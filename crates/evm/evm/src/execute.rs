@@ -4,12 +4,15 @@ use crate::{ConfigureEvm, Database, DynDatabase, EvmEnv, TxEnvFor};
 use alloc::{boxed::Box, format, sync::Arc, vec::Vec};
 use alloy_consensus::{
     transaction::{Either, Recovered, TransactionEnvelope},
-    BlockHeader as _, Header,
+    BlockHeader as _, Header, Transaction, TxEip2930, TxEip4844, TxLegacy,
 };
 use alloy_eip7928::{
     bal::DecodedBal, compute_block_access_list_hash_with_buf, BlockAccessIndex, BlockAccessList,
 };
-use alloy_eips::eip2718::{Typed2718, WithEncoded};
+use alloy_eips::{
+    eip2718::{Typed2718, WithEncoded},
+    eip2930::AccessList,
+};
 pub use alloy_evm::{block::CommitChanges, RecoveredTx};
 use alloy_primitives::{Address, B256};
 use core::fmt::Debug;
@@ -21,7 +24,7 @@ pub use reth_execution_errors::{
     InvalidTxError,
 };
 pub use reth_execution_types::{BlockExecutionOutput, ExecutionOutcome};
-use reth_execution_types::{BlockExecutionResult, BundleSource, EvmState, HashedPostState};
+use reth_execution_types::{BlockExecutionResult, BundleSource, HashedPostState, StateUpdate};
 #[cfg(feature = "std")]
 use reth_primitives_traits::BlockTy;
 use reth_primitives_traits::{
@@ -344,7 +347,7 @@ pub trait BlockExecutor: Sized {
     /// block changes and transaction changes.
     ///
     /// Returns `true` if the hook was installed.
-    fn set_state_hook(&mut self, _hook: impl FnMut(EvmState) + Send + 'static) -> bool {
+    fn set_state_hook(&mut self, _hook: impl FnMut(StateUpdate) + Send + 'static) -> bool {
         false
     }
 
@@ -664,7 +667,7 @@ pub trait BlockBuilder: Sized {
     /// Sets a hook for transaction state updates emitted while building a block.
     ///
     /// Returns `true` if the hook was installed.
-    fn set_state_hook(&mut self, _hook: impl FnMut(EvmState) + Send + 'static) -> bool {
+    fn set_state_hook(&mut self, _hook: impl FnMut(StateUpdate) + Send + 'static) -> bool {
         false
     }
 
@@ -856,7 +859,7 @@ where
         })
     }
 
-    fn set_state_hook(&mut self, hook: impl FnMut(EvmState) + Send + 'static) -> bool {
+    fn set_state_hook(&mut self, hook: impl FnMut(StateUpdate) + Send + 'static) -> bool {
         self.executor.set_state_hook(hook)
     }
 
@@ -893,7 +896,7 @@ pub trait Executor<DB: Database>: Sized {
         state_hook: F,
     ) -> Result<BlockExecutionResult<<Self::Primitives as NodePrimitives>::Receipt>, Self::Error>
     where
-        F: FnMut(EvmState) + Send + 'static;
+        F: FnMut(StateUpdate) + Send + 'static;
 
     /// Consumes the type and executes the block.
     fn execute(
@@ -914,7 +917,7 @@ pub trait Executor<DB: Database>: Sized {
         state_hook: F,
     ) -> Result<BlockExecutionOutput<<Self::Primitives as NodePrimitives>::Receipt>, Self::Error>
     where
-        F: FnMut(EvmState) + Send + 'static,
+        F: FnMut(StateUpdate) + Send + 'static,
     {
         let result = self.execute_one_with_state_hook(block, state_hook)?;
         let state = self.into_state();
@@ -1050,7 +1053,7 @@ where
         evm_config: &Evm,
         block: &RecoveredBlock<BlockTy<Evm::Primitives>>,
         database: impl DynDatabase,
-        state_hook: Option<Box<dyn FnMut(EvmState) + Send>>,
+        state_hook: Option<Box<dyn FnMut(StateUpdate) + Send>>,
     ) -> Result<
         (BlockExecutionOutput<ReceiptTy<Evm::Primitives>>, Option<BlockAccessList>),
         BlockExecutionError,
@@ -1110,7 +1113,7 @@ where
         state_hook: F,
     ) -> Result<BlockExecutionResult<<Self::Primitives as NodePrimitives>::Receipt>, Self::Error>
     where
-        F: FnMut(EvmState) + Send + 'static,
+        F: FnMut(StateUpdate) + Send + 'static,
     {
         let (output, block_access_list) = Self::execute_block_with_database_and_state_hook(
             &self.evm_config,
@@ -1143,7 +1146,7 @@ where
         state_hook: F,
     ) -> Result<BlockExecutionOutput<<Self::Primitives as NodePrimitives>::Receipt>, Self::Error>
     where
-        F: FnMut(EvmState) + Send + 'static,
+        F: FnMut(StateUpdate) + Send + 'static,
     {
         let Self { evm_config, batch_database, batch_state, .. } = self;
         let (output, _) = Self::execute_block_with_database_and_state_hook(
@@ -1212,7 +1215,7 @@ where
         _state_hook: F,
     ) -> Result<BlockExecutionResult<<Self::Primitives as NodePrimitives>::Receipt>, Self::Error>
     where
-        F: FnMut(EvmState) + Send + 'static,
+        F: FnMut(StateUpdate) + Send + 'static,
     {
         Err(BlockExecutionError::msg("block execution is unsupported by this EVM configuration"))
     }
@@ -1223,7 +1226,7 @@ where
         _state_hook: F,
     ) -> Result<BlockExecutionOutput<<Self::Primitives as NodePrimitives>::Receipt>, Self::Error>
     where
-        F: FnMut(EvmState) + Send + 'static,
+        F: FnMut(StateUpdate) + Send + 'static,
     {
         Err(BlockExecutionError::msg("block execution is unsupported by this EVM configuration"))
     }
@@ -1333,6 +1336,56 @@ where
 {
     fn into_tx_env(self) -> TxEnv {
         TxEnv::from_tx_with_encoded(self)
+    }
+}
+
+/// Transaction environment that can be adjusted in place, e.g. by RPC simulations that re-execute
+/// a prepared transaction with a different gas limit or access list.
+///
+/// Implementations update the transaction fields only: values derived when the environment was
+/// created (sender, recovered authorities, or other cached metadata) are preserved.
+pub trait TransactionEnvMut: Transaction + Clone {
+    /// Sets the gas limit.
+    fn set_gas_limit(&mut self, gas_limit: u64);
+
+    /// Sets the access list.
+    fn set_access_list(&mut self, access_list: AccessList);
+}
+
+impl TransactionEnvMut for evm2::ethereum::TxEnvelope {
+    fn set_gas_limit(&mut self, gas_limit: u64) {
+        match self {
+            Self::Legacy(tx) => tx.gas_limit = gas_limit,
+            Self::Eip2930(tx) => tx.gas_limit = gas_limit,
+            Self::Eip1559(tx) => tx.gas_limit = gas_limit,
+            Self::Eip4844(tx) => AsMut::<TxEip4844>::as_mut(tx).gas_limit = gas_limit,
+            Self::Eip7702(tx) => tx.gas_limit = gas_limit,
+        }
+    }
+
+    fn set_access_list(&mut self, access_list: AccessList) {
+        match self {
+            // Legacy transactions cannot carry an access list, so upgrade them to EIP-2930 like an
+            // RPC request with an access list would be.
+            Self::Legacy(tx) => {
+                let TxLegacy { chain_id, nonce, gas_price, gas_limit, to, value, input } =
+                    core::mem::take(tx);
+                *self = Self::Eip2930(TxEip2930 {
+                    chain_id: chain_id.unwrap_or_default(),
+                    nonce,
+                    gas_price,
+                    gas_limit,
+                    to,
+                    value,
+                    access_list,
+                    input,
+                });
+            }
+            Self::Eip2930(tx) => tx.access_list = access_list,
+            Self::Eip1559(tx) => tx.access_list = access_list,
+            Self::Eip4844(tx) => AsMut::<TxEip4844>::as_mut(tx).access_list = access_list,
+            Self::Eip7702(tx) => tx.access_list = access_list,
+        }
     }
 }
 
@@ -1464,5 +1517,46 @@ impl<TxEnv, T: RecoveredTx<Tx>, Tx> ExecutableTxParts<TxEnv, Tx> for WithTxEnv<T
 
     fn into_parts(self) -> (TxEnv, Self::Recovered) {
         (self.tx_env, self.tx)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use alloy_eips::eip2930::AccessListItem;
+    use alloy_primitives::{Bytes, TxKind, U256};
+
+    #[test]
+    fn transaction_env_mut_upgrades_legacy_with_access_list() {
+        let mut tx = evm2::ethereum::TxEnvelope::Legacy(TxLegacy {
+            chain_id: Some(1),
+            nonce: 2,
+            gas_price: 3,
+            gas_limit: 4,
+            to: TxKind::Call(Address::with_last_byte(5)),
+            value: U256::from(6),
+            input: Bytes::from_static(&[7]),
+        });
+        let access_list = AccessList(vec![AccessListItem {
+            address: Address::with_last_byte(8),
+            storage_keys: vec![B256::with_last_byte(9)],
+        }]);
+
+        tx.set_gas_limit(10);
+        tx.set_access_list(access_list.clone());
+
+        assert_eq!(
+            tx,
+            evm2::ethereum::TxEnvelope::Eip2930(TxEip2930 {
+                chain_id: 1,
+                nonce: 2,
+                gas_price: 3,
+                gas_limit: 10,
+                to: TxKind::Call(Address::with_last_byte(5)),
+                value: U256::from(6),
+                access_list,
+                input: Bytes::from_static(&[7]),
+            })
+        );
     }
 }

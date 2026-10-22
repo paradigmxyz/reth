@@ -38,9 +38,10 @@ use reth_primitives_traits::{SealedBlock, SealedHeader};
 #[cfg(feature = "std")]
 use reth_storage_errors::any::AnyError;
 
-use convert::{block_env_with_blob_params, spec_id};
 #[cfg(feature = "std")]
-use convert::{payload_block_env, spec_id_by_timestamp_and_block_number};
+use convert::payload_block_env;
+pub use convert::spec_id_by_timestamp_and_block_number;
+use convert::{block_env_with_blob_params, spec_id};
 
 /// Configured Ethereum EVM environment.
 pub struct EthEvmEnv<T = evm2::BaseEvmTypes>
@@ -402,10 +403,9 @@ impl<ChainSpec, EvmF> ConfigureEvm for EthEvmConfig<ChainSpec, EvmF>
 where
     ChainSpec: EthChainSpec<Header = Header> + EthereumHardforks + Hardforks + 'static,
     EvmF: EvmFactory,
-    <EvmF::Types as evm2::EvmTypesHost>::Tx: alloy_consensus::Transaction
-        + alloy_eips::eip2718::Typed2718
-        + Clone
-        + reth_evm::FromTxWithEncoded<reth_ethereum_primitives::TransactionSigned>,
+    <EvmF::Types as evm2::EvmTypesHost>::Tx: alloy_eips::eip2718::Typed2718
+        + reth_evm::FromTxWithEncoded<reth_ethereum_primitives::TransactionSigned>
+        + reth_evm::TransactionEnvMut,
 {
     type Primitives = EthPrimitives;
     type Error = Infallible;

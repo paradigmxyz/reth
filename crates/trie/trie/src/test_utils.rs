@@ -145,7 +145,7 @@ impl TrieTestHarness {
     /// rebuilds the harness from scratch with the resulting storage.
     pub fn apply_changeset(&mut self, changeset: BTreeMap<B256, U256>) {
         for (k, v) in changeset {
-            if v == U256::ZERO {
+            if v.is_zero() {
                 self.storage.remove(&k);
             } else {
                 self.storage.insert(k, v);

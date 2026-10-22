@@ -1,5 +1,5 @@
 //! EVM-backed Ethereum executor.
-use reth_execution_types::{BlockState, EvmState};
+use reth_execution_types::{BlockState, StateUpdate};
 
 use crate::{
     execution::{
@@ -39,21 +39,26 @@ where
     T: EvmTypes<Tx: Typed2718, TxResultExt: Send>,
     R: ReceiptBuilder,
 {
-    evm: Evm<'a, T>,
+    /// EVM containing the execution overlay and optional block access list builder.
+    pub evm: Evm<'a, T>,
     ctx: EthBlockExecutionCtx<'a>,
     receipt_builder: R,
     spec_id: evm2::SpecId,
     base_block_reward: Option<u128>,
     dao_fork_transition: bool,
     deposit_contract_address: Option<Address>,
-    block_state: BlockState,
+    /// Accumulated state changes, including state committed through the executor's hooks.
+    pub block_state: BlockState,
     state_update_hook: StateUpdateHook,
-    receipts: Vec<R::Receipt>,
-    cumulative_gas_used: u64,
+    /// Transaction receipts in execution order.
+    pub receipts: Vec<R::Receipt>,
+    /// Total receipt gas used.
+    pub cumulative_gas_used: u64,
     block_regular_gas_used: u64,
     block_state_gas_used: u64,
     separate_block_gas: bool,
-    blob_gas_used: u64,
+    /// Total blob gas used.
+    pub blob_gas_used: u64,
     bal_index_offset: u64,
 }
 
@@ -86,7 +91,7 @@ impl<T: EvmTypes, TxType> EthTransactionResultWithState<T, TxType> {
     }
 }
 
-type StateUpdateHook = Option<Box<dyn FnMut(EvmState) + Send>>;
+type StateUpdateHook = Option<Box<dyn FnMut(StateUpdate) + Send>>;
 
 impl<'a, T, R> EthBlockExecutor<'a, T, R>
 where
@@ -176,6 +181,11 @@ where
         );
     }
 
+    /// Sets the Ethereum fork used for block system calls and deposit request processing.
+    pub const fn set_spec_id(&mut self, spec_id: evm2::SpecId) {
+        self.spec_id = spec_id;
+    }
+
     #[inline]
     const fn set_transaction_block_access_index(&mut self) {
         if self.block_access_list_builder_enabled() {
@@ -205,7 +215,7 @@ where
         &mut self.evm
     }
 
-    fn set_state_hook(&mut self, hook: impl FnMut(EvmState) + Send + 'static) -> bool {
+    fn set_state_hook(&mut self, hook: impl FnMut(StateUpdate) + Send + 'static) -> bool {
         self.state_update_hook = Some(Box::new(hook));
         true
     }
@@ -631,13 +641,9 @@ where
     fn configure_segment(&mut self, segment_idx: usize) {
         let segment = &self.plan.segments[segment_idx];
         let env = &segment.evm_env;
-        if self.inner.evm.config_spec_id() == env.spec &&
-            self.inner.evm.version().features == env.version.features
-        {
-            self.inner.evm.set_block(env.block);
-        } else {
-            self.factory.reconfigure_evm(&mut self.inner.evm, env);
-        }
+        // The version carries more than the spec and features (blob cap, gas caps, code limits), so
+        // install the whole segment config.
+        self.factory.reconfigure_evm(&mut self.inner.evm, env);
 
         let block_number = env.block.number.to::<u64>();
         self.inner.spec_id = env.spec.into();
@@ -809,7 +815,7 @@ where
         self.inner.evm_mut()
     }
 
-    fn set_state_hook(&mut self, hook: impl FnMut(EvmState) + Send + 'static) -> bool {
+    fn set_state_hook(&mut self, hook: impl FnMut(StateUpdate) + Send + 'static) -> bool {
         self.inner.set_state_hook(hook)
     }
 
@@ -959,7 +965,7 @@ const fn final_block_gas_used(
     }
 }
 
-fn emit_state(hook: &mut StateUpdateHook, state: EvmState) {
+fn emit_state(hook: &mut StateUpdateHook, state: StateUpdate) {
     if let Some(hook) = hook.as_mut() {
         hook(state);
     }
@@ -968,7 +974,7 @@ fn emit_state(hook: &mut StateUpdateHook, state: EvmState) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_consensus::{SignableTransaction, TxLegacy};
+    use alloy_consensus::{SignableTransaction, TxEip4844, TxLegacy};
     use alloy_eip7928::BlockAccessIndex;
     use alloy_primitives::{address, Address, Bytes, Signature, TxKind, B256, U256};
     use evm2::{
@@ -1339,5 +1345,64 @@ mod tests {
         }
         let (output, _) = executor.finish_with_block_access_list().unwrap();
         assert_eq!(output.result.gas_used, block_gas);
+    }
+
+    #[test]
+    fn big_block_segment_switch_installs_segment_blob_cap() {
+        let sender = Address::with_last_byte(0x10);
+        let mut database = TestDatabase::default();
+        database.accounts.insert(
+            sender,
+            AccountInfo::default().with_balance(U256::from(1_000_000_000_000_000_000u64)),
+        );
+        let segments = [9, 6]
+            .into_iter()
+            .enumerate()
+            .map(|(index, max_blobs_per_tx)| {
+                let mut segment = segment(index, index as u64 + 1, B256::ZERO);
+                segment.ctx.parent_beacon_block_root = Some(B256::ZERO);
+                segment.evm_env = EthEvmEnv::new(
+                    SpecId::PRAGUE,
+                    BlockEnv::<BaseEvmTypes> {
+                        number: U256::from(index + 1),
+                        gas_limit: U256::from(30_000_000),
+                        ..Default::default()
+                    },
+                    1,
+                );
+                segment.evm_env.version.max_blobs_per_tx = max_blobs_per_tx;
+                segment
+            })
+            .collect();
+        let plan = EthBigBlockPlan::new(segments, Vec::new(), 2);
+        let factory = super::super::factory::EthBigBlockExecutorFactory::new(
+            super::super::factory::EthBlockExecutorFactory::new(Arc::new(
+                ChainSpecBuilder::mainnet().prague_activated().build(),
+            )),
+        );
+        let evm = factory.evm_with_env(Db::new(database), plan.segments[0].evm_env.clone());
+        let mut executor = factory.create_executor(evm, plan);
+        executor.apply_pre_execution_changes().unwrap();
+
+        let blob_tx = |nonce| {
+            let tx = TransactionSigned::Eip4844(
+                TxEip4844 {
+                    chain_id: 1,
+                    nonce,
+                    gas_limit: 100_000,
+                    max_fee_per_gas: 1,
+                    max_priority_fee_per_gas: 1,
+                    to: Address::with_last_byte(0x20),
+                    max_fee_per_blob_gas: 1,
+                    blob_versioned_hashes: vec![B256::repeat_byte(1); 7],
+                    ..Default::default()
+                }
+                .into_signed(Signature::test_signature()),
+            );
+            Recovered::new_unchecked(tx, sender)
+        };
+        executor.execute_transaction(blob_tx(0)).expect("seven blobs fit the first segment cap");
+        let err = executor.execute_transaction(blob_tx(1)).unwrap_err();
+        assert!(err.to_string().contains("too many blobs: have 7, max 6"), "{err}");
     }
 }

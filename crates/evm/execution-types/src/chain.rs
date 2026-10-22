@@ -559,7 +559,7 @@ pub(super) mod serde_bincode_compat {
     use core::marker::PhantomData;
     use reth_ethereum_primitives::EthPrimitives;
     use reth_primitives_traits::{NodePrimitives, SealedBlock};
-    use reth_trie_common::ComputedTrieData;
+    use reth_trie_common::SortedTrieData;
     use serde::{Deserialize, Deserializer, Serialize, Serializer};
     use serde_with::{DeserializeAs, SerializeAs};
 
@@ -626,12 +626,12 @@ pub(super) mod serde_bincode_compat {
                 trie_updates: value
                     .trie_data
                     .iter()
-                    .map(|(k, v)| (*k, v.get().sorted.trie_updates.as_ref().into()))
+                    .map(|(k, v)| (*k, v.get().trie_updates.as_ref().into()))
                     .collect(),
                 hashed_state: value
                     .trie_data
                     .iter()
-                    .map(|(k, v)| (*k, v.get().sorted.hashed_state.as_ref().into()))
+                    .map(|(k, v)| (*k, v.get().hashed_state.as_ref().into()))
                     .collect(),
             }
         }
@@ -653,13 +653,7 @@ pub(super) mod serde_bincode_compat {
                 .into_iter()
                 .map(|(k, v)| {
                     let hashed_state = hashed_state_map.get(&k).cloned().unwrap_or_default();
-                    (
-                        k,
-                        LazyTrieData::ready(ComputedTrieData::new(
-                            hashed_state,
-                            Arc::new(v.into()),
-                        )),
-                    )
+                    (k, LazyTrieData::ready(SortedTrieData::new(hashed_state, Arc::new(v.into()))))
                 })
                 .collect();
 
@@ -758,10 +752,10 @@ mod tests {
     #[test]
     fn chain_append() {
         let block: RecoveredBlock<reth_ethereum_primitives::Block> = Default::default();
-        let block1_hash = B256::new([0x01; 32]);
-        let block2_hash = B256::new([0x02; 32]);
-        let block3_hash = B256::new([0x03; 32]);
-        let block4_hash = B256::new([0x04; 32]);
+        let block1_hash = B256::repeat_byte(0x01);
+        let block2_hash = B256::repeat_byte(0x02);
+        let block3_hash = B256::repeat_byte(0x03);
+        let block4_hash = B256::repeat_byte(0x04);
 
         let mut block1 = block.clone();
         let mut block2 = block.clone();
@@ -796,12 +790,12 @@ mod tests {
         let execution_outcome1: ExecutionOutcome = ExecutionOutcome::new(
             BundleState::new(
                 vec![(
-                    Address::new([2; 20]),
+                    Address::repeat_byte(2),
                     None,
                     Some(AccountInfo::default()),
                     HashMap::default(),
                 )],
-                vec![vec![(Address::new([2; 20]), None, vec![])]],
+                vec![vec![(Address::repeat_byte(2), None, vec![])]],
                 vec![],
             ),
             vec![vec![]],
@@ -812,12 +806,12 @@ mod tests {
         let execution_outcome2 = ExecutionOutcome::new(
             BundleState::new(
                 vec![(
-                    Address::new([3; 20]),
+                    Address::repeat_byte(3),
                     None,
                     Some(AccountInfo::default()),
                     HashMap::default(),
                 )],
-                vec![vec![(Address::new([3; 20]), None, vec![])]],
+                vec![vec![(Address::repeat_byte(3), None, vec![])]],
                 vec![],
             ),
             vec![vec![]],
@@ -826,16 +820,16 @@ mod tests {
         );
 
         let mut block1: RecoveredBlock<reth_ethereum_primitives::Block> = Default::default();
-        let block1_hash = B256::new([15; 32]);
+        let block1_hash = B256::repeat_byte(15);
         block1.set_block_number(1);
         block1.set_hash(block1_hash);
-        block1.push_sender(Address::new([4; 20]));
+        block1.push_sender(Address::repeat_byte(4));
 
         let mut block2: RecoveredBlock<reth_ethereum_primitives::Block> = Default::default();
-        let block2_hash = B256::new([16; 32]);
+        let block2_hash = B256::repeat_byte(16);
         block2.set_block_number(2);
         block2.set_hash(block2_hash);
-        block2.push_sender(Address::new([4; 20]));
+        block2.push_sender(Address::repeat_byte(4));
 
         let mut block_state_extended = execution_outcome1;
         block_state_extended.extend(execution_outcome2);
@@ -858,8 +852,8 @@ mod tests {
         let block: RecoveredBlock<reth_ethereum_primitives::Block> = Default::default();
 
         // Define block hashes for block1 and block2
-        let block1_hash = B256::new([0x01; 32]);
-        let block2_hash = B256::new([0x02; 32]);
+        let block1_hash = B256::repeat_byte(0x01);
+        let block2_hash = B256::repeat_byte(0x02);
 
         // Clone the default block into block1 and block2
         let mut block1 = block.clone();

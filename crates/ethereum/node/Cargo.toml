@@ -42,6 +42,11 @@ reth-engine-primitives = { workspace = true, features = ["std"] }
 reth-payload-primitives.workspace = true
 reth-tasks.workspace = true
 reth-trie-common.workspace = true
+reth-errors.workspace = true
+reth-snap-sync.workspace = true
+reth-stages.workspace = true
+reth-engine-tree.workspace = true
+reth-network-p2p.workspace = true
 # ethereum
 alloy-consensus.workspace = true
 alloy-eips.workspace = true
@@ -54,6 +59,7 @@ alloy-rpc-types-engine = { workspace = true, features = ["ssz"] }
 
 # async
 tokio = { workspace = true, features = ["sync"] }
+tokio-util.workspace = true
 
 # misc
 eyre.workspace = true
@@ -73,6 +79,9 @@ reth-e2e-test-utils.workspace = true
 reth-tasks.workspace = true
 reth-testing-utils.workspace = true
 reth-stages-types.workspace = true
+reth-downloaders.workspace = true
+reth-eth-wire-types.workspace = true
+reth-network-peers.workspace = true
 tempfile.workspace = true
 jsonrpsee-core.workspace = true
 
@@ -93,10 +102,27 @@ alloy-rpc-types-trace.workspace = true
 similar-asserts.workspace = true
 reqwest.workspace = true
 reth-rpc-layer.workspace = true
+reth-stages-api = { workspace = true, features = ["test-utils"] }
+reth-prune.workspace = true
+reth-static-file.workspace = true
+reth-consensus.workspace = true
 
 [features]
 default = []
 gmp = ["evm2/gmp", "reth-evm/gmp", "reth-evm-ethereum/gmp"]
+account-ext = [
+    "reth-provider/account-ext",
+    "reth-evm/account-ext",
+    "alloy-genesis/account-ext",
+    "alloy-rpc-types-eth/account-ext",
+    "reth-primitives-traits/account-ext",
+    "reth-revm/account-ext",
+    "reth-stages-types/account-ext",
+    "reth-rpc/account-ext",
+    "reth-rpc-eth-api/account-ext",
+    "evm2/account-ext",
+    "reth-execution-types/account-ext",
+]
 jit = ["reth-evm-ethereum/jit"]
 asm-keccak = [
     "alloy-primitives/asm-keccak",
@@ -105,6 +131,7 @@ asm-keccak = [
     "reth-evm-ethereum/asm-keccak",
     "evm2/asm-keccak",
     "reth-execution-types/asm-keccak",
+    "reth-engine-tree/asm-keccak",
 ]
 portable = [
     "reth-evm/portable",
@@ -112,6 +139,7 @@ portable = [
     "evm2/portable",
     "reth-execution-types/portable",
     "reth-revm/portable",
+    "reth-engine-tree/portable",
 ]
 keccak-cache-global = [
     "alloy-primitives/keccak-cache-global",
@@ -138,4 +166,10 @@ test-utils = [
     "reth-tasks/test-utils",
     "reth-trie-common/test-utils",
     "reth-revm/test-utils",
+    "reth-stages/test-utils",
+    "reth-downloaders/test-utils",
+    "reth-network-p2p/test-utils",
+    "reth-consensus/test-utils",
+    "reth-engine-tree/test-utils",
+    "reth-stages-api/test-utils",
 ]

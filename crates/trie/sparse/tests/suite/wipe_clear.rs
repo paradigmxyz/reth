@@ -7,7 +7,7 @@ pub(super) fn test_clear_resets_trie_but_preserves_update_tracking<T: SparseTrie
     new_trie: fn() -> T,
 ) {
     let storage: BTreeMap<B256, U256> = BTreeMap::from([
-        (B256::with_last_byte(0x10), U256::from(1)),
+        (B256::with_last_byte(0x10), U256::ONE),
         (B256::with_last_byte(0x20), U256::from(2)),
         (B256::with_last_byte(0x30), U256::from(3)),
     ]);
@@ -38,7 +38,7 @@ pub(super) fn test_clear_resets_trie_but_preserves_update_tracking<T: SparseTrie
 pub(super) fn test_clear_then_reuse_trie<T: SparseTrie>(new_trie: fn() -> T) {
     // Phase 1: build a trie with 5 leaves and compute root.
     let storage_1: BTreeMap<B256, U256> = BTreeMap::from([
-        (B256::with_last_byte(0x10), U256::from(1)),
+        (B256::with_last_byte(0x10), U256::ONE),
         (B256::with_last_byte(0x20), U256::from(2)),
         (B256::with_last_byte(0x30), U256::from(3)),
         (B256::with_last_byte(0x40), U256::from(4)),

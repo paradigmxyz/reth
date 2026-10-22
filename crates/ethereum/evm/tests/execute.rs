@@ -1,6 +1,7 @@
 //! Execution tests.
 
 use alloy_consensus::{constants::ETH_TO_WEI, Header, TxLegacy};
+use alloy_eip7928::BlockAccessList;
 use alloy_eips::{
     eip2935::{HISTORY_SERVE_WINDOW, HISTORY_STORAGE_ADDRESS, HISTORY_STORAGE_CODE},
     eip4788::{BEACON_ROOTS_ADDRESS, BEACON_ROOTS_CODE, SYSTEM_ADDRESS},
@@ -8,27 +9,27 @@ use alloy_eips::{
     eip7002::{WITHDRAWAL_REQUEST_PREDEPLOY_ADDRESS, WITHDRAWAL_REQUEST_PREDEPLOY_CODE},
     eip7685::EMPTY_REQUESTS_HASH,
 };
-use alloy_primitives::{address, b256, fixed_bytes, keccak256, Bytes, TxKind, B256, U256};
+use alloy_primitives::{address, b256, bytes, fixed_bytes, keccak256, Bytes, TxKind, B256, U256};
 use evm2::{
     bytecode::Bytecode,
-    evm::{AccountInfo, CacheDB, Database, EmptyDB},
+    evm::{AccountInfo, Database, InMemoryDB},
 };
 use reth_chainspec::{ChainSpecBuilder, EthereumHardfork, ForkCondition, MAINNET};
 use reth_ethereum_primitives::{Block, BlockBody, Transaction};
 use reth_evm::{
     execute::{BasicBlockExecutor, Executor},
-    BlockValidationError, ConfigureEvm,
+    BlockExecutor, BlockValidationError, ConfigureEvm,
 };
 use reth_evm_ethereum::EthEvmConfig;
-use reth_execution_types::{BlockExecutionResult, BundleSource, EvmState};
+use reth_execution_types::{BlockExecutionResult, BundleSource, StateUpdate};
 use reth_primitives_traits::{
     crypto::secp256k1::public_key_to_address, Block as _, RecoveredBlock,
 };
 use reth_testing_utils::generators::{self, sign_tx_with_key_pair};
 use std::sync::{mpsc, Arc};
 
-fn create_database_with_beacon_root_contract() -> CacheDB<EmptyDB> {
-    let mut db = CacheDB::new(Default::default());
+fn create_database_with_beacon_root_contract() -> InMemoryDB {
+    let mut db = InMemoryDB::default();
 
     let beacon_root_contract_account = AccountInfo {
         balance: U256::ZERO,
@@ -43,8 +44,8 @@ fn create_database_with_beacon_root_contract() -> CacheDB<EmptyDB> {
     db
 }
 
-fn create_database_with_withdrawal_requests_contract() -> CacheDB<EmptyDB> {
-    let mut db = CacheDB::new(Default::default());
+fn create_database_with_withdrawal_requests_contract() -> InMemoryDB {
+    let mut db = InMemoryDB::default();
 
     let withdrawal_requests_contract_account = AccountInfo {
         nonce: 1,
@@ -144,7 +145,7 @@ fn eip_4788_no_code_cancun() {
         ..Header::default()
     };
 
-    let db = CacheDB::new(EmptyDB::default());
+    let db = InMemoryDB::default();
 
     // DON'T deploy the contract at genesis
     let chain_spec = Arc::new(
@@ -318,8 +319,8 @@ fn eip_4788_high_base_fee() {
 }
 
 /// Create a state provider with blockhashes and the EIP-2935 system contract.
-fn create_database_with_block_hashes(latest_block: u64) -> CacheDB<EmptyDB> {
-    let mut db = CacheDB::new(Default::default());
+fn create_database_with_block_hashes(latest_block: u64) -> InMemoryDB {
+    let mut db = InMemoryDB::default();
     for block_number in 0..=latest_block {
         db.cache.block_hashes.insert(U256::from(block_number), keccak256(block_number.to_string()));
     }
@@ -660,7 +661,7 @@ fn block_gas_limit_error() {
             gas_price: header.base_fee_per_gas.unwrap().into(),
             gas_limit: 2_500_000, // higher than block gas limit
             to: TxKind::Call(WITHDRAWAL_REQUEST_PREDEPLOY_ADDRESS),
-            value: U256::from(1),
+            value: U256::ONE,
             input,
         }),
     );
@@ -701,7 +702,7 @@ fn test_balance_increment_not_duplicated() {
 
     let withdrawal_recipient = address!("0x1000000000000000000000000000000000000000");
 
-    let mut db = CacheDB::new(EmptyDB::default());
+    let mut db = InMemoryDB::default();
     let initial_balance = 100;
     db.insert_account_info(
         &withdrawal_recipient,
@@ -738,9 +739,11 @@ fn test_balance_increment_not_duplicated() {
     let tx_clone = tx.clone();
 
     let _output = executor
-        .execute_with_state_hook(block, move |state: EvmState| {
-            if let Some(account) = state.get(&withdrawal_recipient) {
-                let _ = tx_clone.send(account.info.balance);
+        .execute_with_state_hook(block, move |state: StateUpdate| {
+            if let Some(info) =
+                state.account(&withdrawal_recipient).and_then(|account| account.current.as_ref())
+            {
+                let _ = tx_clone.send(info.balance);
             }
         })
         .expect("Block execution should succeed");
@@ -754,4 +757,53 @@ fn test_balance_increment_not_duplicated() {
         [expected_final_balance],
         "withdrawal must be streamed exactly once"
     );
+}
+
+#[test]
+fn prepared_block_access_list_keeps_legacy_ef01_code() {
+    // Berlin is active and London (EIP-3541) is not, so a create may deploy `0xEF`-prefixed code.
+    let chain_spec = Arc::new(ChainSpecBuilder::from(&*MAINNET).berlin_activated().build());
+
+    let sender_key_pair = generators::generate_key(&mut generators::rng());
+    let sender_address = public_key_to_address(sender_key_pair.public_key());
+    let mut db = InMemoryDB::default();
+    db.insert_account_info(
+        &sender_address,
+        AccountInfo { balance: U256::from(ETH_TO_WEI), ..Default::default() },
+    );
+
+    // Initcode returning the two-byte runtime `0xEF01`, which is valid legacy code here but
+    // malformed when read as an EIP-7702 delegation.
+    let runtime = Bytes::from_static(&[0xef, 0x01]);
+    let tx = sign_tx_with_key_pair(
+        sender_key_pair,
+        Transaction::Legacy(TxLegacy {
+            chain_id: Some(chain_spec.chain.id()),
+            nonce: 0,
+            gas_price: 1,
+            gas_limit: 100_000,
+            to: TxKind::Create,
+            value: U256::ZERO,
+            input: bytes!("0x61ef016000526002601ef3"),
+        }),
+    );
+    let header = Header { number: 1, gas_limit: 1_000_000, ..Header::default() };
+    let block = Block { header, body: BlockBody { transactions: vec![tx], ..Default::default() } }
+        .try_into_recovered()
+        .unwrap();
+
+    let evm_config = EthEvmConfig::new(chain_spec);
+    let mut executor = evm_config.executor_for_block(db, block.sealed_block()).unwrap();
+    executor.enable_block_access_list_builder();
+    executor.apply_pre_execution_changes().unwrap();
+    for tx in block.transactions_recovered() {
+        executor.execute_transaction(tx).unwrap();
+    }
+    let (_, bal) = executor.finish_with_prepared_block_access_list().unwrap();
+
+    let alloy_bal = BlockAccessList::from(&bal.unwrap());
+    let created = alloy_bal.iter().find(|account| account.address == sender_address.create(0));
+    assert_eq!(created.unwrap().code_changes[0].new_code, runtime);
+    // Reparsing the canonical BAL into evm2's representation rejects the same code.
+    assert!(evm2::evm::Bal::try_from(alloy_bal).is_err());
 }

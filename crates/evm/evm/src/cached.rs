@@ -1,15 +1,33 @@
 //! Database adapters for payload building.
-
-use alloc::rc::Rc;
 use alloy_primitives::{
-    map::{AddressMap, B256Map, HashMap, U256Map},
+    map::{AddressMap, B256Map, Entry, HashMap, U256Map},
     Address, B256, U256,
 };
-use core::cell::RefCell;
 pub use evm2::{bytecode::Bytecode, evm::AccountInfo};
 use evm2::{evm::Database, interpreter::Word};
 
-/// A container type that caches reads for payload pre-cache bookkeeping.
+/// A container type that caches reads from an underlying [`Database`].
+///
+/// This is intended to be used in conjunction with block executors and builders
+/// during payload building which repeatedly accesses the same data.
+///
+/// [`CachedReads::as_db_mut`] transforms this type into a [`Database`] implementation that uses
+/// [`CachedReads`] as a caching layer for operations, and records any cache misses.
+///
+/// # Example
+///
+/// ```
+/// use evm2::evm::Database;
+/// use reth_evm::cached::CachedReads;
+///
+/// fn build_payload<DB: Database>(db: DB) {
+///     let mut cached_reads = CachedReads::default();
+///     let db = cached_reads.as_db_mut(db);
+///     // this is `Database` and can be used to build a payload, it never commits to `CachedReads` or the underlying database, but all reads from the underlying database are cached in `CachedReads`.
+///     // Subsequent payload build attempts can use cached reads and avoid hitting the underlying database.
+///     // Note: `cached_reads` must outlive `db` to satisfy lifetime requirements.
+/// }
+/// ```
 #[derive(Debug, Clone, Default)]
 pub struct CachedReads {
     /// Block state account with storage.
@@ -31,14 +49,14 @@ impl CachedReads {
         }
     }
 
-    /// Gets a database wrapper that will cache reads from the given database.
-    pub fn as_db<DB>(&mut self, db: DB) -> CachedReadsDbMut<DB> {
+    /// Gets a [`Database`] that will cache reads from the given database.
+    pub const fn as_db<DB>(&mut self, db: DB) -> CachedReadsDbMut<'_, DB> {
         self.as_db_mut(db).into_db()
     }
 
-    /// Gets a mutable database wrapper that will cache reads from the underlying database.
-    pub fn as_db_mut<DB>(&mut self, db: DB) -> CachedReadsDbMut<DB> {
-        CachedReadsDbMut { cached: Rc::new(RefCell::new(self.clone())), db }
+    /// Gets a mutable [`Database`] that will cache reads from the underlying database.
+    pub const fn as_db_mut<DB>(&mut self, db: DB) -> CachedReadsDbMut<'_, DB> {
+        CachedReadsDbMut { cached: self, db }
     }
 
     /// Inserts an account info into the cache.
@@ -56,38 +74,33 @@ impl CachedReads {
     }
 }
 
-/// Mutable cache wrapper for cache-aware call sites.
-#[derive(Debug, Clone)]
-pub struct CachedReadsDbMut<DB> {
+/// A [Database] that caches reads inside [`CachedReads`].
+///
+/// The lifetime parameter `'a` is tied to the lifetime of the underlying [`CachedReads`] instance.
+/// This ensures that the cache remains valid for the entire duration this wrapper is used.
+/// The original [`CachedReads`] must outlive this wrapper to prevent use-after-free.
+#[derive(Debug)]
+pub struct CachedReadsDbMut<'a, DB> {
     /// The cache of reads.
-    cached: Rc<RefCell<CachedReads>>,
+    pub cached: &'a mut CachedReads,
     /// The underlying database.
-    db: DB,
+    pub db: DB,
 }
 
-impl<DB> CachedReadsDbMut<DB> {
-    /// Converts this mutable wrapper into a database wrapper.
+impl<'a, DB> CachedReadsDbMut<'a, DB> {
+    /// Converts this [`Database`] implementation into a database wrapper that will still cache
+    /// reads.
     pub const fn into_db(self) -> Self {
         self
     }
 
-    /// Returns access to wrapped database.
+    /// Returns access to wrapped [`Database`].
     pub const fn inner(&self) -> &DB {
         &self.db
     }
-
-    /// Returns the currently cached reads.
-    pub fn cached_reads(&self) -> CachedReads {
-        self.cached.borrow().clone()
-    }
-
-    /// Copies the currently cached reads into the given cache.
-    pub fn sync(&self, cached_reads: &mut CachedReads) {
-        *cached_reads = self.cached_reads();
-    }
 }
 
-impl<DB, T> AsRef<T> for CachedReadsDbMut<DB>
+impl<DB, T> AsRef<T> for CachedReadsDbMut<'_, DB>
 where
     DB: AsRef<T>,
 {
@@ -96,10 +109,7 @@ where
     }
 }
 
-impl<DB> Database for CachedReadsDbMut<DB>
-where
-    DB: Database,
-{
+impl<DB: Database> Database for CachedReadsDbMut<'_, DB> {
     type Error = DB::Error;
 
     fn is_fatal(error: &Self::Error) -> bool {
@@ -107,73 +117,58 @@ where
     }
 
     fn get_account(&mut self, address: &Address) -> Result<Option<AccountInfo>, Self::Error> {
-        if let Some(account) = self.cached.borrow().accounts.get(address) {
-            return Ok(account.info.clone())
-        }
-
-        let info = self.db.get_account(address)?;
-        self.cached.borrow_mut().accounts.insert(*address, CachedAccount::new(info.clone()));
-        Ok(info)
+        let basic = match self.cached.accounts.entry(*address) {
+            Entry::Occupied(entry) => entry.get().info.clone(),
+            Entry::Vacant(entry) => {
+                entry.insert(CachedAccount::new(self.db.get_account(address)?)).info.clone()
+            }
+        };
+        Ok(basic)
     }
 
     fn get_code_by_hash(&mut self, code_hash: &B256) -> Result<Bytecode, Self::Error> {
-        if let Some(code) = self.cached.borrow().contracts.get(code_hash) {
-            return Ok(code.clone())
-        }
-
-        let code = self.db.get_code_by_hash(code_hash)?;
-        self.cached.borrow_mut().contracts.insert(*code_hash, code.clone());
+        let code = match self.cached.contracts.entry(*code_hash) {
+            Entry::Occupied(entry) => entry.get().clone(),
+            Entry::Vacant(entry) => entry.insert(self.db.get_code_by_hash(code_hash)?).clone(),
+        };
         Ok(code)
     }
 
-    fn get_storage(&mut self, address: &Address, key: &Word) -> Result<Word, Self::Error> {
-        {
-            let cached = self.cached.borrow();
-            if let Some(account) = cached.accounts.get(address) {
-                if let Some(value) = account.storage.get(key) {
-                    return Ok(*value)
-                }
-
-                if account.info.is_none() {
-                    return Ok(U256::ZERO)
-                }
+    fn get_storage(&mut self, address: &Address, index: &Word) -> Result<Word, Self::Error> {
+        match self.cached.accounts.entry(*address) {
+            Entry::Occupied(mut acc_entry) => match acc_entry.get_mut().storage.entry(*index) {
+                Entry::Occupied(entry) => Ok(*entry.get()),
+                Entry::Vacant(entry) => Ok(*entry.insert(self.db.get_storage(address, index)?)),
+            },
+            Entry::Vacant(acc_entry) => {
+                // acc needs to be loaded for us to access slots.
+                let info = self.db.get_account(address)?;
+                let (account, value) = if info.is_some() {
+                    let value = self.db.get_storage(address, index)?;
+                    let mut account = CachedAccount::new(info);
+                    account.storage.insert(*index, value);
+                    (account, value)
+                } else {
+                    (CachedAccount::new(info), U256::ZERO)
+                };
+                acc_entry.insert(account);
+                Ok(value)
             }
         }
-
-        if !self.cached.borrow().accounts.contains_key(address) {
-            let info = self.db.get_account(address)?;
-            if info.is_none() {
-                self.cached.borrow_mut().accounts.insert(*address, CachedAccount::new(None));
-                return Ok(U256::ZERO)
-            }
-
-            self.cached.borrow_mut().accounts.insert(*address, CachedAccount::new(info));
-        }
-
-        let value = self.db.get_storage(address, key)?;
-        self.cached
-            .borrow_mut()
-            .accounts
-            .entry(*address)
-            .or_insert_with(|| CachedAccount::new(None))
-            .storage
-            .insert(*key, value);
-        Ok(value)
     }
 
     fn get_block_hash(&mut self, number: &Word) -> Result<B256, Self::Error> {
-        let number = number.saturating_to::<u64>();
-        if let Some(hash) = self.cached.borrow().block_hashes.get(&number) {
-            return Ok(*hash)
-        }
-
-        let hash = self.db.get_block_hash(&U256::from(number))?;
-        self.cached.borrow_mut().block_hashes.insert(number, hash);
+        let number = number.saturating_to();
+        let hash = match self.cached.block_hashes.entry(number) {
+            Entry::Occupied(entry) => *entry.get(),
+            Entry::Vacant(entry) => *entry.insert(self.db.get_block_hash(&U256::from(number))?),
+        };
         Ok(hash)
     }
 }
 
-/// Cached account contains the account state with storage but lacks the account status.
+/// Cached account contains the account state with storage
+/// but lacks the account status.
 #[derive(Debug, Clone)]
 pub struct CachedAccount {
     /// Account state.
@@ -183,8 +178,7 @@ pub struct CachedAccount {
 }
 
 impl CachedAccount {
-    /// Creates a cached account with no storage slots.
-    pub fn new(info: Option<AccountInfo>) -> Self {
+    fn new(info: Option<AccountInfo>) -> Self {
         Self { info, storage: U256Map::default() }
     }
 }
@@ -193,8 +187,56 @@ impl CachedAccount {
 mod tests {
     use super::*;
     use core::cell::Cell;
-    use evm2::interpreter::Word;
     use std::{error::Error, fmt, rc::Rc};
+
+    #[test]
+    fn test_extend_with_two_cached_reads() {
+        // Setup test data
+        let hash1 = B256::from_slice(&[1u8; 32]);
+        let hash2 = B256::from_slice(&[2u8; 32]);
+        let address1 = Address::from_slice(&[1u8; 20]);
+        let address2 = Address::from_slice(&[2u8; 20]);
+
+        // Create primary cache
+        let mut primary = {
+            let mut cache = CachedReads::default();
+            cache.accounts.insert(address1, CachedAccount::new(Some(AccountInfo::default())));
+            cache.contracts.insert(hash1, Bytecode::default());
+            cache.block_hashes.insert(1, hash1);
+            cache
+        };
+
+        // Create additional cache
+        let additional = {
+            let mut cache = CachedReads::default();
+            cache.accounts.insert(address2, CachedAccount::new(Some(AccountInfo::default())));
+            cache.contracts.insert(hash2, Bytecode::default());
+            cache.block_hashes.insert(2, hash2);
+            cache
+        };
+
+        // Extending primary with additional cache
+        primary.extend(additional);
+
+        // Verify the combined state
+        assert!(
+            primary.accounts.len() == 2 &&
+                primary.contracts.len() == 2 &&
+                primary.block_hashes.len() == 2,
+            "All maps should contain 2 entries"
+        );
+
+        // Verify specific entries
+        assert!(
+            primary.accounts.contains_key(&address1) &&
+                primary.accounts.contains_key(&address2) &&
+                primary.contracts.contains_key(&hash1) &&
+                primary.contracts.contains_key(&hash2) &&
+                primary.block_hashes.get(&1) == Some(&hash1) &&
+                primary.block_hashes.get(&2) == Some(&hash2),
+            "All expected entries should be present"
+        );
+    }
 
     #[derive(Clone, Debug)]
     struct CountingDb {
@@ -249,42 +291,6 @@ mod tests {
     }
 
     #[test]
-    fn test_extend_with_two_cached_reads() {
-        let hash1 = B256::from_slice(&[1u8; 32]);
-        let hash2 = B256::from_slice(&[2u8; 32]);
-        let address1 = Address::from_slice(&[1u8; 20]);
-        let address2 = Address::from_slice(&[2u8; 20]);
-
-        let mut primary = {
-            let mut cache = CachedReads::default();
-            cache.accounts.insert(address1, CachedAccount::new(Some(AccountInfo::default())));
-            cache.contracts.insert(hash1, Bytecode::default());
-            cache.block_hashes.insert(1, hash1);
-            cache
-        };
-
-        let additional = {
-            let mut cache = CachedReads::default();
-            cache.accounts.insert(address2, CachedAccount::new(Some(AccountInfo::default())));
-            cache.contracts.insert(hash2, Bytecode::default());
-            cache.block_hashes.insert(2, hash2);
-            cache
-        };
-
-        primary.extend(additional);
-
-        assert_eq!(primary.accounts.len(), 2);
-        assert_eq!(primary.contracts.len(), 2);
-        assert_eq!(primary.block_hashes.len(), 2);
-        assert!(primary.accounts.contains_key(&address1));
-        assert!(primary.accounts.contains_key(&address2));
-        assert!(primary.contracts.contains_key(&hash1));
-        assert!(primary.contracts.contains_key(&hash2));
-        assert_eq!(primary.block_hashes.get(&1), Some(&hash1));
-        assert_eq!(primary.block_hashes.get(&2), Some(&hash2));
-    }
-
-    #[test]
     fn cached_reads_database_avoids_repeated_backing_reads() {
         let address = Address::repeat_byte(1);
         let code_hash = B256::repeat_byte(2);
@@ -317,7 +323,6 @@ mod tests {
         assert_eq!(reads.storage.get(), 1);
         assert_eq!(reads.block_hashes.get(), 1);
 
-        db.sync(&mut cached);
         assert!(cached.accounts.contains_key(&address));
         assert!(cached.contracts.contains_key(&code_hash));
         assert_eq!(cached.block_hashes.get(&1), Some(&block_hash));

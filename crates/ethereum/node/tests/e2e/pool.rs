@@ -1,23 +1,16 @@
-use crate::utils::eth_payload_attributes;
 use alloy_consensus::{EthereumTxEnvelope, TxEip4844};
 use alloy_eips::{eip1559::ETHEREUM_BLOCK_GAS_LIMIT_30M, Encodable2718};
-use alloy_genesis::Genesis;
-use alloy_primitives::{Address, TxKind, B256, U256};
-use alloy_provider::{Provider, ProviderBuilder};
-use alloy_rpc_types_eth::TransactionRequest;
-use reth_chainspec::{ChainSpecBuilder, MAINNET};
+use alloy_primitives::{Address, B256, U256};
+use alloy_provider::Provider;
+use reth_chainspec::EthereumHardfork;
 use reth_e2e_test_utils::{
-    node::NodeTestContext, transaction::TransactionTestContext, wallet::Wallet, E2ETestSetupBuilder,
+    node::Finality, test_chain_spec, test_chain_spec_builder, test_genesis,
+    transaction::TransactionTestContext, wait::poll_until, E2ETestSetupExt,
 };
-use reth_node_builder::{NodeBuilder, NodeHandle};
-use reth_node_core::{
-    args::{RpcServerArgs, TxPoolArgs},
-    node_config::NodeConfig,
-};
+use reth_node_core::args::TxPoolArgs;
 use reth_node_ethereum::EthereumNode;
 use reth_primitives_traits::Recovered;
-use reth_provider::CanonStateSubscriptions;
-use reth_tasks::Runtime;
+use reth_provider::{BlockNumReader, CanonStateSubscriptions};
 use reth_transaction_pool::{
     blobstore::InMemoryBlobStore, test_utils::OkValidator, BlockInfo, CoinbaseTipOrdering,
     EthPooledTransaction, Pool, PoolTransaction, TransactionOrigin, TransactionPool,
@@ -30,50 +23,35 @@ async fn rpc_enforces_minimum_priority_fee() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
 
     const MINIMUM_PRIORITY_FEE: u128 = 1;
+    const MAX_FEE: u128 = 20_000_000_000;
 
-    let genesis: Genesis = serde_json::from_str(include_str!("../assets/genesis.json"))?;
-    let chain_spec = Arc::new(
-        ChainSpecBuilder::default()
-            .chain(MAINNET.chain)
-            .genesis(genesis)
-            .cancun_activated()
-            .build(),
-    );
-    let (mut nodes, wallet) =
-        E2ETestSetupBuilder::<EthereumNode, _>::new(1, chain_spec, eth_payload_attributes)
-            .with_node_config_modifier(|config| {
-                config.with_txpool(TxPoolArgs {
-                    minimum_priority_fee: Some(MINIMUM_PRIORITY_FEE),
-                    ..Default::default()
-                })
+    let (node, wallet) = EthereumNode::test_setup_for(EthereumHardfork::Cancun)
+        .with_node_config_modifier(|config| {
+            config.with_txpool(TxPoolArgs {
+                minimum_priority_fee: Some(MINIMUM_PRIORITY_FEE),
+                ..Default::default()
             })
-            .build()
-            .await?;
-    let node = nodes.pop().unwrap();
-    let provider = ProviderBuilder::new().connect_http(node.rpc_url());
+        })
+        .build_single()
+        .await?;
+    let provider = node.rpc_provider();
+    let mut account = wallet.account(0);
 
-    let transaction = |max_priority_fee_per_gas| TransactionRequest {
-        nonce: Some(0),
-        value: Some(U256::from(100)),
-        to: Some(TxKind::Call(Address::ZERO)),
-        gas: Some(21_000),
-        max_fee_per_gas: Some(20_000_000_000),
-        max_priority_fee_per_gas: Some(max_priority_fee_per_gas),
-        chain_id: Some(1),
-        ..Default::default()
-    };
-
-    let below_minimum = TransactionTestContext::sign_tx(wallet.inner.clone(), transaction(0)).await;
-    let err = provider.send_raw_transaction(&below_minimum.encoded_2718()).await.unwrap_err();
+    let below_minimum = account.transfer(Address::ZERO, U256::from(100)).fees(MAX_FEE, 0).await;
+    let err = provider.send_raw_transaction(&below_minimum).await.unwrap_err();
     assert!(
         err.to_string().contains("transaction priority fee below minimum required priority fee 1"),
         "{err}"
     );
     assert!(node.inner.pool.is_empty());
 
-    let at_minimum =
-        TransactionTestContext::sign_tx(wallet.inner, transaction(MINIMUM_PRIORITY_FEE)).await;
-    let pending = provider.send_raw_transaction(&at_minimum.encoded_2718()).await?;
+    // The rejected transaction did not use up its nonce.
+    let at_minimum = account
+        .transfer(Address::ZERO, U256::from(100))
+        .fees(MAX_FEE, MINIMUM_PRIORITY_FEE)
+        .nonce(0)
+        .await;
+    let pending = provider.send_raw_transaction(&at_minimum).await?;
     assert_eq!(node.inner.pool.len(), 1);
     assert!(node.inner.pool.contains(pending.tx_hash()));
 
@@ -84,7 +62,6 @@ async fn rpc_enforces_minimum_priority_fee() -> eyre::Result<()> {
 #[tokio::test]
 async fn maintain_txpool_stale_eviction() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
-    let runtime = Runtime::test();
 
     let txpool = Pool::new(
         OkValidator::default(),
@@ -95,27 +72,9 @@ async fn maintain_txpool_stale_eviction() -> eyre::Result<()> {
 
     // Directly generate a node to simulate various traits such as `StateProviderFactory` required
     // by the pool maintenance task
-    let genesis: Genesis = serde_json::from_str(include_str!("../assets/genesis.json")).unwrap();
-    let chain_spec = Arc::new(
-        ChainSpecBuilder::default()
-            .chain(MAINNET.chain)
-            .genesis(genesis)
-            .cancun_activated()
-            .build(),
-    );
-    let node_config = NodeConfig::test()
-        .with_chain(chain_spec)
-        .with_unused_ports()
-        .with_rpc(RpcServerArgs::default().with_unused_ports().with_http());
-    let NodeHandle { node, node_exit_future: _ } = NodeBuilder::new(node_config.clone())
-        .testing_node(runtime.clone())
-        .node(EthereumNode::default())
-        .launch()
-        .await?;
-
-    let node = NodeTestContext::new(node, eth_payload_attributes).await?;
-
-    let wallet = Wallet::default();
+    let (node, wallet) =
+        EthereumNode::test_setup_for(EthereumHardfork::Cancun).build_single().await?;
+    let runtime = node.inner.task_executor.clone();
 
     let config = reth_transaction_pool::maintain::MaintainPoolConfig {
         max_tx_lifetime: Duration::from_secs(1),
@@ -145,10 +104,8 @@ async fn maintain_txpool_stale_eviction() -> eyre::Result<()> {
     txpool.add_transaction(TransactionOrigin::External, pooled_tx).await.unwrap();
     assert_eq!(txpool.len(), 1);
 
-    tokio::time::sleep(std::time::Duration::from_secs(2)).await;
-
-    // stale tx should be evicted
-    assert_eq!(txpool.len(), 0);
+    poll_until("stale transaction to be evicted", || async { Ok(txpool.is_empty().then_some(())) })
+        .await?;
 
     Ok(())
 }
@@ -157,7 +114,6 @@ async fn maintain_txpool_stale_eviction() -> eyre::Result<()> {
 #[tokio::test]
 async fn maintain_txpool_reorg() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
-    let runtime = Runtime::test();
 
     let txpool = Pool::new(
         OkValidator::default(),
@@ -168,30 +124,14 @@ async fn maintain_txpool_reorg() -> eyre::Result<()> {
 
     // Directly generate a node to simulate various traits such as `StateProviderFactory` required
     // by the pool maintenance task
-    let genesis: Genesis = serde_json::from_str(include_str!("../assets/genesis.json")).unwrap();
-    let chain_spec = Arc::new(
-        ChainSpecBuilder::default()
-            .chain(MAINNET.chain)
-            .genesis(genesis)
-            .cancun_activated()
-            .build(),
-    );
+    let chain_spec = test_chain_spec(EthereumHardfork::Cancun);
     let genesis_hash = chain_spec.genesis_hash();
-    let node_config = NodeConfig::test()
-        .with_chain(chain_spec)
-        .with_unused_ports()
-        .with_rpc(RpcServerArgs::default().with_unused_ports().with_http());
-    let NodeHandle { node, node_exit_future: _ } = NodeBuilder::new(node_config.clone())
-        .testing_node(runtime.clone())
-        .node(EthereumNode::default())
-        .launch()
-        .await?;
+    let (mut node, wallet) = EthereumNode::test_setup(1, chain_spec).build_single().await?;
+    // keep genesis finalized, so the block with tx1 can be reorged
+    node.set_finality(Finality::Keep);
+    let runtime = node.inner.task_executor.clone();
 
-    let mut node = NodeTestContext::new(node, eth_payload_attributes).await?;
-
-    let wallets = Wallet::new(2).wallet_gen();
-    let w1 = wallets.first().unwrap();
-    let w2 = wallets.last().unwrap();
+    let (w1, w2) = (wallet.signer(0), wallet.signer(1));
 
     runtime.spawn_critical_task(
         "txpool maintenance task",
@@ -237,49 +177,29 @@ async fn maintain_txpool_reorg() -> eyre::Result<()> {
     txpool.add_transaction(TransactionOrigin::External, pooled_tx2).await.unwrap();
 
     // inject tx1, make the node advance and eventually generate `CanonStateNotification::Commit`
-    // event to propagate to the pool
+    // event to propagate to the pool. Wait for the node's own pool to drop tx1, so the block of the
+    // reorg below can't include it.
     let _ = node.rpc.inject_tx(envelop1.encoded_2718().into()).await.unwrap();
+    node.advance_block_synced().await?;
 
-    // build a payload based on tx1
-    let payload1 = node.new_payload().await?;
+    // wait for pool to process `CanonStateNotification::Commit` event correctly, and finally tx1
+    // will be removed and tx2 is still in the pool.
+    poll_until("pool to process the commit", || async {
+        Ok((txpool.get(&tx_hash1).is_none() && txpool.get(&tx_hash2).is_some()).then_some(()))
+    })
+    .await?;
 
-    // clean up the internal pool of the provider node
-    node.inner.pool.remove_transactions(vec![tx_hash1]);
-
-    // inject tx2, make the node reorg and eventually generate `CanonStateNotification::Reorg` event
-    // to propagate to the pool
+    // inject tx2 and mine it in a block on genesis, make the node reorg and eventually generate
+    // `CanonStateNotification::Reorg` event to propagate to the pool
     let _ = node.rpc.inject_tx(envelop2.encoded_2718().into()).await.unwrap();
+    node.advance_block_on(genesis_hash).await?;
 
-    // build a payload based on tx2
-    let payload2 = node.new_payload().await?;
-
-    // submit payload1
-    let block_hash1 = node.submit_payload(payload1).await?;
-
-    node.update_forkchoice(genesis_hash, block_hash1).await?;
-
-    loop {
-        // wait for pool to process `CanonStateNotification::Commit` event correctly, and finally
-        // tx1 will be removed and tx2 is still in the pool
-        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
-        if txpool.get(&tx_hash1).is_none() && txpool.get(&tx_hash2).is_some() {
-            break;
-        }
-    }
-
-    // submit payload2
-    let block_hash2 = node.submit_payload(payload2).await?;
-
-    node.update_forkchoice(genesis_hash, block_hash2).await?;
-
-    loop {
-        // wait for pool to process `CanonStateNotification::Reorg` event properly, and finally tx1
-        // will be added back to the pool and tx2 will be removed.
-        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
-        if txpool.get(&tx_hash1).is_some() && txpool.get(&tx_hash2).is_none() {
-            break;
-        }
-    }
+    // wait for pool to process `CanonStateNotification::Reorg` event properly, and finally tx1
+    // will be added back to the pool and tx2 will be removed.
+    poll_until("pool to process the reorg", || async {
+        Ok((txpool.get(&tx_hash1).is_some() && txpool.get(&tx_hash2).is_none()).then_some(()))
+    })
+    .await?;
 
     Ok(())
 }
@@ -289,7 +209,6 @@ async fn maintain_txpool_reorg() -> eyre::Result<()> {
 #[tokio::test]
 async fn maintain_txpool_commit() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
-    let runtime = Runtime::test();
 
     let txpool = Pool::new(
         OkValidator::default(),
@@ -300,27 +219,9 @@ async fn maintain_txpool_commit() -> eyre::Result<()> {
 
     // Directly generate a node to simulate various traits such as `StateProviderFactory` required
     // by the pool maintenance task
-    let genesis: Genesis = serde_json::from_str(include_str!("../assets/genesis.json")).unwrap();
-    let chain_spec = Arc::new(
-        ChainSpecBuilder::default()
-            .chain(MAINNET.chain)
-            .genesis(genesis)
-            .cancun_activated()
-            .build(),
-    );
-    let node_config = NodeConfig::test()
-        .with_chain(chain_spec)
-        .with_unused_ports()
-        .with_rpc(RpcServerArgs::default().with_unused_ports().with_http());
-    let NodeHandle { node, node_exit_future: _ } = NodeBuilder::new(node_config.clone())
-        .testing_node(runtime.clone())
-        .node(EthereumNode::default())
-        .launch()
-        .await?;
-
-    let mut node = NodeTestContext::new(node, eth_payload_attributes).await?;
-
-    let wallet = Wallet::default();
+    let (mut node, wallet) =
+        EthereumNode::test_setup_for(EthereumHardfork::Cancun).build_single().await?;
+    let runtime = node.inner.task_executor.clone();
 
     runtime.spawn_critical_task(
         "txpool maintenance task",
@@ -358,14 +259,108 @@ async fn maintain_txpool_commit() -> eyre::Result<()> {
     let _ = node.rpc.inject_tx(envelop.encoded_2718().into()).await.unwrap();
     let _ = node.advance_block().await.unwrap();
 
-    loop {
-        // wait for pool to process `CanonStateNotification::Commit` event correctly, and finally
-        // the pool will be cleared
-        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
-        if txpool.is_empty() {
-            break;
-        }
+    // wait for pool to process `CanonStateNotification::Commit` event correctly, and finally the
+    // pool will be cleared.
+    poll_until("pool to process the commit", || async { Ok(txpool.is_empty().then_some(())) })
+        .await?;
+
+    Ok(())
+}
+
+// Test that the pool processed the new block once `advance_block_synced` returns.
+#[tokio::test]
+async fn advance_block_synced_waits_for_pool() -> eyre::Result<()> {
+    reth_tracing::init_test_tracing();
+
+    let (mut node, wallet) =
+        EthereumNode::test_setup_for(EthereumHardfork::Cancun).build_single().await?;
+
+    let mut account = wallet.account(0);
+    for _ in 0..3 {
+        let raw_tx = account.transfer(Address::random(), U256::from(100)).await;
+        let tx_hash = node.rpc.inject_tx(raw_tx).await?;
+
+        let payload = node.advance_block_synced().await?;
+        let block = payload.block();
+        assert!(block.body().transactions().any(|tx| *tx.hash() == tx_hash));
+
+        // the mined transaction is removed from the pool without waiting any further
+        let info = node.inner.pool.block_info();
+        assert_eq!(info.last_seen_block_hash, block.hash());
+        assert_eq!(info.last_seen_block_number, block.header().number);
+        assert!(node.inner.pool.is_empty());
     }
+
+    Ok(())
+}
+
+// Test that the pool transaction waits return once the transactions entered and left the pool.
+#[tokio::test]
+async fn wait_for_pooled_and_pool_removal() -> eyre::Result<()> {
+    reth_tracing::init_test_tracing();
+
+    let (mut node, wallet) =
+        EthereumNode::test_setup_for(EthereumHardfork::Cancun).build_single().await?;
+
+    let mut account = wallet.account(0);
+    let mut hashes = Vec::new();
+    for _ in 0..2 {
+        let raw_tx = account.transfer(Address::random(), U256::from(100)).await;
+        hashes.push(node.rpc.inject_tx(raw_tx).await?);
+    }
+    node.wait_for_pooled(hashes.clone()).await?;
+
+    // the pool removes the mined transactions in the background
+    let payload = node.advance_block().await?;
+    assert_eq!(payload.block().body().transactions().count(), hashes.len());
+    node.wait_for_pool_removal(hashes).await?;
+    assert!(node.inner.pool.is_empty());
+
+    Ok(())
+}
+
+// Test that `advance_until_pool_drained` mines the pending transactions over as many blocks as
+// they need, without a trailing empty block, and does not wait for a transaction behind a nonce
+// gap.
+#[tokio::test]
+async fn advance_until_pool_drained_mines_pending_transactions() -> eyre::Result<()> {
+    reth_tracing::init_test_tracing();
+
+    // A block of 100k gas fits four transfers.
+    let mut genesis = test_genesis();
+    genesis.gas_limit = 100_000;
+    let chain_spec = test_chain_spec_builder().genesis(genesis).cancun_activated().build();
+    let (mut node, wallet) =
+        EthereumNode::test_setup(1, Arc::new(chain_spec)).build_single().await?;
+
+    let mut account = wallet.account(0).with_gas_limit(21_000);
+    let mut pending = Vec::new();
+    for _ in 0..10 {
+        let raw_tx = account.transfer(Address::random(), U256::from(100)).await;
+        pending.push(node.rpc.inject_tx(raw_tx).await?);
+    }
+    let gap_nonce = account.nonce() + 1;
+    let queued = account.transfer(Address::random(), U256::from(100)).nonce(gap_nonce).await;
+    let queued = node.rpc.inject_tx(queued).await?;
+
+    let payloads = node.advance_until_pool_drained().await?;
+    assert_eq!(payloads.len(), 3);
+    assert!(payloads.iter().all(|payload| !payload.block().body().transactions.is_empty()));
+    let mined = payloads
+        .iter()
+        .flat_map(|payload| payload.block().body().transactions().map(|tx| *tx.hash()))
+        .collect::<Vec<_>>();
+    assert_eq!(mined, pending);
+    let head = payloads.last().unwrap().block().number;
+    assert_eq!(node.inner.provider.best_block_number()?, head);
+
+    let size = node.inner.pool.pool_size();
+    assert_eq!((size.pending, size.queued), (0, 1));
+    assert!(node.inner.pool.contains(&queued));
+
+    // Nothing is pending, so the chain does not advance.
+    assert!(node.advance_until_pool_drained().await?.is_empty());
+    assert_eq!(node.inner.provider.best_block_number()?, head);
 
     Ok(())
 }

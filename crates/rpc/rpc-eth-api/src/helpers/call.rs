@@ -20,24 +20,28 @@ use futures::Future;
 use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthereumHardforks};
 use reth_errors::{ProviderError, RethError};
 use reth_evm::{
-    cancelled::CancelOnDrop,
     database::StateProviderDatabase,
     execute::{BlockBuilder, BlockExecutor, BlockExecutorFactory},
-    ConfigureEvm, Database, Evm, EvmEnv, EvmEnvFor, EvmTypesFor, TxEnvFor, TxResultWithStateFor,
+    BundleState, ConfigureEvm, Database, Evm, EvmEnv, EvmEnvFor, EvmTypesFor, TransactionEnvMut,
+    TxEnvFor, TxResultWithStateFor,
 };
-use reth_execution_types::{BundleSource, HashedPostState};
+use reth_execution_types::BundleSource;
 use reth_node_api::BlockBody;
 use reth_primitives_traits::Recovered;
 use reth_rpc_convert::{RpcConvert, RpcTxReq};
 use reth_rpc_eth_types::{
-    cache::db::{apply_block_overrides, apply_state_overrides, attach_bal_before_tx},
+    cache::db::{
+        apply_block_overrides, apply_state_overrides, apply_state_overrides_with_state,
+        attach_bal_before_tx,
+    },
     error::{AsEthApiError, FromEthApiError},
     simulate::{self, EthSimulateError},
     EthApiError, RpcInvalidTransactionError, StateCacheDb,
 };
 use reth_storage_api::{BlockIdReader, ProviderTx, StateProvider};
+use reth_tasks::{cancel::is_cancelled, CancelOnDrop};
 use std::fmt;
-use tracing::{trace, warn};
+use tracing::{debug, trace};
 
 /// Result type for `eth_simulateV1` RPC method.
 pub type SimulatedBlocksResult<N, E> = Result<Vec<SimulatedBlock<RpcBlock<N>>>, E>;
@@ -93,16 +97,19 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                 .ok_or_else(|| EthApiError::other(EthSimulateError::BlockNotFound { block }))?;
             let parent = base_block.sealed_header().clone();
             let max_simulate_blocks = self.max_simulate_blocks();
+            // Load the state of the block resolved above: resolving a tag such as `latest` again
+            // could return a newer block than `parent`.
+            let state_at = if block.is_pending() { block } else { parent.hash().into() };
 
-            self.spawn_with_state_at_block(block, move |this, db| {
+            self.spawn_with_state_at_block(state_at, move |this, db| {
                 let _permit = permit;
                 let state_provider = db.db.into_inner().into_inner().0;
                 let mut db = CacheDB::new(evm2::evm::Db::new(StateProviderDatabase::new(
                     (&state_provider).into_evm_state_provider(),
                 )));
                 let mut parent = parent;
-                let mut hashed_state =
-                    this.compute_state_root_for_eth_simulate().then(HashedPostState::default);
+                let mut simulation_state =
+                    this.compute_state_root_for_eth_simulate().then(BundleState::default);
 
                 let chain_id = this.provider().chain_spec().chain_id();
 
@@ -176,8 +183,12 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                         apply_block_overrides(block_overrides, &mut db, &mut evm_env);
                     }
                     if let Some(ref state_overrides) = state_overrides {
-                        apply_state_overrides(state_overrides.clone(), &mut db)
-                            .map_err(Self::Error::from_eth_err)?;
+                        apply_state_overrides_with_state(
+                            state_overrides.clone(),
+                            &mut db,
+                            simulation_state.as_mut(),
+                        )
+                        .map_err(Self::Error::from_eth_err)?;
                     }
 
                     let chain_id = evm_env.chain_id();
@@ -229,7 +240,7 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                             calls,
                             &mut remaining_call_gas_limit,
                             chain_id,
-                            hashed_state.as_mut(),
+                            simulation_state.as_mut(),
                             this.converter(),
                         )
                         .map_err(map_err)?
@@ -258,7 +269,7 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                             calls,
                             &mut remaining_call_gas_limit,
                             chain_id,
-                            hashed_state.as_mut(),
+                            simulation_state.as_mut(),
                             this.converter(),
                         )
                         .map_err(map_err)?
@@ -391,6 +402,10 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
 
                     // transact all transactions in the bundle
                     for (tx_index, tx) in transactions.into_iter().enumerate() {
+                        if is_cancelled() {
+                            return Err(EthApiError::InternalEthError.into())
+                        }
+
                         // Apply overrides, state overrides are only applied for the first tx in the
                         // request
                         let overrides =
@@ -457,10 +472,7 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
             let block_id = block_number.unwrap_or_default();
             let (evm_env, at) = self.evm_env_at(block_id).await?;
 
-            self.spawn_blocking_io_fut(async move |this| {
-                this.create_access_list_with(evm_env, at, request, state_override).await
-            })
-            .await
+            self.create_access_list_with(evm_env, at, request, state_override).await
         }
     }
 
@@ -470,7 +482,7 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
         &self,
         evm_env: EvmEnvFor<Self::Evm>,
         at: BlockId,
-        mut request: RpcTxReq<<Self::RpcConvert as RpcConvert>::Network>,
+        request: RpcTxReq<<Self::RpcConvert as RpcConvert>::Network>,
         state_override: Option<StateOverride>,
     ) -> impl Future<Output = Result<AccessListResult, Self::Error>> + Send
     where
@@ -478,20 +490,23 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
     {
         self.spawn_with_state_at_block(at, |this, mut db| {
             let initial = request.as_ref().access_list().cloned().unwrap_or_default();
-            let (evm_env, tx_env) = this.prepare_call_env(
+            let (evm_env, mut tx_env) = this.prepare_call_env(
                 evm_env,
-                request.clone(),
+                request,
                 &mut db,
                 EvmOverrides::state(state_override),
             )?;
+            let chain_id = evm_env.chain_id();
 
-            let mut evm = this
-                .evm_config()
-                .block_executor_factory()
-                .evm_with_database(&mut db, evm_env.clone());
+            let mut evm =
+                this.evm_config().block_executor_factory().evm_with_database(&mut db, evm_env);
 
+            // EIP-7702 authorities are warmed during authorization processing, so listing them
+            // would only add access list cost.
+            let inspector =
+                AccessListInspector::new(initial).with_excluded_from_tx(tx_env.inner(), chain_id);
             let (inspector, result) = evm
-                .transact_with_inspector(&tx_env, AccessListInspector::new(initial))
+                .transact_with_inspector(&tx_env, inspector)
                 .map_err(Self::Error::from_evm_err)?;
             let access_list = inspector.into_access_list();
             let gas_used = result.result.tx_gas_used();
@@ -503,11 +518,7 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                 });
             }
 
-            // Preserve the prepared nonce and gas cap when rebuilding the envelope with the list.
-            request.as_mut().set_nonce(tx_env.nonce());
-            request.as_mut().set_gas_limit(tx_env.gas_limit());
-            request.as_mut().set_access_list(access_list.clone());
-            let tx_env = this.converter().tx_env(request, &evm_env)?;
+            tx_env.inner_mut().set_access_list(access_list.clone());
 
             // Transact again to get the exact gas used with the returned access list.
             let result = evm.transact_result(&tx_env).map_err(Self::Error::from_evm_err)?;
@@ -665,9 +676,7 @@ pub trait Call:
         F: FnOnce(Self, StateCacheDb) -> Result<R, Self::Error> + Send + 'static,
         R: Send + 'static,
     {
-        let at = at.into();
-        self.spawn_blocking_io_fut(async move |this| {
-            let state = this.state_at_block_id(at).await?;
+        self.spawn_blocking_io_with_state(at.into(), move |this, state| {
             let db = evm2::evm::CacheDB::new(evm2::evm::Db::new(StateProviderDatabase::new(
                 state.into_evm_state_provider(),
             )));
@@ -831,6 +840,9 @@ pub trait Call:
                 // reached the target transaction
                 break
             }
+            if is_cancelled() {
+                return Err(EthApiError::InternalEthError.into())
+            }
 
             let tx_env = self.evm_config().tx_env(tx.cloned());
             let _ = evm.transact_commit(&tx_env).map_err(Self::Error::from_evm_err)?;
@@ -890,7 +902,9 @@ pub trait Call:
         if let Some(requested_gas) = request.as_ref().gas_limit() {
             let global_gas_cap = self.call_gas_limit();
             if global_gas_cap != 0 && global_gas_cap < requested_gas {
-                warn!(target: "rpc::eth::call", ?request, ?global_gas_cap, "Capping gas limit to global gas cap");
+                // Callers routinely send gas limits above the cap, so this is not worth a warning.
+                // Log only the limits: the request carries caller calldata and addresses.
+                debug!(target: "rpc::eth::call", requested_gas, global_gas_cap, "Capping gas limit to global gas cap");
                 request.as_mut().set_gas_limit(global_gas_cap);
             }
         } else {
@@ -911,8 +925,12 @@ pub trait Call:
         // <https://github.com/ethereum/go-ethereum/blob/ee8e83fa5f6cb261dad2ed0a7bbcde4930c41e6c/internal/ethapi/api.go#L985>
         evm_env.version_mut().features.remove(evm2::EvmFeatures::BASE_FEE_CHECK);
 
-        // Disable EIP-7825 transaction gas limit to support larger transactions
-        evm_env.version_mut().tx_gas_limit_cap = u64::MAX;
+        // Disable EIP-7825 transaction gas limit to support larger transactions. Under Amsterdam's
+        // EIP-8037 it only caps execution gas, the rest going to the state gas reservoir, so keep
+        // it to execute the call like a transaction.
+        if !evm_env.version().feature(evm2::EvmFeatures::EIP8037) {
+            evm_env.version_mut().tx_gas_limit_cap = u64::MAX;
+        }
 
         // Disable additional fee charges, e.g. opstack operator fee charge
         // See:
@@ -945,7 +963,11 @@ pub trait Call:
             if gas_price > 0 {
                 // If gas price is specified, cap transaction gas limit with caller allowance
                 trace!(target: "rpc::eth::call", ?request, "Applying gas limit cap with caller allowance");
-                let cap = self.caller_gas_allowance(&mut *db, &evm_env, &tx_env)?;
+                let mut cap = self.caller_gas_allowance(&mut *db, &evm_env, &tx_env)?;
+                // The allowance must not raise the already applied RPC gas cap.
+                if self.call_gas_limit() != 0 {
+                    cap = cap.min(tx_env.gas_limit());
+                }
                 // ensure we cap gas_limit to the block's
                 request.as_mut().set_gas_limit(cap.min(evm_env.block_env().gas_limit.to::<u64>()));
             }

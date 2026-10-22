@@ -71,10 +71,10 @@ use reth_node_metrics::{
 };
 use reth_provider::{
     providers::{NodeTypesForProvider, ProviderNodeTypes, RocksDBProvider, StaticFileProvider},
-    BalConfig, BalStoreHandle, BlockHashReader, BlockNumReader, DBProvider,
-    DatabaseProviderFactory, InMemoryBalStore, MetadataProvider, MetadataWriter, ProviderError,
-    ProviderFactory, ProviderResult, RocksDBProviderFactory, StageCheckpointReader,
-    StaticFileProviderBuilder, StaticFileProviderFactory, StorageSettingsCache,
+    BalStoreHandle, BlockHashReader, BlockNumReader, DBProvider, DatabaseProviderFactory,
+    MetadataProvider, MetadataWriter, ProviderError, ProviderFactory, ProviderResult,
+    RocksDBBalStore, RocksDBProviderFactory, StageCheckpointReader, StaticFileProviderBuilder,
+    StaticFileProviderFactory, StorageSettingsCache,
 };
 use reth_prune::{PruneMode, PruneModes, PrunerBuilder};
 use reth_rpc_builder::config::RethRpcServerConfig;
@@ -89,7 +89,7 @@ use reth_storage_overlay::OverlayManager;
 use reth_tasks::TaskExecutor;
 use reth_tracing::tracing::{debug, error, info, warn};
 use reth_transaction_pool::TransactionPool;
-use std::{num::NonZeroUsize, sync::Arc, thread::available_parallelism, time::Duration};
+use std::{sync::Arc, time::Duration};
 use tokio::sync::{
     mpsc::{unbounded_channel, UnboundedSender},
     oneshot, watch,
@@ -236,7 +236,7 @@ impl LaunchContext {
         // TODO: reserved_cpu_cores is currently ignored because subtracting from thread pool
         // sizes doesn't actually reserve CPU cores for other processes.
         let _ = reserved_cpu_cores;
-        let num_threads = available_parallelism().map_or(1, NonZeroUsize::get);
+        let num_threads = self.task_executor.cpu_pool().current_num_threads();
         if let Err(err) = ThreadPoolBuilder::new()
             .num_threads(num_threads)
             .thread_name(|i| format!("rayon-{i:02}"))
@@ -484,6 +484,28 @@ where
         N: ProviderNodeTypes<DB = DB, ChainSpec = ChainSpec>,
         Evm: ConfigureEvm<Primitives = N::Primitives> + 'static,
     {
+        self.create_provider_factory_with_recovery::<N, Evm>(
+            overlay_manager,
+            rocksdb_provider,
+            disabled_stages,
+            |_| Ok(()),
+        )
+        .await
+    }
+
+    /// Like [`Self::create_provider_factory`], but first runs `recover` to finish writes an earlier
+    /// run left half-committed, before the consistency check.
+    pub async fn create_provider_factory_with_recovery<N, Evm>(
+        &self,
+        overlay_manager: OverlayManager<N::Primitives>,
+        rocksdb_provider: Option<RocksDBProvider>,
+        disabled_stages: &[StageId],
+        recover: impl FnOnce(&ProviderFactory<N>) -> eyre::Result<()>,
+    ) -> eyre::Result<ProviderFactory<N>>
+    where
+        N: ProviderNodeTypes<DB = DB, ChainSpec = ChainSpec>,
+        Evm: ConfigureEvm<Primitives = N::Primitives> + 'static,
+    {
         // Validate static files configuration
         let static_files_config = &self.toml_config().static_files;
         static_files_config.validate()?;
@@ -522,14 +544,15 @@ where
                 .build()?
         };
 
-        let balstore_cache_size = self
+        let bal_store = self
             .node_config()
             .db
             .balstore_cache_size
-            .unwrap_or(BalConfig::DEFAULT_IN_MEMORY_RETENTION_DISTANCE);
-        let bal_store = BalStoreHandle::new(InMemoryBalStore::new(
-            BalConfig::with_in_memory_retention_distance(balstore_cache_size),
-        ));
+            .map(|distance| {
+                RocksDBBalStore::with_buffer_retention_distance(rocksdb_provider.clone(), distance)
+            })
+            .unwrap_or_else(|| RocksDBBalStore::new(rocksdb_provider.clone()));
+        let bal_store = BalStoreHandle::new(bal_store);
         let factory = ProviderFactory::new(
             self.right().clone(),
             self.chain_spec(),
@@ -541,6 +564,8 @@ where
         .with_minimum_pruning_distance(prune_config.minimum_pruning_distance)
         .with_overlay_manager(overlay_manager)
         .with_bal_store(bal_store);
+
+        recover(&factory)?;
 
         // Check consistency between the database and static files, returning
         // the unwind targets for each storage layer if inconsistencies are
@@ -678,8 +703,35 @@ where
         N: ProviderNodeTypes<DB = DB, ChainSpec = ChainSpec>,
         Evm: ConfigureEvm<Primitives = N::Primitives> + 'static,
     {
+        self.with_provider_factory_and_recovery::<N, Evm>(
+            overlay_manager,
+            rocksdb_provider,
+            disabled_stages,
+            |_| Ok(()),
+        )
+        .await
+    }
+
+    /// Like [`Self::with_provider_factory`], but first runs `recover` to finish writes an earlier
+    /// run left half-committed, before the consistency check.
+    pub async fn with_provider_factory_and_recovery<N, Evm>(
+        self,
+        overlay_manager: OverlayManager<N::Primitives>,
+        rocksdb_provider: Option<RocksDBProvider>,
+        disabled_stages: &[StageId],
+        recover: impl FnOnce(&ProviderFactory<N>) -> eyre::Result<()>,
+    ) -> eyre::Result<LaunchContextWith<Attached<WithConfigs<ChainSpec>, ProviderFactory<N>>>>
+    where
+        N: ProviderNodeTypes<DB = DB, ChainSpec = ChainSpec>,
+        Evm: ConfigureEvm<Primitives = N::Primitives> + 'static,
+    {
         let factory = self
-            .create_provider_factory::<N, Evm>(overlay_manager, rocksdb_provider, disabled_stages)
+            .create_provider_factory_with_recovery::<N, Evm>(
+                overlay_manager,
+                rocksdb_provider,
+                disabled_stages,
+                recover,
+            )
             .await?;
         let ctx = LaunchContextWith {
             inner: self.inner,
