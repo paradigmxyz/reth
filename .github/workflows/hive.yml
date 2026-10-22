@@ -54,6 +54,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: ethereum/hive
+          ref: master
           path: hivetests
           persist-credentials: false
 
@@ -77,18 +78,9 @@ jobs:
         if: steps.cache-hive.outputs.cache-hit != 'true'
         run: .github/scripts/hive/build_simulators.sh ${{ matrix.variant }}
 
-      - name: Load cached Docker images
+      - name: Make cached Hive binary executable
         if: steps.cache-hive.outputs.cache-hit == 'true'
-        run: |
-          cd hive_assets
-          for tar_file in *.tar; do
-            if [ -f "$tar_file" ]; then
-              echo "Loading $tar_file..."
-              docker load -i "$tar_file"
-            fi
-          done
-          # Make hive binary executable
-          chmod +x hive
+        run: chmod +x hive_assets/hive
 
       - name: Upload hive assets
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -242,7 +234,9 @@ jobs:
           path: /tmp
 
       - name: Load Docker images
-        run: .github/scripts/hive/load_images.sh
+        env:
+          SCENARIO_SIM: ${{ matrix.scenario.sim }}
+        run: .github/scripts/hive/load_images.sh "$SCENARIO_SIM"
 
       - name: Move hive binary
         run: |
@@ -432,7 +426,9 @@ jobs:
           path: /tmp
 
       - name: Load Docker images
-        run: .github/scripts/hive/load_images.sh
+        env:
+          SCENARIO_SIM: ${{ matrix.scenario.sim }}
+        run: .github/scripts/hive/load_images.sh "$SCENARIO_SIM"
 
       - name: Move hive binary
         run: |
@@ -621,7 +617,9 @@ jobs:
           path: /tmp
 
       - name: Load Docker images
-        run: .github/scripts/hive/load_images.sh
+        env:
+          SCENARIO_SIM: ${{ matrix.scenario.sim }}
+        run: .github/scripts/hive/load_images.sh "$SCENARIO_SIM"
 
       - name: Move hive binary
         run: |

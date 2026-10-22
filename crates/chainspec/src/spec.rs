@@ -1285,9 +1285,10 @@ fn blob_params_from_genesis(
     config.bogota_time = timestamp(EthereumHardfork::Bogota);
     let mut params = config.blob_schedule_blob_params();
     if !config.blob_schedule.contains_key("Bogota") &&
-        let Some(timestamp) = config.bogota_time
+        let Some(timestamp) = config.bogota_time &&
+        params.active_scheduled_params_at_timestamp(timestamp).is_none()
     {
-        // Insert after earlier forks at the same timestamp, including genesis activations.
+        // Preserve active Amsterdam or BPO parameters, including a BPO at the Bogota timestamp.
         params.scheduled.push((timestamp, BOGOTA_BLOB_PARAMS));
         params.scheduled.sort_by_key(|(timestamp, _)| *timestamp);
     }
@@ -3122,19 +3123,30 @@ Post-merge hard forks (timestamp based):
             gas_limit: 30_000_000,
             gas_used: 30_000_000,
             base_fee_per_gas: Some(1_000_000_000),
-            timestamp: 14_998,
+            timestamp: 14_988,
+            slot_number: Some(100),
             ..Default::default()
         };
-        assert_eq!(spec.next_block_base_fee(&parent, 14_999), Some(1_125_000_000));
-        assert_eq!(spec.next_block_base_fee(&parent, 15_000), Some(1_104_166_666));
-        assert_eq!(spec.next_block_base_fee(&parent, 15_012), Some(1_104_166_666));
+        assert_eq!(
+            spec.next_block_base_fee_with_slot(&parent, 14_999, Some(101)),
+            Some(1_125_000_000)
+        );
+        assert_eq!(
+            spec.next_block_base_fee_with_slot(&parent, 15_000, Some(101)),
+            Some(1_125_000_000)
+        );
+        let parent = Header { timestamp: 15_000, slot_number: Some(101), ..parent };
+        assert_eq!(
+            spec.next_block_base_fee_with_slot(&parent, 15_009, Some(102)),
+            Some(1_093_750_000)
+        );
     }
 
     #[test]
     fn bogota_base_fee_rounding_and_floor() {
         let spec = ChainSpecBuilder::mainnet().bogota_activated().build();
         // Gas limit, gas used, parent fee, expected child fee. The 99-wei case distinguishes
-        // the spec's gas-target division from multiplying the full expression by 5 first.
+        // the spec's gas-target division from multiplying the full expression by time first.
         let cases = [
             (30_000_000, 30_000_000, 1_000_000_000, 1_104_166_666),
             (30_000_000, 0, 1_000_000_000, 895_833_334),
@@ -3151,11 +3163,16 @@ Post-merge hard forks (timestamp based):
                 gas_limit,
                 gas_used,
                 base_fee_per_gas: Some(base_fee),
+                slot_number: Some(0),
                 ..Default::default()
             };
-            assert_eq!(spec.next_block_base_fee(&parent, 12), Some(expected), "{parent:?}");
+            assert_eq!(
+                spec.next_block_base_fee_with_slot(&parent, 10, Some(1)),
+                Some(expected),
+                "{parent:?}"
+            );
         }
-        assert_eq!(spec.next_block_base_fee(&Header::default(), 12), None);
+        assert_eq!(spec.next_block_base_fee_with_slot(&Header::default(), 10, Some(1)), None);
     }
 
     #[test]
@@ -3178,6 +3195,11 @@ Post-merge hard forks (timestamp based):
         assert_eq!(spec.blob_params_at_timestamp(14_999).unwrap().max_blob_count, 21);
         assert_eq!(spec.blob_params_at_timestamp(15_000), Some(BOGOTA_BLOB_PARAMS));
         assert_eq!(spec.blob_params_at_timestamp(15_012), Some(BOGOTA_BLOB_PARAMS));
+        let params = spec.blob_params_at_timestamp(15_000).unwrap();
+        assert_eq!(
+            (params.target_blob_count, params.max_blob_count, params.update_fraction),
+            (14, 21, 11_684_671)
+        );
         genesis.config.bogota_time = Some(0);
         let at_genesis = ChainSpec::from_genesis(genesis);
         assert_eq!(at_genesis.blob_params_at_timestamp(0), Some(BOGOTA_BLOB_PARAMS));
@@ -3236,5 +3258,90 @@ Post-merge hard forks (timestamp based):
         let spec = ChainSpec::from_genesis(genesis);
         assert_eq!(spec.blob_params_at_timestamp(15_000), Some(BOGOTA_BLOB_PARAMS));
         assert_eq!(spec.blob_params_at_timestamp(16_000).unwrap().max_blob_count, 14);
+    }
+
+    #[test]
+    fn bogota_base_fee_tracks_slot_spacing() {
+        let spec = ChainSpecBuilder::mainnet().bogota_activated().build();
+        let denominator_overflow_gap = u64::MAX.div_ceil(96);
+        let cap_overflow_gap = u64::MAX.div_ceil(12);
+        let cases = [
+            (9, 1, 93_750_000),
+            (27, 3, 93_750_000),
+            (10, 1, 104_166_666),
+            (20, 2, 104_166_666),
+            (21, 2, 109_375_000),
+            (31, 3, 107_638_888),
+            (1, 2, 5_208_333),
+            (12, 1, 125_000_000),
+            (120, 10, 125_000_000),
+            (13, 1, 125_000_000),
+            (u64::MAX, 1, 125_000_000),
+            (u64::MAX, u64::MAX, 10_416_666),
+            (12 * denominator_overflow_gap, denominator_overflow_gap, 125_000_000),
+            (11 * cap_overflow_gap, cap_overflow_gap, 114_583_333),
+        ];
+        for (seconds, slots, delta) in cases {
+            for gas_used in [0, 30_000_000] {
+                let parent = Header {
+                    gas_limit: 30_000_000,
+                    gas_used,
+                    base_fee_per_gas: Some(1_000_000_000),
+                    slot_number: Some(0),
+                    ..Default::default()
+                };
+                let expected =
+                    if gas_used == 0 { 1_000_000_000 - delta } else { 1_000_000_000 + delta };
+                assert_eq!(
+                    spec.next_block_base_fee_with_slot(&parent, seconds, Some(slots)),
+                    Some(expected),
+                    "seconds={seconds}, slots={slots}, gas_used={gas_used}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn bogota_base_fee_requires_increasing_slots() {
+        let spec = ChainSpecBuilder::mainnet().bogota_activated().build();
+        let parent = Header {
+            gas_limit: 30_000_000,
+            base_fee_per_gas: Some(7),
+            slot_number: Some(10),
+            ..Default::default()
+        };
+        for slot in [None, Some(9), Some(10)] {
+            assert_eq!(spec.next_block_base_fee_with_slot(&parent, 9, slot), None);
+        }
+        let parent = Header { slot_number: None, ..parent };
+        assert_eq!(spec.next_block_base_fee_with_slot(&parent, 9, Some(11)), None);
+    }
+
+    #[test]
+    fn bogota_inherits_active_blob_schedule() {
+        for bpo_time in [None, Some(14_000), Some(15_000)] {
+            let genesis: Genesis = serde_json::from_value(serde_json::json!({
+                "config": {
+                    "osakaTime": 0,
+                    "amsterdamTime": 0,
+                    "bogotaTime": 15_000,
+                    "bpo3Time": bpo_time,
+                    "blobSchedule": {
+                        "amsterdam": {"target": 8, "max": 12, "baseFeeUpdateFraction": 8_346_193},
+                        "bpo3": {"target": 11, "max": 17, "baseFeeUpdateFraction": 12_241_084}
+                    }
+                }
+            }))
+            .unwrap();
+            let spec = ChainSpec::from_genesis(genesis);
+            let params = spec.blob_params_at_timestamp(15_000).unwrap();
+            let expected =
+                if bpo_time.is_some() { (11, 17, 12_241_084) } else { (8, 12, 8_346_193) };
+            assert_eq!(
+                (params.target_blob_count, params.max_blob_count, params.update_fraction),
+                expected,
+                "bpo_time={bpo_time:?}"
+            );
+        }
     }
 }

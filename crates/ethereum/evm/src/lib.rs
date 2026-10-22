@@ -229,7 +229,9 @@ where
                 gas_limit: attributes.gas_limit,
                 slot_number: attributes.slot_number,
             },
-            self.chain_spec().next_block_base_fee(parent, attributes.timestamp).unwrap_or_default(),
+            self.chain_spec()
+                .next_block_base_fee_with_slot(parent, attributes.timestamp, attributes.slot_number)
+                .unwrap_or_default(),
             self.chain_spec(),
             self.chain_spec().chain().id(),
             self.chain_spec().blob_params_at_timestamp(attributes.timestamp),
@@ -376,7 +378,7 @@ mod tests {
     use super::*;
     use alloy_consensus::Header;
     use alloy_genesis::Genesis;
-    use reth_chainspec::{Chain, ChainSpec};
+    use reth_chainspec::{Chain, ChainSpec, ChainSpecBuilder};
     use reth_evm::{execute::ProviderError, EvmEnv};
     use revm::{
         context::{BlockEnv, CfgEnv},
@@ -580,5 +582,31 @@ mod tests {
 
         let evm_config = evm_config.with_jit_support();
         assert!(evm_config.jit_backend().is_none());
+    }
+
+    #[test]
+    fn bogota_next_evm_env_uses_child_slot_number() {
+        let config =
+            EthEvmConfig::new(Arc::new(ChainSpecBuilder::mainnet().bogota_activated().build()));
+        let parent = Header {
+            gas_limit: 30_000_000,
+            gas_used: 30_000_000,
+            base_fee_per_gas: Some(1_000_000_000),
+            timestamp: 100,
+            slot_number: Some(10),
+            ..Default::default()
+        };
+        let attributes = NextBlockEnvAttributes {
+            timestamp: 127,
+            gas_limit: parent.gas_limit,
+            slot_number: Some(13),
+            suggested_fee_recipient: Default::default(),
+            prev_randao: Default::default(),
+            parent_beacon_block_root: None,
+            withdrawals: None,
+            extra_data: Default::default(),
+        };
+        let env = config.next_evm_env(&parent, &attributes).unwrap();
+        assert_eq!(env.block_env.basefee, 1_093_750_000);
     }
 }
