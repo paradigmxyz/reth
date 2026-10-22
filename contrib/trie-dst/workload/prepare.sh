@@ -37,6 +37,7 @@ DOCKERFILE
   --mount "type=bind,src=$context,dst=/out" \
   --mount "type=bind,src=$RUN_DIR,dst=/run-info" \
   --mount "type=bind,src=$BEDROCK_ROOT/guest,dst=/bedrock-guest,readonly" \
+  --mount "type=bind,src=$BEDROCK_ROOT/scripts/dst/rust-coverage.sh,dst=/bedrock-rust-coverage.sh,readonly" \
   -e CARGO_BUILD_JOBS="${CARGO_BUILD_JOBS:-6}" \
   -e SCCACHE_CACHE_SIZE="${SCCACHE_CACHE_SIZE:-10G}" \
   -e DST_CMD="${DST_CMD:-campaign}" \
@@ -51,22 +52,9 @@ trap 'sccache --show-stats > /run-info/sccache.txt; cat /run-info/sccache.txt' E
 # Keep the DST profile: it inherits profiling and enables debug assertions and
 # overflow checks for the harness. Do not switch these builds to profiling.
 if [ "${DST_CMD:-campaign}" = fuzz ]; then
-  clang -O2 -fPIC -c /bedrock-guest/libfeedback.c -o /out/libfeedback.o
-  clang -O2 -fPIC -c /bedrock-guest/libpcguard.c -o /out/libpcguard.o
-  ar rcs /out/rt.a /out/libfeedback.o /out/libpcguard.o
-  export RUSTFLAGS="$RUSTFLAGS -Cpasses=sancov-module -Cllvm-args=-sanitizer-coverage-level=3 -Cllvm-args=-sanitizer-coverage-trace-pc-guard -C link-arg=/out/rt.a -C link-arg=-Wl,--build-id=sha1"
-  host_target=$(rustc -vV | sed -n 's/^host: //p')
-  cargo build --locked -p reth-trie-dst --profile dst --target "$host_target"
-  binary="$CARGO_TARGET_DIR/$host_target/dst/reth-trie-dst"
-  nm --defined-only "$binary" | grep -qw __sanitizer_cov_trace_pc_guard_init
-  size=$(readelf -SW "$binary" | sed -n 's/.*__sancov_guards *[A-Z_]* *[0-9a-f]* [0-9a-f]* \([0-9a-f]*\).*/\1/p')
-  test -n "$size"
-  mkdir -p /out/cov-smoke
-  BEDROCK_COVERAGE_DIR=/out/cov-smoke "$binary" --version >/dev/null 2>&1 || true
-  measured=$(stat -c %s /out/cov-smoke/*-cov-*)
-  expected=$(( ( (0x$size / 4) + 4095 ) / 4096 * 4096 ))
-  test "$measured" = "$expected" && test "$expected" -gt 0 && test "$expected" -le $((64 << 20))
-  rm -rf /out/cov-smoke
+  source /bedrock-rust-coverage.sh
+  binary=$(bedrock_rust_coverage_build /bedrock-guest /out reth-trie-dst dst --locked -p reth-trie-dst)
+  bedrock_rust_coverage_check "$binary" --version
 else
   cargo build --locked -p reth-trie-dst --profile dst
   binary="$CARGO_TARGET_DIR/dst/reth-trie-dst"
