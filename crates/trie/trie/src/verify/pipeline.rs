@@ -13,6 +13,7 @@ use reth_storage_errors::db::DatabaseError;
 use std::{
     collections::VecDeque,
     panic::{catch_unwind, AssertUnwindSafe},
+    sync::Arc,
     thread::{self, JoinHandle},
 };
 
@@ -21,7 +22,8 @@ use std::{
 pub(super) struct StoragePipeline {
     roots_rx: Receiver<(B256, B256)>,
     roots: B256Map<B256>,
-    events_tx: Sender<Result<Output, StateRootError>>,
+    // Held so `events_rx` never disconnects, even after every background thread has exited.
+    _events_tx: Sender<Result<Output, StateRootError>>,
     events_rx: Receiver<Result<Output, StateRootError>>,
     // Disconnecting the sole sender broadcasts cancellation to every worker.
     cancel: Option<Sender<()>>,
@@ -29,6 +31,12 @@ pub(super) struct StoragePipeline {
 }
 
 impl StoragePipeline {
+    /// Spawns the background thread which walks `accounts` and verifies their storage on one
+    /// thread per worker.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `workers` is empty.
     pub(super) fn spawn<L, T, H, TX>(
         accounts: L,
         workers: Vec<StorageWorker<T, H, TX>>,
@@ -56,17 +64,21 @@ impl StoragePipeline {
                 let _entered = span.enter();
                 scheduler.run();
             })
-            .map_err(|error| DatabaseError::Other(error.to_string()))?;
+            .map_err(|error| DatabaseError::Custom(Arc::new(error)))?;
         Ok(Self {
             roots_rx,
             roots: Default::default(),
-            events_tx,
+            _events_tx: events_tx,
             events_rx,
             cancel: Some(cancel_tx),
             background: Some(background),
         })
     }
 
+    /// Blocks until the storage root of `address` is computed, buffering roots of other accounts
+    /// and moving findings into `outputs` while waiting.
+    ///
+    /// `address` must have non-empty storage, and each root can only be taken once.
     pub(super) fn root(
         &mut self,
         address: B256,
@@ -77,21 +89,27 @@ impl StoragePipeline {
         }
         loop {
             crossbeam_channel::select! {
+                // Never disconnects, see `_events_tx`.
                 recv(self.events_rx) -> event => {
                     if let Ok(event) = event { outputs.push_back(Ok(event?)); }
                 }
                 recv(self.roots_rx) -> root => {
-                    let Ok((account, root)) = root else {
+                    let Ok((root_address, root)) = root else {
                         self.drain(outputs)?;
-                        return Err(DatabaseError::Other("Storage root workers disconnected".into()).into())
+                        return Err(DatabaseError::Other(format!(
+                            "storage root of {address} was never computed"
+                        ))
+                        .into())
                     };
-                    if account == address { return Ok(root) }
-                    self.roots.insert(account, root);
+                    if root_address == address { return Ok(root) }
+                    self.roots.insert(root_address, root);
                 }
             }
         }
     }
 
+    /// Moves already received findings into `outputs` without blocking, stopping at the first
+    /// error.
     pub(super) fn drain(
         &self,
         outputs: &mut VecDeque<Result<Output, StateRootError>>,
@@ -102,30 +120,31 @@ impl StoragePipeline {
         Ok(())
     }
 
+    /// Appends `found` to `outputs` after any findings already received from background threads.
     pub(super) fn report(
         &self,
         found: Vec<Output>,
         outputs: &mut VecDeque<Result<Output, StateRootError>>,
     ) -> Result<(), StateRootError> {
-        for output in found {
-            assert!(self.events_tx.send(Ok(output)).is_ok(), "verifier owns the event receiver");
-        }
-        self.drain(outputs)
+        self.drain(outputs)?;
+        outputs.extend(found.into_iter().map(Ok));
+        Ok(())
     }
 
-    /// Waits for all scheduled work; queued findings and failures remain available to drain.
+    /// Waits for all scheduled work to complete; queued findings and failures remain available to
+    /// drain.
     pub(super) fn finish(&mut self) {
-        // Joining before cancellation preserves errors from the producer's final cursor read.
         self.join();
-        self.cancel.take();
     }
 
+    /// Cancels outstanding work and waits for background threads to exit.
     pub(super) fn stop(&mut self) {
         self.cancel.take();
         self.join();
     }
 
     fn join(&mut self) {
+        // Re-raising while already unwinding would abort the process.
         if let Some(background) = self.background.take() &&
             let Err(panic) = background.join() &&
             !thread::panicking()
@@ -141,7 +160,8 @@ impl Drop for StoragePipeline {
     }
 }
 
-/// Runs lookahead on the coordinator thread and keeps the fixed storage pool supplied with jobs.
+/// Body of the background thread: walks hashed accounts and keeps the storage workers supplied with
+/// jobs.
 struct StorageScheduler<L, T, H, TX> {
     accounts: L,
     workers: Vec<StorageWorker<T, H, TX>>,
@@ -159,10 +179,10 @@ where
     fn run(mut self) {
         let context = self.context.clone();
         context.run(|| {
-            let workers = self.workers.len();
-            let pool = reth_tasks::WorkerPool::new(workers, "trie-verify");
+            let worker_count = self.workers.len();
+            let pool = reth_tasks::WorkerPool::new(worker_count, "trie-verify");
             // Only queued work is bounded; completed roots never wait for the account thread.
-            let (jobs_tx, jobs_rx) = crossbeam_channel::bounded(workers * 2);
+            let (jobs_tx, jobs_rx) = crossbeam_channel::bounded(worker_count * 2);
             pool.in_place_scope(|scope| {
                 for worker in self.workers.drain(..) {
                     let jobs = jobs_rx.clone();
@@ -192,7 +212,9 @@ where
     }
 }
 
-/// Shared cancellation and reporting policy for the coordinator and storage workers.
+/// Shared cancellation and reporting policy for background threads.
+///
+/// Verification is cancelled once the `cancel` sender is dropped; nothing is ever sent on it.
 #[derive(Clone, Debug)]
 pub(super) struct WorkerContext {
     events: Sender<Result<Output, StateRootError>>,
@@ -200,6 +222,8 @@ pub(super) struct WorkerContext {
 }
 
 impl WorkerContext {
+    /// Sends `value`, returning `false` if it was not sent because verification was cancelled or
+    /// `sender` disconnected.
     pub(super) fn send<T>(&self, sender: &Sender<T>, value: T) -> bool {
         crossbeam_channel::select! {
             send(sender, value) -> result => result.is_ok(),
@@ -207,20 +231,22 @@ impl WorkerContext {
         }
     }
 
-    pub(super) fn receive(
-        &self,
-        jobs: &Receiver<B256>,
-    ) -> Result<B256, crossbeam_channel::RecvError> {
+    /// Receives the next job. Returns `None` once `jobs` is exhausted, and may return `None` early
+    /// if verification was cancelled.
+    pub(super) fn receive(&self, jobs: &Receiver<B256>) -> Option<B256> {
         crossbeam_channel::select! {
-            recv(jobs) -> job => job,
-            recv(self.cancel) -> _ => Err(crossbeam_channel::RecvError),
+            recv(jobs) -> job => job.ok(),
+            recv(self.cancel) -> _ => None,
         }
     }
 
+    /// Returns whether verification was cancelled.
     pub(super) fn is_cancelled(&self) -> bool {
         self.cancel.try_recv() == Err(crossbeam_channel::TryRecvError::Disconnected)
     }
 
+    /// Sends each finding, returning `false` if one was not sent because verification was
+    /// cancelled.
     pub(super) fn report(&self, found: Vec<Output>) -> bool {
         for output in found {
             if !self.send(&self.events, Ok(output)) {
@@ -230,10 +256,19 @@ impl WorkerContext {
         true
     }
 
+    /// Runs `work`, reporting its error or panic as a verification error.
     fn run(&self, work: impl FnOnce() -> Result<(), StateRootError>) {
-        let result = catch_unwind(AssertUnwindSafe(work)).unwrap_or_else(|_| {
-            Err(DatabaseError::Other("Trie verification thread panicked".into()).into())
+        let result = catch_unwind(AssertUnwindSafe(work)).unwrap_or_else(|panic| {
+            let message = panic
+                .downcast_ref::<&str>()
+                .copied()
+                .or_else(|| panic.downcast_ref::<String>().map(String::as_str))
+                .unwrap_or("unknown panic");
+            Err(DatabaseError::Other(format!("trie verification thread panicked: {message}"))
+                .into())
         });
+        // The error is only lost if verification was already cancelled, in which case the
+        // verifier has stopped reading results.
         if let Err(error) = result {
             self.send(&self.events, Err(error));
         }

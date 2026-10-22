@@ -1,5 +1,4 @@
 use alloy_consensus::BlockHeader as AlloyBlockHeader;
-use alloy_primitives::B256;
 use clap::Parser;
 use metrics::{self, Counter};
 use reth_chainspec::EthChainSpec;
@@ -8,7 +7,6 @@ use reth_db_api::{
     cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO},
     database::Database,
     transaction::{DbTx, DbTxMut},
-    DatabaseError,
 };
 use reth_db_common::DbTool;
 use reth_node_core::{
@@ -27,14 +25,9 @@ use reth_provider::{
 use reth_stages::StageId;
 use reth_storage_api::StorageSettingsCache;
 use reth_tasks::TaskExecutor;
-use reth_trie::{
-    hashed_cursor::HashedCursorFactory,
-    trie_cursor::TrieCursorFactory,
-    verify::{default_storage_workers, Output, StorageWorker, Verifier},
-    Nibbles,
-};
+use reth_trie::{verify::Output, Nibbles};
 use reth_trie_db::{
-    DatabaseHashedCursorFactory, DatabaseStateRoot, DatabaseTrieCursorFactory,
+    DatabaseHashedCursorFactory, DatabaseStateRoot, DatabaseTrieCursorFactory, DatabaseVerifier,
     StorageTrieEntryLike, TrieTableAdapter,
 };
 use std::{
@@ -125,30 +118,7 @@ fn verify_only<N: ProviderNodeTypes>(tool: &DbTool<N>) -> eyre::Result<()> {
 }
 
 fn do_verify_only<DB: Database, A: TrieTableAdapter>(db: &DB) -> eyre::Result<()> {
-    // Create the verifier
-    let mut account_tx = db.tx()?;
-    account_tx.disable_long_read_transaction_safety();
-    let mut lookahead_tx = db.tx()?;
-    lookahead_tx.disable_long_read_transaction_safety();
-    let workers = (0..default_storage_workers())
-        .map(|_| {
-            let mut tx = db.tx()?;
-            tx.disable_long_read_transaction_safety();
-            Ok::<_, DatabaseError>(StorageWorker {
-                trie: DatabaseTrieCursorFactory::<_, A>::new(&tx)
-                    .storage_trie_cursor(B256::ZERO)?,
-                hashed: DatabaseHashedCursorFactory::new(&tx).hashed_storage_cursor(B256::ZERO)?,
-                transaction: tx,
-            })
-        })
-        .collect::<Result<Vec<_>, _>>()?;
-    let verifier = Verifier::new(
-        DatabaseTrieCursorFactory::<_, A>::new(&account_tx).account_trie_cursor()?,
-        DatabaseHashedCursorFactory::new(&account_tx).hashed_account_cursor()?,
-        DatabaseHashedCursorFactory::new(&account_tx).hashed_storage_cursor(B256::ZERO)?,
-        DatabaseHashedCursorFactory::new(&lookahead_tx).hashed_account_cursor()?,
-        workers,
-    )?;
+    let verifier = DatabaseVerifier::<_, A>::new(|| db.tx())?;
 
     let metrics = RepairTrieMetrics::new();
 
@@ -271,29 +241,7 @@ where
     let mut storage_trie_cursor = tx.cursor_dup_write::<A::StorageTrieTable>()?;
 
     // Open every read snapshot before any repairs are applied.
-    let mut account_tx = db.tx()?;
-    account_tx.disable_long_read_transaction_safety();
-    let mut lookahead_tx = db.tx()?;
-    lookahead_tx.disable_long_read_transaction_safety();
-    let workers = (0..default_storage_workers())
-        .map(|_| {
-            let mut tx = db.tx()?;
-            tx.disable_long_read_transaction_safety();
-            Ok::<_, DatabaseError>(StorageWorker {
-                trie: DatabaseTrieCursorFactory::<_, A>::new(&tx)
-                    .storage_trie_cursor(B256::ZERO)?,
-                hashed: DatabaseHashedCursorFactory::new(&tx).hashed_storage_cursor(B256::ZERO)?,
-                transaction: tx,
-            })
-        })
-        .collect::<Result<Vec<_>, _>>()?;
-    let verifier = Verifier::new(
-        DatabaseTrieCursorFactory::<_, A>::new(&account_tx).account_trie_cursor()?,
-        DatabaseHashedCursorFactory::new(&account_tx).hashed_account_cursor()?,
-        DatabaseHashedCursorFactory::new(&account_tx).hashed_storage_cursor(B256::ZERO)?,
-        DatabaseHashedCursorFactory::new(&lookahead_tx).hashed_account_cursor()?,
-        workers,
-    )?;
+    let verifier = DatabaseVerifier::<_, A>::new(|| db.tx())?;
 
     let metrics = RepairTrieMetrics::new();
 
