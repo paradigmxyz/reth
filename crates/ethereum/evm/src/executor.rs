@@ -641,13 +641,9 @@ where
     fn configure_segment(&mut self, segment_idx: usize) {
         let segment = &self.plan.segments[segment_idx];
         let env = &segment.evm_env;
-        if self.inner.evm.config_spec_id() == env.spec &&
-            self.inner.evm.version().features == env.version.features
-        {
-            self.inner.evm.set_block(env.block);
-        } else {
-            self.factory.reconfigure_evm(&mut self.inner.evm, env);
-        }
+        // The version carries more than the spec and features (blob cap, gas caps, code limits), so
+        // install the whole segment config.
+        self.factory.reconfigure_evm(&mut self.inner.evm, env);
 
         let block_number = env.block.number.to::<u64>();
         self.inner.spec_id = env.spec.into();
@@ -978,7 +974,7 @@ fn emit_state(hook: &mut StateUpdateHook, state: StateUpdate) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_consensus::{SignableTransaction, TxLegacy};
+    use alloy_consensus::{SignableTransaction, TxEip4844, TxLegacy};
     use alloy_eip7928::BlockAccessIndex;
     use alloy_primitives::{address, Address, Bytes, Signature, TxKind, B256, U256};
     use evm2::{
@@ -1349,5 +1345,64 @@ mod tests {
         }
         let (output, _) = executor.finish_with_block_access_list().unwrap();
         assert_eq!(output.result.gas_used, block_gas);
+    }
+
+    #[test]
+    fn big_block_segment_switch_installs_segment_blob_cap() {
+        let sender = Address::with_last_byte(0x10);
+        let mut database = TestDatabase::default();
+        database.accounts.insert(
+            sender,
+            AccountInfo::default().with_balance(U256::from(1_000_000_000_000_000_000u64)),
+        );
+        let segments = [9, 6]
+            .into_iter()
+            .enumerate()
+            .map(|(index, max_blobs_per_tx)| {
+                let mut segment = segment(index, index as u64 + 1, B256::ZERO);
+                segment.ctx.parent_beacon_block_root = Some(B256::ZERO);
+                segment.evm_env = EthEvmEnv::new(
+                    SpecId::PRAGUE,
+                    BlockEnv::<BaseEvmTypes> {
+                        number: U256::from(index + 1),
+                        gas_limit: U256::from(30_000_000),
+                        ..Default::default()
+                    },
+                    1,
+                );
+                segment.evm_env.version.max_blobs_per_tx = max_blobs_per_tx;
+                segment
+            })
+            .collect();
+        let plan = EthBigBlockPlan::new(segments, Vec::new(), 2);
+        let factory = super::super::factory::EthBigBlockExecutorFactory::new(
+            super::super::factory::EthBlockExecutorFactory::new(Arc::new(
+                ChainSpecBuilder::mainnet().prague_activated().build(),
+            )),
+        );
+        let evm = factory.evm_with_env(Db::new(database), plan.segments[0].evm_env.clone());
+        let mut executor = factory.create_executor(evm, plan);
+        executor.apply_pre_execution_changes().unwrap();
+
+        let blob_tx = |nonce| {
+            let tx = TransactionSigned::Eip4844(
+                TxEip4844 {
+                    chain_id: 1,
+                    nonce,
+                    gas_limit: 100_000,
+                    max_fee_per_gas: 1,
+                    max_priority_fee_per_gas: 1,
+                    to: Address::with_last_byte(0x20),
+                    max_fee_per_blob_gas: 1,
+                    blob_versioned_hashes: vec![B256::repeat_byte(1); 7],
+                    ..Default::default()
+                }
+                .into_signed(Signature::test_signature()),
+            );
+            Recovered::new_unchecked(tx, sender)
+        };
+        executor.execute_transaction(blob_tx(0)).expect("seven blobs fit the first segment cap");
+        let err = executor.execute_transaction(blob_tx(1)).unwrap_err();
+        assert!(err.to_string().contains("too many blobs"), "{err}");
     }
 }
