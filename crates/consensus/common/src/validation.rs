@@ -333,7 +333,7 @@ pub fn validate_against_parent_eip1559_base_fee<ChainSpec: EthChainSpec + Ethere
             alloy_eips::eip1559::INITIAL_BASE_FEE
         } else {
             chain_spec
-                .next_block_base_fee(parent, header.timestamp())
+                .next_block_base_fee_with_slot(parent, header.timestamp(), header.slot_number())
                 .ok_or(ConsensusError::BaseFeeMissing)?
         };
         if expected_base_fee != base_fee {

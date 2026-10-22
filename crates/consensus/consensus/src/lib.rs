@@ -354,6 +354,15 @@ pub enum ConsensusError {
     #[error("unexpected slot number")]
     SlotNumberUnexpected,
 
+    /// Error when a Bogota block's slot number does not exceed its parent's.
+    #[error("invalid slot number: {slot_number} is not greater than parent slot number {parent_slot_number}")]
+    SlotNumberNotIncreasing {
+        /// Slot number of the parent block.
+        parent_slot_number: u64,
+        /// Slot number of the child block.
+        slot_number: u64,
+    },
+
     /// Error when withdrawals are missing.
     #[error("missing withdrawals")]
     BodyWithdrawalsMissing,
