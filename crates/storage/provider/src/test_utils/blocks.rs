@@ -12,7 +12,7 @@ use alloy_primitives::Signature;
 use reth_db_api::{database::Database, models::StoredBlockBodyIndices, tables};
 use reth_ethereum_primitives::{BlockBody, Receipt, Transaction, TransactionSigned, TxType};
 use reth_node_types::NodeTypes;
-use reth_primitives_traits::{Account, RecoveredBlock, SealedBlock, SealedHeader};
+use reth_primitives_traits::{RecoveredBlock, SealedBlock, SealedHeader};
 use reth_trie::root::{state_root_unhashed, storage_root_unhashed};
 use revm_database::BundleState;
 use revm_state::AccountInfo;
@@ -169,13 +169,15 @@ fn bundle_state_root(execution_outcome: &ExecutionOutcome) -> B256 {
             account.info.as_ref().map(|info| {
                 (
                     address,
-                    Account::from(info).into_trie_account(storage_root_unhashed(
-                        account
-                            .storage
-                            .iter()
-                            .filter(|(_, value)| !value.present_value.is_zero())
-                            .map(|(slot, value)| ((*slot).into(), value.present_value)),
-                    )),
+                    reth_execution_types::account_from_revm(info).into_trie_account(
+                        storage_root_unhashed(
+                            account
+                                .storage
+                                .iter()
+                                .filter(|(_, value)| !value.present_value.is_zero())
+                                .map(|(slot, value)| ((*slot).into(), value.present_value)),
+                        ),
+                    ),
                 )
             })
         },

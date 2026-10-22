@@ -42,7 +42,11 @@ alloy-rlp.workspace = true
 revm-bytecode.workspace = true
 
 [features]
-account-ext = ["evm2/account-ext", "revm-state/account-ext", "reth-primitives-traits/account-ext"]
+account-ext = [
+    "evm2/account-ext", "revm-state/account-ext",
+    "reth-primitives-traits/account-ext",
+    "reth-trie-common/account-ext",
+]
 asm-keccak = [
     "evm2/asm-keccak",
     "alloy-primitives/asm-keccak",

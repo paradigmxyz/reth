@@ -539,7 +539,10 @@ pub fn evm_state_to_hashed_post_state(update: EvmState) -> HashedPostState {
                 hashed_state.accounts.insert(hashed_address, None);
             } else if account.info != account.original_info() {
                 // A touched but unchanged account produces no bundle transition either.
-                hashed_state.accounts.insert(hashed_address, Some(account.info.into()));
+                hashed_state.accounts.insert(
+                    hashed_address,
+                    Some(reth_execution_types::account_from_revm(&account.info)),
+                );
             }
 
             let mut changed_storage_iter = account

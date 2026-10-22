@@ -216,7 +216,7 @@ where
         message: &Message<T>,
         gas: &mut GasTracker,
     ) -> Option<Result<PrecompileOutput, PrecompileError>> {
-        let address = message.code_address;
+        let address = message.call_target;
         if !self.policy.allows(&address) {
             return self.inner.execute(evm, message, gas);
         }
@@ -478,6 +478,7 @@ mod tests {
             gas_limit: 30_000,
             destination,
             code_address: destination,
+            call_target: destination,
             input: input.clone(),
             ..Default::default()
         };
@@ -530,7 +531,7 @@ mod tests {
             input: Bytes::copy_from_slice(b"cached-input"),
             value: U256::ZERO,
             code_address: address,
-            disable_precompiles: false,
+            call_target: address,
             salt: B256::ZERO,
             ..Default::default()
         };
@@ -579,6 +580,7 @@ mod tests {
                 gas_limit: 30_000,
                 destination: address,
                 code_address: address,
+                call_target: address,
                 input: Bytes::from(vec![1; len]),
                 ..Default::default()
             };
@@ -632,6 +634,7 @@ mod tests {
                     caller,
                     destination: identity,
                     code_address: identity,
+                    call_target: identity,
                     gas_limit: 30_000,
                     ..Default::default()
                 };

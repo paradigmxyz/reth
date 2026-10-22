@@ -93,6 +93,7 @@ account-ext = [
     "reth-stages-types/account-ext",
     "alloy-trie/account-ext",
     "reth-primitives-traits/account-ext",
+    "reth-trie-common/account-ext",
 ]
 
 [[bench]]

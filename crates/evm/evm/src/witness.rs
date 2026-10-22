@@ -108,7 +108,9 @@ impl<'a, DB> ExecutionWitnessRecord<'a, DB> {
                     *address,
                     revm_database::BundleAccount::new(
                         // Original existence determines whether parent storage proofs are needed.
-                        state_provider.basic_account(address)?.map(Into::into),
+                        state_provider
+                            .basic_account(address)?
+                            .map(reth_trie_common::account_to_revm),
                         info.clone(),
                         Default::default(),
                         if info.is_some() {

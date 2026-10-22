@@ -47,6 +47,7 @@ account-ext = [
     "evm2/account-ext",
     "reth-execution-types/account-ext",
     "reth-primitives-traits/account-ext",
+    "reth-trie-common/account-ext",
 ]
 default = ["std"]
 gmp = ["evm2/gmp"]

@@ -1136,7 +1136,7 @@ impl ExecutionCache {
                 .entered();
         // Insert bytecodes
         for (code_hash, bytecode) in &state_updates.contracts {
-            self.insert_code(*code_hash, Some(Bytecode(bytecode.clone())));
+            self.insert_code(*code_hash, Some(reth_execution_types::reth_bytecode(bytecode)));
         }
         drop(_enter);
 
@@ -1197,7 +1197,7 @@ impl ExecutionCache {
 
             // Insert will update if present, so we just use the new account info as the new value
             // for the account cache
-            self.insert_account(*addr, Some(Account::from(account_info)));
+            self.insert_account(*addr, Some(reth_execution_types::account_from_revm(account_info)));
         }
 
         Ok(())

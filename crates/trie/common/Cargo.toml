@@ -33,6 +33,7 @@ thiserror.workspace = true
 # State types
 revm-database.workspace = true
 revm-state.workspace = true
+evm2.workspace = true
 
 # `serde` feature
 serde = { workspace = true, optional = true }
@@ -88,8 +89,18 @@ std = [
     "thiserror/std",
     "revm-database/std",
     "revm-state/std",
+    "evm2/std",
     "reth-codecs?/std",
     "alloy-eips/std",
+]
+account-ext = [
+    "alloy-trie/account-ext",
+    "reth-primitives-traits/account-ext",
+    "revm-state/account-ext",
+    "evm2/account-ext",
+    "alloy-genesis/account-ext",
+    "alloy-rpc-types-eth?/account-ext",
+    "reth-codecs?/account-ext",
 ]
 eip1186 = ["alloy-rpc-types-eth/serde", "dep:alloy-serde"]
 serde = [
@@ -106,6 +117,7 @@ serde = [
     "revm-database/serde",
     "revm-state/serde",
     "alloy-eips/serde",
+    "evm2/serde",
 ]
 reth-codec = ["dep:reth-codecs", "reth-codecs/alloy", "dep:bytes", "dep:arrayvec"]
 serde-bincode-compat = [
@@ -136,5 +148,6 @@ arbitrary = [
     "reth-codecs/arbitrary",
     "alloy-rpc-types-eth?/arbitrary",
     "alloy-eips/arbitrary",
+    "evm2/arbitrary",
 ]
 rayon = ["dep:rayon"]

@@ -33,7 +33,7 @@ use evm2::{
         AccountChanges, AccountInfo, Database, Db, DbResult, DynDatabase, PendingState, StorageSlot,
     },
     interpreter::{op, InstrStop, Interpreter, Message, MessageKind, MessageResult},
-    utils::word_to_address,
+    utils::WordExt,
     EvmFeatures, EvmTypes, Inspector, TxResultWithState, Version,
 };
 use parking_lot::{Mutex, RwLock};
@@ -166,11 +166,10 @@ impl<T: EvmTypes> PrewarmResults<T> {
     pub(crate) fn publish_executed(&self, index: usize, state: &PendingState) {
         let Some(slot) = self.slots.get(index) else { return };
         let mut slot = slot.lock();
-        // Overwrite the predicted writes in place, then retract those the execution did not make.
-        self.predicted.publish(index, state);
         if let ResultSlot::Ready(previous) = core::mem::replace(&mut *slot, ResultSlot::Executed) {
-            self.predicted.retract_unwritten(index, &previous.result.pending_state, state);
+            self.predicted.retract(index, &previous.result.pending_state);
         }
+        self.predicted.publish(index, state);
         self.predicted.generation.fetch_add(1, Ordering::Relaxed);
     }
 
@@ -317,6 +316,11 @@ impl<T: EvmTypes> PrewarmedTx<T> {
             let mut current = original.clone();
             let Some(balance) = current.balance.checked_add(credit.amount) else { return Ok(None) };
             current.balance = balance;
+            // Execution touches the beneficiary even for a zero credit, which deletes it if it is
+            // empty (EIP-161). Detached state cannot express that, so execute normally.
+            if current.is_empty() {
+                return Ok(None)
+            }
             // The synthetic beneficiary was not observed. Preserve its current canonical cache
             // value when committing the detached result's loaded-but-unchanged entries.
             let synthetic = db.get_account(&POOL_BENEFICIARY)?;
@@ -579,13 +583,6 @@ impl PredictedState {
     /// Retracts the transaction's predicted writes.
     fn retract(&self, index: usize, state: &PendingState) {
         self.update(index, state.account_changes(), false);
-    }
-
-    /// Retracts predictions absent from the actual transaction result.
-    fn retract_unwritten(&self, index: usize, previous: &PendingState, state: &PendingState) {
-        // Replacing this index's writes also handles creation and storage-wipe changes.
-        self.retract(index, previous);
-        self.publish(index, state);
     }
 
     /// Publishes or retracts each changed account and slot.
@@ -1014,7 +1011,7 @@ impl<T: EvmTypes> Inspector<T> for BalanceTracker {
         let address = match interp.opcode() {
             op::BALANCE => {
                 let Some(word) = interp.stack().peek(0) else { return };
-                word_to_address(word)
+                word.to_address()
             }
             op::SELFBALANCE | op::SELFDESTRUCT => interp.message().destination,
             op::COINBASE => {
@@ -1139,6 +1136,8 @@ mod tests {
     const EXHAUSTED_SENDER: u8 = 5;
     /// Selfdestructs to the noop contract.
     const SELFDESTRUCTER: Address = Address::repeat_byte(0xcf);
+    /// Exists and is empty.
+    const EMPTY: Address = Address::repeat_byte(0xd0);
     const GAS_PRICE: u128 = 2;
 
     type Results = PrewarmResults<BaseEvmTypes>;
@@ -1176,10 +1175,21 @@ mod tests {
         value: u64,
         gas_limit: u64,
     ) -> Recovered<TransactionSigned> {
+        tx_with_gas_price(from, nonce, to, value, gas_limit, GAS_PRICE)
+    }
+
+    fn tx_with_gas_price(
+        from: u8,
+        nonce: u64,
+        to: Address,
+        value: u64,
+        gas_limit: u64,
+        gas_price: u128,
+    ) -> Recovered<TransactionSigned> {
         let tx = Transaction::Legacy(TxLegacy {
             chain_id: Some(1),
             nonce,
-            gas_price: GAS_PRICE,
+            gas_price,
             gas_limit,
             to: TxKind::Call(to),
             value: U256::from(value),
@@ -1225,6 +1235,7 @@ mod tests {
             AccountInfo { balance: U256::from(12), ..Default::default() },
         );
         db.insert_account_info(&ZERO_BALANCE, AccountInfo { nonce: 1, ..Default::default() });
+        db.insert_account_info(&EMPTY, AccountInfo::default());
         db.insert_account_info(
             &UNKNOWN_CODE,
             AccountInfo { code_hash: B256::repeat_byte(0xab), code: None, ..Default::default() },
@@ -1598,6 +1609,13 @@ mod tests {
         // The beneficiary must exist to be credited.
         let missing = Address::repeat_byte(0xbf);
         assert_eq!(reuse_pool(&txs, &txs, missing), [Err(ReuseMiss::Stale), Err(ReuseMiss::Stale)]);
+    }
+
+    #[test]
+    fn rejects_zero_credit_to_empty_beneficiary() {
+        // Executing the credit deletes the empty beneficiary, which detached state cannot express.
+        let txs = [tx_with_gas_price(1, 0, COUNTER, 1, 100_000, 1)];
+        assert_eq!(reuse_pool(&txs, &txs, EMPTY), [Err(ReuseMiss::Stale)]);
     }
 
     #[test]

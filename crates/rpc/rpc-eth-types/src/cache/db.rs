@@ -8,9 +8,12 @@ use alloy_primitives::U256;
 use alloy_rpc_types_eth::{state::StateOverride, BlockOverrides};
 use evm2::{
     bytecode::Bytecode,
-    evm::{Bal as EvmBal, CacheDB, Db, DynDatabase},
+    evm::{
+        AccountChangeRef, Bal as EvmBal, CacheDB, Db, DynDatabase, StateChangeSink, StorageChange,
+    },
 };
-use reth_evm::{database::StateProviderDatabase, EvmEnv};
+use reth_evm::{database::StateProviderDatabase, BundleState, EvmEnv};
+use reth_execution_types::{BlockState, TransactionChanges};
 use reth_storage_api::{EvmStateProviderAdapter, StateProviderBox};
 use std::sync::Arc;
 
@@ -75,10 +78,19 @@ pub fn apply_state_overrides<DB: DynDatabase>(
     overrides: StateOverride,
     db: &mut CacheDB<DB>,
 ) -> Result<(), StateOverrideError<evm2::DatabaseError>> {
+    apply_state_overrides_with_state(overrides, db, None)
+}
+
+/// Applies overrides and optionally records them for simulated state-root computation.
+pub fn apply_state_overrides_with_state<DB: DynDatabase>(
+    overrides: StateOverride,
+    db: &mut CacheDB<DB>,
+    state: Option<&mut BundleState>,
+) -> Result<(), StateOverrideError<evm2::DatabaseError>> {
+    let mut changes = state.is_some().then(TransactionChanges::default);
     for (address, account_override) in overrides {
-        let account = db.get_account(&address).map_err(StateOverrideError::Database)?;
-        let existed = account.is_some();
-        let mut account = account.unwrap_or_default();
+        let original = db.get_account(&address).map_err(StateOverrideError::Database)?;
+        let mut account = original.clone().unwrap_or_default();
 
         if let Some(nonce) = account_override.nonce {
             account.nonce = nonce;
@@ -95,6 +107,9 @@ pub fn apply_state_overrides<DB: DynDatabase>(
             (Some(_), Some(_)) => return Err(StateOverrideError::BothStateAndStateDiff(address)),
             (Some(state), None) => {
                 db.cache.storage.entry(address).or_default().wipe();
+                if let Some(changes) = changes.as_mut() {
+                    let Ok(()) = changes.storage_wipe(address);
+                }
                 Some(state)
             }
             (None, Some(state)) => Some(state),
@@ -103,22 +118,42 @@ pub fn apply_state_overrides<DB: DynDatabase>(
 
         // Account existence affects authorization refunds and new-account gas charges. A full
         // storage replacement always materializes the account, even with no slots.
-        if existed ||
+        if original.is_some() ||
             !account.is_empty() ||
             replaces_storage ||
             storage.as_ref().is_some_and(|state| !state.is_empty())
         {
+            if let Some(changes) = changes.as_mut() {
+                let Ok(()) = changes.account(AccountChangeRef {
+                    address,
+                    original: original.as_ref(),
+                    current: Some(&account),
+                    created: original.is_none(),
+                    selfdestructed: false,
+                });
+            }
             db.insert_account_info(&address, account);
         }
         if let Some(storage) = storage {
             for (key, value) in storage {
-                db.insert_account_storage(
-                    &address,
-                    &U256::from_be_bytes(key.0),
-                    &U256::from_be_bytes(value.0),
-                );
+                let key = U256::from_be_bytes(key.0);
+                let current = U256::from_be_bytes(value.0);
+                if let Some(changes) = changes.as_mut() {
+                    let original =
+                        db.get_storage(&address, &key).map_err(StateOverrideError::Database)?;
+                    let Ok(()) = changes.storage(StorageChange { address, key, original, current });
+                }
+                db.insert_account_storage(&address, &key, &current);
             }
         }
+    }
+
+    if let Some(state) = state &&
+        let Some(changes) = changes
+    {
+        let mut block = BlockState::new();
+        block.commit(&changes);
+        state.extend(block.into_bundle());
     }
 
     Ok(())

@@ -345,6 +345,72 @@ async fn test_simulate_v1_explicit_gas_over_remaining_block_gas_errors() -> eyre
     Ok(())
 }
 
+#[tokio::test]
+async fn test_simulate_v1_validation_error_codes() -> eyre::Result<()> {
+    reth_tracing::init_test_tracing();
+
+    let (node, wallet) =
+        EthereumNode::test_setup_for(EthereumHardfork::Cancun).build_single().await?;
+    let provider = node.rpc_provider_with_wallet(wallet.signer(0));
+
+    let from = address!("0xc000000000000000000000000000000000000000");
+    let tx = || {
+        TransactionRequest::default()
+            .from(from)
+            .to(Address::ZERO)
+            .max_fee_per_gas(1_000_000_000)
+            .max_priority_fee_per_gas(0)
+            .nonce(5)
+    };
+    let state_overrides = || {
+        StateOverridesBuilder::default()
+            .with_balance(from, U256::from(u64::MAX))
+            .with_nonce(from, 5)
+            .build()
+    };
+
+    let cases = [
+        ("nonce too low", tx().nonce(4), -38010, "nonce too low: next nonce 5, tx nonce 4"),
+        ("nonce too high", tx().nonce(6), -38011, "nonce too high"),
+        ("intrinsic gas too low", tx().gas_limit(20_000), -38013, "intrinsic gas too low"),
+        (
+            "base fee too low",
+            tx().max_fee_per_gas(1),
+            -38012,
+            "max fee per gas less than block base fee",
+        ),
+        (
+            "insufficient funds",
+            tx().gas_limit(21_000).value(U256::from(u64::MAX)),
+            -38014,
+            "insufficient funds for gas * price + value: have 18446744073709551615 want 18446765073709551615",
+        ),
+    ];
+
+    for (name, tx, code, message) in cases {
+        let sim_block = SimBlock::default()
+            .with_block_overrides(BlockOverrides {
+                base_fee: Some(U256::from(1_000_000)),
+                ..Default::default()
+            })
+            .with_state_overrides(state_overrides())
+            .call(tx);
+        let payload = SimulatePayload::default().with_validation().extend(sim_block);
+
+        let err = provider
+            .raw_request::<_, Vec<SimulatedBlock>>("eth_simulateV1".into(), (&payload, "latest"))
+            .await
+            .map(drop)
+            .expect_err(name);
+        let err = err.as_error_resp().expect("expected JSON-RPC error response");
+
+        assert_eq!(err.code, code, "{name}: {err:?}");
+        assert_eq!(err.message, message, "{name}");
+    }
+
+    Ok(())
+}
+
 /// Tests that `eth_simulateV1` handles a transaction with `maxFeePerBlobGas` set but no
 /// `blob_versioned_hashes` or sidecar. The transaction should be treated as EIP-1559, not
 /// EIP-4844.
