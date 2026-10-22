@@ -373,7 +373,7 @@ where
                         .get_account(&coinbase)
                         .map_err(EthApiError::from)?
                         .map(|acc| acc.balance)
-                        .unwrap_or(coinbase_balance_before_tx);
+                        .unwrap_or_default();
 
                     let coinbase_diff =
                         coinbase_balance_after_tx.saturating_sub(coinbase_balance_before_tx);
