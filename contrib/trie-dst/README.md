@@ -15,13 +15,14 @@ shared overlay manager.
 From the reth repository root:
 
 ```sh
-cargo build --locked -p reth-trie-dst --profile profiling
-target/profiling/reth-trie-dst '{"seed":42,"blocks":64,"datadir":"/tmp/trie-42"}' > /tmp/reth-trie-dst-42.log
+cargo build --locked -p reth-trie-dst --profile dst
+target/dst/reth-trie-dst '{"seed":42,"blocks":64,"datadir":"/tmp/trie-42"}' > /tmp/reth-trie-dst-42.log
 ```
 
 Prerequisites for native builds are reth's normal Rust/native build dependencies,
 including Clang for RocksDB's bindings. The crate belongs to the root workspace and uses its
-shared dependencies and `Cargo.lock`.
+shared dependencies, `Cargo.lock`, and the `dst` profile. Keep `dst` for this harness:
+it inherits `profiling` while enabling debug assertions and overflow checks.
 
 The executable accepts one optional JSON object:
 
@@ -126,7 +127,7 @@ the build tools.
 Cargo downloads, compiled targets, and the unstripped executable persist under
 `BEDROCK_DST_BUILD_CACHE` (Bedrock CI's workload cache), defaulting to
 `${XDG_CACHE_HOME:-$HOME/.cache}/reth-trie-dst`. Compilation uses sccache and mold
-with the `profiling` profile. `BEDROCK_DST_SCCACHE_DIR` selects the compiler cache, defaulting
+with the `dst` profile. `BEDROCK_DST_SCCACHE_DIR` selects the compiler cache, defaulting
 to the workload cache's `sccache` directory; `SCCACHE_CACHE_SIZE` defaults to `10G`.
 Preparation writes timings and cache paths to `RUN_DIR/cache-info.env` and
 compiler statistics to `RUN_DIR/sccache.txt`, which Bedrock CI displays and
