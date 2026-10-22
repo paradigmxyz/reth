@@ -16,7 +16,7 @@ pub use evm2::evm::{
     StateChangeSink as EvmStateChangeSink, StorageChange as ExecutionStorageChange,
 };
 pub use reth_trie_common::HashedPostState;
-pub use revm::state::EvmState;
+pub use revm_state::EvmState;
 
 /// Receives per-transaction state changes streamed from block execution.
 pub trait OnStateHook: Send + 'static {

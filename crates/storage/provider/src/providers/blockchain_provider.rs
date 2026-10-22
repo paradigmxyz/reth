@@ -1094,7 +1094,8 @@ mod tests {
         random_receipt, BlockParams, BlockRangeParams,
     };
     use reth_trie::{updates::TrieUpdates, HashedPostState, HashedStorage, SortedTrieData};
-    use revm::database::{BundleState, OriginalValuesKnown};
+    use revm_database::{BundleState, OriginalValuesKnown};
+    use revm_state::AccountInfo;
     use std::{
         collections::{BTreeMap, HashMap},
         ops::{Bound, Range, RangeBounds},
@@ -1106,7 +1107,6 @@ mod tests {
         use crate::{StaticFileProviderFactory, StaticFileSegment, StaticFileWriter};
         use reth_storage_api::{StorageSettings, StorageSettingsCache, TrieWriter};
         use reth_trie::{test_utils::TrieTestHarness, MultiProofTargetsV2};
-        use revm::state::AccountInfo;
 
         let address = Address::with_last_byte(1);
         let other_address = Address::with_last_byte(2);

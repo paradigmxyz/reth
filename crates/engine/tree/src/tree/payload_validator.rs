@@ -160,7 +160,8 @@ use reth_provider::{
 };
 use reth_storage_overlay::{OverlayManager, OverlayStateProviderFactory};
 use reth_trie::{updates::TrieUpdates, HashedPostState, KeccakKeyHasher, LazyTrieData};
-use revm::{database::BundleAccount, state::AccountInfo};
+use revm_database::BundleAccount;
+use revm_state::AccountInfo;
 use std::{
     sync::{
         atomic::{AtomicUsize, Ordering},

@@ -11,7 +11,7 @@ use reth_errors::ProviderResult;
 use reth_metrics::Metrics;
 use reth_primitives_traits::{Account, Bytecode};
 use reth_storage_api::EvmStateProvider;
-use revm::database::BundleState;
+use revm_database::BundleState;
 use std::{
     cell::Cell,
     fmt,
@@ -1312,10 +1312,8 @@ mod tests {
     use alloy_primitives::{map::HashMap, U256};
     use reth_provider::test_utils::{ExtendedAccount, MockEthProvider};
     use reth_storage_api::StateProvider;
-    use revm::{
-        database::{AccountStatus, BundleAccount},
-        state::AccountInfo,
-    };
+    use revm_database::{AccountStatus, BundleAccount};
+    use revm_state::AccountInfo;
 
     #[test]
     fn test_empty_storage_cached_state_provider() {

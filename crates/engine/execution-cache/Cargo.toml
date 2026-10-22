@@ -12,7 +12,7 @@ description = "Cross-block execution cache for payload processing"
 workspace = true
 
 [dependencies]
-revm.workspace = true
+revm-database.workspace = true
 reth-execution-types.workspace = true
 alloy-primitives.workspace = true
 fixed-cache = { workspace = true, features = ["stats"] }
@@ -28,6 +28,8 @@ tracing.workspace = true
 [dev-dependencies]
 alloy-primitives = { workspace = true, features = ["rand"] }
 reth-provider = { workspace = true, features = ["test-utils"] }
+
+revm-state.workspace = true
 
 [features]
 test-utils = [

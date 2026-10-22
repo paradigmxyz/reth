@@ -11,7 +11,7 @@ use reth_libmdbx::{
 };
 use reth_provider::{DBProvider, ExecutionOutcome};
 use reth_stages_api::StageError;
-use revm::database::{states::RevertToSlot, AccountRevert};
+use revm_database::{states::RevertToSlot, AccountRevert};
 use std::path::Path;
 use tracing::trace;
 

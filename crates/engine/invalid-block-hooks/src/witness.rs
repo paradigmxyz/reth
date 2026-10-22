@@ -10,14 +10,12 @@ use reth_provider::{BlockExecutionOutput, StateProvider, StateProviderFactory};
 use reth_rpc_api::DebugApiClient;
 use reth_tracing::tracing::warn;
 use reth_trie::updates::TrieUpdates;
-use revm::{
-    bytecode::Bytecode,
-    database::{
-        states::{reverts::AccountInfoRevert, StorageSlot},
-        AccountStatus, BundleState, RevertToSlot,
-    },
-    state::AccountInfo,
+use revm_bytecode::Bytecode;
+use revm_database::{
+    states::{reverts::AccountInfoRevert, StorageSlot},
+    AccountStatus, BundleState, RevertToSlot,
 };
+use revm_state::AccountInfo;
 use serde::Serialize;
 use std::{collections::BTreeMap, fmt::Debug, fs::File, io::Write, path::PathBuf};
 
@@ -355,7 +353,7 @@ mod tests {
     use reth_ethereum_primitives::EthPrimitives;
     use reth_evm_ethereum::EthEvmConfig;
     use reth_provider::test_utils::MockEthProvider;
-    use revm::database::{AccountRevert, BundleAccount};
+    use revm_database::{AccountRevert, BundleAccount};
     use tempfile::TempDir;
 
     use reth_testing_utils::generators::{self, random_block, random_eoa_accounts, BlockParams};

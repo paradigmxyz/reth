@@ -48,7 +48,7 @@ pub use execute::{
     RecoveredTx, TransactionEnvMut, WithTxEnv,
 };
 pub use reth_execution_types::{EvmState, OnStateHook, StateUpdate};
-pub use revm::database::BundleState;
+pub use revm_database::BundleState;
 
 /// Transaction validation limits resolved for an EVM environment.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

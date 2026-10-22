@@ -21,7 +21,9 @@ use reth_storage_api::{
 };
 use reth_trie::{updates::TrieUpdatesSorted, HashedPostStateSorted, TrieInputSorted};
 use reth_trie_db::DatabaseHashedPostState;
-use revm::{bytecode::Bytecode, database::BundleState, state::AccountInfo};
+use revm_bytecode::Bytecode;
+use revm_database::BundleState;
+use revm_state::AccountInfo;
 use std::{
     ops::RangeInclusive,
     sync::Arc,
@@ -848,11 +850,9 @@ mod tests {
     use reth_stages_types::{FinishCheckpoint, StageCheckpoint};
     use reth_storage_api::StageCheckpointWriter;
     use reth_trie::{BranchNodeCompact, HashedPostState, HashedStorage, Nibbles, SortedTrieData};
-    use revm::{
-        bytecode::Bytecode,
-        database::{AccountStatus, BundleAccount, BundleState},
-        state::{AccountId, AccountInfo},
-    };
+    use revm_bytecode::Bytecode;
+    use revm_database::{AccountStatus, BundleAccount, BundleState};
+    use revm_state::{AccountId, AccountInfo};
 
     fn with_unique_trie_data(
         block: &ExecutedBlock<EthPrimitives>,

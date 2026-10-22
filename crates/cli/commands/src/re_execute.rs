@@ -22,7 +22,7 @@ use reth_provider::{
 };
 use reth_stages::stages::calculate_gas_used_from_headers;
 use reth_storage_api::{ChangeSetReader, DBProvider, StateProvider, StorageChangeSetReader};
-use revm::database::{
+use revm_database::{
     states::reverts::{AccountInfoRevert, RevertToSlot},
     BundleState,
 };

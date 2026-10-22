@@ -320,7 +320,7 @@ mod tests {
     use reth_stages::stages::MerkleStage;
     use reth_stages_api::{ExecInput, Stage, StageError};
     use reth_trie_common::{root::storage_root_unsorted, HashedStorage, TrieAccount};
-    use revm::bytecode::Bytecode;
+    use revm_bytecode::Bytecode;
     use std::collections::BTreeMap;
 
     type Factory = ProviderFactory<MockNodeTypesWithDB>;

@@ -13,7 +13,7 @@ workspace = true
 
 [dependencies]
 reth-execution-types.workspace = true
-revm.workspace = true
+revm-database.workspace = true
 # reth
 evm2.workspace = true
 reth-chain-state.workspace = true
@@ -71,5 +71,4 @@ account-ext = [
     "reth-evm/account-ext",
     "evm2/account-ext",
     "reth-execution-types/account-ext",
-    "revm/account-ext",
 ]

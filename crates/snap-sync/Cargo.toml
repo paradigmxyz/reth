@@ -32,7 +32,8 @@ alloy-eips = { workspace = true, features = ["serde"] }
 alloy-primitives.workspace = true
 
 # revm
-revm.workspace = true
+revm-bytecode.workspace = true
+revm-database.workspace = true
 
 # misc
 futures.workspace = true

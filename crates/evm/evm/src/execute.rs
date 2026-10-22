@@ -23,7 +23,7 @@ use reth_primitives_traits::{
 };
 use reth_storage_api::StateProvider;
 use reth_trie_common::updates::TrieUpdates;
-use revm::database::BundleState;
+use revm_database::BundleState;
 
 #[cfg(feature = "std")]
 use evm2::evm::{CacheDB, Db};
@@ -32,7 +32,6 @@ use reth_execution_types::BundleSource;
 #[cfg(feature = "std")]
 use reth_primitives_traits::BlockTy;
 
-pub use alloy_evm::{block::CommitChanges, RecoveredTx};
 pub use reth_execution_errors::{
     BlockExecutionError, BlockValidationError, EvmError, InternalBlockExecutionError,
     InvalidTxError,
@@ -1258,6 +1257,105 @@ where
     }
 }
 
+/// Marks whether transaction should be committed into block executor's state.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[must_use]
+pub enum CommitChanges {
+    /// Transaction should be committed into block executor's state.
+    Yes,
+    /// Transaction should not be committed.
+    No,
+}
+
+impl CommitChanges {
+    /// Returns `true` if transaction should be committed into block executor's state.
+    pub const fn should_commit(self) -> bool {
+        matches!(self, Self::Yes)
+    }
+}
+
+/// Helper trait to abstract over different [`Recovered<T>`] implementations.
+///
+/// Supports owned, borrowed, and shared transactions, including encoded and either wrappers.
+#[auto_impl::auto_impl(&)]
+pub trait RecoveredTx<T> {
+    /// Returns the transaction.
+    fn tx(&self) -> &T;
+
+    /// Returns the signer of the transaction.
+    fn signer(&self) -> &Address;
+}
+
+impl<T> RecoveredTx<T> for Recovered<&T> {
+    fn tx(&self) -> &T {
+        self.inner()
+    }
+
+    fn signer(&self) -> &Address {
+        self.signer_ref()
+    }
+}
+
+impl<T> RecoveredTx<T> for Recovered<Arc<T>> {
+    fn tx(&self) -> &T {
+        self.inner().as_ref()
+    }
+
+    fn signer(&self) -> &Address {
+        self.signer_ref()
+    }
+}
+
+impl<T> RecoveredTx<T> for Recovered<T> {
+    fn tx(&self) -> &T {
+        self.inner()
+    }
+
+    fn signer(&self) -> &Address {
+        self.signer_ref()
+    }
+}
+
+impl<Tx, T: RecoveredTx<Tx>> RecoveredTx<Tx> for WithEncoded<T> {
+    fn tx(&self) -> &Tx {
+        self.1.tx()
+    }
+
+    fn signer(&self) -> &Address {
+        self.1.signer()
+    }
+}
+
+impl<L, R, Tx> RecoveredTx<Tx> for Either<L, R>
+where
+    L: RecoveredTx<Tx>,
+    R: RecoveredTx<Tx>,
+{
+    fn tx(&self) -> &Tx {
+        match self {
+            Self::Left(l) => l.tx(),
+            Self::Right(r) => r.tx(),
+        }
+    }
+
+    fn signer(&self) -> &Address {
+        match self {
+            Self::Left(l) => l.signer(),
+            Self::Right(r) => r.signer(),
+        }
+    }
+}
+
+impl<Tx, T: RecoveredTx<Tx>> RecoveredTx<Tx> for Arc<T> {
+    fn tx(&self) -> &Tx {
+        (**self).tx()
+    }
+
+    fn signer(&self) -> &Address {
+        (**self).signer()
+    }
+}
+
 /// Helper trait to split an executable transaction into an EVM transaction environment and its
 /// recovered transaction accessor.
 pub trait ExecutableTxParts<TxEnv, T> {
@@ -1562,5 +1660,27 @@ mod tests {
                 input: Bytes::from_static(&[7]),
             })
         );
+    }
+
+    #[test]
+    fn recovered_tx_wrappers_preserve_transaction_and_signer() {
+        let transaction = TxLegacy { nonce: 7, ..Default::default() };
+        let signer = Address::with_last_byte(42);
+        let recovered = Recovered::new_unchecked(transaction.clone(), signer);
+
+        let assert_parts = |tx: &dyn RecoveredTx<TxLegacy>| {
+            assert_eq!(tx.tx(), &transaction);
+            assert_eq!(tx.signer(), &signer);
+        };
+
+        assert_parts(&recovered);
+        assert_parts(&&recovered);
+        assert_parts(&Recovered::new_unchecked(&transaction, signer));
+        assert_parts(&Recovered::new_unchecked(Arc::new(transaction.clone()), signer));
+        assert_parts(&Arc::new(recovered.clone()));
+        assert_parts(&WithEncoded::new(Bytes::new(), recovered.clone()));
+        assert_parts(&Either::<_, Recovered<TxLegacy>>::Left(recovered.clone()));
+        assert_parts(&Either::<Recovered<TxLegacy>, _>::Right(recovered.clone()));
+        assert_parts(&WithTxEnv { tx_env: (), tx: Arc::new(recovered) });
     }
 }

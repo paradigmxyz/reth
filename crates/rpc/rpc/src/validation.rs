@@ -856,10 +856,8 @@ mod tests {
     use reth_primitives_traits::{RecoveredBlock, SealedBlock, SealedHeader};
     use reth_provider::test_utils::MockEthProvider;
     use reth_tasks::Runtime;
-    use revm::{
-        database::{states::bundle_state::BundleState, AccountStatus, BundleAccount},
-        state::AccountInfo,
-    };
+    use revm_database::{states::bundle_state::BundleState, AccountStatus, BundleAccount};
+    use revm_state::AccountInfo;
     use std::sync::Arc;
 
     fn test_execution_payload() -> ExecutionPayload {

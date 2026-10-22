@@ -7,13 +7,11 @@ use alloy_primitives::{
     Address, B256, U256,
 };
 use reth_trie_common::{HashedPostState, HashedStorage};
-use revm::{
-    database::{
-        states::{bundle_state::BundleRetention, StorageSlot, TransitionAccount, TransitionState},
-        AccountStatus, BundleState,
-    },
-    state::{Account, AccountInfo, Bytecode},
+use revm_database::{
+    states::{bundle_state::BundleRetention, StorageSlot, TransitionAccount, TransitionState},
+    AccountStatus, BundleState,
 };
+use revm_state::{Account, AccountInfo, Bytecode};
 
 /// Transaction transitions retained using revm's bundle state model.
 #[derive(Debug, Default)]
@@ -168,7 +166,7 @@ impl BlockState {
 #[derive(Debug, Default)]
 pub struct TransactionChanges {
     /// State passed to the block accumulator and state-root hooks.
-    pub state: revm::state::EvmState,
+    pub state: revm_state::EvmState,
     wiped: AddressSet,
     contracts: alloy_primitives::map::B256Map<Bytecode>,
 }
@@ -191,10 +189,10 @@ impl evm2::evm::StateChangeSink for TransactionChanges {
     fn storage(&mut self, change: evm2::evm::StorageChange) -> Result<(), Self::Error> {
         self.state.entry(change.address).or_insert_with(empty_account).storage.insert(
             change.key,
-            revm::state::EvmStorageSlot::new_changed(
+            revm_state::EvmStorageSlot::new_changed(
                 change.original,
                 change.current,
-                revm::state::TransactionId::ZERO,
+                revm_state::TransactionId::ZERO,
             ),
         );
         Ok(())
@@ -297,9 +295,9 @@ pub fn state_update_to_hashed_post_state(update: &StateUpdate) -> HashedPostStat
     hashed_state
 }
 
-/// Converts a revm [`EvmState`](revm::state::EvmState) into a state update, keeping touched
+/// Converts a revm [`EvmState`](revm_state::EvmState) into a state update, keeping touched
 /// accounts and their changed slots.
-pub fn evm_state_to_state_update(state: &revm::state::EvmState) -> StateUpdate {
+pub fn evm_state_to_state_update(state: &revm_state::EvmState) -> StateUpdate {
     let accounts = state
         .iter()
         .filter(|(_, account)| account.is_touched())
@@ -346,7 +344,7 @@ fn update_account(
     contracts: &alloy_primitives::map::B256Map<Bytecode>,
 ) {
     let original = change.original.map(revm_account);
-    account.status.set(revm::state::AccountStatus::LoadedAsNotExisting, original.is_none());
+    account.status.set(revm_state::AccountStatus::LoadedAsNotExisting, original.is_none());
     *account.original_info_mut() = original.unwrap_or_default();
     account.info = change.current.map(revm_account).unwrap_or_default();
     if let Some(code) = contracts.get(&account.info.code_hash) {
@@ -447,7 +445,7 @@ pub fn revm_account(info: &evm2::evm::AccountInfo) -> AccountInfo {
         code: None,
         account_id: None,
         #[cfg(feature = "account-ext")]
-        extension: revm::state::AccountExtension::from_shared(info.extension.clone().into_shared()),
+        extension: revm_state::AccountExtension::from_shared(info.extension.clone().into_shared()),
     }
 }
 
@@ -485,7 +483,7 @@ mod tests {
         let address = Address::with_last_byte(1);
         let original = AccountInfo {
             balance: U256::from(10),
-            extension: revm::state::AccountExtension::copy_from_slice(b"original extension"),
+            extension: revm_state::AccountExtension::copy_from_slice(b"original extension"),
             ..Default::default()
         };
         let native = native_account(&original);
@@ -606,9 +604,9 @@ mod tests {
             }
         }
         for opcode in [
-            revm::bytecode::opcode::DUPN,
-            revm::bytecode::opcode::SWAPN,
-            revm::bytecode::opcode::EXCHANGE,
+            revm_bytecode::opcode::DUPN,
+            revm_bytecode::opcode::SWAPN,
+            revm_bytecode::opcode::EXCHANGE,
         ] {
             cases.push(alloc::vec![opcode]);
             cases.push(alloc::vec![opcode, 0]);

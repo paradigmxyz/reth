@@ -45,7 +45,7 @@ tracing.workspace = true
 dashmap = { workspace = true, features = ["inline"] }
 
 # revm
-revm.workspace = true
+revm-database.workspace = true
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["rt", "macros"] }
@@ -57,6 +57,5 @@ account-ext = [
     "reth-provider/account-ext",
     "reth-stages-types/account-ext",
     "reth-trie/account-ext",
-    "revm/account-ext",
     "reth-execution-types/account-ext",
 ]

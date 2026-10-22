@@ -434,8 +434,11 @@ reth-trie-parallel = { path = "crates/trie/parallel" }
 reth-trie-sparse = { path = "crates/trie/sparse", default-features = false }
 reth-zstd-compressors = { version = "0.8.2", default-features = false }
 
-# revm
-revm = { version = "43.0.3", default-features = false }
+# State types used by persistence and unwind.
+revm-bytecode = { version = "43.0.0", default-features = false }
+revm-database = { version = "43.0.1", default-features = false }
+revm-database-interface = { version = "43.0.1", default-features = false }
+revm-state = { version = "43.0.1", default-features = false }
 # evm2
 evm2 = { git = "https://github.com/alloy-rs/evm2", rev = "23b49a5de13becb00311fedafb12991690465726", default-features = false }
 evm2-inspectors = { git = "https://github.com/alloy-rs/evm2", rev = "23b49a5de13becb00311fedafb12991690465726", default-features = false }
@@ -449,7 +452,6 @@ alloy-sol-types = { version = "1.6.1", default-features = false }
 alloy-chains = { version = "0.2.33", default-features = false }
 alloy-eip2124 = { version = "0.2.0", default-features = false }
 alloy-eip7928 = { version = "0.4.10", default-features = false, features = ["rlp"] }
-alloy-evm = { version = "0.39.0", default-features = false }
 alloy-rlp = { version = "0.3.16", default-features = false, features = ["core-net"] }
 alloy-trie = { version = "0.9.8", default-features = false }
 

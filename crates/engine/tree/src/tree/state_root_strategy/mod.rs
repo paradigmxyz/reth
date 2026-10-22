@@ -1347,7 +1347,7 @@ mod tests {
     use reth_storage_overlay::{OverlayManager, OverlayStateProviderFactory};
     use reth_testing_utils::generators;
     use reth_trie::test_utils::state_root;
-    use revm::state::{AccountInfo, AccountStatus, EvmState, EvmStorageSlot, TransactionId};
+    use revm_state::{AccountInfo, AccountStatus, EvmState, EvmStorageSlot, TransactionId};
 
     #[test]
     fn proof_worker_count_scales_with_block_gas() {
@@ -1654,7 +1654,7 @@ mod tests {
                     }
                 }
 
-                let mut account = revm::state::Account::default();
+                let mut account = revm_state::Account::default();
                 account.info = AccountInfo {
                     balance: U256::from(rng.random::<u64>()),
                     nonce: rng.random::<u64>(),

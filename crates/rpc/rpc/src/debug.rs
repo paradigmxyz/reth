@@ -1633,10 +1633,8 @@ mod tests {
     };
     use reth_rpc_eth_api::EthApiServer;
     use reth_transaction_pool::test_utils::testing_pool;
-    use revm::{
-        database::{states::StorageSlot, AccountStatus, BundleAccount, BundleState},
-        state::{AccountInfo as RevmAccountInfo, Bytecode},
-    };
+    use revm_database::{states::StorageSlot, AccountStatus, BundleAccount, BundleState};
+    use revm_state::{AccountInfo as RevmAccountInfo, Bytecode};
 
     #[tokio::test]
     async fn trace_call_out_of_range_block_error() {

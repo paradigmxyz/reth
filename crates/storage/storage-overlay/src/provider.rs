@@ -848,7 +848,7 @@ where
 {
     fn hashed_post_state(
         &self,
-        bundle_state: &revm::database::BundleState,
+        bundle_state: &revm_database::BundleState,
     ) -> ProviderResult<HashedPostState> {
         let mut hashed_state =
             HashedPostState::from_bundle_state::<KeccakKeyHasher>(bundle_state.state());
@@ -1144,7 +1144,8 @@ mod tests {
         updates::TrieUpdatesSorted, BranchNodeCompact, HashedPostState, HashedStorage, Nibbles,
         SortedTrieData,
     };
-    use revm::{bytecode::Bytecode as RevmBytecode, state::AccountInfo};
+    use revm_bytecode::Bytecode as RevmBytecode;
+    use revm_state::AccountInfo;
 
     fn with_unique_trie_data(
         block: &ExecutedBlock<EthPrimitives>,

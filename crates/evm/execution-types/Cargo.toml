@@ -15,11 +15,11 @@ reth-ethereum-primitives.workspace = true
 reth-primitives-traits.workspace = true
 reth-trie-common.workspace = true
 
-revm.workspace = true
+revm-database.workspace = true
+revm-state.workspace = true
 evm2.workspace = true
 
 # alloy
-alloy-evm.workspace = true
 alloy-consensus.workspace = true
 alloy-primitives.workspace = true
 alloy-eip7928.workspace = true
@@ -39,26 +39,27 @@ bincode.workspace = true
 rand.workspace = true
 alloy-rlp.workspace = true
 
+revm-bytecode.workspace = true
+
 [features]
-account-ext = ["evm2/account-ext", "revm/account-ext", "reth-primitives-traits/account-ext"]
+account-ext = ["evm2/account-ext", "revm-state/account-ext", "reth-primitives-traits/account-ext"]
 asm-keccak = [
     "evm2/asm-keccak",
-    "alloy-evm/asm-keccak",
     "alloy-primitives/asm-keccak",
-    "revm/asm-keccak",
 ]
 c-kzg = ["evm2/c-kzg"]
 blst = ["evm2/blst"]
 portable = [
     "evm2/portable",
-    "revm/portable",
 ]
 p256-aws-lc-rs = ["evm2/p256-aws-lc-rs"]
 default = ["std"]
 serde = [
     "dep:serde",
     "rand/serde",
-    "revm/serde",
+    "revm-bytecode/serde",
+    "revm-database/serde",
+    "revm-state/serde",
     "alloy-eips/serde",
     "alloy-primitives/serde",
     "reth-primitives-traits/serde",
@@ -80,7 +81,9 @@ std = [
     "alloy-eip7928/std",
     "alloy-eips/std",
     "alloy-primitives/std",
-    "revm/std",
+    "revm-bytecode/std",
+    "revm-database/std",
+    "revm-state/std",
     "serde?/std",
     "reth-primitives-traits/std",
     "alloy-consensus/std",
@@ -88,7 +91,6 @@ std = [
     "derive_more/std",
     "reth-ethereum-primitives/std",
     "reth-trie-common/std",
-    "alloy-evm/std",
     "alloy-rlp?/std",
     "evm2/std",
 ]
