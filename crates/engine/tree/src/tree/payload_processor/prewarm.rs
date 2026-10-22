@@ -150,10 +150,9 @@ where
 
     /// Streams pending transactions and executes them in parallel on the prewarming pool.
     ///
-    /// Kicks off EVM init on every pool thread, then uses `in_place_scope` to dispatch
-    /// transactions as they arrive and wait for all spawned tasks to complete. State is cleared
-    /// when the last context holding its worker-state owner is dropped. Workers that start via
-    /// work-stealing lazily initialise their EVM state on first access via
+    /// Uses `in_place_scope` to dispatch transactions as they arrive and wait for all spawned
+    /// tasks to complete. State is cleared when the last context holding its worker-state owner
+    /// is dropped. Each worker lazily initialises its EVM state on first access via
     /// [`get_or_init`](reth_tasks::WorkerStatefulPool::get_or_init).
     fn spawn_txs_prewarm<Tx>(
         &self,
@@ -183,10 +182,6 @@ where
             // Transactions to execute again when their results become stale.
             let mut refresh_txs = Vec::new();
             pool.in_place_scope(|s| {
-                s.spawn(|_| {
-                    ctx.stateful_pool.init::<PrewarmEvmState<Evm>>(|_| ctx.evm_for_ctx());
-                });
-
                 while let Ok((index, tx)) = pending.recv() {
                     if ctx.should_stop() {
                         trace!(
