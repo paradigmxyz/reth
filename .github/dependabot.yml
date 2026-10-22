@@ -36,7 +36,7 @@ updates:
         patterns: ["*"]
         update-types: ["minor", "patch"]
   - package-ecosystem: uv
-    directory: /.github/scripts/bench-reth-charts
+    directory: /scripts/bench-reth-charts
     allow:
       - dependency-type: all
     schedule:
