@@ -76,6 +76,16 @@ pub trait ReceiptConverter<N: NodePrimitives>: Debug + 'static {
     ) -> Result<Vec<Self::RpcReceipt>, Self::Error> {
         self.convert_receipts(receipts)
     }
+
+    #[allow(missing_docs)]
+    fn convert_receipts_with_context(
+        &self,
+        receipts: Vec<ConvertReceiptInput<'_, N>>,
+        block: &SealedBlock<N::Block>,
+        _require_canonical: bool,
+    ) -> Result<Vec<Self::RpcReceipt>, Self::Error> {
+        self.convert_receipts_with_block(receipts, block)
+    }
 }
 
 /// A type that knows how to convert a consensus header into an RPC header.
@@ -214,6 +224,16 @@ pub trait RpcConvert: Send + Sync + Unpin + Debug + DynClone + 'static {
         receipts: Vec<ConvertReceiptInput<'_, Self::Primitives>>,
         block: &SealedBlock<BlockTy<Self::Primitives>>,
     ) -> Result<Vec<RpcReceipt<Self::Network>>, Self::Error>;
+
+    #[allow(missing_docs)]
+    fn convert_receipts_with_context(
+        &self,
+        receipts: Vec<ConvertReceiptInput<'_, Self::Primitives>>,
+        block: &SealedBlock<BlockTy<Self::Primitives>>,
+        _require_canonical: bool,
+    ) -> Result<Vec<RpcReceipt<Self::Network>>, Self::Error> {
+        self.convert_receipts_with_block(receipts, block)
+    }
 
     /// Converts a primitive header to an RPC header.
     fn convert_header(
@@ -804,6 +824,15 @@ where
         block: &SealedBlock<BlockTy<Self::Primitives>>,
     ) -> Result<Vec<RpcReceipt<Self::Network>>, Self::Error> {
         self.receipt_converter.convert_receipts_with_block(receipts, block)
+    }
+
+    fn convert_receipts_with_context(
+        &self,
+        receipts: Vec<ConvertReceiptInput<'_, Self::Primitives>>,
+        block: &SealedBlock<BlockTy<Self::Primitives>>,
+        require_canonical: bool,
+    ) -> Result<Vec<RpcReceipt<Self::Network>>, Self::Error> {
+        self.receipt_converter.convert_receipts_with_context(receipts, block, require_canonical)
     }
 
     fn convert_header(

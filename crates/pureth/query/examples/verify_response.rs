@@ -2,8 +2,9 @@
 
 use alloy_primitives::B256;
 use reth_pureth_query::{
-    verify_query_response, verify_transaction_receipt, QueryRequest, QueryResponse,
-    SelectionLimits, TransactionReceiptRequest, TransactionReceiptResponse,
+    verify_eip6466_receipt_response, verify_query_response, verify_transaction_receipt,
+    QueryRequest, QueryResponse, SelectionLimits, TransactionReceiptRequest,
+    TransactionReceiptResponse,
 };
 use serde::Deserialize;
 use std::{
@@ -22,6 +23,14 @@ enum Verification {
         response: TransactionReceiptResponse,
         expected_root: B256,
     },
+    #[serde(rename = "eth_getTransactionReceipt")]
+    Receipt {
+        response: serde_json::Value,
+        block_hash: B256,
+        transaction_index: u64,
+        transaction_hash: B256,
+        expected_root: B256,
+    },
 }
 
 fn verify(bytes: &[u8]) -> Result<(), Box<dyn Error>> {
@@ -36,6 +45,29 @@ fn verify(bytes: &[u8]) -> Result<(), Box<dyn Error>> {
             verify_transaction_receipt(&request, &response, expected_root, limits).map_err(
                 |error| io::Error::other(format!("association verification failed: {error:?}")),
             )?;
+        }
+        Verification::Receipt {
+            mut response,
+            block_hash,
+            transaction_index,
+            transaction_hash,
+            expected_root,
+        } => {
+            let proof = response
+                .as_object_mut()
+                .and_then(|fields| fields.remove("sszProof"))
+                .ok_or_else(|| io::Error::other("receipt has no proof"))?;
+            let proof = serde_json::from_value(proof)?;
+            verify_eip6466_receipt_response(
+                &response,
+                &proof,
+                block_hash,
+                transaction_index,
+                transaction_hash,
+                expected_root,
+                limits,
+            )
+            .map_err(|error| io::Error::other(format!("receipt verification failed: {error:?}")))?;
         }
     }
     Ok(())
@@ -59,8 +91,10 @@ mod tests {
     use super::*;
     use alloy_primitives::Bytes;
     use reth_pureth_query::{
-        select_component, ComponentSnapshot, ReceiptSelection, SelectionOperation, SelectionRequest,
+        extend_receipt_response, select_component, ComponentSnapshot, ReceiptProofSupport,
+        ReceiptSelection, SelectionOperation, SelectionRequest,
     };
+    use reth_pureth_receipt::eip6466::{Eip6466ReceiptSnapshot, Receipts};
     use reth_pureth_transaction::TransactionSnapshot;
 
     #[test]
@@ -109,5 +143,70 @@ mod tests {
             record["unused_context"] = serde_json::json!(true);
             assert!(verify(&serde_json::to_vec(&record).unwrap()).is_err());
         }
+    }
+
+    #[test]
+    fn saved_receipt_requires_a_proof_and_the_supplied_identity_and_reference_root() {
+        let fixture: serde_json::Value =
+            serde_json::from_str(include_str!("../tests/fixtures/receipt_selection.json")).unwrap();
+        let bytes: Bytes =
+            format!("0x{}", fixture["list_bytes"].as_str().unwrap()).parse().unwrap();
+        let snapshot =
+            Eip6466ReceiptSnapshot::build(Receipts::from_ssz_bytes(&bytes).unwrap()).unwrap();
+        let expected: B256 =
+            format!("0x{}", fixture["receipt_list_root"].as_str().unwrap()).parse().unwrap();
+        assert_eq!(snapshot.root(), expected);
+        let block_hash = B256::repeat_byte(0xaa);
+        let transaction_hash = B256::repeat_byte(0xbb);
+        let receipt = serde_json::json!({
+            "type": "0x0", "status": "0x1", "cumulativeGasUsed": "0x5208",
+            "gasUsed": "0x5208", "from": alloy_primitives::Address::repeat_byte(0x11),
+            "contractAddress": null, "authorities": null,
+            "blockHash": block_hash, "blockNumber": "0x1",
+            "transactionHash": transaction_hash, "transactionIndex": "0x0",
+            "logs": [{
+                "address": alloy_primitives::Address::repeat_byte(0x44),
+                "topics": [B256::repeat_byte(0x55), B256::repeat_byte(0x66)],
+                "data": Bytes::from((0..33).collect::<Vec<u8>>()),
+                "blockHash": block_hash, "blockNumber": "0x1",
+                "transactionHash": transaction_hash, "transactionIndex": "0x0",
+                "logIndex": "0x0", "removed": false
+            }]
+        });
+        let response = extend_receipt_response(
+            receipt,
+            0,
+            ReceiptProofSupport::Retained { block_hash, snapshot: &snapshot },
+            true,
+            SelectionLimits::default(),
+        )
+        .unwrap();
+        let record = serde_json::json!({
+            "method": "eth_getTransactionReceipt", "response": response,
+            "block_hash": block_hash, "transaction_index": 0,
+            "transaction_hash": transaction_hash, "expected_root": expected,
+        });
+        verify(&serde_json::to_vec(&record).unwrap()).unwrap();
+        for mutation in 0..8 {
+            let mut changed = record.clone();
+            match mutation {
+                0 => changed["expected_root"] = serde_json::json!(B256::ZERO),
+                1 => changed["block_hash"] = serde_json::json!(B256::ZERO),
+                2 => changed["transaction_hash"] = serde_json::json!(B256::ZERO),
+                3 => changed["transaction_index"] = serde_json::json!(1),
+                4 => changed["response"]["status"] = serde_json::json!("0x0"),
+                5 => changed["response"]["sszProof"] = serde_json::Value::Null,
+                6 => {
+                    changed["response"].as_object_mut().unwrap().remove("sszProof");
+                }
+                _ => {
+                    changed["response"] = serde_json::Value::Null;
+                }
+            }
+            assert!(verify(&serde_json::to_vec(&changed).unwrap()).is_err(), "mutation {mutation}");
+        }
+        let mut metadata_only = record;
+        metadata_only["response"]["cumulativeGasUsed"] = serde_json::json!("0x1234");
+        verify(&serde_json::to_vec(&metadata_only).unwrap()).unwrap();
     }
 }

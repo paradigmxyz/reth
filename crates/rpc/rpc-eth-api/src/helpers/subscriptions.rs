@@ -1,5 +1,6 @@
 //! Streams subscriptions providers for `eth_subscribe`.
 
+use super::SpawnBlocking;
 use crate::{EthApiTypes, RpcConvert, RpcLog, RpcNodeCore, RpcReceipt};
 use alloy_consensus::{transaction::TxHashRef, BlockHeader, TxReceipt};
 use alloy_rpc_types_eth::{pubsub::TransactionReceiptsParams, Filter};
@@ -14,7 +15,7 @@ use tracing::error;
 ///
 /// Override the default methods to inject additional data sources (e.g. flashblocks).
 pub trait EthSubscriptions:
-    RpcNodeCore + EthApiTypes<RpcConvert: RpcConvert<Primitives = Self::Primitives>>
+    RpcNodeCore + EthApiTypes<RpcConvert: RpcConvert<Primitives = Self::Primitives>> + SpawnBlocking
 {
     /// Returns a stream that yields matching logs from canonical chain updates.
     fn log_stream(
@@ -86,71 +87,98 @@ pub trait EthSubscriptions:
         &self,
         filter: TransactionReceiptsParams,
     ) -> impl futures::Stream<Item = Vec<RpcReceipt<Self::NetworkTypes>>> + Send + Unpin {
-        let converter = self.converter();
-        self.provider().canonical_state_stream().flat_map(move |new_chain| {
-            let results: Vec<_> = new_chain
-                .committed()
-                .blocks_and_receipts()
-                .filter_map(|(block, receipts)| {
-                    let block_hash = block.hash();
-                    let block_number = block.number();
-                    let base_fee = block.base_fee_per_gas();
-                    let excess_blob_gas = block.excess_blob_gas();
-                    let timestamp = block.timestamp();
+        let this = self.clone();
+        let notifications = self.provider().canonical_state_stream().then(move |new_chain| {
+            let this = this.clone();
+            let filter = filter.clone();
+            async move {
+                let permit = match this.acquire_owned_blocking_io().await {
+                    Ok(permit) => permit,
+                    Err(err) => {
+                        error!(target = "rpc", %err, "Failed to acquire receipt conversion permit");
+                        return Vec::new();
+                    }
+                };
+                this.spawn_blocking_io(move |this| {
+                    let _permit = permit;
+                    let converter = this.converter();
+                    let results: Vec<_> = new_chain
+                        .committed()
+                        .blocks_and_receipts()
+                        .filter_map(|(block, receipts)| {
+                            let block_hash = block.hash();
+                            let block_number = block.number();
+                            let base_fee = block.base_fee_per_gas();
+                            let excess_blob_gas = block.excess_blob_gas();
+                            let timestamp = block.timestamp();
 
-                    let mut gas_used: u64 = 0;
-                    let mut next_log_index: usize = 0;
+                            let mut gas_used: u64 = 0;
+                            let mut next_log_index: usize = 0;
 
-                    let inputs: Vec<_> = block
-                        .transactions_recovered()
-                        .zip(receipts.iter())
-                        .enumerate()
-                        .filter_map(|(idx, (tx, receipt))| {
-                            let gas_used_before = gas_used;
-                            let next_log_index_before = next_log_index;
-                            let cumulative_gas_used = receipt.cumulative_gas_used();
+                            let inputs: Vec<_> = block
+                                .transactions_recovered()
+                                .zip(receipts.iter())
+                                .enumerate()
+                                .filter_map(|(idx, (tx, receipt))| {
+                                    let gas_used_before = gas_used;
+                                    let next_log_index_before = next_log_index;
+                                    let cumulative_gas_used = receipt.cumulative_gas_used();
 
-                            gas_used = cumulative_gas_used;
-                            next_log_index += receipt.logs().len();
+                                    gas_used = cumulative_gas_used;
+                                    next_log_index += receipt.logs().len();
 
-                            let matches = match &filter.transaction_hashes {
-                                Some(hashes) if !hashes.is_empty() => hashes.contains(tx.tx_hash()),
-                                _ => true,
-                            };
+                                    let matches = match &filter.transaction_hashes {
+                                        Some(hashes) if !hashes.is_empty() => {
+                                            hashes.contains(tx.tx_hash())
+                                        }
+                                        _ => true,
+                                    };
 
-                            matches.then(|| ConvertReceiptInput {
-                                tx,
-                                gas_used: cumulative_gas_used - gas_used_before,
-                                next_log_index: next_log_index_before,
-                                meta: TransactionMeta {
-                                    tx_hash: *tx.tx_hash(),
-                                    index: idx as u64,
-                                    block_hash,
-                                    block_number,
-                                    base_fee,
-                                    excess_blob_gas,
-                                    timestamp,
-                                },
-                                receipt: receipt.clone(),
-                            })
+                                    matches.then(|| ConvertReceiptInput {
+                                        tx,
+                                        gas_used: cumulative_gas_used - gas_used_before,
+                                        next_log_index: next_log_index_before,
+                                        meta: TransactionMeta {
+                                            tx_hash: *tx.tx_hash(),
+                                            index: idx as u64,
+                                            block_hash,
+                                            block_number,
+                                            base_fee,
+                                            excess_blob_gas,
+                                            timestamp,
+                                        },
+                                        receipt: receipt.clone(),
+                                    })
+                                })
+                                .collect();
+
+                            if inputs.is_empty() {
+                                return None;
+                            }
+
+                            match converter.convert_receipts_with_context(
+                                inputs,
+                                block.sealed_block(),
+                                false,
+                            ) {
+                                Ok(rpc_receipts) => Some(rpc_receipts),
+                                Err(err) => {
+                                    error!(target = "rpc", %err, "Failed to convert receipts");
+                                    None
+                                }
+                            }
                         })
                         .collect();
 
-                    if inputs.is_empty() {
-                        return None;
-                    }
-
-                    match converter.convert_receipts_with_block(inputs, block.sealed_block()) {
-                        Ok(rpc_receipts) => Some(rpc_receipts),
-                        Err(err) => {
-                            error!(target = "rpc", %err, "Failed to convert receipts");
-                            None
-                        }
-                    }
+                    Ok(results)
                 })
-                .collect();
-
-            futures::stream::iter(results)
-        })
+                .await
+                .unwrap_or_else(|err| {
+                    error!(target = "rpc", %err, "Failed to convert receipt notification");
+                    Vec::new()
+                })
+            }
+        });
+        notifications.flat_map(futures::stream::iter).boxed()
     }
 }

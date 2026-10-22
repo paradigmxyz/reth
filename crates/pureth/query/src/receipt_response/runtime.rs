@@ -5,12 +5,14 @@ use super::{
 };
 use crate::{selection::encoded_size, SelectionError, SelectionLimits};
 use alloy_consensus::{BlockHeader, Eip658Value, ReceiptEnvelope, TxReceipt};
+use alloy_eips::BlockId;
 use alloy_primitives::{Address, Bloom, Sealable, U256, U64};
 use alloy_rpc_types_eth::{Log, TransactionReceipt};
 use reth_chainspec::EthChainSpec;
 use reth_primitives_traits::{BlockBody, SealedBlock, SealedHeader};
 use reth_pureth_block::{
     ExecutionBlock, ExecutionForkConfig, ExecutionHeader, ExecutionPrimitives, ExecutionSource,
+    ExecutionSourceProvider, PayloadSourceError,
 };
 use reth_pureth_receipt::RootContext;
 use reth_rpc_convert::{
@@ -170,6 +172,7 @@ pub struct ExecutionReceiptConverter<S> {
     chain_spec: Arc<S>,
     fork: ExecutionForkConfig,
     source: Option<Arc<ExecutionSource>>,
+    provider: Option<Arc<dyn ExecutionSourceProvider>>,
     limits: SelectionLimits,
     proofs: bool,
 }
@@ -181,6 +184,7 @@ impl<S> Clone for ExecutionReceiptConverter<S> {
             chain_spec: self.chain_spec.clone(),
             fork: self.fork,
             source: self.source.clone(),
+            provider: self.provider.clone(),
             limits: self.limits,
             proofs: self.proofs,
         }
@@ -194,6 +198,7 @@ impl<S: EthChainSpec + 'static> ExecutionReceiptConverter<S> {
             chain_spec,
             fork,
             source: None,
+            provider: None,
             limits,
             proofs: false,
         }
@@ -209,6 +214,12 @@ impl<S: EthChainSpec + 'static> ExecutionReceiptConverter<S> {
         }
         self.source = Some(source);
         Ok(self)
+    }
+
+    pub fn with_source_provider(mut self, provider: Arc<dyn ExecutionSourceProvider>) -> Self {
+        self.provider = Some(provider);
+        self.source = None;
+        self
     }
 
     pub const fn with_receipt_proof(mut self, enabled: bool) -> Self {
@@ -255,7 +266,7 @@ impl<S: EthChainSpec + 'static> ExecutionReceiptConverter<S> {
         inputs: Vec<ConvertReceiptInput<'_, ExecutionPrimitives>>,
         cancelled: &AtomicBool,
     ) -> Result<Vec<ExecutionRpcReceipt>, EthApiError> {
-        if cancelled.load(Ordering::Relaxed) {
+        if cancelled.load(Ordering::Relaxed) || reth_tasks::cancel::is_cancelled() {
             return Err(selection_error(SelectionError::Cancelled));
         }
         let Some(first) = inputs.first() else {
@@ -265,6 +276,18 @@ impl<S: EthChainSpec + 'static> ExecutionReceiptConverter<S> {
             return Ok(receipts);
         };
         let active = self.fork.is_active_at_timestamp(first.meta.timestamp);
+        if active && let Some(provider) = &self.provider {
+            let source = provider.receipt_source(first.meta.block_hash.into(), cancelled).map_err(
+                |error| {
+                    EthApiError::other(crate::rpc::rpc_error(
+                        crate::QueryError::PayloadAcquisition(error),
+                    ))
+                },
+            )?;
+            let mut converter = self.clone().with_source(source)?;
+            converter.provider = None;
+            return converter.convert_receipts_with_cancel(inputs, cancelled);
+        }
         let identity = (first.meta.block_hash, first.meta.block_number, first.meta.timestamp);
         if inputs.iter().any(|input| {
             (input.meta.block_hash, input.meta.block_number, input.meta.timestamp) != identity
@@ -292,7 +315,7 @@ impl<S: EthChainSpec + 'static> ExecutionReceiptConverter<S> {
         let snapshot = source.receipt_snapshot();
         let mut indices = Vec::with_capacity(inputs.len());
         for input in &inputs {
-            if cancelled.load(Ordering::Relaxed) {
+            if cancelled.load(Ordering::Relaxed) || reth_tasks::cancel::is_cancelled() {
                 return Err(selection_error(SelectionError::Cancelled));
             }
             let index =
@@ -334,7 +357,11 @@ impl<S: EthChainSpec + 'static> ExecutionReceiptConverter<S> {
             .collect::<Result<Vec<_>, _>>()?;
         encoded_size(&receipts, self.limits.response_bytes, "response bytes")
             .map_err(selection_error)?;
-        self.attach_proofs(receipts, &indices, cancelled)
+        let receipts = self.attach_proofs(receipts, &indices, cancelled)?;
+        if cancelled.load(Ordering::Relaxed) || reth_tasks::cancel::is_cancelled() {
+            return Err(selection_error(SelectionError::Cancelled));
+        }
+        Ok(receipts)
     }
 }
 
@@ -394,8 +421,51 @@ impl<S: EthChainSpec + 'static> ReceiptConverter<ExecutionPrimitives>
         inputs: Vec<ConvertReceiptInput<'_, ExecutionPrimitives>>,
         block: &SealedBlock<ExecutionBlock>,
     ) -> Result<Vec<ExecutionRpcReceipt>, EthApiError> {
+        self.convert_receipts_with_context(inputs, block, false)
+    }
+
+    fn convert_receipts_with_context(
+        &self,
+        inputs: Vec<ConvertReceiptInput<'_, ExecutionPrimitives>>,
+        block: &SealedBlock<ExecutionBlock>,
+        require_canonical: bool,
+    ) -> Result<Vec<ExecutionRpcReceipt>, EthApiError> {
         if block.header().is_ssz() != self.fork.is_active_at_timestamp(block.timestamp()) ||
-            block.header().is_ssz() && self.source.is_none() ||
+            block.header().hash_slow() != block.hash()
+        {
+            return Err(EthApiError::InternalEthError);
+        }
+        if block.header().is_ssz() &&
+            let Some(provider) = &self.provider
+        {
+            let selector = if require_canonical {
+                BlockId::hash_canonical(block.hash())
+            } else {
+                block.hash().into()
+            };
+            let source =
+                provider.receipt_source(selector, &AtomicBool::new(false)).map_err(|error| {
+                    EthApiError::other(crate::rpc::rpc_error(
+                        crate::QueryError::PayloadAcquisition(error),
+                    ))
+                })?;
+            let mut converter = self.clone().with_source(source)?;
+            converter.provider = None;
+            return converter.convert_receipts_with_context(inputs, block, require_canonical);
+        }
+        if require_canonical &&
+            block.header().is_ssz() &&
+            self.source.as_ref().is_some_and(|source| {
+                source.metadata().canonicality != reth_pureth_receipt::CanonicalityStatus::Canonical
+            })
+        {
+            return Err(EthApiError::other(crate::rpc::rpc_error(
+                crate::QueryError::PayloadAcquisition(PayloadSourceError::NonCanonicalBlock(
+                    block.num_hash(),
+                )),
+            )));
+        }
+        if block.header().is_ssz() && self.source.is_none() ||
             self.source.as_ref().is_some_and(|source| source.block().hash() != block.hash()) ||
             inputs.iter().any(|input| {
                 input.meta.block_hash != block.hash() ||

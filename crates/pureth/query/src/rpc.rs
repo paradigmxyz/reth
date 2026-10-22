@@ -145,6 +145,13 @@ pub(crate) fn rpc_error(error: QueryError) -> ErrorObjectOwned {
                 None::<()>,
             )
         }
+        QueryError::PayloadAcquisition(PayloadSourceError::NonCanonicalBlock(_)) => {
+            ErrorObjectOwned::owned(
+                EthRpcErrorCode::InvalidInput.code(),
+                "requested block is not canonical",
+                None::<()>,
+            )
+        }
         QueryError::PayloadAcquisition(
             PayloadSourceError::UnsupportedFork |
             PayloadSourceError::UnsupportedFeeRange |
@@ -388,6 +395,13 @@ mod tests {
 
     #[test]
     fn payload_errors_distinguish_unavailable_history_from_corruption_and_context() {
+        assert_eq!(
+            rpc_error(QueryError::PayloadAcquisition(PayloadSourceError::NonCanonicalBlock(
+                alloy_eips::BlockNumHash::new(1, B256::ZERO),
+            )))
+            .code(),
+            -32000
+        );
         for input in [
             PayloadSourceInput::Block,
             PayloadSourceInput::Requests,

@@ -1,4 +1,4 @@
-#![allow(missing_docs)]
+#![allow(missing_docs, rustdoc::missing_crate_level_docs)]
 
 use clap::Parser;
 use reth_chainspec::ChainSpec;
@@ -28,6 +28,8 @@ impl ChainSpecParser for ExecutionChainParser {
 struct RuntimeArgs {
     #[arg(long = "pureth.source-cache-entries")]
     source_cache_entries: NonZeroU32,
+    #[arg(long = "pureth.receipt-proof")]
+    receipt_proof: bool,
 }
 
 fn main() -> eyre::Result<()> {
@@ -40,7 +42,8 @@ fn main() -> eyre::Result<()> {
     eyre::ensure!(!command.jit.enabled, "this execution configuration uses the interpreter");
     let native =
         Arc::new(command.chain.as_ref().clone().map_header(|header| header.as_native().clone()));
-    let node = ExecutionNode::new(native, command.ext.source_cache_entries)?;
+    let node = ExecutionNode::new(native, command.ext.source_cache_entries)?
+        .with_receipt_proof(command.ext.receipt_proof);
     let _guard = RethTracer::new().init()?;
     CliRunner::try_default_runtime()?.run_command_until_exit(|ctx| {
         command.execute(

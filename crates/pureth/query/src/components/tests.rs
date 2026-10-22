@@ -407,7 +407,7 @@ fn transaction_and_bal_component_links_verify_against_independent_payload_roots(
             )
             .is_err());
         }
-        let mut corrupted = response.clone();
+        let mut corrupted = response;
         corrupted.selection.results[0].values_ssz[0] = bytes(&case["summary"]);
         assert!(verify_component_selection(
             ComponentObject::ExecutionPayload,

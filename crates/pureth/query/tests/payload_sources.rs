@@ -90,8 +90,14 @@ impl RetainedSources {
         if cancelled.load(Ordering::Relaxed) {
             return Err(PayloadSourceError::Cancelled);
         }
-        if block != source.block().hash().into() {
+        if !matches!(block, alloy_eips::BlockId::Hash(hash) if hash.block_hash == source.block().hash())
+        {
             return Err(PayloadSourceError::MissingInput(PayloadSourceInput::Block));
+        }
+        if matches!(block, alloy_eips::BlockId::Hash(hash) if hash.require_canonical == Some(true)) &&
+            source.metadata().canonicality != reth_pureth_receipt::CanonicalityStatus::Canonical
+        {
+            return Err(PayloadSourceError::NonCanonicalBlock(source.block().num_hash()));
         }
         Ok(source.clone())
     }
@@ -915,6 +921,29 @@ fn assert_runtime_receipt_conversion(
     let converter = converter.with_source(source.clone()).unwrap();
     let receipts =
         converter.convert_receipts_with_block(vec![input()], block.sealed_block()).unwrap();
+    let provider = Arc::new(RetainedSources {
+        receipts: source.clone(),
+        payload: source.clone(),
+        receipt_calls: AtomicUsize::new(0),
+        payload_calls: AtomicUsize::new(0),
+    });
+    let operation_converter = converter.clone().with_source_provider(provider.clone());
+    assert_eq!(operation_converter.convert_receipts(vec![input()]).unwrap(), receipts);
+    assert_eq!(
+        operation_converter
+            .convert_receipts_with_context(vec![input()], block.sealed_block(), false)
+            .unwrap(),
+        receipts
+    );
+    assert!(operation_converter
+        .convert_receipts_with_context(vec![], block.sealed_block(), false)
+        .unwrap()
+        .is_empty());
+    assert!(operation_converter
+        .convert_receipts_with_context(vec![input()], block.sealed_block(), true)
+        .is_err());
+    assert_eq!(provider.receipt_calls.load(Ordering::Relaxed), 4);
+    assert_eq!(provider.payload_calls.load(Ordering::Relaxed), 0);
     let plain = serde_json::to_value(&receipts[0]).unwrap();
     assert!(plain.get("sszProof").is_none());
     assert!(plain.get("logsBloom").is_none());

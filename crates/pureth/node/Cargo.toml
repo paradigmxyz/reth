@@ -77,6 +77,7 @@ futures-util.workspace = true
 jsonrpsee-types.workspace = true
 reth-db-common.workspace = true
 reth-engine-tree.workspace = true
+reth-rpc-eth-api.workspace = true
 reth-provider = { workspace = true, features = ["test-utils"] }
 reth-revm.workspace = true
 reth-storage-overlay.workspace = true

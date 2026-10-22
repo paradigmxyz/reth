@@ -455,7 +455,15 @@ impl<N: ProviderNodeTypes> HeaderProvider for BlockchainProvider<N> {
 
 impl<N: ProviderNodeTypes> BlockHashReader for BlockchainProvider<N> {
     fn block_hash(&self, number: u64) -> ProviderResult<Option<B256>> {
-        self.consistent_provider()?.block_hash(number)
+        let head = self.canonical_in_memory_state.get_canonical_head();
+        if number > head.number() {
+            return Ok(None);
+        }
+        let view = self.consistent_provider()?;
+        if view.block_hash(head.number())? != Some(head.hash()) {
+            return Err(ProviderError::HeaderNotFound(head.hash().into()));
+        }
+        view.block_hash(number)
     }
 
     fn canonical_hashes_range(

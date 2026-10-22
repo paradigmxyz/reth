@@ -11,7 +11,7 @@ use alloy_eips::{
     eip7002::{WITHDRAWAL_REQUEST_PREDEPLOY_ADDRESS, WITHDRAWAL_REQUEST_PREDEPLOY_CODE},
     eip7251::{CONSOLIDATION_REQUEST_PREDEPLOY_ADDRESS, CONSOLIDATION_REQUEST_PREDEPLOY_CODE},
     eip7685::RequestsOrHash,
-    BlockNumberOrTag,
+    BlockId, BlockNumberOrTag,
 };
 use alloy_genesis::{Genesis, GenesisAccount};
 use alloy_primitives::{Address, Bytes, TxKind, B256, U256};
@@ -65,16 +65,24 @@ use reth_provider::{
         create_test_provider_factory_with_chain_spec, create_test_provider_factory_with_node_types,
         MockEthProvider, MockNodeTypesWithDB,
     },
-    BalProvider, BalStoreHandle, RocksDBBalStore, RocksDBProviderFactory, SaveBlocksInput,
-    StateWriter,
+    BalProvider, BalStoreHandle, BlockIdReader, RocksDBBalStore, RocksDBProviderFactory,
+    SaveBlocksInput, StateWriter,
 };
 use reth_pureth_block::{
     ExecutionForkConfig, ExecutionHeader, ExecutionPrimitives, ExecutionSource,
     ExecutionSourceProvider, PayloadLimits, PayloadSourceError, PayloadSourceInput,
 };
+use reth_pureth_query::{
+    ExecutionHeaderConverter, ExecutionReceiptConverter, ExecutionRpcTypes, SelectionLimits,
+};
 use reth_revm::{database::StateProviderDatabase, db::State};
 use reth_rpc_api::EngineApiServer;
+use reth_rpc_convert::{
+    transaction::{ConvertReceiptInput, ReceiptConverter},
+    RpcConverter,
+};
 use reth_rpc_engine_api::{capabilities::EngineCapabilities, EngineApi, EngineApiError};
+use reth_rpc_eth_api::helpers::{EthBlocks, EthTransactions};
 use reth_storage_api::{StateProvider, StateProviderFactory};
 use reth_storage_overlay::OverlayManager;
 use reth_tasks::{CancelOnDrop, Runtime};
@@ -1087,12 +1095,14 @@ async fn receiver_executes_and_retains_source_before_accepting_commitments() {
                 let cancelled = AtomicBool::new(false);
                 overlay.insert_block(result.executed_block.clone());
                 overlay.insert_block(received_empty.executed_block.clone());
-                let backend = crate::ExecutionSourceBackend::new(
-                    provider.clone(),
-                    validator.clone(),
-                    NonZeroU32::new(2).unwrap(),
-                )
-                .unwrap();
+                let backend = Arc::new(
+                    crate::ExecutionSourceBackend::new(
+                        provider.clone(),
+                        validator.clone(),
+                        NonZeroU32::new(2).unwrap(),
+                    )
+                    .unwrap(),
+                );
                 let memory = provider.canonical_in_memory_state();
                 memory.set_pending_block(result.executed_block.clone());
                 let pending =
@@ -1109,6 +1119,61 @@ async fn receiver_executes_and_retains_source_before_accepting_commitments() {
                 memory.set_finalized(built.block().sealed_header().clone());
                 let captured =
                     backend.payload_source(BlockNumberOrTag::Latest.into(), &cancelled).unwrap();
+                let block = captured.block();
+                let inputs = vec![ConvertReceiptInput {
+                    receipt: captured.native_receipts()[0].clone(),
+                    tx: block.transactions_recovered().next().unwrap(),
+                    gas_used: captured.receipt_snapshot().receipts().get(0).unwrap().gas_used(),
+                    next_log_index: 0,
+                    meta: reth_primitives_traits::TransactionMeta {
+                        tx_hash: *block.body().transactions()[0].hash(),
+                        index: 0,
+                        block_hash: block.hash(),
+                        block_number: block.number(),
+                        base_fee: block.base_fee_per_gas(),
+                        excess_blob_gas: block.excess_blob_gas(),
+                        timestamp: block.timestamp(),
+                    },
+                }];
+                let converter = ExecutionReceiptConverter::new(
+                    spec.clone(),
+                    validator.fork_config(),
+                    SelectionLimits::default(),
+                )
+                .with_source_provider(backend.clone());
+                assert_eq!(
+                    converter
+                        .convert_receipts_with_context(inputs.clone(), block.sealed_block(), true)
+                        .unwrap()
+                        .len(),
+                    1
+                );
+                let rpc_converter = RpcConverter::<ExecutionRpcTypes, ExecutionEvmConfig, _>::new(
+                    converter.clone(),
+                )
+                .with_header_converter(ExecutionHeaderConverter::new(validator.fork_config()));
+                let api = reth_rpc::EthApiBuilder::new(
+                    provider.clone(),
+                    fixture.builder.pool.clone(),
+                    NoopNetwork::default(),
+                    evm.clone(),
+                )
+                .with_rpc_converter(rpc_converter)
+                .build();
+                tokio::runtime::Handle::current().block_on(async {
+                    let receipts =
+                        EthBlocks::block_receipts(&api, BlockId::hash_canonical(block.hash()))
+                            .await
+                            .unwrap()
+                            .unwrap();
+                    assert_eq!(receipts.len(), block.transaction_count());
+                    let receipt =
+                        EthTransactions::transaction_receipt(&api, inputs[0].meta.tx_hash)
+                            .await
+                            .unwrap()
+                            .unwrap();
+                    assert_eq!(receipt, receipts[0]);
+                });
                 for tag in [
                     BlockNumberOrTag::Number(1),
                     BlockNumberOrTag::Safe,
@@ -1130,6 +1195,20 @@ async fn receiver_executes_and_retains_source_before_accepting_commitments() {
                 let current =
                     backend.payload_source(BlockNumberOrTag::Latest.into(), &cancelled).unwrap();
                 assert_eq!(current.block().hash(), empty.block().hash());
+                assert!(converter
+                    .convert_receipts_with_context(vec![], current.block().sealed_block(), true)
+                    .unwrap()
+                    .is_empty());
+                assert!(converter
+                    .convert_receipts_with_context(inputs.clone(), block.sealed_block(), true)
+                    .is_err());
+                assert_eq!(
+                    converter
+                        .convert_receipts_with_context(inputs, block.sealed_block(), false)
+                        .unwrap()
+                        .len(),
+                    1
+                );
                 assert_eq!(
                     captured.metadata().canonicality,
                     reth_pureth_receipt::CanonicalityStatus::Canonical
@@ -1214,6 +1293,16 @@ async fn receiver_executes_and_retains_source_before_accepting_commitments() {
                 );
                 cold_provider.canonical_in_memory_state().set_canonical_head(
                     SealedHeader::seal_slow(ExecutionHeader::legacy(spec.genesis_header().clone())),
+                );
+                assert_eq!(
+                    cold_provider
+                        .block_hash_for_id(BlockNumberOrTag::Number(identity.number).into())
+                        .unwrap(),
+                    None,
+                );
+                assert_eq!(
+                    cold_provider.block_hash_for_id(identity.hash.into()).unwrap(),
+                    Some(identity.hash),
                 );
                 assert!(matches!(
                     cold.payload_source(BlockNumberOrTag::Number(1).into(), &cancelled),

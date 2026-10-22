@@ -47,6 +47,7 @@ use std::{
 pub struct ExecutionNode {
     validator: ExecutionEngineValidator,
     retained_entries: NonZeroU32,
+    receipt_proof: bool,
     sources: Arc<OnceLock<Arc<dyn ExecutionSourceProvider>>>,
 }
 
@@ -60,7 +61,17 @@ impl ExecutionNode {
         {
             return Err(PayloadSourceError::UnsupportedFork);
         }
-        Ok(Self { validator, retained_entries, sources: Arc::new(OnceLock::new()) })
+        Ok(Self {
+            validator,
+            retained_entries,
+            receipt_proof: false,
+            sources: Arc::new(OnceLock::new()),
+        })
+    }
+
+    pub const fn with_receipt_proof(mut self, enabled: bool) -> Self {
+        self.receipt_proof = enabled;
+        self
     }
 
     pub fn source_provider(&self) -> Option<&Arc<dyn ExecutionSourceProvider>> {
@@ -105,13 +116,17 @@ where
             node.retained_entries,
         )?);
         node.sources
-            .set(source)
+            .set(source.clone())
             .map_err(|_| eyre::eyre!("execution source backend already installed"))?;
-        let converter = RpcConverter::new(ExecutionReceiptConverter::new(
-            ctx.components.provider().chain_spec(),
-            node.validator.fork_config(),
-            SelectionLimits::default(),
-        ))
+        let converter = RpcConverter::new(
+            ExecutionReceiptConverter::new(
+                ctx.components.provider().chain_spec(),
+                node.validator.fork_config(),
+                SelectionLimits::default(),
+            )
+            .with_source_provider(source)
+            .with_receipt_proof(node.receipt_proof),
+        )
         .with_header_converter(ExecutionHeaderConverter::new(node.validator.fork_config()));
         Ok(ctx.eth_api_builder().with_rpc_converter(converter).build())
     }
