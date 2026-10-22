@@ -38,7 +38,7 @@ use alloc::{
     vec::Vec,
 };
 use alloy_consensus::Header;
-use alloy_eip7928::BlockAccessListGasError;
+use alloy_eip7928::{BlockAccessListGasError, BlockAccessListValidationError};
 use alloy_primitives::{BlockHash, BlockNumber, Bloom, B256};
 use core::{error::Error, fmt::Display};
 
@@ -502,6 +502,9 @@ pub enum ConsensusError {
     /// EIP-7928: Error when the block access list hash doesn't match the expected value.
     #[error("block access list hash mismatch: {0}")]
     BlockAccessListHashMismatch(GotExpectedBoxed<B256>),
+    /// EIP-7928: Error when the block access list structure or indices are invalid.
+    #[error(transparent)]
+    InvalidBlockAccessList(Box<BlockAccessListValidationError>),
     /// Any additional consensus error, for example L2-specific errors.
     #[error(transparent)]
     Other(#[from] Arc<dyn Error + Send + Sync>),
@@ -562,6 +565,12 @@ impl From<TxGasLimitTooHighErr> for ConsensusError {
 impl From<BlockAccessListGasError> for ConsensusError {
     fn from(value: BlockAccessListGasError) -> Self {
         Self::BlockAccessListCostMoreThanGasLimit(Box::new(value))
+    }
+}
+
+impl From<BlockAccessListValidationError> for ConsensusError {
+    fn from(value: BlockAccessListValidationError) -> Self {
+        Self::InvalidBlockAccessList(Box::new(value))
     }
 }
 

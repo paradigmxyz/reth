@@ -222,6 +222,10 @@ where
                 .as_bal()
                 .validate_gas_limit(block.gas_limit())
                 .map_err(ConsensusError::from)?;
+            decoded_bal
+                .as_bal()
+                .validate_structure(block.body().transactions().len())
+                .map_err(ConsensusError::from)?;
         }
 
         let parent_header_hash = parent_header.hash();
@@ -806,6 +810,7 @@ impl From<ValidationApiError> for ErrorObject<'static> {
 
             ValidationApiError::Consensus(
                 error @ (ConsensusError::BlockAccessListCostMoreThanGasLimit(_) |
+                ConsensusError::InvalidBlockAccessList(_) |
                 ConsensusError::BlockAccessListHashMismatch(_)),
             ) => invalid_params_rpc_err(error.to_string()),
             ValidationApiError::MissingLatestBlock |
