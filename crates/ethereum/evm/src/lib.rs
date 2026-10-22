@@ -13,35 +13,37 @@ extern crate alloc;
 
 use alloc::{borrow::Cow, sync::Arc};
 use alloy_consensus::{BlockHeader, Header};
-#[cfg(feature = "std")]
-use alloy_eips::Decodable2718;
-use alloy_eips::{eip4895::Withdrawal, eip7840::BlobParams};
+use alloy_eips::{eip4895::Withdrawal, eip7840::BlobParams, merge::SLOT_DURATION_SECS};
 use alloy_primitives::{Address, Bytes, B256};
-#[cfg(feature = "std")]
-use alloy_rpc_types_engine::ExecutionData;
-#[cfg(feature = "jit")]
-use core::any::Any;
-use core::{convert::Infallible, fmt::Debug};
+use convert::{block_env_with_blob_params, spec_id};
+use core::{any::TypeId, convert::Infallible, fmt::Debug};
 use reth_chainspec::{ChainSpec, EthChainSpec, EthereumHardforks, MAINNET};
 use reth_ethereum_forks::Hardforks;
+use reth_ethereum_primitives::{Block, EthPrimitives};
+use reth_evm::{ConfigureEvm, EvmEnv, EvmEnvFor, NextBlockEnvAttributes, SenderRecoveryCache};
+use reth_primitives_traits::{SealedBlock, SealedHeader};
+
+#[cfg(feature = "std")]
+use alloy_consensus::Transaction;
+#[cfg(feature = "std")]
+use alloy_eips::Decodable2718;
+#[cfg(feature = "std")]
+use alloy_rpc_types_engine::ExecutionData;
+#[cfg(feature = "std")]
+use convert::payload_block_env;
 #[cfg(feature = "std")]
 use reth_ethereum_primitives::TransactionSigned;
-use reth_ethereum_primitives::{Block, EthPrimitives};
 #[cfg(feature = "std")]
-use reth_evm::ExecutionCtxFor;
-#[cfg(feature = "std")]
-use reth_evm::{ConfigureEngineEvm, ExecutableTxIterator};
-use reth_evm::{ConfigureEvm, EvmEnv, EvmEnvFor, NextBlockEnvAttributes, SenderRecoveryCache};
+use reth_evm::{ConfigureEngineEvm, ExecutableTxIterator, ExecutionCtxFor};
 #[cfg(feature = "std")]
 use reth_primitives_traits::SignedTransaction;
-use reth_primitives_traits::{SealedBlock, SealedHeader};
 #[cfg(feature = "std")]
 use reth_storage_errors::any::AnyError;
 
-#[cfg(feature = "std")]
-use convert::payload_block_env;
+#[cfg(feature = "jit")]
+use core::any::Any;
+
 pub use convert::spec_id_by_timestamp_and_block_number;
-use convert::{block_env_with_blob_params, spec_id};
 
 /// Configured Ethereum EVM environment.
 pub struct EthEvmEnv<T = evm2::BaseEvmTypes>
@@ -547,6 +549,49 @@ where
             slot_number: attributes.slot_number,
         })
     }
+
+    fn reuses_prewarm_results(&self) -> bool {
+        // Custom factories may change transaction validation or read state outside the database.
+        let factory = TypeId::of::<EvmF>();
+        factory == TypeId::of::<()>() || factory == TypeId::of::<factory::RethEvmFactory>()
+    }
+
+    #[cfg(feature = "std")]
+    fn prewarm_tx_result<'a>(
+        &self,
+        tx: &TransactionSigned,
+        result: reth_evm::TxResultWithStateFor<Self>,
+    ) -> Option<reth_evm::TxExecutionResultFor<'a, Self>>
+    where
+        Self: 'a,
+    {
+        Some(EthTransactionResultWithState::new(
+            result,
+            tx.tx_type(),
+            tx.blob_gas_used().unwrap_or_default(),
+        ))
+    }
+
+    fn speculative_next_evm_env(
+        &self,
+        parent: &SealedHeader,
+        beneficiary: Address,
+    ) -> Option<EvmEnvFor<Self>> {
+        let Ok(evm_env) = self.next_evm_env(
+            parent,
+            &NextBlockEnvAttributes {
+                timestamp: parent.timestamp + SLOT_DURATION_SECS,
+                suggested_fee_recipient: beneficiary,
+                prev_randao: B256::ZERO,
+                gas_limit: parent.gas_limit,
+                parent_beacon_block_root: None,
+                withdrawals: None,
+                extra_data: Bytes::new(),
+                slot_number: None,
+            },
+        );
+        Some(evm_env)
+    }
 }
 
 #[cfg(feature = "std")]
@@ -635,6 +680,39 @@ mod tests {
 
             assert_eq!(env.blob_basefee, U256::from(blob_params.calc_blob_fee(excess_blob_gas)));
         }
+    }
+
+    #[test]
+    fn test_reuses_prewarm_results_only_for_known_factories() {
+        assert!(EthEvmConfig::mainnet().reuses_prewarm_results());
+        assert!(EthEvmConfig::new_with_evm_factory(MAINNET.clone(), ()).reuses_prewarm_results());
+        assert!(EthEvmConfig::new_with_evm_factory(
+            MAINNET.clone(),
+            factory::RethEvmFactory::default()
+        )
+        .reuses_prewarm_results());
+
+        #[derive(Debug, Clone)]
+        struct CustomFactory;
+
+        impl EvmFactory for CustomFactory {
+            type Types = evm2::BaseEvmTypes;
+            type SpecId = evm2::SpecId;
+
+            fn spec_id(&self, spec: evm2::SpecId) -> Self::SpecId {
+                spec
+            }
+
+            fn tx_registry(
+                &self,
+                spec: Self::SpecId,
+            ) -> evm2::registry::TxRegistry<Self::Types, evm2::TxResult<Self::Types>> {
+                evm2::ethereum::ethereum_tx_registry(spec)
+            }
+        }
+
+        assert!(!EthEvmConfig::new_with_evm_factory(MAINNET.clone(), CustomFactory)
+            .reuses_prewarm_results());
     }
 
     #[cfg(feature = "jit")]

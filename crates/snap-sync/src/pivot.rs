@@ -15,8 +15,8 @@ use alloy_eip7928::BAL_RETENTION_PERIOD_SLOTS;
 use reth_primitives_traits::AlloyBlockHeader;
 use reth_storage_api::HeaderProvider;
 
-// EIP-8189's example anchor, matching go-ethereum's `fsMinFullBlocks`.
-const DEFAULT_HEAD_DISTANCE: u64 = 64;
+/// Blocks behind the head a generation is anchored to when no finalized block is available
+pub const DEFAULT_HEAD_DISTANCE: u64 = 64;
 
 // Blocks of state history a serving peer is assumed to still hold, mirroring reth's own
 // `SNAPSHOT_STATE_RETENTION`.
@@ -189,11 +189,11 @@ mod tests {
     }
 
     #[test]
-    fn pivot_without_a_bal_commitment_is_not_selectable() {
+    fn pivot_without_a_block_access_list_hash_is_not_selectable() {
         let provider = provider_with(chain(Some(3)));
 
         assert_eq!(policy().select(&provider, 3, None).unwrap(), None);
-        // Neither the finalized anchor nor the fallback carries a commitment.
+        // Neither the finalized anchor nor the fallback carries a block access list hash.
         assert_eq!(policy().select(&provider, 3, Some(1)).unwrap(), None);
     }
 

@@ -41,6 +41,9 @@ pub struct Tx<K: TransactionKind> {
     ///
     /// If [Some], then metrics are reported.
     metrics_handler: Option<MetricsHandler<K>>,
+    /// Persistent read-ahead setting for gets and newly created cursors.
+    #[cfg(target_os = "linux")]
+    prefetch: AtomicBool,
 }
 
 impl<K: TransactionKind> Tx<K> {
@@ -60,7 +63,13 @@ impl<K: TransactionKind> Tx<K> {
                 Ok(handler)
             })
             .transpose()?;
-        Ok(Self { inner, dbis, metrics_handler })
+        Ok(Self {
+            inner,
+            dbis,
+            metrics_handler,
+            #[cfg(target_os = "linux")]
+            prefetch: AtomicBool::new(false),
+        })
     }
 
     /// Returns a reference to the inner libmdbx transaction.
@@ -102,6 +111,8 @@ impl<K: TransactionKind> Tx<K> {
         Ok(Cursor::new_with_metrics(
             inner,
             self.metrics_handler.as_ref().map(|h| h.env_metrics.table_operation_metrics(T::NAME)),
+            #[cfg(target_os = "linux")]
+            self.prefetch.load(Ordering::Relaxed),
         ))
     }
 
@@ -301,10 +312,17 @@ impl<K: TransactionKind> DbTx for Tx<K> {
         key: &<T::Key as Encode>::Encoded,
     ) -> Result<Option<T::Value>, DatabaseError> {
         self.execute_with_operation_metric::<T, _>(Operation::Get, None, |tx| {
-            tx.get(self.get_dbi::<T>()?, key.as_ref())
-                .map_err(|e| DatabaseError::Read(e.into()))?
-                .map(decode_one::<T>)
-                .transpose()
+            let dbi = self.get_dbi::<T>()?;
+            #[cfg(target_os = "linux")]
+            let value = if self.prefetch.load(Ordering::Relaxed) {
+                tx.get::<super::value_prefetch::PrefetchValue<'_>>(dbi, key.as_ref())
+                    .map(|value| value.map(|value| value.0))
+            } else {
+                tx.get(dbi, key.as_ref())
+            };
+            #[cfg(not(target_os = "linux"))]
+            let value = tx.get(dbi, key.as_ref());
+            value.map_err(|e| DatabaseError::Read(e.into()))?.map(decode_one::<T>).transpose()
         })
     }
 
@@ -351,6 +369,12 @@ impl<K: TransactionKind> DbTx for Tx<K> {
         }
 
         self.inner.disable_timeout();
+    }
+
+    #[cfg(target_os = "linux")]
+    fn prefetch(&self, enabled: bool) -> &Self {
+        self.prefetch.store(enabled, Ordering::Relaxed);
+        self
     }
 }
 

@@ -27,8 +27,8 @@ use futures::FutureExt as _;
 use reth_chain_state::test_utils::TestBlockBuilder;
 use reth_chainspec::{ChainSpec, HOLESKY, MAINNET};
 use reth_engine_primitives::{
-    ConsensusEngineHandle, EngineApiValidator, ForkchoiceStatus, NoopInvalidBlockHook,
-    DEFAULT_BACKFILL_RUN_THRESHOLD,
+    BeaconForkChoiceUpdateError, ConsensusEngineHandle, EngineApiValidator, ForkchoiceStatus,
+    NoopInvalidBlockHook, DEFAULT_BACKFILL_RUN_THRESHOLD,
 };
 use reth_ethereum_consensus::EthBeaconConsensus;
 use reth_ethereum_engine_primitives::{EthEngineTypes, EthPayloadAttributes};
@@ -1897,7 +1897,10 @@ async fn test_fcu_with_canonical_ancestor_below_finalized_is_rejected() {
             .await
             .unwrap_err();
 
-        assert_matches!(err, ForkchoiceUpdateError::TooDeepReorg);
+        assert_matches!(
+            err,
+            BeaconForkChoiceUpdateError::ForkchoiceUpdateError(ForkchoiceUpdateError::TooDeepReorg)
+        );
     }
 
     // no payload build is started and the canonical head remains untouched

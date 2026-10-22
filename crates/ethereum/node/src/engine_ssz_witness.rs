@@ -39,7 +39,7 @@ impl<Provider, Evm> EngineSszWitnessGenerator<Provider, Evm> {
 
 impl<Provider, Evm> EngineSszWitness for EngineSszWitnessGenerator<Provider, Evm>
 where
-    Provider: HeaderProvider + StateProviderFactory + Clone + Send + Sync + 'static,
+    Provider: HeaderProvider + StateProviderFactory + Clone + 'static,
     Provider::Header: alloy_rlp::Encodable,
     Evm: ConfigureEvm<Primitives = EthPrimitives> + 'static,
 {

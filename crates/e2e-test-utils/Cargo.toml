@@ -46,6 +46,8 @@ reth-trie-db.workspace = true
 reth-transaction-pool.workspace = true
 reth-prune-types.workspace = true
 reth-fs-util.workspace = true
+reth-network-p2p.workspace = true
+reth-eth-wire-types.workspace = true
 
 tempfile.workspace = true
 
@@ -74,6 +76,7 @@ tokio-stream.workspace = true
 serde_json.workspace = true
 tracing.workspace = true
 derive_more.workspace = true
+parking_lot.workspace = true
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["test-util"] }
@@ -81,7 +84,14 @@ tokio = { workspace = true, features = ["test-util"] }
 [[test]]
 name = "e2e_testsuite"
 path = "tests/e2e-testsuite/main.rs"
+required-features = ["chain-import"]
 
 [[test]]
 name = "rocksdb"
 path = "tests/rocksdb/main.rs"
+
+[features]
+default = ["chain-import"]
+# Chain import setup (`setup_import`, `Setup::apply_with_import`). It launches an `EthereumNode`
+# from non-generic code, which every dependent compiles even if it never imports a chain.
+chain-import = []

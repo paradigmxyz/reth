@@ -228,6 +228,8 @@ pub struct TreeConfig {
     /// When set, BAL storage slots are not read into the execution cache. BAL hashed-state
     /// streaming for parallel state-root computation is controlled separately.
     disable_bal_batch_io: bool,
+    /// Whether block execution reuses transaction prewarming results.
+    prewarm_reuse: bool,
     /// Whether to skip trie state-root computation during engine validation.
     ///
     /// This trusts the block header's state root. It is intended for experiments that measure
@@ -285,6 +287,7 @@ impl Default for TreeConfig {
             disable_bal_parallel_execution: false,
             disable_bal_parallel_state_root: false,
             disable_bal_batch_io: false,
+            prewarm_reuse: false,
             skip_state_root: false,
             #[cfg(feature = "trie-debug")]
             proof_jitter: None,
@@ -376,6 +379,7 @@ impl TreeConfig {
             disable_bal_parallel_execution: false,
             disable_bal_parallel_state_root: false,
             disable_bal_batch_io: false,
+            prewarm_reuse: false,
             skip_state_root: false,
             #[cfg(feature = "trie-debug")]
             proof_jitter: None,
@@ -844,6 +848,17 @@ impl TreeConfig {
     /// Setter for whether to disable BAL state prefetching during prewarm.
     pub const fn without_bal_batch_io(mut self, disable_bal_batch_io: bool) -> Self {
         self.disable_bal_batch_io = disable_bal_batch_io;
+        self
+    }
+
+    /// Returns whether block execution reuses transaction prewarming results.
+    pub const fn prewarm_reuse(&self) -> bool {
+        self.prewarm_reuse
+    }
+
+    /// Setter for whether block execution reuses transaction prewarming results.
+    pub const fn with_prewarm_reuse(mut self, prewarm_reuse: bool) -> Self {
+        self.prewarm_reuse = prewarm_reuse;
         self
     }
 

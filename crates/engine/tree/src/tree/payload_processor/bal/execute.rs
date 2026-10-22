@@ -69,7 +69,6 @@ where
     Err: core::error::Error + Send + Sync + 'static,
     DB: Database + Send + 'a,
     MakeDb: Fn(bool) -> Result<DB, BalExecutionError> + Sync + 'a,
-    ReceiptTy<Evm::Primitives>: Clone,
 {
     let worker_pool = runtime.bal_streaming_pool();
     let worker_count = worker_pool.current_num_threads().max(1).min(transaction_count);
@@ -112,7 +111,6 @@ where
     Err: core::error::Error + Send + Sync + 'static,
     DB: Database + Send + 'scope,
     MakeDb: Fn(bool) -> Result<DB, BalExecutionError> + Sync + 'scope,
-    ReceiptTy<Evm::Primitives>: Clone,
 {
     let received_bal = Arc::new(
         <BlockExecutorFor<'scope, Evm> as BlockExecutor>::convert_block_access_list(

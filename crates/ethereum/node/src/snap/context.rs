@@ -62,19 +62,19 @@ impl<N: ProviderNodeTypes, C> NodeSnapContext<N, C> {
 impl<N, C> SnapSyncContext for NodeSnapContext<N, C>
 where
     N: ProviderNodeTypes,
-    C: DownloadClient + Send + Sync,
+    C: DownloadClient,
 {
     fn head(&self) -> Result<u64, SnapSyncError> {
         Ok(self.factory.database_provider_ro()?.last_block_number()?)
     }
 
-    fn finalized(&self) -> Option<u64> {
+    fn finalized(&self) -> Result<Option<u64>, SnapSyncError> {
         let hash = *self.finalized.borrow();
         if hash.is_zero() {
-            return None
+            return Ok(None)
         }
         // Only a finalized block whose header is synced can anchor the pivot.
-        self.factory.provider().ok()?.block_number(hash).ok()?
+        Ok(self.factory.provider()?.block_number(hash)?)
     }
 
     async fn wait_for_progress(&mut self, _head: u64) -> bool {
@@ -155,14 +155,14 @@ mod tests {
         let context = NodeSnapContext::new(factory, &peers, watch::channel(B256::ZERO).1, receiver);
 
         // Nothing is known as finalized until the engine reports a block.
-        assert_eq!(context.finalized(), None);
+        assert_eq!(context.finalized().unwrap(), None);
 
         finalized.send(headers[2].hash()).unwrap();
-        assert_eq!(context.finalized(), Some(2));
+        assert_eq!(context.finalized().unwrap(), Some(2));
 
         // A finalized block whose header isn't synced yet can't anchor a pivot.
         finalized.send(B256::repeat_byte(0xff)).unwrap();
-        assert_eq!(context.finalized(), None);
+        assert_eq!(context.finalized().unwrap(), None);
     }
 
     #[tokio::test]

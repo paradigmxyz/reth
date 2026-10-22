@@ -15,10 +15,10 @@ use reth_exex::{ExExManagerHandle, ExExNotification, ExExNotificationSource};
 use reth_primitives_traits::{format_gas_throughput, BlockBody, NodePrimitives};
 use reth_provider::{
     providers::{StaticFileProvider, StaticFileWriter},
-    BlockHashReader, BlockReader, DBProvider, EitherWriter, ExecutionOutcome,
-    HashedPostStateProvider, HeaderProvider, LatestStateProviderRef, OriginalValuesKnown,
-    ProviderError, StateProvider, StateWriteConfig, StateWriter, StaticFileProviderFactory,
-    StatsReader, StoragePath, StorageSettingsCache, TransactionVariant,
+    BlockReader, DBProvider, EitherWriter, ExecutionOutcome, HashedPostStateProvider,
+    HeaderProvider, LatestStateProviderRef, OriginalValuesKnown, ProviderError, StateProvider,
+    StateWriteConfig, StateWriter, StaticFileProviderFactory, StatsReader, StoragePath,
+    StorageSettingsCache, TransactionVariant,
 };
 use reth_stages_api::{
     BlockErrorKind, CheckpointBlockRange, EntitiesCheckpoint, ExecInput, ExecOutput,
@@ -194,11 +194,7 @@ where
         unwind_to: Option<u64>,
     ) -> Result<(), StageError>
     where
-        Provider: StaticFileProviderFactory
-            + DBProvider
-            + BlockReader
-            + HeaderProvider
-            + StorageSettingsCache,
+        Provider: StaticFileProviderFactory + DBProvider + BlockReader + StorageSettingsCache,
     {
         // On old nodes, if there's any receipts pruning configured, receipts are written directly
         // to database and inconsistencies are expected.
@@ -273,7 +269,6 @@ where
         > + StaticFileProviderFactory<
             Primitives: NodePrimitives<BlockHeader: reth_db_api::table::Value>,
         > + StatsReader
-        + BlockHashReader
         + StateWriter<Receipt = <E::Primitives as NodePrimitives>::Receipt>
         + StorageSettingsCache
         + StoragePath

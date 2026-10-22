@@ -405,14 +405,35 @@ pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
     where
         Self: 'a,
     {
-        BasicBlockBuilder::new(
-            self.block_executor_factory(),
-            self.block_assembler(),
-            evm,
+        self.create_block_builder_with(evm, evm_env, parent, ctx, |executor| executor)
+    }
+
+    /// Creates a block builder with a customized executor.
+    #[cfg(feature = "std")]
+    fn create_block_builder_with<'a, E>(
+        &'a self,
+        evm: EvmFor<'a, Self>,
+        evm_env: EvmEnvFor<Self>,
+        parent: &'a SealedHeader<HeaderTy<Self::Primitives>>,
+        ctx: ExecutionCtxFor<'a, Self>,
+        f: impl FnOnce(BlockExecutorFor<'a, Self>) -> E,
+    ) -> impl BlockBuilder<Primitives = Self::Primitives, Executor = E>
+    where
+        Self: 'a,
+        E: BlockExecutor<
+            Evm = EvmFor<'a, Self>,
+            Transaction = TxTy<Self::Primitives>,
+            Receipt = ReceiptTy<Self::Primitives>,
+        >,
+    {
+        BasicBlockBuilder {
+            executor: f(self.block_executor_factory().create_executor(evm, ctx.clone())),
             evm_env,
-            parent,
+            transactions: Default::default(),
             ctx,
-        )
+            parent,
+            assembler: self.block_assembler(),
+        }
     }
 
     /// Creates a block builder for `parent + 1`.
@@ -457,6 +478,62 @@ pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
             .apply_pre_execution_changes()
             .map_err(|err| -> Box<dyn Error + Send + Sync> { Box::new(err) })?;
         Ok(executor.into_state())
+    }
+
+    /// Returns whether engine validation may commit transaction results from speculative prewarm
+    /// execution instead of executing the transactions again.
+    ///
+    /// Return `true` only if all of these hold, see also [`Self::prewarm_tx_result`]:
+    /// - the block executor executes a transaction by checking that its gas limit, capped by the
+    ///   transaction gas limit cap, fits into the block gas limit minus the last receipt's
+    ///   cumulative gas used, and then running [`Evm::transact`] with the transaction environment;
+    /// - [`Evm::transact`] performs the standard caller nonce and balance validation; speculative
+    ///   results additionally reject the largest nonce before reuse;
+    /// - EVMs created by this configuration with JIT support disabled call inspector hooks for
+    ///   every executed instruction;
+    /// - execution depends only on recorded database reads and the transaction and block
+    ///   environments reproduced during prewarming, with no unrecorded external state.
+    ///
+    /// [`Evm::transact`]: Evm::transact
+    fn reuses_prewarm_results(&self) -> bool {
+        false
+    }
+
+    /// Wraps a speculative prewarm execution result of `tx` into the result consumed by
+    /// [`BlockExecutor::commit_transaction`].
+    ///
+    /// Only called if [`Self::reuses_prewarm_results`] returns `true`.
+    /// Returning `None` rejects and consumes this speculative result; the engine executes the
+    /// transaction normally instead.
+    #[cfg(feature = "std")]
+    fn prewarm_tx_result<'a>(
+        &self,
+        tx: &TxTy<Self::Primitives>,
+        result: TxResultWithStateFor<Self>,
+    ) -> Option<TxExecutionResultFor<'a, Self>>
+    where
+        Self: 'a,
+    {
+        let _ = (tx, result);
+        None
+    }
+
+    /// Returns the predicted environment of the block after `parent` with `beneficiary`, in which
+    /// engine validation speculatively executes pool transactions before the block arrives.
+    ///
+    /// Validation reuses such results only for blocks whose environment matches the predicted
+    /// one, apart from the beneficiary, timestamp, prevrandao and gas limit, which the
+    /// transactions must not have observed. Only called if [`Self::reuses_prewarm_results`]
+    /// returns `true`. Returns `None` if the environment cannot be predicted, which disables
+    /// recording pool transaction results. Custom block environment extensions must remain
+    /// identical to canonical execution; the engine compares only standard environment fields.
+    fn speculative_next_evm_env(
+        &self,
+        parent: &SealedHeader<HeaderTy<Self::Primitives>>,
+        beneficiary: Address,
+    ) -> Option<EvmEnvFor<Self>> {
+        let _ = (parent, beneficiary);
+        None
     }
 }
 

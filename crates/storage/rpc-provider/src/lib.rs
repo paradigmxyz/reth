@@ -1323,8 +1323,8 @@ where
 
     fn multiproof_v2(
         &self,
-        _input: TrieInput,
         _targets: reth_trie::MultiProofTargetsV2,
+        _requires_masks: bool,
     ) -> Result<reth_trie::DecodedMultiProofV2, ProviderError> {
         Err(ProviderError::UnsupportedProvider)
     }
@@ -1812,7 +1812,7 @@ where
 impl<P, Node, N> StateProviderFactory for RpcBlockchainStateProvider<P, Node, N>
 where
     P: Provider<N> + Clone + 'static + Send + Sync,
-    Node: NodeTypes + 'static,
+    Node: NodeTypes,
     Node::ChainSpec: Send + Sync,
     N: Network,
     Self: Clone + 'static,

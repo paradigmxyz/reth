@@ -139,7 +139,7 @@ impl<Eth> EthSimBundle<Eth> {
 
 impl<Eth> EthSimBundle<Eth>
 where
-    Eth: EthTransactions + LoadBlock + Call + 'static,
+    Eth: EthTransactions + LoadBlock + Call,
 {
     /// Flattens a potentially nested bundle into a list of individual transactions in a
     /// `FlattenedBundleItem` with their associated metadata. This handles recursive bundle
@@ -491,7 +491,7 @@ where
 #[async_trait::async_trait]
 impl<Eth> MevSimApiServer for EthSimBundle<Eth>
 where
-    Eth: EthTransactions + LoadBlock + Call + 'static,
+    Eth: EthTransactions + LoadBlock + Call,
 {
     async fn sim_bundle(
         &self,

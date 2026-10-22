@@ -45,7 +45,7 @@ pub type SimulatedBlocksResult<N, E> = Result<Vec<SimulatedBlock<RpcBlock<N>>>, 
 
 /// Execution related functions for the [`EthApiServer`](crate::EthApiServer) trait in
 /// the `eth_` namespace.
-pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthApiTypes {
+pub trait EthCall: EstimateCall + LoadBlock + FullEthApiTypes {
     /// Estimate gas needed for execution of the `request` at the [`BlockId`].
     fn estimate_gas_at(
         &self,
@@ -145,8 +145,9 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                     evm_env.version_mut().features.remove(evm2::EvmFeatures::EIP3607);
 
                     // EIP-7825's transaction gas cap is only active with Amsterdam's
-                    // regular/state-gas accounting.
-                    if !evm_env.version().feature(evm2::EvmFeatures::EIP8037) {
+                    // regular/state-gas accounting, and only in validation mode. Without
+                    // validation the whole gas limit is execution gas.
+                    if !validation || !evm_env.version().feature(evm2::EvmFeatures::EIP8037) {
                         evm_env.version_mut().tx_gas_limit_cap = u64::MAX;
                     }
 

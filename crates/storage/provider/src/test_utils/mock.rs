@@ -585,7 +585,7 @@ impl<T: NodePrimitives, ChainSpec: EthChainSpec + 'static> DBProvider
     }
 }
 
-impl<T: NodePrimitives, ChainSpec: EthChainSpec + Send + Sync + 'static> HeaderProvider
+impl<T: NodePrimitives, ChainSpec: EthChainSpec + 'static> HeaderProvider
     for MockEthProvider<T, ChainSpec>
 {
     type Header = <T::Block as Block>::Header;
@@ -637,7 +637,7 @@ impl<T: NodePrimitives, ChainSpec: EthChainSpec + Send + Sync + 'static> HeaderP
 impl<T, ChainSpec> ChainSpecProvider for MockEthProvider<T, ChainSpec>
 where
     T: NodePrimitives,
-    ChainSpec: EthChainSpec + 'static + Debug + Send + Sync,
+    ChainSpec: EthChainSpec + 'static,
 {
     type ChainSpec = ChainSpec;
 
@@ -905,7 +905,7 @@ impl<T: NodePrimitives, ChainSpec: Send + Sync + 'static> BlockNumReader
     }
 }
 
-impl<T: NodePrimitives, ChainSpec: EthChainSpec + Send + Sync + 'static> BlockIdReader
+impl<T: NodePrimitives, ChainSpec: EthChainSpec + 'static> BlockIdReader
     for MockEthProvider<T, ChainSpec>
 {
     fn pending_block_num_hash(&self) -> ProviderResult<Option<alloy_eips::BlockNumHash>> {
@@ -922,7 +922,7 @@ impl<T: NodePrimitives, ChainSpec: EthChainSpec + Send + Sync + 'static> BlockId
 }
 
 //look
-impl<T: NodePrimitives, ChainSpec: EthChainSpec + Send + Sync + 'static> BlockReader
+impl<T: NodePrimitives, ChainSpec: EthChainSpec + 'static> BlockReader
     for MockEthProvider<T, ChainSpec>
 {
     type Block = T::Block;
@@ -1007,7 +1007,7 @@ impl<T: NodePrimitives, ChainSpec: EthChainSpec + Send + Sync + 'static> BlockRe
 
 impl<T, ChainSpec> BlockReaderIdExt for MockEthProvider<T, ChainSpec>
 where
-    ChainSpec: EthChainSpec + Send + Sync + 'static,
+    ChainSpec: EthChainSpec + 'static,
     T: NodePrimitives,
 {
     fn block_by_id(&self, id: BlockId) -> ProviderResult<Option<T::Block>> {
@@ -1160,8 +1160,8 @@ where
 
     fn multiproof_v2(
         &self,
-        _input: TrieInput,
         _targets: reth_trie::MultiProofTargetsV2,
+        _requires_masks: bool,
     ) -> ProviderResult<reth_trie::DecodedMultiProofV2> {
         Ok(reth_trie::DecodedMultiProofV2::default())
     }
@@ -1190,7 +1190,7 @@ impl<T: NodePrimitives, ChainSpec: EthChainSpec + 'static> HashedPostStateProvid
 impl<T, ChainSpec> StateProvider for MockEthProvider<T, ChainSpec>
 where
     T: NodePrimitives,
-    ChainSpec: EthChainSpec + Send + Sync + 'static,
+    ChainSpec: EthChainSpec + 'static,
 {
     fn storage(
         &self,
@@ -1230,7 +1230,7 @@ impl<T: NodePrimitives, ChainSpec: Send + Sync> StorageSettingsCache
     fn set_storage_settings_cache(&self, _settings: StorageSettings) {}
 }
 
-impl<T: NodePrimitives, ChainSpec: EthChainSpec + Send + Sync + 'static> StateProviderFactory
+impl<T: NodePrimitives, ChainSpec: EthChainSpec + 'static> StateProviderFactory
     for MockEthProvider<T, ChainSpec>
 {
     type Primitives = T;

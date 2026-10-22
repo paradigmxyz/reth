@@ -36,7 +36,7 @@ use reth_execution_types::BlockExecutionResult;
 #[expect(missing_debug_implementations)]
 pub struct EthBlockExecutor<'a, T = BaseEvmTypes, R = RethReceiptBuilder>
 where
-    T: EvmTypes<Tx: Typed2718, TxResultExt: Send>,
+    T: EvmTypes<Tx: Typed2718, TxResultExt: Send + Sync>,
     R: ReceiptBuilder,
 {
     /// EVM containing the execution overlay and optional block access list builder.
@@ -95,7 +95,7 @@ type StateUpdateHook = Option<Box<dyn FnMut(StateUpdate) + Send>>;
 
 impl<'a, T, R> EthBlockExecutor<'a, T, R>
 where
-    T: EvmTypes<Tx: Typed2718, TxResultExt: Send>,
+    T: EvmTypes<Tx: Typed2718, TxResultExt: Send + Sync>,
     R: ReceiptBuilder,
 {
     /// Creates a configured Ethereum block executor.
@@ -197,7 +197,7 @@ where
 
 impl<'a, T, R> BlockExecutor for EthBlockExecutor<'a, T, R>
 where
-    T: EvmTypes<Tx: Typed2718, TxResultExt: Send>,
+    T: EvmTypes<Tx: Typed2718, TxResultExt: Send + Sync>,
     R: ReceiptBuilder,
 {
     type Transaction = R::Transaction;
@@ -589,7 +589,7 @@ where
     F: EvmFactory,
     F::Types: EvmTypes<Tx = TxEnvelope>,
     <F::Types as evm2::EvmTypesHost>::Tx: Typed2718,
-    <F::Types as evm2::EvmTypesHost>::TxResultExt: Send,
+    <F::Types as evm2::EvmTypesHost>::TxResultExt: Send + Sync,
 {
     inner: EthBlockExecutor<'a, F::Types, &'a RethReceiptBuilder>,
     factory: &'a EthBlockExecutorFactory<RethReceiptBuilder, C, F>,
@@ -612,7 +612,7 @@ where
     F: EvmFactory,
     F::Types: EvmTypes<Tx = TxEnvelope>,
     <F::Types as evm2::EvmTypesHost>::Tx: Typed2718,
-    <F::Types as evm2::EvmTypesHost>::TxResultExt: Send,
+    <F::Types as evm2::EvmTypesHost>::TxResultExt: Send + Sync,
 {
     pub(crate) fn new(
         inner: EthBlockExecutor<'a, F::Types, &'a RethReceiptBuilder>,
@@ -803,7 +803,7 @@ where
     F: EvmFactory,
     F::Types: EvmTypes<Tx = TxEnvelope>,
     <F::Types as evm2::EvmTypesHost>::Tx: Typed2718,
-    <F::Types as evm2::EvmTypesHost>::TxResultExt: Send,
+    <F::Types as evm2::EvmTypesHost>::TxResultExt: Send + Sync,
 {
     type Transaction = TransactionSigned;
     type Receipt = Receipt;

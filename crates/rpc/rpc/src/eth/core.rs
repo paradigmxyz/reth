@@ -585,7 +585,7 @@ mod tests {
     };
     use reth_rpc_eth_types::RpcInvalidTransactionError;
     use reth_storage_api::{
-        BalProvider, BlockReader, BlockReaderIdExt, NodePrimitivesProvider, StateProviderFactory,
+        BalProvider, BlockReaderIdExt, NodePrimitivesProvider, StateProviderFactory,
     };
     use reth_tasks::cancel::is_cancelled;
     use reth_testing_utils::generators;
@@ -603,8 +603,7 @@ mod tests {
                 Receipt = reth_ethereum_primitives::Receipt,
                 Header = alloy_consensus::Header,
                 Transaction = reth_ethereum_primitives::TransactionSigned,
-            > + BlockReader
-            + ChainSpecProvider<ChainSpec = ChainSpec>
+            > + ChainSpecProvider<ChainSpec = ChainSpec>
             + StateProviderFactory<Primitives = reth_ethereum_primitives::EthPrimitives>
             + NodePrimitivesProvider<Primitives = reth_ethereum_primitives::EthPrimitives>
             + CanonStateSubscriptions<Primitives = reth_ethereum_primitives::EthPrimitives>

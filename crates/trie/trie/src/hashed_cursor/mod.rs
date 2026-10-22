@@ -16,10 +16,14 @@ pub mod noop;
 pub mod mock;
 
 /// Metrics tracking hashed cursor implementations.
+#[cfg(feature = "metrics")]
 pub mod metrics;
 #[cfg(feature = "metrics")]
-pub use metrics::HashedCursorMetrics;
-pub use metrics::{HashedCursorMetricsCache, InstrumentedHashedCursor};
+pub use metrics::{HashedCursorMetrics, InstrumentedHashedCursor, InstrumentedHashedCursorFactory};
+
+/// Uses the underlying factory directly when cursor metrics are disabled.
+#[cfg(not(feature = "metrics"))]
+pub type InstrumentedHashedCursorFactory<F> = F;
 
 /// The factory trait for creating cursors over the hashed state.
 #[auto_impl::auto_impl(&)]

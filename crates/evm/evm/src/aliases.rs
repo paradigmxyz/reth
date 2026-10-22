@@ -36,3 +36,8 @@ pub type BlockExecutorFor<'a, Evm> =
     <<Evm as ConfigureEvm>::BlockExecutorFactory as crate::execute::BlockExecutorFactory>::Executor<
         'a,
     >;
+
+/// Detached transaction result accepted by the configured block executor.
+#[cfg(feature = "std")]
+pub type TxExecutionResultFor<'a, Evm> =
+    <BlockExecutorFor<'a, Evm> as crate::BlockExecutor>::TransactionResultWithState;

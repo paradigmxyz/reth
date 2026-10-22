@@ -31,7 +31,7 @@ pub trait EvmFactory: Clone + core::fmt::Debug + Send + Sync + Unpin + 'static
 where
     <Self::Types as evm2::EvmTypesHost>::BlockEnvExt: Send + Sync,
     <Self::Types as evm2::EvmTypesHost>::EvmExt: Default,
-    <Self::Types as evm2::EvmTypesHost>::TxResultExt: Send,
+    <Self::Types as evm2::EvmTypesHost>::TxResultExt: Send + Sync,
 {
     /// Runtime evm2 type family used by the EVM.
     type Types: evm2::EvmTypes + evm2::EvmTypesHost<SpecId = Self::SpecId>;

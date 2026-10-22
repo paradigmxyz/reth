@@ -100,13 +100,17 @@ use crate::tree::{
         BlockAccessListDecodeError, InsertBlockError, InsertBlockErrorKind, InsertPayloadError,
     },
     instrumented_state::{InstrumentedStateProvider, StateProviderMetrics, StateProviderStats},
-    payload_processor::PayloadProcessor,
+    metrics::PrewarmReuseStats,
+    payload_processor::{
+        reuse::{PrewarmResults, ReuseMiss},
+        PayloadProcessor,
+    },
     txpool_prewarm,
     types::{InsertPayloadResult, ValidationOutput},
     CacheWaitDurations, CachedStateProvider, EngineApiMetrics, EngineApiTreeState, ExecutionEnv,
     PayloadHandle, TreeConfig, WaitForCaches,
 };
-use alloy_consensus::transaction::Either;
+use alloy_consensus::{transaction::Either, Transaction as _};
 use alloy_eip7928::{
     bal::{Bal, DecodedBal},
     BlockAccessList,
@@ -133,7 +137,8 @@ use reth_engine_primitives::{
 use reth_errors::{BlockExecutionError, BlockValidationError, ProviderResult};
 use reth_evm::{
     database::StateProviderDatabase, BlockExecutor, BlockExecutorFactory, BlockExecutorFor,
-    ConfigureEvm, EvmEnvFor, ExecutableTxFor, ExecutionCtxFor,
+    BlockTransactionResult, ConfigureEvm, Evm as _, EvmEnvFor, EvmTypesFor, ExecutableTxFor,
+    ExecutionCtxFor,
 };
 use reth_execution_cache::{CacheFillMode, CacheStats};
 use reth_execution_types::DecodedEvmBal;
@@ -145,20 +150,16 @@ use reth_payload_primitives::{
 };
 use reth_primitives_traits::{
     AlloyBlockHeader, BlockBody, BlockTy, FastInstant as Instant, GotExpected, NodePrimitives,
-    RecoveredBlock, SealedBlock, SealedHeader, SignerRecoverable,
+    RecoveredBlock, SealedBlock, SealedHeader, SignerRecoverable, TxTy,
 };
 use reth_provider::{
-    BlockExecutionOutput, BlockHashReader, BlockReader, ChangeSetReader, DatabaseProviderFactory,
-    DatabaseProviderROFactory, EvmStateProvider, EvmStateProviderBox, HashedPostStateProvider,
-    HistoryReader, ProviderError, PruneCheckpointReader, StageCheckpointReader, StateProvider,
-    StateProviderFactory, StateReader, StateRootProvider, StorageChangeSetReader,
-    StorageSettingsCache,
+    BlockExecutionOutput, BlockReader, ChangeSetReader, DatabaseProviderFactory,
+    DatabaseProviderROFactory, EvmStateProvider, EvmStateProviderBox, HistoryReader, ProviderError,
+    PruneCheckpointReader, StageCheckpointReader, StateProvider, StateProviderFactory, StateReader,
+    StorageChangeSetReader, StorageSettingsCache,
 };
 use reth_storage_overlay::{OverlayManager, OverlayStateProviderFactory};
-use reth_trie::{
-    hashed_cursor::HashedCursorFactory, trie_cursor::TrieCursorFactory, updates::TrieUpdates,
-    HashedPostState, KeccakKeyHasher, LazyTrieData,
-};
+use reth_trie::{updates::TrieUpdates, HashedPostState, KeccakKeyHasher, LazyTrieData};
 use revm::{database::BundleAccount, state::AccountInfo};
 use std::{
     sync::{
@@ -303,7 +304,6 @@ where
     N: NodePrimitives,
     P: DatabaseProviderFactory<
             Provider: BlockReader
-                          + BlockHashReader
                           + StageCheckpointReader
                           + PruneCheckpointReader
                           + ChangeSetReader
@@ -316,15 +316,6 @@ where
         + StateProviderFactory
         + StateReader
         + Clone
-        + 'static,
-    OverlayStateProviderFactory<P, N>: DatabaseProviderROFactory<
-            Provider: TrieCursorFactory
-                          + HashedCursorFactory
-                          + HashedPostStateProvider
-                          + StateRootProvider
-                          + StateProvider
-                          + Send,
-        > + Clone
         + 'static,
     Evm: ConfigureEvm<Primitives = N> + 'static,
 {
@@ -381,6 +372,7 @@ where
             &self.runtime,
             Arc::new(source),
             self.evm_config.clone(),
+            self.evm_config.reuses_prewarm_results() && self.config.prewarm_reuse(),
         ));
         self
     }
@@ -567,6 +559,10 @@ where
         let evm_env = debug_span!(target: "engine::tree::payload_validator", "evm_env")
             .in_scope(|| self.evm_env_for(&input))
             .map_err(NewPayloadError::other)?;
+        let pool_seeds = self
+            .txpool_prewarm
+            .as_ref()
+            .and_then(|prewarmer| prewarmer.seeds(parent_hash, &evm_env));
 
         // Extract the decoded BAL, if present. Undecodable block access list bytes invalidate the
         // payload.
@@ -592,6 +588,7 @@ where
             withdrawals: input.withdrawals().map(|w| w.to_vec()),
             decoded_bal: decoded_bal.as_ref().map(Arc::clone),
             txpool_snapshot: txpool_snapshot.clone(),
+            pool_seeds,
         };
 
         // Get an iterator over the transactions in the payload
@@ -954,7 +951,7 @@ where
             };
 
             if let Err(e) = consensus.validate_header(block.sealed_header()) {
-                error!(target: "engine::tree::payload_validator", ?block, "Failed to validate header {}: {e}", block.hash());
+                error!(target: "engine::tree::payload_validator", block = ?block.block_with_parent(), %e, "Failed to validate header");
                 return Err(InsertBlockError::consensus_error(e, block).into())
             }
 
@@ -962,7 +959,7 @@ where
             let _enter = debug_span!(target: "engine::tree::payload_validator", "validate_header_against_parent").entered();
             if let Err(e) = consensus.validate_header_against_parent(block.sealed_header(), &parent)
             {
-                warn!(target: "engine::tree::payload_validator", ?block, "Failed to validate header {} against parent: {e}", block.hash());
+                warn!(target: "engine::tree::payload_validator", block = ?block.block_with_parent(), %e, "Failed to validate header against parent");
                 return Err(InsertBlockError::consensus_error(e, block).into())
             }
             drop(_enter);
@@ -970,7 +967,7 @@ where
             if let Err(e) =
                 consensus.validate_block_pre_execution_with_tx_root(&block, None)
             {
-                error!(target: "engine::tree::payload_validator", ?block, "Failed to validate block {}: {e}", block.hash());
+                error!(target: "engine::tree::payload_validator", block = ?block.block_with_parent(), %e, "Failed to validate block");
                 return Err(InsertBlockError::consensus_error(e, block).into())
             }
 
@@ -1008,7 +1005,7 @@ where
         state_provider: S,
         env: ExecutionEnv<Evm>,
         input: &BlockOrPayload<T>,
-        handle: &mut PayloadHandle<impl ExecutableTxFor<Evm>, Err, N::Receipt>,
+        handle: &mut PayloadHandle<impl ExecutableTxFor<Evm>, Err, N::Receipt, EvmTypesFor<Evm>>,
         state_hook: Option<Box<dyn FnMut(reth_execution_types::StateUpdate) + Send + 'static>>,
     ) -> Result<
         (BlockExecutionOutput<N::Receipt>, Vec<Address>, ReceiptRootReceiver, Option<ExecutedBal>),
@@ -1026,6 +1023,8 @@ where
         let transaction_count = input.transaction_count();
         let (receipt_tx, result_rx) = self.spawn_receipt_root_task(transaction_count);
         let executed_tx_index = Arc::clone(handle.executed_tx_index());
+        // Reuse validation reads must not alter a block's access list.
+        let prewarm_results = handle.prewarm_results().filter(|_| !input.has_block_access_list());
         let execution_start = Instant::now();
         let evm_config =
             self.evm_config.clone().with_jit_support().with_precompile_cache_metrics(true);
@@ -1049,6 +1048,7 @@ where
                     handle.iter_transactions(),
                     &receipt_tx,
                     &executed_tx_index,
+                    prewarm_results.as_deref(),
                 )?;
 
                 let post_exec_start = Instant::now();
@@ -1057,6 +1057,9 @@ where
                 Ok::<_, BlockExecutionError>((output, senders, built_bal))
             })?;
         drop(receipt_tx);
+        if let Some(results) = prewarm_results {
+            self.runtime.spawn_drop(results);
+        }
         let built_bal =
             built_bal.map(|bal| ExecutedBal { alloy: bal.clone().into(), evm: Arc::new(bal) });
 
@@ -1105,7 +1108,7 @@ where
         &self,
         env: ExecutionEnv<Evm>,
         input: &BlockOrPayload<T>,
-        handle: &PayloadHandle<Tx, Err, N::Receipt>,
+        handle: &PayloadHandle<Tx, Err, N::Receipt, EvmTypesFor<Evm>>,
         make_state_provider: &MakeStateProvider,
     ) -> Result<
         (BlockExecutionOutput<N::Receipt>, Vec<Address>, ReceiptRootReceiver, Option<ExecutedBal>),
@@ -1195,6 +1198,7 @@ where
         transactions: impl Iterator<Item = Result<Tx, Err>>,
         receipt_tx: &ReceiptRootSender<N>,
         executed_tx_index: &AtomicUsize,
+        prewarm_results: Option<&PrewarmResults<EvmTypesFor<Evm>>>,
     ) -> Result<Vec<Address>, BlockExecutionError>
     where
         Tx: ExecutableTxFor<Evm>,
@@ -1207,6 +1211,7 @@ where
 
         let exec_span = debug_span!(target: "engine::tree", "execution").entered();
         let mut senders = Vec::with_capacity(transaction_count);
+        let mut reuse_stats = PrewarmReuseStats::default();
         let mut transactions = transactions.into_iter();
         let mut last_sent_len = 0usize;
         loop {
@@ -1229,7 +1234,22 @@ where
             }
 
             let tx_start = Instant::now();
-            executor.execute_transaction(tx)?;
+            let index = senders.len() - 1;
+            match prewarm_results {
+                Some(results) => {
+                    let outcome = self.commit_prewarm_result(executor, results, index, tx.tx())?;
+                    if outcome.is_err() {
+                        // Later prewarm results are refreshed against the actual writes.
+                        let result = executor.execute_transaction_without_commit(tx)?;
+                        results.publish_executed(index, &result.result().pending_state);
+                        executor.commit_transaction(result)?;
+                    }
+                    reuse_stats.record(outcome);
+                }
+                None => {
+                    executor.execute_transaction(tx)?;
+                }
+            }
             self.metrics.record_transaction_execution(tx_start.elapsed());
             executed_tx_index.store(senders.len(), Ordering::Relaxed);
 
@@ -1246,7 +1266,34 @@ where
         }
 
         drop(exec_span);
+        if prewarm_results.is_some() {
+            self.metrics.prewarm_reuse.record(reuse_stats);
+        }
         Ok(senders)
+    }
+
+    /// Commits the prewarm result of the transaction at `index` instead of executing it, if the
+    /// result is ready and its reads match the current state.
+    fn commit_prewarm_result(
+        &self,
+        executor: &mut BlockExecutorFor<'_, Evm>,
+        results: &PrewarmResults<EvmTypesFor<Evm>>,
+        index: usize,
+        tx: &TxTy<N>,
+    ) -> Result<Result<(), ReuseMiss>, BlockExecutionError> {
+        executor.validate_transaction_gas_limit(tx.gas_limit())?;
+        let result = match results
+            .take_valid(index, executor.evm_mut().state_db_mut())
+            .map_err(BlockExecutionError::other)?
+        {
+            Ok(result) => result,
+            Err(miss) => return Ok(Err(miss)),
+        };
+        let Some(result) = self.evm_config.prewarm_tx_result(tx, result) else {
+            return Ok(Err(ReuseMiss::Stale))
+        };
+        executor.commit_transaction(result)?;
+        Ok(Ok(()))
     }
 
     /// Validates the block after execution.
@@ -1341,6 +1388,7 @@ where
             impl ExecutableTxFor<Evm> + use<N, P, Evm, V, T>,
             impl core::error::Error + Send + Sync + 'static + use<N, P, Evm, V, T>,
             N::Receipt,
+            EvmTypesFor<Evm>,
         >,
         InsertBlockErrorKind,
     > {
@@ -1729,7 +1777,6 @@ impl<N, Types, P, Evm, V> EngineValidator<Types> for BasicEngineValidator<P, Evm
 where
     P: DatabaseProviderFactory<
             Provider: BlockReader
-                          + BlockHashReader
                           + StageCheckpointReader
                           + PruneCheckpointReader
                           + ChangeSetReader
@@ -1742,15 +1789,6 @@ where
         + StateReader
         + ChangeSetReader
         + Clone
-        + 'static,
-    OverlayStateProviderFactory<P, N>: DatabaseProviderROFactory<
-            Provider: TrieCursorFactory
-                          + HashedCursorFactory
-                          + HashedPostStateProvider
-                          + StateRootProvider
-                          + StateProvider
-                          + Send,
-        > + Clone
         + 'static,
     N: NodePrimitives,
     V: PayloadValidator<Types, Block = N::Block> + Clone,
@@ -1824,9 +1862,10 @@ where
                 return
             }
         };
-        // Warming reuses the head block's own environment rather than predicting the next
-        // block's: attribute-level accuracy (timestamp, basefee) doesn't matter for collecting
-        // state reads, and the worker disables the fee checks a stale basefee would trip.
+        // Unless results are recorded, warming reuses the head block's own environment rather
+        // than predicting the next block's: attribute-level accuracy (timestamp, basefee) doesn't
+        // matter for collecting state reads, and the worker disables the fee checks a stale
+        // basefee would trip.
         let evm_env = match self.evm_config.evm_env(parent.header()) {
             Ok(evm_env) => evm_env,
             Err(err) => {
@@ -1854,7 +1893,7 @@ where
                 return
             }
         };
-        txpool_prewarm.start(parent.hash(), evm_env, state_provider_factory)
+        txpool_prewarm.start(&parent, evm_env, state_provider_factory)
     }
 
     fn payload_builder_resources(
