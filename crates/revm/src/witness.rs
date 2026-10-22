@@ -227,7 +227,7 @@ mod tests {
     fn additional_state_is_merged_with_executed_state() {
         let address = Address::with_last_byte(1);
         let hashed_address = keccak256(address);
-        let slot = U256::from(1);
+        let slot = U256::ONE;
         let additional_slot = B256::with_last_byte(2);
 
         let mut state = State::builder().with_database(EmptyDB::default()).build();
@@ -240,7 +240,7 @@ mod tests {
         let additional_state = HashedPostState::default().with_storages([(
             hashed_address,
             HashedStorage::from_iter([
-                (keccak256(B256::from(slot)), U256::from(1)),
+                (keccak256(B256::from(slot)), U256::ONE),
                 (additional_slot, U256::from(3)),
             ]),
         )]);

@@ -52,6 +52,18 @@ alloy-rpc-types-engine = { workspace = true, optional = true }
 
 [features]
 default = ["std"]
+account-ext = [
+    "reth-ethereum-cli?/account-ext",
+    "reth-evm?/account-ext",
+    "alloy-rpc-types-eth?/account-ext",
+    "reth-codecs?/account-ext",
+    "reth-primitives-traits/account-ext",
+    "reth-node-ethereum?/account-ext",
+    "reth-provider?/account-ext",
+    "reth-trie?/account-ext",
+    "reth-rpc?/account-ext",
+    "reth-trie-db?/account-ext",
+]
 std = [
     "reth-chainspec/std",
     "reth-ethereum-primitives/std",

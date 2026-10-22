@@ -31,6 +31,13 @@ cargo docs --document-private-items
 - Reuse test helpers and isolate test databases and directories.
 - Run affected packages first; broaden checks for changes across crates.
 - Use existing benchmarks for performance changes and report measured results.
+- E2E tests launch real nodes with the `reth-e2e-test-utils` harness; read its guide,
+  `crates/e2e-test-utils/README.md`, before writing one. Node tests live in
+  `crates/ethereum/node/tests/e2e/`.
+- Run a single e2e test with
+  `cargo nextest run -p reth-node-ethereum --test e2e -E 'test(=module::test_name)'`.
+- In e2e tests, wait on conditions instead of sleeping, assert exact errors, and add missing
+  helpers to the harness instead of copying them into tests.
 
 ## Commit and PR Style
 

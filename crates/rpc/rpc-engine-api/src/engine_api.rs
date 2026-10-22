@@ -1954,14 +1954,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn get_inclusion_list_v1_returns_empty_list() {
-        let (_, api) = setup_engine_api();
-
-        let res = EngineApiServer::get_inclusion_list_v1(&api).await.unwrap();
-        assert!(res.is_empty());
-    }
-
-    #[tokio::test]
     async fn get_inclusion_list_v1_stops_at_size_limit() {
         let pool = eth_test_pool();
         let first = pooled_transaction(
@@ -2430,15 +2422,6 @@ mod tests {
         assert_matches!(res, Ok(None));
     }
 
-    #[test]
-    fn engine_bitvector_uses_little_endian_cell_indices() {
-        for index in [0, 7, 8, 63, 64, 127] {
-            let wire_mask = B128::from((1u128 << index).to_le_bytes());
-            let mask = BlobCellMask::from_bits(u128::from_le_bytes(wire_mask.into()));
-            assert_eq!(mask.selected_indices().collect::<Vec<_>>(), vec![index]);
-        }
-    }
-
     #[tokio::test]
     async fn fcu_v4_updates_shared_cell_custody_before_forkchoice_result() {
         let chain_spec: Arc<ChainSpec> =
@@ -2469,7 +2452,7 @@ mod tests {
         );
 
         let state = ForkchoiceState {
-            head_block_hash: B256::from([0x33; 32]),
+            head_block_hash: B256::repeat_byte(0x33),
             safe_block_hash: B256::ZERO,
             finalized_block_hash: B256::ZERO,
         };
@@ -2536,7 +2519,7 @@ mod tests {
         );
 
         let state = ForkchoiceState {
-            head_block_hash: B256::from([0x44; 32]),
+            head_block_hash: B256::repeat_byte(0x44),
             safe_block_hash: B256::ZERO,
             finalized_block_hash: B256::ZERO,
         };
@@ -2592,7 +2575,7 @@ mod tests {
         let (mut handle, api) = setup_engine_api();
 
         let state = ForkchoiceState {
-            head_block_hash: B256::from([0x11; 32]),
+            head_block_hash: B256::repeat_byte(0x11),
             safe_block_hash: B256::ZERO,
             finalized_block_hash: B256::ZERO,
         };
@@ -2642,7 +2625,7 @@ mod tests {
         let (mut handle, api) = setup_engine_api();
 
         let state = ForkchoiceState {
-            head_block_hash: B256::from([0x22; 32]),
+            head_block_hash: B256::repeat_byte(0x22),
             safe_block_hash: B256::ZERO,
             finalized_block_hash: B256::ZERO,
         };

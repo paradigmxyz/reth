@@ -1,3 +1,4 @@
+use self::blob_cache::BlobValidationCache;
 use alloy_consensus::{
     BlobTransactionValidationError, BlockHeader, EnvKzgSettings, Transaction, TxReceipt,
 };
@@ -23,11 +24,10 @@ use reth_consensus_common::validation::MAX_RLP_BLOCK_SIZE;
 use reth_engine_primitives::PayloadValidator;
 use reth_errors::{BlockExecutionError, ConsensusError, ProviderError};
 use reth_evm::{
-    cached::CachedReads,
-    database::StateProviderDatabase,
-    execute::{BlockExecutionOutput, Executor},
-    ConfigureEvm, SenderRecoveryCache,
+    cached::CachedReads, database::StateProviderDatabase, execute::Executor, ConfigureEvm,
+    SenderRecoveryCache,
 };
+use reth_execution_types::BlockExecutionOutput;
 use reth_metrics::{
     metrics,
     metrics::{gauge, Gauge},
@@ -49,6 +49,8 @@ use sha2::{Digest, Sha256};
 use std::sync::Arc;
 use tokio::sync::{oneshot, RwLock};
 use tracing::warn;
+
+mod blob_cache;
 
 /// The type that implements the `validation` rpc namespace trait
 #[derive(Clone, Debug, derive_more::Deref)]
@@ -86,7 +88,8 @@ where
             evm_config,
             disallow,
             validation_window,
-            cached_state: RwLock::new(Default::default()),
+            cached_state: Default::default(),
+            validated_blobs: Default::default(),
             task_spawner,
             sender_recovery_cache,
             metrics: Default::default(),
@@ -107,7 +110,7 @@ where
         if cache.0 == head {
             cache.1.clone()
         } else {
-            CachedReads::default()
+            Default::default()
         }
     }
 
@@ -117,8 +120,30 @@ where
         if cache.0 == head {
             cache.1.extend(cached_state);
         } else {
-            *cache = (head, cached_state);
+            *cache = (head, cached_state)
         }
+    }
+
+    /// Runs the validation on a blocking task.
+    ///
+    /// The validation is skipped if the request is dropped before it starts and stopped if the
+    /// request is dropped while the validation waits for the cached reads.
+    async fn spawn_validation<F>(&self, validation: F) -> RpcResult<()>
+    where
+        F: Future<Output = Result<(), ValidationApiError>> + Send + 'static,
+    {
+        let (mut tx, rx) = oneshot::channel();
+
+        self.task_spawner.spawn_blocking_task(async move {
+            let result = tokio::select! {
+                biased;
+                _ = tx.closed() => return,
+                result = validation => result.map_err(ErrorObject::from),
+            };
+            let _ = tx.send(result);
+        });
+
+        rx.await.map_err(|_| internal_rpc_err("Internal blocking task error"))?
     }
 }
 
@@ -207,21 +232,31 @@ where
         let mut request_cache = self.cached_reads(parent_header_hash).await;
 
         let (output, block_access_list_hash) = {
-            let db = StateProviderDatabase::new(state_provider.as_ref().into_evm_state_provider());
-            let cached_db = request_cache.as_db_mut(db);
-            let cached_db_handle = cached_db.clone();
+            let cached_db = request_cache
+                .as_db_mut(StateProviderDatabase::new((&state_provider).into_evm_state_provider()));
             let mut executor = self.evm_config.batch_executor(cached_db);
-            let result = executor.execute_one(&block)?;
-            let block_access_list_hash =
-                executor.take_bal().as_ref().map(|bal| compute_block_access_list_hash(bal));
-            let output = BlockExecutionOutput::new(result, executor.into_state());
-            cached_db_handle.sync(&mut request_cache);
 
+            let result = executor.execute_one(&block)?;
+
+            // The executor rebuilds the block access list whenever the block header contains a
+            // BAL hash. Comparing the rebuilt hash against the header post execution also
+            // commits to the submitted access list, because the header's BAL hash is derived
+            // from the submitted bytes.
+            let block_access_list_hash =
+                executor.take_bal().map(|bal| compute_block_access_list_hash(&bal));
+
+            let state = executor.into_state();
             if !self.disallow.is_empty() {
-                self.ensure_no_disallowed_accounts(&request_cache, &output)?;
+                // Check whether the submission interacted with any blacklisted account by
+                // scanning the cached reads and the accounts changed during execution.
+                for account in request_cache.accounts.keys().chain(state.state.keys()) {
+                    if self.disallow.contains(account) {
+                        return Err(ValidationApiError::Blacklist(*account))
+                    }
+                }
             }
 
-            (output, block_access_list_hash)
+            (BlockExecutionOutput { state, result }, block_access_list_hash)
         };
 
         // update the cached reads
@@ -278,26 +313,6 @@ where
         } else {
             Ok(())
         }
-    }
-
-    fn ensure_no_disallowed_accounts(
-        &self,
-        request_cache: &CachedReads,
-        output: &BlockExecutionOutput<<E::Primitives as NodePrimitives>::Receipt>,
-    ) -> Result<(), ValidationApiError> {
-        for account in request_cache.accounts.keys() {
-            if self.disallow.contains(account) {
-                return Err(ValidationApiError::Blacklist(*account))
-            }
-        }
-
-        for account in output.state.state.keys() {
-            if self.disallow.contains(account) {
-                return Err(ValidationApiError::Blacklist(*account))
-            }
-        }
-
-        Ok(())
     }
 
     /// Ensures that the proposer has received [`BidTrace::value`] for this block.
@@ -385,16 +400,15 @@ where
     }
 
     /// Validates the given [`BlobsBundleV2`] and returns versioned hashes for blobs.
+    ///
+    /// Exact blob, commitment, and cell-proof matches from recent submissions reuse KZG
+    /// validation. The resulting hashes are still checked against the block's EIP-4844
+    /// transactions during payload validation.
     pub fn validate_blobs_bundle_v2(
         &self,
         blobs_bundle: BlobsBundleV2,
     ) -> Result<Vec<B256>, ValidationApiError> {
-        let versioned_hashes = blobs_bundle.versioned_hashes();
-        let sidecar =
-            blobs_bundle.try_into_sidecar().map_err(|_| ValidationApiError::InvalidBlobsBundle)?;
-
-        sidecar.validate(&versioned_hashes, EnvKzgSettings::default().get())?;
-        Ok(versioned_hashes)
+        self.validated_blobs.validate(blobs_bundle)
     }
 
     /// Converts the payload into a block and recovers the transaction senders.
@@ -602,16 +616,8 @@ where
         request: BuilderBlockValidationRequestV3,
     ) -> RpcResult<()> {
         let this = self.clone();
-        let (tx, rx) = oneshot::channel();
-
-        self.task_spawner.spawn_blocking_task(async move {
-            let result = Self::validate_builder_submission_v3(&this, request)
-                .await
-                .map_err(ErrorObject::from);
-            let _ = tx.send(result);
-        });
-
-        rx.await.map_err(|_| internal_rpc_err("Internal blocking task error"))?
+        let validation = async move { Self::validate_builder_submission_v3(&this, request).await };
+        self.spawn_validation(validation).await
     }
 
     /// Validates a block submitted to the relay
@@ -620,16 +626,8 @@ where
         request: BuilderBlockValidationRequestV4,
     ) -> RpcResult<()> {
         let this = self.clone();
-        let (tx, rx) = oneshot::channel();
-
-        self.task_spawner.spawn_blocking_task(async move {
-            let result = Self::validate_builder_submission_v4(&this, request)
-                .await
-                .map_err(ErrorObject::from);
-            let _ = tx.send(result);
-        });
-
-        rx.await.map_err(|_| internal_rpc_err("Internal blocking task error"))?
+        let validation = async move { Self::validate_builder_submission_v4(&this, request).await };
+        self.spawn_validation(validation).await
     }
 
     /// Validates a block submitted to the relay
@@ -638,16 +636,8 @@ where
         request: BuilderBlockValidationRequestV5,
     ) -> RpcResult<()> {
         let this = self.clone();
-        let (tx, rx) = oneshot::channel();
-
-        self.task_spawner.spawn_blocking_task(async move {
-            let result = Self::validate_builder_submission_v5(&this, request)
-                .await
-                .map_err(ErrorObject::from);
-            let _ = tx.send(result);
-        });
-
-        rx.await.map_err(|_| internal_rpc_err("Internal blocking task error"))?
+        let validation = async move { Self::validate_builder_submission_v5(&this, request).await };
+        self.spawn_validation(validation).await
     }
 
     /// Validates a block submitted to the relay
@@ -656,16 +646,8 @@ where
         request: BuilderBlockValidationRequestV6,
     ) -> RpcResult<()> {
         let this = self.clone();
-        let (tx, rx) = oneshot::channel();
-
-        self.task_spawner.spawn_blocking_task(async move {
-            let result = Self::validate_builder_submission_v6(&this, request)
-                .await
-                .map_err(ErrorObject::from);
-            let _ = tx.send(result);
-        });
-
-        rx.await.map_err(|_| internal_rpc_err("Internal blocking task error"))?
+        let validation = async move { Self::validate_builder_submission_v6(&this, request).await };
+        self.spawn_validation(validation).await
     }
 }
 
@@ -688,6 +670,8 @@ pub struct ValidationApiInner<Provider, E: ConfigureEvm, T: PayloadTypes> {
     /// latest head block state. Uses async `RwLock` to safely handle concurrent validation
     /// requests.
     cached_state: RwLock<(B256, CachedReads)>,
+    /// Recently validated blob, commitment, and cell-proof tuples shared by V2 submissions.
+    validated_blobs: BlobValidationCache,
     /// Task spawner for blocking operations
     task_spawner: Runtime,
     /// Cache of recovered transaction senders shared with transaction ingress and payload
@@ -967,8 +951,8 @@ mod tests {
     #[test]
     fn test_hash_disallow_list_deterministic() {
         let mut addresses = AddressSet::default();
-        addresses.insert(Address::from([1u8; 20]));
-        addresses.insert(Address::from([2u8; 20]));
+        addresses.insert(Address::repeat_byte(1u8));
+        addresses.insert(Address::repeat_byte(2u8));
 
         let hash1 = hash_disallow_list(&addresses);
         let hash2 = hash_disallow_list(&addresses);
@@ -979,10 +963,10 @@ mod tests {
     #[test]
     fn test_hash_disallow_list_different_content() {
         let mut addresses1 = AddressSet::default();
-        addresses1.insert(Address::from([1u8; 20]));
+        addresses1.insert(Address::repeat_byte(1u8));
 
         let mut addresses2 = AddressSet::default();
-        addresses2.insert(Address::from([2u8; 20]));
+        addresses2.insert(Address::repeat_byte(2u8));
 
         let hash1 = hash_disallow_list(&addresses1);
         let hash2 = hash_disallow_list(&addresses2);
@@ -993,12 +977,12 @@ mod tests {
     #[test]
     fn test_hash_disallow_list_order_independent() {
         let mut addresses1 = AddressSet::default();
-        addresses1.insert(Address::from([1u8; 20]));
-        addresses1.insert(Address::from([2u8; 20]));
+        addresses1.insert(Address::repeat_byte(1u8));
+        addresses1.insert(Address::repeat_byte(2u8));
 
         let mut addresses2 = AddressSet::default();
-        addresses2.insert(Address::from([2u8; 20])); // Different insertion order
-        addresses2.insert(Address::from([1u8; 20]));
+        addresses2.insert(Address::repeat_byte(2u8)); // Different insertion order
+        addresses2.insert(Address::repeat_byte(1u8));
 
         let hash1 = hash_disallow_list(&addresses1);
         let hash2 = hash_disallow_list(&addresses2);

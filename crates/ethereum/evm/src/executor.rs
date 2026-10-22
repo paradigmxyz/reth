@@ -1,5 +1,5 @@
 //! EVM-backed Ethereum executor.
-use reth_execution_types::{BlockState, EvmState};
+use reth_execution_types::{BlockState, StateUpdate};
 
 use crate::{
     execution::{
@@ -39,21 +39,26 @@ where
     T: EvmTypes<Tx: Typed2718, TxResultExt: Send>,
     R: ReceiptBuilder,
 {
-    evm: Evm<'a, T>,
+    /// EVM containing the execution overlay and optional block access list builder.
+    pub evm: Evm<'a, T>,
     ctx: EthBlockExecutionCtx<'a>,
     receipt_builder: R,
     spec_id: evm2::SpecId,
     base_block_reward: Option<u128>,
     dao_fork_transition: bool,
     deposit_contract_address: Option<Address>,
-    block_state: BlockState,
+    /// Accumulated state changes, including state committed through the executor's hooks.
+    pub block_state: BlockState,
     state_update_hook: StateUpdateHook,
-    receipts: Vec<R::Receipt>,
-    cumulative_gas_used: u64,
+    /// Transaction receipts in execution order.
+    pub receipts: Vec<R::Receipt>,
+    /// Total receipt gas used.
+    pub cumulative_gas_used: u64,
     block_regular_gas_used: u64,
     block_state_gas_used: u64,
     separate_block_gas: bool,
-    blob_gas_used: u64,
+    /// Total blob gas used.
+    pub blob_gas_used: u64,
     bal_index_offset: u64,
 }
 
@@ -86,7 +91,7 @@ impl<T: EvmTypes, TxType> EthTransactionResultWithState<T, TxType> {
     }
 }
 
-type StateUpdateHook = Option<Box<dyn FnMut(EvmState) + Send>>;
+type StateUpdateHook = Option<Box<dyn FnMut(StateUpdate) + Send>>;
 
 impl<'a, T, R> EthBlockExecutor<'a, T, R>
 where
@@ -176,6 +181,11 @@ where
         );
     }
 
+    /// Sets the Ethereum fork used for block system calls and deposit request processing.
+    pub const fn set_spec_id(&mut self, spec_id: evm2::SpecId) {
+        self.spec_id = spec_id;
+    }
+
     #[inline]
     const fn set_transaction_block_access_index(&mut self) {
         if self.block_access_list_builder_enabled() {
@@ -205,7 +215,7 @@ where
         &mut self.evm
     }
 
-    fn set_state_hook(&mut self, hook: impl FnMut(EvmState) + Send + 'static) -> bool {
+    fn set_state_hook(&mut self, hook: impl FnMut(StateUpdate) + Send + 'static) -> bool {
         self.state_update_hook = Some(Box::new(hook));
         true
     }
@@ -592,6 +602,7 @@ where
     initialized: bool,
     requests: Requests,
     gas_used_offset: u64,
+    receipt_gas_used_offset: u64,
     blob_gas_used_offset: u64,
 }
 
@@ -622,6 +633,7 @@ where
             initialized: false,
             requests: Requests::default(),
             gas_used_offset: 0,
+            receipt_gas_used_offset: 0,
             blob_gas_used_offset: 0,
         }
     }
@@ -749,6 +761,7 @@ where
     fn merge_segment(&mut self, segment: FinishedBigBlockSegment) {
         self.requests.extend(segment.requests);
         self.gas_used_offset += segment.gas_used;
+        self.receipt_gas_used_offset += self.inner.cumulative_gas_used;
         self.blob_gas_used_offset += segment.blob_gas_used;
         self.inner.cumulative_gas_used = 0;
         self.inner.block_regular_gas_used = 0;
@@ -758,7 +771,7 @@ where
 
     fn after_committed_transaction(&mut self) -> Result<(), BlockExecutionError> {
         if let Some(receipt) = self.inner.receipts.last_mut() {
-            receipt.cumulative_gas_used += self.gas_used_offset;
+            receipt.cumulative_gas_used += self.receipt_gas_used_offset;
         }
         self.tx_counter += 1;
         while self.worker_segment.is_none() &&
@@ -806,7 +819,7 @@ where
         self.inner.evm_mut()
     }
 
-    fn set_state_hook(&mut self, hook: impl FnMut(EvmState) + Send + 'static) -> bool {
+    fn set_state_hook(&mut self, hook: impl FnMut(StateUpdate) + Send + 'static) -> bool {
         self.inner.set_state_hook(hook)
     }
 
@@ -956,7 +969,7 @@ const fn final_block_gas_used(
     }
 }
 
-fn emit_state(hook: &mut StateUpdateHook, state: EvmState) {
+fn emit_state(hook: &mut StateUpdateHook, state: StateUpdate) {
     if let Some(hook) = hook.as_mut() {
         hook(state);
     }
@@ -964,9 +977,7 @@ fn emit_state(hook: &mut StateUpdateHook, state: EvmState) {
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        final_block_gas_used, EthBigBlockPlan, EthBigBlockSegment, EthBlockExecutionCtx, EthEvmEnv,
-    };
+    use super::*;
     use alloy_consensus::{SignableTransaction, TxLegacy};
     use alloy_eip7928::BlockAccessIndex;
     use alloy_primitives::{address, Address, Bytes, Signature, TxKind, B256, U256};
@@ -1276,5 +1287,67 @@ mod tests {
         assert_eq!(final_block_gas_used(true, 90, 70, 120), 120);
         assert_eq!(final_block_gas_used(true, 90, 130, 120), 130);
         assert_eq!(final_block_gas_used(false, 90, 130, 120), 90);
+    }
+
+    #[test]
+    fn amsterdam_segment_receipts_use_transaction_gas() {
+        let sender = Address::with_last_byte(0x10);
+        let mut database = TestDatabase::default();
+        database.accounts.insert(
+            sender,
+            AccountInfo::default().with_balance(U256::from(1_000_000_000_000_000_000u64)),
+        );
+        let segments = (0..2)
+            .map(|index| {
+                let mut segment = segment(index, index as u64 + 1, B256::ZERO);
+                segment.ctx.parent_beacon_block_root = Some(B256::ZERO);
+                segment.evm_env = EthEvmEnv::new(
+                    SpecId::AMSTERDAM,
+                    BlockEnv::<BaseEvmTypes> {
+                        number: U256::from(index + 1),
+                        gas_limit: U256::from(30_000_000),
+                        ..Default::default()
+                    },
+                    1,
+                );
+                segment
+            })
+            .collect();
+        let plan = EthBigBlockPlan::new(segments, Vec::new(), 2);
+        let factory = super::super::factory::EthBigBlockExecutorFactory::new(
+            super::super::factory::EthBlockExecutorFactory::new(Arc::new(
+                ChainSpecBuilder::mainnet().amsterdam_activated().build(),
+            )),
+        );
+        let evm = factory.evm_with_env(Db::new(database), plan.segments[0].evm_env.clone());
+        let mut executor = factory.create_executor(evm, plan);
+        executor.apply_pre_execution_changes().unwrap();
+        let mut receipt_gas = 0;
+        let mut block_gas = 0;
+        for nonce in 0..2 {
+            // Creating a recipient charges state gas, separating receipt and block gas totals.
+            let tx = TransactionSigned::Legacy(
+                TxLegacy {
+                    chain_id: Some(1),
+                    nonce,
+                    gas_limit: 1_000_000,
+                    gas_price: 1,
+                    to: TxKind::Call(Address::with_last_byte(0x20 + nonce as u8)),
+                    value: U256::from(1),
+                    ..Default::default()
+                }
+                .into_signed(Signature::test_signature()),
+            );
+            let gas = executor.execute_transaction(Recovered::new_unchecked(tx, sender)).unwrap();
+            let segment_block_gas = gas.regular_gas_used().max(gas.state_gas_used());
+            assert_ne!(gas.tx_gas_used(), segment_block_gas);
+            receipt_gas += gas.tx_gas_used();
+            block_gas += segment_block_gas;
+            let receipt = executor.receipts().last().unwrap();
+            assert!(receipt.success);
+            assert_eq!(receipt.cumulative_gas_used, receipt_gas);
+        }
+        let (output, _) = executor.finish_with_block_access_list().unwrap();
+        assert_eq!(output.result.gas_used, block_gas);
     }
 }

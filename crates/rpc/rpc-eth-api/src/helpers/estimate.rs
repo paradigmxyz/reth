@@ -2,14 +2,16 @@
 
 use super::{call::request_gas_price, Call, LoadPendingBlock};
 use crate::{AsEthApiError, FromEthApiError, FromEvmError, IntoEthApiError};
-use alloy_consensus::Transaction;
 use alloy_network::TransactionBuilder;
 use alloy_primitives::{TxKind, KECCAK256_EMPTY, U256};
 use alloy_rpc_types_eth::{state::EvmOverrides, BlockId};
 use evm2::{evm::DynDatabase, EvmFeatures, TxResult};
 use futures::Future;
 use reth_chainspec::MIN_TRANSACTION_GAS;
-use reth_evm::{execute::BlockExecutorFactory, ConfigureEvm, Evm, EvmEnv, EvmEnvFor, EvmTypesFor};
+use reth_evm::{
+    execute::BlockExecutorFactory, ConfigureEvm, Evm, EvmEnv, EvmEnvFor, EvmTypesFor,
+    TransactionEnvMut,
+};
 use reth_rpc_convert::{RpcConvert, RpcTxReq};
 use reth_rpc_eth_types::{
     cache::db::{apply_block_overrides, apply_state_overrides},
@@ -18,6 +20,7 @@ use reth_rpc_eth_types::{
 };
 use reth_rpc_server_types::constants::gas_oracle::{CALL_STIPEND_GAS, ESTIMATE_GAS_ERROR_RATIO};
 use reth_storage_api::{EvmStateProvider, StateProvider};
+use reth_tasks::cancel::is_cancelled;
 use tracing::trace;
 
 /// Gas execution estimates
@@ -124,13 +127,11 @@ pub trait EstimateCall: Call {
             highest_gas_limit = highest_gas_limit.min(allowance);
         }
 
-        request.as_mut().set_nonce(tx_env.nonce());
         let mut evm =
             self.evm_config().block_executor_factory().evm_with_database(&mut db, evm_env.clone());
         let mut execute = |gas_limit| {
-            let mut request = request.clone();
-            request.as_mut().set_gas_limit(gas_limit);
-            let tx_env = self.converter().tx_env(request, &evm_env)?;
+            let mut tx_env = tx_env.clone();
+            tx_env.inner_mut().set_gas_limit(gas_limit);
             evm.transact_result(&tx_env).map_err(Self::Error::from_evm_err)
         };
 
@@ -246,6 +247,9 @@ pub trait EstimateCall: Call {
                 break
             };
 
+            if is_cancelled() {
+                return Err(EthApiError::InternalEthError.into())
+            }
             // Execute transaction and handle potential gas errors, adjusting limits accordingly.
             match execute(mid_gas_limit) {
                 Err(err) if err.is_gas_too_high() => {
@@ -288,8 +292,7 @@ pub trait EstimateCall: Call {
         async move {
             let (evm_env, at) = self.evm_env_at(at).await?;
 
-            self.spawn_blocking_io_fut(async move |this| {
-                let state = this.state_at_block_id(at).await?;
+            self.spawn_blocking_io_with_state(at, move |this, state| {
                 EstimateCall::estimate_gas_with(
                     &this,
                     evm_env,

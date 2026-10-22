@@ -1,4 +1,4 @@
-use crate::proof_task::StorageProofResultMessage;
+use crate::storage_proof::StorageProofResultMessage;
 use alloy_primitives::{map::B256Map, B256};
 use alloy_rlp::Encodable;
 use core::cell::RefCell;
@@ -52,8 +52,7 @@ pub(crate) enum AsyncAccountDeferredValueEncoder<TC, HC> {
         /// The receiver for the storage proof result. This is an `Option` so that `encode` can
         /// take ownership of the receiver, preventing the `Drop` impl from trying to receive on
         /// it again.
-        proof_result_rx:
-            Option<Result<CrossbeamReceiver<StorageProofResultMessage>, DatabaseError>>,
+        proof_result_rx: Option<CrossbeamReceiver<StorageProofResultMessage>>,
         /// Shared storage proof results.
         storage_proof_results: Rc<RefCell<B256Map<Vec<ProofTrieNodeV2>>>>,
         /// Shared stats for tracking wait time and counts.
@@ -87,19 +86,12 @@ impl<TC, HC> Drop for AsyncAccountDeferredValueEncoder<TC, HC> {
             let Some(proof_result_rx) = proof_result_rx.take() else { return };
 
             (|| -> Result<(), StateProofError> {
-                let rx = proof_result_rx?;
-
-                let wait_start = Instant::now();
-                let msg = rx.recv().map_err(|_| {
-                    StateProofError::Database(DatabaseError::Other(format!(
-                        "Storage proof channel closed for {hashed_address:?}",
-                    )))
-                })?;
-                let result = msg.result?;
-
-                stats.borrow_mut().storage_wait_time += wait_start.elapsed();
-
-                storage_proof_results.borrow_mut().insert(*hashed_address, result.proof);
+                collect_storage_proof(
+                    *hashed_address,
+                    &proof_result_rx,
+                    &mut storage_proof_results.borrow_mut(),
+                    &mut stats.borrow_mut(),
+                )?;
                 Ok(())
             })()
         } else {
@@ -117,6 +109,7 @@ where
     TC: TrieStorageCursor,
     HC: HashedStorageCursor<Value = alloy_primitives::U256>,
 {
+    #[allow(clippy::clone_on_copy)]
     fn encode(mut self, buf: &mut Vec<u8>) -> Result<(), StateProofError> {
         let (account, root) = match &mut self {
             Self::Dispatched {
@@ -128,25 +121,19 @@ where
                 storage_calculator,
             } => {
                 let hashed_address = *hashed_address;
-                let account = *account;
+                let account = account.clone();
                 // Take the receiver so Drop won't try to receive on it again
                 let proof_result_rx = proof_result_rx
                     .take()
                     .expect("encode called on already-consumed Dispatched encoder");
-                let wait_start = Instant::now();
-                let result = proof_result_rx?
-                    .recv()
-                    .map_err(|_| {
-                        StateProofError::Database(DatabaseError::Other(format!(
-                            "Storage proof channel closed for {hashed_address:?}",
-                        )))
-                    })?
-                    .result?;
-                stats.borrow_mut().storage_wait_time += wait_start.elapsed();
+                let root = collect_storage_proof(
+                    hashed_address,
+                    &proof_result_rx,
+                    &mut storage_proof_results.borrow_mut(),
+                    &mut stats.borrow_mut(),
+                )?;
 
-                storage_proof_results.borrow_mut().insert(hashed_address, result.proof);
-
-                let root = match result.root {
+                let root = match root {
                     Some(root) => root,
                     None => {
                         // In `compute_v2_account_multiproof` we ensure that all dispatched storage
@@ -169,7 +156,7 @@ where
             }
             Self::Sync { storage_calculator, hashed_address, account } => {
                 let hashed_address = *hashed_address;
-                let account = *account;
+                let account = account.clone();
                 let mut calculator = storage_calculator.borrow_mut();
                 let root_node = calculator.storage_root_node(hashed_address)?;
                 let storage_root = calculator
@@ -249,18 +236,7 @@ impl<TC, HC> AsyncAccountValueEncoder<TC, HC> {
         // Any remaining dispatched proofs need to have their results collected.
         // These are proofs that were pre-dispatched but not consumed during proof calculation.
         for (hashed_address, rx) in &self.dispatched {
-            let wait_start = Instant::now();
-            let result = rx
-                .recv()
-                .map_err(|_| {
-                    StateProofError::Database(DatabaseError::Other(format!(
-                        "Storage proof channel closed for {hashed_address:?}",
-                    )))
-                })?
-                .result?;
-            stats.storage_wait_time += wait_start.elapsed();
-
-            storage_proof_results.insert(*hashed_address, result.proof);
+            collect_storage_proof(*hashed_address, rx, &mut storage_proof_results, &mut stats)?;
         }
 
         Ok((storage_proof_results, stats))
@@ -287,7 +263,7 @@ where
             return AsyncAccountDeferredValueEncoder::Dispatched {
                 hashed_address,
                 account,
-                proof_result_rx: Some(Ok(rx)),
+                proof_result_rx: Some(rx),
                 storage_proof_results: self.storage_proof_results.clone(),
                 stats: self.stats.clone(),
                 storage_calculator: self.storage_calculator.clone(),
@@ -305,4 +281,25 @@ where
             account,
         }
     }
+}
+
+// Receives one worker result and records its proof and successful wait time for every consumer.
+fn collect_storage_proof(
+    hashed_address: B256,
+    receiver: &CrossbeamReceiver<StorageProofResultMessage>,
+    proofs: &mut B256Map<Vec<ProofTrieNodeV2>>,
+    stats: &mut ValueEncoderStats,
+) -> Result<Option<B256>, StateProofError> {
+    let wait_start = Instant::now();
+    let result = receiver
+        .recv()
+        .map_err(|_| {
+            StateProofError::Database(DatabaseError::Other(format!(
+                "Storage proof channel closed for {hashed_address:?}",
+            )))
+        })?
+        .result?;
+    stats.storage_wait_time += wait_start.elapsed();
+    proofs.insert(hashed_address, result.proof);
+    Ok(result.root)
 }

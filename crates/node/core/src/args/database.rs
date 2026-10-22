@@ -1,4 +1,4 @@
-//! clap [Args](clap::Args) for database configuration
+//! clap [`Args`] for database configuration.
 
 use std::{fmt, str::FromStr, time::Duration};
 

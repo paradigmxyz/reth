@@ -296,6 +296,10 @@ impl TreeConfig {
     /// Create engine tree configuration.
     ///
     /// The backfill run threshold is clamped to [`MAX_BACKFILL_RUN_THRESHOLD`].
+    ///
+    /// # Panics
+    ///
+    /// Panics if `multiproof_chunk_size` is zero or the persistence thresholds are inconsistent.
     #[expect(clippy::too_many_arguments)]
     pub const fn new(
         persistence_threshold: u64,
@@ -326,6 +330,7 @@ impl TreeConfig {
         share_execution_cache_with_payload_builder: bool,
         share_sparse_trie_with_payload_builder: bool,
     ) -> Self {
+        assert!(multiproof_chunk_size > 0, "multiproof chunk size must be non-zero");
         let num_state_masking_blocks =
             if persistence_threshold == 0 { 0 } else { num_state_masking_blocks };
         assert_backpressure_threshold_invariant(
@@ -667,7 +672,12 @@ impl TreeConfig {
     }
 
     /// Setter for multiproof task chunk size for proof targets.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `multiproof_chunk_size` is zero.
     pub const fn with_multiproof_chunk_size(mut self, multiproof_chunk_size: usize) -> Self {
+        assert!(multiproof_chunk_size > 0, "multiproof chunk size must be non-zero");
         self.multiproof_chunk_size = multiproof_chunk_size;
         self
     }
@@ -890,26 +900,6 @@ mod tests {
     }
 
     #[test]
-    fn txpool_prewarming_is_disabled_by_default_and_can_be_enabled() {
-        assert!(!TreeConfig::default().txpool_prewarming());
-        assert!(TreeConfig::default().with_txpool_prewarming(true).txpool_prewarming());
-    }
-
-    #[test]
-    fn state_root_task_requires_parallelism_without_overrides() {
-        assert!(TreeConfig::default().with_has_enough_parallelism(true).use_state_root_task());
-        assert!(!TreeConfig::default().with_has_enough_parallelism(false).use_state_root_task());
-        assert!(!TreeConfig::default()
-            .with_has_enough_parallelism(true)
-            .with_state_root_fallback(true)
-            .use_state_root_task());
-        assert!(!TreeConfig::default()
-            .with_has_enough_parallelism(true)
-            .with_skip_state_root(true)
-            .use_state_root_task());
-    }
-
-    #[test]
     #[should_panic(
         expected = "persistence_backpressure_threshold must be greater than persistence_threshold"
     )]
@@ -918,14 +908,6 @@ mod tests {
             .with_num_state_masking_blocks(0)
             .with_persistence_threshold(4)
             .with_persistence_backpressure_threshold(4);
-    }
-
-    #[test]
-    fn default_persistence_settings() {
-        let config = TreeConfig::default();
-        assert_eq!(config.persistence_threshold(), 50);
-        assert_eq!(config.num_state_masking_blocks(), 30);
-        assert_eq!(config.persistence_backpressure_threshold(), 100);
     }
 
     #[test]

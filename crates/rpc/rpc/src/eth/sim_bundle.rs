@@ -1,7 +1,6 @@
 //! `Eth` Sim bundle implementation and helpers.
 
 use alloy_consensus::{transaction::TxHashRef, BlockHeader};
-use alloy_eips::BlockNumberOrTag;
 use alloy_primitives::U256;
 use alloy_rpc_types_eth::{BlockId, Log};
 use alloy_rpc_types_mev::{
@@ -289,7 +288,7 @@ where
         // Also, flatten the bundle here so that its easier to process
         let flattened_bundle = self.parse_and_flatten_bundle(&request)?;
 
-        let block_id = parent_block.unwrap_or(BlockId::Number(BlockNumberOrTag::Latest));
+        let block_id = parent_block.unwrap_or(BlockId::latest());
         let (parent, _, parent_block_id) =
             self.eth_api().evm_env_and_recovered_block_at(block_id).await?;
 
@@ -657,7 +656,7 @@ mod tests {
             (SimBundleOverrides::default(), 1, 112, 875_000_000, coinbase),
             (
                 SimBundleOverrides {
-                    parent_block: Some(BlockNumberOrTag::Number(0).into()),
+                    parent_block: Some(BlockId::number(0)),
                     block_overrides: BlockOverrides {
                         number: Some(U256::from(2)),
                         time: Some(200),

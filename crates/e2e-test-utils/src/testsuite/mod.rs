@@ -7,7 +7,7 @@ use crate::{
 use alloy_primitives::{Bytes, B256};
 use eyre::Result;
 use jsonrpsee::http_client::HttpClient;
-use reth_node_api::{EngineTypes, PayloadTypes};
+use reth_node_api::{EngineTypes, PayloadAttrTy, PayloadTypes};
 use reth_payload_builder::{PayloadBuilderHandle, PayloadId};
 use std::{collections::HashMap, marker::PhantomData};
 pub mod actions;
@@ -15,7 +15,9 @@ pub mod setup;
 use crate::testsuite::setup::Setup;
 use alloy_provider::{Provider, ProviderBuilder};
 use alloy_rpc_types_engine::{ForkchoiceState, PayloadAttributes};
+use reth_chainspec::ChainSpec;
 use reth_engine_primitives::ConsensusEngineHandle;
+use reth_provider::{BlockNumReader, ProviderResult};
 use reth_rpc_builder::auth::AuthServerHandle;
 use std::sync::Arc;
 use url::Url;
@@ -36,6 +38,8 @@ where
     pub(crate) payload_builder: Option<PayloadBuilderHandle<Payload>>,
     /// Alloy provider for interacting with the node
     provider: Arc<dyn Provider + Send + Sync>,
+    /// Opens read-only views of the node's database, if the node runs in-process.
+    pub(crate) database: Option<DatabaseOpener>,
 }
 
 impl<Payload> NodeClient<Payload>
@@ -46,7 +50,14 @@ where
     pub fn new(rpc: HttpClient, engine: AuthServerHandle, url: Url) -> Self {
         let provider =
             Arc::new(ProviderBuilder::new().connect_http(url)) as Arc<dyn Provider + Send + Sync>;
-        Self { rpc, engine, beacon_engine_handle: None, payload_builder: None, provider }
+        Self {
+            rpc,
+            engine,
+            beacon_engine_handle: None,
+            payload_builder: None,
+            provider,
+            database: None,
+        }
     }
 
     /// Instantiates a new [`NodeClient`] with the given handles, RPC URL, and beacon engine handle
@@ -64,6 +75,7 @@ where
             beacon_engine_handle: Some(beacon_engine_handle),
             payload_builder: None,
             provider,
+            database: None,
         }
     }
 
@@ -92,6 +104,16 @@ where
     pub async fn is_ready(&self) -> bool {
         self.get_block_by_number(alloy_eips::BlockNumberOrTag::Latest).await.is_ok()
     }
+
+    /// Opens a read-only view of the node's database.
+    ///
+    /// Unlike the RPC endpoints, the view only contains blocks that were persisted to disk, not
+    /// canonical blocks that the engine still holds in memory.
+    pub fn database_provider_ro(&self) -> Result<Box<dyn BlockNumReader>> {
+        let open =
+            self.database.as_ref().ok_or_else(|| eyre::eyre!("Node database is not accessible"))?;
+        Ok(open()?)
+    }
 }
 
 impl<Payload> std::fmt::Debug for NodeClient<Payload>
@@ -104,9 +126,14 @@ where
             .field("engine", &self.engine)
             .field("beacon_engine_handle", &self.beacon_engine_handle.is_some())
             .field("provider", &"<Provider>")
+            .field("database", &self.database.is_some())
             .finish()
     }
 }
+
+/// Opens a read-only view of a node's database.
+pub(crate) type DatabaseOpener =
+    Arc<dyn Fn() -> ProviderResult<Box<dyn BlockNumReader>> + Send + Sync>;
 
 /// Represents complete block information.
 #[derive(Debug, Clone, Copy)]
@@ -332,7 +359,7 @@ where
         self
     }
 
-    /// Set the test setup with chain import from RLP file
+    /// Set the test setup with chain import from RLP file, see [`Setup::apply_with_import`].
     pub fn with_setup_and_import(
         mut self,
         mut setup: Setup<I>,
@@ -365,7 +392,8 @@ where
     /// Run the test scenario
     pub async fn run<N>(mut self) -> Result<()>
     where
-        N: NodeBuilderHelper<Payload = I>,
+        N: NodeBuilderHelper<Payload = I, ChainSpec: From<ChainSpec>>,
+        PayloadAttrTy<N>: From<PayloadAttributes>,
     {
         let mut setup = self.setup.take();
 

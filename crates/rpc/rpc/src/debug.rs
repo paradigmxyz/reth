@@ -1,4 +1,4 @@
-use alloy_consensus::{constants::KECCAK_EMPTY, transaction::TxHashRef, BlockHeader};
+use alloy_consensus::{transaction::TxHashRef, BlockHeader};
 use alloy_eips::{eip2718::Encodable2718, BlockId, BlockNumberOrTag};
 use alloy_genesis::ChainConfig;
 use alloy_primitives::{hex::decode, uint, Address, Bytes, B256, U256, U64};
@@ -42,7 +42,7 @@ use reth_storage_api::{
     ReceiptProviderIdExt, StateProviderFactory, StateRootProvider, StorageRootProvider,
     TransactionVariant,
 };
-use reth_tasks::{pool::BlockingTaskGuard, Runtime};
+use reth_tasks::{cancel::is_cancelled, pool::BlockingTaskGuard, Runtime};
 use reth_transaction_pool::TransactionPool;
 use reth_trie_common::{
     root::storage_root_unsorted, updates::TrieUpdates, ExecutionWitnessMode, HashedPostState,
@@ -137,6 +137,9 @@ where
                     .block_executor_factory()
                     .evm_with_database(&mut db, evm_env);
                 while let Some((index, tx)) = transactions.next() {
+                    if is_cancelled() {
+                        return Err(EthApiError::InternalEthError.into())
+                    }
                     let _tx_hash = *tx.tx_hash();
                     let tx_env = eth_api.evm_config().tx_env(tx.cloned());
 
@@ -552,6 +555,9 @@ where
 
                     let mut transactions = transactions.into_iter().peekable();
                     while let Some(tx) = transactions.next() {
+                        if is_cancelled() {
+                            return Err(EthApiError::InternalEthError.into())
+                        }
                         // apply state overrides only once, before the first transaction
                         let state_overrides = state_overrides.take();
                         let overrides = EvmOverrides::new(state_overrides, block_overrides.clone());
@@ -635,9 +641,11 @@ where
                     .executor(&mut db)
                     .execute(&block)
                     .map_err(|err| EthApiError::Internal(err.into()))?;
+                let codes = ExecutionWitnessRecord::capture_codes(&db);
                 db.commit_source(&reth_execution_types::BundleSource(&output.state));
 
                 Ok(ExecutionWitnessRecord::new(&db)
+                    .with_canonical_codes(codes)
                     .into_execution_witness(
                         &db.db.inner().0 .0,
                         eth_api.provider(),
@@ -705,6 +713,9 @@ where
                 eth_api.apply_pre_execution_changes(&block, &mut db)?;
 
                 for tx in block.transactions_recovered().take(tx_index + 1) {
+                    if is_cancelled() {
+                        return Err(EthApiError::InternalEthError.into())
+                    }
                     let tx_env = eth_api.evm_config().tx_env(tx.cloned());
                     let result = eth_api.transact(&mut db, evm_env.clone(), tx_env)?;
                     db.commit_source(&result.pending_state);
@@ -724,9 +735,6 @@ where
             .map_err(Eth::Error::from_eth_err)?;
         let Some(account) = account else { return Ok(None) };
 
-        let balance = account.balance;
-        let nonce = account.nonce;
-        let code_hash = account.code_hash;
         let storage = db.cache.storage.get(&address);
         let hashed_storage = storage.map_or_else(HashedStorage::default, |s| {
             HashedStorage::from_plain_storage(s.slots.iter())
@@ -739,17 +747,21 @@ where
             db.db.inner().storage_root(address, hashed_storage).map_err(Eth::Error::from_eth_err)?
         };
 
-        Ok(Some(Account { balance, nonce, code_hash, storage_root }))
+        Ok(Some(
+            reth_primitives_traits::Account::from(reth_execution_types::revm_account(&account))
+                .into_trie_account(storage_root),
+        ))
     }
 
     /// Retrieves the account's balance, nonce, and code from the given state.
+    #[allow(clippy::needless_update)]
     fn account_info(db: &mut StateCacheDb, address: Address) -> Result<AccountInfo, Eth::Error> {
         let account = db
             .get_account(&address)
             .map_err(EthApiError::from)
             .map_err(Eth::Error::from_eth_err)?
             .unwrap_or_default();
-        let code = if account.code_hash == KECCAK_EMPTY {
+        let code = if account.code_hash == alloy_primitives::KECCAK256_EMPTY {
             Default::default()
         } else if let Some(code) = account.code {
             code.original_bytes()
@@ -760,7 +772,16 @@ where
                 .original_bytes()
         };
 
-        Ok(AccountInfo { balance: account.balance, nonce: account.nonce, code })
+        Ok(AccountInfo {
+            balance: account.balance,
+            nonce: account.nonce,
+            code,
+            #[cfg(feature = "account-ext")]
+            extension: reth_primitives_traits::AccountExtension::from_shared(
+                account.extension.into_shared(),
+            ),
+            ..Default::default()
+        })
     }
 
     /// Returns the code associated with a given hash at the specified block ID. If no code is
@@ -812,6 +833,9 @@ where
                 let mut roots = Vec::with_capacity(block.body().transactions().len());
                 let mut state = eth_api.apply_pre_execution_changes(&block, &mut db)?;
                 for tx in block.transactions_recovered() {
+                    if is_cancelled() {
+                        return Err(EthApiError::InternalEthError.into())
+                    }
                     let tx_env = eth_api.evm_config().tx_env(tx.cloned());
                     let result = eth_api.transact(&mut db, evm_env.clone(), tx_env)?;
                     let mut changes = reth_execution_types::TransactionChanges::default();
@@ -1026,7 +1050,7 @@ where
                     break
                 }
 
-                let block_id = BlockId::Number(number.into());
+                let block_id = BlockId::number(number);
                 let block = match this.eth_api().recovered_block(block_id).await {
                     Ok(Some(block)) => block,
                     Ok(None) => {
@@ -1495,18 +1519,22 @@ impl<B: BlockTrait> Default for BadBlockStore<B> {
 mod tests {
     use super::*;
     use crate::{eth::helpers::types::EthRpcConverter, EthApi};
+    use alloy_genesis::{Genesis, GenesisAccount};
     use alloy_primitives::{keccak256, U256};
-    use reth_chainspec::ChainSpec;
+    use reth_chainspec::{ChainSpec, ChainSpecBuilder};
     use reth_db_api::{tables, transaction::DbTxMut};
+    use reth_db_common::init::init_genesis;
     use reth_evm_ethereum::EthEvmConfig;
     use reth_network_api::noop::NoopNetwork;
     use reth_primitives_traits::StorageEntry;
-    use reth_provider::test_utils::{create_test_provider_factory, NoopProvider};
+    use reth_provider::test_utils::{
+        create_test_provider_factory, create_test_provider_factory_with_chain_spec, NoopProvider,
+    };
     use reth_rpc_eth_api::EthApiServer;
     use reth_transaction_pool::test_utils::testing_pool;
     use revm::{
         database::{states::StorageSlot, AccountStatus, BundleAccount, BundleState},
-        state::AccountInfo as RevmAccountInfo,
+        state::{AccountInfo as RevmAccountInfo, Bytecode},
     };
 
     #[tokio::test]
@@ -1548,12 +1576,7 @@ mod tests {
     }
 
     #[test]
-    fn destroyed_account_witness_includes_parent_storage_proofs() {
-        use alloy_genesis::{Genesis, GenesisAccount};
-        use reth_chainspec::ChainSpecBuilder;
-        use reth_db_common::init::init_genesis;
-        use reth_provider::test_utils::create_test_provider_factory_with_chain_spec;
-
+    fn witness_preserves_parent_storage_and_code_reads() {
         let address = Address::with_last_byte(1);
         let slots = [B256::with_last_byte(1), B256::with_last_byte(2)];
         let genesis = Genesis::default().extend_accounts([(
@@ -1572,10 +1595,34 @@ mod tests {
         state.cache.accounts.insert(address, None);
         state.cache.storage.entry(address).or_default().wipe();
 
+        let read_code = Bytecode::new_raw(alloy_primitives::bytes!("600100"));
+        let created_code = Bytecode::new_raw(alloy_primitives::bytes!("600200"));
+        state
+            .cache
+            .contracts
+            .insert(read_code.hash_slow(), reth_execution_types::native_bytecode(&read_code));
+        let codes = ExecutionWitnessRecord::capture_codes(&state);
+        let mut output = BundleState::default();
+        // Recreating code already read from parent state must not remove it from the witness.
+        output.contracts.insert(read_code.hash_slow(), read_code.clone());
+        output.contracts.insert(created_code.hash_slow(), created_code.clone());
+        state.commit_source(&reth_execution_types::BundleSource(&output));
+
         for mode in [ExecutionWitnessMode::Legacy, ExecutionWitnessMode::Canonical] {
             let witness = ExecutionWitnessRecord::new(&state)
+                .with_canonical_codes(codes.clone())
                 .into_execution_witness_without_headers(&provider, mode)
                 .unwrap();
+            // Canonical mode needs only parent code; legacy also includes execution output.
+            let mut expected_codes = vec![read_code.original_bytes()];
+            if !mode.is_canonical() {
+                expected_codes.push(created_code.original_bytes());
+                expected_codes.push(Bytes::new());
+                expected_codes.sort_unstable();
+            }
+            let mut actual_codes = witness.codes;
+            actual_codes.sort_unstable();
+            assert_eq!(actual_codes, expected_codes);
             for storage in &proof.storage_proofs {
                 assert!(!storage.proof.is_empty());
                 assert!(storage.proof.iter().all(|node| witness.state.contains(node)));
@@ -1587,7 +1634,7 @@ mod tests {
     fn hashed_post_state_zeroes_destroyed_account_parent_storage() {
         let factory = create_test_provider_factory();
         let address = Address::with_last_byte(1);
-        let old_slot = U256::from(1);
+        let old_slot = U256::ONE;
         let new_slot = U256::from(2);
         let old_value = U256::from(10);
         let new_value = U256::from(20);

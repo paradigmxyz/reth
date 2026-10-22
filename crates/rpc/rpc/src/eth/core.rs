@@ -551,7 +551,7 @@ mod tests {
     use super::*;
     use crate::{eth::helpers::types::EthRpcConverter, EthApi, EthApiBuilder};
     use alloy_consensus::{Block, BlockBody, Header};
-    use alloy_eips::{BlockId, BlockNumberOrTag};
+    use alloy_eips::{eip7702::Authorization, BlockId, BlockNumberOrTag};
     use alloy_genesis::{Genesis, GenesisAccount};
     use alloy_network::TransactionBuilder;
     use alloy_primitives::{Address, Bytes, Signature, B256, U256, U64};
@@ -569,6 +569,7 @@ mod tests {
     use reth_ethereum_primitives::TransactionSigned;
     use reth_evm_ethereum::EthEvmConfig;
     use reth_network_api::noop::NoopNetwork;
+    use reth_primitives_traits::crypto::secp256k1::sign_message;
     use reth_provider::{
         providers::BlockchainProvider,
         test_utils::{
@@ -578,7 +579,7 @@ mod tests {
         PruneCheckpointReader, StageCheckpointReader,
     };
     use reth_rpc_eth_api::{
-        helpers::{EthBlocks, EthCall},
+        helpers::{EthBlocks, EthCall, SpawnBlocking},
         node::RpcNodeCoreAdapter,
         EthApiServer,
     };
@@ -586,8 +587,10 @@ mod tests {
     use reth_storage_api::{
         BalProvider, BlockReader, BlockReaderIdExt, NodePrimitivesProvider, StateProviderFactory,
     };
+    use reth_tasks::cancel::is_cancelled;
     use reth_testing_utils::generators;
     use reth_transaction_pool::test_utils::{testing_pool, TestPool};
+    use std::time::{Duration, Instant};
 
     type FakeEthApi<P = MockEthProvider> = EthApi<
         RpcNodeCoreAdapter<P, TestPool, NoopNetwork, EthEvmConfig>,
@@ -632,6 +635,30 @@ mod tests {
         )
         .gas_cap(gas_cap.into())
         .build()
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn blocking_task_observes_dropped_request() {
+        let api = build_test_eth_api(MockEthProvider::default());
+        let (started_tx, started_rx) = tokio::sync::oneshot::channel();
+        let (cancelled_tx, cancelled_rx) = tokio::sync::oneshot::channel();
+
+        let request = api.spawn_blocking_io(move |_| {
+            let _ = started_tx.send(());
+            let deadline = Instant::now() + Duration::from_secs(5);
+            while !is_cancelled() && Instant::now() < deadline {
+                std::thread::sleep(Duration::from_millis(1));
+            }
+            let _ = cancelled_tx.send(is_cancelled());
+            Ok(())
+        });
+        // drop the request while its blocking task is running
+        tokio::select! {
+            _ = request => panic!("blocking task completed before the request was dropped"),
+            _ = started_rx => {}
+        }
+
+        assert!(cancelled_rx.await.unwrap());
     }
 
     #[tokio::test]
@@ -1119,6 +1146,91 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn call_allowance_respects_rpc_gas_cap() {
+        use alloy_rpc_types_trace::{parity::TraceType, tracerequest::TraceCallRequest};
+        use reth_rpc_eth_types::EthConfig;
+        use reth_tasks::pool::BlockingTaskGuard;
+
+        let sender = Address::repeat_byte(0x11);
+        let contract = Address::repeat_byte(0xaa);
+        // Return the gas remaining after intrinsic gas and the GAS opcode.
+        let code = Bytes::from_static(&[0x5a, 0x60, 0x00, 0x52, 0x60, 0x20, 0x60, 0x00, 0xf3]);
+
+        // RPC cap, supplied gas, price, balance after value, block limit, expected budget.
+        for (gas_cap, gas, price, balance, block_limit, budget) in [
+            (50_000, None, 1, 100_000, 100_000, 50_000),
+            (50_000, None, 0, 100_000, 100_000, 50_000),
+            (50_000, None, 1, 40_000, 100_000, 40_000),
+            (50_000, None, 1, 100_000, 40_000, 40_000),
+            (50_000, Some(70_000), 1, 100_000, 100_000, 50_000),
+            (50_000, Some(30_000), 1, 100_000, 100_000, 30_000),
+            (50_000, Some(70_000), 1, 100_000, 40_000, 50_000),
+            (0, None, 1, 100_000, 100_000, 100_000),
+            (0, Some(70_000), 1, 100_000, 40_000, 70_000),
+        ] {
+            let provider = MockEthProvider::default()
+                .with_chain_spec(ChainSpecBuilder::mainnet().cancun_activated().build());
+            provider.add_block(
+                B256::repeat_byte(0x42),
+                Block {
+                    header: Header {
+                        number: 1,
+                        gas_limit: block_limit,
+                        excess_blob_gas: Some(0),
+                        ..Default::default()
+                    },
+                    body: BlockBody::default(),
+                },
+            );
+            let api = build_test_eth_api_with_gas_cap(provider, gas_cap);
+            let trace_api =
+                crate::TraceApi::new(api.clone(), BlockingTaskGuard::new(1), EthConfig::default());
+            let state_override = StateOverride::from_iter([
+                (
+                    sender,
+                    AccountOverride {
+                        balance: Some(U256::from(balance + 1_000)),
+                        ..Default::default()
+                    },
+                ),
+                (contract, AccountOverride { code: Some(code.clone()), ..Default::default() }),
+            ]);
+
+            for dynamic_fee in [false, true] {
+                let request = TransactionRequest {
+                    gas,
+                    gas_price: (!dynamic_fee).then_some(price),
+                    max_fee_per_gas: dynamic_fee.then_some(price),
+                    max_priority_fee_per_gas: dynamic_fee.then_some(price),
+                    value: Some(U256::from(1_000)),
+                    ..TransactionRequest::default().with_from(sender).with_to(contract)
+                };
+                let output = EthCall::call(
+                    &api,
+                    request.clone(),
+                    Some(BlockId::latest()),
+                    EvmOverrides::state(Some(state_override.clone())),
+                )
+                .await
+                .unwrap();
+                let traces = trace_api
+                    .trace_call(TraceCallRequest {
+                        call: request,
+                        trace_types: std::iter::once(TraceType::Trace).collect(),
+                        block_id: Some(BlockId::latest()),
+                        state_overrides: Some(state_override.clone()),
+                        block_overrides: None,
+                    })
+                    .await
+                    .unwrap();
+
+                assert_eq!(U256::from_be_slice(&output), U256::from(budget - 21_002));
+                assert_eq!(traces.output, output);
+            }
+        }
+    }
+
+    #[tokio::test]
     async fn estimate_gas_respects_rpc_gas_cap() {
         const LOW_GAS_CAP: u64 = 50_000;
         const HIGH_GAS_CAP: u64 = 200_000;
@@ -1133,7 +1245,7 @@ mod tests {
         let mut state_override = StateOverride::default();
         state_override.insert(contract, AccountOverride { code: Some(code), ..Default::default() });
         let overrides = EvmOverrides::state(Some(state_override));
-        let at = BlockId::Number(BlockNumberOrTag::Latest);
+        let at = BlockId::latest();
 
         for chain_spec in [
             ChainSpecBuilder::mainnet().cancun_activated().build(),
@@ -1196,7 +1308,7 @@ mod tests {
             },
         );
         let request = TransactionRequest::default().with_to(Address::repeat_byte(0xaa));
-        let at = BlockId::Number(BlockNumberOrTag::Latest);
+        let at = BlockId::latest();
 
         let capped = build_test_eth_api_with_gas_cap(provider.clone(), 20_999);
         let err = EthCall::estimate_gas_at(&capped, request.clone(), at, EvmOverrides::default())
@@ -1229,7 +1341,7 @@ mod tests {
         provider.add_block(hash, block);
 
         let api = build_test_eth_api(provider);
-        for block_id in [BlockId::Number(BlockNumberOrTag::Number(1)), BlockId::Hash(hash.into())] {
+        for block_id in [BlockId::number(1), BlockId::hash(hash)] {
             let header = EthBlocks::rpc_block_header(&api, block_id).await.unwrap().unwrap();
             let response = serde_json::to_value(&header).unwrap();
             assert!(response.get("size").is_none());
@@ -1237,10 +1349,7 @@ mod tests {
 
         for full in [false, true] {
             let block =
-                EthBlocks::rpc_block(&api, BlockId::Number(BlockNumberOrTag::Number(1)), full)
-                    .await
-                    .unwrap()
-                    .unwrap();
+                EthBlocks::rpc_block(&api, BlockId::number(1), full).await.unwrap().unwrap();
             assert_eq!(block.header.size, Some(U256::from(block_size)));
         }
     }
@@ -1428,10 +1537,66 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn create_access_list_excludes_authorization_authorities() {
+        let provider = MockEthProvider::default()
+            .with_chain_spec(ChainSpecBuilder::mainnet().prague_activated().build());
+        provider.add_block(
+            B256::repeat_byte(0x42),
+            Block {
+                header: Header { number: 1, gas_limit: 30_000_000, ..Default::default() },
+                body: BlockBody::default(),
+            },
+        );
+        let sender = Address::repeat_byte(0x11);
+        provider.add_account(sender, ExtendedAccount::new(0, U256::MAX));
+
+        let authorization = Authorization {
+            chain_id: U256::from(1),
+            address: Address::repeat_byte(0xbb),
+            nonce: 0,
+        };
+        let signature =
+            sign_message(B256::repeat_byte(0x22), authorization.signature_hash()).unwrap();
+        let authorization = authorization.into_signed(signature);
+        let authority = authorization.recover_authority().unwrap();
+
+        let contract = Address::repeat_byte(0xaa);
+        let state_override = StateOverride::from_iter([(
+            contract,
+            AccountOverride {
+                // PUSH20 authority; BALANCE; STOP.
+                code: Some([&[0x73][..], authority.as_slice(), &[0x31, 0x00]].concat().into()),
+                ..Default::default()
+            },
+        )]);
+        let api = build_test_eth_api(provider);
+        let request = TransactionRequest {
+            authorization_list: Some(vec![authorization]),
+            ..TransactionRequest::default()
+                .with_from(sender)
+                .with_to(contract)
+                .with_gas_limit(100_000)
+        };
+        let result = EthCall::create_access_list_at(
+            &api,
+            request,
+            Some(BlockId::latest()),
+            Some(state_override),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(result.error, None);
+        // The authority is warmed by authorization processing, so listing it only adds cost.
+        assert!(result.access_list.0.is_empty(), "{:?}", result.access_list);
+    }
+
+    #[tokio::test]
     async fn simulate_roots_include_overrides_across_blocks() {
         let sender = Address::repeat_byte(0x11);
         let contract = Address::repeat_byte(0xaa);
         let added = Address::repeat_byte(0xbb);
+        let absent = Address::repeat_byte(0xcc);
         let slot = |n: u64| B256::from(U256::from(n));
         let genesis =
             Genesis::default().with_gas_limit(30_000_000).with_base_fee(Some(0)).extend_accounts([
@@ -1468,11 +1633,14 @@ mod tests {
                         balance: Some(U256::from(7)),
                         nonce: Some(2),
                         code: Some(code.clone()),
-                        state_diff: Some([(slot(2), slot(3))].into_iter().collect()),
+                        state_diff: Some(std::iter::once((slot(2), slot(3))).collect()),
                         ..Default::default()
                     },
                 ),
                 (added, AccountOverride { balance: Some(U256::from(4)), ..Default::default() }),
+                // An empty override leaves an absent account absent, so it must not reach the
+                // root.
+                (absent, AccountOverride::default()),
             ])),
             ..Default::default()
         };
@@ -1480,7 +1648,7 @@ mod tests {
             state_overrides: Some(StateOverride::from_iter([(
                 contract,
                 AccountOverride {
-                    state: Some([(slot(0), slot(5))].into_iter().collect()),
+                    state: Some(std::iter::once((slot(0), slot(5))).collect()),
                     ..Default::default()
                 },
             )])),
@@ -1510,7 +1678,7 @@ mod tests {
         // Genesis trie construction supplies an independent root for the expected full state.
         for (index, storage) in [
             [(slot(0), slot(1)), (slot(1), slot(2)), (slot(2), slot(3))].into_iter().collect(),
-            [(slot(0), slot(9))].into_iter().collect(),
+            std::iter::once((slot(0), slot(9))).collect(),
         ]
         .into_iter()
         .enumerate()

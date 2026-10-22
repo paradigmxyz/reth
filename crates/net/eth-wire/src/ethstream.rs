@@ -436,7 +436,7 @@ mod tests {
         let status = Status {
             version: EthVersion::Eth67,
             chain: NamedChain::Mainnet.into(),
-            total_difficulty: U256::from(2).pow(U256::from(100)) - U256::from(1),
+            total_difficulty: U256::from(2).pow(U256::from(100)) - U256::ONE,
             blockhash: B256::random(),
             genesis,
             // Pass the current fork id.

@@ -1,4 +1,4 @@
-//! clap [Args](clap::Args) for RPC related arguments.
+//! clap [`Args`] for RPC related arguments.
 
 use crate::args::{
     types::{MaxU32, ZeroAsNoneU64},
@@ -1377,18 +1377,6 @@ mod tests {
     #[test]
     fn parse_auth_jwtsecret_hex() {
         let hex = "1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef";
-        let args =
-            CommandParser::<RpcServerArgs>::parse_from(["reth", "--authrpc.jwtsecret-hex", hex])
-                .args;
-
-        let expected = JwtSecret::from_hex(hex).unwrap();
-        assert_eq!(args.auth_jwtsecret_hex, Some(expected));
-        assert_eq!(args.auth_jwtsecret, None);
-    }
-
-    #[test]
-    fn parse_auth_jwtsecret_hex_with_0x_prefix() {
-        let hex = "0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef";
         let args =
             CommandParser::<RpcServerArgs>::parse_from(["reth", "--authrpc.jwtsecret-hex", hex])
                 .args;

@@ -406,15 +406,7 @@ where
 
         state_init.insert(
             *address,
-            (
-                None,
-                Some(Account {
-                    nonce: account.nonce.unwrap_or_default(),
-                    balance: account.balance,
-                    bytecode_hash,
-                }),
-                storage,
-            ),
+            (None, Some(Account { bytecode_hash, ..Account::from(account) }), storage),
         );
     }
     let all_reverts_init: RevertsInit = HashMap::from_iter([(block, reverts_init)]);
@@ -973,6 +965,7 @@ where
 /// `StorageChangeSets` receive data in sorted order within each account). For `HashedAccounts`
 /// and `HashedStorages`, insertion order is unsorted (keccak scrambles address order), so we
 /// use `put`/`upsert` which do a full B-tree lookup.
+#[allow(clippy::clone_on_copy)]
 fn write_account_to_db<TX: DbTxMut>(
     tx: &TX,
     address: &Address,
@@ -993,16 +986,12 @@ fn write_account_to_db<TX: DbTxMut>(
         None
     };
 
-    let account = Account {
-        nonce: genesis_account.nonce.unwrap_or_default(),
-        balance: genesis_account.balance,
-        bytecode_hash,
-    };
+    let account = Account { bytecode_hash, ..Account::from(genesis_account) };
 
     let hashed_address = keccak256(address);
 
     // plain state — sorted by address (ETL order), use append
-    tx.put::<tables::PlainAccountState>(*address, account)?;
+    tx.put::<tables::PlainAccountState>(*address, account.clone())?;
 
     // hashed state — unsorted (keccak scrambles order), must use put
     tx.put::<tables::HashedAccounts>(hashed_address, account)?;
@@ -1081,11 +1070,7 @@ where
         None
     };
 
-    let account = Account {
-        nonce: genesis_account.nonce.unwrap_or_default(),
-        balance: genesis_account.balance,
-        bytecode_hash,
-    };
+    let account = Account { bytecode_hash, ..Account::from(genesis_account) };
 
     let hashed_address = keccak256(address);
     let (account_changeset_writer, storage_changeset_writer) = changeset_writers;
@@ -1343,7 +1328,7 @@ mod tests {
         assert_eq!(
             accounts,
             vec![
-                (Address::with_last_byte(1), U256::from(1)),
+                (Address::with_last_byte(1), U256::ONE),
                 (Address::with_last_byte(2), U256::from(2))
             ]
         );
@@ -1599,7 +1584,7 @@ mod tests {
                 alloc: BTreeMap::from([
                     (
                         address_with_balance,
-                        GenesisAccount { balance: U256::from(1), ..Default::default() },
+                        GenesisAccount { balance: U256::ONE, ..Default::default() },
                     ),
                     (
                         address_with_storage,

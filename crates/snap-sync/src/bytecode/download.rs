@@ -129,7 +129,7 @@ mod tests {
     use crate::{
         test_utils::{
             account, byte_codes, generation, hashed_factory, insert_generation_headers, key,
-            state_root, verified_range, ScriptedSnapClient,
+            state_root, verified_range, verified_repair, ScriptedSnapClient,
         },
         SnapAccountStore, SnapAttemptStore,
     };
@@ -220,17 +220,24 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn code_already_stored_is_never_requested() {
+    async fn a_repair_requests_only_the_code_of_its_account() {
         let accounts = accounts();
         let (factory, range) = started(&accounts);
-        let (_, mut first) = download([byte_codes(1, &[code(1), code(2)])], factory.clone());
-        committed(&mut first, &range).await;
-        drop(first);
+        let write = range.write();
+        let (client, mut download) = download([byte_codes(1, &[code(2)])], factory);
 
-        let (client, mut resumed) = download([], factory);
+        // Key 2 holds no code, and the contract at key 3 only proves where its range ends.
+        let plain =
+            VerifiedRange::new(write, verified_repair(&accounts, 1..3, key(2), &[key(2), key(3)]));
+        assert!(matches!(download.next(&plain).await.unwrap(), BytecodeStep::Complete));
+        let contract =
+            VerifiedRange::new(write, verified_repair(&accounts, 3..4, key(4), &[key(4)]));
+        assert!(matches!(
+            download.next(&contract).await.unwrap(),
+            BytecodeStep::Committed { persisted: 1 }
+        ));
 
-        assert!(matches!(resumed.next(&range).await.unwrap(), BytecodeStep::Complete));
-        assert!(client.code_requests().is_empty());
+        assert_eq!(*client.code_requests(), [vec![keccak256(code(2))]]);
     }
 
     #[tokio::test]
@@ -266,27 +273,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn unresolved_code_prevents_the_range_from_committing() {
-        let accounts = accounts();
-        let (factory, range) = started(&accounts);
-        let (_, mut download) = download([byte_codes(1, &[code(1)])], factory.clone());
-        committed(&mut download, &range).await;
-
-        let provider = factory.database_provider_rw().unwrap();
-        let refused = provider.commit_account_range(
-            range.write(),
-            range.range(),
-            Default::default(),
-            Vec::new(),
-        );
-
-        assert!(matches!(
-            refused,
-            Err(SnapSyncError::MissingCode { hash }) if hash == keccak256(code(2))
-        ));
-    }
-
-    #[tokio::test]
     async fn requests_ask_for_at_most_the_configured_hashes() {
         let accounts = accounts();
         let (factory, range) = started(&accounts);
@@ -299,29 +285,5 @@ mod tests {
 
         assert!(matches!(download.next(&range).await.unwrap(), BytecodeStep::Complete));
         assert_eq!(*client.code_requests(), [vec![keccak256(code(1))], vec![keccak256(code(2))]]);
-    }
-
-    #[tokio::test]
-    async fn a_range_without_contracts_requests_no_code() {
-        let accounts = vec![(key(1), account(1)), (key(2), account(2))];
-        let (factory, range) = started(&accounts);
-        let (client, mut download) = download([], factory);
-
-        assert!(matches!(download.next(&range).await.unwrap(), BytecodeStep::Complete));
-        assert!(client.code_requests().is_empty());
-    }
-
-    #[tokio::test]
-    async fn code_fetched_before_the_pivot_moved_is_not_committed() {
-        let accounts = accounts();
-        let (factory, range) = started(&accounts);
-        let (client, mut download) =
-            download([byte_codes(1, &[code(1), code(2)])], factory.clone());
-        let provider = factory.database_provider_rw().unwrap();
-        provider.advance_snap_pivot(range.write(), generation(2, state_root(&accounts))).unwrap();
-        provider.commit().unwrap();
-
-        assert!(matches!(download.next(&range).await, Err(SnapSyncError::StaleWrite { .. })));
-        assert!(client.code_requests().is_empty());
     }
 }

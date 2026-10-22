@@ -17,6 +17,7 @@ use reth_evm::{
 use reth_primitives_traits::{BlockBody, BlockTy, RecoveredBlock};
 use reth_rpc_eth_types::{cache::db::attach_bal_before_tx, EthApiError, StateCacheDb};
 use reth_storage_api::ProviderBlock;
+use reth_tasks::cancel::is_cancelled;
 use std::sync::Arc;
 
 /// Context passed to per-transaction trace callbacks.
@@ -302,6 +303,9 @@ pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> + Call {
                     this.evm_config().block_executor_factory().evm_with_database(&mut db, evm_env);
 
                 for (idx, tx) in block.transactions_recovered().take(max_transactions).enumerate() {
+                    if is_cancelled() {
+                        return Err(EthApiError::InternalEthError.into())
+                    }
                     let tx_env = this.evm_config().tx_env(tx.cloned());
                     let (inspector, result) = evm
                         .transact_with_inspector(&tx_env, inspector_setup())

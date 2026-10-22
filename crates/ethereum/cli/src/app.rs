@@ -108,13 +108,18 @@ where
             None => {
                 let runtime_config = match &self.cli.command {
                     Commands::Node(command) => {
-                        reth_tasks::RuntimeConfig::default().with_rayon(RayonConfig {
+                        let config = reth_tasks::RuntimeConfig::default().with_rayon(RayonConfig {
                             reserved_cpu_cores: command.engine.reserved_cpu_cores,
                             proof_storage_worker_threads: command.engine.storage_worker_count,
                             proof_account_worker_threads: command.engine.account_worker_count,
                             prewarming_threads: command.engine.prewarming_threads,
                             ..Default::default()
-                        })
+                        });
+                        if let Some(cpu_cores) = command.engine.cpu_cores {
+                            config.with_cpu_cores(cpu_cores)
+                        } else {
+                            config
+                        }
                     }
                     _ => reth_tasks::RuntimeConfig::default(),
                 };

@@ -64,8 +64,16 @@ where
     type Error = ProviderError;
 
     fn get_account(&mut self, address: &Address) -> Result<Option<AccountInfo>, Self::Error> {
-        Ok(self.0.basic_account(address)?.map(|account| {
-            AccountInfo::new(account.balance, account.nonce, account.get_bytecode_hash(), None)
+        Ok(self.0.basic_account(address)?.map(|account| AccountInfo {
+            #[cfg(feature = "account-ext")]
+            extension: evm2::evm::AccountExtension::from_shared(
+                account.extension.clone().into_shared(),
+            ),
+            balance: account.balance,
+            nonce: account.nonce,
+            code_hash: account.get_bytecode_hash(),
+            code: None,
+            _non_exhaustive: (),
         }))
     }
 
