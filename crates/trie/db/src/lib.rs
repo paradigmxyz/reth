@@ -54,6 +54,3 @@ macro_rules! with_adapter {
         }
     };
 }
-
-mod verify;
-pub use verify::VerifierCursorFactory;

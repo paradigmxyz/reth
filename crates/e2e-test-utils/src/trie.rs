@@ -1,16 +1,20 @@
 //! Helpers for verifying the persisted state and trie representation of test nodes.
 
 use alloy_consensus::BlockHeader;
+use alloy_primitives::B256;
 use eyre::{ensure, eyre, Result};
+use reth_db::transaction::DbTx;
 use reth_provider::{
     BlockNumReader, DBProvider, DatabaseProviderFactory, HeaderProvider, StorageSettingsCache,
 };
 use reth_trie::{
+    hashed_cursor::HashedCursorFactory,
     prefix_set::{PrefixSetMut, TriePrefixSets},
-    verify::{default_storage_workers, Output, Verifier},
+    trie_cursor::TrieCursorFactory,
+    verify::{default_storage_workers, Output, StorageWorker, Verifier},
     StateRoot,
 };
-use reth_trie_db::{DatabaseHashedCursorFactory, DatabaseTrieCursorFactory, VerifierCursorFactory};
+use reth_trie_db::{DatabaseHashedCursorFactory, DatabaseTrieCursorFactory};
 
 /// Asserts that the persisted state and trie representation is internally consistent and matches
 /// the state root of the latest persisted block.
@@ -42,14 +46,24 @@ where
 
     reth_trie_db::with_adapter!(provider, |A| {
         let open = || {
-            factory
-                .database_provider_ro()
-                .map(|provider| VerifierCursorFactory::<_, A>::new(provider.into_tx()))
+            let mut tx = factory.database_provider_ro()?.into_tx();
+            tx.disable_long_read_transaction_safety();
+            Ok::<_, eyre::Report>(tx)
         };
-        let cursors = open()?;
-        let lookahead = open()?;
-        let workers =
-            (0..default_storage_workers()).map(|_| open()).collect::<Result<Vec<_>, _>>()?;
+        let account_tx = open()?;
+        let lookahead_tx = open()?;
+        let workers = (0..default_storage_workers())
+            .map(|_| {
+                let tx = open()?;
+                Ok::<_, eyre::Report>(StorageWorker {
+                    trie: DatabaseTrieCursorFactory::<_, A>::new(&tx)
+                        .storage_trie_cursor(B256::ZERO)?,
+                    hashed: DatabaseHashedCursorFactory::new(&tx)
+                        .hashed_storage_cursor(B256::ZERO)?,
+                    transaction: tx,
+                })
+            })
+            .collect::<Result<Vec<_>>>()?;
         drop(snapshot_guard);
 
         // Recompute all account leaves from the persisted hashed state. Storage roots are taken
@@ -70,7 +84,13 @@ where
             header.state_root()
         );
 
-        let verifier = Verifier::new(&cursors, &cursors, lookahead, workers)?;
+        let verifier = Verifier::new(
+            DatabaseTrieCursorFactory::<_, A>::new(&account_tx).account_trie_cursor()?,
+            DatabaseHashedCursorFactory::new(&account_tx).hashed_account_cursor()?,
+            DatabaseHashedCursorFactory::new(&account_tx).hashed_storage_cursor(B256::ZERO)?,
+            DatabaseHashedCursorFactory::new(&lookahead_tx).hashed_account_cursor()?,
+            workers,
+        )?;
         let mut inconsistencies = Vec::new();
         for output in verifier {
             match output? {
