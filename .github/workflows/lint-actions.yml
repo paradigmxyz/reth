@@ -37,3 +37,26 @@ jobs:
           bash .github/scripts/bench-upload-charts-test.sh
           bash .github/scripts/bench-txgen-build-test.sh
           node --test .github/scripts/bench-job-summary-test.js .github/scripts/bench-args-test.js
+
+  chart-dependencies:
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+    strategy:
+      matrix:
+        python: ["3.10", "3.11", "3.12"]
+    steps:
+      - name: Secure runner
+        uses: tempoxyz/gh-actions/actions/secure-runner@d5402286a7abdfb7232173b3228d56473feb8a66 # 2026-09-29T02-04-45Z-d5402286
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        with:
+          version: "0.13.4"
+          python-version: ${{ matrix.python }}
+      - name: Check chart lockfile
+        run: uv lock --check --project .github/scripts/bench-reth-charts
+      - name: Smoke test chart generation
+        run: uv run --frozen --project .github/scripts/bench-reth-charts python .github/scripts/test_bench_charts.py

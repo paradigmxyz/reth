@@ -1,5 +1,0 @@
-# Direct dependencies for bench-reth-charts.py; compile to the adjacent .txt lockfile.
-# Use --exclude-newer with a cutoff at least seven days old when updating the lockfile.
-matplotlib==3.10.8
-numpy
-pillow==12.3.0
