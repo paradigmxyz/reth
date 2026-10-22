@@ -10,7 +10,7 @@ use evm2::{
     bytecode::Bytecode,
     evm::{
         AccountBal as EvmAccountBal, AccountInfoBal as EvmAccountInfoBal, Bal as EvmBal,
-        BalChanges as EvmBalChanges, BalCodeChange as EvmBalCodeChange,
+        BalChange as EvmBalChange, BalChanges as EvmBalChanges, BalCodeChange as EvmBalCodeChange,
         StorageBal as EvmStorageBal,
     },
 };
@@ -969,6 +969,7 @@ fn evm_storage_bal_heap_size(storage: &EvmStorageBal) -> usize {
 
 fn evm_bal_changes_heap_size<T, F>(changes: &EvmBalChanges<T>, mut item_heap_size: F) -> usize
 where
+    T: EvmBalChange,
     F: FnMut(&T) -> usize,
 {
     changes.changes.capacity() * core::mem::size_of::<T>() +

@@ -298,6 +298,12 @@ async fn test_simulate_v1_validation_error_codes() -> eyre::Result<()> {
             -38012,
             "max fee per gas less than block base fee",
         ),
+        (
+            "insufficient funds",
+            tx().gas_limit(21_000).value(U256::from(u64::MAX)),
+            -38014,
+            "insufficient funds for gas * price + value: have 18446744073709551615 want 18446765073709551615",
+        ),
     ];
 
     for (name, tx, code, message) in cases {

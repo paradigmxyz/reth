@@ -569,7 +569,10 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
                 .accounts
                 .into_iter()
                 .flatten()
-                .map(|(address, info)| AccountBeforeTx { address, info: info.map(Into::into) })
+                .map(|(address, info)| AccountBeforeTx {
+                    address,
+                    info: info.map(|info| reth_execution_types::account_from_revm(&info)),
+                })
                 .collect();
             w.append_account_changeset(changeset, block_number)?;
         }

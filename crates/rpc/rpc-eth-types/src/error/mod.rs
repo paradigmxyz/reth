@@ -645,9 +645,6 @@ pub enum RpcInvalidTransactionError {
     /// Incrementing the nonce would lead to invalid state (overflow)
     #[error("nonce has max value")]
     NonceMaxValue,
-    /// thrown if the transaction sender doesn't have enough funds for a transfer
-    #[error("insufficient funds for transfer")]
-    InsufficientFundsForTransfer,
     /// thrown if creation transaction provides the init code bigger than init code size limit.
     #[error("max initcode size exceeded")]
     MaxInitCodeSizeExceeded,
@@ -879,7 +876,9 @@ impl From<HandlerError> for RpcInvalidTransactionError {
                 Self::InvalidChainId
             }
             HandlerError::IntrinsicGasTooLow { .. } => Self::GasTooLow,
-            HandlerError::InsufficientFunds => Self::InsufficientFundsForTransfer,
+            HandlerError::InsufficientFunds { fee, balance } => {
+                Self::InsufficientFunds { cost: fee, balance }
+            }
             HandlerError::RejectCallerWithCode => Self::SenderNoEOA,
             HandlerError::NonceOverflow => Self::NonceMaxValue,
             HandlerError::GasLimitMoreThanBlock { .. } |
