@@ -41,7 +41,7 @@ pub(crate) mod worker_map;
 #[cfg(feature = "rayon")]
 pub mod pool;
 #[cfg(feature = "rayon")]
-pub use pool::{build_pool_with_panic_handler, Worker, WorkerPool, WorkerRunId};
+pub use pool::{build_pool_with_panic_handler, Worker, WorkerPool, WorkerState};
 
 /// Lock-free ordered parallel iterator extension trait.
 #[cfg(feature = "rayon")]
