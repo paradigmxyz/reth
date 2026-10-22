@@ -232,6 +232,8 @@ pub struct EthApiInner<N: RpcNodeCore, Rpc: RpcConvert> {
     components: N,
     /// All configured Signers
     signers: SignersForRpc<N::Provider, Rpc::Network>,
+    /// Held by `eth_sendTransaction` from filling the nonce until the transaction is in the pool.
+    send_transaction_nonce_lock: Mutex<()>,
     /// The async cache frontend for eth related data
     eth_cache: EthStateCache<N::Primitives>,
     /// The async gas oracle frontend for gas price suggestions
@@ -316,6 +318,7 @@ where
         Self {
             components,
             signers,
+            send_transaction_nonce_lock: Default::default(),
             eth_cache,
             gas_oracle,
             starting_block,
@@ -440,6 +443,13 @@ where
     #[inline]
     pub const fn signers(&self) -> &SignersForRpc<N::Provider, Rpc::Network> {
         &self.signers
+    }
+
+    /// Returns the lock `eth_sendTransaction` holds from filling the nonce until the transaction
+    /// is in the pool.
+    #[inline]
+    pub const fn send_transaction_nonce_lock(&self) -> &Mutex<()> {
+        &self.send_transaction_nonce_lock
     }
 
     /// Returns the starting block.

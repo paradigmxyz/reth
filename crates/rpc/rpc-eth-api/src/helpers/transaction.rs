@@ -39,6 +39,7 @@ use reth_transaction_pool::{
 };
 use revm::state::bal::Bal as RevmBal;
 use std::{sync::Arc, time::Duration};
+use tokio::sync::Mutex;
 
 /// Transaction related functions for the [`EthApiServer`](crate::EthApiServer) trait in
 /// the `eth_` namespace.
@@ -67,6 +68,10 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
     ///
     /// Signer access in default (L1) trait method implementations.
     fn signers(&self) -> &SignersForRpc<Self::Provider, Self::NetworkTypes>;
+
+    /// Returns the lock that [`Self::send_transaction_request`] holds from filling the nonce until
+    /// the transaction is in the pool, so concurrent calls from one sender get consecutive nonces.
+    fn send_transaction_nonce_lock(&self) -> &Mutex<()>;
 
     /// Returns a list of addresses owned by provider.
     fn accounts(&self) -> Vec<Address> {
@@ -516,11 +521,16 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
                 return Err(SignError::NoAccount.into_eth_err())
             }
 
-            // set nonce if not already set before
-            if request.as_ref().nonce().is_none() {
+            // Set the nonce if not already set. The lock is held until the transaction is in the
+            // pool, so a concurrent call from the same sender can't read the same nonce.
+            let _nonce_guard = if request.as_ref().nonce().is_none() {
+                let guard = self.send_transaction_nonce_lock().lock().await;
                 let nonce = self.next_available_nonce_for(&request).await?;
                 request.as_mut().set_nonce(nonce);
-            }
+                Some(guard)
+            } else {
+                None
+            };
 
             let chain_id = self.chain_id();
             // A caller that pins `chainId` is asserting which chain it means to sign for.

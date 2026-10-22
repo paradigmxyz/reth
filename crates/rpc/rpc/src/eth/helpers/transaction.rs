@@ -17,6 +17,7 @@ use reth_transaction_pool::{
     error::Eip4844PoolTransactionError, AddedTransactionOutcome, EthBlobTransactionSidecar,
     EthPoolTransaction, PoolTransaction, PoolTx,
 };
+use tokio::sync::Mutex;
 
 impl<N, Rpc> EthTransactions for EthApi<N, Rpc>
 where
@@ -27,6 +28,11 @@ where
     #[inline]
     fn signers(&self) -> &SignersForRpc<Self::Provider, Self::NetworkTypes> {
         self.inner.signers()
+    }
+
+    #[inline]
+    fn send_transaction_nonce_lock(&self) -> &Mutex<()> {
+        self.inner.send_transaction_nonce_lock()
     }
 
     async fn send_pool_transaction(
@@ -539,6 +545,40 @@ mod tests {
             .expect("a matching chain id must still be accepted");
         let pooled = eth_api.pool().get(&hash).expect("transaction should be in the pool");
         assert_eq!(pooled.transaction.chain_id(), Some(1));
+    }
+
+    #[tokio::test]
+    async fn concurrent_send_transaction_fills_consecutive_nonces() {
+        let signers = DevSigner::random_signers(1);
+        let address = signers[0].accounts()[0];
+        let accounts = AddressMap::from_iter([(
+            address,
+            ExtendedAccount::new(0, U256::from(10_000_000_000_000_000_000u64)),
+        )]);
+        let eth_api = mock_eth_api(accounts);
+        eth_api.signers().write().extend(signers);
+
+        let hashes = futures::future::try_join_all((1..=5u64).map(|value| {
+            eth_api.send_transaction_request(TransactionRequest {
+                from: Some(address),
+                to: Some(address.into()),
+                value: Some(U256::from(value)),
+                gas: Some(90_000),
+                gas_price: Some(1_000_000_000),
+                ..Default::default()
+            })
+        }))
+        .await
+        .expect("concurrent sends from one account should all be accepted");
+
+        let mut nonces = hashes
+            .iter()
+            .map(|hash| {
+                eth_api.pool().get(hash).expect("transaction should be in the pool").nonce()
+            })
+            .collect::<Vec<_>>();
+        nonces.sort_unstable();
+        assert_eq!(nonces, [0, 1, 2, 3, 4]);
     }
 
     #[tokio::test]
