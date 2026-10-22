@@ -689,15 +689,18 @@ mod tests {
         });
 
         pool.clear(&first);
+        let retained = AtomicUsize::new(0);
         pool.broadcast(2, |worker| match worker.state.as_ref() {
             Some((owner, state)) => {
                 assert!(Arc::ptr_eq(&owner.0, &second.0));
                 assert_eq!(state.downcast_ref::<u64>(), Some(&2));
+                retained.fetch_add(1, Ordering::Relaxed);
             }
             None => {
                 assert_eq!(*worker.get_or_init(&first, || 3u64), 3);
             }
         });
+        assert_eq!(retained.load(Ordering::Relaxed), 1);
         pool.clear(&second);
         pool.clear(&first);
         pool.broadcast(2, |worker| assert!(worker.state.is_none()));
