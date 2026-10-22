@@ -525,6 +525,10 @@ impl From<BlockExecutionError> for EthApiError {
                         Self::InvalidTransaction(RpcInvalidTransactionError::from(
                             invalid_tx.clone(),
                         ))
+                    } else if let Some(handler_error) =
+                        error.as_any().downcast_ref::<HandlerError>()
+                    {
+                        Self::InvalidTransaction(handler_error.clone().into())
                     } else {
                         Self::InvalidTransaction(RpcInvalidTransactionError::other(
                             rpc_error_with_code(
