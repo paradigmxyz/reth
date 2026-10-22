@@ -708,6 +708,10 @@ pub struct RpcServerArgs {
     )]
     pub rpc_eth_proof_window: u64,
 
+    /// Use the parent's BAL for Flashbots validation state reads (experimental).
+    #[arg(long = "rpc.flashbots-parent-bal")]
+    pub rpc_flashbots_parent_bal: bool,
+
     /// Maximum number of concurrent getproof requests.
     #[arg(long = "rpc.proof-permits", alias = "rpc-proof-permits", value_name = "COUNT", value_parser = RangedU64ValueParser::<usize>::new().range(1..), default_value_t = DefaultRpcServerArgs::get_global().rpc_proof_permits)]
     pub rpc_proof_permits: usize,
@@ -1033,6 +1037,7 @@ impl Default for RpcServerArgs {
             rpc_state_cache,
             gas_price_oracle,
             rpc_send_raw_transaction_sync_timeout,
+            rpc_flashbots_parent_bal: false,
             testing_skip_invalid_transactions: false,
             testing_gas_limit: None,
             rpc_force_blob_sidecar_upcasting: false,
@@ -1362,6 +1367,7 @@ mod tests {
                 default_suggested_fee: None,
             },
             rpc_send_raw_transaction_sync_timeout: std::time::Duration::from_secs(30),
+            rpc_flashbots_parent_bal: false,
             testing_skip_invalid_transactions: true,
             testing_gas_limit: None,
             rpc_force_blob_sidecar_upcasting: false,

@@ -53,7 +53,7 @@ use reth_rpc_eth_api::{
         config::{EthConfigApiServer, EthConfigHandler},
         pending_block::BuildPendingEnv,
     },
-    RpcConvert, RpcTypes, SignableTxRequest,
+    RpcConvert, RpcNodeCore, RpcNodeCoreExt, RpcTypes, SignableTxRequest,
 };
 use reth_rpc_eth_types::{error::FromEvmError, EthApiError};
 use reth_rpc_server_types::RethRpcModule;
@@ -319,6 +319,7 @@ where
         Evm: ConfigureEvm<NextBlockEnvCtx = NextBlockEnvAttributes>,
     >,
     EthB: EthApiBuilder<N>,
+    EthB::EthApi: RpcNodeCore<Primitives = EthPrimitives>,
     PVB: Send,
     EB: EngineApiBuilder<N>,
     EB::EngineApi: EngineSszApi,
@@ -345,6 +346,8 @@ where
             ctx.sender_recovery_cache.clone(),
         );
 
+        let parent_bal_validation = ctx.config.rpc.rpc_flashbots_parent_bal;
+
         let eth_config =
             EthConfigHandler::new(ctx.node.provider().clone(), ctx.node.evm_config().clone());
 
@@ -368,6 +371,12 @@ where
             })
             .map_auth_http_middleware(|middleware| Stack::new(ssz_proxy_layer, middleware))
             .launch_add_ons_with(ctx, move |container| {
+                let validation_api = if parent_bal_validation {
+                    validation_api
+                        .with_parent_bal_cache(container.registry.eth_api().cache().clone())
+                } else {
+                    validation_api
+                };
                 container.modules.merge_if_module_configured(
                     RethRpcModule::Flashbots,
                     validation_api.into_rpc(),
@@ -413,6 +422,7 @@ where
         Evm: ConfigureEvm<NextBlockEnvCtx = NextBlockEnvAttributes>,
     >,
     EthB: EthApiBuilder<N>,
+    EthB::EthApi: RpcNodeCore<Primitives = EthPrimitives>,
     PVB: PayloadValidatorBuilder<N>,
     EB: EngineApiBuilder<N>,
     EB::EngineApi: EngineSszApi,
