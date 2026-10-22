@@ -46,7 +46,8 @@ impl Input {
             );
             for op in &block.operations {
                 match op {
-                    Operation::Account { address, .. } => {
+                    Operation::Account { address, account } => {
+                        ensure!(!account.is_empty(), "empty account: {address}");
                         accounts.insert(*address);
                     }
                     Operation::Storage { address, .. } => {
@@ -133,5 +134,27 @@ impl Input {
             block.operations = repaired;
         }
         self.validate()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn rejects_empty_accounts_but_accepts_hash_bearing_accounts() {
+        let address = Address::from([1; 20]);
+        let mut input = Input {
+            blocks: vec![BlockInput {
+                operations: vec![Operation::Account { address, account: Account::default() }],
+                stream_seed: 0,
+            }],
+        };
+        assert_eq!(input.validate().unwrap_err().to_string(), format!("empty account: {address}"));
+        let Operation::Account { account, .. } = &mut input.blocks[0].operations[0] else {
+            unreachable!()
+        };
+        account.bytecode_hash = Some(alloy_primitives::B256::from([2; 32]));
+        input.validate().unwrap();
     }
 }
