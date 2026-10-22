@@ -2123,11 +2123,20 @@ mod tests {
             &ExecutionOutcome {
                 bundle: BundleState::new(
                     database_state.into_iter().map(|(address, (account, _))| {
-                        (address, None, Some(account.into()), Default::default())
+                        (
+                            address,
+                            None,
+                            Some(reth_execution_types::account_to_revm(account)),
+                            Default::default(),
+                        )
                     }),
                     database_changesets.iter().map(|block_changesets| {
                         block_changesets.iter().map(|(address, account, _)| {
-                            (*address, Some(Some((account.clone()).into())), [])
+                            (
+                                *address,
+                                Some(Some(reth_execution_types::account_to_revm(account.clone()))),
+                                [],
+                            )
                         })
                     }),
                     Vec::new(),
@@ -2155,10 +2164,21 @@ mod tests {
                         execution_output: Arc::new(BlockExecutionOutput {
                             state: BundleState::new(
                                 in_memory_state.into_iter().map(|(address, (account, _))| {
-                                    (address, None, Some(account.into()), Default::default())
+                                    (
+                                        address,
+                                        None,
+                                        Some(reth_execution_types::account_to_revm(account)),
+                                        Default::default(),
+                                    )
                                 }),
                                 [in_memory_changesets.iter().map(|(address, account, _)| {
-                                    (*address, Some(Some((account.clone()).into())), Vec::new())
+                                    (
+                                        *address,
+                                        Some(Some(reth_execution_types::account_to_revm(
+                                            account.clone(),
+                                        ))),
+                                        Vec::new(),
+                                    )
                                 })],
                                 [],
                             ),
@@ -3285,11 +3305,15 @@ mod tests {
                 bundle: BundleState::new(
                     [(
                         address,
-                        Some(account_a.clone().into()),
-                        Some(account_b.into()),
+                        Some(reth_execution_types::account_to_revm(account_a.clone())),
+                        Some(reth_execution_types::account_to_revm(account_b)),
                         Default::default(),
                     )],
-                    [[(address, Some(Some(account_a.clone().into())), [])]],
+                    [[(
+                        address,
+                        Some(Some(reth_execution_types::account_to_revm(account_a.clone()))),
+                        [],
+                    )]],
                     [],
                 ),
                 first_block: 2,
@@ -3401,7 +3425,12 @@ mod tests {
                 blob_gas_used: 0,
             },
             state: BundleState::new(
-                [(address, None, Some(account.clone().into()), storage)],
+                [(
+                    address,
+                    None,
+                    Some(reth_execution_types::account_to_revm(account.clone())),
+                    storage,
+                )],
                 [[(address, Some(None), [])]],
                 [],
             ),
@@ -3499,7 +3528,12 @@ mod tests {
             vec![noise_block],
             &ExecutionOutcome {
                 bundle: BundleState::new(
-                    [(noise_address, None, Some(noise_account.into()), Default::default())],
+                    [(
+                        noise_address,
+                        None,
+                        Some(reth_execution_types::account_to_revm(noise_account)),
+                        Default::default(),
+                    )],
                     [[(noise_address, Some(None), [])]],
                     [],
                 ),
@@ -3589,8 +3623,17 @@ mod tests {
             vec![later_block],
             &ExecutionOutcome {
                 bundle: BundleState::new(
-                    [(address, Some(account_a.clone().into()), Some(account_b.into()), storage)],
-                    [[(address, Some(Some(account_a.clone().into())), [(slot, value_a)])]],
+                    [(
+                        address,
+                        Some(reth_execution_types::account_to_revm(account_a.clone())),
+                        Some(reth_execution_types::account_to_revm(account_b)),
+                        storage,
+                    )],
+                    [[(
+                        address,
+                        Some(Some(reth_execution_types::account_to_revm(account_a.clone()))),
+                        [(slot, value_a)],
+                    )]],
                     [],
                 ),
                 first_block: 2,

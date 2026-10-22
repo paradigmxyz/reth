@@ -17,6 +17,7 @@ reth-primitives-traits.workspace = true
 reth-storage-errors.workspace = true
 reth-storage-api.workspace = true
 reth-trie = { workspace = true, optional = true }
+reth-trie-common.workspace = true
 
 # alloy
 alloy-primitives.workspace = true
@@ -37,6 +38,7 @@ account-ext = [
     "revm/account-ext",
     "reth-primitives-traits/account-ext",
     "reth-trie?/account-ext",
+    "reth-trie-common/account-ext",
 ]
 std = [
     "reth-primitives-traits/std",
@@ -47,12 +49,14 @@ std = [
     "reth-ethereum-forks/std",
     "reth-storage-api/std",
     "reth-storage-errors/std",
+    "reth-trie-common/std",
 ]
 witness = ["dep:reth-trie", "dep:alloy-rlp", "dep:alloy-rpc-types-debug"]
 test-utils = [
     "dep:reth-trie",
     "reth-primitives-traits/test-utils",
     "reth-trie?/test-utils",
+    "reth-trie-common/test-utils",
 ]
 serde = [
     "revm/serde",
@@ -62,6 +66,7 @@ serde = [
     "reth-ethereum-forks/serde",
     "reth-primitives-traits/serde",
     "reth-storage-api/serde",
+    "reth-trie-common/serde",
 ]
 portable = ["revm/portable"]
 gmp = ["revm/gmp"]

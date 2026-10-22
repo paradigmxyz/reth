@@ -79,4 +79,5 @@ account-ext = [
     "reth-primitives-traits/account-ext",
     "reth-stages-types/account-ext",
     "revm/account-ext",
+    "reth-trie-common/account-ext",
 ]

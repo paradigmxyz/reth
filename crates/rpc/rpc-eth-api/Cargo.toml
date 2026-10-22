@@ -72,4 +72,5 @@ account-ext = [
     "evm2/account-ext",
     "reth-execution-types/account-ext",
     "revm/account-ext",
+    "reth-trie-common/account-ext",
 ]
