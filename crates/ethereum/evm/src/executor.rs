@@ -1403,6 +1403,6 @@ mod tests {
         };
         executor.execute_transaction(blob_tx(0)).expect("seven blobs fit the first segment cap");
         let err = executor.execute_transaction(blob_tx(1)).unwrap_err();
-        assert!(err.to_string().contains("too many blobs"), "{err}");
+        assert!(err.to_string().contains("too many blobs: have 7, max 6"), "{err}");
     }
 }
