@@ -1268,7 +1268,7 @@ jobs:
           repository: ${{ github.repository }}
           ref: ${{ github.workflow_sha }}
           path: .bench-chart-workflow
-          sparse-checkout: .github/scripts/bench-reth-charts
+          sparse-checkout: scripts/bench-reth-charts
           persist-credentials: false
 
       - name: Initialize run summary and update status
@@ -2171,7 +2171,7 @@ jobs:
           CHART_ARGS="$CHART_ARGS --baseline-name ${BASELINE_NAME}"
           CHART_ARGS="$CHART_ARGS --feature-name ${FEATURE_NAME}"
           # shellcheck disable=SC2086
-          uv run --frozen --project "$GITHUB_WORKSPACE/.bench-chart-workflow/.github/scripts/bench-reth-charts" python3 .github/scripts/bench-reth-charts.py $CHART_ARGS
+          uv run --frozen --project "$GITHUB_WORKSPACE/.bench-chart-workflow/scripts/bench-reth-charts" python3 .github/scripts/bench-reth-charts.py $CHART_ARGS
 
       - name: Upload chart attachments
         id: upload-charts
