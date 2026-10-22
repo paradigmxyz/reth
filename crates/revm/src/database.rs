@@ -3,6 +3,7 @@ use core::ops::{Deref, DerefMut};
 use reth_primitives_traits::Account;
 use reth_storage_api::{AccountReader, BytecodeReader, EvmStateProvider};
 use reth_storage_errors::provider::{ProviderError, ProviderResult};
+use reth_trie_common::{account_from_revm, account_to_revm, reth_bytecode, revm_bytecode};
 use revm::{bytecode::Bytecode, state::AccountInfo, Database, DatabaseRef};
 
 /// A [Database] and [`DatabaseRef`] implementation that uses [`EvmStateProvider`] as the underlying
@@ -90,14 +91,14 @@ impl<DB: EvmStateProvider> DatabaseRef for StateProviderDatabase<DB> {
     /// Returns `Ok` with `Some(AccountInfo)` if the account exists,
     /// `None` if it doesn't, or an error if encountered.
     fn basic_ref(&self, address: Address) -> Result<Option<AccountInfo>, Self::Error> {
-        Ok(self.basic_account(&address)?.map(Into::into))
+        Ok(self.basic_account(&address)?.map(account_to_revm))
     }
 
     /// Retrieves the bytecode associated with a given code hash.
     ///
     /// Returns `Ok` with the bytecode if found, or the default bytecode otherwise.
     fn code_by_hash_ref(&self, code_hash: B256) -> Result<Bytecode, Self::Error> {
-        Ok(self.bytecode_by_hash(&code_hash)?.unwrap_or_default().0)
+        Ok(revm_bytecode(&self.bytecode_by_hash(&code_hash)?.unwrap_or_default().0))
     }
 
     /// Retrieves the storage value at a specific index for a given address.
@@ -156,7 +157,7 @@ where
     DB: DatabaseRef<Error = ProviderError>,
 {
     fn basic_account(&self, address: &Address) -> ProviderResult<Option<Account>> {
-        Ok(self.0.basic_ref(*address)?.map(Into::into))
+        Ok(self.0.basic_ref(*address)?.map(|info| account_from_revm(&info)))
     }
 }
 
@@ -168,7 +169,7 @@ where
         &self,
         code_hash: &B256,
     ) -> ProviderResult<Option<reth_primitives_traits::Bytecode>> {
-        Ok(Some(reth_primitives_traits::Bytecode(self.0.code_by_hash_ref(*code_hash)?)))
+        Ok(Some(reth_bytecode(&self.0.code_by_hash_ref(*code_hash)?)))
     }
 }
 
@@ -290,10 +291,7 @@ mod tests {
                 ..Default::default()
             })
         );
-        assert_eq!(
-            provider.bytecode_by_hash(&code_hash).unwrap(),
-            Some(reth_primitives_traits::Bytecode(bytecode))
-        );
+        assert_eq!(provider.bytecode_by_hash(&code_hash).unwrap(), Some(reth_bytecode(&bytecode)));
     }
 
     #[test]
@@ -305,7 +303,7 @@ mod tests {
 
         assert_eq!(
             provider.bytecode_by_hash(&unknown_hash).unwrap(),
-            Some(reth_primitives_traits::Bytecode(Bytecode::default()))
+            Some(reth_bytecode(&Bytecode::default()))
         );
     }
 
@@ -363,14 +361,8 @@ mod tests {
         );
         assert_eq!(account_reads.load(Ordering::Relaxed), 1);
 
-        assert_eq!(
-            provider.bytecode_by_hash(&code_hash).unwrap(),
-            Some(reth_primitives_traits::Bytecode(bytecode.clone()))
-        );
-        assert_eq!(
-            provider.bytecode_by_hash(&code_hash).unwrap(),
-            Some(reth_primitives_traits::Bytecode(bytecode))
-        );
+        assert_eq!(provider.bytecode_by_hash(&code_hash).unwrap(), Some(reth_bytecode(&bytecode)));
+        assert_eq!(provider.bytecode_by_hash(&code_hash).unwrap(), Some(reth_bytecode(&bytecode)));
         assert_eq!(bytecode_reads.load(Ordering::Relaxed), 1);
     }
 }

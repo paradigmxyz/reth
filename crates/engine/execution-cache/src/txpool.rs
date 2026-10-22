@@ -28,12 +28,7 @@ impl TxPoolPrewarmCacheSnapshot {
 
     /// Returns a cached account, preserving cached non-existence.
     pub fn account(&self, address: &Address) -> Option<Option<Account>> {
-        self.reads.accounts.get(address).map(|account| {
-            account
-                .info
-                .as_ref()
-                .map(|info| Account::from(reth_execution_types::revm_account(info)))
-        })
+        self.reads.accounts.get(address).map(|account| account.info.as_ref().map(Account::from))
     }
 
     /// Returns a cached storage value, preserving cached zero values.
@@ -47,7 +42,7 @@ impl TxPoolPrewarmCacheSnapshot {
     /// as a miss and the caller's fallback tier decides.
     pub fn bytecode(&self, code_hash: &B256) -> Option<Option<Bytecode>> {
         let code = self.reads.contracts.get(code_hash)?;
-        (!code.is_empty()).then(|| Some(Bytecode(reth_execution_types::revm_bytecode(code))))
+        (!code.is_empty()).then(|| Some(Bytecode(code.clone())))
     }
 
     /// Returns `(accounts, storage slots, bytecodes)` in the snapshot.

@@ -443,7 +443,7 @@ where
                     let cs_info = cs_accounts.remove(addr).ok_or_else(|| {
                         eyre::eyre!("Block {block_number}: account {addr} revert is RevertTo but not in changeset")
                     })?;
-                    let revert_acct = Some(Account::from(info));
+                    let revert_acct = Some(reth_revm::account_from_revm(info));
                     eyre::ensure!(
                         revert_acct == cs_info,
                         "Block {block_number}: account {addr} info mismatch: revert={revert_acct:?} cs={cs_info:?}",

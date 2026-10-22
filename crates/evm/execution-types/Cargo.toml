@@ -40,7 +40,12 @@ rand.workspace = true
 alloy-rlp.workspace = true
 
 [features]
-account-ext = ["evm2/account-ext", "revm/account-ext", "reth-primitives-traits/account-ext"]
+account-ext = [
+    "evm2/account-ext",
+    "revm/account-ext",
+    "reth-primitives-traits/account-ext",
+    "reth-trie-common/account-ext",
+]
 asm-keccak = [
     "evm2/asm-keccak",
     "alloy-evm/asm-keccak",
