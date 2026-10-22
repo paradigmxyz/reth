@@ -15,7 +15,10 @@ use reth_node_core::{
     dirs::{DataDirPath, MaybePlatformPath},
 };
 use reth_node_ethereum::node::{EthereumAddOns, EthereumNode};
-use reth_provider::{providers::ProviderNodeTypes, ProviderFactory, StageCheckpointReader};
+use reth_provider::{
+    providers::ProviderNodeTypes, DBProvider, DatabaseProviderFactory, MetadataProvider,
+    MetadataWriter, PipelineUnwind, ProviderFactory, StageCheckpointReader,
+};
 use reth_rpc_builder::Identity;
 use reth_stages_types::StageId;
 use reth_tasks::Runtime;
@@ -28,6 +31,7 @@ struct RecordingBackfill {
     calls: Arc<Mutex<Vec<&'static str>>>,
     // Whether `recover` refuses the database.
     fail_recovery: bool,
+    pending_unwind: bool,
 }
 
 impl<N: ProviderNodeTypes, C> BackfillSyncBuilder<N, C> for RecordingBackfill {
@@ -35,6 +39,7 @@ impl<N: ProviderNodeTypes, C> BackfillSyncBuilder<N, C> for RecordingBackfill {
 
     fn build(self, ctx: BackfillContext<N, C>) -> eyre::Result<Self::Backfill> {
         self.calls.lock().unwrap().push("build");
+        assert_eq!(ctx.provider_factory().provider()?.pipeline_unwind()?, None);
         PipelineBackfill.build(ctx)
     }
 
@@ -44,6 +49,15 @@ impl<N: ProviderNodeTypes, C> BackfillSyncBuilder<N, C> for RecordingBackfill {
         self.calls.lock().unwrap().push("recover");
         if self.fail_recovery {
             eyre::bail!("recovery refused the database")
+        }
+        if self.pending_unwind {
+            let provider = provider_factory.database_provider_rw()?;
+            provider.write_pipeline_unwind(Some(&PipelineUnwind {
+                target: 0,
+                stages: vec!["Execution".into()],
+                bad_block: None,
+            }))?;
+            provider.commit()?;
         }
         Ok(())
     }
@@ -137,4 +151,19 @@ async fn failed_backfill_recovery_stops_the_launch() {
 
     assert!(launched.is_err());
     assert_eq!(*calls.lock().unwrap(), ["recover"]);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn pending_genesis_unwind_recovers_before_backfill() -> eyre::Result<()> {
+    let (config, _datadir) = launch_config();
+    let backfill = RecordingBackfill { pending_unwind: true, ..Default::default() };
+    let _node = NodeBuilder::new(config)
+        .with_database(create_test_rw_db())
+        .with_launch_context(Runtime::test())
+        .with_types::<EthereumNode>()
+        .with_components(EthereumNode::components())
+        .with_add_ons(EthereumAddOns::default())
+        .launch_with_debug_capabilities_and_backfill(backfill)
+        .await?;
+    Ok(())
 }
