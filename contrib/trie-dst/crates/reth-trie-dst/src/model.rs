@@ -32,8 +32,8 @@ impl Operation {
         let mut delta = HashedPostState::default();
         let address = match self {
             Self::Account { address, account } => {
-                state.entry(*address).or_default().account = account.clone();
-                delta.accounts.insert(keccak256(address), Some(account.clone()));
+                state.entry(*address).or_default().account = account.to_owned();
+                delta.accounts.insert(keccak256(address), Some(account.to_owned()));
                 *address
             }
             Self::Storage { address, slot, value } => {
@@ -63,7 +63,7 @@ pub fn generate(rng: &mut StdRng, state: &Model, updates: usize) -> Vec<Operatio
             let address = Address::from_word(B256::from(U256::from(rng.random_range(1..=16u64))));
             let operation = if !state.contains_key(&address) || rng.random_ratio(1, 4) {
                 let mut account =
-                    state.get(&address).map(|entry| entry.account.clone()).unwrap_or_default();
+                    state.get(&address).map(|entry| entry.account.to_owned()).unwrap_or_default();
                 account.nonce += 1;
                 account.balance = U256::from(rng.random_range(1..=1_000_000u64));
                 Operation::Account { address, account }
