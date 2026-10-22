@@ -1,7 +1,7 @@
 //! Explicit corpus inputs and deterministic, structure-preserving mutations.
 
 use crate::model::{apply, generate, Model, Operation};
-use alloy_primitives::{Address, U256};
+use alloy_primitives::{Address, KECCAK256_EMPTY, U256};
 use eyre::{ensure, Result};
 use rand::{rngs::StdRng, Rng, SeedableRng};
 use reth_primitives_traits::Account;
@@ -48,6 +48,10 @@ impl Input {
                 match op {
                     Operation::Account { address, account } => {
                         ensure!(!account.is_empty(), "empty account: {address}");
+                        ensure!(
+                            account.bytecode_hash != Some(KECCAK256_EMPTY),
+                            "noncanonical empty code hash: {address}"
+                        );
                         accounts.insert(*address);
                     }
                     Operation::Storage { address, .. } => {

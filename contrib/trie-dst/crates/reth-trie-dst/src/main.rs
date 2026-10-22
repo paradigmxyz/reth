@@ -45,6 +45,7 @@ use std::{
     collections::{BTreeMap, BTreeSet},
     fs::{self, OpenOptions},
     io::Write,
+    os::unix::fs::MetadataExt,
     path::PathBuf,
     sync::{mpsc, Arc},
     time::Duration,
@@ -367,11 +368,16 @@ fn run(config: &Config, snapshotter: &Snapshotter) -> Result<()> {
     let mut prune_requested = false;
     let mut shutdown = false;
     let mut waiting = false;
+    let mut seen_input_inode = None;
     loop {
         let head = base + blocks.len() as u64;
         if head < 1024 &&
             journal.range((head + 1)..).next().is_none() &&
-            let Some(path) = config.input_file.as_ref().filter(|p| p.exists())
+            let Some((path, inode)) = config
+                .input_file
+                .as_ref()
+                .and_then(|path| fs::metadata(path).ok().map(|metadata| (path, metadata.ino()))) &&
+            seen_input_inode != Some(inode)
         {
             let injection: Injection = serde_json::from_slice(&fs::read(path)?)?;
             if injection.id != overrides.applied {
@@ -392,6 +398,7 @@ fn run(config: &Config, snapshotter: &Snapshotter) -> Result<()> {
                 fs::rename(tmp, &overrides_path)?;
                 println!("{}", json!({"input": "injected", "block": (head + 1), "blocks": count}));
             }
+            seen_input_inode = Some(inode);
         }
         if let Some((next_db, next_state)) = pending_save {
             let result = if shutdown ||
