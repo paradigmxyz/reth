@@ -1,6 +1,6 @@
 use crate::{
     hashed_cursor::{HashedCursor, HashedStorageCursor},
-    trie::{calculate_storage_root, StorageRootCalculation, DEFAULT_INTERMEDIATE_THRESHOLD},
+    trie::{StorageRootCalculation, DEFAULT_INTERMEDIATE_THRESHOLD},
     trie_cursor::{
         depth_first::{self, DepthFirstTrieIterator},
         noop::NoopStorageTrieCursor,
@@ -529,15 +529,15 @@ fn verify_storage<H: HashedStorageCursor<Value = U256>, C: TrieStorageCursor>(
         if cancel.try_recv() == Err(crossbeam_channel::TryRecvError::Disconnected) {
             return Ok(None)
         }
-        let result = calculate_storage_root(
-            StorageRootCalculation {
-                hashed_address: address,
-                prefix_set: Default::default(),
-                previous_state: state.take(),
-                walk_all_changed_branch_children: false,
-                threshold: DEFAULT_INTERMEDIATE_THRESHOLD,
-                retain_updates: true,
-            },
+        let result = StorageRootCalculation {
+            hashed_address: address,
+            prefix_set: Default::default(),
+            previous_state: state.take(),
+            walk_all_changed_branch_children: false,
+            threshold: DEFAULT_INTERMEDIATE_THRESHOLD,
+            retain_updates: true,
+        }
+        .calculate(
             &mut NoopStorageTrieCursor::default(),
             storage,
             #[cfg(feature = "metrics")]
