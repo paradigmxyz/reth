@@ -134,10 +134,8 @@ pub fn apply_state_overrides_with_state<DB: DynDatabase>(
                 });
             }
             db.insert_account_info(&address, account);
-        } else {
-            if let Some(changes) = changes.as_mut() &&
-                original.is_some()
-            {
+        } else if original.is_some() {
+            if let Some(changes) = changes.as_mut() {
                 let Ok(()) = changes.storage_wipe(address);
                 let Ok(()) = changes.account(AccountChangeRef {
                     address,
