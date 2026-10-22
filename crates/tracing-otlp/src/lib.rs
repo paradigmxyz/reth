@@ -308,6 +308,9 @@ fn build_sampler(sample_ratio: Option<f64>) -> eyre::Result<Sampler> {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
 pub enum OtlpProtocol {
     /// HTTP/Protobuf transport, port 4318, requires `/v1/traces` path
+    // `http/protobuf` is the OpenTelemetry-specified spelling of this value for
+    // `OTEL_EXPORTER_OTLP_PROTOCOL`.
+    #[value(alias = "http/protobuf")]
     Http,
     /// gRPC transport, port 4317
     Grpc,
