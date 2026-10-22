@@ -42,7 +42,7 @@ use reth_provider::{
 };
 use reth_revm::database::StateProviderDatabase;
 use reth_storage_overlay::OverlayStateProviderFactory;
-use reth_tasks::{pool::WorkerPool, Runtime, WorkerState};
+use reth_tasks::{pool::WorkerPool, Runtime, WorkerStatefulPool};
 use reth_trie_common::MultiProofTargetsV2;
 use revm::{context::Transaction as _, state::EvmState};
 use std::{
@@ -154,7 +154,7 @@ where
     /// transactions as they arrive and wait for all spawned tasks to complete. State is cleared
     /// when the last context holding its worker-state owner is dropped. Workers that start via
     /// work-stealing lazily initialise their EVM state on first access via
-    /// [`get_or_init`](reth_tasks::WorkerState::get_or_init).
+    /// [`get_or_init`](reth_tasks::WorkerStatefulPool::get_or_init).
     fn spawn_txs_prewarm<Tx>(
         &self,
         pending: mpsc::Receiver<(usize, Tx)>,
@@ -184,7 +184,7 @@ where
             let mut refresh_txs = Vec::new();
             pool.in_place_scope(|s| {
                 s.spawn(|_| {
-                    ctx.worker_state.init::<PrewarmEvmState<Evm>>(|_| ctx.evm_for_ctx());
+                    ctx.stateful_pool.init::<PrewarmEvmState<Evm>>(|_| ctx.evm_for_ctx());
                 });
 
                 while let Ok((index, tx)) = pending.recv() {
@@ -316,7 +316,7 @@ where
     /// reads of its `seeded` pool transaction result.
     ///
     /// Lazily initialises per-thread [`PrewarmEvmState`] via
-    /// [`get_or_init`](reth_tasks::WorkerState::get_or_init) on first access.
+    /// [`get_or_init`](reth_tasks::WorkerStatefulPool::get_or_init) on first access.
     fn transact_worker<Tx>(
         ctx: &PrewarmContext<N, P, Evm>,
         index: usize,
@@ -330,7 +330,7 @@ where
             return;
         }
 
-        ctx.worker_state.get_or_init(
+        ctx.stateful_pool.get_or_init(
             || ctx.evm_for_ctx(),
             |state| {
                 let Some(evm) = state.as_mut() else { return };
@@ -543,7 +543,7 @@ where
                 let _span = branch_span.entered();
 
                 stream_bal.as_bal().par_iter().for_each(|account_changes| {
-                    ctx.worker_state.get_or_init(
+                    ctx.stateful_pool.get_or_init(
                         || None,
                         |provider| {
                             ctx.send_bal_hashed_state(
@@ -705,7 +705,7 @@ where
     /// Metrics for shared execution cache state. `None` disables metrics recording.
     pub cache_state_metrics: Option<CachedStateCacheMetrics>,
     /// Shared owner of this run's worker-local state, cleared when its last handle is dropped.
-    pub worker_state: Arc<WorkerState>,
+    pub stateful_pool: Arc<WorkerStatefulPool>,
     /// An atomic bool that tells prewarm tasks to not start any more execution.
     pub terminate_execution: Arc<AtomicBool>,
     /// Shared counter tracking the next transaction index to be executed by the main execution
@@ -726,7 +726,7 @@ where
 }
 
 /// Per-thread EVM state initialised by [`PrewarmContext::evm_for_ctx`] and stored in
-/// [`WorkerPool`] workers via [`WorkerState::get_or_init`].
+/// [`WorkerPool`] workers via [`WorkerStatefulPool::get_or_init`].
 type PrewarmEvmState<Evm> =
     Option<EvmFor<Evm, RecordingDb<StateProviderDatabase<EvmStateProviderBox>>, BalanceTracker>>;
 
@@ -1035,7 +1035,7 @@ mod tests {
             metrics: PrewarmMetrics::default(),
             cache_metrics: None,
             cache_state_metrics: None,
-            worker_state: Arc::new(WorkerState::new(Arc::new(WorkerPool::new(1, "prewarm-test")))),
+            stateful_pool: WorkerStatefulPool::new(Arc::new(WorkerPool::new(1, "prewarm-test"))),
             terminate_execution: Arc::clone(&terminate_execution),
             executed_tx_index: Arc::new(AtomicUsize::new(0)),
             precompile_cache_disabled: false,
@@ -1099,7 +1099,7 @@ mod tests {
                 metrics: PrewarmMetrics::default(),
                 cache_metrics: None,
                 cache_state_metrics: None,
-                worker_state: Arc::new(WorkerState::new(Arc::clone(&pool))),
+                stateful_pool: WorkerStatefulPool::new(Arc::clone(&pool)),
                 terminate_execution: Arc::new(AtomicBool::new(false)),
                 executed_tx_index: Arc::new(AtomicUsize::new(0)),
                 precompile_cache_disabled: false,
@@ -1142,7 +1142,7 @@ mod tests {
             },
             cache_metrics: None,
             cache_state_metrics: None,
-            worker_state: Arc::new(WorkerState::new(Arc::new(WorkerPool::new(1, "prewarm-test")))),
+            stateful_pool: WorkerStatefulPool::new(Arc::new(WorkerPool::new(1, "prewarm-test"))),
             terminate_execution: Arc::new(AtomicBool::new(false)),
             executed_tx_index: Arc::new(AtomicUsize::new(0)),
             precompile_cache_disabled: false,

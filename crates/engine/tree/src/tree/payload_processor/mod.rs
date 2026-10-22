@@ -27,7 +27,7 @@ use reth_provider::{
 };
 use reth_revm::db::BundleState;
 use reth_storage_overlay::OverlayStateProviderFactory;
-use reth_tasks::{Runtime, WorkerState};
+use reth_tasks::{Runtime, WorkerStatefulPool};
 pub use reth_trie_parallel::{
     error::StateRootTaskError,
     state_root_task::{
@@ -468,11 +468,11 @@ where
             metrics: PrewarmMetrics::default(),
             cache_metrics: self.cache_metrics.clone(),
             cache_state_metrics: self.cache_state_metrics.clone(),
-            worker_state: Arc::new(WorkerState::new(Arc::clone(if parallel_bal_execution {
+            stateful_pool: WorkerStatefulPool::new(Arc::clone(if parallel_bal_execution {
                 self.executor.bal_streaming_pool()
             } else {
                 self.executor.prewarming_pool()
-            }))),
+            })),
             terminate_execution: Arc::new(AtomicBool::new(false)),
             executed_tx_index: Arc::clone(&executed_tx_index),
             precompile_cache_disabled: self.precompile_cache_disabled,
