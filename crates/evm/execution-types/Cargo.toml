@@ -43,7 +43,8 @@ revm-bytecode.workspace = true
 
 [features]
 account-ext = [
-    "evm2/account-ext", "revm-state/account-ext",
+    "evm2/account-ext",
+    "revm-state/account-ext",
     "reth-primitives-traits/account-ext",
     "reth-trie-common/account-ext",
 ]
