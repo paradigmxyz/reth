@@ -12,7 +12,7 @@ description = "Staged syncing primitives used in reth."
 workspace = true
 
 [dependencies]
-reth-revm.workspace = true
+revm.workspace = true
 # reth
 reth-chainspec.workspace = true
 reth-codecs.workspace = true
@@ -119,5 +119,4 @@ test-utils = [
     "reth-ethereum-primitives?/test-utils",
     "reth-evm-ethereum/test-utils",
     "reth-tasks/test-utils",
-    "reth-revm/test-utils",
 ]

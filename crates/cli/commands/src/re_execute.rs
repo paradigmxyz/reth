@@ -20,12 +20,12 @@ use reth_provider::{
     providers::BlockchainProvider, BlockHashReader, BlockNumReader, BlockReader, ChainSpecProvider,
     DatabaseProviderFactory, ReceiptProvider, StaticFileProviderFactory, TransactionVariant,
 };
-use reth_revm::db::{
+use reth_stages::stages::calculate_gas_used_from_headers;
+use reth_storage_api::{ChangeSetReader, DBProvider, StateProvider, StorageChangeSetReader};
+use revm::database::{
     states::reverts::{AccountInfoRevert, RevertToSlot},
     BundleState,
 };
-use reth_stages::stages::calculate_gas_used_from_headers;
-use reth_storage_api::{ChangeSetReader, DBProvider, StateProvider, StorageChangeSetReader};
 use std::{
     collections::HashMap,
     sync::{

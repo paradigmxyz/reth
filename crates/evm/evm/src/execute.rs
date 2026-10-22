@@ -13,20 +13,10 @@ use alloy_eips::{
     eip2718::{Typed2718, WithEncoded},
     eip2930::AccessList,
 };
-pub use alloy_evm::{block::CommitChanges, RecoveredTx};
 use alloy_primitives::{Address, B256};
 use core::fmt::Debug;
-#[cfg(feature = "std")]
-use evm2::evm::{CacheDB, Db};
 use evm2::{evm::StateChangeSink as EvmStateChangeSink, registry::HandlerError, DatabaseError};
-pub use reth_execution_errors::{
-    BlockExecutionError, BlockValidationError, EvmError, InternalBlockExecutionError,
-    InvalidTxError,
-};
-pub use reth_execution_types::{BlockExecutionOutput, ExecutionOutcome};
-use reth_execution_types::{BlockExecutionResult, BundleSource, HashedPostState, StateUpdate};
-#[cfg(feature = "std")]
-use reth_primitives_traits::BlockTy;
+use reth_execution_types::{BlockExecutionResult, HashedPostState, StateUpdate};
 use reth_primitives_traits::{
     Block, HeaderTy, NodePrimitives, ReceiptTy, RecoveredBlock, SealedHeader, SignedTransaction,
     TxTy,
@@ -34,6 +24,20 @@ use reth_primitives_traits::{
 use reth_storage_api::StateProvider;
 use reth_trie_common::updates::TrieUpdates;
 use revm::database::BundleState;
+
+#[cfg(feature = "std")]
+use evm2::evm::{CacheDB, Db};
+#[cfg(feature = "std")]
+use reth_execution_types::BundleSource;
+#[cfg(feature = "std")]
+use reth_primitives_traits::BlockTy;
+
+pub use alloy_evm::{block::CommitChanges, RecoveredTx};
+pub use reth_execution_errors::{
+    BlockExecutionError, BlockValidationError, EvmError, InternalBlockExecutionError,
+    InvalidTxError,
+};
+pub use reth_execution_types::{BlockExecutionOutput, ExecutionOutcome};
 
 /// Gas used by a successfully executed transaction.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]

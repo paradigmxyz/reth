@@ -13,7 +13,6 @@ workspace = true
 [dependencies]
 revm.workspace = true
 # reth
-reth-revm.workspace = true
 reth-execution-errors.workspace = true
 reth-execution-types.workspace = true
 reth-metrics = { workspace = true, optional = true }
@@ -48,7 +47,6 @@ reth-ethereum-primitives.workspace = true
 account-ext = [
     "evm2/account-ext",
     "reth-execution-types/account-ext",
-    "reth-revm/account-ext",
     "revm/account-ext",
     "reth-primitives-traits/account-ext",
 ]
@@ -74,7 +72,6 @@ portable = [
     "evm2/portable",
     "reth-execution-types/portable",
     "revm/portable",
-    "reth-revm/portable",
 ]
 p256-aws-lc-rs = [
     "evm2/p256-aws-lc-rs",
@@ -82,7 +79,6 @@ p256-aws-lc-rs = [
 ]
 std = [
     "alloy-evm/std",
-    "reth-revm/std",
     "dep:moka",
     "dep:rayon",
     "dep:tracing",
@@ -112,5 +108,4 @@ test-utils = [
     "reth-primitives-traits/test-utils",
     "reth-trie-common/test-utils",
     "reth-ethereum-primitives/test-utils",
-    "reth-revm/test-utils",
 ]

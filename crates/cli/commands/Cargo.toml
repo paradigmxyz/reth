@@ -10,7 +10,7 @@ repository.workspace = true
 [lints]
 
 [dependencies]
-reth-revm.workspace = true
+revm.workspace = true
 # reth
 reth-chainspec.workspace = true
 reth-cli.workspace = true
@@ -137,4 +137,5 @@ arbitrary = [
     "alloy-consensus/arbitrary",
     "reth-primitives-traits/arbitrary",
     "reth-ethereum-primitives/arbitrary",
+    "revm/arbitrary",
 ]

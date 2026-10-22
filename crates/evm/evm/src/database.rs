@@ -101,15 +101,9 @@ mod tests {
     use reth_storage_api::{noop::NoopProvider, StateProvider};
 
     #[test]
-    fn missing_block_hash_matches_revm_adapter() {
+    fn missing_block_hash_returns_zero() {
         let mut native =
             StateProviderDatabase::new(NoopProvider::mainnet().into_evm_state_provider());
-        let mut revm = reth_revm::database::StateProviderDatabase::new(
-            NoopProvider::mainnet().into_evm_state_provider(),
-        );
-        assert_eq!(
-            native.get_block_hash(&Word::from(42)).unwrap(),
-            revm::Database::block_hash(&mut revm, 42).unwrap()
-        );
+        assert_eq!(native.get_block_hash(&Word::from(42)).unwrap(), B256::ZERO);
     }
 }

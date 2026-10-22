@@ -8434,7 +8434,6 @@ dependencies = [
  "reth-provider",
  "reth-prune",
  "reth-prune-types",
- "reth-revm",
  "reth-stages",
  "reth-stages-types",
  "reth-static-file",
@@ -8444,6 +8443,7 @@ dependencies = [
  "reth-trie",
  "reth-trie-common",
  "reth-trie-db",
+ "revm",
  "secp256k1 0.30.0",
  "serde",
  "serde_json",
@@ -9407,7 +9407,6 @@ dependencies = [
  "reth-execution-types",
  "reth-metrics",
  "reth-primitives-traits",
- "reth-revm",
  "reth-storage-api",
  "reth-storage-errors",
  "reth-trie-common",
@@ -9451,8 +9450,6 @@ dependencies = [
  "alloy-primitives",
  "fixed-cache",
  "metrics",
- "metrics-util",
- "moka",
  "parking_lot",
  "reth-errors",
  "reth-evm",
@@ -9460,7 +9457,6 @@ dependencies = [
  "reth-metrics",
  "reth-primitives-traits",
  "reth-provider",
- "reth-revm",
  "reth-storage-api",
  "revm",
  "tracing",
@@ -10091,7 +10087,6 @@ dependencies = [
  "reth-primitives-traits",
  "reth-provider",
  "reth-prune",
- "reth-revm",
  "reth-rpc",
  "reth-rpc-api",
  "reth-rpc-builder",
@@ -10110,6 +10105,7 @@ dependencies = [
  "reth-tracing",
  "reth-transaction-pool",
  "reth-trie-common",
+ "revm",
  "serde",
  "serde_json",
  "similar-asserts",
@@ -10420,22 +10416,6 @@ dependencies = [
  "thiserror 2.0.21",
  "toml",
  "tracing",
-]
-
-[[package]]
-name = "reth-revm"
-version = "2.8.0"
-dependencies = [
- "alloy-consensus",
- "alloy-primitives",
- "alloy-rlp",
- "alloy-rpc-types-debug",
- "reth-ethereum-forks",
- "reth-primitives-traits",
- "reth-storage-api",
- "reth-storage-errors",
- "reth-trie",
- "revm",
 ]
 
 [[package]]
@@ -10915,7 +10895,6 @@ dependencies = [
  "reth-provider",
  "reth-prune",
  "reth-prune-types",
- "reth-revm",
  "reth-stages-api",
  "reth-static-file",
  "reth-static-file-types",
@@ -10926,6 +10905,7 @@ dependencies = [
  "reth-tracing",
  "reth-trie",
  "reth-trie-db",
+ "revm",
  "tempfile",
  "thiserror 2.0.21",
  "tokio",
@@ -11575,7 +11555,6 @@ dependencies = [
  "blst",
  "c-kzg",
  "cfg-if",
- "gmp-mpfr-sys",
  "k256 0.13.4",
  "p256 0.13.2",
  "revm-context-interface",
