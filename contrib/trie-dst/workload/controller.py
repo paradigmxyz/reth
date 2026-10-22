@@ -95,7 +95,10 @@ def worker(config):
     killed = 0
     recovered = 0
     plan = list(config["kill_blocks"])
-    deadline = time.monotonic() + config["workload"]["timeout_secs"]
+    # Rust may make two sequential timeout-bounded waits before its next event;
+    # recovery has no internal timeout and can use the campaign horizon.
+    idle_budget = 2 * config["workload"]["timeout_secs"] + config["run_secs"]
+    deadline = time.monotonic() + idle_budget
     waiting = False
     try:
         workload = config["workload"] | {"datadir": str(STATE / "data"),
@@ -133,7 +136,7 @@ def worker(config):
                             continue  # Rust errors/backtraces share stdout with JSON events.
                         if not isinstance(event, dict):
                             continue
-                        deadline = time.monotonic() + config["workload"]["timeout_secs"]
+                        deadline = time.monotonic() + idle_budget
                         if event.get("input") == "waiting":
                             waiting = True
                             assertion(True, json.dumps(event), "trie/input/checked", "Sometimes")
@@ -219,11 +222,11 @@ def main():
             args = arguments(request["args"])
             crashes = args.pop("crashes")
             supplied = request.get("base_input")
-            if supplied is not None:
-                input_value = native("validate-input", {"input": json.loads(supplied)})
-            else:
-                input_value = native("generate-input", args | {"seed": request["seed"]})
-            args["blocks"] = len(input_value["blocks"])
+            if supplied is not None and len(supplied) > 32 << 20:
+                raise ValueError("explicit input exceeds 32 MiB")
+            input_value = native("validate-input", {"input": json.loads(supplied)}) if supplied is not None else None
+            if input_value is not None:
+                args["blocks"] = len(input_value["blocks"])
             kill_blocks = sorted(random.Random(request["seed"]).sample(
                 range(1, args["blocks"] + 1), min(crashes, args["blocks"])))
             config = {"workload": args | {"seed": request["seed"], "input": input_value},

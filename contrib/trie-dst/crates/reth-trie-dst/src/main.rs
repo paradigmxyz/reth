@@ -193,7 +193,7 @@ fn metric_counts(snapshotter: &Snapshotter) -> BTreeMap<String, u64> {
         .collect()
 }
 
-fn run(config: &Config, snapshotter: &Snapshotter) -> Result<()> {
+fn run(config: &mut Config, snapshotter: &Snapshotter) -> Result<()> {
     ensure!((1..=1024).contains(&config.blocks), "blocks must be 1..=1024");
     ensure!((1..=4096).contains(&config.updates), "updates must be 1..=4096");
     ensure!((1..=16).contains(&config.proof_workers), "proof_workers must be 1..=16");
@@ -242,7 +242,7 @@ fn run(config: &Config, snapshotter: &Snapshotter) -> Result<()> {
     fs::create_dir_all(datadir)?;
     let input = config
         .input
-        .clone()
+        .take()
         .unwrap_or_else(|| Input::generate(config.seed, config.blocks, config.updates));
     input.validate()?;
     let mut total_blocks = input.blocks.len() as u64;
@@ -368,16 +368,20 @@ fn run(config: &Config, snapshotter: &Snapshotter) -> Result<()> {
     let mut prune_requested = false;
     let mut shutdown = false;
     let mut waiting = false;
-    let mut seen_input_inode = None;
+    let mut seen_input_file = None;
     loop {
         let head = base + blocks.len() as u64;
         if head < 1024 &&
             journal.range((head + 1)..).next().is_none() &&
-            let Some((path, inode)) = config
-                .input_file
-                .as_ref()
-                .and_then(|path| fs::metadata(path).ok().map(|metadata| (path, metadata.ino()))) &&
-            seen_input_inode != Some(inode)
+            let Some((path, file_stamp)) = config.input_file.as_ref().and_then(|path| {
+                fs::metadata(path).ok().map(|metadata| {
+                    (
+                        path,
+                        (metadata.ino(), metadata.mtime(), metadata.mtime_nsec(), metadata.len()),
+                    )
+                })
+            }) &&
+            seen_input_file != Some(file_stamp)
         {
             let injection: Injection = serde_json::from_slice(&fs::read(path)?)?;
             if injection.id != overrides.applied {
@@ -398,7 +402,7 @@ fn run(config: &Config, snapshotter: &Snapshotter) -> Result<()> {
                 fs::rename(tmp, &overrides_path)?;
                 println!("{}", json!({"input": "injected", "block": (head + 1), "blocks": count}));
             }
-            seen_input_inode = Some(inode);
+            seen_input_file = Some(file_stamp);
         }
         if let Some((next_db, next_state)) = pending_save {
             let result = if shutdown ||
@@ -743,12 +747,14 @@ fn main() -> Result<()> {
         Some(text) => text.to_string(),
         None => "{}".into(),
     };
-    let config: Config = serde_json::from_str(&text)?;
+    let mut config: Config = serde_json::from_str(&text)?;
+    drop(text);
     if let Some(input) = &config.input {
         input.validate()?;
     }
     let recorder = DebuggingRecorder::new();
     let snapshotter = recorder.snapshotter();
     recorder.install()?;
-    run(&config, &snapshotter).wrap_err_with(|| format!("reth-trie-dst {config:?}"))
+    run(&mut config, &snapshotter)
+        .wrap_err_with(|| format!("reth-trie-dst seed={} blocks={}", config.seed, config.blocks))
 }
