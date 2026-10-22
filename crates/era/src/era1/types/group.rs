@@ -222,6 +222,28 @@ mod tests {
     }
 
     #[test]
+    fn test_block_index_rejects_overflowing_count() {
+        // A 16-byte entry (starting-number | count) whose count is 2^61: `count * 8` wraps to 0,
+        // so the length check passes. It must be rejected, not allocated.
+        let mut data = Vec::new();
+        data.extend_from_slice(&1000u64.to_le_bytes()); // starting-number
+        data.extend_from_slice(&(1i64 << 61).to_le_bytes()); // count = 2^61
+        let entry = Entry::new(BLOCK_INDEX, data);
+
+        assert!(BlockIndex::from_entry(&entry).is_err());
+    }
+
+    #[test]
+    fn test_block_index_rejects_negative_count() {
+        let mut data = Vec::new();
+        data.extend_from_slice(&1000u64.to_le_bytes()); // starting-number
+        data.extend_from_slice(&(-1i64).to_le_bytes()); // count = -1
+        let entry = Entry::new(BLOCK_INDEX, data);
+
+        assert!(BlockIndex::from_entry(&entry).is_err());
+    }
+
+    #[test]
     fn test_block_index_offset_lookup() {
         let starting_number = 1000;
         let offsets = vec![100, 200, 300, 400, 500];

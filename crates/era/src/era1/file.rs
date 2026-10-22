@@ -499,6 +499,29 @@ mod tests {
     }
 
     #[test]
+    fn test_era1_reader_rejects_overflowing_block_index_count() {
+        // A valid file whose trailing block index declares a count of 2^61 with no offsets.
+        let era1_file = create_test_era1_file(1000, 2, "testnet");
+        let mut buffer = Vec::new();
+        {
+            let mut writer = Era1Writer::new(&mut buffer);
+            writer.write_version().unwrap();
+            for block in &era1_file.group.blocks {
+                writer.write_block(block).unwrap();
+            }
+            writer.write_accumulator(&era1_file.group.accumulator).unwrap();
+            writer.flush().unwrap();
+        }
+        let mut data = Vec::new();
+        data.extend_from_slice(&1000u64.to_le_bytes());
+        data.extend_from_slice(&(1i64 << 61).to_le_bytes());
+        Entry::new(BLOCK_INDEX, data).write(&mut buffer).unwrap();
+
+        let result: Result<Vec<_>, _> = Era1Reader::new(Cursor::new(&buffer)).iter().collect();
+        assert!(result.is_err());
+    }
+
+    #[test]
     fn test_era1_roundtrip_file() -> Result<(), E2sError> {
         // Create a temporary directory
         let temp_dir = tempdir().expect("Failed to create temp directory");
