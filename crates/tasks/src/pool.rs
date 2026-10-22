@@ -487,8 +487,9 @@ impl Worker {
 
     /// Returns mutable state for `run_id`, creating it with `f` if absent.
     ///
-    /// Drops and replaces existing state when its run or type differs, even if two runs
-    /// process the same block with different execution environments.
+    /// Reuses existing state without calling `f` when both its run and type match.
+    /// Otherwise, drops the previous state before calling `f` to create its replacement.
+    /// If `f` panics, the worker remains uninitialized.
     pub fn get_or_init<T: 'static>(
         &mut self,
         run_id: &WorkerRunId,
@@ -516,7 +517,7 @@ impl Worker {
 /// Identity of one run using worker-local state.
 ///
 /// Create a fresh identity with [`Default::default`] for each run and clone it for that run's
-/// jobs. Clones share an identity; separately created values are distinct even for the same block.
+/// jobs. Clones share an identity; separately created values are always distinct.
 #[derive(Clone, Debug, Default)]
 pub struct WorkerRunId(Arc<()>);
 
@@ -720,5 +721,41 @@ mod tests {
         let mut worker = Worker::new();
         worker.init(&WorkerRunId::default(), |_| 1u64);
         worker.get_mut::<u64>(&WorkerRunId::default());
+    }
+
+    #[test]
+    fn worker_replacement_drops_previous_state_before_initialization() {
+        let mut worker = Worker::new();
+        let previous_run = WorkerRunId::default();
+        let next_run = WorkerRunId::default();
+        let resource = Arc::new(());
+
+        for run_id in [&previous_run, &next_run] {
+            worker.init(&previous_run, |_| Arc::clone(&resource));
+            assert_eq!(Arc::strong_count(&resource), 2);
+            assert_eq!(
+                *worker.get_or_init(run_id, || {
+                    assert_eq!(Arc::strong_count(&resource), 1);
+                    42u64
+                }),
+                42,
+            );
+        }
+    }
+
+    #[test]
+    fn worker_failed_replacement_leaves_state_uninitialized() {
+        let mut worker = Worker::new();
+        let previous_run = WorkerRunId::default();
+        let next_run = WorkerRunId::default();
+        worker.init(&previous_run, |_| 1u64);
+
+        let panic = catch_unwind(AssertUnwindSafe(|| {
+            worker.get_or_init::<u64>(&next_run, || panic!("initialization failed"));
+        }))
+        .unwrap_err();
+        assert_eq!(panic.downcast_ref::<&str>(), Some(&"initialization failed"));
+        assert!(worker.state.is_none());
+        assert_eq!(*worker.get_or_init(&next_run, || 2u64), 2);
     }
 }
