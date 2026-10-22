@@ -962,27 +962,37 @@ pub(crate) struct ValidationMetrics {
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        hash_disallow_list, validate_message_against_payload, AddressSet, ValidationApi,
-        ValidationApiConfig, ValidationApiError,
-    };
+    use super::*;
     use alloy_consensus::{BlockHeader, Header};
-    use alloy_primitives::{Address, B256, U256};
+    use alloy_eips::NumHash;
+    use alloy_primitives::{Address, Bytes, B256, U256};
     use alloy_rpc_types_beacon::relay::BidTrace;
     use alloy_rpc_types_engine::{ExecutionData, ExecutionPayload, ExecutionPayloadV1};
     use reth_consensus::noop::NoopConsensus;
     use reth_engine_primitives::PayloadValidator;
     use reth_ethereum_engine_primitives::EthPayloadTypes;
-    use reth_ethereum_primitives::Block;
+    use reth_ethereum_primitives::{Block, EthPrimitives};
     use reth_evm_ethereum::EthEvmConfig;
     use reth_execution_types::BlockExecutionOutput;
     use reth_node_api::NewPayloadError;
     use reth_primitives_traits::{RecoveredBlock, SealedBlock, SealedHeader};
-    use reth_provider::test_utils::MockEthProvider;
+    use reth_provider::{test_utils::MockEthProvider, InMemoryBalStore};
     use reth_revm::db::{states::bundle_state::BundleState, AccountStatus, BundleAccount};
+    use reth_rpc_eth_types::EthStateCacheConfig;
+    use reth_storage_api::{BalStoreHandle, RawBal};
     use reth_tasks::Runtime;
-    use revm::state::AccountInfo;
-    use std::sync::Arc;
+    use revm::{
+        database::EmptyDB,
+        state::{
+            bal::{AccountBal, Bal, BalWrites, BlockAccessIndex},
+            AccountInfo,
+        },
+        DatabaseRef,
+    };
+    use std::{
+        sync::{mpsc, Arc},
+        time::Duration,
+    };
 
     fn test_execution_payload() -> ExecutionPayload {
         ExecutionPayload::V1(ExecutionPayloadV1 {
@@ -1290,5 +1300,213 @@ mod tests {
             },
         );
         state
+    }
+
+    #[tokio::test]
+    async fn cached_reads_are_isolated_by_parent_without_premature_eviction() {
+        let api = test_validation_api(MockEthProvider::default());
+        let first = B256::repeat_byte(1);
+        let fork = B256::repeat_byte(2);
+        let mut reads = api.cached_reads(first).await;
+        reads.insert_account(
+            Address::ZERO,
+            AccountInfo { nonce: 9, ..Default::default() },
+            Default::default(),
+        );
+        api.update_cached_reads(first, reads).await;
+        assert!(api.cached_reads(fork).await.accounts.is_empty());
+        assert_eq!(
+            api.cached_reads(first).await.accounts[&Address::ZERO].info.as_ref().unwrap().nonce,
+            9
+        );
+        api.update_cached_reads(fork, Default::default()).await;
+        assert!(api.cached_reads(first).await.accounts.is_empty());
+    }
+
+    fn storage_bal(value: u64) -> SharedBal {
+        let mut account = AccountBal::default();
+        account.storage.storage.insert(
+            U256::from(1),
+            BalWrites::new(vec![(BlockAccessIndex::new(4), U256::from(value))]),
+        );
+        let mut bal = Bal::default();
+        bal.accounts.insert(Address::repeat_byte(1), account);
+        let raw: Bytes = alloy_rlp::encode(bal.clone().into_alloy_bal()).into();
+        let hash = alloy_primitives::keccak256(&raw);
+        Arc::new(DecodedBal::new_unchecked(Arc::new(bal), raw, hash))
+    }
+
+    fn parent_bal_api(
+        mut provider: MockEthProvider,
+    ) -> ValidationApi<MockEthProvider, EthEvmConfig, EthPayloadTypes> {
+        let chain = Arc::new(
+            reth_chainspec::ChainSpecBuilder::from(&*reth_chainspec::MAINNET)
+                .amsterdam_activated()
+                .build(),
+        );
+        provider.chain_spec = chain.clone();
+        let cache = EthStateCache::<EthPrimitives>::spawn_with(
+            provider.clone(),
+            EthStateCacheConfig::default(),
+            Runtime::test(),
+        );
+        let mut api = test_validation_api(provider).with_parent_bal_cache(cache);
+        Arc::get_mut(&mut api.inner).unwrap().evm_config = EthEvmConfig::new(chain);
+        api
+    }
+
+    #[tokio::test]
+    async fn upfront_requests_reuse_the_eth_cache_and_select_the_exact_parent() {
+        let api = parent_bal_api(MockEthProvider::default());
+        let cache = api.parent_bal_cache.as_ref().unwrap().clone();
+        let first = B256::repeat_byte(1);
+        let fork = B256::repeat_byte(2);
+        for (hash, value) in [(first, 42), (fork, 77)] {
+            cache.insert_bal(hash, Arc::unwrap_or_clone(storage_bal(value)));
+        }
+        let original = api.parent_bal(first, 1).await.unwrap().unwrap();
+        // Even with a populated read cache, the next submission asks EthStateCache again.
+        api.update_cached_reads(first, Default::default()).await;
+        let repeated = api.parent_bal(first, 1).await.unwrap().unwrap();
+        assert!(Arc::ptr_eq(&original, &repeated));
+        let fork_bal = api.parent_bal(fork, 1).await.unwrap().unwrap();
+        assert_eq!(
+            ParentBalDb::new(EmptyDB::default(), Some(fork_bal.as_bal().as_ref()))
+                .storage_ref(Address::repeat_byte(1), U256::from(1))
+                .unwrap(),
+            U256::from(77)
+        );
+        assert!(api.parent_bal(B256::repeat_byte(3), 1).await.unwrap().is_none());
+        let unconfigured = test_validation_api(MockEthProvider::default());
+        let original_handle = unconfigured.clone();
+        let configured = unconfigured.with_parent_bal_cache(cache);
+        assert!(original_handle.parent_bal_cache.is_none());
+        assert!(configured.parent_bal_cache.is_some());
+    }
+
+    #[tokio::test]
+    async fn unavailable_and_pre_amsterdam_bal_use_provider_fallback() {
+        let provider = MockEthProvider::default();
+        let cache_runtime = Runtime::test();
+        let cache = EthStateCache::<EthPrimitives>::spawn_with(
+            provider.clone(),
+            EthStateCacheConfig::default(),
+            cache_runtime.clone(),
+        );
+        cache_runtime.graceful_shutdown();
+        cache_runtime.on_shutdown_signal().clone().await;
+        let pre_amsterdam =
+            test_validation_api(provider.clone()).with_parent_bal_cache(cache.clone());
+        assert!(pre_amsterdam.parent_bal(B256::ZERO, 1).await.unwrap().is_none());
+        let active = parent_bal_api(provider).with_parent_bal_cache(cache);
+        assert!(active.parent_bal(B256::ZERO, 1).await.unwrap().is_none());
+    }
+
+    fn single_blocking_runtime() -> tokio::runtime::Runtime {
+        tokio::runtime::Builder::new_current_thread()
+            .max_blocking_threads(1)
+            .enable_all()
+            .build()
+            .unwrap()
+    }
+
+    #[test]
+    fn upfront_public_validation_does_not_hold_the_bal_fetch_worker() {
+        let runtime = single_blocking_runtime();
+        runtime.block_on(async {
+            let mut provider = MockEthProvider::default();
+            let bal = storage_bal(42);
+            let parent = SealedHeader::seal_slow(Header {
+                gas_limit: 30_000_000,
+                block_access_list_hash: Some(bal.hash()),
+                ..Default::default()
+            });
+            provider.add_block(
+                parent.hash(),
+                Block { header: parent.clone_header(), body: Default::default() },
+            );
+            provider.bal_store = BalStoreHandle::new(InMemoryBalStore::new(Default::default()));
+            provider
+                .bal_store
+                .insert(NumHash::new(0, parent.hash()), RawBal::from(bal.as_raw().clone()))
+                .unwrap();
+            let block = RecoveredBlock::new_unhashed(
+                Block {
+                    header: Header {
+                        parent_hash: parent.hash(),
+                        number: 1,
+                        timestamp: 12,
+                        gas_limit: parent.gas_limit(),
+                        base_fee_per_gas: Some(0),
+                        excess_blob_gas: Some(0),
+                        parent_beacon_block_root: Some(B256::ZERO),
+                        block_access_list_hash: Some(B256::ZERO),
+                        ..Default::default()
+                    },
+                    body: reth_ethereum_primitives::BlockBody {
+                        withdrawals: Some(Default::default()),
+                        ..Default::default()
+                    },
+                },
+                vec![],
+            );
+            let message = BidTrace {
+                block_hash: block.hash(),
+                parent_hash: parent.hash(),
+                gas_limit: block.gas_limit(),
+                ..Default::default()
+            };
+            let api = parent_bal_api(provider.clone());
+            for _ in 0..2 {
+                provider.state_roots.lock().push(block.state_root());
+                tokio::time::timeout(
+                    Duration::from_secs(2),
+                    api.validate_message_against_block(
+                        block.clone(),
+                        message.clone(),
+                        block.gas_limit(),
+                        None,
+                    ),
+                )
+                .await
+                .unwrap()
+                .unwrap();
+            }
+            let cached = api.parent_bal(parent.hash(), 12).await.unwrap().unwrap();
+            assert_eq!(cached.hash(), bal.hash());
+        });
+        runtime.shutdown_timeout(Duration::from_secs(2));
+    }
+
+    #[test]
+    fn timed_out_upfront_fetch_falls_back_and_later_requests_retry() {
+        let runtime = single_blocking_runtime();
+        runtime.block_on(async {
+            let api = parent_bal_api(MockEthProvider::default());
+            let (entered_tx, entered_rx) = oneshot::channel();
+            let (release_tx, release_rx) = mpsc::channel();
+            let blocker = api.task_spawner.spawn_blocking(move || {
+                entered_tx.send(()).unwrap();
+                release_rx.recv_timeout(Duration::from_secs(3)).unwrap();
+            });
+            tokio::time::timeout(Duration::from_secs(2), entered_rx).await.unwrap().unwrap();
+            let hash = B256::repeat_byte(1);
+            assert!(tokio::time::timeout(Duration::from_secs(2), api.parent_bal(hash, 1))
+                .await
+                .unwrap()
+                .unwrap()
+                .is_none());
+            release_tx.send(()).unwrap();
+            blocker.await.unwrap();
+            api.parent_bal_cache
+                .as_ref()
+                .unwrap()
+                .insert_bal(hash, Arc::unwrap_or_clone(storage_bal(42)));
+            assert_eq!(
+                api.parent_bal(hash, 1).await.unwrap().unwrap().hash(),
+                storage_bal(42).hash()
+            );
+        });
+        runtime.shutdown_timeout(Duration::from_secs(2));
     }
 }

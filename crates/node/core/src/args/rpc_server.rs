@@ -1367,7 +1367,7 @@ mod tests {
                 default_suggested_fee: None,
             },
             rpc_send_raw_transaction_sync_timeout: std::time::Duration::from_secs(30),
-            rpc_flashbots_parent_bal: false,
+            rpc_flashbots_parent_bal: true,
             testing_skip_invalid_transactions: true,
             testing_gas_limit: None,
             rpc_force_blob_sidecar_upcasting: false,
@@ -1463,6 +1463,7 @@ mod tests {
             "60",
             "--rpc.send-raw-transaction-sync-timeout",
             "30s",
+            "--rpc.flashbots-parent-bal",
             "--testing.skip-invalid-transactions",
         ])
         .args;
@@ -1493,5 +1494,17 @@ mod tests {
         ]);
 
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn flashbots_parent_bal_is_opt_in() {
+        assert!(
+            !CommandParser::<RpcServerArgs>::parse_from(["reth"]).args.rpc_flashbots_parent_bal
+        );
+        assert!(
+            CommandParser::<RpcServerArgs>::parse_from(["reth", "--rpc.flashbots-parent-bal"])
+                .args
+                .rpc_flashbots_parent_bal
+        );
     }
 }
