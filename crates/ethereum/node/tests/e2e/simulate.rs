@@ -1,3 +1,4 @@
+use alloy_eips::eip7825::MAX_TX_GAS_LIMIT_OSAKA;
 use alloy_primitives::{address, bytes, Address, U256};
 use alloy_provider::Provider;
 use alloy_rpc_types_eth::{
@@ -8,7 +9,6 @@ use alloy_rpc_types_eth::{
 use reth_chainspec::EthereumHardfork;
 use reth_e2e_test_utils::{test_chain_spec_builder, E2ETestSetupExt};
 use reth_node_ethereum::EthereumNode;
-use revm::primitives::eip7825::TX_GAS_LIMIT_CAP;
 use std::sync::Arc;
 
 #[tokio::test]
@@ -185,7 +185,7 @@ async fn assert_validation_uses_remaining_gas(fork: EthereumHardfork) -> eyre::R
     let txs = result[0].inner.transactions.as_transactions().expect("expected full transactions");
     assert_eq!(txs.len(), 1);
     assert_eq!(txs[0].gas_limit(), 30_000_000);
-    assert!(txs[0].gas_limit() > TX_GAS_LIMIT_CAP);
+    assert!(txs[0].gas_limit() > MAX_TX_GAS_LIMIT_OSAKA);
 
     Ok(())
 }
@@ -275,7 +275,7 @@ async fn test_simulate_v1_execution_gas_cap_amsterdam() -> eyre::Result<()> {
 
         assert!(result[0].calls[0].status);
         let gas = U256::from_be_slice(&result[0].calls[0].return_data);
-        assert_eq!(gas > U256::from(TX_GAS_LIMIT_CAP), !validation);
+        assert_eq!(gas > U256::from(MAX_TX_GAS_LIMIT_OSAKA), !validation);
     }
 
     Ok(())
