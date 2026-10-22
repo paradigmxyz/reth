@@ -1,6 +1,7 @@
 use alloc::sync::Arc;
 use alloy_primitives::{Address, B256, U256};
 use reth_primitives_traits::{Account, Block, Bytecode, RecoveredBlock};
+use reth_trie_common::{account_from_revm, reth_bytecode};
 use revm::database::{states::BundleState, BundleAccount};
 
 pub use alloy_evm::block::BlockExecutionResult;
@@ -35,12 +36,12 @@ impl<T> BlockExecutionOutput<T> {
 
     /// Return bytecode if known.
     pub fn bytecode(&self, code_hash: &B256) -> Option<Bytecode> {
-        self.state.bytecode(code_hash).map(Bytecode)
+        self.state.bytecode(code_hash).map(|code| reth_bytecode(&code))
     }
 
     /// Get account if account is known.
     pub fn account(&self, address: &Address) -> Option<Option<Account>> {
-        self.state.account(address).map(|a| a.info.as_ref().map(Into::into))
+        self.state.account(address).map(|a| a.info.as_ref().map(account_from_revm))
     }
 
     /// Returns the state [`BundleAccount`] for the given address.

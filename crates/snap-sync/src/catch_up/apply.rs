@@ -193,7 +193,7 @@ mod tests {
         for (address, info) in &db.cache.accounts {
             let Some(info) = info else { continue };
             let hashed_address = keccak256(address);
-            state.0.insert(hashed_address, Account::from(reth_execution_types::revm_account(info)));
+            state.0.insert(hashed_address, Account::from(info));
             if let Some(storage) = db.cache.storage.get(address) {
                 for (slot, value) in &storage.slots {
                     if !value.is_zero() {

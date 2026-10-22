@@ -1,4 +1,4 @@
-use crate::{BlockExecutionOutput, BlockExecutionResult};
+use crate::{revm_bytecode, BlockExecutionOutput, BlockExecutionResult};
 use alloc::{vec, vec::Vec};
 use alloy_eips::eip7685::Requests;
 use alloy_primitives::{
@@ -7,7 +7,9 @@ use alloy_primitives::{
     Address, BlockNumber, Bloom, Log, B256, U256,
 };
 use reth_primitives_traits::{Account, Bytecode, Receipt, StorageEntry};
-use reth_trie_common::{HashedPostState, KeyHasher};
+use reth_trie_common::{
+    account_from_revm, account_to_revm, reth_bytecode, HashedPostState, KeyHasher,
+};
 use revm::{
     database::{states::BundleState, BundleAccount},
     state::AccountInfo,
@@ -110,8 +112,8 @@ impl<T> ExecutionOutcome<T> {
             state_init.into_iter().map(|(address, (original, present, storage))| {
                 (
                     address,
-                    original.map(Into::into),
-                    present.map(Into::into),
+                    original.map(account_to_revm),
+                    present.map(account_to_revm),
                     storage.into_iter().map(|(k, s)| (k.into(), s)).collect(),
                 )
             }),
@@ -120,12 +122,14 @@ impl<T> ExecutionOutcome<T> {
                 reverts.into_iter().map(|(address, (original, storage))| {
                     (
                         address,
-                        original.map(|i| i.map(Into::into)),
+                        original.map(|i| i.map(account_to_revm)),
                         storage.into_iter().map(|entry| (entry.key.into(), entry.value)),
                     )
                 })
             }),
-            contracts_init.into_iter().map(|(code_hash, bytecode)| (code_hash, bytecode.0)),
+            contracts_init
+                .into_iter()
+                .map(|(code_hash, bytecode)| (code_hash, revm_bytecode(&bytecode.0))),
         );
 
         Self { bundle, receipts, first_block, requests }
@@ -187,7 +191,7 @@ impl<T> ExecutionOutcome<T> {
 
     /// Get account if account is known.
     pub fn account(&self, address: &Address) -> Option<Option<Account>> {
-        self.bundle.account(address).map(|a| a.info.as_ref().map(Into::into))
+        self.bundle.account(address).map(|a| a.info.as_ref().map(account_from_revm))
     }
 
     /// Returns the state [`BundleAccount`] for the given account.
@@ -204,7 +208,7 @@ impl<T> ExecutionOutcome<T> {
 
     /// Return bytecode if known.
     pub fn bytecode(&self, code_hash: &B256) -> Option<Bytecode> {
-        self.bundle.bytecode(code_hash).map(Bytecode)
+        self.bundle.bytecode(code_hash).map(|code| reth_bytecode(&code))
     }
 
     /// Returns [`HashedPostState`] for this execution outcome.

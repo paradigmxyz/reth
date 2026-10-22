@@ -19,6 +19,7 @@ pub mod cached;
 /// Contains glue code for integrating reth database into revm's [Database].
 pub mod database;
 
+pub use reth_trie_common::{account_from_revm, account_to_revm, reth_bytecode, revm_bytecode};
 pub use revm::{database as db, inspector};
 
 /// Common test helpers
