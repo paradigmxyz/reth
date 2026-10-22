@@ -12,7 +12,7 @@ use evm2::{
         AccountChangeRef, Bal as EvmBal, CacheDB, Db, DynDatabase, StateChangeSink, StorageChange,
     },
 };
-use reth_evm::{database::StateProviderDatabase, EvmEnv};
+use reth_evm::{database::StateProviderDatabase, BundleState, EvmEnv};
 use reth_execution_types::{BlockState, TransactionChanges};
 use reth_storage_api::{EvmStateProviderAdapter, StateProviderBox};
 use std::sync::Arc;
@@ -85,7 +85,7 @@ pub fn apply_state_overrides<DB: DynDatabase>(
 pub fn apply_state_overrides_with_state<DB: DynDatabase>(
     overrides: StateOverride,
     db: &mut CacheDB<DB>,
-    state: Option<&mut BlockState>,
+    state: Option<&mut BundleState>,
 ) -> Result<(), StateOverrideError<evm2::DatabaseError>> {
     let mut changes = state.is_some().then(TransactionChanges::default);
     for (address, account_override) in overrides {
@@ -118,12 +118,21 @@ pub fn apply_state_overrides_with_state<DB: DynDatabase>(
 
         // Account existence affects authorization refunds and new-account gas charges. A full
         // storage replacement always materializes the account, even with no slots.
-        let materialize = original.is_some() ||
+        if original.is_some() ||
             !account.is_empty() ||
             replaces_storage ||
-            storage.as_ref().is_some_and(|state| !state.is_empty());
-        if materialize {
-            db.insert_account_info(&address, account.clone());
+            storage.as_ref().is_some_and(|state| !state.is_empty())
+        {
+            if let Some(changes) = changes.as_mut() {
+                let Ok(()) = changes.account(AccountChangeRef {
+                    address,
+                    original: original.as_ref(),
+                    current: Some(&account),
+                    created: original.is_none(),
+                    selfdestructed: false,
+                });
+            }
+            db.insert_account_info(&address, account);
         }
         if let Some(storage) = storage {
             for (key, value) in storage {
@@ -137,21 +146,14 @@ pub fn apply_state_overrides_with_state<DB: DynDatabase>(
                 db.insert_account_storage(&address, &key, &current);
             }
         }
-        if materialize && let Some(changes) = changes.as_mut() {
-            let Ok(()) = changes.account(AccountChangeRef {
-                address,
-                original: original.as_ref(),
-                current: Some(&account),
-                created: original.is_none(),
-                selfdestructed: false,
-            });
-        }
     }
 
     if let Some(state) = state &&
         let Some(changes) = changes
     {
-        state.commit(&changes);
+        let mut block = BlockState::new();
+        block.commit(&changes);
+        state.extend(block.into_bundle());
     }
 
     Ok(())

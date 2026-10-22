@@ -25,7 +25,7 @@ use reth_evm::{
     BundleState, ConfigureEvm, Database, Evm, EvmEnv, EvmEnvFor, EvmTypesFor, TransactionEnvMut,
     TxEnvFor, TxResultWithStateFor,
 };
-use reth_execution_types::{BlockState, BundleSource};
+use reth_execution_types::BundleSource;
 use reth_node_api::BlockBody;
 use reth_primitives_traits::Recovered;
 use reth_rpc_convert::{RpcConvert, RpcTxReq};
@@ -183,19 +183,12 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                         apply_block_overrides(block_overrides, &mut db, &mut evm_env);
                     }
                     if let Some(ref state_overrides) = state_overrides {
-                        let mut overrides_state =
-                            simulation_state.as_ref().map(|_| BlockState::new());
                         apply_state_overrides_with_state(
                             state_overrides.clone(),
                             &mut db,
-                            overrides_state.as_mut(),
+                            simulation_state.as_mut(),
                         )
                         .map_err(Self::Error::from_eth_err)?;
-                        if let Some(state) = simulation_state.as_mut() &&
-                            let Some(overrides) = overrides_state
-                        {
-                            state.extend(overrides.into_bundle());
-                        }
                     }
 
                     let chain_id = evm_env.chain_id();
