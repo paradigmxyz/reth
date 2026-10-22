@@ -135,6 +135,18 @@ pub fn apply_state_overrides_with_state<DB: DynDatabase>(
             }
             db.insert_account_info(&address, account);
         } else {
+            if let Some(changes) = changes.as_mut() &&
+                original.is_some()
+            {
+                let Ok(()) = changes.storage_wipe(address);
+                let Ok(()) = changes.account(AccountChangeRef {
+                    address,
+                    original: original.as_ref(),
+                    current: None,
+                    created: false,
+                    selfdestructed: true,
+                });
+            }
             db.cache.accounts.insert(address, None);
             db.cache.storage.entry(address).or_default().wipe();
         }
@@ -219,15 +231,26 @@ mod tests {
                     .with_state(std::iter::empty::<(B256, B256)>()),
             ),
         ]);
-        apply_state_overrides(overrides, &mut state).unwrap();
+        let mut bundle = BundleState::default();
+        apply_state_overrides_with_state(overrides, &mut state, Some(&mut bundle)).unwrap();
 
         // An existing account touched into emptiness is removed under EIP-161, with its storage.
         assert_eq!(state.get_account(&emptied).unwrap(), None);
         assert_eq!(state.get_storage(&emptied, &slot).unwrap(), U256::ZERO);
+        let removed = bundle.account(&emptied).unwrap();
+        assert_eq!(removed.info, None);
+        assert!(removed.was_destroyed());
         assert_eq!(state.get_account(&absent).unwrap(), None);
+        assert!(bundle.account(&absent).is_none());
         // A full storage replacement materializes the account even when it is left empty.
         assert_eq!(state.get_account(&replaced).unwrap(), Some(AccountInfo::default()));
         assert_eq!(state.get_storage(&replaced, &slot).unwrap(), U256::ZERO);
+        assert!(bundle
+            .account(&replaced)
+            .unwrap()
+            .info
+            .as_ref()
+            .is_some_and(|info| info.is_empty()));
     }
 
     #[test]
