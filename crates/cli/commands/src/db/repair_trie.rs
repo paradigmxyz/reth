@@ -26,7 +26,7 @@ use reth_stages::StageId;
 use reth_storage_api::StorageSettingsCache;
 use reth_tasks::TaskExecutor;
 use reth_trie::{
-    verify::{Output, Verifier},
+    verify::{default_storage_workers, Output, Verifier},
     Nibbles,
 };
 use reth_trie_db::{
@@ -122,8 +122,12 @@ fn verify_only<N: ProviderNodeTypes>(tool: &DbTool<N>) -> eyre::Result<()> {
 
 fn do_verify_only<DB: Database, A: TrieTableAdapter>(db: &DB) -> eyre::Result<()> {
     // Create the verifier
-    let cursors = VerifierCursorFactory::<_, A>::new(|| db.tx())?;
-    let verifier = Verifier::new(&cursors, cursors.clone())?;
+    let cursors = VerifierCursorFactory::<_, A>::new(db.tx()?);
+    let lookahead = VerifierCursorFactory::<_, A>::new(db.tx()?);
+    let workers = (0..default_storage_workers())
+        .map(|_| db.tx().map(VerifierCursorFactory::<_, A>::new))
+        .collect::<Result<Vec<_>, _>>()?;
+    let verifier = Verifier::new(&cursors, &cursors, lookahead, workers)?;
 
     let metrics = RepairTrieMetrics::new();
 
@@ -246,8 +250,12 @@ where
     let mut storage_trie_cursor = tx.cursor_dup_write::<A::StorageTrieTable>()?;
 
     // Open every read snapshot before any repairs are applied.
-    let cursors = VerifierCursorFactory::<_, A>::new(|| db.tx())?;
-    let verifier = Verifier::new(&cursors, cursors.clone())?;
+    let cursors = VerifierCursorFactory::<_, A>::new(db.tx()?);
+    let lookahead = VerifierCursorFactory::<_, A>::new(db.tx()?);
+    let workers = (0..default_storage_workers())
+        .map(|_| db.tx().map(VerifierCursorFactory::<_, A>::new))
+        .collect::<Result<Vec<_>, _>>()?;
+    let verifier = Verifier::new(&cursors, &cursors, lookahead, workers)?;
 
     let metrics = RepairTrieMetrics::new();
 

@@ -7,7 +7,7 @@ use reth_provider::{
 };
 use reth_trie::{
     prefix_set::{PrefixSetMut, TriePrefixSets},
-    verify::{Output, Verifier},
+    verify::{default_storage_workers, Output, Verifier},
     StateRoot,
 };
 use reth_trie_db::{DatabaseHashedCursorFactory, DatabaseTrieCursorFactory, VerifierCursorFactory};
@@ -41,9 +41,15 @@ where
     let tx = provider.tx_ref();
 
     reth_trie_db::with_adapter!(provider, |A| {
-        let cursors = VerifierCursorFactory::<_, A>::new(|| {
-            factory.database_provider_ro().map(DBProvider::into_tx)
-        })?;
+        let open = || {
+            factory
+                .database_provider_ro()
+                .map(|provider| VerifierCursorFactory::<_, A>::new(provider.into_tx()))
+        };
+        let cursors = open()?;
+        let lookahead = open()?;
+        let workers =
+            (0..default_storage_workers()).map(|_| open()).collect::<Result<Vec<_>, _>>()?;
         drop(snapshot_guard);
 
         // Recompute all account leaves from the persisted hashed state. Storage roots are taken
@@ -64,7 +70,7 @@ where
             header.state_root()
         );
 
-        let verifier = Verifier::new(&cursors, cursors.clone())?;
+        let verifier = Verifier::new(&cursors, &cursors, lookahead, workers)?;
         let mut inconsistencies = Vec::new();
         for output in verifier {
             match output? {

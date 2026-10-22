@@ -172,7 +172,7 @@ impl<C: TrieCursor> SingleVerifier<DepthFirstTrieIterator<C>> {
 /// Checks trie tables against hashed state, recomputing storage roots on a fixed sync pool.
 ///
 /// Cursor factories must provide long-lived read snapshots of the same database version. The
-/// lookahead thread and storage workers own clones of the factories and run until EOF or drop.
+/// lookahead thread and storage workers own independent factories and run until EOF or drop.
 /// Completed roots accumulate without a limit while account leaves are consumed in order.
 /// Inconsistencies from every thread are delivered through the same queue.
 #[derive(Debug)]
@@ -201,19 +201,25 @@ const ACCOUNT_UPDATE_THRESHOLD: usize = 1024;
 
 impl<'a, T, H> Verifier<'a, T, H>
 where
-    T: TrieCursorFactory + Clone + Send + Sync + 'static,
-    H: HashedCursorFactory + Clone + Send + Sync + 'static,
+    T: TrieCursorFactory,
+    H: HashedCursorFactory + Clone,
 {
-    /// Starts continuous storage verification over a fixed database state. Factories must own
-    /// their snapshots so background work can continue between iterator calls. Dropping the
-    /// verifier cancels and joins all background work before returning.
-    pub fn new(
+    /// Starts continuous verification with an independent factory for lookahead and each worker.
+    /// All factories must read the same database version. Background factories are moved into
+    /// their respective threads; `storage_workers` must not be empty. Dropping the verifier
+    /// cancels and joins all background work before returning.
+    pub fn new<L, W>(
         trie_cursor_factory: &'a T,
         hashed_cursor_factory: H,
-    ) -> Result<Self, DatabaseError> {
+        lookahead: L,
+        storage_workers: Vec<W>,
+    ) -> Result<Self, DatabaseError>
+    where
+        L: HashedCursorFactory + Send + 'static,
+        W: TrieCursorFactory + HashedCursorFactory + Send + 'static,
+    {
         let account = SingleVerifier::new(None, trie_cursor_factory.account_trie_cursor()?)?;
-        let trie = trie_cursor_factory.clone();
-        let hashed = hashed_cursor_factory.clone();
+        assert!(!storage_workers.is_empty(), "verification requires storage workers");
         let (events_tx, events_rx) = crossbeam_channel::unbounded();
         let (roots_tx, roots_rx) = crossbeam_channel::unbounded();
         let (cancel_tx, cancel_rx) = crossbeam_channel::bounded::<()>(0);
@@ -224,26 +230,25 @@ where
             .spawn(move || {
                 let _entered = span.enter();
                 run_verification(&events, &cancel_rx, || {
-                    let workers = default_storage_workers();
+                    let workers = storage_workers.len();
                     let pool = reth_tasks::WorkerPool::new(workers, "trie-verify");
                     // Only queued work is bounded; completed roots never wait for the account
                     // thread.
                     let (jobs_tx, jobs_rx) = crossbeam_channel::bounded(workers * 2);
                     pool.in_place_scope(|scope| {
-                        for _ in 0..workers {
+                        for worker in storage_workers {
                             let jobs = jobs_rx.clone();
                             let span = tracing::Span::current();
-                            let (trie, hashed, events, roots, cancel) =
-                                (&trie, &hashed, &events, &roots_tx, &cancel_rx);
+                            let (events, roots, cancel) = (&events, &roots_tx, &cancel_rx);
                             scope.spawn(move |_| {
                                 let _entered = span.enter();
                                 run_verification(events, cancel, || {
-                                    storage_worker(trie, hashed, jobs, roots, events, cancel)
+                                    storage_worker(&worker, jobs, roots, events, cancel)
                                 });
                             });
                         }
                         run_verification(&events, &cancel_rx, || {
-                            produce_accounts(&hashed, jobs_tx, &cancel_rx)
+                            produce_accounts(&lookahead, jobs_tx, &cancel_rx)
                         });
                     });
                     Ok(())
@@ -375,8 +380,8 @@ impl<T: TrieCursorFactory, H> Drop for Verifier<'_, T, H> {
 
 impl<T, H> Iterator for Verifier<'_, T, H>
 where
-    T: TrieCursorFactory + Clone + Send + Sync + 'static,
-    H: HashedCursorFactory + Clone + Send + Sync + 'static,
+    T: TrieCursorFactory,
+    H: HashedCursorFactory + Clone,
 {
     type Item = Result<Output, StateRootError>;
 
@@ -453,17 +458,15 @@ fn produce_accounts<H: HashedCursorFactory>(
     Ok(())
 }
 
-fn storage_worker<T, H>(
-    trie: &T,
-    hashed: &H,
+fn storage_worker<W>(
+    worker: &W,
     jobs: crossbeam_channel::Receiver<B256>,
     roots: &crossbeam_channel::Sender<(B256, B256)>,
     events: &crossbeam_channel::Sender<Result<Output, StateRootError>>,
     cancel: &crossbeam_channel::Receiver<()>,
 ) -> Result<(), StateRootError>
 where
-    T: TrieCursorFactory,
-    H: HashedCursorFactory + Clone,
+    W: TrieCursorFactory + HashedCursorFactory,
 {
     let next_address = || {
         crossbeam_channel::select! {
@@ -472,12 +475,12 @@ where
         }
     };
     let Ok(mut address) = next_address() else { return Ok(()) };
-    let mut storage = hashed.hashed_storage_cursor(address)?;
-    let mut stored = trie.storage_trie_cursor(address)?;
+    let mut storage = worker.hashed_storage_cursor(address)?;
+    let mut stored = worker.storage_trie_cursor(address)?;
     loop {
         storage.set_hashed_address(address);
+        stored.set_hashed_address(address);
         if storage.is_storage_empty()? {
-            stored.set_hashed_address(address);
             let mut verifier = SingleVerifier::new(Some(address), &mut stored)?;
             let mut found = Vec::new();
             verifier.finalize(&mut found)?;
@@ -487,8 +490,10 @@ where
                 }
             }
         } else {
-            let Some(root) = verify_storage(trie, hashed, address, events, cancel)? else {
-                return Ok(())
+            let Some(root) =
+                verify_storage(worker, &mut storage, &mut stored, address, events, cancel)?
+            else {
+                return Ok(());
             };
             if !send_verification(roots, (address, root), cancel) {
                 return Ok(())
@@ -499,18 +504,15 @@ where
     }
 }
 
-fn verify_storage<T, H>(
-    trie: &T,
-    hashed: &H,
+fn verify_storage<'a, H: HashedCursorFactory, C: TrieStorageCursor>(
+    hashed: &'a H,
+    storage: &mut H::StorageCursor<'a>,
+    stored: &mut C,
     address: B256,
     events: &crossbeam_channel::Sender<Result<Output, StateRootError>>,
     cancel: &crossbeam_channel::Receiver<()>,
-) -> Result<Option<B256>, StateRootError>
-where
-    T: TrieCursorFactory,
-    H: HashedCursorFactory + Clone,
-{
-    let mut verifier = SingleVerifier::new(Some(address), trie.storage_trie_cursor(address)?)?;
+) -> Result<Option<B256>, StateRootError> {
+    let mut verifier = SingleVerifier::new(Some(address), stored)?;
     let mut state = None;
     loop {
         if cancel.try_recv() == Err(crossbeam_channel::TryRecvError::Disconnected) {
@@ -518,14 +520,14 @@ where
         }
         let result = crate::StorageRoot::new_hashed(
             NoopTrieCursorFactory,
-            hashed.clone(),
+            hashed,
             address,
             Default::default(),
             #[cfg(feature = "metrics")]
             Default::default(),
         )
         .with_intermediate_state(state.take())
-        .root_with_progress()?;
+        .calculate_with_cursor(storage, true)?;
         let (root, updates) = match result {
             crate::StorageRootProgress::Complete(root, _, updates) => (Some(root), updates),
             crate::StorageRootProgress::Progress(next, _, updates) => {
@@ -599,6 +601,42 @@ mod tests {
         factory.account_trie_cursor().unwrap()
     }
 
+    struct MockVerifierCursorFactory {
+        trie: MockTrieCursorFactory,
+        hashed: MockHashedCursorFactory,
+    }
+
+    impl TrieCursorFactory for MockVerifierCursorFactory {
+        type AccountTrieCursor<'a> = MockTrieCursor;
+        type StorageTrieCursor<'a> = MockTrieCursor;
+
+        fn account_trie_cursor(&self) -> Result<MockTrieCursor, DatabaseError> {
+            self.trie.account_trie_cursor()
+        }
+
+        fn storage_trie_cursor(&self, address: B256) -> Result<MockTrieCursor, DatabaseError> {
+            self.trie.storage_trie_cursor(address)
+        }
+    }
+
+    impl HashedCursorFactory for MockVerifierCursorFactory {
+        type AccountCursor<'a> =
+            <MockHashedCursorFactory as HashedCursorFactory>::AccountCursor<'a>;
+        type StorageCursor<'a> =
+            <MockHashedCursorFactory as HashedCursorFactory>::StorageCursor<'a>;
+
+        fn hashed_account_cursor(&self) -> Result<Self::AccountCursor<'_>, DatabaseError> {
+            self.hashed.hashed_account_cursor()
+        }
+
+        fn hashed_storage_cursor(
+            &self,
+            address: B256,
+        ) -> Result<Self::StorageCursor<'_>, DatabaseError> {
+            self.hashed.hashed_storage_cursor(address)
+        }
+    }
+
     fn verified_trie(factory: &MockHashedCursorFactory) -> MockTrieCursorFactory {
         let (_, updates) = crate::StateRoot::new(NoopTrieCursorFactory, factory.clone())
             .root_with_updates()
@@ -624,7 +662,10 @@ mod tests {
         // Test with completely empty state
         let factory = MockHashedCursorFactory::new(BTreeMap::new(), B256Map::default());
         let trie = verified_trie(&factory);
-        let mut verifier = Verifier::new(&trie, factory).unwrap();
+        let workers = (0..default_storage_workers())
+            .map(|_| MockVerifierCursorFactory { trie: trie.clone(), hashed: factory.clone() })
+            .collect();
+        let mut verifier = Verifier::new(&trie, factory.clone(), factory, workers).unwrap();
         for output in verifier.by_ref() {
             assert_matches!(output.unwrap(), Output::Progress(_));
         }
@@ -658,7 +699,10 @@ mod tests {
 
         let factory = MockHashedCursorFactory::new(accounts, storage_tries);
         let trie = verified_trie(&factory);
-        let mut verifier = Verifier::new(&trie, factory).unwrap();
+        let workers = (0..default_storage_workers())
+            .map(|_| MockVerifierCursorFactory { trie: trie.clone(), hashed: factory.clone() })
+            .collect();
+        let mut verifier = Verifier::new(&trie, factory.clone(), factory, workers).unwrap();
         for output in verifier.by_ref() {
             assert_matches!(output.unwrap(), Output::Progress(_));
         }
@@ -697,7 +741,10 @@ mod tests {
 
         let factory = MockHashedCursorFactory::new(accounts, storage_tries);
         let trie = verified_trie(&factory);
-        let mut verifier = Verifier::new(&trie, factory).unwrap();
+        let workers = (0..default_storage_workers())
+            .map(|_| MockVerifierCursorFactory { trie: trie.clone(), hashed: factory.clone() })
+            .collect();
+        let mut verifier = Verifier::new(&trie, factory.clone(), factory, workers).unwrap();
         for output in verifier.by_ref() {
             assert_matches!(output.unwrap(), Output::Progress(_));
         }

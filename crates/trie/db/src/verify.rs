@@ -1,4 +1,4 @@
-//! Database snapshots for parallel trie verification.
+//! Owned database transaction for trie verification.
 
 use crate::{
     DatabaseAccountTrieCursor, DatabaseHashedAccountCursor, DatabaseHashedStorageCursor,
@@ -6,74 +6,24 @@ use crate::{
 };
 use alloy_primitives::B256;
 use reth_db_api::{tables, transaction::DbTx, DatabaseError};
-use reth_trie::{
-    hashed_cursor::HashedCursorFactory, trie_cursor::TrieCursorFactory,
-    verify::default_storage_workers,
-};
-use std::{
-    marker::PhantomData,
-    sync::Arc,
-    thread::{self, ThreadId},
-};
+use reth_trie::{hashed_cursor::HashedCursorFactory, trie_cursor::TrieCursorFactory};
+use std::marker::PhantomData;
 
-/// Cursor factories for [`reth_trie::verify::Verifier`] with independent, long-lived transactions
-/// for the account thread, lookahead thread, and each storage worker.
+/// Cursor factory owning one long-lived read transaction for a verifier thread.
 ///
-/// All transactions are opened before verification starts, so repairs cannot change their view.
-/// Storage cursors select the transaction belonging to the verifier pool's current worker.
+/// Open all verifier transactions while commits are prevented, before applying any repairs.
 #[derive(Debug)]
 pub struct VerifierCursorFactory<TX, A> {
-    snapshots: Arc<VerifierSnapshots<TX>>,
+    tx: TX,
     adapter: PhantomData<A>,
 }
 
-#[derive(Debug)]
-struct VerifierSnapshots<TX> {
-    account: TX,
-    lookahead: TX,
-    storage: Vec<TX>,
-    account_thread: ThreadId,
-}
-
-impl<TX, A> Clone for VerifierCursorFactory<TX, A> {
-    fn clone(&self) -> Self {
-        Self { snapshots: self.snapshots.clone(), adapter: PhantomData }
-    }
-}
-
 impl<TX: DbTx, A: TrieTableAdapter> VerifierCursorFactory<TX, A> {
-    /// Opens one long-lived read transaction per thread, with timeouts disabled. The caller must
-    /// prevent database commits while these snapshots are opened and keep the node offline while
-    /// verification runs. `open` is called once for each transaction; its first error is returned.
-    pub fn new<E>(mut open: impl FnMut() -> Result<TX, E>) -> Result<Self, E> {
-        let mut open = || {
-            let mut tx = open()?;
-            tx.disable_long_read_transaction_safety();
-            Ok(tx)
-        };
-        let account = open()?;
-        let lookahead = open()?;
-        let storage =
-            (0..default_storage_workers()).map(|_| open()).collect::<Result<Vec<_>, _>>()?;
-        Ok(Self {
-            snapshots: Arc::new(VerifierSnapshots {
-                account,
-                lookahead,
-                storage,
-                account_thread: thread::current().id(),
-            }),
-            adapter: PhantomData,
-        })
-    }
-
-    fn storage_tx(&self) -> &TX {
-        if thread::current().id() == self.snapshots.account_thread {
-            &self.snapshots.account
-        } else if let Some(index) = rayon::current_thread_index() {
-            &self.snapshots.storage[index]
-        } else {
-            &self.snapshots.lookahead
-        }
+    /// Takes ownership of a read transaction and disables its long-read timeout. Move this
+    /// factory into one storage worker or the lookahead thread; transactions are never shared.
+    pub fn new(mut tx: TX) -> Self {
+        tx.disable_long_read_transaction_safety();
+        Self { tx, adapter: PhantomData }
     }
 }
 
@@ -88,12 +38,7 @@ impl<TX: DbTx, A: TrieTableAdapter> HashedCursorFactory for VerifierCursorFactor
         Self: 'a;
 
     fn hashed_account_cursor(&self) -> Result<Self::AccountCursor<'_>, DatabaseError> {
-        let tx = if thread::current().id() == self.snapshots.account_thread {
-            &self.snapshots.account
-        } else {
-            &self.snapshots.lookahead
-        };
-        Ok(DatabaseHashedAccountCursor::new(tx.cursor_read::<tables::HashedAccounts>()?))
+        Ok(DatabaseHashedAccountCursor::new(self.tx.cursor_read::<tables::HashedAccounts>()?))
     }
 
     fn hashed_storage_cursor(
@@ -101,7 +46,7 @@ impl<TX: DbTx, A: TrieTableAdapter> HashedCursorFactory for VerifierCursorFactor
         address: B256,
     ) -> Result<Self::StorageCursor<'_>, DatabaseError> {
         Ok(DatabaseHashedStorageCursor::new(
-            self.storage_tx().cursor_dup_read::<tables::HashedStorages>()?,
+            self.tx.cursor_dup_read::<tables::HashedStorages>()?,
             address,
         ))
     }
@@ -118,9 +63,7 @@ impl<TX: DbTx, A: TrieTableAdapter> TrieCursorFactory for VerifierCursorFactory<
         Self: 'a;
 
     fn account_trie_cursor(&self) -> Result<Self::AccountTrieCursor<'_>, DatabaseError> {
-        Ok(DatabaseAccountTrieCursor::new(
-            self.snapshots.account.cursor_read::<A::AccountTrieTable>()?,
-        ))
+        Ok(DatabaseAccountTrieCursor::new(self.tx.cursor_read::<A::AccountTrieTable>()?))
     }
 
     fn storage_trie_cursor(
@@ -128,7 +71,7 @@ impl<TX: DbTx, A: TrieTableAdapter> TrieCursorFactory for VerifierCursorFactory<
         address: B256,
     ) -> Result<Self::StorageTrieCursor<'_>, DatabaseError> {
         Ok(DatabaseStorageTrieCursor::new(
-            self.storage_tx().cursor_dup_read::<A::StorageTrieTable>()?,
+            self.tx.cursor_dup_read::<A::StorageTrieTable>()?,
             address,
         ))
     }

@@ -24,9 +24,6 @@ reth-storage-errors.workspace = true
 # alloy
 alloy-primitives.workspace = true
 
-# misc
-rayon.workspace = true
-
 # tracing
 tracing.workspace = true
 
