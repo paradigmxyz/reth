@@ -116,10 +116,11 @@ pub fn apply_state_overrides_with_state<DB: DynDatabase>(
             (None, None) => None,
         };
 
-        // Account existence affects authorization refunds and new-account gas charges. A full
-        // storage replacement always materializes the account, even with no slots.
-        if original.is_some() ||
-            !account.is_empty() ||
+        // Account existence affects authorization refunds and new-account gas charges. The
+        // override touches the account, so under EIP-161 an empty result is removed regardless of
+        // whether the account existed before, unless storage materializes it. A full storage
+        // replacement always materializes the account, even with no slots.
+        if !account.is_empty() ||
             replaces_storage ||
             storage.as_ref().is_some_and(|state| !state.is_empty())
         {
@@ -133,6 +134,19 @@ pub fn apply_state_overrides_with_state<DB: DynDatabase>(
                 });
             }
             db.insert_account_info(&address, account);
+        } else if original.is_some() {
+            if let Some(changes) = changes.as_mut() {
+                let Ok(()) = changes.storage_wipe(address);
+                let Ok(()) = changes.account(AccountChangeRef {
+                    address,
+                    original: original.as_ref(),
+                    current: None,
+                    created: false,
+                    selfdestructed: true,
+                });
+            }
+            db.cache.accounts.insert(address, None);
+            db.cache.storage.entry(address).or_default().wipe();
         }
         if let Some(storage) = storage {
             for (key, value) in storage {
@@ -184,8 +198,58 @@ mod tests {
 
     use super::*;
     use alloy_eip7928::{BalanceChange, StorageChange};
-    use alloy_primitives::{Address, Bytes, U256};
+    use alloy_primitives::{Address, Bytes, B256, U256};
+    use alloy_rpc_types_eth::state::AccountOverride;
     use evm2::evm::{AccountBal, AccountInfo, Bal, BalChanges, InMemoryDB};
+
+    #[test]
+    fn state_overrides_remove_accounts_left_empty() {
+        let emptied = Address::with_last_byte(1);
+        let absent = Address::with_last_byte(2);
+        let replaced = Address::with_last_byte(3);
+        let slot = U256::ONE;
+
+        let mut db = InMemoryDB::default();
+        for address in [emptied, replaced] {
+            db.insert_account_info(
+                &address,
+                AccountInfo { balance: U256::from(5), ..Default::default() },
+            );
+            db.insert_account_storage(&address, &slot, &U256::from(9));
+        }
+        let mut state = CacheDB::new(db);
+
+        let overrides = StateOverride::from_iter([
+            (emptied, AccountOverride::default().with_balance(U256::ZERO)),
+            (absent, AccountOverride::default()),
+            (
+                replaced,
+                AccountOverride::default()
+                    .with_balance(U256::ZERO)
+                    .with_state(std::iter::empty::<(B256, B256)>()),
+            ),
+        ]);
+        let mut bundle = BundleState::default();
+        apply_state_overrides_with_state(overrides, &mut state, Some(&mut bundle)).unwrap();
+
+        // An existing account touched into emptiness is removed under EIP-161, with its storage.
+        assert_eq!(state.get_account(&emptied).unwrap(), None);
+        assert_eq!(state.get_storage(&emptied, &slot).unwrap(), U256::ZERO);
+        let removed = bundle.account(&emptied).unwrap();
+        assert_eq!(removed.info, None);
+        assert!(removed.was_destroyed());
+        assert_eq!(state.get_account(&absent).unwrap(), None);
+        assert!(bundle.account(&absent).is_none());
+        // A full storage replacement materializes the account even when it is left empty.
+        assert_eq!(state.get_account(&replaced).unwrap(), Some(AccountInfo::default()));
+        assert_eq!(state.get_storage(&replaced, &slot).unwrap(), U256::ZERO);
+        assert!(bundle
+            .account(&replaced)
+            .unwrap()
+            .info
+            .as_ref()
+            .is_some_and(|info| info.is_empty()));
+    }
 
     #[test]
     fn attach_bal_before_tx_serves_positioned_reads() {
