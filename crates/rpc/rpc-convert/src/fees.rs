@@ -109,27 +109,33 @@ pub enum CallFeesError {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    const GWEI: u64 = 1_000_000_000;
+    use alloy_consensus::constants::GWEI_TO_WEI;
 
     #[test]
     fn omitted_fee_cap_defaults_to_zero() {
-        let base_fee = U256::from(15 * GWEI);
+        let base_fee = U256::from(15 * GWEI_TO_WEI);
 
         let CallFees { gas_price, .. } =
             CallFees::ensure_fees(None, None, Some(U256::ZERO), base_fee, None, None, None)
                 .unwrap();
         assert!(gas_price.is_zero());
 
-        let call_fees =
-            CallFees::ensure_fees(None, None, Some(U256::from(GWEI)), base_fee, None, None, None);
+        let call_fees = CallFees::ensure_fees(
+            None,
+            None,
+            Some(U256::from(GWEI_TO_WEI)),
+            base_fee,
+            None,
+            None,
+            None,
+        );
         assert!(matches!(call_fees, Err(CallFeesError::TipAboveFeeCap)));
 
         // A tip above a fee cap that is also below the base fee reports the tip.
         let call_fees = CallFees::ensure_fees(
             None,
             Some(U256::ZERO),
-            Some(U256::from(GWEI)),
+            Some(U256::from(GWEI_TO_WEI)),
             base_fee,
             None,
             None,
@@ -143,16 +149,16 @@ mod tests {
         let hashes = [B256::ZERO];
 
         let CallFees { gas_price, max_fee_per_blob_gas, .. } = CallFees::ensure_fees(
-            Some(U256::from(2 * GWEI)),
+            Some(U256::from(2 * GWEI_TO_WEI)),
             None,
             None,
-            U256::from(GWEI),
+            U256::from(GWEI_TO_WEI),
             Some(&hashes),
             Some(U256::from(1)),
             Some(U256::from(1)),
         )
         .unwrap();
-        assert_eq!(gas_price, U256::from(2 * GWEI));
+        assert_eq!(gas_price, U256::from(2 * GWEI_TO_WEI));
         assert_eq!(max_fee_per_blob_gas, Some(U256::from(1)));
 
         // Only the blob fee is set, so execution runs free.
@@ -160,7 +166,7 @@ mod tests {
             None,
             None,
             None,
-            U256::from(GWEI),
+            U256::from(GWEI_TO_WEI),
             Some(&hashes),
             Some(U256::from(1)),
             Some(U256::from(1)),
@@ -169,10 +175,10 @@ mod tests {
         assert!(gas_price.is_zero());
 
         let call_fees = CallFees::ensure_fees(
-            Some(U256::from(2 * GWEI)),
+            Some(U256::from(2 * GWEI_TO_WEI)),
             None,
             None,
-            U256::from(GWEI),
+            U256::from(GWEI_TO_WEI),
             None,
             Some(U256::from(1)),
             Some(U256::from(1)),

@@ -989,9 +989,30 @@ pub(super) fn request_gas_price(
     match (request.max_fee_per_gas, request.max_priority_fee_per_gas) {
         (None, None) => 0,
         (max_fee, priority_fee) => calc_effective_gas_price(
-            max_fee.unwrap_or(u128::MAX),
+            // An omitted fee cap defaults to zero, as in `CallFees`.
+            max_fee.unwrap_or_default(),
             priority_fee.unwrap_or_default(),
             Some(block_base_fee),
         ),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use alloy_rpc_types_eth::TransactionRequest;
+
+    #[test]
+    fn omitted_fee_cap_prices_call_at_zero() {
+        let request = |max_fee_per_gas, max_priority_fee_per_gas| TransactionRequest {
+            max_fee_per_gas,
+            max_priority_fee_per_gas,
+            ..Default::default()
+        };
+
+        assert_eq!(request_gas_price(&request(None, None), 30), 0);
+        assert_eq!(request_gas_price(&request(None, Some(0)), 30), 0);
+        assert_eq!(request_gas_price(&request(Some(100), None), 30), 30);
+        assert_eq!(request_gas_price(&request(Some(100), Some(5)), 30), 35);
     }
 }
