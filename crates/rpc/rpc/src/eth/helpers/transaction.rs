@@ -133,7 +133,7 @@ mod tests {
     };
     use alloy_eips::eip2718::Encodable2718;
     use alloy_primitives::{bytes, map::AddressMap, Address, Bytes, Signature, U256};
-    use alloy_rpc_types_eth::request::TransactionRequest;
+    use alloy_rpc_types_eth::{request::TransactionRequest, state::EvmOverrides, BlockOverrides};
     use reth_chainspec::{ChainSpec, ChainSpecBuilder};
     use reth_ethereum_primitives::TransactionSigned;
     use reth_evm::SenderRecoveryCache;
@@ -144,7 +144,7 @@ mod tests {
         test_utils::{ExtendedAccount, MockEthProvider},
         ChainSpecProvider,
     };
-    use reth_rpc_eth_api::node::RpcNodeCoreAdapter;
+    use reth_rpc_eth_api::{helpers::EthCall, node::RpcNodeCoreAdapter};
     use reth_transaction_pool::{
         test_utils::{testing_pool, TestPool, TransactionGenerator},
         PoolPooledTx, TransactionOrigin, TransactionPool,
@@ -760,5 +760,31 @@ mod tests {
 
         assert_eq!(filled.tx.gas_limit(), 21_000);
         assert_eq!(filled.tx.max_priority_fee_per_gas(), Some(1_000_000_000));
+    }
+
+    #[tokio::test]
+    async fn test_call_caps_gas_limit_at_fee_cap_allowance() {
+        let address = Address::random();
+        // Funds 1 gwei for 10M gas, which is below the RPC gas cap.
+        let accounts = AddressMap::from_iter([(
+            address,
+            ExtendedAccount::new(0, U256::from(10_000_000u64) * U256::from(1_000_000_000u64)),
+        )]);
+
+        let eth_api = mock_eth_api(accounts);
+
+        // A zero block base fee makes the effective price zero while the fee cap is not.
+        let overrides = EvmOverrides::block(Some(Box::new(BlockOverrides {
+            base_fee: Some(U256::ZERO),
+            ..Default::default()
+        })));
+        let tx_req = TransactionRequest {
+            from: Some(address),
+            to: Some(Address::random().into()),
+            max_fee_per_gas: Some(1_000_000_000),
+            ..Default::default()
+        };
+
+        eth_api.call(tx_req, None, overrides).await.expect("call should be capped to the balance");
     }
 }

@@ -1,7 +1,8 @@
 //! Estimate gas needed implementation
 
-use super::{call::request_gas_price, Call, LoadPendingBlock};
+use super::{Call, LoadPendingBlock};
 use crate::{AsEthApiError, FromEthApiError, FromEvmError, IntoEthApiError};
+use alloy_consensus::transaction::Transaction;
 use alloy_network::TransactionBuilder;
 use alloy_primitives::{TxKind, KECCAK256_EMPTY, U256};
 use alloy_rpc_types_eth::{state::EvmOverrides, BlockId};
@@ -122,7 +123,7 @@ pub trait EstimateCall: Call {
         // Check funds of the sender (only useful to check if transaction gas price is more than 0).
         //
         // The caller allowance is check by doing `(account.balance - tx.value) / tx.gas_price`
-        if request_gas_price(request.as_ref(), evm_env.block_base_fee()) > 0 {
+        if tx_env.effective_gas_price(None) > 0 {
             let allowance = self.caller_gas_allowance(&mut db, &evm_env, &tx_env)?;
             highest_gas_limit = highest_gas_limit.min(allowance);
         }

@@ -6,7 +6,7 @@ use crate::{
     helpers::estimate::EstimateCall, FromEvmError, FullEthApiTypes, RpcBlock, RpcNodeCore,
 };
 use alloy_consensus::{transaction::Transaction, BlockHeader};
-use alloy_eips::{eip1559::calc_effective_gas_price, eip2930::AccessListResult};
+use alloy_eips::eip2930::AccessListResult;
 use alloy_network::TransactionBuilder;
 use alloy_primitives::{Bytes, B256, U256};
 use alloy_rpc_types_eth::{
@@ -950,8 +950,9 @@ pub trait Call:
                 .map_err(EthApiError::from_state_overrides_err)?;
         }
 
-        let gas_price = request_gas_price(request.as_ref(), evm_env.block_base_fee());
         let tx_env = self.create_txn_env(&evm_env, request.clone(), &mut *db)?;
+        // The fee cap, which the EVM checks the sender's balance against.
+        let gas_price = tx_env.effective_gas_price(None);
 
         // lower the basefee to 0 to avoid breaking EVM invariants (basefee < gasprice): <https://github.com/ethereum/go-ethereum/blob/355228b011ef9a85ebc0f21e7196f892038d49f0/internal/ethapi/api.go#L700-L704>
         if gas_price == 0 {
@@ -975,44 +976,5 @@ pub trait Call:
 
         let tx_env = self.create_txn_env(&evm_env, request, &mut *db)?;
         Ok((evm_env, tx_env))
-    }
-}
-
-pub(super) fn request_gas_price(
-    request: &alloy_rpc_types_eth::TransactionRequest,
-    block_base_fee: u64,
-) -> u128 {
-    if let Some(gas_price) = request.gas_price {
-        return gas_price
-    }
-
-    match (request.max_fee_per_gas, request.max_priority_fee_per_gas) {
-        (None, None) => 0,
-        (max_fee, priority_fee) => calc_effective_gas_price(
-            // An omitted fee cap defaults to zero, as in `CallFees`.
-            max_fee.unwrap_or_default(),
-            priority_fee.unwrap_or_default(),
-            Some(block_base_fee),
-        ),
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use alloy_rpc_types_eth::TransactionRequest;
-
-    #[test]
-    fn omitted_fee_cap_prices_call_at_zero() {
-        let request = |max_fee_per_gas, max_priority_fee_per_gas| TransactionRequest {
-            max_fee_per_gas,
-            max_priority_fee_per_gas,
-            ..Default::default()
-        };
-
-        assert_eq!(request_gas_price(&request(None, None), 30), 0);
-        assert_eq!(request_gas_price(&request(None, Some(0)), 30), 0);
-        assert_eq!(request_gas_price(&request(Some(100), None), 30), 30);
-        assert_eq!(request_gas_price(&request(Some(100), Some(5)), 30), 35);
     }
 }
