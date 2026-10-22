@@ -191,9 +191,9 @@ pub struct Verifier<'a, T: TrieCursorFactory + 'a, H> {
     complete: bool,
 }
 
-/// Defaults to the available CPU count, or one worker if it cannot be determined.
+/// Defaults to twice the available CPU count, or two workers if it cannot be determined.
 pub fn default_storage_workers() -> usize {
-    thread::available_parallelism().map_or(1, usize::from)
+    thread::available_parallelism().map_or(1, usize::from).saturating_mul(2)
 }
 
 const ACCOUNT_BATCH_SIZE: usize = 16_384;
