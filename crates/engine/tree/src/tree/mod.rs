@@ -100,7 +100,7 @@ pub mod state;
 ///
 /// This ensures that recent changesets are kept in memory for potential reorgs,
 /// even when the finalized block is not set (e.g., on L2s like Optimism).
-const CHANGESET_CACHE_RETENTION_BLOCKS: u64 = 64;
+pub const CHANGESET_CACHE_RETENTION_BLOCKS: u64 = 64;
 
 /// Tracks the state of the engine api internals.
 ///
