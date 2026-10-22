@@ -220,7 +220,7 @@ where
                         .get_account(&coinbase)
                         .map_err(|error| Eth::Error::from_eth_err(EthApiError::from(error)))?
                         .map(|acc| acc.balance)
-                        .unwrap_or(coinbase_balance_before_tx);
+                        .unwrap_or_default();
                     let coinbase_diff =
                         coinbase_balance_after_tx.saturating_sub(coinbase_balance_before_tx);
                     let eth_sent_to_coinbase = coinbase_diff.saturating_sub(gas_fees);
@@ -452,6 +452,75 @@ mod tests {
                 (next_base_fee + 1) as u128 - base_fee.unwrap_or(pending_next_base_fee as u128);
             assert_bundle_fees(&response, expected_tip);
         }
+    }
+
+    /// A pre-Cancun transaction can selfdestruct the coinbase; later fees must then be counted
+    /// from a zero balance.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn call_bundle_counts_fees_after_coinbase_selfdestruct() {
+        let mut rng = generators::rng();
+        let key = generate_key(&mut rng);
+        let tip = INITIAL_BASE_FEE - INITIAL_BASE_FEE / 8 + 1;
+        let coinbase = Address::random();
+        let tx = |nonce, to| {
+            sign_tx_with_key_pair(
+                key,
+                reth_ethereum_primitives::Transaction::Eip1559(TxEip1559 {
+                    chain_id: 1,
+                    nonce,
+                    gas_limit: 100_000,
+                    max_fee_per_gas: tip as u128 * 2,
+                    max_priority_fee_per_gas: tip as u128,
+                    to: TxKind::Call(to),
+                    ..Default::default()
+                }),
+            )
+        };
+        let txs = [tx(0, coinbase), tx(1, Address::random())];
+        let sender = txs[0].recover_signer().unwrap();
+
+        // `PUSH0 SELFDESTRUCT`
+        let selfdestruct_code = [0x5f, 0xff];
+        let genesis = Genesis::default()
+            .with_gas_limit(30_000_000)
+            .with_base_fee(Some(INITIAL_BASE_FEE as u128))
+            .extend_accounts([
+                (sender, GenesisAccount::default().with_balance(U256::from(10u128.pow(18)))),
+                (
+                    coinbase,
+                    GenesisAccount::default()
+                        .with_balance(U256::from(10u128.pow(18)))
+                        .with_code(Some(selfdestruct_code.into())),
+                ),
+            ]);
+        let chain_spec =
+            Arc::new(ChainSpecBuilder::mainnet().shanghai_activated().genesis(genesis).build());
+        let factory = create_test_provider_factory_with_chain_spec(chain_spec);
+        init_genesis(&factory).unwrap();
+        let provider = BlockchainProvider::new(factory).unwrap();
+
+        let eth_api = EthApiBuilder::new(
+            provider.clone(),
+            testing_pool(),
+            NoopNetwork::default(),
+            EthEvmConfig::new(provider.chain_spec()),
+        )
+        .build();
+        let api = EthBundle::new(eth_api, BlockingTaskGuard::new(4));
+
+        let response = api
+            .call_bundle(EthCallBundle {
+                txs: txs.iter().map(|tx| tx.encoded_2718().into()).collect(),
+                block_number: 1,
+                state_block_number: BlockNumberOrTag::Number(0),
+                coinbase: Some(coinbase),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        let second_fee = response.results[1].gas_fees;
+        assert_eq!(response.results[1].coinbase_diff, second_fee);
     }
 
     fn assert_bundle_fees(response: &EthCallBundleResponse, expected_tip: u128) {
