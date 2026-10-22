@@ -121,6 +121,7 @@ account-ext = [
     "reth-rpc-eth-api/account-ext",
     "evm2/account-ext",
     "reth-execution-types/account-ext",
+    "reth-trie-common/account-ext",
     "revm/account-ext",
 ]
 jit = ["reth-evm-ethereum/jit"]
