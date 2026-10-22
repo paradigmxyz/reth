@@ -309,7 +309,7 @@ impl SnapshotManifest {
     }
 
     /// Returns archive URLs for a component, limited to chunks covering at least `distance`
-    /// blocks from the tip. Returns all URLs if distance is `None` (All mode).
+    /// blocks ending at [`Self::block`]. Returns all URLs if distance is `None` (All mode).
     pub fn archive_urls_for_distance(
         &self,
         ty: SnapshotComponentType,
@@ -327,12 +327,7 @@ impl SnapshotManifest {
                 let key = ty.key();
                 let num_chunks = chunked.num_chunks();
 
-                // Calculate which chunks to include
-                let start_chunk = match distance {
-                    // Include the tail chunks that cover at least `dist` blocks.
-                    Some(dist) => num_chunks.saturating_sub(chunked.tail_chunks_for_distance(dist)),
-                    None => 0, // All chunks
-                };
+                let start_chunk = self.start_chunk_for_distance(chunked, distance);
 
                 (start_chunk..num_chunks)
                     .map(|i| {
@@ -346,7 +341,8 @@ impl SnapshotManifest {
         }
     }
 
-    /// Returns concrete snapshot archives for a component, optionally limited to distance.
+    /// Returns concrete snapshot archives for a component, optionally limited to a distance
+    /// ending at [`Self::block`].
     pub fn snapshot_archives_for_distance(
         &self,
         ty: SnapshotComponentType,
@@ -370,10 +366,7 @@ impl SnapshotManifest {
                 let key = ty.key();
                 let num_chunks = chunked.num_chunks();
 
-                let start_chunk = match distance {
-                    Some(dist) => num_chunks.saturating_sub(chunked.tail_chunks_for_distance(dist)),
-                    None => 0,
-                };
+                let start_chunk = self.start_chunk_for_distance(chunked, distance);
 
                 (start_chunk..num_chunks)
                     .map(|i| {
@@ -395,7 +388,7 @@ impl SnapshotManifest {
         }
     }
 
-    /// Returns the exact download size for a component given a distance selection.
+    /// Returns the exact download size for a component given a distance ending at [`Self::block`].
     ///
     /// For single archives, returns the full size. For chunked archives, sums the
     /// sizes of the selected tail chunks from [`ChunkedArchive::chunk_sizes`].
@@ -409,17 +402,14 @@ impl SnapshotManifest {
                 if chunked.chunk_sizes.is_empty() {
                     return 0;
                 }
-                let num_chunks = chunked.chunk_sizes.len() as u64;
-                let start_chunk = match distance {
-                    Some(dist) => num_chunks.saturating_sub(chunked.tail_chunks_for_distance(dist)),
-                    None => 0,
-                };
-                chunked.chunk_sizes[start_chunk as usize..].iter().sum()
+                let start_chunk = self.start_chunk_for_distance(chunked, distance);
+                chunked.chunk_sizes.iter().skip(start_chunk as usize).sum()
             }
         }
     }
 
-    /// Returns the exact extracted plain-output size for a component given a distance selection.
+    /// Returns the exact extracted plain-output size for a component given a distance ending at
+    /// [`Self::block`].
     pub fn output_size_for_distance(
         &self,
         ty: SnapshotComponentType,
@@ -433,10 +423,7 @@ impl SnapshotManifest {
             ComponentManifest::Single(single) => single.output_size(),
             ComponentManifest::Chunked(chunked) => {
                 let num_chunks = chunked.num_chunks();
-                let start_chunk = match distance {
-                    Some(dist) => num_chunks.saturating_sub(chunked.tail_chunks_for_distance(dist)),
-                    None => 0,
-                };
+                let start_chunk = self.start_chunk_for_distance(chunked, distance);
 
                 (start_chunk..num_chunks)
                     .map(|index| chunked.chunk_output_size(index as usize))
@@ -445,15 +432,25 @@ impl SnapshotManifest {
         }
     }
 
-    /// Returns the number of chunks that would be downloaded for a given distance.
+    /// Returns the number of chunks that would be downloaded for a distance ending at
+    /// [`Self::block`].
     pub fn chunks_for_distance(&self, ty: SnapshotComponentType, distance: Option<u64>) -> u64 {
         let Some(ComponentManifest::Chunked(chunked)) = self.component(ty) else {
             return if self.component(ty).is_some() { 1 } else { 0 };
         };
-        match distance {
-            Some(dist) => chunked.tail_chunks_for_distance(dist),
-            None => chunked.num_chunks(),
+        chunked.num_chunks() - self.start_chunk_for_distance(chunked, distance)
+    }
+
+    /// Returns the first chunk needed for a distance measured from the declared snapshot block.
+    fn start_chunk_for_distance(&self, chunked: &ChunkedArchive, distance: Option<u64>) -> u64 {
+        let Some(distance) = distance else { return 0 };
+        // The final archive may extend past the snapshot block. Counting back from its end
+        // would shift the requested history window forward and could skip a required chunk.
+        let first_block = self.block.saturating_sub(distance.saturating_sub(1));
+        if distance == 0 || first_block >= chunked.total_blocks {
+            return chunked.num_chunks();
         }
+        first_block / chunked.blocks_per_file
     }
 }
 
