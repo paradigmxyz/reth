@@ -82,3 +82,20 @@ instead.
 
 snap/1 synchronization is not covered: this design keeps the state current with BALs, which only
 snap/2 serves, rather than with snap/1's trie-node healing.
+
+## Monitoring
+
+The sync exports metrics under `sync.snap` that describe its current step and the reason for any
+interruption:
+
+- **Progress.** `account_progress` reports the share of the account keyspace downloaded. When it
+  remains constant while `storage_responses` increases, a large contract is being downloaded and the
+  sync has not stalled.
+- **Catch-up.** The difference between `pivot_block` and `applied_block` measures how far BAL
+  catch-up lags the pivot. A gap that keeps growing leads to a restart once peers no longer serve
+  the BALs required to close it.
+- **Waits.** The `*_waits` counters record why the sync is idle: no eligible pivot, no peer serving
+  snap/2, a peer lacking the requested data, or a transient failure.
+  `downloaders.snap.invalid_responses` counts responses rejected by verification.
+- **Pivot changes.** `pivot_advances`, `reorg_recoveries` and `restarts` record how the pivot
+  changed, and `phase` reports the step currently running.
