@@ -45,6 +45,14 @@ impl SnapSyncMetrics {
         self.phase.set(phase as u8 as f64);
     }
 
+    // Drops the abandoned attempt's progress until the next one reports its own.
+    pub(crate) fn clear_attempt(&self) {
+        self.pivot_block.set(0.0);
+        self.applied_block.set(0.0);
+        self.account_progress.set(0.0);
+        self.pending_repairs.set(0.0);
+    }
+
     // Accounts download in key order, so the cursor's most significant limb gives the share done.
     pub(crate) fn set_account_progress(&self, next: Option<B256>) {
         let progress = next

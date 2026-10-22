@@ -203,6 +203,7 @@ where
                     provider.abandon_snap_attempt()?;
                     provider.commit()?;
                     self.metrics.restarts.increment(1);
+                    self.metrics.clear_attempt();
                 }
                 Step::Stop => return Ok(SnapBootstrapOutcome::Stopped),
             }
@@ -257,9 +258,10 @@ where
     // One pass over the attempt: reorg recovery, pivot, catch-up, repairs, then up to
     // `ranges_per_check` account ranges.
     async fn drive(&mut self, write: SnapWrite, head: u64) -> Result<Step, SnapSyncError> {
-        let (applied, complete) = {
+        let (applied, coverage, repairs) = {
             let provider = self.factory.database_provider_ro()?;
             let generation = self.session.target().copied().ok_or(SnapSyncError::NoAttempt)?;
+            self.metrics.pivot_block.set(generation.target().number as f64);
             let handed_off = provider.is_trie_rebuild_started(write)?;
             if !generation.is_canonical(&provider)? {
                 // Handed-off state may be partly rebuilt, so it cannot be repaired in place.
@@ -271,18 +273,27 @@ where
                 return self.recover(write, head).await
             }
             if handed_off {
+                // The hand-off required every account, lists through the pivot and no repairs.
+                self.metrics.set_account_progress(None);
+                self.metrics.applied_block.set(generation.target().number as f64);
+                self.metrics.pending_repairs.set(0.0);
                 return Ok(Step::HandedOff(write))
             }
             let applied = provider
                 .catch_up_progress(write)?
                 .ok_or(SnapSyncError::NoCatchUpProgress)?
                 .applied();
-            // Repairs are fetched at the pivot, so pending ones still need it served.
-            let complete = provider.account_coverage(write)?.is_some_and(|c| c.is_complete()) &&
-                provider.snap_repairs(write)?.is_empty();
-            (applied, complete)
+            let coverage = provider.account_coverage(write)?;
+            (applied, coverage, provider.snap_repairs(write)?.len())
         };
+        // Read back from the attempt on every pass, so a resumed or restarted run reports its own.
         self.metrics.applied_block.set(applied.number as f64);
+        self.metrics.pending_repairs.set(repairs as f64);
+        if let Some(coverage) = coverage {
+            self.metrics.set_account_progress(coverage.next());
+        }
+        // Repairs are fetched at the pivot, so pending ones still need it served.
+        let complete = coverage.is_some_and(|c| c.is_complete()) && repairs == 0;
         // Complete state carried to its pivot needs no further lists, only its trie rebuilt, so
         // neither their retention nor a newer pivot applies to it.
         if complete && applied == self.pivot()? {
@@ -295,14 +306,21 @@ where
             return Ok(Step::Restart)
         }
         let write = self.advance_pivot(write, head)?;
-        self.metrics.pivot_block.set(self.pivot()?.number as f64);
+        let pivot = self.pivot()?.number;
+        self.metrics.pivot_block.set(pivot as f64);
         // Lists only update accounts already downloaded, so coverage grows once they reach the
         // pivot.
+        if applied.number < pivot {
+            self.metrics.set_phase(SnapPhase::CatchingUp);
+        }
         if let Some(step) = self.catch_up(write).await? {
             return Ok(step)
         }
         // Repairs take the pivot's values, which the rest of the state holds once the lists reach
-        // it.
+        // it. Catch-up only drops repairs, so none are left if none were pending.
+        if repairs > 0 {
+            self.metrics.set_phase(SnapPhase::Repairing);
+        }
         if let Some(step) = self.repair().await? {
             return Ok(step)
         }
@@ -393,8 +411,10 @@ where
                 CatchUpStep::Complete => return Ok(None),
                 CatchUpStep::Applied { progress, .. } => {
                     debug!(target: "sync::snap", applied = ?progress.applied(), pivot, "Applied block access lists");
-                    self.metrics.set_phase(SnapPhase::CatchingUp);
                     self.metrics.applied_block.set(progress.applied().number as f64);
+                    // Lists drop the repairs they overwrite, so the backlog is read back.
+                    let repairs = self.factory.database_provider_ro()?.snap_repairs(write)?.len();
+                    self.metrics.pending_repairs.set(repairs as f64);
                 }
                 CatchUpStep::Unavailable { peer_id, .. } => {
                     debug!(target: "sync::snap", ?peer_id, pivot, "Peer does not serve the pivot's block access lists");
@@ -414,17 +434,13 @@ where
     async fn repair(&mut self) -> Result<Option<Step>, SnapSyncError> {
         for _ in 0..self.ranges_per_check {
             let range = match self.accounts.next_repair().await? {
-                None => {
-                    self.metrics.pending_repairs.set(0.0);
-                    return Ok(None)
-                }
+                None => return Ok(None),
                 Some(AccountRangeStep::Verified(range)) => range,
                 Some(AccountRangeStep::Unavailable { .. }) => {
                     self.metrics.unavailable_waits.increment(1);
                     return Ok(Some(Step::Wait))
                 }
             };
-            self.metrics.set_phase(SnapPhase::Repairing);
             let Some(slots) = self.storage.repair_slots(&range).await? else {
                 self.metrics.unavailable_waits.increment(1);
                 return Ok(Some(Step::Wait))
@@ -735,11 +751,15 @@ mod tests {
         write
     }
 
-    // Builds with a recorder, so the run's metrics are read from the returned snapshotter.
-    fn recorded<T>(build: impl FnOnce() -> T) -> (Snapshotter, T) {
+    // Gives `bootstrap` metrics recorded in the returned snapshotter. `default` handles are cached
+    // process-wide, so they are registered afresh for each recorder.
+    fn recorded(mut bootstrap: Bootstrap) -> (Snapshotter, Bootstrap) {
         let recorder = DebuggingRecorder::new();
         let snapshotter = recorder.snapshotter();
-        (snapshotter, metrics::with_local_recorder(&recorder, build))
+        bootstrap.metrics = metrics::with_local_recorder(&recorder, || {
+            SnapSyncMetrics::new_with_labels(Vec::<metrics::Label>::new())
+        });
+        (snapshotter, bootstrap)
     }
 
     // Taking a snapshot resets every value, so it is taken once per check.
@@ -931,7 +951,8 @@ mod tests {
         if repaired {
             responses.push(served_account(1, &accounts, keccak256(STALE)));
         }
-        let (client, mut bootstrap) = scripted(&factory, responses, [5]);
+        let (client, bootstrap) = scripted(&factory, responses, [5]);
+        let (snapshotter, mut bootstrap) = recorded(bootstrap);
 
         let outcome = bootstrap.run().await.unwrap();
 
@@ -941,6 +962,10 @@ mod tests {
         assert_eq!(pivot, new[1].num_hash());
         assert_eq!(attempt_id(&factory), attempt);
         assert_eq!(*client.block_requests(), [hashes(&orphaned), hashes(&new[..2])]);
+        // Whether repaired or dropped by the new branch's lists, no repair is left reported.
+        let metrics = snapshot(&snapshotter);
+        assert_eq!(metrics["reorg_recoveries"], DebugValue::Counter(1));
+        assert_eq!(metrics["pending_repairs"], DebugValue::Gauge(0.0.into()));
         let origins = client.origins().clone();
         // The repaired state is the new pivot's, as its header commits to.
         let verified = rebuild_and_verify(&factory, write, pivot.number);
@@ -984,8 +1009,13 @@ mod tests {
         provider.schedule_snap_repairs(write, repairs).unwrap();
         provider.commit().unwrap();
         // No peer serves the repair at pivot 2 any more.
-        let (_, mut bootstrap) = scripted(&factory, [unserved_range(1)], [3]);
+        let (_, bootstrap) = scripted(&factory, [unserved_range(1)], [3]);
+        let (snapshotter, mut bootstrap) = recorded(bootstrap);
         assert_eq!(bootstrap.run().await.unwrap(), SnapBootstrapOutcome::Stopped);
+        // The backlog is reported although no repair committed.
+        let metrics = snapshot(&snapshotter);
+        assert_eq!(metrics["pending_repairs"], DebugValue::Gauge(1.0.into()));
+        assert_eq!(metrics["unavailable_waits"], DebugValue::Counter(1));
 
         // Once the head moves on, the pivot advances and the repair is fetched there.
         let responses = [empty_lists(1, 5), account_range(1, &accounts, 1..2, &[key(2)])];
@@ -1075,8 +1105,8 @@ mod tests {
             account_range(2, &accounts, 1..3, &[key(2), FAR]),
         ];
         // The head moves past the advance window after the first range.
-        let (snapshotter, (client, bootstrap)) = recorded(|| scripted(&factory, responses, [3, 8]));
-        let mut bootstrap = bootstrap.with_ranges_per_check(1);
+        let (client, bootstrap) = scripted(&factory, responses, [3, 8]);
+        let (snapshotter, mut bootstrap) = recorded(bootstrap.with_ranges_per_check(1));
 
         let outcome = bootstrap.run().await.unwrap();
 
@@ -1107,7 +1137,8 @@ mod tests {
             account_range(1, &accounts, 0..1, &[key(1)]),
             Err(RequestError::UnsupportedCapability),
         ];
-        let (snapshotter, (_, mut bootstrap)) = recorded(|| scripted(&factory, responses, [3]));
+        let (_, bootstrap) = scripted(&factory, responses, [3]);
+        let (snapshotter, mut bootstrap) = recorded(bootstrap);
 
         assert_eq!(bootstrap.run().await.unwrap(), SnapBootstrapOutcome::Stopped);
         assert_eq!(bootstrap.context.waits, 1);
@@ -1176,8 +1207,8 @@ mod tests {
         });
         factory.replace_headers_after(1, &replaced[2..]);
         let orphaned = attempt_id(&factory);
-        let (snapshotter, (_, mut bootstrap)) =
-            recorded(|| scripted(&factory, [account_range(1, &accounts, 0..3, &[])], [3]));
+        let (_, bootstrap) = scripted(&factory, [account_range(1, &accounts, 0..3, &[])], [3]);
+        let (snapshotter, mut bootstrap) = recorded(bootstrap);
 
         let outcome = bootstrap.run().await.unwrap();
 
@@ -1199,10 +1230,15 @@ mod tests {
         let (_, mut bootstrap) = scripted(&factory, [account_range(1, &accounts, 0..3, &[])], [3]);
         let first = bootstrap.run().await.unwrap();
 
-        let (client, mut resumed) = scripted(&factory, [], [3]);
+        let (client, resumed) = scripted(&factory, [], [3]);
+        let (snapshotter, mut resumed) = recorded(resumed);
 
         assert_eq!(resumed.run().await.unwrap(), first);
         assert!(client.origins().is_empty());
+        // The stored progress is reported while the trie rebuilds.
+        let metrics = snapshot(&snapshotter);
+        assert_eq!(metrics["account_progress"], DebugValue::Gauge(1.0.into()));
+        assert_eq!(metrics["applied_block"], DebugValue::Gauge(2.0.into()));
     }
 
     #[tokio::test]
@@ -1246,7 +1282,8 @@ mod tests {
         provider.commit().unwrap();
 
         // Block 3's list is past the served history under head 11, but nothing needs it.
-        let (client, mut resumed) = scripted(&factory, [], [11]);
+        let (client, resumed) = scripted(&factory, [], [11]);
+        let (snapshotter, mut resumed) = recorded(resumed);
         let outcome = resumed.run().await.unwrap();
 
         assert_eq!(
@@ -1255,6 +1292,10 @@ mod tests {
         );
         assert!(client.origins().is_empty());
         assert!(client.block_requests().is_empty());
+        // The resumed run reports the stored progress without committing anything.
+        let metrics = snapshot(&snapshotter);
+        assert_eq!(metrics["pivot_block"], DebugValue::Gauge(2.0.into()));
+        assert_eq!(metrics["account_progress"], DebugValue::Gauge(1.0.into()));
     }
 
     #[tokio::test]
