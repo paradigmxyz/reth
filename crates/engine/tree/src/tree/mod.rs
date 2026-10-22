@@ -793,10 +793,11 @@ where
         self.metrics.block_validation.record_payload_validation(start.elapsed().as_secs_f64());
 
         let mut outcome = if self.backfill_sync_state.is_idle() {
-            self.try_insert_payload(payload)?.into_outcome()
+            self.try_insert_payload(payload)?
         } else {
-            TreeOutcome::new(self.try_buffer_payload(payload)?)
-        };
+            self.try_buffer_payload(payload)?
+        }
+        .into_outcome();
 
         // if the block is valid and it is the current sync target head, make it canonical
         if outcome.outcome.is_valid() && self.is_sync_target_head(block_hash) {
@@ -870,28 +871,37 @@ where
     /// so they are buffered (stored in memory) until their parent blocks are synced.
     ///
     /// Returns:
+    /// - `Valid`: Block is already known, so it is not validated again
     /// - `Syncing`: Payload successfully buffered
     /// - Error status: Payload is malformed or invalid
     fn try_buffer_payload(
         &mut self,
         payload: T::ExecutionData,
-    ) -> Result<PayloadStatus, InsertBlockProcessingError> {
+    ) -> Result<TryInsertPayloadResult, InsertBlockProcessingError> {
         let parent_hash = payload.parent_hash();
         let num_hash = payload.num_hash();
 
-        match self.payload_validator.convert_payload_to_block(payload) {
+        let status = match self.payload_validator.convert_payload_to_block(payload) {
             // if the block is well-formed, buffer it for later
             Ok(block) => {
+                if self.is_block_known(num_hash).map_err(InsertBlockFatalError::from)? {
+                    return Ok(TryInsertPayloadResult {
+                        status: PayloadStatus::new(PayloadStatusEnum::Valid, Some(num_hash.hash)),
+                        already_seen: true,
+                    })
+                }
                 if let Err(error) = self.buffer_block(block) {
-                    self.on_insert_block_error(error)
+                    self.on_insert_block_error(error)?
                 } else {
-                    Ok(PayloadStatus::from_status(PayloadStatusEnum::Syncing))
+                    PayloadStatus::from_status(PayloadStatusEnum::Syncing)
                 }
             }
-            Err(error) => Ok(self
+            Err(error) => self
                 .on_new_payload_error(error, num_hash, parent_hash)
-                .map_err(InsertBlockFatalError::from)?),
-        }
+                .map_err(InsertBlockFatalError::from)?,
+        };
+
+        Ok(TryInsertPayloadResult { status, already_seen: false })
     }
 
     /// Returns the new chain for the given head.
@@ -2745,6 +2755,14 @@ where
         Ok(())
     }
 
+    /// Returns whether the block is in the tree or persisted.
+    fn is_block_known(&self, block: BlockNumHash) -> ProviderResult<bool> {
+        // Blocks above the last persisted height are new or staged by backfill, so skip the DB.
+        Ok(self.state.tree_state.contains_hash(&block.hash) ||
+            (block.number <= self.persistence_state.last_persisted_block.number &&
+                self.provider.sealed_header_by_hash(block.hash)?.is_some()))
+    }
+
     /// Pre-validates the block and inserts it into the buffer.
     fn buffer_block(
         &mut self,
@@ -3188,26 +3206,16 @@ where
         let block_num_hash = block_id.block;
         debug!(target: "engine::tree", block=?block_num_hash, parent = ?block_id.parent, "Inserting new block into tree");
 
-        // Check if block already exists - first in memory, then DB only if it could be persisted
-        if self.state.tree_state.contains_hash(&block_num_hash.hash) {
-            convert_to_block(self, input)?;
-            return Ok(InsertPayloadOk::AlreadySeen(BlockStatus::Valid));
-        }
-
-        // Only query DB if block could be persisted (number <= last persisted block).
-        // New blocks from CL always have number > last persisted, so skip DB lookup for them.
-        if block_num_hash.number <= self.persistence_state.last_persisted_block.number {
-            match self.provider.sealed_header_by_hash(block_num_hash.hash) {
-                Err(err) => {
-                    let block = convert_to_block(self, input)?;
-                    return Err(InsertBlockError::new(block.split().0, err.into()).into());
-                }
-                Ok(Some(_)) => {
-                    convert_to_block(self, input)?;
-                    return Ok(InsertPayloadOk::AlreadySeen(BlockStatus::Valid));
-                }
-                Ok(None) => {}
+        match self.is_block_known(block_num_hash) {
+            Ok(true) => {
+                convert_to_block(self, input)?;
+                return Ok(InsertPayloadOk::AlreadySeen(BlockStatus::Valid));
             }
+            Err(err) => {
+                let block = convert_to_block(self, input)?;
+                return Err(InsertBlockError::new(block.split().0, err.into()).into());
+            }
+            Ok(false) => {}
         }
 
         // Ensure that the parent state is available.
