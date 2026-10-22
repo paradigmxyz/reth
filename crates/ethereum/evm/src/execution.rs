@@ -78,8 +78,9 @@ impl InvalidTxError for EthInvalidTxError {
         matches!(self.0, HandlerError::IntrinsicGasTooLow { .. })
     }
 
+    /// Exposes the wrapped [`HandlerError`] so RPC layers can recover the structured error.
     fn as_any(&self) -> &(dyn Any + 'static) {
-        self
+        &self.0
     }
 }
 
