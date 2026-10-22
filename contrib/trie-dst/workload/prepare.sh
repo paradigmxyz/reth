@@ -51,26 +51,29 @@ trap 'sccache --show-stats > /run-info/sccache.txt; cat /run-info/sccache.txt' E
 # Keep the DST profile: it inherits profiling and enables debug assertions and
 # overflow checks for the harness. Do not switch these builds to profiling.
 cargo build --locked -p reth-trie-dst --profile dst
+binary="$CARGO_TARGET_DIR/dst/reth-trie-dst"
 printf 'cargo_secs=%s\n' "$SECONDS" >> /run-info/cache-info.env
-objcopy --strip-debug "$CARGO_TARGET_DIR/dst/reth-trie-dst" /run-info/reth-trie-dst
+objcopy --strip-debug "$binary" /run-info/reth-trie-dst
 if [ "${DST_CMD:-campaign}" = fuzz ]; then
   clang -O2 -fPIC -c /bedrock-guest/libfeedback.c -o /out/libfeedback.o
   clang -O2 -fPIC -c /bedrock-guest/libpcguard.c -o /out/libpcguard.o
   ar rcs /out/rt.a /out/libfeedback.o /out/libpcguard.o
   export RUSTFLAGS="$RUSTFLAGS -Cpasses=sancov-module -Cllvm-args=-sanitizer-coverage-level=3 -Cllvm-args=-sanitizer-coverage-trace-pc-guard -C link-arg=/out/rt.a -C link-arg=-Wl,--build-id=sha1"
-  cargo build --locked -p reth-trie-dst --profile dst
-  nm --defined-only "$CARGO_TARGET_DIR/dst/reth-trie-dst" | grep -qw __sanitizer_cov_trace_pc_guard_init
-  size=$(readelf -SW "$CARGO_TARGET_DIR/dst/reth-trie-dst" | sed -n 's/.*__sancov_guards *[A-Z_]* *[0-9a-f]* [0-9a-f]* \([0-9a-f]*\).*/\1/p')
+  host_target=$(rustc -vV | sed -n 's/^host: //p')
+  cargo build --locked -p reth-trie-dst --profile dst --target "$host_target"
+  binary="$CARGO_TARGET_DIR/$host_target/dst/reth-trie-dst"
+  nm --defined-only "$binary" | grep -qw __sanitizer_cov_trace_pc_guard_init
+  size=$(readelf -SW "$binary" | sed -n 's/.*__sancov_guards *[A-Z_]* *[0-9a-f]* [0-9a-f]* \([0-9a-f]*\).*/\1/p')
   test -n "$size"
   mkdir -p /out/cov-smoke
-  BEDROCK_COVERAGE_DIR=/out/cov-smoke "$CARGO_TARGET_DIR/dst/reth-trie-dst" --version >/dev/null 2>&1 || true
+  BEDROCK_COVERAGE_DIR=/out/cov-smoke "$binary" --version >/dev/null 2>&1 || true
   measured=$(stat -c %s /out/cov-smoke/*-cov-*)
   expected=$(( ( (0x$size / 4) + 4095 ) / 4096 * 4096 ))
   test "$measured" = "$expected" && test "$expected" -gt 0 && test "$expected" -le $((64 << 20))
   rm -rf /out/cov-smoke
 fi
 # Keep symbols in the cached executable for debugging recorded failures.
-objcopy --strip-debug "$CARGO_TARGET_DIR/dst/reth-trie-dst" /out/reth-trie-dst
+objcopy --strip-debug "$binary" /out/reth-trie-dst
 sccache gcc -O2 -I /bedrock-guest -x c - -o /out/bedrock-ready <<'C'
 #include "libvmcall.h"
 int main(void) {

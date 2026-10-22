@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """Bedrock workload hooks; native state generation and checking live in Rust."""
 
-import hashlib
 import json
 import os
 import random
@@ -256,18 +255,20 @@ def main():
             raise RuntimeError("input injection reached an already completed workload")
         pending = STATE / "pending-input.json"
         tmp = pending.with_suffix(".tmp")
-        payload = json.dumps(request, sort_keys=True)
-        tmp.write_text(json.dumps({"id": int.from_bytes(hashlib.sha256(payload.encode()).digest()[:8], "big"),
-                                   "input": request}))
+        applied = STATE / "data/input-overrides.json"
+        previous = [json.loads(path.read_text())[key] for path, key in
+                    ((pending, "id"), (applied, "applied")) if path.exists()]
+        tmp.write_text(json.dumps({"id": max(previous, default=0) + 1, "input": request}))
         tmp.replace(pending)
     elif hook == "merge-assertions":
         collect(Path("/bedrock/out/assertions.jsonl"))
     elif hook == "progress":
         collect(Path("/bedrock/out/progress.jsonl"), progress=True)
     elif hook == "finalize":
-        (STATE / "pending-input.finish").touch()
+        if STATE.exists():
+            (STATE / "pending-input.finish").touch()
         deadline = time.monotonic() + 5
-        while not (STATE / "done.json").exists() and time.monotonic() < deadline:
+        while STATE.exists() and not (STATE / "done.json").exists() and time.monotonic() < deadline:
             time.sleep(0.01)
         if not (STATE / "done.json").exists():
             pid = STATE / "worker.pid"

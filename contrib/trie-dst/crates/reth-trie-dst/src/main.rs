@@ -122,8 +122,8 @@ fn verify(factory: &ProviderFactory<Node>, state: &Model, tip: u64, state_tip: u
         let slots = (0..64).map(|slot| B256::from(U256::from(slot))).collect::<Vec<_>>();
         for slot in &slots {
             ensure!(
-                view.storage(*address, *slot)?.unwrap_or_default()
-                    == entry.storage.get(&U256::from_be_bytes(slot.0)).copied().unwrap_or_default(),
+                view.storage(*address, *slot)?.unwrap_or_default() ==
+                    entry.storage.get(&U256::from_be_bytes(slot.0)).copied().unwrap_or_default(),
                 "plain storage {address}/{slot} at {tip}"
             );
         }
@@ -176,9 +176,9 @@ fn metric_counts(snapshotter: &Snapshotter) -> BTreeMap<String, u64> {
         .into_iter()
         .filter_map(|(key, _, _, value)| {
             let name = key.key().name().to_string();
-            if !(name.contains("tree.root")
-                || name.contains("state_trie_overlay")
-                || name.contains("storage.overlay"))
+            if !(name.contains("tree.root") ||
+                name.contains("state_trie_overlay") ||
+                name.contains("storage.overlay"))
             {
                 return None;
             }
@@ -207,8 +207,8 @@ fn run(config: &Config, snapshotter: &Snapshotter) -> Result<()> {
     ensure!(backpressure > config.persistence_threshold, "persistence threshold is too large");
     ensure!(buffer <= config.persistence_threshold, "buffer must not exceed persistence threshold");
     ensure!(
-        masking == 0
-            || matches!(masking.checked_add(buffer), Some(window) if window < config.persistence_threshold),
+        masking == 0 ||
+            matches!(masking.checked_add(buffer), Some(window) if window < config.persistence_threshold),
         "masking blocks + buffer must be less than persistence threshold"
     );
     // Clear the default window before applying smaller thresholds: TreeConfig checks each setter.
@@ -262,7 +262,9 @@ fn run(config: &Config, snapshotter: &Snapshotter) -> Result<()> {
     } else {
         Overrides::default()
     };
-    total_blocks = total_blocks.max(overrides.total_blocks);
+    if overrides.total_blocks != 0 {
+        total_blocks = overrides.total_blocks;
+    }
     let journal_path = datadir.join("blocks.jsonl");
     let mut journal = BTreeMap::<u64, JournalBlock>::new();
     if journal_path.exists() {
@@ -367,8 +369,9 @@ fn run(config: &Config, snapshotter: &Snapshotter) -> Result<()> {
     let mut waiting = false;
     loop {
         let head = base + blocks.len() as u64;
-        if journal.range((head + 1)..).next().is_none()
-            && let Some(path) = config.input_file.as_ref().filter(|p| p.exists())
+        if head < 1024 &&
+            journal.range((head + 1)..).next().is_none() &&
+            let Some(path) = config.input_file.as_ref().filter(|p| p.exists())
         {
             let injection: Injection = serde_json::from_slice(&fs::read(path)?)?;
             if injection.id != overrides.applied {
@@ -379,7 +382,7 @@ fn run(config: &Config, snapshotter: &Snapshotter) -> Result<()> {
                 for (i, block) in injection.input.blocks.into_iter().take(count).enumerate() {
                     overrides.blocks.insert((head + 1) + i as u64, block);
                 }
-                total_blocks = total_blocks.max(head + count as u64);
+                total_blocks = head + count as u64;
                 overrides.total_blocks = total_blocks;
                 overrides.applied = injection.id;
                 shutdown = false;
@@ -391,8 +394,8 @@ fn run(config: &Config, snapshotter: &Snapshotter) -> Result<()> {
             }
         }
         if let Some((next_db, next_state)) = pending_save {
-            let result = if shutdown
-                || head.saturating_sub(state_tip).saturating_sub(buffer) >= backpressure
+            let result = if shutdown ||
+                head.saturating_sub(state_tip).saturating_sub(buffer) >= backpressure
             {
                 Some(ack_rx.recv_timeout(timeout)?)
             } else {
@@ -439,9 +442,9 @@ fn run(config: &Config, snapshotter: &Snapshotter) -> Result<()> {
         if pending_save.is_none() {
             // Match EngineApiTreeHandler::get_save_blocks_input's Threshold and Head targets.
             let next_db = if shutdown { head } else { head.saturating_sub(buffer) };
-            if shutdown
-                || (head.saturating_sub(state_tip) > config.persistence_threshold
-                    && next_db > db_tip)
+            if shutdown ||
+                (head.saturating_sub(state_tip) > config.persistence_threshold &&
+                    next_db > db_tip)
             {
                 let next_state =
                     if shutdown { head } else { next_db.saturating_sub(masking).max(state_tip) };
@@ -467,8 +470,9 @@ fn run(config: &Config, snapshotter: &Snapshotter) -> Result<()> {
         }
         if head == total_blocks {
             if shutdown {
-                if let Some(path) = &config.input_file
-                    && !path.with_extension("finish").exists()
+                if head < 1024 &&
+                    let Some(path) = &config.input_file &&
+                    !path.with_extension("finish").exists()
                 {
                     if !waiting {
                         println!("{}", json!({"input": "waiting", "head": head}));
