@@ -42,7 +42,7 @@ use reth_provider::{
 };
 use reth_revm::database::StateProviderDatabase;
 use reth_storage_overlay::OverlayStateProviderFactory;
-use reth_tasks::{pool::WorkerPool, Runtime, WorkerStatefulPool};
+use reth_tasks::{Runtime, WorkerStatefulPool};
 use reth_trie_common::MultiProofTargetsV2;
 use revm::{context::Transaction as _, state::EvmState};
 use std::{
@@ -137,7 +137,7 @@ where
 
         trace!(
             target: "engine::tree::payload_processor::prewarm",
-            prewarming_threads = executor.prewarming_pool().current_num_threads(),
+            prewarming_threads = ctx.stateful_pool.current_num_threads(),
             transaction_count = ctx.env.transaction_count,
             "Initialized prewarm task"
         );
@@ -162,7 +162,6 @@ where
     ) where
         Tx: ExecutableTxFor<Evm> + Clone + Send + Sync + 'static,
     {
-        let executor = self.executor.clone();
         let ctx = self.ctx.clone();
         let span = Span::current();
 
@@ -175,13 +174,12 @@ where
             .entered();
 
             let ctx = &ctx;
-            let pool = executor.prewarming_pool();
 
             let mut tx_count = 0usize;
             let state_root_hint_stream = state_root_hint_stream.as_ref();
             // Transactions to execute again when their results become stale.
             let mut refresh_txs = Vec::new();
-            pool.in_place_scope(|s| {
+            ctx.stateful_pool.in_place_scope(|s| {
                 while let Ok((index, tx)) = pending.recv() {
                     if ctx.should_stop() {
                         trace!(
@@ -235,7 +233,7 @@ where
             });
 
             if let Some(results) = &ctx.prewarm_results {
-                Self::refresh_results(ctx, pool, results, &refresh_txs);
+                Self::refresh_results(ctx, results, &refresh_txs);
             }
 
             let _ = actions_tx
@@ -252,7 +250,6 @@ where
     /// prewarming stops.
     fn refresh_results<Tx>(
         ctx: &PrewarmContext<N, P, Evm>,
-        pool: &WorkerPool,
         results: &PrewarmResults<HaltReasonFor<Evm>>,
         txs: &[(usize, Tx)],
     ) where
@@ -279,8 +276,8 @@ where
             let refreshed = !stale.is_empty();
             if refreshed {
                 let cursor = AtomicUsize::new(0);
-                pool.in_place_scope(|s| {
-                    for _ in 0..pool.current_num_threads().min(stale.len()) {
+                ctx.stateful_pool.in_place_scope(|s| {
+                    for _ in 0..ctx.stateful_pool.current_num_threads().min(stale.len()) {
                         s.spawn(|_| {
                             while let Some((index, tx)) =
                                 stale.get(cursor.fetch_add(1, Ordering::Relaxed))
@@ -518,7 +515,6 @@ where
         );
 
         let ctx = self.ctx.clone();
-        let executor = self.executor.clone();
         let parent_span = Span::current();
         let stream_parent_span = parent_span;
         let prefetch_bal = Arc::clone(&decoded_bal);
@@ -527,7 +523,7 @@ where
 
         if let Some(hashed_update_stream) = hashed_update_stream {
             let ctx = ctx.clone();
-            executor.bal_streaming_pool().spawn(move || {
+            Arc::clone(&ctx.stateful_pool).spawn(move || {
                 let branch_span = debug_span!(
                     target: "engine::tree::payload_processor::prewarm",
                     parent: &stream_parent_span,
@@ -721,7 +717,7 @@ where
 }
 
 /// Per-thread EVM state initialised by [`PrewarmContext::evm_for_ctx`] and stored in
-/// [`WorkerPool`] workers via [`WorkerStatefulPool::get_or_init`].
+/// workers via [`WorkerStatefulPool::get_or_init`].
 type PrewarmEvmState<Evm> =
     Option<EvmFor<Evm, RecordingDb<StateProviderDatabase<EvmStateProviderBox>>, BalanceTracker>>;
 
@@ -1013,6 +1009,7 @@ mod tests {
     use reth_provider::test_utils::MockEthProvider;
     use reth_stages_api::{StageCheckpoint, StageId};
     use reth_storage_overlay::OverlayManager;
+    use reth_tasks::WorkerPool;
     use revm::database::EmptyDB;
 
     #[test]

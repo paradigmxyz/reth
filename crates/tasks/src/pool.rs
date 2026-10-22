@@ -5,6 +5,7 @@ use std::{
     any::Any,
     cell::RefCell,
     future::Future,
+    ops::Deref,
     panic::{catch_unwind, AssertUnwindSafe},
     pin::Pin,
     sync::{
@@ -508,7 +509,8 @@ impl Worker {
 ///
 /// Share this value with jobs through an [`Arc`]. Dropping the last handle clears this run's
 /// state on every pool thread, leaving other runs' state untouched. Worker slots retain only
-/// a weak reference to this owner and do not keep it alive.
+/// a weak reference to this owner and do not keep it alive. Dereferences to the underlying
+/// pool for scheduling jobs; each job accessing state must retain an owner handle.
 ///
 /// Access closures borrow the current thread's worker and must not yield to Rayon or recursively
 /// access worker state. Use them only in jobs executing on this pool. Cleanup broadcasts to the
@@ -558,6 +560,14 @@ impl WorkerStatefulPool {
         f: impl FnOnce(&mut T) -> R,
     ) -> R {
         WorkerPool::with_worker_mut(|worker| f(worker.get_or_init(&self.owner, init)))
+    }
+}
+
+impl Deref for WorkerStatefulPool {
+    type Target = WorkerPool;
+
+    fn deref(&self) -> &Self::Target {
+        &self.pool
     }
 }
 
@@ -790,7 +800,7 @@ mod tests {
         let (release_tx, release_rx) = std::sync::mpsc::channel();
         let (done_tx, done_rx) = std::sync::mpsc::channel();
         let job_state = Arc::clone(&state);
-        pool.spawn(move || {
+        state.spawn(move || {
             ready_tx.send(()).unwrap();
             release_rx.recv_timeout(Duration::from_secs(5)).unwrap();
             job_state.get(|value: &Arc<()>| assert_eq!(Arc::strong_count(value), 3));
