@@ -33,7 +33,7 @@ use reth_rpc_api::DebugApiServer;
 use reth_rpc_convert::RpcTxReq;
 use reth_rpc_eth_api::{
     helpers::{EthTransactions, TraceExt},
-    AsEthApiError, FromEthApiError, RpcConvert, RpcNodeCore,
+    AsEthApiError, FromEthApiError, FromEvmError, RpcConvert, RpcNodeCore,
 };
 use reth_rpc_eth_types::{EthApiError, StateCacheDb};
 use reth_rpc_server_types::{result::internal_rpc_err, ToRpcResult};
@@ -122,8 +122,68 @@ where
         self.inner.blocking_task_guard.clone().acquire_owned().await
     }
 
-    /// Trace the entire block asynchronously
+    /// Trace the entire block asynchronously.
+    ///
+    /// Transactions run on a bare EVM, so a block the executor would reject, such as a bad block,
+    /// is still traced.
     async fn trace_block(
+        &self,
+        block: Arc<RecoveredBlock<ProviderBlock<Eth::Provider>>>,
+        evm_env: EvmEnvFor<Eth::Evm>,
+        opts: GethDebugTracingOptions,
+    ) -> Result<Vec<TraceResult>, Eth::Error> {
+        self.eth_api()
+            .spawn_with_state_at_block(block.parent_hash(), move |eth_api, mut db| {
+                let mut results = Vec::with_capacity(block.body().transactions().len());
+
+                eth_api.apply_pre_execution_changes(&block, &mut db)?;
+
+                let block_env = evm_env.block_env.clone();
+
+                let mut transactions = block.transactions_recovered().enumerate().peekable();
+                let inspector = DebugInspector::new(opts).map_err(Eth::Error::from_eth_err)?;
+                let mut evm =
+                    eth_api.evm_config().evm_with_env_and_inspector(&mut db, evm_env, inspector);
+                while let Some((index, tx)) = transactions.next() {
+                    if is_cancelled() {
+                        return Err(EthApiError::InternalEthError.into())
+                    }
+                    let tx_env = eth_api.evm_config().tx_env(tx);
+
+                    let res = evm.transact(tx_env.clone()).map_err(Eth::Error::from_evm_err)?;
+
+                    let (db, inspector, _) = evm.components_mut();
+                    let result = inspector
+                        .get_result(
+                            Some(TransactionContext {
+                                block_hash: Some(block.hash()),
+                                tx_hash: Some(*tx.tx_hash()),
+                                tx_index: Some(index),
+                            }),
+                            &tx_env,
+                            &block_env,
+                            &res,
+                            db,
+                        )
+                        .map_err(Eth::Error::from_eth_err)?;
+
+                    results.push(TraceResult::Success { result, tx_hash: Some(*tx.tx_hash()) });
+                    if transactions.peek().is_some() {
+                        inspector.fuse().map_err(Eth::Error::from_eth_err)?;
+                        // need to apply the state changes of this transaction before executing the
+                        // next transaction
+                        db.commit(res.state)
+                    }
+                }
+
+                Ok(results)
+            })
+            .await
+    }
+
+    /// Traces a canonical block like [`Self::trace_block`], but replays it through the block
+    /// executor, so the traces include the per-transaction changes the executor applies.
+    async fn trace_canonical_block(
         &self,
         block: Arc<RecoveredBlock<ProviderBlock<Eth::Provider>>>,
         evm_env: EvmEnvFor<Eth::Evm>,
@@ -318,7 +378,7 @@ where
         }
         let evm_env = self.eth_api().evm_env_for_header(block.sealed_block().sealed_header())?;
 
-        self.trace_block(block, evm_env, opts).await
+        self.trace_canonical_block(block, evm_env, opts).await
     }
 
     /// Trace the transaction according to the provided options.
@@ -329,10 +389,11 @@ where
         tx_hash: B256,
         opts: GethDebugTracingOptions,
     ) -> Result<GethTrace, Eth::Error> {
-        let (transaction, block) = match self.eth_api().transaction_and_block(tx_hash).await? {
-            None => return Err(EthApiError::TracingTransactionNotFound.into()),
-            Some(res) => res,
-        };
+        let (transaction, block, bal) =
+            match self.eth_api().transaction_and_block_and_maybe_bal(tx_hash).await? {
+                None => return Err(EthApiError::TracingTransactionNotFound.into()),
+                Some(res) => res,
+            };
 
         let interrupt = JsTraceInterrupt::new(&opts)?;
         let tracer_interrupt = interrupt.clone();
@@ -351,8 +412,14 @@ where
                 let mut inspector = tracer_interrupt
                     .attach(DebugInspector::new(opts).map_err(Eth::Error::from_eth_err)?);
                 let tx_env = eth_api.evm_config().tx_env(&tx);
-                let (res, evm_env) =
-                    eth_api.inspect_transaction_in_block(&block, &mut db, &mut inspector, index)?;
+                let (res, evm_env) = eth_api.inspect_transaction_in_block(
+                    &block,
+                    &mut db,
+                    &mut inspector,
+                    index,
+                    tx_env.clone(),
+                    bal.as_deref(),
+                )?;
 
                 let trace = inspector
                     .get_result(

@@ -36,6 +36,7 @@ use reth_revm::{
 };
 use reth_rpc_convert::{RpcConvert, RpcTxReq};
 use reth_rpc_eth_types::{
+    cache::db::attach_bal_before_tx,
     error::{AsEthApiError, FromEthApiError},
     simulate::{self, EthSimulateError},
     EthApiError, StateCacheDb,
@@ -707,12 +708,13 @@ pub trait Call:
 
     /// Retrieves the transaction if it exists and executes it.
     ///
-    /// Before the transaction is executed, all previous transactions in the block are executed
-    /// through the block executor, which then executes the transaction itself, so the result
-    /// includes any chain-specific per-transaction settlement. A cached BAL is not used, because
-    /// the target would then run outside an executor that has replayed the block up to it.
+    /// Before the transaction is executed, the state is positioned right before the transaction,
+    /// either by attaching the block's cached BAL or by executing all previous transactions in the
+    /// block through the block executor, which then also executes the transaction.
     /// The callback `f` is invoked with the [`ResultAndState`] after the transaction was executed
-    /// and the database that points to the beginning of the transaction.
+    /// and the database that points to the beginning of the transaction. The database may have
+    /// the block's BAL attached and must only be used for reads, because an attached BAL takes
+    /// read precedence over state committed on top, see [`attach_bal_before_tx`].
     ///
     /// Note: Implementers should use a threadpool where blocking is allowed, such as
     /// [`BlockingTaskPool`](reth_tasks::pool::BlockingTaskPool).
@@ -733,10 +735,11 @@ pub trait Call:
         R: Send + 'static,
     {
         async move {
-            let (transaction, block) = match self.transaction_and_block(hash).await? {
-                None => return Ok(None),
-                Some(res) => res,
-            };
+            let (transaction, block, bal) =
+                match self.transaction_and_block_and_maybe_bal(hash).await? {
+                    None => return Ok(None),
+                    Some(res) => res,
+                };
             let (tx, tx_info) = transaction.split();
 
             // we need to get the state of the parent block because we're essentially replaying the
@@ -744,6 +747,15 @@ pub trait Call:
             let parent_block = block.parent_hash();
 
             self.spawn_with_state_at_block(parent_block, move |this, mut db| {
+                if let Some((bal, tx_index)) = bal.zip(tx_info.index) {
+                    attach_bal_before_tx(&mut db, &bal, tx_index as usize);
+
+                    let evm_env = this.evm_env_for_header(block.sealed_block().sealed_header())?;
+                    let tx_env = RpcNodeCore::evm_config(&this).tx_env(tx);
+                    let res = this.transact(&mut db, evm_env, tx_env)?;
+                    return f(tx_info, res, db)
+                }
+
                 let block_txs = block.transactions_recovered();
 
                 let mut executor = RpcNodeCore::evm_config(&this)
