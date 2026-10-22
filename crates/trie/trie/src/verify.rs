@@ -7,12 +7,17 @@ use crate::{
     },
     Nibbles,
 };
-use alloy_primitives::B256;
+use alloy_primitives::{map::B256Map, B256};
 use alloy_rlp::Encodable;
 use alloy_trie::BranchNodeCompact;
 use reth_execution_errors::StateRootError;
 use reth_storage_errors::db::DatabaseError;
-use std::cmp::Ordering;
+use std::{
+    cmp::Ordering,
+    collections::VecDeque,
+    panic::{catch_unwind, AssertUnwindSafe},
+    thread::{self, JoinHandle},
+};
 use tracing::trace;
 
 /// Output describes an inconsistency found when comparing the hashed state tables
@@ -166,168 +171,212 @@ impl<C: TrieCursor> SingleVerifier<DepthFirstTrieIterator<C>> {
 
 /// Checks trie tables against hashed state, recomputing storage roots on a fixed sync pool.
 ///
-/// Cursor factories must provide long-lived read snapshots of the same database version. Each
-/// bounded batch runs a lookahead thread and scoped storage jobs, so no worker can outlive the
-/// borrowed factories. Inconsistencies from every thread are delivered through the same queue.
-/// Storage outputs may arrive in any account order; account progress remains ordered.
+/// Cursor factories must provide long-lived read snapshots of the same database version. The
+/// lookahead thread and storage workers own clones of the factories and run until EOF or drop.
+/// Completed roots accumulate without a limit while account leaves are consumed in order.
+/// Inconsistencies from every thread are delivered through the same queue.
 #[derive(Debug)]
-pub struct Verifier<'a, T: TrieCursorFactory, H> {
-    trie_cursor_factory: &'a T,
+pub struct Verifier<'a, T: TrieCursorFactory + 'a, H> {
     hashed_cursor_factory: H,
     account: SingleVerifier<DepthFirstTrieIterator<T::AccountTrieCursor<'a>>>,
     hash_builder: crate::HashBuilder,
     last_account: Option<B256>,
-    outputs: std::collections::VecDeque<Result<Output, StateRootError>>,
-    pool: reth_tasks::WorkerPool,
+    roots_rx: crossbeam_channel::Receiver<(B256, B256)>,
+    roots: B256Map<B256>,
+    events_tx: crossbeam_channel::Sender<Result<Output, StateRootError>>,
+    events_rx: crossbeam_channel::Receiver<Result<Output, StateRootError>>,
+    outputs: VecDeque<Result<Output, StateRootError>>,
+    cancel: Option<crossbeam_channel::Sender<()>>,
+    background: Option<JoinHandle<()>>,
     complete: bool,
 }
 
 /// Defaults to the available CPU count, or one worker if it cannot be determined.
 pub fn default_storage_workers() -> usize {
-    std::thread::available_parallelism().map_or(1, usize::from)
+    thread::available_parallelism().map_or(1, usize::from)
 }
 
 const ACCOUNT_BATCH_SIZE: usize = 16_384;
-const QUEUE_CAPACITY: usize = 256;
 const ACCOUNT_UPDATE_THRESHOLD: usize = 1024;
 
 impl<'a, T, H> Verifier<'a, T, H>
 where
-    T: TrieCursorFactory + Sync,
-    H: HashedCursorFactory + Clone + Sync,
+    T: TrieCursorFactory + Clone + Send + Sync + 'static,
+    H: HashedCursorFactory + Clone + Send + Sync + 'static,
 {
-    /// Creates a verifier over a fixed database state. Background work is joined before each
-    /// iterator step returns, including on error or cancellation.
+    /// Starts continuous storage verification over a fixed database state. Factories must own
+    /// their snapshots so background work can continue between iterator calls. Dropping the
+    /// verifier cancels and joins all background work before returning.
     pub fn new(
         trie_cursor_factory: &'a T,
         hashed_cursor_factory: H,
     ) -> Result<Self, DatabaseError> {
+        let account = SingleVerifier::new(None, trie_cursor_factory.account_trie_cursor()?)?;
+        let trie = trie_cursor_factory.clone();
+        let hashed = hashed_cursor_factory.clone();
+        let (events_tx, events_rx) = crossbeam_channel::unbounded();
+        let (roots_tx, roots_rx) = crossbeam_channel::unbounded();
+        let (cancel_tx, cancel_rx) = crossbeam_channel::bounded::<()>(0);
+        let events = events_tx.clone();
+        let span = tracing::Span::current();
+        let background = thread::Builder::new()
+            .name("trie-lookahead".into())
+            .spawn(move || {
+                let _entered = span.enter();
+                run_verification(&events, &cancel_rx, || {
+                    let workers = default_storage_workers();
+                    let pool = reth_tasks::WorkerPool::new(workers, "trie-verify");
+                    // Only queued work is bounded; completed roots never wait for the account
+                    // thread.
+                    let (jobs_tx, jobs_rx) = crossbeam_channel::bounded(workers * 2);
+                    pool.in_place_scope(|scope| {
+                        for _ in 0..workers {
+                            let jobs = jobs_rx.clone();
+                            let span = tracing::Span::current();
+                            let (trie, hashed, events, roots, cancel) =
+                                (&trie, &hashed, &events, &roots_tx, &cancel_rx);
+                            scope.spawn(move |_| {
+                                let _entered = span.enter();
+                                run_verification(events, cancel, || {
+                                    storage_worker(trie, hashed, jobs, roots, events, cancel)
+                                });
+                            });
+                        }
+                        run_verification(&events, &cancel_rx, || {
+                            produce_accounts(&hashed, jobs_tx, &cancel_rx)
+                        });
+                    });
+                    Ok(())
+                });
+            })
+            .map_err(|error| DatabaseError::Other(error.to_string()))?;
         Ok(Self {
-            trie_cursor_factory,
             hashed_cursor_factory,
-            account: SingleVerifier::new(None, trie_cursor_factory.account_trie_cursor()?)?,
+            account,
             hash_builder: crate::HashBuilder::default().with_updates(true),
             last_account: None,
+            roots_rx,
+            roots: Default::default(),
+            events_tx,
+            events_rx,
             outputs: Default::default(),
-            pool: reth_tasks::WorkerPool::new(default_storage_workers(), "trie-verify"),
+            cancel: Some(cancel_tx),
+            background: Some(background),
             complete: false,
         })
     }
 
-    fn fill_batch(&mut self) -> Result<(), StateRootError> {
-        let (events_tx, events_rx) = crossbeam_channel::bounded(QUEUE_CAPACITY);
-        // Let the whole batch run ahead while the account thread waits for a large storage root.
-        let (accounts_tx, accounts_rx) = crossbeam_channel::bounded(ACCOUNT_BATCH_SIZE);
-        let trie = self.trie_cursor_factory;
-        let hashed = &self.hashed_cursor_factory;
-        let last = self.last_account;
-        let span = tracing::Span::current();
-        let account_verifier = &mut self.account;
-        let builder = &mut self.hash_builder;
-        let outputs = &mut self.outputs;
-        let last_account = &mut self.last_account;
-        let mut account_rlp = Vec::with_capacity(crate::TRIE_ACCOUNT_RLP_MAX_SIZE);
-
-        let complete = self.pool.in_place_scope(|jobs| {
-            std::thread::scope(|threads| {
-                let (cancel_tx, cancel_rx) = crossbeam_channel::bounded::<()>(0);
-                let producer_events = events_tx.clone();
-                let producer_cancel = cancel_rx;
-                let producer = threads.spawn(move || {
-                    let _entered = span.enter();
-                    produce_accounts(jobs, (trie, hashed), last, accounts_tx, producer_events, producer_cancel)
-                });
-                let result = (|| -> Result<(), StateRootError> {
-                    loop {
-                        crossbeam_channel::select! {
-                            recv(events_rx) -> event => {
-                                if let Ok(event) = event {
-                                    outputs.push_back(Ok(event?));
-                                }
-                            }
-                            recv(accounts_rx) -> pending => {
-                                let Ok(PendingAccount { address, account, root }) = pending else { break };
-                                let root = if let Some(root) = root {
-                                    loop {
-                                        crossbeam_channel::select! {
-                                            recv(events_rx) -> event => {
-                                                if let Ok(event) = event {
-                                                    outputs.push_back(Ok(event?));
-                                                }
-                                            }
-                                            recv(root) -> root => {
-                                                match root {
-                                                    Ok(root) => break root,
-                                                    Err(_) => {
-                                                        for event in events_rx.try_iter() {
-                                                            outputs.push_back(Ok(event?));
-                                                        }
-                                                        return Err(DatabaseError::Other(
-                                                            "Storage root worker disconnected".into(),
-                                                        ).into())
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    }
-                                } else {
-                                    alloy_consensus::EMPTY_ROOT_HASH
-                                };
-                                account_rlp.clear();
-                                account.into_trie_account(root).encode(&mut account_rlp);
-                                builder.add_leaf(Nibbles::unpack(address), &account_rlp);
-                                *last_account = Some(address);
-                                if builder.updates_len() < ACCOUNT_UPDATE_THRESHOLD {
-                                    continue
-                                }
-                                let (next_builder, updates) = std::mem::take(builder).split();
-                                *builder = next_builder.with_updates(true);
-                                // The account trie root is calculated but never persisted.
-                                let mut nodes = updates.into_iter()
-                                    .filter(|(path, _)| !path.is_empty())
-                                    .collect::<Vec<_>>();
-                                nodes.sort_unstable_by(|a, b| depth_first::cmp(&a.0, &b.0));
-                                let mut found = Vec::new();
-                                for (path, node) in nodes {
-                                    account_verifier.next(&mut found, path, node)?;
-                                    found.push(Output::Progress(path));
-                                }
-                                report_outputs(found, &events_tx, &events_rx, outputs)?;
-                            }
+    fn storage_root(&mut self, address: B256) -> Result<B256, StateRootError> {
+        if let Some(root) = self.roots.remove(&address) {
+            return Ok(root)
+        }
+        loop {
+            crossbeam_channel::select! {
+                recv(self.events_rx) -> event => {
+                    if let Ok(event) = event { self.outputs.push_back(Ok(event?)); }
+                }
+                recv(self.roots_rx) -> root => {
+                    let Ok((account, root)) = root else {
+                        for event in self.events_rx.try_iter() {
+                            self.outputs.push_back(Ok(event?));
                         }
-                    }
-                    for event in events_rx.try_iter() { outputs.push_back(Ok(event?)); }
-                    Ok(())
-                })();
-                // Disconnecting cancellation wakes blocked producers, including during unwinding.
-                drop(cancel_tx);
-                let produced = producer.join().unwrap_or_else(|panic| std::panic::resume_unwind(panic));
-                result?;
-                produced
-            })
-        })?;
-        self.complete = complete;
-        if self.complete {
-            self.hash_builder.root();
-            let (_, updates) = std::mem::take(&mut self.hash_builder).split();
-            let mut nodes =
-                updates.into_iter().filter(|(path, _)| !path.is_empty()).collect::<Vec<_>>();
-            nodes.sort_unstable_by(|a, b| depth_first::cmp(&a.0, &b.0));
-            let mut found = Vec::new();
-            for (path, node) in nodes {
-                self.account.next(&mut found, path, node)?;
+                        return Err(DatabaseError::Other("Storage root workers disconnected".into()).into())
+                    };
+                    if account == address { return Ok(root) }
+                    self.roots.insert(account, root);
+                }
             }
-            self.account.finalize(&mut found)?;
-            report_outputs(found, &events_tx, &events_rx, &mut self.outputs)?;
+        }
+    }
+
+    fn fill_batch(&mut self) -> Result<(), StateRootError> {
+        let hashed = self.hashed_cursor_factory.clone();
+        let mut cursor = hashed.hashed_account_cursor()?;
+        let mut next = if let Some(last) = self.last_account {
+            cursor.seek(last)?;
+            cursor.next()?
+        } else {
+            cursor.seek(B256::ZERO)?
+        };
+        let Some((first, _)) = next else { return self.finish() };
+        let mut storage = hashed.hashed_storage_cursor(first)?;
+        let mut account_rlp = Vec::with_capacity(crate::TRIE_ACCOUNT_RLP_MAX_SIZE);
+        for _ in 0..ACCOUNT_BATCH_SIZE {
+            let Some((address, account)) = next else { break };
+            for event in self.events_rx.try_iter() {
+                self.outputs.push_back(Ok(event?));
+            }
+            storage.set_hashed_address(address);
+            let root = if storage.is_storage_empty()? {
+                alloy_consensus::EMPTY_ROOT_HASH
+            } else {
+                self.storage_root(address)?
+            };
+            account_rlp.clear();
+            account.into_trie_account(root).encode(&mut account_rlp);
+            self.hash_builder.add_leaf(Nibbles::unpack(address), &account_rlp);
+            self.last_account = Some(address);
+            if self.hash_builder.updates_len() >= ACCOUNT_UPDATE_THRESHOLD {
+                self.verify_account_updates()?;
+            }
+            next = cursor.next()?;
+        }
+        if next.is_none() {
+            self.finish()?;
         }
         Ok(())
+    }
+
+    fn finish(&mut self) -> Result<(), StateRootError> {
+        // Joining before cancellation preserves errors from the producer's final cursor read.
+        self.join_background();
+        self.cancel.take();
+        self.complete = true;
+        self.hash_builder.root();
+        self.verify_account_updates()?;
+        let mut found = Vec::new();
+        self.account.finalize(&mut found)?;
+        report_outputs(found, &self.events_tx, &self.events_rx, &mut self.outputs)
+    }
+
+    fn verify_account_updates(&mut self) -> Result<(), StateRootError> {
+        let (builder, updates) = std::mem::take(&mut self.hash_builder).split();
+        self.hash_builder = builder.with_updates(true);
+        // The account trie root is calculated but never persisted.
+        let mut nodes =
+            updates.into_iter().filter(|(path, _)| !path.is_empty()).collect::<Vec<_>>();
+        nodes.sort_unstable_by(|a, b| depth_first::cmp(&a.0, &b.0));
+        let mut found = Vec::new();
+        for (path, node) in nodes {
+            self.account.next(&mut found, path, node)?;
+            found.push(Output::Progress(path));
+        }
+        report_outputs(found, &self.events_tx, &self.events_rx, &mut self.outputs)
+    }
+}
+
+impl<T: TrieCursorFactory, H> Verifier<'_, T, H> {
+    fn join_background(&mut self) {
+        if let Some(background) = self.background.take() &&
+            let Err(panic) = background.join() &&
+            !thread::panicking()
+        {
+            std::panic::resume_unwind(panic);
+        }
+    }
+}
+
+impl<T: TrieCursorFactory, H> Drop for Verifier<'_, T, H> {
+    fn drop(&mut self) {
+        self.cancel.take();
+        self.join_background();
     }
 }
 
 impl<T, H> Iterator for Verifier<'_, T, H>
 where
-    T: TrieCursorFactory + Sync,
-    H: HashedCursorFactory + Clone + Sync,
+    T: TrieCursorFactory + Clone + Send + Sync + 'static,
+    H: HashedCursorFactory + Clone + Send + Sync + 'static,
 {
     type Item = Result<Output, StateRootError>;
 
@@ -341,43 +390,22 @@ where
             }
             if let Err(error) = self.fill_batch() {
                 self.complete = true;
+                self.cancel.take();
+                self.join_background();
                 self.outputs.push_back(Err(error));
             }
         }
     }
 }
 
-#[derive(Debug)]
-struct PendingAccount {
-    address: B256,
-    account: reth_primitives_traits::Account,
-    // Empty storage is verified by the lookahead thread without scheduling a root job.
-    root: Option<crossbeam_channel::Receiver<B256>>,
-}
-
 fn report_outputs(
     found: Vec<Output>,
     sender: &crossbeam_channel::Sender<Result<Output, StateRootError>>,
     receiver: &crossbeam_channel::Receiver<Result<Output, StateRootError>>,
-    outputs: &mut std::collections::VecDeque<Result<Output, StateRootError>>,
+    outputs: &mut VecDeque<Result<Output, StateRootError>>,
 ) -> Result<(), StateRootError> {
     for output in found {
-        let mut event = Ok(output);
-        loop {
-            match sender.try_send(event) {
-                Ok(()) => break,
-                Err(crossbeam_channel::TrySendError::Full(returned)) => {
-                    event = returned;
-                    // The account thread also consumes the central queue and must not block on it.
-                    for queued in receiver.try_iter() {
-                        outputs.push_back(Ok(queued?));
-                    }
-                }
-                Err(crossbeam_channel::TrySendError::Disconnected(_)) => {
-                    unreachable!("account thread owns receiver")
-                }
-            }
-        }
+        assert!(sender.send(Ok(output)).is_ok(), "verifier owns the event receiver");
     }
     for queued in receiver.try_iter() {
         outputs.push_back(Ok(queued?));
@@ -396,68 +424,79 @@ fn send_verification<T>(
     }
 }
 
-fn produce_accounts<'scope, T, H>(
-    jobs: &rayon::Scope<'scope>,
-    factories: (&'scope T, &'scope H),
-    last: Option<B256>,
-    accounts: crossbeam_channel::Sender<PendingAccount>,
-    events: crossbeam_channel::Sender<Result<Output, StateRootError>>,
-    cancel: crossbeam_channel::Receiver<()>,
-) -> Result<bool, StateRootError>
-where
-    T: TrieCursorFactory + Sync,
-    H: HashedCursorFactory + Clone + Sync,
-{
-    let (trie, hashed) = factories;
+fn run_verification(
+    events: &crossbeam_channel::Sender<Result<Output, StateRootError>>,
+    cancel: &crossbeam_channel::Receiver<()>,
+    f: impl FnOnce() -> Result<(), StateRootError>,
+) {
+    let result = catch_unwind(AssertUnwindSafe(f)).unwrap_or_else(|_| {
+        Err(DatabaseError::Other("Trie verification thread panicked".into()).into())
+    });
+    if let Err(error) = result {
+        send_verification(events, Err(error), cancel);
+    }
+}
+
+fn produce_accounts<H: HashedCursorFactory>(
+    hashed: &H,
+    jobs: crossbeam_channel::Sender<B256>,
+    cancel: &crossbeam_channel::Receiver<()>,
+) -> Result<(), StateRootError> {
     let mut cursor = hashed.hashed_account_cursor()?;
-    let mut next = if let Some(last) = last {
-        cursor.seek(last)?;
-        cursor.next()?
-    } else {
-        cursor.seek(B256::ZERO)?
+    let mut next = cursor.seek(B256::ZERO)?;
+    while let Some((address, _)) = next {
+        if !send_verification(&jobs, address, cancel) {
+            return Ok(())
+        }
+        next = cursor.next()?;
+    }
+    Ok(())
+}
+
+fn storage_worker<T, H>(
+    trie: &T,
+    hashed: &H,
+    jobs: crossbeam_channel::Receiver<B256>,
+    roots: &crossbeam_channel::Sender<(B256, B256)>,
+    events: &crossbeam_channel::Sender<Result<Output, StateRootError>>,
+    cancel: &crossbeam_channel::Receiver<()>,
+) -> Result<(), StateRootError>
+where
+    T: TrieCursorFactory,
+    H: HashedCursorFactory + Clone,
+{
+    let next_address = || {
+        crossbeam_channel::select! {
+            recv(jobs) -> job => job,
+            recv(cancel) -> _ => Err(crossbeam_channel::RecvError),
+        }
     };
-    let Some((first, _)) = next else { return Ok(true) };
-    let mut storage = hashed.hashed_storage_cursor(first)?;
-    let mut stored = trie.storage_trie_cursor(first)?;
-    for _ in 0..ACCOUNT_BATCH_SIZE {
-        let Some((address, account)) = next else { return Ok(true) };
+    let Ok(mut address) = next_address() else { return Ok(()) };
+    let mut storage = hashed.hashed_storage_cursor(address)?;
+    let mut stored = trie.storage_trie_cursor(address)?;
+    loop {
         storage.set_hashed_address(address);
-        let root = if storage.is_storage_empty()? {
+        if storage.is_storage_empty()? {
             stored.set_hashed_address(address);
             let mut verifier = SingleVerifier::new(Some(address), &mut stored)?;
             let mut found = Vec::new();
             verifier.finalize(&mut found)?;
             for output in found {
-                if !send_verification(&events, Ok(output), &cancel) {
-                    return Ok(false)
+                if !send_verification(events, Ok(output), cancel) {
+                    return Ok(())
                 }
             }
-            None
         } else {
-            let (root_tx, root_rx) = crossbeam_channel::bounded(1);
-            let events = events.clone();
-            let cancel = cancel.clone();
-            let span = tracing::Span::current();
-            jobs.spawn(move |_| {
-                let _entered = span.enter();
-                match verify_storage(trie, hashed, address, &events, &cancel) {
-                    Ok(Some(root)) => {
-                        send_verification(&root_tx, root, &cancel);
-                    }
-                    Ok(None) => {}
-                    Err(error) => {
-                        send_verification(&events, Err(error), &cancel);
-                    }
-                }
-            });
-            Some(root_rx)
-        };
-        if !send_verification(&accounts, PendingAccount { address, account, root }, &cancel) {
-            return Ok(false)
+            let Some(root) = verify_storage(trie, hashed, address, events, cancel)? else {
+                return Ok(())
+            };
+            if !send_verification(roots, (address, root), cancel) {
+                return Ok(())
+            }
         }
-        next = cursor.next()?;
+        let Ok(next) = next_address() else { return Ok(()) };
+        address = next;
     }
-    Ok(next.is_none())
 }
 
 fn verify_storage<T, H>(

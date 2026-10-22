@@ -123,7 +123,7 @@ fn verify_only<N: ProviderNodeTypes>(tool: &DbTool<N>) -> eyre::Result<()> {
 fn do_verify_only<DB: Database, A: TrieTableAdapter>(db: &DB) -> eyre::Result<()> {
     // Create the verifier
     let cursors = VerifierCursorFactory::<_, A>::new(|| db.tx())?;
-    let verifier = Verifier::new(&cursors, &cursors)?;
+    let verifier = Verifier::new(&cursors, cursors.clone())?;
 
     let metrics = RepairTrieMetrics::new();
 
@@ -247,7 +247,7 @@ where
 
     // Open every read snapshot before any repairs are applied.
     let cursors = VerifierCursorFactory::<_, A>::new(|| db.tx())?;
-    let verifier = Verifier::new(&cursors, &cursors)?;
+    let verifier = Verifier::new(&cursors, cursors.clone())?;
 
     let metrics = RepairTrieMetrics::new();
 

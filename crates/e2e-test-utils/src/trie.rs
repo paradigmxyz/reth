@@ -64,7 +64,7 @@ where
             header.state_root()
         );
 
-        let verifier = Verifier::new(&cursors, &cursors)?;
+        let verifier = Verifier::new(&cursors, cursors.clone())?;
         let mut inconsistencies = Vec::new();
         for output in verifier {
             match output? {

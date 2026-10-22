@@ -10,7 +10,11 @@ use reth_trie::{
     hashed_cursor::HashedCursorFactory, trie_cursor::TrieCursorFactory,
     verify::default_storage_workers,
 };
-use std::marker::PhantomData;
+use std::{
+    marker::PhantomData,
+    sync::Arc,
+    thread::{self, ThreadId},
+};
 
 /// Cursor factories for [`reth_trie::verify::Verifier`] with independent, long-lived transactions
 /// for the account thread, lookahead thread, and each storage worker.
@@ -19,10 +23,22 @@ use std::marker::PhantomData;
 /// Storage cursors select the transaction belonging to the verifier pool's current worker.
 #[derive(Debug)]
 pub struct VerifierCursorFactory<TX, A> {
+    snapshots: Arc<VerifierSnapshots<TX>>,
+    adapter: PhantomData<A>,
+}
+
+#[derive(Debug)]
+struct VerifierSnapshots<TX> {
     account: TX,
     lookahead: TX,
     storage: Vec<TX>,
-    adapter: PhantomData<A>,
+    account_thread: ThreadId,
+}
+
+impl<TX, A> Clone for VerifierCursorFactory<TX, A> {
+    fn clone(&self) -> Self {
+        Self { snapshots: self.snapshots.clone(), adapter: PhantomData }
+    }
 }
 
 impl<TX: DbTx, A: TrieTableAdapter> VerifierCursorFactory<TX, A> {
@@ -39,14 +55,24 @@ impl<TX: DbTx, A: TrieTableAdapter> VerifierCursorFactory<TX, A> {
         let lookahead = open()?;
         let storage =
             (0..default_storage_workers()).map(|_| open()).collect::<Result<Vec<_>, _>>()?;
-        Ok(Self { account, lookahead, storage, adapter: PhantomData })
+        Ok(Self {
+            snapshots: Arc::new(VerifierSnapshots {
+                account,
+                lookahead,
+                storage,
+                account_thread: thread::current().id(),
+            }),
+            adapter: PhantomData,
+        })
     }
 
     fn storage_tx(&self) -> &TX {
-        if let Some(index) = rayon::current_thread_index() {
-            &self.storage[index]
+        if thread::current().id() == self.snapshots.account_thread {
+            &self.snapshots.account
+        } else if let Some(index) = rayon::current_thread_index() {
+            &self.snapshots.storage[index]
         } else {
-            &self.lookahead
+            &self.snapshots.lookahead
         }
     }
 }
@@ -62,9 +88,12 @@ impl<TX: DbTx, A: TrieTableAdapter> HashedCursorFactory for VerifierCursorFactor
         Self: 'a;
 
     fn hashed_account_cursor(&self) -> Result<Self::AccountCursor<'_>, DatabaseError> {
-        Ok(DatabaseHashedAccountCursor::new(
-            self.lookahead.cursor_read::<tables::HashedAccounts>()?,
-        ))
+        let tx = if thread::current().id() == self.snapshots.account_thread {
+            &self.snapshots.account
+        } else {
+            &self.snapshots.lookahead
+        };
+        Ok(DatabaseHashedAccountCursor::new(tx.cursor_read::<tables::HashedAccounts>()?))
     }
 
     fn hashed_storage_cursor(
@@ -89,7 +118,9 @@ impl<TX: DbTx, A: TrieTableAdapter> TrieCursorFactory for VerifierCursorFactory<
         Self: 'a;
 
     fn account_trie_cursor(&self) -> Result<Self::AccountTrieCursor<'_>, DatabaseError> {
-        Ok(DatabaseAccountTrieCursor::new(self.account.cursor_read::<A::AccountTrieTable>()?))
+        Ok(DatabaseAccountTrieCursor::new(
+            self.snapshots.account.cursor_read::<A::AccountTrieTable>()?,
+        ))
     }
 
     fn storage_trie_cursor(
