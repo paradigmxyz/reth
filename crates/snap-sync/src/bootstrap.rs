@@ -263,16 +263,13 @@ where
             let generation = self.session.target().copied().ok_or(SnapSyncError::NoAttempt)?;
             self.metrics.pivot_block.set(generation.target().number as f64);
             let handed_off = provider.is_trie_rebuild_started(write)?;
-            if !generation.is_canonical(&provider)? {
+            let canonical = generation.is_canonical(&provider)?;
+            if handed_off {
                 // Handed-off state may be partly rebuilt, so it cannot be repaired in place.
-                if handed_off {
+                if !canonical {
                     info!(target: "sync::snap", pivot = ?generation.target(), "Handed-off snap pivot was reorged, restarting");
                     return Ok(Step::Restart)
                 }
-                drop(provider);
-                return self.recover(write, head).await
-            }
-            if handed_off {
                 // The hand-off required every account, lists through the pivot and no repairs.
                 self.metrics.set_account_progress(None);
                 self.metrics.applied_block.set(generation.target().number as f64);
@@ -284,14 +281,19 @@ where
                 .ok_or(SnapSyncError::NoCatchUpProgress)?
                 .applied();
             let coverage = provider.account_coverage(write)?;
-            (applied, coverage, provider.snap_repairs(write)?.len())
+            let repairs = provider.snap_repairs(write)?.len();
+            // Recovery can wait for orphaned lists, so publish the stored progress first.
+            self.metrics.applied_block.set(applied.number as f64);
+            self.metrics.pending_repairs.set(repairs as f64);
+            if let Some(coverage) = coverage {
+                self.metrics.set_account_progress(coverage.next());
+            }
+            if !canonical {
+                drop(provider);
+                return self.recover(write, head).await
+            }
+            (applied, coverage, repairs)
         };
-        // Read back from the attempt on every pass, so a resumed or restarted run reports its own.
-        self.metrics.applied_block.set(applied.number as f64);
-        self.metrics.pending_repairs.set(repairs as f64);
-        if let Some(coverage) = coverage {
-            self.metrics.set_account_progress(coverage.next());
-        }
         // Repairs are fetched at the pivot, so pending ones still need it served.
         let complete = coverage.is_some_and(|c| c.is_complete()) && repairs == 0;
         // Complete state carried to its pivot needs no further lists, only its trie rebuilt, so
@@ -1466,9 +1468,20 @@ mod tests {
         let accounts = reorg_accounts();
         let factory = hashed_factory();
         let (attempt, orphaned, new) = reorged(&factory, [Vec::new(), Vec::new()]);
-        let (_, mut bootstrap) = scripted(&factory, [lists(1, &orphaned_lists(), false)], [5]);
+        let provider = factory.database_provider_rw().unwrap();
+        let write = provider.active_snap_write().unwrap().unwrap();
+        let mut repairs = StateRepairs::default();
+        repairs.insert_account(keccak256(STALE));
+        provider.schedule_snap_repairs(write, repairs).unwrap();
+        provider.commit().unwrap();
+        let (_, bootstrap) = scripted(&factory, [lists(1, &orphaned_lists(), false)], [5]);
+        let (snapshotter, mut bootstrap) = recorded(bootstrap);
         assert_eq!(bootstrap.run().await.unwrap(), SnapBootstrapOutcome::Stopped);
         assert_eq!(attempt_id(&factory), attempt);
+        let metrics = snapshot(&snapshotter);
+        assert_eq!(metrics["account_progress"], DebugValue::Gauge(1.0.into()));
+        assert_eq!(metrics["applied_block"], DebugValue::Gauge(4.0.into()));
+        assert_eq!(metrics["pending_repairs"], DebugValue::Gauge(1.0.into()));
 
         // A restarted node resumes the orphaned attempt, and another peer serves them.
         let responses = [
