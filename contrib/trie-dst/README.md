@@ -15,20 +15,20 @@ shared overlay manager.
 From the reth repository root:
 
 ```sh
-cargo build --locked -p reth-trie-dst --profile dst
-target/dst/reth-trie-dst '{"seed":42,"blocks":64,"datadir":"/tmp/trie-42"}' > /tmp/reth-trie-dst-42.log
+cargo build --locked -p reth-trie-dst --profile profiling
+target/profiling/reth-trie-dst '{"seed":42,"blocks":64,"datadir":"/tmp/trie-42"}' > /tmp/reth-trie-dst-42.log
 ```
 
 Prerequisites for native builds are reth's normal Rust/native build dependencies,
 including Clang for RocksDB's bindings. The crate belongs to the root workspace and uses its
-shared dependencies, `Cargo.lock`, and `dst` profile. That profile inherits
-`profiling` and enables debug assertions and overflow checks.
+shared dependencies and `Cargo.lock`.
 
 The executable accepts one optional JSON object:
 
 | Field | Default | Range |
 | --- | --- | --- |
 | `seed` | 0 | unsigned 64-bit integer |
+| `input` | generated from seed | explicit ordered block operations and stream seeds |
 | `datadir` | temporary directory | persistent database and journal directory; reuse to restart |
 | `blocks` | 64 | 1–1024 |
 | `updates` | 64 | 1–4096 per block |
@@ -126,7 +126,7 @@ the build tools.
 Cargo downloads, compiled targets, and the unstripped executable persist under
 `BEDROCK_DST_BUILD_CACHE` (Bedrock CI's workload cache), defaulting to
 `${XDG_CACHE_HOME:-$HOME/.cache}/reth-trie-dst`. Compilation uses sccache and mold
-with the `dst` profile. `BEDROCK_DST_SCCACHE_DIR` selects the compiler cache, defaulting
+with the `profiling` profile. `BEDROCK_DST_SCCACHE_DIR` selects the compiler cache, defaulting
 to the workload cache's `sccache` directory; `SCCACHE_CACHE_SIZE` defaults to `10G`.
 Preparation writes timings and cache paths to `RUN_DIR/cache-info.env` and
 compiler statistics to `RUN_DIR/sccache.txt`, which Bedrock CI displays and
@@ -198,3 +198,24 @@ CI's `duration` is the same host budget; `num_seeds` is a global cap, unlimited
 when blank. The workflow fetches the selected Reth revision. Preserve `RUN_DIR`
 and use the generic runner's `--prepared` option to reuse the exact inputs. For an actual recorded schedule, use Bedrock's replay command on the
 recorded run; rebuilding an image or changing the binary changes the World.
+
+## Fuzz explicit trie inputs
+
+With the accompanying Bedrock workload-input hooks, set `DST_CMD=fuzz` during
+preparation and execution. For example, dispatch the same CI workflow with
+`mode=fuzz`, `parallel_seeds=1`, and this workload URL. The workflow's
+`num_seeds` then caps fuzz executions. Each corpus entry is an `Input`: an
+ordered list of blocks, each with account/storage operations and a stream seed
+for batch composition and hints. Reth generates eight initial entries and
+performs typed mutations that can duplicate or drop blocks and change operations, values, slots,
+and stream seeds while preserving account prerequisites. The same input can
+also be supplied as `base_input` to the controller for replay.
+
+At a completed-block snapshot, the controller emits `trie/input/checked`,
+which gives Bedrock a pull point. A suffix input is injected at the next new
+block boundary; already journaled blocks are never replaced. The worker waits
+after its original input until Bedrock either injects a suffix or finalizes the
+run. Fuzz preparation builds a coverage-instrumented guest executable and
+keeps an uninstrumented executable beside the host controller for input hooks.
+The first scope is trie operation and scheduling-stream inputs on a linear
+chain; it does not mutate Reth code or the VM's recorded scheduling decisions.

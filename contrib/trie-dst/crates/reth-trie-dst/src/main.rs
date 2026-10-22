@@ -1,12 +1,14 @@
 //! Bounded workload for the sparse-trie, proof, overlay and persistence pipeline.
 
+mod input;
 mod model;
 
 use alloy_consensus::Header;
 use alloy_primitives::{keccak256, Address, B256, U256};
 use eyre::{ensure, Context, Result};
+use input::{BlockInput, Input};
 use metrics_util::debugging::{DebugValue, DebuggingRecorder, Snapshotter};
-use model::{apply, generate, root, storage_root, Model, Operation};
+use model::{apply, root, storage_root, Model};
 use rand::{rngs::StdRng, seq::SliceRandom, Rng, SeedableRng};
 use reth_chain_state::ExecutedBlock;
 use reth_chainspec::ChainSpec;
@@ -53,13 +55,16 @@ type Node = MockNodeTypesWithDB<Arc<DatabaseEnv>>;
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 struct JournalBlock {
     number: u64,
-    operations: Vec<Operation>,
+    input: BlockInput,
 }
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 struct Config {
     seed: u64,
+    input: Option<Input>,
+    /// An atomic mailbox for snapshot continuations, applied before the next new block.
+    input_file: Option<PathBuf>,
     datadir: Option<PathBuf>,
     blocks: u64,
     updates: usize,
@@ -75,6 +80,8 @@ impl Default for Config {
         let tree = TreeConfig::default();
         Self {
             seed: 0,
+            input: None,
+            input_file: None,
             datadir: None,
             blocks: 64,
             updates: 64,
@@ -115,8 +122,8 @@ fn verify(factory: &ProviderFactory<Node>, state: &Model, tip: u64, state_tip: u
         let slots = (0..64).map(|slot| B256::from(U256::from(slot))).collect::<Vec<_>>();
         for slot in &slots {
             ensure!(
-                view.storage(*address, *slot)?.unwrap_or_default() ==
-                    entry.storage.get(&U256::from_be_bytes(slot.0)).copied().unwrap_or_default(),
+                view.storage(*address, *slot)?.unwrap_or_default()
+                    == entry.storage.get(&U256::from_be_bytes(slot.0)).copied().unwrap_or_default(),
                 "plain storage {address}/{slot} at {tip}"
             );
         }
@@ -169,9 +176,9 @@ fn metric_counts(snapshotter: &Snapshotter) -> BTreeMap<String, u64> {
         .into_iter()
         .filter_map(|(key, _, _, value)| {
             let name = key.key().name().to_string();
-            if !(name.contains("tree.root") ||
-                name.contains("state_trie_overlay") ||
-                name.contains("storage.overlay"))
+            if !(name.contains("tree.root")
+                || name.contains("state_trie_overlay")
+                || name.contains("storage.overlay"))
             {
                 return None;
             }
@@ -200,8 +207,8 @@ fn run(config: &Config, snapshotter: &Snapshotter) -> Result<()> {
     ensure!(backpressure > config.persistence_threshold, "persistence threshold is too large");
     ensure!(buffer <= config.persistence_threshold, "buffer must not exceed persistence threshold");
     ensure!(
-        masking == 0 ||
-            matches!(masking.checked_add(buffer), Some(window) if window < config.persistence_threshold),
+        masking == 0
+            || matches!(masking.checked_add(buffer), Some(window) if window < config.persistence_threshold),
         "masking blocks + buffer must be less than persistence threshold"
     );
     // Clear the default window before applying smaller thresholds: TreeConfig checks each setter.
@@ -232,6 +239,30 @@ fn run(config: &Config, snapshotter: &Snapshotter) -> Result<()> {
     let temporary = config.datadir.is_none().then(tempfile::tempdir).transpose()?;
     let datadir = config.datadir.as_deref().unwrap_or_else(|| temporary.as_ref().unwrap().path());
     fs::create_dir_all(datadir)?;
+    let input = config
+        .input
+        .clone()
+        .unwrap_or_else(|| Input::generate(config.seed, config.blocks, config.updates));
+    input.validate()?;
+    let mut total_blocks = input.blocks.len() as u64;
+    let overrides_path = datadir.join("input-overrides.json");
+    #[derive(Default, Serialize, Deserialize)]
+    struct Overrides {
+        applied: u64,
+        blocks: BTreeMap<u64, BlockInput>,
+        total_blocks: u64,
+    }
+    #[derive(Deserialize)]
+    struct Injection {
+        id: u64,
+        input: Input,
+    }
+    let mut overrides: Overrides = if overrides_path.exists() {
+        serde_json::from_slice(&fs::read(&overrides_path)?)?
+    } else {
+        Overrides::default()
+    };
+    total_blocks = total_blocks.max(overrides.total_blocks);
     let journal_path = datadir.join("blocks.jsonl");
     let mut journal = BTreeMap::<u64, JournalBlock>::new();
     if journal_path.exists() {
@@ -244,7 +275,7 @@ fn run(config: &Config, snapshotter: &Snapshotter) -> Result<()> {
                 Err(error) if error.is_eof() => continue,
                 Err(error) => return Err(error.into()),
             };
-            ensure!((1..=config.blocks).contains(&block.number), "journal block out of range");
+            ensure!((1..=total_blocks).contains(&block.number), "journal block out of range");
             if let Some(previous) = journal.insert(block.number, block.clone()) {
                 ensure!(previous == block, "conflicting journal block {}", block.number);
             }
@@ -298,7 +329,7 @@ fn run(config: &Config, snapshotter: &Snapshotter) -> Result<()> {
     for number in 1..=base {
         let block =
             journal.get(&number).ok_or_else(|| eyre::eyre!("missing journal block {number}"))?;
-        apply(&mut state, number, &block.operations);
+        apply(&mut state, number, &block.input.operations);
     }
     if base > 0 {
         verify(&factory, &state, base, base)?;
@@ -333,11 +364,35 @@ fn run(config: &Config, snapshotter: &Snapshotter) -> Result<()> {
     let mut pending_save = None;
     let mut prune_requested = false;
     let mut shutdown = false;
+    let mut waiting = false;
     loop {
         let head = base + blocks.len() as u64;
+        if journal.range((head + 1)..).next().is_none()
+            && let Some(path) = config.input_file.as_ref().filter(|p| p.exists())
+        {
+            let injection: Injection = serde_json::from_slice(&fs::read(path)?)?;
+            if injection.id != overrides.applied {
+                injection.input.validate()?;
+                let count = injection.input.blocks.len().min((1024 - head) as usize);
+                ensure!(count > 0, "continuation exceeds the 1024-block limit");
+                overrides.blocks.retain(|n, _| *n < (head + 1));
+                for (i, block) in injection.input.blocks.into_iter().take(count).enumerate() {
+                    overrides.blocks.insert((head + 1) + i as u64, block);
+                }
+                total_blocks = total_blocks.max(head + count as u64);
+                overrides.total_blocks = total_blocks;
+                overrides.applied = injection.id;
+                shutdown = false;
+                waiting = false;
+                let tmp = overrides_path.with_extension("tmp");
+                fs::write(&tmp, serde_json::to_vec(&overrides)?)?;
+                fs::rename(tmp, &overrides_path)?;
+                println!("{}", json!({"input": "injected", "block": (head + 1), "blocks": count}));
+            }
+        }
         if let Some((next_db, next_state)) = pending_save {
-            let result = if shutdown ||
-                head.saturating_sub(state_tip).saturating_sub(buffer) >= backpressure
+            let result = if shutdown
+                || head.saturating_sub(state_tip).saturating_sub(buffer) >= backpressure
             {
                 Some(ack_rx.recv_timeout(timeout)?)
             } else {
@@ -384,9 +439,9 @@ fn run(config: &Config, snapshotter: &Snapshotter) -> Result<()> {
         if pending_save.is_none() {
             // Match EngineApiTreeHandler::get_save_blocks_input's Threshold and Head targets.
             let next_db = if shutdown { head } else { head.saturating_sub(buffer) };
-            if shutdown ||
-                (head.saturating_sub(state_tip) > config.persistence_threshold &&
-                    next_db > db_tip)
+            if shutdown
+                || (head.saturating_sub(state_tip) > config.persistence_threshold
+                    && next_db > db_tip)
             {
                 let next_state =
                     if shutdown { head } else { next_db.saturating_sub(masking).max(state_tip) };
@@ -410,8 +465,18 @@ fn run(config: &Config, snapshotter: &Snapshotter) -> Result<()> {
                 }
             }
         }
-        if head == config.blocks {
+        if head == total_blocks {
             if shutdown {
+                if let Some(path) = &config.input_file
+                    && !path.with_extension("finish").exists()
+                {
+                    if !waiting {
+                        println!("{}", json!({"input": "waiting", "head": head}));
+                        waiting = true;
+                    }
+                    std::thread::sleep(Duration::from_millis(10));
+                    continue;
+                }
                 break;
             }
             // Let the last block trigger normal threshold persistence before shutdown.
@@ -419,20 +484,33 @@ fn run(config: &Config, snapshotter: &Snapshotter) -> Result<()> {
             continue;
         }
         let number = head + 1;
-        let operations = if let Some(block) = journal.get(&number) {
-            block.operations.clone()
+        let block_input = if let Some(block) = journal.get(&number) {
+            block.input.clone()
         } else {
-            // New input is journaled before it can reach persistence. Replayed input is read,
-            // never regenerated, so a completed commit does not depend on its acknowledgement.
-            let mut rng = StdRng::seed_from_u64(config.seed.wrapping_add(number));
-            let operations = generate(&mut rng, &state, config.updates);
-            let record =
-                serde_json::to_vec(&JournalBlock { number, operations: operations.clone() })?;
+            let block = overrides
+                .blocks
+                .get(&number)
+                .unwrap_or_else(|| &input.blocks[number as usize - 1])
+                .clone();
+            let record = serde_json::to_vec(&JournalBlock { number, input: block.clone() })?;
             journal_file.write_all(b"\n")?;
             journal_file.write_all(&record)?;
             journal_file.write_all(b"\n")?;
-            operations
+            block
         };
+        let operations = block_input.operations;
+        let mut accounts = state.keys().copied().collect::<BTreeSet<_>>();
+        for op in &operations {
+            match op {
+                model::Operation::Account { address, .. } => {
+                    accounts.insert(*address);
+                }
+                model::Operation::Storage { address, .. } => ensure!(
+                    accounts.contains(address),
+                    "storage before account creation: {address}"
+                ),
+            }
+        }
         let (bundle, updates) = apply(&mut state, number, &operations);
         // Print before entering production tasks so a panic still leaves the input on disk.
         println!(
@@ -466,7 +544,7 @@ fn run(config: &Config, snapshotter: &Snapshotter) -> Result<()> {
         );
         let stream = handle.take_hashed_update_stream();
         let hints = handle.take_hint_stream();
-        let mut rng = StdRng::seed_from_u64(config.seed.wrapping_add(number).rotate_left(32));
+        let mut rng = StdRng::seed_from_u64(block_input.stream_seed);
         let written = updates
             .iter()
             .flat_map(|update| {
@@ -598,7 +676,7 @@ fn run(config: &Config, snapshotter: &Snapshotter) -> Result<()> {
     let metrics = metric_counts(snapshotter);
     println!(
         "{}",
-        json!({"completed": true, "seed": config.seed, "blocks": config.blocks,
+        json!({"completed": true, "seed": config.seed, "blocks": total_blocks,
         "commits": commits, "partial_commits": partial_commits,
         "update_batches": update_batches, "hint_batches": hint_batches,
         "metrics": metrics})
@@ -607,11 +685,57 @@ fn run(config: &Config, snapshotter: &Snapshotter) -> Result<()> {
 }
 
 fn main() -> Result<()> {
-    let config = std::env::args()
-        .nth(1)
-        .map(|value| serde_json::from_str::<Config>(&value))
-        .transpose()?
-        .unwrap_or_default();
+    let mut argv = std::env::args().skip(1);
+    let command = argv.next();
+    let text = match command.as_deref() {
+        Some("generate-input" | "generate-suffix" | "mutate-input" | "validate-input") => {
+            let value: serde_json::Value = serde_json::from_reader(std::io::stdin())?;
+            let input = match command.as_deref() {
+                Some("generate-input" | "generate-suffix") => {
+                    let config: Config = serde_json::from_value(value)?;
+                    ensure!(
+                        (1..=1024).contains(&config.blocks) && (1..=4096).contains(&config.updates),
+                        "invalid input size"
+                    );
+                    let mut input = Input::generate(config.seed, config.blocks, config.updates);
+                    if command.as_deref() == Some("generate-suffix") {
+                        let accounts = (1..=16u64)
+                            .map(|a| model::Operation::Account {
+                                address: Address::from_word(B256::from(U256::from(a))),
+                                account: reth_primitives_traits::Account {
+                                    nonce: 1,
+                                    ..Default::default()
+                                },
+                            })
+                            .collect::<Vec<_>>();
+                        input.blocks[0].operations.splice(0..0, accounts);
+                    }
+                    input
+                }
+                _ => {
+                    let mut input: Input = serde_json::from_value(value["input"].clone())?;
+                    if command.as_deref() == Some("mutate-input") {
+                        input.mutate(
+                            value["seed"]
+                                .as_u64()
+                                .ok_or_else(|| eyre::eyre!("missing mutation seed"))?,
+                        )?;
+                    }
+                    input
+                }
+            };
+            input.validate()?;
+            println!("{}", serde_json::to_string(&input)?);
+            return Ok(());
+        }
+        Some("-") => std::io::read_to_string(std::io::stdin())?,
+        Some(text) => text.to_string(),
+        None => "{}".into(),
+    };
+    let config: Config = serde_json::from_str(&text)?;
+    if let Some(input) = &config.input {
+        input.validate()?;
+    }
     let recorder = DebuggingRecorder::new();
     let snapshotter = recorder.snapshotter();
     recorder.install()?;

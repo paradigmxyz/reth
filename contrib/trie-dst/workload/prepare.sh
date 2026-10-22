@@ -39,6 +39,7 @@ DOCKERFILE
   --mount "type=bind,src=$BEDROCK_ROOT/guest,dst=/bedrock-guest,readonly" \
   -e CARGO_BUILD_JOBS="${CARGO_BUILD_JOBS:-6}" \
   -e SCCACHE_CACHE_SIZE="${SCCACHE_CACHE_SIZE:-10G}" \
+  -e DST_CMD="${DST_CMD:-campaign}" \
   -w /workspace bedrock/reth-trie-dst-builder:rust1.96-sccache0.14 bash -seu <<'BUILD'
 export HOME=/cache CARGO_HOME=/cache/cargo CARGO_TARGET_DIR=/cache/target/reth-trie-dst
 export SCCACHE_DIR=/cache/sccache RUSTC_WRAPPER=sccache CARGO_INCREMENTAL=0
@@ -47,10 +48,27 @@ mkdir -p "$CARGO_HOME" "$CARGO_TARGET_DIR" "$SCCACHE_DIR"
 touch "$CARGO_HOME" "$CARGO_TARGET_DIR"
 sccache --zero-stats >/dev/null
 trap 'sccache --show-stats > /run-info/sccache.txt; cat /run-info/sccache.txt' EXIT
-cargo build --locked -p reth-trie-dst --profile dst
+cargo build --locked -p reth-trie-dst --profile profiling
 printf 'cargo_secs=%s\n' "$SECONDS" >> /run-info/cache-info.env
+objcopy --strip-debug "$CARGO_TARGET_DIR/profiling/reth-trie-dst" /run-info/reth-trie-dst
+if [ "${DST_CMD:-campaign}" = fuzz ]; then
+  clang -O2 -fPIC -c /bedrock-guest/libfeedback.c -o /out/libfeedback.o
+  clang -O2 -fPIC -c /bedrock-guest/libpcguard.c -o /out/libpcguard.o
+  ar rcs /out/rt.a /out/libfeedback.o /out/libpcguard.o
+  export RUSTFLAGS="$RUSTFLAGS -Cpasses=sancov-module -Cllvm-args=-sanitizer-coverage-level=3 -Cllvm-args=-sanitizer-coverage-trace-pc-guard -C link-arg=/out/rt.a -C link-arg=-Wl,--build-id=sha1"
+  cargo build --locked -p reth-trie-dst --profile profiling
+  nm --defined-only "$CARGO_TARGET_DIR/profiling/reth-trie-dst" | grep -qw __sanitizer_cov_trace_pc_guard_init
+  size=$(readelf -SW "$CARGO_TARGET_DIR/profiling/reth-trie-dst" | sed -n 's/.*__sancov_guards *[A-Z_]* *[0-9a-f]* [0-9a-f]* \([0-9a-f]*\).*/\1/p')
+  test -n "$size"
+  mkdir -p /out/cov-smoke
+  BEDROCK_COVERAGE_DIR=/out/cov-smoke "$CARGO_TARGET_DIR/profiling/reth-trie-dst" --version >/dev/null 2>&1 || true
+  measured=$(stat -c %s /out/cov-smoke/*-cov-*)
+  expected=$(( ( (0x$size / 4) + 4095 ) / 4096 * 4096 ))
+  test "$measured" = "$expected" && test "$expected" -gt 0 && test "$expected" -le $((64 << 20))
+  rm -rf /out/cov-smoke
+fi
 # Keep symbols in the cached executable for debugging recorded failures.
-objcopy --strip-debug "$CARGO_TARGET_DIR/dst/reth-trie-dst" /out/reth-trie-dst
+objcopy --strip-debug "$CARGO_TARGET_DIR/profiling/reth-trie-dst" /out/reth-trie-dst
 sccache gcc -O2 -I /bedrock-guest -x c - -o /out/bedrock-ready <<'C'
 #include "libvmcall.h"
 int main(void) {
@@ -59,6 +77,7 @@ int main(void) {
 }
 C
 BUILD
+rm -f "$context/libfeedback.o" "$context/libpcguard.o" "$context/rt.a"
 cp "$root/workload/controller.py" "$context/controller.py"
 "${docker_cmd[@]}" build -f - -t bedrock/reth-trie-dst:latest "$context" <<'DOCKERFILE'
 FROM debian:trixie-slim

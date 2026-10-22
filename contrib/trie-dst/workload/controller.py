@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Bedrock workload hooks; native state generation and checking live in Rust."""
 
+import hashlib
 import json
 import os
 import random
@@ -48,14 +49,14 @@ def arguments(values):
     return result
 
 
-def assertion(ok, detail):
+def assertion(ok, detail, signature="trie/run/checked", kind="Always"):
     ASSERTIONS.parent.mkdir(parents=True, exist_ok=True)
     with ASSERTIONS.open("a") as output:
         record = {"condition": {"Bool": ok}, "result": ok,
-                  "message": f"E1/reth-trie-dst: {detail}",
+                  "message": f"{signature}: {detail}",
                   "location": {"file": "controller.py", "line": 35, "column": 1},
                   "timestamp_unix_nano": time.time_ns()}
-        output.write(json.dumps({"Always": record}) + "\n")
+        output.write(json.dumps({kind: record}) + "\n")
 
 
 def collect(destination, progress=False):
@@ -80,24 +81,39 @@ def collect(destination, progress=False):
         cursor.write_text(json.dumps(offsets))
 
 
+def native(hook, request):
+    binary = Path(__file__).with_name("reth-trie-dst")
+    result = subprocess.run([str(binary), hook], input=json.dumps(request), text=True,
+                            stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True)
+    return json.loads(result.stdout)
+
+
 def worker(config):
     process = None
     killed = 0
     recovered = 0
     plan = list(config["kill_blocks"])
-    deadline = time.monotonic() + max(1, config["run_secs"] - 5)
+    deadline = time.monotonic() + config["workload"]["timeout_secs"]
+    waiting = False
     try:
-        workload = config["workload"] | {"datadir": str(STATE / "data")}
+        workload = config["workload"] | {"datadir": str(STATE / "data"),
+                                         "input_file": str(STATE / "pending-input.json")}
+        (STATE / "config.json").write_text(json.dumps(config))
         with (STATE / "run.log").open("wb") as output:
             while True:
+                completed = False
                 process = subprocess.Popen(
                     ["/usr/local/bin/thread-fuzz", "/usr/local/bin/reth-trie-dst",
-                     json.dumps(workload)], stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+                     "-"], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+                process.stdin.write(json.dumps(workload).encode())
+                process.stdin.close()
                 pending = b""
                 planned = False
                 while True:
                     remaining = deadline - time.monotonic()
-                    if remaining <= 0:
+                    if waiting:
+                        remaining = 1
+                    elif remaining <= 0:
                         raise TimeoutError("workload recovery campaign timed out")
                     if not select.select([process.stdout], [], [], min(remaining, 0.1))[0]:
                         continue
@@ -115,9 +131,23 @@ def worker(config):
                             continue  # Rust errors/backtraces share stdout with JSON events.
                         if not isinstance(event, dict):
                             continue
+                        deadline = time.monotonic() + config["workload"]["timeout_secs"]
+                        if event.get("input") == "waiting":
+                            waiting = True
+                            assertion(True, json.dumps(event), "trie/input/checked", "Sometimes")
+                        if event.get("input") == "injected":
+                            waiting = False
+                        if event.get("completed"):
+                            completed = True
+                            assertion(True, json.dumps(event), "trie/input/completed", "Sometimes")
+                        if event.get("input") == "injected":
+                            assertion(True, json.dumps(event), "trie/input/injected", "Sometimes")
+                        if event.get("persistence") == "complete":
+                            assertion(True, json.dumps(event), "trie/persistence/committed", "Sometimes")
                         if event.get("recovery") == "complete":
                             recovered += 1
-                        if not planned and plan and event.get("block", 0) >= plan[0]:
+                            assertion(True, json.dumps(event), "trie/recovery/checked", "Sometimes")
+                        if not planned and plan and "operations" in event and event.get("block", 0) >= plan[0]:
                             process.send_signal(signal.SIGKILL)
                             target = plan.pop(0)
                             killed += 1
@@ -133,6 +163,8 @@ def worker(config):
                     continue
                 if code != 0:
                     raise RuntimeError(f"unexpected worker exit={code}")
+                if not completed:
+                    raise RuntimeError("worker exited without completing its input")
                 if plan:
                     raise RuntimeError(f"nemesis did not fire at blocks {plan}")
                 break
@@ -153,8 +185,22 @@ def worker(config):
 
 def main():
     hook = sys.argv[1]
-    request = json.load(sys.stdin) if len(sys.argv) > 2 and sys.argv[2] == "-" else (
-        json.loads(sys.argv[2]) if len(sys.argv) > 2 else None)
+    value = sys.argv[2] if len(sys.argv) > 2 else None
+    request = (json.load(sys.stdin) if value == "-" else
+               json.loads(Path(value[1:]).read_text()) if value and value.startswith("@") else
+               json.loads(value) if value else None)
+    if hook in ("seed-inputs", "suffix-seed", "mutate-input"):
+        args = arguments(request["args"])
+        args.pop("crashes")
+        if hook == "mutate-input":
+            return json.dumps(native("mutate-input", {"input": json.loads(request["input"]),
+                                                       "seed": request["seed"]}))
+        if hook == "suffix-seed":
+            # Each block establishes its own accounts, so it also runs at a deep snapshot.
+            args.update(blocks=4, updates=min(4080, args["updates"]))
+        inputs = [json.dumps(native("generate-suffix" if hook == "suffix-seed" else "generate-input", args | {"seed": seed}))
+                  for seed in range(1 if hook == "suffix-seed" else 8)]
+        return inputs[0] if hook == "suffix-seed" else inputs
     if hook == "parse-args":
         values = json.loads(Path(request["config_file"]).read_text()) if request.get("config_file") else {}
         for pair in request.get("args", []):
@@ -165,12 +211,20 @@ def main():
         if request.get("redraw") or request.get("drop"):
             raise ValueError("this workload has no mid-run semantic decisions to redraw or drop")
         decisions = request.get("decisions")
+        if decisions is not None and request.get("base_input") is not None:
+            raise ValueError("base_input cannot replace recorded decisions")
         if decisions is None:
             args = arguments(request["args"])
             crashes = args.pop("crashes")
+            supplied = request.get("base_input")
+            if supplied is not None:
+                input_value = native("validate-input", {"input": json.loads(supplied)})
+            else:
+                input_value = native("generate-input", args | {"seed": request["seed"]})
+            args["blocks"] = len(input_value["blocks"])
             kill_blocks = sorted(random.Random(request["seed"]).sample(
-                range(1, args["blocks"] + 1), crashes))
-            config = {"workload": args | {"seed": request["seed"]},
+                range(1, args["blocks"] + 1), min(crashes, args["blocks"])))
+            config = {"workload": args | {"seed": request["seed"], "input": input_value},
                       "kill_blocks": kill_blocks, "run_secs": request["campaign"]["run_secs"]}
             decisions = {"config": config, "seed": request["seed"],
                          "rng_seed": request["seed"], "preempt": request["preempt"]}
@@ -189,15 +243,32 @@ def main():
         STATE.mkdir(parents=True, exist_ok=True)
         if (STATE / "worker.pid").exists():
             raise RuntimeError("workload already started")
+        config_path = STATE / "config.json"
+        config_path.write_text(json.dumps(request))
         with (STATE / "controller.log").open("w") as output:
-            process = subprocess.Popen([sys.executable, __file__, "worker", json.dumps(request)],
+            process = subprocess.Popen([sys.executable, __file__, "worker", "@" + str(config_path)],
                                        stdout=output, stderr=subprocess.STDOUT, start_new_session=True)
         (STATE / "worker.pid").write_text(str(process.pid))
     elif hook == "worker":
         worker(request)
+    elif hook == "set-input":
+        if (STATE / "done.json").exists():
+            raise RuntimeError("input injection reached an already completed workload")
+        pending = STATE / "pending-input.json"
+        tmp = pending.with_suffix(".tmp")
+        payload = json.dumps(request, sort_keys=True)
+        tmp.write_text(json.dumps({"id": int.from_bytes(hashlib.sha256(payload.encode()).digest()[:8], "big"),
+                                   "input": request}))
+        tmp.replace(pending)
+    elif hook == "merge-assertions":
+        collect(Path("/bedrock/out/assertions.jsonl"))
     elif hook == "progress":
         collect(Path("/bedrock/out/progress.jsonl"), progress=True)
     elif hook == "finalize":
+        (STATE / "pending-input.finish").touch()
+        deadline = time.monotonic() + 5
+        while not (STATE / "done.json").exists() and time.monotonic() < deadline:
+            time.sleep(0.01)
         if not (STATE / "done.json").exists():
             pid = STATE / "worker.pid"
             if pid.exists():
@@ -209,7 +280,7 @@ def main():
             assertion(False, "workload incomplete; " + (log.read_text()[-12000:] if log.exists() else "never started"))
         out = Path("/bedrock/out")
         out.mkdir(parents=True, exist_ok=True)
-        for name in ["run.log", "controller.log", "done.json", "data/blocks.jsonl"]:
+        for name in ["run.log", "controller.log", "done.json", "data/blocks.jsonl", "data/input-overrides.json", "pending-input.json", "config.json"]:
             if (STATE / name).exists():
                 shutil.copyfile(STATE / name, out / ("reth-trie-dst-" + Path(name).name))
         collect(out / "assertions.jsonl")
