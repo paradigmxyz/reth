@@ -81,7 +81,7 @@ use reth_rpc_builder::config::RethRpcServerConfig;
 use reth_rpc_layer::JwtSecret;
 use reth_stages::{
     sets::DefaultStages,
-    stages::{EraImportSource, MerkleStage},
+    stages::{EraImportSource, EraStage, MerkleStage},
     MetricEvent, PipelineBuilder, PipelineTarget, StageId, StageSet,
 };
 use reth_static_file::{blocks_per_file_for_prune_distance, StaticFileProducer, StaticFileSegment};
@@ -609,6 +609,11 @@ where
                     None,
                 )
                 .builder()
+                // Recovery only moves the ERA checkpoint; it does not need an import source.
+                .add_before(
+                    EraStage::new(None::<EraImportSource>, self.toml_config().stages.etl.clone()),
+                    StageId::Headers,
+                )
                 .disable_all(disabled_stages);
 
                 if walk_all_changed_branch_children {

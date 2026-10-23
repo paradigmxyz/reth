@@ -17,10 +17,10 @@ use reth_node_core::{
 use reth_node_ethereum::node::{EthereumAddOns, EthereumNode};
 use reth_provider::{
     providers::ProviderNodeTypes, DBProvider, DatabaseProviderFactory, MetadataProvider,
-    MetadataWriter, PipelineUnwind, ProviderFactory, StageCheckpointReader,
+    MetadataWriter, PipelineUnwind, ProviderFactory, StageCheckpointReader, StageCheckpointWriter,
 };
 use reth_rpc_builder::Identity;
-use reth_stages_types::StageId;
+use reth_stages_types::{StageCheckpoint, StageId};
 use reth_tasks::Runtime;
 use tempfile::{tempdir, TempDir};
 
@@ -40,6 +40,12 @@ impl<N: ProviderNodeTypes, C> BackfillSyncBuilder<N, C> for RecordingBackfill {
     fn build(self, ctx: BackfillContext<N, C>) -> eyre::Result<Self::Backfill> {
         self.calls.lock().unwrap().push("build");
         assert_eq!(ctx.provider_factory().provider()?.pipeline_unwind()?, None);
+        if self.pending_unwind {
+            assert_eq!(
+                ctx.provider_factory().get_stage_checkpoint(StageId::Era)?,
+                Some(StageCheckpoint::new(0))
+            );
+        }
         PipelineBackfill.build(ctx)
     }
 
@@ -54,9 +60,10 @@ impl<N: ProviderNodeTypes, C> BackfillSyncBuilder<N, C> for RecordingBackfill {
             let provider = provider_factory.database_provider_rw()?;
             provider.write_pipeline_unwind(Some(&PipelineUnwind {
                 target: 0,
-                stages: vec!["Execution".into()],
+                stages: vec!["Era".into(), "Execution".into()],
                 bad_block: None,
             }))?;
+            provider.save_stage_checkpoint(StageId::Era, StageCheckpoint::new(10))?;
             provider.commit()?;
         }
         Ok(())
