@@ -136,11 +136,11 @@ impl ConfigureEvm for CustomEvmConfig {
         Self { inner, executor_factory }
     }
 
-    fn with_precompile_cache_disabled(self, disabled: bool) -> Self
+    fn with_precompile_cache_enabled(self, enabled: bool) -> Self
     where
         Self: Sized,
     {
-        let inner = self.inner.with_precompile_cache_disabled(disabled);
+        let inner = self.inner.with_precompile_cache_enabled(enabled);
         let executor_factory = CustomBlockExecutorFactory::new(inner.executor_factory.clone());
         Self { inner, executor_factory }
     }

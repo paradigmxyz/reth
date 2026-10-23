@@ -331,11 +331,8 @@ where
         overlay_manager: OverlayManager<N>,
         runtime: reth_tasks::Runtime,
     ) -> Self {
-        let evm_config = if config.precompile_cache_disabled() {
-            evm_config.with_precompile_cache_disabled(true)
-        } else {
-            evm_config
-        };
+        let evm_config =
+            evm_config.with_precompile_cache_enabled(!config.precompile_cache_disabled());
         let payload_processor = PayloadProcessor::new(runtime.clone(), evm_config.clone(), &config);
         Self {
             provider,
