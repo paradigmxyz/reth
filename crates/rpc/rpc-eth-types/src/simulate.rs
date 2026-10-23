@@ -14,7 +14,7 @@ use alloy_rpc_types_eth::{
     state::StateOverride,
     BlockId, BlockOverrides, BlockTransactionsKind,
 };
-use evm2::{precompiles::MovePrecompileError, EvmFeatures, TxResult};
+use evm2::{interpreter::InstrStop, precompiles::MovePrecompileError, EvmFeatures, TxResult};
 use jsonrpsee_types::{error::INTERNAL_ERROR_CODE, ErrorObject};
 use reth_errors::ProviderResult;
 use reth_evm::{
@@ -594,7 +594,7 @@ where
                     .collect(),
                 status: true,
             }
-        } else if result.stop.is_revert() {
+        } else if result.stop == InstrStop::Revert {
             let error = Err::from_revert(result.output.clone());
             SimCallResult {
                 return_data: Bytes::new(),

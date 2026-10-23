@@ -5,7 +5,7 @@ use crate::{AsEthApiError, FromEthApiError, FromEvmError, IntoEthApiError};
 use alloy_network::TransactionBuilder;
 use alloy_primitives::{TxKind, U256};
 use alloy_rpc_types_eth::{state::EvmOverrides, BlockId};
-use evm2::{evm::DynDatabase, EvmFeatures, TxResult};
+use evm2::{evm::DynDatabase, interpreter::InstrStop, EvmFeatures, TxResult};
 use futures::Future;
 use reth_chainspec::MIN_TRANSACTION_GAS;
 use reth_evm::{
@@ -177,7 +177,7 @@ pub trait EstimateCall: Call {
 
         let gas_refund = if res.status {
             res.refunded
-        } else if res.stop.is_revert() {
+        } else if res.stop == InstrStop::Revert {
             // if price or limit was included in the request then we can execute the request
             // again with the block's gas limit to check if revert is gas related or not
             return if tx_request_gas_limit.is_some() || tx_request_gas_price.is_some() {
@@ -318,7 +318,7 @@ where
         // Transaction succeeded by manually increasing the gas limit,
         // which means the caller lacks funds to pay for the tx
         Err(RpcInvalidTransactionError::BasicOutOfGas(requested_gas_limit).into_eth_err())
-    } else if result.stop.is_revert() {
+    } else if result.stop == InstrStop::Revert {
         // reverted again after bumping the limit
         Err(Error::from_revert(result.output))
     } else {
