@@ -1260,6 +1260,17 @@ jobs:
           fetch-depth: 0
           ref: ${{ steps.checkout-ref.outputs.ref }}
 
+      # Older candidates may not contain the chart project used by this workflow.
+      - name: Check out chart dependencies from workflow revision
+        if: env.BENCH_EXECUTION_MODE != 'call'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ github.repository }}
+          ref: ${{ github.workflow_sha }}
+          path: .bench-chart-workflow
+          sparse-checkout: scripts/bench-reth-charts
+          persist-credentials: false
+
       - name: Initialize run summary and update status
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         env:
@@ -1366,6 +1377,8 @@ jobs:
       - uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
         continue-on-error: true
       - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        with:
+          version: "0.13.4"
 
       - name: Mask OTLP endpoints
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
@@ -2158,7 +2171,7 @@ jobs:
           CHART_ARGS="$CHART_ARGS --baseline-name ${BASELINE_NAME}"
           CHART_ARGS="$CHART_ARGS --feature-name ${FEATURE_NAME}"
           # shellcheck disable=SC2086
-          uv run --with matplotlib==3.10.8 --with pillow==12.3.0 python3 .github/scripts/bench-reth-charts.py $CHART_ARGS
+          uv run --frozen --project "$GITHUB_WORKSPACE/.bench-chart-workflow/scripts/bench-reth-charts" python3 .github/scripts/bench-reth-charts.py $CHART_ARGS
 
       - name: Upload chart attachments
         id: upload-charts

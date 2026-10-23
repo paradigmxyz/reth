@@ -1,0 +1,14 @@
+prepare: [./prepare.sh]
+compose: compose.yaml
+planner: controller.py
+command: podman exec reth-trie-dst /usr/local/bin/controller.py
+memory_mb: 4096
+workload_args:
+  blocks: 64
+  updates: 64
+  proof_workers: 2
+  timeout_secs: 60
+  persistence_threshold: 50
+  num_state_masking_blocks: 30
+  memory_block_buffer_target: null # Reth defaults to min(5, persistence_threshold).
+  crashes: 1 # SIGKILL/restart the worker, retaining its database and block journal.
