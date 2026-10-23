@@ -35,7 +35,7 @@ use reth_rpc_eth_types::{
         attach_bal_before_tx,
     },
     error::{AsEthApiError, FromEthApiError},
-    simulate::{self, EthSimulateError},
+    simulate::{self, EthSimulateError, SimulatedState},
     EthApiError, RpcInvalidTransactionError, StateCacheDb,
 };
 use reth_storage_api::{BlockIdReader, ProviderTx, StateProvider};
@@ -109,7 +109,7 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                 )));
                 let mut parent = parent;
                 let mut simulation_state =
-                    this.compute_state_root_for_eth_simulate().then(BundleState::default);
+                    this.compute_state_root_for_eth_simulate().then(SimulatedState::default);
 
                 let chain_id = this.provider().chain_spec().chain_id();
 
@@ -183,12 +183,20 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                         apply_block_overrides(block_overrides, &mut db, &mut evm_env);
                     }
                     if let Some(ref state_overrides) = state_overrides {
+                        let mut changes = simulation_state.as_ref().map(|_| BundleState::default());
                         apply_state_overrides_with_state(
                             state_overrides.clone(),
                             &mut db,
-                            simulation_state.as_mut(),
+                            changes.as_mut(),
                         )
                         .map_err(Self::Error::from_eth_err)?;
+                        if let Some(simulation_state) = simulation_state.as_mut() &&
+                            let Some(changes) = changes
+                        {
+                            simulation_state
+                                .extend(&state_provider, &changes)
+                                .map_err(Self::Error::from_eth_err)?;
+                        }
                     }
 
                     let chain_id = evm_env.chain_id();

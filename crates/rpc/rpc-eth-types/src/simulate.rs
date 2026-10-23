@@ -8,7 +8,7 @@ use alloy_chains::Chain;
 use alloy_consensus::{transaction::TxHashRef, BlockHeader, Transaction as _};
 use alloy_eips::eip2718::WithEncoded;
 use alloy_network::{NetworkTransactionBuilder, TransactionBuilder};
-use alloy_primitives::{Address, Bytes, TxKind, U256};
+use alloy_primitives::{keccak256, map::AddressMap, Address, Bytes, TxKind, U256};
 use alloy_rpc_types_eth::{
     simulate::{SimBlock, SimCallResult, SimulateError, SimulatedBlock},
     state::StateOverride,
@@ -16,6 +16,7 @@ use alloy_rpc_types_eth::{
 };
 use evm2::{precompiles::MovePrecompileError, EvmFeatures, TxResult};
 use jsonrpsee_types::{error::INTERNAL_ERROR_CODE, ErrorObject};
+use reth_errors::ProviderResult;
 use reth_evm::{
     execute::{BlockBuilder, BlockBuilderOutcome, BlockTransactionResult},
     BlockExecutionError, BundleState, Database, Evm as RethEvm, EvmEnv,
@@ -25,7 +26,9 @@ use reth_primitives_traits::{
 };
 use reth_rpc_convert::{RpcBlock, RpcConvert, RpcTxReq};
 use reth_rpc_server_types::result::rpc_err;
-use reth_storage_api::{noop::NoopProvider, StateProvider};
+use reth_storage_api::{noop::NoopProvider, HashedPostStateProvider, StateProvider};
+use reth_trie_common::{HashedPostState, KeccakKeyHasher};
+use std::mem;
 
 /// Fallback seconds added between simulated block timestamps when neither the user nor the chain
 /// hint provides a value.
@@ -312,7 +315,7 @@ pub fn execute_transactions<S, T, EvmTypes>(
     calls: Vec<RpcTxReq<T::Network>>,
     remaining_call_gas_limit: &mut Option<u64>,
     chain_id: u64,
-    simulation_state: Option<&mut BundleState>,
+    simulation_state: Option<&mut SimulatedState>,
     converter: &T,
 ) -> Result<(BlockBuilderOutcome<S::Primitives>, Vec<TxResult<EvmTypes>>), EthApiError>
 where
@@ -402,14 +405,11 @@ where
 
     let result = if let Some(simulation_state) = simulation_state {
         builder.finish_with_state_root(&state_provider, |output| {
-            // Preserve override storage wipes and account lifecycle changes across blocks before
-            // hashing against the original provider snapshot.
-            simulation_state.extend(output.state.clone());
-            let hashed_state = state_provider
-                .hashed_post_state(simulation_state)
+            simulation_state
+                .extend(&state_provider, &output.state)
                 .map_err(BlockExecutionError::other)?;
             state_provider
-                .state_root_with_updates(hashed_state)
+                .state_root_with_updates(simulation_state.hashed_state().clone())
                 .map(Some)
                 .map_err(BlockExecutionError::other)
         })?
@@ -634,24 +634,95 @@ where
     Ok(SimulatedBlock { inner: block, calls })
 }
 
+/// The hashed post-state accumulated across simulated blocks, relative to the parent state.
+///
+/// Each block's changes are hashed once when they are added. Re-hashing a cumulative
+/// [`BundleState`] instead would read the parent storage of every destroyed account again for
+/// every block.
+#[derive(Debug, Default)]
+pub struct SimulatedState {
+    hashed: HashedPostState,
+    /// Whether the parent storage of an account still has to be zeroed in `hashed`, by the
+    /// account's first appearance in the changes.
+    parent_storage_unzeroed: AddressMap<bool>,
+}
+
+impl SimulatedState {
+    /// Returns the accumulated hashed post-state.
+    pub const fn hashed_state(&self) -> &HashedPostState {
+        &self.hashed
+    }
+
+    /// Adds the changes of a block or of state overrides on top of the accumulated state.
+    ///
+    /// A destroyed account drops every storage value recorded so far. Its parent storage is read
+    /// from `provider` only the first time, and later wipes zero the recorded slots in place.
+    pub fn extend(
+        &mut self,
+        provider: &impl HashedPostStateProvider,
+        changes: &BundleState,
+    ) -> ProviderResult<()> {
+        let mut parent_storage = BundleState::default();
+        for (address, account) in &changes.state {
+            // The first change to an account starts from its parent state.
+            let unzeroed = self
+                .parent_storage_unzeroed
+                .entry(*address)
+                .or_insert_with(|| account.original_info.is_some());
+            if !account.was_destroyed() {
+                continue
+            }
+            if let Some(storage) = self.hashed.storages.get_mut(&keccak256(address)) {
+                storage.storage.values_mut().for_each(|value| *value = U256::ZERO);
+            }
+            if mem::take(unzeroed) {
+                let mut account = account.clone();
+                account.storage.clear();
+                parent_storage.state.insert(*address, account);
+            }
+        }
+
+        if !parent_storage.state.is_empty() {
+            self.hashed.extend(provider.hashed_post_state(&parent_storage)?);
+        }
+
+        self.hashed.extend(HashedPostState::from_bundle_state::<KeccakKeyHasher>(&changes.state));
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
-        apply_precompile_overrides, sanitize_chain, EthSimulateError, INTERNAL_ERROR_CODE,
+        apply_precompile_overrides, sanitize_chain, EthSimulateError, ProviderResult,
+        SimulatedState, INTERNAL_ERROR_CODE,
     };
-    use crate::{error::ToRpcError, EthApiError};
+    use crate::{cache::db::apply_state_overrides_with_state, error::ToRpcError, EthApiError};
     use alloy_chains::Chain;
     use alloy_consensus::Header;
-    use alloy_primitives::{address, Address, U256};
+    use alloy_primitives::{
+        address, keccak256,
+        map::{AddressMap, B256Map},
+        Address, B256, U256,
+    };
     use alloy_rpc_types_eth::{
         simulate::SimBlock,
         state::{AccountOverride, StateOverride},
         BlockOverrides, TransactionRequest,
     };
     use evm2::{
-        ethereum::ethereum_tx_registry, evm::EmptyDB, BaseEvmTypes, Evm, Precompiles, SpecId,
+        ethereum::ethereum_tx_registry,
+        evm::{AccountInfo, CacheDB, EmptyDB, InMemoryDB},
+        BaseEvmTypes, Evm, Precompiles, SpecId,
     };
+    use reth_evm::BundleState;
     use reth_primitives_traits::SealedHeader;
+    use reth_storage_api::HashedPostStateProvider;
+    use reth_trie_common::{HashedPostState, KeccakKeyHasher};
+    use std::{
+        collections::BTreeMap,
+        sync::atomic::{AtomicUsize, Ordering},
+    };
 
     fn test_evm() -> Evm<'static, BaseEvmTypes> {
         Evm::new(
@@ -661,6 +732,51 @@ mod tests {
             EmptyDB::default(),
             Precompiles::base(SpecId::PRAGUE),
         )
+    }
+
+    /// Mimics the parent-state storage reads of the database-backed providers and counts them.
+    #[derive(Default)]
+    struct CountingProvider {
+        storage: AddressMap<B256Map<U256>>,
+        scans: AtomicUsize,
+        reads: AtomicUsize,
+    }
+
+    impl CountingProvider {
+        /// Returns the non-zero storage that results from layering `hashed` over the parent state.
+        fn resulting_storage(&self, hashed: &HashedPostState) -> BTreeMap<(B256, B256), U256> {
+            let parent = self.storage.iter().flat_map(|(address, slots)| {
+                slots.iter().map(move |(slot, value)| ((keccak256(address), *slot), *value))
+            });
+            let changes = hashed.storages.iter().flat_map(|(address, storage)| {
+                storage.storage.iter().map(|(slot, value)| ((*address, *slot), *value))
+            });
+            parent
+                .chain(changes)
+                .collect::<BTreeMap<_, _>>()
+                .into_iter()
+                .filter(|(_, v)| !v.is_zero())
+                .collect()
+        }
+    }
+
+    impl HashedPostStateProvider for CountingProvider {
+        fn hashed_post_state(&self, bundle_state: &BundleState) -> ProviderResult<HashedPostState> {
+            let mut hashed =
+                HashedPostState::from_bundle_state::<KeccakKeyHasher>(&bundle_state.state);
+            for (address, account) in &bundle_state.state {
+                if account.was_destroyed() && account.original_info.is_some() {
+                    self.scans.fetch_add(1, Ordering::Relaxed);
+                    let storage = self.storage.get(address).into_iter().flatten();
+                    let slots = &mut hashed.storages.entry(keccak256(address)).or_default().storage;
+                    for (slot, _) in storage {
+                        self.reads.fetch_add(1, Ordering::Relaxed);
+                        slots.entry(*slot).or_insert(U256::ZERO);
+                    }
+                }
+            }
+            Ok(hashed)
+        }
     }
 
     #[test]
@@ -875,5 +991,99 @@ mod tests {
         let err = sanitize_chain(vec![block_with_number(257)], &parent, Chain::mainnet().id(), 256)
             .unwrap_err();
         assert!(matches!(err, EthApiError::Other(_)));
+    }
+
+    /// Hashing each block's changes once gives the same state as hashing the cumulative bundle
+    /// again after every block, without reading the parent storage of destroyed accounts again.
+    #[test]
+    fn simulated_state_reads_parent_storage_once() {
+        let wiped = Address::with_last_byte(1);
+        let emptied = Address::with_last_byte(2);
+        let created = Address::with_last_byte(3);
+        let slot = |n: u64| B256::from(U256::from(n));
+        let slots = |range: std::ops::Range<u64>| {
+            range.map(|n| (slot(n), slot(n + 1000))).collect::<Vec<_>>()
+        };
+
+        let mut db = InMemoryDB::default();
+        let mut provider = CountingProvider::default();
+        for (address, count) in [(wiped, 100), (emptied, 10)] {
+            db.insert_account_info(
+                &address,
+                AccountInfo { balance: U256::from(5), ..Default::default() },
+            );
+            for (key, value) in slots(0..count) {
+                db.insert_account_storage(
+                    &address,
+                    &U256::from_be_bytes(key.0),
+                    &U256::from_be_bytes(value.0),
+                );
+                provider
+                    .storage
+                    .entry(address)
+                    .or_default()
+                    .insert(keccak256(key), U256::from_be_bytes(value.0));
+            }
+        }
+        let mut db = CacheDB::new(db);
+
+        let blocks = [
+            // Full replacement of an existing account's storage, an emptied account, and a new
+            // account.
+            StateOverride::from_iter([
+                (
+                    wiped,
+                    AccountOverride::default()
+                        .with_state([(slot(1), slot(7)), (slot(500), slot(8))]),
+                ),
+                (emptied, AccountOverride::default().with_balance(U256::ZERO)),
+                (created, AccountOverride::default().with_balance(U256::from(3))),
+            ]),
+            // Later blocks touch the same account without wiping it. The new account has no
+            // parent storage to read when its storage is replaced.
+            StateOverride::from_iter([
+                (wiped, AccountOverride::default().with_state_diff([(slot(2), slot(9))])),
+                (created, AccountOverride::default().with_state([(slot(1), slot(4))])),
+            ]),
+            StateOverride::from_iter([(
+                wiped,
+                AccountOverride::default().with_balance(U256::from(6)),
+            )]),
+            // A second wipe, recreating a slot of the first.
+            StateOverride::from_iter([(
+                wiped,
+                AccountOverride::default().with_state([(slot(500), slot(10))]),
+            )]),
+            StateOverride::from_iter([(
+                wiped,
+                AccountOverride::default().with_state_diff([(slot(3), slot(11))]),
+            )]),
+        ];
+
+        let mut simulated = SimulatedState::default();
+        let mut cumulative = BundleState::default();
+        for (index, state_overrides) in blocks.into_iter().enumerate() {
+            let mut changes = BundleState::default();
+            apply_state_overrides_with_state(state_overrides, &mut db, Some(&mut changes)).unwrap();
+
+            simulated.extend(&provider, &changes).unwrap();
+            // Parent storage is read only when an account existing in the parent is first
+            // destroyed.
+            let reads = provider.reads.swap(0, Ordering::Relaxed);
+            assert_eq!(reads, [110, 0, 0, 0, 0][index], "block {index}");
+            let scans = provider.scans.swap(0, Ordering::Relaxed);
+            assert_eq!(scans, [2, 0, 0, 0, 0][index], "block {index}");
+
+            cumulative.extend(changes);
+            let expected = provider.hashed_post_state(&cumulative).unwrap();
+            provider.reads.store(0, Ordering::Relaxed);
+            provider.scans.store(0, Ordering::Relaxed);
+            assert_eq!(simulated.hashed_state().accounts, expected.accounts, "block {index}");
+            assert_eq!(
+                provider.resulting_storage(simulated.hashed_state()),
+                provider.resulting_storage(&expected),
+                "block {index}"
+            );
+        }
     }
 }
