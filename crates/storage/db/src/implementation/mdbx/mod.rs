@@ -692,7 +692,7 @@ mod tests {
     use reth_db_api::{
         cursor::{DbDupCursorRO, DbDupCursorRW, ReverseWalker, Walker},
         models::{AccountBeforeTx, IntegerList, ShardedKey},
-        table::{Encode, Table},
+        table::{Encode, Table, TableInfo},
     };
     use reth_libmdbx::Error;
     use reth_primitives_traits::{Account, StorageEntry};
@@ -827,6 +827,54 @@ mod tests {
 
         // Check the remainder of walker
         assert!(walker.next().is_none());
+    }
+
+    /// A table a node creates beside reth's own has no metric handles. With metrics enabled,
+    /// cursors on it run without metrics, as plain reads and writes on it already do.
+    #[test]
+    fn db_cursor_on_table_without_metrics() {
+        #[derive(Debug)]
+        struct NodeTable;
+
+        impl Table for NodeTable {
+            const NAME: &'static str = "NodeTable";
+            const DUPSORT: bool = false;
+            type Key = u64;
+            type Value = B256;
+        }
+
+        impl TableInfo for NodeTable {
+            fn name(&self) -> &'static str {
+                Self::NAME
+            }
+
+            fn is_dupsort(&self) -> bool {
+                Self::DUPSORT
+            }
+        }
+
+        struct NodeTables;
+
+        impl TableSet for NodeTables {
+            fn tables() -> Box<dyn Iterator<Item = Box<dyn TableInfo>>> {
+                Box::new(std::iter::once(Box::new(NodeTable) as Box<dyn TableInfo>))
+            }
+        }
+
+        let (_tempdir, env) = create_test_db(DatabaseEnvKind::RW);
+        let mut env = env.with_metrics();
+        env.create_and_track_tables_for::<NodeTables>().expect(ERROR_TABLE_CREATION);
+
+        let tx = env.tx_mut().expect(ERROR_INIT_TX);
+        tx.cursor_write::<NodeTable>()
+            .unwrap()
+            .append(1, &B256::repeat_byte(1))
+            .expect(ERROR_APPEND);
+        tx.commit().expect(ERROR_COMMIT);
+
+        let tx = env.tx().expect(ERROR_INIT_TX);
+        let first = tx.cursor_read::<NodeTable>().unwrap().first().unwrap();
+        assert_eq!(first, Some((1, B256::repeat_byte(1))));
     }
 
     #[test]
