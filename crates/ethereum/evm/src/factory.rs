@@ -1,6 +1,6 @@
 #[cfg(feature = "jit")]
 use alloc::string::String;
-use alloc::{boxed::Box, sync::Arc};
+use alloc::sync::Arc;
 use alloy_consensus::Header;
 use reth_chainspec::{ChainSpec, EthChainSpec, EthereumHardforks};
 #[cfg(feature = "std")]
@@ -332,7 +332,6 @@ impl<R, C, F: EvmFactory> EthBlockExecutorFactory<R, C, F> {
         let config = self.evm_factory.execution_config(spec, env.version);
         let registry = self.evm_factory.tx_registry(spec);
         let precompiles = self.evm_factory.precompiles(spec);
-        let precompiles = Box::new(precompiles);
 
         evm.set_block_and_execution_config(env.block, config, spec, registry, precompiles);
         self.evm_factory.configure_evm(evm);

@@ -507,7 +507,6 @@ where
             .unwrap_or_default();
         let blob_params = self.chain_spec().as_ref().blob_params_at_timestamp(attributes.timestamp);
         let header = Header {
-            parent_hash: parent.hash_slow(),
             beneficiary: attributes.suggested_fee_recipient,
             timestamp: attributes.timestamp,
             number: parent.number + 1,
