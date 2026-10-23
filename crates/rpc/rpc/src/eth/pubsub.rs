@@ -11,7 +11,8 @@ use alloy_rpc_types_eth::{
 };
 use futures::StreamExt;
 use jsonrpsee::{
-    server::SubscriptionMessage, types::ErrorObject, PendingSubscriptionSink, SubscriptionSink,
+    server::SubscriptionMessage, types::ErrorObject, Extensions, PendingSubscriptionSink,
+    SubscriptionSink,
 };
 use reth_chain_state::CanonStateSubscriptions;
 use reth_network_api::NetworkInfo;
@@ -20,7 +21,10 @@ use reth_rpc_eth_api::{
     helpers::EthSubscriptions, pubsub::EthPubSubApiServer, RpcConvert, RpcLog, RpcNodeCore,
     RpcTransaction,
 };
-use reth_rpc_server_types::result::{internal_rpc_err, invalid_params_rpc_err};
+use reth_rpc_server_types::{
+    result::{internal_rpc_err, invalid_params_rpc_err},
+    subscriptions::track_subscription,
+};
 use reth_storage_api::BlockNumReader;
 use reth_tasks::Runtime;
 use reth_transaction_pool::{NewTransactionEvent, TransactionPool};
@@ -227,16 +231,34 @@ where
     async fn subscribe(
         &self,
         pending: PendingSubscriptionSink,
+        ext: &Extensions,
         kind: SubscriptionKind,
         params: Option<Params>,
     ) -> jsonrpsee::core::SubscriptionResult {
         let sink = pending.accept().await?;
         let pubsub = self.clone();
-        self.inner.subscription_task_spawner.spawn_task(async move {
-            let _ = pubsub.handle_accepted(sink, kind, params).await;
-        });
+        self.inner.subscription_task_spawner.spawn_task(track_subscription(
+            ext,
+            subscription_kind_label(kind),
+            async move {
+                let _ = pubsub.handle_accepted(sink, kind, params).await;
+            },
+        ));
 
         Ok(())
+    }
+}
+
+/// Returns the bounded metrics label for an `eth_subscribe` kind.
+const fn subscription_kind_label(kind: SubscriptionKind) -> &'static str {
+    #[allow(unreachable_patterns)]
+    match kind {
+        SubscriptionKind::NewHeads => "newHeads",
+        SubscriptionKind::Logs => "logs",
+        SubscriptionKind::NewPendingTransactions => "newPendingTransactions",
+        SubscriptionKind::Syncing => "syncing",
+        SubscriptionKind::TransactionReceipts => "transactionReceipts",
+        _ => "other",
     }
 }
 
