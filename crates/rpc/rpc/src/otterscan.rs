@@ -328,7 +328,7 @@ where
     /// Handler for `ots_getContractCreator`
     async fn get_contract_creator(&self, address: Address) -> RpcResult<Option<ContractCreator>> {
         if !self.has_code(address, None).await? {
-            return Ok(None)
+            return Ok(None);
         }
 
         let permit = self.acquire_trace_permit().await?;
@@ -488,7 +488,7 @@ mod tests {
     };
     use evm2_inspectors::tracing::{types::CallTrace, TracingInspector};
     use reth_chainspec::MAINNET;
-    use reth_evm::{BlockExecutorFactory, ConfigureEvm, Evm};
+    use reth_evm::{ConfigureEvm, Evm};
     use reth_evm_ethereum::{EthEvmConfig, EthEvmEnv};
     use reth_network_api::noop::NoopNetwork;
     use reth_primitives_traits::Recovered;
@@ -795,7 +795,7 @@ mod tests {
         );
         let config = EthEvmConfig::mainnet();
         let env = EthEvmEnv::new(spec, Default::default(), 1);
-        let mut evm = config.block_executor_factory().evm_with_database(db, env);
+        let mut evm = config.evm_with_env(db, env);
         let tx = Recovered::new_unchecked(
             evm2::ethereum::TxEnvelope::Legacy(alloy_consensus::TxLegacy {
                 to: TxKind::Call(contract),

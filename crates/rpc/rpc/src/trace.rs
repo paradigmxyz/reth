@@ -113,7 +113,6 @@ where
                 let trace_res = inspector
                     .into_parity_builder()
                     .into_trace_results_with_state(&res, &trace_request.trace_types, &mut *db)
-                    .map_err(EthApiError::from)
                     .map_err(Eth::Error::from_eth_err)?;
                 Ok(trace_res)
             })
@@ -147,7 +146,6 @@ where
                     inspector
                         .into_parity_builder()
                         .into_trace_results_with_state(&res, &trace_types, &mut db)
-                        .map_err(EthApiError::from)
                         .map_err(Eth::Error::from_eth_err)
                 },
             )
@@ -193,7 +191,6 @@ where
                     let trace_res = inspector
                         .into_parity_builder()
                         .into_trace_results_with_state(&res, &trace_types, &mut db)
-                        .map_err(EthApiError::from)
                         .map_err(Eth::Error::from_eth_err)?;
 
                     results.push(trace_res);
@@ -222,7 +219,6 @@ where
                 let trace_res = inspector
                     .into_parity_builder()
                     .into_trace_results_with_state(&res, &trace_types, &mut db)
-                    .map_err(EthApiError::from)
                     .map_err(Eth::Error::from_eth_err)?;
                 Ok(TraceResultsWithTransactionHash {
                     transaction_hash: hash,
@@ -588,13 +584,7 @@ where
                     let full_trace = ctx
                         .inspector
                         .into_parity_builder()
-                        .into_trace_results_with_state_parts(
-                            &ctx.result.result,
-                            &ctx.result.pending_state,
-                            &trace_types,
-                            ctx.db,
-                        )
-                        .map_err(EthApiError::from)
+                        .into_trace_results_with_state(ctx.result, &trace_types, ctx.db)
                         .map_err(Eth::Error::from_eth_err)?;
 
                     let trace = TraceResultsWithTransactionHash {

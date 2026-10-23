@@ -22,9 +22,8 @@ use reth_chainspec::{ChainSpecProvider, EthereumHardforks};
 use reth_engine_primitives::ConsensusEngineEvent;
 use reth_errors::RethError;
 use reth_evm::{
-    execute::{BlockExecutorFactory, Executor},
-    witness::ExecutionWitnessRecord,
-    ConfigureEvm, DynDatabase, Evm, EvmEnv, EvmEnvFor,
+    execute::Executor, witness::ExecutionWitnessRecord, ConfigureEvm, DynDatabase, Evm, EvmEnv,
+    EvmEnvFor,
 };
 use reth_primitives_traits::{
     Block as BlockTrait, BlockBody, BlockTy, ReceiptWithBloom, RecoveredBlock,
@@ -139,15 +138,11 @@ where
 
                 let mut transactions = block.transactions_recovered().enumerate().peekable();
                 let mut inspector = DebugInspector::new(opts).map_err(Eth::Error::from_eth_err)?;
-                let mut evm = eth_api
-                    .evm_config()
-                    .block_executor_factory()
-                    .evm_with_database(&mut db, evm_env);
+                let mut evm = eth_api.evm_config().evm_with_env(&mut db, evm_env);
                 while let Some((index, tx)) = transactions.next() {
                     if is_cancelled() {
                         return Err(EthApiError::InternalEthError.into())
                     }
-                    let _tx_hash = *tx.tx_hash();
                     let tx_env = eth_api.evm_config().tx_env(tx.cloned());
 
                     let (next_inspector, res) = evm
@@ -213,10 +208,7 @@ where
                         return Ok(results)
                     }
                 };
-                let mut evm = eth_api
-                    .evm_config()
-                    .block_executor_factory()
-                    .evm_with_database(&mut db, evm_env);
+                let mut evm = eth_api.evm_config().evm_with_env(&mut db, evm_env);
 
                 while let Some((index, tx)) = transactions.next() {
                     let tx_hash = *tx.tx_hash();
@@ -725,20 +717,10 @@ where
             ))
             .into())
         }
-        let evm_env = self.eth_api().evm_env_for_header(block.sealed_block().sealed_header())?;
 
         self.eth_api()
             .spawn_with_state_at_block(block.parent_hash(), move |eth_api, mut db| {
-                eth_api.apply_pre_execution_changes(&block, &mut db)?;
-
-                for tx in block.transactions_recovered().take(tx_index + 1) {
-                    if is_cancelled() {
-                        return Err(EthApiError::InternalEthError.into())
-                    }
-                    let tx_env = eth_api.evm_config().tx_env(tx.cloned());
-                    let result = eth_api.transact(&mut db, evm_env.clone(), tx_env)?;
-                    db.commit_source(&result.pending_state);
-                }
+                eth_api.replay_block_until(&mut db, &block, tx_index + 1, None)?;
 
                 f(&mut db)
             })
@@ -748,10 +730,7 @@ where
 
     /// Retrieves the account's balance, nonce, code hash, and storage root from the given state.
     fn account(db: &mut StateCacheDb, address: Address) -> Result<Option<Account>, Eth::Error> {
-        let account = db
-            .get_account(&address)
-            .map_err(EthApiError::from)
-            .map_err(Eth::Error::from_eth_err)?;
+        let account = db.get_account(&address).map_err(Eth::Error::from_eth_err)?;
         let Some(account) = account else { return Ok(None) };
 
         let storage = db.cache.storage.get(&address);
@@ -772,18 +751,14 @@ where
     /// Retrieves the account's balance, nonce, and code from the given state.
     #[allow(clippy::needless_update)]
     fn account_info(db: &mut StateCacheDb, address: Address) -> Result<AccountInfo, Eth::Error> {
-        let account = db
-            .get_account(&address)
-            .map_err(EthApiError::from)
-            .map_err(Eth::Error::from_eth_err)?
-            .unwrap_or_default();
+        let account =
+            db.get_account(&address).map_err(Eth::Error::from_eth_err)?.unwrap_or_default();
         let code = if account.is_empty_code_hash() {
             Default::default()
         } else if let Some(code) = account.code {
             code.original_bytes()
         } else {
             db.get_code_by_hash(&account.code_hash)
-                .map_err(EthApiError::from)
                 .map_err(Eth::Error::from_eth_err)?
                 .original_bytes()
         };

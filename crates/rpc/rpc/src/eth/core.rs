@@ -549,7 +549,6 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{eth::helpers::types::EthRpcConverter, EthApi, EthApiBuilder};
     use alloy_consensus::{Block, BlockBody, Header};
     use alloy_eips::{eip7702::Authorization, BlockId, BlockNumberOrTag};
     use alloy_genesis::{Genesis, GenesisAccount};
@@ -567,6 +566,7 @@ mod tests {
     use reth_chainspec::{ChainSpec, ChainSpecBuilder, ChainSpecProvider, EthChainSpec};
     use reth_db_common::init::init_genesis;
     use reth_ethereum_primitives::TransactionSigned;
+    use reth_evm::{EvmEnvFor, TxEnvFor};
     use reth_evm_ethereum::EthEvmConfig;
     use reth_network_api::noop::NoopNetwork;
     use reth_primitives_traits::crypto::secp256k1::sign_message;
@@ -578,12 +578,13 @@ mod tests {
         },
         PruneCheckpointReader, StageCheckpointReader,
     };
+    use reth_rpc_convert::{EthTxEnvError, TryIntoTxEnv};
     use reth_rpc_eth_api::{
         helpers::{EthBlocks, EthCall, SpawnBlocking},
         node::RpcNodeCoreAdapter,
         EthApiServer,
     };
-    use reth_rpc_eth_types::RpcInvalidTransactionError;
+    use reth_rpc_eth_types::{receipt::EthReceiptConverter, RpcInvalidTransactionError};
     use reth_storage_api::{
         BalProvider, BlockReaderIdExt, NodePrimitivesProvider, StateProviderFactory,
     };
@@ -1236,12 +1237,8 @@ mod tests {
 
     #[tokio::test]
     async fn call_converts_request_once_as_sent() {
-        use reth_evm::{EvmEnvFor, TxEnvFor};
-        use reth_rpc_convert::{EthTxEnvError, TryIntoTxEnv};
-        use reth_rpc_eth_types::receipt::EthReceiptConverter;
-        use std::sync::Mutex;
-
-        static CONVERTED_GAS: Mutex<Vec<Option<u64>>> = Mutex::new(Vec::new());
+        static CONVERTED_GAS: std::sync::Mutex<Vec<Option<u64>>> =
+            std::sync::Mutex::new(Vec::new());
 
         // A signature that commits to the gas limit can recover a different caller or fee payer
         // from a request with another gas limit, so the request must be converted once, as sent.

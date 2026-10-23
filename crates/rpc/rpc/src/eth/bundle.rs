@@ -7,10 +7,10 @@ use alloy_rpc_types_mev::{EthCallBundle, EthCallBundleResponse, EthCallBundleTra
 use evm2::evm::DynDatabase;
 use jsonrpsee::core::RpcResult;
 use reth_chainspec::{ChainSpecProvider, EthChainSpec};
-use reth_evm::{ConfigureEvm, EvmEnv};
+use reth_evm::{ConfigureEvm, Evm, EvmEnv};
 use reth_rpc_eth_api::{
     helpers::{Call, EthTransactions},
-    EthCallBundleApiServer, FromEthApiError,
+    EthCallBundleApiServer, FromEthApiError, FromEvmError,
 };
 use reth_rpc_eth_types::{
     EthApiError, PendingBlockEnv, PendingBlockEnvOrigin, RpcInvalidTransactionError,
@@ -134,7 +134,7 @@ where
                 .eth_api()
                 .provider()
                 .chain_spec()
-                .blob_params_at_timestamp(evm_env.block_env().timestamp.to())
+                .blob_params_at_timestamp(evm_env.block_env().timestamp.saturating_to())
                 .unwrap_or_else(BlobParams::cancun);
             if blob_gas_used > blob_params.max_blob_gas_per_block() {
                 return Err(EthApiError::InvalidParams(
@@ -172,9 +172,10 @@ where
 
                 let initial_coinbase = db
                     .get_account(&coinbase)
-                    .map_err(|error| Eth::Error::from_eth_err(EthApiError::from(error)))?
+                    .map_err(Eth::Error::from_eth_err)?
                     .map(|acc| acc.balance)
                     .unwrap_or_default();
+                let mut evm = eth_api.evm_config().evm_with_env(&mut db, evm_env);
                 let mut coinbase_balance_before_tx = initial_coinbase;
                 let mut coinbase_balance_after_tx = initial_coinbase;
                 let mut total_gas_used = 0u64;
@@ -200,17 +201,17 @@ where
                         tx.into_consensus()
                     };
 
-                    hasher.update(*tx.tx_hash());
+                    let tx_hash = *tx.tx_hash();
+                    hasher.update(tx_hash);
                     // Fee caps below the base fee are only rejected by the EVM from London on.
                     let gas_price = tx.effective_tip_per_gas(basefee).ok_or_else(|| {
                         Eth::Error::from_eth_err(EthApiError::InvalidTransaction(
                             RpcInvalidTransactionError::FeeCapTooLow,
                         ))
                     })?;
-                    let tx_env = eth_api.evm_config().tx_env(tx.clone());
-                    let result_and_state = eth_api.transact(&mut db, evm_env.clone(), tx_env)?;
-                    let result = result_and_state.result;
-                    let state = result_and_state.pending_state;
+                    let to_address = tx.inner().to();
+                    let tx_env = eth_api.evm_config().tx_env(tx);
+                    let result = evm.transact_commit(&tx_env).map_err(Eth::Error::from_evm_err)?;
 
                     let gas_used = result.tx_gas_used();
                     total_gas_used += gas_used;
@@ -218,10 +219,9 @@ where
                     let gas_fees = U256::from(gas_used) * U256::from(gas_price);
                     total_gas_fees += gas_fees;
 
-                    db.commit_source(&state);
-                    coinbase_balance_after_tx = db
-                        .get_account(&coinbase)
-                        .map_err(|error| Eth::Error::from_eth_err(EthApiError::from(error)))?
+                    coinbase_balance_after_tx = evm
+                        .account_info(&coinbase)
+                        .map_err(Eth::Error::from_evm_err)?
                         .map(|acc| acc.balance)
                         .unwrap_or_default();
                     let coinbase_diff =
@@ -247,8 +247,8 @@ where
                         gas_fees,
                         gas_price: U256::from(gas_price),
                         gas_used,
-                        to_address: tx.inner().to(),
-                        tx_hash: *tx.tx_hash(),
+                        to_address,
+                        tx_hash,
                         value,
                         revert,
                     };

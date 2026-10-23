@@ -10,12 +10,12 @@ use alloy_rpc_types_mev::{
 use evm2::evm::DynDatabase;
 use jsonrpsee::core::RpcResult;
 use reth_errors::RethError;
-use reth_evm::{ConfigureEvm, EvmEnv};
+use reth_evm::{ConfigureEvm, Evm, EvmEnv};
 use reth_primitives_traits::Recovered;
 use reth_rpc_api::MevSimApiServer;
 use reth_rpc_eth_api::{
     helpers::{block::LoadBlock, Call, EthTransactions},
-    FromEthApiError,
+    FromEthApiError, FromEvmError,
 };
 use reth_rpc_eth_types::{cache::db::apply_block_overrides, EthApiError};
 use reth_storage_api::ProviderTx;
@@ -326,10 +326,11 @@ where
 
                 let initial_coinbase_balance = db
                     .get_account(&coinbase)
-                    .map_err(EthApiError::from)?
+                    .map_err(Eth::Error::from_eth_err)?
                     .map(|acc| acc.balance)
                     .unwrap_or_default();
 
+                let mut evm = eth_api.evm_config().evm_with_env(&mut db, evm_env);
                 let mut coinbase_balance_before_tx = initial_coinbase_balance;
                 let mut total_gas_used = 0;
                 let mut total_profit = U256::ZERO;
@@ -354,9 +355,7 @@ where
                     }
 
                     let tx_env = eth_api.evm_config().tx_env(item.tx.clone());
-                    let result_and_state = eth_api.transact(&mut db, evm_env.clone(), tx_env)?;
-                    let result = result_and_state.result;
-                    let state = result_and_state.pending_state;
+                    let result = evm.transact_commit(&tx_env).map_err(Eth::Error::from_evm_err)?;
 
                     if !result.status && !item.can_revert {
                         return Err(EthApiError::InvalidParams(
@@ -368,10 +367,9 @@ where
                     let gas_used = result.tx_gas_used();
                     total_gas_used += gas_used;
 
-                    db.commit_source(&state);
-                    let coinbase_balance_after_tx = db
-                        .get_account(&coinbase)
-                        .map_err(EthApiError::from)?
+                    let coinbase_balance_after_tx = evm
+                        .account_info(&coinbase)
+                        .map_err(Eth::Error::from_evm_err)?
                         .map(|acc| acc.balance)
                         .unwrap_or_default();
 
