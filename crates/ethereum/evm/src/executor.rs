@@ -974,6 +974,7 @@ fn emit_state(hook: &mut StateUpdateHook, state: StateUpdate) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::dao_fork;
     use alloy_consensus::{SignableTransaction, TxEip4844, TxLegacy};
     use alloy_eip7928::BlockAccessIndex;
     use alloy_primitives::{address, Address, Bytes, Signature, TxKind, B256, U256};
@@ -1241,6 +1242,54 @@ mod tests {
             U256::from(5 * alloy_consensus::constants::ETH_TO_WEI)
         );
         assert_eq!(output.account(&beneficiary).unwrap().unwrap().balance, U256::from(7));
+    }
+
+    #[test]
+    fn dao_fork_drain_removes_empty_accounts() {
+        let [absent, empty, empty_with_balance, nonce_only, ..] = dao_fork::DAO_HARDFORK_ACCOUNTS;
+        let beneficiary = dao_fork::DAO_HARDFORK_BENEFICIARY;
+
+        let execute = |accounts: &[(Address, AccountInfo)]| {
+            let mut database = TestDatabase::default();
+            database.accounts.extend(accounts.iter().cloned());
+            let chain_spec = ChainSpecBuilder::mainnet()
+                .with_fork(EthereumHardfork::Dao, ForkCondition::Block(1))
+                .build();
+            let factory = super::super::factory::EthBlockExecutorFactory::new(Arc::new(chain_spec));
+            let env = EthEvmEnv::new(
+                SpecId::FRONTIER,
+                BlockEnv::<BaseEvmTypes> {
+                    number: U256::from(1),
+                    gas_limit: U256::from(30_000),
+                    beneficiary: Address::with_last_byte(0xbe),
+                    ..Default::default()
+                },
+                1,
+            );
+            let evm = factory.evm_with_env(Db::new(database), env);
+            let mut executor = factory.create_executor(evm, segment(0, 1, B256::ZERO).ctx);
+            executor.apply_pre_execution_changes().unwrap();
+            executor.finish_with_block_access_list().unwrap().0
+        };
+
+        // Absent accounts stay absent, and accounts that are empty after the drain are removed,
+        // even before EIP-161.
+        let output = execute(&[
+            (empty, AccountInfo::default()),
+            (empty_with_balance, AccountInfo::default().with_balance(U256::from(7))),
+            (nonce_only, AccountInfo { nonce: 1, balance: U256::from(3), ..Default::default() }),
+        ]);
+        assert_eq!(output.account(&absent), None);
+        assert_eq!(output.account(&empty), Some(None));
+        assert_eq!(output.account(&empty_with_balance), Some(None));
+        let nonce_only_account = output.account(&nonce_only).unwrap().unwrap();
+        assert_eq!((nonce_only_account.nonce, nonce_only_account.balance), (1, U256::ZERO));
+        assert_eq!(output.account(&beneficiary).unwrap().unwrap().balance, U256::from(10));
+
+        // Nothing is drained, but the zero increment is still applied to the beneficiary, which
+        // removes it because it is empty.
+        let output = execute(&[(beneficiary, AccountInfo::default())]);
+        assert_eq!(output.account(&beneficiary), Some(None));
     }
 
     #[test]
