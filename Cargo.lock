@@ -314,7 +314,7 @@ checksum = "7b6bd5f7e5ce9858bac99275e3f548c3b63bb3e5806da0142dc0b2f518d3ec4a"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
- "alloy-hardforks 0.4.10",
+ "alloy-hardforks 0.4.11",
  "alloy-primitives",
  "alloy-rpc-types-engine",
  "alloy-rpc-types-eth",
@@ -356,9 +356,9 @@ dependencies = [
 
 [[package]]
 name = "alloy-hardforks"
-version = "0.4.10"
+version = "0.4.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "67bc1e34b9e64d1cff9fe7f65627f6e09e3db5893c918cc4b90b8e2a09da1aa5"
+checksum = "7f03efb8382bf3b19f0bd0b3cdfaa59cb13e57a3a6650f75fae47645873723d5"
 dependencies = [
  "alloy-chains",
  "alloy-eip2124",
@@ -7966,7 +7966,7 @@ dependencies = [
  "alloy-consensus",
  "alloy-eips",
  "alloy-evm",
- "alloy-hardforks 0.4.10",
+ "alloy-hardforks 0.4.11",
  "alloy-primitives",
  "alloy-rlp",
  "alloy-rpc-types",
@@ -8897,7 +8897,7 @@ dependencies = [
  "alloy-eip7928",
  "alloy-eips",
  "alloy-genesis",
- "alloy-hardforks 0.4.10",
+ "alloy-hardforks 0.4.11",
  "alloy-primitives",
  "alloy-rlp",
  "alloy-trie",
@@ -9016,7 +9016,7 @@ name = "reth-ethereum-forks"
 version = "2.8.0"
 dependencies = [
  "alloy-eip2124",
- "alloy-hardforks 0.4.10",
+ "alloy-hardforks 0.4.11",
  "alloy-primitives",
  "arbitrary",
  "auto_impl",
