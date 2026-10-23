@@ -12,8 +12,7 @@ use reth_engine_primitives::{
 use reth_engine_tree::tree::EngineValidator;
 use reth_errors::{BlockExecutionError, BlockValidationError, RethError, RethResult};
 use reth_evm::{
-    database::StateProviderDatabase, BlockBuilder, BlockBuilderOutcome, BlockExecutor,
-    ConfigureEvm, EvmEnv,
+    database::StateProviderDatabase, BlockBuilder, BlockBuilderOutcome, BlockExecutor, ConfigureEvm,
 };
 use reth_payload_primitives::{BuiltPayload, PayloadTypes};
 use reth_primitives_traits::{
@@ -291,43 +290,25 @@ where
 
     builder.apply_pre_execution_changes()?;
 
-    let mut cumulative_gas_used = 0;
-    let mut block_regular_gas_used = 0;
-    let mut block_state_gas_used = 0;
-    let separate_block_gas = builder.evm_env().uses_separate_block_gas();
-    let regular_gas_limit_cap = builder.evm_env().regular_gas_limit_cap();
     for tx in candidate_transactions {
         // ensure we still have capacity for this transaction
-        let exceeds_gas_limit = if separate_block_gas {
-            let regular_available = reorg_target.gas_limit().saturating_sub(block_regular_gas_used);
-            let state_available = reorg_target.gas_limit().saturating_sub(block_state_gas_used);
-            tx.gas_limit().min(regular_gas_limit_cap) > regular_available ||
-                tx.gas_limit() > state_available
-        } else {
-            tx.gas_limit() > reorg_target.gas_limit().saturating_sub(cumulative_gas_used)
-        };
-        if exceeds_gas_limit {
+        if builder.executor_mut().validate_transaction_gas_limit(tx.gas_limit()).is_err() {
             continue
         }
 
         let tx_recovered =
             tx.try_into_recovered().map_err(|_| ProviderError::SenderRecoveryError)?;
-        let gas_output = match builder.execute_transaction(tx_recovered) {
-            Ok(gas_output) => gas_output,
+        match builder.execute_transaction(tx_recovered) {
+            Ok(_) => {}
             Err(BlockExecutionError::Validation(BlockValidationError::InvalidTx {
                 hash,
                 error,
             })) => {
                 trace!(target: "engine::stream::reorg", hash = %hash, ?error, "Error executing transaction from next block");
-                continue
             }
             // Treat error as fatal
             Err(error) => return Err(RethError::Execution(error)),
-        };
-
-        cumulative_gas_used += gas_output.tx_gas_used();
-        block_regular_gas_used += gas_output.regular_gas_used();
-        block_state_gas_used += gas_output.state_gas_used();
+        }
     }
 
     let BlockBuilderOutcome { block, block_access_list, .. } =
