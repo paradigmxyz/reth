@@ -80,7 +80,6 @@ tokio.workspace = true
 jemalloc = ["reth-cli-util/jemalloc"]
 asm-keccak = [
     "alloy-primitives/asm-keccak",
-    "reth-storage-api/asm-keccak",
 ]
 keccak-cache-global = ["alloy-primitives/keccak-cache-global"]
 otlp = ["reth-tracing/otlp", "reth-tracing-otlp/otlp"]

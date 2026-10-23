@@ -43,16 +43,6 @@ account-ext = [
     "reth-primitives-traits/account-ext",
     "reth-trie-common/account-ext",
 ]
-asm-keccak = [
-    "evm2/asm-keccak",
-    "alloy-primitives/asm-keccak",
-]
-c-kzg = ["evm2/c-kzg"]
-blst = ["evm2/blst"]
-portable = [
-    "evm2/portable",
-]
-p256-aws-lc-rs = ["evm2/p256-aws-lc-rs"]
 default = ["std"]
 serde = [
     "dep:serde",

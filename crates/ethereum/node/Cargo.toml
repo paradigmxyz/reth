@@ -129,14 +129,12 @@ asm-keccak = [
     "reth-evm/asm-keccak",
     "reth-evm-ethereum/asm-keccak",
     "evm2/asm-keccak",
-    "reth-execution-types/asm-keccak",
     "reth-engine-tree/asm-keccak",
 ]
 portable = [
     "reth-evm/portable",
     "reth-evm-ethereum/portable",
     "evm2/portable",
-    "reth-execution-types/portable",
     "reth-engine-tree/portable",
 ]
 keccak-cache-global = [

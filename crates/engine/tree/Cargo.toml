@@ -102,7 +102,6 @@ tracing-subscriber = { workspace = true, features = ["registry"] }
 [features]
 asm-keccak = [
     "reth-evm/asm-keccak",
-    "reth-execution-types/asm-keccak",
     "alloy-primitives/asm-keccak",
     "reth-node-ethereum/asm-keccak",
     "reth-evm-ethereum/asm-keccak",
@@ -110,7 +109,6 @@ asm-keccak = [
 ]
 portable = [
     "reth-evm/portable",
-    "reth-execution-types/portable",
     "reth-node-ethereum/portable",
     "reth-evm-ethereum/portable",
     "evm2/portable",
