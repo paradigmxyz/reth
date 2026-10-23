@@ -304,8 +304,8 @@ impl PartialOrd for AccountInfoRevert {
     }
 }
 
-/// Orders like revm's derived ordering: by variant, then by the [`AccountInfo`] fields that its
-/// `Eq` compares.
+/// Orders by variant (`DoNothing`, `DeleteIt`, `RevertTo`), then by the [`AccountInfo`] fields that
+/// its `Eq` compares.
 impl Ord for AccountInfoRevert {
     fn cmp(&self, other: &Self) -> Ordering {
         match (self, other) {

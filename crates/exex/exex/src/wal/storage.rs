@@ -246,10 +246,9 @@ mod tests {
         Ok(())
     }
 
-    /// Decodes `test-data/contracts.wal`, written with revm's bytecode encoding by
-    /// `origin/codex/excise-revm`, which still executed with revm.
+    /// Decodes `test-data/contracts.wal`, which stores bytecode in the legacy encoding.
     #[test]
-    fn test_decode_revm_bytecode() -> eyre::Result<()> {
+    fn test_decode_legacy_bytecode() -> eyre::Result<()> {
         let encoded = std::fs::read(
             std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("test-data/contracts.wal"),
         )?;
