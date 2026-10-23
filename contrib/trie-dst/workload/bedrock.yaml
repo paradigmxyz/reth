@@ -2,6 +2,7 @@ prepare: [./prepare.sh]
 compose: compose.yaml
 planner: controller.py
 command: podman exec reth-trie-dst /usr/local/bin/controller.py
+fuzz_args: [--max-snaps=0]
 memory_mb: 4096
 workload_args:
   blocks: 64

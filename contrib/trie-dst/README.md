@@ -218,11 +218,14 @@ fields, prewarm keys, nested updates, batches, and commit boundaries; crossover
 draws a second corpus entry. Invalid edits leave the input unchanged. The same input can
 also be supplied as `base_input` to the controller for replay.
 
-At a completed-block snapshot, the controller emits `trie/input/checked`,
-which gives Bedrock a pull point. A suffix input is injected at the next new
-block boundary; already journaled blocks are never replaced. The worker waits
-after its original input until Bedrock either injects a suffix or finalizes the
-run. Fuzz preparation builds a coverage-instrumented guest executable and
-keeps an uninstrumented executable beside the host controller for input hooks.
+At each completed block, the controller emits `trie/input/checked`, which gives
+Bedrock a pull point when mid-run snapshots are enabled. A suffix input is
+injected at the next new block boundary; already journaled blocks are never
+replaced. The worker waits after its original input until Bedrock either injects
+a suffix or finalizes the run. This workload sets `--max-snaps=0` in
+`bedrock.yaml`, so fuzzing currently uses only whole-input mutations from the
+warm checkpoint; the suffix path remains available for experiments. Fuzz
+preparation builds a coverage-instrumented guest executable and keeps an
+uninstrumented executable beside the host controller for input hooks.
 The first scope is trie operation streams on a linear
 chain; it does not mutate Reth code or the VM's recorded scheduling decisions.
