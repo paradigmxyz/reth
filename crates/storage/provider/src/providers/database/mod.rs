@@ -469,6 +469,12 @@ impl<N: ProviderNodeTypes> ProviderFactory<N> {
     /// target. May also return any [`ProviderError`] that
     /// [`Self::check_consistency`] may return.
     pub fn assert_consistent(self) -> ProviderResult<Self> {
+        if let Some(unwind) = self.provider()?.pipeline_unwind()? {
+            return Err(ProviderError::MustUnwind {
+                data_source: "interrupted pipeline unwind",
+                unwind_to: unwind.target,
+            })
+        }
         let (rocksdb_unwind, static_file_unwind) = self.check_consistency()?;
 
         let source = match (rocksdb_unwind, static_file_unwind) {

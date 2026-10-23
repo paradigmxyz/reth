@@ -81,7 +81,7 @@ use reth_rpc_builder::config::RethRpcServerConfig;
 use reth_rpc_layer::JwtSecret;
 use reth_stages::{
     sets::DefaultStages,
-    stages::{EraImportSource, MerkleStage},
+    stages::{EraImportSource, EraStage, MerkleStage},
     MetricEvent, PipelineBuilder, PipelineTarget, StageId, StageSet,
 };
 use reth_static_file::{blocks_per_file_for_prune_distance, StaticFileProducer, StaticFileSegment};
@@ -576,6 +576,7 @@ where
         // resuming an interrupted partial trie unwind.
         let (partial_trie_unwind, has_persisted_partial_trie_unwind) =
             get_partial_trie_unwind_marker(&provider_ro)?;
+        let pending_pipeline_unwind = provider_ro.pipeline_unwind()?;
         drop(provider_ro);
         let persist_partial_trie_unwind =
             !has_persisted_partial_trie_unwind && partial_trie_unwind.is_some();
@@ -590,7 +591,10 @@ where
             partial_trie_unwind_target.is_none_or(|partial_trie| *unwind_block < partial_trie)
         });
 
-        if partial_trie_unwind_target.is_some() || storage_unwind.is_some() {
+        if partial_trie_unwind_target.is_some() ||
+            storage_unwind.is_some() ||
+            pending_pipeline_unwind.is_some()
+        {
             let build_unwind_pipeline = |walk_all_changed_branch_children| {
                 let (_tip_tx, tip_rx) = watch::channel(B256::ZERO);
                 let mut stages = DefaultStages::new(
@@ -605,6 +609,11 @@ where
                     None,
                 )
                 .builder()
+                // Recovery only moves the ERA checkpoint; it does not need an import source.
+                .add_before(
+                    EraStage::new(None::<EraImportSource>, self.toml_config().stages.etl.clone()),
+                    StageId::Headers,
+                )
                 .disable_all(disabled_stages);
 
                 if walk_all_changed_branch_children {
@@ -618,6 +627,10 @@ where
                     StaticFileProducer::new(factory.clone(), self.prune_modes()),
                 )
             };
+            let pending_unwind_target =
+                pending_pipeline_unwind.as_ref().map(|unwind| unwind.target);
+            let recovery_pipeline = pending_pipeline_unwind
+                .map(|_| build_unwind_pipeline(partial_trie_unwind_target.is_some()));
             let mut unwinds = Vec::with_capacity(2);
 
             if let Some(unwind_block) = partial_trie_unwind_target {
@@ -638,8 +651,8 @@ where
                     (None, Some(_)) => "static file",
                     (None, None) => unreachable!(),
                 };
-                assert_ne!(
-                    unwind_block, 0,
+                assert!(
+                    unwind_block != 0 || pending_unwind_target == Some(0),
                     "A {inconsistency_source} inconsistency was found that would trigger an unwind to block 0"
                 );
                 unwinds.push((
@@ -666,6 +679,9 @@ where
             // Pipeline should be run as blocking and panic if it fails.
             self.task_executor().spawn_critical_blocking_task("pipeline task", async move {
                 let result: Result<(), reth_stages::PipelineError> = async {
+                    if let Some(mut pipeline) = recovery_pipeline {
+                        pipeline.resume_unwind()?;
+                    }
                     for (unwind_target, inconsistency_source, pipeline, clear_partial_trie_unwind) in
                         unwinds
                     {
