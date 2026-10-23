@@ -220,69 +220,36 @@ pub trait EthCall: EstimateCall + LoadBlock + FullEthApiTypes {
                     // EIP-7708 already emits transfer logs: https://eips.ethereum.org/EIPS/eip-7708
                     let trace_transfers =
                         trace_transfers && !evm_env.version().feature(evm2::EvmFeatures::EIP7708);
-                    let (result, results) = if trace_transfers {
+                    let mut evm = this
+                        .evm_config()
+                        .block_executor_factory()
+                        .evm_with_env(&mut db, evm_env.clone());
+                    if trace_transfers {
                         // prepare inspector to capture transfer inside the evm so they are recorded
                         // and included in logs
-                        let inspector = TransferInspector::new(false).with_logs(true);
-                        let mut evm = this
-                            .evm_config()
-                            .block_executor_factory()
-                            .evm_with_env(&mut db, evm_env.clone());
-                        evm.set_inspector(inspector);
-                        let mut builder =
-                            this.evm_config().create_block_builder(evm, evm_env, &parent, ctx);
-                        if build_bal {
-                            builder.executor_mut().enable_block_access_list_builder();
-                        }
+                        evm.set_inspector(TransferInspector::new(false).with_logs(true));
+                    }
+                    let mut builder =
+                        this.evm_config().create_block_builder(evm, evm_env, &parent, ctx);
+                    if build_bal {
+                        builder.executor_mut().enable_block_access_list_builder();
+                    }
 
-                        if let Some(ref state_overrides) = state_overrides {
-                            simulate::apply_precompile_overrides(
-                                state_overrides,
-                                builder.evm_mut(),
-                            )
+                    if let Some(ref state_overrides) = state_overrides {
+                        simulate::apply_precompile_overrides(state_overrides, builder.evm_mut())
                             .map_err(|e| Self::Error::from_eth_err(EthApiError::other(e)))?;
-                        }
+                    }
 
-                        simulate::execute_transactions(
-                            builder,
-                            &*state_provider,
-                            calls,
-                            &mut remaining_call_gas_limit,
-                            chain_id,
-                            simulation_state.as_mut(),
-                            this.converter(),
-                        )
-                        .map_err(map_err)?
-                    } else {
-                        let evm = this
-                            .evm_config()
-                            .block_executor_factory()
-                            .evm_with_env(&mut db, evm_env.clone());
-                        let mut builder =
-                            this.evm_config().create_block_builder(evm, evm_env, &parent, ctx);
-                        if build_bal {
-                            builder.executor_mut().enable_block_access_list_builder();
-                        }
-
-                        if let Some(ref state_overrides) = state_overrides {
-                            simulate::apply_precompile_overrides(
-                                state_overrides,
-                                builder.evm_mut(),
-                            )
-                            .map_err(|e| Self::Error::from_eth_err(EthApiError::other(e)))?;
-                        }
-
-                        simulate::execute_transactions(
-                            builder,
-                            &*state_provider,
-                            calls,
-                            &mut remaining_call_gas_limit,
-                            chain_id,
-                            simulation_state.as_mut(),
-                            this.converter(),
-                        )
-                        .map_err(map_err)?
-                    };
+                    let (result, results) = simulate::execute_transactions(
+                        builder,
+                        &*state_provider,
+                        calls,
+                        &mut remaining_call_gas_limit,
+                        chain_id,
+                        simulation_state.as_mut(),
+                        this.converter(),
+                    )
+                    .map_err(map_err)?;
 
                     db.commit_source(&BundleSource(&result.execution_state));
                     let simulated_header = result.block.clone_sealed_header();
@@ -906,7 +873,7 @@ pub trait Call:
         DB: DynDatabase,
     {
         // track whether the request has a gas limit set
-        let request_has_gas_limit = request.as_ref().gas_limit().is_some();
+        let requested_gas = request.as_ref().gas_limit();
 
         // Disable block gas limit check to allow executing transactions with higher gas limit (call
         // gas limit): https://github.com/paradigmxyz/reth/issues/18577
@@ -957,9 +924,9 @@ pub trait Call:
         // Convert the request once, as sent, and apply every gas limit cap to the prepared env:
         // converting again with a changed gas limit could change the recovered caller or fee payer
         // when the signature commits to the gas limit.
-        let mut tx_env = self.create_txn_env(&evm_env, request.clone(), &mut *db)?;
+        let mut tx_env = self.create_txn_env(&evm_env, request, &mut *db)?;
 
-        if let Some(requested_gas) = request.as_ref().gas_limit() {
+        if let Some(requested_gas) = requested_gas {
             let global_gas_cap = self.call_gas_limit();
             if global_gas_cap != 0 && global_gas_cap < requested_gas {
                 // Callers routinely send gas limits above the cap, so this is not worth a warning.
@@ -977,11 +944,11 @@ pub trait Call:
             evm_env.block_env_mut().basefee = U256::ZERO;
         }
 
-        if !request_has_gas_limit {
+        if requested_gas.is_none() {
             // No gas limit was provided in the request, so we need to cap the transaction gas limit
             if gas_price > 0 {
                 // If gas price is specified, cap transaction gas limit with caller allowance
-                trace!(target: "rpc::eth::call", ?request, "Applying gas limit cap with caller allowance");
+                trace!(target: "rpc::eth::call", ?tx_env, "Applying gas limit cap with caller allowance");
                 let mut cap = self.caller_gas_allowance(&mut *db, &evm_env, &tx_env)?;
                 // The allowance must not raise the already applied RPC gas cap.
                 if self.call_gas_limit() != 0 {
