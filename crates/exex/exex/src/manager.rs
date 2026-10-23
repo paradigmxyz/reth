@@ -6,14 +6,14 @@ use alloy_eips::BlockNumHash;
 use futures::StreamExt;
 use itertools::Itertools;
 use metrics::Gauge;
-use reth_chain_state::{CanonStateNotification, CanonStateNotifications, ForkChoiceStream};
+use reth_chain_state::ForkChoiceStream;
 use reth_ethereum_primitives::EthPrimitives;
 use reth_evm::ConfigureEvm;
 use reth_metrics::{metrics::Counter, Metrics};
 use reth_node_api::NodePrimitives;
 use reth_primitives_traits::SealedHeader;
 use reth_provider::HeaderProvider;
-use reth_tracing::tracing::{debug, error, warn};
+use reth_tracing::tracing::{debug, warn};
 use std::{
     collections::VecDeque,
     fmt::Debug,
@@ -30,7 +30,6 @@ use tokio::sync::{
     mpsc::{self, error::SendError, UnboundedReceiver, UnboundedSender},
     watch,
 };
-use tokio_stream::wrappers::{errors::BroadcastStreamRecvError, BroadcastStream};
 use tokio_util::sync::{PollSendError, PollSender, ReusableBoxFuture};
 
 /// Default max size of the internal state notifications buffer.
@@ -227,8 +226,6 @@ pub struct ExExManager<P, N: NodePrimitives> {
     /// [`ExExNotification`] channel from the [`ExExManagerHandle`]s.
     handle_rx: UnboundedReceiver<(ExExNotificationSource, ExExNotification<N>)>,
 
-    /// Canonical state subscription, set by [`Self::with_canonical_state_notifications`].
-    canonical_state_notifications: Option<BroadcastStream<CanonStateNotification<N>>>,
     /// Notifications waiting for space in the internal buffer, in arrival order.
     queued_notifications: VecDeque<QueuedNotification<N>>,
 
@@ -308,7 +305,6 @@ where
 
             handle_rx,
 
-            canonical_state_notifications: None,
             queued_notifications: VecDeque::new(),
 
             min_id: 0,
@@ -348,23 +344,6 @@ where
     /// a value 6x higher than the default.
     pub const fn with_wal_blocks_warning(mut self, threshold: usize) -> Self {
         self.wal_blocks_warning = threshold;
-        self
-    }
-
-    /// Subscribes the manager to canonical chain updates.
-    ///
-    /// Notifications are written to the WAL independently of consumer backpressure, then read
-    /// into the bounded internal buffer in arrival order, together with [`ExExManagerHandle`]
-    /// notifications. A slow ExEx therefore grows the WAL instead of making the subscription lag.
-    /// Notifications read back from the WAL have no [`Chain::bals`](reth_provider::Chain::bals).
-    ///
-    /// If the subscription lags or closes, the manager stops receiving canonical notifications and
-    /// keeps running.
-    pub fn with_canonical_state_notifications(
-        mut self,
-        notifications: CanonStateNotifications<N>,
-    ) -> Self {
-        self.canonical_state_notifications = Some(BroadcastStream::new(notifications));
         self
     }
 
@@ -488,9 +467,9 @@ where
     /// Main loop of the [`ExExManager`]. The order of operations is as follows:
     /// 1. Handle incoming ExEx events. We do it before finalizing the WAL, because it depends on
     ///    the latest state of [`ExExEvent::FinishedHeight`] events.
-    /// 2. Receive [`ExExManagerHandle`] notifications, then canonical notifications, and push them
-    ///    to the internal buffer, or queue them if it's full. Canonical notifications are always
-    ///    committed to the WAL, and queued only by file ID.
+    /// 2. Receive [`ExExManagerHandle`] notifications and push them to the internal buffer, or
+    ///    queue them if it's full. Blockchain tree notifications are always committed to the WAL,
+    ///    and queued only by file ID.
     /// 3. Finalize the WAL with the finalized header, if necessary.
     /// 4. Move queued notifications to the internal buffer in arrival order.
     /// 5. Send notifications from the internal buffer to those ExExes that are ready to receive new
@@ -512,8 +491,7 @@ where
             }
         }
 
-        // Drain handle notifications. They are received before canonical notifications, because
-        // pipeline notifications precede the canonical notifications that follow a backfill.
+        // Drain handle notifications, even when the buffer is full.
         while let Poll::Ready(Some((source, notification))) = this.handle_rx.poll_recv(cx) {
             let committed_tip = notification.committed_chain().map(|chain| chain.tip().number());
             let reverted_tip = notification.reverted_chain().map(|chain| chain.tip().number());
@@ -521,46 +499,24 @@ where
 
             // Commit to WAL only notifications from blockchain tree. Pipeline notifications
             // always contain only finalized blocks.
-            match source {
+            let file_id = match source {
                 ExExNotificationSource::BlockchainTree => {
                     debug!(target: "exex::manager", ?committed_tip, ?reverted_tip, "Committing notification to WAL");
-                    this.wal.commit(&notification)?;
+                    Some(this.wal.commit(&notification)?)
                 }
                 ExExNotificationSource::Pipeline => {
                     debug!(target: "exex::manager", ?committed_tip, ?reverted_tip, "Notification was sent from pipeline, skipping WAL commit");
+                    None
                 }
-            }
+            };
 
             if this.can_push_notification() {
                 this.push_notification(notification);
+            } else if let Some(file_id) = file_id {
+                // Keep only the file ID, so a slow ExEx grows the WAL instead of memory.
+                this.queued_notifications.push_back(QueuedNotification::Wal(file_id));
             } else {
                 this.queued_notifications.push_back(QueuedNotification::Handle(notification));
-            }
-        }
-
-        // Commit canonical notifications even when the buffer is full, so slow ExExes can't make
-        // the subscription lag. The subscription cooperatively yields during bursts.
-        while let Some(notifications) = &mut this.canonical_state_notifications {
-            let notification = match notifications.poll_next_unpin(cx) {
-                Poll::Ready(Some(Ok(notification))) => ExExNotification::from(notification),
-                Poll::Ready(Some(Err(BroadcastStreamRecvError::Lagged(skipped)))) => {
-                    error!(target: "exex::manager", skipped, "Canonical state notifications lagged, stopping canonical notification delivery");
-                    this.canonical_state_notifications = None;
-                    break
-                }
-                Poll::Ready(None) => {
-                    debug!(target: "exex::manager", "Canonical state notification stream closed");
-                    this.canonical_state_notifications = None;
-                    break
-                }
-                Poll::Pending => break,
-            };
-            let file_id = this.wal.commit(&notification)?;
-            if this.can_push_notification() {
-                // Avoid reading the notification back from disk on the normal path.
-                this.push_notification(notification);
-            } else {
-                this.queued_notifications.push_back(QueuedNotification::Wal(file_id));
             }
         }
 
@@ -760,7 +716,7 @@ impl<N: NodePrimitives> Clone for ExExManagerHandle<N> {
 /// A notification waiting for space in the [`ExExManager`]'s internal buffer.
 #[derive(Debug)]
 enum QueuedNotification<N: NodePrimitives> {
-    /// A canonical notification stored in the WAL file with this ID.
+    /// A blockchain tree notification stored in the WAL file with this ID.
     Wal(u32),
     /// A notification received from an [`ExExManagerHandle`].
     Handle(ExExNotification<N>),
@@ -773,6 +729,7 @@ mod tests {
     use alloy_primitives::B256;
     use futures::{StreamExt, TryStreamExt};
     use rand::Rng;
+    use reth_chain_state::CanonStateNotification;
     use reth_db_common::init::init_genesis;
     use reth_evm_ethereum::EthEvmConfig;
     use reth_primitives_traits::RecoveredBlock;
@@ -785,7 +742,6 @@ mod tests {
         self, random_block, random_block_range, BlockParams, BlockRangeParams,
     };
     use std::time::Duration;
-    use tokio::sync::broadcast;
 
     fn empty_finalized_header_stream() -> ForkChoiceStream<SealedHeader> {
         let (tx, rx) = watch::channel(None);
@@ -1605,10 +1561,7 @@ mod tests {
         .collect()
     }
 
-    fn canonical_manager(
-        wal: Wal,
-        notifications: CanonStateNotifications,
-    ) -> ExExManager<MockEthProvider, EthPrimitives> {
+    fn canonical_manager(wal: Wal) -> ExExManager<MockEthProvider, EthPrimitives> {
         ExExManager::new(
             MockEthProvider::default(),
             vec![],
@@ -1616,7 +1569,6 @@ mod tests {
             wal,
             empty_finalized_header_stream(),
         )
-        .with_canonical_state_notifications(notifications)
     }
 
     #[tokio::test]
@@ -1638,15 +1590,14 @@ mod tests {
             EthEvmConfig::mainnet(),
             wal.handle(),
         );
-        let (canonical, receiver) = broadcast::channel(4);
         let mut manager = ExExManager::new(
             provider,
             vec![first, second],
             2,
             wal,
             empty_finalized_header_stream(),
-        )
-        .with_canonical_state_notifications(receiver);
+        );
+        let canonical = manager.handle();
         let mut cx = Context::from_waker(futures::task::noop_waker_ref());
         let mut updates = canonical_notifications(16);
 
@@ -1663,17 +1614,16 @@ mod tests {
         updates.push(CanonStateNotification::Reorg { old: new, new: old });
         let live_parent = updates.last().unwrap().tip().num_hash();
 
-        // Neither consumer is polled while the subscription is filled to capacity between manager
-        // polls, so the manager must keep receiving with its two-entry buffer full.
+        // Neither consumer is polled between manager polls, so the manager must keep receiving
+        // tree notifications with its two-entry buffer full.
         for chunk in updates.chunks(4) {
             for update in chunk {
-                canonical.send(update.clone())?;
+                canonical.send(ExExNotificationSource::BlockchainTree, update.clone().into())?;
             }
             assert!(Pin::new(&mut manager).poll(&mut cx)?.is_pending());
             assert!(manager.buffer.len() <= manager.max_capacity);
             tokio::task::yield_now().await;
         }
-        assert!(manager.canonical_state_notifications.is_some());
         assert!(!manager.queued_notifications.is_empty());
         let expected = updates.into_iter().map(ExExNotification::from).collect::<Vec<_>>();
         assert_eq!(manager.wal.iter_notifications()?.collect::<WalResult<Vec<_>>>()?, expected);
@@ -1710,7 +1660,7 @@ mod tests {
             new: Arc::new(Chain::new(vec![block], Default::default(), Default::default())),
         };
         let live_head = live.tip().num_hash();
-        canonical.send(live.clone())?;
+        canonical.send(ExExNotificationSource::BlockchainTree, live.clone().into())?;
         let live = ExExNotification::from(live);
         tokio::time::timeout(Duration::from_secs(10), async {
             assert_eq!(first_notifications.try_next().await?, Some(live.clone()));
@@ -1746,21 +1696,20 @@ mod tests {
             EthEvmConfig::mainnet(),
             wal.handle(),
         );
-        let (canonical, receiver) = broadcast::channel(1);
         let mut manager =
-            ExExManager::new(provider, vec![exex], 1, wal, empty_finalized_header_stream())
-                .with_canonical_state_notifications(receiver);
+            ExExManager::new(provider, vec![exex], 1, wal, empty_finalized_header_stream());
+        let canonical = manager.handle();
         let mut cx = Context::from_waker(futures::task::noop_waker_ref());
         let updates = canonical_notifications(3);
         let expected = updates.iter().cloned().map(ExExNotification::from).collect::<Vec<_>>();
 
-        // The second pipeline notification is queued because the buffer is full, and the
-        // canonical notification arrives after it.
+        // The second pipeline notification is queued because the buffer is full, and the tree
+        // notification arrives after it.
         for notification in &expected[..2] {
             manager.handle.send(ExExNotificationSource::Pipeline, notification.clone())?;
         }
         assert!(Pin::new(&mut manager).poll(&mut cx)?.is_pending());
-        canonical.send(updates[2].clone())?;
+        canonical.send(ExExNotificationSource::BlockchainTree, updates[2].clone().into())?;
         assert!(Pin::new(&mut manager).poll(&mut cx)?.is_pending());
 
         tokio::spawn(manager);
@@ -1775,38 +1724,9 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_canonical_notification_stream_lagged() -> eyre::Result<()> {
-        let temp_dir = tempfile::tempdir()?;
-        let (canonical, receiver) = broadcast::channel(1);
-        let mut manager = canonical_manager(Wal::new(temp_dir.path())?, receiver);
-        for update in canonical_notifications(2) {
-            canonical.send(update)?;
-        }
-
-        // Lagging stops canonical notification delivery without terminating the manager.
-        let mut cx = Context::from_waker(futures::task::noop_waker_ref());
-        assert!(Pin::new(&mut manager).poll(&mut cx)?.is_pending());
-        assert!(manager.canonical_state_notifications.is_none());
-        assert_eq!(manager.wal.iter_notifications()?.next().transpose()?, None);
-        Ok(())
-    }
-
-    #[tokio::test]
-    async fn test_canonical_notification_stream_closed() -> eyre::Result<()> {
-        let temp_dir = tempfile::tempdir()?;
-        let mut manager = canonical_manager(Wal::new(temp_dir.path())?, broadcast::channel(1).1);
-
-        let mut cx = Context::from_waker(futures::task::noop_waker_ref());
-        assert!(Pin::new(&mut manager).poll(&mut cx)?.is_pending());
-        assert!(manager.canonical_state_notifications.is_none());
-        Ok(())
-    }
-
-    #[tokio::test]
     async fn test_canonical_wal_finalization_keeps_queued_notifications() -> eyre::Result<()> {
         let temp_dir = tempfile::tempdir()?;
         let wal = Wal::<EthPrimitives>::new(temp_dir.path())?;
-        let (canonical, receiver) = broadcast::channel(4);
         let (finalized, finalized_receiver) = watch::channel(None);
         let mut manager = ExExManager::new(
             MockEthProvider::<EthPrimitives>::default(),
@@ -1814,13 +1734,13 @@ mod tests {
             1,
             wal,
             ForkChoiceStream::new(finalized_receiver),
-        )
-        .with_canonical_state_notifications(receiver);
+        );
+        let canonical = manager.handle();
         let updates = canonical_notifications(3);
         let header = updates.last().unwrap().tip().clone_sealed_header();
         let expected = updates.iter().cloned().map(ExExNotification::from).collect::<Vec<_>>();
         for update in updates {
-            canonical.send(update)?;
+            canonical.send(ExExNotificationSource::BlockchainTree, update.into())?;
         }
         let mut cx = Context::from_waker(futures::task::noop_waker_ref());
         assert!(Pin::new(&mut manager).poll(&mut cx)?.is_pending());
@@ -1847,9 +1767,12 @@ mod tests {
     async fn test_canonical_wal_commit_error() -> eyre::Result<()> {
         let temp_dir = tempfile::tempdir()?;
         let directory = temp_dir.path().join("wal");
-        let (canonical, receiver) = broadcast::channel(1);
-        let mut manager = canonical_manager(Wal::new(&directory)?, receiver);
-        canonical.send(canonical_notifications(1).remove(0))?;
+        let mut manager = canonical_manager(Wal::new(&directory)?);
+        let canonical = manager.handle();
+        canonical.send(
+            ExExNotificationSource::BlockchainTree,
+            canonical_notifications(1).remove(0).into(),
+        )?;
         reth_fs_util::remove_dir_all(&directory)?;
 
         let mut cx = Context::from_waker(futures::task::noop_waker_ref());
@@ -1863,10 +1786,10 @@ mod tests {
     #[tokio::test]
     async fn test_canonical_wal_missing_entry() -> eyre::Result<()> {
         let temp_dir = tempfile::tempdir()?;
-        let (canonical, receiver) = broadcast::channel(2);
-        let mut manager = canonical_manager(Wal::new(temp_dir.path())?, receiver);
+        let mut manager = canonical_manager(Wal::new(temp_dir.path())?);
+        let canonical = manager.handle();
         for update in canonical_notifications(2) {
-            canonical.send(update)?;
+            canonical.send(ExExNotificationSource::BlockchainTree, update.into())?;
         }
         let mut cx = Context::from_waker(futures::task::noop_waker_ref());
         assert!(Pin::new(&mut manager).poll(&mut cx)?.is_pending());
