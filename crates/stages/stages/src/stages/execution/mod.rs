@@ -563,8 +563,10 @@ where
         provider: &Provider,
         input: UnwindInput,
     ) -> Result<UnwindOutput, StageError> {
-        let (range, unwind_to, _) =
-            input.unwind_block_range_with_threshold(self.thresholds.max_blocks.unwrap_or(u64::MAX));
+        // The range helper measures the distance between inclusive endpoints, not a block count.
+        let (range, unwind_to, _) = input.unwind_block_range_with_threshold(
+            self.thresholds.max_blocks.unwrap_or(u64::MAX).saturating_sub(1),
+        );
         if range.is_empty() {
             return Ok(UnwindOutput {
                 checkpoint: input.checkpoint.with_block_number(input.unwind_to),
@@ -578,7 +580,8 @@ where
         // Unwind account and storage changesets, as well as receipts.
         //
         // This also updates `PlainStorageState` and `PlainAccountState`.
-        let bundle_state_with_receipts = provider.take_state_above(unwind_to)?;
+        let bundle_state_with_receipts =
+            provider.take_state_above_until(unwind_to, input.checkpoint.block_number)?;
 
         // Prepare the input for post unwind commit hook, where an `ExExNotification` will be sent.
         if self.exex_manager_handle.has_exexs() {

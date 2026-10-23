@@ -14,15 +14,13 @@ use reth_consensus::noop::NoopConsensus;
 use reth_db::DatabaseEnv;
 use reth_downloaders::{bodies::noop::NoopBodiesDownloader, headers::noop::NoopHeaderDownloader};
 use reth_evm::ConfigureEvm;
-use reth_exex::ExExManagerHandle;
 use reth_provider::{providers::ProviderNodeTypes, BlockNumReader, ProviderFactory};
 use reth_stages::{
     sets::{DefaultStages, OfflineStages},
-    stages::ExecutionStage,
-    ExecutionStageThresholds, Pipeline, StageSet,
+    Pipeline, StageSet,
 };
 use reth_static_file::StaticFileProducer;
-use std::sync::Arc;
+use std::{num::NonZeroU64, sync::Arc};
 use tokio::sync::watch;
 use tracing::info;
 
@@ -39,6 +37,10 @@ pub struct Command<C: ChainSpecParser> {
     /// unwound.
     #[arg(long)]
     offline: bool,
+
+    /// Upper bound on blocks unwound per Execution stage commit, capped further by config.
+    #[arg(long, default_value = "10000")]
+    execution_batch_size: NonZeroU64,
 }
 
 impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C> {
@@ -82,10 +84,18 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
 
     fn build_pipeline<N: ProviderNodeTypes<ChainSpec = C::ChainSpec>>(
         self,
-        config: Config,
+        mut config: Config,
         provider_factory: ProviderFactory<N>,
         evm_config: impl ConfigureEvm<Primitives = N::Primitives> + 'static,
     ) -> Result<Pipeline<N>, eyre::Error> {
+        config.stages.execution.max_blocks = Some(
+            config
+                .stages
+                .execution
+                .max_blocks
+                .unwrap_or(u64::MAX)
+                .min(self.execution_batch_size.get()),
+        );
         let stage_conf = &config.stages;
         let prune_modes = config.prune.segments.clone();
 
@@ -110,23 +120,12 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
                     Arc::new(NoopConsensus::default()),
                     NoopHeaderDownloader::default(),
                     NoopBodiesDownloader::default(),
-                    evm_config.clone(),
+                    evm_config,
                     stage_conf.clone(),
                     prune_modes.clone(),
                     None,
                 )
-                .set(ExecutionStage::new(
-                    evm_config,
-                    Arc::new(NoopConsensus::default()),
-                    ExecutionStageThresholds {
-                        max_blocks: None,
-                        max_changes: None,
-                        max_cumulative_gas: None,
-                        max_duration: None,
-                    },
-                    stage_conf.execution_external_clean_threshold(),
-                    ExExManagerHandle::empty(),
-                )),
+                .builder(),
             )
         };
 
@@ -200,6 +199,7 @@ mod tests {
             "100",
         ]);
         assert_eq!(cmd.command, Subcommands::ToBlock { target: BlockHashOrNumber::Number(100) });
+        assert_eq!(cmd.execution_batch_size.get(), 10_000);
 
         let cmd = Command::<EthereumChainSpecParser>::parse_from([
             "reth",
@@ -218,5 +218,26 @@ mod tests {
         ]);
         assert_eq!(cmd.command, Subcommands::ToBlock { target: BlockHashOrNumber::Number(100) });
         assert_eq!(cmd.env.chain.chain_id(), SEPOLIA.chain_id());
+    }
+
+    #[test]
+    fn parse_execution_batch_size() {
+        let cmd = Command::<EthereumChainSpecParser>::parse_from([
+            "reth",
+            "--execution-batch-size",
+            "500",
+            "to-block",
+            "100",
+        ]);
+        assert_eq!(cmd.execution_batch_size.get(), 500);
+        let err = Command::<EthereumChainSpecParser>::try_parse_from([
+            "reth",
+            "--execution-batch-size",
+            "0",
+            "to-block",
+            "100",
+        ])
+        .unwrap_err();
+        assert_eq!(err.kind(), clap::error::ErrorKind::ValueValidation);
     }
 }

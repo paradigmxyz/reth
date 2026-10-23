@@ -576,6 +576,7 @@ where
         // resuming an interrupted partial trie unwind.
         let (partial_trie_unwind, has_persisted_partial_trie_unwind) =
             get_partial_trie_unwind_marker(&provider_ro)?;
+        let pending_pipeline_unwind = reth_provider::pending_pipeline_unwind_target(&provider_ro)?;
         drop(provider_ro);
         let persist_partial_trie_unwind =
             !has_persisted_partial_trie_unwind && partial_trie_unwind.is_some();
@@ -630,16 +631,17 @@ where
             }
 
             if let Some(unwind_block) = storage_unwind {
-                // Highly unlikely to happen, and given its destructive nature, it's better to
-                // panic instead. Unwinding to 0 would leave MDBX with a huge free list size.
+                // A storage inconsistency at genesis is suspicious and can leave MDBX with a
+                // huge free list. An explicit interrupted pipeline unwind to genesis is valid
+                // and must be resumed instead of panicking.
                 let inconsistency_source = match (rocksdb_unwind, static_file_unwind) {
                     (Some(_), Some(_)) => "RocksDB and static file",
                     (Some(_), None) => "RocksDB",
-                    (None, Some(_)) => "static file",
+                    (None, Some(_)) => "static file or interrupted pipeline unwind",
                     (None, None) => unreachable!(),
                 };
-                assert_ne!(
-                    unwind_block, 0,
+                assert!(
+                    unwind_block != 0 || pending_pipeline_unwind == Some(0),
                     "A {inconsistency_source} inconsistency was found that would trigger an unwind to block 0"
                 );
                 unwinds.push((
