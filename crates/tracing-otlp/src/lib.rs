@@ -1,5 +1,5 @@
-//! Provides tracing layers for `OpenTelemetry` that export spans, logs, and metrics to an OTLP
-//! endpoint.
+//! With the `otlp` feature, provides tracing layers for `OpenTelemetry` that export spans, logs,
+//! and metrics to an OTLP endpoint.
 //!
 //! This module simplifies the integration of `OpenTelemetry` with OTLP export in Rust
 //! applications. It allows for easily capturing and exporting distributed traces, logs,
