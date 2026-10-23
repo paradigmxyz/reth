@@ -236,7 +236,7 @@ pub trait EthState: LoadState + SpawnBlocking {
                             .map_err(Self::Error::from_eth_err)?;
                         let storage_keys =
                             slots.into_iter().map(JsonStorageKey::from).collect::<Vec<_>>();
-                        Ok(proof.into_eip1186_response(storage_keys))
+                        Ok(proof.into_eip1186_response_with(storage_keys, true))
                     })
                     .collect::<Result<Vec<_>, Self::Error>>()
             })
