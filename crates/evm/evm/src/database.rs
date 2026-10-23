@@ -64,17 +64,7 @@ where
     type Error = ProviderError;
 
     fn get_account(&mut self, address: &Address) -> Result<Option<AccountInfo>, Self::Error> {
-        Ok(self.0.basic_account(address)?.map(|account| AccountInfo {
-            #[cfg(feature = "account-ext")]
-            extension: evm2::evm::AccountExtension::from_shared(
-                account.extension.clone().into_shared(),
-            ),
-            balance: account.balance,
-            nonce: account.nonce,
-            code_hash: account.get_bytecode_hash(),
-            code: None,
-            _non_exhaustive: (),
-        }))
+        Ok(self.0.basic_account(address)?.map(Into::into))
     }
 
     fn get_code_by_hash(&mut self, code_hash: &B256) -> Result<Bytecode, Self::Error> {
@@ -82,7 +72,7 @@ where
     }
 
     fn get_storage(&mut self, address: &Address, key: &Word) -> Result<Word, Self::Error> {
-        Ok(self.0.storage(*address, B256::new(key.to_be_bytes()))?.unwrap_or_default())
+        Ok(self.0.storage(*address, B256::from(*key))?.unwrap_or_default())
     }
 
     fn get_block_hash(&mut self, number: &Word) -> Result<B256, Self::Error> {
