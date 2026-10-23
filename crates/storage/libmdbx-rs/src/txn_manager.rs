@@ -279,7 +279,7 @@ mod read_transactions {
                     // Log outside of `retain`, which holds a shard lock that blocks opening and
                     // dropping read transactions.
                     for (open_duration, backtrace) in newly_timed_out {
-                        warn!(target: "libmdbx", ?open_duration, ?backtrace, "Long-lived read transaction has been timed out");
+                        warn!(target: "libmdbx", ?open_duration, ?backtrace, "Long-lived read transaction has been timed out, its snapshot is held until it is dropped");
                     }
 
                     if !self.active.is_empty() {

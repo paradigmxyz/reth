@@ -73,6 +73,7 @@ pub struct Transaction<K>
 where
     K: TransactionKind,
 {
+    /// The transaction pointer itself.
     txn: *mut ffi::MDBX_txn,
     /// Set by the read transaction monitor in `TxnManager` once the transaction has been open for
     /// too long, or `None` if the transaction isn't monitored. Every following operation fails,
@@ -83,6 +84,7 @@ where
     /// transaction, for example by a [`TableObject`] decoder that reaches it through a thread
     /// local.
     executing: RefCell<()>,
+    /// Whether the transaction has committed.
     committed: bool,
     env: Environment,
     _marker: PhantomData<fn(K)>,
@@ -312,7 +314,6 @@ where
             return
         }
 
-        // A timed out transaction is still valid, so it is released like any other.
         let txn = self.txn;
         if K::IS_READ_ONLY {
             #[cfg(feature = "read-tx-timeouts")]

@@ -16,6 +16,11 @@ use std::{borrow::Cow, ffi::c_void, fmt, marker::PhantomData, mem, ptr};
 /// A cursor for navigating the items within a database.
 ///
 /// A cursor borrows its transaction, so like the transaction it can't be used by multiple threads.
+///
+/// ```compile_fail
+/// fn assert_send<T: Send>() {}
+/// assert_send::<reth_libmdbx::Cursor<'static, reth_libmdbx::RO>>();
+/// ```
 pub struct Cursor<'tx, K>
 where
     K: TransactionKind,
