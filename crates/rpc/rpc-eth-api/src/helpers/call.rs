@@ -899,19 +899,6 @@ pub trait Call:
         // track whether the request has a gas limit set
         let request_has_gas_limit = request.as_ref().gas_limit().is_some();
 
-        if let Some(requested_gas) = request.as_ref().gas_limit() {
-            let global_gas_cap = self.call_gas_limit();
-            if global_gas_cap != 0 && global_gas_cap < requested_gas {
-                // Callers routinely send gas limits above the cap, so this is not worth a warning.
-                // Log only the limits: the request carries caller calldata and addresses.
-                debug!(target: "rpc::eth::call", requested_gas, global_gas_cap, "Capping gas limit to global gas cap");
-                request.as_mut().set_gas_limit(global_gas_cap);
-            }
-        } else {
-            // cap request's gas limit to call gas limit
-            request.as_mut().set_gas_limit(self.call_gas_limit());
-        }
-
         // Disable block gas limit check to allow executing transactions with higher gas limit (call
         // gas limit): https://github.com/paradigmxyz/reth/issues/18577
         evm_env.version_mut().features.remove(evm2::EvmFeatures::BLOCK_GAS_LIMIT_CHECK);
@@ -951,7 +938,23 @@ pub trait Call:
         }
 
         let gas_price = request_gas_price(request.as_ref(), evm_env.block_base_fee());
-        let tx_env = self.create_txn_env(&evm_env, request.clone(), &mut *db)?;
+        // Convert the request once, as sent, and apply every gas limit cap to the prepared env:
+        // converting again with a changed gas limit could change the recovered caller or fee payer
+        // when the signature commits to the gas limit.
+        let mut tx_env = self.create_txn_env(&evm_env, request.clone(), &mut *db)?;
+
+        if let Some(requested_gas) = request.as_ref().gas_limit() {
+            let global_gas_cap = self.call_gas_limit();
+            if global_gas_cap != 0 && global_gas_cap < requested_gas {
+                // Callers routinely send gas limits above the cap, so this is not worth a warning.
+                // Log only the limits: the request carries caller calldata and addresses.
+                debug!(target: "rpc::eth::call", requested_gas, global_gas_cap, "Capping gas limit to global gas cap");
+                tx_env.inner_mut().set_gas_limit(global_gas_cap);
+            }
+        } else {
+            // cap request's gas limit to call gas limit
+            tx_env.inner_mut().set_gas_limit(self.call_gas_limit());
+        }
 
         // lower the basefee to 0 to avoid breaking EVM invariants (basefee < gasprice): <https://github.com/ethereum/go-ethereum/blob/355228b011ef9a85ebc0f21e7196f892038d49f0/internal/ethapi/api.go#L700-L704>
         if gas_price == 0 {
@@ -969,11 +972,12 @@ pub trait Call:
                     cap = cap.min(tx_env.gas_limit());
                 }
                 // ensure we cap gas_limit to the block's
-                request.as_mut().set_gas_limit(cap.min(evm_env.block_env().gas_limit.to::<u64>()));
+                tx_env
+                    .inner_mut()
+                    .set_gas_limit(cap.min(evm_env.block_env().gas_limit.to::<u64>()));
             }
         }
 
-        let tx_env = self.create_txn_env(&evm_env, request, &mut *db)?;
         Ok((evm_env, tx_env))
     }
 }
