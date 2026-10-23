@@ -35,13 +35,15 @@ pub(crate) enum ViewMode {
     GoToPage,
 }
 
+/// Fetches a page of entries as pairs of the formatted key and the value serialized as JSON.
+pub(crate) type PageFetcher<'a> = Box<dyn FnMut(usize, usize) -> Vec<(String, String)> + 'a>;
+
 pub(crate) struct DbListTUI<'a> {
     /// Fetcher for the next page of items.
     ///
     /// The fetcher is passed the index of the first item to fetch, and the number of items to
-    /// fetch from that item. It returns the entries as pairs of the formatted key and the value
-    /// serialized as JSON.
-    fetch: Box<dyn FnMut(usize, usize) -> Vec<(String, String)> + 'a>,
+    /// fetch from that item.
+    fetch: PageFetcher<'a>,
     /// Skip N indices of the key list in the DB.
     skip: usize,
     /// The amount of entries to show per page
@@ -61,7 +63,7 @@ pub(crate) struct DbListTUI<'a> {
 impl<'a> DbListTUI<'a> {
     /// Create a new database list TUI
     pub(crate) fn new(
-        fetch: Box<dyn FnMut(usize, usize) -> Vec<(String, String)> + 'a>,
+        fetch: PageFetcher<'a>,
         skip: usize,
         count: usize,
         total_entries: usize,
