@@ -467,7 +467,10 @@ pub trait BlockExecutorFactory {
     /// Additional EVM factory configuration owned by this executor factory.
     type EvmFactory;
     /// Runtime EVM type family.
-    type EvmTypes: evm2::EvmTypes<TxResultExt: Send + Sync>;
+    type EvmTypes: evm2::EvmTypes<
+        TxResultExt: Send + Sync,
+        SpecId: Eq + core::hash::Hash + Debug + Send + Sync + 'static,
+    >;
     /// Consensus transaction type consumed by executors from this factory.
     type Transaction: Debug + Clone + Send + Sync + 'static;
     /// Receipt type produced by executors from this factory.

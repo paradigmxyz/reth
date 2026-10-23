@@ -34,7 +34,10 @@ use convert::payload_block_env;
 #[cfg(feature = "std")]
 use reth_ethereum_primitives::TransactionSigned;
 #[cfg(feature = "std")]
-use reth_evm::{ConfigureEngineEvm, ExecutableTxIterator, ExecutionCtxFor};
+use reth_evm::{
+    precompile_cache::{CachedPrecompileProvider, PrecompileCacheMap},
+    ConfigureEngineEvm, EvmFor, ExecutableTxIterator, ExecutionCtxFor, SpecFor,
+};
 #[cfg(feature = "std")]
 use reth_primitives_traits::SignedTransaction;
 #[cfg(feature = "std")]
@@ -450,17 +453,22 @@ where
         }
     }
 
-    fn with_precompile_cache_disabled(mut self, disabled: bool) -> Self
-    where
-        Self: Sized,
-    {
-        self.executor_factory = self.executor_factory.with_precompile_cache_disabled(disabled);
-        self
-    }
-
-    fn with_precompile_cache_metrics(mut self, enabled: bool) -> Self {
-        self.executor_factory = self.executor_factory.with_precompile_cache_metrics(enabled);
-        self
+    #[cfg(feature = "std")]
+    fn cache_precompiles(
+        &self,
+        evm: &mut EvmFor<'_, Self>,
+        spec: SpecFor<Self>,
+        cache_map: PrecompileCacheMap<SpecFor<Self>>,
+        metrics_enabled: bool,
+    ) {
+        let factory = self.executor_factory.evm_factory();
+        evm.set_precompiles(CachedPrecompileProvider::new(
+            factory.precompiles(spec),
+            cache_map,
+            spec,
+            factory.precompile_cache_policy(spec),
+            metrics_enabled,
+        ));
     }
 
     fn jit_backend(&self) -> Option<&dyn reth_evm::JitBackend> {

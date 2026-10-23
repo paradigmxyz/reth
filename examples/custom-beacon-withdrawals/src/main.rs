@@ -15,9 +15,10 @@ use reth_ethereum::{
     cli::interface::Cli,
     evm::{
         primitives::{
-            BlockExecutionError, BlockExecutionOutput, BlockExecutor, BlockExecutorFactory,
-            BundleState, ConfigureEngineEvm, ConfigureEvm, ExecutableTxIterator, ExecutorTx,
-            GasOutput, NextBlockEnvAttributes, StateUpdate,
+            precompile_cache::PrecompileCacheMap, BlockExecutionError, BlockExecutionOutput,
+            BlockExecutor, BlockExecutorFactory, BundleState, ConfigureEngineEvm, ConfigureEvm,
+            EvmFor, ExecutableTxIterator, ExecutorTx, GasOutput, NextBlockEnvAttributes, SpecFor,
+            StateUpdate,
         },
         EthBlockAssembler, EthBlockExecutionCtx, EthBlockExecutor, EthBlockExecutorFactory,
         EthEvmConfig, EthEvmEnv, RethEvmFactory, RethReceiptBuilder,
@@ -136,13 +137,14 @@ impl ConfigureEvm for CustomEvmConfig {
         Self { inner, executor_factory }
     }
 
-    fn with_precompile_cache_disabled(self, disabled: bool) -> Self
-    where
-        Self: Sized,
-    {
-        let inner = self.inner.with_precompile_cache_disabled(disabled);
-        let executor_factory = CustomBlockExecutorFactory::new(inner.executor_factory.clone());
-        Self { inner, executor_factory }
+    fn cache_precompiles(
+        &self,
+        evm: &mut EvmFor<'_, Self>,
+        spec: SpecFor<Self>,
+        cache_map: PrecompileCacheMap<SpecFor<Self>>,
+        metrics_enabled: bool,
+    ) {
+        self.inner.cache_precompiles(evm, spec, cache_map, metrics_enabled);
     }
 }
 

@@ -278,23 +278,19 @@ pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
         self.with_jit_support_enabled(true)
     }
 
-    /// Returns a config with precompile cache disabled for subsequently created EVMs, if
-    /// supported.
-    #[auto_impl(keep_default_for(&, Arc))]
-    fn with_precompile_cache_disabled(self, _disabled: bool) -> Self
-    where
-        Self: Sized,
-    {
-        self
-    }
-
-    /// Enables precompile cache metrics for subsequently created EVMs, if supported.
-    #[auto_impl(keep_default_for(&, Arc))]
-    fn with_precompile_cache_metrics(self, _enabled: bool) -> Self
-    where
-        Self: Sized,
-    {
-        self
+    /// Wraps the precompiles of `evm`, which was created for `spec`, in `cache_map`.
+    ///
+    /// Only the engine calls this, for the EVMs it executes and prewarms blocks with. Configs that
+    /// do not support precompile caching leave the EVM unchanged. `metrics_enabled` selects whether
+    /// the wrapper records cache hit, miss, and size metrics.
+    #[cfg(feature = "std")]
+    fn cache_precompiles(
+        &self,
+        _evm: &mut EvmFor<'_, Self>,
+        _spec: SpecFor<Self>,
+        _cache_map: precompile_cache::PrecompileCacheMap<SpecFor<Self>>,
+        _metrics_enabled: bool,
+    ) {
     }
 
     /// Returns the JIT backend, if supported.

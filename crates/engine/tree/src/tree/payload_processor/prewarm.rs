@@ -31,8 +31,8 @@ use evm2::evm::StateChangeSource;
 use metrics::{Counter, Gauge, Histogram};
 use rayon::prelude::*;
 use reth_evm::{
-    database::StateProviderDatabase, ConfigureEvm, Evm as EvmInstance, EvmEnv, EvmFor, EvmTypesFor,
-    ExecutableTxFor, RecoveredTx,
+    database::StateProviderDatabase, precompile_cache::PrecompileCacheMap, ConfigureEvm,
+    Evm as EvmInstance, EvmEnv, EvmFor, EvmTypesFor, ExecutableTxFor, RecoveredTx, SpecFor,
 };
 use reth_execution_types::{EvmStateChangeSink, ExecutionAccountChangeRef, ExecutionStorageChange};
 use reth_metrics::Metrics;
@@ -749,6 +749,10 @@ where
     pub disable_bal_batch_io: bool,
     /// Results of transaction prewarming that block execution may reuse, `None` if disabled.
     pub(crate) prewarm_results: Option<Arc<PrewarmResults<EvmTypesFor<Evm>>>>,
+    /// Whether the precompile cache is disabled.
+    pub precompile_cache_disabled: bool,
+    /// The precompile cache map.
+    pub precompile_cache_map: PrecompileCacheMap<SpecFor<Evm>>,
 }
 
 /// Per-thread EVM state initialised by [`PrewarmContext::evm_for_ctx`] and stored in
@@ -799,6 +803,7 @@ where
 
         let evm_env =
             self.env.evm_env.clone().with_nonce_check_disabled().with_balance_check_disabled();
+        let spec = evm_env.spec_id();
 
         let recording = RecordingHandle::default();
         let config = if self.prewarm_results.is_some() {
@@ -807,11 +812,17 @@ where
             self.evm_config.clone()
         };
         let db = StateProviderDatabase::new(state_provider);
-        let evm = if self.prewarm_results.is_some() {
+        let mut evm = if self.prewarm_results.is_some() {
             config.evm_with_env(RecordingDb::new(db, recording.clone()), evm_env)
         } else {
             config.evm_with_env(db, evm_env)
         };
+
+        if !self.precompile_cache_disabled {
+            // No metrics for prewarm.
+            config.cache_precompiles(&mut evm, spec, self.precompile_cache_map.clone(), false);
+        }
+
         PrewarmEvmState { evm: Some(evm), recording }
     }
 
@@ -1099,6 +1110,8 @@ mod tests {
             disable_bal_parallel_state_root: false,
             disable_bal_batch_io: false,
             prewarm_results: None,
+            precompile_cache_disabled: false,
+            precompile_cache_map: PrecompileCacheMap::default(),
         };
         let (task, actions_tx) =
             PrewarmCacheTask::new(Runtime::test(), PayloadExecutionCache::default(), ctx);
@@ -1160,6 +1173,8 @@ mod tests {
                 disable_bal_parallel_state_root: false,
                 disable_bal_batch_io: false,
                 prewarm_results: Some(Arc::clone(&results)),
+                precompile_cache_disabled: false,
+                precompile_cache_map: PrecompileCacheMap::default(),
             };
             let tx =
                 WithTxEnv { tx_env: ctx.evm_config.tx_env(tx.clone()), tx: Arc::new(tx.clone()) };
@@ -1250,6 +1265,8 @@ mod tests {
             disable_bal_parallel_state_root: false,
             disable_bal_batch_io: false,
             prewarm_results: None,
+            precompile_cache_disabled: false,
+            precompile_cache_map: PrecompileCacheMap::default(),
         }
     }
 

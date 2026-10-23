@@ -84,9 +84,8 @@ pub use payload_validator::{BasicEngineValidator, EngineValidator};
 pub use persistence_state::PersistenceState;
 pub use reth_engine_primitives::TreeConfig;
 pub use reth_execution_cache::{
-    precompile_cache, CachedStateCacheMetrics, CachedStateMetrics, CachedStateMetricsSource,
-    CachedStateProvider, ExecutionCache, PayloadExecutionCache, SavedCache,
-    TxPoolPrewarmCacheSnapshot,
+    CachedStateCacheMetrics, CachedStateMetrics, CachedStateMetricsSource, CachedStateProvider,
+    ExecutionCache, PayloadExecutionCache, SavedCache, TxPoolPrewarmCacheSnapshot,
 };
 pub use txpool_prewarm::{
     Source as TxPoolPrewarmSource, Transaction as TxPoolPrewarmTransaction,

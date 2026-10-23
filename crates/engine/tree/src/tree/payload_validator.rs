@@ -136,9 +136,9 @@ use reth_engine_primitives::{
 };
 use reth_errors::{BlockExecutionError, BlockValidationError, ProviderResult};
 use reth_evm::{
-    database::StateProviderDatabase, BlockExecutor, BlockExecutorFactory, BlockExecutorFor,
-    BlockTransactionResult, ConfigureEvm, Evm as _, EvmEnvFor, EvmTypesFor, ExecutableTxFor,
-    ExecutionCtxFor,
+    database::StateProviderDatabase, precompile_cache::PrecompileCacheMap, BlockExecutor,
+    BlockExecutorFactory, BlockExecutorFor, BlockTransactionResult, ConfigureEvm, Evm as _,
+    EvmEnv as _, EvmEnvFor, EvmTypesFor, ExecutableTxFor, ExecutionCtxFor, SpecFor,
 };
 use reth_execution_cache::{CacheFillMode, CacheStats};
 use reth_execution_types::DecodedEvmBal;
@@ -276,6 +276,8 @@ where
     config: TreeConfig,
     /// Payload processor for transaction conversion, prewarming, and execution caching.
     payload_processor: PayloadProcessor<Evm>,
+    /// Precompile cache map, shared with the payload processor's prewarm EVMs.
+    precompile_cache_map: PrecompileCacheMap<SpecFor<Evm>>,
     /// Hook to call when invalid blocks are encountered.
     #[debug(skip)]
     invalid_block_hook: Box<dyn InvalidBlockHook<Evm::Primitives>>,
@@ -331,17 +333,19 @@ where
         overlay_manager: OverlayManager<N>,
         runtime: reth_tasks::Runtime,
     ) -> Self {
-        let evm_config = if config.precompile_cache_disabled() {
-            evm_config.with_precompile_cache_disabled(true)
-        } else {
-            evm_config
-        };
-        let payload_processor = PayloadProcessor::new(runtime.clone(), evm_config.clone(), &config);
+        let precompile_cache_map = PrecompileCacheMap::default();
+        let payload_processor = PayloadProcessor::new(
+            runtime.clone(),
+            evm_config.clone(),
+            &config,
+            precompile_cache_map.clone(),
+        );
         Self {
             provider,
             consensus,
             evm_config,
             payload_processor,
+            precompile_cache_map,
             config,
             invalid_block_hook,
             metrics: EngineApiMetrics::default(),
@@ -1026,14 +1030,24 @@ where
         // Reuse validation reads must not alter a block's access list.
         let prewarm_results = handle.prewarm_results().filter(|_| !input.has_block_access_list());
         let execution_start = Instant::now();
-        let evm_config =
-            self.evm_config.clone().with_jit_support().with_precompile_cache_metrics(true);
+        let evm_config = self.evm_config.clone().with_jit_support();
         let execution_ctx = self.execution_ctx_for(input).map_err(BlockExecutionError::other)?;
 
         let (output, senders, built_bal) = debug_span!(target: "engine::tree", "execute_block")
             .in_scope(|| {
                 let db = StateProviderDatabase::new(state_provider);
-                let evm = evm_config.evm_with_env(db, env.evm_env);
+                let spec = env.evm_env.spec_id();
+                let mut evm = evm_config.evm_with_env(db, env.evm_env);
+                if !self.config.precompile_cache_disabled() {
+                    let _span =
+                        debug_span!(target: "engine::tree", "setup_precompile_cache").entered();
+                    evm_config.cache_precompiles(
+                        &mut evm,
+                        spec,
+                        self.precompile_cache_map.clone(),
+                        true,
+                    );
+                }
                 let mut executor =
                     evm_config.block_executor_factory().create_executor(evm, execution_ctx);
                 if input.has_block_access_list() {
@@ -1137,11 +1151,10 @@ where
         let execution_start = Instant::now();
         let ctx =
             self.execution_ctx_for(input).map_err(|e| InsertBlockErrorKind::Other(Box::new(e)))?;
-        let evm_config = self.evm_config.clone().with_precompile_cache_metrics(true);
         let (output, senders, built_bal, received_bal_evm) =
             crate::tree::payload_processor::bal::execute_block(
                 &self.runtime,
-                &evm_config,
+                &self.evm_config,
                 &make_db,
                 input_bal,
                 env.evm_env,

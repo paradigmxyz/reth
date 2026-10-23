@@ -4,9 +4,7 @@ use alloc::{boxed::Box, sync::Arc};
 use alloy_consensus::Header;
 use reth_chainspec::{ChainSpec, EthChainSpec, EthereumHardforks};
 #[cfg(feature = "std")]
-use reth_evm::precompile_cache::{
-    CachedPrecompileProvider, PrecompileCacheMap, PrecompileCachePolicy,
-};
+use reth_evm::precompile_cache::PrecompileCachePolicy;
 
 #[cfg(feature = "jit")]
 pub use evm2_jit::{
@@ -123,15 +121,6 @@ where
     receipt_builder: R,
     /// Chain specification.
     chain_spec: Arc<C>,
-    /// Shared precompile cache.
-    #[cfg(feature = "std")]
-    precompile_cache_map: PrecompileCacheMap<F::SpecId>,
-    /// Whether to disable the shared precompile cache.
-    #[cfg(feature = "std")]
-    precompile_cache_disabled: bool,
-    /// Whether EVMs record precompile cache metrics.
-    #[cfg(feature = "std")]
-    precompile_cache_metrics: bool,
     /// EVM factory configuration.
     evm_factory: F,
 }
@@ -212,12 +201,6 @@ impl<R: Clone, C, F: EvmFactory> Clone for EthBlockExecutorFactory<R, C, F> {
         Self {
             receipt_builder: self.receipt_builder.clone(),
             chain_spec: self.chain_spec.clone(),
-            #[cfg(feature = "std")]
-            precompile_cache_map: self.precompile_cache_map.clone(),
-            #[cfg(feature = "std")]
-            precompile_cache_disabled: self.precompile_cache_disabled,
-            #[cfg(feature = "std")]
-            precompile_cache_metrics: self.precompile_cache_metrics,
             evm_factory: self.evm_factory.clone(),
         }
     }
@@ -232,29 +215,19 @@ impl<C> EthBlockExecutorFactory<RethReceiptBuilder, C> {
 
 impl<C, F: EvmFactory> EthBlockExecutorFactory<RethReceiptBuilder, C, F> {
     /// Creates a new Ethereum block executor factory with the given EVM factory configuration.
-    pub fn new_with_evm_factory(chain_spec: Arc<C>, evm_factory: F) -> Self {
+    pub const fn new_with_evm_factory(chain_spec: Arc<C>, evm_factory: F) -> Self {
         Self::new_with_receipt_builder(RethReceiptBuilder, chain_spec, evm_factory)
     }
 }
 
 impl<R, C, F: EvmFactory> EthBlockExecutorFactory<R, C, F> {
     /// Creates a new Ethereum block executor factory with the given receipt and EVM factories.
-    pub fn new_with_receipt_builder(
+    pub const fn new_with_receipt_builder(
         receipt_builder: R,
         chain_spec: Arc<C>,
         evm_factory: F,
     ) -> Self {
-        Self {
-            receipt_builder,
-            chain_spec,
-            #[cfg(feature = "std")]
-            precompile_cache_map: PrecompileCacheMap::default(),
-            #[cfg(feature = "std")]
-            precompile_cache_disabled: false,
-            #[cfg(feature = "std")]
-            precompile_cache_metrics: false,
-            evm_factory,
-        }
+        Self { receipt_builder, chain_spec, evm_factory }
     }
 
     /// Returns the chain spec associated with this factory.
@@ -278,36 +251,6 @@ impl<R, C, F: EvmFactory> EthBlockExecutorFactory<R, C, F> {
         &mut self.evm_factory
     }
 
-    /// Returns a factory with precompile cache disabled, if supported by the active build.
-    pub const fn with_precompile_cache_disabled(self, disabled: bool) -> Self {
-        #[cfg(feature = "std")]
-        {
-            let mut this = self;
-            this.precompile_cache_disabled = disabled;
-            this
-        }
-        #[cfg(not(feature = "std"))]
-        {
-            let _ = disabled;
-            self
-        }
-    }
-
-    /// Enables address-labelled precompile cache metrics for subsequently created EVMs.
-    pub const fn with_precompile_cache_metrics(self, enabled: bool) -> Self {
-        #[cfg(feature = "std")]
-        {
-            let mut this = self;
-            this.precompile_cache_metrics = enabled;
-            this
-        }
-        #[cfg(not(feature = "std"))]
-        {
-            let _ = enabled;
-            self
-        }
-    }
-
     /// Creates an EVM instance with the configured Ethereum execution environment.
     pub(crate) fn build_evm_with_env<'a, DB>(
         &self,
@@ -323,20 +266,6 @@ impl<R, C, F: EvmFactory> EthBlockExecutorFactory<R, C, F> {
         let config = self.evm_factory.execution_config(spec, env.version);
         let registry = self.evm_factory.tx_registry(spec);
         let precompiles = self.evm_factory.precompiles(spec);
-        #[cfg(feature = "std")]
-        let precompiles: Box<dyn evm2::evm::precompile::PrecompileProvider<F::Types>> =
-            if self.precompile_cache_disabled {
-                Box::new(precompiles)
-            } else {
-                Box::new(CachedPrecompileProvider::new(
-                    precompiles,
-                    self.precompile_cache_map.clone(),
-                    spec,
-                    self.evm_factory.precompile_cache_policy(spec),
-                    self.precompile_cache_metrics,
-                ))
-            };
-        #[cfg(not(feature = "std"))]
         let precompiles = Box::new(precompiles);
 
         let mut evm = evm2::Evm::<F::Types>::new_with_execution_config(
@@ -362,20 +291,6 @@ impl<R, C, F: EvmFactory> EthBlockExecutorFactory<R, C, F> {
         let config = self.evm_factory.execution_config(spec, env.version);
         let registry = self.evm_factory.tx_registry(spec);
         let precompiles = self.evm_factory.precompiles(spec);
-        #[cfg(feature = "std")]
-        let precompiles: Box<dyn evm2::evm::precompile::PrecompileProvider<F::Types>> =
-            if self.precompile_cache_disabled {
-                Box::new(precompiles)
-            } else {
-                Box::new(CachedPrecompileProvider::new(
-                    precompiles,
-                    self.precompile_cache_map.clone(),
-                    spec,
-                    self.evm_factory.precompile_cache_policy(spec),
-                    self.precompile_cache_metrics,
-                ))
-            };
-        #[cfg(not(feature = "std"))]
         let precompiles = Box::new(precompiles);
 
         evm.set_block_and_execution_config(env.block, config, spec, registry, precompiles);

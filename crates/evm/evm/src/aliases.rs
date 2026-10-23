@@ -20,6 +20,9 @@ pub type EvmFor<'a, Evm> =
 pub type EvmTypesFor<Evm> =
     <<Evm as ConfigureEvm>::BlockExecutorFactory as BlockExecutorFactory>::EvmTypes;
 
+/// Type alias for the configured runtime specification identifier.
+pub type SpecFor<Evm> = <EvmTypesFor<Evm> as evm2::EvmTypesHost>::SpecId;
+
 /// Type alias for a configured EVM transaction result with detached state changes.
 pub type TxResultWithStateFor<Evm> = evm2::TxResultWithState<EvmTypesFor<Evm>>;
 

@@ -14,8 +14,9 @@ use crossbeam_channel::{Receiver as CrossbeamReceiver, Sender as CrossbeamSender
 use prewarm::PrewarmMetrics;
 use rayon::prelude::*;
 use reth_evm::{
-    ConfigureEvm, ConvertTx, EvmEnv, EvmTypesFor, ExecutableTxFor, ExecutableTxIterator,
-    ExecutableTxParts, ExecutableTxTuple, TxEnvFor, WithTxEnv,
+    precompile_cache::PrecompileCacheMap, ConfigureEvm, ConvertTx, EvmEnv, EvmTypesFor,
+    ExecutableTxFor, ExecutableTxIterator, ExecutableTxParts, ExecutableTxTuple, SpecFor, TxEnvFor,
+    WithTxEnv,
 };
 use reth_primitives_traits::{FastInstant as Instant, NodePrimitives};
 use reth_provider::{
@@ -109,6 +110,10 @@ where
     disable_bal_batch_io: bool,
     /// Whether block execution may reuse transaction prewarming results.
     reuse_prewarm_results: bool,
+    /// Whether precompile cache should be disabled.
+    precompile_cache_disabled: bool,
+    /// Precompile cache map.
+    precompile_cache_map: PrecompileCacheMap<SpecFor<Evm>>,
     /// Dedicated blocking pool for warming the BAL read-set, created lazily on the first BAL block
     /// (see [`Self::bal_prewarm_pool`]). Its threads exit when the processor is dropped.
     bal_prewarm_pool: OnceLock<Arc<bal_prewarm_pool::BalPrewarmPool>>,
@@ -119,7 +124,12 @@ where
     Evm: ConfigureEvm,
 {
     /// Creates a new payload processor.
-    pub fn new(executor: Runtime, evm_config: Evm, config: &TreeConfig) -> Self {
+    pub fn new(
+        executor: Runtime,
+        evm_config: Evm,
+        config: &TreeConfig,
+        precompile_cache_map: PrecompileCacheMap<SpecFor<Evm>>,
+    ) -> Self {
         Self {
             executor,
             execution_cache: Default::default(),
@@ -134,6 +144,8 @@ where
             disable_bal_parallel_state_root: config.disable_bal_parallel_state_root(),
             disable_bal_batch_io: config.disable_bal_batch_io(),
             reuse_prewarm_results: config.prewarm_reuse(),
+            precompile_cache_disabled: config.precompile_cache_disabled(),
+            precompile_cache_map,
             bal_prewarm_pool: OnceLock::new(),
         }
     }
@@ -459,6 +471,8 @@ where
             disable_bal_parallel_state_root: self.disable_bal_parallel_state_root,
             disable_bal_batch_io: self.disable_bal_batch_io,
             prewarm_results: prewarm_results.clone(),
+            precompile_cache_disabled: self.precompile_cache_disabled,
+            precompile_cache_map: self.precompile_cache_map.clone(),
         };
 
         let (prewarm_task, to_prewarm_task) =
@@ -769,6 +783,7 @@ mod tests {
             reth_tasks::Runtime::test(),
             EthEvmConfig::new(Arc::new(ChainSpec::default())),
             &TreeConfig::default(),
+            PrecompileCacheMap::default(),
         )
     }
 
@@ -994,6 +1009,7 @@ mod tests {
             reth_tasks::Runtime::test(),
             EthEvmConfig::new(Arc::new(ChainSpec::default())),
             &TreeConfig::default(),
+            PrecompileCacheMap::default(),
         );
 
         let parent_hash = B256::repeat_byte(1u8);
@@ -1022,6 +1038,7 @@ mod tests {
             reth_tasks::Runtime::test(),
             EthEvmConfig::new(Arc::new(ChainSpec::default())),
             &TreeConfig::default(),
+            PrecompileCacheMap::default(),
         );
 
         // Setup: populate cache with block 1
@@ -1056,6 +1073,7 @@ mod tests {
             reth_tasks::Runtime::test(),
             EthEvmConfig::new(Arc::new(ChainSpec::default())),
             &TreeConfig::default(),
+            PrecompileCacheMap::default(),
         );
 
         let parent_hash = B256::repeat_byte(1u8);

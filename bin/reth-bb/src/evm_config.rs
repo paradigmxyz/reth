@@ -12,8 +12,9 @@ use reth_engine_primitives::ExecutionPayload;
 use reth_ethereum_forks::Hardforks;
 use reth_ethereum_primitives::{Block, EthPrimitives, TransactionSigned};
 use reth_evm::{
-    BlockAssembler, BlockAssemblerInput, BlockExecutionError, ConfigureEngineEvm, ConfigureEvm,
-    EvmEnvFor, ExecutableTxIterator, ExecutionCtxFor, NextBlockEnvAttributes,
+    precompile_cache::PrecompileCacheMap, BlockAssembler, BlockAssemblerInput, BlockExecutionError,
+    ConfigureEngineEvm, ConfigureEvm, EvmEnvFor, EvmFor, ExecutableTxIterator, ExecutionCtxFor,
+    NextBlockEnvAttributes, SpecFor,
 };
 use reth_evm_ethereum::{
     EthBigBlockExecutorFactory, EthBigBlockPlan, EthBigBlockSegment, EthEvmConfig,
@@ -97,12 +98,14 @@ where
     type BlockExecutorFactory = EthBigBlockExecutorFactory<C>;
     type BlockAssembler = BbBlockAssembler;
 
-    fn with_precompile_cache_disabled(self, disabled: bool) -> Self {
-        Self::new(self.inner.with_precompile_cache_disabled(disabled))
-    }
-
-    fn with_precompile_cache_metrics(self, enabled: bool) -> Self {
-        Self::new(self.inner.with_precompile_cache_metrics(enabled))
+    fn cache_precompiles(
+        &self,
+        evm: &mut EvmFor<'_, Self>,
+        spec: SpecFor<Self>,
+        cache_map: PrecompileCacheMap<SpecFor<Self>>,
+        metrics_enabled: bool,
+    ) {
+        self.inner.cache_precompiles(evm, spec, cache_map, metrics_enabled);
     }
 
     fn block_executor_factory(&self) -> &Self::BlockExecutorFactory {
@@ -266,8 +269,7 @@ mod tests {
     }
 
     #[test]
-    #[expect(clippy::redundant_clone, reason = "verify cache settings and sharing across clones")]
-    fn precompile_cache_settings_and_metrics() {
+    fn precompile_cache_is_opt_in_per_evm() {
         let recorder = DebuggingRecorder::new();
         metrics::with_local_recorder(&recorder, || {
             let metrics_snapshot = || {
@@ -280,26 +282,36 @@ mod tests {
                     .collect::<Vec<_>>()
             };
             let config = BbEvmConfig::new(EthEvmConfig::mainnet());
+            let cache_map = PrecompileCacheMap::default();
             let identity = Address::with_last_byte(4);
             let sha256 = Address::with_last_byte(2);
             let ecadd = Address::with_last_byte(6);
-            let call = |config: &BbEvmConfig, address, input: Bytes| {
-                let mut evm = config.evm_with_env(EmptyDB::default(), EthEvmEnv::default());
+            let call = |cache_metrics: Option<bool>, address, input: Bytes| {
+                let env = EthEvmEnv::default();
+                let spec = env.spec;
+                let mut evm = config.evm_with_env(EmptyDB::default(), env);
+                if let Some(metrics_enabled) = cache_metrics {
+                    config.cache_precompiles(&mut evm, spec, cache_map.clone(), metrics_enabled);
+                }
                 evm.system_call(SystemTx::new(address, input)).unwrap().commit().status
             };
 
-            // Prewarming fills the shared cache without recording execution metrics.
+            // EVMs the engine did not wrap do not use the cache.
             let warm_input = Bytes::from_static(b"prewarmed");
-            assert!(call(&config, identity, warm_input.clone()));
+            assert!(call(None, identity, warm_input.clone()));
+            assert!(call(None, identity, warm_input.clone()));
             assert!(metrics_snapshot().is_empty());
 
-            let measured = config.clone().with_precompile_cache_metrics(true);
-            assert!(call(&measured, identity, warm_input.clone()));
+            // Prewarming fills the shared cache without recording execution metrics.
+            assert!(call(Some(false), identity, warm_input.clone()));
+            assert!(metrics_snapshot().is_empty());
+
+            assert!(call(Some(true), identity, warm_input.clone()));
             let new_input = Bytes::from_static(b"uncached");
-            assert!(call(&measured, identity, new_input.clone()));
-            assert!(call(&measured.clone(), identity, new_input));
-            assert!(call(&measured, sha256, warm_input.clone()));
-            assert!(!call(&measured, ecadd, Bytes::from(vec![0xff; 128])));
+            assert!(call(Some(true), identity, new_input.clone()));
+            assert!(call(Some(true), identity, new_input));
+            assert!(call(Some(true), sha256, warm_input.clone()));
+            assert!(!call(Some(true), ecadd, Bytes::from(vec![0xff; 128])));
 
             let snapshot = metrics_snapshot();
             let counter = |address, name| {
@@ -333,14 +345,8 @@ mod tests {
                 DebugValue::Gauge(_)
             ));
 
-            // Disabling the cache must reach the big-block factory, even after cloning.
-            let disabled = measured.clone().with_precompile_cache_disabled(true);
-            assert!(call(&disabled.clone(), identity, warm_input.clone()));
-            assert!(call(
-                &measured.clone().with_precompile_cache_metrics(false),
-                identity,
-                warm_input
-            ));
+            // An EVM created after the cache was filled is still uncached unless wrapped.
+            assert!(call(None, identity, warm_input));
             // The debugging recorder resets values on each snapshot.
             assert!(metrics_snapshot().iter().all(|(.., value)| {
                 value == &DebugValue::Counter(0) || value == &DebugValue::Gauge(0.0.into())
