@@ -1,4 +1,4 @@
-use alloy_consensus::{transaction::TxHashRef, BlockHeader};
+use alloy_consensus::{transaction::TxHashRef, BlockHeader, TxReceipt};
 use alloy_eips::{eip2718::Encodable2718, BlockId, BlockNumberOrTag};
 use alloy_evm::{env::BlockEnvironment, Evm};
 use alloy_genesis::ChainConfig;
@@ -10,8 +10,8 @@ use alloy_rpc_types_eth::{
     state::EvmOverrides, Account, AccountInfo, BlockError, Bundle, Index, StateContext,
 };
 use alloy_rpc_types_trace::geth::{
-    ChainBlockTraceResult, GethDebugTracingCallOptions, GethDebugTracingOptions, GethTrace,
-    TraceResult,
+    ChainBlockTraceResult, GethDebugBuiltInTracerType, GethDebugTracerType,
+    GethDebugTracingCallOptions, GethDebugTracingOptions, GethTrace, TraceResult,
 };
 use async_trait::async_trait;
 use futures::Stream;
@@ -50,11 +50,11 @@ use serde::{Deserialize, Serialize};
 use std::{collections::VecDeque, sync::Arc};
 use tokio::sync::{AcquireError, OwnedSemaphorePermit};
 use tokio_stream::StreamExt;
+
 #[cfg(feature = "js-tracer")]
-use {
-    alloy_rpc_types_trace::geth::GethDebugTracerType,
-    revm_inspectors::tracing::js::JsInspectorInterrupt, std::time::Duration,
-};
+use revm_inspectors::tracing::js::JsInspectorInterrupt;
+#[cfg(feature = "js-tracer")]
+use std::time::Duration;
 
 /// `debug` API implementation.
 ///
@@ -137,6 +137,7 @@ where
                 let inspector = DebugInspector::new(opts).map_err(Eth::Error::from_eth_err)?;
                 let mut evm =
                     eth_api.evm_config().evm_with_env_and_inspector(&mut db, evm_env, inspector);
+                let mut next_log_index = 0;
                 while let Some((index, tx)) = transactions.next() {
                     if is_cancelled() {
                         return Err(EthApiError::InternalEthError.into())
@@ -144,6 +145,7 @@ where
                     let tx_env = eth_api.evm_config().tx_env(tx);
 
                     let res = evm.transact(tx_env.clone()).map_err(Eth::Error::from_evm_err)?;
+                    next_log_index += res.result.logs().len();
 
                     let (db, inspector, _) = evm.components_mut();
                     let result = inspector
@@ -163,6 +165,7 @@ where
                     results.push(TraceResult::Success { result, tx_hash: Some(*tx.tx_hash()) });
                     if transactions.peek().is_some() {
                         inspector.fuse().map_err(Eth::Error::from_eth_err)?;
+                        inspector.set_next_log_index(next_log_index);
                         // need to apply the state changes of this transaction before executing the
                         // next transaction
                         db.commit(res.state)
@@ -208,6 +211,7 @@ where
                 let mut evm =
                     eth_api.evm_config().evm_with_env_and_inspector(&mut db, evm_env, inspector);
 
+                let mut next_log_index = 0;
                 while let Some((index, tx)) = transactions.next() {
                     let tx_hash = *tx.tx_hash();
                     let tx_env = eth_api.evm_config().tx_env(tx);
@@ -221,6 +225,7 @@ where
                             break
                         }
                     };
+                    next_log_index += res.result.logs().len();
 
                     let (db, inspector, _) = evm.components_mut();
                     let result = match inspector.get_result(
@@ -253,6 +258,7 @@ where
                             }));
                             break
                         }
+                        inspector.set_next_log_index(next_log_index);
                         db.commit(res.state);
                     }
                 }
@@ -324,26 +330,43 @@ where
         tx_hash: B256,
         opts: GethDebugTracingOptions,
     ) -> Result<GethTrace, Eth::Error> {
-        let (transaction, block, bal) =
+        let (transaction, block, mut bal) =
             match self.eth_api().transaction_and_block_and_maybe_bal(tx_hash).await? {
                 None => return Err(EthApiError::TracingTransactionNotFound.into()),
                 Some(res) => res,
             };
+
+        // configure env for the target transaction
+        let (tx, tx_info) = transaction.split();
+
+        // index should always be available because `transaction_and_block` only
+        // returns transactions included in a block
+        let index =
+            tx_info.index.expect("transaction_and_block only returns block transactions") as usize;
+
+        // Replay already counts preceding logs. Only the BAL fast path needs receipts.
+        let mut next_log_index = 0;
+        if index > 0 && bal.is_some() && records_call_logs(&opts) {
+            if let Some(receipts) = self
+                .eth_api()
+                .cache()
+                .get_receipts(block.hash())
+                .await
+                .map_err(Eth::Error::from_eth_err)?
+            {
+                next_log_index =
+                    receipts.iter().take(index).map(|receipt| receipt.logs().len()).sum();
+            } else {
+                // Replay when receipts are pruned to retain block-level log indices.
+                bal = None;
+            }
+        }
 
         let interrupt = JsTraceInterrupt::new(&opts)?;
         let tracer_interrupt = interrupt.clone();
         let trace = self.eth_api().spawn_with_state_at_block(
             block.parent_hash(),
             move |eth_api, mut db| {
-                // configure env for the target transaction
-                let (tx, tx_info) = transaction.split();
-
-                // index should always be available because `transaction_and_block` only
-                // returns transactions included in a block
-                let index =
-                    tx_info.index.expect("transaction_and_block only returns block transactions")
-                        as usize;
-
                 let mut inspector = tracer_interrupt
                     .attach(DebugInspector::new(opts).map_err(Eth::Error::from_eth_err)?);
                 let tx_env = eth_api.evm_config().tx_env(&tx);
@@ -354,6 +377,9 @@ where
                     index,
                     tx_env.clone(),
                     bal.as_deref(),
+                    |inspector, replayed_logs| {
+                        inspector.set_next_log_index(next_log_index + replayed_logs)
+                    },
                 )?;
 
                 let trace = inspector
@@ -1619,6 +1645,21 @@ impl JsTraceInterrupt {
             trace.await
         }
     }
+}
+
+/// Whether the tracer requests call logs. Inspector construction validates the full config.
+fn records_call_logs(opts: &GethDebugTracingOptions) -> bool {
+    let config = match &opts.tracer {
+        Some(GethDebugTracerType::BuiltInTracer(
+            GethDebugBuiltInTracerType::CallTracer | GethDebugBuiltInTracerType::Erc7562Tracer,
+        )) => Some(&opts.tracer_config.0),
+        Some(GethDebugTracerType::BuiltInTracer(GethDebugBuiltInTracerType::MuxTracer)) => {
+            opts.tracer_config.0.get("callTracer")
+        }
+        _ => None,
+    };
+    config.and_then(|config| config.get("withLog")).and_then(serde_json::Value::as_bool) ==
+        Some(true)
 }
 
 #[cfg(test)]
