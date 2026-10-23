@@ -1,9 +1,13 @@
 use super::{
-    AccountStatus, BundleAccount, PlainStateReverts, PlainStorageRevert, StorageWithOriginalValues,
+    changes::PlainStorageRevert, AccountStatus, BundleAccount, PlainStateReverts,
+    StorageWithOriginalValues,
 };
 use alloc::vec::Vec;
 use alloy_primitives::{map::U256Map, Address, U256};
-use core::ops::{Deref, DerefMut};
+use core::{
+    cmp::Ordering,
+    ops::{Deref, DerefMut},
+};
 use evm2::evm::AccountInfo;
 
 /// Contains reverts of multiple account in multiple transitions (Transitions as a block).
@@ -39,7 +43,7 @@ impl Reverts {
     }
 
     /// Extends reverts with other reverts.
-    pub fn extend(&mut self, other: Self) {
+    pub fn extend(&mut self, other: Reverts) {
         self.0.extend(other.0);
     }
 
@@ -93,9 +97,13 @@ impl Reverts {
 
             let mut self_transition = self_transition.clone();
             let mut other_transition = other_transition.clone();
-            // Sort both transitions. Each transition holds at most one revert per address.
-            self_transition.sort_by_key(|(address, _)| *address);
-            other_transition.sort_by_key(|(address, _)| *address);
+            // Sort both transitions
+            self_transition.sort_by(|(addr1, revert1), (addr2, revert2)| {
+                addr1.cmp(addr2).then_with(|| revert1.cmp(revert2))
+            });
+            other_transition.sort_by(|(addr1, revert1), (addr2, revert2)| {
+                addr1.cmp(addr2).then_with(|| revert1.cmp(revert2))
+            });
 
             // Compare sorted transitions
             if self_transition != other_transition {
@@ -104,6 +112,14 @@ impl Reverts {
         }
 
         true
+    }
+
+    /// Consume reverts and create [`PlainStateReverts`].
+    ///
+    /// Note that account are sorted by address.
+    #[deprecated = "Use `to_plain_state_reverts` instead"]
+    pub fn into_plain_state_reverts(self) -> PlainStateReverts {
+        self.to_plain_state_reverts()
     }
 }
 
@@ -120,7 +136,7 @@ impl PartialEq for Reverts {
 ///
 /// And it is used to revert new account state to the old account state.
 ///
-/// [`AccountRevert`] is structured in this way as we need to save it inside database.
+/// [AccountRevert] is structured in this way as we need to save it inside database.
 ///
 /// And we need to be able to read it from database.
 #[derive(Clone, Default, Debug, PartialEq, Eq)]
@@ -144,8 +160,8 @@ impl AccountRevert {
         1 + self.storage.len()
     }
 
-    /// Very similar to `new_selfdestructed` but it will add additional zeros
-    /// ([`RevertToSlot::Destroyed`]) for the storage that are set if account is again created.
+    /// Very similar to new_selfdestructed but it will add additional zeros
+    /// ([RevertToSlot::Destroyed]) for the storage that are set if account is again created.
     pub fn new_selfdestructed_again(
         status: AccountStatus,
         account: AccountInfoRevert,
@@ -161,7 +177,12 @@ impl AccountRevert {
         for (key, _) in updated_storage {
             previous_storage.entry(key).or_insert(RevertToSlot::Destroyed);
         }
-        Self { account, storage: previous_storage, previous_status: status, wipe_storage: false }
+        AccountRevert {
+            account,
+            storage: previous_storage,
+            previous_status: status,
+            wipe_storage: false,
+        }
     }
 
     /// Creates revert for states that were before selfdestruct.
@@ -175,7 +196,7 @@ impl AccountRevert {
             AccountStatus::Changed |
             AccountStatus::LoadedEmptyEIP161 |
             AccountStatus::Loaded => {
-                let mut ret = Self::new_selfdestructed_again(
+                let mut ret = AccountRevert::new_selfdestructed_again(
                     bundle_account.status,
                     account_info_revert,
                     core::mem::take(&mut bundle_account.storage),
@@ -216,9 +237,56 @@ impl AccountRevert {
             !self.wipe_storage
     }
 }
+
+/// Implements partial ordering for AccountRevert
+impl PartialOrd for AccountRevert {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+/// Implements total ordering for AccountRevert
+impl Ord for AccountRevert {
+    fn cmp(&self, other: &Self) -> Ordering {
+        // First compare accounts
+        if let Some(ord) = self.account.partial_cmp(&other.account) {
+            if ord != Ordering::Equal {
+                return ord;
+            }
+        }
+
+        // Convert HashMaps to sorted vectors for comparison
+        let mut self_storage: Vec<_> = self.storage.iter().collect();
+        let mut other_storage: Vec<_> = other.storage.iter().collect();
+
+        // Sort by key and then by value
+        self_storage.sort_by(|(k1, v1), (k2, v2)| k1.cmp(k2).then_with(|| v1.cmp(v2)));
+        other_storage.sort_by(|(k1, v1), (k2, v2)| k1.cmp(k2).then_with(|| v1.cmp(v2)));
+
+        // Compare each element
+        for (self_entry, other_entry) in self_storage.iter().zip(other_storage.iter()) {
+            let key_ord = self_entry.0.cmp(other_entry.0);
+            if key_ord != Ordering::Equal {
+                return key_ord;
+            }
+            let value_ord = self_entry.1.cmp(other_entry.1);
+            if value_ord != Ordering::Equal {
+                return value_ord;
+            }
+        }
+
+        // If one vector is longer than the other, or if all elements are equal
+        self_storage
+            .len()
+            .cmp(&other_storage.len())
+            .then_with(|| self.previous_status.cmp(&other.previous_status))
+            .then_with(|| self.wipe_storage.cmp(&other.wipe_storage))
+    }
+}
+
 /// Depending on previous state of account info this
 /// will tell us what to do on revert.
-#[derive(Clone, Default, Debug, PartialEq, Eq)]
+#[derive(Clone, Default, Debug, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum AccountInfoRevert {
     #[default]
@@ -228,6 +296,36 @@ pub enum AccountInfoRevert {
     DeleteIt,
     /// Account was changed and on revert we need to put old state.
     RevertTo(AccountInfo),
+}
+
+impl PartialOrd for AccountInfoRevert {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+/// Orders like revm's derived ordering: by variant, then by the [`AccountInfo`] fields that its
+/// `Eq` compares.
+impl Ord for AccountInfoRevert {
+    fn cmp(&self, other: &Self) -> Ordering {
+        match (self, other) {
+            (Self::RevertTo(a), Self::RevertTo(b)) => {
+                let order = a
+                    .balance
+                    .cmp(&b.balance)
+                    .then_with(|| a.nonce.cmp(&b.nonce))
+                    .then_with(|| a.code_hash.cmp(&b.code_hash));
+                #[cfg(feature = "account-ext")]
+                let order = order.then_with(|| a.extension.as_ref().cmp(b.extension.as_ref()));
+                order
+            }
+            (Self::DoNothing, Self::DoNothing) | (Self::DeleteIt, Self::DeleteIt) => {
+                Ordering::Equal
+            }
+            (Self::DoNothing, _) | (Self::DeleteIt, Self::RevertTo(_)) => Ordering::Less,
+            (_, Self::DoNothing) | (Self::RevertTo(_), Self::DeleteIt) => Ordering::Greater,
+        }
+    }
 }
 
 /// So storage can have multiple types:
@@ -252,8 +350,25 @@ impl RevertToSlot {
     /// Returns the previous value to set on revert.
     pub const fn to_previous_value(self) -> U256 {
         match self {
-            Self::Some(value) => value,
-            Self::Destroyed => U256::ZERO,
+            RevertToSlot::Some(value) => value,
+            RevertToSlot::Destroyed => U256::ZERO,
         }
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn content_eq_ignores_order_of_same_address() {
+        let address = Address::with_last_byte(1);
+        let do_nothing = AccountRevert::default();
+        let delete_it =
+            AccountRevert { account: AccountInfoRevert::DeleteIt, ..Default::default() };
+        let a =
+            Reverts::new(vec![vec![(address, do_nothing.clone()), (address, delete_it.clone())]]);
+        let b = Reverts::new(vec![vec![(address, delete_it), (address, do_nothing)]]);
+        assert_eq!(a, b);
     }
 }

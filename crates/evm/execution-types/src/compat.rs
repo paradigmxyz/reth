@@ -9,7 +9,10 @@ use alloy_primitives::{
 use evm2::{bytecode::Bytecode, evm::AccountInfo};
 use reth_primitives_traits::Account;
 use reth_trie_common::{
-    bundle_state::{AccountStatus, BundleState, StorageSlot, TransitionAccount},
+    bundle_state::{
+        AccountStatus, BundleRetention, BundleState, StorageSlot, TransitionAccount,
+        TransitionState,
+    },
     HashedPostState, HashedStorage,
 };
 
@@ -153,7 +156,10 @@ impl BlockState {
     /// Finalizes one block's transitions and reverts.
     pub fn into_bundle(self) -> BundleState {
         let mut bundle = BundleState::default();
-        bundle.apply_transitions_and_create_reverts(self.transitions);
+        bundle.apply_transitions_and_create_reverts(
+            TransitionState { transitions: self.transitions },
+            BundleRetention::Reverts,
+        );
         bundle.contracts.extend(self.contracts);
         bundle
     }

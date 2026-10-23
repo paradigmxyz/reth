@@ -58,7 +58,7 @@ pub struct PlainStorageRevert {
 pub struct PlainStateReverts {
     /// Vector of account with removed contracts bytecode.
     ///
-    /// **Note**: If `AccountInfo` is None means that account needs to be removed.
+    /// **Note**: If AccountInfo is None means that account needs to be removed.
     pub accounts: Vec<Vec<(Address, Option<AccountInfo>)>>,
     /// Vector of storage with its address.
     pub storage: Vec<Vec<PlainStorageRevert>>,
@@ -70,3 +70,6 @@ impl PlainStateReverts {
         Self { accounts: Vec::with_capacity(capacity), storage: Vec::with_capacity(capacity) }
     }
 }
+
+/// Storage reverts
+pub type StorageRevert = Vec<Vec<(Address, bool, Vec<(U256, RevertToSlot)>)>>;
