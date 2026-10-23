@@ -4,7 +4,9 @@ use alloc::{boxed::Box, sync::Arc};
 use alloy_consensus::Header;
 use reth_chainspec::{ChainSpec, EthChainSpec, EthereumHardforks};
 #[cfg(feature = "std")]
-use reth_evm::precompile_cache::PrecompileCachePolicy;
+use reth_evm::precompile_cache::{
+    CachedPrecompileProvider, PrecompileCacheMap, PrecompileCachePolicy,
+};
 
 #[cfg(feature = "jit")]
 pub use evm2_jit::{
@@ -262,11 +264,50 @@ impl<R, C, F: EvmFactory> EthBlockExecutorFactory<R, C, F> {
         DB: evm2::evm::DynDatabase + 'a,
         F: 'static,
     {
+        let precompiles = Box::new(self.evm_factory.precompiles(env.spec));
+        self.build_evm(db, env, precompiles)
+    }
+
+    /// Creates an EVM instance whose precompile results are cached in `cache_map`.
+    ///
+    /// The cache wraps the factory's precompiles before [`EvmFactory::configure_evm`] runs, so
+    /// factory customizations apply to the cached provider.
+    #[cfg(feature = "std")]
+    pub(crate) fn build_evm_with_precompile_cache<'a, DB>(
+        &self,
+        db: DB,
+        env: EthEvmEnv<F::Types>,
+        cache_map: PrecompileCacheMap<F::SpecId>,
+        metrics_enabled: bool,
+    ) -> evm2::Evm<'a, F::Types>
+    where
+        C: EthChainSpec<Header = Header>,
+        DB: evm2::evm::DynDatabase + 'a,
+        F: 'static,
+    {
+        let spec = env.spec;
+        let precompiles = Box::new(CachedPrecompileProvider::new(
+            self.evm_factory.precompiles(spec),
+            cache_map,
+            spec,
+            self.evm_factory.precompile_cache_policy(spec),
+            metrics_enabled,
+        ));
+        self.build_evm(db, env, precompiles)
+    }
+
+    fn build_evm<'a, DB>(
+        &self,
+        db: DB,
+        env: EthEvmEnv<F::Types>,
+        precompiles: Box<dyn evm2::evm::precompile::PrecompileProvider<F::Types>>,
+    ) -> evm2::Evm<'a, F::Types>
+    where
+        DB: evm2::evm::DynDatabase + 'a,
+    {
         let spec = env.spec;
         let config = self.evm_factory.execution_config(spec, env.version);
         let registry = self.evm_factory.tx_registry(spec);
-        let precompiles = self.evm_factory.precompiles(spec);
-        let precompiles = Box::new(precompiles);
 
         let mut evm = evm2::Evm::<F::Types>::new_with_execution_config(
             config,

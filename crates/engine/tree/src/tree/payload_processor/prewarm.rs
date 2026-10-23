@@ -27,12 +27,13 @@ use alloy_eip7928::bal::DecodedBal;
 use alloy_eips::eip4895::Withdrawal;
 use alloy_primitives::{keccak256, Address};
 use core::convert::Infallible;
-use evm2::evm::StateChangeSource;
+use evm2::evm::{Database, StateChangeSource};
 use metrics::{Counter, Gauge, Histogram};
 use rayon::prelude::*;
 use reth_evm::{
     database::StateProviderDatabase, precompile_cache::PrecompileCacheMap, ConfigureEvm,
-    Evm as EvmInstance, EvmEnv, EvmFor, EvmTypesFor, ExecutableTxFor, RecoveredTx, SpecFor,
+    Evm as EvmInstance, EvmEnv, EvmEnvFor, EvmFor, EvmTypesFor, ExecutableTxFor, RecoveredTx,
+    SpecFor,
 };
 use reth_execution_types::{EvmStateChangeSink, ExecutionAccountChangeRef, ExecutionStorageChange};
 use reth_metrics::Metrics;
@@ -803,7 +804,6 @@ where
 
         let evm_env =
             self.env.evm_env.clone().with_nonce_check_disabled().with_balance_check_disabled();
-        let spec = evm_env.spec_id();
 
         let recording = RecordingHandle::default();
         let config = if self.prewarm_results.is_some() {
@@ -812,18 +812,28 @@ where
             self.evm_config.clone()
         };
         let db = StateProviderDatabase::new(state_provider);
-        let mut evm = if self.prewarm_results.is_some() {
-            config.evm_with_env(RecordingDb::new(db, recording.clone()), evm_env)
+        let evm = if self.prewarm_results.is_some() {
+            self.create_evm(&config, RecordingDb::new(db, recording.clone()), evm_env)
         } else {
-            config.evm_with_env(db, evm_env)
+            self.create_evm(&config, db, evm_env)
         };
-
-        if !self.precompile_cache_disabled {
-            // No metrics for prewarm.
-            config.cache_precompiles(&mut evm, spec, self.precompile_cache_map.clone(), false);
-        }
-
         PrewarmEvmState { evm: Some(evm), recording }
+    }
+
+    /// Creates a prewarm EVM, caching precompile results unless the cache is disabled.
+    ///
+    /// Prewarming does not record precompile cache metrics.
+    fn create_evm(
+        &self,
+        config: &Evm,
+        db: impl Database + 'static,
+        evm_env: EvmEnvFor<Evm>,
+    ) -> EvmFor<'static, Evm> {
+        if self.precompile_cache_disabled {
+            config.evm_with_env(db, evm_env)
+        } else {
+            config.evm_with_precompile_cache(db, evm_env, self.precompile_cache_map.clone(), false)
+        }
     }
 
     /// Returns `true` if prewarming should stop.

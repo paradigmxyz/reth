@@ -137,14 +137,17 @@ impl ConfigureEvm for CustomEvmConfig {
         Self { inner, executor_factory }
     }
 
-    fn cache_precompiles(
+    fn evm_with_precompile_cache<'a, DB>(
         &self,
-        evm: &mut EvmFor<'_, Self>,
-        spec: SpecFor<Self>,
+        db: DB,
+        evm_env: reth_ethereum::evm::primitives::EvmEnvFor<Self>,
         cache_map: PrecompileCacheMap<SpecFor<Self>>,
         metrics_enabled: bool,
-    ) {
-        self.inner.cache_precompiles(evm, spec, cache_map, metrics_enabled);
+    ) -> EvmFor<'a, Self>
+    where
+        DB: evm2::evm::Database + 'a,
+    {
+        self.inner.evm_with_precompile_cache(db, evm_env, cache_map, metrics_enabled)
     }
 }
 

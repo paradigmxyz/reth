@@ -138,7 +138,7 @@ use reth_errors::{BlockExecutionError, BlockValidationError, ProviderResult};
 use reth_evm::{
     database::StateProviderDatabase, precompile_cache::PrecompileCacheMap, BlockExecutor,
     BlockExecutorFactory, BlockExecutorFor, BlockTransactionResult, ConfigureEvm, Evm as _,
-    EvmEnv as _, EvmEnvFor, EvmTypesFor, ExecutableTxFor, ExecutionCtxFor, SpecFor,
+    EvmEnvFor, EvmTypesFor, ExecutableTxFor, ExecutionCtxFor, SpecFor,
 };
 use reth_execution_cache::{CacheFillMode, CacheStats};
 use reth_execution_types::DecodedEvmBal;
@@ -1036,18 +1036,16 @@ where
         let (output, senders, built_bal) = debug_span!(target: "engine::tree", "execute_block")
             .in_scope(|| {
                 let db = StateProviderDatabase::new(state_provider);
-                let spec = env.evm_env.spec_id();
-                let mut evm = evm_config.evm_with_env(db, env.evm_env);
-                if !self.config.precompile_cache_disabled() {
-                    let _span =
-                        debug_span!(target: "engine::tree", "setup_precompile_cache").entered();
-                    evm_config.cache_precompiles(
-                        &mut evm,
-                        spec,
+                let evm = if self.config.precompile_cache_disabled() {
+                    evm_config.evm_with_env(db, env.evm_env)
+                } else {
+                    evm_config.evm_with_precompile_cache(
+                        db,
+                        env.evm_env,
                         self.precompile_cache_map.clone(),
                         true,
-                    );
-                }
+                    )
+                };
                 let mut executor =
                     evm_config.block_executor_factory().create_executor(evm, execution_ctx);
                 if input.has_block_access_list() {

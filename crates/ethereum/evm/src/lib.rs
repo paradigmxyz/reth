@@ -32,11 +32,13 @@ use alloy_rpc_types_engine::ExecutionData;
 #[cfg(feature = "std")]
 use convert::payload_block_env;
 #[cfg(feature = "std")]
+use evm2::evm::{Database, Db};
+#[cfg(feature = "std")]
 use reth_ethereum_primitives::TransactionSigned;
 #[cfg(feature = "std")]
 use reth_evm::{
-    precompile_cache::{CachedPrecompileProvider, PrecompileCacheMap},
-    ConfigureEngineEvm, EvmFor, ExecutableTxIterator, ExecutionCtxFor, SpecFor,
+    precompile_cache::PrecompileCacheMap, ConfigureEngineEvm, EvmFor, ExecutableTxIterator,
+    ExecutionCtxFor, SpecFor,
 };
 #[cfg(feature = "std")]
 use reth_primitives_traits::SignedTransaction;
@@ -454,21 +456,22 @@ where
     }
 
     #[cfg(feature = "std")]
-    fn cache_precompiles(
+    fn evm_with_precompile_cache<'a, DB>(
         &self,
-        evm: &mut EvmFor<'_, Self>,
-        spec: SpecFor<Self>,
+        db: DB,
+        evm_env: EvmEnvFor<Self>,
         cache_map: PrecompileCacheMap<SpecFor<Self>>,
         metrics_enabled: bool,
-    ) {
-        let factory = self.executor_factory.evm_factory();
-        evm.set_precompiles(CachedPrecompileProvider::new(
-            factory.precompiles(spec),
+    ) -> EvmFor<'a, Self>
+    where
+        DB: Database + 'a,
+    {
+        self.executor_factory.build_evm_with_precompile_cache(
+            Db::new(db),
+            evm_env,
             cache_map,
-            spec,
-            factory.precompile_cache_policy(spec),
             metrics_enabled,
-        ));
+        )
     }
 
     fn jit_backend(&self) -> Option<&dyn reth_evm::JitBackend> {

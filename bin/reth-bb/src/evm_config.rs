@@ -98,14 +98,17 @@ where
     type BlockExecutorFactory = EthBigBlockExecutorFactory<C>;
     type BlockAssembler = BbBlockAssembler;
 
-    fn cache_precompiles(
+    fn evm_with_precompile_cache<'a, DB>(
         &self,
-        evm: &mut EvmFor<'_, Self>,
-        spec: SpecFor<Self>,
+        db: DB,
+        evm_env: EvmEnvFor<Self>,
         cache_map: PrecompileCacheMap<SpecFor<Self>>,
         metrics_enabled: bool,
-    ) {
-        self.inner.cache_precompiles(evm, spec, cache_map, metrics_enabled);
+    ) -> EvmFor<'a, Self>
+    where
+        DB: evm2::evm::Database + 'a,
+    {
+        self.inner.evm_with_precompile_cache(db, evm_env, cache_map, metrics_enabled)
     }
 
     fn block_executor_factory(&self) -> &Self::BlockExecutorFactory {
@@ -287,12 +290,15 @@ mod tests {
             let sha256 = Address::with_last_byte(2);
             let ecadd = Address::with_last_byte(6);
             let call = |cache_metrics: Option<bool>, address, input: Bytes| {
-                let env = EthEvmEnv::default();
-                let spec = env.spec;
-                let mut evm = config.evm_with_env(EmptyDB::default(), env);
-                if let Some(metrics_enabled) = cache_metrics {
-                    config.cache_precompiles(&mut evm, spec, cache_map.clone(), metrics_enabled);
-                }
+                let mut evm = match cache_metrics {
+                    Some(metrics_enabled) => config.evm_with_precompile_cache(
+                        EmptyDB::default(),
+                        EthEvmEnv::default(),
+                        cache_map.clone(),
+                        metrics_enabled,
+                    ),
+                    None => config.evm_with_env(EmptyDB::default(), EthEvmEnv::default()),
+                };
                 evm.system_call(SystemTx::new(address, input)).unwrap().commit().status
             };
 
