@@ -178,6 +178,14 @@ mod read_transactions {
             }
         }
 
+        /// Stops timing out a read transaction. A transaction that has already timed out still
+        /// holds its snapshot, so it stays in the list of timed out transactions until dropped.
+        pub(crate) fn disable_read_transaction_timeout(&self, ptr: *mut ffi::MDBX_txn) {
+            if let Some(read_transactions) = &self.read_transactions {
+                read_transactions.active.remove(&(ptr as usize));
+            }
+        }
+
         /// Returns the number of timed out transactions that were not aborted by the user yet.
         pub(crate) fn timed_out_not_aborted_read_transactions(&self) -> Option<usize> {
             self.read_transactions
@@ -385,6 +393,11 @@ mod read_transactions {
 
                 assert_eq!(cursor.first::<(), ()>().err(), Some(Error::ReadTransactionTimeout));
                 drop(cursor);
+
+                // Disabling the timeout of a timed out transaction doesn't hide that it still
+                // holds its snapshot.
+                tx.disable_timeout();
+                assert!(read_transactions.timed_out_not_aborted.contains(&tx_ptr));
 
                 // Ensure that the transaction pointer is not reused when opening a new read-only
                 // transaction.

@@ -289,7 +289,7 @@ where
     #[cfg(feature = "read-tx-timeouts")]
     pub fn disable_timeout(&self) {
         if K::IS_READ_ONLY {
-            self.env().txn_manager().remove_active_read_transaction(self.txn);
+            self.env().txn_manager().disable_read_transaction_timeout(self.txn);
         }
     }
 }
