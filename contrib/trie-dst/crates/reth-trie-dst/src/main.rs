@@ -534,10 +534,10 @@ fn run(config: &mut Config, snapshotter: &Snapshotter) -> Result<()> {
         let mut accounts = state.keys().copied().collect::<BTreeSet<_>>();
         for op in &updates_input {
             match op {
-                model::Operation::Account { address, .. } => {
+                model::Update::Account { address, .. } => {
                     accounts.insert(*address);
                 }
-                model::Operation::Storage { address, .. } => ensure!(
+                model::Update::Storage { address, .. } => ensure!(
                     accounts.contains(address),
                     "storage before account creation: {address}"
                 ),
@@ -769,7 +769,7 @@ fn main() -> Result<()> {
                     let mut input = Input::generate(config.seed, config.blocks, config.updates);
                     if command.as_deref() == Some("generate-suffix") {
                         let accounts = (1..=16u64)
-                            .map(|a| model::Operation::Account {
+                            .map(|a| model::Update::Account {
                                 address: Address::from_word(B256::from(U256::from(a))),
                                 account: reth_primitives_traits::Account {
                                     nonce: 1,

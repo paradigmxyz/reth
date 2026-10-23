@@ -22,12 +22,12 @@ pub struct ModelAccount {
 pub type Model = BTreeMap<Address, ModelAccount>;
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub enum Operation {
+pub enum Update {
     Account { address: Address, account: Account },
     Storage { address: Address, slot: U256, value: U256 },
 }
 
-impl Operation {
+impl Update {
     fn apply(&self, state: &mut Model) -> (Address, HashedPostState) {
         let mut delta = HashedPostState::default();
         let address = match self {
@@ -56,7 +56,7 @@ impl Operation {
     }
 }
 
-pub fn generate(rng: &mut StdRng, state: &Model, updates: usize) -> Vec<Operation> {
+pub fn generate(rng: &mut StdRng, state: &Model, updates: usize) -> Vec<Update> {
     let mut state = state.clone();
     (0..updates)
         .map(|_| {
@@ -66,7 +66,7 @@ pub fn generate(rng: &mut StdRng, state: &Model, updates: usize) -> Vec<Operatio
                     state.get(&address).map(|entry| entry.account.to_owned()).unwrap_or_default();
                 account.nonce += 1;
                 account.balance = U256::from(rng.random_range(1..=1_000_000u64));
-                Operation::Account { address, account }
+                Update::Account { address, account }
             } else {
                 let slot = U256::from(rng.random_range(0..64u64));
                 let value = if rng.random_ratio(1, 3) {
@@ -74,7 +74,7 @@ pub fn generate(rng: &mut StdRng, state: &Model, updates: usize) -> Vec<Operatio
                 } else {
                     U256::from(rng.random::<u64>())
                 };
-                Operation::Storage { address, slot, value }
+                Update::Storage { address, slot, value }
             };
             operation.apply(&mut state);
             operation
@@ -85,7 +85,7 @@ pub fn generate(rng: &mut StdRng, state: &Model, updates: usize) -> Vec<Operatio
 pub fn apply(
     state: &mut Model,
     number: u64,
-    operations: &[Operation],
+    operations: &[Update],
 ) -> (BundleState, Vec<HashedPostState>) {
     let before = state.clone();
     let mut touched = BTreeMap::<Address, BTreeSet<U256>>::new();
@@ -93,7 +93,7 @@ pub fn apply(
     for operation in operations {
         let (address, delta) = operation.apply(state);
         let slots = touched.entry(address).or_default();
-        if let Operation::Storage { slot, .. } = operation {
+        if let Update::Storage { slot, .. } = operation {
             slots.insert(*slot);
         }
         stream.push(delta);
@@ -182,7 +182,7 @@ mod tests {
         apply(
             &mut state,
             1,
-            &[Operation::Account {
+            &[Update::Account {
                 address,
                 account: Account { bytecode_hash: Some(old_hash), ..Default::default() },
             }],
@@ -190,7 +190,7 @@ mod tests {
         let (bundle, _) = apply(
             &mut state,
             2,
-            &[Operation::Account {
+            &[Update::Account {
                 address,
                 account: Account { bytecode_hash: Some(new_hash), ..Default::default() },
             }],

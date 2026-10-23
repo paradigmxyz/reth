@@ -1,6 +1,6 @@
 //! Explicit trie-task operation stream. Only `Commit` ends a block.
 
-use crate::model::{apply, generate, Model, Operation as Update};
+use crate::model::{apply, generate, Model, Update};
 use alloy_primitives::{Address, B256, KECCAK256_EMPTY, U256};
 use eyre::{ensure, Result};
 use rand::{rngs::StdRng, seq::SliceRandom, Rng, SeedableRng};
