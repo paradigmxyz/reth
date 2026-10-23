@@ -47,7 +47,7 @@ impl HashedPostState {
             .into_iter()
             .map(|(address, account)| {
                 let hashed_address = KH::hash_key(address);
-                let hashed_account = account.info.as_ref().map(Account::from);
+                let hashed_account = account.info.as_ref().map(Into::into);
                 let hashed_storage = HashedStorage::from_iter(
                     account
                         .storage

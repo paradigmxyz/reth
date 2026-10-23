@@ -2583,11 +2583,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
             // are written elsewhere. Only bytecodes need MDBX writes, so skip the expensive
             // to_plain_state_and_reverts conversion that iterates all accounts and storage.
             self.write_bytecodes(
-                execution_outcome
-                    .state()
-                    .contracts
-                    .iter()
-                    .map(|(h, b)| (*h, reth_primitives_traits::Bytecode(b.clone()))),
+                execution_outcome.state().contracts.iter().map(|(h, b)| (*h, Bytecode(b.clone()))),
             )?;
             return Ok(());
         }
@@ -2756,10 +2752,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
             let block_number = first_block + block_index as BlockNumber;
             let changeset = account_block_reverts
                 .into_iter()
-                .map(|(address, info)| AccountBeforeTx {
-                    address,
-                    info: info.map(reth_primitives_traits::Account::from),
-                })
+                .map(|(address, info)| AccountBeforeTx { address, info: info.map(Into::into) })
                 .collect::<Vec<_>>();
             let mut account_changesets_writer =
                 EitherWriter::new_account_changesets(self, block_number)?;
@@ -2785,8 +2778,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
             for (address, account) in changes.accounts {
                 if let Some(account) = account {
                     tracing::trace!(?address, "Updating plain state account");
-                    accounts_cursor
-                        .upsert(address, &reth_primitives_traits::Account::from(&account))?;
+                    accounts_cursor.upsert(address, &account.into())?;
                 } else if accounts_cursor.seek_exact(address)?.is_some() {
                     tracing::trace!(?address, "Deleting plain state account");
                     accounts_cursor.delete_current()?;
@@ -2829,10 +2821,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
         // Write bytecode
         tracing::trace!(len = changes.contracts.len(), "Writing bytecodes");
         self.write_bytecodes(
-            changes
-                .contracts
-                .into_iter()
-                .map(|(hash, bytecode)| (hash, reth_primitives_traits::Bytecode(bytecode))),
+            changes.contracts.into_iter().map(|(hash, bytecode)| (hash, Bytecode(bytecode))),
         )?;
 
         Ok(())

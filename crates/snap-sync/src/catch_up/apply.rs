@@ -330,9 +330,7 @@ mod tests {
             AccountCoverage::COMPLETE,
             pre.0.iter().map(|(address, account)| (*address, account.clone())),
         );
-        let executed = reth_trie_common::HashedPostState::from_bundle_state::<KeccakKeyHasher>(
-            &output.state.state,
-        );
+        let executed = HashedPostState::from_bundle_state::<KeccakKeyHasher>(&output.state.state);
 
         let post = fold(pre.clone(), &update.state);
         assert!(update.unresolved.is_empty());
