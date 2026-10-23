@@ -213,7 +213,9 @@ pub static HOLESKY: LazyLock<Arc<ChainSpec>> = LazyLock::new(|| {
 pub static HOODI: LazyLock<Arc<ChainSpec>> = LazyLock::new(|| {
     let genesis = serde_json::from_str(include_str!("../res/genesis/hoodi.json"))
         .expect("Can't deserialize Hoodi genesis json");
-    let hardforks = EthereumHardfork::hoodi().into();
+    let mut hardforks = ChainHardforks::from(EthereumHardfork::hoodi());
+    // Amsterdam on Hoodi was cancelled.
+    hardforks.remove(&EthereumHardfork::Amsterdam);
     let mut spec = ChainSpec {
         chain: Chain::hoodi(),
         genesis_header: SealedHeader::new(
@@ -1847,43 +1849,37 @@ Post-merge hard forks (timestamp based):
                         timestamp: hoodi::HOODI_BPO2_TIMESTAMP,
                         ..Default::default()
                     },
-                    ForkId {
-                        hash: ForkHash(hex!("0x23aa1351")),
-                        next: hoodi::HOODI_AMSTERDAM_TIMESTAMP,
-                    },
+                    ForkId { hash: ForkHash(hex!("0x23aa1351")), next: 0 },
                 ),
-                // Last block before Amsterdam.
+                // Before the cancelled Amsterdam activation.
                 (
-                    Head {
-                        number: 0,
-                        timestamp: hoodi::HOODI_AMSTERDAM_TIMESTAMP - 1,
-                        ..Default::default()
-                    },
-                    ForkId {
-                        hash: ForkHash(hex!("0x23aa1351")),
-                        next: hoodi::HOODI_AMSTERDAM_TIMESTAMP,
-                    },
+                    Head { number: 0, timestamp: 1_793_036_567, ..Default::default() },
+                    ForkId { hash: ForkHash(hex!("0x23aa1351")), next: 0 },
                 ),
-                // First Amsterdam block.
+                // At the cancelled Amsterdam activation.
                 (
-                    Head {
-                        number: 0,
-                        timestamp: hoodi::HOODI_AMSTERDAM_TIMESTAMP,
-                        ..Default::default()
-                    },
-                    ForkId { hash: ForkHash(hex!("0x3d068b59")), next: 0 },
+                    Head { number: 0, timestamp: 1_793_036_568, ..Default::default() },
+                    ForkId { hash: ForkHash(hex!("0x23aa1351")), next: 0 },
                 ),
-                // After Amsterdam.
+                // After the cancelled Amsterdam activation.
                 (
-                    Head {
-                        number: 0,
-                        timestamp: hoodi::HOODI_AMSTERDAM_TIMESTAMP + 1,
-                        ..Default::default()
-                    },
-                    ForkId { hash: ForkHash(hex!("0x3d068b59")), next: 0 },
+                    Head { number: 0, timestamp: 1_793_036_569, ..Default::default() },
+                    ForkId { hash: ForkHash(hex!("0x23aa1351")), next: 0 },
+                ),
+                (
+                    Head { number: 0, timestamp: u64::MAX, ..Default::default() },
+                    ForkId { hash: ForkHash(hex!("0x23aa1351")), next: 0 },
                 ),
             ],
         )
+    }
+
+    #[test]
+    fn hoodi_amsterdam_not_scheduled() {
+        assert_eq!(HOODI.fork(EthereumHardfork::Amsterdam), ForkCondition::Never);
+        for timestamp in [1_793_036_567, 1_793_036_568, 1_793_036_569, u64::MAX] {
+            assert!(!HOODI.is_amsterdam_active_at_timestamp(timestamp));
+        }
     }
 
     #[test]
@@ -2901,8 +2897,8 @@ Post-merge hard forks (timestamp based):
 
     #[test]
     fn latest_hoodi_mainnet_fork_id() {
-        // Amsterdam.
-        assert_eq!(ForkId { hash: ForkHash(hex!("0x3d068b59")), next: 0 }, HOODI.latest_fork_id())
+        // BPO2.
+        assert_eq!(ForkId { hash: ForkHash(hex!("0x23aa1351")), next: 0 }, HOODI.latest_fork_id())
     }
 
     #[test]
