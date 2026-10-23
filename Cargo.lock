@@ -3714,7 +3714,7 @@ dependencies = [
 [[package]]
 name = "evm2"
 version = "0.1.0"
-source = "git+https://github.com/alloy-rs/evm2?rev=35a2eb035a29875164a7e4638e29ee89a706a679#35a2eb035a29875164a7e4638e29ee89a706a679"
+source = "git+https://github.com/alloy-rs/evm2?rev=df9d344582a23ad36081a23788d5f736de5f0f35#df9d344582a23ad36081a23788d5f736de5f0f35"
 dependencies = [
  "alloy-consensus",
  "alloy-eip7928",
@@ -3752,7 +3752,7 @@ dependencies = [
 [[package]]
 name = "evm2-inspectors"
 version = "0.1.0"
-source = "git+https://github.com/alloy-rs/evm2?rev=35a2eb035a29875164a7e4638e29ee89a706a679#35a2eb035a29875164a7e4638e29ee89a706a679"
+source = "git+https://github.com/alloy-rs/evm2?rev=df9d344582a23ad36081a23788d5f736de5f0f35#df9d344582a23ad36081a23788d5f736de5f0f35"
 dependencies = [
  "alloy-consensus",
  "alloy-eip2930",
@@ -3774,7 +3774,7 @@ dependencies = [
 [[package]]
 name = "evm2-jit"
 version = "0.1.0"
-source = "git+https://github.com/alloy-rs/evm2?rev=35a2eb035a29875164a7e4638e29ee89a706a679#35a2eb035a29875164a7e4638e29ee89a706a679"
+source = "git+https://github.com/alloy-rs/evm2?rev=df9d344582a23ad36081a23788d5f736de5f0f35#df9d344582a23ad36081a23788d5f736de5f0f35"
 dependencies = [
  "evm2",
  "evm2-jit-backend",
@@ -3789,7 +3789,7 @@ dependencies = [
 [[package]]
 name = "evm2-jit-backend"
 version = "0.1.0"
-source = "git+https://github.com/alloy-rs/evm2?rev=35a2eb035a29875164a7e4638e29ee89a706a679#35a2eb035a29875164a7e4638e29ee89a706a679"
+source = "git+https://github.com/alloy-rs/evm2?rev=df9d344582a23ad36081a23788d5f736de5f0f35#df9d344582a23ad36081a23788d5f736de5f0f35"
 dependencies = [
  "eyre",
  "ruint",
@@ -3798,12 +3798,12 @@ dependencies = [
 [[package]]
 name = "evm2-jit-build"
 version = "0.1.0"
-source = "git+https://github.com/alloy-rs/evm2?rev=35a2eb035a29875164a7e4638e29ee89a706a679#35a2eb035a29875164a7e4638e29ee89a706a679"
+source = "git+https://github.com/alloy-rs/evm2?rev=df9d344582a23ad36081a23788d5f736de5f0f35#df9d344582a23ad36081a23788d5f736de5f0f35"
 
 [[package]]
 name = "evm2-jit-builtins"
 version = "0.1.0"
-source = "git+https://github.com/alloy-rs/evm2?rev=35a2eb035a29875164a7e4638e29ee89a706a679#35a2eb035a29875164a7e4638e29ee89a706a679"
+source = "git+https://github.com/alloy-rs/evm2?rev=df9d344582a23ad36081a23788d5f736de5f0f35#df9d344582a23ad36081a23788d5f736de5f0f35"
 dependencies = [
  "alloy-primitives",
  "evm2",
@@ -3816,7 +3816,7 @@ dependencies = [
 [[package]]
 name = "evm2-jit-codegen"
 version = "0.1.0"
-source = "git+https://github.com/alloy-rs/evm2?rev=35a2eb035a29875164a7e4638e29ee89a706a679#35a2eb035a29875164a7e4638e29ee89a706a679"
+source = "git+https://github.com/alloy-rs/evm2?rev=df9d344582a23ad36081a23788d5f736de5f0f35#df9d344582a23ad36081a23788d5f736de5f0f35"
 dependencies = [
  "alloy-primitives",
  "bitflags 2.13.2",
@@ -3839,7 +3839,7 @@ dependencies = [
 [[package]]
 name = "evm2-jit-context"
 version = "0.1.0"
-source = "git+https://github.com/alloy-rs/evm2?rev=35a2eb035a29875164a7e4638e29ee89a706a679#35a2eb035a29875164a7e4638e29ee89a706a679"
+source = "git+https://github.com/alloy-rs/evm2?rev=df9d344582a23ad36081a23788d5f736de5f0f35#df9d344582a23ad36081a23788d5f736de5f0f35"
 dependencies = [
  "alloy-primitives",
  "evm2",
@@ -3849,7 +3849,7 @@ dependencies = [
 [[package]]
 name = "evm2-jit-llvm"
 version = "0.1.0"
-source = "git+https://github.com/alloy-rs/evm2?rev=35a2eb035a29875164a7e4638e29ee89a706a679#35a2eb035a29875164a7e4638e29ee89a706a679"
+source = "git+https://github.com/alloy-rs/evm2?rev=df9d344582a23ad36081a23788d5f736de5f0f35#df9d344582a23ad36081a23788d5f736de5f0f35"
 dependencies = [
  "alloy-primitives",
  "cc",
@@ -3862,7 +3862,7 @@ dependencies = [
 [[package]]
 name = "evm2-jit-runtime"
 version = "0.1.0"
-source = "git+https://github.com/alloy-rs/evm2?rev=35a2eb035a29875164a7e4638e29ee89a706a679#35a2eb035a29875164a7e4638e29ee89a706a679"
+source = "git+https://github.com/alloy-rs/evm2?rev=df9d344582a23ad36081a23788d5f736de5f0f35#df9d344582a23ad36081a23788d5f736de5f0f35"
 dependencies = [
  "alloy-primitives",
  "crossbeam-channel",
@@ -3889,7 +3889,7 @@ dependencies = [
 [[package]]
 name = "evm2-macros"
 version = "0.1.0"
-source = "git+https://github.com/alloy-rs/evm2?rev=35a2eb035a29875164a7e4638e29ee89a706a679#35a2eb035a29875164a7e4638e29ee89a706a679"
+source = "git+https://github.com/alloy-rs/evm2?rev=df9d344582a23ad36081a23788d5f736de5f0f35#df9d344582a23ad36081a23788d5f736de5f0f35"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -8488,7 +8488,7 @@ dependencies = [
 [[package]]
 name = "reth-codecs"
 version = "0.8.2"
-source = "git+https://github.com/paradigmxyz/reth-core?rev=7041982f28cc83b1f757b1cc8a166cdae4875b63#7041982f28cc83b1f757b1cc8a166cdae4875b63"
+source = "git+https://github.com/paradigmxyz/reth-core?rev=d93c2c8828d9c0250d1def2d00a591fd39c0fa20#d93c2c8828d9c0250d1def2d00a591fd39c0fa20"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -8508,7 +8508,7 @@ dependencies = [
 [[package]]
 name = "reth-codecs-derive"
 version = "0.8.2"
-source = "git+https://github.com/paradigmxyz/reth-core?rev=7041982f28cc83b1f757b1cc8a166cdae4875b63#7041982f28cc83b1f757b1cc8a166cdae4875b63"
+source = "git+https://github.com/paradigmxyz/reth-core?rev=d93c2c8828d9c0250d1def2d00a591fd39c0fa20#d93c2c8828d9c0250d1def2d00a591fd39c0fa20"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -10278,7 +10278,7 @@ dependencies = [
 [[package]]
 name = "reth-primitives-traits"
 version = "0.8.2"
-source = "git+https://github.com/paradigmxyz/reth-core?rev=7041982f28cc83b1f757b1cc8a166cdae4875b63#7041982f28cc83b1f757b1cc8a166cdae4875b63"
+source = "git+https://github.com/paradigmxyz/reth-core?rev=d93c2c8828d9c0250d1def2d00a591fd39c0fa20#d93c2c8828d9c0250d1def2d00a591fd39c0fa20"
 dependencies = [
  "alloy-consensus",
  "alloy-eip7928",
@@ -10740,6 +10740,7 @@ dependencies = [
  "reth-storage-api",
  "reth-tasks",
  "reth-transaction-pool",
+ "reth-trie-common",
  "schnellru",
  "serde",
  "serde_json",
@@ -10789,7 +10790,7 @@ dependencies = [
 [[package]]
 name = "reth-rpc-traits"
 version = "0.8.2"
-source = "git+https://github.com/paradigmxyz/reth-core?rev=7041982f28cc83b1f757b1cc8a166cdae4875b63#7041982f28cc83b1f757b1cc8a166cdae4875b63"
+source = "git+https://github.com/paradigmxyz/reth-core?rev=d93c2c8828d9c0250d1def2d00a591fd39c0fa20#d93c2c8828d9c0250d1def2d00a591fd39c0fa20"
 dependencies = [
  "alloy-consensus",
  "alloy-network",
@@ -11381,7 +11382,7 @@ dependencies = [
 [[package]]
 name = "reth-zstd-compressors"
 version = "0.8.2"
-source = "git+https://github.com/paradigmxyz/reth-core?rev=7041982f28cc83b1f757b1cc8a166cdae4875b63#7041982f28cc83b1f757b1cc8a166cdae4875b63"
+source = "git+https://github.com/paradigmxyz/reth-core?rev=d93c2c8828d9c0250d1def2d00a591fd39c0fa20#d93c2c8828d9c0250d1def2d00a591fd39c0fa20"
 dependencies = [
  "zstd 0.13.3",
 ]
