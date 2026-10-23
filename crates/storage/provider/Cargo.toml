@@ -42,7 +42,7 @@ alloy-genesis.workspace = true
 alloy-primitives.workspace = true
 alloy-rpc-types-engine.workspace = true
 alloy-consensus.workspace = true
-revm.workspace = true
+revm-database.workspace = true
 
 # tracing
 tracing.workspace = true
@@ -61,6 +61,7 @@ eyre.workspace = true
 tokio = { workspace = true, features = ["sync"], optional = true }
 
 # test-utils
+revm-state = { workspace = true, optional = true }
 reth-ethereum-engine-primitives = { workspace = true, optional = true }
 
 # parallel utils
@@ -87,9 +88,13 @@ rand.workspace = true
 
 tokio = { workspace = true, features = ["sync", "macros", "rt-multi-thread"] }
 
+revm-database-interface.workspace = true
+revm-state.workspace = true
+
 [features]
 jemalloc = ["rocksdb/jemalloc"]
 test-utils = [
+    "dep:revm-state",
     "reth-db/test-utils",
     "reth-nippy-jar/test-utils",
     "reth-trie/test-utils",
@@ -111,7 +116,7 @@ account-ext = [
     "alloy-genesis/account-ext",
     "reth-codecs/account-ext",
     "reth-primitives-traits/account-ext",
-    "revm/account-ext",
+    "revm-state?/account-ext",
     "reth-trie/account-ext",
     "reth-trie-db/account-ext",
     "reth-execution-types/account-ext",

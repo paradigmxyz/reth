@@ -1,8 +1,6 @@
 //! EVM-backed Ethereum execution helpers.
-use reth_execution_types::{BlockState, StateUpdate};
 
-use alloy_evm::eth::dao_fork;
-
+use crate::dao_fork;
 use alloc::{boxed::Box, string::ToString, vec::Vec};
 use alloy_consensus::{
     constants::ETH_TO_WEI, transaction::Recovered, BlockHeader, Header, TxReceipt,
@@ -33,6 +31,7 @@ use reth_evm::{
     execute::{map_database_error, map_handler_error},
     BlockExecutionError, BlockValidationError, InternalBlockExecutionError, InvalidTxError,
 };
+use reth_execution_types::{BlockState, StateUpdate};
 
 const DEPOSIT_BYTES_SIZE: usize = 48 + 32 + 8 + 96 + 8;
 const BUILDER_DEPOSIT_REQUEST_TYPE: u8 = 0x03;

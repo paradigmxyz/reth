@@ -9,7 +9,8 @@ use alloy_trie::{HashBuilder, Nibbles, TrieAccount};
 use rand::{rngs::StdRng, Rng};
 use reth_primitives_traits::Account;
 use reth_trie::{HashedPostState, HashedStorage};
-use revm::{database::BundleState, state::AccountInfo};
+use revm_database::BundleState;
+use revm_state::AccountInfo;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 

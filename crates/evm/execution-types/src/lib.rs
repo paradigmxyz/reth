@@ -19,7 +19,7 @@ pub use reth_trie_common::{
     account_from_revm, account_to_revm, native_account, native_bytecode, reth_bytecode,
     revm_account, revm_bytecode, HashedPostState,
 };
-pub use revm::state::EvmState;
+pub use revm_state::EvmState;
 
 /// Receives per-transaction state changes streamed from block execution.
 pub trait OnStateHook: Send + 'static {

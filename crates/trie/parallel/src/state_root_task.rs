@@ -13,7 +13,7 @@ use reth_execution_types::{OnStateHook, StateUpdate};
 use reth_trie::{
     updates::TrieUpdates, HashedPostState, HashedStorage, MultiProofTargetsV2, ProofV2Target,
 };
-use revm::state::EvmState;
+use revm_state::EvmState;
 use std::{fmt, sync::Arc};
 use tracing::trace;
 
@@ -567,7 +567,9 @@ pub fn evm_state_to_hashed_post_state(update: EvmState) -> HashedPostState {
 mod tests {
     use super::*;
     use alloy_primitives::{Address, U256};
-    use revm::state::{Account, EvmStorageSlot, TransactionId};
+    use revm_database::{states::bundle_state::BundleRetention, State};
+    use revm_database_interface::DatabaseCommit;
+    use revm_state::{Account, AccountInfo, EvmStorageSlot, TransactionId};
     use std::{
         sync::atomic::{AtomicUsize, Ordering},
         time::Duration,
@@ -669,12 +671,6 @@ mod tests {
     /// marks for removal in the bundle path (`CacheAccount::touch_empty_eip161`).
     #[test]
     fn matches_bundle_state_for_emptied_account() {
-        use revm::{
-            database::{states::bundle_state::BundleRetention, State},
-            state::AccountInfo,
-            DatabaseCommit,
-        };
-
         let address = Address::repeat_byte(0x07);
         let pre = AccountInfo { balance: U256::ONE, ..Default::default() };
 
@@ -705,11 +701,6 @@ mod tests {
     /// the bundle producer reports a removal.
     #[test]
     fn created_empty_account_matches_bundle_state() {
-        use revm::{
-            database::{states::bundle_state::BundleRetention, State},
-            DatabaseCommit,
-        };
-
         let address = Address::repeat_byte(0x08);
         let mut account = Account::default();
         account.mark_touch();
@@ -739,11 +730,6 @@ mod tests {
     /// that would queue a `HashedAccounts` delete and a storage-trie wipe for an unused address.
     #[test]
     fn touched_never_existing_account_matches_bundle_state() {
-        use revm::{
-            database::{states::bundle_state::BundleRetention, State},
-            DatabaseCommit,
-        };
-
         let address = Address::repeat_byte(0x09);
         let mut account = Account::new_not_existing(TransactionId::default());
         account.mark_touch();
@@ -769,12 +755,6 @@ mod tests {
     /// unchanged `HashedAccounts` rows.
     #[test]
     fn touched_unchanged_account_matches_bundle_state() {
-        use revm::{
-            database::{states::bundle_state::BundleRetention, State},
-            state::AccountInfo,
-            DatabaseCommit,
-        };
-
         let address = Address::repeat_byte(0x0a);
         let pre = AccountInfo { balance: U256::from(7), nonce: 1, ..Default::default() };
         let mut account = Account::from(pre.clone());

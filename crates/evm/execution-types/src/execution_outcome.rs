@@ -10,10 +10,8 @@ use reth_primitives_traits::{Account, Bytecode, Receipt, StorageEntry};
 use reth_trie_common::{
     account_from_revm, account_to_revm, reth_bytecode, HashedPostState, KeyHasher,
 };
-use revm::{
-    database::{states::BundleState, BundleAccount},
-    state::AccountInfo,
-};
+use revm_database::{states::BundleState, BundleAccount};
+use revm_state::AccountInfo;
 
 /// Type used to initialize revms bundle state.
 pub type BundleStateInit = AddressMap<(Option<Account>, Option<Account>, B256Map<(U256, U256)>)>;
@@ -432,7 +430,7 @@ pub(super) mod serde_bincode_compat {
     use alloy_eips::eip7685::Requests;
     use alloy_primitives::{BlockNumber, Bytes};
     use reth_primitives_traits::Receipt;
-    use revm::database::BundleState;
+    use revm_database::BundleState;
     use serde::{Deserialize, Deserializer, Serialize, Serializer};
     use serde_with::{DeserializeAs, SerializeAs};
 

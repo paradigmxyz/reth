@@ -319,7 +319,8 @@ mod tests {
     };
     use reth_storage_api::{metadata::keys, StateWriter};
     use reth_trie_common::HashedPostState;
-    use revm::{bytecode::Bytecode, database::states::StateChangeset};
+    use revm_bytecode::Bytecode;
+    use revm_database::states::StateChangeset;
 
     const HASHED_ADDRESS: B256 = B256::repeat_byte(0xbb);
 

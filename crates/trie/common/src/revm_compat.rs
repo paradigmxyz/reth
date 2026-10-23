@@ -3,7 +3,7 @@
 
 use alloy_primitives::KECCAK256_EMPTY;
 use reth_primitives_traits::Account;
-use revm::state::{AccountInfo, Bytecode};
+use revm_state::{AccountInfo, Bytecode};
 
 /// Converts a bundle-state account into Reth's account representation.
 pub fn account_from_revm(info: &AccountInfo) -> Account {
@@ -25,7 +25,7 @@ pub fn account_to_revm(account: Account) -> AccountInfo {
         code: None,
         account_id: None,
         #[cfg(feature = "account-ext")]
-        extension: revm::state::AccountExtension::from_shared(account.extension.into_shared()),
+        extension: revm_state::AccountExtension::from_shared(account.extension.into_shared()),
     }
 }
 
@@ -85,6 +85,6 @@ pub fn revm_account(info: &evm2::evm::AccountInfo) -> AccountInfo {
         code: None,
         account_id: None,
         #[cfg(feature = "account-ext")]
-        extension: revm::state::AccountExtension::from_shared(info.extension.clone().into_shared()),
+        extension: revm_state::AccountExtension::from_shared(info.extension.clone().into_shared()),
     }
 }

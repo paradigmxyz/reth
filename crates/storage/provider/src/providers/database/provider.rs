@@ -78,7 +78,7 @@ use reth_trie::{
     HashedPostStateSorted, SortedTrieData,
 };
 use reth_trie_db::{DatabaseStorageTrieCursor, TrieTableAdapter};
-use revm::database::states::{
+use revm_database::states::{
     PlainStateReverts, PlainStorageChangeset, PlainStorageRevert, StateChangeset,
 };
 use smallvec::SmallVec;
@@ -4121,7 +4121,8 @@ mod tests {
         HashedPostState, KeccakKeyHasher, Nibbles, SortedTrieData, StoredNibbles,
         StoredNibblesSubKey,
     };
-    use revm::{database::BundleState, state::AccountInfo};
+    use revm_database::BundleState;
+    use revm_state::AccountInfo;
     use std::{sync::mpsc, time::Duration};
 
     /// Seeds block zero through the writer core because [`SaveBlocksInput`] only describes
@@ -5472,7 +5473,6 @@ mod tests {
     #[test]
     fn test_write_state_hashed() {
         use reth_trie::{HashedPostState, KeccakKeyHasher};
-        use revm::{database::BundleState, state::AccountInfo};
 
         let factory = create_test_provider_factory();
         factory.set_storage_settings_cache(StorageSettings::v2());

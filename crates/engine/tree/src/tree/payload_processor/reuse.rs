@@ -1099,7 +1099,7 @@ mod tests {
     use reth_ethereum_primitives::{Receipt, Transaction, TransactionSigned};
     use reth_evm::{BlockExecutor, BlockExecutorFactory, ConfigureEvm, Evm, EvmFor};
     use reth_evm_ethereum::{EthBlockExecutionCtx, EthEvmConfig, EthEvmEnv};
-    use revm::database::BundleState;
+    use revm_database::BundleState;
 
     const BENEFICIARY: Address = Address::repeat_byte(0xbe);
     /// Does nothing.
