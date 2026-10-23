@@ -506,23 +506,24 @@ pub(crate) fn post_block_balance_state_changes<T: EvmTypes>(
     if dao_fork_transition {
         core::hint::cold_path();
         let mut drained_balance = U256::ZERO;
+        // Mirrors revm's `drain_balances` and `increment_balances`: absent accounts stay absent,
+        // and an account that is empty once drained is removed, even before EIP-161.
         for address in dao_fork::DAO_HARDFORK_ACCOUNTS {
             let original = evm.read_account_info(&address).map_err(map_database_error)?;
             let Some(original) = original else { continue };
-            if original.balance.is_zero() {
-                continue
-            }
 
             drained_balance = drained_balance.saturating_add(original.balance);
             let mut current = original.clone();
             current.balance = U256::ZERO;
-            changes.push((address, Some(original), Some(current)));
+            let current = (!current.is_empty()).then_some(current);
+            if current.as_ref() == Some(&original) {
+                continue
+            }
+            changes.push((address, Some(original), current));
         }
 
-        if !drained_balance.is_zero() {
-            *balance_increments.entry(dao_fork::DAO_HARDFORK_BENEFICIARY).or_default() +=
-                drained_balance;
-        }
+        *balance_increments.entry(dao_fork::DAO_HARDFORK_BENEFICIARY).or_default() +=
+            drained_balance;
         // Reward recipients may also be drained accounts. Read their balances after the drain.
         commit_state_changes(evm, block_state, stream_state, on_state_update, &changes);
         changes.clear();
