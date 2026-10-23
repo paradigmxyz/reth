@@ -36,13 +36,13 @@ pub struct Verifier<T: TrieCursor, H, S> {
     storage: S,
     account_verifier: SingleVerifier<DepthFirstTrieIterator<T>>,
     hash_builder: crate::HashBuilder,
+    account_rlp: Vec<u8>,
     accounts_seeked: bool,
     pipeline: StoragePipeline,
     outputs: VecDeque<Result<Output, StateRootError>>,
     complete: bool,
 }
 
-const ACCOUNT_BATCH_SIZE: usize = 16_384;
 const ACCOUNT_UPDATE_THRESHOLD: usize = 1024;
 
 impl<T, H, S> Verifier<T, H, S>
@@ -91,6 +91,7 @@ where
             storage,
             account_verifier,
             hash_builder: crate::HashBuilder::default().with_updates(true),
+            account_rlp: Vec::with_capacity(crate::TRIE_ACCOUNT_RLP_MAX_SIZE),
             accounts_seeked: false,
             pipeline,
             outputs: Default::default(),
@@ -98,9 +99,12 @@ where
         })
     }
 
-    fn fill_batch(&mut self) -> Result<(), StateRootError> {
-        let mut account_rlp = Vec::with_capacity(crate::TRIE_ACCOUNT_RLP_MAX_SIZE);
-        for _ in 0..ACCOUNT_BATCH_SIZE {
+    fn fill_outputs(&mut self) -> Result<(), StateRootError> {
+        loop {
+            self.pipeline.drain(&mut self.outputs)?;
+            if !self.outputs.is_empty() {
+                return Ok(())
+            }
             let next = if self.accounts_seeked {
                 self.accounts.next()?
             } else {
@@ -108,7 +112,6 @@ where
                 self.accounts.seek(B256::ZERO)?
             };
             let Some((address, account)) = next else { return self.finish() };
-            self.pipeline.drain(&mut self.outputs)?;
             // Storage workers make the same emptiness check and only send roots for non-empty
             // storage, so waiting on the pipeline here for an empty storage would never return.
             self.storage.set_hashed_address(address);
@@ -117,14 +120,13 @@ where
             } else {
                 self.pipeline.root(address, &mut self.outputs)?
             };
-            account_rlp.clear();
-            account.into_trie_account(root).encode(&mut account_rlp);
-            self.hash_builder.add_leaf(Nibbles::unpack(address), &account_rlp);
+            self.account_rlp.clear();
+            account.into_trie_account(root).encode(&mut self.account_rlp);
+            self.hash_builder.add_leaf(Nibbles::unpack(address), &self.account_rlp);
             if self.hash_builder.updates_len() >= ACCOUNT_UPDATE_THRESHOLD {
                 self.verify_account_updates()?;
             }
         }
-        Ok(())
     }
 
     fn finish(&mut self) -> Result<(), StateRootError> {
@@ -172,7 +174,7 @@ where
             if self.complete {
                 return None
             }
-            if let Err(error) = self.fill_batch() {
+            if let Err(error) = self.fill_outputs() {
                 self.complete = true;
                 self.pipeline.stop();
                 self.outputs.push_back(Err(error));
