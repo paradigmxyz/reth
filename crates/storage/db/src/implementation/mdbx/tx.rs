@@ -299,8 +299,9 @@ impl<K: TransactionKind> Drop for MetricsHandler<K> {
 
 impl TableImporter for Tx<RW> {}
 
-// SAFETY: An MDBX cursor holds only its cursor pointer and a reference to the transaction, and
-// MDBX allows a transaction and its cursors to move between threads together.
+// SAFETY: Besides `Send` fields, a cursor holds only a libmdbx cursor pointer and a reference to
+// the transaction, and MDBX allows a transaction and its cursors to move between threads together.
+// `Tx` is not `Sync`, so its cursors never need to move on their own.
 unsafe impl<K: TransactionKind> DbTx for Tx<K> {
     type Cursor<'tx, T: Table> = Cursor<'tx, K, T>;
     type DupCursor<'tx, T: DupSort> = Cursor<'tx, K, T>;
