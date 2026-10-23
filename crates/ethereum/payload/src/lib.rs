@@ -176,6 +176,8 @@ where
         CachedStateProvider::new(
             &evm_state_provider,
             execution_cache.cache().clone(),
+            // It's ok to recreate the cache every time, because it's cheap to do so for a vanilla
+            // Ethereum builder every 12s.
             Some(CachedStateMetrics::zeroed(CachedStateMetricsSource::Builder)),
         )
     });
@@ -223,6 +225,7 @@ where
     let separate_block_gas = builder.evm_env().uses_separate_block_gas();
     let regular_gas_limit_cap = builder.evm_env().regular_gas_limit_cap();
 
+    // If we have a state-root task, wire a state hook that streams per-tx state diffs.
     let use_state_root_task =
         if let Some(task) = state_root_handle.as_mut().filter(|_| stream_state_updates) {
             let mut hook = task.take_state_hook();
@@ -241,11 +244,15 @@ where
     let mut cumulative_tx_gas_used = 0u64;
     let mut block_regular_gas_used = 0u64;
     let mut block_state_gas_used = 0u64;
+    // initialize empty blob sidecars at first. If cancun is active then this will be populated by
+    // blob sidecars if any.
     let mut blob_sidecars = BlobSidecars::Empty;
     let mut block_blob_count = 0;
     let mut block_transactions_rlp_length = 0;
     let protocol_max_blob_count =
         blob_params.as_ref().map(|params| params.max_blob_count).unwrap_or_default();
+    // Apply user-configured blob limit (EIP-7872)
+    // Per EIP-7872: if the minimum is zero, set it to one
     let max_blob_count = builder_config
         .max_blobs_per_block
         .map(|user_limit| std::cmp::min(user_limit, protocol_max_blob_count).max(1))
@@ -255,10 +262,12 @@ where
         attributes.withdrawals.as_ref().map(|withdrawals| withdrawals.length()).unwrap_or(0);
 
     while let Some(pool_tx) = best_txs.next() {
+        // check if the job was cancelled, if so we can exit early
         if cancel.is_cancelled() {
             return Ok(BuildOutcome::Cancelled)
         }
 
+        // ensure we still have capacity for this transaction
         let exceeds_gas_limit = if separate_block_gas {
             let regular_available = gas_limit.saturating_sub(block_regular_gas_used);
             let state_available = gas_limit.saturating_sub(block_state_gas_used);
@@ -275,6 +284,9 @@ where
             (pool_tx.gas_limit() > available).then_some((pool_tx.gas_limit(), available))
         };
         if let Some((transaction_gas_limit, block_available_gas)) = exceeds_gas_limit {
+            // we can't fit this transaction into the block, so we need to mark it as invalid
+            // which also removes all dependent transaction from the iterator before we can
+            // continue
             best_txs.mark_invalid(
                 &pool_tx,
                 InvalidPoolTransactionError::ExceedsGasLimit(
@@ -285,10 +297,11 @@ where
             continue
         }
 
+        // convert tx to a signed transaction
         let tx = pool_tx.to_consensus();
         let tx_rlp_len = tx.inner().length();
         let estimated_block_size_with_tx =
-            block_transactions_rlp_length + tx_rlp_len + withdrawals_rlp_length + 1024;
+            block_transactions_rlp_length + tx_rlp_len + withdrawals_rlp_length + 1024; // 1Kb of overhead for the block header
 
         if is_osaka && estimated_block_size_with_tx > MAX_RLP_BLOCK_SIZE {
             best_txs.mark_invalid(
@@ -301,10 +314,16 @@ where
             continue
         }
 
+        // There's only limited amount of blob space available per block, so we need to check if
+        // the EIP-4844 can still fit in the block
         let mut blob_tx_sidecar = None;
         let tx_blob_count = tx.blob_count();
         if let Some(tx_blob_count) = tx_blob_count {
             if block_blob_count + tx_blob_count > max_blob_count {
+                // we can't fit this _blob_ transaction into the block, so we mark it as
+                // invalid, which removes its dependent transactions from
+                // the iterator. This is similar to the gas limit condition
+                // for regular transactions above.
                 trace!(
                     target: "payload_builder",
                     tx = ?tx.hash(),
@@ -360,8 +379,11 @@ where
                 error, ..
             })) => {
                 if error.is_nonce_too_low() {
+                    // if the nonce is too low, we can skip this transaction
                     trace!(target: "payload_builder", %error, ?tx_hash, "skipping nonce too low transaction");
                 } else {
+                    // if the transaction is invalid, we can skip it and all of its
+                    // descendants
                     trace!(target: "payload_builder", %error, ?tx_hash, "skipping invalid transaction and its descendants");
                     best_txs.mark_invalid(
                         &pool_tx,
@@ -372,6 +394,8 @@ where
                 }
                 continue
             }
+            // The executor is the source of truth for block gas availability. Keep this
+            // non-fatal in case local builder accounting diverges from executor rules.
             Err(BlockExecutionError::Validation(
                 BlockValidationError::TransactionGasLimitMoreThanAvailableBlockGas {
                     transaction_gas_limit,
@@ -388,11 +412,15 @@ where
                 );
                 continue
             }
+            // this is an error that we should treat as fatal for this attempt
             Err(err) => return Err(PayloadBuilderError::evm(err)),
         };
 
+        // add to the total blob gas used if the transaction successfully executed
         if let Some(blob_count) = tx_blob_count {
             block_blob_count += blob_count;
+
+            // if we've reached the max blob count, we can skip blob txs entirely
             if block_blob_count == max_blob_count {
                 best_txs.skip_blobs();
             }
@@ -400,6 +428,7 @@ where
 
         block_transactions_rlp_length += tx_rlp_len;
 
+        // update and add to total fees
         let gas_used = gas_output.tx_gas_used();
         let miner_fee = miner_fee.expect("fee is always valid; execution succeeded");
         total_fees += U256::from(miner_fee) * U256::from(gas_used);
@@ -407,11 +436,13 @@ where
         block_regular_gas_used += gas_output.regular_gas_used();
         block_state_gas_used += gas_output.state_gas_used();
 
+        // Add blob tx sidecar to the payload.
         if let Some(sidecar) = blob_tx_sidecar {
             blob_sidecars.push_sidecar_variant(sidecar.as_ref().clone());
         }
     }
 
+    // check if we have a better block
     if !is_better_payload(best_payload.as_ref(), total_fees) {
         // Release db
         drop(builder);
@@ -433,6 +464,9 @@ where
         )?
     } else if use_state_root_task {
         let mut task = state_root_handle.expect("state-root task exists if hook was installed");
+        // The state-root task has been computing incrementally alongside tx execution.
+        // This recv() waits for the final root hash — most work is already done.
+        // Fall back to sync state root if the trie pipeline fails.
         builder.finish_with_state_root(state_provider.as_ref(), |_| match task.state_root() {
             Ok(outcome) => {
                 debug!(
@@ -473,6 +507,7 @@ where
 
     let block_access_list = block_access_list.map(|bal| bal.split().1);
     let payload = EthBuiltPayload::new(Arc::new(block), total_fees, requests, block_access_list)
+        // add blob sidecars from the executed txs
         .with_sidecars(blob_sidecars);
 
     Ok(BuildOutcome::Better { payload, cached_reads })

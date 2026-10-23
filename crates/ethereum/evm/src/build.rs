@@ -100,6 +100,8 @@ impl<ChainSpec: EthChainSpec + EthereumHardforks> EthBlockAssembler<ChainSpec> {
 
         let mut excess_blob_gas = None;
         let mut block_blob_gas_used = None;
+
+        // only determine cancun fields when active
         if self.chain_spec.is_cancun_active_at_timestamp(timestamp) {
             block_blob_gas_used = Some(*blob_gas_used);
             excess_blob_gas = if self.chain_spec.is_cancun_active_at_timestamp(parent.timestamp) {
@@ -107,6 +109,8 @@ impl<ChainSpec: EthChainSpec + EthereumHardforks> EthBlockAssembler<ChainSpec> {
                     self.chain_spec.blob_params_at_timestamp(timestamp),
                 )
             } else {
+                // for the first post-fork block, both parent.blob_gas_used and
+                // parent.excess_blob_gas are evaluated as 0
                 Some(
                     alloy_eips::eip7840::BlobParams::cancun()
                         .next_block_excess_blob_gas_osaka(0, 0, 0),

@@ -60,4 +60,6 @@ arbitrary = [
     "alloy-primitives/arbitrary",
     "alloy-trie/arbitrary",
 ]
-test-utils = ["reth-primitives-traits/test-utils"]
+test-utils = [
+    "reth-primitives-traits/test-utils",
+]

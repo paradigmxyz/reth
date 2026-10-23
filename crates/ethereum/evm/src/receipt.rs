@@ -14,6 +14,13 @@ impl ReceiptBuilder for RethReceiptBuilder {
 
     fn build_receipt<T: EvmTypes>(&self, ctx: ReceiptBuilderCtx<TxType, TxResult<T>>) -> Receipt {
         let ReceiptBuilderCtx { tx_type, result, cumulative_gas_used } = ctx;
-        Receipt { tx_type, success: result.status, cumulative_gas_used, logs: result.logs }
+        Receipt {
+            tx_type,
+            // Success flag was added in `EIP-658: Embedding transaction status code in
+            // receipts`.
+            success: result.status,
+            cumulative_gas_used,
+            logs: result.logs,
+        }
     }
 }

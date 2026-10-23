@@ -35,6 +35,7 @@ where
     type BlockExecutorFactory = Inner::BlockExecutorFactory;
     #[cfg(feature = "std")]
     type BlockAssembler = Inner::BlockAssembler;
+
     #[cfg(feature = "std")]
     fn block_executor_factory(&self) -> &Self::BlockExecutorFactory {
         self.inner().block_executor_factory()
