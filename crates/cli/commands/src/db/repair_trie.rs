@@ -3,9 +3,9 @@ use clap::{builder::RangedU64ValueParser, Parser};
 use metrics::{self, Counter};
 use reth_chainspec::EthChainSpec;
 use reth_cli_util::parse_socket_address;
+use reth_db::DatabaseEnv;
 use reth_db_api::{
     cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO},
-    database::{Database, LongReadTransactionDatabase},
     transaction::{DbTx, DbTxMut},
 };
 use reth_db_common::DbTool;
@@ -61,7 +61,7 @@ pub struct Command {
 
 impl Command {
     /// Execute `db repair-trie` command
-    pub fn execute<N: ProviderNodeTypes>(
+    pub fn execute<N: ProviderNodeTypes<DB = DatabaseEnv>>(
         self,
         tool: &DbTool<N>,
         task_executor: TaskExecutor,
@@ -111,7 +111,10 @@ impl Command {
     }
 }
 
-fn verify_only<N: ProviderNodeTypes>(tool: &DbTool<N>, storage_workers: usize) -> eyre::Result<()> {
+fn verify_only<N: ProviderNodeTypes<DB = DatabaseEnv>>(
+    tool: &DbTool<N>,
+    storage_workers: usize,
+) -> eyre::Result<()> {
     // Log the database block tip from Finish stage checkpoint
     let finish_checkpoint = tool
         .provider_factory
@@ -121,18 +124,15 @@ fn verify_only<N: ProviderNodeTypes>(tool: &DbTool<N>, storage_workers: usize) -
     info!("Database block tip: {}", finish_checkpoint.block_number);
 
     let db = tool.provider_factory.db_ref();
-    reth_trie_db::with_adapter!(tool.provider_factory, |A| do_verify_only::<_, A>(
-        db,
-        storage_workers
-    ))
+    reth_trie_db::with_adapter!(tool.provider_factory, |A| do_verify_only::<A>(db, storage_workers))
 }
 
-fn do_verify_only<DB: Database, A: TrieTableAdapter>(
-    db: &DB,
+fn do_verify_only<A: TrieTableAdapter>(
+    db: &DatabaseEnv,
     storage_workers: usize,
 ) -> eyre::Result<()> {
-    let verifier =
-        DatabaseVerifier::<_, A>::new(&LongReadTransactionDatabase(db), storage_workers)?;
+    let db = db.clone().with_disable_long_read_transaction_safety();
+    let verifier = DatabaseVerifier::<_, A>::new(&db, storage_workers)?;
 
     let metrics = RepairTrieMetrics::new();
 
@@ -211,7 +211,7 @@ fn verify_checkpoints(provider: impl StageCheckpointReader) -> eyre::Result<()> 
     Ok(())
 }
 
-fn verify_and_repair<N: ProviderNodeTypes>(
+fn verify_and_repair<N: ProviderNodeTypes<DB = DatabaseEnv>>(
     tool: &DbTool<N>,
     storage_workers: usize,
 ) -> eyre::Result<()> {
@@ -244,15 +244,12 @@ fn verify_and_repair<N: ProviderNodeTypes>(
     Ok(())
 }
 
-fn do_verify_and_repair<N: ProviderNodeTypes, A: TrieTableAdapter>(
+fn do_verify_and_repair<N: ProviderNodeTypes<DB = DatabaseEnv>, A: TrieTableAdapter>(
     provider_rw: &mut reth_provider::DatabaseProviderRW<N::DB, N>,
     db: &N::DB,
     block_number: u64,
     storage_workers: usize,
-) -> eyre::Result<usize>
-where
-    <N::DB as reth_db_api::database::Database>::TXMut: DbTxMut + DbTx,
-{
+) -> eyre::Result<usize> {
     // Create cursors for making modifications with
     let tx = provider_rw.tx_mut();
     tx.disable_long_read_transaction_safety();
@@ -260,8 +257,8 @@ where
     let mut storage_trie_cursor = tx.cursor_dup_write::<A::StorageTrieTable>()?;
 
     // Open every read snapshot before any repairs are applied.
-    let verifier =
-        DatabaseVerifier::<_, A>::new(&LongReadTransactionDatabase(db), storage_workers)?;
+    let db = db.clone().with_disable_long_read_transaction_safety();
+    let verifier = DatabaseVerifier::<_, A>::new(&db, storage_workers)?;
 
     let metrics = RepairTrieMetrics::new();
 

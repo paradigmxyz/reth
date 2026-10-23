@@ -43,7 +43,7 @@ where
     ///
     /// Prevent commits while this constructor opens the transactions so they read the same database
     /// version. Each storage worker owns a separate transaction. For long-running verification,
-    /// pass a [`LongReadTransactionDatabase`](reth_db_api::database::LongReadTransactionDatabase).
+    /// configure `db` to disable long-lived read transaction safety.
     ///
     /// # Panics
     ///

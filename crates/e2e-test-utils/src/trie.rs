@@ -1,8 +1,8 @@
 //! Helpers for verifying the persisted state and trie representation of test nodes.
 
+use crate::TmpDB;
 use alloy_consensus::BlockHeader;
 use eyre::{ensure, eyre, Result};
-use reth_db::database::LongReadTransactionDatabase;
 use reth_provider::{
     BlockNumReader, DBProvider, DatabaseProviderFactory, HeaderProvider, StorageSettingsCache,
 };
@@ -29,6 +29,7 @@ use reth_trie_db::{DatabaseHashedCursorFactory, DatabaseTrieCursorFactory, Datab
 pub fn assert_trie_consistency<F>(factory: &F) -> Result<()>
 where
     F: DatabaseProviderFactory<
+            DB = TmpDB,
             Provider: DBProvider + StorageSettingsCache + BlockNumReader + HeaderProvider,
         > + AsRef<F::DB>,
 {
@@ -42,10 +43,8 @@ where
     let tx = provider.tx_ref();
 
     reth_trie_db::with_adapter!(provider, |A| {
-        let verifier = DatabaseVerifier::<_, A>::new(
-            &LongReadTransactionDatabase(factory.as_ref()),
-            default_storage_workers(),
-        )?;
+        let db = factory.as_ref().db().clone().with_disable_long_read_transaction_safety();
+        let verifier = DatabaseVerifier::<_, A>::new(&db, default_storage_workers())?;
         drop(snapshot_guard);
 
         // Recompute all account leaves from the persisted hashed state. Storage roots are taken
