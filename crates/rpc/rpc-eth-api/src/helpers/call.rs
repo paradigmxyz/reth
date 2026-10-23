@@ -21,7 +21,7 @@ use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthereumHardforks};
 use reth_errors::{ProviderError, RethError};
 use reth_evm::{
     database::StateProviderDatabase,
-    execute::{BlockBuilder, BlockExecutor, BlockExecutorFactory},
+    execute::{BlockBuilder, BlockExecutor},
     BundleState, ConfigureEvm, Database, Evm, EvmEnv, EvmEnvFor, EvmTypesFor, TransactionEnvMut,
     TxEnvFor, TxResultWithStateFor,
 };
@@ -220,10 +220,7 @@ pub trait EthCall: EstimateCall + LoadBlock + FullEthApiTypes {
                     // EIP-7708 already emits transfer logs: https://eips.ethereum.org/EIPS/eip-7708
                     let trace_transfers =
                         trace_transfers && !evm_env.version().feature(evm2::EvmFeatures::EIP7708);
-                    let mut evm = this
-                        .evm_config()
-                        .block_executor_factory()
-                        .evm_with_env(&mut db, evm_env.clone());
+                    let mut evm = this.evm_config().evm_with_env(&mut db, evm_env.clone());
                     if trace_transfers {
                         // prepare inspector to capture transfer inside the evm so they are recorded
                         // and included in logs
@@ -474,8 +471,7 @@ pub trait EthCall: EstimateCall + LoadBlock + FullEthApiTypes {
             )?;
             let chain_id = evm_env.chain_id();
 
-            let mut evm =
-                this.evm_config().block_executor_factory().evm_with_database(&mut db, evm_env);
+            let mut evm = this.evm_config().evm_with_env(&mut db, evm_env);
 
             // EIP-7702 authorities are warmed during authorization processing, so listing them
             // would only add access list cost.
@@ -577,7 +573,7 @@ pub trait Call:
     where
         DB: Database + fmt::Debug,
     {
-        let mut evm = self.evm_config().block_executor_factory().evm_with_database(db, evm_env);
+        let mut evm = self.evm_config().evm_with_env(db, evm_env);
         let res = evm.transact(&tx_env).map_err(Self::Error::from_evm_err)?;
 
         Ok(res)
@@ -596,7 +592,7 @@ pub trait Call:
         DB: Database + fmt::Debug,
         I: evm2::Inspector<EvmTypesFor<Self::Evm>> + 'static,
     {
-        let mut evm = self.evm_config().block_executor_factory().evm_with_database(db, evm_env);
+        let mut evm = self.evm_config().evm_with_env(db, evm_env);
         let res =
             evm.transact_with_inspector(&tx_env, inspector).map_err(Self::Error::from_evm_err)?;
 
@@ -770,8 +766,7 @@ pub trait Call:
                     .map_err(Self::Error::from_eth_err)?;
                 db.commit_source(&reth_execution_types::BundleSource(&changes));
 
-                let mut evm =
-                    this.evm_config().block_executor_factory().evm_with_database(&mut db, evm_env);
+                let mut evm = this.evm_config().evm_with_env(&mut db, evm_env);
                 this.replay_transactions_until_with_evm(
                     &mut evm,
                     block_txs,

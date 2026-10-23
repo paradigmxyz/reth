@@ -5,11 +5,15 @@ use crate::{AsEthApiError, FromEthApiError, FromEvmError, IntoEthApiError};
 use alloy_network::TransactionBuilder;
 use alloy_primitives::{TxKind, U256};
 use alloy_rpc_types_eth::{state::EvmOverrides, BlockId};
-use evm2::{evm::DynDatabase, interpreter::InstrStop, EvmFeatures, TxResult};
+use evm2::{
+    evm::{CacheDB, Db, DynDatabase},
+    interpreter::InstrStop,
+    EvmFeatures, TxResult,
+};
 use futures::Future;
 use reth_chainspec::MIN_TRANSACTION_GAS;
 use reth_evm::{
-    execute::BlockExecutorFactory, ConfigureEvm, Evm, EvmEnv, EvmEnvFor, EvmTypesFor,
+    database::StateProviderDatabase, ConfigureEvm, Evm, EvmEnv, EvmEnvFor, EvmTypesFor,
     TransactionEnvMut,
 };
 use reth_rpc_convert::{RpcConvert, RpcTxReq};
@@ -45,7 +49,7 @@ pub trait EstimateCall: Call {
         overrides: EvmOverrides,
     ) -> Result<U256, Self::Error>
     where
-        S: EvmStateProvider + Send + 'static,
+        S: EvmStateProvider,
     {
         // Disabled because eth_estimateGas is sometimes used with eoa senders
         // See <https://github.com/paradigmxyz/reth/issues/1959>
@@ -70,10 +74,7 @@ pub trait EstimateCall: Call {
         let tx_request_gas_price = request.as_ref().gas_price();
 
         // Configure the evm env
-        let state: reth_storage_api::EvmStateProviderBox = Box::new(state);
-        let mut db = evm2::evm::CacheDB::new(evm2::evm::Db::new(
-            reth_evm::database::StateProviderDatabase::new(state),
-        ));
+        let mut db = CacheDB::new(Db::new(StateProviderDatabase::new(state)));
 
         // Apply any block overrides before deriving block-derived limits and the tx env so
         // overrides for `gasLimit`, `baseFee` and `blobBaseFee` are visible to estimation.
@@ -91,11 +92,7 @@ pub trait EstimateCall: Call {
         // the gas limit of the corresponding block
         let block_gas_limit = evm_env.block_env().gas_limit.to::<u64>();
         // If EIP-8037 is enabled, the transaction gas limit cap is not applicable
-        let mut max_gas_limit = if evm_env.version().feature(EvmFeatures::EIP8037) {
-            block_gas_limit
-        } else {
-            evm_env.version().tx_gas_limit_cap.min(block_gas_limit)
-        };
+        let mut max_gas_limit = evm_env.version().tx_gas_caps().0.min(block_gas_limit);
 
         // Also bound diagnostic retries by the RPC gas cap. Zero means unlimited.
         let gas_cap = self.call_gas_limit();
@@ -110,6 +107,7 @@ pub trait EstimateCall: Call {
         let is_basic_transfer = if request.as_ref().input().is_none_or(|input| input.is_empty()) &&
             let Some(TxKind::Call(to)) = request.as_ref().kind()
         {
+            // Fetch the account through the DB so the state overrides applied above are visible.
             match db.get_account(&to) {
                 Ok(Some(account)) => account.is_empty_code_hash(),
                 Ok(None) => true,
@@ -119,20 +117,21 @@ pub trait EstimateCall: Call {
             false
         };
 
-        let tx_env = self.create_txn_env(&evm_env, request.clone(), &mut db)?;
+        let request_gas_price = request_gas_price(request.as_ref(), evm_env.block_base_fee());
+        let mut tx_env = self.create_txn_env(&evm_env, request, &mut db)?;
 
         // Check funds of the sender (only useful to check if transaction gas price is more than 0).
         //
         // The caller allowance is check by doing `(account.balance - tx.value) / tx.gas_price`
-        if request_gas_price(request.as_ref(), evm_env.block_base_fee()) > 0 {
+        if request_gas_price > 0 {
             let allowance = self.caller_gas_allowance(&mut db, &evm_env, &tx_env)?;
             highest_gas_limit = highest_gas_limit.min(allowance);
         }
 
-        let mut evm =
-            self.evm_config().block_executor_factory().evm_with_database(&mut db, evm_env.clone());
-        let mut execute = |gas_limit| {
-            let mut tx_env = tx_env.clone();
+        trace!(target: "rpc::eth::estimate", ?tx_env, gas_limit = highest_gas_limit, is_basic_transfer, "Starting gas estimation");
+
+        let mut evm = self.evm_config().evm_with_env(&mut db, evm_env);
+        let mut execute = move |gas_limit| {
             tx_env.inner_mut().set_gas_limit(gas_limit);
             evm.transact_result(&tx_env).map_err(Self::Error::from_evm_err)
         };
@@ -145,8 +144,6 @@ pub trait EstimateCall: Call {
             return Ok(U256::from(res.tx_gas_used()))
         }
 
-        trace!(target: "rpc::eth::estimate", ?request, gas_limit = highest_gas_limit, is_basic_transfer, "Starting gas estimation");
-
         // Execute the transaction with the highest possible gas limit.
         let mut res = match execute(highest_gas_limit) {
             // Handle the exceptional case where the transaction initialization uses too much
@@ -158,10 +155,7 @@ pub trait EstimateCall: Call {
                     (tx_request_gas_limit.is_some() || tx_request_gas_price.is_some()) =>
             {
                 let retry = execute(max_gas_limit)?;
-                return map_out_of_gas_result::<Self::Error, EvmTypesFor<Self::Evm>>(
-                    retry,
-                    highest_gas_limit,
-                )
+                return map_out_of_gas_result::<_, EvmTypesFor<Self::Evm>>(retry, highest_gas_limit)
             }
             Err(err) if err.is_gas_too_low() => {
                 // This failed because the configured gas cost of the tx was lower than what
@@ -178,16 +172,13 @@ pub trait EstimateCall: Call {
         };
 
         let gas_refund = if res.status {
-            res.refunded
+            res.final_refunded()
         } else if res.stop == InstrStop::Revert {
             // if price or limit was included in the request then we can execute the request
             // again with the block's gas limit to check if revert is gas related or not
             return if tx_request_gas_limit.is_some() || tx_request_gas_price.is_some() {
                 let retry = execute(max_gas_limit)?;
-                map_out_of_gas_result::<Self::Error, EvmTypesFor<Self::Evm>>(
-                    retry,
-                    highest_gas_limit,
-                )
+                map_out_of_gas_result::<_, EvmTypesFor<Self::Evm>>(retry, highest_gas_limit)
             } else {
                 // the transaction did revert
                 Err(Self::Error::from_revert(res.output))

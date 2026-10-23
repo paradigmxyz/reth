@@ -11,8 +11,7 @@ use evm2_inspectors::tracing::{TracingInspector, TracingInspectorConfig};
 use futures::Future;
 use reth_errors::RethError;
 use reth_evm::{
-    execute::BlockExecutorFactory, ConfigureEvm, Database, Evm, EvmEnvFor, EvmTypesFor, TxEnvFor,
-    TxResultWithStateFor,
+    ConfigureEvm, Database, Evm, EvmEnvFor, EvmTypesFor, TxEnvFor, TxResultWithStateFor,
 };
 use reth_primitives_traits::{BlockBody, BlockTy, RecoveredBlock};
 use reth_rpc_eth_types::{cache::db::attach_bal_before_tx, EthApiError, StateCacheDb};
@@ -57,34 +56,12 @@ pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> + Call {
         DB: Database,
         I: evm2::Inspector<EvmTypesFor<Self::Evm>> + 'static,
     {
-        let mut evm = self.evm_config().block_executor_factory().evm_with_database(db, evm_env);
+        let mut evm = self.evm_config().evm_with_env(db, evm_env);
         evm.transact_with_inspector(tx_env, inspector).map_err(Self::Error::from_evm_err)
     }
 
     /// Executes the transaction on top of the given [`BlockId`] with a tracer configured by the
-    /// config.
-    fn trace_at<F, R>(
-        &self,
-        evm_env: EvmEnvFor<Self::Evm>,
-        tx_env: TxEnvFor<Self::Evm>,
-        config: TracingInspectorConfig,
-        at: BlockId,
-        f: F,
-    ) -> impl Future<Output = Result<R, Self::Error>> + Send
-    where
-        R: Send + 'static,
-        F: FnOnce(TracingInspector, TxResultWithStateFor<Self::Evm>) -> Result<R, Self::Error>
-            + Send
-            + 'static,
-    {
-        self.spawn_with_state_at_block(at, move |this, mut db| {
-            let (inspector, result) =
-                this.inspect(&mut db, evm_env, &tx_env, TracingInspector::new(config))?;
-            f(inspector, result)
-        })
-    }
-
-    /// Same as [`trace_at`](Self::trace_at) but also provides the used database to the callback.
+    /// config and provides the used database to the callback.
     fn spawn_trace_at_with_state<F, R>(
         &self,
         evm_env: EvmEnvFor<Self::Evm>,
@@ -110,7 +87,18 @@ pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> + Call {
         })
     }
 
-    /// Retrieves and traces a transaction in its containing block.
+    /// Retrieves the transaction if it exists and returns its trace.
+    ///
+    /// Before the transaction is traced, the state is positioned right before the transaction,
+    /// either by attaching the block's cached BAL or by executing all previous transactions in
+    /// the block.
+    /// The callback `f` is invoked with the [`TxResultWithStateFor`] after the transaction was
+    /// executed and the database that points to the beginning of the transaction. The database may
+    /// have the block's BAL attached and must only be used for reads, because an attached BAL takes
+    /// read precedence over state committed on top, see [`attach_bal_before_tx`].
+    ///
+    /// Note: Implementers should use a threadpool where blocking is allowed, such as
+    /// [`BlockingTaskPool`](reth_tasks::pool::BlockingTaskPool).
     fn spawn_trace_transaction_in_block<F, R>(
         &self,
         hash: B256,
@@ -132,7 +120,18 @@ pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> + Call {
         self.spawn_trace_transaction_in_block_with_inspector(hash, TracingInspector::new(config), f)
     }
 
-    /// Retrieves and traces a transaction in its containing block with a custom inspector.
+    /// Retrieves the transaction if it exists and returns its trace.
+    ///
+    /// Before the transaction is traced, the state is positioned right before the transaction,
+    /// either by attaching the block's cached BAL or by executing all previous transactions in
+    /// the block.
+    /// The callback `f` is invoked with the [`TxResultWithStateFor`] after the transaction was
+    /// executed and the database that points to the beginning of the transaction. The database may
+    /// have the block's BAL attached and must only be used for reads, because an attached BAL takes
+    /// read precedence over state committed on top, see [`attach_bal_before_tx`].
+    ///
+    /// Note: Implementers should use a threadpool where blocking is allowed, such as
+    /// [`BlockingTaskPool`](reth_tasks::pool::BlockingTaskPool).
     fn spawn_trace_transaction_in_block_with_inspector<Insp, F, R>(
         &self,
         hash: B256,
@@ -159,13 +158,19 @@ pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> + Call {
                 return Ok(None);
             };
             let (target_tx, tx_info) = transaction.split();
+
+            // we need to get the state of the parent block because we're essentially replaying the
+            // block the transaction is included in
             self.spawn_with_state_at_block(block.parent_hash(), move |this, mut db| {
                 let tx_env = this.evm_config().tx_env(target_tx);
                 let (inspector, result, _) = this.inspect_transaction_in_block(
                     &block,
                     &mut db,
                     inspector,
-                    tx_info.index.expect("included transaction has an index") as usize,
+                    // index should always be available because `transaction_and_block` only
+                    // returns transactions included in a block
+                    tx_info.index.expect("transaction_and_block only returns block transactions")
+                        as usize,
                     &tx_env,
                     bal.as_deref(),
                 )?;
@@ -200,8 +205,7 @@ pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> + Call {
         self.apply_pre_execution_changes(block, db)?;
 
         let evm_env = self.evm_env_for_header(block.sealed_block().sealed_header())?;
-        let mut evm =
-            self.evm_config().block_executor_factory().evm_with_database(&mut *db, evm_env);
+        let mut evm = self.evm_config().evm_with_env(&mut *db, evm_env);
         self.replay_transactions_until_with_evm(
             &mut evm,
             block.transactions_recovered(),
@@ -233,13 +237,15 @@ pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> + Call {
         I: evm2::Inspector<EvmTypesFor<Self::Evm>> + 'static,
     {
         if let Some(bal) = bal {
+            // the BAL also covers the block's pre-execution changes
             attach_bal_before_tx(db, bal, target_tx_index);
         } else {
             self.apply_pre_execution_changes(block, db)?;
         }
+
         let evm_env = self.evm_env_for_header(block.sealed_block().sealed_header())?;
-        let mut evm =
-            self.evm_config().block_executor_factory().evm_with_database(&mut *db, evm_env.clone());
+        let mut evm = self.evm_config().evm_with_env(&mut *db, evm_env.clone());
+
         if bal.is_none() {
             self.replay_transactions_until_with_evm(
                 &mut evm,
@@ -247,6 +253,7 @@ pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> + Call {
                 target_tx_index,
             )?;
         }
+
         let (inspector, result) = evm
             .transact_with_inspector(target_tx_env, inspector)
             .map_err(Self::Error::from_evm_err)?;
@@ -257,82 +264,11 @@ pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> + Call {
     }
 
     /// Executes all transactions of a block up to a given index.
-    fn trace_block_until_with_inspector<Setup, Insp, F, R>(
-        &self,
-        block_id: BlockId,
-        block: Option<Arc<RecoveredBlock<ProviderBlock<Self::Provider>>>>,
-        highest_index: Option<u64>,
-        mut inspector_setup: Setup,
-        f: F,
-    ) -> impl Future<Output = Result<Option<Vec<R>>, Self::Error>> + Send
-    where
-        Self: LoadBlock,
-        F: Fn(
-                TransactionInfo,
-                TracingCtx<'_, Insp, EvmTypesFor<Self::Evm>>,
-            ) -> Result<R, Self::Error>
-            + Send
-            + 'static,
-        Setup: FnMut() -> Insp + Send + 'static,
-        Insp: Clone + evm2::Inspector<EvmTypesFor<Self::Evm>> + 'static,
-        R: Send + 'static,
-    {
-        async move {
-            let block =
-                if block.is_some() { block } else { self.recovered_block(block_id).await? };
-            let Some(block) = block else { return Ok(None) };
-            let evm_env = self.evm_env_for_header(block.sealed_block().sealed_header())?;
-
-            if block.body().transactions().is_empty() {
-                return Ok(Some(Vec::new()))
-            }
-
-            self.spawn_with_state_at_block(block.parent_hash(), move |this, mut db| {
-                let block_hash = block.hash();
-                let block_number = block.number();
-                let block_timestamp = block.timestamp();
-                let base_fee = block.base_fee_per_gas();
-
-                this.apply_pre_execution_changes(&block, &mut db)?;
-
-                let max_transactions = highest_index
-                    .map(|highest| highest as usize + 1)
-                    .unwrap_or_else(|| block.body().transaction_count());
-                let mut results = Vec::new();
-                let mut evm =
-                    this.evm_config().block_executor_factory().evm_with_database(&mut db, evm_env);
-
-                for (idx, tx) in block.transactions_recovered().take(max_transactions).enumerate() {
-                    if is_cancelled() {
-                        return Err(EthApiError::InternalEthError.into())
-                    }
-                    let tx_env = this.evm_config().tx_env(tx.cloned());
-                    let (inspector, result) = evm
-                        .transact_with_inspector(&tx_env, inspector_setup())
-                        .map_err(Self::Error::from_evm_err)?;
-                    let tx_info = TransactionInfo {
-                        hash: Some(*tx.tx_hash()),
-                        index: Some(idx as u64),
-                        block_hash: Some(block_hash),
-                        block_number: Some(block_number),
-                        block_timestamp: Some(block_timestamp),
-                        base_fee,
-                    };
-                    let item = f(
-                        tx_info,
-                        TracingCtx { result: &result, db: evm.state_db_mut(), inspector },
-                    )?;
-                    evm.commit_state(&result.pending_state);
-                    results.push(item);
-                }
-
-                Ok(Some(results))
-            })
-            .await
-        }
-    }
-
-    /// Executes all transactions of a block up to a given index.
+    ///
+    /// If a `highest_index` is given, this will only execute the first `highest_index`
+    /// transactions, in other words, it will stop executing transactions after the
+    /// `highest_index`th transaction. If `highest_index` is `None`, all transactions
+    /// are executed.
     fn trace_block_until<F, R>(
         &self,
         block_id: BlockId,
@@ -360,7 +296,117 @@ pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> + Call {
         )
     }
 
-    /// Executes all transactions of a block with a tracing inspector.
+    /// Executes all transactions of a block.
+    ///
+    /// If a `highest_index` is given, this will only execute the first `highest_index`
+    /// transactions, in other words, it will stop executing transactions after the
+    /// `highest_index`th transaction.
+    ///
+    /// Note: This expect tx index to be 0-indexed, so the first transaction is at index 0.
+    ///
+    /// This accepts a `inspector_setup` closure that returns the inspector to be used for tracing
+    /// the transactions.
+    fn trace_block_until_with_inspector<Setup, Insp, F, R>(
+        &self,
+        block_id: BlockId,
+        block: Option<Arc<RecoveredBlock<ProviderBlock<Self::Provider>>>>,
+        highest_index: Option<u64>,
+        mut inspector_setup: Setup,
+        f: F,
+    ) -> impl Future<Output = Result<Option<Vec<R>>, Self::Error>> + Send
+    where
+        Self: LoadBlock,
+        F: Fn(
+                TransactionInfo,
+                TracingCtx<'_, Insp, EvmTypesFor<Self::Evm>>,
+            ) -> Result<R, Self::Error>
+            + Send
+            + 'static,
+        Setup: FnMut() -> Insp + Send + 'static,
+        Insp: evm2::Inspector<EvmTypesFor<Self::Evm>> + 'static,
+        R: Send + 'static,
+    {
+        async move {
+            let block =
+                if block.is_some() { block } else { self.recovered_block(block_id).await? };
+
+            let Some(block) = block else { return Ok(None) };
+            let evm_env = self.evm_env_for_header(block.sealed_block().sealed_header())?;
+
+            if block.body().transactions().is_empty() {
+                // nothing to trace
+                return Ok(Some(Vec::new()))
+            }
+
+            // replay all transactions of the block
+            // we need to get the state of the parent block because we're replaying this block
+            // on top of its parent block's state
+            self.spawn_with_state_at_block(block.parent_hash(), move |this, mut db| {
+                let block_hash = block.hash();
+
+                let block_number = block.number();
+                let block_timestamp = block.timestamp();
+                let base_fee = block.base_fee_per_gas();
+
+                this.apply_pre_execution_changes(&block, &mut db)?;
+
+                // prepare transactions, we do everything upfront to reduce time spent with open
+                // state
+                let max_transactions = highest_index.map_or_else(
+                    || block.body().transaction_count(),
+                    |highest| {
+                        // we need + 1 because the index is 0-based
+                        highest as usize + 1
+                    },
+                );
+                let tx_count = max_transactions.min(block.body().transaction_count());
+
+                let mut results = Vec::new();
+                let mut evm = this.evm_config().evm_with_env(&mut db, evm_env);
+
+                for (idx, tx) in block.transactions_recovered().take(max_transactions).enumerate() {
+                    if is_cancelled() {
+                        return Err(EthApiError::InternalEthError.into())
+                    }
+                    let tx_env = this.evm_config().tx_env(tx.cloned());
+                    let (inspector, result) = evm
+                        .transact_with_inspector(&tx_env, inspector_setup())
+                        .map_err(Self::Error::from_evm_err)?;
+                    let tx_info = TransactionInfo {
+                        hash: Some(*tx.tx_hash()),
+                        index: Some(idx as u64),
+                        block_hash: Some(block_hash),
+                        block_number: Some(block_number),
+                        block_timestamp: Some(block_timestamp),
+                        base_fee,
+                    };
+                    let item = f(
+                        tx_info,
+                        TracingCtx { result: &result, db: evm.state_db_mut(), inspector },
+                    )?;
+                    // the EVM is dropped after the last transaction, so its state needs no commit
+                    if idx + 1 < tx_count {
+                        evm.commit_state(&result.pending_state);
+                    }
+                    results.push(item);
+                }
+
+                Ok(Some(results))
+            })
+            .await
+        }
+    }
+
+    /// Executes all transactions of a block and returns a list of callback results invoked for each
+    /// transaction in the block.
+    ///
+    /// This
+    /// 1. fetches all transactions of the block
+    /// 2. configures the EVM env
+    /// 3. loops over all transactions and executes them
+    /// 4. calls the callback with the transaction info, the execution result, the changed state
+    ///    _after_ the transaction [`StateCacheDb`] and the database that points to the state right
+    ///    _before_ the transaction.
     fn trace_block_with<F, R>(
         &self,
         block_id: BlockId,
@@ -378,16 +424,23 @@ pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> + Call {
             + 'static,
         R: Send + 'static,
     {
-        self.trace_block_until_with_inspector(
-            block_id,
-            block,
-            None,
-            move || TracingInspector::new(config),
-            f,
-        )
+        self.trace_block_until(block_id, block, None, config, f)
     }
 
-    /// Executes all transactions of a block with a custom inspector.
+    /// Executes all transactions of a block and returns a list of callback results invoked for each
+    /// transaction in the block.
+    ///
+    /// This
+    /// 1. fetches all transactions of the block
+    /// 2. configures the EVM env
+    /// 3. loops over all transactions and executes them
+    /// 4. calls the callback with the transaction info, the execution result, the changed state
+    ///    _after_ the transaction `EvmState` and the database that points to the state right
+    ///    _before_ the transaction, in other words the state the transaction was executed on:
+    ///    `changed_state = tx(cached_state)`
+    ///
+    /// This accepts a `inspector_setup` closure that returns the inspector to be used for tracing
+    /// a transaction. This is invoked for each transaction.
     fn trace_block_inspector<Setup, Insp, F, R>(
         &self,
         block_id: BlockId,
@@ -404,13 +457,17 @@ pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> + Call {
             + Send
             + 'static,
         Setup: FnMut() -> Insp + Send + 'static,
-        Insp: Clone + evm2::Inspector<EvmTypesFor<Self::Evm>> + 'static,
+        Insp: evm2::Inspector<EvmTypesFor<Self::Evm>> + 'static,
         R: Send + 'static,
     {
         self.trace_block_until_with_inspector(block_id, block, None, insp_setup, f)
     }
 
     /// Applies chain-specific state transitions required before executing a block.
+    ///
+    /// Note: This should only be called when tracing an entire block vs individual transactions.
+    /// When tracing transactions on top of an already committed block state, those transitions are
+    /// already applied.
     fn apply_pre_execution_changes(
         &self,
         block: &RecoveredBlock<ProviderBlock<Self::Provider>>,

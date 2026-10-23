@@ -29,6 +29,7 @@ pub trait GetBlockAccessList: Trace + LoadBlock {
             let Some(block) = self.recovered_block(block_id).await? else {
                 return Ok(None);
             };
+
             if let Some(cached_bal) =
                 self.cache().get_bal(block.hash()).await.map_err(Self::Error::from_eth_err)?
             {
@@ -50,7 +51,8 @@ pub trait GetBlockAccessList: Trace + LoadBlock {
                     .provider()
                     .state_by_block_id(block.parent_hash().into())
                     .map_err(Self::Error::from_eth_err)?;
-                let db = StateProviderDatabase::new(state.as_ref().into_evm_state_provider());
+
+                let db = StateProviderDatabase::new(state.into_evm_state_provider());
                 let mut executor = RpcNodeCore::evm_config(&eth_api)
                     .executor_for_block(db, block.sealed_block())
                     .map_err(RethError::other)
@@ -64,11 +66,13 @@ pub trait GetBlockAccessList: Trace + LoadBlock {
                     .finish_with_prepared_block_access_list()
                     .map_err(Self::Error::from_eth_err)?;
                 let Some(bal) = bal else { return Ok(None) };
-                let alloy_bal = BlockAccessList::from(&bal);
-                if eth_api.eth_api_settings().cache_computed_bals {
-                    let raw = alloy_rlp::encode(&alloy_bal).into();
-                    eth_api.cache().insert_bal(block.hash(), DecodedBal::new(Arc::new(bal), raw));
+                if !eth_api.eth_api_settings().cache_computed_bals {
+                    return Ok(Some(BlockAccessList::from(bal)))
                 }
+
+                let alloy_bal = BlockAccessList::from(&bal);
+                let raw = alloy_rlp::encode(&alloy_bal).into();
+                eth_api.cache().insert_bal(block.hash(), DecodedBal::new(Arc::new(bal), raw));
                 Ok(Some(alloy_bal))
             })
             .await
@@ -85,6 +89,7 @@ pub trait GetBlockAccessList: Trace + LoadBlock {
                 .recovered_block(block_id)
                 .await?
                 .ok_or_else(|| EthApiError::HeaderNotFound(block_id))?;
+
             if let Some(cached_bal) =
                 self.cache().get_bal(block.hash()).await.map_err(Self::Error::from_eth_err)?
             {
