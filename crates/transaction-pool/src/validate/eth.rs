@@ -1393,7 +1393,6 @@ impl<Client, Evm> EthTransactionValidatorBuilder<Client, Evm> {
             max_blob_count: AtomicU64::new(max_blob_count),
             max_initcode_size: AtomicUsize::new(validation_rules.max_initcode_size),
             tx_gas_limit_cap: AtomicU64::new(validation_rules.tx_gas_limit_cap),
-            tx_regular_gas_cap: AtomicU64::new(validation_rules.gas_rules.regular_gas_cap()),
         };
         let transaction_validation_gas_rules =
             AtomicTransactionValidationGasRules::new(validation_rules.gas_rules);
@@ -1467,8 +1466,6 @@ pub struct ForkTracker {
     pub max_initcode_size: AtomicUsize,
     /// Cached transaction gas limit cap from EVM config (0 = no cap)
     pub tx_gas_limit_cap: AtomicU64,
-    /// Cached EIP-8037 intrinsic regular gas cap from EVM config (0 = no cap).
-    pub tx_regular_gas_cap: AtomicU64,
 }
 
 /// Transaction validation rules resolved by the configured EVM for a specific block.
@@ -1522,9 +1519,6 @@ impl<Client, Tx, Evm> EthTransactionValidator<Client, Tx, Evm> {
         self.fork_tracker
             .tx_gas_limit_cap
             .store(rules.tx_gas_limit_cap, std::sync::atomic::Ordering::Relaxed);
-        self.fork_tracker
-            .tx_regular_gas_cap
-            .store(rules.gas_rules.regular_gas_cap(), std::sync::atomic::Ordering::Relaxed);
         self.transaction_validation_gas_rules.store(rules.gas_rules);
     }
 }
@@ -1570,7 +1564,7 @@ impl ForkTracker {
 /// that its intrinsic regular gas fits the EIP-8037 regular gas cap.
 ///
 /// Caution: This only checks past the Merge hardfork.
-fn ensure_intrinsic_gas<T: EthPoolTransaction>(
+pub fn ensure_intrinsic_gas<T: EthPoolTransaction>(
     transaction: &T,
     gas_rules: &EvmTransactionValidationGasRules,
 ) -> Result<(), InvalidPoolTransactionError> {
@@ -1591,6 +1585,8 @@ fn ensure_intrinsic_gas<T: EthPoolTransaction>(
     );
 
     let gas_limit = transaction.gas_limit();
+    // EIP-8037: `tx.gas` may exceed the cap, but intrinsic regular gas and the calldata floor may
+    // not, otherwise the transaction can never be included.
     let regular_gas_cap = gas_rules.regular_gas_cap();
     if gas_limit < gas.intrinsic_gas || gas_limit < gas.floor_gas {
         Err(InvalidPoolTransactionError::IntrinsicGasTooLow)
