@@ -1,6 +1,4 @@
-//! Helper types to workaround 'higher-ranked lifetime error'
-//! <https://github.com/rust-lang/rust/issues/100013> in default implementation of
-//! `reth_rpc_eth_api::helpers::Call`.
+//! EVM database types and state/block override helpers used by the RPC state cache.
 
 use crate::error::StateOverrideError;
 use alloy_eip7928::{bal::DecodedBal, BlockAccessIndex};

@@ -3,9 +3,9 @@
 use super::{EthStateCacheConfig, MultiConsumerLruCache};
 use crate::block::CachedTransaction;
 use alloy_consensus::transaction::TxHashRef;
-use alloy_eip7928::bal::DecodedBal;
+use alloy_eip7928::{bal::DecodedBal, StorageChange};
 use alloy_eips::BlockHashOrNumber;
-use alloy_primitives::{Bytes, TxHash, B256};
+use alloy_primitives::{Address, Bytes, TxHash, B256, U256};
 use evm2::{
     bytecode::Bytecode,
     evm::{
@@ -940,8 +940,7 @@ fn decoded_bal_size(bal: &DecodedEvmBal) -> usize {
 
 fn evm_bal_size(bal: &EvmBal) -> usize {
     core::mem::size_of::<EvmBal>() +
-        bal.accounts.capacity() *
-            core::mem::size_of::<(alloy_primitives::Address, EvmAccountBal)>() +
+        bal.accounts.capacity() * core::mem::size_of::<(Address, EvmAccountBal)>() +
         bal.accounts.values().map(evm_account_bal_heap_size).sum::<usize>()
 }
 
@@ -957,9 +956,7 @@ fn evm_account_info_bal_heap_size(account_info: &EvmAccountInfoBal) -> usize {
 }
 
 fn evm_storage_bal_heap_size(storage: &EvmStorageBal) -> usize {
-    storage.storage.capacity() *
-        core::mem::size_of::<(alloy_primitives::U256, EvmBalChanges<alloy_eip7928::StorageChange>)>(
-        ) +
+    storage.storage.capacity() * core::mem::size_of::<(U256, EvmBalChanges<StorageChange>)>() +
         storage
             .storage
             .values()
@@ -1397,11 +1394,11 @@ mod tests {
         bal.accounts.insert(Address::ZERO, account);
 
         let raw = Bytes::from_static(&[0xc0, 0x01, 0x02]);
-        let top_level_estimate = core::mem::size_of::<CachedBal>() +
+        let previous_estimate = core::mem::size_of::<CachedBal>() +
             core::mem::size_of::<DecodedBal<Arc<EvmBal>>>() +
             raw.len() +
             core::mem::size_of::<EvmBal>();
-        assert!(CachedBal::new(DecodedBal::new(Arc::new(bal), raw)).size() > top_level_estimate);
+        assert!(CachedBal::new(DecodedBal::new(Arc::new(bal), raw)).size() > previous_estimate);
     }
 
     #[tokio::test]

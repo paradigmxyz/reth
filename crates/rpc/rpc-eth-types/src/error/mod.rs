@@ -185,7 +185,7 @@ pub enum EthApiError {
     /// Error encountered when converting a transaction type
     #[error(transparent)]
     TransactionConversionError(#[from] TransactionConversionError),
-    /// Error thrown when tracing with a muxTracer fails.
+    /// Error thrown when tracing with a muxTracer fails
     #[error(transparent)]
     MuxTracerError(#[from] MuxError),
     /// Error thrown when waiting for transaction confirmation times out
@@ -419,10 +419,10 @@ where
     fn from(value: CallError<E>) -> Self {
         match value {
             CallError::Database(err) => err.into(),
-            CallError::InsufficientFunds(err) => {
+            CallError::InsufficientFunds(insufficient_funds_error) => {
                 Self::InvalidTransaction(RpcInvalidTransactionError::InsufficientFunds {
-                    cost: err.cost,
-                    balance: err.balance,
+                    cost: insufficient_funds_error.cost,
+                    balance: insufficient_funds_error.balance,
                 })
             }
         }
@@ -435,7 +435,9 @@ where
 {
     fn from(value: StateOverrideError<E>) -> Self {
         match value {
-            StateOverrideError::InvalidBytecode(err) => Self::InvalidBytecode(err.to_string()),
+            StateOverrideError::InvalidBytecode(bytecode_decode_error) => {
+                Self::InvalidBytecode(bytecode_decode_error.to_string())
+            }
             StateOverrideError::BothStateAndStateDiff(address) => {
                 Self::BothStateAndStateDiffInOverride(address)
             }
@@ -496,9 +498,7 @@ impl From<DebugInspectorError> for EthApiError {
                 Self::Unsupported("JS Tracer is not enabled")
             }
             DebugInspectorError::MuxInspector(err) => err.into(),
-            DebugInspectorError::Database(err) => {
-                Self::Internal(RethError::msg(format!("{err:?}")))
-            }
+            DebugInspectorError::Database(err) => Self::Internal(RethError::other(err)),
             #[cfg(feature = "js-tracer")]
             DebugInspectorError::JsInspector(err) => err.into(),
             #[allow(unreachable_patterns)]
@@ -559,6 +559,9 @@ impl From<BlockExecutionError> for EthApiError {
 
 impl From<evm2::DatabaseError> for EthApiError {
     fn from(error: evm2::DatabaseError) -> Self {
+        if let Some(err) = error.downcast_ref::<reth_errors::ProviderError>() {
+            return err.clone().into()
+        }
         Self::EvmCustom(error.to_string())
     }
 }
@@ -647,6 +650,9 @@ pub enum RpcInvalidTransactionError {
     /// Incrementing the nonce would lead to invalid state (overflow)
     #[error("nonce has max value")]
     NonceMaxValue,
+    /// thrown if the transaction sender doesn't have enough funds for a transfer
+    #[error("insufficient funds for transfer")]
+    InsufficientFundsForTransfer,
     /// thrown if creation transaction provides the init code bigger than init code size limit.
     #[error("max initcode size exceeded")]
     MaxInitCodeSizeExceeded,
