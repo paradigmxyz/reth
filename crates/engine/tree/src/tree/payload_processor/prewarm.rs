@@ -27,7 +27,9 @@ use alloy_eip7928::bal::DecodedBal;
 use alloy_eips::eip4895::Withdrawal;
 use alloy_primitives::{keccak256, Address};
 use core::convert::Infallible;
-use evm2::evm::{AccountChangeRef, Database, StateChangeSink, NoopChangeSink, StateChangeSource, StorageChange};
+use evm2::evm::{
+    AccountChangeRef, Database, NoopChangeSink, StateChangeSink, StateChangeSource, StorageChange,
+};
 use metrics::{Counter, Gauge, Histogram};
 use rayon::prelude::*;
 use reth_evm::{
