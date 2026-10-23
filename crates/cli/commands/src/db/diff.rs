@@ -208,8 +208,7 @@ where
             // if the keys are different, we need to check if the key is in the other table
             let crossed_secondary =
                 secondary_cursor.seek_exact(primary_key.clone())?.map(|(_, value)| value);
-            try_push_discrepancy::<T>(
-                &mut result,
+            result.try_push_discrepancy::<T>(
                 primary_key.clone(),
                 Some(primary_value),
                 crossed_secondary,
@@ -218,16 +217,14 @@ where
             // now do the same for the primary table
             let crossed_primary =
                 primary_cursor.seek_exact(secondary_key.clone())?.map(|(_, value)| value);
-            try_push_discrepancy::<T>(
-                &mut result,
+            result.try_push_discrepancy::<T>(
                 secondary_key.clone(),
                 crossed_primary,
                 Some(secondary_value),
             );
         } else {
             // the keys are the same, so we need to compare the values
-            try_push_discrepancy::<T>(
-                &mut result,
+            result.try_push_discrepancy::<T>(
                 primary_key,
                 Some(primary_value),
                 Some(secondary_value),
@@ -236,67 +233,6 @@ where
     }
 
     Ok(result)
-}
-
-/// The diff result for an entire table, with elements already formatted for the report. If the
-/// tables had the same number of elements, there will be no extra elements.
-///
-/// Both maps are keyed by the encoded table key, which sorts in database order.
-#[derive(Default)]
-struct TableDiffResult {
-    /// All elements of the database that are different
-    discrepancies: BTreeMap<Vec<u8>, String>,
-
-    /// Any extra elements, and the table they are in
-    extra_elements: BTreeMap<Vec<u8>, String>,
-}
-
-/// Try to push a diff result into the discrepancy set, only pushing if the given elements are
-/// different, and the discrepancy does not exist anywhere already.
-fn try_push_discrepancy<T>(
-    result: &mut TableDiffResult,
-    key: T::Key,
-    first: Option<T::Value>,
-    second: Option<T::Value>,
-) where
-    T: Table,
-    T::Value: PartialEq,
-{
-    // nothing to record if both elements are equal or missing
-    if first == second {
-        return
-    }
-
-    let encoded_key = key.clone().encode().into_vec();
-
-    // do not bother recording if the key is already in the discrepancies or extra elements maps
-    if result.discrepancies.contains_key(&encoded_key) ||
-        result.extra_elements.contains_key(&encoded_key)
-    {
-        return
-    }
-
-    match (first, second) {
-        (Some(first), Some(second)) => {
-            result.discrepancies.insert(
-                encoded_key,
-                format!("{:#?}", TableDiffElement::<T> { key, first, second }),
-            );
-        }
-        (Some(first), None) => {
-            result.extra_elements.insert(
-                encoded_key,
-                format!("{:#?}", ExtraTableElement::<T>::First { key, value: first }),
-            );
-        }
-        (None, Some(second)) => {
-            result.extra_elements.insert(
-                encoded_key,
-                format!("{:#?}", ExtraTableElement::<T>::Second { key, value: second }),
-            );
-        }
-        (None, None) => {}
-    }
 }
 
 /// Includes a table element between two databases with the same key, but different values
@@ -313,6 +249,70 @@ struct TableDiffElement<T: Table> {
     /// The element from the second table
     #[expect(dead_code)]
     second: T::Value,
+}
+
+/// The diff result for an entire table, with elements already formatted for the report. If the
+/// tables had the same number of elements, there will be no extra elements.
+///
+/// Both maps are keyed by the encoded table key, which sorts in database order.
+#[derive(Default)]
+struct TableDiffResult {
+    /// All elements of the database that are different
+    discrepancies: BTreeMap<Vec<u8>, String>,
+
+    /// Any extra elements, and the table they are in
+    extra_elements: BTreeMap<Vec<u8>, String>,
+}
+
+impl TableDiffResult {
+    /// Try to push a diff result into the discrepancy set, only pushing if the given elements are
+    /// different, and the discrepancy does not exist anywhere already.
+    fn try_push_discrepancy<T>(
+        &mut self,
+        key: T::Key,
+        first: Option<T::Value>,
+        second: Option<T::Value>,
+    ) where
+        T: Table,
+        T::Value: PartialEq,
+    {
+        // nothing to record if both elements are equal or missing
+        if first == second {
+            return
+        }
+
+        let encoded_key = key.clone().encode().into_vec();
+
+        // do not bother recording if the key is already in the discrepancies or extra elements
+        // maps
+        if self.discrepancies.contains_key(&encoded_key) ||
+            self.extra_elements.contains_key(&encoded_key)
+        {
+            return
+        }
+
+        match (first, second) {
+            (Some(first), Some(second)) => {
+                self.discrepancies.insert(
+                    encoded_key,
+                    format!("{:#?}", TableDiffElement::<T> { key, first, second }),
+                );
+            }
+            (Some(first), None) => {
+                self.extra_elements.insert(
+                    encoded_key,
+                    format!("{:#?}", ExtraTableElement::<T>::First { key, value: first }),
+                );
+            }
+            (None, Some(second)) => {
+                self.extra_elements.insert(
+                    encoded_key,
+                    format!("{:#?}", ExtraTableElement::<T>::Second { key, value: second }),
+                );
+            }
+            (None, None) => {}
+        }
+    }
 }
 
 /// A single extra element from a table
