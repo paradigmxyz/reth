@@ -34,7 +34,5 @@ thiserror.workspace = true
 auto_impl.workspace = true
 dyn-clone.workspace = true
 
-[dev-dependencies]
-
 [features]
 default = []
