@@ -72,13 +72,19 @@ impl Input {
         // Stack a few domain edits; do not mutate the serialized JSON bytes.
         for _ in 0..rng.random_range(1..=4) {
             let b = rng.random_range(0..self.blocks.len());
-            match rng.random_range(0..7) {
+            match rng.random_range(0..9) {
                 0 => self.blocks[b].stream_seed = rng.random(),
                 1 if self.blocks.len() > 1 => {
                     self.blocks.remove(b);
                 }
                 2 if self.blocks.len() < 1024 => {
                     self.blocks.insert(b, self.blocks[b].clone());
+                }
+                7 if self.blocks.len() > 1 => {
+                    self.blocks.pop();
+                }
+                8 if self.blocks.len() < 1024 => {
+                    self.blocks.push(self.blocks[self.blocks.len() - 1].clone());
                 }
                 kind => {
                     let ops = &mut self.blocks[b].operations;

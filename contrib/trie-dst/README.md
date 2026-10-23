@@ -208,8 +208,9 @@ preparation and execution. For example, dispatch the same CI workflow with
 `num_seeds` then caps fuzz executions. Each corpus entry is an `Input`: an
 ordered list of blocks, each with account/storage operations and a stream seed
 for batch composition and hints. Reth generates eight initial entries and
-performs typed mutations that can duplicate or drop blocks and change operations, values, slots,
-and stream seeds while preserving account prerequisites. The same input can
+performs typed mutations that can duplicate or drop a chosen block or the last
+block, and change operations, values, slots, and stream seeds while preserving
+account prerequisites. The same input can
 also be supplied as `base_input` to the controller for replay.
 
 At a completed-block snapshot, the controller emits `trie/input/checked`,
