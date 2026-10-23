@@ -24,10 +24,7 @@ use reth_trie::{
 use reth_trie_common::{MultiProofTargetsV2, ProofTrieNodeV2, ProofV2Target, ProofV2TargetParent};
 use reth_trie_parallel::{
     error::StateRootTaskError,
-    proof_task::{
-        AccountMultiproofInput, ProofResultContext, ProofResultMessage, ProofResultSender,
-        ProofWorkerHandle,
-    },
+    proof_task::{ProofWorkerHandle, ProofWorkerResult},
 };
 use reth_trie_sparse::{
     errors::{
@@ -52,11 +49,11 @@ use tracing::{debug, debug_span, error, instrument, trace_span};
 ///    receive order. `HashedState` supplies changed values; `PrefetchProofs` supplies
 ///    [`LeafUpdate::Touched`] hints that must not overwrite changed values. The task buffers these
 ///    leaf updates before applying them in batches.
-/// 2. **Proof workers:** blinded paths become [`MultiProofTargetsV2`] requests dispatched through
-///    [`ProofWorkerHandle`]. Each request carries a [`ProofResultContext`] with a sender for
-///    [`Self::proof_result_rx`]. The task coalesces returned [`ProofResultMessage`]s, reveals
-///    account proofs locally, and queues storage proofs on the corresponding address'
-///    [`StorageTrieState`].
+/// 2. **Proof workers:** blinded paths become [`MultiProofTargetsV2`] chunks, which
+///    [`ProofWorkerHandle::dispatch`] splits into independent account and per-address storage jobs.
+///    The task coalesces the [`ProofWorkerResult`]s returned through
+///    [`ProofWorkerHandle::results`], reveals account proofs locally, and queues storage proofs on
+///    the corresponding address' [`StorageTrieState`].
 /// 3. **Storage jobs:** [`Self::spawn_storage_jobs`] moves each [`StorageTrieWork`] into a rayon
 ///    closure. A pass reveals queued proofs, applies unblocked leaves, and hashes the storage trie
 ///    once its pending leaves are drained. It sends [`StorageJobMessage::Done`] via
@@ -120,10 +117,6 @@ use tracing::{debug, debug_span, error, instrument, trace_span};
 /// this task's thread. During draining, pending updates with no remaining source of progress
 /// produce [`StateRootTaskError::Stalled`].
 pub(super) struct SparseTrieCacheTask<A = ArenaParallelSparseTrie, S = ArenaParallelSparseTrie> {
-    /// Sender for proof results.
-    proof_result_tx: ProofResultSender,
-    /// Receiver for proof results directly from workers.
-    proof_result_rx: CrossbeamReceiver<ProofResultMessage>,
     /// Receives updates from execution and prewarming.
     updates: CrossbeamReceiver<SparseTrieTaskMessage>,
     /// Fires (by disconnecting) when the consumer drops its cancel guard, meaning nobody is
@@ -188,8 +181,8 @@ pub(super) struct SparseTrieCacheTask<A = ArenaParallelSparseTrie, S = ArenaPara
     storage_cache_misses: u64,
     /// Pending proof targets queued for dispatch to proof workers.
     pending_targets: PendingTargets,
-    /// Proof batches dispatched to workers and not yet received.
-    in_flight_proof_batches: usize,
+    /// Proof jobs queued on the workers whose results have not been received yet.
+    in_flight_proof_jobs: usize,
     /// Everything the task knows about a storage trie touched by this block: the trie itself, its
     /// queued leaf updates, the proof nodes waiting to be revealed into it and its proof target
     /// cache. See [`StorageTrieState`].
@@ -235,8 +228,6 @@ where
         cancel_rx: CrossbeamReceiver<()>,
         final_hashed_state_tx: std::sync::mpsc::Sender<Arc<HashedPostState>>,
         proof_worker_handle: ProofWorkerHandle,
-        proof_result_tx: ProofResultSender,
-        proof_result_rx: CrossbeamReceiver<ProofResultMessage>,
         metrics: SparseTrieTaskMetrics,
         trie: SparseStateTrie<A, S>,
         parent_state_root: B256,
@@ -254,8 +245,6 @@ where
         });
 
         Self {
-            proof_result_tx,
-            proof_result_rx,
             updates: hashed_state_rx,
             cancel_rx,
             proof_worker_handle,
@@ -277,7 +266,7 @@ where
             storage_cache_hits: 0,
             storage_cache_misses: 0,
             pending_targets: Default::default(),
-            in_flight_proof_batches: 0,
+            in_flight_proof_jobs: 0,
             storage: Default::default(),
             storage_to_drop: Default::default(),
             storage_in_flight: 0,
@@ -396,14 +385,14 @@ where
                         .record(wake.duration_since(t));
 
                     let update = message.map_err(|_| StateRootTaskError::Other(
-                        "updates channel disconnected before state root calculation".to_string(),
+                        "updates channel disconnected before state root calculation".into(),
                     ))?;
                     if let Some(hashed_state) = self.on_message(update) {
                         finalized_hashed_state = Some(hashed_state);
                     }
                     self.pending_updates += 1;
                 }
-                recv(self.proof_result_rx) -> message => {
+                recv(self.proof_worker_handle.results()) -> message => {
                     let wake = Instant::now();
                     total_idle_time += wake.duration_since(idle_start);
                     self.metrics
@@ -412,9 +401,9 @@ where
                     t = wake;
 
                     let Ok(result) = message else {
-                        unreachable!("we own the sender half")
+                        unreachable!("proof worker results never disconnect while the handle is alive")
                     };
-                    self.on_proof_results(result, &mut t)?;
+                    self.on_proof_worker_result(result, &mut t)?;
                 },
                 recv(self.storage_done_rx) -> message => {
                     let wake = Instant::now();
@@ -442,7 +431,7 @@ where
         while !done {
             let mut t = Instant::now();
             crossbeam_channel::select_biased! {
-                recv(self.proof_result_rx) -> message => {
+                recv(self.proof_worker_handle.results()) -> message => {
                     let wake = Instant::now();
                     total_idle_time += wake.duration_since(idle_start);
                     self.metrics
@@ -451,9 +440,9 @@ where
                     t = wake;
 
                     let Ok(result) = message else {
-                        unreachable!("we own the sender half")
+                        unreachable!("proof worker results never disconnect while the handle is alive")
                     };
-                    self.on_proof_results(result, &mut t)?;
+                    self.on_proof_worker_result(result, &mut t)?;
                 },
                 recv(self.storage_done_rx) -> message => {
                     let wake = Instant::now();
@@ -497,11 +486,7 @@ where
                 // the unchanged root node.
                 (self.parent_state_root, TrieUpdates::default())
             }
-            Err(err) => {
-                return Err(StateRootTaskError::Other(format!(
-                    "could not calculate state root: {err:?}"
-                )))
-            }
+            Err(err) => return Err(StateRootTaskError::Other(err.into())),
         };
 
         let end = Instant::now();
@@ -525,17 +510,16 @@ where
         })
     }
 
-    /// Handles a received proof result: coalesces everything already queued, reveals the
+    /// Handles a received proof worker result: coalesces everything already queued, reveals the
     /// proof in the trie, and records timing metrics.
-    fn on_proof_results(
+    fn on_proof_worker_result(
         &mut self,
-        message: ProofResultMessage,
+        result: ProofWorkerResult,
         t: &mut Instant,
     ) -> Result<(), StateRootTaskError> {
-        let mut result = self.on_proof_result_message(message)?;
-        while let Ok(next) = self.proof_result_rx.try_recv() {
-            let res = self.on_proof_result_message(next)?;
-            result.extend(res);
+        let mut proofs = self.complete_proof_job(result)?;
+        while let Ok(next) = self.proof_worker_handle.results().try_recv() {
+            proofs.extend(self.complete_proof_job(next)?);
         }
 
         let phase_end = Instant::now();
@@ -544,7 +528,7 @@ where
             .record(phase_end.duration_since(*t));
         *t = phase_end;
 
-        self.on_proof_result(result)?;
+        self.on_proofs(proofs)?;
         self.metrics.sparse_trie_reveal_multiproof_duration_histogram.record(t.elapsed());
         Ok(())
     }
@@ -560,7 +544,7 @@ where
 
         let updates_queued = !self.finished_state_updates && !self.updates.is_empty();
 
-        if !updates_queued && self.proof_result_rx.is_empty() {
+        if !updates_queued && self.proof_worker_handle.results().is_empty() {
             // If we don't have any pending messages, we can spend some time on computing
             // storage roots and promoting account updates.
             self.dispatch_pending_targets()?;
@@ -578,7 +562,7 @@ where
 
             // If there's still no pending updates spend some time pre-computing the account
             // trie upper hashes
-            if self.proof_result_rx.is_empty() {
+            if self.proof_worker_handle.results().is_empty() {
                 self.trie.calculate_subtries(self.new_epoch);
             }
         } else if !updates_queued {
@@ -696,17 +680,16 @@ where
         self.final_hashed_state.extend(hashed_state_update);
     }
 
-    fn on_proof_result(&mut self, result: DecodedMultiProofV2) -> Result<(), StateRootTaskError> {
-        self.reveal_proof_result(result)
-            .map_err(|e| StateRootTaskError::Other(format!("could not reveal multiproof: {e:?}")))
+    fn on_proofs(&mut self, proofs: DecodedMultiProofV2) -> Result<(), StateRootTaskError> {
+        self.reveal_proof_result(proofs).map_err(|e| StateRootTaskError::Other(e.into()))
     }
 
     /// Reveals a proof batch.
     ///
     /// The account trie is revealed here because it can never be checked out. Storage proof nodes
     /// are queued on their address' entry and revealed by the job that runs for it next.
-    fn reveal_proof_result(&mut self, result: DecodedMultiProofV2) -> SparseStateTrieResult<()> {
-        let DecodedMultiProofV2 { account_proofs, storage_proofs } = result;
+    fn reveal_proof_result(&mut self, proofs: DecodedMultiProofV2) -> SparseStateTrieResult<()> {
+        let DecodedMultiProofV2 { account_proofs, storage_proofs } = proofs;
 
         self.queue_storage_proofs(storage_proofs);
         // Get the workers going before spending this thread on the account trie.
@@ -743,17 +726,19 @@ where
         })
     }
 
-    fn on_proof_result_message(
+    /// Accounts for a received proof job result and returns its proofs.
+    fn complete_proof_job(
         &mut self,
-        message: ProofResultMessage,
+        result: ProofWorkerResult,
     ) -> Result<DecodedMultiProofV2, StateRootTaskError> {
-        let result = message.result?;
+        let proofs = result?;
         debug_assert!(
-            self.in_flight_proof_batches > 0,
-            "received proof result without an in-flight proof batch"
+            self.in_flight_proof_jobs > 0,
+            "received proof result without an in-flight proof job"
         );
-        self.in_flight_proof_batches = self.in_flight_proof_batches.saturating_sub(1);
-        Ok(result)
+        // Saturates so that a broken invariant in release builds still lets the stall check fire.
+        self.in_flight_proof_jobs = self.in_flight_proof_jobs.saturating_sub(1);
+        Ok(proofs)
     }
 
     /// Applies buffered input and runs ready storage work, including work buffered while a job
@@ -1148,20 +1133,13 @@ where
                     return;
                 }
 
-                match self.proof_worker_handle.dispatch_account_multiproof(AccountMultiproofInput {
-                    targets: proof_targets,
-                    proof_result_sender: ProofResultContext::new(
-                        self.proof_result_tx.clone(),
-                        HashedPostState::default(),
-                        Instant::now(),
-                    ),
-                }) {
-                    Ok(()) => {
-                        self.in_flight_proof_batches += 1;
-                    }
+                // A chunk becomes several jobs, and an address whose slots span chunks gets one
+                // storage job per chunk. Every job returns its own result.
+                match self.proof_worker_handle.dispatch(proof_targets) {
+                    Ok(jobs) => self.in_flight_proof_jobs += jobs,
                     Err(e) => {
-                        error!("failed to dispatch account multiproof: {e:?}");
-                        dispatch_error = Some(StateRootTaskError::ProofDispatch(e));
+                        error!("failed to dispatch proofs: {e}");
+                        dispatch_error = Some(StateRootTaskError::Other(Box::new(e)));
                     }
                 }
             },
@@ -1201,8 +1179,8 @@ where
             !updates_queued &&
             self.pending_updates == 0 &&
             self.pending_targets.is_empty() &&
-            self.in_flight_proof_batches == 0 &&
-            self.proof_result_rx.is_empty() &&
+            self.in_flight_proof_jobs == 0 &&
+            self.proof_worker_handle.results().is_empty() &&
             self.storage_in_flight == 0 &&
             !self.has_ready_storage_work() &&
             self.has_pending_sparse_trie_updates()
@@ -1673,11 +1651,13 @@ enum SparseTrieTaskMessage {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_primitives::{keccak256, Address, B256, U256};
+    use alloy_primitives::{B256, U256};
     use reth_db_common::init::init_genesis;
     use reth_provider::test_utils::create_test_provider_factory;
     use reth_storage_overlay::{OverlayManager, OverlayStateProviderFactory};
-    use reth_trie_common::{ExtensionNode, LeafNode, Nibbles, RlpNode, TrieNodeV2};
+    use reth_trie_common::{
+        BranchNodeV2, ExtensionNode, LeafNode, Nibbles, RlpNode, TrieMask, TrieNodeV2,
+    };
     use reth_trie_parallel::proof_task::{ProofTaskCtx, ProofWorkerCounts};
     use reth_trie_sparse::ArenaParallelSparseTrie;
 
@@ -1698,12 +1678,11 @@ mod tests {
             OverlayManager::<reth_chain_state::EthPrimitives>::default()
                 .overlay_builder(anchor_hash),
         );
-        let (proof_result_tx, proof_result_rx) = crossbeam_channel::unbounded();
         let proof_worker_handle = ProofWorkerHandle::new(
             runtime,
             ProofTaskCtx::new(state_provider_factory),
             ProofWorkerCounts::full(runtime),
-            proof_result_tx.clone(),
+            Default::default(),
         );
         let (updates_tx, updates_rx) = crossbeam_channel::unbounded();
         let (cancel_guard, cancel_rx) = crossbeam_channel::bounded(0);
@@ -1713,8 +1692,6 @@ mod tests {
             cancel_rx,
             std::sync::mpsc::channel().0,
             proof_worker_handle,
-            proof_result_tx,
-            proof_result_rx,
             SparseTrieTaskMetrics::default(),
             trie,
             EMPTY_ROOT_HASH,
@@ -1779,56 +1756,6 @@ mod tests {
     }
 
     #[test]
-    fn test_run_hashing_task_hashed_state_update_forwards() {
-        let (updates_tx, updates_rx) = crossbeam_channel::unbounded();
-        let (hashed_state_tx, hashed_state_rx) = crossbeam_channel::unbounded();
-
-        let address = keccak256(Address::random());
-        let slot = keccak256(U256::from(42).to_be_bytes::<32>());
-        let value = U256::from(999);
-
-        let mut hashed_state = HashedPostState::default();
-        hashed_state.accounts.insert(
-            address,
-            Some(Account { balance: U256::from(100), nonce: 1, ..Default::default() }),
-        );
-        let mut storage = reth_trie::HashedStorage::default();
-        storage.storage.insert(slot, value);
-        hashed_state.storages.insert(address, storage);
-
-        let expected_state = hashed_state.clone();
-
-        let handle = std::thread::spawn(move || {
-            SparseTrieCacheTask::<ArenaParallelSparseTrie, ArenaParallelSparseTrie>::run_hashing_task(
-                updates_rx,
-                hashed_state_tx,
-                SparseTrieTaskMetrics::default(),
-            );
-        });
-
-        updates_tx.send(StateRootMessage::HashedStateUpdate(hashed_state)).unwrap();
-        updates_tx.send(StateRootMessage::FinishedStateUpdates).unwrap();
-        drop(updates_tx);
-
-        let SparseTrieTaskMessage::HashedState(received) = hashed_state_rx.recv().unwrap() else {
-            panic!("expected HashedState message");
-        };
-
-        let account = received.accounts.get(&address).unwrap().as_ref().unwrap();
-        assert_eq!(account.balance, expected_state.accounts[&address].as_ref().unwrap().balance);
-        assert_eq!(account.nonce, expected_state.accounts[&address].as_ref().unwrap().nonce);
-
-        let storage = received.storages.get(&address).unwrap();
-        assert_eq!(*storage.storage.get(&slot).unwrap(), value);
-
-        let second = hashed_state_rx.recv().unwrap();
-        assert!(matches!(second, SparseTrieTaskMessage::FinishedStateUpdates));
-
-        assert!(hashed_state_rx.recv().is_err());
-        handle.join().unwrap();
-    }
-
-    #[test]
     fn test_encode_account_leaf_value_deletion_and_empty_root_is_empty() {
         let mut account_rlp_buf = vec![0xAB];
         let encoded = encode_account_leaf_value(None, EMPTY_ROOT_HASH, &mut account_rlp_buf);
@@ -1855,11 +1782,11 @@ mod tests {
     #[test]
     #[allow(clippy::needless_update)]
     fn test_encode_account_leaf_value_non_empty_account_is_rlp() {
-        let storage_root = B256::from([0x99; 32]);
+        let storage_root = B256::repeat_byte(0x99);
         let account = Some(Account {
             nonce: 7,
             balance: U256::from(42),
-            bytecode_hash: Some(B256::from([0xAA; 32])),
+            bytecode_hash: Some(B256::repeat_byte(0xAA)),
             ..Default::default()
         });
         let mut account_rlp_buf = vec![0x00, 0x01];
@@ -1918,7 +1845,7 @@ mod tests {
             )),
             masks: None,
         };
-        task.on_proof_result(DecodedMultiProofV2 {
+        task.on_proofs(DecodedMultiProofV2 {
             storage_proofs: B256Map::from_iter([(address, vec![leaf])]),
             ..Default::default()
         })
@@ -2009,7 +1936,7 @@ mod tests {
         state.storages.entry(address).or_default().storage.extend([
             (removed_slot, U256::from(8)),
             (changed_slot, U256::from(9)),
-            (new_slot, U256::from(1)),
+            (new_slot, U256::ONE),
             (sibling_slot, U256::from(2)),
         ]);
         task.on_hashed_state_update(state);
@@ -2046,7 +1973,7 @@ mod tests {
         // Deliver the requested parent proof directly so the interleaving is deterministic.
         let (targets, _) = task.pending_targets.take();
         assert_eq!(targets.storage_targets[&address].len(), 4);
-        task.on_proof_result(DecodedMultiProofV2 {
+        task.on_proofs(DecodedMultiProofV2 {
             storage_proofs: B256Map::from_iter([(address, vec![parent_leaf.clone()])]),
             ..Default::default()
         })
@@ -2056,7 +1983,7 @@ mod tests {
 
         let expected_root = reth_trie_common::root::storage_root_unsorted([
             (changed_slot, U256::from(11)),
-            (new_slot, U256::from(1)),
+            (new_slot, U256::ONE),
             (sibling_slot, U256::from(2)),
         ]);
         assert_eq!(
@@ -2072,7 +1999,7 @@ mod tests {
         let mut final_updates = B256Map::from_iter([
             (removed_slot, LeafUpdate::Changed(Vec::new())),
             (changed_slot, LeafUpdate::Changed(alloy_rlp::encode(U256::from(11)))),
-            (new_slot, LeafUpdate::Changed(alloy_rlp::encode(U256::from(1)))),
+            (new_slot, LeafUpdate::Changed(alloy_rlp::encode(U256::ONE))),
             (sibling_slot, LeafUpdate::Changed(alloy_rlp::encode(U256::from(2)))),
         ]);
         serial
@@ -2105,7 +2032,7 @@ mod tests {
         task.run_ready_storage_work().unwrap();
         assert_eq!(task.storage_cache_misses, 1);
 
-        task.on_proof_result(DecodedMultiProofV2 {
+        task.on_proofs(DecodedMultiProofV2 {
             storage_proofs: B256Map::from_iter([(
                 B256::repeat_byte(0x33),
                 vec![ProofTrieNodeV2::empty()],
@@ -2116,7 +2043,7 @@ mod tests {
         assert_eq!(task.storage_cache_misses, 1, "unrelated reveals cannot unblock this trie");
         assert_eq!(storage_slot_value(&task, &address, &slot), None);
 
-        task.on_proof_result(DecodedMultiProofV2 {
+        task.on_proofs(DecodedMultiProofV2 {
             storage_proofs: B256Map::from_iter([(address, vec![ProofTrieNodeV2::empty()])]),
             ..Default::default()
         })
@@ -2164,13 +2091,12 @@ mod tests {
         let StorageTrieState::Idle(work) = task.storage_trie_state_mut(address) else {
             unreachable!()
         };
-        // An unfused extension root is unsupported and deterministically panics in set_root.
         work.queue_proofs(&mut vec![ProofTrieNodeV2 {
             path: Nibbles::default(),
-            node: TrieNodeV2::Extension(ExtensionNode::new(
-                Nibbles::from_nibbles([1]),
-                RlpNode::word_rlp(&B256::ZERO),
-            )),
+            node: TrieNodeV2::Branch(BranchNodeV2 {
+                state_mask: TrieMask::from(1),
+                ..Default::default()
+            }),
             masks: None,
         }]);
         let work = check_out_storage(&mut task, address);
@@ -2184,6 +2110,39 @@ mod tests {
         assert!(panic.is_err());
         assert_eq!(task.storage_in_flight, 0);
         assert!(!task.storage.contains_key(&address));
+
+        drop(updates_tx);
+        drop(task);
+        drain_sparse_trie_tasks(&runtime);
+    }
+
+    #[test]
+    fn unsupported_storage_root_errors_are_returned_to_the_task() {
+        let runtime = Runtime::test();
+        let (mut task, updates_tx, _cancel_guard) = test_task(&runtime, SparseStateTrie::default());
+        let address = B256::repeat_byte(0x11);
+        let StorageTrieState::Idle(work) = task.storage_trie_state_mut(address) else {
+            unreachable!()
+        };
+        work.queue_proofs(&mut vec![ProofTrieNodeV2 {
+            path: Nibbles::default(),
+            node: TrieNodeV2::Extension(ExtensionNode::new(
+                Nibbles::from_nibbles([1]),
+                RlpNode::word_rlp(&B256::ZERO),
+            )),
+            masks: None,
+        }]);
+        let work = check_out_storage(&mut task, address);
+        task.spawn_storage_jobs(vec![StorageTrieJob { address, work }]);
+
+        let message = receive_storage_job(&task);
+        assert!(matches!(&message, StorageJobMessage::Done(done) if done.address == address));
+        let error = task.on_storage_job_message(message).unwrap_err();
+        assert!(
+            matches!(error.kind(), SparseTrieErrorKind::Reveal { path, .. } if path.is_empty())
+        );
+        assert_eq!(task.storage_in_flight, 0);
+        assert!(matches!(task.storage.get(&address), Some(StorageTrieState::Idle(_))));
 
         drop(updates_tx);
         drop(task);
@@ -2222,8 +2181,7 @@ mod tests {
             })
             .collect();
 
-        task.on_proof_result(DecodedMultiProofV2 { account_proofs: Vec::new(), storage_proofs })
-            .unwrap();
+        task.on_proofs(DecodedMultiProofV2 { account_proofs: Vec::new(), storage_proofs }).unwrap();
 
         assert_eq!(task.storage_in_flight, leaves.len());
         assert!(task.has_pending_sparse_trie_updates(), "completion must wait for the reveals");
@@ -2262,10 +2220,7 @@ mod tests {
                 };
                 let storage = (0..4u8)
                     .map(|slot| {
-                        (
-                            B256::repeat_byte(0x40 + index * 4 + slot),
-                            U256::from(slot) + U256::from(1),
-                        )
+                        (B256::repeat_byte(0x40 + index * 4 + slot), U256::from(slot) + U256::ONE)
                     })
                     .collect::<Vec<_>>();
                 (address, account, storage)
@@ -2306,12 +2261,11 @@ mod tests {
             OverlayManager::<reth_chain_state::EthPrimitives>::default()
                 .overlay_builder(anchor_hash),
         );
-        let (proof_result_tx, proof_result_rx) = crossbeam_channel::unbounded();
         let proof_worker_handle = ProofWorkerHandle::new(
             &runtime,
             ProofTaskCtx::new(state_provider_factory),
             ProofWorkerCounts::full(&runtime),
-            proof_result_tx.clone(),
+            Default::default(),
         );
 
         let default_trie = RevealableSparseTrie::blind_from(ArenaParallelSparseTrie::default());
@@ -2320,7 +2274,7 @@ mod tests {
             .with_default_storage_trie(default_trie)
             .with_updates(true);
 
-        let parent_state_root = B256::from([0x55; 32]);
+        let parent_state_root = B256::repeat_byte(0x55);
         let (updates_tx, updates_rx) = crossbeam_channel::unbounded();
         let (_cancel_guard, cancel_rx) = crossbeam_channel::bounded::<()>(0);
         let mut task = SparseTrieCacheTask::new_with_trie(
@@ -2329,8 +2283,6 @@ mod tests {
             cancel_rx,
             std::sync::mpsc::channel().0,
             proof_worker_handle,
-            proof_result_tx,
-            proof_result_rx,
             SparseTrieTaskMetrics::default(),
             trie,
             parent_state_root,
@@ -2355,10 +2307,10 @@ mod tests {
             task.pending_updates += 1;
             assert!(!task.make_progress().unwrap());
             if index + 1 < INITIAL_UPDATE_BATCH_SIZE {
-                assert_eq!(task.in_flight_proof_batches, 0);
+                assert_eq!(task.in_flight_proof_jobs, 0);
             }
         }
-        assert!(task.in_flight_proof_batches > 0, "proof work must start before the queue drains");
+        assert!(task.in_flight_proof_jobs > 0, "proof work must start before the queue drains");
         assert_eq!(task.pending_updates, 0);
 
         // A second batch remains buffered; the early flush must not become a permanent small
@@ -2390,12 +2342,11 @@ mod tests {
             OverlayManager::<reth_chain_state::EthPrimitives>::default()
                 .overlay_builder(anchor_hash),
         );
-        let (proof_result_tx, proof_result_rx) = crossbeam_channel::unbounded();
         let proof_worker_handle = ProofWorkerHandle::new(
             &runtime,
             ProofTaskCtx::new(state_provider_factory),
             ProofWorkerCounts::full(&runtime),
-            proof_result_tx.clone(),
+            Default::default(),
         );
 
         let default_trie = RevealableSparseTrie::blind_from(ArenaParallelSparseTrie::default());
@@ -2404,7 +2355,7 @@ mod tests {
             .with_default_storage_trie(default_trie)
             .with_updates(true);
 
-        let parent_state_root = B256::from([0x55; 32]);
+        let parent_state_root = B256::repeat_byte(0x55);
         let (updates_tx, updates_rx) = crossbeam_channel::unbounded();
         let (_cancel_guard, cancel_rx) = crossbeam_channel::bounded::<()>(0);
         let mut task = SparseTrieCacheTask::new_with_trie(
@@ -2413,8 +2364,6 @@ mod tests {
             cancel_rx,
             std::sync::mpsc::channel().0,
             proof_worker_handle,
-            proof_result_tx,
-            proof_result_rx,
             SparseTrieTaskMetrics::default(),
             trie,
             parent_state_root,
@@ -2445,12 +2394,11 @@ mod tests {
             OverlayManager::<reth_chain_state::EthPrimitives>::default()
                 .overlay_builder(anchor_hash),
         );
-        let (proof_result_tx, proof_result_rx) = crossbeam_channel::unbounded();
         let proof_worker_handle = ProofWorkerHandle::new(
             &runtime,
             ProofTaskCtx::new(state_provider_factory),
             ProofWorkerCounts::full(&runtime),
-            proof_result_tx.clone(),
+            Default::default(),
         );
 
         let default_trie = RevealableSparseTrie::blind_from(ArenaParallelSparseTrie::default());
@@ -2467,21 +2415,19 @@ mod tests {
             cancel_rx,
             std::sync::mpsc::channel().0,
             proof_worker_handle,
-            proof_result_tx,
-            proof_result_rx,
             SparseTrieTaskMetrics::default(),
             trie,
-            B256::from([0x55; 32]),
+            B256::repeat_byte(0x55),
             TrieNodeEpoch::UNMODIFIED,
             1,
         );
 
         drop(updates_tx);
 
-        let account = B256::from([0x11; 32]);
-        let slot = B256::from([0x22; 32]);
-        let account_target = B256::from([0x33; 32]);
-        let storage_target = B256::from([0x44; 32]);
+        let account = B256::repeat_byte(0x11);
+        let slot = B256::repeat_byte(0x22);
+        let account_target = B256::repeat_byte(0x33);
+        let storage_target = B256::repeat_byte(0x44);
 
         task.finished_state_updates = true;
         task.account_updates.insert(account, LeafUpdate::Touched);
@@ -2495,18 +2441,14 @@ mod tests {
         work.updated = true;
         work.pending.insert(slot, LeafUpdate::Touched);
         work.fetched.insert(storage_target, ProofV2TargetParent::new(11));
-        task.in_flight_proof_batches = 1;
+        task.in_flight_proof_jobs = 1;
 
         assert!(task.ensure_not_stalled(false).is_ok());
 
-        let result = ProofResultMessage {
-            result: Ok(DecodedMultiProofV2::default()),
-            elapsed: std::time::Duration::ZERO,
-            state: HashedPostState::default(),
-        };
-        task.on_proof_result_message(result).expect("proof result should be ok");
+        let result = Ok(DecodedMultiProofV2::default());
+        task.complete_proof_job(result).expect("proof result should be ok");
 
-        assert_eq!(task.in_flight_proof_batches, 0);
+        assert_eq!(task.in_flight_proof_jobs, 0);
         let error = task.ensure_not_stalled(false).expect_err("task should be stalled");
         assert!(matches!(error, StateRootTaskError::Stalled));
         let error = error.to_string();
@@ -2527,59 +2469,6 @@ mod tests {
     }
 
     #[test]
-    fn run_errors_when_cancel_guard_drops_before_updates_finish() {
-        let runtime = reth_tasks::Runtime::test();
-        let provider_factory = create_test_provider_factory();
-        let anchor_hash = init_genesis(&provider_factory).expect("failed to initialize genesis");
-        let state_provider_factory = OverlayStateProviderFactory::new(
-            provider_factory,
-            OverlayManager::<reth_chain_state::EthPrimitives>::default()
-                .overlay_builder(anchor_hash),
-        );
-        let (proof_result_tx, proof_result_rx) = crossbeam_channel::unbounded();
-        let proof_worker_handle = ProofWorkerHandle::new(
-            &runtime,
-            ProofTaskCtx::new(state_provider_factory),
-            ProofWorkerCounts::full(&runtime),
-            proof_result_tx.clone(),
-        );
-
-        let default_trie = RevealableSparseTrie::blind_from(ArenaParallelSparseTrie::default());
-        let trie = SparseStateTrie::default()
-            .with_accounts_trie(default_trie.clone())
-            .with_default_storage_trie(default_trie)
-            .with_updates(true);
-
-        let (updates_tx, updates_rx) = crossbeam_channel::unbounded();
-        let (cancel_guard, cancel_rx) = crossbeam_channel::bounded::<()>(0);
-        let mut task = SparseTrieCacheTask::new_with_trie(
-            &runtime,
-            updates_rx,
-            cancel_rx,
-            std::sync::mpsc::channel().0,
-            proof_worker_handle,
-            proof_result_tx,
-            proof_result_rx,
-            SparseTrieTaskMetrics::default(),
-            trie,
-            B256::from([0x55; 32]),
-            TrieNodeEpoch::UNMODIFIED,
-            1,
-        );
-
-        // The consumer abandons the computation. The updates channel is still open (no finish
-        // marker was sent), so without the cancel signal the task would wait forever.
-        drop(cancel_guard);
-
-        let error = task.run().expect_err("canceled task must return an error");
-        assert!(matches!(error, StateRootTaskError::Canceled));
-
-        drop(updates_tx);
-        drop(task);
-        drain_sparse_trie_tasks(&runtime);
-    }
-
-    #[test]
     fn run_ignores_hints_queued_after_updates_finish() {
         let runtime = reth_tasks::Runtime::test();
         let provider_factory = create_test_provider_factory();
@@ -2589,12 +2478,11 @@ mod tests {
             OverlayManager::<reth_chain_state::EthPrimitives>::default()
                 .overlay_builder(anchor_hash),
         );
-        let (proof_result_tx, proof_result_rx) = crossbeam_channel::unbounded();
         let proof_worker_handle = ProofWorkerHandle::new(
             &runtime,
             ProofTaskCtx::new(state_provider_factory),
             ProofWorkerCounts::full(&runtime),
-            proof_result_tx.clone(),
+            Default::default(),
         );
 
         let default_trie = RevealableSparseTrie::blind_from(ArenaParallelSparseTrie::default());
@@ -2611,11 +2499,9 @@ mod tests {
             cancel_rx,
             std::sync::mpsc::channel().0,
             proof_worker_handle,
-            proof_result_tx,
-            proof_result_rx,
             SparseTrieTaskMetrics::default(),
             trie,
-            B256::from([0x55; 32]),
+            B256::repeat_byte(0x55),
             TrieNodeEpoch::UNMODIFIED,
             1,
         );

@@ -3,13 +3,14 @@
 use alloy_eips::BlockNumberOrTag;
 use alloy_primitives::B256;
 use alloy_provider::Provider;
-use alloy_rpc_types_engine::{ForkchoiceState, PayloadStatusEnum};
-use jsonrpsee_core::client::Error;
+use alloy_rpc_types_engine::{ForkchoiceState, ForkchoiceUpdateError, PayloadStatusEnum};
+use futures::FutureExt;
 use reth_chainspec::EthereumHardfork;
 use reth_e2e_test_utils::{eth_payload_attributes, test_chain_spec, E2ETestSetupExt};
+use reth_node_api::BeaconForkChoiceUpdateError;
 use reth_node_ethereum::{EthEngineTypes, EthereumNode};
 use reth_provider::{DatabaseProviderFactory, HeaderProvider};
-use reth_rpc_api::{EngineApiClient, TestingBuildBlockRequestV1};
+use reth_rpc_api::{EngineApiClient, TestingBuildBlockRequestV1, TestingBuildBlockResponseV1};
 use reth_rpc_server_types::{RethRpcModule, RpcModuleSelection};
 use std::time::Duration;
 
@@ -39,7 +40,7 @@ async fn invalid_forkchoice_preserves_canonical_state() -> eyre::Result<()> {
     let mut chains = [vec![genesis], vec![genesis]];
     for (branch, length) in [3, 2].into_iter().enumerate() {
         for number in 1..=length {
-            let envelope = producer
+            let TestingBuildBlockResponseV1::V5(envelope) = producer
                 .testing_build_block_v1(TestingBuildBlockRequestV1 {
                     parent_block_hash: *chains[branch].last().unwrap(),
                     payload_attributes: eth_payload_attributes(
@@ -49,7 +50,10 @@ async fn invalid_forkchoice_preserves_canonical_state() -> eyre::Result<()> {
                     transactions: vec![],
                     extra_data: None,
                 })
-                .await?;
+                .await?
+            else {
+                panic!("expected a V5 envelope")
+            };
             let payload = envelope.execution_payload;
             let hash = payload.payload_inner.payload_inner.block_hash;
             for client in [&producer_engine, &engine] {
@@ -66,16 +70,14 @@ async fn invalid_forkchoice_preserves_canonical_state() -> eyre::Result<()> {
             chains[branch].push(hash);
         }
         if branch == 0 {
-            let status = EngineApiClient::<EthEngineTypes>::fork_choice_updated_v3(
-                &engine,
-                ForkchoiceState {
+            let status = node
+                .engine
+                .forkchoice_updated(ForkchoiceState {
                     head_block_hash: chains[0][3],
                     safe_block_hash: genesis,
                     finalized_block_hash: genesis,
-                },
-                None,
-            )
-            .await?;
+                })
+                .await?;
             assert_eq!(status.payload_status.status, PayloadStatusEnum::Valid);
         }
     }
@@ -94,11 +96,16 @@ async fn invalid_forkchoice_preserves_canonical_state() -> eyre::Result<()> {
             safe_block_hash: safe,
             finalized_block_hash: finalized,
         };
-        let err = EngineApiClient::<EthEngineTypes>::fork_choice_updated_v3(&engine, state, None)
-            .await
-            .unwrap_err();
-        let Error::Call(err) = err else { panic!("Expected an RPC error, got {err:?}") };
-        assert_eq!(err.code(), -38002, "{state:?}");
+        let err = node.engine.forkchoice_updated(state).await.unwrap_err();
+        assert!(
+            matches!(
+                err,
+                BeaconForkChoiceUpdateError::ForkchoiceUpdateError(
+                    ForkchoiceUpdateError::InvalidState
+                )
+            ),
+            "{state:?}: {err}"
+        );
 
         for (tag, hash) in [
             (BlockNumberOrTag::Latest, a[3]),
@@ -117,16 +124,14 @@ async fn invalid_forkchoice_preserves_canonical_state() -> eyre::Result<()> {
     }
 
     // Safe/finalized hashes on the proposed branch must be accepted before it is canonical.
-    let status = EngineApiClient::<EthEngineTypes>::fork_choice_updated_v3(
-        &engine,
-        ForkchoiceState {
+    let status = node
+        .engine
+        .forkchoice_updated(ForkchoiceState {
             head_block_hash: b[2],
             safe_block_hash: b[2],
             finalized_block_hash: b[1],
-        },
-        None,
-    )
-    .await?;
+        })
+        .await?;
     assert_eq!(status.payload_status.status, PayloadStatusEnum::Valid);
     for (tag, hash) in [
         (BlockNumberOrTag::Latest, b[2]),
@@ -140,15 +145,23 @@ async fn invalid_forkchoice_preserves_canonical_state() -> eyre::Result<()> {
     assert!(rpc.get_block_by_number(BlockNumberOrTag::Number(3)).await?.is_none());
 
     // Invalid payload attributes must not roll back an otherwise valid forkchoice update.
-    let err = EngineApiClient::<EthEngineTypes>::fork_choice_updated_v3(
-        &engine,
-        ForkchoiceState::same_hash(b[2]),
-        Some(eth_payload_attributes(&chain_spec, 1)),
-    )
-    .await
-    .unwrap_err();
-    let Error::Call(err) = err else { panic!("Expected an RPC error, got {err:?}") };
-    assert_eq!(err.code(), -38003);
+    let err = node
+        .engine
+        .forkchoice_updated_with_attributes(
+            ForkchoiceState::same_hash(b[2]),
+            eth_payload_attributes(&chain_spec, 1),
+        )
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(
+            err,
+            BeaconForkChoiceUpdateError::ForkchoiceUpdateError(
+                ForkchoiceUpdateError::UpdatedInvalidPayloadAttributes
+            )
+        ),
+        "{err}"
+    );
     assert_eq!(
         rpc.get_block_by_number(BlockNumberOrTag::Finalized).await?.unwrap().header.hash,
         b[2]
@@ -201,7 +214,7 @@ async fn assert_fcu_restores_reorged_out_persisted_head(sibling_len: u64) -> eyr
     let mut chains = [vec![genesis], vec![genesis]];
     for (branch, length) in [3, sibling_len].into_iter().enumerate() {
         for number in 1..=length {
-            let envelope = producer
+            let TestingBuildBlockResponseV1::V5(envelope) = producer
                 .testing_build_block_v1(TestingBuildBlockRequestV1 {
                     parent_block_hash: *chains[branch].last().unwrap(),
                     payload_attributes: eth_payload_attributes(
@@ -211,7 +224,10 @@ async fn assert_fcu_restores_reorged_out_persisted_head(sibling_len: u64) -> eyr
                     transactions: vec![],
                     extra_data: None,
                 })
-                .await?;
+                .await?
+            else {
+                panic!("expected a V5 envelope")
+            };
             let payload = envelope.execution_payload;
             let hash = payload.payload_inner.payload_inner.block_hash;
             for client in [&producer_engine, &engine] {
@@ -242,15 +258,11 @@ async fn assert_fcu_restores_reorged_out_persisted_head(sibling_len: u64) -> eyr
     for head in [*b.last().unwrap(), a[3]] {
         let status = tokio::time::timeout(
             Duration::from_secs(10),
-            EngineApiClient::<EthEngineTypes>::fork_choice_updated_v3(
-                &engine,
-                ForkchoiceState {
-                    head_block_hash: head,
-                    safe_block_hash: B256::ZERO,
-                    finalized_block_hash: B256::ZERO,
-                },
-                None,
-            ),
+            node.engine.forkchoice_updated(ForkchoiceState {
+                head_block_hash: head,
+                safe_block_hash: B256::ZERO,
+                finalized_block_hash: B256::ZERO,
+            }),
         )
         .await??;
         assert_eq!(status.payload_status.status, PayloadStatusEnum::Valid);
@@ -308,14 +320,17 @@ async fn fcu_unwinds_canonical_chain_to_genesis() -> eyre::Result<()> {
 
     let mut head = genesis;
     for number in 1..=3 {
-        let envelope = node
+        let TestingBuildBlockResponseV1::V5(envelope) = node
             .testing_build_block_v1(TestingBuildBlockRequestV1 {
                 parent_block_hash: head,
                 payload_attributes: eth_payload_attributes(&chain_spec, number),
                 transactions: vec![],
                 extra_data: None,
             })
-            .await?;
+            .await?
+        else {
+            panic!("expected a V5 envelope")
+        };
         let payload = envelope.execution_payload;
         let hash = payload.payload_inner.payload_inner.block_hash;
         let status =
@@ -327,22 +342,51 @@ async fn fcu_unwinds_canonical_chain_to_genesis() -> eyre::Result<()> {
     }
     assert_eq!(rpc.get_block_number().await?, 3);
 
-    let status = EngineApiClient::<EthEngineTypes>::fork_choice_updated_v3(
-        &engine,
-        ForkchoiceState {
+    let status = node
+        .engine
+        .forkchoice_updated(ForkchoiceState {
             head_block_hash: genesis,
             safe_block_hash: genesis,
             finalized_block_hash: genesis,
-        },
-        None,
-    )
-    .await?;
+        })
+        .await?;
     assert_eq!(status.payload_status.status, PayloadStatusEnum::Valid);
     assert_eq!(
         rpc.get_block_by_number(BlockNumberOrTag::Latest).await?.unwrap().header.hash,
         genesis,
         "unwinding to genesis must make it the canonical head"
     );
+
+    Ok(())
+}
+
+/// Payload jobs the harness did not start or did not resolve must not affect the next block it
+/// builds, e.g. a job started by a forkchoice update with payload attributes sent by the test, or
+/// by a cancelled `advance_block`.
+#[tokio::test]
+async fn advance_block_ignores_foreign_payload_jobs() -> eyre::Result<()> {
+    reth_tracing::init_test_tracing();
+
+    let chain_spec = test_chain_spec(EthereumHardfork::Cancun);
+    let (mut node, _) = EthereumNode::test_setup(1, chain_spec.clone()).build_single().await?;
+    let genesis = node.block_hash(0);
+    let engine = node.auth_server_handle().http_client();
+
+    let attributes = eth_payload_attributes(&chain_spec, node.payload.timestamp + 10);
+    let updated = EngineApiClient::<EthEngineTypes>::fork_choice_updated_v3(
+        &engine,
+        ForkchoiceState::same_hash(genesis),
+        Some(attributes),
+    )
+    .await?;
+    assert!(updated.payload_id.is_some());
+
+    // The first poll sends the forkchoice update that starts the payload job.
+    assert!(node.advance_block().now_or_never().is_none());
+
+    let payload = node.advance_block().await?;
+    assert_eq!(payload.block().parent_hash, genesis);
+    assert_eq!(node.block_hash(1), payload.block().hash());
 
     Ok(())
 }

@@ -70,7 +70,7 @@ impl From<StateProofError> for ProviderError {
         match value {
             StateProofError::Database(error) => Self::Database(error),
             StateProofError::Rlp(error) => Self::Rlp(error),
-            StateProofError::TrieInconsistency(msg) => Self::Database(DatabaseError::Other(msg)),
+            error @ StateProofError::TrieInconsistency(_) => Self::other(error),
         }
     }
 }

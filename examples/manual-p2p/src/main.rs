@@ -132,7 +132,12 @@ async fn snoop(peer: NodeRecord, mut eth_stream: AuthedEthStream) {
                 println!("Got {} new tx hashes from peer {}", txs.len(), peer.address);
             }
             EthMessage::NewBlock(block) => {
-                println!("Got new block data {:?} from peer {}", block, peer.address);
+                println!(
+                    "Got new block {:?} with {} txs from peer {}",
+                    block.block.header.num_hash_slow(),
+                    block.block.body.transactions.len(),
+                    peer.address
+                );
             }
             EthMessage::NewPooledTransactionHashes68(txs) => {
                 println!("Got {} new tx hashes from peer {}", txs.hashes.len(), peer.address);

@@ -2,7 +2,7 @@
 
 use crate::{
     eth_payload_attributes,
-    setup_builder::{launch_test_node, test_node_config, LaunchArgs},
+    setup_builder::{launch_test_node, open_test_database, test_node_config, LaunchArgs},
     wallet::Wallet,
     NodeHelperType,
 };
@@ -12,6 +12,7 @@ use reth_cli_commands::import_core::{import_blocks_from_file, ImportConfig, Impo
 use reth_config::Config;
 use reth_db::DatabaseEnv;
 use reth_node_api::{NodeTypesWithDBAdapter, TreeConfig};
+use reth_node_builder::sync::PipelineBackfill;
 use reth_node_core::args::StorageArgs;
 use reth_node_ethereum::EthereumNode;
 use reth_provider::{
@@ -107,14 +108,22 @@ pub async fn setup_engine_with_chain_import(
         // Now launch the node with the pre-populated datadir.
         debug!(target: "e2e::import", "Launching node with datadir: {:?}", datadir);
 
-        let node = launch_test_node::<EthereumNode>(LaunchArgs {
-            node_config,
-            runtime: runtime.clone(),
-            tree_config: tree_config.clone(),
-            datadir,
-            attributes_generator: attributes_generator.clone(),
-            dev_payload_attributes: None,
-        })
+        let database = open_test_database(&datadir)?;
+        let node = launch_test_node(
+            LaunchArgs {
+                idx,
+                node_factory: Arc::new(|_| EthereumNode::default()),
+                node_builder_modifiers: Vec::new(),
+                node_config,
+                runtime: Some(runtime.clone()),
+                tree_config: tree_config.clone(),
+                datadir,
+                attributes_generator: attributes_generator.clone(),
+                dev_payload_attributes: None,
+            },
+            database,
+            PipelineBackfill,
+        )
         .instrument(span)
         .await?;
 

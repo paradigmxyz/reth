@@ -78,7 +78,6 @@ where
     Err: core::error::Error + Send + Sync + 'static,
     DB: Database + Send + 'a,
     MakeDb: Fn(bool) -> Result<DB, BalExecutionError> + Sync + 'a,
-    ReceiptTy<Evm::Primitives>: Clone,
 {
     let worker_pool = runtime.bal_streaming_pool();
     let worker_count = worker_pool.current_num_threads().max(1).min(transaction_count);
@@ -121,7 +120,6 @@ where
     Err: core::error::Error + Send + Sync + 'static,
     DB: Database + Send + 'scope,
     MakeDb: Fn(bool) -> Result<DB, BalExecutionError> + Sync + 'scope,
-    ReceiptTy<Evm::Primitives>: Clone,
 {
     let bal = input_bal.as_bal();
     let input_bal_revm = convert_alloy_to_revm_bal(bal)?;
@@ -371,6 +369,7 @@ impl BlockGasTracker {
 
 #[cfg(test)]
 mod tests {
+
     use super::*;
     use crate::tree::error::{InsertBlockErrorKind, InsertBlockValidationError};
     use alloy_consensus::{BlockHeader, Header, TxLegacy};
@@ -389,13 +388,10 @@ mod tests {
     use reth_primitives_traits::{
         crypto::secp256k1::public_key_to_address, Block as _, Recovered, SealedBlock,
     };
-    use reth_revm::db::BundleState;
+    use reth_revm::db::{BundleState, InMemoryDB};
     use reth_tasks::Runtime;
     use reth_testing_utils::generators::{generate_key, rng, sign_tx_with_key_pair};
-    use revm::{
-        database::{CacheDB, EmptyDB},
-        state::{AccountInfo, Bytecode},
-    };
+    use revm::state::{AccountInfo, Bytecode};
     use std::convert::Infallible;
 
     /// Wraps a `BlockAccessList` into an `Arc<DecodedBal>` by RLP-encoding the BAL.
@@ -408,8 +404,8 @@ mod tests {
     /// Builds an in-memory canonical DB pre-populated with the post-Cancun system contracts
     /// that `apply_pre_execution_changes` calls: beacon roots (EIP-4788), withdrawal requests
     /// (EIP-7002), and historical block hashes (EIP-2935).
-    fn system_contracts_db() -> CacheDB<EmptyDB> {
-        let mut db = CacheDB::<EmptyDB>::new(Default::default());
+    fn system_contracts_db() -> InMemoryDB {
+        let mut db = InMemoryDB::default();
         db.insert_account_info(
             BEACON_ROOTS_ADDRESS,
             AccountInfo::from_bytecode(Bytecode::new_raw(BEACON_ROOTS_CODE.clone())),
@@ -539,9 +535,7 @@ mod tests {
         }
     }
 
-    fn db_factory(
-        db: CacheDB<EmptyDB>,
-    ) -> impl Fn() -> Result<CacheDB<EmptyDB>, BalExecutionError> + Sync {
+    fn db_factory(db: InMemoryDB) -> impl Fn() -> Result<InMemoryDB, BalExecutionError> + Sync {
         move || Ok(db.clone())
     }
 
@@ -603,7 +597,7 @@ mod tests {
     }
 
     /// Inserts `AccountInfo { nonce: 0, balance }` for `addr` into the canonical DB.
-    fn insert_funded(db: &mut CacheDB<EmptyDB>, addr: alloy_primitives::Address, balance: U256) {
+    fn insert_funded(db: &mut InMemoryDB, addr: alloy_primitives::Address, balance: U256) {
         db.insert_account_info(
             addr,
             AccountInfo { balance, code_hash: B256::ZERO, code: None, ..Default::default() },
@@ -614,7 +608,7 @@ mod tests {
     /// composed BAL. Used to build the reference BAL for happy-path multi-tx tests.
     fn reference_bal_for_block<Tx>(
         evm_config: &EthEvmConfig,
-        mut db: CacheDB<EmptyDB>,
+        mut db: InMemoryDB,
         block: &SealedBlock<Block>,
         txs: Vec<Tx>,
     ) -> BlockAccessList
@@ -655,7 +649,7 @@ mod tests {
         //    `with_bal_builder`.
         // 4. Feed that BAL into `execute_block` and assert 2 receipts + no rejections.
         let evm_config = EthEvmConfig::mainnet();
-        let carol: alloy_primitives::Address = alloy_primitives::Address::from([0xCA; 20]);
+        let carol: alloy_primitives::Address = Address::repeat_byte(0xCA);
         let sender_balance = U256::from(alloy_consensus::constants::ETH_TO_WEI);
 
         // Generate keypairs + derive sender addresses.
@@ -773,7 +767,7 @@ mod tests {
     /// (a) capture the composed BAL for the BAL-path input and (b) pull the bundle out after.
     fn run_serial_path(
         evm_config: &EthEvmConfig,
-        canonical_db: CacheDB<EmptyDB>,
+        canonical_db: InMemoryDB,
         block: &SealedBlock<Block>,
         txs: &[Recovered<TransactionSigned>],
     ) -> (ShadowOutput, BlockAccessList) {
@@ -817,7 +811,7 @@ mod tests {
     /// Shadow harness. Runs the block through both paths; asserts byte-equal outputs.
     fn assert_shadow_equal(
         evm_config: EthEvmConfig,
-        canonical_db_template: CacheDB<EmptyDB>,
+        canonical_db_template: InMemoryDB,
         block_header_only: SealedBlock<Block>,
         txs: Vec<Recovered<TransactionSigned>>,
     ) {
@@ -877,7 +871,7 @@ mod tests {
         // Two senders → same recipient. Byte-equal across paths means: worker-produced
         // diffs commit identically to a directly-executed serial path.
         let evm_config = EthEvmConfig::mainnet();
-        let carol: alloy_primitives::Address = alloy_primitives::Address::from([0xCA; 20]);
+        let carol: alloy_primitives::Address = Address::repeat_byte(0xCA);
         let sender_balance = U256::from(alloy_consensus::constants::ETH_TO_WEI);
 
         let alice_kp = generate_key(&mut rng());
@@ -916,7 +910,7 @@ mod tests {
         // commit loop must still reject tx2 because tx1's committed gas leaves too little
         // block gas for tx2's gas limit.
         let evm_config = EthEvmConfig::mainnet();
-        let carol: alloy_primitives::Address = alloy_primitives::Address::from([0xCA; 20]);
+        let carol: alloy_primitives::Address = Address::repeat_byte(0xCA);
         let sender_balance = U256::from(alloy_consensus::constants::ETH_TO_WEI);
         let block_gas_limit = 1_000_000;
         let tx_gas_limit = 990_000;
@@ -986,8 +980,8 @@ mod tests {
         tx1_gas_limit: u64,
         tx2_gas_limit: u64,
         fund_recipient: bool,
-    ) -> (CacheDB<EmptyDB>, Recovered<TransactionSigned>, Recovered<TransactionSigned>) {
-        let recipient = alloy_primitives::Address::from([0xCA; 20]);
+    ) -> (InMemoryDB, Recovered<TransactionSigned>, Recovered<TransactionSigned>) {
+        let recipient = Address::repeat_byte(0xCA);
         let balance = U256::from(alloy_consensus::constants::ETH_TO_WEI);
 
         let alice_kp = generate_key(&mut rng());
@@ -1029,7 +1023,7 @@ mod tests {
         tx_gas_limit: u64,
         bal_covers_first: bool,
     ) -> (
-        CacheDB<EmptyDB>,
+        InMemoryDB,
         BlockAccessList,
         Recovered<reth_ethereum_primitives::TransactionSigned>,
         Recovered<reth_ethereum_primitives::TransactionSigned>,
@@ -1304,8 +1298,7 @@ mod tests {
         // Deploys `0x60006000fd` (PUSH1 0 PUSH1 0 REVERT) at `revert_contract`. Sender calls
         // it; the call reverts; fees + nonce still apply.
         let evm_config = EthEvmConfig::mainnet();
-        let revert_contract: alloy_primitives::Address =
-            alloy_primitives::Address::from([0xDE; 20]);
+        let revert_contract: alloy_primitives::Address = Address::repeat_byte(0xDE);
         let sender_balance = U256::from(alloy_consensus::constants::ETH_TO_WEI);
 
         let alice_kp = generate_key(&mut rng());
@@ -1347,8 +1340,7 @@ mod tests {
         //
         // Bytecode: PUSH1 0x42, PUSH1 0x00, SSTORE, STOP → `0x60 0x42 0x60 0x00 0x55 0x00`.
         let evm_config = EthEvmConfig::mainnet();
-        let sstore_contract: alloy_primitives::Address =
-            alloy_primitives::Address::from([0x55; 20]);
+        let sstore_contract: alloy_primitives::Address = Address::repeat_byte(0x55);
         let sender_balance = U256::from(alloy_consensus::constants::ETH_TO_WEI);
 
         let alice_kp = generate_key(&mut rng());
@@ -1396,7 +1388,7 @@ mod tests {
         assert!(!real_bal.is_empty(), "reference BAL must be non-empty");
 
         // Tamper: append a phantom address not accessed during execution.
-        let phantom = alloy_primitives::Address::from([0xFF; 20]);
+        let phantom = Address::repeat_byte(0xFF);
         let mut tampered_entries: Vec<AccountChanges> = real_bal;
         tampered_entries.push(AccountChanges::new(phantom));
         let tampered_bal: alloy_eip7928::bal::Bal = alloy_eip7928::bal::Bal::new(tampered_entries);
@@ -1437,7 +1429,7 @@ mod tests {
         let evm_config = EthEvmConfig::mainnet();
         let block = empty_amsterdam_block(B256::ZERO);
 
-        let failing_make_db = || -> Result<CacheDB<EmptyDB>, BalExecutionError> {
+        let failing_make_db = || -> Result<InMemoryDB, BalExecutionError> {
             Err(reth_provider::ProviderError::BestBlockNotFound.into())
         };
 

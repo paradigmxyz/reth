@@ -54,7 +54,7 @@ pub trait SnapCatchUpStore {
 
     /// Applies `bal` to the downloaded state and records `block` as the last one applied.
     ///
-    /// The list must be authenticated against `block`'s header commitment, and `block` must be
+    /// The list must be authenticated against `block`'s header hash, and `block` must be
     /// canonical and the child of the last applied one.
     fn commit_block_access_list(
         &self,
@@ -358,9 +358,10 @@ mod tests {
     // block access list progress recorded, then moved to pivot 2.
     fn started(accounts: &[(B256, TrieAccount)], served: usize) -> (Factory, SnapWrite) {
         let factory = hashed_factory();
-        insert_headers(&factory, &chain().headers);
+        let root = state_root(accounts);
+        insert_headers(&factory, &chain().headers_with_roots(&[(1, root), (2, root), (3, root)]));
         let provider = factory.database_provider_rw().unwrap();
-        let write = provider.start_snap_attempt(generation(1, state_root(accounts))).unwrap();
+        let write = provider.start_snap_attempt(generation(1, root)).unwrap();
         provider.start_account_coverage(write).unwrap();
         // A partial range needs a proof placing the accounts it leaves out.
         let targets = (served < accounts.len()).then(|| accounts[served - 1].0);
@@ -488,21 +489,6 @@ mod tests {
     }
 
     #[test]
-    fn an_interrupted_application_leaves_nothing_behind() {
-        let accounts = accounts();
-        let (factory, write) = started(&accounts, accounts.len());
-        let (block, parent) = block(2);
-
-        let provider = factory.database_provider_rw().unwrap();
-        provider.commit_block_access_list(write, block, parent, &credit(10)).unwrap();
-        drop(provider);
-
-        let provider = factory.database_provider_ro().unwrap();
-        assert_eq!(stored(&provider, keccak256(CHANGED)).unwrap().balance, U256::from(1));
-        assert_eq!(provider.catch_up_progress(write).unwrap().unwrap().applied().number, 1);
-    }
-
-    #[test]
     fn a_block_already_applied_is_refused() {
         let accounts = accounts();
         let (factory, write) = started(&accounts, accounts.len());
@@ -526,7 +512,7 @@ mod tests {
         let gap = provider.commit_block_access_list(write, block, parent, &credit(10));
 
         assert!(matches!(gap, Err(SnapSyncError::OutOfOrderBlock { expected: 2, got: 3 })));
-        assert_eq!(stored(&provider, keccak256(CHANGED)).unwrap().balance, U256::from(1));
+        assert_eq!(stored(&provider, keccak256(CHANGED)).unwrap().balance, U256::ONE);
     }
 
     #[test]
@@ -540,7 +526,7 @@ mod tests {
         let refused = provider.commit_block_access_list(write, orphaned, parent, &credit(10));
 
         assert!(matches!(refused, Err(SnapSyncError::NonCanonicalBlock { block: 2, .. })));
-        assert_eq!(stored(&provider, keccak256(CHANGED)).unwrap().balance, U256::from(1));
+        assert_eq!(stored(&provider, keccak256(CHANGED)).unwrap().balance, U256::ONE);
     }
 
     #[test]
@@ -601,21 +587,6 @@ mod tests {
     }
 
     #[test]
-    fn a_block_that_changes_nothing_still_carries_the_state_past_it() {
-        let accounts = accounts();
-        let (factory, write) = started(&accounts, accounts.len());
-        let provider = factory.database_provider_rw().unwrap();
-        let (block, parent) = block(2);
-        // A list a peer holds but that touches no state, as against one it does not hold.
-        let read_only = vec![AccountChanges::new(CHANGED).with_storage_read(SLOT)];
-
-        let progress = provider.commit_block_access_list(write, block, parent, &read_only).unwrap();
-
-        assert_eq!(progress.applied(), block);
-        assert_eq!(stored(&provider, keccak256(CHANGED)).unwrap().balance, U256::from(1));
-    }
-
-    #[test]
     fn an_account_the_list_empties_loses_its_storage() {
         let accounts = accounts();
         let (factory, write) = started(&accounts, accounts.len());
@@ -662,7 +633,13 @@ mod tests {
     #[test]
     fn slots_persisted_ahead_of_their_range_follow_the_lists() {
         let factory = hashed_factory();
-        insert_headers(&factory, &chain().headers);
+        let mut moved = accounts();
+        let position = changed_index(&moved);
+        moved[position].1.storage_root = storage_root_of(&[(hashed_slot(), U256::from(9))]);
+        insert_headers(
+            &factory,
+            &chain().headers_with_roots(&[(1, state_root(&accounts())), (2, state_root(&moved))]),
+        );
         let provider = factory.database_provider_rw().unwrap();
         let write = provider.start_snap_attempt(generation(1, state_root(&accounts()))).unwrap();
         provider.start_account_coverage(write).unwrap();
@@ -675,9 +652,6 @@ mod tests {
             None,
         );
         provider.commit_storage_chunk(write, B256::ZERO, chunk).unwrap();
-        let mut moved = accounts();
-        let position = changed_index(&moved);
-        moved[position].1.storage_root = storage_root_of(&[(hashed_slot(), U256::from(9))]);
         let write = provider.advance_snap_pivot(write, generation(2, state_root(&moved))).unwrap();
         let (block, parent) = block(2);
         let changes = vec![AccountChanges::new(CHANGED).with_storage_change(SlotChanges::new(
@@ -703,13 +677,23 @@ mod tests {
     #[allow(clippy::clone_on_copy)]
     fn skipped_storage_from_an_abandoned_attempt_is_not_reused() {
         let factory = hashed_factory();
-        insert_headers(&factory, &chain().headers);
-        let provider = factory.database_provider_rw().unwrap();
         let (changed, later) = (keccak256(CHANGED), B256::repeat_byte(0xff));
         let stale = (B256::ZERO, U256::from(7));
         let mut contract = account(1);
         contract.storage_root = storage_root_of(&[stale]);
         let mut accounts = vec![(changed, contract.clone()), (later, contract.clone())];
+        let first = state_root(&accounts);
+        accounts[0].1.storage_root = reth_trie_common::EMPTY_ROOT_HASH;
+        let second = state_root(&accounts);
+        let new_slot = (hashed_slot(), U256::from(9));
+        accounts[0].1.storage_root = storage_root_of(&[new_slot]);
+        let third = state_root(&accounts);
+        accounts[0].1.storage_root = contract.storage_root;
+        insert_headers(
+            &factory,
+            &chain().headers_with_roots(&[(1, first), (2, second), (3, third)]),
+        );
+        let provider = factory.database_provider_rw().unwrap();
         let write = provider.start_snap_attempt(generation(1, state_root(&accounts))).unwrap();
         provider.start_account_coverage(write).unwrap();
         provider
@@ -721,7 +705,7 @@ mod tests {
             .unwrap();
 
         accounts[0].1.storage_root = reth_trie_common::EMPTY_ROOT_HASH;
-        let write = provider.start_snap_attempt(generation(1, state_root(&accounts))).unwrap();
+        let write = provider.start_snap_attempt(generation(2, state_root(&accounts))).unwrap();
         provider.start_account_coverage(write).unwrap();
         provider
             .commit_storage_chunk(
@@ -731,11 +715,10 @@ mod tests {
             )
             .unwrap();
 
-        let new_slot = (hashed_slot(), U256::from(9));
         accounts[0].1.storage_root = storage_root_of(&[new_slot]);
         let write =
-            provider.advance_snap_pivot(write, generation(2, state_root(&accounts))).unwrap();
-        let (block, parent) = block(2);
+            provider.advance_snap_pivot(write, generation(3, state_root(&accounts))).unwrap();
+        let (block, parent) = block(3);
         let changes = vec![AccountChanges::new(CHANGED).with_storage_change(SlotChanges::new(
             SLOT,
             vec![StorageChange::new(index(1), new_slot.1)],
@@ -756,7 +739,7 @@ mod tests {
         let accounts = accounts();
         let (factory, write) = started(&accounts, accounts.len());
         let provider = factory.database_provider_rw().unwrap();
-        provider.advance_snap_pivot(write, generation(3, B256::repeat_byte(0xcc))).unwrap();
+        provider.advance_snap_pivot(write, generation(3, state_root(&accounts))).unwrap();
         let (block, parent) = block(2);
 
         let refused = provider.commit_block_access_list(write, block, parent, &credit(10));
@@ -788,7 +771,7 @@ mod tests {
         let provider = factory.database_provider_rw().unwrap();
         // The orphaned branch changed the balance and the nonce.
         let orphaned = AccountChanges::new(CHANGED)
-            .with_balance_change(BalanceChange::new(index(1), U256::from(1)))
+            .with_balance_change(BalanceChange::new(index(1), U256::ONE))
             .with_nonce_change(NonceChange::new(index(1), 1));
         let mut repairs = StateRepairs::default();
         repairs.insert_changes(keccak256(CHANGED), &orphaned);

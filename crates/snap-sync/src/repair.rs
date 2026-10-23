@@ -35,7 +35,11 @@ impl StateRepairs {
 
     /// Schedules the fields and slots `changes` writes for the account at `hashed_address`.
     pub fn insert_changes(&mut self, hashed_address: B256, changes: &AccountChanges) {
-        self.accounts.entry(hashed_address).or_default().insert_changes(changes);
+        let stale = self.accounts.entry(hashed_address).or_default();
+        stale.insert_changes(changes);
+        if stale.is_resolved() {
+            self.accounts.remove(&hashed_address);
+        }
     }
 
     /// Returns whether nothing is scheduled.
@@ -230,7 +234,7 @@ mod tests {
         slots.iter().fold(AccountChanges::new(ACCOUNT), |changes, slot| {
             changes.with_storage_change(SlotChanges::new(
                 U256::from(*slot),
-                vec![StorageChange::new(BlockAccessIndex::new(1), U256::from(1))],
+                vec![StorageChange::new(BlockAccessIndex::new(1), U256::ONE)],
             ))
         })
     }
@@ -266,7 +270,7 @@ mod tests {
         repairs.resolve_changes(hashed(), &slots(&[1]));
 
         let remaining: Vec<_> = repairs.slots(hashed()).collect();
-        assert_eq!(remaining, [keccak256(B256::from(U256::from(2)))]);
+        assert_eq!(remaining, [keccak256(B256::with_last_byte(2))]);
     }
 
     #[test]

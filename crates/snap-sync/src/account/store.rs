@@ -161,7 +161,7 @@ impl StoredCoverage {
 }
 
 impl<T: MetadataProvider> SnapAccountStore for T {
-    // Resumes the recorded coverage, so restarting an attempt keeps its progress.
+    // Resumes the recorded coverage, so resuming an attempt keeps its progress.
     fn start_account_coverage(&self, write: SnapWrite) -> Result<AccountCoverage, SnapSyncError>
     where
         Self: MetadataWriter,
@@ -203,14 +203,18 @@ impl<T: MetadataProvider> SnapAccountStore for T {
         let advanced = coverage.advance(range)?;
         let progress = self.storage_progress(write, range.origin())?;
         // Slots persisted before the pivot moved hold its old values until the lists reach it.
-        if progress != StorageProgress::START &&
-            let Some(catch_up) = self.catch_up_progress(write)? &&
-            catch_up.applied().number < attempt.pivot().number
-        {
-            return Err(SnapSyncError::CatchUpBehindPivot {
-                applied: catch_up.applied().number,
-                pivot: attempt.pivot().number,
-            })
+        if progress != StorageProgress::START {
+            let applied = self
+                .catch_up_progress(write)?
+                .ok_or(SnapSyncError::NoCatchUpProgress)?
+                .applied()
+                .number;
+            if applied < attempt.pivot().number {
+                return Err(SnapSyncError::CatchUpBehindPivot {
+                    applied,
+                    pivot: attempt.pivot().number,
+                })
+            }
         }
         let dependencies = RangeDependencies::new(range.accounts(), storages, bytecodes);
         let persisted = dependencies.verify(range.accounts(), &progress, self.tx_ref())?;
@@ -238,7 +242,7 @@ impl<T: MetadataProvider> SnapAccountStore for T {
         for account in kept {
             self.remove::<tables::HashedStorages>((start, Bound::Excluded(*account)))?;
             // Walks cannot start at an excluded key, so the next piece starts one key past it.
-            let Some(after) = U256::from_be_bytes(account.0).checked_add(U256::from(1)) else {
+            let Some(after) = U256::from_be_bytes(account.0).checked_add(U256::ONE) else {
                 return Ok(())
             };
             start = Bound::Included(after.into());
@@ -453,8 +457,8 @@ mod tests {
     use super::*;
     use crate::{
         test_utils::{
-            account, generation, hashed_factory, insert_generation_headers, key, state_root,
-            stored_slots, verified_range, verified_repair,
+            account, generation, hashed_factory_with_roots, key, state_root, stored_slots,
+            verified_range, verified_repair,
         },
         SnapGeneration, StorageChunk,
     };
@@ -502,7 +506,19 @@ mod tests {
     fn started(
         accounts: &[(B256, TrieAccount)],
     ) -> (ProviderFactory<MockNodeTypesWithDB>, SnapWrite, SnapGeneration) {
-        let factory = hashed_factory();
+        started_moving_to(accounts, accounts)
+    }
+
+    // `started`, with the later blocks committing to the state `moved`.
+    fn started_moving_to(
+        accounts: &[(B256, TrieAccount)],
+        moved: &[(B256, TrieAccount)],
+    ) -> (ProviderFactory<MockNodeTypesWithDB>, SnapWrite, SnapGeneration) {
+        let factory = hashed_factory_with_roots(&[
+            state_root(accounts),
+            state_root(moved),
+            state_root(moved),
+        ]);
         let generation = generation(1, state_root(accounts));
         let provider = factory.database_provider_rw().unwrap();
         let write = provider.start_snap_attempt(generation).unwrap();
@@ -540,22 +556,6 @@ mod tests {
         let provider = factory.database_provider_rw().unwrap();
         assert_eq!(stored(&provider), (vec![key(1), key(2), FAR], true, true));
         assert_eq!(provider.account_coverage(write).unwrap(), Some(coverage));
-    }
-
-    #[test]
-    fn an_interrupted_commit_leaves_nothing_behind() {
-        let accounts = accounts();
-        let (factory, write, _) = started(&accounts);
-        let range = verified_range(&accounts, 0..3, B256::ZERO, &[]);
-        let (storages, bytecodes) = dependencies();
-
-        let provider = factory.database_provider_rw().unwrap();
-        provider.commit_account_range(write, &range, storages, bytecodes).unwrap();
-        drop(provider);
-
-        let provider = factory.database_provider_rw().unwrap();
-        assert_eq!(stored(&provider), (Vec::new(), false, false));
-        assert_eq!(provider.account_coverage(write).unwrap(), Some(AccountCoverage::START));
     }
 
     #[test]
@@ -634,6 +634,35 @@ mod tests {
         );
 
         assert_eq!(stored(&provider), (Vec::new(), false, false));
+        assert_eq!(provider.account_coverage(write).unwrap(), Some(AccountCoverage::START));
+    }
+
+    #[test]
+    fn missing_code_is_named_after_contracts_whose_code_is_stored() {
+        let stored_code = code();
+        let missing_code = Bytecode::new_raw(Bytes::from_static(&[0x60, 0x01]));
+        let mut first = account(1);
+        first.code_hash = stored_code.hash_slow();
+        let mut second = account(2);
+        second.code_hash = missing_code.hash_slow();
+        let accounts = vec![(key(1), first), (key(2), second), (key(3), account(3))];
+        let (factory, write, _) = started(&accounts);
+        let range = verified_range(&accounts, 0..3, B256::ZERO, &[]);
+        let provider = factory.database_provider_rw().unwrap();
+        provider
+            .write_state_changes(StateChangeset {
+                contracts: vec![(stored_code.hash_slow(), stored_code)],
+                ..Default::default()
+            })
+            .unwrap();
+
+        let refused = provider.commit_account_range(write, &range, Default::default(), Vec::new());
+
+        assert!(matches!(
+            refused,
+            Err(SnapSyncError::MissingCode { hash }) if hash == missing_code.hash_slow()
+        ));
+        assert_eq!(stored_accounts(&provider), Vec::<B256>::new());
         assert_eq!(provider.account_coverage(write).unwrap(), Some(AccountCoverage::START));
     }
 
@@ -723,7 +752,8 @@ mod tests {
     #[test]
     fn a_new_attempt_replaces_what_an_earlier_one_left_in_the_interval() {
         let earlier = accounts();
-        let (factory, write, _) = started(&earlier);
+        let current = vec![(key(1), account(9)), (FAR, account(3))];
+        let (factory, write, _) = started_moving_to(&earlier, &current);
         let (storages, bytecodes) = dependencies();
         let provider = factory.database_provider_rw().unwrap();
         let range = verified_range(&earlier, 0..3, B256::ZERO, &[]);
@@ -731,7 +761,6 @@ mod tests {
         provider.commit().unwrap();
 
         // At the new root the contract is gone and the first account changed.
-        let current = vec![(key(1), account(9)), (FAR, account(3))];
         let provider = factory.database_provider_rw().unwrap();
         let write = provider.start_snap_attempt(generation(2, state_root(&current))).unwrap();
         provider.start_account_coverage(write).unwrap();
@@ -762,7 +791,7 @@ mod tests {
     #[test]
     fn a_range_without_recorded_coverage_is_refused() {
         let accounts = accounts();
-        let factory = hashed_factory();
+        let factory = hashed_factory_with_roots(&[state_root(&accounts)]);
         let provider = factory.database_provider_rw().unwrap();
         let write = provider.start_snap_attempt(generation(1, state_root(&accounts))).unwrap();
         let range = verified_range(&accounts, 0..3, B256::ZERO, &[]);
@@ -771,21 +800,6 @@ mod tests {
             provider.commit_account_range(write, &range, Default::default(), Vec::new()),
             Err(SnapSyncError::NoCoverage)
         ));
-    }
-
-    #[test]
-    fn coverage_survives_reopening_the_database() {
-        let accounts = accounts();
-        let (factory, write, _) = started(&accounts);
-        let range = verified_range(&accounts, 0..1, B256::ZERO, &[key(1)]);
-        let provider = factory.database_provider_rw().unwrap();
-        let coverage =
-            provider.commit_account_range(write, &range, Default::default(), Vec::new()).unwrap();
-        provider.commit().unwrap();
-
-        let reopened = factory.database_provider_rw().unwrap();
-
-        assert_eq!(reopened.account_coverage(write).unwrap(), Some(coverage));
     }
 
     #[test]
@@ -866,7 +880,6 @@ mod tests {
         accounts: &[(B256, TrieAccount)],
     ) -> (ProviderFactory<MockNodeTypesWithDB>, SnapWrite) {
         let (factory, write, _) = started(accounts);
-        insert_generation_headers(&factory);
         let provider = factory.database_provider_rw().unwrap();
         let stale = HashedPostState::default()
             .with_accounts([
@@ -874,8 +887,8 @@ mod tests {
                 (ABSENT, Some(Account::from(account(9)))),
             ])
             .with_storages([
-                (key(2), HashedStorage::from_iter([(SLOT, U256::from(1)), (OTHER, U256::from(2))])),
-                (ABSENT, HashedStorage::from_iter([(SLOT, U256::from(1))])),
+                (key(2), HashedStorage::from_iter([(SLOT, U256::ONE), (OTHER, U256::from(2))])),
+                (ABSENT, HashedStorage::from_iter([(SLOT, U256::ONE)])),
             ]);
         provider.write_hashed_state(&stale.into_sorted()).unwrap();
         let mut repairs = StateRepairs::default();

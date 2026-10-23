@@ -50,11 +50,7 @@ use tracing::{debug, error, trace};
 
 impl<Eth> EngineEthFilter<RpcLog<Eth::NetworkTypes>> for EthFilter<Eth>
 where
-    Eth: FullEthApiTypes
-        + RpcNodeCoreExt<Provider: BlockIdReader>
-        + LoadReceipt
-        + EthBlocks
-        + 'static,
+    Eth: FullEthApiTypes + RpcNodeCoreExt<Provider: BlockIdReader> + LoadReceipt + EthBlocks,
 {
     /// Returns logs matching given filter object, no query limits
     fn logs(
@@ -209,11 +205,7 @@ where
 
 impl<Eth> EthFilter<Eth>
 where
-    Eth: FullEthApiTypes<Provider: BlockReader + BlockIdReader>
-        + RpcNodeCoreExt
-        + LoadReceipt
-        + EthBlocks
-        + 'static,
+    Eth: FullEthApiTypes<Provider: BlockReader + BlockIdReader> + LoadReceipt + EthBlocks,
 {
     /// Access the underlying provider.
     fn provider(&self) -> &Eth::Provider {
@@ -354,7 +346,7 @@ where
 impl<Eth> EthFilterApiServer<RpcTransaction<Eth::NetworkTypes>, RpcLog<Eth::NetworkTypes>>
     for EthFilter<Eth>
 where
-    Eth: FullEthApiTypes + RpcNodeCoreExt + LoadReceipt + EthBlocks + 'static,
+    Eth: FullEthApiTypes + LoadReceipt + EthBlocks,
 {
     /// Handler for `eth_newFilter`
     async fn new_filter(&self, filter: Filter) -> RpcResult<FilterId> {
@@ -473,8 +465,7 @@ where
     Eth: RpcNodeCoreExt<Provider: BlockIdReader, Pool: TransactionPool>
         + EthApiTypes<NetworkTypes: reth_rpc_eth_api::types::RpcTypes>
         + LoadReceipt
-        + EthBlocks
-        + 'static,
+        + EthBlocks,
 {
     /// Access the underlying provider.
     fn provider(&self) -> &Eth::Provider {
@@ -946,7 +937,7 @@ impl<T, TxCompat> FullTransactionsFilter<RpcTransaction<TxCompat::Network>>
     for FullTransactionsReceiver<T, TxCompat>
 where
     T: PoolTransaction + 'static,
-    TxCompat: RpcConvert<Primitives: NodePrimitives<SignedTx = T::Consensus>> + 'static,
+    TxCompat: RpcConvert<Primitives: NodePrimitives<SignedTx = T::Consensus>>,
 {
     async fn drain(&self) -> FilterChanges<RpcTransaction<TxCompat::Network>> {
         Self::drain(self).await
@@ -1094,7 +1085,7 @@ impl From<logs_utils::FilterBlockRangeError> for EthFilterError {
 /// a match for the filter.
 struct ReceiptBlockResult<P>
 where
-    P: ReceiptProvider + BlockReader,
+    P: BlockReader,
 {
     /// We always need the entire receipts for the matching block.
     receipts: Arc<Vec<ProviderReceipt<P>>>,
@@ -1106,11 +1097,7 @@ where
 
 /// Represents different modes for processing block ranges when filtering logs
 enum RangeMode<
-    Eth: RpcNodeCoreExt<Provider: BlockIdReader, Pool: TransactionPool>
-        + EthApiTypes
-        + LoadReceipt
-        + EthBlocks
-        + 'static,
+    Eth: RpcNodeCoreExt<Provider: BlockIdReader, Pool: TransactionPool> + LoadReceipt + EthBlocks,
 > {
     /// Use cache-based processing for recent blocks
     Cached(CachedMode<Eth>),
@@ -1119,11 +1106,7 @@ enum RangeMode<
 }
 
 impl<
-        Eth: RpcNodeCoreExt<Provider: BlockIdReader, Pool: TransactionPool>
-            + EthApiTypes
-            + LoadReceipt
-            + EthBlocks
-            + 'static,
+        Eth: RpcNodeCoreExt<Provider: BlockIdReader, Pool: TransactionPool> + LoadReceipt + EthBlocks,
     > RangeMode<Eth>
 {
     /// Creates a new `RangeMode`.
@@ -1200,22 +1183,14 @@ impl<
 
 /// Mode for processing blocks using cache optimization for recent blocks
 struct CachedMode<
-    Eth: RpcNodeCoreExt<Provider: BlockIdReader, Pool: TransactionPool>
-        + EthApiTypes
-        + LoadReceipt
-        + EthBlocks
-        + 'static,
+    Eth: RpcNodeCoreExt<Provider: BlockIdReader, Pool: TransactionPool> + LoadReceipt + EthBlocks,
 > {
     filter_inner: Arc<EthFilterInner<Eth>>,
     headers_iter: std::vec::IntoIter<SealedHeader<<Eth::Provider as HeaderProvider>::Header>>,
 }
 
 impl<
-        Eth: RpcNodeCoreExt<Provider: BlockIdReader, Pool: TransactionPool>
-            + EthApiTypes
-            + LoadReceipt
-            + EthBlocks
-            + 'static,
+        Eth: RpcNodeCoreExt<Provider: BlockIdReader, Pool: TransactionPool> + LoadReceipt + EthBlocks,
     > CachedMode<Eth>
 {
     async fn next(&mut self) -> Result<Option<ReceiptBlockResult<Eth::Provider>>, EthFilterError> {
@@ -1238,11 +1213,7 @@ type ReceiptFetchFuture<P> =
 
 /// Mode for processing blocks using range queries for older blocks
 struct RangeBlockMode<
-    Eth: RpcNodeCoreExt<Provider: BlockIdReader, Pool: TransactionPool>
-        + EthApiTypes
-        + LoadReceipt
-        + EthBlocks
-        + 'static,
+    Eth: RpcNodeCoreExt<Provider: BlockIdReader, Pool: TransactionPool> + LoadReceipt + EthBlocks,
 > {
     filter_inner: Arc<EthFilterInner<Eth>>,
     iter: Peekable<std::vec::IntoIter<SealedHeader<<Eth::Provider as HeaderProvider>::Header>>>,
@@ -1256,11 +1227,7 @@ struct RangeBlockMode<
 }
 
 impl<
-        Eth: RpcNodeCoreExt<Provider: BlockIdReader, Pool: TransactionPool>
-            + EthApiTypes
-            + LoadReceipt
-            + EthBlocks
-            + 'static,
+        Eth: RpcNodeCoreExt<Provider: BlockIdReader, Pool: TransactionPool> + LoadReceipt + EthBlocks,
     > RangeBlockMode<Eth>
 {
     async fn next(&mut self) -> Result<Option<ReceiptBlockResult<Eth::Provider>>, EthFilterError> {
@@ -1441,7 +1408,7 @@ mod tests {
     use super::*;
     use crate::{eth::EthApi, EthApiBuilder};
     use alloy_network::Ethereum;
-    use alloy_primitives::FixedBytes;
+    use alloy_primitives::{Bloom, FixedBytes};
     use rand::Rng;
     use reth_chainspec::{ChainSpec, ChainSpecProvider};
     use reth_ethereum_primitives::TxType;
@@ -1989,7 +1956,7 @@ mod tests {
             let header = alloy_consensus::Header {
                 number: block_number,
                 parent_hash: prev_hash,
-                logs_bloom: alloy_primitives::Bloom::from([1u8; 256]),
+                logs_bloom: Bloom::repeat_byte(1u8),
                 ..Default::default()
             };
             let hash = header.hash_slow();
@@ -2063,7 +2030,7 @@ mod tests {
                 parent_hash: prev_hash,
                 // Set bloom to match filter only for blocks 100 and 102
                 logs_bloom: if i == 100 || i == 102 {
-                    alloy_primitives::Bloom::from([1u8; 256])
+                    Bloom::repeat_byte(1u8)
                 } else {
                     alloy_primitives::Bloom::default()
                 },
@@ -2207,7 +2174,7 @@ mod tests {
             let header = alloy_consensus::Header {
                 number,
                 parent_hash,
-                logs_bloom: if matches { Bloom::from([1u8; 256]) } else { Bloom::default() },
+                logs_bloom: if matches { Bloom::repeat_byte(1u8) } else { Bloom::default() },
                 ..Default::default()
             };
             parent_hash = header.hash_slow();
@@ -2305,7 +2272,7 @@ mod tests {
             let header = alloy_consensus::Header {
                 number,
                 parent_hash,
-                logs_bloom: alloy_primitives::Bloom::from([1u8; 256]),
+                logs_bloom: Bloom::repeat_byte(1u8),
                 ..Default::default()
             };
             parent_hash = header.hash_slow();

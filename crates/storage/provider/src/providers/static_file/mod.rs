@@ -92,6 +92,7 @@ mod tests {
     };
     use alloy_consensus::{Header, SignableTransaction, Transaction, TxLegacy};
     use alloy_primitives::{Address, BlockHash, Signature, TxNumber, B256, U160, U256};
+    use assert_matches::assert_matches;
     use rand::seq::SliceRandom;
     use reth_db::{
         models::{AccountBeforeTx, StorageBeforeTx},
@@ -99,12 +100,14 @@ mod tests {
     };
     use reth_db_api::{transaction::DbTxMut, CanonicalHeaders, HeaderNumbers, Headers};
     use reth_ethereum_primitives::{EthPrimitives, Receipt, TransactionSigned};
+    use reth_nippy_jar::NippyJarError;
     use reth_primitives_traits::Account;
     use reth_static_file_types::{
         find_fixed_range, SegmentRangeInclusive, DEFAULT_BLOCKS_PER_STATIC_FILE,
     };
     use reth_storage_api::{
-        ChangeSetReader, ReceiptProvider, StorageChangeSetReader, TransactionsProvider,
+        BlockHashReader, ChangeSetReader, ReceiptProvider, StorageChangeSetReader,
+        TransactionsProvider,
     };
     use reth_testing_utils::generators::{self, random_header_range};
     use std::{collections::BTreeMap, fmt::Debug, fs, ops::Range, path::Path};
@@ -614,9 +617,8 @@ mod tests {
 
     /// Returns the number of files in the provided path, excluding ".lock" files.
     fn count_files_without_lockfile(path: impl AsRef<Path>) -> eyre::Result<usize> {
-        let is_lockfile = |entry: &fs::DirEntry| {
-            entry.path().file_name().map(|name| name == "lock").unwrap_or(false)
-        };
+        let is_lockfile =
+            |entry: &fs::DirEntry| entry.path().file_name().is_some_and(|name| name == "lock");
         let count = fs::read_dir(path)?
             .filter_map(|entry| entry.ok())
             .filter(|entry| !is_lockfile(entry))
@@ -787,9 +789,9 @@ mod tests {
             .expect("Failed to create static file provider");
 
         // Setup test data
-        let test_address = Address::from([1u8; 20]);
-        let other_address = Address::from([2u8; 20]);
-        let missing_address = Address::from([3u8; 20]);
+        let test_address = Address::repeat_byte(1u8);
+        let other_address = Address::repeat_byte(2u8);
+        let missing_address = Address::repeat_byte(3u8);
 
         // Write changesets for multiple blocks
         {
@@ -1132,9 +1134,9 @@ mod tests {
         let sf_rw = StaticFileProvider::<EthPrimitives>::read_write(&static_dir)
             .expect("Failed to create static file provider");
 
-        let test_address = Address::from([1u8; 20]);
-        let other_address = Address::from([2u8; 20]);
-        let missing_address = Address::from([3u8; 20]);
+        let test_address = Address::repeat_byte(1u8);
+        let other_address = Address::repeat_byte(2u8);
+        let missing_address = Address::repeat_byte(3u8);
         let test_key = B256::with_last_byte(1);
         let other_key = B256::with_last_byte(2);
 
@@ -1330,7 +1332,7 @@ mod tests {
 
         let block_num = 0u64;
         let num_slots = 100;
-        let address = Address::from([4u8; 20]);
+        let address = Address::repeat_byte(4u8);
 
         let mut keys: Vec<B256> = Vec::with_capacity(num_slots);
         for i in 0..num_slots {
@@ -1354,7 +1356,7 @@ mod tests {
             assert!(result.is_some());
             let entry = result.unwrap();
             assert_eq!(entry.key, keys[0]);
-            assert_eq!(entry.value, U256::from(0));
+            assert_eq!(entry.value, U256::ZERO);
 
             let result =
                 sf_rw.get_storage_before_block(block_num, address, keys[num_slots - 1]).unwrap();
@@ -1387,7 +1389,7 @@ mod tests {
         let sf_rw = StaticFileProvider::<EthPrimitives>::read_write(&static_dir)
             .expect("Failed to create static file provider");
 
-        let address = Address::from([5u8; 20]);
+        let address = Address::repeat_byte(5u8);
         let key = B256::with_last_byte(1);
 
         // Write changes for a single block without calling increment_block explicitly
@@ -1416,5 +1418,91 @@ mod tests {
         assert!(result.is_some(), "Should be able to read the changeset entry");
         let entry = result.unwrap();
         assert_eq!(entry.value, U256::from(42));
+    }
+
+    #[test]
+    fn test_read_headers_while_appending() {
+        let (static_dir, _) = create_test_static_files_dir();
+        let sf_rw: StaticFileProvider<EthPrimitives> =
+            StaticFileProviderBuilder::read_write(&static_dir)
+                .build()
+                .expect("Failed to build static file provider");
+        let hash = |num: u64| B256::with_last_byte(num as u8 + 1);
+
+        let mut header_writer = sf_rw.latest_writer(StaticFileSegment::Headers).unwrap();
+        let mut header = Header::default();
+        for num in 0..=2 {
+            header.number = num;
+            header_writer.append_header(&header, &hash(num)).unwrap();
+        }
+        header_writer.commit().unwrap();
+
+        // Writes the next header to disk without committing it, as persistence does before the
+        // database commit.
+        header.number = 3;
+        header_writer.append_header(&header, &hash(3)).unwrap();
+        header_writer.sync_all().unwrap();
+
+        // Reloads the jar from disk meanwhile, as every static file deletion by the pruner does.
+        sf_rw.initialize_index().unwrap();
+
+        assert_eq!(sf_rw.block_hash(2).unwrap(), Some(hash(2)));
+        assert_eq!(sf_rw.block_hash(3).unwrap(), None);
+    }
+
+    #[test]
+    fn test_header_read_errors_are_not_missing_blocks() {
+        for corrupt_offsets in [true, false] {
+            let (static_dir, _) = create_test_static_files_dir();
+            let provider = StaticFileProvider::<EthPrimitives>::read_write(&static_dir).unwrap();
+            let header = Header::default();
+            let hash = header.hash_slow();
+            {
+                let mut writer = provider.latest_writer(StaticFileSegment::Headers).unwrap();
+                writer.append_header(&header, &hash).unwrap();
+                writer.commit().unwrap();
+            }
+
+            assert_eq!(provider.header_by_number(0).unwrap(), Some(header));
+            assert_eq!(provider.block_hash(0).unwrap(), Some(hash));
+            assert_eq!(provider.header_by_number(1).unwrap(), None);
+            assert_eq!(provider.block_hash(1).unwrap(), None);
+
+            let jar = provider
+                .get_segment_provider_for_block(StaticFileSegment::Headers, 0, None)
+                .unwrap();
+            let path =
+                if corrupt_offsets { jar.offsets_path() } else { jar.data_path().to_path_buf() };
+            drop(jar);
+            drop(provider);
+
+            // Corrupt the files before opening any readers, retaining the committed row count.
+            let mut bytes = reth_fs_util::read(&path).unwrap();
+            if corrupt_offsets {
+                // Retain the offset-size byte, but point every offset beyond the data file.
+                bytes[1..].fill(u8::MAX);
+            } else {
+                // An unterminated LZ4 literal-length sequence cannot be decompressed.
+                bytes.fill(u8::MAX);
+            }
+            reth_fs_util::write(&path, bytes).unwrap();
+
+            let provider = StaticFileProvider::<EthPrimitives>::read_only(&static_dir).unwrap();
+            for error in [
+                provider.header_by_number(0).unwrap_err(),
+                provider.block_hash(0).unwrap_err(),
+                provider.sealed_header(0).unwrap_err(),
+                provider.headers_range(0..1).unwrap_err(),
+            ] {
+                let error = error.downcast_other_ref::<NippyJarError>().unwrap();
+                if corrupt_offsets {
+                    assert_matches!(error, NippyJarError::InconsistentState);
+                } else {
+                    assert_matches!(error, NippyJarError::OutputTooSmall);
+                }
+            }
+            assert_eq!(provider.header_by_number(1).unwrap(), None);
+            assert_eq!(provider.block_hash(1).unwrap(), None);
+        }
     }
 }

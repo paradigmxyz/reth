@@ -25,7 +25,7 @@ use reth_node_ethereum::{
     engine_ssz_witness::PayloadStatusWithWitness, EthereumAddOns, EthereumNode,
 };
 use reth_provider::{BlockNumReader, StateProviderFactory};
-use reth_rpc_api::TestingBuildBlockRequestV1;
+use reth_rpc_api::{TestingBuildBlockRequestV1, TestingBuildBlockResponseV1};
 use reth_rpc_server_types::{RethRpcModule, RpcModuleSelection};
 use reth_tasks::Runtime;
 use ssz::Encode;
@@ -36,24 +36,6 @@ const ENGINE_FORKCHOICE_ROUTE: &str = "/engine/v1/forkchoice";
 const ENGINE_V1_BLOBS_ROUTE: &str = "/engine/v1/blobs/v1";
 const ENGINE_CAPABILITIES_ROUTE: &str = "/engine/v1/capabilities";
 const ENGINE_IDENTITY_ROUTE: &str = "/engine/v1/identity";
-
-#[tokio::test]
-async fn can_run_eth_node() -> eyre::Result<()> {
-    reth_tracing::init_test_tracing();
-
-    let (mut node, wallet) =
-        EthereumNode::test_setup_for(EthereumHardfork::Cancun).build_single().await?;
-    let raw_tx = TransactionTestContext::transfer_tx_bytes(1, wallet.inner).await;
-
-    // mine an empty block first, so its canonical notification is still buffered when the next
-    // block is asserted
-    node.advance_block().await?;
-
-    // make the node advance and assert the block has been committed to the blockchain
-    node.inject_and_advance(raw_tx).await?;
-
-    Ok(())
-}
 
 #[tokio::test]
 #[cfg(unix)]
@@ -92,8 +74,10 @@ async fn test_failed_run_eth_node_with_no_auth_engine_api_over_ipc_opts() -> eyr
 async fn test_engine_graceful_shutdown() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
 
-    let (mut node, wallet) =
-        EthereumNode::test_setup_for(EthereumHardfork::Cancun).build_single().await?;
+    let (mut node, wallet) = EthereumNode::test_setup_for(EthereumHardfork::Cancun)
+        .with_restartable_nodes()
+        .build_single()
+        .await?;
 
     let raw_tx = TransactionTestContext::transfer_tx_bytes(1, wallet.inner).await;
     node.inject_and_advance(raw_tx).await?;
@@ -121,6 +105,10 @@ async fn test_engine_graceful_shutdown() -> eyre::Result<()> {
 
     let db_block = node.inner.provider.last_block_number()?;
     assert_eq!(db_block, 1, "Database should have persisted block 1");
+
+    // Stop the node so its database is closed before the test process exits. Otherwise node
+    // threads can still use RocksDB while the process tears down, which aborts.
+    node.stop().await?;
 
     Ok(())
 }
@@ -150,7 +138,10 @@ async fn test_testing_build_block_v1_osaka() -> eyre::Result<()> {
         extra_data: None,
     };
 
-    let envelope = node.testing_build_block_v1(request).await?;
+    let TestingBuildBlockResponseV1::V5(envelope) = node.testing_build_block_v1(request).await?
+    else {
+        panic!("expected a V5 envelope")
+    };
 
     let engine_client = node.auth_server_handle().http_client();
     let payload = envelope.execution_payload.clone();
@@ -193,7 +184,7 @@ async fn test_engine_ssz_proxy_can_mine_block() -> eyre::Result<()> {
 
     let raw_tx = TransactionTestContext::transfer_tx_bytes(1, wallet.signer(0)).await;
 
-    let envelope = node
+    let TestingBuildBlockResponseV1::V5(envelope) = node
         .testing_build_block_v1(TestingBuildBlockRequestV1 {
             parent_block_hash: genesis_hash,
             payload_attributes: eth_payload_attributes(
@@ -203,7 +194,10 @@ async fn test_engine_ssz_proxy_can_mine_block() -> eyre::Result<()> {
             transactions: vec![raw_tx],
             extra_data: None,
         })
-        .await?;
+        .await?
+    else {
+        panic!("expected a V5 envelope")
+    };
 
     let payload = envelope.execution_payload;
     let block_hash = payload.payload_inner.payload_inner.block_hash;

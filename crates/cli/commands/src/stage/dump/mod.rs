@@ -74,6 +74,20 @@ pub struct StageCommand {
     dry_run: bool,
 }
 
+impl StageCommand {
+    /// Validates the block range before any database is opened.
+    fn validate(&self) -> eyre::Result<()> {
+        eyre::ensure!(self.from > 0, "`--from` must be at least 1");
+        eyre::ensure!(
+            self.from < self.to,
+            "`--from` ({}) must be lower than `--to` ({})",
+            self.from,
+            self.to
+        );
+        Ok(())
+    }
+}
+
 macro_rules! handle_stage {
     ($stage_fn:ident, $tool:expr, $command:expr, $runtime:expr) => {{
         let StageCommand { output_datadir, from, to, dry_run, .. } = $command;
@@ -103,6 +117,13 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
         Comp: CliNodeComponents<N>,
         F: FnOnce(Arc<C::ChainSpec>) -> Comp,
     {
+        match &self.command {
+            Stages::Execution(cmd) |
+            Stages::StorageHashing(cmd) |
+            Stages::AccountHashing(cmd) |
+            Stages::Merkle(cmd) => cmd.validate()?,
+        }
+
         // `unwind_and_copy` opens a RW provider on the source datadir, so open RW here.
         let Environment { provider_factory, .. } =
             self.env.init::<N>(AccessRights::RW, runtime.clone())?;
@@ -152,8 +173,6 @@ pub(crate) fn setup<N: NodeTypesWithDB>(
     output_db: &PathBuf,
     db_tool: &DbTool<N>,
 ) -> eyre::Result<(DatabaseEnv, u64)> {
-    assert!(from < to, "FROM block should be lower than TO block.");
-
     info!(target: "reth::cli", ?output_db, "Creating separate db");
 
     let output_datadir = init_db(output_db, DatabaseArguments::new(ClientVersion::default()))?;
@@ -170,7 +189,7 @@ pub(crate) fn setup<N: NodeTypesWithDB>(
         .provider_factory
         .db_ref()
         .view(|tx| tx.cursor_read::<tables::BlockBodyIndices>()?.last())??
-        .expect("some");
+        .ok_or_else(|| eyre::eyre!("`BlockBodyIndices` table of the source database is empty"))?;
 
     Ok((output_datadir, tip_block_number))
 }

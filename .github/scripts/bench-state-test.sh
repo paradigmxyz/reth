@@ -57,7 +57,7 @@ gh() {
       if [[ "$*" == *'--status=in_progress'* ]]; then
         printf '0\n'
       else
-        printf '[{"headSha":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","createdAt":"%s","conclusion":"success"}]\n' "$STATE_TEST_DATE"
+        printf '[{"headSha":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","createdAt":"%s","conclusion":"success","event":"schedule"}]\n' "$STATE_TEST_DATE"
       fi
       ;;
     *) return 1 ;;

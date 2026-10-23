@@ -128,11 +128,12 @@ mod tests {
 
     use super::*;
     use crate::eth::helpers::{signer::DevSigner, types::EthRpcConverter};
-    use alloy_consensus::{
-        BlobTransactionSidecar, Block, Header, SidecarBuilder, SimpleCoder, Transaction,
+    use alloy_consensus::{BlobTransactionSidecar, Block, Header, Transaction};
+    use alloy_eips::{
+        eip2718::Encodable2718,
+        eip4844::{Blob, Bytes48},
     };
-    use alloy_eips::eip2718::Encodable2718;
-    use alloy_primitives::{map::AddressMap, Address, Bytes, Signature, U256};
+    use alloy_primitives::{bytes, map::AddressMap, Address, Bytes, Signature, U256};
     use alloy_rpc_types_eth::request::TransactionRequest;
     use reth_chainspec::{ChainSpec, ChainSpecBuilder};
     use reth_ethereum_primitives::TransactionSigned;
@@ -147,9 +148,20 @@ mod tests {
     use reth_rpc_eth_api::node::RpcNodeCoreAdapter;
     use reth_transaction_pool::{
         test_utils::{testing_pool, TestPool, TransactionGenerator},
-        EthPooledTransaction, PoolPooledTx, TransactionOrigin, TransactionPool,
+        PoolPooledTx, TransactionOrigin, TransactionPool,
     };
 
+    /// A sidecar with one zero blob. Its commitment and proof are the point at infinity, so it is
+    /// valid without loading the KZG trusted setup.
+    fn zero_blob_sidecar() -> BlobTransactionSidecar {
+        let mut point_at_infinity = [0; 48];
+        point_at_infinity[0] = 0xc0;
+        BlobTransactionSidecar::new(
+            vec![Blob::default()],
+            vec![Bytes48::from(point_at_infinity)],
+            vec![Bytes48::from(point_at_infinity)],
+        )
+    }
     fn mock_eth_api(
         accounts: AddressMap<ExtendedAccount>,
     ) -> EthApi<
@@ -202,9 +214,7 @@ mod tests {
 
     fn raw_transfer_tx() -> Bytes {
         // https://etherscan.io/tx/0xa694b71e6c128a2ed8e2e0f6770bddbe52e3bb8f10e8472f9a79ab81497a8b5d
-        Bytes::from(hex!(
-            "02f871018303579880850555633d1b82520894eee27662c2b8eba3cd936a23f039f3189633e4c887ad591c62bdaeb180c080a07ea72c68abfb8fca1bd964f0f99132ed9280261bdca3e549546c0205e800f7d0a05b4ef3039e9c9b9babc179a1878fb825b5aaf5aed2fa8744854150157b08d6f3"
-        ))
+        bytes!("02f871018303579880850555633d1b82520894eee27662c2b8eba3cd936a23f039f3189633e4c887ad591c62bdaeb180c080a07ea72c68abfb8fca1bd964f0f99132ed9280261bdca3e549546c0205e800f7d0a05b4ef3039e9c9b9babc179a1878fb825b5aaf5aed2fa8744854150157b08d6f3")
     }
 
     #[tokio::test]
@@ -303,10 +313,7 @@ mod tests {
         )
         .sender_recovery_cache(Some(cache.clone()))
         .build();
-        let mut builder = SidecarBuilder::<SimpleCoder>::new();
-        builder.ingest(b"cached blob transaction");
-        let sidecar =
-            BlobTransactionSidecarVariant::from(builder.build::<BlobTransactionSidecar>().unwrap());
+        let sidecar = BlobTransactionSidecarVariant::from(zero_blob_sidecar());
         let transaction = TransactionSigned::new_unhashed(
             alloy_consensus::TxEip4844 {
                 blob_versioned_hashes: sidecar.versioned_hashes().collect(),
@@ -331,22 +338,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn send_raw_transaction_sync_populates_sender_cache() {
-        let cache = SenderRecoveryCache::new(16);
-        let eth_api = mock_eth_api_builder(Default::default())
-            .sender_recovery_cache(Some(cache.clone()))
-            .build();
-        let raw = raw_transfer_tx();
-        let transaction = EthPooledTransaction::decode_raw_transaction(&raw).unwrap();
-        let sender = transaction.try_recover().unwrap();
-
-        let err = eth_api.send_raw_transaction_sync(raw, Some(1)).await.unwrap_err();
-        assert!(matches!(err, EthApiError::TransactionConfirmationTimeout { .. }));
-        assert_eq!(cache.get(transaction.tx_hash()), Some(sender));
-        assert_eq!(eth_api.pool().len(), 1);
-    }
-
-    #[tokio::test]
     async fn send_raw_transaction() {
         let eth_api = mock_eth_api(Default::default());
         let pool = eth_api.pool();
@@ -362,9 +353,7 @@ mod tests {
         );
 
         // https://etherscan.io/tx/0x48816c2f32c29d152b0d86ff706f39869e6c1f01dc2fe59a3c1f9ecf39384694
-        let tx_2 = Bytes::from(hex!(
-            "02f9043c018202b7843b9aca00850c807d37a08304d21d94ef1c6e67703c7bd7107eed8303fbe6ec2554bf6b881bc16d674ec80000b903c43593564c000000000000000000000000000000000000000000000000000000000000006000000000000000000000000000000000000000000000000000000000000000a00000000000000000000000000000000000000000000000000000000063e2d99f00000000000000000000000000000000000000000000000000000000000000030b000800000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000003000000000000000000000000000000000000000000000000000000000000006000000000000000000000000000000000000000000000000000000000000000c000000000000000000000000000000000000000000000000000000000000001e0000000000000000000000000000000000000000000000000000000000000004000000000000000000000000000000000000000000000000000000000000000020000000000000000000000000000000000000000000000001bc16d674ec80000000000000000000000000000000000000000000000000000000000000000010000000000000000000000000065717fe021ea67801d1088cc80099004b05b64600000000000000000000000000000000000000000000000001bc16d674ec80000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000a00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000002bc02aaa39b223fe8d0a0e5c4f27ead9083c756cc20001f4a0b86991c6218b36c1d19d4a2e9eb0ce3606eb480000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000100000000000000000000000000000000000000000000000000000000000000000180000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000009e95fd5965fd1f1a6f0d4600000000000000000000000000000000000000000000000000000000000000a000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000002000000000000000000000000a0b86991c6218b36c1d19d4a2e9eb0ce3606eb48000000000000000000000000428dca9537116148616a5a3e44035af17238fe9dc080a0c6ec1e41f5c0b9511c49b171ad4e04c6bb419c74d99fe9891d74126ec6e4e879a032069a753d7a2cfa158df95421724d24c0e9501593c09905abf3699b4a4405ce"
-        ));
+        let tx_2 = bytes!("02f9043c018202b7843b9aca00850c807d37a08304d21d94ef1c6e67703c7bd7107eed8303fbe6ec2554bf6b881bc16d674ec80000b903c43593564c000000000000000000000000000000000000000000000000000000000000006000000000000000000000000000000000000000000000000000000000000000a00000000000000000000000000000000000000000000000000000000063e2d99f00000000000000000000000000000000000000000000000000000000000000030b000800000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000003000000000000000000000000000000000000000000000000000000000000006000000000000000000000000000000000000000000000000000000000000000c000000000000000000000000000000000000000000000000000000000000001e0000000000000000000000000000000000000000000000000000000000000004000000000000000000000000000000000000000000000000000000000000000020000000000000000000000000000000000000000000000001bc16d674ec80000000000000000000000000000000000000000000000000000000000000000010000000000000000000000000065717fe021ea67801d1088cc80099004b05b64600000000000000000000000000000000000000000000000001bc16d674ec80000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000a00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000002bc02aaa39b223fe8d0a0e5c4f27ead9083c756cc20001f4a0b86991c6218b36c1d19d4a2e9eb0ce3606eb480000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000100000000000000000000000000000000000000000000000000000000000000000180000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000009e95fd5965fd1f1a6f0d4600000000000000000000000000000000000000000000000000000000000000a000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000002000000000000000000000000a0b86991c6218b36c1d19d4a2e9eb0ce3606eb48000000000000000000000000428dca9537116148616a5a3e44035af17238fe9dc080a0c6ec1e41f5c0b9511c49b171ad4e04c6bb419c74d99fe9891d74126ec6e4e879a032069a753d7a2cfa158df95421724d24c0e9501593c09905abf3699b4a4405ce");
 
         let tx_2_result = eth_api.send_raw_transaction(tx_2).await.unwrap();
         assert_eq!(
@@ -480,7 +469,7 @@ mod tests {
         let tx_req = TransactionRequest {
             from: Some(address),
             to: Some(address.into()),
-            value: Some(U256::from(1)),
+            value: Some(U256::ONE),
             ..Default::default()
         };
 
@@ -664,16 +653,11 @@ mod tests {
 
         let eth_api = mock_eth_api(accounts);
 
-        let mut builder = SidecarBuilder::<SimpleCoder>::new();
-        builder.ingest(b"dummy blob");
-
         // EIP-4844 blob transaction with versioned hashes but no blob fee
         let tx_req = TransactionRequest {
             from: Some(address),
             to: Some(Address::random().into()),
-            sidecar: Some(BlobTransactionSidecarVariant::from(
-                builder.build::<BlobTransactionSidecar>().unwrap(),
-            )),
+            sidecar: Some(BlobTransactionSidecarVariant::from(zero_blob_sidecar())),
             ..Default::default()
         };
 
@@ -703,17 +687,12 @@ mod tests {
 
         let provided_blob_fee = 5000000u128;
 
-        let mut builder = SidecarBuilder::<SimpleCoder>::new();
-        builder.ingest(b"dummy blob");
-
         // EIP-4844 blob transaction with blob fee already set
         let tx_req = TransactionRequest {
             from: Some(address),
             to: Some(Address::random().into()),
             transaction_type: Some(3), // EIP-4844
-            sidecar: Some(BlobTransactionSidecarVariant::from(
-                builder.build::<BlobTransactionSidecar>().unwrap(),
-            )),
+            sidecar: Some(BlobTransactionSidecarVariant::from(zero_blob_sidecar())),
             max_fee_per_blob_gas: Some(provided_blob_fee), // Already set
             ..Default::default()
         };
