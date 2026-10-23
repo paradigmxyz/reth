@@ -8,8 +8,7 @@ use crate::wal::{WalError, WalResult};
 use reth_ethereum_primitives::EthPrimitives;
 use reth_exex_types::ExExNotification;
 use reth_node_api::NodePrimitives;
-use reth_tracing::tracing::debug;
-use tracing::instrument;
+use tracing::{debug, instrument};
 
 static FILE_EXTENSION: &str = "wal";
 

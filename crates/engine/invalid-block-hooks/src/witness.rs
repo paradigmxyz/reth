@@ -14,7 +14,6 @@ use reth_revm::{
     db::{BundleState, State},
 };
 use reth_rpc_api::DebugApiClient;
-use reth_tracing::tracing::warn;
 use reth_trie::updates::TrieUpdates;
 use revm::{
     bytecode::Bytecode,
@@ -26,6 +25,7 @@ use revm::{
 };
 use serde::Serialize;
 use std::{collections::BTreeMap, fmt::Debug, fs::File, io::Write, path::PathBuf};
+use tracing::warn;
 
 type CollectionResult =
     (BTreeMap<B256, Bytes>, BTreeMap<B256, Bytes>, reth_trie::HashedPostState, BundleState);

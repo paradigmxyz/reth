@@ -15,13 +15,13 @@ use reth_primitives_traits::RecoveredBlock;
 use reth_provider::{BlockReader, Chain, StateProviderFactory};
 use reth_prune_types::PruneModes;
 use reth_stages_api::ExecutionStageThresholds;
-use reth_tracing::tracing::debug;
 use std::{
     ops::RangeInclusive,
     pin::Pin,
     task::{ready, Context, Poll},
 };
 use tokio::task::JoinHandle;
+use tracing::debug;
 
 /// The default parallelism for active tasks in [`StreamBackfillJob`].
 pub(crate) const DEFAULT_PARALLELISM: usize = 4;

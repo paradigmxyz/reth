@@ -19,7 +19,6 @@ reth-ethereum-primitives.workspace = true
 ## ensure secp256k1 recovery with rayon support is activated
 reth-primitives-traits = { workspace = true, features = ["secp256k1", "rayon"] }
 reth-node-builder.workspace = true
-reth-tracing.workspace = true
 reth-provider.workspace = true
 reth-transaction-pool.workspace = true
 reth-network.workspace = true
@@ -73,8 +72,10 @@ http-body-util.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 tower.workspace = true
+tracing.workspace = true
 
 [dev-dependencies]
+reth-tracing.workspace = true
 reth-db.workspace = true
 reth-exex.workspace = true
 reth-e2e-test-utils.workspace = true
