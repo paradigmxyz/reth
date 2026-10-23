@@ -243,7 +243,7 @@ impl<R, C, F: EvmFactory> EthBlockExecutorFactory<R, C, F> {
         DB: evm2::evm::DynDatabase + 'a,
         F: 'static,
     {
-        let precompiles = Box::new(self.evm_factory.precompiles(env.spec));
+        let precompiles = self.evm_factory.precompiles(env.spec);
         self.build_evm(db, env, precompiles)
     }
 
@@ -265,13 +265,13 @@ impl<R, C, F: EvmFactory> EthBlockExecutorFactory<R, C, F> {
         F: 'static,
     {
         let spec = env.spec;
-        let precompiles = Box::new(CachedPrecompileProvider::new(
+        let precompiles = CachedPrecompileProvider::new(
             self.evm_factory.precompiles(spec),
             cache_map,
             spec,
             self.evm_factory.precompile_cache_policy(spec),
             metrics_enabled,
-        ));
+        );
         self.build_evm(db, env, precompiles)
     }
 
@@ -279,7 +279,7 @@ impl<R, C, F: EvmFactory> EthBlockExecutorFactory<R, C, F> {
         &self,
         db: DB,
         env: EthEvmEnv<F::Types>,
-        precompiles: Box<dyn evm2::evm::precompile::PrecompileProvider<F::Types>>,
+        precompiles: impl evm2::evm::precompile::PrecompileProvider<F::Types> + 'a,
     ) -> evm2::Evm<'a, F::Types>
     where
         DB: evm2::evm::DynDatabase + 'a,
