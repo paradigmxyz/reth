@@ -201,14 +201,17 @@ where
                     };
 
                     hasher.update(*tx.tx_hash());
+                    // Fee caps below the base fee are only rejected by the EVM from London on.
+                    let gas_price = tx.effective_tip_per_gas(basefee).ok_or_else(|| {
+                        Eth::Error::from_eth_err(EthApiError::InvalidTransaction(
+                            RpcInvalidTransactionError::FeeCapTooLow,
+                        ))
+                    })?;
                     let tx_env = eth_api.evm_config().tx_env(tx.clone());
                     let result_and_state = eth_api.transact(&mut db, evm_env.clone(), tx_env)?;
                     let result = result_and_state.result;
                     let state = result_and_state.pending_state;
 
-                    let gas_price = tx
-                        .effective_tip_per_gas(basefee)
-                        .expect("fee is always valid; execution succeeded");
                     let gas_used = result.tx_gas_used();
                     total_gas_used += gas_used;
 
@@ -452,6 +455,63 @@ mod tests {
                 (next_base_fee + 1) as u128 - base_fee.unwrap_or(pending_next_base_fee as u128);
             assert_bundle_fees(&response, expected_tip);
         }
+    }
+
+    /// A pre-London state has no base fee check in the EVM, so the bundle must reject a fee cap
+    /// below the supplied base fee instead of panicking.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn call_bundle_rejects_fee_cap_below_base_fee_before_london() {
+        let mut rng = generators::rng();
+        let key = generate_key(&mut rng);
+        let tx = sign_tx_with_key_pair(
+            key,
+            reth_ethereum_primitives::Transaction::Legacy(alloy_consensus::TxLegacy {
+                chain_id: Some(1),
+                nonce: 0,
+                gas_price: 1,
+                gas_limit: 21_000,
+                to: TxKind::Call(Address::random()),
+                ..Default::default()
+            }),
+        );
+        let sender = tx.recover_signer().unwrap();
+
+        let genesis = Genesis::default().with_gas_limit(30_000_000).extend_accounts([(
+            sender,
+            GenesisAccount::default().with_balance(U256::from(10u128.pow(18))),
+        )]);
+        let chain_spec =
+            Arc::new(ChainSpecBuilder::mainnet().berlin_activated().genesis(genesis).build());
+        let factory = create_test_provider_factory_with_chain_spec(chain_spec);
+        init_genesis(&factory).unwrap();
+        let provider = BlockchainProvider::new(factory).unwrap();
+
+        let eth_api = EthApiBuilder::new(
+            provider.clone(),
+            testing_pool(),
+            NoopNetwork::default(),
+            EthEvmConfig::new(provider.chain_spec()),
+        )
+        .build();
+        let api = EthBundle::new(eth_api, BlockingTaskGuard::new(4));
+
+        let error = api
+            .call_bundle(EthCallBundle {
+                txs: vec![tx.encoded_2718().into()],
+                block_number: 1,
+                state_block_number: BlockNumberOrTag::Number(0),
+                base_fee: Some(100),
+                ..Default::default()
+            })
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(
+                error.as_invalid_transaction(),
+                Some(RpcInvalidTransactionError::FeeCapTooLow)
+            ),
+            "{error:?}"
+        );
     }
 
     /// A pre-Cancun transaction can selfdestruct the coinbase; later fees must then be counted
