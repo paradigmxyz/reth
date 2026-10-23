@@ -92,27 +92,6 @@ where
     }
 }
 
-impl EvmFactory for () {
-    type Types = evm2::BaseEvmTypes;
-    type SpecId = evm2::SpecId;
-
-    fn spec_id(&self, spec: evm2::SpecId) -> evm2::SpecId {
-        spec
-    }
-
-    #[cfg(feature = "std")]
-    fn precompile_cache_policy(&self, _spec: Self::SpecId) -> PrecompileCachePolicy {
-        PrecompileCachePolicy::All
-    }
-
-    fn tx_registry(
-        &self,
-        spec: Self::SpecId,
-    ) -> evm2::registry::TxRegistry<Self::Types, evm2::TxResult<Self::Types>> {
-        evm2::ethereum::ethereum_tx_registry(spec)
-    }
-}
-
 /// Ethereum block executor factory.
 #[derive(Debug)]
 pub struct EthBlockExecutorFactory<R = RethReceiptBuilder, C = ChainSpec, F = RethEvmFactory>

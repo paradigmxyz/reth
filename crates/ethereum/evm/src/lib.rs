@@ -490,7 +490,7 @@ where
     fn reuses_prewarm_results(&self) -> bool {
         // Custom factories may change transaction validation or read state outside the database.
         let factory = TypeId::of::<EvmF>();
-        factory == TypeId::of::<()>() || factory == TypeId::of::<factory::RethEvmFactory>()
+        factory == TypeId::of::<factory::RethEvmFactory>()
     }
 
     #[cfg(feature = "std")]
@@ -619,34 +619,33 @@ mod tests {
         }
     }
 
+    #[derive(Debug, Clone)]
+    struct CustomFactory;
+
+    impl EvmFactory for CustomFactory {
+        type Types = evm2::BaseEvmTypes;
+        type SpecId = evm2::SpecId;
+
+        fn spec_id(&self, spec: evm2::SpecId) -> Self::SpecId {
+            spec
+        }
+
+        fn tx_registry(
+            &self,
+            spec: Self::SpecId,
+        ) -> evm2::registry::TxRegistry<Self::Types, evm2::TxResult<Self::Types>> {
+            evm2::ethereum::ethereum_tx_registry(spec)
+        }
+    }
+
     #[test]
     fn test_reuses_prewarm_results_only_for_known_factories() {
         assert!(EthEvmConfig::mainnet().reuses_prewarm_results());
-        assert!(EthEvmConfig::new_with_evm_factory(MAINNET.clone(), ()).reuses_prewarm_results());
         assert!(EthEvmConfig::new_with_evm_factory(
             MAINNET.clone(),
             factory::RethEvmFactory::default()
         )
         .reuses_prewarm_results());
-
-        #[derive(Debug, Clone)]
-        struct CustomFactory;
-
-        impl EvmFactory for CustomFactory {
-            type Types = evm2::BaseEvmTypes;
-            type SpecId = evm2::SpecId;
-
-            fn spec_id(&self, spec: evm2::SpecId) -> Self::SpecId {
-                spec
-            }
-
-            fn tx_registry(
-                &self,
-                spec: Self::SpecId,
-            ) -> evm2::registry::TxRegistry<Self::Types, evm2::TxResult<Self::Types>> {
-                evm2::ethereum::ethereum_tx_registry(spec)
-            }
-        }
 
         assert!(!EthEvmConfig::new_with_evm_factory(MAINNET.clone(), CustomFactory)
             .reuses_prewarm_results());
@@ -672,7 +671,7 @@ mod tests {
     #[cfg(feature = "jit")]
     #[test]
     fn test_jit_support_ignores_plain_factory() {
-        let evm_config = EthEvmConfig::new_with_evm_factory(MAINNET.clone(), ());
+        let evm_config = EthEvmConfig::new_with_evm_factory(MAINNET.clone(), CustomFactory);
 
         assert!(evm_config.jit_backend().is_none());
 
