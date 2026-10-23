@@ -571,7 +571,7 @@ where
             })
         }
 
-        reject_cancun_boundary_unwind(provider, input.checkpoint.block_number, unwind_to)?;
+        reject_cancun_boundary_unwind(provider, input.checkpoint.block_number, input.unwind_to)?;
 
         self.ensure_consistency(provider, input.checkpoint.block_number, Some(unwind_to))?;
 
@@ -629,6 +629,14 @@ where
         );
 
         Ok(())
+    }
+
+    fn validate_unwind(
+        &mut self,
+        provider: &Provider,
+        input: UnwindInput,
+    ) -> Result<(), StageError> {
+        reject_cancun_boundary_unwind(provider, input.checkpoint.block_number, input.unwind_to)
     }
 }
 
@@ -1311,15 +1319,15 @@ mod tests {
             .unwrap();
 
         let mut execution_stage = stage();
-        let err = execution_stage
-            .unwind(
-                &provider,
-                UnwindInput { checkpoint: StageCheckpoint::new(2), unwind_to: 1, bad_block: None },
-            )
-            .unwrap_err();
-
-        assert_matches!(err, StageError::Fatal(_));
-        assert!(err.to_string().contains("across Cancun activation boundary"));
+        let input =
+            UnwindInput { checkpoint: StageCheckpoint::new(2), unwind_to: 1, bad_block: None };
+        for err in [
+            execution_stage.validate_unwind(&provider, input).unwrap_err(),
+            execution_stage.unwind(&provider, input).unwrap_err(),
+        ] {
+            assert_matches!(err, StageError::Fatal(_));
+            assert!(err.to_string().contains("across Cancun activation boundary"));
+        }
     }
 
     #[tokio::test]
