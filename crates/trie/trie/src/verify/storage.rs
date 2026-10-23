@@ -35,12 +35,13 @@ where
     /// verification is cancelled.
     pub(super) fn run(
         mut self,
-        jobs: Receiver<B256>,
+        jobs: Receiver<StorageJob>,
         roots: &Sender<(B256, B256)>,
         context: &WorkerContext,
     ) -> Result<(), StateRootError> {
         loop {
-            let Some(address) = context.receive(&jobs) else { return Ok(()) };
+            let Some(job) = context.receive(&jobs) else { return Ok(()) };
+            let address = job.address;
             self.hashed.set_hashed_address(address);
             self.trie.set_hashed_address(address);
             // The account side assumes `EMPTY_ROOT_HASH` for empty storage and doesn't wait for a
@@ -49,12 +50,15 @@ where
                 let mut verifier = SingleVerifier::new(Some(address), &mut self.trie)?;
                 let mut found = Vec::new();
                 verifier.finalize(&mut found)?;
+                if job.root_required {
+                    context.root_window.release();
+                }
                 if !context.report(found) {
                     return Ok(())
                 }
             } else {
                 let Some(root) = self.verify_storage(address, context)? else { return Ok(()) };
-                if !context.send(roots, (address, root)) {
+                if job.root_required && !context.send(roots, (address, root)) {
                     return Ok(())
                 }
             }
@@ -115,4 +119,14 @@ where
             }
         }
     }
+}
+
+/// Storage to verify, including whether its root belongs to an account in the hashed state.
+#[derive(Debug)]
+pub struct StorageJob {
+    /// Hashed address of the storage to verify.
+    pub address: B256,
+    /// Whether to return the computed root to the account walk. False still verifies the storage
+    /// trie, but discards its root and does not reserve space in the root backlog.
+    pub root_required: bool,
 }

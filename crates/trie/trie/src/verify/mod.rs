@@ -20,7 +20,7 @@ use std::{collections::VecDeque, thread};
 mod compare;
 mod pipeline;
 mod storage;
-pub use storage::StorageWorker;
+pub use storage::{StorageJob, StorageWorker};
 
 /// Compares the persisted account and storage trie tables against tries recomputed from the hashed
 /// state tables, yielding an [`Output`] for every inconsistency found.
@@ -29,7 +29,7 @@ pub use storage::StorageWorker;
 /// findings are not ordered relative to account findings or to [`Output::Progress`]. Iteration
 /// stops after the first error.
 ///
-/// Memory use grows with the number of storage roots computed ahead of the account walk.
+/// Storage work ahead of the account walk is bounded by the configured storage root limit.
 #[derive(Debug)]
 pub struct Verifier<T: TrieCursor, H, S> {
     accounts: H,
@@ -45,6 +45,9 @@ pub struct Verifier<T: TrieCursor, H, S> {
 
 const ACCOUNT_UPDATE_THRESHOLD: usize = 1024;
 
+/// Default maximum number of storage roots computed or in flight ahead of the account walk.
+pub const DEFAULT_STORAGE_ROOT_LIMIT: usize = 25_000_000;
+
 impl<T, H, S> Verifier<T, H, S>
 where
     T: TrieCursor,
@@ -55,10 +58,12 @@ where
     ///
     /// - `trie` reads the account trie table.
     /// - `accounts` reads the hashed accounts table.
-    /// - `storage_addresses` yields each address present in hashed storage or stored storage tries
-    ///   exactly once, including addresses without an account. It is walked on a background thread
-    ///   to schedule storage work ahead of `accounts`.
+    /// - `storage_addresses` yields a job for each address present in hashed storage or stored
+    ///   storage tries exactly once, in ascending address order, including addresses without an
+    ///   account. It is walked on a background thread to schedule storage work ahead of `accounts`.
     /// - `storage` reads the hashed storage table.
+    /// - `storage_root_limit` bounds account-backed storage jobs whose roots have not been
+    ///   consumed.
     /// - `storage_workers` sets the storage parallelism, one thread per worker.
     ///
     /// Storage cursors may start at any hashed address. All cursors must read the same database
@@ -72,22 +77,24 @@ where
     ///
     /// # Panics
     ///
-    /// Panics if `storage_workers` is empty.
+    /// Panics if `storage_workers` is empty or `storage_root_limit` is zero.
     pub fn new<L, W, C, TX>(
         trie: T,
         accounts: H,
         storage: S,
         storage_addresses: L,
         storage_workers: Vec<StorageWorker<W, C, TX>>,
+        storage_root_limit: usize,
     ) -> Result<Self, DatabaseError>
     where
-        L: Iterator<Item = Result<B256, DatabaseError>> + Send + 'static,
+        L: Iterator<Item = Result<StorageJob, DatabaseError>> + Send + 'static,
         W: TrieStorageCursor + Send + 'static,
         C: HashedStorageCursor<Value = U256> + Send + 'static,
         TX: Send + 'static,
     {
         let account_verifier = SingleVerifier::new(None, trie)?;
-        let pipeline = StoragePipeline::spawn(storage_addresses, storage_workers)?;
+        let pipeline =
+            StoragePipeline::spawn(storage_addresses, storage_workers, storage_root_limit)?;
         Ok(Self {
             accounts,
             storage,

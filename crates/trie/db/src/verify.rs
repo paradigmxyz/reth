@@ -16,7 +16,7 @@ use reth_execution_errors::StateRootError;
 use reth_trie::{
     hashed_cursor::HashedCursorFactory,
     trie_cursor::TrieCursorFactory,
-    verify::{Output, StorageWorker, Verifier},
+    verify::{Output, StorageJob, StorageWorker, Verifier},
 };
 use std::fmt;
 
@@ -44,12 +44,17 @@ where
     ///
     /// Prevent commits while this constructor opens the transactions so they read the same database
     /// version. Each storage worker owns a separate transaction. For long-running verification,
-    /// configure `db` to disable long-lived read transaction safety.
+    /// configure `db` to disable long-lived read transaction safety. `storage_root_limit` bounds
+    /// account-backed storage jobs whose roots have not yet been consumed.
     ///
     /// # Panics
     ///
-    /// Panics if `storage_workers` is zero.
-    pub fn new(db: &impl Database<TX = TX>, storage_workers: usize) -> Result<Self, DatabaseError> {
+    /// Panics if `storage_workers` or `storage_root_limit` is zero.
+    pub fn new(
+        db: &impl Database<TX = TX>,
+        storage_workers: usize,
+        storage_root_limit: usize,
+    ) -> Result<Self, DatabaseError> {
         assert!(storage_workers > 0, "at least one storage worker is required");
         let account_tx = db.tx()?;
         let lookahead_tx = db.tx()?;
@@ -70,6 +75,7 @@ where
             DatabaseHashedCursorFactory::new(&account_tx).hashed_account_cursor()?,
             DatabaseHashedCursorFactory::new(&account_tx).hashed_storage_cursor(B256::ZERO)?,
             StorageAddresses::<TX, A> {
+                accounts: lookahead_tx.cursor_read::<tables::HashedAccounts>()?,
                 hashed: lookahead_tx.cursor_dup_read::<tables::HashedStorages>()?,
                 trie: lookahead_tx.cursor_dup_read::<A::StorageTrieTable>()?,
                 next_hashed: None,
@@ -77,6 +83,7 @@ where
                 initialized: false,
             },
             storage_workers,
+            storage_root_limit,
         )?;
         Ok(Self { verifier, _txs: [account_tx, lookahead_tx] })
     }
@@ -99,6 +106,7 @@ impl<TX: DbTx, A: TrieTableAdapter> fmt::Debug for DatabaseVerifier<TX, A> {
 /// Merges the distinct addresses in hashed storage and stored storage tries, including orphan
 /// tries.
 struct StorageAddresses<TX: DbTx, A: TrieTableAdapter> {
+    accounts: CursorTy<TX, tables::HashedAccounts>,
     hashed: DupCursorTy<TX, tables::HashedStorages>,
     trie: DupCursorTy<TX, A::StorageTrieTable>,
     next_hashed: Option<B256>,
@@ -107,7 +115,7 @@ struct StorageAddresses<TX: DbTx, A: TrieTableAdapter> {
 }
 
 impl<TX: DbTx, A: TrieTableAdapter> StorageAddresses<TX, A> {
-    fn next_address(&mut self) -> Result<Option<B256>, DatabaseError> {
+    fn next_address(&mut self) -> Result<Option<StorageJob>, DatabaseError> {
         if !self.initialized {
             self.next_hashed = self.hashed.first()?.map(|(address, _)| address);
             self.next_trie = self.trie.first()?.map(|(address, _)| address);
@@ -124,12 +132,13 @@ impl<TX: DbTx, A: TrieTableAdapter> StorageAddresses<TX, A> {
         if self.next_trie == Some(address) {
             self.next_trie = self.trie.next_no_dup()?.map(|(address, _)| address);
         }
-        Ok(Some(address))
+        let root_required = self.accounts.seek(address)?.is_some_and(|(key, _)| key == address);
+        Ok(Some(StorageJob { address, root_required }))
     }
 }
 
 impl<TX: DbTx, A: TrieTableAdapter> Iterator for StorageAddresses<TX, A> {
-    type Item = Result<B256, DatabaseError>;
+    type Item = Result<StorageJob, DatabaseError>;
 
     fn next(&mut self) -> Option<Self::Item> {
         self.next_address().transpose()

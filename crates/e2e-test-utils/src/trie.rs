@@ -8,7 +8,7 @@ use reth_provider::{
 };
 use reth_trie::{
     prefix_set::{PrefixSetMut, TriePrefixSets},
-    verify::{default_storage_workers, Output},
+    verify::{default_storage_workers, Output, DEFAULT_STORAGE_ROOT_LIMIT},
     StateRoot,
 };
 use reth_trie_db::{DatabaseHashedCursorFactory, DatabaseTrieCursorFactory, DatabaseVerifier};
@@ -44,7 +44,11 @@ where
 
     reth_trie_db::with_adapter!(provider, |A| {
         let db = factory.as_ref().db().clone().with_disable_long_read_transaction_safety();
-        let verifier = DatabaseVerifier::<_, A>::new(&db, default_storage_workers())?;
+        let verifier = DatabaseVerifier::<_, A>::new(
+            &db,
+            default_storage_workers(),
+            DEFAULT_STORAGE_ROOT_LIMIT,
+        )?;
         drop(snapshot_guard);
 
         // Recompute all account leaves from the persisted hashed state. Storage roots are taken
