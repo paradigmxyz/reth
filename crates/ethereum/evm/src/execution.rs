@@ -506,8 +506,8 @@ pub(crate) fn post_block_balance_state_changes<T: EvmTypes>(
     if dao_fork_transition {
         core::hint::cold_path();
         let mut drained_balance = U256::ZERO;
-        // Mirrors revm's `drain_balances` and `increment_balances`: absent accounts stay absent,
-        // and an account that is empty once drained is removed, even before EIP-161.
+        // Absent accounts stay absent, and an account that is empty once drained is removed, even
+        // before EIP-161.
         for address in dao_fork::DAO_HARDFORK_ACCOUNTS {
             let original = evm.read_account_info(&address).map_err(map_database_error)?;
             let Some(original) = original else { continue };

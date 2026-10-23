@@ -1245,7 +1245,7 @@ mod tests {
     }
 
     #[test]
-    fn dao_fork_drain_matches_revm_account_semantics() {
+    fn dao_fork_drain_removes_empty_accounts() {
         let [absent, empty, empty_with_balance, nonce_only, ..] = dao_fork::DAO_HARDFORK_ACCOUNTS;
         let beneficiary = dao_fork::DAO_HARDFORK_BENEFICIARY;
 
@@ -1272,8 +1272,8 @@ mod tests {
             executor.finish_with_block_access_list().unwrap().0
         };
 
-        // Like revm's `drain_balances` on `State`: absent accounts stay absent, and accounts that
-        // are empty after the drain are removed, even before EIP-161.
+        // Absent accounts stay absent, and accounts that are empty after the drain are removed,
+        // even before EIP-161.
         let output = execute(&[
             (empty, AccountInfo::default()),
             (empty_with_balance, AccountInfo::default().with_balance(U256::from(7))),
@@ -1286,7 +1286,7 @@ mod tests {
         assert_eq!((nonce_only_account.nonce, nonce_only_account.balance), (1, U256::ZERO));
         assert_eq!(output.account(&beneficiary).unwrap().unwrap().balance, U256::from(10));
 
-        // Nothing is drained, but revm still applies the zero increment to the beneficiary, which
+        // Nothing is drained, but the zero increment is still applied to the beneficiary, which
         // removes it because it is empty.
         let output = execute(&[(beneficiary, AccountInfo::default())]);
         assert_eq!(output.account(&beneficiary), Some(None));
