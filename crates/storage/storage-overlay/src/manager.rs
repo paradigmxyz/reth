@@ -1022,11 +1022,9 @@ mod tests {
     #[cfg(feature = "rayon")]
     use reth_tasks::WorkerPool;
     use reth_trie::{updates::TrieUpdatesSorted, HashedPostState, HashedStorage, SortedTrieData};
-    use revm::{
-        bytecode::Bytecode,
-        database::BundleState,
-        state::{AccountId, AccountInfo},
-    };
+    use revm_bytecode::Bytecode;
+    use revm_database::BundleState;
+    use revm_state::{AccountId, AccountInfo};
     use std::{
         sync::{mpsc, Arc},
         thread,

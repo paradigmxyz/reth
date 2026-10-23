@@ -23,14 +23,14 @@ mod tests {
         TrieInputSorted,
     };
     use reth_trie_db::{DatabaseStateRoot, DatabaseStorageRoot, LegacyKeyAdapter, PackedKeyAdapter};
-    use revm::database::{
+    use revm_database::{
         states::{
             bundle_state::BundleRetention, changes::PlainStorageRevert, PlainStorageChangeset,
         },
         BundleState, OriginalValuesKnown, State,
     };
-    use revm::database_interface::{DatabaseCommit, EmptyDB};
-    use revm::state::{
+    use revm_database_interface::{DatabaseCommit, EmptyDB};
+    use revm_state::{
         Account as RevmAccount, AccountInfo as RevmAccountInfo, AccountStatus, EvmStorageSlot,
     };
     use std::{collections::BTreeMap, str::FromStr};

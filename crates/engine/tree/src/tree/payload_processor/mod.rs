@@ -32,7 +32,7 @@ pub use reth_trie_parallel::{
         StateRootTaskCancelGuard, StateRootUpdateHook, StateRootUpdateStream,
     },
 };
-use revm::database::BundleState;
+use revm_database::BundleState;
 use std::{
     ops::Not,
     sync::{
@@ -735,7 +735,8 @@ mod tests {
     use reth_chainspec::ChainSpec;
     use reth_evm_ethereum::EthEvmConfig;
     use reth_execution_cache::CachedStatus;
-    use revm::{database::BundleState, state::AccountInfo};
+    use revm_database::BundleState;
+    use revm_state::AccountInfo;
     use std::{
         collections::HashSet,
         process::Command,

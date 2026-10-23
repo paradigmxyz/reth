@@ -23,7 +23,7 @@ reth-prune-types.workspace = true
 reth-stages-types.workspace = true
 reth-storage-errors.workspace = true
 reth-trie-common.workspace = true
-revm.workspace = true
+revm-database.workspace = true
 reth-ethereum-primitives.workspace = true
 
 # ethereum
@@ -44,7 +44,6 @@ alloy-primitives = { workspace = true, features = ["getrandom"] }
 asm-keccak = [
     "reth-execution-types/asm-keccak",
     "alloy-primitives/asm-keccak",
-    "revm/asm-keccak",
 ]
 default = ["std"]
 std = [
@@ -55,7 +54,7 @@ std = [
     "alloy-rpc-types-engine/std",
     "reth-primitives-traits/std",
     "reth-stages-types/std",
-    "revm/std",
+    "revm-database/std",
     "reth-ethereum-primitives/std",
     "reth-execution-types/std",
     "reth-prune-types/std",
@@ -85,7 +84,7 @@ serde = [
     "reth-prune-types/serde",
     "reth-stages-types/serde",
     "reth-trie-common/serde",
-    "revm/serde",
+    "revm-database/serde",
     "alloy-eips/serde",
     "alloy-primitives/serde",
     "alloy-consensus/serde",

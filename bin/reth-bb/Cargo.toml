@@ -12,7 +12,6 @@ description = "Reth node configured for big block payload execution"
 workspace = true
 
 [dependencies]
-revm.workspace = true
 # reth
 reth-ethereum-cli.workspace = true
 reth-chainspec.workspace = true
@@ -109,7 +108,6 @@ asm-keccak = [
     "reth-storage-api/asm-keccak",
     "alloy-primitives/asm-keccak",
     "evm2/asm-keccak",
-    "revm/asm-keccak",
 ]
 portable = [
     "reth-node-ethereum/portable",
@@ -117,7 +115,6 @@ portable = [
     "reth-evm/portable",
     "reth-evm-ethereum/portable",
     "evm2/portable",
-    "revm/portable",
 ]
 
 keccak-cache-global = [

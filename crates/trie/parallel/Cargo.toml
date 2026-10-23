@@ -27,7 +27,7 @@ alloy-primitives.workspace = true
 tracing.workspace = true
 
 # revm
-revm.workspace = true
+revm-state.workspace = true
 
 # misc
 thiserror.workspace = true
@@ -54,6 +54,9 @@ reth-trie = { workspace = true, features = ["test-utils"] }
 # misc
 rand.workspace = true
 tokio = { workspace = true, features = ["rt", "rt-multi-thread", "macros"] }
+
+revm-database.workspace = true
+revm-database-interface.workspace = true
 
 [features]
 default = ["metrics"]

@@ -91,7 +91,8 @@ itertools.workspace = true
 humantime = { workspace = true, optional = true }
 
 [dev-dependencies]
-revm.workspace = true
+revm-database.workspace = true
+revm-state.workspace = true
 reth-testing-utils.workspace = true
 reth-ethereum-primitives.workspace = true
 reth-transaction-pool = { workspace = true, features = ["test-utils"] }
@@ -120,6 +121,6 @@ account-ext = [
     "reth-evm/account-ext",
     "evm2/account-ext",
     "reth-execution-types/account-ext",
-    "revm/account-ext",
+    "revm-state/account-ext",
     "reth-trie-common/account-ext",
 ]

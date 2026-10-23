@@ -72,7 +72,7 @@ serde_json.workspace = true
 tower.workspace = true
 
 [dev-dependencies]
-revm.workspace = true
+revm-database.workspace = true
 reth-db.workspace = true
 reth-exex.workspace = true
 reth-e2e-test-utils.workspace = true
@@ -122,7 +122,6 @@ account-ext = [
     "evm2/account-ext",
     "reth-execution-types/account-ext",
     "reth-trie-common/account-ext",
-    "revm/account-ext",
 ]
 jit = ["reth-evm-ethereum/jit"]
 asm-keccak = [
@@ -133,14 +132,12 @@ asm-keccak = [
     "evm2/asm-keccak",
     "reth-execution-types/asm-keccak",
     "reth-engine-tree/asm-keccak",
-    "revm/asm-keccak",
 ]
 portable = [
     "reth-evm/portable",
     "reth-evm-ethereum/portable",
     "evm2/portable",
     "reth-execution-types/portable",
-    "revm/portable",
     "reth-engine-tree/portable",
 ]
 keccak-cache-global = [

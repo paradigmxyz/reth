@@ -25,7 +25,8 @@ use reth_trie_common::{
     root::storage_root, HashedPostState, HashedPostStateSorted, HashedStorage, TrieAccount,
     EMPTY_ROOT_HASH,
 };
-use revm::{bytecode::Bytecode, database::states::StateChangeset};
+use revm_bytecode::Bytecode;
+use revm_database::states::StateChangeset;
 use serde::{Deserialize, Serialize};
 use std::ops::Bound;
 

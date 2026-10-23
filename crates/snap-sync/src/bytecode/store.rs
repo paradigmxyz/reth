@@ -11,7 +11,8 @@ use reth_db_api::{
     RawKey, RawTable,
 };
 use reth_storage_api::{DBProvider, MetadataProvider, StateWriter};
-use revm::{bytecode::Bytecode, database::states::StateChangeset};
+use revm_bytecode::Bytecode;
+use revm_database::states::StateChangeset;
 
 /// Persistence for the code an attempt's accounts reference.
 ///

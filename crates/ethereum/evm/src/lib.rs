@@ -318,6 +318,8 @@ pub use convert::ExecutableRecoveredTx;
 
 mod execution;
 
+mod dao_fork;
+
 mod receipt;
 pub use receipt::RethReceiptBuilder;
 

@@ -94,7 +94,7 @@ impl<'a, DB> ExecutionWitnessRecord<'a, DB> {
                 .collect()
         };
 
-        let mut wiped_state = revm::database::BundleState::default();
+        let mut wiped_state = revm_database::BundleState::default();
         for (address, storage) in &self.state.cache.storage {
             if storage.wiped {
                 let info = self
@@ -106,7 +106,7 @@ impl<'a, DB> ExecutionWitnessRecord<'a, DB> {
                     .map(reth_execution_types::revm_account);
                 wiped_state.state.insert(
                     *address,
-                    revm::database::BundleAccount::new(
+                    revm_database::BundleAccount::new(
                         // Original existence determines whether parent storage proofs are needed.
                         state_provider
                             .basic_account(address)?
@@ -114,9 +114,9 @@ impl<'a, DB> ExecutionWitnessRecord<'a, DB> {
                         info.clone(),
                         Default::default(),
                         if info.is_some() {
-                            revm::database::AccountStatus::DestroyedChanged
+                            revm_database::AccountStatus::DestroyedChanged
                         } else {
-                            revm::database::AccountStatus::Destroyed
+                            revm_database::AccountStatus::Destroyed
                         },
                     ),
                 );

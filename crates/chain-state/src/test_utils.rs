@@ -20,7 +20,8 @@ use reth_primitives_traits::{
     SignedTransaction,
 };
 use reth_trie::{root::state_root_unhashed, SortedTrieData};
-use revm::{database::BundleState, state::AccountInfo};
+use revm_database::BundleState;
+use revm_state::AccountInfo;
 use std::{
     ops::Range,
     sync::{Arc, Mutex},

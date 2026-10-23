@@ -11,7 +11,7 @@ repository.workspace = true
 workspace = true
 
 [dependencies]
-revm.workspace = true
+revm-database.workspace = true
 # reth
 reth-execution-errors.workspace = true
 reth-execution-types.workspace = true
@@ -24,7 +24,6 @@ reth-trie-common.workspace = true
 evm2.workspace = true
 
 # alloy
-alloy-evm.workspace = true
 alloy-primitives.workspace = true
 alloy-eips.workspace = true
 alloy-consensus.workspace = true
@@ -47,7 +46,6 @@ reth-ethereum-primitives.workspace = true
 account-ext = [
     "evm2/account-ext",
     "reth-execution-types/account-ext",
-    "revm/account-ext",
     "reth-primitives-traits/account-ext",
     "reth-trie-common/account-ext",
 ]
@@ -58,8 +56,6 @@ asm-keccak = [
     "reth-execution-types/asm-keccak",
     "reth-storage-api/asm-keccak",
     "alloy-primitives/asm-keccak",
-    "revm/asm-keccak",
-    "alloy-evm/asm-keccak",
 ]
 c-kzg = [
     "evm2/c-kzg",
@@ -72,14 +68,12 @@ blst = [
 portable = [
     "evm2/portable",
     "reth-execution-types/portable",
-    "revm/portable",
 ]
 p256-aws-lc-rs = [
     "evm2/p256-aws-lc-rs",
     "reth-execution-types/p256-aws-lc-rs",
 ]
 std = [
-    "alloy-evm/std",
     "dep:moka",
     "dep:rayon",
     "dep:tracing",
@@ -101,7 +95,7 @@ std = [
     "alloy-eip7928/std",
     "fixed-cache/std",
     "alloy-rlp?/std",
-    "revm/std",
+    "revm-database/std",
 ]
 metrics = ["std", "dep:metrics", "dep:reth-metrics"]
 witness = ["dep:alloy-rlp", "dep:alloy-rpc-types-debug", "dep:reth-storage-errors"]

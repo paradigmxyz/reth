@@ -16,7 +16,7 @@ use reth_storage_api::{
 };
 use reth_tasks::Runtime;
 use reth_trie_common::HashedStorage;
-use revm::bytecode::Bytecode;
+use revm_bytecode::Bytecode;
 use std::fmt;
 
 /// Downloads the account ranges an attempt still needs, one at a time in key order.
