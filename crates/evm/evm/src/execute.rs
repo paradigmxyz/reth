@@ -22,8 +22,7 @@ use reth_primitives_traits::{
     TxTy,
 };
 use reth_storage_api::StateProvider;
-use reth_trie_common::updates::TrieUpdates;
-use revm_database::BundleState;
+use reth_trie_common::{bundle_state::BundleState, updates::TrieUpdates};
 
 #[cfg(feature = "std")]
 use evm2::evm::{CacheDB, Db};

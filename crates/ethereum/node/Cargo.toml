@@ -72,7 +72,6 @@ serde_json.workspace = true
 tower.workspace = true
 
 [dev-dependencies]
-revm-database.workspace = true
 reth-db.workspace = true
 reth-exex.workspace = true
 reth-e2e-test-utils.workspace = true

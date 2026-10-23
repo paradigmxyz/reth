@@ -10,7 +10,6 @@ repository.workspace = true
 [lints]
 
 [dependencies]
-revm-database.workspace = true
 # reth
 reth-chainspec.workspace = true
 reth-cli.workspace = true

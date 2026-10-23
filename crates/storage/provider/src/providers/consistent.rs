@@ -28,7 +28,7 @@ use reth_storage_api::{
     StorageChangeSetReader,
 };
 use reth_storage_errors::provider::ProviderResult;
-use revm_database::states::PlainStorageRevert;
+use reth_trie::bundle_state::PlainStorageRevert;
 use std::{
     ops::{Add, Bound, RangeBounds, RangeInclusive, Sub},
     sync::Arc,
@@ -1280,7 +1280,7 @@ impl<N: ProviderNodeTypes> ChangeSetReader for ConsistentProvider<N> {
                 .flatten()
                 .map(|(address, info)| AccountBeforeTx {
                     address,
-                    info: info.map(|info| reth_execution_types::account_from_revm(&info)),
+                    info: info.map(reth_primitives_traits::Account::from),
                 })
                 .collect();
             Ok(changesets)
@@ -1329,7 +1329,7 @@ impl<N: ProviderNodeTypes> ChangeSetReader for ConsistentProvider<N> {
                 .find(|(addr, _)| addr == &address)
                 .map(|(address, info)| AccountBeforeTx {
                     address,
-                    info: info.map(|info| reth_execution_types::account_from_revm(&info)),
+                    info: info.map(reth_primitives_traits::Account::from),
                 });
             Ok(changeset)
         } else {
@@ -1383,7 +1383,7 @@ impl<N: ProviderNodeTypes> ChangeSetReader for ConsistentProvider<N> {
                     .flatten()
                     .map(|(address, info)| AccountBeforeTx {
                         address,
-                        info: info.map(|info| reth_execution_types::account_from_revm(&info)),
+                        info: info.map(reth_primitives_traits::Account::from),
                     });
 
                 for changeset in block_changesets {
@@ -1438,7 +1438,7 @@ mod tests {
     use reth_testing_utils::generators::{
         self, random_block_range, random_changeset_range, random_eoa_accounts, BlockRangeParams,
     };
-    use revm_database::BundleState;
+    use reth_trie::bundle_state::BundleState;
     use std::{
         ops::{Bound, Range, RangeBounds},
         sync::Arc,
@@ -1745,20 +1745,11 @@ mod tests {
             &ExecutionOutcome {
                 bundle: BundleState::new(
                     database_state.into_iter().map(|(address, (account, _))| {
-                        (
-                            address,
-                            None,
-                            Some(reth_execution_types::account_to_revm(account)),
-                            Default::default(),
-                        )
+                        (address, None, Some(account.into()), Default::default())
                     }),
                     database_changesets.iter().map(|block_changesets| {
                         block_changesets.iter().map(|(address, account, _)| {
-                            (
-                                *address,
-                                Some(Some(reth_execution_types::account_to_revm(account.clone()))),
-                                [],
-                            )
+                            (*address, Some(Some(account.clone().into())), [])
                         })
                     }),
                     Vec::new(),
@@ -1786,21 +1777,10 @@ mod tests {
                         execution_output: Arc::new(BlockExecutionOutput {
                             state: BundleState::new(
                                 in_memory_state.into_iter().map(|(address, (account, _))| {
-                                    (
-                                        address,
-                                        None,
-                                        Some(reth_execution_types::account_to_revm(account)),
-                                        Default::default(),
-                                    )
+                                    (address, None, Some(account.into()), Default::default())
                                 }),
                                 [in_memory_changesets.iter().map(|(address, account, _)| {
-                                    (
-                                        *address,
-                                        Some(Some(reth_execution_types::account_to_revm(
-                                            account.clone(),
-                                        ))),
-                                        Vec::new(),
-                                    )
+                                    (*address, Some(Some(account.clone().into())), Vec::new())
                                 })],
                                 [],
                             ),
@@ -1877,21 +1857,16 @@ mod tests {
                 .collect(),
             &ExecutionOutcome {
                 bundle: BundleState::new(
-                    [(
-                        address,
-                        None,
-                        Some(reth_execution_types::account_to_revm(account.clone())),
-                        {
-                            let mut s = HashMap::default();
-                            s.insert(slot, (U256::ZERO, U256::from(100)));
-                            s
-                        },
-                    )],
+                    [(address, None, Some(account.clone().into()), {
+                        let mut s = HashMap::default();
+                        s.insert(slot, (U256::ZERO, U256::from(100)));
+                        s
+                    })],
                     [
                         Vec::new(),
                         vec![(
                             address,
-                            Some(Some(reth_execution_types::account_to_revm(account.clone()))),
+                            Some(Some(account.clone().into())),
                             vec![(slot, U256::ZERO)],
                         )],
                     ],
@@ -1958,21 +1933,12 @@ mod tests {
                 .collect(),
             &ExecutionOutcome {
                 bundle: BundleState::new(
-                    [(
-                        address,
-                        None,
-                        Some(reth_execution_types::account_to_revm(account.clone())),
-                        {
-                            let mut s = HashMap::default();
-                            s.insert(slot, (U256::ZERO, U256::from(100)));
-                            s
-                        },
-                    )],
-                    [[(
-                        address,
-                        Some(Some(reth_execution_types::account_to_revm(account.clone()))),
-                        vec![(slot, U256::ZERO)],
-                    )]],
+                    [(address, None, Some(account.clone().into()), {
+                        let mut s = HashMap::default();
+                        s.insert(slot, (U256::ZERO, U256::from(100)));
+                        s
+                    })],
+                    [[(address, Some(Some(account.clone().into())), vec![(slot, U256::ZERO)])]],
                     [],
                 ),
                 first_block: 0,
@@ -1994,21 +1960,12 @@ mod tests {
                 )),
                 execution_output: Arc::new(BlockExecutionOutput {
                     state: BundleState::new(
-                        [(
-                            address,
-                            None,
-                            Some(reth_execution_types::account_to_revm(account.clone())),
-                            {
-                                let mut s = HashMap::default();
-                                s.insert(slot, (U256::from(100), U256::from(200)));
-                                s
-                            },
-                        )],
-                        [[(
-                            address,
-                            Some(Some(reth_execution_types::account_to_revm(account))),
-                            vec![(slot, U256::from(100))],
-                        )]],
+                        [(address, None, Some(account.clone().into()), {
+                            let mut s = HashMap::default();
+                            s.insert(slot, (U256::from(100), U256::from(200)));
+                            s
+                        })],
+                        [[(address, Some(Some(account.into())), vec![(slot, U256::from(100))])]],
                         [],
                     ),
                     result: BlockExecutionResult {
@@ -2075,20 +2032,15 @@ mod tests {
                 .collect(),
             &ExecutionOutcome {
                 bundle: BundleState::new(
-                    [(
-                        address,
-                        None,
-                        Some(reth_execution_types::account_to_revm(account.clone())),
-                        {
-                            let mut s = HashMap::default();
-                            s.insert(slot, (U256::ZERO, U256::from(100)));
-                            s
-                        },
-                    )],
+                    [(address, None, Some(account.clone().into()), {
+                        let mut s = HashMap::default();
+                        s.insert(slot, (U256::ZERO, U256::from(100)));
+                        s
+                    })],
                     vec![
                         vec![(
                             address,
-                            Some(Some(reth_execution_types::account_to_revm(account.clone()))),
+                            Some(Some(account.clone().into())),
                             vec![(slot, U256::ZERO)],
                         )],
                         vec![],
@@ -2114,21 +2066,12 @@ mod tests {
                 )),
                 execution_output: Arc::new(BlockExecutionOutput {
                     state: BundleState::new(
-                        [(
-                            address,
-                            None,
-                            Some(reth_execution_types::account_to_revm(account.clone())),
-                            {
-                                let mut s = HashMap::default();
-                                s.insert(slot, (U256::from(100), U256::from(200)));
-                                s
-                            },
-                        )],
-                        [[(
-                            address,
-                            Some(Some(reth_execution_types::account_to_revm(account))),
-                            vec![(slot, U256::from(100))],
-                        )]],
+                        [(address, None, Some(account.clone().into()), {
+                            let mut s = HashMap::default();
+                            s.insert(slot, (U256::from(100), U256::from(200)));
+                            s
+                        })],
+                        [[(address, Some(Some(account.into())), vec![(slot, U256::from(100))])]],
                         [],
                     ),
                     result: BlockExecutionResult {

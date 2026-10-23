@@ -128,7 +128,7 @@ use crate::tree::{
     },
 };
 use alloy_primitives::Address;
-use evm2::evm::Bal as EvmBal;
+use evm2::evm::{AccountInfo, Bal as EvmBal};
 use reth_chain_state::{CanonicalInMemoryState, ExecutedBlock, ExecutionTimingStats};
 use reth_consensus::{ConsensusError, FullConsensus, ReceiptRootBloom};
 use reth_engine_primitives::{
@@ -160,8 +160,7 @@ use reth_provider::{
 };
 use reth_storage_overlay::{OverlayManager, OverlayStateProviderFactory};
 use reth_trie::{updates::TrieUpdates, HashedPostState, KeccakKeyHasher, LazyTrieData};
-use revm_database::BundleAccount;
-use revm_state::AccountInfo;
+use reth_trie_common::bundle_state::BundleAccount;
 use std::{
     sync::{
         atomic::{AtomicUsize, Ordering},

@@ -24,15 +24,15 @@ use reth_provider::{
 };
 use reth_storage_overlay::OverlayStateProviderFactory;
 use reth_tasks::Runtime;
+use reth_trie_common::bundle_state::BundleState;
 pub use reth_trie_parallel::{
     error::StateRootTaskError,
     state_root_task::{
-        evm_state_to_hashed_post_state, PayloadStateRootHandle, StateAccessHint,
-        StateRootComputeOutcome, StateRootHandle, StateRootHintStream, StateRootMessage,
-        StateRootTaskCancelGuard, StateRootUpdateHook, StateRootUpdateStream,
+        PayloadStateRootHandle, StateAccessHint, StateRootComputeOutcome, StateRootHandle,
+        StateRootHintStream, StateRootMessage, StateRootTaskCancelGuard, StateRootUpdateHook,
+        StateRootUpdateStream,
     },
 };
-use revm_database::BundleState;
 use std::{
     ops::Not,
     sync::{
@@ -728,6 +728,7 @@ mod tests {
     use alloy_consensus::constants::KECCAK_EMPTY;
     use alloy_eips::eip1898::{BlockNumHash, BlockWithParent};
     use alloy_primitives::{Address, B256, U256};
+    use evm2::evm::AccountInfo;
     use proptest::{
         prelude::any,
         test_runner::{Config, TestRunner},
@@ -735,8 +736,7 @@ mod tests {
     use reth_chainspec::ChainSpec;
     use reth_evm_ethereum::EthEvmConfig;
     use reth_execution_cache::CachedStatus;
-    use revm_database::BundleState;
-    use revm_state::AccountInfo;
+    use reth_trie_common::bundle_state::BundleState;
     use std::{
         collections::HashSet,
         process::Command,

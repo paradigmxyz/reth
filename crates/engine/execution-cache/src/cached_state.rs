@@ -11,7 +11,7 @@ use reth_errors::ProviderResult;
 use reth_metrics::Metrics;
 use reth_primitives_traits::{Account, Bytecode};
 use reth_storage_api::EvmStateProvider;
-use revm_database::BundleState;
+use reth_trie_common::bundle_state::BundleState;
 use std::{
     cell::Cell,
     fmt,
@@ -1136,7 +1136,7 @@ impl ExecutionCache {
                 .entered();
         // Insert bytecodes
         for (code_hash, bytecode) in &state_updates.contracts {
-            self.insert_code(*code_hash, Some(reth_execution_types::reth_bytecode(bytecode)));
+            self.insert_code(*code_hash, Some(reth_primitives_traits::Bytecode(bytecode.clone())));
         }
         drop(_enter);
 
@@ -1197,7 +1197,7 @@ impl ExecutionCache {
 
             // Insert will update if present, so we just use the new account info as the new value
             // for the account cache
-            self.insert_account(*addr, Some(reth_execution_types::account_from_revm(account_info)));
+            self.insert_account(*addr, Some(reth_primitives_traits::Account::from(account_info)));
         }
 
         Ok(())
@@ -1310,10 +1310,10 @@ impl SavedCache {
 mod tests {
     use super::*;
     use alloy_primitives::{map::HashMap, U256};
+    use evm2::evm::AccountInfo;
     use reth_provider::test_utils::{ExtendedAccount, MockEthProvider};
     use reth_storage_api::StateProvider;
-    use revm_database::{AccountStatus, BundleAccount};
-    use revm_state::AccountInfo;
+    use reth_trie_common::bundle_state::{AccountStatus, BundleAccount};
 
     #[test]
     fn test_empty_storage_cached_state_provider() {

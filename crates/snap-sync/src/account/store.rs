@@ -11,6 +11,7 @@ use alloy_primitives::{
     map::{B256Map, B256Set},
     B256, KECCAK256_EMPTY, U256,
 };
+use evm2::bytecode::Bytecode;
 use reth_db_api::{
     tables,
     transaction::{DbTx, DbTxMut},
@@ -22,11 +23,9 @@ use reth_storage_api::{
     BlockHashReader, DBProvider, MetadataProvider, MetadataWriter, SnapAttemptId, StateWriter,
 };
 use reth_trie_common::{
-    root::storage_root, HashedPostState, HashedPostStateSorted, HashedStorage, TrieAccount,
-    EMPTY_ROOT_HASH,
+    bundle_state::StateChangeset, root::storage_root, HashedPostState, HashedPostStateSorted,
+    HashedStorage, TrieAccount, EMPTY_ROOT_HASH,
 };
-use revm_bytecode::Bytecode;
-use revm_database::states::StateChangeset;
 use serde::{Deserialize, Serialize};
 use std::ops::Bound;
 

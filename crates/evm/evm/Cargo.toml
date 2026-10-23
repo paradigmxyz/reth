@@ -11,7 +11,6 @@ repository.workspace = true
 workspace = true
 
 [dependencies]
-revm-database.workspace = true
 # reth
 reth-execution-errors.workspace = true
 reth-execution-types.workspace = true
@@ -95,7 +94,6 @@ std = [
     "alloy-eip7928/std",
     "fixed-cache/std",
     "alloy-rlp?/std",
-    "revm-database/std",
 ]
 metrics = ["std", "dep:metrics", "dep:reth-metrics"]
 witness = ["dep:alloy-rlp", "dep:alloy-rpc-types-debug", "dep:reth-storage-errors"]

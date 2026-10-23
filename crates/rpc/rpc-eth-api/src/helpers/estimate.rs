@@ -3,7 +3,7 @@
 use super::{call::request_gas_price, Call, LoadPendingBlock};
 use crate::{AsEthApiError, FromEthApiError, FromEvmError, IntoEthApiError};
 use alloy_network::TransactionBuilder;
-use alloy_primitives::{TxKind, KECCAK256_EMPTY, U256};
+use alloy_primitives::{TxKind, U256};
 use alloy_rpc_types_eth::{state::EvmOverrides, BlockId};
 use evm2::{evm::DynDatabase, EvmFeatures, TxResult};
 use futures::Future;
@@ -109,7 +109,7 @@ pub trait EstimateCall: Call {
             let Some(TxKind::Call(to)) = request.as_ref().kind()
         {
             match db.get_account(&to) {
-                Ok(Some(account)) => account.code_hash == KECCAK256_EMPTY,
+                Ok(Some(account)) => account.is_empty_code_hash(),
                 Ok(None) => true,
                 Err(_) => false,
             }

@@ -39,8 +39,7 @@ reth-trie = { workspace = true, features = ["test-utils"] }
 
 alloy-consensus.workspace = true
 alloy-rlp.workspace = true
-revm-database.workspace = true
-revm-state.workspace = true
+evm2.workspace = true
 
 # trie
 triehash.workspace = true
@@ -61,9 +60,8 @@ serde = [
     "reth-trie/serde",
     "reth-trie-common/serde",
     "reth-primitives-traits/serde",
-    "revm-database/serde",
-    "revm-state/serde",
     "reth-stages-types/serde",
+    "evm2/serde",
 ]
 test-utils = [
     "reth-trie-common/test-utils",
@@ -80,6 +78,6 @@ account-ext = [
     "reth-provider/account-ext",
     "reth-primitives-traits/account-ext",
     "reth-stages-types/account-ext",
-    "revm-state/account-ext",
     "reth-trie-common/account-ext",
+    "evm2/account-ext",
 ]

@@ -32,6 +32,9 @@ reth-trie-db.workspace = true
 alloy-eips.workspace = true
 alloy-primitives.workspace = true
 
+# evm
+evm2.workspace = true
+
 # metrics
 metrics.workspace = true
 
@@ -39,9 +42,6 @@ metrics.workspace = true
 parking_lot.workspace = true
 rayon = { workspace = true, optional = true }
 tracing.workspace = true
-revm-bytecode.workspace = true
-revm-database.workspace = true
-revm-state.workspace = true
 
 [dev-dependencies]
 reth-chain-state = { workspace = true, features = ["test-utils"] }

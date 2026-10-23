@@ -12,7 +12,6 @@ description = "Staged syncing primitives used in reth."
 workspace = true
 
 [dependencies]
-revm-database.workspace = true
 # reth
 reth-chainspec.workspace = true
 reth-codecs.workspace = true

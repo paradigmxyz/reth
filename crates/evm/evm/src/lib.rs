@@ -47,8 +47,8 @@ pub use execute::{
     InternalBlockExecutionError, IntoTxEnv, InvalidTxError, ReceiptBuilder, ReceiptBuilderCtx,
     RecoveredTx, TransactionEnvMut, WithTxEnv,
 };
-pub use reth_execution_types::{EvmState, OnStateHook, StateUpdate};
-pub use revm_database::BundleState;
+pub use reth_execution_types::{OnStateHook, StateUpdate};
+pub use reth_trie_common::bundle_state::BundleState;
 
 /// Transaction validation limits resolved for an EVM environment.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

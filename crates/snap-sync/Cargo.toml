@@ -26,14 +26,13 @@ reth-storage-errors.workspace = true
 reth-tasks.workspace = true
 reth-trie-common.workspace = true
 
+# evm
+evm2.workspace = true
+
 # alloy
 alloy-eip7928.workspace = true
 alloy-eips = { workspace = true, features = ["serde"] }
 alloy-primitives.workspace = true
-
-# revm
-revm-bytecode.workspace = true
-revm-database.workspace = true
 
 # misc
 futures.workspace = true
@@ -45,7 +44,6 @@ tracing.workspace = true
 
 [dev-dependencies]
 reth-execution-types.workspace = true
-evm2.workspace = true
 alloy-consensus.workspace = true
 alloy-rlp.workspace = true
 reth-chainspec.workspace = true

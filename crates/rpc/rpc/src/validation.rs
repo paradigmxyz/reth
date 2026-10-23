@@ -846,6 +846,7 @@ mod tests {
     use alloy_primitives::{Address, B256, U256};
     use alloy_rpc_types_beacon::relay::BidTrace;
     use alloy_rpc_types_engine::{ExecutionData, ExecutionPayload, ExecutionPayloadV1};
+    use evm2::evm::AccountInfo;
     use reth_consensus::noop::NoopConsensus;
     use reth_engine_primitives::PayloadValidator;
     use reth_ethereum_engine_primitives::EthPayloadTypes;
@@ -856,8 +857,7 @@ mod tests {
     use reth_primitives_traits::{RecoveredBlock, SealedBlock, SealedHeader};
     use reth_provider::test_utils::MockEthProvider;
     use reth_tasks::Runtime;
-    use revm_database::{states::bundle_state::BundleState, AccountStatus, BundleAccount};
-    use revm_state::AccountInfo;
+    use reth_trie_common::bundle_state::{AccountStatus, BundleAccount, BundleState};
     use std::sync::Arc;
 
     fn test_execution_payload() -> ExecutionPayload {

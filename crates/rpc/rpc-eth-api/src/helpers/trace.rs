@@ -415,7 +415,7 @@ pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> + Call {
         &self,
         block: &RecoveredBlock<ProviderBlock<Self::Provider>>,
         db: &mut StateCacheDb,
-    ) -> Result<revm_database::BundleState, Self::Error> {
+    ) -> Result<reth_trie_common::bundle_state::BundleState, Self::Error> {
         let evm_env = self.evm_env_for_header(block.sealed_block().sealed_header())?;
         let ctx = self
             .evm_config()

@@ -800,7 +800,7 @@ mod tests {
     use reth_prune_types::{PruneMode, ReceiptsLogPruneConfig};
     use reth_stages_api::StageUnitCheckpoint;
     use reth_testing_utils::generators;
-    use revm_database::{AccountStatus, BundleAccount};
+    use reth_trie::bundle_state::{AccountStatus, BundleAccount};
     use std::collections::BTreeMap;
 
     fn stage() -> ExecutionStage<EthEvmConfig> {

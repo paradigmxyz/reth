@@ -435,15 +435,10 @@ reth-trie-parallel = { path = "crates/trie/parallel" }
 reth-trie-sparse = { path = "crates/trie/sparse", default-features = false }
 reth-zstd-compressors = { version = "0.8.2", default-features = false }
 
-# State types used by persistence and unwind.
-revm-bytecode = { version = "43.0.0", default-features = false }
-revm-database = { version = "43.0.1", default-features = false }
-revm-database-interface = { version = "43.0.1", default-features = false }
-revm-state = { version = "43.0.1", default-features = false }
 # evm2
-evm2 = { git = "https://github.com/alloy-rs/evm2", rev = "df9d344582a23ad36081a23788d5f736de5f0f35", default-features = false }
-evm2-inspectors = { git = "https://github.com/alloy-rs/evm2", rev = "df9d344582a23ad36081a23788d5f736de5f0f35", default-features = false }
-evm2-jit = { git = "https://github.com/alloy-rs/evm2", rev = "df9d344582a23ad36081a23788d5f736de5f0f35", default-features = false }
+evm2 = { git = "https://github.com/alloy-rs/evm2", rev = "cd84c4815692a4473c6786011f1378732360c106", default-features = false }
+evm2-inspectors = { git = "https://github.com/alloy-rs/evm2", rev = "cd84c4815692a4473c6786011f1378732360c106", default-features = false }
+evm2-jit = { git = "https://github.com/alloy-rs/evm2", rev = "cd84c4815692a4473c6786011f1378732360c106", default-features = false }
 
 # eth
 alloy-dyn-abi = "1.6.1"
@@ -685,3 +680,10 @@ reth-codecs-derive = { git = "https://github.com/paradigmxyz/reth-core", rev = "
 reth-primitives-traits = { git = "https://github.com/paradigmxyz/reth-core", rev = "bd0edad994bfbb1e5cea8ca5b4da5d8813baa5f1" }
 reth-rpc-traits = { git = "https://github.com/paradigmxyz/reth-core", rev = "bd0edad994bfbb1e5cea8ca5b4da5d8813baa5f1" }
 reth-zstd-compressors = { git = "https://github.com/paradigmxyz/reth-core", rev = "bd0edad994bfbb1e5cea8ca5b4da5d8813baa5f1" }
+
+# evm2 is patched through its pre-transfer URL, which redirects to alloy-rs/evm2, because Cargo
+# rejects a patch from the same source.
+[patch."https://github.com/alloy-rs/evm2"]
+evm2 = { git = "https://github.com/DaniPopes/evm2", rev = "cd84c4815692a4473c6786011f1378732360c106" }
+evm2-inspectors = { git = "https://github.com/DaniPopes/evm2", rev = "cd84c4815692a4473c6786011f1378732360c106" }
+evm2-jit = { git = "https://github.com/DaniPopes/evm2", rev = "cd84c4815692a4473c6786011f1378732360c106" }

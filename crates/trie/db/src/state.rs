@@ -347,6 +347,7 @@ impl DatabaseHashedPostState for HashedPostStateSorted {
 mod tests {
     use super::*;
     use alloy_primitives::{hex, keccak256, map::HashMap, Address, B256, U256};
+    use evm2::evm::AccountInfo;
     use reth_db_api::{
         models::{AccountBeforeTx, BlockNumberAddress},
         tables,
@@ -359,8 +360,7 @@ mod tests {
     use reth_trie::{
         HashedPostState, HashedPostStateSorted, HashedStorage, KeccakKeyHasher, StateRoot,
     };
-    use revm_database::BundleState;
-    use revm_state::AccountInfo;
+    use reth_trie_common::bundle_state::BundleState;
 
     fn overlay_root_for_provider<TX: reth_db_api::transaction::DbTx>(
         provider: &impl StorageSettingsCache,
