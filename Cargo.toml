@@ -678,8 +678,8 @@ ipnet = "2.11"
 inkwell = { git = "https://github.com/TheDan64/inkwell", rev = "c9d9734ae17dbaf1d9902dab3b8ee9d2041781ff" }
 
 # reth-core
-reth-codecs = { git = "https://github.com/paradigmxyz/reth-core", rev = "d93c2c8828d9c0250d1def2d00a591fd39c0fa20" }
-reth-codecs-derive = { git = "https://github.com/paradigmxyz/reth-core", rev = "d93c2c8828d9c0250d1def2d00a591fd39c0fa20" }
-reth-primitives-traits = { git = "https://github.com/paradigmxyz/reth-core", rev = "d93c2c8828d9c0250d1def2d00a591fd39c0fa20" }
-reth-rpc-traits = { git = "https://github.com/paradigmxyz/reth-core", rev = "d93c2c8828d9c0250d1def2d00a591fd39c0fa20" }
-reth-zstd-compressors = { git = "https://github.com/paradigmxyz/reth-core", rev = "d93c2c8828d9c0250d1def2d00a591fd39c0fa20" }
+reth-codecs = { git = "https://github.com/paradigmxyz/reth-core", rev = "bd0edad994bfbb1e5cea8ca5b4da5d8813baa5f1" }
+reth-codecs-derive = { git = "https://github.com/paradigmxyz/reth-core", rev = "bd0edad994bfbb1e5cea8ca5b4da5d8813baa5f1" }
+reth-primitives-traits = { git = "https://github.com/paradigmxyz/reth-core", rev = "bd0edad994bfbb1e5cea8ca5b4da5d8813baa5f1" }
+reth-rpc-traits = { git = "https://github.com/paradigmxyz/reth-core", rev = "bd0edad994bfbb1e5cea8ca5b4da5d8813baa5f1" }
+reth-zstd-compressors = { git = "https://github.com/paradigmxyz/reth-core", rev = "bd0edad994bfbb1e5cea8ca5b4da5d8813baa5f1" }
