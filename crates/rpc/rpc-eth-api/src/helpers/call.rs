@@ -933,6 +933,13 @@ pub trait Call:
         // <https://github.com/paradigmxyz/reth/issues/18470>
         evm_env.version_mut().features.remove(evm2::EvmFeatures::FEE_CHARGE);
 
+        // Calls do not pay upfront fees. Preserve the caller's actual balance so value transfers
+        // still fail during execution when it is insufficient, without topping up the account.
+        evm_env
+            .version_mut()
+            .features
+            .remove(evm2::EvmFeatures::BALANCE_CHECK | evm2::EvmFeatures::BALANCE_TOP_UP);
+
         evm_env.version_mut().memory_limit = self.evm_memory_limit();
 
         // set nonce to None so that the correct nonce is chosen by the EVM
