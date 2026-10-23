@@ -10752,6 +10752,7 @@ dependencies = [
  "reth-storage-api",
  "reth-tasks",
  "reth-transaction-pool",
+ "reth-trie-common",
  "schnellru",
  "serde",
  "serde_json",

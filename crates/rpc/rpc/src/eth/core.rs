@@ -1709,6 +1709,7 @@ mod tests {
         .build();
         // The first block leaves the overridden accounts untouched. The second replaces storage
         // (including a slot introduced by the first override), then execution overwrites slot zero.
+        // The third executes against the same account again without overriding it.
         let code = alloy_primitives::bytes!("600960005500");
         let first = SimBlock {
             state_overrides: Some(StateOverride::from_iter([
@@ -1747,11 +1748,19 @@ mod tests {
                 .with_gas_limit(100_000)
                 .with_gas_price(0),
         );
+        let third = SimBlock::default().call(
+            TransactionRequest::default()
+                .with_from(sender)
+                .with_to(contract)
+                .with_nonce(1)
+                .with_gas_limit(100_000)
+                .with_gas_price(0),
+        );
         let blocks = EthCall::simulate_v1(
             &api,
             SimulatePayload {
                 validation: true,
-                block_state_calls: vec![first, second],
+                block_state_calls: vec![first, second, third],
                 ..Default::default()
             },
             None,
@@ -1759,10 +1768,12 @@ mod tests {
         .await
         .unwrap();
         assert!(blocks[1].calls[0].status);
+        assert!(blocks[2].calls[0].status);
 
         // Genesis trie construction supplies an independent root for the expected full state.
         for (index, storage) in [
             [(slot(0), slot(1)), (slot(1), slot(2)), (slot(2), slot(3))].into_iter().collect(),
+            std::iter::once((slot(0), slot(9))).collect(),
             std::iter::once((slot(0), slot(9))).collect(),
         ]
         .into_iter()
