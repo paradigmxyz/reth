@@ -42,26 +42,6 @@ pub trait InvalidTxError: Error + Send + Sync + Any + 'static {
     fn as_any(&self) -> &(dyn Any + 'static);
 }
 
-/// Abstraction over errors that can occur during EVM execution.
-pub trait EvmError: Sized + Error + Send + Sync + 'static {
-    /// Transaction validation error type.
-    type InvalidTransaction: InvalidTxError;
-
-    /// Returns the invalid transaction error, if this error represents one.
-    fn as_invalid_tx_err(&self) -> Option<&Self::InvalidTransaction>;
-
-    /// Attempts to convert this error into an invalid transaction error.
-    fn try_into_invalid_tx_err(self) -> Result<Self::InvalidTransaction, Self>;
-
-    /// Returns `true` if the error should be treated as fatal to block execution.
-    fn is_fatal(&self) -> bool;
-
-    /// Returns `true` if this is an invalid transaction error.
-    fn is_invalid_tx_err(&self) -> bool {
-        self.as_invalid_tx_err().is_some()
-    }
-}
-
 /// Block validation error.
 #[derive(Debug, thiserror::Error)]
 pub enum BlockValidationError {
@@ -195,19 +175,6 @@ impl BlockExecutionError {
         match self {
             Self::Internal(err) => Some(err),
             _ => None,
-        }
-    }
-
-    /// Converts an EVM execution error into the appropriate block execution error.
-    pub fn evm<E: EvmError>(error: E, hash: B256) -> Self {
-        match error.try_into_invalid_tx_err() {
-            Ok(err) => {
-                Self::Validation(BlockValidationError::InvalidTx { hash, error: Box::new(err) })
-            }
-            Err(err) if err.is_fatal() => {
-                Self::Internal(InternalBlockExecutionError::EVM { hash, error: Box::new(err) })
-            }
-            Err(err) => Self::Validation(BlockValidationError::EVM { hash, error: Box::new(err) }),
         }
     }
 }

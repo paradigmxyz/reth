@@ -32,8 +32,7 @@ use reth_execution_types::BundleSource;
 use reth_primitives_traits::BlockTy;
 
 pub use reth_execution_errors::{
-    BlockExecutionError, BlockValidationError, EvmError, InternalBlockExecutionError,
-    InvalidTxError,
+    BlockExecutionError, BlockValidationError, InternalBlockExecutionError, InvalidTxError,
 };
 pub use reth_execution_types::{BlockExecutionOutput, ExecutionOutcome};
 

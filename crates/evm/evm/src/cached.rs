@@ -49,11 +49,6 @@ impl CachedReads {
         }
     }
 
-    /// Gets a [`Database`] that will cache reads from the given database.
-    pub const fn as_db<DB>(&mut self, db: DB) -> CachedReadsDbMut<'_, DB> {
-        self.as_db_mut(db).into_db()
-    }
-
     /// Gets a mutable [`Database`] that will cache reads from the underlying database.
     pub const fn as_db_mut<DB>(&mut self, db: DB) -> CachedReadsDbMut<'_, DB> {
         CachedReadsDbMut { cached: self, db }
@@ -88,12 +83,6 @@ pub struct CachedReadsDbMut<'a, DB> {
 }
 
 impl<'a, DB> CachedReadsDbMut<'a, DB> {
-    /// Converts this [`Database`] implementation into a database wrapper that will still cache
-    /// reads.
-    pub const fn into_db(self) -> Self {
-        self
-    }
-
     /// Returns access to wrapped [`Database`].
     pub const fn inner(&self) -> &DB {
         &self.db

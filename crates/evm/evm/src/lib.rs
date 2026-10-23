@@ -42,10 +42,10 @@ pub use aliases::*;
 pub use execute::{
     BlockAssembler, BlockAssemblerInput, BlockBuilder, BlockBuilderOutcome, BlockExecutionError,
     BlockExecutionOutput, BlockExecutor, BlockExecutorFactory, BlockTransactionResult,
-    BlockValidationError, CommitChanges, Evm, EvmError, ExecutableTxFor, ExecutableTxParts,
-    Executor, ExecutorTx, FromRecoveredTx, FromTxWithEncoded, GasOutput,
-    InternalBlockExecutionError, IntoTxEnv, InvalidTxError, ReceiptBuilder, ReceiptBuilderCtx,
-    RecoveredTx, TransactionEnvMut, WithTxEnv,
+    BlockValidationError, CommitChanges, Evm, ExecutableTxFor, ExecutableTxParts, Executor,
+    ExecutorTx, FromRecoveredTx, FromTxWithEncoded, GasOutput, InternalBlockExecutionError,
+    IntoTxEnv, InvalidTxError, ReceiptBuilder, ReceiptBuilderCtx, RecoveredTx, TransactionEnvMut,
+    WithTxEnv,
 };
 pub use reth_execution_types::{OnStateHook, StateUpdate};
 pub use reth_trie_common::bundle_state::BundleState;
@@ -178,9 +178,6 @@ pub use sender_recovery::SenderRecoveryCache;
 #[cfg(feature = "metrics")]
 pub mod metrics;
 pub mod noop;
-#[cfg(any(test, feature = "test-utils"))]
-/// test helpers for mocking executor
-pub mod test_utils;
 /// Helper types for execution witness generation.
 #[cfg(feature = "witness")]
 pub mod witness;
