@@ -410,8 +410,8 @@ mod tests {
     fn overlay(wiped: bool, slots: &[(U256, U256, U256)]) -> StorageOverlay {
         let mut storage = StorageOverlay { wiped, ..Default::default() };
         for &(key, original, current) in slots {
-            let slot =
-                NativeSlot { value: Tracked::from_parts(original, current), ..Default::default() };
+            let mut slot = NativeSlot::default();
+            slot.value = Tracked::from_parts(original, current);
             storage.slots.insert(key, slot);
         }
         storage

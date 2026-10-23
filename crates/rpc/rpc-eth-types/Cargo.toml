@@ -26,6 +26,7 @@ reth-rpc-server-types.workspace = true
 reth-rpc-convert.workspace = true
 reth-tasks.workspace = true
 reth-transaction-pool.workspace = true
+reth-trie-common.workspace = true
 
 # ethereum
 alloy-chains.workspace = true

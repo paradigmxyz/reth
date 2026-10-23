@@ -1230,6 +1230,91 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn call_converts_request_once_as_sent() {
+        use reth_evm::{EvmEnvFor, TxEnvFor};
+        use reth_rpc_convert::{EthTxEnvError, TryIntoTxEnv};
+        use reth_rpc_eth_types::receipt::EthReceiptConverter;
+        use std::sync::Mutex;
+
+        static CONVERTED_GAS: Mutex<Vec<Option<u64>>> = Mutex::new(Vec::new());
+
+        // A signature that commits to the gas limit can recover a different caller or fee payer
+        // from a request with another gas limit, so the request must be converted once, as sent.
+        fn count_conversion(
+            request: TransactionRequest,
+            evm_env: &EvmEnvFor<EthEvmConfig>,
+        ) -> Result<TxEnvFor<EthEvmConfig>, EthTxEnvError> {
+            CONVERTED_GAS.lock().unwrap().push(request.gas);
+            request.try_into_tx_env(evm_env)
+        }
+
+        let sender = Address::repeat_byte(0x11);
+        let contract = Address::repeat_byte(0xaa);
+        // Return the gas remaining after intrinsic gas and the GAS opcode.
+        let code = Bytes::from_static(&[0x5a, 0x60, 0x00, 0x52, 0x60, 0x20, 0x60, 0x00, 0xf3]);
+        let provider = MockEthProvider::default()
+            .with_chain_spec(ChainSpecBuilder::mainnet().cancun_activated().build());
+        provider.add_block(
+            B256::repeat_byte(0x42),
+            Block {
+                header: Header {
+                    number: 1,
+                    gas_limit: 100_000,
+                    excess_blob_gas: Some(0),
+                    ..Default::default()
+                },
+                body: BlockBody::default(),
+            },
+        );
+        let api = EthApiBuilder::new(
+            provider.clone(),
+            testing_pool(),
+            NoopNetwork::default(),
+            EthEvmConfig::new(provider.chain_spec()),
+        )
+        .with_rpc_converter(
+            EthRpcConverter::new(EthReceiptConverter::new(provider.chain_spec()))
+                .with_tx_env_converter(
+                    count_conversion
+                        as fn(
+                            TransactionRequest,
+                            &EvmEnvFor<EthEvmConfig>,
+                        )
+                            -> Result<TxEnvFor<EthEvmConfig>, EthTxEnvError>,
+                ),
+        )
+        .gas_cap(50_000u64.into())
+        .build();
+        let state_override = StateOverride::from_iter([
+            (sender, AccountOverride { balance: Some(U256::from(101_000)), ..Default::default() }),
+            (contract, AccountOverride { code: Some(code), ..Default::default() }),
+        ]);
+        // Omitted gas, and gas above the RPC cap.
+        for (gas, expected_gas) in [(None, 50_000), (Some(70_000), 50_000), (Some(30_000), 30_000)]
+        {
+            let request = TransactionRequest {
+                gas,
+                gas_price: Some(1),
+                value: Some(U256::from(1_000)),
+                ..TransactionRequest::default().with_from(sender).with_to(contract)
+            };
+            CONVERTED_GAS.lock().unwrap().clear();
+
+            let output = EthCall::call(
+                &api,
+                request,
+                Some(BlockId::latest()),
+                EvmOverrides::state(Some(state_override.clone())),
+            )
+            .await
+            .unwrap();
+
+            assert_eq!(U256::from_be_slice(&output), U256::from(expected_gas - 21_002));
+            assert_eq!(*CONVERTED_GAS.lock().unwrap(), [gas]);
+        }
+    }
+
+    #[tokio::test]
     async fn estimate_gas_respects_rpc_gas_cap() {
         const LOW_GAS_CAP: u64 = 50_000;
         const HIGH_GAS_CAP: u64 = 200_000;
@@ -1623,6 +1708,7 @@ mod tests {
         .build();
         // The first block leaves the overridden accounts untouched. The second replaces storage
         // (including a slot introduced by the first override), then execution overwrites slot zero.
+        // The third executes against the same account again without overriding it.
         let code = alloy_primitives::bytes!("600960005500");
         let first = SimBlock {
             state_overrides: Some(StateOverride::from_iter([
@@ -1661,11 +1747,19 @@ mod tests {
                 .with_gas_limit(100_000)
                 .with_gas_price(0),
         );
+        let third = SimBlock::default().call(
+            TransactionRequest::default()
+                .with_from(sender)
+                .with_to(contract)
+                .with_nonce(1)
+                .with_gas_limit(100_000)
+                .with_gas_price(0),
+        );
         let blocks = EthCall::simulate_v1(
             &api,
             SimulatePayload {
                 validation: true,
-                block_state_calls: vec![first, second],
+                block_state_calls: vec![first, second, third],
                 ..Default::default()
             },
             None,
@@ -1673,10 +1767,12 @@ mod tests {
         .await
         .unwrap();
         assert!(blocks[1].calls[0].status);
+        assert!(blocks[2].calls[0].status);
 
         // Genesis trie construction supplies an independent root for the expected full state.
         for (index, storage) in [
             [(slot(0), slot(1)), (slot(1), slot(2)), (slot(2), slot(3))].into_iter().collect(),
+            std::iter::once((slot(0), slot(9))).collect(),
             std::iter::once((slot(0), slot(9))).collect(),
         ]
         .into_iter()

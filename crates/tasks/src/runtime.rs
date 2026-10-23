@@ -322,10 +322,10 @@ struct RuntimeInner {
     proof_account_worker_threads_override: Option<usize>,
     /// Prewarming pool (execution prewarming workers).
     #[cfg(feature = "rayon")]
-    prewarming_pool: WorkerPool,
+    prewarming_pool: Arc<WorkerPool>,
     /// BAL streaming pool (BAL hashed state streaming).
     #[cfg(feature = "rayon")]
-    bal_streaming_pool: WorkerPool,
+    bal_streaming_pool: Arc<WorkerPool>,
     /// State trie overlay worker pool.
     #[cfg(feature = "rayon")]
     state_trie_overlay_worker_pool: Arc<WorkerPool>,
@@ -440,13 +440,13 @@ impl Runtime {
 
     /// Get the prewarming pool.
     #[cfg(feature = "rayon")]
-    pub fn prewarming_pool(&self) -> &WorkerPool {
+    pub fn prewarming_pool(&self) -> &Arc<WorkerPool> {
         &self.0.prewarming_pool
     }
 
     /// Get the BAL streaming pool.
     #[cfg(feature = "rayon")]
-    pub fn bal_streaming_pool(&self) -> &WorkerPool {
+    pub fn bal_streaming_pool(&self) -> &Arc<WorkerPool> {
         &self.0.bal_streaming_pool
     }
 
@@ -1017,11 +1017,11 @@ impl RuntimeBuilder {
                 WorkerPool::new(proof_account_worker_threads, "proof-acct");
 
             let prewarming_threads = config.rayon.prewarming_threads.unwrap_or(default_threads);
-            let prewarming_pool = WorkerPool::new(prewarming_threads, "prewarm");
+            let prewarming_pool = Arc::new(WorkerPool::new(prewarming_threads, "prewarm"));
 
             let bal_streaming_threads =
                 config.rayon.bal_streaming_threads.unwrap_or(default_threads);
-            let bal_streaming_pool = WorkerPool::new(bal_streaming_threads, "bal-stream");
+            let bal_streaming_pool = Arc::new(WorkerPool::new(bal_streaming_threads, "bal-stream"));
 
             let state_trie_overlay_worker_threads = config
                 .rayon

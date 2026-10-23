@@ -532,8 +532,10 @@ impl DefaultStateRootStrategy {
     ///
     /// The authoritative update capability taken from the returned handle must be dropped or
     /// explicitly finished after execution so the task observes the end of the update stream.
+    /// Publish the returned pending trie with [`publish_sparse_trie`] only after accepting the
+    /// matching block root. Dropping that receiver discards the reusable trie.
     #[instrument(level = "debug", target = "engine::tree::payload_processor", skip_all)]
-    fn spawn_state_root<N, F>(
+    pub fn spawn_state_root<N, F>(
         &self,
         executor: &reth_tasks::Runtime,
         multiproof_provider_factory: OverlayStateProviderFactory<F, N>,
@@ -809,13 +811,16 @@ impl DefaultStateRootStrategy {
 
 /// A computed trie whose finalization and pruning may still be running.
 #[derive(Debug)]
-struct PendingSparseTrie {
+pub struct PendingSparseTrie {
     state_root: B256,
     anchor_hash: B256,
     trie: mpsc::Receiver<SparseTrieWithStorageRoots>,
 }
 
-fn publish_sparse_trie<N: NodePrimitives>(
+/// Publishes a matching completed root for reuse after its block has been accepted.
+///
+/// Does nothing if the producer has not handed off a trie or its root differs.
+pub fn publish_sparse_trie<N: NodePrimitives>(
     pending_trie_rx: &mpsc::Receiver<PendingSparseTrie>,
     overlay_manager: &OverlayManager<N>,
     block_hash: B256,
@@ -846,14 +851,25 @@ struct SparseTrieTaskOptions<N: NodePrimitives> {
     pending_sparse_trie_prune_blocks: Option<Vec<ExecutedBlock<N>>>,
 }
 
-struct StateRootTaskOptions<'a, N: NodePrimitives> {
-    parent_header: SealedHeader<N::BlockHeader>,
-    preserved_sparse_trie: Option<PreservedSparseTrie>,
-    transaction_count: Option<usize>,
-    /// Gas the block claims to use, taken from the payload before execution.
-    gas_used: Option<u64>,
-    config: &'a TreeConfig,
-    pending_sparse_trie_prune_blocks: Option<Vec<ExecutedBlock<N>>>,
+/// Inputs for starting one sparse-trie task and its proof workers.
+///
+/// Complete the returned handle's authoritative update stream before awaiting its result.
+#[derive(Debug)]
+pub struct StateRootTaskOptions<'a, N: NodePrimitives> {
+    /// Accepted parent whose post-state the proof workers must read.
+    pub parent_header: SealedHeader<N::BlockHeader>,
+    /// Previously accepted trie, or `None` for a cold start.
+    pub preserved_sparse_trie: Option<PreservedSparseTrie>,
+    /// Transaction count hint for proof-worker sizing, or `None` if unknown.
+    pub transaction_count: Option<usize>,
+    /// Gas the block claims to use, or `None` if unknown.
+    pub gas_used: Option<u64>,
+    /// Task and proof batching configuration.
+    pub config: &'a TreeConfig,
+    /// In-memory parent chain, newest first, when pruning is requested.
+    ///
+    /// `None` disables pruning; an empty chain means the parent is durable.
+    pub pending_sparse_trie_prune_blocks: Option<Vec<ExecutedBlock<N>>>,
 }
 
 fn sparse_trie_prune_target<N: NodePrimitives>(
