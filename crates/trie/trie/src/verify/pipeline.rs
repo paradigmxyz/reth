@@ -1,14 +1,10 @@
 //! Storage scheduling, completed-root buffering, shared findings, and background task lifetime.
 
 use super::{Output, StorageWorker};
-use crate::{
-    hashed_cursor::{HashedCursor, HashedStorageCursor},
-    trie_cursor::TrieStorageCursor,
-};
+use crate::{hashed_cursor::HashedStorageCursor, trie_cursor::TrieStorageCursor};
 use alloy_primitives::{map::B256Map, B256, U256};
 use crossbeam_channel::{Receiver, Sender};
 use reth_execution_errors::StateRootError;
-use reth_primitives_traits::Account;
 use reth_storage_errors::db::DatabaseError;
 use std::{
     collections::VecDeque,
@@ -31,18 +27,18 @@ pub(super) struct StoragePipeline {
 }
 
 impl StoragePipeline {
-    /// Spawns the background thread which walks `accounts` and verifies their storage on one
+    /// Spawns the background thread which walks `addresses` and verifies their storage on one
     /// thread per worker.
     ///
     /// # Panics
     ///
     /// Panics if `workers` is empty.
     pub(super) fn spawn<L, T, H, TX>(
-        accounts: L,
+        addresses: L,
         workers: Vec<StorageWorker<T, H, TX>>,
     ) -> Result<Self, DatabaseError>
     where
-        L: HashedCursor<Value = Account> + Send + 'static,
+        L: Iterator<Item = Result<B256, DatabaseError>> + Send + 'static,
         T: TrieStorageCursor + Send + 'static,
         H: HashedStorageCursor<Value = U256> + Send + 'static,
         TX: Send + 'static,
@@ -52,7 +48,7 @@ impl StoragePipeline {
         let (roots_tx, roots_rx) = crossbeam_channel::unbounded();
         let (cancel_tx, cancel_rx) = crossbeam_channel::bounded::<()>(0);
         let scheduler = StorageScheduler {
-            accounts,
+            addresses,
             workers,
             roots: roots_tx,
             context: WorkerContext { events: events_tx.clone(), cancel: cancel_rx },
@@ -160,10 +156,10 @@ impl Drop for StoragePipeline {
     }
 }
 
-/// Body of the background thread: walks hashed accounts and keeps the storage workers supplied with
+/// Body of the background thread: walks storage addresses and keeps the workers supplied with
 /// jobs.
 struct StorageScheduler<L, T, H, TX> {
-    accounts: L,
+    addresses: L,
     workers: Vec<StorageWorker<T, H, TX>>,
     roots: Sender<(B256, B256)>,
     context: WorkerContext,
@@ -171,7 +167,7 @@ struct StorageScheduler<L, T, H, TX> {
 
 impl<L, T, H, TX> StorageScheduler<L, T, H, TX>
 where
-    L: HashedCursor<Value = Account>,
+    L: Iterator<Item = Result<B256, DatabaseError>>,
     T: TrieStorageCursor + Send,
     H: HashedStorageCursor<Value = U256> + Send,
     TX: Send,
@@ -201,12 +197,10 @@ where
     }
 
     fn produce(&mut self, jobs: Sender<B256>) -> Result<(), StateRootError> {
-        let mut next = self.accounts.seek(B256::ZERO)?;
-        while let Some((address, _)) = next {
-            if !self.context.send(&jobs, address) {
+        for address in self.addresses.by_ref() {
+            if !self.context.send(&jobs, address?) {
                 return Ok(())
             }
-            next = self.accounts.next()?;
         }
         Ok(())
     }

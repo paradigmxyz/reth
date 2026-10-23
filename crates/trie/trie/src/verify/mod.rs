@@ -54,8 +54,10 @@ where
     /// Starts verification and its background storage root computation.
     ///
     /// - `trie` reads the account trie table.
-    /// - `accounts` and `lookahead` each read the hashed accounts table. `lookahead` is walked on a
-    ///   background thread to schedule storage work ahead of `accounts`.
+    /// - `accounts` reads the hashed accounts table.
+    /// - `storage_addresses` yields each address present in hashed storage or stored storage tries
+    ///   exactly once, including addresses without an account. It is walked on a background thread
+    ///   to schedule storage work ahead of `accounts`.
     /// - `storage` reads the hashed storage table.
     /// - `storage_workers` sets the storage parallelism, one thread per worker.
     ///
@@ -75,17 +77,17 @@ where
         trie: T,
         accounts: H,
         storage: S,
-        lookahead: L,
+        storage_addresses: L,
         storage_workers: Vec<StorageWorker<W, C, TX>>,
     ) -> Result<Self, DatabaseError>
     where
-        L: HashedCursor<Value = Account> + Send + 'static,
+        L: Iterator<Item = Result<B256, DatabaseError>> + Send + 'static,
         W: TrieStorageCursor + Send + 'static,
         C: HashedStorageCursor<Value = U256> + Send + 'static,
         TX: Send + 'static,
     {
         let account_verifier = SingleVerifier::new(None, trie)?;
-        let pipeline = StoragePipeline::spawn(lookahead, storage_workers)?;
+        let pipeline = StoragePipeline::spawn(storage_addresses, storage_workers)?;
         Ok(Self {
             accounts,
             storage,
