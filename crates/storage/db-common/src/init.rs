@@ -29,9 +29,9 @@ use reth_provider::{
     errors::provider::ProviderResult, providers::StaticFileWriter, BlockHashReader, BlockNumReader,
     BundleStateInit, ChainSpecProvider, DBProvider, DatabaseProviderFactory, ExecutionOutcome,
     HashingWriter, HeaderProvider, HistoryWriter, MetadataProvider, MetadataWriter,
-    NodePrimitivesProvider, OriginalValuesKnown, ProviderError, RevertsInit,
-    RocksDBProviderFactory, StageCheckpointReader, StageCheckpointWriter, StateWriteConfig,
-    StateWriter, StaticFileProviderFactory, StorageSettings, StorageSettingsCache, TrieWriter,
+    OriginalValuesKnown, ProviderError, RevertsInit, RocksDBProviderFactory, StageCheckpointReader,
+    StageCheckpointWriter, StateWriteConfig, StateWriter, StaticFileProviderFactory,
+    StorageSettings, StorageSettingsCache, TrieWriter,
 };
 use reth_stages_types::{StageCheckpoint, StageId};
 use reth_static_file_types::StaticFileSegment;
@@ -129,7 +129,6 @@ where
         + ChainSpecProvider
         + StorageSettingsCache
         + RocksDBProviderFactory
-        + NodePrimitivesProvider
         + AsRef<PF::ProviderRW>,
     PF::ChainSpec: EthChainSpec<Header = <PF::Primitives as NodePrimitives>::BlockHeader>,
 {
@@ -160,7 +159,6 @@ where
         + ChainSpecProvider
         + StorageSettingsCache
         + RocksDBProviderFactory
-        + NodePrimitivesProvider
         + AsRef<PF::ProviderRW>,
     PF::ChainSpec: EthChainSpec<Header = <PF::Primitives as NodePrimitives>::BlockHeader>,
 {
@@ -193,7 +191,6 @@ where
         + ChainSpecProvider
         + StorageSettingsCache
         + RocksDBProviderFactory
-        + NodePrimitivesProvider
         + AsRef<PF::ProviderRW>,
     PF::ChainSpec: EthChainSpec<Header = <PF::Primitives as NodePrimitives>::BlockHeader>,
 {
@@ -406,15 +403,7 @@ where
 
         state_init.insert(
             *address,
-            (
-                None,
-                Some(Account {
-                    nonce: account.nonce.unwrap_or_default(),
-                    balance: account.balance,
-                    bytecode_hash,
-                }),
-                storage,
-            ),
+            (None, Some(Account { bytecode_hash, ..Account::from(account) }), storage),
         );
     }
     let all_reverts_init: RevertsInit = HashMap::from_iter([(block, reverts_init)]);
@@ -530,7 +519,6 @@ where
         ProviderRW: StaticFileProviderFactory
                         + DBProvider<Tx: DbTxMut>
                         + BlockNumReader
-                        + BlockHashReader
                         + ChainSpecProvider
                         + StageCheckpointWriter
                         + HistoryWriter
@@ -540,7 +528,6 @@ where
                         + StateWriter
                         + StorageSettingsCache
                         + RocksDBProviderFactory
-                        + NodePrimitivesProvider
                         + AsRef<PF::ProviderRW>,
     >,
 {
@@ -690,10 +677,7 @@ fn dump_state<PF>(
 ) -> Result<(), eyre::Error>
 where
     PF: DatabaseProviderFactory<ProviderRW: DBProvider<Tx: DbTxMut>>,
-    PF::ProviderRW: StaticFileProviderFactory
-        + StorageSettingsCache
-        + RocksDBProviderFactory
-        + NodePrimitivesProvider,
+    PF::ProviderRW: StaticFileProviderFactory + StorageSettingsCache + RocksDBProviderFactory,
 {
     let storage_settings = provider_factory.database_provider_rw()?.cached_storage_settings();
     if storage_settings.storage_v2 {
@@ -769,8 +753,7 @@ where
         ProviderRW: StaticFileProviderFactory
                         + DBProvider<Tx: DbTxMut>
                         + StorageSettingsCache
-                        + RocksDBProviderFactory
-                        + NodePrimitivesProvider,
+                        + RocksDBProviderFactory,
     >,
 {
     let accounts_len = collector.len();
@@ -994,11 +977,7 @@ fn write_account_to_db<TX: DbTxMut>(
         None
     };
 
-    let account = Account {
-        nonce: genesis_account.nonce.unwrap_or_default(),
-        balance: genesis_account.balance,
-        bytecode_hash,
-    };
+    let account = Account { bytecode_hash, ..Account::from(genesis_account) };
 
     let hashed_address = keccak256(address);
 
@@ -1082,11 +1061,7 @@ where
         None
     };
 
-    let account = Account {
-        nonce: genesis_account.nonce.unwrap_or_default(),
-        balance: genesis_account.balance,
-        bytecode_hash,
-    };
+    let account = Account { bytecode_hash, ..Account::from(genesis_account) };
 
     let hashed_address = keccak256(address);
     let (account_changeset_writer, storage_changeset_writer) = changeset_writers;
@@ -1344,7 +1319,7 @@ mod tests {
         assert_eq!(
             accounts,
             vec![
-                (Address::with_last_byte(1), U256::from(1)),
+                (Address::with_last_byte(1), U256::ONE),
                 (Address::with_last_byte(2), U256::from(2))
             ]
         );
@@ -1600,7 +1575,7 @@ mod tests {
                 alloc: BTreeMap::from([
                     (
                         address_with_balance,
-                        GenesisAccount { balance: U256::from(1), ..Default::default() },
+                        GenesisAccount { balance: U256::ONE, ..Default::default() },
                     ),
                     (
                         address_with_storage,

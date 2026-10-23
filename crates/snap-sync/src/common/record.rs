@@ -21,13 +21,15 @@ pub(crate) trait SnapRecord: Serialize + DeserializeOwned {
     /// Reads the record, reporting one written at another version instead of misreading it.
     fn read(provider: &impl MetadataProvider) -> Result<Option<Self>, SnapSyncError> {
         let Some(bytes) = provider.get_metadata(Self::KEY)? else { return Ok(None) };
-        let value: serde_json::Value =
-            serde_json::from_slice(&bytes).map_err(ProviderError::other)?;
+        let value = serde_json::from_slice::<serde_json::Value>(&bytes)
+            .map_err(|source| SnapSyncError::UnreadableRecord { key: Self::KEY, source })?;
         let version = value.get("version").and_then(serde_json::Value::as_u64);
         if version != Some(u64::from(Self::VERSION)) {
             return Err(SnapSyncError::UnsupportedRecord { key: Self::KEY, version })
         }
-        Ok(Some(serde_json::from_value(value).map_err(ProviderError::other)?))
+        serde_json::from_value(value)
+            .map(Some)
+            .map_err(|source| SnapSyncError::UnreadableRecord { key: Self::KEY, source })
     }
 
     /// Removes the record, whichever version wrote it.

@@ -1750,10 +1750,13 @@ mod tests {
         TransactionValidationOutcome, ValidPoolTransaction, U256,
     };
     use alloy_consensus::Transaction;
-    use alloy_eips::{eip4844::BlobTransactionSidecar, eip7594::BlobTransactionSidecarVariant};
+    use alloy_eips::{
+        eip4844::{Blob, BlobTransactionSidecar, Bytes48},
+        eip7594::BlobTransactionSidecarVariant,
+    };
     use alloy_primitives::{Address, B256};
     use futures_util::{FutureExt, StreamExt};
-    use std::{fs, path::PathBuf, sync::Arc};
+    use std::sync::Arc;
     use tokio::sync::mpsc::error::TryRecvError;
 
     /// Inserts a transaction with an explicit validator snapshot, without running maintenance.
@@ -1761,7 +1764,7 @@ mod tests {
         let transaction = MockTransaction::eip1559()
             .with_sender(Address::with_last_byte(1))
             .with_nonce(nonce)
-            .with_hash(B256::from([nonce as u8; 32]));
+            .with_hash(B256::repeat_byte(nonce as u8));
         pool.pool
             .add_transactions(
                 TransactionOrigin::External,
@@ -1908,7 +1911,7 @@ mod tests {
         assert_eq!(transaction_nonces(&txs.pending), [1, 2]);
         assert_eq!(transaction_nonces(&txs.queued), [4]);
 
-        let expected = vec![B256::from([1; 32]), B256::from([2; 32])];
+        let expected = vec![B256::repeat_byte(1), B256::repeat_byte(2)];
         for (kind, listener) in [("network", &mut network), ("all", &mut all)] {
             let mut received = Vec::new();
             while let Ok(hash) = listener.try_recv() {
@@ -1927,9 +1930,9 @@ mod tests {
             }
             received.sort_unstable_by_key(|(hash, _)| *hash);
             let expected = vec![
-                (B256::from([1; 32]), SubPool::Pending),
-                (B256::from([2; 32]), SubPool::Pending),
-                (B256::from([4; 32]), SubPool::Queued),
+                (B256::repeat_byte(1), SubPool::Pending),
+                (B256::repeat_byte(2), SubPool::Pending),
+                (B256::repeat_byte(4), SubPool::Queued),
             ];
             assert_eq!(received, expected, "{kind} full transaction notifications");
         }
@@ -1945,7 +1948,7 @@ mod tests {
         }
         pending_events.sort_unstable();
         assert_eq!(pending_events, expected);
-        assert_eq!(queued_events, vec![B256::from([4; 32])]);
+        assert_eq!(queued_events, vec![B256::repeat_byte(4)]);
 
         // A later insertion observing the same state must not notify those promotions again.
         insert_with_state_nonce(&test_pool, 5, 1, true);
@@ -1953,13 +1956,13 @@ mod tests {
         assert_eq!(all.try_recv(), Err(TryRecvError::Empty));
         for listener in [&mut full_network, &mut full_all] {
             let event = listener.try_recv().unwrap();
-            assert_eq!(*event.transaction.hash(), B256::from([5; 32]));
+            assert_eq!(*event.transaction.hash(), B256::repeat_byte(5));
             assert_eq!(event.subpool, SubPool::Queued);
             assert!(matches!(listener.try_recv(), Err(TryRecvError::Empty)));
         }
         assert!(matches!(
             events.next().now_or_never(),
-            Some(Some(FullTransactionEvent::Queued(hash, _))) if hash == B256::from([5; 32])
+            Some(Some(FullTransactionEvent::Queued(hash, _))) if hash == B256::repeat_byte(5)
         ));
         assert!(events.next().now_or_never().is_none());
     }
@@ -1978,29 +1981,29 @@ mod tests {
         let mut full_all = pool.add_new_transaction_listener(TransactionListenerKind::All);
         insert_with_state_nonce(&test_pool, 4, 1, true);
 
-        assert_eq!(network.try_recv().unwrap(), B256::from([2; 32]));
+        assert_eq!(network.try_recv().unwrap(), B256::repeat_byte(2));
         assert_eq!(network.try_recv(), Err(TryRecvError::Empty));
         let mut received = Vec::new();
         while let Ok(hash) = all.try_recv() {
             received.push(hash);
         }
         received.sort_unstable();
-        assert_eq!(received, [B256::from([1; 32]), B256::from([2; 32])]);
+        assert_eq!(received, [B256::repeat_byte(1), B256::repeat_byte(2)]);
 
         for (listener, expected) in [
             (
                 &mut full_network,
                 vec![
-                    (B256::from([2; 32]), SubPool::Pending),
-                    (B256::from([4; 32]), SubPool::Queued),
+                    (B256::repeat_byte(2), SubPool::Pending),
+                    (B256::repeat_byte(4), SubPool::Queued),
                 ],
             ),
             (
                 &mut full_all,
                 vec![
-                    (B256::from([1; 32]), SubPool::Pending),
-                    (B256::from([2; 32]), SubPool::Pending),
-                    (B256::from([4; 32]), SubPool::Queued),
+                    (B256::repeat_byte(1), SubPool::Pending),
+                    (B256::repeat_byte(2), SubPool::Pending),
+                    (B256::repeat_byte(4), SubPool::Queued),
                 ],
             ),
         ] {
@@ -2033,39 +2036,24 @@ mod tests {
                 received.push(hash);
             }
             received.sort_unstable();
-            assert_eq!(received, [B256::from([1; 32]), B256::from([2; 32]), B256::from([3; 32])]);
+            assert_eq!(
+                received,
+                [B256::repeat_byte(1), B256::repeat_byte(2), B256::repeat_byte(3)]
+            );
         }
     }
 
     #[test]
     fn test_discard_blobs_on_blob_tx_eviction() {
-        let blobs = {
-            // Read the contents of the JSON file into a string.
-            let json_content = fs::read_to_string(
-                PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("test_data/blob1.json"),
-            )
-            .expect("Failed to read the blob data file");
-
-            // Parse the JSON contents into a serde_json::Value.
-            let json_value: serde_json::Value =
-                serde_json::from_str(&json_content).expect("Failed to deserialize JSON");
-
-            // Extract blob data from JSON and convert it to Blob.
-            vec![
-                // Extract the "data" field from the JSON and parse it as a string.
-                json_value
-                    .get("data")
-                    .unwrap()
-                    .as_str()
-                    .expect("Data is not a valid string")
-                    .to_string(),
-            ]
-        };
-
-        // Generate a BlobTransactionSidecar from the blobs.
-        let sidecar = BlobTransactionSidecarVariant::Eip4844(
-            BlobTransactionSidecar::try_from_blobs_hex(blobs).unwrap(),
-        );
+        // A zero blob, whose commitment and proof are the point at infinity, is a valid sidecar
+        // that doesn't need the KZG trusted setup.
+        let mut point_at_infinity = [0; 48];
+        point_at_infinity[0] = 0xc0;
+        let sidecar = BlobTransactionSidecarVariant::Eip4844(BlobTransactionSidecar::new(
+            vec![Blob::default()],
+            vec![Bytes48::from(point_at_infinity)],
+            vec![Bytes48::from(point_at_infinity)],
+        ));
 
         // Define the maximum limit for blobs in the sub-pool.
         let blob_limit = SubPoolLimit::new(1000, usize::MAX);
@@ -2127,7 +2115,7 @@ mod tests {
         // Create a test pool with default configuration.
         let test_pool = &TestPoolBuilder::default().with_config(Default::default()).pool;
 
-        let auth = Address::new([1; 20]);
+        let auth = Address::repeat_byte(1);
         let tx = MockTransaction::eip7702();
 
         test_pool.add_transactions(
@@ -2149,7 +2137,7 @@ mod tests {
     #[test]
     fn sender_queries_do_not_allocate_ids_for_unknown_addresses() {
         let test_pool = &TestPoolBuilder::default().with_config(Default::default()).pool;
-        let sender = Address::new([9; 20]);
+        let sender = Address::repeat_byte(9);
 
         assert_eq!(test_pool.sender_id(&sender), None);
         assert!(test_pool.get_transactions_by_sender(sender).is_empty());

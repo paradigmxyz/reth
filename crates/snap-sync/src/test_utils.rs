@@ -57,7 +57,8 @@ pub(crate) fn policy() -> SnapPivotPolicy {
     SnapPivotPolicy::default().with_head_distance(1).with_advance_after(4).with_history(8)
 }
 
-/// A header with a state root distinctive to its number, and a commitment when one is given.
+/// A header with a state root distinctive to its number, and a block access list hash when one
+/// is given.
 pub(crate) fn header(
     number: u64,
     parent_hash: B256,
@@ -72,7 +73,7 @@ pub(crate) fn header(
     }
 }
 
-/// Blocks `0..=3`, carrying a block access list commitment from `bal_from` onwards.
+/// Blocks `0..=3`, carrying a block access list hash from `bal_from` onwards.
 pub(crate) fn chain(bal_from: Option<u64>) -> Vec<Header> {
     let mut headers = Vec::new();
     let mut parent = B256::ZERO;
@@ -98,12 +99,20 @@ pub(crate) fn generation(block: u64, state_root: B256) -> SnapGeneration {
 }
 
 /// Writes blocks `0..=3` hashed the way [`generation`] anchors them, so an attempt started from
-/// one finds its pivot on the canonical chain.
-pub(crate) fn insert_generation_headers(factory: &ProviderFactory<MockNodeTypesWithDB>) {
+/// one finds its pivot on the canonical chain. `roots` are the state roots of blocks `1..`, the
+/// ones attempts download against; later blocks keep their distinctive root.
+pub(crate) fn insert_generation_headers(
+    factory: &ProviderFactory<MockNodeTypesWithDB>,
+    roots: &[B256],
+) {
     let headers: Vec<_> = (0..=3u64)
         .map(|number| {
             let parent = number.checked_sub(1).map_or(B256::ZERO, |n| B256::repeat_byte(n as u8));
-            SealedHeader::new(header(number, parent, None), B256::repeat_byte(number as u8))
+            let mut header = header(number, parent, None);
+            if let Some(root) = number.checked_sub(1).and_then(|i| roots.get(i as usize)) {
+                header.state_root = *root;
+            }
+            SealedHeader::new(header, B256::repeat_byte(number as u8))
         })
         .collect();
     insert_headers(factory, &headers);
@@ -120,6 +129,13 @@ pub(crate) fn hashed_factory() -> ProviderFactory<MockNodeTypesWithDB> {
     factory
 }
 
+/// A hashed database holding the blocks of [`insert_generation_headers`] with `roots`.
+pub(crate) fn hashed_factory_with_roots(roots: &[B256]) -> ProviderFactory<MockNodeTypesWithDB> {
+    let factory = hashed_factory();
+    insert_generation_headers(&factory, roots);
+    factory
+}
+
 /// A hashed account key in the lowest part of the key space.
 pub(crate) fn key(value: u64) -> B256 {
     B256::left_padding_from(&value.to_be_bytes())
@@ -127,12 +143,13 @@ pub(crate) fn key(value: u64) -> B256 {
 
 /// An account without storage or code, distinguished by its nonce.
 pub(crate) fn account(nonce: u64) -> TrieAccount {
-    TrieAccount { nonce, balance: U256::from(1), ..Default::default() }
+    TrieAccount { nonce, balance: U256::ONE, ..Default::default() }
 }
 
 /// Root of the account trie holding `accounts`.
+#[allow(clippy::cloned_instead_of_copied)]
 pub(crate) fn state_root(accounts: &[(B256, TrieAccount)]) -> B256 {
-    state_root_unsorted(accounts.iter().copied())
+    state_root_unsorted(accounts.iter().cloned())
 }
 
 // Root of the account trie, and the proof nodes on the paths to `targets`.
@@ -196,12 +213,34 @@ pub(crate) fn verified_range(
     origin: B256,
     proof_targets: &[B256],
 ) -> VerifiedAccountRange {
+    verified_accounts(accounts, served, origin, MAX_HASH, proof_targets)
+}
+
+/// Like [`verified_range`], but for a repair's request of the account at `origin` alone, so an
+/// account served past it only proves the interval and is dropped.
+pub(crate) fn verified_repair(
+    accounts: &[(B256, TrieAccount)],
+    served: Range<usize>,
+    origin: B256,
+    proof_targets: &[B256],
+) -> VerifiedAccountRange {
+    verified_accounts(accounts, served, origin, origin, proof_targets)
+}
+
+// Verifies [`account_range`]'s answer to a request from `origin` through `limit`.
+fn verified_accounts(
+    accounts: &[(B256, TrieAccount)],
+    served: Range<usize>,
+    origin: B256,
+    limit: B256,
+    proof_targets: &[B256],
+) -> VerifiedAccountRange {
     let client = ScriptedSnapClient::new([account_range(1, accounts, served, proof_targets)]);
     let request = GetAccountRangeMessage {
         request_id: 1,
         root_hash: state_root(accounts),
         starting_hash: origin,
-        limit_hash: MAX_HASH,
+        limit_hash: limit,
         response_bytes: DEFAULT_RESPONSE_BYTES,
     };
     let downloader = AccountRangeDownloader::new(client, request, Runtime::test()).unwrap();
@@ -251,7 +290,7 @@ pub(crate) struct BalChain {
 impl BalChain {
     /// A chain anchored at `pivot`, carrying one block per entry of `lists` after it.
     pub(crate) fn new(pivot: u64, lists: impl IntoIterator<Item = Vec<AccountChanges>>) -> Self {
-        let (commitments, lists): (Vec<B256>, Vec<Bytes>) = lists
+        let (access_list_hashes, lists): (Vec<B256>, Vec<Bytes>) = lists
             .into_iter()
             .map(|changes| {
                 (
@@ -266,13 +305,50 @@ impl BalChain {
             headers.push(SealedHeader::seal_slow(header(number, parent, None)));
             parent = headers[number as usize].hash();
         }
-        for (index, commitment) in commitments.into_iter().enumerate() {
-            let sealed =
-                SealedHeader::seal_slow(header(pivot + index as u64 + 1, parent, Some(commitment)));
+        for (index, access_list_hash) in access_list_hashes.into_iter().enumerate() {
+            let sealed = SealedHeader::seal_slow(header(
+                pivot + index as u64 + 1,
+                parent,
+                Some(access_list_hash),
+            ));
             parent = sealed.hash();
             headers.push(sealed);
         }
         Self { headers, pivot, lists }
+    }
+
+    /// The chain's headers with the state roots of the given blocks replaced, hashes unchanged, so
+    /// an attempt downloading against a root finds it in the canonical header.
+    pub(crate) fn headers_with_roots(&self, roots: &[(u64, B256)]) -> Vec<SealedHeader<Header>> {
+        self.headers
+            .iter()
+            .map(|sealed| {
+                let mut header = sealed.header().clone();
+                if let Some((_, root)) = roots.iter().find(|(number, _)| *number == header.number) {
+                    header.state_root = *root;
+                }
+                SealedHeader::new(header, sealed.hash())
+            })
+            .collect()
+    }
+
+    /// The chain's headers all committing to `state_root`, hashes unchanged.
+    pub(crate) fn headers_with_root(&self, state_root: B256) -> Vec<SealedHeader<Header>> {
+        let roots: Vec<_> =
+            self.headers.iter().map(|sealed| (sealed.number(), state_root)).collect();
+        self.headers_with_roots(&roots)
+    }
+
+    /// This chain with the state roots of the given blocks replaced, hashes unchanged.
+    pub(crate) fn with_state_roots(mut self, roots: &[(u64, B256)]) -> Self {
+        self.headers = self.headers_with_roots(roots);
+        self
+    }
+
+    /// This chain with every header committing to `state_root`, hashes unchanged.
+    pub(crate) fn with_state_root(mut self, state_root: B256) -> Self {
+        self.headers = self.headers_with_root(state_root);
+        self
     }
 
     /// Generation anchored to this chain's pivot, downloading against `state_root`.
@@ -294,6 +370,15 @@ impl BalChain {
         let tip = self.headers.last().unwrap();
         writer.append_header(tip.header(), &tip.hash()).unwrap();
         writer.commit().unwrap();
+    }
+
+    /// Replaces the canonical blocks after `ancestor` with this chain's, as a reorg to it does.
+    pub(crate) fn replace_after(
+        &self,
+        factory: &ProviderFactory<MockNodeTypesWithDB>,
+        ancestor: u64,
+    ) {
+        factory.replace_headers_after(ancestor, &self.headers[ancestor as usize + 1..]);
     }
 
     /// The block `nth` after the pivot, which is the pivot itself at zero.
@@ -318,6 +403,27 @@ impl BalChain {
             block_access_lists: BlockAccessLists(block_access_lists),
         };
         Ok(WithPeerId::new(PeerId::random(), SnapResponse::BlockAccessLists(message)))
+    }
+}
+
+/// Reorgs of a test database's canonical headers.
+pub(crate) trait ReorgFactoryExt {
+    /// Replaces the canonical blocks after `ancestor` with `headers`, as a reorg to them does.
+    fn replace_headers_after(&self, ancestor: u64, headers: &[SealedHeader<Header>]);
+}
+
+impl ReorgFactoryExt for ProviderFactory<MockNodeTypesWithDB> {
+    fn replace_headers_after(&self, ancestor: u64, headers: &[SealedHeader<Header>]) {
+        let static_files = self.static_file_provider();
+        let highest =
+            static_files.get_highest_static_file_block(StaticFileSegment::Headers).unwrap();
+        let mut writer = static_files.latest_writer(StaticFileSegment::Headers).unwrap();
+        writer.prune_headers(highest - ancestor).unwrap();
+        writer.commit().unwrap();
+        for header in headers {
+            writer.append_header(header.header(), &header.hash()).unwrap();
+        }
+        writer.commit().unwrap();
     }
 }
 

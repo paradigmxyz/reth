@@ -659,7 +659,7 @@ where
     }
 
     fn size_hint(&self) -> usize {
-        self.db.bundle_state.size_hint()
+        self.db.bundle_size_hint()
     }
 
     fn take_bal(&mut self) -> Option<BlockAccessList> {
@@ -729,10 +729,11 @@ impl<TxEnv, T: RecoveredTx<Tx>, Tx> ExecutableTxParts<TxEnv, Tx> for WithTxEnv<T
 
 #[cfg(test)]
 mod tests {
+
     use super::*;
     use core::marker::PhantomData;
     use reth_ethereum_primitives::EthPrimitives;
-    use revm::database::{CacheDB, EmptyDB};
+    use revm::database::InMemoryDB;
 
     #[derive(Clone, Debug, Default)]
     struct TestExecutorProvider;
@@ -787,7 +788,7 @@ mod tests {
     #[test]
     fn test_provider() {
         let provider = TestExecutorProvider;
-        let db = CacheDB::<EmptyDB>::default();
+        let db = InMemoryDB::default();
         let executor = provider.executor(db);
         let _ = executor.execute(&Default::default());
     }

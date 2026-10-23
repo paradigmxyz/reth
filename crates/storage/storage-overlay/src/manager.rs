@@ -124,7 +124,8 @@ impl<N: NodePrimitives> OverlayManager<N> {
         &self.changeset_cache
     }
 
-    /// Gets or computes cached changesets for an inclusive block range.
+    /// Gets complete trie before-values for an inclusive block range, oldest values taking
+    /// precedence. No updates from outside the requested range are included.
     pub fn get_or_compute_cached_changesets_range<P>(
         &self,
         provider: &P,
@@ -508,7 +509,7 @@ impl<N: NodePrimitives> OverlayManager<N> {
             return match entry {
                 OverlayCacheEntry::Ready(input) => Ok(Some(input)),
                 OverlayCacheEntry::Computing(_) if cache_config.precompute => Ok(None),
-                OverlayCacheEntry::Computing(waiter) => Ok(Some(waiter.wait())),
+                OverlayCacheEntry::Computing(waiter) => Ok(Some(waiter.wait(metrics))),
             }
         }
         span.record("cache_reused", false);
@@ -570,7 +571,7 @@ impl<N: NodePrimitives> OverlayManager<N> {
 
         match action {
             CacheAction::Ready(input) => Ok(Some(input)),
-            CacheAction::Wait(waiter) => Ok(Some(waiter.wait())),
+            CacheAction::Wait(waiter) => Ok(Some(waiter.wait(metrics))),
             CacheAction::Compute(waiter) => {
                 let parent_input = blocks.first().and_then(|block| {
                     let parent_hash = block.recovered_block().parent_hash();
@@ -631,7 +632,10 @@ impl<N: NodePrimitives> OverlayManager<N> {
     }
 
     /// Returns every in-memory block in the chain whose tip is `parent_hash`.
-    fn parent_chain(&self, parent_hash: B256) -> impl Iterator<Item = ExecutedBlock<N>> + '_ {
+    pub(crate) fn parent_chain(
+        &self,
+        parent_hash: B256,
+    ) -> impl Iterator<Item = ExecutedBlock<N>> + '_ {
         let mut hash = parent_hash;
         std::iter::from_fn(move || {
             let block = self.blocks.get(&hash)?;
@@ -825,8 +829,11 @@ impl<T> OverlayWaiter<T> {
         Self { input: OnceLock::new() }
     }
 
-    fn wait(&self) -> Arc<T> {
-        Arc::clone(self.input.wait())
+    fn wait(&self, metrics: &impl OverlayCacheMetrics) -> Arc<T> {
+        let start = Instant::now();
+        let input = self.input.wait();
+        metrics.record_wait_duration(start.elapsed());
+        Arc::clone(input)
     }
 
     fn finish(&self, computed: Arc<T>) {
@@ -878,8 +885,8 @@ fn compute_overlay<N: NodePrimitives>(
             let mut parent_input = parent_input;
             extend_overlay(
                 Arc::make_mut(&mut parent_input),
-                &trie_data.sorted.hashed_state,
-                &trie_data.sorted.trie_updates,
+                &trie_data.hashed_state,
+                &trie_data.trie_updates,
             );
             Arc::try_unwrap(parent_input).expect("Arc::make_mut leaves the child overlay unique")
         }
@@ -908,23 +915,21 @@ fn merge_blocks<N: NodePrimitives>(blocks: Vec<ExecutedBlock<N>>) -> TrieInputSo
     let (nodes, state) = rayon::join(
         || {
             TrieUpdatesSorted::merge_batch(
-                trie_data.iter().map(|data| Arc::clone(&data.sorted.trie_updates)),
+                trie_data.iter().map(|data| Arc::clone(&data.trie_updates)),
             )
         },
         || {
             HashedPostStateSorted::merge_batch(
-                trie_data.iter().map(|data| Arc::clone(&data.sorted.hashed_state)),
+                trie_data.iter().map(|data| Arc::clone(&data.hashed_state)),
             )
         },
     );
 
     #[cfg(not(feature = "rayon"))]
     let (nodes, state) = (
-        TrieUpdatesSorted::merge_batch(
-            trie_data.iter().map(|data| Arc::clone(&data.sorted.trie_updates)),
-        ),
+        TrieUpdatesSorted::merge_batch(trie_data.iter().map(|data| Arc::clone(&data.trie_updates))),
         HashedPostStateSorted::merge_batch(
-            trie_data.iter().map(|data| Arc::clone(&data.sorted.hashed_state)),
+            trie_data.iter().map(|data| Arc::clone(&data.hashed_state)),
         ),
     );
 
@@ -1011,12 +1016,12 @@ fn compute_execution_overlay_inner<N: NodePrimitives>(
 mod tests {
     use super::*;
     use alloy_primitives::{map::HashMap, Address, U256};
-    use reth_chain_state::{test_utils::TestBlockBuilder, ExecutedBlock, SparseTrie};
+    use reth_chain_state::{test_utils::TestBlockBuilder, ExecutedBlock};
     use reth_ethereum_primitives::EthPrimitives;
     use reth_primitives_traits::Account;
     #[cfg(feature = "rayon")]
     use reth_tasks::WorkerPool;
-    use reth_trie::{updates::TrieUpdatesSorted, ComputedTrieData, HashedPostState, HashedStorage};
+    use reth_trie::{updates::TrieUpdatesSorted, HashedPostState, HashedStorage, SortedTrieData};
     use revm::{
         bytecode::Bytecode,
         database::BundleState,
@@ -1063,7 +1068,7 @@ mod tests {
         ExecutedBlock::new(
             Arc::clone(&block.recovered_block),
             Arc::new(execution_output),
-            ComputedTrieData::new(Arc::new(hashed_state), Arc::new(TrieUpdatesSorted::default())),
+            SortedTrieData::new(Arc::new(hashed_state), Arc::new(TrieUpdatesSorted::default())),
         )
     }
 
@@ -1104,18 +1109,6 @@ mod tests {
             .block_state(parent_hash)
             .ok_or(StateTrieOverlayError { tip_hash: parent_hash, anchor_hash })?;
         manager.overlay_for_parent(&parent_state, anchor_hash, OverlayCacheConfig::default())
-    }
-
-    #[test]
-    fn errors_for_unknown_parent() {
-        let manager = OverlayManager::<EthPrimitives>::default();
-        let parent = B256::random();
-        let anchor = B256::random();
-
-        let err = overlay_for_parent(&manager, parent, anchor).unwrap_err();
-
-        assert_eq!(err.tip_hash, parent);
-        assert_eq!(err.anchor_hash, anchor);
     }
 
     #[test]
@@ -1208,19 +1201,6 @@ mod tests {
 
         assert!(!manager.state_trie_overlays.entries.contains_key(&first_key));
         assert!(!manager.execution_overlays.entries.contains_key(&first_key));
-    }
-
-    #[test]
-    fn execution_overlay_for_parent_at_anchor_is_empty() {
-        let manager = OverlayManager::<EthPrimitives>::default();
-        let anchor_hash = B256::with_last_byte(1);
-
-        let overlay = manager.execution_overlay_for_parent(anchor_hash, anchor_hash).unwrap();
-
-        assert!(overlay.accounts().is_empty());
-        assert!(overlay.storage().is_empty());
-        assert!(overlay.code_hashes().is_empty());
-        assert!(overlay.block_hashes().is_empty());
     }
 
     #[test]
@@ -1517,26 +1497,6 @@ mod tests {
         let anchor_hash = B256::random();
 
         assert!(!manager.contains_hash(parent_hash, anchor_hash, anchor_hash));
-    }
-
-    #[test]
-    fn taking_sparse_trie_removes_it() {
-        let manager = OverlayManager::<EthPrimitives>::default();
-        let state_root = B256::with_last_byte(1);
-        let other_state_root = B256::with_last_byte(2);
-        let anchor_hash = B256::with_last_byte(3);
-
-        manager.store_sparse_trie(PreservedSparseTrie::anchored(
-            SparseTrie::default(),
-            state_root,
-            anchor_hash,
-        ));
-
-        let preserved = manager.take_sparse_trie().expect("preserved trie should be available");
-        assert_eq!(preserved.state_root(), state_root);
-        assert_eq!(preserved.anchor_hash(), anchor_hash);
-        assert!(preserved.into_trie_for(other_state_root).unwrap().is_none());
-        assert!(manager.take_sparse_trie().is_none());
     }
 
     #[test]

@@ -97,12 +97,11 @@ pub trait EthState: LoadState + SpawnBlocking {
         block_id: Option<BlockId>,
     ) -> impl Future<Output = Result<B256, Self::Error>> + Send {
         self.spawn_blocking_io_with_state(block_id.unwrap_or_default(), move |_, state| {
-            Ok(B256::new(
+            Ok(B256::from(
                 state
                     .storage(address, index.as_b256())
                     .map_err(Self::Error::from_eth_err)?
-                    .unwrap_or_default()
-                    .to_be_bytes(),
+                    .unwrap_or_default(),
             ))
         })
     }
@@ -140,7 +139,7 @@ pub trait EthState: LoadState + SpawnBlocking {
                             .storage(address, slot.as_b256())
                             .map_err(Self::Error::from_eth_err)?
                             .unwrap_or_default();
-                        values.push(B256::new(value.to_be_bytes()));
+                        values.push(B256::from(value));
                     }
                     result.insert(address, values);
                 }
@@ -180,7 +179,7 @@ pub trait EthState: LoadState + SpawnBlocking {
                 let proof = state
                     .proof(Default::default(), address, &storage_keys)
                     .map_err(Self::Error::from_eth_err)?;
-                Ok(proof.into_eip1186_response(keys))
+                Ok(proof.into_eip1186_response_with(keys, true))
             })
             .await
         })
@@ -216,16 +215,17 @@ pub trait EthState: LoadState + SpawnBlocking {
                 for (address, slots) in &targets {
                     let hashed_address = keccak256(address);
                     proof_targets.account_targets.push(ProofV2Target::new(hashed_address));
-                    proof_targets
-                        .storage_targets
-                        .entry(hashed_address)
-                        .or_default()
-                        .extend(slots.iter().map(|slot| ProofV2Target::new(keccak256(slot))));
+                    if !slots.is_empty() {
+                        proof_targets
+                            .storage_targets
+                            .entry(hashed_address)
+                            .or_default()
+                            .extend(slots.iter().map(|slot| ProofV2Target::new(keccak256(slot))));
+                    }
                 }
 
-                let multiproof = state
-                    .multiproof_v2(Default::default(), proof_targets)
-                    .map_err(Self::Error::from_eth_err)?;
+                let multiproof =
+                    state.multiproof_v2(proof_targets, false).map_err(Self::Error::from_eth_err)?;
 
                 targets
                     .into_iter()
@@ -236,7 +236,7 @@ pub trait EthState: LoadState + SpawnBlocking {
                             .map_err(Self::Error::from_eth_err)?;
                         let storage_keys =
                             slots.into_iter().map(JsonStorageKey::from).collect::<Vec<_>>();
-                        Ok(proof.into_eip1186_response(storage_keys))
+                        Ok(proof.into_eip1186_response_with(storage_keys, true))
                     })
                     .collect::<Result<Vec<_>, Self::Error>>()
             })
@@ -260,23 +260,20 @@ pub trait EthState: LoadState + SpawnBlocking {
                 let account = state.basic_account(&address).map_err(Self::Error::from_eth_err)?;
                 let Some(account) = account else { return Ok(None) };
 
-                let balance = account.balance;
-                let nonce = account.nonce;
-                let code_hash = account.bytecode_hash.unwrap_or(KECCAK_EMPTY);
-
                 // Provide a default `HashedStorage` value in order to
                 // get the storage root hash of the current state.
                 let storage_root = state
                     .storage_root(address, Default::default())
                     .map_err(Self::Error::from_eth_err)?;
 
-                Ok(Some(Account { balance, nonce, code_hash, storage_root }))
+                Ok(Some(account.into_trie_account(storage_root)))
             })
             .await
         }
     }
 
     /// Retrieves the account's balance, nonce, and code for a given address.
+    #[allow(clippy::needless_update)]
     fn get_account_info(
         &self,
         address: Address,
@@ -300,7 +297,14 @@ pub trait EthState: LoadState + SpawnBlocking {
                     .original_bytes()
             };
 
-            Ok(AccountInfo { balance, nonce, code })
+            Ok(AccountInfo {
+                balance,
+                nonce,
+                code,
+                #[cfg(feature = "account-ext")]
+                extension: account.extension,
+                ..Default::default()
+            })
         })
     }
 }
@@ -474,7 +478,7 @@ pub trait LoadState:
         >,
     > + Send
     where
-        Self: SpawnBlocking + LoadBlock,
+        Self: LoadBlock,
     {
         async move {
             if at.is_pending() {

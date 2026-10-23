@@ -299,6 +299,10 @@ where
     /// The returned account key is memoized and the cursor remains positioned at that key until
     /// [`HashedCursor::seek`] or [`HashedCursor::next`] are called.
     fn seek(&mut self, key: B256) -> Result<Option<(B256, Self::Value)>, DatabaseError> {
+        // Forward scans can reuse cursor positions; backward seeks and exhausted cursors cannot.
+        if self.last_key.is_none_or(|last| key < last) {
+            self.reset();
+        }
         let post_state_entry =
             self.post_state_cursor.seek(&key).cloned().map(|(k, v)| (k, v.into_option()));
 
@@ -457,7 +461,7 @@ mod tests {
 
     #[test]
     fn test_seek_overlay_exact_hit_repositions_stale_db_on_next() {
-        let db_nodes = vec![(key(0x01), U256::from(1)), (key(0x03), U256::from(3))];
+        let db_nodes = vec![(key(0x01), U256::ONE), (key(0x03), U256::from(3))];
         let post_state_nodes = vec![(key(0x02), U256::from(2))];
 
         let db_nodes_map: BTreeMap<B256, U256> = db_nodes.into_iter().collect();
@@ -469,7 +473,7 @@ mod tests {
         let mut cursor = HashedPostStateCursor::new_storage(mock_cursor, &post_state, B256::ZERO);
 
         let result = cursor.seek(key(0x01)).unwrap();
-        assert_eq!(result, Some((key(0x01), U256::from(1))));
+        assert_eq!(result, Some((key(0x01), U256::ONE)));
         assert_eq!(visited_keys.lock().len(), 1);
 
         let result = cursor.seek(key(0x02)).unwrap();

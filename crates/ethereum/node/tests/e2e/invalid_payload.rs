@@ -10,9 +10,11 @@ use alloy_rpc_types_engine::{ExecutionPayloadV1, ExecutionPayloadV3, PayloadStat
 use rand::{rngs::StdRng, Rng, SeedableRng};
 use reth_chainspec::EthereumHardfork;
 use reth_e2e_test_utils::{transaction::TransactionTestContext, E2ETestSetupExt};
-use reth_ethereum_primitives::TransactionSigned;
+use reth_ethereum_engine_primitives::EthBuiltPayload;
+use reth_ethereum_primitives::{EthPrimitives, TransactionSigned};
 use reth_node_ethereum::EthereumNode;
-use reth_primitives_traits::SignedTransaction;
+use reth_primitives_traits::{RecoveredBlock, SignedTransaction};
+use std::sync::Arc;
 
 use reth_rpc_api::EngineApiClient;
 
@@ -406,7 +408,7 @@ async fn undecodable_bal_is_invalid_payload() -> eyre::Result<()> {
         RequestsOrHash::Requests(envelope.execution_requests.clone()),
     )
     .await?;
-    assert!(matches!(invalid_status.status, PayloadStatusEnum::Invalid { .. }));
+    assert!(invalid_status.is_invalid());
     assert_eq!(invalid_status.latest_valid_hash, None);
 
     // The same block with well-formed block access list bytes is processed normally.
@@ -418,7 +420,45 @@ async fn undecodable_bal_is_invalid_payload() -> eyre::Result<()> {
         RequestsOrHash::Requests(envelope.execution_requests),
     )
     .await?;
-    assert!(matches!(status.status, PayloadStatusEnum::Valid));
+    assert!(status.is_valid());
+
+    Ok(())
+}
+
+/// Tests that `submit_payload` returns an error with the validation error and the latest valid
+/// hash if the engine reports the payload invalid, while `submit_payload_with_status` returns the
+/// `INVALID` status.
+#[tokio::test]
+async fn submit_payload_errors_on_invalid_payload() -> eyre::Result<()> {
+    reth_tracing::init_test_tracing();
+
+    let (mut node, _) =
+        EthereumNode::test_setup_for(EthereumHardfork::Cancun).build_single().await?;
+    let payload = node.new_payload().await?;
+
+    // Reseal the block with a wrong state root, so it only fails validation after execution.
+    let mut block = payload.block().clone_block();
+    block.header.state_root = B256::ZERO;
+    let block = RecoveredBlock::new_unhashed(block, payload.recovered_block().senders().to_vec());
+    let invalid =
+        EthBuiltPayload::<EthPrimitives>::new(Arc::new(block), payload.fees(), None, None);
+    let invalid_hash = invalid.block().hash();
+    let parent_hash = invalid.block().parent_hash;
+
+    assert_eq!(
+        node.submit_payload(invalid.clone()).await.unwrap_err().to_string(),
+        format!(
+            "payload {invalid_hash} is invalid (latest valid hash: {parent_hash}): mismatched \
+             block state root: got {}, expected {}",
+            payload.block().state_root,
+            B256::ZERO
+        )
+    );
+
+    // The engine now rejects the payload as a known invalid block.
+    let status = node.submit_payload_with_status(invalid).await?;
+    assert!(status.is_invalid(), "{status}");
+    assert_eq!(status.latest_valid_hash, Some(parent_hash));
 
     Ok(())
 }

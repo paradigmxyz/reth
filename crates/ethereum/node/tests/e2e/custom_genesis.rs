@@ -92,3 +92,32 @@ async fn can_advance_on_genesis_newer_than_payload_timestamp() -> eyre::Result<(
 
     Ok(())
 }
+
+/// Tests that the next payload is built at the timestamp set on the test context, that later
+/// payloads continue from it, and that timestamps not after the latest block are rejected.
+#[tokio::test]
+async fn can_set_next_payload_timestamp() -> eyre::Result<()> {
+    reth_tracing::init_test_tracing();
+
+    let genesis_timestamp = 2_000_000_000;
+    let mut genesis = test_genesis();
+    genesis.timestamp = genesis_timestamp;
+    let chain_spec =
+        Arc::new(test_chain_spec_builder().genesis(genesis).cancun_activated().build());
+
+    let (mut node, _) = EthereumNode::test_setup(1, chain_spec).build_single().await?;
+
+    assert_eq!(
+        node.set_next_payload_timestamp(genesis_timestamp).unwrap_err().to_string(),
+        "next payload timestamp 2000000000 must be greater than the latest block timestamp 2000000000"
+    );
+
+    let timestamp = genesis_timestamp + 100;
+    node.set_next_payload_timestamp(timestamp)?;
+    assert_eq!(node.advance_block().await?.block().timestamp, timestamp);
+    assert_eq!(node.advance_block().await?.block().timestamp, timestamp + 1);
+
+    assert!(node.set_next_payload_timestamp(timestamp + 1).is_err());
+
+    Ok(())
+}

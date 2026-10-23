@@ -46,6 +46,17 @@ pub trait DbTx: Debug + Send {
     fn entries<T: Table>(&self) -> Result<usize, DatabaseError>;
     /// Disables long-lived read transaction safety guarantees.
     fn disable_long_read_transaction_safety(&mut self);
+
+    /// Enables or disables best-effort read-ahead for this transaction.
+    ///
+    /// Defaults to disabled and persists across operations until explicitly changed. Applies to
+    /// gets in every table. New read and write cursors inherit the setting; existing cursors keep
+    /// their own setting, configurable with [`DbCursorRO::prefetch`]. Returns the transaction for
+    /// chaining. Backends without support ignore the setting.
+    #[inline]
+    fn prefetch(&self, _enabled: bool) -> &Self {
+        self
+    }
 }
 
 /// Read write transaction that allows writing to database

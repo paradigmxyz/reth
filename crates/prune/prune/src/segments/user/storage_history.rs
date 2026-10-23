@@ -825,9 +825,7 @@ mod tests {
                 vec![(
                     address,
                     account.clone(),
-                    keys.iter()
-                        .map(|key| StorageEntry { key: *key, value: U256::from(1) })
-                        .collect(),
+                    keys.iter().map(|key| StorageEntry { key: *key, value: U256::ONE }).collect(),
                 )]
             })
             .collect::<Vec<_>>();

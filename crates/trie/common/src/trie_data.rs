@@ -34,30 +34,13 @@ impl SortedTrieData {
     }
 }
 
-/// Container for sorted trie data.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct ComputedTrieData {
-    /// Sorted trie data: hashed state and trie updates.
-    pub sorted: SortedTrieData,
-}
-
-impl ComputedTrieData {
-    /// Construct sorted trie data for one block.
-    pub const fn new(
-        hashed_state: Arc<HashedPostStateSorted>,
-        trie_updates: Arc<TrieUpdatesSorted>,
-    ) -> Self {
-        Self { sorted: SortedTrieData::new(hashed_state, trie_updates) }
-    }
-}
-
 /// Lazily initialized trie data containing sorted hashed state and trie updates.
 ///
 /// This is a no-std compatible wrapper that supports three modes:
 /// 1. **Ready mode**: Data is available immediately (created via `ready()`)
 /// 2. **Deferred mode**: Data is computed on first access (created via `deferred()`)
-/// 3. **Pending mode**: Data is computed in background task, callers wait for that result (created
-///    via `pending()`).
+/// 3. **Pending mode**: Access blocks until the caller-owned producer publishes the data (created
+///    via `pending()`). No task is spawned automatically.
 ///
 /// In deferred mode, the computation runs on the first call to `get()`, `hashed_state()`,
 /// or `trie_updates()`, and results are cached for subsequent calls.
@@ -65,7 +48,7 @@ impl ComputedTrieData {
 /// Cloning is cheap (Arc clone) and clones share the cached state.
 pub struct LazyTrieData {
     /// Cached sorted trie data, computed on first access.
-    data: Arc<OnceLock<ComputedTrieData>>,
+    data: Arc<OnceLock<SortedTrieData>>,
     // /// Optional deferred computation function.
     // compute: Option<Arc<dyn Fn() -> SortedTrieData + Send + Sync>>,
     /// Lazy mode.
@@ -96,7 +79,7 @@ impl Eq for LazyTrieData {}
 
 impl LazyTrieData {
     /// Creates a new [`LazyTrieData`] that is already initialized with the given values.
-    pub fn ready(sorted: ComputedTrieData) -> Self {
+    pub fn ready(sorted: SortedTrieData) -> Self {
         Self { data: Arc::new(OnceLock::from(sorted)), mode: LazyTrieDataMode::Ready }
     }
 
@@ -104,14 +87,18 @@ impl LazyTrieData {
     ///
     /// The computation will run on the first call to `get()`, `hashed_state()`,
     /// or `trie_updates()`. Results are cached for subsequent calls.
-    pub fn deferred(compute: impl Fn() -> ComputedTrieData + Send + Sync + 'static) -> Self {
+    pub fn deferred(compute: impl Fn() -> SortedTrieData + Send + Sync + 'static) -> Self {
         Self {
             data: Arc::new(OnceLock::new()),
             mode: LazyTrieDataMode::Deferred(Arc::new(compute)),
         }
     }
 
-    /// Creates a new [`LazyTrieData`] with a spawned task to compute sorted trie data.
+    /// Creates a pending [`LazyTrieData`] and its producer without spawning a task.
+    ///
+    /// The caller must arrange for `LazyTrieDataProducer::compute_and_publish` to run before or
+    /// concurrently with access to the handle. Access blocks until publication; dropping the
+    /// producer without publishing leaves access blocked indefinitely.
     #[cfg(feature = "std")]
     pub fn pending(
         hashed_state: Arc<HashedPostState>,
@@ -124,12 +111,15 @@ impl LazyTrieData {
         )
     }
 
-    /// Returns a reference to the sorted trie data, computing or waiting for result if necessary.
+    /// Returns a reference to the sorted trie data.
+    ///
+    /// Deferred mode computes on first access. Pending mode blocks until the producer publishes
+    /// the result and can block indefinitely if publication never occurs.
     ///
     /// # Panics
     ///
     /// Panics if in ready state, but value has not been initialized.
-    pub fn get(&self) -> &ComputedTrieData {
+    pub fn get(&self) -> &SortedTrieData {
         match &self.mode {
             LazyTrieDataMode::Ready => self.data.get().expect("LazyTrieData must be initialized"),
             LazyTrieDataMode::Deferred(compute) => self.data.get_or_init(|| compute.as_ref()()),
@@ -140,23 +130,23 @@ impl LazyTrieData {
 
     /// Returns a clone of the hashed state Arc.
     ///
-    /// If not initialized, computes from the deferred source or panics.
+    /// Calls [`Self::get`], computing deferred data or blocking until pending data is published.
     pub fn hashed_state(&self) -> Arc<HashedPostStateSorted> {
-        Arc::clone(&self.get().sorted.hashed_state)
+        Arc::clone(&self.get().hashed_state)
     }
 
     /// Returns a clone of the trie updates Arc.
     ///
-    /// If not initialized, computes from the deferred source or panics.
+    /// Calls [`Self::get`], computing deferred data or blocking until pending data is published.
     pub fn trie_updates(&self) -> Arc<TrieUpdatesSorted> {
-        Arc::clone(&self.get().sorted.trie_updates)
+        Arc::clone(&self.get().trie_updates)
     }
 
     /// Returns a clone of the [`SortedTrieData`].
     ///
-    /// If not initialized, computes from the deferred source or panics.
+    /// Calls [`Self::get`], computing deferred data or blocking until pending data is published.
     pub fn sorted_trie_data(&self) -> SortedTrieData {
-        self.get().sorted.clone()
+        self.get().clone()
     }
 }
 
@@ -166,7 +156,7 @@ impl serde::Serialize for LazyTrieData {
     where
         S: serde::Serializer,
     {
-        self.get().sorted.serialize(serializer)
+        self.get().serialize(serializer)
     }
 }
 
@@ -177,14 +167,14 @@ impl<'de> serde::Deserialize<'de> for LazyTrieData {
         D: serde::Deserializer<'de>,
     {
         let data = SortedTrieData::deserialize(deserializer)?;
-        Ok(Self::ready(ComputedTrieData::new(data.hashed_state, data.trie_updates)))
+        Ok(Self::ready(data))
     }
 }
 
 #[derive(Clone)]
 enum LazyTrieDataMode {
     Ready,
-    Deferred(Arc<dyn Fn() -> ComputedTrieData + Send + Sync>),
+    Deferred(Arc<dyn Fn() -> SortedTrieData + Send + Sync>),
     #[cfg(feature = "std")]
     Pending,
 }
@@ -200,11 +190,14 @@ impl fmt::Debug for LazyTrieDataMode {
     }
 }
 
-/// Producer consumed by a spawned task to compute sorted trie data for a [`LazyTrieData`] handle.
+/// Producer that computes and publishes sorted trie data for a [`LazyTrieData`] handle.
+///
+/// The caller is responsible for running [`Self::compute_and_publish`]. Dropping the producer
+/// without publishing leaves pending accessors blocked indefinitely.
 #[must_use = "LazyTrieDataProducer must be consumed with compute_and_publish to wake trie data waiters"]
 pub struct LazyTrieDataProducer {
     /// Shared result initialized exactly once by this producer.
-    value: Arc<OnceLock<ComputedTrieData>>,
+    value: Arc<OnceLock<SortedTrieData>>,
     /// Unsorted inputs consumed when the producer computes trie data.
     inputs: PendingInputs,
 }
@@ -217,7 +210,7 @@ impl fmt::Debug for LazyTrieDataProducer {
 
 impl LazyTrieDataProducer {
     /// Computes sorted trie data, publishes it to waiters, and returns it to the task owner.
-    pub fn compute_and_publish(self) -> ComputedTrieData {
+    pub fn compute_and_publish(self) -> SortedTrieData {
         let Self { value, inputs } = self;
         let computed = Self::sort(inputs.hashed_state, inputs.trie_updates);
         let _ = value.set(computed.clone());
@@ -228,7 +221,7 @@ impl LazyTrieDataProducer {
     pub fn sort(
         hashed_state: Arc<HashedPostState>,
         trie_updates: Arc<TrieUpdates>,
-    ) -> ComputedTrieData {
+    ) -> SortedTrieData {
         #[cfg(feature = "rayon")]
         let (sorted_hashed_state, sorted_trie_updates) = rayon::join(
             || match Arc::try_unwrap(hashed_state) {
@@ -253,7 +246,7 @@ impl LazyTrieDataProducer {
             },
         );
 
-        ComputedTrieData::new(Arc::new(sorted_hashed_state), Arc::new(sorted_trie_updates))
+        SortedTrieData::new(Arc::new(sorted_hashed_state), Arc::new(sorted_trie_updates))
     }
 }
 
@@ -271,12 +264,9 @@ mod tests {
     use crate::HashedStorage;
 
     use super::*;
-    use alloy_primitives::{map::B256Map, B256, U256};
+    use alloy_primitives::{B256, U256};
     use reth_primitives_traits::Account;
-    use std::{
-        thread,
-        time::{Duration, Instant},
-    };
+    use std::{thread, time::Duration};
 
     fn empty_pending() -> (LazyTrieData, LazyTrieDataProducer) {
         LazyTrieData::pending(
@@ -286,15 +276,8 @@ mod tests {
     }
 
     #[test]
-    fn test_lazy_ready_is_initialized() {
-        let lazy = LazyTrieData::ready(ComputedTrieData::default());
-        let _ = lazy.hashed_state();
-        let _ = lazy.trie_updates();
-    }
-
-    #[test]
     fn test_lazy_clone_shares_state() {
-        let lazy1 = LazyTrieData::ready(ComputedTrieData::default());
+        let lazy1 = LazyTrieData::ready(SortedTrieData::default());
         let lazy2 = lazy1.clone();
 
         // Both point to the same data
@@ -304,34 +287,9 @@ mod tests {
 
     #[test]
     fn test_lazy_deferred() {
-        let lazy = LazyTrieData::deferred(ComputedTrieData::default);
+        let lazy = LazyTrieData::deferred(SortedTrieData::default);
         assert!(lazy.hashed_state().is_empty());
         assert!(lazy.trie_updates().is_empty());
-    }
-
-    #[test]
-    fn ready_returns_immediately() {
-        let bundle = ComputedTrieData::default();
-        let deferred = LazyTrieData::ready(bundle.clone());
-
-        let result = deferred.get();
-
-        assert_eq!(result.sorted.hashed_state.total_len(), bundle.sorted.hashed_state.total_len());
-        assert_eq!(result.sorted.trie_updates.total_len(), bundle.sorted.trie_updates.total_len());
-    }
-
-    #[test]
-    fn pending_waits_for_task_and_caches_result() {
-        let (deferred, task) = empty_pending();
-
-        let published = task.compute_and_publish();
-        let first = deferred.get();
-        let second = deferred.get();
-
-        assert!(Arc::ptr_eq(&published.sorted.hashed_state, &first.sorted.hashed_state));
-        assert!(Arc::ptr_eq(&published.sorted.trie_updates, &first.sorted.trie_updates));
-        assert!(Arc::ptr_eq(&first.sorted.hashed_state, &second.sorted.hashed_state));
-        assert!(Arc::ptr_eq(&first.sorted.trie_updates, &second.sorted.trie_updates));
     }
 
     #[test]
@@ -345,8 +303,8 @@ mod tests {
         let published = task.compute_and_publish();
         let result = handle.join().unwrap();
 
-        assert!(Arc::ptr_eq(&published.sorted.hashed_state, &result.sorted.hashed_state));
-        assert!(Arc::ptr_eq(&published.sorted.trie_updates, &result.sorted.trie_updates));
+        assert!(Arc::ptr_eq(&published.hashed_state, &result.hashed_state));
+        assert!(Arc::ptr_eq(&published.trie_updates, &result.trie_updates));
     }
 
     #[test]
@@ -359,10 +317,10 @@ mod tests {
         let result1 = deferred.get().clone();
         let result2 = handle.join().unwrap();
 
-        assert!(Arc::ptr_eq(&published.sorted.hashed_state, &result1.sorted.hashed_state));
-        assert!(Arc::ptr_eq(&published.sorted.trie_updates, &result1.sorted.trie_updates));
-        assert!(Arc::ptr_eq(&result1.sorted.hashed_state, &result2.sorted.hashed_state));
-        assert!(Arc::ptr_eq(&result1.sorted.trie_updates, &result2.sorted.trie_updates));
+        assert!(Arc::ptr_eq(&published.hashed_state, &result1.hashed_state));
+        assert!(Arc::ptr_eq(&published.trie_updates, &result1.trie_updates));
+        assert!(Arc::ptr_eq(&result1.hashed_state, &result2.hashed_state));
+        assert!(Arc::ptr_eq(&result1.trie_updates, &result2.trie_updates));
     }
 
     #[test]
@@ -373,7 +331,7 @@ mod tests {
             .with_accounts([(hashed_address, Some(Account::default()))])
             .with_storages([(
                 hashed_address,
-                HashedStorage::from_iter([(hashed_slot, U256::from(1))]),
+                HashedStorage::from_iter([(hashed_slot, U256::ONE)]),
             )]);
 
         let (deferred, task) =
@@ -381,26 +339,7 @@ mod tests {
         let _ = task.compute_and_publish();
         let result = deferred.get().clone();
 
-        assert_eq!(result.sorted.hashed_state.total_len(), 2);
-        assert_eq!(result.sorted.trie_updates.total_len(), 0);
-    }
-
-    #[test]
-    fn wait_does_not_block_after_first_compute() {
-        let mut accounts = B256Map::default();
-        for i in 0..100 {
-            accounts.insert(B256::with_last_byte(i), Some(Account::default()));
-        }
-        let (deferred, task) = LazyTrieData::pending(
-            Arc::new(HashedPostState { accounts, storages: Default::default() }),
-            Arc::new(TrieUpdates::default()),
-        );
-
-        let _ = task.compute_and_publish();
-        let _ = deferred.get().clone();
-        let start = Instant::now();
-        let _ = deferred.get().clone();
-
-        assert!(start.elapsed() < Duration::from_millis(10));
+        assert_eq!(result.hashed_state.total_len(), 2);
+        assert_eq!(result.trie_updates.total_len(), 0);
     }
 }

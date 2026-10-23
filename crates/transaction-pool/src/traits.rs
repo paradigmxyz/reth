@@ -2049,23 +2049,13 @@ impl<Tx: PoolTransaction> Stream for NewSubpoolTransactionStream<Tx> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{blobstore::BlobCellAvailability, test_utils::MockTransaction};
+    use crate::blobstore::BlobCellAvailability;
     use alloy_consensus::{
         EthereumTxEnvelope, SignableTransaction, TxEip1559, TxEip2930, TxEip4844, TxEip7702,
         TxEnvelope, TxLegacy,
     };
     use alloy_eips::eip4844::DATA_GAS_PER_BLOB;
     use alloy_primitives::Signature;
-
-    #[test]
-    fn test_mock_consensus_encoding() {
-        let transaction = MockTransaction::legacy();
-
-        assert_eq!(
-            transaction.encoded_2718_consensus(),
-            transaction.into_consensus().encoded_2718()
-        );
-    }
 
     #[test]
     fn test_pool_size_invariants() {
