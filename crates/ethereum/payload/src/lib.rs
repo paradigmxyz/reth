@@ -43,6 +43,7 @@ use std::sync::Arc;
 use tracing::{debug, trace, warn};
 
 mod config;
+mod recovery;
 pub use config::*;
 
 pub mod validator;
@@ -143,6 +144,11 @@ where
 /// Given build arguments including an Ethereum client, transaction pool,
 /// and configuration, this function creates a transaction payload. Returns
 /// a result indicating success with the payload or an error in case of failure.
+///
+/// Unwinding transaction panics evict the transaction and its nonce descendants from the pool
+/// and fail the build, discarding its execution state. The payload scheduler can retry on its
+/// next interval. This containment requires unwinding and does not apply to `panic = "abort"`
+/// builds or to block validation.
 #[inline]
 pub fn default_ethereum_payload<EvmConfig, Client, Pool, F>(
     evm_config: EvmConfig,
@@ -375,9 +381,11 @@ where
         let tx_hash = *tx.tx_hash();
 
         let mut tx_regular_gas_used = 0;
-        let gas_output = match builder.execute_transaction_with_result_closure(tx, |result| {
-            tx_regular_gas_used = result.result().result.gas().block_regular_gas_used();
-        }) {
+        let gas_output = match recovery::catch_transaction_panic(&pool, tx_hash, || {
+            builder.execute_transaction_with_result_closure(tx, |result| {
+                tx_regular_gas_used = result.result().result.gas().block_regular_gas_used();
+            })
+        })? {
             Ok(gas_output) => gas_output,
             Err(BlockExecutionError::Validation(BlockValidationError::InvalidTx {
                 error, ..
