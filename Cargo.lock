@@ -10011,7 +10011,6 @@ dependencies = [
  "reth-ethereum-primitives",
  "reth-evm",
  "reth-evm-ethereum",
- "reth-execution-types",
  "reth-exex",
  "reth-network",
  "reth-network-p2p",

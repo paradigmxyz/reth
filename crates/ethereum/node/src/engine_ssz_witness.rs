@@ -80,8 +80,7 @@ where
                     )));
                     let output =
                         evm_config.executor(&mut db).execute(&block).map_err(eyre::Report::new)?;
-                    let codes = ExecutionWitnessRecord::capture_codes(&db);
-                    db.commit_source(&reth_execution_types::BundleSource(&output.state));
+                    let codes = ExecutionWitnessRecord::commit_execution(&mut db, &output.state);
                     let first_header = db
                         .cache
                         .block_hashes

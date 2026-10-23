@@ -11,7 +11,6 @@ repository.workspace = true
 workspace = true
 
 [dependencies]
-reth-execution-types.workspace = true
 evm2.workspace = true
 # reth
 reth-ethereum-engine-primitives = { workspace = true, features = ["std"] }
@@ -119,7 +118,6 @@ account-ext = [
     "reth-rpc/account-ext",
     "reth-rpc-eth-api/account-ext",
     "evm2/account-ext",
-    "reth-execution-types/account-ext",
     "reth-trie-common/account-ext",
 ]
 jit = ["reth-evm-ethereum/jit"]

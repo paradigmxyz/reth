@@ -2,12 +2,13 @@ use alloc::vec::Vec;
 use alloy_primitives::{keccak256, Bytes, B256};
 use alloy_rpc_types_debug::ExecutionWitness;
 use evm2::evm::CacheDB;
+use reth_execution_types::BundleSource;
 use reth_primitives_traits::Account as PrimitiveAccount;
 use reth_storage_api::{
     AccountReader, HashedPostStateProvider, HeaderProvider, StateProofProvider,
 };
 use reth_storage_errors::provider::ProviderResult;
-use reth_trie_common::{ExecutionWitnessMode, HashedPostState};
+use reth_trie_common::{bundle_state::BundleState, ExecutionWitnessMode, HashedPostState};
 
 /// Borrows finalized execution state for witness generation.
 #[derive(Debug, Clone)]
@@ -137,6 +138,17 @@ impl<'a, DB> ExecutionWitnessRecord<'a, DB> {
             .map(|(_, code)| code.original_bytes())
             .collect::<Vec<_>>();
         codes.sort_unstable();
+        codes
+    }
+
+    /// Captures the parent-state bytecode read during execution, then commits the execution
+    /// `output` to `state`, and returns the captured codes for [`Self::with_canonical_codes`].
+    ///
+    /// The codes are captured before the commit, so code deployed by execution is excluded from
+    /// canonical witnesses.
+    pub fn commit_execution(state: &mut CacheDB<DB>, output: &BundleState) -> Vec<Bytes> {
+        let codes = Self::capture_codes(state);
+        state.commit_source(&BundleSource(output));
         codes
     }
 

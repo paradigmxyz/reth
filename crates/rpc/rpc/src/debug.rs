@@ -652,8 +652,7 @@ where
                     .executor(&mut db)
                     .execute(&block)
                     .map_err(|err| EthApiError::Internal(err.into()))?;
-                let codes = ExecutionWitnessRecord::capture_codes(&db);
-                db.commit_source(&reth_execution_types::BundleSource(&output.state));
+                let codes = ExecutionWitnessRecord::commit_execution(&mut db, &output.state);
 
                 Ok(ExecutionWitnessRecord::new(&db)
                     .with_canonical_codes(codes)
@@ -1728,12 +1727,11 @@ mod tests {
         let read_code = Bytecode::new_raw(alloy_primitives::bytes!("600100"));
         let created_code = Bytecode::new_raw(alloy_primitives::bytes!("600200"));
         state.cache.contracts.insert(read_code.hash_slow(), read_code.clone());
-        let codes = ExecutionWitnessRecord::capture_codes(&state);
         let mut output = BundleState::default();
         // Recreating code already read from parent state must not remove it from the witness.
         output.contracts.insert(read_code.hash_slow(), read_code.clone());
         output.contracts.insert(created_code.hash_slow(), created_code.clone());
-        state.commit_source(&reth_execution_types::BundleSource(&output));
+        let codes = ExecutionWitnessRecord::commit_execution(&mut state, &output);
 
         for mode in [ExecutionWitnessMode::Legacy, ExecutionWitnessMode::Canonical] {
             let witness = ExecutionWitnessRecord::new(&state)
