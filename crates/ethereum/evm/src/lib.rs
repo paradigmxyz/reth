@@ -450,11 +450,11 @@ where
         }
     }
 
-    fn with_precompile_cache_enabled(mut self, enabled: bool) -> Self
+    fn with_precompile_cache_disabled(mut self, disabled: bool) -> Self
     where
         Self: Sized,
     {
-        self.executor_factory = self.executor_factory.with_precompile_cache_enabled(enabled);
+        self.executor_factory = self.executor_factory.with_precompile_cache_disabled(disabled);
         self
     }
 

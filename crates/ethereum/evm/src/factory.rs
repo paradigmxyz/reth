@@ -126,9 +126,9 @@ where
     /// Shared precompile cache.
     #[cfg(feature = "std")]
     precompile_cache_map: PrecompileCacheMap<F::SpecId>,
-    /// Whether EVMs use the shared precompile cache. Disabled by default.
+    /// Whether to disable the shared precompile cache.
     #[cfg(feature = "std")]
-    precompile_cache_enabled: bool,
+    precompile_cache_disabled: bool,
     /// Whether EVMs record precompile cache metrics.
     #[cfg(feature = "std")]
     precompile_cache_metrics: bool,
@@ -215,7 +215,7 @@ impl<R: Clone, C, F: EvmFactory> Clone for EthBlockExecutorFactory<R, C, F> {
             #[cfg(feature = "std")]
             precompile_cache_map: self.precompile_cache_map.clone(),
             #[cfg(feature = "std")]
-            precompile_cache_enabled: self.precompile_cache_enabled,
+            precompile_cache_disabled: self.precompile_cache_disabled,
             #[cfg(feature = "std")]
             precompile_cache_metrics: self.precompile_cache_metrics,
             evm_factory: self.evm_factory.clone(),
@@ -250,7 +250,7 @@ impl<R, C, F: EvmFactory> EthBlockExecutorFactory<R, C, F> {
             #[cfg(feature = "std")]
             precompile_cache_map: PrecompileCacheMap::default(),
             #[cfg(feature = "std")]
-            precompile_cache_enabled: false,
+            precompile_cache_disabled: false,
             #[cfg(feature = "std")]
             precompile_cache_metrics: false,
             evm_factory,
@@ -278,18 +278,17 @@ impl<R, C, F: EvmFactory> EthBlockExecutorFactory<R, C, F> {
         &mut self.evm_factory
     }
 
-    /// Returns a factory whose EVMs use the shared precompile cache, if supported by the active
-    /// build.
-    pub const fn with_precompile_cache_enabled(self, enabled: bool) -> Self {
+    /// Returns a factory with precompile cache disabled, if supported by the active build.
+    pub const fn with_precompile_cache_disabled(self, disabled: bool) -> Self {
         #[cfg(feature = "std")]
         {
             let mut this = self;
-            this.precompile_cache_enabled = enabled;
+            this.precompile_cache_disabled = disabled;
             this
         }
         #[cfg(not(feature = "std"))]
         {
-            let _ = enabled;
+            let _ = disabled;
             self
         }
     }
@@ -326,7 +325,9 @@ impl<R, C, F: EvmFactory> EthBlockExecutorFactory<R, C, F> {
         let precompiles = self.evm_factory.precompiles(spec);
         #[cfg(feature = "std")]
         let precompiles: Box<dyn evm2::evm::precompile::PrecompileProvider<F::Types>> =
-            if self.precompile_cache_enabled {
+            if self.precompile_cache_disabled {
+                Box::new(precompiles)
+            } else {
                 Box::new(CachedPrecompileProvider::new(
                     precompiles,
                     self.precompile_cache_map.clone(),
@@ -334,8 +335,6 @@ impl<R, C, F: EvmFactory> EthBlockExecutorFactory<R, C, F> {
                     self.evm_factory.precompile_cache_policy(spec),
                     self.precompile_cache_metrics,
                 ))
-            } else {
-                Box::new(precompiles)
             };
         #[cfg(not(feature = "std"))]
         let precompiles = Box::new(precompiles);
@@ -365,7 +364,9 @@ impl<R, C, F: EvmFactory> EthBlockExecutorFactory<R, C, F> {
         let precompiles = self.evm_factory.precompiles(spec);
         #[cfg(feature = "std")]
         let precompiles: Box<dyn evm2::evm::precompile::PrecompileProvider<F::Types>> =
-            if self.precompile_cache_enabled {
+            if self.precompile_cache_disabled {
+                Box::new(precompiles)
+            } else {
                 Box::new(CachedPrecompileProvider::new(
                     precompiles,
                     self.precompile_cache_map.clone(),
@@ -373,8 +374,6 @@ impl<R, C, F: EvmFactory> EthBlockExecutorFactory<R, C, F> {
                     self.evm_factory.precompile_cache_policy(spec),
                     self.precompile_cache_metrics,
                 ))
-            } else {
-                Box::new(precompiles)
             };
         #[cfg(not(feature = "std"))]
         let precompiles = Box::new(precompiles);

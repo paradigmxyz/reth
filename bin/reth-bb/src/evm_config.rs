@@ -97,8 +97,8 @@ where
     type BlockExecutorFactory = EthBigBlockExecutorFactory<C>;
     type BlockAssembler = BbBlockAssembler;
 
-    fn with_precompile_cache_enabled(self, enabled: bool) -> Self {
-        Self::new(self.inner.with_precompile_cache_enabled(enabled))
+    fn with_precompile_cache_disabled(self, disabled: bool) -> Self {
+        Self::new(self.inner.with_precompile_cache_disabled(disabled))
     }
 
     fn with_precompile_cache_metrics(self, enabled: bool) -> Self {
@@ -288,15 +288,8 @@ mod tests {
                 evm.system_call(SystemTx::new(address, input)).unwrap().commit().status
             };
 
-            // Configs do not cache precompiles unless the engine opts in.
-            let warm_input = Bytes::from_static(b"prewarmed");
-            let uncached = config.clone().with_precompile_cache_metrics(true);
-            assert!(call(&uncached, identity, warm_input.clone()));
-            assert!(call(&uncached, identity, warm_input.clone()));
-            assert!(metrics_snapshot().is_empty());
-
             // Prewarming fills the shared cache without recording execution metrics.
-            let config = config.with_precompile_cache_enabled(true);
+            let warm_input = Bytes::from_static(b"prewarmed");
             assert!(call(&config, identity, warm_input.clone()));
             assert!(metrics_snapshot().is_empty());
 
@@ -341,7 +334,7 @@ mod tests {
             ));
 
             // Disabling the cache must reach the big-block factory, even after cloning.
-            let disabled = measured.clone().with_precompile_cache_enabled(false);
+            let disabled = measured.clone().with_precompile_cache_disabled(true);
             assert!(call(&disabled.clone(), identity, warm_input.clone()));
             assert!(call(
                 &measured.clone().with_precompile_cache_metrics(false),
