@@ -1,7 +1,7 @@
 //! Traits for execution.
 
 use crate::{ConfigureEvm, Database, DynDatabase, EvmEnv, TxEnvFor};
-use alloc::{boxed::Box, format, sync::Arc, vec::Vec};
+use alloc::{boxed::Box, sync::Arc, vec::Vec};
 use alloy_consensus::{
     transaction::{Either, Recovered, TransactionEnvelope},
     BlockHeader as _, Header, Transaction, TxEip2930, TxEip4844, TxLegacy,
@@ -15,7 +15,7 @@ use alloy_eips::{
 };
 use alloy_primitives::{Address, B256};
 use core::fmt::Debug;
-use evm2::{evm::StateChangeSink as EvmStateChangeSink, registry::HandlerError, DatabaseError};
+use evm2::{registry::HandlerError, DatabaseError};
 use reth_execution_types::{BlockExecutionResult, StateUpdate};
 use reth_primitives_traits::{
     Block, HeaderTy, NodePrimitives, ReceiptTy, RecoveredBlock, SealedHeader, SignedTransaction,
@@ -185,16 +185,13 @@ pub trait Evm {
         moves: impl IntoIterator<Item = (Address, Address)>,
     ) -> Result<(), evm2::precompiles::MovePrecompileError>;
 
-    /// Executes a transaction and discards its writes while streaming observed state changes into
-    /// `sink`.
-    fn transact_and_discard<S>(
+    /// Executes a transaction, lets `observe` inspect the executed transaction and its state
+    /// changes, then discards its writes.
+    fn transact_and_discard<R>(
         &mut self,
         transaction: &Recovered<Self::Transaction>,
-        sink: &mut S,
-    ) -> Result<(), BlockExecutionError>
-    where
-        S: EvmStateChangeSink,
-        S::Error: Debug;
+        observe: impl FnOnce(&evm2::ExecutedTx<'_, '_, Self::EvmTypes>) -> R,
+    ) -> Result<R, BlockExecutionError>;
 }
 
 impl<'a, T: evm2::EvmTypes<Tx: Typed2718>> Evm for evm2::Evm<'a, T> {
@@ -278,20 +275,15 @@ impl<'a, T: evm2::EvmTypes<Tx: Typed2718>> Evm for evm2::Evm<'a, T> {
         self.precompiles_mut().move_precompiles(&moves.into_iter().collect::<Vec<_>>())
     }
 
-    fn transact_and_discard<S>(
+    fn transact_and_discard<R>(
         &mut self,
         transaction: &Recovered<Self::Transaction>,
-        sink: &mut S,
-    ) -> Result<(), BlockExecutionError>
-    where
-        S: EvmStateChangeSink,
-        S::Error: Debug,
-    {
+        observe: impl FnOnce(&evm2::ExecutedTx<'_, '_, T>) -> R,
+    ) -> Result<R, BlockExecutionError> {
         let executed = self.transact(transaction).map_err(map_handler_error)?;
-
-        executed.discard_with(sink).map(|_| ()).map_err(|err| {
-            BlockExecutionError::msg(format!("discarded state sink failed: {err:?}"))
-        })
+        let observed = observe(&executed);
+        drop(executed);
+        Ok(observed)
     }
 }
 

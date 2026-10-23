@@ -25,11 +25,8 @@ use crate::tree::{
 use alloy_consensus::transaction::TxHashRef;
 use alloy_eip7928::bal::DecodedBal;
 use alloy_eips::eip4895::Withdrawal;
-use alloy_primitives::{keccak256, Address};
-use core::convert::Infallible;
-use evm2::evm::{
-    AccountChangeRef, Database, NoopChangeSink, StateChangeSink, StateChangeSource, StorageChange,
-};
+use alloy_primitives::keccak256;
+use evm2::evm::Database;
 use metrics::{Counter, Gauge, Histogram};
 use rayon::prelude::*;
 use reth_evm::{
@@ -47,7 +44,7 @@ use reth_provider::{
 };
 use reth_storage_overlay::OverlayStateProviderFactory;
 use reth_tasks::{Runtime, WorkerStatefulPool};
-use reth_trie_common::{MultiProofTargetsV2, ProofV2Target};
+use reth_trie_common::MultiProofTargetsV2;
 use std::{
     sync::{
         atomic::{AtomicBool, AtomicUsize, Ordering},
@@ -351,9 +348,8 @@ where
                     if index > 0 &&
                         let Some(state_root_hint_stream) = state_root_hint_stream
                     {
-                        let mut sink = PrewarmProofTargetsSink::default();
-                        let Ok(()) = state.visit(&mut sink);
-                        let (targets, storage_targets) = sink.into_parts();
+                        let (targets, storage_targets) =
+                            MultiProofTargetsV2::from_account_changes(state.account_changes());
                         ctx.metrics.prefetch_storage_targets.record(storage_targets as f64);
                         state_root_hint_stream.on_access_hint(targets.into());
                     }
@@ -375,29 +371,32 @@ where
 
                 let Some(results) = &ctx.prewarm_results else {
                     let hint_stream = state_root_hint_stream.filter(|_| index > 0);
-                    let mut proof_targets = PrewarmProofTargetsSink::default();
-                    let res = if hint_stream.is_some() {
-                        evm.transact_and_discard(&tx_env, &mut proof_targets)
-                    } else {
-                        evm.transact_and_discard(&tx_env, &mut NoopChangeSink::default())
+                    let res = evm.transact_and_discard(&tx_env, |executed| {
+                        hint_stream.is_some().then(|| {
+                            MultiProofTargetsV2::from_account_changes(executed.account_changes())
+                        })
+                    });
+                    let hints = match res {
+                        Ok(hints) => hints,
+                        Err(err) => {
+                            trace!(
+                                target: "engine::tree::payload_processor::prewarm",
+                                %err,
+                                tx_hash=%tx.tx().tx_hash(),
+                                sender=%tx.signer(),
+                                "Error when executing prewarm transaction",
+                            );
+                            ctx.metrics.transaction_errors.increment(1);
+                            return;
+                        }
                     };
-                    if let Err(err) = res {
-                        trace!(
-                            target: "engine::tree::payload_processor::prewarm",
-                            %err,
-                            tx_hash=%tx.tx().tx_hash(),
-                            sender=%tx.signer(),
-                            "Error when executing prewarm transaction",
-                        );
-                        ctx.metrics.transaction_errors.increment(1);
-                        return;
-                    }
                     ctx.metrics.execution_duration.record(start.elapsed());
                     if ctx.should_stop() {
                         return;
                     }
-                    if let Some(stream) = hint_stream {
-                        let (targets, storage_targets) = proof_targets.into_parts();
+                    if let Some(stream) = hint_stream &&
+                        let Some((targets, storage_targets)) = hints
+                    {
                         ctx.metrics.prefetch_storage_targets.record(storage_targets as f64);
                         stream.on_access_hint(targets.into());
                     }
@@ -959,59 +958,6 @@ where
     }
 }
 
-#[derive(Debug, Default)]
-struct PrewarmProofTargetsSink {
-    targets: MultiProofTargetsV2,
-    storage_targets: usize,
-    selfdestructed: Vec<Address>,
-    last_storage_address: Option<(Address, alloy_primitives::B256)>,
-}
-
-impl PrewarmProofTargetsSink {
-    fn into_parts(mut self) -> (MultiProofTargetsV2, usize) {
-        // A transaction can write storage before selfdestructing. Such writes do not need
-        // speculative proofs, regardless of the order in which the stream reports them.
-        for address in self.selfdestructed {
-            if let Some(slots) = self.targets.storage_targets.remove(&keccak256(address)) {
-                self.storage_targets -= slots.len();
-            }
-        }
-        (self.targets, self.storage_targets)
-    }
-
-    fn storage_targets_for_address(&mut self, address: Address) -> &mut Vec<ProofV2Target> {
-        let hash = match self.last_storage_address {
-            Some((previous, hash)) if previous == address => hash,
-            _ => {
-                let hash = keccak256(address);
-                self.last_storage_address = Some((address, hash));
-                hash
-            }
-        };
-        self.targets.storage_targets.entry(hash).or_default()
-    }
-}
-
-impl StateChangeSink for PrewarmProofTargetsSink {
-    type Error = Infallible;
-
-    fn account(&mut self, change: AccountChangeRef<'_>) -> Result<(), Self::Error> {
-        if change.selfdestructed {
-            self.selfdestructed.push(change.address);
-        } else if change.original != change.current {
-            self.targets.account_targets.push(ProofV2Target::new(keccak256(change.address)));
-        }
-        Ok(())
-    }
-
-    fn storage(&mut self, change: StorageChange) -> Result<(), Self::Error> {
-        self.storage_targets_for_address(change.address)
-            .push(ProofV2Target::new(keccak256(change.key.to_be_bytes::<32>())));
-        self.storage_targets += 1;
-        Ok(())
-    }
-}
-
 /// Returns [`MultiProofTargetsV2`] for withdrawal addresses.
 ///
 /// Withdrawals only modify account balances (no storage), so the targets contain
@@ -1094,10 +1040,7 @@ mod tests {
     use alloy_consensus::{transaction::Recovered, TxLegacy};
     use alloy_eips::eip7702::constants::EIP7702_CLEARED_DELEGATION;
     use alloy_primitives::{Address, Signature, TxKind, B256, U256};
-    use evm2::{
-        evm::{AccountInfo, EmptyDB},
-        BaseEvmTypes,
-    };
+    use evm2::{evm::EmptyDB, BaseEvmTypes};
     use reth_chainspec::ChainSpec;
     use reth_ethereum_primitives::{EthPrimitives, TransactionSigned};
     use reth_evm::{execute::WithTxEnv, TxEnvFor};
@@ -1586,103 +1529,6 @@ mod tests {
     fn save_cache_handles_empty_slot() {
         for (valid, insert_error) in [(true, false), (false, false), (true, true)] {
             assert_save_cache_drops_removed_caches(CacheSlot::Empty, valid, insert_error);
-        }
-    }
-
-    #[test]
-    fn prewarm_targets_ignore_unchanged_reads() {
-        let address = Address::repeat_byte(1);
-        let slot = U256::from(7);
-        let mut sink = PrewarmProofTargetsSink::default();
-        sink.account_read(address, None).unwrap();
-        sink.storage_read(address, slot, U256::from(8)).unwrap();
-        let (targets, count) = sink.into_parts();
-        assert!(targets.account_targets.is_empty());
-        assert!(targets.storage_targets.is_empty());
-        assert_eq!(count, 0);
-    }
-
-    #[test]
-    fn prewarm_targets_include_changes() {
-        let address = Address::repeat_byte(1);
-        let slot = U256::from(7);
-        let original = AccountInfo::default();
-        let current = AccountInfo { nonce: 1, ..original.clone() };
-        let mut sink = PrewarmProofTargetsSink::default();
-        sink.account(AccountChangeRef {
-            address,
-            original: Some(&original),
-            current: Some(&current),
-            created: false,
-            selfdestructed: false,
-        })
-        .unwrap();
-        sink.storage(StorageChange {
-            address,
-            key: slot,
-            original: U256::ZERO,
-            current: U256::from(8),
-        })
-        .unwrap();
-        let (targets, count) = sink.into_parts();
-        assert_eq!(
-            targets.account_targets.iter().map(ProofV2Target::key).collect::<Vec<_>>(),
-            vec![keccak256(address)]
-        );
-        assert_eq!(
-            targets.storage_targets[&keccak256(address)]
-                .iter()
-                .map(ProofV2Target::key)
-                .collect::<Vec<_>>(),
-            vec![keccak256(slot.to_be_bytes::<32>())]
-        );
-        assert_eq!(count, 1);
-    }
-
-    #[test]
-    fn prewarm_targets_discard_selfdestructed_storage() {
-        let address = Address::repeat_byte(1);
-        let retained = Address::repeat_byte(2);
-        let info = AccountInfo::default();
-        for account_first in [false, true] {
-            let mut sink = PrewarmProofTargetsSink::default();
-            let destroyed = AccountChangeRef {
-                address,
-                original: Some(&info),
-                current: None,
-                created: true,
-                selfdestructed: true,
-            };
-            if account_first {
-                sink.account(destroyed).unwrap();
-            }
-            sink.storage_wipe(address).unwrap();
-            for address in [address, retained] {
-                sink.storage(StorageChange {
-                    address,
-                    key: U256::from(7),
-                    original: U256::ZERO,
-                    current: U256::from(8),
-                })
-                .unwrap();
-            }
-            if !account_first {
-                sink.account(destroyed).unwrap();
-            }
-            // Lifecycle flags alone do not imply an account trie update.
-            sink.account(AccountChangeRef {
-                address: retained,
-                original: Some(&info),
-                current: Some(&info),
-                created: true,
-                selfdestructed: false,
-            })
-            .unwrap();
-            let (targets, count) = sink.into_parts();
-            assert!(targets.account_targets.is_empty());
-            assert_eq!(targets.storage_targets.len(), 1);
-            assert!(targets.storage_targets.contains_key(&keccak256(retained)));
-            assert_eq!(count, 1);
         }
     }
 }
