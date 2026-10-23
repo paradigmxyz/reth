@@ -777,7 +777,7 @@ where
             .map_err(EthApiError::from)
             .map_err(Eth::Error::from_eth_err)?
             .unwrap_or_default();
-        let code = if account.code_hash == alloy_primitives::KECCAK256_EMPTY {
+        let code = if account.is_empty_code_hash() {
             Default::default()
         } else if let Some(code) = account.code {
             code.original_bytes()

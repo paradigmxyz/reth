@@ -99,18 +99,17 @@ impl BlockState {
             Entry::Occupied(entry) => entry.get().status,
             Entry::Vacant(_) => loaded_status(original.as_ref()),
         };
-        let status =
-            if current.is_none() {
-                previous_status.on_selfdestructed()
-            } else if wiped && !created {
-                AccountStatus::DestroyedChanged
-            } else if created {
-                previous_status.on_created()
-            } else {
-                previous_status.on_changed(original.as_ref().is_none_or(|i| {
-                    i.nonce == 0 && i.code_hash == alloy_primitives::KECCAK256_EMPTY
-                }))
-            };
+        let status = if current.is_none() {
+            previous_status.on_selfdestructed()
+        } else if wiped && !created {
+            AccountStatus::DestroyedChanged
+        } else if created {
+            previous_status.on_created()
+        } else {
+            previous_status.on_changed(
+                original.as_ref().is_none_or(|i| i.nonce == 0 && i.is_empty_code_hash()),
+            )
+        };
         match entry {
             Entry::Vacant(entry) => {
                 entry.insert(TransitionAccount {

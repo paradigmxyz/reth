@@ -157,8 +157,7 @@ impl<'a, DB> ExecutionWitnessRecord<'a, DB> {
                 account.as_ref().map(|account| PrimitiveAccount {
                     nonce: account.nonce,
                     balance: account.balance,
-                    bytecode_hash: (!account.code_hash.is_zero() &&
-                        account.code_hash != alloy_consensus::constants::KECCAK_EMPTY)
+                    bytecode_hash: (!account.code_hash.is_zero() && !account.is_empty_code_hash())
                         .then_some(account.code_hash),
                     #[cfg(feature = "account-ext")]
                     extension: reth_primitives_traits::AccountExtension::from_shared(

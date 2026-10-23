@@ -1162,10 +1162,8 @@ impl ExecutionCache {
             // If the original account had no code (was an EOA or a not yet deployed contract), we
             // just remove the account from cache - no storage exists for it.
             if account.was_destroyed() {
-                let had_code = account
-                    .original_info
-                    .as_ref()
-                    .is_some_and(|info| info.code_hash != alloy_primitives::KECCAK256_EMPTY);
+                let had_code =
+                    account.original_info.as_ref().is_some_and(|info| !info.is_empty_code_hash());
                 if had_code {
                     self.0.selfdestruct_encountered.call_once(|| {
                         warn!(
