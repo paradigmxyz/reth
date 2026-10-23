@@ -23,8 +23,9 @@ use alloy_primitives::{
 };
 use alloy_rlp::Encodable;
 use alloy_rpc_types_engine::{
-    BlobsBundleV2, ExecutionData, ExecutionPayloadEnvelopeV5, ExecutionPayloadSidecar,
-    ExecutionPayloadV3, ForkchoiceState, PayloadAttributes, PraguePayloadFields,
+    BlobsBundleV2, ExecutionData, ExecutionPayloadEnvelopeV5, ExecutionPayloadEnvelopeV6,
+    ExecutionPayloadSidecar, ExecutionPayloadV3, ExecutionPayloadV4, ForkchoiceState,
+    PayloadAttributes, PraguePayloadFields,
 };
 use async_trait::async_trait;
 use jsonrpsee::core::RpcResult;
@@ -40,7 +41,7 @@ use reth_primitives_traits::{
     AlloyBlockHeader as BlockTrait, Block as _, HeaderTy, TxTy,
 };
 use reth_revm::{database::StateProviderDatabase, db::State};
-use reth_rpc_api::{TestingApiServer, TestingBuildBlockRequestV1};
+use reth_rpc_api::{TestingApiServer, TestingBuildBlockRequestV1, TestingBuildBlockResponseV1};
 use reth_rpc_eth_api::{helpers::Call, FromEthApiError};
 use reth_rpc_eth_types::EthApiError;
 use reth_storage_api::{BlockReader, BlockReaderIdExt, HeaderProvider};
@@ -125,7 +126,7 @@ where
         let gas_limit_override = self.gas_limit_override;
         self.eth_api
             .spawn_with_state_at_block(request.parent_block_hash, move |eth_api, state| {
-                let state = state.database.0;
+                let state = state.database.into_inner();
                 let parent = eth_api
                     .provider()
                     .sealed_header_by_hash(request.parent_block_hash)?
@@ -268,7 +269,7 @@ where
                     block_transactions_rlp_length += tx_rlp_len;
                     total_fees += U256::from(tip) * U256::from(gas_used);
                 }
-                let outcome = builder.finish(&state, None).map_err(Eth::Error::from_eth_err)?;
+                let outcome = builder.finish(&*state, None).map_err(Eth::Error::from_eth_err)?;
 
                 let has_requests = outcome.block.requests_hash().is_some();
                 let requests = has_requests.then_some(outcome.execution_result.requests);
@@ -288,23 +289,37 @@ where
         &self,
         request: TestingBuildBlockRequestV1,
         use_pool_transactions: bool,
-    ) -> Result<ExecutionPayloadEnvelopeV5, Eth::Error> {
+    ) -> Result<TestingBuildBlockResponseV1, Eth::Error> {
         let payload = self
             .build_payload_v1(request, self.skip_invalid_transactions, use_pool_transactions)
             .await?;
         let fees = payload.fees();
         let requests = payload.requests().unwrap_or_default();
+        let block_access_list = payload.block_access_list().cloned();
         let block = Arc::unwrap_or_clone(payload.into_block_arc());
         let block_hash = block.hash();
         let block = block.into_block().into_ethereum_block();
 
-        Ok(ExecutionPayloadEnvelopeV5 {
-            execution_payload: ExecutionPayloadV3::from_block_unchecked(block_hash, &block),
+        let Some(block_access_list) = block_access_list else {
+            return Ok(TestingBuildBlockResponseV1::V5(ExecutionPayloadEnvelopeV5 {
+                execution_payload: ExecutionPayloadV3::from_block_unchecked(block_hash, &block),
+                block_value: fees,
+                blobs_bundle: BlobsBundleV2::empty(),
+                should_override_builder: false,
+                execution_requests: requests,
+            }))
+        };
+        Ok(TestingBuildBlockResponseV1::V6(ExecutionPayloadEnvelopeV6 {
+            execution_payload: ExecutionPayloadV4::from_block_unchecked_with_bal(
+                block_hash,
+                &block,
+                block_access_list,
+            ),
             block_value: fees,
             blobs_bundle: BlobsBundleV2::empty(),
             should_override_builder: false,
             execution_requests: requests,
-        })
+        }))
     }
 
     async fn commit_block_v1(
@@ -420,7 +435,7 @@ where
         payload_attributes: PayloadAttributes,
         transactions: Option<Vec<Bytes>>,
         extra_data: Option<Bytes>,
-    ) -> RpcResult<ExecutionPayloadEnvelopeV5> {
+    ) -> RpcResult<TestingBuildBlockResponseV1> {
         let use_pool_transactions = transactions.is_none();
         let request = TestingBuildBlockRequestV1 {
             parent_block_hash,

@@ -41,7 +41,7 @@ impl<const N: usize> IntoVec for arrayvec::ArrayVec<u8, N> {
 /// Trait that will transform the data to be saved in the DB.
 pub trait Encode: Send + Sync + Sized + Debug {
     /// Encoded type.
-    type Encoded: AsRef<[u8]> + IntoVec + Send + Sync + Ord + Debug;
+    type Encoded: IntoVec + Send + Sync + Ord + Debug;
 
     /// Encodes data going into the database.
     fn encode(self) -> Self::Encoded;

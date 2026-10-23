@@ -5,7 +5,7 @@ use alloy_eips::BlockId;
 use alloy_evm::{call::CallError, overrides::StateOverrideError};
 use alloy_primitives::{Address, Bytes, B256, U256};
 use alloy_rpc_types_eth::{error::EthRpcErrorCode, request::TransactionInputError, BlockError};
-use alloy_sol_types::{ContractError, RevertReason};
+use alloy_sol_types::RevertReason;
 use alloy_transport::{RpcError, TransportErrorKind};
 pub use api::{AsEthApiError, FromEthApiError, FromEvmError, IntoEthApiError};
 use core::time::Duration;
@@ -298,7 +298,6 @@ impl From<EthApiError> for jsonrpsee_types::error::ErrorObject<'static> {
             EthApiError::EmptyRawTransactionData |
             EthApiError::InvalidBlockRange |
             EthApiError::RequestBeyondHead { .. } |
-            EthApiError::ExceedsMaxProofWindow |
             EthApiError::ConflictingFeeFieldsInRequest |
             EthApiError::Signing(_) |
             EthApiError::BothStateAndStateDiffInOverride(_) |
@@ -308,6 +307,9 @@ impl From<EthApiError> for jsonrpsee_types::error::ErrorObject<'static> {
             EthApiError::InvalidBytecode(_) => invalid_params_rpc_err(error.to_string()),
             EthApiError::InvalidTransaction(err) => err.into(),
             EthApiError::PoolError(err) => err.into(),
+            EthApiError::Internal(RethError::Provider(
+                reth_errors::ProviderError::StateAtBlockPruned(_),
+            )) => rpc_error_with_code(EthRpcErrorCode::PrunedHistory.code(), error.to_string()),
             EthApiError::PrevrandaoNotSet |
             EthApiError::ExcessBlobGasNotSet |
             EthApiError::InvalidBlockData(_) |
@@ -359,8 +361,8 @@ impl From<EthApiError> for jsonrpsee_types::error::ErrorObject<'static> {
                 internal_rpc_err(err.to_string())
             }
             err @ EthApiError::TransactionInputError(_) => invalid_params_rpc_err(err.to_string()),
-            EthApiError::PrunedHistoryUnavailable { .. } => {
-                rpc_error_with_code(4444, error.to_string())
+            EthApiError::PrunedHistoryUnavailable { .. } | EthApiError::ExceedsMaxProofWindow => {
+                rpc_error_with_code(EthRpcErrorCode::PrunedHistory.code(), error.to_string())
             }
             EthApiError::Other(err) => err.to_rpc_error(),
             EthApiError::MuxTracerError(msg) => internal_rpc_err(msg.to_string()),
@@ -544,6 +546,11 @@ impl From<reth_errors::ProviderError> for EthApiError {
             ProviderError::SafeBlockNotFound => Self::HeaderNotFound(BlockId::safe()),
             ProviderError::BlockExpired { requested, earliest_available } => {
                 Self::PrunedHistoryUnavailable { requested, earliest_available }
+            }
+            ProviderError::InsufficientChangesets { requested, available }
+                if requested < *available.start() =>
+            {
+                Self::PrunedHistoryUnavailable { requested, earliest_available: *available.start() }
             }
             err => Self::Internal(err.into()),
         }
@@ -984,7 +991,7 @@ impl std::fmt::Display for RevertError {
         if let Some(reason) = self.output.as_ref().and_then(|out| RevertReason::decode(out)) {
             let error = reason.to_string();
             let mut error = error.as_str();
-            if matches!(reason, RevertReason::ContractError(ContractError::Revert(_))) {
+            if reason.is_revert() {
                 // we strip redundant `revert: ` prefix from the revert reason
                 error = error.trim_start_matches("revert: ");
             }
@@ -1188,9 +1195,7 @@ mod tests {
         let cases = [
             (EthApiError::TracingTransactionNotFound, "transaction not found"),
             (
-                EthApiError::TracingBlockNotFound(BlockId::hash(b256!(
-                    "0x0000000000000000000000000000000000000000000000000000000000000001"
-                ))),
+                EthApiError::TracingBlockNotFound(BlockId::hash(B256::with_last_byte(1))),
                 "block 0x0000000000000000000000000000000000000000000000000000000000000001 not found",
             ),
             (EthApiError::GenesisNotTraceable, "genesis is not traceable"),
@@ -1253,6 +1258,31 @@ mod tests {
             err.message(),
             "pruned history unavailable: requested 5, earliest available 100"
         );
+    }
+
+    #[test]
+    fn pruned_state_errors_use_history_unavailable_code() {
+        use reth_errors::ProviderError;
+
+        let err = EthApiError::from(ProviderError::InsufficientChangesets {
+            requested: 1,
+            available: 43..=48,
+        })
+        .into_rpc_err();
+        assert_eq!(err.code(), 4444);
+        assert_eq!(err.message(), "pruned history unavailable: requested 1, earliest available 43");
+
+        let err = EthApiError::from(ProviderError::StateAtBlockPruned(7)).into_rpc_err();
+        assert_eq!(err.code(), 4444);
+
+        for requested in [43, 49] {
+            let err = EthApiError::from(ProviderError::InsufficientChangesets {
+                requested,
+                available: 43..=48,
+            })
+            .into_rpc_err();
+            assert_eq!(err.code(), -32603);
+        }
     }
 
     #[test]

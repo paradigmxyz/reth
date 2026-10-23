@@ -203,7 +203,7 @@ struct PartialStorage {
 
 // The progress record as persisted, tied to the write and range that recorded it.
 #[derive(Serialize, Deserialize)]
-struct StoredProgress {
+pub(crate) struct StoredProgress {
     // Encoding version, checked before the rest is decoded.
     version: u32,
     // Attempt the slots belong to.
@@ -282,11 +282,14 @@ impl<T: MetadataProvider> SnapStorageStore for T {
         if chunk.next.is_none() {
             // Skipped accounts have empty storage at this pivot. Clear earlier attempts' slots
             // before the completion watermark makes them eligible for reuse and BAL updates.
-            let start = complete
-                .map_or(origin, |account| (U256::from_be_bytes(account.0) + U256::from(1)).into());
-            self.remove::<tables::HashedStorages>(start..chunk.account)?;
+            let start = complete.map_or(Some(origin), |account| {
+                U256::from_be_bytes(account.0).checked_add(U256::ONE).map(B256::from)
+            });
+            if let Some(start) = start {
+                self.remove::<tables::HashedStorages>(start..chunk.account)?;
+            }
         }
-        if chunk.from == B256::ZERO {
+        if chunk.from.is_zero() {
             self.remove::<tables::HashedStorages>(chunk.account..=chunk.account)?;
         }
         let state = HashedPostState::default()
@@ -315,8 +318,7 @@ pub(crate) fn persisted_storage_root(tx: &impl DbTx, account: B256) -> Result<B2
 mod tests {
     use super::*;
     use crate::test_utils::{
-        account, generation, hashed_factory, insert_generation_headers, state_root,
-        storage_root_of, stored_slots,
+        account, generation, hashed_factory_with_roots, state_root, storage_root_of, stored_slots,
     };
     use reth_provider::{
         test_utils::MockNodeTypesWithDB, DatabaseProviderFactory, ProviderFactory,
@@ -344,12 +346,12 @@ mod tests {
 
     // An attempt whose account coverage has not reached the contract yet.
     fn started() -> (ProviderFactory<MockNodeTypesWithDB>, SnapWrite) {
-        let factory = hashed_factory();
-        insert_generation_headers(&factory);
-        let provider = factory.database_provider_rw().unwrap();
         let mut contract = account(1);
         contract.storage_root = root();
-        let generation = generation(1, state_root(&[(CONTRACT, contract)]));
+        let state_root = state_root(&[(CONTRACT, contract)]);
+        let factory = hashed_factory_with_roots(&[state_root]);
+        let provider = factory.database_provider_rw().unwrap();
+        let generation = generation(1, state_root);
         let write = provider.start_snap_attempt(generation).unwrap();
         provider.start_account_coverage(write).unwrap();
         provider.commit().unwrap();
@@ -439,7 +441,7 @@ mod tests {
         let first = chunk(0..1, B256::ZERO, Some(slot(2)));
         provider.commit_storage_chunk(write, B256::ZERO, first).unwrap();
         let advanced =
-            provider.advance_snap_pivot(write, generation(2, B256::repeat_byte(0xcc))).unwrap();
+            provider.advance_snap_pivot(write, generation(2, B256::repeat_byte(2))).unwrap();
         provider.commit().unwrap();
         (factory, write, advanced)
     }
@@ -504,7 +506,7 @@ mod tests {
 
         // Both stay resumable, even across another pivot move.
         let advanced =
-            provider.advance_snap_pivot(advanced, generation(3, B256::repeat_byte(0xdd))).unwrap();
+            provider.advance_snap_pivot(advanced, generation(3, B256::repeat_byte(3))).unwrap();
         let progress = provider.storage_progress(advanced, B256::ZERO).unwrap();
         assert_eq!(progress.resume_at(before), Some(slot(2)));
         assert_eq!(progress.resume_at(CONTRACT), Some(slot(2)));
@@ -554,6 +556,16 @@ mod tests {
             assert!(matches!(
                 provider.storage_progress(write, B256::ZERO),
                 Err(SnapSyncError::UnsupportedRecord { .. })
+            ));
+        }
+
+        for record in [b"not json".to_vec(), br#"{"version":2}"#.to_vec()] {
+            let provider = factory.database_provider_rw().unwrap();
+            provider.write_metadata(StoredProgress::KEY, record).unwrap();
+
+            assert!(matches!(
+                provider.storage_progress(write, B256::ZERO),
+                Err(SnapSyncError::UnreadableRecord { .. })
             ));
         }
     }

@@ -9,12 +9,11 @@ use jsonrpsee::core::RpcResult;
 use reth_chainspec::{ChainSpecProvider, EthChainSpec};
 use reth_evm::{ConfigureEvm, Evm};
 use reth_rpc_eth_api::{
-    helpers::{Call, EthTransactions, LoadPendingBlock},
+    helpers::{Call, EthTransactions},
     EthCallBundleApiServer, FromEthApiError, FromEvmError,
 };
 use reth_rpc_eth_types::{
-    utils::recover_raw_transaction, EthApiError, PendingBlockEnv, PendingBlockEnvOrigin,
-    RpcInvalidTransactionError,
+    EthApiError, PendingBlockEnv, PendingBlockEnvOrigin, RpcInvalidTransactionError,
 };
 use reth_storage_api::BlockReaderIdExt;
 use reth_tasks::pool::BlockingTaskGuard;
@@ -46,7 +45,7 @@ impl<Eth> EthBundle<Eth> {
 
 impl<Eth> EthBundle<Eth>
 where
-    Eth: EthTransactions + LoadPendingBlock + Call + 'static,
+    Eth: EthTransactions + Call,
 {
     /// Simulates a bundle of transactions at the top of a given block number with the state of
     /// another (or the same) block. This can be used to simulate future blocks with the current
@@ -91,10 +90,8 @@ where
             )
         }
 
-        let transactions = txs
-            .into_iter()
-            .map(|tx| recover_raw_transaction::<PoolPooledTx<Eth::Pool>>(&tx))
-            .collect::<Result<Vec<_>, _>>()?;
+        let transactions =
+            self.eth_api().recover_raw_transactions::<PoolPooledTx<Eth::Pool>>(txs)?;
 
         let block_id: alloy_rpc_types_eth::BlockId = state_block_number.into();
         // Note: the block number is considered the `parent` block: <https://github.com/flashbots/mev-geth/blob/fddf97beec5877483f879a77b7dea2e58a58d653/internal/ethapi/api.go#L2104>
@@ -129,7 +126,7 @@ where
         }
 
         if let Some(difficulty) = difficulty {
-            evm_env.block_env.inner_mut().difficulty = U256::from(difficulty);
+            evm_env.block_env.inner_mut().difficulty = difficulty;
         }
 
         // Validate that the bundle does not contain more than MAX_BLOB_NUMBER_PER_BLOCK blob
@@ -292,7 +289,7 @@ where
 #[async_trait::async_trait]
 impl<Eth> EthCallBundleApiServer for EthBundle<Eth>
 where
-    Eth: EthTransactions + LoadPendingBlock + Call + 'static,
+    Eth: EthTransactions + Call,
 {
     async fn call_bundle(&self, request: EthCallBundle) -> RpcResult<EthCallBundleResponse> {
         Self::call_bundle(self, request).await.map_err(Into::into)

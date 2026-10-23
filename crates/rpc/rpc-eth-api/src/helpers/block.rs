@@ -14,6 +14,7 @@ use futures::Future;
 use reth_node_api::BlockBody;
 use reth_primitives_traits::{AlloyBlockHeader, RecoveredBlock, SealedHeader, TransactionMeta};
 use reth_rpc_convert::{transaction::ConvertReceiptInput, RpcConvert, RpcHeader};
+use reth_rpc_eth_types::block::SharedReceipts;
 use reth_storage_api::{BlockIdReader, BlockReader, ProviderHeader, ProviderReceipt, ProviderTx};
 use reth_transaction_pool::{PoolTransaction, TransactionPool};
 use revm::state::bal::Bal as RevmBal;
@@ -25,7 +26,7 @@ pub type BlockReceiptsResult<N, E> = Result<Option<Vec<RpcReceipt<N>>>, E>;
 pub type BlockAndReceiptsResult<Eth> = Result<
     Option<(
         Arc<RecoveredBlock<<<Eth as RpcNodeCore>::Provider as BlockReader>::Block>>,
-        Arc<Vec<ProviderReceipt<<Eth as RpcNodeCore>::Provider>>>,
+        SharedReceipts<ProviderReceipt<<Eth as RpcNodeCore>::Provider>>,
     )>,
     <Eth as EthApiTypes>::Error,
 >;
@@ -43,8 +44,8 @@ pub trait EthBlocks: LoadBlock<RpcConvert: RpcConvert<Primitives = Self::Primiti
     {
         async move {
             let Some(block) = self.recovered_block(block_id).await? else { return Ok(None) };
-            let header =
-                self.converter().convert_header(block.clone_sealed_header(), block.rlp_length())?;
+            // Header responses omit the block size: https://github.com/ethereum/execution-apis/pull/877
+            let header = self.converter().convert_header(block.clone_sealed_header(), None)?;
             Ok(Some(header))
         }
     }
@@ -67,7 +68,7 @@ pub trait EthBlocks: LoadBlock<RpcConvert: RpcConvert<Primitives = Self::Primiti
             let block = block.clone_into_rpc_block(
                 full.into(),
                 |tx, tx_info| self.converter().fill(tx, tx_info),
-                |header, size| self.converter().convert_header(header, size),
+                |header, block_size| self.converter().convert_header(header, Some(block_size)),
             )?;
             Ok(Some(block))
         }
@@ -105,7 +106,7 @@ pub trait EthBlocks: LoadBlock<RpcConvert: RpcConvert<Primitives = Self::Primiti
 
                 let inputs = block
                     .transactions_recovered()
-                    .zip(Arc::unwrap_or_clone(receipts))
+                    .zip(receipts.into_vec())
                     .enumerate()
                     .map(|(idx, (tx, receipt))| {
                         let meta = TransactionMeta {
@@ -164,12 +165,13 @@ pub trait EthBlocks: LoadBlock<RpcConvert: RpcConvert<Primitives = Self::Primiti
 
                 // First, try to get the pending block from the provider, in case we already
                 // received the actual pending block from the CL.
-                if let Some((block, receipts)) = self
+                if let Some(pending) = self
                     .provider()
                     .pending_block_and_receipts()
                     .map_err(Self::Error::from_eth_err)?
                 {
-                    return Ok(Some((Arc::new(block), Arc::new(receipts))));
+                    let (block, output) = pending.into_parts();
+                    return Ok(Some((block, output.into())));
                 }
 
                 // If no pending block from provider, build the pending block locally.
@@ -186,7 +188,7 @@ pub trait EthBlocks: LoadBlock<RpcConvert: RpcConvert<Primitives = Self::Primiti
                     .await
                     .map_err(Self::Error::from_eth_err)?
             {
-                return Ok(Some((block, receipts)));
+                return Ok(Some((block, receipts.into())));
             }
 
             Ok(None)
@@ -236,7 +238,7 @@ pub trait EthBlocks: LoadBlock<RpcConvert: RpcConvert<Primitives = Self::Primiti
                     let size = block.length();
                     let header = self
                         .converter()
-                        .convert_header(SealedHeader::new_unhashed(block.header), size)?;
+                        .convert_header(SealedHeader::new_unhashed(block.header), Some(size))?;
                     Ok(Block {
                         uncles: vec![],
                         header,
@@ -274,7 +276,7 @@ pub trait LoadBlock: LoadPendingBlock + SpawnBlocking + RpcNodeCoreExt {
                 if let Some(pending_block) =
                     self.provider().pending_block().map_err(Self::Error::from_eth_err)?
                 {
-                    return Ok(Some(Arc::new(pending_block)));
+                    return Ok(Some(pending_block));
                 }
 
                 // If no pending block from provider, try to get local pending block

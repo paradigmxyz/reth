@@ -48,7 +48,7 @@ rayon = { workspace = true, optional = true }
 
 [dev-dependencies]
 reth-primitives-traits = { workspace = true, features = ["serde"] }
-reth-codecs.workspace = true
+reth-codecs = { workspace = true, features = ["alloy"] }
 alloy-eips.workspace = true
 alloy-genesis.workspace = true
 
@@ -104,7 +104,7 @@ serde = [
     "revm/serde",
     "alloy-eips/serde",
 ]
-reth-codec = ["dep:reth-codecs", "dep:bytes", "dep:arrayvec"]
+reth-codec = ["dep:reth-codecs", "reth-codecs/alloy", "dep:bytes", "dep:arrayvec"]
 serde-bincode-compat = [
     "serde",
     "alloy-consensus/serde-bincode-compat",

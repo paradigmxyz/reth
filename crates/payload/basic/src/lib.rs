@@ -21,10 +21,10 @@ use reth_payload_builder::{
 };
 use reth_payload_builder_primitives::PayloadBuilderError;
 use reth_payload_primitives::{BuiltPayload, PayloadAttributes, PayloadKind};
-use reth_primitives_traits::{HeaderTy, NodePrimitives, SealedHeader};
-use reth_revm::{cached::CachedReads, cancelled::CancelOnDrop};
+use reth_primitives_traits::{AlloyBlockHeader, HeaderTy, NodePrimitives, SealedHeader};
+use reth_revm::cached::CachedReads;
 use reth_storage_api::{BlockReaderIdExt, StateProviderFactory};
-use reth_tasks::Runtime;
+use reth_tasks::{CancelOnDrop, Runtime};
 use reth_trie_parallel::state_root_task::PayloadStateRootHandle;
 use std::{
     fmt,
@@ -39,7 +39,7 @@ use tokio::{
     sync::{oneshot, Semaphore},
     time::{Interval, Sleep},
 };
-use tracing::{debug, trace, warn};
+use tracing::{debug, debug_span, trace, warn, Span};
 
 mod better_payload_emitter;
 mod metrics;
@@ -423,14 +423,20 @@ where
         self.metrics.inc_initiated_payload_builds();
         let cached_reads = self.cached_reads.take().unwrap_or_default();
         let execution_cache = self.execution_cache.clone();
-        let state_root_handle = self.state_root_handle.take();
+        let mut state_root_handle = self.state_root_handle.take();
+        let on_payload_built =
+            state_root_handle.as_mut().and_then(PayloadStateRootHandle::take_on_payload_built);
         let leases = self.leases.clone();
         let builder = self.builder.clone();
         let executor = self.executor.clone();
+        let span = Span::current();
         self.executor.spawn_task(async move {
             // acquire the permit for executing the task
             let permit = guard.acquire_owned().await;
             executor.spawn_blocking_named_or_tokio(PAYLOAD_BUILDER_THREAD_NAME, move || {
+                // Restore the parent even when the worker span is filtered out.
+                let _parent = span.enter();
+                let _span = debug_span!(target: "payload_builder", "build_payload").entered();
                 let _permit = permit;
                 let args = BuildArguments {
                     cached_reads,
@@ -441,6 +447,12 @@ where
                     best_payload,
                 };
                 let result = builder.try_build(args);
+                if let Some(on_payload_built) = on_payload_built &&
+                    let Ok(outcome) = &result &&
+                    let Some(payload) = outcome.payload()
+                {
+                    on_payload_built(payload.block().hash(), payload.block().state_root());
+                }
                 drop(leases);
                 let _ = tx.send(result);
             });
@@ -595,9 +607,14 @@ where
                     let (tx, rx) = oneshot::channel();
                     let config = self.config.clone();
                     let builder = self.builder.clone();
+                    let span = Span::current();
                     self.executor.spawn_blocking_named_or_tokio(
                         PAYLOAD_BUILDER_THREAD_NAME,
                         move || {
+                            let _parent = span.enter();
+                            let _span =
+                                debug_span!(target: "payload_builder", "build_empty_payload")
+                                    .entered();
                             let res = builder.build_empty_payload(config);
                             let _ = tx.send(res);
                         },
@@ -609,9 +626,14 @@ where
                     debug!(target: "payload_builder", id=%self.config.payload_id(), "racing fallback payload");
                     // race the in progress job with this job
                     let (tx, rx) = oneshot::channel();
+                    let span = Span::current();
                     self.executor.spawn_blocking_named_or_tokio(
                         PAYLOAD_BUILDER_THREAD_NAME,
                         move || {
+                            let _parent = span.enter();
+                            let _span =
+                                debug_span!(target: "payload_builder", "build_fallback_payload")
+                                    .entered();
                             let _ = tx.send(job());
                         },
                     );
@@ -932,10 +954,8 @@ pub struct BuildArguments<Attributes, Payload: BuiltPayload> {
     pub execution_cache: Option<SavedCache>,
     /// Optional state-root task handle, shared with the engine.
     ///
-    /// The preserved trie is shared with the engine, so a concurrent `newPayload` will
-    /// block until this task completes. The trie is anchored at the built block's state
-    /// root, so if the next `newPayload` is not on top of that block, the trie cache is
-    /// invalidated and cleared.
+    /// A successful build returns its retained trie through the handle's completion callback,
+    /// associated with the built block's hash and state root.
     pub state_root_handle: Option<PayloadStateRootHandle>,
     /// How to configure the payload.
     pub config: PayloadConfig<Attributes, HeaderTy<Payload::Primitives>>,

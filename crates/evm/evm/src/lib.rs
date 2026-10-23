@@ -31,7 +31,7 @@ use reth_execution_errors::BlockExecutionError;
 use reth_primitives_traits::{
     BlockTy, HeaderTy, NodePrimitives, ReceiptTy, SealedBlock, SealedHeader, TxTy,
 };
-use revm::{database::State, primitives::hardfork::SpecId};
+use revm::{context::result::ResultAndState, database::State, primitives::hardfork::SpecId};
 
 pub mod either;
 /// EVM environment configuration.
@@ -399,8 +399,29 @@ pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
         DB: Database,
         I: InspectorFor<Self, &'a mut State<DB>> + 'a,
     {
+        self.create_block_builder_with(evm, parent, ctx, |executor| executor)
+    }
+
+    /// Creates a [`BlockBuilder`] like [`ConfigureEvm::create_block_builder`], with a customized
+    /// executor.
+    fn create_block_builder_with<'a, DB, I, E>(
+        &'a self,
+        evm: EvmFor<Self, &'a mut State<DB>, I>,
+        parent: &'a SealedHeader<HeaderTy<Self::Primitives>>,
+        ctx: <Self::BlockExecutorFactory as BlockExecutorFactory>::ExecutionCtx<'a>,
+        f: impl FnOnce(BlockExecutorForEvm<'a, Self, DB, I>) -> E,
+    ) -> impl BlockBuilder<Primitives = Self::Primitives, Executor = E>
+    where
+        DB: Database,
+        I: InspectorFor<Self, &'a mut State<DB>> + 'a,
+        E: alloy_evm::block::BlockExecutor<
+            Evm = EvmFor<Self, &'a mut State<DB>, I>,
+            Transaction = TxTy<Self::Primitives>,
+            Receipt = ReceiptTy<Self::Primitives>,
+        >,
+    {
         BasicBlockBuilder {
-            executor: self.create_executor(evm, ctx.clone()),
+            executor: f(self.create_executor(evm, ctx.clone())),
             ctx,
             assembler: self.block_assembler(),
             parent,
@@ -487,6 +508,57 @@ pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
         db: DB,
     ) -> impl Executor<DB, Primitives = Self::Primitives, Error = BlockExecutionError> {
         BasicBlockExecutor::new(self, db)
+    }
+
+    /// Returns whether engine validation may commit transaction results from speculative prewarm
+    /// execution instead of executing the transactions again.
+    ///
+    /// Return `true` only if all of these hold, see also [`Self::prewarm_tx_result`]:
+    /// - the block executor executes a transaction by checking that its gas limit, capped by the
+    ///   transaction gas limit cap, fits into the block gas limit minus the last receipt's
+    ///   cumulative gas used, and then running [`Evm::transact`] with the transaction environment;
+    /// - [`Evm::transact`] performs the standard caller nonce and balance validation, and rejects
+    ///   transactions with the largest nonce even if nonce checks are disabled;
+    /// - EVMs created by this configuration with JIT support disabled call inspector hooks for
+    ///   every executed instruction;
+    /// - execution depends only on recorded database reads and the transaction and block
+    ///   environments reproduced during prewarming, with no unrecorded external state.
+    ///
+    /// [`Evm::transact`]: alloy_evm::Evm::transact
+    fn reuses_prewarm_results(&self) -> bool {
+        false
+    }
+
+    /// Wraps a speculative prewarm execution result of `tx` into the result consumed by
+    /// [`BlockExecutor::commit_transaction`](alloy_evm::block::BlockExecutor::commit_transaction).
+    ///
+    /// Only called if [`Self::reuses_prewarm_results`] returns `true`.
+    /// Returning `None` rejects and consumes this speculative result; the engine executes the
+    /// transaction normally instead.
+    fn prewarm_tx_result(
+        &self,
+        tx: &TxTy<Self::Primitives>,
+        result: ResultAndState<HaltReasonFor<Self>>,
+    ) -> Option<TxExecutionResultFor<Self>> {
+        let _ = (tx, result);
+        None
+    }
+
+    /// Returns the predicted environment of the block after `parent` with `beneficiary`, in which
+    /// engine validation speculatively executes pool transactions before the block arrives.
+    ///
+    /// Validation reuses such results only for blocks whose environment matches the predicted
+    /// one, apart from the beneficiary, timestamp, prevrandao and gas limit, which the
+    /// transactions must not have observed. Only called if [`Self::reuses_prewarm_results`]
+    /// returns `true`. Returns `None` if the environment cannot be predicted, which disables
+    /// recording pool transaction results.
+    fn speculative_next_evm_env(
+        &self,
+        parent: &SealedHeader<HeaderTy<Self::Primitives>>,
+        beneficiary: Address,
+    ) -> Option<EvmEnvFor<Self>> {
+        let _ = (parent, beneficiary);
+        None
     }
 }
 

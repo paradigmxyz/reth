@@ -31,25 +31,26 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::needless_update)]
     fn test_from_genesis_account_with_values() {
         // Create a GenesisAccount with specific values
         let mut storage = BTreeMap::new();
-        storage.insert(B256::from([0x01; 32]), B256::from([0x02; 32]));
+        storage.insert(B256::repeat_byte(0x01), B256::repeat_byte(0x02));
 
         let genesis_account = GenesisAccount {
             nonce: Some(10),
             balance: U256::from(1000),
             code: Some(Bytes::from(vec![0x60, 0x61])),
             storage: Some(storage),
-            private_key: None,
+            ..Default::default()
         };
 
         // Convert the GenesisAccount to a TrieAccount
         let trie_account: TrieAccount = genesis_account.into();
 
         let expected_storage_root = storage_root_unhashed(BTreeMap::from([(
-            B256::from([0x01; 32]),
-            U256::from_be_bytes(*B256::from([0x02; 32])),
+            B256::repeat_byte(0x01),
+            U256::from_be_bytes(*B256::repeat_byte(0x02)),
         )]));
 
         // Check that the fields are properly set.
@@ -63,7 +64,8 @@ mod tests {
             Account {
                 nonce: 10,
                 balance: U256::from(1000),
-                bytecode_hash: Some(keccak256([0x60, 0x61]))
+                bytecode_hash: Some(keccak256([0x60, 0x61])),
+                ..Default::default()
             }
             .into_trie_account(expected_storage_root),
             trie_account
@@ -73,14 +75,13 @@ mod tests {
     #[test]
     fn test_from_genesis_account_with_zeroed_storage_values() {
         // Create a GenesisAccount with storage containing zero values
-        let storage = BTreeMap::from([(B256::from([0x01; 32]), B256::from([0x00; 32]))]);
+        let storage = BTreeMap::from([(B256::repeat_byte(0x01), B256::ZERO)]);
 
         let genesis_account = GenesisAccount {
             nonce: Some(3),
             balance: U256::from(300),
-            code: None,
             storage: Some(storage),
-            private_key: None,
+            ..Default::default()
         };
 
         // Convert the GenesisAccount to a TrieAccount

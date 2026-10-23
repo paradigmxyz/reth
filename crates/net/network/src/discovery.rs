@@ -12,16 +12,19 @@ use reth_dns_discovery::{
     DnsDiscoveryConfig, DnsDiscoveryHandle, DnsDiscoveryService, DnsNodeRecordUpdate, DnsResolver,
 };
 use reth_ethereum_forks::{EnrForkIdEntry, ForkId};
+use reth_net_nat::{NatResolver, ResolveNatInterval};
 use reth_network_api::{DiscoveredEvent, DiscoveryEvent};
 use reth_network_peers::{NodeRecord, PeerId};
 use reth_network_types::PeerAddr;
 use secp256k1::SecretKey;
+use socket2::{Domain, Protocol, Socket, Type};
 use std::{
     collections::VecDeque,
     net::{IpAddr, SocketAddr},
     pin::Pin,
     sync::Arc,
     task::{ready, Context, Poll},
+    time::Duration,
 };
 use tokio::{net::UdpSocket, sync::mpsc, task::JoinHandle};
 use tokio_stream::{wrappers::ReceiverStream, Stream};
@@ -31,6 +34,11 @@ use tracing::{debug, trace};
 ///
 /// Default is 10 000 peers.
 pub const DEFAULT_MAX_CAPACITY_DISCOVERED_PEERS_CACHE: u32 = 10_000;
+
+/// How often discv5-only nodes refresh their external IP.
+///
+/// Matches the default interval of discv4.
+const RESOLVE_EXTERNAL_IP_INTERVAL: Duration = Duration::from_secs(60 * 5);
 
 /// An abstraction over the configured discovery protocol.
 ///
@@ -67,13 +75,18 @@ pub struct Discovery {
     queued_events: VecDeque<DiscoveryEvent>,
     /// List of listeners subscribed to discovery events.
     discovery_listeners: Vec<mpsc::UnboundedSender<DiscoveryEvent>>,
+    /// Resolves the external IP for discv5 when discv4 is disabled.
+    nat_resolver: Option<ResolveNatInterval>,
 }
 
 impl Discovery {
     /// Spawns the discovery service.
     ///
     /// This will spawn the [`reth_discv4::Discv4Service`] onto a new task and establish a listener
-    /// channel to receive all discovered nodes.
+    /// channel to receive all discovered nodes. When only discv5 is enabled, `nat` periodically
+    /// resolves its advertised external IP without waiting for peer votes. When ENR updates are
+    /// disabled or discv5 checks inbound connectivity, only explicit `extip` or `extaddr` settings
+    /// are applied.
     pub async fn new(
         tcp_addr: SocketAddr,
         discovery_v4_addr: SocketAddr,
@@ -81,6 +94,7 @@ impl Discovery {
         discv4_config: Option<Discv4Config>,
         mut discv5_config: Option<reth_discv5::Config>, // contains discv5 listen address
         dns_discovery_config: Option<DnsDiscoveryConfig>,
+        nat: Option<NatResolver>,
     ) -> Result<Self, NetworkError> {
         // setup discv4 with the discovery address and tcp port
         let local_enr =
@@ -92,16 +106,13 @@ impl Discovery {
         let bind_socket = async |addr: SocketAddr| {
             let result = match addr {
                 SocketAddr::V4(_) => UdpSocket::bind(addr).await,
-                SocketAddr::V6(_) => {
-                    use socket2::{Domain, Protocol, Socket, Type};
-                    (|| {
-                        let socket = Socket::new(Domain::IPV6, Type::DGRAM, Some(Protocol::UDP))?;
-                        socket.set_only_v6(true)?;
-                        socket.set_nonblocking(true)?;
-                        socket.bind(&addr.into())?;
-                        UdpSocket::from_std(socket.into())
-                    })()
-                }
+                SocketAddr::V6(_) => (|| {
+                    let socket = Socket::new(Domain::IPV6, Type::DGRAM, Some(Protocol::UDP))?;
+                    socket.set_only_v6(true)?;
+                    socket.set_nonblocking(true)?;
+                    socket.bind(&addr.into())?;
+                    UdpSocket::from_std(socket.into())
+                })(),
             };
             result
                 .map(Arc::new)
@@ -109,16 +120,53 @@ impl Discovery {
         };
 
         // In shared-port mode, bind the shared socket and start discv4 without its own receive
-        // loop. Unrecognized frames from discv5 will be forwarded to the ingress handler.
-        let (discv4, discv4_updates, _discv4_service, discv4_ingress, shared_socket) =
-            if let Some(config) = discv4_config {
+        // loop. Unrecognized frames from discv5 will be forwarded to the ingress handler, and
+        // discv5's opposite-family sibling socket doubles as discv4's secondary-family egress.
+        // The sibling binds at the shared port that discv4 advertises for both families, not at
+        // discv5's configured opposite-family port, and serves egress and replies only. Node
+        // config has no second-family external IP source, so the discv4 ENR advertises only the
+        // discovery address family. The discv5 ENR carries the dual-stack advertisement.
+        let (discv4, discv4_updates, _discv4_service, discv4_ingress, shared_sockets) =
+            if let Some(mut config) = discv4_config {
                 if let Some(discv5_config) = &mut discv5_config &&
                     discv5_config.has_matching_socket(discovery_v4_addr)
                 {
                     let socket = bind_socket(discovery_v4_addr).await?;
+                    let shared_port = socket
+                        .local_addr()
+                        .map_err(|err| {
+                            NetworkError::from_io_error(
+                                err,
+                                ServiceKind::Discovery(discovery_v4_addr),
+                            )
+                        })?
+                        .port();
+
+                    let listen_config = &discv5_config.discv5_config_mut().listen_config;
+                    let secondary_addr = reth_discv5::config::sibling_addr(
+                        listen_config,
+                        discovery_v4_addr,
+                        shared_port,
+                    );
+                    let secondary_socket = match secondary_addr {
+                        Some(addr) => Some(bind_socket(addr).await?),
+                        None => None,
+                    };
+
+                    if secondary_socket.is_some() {
+                        // The TCP listener's family can differ from the primary discovery socket.
+                        let (tcp4, tcp6) = if tcp_addr.is_ipv4() {
+                            (tcp_addr.port(), 0)
+                        } else {
+                            (0, tcp_addr.port())
+                        };
+                        config.add_eip868_pair("tcp", tcp4);
+                        config.add_eip868_pair("tcp6", tcp6);
+                    }
 
                     let (discv4, mut discv4_service, ingress) = Discv4::bind_shared(
                         socket.clone(),
+                        secondary_socket.clone(),
                         local_enr,
                         sk,
                         config,
@@ -135,7 +183,7 @@ impl Discovery {
                         Some(discv4_updates),
                         Some(discv4_service),
                         Some(ingress),
-                        Some(socket),
+                        Some((socket, secondary_socket)),
                     )
                 } else {
                     let (discv4, mut discv4_service) =
@@ -159,30 +207,37 @@ impl Discovery {
                 (None, None, None, None, None)
             };
 
+        // Discv4 resolves its own external IP when enabled.
+        let nat_resolver = if discv4.is_none() &&
+            let Some(config) = &mut discv5_config
+        {
+            let config = config.discv5_config_mut();
+            nat.filter(|nat| match nat {
+                NatResolver::None => false,
+                // Use the address or hostname explicitly configured by the operator.
+                NatResolver::ExternalIp(_) | NatResolver::ExternalAddr(_) => true,
+                // Preserve manual addresses and let discv5 handle reachability checks. Its check
+                // for incoming connections starts when peer votes change the advertised address.
+                _ => config.enr_update && config.auto_nat_listen_duration.is_none(),
+            })
+            .map(|nat| ResolveNatInterval::interval(nat, RESOLVE_EXTERNAL_IP_INTERVAL))
+        } else {
+            None
+        };
+
         // Start discv5, wiring in the shared socket if in shared-port mode.
         let (discv5, discv5_updates) = if let Some(mut config) = discv5_config {
             // Set OS-assigned advertised RLPx ports to the bound listener port.
             set_bound_rlpx_port_if_unset(&mut config, tcp_addr.port());
 
-            if let Some(socket) = shared_socket {
-                let discv5_cfg = config.discv5_config_mut();
-
-                // The shared socket covers discv4's address family; bind the opposite family
-                // only if discv5 was configured for dual-stack.
-                let (mut ipv4, mut ipv6) = (None, None);
-                if discovery_v4_addr.is_ipv4() {
-                    ipv4 = Some(socket);
-                    if let Some(addr) = reth_discv5::config::ipv6(&discv5_cfg.listen_config) {
-                        ipv6 = Some(bind_socket(SocketAddr::V6(addr)).await?);
-                    }
+            if let Some((primary, secondary)) = shared_sockets {
+                let (ipv4, ipv6) = if discovery_v4_addr.is_ipv4() {
+                    (Some(primary), secondary)
                 } else {
-                    ipv6 = Some(socket);
-                    if let Some(addr) = reth_discv5::config::ipv4(&discv5_cfg.listen_config) {
-                        ipv4 = Some(bind_socket(SocketAddr::V4(addr)).await?);
-                    }
-                }
-
-                discv5_cfg.listen_config = discv5::ListenConfig::FromSockets { ipv4, ipv6 };
+                    (secondary, Some(primary))
+                };
+                config.discv5_config_mut().listen_config =
+                    discv5::ListenConfig::FromSockets { ipv4, ipv6 };
             }
 
             let (discv5, discv5_updates) = Discv5::start(&sk, config).await?;
@@ -243,6 +298,7 @@ impl Discovery {
             _dns_disc_service,
             _dns_discovery,
             dns_discovery_updates,
+            nat_resolver,
         })
     }
 
@@ -400,8 +456,42 @@ impl Discovery {
                 self.on_node_record_update(update.node_record, update.fork_id);
             }
 
+            while let Some(Poll::Ready(ip)) =
+                self.nat_resolver.as_mut().map(|resolver| resolver.poll_tick(cx))
+            {
+                if let Some(ip) = ip {
+                    self.on_external_ip(ip);
+                }
+            }
+
             if self.queued_events.is_empty() {
                 return Poll::Pending
+            }
+        }
+    }
+
+    /// Updates discv5's advertised IP without changing ports or address families.
+    ///
+    /// Discv4 owns its NAT resolution and updates its own node record and ENR, so only
+    /// discv5 needs an update here.
+    fn on_external_ip(&self, external_ip: IpAddr) {
+        let Some(discv5) = &self.discv5 else { return };
+        let enr = discv5.local_enr();
+        // TCP and UDP share the ENR IP fields. Preserve their ports, including ports learned
+        // from peer votes, and only update address families the service is listening on.
+        let result = match external_ip {
+            IpAddr::V4(ip) if enr.udp4().is_some() && enr.ip4() != Some(ip) => {
+                discv5.with_discv5(|discv5| discv5.enr_insert("ip", &ip))
+            }
+            IpAddr::V6(ip) if enr.udp6().is_some() && enr.ip6() != Some(ip) => {
+                discv5.with_discv5(|discv5| discv5.enr_insert("ip6", &ip))
+            }
+            _ => return,
+        };
+        match result {
+            Ok(_) => debug!(target: "net::discovery", ?external_ip, "Updated external IP"),
+            Err(err) => {
+                debug!(target: "net::discovery", ?external_ip, %err, "Failed to update external IP");
             }
         }
     }
@@ -466,6 +556,7 @@ impl Discovery {
             dns_discovery_updates: None,
             _dns_disc_service: None,
             discovery_listeners: Default::default(),
+            nat_resolver: None,
         }
     }
 }
@@ -474,7 +565,10 @@ impl Discovery {
 mod tests {
     use super::*;
     use secp256k1::SECP256K1;
-    use std::net::{Ipv4Addr, SocketAddrV4};
+    use std::{
+        net::{Ipv4Addr, Ipv6Addr, SocketAddrV4},
+        time::Duration,
+    };
 
     #[tokio::test(flavor = "multi_thread")]
     async fn test_discovery_setup() {
@@ -487,6 +581,7 @@ mod tests {
             Default::default(),
             None,
             Default::default(),
+            None,
         )
         .await
         .unwrap();
@@ -517,9 +612,95 @@ mod tests {
             Some(discv4_config),
             Some(discv5_config),
             None,
+            None,
         )
         .await
         .expect("should build discv5 with discv4 downgrade")
+    }
+
+    async fn start_discv5_only(config: reth_discv5::Config, nat: Option<NatResolver>) -> Discovery {
+        let secret_key = SecretKey::new(&mut rand_08::thread_rng());
+        Discovery::new(
+            "127.0.0.1:30303".parse().unwrap(),
+            "127.0.0.1:0".parse().unwrap(),
+            secret_key,
+            None,
+            Some(config),
+            None,
+            nat,
+        )
+        .await
+        .expect("should start discv5")
+    }
+
+    #[tokio::test]
+    async fn discv5_only_advertises_resolved_external_ip() {
+        let socket = Arc::new(UdpSocket::bind("0.0.0.0:0").await.unwrap());
+        let udp_port = socket.local_addr().unwrap().port();
+        let external_ip = "203.0.113.7".parse().unwrap();
+        // The advertised TCP port may differ from the listener port behind NAT.
+        let mut config = reth_discv5::Config::builder("127.0.0.1:30309".parse().unwrap()).build();
+        // Install pre-bound sockets after the builder normalizes its listen addresses.
+        let discv5_config = config.discv5_config_mut();
+        discv5_config.listen_config =
+            discv5::ListenConfig::FromSockets { ipv4: Some(socket), ipv6: None };
+        // Explicit NAT addresses still apply when peer-driven ENR updates are disabled.
+        discv5_config.enr_update = false;
+        let mut discovery =
+            start_discv5_only(config, Some(NatResolver::ExternalIp(external_ip))).await;
+        let discv5 = discovery.discv5().unwrap();
+        assert!(discv5.local_enr().ip4().is_none());
+
+        tokio::time::timeout(
+            Duration::from_secs(5),
+            futures::future::poll_fn(|cx| {
+                let _ = discovery.poll(cx);
+                if discv5.node_record().is_some_and(|record| record.address == external_ip) {
+                    Poll::Ready(())
+                } else {
+                    Poll::Pending
+                }
+            }),
+        )
+        .await
+        .expect("external IP should be advertised");
+
+        let record = discv5.node_record().unwrap();
+        assert_eq!(record.address, external_ip);
+        assert_eq!(record.udp_port, udp_port);
+        assert_eq!(record.tcp_port, 30309);
+
+        let seq = discv5.local_enr().seq();
+        discovery.on_external_ip(external_ip);
+        assert_eq!(discv5.local_enr().seq(), seq);
+        discovery.on_external_ip("2001:db8::7".parse().unwrap());
+        assert_eq!(discv5.local_enr().seq(), seq);
+
+        // Peer votes can change the address and mapped UDP port between NAT resolutions.
+        discv5.with_discv5(|discv5| {
+            discv5.update_local_enr_socket((Ipv4Addr::LOCALHOST, 30310).into(), false);
+        });
+        discovery.on_external_ip(external_ip);
+        assert_eq!(discv5.node_record().unwrap(), NodeRecord { udp_port: 30310, ..record });
+    }
+
+    #[tokio::test]
+    async fn discv5_only_respects_enr_update_policy() {
+        for (enr_update, auto_nat_listen_duration) in
+            [(false, None), (true, Some(Duration::from_secs(300)))]
+        {
+            let mut config = reth_discv5::Config::builder((Ipv4Addr::LOCALHOST, 0).into()).build();
+            let discv5_config = config.discv5_config_mut();
+            discv5_config.listen_config =
+                discv5::ListenConfig::Ipv4 { ip: Ipv4Addr::LOCALHOST, port: 0 };
+            discv5_config.enr_update = enr_update;
+            // Set this after building: the upstream builder clears the reachability timer.
+            discv5_config.auto_nat_listen_duration = auto_nat_listen_duration;
+            let discovery = start_discv5_only(config, Some(NatResolver::Any)).await;
+
+            // No automatic lookup may overwrite a pinned address or bypass reachability checks.
+            assert!(discovery.nat_resolver.is_none());
+        }
     }
 
     #[test]
@@ -658,6 +839,7 @@ mod tests {
             secret_key,
             Some(discv4_config),
             Some(discv5_config),
+            None,
             None,
         )
         .await
@@ -806,8 +988,133 @@ mod tests {
             Some(discv4_config),
             Some(discv5_config),
             None,
+            None,
         )
         .await
         .expect("discovery should start with shared port + dual-stack");
+    }
+
+    /// A discv4 ping over the opposite family must complete the endpoint proof: the sibling
+    /// socket bound for discv5's dual-stack listen config is discv4's secondary-family egress.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_shared_port_dual_stack_answers_opposite_family_discv4() {
+        reth_tracing::init_test_tracing();
+
+        let Ok(probe6) = UdpSocket::bind("[::1]:0").await else {
+            // No IPv6 loopback on this host.
+            return;
+        };
+        drop(probe6);
+
+        let ips = [IpAddr::V4(Ipv4Addr::LOCALHOST), IpAddr::V6(Ipv6Addr::LOCALHOST)];
+        for primary_ip in ips {
+            for tcp_ip in ips {
+                assert_shared_port_dual_stack(primary_ip, tcp_ip).await;
+            }
+        }
+    }
+
+    async fn assert_shared_port_dual_stack(primary_ip: IpAddr, tcp_ip: IpAddr) {
+        let secondary_ip = if primary_ip.is_ipv4() {
+            IpAddr::V6(Ipv6Addr::LOCALHOST)
+        } else {
+            IpAddr::V4(Ipv4Addr::LOCALHOST)
+        };
+        let probe = UdpSocket::bind((primary_ip, 0)).await.expect("probe bind");
+        let port = probe.local_addr().unwrap().port();
+        drop(probe);
+
+        let secret_key = SecretKey::new(&mut rand_08::thread_rng());
+        let node_id = reth_network_peers::pk2id(&secret_key.public_key(SECP256K1));
+        let discovery_addr = SocketAddr::new(primary_ip, port);
+        let tcp_addr = SocketAddr::new(tcp_ip, 30303);
+
+        let discv4_config = Discv4ConfigBuilder::default().external_ip_resolver(None).build();
+        // The sibling must use discv4's shared port despite a different configured port.
+        let other_port = if port == u16::MAX { port - 1 } else { port + 1 };
+        let discv5_listen_config = discv5::ListenConfig::DualStack {
+            ipv4: Ipv4Addr::LOCALHOST,
+            ipv4_port: if primary_ip.is_ipv4() { port } else { other_port },
+            ipv6: Ipv6Addr::LOCALHOST,
+            ipv6_port: if primary_ip.is_ipv6() { port } else { other_port },
+        };
+        let discv5_config = reth_discv5::Config::builder(tcp_addr)
+            .discv5_config(discv5::ConfigBuilder::new(discv5_listen_config).build())
+            .build();
+
+        let _node = Discovery::new(
+            tcp_addr,
+            discovery_addr,
+            secret_key,
+            Some(discv4_config),
+            Some(discv5_config),
+            None,
+            None,
+        )
+        .await
+        .expect("discovery should start with shared port + dual-stack");
+
+        // Seed the discv4-only prober with the secondary endpoint.
+        let probe_sk = SecretKey::new(&mut rand_08::thread_rng());
+        let secondary_node =
+            NodeRecord { address: secondary_ip, udp_port: port, tcp_port: port, id: node_id };
+        let probe_config = Discv4ConfigBuilder::default()
+            .external_ip_resolver(None)
+            .add_boot_node(secondary_node)
+            .build();
+        let probe_addr = SocketAddr::new(secondary_ip, 0);
+        let probe_enr = NodeRecord::from_secret_key(probe_addr, &probe_sk);
+        let (_probe, mut probe_service) =
+            Discv4::bind(probe_addr, probe_enr, probe_sk, probe_config).await.unwrap();
+        let mut updates = probe_service.update_stream();
+        probe_service.spawn();
+
+        // The bootnode only becomes `Added` once its pong arrives over the secondary socket.
+        let added = tokio::time::timeout(Duration::from_secs(5), async {
+            while let Some(update) = updates.next().await {
+                if let DiscoveryUpdate::Added(record) = update &&
+                    record.id == node_id
+                {
+                    return true
+                }
+            }
+            false
+        })
+        .await
+        .unwrap_or(false);
+        assert!(added, "node should answer discv4 over its secondary family");
+
+        for peer_ip in [primary_ip, secondary_ip] {
+            let node = NodeRecord { address: peer_ip, ..secondary_node };
+            let socket = UdpSocket::bind((peer_ip, 0)).await.unwrap();
+            let secret_key = SecretKey::new(&mut rand_08::thread_rng());
+            let record = NodeRecord::from_secret_key(socket.local_addr().unwrap(), &secret_key);
+            let ping = reth_discv4::proto::Message::Ping(reth_discv4::proto::Ping {
+                from: record.into(),
+                to: node.into(),
+                expire: u32::MAX.into(),
+                enr_sq: None,
+            });
+            let (packet, _) = ping.encode(&secret_key);
+            socket.send_to(&packet, node.udp_addr()).await.unwrap();
+            let ping = tokio::time::timeout(Duration::from_secs(5), async {
+                let mut buf = [0u8; 1280];
+                loop {
+                    let (len, _) = socket.recv_from(&mut buf).await.unwrap();
+                    if let reth_discv4::proto::Message::Ping(ping) =
+                        reth_discv4::proto::Message::decode(&buf[..len]).unwrap().msg
+                    {
+                        break ping
+                    }
+                }
+            })
+            .await
+            .expect("node should ping the peer");
+            assert_eq!(
+                ping.from.tcp_port,
+                if peer_ip == tcp_ip { tcp_addr.port() } else { 0 },
+                "primary discovery IP: {primary_ip}, TCP IP: {tcp_ip}, peer IP: {peer_ip}"
+            );
+        }
     }
 }

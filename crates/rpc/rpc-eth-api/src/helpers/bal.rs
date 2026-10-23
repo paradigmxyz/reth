@@ -7,16 +7,16 @@ use reth_errors::RethError;
 use reth_evm::{block::BlockExecutor, ConfigureEvm, Evm};
 use reth_revm::{database::StateProviderDatabase, State};
 use reth_rpc_eth_types::{error::FromEthApiError, EthApiError};
-use reth_storage_api::StateProviderFactory;
+use reth_storage_api::{StateProvider, StateProviderFactory};
 use std::sync::Arc;
 
 use crate::{
-    helpers::{Call, LoadBlock, Trace},
-    RpcNodeCore, RpcNodeCoreExt,
+    helpers::{LoadBlock, Trace},
+    RpcNodeCore,
 };
 
 /// Helper trait for `eth_blockAccessList` RPC method.
-pub trait GetBlockAccessList: Trace + Call + LoadBlock + RpcNodeCoreExt {
+pub trait GetBlockAccessList: Trace + LoadBlock {
     /// Retrieves the block access list for a block identified by its hash.
     fn get_block_access_list(
         &self,
@@ -54,7 +54,7 @@ pub trait GetBlockAccessList: Trace + Call + LoadBlock + RpcNodeCoreExt {
                     .map_err(Self::Error::from_eth_err)?;
 
                 let mut db = State::builder()
-                    .with_database(StateProviderDatabase::new(state))
+                    .with_database(StateProviderDatabase::new(state.into_evm_state_provider()))
                     .with_bal_builder()
                     .build();
 

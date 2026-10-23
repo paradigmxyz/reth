@@ -20,7 +20,7 @@ reth-rpc-eth-api.workspace = true
 reth-engine-primitives.workspace = true
 reth-errors.workspace = true
 reth-metrics.workspace = true
-reth-storage-api.workspace = true
+reth-storage-api = { workspace = true, features = ["chain-state"] }
 reth-execution-types = { workspace = true, features = ["serde"] }
 reth-chain-state.workspace = true
 reth-transaction-pool.workspace = true
@@ -90,6 +90,7 @@ sha2.workspace = true
 thiserror.workspace = true
 derive_more.workspace = true
 itertools.workspace = true
+humantime = { workspace = true, optional = true }
 
 [dev-dependencies]
 reth-testing-utils.workspace = true
@@ -106,7 +107,17 @@ jsonrpsee = { workspace = true, features = ["client"] }
 
 [features]
 js-tracer = [
+    "dep:humantime",
     "revm-inspectors/js-tracer",
     "reth-rpc-eth-types/js-tracer",
     "reth-rpc-eth-api/js-tracer",
+]
+account-ext = [
+    "reth-rpc-eth-api/account-ext",
+    "reth-primitives-traits/account-ext",
+    "alloy-genesis/account-ext",
+    "alloy-rpc-types-eth/account-ext",
+    "reth-provider/account-ext",
+    "reth-revm/account-ext",
+    "revm/account-ext",
 ]

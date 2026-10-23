@@ -7,11 +7,7 @@ use nybbles::Nibbles;
 /// Check the `reth-trie` crate for more info on hash builder.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 #[cfg_attr(any(test, feature = "serde"), derive(serde::Serialize, serde::Deserialize))]
-#[cfg_attr(
-    feature = "arbitrary",
-    derive(arbitrary::Arbitrary),
-    reth_codecs::add_arbitrary_tests(compact)
-)]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct HashBuilderState {
     /// The current key.
     pub key: Vec<u8>,
@@ -70,7 +66,10 @@ impl reth_codecs::Compact for HashBuilderState {
     {
         let mut len = 0;
 
-        len += self.key.to_compact(buf);
+        // Collection codecs return flag bits, not their encoded byte length.
+        let start = buf.remaining_mut();
+        self.key.to_compact(buf);
+        len += start - buf.remaining_mut();
 
         buf.put_u16(self.stack.len() as u16);
         len += 2;
@@ -80,7 +79,9 @@ impl reth_codecs::Compact for HashBuilderState {
             len += 2 + item.len();
         }
 
-        len += self.value.to_compact(buf);
+        let start = buf.remaining_mut();
+        self.value.to_compact(buf);
+        len += start - buf.remaining_mut();
 
         buf.put_u16(self.groups.len() as u16);
         len += 2;
@@ -152,6 +153,8 @@ impl reth_codecs::Compact for HashBuilderState {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(feature = "arbitrary")]
+    use proptest::{collection::vec, prelude::*};
     use reth_codecs::Compact;
 
     #[test]
@@ -164,14 +167,47 @@ mod tests {
         assert_eq!(state, decoded);
     }
 
+    #[test]
+    fn hash_builder_state_fixed_slice() {
+        let mut state = HashBuilderState { key: vec![1, 2, 3], ..Default::default() };
+        state.value.set_bytes_owned(vec![42; 128]);
+        let mut expected = vec![];
+        assert_eq!(state.to_compact(&mut expected), expected.len());
+
+        let mut storage = vec![0; expected.len() + 1];
+        let mut remaining = storage.as_mut_slice();
+        let len = state.to_compact(&mut remaining);
+        assert_eq!(len, expected.len());
+        assert_eq!(remaining.len(), 1);
+        assert_eq!(&storage[..len], expected);
+        let (decoded, rest) = HashBuilderState::from_compact(&storage[..len], len);
+        assert_eq!(decoded, state);
+        assert!(rest.is_empty());
+    }
+
+    // Generate fields directly: the arbitrary interop's fixed byte buffer can run out while
+    // generating variable-length fields, aborting the test before checking the codec.
     #[cfg(feature = "arbitrary")]
     proptest::proptest! {
         #[test]
-        fn hash_builder_state_roundtrip(state in proptest_arbitrary_interop::arb::<HashBuilderState>()) {
+        fn hash_builder_state_roundtrip(
+            key in vec(0u8..16, 0..=64),
+            value in any::<HashBuilderValue>(),
+            stack in vec(any::<RlpNode>(), 0..=64),
+            groups in vec(any::<TrieMask>(), 0..=64),
+            tree_masks in vec(any::<TrieMask>(), 0..=64),
+            hash_masks in vec(any::<TrieMask>(), 0..=64),
+            stored_in_database in any::<bool>(),
+        ) {
+            let state = HashBuilderState {
+                key, value, stack, groups, tree_masks, hash_masks, stored_in_database,
+            };
             let mut buf = vec![];
             let len = state.to_compact(&mut buf);
-            let (decoded, _) = HashBuilderState::from_compact(&buf, len);
-            assert_eq!(state, decoded);
+            prop_assert_eq!(len, buf.len());
+            let (decoded, rest) = HashBuilderState::from_compact(&buf, len);
+            prop_assert_eq!(state, decoded);
+            prop_assert!(rest.is_empty());
         }
     }
 }
