@@ -117,6 +117,7 @@ where
         let dao_fork_transition = chain_spec
             .ethereum_fork_activation(EthereumHardfork::Dao)
             .transitions_at_block(block_number);
+        let receipts = Vec::with_capacity(ctx.tx_count_hint.unwrap_or_default());
 
         Self {
             evm,
@@ -130,7 +131,7 @@ where
                 .map(|contract| contract.address),
             block_state: BlockState::new(),
             state_update_hook: None,
-            receipts: Vec::new(),
+            receipts,
             cumulative_gas_used: 0,
             block_regular_gas_used: 0,
             block_state_gas_used: 0,
@@ -418,7 +419,8 @@ where
             &mut requests,
         )?;
 
-        let withdrawals = self.ctx.withdrawals.clone();
+        let withdrawals =
+            self.ctx.withdrawals.clone().filter(|_| self.spec_id.enables(evm2::SpecId::SHANGHAI));
         let context = Self::block_context(
             self.deposit_contract_address,
             self.ctx.parent_hash,
@@ -719,7 +721,12 @@ where
             &mut requests,
         )?;
 
-        let withdrawals = self.inner.ctx.withdrawals.clone();
+        let withdrawals = self
+            .inner
+            .ctx
+            .withdrawals
+            .clone()
+            .filter(|_| self.inner.spec_id.enables(evm2::SpecId::SHANGHAI));
         let context = EthBlockExecutor::<F::Types>::block_context(
             self.inner.deposit_contract_address,
             self.inner.ctx.parent_hash,
