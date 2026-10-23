@@ -26,14 +26,20 @@ use reth_primitives_traits::{
     RecoveredBlock, SealedBlock,
 };
 use reth_provider::{
-    test_utils::create_test_provider_factory_with_chain_spec, BlockNumReader, DBProvider,
-    DatabaseProviderFactory, HeaderProvider, OriginalValuesKnown, StageCheckpointReader,
-    StateWriter, StaticFileProviderFactory,
+    pending_pipeline_unwind_target,
+    providers::{RocksDBProvider, StaticFileProvider},
+    test_utils::create_test_provider_factory_with_chain_spec,
+    BlockNumReader, DBProvider, DatabaseProviderFactory, HeaderProvider, MetadataWriter,
+    OriginalValuesKnown, ProviderFactory, StageCheckpointReader, StateWriter,
+    StaticFileProviderFactory,
 };
 use reth_prune_types::PruneModes;
 use reth_revm::database::StateProviderDatabase;
-use reth_stages::sets::DefaultStages;
-use reth_stages_api::{Pipeline, StageId};
+use reth_stages::{sets::DefaultStages, stages::StorageHashingStage};
+use reth_stages_api::{
+    ExecInput, ExecOutput, Pipeline, PipelineTarget, Stage, StageError, StageId, StageSet,
+    UnwindInput, UnwindOutput,
+};
 use reth_static_file::StaticFileProducer;
 use reth_storage_api::{
     ChangeSetReader, StateProvider, StorageChangeSetReader, StorageSettings, StorageSettingsCache,
@@ -169,13 +175,14 @@ fn build_pipeline<H, B>(
     body_downloader: B,
     max_block: u64,
     tip: B256,
+    stages_config: StageConfig,
+    interrupt_unwind: bool,
 ) -> Pipeline<reth_provider::test_utils::MockNodeTypesWithDB>
 where
     H: HeaderDownloader<Header = Header> + 'static,
     B: BodyDownloader<Block = Block> + 'static,
 {
     let consensus = NoopConsensus::arc();
-    let stages_config = StageConfig::default();
     let evm_config = EthEvmConfig::new(provider_factory.chain_spec());
 
     let (tip_tx, tip_rx) = watch::channel(B256::ZERO);
@@ -192,7 +199,13 @@ where
         stages_config,
         PruneModes::default(),
         None,
-    );
+    )
+    .builder();
+    let stages = if interrupt_unwind {
+        stages.set(InterruptStorageHashing(StorageHashingStage::default()))
+    } else {
+        stages
+    };
 
     let pipeline = Pipeline::builder()
         .with_tip_sender(tip_tx)
@@ -219,6 +232,7 @@ async fn run_pipeline_forward_and_unwind(
     storage_settings: Option<StorageSettings>,
     num_blocks: u64,
     unwind_target: u64,
+    interrupt_unwind: bool,
 ) -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
 
@@ -393,10 +407,13 @@ async fn run_pipeline_forward_and_unwind(
 
     // Create a fresh provider factory for the pipeline (clean state from genesis)
     // This is needed because we wrote state during block generation for computing state roots
-    let pipeline_provider_factory =
+    let mut pipeline_provider_factory =
         create_test_provider_factory_with_chain_spec(chain_spec.clone());
     if let Some(settings) = storage_settings {
         pipeline_provider_factory.set_storage_settings_cache(settings);
+        let provider = pipeline_provider_factory.database_provider_rw()?;
+        provider.write_storage_settings(settings)?;
+        provider.commit()?;
     }
     init_genesis(&pipeline_provider_factory).expect("init genesis");
     let pipeline_genesis =
@@ -408,11 +425,15 @@ async fn run_pipeline_forward_and_unwind(
     let max_block = file_client.max_block().unwrap();
     let tip = file_client.tip().expect("tip");
 
-    let stages_config = StageConfig::default();
+    let mut stages_config = StageConfig::default();
+    if interrupt_unwind {
+        // Exercise full Merkle rebuilds with the five-block interruption fixture.
+        stages_config.merkle.rebuild_threshold = 1;
+    }
     let (header_downloader, body_downloader, _runtime) = build_downloaders_from_file_client(
         file_client,
         pipeline_genesis,
-        stages_config,
+        stages_config.clone(),
         pipeline_consensus,
         pipeline_provider_factory.clone(),
     );
@@ -423,6 +444,8 @@ async fn run_pipeline_forward_and_unwind(
         body_downloader,
         max_block,
         tip,
+        stages_config.clone(),
+        interrupt_unwind,
     );
 
     let (mut pipeline, result) = pipeline.run_as_fut(None).await;
@@ -471,8 +494,59 @@ async fn run_pipeline_forward_and_unwind(
     // source
     assert_changesets_queryable(&pipeline_provider_factory, 1..=num_blocks)?;
 
-    // Unwind to unwind_target
-    pipeline.unwind(unwind_target, None)?;
+    // Interrupt after the real storage hashing unwind commit, while Execution is still ahead.
+    if interrupt_unwind {
+        assert_eq!(
+            pipeline.unwind(unwind_target, None).unwrap_err().to_string(),
+            "interrupted after storage hashing commit"
+        );
+        let provider = pipeline_provider_factory.provider()?;
+        assert_eq!(
+            provider.get_stage_checkpoint(StageId::StorageHashing)?.unwrap().block_number,
+            unwind_target
+        );
+        assert_eq!(
+            provider.get_stage_checkpoint(StageId::Execution)?.unwrap().block_number,
+            num_blocks
+        );
+        assert_eq!(
+            provider.latest().storage(CONTRACT_ADDRESS, B256::ZERO)?,
+            Some(U256::from(unwind_target))
+        );
+        drop(provider);
+        drop(pipeline);
+        drop(_runtime);
+        // Close storage handles and reopen the same datadir, loading settings and metadata.
+        pipeline_provider_factory = reopen_provider_factory(pipeline_provider_factory).await?;
+
+        // Construct a fresh pipeline and use the same consistency target as node startup.
+        let (rocksdb_target, storage_target) = pipeline_provider_factory.check_consistency()?;
+        let recovery_target = rocksdb_target.into_iter().chain(storage_target).min();
+        let (headers, bodies, _recovery_runtime) = build_downloaders_from_file_client(
+            create_file_client_from_blocks(blocks_clone.clone()),
+            pipeline_provider_factory.sealed_header(0)?.unwrap(),
+            StageConfig::default(),
+            NoopConsensus::arc(),
+            pipeline_provider_factory.clone(),
+        );
+        pipeline = build_pipeline(
+            pipeline_provider_factory.clone(),
+            headers,
+            bodies,
+            max_block,
+            tip,
+            stages_config.clone(),
+            false,
+        );
+        let (recovered_pipeline, result) =
+            pipeline.run_as_fut(recovery_target.map(PipelineTarget::Unwind)).await;
+        result?;
+        pipeline = recovered_pipeline;
+        assert_eq!(recovery_target, Some(unwind_target));
+        assert_eq!(pending_pipeline_unwind_target(&pipeline_provider_factory.provider()?)?, None);
+    } else {
+        pipeline.unwind(unwind_target, None)?;
+    }
 
     // Verify unwind
     {
@@ -539,6 +613,8 @@ async fn run_pipeline_forward_and_unwind(
         resync_body_downloader,
         max_block,
         tip,
+        stages_config,
+        false,
     );
 
     let (_resync_pipeline, resync_result) = resync_pipeline.run_as_fut(None).await;
@@ -580,6 +656,18 @@ async fn run_pipeline_forward_and_unwind(
         );
     }
 
+    if interrupt_unwind {
+        drop(pipeline);
+        drop(_resync_pipeline);
+        drop(resync_runtime);
+        pipeline_provider_factory = reopen_provider_factory(pipeline_provider_factory).await?;
+        assert_eq!(pipeline_provider_factory.check_consistency()?, (None, None));
+        assert_eq!(
+            pipeline_provider_factory.provider()?.latest().storage(CONTRACT_ADDRESS, B256::ZERO)?,
+            Some(U256::from(num_blocks))
+        );
+    }
+
     Ok(())
 }
 
@@ -596,7 +684,7 @@ async fn run_pipeline_forward_and_unwind(
 /// This exercises both account and storage hashing/history stages.
 #[tokio::test(flavor = "multi_thread")]
 async fn test_pipeline() -> eyre::Result<()> {
-    run_pipeline_forward_and_unwind(None, 5, 2).await
+    run_pipeline_forward_and_unwind(None, 5, 2, false).await
 }
 
 /// Same as [`test_pipeline`] but runs with v2 storage settings (`use_hashed_state=true`,
@@ -609,5 +697,79 @@ async fn test_pipeline() -> eyre::Result<()> {
 /// - Unwind must still revert hashed state via the hashing stages before `MerkleUnwind` validates
 #[tokio::test(flavor = "multi_thread")]
 async fn test_pipeline_v2() -> eyre::Result<()> {
-    run_pipeline_forward_and_unwind(Some(StorageSettings::v2()), 5, 2).await
+    run_pipeline_forward_and_unwind(Some(StorageSettings::v2()), 5, 2, false).await
+}
+
+/// A fresh pipeline must finish the durable unwind before trusting Execution's checkpoint.
+#[tokio::test(flavor = "multi_thread")]
+async fn interrupted_storage_v2_unwind_recovers() -> eyre::Result<()> {
+    run_pipeline_forward_and_unwind(Some(StorageSettings::v2()), 5, 2, true).await
+}
+
+struct InterruptStorageHashing(StorageHashingStage);
+
+impl<Provider> Stage<Provider> for InterruptStorageHashing
+where
+    StorageHashingStage: Stage<Provider>,
+{
+    fn id(&self) -> StageId {
+        StageId::StorageHashing
+    }
+
+    fn execute(&mut self, provider: &Provider, input: ExecInput) -> Result<ExecOutput, StageError> {
+        self.0.execute(provider, input)
+    }
+
+    fn unwind(
+        &mut self,
+        provider: &Provider,
+        input: UnwindInput,
+    ) -> Result<UnwindOutput, StageError> {
+        self.0.unwind(provider, input)
+    }
+
+    fn post_unwind_commit(&mut self) -> Result<(), StageError> {
+        Err(std::io::Error::other("interrupted after storage hashing commit").into())
+    }
+}
+
+async fn reopen_provider_factory(
+    factory: ProviderFactory<reth_provider::test_utils::MockNodeTypesWithDB>,
+) -> eyre::Result<ProviderFactory<reth_provider::test_utils::MockNodeTypesWithDB>> {
+    let chain_spec = factory.chain_spec();
+    let db = factory.db_ref().clone();
+    let datadir = db.path().to_path_buf();
+    drop(factory);
+    tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        while Arc::strong_count(&db) != 1 {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await?;
+    let db = Arc::try_unwrap(db).expect("all database users must be dropped");
+    drop(db.into_inner_db());
+    let db = reth_db::init_db(datadir.join("db"), reth_db::mdbx::DatabaseArguments::test())?;
+    // A downloader can release its MDBX handle just before its RocksDB handle finishes closing.
+    let rocksdb = tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        loop {
+            match RocksDBProvider::builder(datadir.join("rocksdb")).with_default_tables().build() {
+                Ok(provider) => break Ok(provider),
+                Err(reth_provider::ProviderError::Database(reth_db::DatabaseError::Open(
+                    error,
+                ))) if error.message.contains("lock hold by current process") => {
+                    tokio::task::yield_now().await;
+                }
+                Err(error) => break Err(error),
+            }
+        }
+    })
+    .await??;
+    ProviderFactory::new(
+        Arc::new(reth_db::test_utils::TempDatabase::new(db, datadir.clone())),
+        chain_spec,
+        StaticFileProvider::read_write(datadir.join("static_files"))?,
+        rocksdb,
+        reth_tasks::Runtime::test(),
+    )
+    .map_err(Into::into)
 }

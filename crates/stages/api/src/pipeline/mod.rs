@@ -7,10 +7,11 @@ pub use event::*;
 use futures_util::Future;
 use reth_primitives_traits::constants::BEACON_CONSENSUS_REORG_UNWIND_DEPTH;
 use reth_provider::{
-    providers::ProviderNodeTypes, BlockHashReader, BlockNumReader, ChainStateBlockReader,
-    ChainStateBlockWriter, DBProvider, DatabaseProviderFactory, ProviderFactory,
-    PruneCheckpointReader, StageCheckpointReader, StageCheckpointWriter, StaticFileProviderFactory,
-    StorageSettingsCache,
+    pending_pipeline_unwind_target, providers::ProviderNodeTypes, BlockHashReader, BlockNumReader,
+    ChainStateBlockReader, ChainStateBlockWriter, DBProvider, DatabaseProviderFactory,
+    MetadataWriter, ProviderError, ProviderFactory, PruneCheckpointReader, StageCheckpointReader,
+    StageCheckpointWriter, StaticFileProviderFactory, StorageSettingsCache,
+    PENDING_PIPELINE_UNWIND_KEY,
 };
 use reth_prune::PrunerBuilder;
 use reth_static_file::StaticFileProducer;
@@ -353,16 +354,26 @@ impl<N: ProviderNodeTypes> Pipeline<N> {
         to: BlockNumber,
         bad_block: Option<BlockNumber>,
     ) -> Result<(), PipelineError> {
-        // Add validation before starting unwind
-        let (latest_block, prune_modes, checkpoints) = {
+        // The target is persisted before any stage commits. On restart, a partially unwound
+        // database must finish unwinding before forward stages may trust their checkpoints.
+        let (to, pending_target, latest_block, prune_modes, checkpoints) = {
             let provider = self.provider_factory.provider()?;
+            let pending_target = pending_pipeline_unwind_target(&provider)?;
             (
+                pending_target.map_or(to, |pending| pending.min(to)),
+                pending_target,
                 provider.last_block_number()?,
                 provider.prune_modes_ref().clone(),
                 provider.get_prune_checkpoints()?,
             )
         };
         prune_modes.ensure_unwind_target_unpruned(latest_block, to, &checkpoints)?;
+
+        if pending_target != Some(to) {
+            let provider_rw = self.provider_factory.database_provider_rw()?;
+            provider_rw.write_metadata(PENDING_PIPELINE_UNWIND_KEY, to.to_be_bytes().to_vec())?;
+            provider_rw.commit()?;
+        }
 
         // Unwind stages in reverse order of execution
         let unwind_pipeline = self.stages.iter_mut().rev();
@@ -472,6 +483,28 @@ impl<N: ProviderNodeTypes> Pipeline<N> {
                 }
             }
         }
+
+        // Repeating a completed unwind is safe. Keep the marker until every stage has
+        // committed so another interruption resumes the same target.
+        for stage_id in [
+            StageId::Finish,
+            StageId::MerkleExecute,
+            StageId::StorageHashing,
+            StageId::AccountHashing,
+            StageId::MerkleUnwind,
+            StageId::Execution,
+        ] {
+            if provider_rw.get_stage_checkpoint(stage_id)?.unwrap_or_default().block_number > to {
+                return Err(ProviderError::other(std::io::Error::other(format!(
+                    "cannot finish pipeline unwind: {stage_id} remains above block {to}",
+                )))
+                .into());
+            }
+        }
+        drop(provider_rw);
+        let provider_rw = self.provider_factory.database_provider_rw()?;
+        provider_rw.delete_metadata(PENDING_PIPELINE_UNWIND_KEY)?;
+        provider_rw.commit()?;
 
         Ok(())
     }
@@ -1311,5 +1344,149 @@ mod tests {
                 Some(ControlFlow::Unwind { target: genesis, bad_block: block(genesis + 1) })
             );
         }
+    }
+
+    #[test]
+    fn interrupted_unwind_resumes_until_execution_finishes() {
+        for target in [0, 2] {
+            let factory = create_test_provider_factory();
+            let provider = factory.database_provider_rw().unwrap();
+            for stage in [StageId::Execution, StageId::StorageHashing] {
+                provider.save_stage_checkpoint(stage, StageCheckpoint::new(10)).unwrap();
+            }
+            provider.commit().unwrap();
+
+            let mut pipeline = Pipeline::<MockNodeTypesWithDB>::builder()
+                .add_stage(
+                    TestStage::new(StageId::Execution)
+                        .add_unwind(Err(StageError::MissingDownloadBuffer)),
+                )
+                .add_stage(
+                    TestStage::new(StageId::StorageHashing)
+                        .add_unwind(Ok(UnwindOutput { checkpoint: StageCheckpoint::new(target) })),
+                )
+                .build(
+                    factory.clone(),
+                    StaticFileProducer::new(factory.clone(), PruneModes::default()),
+                );
+            assert_eq!(
+                pipeline.unwind(target, None).unwrap_err().to_string(),
+                "missing download buffer"
+            );
+            drop(pipeline);
+
+            let provider = factory.provider().unwrap();
+            assert_eq!(pending_pipeline_unwind_target(&provider).unwrap(), Some(target));
+            assert_eq!(
+                provider.get_stage_checkpoint(StageId::StorageHashing).unwrap(),
+                Some(StageCheckpoint::new(target))
+            );
+            assert_eq!(
+                provider.get_stage_checkpoint(StageId::Execution).unwrap(),
+                Some(StageCheckpoint::new(10))
+            );
+            drop(provider);
+
+            let mut pipeline = Pipeline::<MockNodeTypesWithDB>::builder()
+                .add_stage(
+                    TestStage::new(StageId::Execution)
+                        .add_unwind(Err(StageError::MissingDownloadBuffer))
+                        .add_unwind(Ok(UnwindOutput { checkpoint: StageCheckpoint::new(target) })),
+                )
+                .add_stage(TestStage::new(StageId::StorageHashing))
+                .build(
+                    factory.clone(),
+                    StaticFileProducer::new(factory.clone(), PruneModes::default()),
+                );
+            assert_eq!(
+                pipeline.unwind(target, None).unwrap_err().to_string(),
+                "missing download buffer"
+            );
+            assert_eq!(
+                pending_pipeline_unwind_target(&factory.provider().unwrap()).unwrap(),
+                Some(target)
+            );
+            pipeline.unwind(target, None).unwrap();
+            assert_eq!(pending_pipeline_unwind_target(&factory.provider().unwrap()).unwrap(), None);
+        }
+    }
+
+    #[test]
+    fn resumed_unwind_honors_lower_pending_target() {
+        let factory = create_test_provider_factory();
+        let provider = factory.database_provider_rw().unwrap();
+        provider.save_stage_checkpoint(StageId::Execution, StageCheckpoint::new(10)).unwrap();
+        provider.write_metadata(PENDING_PIPELINE_UNWIND_KEY, 2u64.to_be_bytes().to_vec()).unwrap();
+        provider.commit().unwrap();
+        let mut pipeline = Pipeline::<MockNodeTypesWithDB>::builder()
+            .add_stage(
+                TestStage::new(StageId::Execution)
+                    .add_unwind(Ok(UnwindOutput { checkpoint: StageCheckpoint::new(2) })),
+            )
+            .build(
+                factory.clone(),
+                StaticFileProducer::new(factory.clone(), PruneModes::default()),
+            );
+        pipeline.unwind(4, None).unwrap();
+        let provider = factory.provider().unwrap();
+        assert_eq!(pending_pipeline_unwind_target(&provider).unwrap(), None);
+        assert_eq!(
+            provider.get_stage_checkpoint(StageId::Execution).unwrap(),
+            Some(StageCheckpoint::new(2))
+        );
+    }
+
+    #[test]
+    fn incomplete_unwind_keeps_pending_target() {
+        let factory = create_test_provider_factory();
+        let provider = factory.database_provider_rw().unwrap();
+        provider.save_stage_checkpoint(StageId::Execution, StageCheckpoint::new(10)).unwrap();
+        provider.commit().unwrap();
+        let mut pipeline = Pipeline::<MockNodeTypesWithDB>::builder().build(
+            factory.clone(),
+            StaticFileProducer::new(factory.clone(), PruneModes::default()),
+        );
+        assert_eq!(
+            pipeline.unwind(2, None).unwrap_err().to_string(),
+            "cannot finish pipeline unwind: Execution remains above block 2"
+        );
+        assert_eq!(pending_pipeline_unwind_target(&factory.provider().unwrap()).unwrap(), Some(2));
+    }
+
+    #[test]
+    fn pending_unwind_rejects_malformed_metadata() {
+        let factory = create_test_provider_factory();
+        assert_eq!(pending_pipeline_unwind_target(&factory.provider().unwrap()).unwrap(), None);
+        for bytes in [vec![], vec![0; 7], vec![0; 9]] {
+            let provider = factory.database_provider_rw().unwrap();
+            provider.write_metadata(PENDING_PIPELINE_UNWIND_KEY, bytes).unwrap();
+            provider.commit().unwrap();
+            assert_eq!(
+                pending_pipeline_unwind_target(&factory.provider().unwrap())
+                    .unwrap_err()
+                    .to_string(),
+                "invalid pending pipeline unwind target"
+            );
+        }
+    }
+
+    #[test]
+    fn interrupted_unwind_can_lower_pending_target() {
+        let factory = create_test_provider_factory();
+        let provider = factory.database_provider_rw().unwrap();
+        provider.save_stage_checkpoint(StageId::Execution, StageCheckpoint::new(10)).unwrap();
+        provider.write_metadata(PENDING_PIPELINE_UNWIND_KEY, 4u64.to_be_bytes().to_vec()).unwrap();
+        provider.commit().unwrap();
+        let mut pipeline = Pipeline::<MockNodeTypesWithDB>::builder()
+            .add_stage(
+                TestStage::new(StageId::Execution)
+                    .add_unwind(Err(StageError::MissingDownloadBuffer)),
+            )
+            .build(
+                factory.clone(),
+                StaticFileProducer::new(factory.clone(), PruneModes::default()),
+            );
+        assert_eq!(pipeline.unwind(2, None).unwrap_err().to_string(), "missing download buffer");
+        assert_eq!(pending_pipeline_unwind_target(&factory.provider().unwrap()).unwrap(), Some(2));
     }
 }

@@ -15,7 +15,11 @@ use reth_node_core::{
     dirs::{DataDirPath, MaybePlatformPath},
 };
 use reth_node_ethereum::node::{EthereumAddOns, EthereumNode};
-use reth_provider::{providers::ProviderNodeTypes, ProviderFactory, StageCheckpointReader};
+use reth_provider::{
+    pending_pipeline_unwind_target, providers::ProviderNodeTypes, DBProvider,
+    DatabaseProviderFactory, MetadataWriter, ProviderFactory, StageCheckpointReader,
+    PENDING_PIPELINE_UNWIND_KEY,
+};
 use reth_rpc_builder::Identity;
 use reth_stages_types::StageId;
 use reth_tasks::Runtime;
@@ -28,6 +32,8 @@ struct RecordingBackfill {
     calls: Arc<Mutex<Vec<&'static str>>>,
     // Whether `recover` refuses the database.
     fail_recovery: bool,
+    // An interrupted unwind to recover before building the backfill pipeline.
+    pending_unwind: Option<u64>,
 }
 
 impl<N: ProviderNodeTypes, C> BackfillSyncBuilder<N, C> for RecordingBackfill {
@@ -35,6 +41,9 @@ impl<N: ProviderNodeTypes, C> BackfillSyncBuilder<N, C> for RecordingBackfill {
 
     fn build(self, ctx: BackfillContext<N, C>) -> eyre::Result<Self::Backfill> {
         self.calls.lock().unwrap().push("build");
+        if self.pending_unwind.is_some() {
+            assert_eq!(pending_pipeline_unwind_target(&ctx.provider_factory().provider()?)?, None);
+        }
         PipelineBackfill.build(ctx)
     }
 
@@ -44,6 +53,11 @@ impl<N: ProviderNodeTypes, C> BackfillSyncBuilder<N, C> for RecordingBackfill {
         self.calls.lock().unwrap().push("recover");
         if self.fail_recovery {
             eyre::bail!("recovery refused the database")
+        }
+        if let Some(target) = self.pending_unwind {
+            let provider = provider_factory.database_provider_rw()?;
+            provider.write_metadata(PENDING_PIPELINE_UNWIND_KEY, target.to_be_bytes().to_vec())?;
+            provider.commit()?;
         }
         Ok(())
     }
@@ -137,4 +151,21 @@ async fn failed_backfill_recovery_stops_the_launch() {
 
     assert!(launched.is_err());
     assert_eq!(*calls.lock().unwrap(), ["recover"]);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn recorded_genesis_unwind_is_recovered_before_backfill() -> eyre::Result<()> {
+    let (config, _datadir) = launch_config();
+    let backfill = RecordingBackfill { pending_unwind: Some(0), ..Default::default() };
+    let calls = Arc::clone(&backfill.calls);
+    let _node = NodeBuilder::new(config)
+        .with_database(create_test_rw_db())
+        .with_launch_context(Runtime::test())
+        .with_types::<EthereumNode>()
+        .with_components(EthereumNode::components())
+        .with_add_ons(EthereumAddOns::default())
+        .launch_with_debug_capabilities_and_backfill(backfill)
+        .await?;
+    assert_eq!(*calls.lock().unwrap(), ["recover", "build"]);
+    Ok(())
 }
