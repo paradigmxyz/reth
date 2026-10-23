@@ -42,7 +42,11 @@ where
 
     reth_trie_db::with_adapter!(provider, |A| {
         let verifier = DatabaseVerifier::<_, A>::new(
-            || factory.database_provider_ro().map(DBProvider::into_tx),
+            || {
+                factory
+                    .database_provider_ro()
+                    .map(|provider| provider.disable_long_read_transaction_safety().into_tx())
+            },
             default_storage_workers(),
         )?;
         drop(snapshot_guard);

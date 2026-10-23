@@ -131,7 +131,15 @@ fn do_verify_only<DB: Database, A: TrieTableAdapter>(
     db: &DB,
     storage_workers: usize,
 ) -> eyre::Result<()> {
-    let verifier = DatabaseVerifier::<_, A>::new(|| db.tx(), storage_workers)?;
+    let verifier = DatabaseVerifier::<_, A>::new(
+        || {
+            db.tx().map(|mut tx| {
+                tx.disable_long_read_transaction_safety();
+                tx
+            })
+        },
+        storage_workers,
+    )?;
 
     let metrics = RepairTrieMetrics::new();
 
@@ -259,7 +267,15 @@ where
     let mut storage_trie_cursor = tx.cursor_dup_write::<A::StorageTrieTable>()?;
 
     // Open every read snapshot before any repairs are applied.
-    let verifier = DatabaseVerifier::<_, A>::new(|| db.tx(), storage_workers)?;
+    let verifier = DatabaseVerifier::<_, A>::new(
+        || {
+            db.tx().map(|mut tx| {
+                tx.disable_long_read_transaction_safety();
+                tx
+            })
+        },
+        storage_workers,
+    )?;
 
     let metrics = RepairTrieMetrics::new();
 

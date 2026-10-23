@@ -41,8 +41,8 @@ where
     /// Starts verification over read transactions returned by `open_tx`, which is called once for
     /// every transaction the verifier needs.
     ///
-    /// Every transaction returned by `open_tx` must read the same database version. Long-lived
-    /// read transaction safety is disabled on each of them. Each storage worker owns a separate
+    /// Every transaction returned by `open_tx` must read the same database version and have
+    /// long-lived read transaction safety disabled. Each storage worker owns a separate
     /// transaction.
     ///
     /// # Panics
@@ -53,11 +53,6 @@ where
         storage_workers: usize,
     ) -> Result<Self, E> {
         assert!(storage_workers > 0, "at least one storage worker is required");
-        let mut open_tx = || {
-            let mut tx = open_tx()?;
-            tx.disable_long_read_transaction_safety();
-            Ok::<_, E>(tx)
-        };
         let account_tx = open_tx()?;
         let lookahead_tx = open_tx()?;
         let storage_workers = (0..storage_workers)
