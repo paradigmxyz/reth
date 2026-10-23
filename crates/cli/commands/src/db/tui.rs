@@ -10,10 +10,6 @@ use ratatui::{
     widgets::{Block, Borders, List, ListItem, ListState, Paragraph, Wrap},
     Frame, Terminal,
 };
-use reth_db_api::{
-    table::{Table, TableRow},
-    RawValue,
-};
 use std::{
     io,
     time::{Duration, Instant},
@@ -39,79 +35,13 @@ pub(crate) enum ViewMode {
     GoToPage,
 }
 
-enum Entries<T: Table> {
-    /// Pairs of [`Table::Key`] and [`RawValue<Table::Value>`]
-    RawValues(Vec<(T::Key, RawValue<T::Value>)>),
-    /// Pairs of [`Table::Key`] and [`Table::Value`]
-    Values(Vec<TableRow<T>>),
-}
-
-impl<T: Table> Entries<T> {
-    /// Creates new empty [Entries] as [`Entries::RawValues`] if `raw_values == true` and as
-    /// [`Entries::Values`] if `raw == false`.
-    const fn new_with_raw_values(raw_values: bool) -> Self {
-        if raw_values {
-            Self::RawValues(Vec::new())
-        } else {
-            Self::Values(Vec::new())
-        }
-    }
-
-    /// Sets the internal entries [Vec], converting the [`Table::Value`] into
-    /// [`RawValue<Table::Value>`] if needed.
-    fn set(&mut self, new_entries: Vec<TableRow<T>>) {
-        match self {
-            Self::RawValues(old_entries) => {
-                *old_entries =
-                    new_entries.into_iter().map(|(key, value)| (key, value.into())).collect()
-            }
-            Self::Values(old_entries) => *old_entries = new_entries,
-        }
-    }
-
-    /// Returns the length of internal [Vec].
-    fn len(&self) -> usize {
-        match self {
-            Self::RawValues(entries) => entries.len(),
-            Self::Values(entries) => entries.len(),
-        }
-    }
-
-    /// Returns an iterator over keys of the internal [Vec]. For both [`Entries::RawValues`] and
-    /// [`Entries::Values`], this iterator will yield [`Table::Key`].
-    const fn iter_keys(&self) -> EntriesKeyIter<'_, T> {
-        EntriesKeyIter { entries: self, index: 0 }
-    }
-}
-
-struct EntriesKeyIter<'a, T: Table> {
-    entries: &'a Entries<T>,
-    index: usize,
-}
-
-impl<'a, T: Table> Iterator for EntriesKeyIter<'a, T> {
-    type Item = &'a T::Key;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        let item = match self.entries {
-            Entries::RawValues(values) => values.get(self.index).map(|(key, _)| key),
-            Entries::Values(values) => values.get(self.index).map(|(key, _)| key),
-        };
-        self.index += 1;
-
-        item
-    }
-}
-
-pub(crate) struct DbListTUI<F, T: Table>
-where
-    F: FnMut(usize, usize) -> Vec<TableRow<T>>,
-{
+pub(crate) struct DbListTUI<'a> {
     /// Fetcher for the next page of items.
     ///
     /// The fetcher is passed the index of the first item to fetch, and the number of items to
-    /// fetch from that item.
-    fetch: F,
+    /// fetch from that item. It returns the entries as pairs of the formatted key and the value
+    /// serialized as JSON.
+    fetch: Box<dyn FnMut(usize, usize) -> Vec<(String, String)> + 'a>,
     /// Skip N indices of the key list in the DB.
     skip: usize,
     /// The amount of entries to show per page
@@ -125,20 +55,16 @@ where
     /// The state of the key list.
     list_state: ListState,
     /// Entries to show in the TUI.
-    entries: Entries<T>,
+    entries: Vec<(String, String)>,
 }
 
-impl<F, T: Table> DbListTUI<F, T>
-where
-    F: FnMut(usize, usize) -> Vec<TableRow<T>>,
-{
+impl<'a> DbListTUI<'a> {
     /// Create a new database list TUI
     pub(crate) fn new(
-        fetch: F,
+        fetch: Box<dyn FnMut(usize, usize) -> Vec<(String, String)> + 'a>,
         skip: usize,
         count: usize,
         total_entries: usize,
-        raw: bool,
     ) -> Self {
         Self {
             fetch,
@@ -148,7 +74,7 @@ where
             mode: ViewMode::Normal,
             input: String::new(),
             list_state: ListState::default(),
-            entries: Entries::new_with_raw_values(raw),
+            entries: Vec::new(),
         }
     }
 
@@ -200,7 +126,7 @@ where
 
     /// Fetch the current page
     fn fetch_page(&mut self) {
-        self.entries.set((self.fetch)(self.skip, self.count));
+        self.entries = (self.fetch)(self.skip, self.count);
         self.reset();
     }
 
@@ -235,13 +161,12 @@ where
 }
 
 /// Run the event loop
-fn event_loop<B: Backend, F, T: Table>(
+fn event_loop<B: Backend>(
     terminal: &mut Terminal<B>,
-    app: &mut DbListTUI<F, T>,
+    app: &mut DbListTUI<'_>,
     tick_rate: Duration,
 ) -> io::Result<()>
 where
-    F: FnMut(usize, usize) -> Vec<TableRow<T>>,
     io::Error: From<B::Error>,
 {
     let mut last_tick = Instant::now();
@@ -268,10 +193,7 @@ where
 }
 
 /// Handle incoming events
-fn handle_event<F, T: Table>(app: &mut DbListTUI<F, T>, event: Event) -> io::Result<bool>
-where
-    F: FnMut(usize, usize) -> Vec<TableRow<T>>,
-{
+fn handle_event(app: &mut DbListTUI<'_>, event: Event) -> io::Result<bool> {
     if app.mode == ViewMode::GoToPage {
         if let Event::Key(key) = event {
             match key.code {
@@ -328,10 +250,7 @@ where
 }
 
 /// Render the UI
-fn ui<F, T: Table>(f: &mut Frame<'_>, app: &mut DbListTUI<F, T>)
-where
-    F: FnMut(usize, usize) -> Vec<TableRow<T>>,
-{
+fn ui(f: &mut Frame<'_>, app: &mut DbListTUI<'_>) {
     let outer_chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([Constraint::Percentage(95), Constraint::Percentage(5)].as_ref())
@@ -348,10 +267,10 @@ where
 
         let formatted_keys = app
             .entries
-            .iter_keys()
+            .iter()
             .enumerate()
-            .map(|(i, k)| {
-                ListItem::new(format!("[{:0>width$}]: {k:?}", i + app.skip, width = key_length))
+            .map(|(i, (k, _))| {
+                ListItem::new(format!("[{:0>width$}]: {k}", i + app.skip, width = key_length))
             })
             .collect::<Vec<_>>();
 
@@ -370,20 +289,8 @@ where
         let value_display = Paragraph::new(
             app.list_state
                 .selected()
-                .and_then(|selected| {
-                    let maybe_serialized = match &app.entries {
-                        Entries::RawValues(entries) => {
-                            entries.get(selected).map(|(_, v)| serde_json::to_string(v.raw_value()))
-                        }
-                        Entries::Values(entries) => {
-                            entries.get(selected).map(|(_, v)| serde_json::to_string_pretty(v))
-                        }
-                    };
-                    maybe_serialized.map(|ser| {
-                        ser.unwrap_or_else(|error| format!("Error serializing value: {error}"))
-                    })
-                })
-                .unwrap_or_else(|| "No value selected".to_string()),
+                .and_then(|selected| app.entries.get(selected))
+                .map_or("No value selected", |(_, value)| value),
         )
         .block(Block::default().borders(Borders::ALL).title("Value (JSON)"))
         .wrap(Wrap { trim: false })
