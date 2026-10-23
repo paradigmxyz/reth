@@ -16,7 +16,9 @@ use alloy_rpc_types_engine::{
 };
 use reth_ethereum_primitives::EthPrimitives;
 use reth_payload_primitives::BuiltPayload;
-use reth_primitives_traits::{NodePrimitives, RecoveredBlock, SealedBlock};
+use reth_primitives_traits::{
+    AlloyBlockHeader, Block, NodePrimitives, RecoveredBlock, SealedBlock,
+};
 
 use crate::BuiltPayloadConversionError;
 
@@ -92,9 +94,14 @@ impl<N: NodePrimitives> EthBuiltPayload<N> {
         self.sidecars = sidecars.into();
         self
     }
+
+    #[allow(missing_docs)]
+    pub const fn execution_requests(&self) -> Option<&Requests> {
+        self.requests.as_ref()
+    }
 }
 
-impl EthBuiltPayload {
+impl<N: NodePrimitives> EthBuiltPayload<N> {
     /// Try converting built payload into [`ExecutionPayloadEnvelopeV3`].
     ///
     /// Returns an error if the payload contains non EIP-4844 sidecar.
@@ -112,7 +119,7 @@ impl EthBuiltPayload {
         Ok(ExecutionPayloadEnvelopeV3 {
             execution_payload: ExecutionPayloadV3::from_block_unchecked(
                 block.hash(),
-                &Arc::unwrap_or_clone(block).into_block(),
+                &Arc::unwrap_or_clone(block).into_block().into_ethereum_block(),
             ),
             block_value: fees,
             // From the engine API spec:
@@ -153,7 +160,7 @@ impl EthBuiltPayload {
         Ok(ExecutionPayloadEnvelopeV5 {
             execution_payload: ExecutionPayloadV3::from_block_unchecked(
                 block.hash(),
-                &Arc::unwrap_or_clone(block).into_block(),
+                &Arc::unwrap_or_clone(block).into_block().into_ethereum_block(),
             ),
             block_value: fees,
             // From the engine API spec:
@@ -189,7 +196,7 @@ impl EthBuiltPayload {
         Ok(ExecutionPayloadEnvelopeV6 {
             execution_payload: ExecutionPayloadV4::from_block_unchecked_with_bal(
                 block.hash(),
-                &Arc::unwrap_or_clone(block).into_block(),
+                &Arc::unwrap_or_clone(block).into_block().into_ethereum_block(),
                 block_access_list,
             ),
             block_value: fees,
@@ -211,7 +218,7 @@ impl EthBuiltPayload {
     pub fn into_execution_data(self) -> ExecutionData {
         let Self { block, requests, block_access_list, .. } = self;
         let block_hash = block.hash();
-        let block = Arc::unwrap_or_clone(block).into_block();
+        let block = Arc::unwrap_or_clone(block).into_block().into_ethereum_block();
 
         let (payload, sidecar) = ExecutionPayload::from_block_unchecked_with_extras(
             block_hash,
@@ -220,7 +227,7 @@ impl EthBuiltPayload {
         );
 
         let sidecar = if let Some(requests) = requests {
-            block.header.parent_beacon_block_root.map_or(sidecar, |parent_beacon_block_root| {
+            block.header.parent_beacon_block_root().map_or(sidecar, |parent_beacon_block_root| {
                 ExecutionPayloadSidecar::v4(
                     CancunPayloadFields {
                         parent_beacon_block_root,
@@ -262,64 +269,64 @@ impl<N: NodePrimitives> BuiltPayload for EthBuiltPayload<N> {
 }
 
 // V1 engine_getPayloadV1 response
-impl From<EthBuiltPayload> for ExecutionPayloadV1 {
-    fn from(value: EthBuiltPayload) -> Self {
+impl<N: NodePrimitives> From<EthBuiltPayload<N>> for ExecutionPayloadV1 {
+    fn from(value: EthBuiltPayload<N>) -> Self {
         Self::from_block_unchecked(
             value.block().hash(),
-            &Arc::unwrap_or_clone(value.block).into_block(),
+            &Arc::unwrap_or_clone(value.block).into_block().into_ethereum_block(),
         )
     }
 }
 
 // V2 engine_getPayloadV2 response
-impl From<EthBuiltPayload> for ExecutionPayloadEnvelopeV2 {
-    fn from(value: EthBuiltPayload) -> Self {
+impl<N: NodePrimitives> From<EthBuiltPayload<N>> for ExecutionPayloadEnvelopeV2 {
+    fn from(value: EthBuiltPayload<N>) -> Self {
         let EthBuiltPayload { block, fees, .. } = value;
 
         Self {
             block_value: fees,
             execution_payload: ExecutionPayloadFieldV2::from_block_unchecked(
                 block.hash(),
-                &Arc::unwrap_or_clone(block).into_block(),
+                &Arc::unwrap_or_clone(block).into_block().into_ethereum_block(),
             ),
         }
     }
 }
 
-impl TryFrom<EthBuiltPayload> for ExecutionPayloadEnvelopeV3 {
+impl<N: NodePrimitives> TryFrom<EthBuiltPayload<N>> for ExecutionPayloadEnvelopeV3 {
     type Error = BuiltPayloadConversionError;
 
-    fn try_from(value: EthBuiltPayload) -> Result<Self, Self::Error> {
+    fn try_from(value: EthBuiltPayload<N>) -> Result<Self, Self::Error> {
         value.try_into_v3()
     }
 }
 
-impl TryFrom<EthBuiltPayload> for ExecutionPayloadEnvelopeV4 {
+impl<N: NodePrimitives> TryFrom<EthBuiltPayload<N>> for ExecutionPayloadEnvelopeV4 {
     type Error = BuiltPayloadConversionError;
 
-    fn try_from(value: EthBuiltPayload) -> Result<Self, Self::Error> {
+    fn try_from(value: EthBuiltPayload<N>) -> Result<Self, Self::Error> {
         value.try_into_v4()
     }
 }
 
-impl TryFrom<EthBuiltPayload> for ExecutionPayloadEnvelopeV5 {
+impl<N: NodePrimitives> TryFrom<EthBuiltPayload<N>> for ExecutionPayloadEnvelopeV5 {
     type Error = BuiltPayloadConversionError;
 
-    fn try_from(value: EthBuiltPayload) -> Result<Self, Self::Error> {
+    fn try_from(value: EthBuiltPayload<N>) -> Result<Self, Self::Error> {
         value.try_into_v5()
     }
 }
 
-impl TryFrom<EthBuiltPayload> for ExecutionPayloadEnvelopeV6 {
+impl<N: NodePrimitives> TryFrom<EthBuiltPayload<N>> for ExecutionPayloadEnvelopeV6 {
     type Error = BuiltPayloadConversionError;
 
-    fn try_from(value: EthBuiltPayload) -> Result<Self, Self::Error> {
+    fn try_from(value: EthBuiltPayload<N>) -> Result<Self, Self::Error> {
         value.try_into_v6()
     }
 }
 
-impl From<EthBuiltPayload> for ExecutionData {
-    fn from(value: EthBuiltPayload) -> Self {
+impl<N: NodePrimitives> From<EthBuiltPayload<N>> for ExecutionData {
+    fn from(value: EthBuiltPayload<N>) -> Self {
         value.into_execution_data()
     }
 }
@@ -422,7 +429,7 @@ impl From<alloc::vec::IntoIter<BlobTransactionSidecarEip7594>> for BlobSidecars 
 mod tests {
     use super::*;
     use alloy_primitives::B256;
-    use reth_primitives_traits::{Block as _, RecoveredBlock};
+    use reth_primitives_traits::RecoveredBlock;
 
     #[test]
     fn into_execution_data_preserves_requests() {
@@ -433,7 +440,7 @@ mod tests {
         block.header.parent_beacon_block_root = Some(parent_beacon_block_root);
         block.header.requests_hash = Some(requests.requests_hash());
 
-        let payload = EthBuiltPayload::new(
+        let payload: EthBuiltPayload = EthBuiltPayload::new(
             Arc::new(RecoveredBlock::new_sealed(block.seal_slow(), vec![])),
             U256::ZERO,
             Some(requests.clone()),
@@ -457,7 +464,7 @@ mod tests {
         block.header.parent_beacon_block_root = Some(B256::ZERO);
         block.header.block_access_list_hash = Some(B256::ZERO);
 
-        let payload = EthBuiltPayload::new(
+        let payload: EthBuiltPayload = EthBuiltPayload::new(
             Arc::new(RecoveredBlock::new_sealed(block.seal_slow(), vec![])),
             U256::ZERO,
             None,

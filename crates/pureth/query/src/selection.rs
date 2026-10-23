@@ -343,6 +343,14 @@ fn check_whole_verification_budget(
     value: &[u8],
     limit: usize,
 ) -> Result<(), SelectionError> {
+    whole_verification_work(kind, value, limit).map(|_| ())
+}
+
+fn whole_verification_work(
+    kind: Kind,
+    value: &[u8],
+    limit: usize,
+) -> Result<usize, SelectionError> {
     let mut bytes = 0;
     add(
         &mut bytes,
@@ -351,7 +359,61 @@ fn check_whole_verification_budget(
         "source bytes",
     )?;
     add(&mut bytes, 4096, limit, "source bytes")?;
-    whole_structure_budget(kind, value, &mut bytes, limit)
+    whole_structure_budget(kind, value, &mut bytes, limit)?;
+    Ok(bytes)
+}
+
+pub(crate) fn receipt_verification_work(
+    value: &[u8],
+    limit: usize,
+) -> Result<usize, SelectionError> {
+    let selector = *value.first().ok_or(SelectionError::InvalidValue)?;
+    whole_verification_work(Kind::Receipt(selector), value, limit)
+}
+
+pub(crate) fn select_receipt_with_usage(
+    snapshot: &Eip6466ReceiptSnapshot,
+    index: u64,
+    limits: SelectionLimits,
+    cancelled: &AtomicBool,
+) -> Result<(SelectionResponse, usize), SelectionError> {
+    let source = source_budget(snapshot, limits, cancelled)?;
+    let value = supplied_whole(snapshot, &[PathToken::Index(index)])?;
+    let verification = receipt_verification_work(value, limits.source_bytes)?;
+    let mut work = source;
+    add(&mut work, verification, limits.source_bytes, "source bytes")?;
+    add(
+        &mut work,
+        value.len().checked_mul(2).ok_or(SelectionError::LimitExceeded("source bytes"))?,
+        limits.source_bytes,
+        "source bytes",
+    )?;
+    let available = limits.source_bytes - work;
+    let bounded = SelectionLimits {
+        source_bytes: limits.source_bytes - verification,
+        witness_hashes: limits.witness_hashes.min(available / (2 * multiproof::PROOF_NODE_BYTES)),
+        ..limits
+    };
+    let request = SelectionRequest {
+        include_proof: true,
+        selections: vec![ReceiptSelection {
+            path: format!("[{index}]"),
+            operation: SelectionOperation::Whole {},
+        }],
+    };
+    let response = select_with_source(
+        snapshot,
+        &request,
+        bounded,
+        cancelled,
+        SelectionProofFormat::Multiproof,
+        source,
+    )?;
+    let proof = response.multiproof.as_ref().ok_or(SelectionError::InvalidProof)?;
+    let proof = multiproof::proof_work(proof, limits)?;
+    add(&mut work, proof, limits.source_bytes, "source bytes")?;
+    add(&mut work, proof, limits.source_bytes, "source bytes")?;
+    Ok((response, work))
 }
 
 fn whole_root(kind: Kind, value: &[u8], limit: usize) -> Result<B256, SelectionError> {

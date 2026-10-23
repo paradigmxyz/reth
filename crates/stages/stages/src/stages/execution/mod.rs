@@ -342,9 +342,11 @@ where
             let fetch_block_start = Instant::now();
 
             // we need the block's transactions but we don't need the transaction hashes
-            let block = provider
-                .recovered_block(block_number.into(), TransactionVariant::NoHash)?
-                .ok_or_else(|| ProviderError::HeaderNotFound(block_number.into()))?;
+            let block = Arc::new(
+                provider
+                    .recovered_block(block_number.into(), TransactionVariant::NoHash)?
+                    .ok_or_else(|| ProviderError::HeaderNotFound(block_number.into()))?,
+            );
 
             fetch_block_duration += fetch_block_start.elapsed();
 
@@ -374,13 +376,23 @@ where
             }
             let bal_hash = built_bal.as_ref().map(|bal| bal.compute_hash_with_buf(&mut bal_buf));
 
-            if let Err(err) =
-                self.consensus.validate_block_post_execution(&block, &result, None, bal_hash)
-            {
+            if let Err(err) = self.consensus.validate_block_post_execution_with_data(
+                &block,
+                &result,
+                None,
+                bal_hash,
+                built_bal.as_ref(),
+            ) {
+                if matches!(&err, reth_consensus::ConsensusError::Unavailable(_)) {
+                    return Err(StageError::Recoverable(Box::new(err)));
+                }
                 return Err(StageError::Block {
                     block: Box::new(block.block_with_parent()),
                     error: BlockErrorKind::Validation(err),
                 })
+            }
+            if block.requests_hash().is_some() {
+                provider.write_execution_requests(block.num_hash(), &result.requests)?;
             }
             results.push(result);
 
@@ -407,7 +419,7 @@ where
 
             // If we have ExExes we need to save the block in memory for later
             if self.exex_manager_handle.has_exexs() {
-                blocks.push(block);
+                blocks.push(Arc::unwrap_or_clone(block));
             }
 
             // Check if we should commit now

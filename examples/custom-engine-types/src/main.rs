@@ -123,10 +123,10 @@ impl PayloadTypes for CustomEngineTypes {
                 <<Self::BuiltPayload as reth_ethereum::node::api::BuiltPayload>::Primitives as reth_ethereum::node::api::NodePrimitives>::Block,
             >,
         _bal: Option<Bytes>,
-    ) -> ExecutionData {
+    ) -> Result<ExecutionData, reth_ethereum::node::api::NewPayloadError> {
         let (payload, sidecar) =
             ExecutionPayload::from_block_unchecked(block.hash(), &block.into_block());
-        ExecutionData { payload, sidecar }
+        Ok(ExecutionData { payload, sidecar })
     }
 }
 

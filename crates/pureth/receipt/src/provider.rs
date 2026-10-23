@@ -118,7 +118,7 @@ impl ProviderSnapshot {
         self.receipt_snapshot
     }
 
-    pub const fn root(&self) -> B256 {
+    pub fn root(&self) -> B256 {
         self.receipt_snapshot.root()
     }
 }

@@ -183,6 +183,17 @@ where
                         safe_block_hash: last_forkchoice_state.safe_block_hash,
                         head_block_hash: reorg_block.hash(),
                     };
+                    let reorg_payload = match T::block_to_payload(reorg_block, encoded_bal) {
+                        Ok(payload) => payload,
+                        Err(error) => {
+                            error!(target: "engine::stream::reorg", %error, "Cannot convert reorg payload");
+                            return Poll::Ready(Some(BeaconEngineMessage::NewPayload {
+                                cause,
+                                payload,
+                                tx,
+                            }))
+                        }
+                    };
 
                     let (reorg_payload_tx, reorg_payload_rx) = oneshot::channel();
                     let (reorg_fcu_tx, reorg_fcu_rx) = oneshot::channel();
@@ -197,7 +208,7 @@ where
                         // Reorg payload
                         BeaconEngineMessage::NewPayload {
                             cause: cause.clone(),
-                            payload: T::block_to_payload(reorg_block, encoded_bal),
+                            payload: reorg_payload,
                             tx: reorg_payload_tx,
                         },
                         // Reorg forkchoice state

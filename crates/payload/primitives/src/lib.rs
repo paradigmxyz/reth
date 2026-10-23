@@ -54,7 +54,7 @@ pub trait PayloadTypes: Send + Sync + Unpin + core::fmt::Debug + Clone + 'static
             <<Self::BuiltPayload as BuiltPayload>::Primitives as NodePrimitives>::Block,
         >,
         bal: Option<Bytes>,
-    ) -> Self::ExecutionData;
+    ) -> Result<Self::ExecutionData, NewPayloadError>;
 }
 
 /// Validates the timestamp depending on the version called:

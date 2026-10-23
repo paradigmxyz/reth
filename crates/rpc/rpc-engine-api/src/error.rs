@@ -127,6 +127,7 @@ impl From<EngineApiError> for jsonrpsee_types::error::ErrorObject<'static> {
                     VersionSpecificValidationError::NoBlockAccessListPostAmsterdam |
                     VersionSpecificValidationError::HasSlotNumberPreAmsterdam |
                     VersionSpecificValidationError::NoSlotNumberPostAmsterdam |
+                    VersionSpecificValidationError::NoTargetGasLimitPostAmsterdam |
                     VersionSpecificValidationError::SlotNumberNotSupported,
                 ),
             ) |

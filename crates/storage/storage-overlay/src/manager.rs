@@ -79,6 +79,12 @@ impl<N: NodePrimitives> std::fmt::Debug for OverlayManager<N> {
 }
 
 impl<N: NodePrimitives> OverlayManager<N> {
+    /// Pins one retained executed block without rebuilding its parent chain.
+    /// Graph membership alone does not imply canonicality.
+    pub fn executed_block(&self, hash: B256) -> Option<ExecutedBlock<N>> {
+        self.blocks.get(&hash).map(|block| block.clone())
+    }
+
     /// Create a new [`OverlayManager`] backed by the given worker pool.
     #[cfg(feature = "rayon")]
     pub fn new(worker_pool: Arc<WorkerPool>) -> Self {

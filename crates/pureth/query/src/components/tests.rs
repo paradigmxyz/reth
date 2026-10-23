@@ -354,6 +354,8 @@ fn transaction_and_bal_component_links_verify_against_independent_payload_roots(
         for component in [
             ComponentSnapshot::Transactions(&payload.components().transactions),
             ComponentSnapshot::BlockAccessList(&payload.components().block_access_list),
+            ComponentSnapshot::Withdrawals(&payload.components().withdrawals),
+            ComponentSnapshot::ExecutionRequests(&payload.components().requests),
         ] {
             let proof =
                 link_component(component, payload.summary(), SelectionLimits::default()).unwrap();
@@ -385,6 +387,56 @@ fn transaction_and_bal_component_links_verify_against_independent_payload_roots(
             ]),
         );
         assert_eq!(response.selection.results[0].values_ssz[0].as_ref(), bal.serialized());
+        let snapshot = ComponentSnapshot::ExecutionPayload(&payload);
+        let whole =
+            request(&[(".", SelectionOperation::Whole {}), (".", SelectionOperation::Whole {})]);
+        let response = checked(snapshot, &whole);
+        assert_eq!(response.selection.results[0], response.selection.results[1]);
+        assert_eq!(response.selection.results[0].values_ssz[0].as_ref(), payload.serialized());
+        for offset in [0, 88, 320, 356] {
+            let mut corrupted = response.clone();
+            let mut value = corrupted.selection.results[0].values_ssz[0].to_vec();
+            value[offset] ^= 1;
+            corrupted.selection.results[0].values_ssz[0] = Bytes::from(value);
+            assert!(verify_component_selection(
+                ComponentObject::ExecutionPayload,
+                &whole,
+                &corrupted,
+                payload.root(),
+                SelectionLimits::default()
+            )
+            .is_err());
+        }
+        let mut corrupted = response;
+        corrupted.selection.results[0].values_ssz[0] = bytes(&case["summary"]);
+        assert!(verify_component_selection(
+            ComponentObject::ExecutionPayload,
+            &whole,
+            &corrupted,
+            payload.root(),
+            SelectionLimits::default()
+        )
+        .is_err());
+        for (path, operation) in [
+            (".state_root", SelectionOperation::Whole {}),
+            (".", SelectionOperation::Value {}),
+            (".", SelectionOperation::Length {}),
+        ] {
+            assert!(select_component(
+                snapshot,
+                &request(&[(path, operation)]),
+                SelectionLimits::default()
+            )
+            .is_err());
+        }
+        assert_eq!(
+            select_component(
+                snapshot,
+                &whole,
+                SelectionLimits { source_bytes: 8192, ..Default::default() }
+            ),
+            Err(SelectionError::LimitExceeded("source bytes"))
+        );
     }
 }
 

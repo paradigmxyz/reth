@@ -9,7 +9,7 @@ use alloy_primitives::{Bytes, B256};
 use pureth_withdrawal_root::WithdrawalSnapshot;
 use reth_pureth_block::{
     BlockAccessListSnapshot, ExecutionPayloadSnapshot, ExecutionRequestsSnapshot,
-    ExecutionSummarySnapshot,
+    ExecutionSummarySnapshot, PayloadError, PayloadLimits,
 };
 use reth_pureth_ssz::{merkleize_fixed, merkleize_progressive, mix_in_length, RetainedNode};
 use reth_pureth_transaction::TransactionSnapshot;
@@ -29,6 +29,7 @@ pub enum ComponentObject {
     Withdrawals,
     ExecutionRequests,
     ExecutionSummary,
+    ExecutionPayload,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -38,6 +39,7 @@ pub enum ComponentSnapshot<'a> {
     Withdrawals(&'a WithdrawalSnapshot),
     ExecutionRequests(&'a ExecutionRequestsSnapshot),
     ExecutionSummary(&'a ExecutionSummarySnapshot),
+    ExecutionPayload(&'a ExecutionPayloadSnapshot),
 }
 
 impl<'a> ComponentSnapshot<'a> {
@@ -54,6 +56,7 @@ impl<'a> ComponentSnapshot<'a> {
             ComponentObject::Withdrawals => Self::Withdrawals(&components.withdrawals),
             ComponentObject::ExecutionRequests => Self::ExecutionRequests(&components.requests),
             ComponentObject::ExecutionSummary => Self::ExecutionSummary(payload.summary()),
+            ComponentObject::ExecutionPayload => Self::ExecutionPayload(payload),
         }
     }
 
@@ -64,6 +67,7 @@ impl<'a> ComponentSnapshot<'a> {
             Self::Withdrawals(_) => ComponentObject::Withdrawals,
             Self::ExecutionRequests(_) => ComponentObject::ExecutionRequests,
             Self::ExecutionSummary(_) => ComponentObject::ExecutionSummary,
+            Self::ExecutionPayload(_) => ComponentObject::ExecutionPayload,
         }
     }
     pub const fn tree(self) -> &'a RetainedNode {
@@ -73,6 +77,7 @@ impl<'a> ComponentSnapshot<'a> {
             Self::Withdrawals(value) => value.tree(),
             Self::ExecutionRequests(value) => value.tree(),
             Self::ExecutionSummary(value) => value.tree(),
+            Self::ExecutionPayload(value) => value.summary().tree(),
         }
     }
     pub fn serialized(self) -> &'a [u8] {
@@ -82,6 +87,7 @@ impl<'a> ComponentSnapshot<'a> {
             Self::Withdrawals(value) => value.serialized(),
             Self::ExecutionRequests(value) => value.serialized(),
             Self::ExecutionSummary(value) => value.serialized(),
+            Self::ExecutionPayload(value) => value.serialized(),
         }
     }
 }
@@ -106,7 +112,9 @@ fn link_request(object: ComponentObject) -> Result<SelectionRequest, SelectionEr
         ComponentObject::Transactions => ".transactions_root",
         ComponentObject::Withdrawals => ".withdrawals_root",
         ComponentObject::ExecutionRequests => ".requests_root",
-        ComponentObject::ExecutionSummary => return Err(SelectionError::UnsupportedOperation),
+        ComponentObject::ExecutionSummary | ComponentObject::ExecutionPayload => {
+            return Err(SelectionError::UnsupportedOperation)
+        }
     };
     Ok(SelectionRequest {
         include_proof: true,
@@ -178,6 +186,7 @@ enum Record {
 
 #[derive(Clone, Copy)]
 enum Kind {
+    Payload,
     Inactive,
     Union { authorization: bool },
     ProgressiveBytes,
@@ -205,6 +214,7 @@ impl ComponentObject {
             Self::Withdrawals => Kind::List(Record::Withdrawal, 0),
             Self::ExecutionRequests => Kind::Record(Record::Requests),
             Self::ExecutionSummary => Kind::Record(Record::Summary),
+            Self::ExecutionPayload => Kind::Payload,
         }
     }
 }
@@ -632,6 +642,7 @@ fn resolve(
                 };
             }
             Kind::Scalar(_) |
+            Kind::Payload |
             Kind::Byte { .. } |
             Kind::ProgressiveByte { .. } |
             Kind::Inactive |
@@ -641,6 +652,7 @@ fn resolve(
                 return Err(SelectionError::InvalidPath)
             }
             Kind::Scalar(_) |
+            Kind::Payload |
             Kind::Bytes(_) |
             Kind::Byte { .. } |
             Kind::ProgressiveByte { .. } |
@@ -735,6 +747,17 @@ fn root_of(
 ) -> Result<B256, SelectionError> {
     add(work, bytes.len(), limit, "source bytes")?;
     let node = match kind {
+        Kind::Payload => {
+            payload_work(bytes, work, limit)?;
+            return ExecutionPayloadSnapshot::root_from_ssz(
+                bytes,
+                PayloadLimits { bytes: limit, ..Default::default() },
+            )
+            .map_err(|error| match error {
+                PayloadError::LimitExceeded(name) => SelectionError::LimitExceeded(name),
+                _ => SelectionError::InvalidValue,
+            });
+        }
         Kind::Inactive => {
             if !bytes.is_empty() {
                 return Err(SelectionError::InvalidValue);
@@ -856,6 +879,7 @@ fn whole_work(
     }
     add(work, bytes.len(), limit, "source bytes")?;
     match kind {
+        Kind::Payload => payload_work(bytes, work, limit),
         Kind::Inactive => {
             if bytes.is_empty() {
                 Ok(())
@@ -933,6 +957,15 @@ fn whole_work(
             Err(SelectionError::UnsupportedOperation)
         }
     }
+}
+
+fn payload_work(bytes: &[u8], work: &mut usize, limit: usize) -> Result<(), SelectionError> {
+    let bound = bytes
+        .len()
+        .checked_mul(128)
+        .and_then(|bytes| bytes.checked_add(8192))
+        .ok_or(SelectionError::LimitExceeded("source bytes"))?;
+    add(work, bound, limit, "source bytes")
 }
 
 fn value(
@@ -1018,10 +1051,18 @@ fn evaluate(
     limits: SelectionLimits,
 ) -> Result<Vec<Bytes>, SelectionError> {
     let path = tokens(&selection.path)?;
+    if object == ComponentObject::ExecutionPayload &&
+        (!path.is_empty() || !matches!(selection.operation, SelectionOperation::Whole {}))
+    {
+        return Err(SelectionError::UnsupportedOperation);
+    }
     let target = resolve(object, &path, read, limits)?;
     let mut one = |path: &[PathToken], target: Target| {
         add(targets, 1, limits.targets, "targets")?;
-        if matches!(target.kind, Kind::Record(_) | Kind::List(..) | Kind::Union { .. }) {
+        if matches!(
+            target.kind,
+            Kind::Payload | Kind::Record(_) | Kind::List(..) | Kind::Union { .. }
+        ) {
             let bytes = whole(path, target.kind)?;
             let node = read(target.index)?;
             if let Some(work) = work.as_deref_mut() &&
@@ -1149,6 +1190,15 @@ pub fn select_component_with_cancel(
     limits: SelectionLimits,
     cancelled: &AtomicBool,
 ) -> Result<ComponentResponse, SelectionError> {
+    select_component_with_usage(snapshot, request, limits, cancelled).map(|(response, _)| response)
+}
+
+pub(crate) fn select_component_with_usage(
+    snapshot: ComponentSnapshot<'_>,
+    request: &SelectionRequest,
+    limits: SelectionLimits,
+    cancelled: &AtomicBool,
+) -> Result<(ComponentResponse, usize), SelectionError> {
     check_request(request, limits)?;
     let mut source = snapshot
         .serialized()
@@ -1295,7 +1345,18 @@ pub fn select_component_with_cancel(
         },
     };
     encoded_size(&response, limits.response_bytes, "response bytes")?;
-    Ok(response)
+    let proof = response
+        .selection
+        .multiproof
+        .as_ref()
+        .map_or(Ok(0), |proof| multiproof::proof_work(proof, limits))?;
+    let mut work = source;
+    add(&mut work, value_bytes, limits.source_bytes, "source bytes")?;
+    add(&mut work, value_bytes, limits.source_bytes, "source bytes")?;
+    add(&mut work, verification_work, limits.source_bytes, "source bytes")?;
+    add(&mut work, proof, limits.source_bytes, "source bytes")?;
+    add(&mut work, proof, limits.source_bytes, "source bytes")?;
+    Ok((response, work))
 }
 
 pub fn verify_component_selection(
@@ -1305,23 +1366,47 @@ pub fn verify_component_selection(
     expected_root: B256,
     limits: SelectionLimits,
 ) -> Result<(), SelectionError> {
+    if response.object != object {
+        return Err(SelectionError::InvalidContext);
+    }
+    encoded_size(response, limits.response_bytes, "response bytes")?;
+    verify_component_response(object, request, &response.selection, expected_root, limits)
+}
+
+pub(crate) fn verify_component_response(
+    object: ComponentObject,
+    request: &SelectionRequest,
+    response: &SelectionResponse,
+    expected_root: B256,
+    limits: SelectionLimits,
+) -> Result<(), SelectionError> {
+    verify_component_response_with_usage(object, request, response, expected_root, limits)
+        .map(|_| ())
+}
+
+pub(crate) fn verify_component_response_with_usage(
+    object: ComponentObject,
+    request: &SelectionRequest,
+    response: &SelectionResponse,
+    expected_root: B256,
+    limits: SelectionLimits,
+) -> Result<usize, SelectionError> {
     check_request(request, limits)?;
     if !request.include_proof {
         return Err(SelectionError::Unverified);
     }
-    if response.object != object ||
-        response.selection.root != expected_root ||
-        response.selection.results.len() != request.selections.len() ||
-        response.selection.proof_format != Some(SelectionProofFormat::Multiproof)
+    if response.root != expected_root ||
+        response.results.len() != request.selections.len() ||
+        response.proof_format != Some(SelectionProofFormat::Multiproof)
     {
         return Err(SelectionError::InvalidContext);
     }
     encoded_size(response, limits.response_bytes, "response bytes")?;
-    let proof = response.selection.multiproof.as_ref().ok_or(SelectionError::InvalidProof)?;
+    let proof = response.multiproof.as_ref().ok_or(SelectionError::InvalidProof)?;
     let mut reads = multiproof::ProofReads::new(proof, limits)?;
     let mut targets = 0;
     let mut work = multiproof::proof_work(proof, limits)?;
-    for result in &response.selection.results {
+    for result in &response.results {
         for value in &result.values_ssz {
             add(
                 &mut work,
@@ -1331,7 +1416,7 @@ pub fn verify_component_selection(
             )?;
         }
     }
-    for (selection, result) in request.selections.iter().zip(&response.selection.results) {
+    for (selection, result) in request.selections.iter().zip(&response.results) {
         if result.witnesses.is_some() || result.matches.is_some() {
             return Err(SelectionError::InvalidProof);
         }
@@ -1350,7 +1435,8 @@ pub fn verify_component_selection(
             return Err(SelectionError::InvalidValue);
         }
     }
-    reads.finish(proof, expected_root, limits)
+    reads.finish(proof, expected_root, limits)?;
+    Ok(work)
 }
 
 #[cfg(test)]

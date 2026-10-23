@@ -3,6 +3,7 @@
 
 use std::sync::Arc;
 
+use super::SpawnBlocking;
 use crate::{EthApiTypes, RpcNodeCoreExt, RpcReceipt};
 use alloy_consensus::{transaction::TransactionMeta, TxReceipt};
 use futures::Future;
@@ -17,7 +18,11 @@ use reth_storage_api::{ProviderBlock, ProviderReceipt, ProviderTx};
 ///
 /// Behaviour shared by several `eth_` RPC methods, not exclusive to `eth_` receipts RPC methods.
 pub trait LoadReceipt:
-    EthApiTypes<RpcConvert: RpcConvert<Primitives = Self::Primitives>> + RpcNodeCoreExt + Send + Sync
+    EthApiTypes<RpcConvert: RpcConvert<Primitives = Self::Primitives>>
+    + RpcNodeCoreExt
+    + SpawnBlocking
+    + Send
+    + Sync
 {
     /// Helper method for `eth_getBlockReceipts` and `eth_getTransactionReceipt`.
     ///
@@ -62,24 +67,35 @@ pub trait LoadReceipt:
                 }
             };
 
-            let (gas_used, next_log_index) =
-                calculate_gas_used_and_next_log_index(meta.index, &all_receipts);
-
-            let inputs = vec![ConvertReceiptInput {
-                tx: tx.as_recovered_ref(),
-                gas_used: receipt.cumulative_gas_used() - gas_used,
-                receipt,
-                next_log_index,
-                meta,
-            }];
-            let mut receipts = match block {
-                Some(block) => {
-                    self.converter().convert_receipts_with_block(inputs, block.sealed_block())
-                }
-                None => self.converter().convert_receipts(inputs),
-            }?;
-
-            Ok(receipts.pop().unwrap())
+            let permit = self
+                .acquire_owned_blocking_io()
+                .await
+                .map_err(|_| EthApiError::InternalEthError)?;
+            self.spawn_blocking_io(move |this| {
+                let _permit = permit;
+                let (gas_used, next_log_index) =
+                    calculate_gas_used_and_next_log_index(meta.index, &all_receipts);
+                let inputs = vec![ConvertReceiptInput {
+                    tx: tx.as_recovered_ref(),
+                    gas_used: receipt
+                        .cumulative_gas_used()
+                        .checked_sub(gas_used)
+                        .ok_or(EthApiError::InternalEthError)?,
+                    receipt,
+                    next_log_index,
+                    meta,
+                }];
+                let mut receipts = match block {
+                    Some(block) => this.converter().convert_receipts_with_context(
+                        inputs,
+                        block.sealed_block(),
+                        false,
+                    ),
+                    None => this.converter().convert_receipts(inputs),
+                }?;
+                receipts.pop().ok_or_else(|| EthApiError::InternalEthError.into())
+            })
+            .await
         }
     }
 }

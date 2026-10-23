@@ -8,8 +8,8 @@
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
-use alloy_consensus::{BlockHeader, Transaction};
-use alloy_primitives::U256;
+use alloy_consensus::{BlockHeader, Header, Transaction};
+use alloy_primitives::{Bytes, U256};
 use alloy_rlp::Encodable;
 use alloy_rpc_types_engine::PayloadAttributes as EthPayloadAttributes;
 use reth_basic_payload_builder::{
@@ -22,15 +22,15 @@ use reth_errors::{BlockExecutionError, BlockValidationError, ConsensusError};
 use reth_ethereum_primitives::{EthPrimitives, TransactionSigned};
 use reth_evm::{
     block::TxResult,
-    execute::{BlockBuilder, BlockBuilderOutcome},
+    execute::{BlockBuilder, BlockBuilderOutcome, BlockExecutor},
     ConfigureEvm, Evm, NextBlockEnvAttributes,
 };
 use reth_evm_ethereum::EthEvmConfig;
 use reth_execution_cache::{CachedStateMetrics, CachedStateMetricsSource, CachedStateProvider};
 use reth_payload_builder::{BlobSidecars, EthBuiltPayload};
 use reth_payload_builder_primitives::PayloadBuilderError;
-use reth_payload_primitives::PayloadAttributes;
-use reth_primitives_traits::transaction::error::InvalidTransactionError;
+use reth_payload_primitives::{BuiltPayload, PayloadAttributes};
+use reth_primitives_traits::{transaction::error::InvalidTransactionError, SealedHeader};
 use reth_revm::{database::StateProviderDatabase, db::State};
 use reth_storage_api::{EvmStateProvider, StateProvider, StateProviderFactory};
 use reth_transaction_pool::{
@@ -158,6 +158,66 @@ where
     Pool: TransactionPool<Transaction: PoolTransaction<Consensus = TransactionSigned>>,
     F: FnOnce(BestTransactionsAttributes) -> BestTransactionsIter<Pool>,
 {
+    let parent_header = args.config.parent_header.clone();
+    default_ethereum_payload_with(
+        evm_config,
+        client,
+        pool,
+        builder_config,
+        args,
+        parent_header,
+        best_txs,
+        |built| {
+            let BlockBuilderOutcome { execution_result, block, block_access_list, .. } =
+                built.outcome;
+            let requests = built.requests_active.then_some(execution_result.requests);
+            Ok(EthBuiltPayload::new(
+                Arc::new(block),
+                built.fees,
+                requests,
+                block_access_list.map(|bal| bal.split().1),
+            )
+            .with_sidecars(built.sidecars))
+        },
+    )
+}
+
+#[allow(missing_docs)]
+#[derive(Debug)]
+pub struct EthereumPayloadBuildOutcome<'a> {
+    pub outcome: BlockBuilderOutcome<EthPrimitives>,
+    pub parent: &'a SealedHeader<Header>,
+    pub attributes: &'a EthPayloadAttributes,
+    pub gas_limit: u64,
+    pub extra_data: &'a Bytes,
+    pub fees: U256,
+    pub sidecars: BlobSidecars,
+    pub state_root_computed: bool,
+    pub chain_id: u64,
+    pub amsterdam_eip8037: bool,
+    pub amsterdam_eip2780: bool,
+    pub requests_active: bool,
+}
+
+#[allow(missing_docs, clippy::too_many_arguments)]
+pub fn default_ethereum_payload_with<EvmConfig, Client, Pool, F, P, Finish>(
+    evm_config: EvmConfig,
+    client: Client,
+    pool: Pool,
+    builder_config: EthereumBuilderConfig,
+    args: BuildArguments<EthPayloadAttributes, P>,
+    parent_header: Arc<SealedHeader<Header>>,
+    best_txs: F,
+    finish: Finish,
+) -> Result<BuildOutcome<P>, PayloadBuilderError>
+where
+    EvmConfig: ConfigureEvm<Primitives = EthPrimitives, NextBlockEnvCtx = NextBlockEnvAttributes>,
+    Client: StateProviderFactory + ChainSpecProvider<ChainSpec: EthereumHardforks>,
+    Pool: TransactionPool<Transaction: PoolTransaction<Consensus = TransactionSigned>>,
+    F: FnOnce(BestTransactionsAttributes) -> BestTransactionsIter<Pool>,
+    P: BuiltPayload,
+    Finish: FnOnce(EthereumPayloadBuildOutcome<'_>) -> Result<P, PayloadBuilderError>,
+{
     let BuildArguments {
         mut cached_reads,
         execution_cache,
@@ -166,7 +226,7 @@ where
         cancel,
         best_payload,
     } = args;
-    let PayloadConfig { parent_header, attributes, payload_id, .. } = config;
+    let PayloadConfig { attributes, payload_id, .. } = config;
     let skip_state_root = builder_config.skip_state_root;
 
     let state_provider = client.state_by_block_hash(parent_header.hash())?;
@@ -195,6 +255,8 @@ where
         .build();
 
     let evm_config = evm_config.with_jit_support();
+    let gas_limit = builder_config
+        .gas_limit_with_target(parent_header.gas_limit, attributes.target_gas_limit());
     let mut builder = evm_config
         .builder_for_next_block(
             &mut db,
@@ -203,8 +265,7 @@ where
                 timestamp: attributes.timestamp(),
                 suggested_fee_recipient: attributes.suggested_fee_recipient,
                 prev_randao: attributes.prev_randao,
-                gas_limit: builder_config
-                    .gas_limit_with_target(parent_header.gas_limit, attributes.target_gas_limit()),
+                gas_limit,
                 parent_beacon_block_root: attributes.parent_beacon_block_root(),
                 withdrawals: attributes.withdrawals.clone().map(Into::into),
                 extra_data: builder_config.extra_data.clone(),
@@ -220,6 +281,10 @@ where
     let block_gas_limit: u64 = builder.evm_mut().block().gas_limit();
     let tx_gas_limit_cap = builder.evm_mut().cfg_env().tx_gas_limit_cap();
     let base_fee = builder.evm_mut().block().basefee();
+    let evm = builder.executor().evm();
+    let chain_id = evm.chain_id();
+    let amsterdam_eip8037 = evm.cfg_env().enable_amsterdam_eip8037;
+    let amsterdam_eip2780 = evm.cfg_env().enable_amsterdam_eip2780;
 
     let mut best_txs = best_txs(BestTransactionsAttributes::new(
         base_fee,
@@ -454,8 +519,7 @@ where
         return Ok(BuildOutcome::Aborted { fees: total_fees, cached_reads })
     }
 
-    let BlockBuilderOutcome { execution_result, block, block_access_list, .. } = if skip_state_root
-    {
+    let outcome = if skip_state_root {
         debug!(
             target: "payload_builder",
             id = %payload_id,
@@ -490,10 +554,7 @@ where
         builder.finish(state_provider.as_ref(), None)?
     };
 
-    let requests = chain_spec
-        .is_prague_active_at_timestamp(attributes.timestamp)
-        .then_some(execution_result.requests);
-
+    let block = &outcome.block;
     debug!(target: "payload_builder", id=%payload_id, sealed_block_header = ?block.sealed_header(), "sealed built block");
 
     if is_osaka && block.rlp_length() > MAX_RLP_BLOCK_SIZE {
@@ -503,10 +564,27 @@ where
         }));
     }
 
-    let block_access_list = block_access_list.map(|bal| bal.split().1);
-    let payload = EthBuiltPayload::new(Arc::new(block), total_fees, requests, block_access_list)
-        // add blob sidecars from the executed txs
-        .with_sidecars(blob_sidecars);
+    if cancel.is_cancelled() {
+        return Ok(BuildOutcome::Cancelled)
+    }
+    let payload = finish(EthereumPayloadBuildOutcome {
+        outcome,
+        parent: &parent_header,
+        attributes: &attributes,
+        gas_limit,
+        extra_data: &builder_config.extra_data,
+        fees: total_fees,
+        sidecars: blob_sidecars,
+        state_root_computed: !skip_state_root,
+        chain_id,
+        amsterdam_eip8037,
+        amsterdam_eip2780,
+        requests_active: chain_spec.is_prague_active_at_timestamp(attributes.timestamp),
+    });
+    if cancel.is_cancelled() {
+        return Ok(BuildOutcome::Cancelled)
+    }
+    let payload = payload?;
 
     Ok(BuildOutcome::Better { payload, cached_reads })
 }

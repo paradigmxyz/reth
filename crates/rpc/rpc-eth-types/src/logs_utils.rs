@@ -48,7 +48,7 @@ where
 
     // Iterate over transaction hashes and receipts and append matching logs.
     for (receipt_idx, (tx_hash, receipt)) in tx_hashes_and_receipts.into_iter().enumerate() {
-        for log in receipt.logs() {
+        for (receipt_log_index, log) in receipt.logs().iter().enumerate() {
             if filter.matches(log) {
                 let log = Log {
                     inner: log.clone(),
@@ -61,7 +61,12 @@ where
                     removed,
                     block_timestamp: Some(header.timestamp()),
                 };
-                all_logs.push(converter.convert_log(log, receipt, header)?);
+                all_logs.push(converter.convert_log_with_index(
+                    log,
+                    receipt,
+                    header,
+                    receipt_log_index,
+                )?);
             }
             log_index += 1;
         }
@@ -111,7 +116,7 @@ where
         // The transaction hash of the current receipt.
         let mut transaction_hash = None;
 
-        for log in receipt.logs() {
+        for (receipt_log_index, log) in receipt.logs().iter().enumerate() {
             if filter.matches(log) {
                 // if this is the first match in the receipt's logs, look up the transaction hash
                 if transaction_hash.is_none() {
@@ -158,7 +163,7 @@ where
                     block_timestamp: Some(header.timestamp()),
                 };
                 let log = converter
-                    .convert_log(log, receipt, header)
+                    .convert_log_with_index(log, receipt, header, receipt_log_index)
                     .map_err(|err| EthApiError::other(Into::<ErrorObject<'static>>::into(err)))?;
                 all_logs.push(log);
             }

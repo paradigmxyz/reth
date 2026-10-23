@@ -64,6 +64,7 @@ exclude_crates=(
   reth-prune # tokio
   reth-prune-static-files # reth-provider
   reth-pureth-block
+  reth-pureth-node
   reth-pureth-query
   reth-pureth-receipt
   reth-snap-sync # reth-tasks, reth-downloaders

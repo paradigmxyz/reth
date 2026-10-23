@@ -17,7 +17,7 @@ pub struct EtherscanBlockProvider<RpcBlock, ExecutionData> {
     chain_id: u64,
     interval: Duration,
     #[debug(skip)]
-    convert: Arc<dyn Fn(RpcBlock) -> ExecutionData + Send + Sync>,
+    convert: Arc<dyn Fn(RpcBlock) -> eyre::Result<ExecutionData> + Send + Sync>,
 }
 
 impl<RpcBlock, ExecutionData> EtherscanBlockProvider<RpcBlock, ExecutionData>
@@ -29,7 +29,7 @@ where
         base_url: String,
         api_key: String,
         chain_id: u64,
-        convert: impl Fn(RpcBlock) -> ExecutionData + Send + Sync + 'static,
+        convert: impl Fn(RpcBlock) -> eyre::Result<ExecutionData> + Send + Sync + 'static,
     ) -> Self {
         Self {
             http_client: Client::new(),
@@ -82,7 +82,7 @@ where
 
         let payload = resp.payload;
         match payload {
-            ResponsePayload::Success(block) => Ok((self.convert)(block)),
+            ResponsePayload::Success(block) => (self.convert)(block),
             ResponsePayload::Failure(err) => Err(eyre::eyre!("Failed to get block: {err}")),
         }
     }

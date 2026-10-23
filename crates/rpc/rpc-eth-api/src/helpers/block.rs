@@ -14,7 +14,7 @@ use futures::Future;
 use reth_node_api::BlockBody;
 use reth_primitives_traits::{AlloyBlockHeader, RecoveredBlock, SealedHeader, TransactionMeta};
 use reth_rpc_convert::{transaction::ConvertReceiptInput, RpcConvert, RpcHeader};
-use reth_rpc_eth_types::block::SharedReceipts;
+use reth_rpc_eth_types::{block::SharedReceipts, EthApiError};
 use reth_storage_api::{BlockIdReader, BlockReader, ProviderHeader, ProviderReceipt, ProviderTx};
 use reth_transaction_pool::{PoolTransaction, TransactionPool};
 use revm::state::bal::Bal as RevmBal;
@@ -96,51 +96,69 @@ pub trait EthBlocks: LoadBlock<RpcConvert: RpcConvert<Primitives = Self::Primiti
     {
         async move {
             if let Some((block, receipts)) = self.load_block_and_receipts(block_id).await? {
-                let block_number = block.number();
-                let base_fee = block.base_fee_per_gas();
-                let block_hash = block.hash();
-                let excess_blob_gas = block.excess_blob_gas();
-                let timestamp = block.timestamp();
-                let mut gas_used = 0;
-                let mut next_log_index = 0;
+                let require_canonical =
+                    matches!(block_id, BlockId::Hash(hash) if hash.require_canonical == Some(true));
+                let permit = self
+                    .acquire_owned_blocking_io()
+                    .await
+                    .map_err(|_| EthApiError::InternalEthError)?;
+                return self
+                    .spawn_blocking_io(move |this| {
+                        let _permit = permit;
+                        if receipts.len() != block.transaction_count() {
+                            return Err(EthApiError::InternalEthError.into());
+                        }
+                        let block_number = block.number();
+                        let base_fee = block.base_fee_per_gas();
+                        let block_hash = block.hash();
+                        let excess_blob_gas = block.excess_blob_gas();
+                        let timestamp = block.timestamp();
+                        let mut gas_used = 0;
+                        let mut next_log_index = 0;
 
-                let inputs = block
-                    .transactions_recovered()
-                    .zip(receipts.into_vec())
-                    .enumerate()
-                    .map(|(idx, (tx, receipt))| {
-                        let meta = TransactionMeta {
-                            tx_hash: *tx.tx_hash(),
-                            index: idx as u64,
-                            block_hash,
-                            block_number,
-                            base_fee,
-                            excess_blob_gas,
-                            timestamp,
-                        };
+                        let inputs = block
+                            .transactions_recovered()
+                            .zip(receipts.into_vec())
+                            .enumerate()
+                            .map(|(idx, (tx, receipt))| {
+                                let meta = TransactionMeta {
+                                    tx_hash: *tx.tx_hash(),
+                                    index: idx as u64,
+                                    block_hash,
+                                    block_number,
+                                    base_fee,
+                                    excess_blob_gas,
+                                    timestamp,
+                                };
 
-                        let cumulative_gas_used = receipt.cumulative_gas_used();
-                        let logs_len = receipt.logs().len();
+                                let cumulative_gas_used = receipt.cumulative_gas_used();
+                                let logs_len = receipt.logs().len();
 
-                        let input = ConvertReceiptInput {
-                            tx,
-                            gas_used: cumulative_gas_used - gas_used,
-                            next_log_index,
-                            meta,
-                            receipt,
-                        };
+                                let input = ConvertReceiptInput {
+                                    tx,
+                                    gas_used: cumulative_gas_used - gas_used,
+                                    next_log_index,
+                                    meta,
+                                    receipt,
+                                };
 
-                        gas_used = cumulative_gas_used;
-                        next_log_index += logs_len;
+                                gas_used = cumulative_gas_used;
+                                next_log_index += logs_len;
 
-                        input
+                                input
+                            })
+                            .collect::<Vec<_>>();
+
+                        Ok(this
+                            .converter()
+                            .convert_receipts_with_context(
+                                inputs,
+                                block.sealed_block(),
+                                require_canonical,
+                            )
+                            .map(Some)?)
                     })
-                    .collect::<Vec<_>>();
-
-                return Ok(self
-                    .converter()
-                    .convert_receipts_with_block(inputs, block.sealed_block())
-                    .map(Some)?)
+                    .await;
             }
 
             Ok(None)

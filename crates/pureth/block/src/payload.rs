@@ -141,6 +141,48 @@ pub struct ExecutionPayloadSnapshot {
     serialized: Bytes,
 }
 
+struct DecodedPayload {
+    fields: ExecutionPayloadFields,
+    transactions: TransactionSnapshot,
+    withdrawals: WithdrawalSnapshot,
+    block_access_list: BlockAccessListSnapshot,
+    receipts_root: B256,
+    requests_root: B256,
+}
+
+impl ExecutionPayloadFields {
+    fn summary(
+        &self,
+        transactions_root: B256,
+        receipts_root: B256,
+        withdrawals_root: B256,
+        requests_root: B256,
+        block_access_list_root: B256,
+    ) -> Result<ExecutionSummarySnapshot, PayloadError> {
+        ExecutionSummarySnapshot::build(ExecutionSummary {
+            parent_hash: self.parent_hash,
+            miner: self.miner,
+            state_root: self.state_root,
+            transactions_root,
+            receipts_root,
+            number: self.number,
+            gas_limits: self.gas_limits,
+            gas_used: self.gas_used,
+            timestamp: self.timestamp,
+            extra_data: self.extra_data.clone(),
+            mix_hash: self.mix_hash,
+            base_fees_per_gas: self.base_fees_per_gas,
+            withdrawals_root,
+            excess_gas: self.excess_gas,
+            parent_beacon_block_root: self.parent_beacon_block_root,
+            requests_root,
+            block_access_list_root,
+            slot_number: self.slot_number,
+        })
+        .map_err(PayloadError::Summary)
+    }
+}
+
 impl ExecutionPayloadSnapshot {
     pub fn build(
         fields: ExecutionPayloadFields,
@@ -176,27 +218,13 @@ impl ExecutionPayloadSnapshot {
         if source_length > limits.bytes || length > u32::MAX as usize {
             return Err(PayloadError::LimitExceeded("component bytes"));
         }
-        let summary = ExecutionSummarySnapshot::build(ExecutionSummary {
-            parent_hash: fields.parent_hash,
-            miner: fields.miner,
-            state_root: fields.state_root,
-            transactions_root: components.transactions.root(),
-            receipts_root: components.receipts.root(),
-            number: fields.number,
-            gas_limits: fields.gas_limits,
-            gas_used: fields.gas_used,
-            timestamp: fields.timestamp,
-            extra_data: fields.extra_data.clone(),
-            mix_hash: fields.mix_hash,
-            base_fees_per_gas: fields.base_fees_per_gas,
-            withdrawals_root: components.withdrawals.root(),
-            excess_gas: fields.excess_gas,
-            parent_beacon_block_root: fields.parent_beacon_block_root,
-            requests_root: components.requests.root(),
-            block_access_list_root: components.block_access_list.root(),
-            slot_number: fields.slot_number,
-        })
-        .map_err(PayloadError::Summary)?;
+        let summary = fields.summary(
+            components.transactions.root(),
+            components.receipts.root(),
+            components.withdrawals.root(),
+            components.requests.root(),
+            components.block_access_list.root(),
+        )?;
         let mut bytes = Vec::with_capacity(length);
         let tx_offset = 364usize;
         let extra_offset = tx_offset + components.transactions.serialized().len();
@@ -241,6 +269,50 @@ impl ExecutionPayloadSnapshot {
         {
             return Err(PayloadError::LimitExceeded("payload bytes"));
         }
+        let decoded = Self::decode_ssz(
+            bytes,
+            limits,
+            Some((receipts.root(), requests.root(), receipts.receipts().len())),
+        )?;
+        let snapshot = Self::build(
+            decoded.fields,
+            PayloadComponents {
+                transactions: decoded.transactions,
+                receipts,
+                withdrawals: decoded.withdrawals,
+                requests,
+                block_access_list: decoded.block_access_list,
+            },
+            limits,
+        )?;
+        if snapshot.serialized() != bytes {
+            return Err(PayloadError::InvalidEncoding("noncanonical payload"));
+        }
+        Ok(snapshot)
+    }
+
+    pub fn root_from_ssz(bytes: &[u8], limits: PayloadLimits) -> Result<B256, PayloadError> {
+        let decoded = Self::decode_ssz(bytes, limits, None)?;
+        Ok(decoded
+            .fields
+            .summary(
+                decoded.transactions.root(),
+                decoded.receipts_root,
+                decoded.withdrawals.root(),
+                decoded.requests_root,
+                decoded.block_access_list.root(),
+            )?
+            .root())
+    }
+
+    fn decode_ssz(
+        bytes: &[u8],
+        limits: PayloadLimits,
+        auxiliary: Option<(B256, B256, usize)>,
+    ) -> Result<DecodedPayload, PayloadError> {
+        if bytes.len() > limits.bytes {
+            return Err(PayloadError::LimitExceeded("payload bytes"));
+        }
         let mut builder = SszDecoderBuilder::new(bytes);
         builder.register_type::<B256>().map_err(PayloadError::Decode)?;
         builder.register_type::<Address>().map_err(PayloadError::Decode)?;
@@ -266,7 +338,7 @@ impl ExecutionPayloadSnapshot {
         let state_root = decoder.decode_next().map_err(PayloadError::Decode)?;
         let tx_bytes = decoder.decode_next_with(Ok).map_err(PayloadError::Decode)?;
         let receipts_root: B256 = decoder.decode_next().map_err(PayloadError::Decode)?;
-        if receipts_root != receipts.root() {
+        if auxiliary.is_some_and(|(root, _, _)| root != receipts_root) {
             return Err(PayloadError::ComponentMismatch("receipts root"));
         }
         let number = decoder.decode_next().map_err(PayloadError::Decode)?;
@@ -284,7 +356,7 @@ impl ExecutionPayloadSnapshot {
         let excess_gas = decoder.decode_next().map_err(PayloadError::Decode)?;
         let parent_beacon_block_root = decoder.decode_next().map_err(PayloadError::Decode)?;
         let requests_root: B256 = decoder.decode_next().map_err(PayloadError::Decode)?;
-        if requests_root != requests.root() {
+        if auxiliary.is_some_and(|(_, root, _)| root != requests_root) {
             return Err(PayloadError::ComponentMismatch("requests root"));
         }
         let bal_bytes = decoder.decode_next_with(Ok).map_err(PayloadError::Decode)?;
@@ -307,7 +379,7 @@ impl ExecutionPayloadSnapshot {
         if count > limits.transactions {
             return Err(PayloadError::LimitExceeded("transactions"));
         }
-        if count != receipts.receipts().len() {
+        if auxiliary.is_some_and(|(_, _, receipts)| count != receipts) {
             return Err(PayloadError::ComponentMismatch("transaction/receipt count"));
         }
         if !withdrawal_bytes.len().is_multiple_of(44) {
@@ -334,23 +406,24 @@ impl ExecutionPayloadSnapshot {
             parent_beacon_block_root,
             slot_number,
         };
-        let components = PayloadComponents {
-            transactions: TransactionSnapshot::from_ssz(tx_bytes)
-                .map_err(PayloadError::Transaction)?,
-            receipts,
-            withdrawals: WithdrawalSnapshot::from_ssz(withdrawal_bytes)
-                .map_err(PayloadError::Withdrawal)?,
-            requests,
+        let transactions =
+            TransactionSnapshot::from_ssz(tx_bytes).map_err(PayloadError::Transaction)?;
+        let withdrawals =
+            WithdrawalSnapshot::from_ssz(withdrawal_bytes).map_err(PayloadError::Withdrawal)?;
+        if transactions.serialized() != tx_bytes || withdrawals.serialized() != withdrawal_bytes {
+            return Err(PayloadError::InvalidEncoding("noncanonical payload components"));
+        }
+        Ok(DecodedPayload {
+            fields,
+            transactions,
+            withdrawals,
             block_access_list: BlockAccessListSnapshot::from_rlp(
                 Bytes::copy_from_slice(bal_bytes),
                 limits.bal_bytes,
             )?,
-        };
-        let snapshot = Self::build(fields, components, limits)?;
-        if snapshot.serialized() != bytes {
-            return Err(PayloadError::InvalidEncoding("noncanonical payload"));
-        }
-        Ok(snapshot)
+            receipts_root,
+            requests_root,
+        })
     }
 
     pub const fn fields(&self) -> &ExecutionPayloadFields {

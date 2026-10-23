@@ -5,10 +5,10 @@ use crate::tree::{
 use alloy_consensus::{BlockHeader, Transaction, TxType};
 use alloy_primitives::{Address, Bytes, Log as ExecutionLog, B256};
 use reth_chainspec::EthereumHardforks;
-use reth_ethereum_primitives::{Block, Receipt as StoredReceipt, TransactionSigned};
-use reth_primitives_traits::RecoveredBlock;
+use reth_ethereum_primitives::{Receipt as StoredReceipt, TransactionSigned};
+use reth_primitives_traits::{Block, BlockBody, RecoveredBlock};
 use ssz::{SszEncoder, BYTES_PER_LENGTH_OFFSET, MAX_LENGTH_VALUE};
-use std::fmt;
+use std::{fmt, sync::Arc};
 use tree_hash::TreeHash;
 
 pub const MAX_TOPICS_PER_LOG: usize = 4;
@@ -237,8 +237,8 @@ pub enum Eip6466SnapshotError {
     Tree(TreeConstructionError),
 }
 
-impl Eip6466SnapshotError {
-    fn from_construction(error: ReceiptConstructionError) -> Self {
+impl From<ReceiptConstructionError> for Eip6466SnapshotError {
+    fn from(error: ReceiptConstructionError) -> Self {
         if error.is_missing_data() {
             Self::MissingData(error)
         } else {
@@ -282,11 +282,11 @@ impl From<TreeConstructionError> for Eip6466SnapshotError {
     }
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct Eip6466ReceiptSnapshot {
-    receipts: Receipts,
+    receipts: Arc<Receipts>,
     serialized: Bytes,
-    tree: RetainedNode,
+    tree: Arc<RetainedNode>,
 }
 
 impl Eip6466ReceiptSnapshot {
@@ -294,21 +294,21 @@ impl Eip6466ReceiptSnapshot {
         let serialized = Bytes::from(serialize_receipts(&receipts)?);
         let tree = build_receipts_tree(&receipts)?;
 
-        Ok(Self { receipts, serialized, tree })
+        Ok(Self { receipts: Arc::new(receipts), serialized, tree: Arc::new(tree) })
     }
 
-    pub fn from_block(
-        block: &RecoveredBlock<Block>,
+    pub fn from_block<B: Block<Body: BlockBody<Transaction = TransactionSigned>>>(
+        block: &RecoveredBlock<B>,
         stored_receipts: &[StoredReceipt],
         chain_spec: &impl EthereumHardforks,
     ) -> Result<Self, Eip6466SnapshotError> {
         let receipts = receipts_from_block(block, stored_receipts, chain_spec)
-            .map_err(Eip6466SnapshotError::from_construction)?;
+            .map_err(Eip6466SnapshotError::from)?;
 
         Self::build(receipts)
     }
 
-    pub const fn receipts(&self) -> &Receipts {
+    pub fn receipts(&self) -> &Receipts {
         &self.receipts
     }
 
@@ -316,11 +316,11 @@ impl Eip6466ReceiptSnapshot {
         &self.serialized
     }
 
-    pub const fn tree(&self) -> &RetainedNode {
+    pub fn tree(&self) -> &RetainedNode {
         &self.tree
     }
 
-    pub const fn root(&self) -> B256 {
+    pub fn root(&self) -> B256 {
         self.tree.root()
     }
 }
@@ -471,12 +471,12 @@ pub fn receipt_from_transaction(
     }
 }
 
-pub fn receipts_from_block(
-    block: &RecoveredBlock<Block>,
+pub fn receipts_from_block<B: Block<Body: BlockBody<Transaction = TransactionSigned>>>(
+    block: &RecoveredBlock<B>,
     stored_receipts: &[StoredReceipt],
     chain_spec: &impl EthereumHardforks,
 ) -> Result<Receipts, ReceiptConstructionError> {
-    let transaction_count = block.body().transactions.len();
+    let transaction_count = block.body().transactions().len();
 
     if transaction_count != stored_receipts.len() {
         return Err(ReceiptConstructionError::InputCountMismatch {

@@ -1,14 +1,17 @@
-use super::{verify_whole_receipt_proof, WholeReceiptProof};
+use super::{
+    runtime::{ExecutionReceiptEnvelope, ExecutionRpcReceipt},
+    verify_whole_receipt_proof, WholeReceiptProof,
+};
 use crate::{
     selection::{add, encoded_size, remaining_materialization, source_budget},
     SelectionError, SelectionLimits,
 };
-use alloy_consensus::{Transaction, TxReceipt};
+use alloy_consensus::{BlockHeader, Transaction, TxReceipt};
 use alloy_primitives::{Address, TxKind, B256, U64};
 use alloy_rpc_types_eth::TransactionReceipt;
-use reth_ethereum_primitives::Block;
-use reth_primitives_traits::RecoveredBlock;
-use reth_pureth_receipt::ProviderSnapshot;
+use reth_ethereum_primitives::{Block, TransactionSigned};
+use reth_primitives_traits::{Block as BlockTrait, BlockBody, RecoveredBlock};
+use reth_pureth_receipt::{Eip6466ReceiptSnapshot, ProviderSnapshot};
 use serde::{Deserialize, Serialize};
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -20,6 +23,8 @@ struct ProvenReceiptFields {
     transaction_hash: B256,
     transaction_index: U64,
     from: Address,
+    #[serde(rename = "cumulativeGasUsed")]
+    _cumulative_gas_used: U64,
     gas_used: U64,
     status: U64,
     contract_address: Option<Address>,
@@ -40,14 +45,37 @@ struct Eip6466ReceiptFields<'a> {
     #[serde(rename = "type")]
     transaction_type: U64,
     status: U64,
+    #[serde(rename = "cumulativeGasUsed")]
+    cumulative_gas_used: U64,
     logs: Vec<alloy_rpc_types_eth::Log>,
     authorities: Option<&'a [Address]>,
 }
 
-struct ConversionBudget {
+pub(super) struct ConversionBudget {
     source: usize,
     native_bytes: usize,
     value_bytes: usize,
+}
+
+impl ConversionBudget {
+    pub(super) fn for_batch(
+        receipts: &[TransactionReceipt],
+        snapshot: &Eip6466ReceiptSnapshot,
+        limits: SelectionLimits,
+        cancelled: &AtomicBool,
+    ) -> Result<Self, SelectionError> {
+        let native_bytes = encoded_size(&receipts, limits.response_bytes, "response bytes")?;
+        let source = source_budget(snapshot, limits, cancelled)?;
+        remaining_materialization(source, native_bytes, 0, limits.source_bytes)?;
+        let mut value_bytes = 2;
+        add(
+            &mut value_bytes,
+            receipts.len().saturating_sub(1),
+            limits.response_bytes,
+            "response bytes",
+        )?;
+        Ok(Self { source, native_bytes, value_bytes })
+    }
 }
 
 pub fn convert_eip6466_receipt(
@@ -61,7 +89,36 @@ pub fn convert_eip6466_receipt(
     if cancelled.load(Ordering::Relaxed) {
         return Err(SelectionError::Cancelled);
     }
-    let source = source_budget(snapshot.receipt_snapshot(), limits, cancelled)?;
+    if snapshot.object() != reth_pureth_receipt::ObjectKind::Receipts ||
+        snapshot.block_hash() != block.hash()
+    {
+        return Err(SelectionError::InvalidContext);
+    }
+    convert_eip6466_receipt_from_retained(
+        receipt,
+        block,
+        snapshot.receipt_snapshot(),
+        index,
+        limits,
+        cancelled,
+    )
+}
+
+pub fn convert_eip6466_receipt_from_retained<B>(
+    receipt: TransactionReceipt,
+    block: &RecoveredBlock<B>,
+    snapshot: &Eip6466ReceiptSnapshot,
+    index: u64,
+    limits: SelectionLimits,
+    cancelled: &AtomicBool,
+) -> Result<serde_json::Value, SelectionError>
+where
+    B: BlockTrait<Body: BlockBody<Transaction = TransactionSigned>>,
+{
+    if cancelled.load(Ordering::Relaxed) {
+        return Err(SelectionError::Cancelled);
+    }
+    let source = source_budget(snapshot, limits, cancelled)?;
     let mut budget = ConversionBudget { source, native_bytes: 0, value_bytes: 0 };
     convert_with_source(receipt, block, snapshot, index, limits, cancelled, &mut budget)
 }
@@ -77,21 +134,40 @@ pub fn convert_eip6466_block_receipts(
         return Err(SelectionError::Cancelled);
     }
     if snapshot.object() != reth_pureth_receipt::ObjectKind::Receipts ||
-        block.hash() != snapshot.block_hash() ||
-        receipts.len() != snapshot.receipt_snapshot().receipts().len() ||
-        receipts.len() != block.body().transactions.len()
+        block.hash() != snapshot.block_hash()
     {
         return Err(SelectionError::InvalidContext);
     }
-    let native_bytes = encoded_size(&receipts, limits.response_bytes, "response bytes")?;
-    let source = source_budget(snapshot.receipt_snapshot(), limits, cancelled)?;
-    remaining_materialization(source, native_bytes, 0, limits.source_bytes)?;
-    let mut budget = ConversionBudget { source, native_bytes, value_bytes: 2 };
+    convert_eip6466_block_receipts_from_retained(
+        receipts,
+        block,
+        snapshot.receipt_snapshot(),
+        limits,
+        cancelled,
+    )
+}
+
+pub fn convert_eip6466_block_receipts_from_retained<B>(
+    receipts: Vec<TransactionReceipt>,
+    block: &RecoveredBlock<B>,
+    snapshot: &Eip6466ReceiptSnapshot,
+    limits: SelectionLimits,
+    cancelled: &AtomicBool,
+) -> Result<Vec<serde_json::Value>, SelectionError>
+where
+    B: BlockTrait<Body: BlockBody<Transaction = TransactionSigned>>,
+{
+    if cancelled.load(Ordering::Relaxed) {
+        return Err(SelectionError::Cancelled);
+    }
+    if receipts.len() != snapshot.receipts().len() ||
+        receipts.len() != block.body().transactions().len()
+    {
+        return Err(SelectionError::InvalidContext);
+    }
+    let mut budget = ConversionBudget::for_batch(&receipts, snapshot, limits, cancelled)?;
     let mut values = Vec::new();
     for (index, receipt) in receipts.into_iter().enumerate() {
-        if index != 0 {
-            add(&mut budget.value_bytes, 1, limits.response_bytes, "response bytes")?;
-        }
         values.push(convert_with_source(
             receipt,
             block,
@@ -103,22 +179,51 @@ pub fn convert_eip6466_block_receipts(
         )?);
     }
     let value_bytes = encoded_size(&values, limits.response_bytes, "response bytes")?;
-    remaining_materialization(source, native_bytes.max(value_bytes), 0, limits.source_bytes)?;
+    remaining_materialization(
+        budget.source,
+        budget.native_bytes.max(value_bytes),
+        0,
+        limits.source_bytes,
+    )?;
     if cancelled.load(Ordering::Relaxed) {
         return Err(SelectionError::Cancelled);
     }
     Ok(values)
 }
 
-fn convert_with_source(
+fn convert_with_source<B>(
     receipt: TransactionReceipt,
-    block: &RecoveredBlock<Block>,
-    snapshot: &ProviderSnapshot,
+    block: &RecoveredBlock<B>,
+    snapshot: &Eip6466ReceiptSnapshot,
     index: u64,
     limits: SelectionLimits,
     cancelled: &AtomicBool,
     budget: &mut ConversionBudget,
-) -> Result<serde_json::Value, SelectionError> {
+) -> Result<serde_json::Value, SelectionError>
+where
+    B: BlockTrait<Body: BlockBody<Transaction = TransactionSigned>>,
+{
+    let receipt =
+        convert_typed_with_source(receipt, block, snapshot, index, limits, cancelled, budget)?;
+    let value = serde_json::to_value(&receipt).map_err(|_| SelectionError::InvalidValue)?;
+    if cancelled.load(Ordering::Relaxed) {
+        return Err(SelectionError::Cancelled);
+    }
+    Ok(value)
+}
+
+pub(super) fn convert_typed_with_source<B>(
+    receipt: TransactionReceipt,
+    block: &RecoveredBlock<B>,
+    snapshot: &Eip6466ReceiptSnapshot,
+    index: u64,
+    limits: SelectionLimits,
+    cancelled: &AtomicBool,
+    budget: &mut ConversionBudget,
+) -> Result<ExecutionRpcReceipt, SelectionError>
+where
+    B: BlockTrait<Body: BlockBody<Transaction = TransactionSigned>>,
+{
     if cancelled.load(Ordering::Relaxed) {
         return Err(SelectionError::Cancelled);
     }
@@ -131,14 +236,13 @@ fn convert_with_source(
         limits.source_bytes,
     )?;
     let position = usize::try_from(index).map_err(|_| SelectionError::OutOfBounds)?;
-    let transaction = block.body().transactions.get(position).ok_or(SelectionError::OutOfBounds)?;
-    let retained = snapshot.receipt_snapshot().receipts();
+    let transaction =
+        block.body().transactions().get(position).ok_or(SelectionError::OutOfBounds)?;
+    let retained = snapshot.receipts();
     let expected = retained.get(position).ok_or(SelectionError::OutOfBounds)?;
-    if snapshot.object() != reth_pureth_receipt::ObjectKind::Receipts ||
-        snapshot.block_hash() != block.hash() ||
-        retained.len() != block.body().transactions.len() ||
+    if retained.len() != block.body().transactions().len() ||
         receipt.block_hash != Some(block.hash()) ||
-        receipt.block_number != Some(block.header().number) ||
+        receipt.block_number != Some(block.header().number()) ||
         receipt.transaction_index != Some(index) ||
         receipt.transaction_hash != *transaction.hash() ||
         receipt.from != expected.from_() ||
@@ -186,6 +290,7 @@ fn convert_with_source(
     let mut receipt = receipt.map_inner(|inner| Eip6466ReceiptFields {
         transaction_type: U64::from(inner.tx_type() as u8),
         status: U64::from(u64::from(expected.status())),
+        cumulative_gas_used: U64::from(inner.cumulative_gas_used()),
         logs: inner.into_logs(),
         authorities: expected.authorities(),
     });
@@ -210,11 +315,19 @@ fn convert_with_source(
     if cancelled.load(Ordering::Relaxed) {
         return Err(SelectionError::Cancelled);
     }
-    let value = serde_json::to_value(&receipt).map_err(|_| SelectionError::InvalidValue)?;
+    let receipt = receipt.map_inner(|fields| {
+        ExecutionReceiptEnvelope::selected(
+            fields.transaction_type,
+            fields.status,
+            fields.cumulative_gas_used,
+            fields.logs,
+            fields.authorities.map(<[Address]>::to_vec),
+        )
+    });
     if cancelled.load(Ordering::Relaxed) {
         return Err(SelectionError::Cancelled);
     }
-    Ok(value)
+    Ok(receipt)
 }
 
 pub fn verify_eip6466_receipt_response(
@@ -234,7 +347,6 @@ pub fn verify_eip6466_receipt_response(
     )?;
     let object = receipt.as_object().ok_or(SelectionError::InvalidValue)?;
     if object.contains_key("logsBloom") ||
-        object.contains_key("cumulativeGasUsed") ||
         object.contains_key("root") ||
         object.contains_key("sszProof") ||
         !object.contains_key("authorities") ||

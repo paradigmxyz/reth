@@ -50,6 +50,17 @@ pub trait ReceiptConverter<N: NodePrimitives>: Debug + 'static {
         header: &SealedHeaderFor<N>,
     ) -> Result<Self::RpcLog, Self::Error>;
 
+    #[allow(missing_docs)]
+    fn convert_log_with_index(
+        &self,
+        log: Log,
+        receipt: &N::Receipt,
+        header: &SealedHeaderFor<N>,
+        _receipt_log_index: usize,
+    ) -> Result<Self::RpcLog, Self::Error> {
+        self.convert_log(log, receipt, header)
+    }
+
     /// Converts a set of primitive receipts to RPC representations. It is guaranteed that all
     /// receipts are from the same block.
     fn convert_receipts(
@@ -64,6 +75,16 @@ pub trait ReceiptConverter<N: NodePrimitives>: Debug + 'static {
         _block: &SealedBlock<N::Block>,
     ) -> Result<Vec<Self::RpcReceipt>, Self::Error> {
         self.convert_receipts(receipts)
+    }
+
+    #[allow(missing_docs)]
+    fn convert_receipts_with_context(
+        &self,
+        receipts: Vec<ConvertReceiptInput<'_, N>>,
+        block: &SealedBlock<N::Block>,
+        _require_canonical: bool,
+    ) -> Result<Vec<Self::RpcReceipt>, Self::Error> {
+        self.convert_receipts_with_block(receipts, block)
     }
 }
 
@@ -179,6 +200,17 @@ pub trait RpcConvert: Send + Sync + Unpin + Debug + DynClone + 'static {
         header: &SealedHeaderFor<Self::Primitives>,
     ) -> Result<RpcLog<Self::Network>, Self::Error>;
 
+    #[allow(missing_docs)]
+    fn convert_log_with_index(
+        &self,
+        log: Log,
+        receipt: &<Self::Primitives as NodePrimitives>::Receipt,
+        header: &SealedHeaderFor<Self::Primitives>,
+        _receipt_log_index: usize,
+    ) -> Result<RpcLog<Self::Network>, Self::Error> {
+        self.convert_log(log, receipt, header)
+    }
+
     /// Converts a set of primitive receipts to RPC representations. It is guaranteed that all
     /// receipts are from the same block.
     fn convert_receipts(
@@ -192,6 +224,16 @@ pub trait RpcConvert: Send + Sync + Unpin + Debug + DynClone + 'static {
         receipts: Vec<ConvertReceiptInput<'_, Self::Primitives>>,
         block: &SealedBlock<BlockTy<Self::Primitives>>,
     ) -> Result<Vec<RpcReceipt<Self::Network>>, Self::Error>;
+
+    #[allow(missing_docs)]
+    fn convert_receipts_with_context(
+        &self,
+        receipts: Vec<ConvertReceiptInput<'_, Self::Primitives>>,
+        block: &SealedBlock<BlockTy<Self::Primitives>>,
+        _require_canonical: bool,
+    ) -> Result<Vec<RpcReceipt<Self::Network>>, Self::Error> {
+        self.convert_receipts_with_block(receipts, block)
+    }
 
     /// Converts a primitive header to an RPC header.
     fn convert_header(
@@ -759,6 +801,16 @@ where
         self.receipt_converter.convert_log(log, receipt, header)
     }
 
+    fn convert_log_with_index(
+        &self,
+        log: Log,
+        receipt: &<Self::Primitives as NodePrimitives>::Receipt,
+        header: &SealedHeaderFor<Self::Primitives>,
+        receipt_log_index: usize,
+    ) -> Result<RpcLog<Self::Network>, Self::Error> {
+        self.receipt_converter.convert_log_with_index(log, receipt, header, receipt_log_index)
+    }
+
     fn convert_receipts(
         &self,
         receipts: Vec<ConvertReceiptInput<'_, Self::Primitives>>,
@@ -772,6 +824,15 @@ where
         block: &SealedBlock<BlockTy<Self::Primitives>>,
     ) -> Result<Vec<RpcReceipt<Self::Network>>, Self::Error> {
         self.receipt_converter.convert_receipts_with_block(receipts, block)
+    }
+
+    fn convert_receipts_with_context(
+        &self,
+        receipts: Vec<ConvertReceiptInput<'_, Self::Primitives>>,
+        block: &SealedBlock<BlockTy<Self::Primitives>>,
+        require_canonical: bool,
+    ) -> Result<Vec<RpcReceipt<Self::Network>>, Self::Error> {
+        self.receipt_converter.convert_receipts_with_context(receipts, block, require_canonical)
     }
 
     fn convert_header(

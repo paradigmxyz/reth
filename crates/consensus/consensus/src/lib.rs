@@ -53,7 +53,7 @@ pub type ReceiptRootBloom = (B256, Bloom);
 /// When provided to [`Consensus::validate_block_pre_execution_with_tx_root`], this allows
 /// skipping transaction trie reconstruction from the block body.
 pub type TransactionRoot = B256;
-use reth_execution_types::BlockExecutionResult;
+use reth_execution_types::{BlockExecutionResult, RetainedExecutionData};
 use reth_primitives_traits::{
     constants::{GAS_LIMIT_BOUND_DIVISOR, MAXIMUM_GAS_LIMIT_BLOCK, MINIMUM_GAS_LIMIT},
     transaction::error::InvalidTransactionError,
@@ -72,6 +72,29 @@ pub mod test_utils;
 /// execution outcome.
 #[auto_impl::auto_impl(&, Arc)]
 pub trait FullConsensus<N: NodePrimitives>: Consensus<N::Block> {
+    #[allow(missing_docs)]
+    fn requires_state_root_validation(&self, _timestamp: u64) -> bool {
+        false
+    }
+
+    #[allow(missing_docs)]
+    fn validate_block_post_execution_with_data(
+        &self,
+        block: &Arc<RecoveredBlock<N::Block>>,
+        result: &BlockExecutionResult<N::Receipt>,
+        receipt_root_bloom: Option<ReceiptRootBloom>,
+        block_access_list_hash: Option<B256>,
+        _block_access_list: Option<&alloy_eip7928::bal::Bal>,
+    ) -> Result<Option<RetainedExecutionData>, ConsensusError> {
+        self.validate_block_post_execution(
+            block,
+            result,
+            receipt_root_bloom,
+            block_access_list_hash,
+        )?;
+        Ok(None)
+    }
+
     /// Validate a block considering world state, i.e. things that can not be checked before
     /// execution.
     ///
@@ -501,6 +524,9 @@ pub enum ConsensusError {
     /// Any additional consensus error, for example L2-specific errors.
     #[error(transparent)]
     Other(#[from] Arc<dyn Error + Send + Sync>),
+    #[allow(missing_docs)]
+    #[error("validation unavailable: {0}")]
+    Unavailable(#[source] Arc<dyn Error + Send + Sync>),
 }
 
 impl ConsensusError {

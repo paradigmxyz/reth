@@ -49,7 +49,7 @@ impl PayloadTypes for BbPayloadTypes {
                 <<Self::BuiltPayload as reth_node_api::BuiltPayload>::Primitives as reth_node_api::NodePrimitives>::Block,
             >,
         _bal: Option<Bytes>,
-    ) -> Self::ExecutionData {
+    ) -> Result<Self::ExecutionData, NewPayloadError> {
         unreachable!()
     }
 }

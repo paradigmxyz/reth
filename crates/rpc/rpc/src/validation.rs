@@ -2,7 +2,10 @@ use self::blob_cache::BlobValidationCache;
 use alloy_consensus::{
     BlobTransactionValidationError, BlockHeader, EnvKzgSettings, Transaction, TxReceipt,
 };
-use alloy_eip7928::{bal::DecodedBal, compute_block_access_list_hash};
+use alloy_eip7928::{
+    bal::{Bal, DecodedBal},
+    compute_block_access_list_hash,
+};
 use alloy_eips::eip7685::RequestsOrHash;
 use alloy_primitives::{map::AddressSet, Address, B256, U256};
 use alloy_rpc_types_beacon::relay::{
@@ -162,6 +165,7 @@ where
         registered_gas_limit: u64,
         decoded_bal: Option<DecodedBal>,
     ) -> Result<(), ValidationApiError> {
+        let block = Arc::new(block);
         self.validate_message_against_header(block.sealed_header(), &message)?;
 
         self.consensus.validate_header(block.sealed_header())?;
@@ -229,19 +233,16 @@ where
 
         let mut request_cache = self.cached_reads(parent_header_hash).await;
 
-        let (output, block_access_list_hash) = {
+        let (output, block_access_list_hash, built_bal) = {
             let cached_db = request_cache
                 .as_db_mut(StateProviderDatabase::new((&state_provider).into_evm_state_provider()));
             let mut executor = self.evm_config.batch_executor(cached_db);
 
             let result = executor.execute_one(&block)?;
 
-            // The executor rebuilds the block access list whenever the block header contains a
-            // BAL hash. Comparing the rebuilt hash against the header post execution also
-            // commits to the submitted access list, because the header's BAL hash is derived
-            // from the submitted bytes.
+            let built_bal = executor.take_bal();
             let block_access_list_hash =
-                executor.take_bal().map(|bal| compute_block_access_list_hash(&bal));
+                built_bal.as_ref().map(|bal| compute_block_access_list_hash(bal));
 
             let mut state = executor.into_state();
             if !self.disallow.is_empty() {
@@ -255,17 +256,22 @@ where
                 }
             }
 
-            (BlockExecutionOutput { state: state.take_bundle(), result }, block_access_list_hash)
+            (
+                BlockExecutionOutput { state: state.take_bundle(), result },
+                block_access_list_hash,
+                built_bal.map(Bal::from),
+            )
         };
 
         // update the cached reads
         self.update_cached_reads(parent_header_hash, request_cache).await;
 
-        self.consensus.validate_block_post_execution(
+        self.consensus.validate_block_post_execution_with_data(
             &block,
             &output,
             None,
             block_access_list_hash,
+            built_bal.as_ref(),
         )?;
 
         self.ensure_payment(&block, &output, &message)?;
@@ -820,8 +826,12 @@ impl From<ValidationApiError> for ErrorObject<'static> {
                 error @ BlockExecutionError::Internal(_) => internal_rpc_err(error.to_string()),
             },
             ValidationApiError::Payload(err) => match err {
-                error @ NewPayloadError::Eth(_) => invalid_params_rpc_err(error.to_string()),
-                error @ NewPayloadError::Other(_) => internal_rpc_err(error.to_string()),
+                error @ (NewPayloadError::Eth(_) | NewPayloadError::InvalidBlockAccessList(_)) => {
+                    invalid_params_rpc_err(error.to_string())
+                }
+                error @ (NewPayloadError::Other(_) | NewPayloadError::Unavailable(_)) => {
+                    internal_rpc_err(error.to_string())
+                }
             },
         }
     }

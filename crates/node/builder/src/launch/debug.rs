@@ -250,6 +250,7 @@ where
                         SealedBlock::new_unhashed(primitive_block),
                         extras.bal,
                     )
+                    .map_err(Into::into)
                 })
                 .await?;
 
@@ -286,6 +287,7 @@ where
                         SealedBlock::new_unhashed(primitive_block),
                         None,
                     )
+                    .map_err(Into::into)
                 },
             );
             let rpc_consensus_client = DebugConsensusClient::new(

@@ -149,6 +149,11 @@ impl<N: ProviderNodeTypes> BlockchainProvider<N> {
         ConsistentProvider::new(self.database.clone(), self.canonical_in_memory_state())
     }
 
+    /// Pins a retained graph block, including side branches, without asserting canonicality.
+    pub fn retained_executed_block(&self, hash: B256) -> Option<ExecutedBlock<N::Primitives>> {
+        self.database.overlay_manager().executed_block(hash)
+    }
+
     /// Returns a state provider for the post-state of an already resolved in-memory chain.
     ///
     /// This is the post-state of `state.hash()`. Because the caller already holds the in-memory
@@ -485,6 +490,31 @@ impl<N: ProviderNodeTypes> BlockNumReader for BlockchainProvider<N> {
 }
 
 impl<N: ProviderNodeTypes> BlockIdReader for BlockchainProvider<N> {
+    fn block_hash_for_id(&self, block_id: BlockId) -> ProviderResult<Option<B256>> {
+        let number = match block_id {
+            BlockId::Hash(hash) => return Ok(Some(hash.into())),
+            BlockId::Number(BlockNumberOrTag::Latest) => {
+                return Ok(Some(self.chain_info()?.best_hash));
+            }
+            BlockId::Number(BlockNumberOrTag::Pending) => {
+                return self.pending_block_num_hash().map(|block| block.map(|block| block.hash));
+            }
+            BlockId::Number(BlockNumberOrTag::Finalized) => return self.finalized_block_hash(),
+            BlockId::Number(BlockNumberOrTag::Safe) => return self.safe_block_hash(),
+            BlockId::Number(BlockNumberOrTag::Earliest) => self.earliest_block_number()?,
+            BlockId::Number(BlockNumberOrTag::Number(number)) => number,
+        };
+        let head = self.canonical_in_memory_state.get_canonical_head();
+        if number > head.number() {
+            return Ok(None);
+        }
+        let view = self.consistent_provider()?;
+        if view.block_hash(head.number())? != Some(head.hash()) {
+            return Err(ProviderError::HeaderNotFound(head.hash().into()));
+        }
+        view.block_hash(number)
+    }
+
     fn pending_block_num_hash(&self) -> ProviderResult<Option<BlockNumHash>> {
         Ok(self.canonical_in_memory_state.pending_block_num_hash())
     }
@@ -780,7 +810,7 @@ impl<N: ProviderNodeTypes> StateProviderFactory for BlockchainProvider<N> {
             BlockNumberOrTag::Pending => self.pending(),
             BlockNumberOrTag::Number(num) => {
                 let hash = self
-                    .block_hash(num)?
+                    .block_hash_for_id(num.into())?
                     .ok_or_else(|| ProviderError::HeaderNotFound(num.into()))?;
                 self.state_by_block_hash(hash)
             }
@@ -1038,6 +1068,7 @@ impl<N: ProviderNodeTypes> StateReader for BlockchainProvider<N> {
             |address, storage_key| state_provider.storage(address, storage_key),
         )?;
         let receipts = provider.receipts_by_tx_range(from_transaction_num..=to_transaction_num)?;
+        let requests = provider.execution_requests(BlockNumHash::new(block, block_hash))?;
 
         Ok(Some(ExecutionOutcome::new_init(
             state,
@@ -1046,7 +1077,7 @@ impl<N: ProviderNodeTypes> StateReader for BlockchainProvider<N> {
             Vec::new(),
             vec![receipts],
             block,
-            Vec::new(),
+            requests.into_iter().collect(),
         )))
     }
 }
@@ -1748,6 +1779,37 @@ mod tests {
                 .map(|block| block.hash())
                 .collect::<Vec<_>>()
         );
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_block_hash_reader_ahead_of_canonical_head() -> eyre::Result<()> {
+        let mut rng = generators::rng();
+        let (provider, database_blocks, _, _) = provider_with_random_blocks(
+            &mut rng,
+            TEST_BLOCKS_COUNT,
+            0,
+            BlockRangeParams::default(),
+        )?;
+        let first = database_blocks.first().unwrap();
+        let last = database_blocks.last().unwrap();
+        provider.set_canonical_head(first.clone_sealed_header());
+
+        assert_eq!(provider.block_hash(last.number)?, Some(last.hash()));
+        assert_eq!(provider.block_hash_for_id(last.number.into())?, None);
+        assert!(matches!(
+            provider.state_by_block_number_or_tag(last.number.into()),
+            Err(ProviderError::HeaderNotFound(_))
+        ));
+        assert_eq!(provider.block_hash_for_id(last.hash().into())?, Some(last.hash()));
+        assert_eq!(
+            provider.block_hash_for_id(BlockNumberOrTag::Latest.into())?,
+            Some(first.hash())
+        );
+
+        provider.set_canonical_head(last.clone_sealed_header());
+        assert_eq!(provider.block_hash_for_id(last.number.into())?, Some(last.hash()));
 
         Ok(())
     }

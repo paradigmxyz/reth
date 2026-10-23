@@ -11,7 +11,7 @@ use reth_chainspec::ChainInfo;
 use reth_ethereum_primitives::EthPrimitives;
 use reth_execution_types::{
     BlockExecutionOutput, BlockExecutionResult, Chain, DecodedRevmBal, ExecutionOutcome,
-    RecoveredBlockAndExecutionOutput,
+    RecoveredBlockAndExecutionOutput, RetainedExecutionData,
 };
 use reth_metrics::{metrics::Gauge, Metrics};
 use reth_primitives_traits::{
@@ -727,6 +727,8 @@ impl<N: NodePrimitives> BlockState<N> {
 /// Represents an executed block stored in-memory.
 #[derive(Clone, Debug)]
 pub struct ExecutedBlock<N: NodePrimitives = EthPrimitives> {
+    #[allow(missing_docs)]
+    pub retained_execution_data: Option<RetainedExecutionData>,
     /// Recovered Block
     pub recovered_block: Arc<RecoveredBlock<N::Block>>,
     /// Block's execution outcome.
@@ -753,6 +755,7 @@ pub struct ExecutedBlock<N: NodePrimitives = EthPrimitives> {
 impl<N: NodePrimitives> Default for ExecutedBlock<N> {
     fn default() -> Self {
         Self {
+            retained_execution_data: None,
             recovered_block: Default::default(),
             execution_output: Arc::new(BlockExecutionOutput {
                 result: BlockExecutionResult {
@@ -789,6 +792,7 @@ impl<N: NodePrimitives> ExecutedBlock<N> {
         trie_data: ComputedTrieData,
     ) -> Self {
         Self {
+            retained_execution_data: None,
             recovered_block,
             execution_output,
             trie_data: LazyTrieData::ready(trie_data),
@@ -814,7 +818,13 @@ impl<N: NodePrimitives> ExecutedBlock<N> {
         execution_output: Arc<BlockExecutionOutput<N::Receipt>>,
         trie_data: LazyTrieData,
     ) -> Self {
-        Self { recovered_block, execution_output, trie_data, bal: None }
+        Self {
+            recovered_block,
+            execution_output,
+            trie_data,
+            bal: None,
+            retained_execution_data: None,
+        }
     }
 
     /// Attaches the prepared block access list of the block, or clears it with `None`.

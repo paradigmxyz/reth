@@ -241,3 +241,64 @@ fn service_limits_cover_the_full_envelope() {
         Err(QueryError::Selection(SelectionError::LimitExceeded("request bytes")))
     ));
 }
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn payload_provider_preserves_receipts_without_auxiliary_block_sources() {
+    let (provider, hash) = test_utils::provider(1);
+    let root =
+        RethRootProvider::new(provider.clone()).lookup(hash, ObjectKind::Receipts).unwrap().root();
+    let service = QueryService::from_payload_provider(
+        provider,
+        reth_provider::NoopBalStore,
+        reth_pureth_block::PayloadLimits::default(),
+    );
+    let request = request(hash, "[0].status");
+    let response = service.query(request.clone()).unwrap();
+    verify_query_response(&request, &response, root, SelectionLimits::default()).unwrap();
+    let mut component = request;
+    component.object = "transactions".into();
+    component.selection.selections[0].path = "[0]".into();
+    assert!(matches!(service.query(component), Err(QueryError::PayloadAcquisition(_))));
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn payload_provider_checks_requests_and_cancellation_before_acquisition() {
+    let (provider, _) = test_utils::provider(1);
+    let service = QueryService::from_payload_provider(
+        provider,
+        reth_provider::NoopBalStore,
+        reth_pureth_block::PayloadLimits::default(),
+    );
+    let mut query = request(B256::ZERO, "not_a_path");
+    query.object = "transactions".into();
+    assert!(matches!(
+        service.query(query.clone()),
+        Err(QueryError::Selection(SelectionError::InvalidPath))
+    ));
+    query.selection.selections[0].path = "[0]".into();
+    assert!(matches!(
+        service.query_with_cancel(query.clone(), &AtomicBool::new(true)),
+        Err(QueryError::Selection(SelectionError::Cancelled))
+    ));
+    query.selection.selections[0].path = ".".into();
+    query.selection.selections[0].operation =
+        SelectionOperation::Filter { output: FilterOutput::Receipts, predicates: Vec::new() };
+    assert!(matches!(
+        service.query(query.clone()),
+        Err(QueryError::Selection(SelectionError::UnsupportedOperation))
+    ));
+    query.object = "unknown".into();
+    assert!(matches!(service.query(query), Err(QueryError::UnsupportedObject)));
+    let association = TransactionReceiptRequest { block_hash: B256::ZERO, transaction_index: 0 };
+    assert!(matches!(
+        service.transaction_receipt_with_cancel(association.clone(), &AtomicBool::new(true)),
+        Err(QueryError::Selection(SelectionError::Cancelled))
+    ));
+    let bounded = service.with_limits(SelectionLimits { selections: 3, ..Default::default() });
+    assert!(matches!(
+        bounded.transaction_receipt(association),
+        Err(QueryError::Selection(SelectionError::LimitExceeded("selections")))
+    ));
+}

@@ -25,6 +25,7 @@ native-primitives = [
     "reth-primitives-traits/serde",
 ]
 native-source = [
+    "native-primitives",
     "dep:alloy-consensus",
     "dep:alloy-eips",
     "dep:reth-chainspec",
@@ -36,6 +37,7 @@ native-source = [
     "dep:reth-execution-types",
     "dep:reth-primitives-traits",
     "dep:reth-provider",
+    "dep:reth-tasks",
 ]
 
 [dependencies]
@@ -59,6 +61,7 @@ reth-evm = { workspace = true, optional = true }
 reth-execution-types = { workspace = true, optional = true }
 reth-primitives-traits = { workspace = true, optional = true }
 reth-provider = { workspace = true, optional = true }
+reth-tasks = { workspace = true, optional = true }
 reth-codecs = { workspace = true, optional = true, features = ["alloy"] }
 serde = { workspace = true, optional = true, features = ["derive"] }
 thiserror = { workspace = true, optional = true }

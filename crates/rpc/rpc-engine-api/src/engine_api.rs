@@ -532,6 +532,7 @@ where
         // Validate timestamp according to engine rules
         // Enforces Osaka restrictions on `getPayloadV4`.
         let timestamp = self.get_payload_timestamp(payload_id).await?;
+        self.inner.validator.validate_get_payload_version(version, timestamp)?;
         validate_payload_timestamp(
             &self.inner.chain_spec,
             version,
@@ -559,10 +560,7 @@ where
         &self,
         payload_id: PayloadId,
     ) -> EngineApiResult<EngineT::ExecutionPayloadEnvelopeV1> {
-        self.get_built_payload(payload_id).await?.try_into().map_err(|_| {
-            warn!(version = ?EngineApiMessageVersion::V1, "could not transform built payload");
-            EngineApiError::UnknownPayload
-        })
+        self.get_payload_inner(payload_id, EngineApiMessageVersion::V1).await
     }
 
     /// Metrics version of `get_payload_v1`
@@ -1394,6 +1392,11 @@ where
     ) -> RpcResult<PayloadStatus> {
         trace!(target: "rpc::engine", "Serving engine_newPayloadV4");
 
+        self.inner
+            .validator
+            .validate_payload_requests(payload.payload_inner.payload_inner.timestamp, &requests)
+            .map_err(EngineApiError::from)?;
+
         // Accept requests as a hash only if it is explicitly allowed
         if requests.is_hash() && !self.inner.accept_execution_requests_hash {
             return Err(EngineApiError::UnexpectedRequestsHash.into());
@@ -1423,6 +1426,13 @@ where
         requests: RequestsOrHash,
     ) -> RpcResult<PayloadStatus> {
         trace!(target: "rpc::engine", "Serving engine_newPayloadV5");
+        self.inner
+            .validator
+            .validate_payload_requests(
+                payload.payload_inner.payload_inner.payload_inner.timestamp,
+                &requests,
+            )
+            .map_err(EngineApiError::from)?;
         // Accept requests as a hash only if it is explicitly allowed.
         if requests.is_hash() && !self.inner.accept_execution_requests_hash {
             return Err(EngineApiError::UnexpectedRequestsHash.into());
@@ -1451,6 +1461,13 @@ where
         inclusion_list_transactions: Vec<Bytes>,
     ) -> RpcResult<PayloadStatusV2> {
         trace!(target: "rpc::engine", "Serving engine_newPayloadV6");
+        self.inner
+            .validator
+            .validate_payload_requests(
+                payload.payload_inner.payload_inner.payload_inner.timestamp,
+                &execution_requests,
+            )
+            .map_err(EngineApiError::from)?;
         if execution_requests.is_hash() && !self.inner.accept_execution_requests_hash {
             return Err(EngineApiError::UnexpectedRequestsHash.into());
         }

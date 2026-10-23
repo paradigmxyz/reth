@@ -4,15 +4,24 @@ use crate::{
     SelectionOperation, SelectionProofFormat, SelectionRequest, SelectionResponse,
 };
 use alloy_primitives::B256;
-use reth_pureth_receipt::{ProviderSnapshot, RootContext};
+use reth_pureth_receipt::{Eip6466ReceiptSnapshot, ProviderSnapshot, RootContext};
 use serde::{Deserialize, Serialize};
 use std::sync::atomic::{AtomicBool, Ordering};
 
 #[cfg(not(target_arch = "wasm32"))]
 mod native;
 #[cfg(not(target_arch = "wasm32"))]
+mod runtime;
+#[cfg(not(target_arch = "wasm32"))]
 pub use native::{
-    convert_eip6466_block_receipts, convert_eip6466_receipt, verify_eip6466_receipt_response,
+    convert_eip6466_block_receipts, convert_eip6466_block_receipts_from_retained,
+    convert_eip6466_receipt, convert_eip6466_receipt_from_retained,
+    verify_eip6466_receipt_response,
+};
+#[cfg(not(target_arch = "wasm32"))]
+pub use runtime::{
+    ExecutionHeaderConverter, ExecutionReceiptConverter, ExecutionReceiptEnvelope,
+    ExecutionRpcReceipt, ExecutionRpcTypes,
 };
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -39,7 +48,23 @@ pub enum ReceiptResponse<T> {
 #[derive(Clone, Copy, Debug)]
 pub enum ReceiptProofSupport<'a> {
     Supported(&'a ProviderSnapshot),
+    Retained { block_hash: B256, snapshot: &'a Eip6466ReceiptSnapshot },
     Unsupported,
+}
+
+impl<'a> ReceiptProofSupport<'a> {
+    fn source(self) -> Result<Option<(B256, &'a Eip6466ReceiptSnapshot)>, SelectionError> {
+        match self {
+            Self::Unsupported => Ok(None),
+            Self::Retained { block_hash, snapshot } => Ok(Some((block_hash, snapshot))),
+            Self::Supported(snapshot) => {
+                if snapshot.root_context() != RootContext::RethExperimentalUnanchored {
+                    return Err(SelectionError::InvalidContext);
+                }
+                Ok(Some((snapshot.block_hash(), snapshot.receipt_snapshot())))
+            }
+        }
+    }
 }
 
 fn request(indices: impl IntoIterator<Item = u64>) -> SelectionRequest {
@@ -55,20 +80,13 @@ fn request(indices: impl IntoIterator<Item = u64>) -> SelectionRequest {
     }
 }
 
-fn proof(
-    snapshot: &ProviderSnapshot,
-    index: u64,
-    selection: SelectionResponse,
-) -> Result<WholeReceiptProof, SelectionError> {
-    if snapshot.root_context() != RootContext::RethExperimentalUnanchored {
-        return Err(SelectionError::InvalidContext);
-    }
-    Ok(WholeReceiptProof {
-        block_hash: snapshot.block_hash(),
+fn proof(block_hash: B256, index: u64, selection: SelectionResponse) -> WholeReceiptProof {
+    WholeReceiptProof {
+        block_hash,
         receipt_index: index,
         root_context: "reth_experimental_unanchored".into(),
         selection,
-    })
+    }
 }
 
 fn check_receipt(receipt: &impl Serialize) -> Result<(), SelectionError> {
@@ -89,17 +107,30 @@ pub fn extend_receipt_response<T: Serialize>(
     if !enabled {
         return Ok(ReceiptResponse::Legacy(receipt));
     }
-    encoded_size(&receipt, limits.response_bytes, "response bytes")?;
+    let receipt_bytes = encoded_size(&receipt, limits.response_bytes, "response bytes")?;
     check_receipt(&receipt)?;
-    let ssz_proof = match support {
-        ReceiptProofSupport::Unsupported => None,
-        ReceiptProofSupport::Supported(snapshot) => {
-            let selection = crate::select_receipt_snapshot(
-                snapshot.receipt_snapshot(),
+    let ssz_proof = match support.source()? {
+        None => None,
+        Some((block_hash, snapshot)) => {
+            let cancelled = AtomicBool::new(false);
+            let mut source = source_budget(snapshot, limits, &cancelled)?;
+            crate::selection::add(
+                &mut source,
+                receipt_bytes
+                    .checked_mul(2)
+                    .ok_or(SelectionError::LimitExceeded("source bytes"))?,
+                limits.source_bytes,
+                "source bytes",
+            )?;
+            let selection = select_with_source(
+                snapshot,
                 &request([index]),
                 limits,
+                &cancelled,
+                SelectionProofFormat::SingleBranch,
+                source,
             )?;
-            Some(proof(snapshot, index, selection)?)
+            Some(proof(block_hash, index, selection))
         }
     };
     let response = ReceiptResponse::WithProof { receipt, ssz_proof };
@@ -114,10 +145,37 @@ pub fn extend_block_receipt_responses<T: Serialize>(
     limits: SelectionLimits,
     cancelled: &AtomicBool,
 ) -> Result<Vec<ReceiptResponse<T>>, SelectionError> {
+    if cancelled.load(Ordering::Relaxed) {
+        return Err(SelectionError::Cancelled);
+    }
     if !enabled {
         return Ok(receipts.into_iter().map(ReceiptResponse::Legacy).collect());
     }
-    encoded_size(&receipts, limits.response_bytes, "response bytes")?;
+    if support.source()?.is_some_and(|(_, retained)| retained.receipts().len() != receipts.len()) {
+        return Err(SelectionError::InvalidContext);
+    }
+    let indices = (0..receipts.len() as u64).collect::<Vec<_>>();
+    extend_indexed_receipt_responses(receipts, &indices, support, enabled, limits, cancelled)
+}
+
+pub(super) fn extend_indexed_receipt_responses<T: Serialize>(
+    receipts: Vec<T>,
+    indices: &[u64],
+    support: ReceiptProofSupport<'_>,
+    enabled: bool,
+    limits: SelectionLimits,
+    cancelled: &AtomicBool,
+) -> Result<Vec<ReceiptResponse<T>>, SelectionError> {
+    if cancelled.load(Ordering::Relaxed) {
+        return Err(SelectionError::Cancelled);
+    }
+    if indices.len() != receipts.len() {
+        return Err(SelectionError::InvalidContext);
+    }
+    if !enabled {
+        return Ok(receipts.into_iter().map(ReceiptResponse::Legacy).collect());
+    }
+    let receipt_bytes = encoded_size(&receipts, limits.response_bytes, "response bytes")?;
     for receipt in &receipts {
         if cancelled.load(Ordering::Relaxed) {
             return Err(SelectionError::Cancelled);
@@ -125,12 +183,14 @@ pub fn extend_block_receipt_responses<T: Serialize>(
         check_receipt(receipt)?;
     }
     let mut proofs = Vec::new();
-    if let ReceiptProofSupport::Supported(snapshot) = support {
-        let retained = snapshot.receipt_snapshot();
-        if retained.receipts().len() != receipts.len() {
-            return Err(SelectionError::InvalidContext);
-        }
-        let source = source_budget(retained, limits, cancelled)?;
+    if let Some((block_hash, retained)) = support.source()? {
+        let mut source = source_budget(retained, limits, cancelled)?;
+        crate::selection::add(
+            &mut source,
+            receipt_bytes.checked_mul(2).ok_or(SelectionError::LimitExceeded("source bytes"))?,
+            limits.source_bytes,
+            "source bytes",
+        )?;
         if receipts.len() > limits.targets {
             return Err(SelectionError::LimitExceeded("targets"));
         }
@@ -146,13 +206,13 @@ pub fn extend_block_receipt_responses<T: Serialize>(
             let end = receipts.len().min(start.saturating_add(limits.selections));
             let selection = select_with_source(
                 retained,
-                &request(start as u64..end as u64),
+                &request(indices[start..end].iter().copied()),
                 limits,
                 cancelled,
                 SelectionProofFormat::SingleBranch,
                 source,
             )?;
-            for (index, result) in (start..end).zip(selection.results) {
+            for (&index, result) in indices[start..end].iter().zip(selection.results) {
                 for value in &result.values_ssz {
                     crate::selection::add(
                         &mut value_bytes,
@@ -171,15 +231,15 @@ pub fn extend_block_receipt_responses<T: Serialize>(
                 }
                 remaining_materialization(source, value_bytes, hashes, limits.source_bytes)?;
                 proofs.push(Some(proof(
-                    snapshot,
-                    index as u64,
+                    block_hash,
+                    index,
                     SelectionResponse {
                         root: retained.root(),
                         proof_format: Some(SelectionProofFormat::SingleBranch),
                         results: vec![result],
                         multiproof: None,
                     },
-                )?));
+                )));
             }
         }
     } else {
@@ -218,6 +278,169 @@ pub fn verify_whole_receipt_proof(
 mod tests {
     use super::*;
     use crate::test_utils;
+
+    #[test]
+    fn single_receipt_proof_reserves_existing_response_work() {
+        let snapshot = test_utils::snapshot(1);
+        let mut limits = SelectionLimits::default();
+        let source =
+            source_budget(snapshot.receipt_snapshot(), limits, &AtomicBool::new(false)).unwrap();
+        let receipt = serde_json::json!({"payload": "x".repeat(128 * 1024)});
+        let receipt_bytes =
+            encoded_size(&receipt, limits.response_bytes, "response bytes").unwrap();
+        limits.source_bytes = source + receipt_bytes - 1;
+        assert!(crate::select_receipt_snapshot(snapshot.receipt_snapshot(), &request([0]), limits)
+            .is_ok());
+        assert!(matches!(
+            extend_receipt_response(
+                receipt,
+                0,
+                ReceiptProofSupport::Supported(&snapshot),
+                true,
+                limits
+            ),
+            Err(SelectionError::LimitExceeded("source bytes"))
+        ));
+    }
+
+    #[test]
+    fn indexed_receipt_proofs_preserve_nonzero_indices_order_and_duplicates() {
+        let snapshot = test_utils::snapshot(2);
+        let support = ReceiptProofSupport::Supported(&snapshot);
+        let receipts = vec![serde_json::json!({"transactionIndex": "0x1"}); 3];
+        let indices = [1, 0, 1];
+        let responses = extend_indexed_receipt_responses(
+            receipts.clone(),
+            &indices,
+            support,
+            true,
+            SelectionLimits::default(),
+            &AtomicBool::new(false),
+        )
+        .unwrap();
+        assert_eq!(responses.len(), indices.len());
+        for (response, index) in responses.iter().zip(indices) {
+            let ReceiptResponse::WithProof { ssz_proof: Some(proof), .. } = response else {
+                panic!("expected proof")
+            };
+            verify_whole_receipt_proof(
+                snapshot.block_hash(),
+                index,
+                proof,
+                snapshot.root(),
+                SelectionLimits::default(),
+            )
+            .unwrap();
+        }
+        assert!(matches!(
+            extend_block_receipt_responses(
+                receipts.clone(),
+                support,
+                true,
+                SelectionLimits::default(),
+                &AtomicBool::new(false)
+            ),
+            Err(SelectionError::InvalidContext)
+        ));
+        assert!(matches!(
+            extend_indexed_receipt_responses(
+                receipts.clone(),
+                &[1],
+                support,
+                true,
+                SelectionLimits::default(),
+                &AtomicBool::new(false)
+            ),
+            Err(SelectionError::InvalidContext)
+        ));
+        assert!(matches!(
+            extend_block_receipt_responses(
+                receipts,
+                support,
+                false,
+                SelectionLimits::default(),
+                &AtomicBool::new(true)
+            ),
+            Err(SelectionError::Cancelled)
+        ));
+    }
+
+    #[test]
+    fn retained_support_preserves_proof_policy_output_and_limits() {
+        let snapshot = test_utils::snapshot(2);
+        let old = ReceiptProofSupport::Supported(&snapshot);
+        let retained = ReceiptProofSupport::Retained {
+            block_hash: snapshot.block_hash(),
+            snapshot: snapshot.receipt_snapshot(),
+        };
+        let receipt = serde_json::json!({ "transactionIndex": "0x0" });
+        for enabled in [false, true] {
+            let response = |support| {
+                serde_json::to_value(
+                    extend_receipt_response(
+                        receipt.clone(),
+                        0,
+                        support,
+                        enabled,
+                        SelectionLimits::default(),
+                    )
+                    .unwrap(),
+                )
+                .unwrap()
+            };
+            assert_eq!(response(old), response(retained));
+        }
+        let receipts = vec![receipt.clone(), receipt];
+        let batch = |support| {
+            serde_json::to_value(
+                extend_block_receipt_responses(
+                    receipts.clone(),
+                    support,
+                    true,
+                    SelectionLimits::default(),
+                    &AtomicBool::new(false),
+                )
+                .unwrap(),
+            )
+            .unwrap()
+        };
+        assert_eq!(batch(old), batch(retained));
+        for support in [old, retained] {
+            assert_eq!(
+                extend_receipt_response(
+                    receipts[0].clone(),
+                    2,
+                    support,
+                    true,
+                    SelectionLimits::default(),
+                )
+                .unwrap_err(),
+                SelectionError::OutOfBounds
+            );
+            assert_eq!(
+                extend_block_receipt_responses(
+                    receipts.clone(),
+                    support,
+                    true,
+                    SelectionLimits { witness_hashes: 0, ..Default::default() },
+                    &AtomicBool::new(false),
+                )
+                .unwrap_err(),
+                SelectionError::LimitExceeded("witness hashes")
+            );
+            assert_eq!(
+                extend_block_receipt_responses(
+                    receipts.clone(),
+                    support,
+                    true,
+                    SelectionLimits::default(),
+                    &AtomicBool::new(true),
+                )
+                .unwrap_err(),
+                SelectionError::Cancelled
+            );
+        }
+    }
     #[test]
     fn receipt_response_preserves_legacy_and_distinguishes_null_from_errors() {
         let receipt = serde_json::json!({"status": "0x1", "transactionHash": B256::ZERO});
