@@ -4,7 +4,7 @@ mod input;
 mod model;
 
 use alloy_consensus::Header;
-use alloy_primitives::{keccak256, Address, B256, U256};
+use alloy_primitives::{keccak256, B256, U256};
 use eyre::{ensure, Context, Result};
 use input::{Input, Operation};
 use metrics_util::debugging::{DebugValue, DebuggingRecorder, Snapshotter};
@@ -118,8 +118,16 @@ fn verify(factory: &ProviderFactory<Node>, state: &Model, tip: u64, state_tip: u
             view.basic_account(address)?.as_ref() == Some(&entry.account),
             "plain account {address} at {tip}"
         );
-        // Include deleted and never-written slots, not only surviving leaves.
-        let slots = (0..64).map(|slot| B256::from(U256::from(slot))).collect::<Vec<_>>();
+        // Include deleted slots and both range endpoints, not only surviving leaves.
+        let slots = entry
+            .touched_slots
+            .iter()
+            .copied()
+            .chain([U256::ZERO, U256::from(u32::MAX)])
+            .collect::<BTreeSet<_>>()
+            .into_iter()
+            .map(B256::from)
+            .collect::<Vec<_>>();
         for slot in &slots {
             ensure!(
                 view.storage(*address, *slot)?.unwrap_or_default() ==
@@ -768,9 +776,22 @@ fn main() -> Result<()> {
                     );
                     let mut input = Input::generate(config.seed, config.blocks, config.updates);
                     if command.as_deref() == Some("generate-suffix") {
-                        let accounts = (1..=16u64)
-                            .map(|a| model::Update::Account {
-                                address: Address::from_word(B256::from(U256::from(a))),
+                        let accounts = input
+                            .operations
+                            .iter()
+                            .filter_map(|op| match op {
+                                Operation::UpdateBatch { updates } => Some(updates.iter()),
+                                _ => None,
+                            })
+                            .flatten()
+                            .filter_map(|update| match update {
+                                model::Update::Account { address, .. } => Some(*address),
+                                _ => None,
+                            })
+                            .collect::<BTreeSet<_>>()
+                            .into_iter()
+                            .map(|address| model::Update::Account {
+                                address,
                                 account: reth_primitives_traits::Account {
                                     nonce: 1,
                                     ..Default::default()

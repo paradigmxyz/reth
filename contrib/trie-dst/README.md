@@ -51,9 +51,11 @@ unsuccessfully. Keep stdout and stderr.
 
 ## What runs
 
-The generator uses 16 accounts and 64 slots per account. It creates nonempty
-accounts, changes nonce/balance, performs storage-only updates, overwrites slots,
-and deletes individual slots. Each block receives the configured number of
+The generator draws new addresses and storage slots uniformly from the full
+32-bit range (0 through `0xFFFFFFFF`). It uses up to 16 generated accounts,
+reusing existing accounts and slots for storage-only updates. It creates
+nonempty accounts, changes nonce/balance, overwrites slots, and deletes
+individual slots. Each block receives the configured number of
 updates. It independently tracks the complete state and builds a per-block
 `BundleState` with original and final account/storage values and reverts.
 
@@ -96,8 +98,9 @@ It then drains trie, proof-worker, and deferred-drop queues before exiting, so
 all database handles close while RocksDB's global scheduler is still alive.
 
 After every commit, a fresh overlay-backed provider must expose the reference
-accounts and all 64 slots, including deleted slots, at the database tip. Account
-and storage proofs must verify against the independent root. Fully flushed
+accounts and every touched slot, including deleted slots, plus both range
+endpoints at the database tip. Account and storage proofs must verify against
+the independent root. Fully flushed
 commits additionally compare the complete raw hashed tables with the reference
 and calculate a fresh database-backed root. Metrics report proof revelation,
 trie reuse, pruning, overlay computation, and partial commits. Their counts

@@ -17,6 +17,7 @@ use std::collections::{BTreeMap, BTreeSet};
 pub struct ModelAccount {
     pub account: Account,
     pub storage: BTreeMap<U256, U256>,
+    pub touched_slots: BTreeSet<U256>,
 }
 
 pub type Model = BTreeMap<Address, ModelAccount>;
@@ -38,6 +39,7 @@ impl Update {
             }
             Self::Storage { address, slot, value } => {
                 let entry = state.get_mut(address).expect("storage account exists");
+                entry.touched_slots.insert(*slot);
                 if value.is_zero() {
                     entry.storage.remove(slot);
                 } else {
@@ -56,11 +58,26 @@ impl Update {
     }
 }
 
+pub fn random_address(rng: &mut impl Rng) -> Address {
+    Address::from_word(B256::from(U256::from(rng.random::<u32>())))
+}
+
+pub fn random_slot(rng: &mut impl Rng) -> U256 {
+    U256::from(rng.random::<u32>())
+}
+
 pub fn generate(rng: &mut StdRng, state: &Model, updates: usize) -> Vec<Update> {
     let mut state = state.clone();
+    let mut addresses = state.keys().copied().collect::<Vec<_>>();
     (0..updates)
         .map(|_| {
-            let address = Address::from_word(B256::from(U256::from(rng.random_range(1..=16u64))));
+            // Bound the active account set while sampling new keys across all 32 bits.
+            let address =
+                if !addresses.is_empty() && (addresses.len() >= 16 || rng.random_ratio(3, 4)) {
+                    addresses[rng.random_range(0..addresses.len())]
+                } else {
+                    random_address(rng)
+                };
             let operation = if !state.contains_key(&address) || rng.random_ratio(1, 4) {
                 let mut account =
                     state.get(&address).map(|entry| entry.account.to_owned()).unwrap_or_default();
@@ -68,7 +85,12 @@ pub fn generate(rng: &mut StdRng, state: &Model, updates: usize) -> Vec<Update> 
                 account.balance = U256::from(rng.random_range(1..=1_000_000u64));
                 Update::Account { address, account }
             } else {
-                let slot = U256::from(rng.random_range(0..64u64));
+                let known_slots = &state[&address].touched_slots;
+                let slot = if !known_slots.is_empty() && rng.random_bool(0.5) {
+                    *known_slots.iter().nth(rng.random_range(0..known_slots.len())).unwrap()
+                } else {
+                    random_slot(rng)
+                };
                 let value = if rng.random_ratio(1, 3) {
                     U256::ZERO
                 } else {
@@ -76,6 +98,9 @@ pub fn generate(rng: &mut StdRng, state: &Model, updates: usize) -> Vec<Update> 
                 };
                 Update::Storage { address, slot, value }
             };
+            if !state.contains_key(&address) {
+                addresses.push(address);
+            }
             operation.apply(&mut state);
             operation
         })

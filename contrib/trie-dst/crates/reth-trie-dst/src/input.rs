@@ -1,6 +1,6 @@
 //! Explicit trie-task operation stream. Only `Commit` ends a block.
 
-use crate::model::{apply, generate, Model, Update};
+use crate::model::{apply, generate, random_address, random_slot, Model, Update};
 use alloy_primitives::{Address, B256, KECCAK256_EMPTY, U256};
 use eyre::{ensure, Result};
 use rand::{rngs::StdRng, seq::SliceRandom, Rng, SeedableRng};
@@ -54,9 +54,8 @@ impl Input {
                 if targets.len() > 1 { rng.random_range(1..targets.len()) } else { targets.len() };
             targets.truncate(count);
             for _ in 0..rng.random_range(1..=8) {
-                let address =
-                    Address::from_word(B256::from(U256::from(rng.random_range(17..=32u64))));
-                let slot = rng.random_bool(0.5).then(|| U256::from(rng.random_range(0..64u64)));
+                let address = random_address(&mut rng);
+                let slot = rng.random_bool(0.5).then(|| random_slot(&mut rng));
                 targets.push((address, slot));
             }
             targets.shuffle(&mut rng);
@@ -331,6 +330,31 @@ impl Input {
                 ensure!(path.get(2).map(String::as_str) == Some("updates"), "invalid update path");
                 let j: usize =
                     path.get(3).ok_or_else(|| eyre::eyre!("missing update index"))?.parse()?;
+                let available_accounts = if operator == "storage.address" {
+                    self.operations
+                        .iter()
+                        .take(i + 1)
+                        .enumerate()
+                        .filter_map(|(index, op)| match op {
+                            Operation::UpdateBatch { updates } => {
+                                Some(updates.iter().take(if index == i {
+                                    j
+                                } else {
+                                    updates.len()
+                                }))
+                            }
+                            _ => None,
+                        })
+                        .flatten()
+                        .filter_map(|update| match update {
+                            Update::Account { address, .. } => Some(*address),
+                            _ => None,
+                        })
+                        .collect::<Vec<_>>()
+                } else {
+                    Vec::new()
+                };
+                let mut renamed = None;
                 let Some(Operation::UpdateBatch { updates }) = self.operations.get_mut(i) else {
                     eyre::bail!("not an update batch")
                 };
@@ -340,9 +364,9 @@ impl Input {
                     {
                         match operator {
                             "account.address" => {
-                                *address = Address::from_word(B256::from(U256::from(
-                                    rng.random_range(1..=16u64),
-                                )))
+                                let old = *address;
+                                *address = random_address(&mut rng);
+                                renamed = Some((old, *address));
                             }
                             "account.balance" => account.balance = U256::from(rng.random::<u64>()),
                             "account.nonce" => account.nonce = rng.random(),
@@ -354,15 +378,38 @@ impl Input {
                     {
                         match operator {
                             "storage.address" => {
-                                *address = Address::from_word(B256::from(U256::from(
-                                    rng.random_range(1..=16u64),
-                                )))
+                                if !available_accounts.is_empty() {
+                                    *address = available_accounts
+                                        [rng.random_range(0..available_accounts.len())];
+                                }
                             }
-                            "storage.slot" => *slot = U256::from(rng.random_range(0..64u64)),
+                            "storage.slot" => *slot = random_slot(&mut rng),
                             _ => *value = U256::from(rng.random::<u64>()),
                         }
                     }
                     _ => eyre::bail!("update path/type mismatch"),
+                }
+                if let Some((old, new)) = renamed {
+                    // Storage after this account update belongs to its new address until
+                    // recreation.
+                    'operations: for (index, op) in self.operations.iter_mut().enumerate().skip(i) {
+                        if let Operation::UpdateBatch { updates } = op {
+                            for (update_index, update) in updates.iter_mut().enumerate() {
+                                if index == i && update_index <= j {
+                                    continue;
+                                }
+                                match update {
+                                    Update::Account { address, .. } if *address == old => {
+                                        break 'operations;
+                                    }
+                                    Update::Storage { address, .. } if *address == old => {
+                                        *address = new;
+                                    }
+                                    _ => {}
+                                }
+                            }
+                        }
+                    }
                 }
             }
             "prewarm.account" | "prewarm.storage.address" | "prewarm.storage.slot" => {
@@ -381,7 +428,7 @@ impl Input {
                     *accounts
                         .get_mut(j)
                         .ok_or_else(|| eyre::eyre!("account hint out of range"))? =
-                        Address::from_word(B256::from(U256::from(rng.random_range(1..=32u64))));
+                        random_address(&mut rng);
                 } else {
                     ensure!(
                         path.get(2).map(String::as_str) == Some("storages"),
@@ -391,10 +438,9 @@ impl Input {
                         .get_mut(j)
                         .ok_or_else(|| eyre::eyre!("storage hint out of range"))?;
                     if operator == "prewarm.storage.address" {
-                        hint.address =
-                            Address::from_word(B256::from(U256::from(rng.random_range(1..=32u64))));
+                        hint.address = random_address(&mut rng);
                     } else {
-                        hint.slot = U256::from(rng.random_range(0..64u64));
+                        hint.slot = random_slot(&mut rng);
                     }
                 }
             }
