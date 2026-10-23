@@ -10047,7 +10047,6 @@ dependencies = [
  "reth-storage-overlay",
  "reth-tasks",
  "reth-testing-utils",
- "reth-tracing",
  "reth-trie",
  "reth-trie-db",
  "revm",
