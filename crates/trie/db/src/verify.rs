@@ -6,6 +6,7 @@ use crate::{
 };
 use alloy_primitives::B256;
 use reth_db_api::{
+    database::Database,
     tables,
     transaction::{CursorTy, DbTx, DupCursorTy},
     DatabaseError,
@@ -38,26 +39,22 @@ where
     TX: DbTx + 'static,
     A: TrieTableAdapter,
 {
-    /// Starts verification over read transactions returned by `open_tx`, which is called once for
-    /// every transaction the verifier needs.
+    /// Starts verification over read transactions opened through `db`.
     ///
-    /// Every transaction returned by `open_tx` must read the same database version and have
-    /// long-lived read transaction safety disabled. Each storage worker owns a separate
-    /// transaction.
+    /// Prevent commits while this constructor opens the transactions so they read the same database
+    /// version. Each storage worker owns a separate transaction. For long-running verification,
+    /// pass a [`LongReadTransactionDatabase`](reth_db_api::database::LongReadTransactionDatabase).
     ///
     /// # Panics
     ///
     /// Panics if `storage_workers` is zero.
-    pub fn new<E: From<DatabaseError>>(
-        mut open_tx: impl FnMut() -> Result<TX, E>,
-        storage_workers: usize,
-    ) -> Result<Self, E> {
+    pub fn new(db: &impl Database<TX = TX>, storage_workers: usize) -> Result<Self, DatabaseError> {
         assert!(storage_workers > 0, "at least one storage worker is required");
-        let account_tx = open_tx()?;
-        let lookahead_tx = open_tx()?;
+        let account_tx = db.tx()?;
+        let lookahead_tx = db.tx()?;
         let storage_workers = (0..storage_workers)
             .map(|_| {
-                let tx = open_tx()?;
+                let tx = db.tx()?;
                 Ok(StorageWorker {
                     trie: DatabaseTrieCursorFactory::<_, A>::new(&tx)
                         .storage_trie_cursor(B256::ZERO)?,
@@ -66,7 +63,7 @@ where
                     tx,
                 })
             })
-            .collect::<Result<Vec<_>, E>>()?;
+            .collect::<Result<Vec<_>, DatabaseError>>()?;
         let verifier = Verifier::new(
             DatabaseTrieCursorFactory::<_, A>::new(&account_tx).account_trie_cursor()?,
             DatabaseHashedCursorFactory::new(&account_tx).hashed_account_cursor()?,

@@ -2,6 +2,7 @@
 
 use alloy_consensus::BlockHeader;
 use eyre::{ensure, eyre, Result};
+use reth_db::database::LongReadTransactionDatabase;
 use reth_provider::{
     BlockNumReader, DBProvider, DatabaseProviderFactory, HeaderProvider, StorageSettingsCache,
 };
@@ -28,8 +29,8 @@ use reth_trie_db::{DatabaseHashedCursorFactory, DatabaseTrieCursorFactory, Datab
 pub fn assert_trie_consistency<F>(factory: &F) -> Result<()>
 where
     F: DatabaseProviderFactory<
-        Provider: DBProvider + StorageSettingsCache + BlockNumReader + HeaderProvider,
-    >,
+            Provider: DBProvider + StorageSettingsCache + BlockNumReader + HeaderProvider,
+        > + AsRef<F::DB>,
 {
     // Prevent commits while opening the independent snapshots.
     let snapshot_guard = factory.database_provider_rw()?;
@@ -42,11 +43,7 @@ where
 
     reth_trie_db::with_adapter!(provider, |A| {
         let verifier = DatabaseVerifier::<_, A>::new(
-            || {
-                factory
-                    .database_provider_ro()
-                    .map(|provider| provider.disable_long_read_transaction_safety().into_tx())
-            },
+            &LongReadTransactionDatabase(factory.as_ref()),
             default_storage_workers(),
         )?;
         drop(snapshot_guard);

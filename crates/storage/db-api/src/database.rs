@@ -128,3 +128,41 @@ impl<DB: Database> ReaderTxnTracker for DB {
         }
     }
 }
+
+/// Database adapter that disables long-lived read transaction safety on every transaction it opens.
+///
+/// Wrap an owned or borrowed database for offline work that intentionally holds transactions open.
+/// Transactions opened directly through the underlying database retain their normal safety policy.
+#[derive(Debug)]
+pub struct LongReadTransactionDatabase<DB>(pub DB);
+
+impl<DB: Database> Database for LongReadTransactionDatabase<DB> {
+    type TX = DB::TX;
+    type TXMut = DB::TXMut;
+
+    #[track_caller]
+    fn tx(&self) -> Result<Self::TX, DatabaseError> {
+        let mut tx = self.0.tx()?;
+        tx.disable_long_read_transaction_safety();
+        Ok(tx)
+    }
+
+    #[track_caller]
+    fn tx_mut(&self) -> Result<Self::TXMut, DatabaseError> {
+        let mut tx = self.0.tx_mut()?;
+        tx.disable_long_read_transaction_safety();
+        Ok(tx)
+    }
+
+    fn path(&self) -> PathBuf {
+        self.0.path()
+    }
+
+    fn oldest_reader_txnid(&self) -> Option<u64> {
+        self.0.oldest_reader_txnid()
+    }
+
+    fn last_txnid(&self) -> Option<u64> {
+        self.0.last_txnid()
+    }
+}
