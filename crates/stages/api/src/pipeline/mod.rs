@@ -364,9 +364,6 @@ impl<N: ProviderNodeTypes> Pipeline<N> {
         };
         prune_modes.ensure_unwind_target_unpruned(latest_block, to, &checkpoints)?;
 
-        // Unwind stages in reverse order of execution
-        let unwind_pipeline = self.stages.iter_mut().rev();
-
         // Legacy Engine: This prevents a race condition in which the `StaticFileProducer` could
         // attempt to proceed with a finalized block which has been unwinded
         let _locked_sf_producer = self.static_file_producer.lock();
@@ -374,7 +371,24 @@ impl<N: ProviderNodeTypes> Pipeline<N> {
         let mut provider_rw =
             self.provider_factory.unwind_provider_rw()?.disable_long_read_transaction_safety();
 
-        for stage in unwind_pipeline {
+        // Stages unwind in reverse order and commit one at a time, so check all of them first. A
+        // target that an earlier stage rejects would otherwise leave the later stages unwound.
+        for stage in &mut self.stages {
+            let stage_id = stage.id();
+            let checkpoint = provider_rw.get_stage_checkpoint(stage_id)?.unwrap_or_default();
+            if checkpoint.block_number > to &&
+                let Err(err) = stage.validate_unwind(
+                    &provider_rw,
+                    UnwindInput { checkpoint, unwind_to: to, bad_block },
+                )
+            {
+                self.event_sender.notify(PipelineEvent::Error { stage_id });
+                return Err(PipelineError::Stage(StageError::Fatal(Box::new(err))))
+            }
+        }
+
+        // Unwind stages in reverse order of execution
+        for stage in self.stages.iter_mut().rev() {
             let stage_id = stage.id();
             let span = info_span!("Unwinding", stage = %stage_id);
             let _enter = span.enter();
@@ -1310,6 +1324,37 @@ mod tests {
                 flow,
                 Some(ControlFlow::Unwind { target: genesis, bad_block: block(genesis + 1) })
             );
+        }
+    }
+
+    /// A target rejected by an earlier stage must not leave the later stages unwound.
+    #[test]
+    fn rejected_unwind_target_leaves_all_stages_intact() {
+        let factory = create_test_provider_factory();
+        let provider = factory.database_provider_rw().unwrap();
+        for id in [StageId::Other("A"), StageId::Other("B")] {
+            provider.save_stage_checkpoint(id, StageCheckpoint::new(10)).unwrap();
+        }
+        provider.commit().unwrap();
+
+        let mut pipeline = Pipeline::<MockNodeTypesWithDB>::builder()
+            .add_stage(
+                TestStage::new(StageId::Other("A"))
+                    .add_validate_unwind(Err(StageError::MissingDownloadBuffer)),
+            )
+            .add_stage(
+                TestStage::new(StageId::Other("B"))
+                    .add_unwind(Ok(UnwindOutput { checkpoint: StageCheckpoint::new(1) })),
+            )
+            .build(
+                factory.clone(),
+                StaticFileProducer::new(factory.clone(), PruneModes::default()),
+            );
+
+        assert_matches!(pipeline.unwind(1, None), Err(PipelineError::Stage(StageError::Fatal(_))));
+        let provider = factory.provider().unwrap();
+        for id in [StageId::Other("A"), StageId::Other("B")] {
+            assert_eq!(provider.get_stage_checkpoint(id).unwrap(), Some(StageCheckpoint::new(10)));
         }
     }
 }
