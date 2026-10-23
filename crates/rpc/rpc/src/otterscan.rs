@@ -12,6 +12,7 @@ use alloy_rpc_types_trace::{
     parity::{Action, CreateAction, CreateOutput, LocalizedTransactionTrace, TraceOutput},
 };
 use async_trait::async_trait;
+use evm2::interpreter::InstrStop;
 use evm2_inspectors::{
     otterscan::InternalOperationsInspector,
     tracing::{
@@ -430,7 +431,7 @@ fn calculate_issuance(
 }
 
 fn transaction_error<E>(result: evm2::evm::TxResultExt<E>) -> Bytes {
-    if !result.status && result.stop.is_revert() {
+    if !result.status && result.stop == InstrStop::Revert {
         result.output
     } else {
         Bytes::new()

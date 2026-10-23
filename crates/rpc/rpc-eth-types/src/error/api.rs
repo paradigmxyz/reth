@@ -119,9 +119,11 @@ pub trait FromEvmError<Evm: ConfigureEvm>:
 
     /// Ensures the execution result is successful or returns an error.
     fn ensure_success<EvmTypes: evm2::EvmTypes>(result: TxResult<EvmTypes>) -> Result<Bytes, Self> {
+        // evm2 also classifies failed call prechecks as reverts for gas-return purposes.
+        // Only the REVERT opcode carries a contract revert reason.
         if result.status {
             Ok(result.output)
-        } else if result.stop.is_revert() {
+        } else if result.stop == InstrStop::Revert {
             Err(Self::from_revert(result.output))
         } else {
             Err(Self::from_evm_halt(result.stop, result.tx_gas_used()))
