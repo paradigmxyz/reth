@@ -347,6 +347,12 @@ impl<T: TransactionOrdering> TxPool<T> {
                 Ordering::Greater
             }
             Ordering::Less => {
+                // Refresh the effective tips of pending transactions before promoting BaseFee
+                // transactions. Their eviction ranks can increase when the base fee falls.
+                let current_base_fee = self.all_transactions.pending_fees.base_fee;
+                let removed = self.pending_pool.update_base_fee(current_base_fee);
+                debug_assert!(removed.is_empty());
+
                 // Base fee decreased: recheck BaseFee and promote.
                 // Invariants:
                 // - BaseFee contains only non-blob txs (blob txs live in Blob) and they already
@@ -355,7 +361,6 @@ impl<T: TransactionOrdering> TxPool<T> {
                 //   ENOUGH_BLOB_FEE_CAP_BLOCK.
                 // With the lower base fee they gain ENOUGH_FEE_CAP_BLOCK, so we can set the bit and
                 // insert directly into Pending (skip generic routing).
-                let current_base_fee = self.all_transactions.pending_fees.base_fee;
                 self.basefee_pool.enforce_basefee_with(current_base_fee, |tx| {
                     // Update transaction state — guaranteed Pending by the invariants above
                     let subpool = {
@@ -4006,6 +4011,36 @@ mod tests {
         let tx_meta = pool.all_transactions.txs.get(&id).unwrap();
         assert_eq!(tx_meta.subpool, SubPool::Pending);
         assert!(tx_meta.state.contains(TxState::ENOUGH_FEE_CAP_BLOCK));
+    }
+
+    #[test]
+    fn base_fee_drop_refreshes_pending_eviction_priority() {
+        let mut f = MockTransactionFactory::default();
+        let mut pool = TxPool::new(MockOrdering::default(), Default::default());
+        pool.update_basefee(90, |_| {});
+
+        let sender = Address::with_last_byte(0x0a);
+        let ancestor =
+            MockTransaction::eip1559().with_sender(sender).with_max_fee(200).with_priority_fee(50);
+        let descendant =
+            ancestor.clone().rng_hash().inc_nonce().with_max_fee(110).with_priority_fee(100);
+        let competitor = MockTransaction::eip1559().with_max_fee(200).with_priority_fee(30);
+        let ancestor = f.validated(ancestor);
+        let descendant = f.validated(descendant);
+        let competitor = f.validated(competitor);
+        let competitor_id = *competitor.id();
+
+        for tx in [ancestor, descendant, competitor] {
+            pool.add_transaction(tx, U256::from(1_000_000), 0, None).unwrap();
+        }
+        assert_eq!(pool.pending_pool.len(), 3);
+
+        pool.update_basefee(0, |_| {});
+        pool.pending_pool.assert_invariants();
+        pool.config.pending_limit = SubPoolLimit { max_txs: 2, max_size: usize::MAX };
+        let removed = pool.discard_worst();
+        assert_eq!(removed.len(), 1);
+        assert_eq!(removed[0].id(), &competitor_id);
     }
 
     #[test]
