@@ -711,11 +711,19 @@ impl BundleState {
                 if let Some(this_account) = self.state.get_mut(address) {
                     // As this account was destroyed inside `other` bundle.
                     // We are fine to wipe/drain this storage and put it inside revert.
+                    // A `Destroyed` slot in `other` means the value before the wipe, which is
+                    // this bundle's present value, not the database value.
                     for (key, value) in this_account.storage.drain() {
+                        let previous = RevertToSlot::Some(value.present_value);
                         revert
                             .storage
                             .entry(key)
-                            .or_insert(RevertToSlot::Some(value.present_value));
+                            .and_modify(|slot| {
+                                if *slot == RevertToSlot::Destroyed {
+                                    *slot = previous;
+                                }
+                            })
+                            .or_insert(previous);
                     }
 
                     // Nullify `other` wipe as primary database wipe is done in `this`.
@@ -1040,6 +1048,24 @@ mod tests {
         b2.state.get_mut(&account1()).unwrap().status = AccountStatus::Changed;
         b1.extend(b2);
         assert_eq!(b1.state.get_mut(&account1()).unwrap().status, AccountStatus::InMemoryChange);
+    }
+
+    #[test]
+    fn extend_replaces_destroyed_revert_with_previous_value() {
+        // bundle1 writes slot1 = 10 and slot2 = 15; bundle2 selfdestructs and re-creates
+        // account1, so its revert wipes storage and marks slot1 as destroyed.
+        let mut b1 = test_bundle1();
+        let mut b2 = test_bundle2();
+        b2.state.get_mut(&account1()).unwrap().status = AccountStatus::DestroyedChanged;
+        let revert = &mut b2.reverts[0][0].1;
+        revert.wipe_storage = true;
+        revert.storage.insert(slot1(), RevertToSlot::Destroyed);
+
+        b1.extend(b2);
+        let revert = &b1.reverts[1][0].1;
+        assert!(revert.wipe_storage);
+        assert_eq!(revert.storage.get(&slot1()), Some(&RevertToSlot::Some(U256::from(10))));
+        assert_eq!(revert.storage.get(&slot2()), Some(&RevertToSlot::Some(U256::from(15))));
     }
 
     #[test]
