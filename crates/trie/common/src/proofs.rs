@@ -94,6 +94,10 @@ impl MultiProofTargets {
     /// Returns an iterator that yields chunks of the specified size.
     ///
     /// See [`ChunkedMultiProofTargets`] for more information.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the chunk size is zero.
     pub fn chunks(self, size: usize) -> ChunkedMultiProofTargets {
         ChunkedMultiProofTargets::new(self, size)
     }
@@ -132,6 +136,7 @@ pub struct ChunkedMultiProofTargets {
 
 impl ChunkedMultiProofTargets {
     fn new(targets: MultiProofTargets, size: usize) -> Self {
+        assert!(size > 0, "chunk size must be non-zero");
         let flattened_targets = targets
             .into_iter()
             .flat_map(|(address, slots)| {
@@ -879,10 +884,8 @@ impl AccountProof {
             storage_proof: self
                 .storage_proofs
                 .into_iter()
-                .filter_map(|proof| {
-                    let input_slot = slots.iter().find(|s| s.as_b256() == proof.key)?;
-                    Some(proof.into_eip1186_proof(*input_slot))
-                })
+                .zip(slots)
+                .map(|(proof, slot)| proof.into_eip1186_proof(slot))
                 .collect(),
         }
     }
@@ -1234,7 +1237,7 @@ mod tests {
 
         let storage_leaf_0 = insert_node(
             &mut witness,
-            LeafNode::new(leaf_key, encode_fixed_size(&U256::from(1)).to_vec()),
+            LeafNode::new(leaf_key, encode_fixed_size(&U256::ONE).to_vec()),
         );
         let storage_leaf_1 = insert_node(
             &mut witness,
@@ -1284,7 +1287,7 @@ mod tests {
     fn witness_nodes_follow_inline_children() {
         let leaf_key = Nibbles::from_nibbles([0]);
         let leaf_0 =
-            alloy_rlp::encode(LeafNode::new(leaf_key, encode_fixed_size(&U256::from(1)).to_vec()));
+            alloy_rlp::encode(LeafNode::new(leaf_key, encode_fixed_size(&U256::ONE).to_vec()));
         let leaf_1 =
             alloy_rlp::encode(LeafNode::new(leaf_key, encode_fixed_size(&U256::from(2)).to_vec()));
         assert!(leaf_0.len() < B256::len_bytes());
@@ -1846,5 +1849,21 @@ mod tests {
 
         assert_eq!(resp.account_proof, multi);
         assert_eq!(resp.storage_proof[0].proof, single_non_sentinel);
+    }
+
+    #[cfg(feature = "eip1186")]
+    #[test]
+    fn eip1186_response_keeps_key_of_each_requested_slot() {
+        let slot = B256::with_last_byte(1);
+        let keys = vec![
+            alloy_serde::JsonStorageKey::Number(U256::from(1)),
+            alloy_serde::JsonStorageKey::Hash(slot),
+        ];
+        let mut account = AccountProof::new(Address::ZERO);
+        account.storage_proofs = vec![StorageProof::new(slot); 2];
+
+        let resp = account.into_eip1186_response(keys.clone());
+
+        assert_eq!(resp.storage_proof.iter().map(|p| p.key).collect::<Vec<_>>(), keys);
     }
 }

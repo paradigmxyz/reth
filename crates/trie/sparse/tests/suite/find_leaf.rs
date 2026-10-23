@@ -6,7 +6,7 @@ pub(super) fn test_find_leaf_exists<T: SparseTrie>(new_trie: fn() -> T) {
     let key3 = B256::with_last_byte(0x30);
 
     let base_storage: BTreeMap<B256, U256> =
-        [(key1, U256::from(1)), (key2, U256::from(2)), (key3, U256::from(3))].into_iter().collect();
+        [(key1, U256::ONE), (key2, U256::from(2)), (key3, U256::from(3))].into_iter().collect();
 
     let harness = SuiteTestHarness::new(base_storage);
     let trie: T = harness.init_trie_fully_revealed(false, new_trie);
@@ -35,7 +35,7 @@ pub(super) fn test_find_leaf_nonexistent<T: SparseTrie>(new_trie: fn() -> T) {
     let key3 = B256::with_last_byte(0x30);
 
     let base_storage: BTreeMap<B256, U256> =
-        [(key1, U256::from(1)), (key2, U256::from(2)), (key3, U256::from(3))].into_iter().collect();
+        [(key1, U256::ONE), (key2, U256::from(2)), (key3, U256::from(3))].into_iter().collect();
 
     let harness = SuiteTestHarness::new(base_storage);
     let trie: T = harness.init_trie_fully_revealed(false, new_trie);
@@ -99,7 +99,7 @@ pub(super) fn test_find_leaf_value_mismatch<T: SparseTrie>(new_trie: fn() -> T) 
     let key3 = B256::with_last_byte(0x30);
 
     let base_storage: BTreeMap<B256, U256> =
-        [(key1, U256::from(1)), (key2, U256::from(2)), (key3, U256::from(3))].into_iter().collect();
+        [(key1, U256::ONE), (key2, U256::from(2)), (key3, U256::from(3))].into_iter().collect();
 
     let harness = SuiteTestHarness::new(base_storage);
     let trie: T = harness.init_trie_fully_revealed(false, new_trie);
@@ -131,7 +131,7 @@ pub(super) fn test_find_leaf_nonexistent_branch_divergence<T: SparseTrie>(new_tr
     key2.0[1] = 0x56;
 
     let base_storage: BTreeMap<B256, U256> =
-        [(key1, U256::from(1)), (key2, U256::from(2))].into_iter().collect();
+        [(key1, U256::ONE), (key2, U256::from(2))].into_iter().collect();
 
     let harness = SuiteTestHarness::new(base_storage);
     let trie: T = harness.init_trie_fully_revealed(false, new_trie);
@@ -162,7 +162,7 @@ pub(super) fn test_find_leaf_nonexistent_extension_divergence<T: SparseTrie>(new
     key1.0[1] = 0x34;
     key1.0[2] = 0x56;
 
-    let base_storage: BTreeMap<B256, U256> = once((key1, U256::from(1))).collect();
+    let base_storage: BTreeMap<B256, U256> = once((key1, U256::ONE)).collect();
 
     let harness = SuiteTestHarness::new(base_storage);
     let trie: T = harness.init_trie_fully_revealed(false, new_trie);
@@ -191,7 +191,7 @@ pub(super) fn test_find_leaf_nonexistent_leaf_divergence<T: SparseTrie>(new_trie
     existing_key.0[0] = 0x12;
     existing_key.0[1] = 0x34;
 
-    let base_storage: BTreeMap<B256, U256> = once((existing_key, U256::from(1))).collect();
+    let base_storage: BTreeMap<B256, U256> = once((existing_key, U256::ONE)).collect();
 
     let harness = SuiteTestHarness::new(base_storage);
     let trie: T = harness.init_trie_fully_revealed(false, new_trie);

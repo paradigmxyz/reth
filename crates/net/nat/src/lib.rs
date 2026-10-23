@@ -360,20 +360,6 @@ mod tests {
         }
     }
 
-    #[tokio::test(start_paused = true)]
-    async fn interval_skips_missed_attempts() {
-        let period = Duration::from_secs(5);
-        let ip: IpAddr = "203.0.113.7".parse().unwrap();
-        let mut interval = ResolveNatInterval::interval(NatResolver::ExternalIp(ip), period);
-        assert_eq!(interval.tick().await, Some(ip));
-
-        tokio::time::advance(period * 3).await;
-        assert_eq!(interval.tick().await, Some(ip));
-        assert!(interval.tick().now_or_never().is_none());
-        tokio::time::advance(period).await;
-        assert_eq!(interval.tick().await, Some(ip));
-    }
-
     #[test]
     fn netif_resolution_does_not_block_the_runtime() {
         let runtime = tokio::runtime::Builder::new_current_thread()

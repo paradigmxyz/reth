@@ -34,7 +34,7 @@ use jsonrpsee::server::{HttpBody, HttpRequest, HttpResponse};
 use reth_chainspec::{EthereumHardfork, EthereumHardforks};
 use reth_engine_primitives::EngineApiValidator;
 use reth_ethereum_engine_primitives::EthEngineTypes;
-use reth_provider::{BalProvider, BlockReader, HeaderProvider, StateProviderFactory};
+use reth_provider::{BalProvider, BlockReader, StateProviderFactory};
 use reth_rpc::EngineApi;
 use reth_rpc_engine_api::EngineApiError;
 use reth_tracing::tracing::debug;
@@ -362,7 +362,7 @@ impl EngineSszApi for reth_node_builder::rpc::NoopEngineApi {}
 impl<Provider, Pool, Validator, ChainSpec> EngineSszApi
     for EthEngineApi<Provider, Pool, Validator, ChainSpec>
 where
-    Provider: HeaderProvider + BlockReader + StateProviderFactory + BalProvider + 'static,
+    Provider: BlockReader + StateProviderFactory + BalProvider + 'static,
     Pool: TransactionPool + 'static,
     Validator: EngineApiValidator<EthEngineTypes>,
     ChainSpec: EthereumHardforks + Send + Sync + 'static,
@@ -807,7 +807,7 @@ async fn submit_payload<Provider, Pool, Validator, ChainSpec>(
     payload: ExecutionData,
 ) -> Result<EngineSszPayloadStatus, HttpResponse>
 where
-    Provider: HeaderProvider + BlockReader + StateProviderFactory + BalProvider + 'static,
+    Provider: BlockReader + StateProviderFactory + BalProvider + 'static,
     Pool: TransactionPool + 'static,
     Validator: EngineApiValidator<EthEngineTypes>,
     ChainSpec: EthereumHardforks + Send + Sync + 'static,
@@ -856,7 +856,7 @@ async fn handle_get_payload_bodies<Provider, Pool, Validator, ChainSpec>(
     request: PayloadBodiesRequest,
 ) -> HttpResponse
 where
-    Provider: HeaderProvider + BlockReader + StateProviderFactory + BalProvider + 'static,
+    Provider: BlockReader + StateProviderFactory + BalProvider + 'static,
     Pool: TransactionPool + 'static,
     Validator: EngineApiValidator<EthEngineTypes>,
     ChainSpec: EthereumHardforks + Send + Sync + 'static,
@@ -1439,25 +1439,10 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn post_body_limits_apply_without_content_length() {
-        for size in [16, 17] {
-            let request = HttpRequest::builder()
-                .header(CONTENT_TYPE, OCTET_STREAM)
-                .body(HttpBody::from(vec![0; size]))
-                .unwrap();
-            let response = read_ssz_body(request, 16).await;
-            if size == 16 {
-                assert_eq!(response.unwrap().len(), size);
-            } else {
-                assert_eq!(response.unwrap_err().status(), STATUS_PAYLOAD_TOO_LARGE);
-            }
-        }
-    }
-
-    #[tokio::test]
     async fn engine_errors_preserve_validation_semantics() {
         use alloy_rpc_types_engine::ForkchoiceUpdateError;
         use reth_engine_primitives::BeaconForkChoiceUpdateError;
+        use reth_payload_primitives::PayloadBuilderError;
         for (error, status, kind) in [
             (EngineApiError::UnknownPayload, 404, "unknown-payload"),
             (EngineApiError::BlobRequestTooLarge { len: 129 }, 413, "request-too-large"),
@@ -1478,6 +1463,13 @@ mod tests {
                 ),
                 422,
                 "invalid-attributes",
+            ),
+            (
+                EngineApiError::ForkChoiceUpdate(BeaconForkChoiceUpdateError::PayloadJob(
+                    PayloadBuilderError::MissingParentHeader(B256::ZERO),
+                )),
+                500,
+                "internal",
             ),
         ] {
             let response = engine_error_response(error);

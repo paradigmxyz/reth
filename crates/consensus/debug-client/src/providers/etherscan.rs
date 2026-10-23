@@ -74,7 +74,7 @@ where
 
         let resp = req.send().await?.text().await?;
 
-        debug!(target: "etherscan", %resp, "fetched block from etherscan");
+        debug!(target: "etherscan", %tag, response_bytes = resp.len(), "fetched block from etherscan");
 
         let resp: Response<RpcBlock> = serde_json::from_str(&resp).inspect_err(|err| {
             warn!(target: "etherscan", "Failed to parse block response from etherscan: {}", err);

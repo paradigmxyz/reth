@@ -18,9 +18,7 @@ use reth_primitives_traits::{
     BlockBody as _, IndexedTx, NodePrimitives, RecoveredBlock, SealedBlock, SealedHeader,
     SignedTransaction,
 };
-use reth_trie::{
-    updates::TrieUpdatesSorted, ComputedTrieData, HashedPostStateSorted, LazyTrieData,
-};
+use reth_trie::{updates::TrieUpdatesSorted, HashedPostStateSorted, LazyTrieData, SortedTrieData};
 use std::{collections::BTreeMap, sync::Arc, time::Instant};
 use tokio::sync::{broadcast, watch};
 
@@ -724,6 +722,21 @@ impl<N: NodePrimitives> BlockState<N> {
     }
 }
 
+// The derived drop recurses once per ancestor released here, which can overflow the stack on deep
+// in-memory chains, so detach parents in a loop instead.
+impl<N: NodePrimitives> Drop for BlockState<N> {
+    fn drop(&mut self) {
+        let mut parent = self.parent.take();
+        while let Some(state) = parent {
+            // A shared parent is left to its last owner, which continues the drain. Unlike
+            // `try_unwrap`, `into_inner` hands it to exactly one of several concurrent releasers.
+            let Some(mut state) = Arc::into_inner(state) else { break };
+            // Detach the next parent so dropping `state` here doesn't recurse.
+            parent = state.parent.take();
+        }
+    }
+}
+
 /// Represents an executed block stored in-memory.
 #[derive(Clone, Debug)]
 pub struct ExecutedBlock<N: NodePrimitives = EthPrimitives> {
@@ -763,7 +776,7 @@ impl<N: NodePrimitives> Default for ExecutedBlock<N> {
                 },
                 state: Default::default(),
             }),
-            trie_data: LazyTrieData::ready(ComputedTrieData::default()),
+            trie_data: LazyTrieData::ready(SortedTrieData::default()),
             bal: None,
         }
     }
@@ -786,7 +799,7 @@ impl<N: NodePrimitives> ExecutedBlock<N> {
     pub fn new(
         recovered_block: Arc<RecoveredBlock<N::Block>>,
         execution_output: Arc<BlockExecutionOutput<N::Receipt>>,
-        trie_data: ComputedTrieData,
+        trie_data: SortedTrieData,
     ) -> Self {
         Self {
             recovered_block,
@@ -856,7 +869,7 @@ impl<N: NodePrimitives> ExecutedBlock<N> {
     /// - If not computed: first caller waits for the publishing task, others wait for that result
     #[inline]
     #[tracing::instrument(level = "debug", target = "engine::tree", name = "trie_data", skip_all)]
-    pub fn trie_data(&self) -> ComputedTrieData {
+    pub fn trie_data(&self) -> SortedTrieData {
         self.trie_data.get().clone()
     }
 
@@ -874,7 +887,7 @@ impl<N: NodePrimitives> ExecutedBlock<N> {
     /// May wait for trie data if the deferred task hasn't completed.
     #[inline]
     pub fn hashed_state(&self) -> Arc<HashedPostStateSorted> {
-        self.trie_data().sorted.hashed_state
+        self.trie_data().hashed_state
     }
 
     /// Returns a reference to the hashed state result of the execution outcome.
@@ -882,7 +895,7 @@ impl<N: NodePrimitives> ExecutedBlock<N> {
     /// May wait for trie data if the deferred task hasn't completed.
     #[inline]
     pub fn hashed_state_ref(&self) -> &HashedPostStateSorted {
-        &self.trie_data.get().sorted.hashed_state
+        &self.trie_data.get().hashed_state
     }
 
     /// Returns references to the hashed state results of the executed blocks.
@@ -897,7 +910,7 @@ impl<N: NodePrimitives> ExecutedBlock<N> {
     /// May wait for trie data if the deferred task hasn't completed.
     #[inline]
     pub fn trie_updates(&self) -> Arc<TrieUpdatesSorted> {
-        self.trie_data().sorted.trie_updates
+        self.trie_data().trie_updates
     }
 
     /// Returns a reference to the trie updates resulting from the execution outcome.
@@ -905,7 +918,7 @@ impl<N: NodePrimitives> ExecutedBlock<N> {
     /// May wait for trie data if the deferred task hasn't completed.
     #[inline]
     pub fn trie_updates_ref(&self) -> &TrieUpdatesSorted {
-        &self.trie_data.get().sorted.trie_updates
+        &self.trie_data.get().trie_updates
     }
 
     /// Returns references to the trie updates of the executed blocks.
@@ -1490,5 +1503,39 @@ mod tests {
         assert_eq!(block.hash(), block1.recovered_block.hash());
         assert_eq!(Some(bal), block1.bal());
         assert!(blocks_and_bals.next().is_none());
+    }
+
+    fn block_state_chain(depth: usize, mut parent: Option<Arc<BlockState>>) -> Arc<BlockState> {
+        let block = ExecutedBlock::default();
+        for _ in 0..depth {
+            parent = Some(Arc::new(BlockState::with_parent(block.clone(), parent)));
+        }
+        parent.expect("nonempty chain")
+    }
+
+    #[test]
+    fn deep_chain_drop_preserves_shared_tail() {
+        const DEPTH: usize = 100_000;
+
+        // A recursive drop of either chain would overflow this stack.
+        std::thread::Builder::new()
+            .stack_size(64 * 1024)
+            .spawn(|| {
+                let tail = block_state_chain(DEPTH, None);
+                let tail_payload = Arc::downgrade(&tail.block_ref().execution_output);
+                let head = block_state_chain(DEPTH, Some(tail.clone()));
+                let head_payload = Arc::downgrade(&head.block_ref().execution_output);
+
+                drop(head);
+                assert_eq!(head_payload.strong_count(), 0);
+                assert_eq!(Arc::strong_count(&tail), 1);
+                assert_eq!(tail_payload.strong_count(), DEPTH);
+
+                drop(tail);
+                assert_eq!(tail_payload.strong_count(), 0);
+            })
+            .unwrap()
+            .join()
+            .unwrap();
     }
 }

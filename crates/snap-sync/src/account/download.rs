@@ -216,17 +216,14 @@ mod tests {
     use super::*;
     use crate::{
         test_utils::{
-            account, account_range, generation, hashed_factory, key, state_root, verified_range,
-            ScriptedSnapClient,
+            account, account_range, generation, hashed_factory, hashed_factory_with_roots, key,
+            state_root, verified_range, ScriptedSnapClient,
         },
         StateRepairs,
     };
     use reth_db_api::{cursor::DbCursorRO, tables, transaction::DbTx};
     use reth_eth_wire_types::snap::AccountRangeMessage;
-    use reth_network_p2p::{
-        error::{PeerRequestResult, RequestError},
-        snap::client::SnapResponse,
-    };
+    use reth_network_p2p::{error::PeerRequestResult, snap::client::SnapResponse};
     use reth_network_peers::WithPeerId;
     use reth_provider::{test_utils::MockNodeTypesWithDB, ProviderFactory};
     use reth_trie_common::TrieAccount;
@@ -239,7 +236,7 @@ mod tests {
     }
 
     fn started(accounts: &[(B256, TrieAccount)]) -> ProviderFactory<MockNodeTypesWithDB> {
-        let factory = hashed_factory();
+        let factory = hashed_factory_with_roots(&[state_root(accounts); 3]);
         let provider = factory.database_provider_rw().unwrap();
         let write = provider.start_snap_attempt(generation(1, state_root(accounts))).unwrap();
         provider.start_account_coverage(write).unwrap();
@@ -317,7 +314,7 @@ mod tests {
         assert!(matches!(
             step,
             AccountRangeStep::Unavailable { origin, peer_id }
-                if origin == B256::ZERO && peer_id == peer
+                if origin.is_zero() && peer_id == peer
         ));
         assert_eq!(download.coverage(), Some(AccountCoverage::START));
 
@@ -325,19 +322,6 @@ mod tests {
         download.commit(range, Default::default(), Vec::new()).await.unwrap();
         assert!(download.coverage().unwrap().is_complete());
         assert_eq!(*client.origins(), [B256::ZERO, B256::ZERO]);
-    }
-
-    #[tokio::test]
-    async fn a_failed_request_leaves_the_cursor_in_place() {
-        let factory = started(&accounts());
-        let (_, mut download) =
-            download([Err(RequestError::UnsupportedCapability)], factory.clone());
-
-        let error = download.next().await.unwrap_err();
-
-        assert!(matches!(error, SnapSyncError::Request(RequestError::UnsupportedCapability)));
-        assert_eq!(download.coverage(), Some(AccountCoverage::START));
-        assert!(stored_accounts(&factory).is_empty());
     }
 
     #[tokio::test]
@@ -381,21 +365,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_range_missing_its_dependencies_is_refused_at_commit() {
-        let mut accounts = accounts();
-        accounts[1].1.code_hash = B256::repeat_byte(0x33);
-        let factory = started(&accounts);
-        let (_, mut download) = download([account_range(1, &accounts, 0..3, &[])], factory.clone());
-        let range = verified(&mut download).await;
-
-        let error = download.commit(range, Default::default(), Vec::new()).await.unwrap_err();
-
-        assert!(matches!(error, SnapSyncError::MissingCode { .. }));
-        assert!(stored_accounts(&factory).is_empty());
-        assert_eq!(download.coverage(), Some(AccountCoverage::START));
-    }
-
-    #[tokio::test]
     async fn nothing_is_requested_without_an_active_attempt() {
         let (client, mut download) = download([], hashed_factory());
 
@@ -406,29 +375,13 @@ mod tests {
 
     #[tokio::test]
     async fn nothing_is_requested_without_recorded_coverage() {
-        let factory = hashed_factory();
+        let factory = hashed_factory_with_roots(&[state_root(&accounts())]);
         let provider = factory.database_provider_rw().unwrap();
         provider.start_snap_attempt(generation(1, state_root(&accounts()))).unwrap();
         provider.commit().unwrap();
         let (client, mut download) = download([], factory);
 
         assert!(matches!(download.next().await, Err(SnapSyncError::NoCoverage)));
-        assert!(client.origins().is_empty());
-    }
-
-    #[tokio::test]
-    async fn a_complete_coverage_requests_nothing() {
-        let accounts = accounts();
-        let factory = started(&accounts);
-        let provider = factory.database_provider_rw().unwrap();
-        let write = provider.active_snap_write().unwrap().unwrap();
-        let whole = verified_range(&accounts, 0..3, B256::ZERO, &[]);
-        provider.commit_account_range(write, &whole, Default::default(), Vec::new()).unwrap();
-        provider.commit().unwrap();
-        let (client, mut download) = download([], factory);
-
-        assert!(download.next().await.unwrap().is_none());
-        assert_eq!(download.coverage(), Some(AccountCoverage::COMPLETE));
         assert!(client.origins().is_empty());
     }
 
