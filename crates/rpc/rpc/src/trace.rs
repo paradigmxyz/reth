@@ -574,7 +574,7 @@ where
                         .take_inspector()
                         .into_parity_builder()
                         .into_trace_results_with_state_parts(
-                            &ctx.result,
+                            ctx.result,
                             ctx.state,
                             &trace_types,
                             &ctx.db,
