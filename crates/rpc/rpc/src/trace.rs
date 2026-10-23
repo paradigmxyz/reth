@@ -7,7 +7,7 @@ use alloy_primitives::{
 };
 use alloy_rpc_types_eth::{
     state::{EvmOverrides, StateOverride},
-    BlockOverrides, Index,
+    BlockOverrides,
 };
 use alloy_rpc_types_trace::{
     filter::TraceFilter,
@@ -20,7 +20,7 @@ use futures::{FutureExt, StreamExt};
 use jsonrpsee::core::RpcResult;
 use reth_chainspec::ChainSpecProvider;
 use reth_primitives_traits::{BlockBody, BlockHeader};
-use reth_rpc_api::TraceApiServer;
+use reth_rpc_api::{TraceAddressIndex, TraceApiServer};
 use reth_rpc_convert::RpcTxReq;
 use reth_rpc_eth_api::{
     helpers::{LoadTransaction, Trace, TraceExt},
@@ -784,12 +784,11 @@ where
         Ok(Self::trace_filter(self, filter).await.map_err(Into::into)?)
     }
 
-    /// Returns transaction trace at given index.
     /// Handler for `trace_get`
     async fn trace_get(
         &self,
         hash: B256,
-        indices: Vec<Index>,
+        indices: Vec<TraceAddressIndex>,
     ) -> RpcResult<Option<LocalizedTransactionTrace>> {
         let _permit = self.acquire_trace_permit().await;
         Ok(Self::trace_get(self, hash, indices.into_iter().map(Into::into).collect())
@@ -1064,6 +1063,30 @@ mod tests {
             let response: serde_json::Value = serde_json::from_str(response.get()).unwrap();
             assert!(response.get("error").is_none(), "{response}");
             assert_eq!(response["result"], serde_json::to_value(expected).unwrap());
+        }
+        for (indices, data) in [
+            (
+                serde_json::json!([0]),
+                "invalid type: integer `0`, expected a string at line 1 column 2",
+            ),
+            (
+                serde_json::json!(["0x0", 0]),
+                "invalid type: integer `0`, expected a string at line 1 column 8",
+            ),
+            (
+                serde_json::json!(["0"]),
+                "invalid value: string \"0\", expected a hex quantity at line 1 column 5",
+            ),
+        ] {
+            let request = serde_json::json!({
+                "jsonrpc": "2.0", "id": 1, "method": "trace_get", "params": [hash, indices],
+            });
+            let (response, _) = module.raw_json_request(&request.to_string(), 1).await.unwrap();
+            let response: serde_json::Value = serde_json::from_str(response.get()).unwrap();
+            assert_eq!(
+                response["error"],
+                serde_json::json!({ "code": -32602, "message": "Invalid params", "data": data })
+            );
         }
         assert!(api.trace_get(B256::ZERO, vec![]).await.unwrap().is_none());
         assert!(api.trace_get(B256::ZERO, vec![0, 0]).await.unwrap().is_none());
