@@ -8196,7 +8196,6 @@ dependencies = [
  "reth-chain-state",
  "reth-evm",
  "reth-execution-cache",
- "reth-execution-types",
  "reth-metrics",
  "reth-payload-builder",
  "reth-payload-builder-primitives",
