@@ -737,12 +737,21 @@ impl Runtime {
     where
         F: Future<Output = ()> + Send + 'static,
     {
+        self.spawn_critical_os_thread_boxed(thread_name, task_name, fut.boxed())
+    }
+
+    fn spawn_critical_os_thread_boxed(
+        &self,
+        thread_name: &'static str,
+        task_name: &'static str,
+        fut: BoxFuture<'static, ()>,
+    ) -> thread::JoinHandle<()> {
         self.0.metrics.inc_critical_tasks();
         let handle = self.0.handle.clone();
         let panicked_tasks_tx = self.0.task_events_tx.clone();
         let on_shutdown = self.0.on_shutdown.clone();
 
-        let task = std::panic::AssertUnwindSafe(fut.boxed())
+        let task = std::panic::AssertUnwindSafe(fut)
             .catch_unwind()
             .map_err(move |error| {
                 let task_error = PanickedTaskError::new(task_name, error);
@@ -796,12 +805,19 @@ impl Runtime {
     where
         F: Future<Output = ()> + Send + 'static,
     {
-        let panicked_tasks_tx = self.0.task_events_tx.clone();
         let on_shutdown = GracefulShutdown::new(
             self.0.on_shutdown.clone(),
             GracefulShutdownGuard::new(Arc::clone(&self.0.graceful_tasks)),
         );
-        let fut = f(on_shutdown).boxed();
+        self.spawn_critical_graceful_boxed(name, f(on_shutdown).boxed())
+    }
+
+    fn spawn_critical_graceful_boxed(
+        &self,
+        name: &'static str,
+        fut: BoxFuture<'static, ()>,
+    ) -> JoinHandle<()> {
+        let panicked_tasks_tx = self.0.task_events_tx.clone();
 
         // wrap the task in catch unwind
         let task = std::panic::AssertUnwindSafe(fut)
