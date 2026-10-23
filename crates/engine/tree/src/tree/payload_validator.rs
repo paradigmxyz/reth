@@ -124,7 +124,7 @@ use crate::tree::{
     state_root_strategy::{
         DefaultStateRootStrategy, LazyHashedPostState, PayloadStateRootHandle,
         PayloadStateRootJobContext, StateRootHintStream, StateRootJobContext, StateRootStrategy,
-        StateRootUpdateStream,
+        StateRootUpdateHook, StateRootUpdateStream,
     },
 };
 use alloy_primitives::Address;
@@ -138,7 +138,7 @@ use reth_errors::{BlockExecutionError, BlockValidationError, ProviderResult};
 use reth_evm::{
     database::StateProviderDatabase, precompile_cache::PrecompileCacheMap, BlockExecutor,
     BlockExecutorFactory, BlockExecutorFor, BlockTransactionResult, ConfigureEvm, Evm as _,
-    EvmEnvFor, EvmTypesFor, ExecutableTxFor, ExecutionCtxFor, SpecFor,
+    EvmEnvFor, EvmTypesFor, ExecutableTxFor, ExecutionCtxFor, OnStateHook, SpecFor,
 };
 use reth_execution_cache::{CacheFillMode, CacheStats};
 use reth_execution_types::DecodedEvmBal;
@@ -1010,7 +1010,7 @@ where
         env: ExecutionEnv<Evm>,
         input: &BlockOrPayload<T>,
         handle: &mut PayloadHandle<impl ExecutableTxFor<Evm>, Err, N::Receipt, EvmTypesFor<Evm>>,
-        state_hook: Option<Box<dyn FnMut(reth_execution_types::StateUpdate) + Send + 'static>>,
+        state_hook: Option<StateRootUpdateHook>,
     ) -> Result<
         (BlockExecutionOutput<N::Receipt>, Vec<Address>, ReceiptRootReceiver, Option<ExecutedBal>),
         InsertBlockErrorKind,
@@ -1051,8 +1051,8 @@ where
                 if input.has_block_access_list() {
                     executor.enable_block_access_list_builder();
                 }
-                if let Some(state_hook) = state_hook {
-                    executor.set_state_hook(state_hook);
+                if let Some(mut state_hook) = state_hook {
+                    executor.set_state_hook(move |state| state_hook.on_state(state));
                 }
                 let senders = self.execute_transactions(
                     &mut executor,
@@ -1069,11 +1069,12 @@ where
                 Ok::<_, BlockExecutionError>((output, senders, built_bal))
             })?;
         drop(receipt_tx);
+        // Free stale results off the execution path.
         if let Some(results) = prewarm_results {
             self.runtime.spawn_drop(results);
         }
         let built_bal =
-            built_bal.map(|bal| ExecutedBal { alloy: bal.clone().into(), evm: Arc::new(bal) });
+            built_bal.map(|bal| ExecutedBal { alloy: (&bal).into(), evm: Arc::new(bal) });
 
         let execution_duration = execution_start.elapsed();
         self.metrics.record_block_execution(&output, execution_duration);
@@ -1215,17 +1216,25 @@ where
         Tx: ExecutableTxFor<Evm>,
         Err: core::error::Error + Send + Sync + 'static,
     {
+        // Apply pre-execution changes (e.g., beacon root update)
         let pre_exec_start = Instant::now();
         debug_span!(target: "engine::tree", "pre_execution")
             .in_scope(|| executor.apply_pre_execution_changes())?;
         self.metrics.record_pre_execution(pre_exec_start.elapsed());
 
+        // Execute transactions
         let exec_span = debug_span!(target: "engine::tree", "execution").entered();
         let mut senders = Vec::with_capacity(transaction_count);
         let mut reuse_stats = PrewarmReuseStats::default();
         let mut transactions = transactions.into_iter();
+        // Some executors may execute transactions that do not append receipts during the
+        // main loop (e.g., system transactions whose receipts are added during finalization).
+        // In that case, invoking the callback on every transaction would resend the previous
+        // receipt with the same index and can panic the ordered root builder.
         let mut last_sent_len = 0usize;
         loop {
+            // Measure time spent waiting for next transaction from iterator
+            // (e.g., parallel signature recovery)
             let wait_start = Instant::now();
             let Some(tx_result) = transactions.next() else { break };
             self.metrics.record_transaction_wait(wait_start.elapsed());
@@ -1262,11 +1271,14 @@ where
                 }
             }
             self.metrics.record_transaction_execution(tx_start.elapsed());
+
+            // advance the shared counter so prewarm workers skip already-executed txs
             executed_tx_index.store(senders.len(), Ordering::Relaxed);
 
             let current_len = executor.receipts().len();
             if current_len > last_sent_len {
                 last_sent_len = current_len;
+                // Send the latest receipt to the background task for incremental root computation.
                 if let Some(receipt) = executor.receipts().last() {
                     let tx_index = current_len - 1;
                     receipt_tx

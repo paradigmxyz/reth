@@ -62,7 +62,6 @@ use crossbeam_channel::Receiver as CrossbeamReceiver;
 use reth_chain_state::{ExecutedBlock, PreservedSparseTrie, SparseTrieWithStorageRoots};
 use reth_errors::ProviderResult;
 use reth_evm::ConfigureEvm;
-use reth_execution_types::OnStateHook;
 use reth_primitives_traits::{
     AlloyBlockHeader, FastInstant as Instant, NodePrimitives, RecoveredBlock, SealedHeader,
 };
@@ -378,13 +377,8 @@ impl<N: NodePrimitives> PreparedStateRootJob<N> {
     }
 
     /// Takes the execution hook, present only when the job wants normal execution updates.
-    pub fn take_execution_hook(
-        &mut self,
-    ) -> Option<Box<dyn FnMut(reth_execution_types::StateUpdate) + Send + 'static>> {
-        self.execution_hook.take().map(|mut hook| {
-            Box::new(move |state| hook.on_state(state))
-                as Box<dyn FnMut(reth_execution_types::StateUpdate) + Send + 'static>
-        })
+    pub const fn take_execution_hook(&mut self) -> Option<StateRootUpdateHook> {
+        self.execution_hook.take()
     }
 
     /// Takes the hint stream for transaction prewarming.

@@ -200,7 +200,7 @@ where
         Ok(())
     }
 
-    /// Validates that the block state after re-execution matches the original.
+    /// Validates that the bundle state after re-execution matches the original
     fn validate_bundle_state(
         &self,
         re_executed_state: &BundleState,
@@ -209,12 +209,13 @@ where
     ) -> eyre::Result<()> {
         if re_executed_state != original_state {
             let original_filename = format!("{}.bundle_state.original.json", block_prefix);
-            let output_state_sorted = sort_bundle_state_for_comparison(original_state);
             let original_path = self.save_file(original_filename, original_state)?;
             let re_executed_filename = format!("{}.bundle_state.re_executed.json", block_prefix);
-            let bundle_state_sorted = sort_bundle_state_for_comparison(re_executed_state);
             let re_executed_path = self.save_file(re_executed_filename, re_executed_state)?;
 
+            // Convert bundle state to sorted format for deterministic comparison
+            let bundle_state_sorted = sort_bundle_state_for_comparison(re_executed_state);
+            let output_state_sorted = sort_bundle_state_for_comparison(original_state);
             let filename = format!("{}.bundle_state.diff", block_prefix);
             let diff_path = self.save_diff(filename, &output_state_sorted, &bundle_state_sorted)?;
 
@@ -223,7 +224,7 @@ where
                 diff_path = %diff_path.display(),
                 original_path = %original_path.display(),
                 re_executed_path = %re_executed_path.display(),
-                "Block state mismatch after re-execution"
+                "Bundle state mismatch after re-execution"
             );
         }
         Ok(())
@@ -234,13 +235,13 @@ where
         &self,
         parent_header: &SealedHeader<N::BlockHeader>,
         block: &RecoveredBlock<N::Block>,
-        hashed_state: &reth_trie::HashedPostState,
+        hashed_state: reth_trie::HashedPostState,
         trie_updates: Option<(&TrieUpdates, B256)>,
         block_prefix: &str,
     ) -> eyre::Result<()> {
         let state_provider = self.provider.state_by_block_hash(parent_header.hash())?;
         let (re_executed_root, trie_output) =
-            state_provider.state_root_with_updates(hashed_state.clone())?;
+            state_provider.state_root_with_updates(hashed_state)?;
 
         if let Some((original_updates, original_root)) = trie_updates {
             if re_executed_root != original_root {
@@ -293,7 +294,7 @@ where
         self.validate_state_root_and_trie(
             parent_header,
             block,
-            &hashed_state,
+            hashed_state,
             trie_updates,
             &block_prefix,
         )?;
@@ -347,6 +348,7 @@ mod tests {
     use super::*;
     use alloy_eips::eip7685::Requests;
     use alloy_primitives::{map::HashMap, Bytes, B256, U256};
+    use evm2::evm::{CacheDB, EmptyDB};
     use reth_chainspec::ChainSpec;
     use reth_ethereum_primitives::EthPrimitives;
     use reth_evm_ethereum::EthEvmConfig;
@@ -356,7 +358,7 @@ mod tests {
 
     use reth_testing_utils::generators::{self, random_block, random_eoa_accounts, BlockParams};
 
-    /// Creates a test block state with realistic accounts and contracts.
+    /// Creates a test `BundleState` with realistic accounts, contracts, and reverts
     fn create_bundle_state() -> BundleState {
         let mut rng = generators::rng();
         let mut bundle_state = BundleState::default();
@@ -571,10 +573,6 @@ mod tests {
 
     #[test]
     fn witness_includes_unchanged_account_storage_and_code_reads() {
-        use evm2::{
-            bytecode::Bytecode,
-            evm::{AccountInfo, CacheDB, EmptyDB},
-        };
         let provider = MockEthProvider::default();
         let mut database = CacheDB::<EmptyDB>::default();
         let address = Address::repeat_byte(1);
@@ -608,7 +606,15 @@ mod tests {
     fn test_validate_bundle_state_mismatch() {
         let (hook, output_dir, _temp_dir) = create_test_hook();
         let original_state = create_bundle_state();
-        let modified_state = BundleState::default();
+        let mut modified_state = create_bundle_state();
+
+        // Modify the state to create a mismatch
+        let addr = Address::repeat_byte(1u8);
+        if let Some(account) = modified_state.state.get_mut(&addr) &&
+            let Some(info) = &mut account.info
+        {
+            info.balance = U256::from(999);
+        }
 
         let block_prefix = "test_block_mismatch";
 
@@ -622,8 +628,8 @@ mod tests {
             output_dir.join(format!("{}.bundle_state.re_executed.json", block_prefix));
         let diff_file = output_dir.join(format!("{}.bundle_state.diff", block_prefix));
 
-        assert!(original_file.exists(), "Original block state file should be created");
-        assert!(re_executed_file.exists(), "Re-executed block state file should be created");
+        assert!(original_file.exists(), "Original bundle state file should be created");
+        assert!(re_executed_file.exists(), "Re-executed bundle state file should be created");
         assert!(diff_file.exists(), "Diff file should be created");
     }
 
@@ -679,7 +685,7 @@ mod tests {
         let result = hook.validate_state_root_and_trie(
             &parent_header,
             &recovered_block,
-            &hashed_state,
+            hashed_state,
             Some((&trie_updates, original_root)),
             block_prefix,
         );
@@ -859,7 +865,7 @@ mod tests {
         let result = hook.validate_state_root_and_trie(
             &parent_header,
             &recovered_block,
-            &hashed_state,
+            hashed_state,
             None,
             block_prefix,
         );
@@ -891,12 +897,12 @@ mod tests {
         // Test validation methods
         let validation_result =
             hook.validate_bundle_state(&bundle_state, &bundle_state, "integration_test");
-        assert!(validation_result.is_ok(), "Block state validation should succeed");
+        assert!(validation_result.is_ok(), "Bundle state validation should succeed");
 
         let state_root_result = hook.validate_state_root_and_trie(
             &parent_header,
             &invalid_block,
-            &hashed_state_for_bundle_state(bundle_state),
+            hashed_state_for_bundle_state(bundle_state),
             Some((&trie_updates, B256::random())),
             "integration_test",
         );

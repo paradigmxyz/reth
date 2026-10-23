@@ -227,9 +227,9 @@ where
             let Some(Transaction { hash, sender, transaction }) = transactions.next() else {
                 return BatchEnd::Rest
             };
-            let speculative = SpeculativeTx::new(sender, transaction.inner());
-            let tx_env = evm_config.tx_env(transaction);
             let result = if let Some(results) = &job.results {
+                let speculative = SpeculativeTx::new(sender, transaction.inner());
+                let tx_env = evm_config.tx_env(transaction);
                 // The underlying CachedReads retains warmed data; the EVM overlay must not hide
                 // reads from the recorder or keep values from an earlier prediction.
                 drop(evm.take_state_cache());
@@ -243,6 +243,7 @@ where
                     }
                 })
             } else {
+                let tx_env = evm_config.tx_env(transaction);
                 evm.transact_result(&tx_env).map(drop)
             };
             if let Err(err) = result {

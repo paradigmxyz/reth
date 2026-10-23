@@ -27,7 +27,7 @@ use alloy_eip7928::bal::DecodedBal;
 use alloy_eips::eip4895::Withdrawal;
 use alloy_primitives::{keccak256, Address};
 use core::convert::Infallible;
-use evm2::evm::{AccountChangeRef, Database, StateChangeSink, StateChangeSource, StorageChange};
+use evm2::evm::{AccountChangeRef, Database, StateChangeSink, NoopChangeSink, StateChangeSource, StorageChange};
 use metrics::{Counter, Gauge, Histogram};
 use rayon::prelude::*;
 use reth_evm::{
@@ -372,8 +372,14 @@ where
                 }
 
                 let Some(results) = &ctx.prewarm_results else {
+                    let hint_stream = state_root_hint_stream.filter(|_| index > 0);
                     let mut proof_targets = PrewarmProofTargetsSink::default();
-                    if let Err(err) = evm.transact_and_discard(&tx_env, &mut proof_targets) {
+                    let res = if hint_stream.is_some() {
+                        evm.transact_and_discard(&tx_env, &mut proof_targets)
+                    } else {
+                        evm.transact_and_discard(&tx_env, &mut NoopChangeSink::default())
+                    };
+                    if let Err(err) = res {
                         trace!(
                             target: "engine::tree::payload_processor::prewarm",
                             %err,
@@ -388,12 +394,10 @@ where
                     if ctx.should_stop() {
                         return;
                     }
-                    if index > 0 {
+                    if let Some(stream) = hint_stream {
                         let (targets, storage_targets) = proof_targets.into_parts();
                         ctx.metrics.prefetch_storage_targets.record(storage_targets as f64);
-                        if let Some(stream) = state_root_hint_stream {
-                            stream.on_access_hint(targets.into());
-                        }
+                        stream.on_access_hint(targets.into());
                     }
                     ctx.metrics.total_runtime.record(start.elapsed());
                     return;
@@ -742,6 +746,10 @@ where
     /// loop. Prewarm workers skip transactions with `index < counter` since those have already
     /// been executed.
     pub executed_tx_index: Arc<AtomicUsize>,
+    /// Whether the precompile cache is disabled.
+    pub precompile_cache_disabled: bool,
+    /// The precompile cache map.
+    pub precompile_cache_map: PrecompileCacheMap<SpecFor<Evm>>,
     /// Whether to disable BAL-driven parallel state root computation.
     /// Only valid when BAL parallel execution is also disabled.
     pub disable_bal_parallel_state_root: bool,
@@ -749,10 +757,6 @@ where
     pub disable_bal_batch_io: bool,
     /// Results of transaction prewarming that block execution may reuse, `None` if disabled.
     pub(crate) prewarm_results: Option<Arc<PrewarmResults<EvmTypesFor<Evm>>>>,
-    /// Whether the precompile cache is disabled.
-    pub precompile_cache_disabled: bool,
-    /// The precompile cache map.
-    pub precompile_cache_map: PrecompileCacheMap<SpecFor<Evm>>,
 }
 
 /// Per-thread EVM state initialised by [`PrewarmContext::evm_for_ctx`] and stored in
@@ -1119,11 +1123,11 @@ mod tests {
             cache_state_metrics: None,
             terminate_execution: Arc::clone(&terminate_execution),
             executed_tx_index: Arc::new(AtomicUsize::new(0)),
+            precompile_cache_disabled: false,
+            precompile_cache_map: PrecompileCacheMap::default(),
             disable_bal_parallel_state_root: false,
             disable_bal_batch_io: false,
             prewarm_results: None,
-            precompile_cache_disabled: false,
-            precompile_cache_map: PrecompileCacheMap::default(),
         };
         let (task, actions_tx) =
             PrewarmCacheTask::new(Runtime::test(), PayloadExecutionCache::default(), ctx);
@@ -1182,11 +1186,11 @@ mod tests {
                 cache_state_metrics: None,
                 terminate_execution: Arc::new(AtomicBool::new(false)),
                 executed_tx_index: Arc::new(AtomicUsize::new(0)),
+                precompile_cache_disabled: false,
+                precompile_cache_map: PrecompileCacheMap::default(),
                 disable_bal_parallel_state_root: false,
                 disable_bal_batch_io: false,
                 prewarm_results: Some(Arc::clone(&results)),
-                precompile_cache_disabled: false,
-                precompile_cache_map: PrecompileCacheMap::default(),
             };
             let tx =
                 WithTxEnv { tx_env: ctx.evm_config.tx_env(tx.clone()), tx: Arc::new(tx.clone()) };
@@ -1274,11 +1278,11 @@ mod tests {
             cache_state_metrics: None,
             terminate_execution: Arc::new(AtomicBool::new(false)),
             executed_tx_index: Arc::new(AtomicUsize::new(0)),
+            precompile_cache_disabled: false,
+            precompile_cache_map: PrecompileCacheMap::default(),
             disable_bal_parallel_state_root: false,
             disable_bal_batch_io: false,
             prewarm_results: None,
-            precompile_cache_disabled: false,
-            precompile_cache_map: PrecompileCacheMap::default(),
         }
     }
 
@@ -1484,7 +1488,9 @@ mod tests {
         assert_ne!(drop_thread, prewarm_thread);
     }
 
-    fn assert_save_cache_drops_removed_caches(slot: CacheSlot, valid: bool) {
+    fn assert_save_cache_drops_removed_caches(slot: CacheSlot, valid: bool, insert_error: bool) {
+        use reth_trie_common::bundle_state::{AccountStatus, BundleAccount, BundleState};
+
         let runtime = Runtime::test();
         let execution_cache = PayloadExecutionCache::default();
         let cache_to_save =
@@ -1500,7 +1506,7 @@ mod tests {
                 CacheSlot::Distinct => distinct_previous.clone(),
             };
         });
-        let expect_saved_cache = valid;
+        let expect_saved_cache = valid && !insert_error;
         let mut drops = Vec::new();
         if let Some(previous) = &distinct_previous {
             drops.push(observe_cache_drop(previous, &execution_cache, expect_saved_cache));
@@ -1517,7 +1523,14 @@ mod tests {
             let _ = release_rx.recv();
         });
 
-        let state = Default::default();
+        let mut state = BundleState::default();
+        if insert_error {
+            // Modified accounts without current info are rejected by insert_state.
+            state.state.insert(
+                Address::with_last_byte(1),
+                BundleAccount::new(None, None, Default::default(), AccountStatus::Changed),
+            );
+        }
         save_test_cache(&runtime, &execution_cache, cache_to_save, state, valid, Gauge::noop());
 
         for (result, reader) in drops {
@@ -1544,23 +1557,33 @@ mod tests {
 
     #[test]
     fn save_cache_drops_replaced_allocation_after_unlock() {
-        assert_save_cache_drops_removed_caches(CacheSlot::Distinct, true);
+        assert_save_cache_drops_removed_caches(CacheSlot::Distinct, true, false);
     }
 
     #[test]
     fn save_cache_drops_invalid_allocations_after_unlock() {
-        assert_save_cache_drops_removed_caches(CacheSlot::Distinct, false);
+        assert_save_cache_drops_removed_caches(CacheSlot::Distinct, false, false);
+    }
+
+    #[test]
+    fn save_cache_drops_allocations_after_unlock_on_insert_error() {
+        assert_save_cache_drops_removed_caches(CacheSlot::Distinct, true, true);
     }
 
     #[test]
     fn save_cache_drops_shared_allocation_after_unlock_on_invalid_block() {
-        assert_save_cache_drops_removed_caches(CacheSlot::Shared, false);
+        assert_save_cache_drops_removed_caches(CacheSlot::Shared, false, false);
+    }
+
+    #[test]
+    fn save_cache_drops_shared_allocation_after_unlock_on_insert_error() {
+        assert_save_cache_drops_removed_caches(CacheSlot::Shared, true, true);
     }
 
     #[test]
     fn save_cache_handles_empty_slot() {
-        for valid in [true, false] {
-            assert_save_cache_drops_removed_caches(CacheSlot::Empty, valid);
+        for (valid, insert_error) in [(true, false), (false, false), (true, true)] {
+            assert_save_cache_drops_removed_caches(CacheSlot::Empty, valid, insert_error);
         }
     }
 
