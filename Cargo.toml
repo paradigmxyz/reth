@@ -670,6 +670,13 @@ vergen-git2 = "10.0.1"
 # networking
 ipnet = "2.11"
 
+# evm2 is patched through its pre-transfer URL, which redirects to alloy-rs/evm2, because Cargo
+# rejects a patch from the same source.
+[patch."https://github.com/alloy-rs/evm2"]
+evm2 = { git = "https://github.com/DaniPopes/evm2", rev = "301852ff4b0cc1f9878ed6e9ff58b35e5eb95152" }
+evm2-inspectors = { git = "https://github.com/DaniPopes/evm2", rev = "301852ff4b0cc1f9878ed6e9ff58b35e5eb95152" }
+evm2-jit = { git = "https://github.com/DaniPopes/evm2", rev = "301852ff4b0cc1f9878ed6e9ff58b35e5eb95152" }
+
 [patch.crates-io]
 # LLVM 23 support is not released yet.
 inkwell = { git = "https://github.com/TheDan64/inkwell", rev = "c9d9734ae17dbaf1d9902dab3b8ee9d2041781ff" }
@@ -680,10 +687,3 @@ reth-codecs-derive = { git = "https://github.com/paradigmxyz/reth-core", rev = "
 reth-primitives-traits = { git = "https://github.com/paradigmxyz/reth-core", rev = "bd0edad994bfbb1e5cea8ca5b4da5d8813baa5f1" }
 reth-rpc-traits = { git = "https://github.com/paradigmxyz/reth-core", rev = "bd0edad994bfbb1e5cea8ca5b4da5d8813baa5f1" }
 reth-zstd-compressors = { git = "https://github.com/paradigmxyz/reth-core", rev = "bd0edad994bfbb1e5cea8ca5b4da5d8813baa5f1" }
-
-# evm2 is patched through its pre-transfer URL, which redirects to alloy-rs/evm2, because Cargo
-# rejects a patch from the same source.
-[patch."https://github.com/alloy-rs/evm2"]
-evm2 = { git = "https://github.com/DaniPopes/evm2", rev = "301852ff4b0cc1f9878ed6e9ff58b35e5eb95152" }
-evm2-inspectors = { git = "https://github.com/DaniPopes/evm2", rev = "301852ff4b0cc1f9878ed6e9ff58b35e5eb95152" }
-evm2-jit = { git = "https://github.com/DaniPopes/evm2", rev = "301852ff4b0cc1f9878ed6e9ff58b35e5eb95152" }
