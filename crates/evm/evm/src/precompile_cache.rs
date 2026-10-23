@@ -1,7 +1,7 @@
 //! Precompile cache for payload prewarming.
 
 use alloy_primitives::{
-    map::{AddressSet, DefaultHashBuilder, FbBuildHasher},
+    map::{AddressMap, AddressSet, DefaultHashBuilder, FbBuildHasher},
     Address, Bytes,
 };
 use evm2::{
@@ -110,12 +110,6 @@ struct CacheEntry<S> {
     spec: S,
 }
 
-impl<S> CacheEntry<S> {
-    fn to_precompile_result(&self) -> PrecompileOutput {
-        self.output.clone()
-    }
-}
-
 /// A caching EVM precompile provider.
 pub struct CachedPrecompileProvider<T, S>
 where
@@ -124,6 +118,8 @@ where
 {
     inner: evm2::Precompiles<T>,
     cache_map: PrecompileCacheMap<S>,
+    /// Caches already resolved from `cache_map`, so repeated calls skip the shared map lookup.
+    caches: AddressMap<Arc<PrecompileCache<S>>>,
     spec_id: S,
     policy: PrecompileCachePolicy,
     #[cfg_attr(not(feature = "metrics"), allow(dead_code))]
@@ -149,14 +145,14 @@ where
     ///
     /// Metrics are labelled by address and shared with the cache. Disable them for prewarming
     /// so speculative work does not count towards execution cache statistics.
-    pub const fn new(
+    pub fn new(
         inner: evm2::Precompiles<T>,
         cache_map: PrecompileCacheMap<S>,
         spec_id: S,
         policy: PrecompileCachePolicy,
         metrics_enabled: bool,
     ) -> Self {
-        Self { inner, cache_map, spec_id, policy, metrics_enabled }
+        Self { inner, cache_map, caches: Default::default(), spec_id, policy, metrics_enabled }
     }
 }
 
@@ -202,6 +198,7 @@ where
             // Relocated entries need a private cache because address alone no longer identifies
             // the same precompile implementation.
             self.cache_map = PrecompileCacheMap::default();
+            self.caches.clear();
         }
         Ok(())
     }
@@ -220,7 +217,8 @@ where
         if !self.policy.allows(&address) {
             return self.inner.execute(evm, message, gas);
         }
-        let cache = self.cache_map.cache_for_address(address);
+        let cache =
+            self.caches.entry(address).or_insert_with(|| self.cache_map.cache_for_address(address));
         #[cfg(feature = "metrics")]
         let metrics = self.metrics_enabled.then(|| {
             cache.metrics.get_or_init(|| CachedPrecompileMetrics::new_with_address(address))
@@ -236,7 +234,7 @@ where
                     if let Some(metrics) = metrics {
                         metrics.precompile_cache_hits.increment(1);
                     }
-                    Ok(entry.to_precompile_result())
+                    Ok(entry.output)
                 }
                 Err(err) => {
                     #[cfg(feature = "metrics")]
