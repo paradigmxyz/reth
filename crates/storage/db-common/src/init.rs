@@ -13,12 +13,12 @@ use reth_config::config::EtlConfig;
 use reth_db_api::{
     cursor::{DbCursorRW, DbDupCursorRO, DbDupCursorRW},
     models::{
-        storage_sharded_key::StorageShardedKey, AccountBeforeTx, BlockNumberAddress, IntegerList,
-        ShardedKey,
+        integer_list::IntegerListError, storage_sharded_key::StorageShardedKey, AccountBeforeTx,
+        BlockNumberAddress, IntegerList, ShardedKey,
     },
     table::DupSort,
     tables,
-    transaction::DbTxMut,
+    transaction::{DbTx, DbTxMut},
     DatabaseError,
 };
 use reth_etl::Collector;
@@ -671,7 +671,9 @@ fn parse_accounts(
 ///
 /// The dump is written over the state already in the database (e.g. the genesis alloc written by
 /// `init-state --without-evm`): each dump slot replaces the same existing slot, while existing
-/// accounts and slots the dump omits are left untouched.
+/// accounts and slots the dump omits are left untouched. Replaced accounts and slots keep their
+/// history: the change sets record their previous values and `block` is appended to their existing
+/// history shards.
 ///
 /// NOTE: This function is not idempotent. If the process crashes mid-import, the database
 /// must be wiped before retrying.
@@ -827,6 +829,7 @@ where
                 &mut history_batch,
                 &address,
                 &account,
+                block,
                 &history_list,
                 &mut seen_bytecodes,
             )?;
@@ -954,7 +957,7 @@ where
 }
 
 /// Writes one storage slot into a `DupSort` storage table, replacing any existing entry for the
-/// same slot.
+/// same slot, and returns the replaced value.
 ///
 /// On `DupSort` tables `upsert`/`append_dup` add a new duplicate instead of replacing an entry with
 /// the same subkey, so a slot already written from the genesis alloc has to be deleted first. Only
@@ -964,22 +967,40 @@ fn replace_storage_slot<T, C>(
     cursor: &mut C,
     key: T::Key,
     entry: StorageEntry,
-) -> Result<(), DatabaseError>
+) -> Result<Option<U256>, DatabaseError>
 where
     T: DupSort<SubKey = B256, Value = StorageEntry>,
     T::Key: Clone,
     C: DbDupCursorRO<T> + DbCursorRW<T>,
 {
-    if cursor
+    let previous = cursor
         .seek_by_key_subkey(key.clone(), entry.key)?
-        .is_some_and(|existing| existing.key == entry.key)
-    {
+        .filter(|existing| existing.key == entry.key)
+        .map(|existing| existing.value);
+    if previous.is_some() {
         cursor.delete_current()?;
     }
     if !entry.value.is_zero() {
         cursor.upsert(key, &entry)?;
     }
-    Ok(())
+    Ok(previous)
+}
+
+/// Returns the last history shard of an account or slot whose existing state the dump replaces,
+/// with `block` appended.
+///
+/// Existing state comes from the genesis alloc, so the shard holds at most the genesis block and
+/// never needs rechunking. `block` is not appended again when the dump is imported at the genesis
+/// block itself.
+fn history_shard_with_block(
+    shard: Option<IntegerList>,
+    block: u64,
+) -> Result<IntegerList, IntegerListError> {
+    let mut shard = shard.unwrap_or_else(IntegerList::empty);
+    if shard.max().is_none_or(|last| last < block) {
+        shard.push(block)?;
+    }
+    Ok(shard)
 }
 
 /// Writes a single account and all its storage to every required DB table directly,
@@ -990,7 +1011,7 @@ where
 /// sorted order within each account). State tables use `put`/`upsert` to replace existing
 /// genesis entries, with storage slots deleted before replacement.
 #[allow(clippy::clone_on_copy)]
-fn write_account_to_db<TX: DbTxMut>(
+fn write_account_to_db<TX: DbTx + DbTxMut>(
     tx: &TX,
     address: &Address,
     genesis_account: &GenesisAccount,
@@ -1013,6 +1034,8 @@ fn write_account_to_db<TX: DbTxMut>(
     let account = Account { bytecode_hash, ..Account::from(genesis_account) };
 
     let hashed_address = keccak256(address);
+    let previous_account = tx.get::<tables::PlainAccountState>(*address)?;
+    let replaces_account = previous_account.is_some();
 
     // plain state — sorted by address (ETL order), use append
     tx.put::<tables::PlainAccountState>(*address, account.clone())?;
@@ -1022,10 +1045,17 @@ fn write_account_to_db<TX: DbTxMut>(
 
     // account changeset — DupSort keyed by block, subkey sorted by address (ETL order)
     let mut acct_cs_cursor = tx.cursor_dup_write::<tables::AccountChangeSets>()?;
-    acct_cs_cursor.append_dup(block, AccountBeforeTx { address: *address, info: None })?;
+    acct_cs_cursor
+        .append_dup(block, AccountBeforeTx { address: *address, info: previous_account })?;
 
     // account history
-    tx.put::<tables::AccountsHistory>(ShardedKey::new(*address, u64::MAX), history_list.clone())?;
+    let history_key = ShardedKey::new(*address, u64::MAX);
+    let account_history = if replaces_account {
+        history_shard_with_block(tx.get::<tables::AccountsHistory>(history_key.clone())?, block)?
+    } else {
+        history_list.clone()
+    };
+    tx.put::<tables::AccountsHistory>(history_key, account_history)?;
 
     // storage entries: each dump slot replaces the same slot from the genesis alloc, other existing
     // slots of the account stay (see `replace_storage_slot`).
@@ -1037,7 +1067,7 @@ fn write_account_to_db<TX: DbTxMut>(
         for (&key, &value) in storage {
             let value_u256 = U256::from_be_bytes(value.0);
 
-            replace_storage_slot(
+            let previous_value = replace_storage_slot(
                 &mut plain_storage_cursor,
                 *address,
                 StorageEntry { key, value: value_u256 },
@@ -1051,14 +1081,20 @@ fn write_account_to_db<TX: DbTxMut>(
             // storage changeset — sorted by (block, address), then by key via append_dup
             storage_cs_cursor.append_dup(
                 BlockNumberAddress((block, *address)),
-                StorageEntry { key, value: U256::ZERO },
+                StorageEntry { key, value: previous_value.unwrap_or_default() },
             )?;
 
             // storage history
-            tx.put::<tables::StoragesHistory>(
-                StorageShardedKey::new(*address, key, u64::MAX),
-                history_list.clone(),
-            )?;
+            let history_key = StorageShardedKey::new(*address, key, u64::MAX);
+            let storage_history = if previous_value.is_some() {
+                history_shard_with_block(
+                    tx.get::<tables::StoragesHistory>(history_key.clone())?,
+                    block,
+                )?
+            } else {
+                history_list.clone()
+            };
+            tx.put::<tables::StoragesHistory>(history_key, storage_history)?;
         }
     }
 
@@ -1070,6 +1106,7 @@ fn write_account_to_db<TX: DbTxMut>(
 /// Storage v2 uses hashed state as the canonical state, static-file change sets, and `RocksDB`
 /// history indices. The ETL collector yields accounts sorted by address and genesis storage is a
 /// `BTreeMap`, so the streaming static-file writes preserve the required order.
+#[expect(clippy::too_many_arguments)]
 fn write_account_to_db_v2<TX, N>(
     tx: &TX,
     changeset_writers: (
@@ -1079,11 +1116,12 @@ fn write_account_to_db_v2<TX, N>(
     history_batch: &mut reth_provider::providers::RocksDBBatch<'_>,
     address: &Address,
     genesis_account: &GenesisAccount,
+    block: u64,
     history_list: &IntegerList,
     seen_bytecodes: &mut B256Set,
 ) -> Result<(), eyre::Error>
 where
-    TX: DbTxMut,
+    TX: DbTx + DbTxMut,
     N: NodePrimitives,
 {
     let bytecode_hash = if let Some(code) = &genesis_account.code {
@@ -1103,11 +1141,23 @@ where
     let hashed_address = keccak256(address);
     let (account_changeset_writer, storage_changeset_writer) = changeset_writers;
 
+    let previous_account = tx.get::<tables::HashedAccounts>(hashed_address)?;
+    let replaces_account = previous_account.is_some();
     tx.put::<tables::HashedAccounts>(hashed_address, account)?;
-    account_changeset_writer
-        .append_account_changeset_entry(AccountBeforeTx { address: *address, info: None })?;
-    history_batch
-        .put::<tables::AccountsHistory>(ShardedKey::new(*address, u64::MAX), history_list)?;
+    account_changeset_writer.append_account_changeset_entry(AccountBeforeTx {
+        address: *address,
+        info: previous_account,
+    })?;
+    let history_key = ShardedKey::new(*address, u64::MAX);
+    if replaces_account {
+        let account_history = history_shard_with_block(
+            history_batch.get::<tables::AccountsHistory>(history_key.clone())?,
+            block,
+        )?;
+        history_batch.put::<tables::AccountsHistory>(history_key, &account_history)?;
+    } else {
+        history_batch.put::<tables::AccountsHistory>(history_key, history_list)?;
+    }
 
     if let Some(storage) = &genesis_account.storage {
         // Each dump slot replaces the same slot from the genesis alloc; see `replace_storage_slot`.
@@ -1116,20 +1166,30 @@ where
         for (&key, &value) in storage {
             let value_u256 = U256::from_be_bytes(value.0);
 
-            replace_storage_slot(
+            let previous_value = replace_storage_slot(
                 &mut hashed_storage_cursor,
                 hashed_address,
                 StorageEntry { key: keccak256(key), value: value_u256 },
             )?;
 
             storage_changeset_writer.append_storage_changeset_entry(
-                reth_db_api::models::StorageBeforeTx { address: *address, key, value: U256::ZERO },
+                reth_db_api::models::StorageBeforeTx {
+                    address: *address,
+                    key,
+                    value: previous_value.unwrap_or_default(),
+                },
             )?;
 
-            history_batch.put::<tables::StoragesHistory>(
-                StorageShardedKey::new(*address, key, u64::MAX),
-                history_list,
-            )?;
+            let history_key = StorageShardedKey::new(*address, key, u64::MAX);
+            if previous_value.is_some() {
+                let storage_history = history_shard_with_block(
+                    history_batch.get::<tables::StoragesHistory>(history_key.clone())?,
+                    block,
+                )?;
+                history_batch.put::<tables::StoragesHistory>(history_key, &storage_history)?;
+            } else {
+                history_batch.put::<tables::StoragesHistory>(history_key, history_list)?;
+            }
         }
     }
 
@@ -1526,6 +1586,7 @@ mod tests {
     /// `init-state --without-evm` does, and checks the result is the genesis state overlaid by the
     /// dump: dump accounts replace their account fields, each dump slot replaces the same genesis
     /// slot (a zero value deletes it), and genesis accounts and slots the dump omits survive.
+    /// Replaced genesis accounts and slots keep their history.
     fn assert_dump_state_overlays_genesis_state(settings: StorageSettings) {
         let dump_only = Address::with_last_byte(1);
         let overlapping = Address::with_last_byte(2);
@@ -1694,6 +1755,86 @@ mod tests {
                     .collect::<Vec<_>>();
                 assert_eq!(plain_storage, expected);
             }
+        }
+
+        // Replaced accounts and slots keep their genesis values as change set pre-images and their
+        // genesis block in history.
+        {
+            let provider = factory.provider().unwrap();
+            let genesis_account =
+                |balance| Some(Account { balance: U256::from(balance), ..Default::default() });
+            assert_eq!(
+                reth_provider::ChangeSetReader::account_block_changeset(&provider, 10).unwrap(),
+                vec![
+                    AccountBeforeTx { address: dump_only, info: None },
+                    AccountBeforeTx { address: overlapping, info: genesis_account(1) },
+                    AccountBeforeTx { address: no_dump_storage, info: genesis_account(0) },
+                ]
+            );
+            let pre_image = |address, key, value: B256| {
+                (
+                    BlockNumberAddress((10, address)),
+                    StorageEntry { key: slot(key), value: U256::from_be_bytes(value.0) },
+                )
+            };
+            assert_eq!(
+                reth_provider::StorageChangeSetReader::storage_changeset(&provider, 10).unwrap(),
+                vec![
+                    pre_image(dump_only, 5, B256::ZERO),
+                    pre_image(overlapping, 1, val(0x11)),
+                    pre_image(overlapping, 3, B256::ZERO),
+                    pre_image(overlapping, 4, val(0x14)),
+                    pre_image(overlapping, 6, val(0x16)),
+                ]
+            );
+
+            let (accounts_history, storages_history) = if settings.storage_v2 {
+                let rocksdb = factory.rocksdb_provider();
+                (
+                    rocksdb
+                        .iter::<tables::AccountsHistory>()
+                        .unwrap()
+                        .collect::<Result<Vec<_>, _>>()
+                        .unwrap(),
+                    rocksdb
+                        .iter::<tables::StoragesHistory>()
+                        .unwrap()
+                        .collect::<Result<Vec<_>, _>>()
+                        .unwrap(),
+                )
+            } else {
+                let tx = provider.tx_ref();
+                (
+                    collect_table_entries::<DatabaseEnv, tables::AccountsHistory>(tx).unwrap(),
+                    collect_table_entries::<DatabaseEnv, tables::StoragesHistory>(tx).unwrap(),
+                )
+            };
+            let blocks = |blocks: &[u64]| IntegerList::new(blocks.iter().copied()).unwrap();
+            assert_eq!(
+                accounts_history,
+                vec![
+                    (ShardedKey::new(dump_only, u64::MAX), blocks(&[10])),
+                    (ShardedKey::new(overlapping, u64::MAX), blocks(&[0, 10])),
+                    (ShardedKey::new(no_dump_storage, u64::MAX), blocks(&[0, 10])),
+                    (ShardedKey::new(genesis_only, u64::MAX), blocks(&[0])),
+                ]
+            );
+            let slot_history = |address, key, list: &[u64]| {
+                (StorageShardedKey::new(address, slot(key), u64::MAX), blocks(list))
+            };
+            assert_eq!(
+                storages_history,
+                vec![
+                    slot_history(dump_only, 5, &[10]),
+                    slot_history(overlapping, 1, &[0, 10]),
+                    slot_history(overlapping, 2, &[0]),
+                    slot_history(overlapping, 3, &[10]),
+                    slot_history(overlapping, 4, &[0, 10]),
+                    slot_history(overlapping, 6, &[0, 10]),
+                    slot_history(no_dump_storage, 7, &[0]),
+                    slot_history(genesis_only, 8, &[0]),
+                ]
+            );
         }
 
         {
