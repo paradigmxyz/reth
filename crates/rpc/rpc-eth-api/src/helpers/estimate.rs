@@ -58,7 +58,9 @@ pub trait EstimateCall: Call {
 
         // Disable additional fee charges (e.g. L2 operator fees) for gas estimation,
         // consistent with `prepare_call_env` for `eth_call`.
-        evm_env.version_mut().features.remove(EvmFeatures::FEE_CHARGE);
+        evm_env.version_mut().features.remove(
+            EvmFeatures::FEE_CHARGE | EvmFeatures::BALANCE_CHECK | EvmFeatures::BALANCE_TOP_UP,
+        );
 
         // set nonce to None so that the correct nonce is chosen by the EVM
         request.as_mut().take_nonce();

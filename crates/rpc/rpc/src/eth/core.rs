@@ -1427,6 +1427,77 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn estimate_gas_fee_free_retries_and_transfer() {
+        let sender = Address::repeat_byte(0x11);
+        let target = Address::repeat_byte(0xaa);
+        let provider = MockEthProvider::default()
+            .with_chain_spec(ChainSpecBuilder::mainnet().cancun_activated().build());
+        provider.add_block(
+            B256::repeat_byte(0x42),
+            Block {
+                header: Header {
+                    number: 1,
+                    gas_limit: 100_000,
+                    excess_blob_gas: Some(0),
+                    ..Default::default()
+                },
+                body: BlockBody::default(),
+            },
+        );
+        let api = build_test_eth_api_with_gas_cap(provider, 100_000);
+        for dynamic_fee in [false, true] {
+            for transfer in [false, true] {
+                let request = TransactionRequest {
+                    gas: Some(30_000),
+                    gas_price: (!dynamic_fee).then_some(1),
+                    max_fee_per_gas: dynamic_fee.then_some(1),
+                    max_priority_fee_per_gas: dynamic_fee.then_some(1),
+                    ..TransactionRequest::default().with_from(sender).with_to(target)
+                };
+                let overrides = StateOverride::from_iter([
+                    (
+                        sender,
+                        AccountOverride {
+                            balance: Some(U256::from(if transfer { 20_000 } else { 50_000 })),
+                            ..Default::default()
+                        },
+                    ),
+                    (
+                        target,
+                        AccountOverride {
+                            code: Some(if transfer {
+                                Bytes::new()
+                            } else {
+                                Bytes::from_static(&[0x60, 0x00, 0x60, 0x00, 0xfd])
+                            }),
+                            ..Default::default()
+                        },
+                    ),
+                ]);
+                let result = EthCall::estimate_gas_at(
+                    &api,
+                    request,
+                    BlockId::latest(),
+                    EvmOverrides::state(Some(overrides)),
+                )
+                .await;
+                if transfer {
+                    assert_eq!(result.unwrap(), U256::from(21_000));
+                } else {
+                    let err = result.unwrap_err();
+                    assert!(
+                        matches!(
+                            err.as_invalid_transaction(),
+                            Some(RpcInvalidTransactionError::Revert(_))
+                        ),
+                        "{err}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[tokio::test]
     async fn estimate_gas_transfer_respects_rpc_gas_cap() {
         let provider = MockEthProvider::default();
         provider.add_block(
