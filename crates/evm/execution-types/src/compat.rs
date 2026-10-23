@@ -3,24 +3,21 @@
 use alloc::vec::Vec;
 use alloy_primitives::{
     keccak256,
-    map::{hash_map::Entry, AddressSet},
+    map::{hash_map::Entry, AddressMap, B256Map, U256Map},
     Address, B256, U256,
 };
+use evm2::{bytecode::Bytecode, evm::AccountInfo};
+use reth_primitives_traits::Account;
 use reth_trie_common::{
-    account_from_revm, account_to_revm, native_account, native_bytecode, revm_account,
-    revm_bytecode, HashedPostState, HashedStorage,
+    bundle_state::{AccountStatus, BundleState, StorageSlot, TransitionAccount},
+    HashedPostState, HashedStorage,
 };
-use revm_database::{
-    states::{bundle_state::BundleRetention, StorageSlot, TransitionAccount, TransitionState},
-    AccountStatus, BundleState,
-};
-use revm_state::{Account, AccountInfo, Bytecode};
 
-/// Transaction transitions retained using revm's bundle state model.
+/// One block's account transitions, finalized into a [`BundleState`] with their reverts.
 #[derive(Debug, Default)]
 pub struct BlockState {
-    transitions: TransitionState,
-    contracts: alloy_primitives::map::B256Map<Bytecode>,
+    transitions: AddressMap<TransitionAccount>,
+    contracts: B256Map<Bytecode>,
 }
 
 impl BlockState {
@@ -29,22 +26,20 @@ impl BlockState {
         Self::default()
     }
 
-    /// Applies a converted transaction to the block's transitions.
+    /// Applies a collected transaction to the block's transitions.
     pub fn commit(&mut self, changes: &TransactionChanges) {
         self.contracts.extend(changes.contracts.iter().map(|(hash, code)| (*hash, code.clone())));
-        for (address, account) in &changes.state {
+        for (address, account) in &changes.accounts {
             self.commit_account(
                 *address,
-                (!account.is_loaded_as_not_existing()).then(|| account.original_info()),
-                (!account.is_selfdestructed()).then(|| account.info.clone()),
-                account.is_created(),
-                changes.wiped.contains(address),
-                account.storage.iter().filter_map(|(key, slot)| {
-                    slot.is_changed().then_some((
-                        *key,
-                        StorageSlot::new_changed(slot.original_value, slot.present_value),
-                    ))
-                }),
+                account.original.clone(),
+                (!account.selfdestructed).then(|| account.info.clone()),
+                account.created,
+                account.wiped,
+                account
+                    .storage
+                    .iter()
+                    .filter_map(|(key, slot)| slot.is_changed().then_some((*key, *slot))),
             );
         }
     }
@@ -63,13 +58,13 @@ impl BlockState {
             return;
         }
         if let Some((hash, code)) = changes.code {
-            self.contracts.entry(hash).or_insert_with(|| revm_bytecode(code));
+            self.contracts.entry(hash).or_insert_with(|| code.clone());
         }
         let address = changes.address;
         let created = changes.created;
         let wiped = changes.storage.wiped;
-        let original = changes.original.map(revm_account);
-        let current = changes.current.map(revm_account);
+        let original = changes.original.map(without_code);
+        let current = changes.current.map(without_code);
         let slots = changes
             .storage
             .changed_slots()
@@ -99,7 +94,7 @@ impl BlockState {
         wiped: bool,
         storage: impl Iterator<Item = (U256, StorageSlot)>,
     ) {
-        let entry = self.transitions.transitions.entry(address);
+        let entry = self.transitions.entry(address);
         let previous_status = match &entry {
             Entry::Occupied(entry) => entry.get().status,
             Entry::Vacant(_) => loaded_status(original.as_ref()),
@@ -131,7 +126,7 @@ impl BlockState {
                 let account = entry.get_mut();
                 account.info = current;
                 account.status = status;
-                // Match TransitionAccount::update: deletion starts a new storage lifetime.
+                // Deletion starts a new storage lifetime.
                 if matches!(status, AccountStatus::Destroyed | AccountStatus::DestroyedAgain) {
                     account.storage.clear();
                     account.storage.extend(storage);
@@ -159,69 +154,91 @@ impl BlockState {
     /// Finalizes one block's transitions and reverts.
     pub fn into_bundle(self) -> BundleState {
         let mut bundle = BundleState::default();
-        bundle.apply_transitions_and_create_reverts(self.transitions, BundleRetention::Reverts);
+        bundle.apply_transitions_and_create_reverts(self.transitions);
         bundle.contracts.extend(self.contracts);
         bundle
     }
 }
 
-/// Materialized transaction changes in revm's EVM state representation.
+/// Transaction changes collected from an evm2 change stream for [`BlockState::commit`].
 #[derive(Debug, Default)]
 pub struct TransactionChanges {
-    /// State passed to the block accumulator and state-root hooks.
-    pub state: revm_state::EvmState,
-    wiped: AddressSet,
-    contracts: alloy_primitives::map::B256Map<Bytecode>,
+    accounts: AddressMap<TransactionAccount>,
+    contracts: B256Map<Bytecode>,
+}
+
+/// One account's changes within a [`TransactionChanges`].
+#[derive(Debug)]
+struct TransactionAccount {
+    /// Account at the start of the transaction, without code. `None` means it did not exist.
+    original: Option<AccountInfo>,
+    /// Account after the transaction, without code.
+    info: AccountInfo,
+    created: bool,
+    selfdestructed: bool,
+    wiped: bool,
+    storage: U256Map<StorageSlot>,
+}
+
+impl Default for TransactionAccount {
+    fn default() -> Self {
+        Self {
+            original: Some(AccountInfo::empty()),
+            info: AccountInfo::empty(),
+            created: false,
+            selfdestructed: false,
+            wiped: false,
+            storage: U256Map::default(),
+        }
+    }
+}
+
+impl TransactionAccount {
+    fn update(&mut self, change: evm2::evm::AccountChangeRef<'_>) {
+        self.original = change.original.map(without_code);
+        self.info = change.current.map(without_code).unwrap_or_else(AccountInfo::empty);
+        self.created |= change.created;
+        self.selfdestructed |= change.current.is_none();
+    }
 }
 
 impl evm2::evm::StateChangeSink for TransactionChanges {
     type Error = core::convert::Infallible;
-    fn bytecode(
-        &mut self,
-        hash: alloy_primitives::B256,
-        code: &evm2::bytecode::Bytecode,
-    ) -> Result<(), Self::Error> {
-        self.contracts.entry(hash).or_insert_with(|| revm_bytecode(code));
+    fn bytecode(&mut self, hash: B256, code: &Bytecode) -> Result<(), Self::Error> {
+        self.contracts.entry(hash).or_insert_with(|| code.clone());
         Ok(())
     }
-    fn storage_wipe(&mut self, address: alloy_primitives::Address) -> Result<(), Self::Error> {
-        self.wiped.insert(address);
-        self.state.entry(address).or_insert_with(empty_account).storage.clear();
+    fn storage_wipe(&mut self, address: Address) -> Result<(), Self::Error> {
+        let account = self.accounts.entry(address).or_default();
+        account.wiped = true;
+        account.storage.clear();
         Ok(())
     }
     fn storage(&mut self, change: evm2::evm::StorageChange) -> Result<(), Self::Error> {
-        self.state.entry(change.address).or_insert_with(empty_account).storage.insert(
-            change.key,
-            revm_state::EvmStorageSlot::new_changed(
-                change.original,
-                change.current,
-                revm_state::TransactionId::ZERO,
-            ),
-        );
+        self.accounts
+            .entry(change.address)
+            .or_default()
+            .storage
+            .insert(change.key, StorageSlot::new_changed(change.original, change.current));
         Ok(())
     }
     fn account(&mut self, change: evm2::evm::AccountChangeRef<'_>) -> Result<(), Self::Error> {
-        let account = self.state.entry(change.address).or_insert_with(empty_account);
-        update_account(account, change, &self.contracts);
+        self.accounts.entry(change.address).or_default().update(change);
         Ok(())
     }
     fn account_read(
         &mut self,
-        address: alloy_primitives::Address,
-        info: Option<&evm2::evm::AccountInfo>,
+        address: Address,
+        info: Option<&AccountInfo>,
     ) -> Result<(), Self::Error> {
-        if let Some(account) = self.state.get_mut(&address) {
-            update_account(
-                account,
-                evm2::evm::AccountChangeRef {
-                    address,
-                    original: info,
-                    current: info,
-                    created: false,
-                    selfdestructed: false,
-                },
-                &self.contracts,
-            );
+        if let Some(account) = self.accounts.get_mut(&address) {
+            account.update(evm2::evm::AccountChangeRef {
+                address,
+                original: info,
+                current: info,
+                created: false,
+                selfdestructed: false,
+            });
         }
         Ok(())
     }
@@ -281,7 +298,7 @@ pub fn state_update_to_hashed_post_state(update: &StateUpdate) -> HashedPostStat
         if destroyed || (info.is_empty() && account.original.is_some()) {
             hashed_state.accounts.insert(hashed_address, None);
         } else if !unchanged {
-            hashed_state.accounts.insert(hashed_address, Some(account_from_revm(&info)));
+            hashed_state.accounts.insert(hashed_address, Some(Account::from(&info)));
         }
         if !destroyed && !account.storage.is_empty() {
             hashed_state.storages.insert(
@@ -298,60 +315,8 @@ pub fn state_update_to_hashed_post_state(update: &StateUpdate) -> HashedPostStat
     hashed_state
 }
 
-/// Converts a revm [`EvmState`](revm_state::EvmState) into a state update, keeping touched
-/// accounts and their changed slots.
-pub fn evm_state_to_state_update(state: &revm_state::EvmState) -> StateUpdate {
-    let accounts = state
-        .iter()
-        .filter(|(_, account)| account.is_touched())
-        .map(|(&address, account)| {
-            let without_code = |info: &AccountInfo| AccountInfo { code: None, ..info.clone() };
-            AccountUpdate {
-                address,
-                original: (!account.is_loaded_as_not_existing())
-                    .then(|| without_code(&account.original_info())),
-                current: (!account.is_selfdestructed()).then(|| without_code(&account.info)),
-                created: account.is_created(),
-                wiped: account.is_selfdestructed(),
-                storage: account
-                    .storage
-                    .iter()
-                    .filter(|(_, slot)| slot.is_changed())
-                    .map(|(&key, slot)| {
-                        (key, StorageSlot::new_changed(slot.original_value, slot.present_value))
-                    })
-                    .collect(),
-            }
-        })
-        .collect();
-    StateUpdate { accounts }
-}
-
-fn empty_account() -> Account {
-    // Account::from initializes the original-info box directly, without constructing and
-    // immediately dropping the default empty bytecode in both account-info values.
-    Account::from(account_to_revm(reth_primitives_traits::Account::default()))
-}
-
-fn update_account(
-    account: &mut Account,
-    change: evm2::evm::AccountChangeRef<'_>,
-    contracts: &alloy_primitives::map::B256Map<Bytecode>,
-) {
-    let original = change.original.map(revm_account);
-    account.status.set(revm_state::AccountStatus::LoadedAsNotExisting, original.is_none());
-    *account.original_info_mut() = original.unwrap_or_default();
-    account.info = change.current.map(revm_account).unwrap_or_default();
-    if let Some(code) = contracts.get(&account.info.code_hash) {
-        account.info.code = Some(code.clone());
-    }
-    account.mark_touch();
-    if change.created {
-        account.mark_created();
-    }
-    if change.current.is_none() {
-        account.mark_selfdestruct();
-    }
+fn without_code(info: &AccountInfo) -> AccountInfo {
+    AccountInfo { code: None, ..info.clone() }
 }
 
 /// Visits a persisted bundle as native changes when seeding an execution cache.
@@ -361,18 +326,17 @@ pub struct BundleSource<'a>(pub &'a BundleState);
 impl evm2::evm::StateChangeSource for BundleSource<'_> {
     fn visit<S: evm2::evm::StateChangeSink>(&self, sink: &mut S) -> Result<(), S::Error> {
         for (hash, code) in &self.0.contracts {
-            sink.bytecode(*hash, &native_bytecode(code))?;
+            sink.bytecode(*hash, code)?;
         }
         for (address, account) in &self.0.state {
-            let original = account.original_info.as_ref().map(native_account);
-            let current = account.info.as_ref().map(native_account);
+            let current = account.info.as_ref();
             if account.status.was_destroyed() {
                 sink.storage_wipe(*address)?;
             }
             sink.account(evm2::evm::AccountChangeRef {
                 address: *address,
-                original: original.as_ref(),
-                current: current.as_ref(),
+                original: account.original_info.as_ref(),
+                current,
                 created: account.status.is_storage_known() && current.is_some(),
                 selfdestructed: current.is_none(),
             })?;
@@ -400,10 +364,9 @@ fn loaded_status(info: Option<&AccountInfo>) -> AccountStatus {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_primitives::{Address, U256};
     use evm2::evm::{
-        AccountChangeRef, AccountChanges, AccountInfo as NativeAccount, StateChangeSink,
-        StorageChange, StorageOverlay, StorageSlot as NativeSlot, Tracked,
+        AccountChangeRef, AccountChanges, StateChangeSink, StorageChange, StorageOverlay,
+        StorageSlot as NativeSlot, Tracked,
     };
 
     /// Builds a storage overlay from `(key, original, current)` slots.
@@ -423,20 +386,17 @@ mod tests {
         let address = Address::with_last_byte(1);
         let original = AccountInfo {
             balance: U256::from(10),
-            extension: revm_state::AccountExtension::copy_from_slice(b"original extension"),
+            extension: evm2::evm::AccountExtension::copy_from_slice(b"original extension"),
             ..Default::default()
         };
-        let native = native_account(&original);
-        assert_eq!(native.extension.as_ref(), original.extension.as_ref());
-        assert_eq!(native.extension.as_ref().as_ptr(), original.extension.as_ref().as_ptr());
-        let mut updated = native.clone();
+        let mut updated = original.clone();
         updated.balance = U256::from(20);
         updated.extension = evm2::evm::AccountExtension::copy_from_slice(b"updated extension");
         let mut state = BlockState::new();
         state.commit_account_changes(
             AccountChanges {
                 address,
-                original: Some(&native),
+                original: Some(&original),
                 current: Some(&updated),
                 created: false,
                 selfdestructed: false,
@@ -463,7 +423,7 @@ mod tests {
     fn native_sink_preserves_storage_lifetimes_and_reverts() {
         let address = Address::with_last_byte(1);
         let code = evm2::bytecode::Bytecode::new_raw(alloy_primitives::bytes!("60015b00"));
-        let info = NativeAccount::default().with_nonce(1).with_code(code.clone());
+        let info = AccountInfo::default().with_nonce(1).with_code(code.clone());
         let mut converted = BlockState::new();
         let mut native = BlockState::new();
         // Storage-only writes, restoration, deletion, recreation, a surviving storage wipe,
@@ -526,60 +486,15 @@ mod tests {
     }
 
     #[test]
-    fn bytecode_conversion_preserves_analysis_and_padding() {
-        let mut cases = alloc::vec![
-            alloc::vec![],
-            alloc::vec![0x00],
-            alloc::vec![0x5b, 0x60, 0x5b, 0x00],
-            alloc::vec![0x5b; 24_576],
-            alloc::vec![0xef, 0x01],
-            Bytecode::new_eip7702(Address::with_last_byte(7)).original_bytes().to_vec(),
-        ];
-        for opcode in 0x60..=0x7f {
-            // Every truncated PUSH width, including a JUMPDEST inside its immediate data.
-            for available in 0..=usize::from(opcode - 0x60) {
-                let mut bytes = alloc::vec![opcode];
-                bytes.extend(core::iter::repeat_n(0x5b, available));
-                cases.push(bytes);
-            }
-        }
-        for opcode in [
-            revm_bytecode::opcode::DUPN,
-            revm_bytecode::opcode::SWAPN,
-            revm_bytecode::opcode::EXCHANGE,
-        ] {
-            cases.push(alloc::vec![opcode]);
-            cases.push(alloc::vec![opcode, 0]);
-        }
-        for bytes in cases {
-            let persistent = Bytecode::new_legacy(bytes.into());
-            let native = native_bytecode(&persistent);
-            let analyzed = evm2::bytecode::Bytecode::new_legacy(persistent.original_bytes());
-            assert_eq!(native, analyzed);
-            assert_eq!(revm_bytecode(&native), persistent);
-            assert_eq!(native.bytes(), &persistent.bytes());
-            assert_eq!(native.legacy_jump_table(), analyzed.legacy_jump_table());
-            if !persistent.is_empty() {
-                assert_eq!(native.bytes().as_ptr(), persistent.bytes_ref().as_ptr());
-            }
-        }
-        let delegated = Bytecode::new_eip7702(Address::with_last_byte(7));
-        let native = native_bytecode(&delegated);
-        assert_eq!(native.eip7702_address(), Some(Address::with_last_byte(7)));
-        assert_eq!(native.original_bytes(), delegated.original_bytes());
-        assert_eq!(revm_bytecode(&native), delegated);
-    }
-
-    #[test]
     fn cached_bytecode_does_not_change_bundle_output() {
         let address = Address::with_last_byte(1);
         let code = evm2::bytecode::Bytecode::new_raw(alloy_primitives::bytes!("60015b00"));
-        let info = NativeAccount {
+        let info = AccountInfo {
             balance: U256::from(5),
             code_hash: code.hash_slow(),
             ..Default::default()
         };
-        let bundle = |info: &NativeAccount| {
+        let bundle = |info: &AccountInfo| {
             let mut changes = TransactionChanges::default();
             changes
                 .account(AccountChangeRef {
@@ -595,7 +510,7 @@ mod tests {
             block.into_bundle()
         };
         let uncached = bundle(&info);
-        let cached = bundle(&NativeAccount { code: Some(code), ..info });
+        let cached = bundle(&AccountInfo { code: Some(code), ..info });
         assert_eq!(uncached, cached);
         assert!(cached.contracts.is_empty());
     }
@@ -605,7 +520,7 @@ mod tests {
         let address = Address::with_last_byte(1);
         let code = evm2::bytecode::Bytecode::new_raw(alloy_primitives::bytes!("60015b00"));
         let hash = code.hash_slow();
-        let info = NativeAccount {
+        let info = AccountInfo {
             nonce: 1,
             code_hash: hash,
             code: Some(code.clone()),
@@ -632,7 +547,7 @@ mod tests {
     #[test]
     fn storage_only_change_retains_account_and_reverts() {
         let address = Address::with_last_byte(1);
-        let info = NativeAccount { nonce: 1, ..Default::default() };
+        let info = AccountInfo { nonce: 1, ..Default::default() };
         let mut changes = TransactionChanges::default();
         changes
             .storage(StorageChange {
@@ -656,8 +571,8 @@ mod tests {
     #[test]
     fn destroy_then_recreate_retains_parent_storage_wipe() {
         let address = Address::with_last_byte(1);
-        let original = NativeAccount { nonce: 1, balance: U256::from(7), ..Default::default() };
-        let recreated = NativeAccount { nonce: 1, balance: U256::from(9), ..Default::default() };
+        let original = AccountInfo { nonce: 1, balance: U256::from(7), ..Default::default() };
+        let recreated = AccountInfo { nonce: 1, balance: U256::from(9), ..Default::default() };
         let mut block = BlockState::new();
         let mut destroyed = TransactionChanges::default();
         destroyed

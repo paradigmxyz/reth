@@ -15,11 +15,7 @@ pub use evm2::evm::{
     AccountChangeRef as ExecutionAccountChangeRef, AccountInfo as ExecutionAccountInfo,
     StateChangeSink as EvmStateChangeSink, StorageChange as ExecutionStorageChange,
 };
-pub use reth_trie_common::{
-    account_from_revm, account_to_revm, native_account, native_bytecode, reth_bytecode,
-    revm_account, revm_bytecode, HashedPostState,
-};
-pub use revm_state::EvmState;
+pub use reth_trie_common::HashedPostState;
 
 /// Receives per-transaction state changes streamed from block execution.
 pub trait OnStateHook: Send + 'static {

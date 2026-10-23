@@ -1619,6 +1619,7 @@ mod tests {
     use crate::{eth::helpers::types::EthRpcConverter, EthApi};
     use alloy_genesis::{Genesis, GenesisAccount};
     use alloy_primitives::{keccak256, U256};
+    use evm2::{bytecode::Bytecode, evm::AccountInfo};
     use reth_chainspec::{ChainSpec, ChainSpecBuilder};
     use reth_db_api::{tables, transaction::DbTxMut};
     use reth_db_common::init::init_genesis;
@@ -1630,8 +1631,7 @@ mod tests {
     };
     use reth_rpc_eth_api::EthApiServer;
     use reth_transaction_pool::test_utils::testing_pool;
-    use revm_database::{states::StorageSlot, AccountStatus, BundleAccount, BundleState};
-    use revm_state::{AccountInfo as RevmAccountInfo, Bytecode};
+    use reth_trie_common::bundle_state::{AccountStatus, BundleAccount, BundleState, StorageSlot};
 
     #[tokio::test]
     async fn trace_call_out_of_range_block_error() {
@@ -1752,10 +1752,7 @@ mod tests {
 
         let read_code = Bytecode::new_raw(alloy_primitives::bytes!("600100"));
         let created_code = Bytecode::new_raw(alloy_primitives::bytes!("600200"));
-        state
-            .cache
-            .contracts
-            .insert(read_code.hash_slow(), reth_execution_types::native_bytecode(&read_code));
+        state.cache.contracts.insert(read_code.hash_slow(), read_code.clone());
         let codes = ExecutionWitnessRecord::capture_codes(&state);
         let mut output = BundleState::default();
         // Recreating code already read from parent state must not remove it from the witness.
@@ -1811,8 +1808,8 @@ mod tests {
         bundle_state.state.insert(
             address,
             BundleAccount::new(
-                Some(RevmAccountInfo::default()),
-                Some(RevmAccountInfo::default()),
+                Some(AccountInfo::default()),
+                Some(AccountInfo::default()),
                 std::iter::once((new_slot, StorageSlot::new_changed(U256::ZERO, new_value)))
                     .collect(),
                 AccountStatus::DestroyedChanged,

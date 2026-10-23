@@ -94,29 +94,22 @@ impl<'a, DB> ExecutionWitnessRecord<'a, DB> {
                 .collect()
         };
 
-        let mut wiped_state = revm_database::BundleState::default();
+        let mut wiped_state = reth_trie_common::bundle_state::BundleState::default();
         for (address, storage) in &self.state.cache.storage {
             if storage.wiped {
-                let info = self
-                    .state
-                    .cache
-                    .accounts
-                    .get(address)
-                    .and_then(|info| info.as_ref())
-                    .map(reth_execution_types::revm_account);
+                let info =
+                    self.state.cache.accounts.get(address).and_then(|info| info.as_ref()).cloned();
                 wiped_state.state.insert(
                     *address,
-                    revm_database::BundleAccount::new(
+                    reth_trie_common::bundle_state::BundleAccount::new(
                         // Original existence determines whether parent storage proofs are needed.
-                        state_provider
-                            .basic_account(address)?
-                            .map(reth_trie_common::account_to_revm),
+                        state_provider.basic_account(address)?.map(Into::into),
                         info.clone(),
                         Default::default(),
                         if info.is_some() {
-                            revm_database::AccountStatus::DestroyedChanged
+                            reth_trie_common::bundle_state::AccountStatus::DestroyedChanged
                         } else {
-                            revm_database::AccountStatus::Destroyed
+                            reth_trie_common::bundle_state::AccountStatus::Destroyed
                         },
                     ),
                 );

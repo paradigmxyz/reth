@@ -22,10 +22,7 @@ use reth_provider::{
 };
 use reth_stages::stages::calculate_gas_used_from_headers;
 use reth_storage_api::{ChangeSetReader, DBProvider, StateProvider, StorageChangeSetReader};
-use revm_database::{
-    states::reverts::{AccountInfoRevert, RevertToSlot},
-    BundleState,
-};
+use reth_trie::bundle_state::{AccountInfoRevert, BundleState, RevertToSlot};
 use std::{
     collections::HashMap,
     sync::{
@@ -449,7 +446,7 @@ where
                     let cs_info = cs_accounts.remove(addr).ok_or_else(|| {
                         eyre::eyre!("Block {block_number}: account {addr} revert is RevertTo but not in changeset")
                     })?;
-                    let revert_acct = Some(reth_provider::account_from_revm(info));
+                    let revert_acct = Some(reth_primitives_traits::Account::from(info));
                     eyre::ensure!(
                         revert_acct == cs_info,
                         "Block {block_number}: account {addr} info mismatch: revert={revert_acct:?} cs={cs_info:?}",

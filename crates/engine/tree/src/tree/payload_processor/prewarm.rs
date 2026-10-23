@@ -1257,7 +1257,7 @@ mod tests {
         runtime: &Runtime,
         execution_cache: &PayloadExecutionCache,
         saved_cache: SavedCache,
-        state: revm_database::BundleState,
+        state: reth_trie_common::bundle_state::BundleState,
         valid: bool,
         saving_duration: Gauge,
     ) {
@@ -1396,10 +1396,10 @@ mod tests {
             inspected: inspected_rx,
             result: result_tx,
         });
-        let code = revm_bytecode::Bytecode::new_eip7702_raw(bytes.into()).unwrap();
+        let code = evm2::bytecode::Bytecode::new_eip7702_raw(bytes.into()).unwrap();
         saved
             .cache()
-            .insert_code(B256::repeat_byte(3), Some(reth_execution_types::reth_bytecode(&code)));
+            .insert_code(B256::repeat_byte(3), Some(reth_primitives_traits::Bytecode(code)));
         (result_rx, reader)
     }
 

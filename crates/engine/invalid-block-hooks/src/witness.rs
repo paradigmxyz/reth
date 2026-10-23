@@ -1,6 +1,7 @@
 use alloy_consensus::BlockHeader;
 use alloy_primitives::{Address, B256, U256};
 use alloy_rpc_types_debug::ExecutionWitness;
+use evm2::{bytecode::Bytecode, evm::AccountInfo};
 use pretty_assertions::Comparison;
 use reth_engine_primitives::InvalidBlockHook;
 use reth_evm::{database::StateProviderDatabase, ConfigureEvm, Executor};
@@ -9,13 +10,10 @@ use reth_primitives_traits::{NodePrimitives, RecoveredBlock, SealedHeader};
 use reth_provider::{BlockExecutionOutput, StateProvider, StateProviderFactory};
 use reth_rpc_api::DebugApiClient;
 use reth_tracing::tracing::warn;
-use reth_trie::updates::TrieUpdates;
-use revm_bytecode::Bytecode;
-use revm_database::{
-    states::{reverts::AccountInfoRevert, StorageSlot},
-    AccountStatus, BundleState, RevertToSlot,
+use reth_trie::{
+    bundle_state::{AccountInfoRevert, AccountStatus, BundleState, RevertToSlot, StorageSlot},
+    updates::TrieUpdates,
 };
-use revm_state::AccountInfo;
 use serde::Serialize;
 use std::{collections::BTreeMap, fmt::Debug, fs::File, io::Write, path::PathBuf};
 
@@ -353,7 +351,7 @@ mod tests {
     use reth_ethereum_primitives::EthPrimitives;
     use reth_evm_ethereum::EthEvmConfig;
     use reth_provider::test_utils::MockEthProvider;
-    use revm_database::{AccountRevert, BundleAccount};
+    use reth_trie::bundle_state::{AccountRevert, BundleAccount};
     use tempfile::TempDir;
 
     use reth_testing_utils::generators::{self, random_block, random_eoa_accounts, BlockParams};

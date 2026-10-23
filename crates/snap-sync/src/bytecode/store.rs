@@ -5,14 +5,14 @@
 
 use crate::{SnapAttemptStore, SnapSyncError, SnapWrite};
 use alloy_primitives::{keccak256, Bytes, B256};
+use evm2::bytecode::Bytecode;
 use reth_db_api::{
     tables,
     transaction::{DbTx, DbTxMut},
     RawKey, RawTable,
 };
 use reth_storage_api::{DBProvider, MetadataProvider, StateWriter};
-use revm_bytecode::Bytecode;
-use revm_database::states::StateChangeset;
+use reth_trie_common::bundle_state::StateChangeset;
 
 /// Persistence for the code an attempt's accounts reference.
 ///

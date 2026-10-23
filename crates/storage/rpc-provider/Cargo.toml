@@ -44,9 +44,6 @@ tokio = { workspace = true, features = ["sync", "macros", "rt-multi-thread"] }
 tracing.workspace = true
 dashmap = { workspace = true, features = ["inline"] }
 
-# revm
-revm-database.workspace = true
-
 [dev-dependencies]
 tokio = { workspace = true, features = ["rt", "macros"] }
 

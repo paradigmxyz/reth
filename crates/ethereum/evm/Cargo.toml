@@ -11,7 +11,6 @@ repository.workspace = true
 workspace = true
 
 [dependencies]
-revm-database.workspace = true
 # Reth
 reth-execution-types.workspace = true
 reth-chainspec.workspace = true
@@ -97,7 +96,6 @@ std = [
     "reth-storage-errors/std",
     "alloy-sol-types/std",
     "alloy-eip7928/std",
-    "revm-database/std",
 ]
 test-utils = [
     "std",

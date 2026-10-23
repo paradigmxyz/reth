@@ -28,7 +28,7 @@
 //! - On the parallel BAL execution path, prewarm converts the block access list and delivers
 //!   pre-hashed updates through the hashed update stream, terminated by
 //!   [`StateRootUpdateStream::finish`].
-//! - On the serial execution path, per-transaction `EvmState` updates arrive through the execution
+//! - On the serial execution path, per-transaction `StateUpdate`s arrive through the execution
 //!   hook, terminated when the hook is dropped after execution.
 //!
 //! Which path runs depends on runtime conditions (BAL present, caching and prewarming enabled),
@@ -80,9 +80,9 @@ use reth_trie_parallel::proof_task::{
 pub use reth_trie_parallel::{
     error::StateRootTaskError,
     state_root_task::{
-        evm_state_to_hashed_post_state, PayloadStateRootHandle, StateAccessHint,
-        StateRootComputeOutcome, StateRootHandle, StateRootHintStream, StateRootMessage,
-        StateRootTaskCancelGuard, StateRootUpdateHook, StateRootUpdateStream,
+        PayloadStateRootHandle, StateAccessHint, StateRootComputeOutcome, StateRootHandle,
+        StateRootHintStream, StateRootMessage, StateRootTaskCancelGuard, StateRootUpdateHook,
+        StateRootUpdateStream,
     },
 };
 use reth_trie_sparse::{
@@ -1348,6 +1348,7 @@ mod tests {
     use super::*;
     use alloy_consensus::constants::KECCAK_EMPTY;
     use alloy_primitives::{map::HashMap, Address, U256};
+    use evm2::evm::AccountInfo;
     use rand::Rng;
     use reth_chain_state::test_utils::TestBlockBuilder;
     use reth_chainspec::ChainSpec;
@@ -1355,6 +1356,7 @@ mod tests {
     use reth_ethereum_primitives::EthPrimitives;
     use reth_evm::OnStateHook;
     use reth_evm_ethereum::EthEvmConfig;
+    use reth_execution_types::{AccountUpdate, StateUpdate};
     use reth_primitives_traits::{Account, StorageEntry};
     use reth_provider::{
         providers::BlockchainProvider, test_utils::create_test_provider_factory_with_chain_spec,
@@ -1363,7 +1365,7 @@ mod tests {
     use reth_storage_overlay::{OverlayManager, OverlayStateProviderFactory};
     use reth_testing_utils::generators;
     use reth_trie::test_utils::state_root;
-    use revm_state::{AccountInfo, AccountStatus, EvmState, EvmStorageSlot, TransactionId};
+    use reth_trie_common::bundle_state::StorageSlot;
 
     #[test]
     fn proof_worker_count_scales_with_block_gas() {
@@ -1645,43 +1647,45 @@ mod tests {
         );
     }
 
-    fn create_mock_state_updates(num_accounts: usize, updates_per_account: usize) -> Vec<EvmState> {
+    fn create_mock_state_updates(
+        num_accounts: usize,
+        updates_per_account: usize,
+    ) -> Vec<StateUpdate> {
         let mut rng = generators::rng();
         let all_addresses: Vec<Address> = (0..num_accounts).map(|_| rng.random()).collect();
         let mut updates = Vec::with_capacity(updates_per_account);
 
         for _ in 0..updates_per_account {
             let num_accounts_in_update = rng.random_range(1..=num_accounts);
-            let mut state_update = EvmState::default();
+            let mut state_update = StateUpdate::default();
 
             for &address in &all_addresses[0..num_accounts_in_update] {
-                let mut storage = HashMap::default();
+                let mut storage = HashMap::<_, _>::default();
                 if rng.random_bool(0.7) {
                     for _ in 0..rng.random_range(1..10) {
                         let slot = U256::from(rng.random::<u64>());
                         storage.insert(
                             slot,
-                            EvmStorageSlot::new_changed(
-                                U256::ZERO,
-                                U256::from(rng.random::<u64>()),
-                                TransactionId::ZERO,
-                            ),
+                            StorageSlot::new_changed(U256::ZERO, U256::from(rng.random::<u64>())),
                         );
                     }
                 }
 
-                let mut account = revm_state::Account::default();
-                account.info = AccountInfo {
+                let info = AccountInfo {
                     balance: U256::from(rng.random::<u64>()),
                     nonce: rng.random::<u64>(),
                     code_hash: KECCAK_EMPTY,
                     code: Some(Default::default()),
                     ..Default::default()
                 };
-                account.storage = storage;
-                account.status = AccountStatus::Touched;
-                account.transaction_id = TransactionId::ZERO;
-                state_update.insert(address, account);
+                state_update.accounts.push(AccountUpdate {
+                    address,
+                    original: Some(AccountInfo::default()),
+                    current: Some(info),
+                    created: false,
+                    wiped: false,
+                    storage: storage.into_iter().collect(),
+                });
             }
 
             updates.push(state_update);
@@ -1703,18 +1707,21 @@ mod tests {
         {
             let provider_rw = factory.provider_rw().expect("failed to get provider");
             for update in &state_updates {
-                let account_updates = update.iter().map(|(address, account)| {
-                    (*address, Some(reth_execution_types::account_from_revm(&account.info)))
+                let account_updates = update.accounts.iter().map(|account| {
+                    (
+                        account.address,
+                        account.current.as_ref().map(reth_primitives_traits::Account::from),
+                    )
                 });
                 provider_rw
                     .insert_account_for_hashing(account_updates)
                     .expect("failed to insert accounts");
 
-                let storage_updates = update.iter().map(|(address, account)| {
+                let storage_updates = update.accounts.iter().map(|account| {
                     let storage_entries = account.storage.iter().map(|(slot, value)| {
                         StorageEntry { key: B256::from(*slot), value: value.present_value }
                     });
-                    (*address, storage_entries)
+                    (account.address, storage_entries)
                 });
                 provider_rw
                     .insert_storage_for_hashing(storage_updates)
@@ -1724,14 +1731,14 @@ mod tests {
         }
 
         for update in &state_updates {
-            for (address, account) in update {
+            for account in &update.accounts {
                 let storage: HashMap<B256, U256> = account
                     .storage
                     .iter()
                     .map(|(key, value)| (B256::from(*key), value.present_value))
                     .collect();
-                let entry = accumulated_state.entry(*address).or_default();
-                entry.0 = reth_execution_types::account_from_revm(&account.info);
+                let entry = accumulated_state.entry(account.address).or_default();
+                entry.0 = reth_primitives_traits::Account::from(account.current.as_ref().unwrap());
                 entry.1.extend(storage);
             }
         }
@@ -1800,16 +1807,17 @@ mod tests {
             let mut state_hook = state_root_handle.take_state_hook();
             if reuse {
                 let mut update = state_updates.last().unwrap().clone();
-                for (address, account) in &mut update {
-                    account.info.nonce += number as u64;
-                    accumulated_state.get_mut(address).unwrap().0 =
-                        reth_execution_types::account_from_revm(&account.info);
+                for account in &mut update.accounts {
+                    let info = account.current.as_mut().unwrap();
+                    info.nonce += number as u64;
+                    accumulated_state.get_mut(&account.address).unwrap().0 =
+                        reth_primitives_traits::Account::from(&*info);
                 }
-                state_hook.on_state(reth_execution_types::evm_state_to_state_update(&update));
+                state_hook.on_state(update);
                 root_from_regular = state_root(accumulated_state.clone());
             } else {
                 for update in &state_updates {
-                    state_hook.on_state(reth_execution_types::evm_state_to_state_update(update));
+                    state_hook.on_state(update.clone());
                 }
             }
             drop(state_hook);

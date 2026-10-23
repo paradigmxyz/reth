@@ -267,7 +267,7 @@ where
         )
     }
 
-    fn into_state(self) -> revm_database::BundleState {
+    fn into_state(self) -> reth_evm::BundleState {
         self.block_state.into_bundle()
     }
 
@@ -875,7 +875,7 @@ where
         Ok(())
     }
 
-    fn into_state(self) -> revm_database::BundleState {
+    fn into_state(self) -> reth_evm::BundleState {
         self.inner.into_state()
     }
 

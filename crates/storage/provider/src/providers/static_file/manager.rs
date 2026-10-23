@@ -571,7 +571,7 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
                 .flatten()
                 .map(|(address, info)| AccountBeforeTx {
                     address,
-                    info: info.map(|info| reth_execution_types::account_from_revm(&info)),
+                    info: info.map(reth_primitives_traits::Account::from),
                 })
                 .collect();
             w.append_account_changeset(changeset, block_number)?;

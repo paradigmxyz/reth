@@ -746,9 +746,9 @@ mod tests {
     use super::*;
     use alloy_consensus::TxType;
     use alloy_primitives::{map::HashMap, Address, B256};
+    use evm2::evm::AccountInfo;
     use reth_ethereum_primitives::Receipt;
-    use revm_database::BundleState;
-    use revm_state::AccountInfo;
+    use reth_trie_common::bundle_state::BundleState;
 
     #[test]
     fn chain_append() {

@@ -39,11 +39,7 @@ pub use constants::*;
 mod account;
 pub use account::TrieAccount;
 
-mod revm_compat;
-pub use revm_compat::{
-    account_from_revm, account_to_revm, native_account, native_bytecode, reth_bytecode,
-    revm_account, revm_bytecode,
-};
+pub mod bundle_state;
 
 /// V2 proof targets and chunking.
 pub mod target_v2;

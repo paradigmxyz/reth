@@ -1064,6 +1064,7 @@ mod tests {
     use alloy_consensus::constants::EMPTY_ROOT_HASH;
     use alloy_eips::{BlockHashOrNumber, BlockNumHash, BlockNumberOrTag};
     use alloy_primitives::{keccak256, Address, BlockNumber, TxNumber, B256, U256};
+    use evm2::evm::AccountInfo;
     use itertools::Itertools;
     use rand::Rng;
     use reth_chain_state::{
@@ -1093,9 +1094,11 @@ mod tests {
         self, random_block, random_block_range, random_changeset_range, random_eoa_accounts,
         random_receipt, BlockParams, BlockRangeParams,
     };
-    use reth_trie::{updates::TrieUpdates, HashedPostState, HashedStorage, SortedTrieData};
-    use revm_database::{BundleState, OriginalValuesKnown};
-    use revm_state::AccountInfo;
+    use reth_trie::{
+        bundle_state::{BundleState, OriginalValuesKnown},
+        updates::TrieUpdates,
+        HashedPostState, HashedStorage, SortedTrieData,
+    };
     use std::{
         collections::{BTreeMap, HashMap},
         ops::{Bound, Range, RangeBounds},
@@ -1152,7 +1155,7 @@ mod tests {
                 let (_, updates) = trie.get_root_with_updates(&changes);
                 trie.apply_changeset(changes);
                 storage.insert(slot, value);
-                let info = AccountInfo::from_balance(account.balance);
+                let info = AccountInfo::default().with_balance(account.balance);
                 output.state = BundleState::builder(number..=number)
                     .state_original_account_info(address, info.clone())
                     .state_present_account_info(address, info)
@@ -2121,20 +2124,11 @@ mod tests {
             &ExecutionOutcome {
                 bundle: BundleState::new(
                     database_state.into_iter().map(|(address, (account, _))| {
-                        (
-                            address,
-                            None,
-                            Some(reth_execution_types::account_to_revm(account)),
-                            Default::default(),
-                        )
+                        (address, None, Some(account.into()), Default::default())
                     }),
                     database_changesets.iter().map(|block_changesets| {
                         block_changesets.iter().map(|(address, account, _)| {
-                            (
-                                *address,
-                                Some(Some(reth_execution_types::account_to_revm(account.clone()))),
-                                [],
-                            )
+                            (*address, Some(Some(account.clone().into())), [])
                         })
                     }),
                     Vec::new(),
@@ -2162,21 +2156,10 @@ mod tests {
                         execution_output: Arc::new(BlockExecutionOutput {
                             state: BundleState::new(
                                 in_memory_state.into_iter().map(|(address, (account, _))| {
-                                    (
-                                        address,
-                                        None,
-                                        Some(reth_execution_types::account_to_revm(account)),
-                                        Default::default(),
-                                    )
+                                    (address, None, Some(account.into()), Default::default())
                                 }),
                                 [in_memory_changesets.iter().map(|(address, account, _)| {
-                                    (
-                                        *address,
-                                        Some(Some(reth_execution_types::account_to_revm(
-                                            account.clone(),
-                                        ))),
-                                        Vec::new(),
-                                    )
+                                    (*address, Some(Some(account.clone().into())), Vec::new())
                                 })],
                                 [],
                             ),
@@ -3303,15 +3286,11 @@ mod tests {
                 bundle: BundleState::new(
                     [(
                         address,
-                        Some(reth_execution_types::account_to_revm(account_a.clone())),
-                        Some(reth_execution_types::account_to_revm(account_b)),
+                        Some(account_a.clone().into()),
+                        Some(account_b.into()),
                         Default::default(),
                     )],
-                    [[(
-                        address,
-                        Some(Some(reth_execution_types::account_to_revm(account_a.clone()))),
-                        [],
-                    )]],
+                    [[(address, Some(Some(account_a.clone().into())), [])]],
                     [],
                 ),
                 first_block: 2,
@@ -3423,12 +3402,7 @@ mod tests {
                 blob_gas_used: 0,
             },
             state: BundleState::new(
-                [(
-                    address,
-                    None,
-                    Some(reth_execution_types::account_to_revm(account.clone())),
-                    storage,
-                )],
+                [(address, None, Some(account.clone().into()), storage)],
                 [[(address, Some(None), [])]],
                 [],
             ),
@@ -3526,12 +3500,7 @@ mod tests {
             vec![noise_block],
             &ExecutionOutcome {
                 bundle: BundleState::new(
-                    [(
-                        noise_address,
-                        None,
-                        Some(reth_execution_types::account_to_revm(noise_account)),
-                        Default::default(),
-                    )],
+                    [(noise_address, None, Some(noise_account.into()), Default::default())],
                     [[(noise_address, Some(None), [])]],
                     [],
                 ),
@@ -3621,17 +3590,8 @@ mod tests {
             vec![later_block],
             &ExecutionOutcome {
                 bundle: BundleState::new(
-                    [(
-                        address,
-                        Some(reth_execution_types::account_to_revm(account_a.clone())),
-                        Some(reth_execution_types::account_to_revm(account_b)),
-                        storage,
-                    )],
-                    [[(
-                        address,
-                        Some(Some(reth_execution_types::account_to_revm(account_a.clone()))),
-                        [(slot, value_a)],
-                    )]],
+                    [(address, Some(account_a.clone().into()), Some(account_b.into()), storage)],
+                    [[(address, Some(Some(account_a.clone().into())), [(slot, value_a)])]],
                     [],
                 ),
                 first_block: 2,

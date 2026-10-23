@@ -72,7 +72,7 @@ where
         state: F,
     ) -> Result<BlockExecutionOutput<<Self::Primitives as NodePrimitives>::Receipt>, Self::Error>
     where
-        F: FnMut(&revm_database::BundleState),
+        F: FnMut(&reth_trie_common::bundle_state::BundleState),
     {
         match self {
             Self::Left(a) => a.execute_with_state_closure(block, state),
@@ -86,7 +86,7 @@ where
         state: F,
     ) -> Result<BlockExecutionOutput<<Self::Primitives as NodePrimitives>::Receipt>, Self::Error>
     where
-        F: FnMut(&revm_database::BundleState),
+        F: FnMut(&reth_trie_common::bundle_state::BundleState),
     {
         match self {
             Self::Left(a) => a.execute_with_state_closure_always(block, state),
@@ -101,7 +101,7 @@ where
         }
     }
 
-    fn into_state(self) -> revm_database::BundleState {
+    fn into_state(self) -> reth_trie_common::bundle_state::BundleState {
         match self {
             Self::Left(a) => a.into_state(),
             Self::Right(b) => b.into_state(),

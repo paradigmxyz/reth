@@ -9,13 +9,15 @@ use alloy_primitives::{
 use alloy_consensus::Header;
 use alloy_eips::eip4895::{Withdrawal, Withdrawals};
 use alloy_primitives::Signature;
+use evm2::evm::AccountInfo;
 use reth_db_api::{database::Database, models::StoredBlockBodyIndices, tables};
 use reth_ethereum_primitives::{BlockBody, Receipt, Transaction, TransactionSigned, TxType};
 use reth_node_types::NodeTypes;
 use reth_primitives_traits::{RecoveredBlock, SealedBlock, SealedHeader};
-use reth_trie::root::{state_root_unhashed, storage_root_unhashed};
-use revm_database::BundleState;
-use revm_state::AccountInfo;
+use reth_trie::{
+    bundle_state::BundleState,
+    root::{state_root_unhashed, storage_root_unhashed},
+};
 use std::{str::FromStr, sync::LazyLock};
 
 /// Assert genesis block
@@ -169,7 +171,7 @@ fn bundle_state_root(execution_outcome: &ExecutionOutcome) -> B256 {
             account.info.as_ref().map(|info| {
                 (
                     address,
-                    reth_execution_types::account_from_revm(info).into_trie_account(
+                    reth_primitives_traits::Account::from(info).into_trie_account(
                         storage_root_unhashed(
                             account
                                 .storage

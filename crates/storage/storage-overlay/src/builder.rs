@@ -7,6 +7,7 @@ use alloy_primitives::{
     map::{AddressMap, AddressSet, B256Map, U256Map},
     Address, BlockHash, BlockNumber, B256, U256,
 };
+use evm2::{bytecode::Bytecode, evm::AccountInfo};
 use metrics::{Counter, Histogram};
 use reth_chain_state::{BlockState, ExecutedBlock};
 use reth_errors::{ProviderError, ProviderResult};
@@ -20,10 +21,8 @@ use reth_storage_api::{
     StorageChangeSetReader, StorageSettingsCache,
 };
 use reth_trie::{updates::TrieUpdatesSorted, HashedPostStateSorted, TrieInputSorted};
+use reth_trie_common::bundle_state::BundleState;
 use reth_trie_db::DatabaseHashedPostState;
-use revm_bytecode::Bytecode;
-use revm_database::BundleState;
-use revm_state::AccountInfo;
 use std::{
     ops::RangeInclusive,
     sync::Arc,
@@ -61,12 +60,12 @@ impl StateTrieOverlay {
 /// Execution state required to initialize an overlay state provider.
 ///
 /// Account entries preserve known non-existence, while storage and code entries contain only data
-/// explicitly observed during execution. Accounts never retain database-context-local lookup IDs.
+/// explicitly observed during execution.
 #[derive(Clone, Debug, Default)]
 pub struct ExecutionOverlay {
     /// In-memory block hashes in ascending block-number order.
     block_hashes: Vec<BlockNumHash>,
-    /// Account state by address, without database-context-local [`AccountInfo::account_id`] hints.
+    /// Account state by address.
     accounts: AddressMap<Option<AccountInfo>>,
     /// Storage values by address and slot.
     storage: AddressMap<U256Map<U256>>,
@@ -137,10 +136,6 @@ impl ExecutionOverlay {
     }
 
     /// Extends this overlay with a later bundle state.
-    ///
-    /// [`AccountInfo::account_id`] is a lookup hint owned by the database context that assigned it
-    /// and cannot be reused by the overlay's database context. All other account fields are
-    /// preserved.
     fn extend_state(&mut self, state: &BundleState) {
         let (accounts, storage, storage_wipes, code_hashes) =
             (&mut self.accounts, &mut self.storage, &mut self.storage_wipes, &mut self.code_hashes);
@@ -149,7 +144,7 @@ impl ExecutionOverlay {
         let mut extend_accounts_and_storage = || {
             for (address, account) in state.state() {
                 if account.info != account.original_info {
-                    accounts.insert(*address, Self::normalized_account_info(account.info.clone()));
+                    accounts.insert(*address, account.info.clone());
                 }
                 if account.was_destroyed() {
                     storage_wipes.insert(*address);
@@ -177,18 +172,6 @@ impl ExecutionOverlay {
             extend_accounts_and_storage();
             extend_code_hashes();
         }
-    }
-
-    /// Removes the database-local account lookup hint before caching account state.
-    ///
-    /// `account_id` indexes the database or BAL context that produced the [`AccountInfo`]. A later
-    /// execution context can assign that ID to a different account, so it must not cross the
-    /// execution-overlay boundary.
-    const fn normalized_account_info(mut info: Option<AccountInfo>) -> Option<AccountInfo> {
-        if let Some(info) = &mut info {
-            info.account_id = None;
-        }
-        info
     }
 }
 
@@ -834,6 +817,7 @@ enum AnchorForParent {
 mod tests {
     use super::*;
     use alloy_primitives::{keccak256, map::HashMap, Address, U256};
+    use evm2::{bytecode::Bytecode, evm::AccountInfo};
     use reth_chain_state::{
         test_utils::TestBlockBuilder, CanonicalInMemoryState, ExecutedBlock, NewCanonicalChain,
     };
@@ -850,9 +834,7 @@ mod tests {
     use reth_stages_types::{FinishCheckpoint, StageCheckpoint};
     use reth_storage_api::StageCheckpointWriter;
     use reth_trie::{BranchNodeCompact, HashedPostState, HashedStorage, Nibbles, SortedTrieData};
-    use revm_bytecode::Bytecode;
-    use revm_database::{AccountStatus, BundleAccount, BundleState};
-    use revm_state::{AccountId, AccountInfo};
+    use reth_trie_common::bundle_state::{AccountStatus, BundleAccount, BundleState};
 
     fn with_unique_trie_data(
         block: &ExecutedBlock<EthPrimitives>,
@@ -880,12 +862,7 @@ mod tests {
         let state = BundleState::builder(block.block_number()..=block.block_number())
             .state_present_account_info(
                 address,
-                AccountInfo {
-                    nonce: id as u64,
-                    balance: U256::from(id),
-                    account_id: AccountId::new(id as usize),
-                    ..Default::default()
-                },
+                AccountInfo { nonce: id as u64, balance: U256::from(id), ..Default::default() },
             )
             .state_storage(address, HashMap::from_iter([(slot, (U256::ZERO, U256::from(id)))]))
             .contract(code_hash, Bytecode::new_raw(vec![id].into()))
@@ -958,35 +935,25 @@ mod tests {
     }
 
     #[test]
-    fn execution_overlay_extends_bundle_state_without_account_ids() {
+    fn execution_overlay_extends_bundle_state() {
         let address = Address::with_last_byte(1);
         let no_storage = Address::with_last_byte(2);
         let slot = U256::from(2);
         let value = U256::from(3);
         let code = Bytecode::new_raw(vec![0x60, 0x00].into());
         let code_hash = code.hash_slow();
-        let account = AccountInfo {
-            account_id: AccountId::new(6),
-            ..AccountInfo::new(U256::from(5), 4, code_hash, code.clone())
-        };
+        let account = AccountInfo::new(U256::from(5), 4, code_hash, Some(code.clone()));
         let state = BundleState::builder(0..=0)
             .state_present_account_info(address, account.clone())
             .state_present_account_info(no_storage, AccountInfo::default())
             .state_storage(address, HashMap::from_iter([(slot, (U256::ZERO, value))]))
             .contract(code_hash, code.clone())
             .build();
-        assert!(state.state()[&address].info.as_ref().unwrap().account_id.is_some());
-
         let mut overlay = ExecutionOverlay::default();
         overlay.extend_state(&state);
 
         let stored_account = overlay.accounts[&address].as_ref().unwrap();
-        assert_eq!(stored_account.account_id, None);
-        assert_eq!(
-            stored_account,
-            &AccountInfo { account_id: None, ..account },
-            "normalization must preserve durable account fields"
-        );
+        assert_eq!(stored_account, &account);
         assert_eq!(stored_account.code, Some(code.clone()));
         assert_eq!(overlay.storage[&address][&slot], value);
         assert!(!overlay.storage.contains_key(&no_storage));
@@ -1288,7 +1255,6 @@ mod tests {
             let address = Address::with_last_byte(id);
             let slot = U256::from(id);
             assert_eq!(overlay.accounts[&address].as_ref().unwrap().balance, U256::from(id));
-            assert_eq!(overlay.accounts[&address].as_ref().unwrap().account_id, None);
             assert_eq!(overlay.storage[&address][&slot], U256::from(id));
             assert!(overlay.code_hashes.contains_key(&B256::with_last_byte(id + 64)));
         }
@@ -1358,7 +1324,6 @@ mod tests {
         assert_eq!(fallback_block_number, Some(2));
 
         assert_eq!(overlay.accounts[&address].as_ref().unwrap().balance, U256::ONE);
-        assert_eq!(overlay.accounts[&address].as_ref().unwrap().account_id, None);
         assert_eq!(overlay.storage[&address][&slot], U256::ONE);
         assert_eq!(
             overlay.block_hashes,

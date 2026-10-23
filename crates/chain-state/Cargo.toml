@@ -44,8 +44,7 @@ serde = { workspace = true, optional = true }
 alloy-signer = { workspace = true, optional = true }
 alloy-signer-local = { workspace = true, optional = true }
 rand = { workspace = true, optional = true }
-revm-database = { workspace = true, optional = true }
-revm-state = { workspace = true, optional = true }
+evm2 = { workspace = true, optional = true }
 
 [dev-dependencies]
 reth-primitives-traits = { workspace = true, features = ["test-utils"] }
@@ -53,8 +52,7 @@ reth-testing-utils.workspace = true
 alloy-signer.workspace = true
 alloy-signer-local.workspace = true
 rand.workspace = true
-revm-database.workspace = true
-revm-state.workspace = true
+evm2.workspace = true
 
 [features]
 serde = [
@@ -68,11 +66,11 @@ serde = [
     "reth-execution-types/serde",
     "reth-primitives-traits/serde",
     "reth-trie/serde",
-    "revm-database?/serde",
-    "revm-state?/serde",
+    "evm2?/serde",
 ]
 test-utils = [
     "alloy-primitives/getrandom",
+    "dep:evm2",
     "alloy-signer",
     "alloy-signer-local",
     "rand",
@@ -81,6 +79,4 @@ test-utils = [
     "reth-trie/test-utils",
     "reth-ethereum-primitives/test-utils",
     "reth-trie-sparse/test-utils",
-    "dep:revm-database",
-    "dep:revm-state",
 ]

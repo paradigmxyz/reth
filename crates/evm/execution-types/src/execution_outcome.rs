@@ -1,4 +1,4 @@
-use crate::{revm_bytecode, BlockExecutionOutput, BlockExecutionResult};
+use crate::{BlockExecutionOutput, BlockExecutionResult};
 use alloc::{vec, vec::Vec};
 use alloy_eips::eip7685::Requests;
 use alloy_primitives::{
@@ -6,20 +6,20 @@ use alloy_primitives::{
     map::{AddressMap, B256Map, HashMap},
     Address, BlockNumber, Bloom, Log, B256, U256,
 };
+use evm2::evm::AccountInfo;
 use reth_primitives_traits::{Account, Bytecode, Receipt, StorageEntry};
 use reth_trie_common::{
-    account_from_revm, account_to_revm, reth_bytecode, HashedPostState, KeyHasher,
+    bundle_state::{BundleAccount, BundleState},
+    HashedPostState, KeyHasher,
 };
-use revm_database::{states::BundleState, BundleAccount};
-use revm_state::AccountInfo;
 
-/// Type used to initialize revms bundle state.
+/// Type used to initialize bundle state.
 pub type BundleStateInit = AddressMap<(Option<Account>, Option<Account>, B256Map<(U256, U256)>)>;
 
-/// Types used inside `RevertsInit` to initialize revms reverts.
+/// Types used inside `RevertsInit` to initialize reverts.
 pub type AccountRevertInit = (Option<Option<Account>>, Vec<StorageEntry>);
 
-/// Type used to initialize revms reverts.
+/// Type used to initialize reverts.
 pub type RevertsInit = HashMap<BlockNumber, AddressMap<AccountRevertInit>>;
 
 /// Represents a changed account
@@ -105,13 +105,13 @@ impl<T> ExecutionOutcome<T> {
         let mut reverts = revert_init.into_iter().collect::<Vec<_>>();
         reverts.sort_unstable_by_key(|a| a.0);
 
-        // initialize revm bundle
+        // initialize bundle
         let bundle = BundleState::new(
             state_init.into_iter().map(|(address, (original, present, storage))| {
                 (
                     address,
-                    original.map(account_to_revm),
-                    present.map(account_to_revm),
+                    original.map(Into::into),
+                    present.map(Into::into),
                     storage.into_iter().map(|(k, s)| (k.into(), s)).collect(),
                 )
             }),
@@ -120,14 +120,12 @@ impl<T> ExecutionOutcome<T> {
                 reverts.into_iter().map(|(address, (original, storage))| {
                     (
                         address,
-                        original.map(|i| i.map(account_to_revm)),
+                        original.map(|i| i.map(Into::into)),
                         storage.into_iter().map(|entry| (entry.key.into(), entry.value)),
                     )
                 })
             }),
-            contracts_init
-                .into_iter()
-                .map(|(code_hash, bytecode)| (code_hash, revm_bytecode(&bytecode.0))),
+            contracts_init.into_iter().map(|(code_hash, bytecode)| (code_hash, bytecode.0)),
         );
 
         Self { bundle, receipts, first_block, requests }
@@ -162,12 +160,12 @@ impl<T> ExecutionOutcome<T> {
         value
     }
 
-    /// Return revm bundle state.
+    /// Return bundle state.
     pub const fn state(&self) -> &BundleState {
         &self.bundle
     }
 
-    /// Returns mutable revm bundle state.
+    /// Returns mutable bundle state.
     pub const fn state_mut(&mut self) -> &mut BundleState {
         &mut self.bundle
     }
@@ -189,7 +187,7 @@ impl<T> ExecutionOutcome<T> {
 
     /// Get account if account is known.
     pub fn account(&self, address: &Address) -> Option<Option<Account>> {
-        self.bundle.account(address).map(|a| a.info.as_ref().map(account_from_revm))
+        self.bundle.account(address).map(|a| a.info.as_ref().map(Account::from))
     }
 
     /// Returns the state [`BundleAccount`] for the given account.
@@ -206,7 +204,7 @@ impl<T> ExecutionOutcome<T> {
 
     /// Return bytecode if known.
     pub fn bytecode(&self, code_hash: &B256) -> Option<Bytecode> {
-        self.bundle.bytecode(code_hash).map(|code| reth_bytecode(&code))
+        self.bundle.bytecode(code_hash).map(Bytecode)
     }
 
     /// Returns [`HashedPostState`] for this execution outcome.
@@ -430,7 +428,7 @@ pub(super) mod serde_bincode_compat {
     use alloy_eips::eip7685::Requests;
     use alloy_primitives::{BlockNumber, Bytes};
     use reth_primitives_traits::Receipt;
-    use revm_database::BundleState;
+    use reth_trie_common::bundle_state::BundleState;
     use serde::{Deserialize, Deserializer, Serialize, Serializer};
     use serde_with::{DeserializeAs, SerializeAs};
 

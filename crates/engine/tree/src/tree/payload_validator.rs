@@ -127,7 +127,7 @@ use crate::tree::{
         StateRootUpdateStream,
     },
 };
-use alloy_primitives::Address;
+use alloy_primitives::{Address, KECCAK256_EMPTY};
 use evm2::evm::Bal as EvmBal;
 use reth_chain_state::{CanonicalInMemoryState, ExecutedBlock, ExecutionTimingStats};
 use reth_consensus::{ConsensusError, FullConsensus, ReceiptRootBloom};
@@ -160,8 +160,7 @@ use reth_provider::{
 };
 use reth_storage_overlay::{OverlayManager, OverlayStateProviderFactory};
 use reth_trie::{updates::TrieUpdates, HashedPostState, KeccakKeyHasher, LazyTrieData};
-use revm_database::BundleAccount;
-use revm_state::AccountInfo;
+use reth_trie_common::bundle_state::BundleAccount;
 use std::{
     sync::{
         atomic::{AtomicUsize, Ordering},
@@ -1583,9 +1582,10 @@ where
 
         // Helper: check if account represents a new contract deployment
         let is_new_deployment = |acc: &BundleAccount| -> bool {
-            let has_code_now = acc.info.as_ref().is_some_and(|info| !info.is_empty_code_hash());
+            let has_code_now =
+                acc.info.as_ref().is_some_and(|info| info.code_hash != KECCAK256_EMPTY);
             let had_no_code_before =
-                acc.original_info.as_ref().is_none_or(AccountInfo::is_empty_code_hash);
+                acc.original_info.as_ref().is_none_or(|info| info.code_hash == KECCAK256_EMPTY);
             has_code_now && had_no_code_before
         };
 
@@ -1631,7 +1631,8 @@ where
                     .is_some_and(|bytecode| bytecode.is_eip7702());
 
                 // Check if current code is empty (delegation cleared)
-                let code_now_empty = acc.info.as_ref().is_some_and(AccountInfo::is_empty_code_hash);
+                let code_now_empty =
+                    acc.info.as_ref().is_some_and(|info| info.code_hash == KECCAK256_EMPTY);
 
                 original_was_eip7702 && code_now_empty
             })

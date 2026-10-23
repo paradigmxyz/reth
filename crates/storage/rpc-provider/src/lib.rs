@@ -1348,7 +1348,7 @@ where
 {
     fn hashed_post_state(
         &self,
-        bundle_state: &revm_database::BundleState,
+        bundle_state: &reth_trie::bundle_state::BundleState,
     ) -> ProviderResult<HashedPostState> {
         if bundle_state
             .state()

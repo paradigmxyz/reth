@@ -74,13 +74,11 @@ use reth_storage_api::{
 use reth_storage_errors::provider::{ProviderResult, StaticFileWriterError};
 use reth_storage_overlay::OverlayManager;
 use reth_trie::{
+    bundle_state::{PlainStateReverts, PlainStorageChangeset, PlainStorageRevert, StateChangeset},
     updates::{StorageTrieUpdatesSorted, TrieUpdatesSorted},
     HashedPostStateSorted, SortedTrieData,
 };
 use reth_trie_db::{DatabaseStorageTrieCursor, TrieTableAdapter};
-use revm_database::states::{
-    PlainStateReverts, PlainStorageChangeset, PlainStorageRevert, StateChangeset,
-};
 use smallvec::SmallVec;
 use std::{
     cmp::Ordering,
@@ -2589,7 +2587,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
                     .state()
                     .contracts
                     .iter()
-                    .map(|(h, b)| (*h, reth_execution_types::reth_bytecode(b))),
+                    .map(|(h, b)| (*h, reth_primitives_traits::Bytecode(b.clone()))),
             )?;
             return Ok(());
         }
@@ -2760,7 +2758,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
                 .into_iter()
                 .map(|(address, info)| AccountBeforeTx {
                     address,
-                    info: info.map(|info| reth_execution_types::account_from_revm(&info)),
+                    info: info.map(reth_primitives_traits::Account::from),
                 })
                 .collect::<Vec<_>>();
             let mut account_changesets_writer =
@@ -2788,7 +2786,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
                 if let Some(account) = account {
                     tracing::trace!(?address, "Updating plain state account");
                     accounts_cursor
-                        .upsert(address, &reth_execution_types::account_from_revm(&account))?;
+                        .upsert(address, &reth_primitives_traits::Account::from(&account))?;
                 } else if accounts_cursor.seek_exact(address)?.is_some() {
                     tracing::trace!(?address, "Deleting plain state account");
                     accounts_cursor.delete_current()?;
@@ -2834,7 +2832,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
             changes
                 .contracts
                 .into_iter()
-                .map(|(hash, bytecode)| (hash, reth_execution_types::reth_bytecode(&bytecode))),
+                .map(|(hash, bytecode)| (hash, reth_primitives_traits::Bytecode(bytecode))),
         )?;
 
         Ok(())
@@ -4110,6 +4108,7 @@ mod tests {
         map::{AddressMap, B256Map},
         U256,
     };
+    use evm2::evm::AccountInfo;
     use reth_chain_state::{test_utils::TestBlockBuilder, ExecutedBlock};
     use reth_db_api::models::StorageSettings;
     use reth_ethereum_primitives::Receipt;
@@ -4118,11 +4117,9 @@ mod tests {
     use reth_storage_api::{DatabaseProviderFactory, MetadataWriter};
     use reth_testing_utils::generators::{self, random_block, BlockParams};
     use reth_trie::{
-        HashedPostState, KeccakKeyHasher, Nibbles, SortedTrieData, StoredNibbles,
-        StoredNibblesSubKey,
+        bundle_state::BundleState, HashedPostState, KeccakKeyHasher, Nibbles, SortedTrieData,
+        StoredNibbles, StoredNibblesSubKey,
     };
-    use revm_database::BundleState;
-    use revm_state::AccountInfo;
     use std::{sync::mpsc, time::Duration};
 
     /// Seeds block zero through the writer core because [`SaveBlocksInput`] only describes
