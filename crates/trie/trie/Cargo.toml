@@ -17,7 +17,6 @@ reth-execution-errors.workspace = true
 reth-primitives-traits = { workspace = true, features = ["std"] }
 reth-stages-types.workspace = true
 reth-storage-errors.workspace = true
-reth-tasks = { workspace = true, features = ["rayon"] }
 reth-trie-sparse = { workspace = true, features = ["std"] }
 reth-trie-common = { workspace = true, features = ["rayon"] }
 
@@ -36,7 +35,6 @@ tracing = { workspace = true, features = ["attributes"] }
 
 # misc
 auto_impl.workspace = true
-crossbeam-channel.workspace = true
 itertools.workspace = true
 parking_lot.workspace = true
 rayon.workspace = true
@@ -47,6 +45,10 @@ metrics = { workspace = true, optional = true }
 
 # `test-utils` feature
 triehash = { workspace = true, optional = true }
+
+[target.'cfg(not(target_family = "wasm"))'.dependencies]
+reth-tasks = { workspace = true, features = ["rayon"] }
+crossbeam-channel.workspace = true
 
 [dev-dependencies]
 # reth
