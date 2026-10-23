@@ -6,7 +6,7 @@ use alloy_eips::BlockNumHash;
 use futures::StreamExt;
 use itertools::Itertools;
 use metrics::Gauge;
-use reth_chain_state::ForkChoiceStream;
+use reth_chain_state::{CanonStateNotification, CanonStateNotifications, ForkChoiceStream};
 use reth_ethereum_primitives::EthPrimitives;
 use reth_evm::ConfigureEvm;
 use reth_metrics::{metrics::Counter, Metrics};
@@ -18,7 +18,7 @@ use std::{
     collections::VecDeque,
     fmt::Debug,
     future::{poll_fn, Future},
-    ops::Not,
+    ops::{Not, Range},
     pin::Pin,
     sync::{
         atomic::{AtomicUsize, Ordering},
@@ -30,6 +30,7 @@ use tokio::sync::{
     mpsc::{self, error::SendError, UnboundedReceiver, UnboundedSender},
     watch,
 };
+use tokio_stream::wrappers::BroadcastStream;
 use tokio_util::sync::{PollSendError, PollSender, ReusableBoxFuture};
 
 /// Default max size of the internal state notifications buffer.
@@ -202,6 +203,8 @@ pub struct ExExManagerMetrics {
     buffer_size: Gauge,
     /// Current number of `ExEx`'s on the node.
     num_exexs: Gauge,
+    /// Canonical notifications retained in the WAL until the delivery buffer has space.
+    wal_backlog: Gauge,
 }
 
 /// The execution extension manager.
@@ -223,6 +226,11 @@ pub struct ExExManager<P, N: NodePrimitives> {
 
     /// [`ExExNotification`] channel from the [`ExExManagerHandle`]s.
     handle_rx: UnboundedReceiver<(ExExNotificationSource, ExExNotification<N>)>,
+
+    /// Canonical notifications are persisted even when the delivery buffer is full.
+    canonical_state_notifications: Option<BroadcastStream<CanonStateNotification<N>>>,
+    /// WAL file IDs awaiting admission to the delivery buffer, in publication order.
+    pending_wal_notifications: Range<u32>,
 
     /// The minimum notification ID currently present in the buffer.
     min_id: usize,
@@ -300,6 +308,9 @@ where
 
             handle_rx,
 
+            canonical_state_notifications: None,
+            pending_wal_notifications: 0..0,
+
             min_id: 0,
             next_id: 0,
             buffer: VecDeque::with_capacity(max_capacity),
@@ -337,6 +348,21 @@ where
     /// a value 6x higher than the default.
     pub const fn with_wal_blocks_warning(mut self, threshold: usize) -> Self {
         self.wal_blocks_warning = threshold;
+        self
+    }
+
+    /// Subscribes the manager to canonical chain updates.
+    ///
+    /// Notifications are written to the WAL independently of consumer backpressure, then read
+    /// into the bounded delivery buffer in order. A slow ExEx therefore grows the disk backlog
+    /// instead of preventing the canonical subscription from being polled. Broadcast lag or
+    /// unexpected closure terminates the manager with an error. The manager must be the only
+    /// writer to this WAL while subscribed.
+    pub fn with_canonical_state_notifications(
+        mut self,
+        notifications: CanonStateNotifications<N>,
+    ) -> Self {
+        self.canonical_state_notifications = Some(BroadcastStream::new(notifications));
         self
     }
 
@@ -405,7 +431,11 @@ where
                 .min_by_key(|num_hash| num_hash.number)
                 .unwrap();
 
-            self.wal.finalize(lowest_finished_height)?;
+            // Even a revert below an ExEx's finished height must reach the delivery buffer
+            // before its WAL entry can be removed.
+            if self.pending_wal_notifications.is_empty() {
+                self.wal.finalize(lowest_finished_height)?;
+            }
             if self.wal.num_blocks() > self.wal_blocks_warning {
                 warn!(
                     target: "exex::manager",
@@ -447,14 +477,15 @@ where
     /// Main loop of the [`ExExManager`]. The order of operations is as follows:
     /// 1. Handle incoming ExEx events. We do it before finalizing the WAL, because it depends on
     ///    the latest state of [`ExExEvent::FinishedHeight`] events.
-    /// 2. Finalize the WAL with the finalized header, if necessary.
-    /// 3. Drain [`ExExManagerHandle`] notifications, push them to the internal buffer and update
-    ///    the internal buffer capacity.
+    /// 2. Persist canonical notifications, including when the delivery buffer is full.
+    /// 3. Finalize the WAL with the finalized header, if necessary.
+    /// 4. Read pending canonical notifications and drain [`ExExManagerHandle`] notifications into
+    ///    the internal buffer.
     /// 5. Send notifications from the internal buffer to those ExExes that are ready to receive new
     ///    notifications.
-    /// 5. Remove notifications from the internal buffer that have been sent to **all** ExExes and
+    /// 6. Remove notifications from the internal buffer that have been sent to **all** ExExes and
     ///    update the internal buffer capacity.
-    /// 6. Update the channel with the lowest [`FinishedExExHeight`] among all ExExes.
+    /// 7. Update the channel with the lowest [`FinishedExExHeight`] among all ExExes.
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let this = self.get_mut();
 
@@ -469,6 +500,31 @@ where
             }
         }
 
+        // Keep ingestion independent of delivery capacity so slow consumers cannot make the
+        // canonical broadcast lag. The Tokio subscription cooperatively yields during bursts.
+        while let Some(notifications) = &mut this.canonical_state_notifications {
+            let notification = match notifications.poll_next_unpin(cx) {
+                Poll::Ready(Some(notification)) => notification?.into(),
+                Poll::Ready(None) => {
+                    return Poll::Ready(Err(eyre::eyre!(
+                        "canonical state notification stream closed"
+                    )))
+                }
+                Poll::Pending => break,
+            };
+            let file_id = this.wal.next_file_id();
+            this.wal.commit(&notification)?;
+            if this.pending_wal_notifications.is_empty() && this.buffer.len() < this.max_capacity {
+                // Avoid reading the notification back from disk on the normal path.
+                this.push_notification(notification);
+            } else {
+                if this.pending_wal_notifications.is_empty() {
+                    this.pending_wal_notifications.start = file_id;
+                }
+                this.pending_wal_notifications.end = this.wal.next_file_id();
+            }
+        }
+
         // Drain the finalized header stream and finalize the WAL with the last header
         let mut last_finalized_header = None;
         while let Poll::Ready(finalized_header) = this.finalized_header_stream.poll_next_unpin(cx) {
@@ -477,6 +533,15 @@ where
         if let Some(header) = last_finalized_header {
             this.finalize_wal(header)?;
         }
+
+        // Drain the disk backlog before accepting more handle notifications, so WAL entries
+        // remain contiguous and older canonical transitions are delivered first.
+        while this.buffer.len() < this.max_capacity && !this.pending_wal_notifications.is_empty() {
+            let notification = this.wal.read_notification(this.pending_wal_notifications.start)?;
+            this.pending_wal_notifications.start += 1;
+            this.push_notification(notification);
+        }
+        this.metrics.wal_backlog.set(this.pending_wal_notifications.len() as f64);
 
         // Drain handle notifications
         while this.buffer.len() < this.max_capacity {
@@ -679,18 +744,25 @@ impl<N: NodePrimitives> Clone for ExExManagerHandle<N> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::wal::WalResult;
+    use crate::wal::{WalError, WalResult};
     use alloy_primitives::B256;
     use futures::{StreamExt, TryStreamExt};
     use rand::Rng;
     use reth_db_common::init::init_genesis;
+    use reth_ethereum_primitives::EthPrimitives;
     use reth_evm_ethereum::EthEvmConfig;
     use reth_primitives_traits::RecoveredBlock;
     use reth_provider::{
-        providers::BlockchainProvider, test_utils::create_test_provider_factory, BlockReader,
-        BlockWriter, Chain, DBProvider, DatabaseProviderFactory, TransactionVariant,
+        providers::BlockchainProvider,
+        test_utils::{create_test_provider_factory, MockEthProvider},
+        BlockReader, BlockWriter, Chain, DBProvider, DatabaseProviderFactory, TransactionVariant,
     };
-    use reth_testing_utils::generators::{self, random_block, BlockParams};
+    use reth_testing_utils::generators::{
+        self, random_block, random_block_range, BlockParams, BlockRangeParams,
+    };
+    use std::time::Duration;
+    use tokio::sync::broadcast;
+    use tokio_stream::wrappers::errors::BroadcastStreamRecvError;
 
     fn empty_finalized_header_stream() -> ForkChoiceStream<SealedHeader> {
         let (tx, rx) = watch::channel(None);
@@ -1491,5 +1563,260 @@ mod tests {
             result.is_ok(),
             "Deadlock detected! Manager failed to wake up and process Pending Item #100."
         );
+    }
+
+    fn canonical_notifications(count: u64) -> Vec<CanonStateNotification> {
+        random_block_range(
+            &mut generators::rng(),
+            1..=count,
+            BlockRangeParams { tx_count: 0..1, ..Default::default() },
+        )
+        .into_iter()
+        .map(|block| CanonStateNotification::Commit {
+            new: Arc::new(Chain::new(
+                vec![block.try_recover().unwrap()],
+                Default::default(),
+                Default::default(),
+            )),
+        })
+        .collect()
+    }
+
+    #[tokio::test]
+    async fn test_canonical_notifications_survive_backpressure() -> eyre::Result<()> {
+        let temp_dir = tempfile::tempdir()?;
+        let wal = Wal::new(temp_dir.path())?;
+        let provider = MockEthProvider::<EthPrimitives>::default();
+        let (first, first_events, mut first_notifications) = ExExHandle::new(
+            "first".to_string(),
+            Default::default(),
+            provider.clone(),
+            EthEvmConfig::mainnet(),
+            wal.handle(),
+        );
+        let (second, second_events, mut second_notifications) = ExExHandle::new(
+            "second".to_string(),
+            Default::default(),
+            provider.clone(),
+            EthEvmConfig::mainnet(),
+            wal.handle(),
+        );
+        let (canonical, receiver) = broadcast::channel(4);
+        let mut manager = ExExManager::new(
+            provider,
+            vec![first, second],
+            2,
+            wal,
+            empty_finalized_header_stream(),
+        )
+        .with_canonical_state_notifications(receiver);
+        let mut cx = Context::from_waker(futures::task::noop_waker_ref());
+        let mut updates = canonical_notifications(300);
+
+        let old = updates.last().unwrap().committed();
+        let mut rng = generators::rng();
+        let replacement = random_block(
+            &mut rng,
+            old.first().number(),
+            BlockParams { parent: Some(old.first().parent_hash()), ..Default::default() },
+        )
+        .try_recover()?;
+        let new = Arc::new(Chain::new(vec![replacement], Default::default(), Default::default()));
+        updates.push(CanonStateNotification::Reorg { old: old.clone(), new: new.clone() });
+        updates.push(CanonStateNotification::Reorg { old: new, new: Arc::new(Chain::default()) });
+        updates.push(CanonStateNotification::Commit { new: old });
+        let live_parent = updates.last().unwrap().tip().num_hash();
+
+        // Neither consumer is polled while more than the production broadcast capacity is
+        // published. The manager must keep ingesting with its two-entry delivery buffer full.
+        tokio::time::timeout(Duration::from_secs(10), async {
+            for update in &updates {
+                canonical.send(update.clone())?;
+                assert!(Pin::new(&mut manager).poll(&mut cx)?.is_pending());
+                assert!(manager.buffer.len() <= manager.max_capacity);
+                tokio::task::yield_now().await;
+            }
+            eyre::Ok(())
+        })
+        .await??;
+        let expected = updates.into_iter().map(ExExNotification::from).collect::<Vec<_>>();
+        assert!(matches!(&expected[expected.len() - 2], ExExNotification::ChainReverted { .. }));
+        assert!(!manager.pending_wal_notifications.is_empty());
+        let persisted = manager.wal.iter_notifications()?.collect::<WalResult<Vec<_>>>()?;
+        assert_eq!(persisted.len(), expected.len());
+        for (persisted, expected) in persisted.iter().zip(&expected) {
+            assert_eq!(persisted, expected);
+        }
+
+        // The faster consumer can advance, but the slower one still holds the shared buffer.
+        assert_eq!(
+            first_notifications.try_poll_next_unpin(&mut cx)?,
+            Poll::Ready(Some(expected[0].clone()))
+        );
+        assert!(Pin::new(&mut manager).poll(&mut cx)?.is_pending());
+        assert!(!manager.pending_wal_notifications.is_empty());
+
+        // No further canonical update is needed to drain the entire disk backlog.
+        let mut finished_height = manager.handle().finished_height();
+        let task = tokio::spawn(manager);
+        tokio::time::timeout(Duration::from_secs(10), async {
+            for (index, notification) in expected.iter().enumerate() {
+                if index > 0 {
+                    assert_eq!(first_notifications.try_next().await?, Some(notification.clone()));
+                }
+                assert_eq!(second_notifications.try_next().await?, Some(notification.clone()));
+            }
+            eyre::Ok(())
+        })
+        .await??;
+
+        let block = random_block(
+            &mut rng,
+            live_parent.number + 1,
+            BlockParams { parent: Some(live_parent.hash), ..Default::default() },
+        )
+        .try_recover()?;
+        let live = CanonStateNotification::<EthPrimitives>::Commit {
+            new: Arc::new(Chain::new(vec![block], Default::default(), Default::default())),
+        };
+        let live_head = live.tip().num_hash();
+        canonical.send(live.clone())?;
+        let live = ExExNotification::from(live);
+        tokio::time::timeout(Duration::from_secs(10), async {
+            assert_eq!(first_notifications.try_next().await?, Some(live.clone()));
+            assert_eq!(second_notifications.try_next().await?, Some(live));
+            eyre::Ok(())
+        })
+        .await??;
+        assert_eq!(first_notifications.try_poll_next_unpin(&mut cx)?, Poll::Pending);
+        assert_eq!(second_notifications.try_poll_next_unpin(&mut cx)?, Poll::Pending);
+
+        // Persisting and delivering notifications never acknowledges work for the consumers.
+        assert_eq!(*finished_height.borrow(), FinishedExExHeight::NotReady);
+        first_events.send(ExExEvent::FinishedHeight(live_head))?;
+        second_events.send(ExExEvent::FinishedHeight(live_head))?;
+        tokio::time::timeout(
+            Duration::from_secs(10),
+            finished_height
+                .wait_for(|height| *height == FinishedExExHeight::Height(live_head.number)),
+        )
+        .await??;
+        task.abort();
+        assert!(tokio::time::timeout(Duration::from_secs(10), task)
+            .await?
+            .unwrap_err()
+            .is_cancelled());
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_canonical_notification_stream_errors() -> eyre::Result<()> {
+        for lagged in [false, true] {
+            let temp_dir = tempfile::tempdir()?;
+            let wal = Wal::<EthPrimitives>::new(temp_dir.path())?;
+            let (canonical, receiver) = broadcast::channel(1);
+            let mut manager = ExExManager::new(
+                MockEthProvider::<EthPrimitives>::default(),
+                vec![],
+                1,
+                wal,
+                empty_finalized_header_stream(),
+            )
+            .with_canonical_state_notifications(receiver);
+            if lagged {
+                for update in canonical_notifications(2) {
+                    canonical.send(update)?;
+                }
+            }
+            drop(canonical);
+            let mut cx = Context::from_waker(futures::task::noop_waker_ref());
+            let Poll::Ready(Err(error)) = Pin::new(&mut manager).poll(&mut cx) else {
+                panic!("expected canonical subscription failure")
+            };
+            if lagged {
+                assert!(matches!(
+                    error.downcast_ref::<BroadcastStreamRecvError>(),
+                    Some(BroadcastStreamRecvError::Lagged(1))
+                ));
+            } else {
+                assert_eq!(error.to_string(), "canonical state notification stream closed");
+            }
+        }
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_canonical_wal_backlog_survives_finalization() -> eyre::Result<()> {
+        let temp_dir = tempfile::tempdir()?;
+        let wal = Wal::<EthPrimitives>::new(temp_dir.path())?;
+        let (canonical, receiver) = broadcast::channel(4);
+        let (finalized, finalized_receiver) = watch::channel(None);
+        let mut manager = ExExManager::new(
+            MockEthProvider::<EthPrimitives>::default(),
+            vec![],
+            1,
+            wal,
+            ForkChoiceStream::new(finalized_receiver),
+        )
+        .with_canonical_state_notifications(receiver);
+        let updates = canonical_notifications(3);
+        let header = updates.last().unwrap().tip().clone_sealed_header();
+        for update in updates {
+            canonical.send(update)?;
+        }
+        let mut cx = Context::from_waker(futures::task::noop_waker_ref());
+        assert!(Pin::new(&mut manager).poll(&mut cx)?.is_pending());
+        assert_eq!(manager.pending_wal_notifications, 1..3);
+
+        finalized.send(Some(header.clone()))?;
+        assert!(Pin::new(&mut manager).poll(&mut cx)?.is_pending());
+        assert_eq!(manager.wal.iter_notifications()?.collect::<WalResult<Vec<_>>>()?.len(), 3);
+        assert_eq!(manager.pending_wal_notifications, 2..3);
+
+        assert!(Pin::new(&mut manager).poll(&mut cx)?.is_pending());
+        finalized.send(Some(header))?;
+        assert!(Pin::new(&mut manager).poll(&mut cx)?.is_pending());
+        assert_eq!(manager.wal.iter_notifications()?.next().transpose()?, None);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_canonical_wal_errors() -> eyre::Result<()> {
+        for missing_entry in [false, true] {
+            let temp_dir = tempfile::tempdir()?;
+            let directory = temp_dir.path().join("wal");
+            let wal = Wal::<EthPrimitives>::new(&directory)?;
+            let (canonical, receiver) = broadcast::channel(2);
+            let mut manager = ExExManager::new(
+                MockEthProvider::<EthPrimitives>::default(),
+                vec![],
+                1,
+                wal,
+                empty_finalized_header_stream(),
+            )
+            .with_canonical_state_notifications(receiver);
+            let mut cx = Context::from_waker(futures::task::noop_waker_ref());
+            for update in canonical_notifications(2) {
+                canonical.send(update)?;
+            }
+            if missing_entry {
+                assert!(Pin::new(&mut manager).poll(&mut cx)?.is_pending());
+                reth_fs_util::remove_file(directory.join("1.wal"))?;
+            } else {
+                reth_fs_util::remove_dir_all(&directory)?;
+            }
+            let Poll::Ready(Err(error)) = Pin::new(&mut manager).poll(&mut cx) else {
+                panic!("expected WAL failure")
+            };
+            if missing_entry {
+                assert!(matches!(
+                    error.downcast_ref::<WalError>(),
+                    Some(WalError::FileNotFound(1))
+                ));
+            } else {
+                assert!(matches!(error.downcast_ref::<WalError>(), Some(WalError::FsPathError(_))));
+            }
+        }
+        Ok(())
     }
 }

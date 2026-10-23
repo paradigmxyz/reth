@@ -78,6 +78,20 @@ where
     pub fn num_blocks(&self) -> usize {
         self.inner.block_cache().num_blocks()
     }
+
+    /// Returns the file ID that will be assigned to the next notification.
+    pub(crate) fn next_file_id(&self) -> u32 {
+        self.inner.next_file_id.load(Ordering::Relaxed)
+    }
+
+    /// Reads a notification retained for delivery by the manager.
+    pub(crate) fn read_notification(&self, file_id: u32) -> WalResult<ExExNotification<N>> {
+        self.inner
+            .storage
+            .read_notification(file_id)?
+            .map(|(notification, _)| notification)
+            .ok_or(WalError::FileNotFound(file_id))
+    }
 }
 
 /// Inner type for the WAL.

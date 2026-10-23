@@ -5,8 +5,8 @@ use futures::future;
 use reth_chain_state::ForkChoiceSubscriptions;
 use reth_chainspec::EthChainSpec;
 use reth_exex::{
-    ExExContext, ExExHandle, ExExManager, ExExManagerHandle, ExExNotificationSource, Wal,
-    DEFAULT_EXEX_MANAGER_CAPACITY, DEFAULT_WAL_BLOCKS_WARNING,
+    ExExContext, ExExHandle, ExExManager, ExExManagerHandle, Wal, DEFAULT_EXEX_MANAGER_CAPACITY,
+    DEFAULT_WAL_BLOCKS_WARNING,
 };
 use reth_node_api::{FullNodeComponents, NodeTypes, PrimitivesTy};
 use reth_provider::CanonStateSubscriptions;
@@ -148,26 +148,12 @@ impl<Node: FullNodeComponents> ExExLauncher<Node> {
             exex_wal,
             components.provider().finalized_block_stream(),
         )
-        .with_wal_blocks_warning(wal_blocks_warning);
+        .with_wal_blocks_warning(wal_blocks_warning)
+        .with_canonical_state_notifications(components.provider().subscribe_to_canonical_state());
         let exex_manager_handle = exex_manager.handle();
         components.task_executor().spawn_critical_task("exex manager", async move {
             exex_manager.await.expect("exex manager crashed");
         });
-
-        // send notifications from the blockchain tree to exex manager
-        let mut canon_state_notifications = components.provider().subscribe_to_canonical_state();
-        let mut handle = exex_manager_handle.clone();
-        components.task_executor().spawn_critical_task(
-            "exex manager blockchain tree notifications",
-            async move {
-                while let Ok(notification) = canon_state_notifications.recv().await {
-                    handle
-                        .send_async(ExExNotificationSource::BlockchainTree, notification.into())
-                        .await
-                        .expect("blockchain tree notification could not be sent to exex manager");
-                }
-            },
-        );
 
         info!(target: "reth::cli", "ExEx Manager started");
 
