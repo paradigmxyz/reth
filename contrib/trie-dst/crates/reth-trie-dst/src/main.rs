@@ -6,10 +6,9 @@ mod model;
 use alloy_consensus::Header;
 use alloy_primitives::{keccak256, Address, B256, U256};
 use eyre::{ensure, Context, Result};
-use input::{BlockInput, Input};
+use input::{Input, Operation};
 use metrics_util::debugging::{DebugValue, DebuggingRecorder, Snapshotter};
 use model::{apply, root, storage_root, Model};
-use rand::{rngs::StdRng, seq::SliceRandom, Rng, SeedableRng};
 use reth_chain_state::ExecutedBlock;
 use reth_chainspec::ChainSpec;
 use reth_db::{init_db, DatabaseEnv};
@@ -56,7 +55,7 @@ type Node = MockNodeTypesWithDB<Arc<DatabaseEnv>>;
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 struct JournalBlock {
     number: u64,
-    input: BlockInput,
+    operations: Vec<Operation>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -245,12 +244,13 @@ fn run(config: &mut Config, snapshotter: &Snapshotter) -> Result<()> {
         .take()
         .unwrap_or_else(|| Input::generate(config.seed, config.blocks, config.updates));
     input.validate()?;
-    let mut total_blocks = input.blocks.len() as u64;
+    let input_blocks = input.blocks();
+    let mut total_blocks = input_blocks.len() as u64;
     let overrides_path = datadir.join("input-overrides.json");
     #[derive(Default, Serialize, Deserialize)]
     struct Overrides {
         applied: u64,
-        blocks: BTreeMap<u64, BlockInput>,
+        blocks: BTreeMap<u64, Vec<Operation>>,
         total_blocks: u64,
     }
     #[derive(Deserialize)]
@@ -332,7 +332,16 @@ fn run(config: &mut Config, snapshotter: &Snapshotter) -> Result<()> {
     for number in 1..=base {
         let block =
             journal.get(&number).ok_or_else(|| eyre::eyre!("missing journal block {number}"))?;
-        apply(&mut state, number, &block.input.operations);
+        let updates = block
+            .operations
+            .iter()
+            .flat_map(|op| match op {
+                Operation::UpdateBatch { updates } => updates.as_slice(),
+                _ => &[],
+            })
+            .cloned()
+            .collect::<Vec<_>>();
+        apply(&mut state, number, &updates);
     }
     if base > 0 {
         verify(&factory, &state, base, base)?;
@@ -386,10 +395,11 @@ fn run(config: &mut Config, snapshotter: &Snapshotter) -> Result<()> {
             let injection: Injection = serde_json::from_slice(&fs::read(path)?)?;
             if injection.id != overrides.applied {
                 injection.input.validate()?;
-                let count = injection.input.blocks.len().min((1024 - head) as usize);
+                let injected = injection.input.blocks();
+                let count = injected.len().min((1024 - head) as usize);
                 ensure!(count > 0, "continuation exceeds the 1024-block limit");
                 overrides.blocks.retain(|n, _| *n < (head + 1));
-                for (i, block) in injection.input.blocks.into_iter().take(count).enumerate() {
+                for (i, block) in injected.into_iter().take(count).enumerate() {
                     overrides.blocks.insert((head + 1) + i as u64, block);
                 }
                 total_blocks = head + count as u64;
@@ -499,23 +509,30 @@ fn run(config: &mut Config, snapshotter: &Snapshotter) -> Result<()> {
             continue;
         }
         let number = head + 1;
-        let block_input = if let Some(block) = journal.get(&number) {
-            block.input.clone()
+        let operations = if let Some(block) = journal.get(&number) {
+            block.operations.clone()
         } else {
             let block = overrides
                 .blocks
                 .get(&number)
-                .unwrap_or_else(|| &input.blocks[number as usize - 1])
+                .unwrap_or_else(|| &input_blocks[number as usize - 1])
                 .clone();
-            let record = serde_json::to_vec(&JournalBlock { number, input: block.clone() })?;
+            let record = serde_json::to_vec(&JournalBlock { number, operations: block.clone() })?;
             journal_file.write_all(b"\n")?;
             journal_file.write_all(&record)?;
             journal_file.write_all(b"\n")?;
             block
         };
-        let operations = block_input.operations;
+        let updates_input = operations
+            .iter()
+            .flat_map(|op| match op {
+                Operation::UpdateBatch { updates } => updates.as_slice(),
+                _ => &[],
+            })
+            .cloned()
+            .collect::<Vec<_>>();
         let mut accounts = state.keys().copied().collect::<BTreeSet<_>>();
-        for op in &operations {
+        for op in &updates_input {
             match op {
                 model::Operation::Account { address, .. } => {
                     accounts.insert(*address);
@@ -526,7 +543,7 @@ fn run(config: &mut Config, snapshotter: &Snapshotter) -> Result<()> {
                 ),
             }
         }
-        let (bundle, updates) = apply(&mut state, number, &operations);
+        let (bundle, updates) = apply(&mut state, number, &updates_input);
         // Print before entering production tasks so a panic still leaves the input on disk.
         println!(
             "{}",
@@ -559,7 +576,6 @@ fn run(config: &mut Config, snapshotter: &Snapshotter) -> Result<()> {
         );
         let stream = handle.take_hashed_update_stream();
         let hints = handle.take_hint_stream();
-        let mut rng = StdRng::seed_from_u64(block_input.stream_seed);
         let written = updates
             .iter()
             .flat_map(|update| {
@@ -573,22 +589,19 @@ fn run(config: &mut Config, snapshotter: &Snapshotter) -> Result<()> {
                     }))
             })
             .collect::<BTreeSet<_>>();
-        let mut targets = written.iter().copied().collect::<Vec<_>>();
-        targets.shuffle(&mut rng);
-        // Prewarming sees only some writes; synthetic read-only accesses add false positives.
-        let count =
-            if targets.len() > 1 { rng.random_range(1..targets.len()) } else { targets.len() };
-        targets.truncate(count);
-        for _ in 0..rng.random_range(1..=8) {
-            let address = Address::from_word(B256::from(U256::from(rng.random_range(17..=32u64))));
-            let slot = rng
-                .random_bool(0.5)
-                .then(|| keccak256(B256::from(U256::from(rng.random_range(0..64u64)))));
-            targets.push((keccak256(address), slot));
-        }
-        let hinted = targets
+        let hinted = operations
             .iter()
-            .flat_map(|(address, slot)| [(*address, None), (*address, *slot)])
+            .filter_map(|op| match op {
+                Operation::PrewarmBatch { accounts, storages } => Some((accounts, storages)),
+                _ => None,
+            })
+            .flat_map(|(accounts, storages)| {
+                accounts.iter().map(|address| (keccak256(address), None)).chain(
+                    storages.iter().map(|hint| {
+                        (keccak256(hint.address), Some(keccak256(B256::from(hint.slot))))
+                    }),
+                )
+            })
             .collect::<BTreeSet<_>>();
         println!(
             "{}",
@@ -597,39 +610,41 @@ fn run(config: &mut Config, snapshotter: &Snapshotter) -> Result<()> {
             "unhinted": written.difference(&hinted).count(),
             "read_only": hinted.difference(&written).count()}})
         );
-        targets.shuffle(&mut rng);
-        let mut targets = targets.into_iter();
         let mut updates = updates.into_iter();
-        while targets.len() > 0 || updates.len() > 0 {
-            if targets.len() > 0 && (updates.len() == 0 || rng.random_bool(0.5)) {
-                let size = rng.random_range(1..=targets.len().min(16));
-                let mut hint = StateAccessHint::default();
-                for (address, slot) in targets.by_ref().take(size) {
-                    if let Some(slot) = slot {
-                        hint.storages.entry(address).or_default().push(slot);
-                    } else {
-                        hint.accounts.push(address);
+        for operation in &operations {
+            match operation {
+                Operation::PrewarmBatch { accounts, storages } => {
+                    let mut hint = StateAccessHint::default();
+                    for address in accounts {
+                        hint.accounts.push(keccak256(address));
                     }
-                }
-                println!(
-                    "{}",
-                    json!({"block_number": number, "batch": "hint",
+                    for storage in storages {
+                        hint.storages
+                            .entry(keccak256(storage.address))
+                            .or_default()
+                            .push(keccak256(B256::from(storage.slot)));
+                    }
+                    println!(
+                        "{}",
+                        json!({"block_number": number, "batch": "hint",
                     "accounts": hint.accounts, "storages": hint.storages})
-                );
-                hints.on_access_hint(hint);
-                hint_batches += 1;
-            } else {
-                let size = rng.random_range(1..=updates.len().min(16));
-                let mut batch = HashedPostState::default();
-                for update in updates.by_ref().take(size) {
-                    batch.extend(update);
+                    );
+                    hints.on_access_hint(hint);
+                    hint_batches += 1;
                 }
-                println!(
-                    "{}",
-                    json!({"block_number": number, "batch": "update", "operations": size})
-                );
-                stream.on_hashed_state_update(batch);
-                update_batches += 1;
+                Operation::UpdateBatch { updates: batch_updates } => {
+                    let mut batch = HashedPostState::default();
+                    for update in updates.by_ref().take(batch_updates.len()) {
+                        batch.extend(update);
+                    }
+                    println!(
+                        "{}",
+                        json!({"block_number": number, "batch": "update", "operations": batch_updates.len()})
+                    );
+                    stream.on_hashed_state_update(batch);
+                    update_batches += 1;
+                }
+                Operation::Commit => {}
             }
         }
         drop(hints);
@@ -703,6 +718,45 @@ fn main() -> Result<()> {
     let mut argv = std::env::args().skip(1);
     let command = argv.next();
     let text = match command.as_deref() {
+        Some("mutation-operators") => {
+            println!(
+                "{}",
+                json!([
+                {"name": "account.address"},
+                {"name": "account.balance"},
+                {"name": "account.nonce"},
+                {"name": "account.bytecode_hash"},
+                {"name": "storage.address"},
+                {"name": "storage.slot"},
+                {"name": "storage.value"},
+                    {"name": "prewarm.account"},
+                {"name": "prewarm.storage.address"},
+                {"name": "prewarm.storage.slot"},
+                {"name": "update.duplicate"},
+                {"name": "update.remove"},
+                {"name": "update.crossover", "donor": true},
+                    {"name": "batch.duplicate"},
+                    {"name": "batch.remove"},
+                {"name": "batch.crossover", "donor": true},
+                {"name": "commit.insert"},
+                {"name": "commit.remove"}
+                ])
+            );
+            return Ok(());
+        }
+        Some("mutation-sites") => {
+            let value: serde_json::Value = serde_json::from_reader(std::io::stdin())?;
+            let input: Input = serde_json::from_value(value["input"].clone())?;
+            input.validate()?;
+            let operator = value["operator"].as_str();
+            let sites = input
+                .mutation_sites()
+                .into_iter()
+                .filter(|site| operator.is_none_or(|name| name == site.operator))
+                .collect::<Vec<_>>();
+            println!("{}", serde_json::to_string(&sites)?);
+            return Ok(());
+        }
         Some("generate-input" | "generate-suffix" | "mutate-input" | "validate-input") => {
             let value: serde_json::Value = serde_json::from_reader(std::io::stdin())?;
             let input = match command.as_deref() {
@@ -723,18 +777,39 @@ fn main() -> Result<()> {
                                 },
                             })
                             .collect::<Vec<_>>();
-                        input.blocks[0].operations.splice(0..0, accounts);
+                        let Operation::UpdateBatch { updates } = input
+                            .operations
+                            .iter_mut()
+                            .find(|op| matches!(op, Operation::UpdateBatch { .. }))
+                            .expect("generated update batch")
+                        else {
+                            unreachable!()
+                        };
+                        updates.splice(0..0, accounts);
                     }
                     input
                 }
                 _ => {
                     let mut input: Input = serde_json::from_value(value["input"].clone())?;
                     if command.as_deref() == Some("mutate-input") {
-                        input.mutate(
-                            value["seed"]
-                                .as_u64()
-                                .ok_or_else(|| eyre::eyre!("missing mutation seed"))?,
-                        )?;
+                        let seed = value["seed"]
+                            .as_u64()
+                            .ok_or_else(|| eyre::eyre!("missing mutation seed"))?;
+                        if let Some(operator) = value["operator"].as_str() {
+                            let path: Vec<String> = serde_json::from_value(value["path"].clone())?;
+                            let donor: Option<Input> =
+                                serde_json::from_value(value["donor"].clone())?;
+                            let donor_path: Vec<String> =
+                                serde_json::from_value(value["donor_path"].clone())?;
+                            input.mutate_at(
+                                operator,
+                                &path,
+                                seed,
+                                donor.as_ref().map(|donor| (donor, donor_path.as_slice())),
+                            )?;
+                        } else {
+                            input.mutate(seed)?;
+                        }
                     }
                     input
                 }

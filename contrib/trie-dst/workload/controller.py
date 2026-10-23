@@ -194,12 +194,21 @@ def main():
     request = (json.load(sys.stdin) if value == "-" else
                json.loads(Path(value[1:]).read_text()) if value and value.startswith("@") else
                json.loads(value) if value else None)
+    if hook in ("mutation-operators", "mutation-sites"):
+        if hook == "mutation-operators":
+            return native(hook, {})
+        return native(hook, {"input": json.loads(request["input"]),
+                             "operator": request["operator"]})
     if hook in ("seed-inputs", "suffix-seed", "mutate-input"):
         args = arguments(request["args"])
         args.pop("crashes")
         if hook == "mutate-input":
-            return json.dumps(native("mutate-input", {"input": json.loads(request["input"]),
-                                                       "seed": request["seed"]}))
+            return json.dumps(native("mutate-input", {
+                "input": json.loads(request["input"]), "seed": request["seed"],
+                "operator": request.get("operator") or None, "path": request.get("path", []),
+                "donor": json.loads(request["donor"]) if request.get("donor") else None,
+                "donor_path": request.get("donor_path", []),
+            }))
         if hook == "suffix-seed":
             # Each block establishes its own accounts, so it also runs at a deep snapshot.
             args.update(blocks=4, updates=min(4080, args["updates"]))
@@ -226,7 +235,7 @@ def main():
                 raise ValueError("explicit input exceeds 32 MiB")
             input_value = native("validate-input", {"input": json.loads(supplied)}) if supplied is not None else None
             if input_value is not None:
-                args["blocks"] = len(input_value["blocks"])
+                args["blocks"] = sum(op["kind"] == "commit" for op in input_value["operations"])
             kill_blocks = sorted(random.Random(request["seed"]).sample(
                 range(1, args["blocks"] + 1), min(crashes, args["blocks"])))
             config = {"workload": args | {"seed": request["seed"], "input": input_value},

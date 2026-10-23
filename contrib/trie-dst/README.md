@@ -29,7 +29,7 @@ The executable accepts one optional JSON object:
 | Field | Default | Range |
 | --- | --- | --- |
 | `seed` | 0 | unsigned 64-bit integer |
-| `input` | generated from seed | explicit ordered block operations and stream seeds |
+| `input` | generated from seed | explicit operation stream ending each block with `Commit` |
 | `datadir` | temporary directory | persistent database and journal directory; reuse to restart |
 | `blocks` | 64 | 1–1024 |
 | `updates` | 64 | 1–4096 per block |
@@ -57,16 +57,19 @@ and deletes individual slots. Each block receives the configured number of
 updates. It independently tracks the complete state and builds a per-block
 `BundleState` with original and final account/storage values and reverts.
 
-The production task consumes hashed updates in randomized batches of 1–16
-operations, preserving write order and merging repeated keys within each batch.
-Hint-only batches are randomly interleaved through the production prewarming
-stream, which produces `LeafUpdate::Touched` entries without changing state.
+The input is an ordered stream of `UpdateBatch`, `PrewarmBatch`, and `Commit`
+operations. Each update batch contains account and storage updates in write
+order; each prewarm batch contains account addresses and storage keys as
+access hints. `Commit` finishes the sparse-trie task, checks the reference
+root, and inserts the resulting block. The input records the batch order
+explicitly, so replay needs no stream seed. Prewarm batches produce
+`LeafUpdate::Touched` entries without changing state.
 Hints include a random nonempty subset of distinct written keys plus read-only
 accesses to unwritten accounts/storage. They overlap actual updates without
 always covering them, and may arrive before or after an overlapping write.
 Batch composition and hint targets are logged; the completion summary counts
-update and hint batches. Batching and hints are seeded per block for replay.
-At each block boundary, its root must equal a root rebuilt from the reference
+update and hint batches. The generator uses the seed to construct the initial
+stream. At each `Commit`, the root must equal a root rebuilt from the reference
 maps with `HashBuilder`:
 storage leaves first, followed by RLP account leaves. Its actual hashed state
 and trie updates are attached to the synthetic executed block alongside the
@@ -206,11 +209,10 @@ With the accompanying Bedrock workload-input hooks, set `DST_CMD=fuzz` during
 preparation and execution. For example, dispatch the same CI workflow with
 `mode=fuzz`, `parallel_seeds=1`, and this workload URL. The workflow's
 `num_seeds` then caps fuzz executions. Each corpus entry is an `Input`: an
-ordered list of blocks, each with account/storage operations and a stream seed
-for batch composition and hints. Reth generates eight initial entries and
-performs typed mutations that can duplicate or drop a chosen block or the last
-block, and change operations, values, slots, and stream seeds while preserving
-account prerequisites. The same input can
+ordered operation stream. Reth generates eight initial entries and exposes
+typed AST sites for LibAFL to choose. Its operators edit account/storage
+fields, prewarm keys, nested updates, batches, and commit boundaries; crossover
+draws a second corpus entry. Invalid edits leave the input unchanged. The same input can
 also be supplied as `base_input` to the controller for replay.
 
 At a completed-block snapshot, the controller emits `trie/input/checked`,
@@ -219,5 +221,5 @@ block boundary; already journaled blocks are never replaced. The worker waits
 after its original input until Bedrock either injects a suffix or finalizes the
 run. Fuzz preparation builds a coverage-instrumented guest executable and
 keeps an uninstrumented executable beside the host controller for input hooks.
-The first scope is trie operation and scheduling-stream inputs on a linear
+The first scope is trie operation streams on a linear
 chain; it does not mutate Reth code or the VM's recorded scheduling decisions.
