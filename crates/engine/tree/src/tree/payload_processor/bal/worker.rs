@@ -1,16 +1,18 @@
 use super::BalExecutionError;
 use alloy_consensus::Transaction;
 use alloy_eip7928::BlockAccessIndex;
-use alloy_primitives::Address;
+use alloy_primitives::{Address, B256, U256};
 use crossbeam_channel::{Receiver, Sender};
+use evm2::{bytecode::Bytecode, evm::AccountInfo};
 use reth_evm::{
     BlockExecutionError, BlockExecutor, BlockExecutorFactory, BlockExecutorFor,
     BlockValidationError, ConfigureEvm, Database, EvmEnvFor, ExecutableTxFor, ExecutionCtxFor,
 };
-use std::sync::Arc;
+use std::{cell::RefCell, rc::Rc, sync::Arc};
 
 #[derive(Debug, thiserror::Error)]
 pub(super) enum BalWorkerError {
+    /// Worker state or provider setup failed.
     #[error("BAL worker setup failed: {0}")]
     Setup(#[source] BalExecutionError),
     /// Transaction recovery or conversion failed before EVM execution.
@@ -82,9 +84,7 @@ pub(super) fn spawn_worker<'scope, Evm, Tx, Err, DB, MakeDb>(
         let worker_result = (|| -> Result<(), BalWorkerError> {
             // Keep the cache-filling database across executor resets so a speculative failure
             // cannot introduce an unindexed provider setup error ahead of its ordered verdict.
-            let database = std::rc::Rc::new(std::cell::RefCell::new(
-                make_db(true).map_err(BalWorkerError::Setup)?,
-            ));
+            let database = Rc::new(RefCell::new(make_db(true).map_err(BalWorkerError::Setup)?));
             'worker: loop {
                 let evm =
                     evm_config.evm_with_env(WorkerDatabase(database.clone()), evm_env.clone());
@@ -136,6 +136,7 @@ pub(super) fn spawn_worker<'scope, Evm, Tx, Err, DB, MakeDb>(
                     }
                 }
             }
+
             Ok(())
         })();
 
@@ -147,7 +148,7 @@ pub(super) fn spawn_worker<'scope, Evm, Tx, Err, DB, MakeDb>(
 
 // Executor resets retain the same provider. The wrapper is created and used entirely on one
 // worker thread; its shared ownership decouples the database lifetime from each executor.
-struct WorkerDatabase<DB>(std::rc::Rc<std::cell::RefCell<DB>>);
+struct WorkerDatabase<DB>(Rc<RefCell<DB>>);
 
 impl<DB: Database> Database for WorkerDatabase<DB> {
     type Error = DB::Error;
@@ -156,29 +157,19 @@ impl<DB: Database> Database for WorkerDatabase<DB> {
         DB::is_fatal(error)
     }
 
-    fn get_account(
-        &mut self,
-        address: &Address,
-    ) -> Result<Option<evm2::evm::AccountInfo>, Self::Error> {
+    fn get_account(&mut self, address: &Address) -> Result<Option<AccountInfo>, Self::Error> {
         self.0.borrow_mut().get_account(address)
     }
-    fn get_code_by_hash(
-        &mut self,
-        hash: &alloy_primitives::B256,
-    ) -> Result<evm2::bytecode::Bytecode, Self::Error> {
+
+    fn get_code_by_hash(&mut self, hash: &B256) -> Result<Bytecode, Self::Error> {
         self.0.borrow_mut().get_code_by_hash(hash)
     }
-    fn get_storage(
-        &mut self,
-        address: &Address,
-        key: &alloy_primitives::U256,
-    ) -> Result<alloy_primitives::U256, Self::Error> {
+
+    fn get_storage(&mut self, address: &Address, key: &U256) -> Result<U256, Self::Error> {
         self.0.borrow_mut().get_storage(address, key)
     }
-    fn get_block_hash(
-        &mut self,
-        number: &alloy_primitives::U256,
-    ) -> Result<alloy_primitives::B256, Self::Error> {
+
+    fn get_block_hash(&mut self, number: &U256) -> Result<B256, Self::Error> {
         self.0.borrow_mut().get_block_hash(number)
     }
 }

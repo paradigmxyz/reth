@@ -6,7 +6,7 @@ use alloy_consensus::Header;
 use alloy_eips::Decodable2718;
 use alloy_primitives::{Bytes, U256};
 use alloy_rpc_types::engine::ExecutionData;
-use core::{convert::Infallible, fmt};
+use core::convert::Infallible;
 use reth_chainspec::{ChainSpec, EthChainSpec, EthereumHardforks};
 use reth_engine_primitives::ExecutionPayload;
 use reth_ethereum_forks::Hardforks;
@@ -22,7 +22,6 @@ use reth_evm_ethereum::{
 };
 use reth_primitives_traits::{BlockTy, HeaderTy, SealedBlock, SealedHeader, SignedTransaction};
 use reth_storage_errors::any::AnyError;
-use std::vec::Vec;
 
 /// Block assembler marker for replay-only big-block execution.
 #[derive(Debug, Clone, Copy, Default)]
@@ -43,37 +42,11 @@ where
 }
 
 /// EVM configuration for big-block execution.
+#[derive(Debug, Clone)]
 pub struct BbEvmConfig<C = ChainSpec> {
     inner: EthEvmConfig<C>,
     executor_factory: EthBigBlockExecutorFactory<C>,
     block_assembler: BbBlockAssembler,
-}
-
-impl<C> Clone for BbEvmConfig<C>
-where
-    EthEvmConfig<C>: Clone,
-    EthBigBlockExecutorFactory<C>: Clone,
-{
-    fn clone(&self) -> Self {
-        Self {
-            inner: self.inner.clone(),
-            executor_factory: self.executor_factory.clone(),
-            block_assembler: self.block_assembler,
-        }
-    }
-}
-
-impl<C> fmt::Debug for BbEvmConfig<C>
-where
-    EthEvmConfig<C>: fmt::Debug,
-    EthBigBlockExecutorFactory<C>: fmt::Debug,
-{
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("BbEvmConfig")
-            .field("inner", &self.inner)
-            .field("executor_factory", &self.executor_factory)
-            .finish()
-    }
 }
 
 impl<C> BbEvmConfig<C> {
@@ -207,18 +180,16 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_primitives::Address;
+    use alloy_consensus::TxLegacy;
+    use alloy_primitives::{Address, Signature, TxKind};
+    use alloy_rpc_types::engine::{ExecutionPayloadSidecar, ExecutionPayloadV1};
     use evm2::evm::{EmptyDB, SystemTx};
     use metrics_util::debugging::{DebugValue, DebuggingRecorder};
+    use reth_evm::EvmEnv;
     use reth_evm_ethereum::EthEvmEnv;
 
     #[test]
     fn prewarm_accepts_later_segment_with_lower_base_fee() {
-        use alloy_consensus::TxLegacy;
-        use alloy_primitives::{Signature, TxKind};
-        use alloy_rpc_types::engine::{ExecutionPayloadSidecar, ExecutionPayloadV1};
-        use reth_evm::EvmEnv;
-
         let segment = |base_fee| ExecutionData {
             payload: ExecutionPayloadV1::from_block_unchecked(
                 Default::default(),

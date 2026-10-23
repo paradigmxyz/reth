@@ -103,6 +103,10 @@ where
     disable_state_cache: bool,
     /// Determines how to configure the evm for execution.
     evm_config: Evm,
+    /// Whether precompile cache should be disabled.
+    precompile_cache_disabled: bool,
+    /// Precompile cache map.
+    precompile_cache_map: PrecompileCacheMap<SpecFor<Evm>>,
     /// Whether to disable BAL-driven parallel state root computation.
     /// Only valid when BAL parallel execution is also disabled.
     disable_bal_parallel_state_root: bool,
@@ -110,10 +114,6 @@ where
     disable_bal_batch_io: bool,
     /// Whether block execution may reuse transaction prewarming results.
     reuse_prewarm_results: bool,
-    /// Whether precompile cache should be disabled.
-    precompile_cache_disabled: bool,
-    /// Precompile cache map.
-    precompile_cache_map: PrecompileCacheMap<SpecFor<Evm>>,
     /// Dedicated blocking pool for warming the BAL read-set, created lazily on the first BAL block
     /// (see [`Self::bal_prewarm_pool`]). Its threads exit when the processor is dropped.
     bal_prewarm_pool: OnceLock<Arc<bal_prewarm_pool::BalPrewarmPool>>,
@@ -137,6 +137,8 @@ where
             disable_transaction_prewarming: config.disable_prewarming(),
             evm_config,
             disable_state_cache: config.disable_state_cache(),
+            precompile_cache_disabled: config.precompile_cache_disabled(),
+            precompile_cache_map,
             cache_metrics: (!config.disable_cache_metrics())
                 .then(|| CachedStateMetrics::zeroed(CachedStateMetricsSource::Engine)),
             cache_state_metrics: (!config.disable_cache_metrics())
@@ -144,8 +146,6 @@ where
             disable_bal_parallel_state_root: config.disable_bal_parallel_state_root(),
             disable_bal_batch_io: config.disable_bal_batch_io(),
             reuse_prewarm_results: config.prewarm_reuse(),
-            precompile_cache_disabled: config.precompile_cache_disabled(),
-            precompile_cache_map,
             bal_prewarm_pool: OnceLock::new(),
         }
     }
@@ -468,11 +468,11 @@ where
             cache_state_metrics: self.cache_state_metrics.clone(),
             terminate_execution: Arc::new(AtomicBool::new(false)),
             executed_tx_index: Arc::clone(&executed_tx_index),
+            precompile_cache_disabled: self.precompile_cache_disabled,
+            precompile_cache_map: self.precompile_cache_map.clone(),
             disable_bal_parallel_state_root: self.disable_bal_parallel_state_root,
             disable_bal_batch_io: self.disable_bal_batch_io,
             prewarm_results: prewarm_results.clone(),
-            precompile_cache_disabled: self.precompile_cache_disabled,
-            precompile_cache_map: self.precompile_cache_map.clone(),
         };
 
         let (prewarm_task, to_prewarm_task) =
@@ -523,7 +523,7 @@ where
     pub fn on_inserted_executed_block(
         &self,
         block_with_parent: BlockWithParent,
-        block_state: &BundleState,
+        bundle_state: &BundleState,
     ) {
         let cache_state_metrics = self.cache_state_metrics.clone();
         self.execution_cache.update_with_guard(|cached| {
@@ -552,9 +552,9 @@ where
                 None => ExecutionCache::new(self.cross_block_cache_size),
             };
 
-            // Insert the block's state into cache
+            // Insert the block's bundle state into cache
             let new_cache = SavedCache::new(block_with_parent.block.hash, caches);
-            if new_cache.cache().insert_state(block_state).is_err() {
+            if new_cache.cache().insert_state(bundle_state).is_err() {
                 *cached = None;
                 debug!(target: "engine::caching", "cleared execution cache on update error");
                 return
@@ -648,7 +648,7 @@ impl<Tx, Err, R: Send + Sync + 'static, H: evm2::EvmTypes> PayloadHandle<Tx, Err
     ///
     /// If the [`BlockExecutionOutput`] is provided it will update the shared cache using its
     /// bundle state. Using `Arc<ExecutionOutcome>` allows sharing with the main execution
-    /// path without cloning the execution state.
+    /// path without cloning the expensive `BundleState`.
     ///
     /// Returns a sender for the channel that should be notified on block validation success.
     pub fn terminate_caching(
@@ -702,7 +702,7 @@ impl<R: Send + Sync + 'static, H: evm2::EvmTypes> CacheTaskHandle<R, H> {
     /// Terminates the entire pre-warming task.
     ///
     /// If the [`BlockExecutionOutput`] is provided it will update the shared cache using its
-    /// execution state. Using `Arc<ExecutionOutcome>` avoids cloning it.
+    /// bundle state. Using `Arc<ExecutionOutcome>` avoids cloning the expensive `BundleState`.
     #[must_use = "sender must be used and notified on block validation success"]
     pub fn terminate_caching(
         &mut self,
@@ -1018,13 +1018,13 @@ mod tests {
             block: BlockNumHash { hash: block_hash, number: 1 },
             parent: parent_hash,
         };
-        let block_state = BundleState::default();
+        let bundle_state = BundleState::default();
 
         // Cache should be empty initially
         assert!(payload_processor.execution_cache.get_cache_for(block_hash).is_none());
 
         // Update cache with inserted block
-        payload_processor.on_inserted_executed_block(block_with_parent, &block_state);
+        payload_processor.on_inserted_executed_block(block_with_parent, &bundle_state);
 
         // Cache should now exist for the block hash
         let cached = payload_processor.execution_cache.get_cache_for(block_hash);
@@ -1054,9 +1054,9 @@ mod tests {
             block: BlockNumHash { hash: block3_hash, number: 3 },
             parent: wrong_parent,
         };
-        let block_state = BundleState::default();
+        let bundle_state = BundleState::default();
 
-        payload_processor.on_inserted_executed_block(block_with_parent, &block_state);
+        payload_processor.on_inserted_executed_block(block_with_parent, &bundle_state);
 
         // Cache should still be for block 1 (unchanged)
         let cached = payload_processor.execution_cache.get_cache_for(block1_hash);
@@ -1090,7 +1090,7 @@ mod tests {
             .expect("expected parent cache checkout to succeed");
 
         let polluted_address = Address::random();
-        let block_state = BundleState::builder(2..=2)
+        let bundle_state = BundleState::builder(2..=2)
             .state_present_account_info(
                 polluted_address,
                 AccountInfo {
@@ -1110,7 +1110,7 @@ mod tests {
             parent: parent_hash,
         };
 
-        payload_processor.on_inserted_executed_block(block_with_parent, &block_state);
+        payload_processor.on_inserted_executed_block(block_with_parent, &bundle_state);
 
         // The closure runs only on a cache miss, so NotCached(None) means polluted_address was
         // absent and Cached(Some(_)) means it was written by on_inserted_executed_block.

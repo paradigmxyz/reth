@@ -46,8 +46,8 @@ use crate::tree::payload_processor::receipt_root_task::IndexedReceipt;
 
 /// Executes one block on the BAL path using the runtime's persistent BAL worker pool.
 ///
-/// Returns the execution output, recovered senders, rebuilt BAL, and the prepared BAL
-/// shared by the workers.
+/// Returns the execution output, the recovered senders, the BAL rebuilt from this execution, and
+/// the received BAL in the evm2 representation the workers consumed.
 #[expect(clippy::too_many_arguments, clippy::type_complexity)]
 pub fn execute_block<'a, Evm, Tx, Err, DB, MakeDb>(
     runtime: &Runtime,
@@ -112,6 +112,18 @@ where
     DB: Database + Send + 'scope,
     MakeDb: Fn(bool) -> Result<DB, BalExecutionError> + Sync + 'scope,
 {
+    // Convert the BAL from alloy to a BAL that can be consumed by evm2, that is more amenable
+    // for state lookups.
+    //
+    // This is failable.
+    //
+    // This is due to bytecodes. A transaction can attempt to deploy illegal bytecodes, e.g. due to
+    // EIP-3541 or more specifically due to EIP-7702.
+    //
+    // During serial execution this check happens before the bytecode is deployed and if the check
+    // is triggered then the execution is reverted, and as such no actual code change event takes
+    // place. Therefore, if we do observe such a bytecode in a BAL then that means the BAL is
+    // invalid as no legal execution should've led to this bytecode deployment.
     let received_bal = Arc::new(
         <BlockExecutorFor<'scope, Evm> as BlockExecutor>::convert_block_access_list(
             input_bal.as_bal().as_vec(),
@@ -152,7 +164,12 @@ where
                 tx_gas_limit,
                 source,
             })) => {
+                // Block-gas admission is adjudicated in transaction order and takes
+                // precedence over the failure at this slot.
                 canonical_executor.validate_transaction_gas_limit(tx_gas_limit)?;
+
+                // The transaction is admitted, so its execution failure is the block's
+                // verdict: a BAL miss proves the received BAL diverges from this execution.
                 return Err(
                     worker::BalWorkerError::Execution { tx_index, tx_gas_limit, source }.into()
                 );
@@ -220,6 +237,7 @@ mod tests {
         eip7002::{WITHDRAWAL_REQUEST_PREDEPLOY_ADDRESS, WITHDRAWAL_REQUEST_PREDEPLOY_CODE},
     };
     use alloy_primitives::{Bytes, B256, U256};
+    use evm2::evm::{CacheDB, EmptyDB};
     use reth_chainspec::{ChainSpecBuilder, MAINNET};
     use reth_ethereum_primitives::{Block, BlockBody, Receipt, Transaction, TransactionSigned};
     use reth_evm::{
@@ -231,43 +249,7 @@ mod tests {
         crypto::secp256k1::public_key_to_address, Block as _, Recovered, SealedBlock,
     };
     use reth_testing_utils::generators::{generate_key, rng, sign_tx_with_key_pair};
-    use std::{collections::BTreeMap, convert::Infallible};
-
-    #[derive(Clone, Default)]
-    struct TestDatabase {
-        accounts: BTreeMap<Address, AccountInfo>,
-        contracts: BTreeMap<B256, Bytecode>,
-        storage: BTreeMap<(Address, U256), U256>,
-    }
-
-    impl TestDatabase {
-        fn insert_account_info(&mut self, address: &Address, info: AccountInfo) {
-            if let Some(code) = info.code.as_ref() {
-                self.contracts.insert(info.code_hash, code.clone());
-            }
-            self.accounts.insert(*address, info);
-        }
-    }
-
-    impl Database for TestDatabase {
-        type Error = Infallible;
-
-        fn get_account(&mut self, address: &Address) -> Result<Option<AccountInfo>, Self::Error> {
-            Ok(self.accounts.get(address).cloned())
-        }
-
-        fn get_code_by_hash(&mut self, code_hash: &B256) -> Result<Bytecode, Self::Error> {
-            Ok(self.contracts.get(code_hash).cloned().unwrap_or_default())
-        }
-
-        fn get_storage(&mut self, address: &Address, key: &U256) -> Result<U256, Self::Error> {
-            Ok(self.storage.get(&(*address, *key)).copied().unwrap_or_default())
-        }
-
-        fn get_block_hash(&mut self, _number: &U256) -> Result<B256, Self::Error> {
-            Ok(B256::ZERO)
-        }
-    }
+    use std::convert::Infallible;
 
     fn test_evm_config() -> EthEvmConfig {
         EthEvmConfig::new(Arc::new(ChainSpecBuilder::mainnet().amsterdam_activated().build()))
@@ -277,14 +259,18 @@ mod tests {
         EthEvmConfig::new(Arc::new(ChainSpecBuilder::mainnet().osaka_activated().build()))
     }
 
+    /// Wraps a `BlockAccessList` into an `Arc<DecodedBal>` by RLP-encoding the BAL.
     fn to_arc_decoded(bal: BlockAccessList) -> Arc<DecodedBal> {
         let alloy_bal: AlloyBal = bal.into();
         let raw = alloy_rlp::encode(&alloy_bal).into();
         Arc::new(DecodedBal::new(alloy_bal, raw))
     }
 
-    fn system_contracts_db() -> TestDatabase {
-        let mut db = TestDatabase::default();
+    /// Builds an in-memory canonical DB pre-populated with the post-Cancun system contracts
+    /// that `apply_pre_execution_changes` calls: beacon roots (EIP-4788), withdrawal requests
+    /// (EIP-7002), and historical block hashes (EIP-2935).
+    fn system_contracts_db() -> CacheDB<EmptyDB> {
+        let mut db = CacheDB::<EmptyDB>::default();
         db.insert_account_info(
             &BEACON_ROOTS_ADDRESS,
             AccountInfo::default()
@@ -306,6 +292,7 @@ mod tests {
         db
     }
 
+    /// Builds a minimal sealed block (empty body, Amsterdam-ready header) for tests.
     fn empty_amsterdam_block(header_bal_hash: B256) -> SealedBlock<Block> {
         empty_amsterdam_block_with_gas_limit(header_bal_hash, 30_000_000)
     }
@@ -339,8 +326,8 @@ mod tests {
     }
 
     fn db_factory(
-        db: TestDatabase,
-    ) -> impl Fn(bool) -> Result<TestDatabase, BalExecutionError> + Sync {
+        db: CacheDB<EmptyDB>,
+    ) -> impl Fn(bool) -> Result<CacheDB<EmptyDB>, BalExecutionError> + Sync {
         move |_| Ok(db.clone())
     }
 
@@ -400,13 +387,16 @@ mod tests {
         .map(|(output, _, built_bal, _)| (output, built_bal))
     }
 
-    fn insert_funded(db: &mut TestDatabase, address: Address, balance: U256) {
+    /// Inserts `AccountInfo { nonce: 0, balance }` for `addr` into the canonical DB.
+    fn insert_funded(db: &mut CacheDB<EmptyDB>, address: Address, balance: U256) {
         db.insert_account_info(&address, AccountInfo::default().with_balance(balance));
     }
 
+    /// Runs the block through the serial executor and captures its full output together with the
+    /// composed BAL it built, which is the input of the BAL path.
     fn run_serial_path(
         evm_config: &EthEvmConfig,
-        canonical_db: TestDatabase,
+        canonical_db: CacheDB<EmptyDB>,
         block: &SealedBlock<Block>,
         txs: &[Recovered<TransactionSigned>],
     ) -> (BlockExecutionOutput<Receipt>, BlockAccessList) {
@@ -423,14 +413,22 @@ mod tests {
         (output, bal.expect("BAL builder was enabled"))
     }
 
+    /// Runs only the canonical phases (pre-exec → post-exec, no txs) against a fresh
+    /// `system_contracts_db()` to compute the composed BAL a block produces. Used to build
+    /// the "reference" received BAL for the happy-path test below.
+    ///
+    /// This intentionally mirrors what `execute_block` does internally,
+    /// but without any hash check — the output is the BAL itself, not a pass/fail signal.
     fn reference_bal_for_empty_block(evm_config: &EthEvmConfig) -> BlockAccessList {
         run_serial_path(evm_config, system_contracts_db(), &empty_amsterdam_block(B256::ZERO), &[])
             .1
     }
 
+    /// Runs the canonical path on a block with real txs (no hash check) and returns the
+    /// composed BAL. Used to build the reference BAL for happy-path multi-tx tests.
     fn reference_bal_for_block(
         evm_config: &EthEvmConfig,
-        db: TestDatabase,
+        db: CacheDB<EmptyDB>,
         block: &SealedBlock<Block>,
         txs: &[Recovered<TransactionSigned>],
     ) -> BlockAccessList {
@@ -458,14 +456,22 @@ mod tests {
         };
     }
 
+    // ============================================================================
+    // Shadow-mode harness — runs a block through the serial block executor
+    // and the BAL path, asserts byte-equal outputs.
+    // ============================================================================
+
+    /// Shadow harness. Runs the block through both paths; asserts byte-equal outputs.
     fn assert_shadow_equal(
         evm_config: EthEvmConfig,
-        canonical_db_template: TestDatabase,
+        canonical_db_template: CacheDB<EmptyDB>,
         block_header_only: SealedBlock<Block>,
         txs: Vec<Recovered<TransactionSigned>>,
     ) {
+        // Serial run: also produces the reference BAL we'll feed to the BAL path.
         let (mut serial, reference_bal) =
             run_serial_path(&evm_config, canonical_db_template.clone(), &block_header_only, &txs);
+        // BAL path: stamp the hash of the reference BAL onto the header.
         let block = empty_amsterdam_block_with_gas_limit(
             compute_block_access_list_hash(&reference_bal),
             block_header_only.header().gas_limit(),
@@ -480,6 +486,7 @@ mod tests {
         )
         .unwrap_or_else(|e| panic!("BAL path failed: {e:?}"));
 
+        // Byte-equal assertions. Any divergence surfaces the specific field that broke.
         assert_eq!(reference_bal, built_bal, "rebuilt BAL diverged");
         assert_eq!(serial.receipts, bal_out.receipts, "receipts diverged");
         assert_eq!(serial.gas_used, bal_out.gas_used, "gas used diverged");
@@ -514,8 +521,14 @@ mod tests {
 
     #[test]
     fn empty_block_happy_path_round_trip() {
+        // Two-pass end-to-end:
+        //   1. Build the canonical BAL an empty Amsterdam block produces (via
+        //      `reference_bal_for_empty_block`).
+        //   2. Hash it, stamp the header, and run `execute_block` with that BAL. Every check must
+        //      pass.
         let evm_config = test_evm_config();
         let input_bal = reference_bal_for_empty_block(&evm_config);
+        // Sanity: reference BAL is non-empty (system calls populated it).
         assert!(!input_bal.is_empty(), "system calls should populate the BAL");
         let block = empty_amsterdam_block(compute_block_access_list_hash(&input_bal));
 
@@ -533,20 +546,35 @@ mod tests {
 
     #[test]
     fn multi_tx_happy_path_round_trip() {
+        // End-to-end with two value transfers from distinct senders to the same recipient.
+        //
+        // 1. Fund alice and bob in a fresh canonical DB.
+        // 2. Sign tx1 (alice → carol, 100 wei) and tx2 (bob → carol, 200 wei).
+        // 3. Build the reference BAL by running the block through a canonical executor with the BAL
+        //    builder enabled.
+        // 4. Feed that BAL into `execute_block` and assert 2 receipts + no rejections.
         let evm_config = test_evm_config();
         let carol = Address::repeat_byte(0xca);
         let sender_balance = U256::from(alloy_consensus::constants::ETH_TO_WEI);
+
+        // Generate keypairs + derive sender addresses.
         let alice_kp = generate_key(&mut rng());
         let alice = public_key_to_address(alice_kp.public_key());
         let bob_kp = generate_key(&mut rng());
         let bob = public_key_to_address(bob_kp.public_key());
+
+        // Sign txs.
         let txs = vec![
             signed_transfer!(alice_kp, alice, carol, 100, 0, 21_000),
             signed_transfer!(bob_kp, bob, carol, 200, 0, 21_000),
         ];
+
+        // Pre-block DB: system contracts + funded senders.
         let mut db = system_contracts_db();
         insert_funded(&mut db, alice, sender_balance);
         insert_funded(&mut db, bob, sender_balance);
+
+        // Reference BAL: run the block through a separate canonical executor.
         let reference_bal = reference_bal_for_block(
             &evm_config,
             db.clone(),
@@ -570,6 +598,8 @@ mod tests {
 
     #[test]
     fn shadow_empty_block() {
+        // System calls only — no txs. Both paths should produce identical system-call
+        // side effects in their execution state (beacon roots storage, history storage, etc.).
         assert_shadow_equal(
             test_evm_config(),
             system_contracts_db(),
@@ -580,6 +610,8 @@ mod tests {
 
     #[test]
     fn shadow_multi_value_transfer() {
+        // Two senders → same recipient. Byte-equal across paths means: worker-produced
+        // diffs commit identically to a directly-executed serial path.
         let evm_config = test_evm_config();
         let carol = Address::repeat_byte(0xca);
         let sender_balance = U256::from(alloy_consensus::constants::ETH_TO_WEI);
@@ -599,6 +631,9 @@ mod tests {
 
     #[test]
     fn rejects_tx_gas_limit_that_exceeds_remaining_block_gas() {
+        // Each worker sees an empty block, so both transactions fit individually. The ordered
+        // commit loop must still reject tx2 because tx1's committed gas leaves too little
+        // block gas for tx2's gas limit.
         let evm_config = test_evm_config();
         let carol = Address::repeat_byte(0xca);
         let sender_balance = U256::from(alloy_consensus::constants::ETH_TO_WEI);
@@ -613,6 +648,9 @@ mod tests {
         let mut pre_block_db = system_contracts_db();
         insert_funded(&mut pre_block_db, alice, sender_balance);
         insert_funded(&mut pre_block_db, bob, sender_balance);
+        // Build the reference BAL under a generous gas limit so both workers can execute.
+        // Replaying the same BAL under the low block gas limit below should reject in the
+        // ordered commit loop before tx2 is committed.
         let reference_bal = reference_bal_for_block(
             &evm_config,
             pre_block_db.clone(),
@@ -643,6 +681,11 @@ mod tests {
 
     #[test]
     fn shadow_tx_with_revert() {
+        // A tx that reverts in a deployed contract. Both paths must produce identical receipts
+        // (success = false, gas charged, state rolled back except for gas payment + nonce bump).
+        //
+        // Deploys `0x60006000fd` (PUSH1 0 PUSH1 0 REVERT) at `contract`. Sender calls it; the call
+        // reverts; fees + nonce still apply.
         let evm_config = test_evm_config();
         let contract = Address::repeat_byte(0xde);
         let key = generate_key(&mut rng());
@@ -661,6 +704,11 @@ mod tests {
 
     #[test]
     fn shadow_tx_with_sstore() {
+        // Tx calls a deployed contract that does `SSTORE(0, 0x42)`. The storage write must
+        // commit identically across serial and BAL paths even though the canonical state applies
+        // a diff produced by a worker EVM.
+        //
+        // Bytecode: PUSH1 0x42, PUSH1 0x00, SSTORE, STOP → `0x60 0x42 0x60 0x00 0x55 0x00`.
         let evm_config = test_evm_config();
         let contract = Address::repeat_byte(0x55);
         let key = generate_key(&mut rng());
@@ -679,13 +727,22 @@ mod tests {
 
     #[test]
     fn returns_built_bal_for_final_hash_mismatch() {
+        // Build the BAL an empty block actually produces, then append a phantom address
+        // that execution never touches. The rebuilt BAL omits it, and the outer consensus
+        // validator is responsible for comparing that rebuilt hash to the header commitment.
         use alloy_eip7928::AccountChanges;
 
         let evm_config = test_evm_config();
+
+        // Real BAL the block would produce.
         let real_bal = reference_bal_for_empty_block(&evm_config);
+
+        // Tamper: append a phantom address not accessed during execution.
         let mut tampered_entries: Vec<AccountChanges> = real_bal;
         tampered_entries.push(AccountChanges::new(Address::repeat_byte(0xff)));
         let tampered_bal = AlloyBal::new(tampered_entries);
+
+        // Stamp the tampered BAL's hash on the block header.
         let tampered_access_list: BlockAccessList = tampered_bal.clone().into();
         let tampered_hash = compute_block_access_list_hash(&tampered_access_list);
         let block = empty_amsterdam_block(tampered_hash);
@@ -708,8 +765,9 @@ mod tests {
 
     #[test]
     fn canonical_make_db_failure() {
+        // A make_db that always fails must surface as Provider.
         let block = empty_amsterdam_block(B256::ZERO);
-        let failing_make_db = |_: bool| -> Result<TestDatabase, BalExecutionError> {
+        let failing_make_db = |_: bool| -> Result<CacheDB<EmptyDB>, BalExecutionError> {
             Err(reth_provider::ProviderError::BestBlockNotFound.into())
         };
         let result = run_execute_block(
@@ -725,6 +783,9 @@ mod tests {
 
     #[test]
     fn worker_tx_recovery_error_becomes_validation_error() {
+        // A tx recovery failure fed into the worker channel must surface as
+        // a block validation error. Uses execute_block directly since tx_stream hardcodes
+        // Infallible and cannot inject errors.
         let evm_config = test_evm_config();
         let block = empty_amsterdam_block(B256::ZERO);
         let (tx_tx, tx_rx) = crossbeam_channel::unbounded::<(
@@ -744,7 +805,7 @@ mod tests {
             to_arc_decoded(BlockAccessList::default()),
             evm_env,
             execution_ctx,
-            1,
+            1, // transaction_count = 1 → exactly one worker spawned
             tx_rx,
             receipt_tx,
         );
@@ -756,6 +817,8 @@ mod tests {
 
     #[test]
     fn gas_tracker_non_amsterdam_uses_cumulative_gas() {
+        // tx2's gas limit fits the block gas limit on its own but not the gas left after tx1, so
+        // non-Amsterdam admission, which budgets by cumulative gas, must reject it.
         let evm_config = non_amsterdam_evm_config();
         let recipient = Address::repeat_byte(0xca);
         let balance = U256::from(alloy_consensus::constants::ETH_TO_WEI);
@@ -794,6 +857,8 @@ mod tests {
 
     #[test]
     fn gas_tracker_caps_oversized_tx_gas_limit_at_tx_gas_limit_cap() {
+        // A tx with gas_limit above the tx gas limit cap (EIP-7825) is admitted when the
+        // capped value fits in the remaining block gas.
         const TX_GAS_LIMIT_CAP: u64 = 1 << 24;
 
         let evm_config = test_evm_config();
@@ -829,12 +894,14 @@ mod tests {
         .expect("the capped regular gas limit should fit the remaining block gas");
         assert_eq!(output.receipts.len(), 2);
     }
-    /// Two funded senders transferring with independently chosen gas limits.
+
+    /// Two funded senders each transferring to the same recipient, which is funded only if
+    /// `fund_recipient` is set.
     fn two_transfers(
         tx1_gas_limit: u64,
         tx2_gas_limit: u64,
         fund_recipient: bool,
-    ) -> (TestDatabase, Recovered<TransactionSigned>, Recovered<TransactionSigned>) {
+    ) -> (CacheDB<EmptyDB>, Recovered<TransactionSigned>, Recovered<TransactionSigned>) {
         let recipient = Address::repeat_byte(0xca);
         let balance = U256::from(alloy_consensus::constants::ETH_TO_WEI);
 
@@ -877,7 +944,7 @@ mod tests {
         tx_gas_limit: u64,
         bal_covers_first: bool,
     ) -> (
-        TestDatabase,
+        CacheDB<EmptyDB>,
         BlockAccessList,
         Recovered<reth_ethereum_primitives::TransactionSigned>,
         Recovered<reth_ethereum_primitives::TransactionSigned>,
@@ -1065,6 +1132,7 @@ mod tests {
         assert!(outputs.next().is_none());
         assert_eq!(setups.load(Ordering::Relaxed), 1);
     }
+
     #[test]
     fn amsterdam_state_gas_admission_matches_serial_execution() {
         let evm_config = EthEvmConfig::new(Arc::new(
