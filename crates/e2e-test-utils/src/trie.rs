@@ -7,7 +7,7 @@ use reth_provider::{
 };
 use reth_trie::{
     prefix_set::{PrefixSetMut, TriePrefixSets},
-    verify::Output,
+    verify::{default_storage_workers, Output},
     StateRoot,
 };
 use reth_trie_db::{DatabaseHashedCursorFactory, DatabaseTrieCursorFactory, DatabaseVerifier};
@@ -41,9 +41,10 @@ where
     let tx = provider.tx_ref();
 
     reth_trie_db::with_adapter!(provider, |A| {
-        let verifier = DatabaseVerifier::<_, A>::new(|| {
-            factory.database_provider_ro().map(DBProvider::into_tx)
-        })?;
+        let verifier = DatabaseVerifier::<_, A>::new(
+            || factory.database_provider_ro().map(DBProvider::into_tx),
+            default_storage_workers(),
+        )?;
         drop(snapshot_guard);
 
         // Recompute all account leaves from the persisted hashed state. Storage roots are taken

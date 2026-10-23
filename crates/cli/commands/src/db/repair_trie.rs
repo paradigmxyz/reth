@@ -1,5 +1,5 @@
 use alloy_consensus::BlockHeader as AlloyBlockHeader;
-use clap::Parser;
+use clap::{builder::RangedU64ValueParser, Parser};
 use metrics::{self, Counter};
 use reth_chainspec::EthChainSpec;
 use reth_cli_util::parse_socket_address;
@@ -25,7 +25,10 @@ use reth_provider::{
 use reth_stages::StageId;
 use reth_storage_api::StorageSettingsCache;
 use reth_tasks::TaskExecutor;
-use reth_trie::{verify::Output, Nibbles};
+use reth_trie::{
+    verify::{default_storage_workers, Output},
+    Nibbles,
+};
 use reth_trie_db::{
     DatabaseHashedCursorFactory, DatabaseStateRoot, DatabaseTrieCursorFactory, DatabaseVerifier,
     StorageTrieEntryLike, TrieTableAdapter,
@@ -44,6 +47,10 @@ pub struct Command {
     /// Only show inconsistencies without making any repairs
     #[arg(long)]
     pub(crate) dry_run: bool,
+
+    /// Number of storage verification workers. Defaults to the number of available CPUs.
+    #[arg(long, default_value_t = default_storage_workers(), hide_default_value = true, value_parser = RangedU64ValueParser::<usize>::new().range(1..))]
+    pub(crate) storage_workers: usize,
 
     /// Enable Prometheus metrics.
     ///
@@ -95,16 +102,16 @@ impl Command {
         };
 
         if self.dry_run {
-            verify_only(tool)?
+            verify_only(tool, self.storage_workers)?
         } else {
-            verify_and_repair(tool)?
+            verify_and_repair(tool, self.storage_workers)?
         }
 
         Ok(())
     }
 }
 
-fn verify_only<N: ProviderNodeTypes>(tool: &DbTool<N>) -> eyre::Result<()> {
+fn verify_only<N: ProviderNodeTypes>(tool: &DbTool<N>, storage_workers: usize) -> eyre::Result<()> {
     // Log the database block tip from Finish stage checkpoint
     let finish_checkpoint = tool
         .provider_factory
@@ -114,11 +121,17 @@ fn verify_only<N: ProviderNodeTypes>(tool: &DbTool<N>) -> eyre::Result<()> {
     info!("Database block tip: {}", finish_checkpoint.block_number);
 
     let db = tool.provider_factory.db_ref();
-    reth_trie_db::with_adapter!(tool.provider_factory, |A| do_verify_only::<_, A>(db))
+    reth_trie_db::with_adapter!(tool.provider_factory, |A| do_verify_only::<_, A>(
+        db,
+        storage_workers
+    ))
 }
 
-fn do_verify_only<DB: Database, A: TrieTableAdapter>(db: &DB) -> eyre::Result<()> {
-    let verifier = DatabaseVerifier::<_, A>::new(|| db.tx())?;
+fn do_verify_only<DB: Database, A: TrieTableAdapter>(
+    db: &DB,
+    storage_workers: usize,
+) -> eyre::Result<()> {
+    let verifier = DatabaseVerifier::<_, A>::new(|| db.tx(), storage_workers)?;
 
     let metrics = RepairTrieMetrics::new();
 
@@ -197,7 +210,10 @@ fn verify_checkpoints(provider: impl StageCheckpointReader) -> eyre::Result<()> 
     Ok(())
 }
 
-fn verify_and_repair<N: ProviderNodeTypes>(tool: &DbTool<N>) -> eyre::Result<()> {
+fn verify_and_repair<N: ProviderNodeTypes>(
+    tool: &DbTool<N>,
+    storage_workers: usize,
+) -> eyre::Result<()> {
     // Get a read-write database provider
     let mut provider_rw = tool.provider_factory.provider_rw()?;
 
@@ -213,6 +229,7 @@ fn verify_and_repair<N: ProviderNodeTypes>(tool: &DbTool<N>) -> eyre::Result<()>
             &mut provider_rw,
             tool.provider_factory.db_ref(),
             finish_checkpoint.block_number,
+            storage_workers,
         )?
     });
 
@@ -230,6 +247,7 @@ fn do_verify_and_repair<N: ProviderNodeTypes, A: TrieTableAdapter>(
     provider_rw: &mut reth_provider::DatabaseProviderRW<N::DB, N>,
     db: &N::DB,
     block_number: u64,
+    storage_workers: usize,
 ) -> eyre::Result<usize>
 where
     <N::DB as reth_db_api::database::Database>::TXMut: DbTxMut + DbTx,
@@ -241,7 +259,7 @@ where
     let mut storage_trie_cursor = tx.cursor_dup_write::<A::StorageTrieTable>()?;
 
     // Open every read snapshot before any repairs are applied.
-    let verifier = DatabaseVerifier::<_, A>::new(|| db.tx())?;
+    let verifier = DatabaseVerifier::<_, A>::new(|| db.tx(), storage_workers)?;
 
     let metrics = RepairTrieMetrics::new();
 

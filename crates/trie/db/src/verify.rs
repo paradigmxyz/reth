@@ -14,7 +14,7 @@ use reth_execution_errors::StateRootError;
 use reth_trie::{
     hashed_cursor::HashedCursorFactory,
     trie_cursor::TrieCursorFactory,
-    verify::{default_storage_workers, Output, StorageWorker, Verifier},
+    verify::{Output, StorageWorker, Verifier},
 };
 use std::fmt;
 
@@ -42,10 +42,17 @@ where
     /// every transaction the verifier needs.
     ///
     /// Every transaction returned by `open_tx` must read the same database version. Long-lived
-    /// read transaction safety is disabled on each of them.
+    /// read transaction safety is disabled on each of them. Each storage worker owns a separate
+    /// transaction.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `storage_workers` is zero.
     pub fn new<E: From<DatabaseError>>(
         mut open_tx: impl FnMut() -> Result<TX, E>,
+        storage_workers: usize,
     ) -> Result<Self, E> {
+        assert!(storage_workers > 0, "at least one storage worker is required");
         let mut open_tx = || {
             let mut tx = open_tx()?;
             tx.disable_long_read_transaction_safety();
@@ -53,7 +60,7 @@ where
         };
         let account_tx = open_tx()?;
         let lookahead_tx = open_tx()?;
-        let storage_workers = (0..default_storage_workers())
+        let storage_workers = (0..storage_workers)
             .map(|_| {
                 let tx = open_tx()?;
                 Ok(StorageWorker {
