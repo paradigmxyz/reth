@@ -790,11 +790,10 @@ where
         ) -> CommitChanges,
     ) -> Result<Option<GasOutput>, BlockExecutionError> {
         let (tx_env, tx) = tx.into_parts();
-        let tx = Recovered::new_unchecked(tx.tx().clone(), *tx.signer());
         if let Some(output) =
             self.executor.execute_transaction_with_commit_condition((tx_env, &tx), f)?
         {
-            self.transactions.push(tx);
+            self.transactions.push(Recovered::new_unchecked(tx.tx().clone(), *tx.signer()));
             Ok(Some(output))
         } else {
             Ok(None)
@@ -807,11 +806,10 @@ where
         f: impl FnOnce(&<Self::Executor as BlockExecutor>::TransactionResultWithState),
     ) -> Result<GasOutput, BlockExecutionError> {
         let (tx_env, tx) = tx.into_parts();
-        let tx = Recovered::new_unchecked(tx.tx().clone(), *tx.signer());
         let output = self.executor.execute_transaction_without_commit((tx_env, &tx))?;
         f(&output);
         let gas_output = self.executor.commit_transaction(output)?;
-        self.transactions.push(tx);
+        self.transactions.push(Recovered::new_unchecked(tx.tx().clone(), *tx.signer()));
         Ok(gas_output)
     }
 
