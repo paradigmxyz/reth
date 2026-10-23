@@ -76,10 +76,7 @@ pub(crate) fn block_env_with_blob_params<H: BlockHeader>(
         gas_limit: U256::from(header.gas_limit()),
         basefee: U256::from(header.base_fee_per_gas().unwrap_or_default()),
         difficulty: header.difficulty(),
-        prevrandao: header
-            .mix_hash()
-            .map(|hash| U256::from_be_slice(hash.as_slice()))
-            .unwrap_or_default(),
+        prevrandao: header.mix_hash().map(|hash| U256::from_be_bytes(hash.0)).unwrap_or_default(),
         blob_basefee: blob_basefee(header.excess_blob_gas(), blob_params),
         slot_num: U256::from(header.slot_number().unwrap_or_default()),
         ext: (),
@@ -105,9 +102,9 @@ pub(crate) fn payload_block_env(
         difficulty: if spec >= SpecId::MERGE {
             U256::ZERO
         } else {
-            U256::from_be_slice(payload.as_v1().prev_randao.as_slice())
+            U256::from_be_bytes(payload.as_v1().prev_randao.0)
         },
-        prevrandao: U256::from_be_slice(payload.as_v1().prev_randao.as_slice()),
+        prevrandao: U256::from_be_bytes(payload.as_v1().prev_randao.0),
         blob_basefee: blob_basefee(payload.excess_blob_gas(), blob_params),
         slot_num: U256::from(payload.as_v4().map(|v4| v4.slot_number).unwrap_or_default()),
         ext: (),
