@@ -1186,7 +1186,7 @@ async fn receiver_executes_and_retains_source_before_accepting_commitments() {
                     backend.receipt_source(BlockNumberOrTag::Pending.into(), &cancelled),
                     Err(PayloadSourceError::MissingInput(PayloadSourceInput::Block))
                 ));
-                let alternate = received_empty.executed_block.clone();
+                let alternate = received_empty.executed_block;
                 memory.update_chain(NewCanonicalChain::Reorg {
                     old: vec![result.executed_block.clone()],
                     new: vec![alternate.clone()],
@@ -1267,7 +1267,6 @@ async fn receiver_executes_and_retains_source_before_accepting_commitments() {
                 provider.bal_store().flush(&[identity]).unwrap();
                 // A new provider, BAL-store buffer and source cache force the durable path.
                 let cold_factory = factory
-                    .clone()
                     .with_overlay_manager(OverlayManager::default())
                     .with_bal_store(BalStoreHandle::new(RocksDBBalStore::new(rocks)));
                 let cold_provider = BlockchainProvider::new(cold_factory.clone()).unwrap();
