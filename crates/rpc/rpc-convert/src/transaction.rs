@@ -8,7 +8,9 @@ use alloy_consensus::{
     TxEip1559, TxEip2930, TxEip4844, TxEip7702, TxLegacy, TxType,
 };
 use alloy_primitives::{Address, TxKind, U256};
-use alloy_rpc_types_eth::{request::TransactionInputError, TransactionInfo, TransactionRequest};
+use alloy_rpc_types_eth::{
+    request::TransactionInputError, Log, TransactionInfo, TransactionRequest,
+};
 use core::error;
 use dyn_clone::DynClone;
 use evm2::ethereum::{RecoveredTxEnvelope, TxEnvelope};
@@ -49,7 +51,7 @@ pub trait ReceiptConverter<N: NodePrimitives>: Debug + 'static {
     /// Converts an RPC log using its primitive receipt and block header.
     fn convert_log(
         &self,
-        log: alloy_rpc_types_eth::Log,
+        log: Log,
         receipt: &N::Receipt,
         header: &SealedHeaderFor<N>,
     ) -> Result<Self::RpcLog, Self::Error>;
@@ -178,7 +180,7 @@ pub trait RpcConvert: Send + Sync + Unpin + Debug + DynClone + 'static {
     /// Converts an RPC log using its primitive receipt and block header.
     fn convert_log(
         &self,
-        log: alloy_rpc_types_eth::Log,
+        log: Log,
         receipt: &<Self::Primitives as NodePrimitives>::Receipt,
         header: &SealedHeaderFor<Self::Primitives>,
     ) -> Result<RpcLog<Self::Network>, Self::Error>;
@@ -940,7 +942,7 @@ where
 
     fn convert_log(
         &self,
-        log: alloy_rpc_types_eth::Log,
+        log: Log,
         receipt: &<Self::Primitives as NodePrimitives>::Receipt,
         header: &SealedHeaderFor<Self::Primitives>,
     ) -> Result<RpcLog<Self::Network>, Self::Error> {
