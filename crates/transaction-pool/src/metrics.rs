@@ -54,6 +54,11 @@ pub struct TxPoolMetrics {
     /// How often the pool was updated after the canonical state changed
     pub performed_state_updates: Counter,
 
+    /// Number of sender identifiers currently tracked by the pool.
+    pub sender_identifiers: Gauge,
+    /// Number of unused sender identifiers that were pruned.
+    pub pruned_sender_identifiers: Counter,
+
     /// Counter for the number of pending transactions evicted
     pub pending_transactions_evicted: Counter,
     /// Counter for the number of basefee transactions evicted
