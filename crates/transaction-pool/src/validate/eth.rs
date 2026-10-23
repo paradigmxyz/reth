@@ -517,7 +517,9 @@ where
 
         // Reject transactions with a nonce equal to U64::max according to EIP-2681
         let tx_nonce = transaction.nonce();
-        if tx_nonce == u64::MAX {
+        if tx_nonce == u64::MAX &&
+            !transaction.eip8250_nonce_keys().is_some_and(|keys| !keys.is_empty())
+        {
             return Err(InvalidPoolTransactionError::Eip2681)
         }
 
@@ -588,7 +590,9 @@ where
         }
 
         // Ensure max_priority_fee_per_gas (if EIP1559) is less than max_fee_per_gas if any.
-        if transaction.max_priority_fee_per_gas() > Some(transaction.max_fee_per_gas()) {
+        if !transaction.is_eip8141() &&
+            transaction.max_priority_fee_per_gas() > Some(transaction.max_fee_per_gas())
+        {
             return Err(InvalidTransactionError::TipAboveFeeCap.into())
         }
 
@@ -733,7 +737,7 @@ where
         };
 
         if transaction.frame_validation().is_none() &&
-            transaction.eip8250_nonce_keys().is_some_and(|keys| keys != [U256::ZERO])
+            transaction.eip8250_nonce_keys().is_some_and(|keys| !keys.is_empty())
         {
             // Private frames are checked during execution; account nonces do not order keyed lanes.
             account.nonce = transaction.nonce();
@@ -1725,11 +1729,7 @@ mod tests {
             chain_id,
             sender,
             frames: vec![Frame::default()],
-            fees: TransactionFees {
-                max_priority_fee_per_gas: U256::ZERO,
-                max_fee_per_gas: U256::from(1),
-                max_fee_per_blob_gas: if blobs == 0 { U256::ZERO } else { U256::from(1) },
-            },
+            fees: TransactionFees { max_priority_fee_per_gas: U256::ZERO, max_fee: U256::from(1) },
             blob_versioned_hashes: vec![B256::repeat_byte(1); blobs],
             ..Default::default()
         };
@@ -1809,14 +1809,14 @@ mod tests {
         let validator = EthTransactionValidatorBuilder::new(provider.clone(), test_evm_config())
             .set_bogota(true)
             .build(InMemoryBlobStore::default());
-        for key in [U256::ZERO, U256::from(1)] {
+        for keys in [vec![], vec![U256::ZERO], vec![U256::from(1)]] {
             let mut frame = eip8141_tx(validator.chain_id(), sender)
                 .transaction
                 .as_eip8141()
                 .unwrap()
                 .clone()
                 .into_inner();
-            frame.nonce_keys = Some(vec![key]);
+            frame.nonce_keys = Some(keys.clone());
             let encoded_length = frame.eip2718_encoded_length();
             let transaction = EthPooledTransaction::new(
                 alloy_consensus::transaction::Recovered::new_unchecked(
@@ -1827,7 +1827,7 @@ mod tests {
             );
             let outcome =
                 validator.validate_stateful(TransactionOrigin::Private, transaction, &provider);
-            if key.is_zero() {
+            if keys.is_empty() {
                 assert!(matches!(outcome, TransactionValidationOutcome::Invalid(..)));
             } else {
                 assert!(matches!(

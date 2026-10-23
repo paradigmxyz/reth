@@ -1526,6 +1526,7 @@ pub trait PoolTransaction:
     /// For legacy transactions: `gas_price * gas_limit + tx_value`.
     /// For EIP-4844 blob transactions: `max_fee_per_gas * gas_limit + tx_value +
     /// max_blob_fee_per_gas * blob_gas_used`.
+    /// Frame transactions reserve their total `max_fee` budget, including blob fees.
     fn cost(&self) -> &U256;
 
     /// Returns the length of the rlp encoded transaction object
@@ -1639,6 +1640,7 @@ pub struct EthPooledTransaction<T = TransactionSigned> {
     /// For legacy transactions: `gas_price * gas_limit + tx_value`.
     /// For EIP-4844 blob transactions: `max_fee_per_gas * gas_limit + tx_value +
     /// max_blob_fee_per_gas * blob_gas_used`.
+    /// Frame transactions reserve their total `max_fee` budget, including blob fees.
     pub cost: U256,
 
     /// This is the RLP length of the transaction, computed when the transaction is added to the
@@ -1671,18 +1673,23 @@ impl<T: SignedTransaction> EthPooledTransaction<T> {
         let mut blob_cell_availability = None;
         let mut blob_sidecar = EthBlobTransactionSidecar::None;
 
-        let gas_cost =
-            transaction.max_fee_per_gas_u256().saturating_mul(U256::from(transaction.gas_limit()));
-
-        let mut cost = gas_cost.saturating_add(transaction.value());
+        let frame_budget = transaction.frame_transaction().map(|frame| frame.fees.max_fee);
+        let mut cost = frame_budget.unwrap_or_else(|| {
+            transaction
+                .max_fee_per_gas_u256()
+                .saturating_mul(U256::from(transaction.gas_limit()))
+                .saturating_add(transaction.value())
+        });
 
         if let (Some(blob_gas_used), Some(max_fee_per_blob_gas)) =
             (transaction.blob_gas_used(), transaction.max_fee_per_blob_gas_u256()) &&
             transaction.blob_versioned_hashes().is_some_and(|hashes| !hashes.is_empty())
         {
             // Add max blob cost using saturating math to avoid overflow
-            cost =
-                cost.saturating_add(max_fee_per_blob_gas.saturating_mul(U256::from(blob_gas_used)));
+            if frame_budget.is_none() {
+                cost = cost
+                    .saturating_add(max_fee_per_blob_gas.saturating_mul(U256::from(blob_gas_used)));
+            }
 
             // because the blob sidecar is not included in this transaction variant, mark it as
             // missing

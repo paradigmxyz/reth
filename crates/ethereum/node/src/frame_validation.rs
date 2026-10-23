@@ -206,7 +206,7 @@ where
         .unwrap_or_default();
     let mut state_nonce = sender.nonce;
     if let Some(keys) = &frame.nonce_keys &&
-        keys != &[U256::ZERO]
+        !keys.is_empty()
     {
         state_nonce = frame.nonce;
         for key in keys {
@@ -216,7 +216,11 @@ where
                 .storage(NONCE_MANAGER, slot.into())
                 .map_err(|_| policy("cannot read keyed nonce"))?
                 .unwrap_or_default();
-            if current != U256::from(frame.nonce) {
+            if if frame.nonce == u64::MAX {
+                !current.is_zero()
+            } else {
+                current != U256::from(frame.nonce)
+            } {
                 return Err(policy("keyed nonce sequence mismatch"));
             }
         }

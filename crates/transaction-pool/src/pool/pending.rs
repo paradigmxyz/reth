@@ -358,7 +358,9 @@ impl<T: TransactionOrdering> PendingPool<T> {
         {
             self.independent_transactions.remove(&id.sender);
             // mark the next as independent if it exists
-            if let Some(unlocked) = self.get(&id.descendant()) {
+            if id.nonce != u64::MAX &&
+                let Some(unlocked) = self.get(&id.descendant())
+            {
                 self.independent_transactions.insert(id.sender, unlocked.clone());
             }
         }
@@ -1070,6 +1072,19 @@ mod tests {
                 panic!("cannot read one of second_txs");
             }
         }
+    }
+
+    #[test]
+    fn exhausted_nonce_is_yielded_once_and_removed() {
+        let mut factory = MockTransactionFactory::default();
+        let mut pool = PendingPool::new(MockOrdering::default());
+        let tx = factory.validated_arc(MockTransaction::eip1559().with_nonce(u64::MAX));
+        pool.add_transaction(tx.clone(), 0);
+        let mut best = pool.best();
+        assert_eq!(best.next().unwrap().nonce(), u64::MAX);
+        assert!(best.next().is_none());
+        pool.remove_transaction(tx.id()).unwrap();
+        assert!(pool.best().next().is_none());
     }
 
     #[test]

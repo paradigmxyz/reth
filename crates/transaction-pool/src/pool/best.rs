@@ -226,7 +226,9 @@ impl<T: TransactionOrdering> BestTransactions<T> {
             }
 
             // Insert transactions that just got unlocked.
-            if let Some(unlocked) = self.all.get(&best.unlocks()) {
+            if best.transaction.nonce() != u64::MAX &&
+                let Some(unlocked) = self.all.get(&best.unlocks())
+            {
                 self.independent.insert(unlocked.clone());
             }
 

@@ -118,25 +118,32 @@ pub(crate) fn frame_replacement_underpriced<T: PoolTransaction>(
     replacement: &T,
     price_bump: u128,
 ) -> bool {
-    if !satisfies_fee_bump(
-        existing.max_fee_per_gas_u256(),
-        replacement.max_fee_per_gas_u256(),
-        price_bump,
-    ) {
+    let budget = |transaction: &T| {
+        transaction.frame_transaction().map_or_else(
+            || transaction.cost().saturating_sub(transaction.value()),
+            |frame| frame.fees.max_fee,
+        )
+    };
+    if !satisfies_fee_bump(budget(existing), budget(replacement), price_bump) {
         return true
     }
-    let existing_tip = existing.max_priority_fee_per_gas_u256().unwrap_or_default();
-    let replacement_tip = replacement.max_priority_fee_per_gas_u256().unwrap_or_default();
+    let existing_tip = existing
+        .max_priority_fee_per_gas_u256()
+        .unwrap_or_else(|| U256::from(existing.priority_fee_or_price()));
+    let replacement_tip = replacement
+        .max_priority_fee_per_gas_u256()
+        .unwrap_or_else(|| U256::from(replacement.priority_fee_or_price()));
     if !satisfies_fee_bump(existing_tip, replacement_tip, price_bump) {
         return true
     }
-    existing.max_fee_per_blob_gas_u256().is_some_and(|fee| {
-        !satisfies_fee_bump(
-            fee,
-            replacement.max_fee_per_blob_gas_u256().unwrap_or_default(),
-            price_bump,
-        )
-    })
+    existing.frame_transaction().is_none() &&
+        existing.max_fee_per_blob_gas_u256().is_some_and(|fee| {
+            !satisfies_fee_bump(
+                fee,
+                replacement.max_fee_per_blob_gas_u256().unwrap_or_default(),
+                price_bump,
+            )
+        })
 }
 
 /// Compute the rounded-up percentage without overflowing the intermediate product.
@@ -157,24 +164,22 @@ fn satisfies_fee_bump(existing: U256, replacement: U256, price_bump: u128) -> bo
 mod tests {
     use super::*;
     use crate::{EthPooledTransaction, PriceBumpConfig, ValidPoolTransaction};
-    use alloy_consensus::TxEip8141;
+    use alloy_consensus::{SignableTransaction, TxEip8141, TxLegacy};
     use alloy_eips::eip8141::TransactionFees;
-    use alloy_primitives::{Address, Sealable};
+    use alloy_primitives::{Address, Sealable, Signature};
 
     fn frame(fee: U256, tip: U256) -> EthPooledTransaction {
-        frame_with_blob_fee(fee, tip, None)
+        frame_with_blobs(fee, tip, false)
     }
 
-    fn frame_with_blob_fee(fee: U256, tip: U256, blob_fee: Option<U256>) -> EthPooledTransaction {
+    fn frame_with_blobs(fee: U256, tip: U256, blobs: bool) -> EthPooledTransaction {
         let tx = TxEip8141 {
-            fees: TransactionFees {
-                max_fee_per_gas: fee,
-                max_priority_fee_per_gas: tip,
-                max_fee_per_blob_gas: blob_fee.unwrap_or_default(),
+            fees: TransactionFees { max_fee: fee, max_priority_fee_per_gas: tip },
+            blob_versioned_hashes: if blobs {
+                vec![alloy_primitives::B256::repeat_byte(1)]
+            } else {
+                vec![]
             },
-            blob_versioned_hashes: blob_fee
-                .map(|_| vec![alloy_primitives::B256::repeat_byte(1)])
-                .unwrap_or_default(),
             ..Default::default()
         };
         EthPooledTransaction::new(
@@ -206,8 +211,11 @@ mod tests {
         use std::sync::Arc;
 
         let fee = U256::from(u128::MAX) + U256::from(1);
-        let low = Arc::new(valid(frame(fee, fee)));
-        let high = Arc::new(valid(frame(fee + U256::from(1), fee + U256::from(1))));
+        let gas = U256::from(alloy_consensus::Transaction::gas_limit(
+            &alloy_consensus::TxEip8141::default(),
+        ));
+        let low = Arc::new(valid(frame(fee * gas, fee)));
+        let high = Arc::new(valid(frame((fee + U256::from(1)) * gas, fee + U256::from(1))));
         assert!(BasefeeOrd::from(high.clone()) > BasefeeOrd::from(low.clone()));
         assert!(QueuedOrd::from(high.clone()) > QueuedOrd::from(low.clone()));
         let ordering = CoinbaseTipOrdering::default();
@@ -231,14 +239,17 @@ mod tests {
     fn frame_priority_retains_high_bits_and_subtracts_basefee() {
         let ordering = CoinbaseTipOrdering::default();
         let boundary = U256::from(u128::MAX);
-        let low = frame(boundary + U256::from(1), U256::MAX);
-        let high = frame(boundary + U256::from(2), U256::MAX);
+        let gas = U256::from(alloy_consensus::Transaction::gas_limit(
+            &alloy_consensus::TxEip8141::default(),
+        ));
+        let low = frame((boundary + U256::from(1)) * gas, U256::MAX);
+        let high = frame((boundary + U256::from(2)) * gas, U256::MAX);
         assert_eq!(alloy_consensus::Transaction::priority_fee_or_price_u256(&high), U256::MAX);
         assert!(ordering.priority(&high, 0) > ordering.priority(&low, 0));
         assert!(ordering.priority(&low, 0) > Priority::Value(u128::MAX));
         assert_eq!(ordering.priority(&low, 1), Priority::Value(u128::MAX));
         assert_eq!(ordering.priority(&low, 2), Priority::Value(u128::MAX - 1));
-        assert_eq!(ordering.priority(&frame(boundary, U256::from(7)), 1), Priority::Value(7));
+        assert_eq!(ordering.priority(&frame(boundary * gas, U256::from(7)), 1), Priority::Value(7));
         assert_eq!(ordering.priority(&frame(U256::from(1), U256::from(1)), 2), Priority::None);
     }
 
@@ -276,17 +287,77 @@ mod tests {
     fn frame_blob_replacement_uses_blob_price_bump() {
         let fee = U256::from(u128::MAX) + U256::from(1);
         let config = PriceBumpConfig { default_price_bump: 10, replace_blob_tx_price_bump: 100 };
-        let existing = valid(frame_with_blob_fee(fee, fee, Some(fee)));
+        let existing = valid(frame_with_blobs(fee, fee, true));
         let doubled = fee * U256::from(2);
         let below = doubled - U256::from(1);
-        assert!(existing
-            .is_underpriced(&valid(frame_with_blob_fee(doubled, doubled, Some(below))), &config));
-        assert!(existing
-            .is_underpriced(&valid(frame_with_blob_fee(below, doubled, Some(doubled))), &config));
-        assert!(existing
-            .is_underpriced(&valid(frame_with_blob_fee(doubled, below, Some(doubled))), &config));
-        assert!(!existing
-            .is_underpriced(&valid(frame_with_blob_fee(doubled, doubled, Some(doubled))), &config));
+        assert!(existing.is_underpriced(&valid(frame_with_blobs(below, doubled, true)), &config));
+        assert!(existing.is_underpriced(&valid(frame_with_blobs(doubled, below, true)), &config));
+        assert!(!existing.is_underpriced(&valid(frame_with_blobs(doubled, doubled, true)), &config));
+    }
+
+    #[test]
+    fn frame_cost_reserves_the_signed_budget_with_blobs() {
+        let budget = U256::from(1_000_001);
+        for blobs in [false, true] {
+            let transaction = frame_with_blobs(budget, U256::from(7), blobs);
+            assert_eq!(*transaction.cost(), budget);
+        }
+    }
+
+    #[test]
+    fn frame_replacement_compares_total_fees_with_legacy_transactions() {
+        let legacy = |price| {
+            let tx = TxLegacy {
+                gas_price: price,
+                gas_limit: 100_000,
+                value: U256::from(1_000_000),
+                ..Default::default()
+            };
+            EthPooledTransaction::new(
+                alloy_consensus::transaction::Recovered::new_unchecked(
+                    reth_ethereum_primitives::TransactionSigned::Legacy(
+                        tx.into_signed(Signature::test_signature()),
+                    ),
+                    Address::ZERO,
+                ),
+                0,
+            )
+        };
+        let frame = frame(U256::from(1_100_000), U256::from(11));
+        assert!(!frame_replacement_underpriced(&legacy(10), &frame, 10));
+        assert!(frame_replacement_underpriced(&legacy(11), &frame, 10));
+        assert!(frame_replacement_underpriced(&frame, &legacy(12), 10));
+        assert!(!frame_replacement_underpriced(&frame, &legacy(13), 10));
+    }
+
+    #[test]
+    fn frame_replacement_bumps_budget_when_gas_limits_change() {
+        use alloy_eips::eip8141::Frame;
+        let pooled = |budget, execution| {
+            let tx = TxEip8141 {
+                fees: TransactionFees {
+                    max_fee: U256::from(budget),
+                    max_priority_fee_per_gas: U256::from(budget),
+                },
+                frames: vec![Frame {
+                    limits: alloy_eips::eip8141::FrameLimits { execution, state: 0 },
+                    ..Default::default()
+                }],
+                ..Default::default()
+            };
+            EthPooledTransaction::new(
+                alloy_consensus::transaction::Recovered::new_unchecked(
+                    reth_ethereum_primitives::TransactionSigned::Eip8141(tx.seal_slow()),
+                    Address::ZERO,
+                ),
+                0,
+            )
+        };
+        let existing = pooled(1_000_000u64, 100_000);
+        let replacement = pooled(1_100_000u64, 200_000);
+        assert!(!frame_replacement_underpriced(&existing, &replacement, 10));
+        let cheaper = pooled(1_000_000u64, 1);
+        assert!(frame_replacement_underpriced(&existing, &cheaper, 10));
     }
 
     #[test]

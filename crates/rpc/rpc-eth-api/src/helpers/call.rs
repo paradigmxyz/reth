@@ -340,19 +340,10 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                 tx.sender,
                 &evm_env.cfg_env.gas_params,
             );
-            let max_cost = tx_env
-                .frame_transaction()
-                .and_then(|frame| {
-                    frame.checked_max_cost_with_params(
-                        tx_env.caller(),
-                        &evm_env.cfg_env.gas_params,
-                        tx_env.total_blob_gas(),
-                        evm_env.block_env.blob_gasprice().unwrap_or_default(),
-                    )
-                })
-                .ok_or_else(|| {
+            let max_cost =
+                tx_env.frame_transaction().map(|frame| frame.max_fee).ok_or_else(|| {
                     Self::Error::from_eth_err(EthApiError::InvalidParams(
-                        "frame transaction maximum cost overflows".into(),
+                        "missing frame transaction fee budget".into(),
                     ))
                 })?;
 
@@ -1077,14 +1068,14 @@ pub trait Call:
                 )
                 .into());
             }
-            request.as_mut().nonce_keys = Some(vec![U256::ZERO]);
+            request.as_mut().nonce_keys = Some(vec![]);
         }
         if request.as_ref().nonce().is_none() {
             let mut keyed_nonce = None;
             if let Some(keys) = request.as_ref().nonce_keys.as_ref() {
                 alloy_eips::eip8141::validate_nonce_keys(keys)
                     .map_err(|reason| EthApiError::InvalidParams(reason.into()))?;
-                if keys != &[U256::ZERO] {
+                if !keys.is_empty() {
                     for key in keys {
                         let value = db
                             .storage(

@@ -698,7 +698,7 @@ where
                 };
 
                 let sender_id = match transaction.eip8250_nonce_keys() {
-                    Some(keys) if keys != [alloy_primitives::U256::ZERO] => {
+                    Some(keys) if !keys.is_empty() => {
                         self.identifiers.write().keyed_sender_id_or_create(
                             sender,
                             alloy_eips::eip8141::nonce_keys_hash(keys),

@@ -2626,21 +2626,18 @@ mod tests {
         sender: Address,
         sender_id: SenderId,
         nonce: u64,
-        fee: u64,
+        fee_per_gas: u64,
         max_cost: u64,
     ) -> ValidPoolTransaction<EthPooledTransaction> {
-        let tx = TxEip8141 {
+        let mut tx = TxEip8141 {
             chain_id: 1,
             sender,
             nonce,
             frames: vec![Frame::default()],
-            fees: TransactionFees {
-                max_priority_fee_per_gas: U256::ZERO,
-                max_fee_per_gas: U256::from(fee),
-                max_fee_per_blob_gas: U256::ZERO,
-            },
+            fees: TransactionFees { max_priority_fee_per_gas: U256::ZERO, max_fee: U256::ZERO },
             ..Default::default()
         };
+        tx.fees.max_fee = U256::from(fee_per_gas) * U256::from(tx.gas_limit());
         let mut transaction = EthPooledTransaction::new(
             alloy_consensus::transaction::Recovered::new_unchecked(
                 TransactionSigned::Eip8141(tx.seal_slow()),

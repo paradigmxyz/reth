@@ -483,8 +483,7 @@ mod tests {
                 signatures: frame_tx.signatures.clone(),
                 signature_hash: frame_tx.signature_hash(),
                 max_priority_fee_per_gas: frame_tx.fees.max_priority_fee_per_gas,
-                max_fee_per_gas: frame_tx.fees.max_fee_per_gas,
-                max_fee_per_blob_gas: frame_tx.fees.max_fee_per_blob_gas,
+                max_fee: frame_tx.fees.max_fee,
             };
             let gas_limit = payload.gas_limit(sender).unwrap();
             let tx = TxEnv::builder()

@@ -70,9 +70,9 @@ fn sender_frame(target: Address) -> Frame {
     }
 }
 
-fn post_tx_frame(target: Address) -> Frame {
+fn assertion_frame(target: Address) -> Frame {
     Frame {
-        mode: FrameMode::PostTx,
+        mode: FrameMode::Assert,
         target: FrameAddress::from(target),
         limits: FrameLimits { execution: VERIFY_GAS, state: 0 },
         ..Default::default()
@@ -84,17 +84,17 @@ fn frame_tx(signer: &PrivateKeySigner, nonce: u64, frames: Vec<Frame>) -> Bytes 
     let mut tx = TxEip8141 {
         chain_id: 1,
         nonce,
-        nonce_keys: Some(vec![U256::ZERO]),
+        nonce_keys: Some(vec![]),
         sender: signer.address(),
         frames,
         signatures: vec![FrameSignature {
             scheme: SignatureScheme::Secp256k1,
+            signature: Bytes::from(vec![0; 65]),
             ..Default::default()
         }],
         fees: TransactionFees {
             max_priority_fee_per_gas: U256::from(MAX_PRIORITY_FEE_PER_GAS),
-            max_fee_per_gas: U256::from(MAX_FEE_PER_GAS),
-            max_fee_per_blob_gas: U256::ZERO,
+            max_fee: U256::from(MAX_FEE_PER_GAS) * U256::from(1_000_000),
         },
         ..Default::default()
     };
@@ -187,7 +187,7 @@ async fn self_verify_frame_is_admitted_and_mined() -> eyre::Result<()> {
 }
 
 #[tokio::test]
-async fn post_tx_suffix_is_admitted_and_mined() -> eyre::Result<()> {
+async fn assertion_suffix_is_admitted_and_mined() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
     let signer = Wallet::default().wallet_gen().into_iter().next().unwrap();
     let (mut nodes, _) = setup_engine::<EthereumNode>(
@@ -202,7 +202,7 @@ async fn post_tx_suffix_is_admitted_and_mined() -> eyre::Result<()> {
     let raw = frame_tx(
         &signer,
         0,
-        vec![self_verify_frame(), sender_frame(recipient()), post_tx_frame(recipient())],
+        vec![self_verify_frame(), sender_frame(recipient()), assertion_frame(recipient())],
     );
     let hash = node.rpc.inject_tx(raw).await?;
 
@@ -328,9 +328,15 @@ async fn keyed_nonce_rpc_and_pool_roundtrip() -> eyre::Result<()> {
             "0x0"
         );
         assert_eq!(
-            rpc("eth_getTransactionCount", json!([signer.address(), block, ["0x0"]])).await?,
+            rpc("eth_getTransactionCount", json!([signer.address(), block, []])).await?,
             rpc("eth_getTransactionCount", json!([signer.address(), block])).await?
         );
+        for keys in [json!(["0x0"]), json!(["0x0", "0x1"])] {
+            assert_eq!(
+                rpc("eth_getTransactionCount", json!([signer.address(), block, keys])).await?,
+                "0x0"
+            );
+        }
     }
     assert_eq!(rpc("eth_getTransactionCount", json!([signer.address()])).await?, "0x0");
     assert_eq!(
@@ -347,10 +353,8 @@ async fn keyed_nonce_rpc_and_pool_roundtrip() -> eyre::Result<()> {
         "0x0"
     );
     for keys in [
-        json!([]),
         json!(["0x1", "0x1"]),
         json!(["0x2", "0x1"]),
-        json!(["0x0", "0x1"]),
         json!((1..=17).map(|key| format!("0x{key:x}")).collect::<Vec<_>>()),
         json!([format!("0x1{}", "0".repeat(64))]),
         json!(["bad"]),
@@ -498,7 +502,7 @@ async fn keyed_nonce_query_requires_activation() -> eyre::Result<()> {
     let client = reqwest::Client::new();
     for block in ["latest", "0x0", "pending"] {
         for (keys, expected_error) in
-            [(json!(["0x1"]), Some(-32000)), (json!(["0x0"]), None), (json!([]), Some(-32602))]
+            [(json!(["0x1"]), Some(-32000)), (json!(["0x0"]), Some(-32000)), (json!([]), None)]
         {
             let response: serde_json::Value = client.post(node.rpc_url()).json(&json!({
                 "jsonrpc":"2.0", "id":1, "method":"eth_getTransactionCount", "params":[recipient(), block, keys]
