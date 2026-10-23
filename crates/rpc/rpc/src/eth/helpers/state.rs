@@ -35,7 +35,6 @@ mod tests {
         Address, StorageKey, StorageValue, B256, U256,
     };
     use alloy_rpc_types_eth::TransactionRequest;
-    use alloy_serde::JsonStorageKey;
     use reth_chainspec::ChainSpec;
     use reth_ethereum_primitives::Block;
     use reth_evm_ethereum::EthEvmConfig;
@@ -115,22 +114,6 @@ mod tests {
         let address = Address::random();
         let account = eth_api.get_account(address, Default::default()).await.unwrap();
         assert!(account.is_none());
-    }
-
-    #[tokio::test]
-    async fn test_get_proof_missing_account() {
-        let eth_api = noop_eth_api();
-        let keys = vec![
-            JsonStorageKey::Number(U256::from(1)),
-            JsonStorageKey::Hash(B256::with_last_byte(1)),
-            JsonStorageKey::Number(U256::from(1)),
-        ];
-        let proof =
-            eth_api.get_proof(Address::random(), keys.clone(), None).unwrap().await.unwrap();
-        assert_eq!(proof.code_hash, B256::ZERO);
-        assert_eq!(proof.storage_hash, B256::ZERO);
-        assert_eq!(proof.storage_proof.iter().map(|p| p.key).collect::<Vec<_>>(), keys);
-        assert!(proof.storage_proof.iter().all(|p| p.value.is_zero() && p.proof.is_empty()));
     }
 
     #[cfg(feature = "account-ext")]

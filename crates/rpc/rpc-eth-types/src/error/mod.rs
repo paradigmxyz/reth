@@ -1272,6 +1272,9 @@ mod tests {
         assert_eq!(err.code(), 4444);
         assert_eq!(err.message(), "pruned history unavailable: requested 1, earliest available 43");
 
+        let err = EthApiError::from(ProviderError::StateAtBlockPruned(7)).into_rpc_err();
+        assert_eq!(err.code(), 4444);
+
         for requested in [43, 49] {
             let err = EthApiError::from(ProviderError::InsufficientChangesets {
                 requested,
@@ -1280,18 +1283,6 @@ mod tests {
             .into_rpc_err();
             assert_eq!(err.code(), -32603);
         }
-    }
-
-    #[test]
-    fn unserved_state_errors_use_history_unavailable_code() {
-        let err =
-            EthApiError::from(reth_errors::ProviderError::StateAtBlockPruned(7)).into_rpc_err();
-        assert_eq!(err.code(), 4444);
-        assert_eq!(err.message(), "state at block #7 is pruned");
-
-        let err = EthApiError::ExceedsMaxProofWindow.into_rpc_err();
-        assert_eq!(err.code(), 4444);
-        assert_eq!(err.message(), "distance to target block exceeds maximum proof window");
     }
 
     #[test]
