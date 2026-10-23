@@ -704,7 +704,16 @@ impl BundleState {
     pub fn extend(&mut self, mut other: Self) {
         // Iterate over reverts and if its storage is wiped try to add previous bundle
         // state as there is potential missing slots.
+        let mut seen = AddressSet::default();
         for (address, revert) in other.reverts.iter_mut().flatten() {
+            // `other` was built on a fresh bundle, so its first revert for an account records the
+            // account as freshly loaded. Revert to the status this bundle accumulated instead.
+            if seen.insert(*address) &&
+                let Some(this_account) = self.state.get(address)
+            {
+                revert.previous_status = this_account.status;
+            }
+
             if revert.wipe_storage {
                 // If there is wipe storage in `other` revert
                 // we need to move storage from present state.
@@ -975,6 +984,71 @@ mod tests {
             )
             .revert_storage(0, account1(), vec![(slot1(), U256::from(10))])
             .build()
+    }
+
+    /// Per-block bundles are built on a fresh bundle, so merging them must still revert an account
+    /// to the status accumulated over the earlier blocks.
+    #[test]
+    fn extend_reverts_to_accumulated_status() {
+        let address = Address::new([0x70; 20]);
+        let info = AccountInfo { nonce: 1, balance: U256::from(10), ..Default::default() };
+        let destroy = TransitionAccount {
+            info: None,
+            status: AccountStatus::Destroyed,
+            previous_info: Some(info.clone()),
+            previous_status: AccountStatus::Loaded,
+            storage: HashMap::from_iter([(
+                slot1(),
+                StorageSlot::new_changed(U256::from(3), U256::ZERO),
+            )]),
+            storage_was_destroyed: true,
+        };
+        let recreate = TransitionAccount {
+            info: Some(info),
+            status: AccountStatus::InMemoryChange,
+            previous_info: None,
+            previous_status: AccountStatus::LoadedNotExisting,
+            storage: HashMap::from_iter([(
+                slot2(),
+                StorageSlot::new_changed(U256::ZERO, U256::from(5)),
+            )]),
+            storage_was_destroyed: false,
+        };
+        let block_bundle = |transition| {
+            let mut bundle = BundleState::default();
+            bundle.apply_transitions_and_create_reverts(
+                TransitionState::single(address, transition),
+                BundleRetention::Reverts,
+            );
+            bundle
+        };
+
+        let first = block_bundle(destroy);
+        let mut merged = first.clone();
+        merged.extend(block_bundle(recreate.clone()));
+
+        // A single bundle built over both blocks tracks the status across them.
+        let mut cumulative = first.clone();
+        cumulative.apply_transitions_and_create_reverts(
+            TransitionState::single(
+                address,
+                TransitionAccount {
+                    status: AccountStatus::DestroyedChanged,
+                    previous_status: AccountStatus::Destroyed,
+                    ..recreate
+                },
+            ),
+            BundleRetention::Reverts,
+        );
+        assert_eq!(merged.state[&address].status, AccountStatus::DestroyedChanged);
+        assert_eq!(merged.reverts, cumulative.reverts);
+
+        merged.revert(1);
+        cumulative.revert(1);
+        let account = &merged.state[&address];
+        assert_eq!(account.status, AccountStatus::Destroyed);
+        assert!(account.was_destroyed());
+        assert_eq!(merged, cumulative);
     }
 
     fn sanity_path(bundle1: BundleState, bundle2: BundleState) {
