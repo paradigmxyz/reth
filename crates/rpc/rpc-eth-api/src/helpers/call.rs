@@ -761,7 +761,7 @@ pub trait Call:
                     .map_err(Self::Error::from_eth_err)?;
                 let changes = this
                     .evm_config()
-                    .pre_block_state_changes(&mut db, evm_env.clone(), block.number(), ctx)
+                    .pre_block_state_changes(&mut db, evm_env.clone(), ctx)
                     .map_err(|err| EthApiError::EvmCustom(err.to_string()))
                     .map_err(Self::Error::from_eth_err)?;
                 db.commit_source(&reth_execution_types::BundleSource(&changes));

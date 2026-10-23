@@ -653,7 +653,6 @@ pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
         &'a self,
         db: DB,
         evm_env: EvmEnvFor<Self>,
-        _block_number: u64,
         ctx: ExecutionCtxFor<'a, Self>,
     ) -> Result<BundleState, Box<dyn Error + Send + Sync>>
     where
