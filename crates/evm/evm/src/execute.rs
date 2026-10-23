@@ -16,13 +16,13 @@ use alloy_eips::{
 use alloy_primitives::{Address, B256};
 use core::fmt::Debug;
 use evm2::{evm::StateChangeSink as EvmStateChangeSink, registry::HandlerError, DatabaseError};
-use reth_execution_types::{BlockExecutionResult, HashedPostState, StateUpdate};
+use reth_execution_types::{BlockExecutionResult, StateUpdate};
 use reth_primitives_traits::{
     Block, HeaderTy, NodePrimitives, ReceiptTy, RecoveredBlock, SealedHeader, SignedTransaction,
     TxTy,
 };
 use reth_storage_api::StateProvider;
-use reth_trie_common::{bundle_state::BundleState, updates::TrieUpdates};
+use reth_trie_common::{bundle_state::BundleState, updates::TrieUpdates, HashedPostState};
 
 #[cfg(feature = "std")]
 use evm2::evm::{CacheDB, Db};

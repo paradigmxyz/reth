@@ -11,12 +11,6 @@
 
 extern crate alloc;
 
-pub use evm2::evm::{
-    AccountChangeRef as ExecutionAccountChangeRef, AccountInfo as ExecutionAccountInfo,
-    StateChangeSink as EvmStateChangeSink, StorageChange as ExecutionStorageChange,
-};
-pub use reth_trie_common::HashedPostState;
-
 /// Receives per-transaction state changes streamed from block execution.
 pub trait OnStateHook: Send + 'static {
     /// Observes one committed state update.

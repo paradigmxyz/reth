@@ -27,7 +27,7 @@ use alloy_eip7928::bal::DecodedBal;
 use alloy_eips::eip4895::Withdrawal;
 use alloy_primitives::{keccak256, Address};
 use core::convert::Infallible;
-use evm2::evm::{Database, StateChangeSource};
+use evm2::evm::{AccountChangeRef, Database, StateChangeSink, StateChangeSource, StorageChange};
 use metrics::{Counter, Gauge, Histogram};
 use rayon::prelude::*;
 use reth_evm::{
@@ -35,7 +35,6 @@ use reth_evm::{
     Evm as EvmInstance, EvmEnv, EvmEnvFor, EvmFor, EvmTypesFor, ExecutableTxFor, RecoveredTx,
     SpecFor,
 };
-use reth_execution_types::{EvmStateChangeSink, ExecutionAccountChangeRef, ExecutionStorageChange};
 use reth_metrics::Metrics;
 use reth_primitives_traits::{FastInstant as Instant, NodePrimitives};
 use reth_provider::{
@@ -987,10 +986,10 @@ impl PrewarmProofTargetsSink {
     }
 }
 
-impl EvmStateChangeSink for PrewarmProofTargetsSink {
+impl StateChangeSink for PrewarmProofTargetsSink {
     type Error = Infallible;
 
-    fn account(&mut self, change: ExecutionAccountChangeRef<'_>) -> Result<(), Self::Error> {
+    fn account(&mut self, change: AccountChangeRef<'_>) -> Result<(), Self::Error> {
         if change.selfdestructed {
             self.selfdestructed.push(change.address);
         } else if change.original != change.current {
@@ -999,7 +998,7 @@ impl EvmStateChangeSink for PrewarmProofTargetsSink {
         Ok(())
     }
 
-    fn storage(&mut self, change: ExecutionStorageChange) -> Result<(), Self::Error> {
+    fn storage(&mut self, change: StorageChange) -> Result<(), Self::Error> {
         self.storage_targets_for_address(change.address)
             .push(ProofV2Target::new(keccak256(change.key.to_be_bytes::<32>())));
         self.storage_targets += 1;
@@ -1089,7 +1088,10 @@ mod tests {
     use alloy_consensus::{transaction::Recovered, TxLegacy};
     use alloy_eips::eip7702::constants::EIP7702_CLEARED_DELEGATION;
     use alloy_primitives::{Address, Signature, TxKind, B256, U256};
-    use evm2::{evm::EmptyDB, BaseEvmTypes};
+    use evm2::{
+        evm::{AccountInfo, EmptyDB},
+        BaseEvmTypes,
+    };
     use reth_chainspec::ChainSpec;
     use reth_ethereum_primitives::{EthPrimitives, TransactionSigned};
     use reth_evm::{execute::WithTxEnv, TxEnvFor};
@@ -1579,10 +1581,10 @@ mod tests {
     fn prewarm_targets_include_changes() {
         let address = Address::repeat_byte(1);
         let slot = U256::from(7);
-        let original = reth_execution_types::ExecutionAccountInfo::default();
-        let current = reth_execution_types::ExecutionAccountInfo { nonce: 1, ..original.clone() };
+        let original = AccountInfo::default();
+        let current = AccountInfo { nonce: 1, ..original.clone() };
         let mut sink = PrewarmProofTargetsSink::default();
-        sink.account(ExecutionAccountChangeRef {
+        sink.account(AccountChangeRef {
             address,
             original: Some(&original),
             current: Some(&current),
@@ -1590,7 +1592,7 @@ mod tests {
             selfdestructed: false,
         })
         .unwrap();
-        sink.storage(ExecutionStorageChange {
+        sink.storage(StorageChange {
             address,
             key: slot,
             original: U256::ZERO,
@@ -1616,10 +1618,10 @@ mod tests {
     fn prewarm_targets_discard_selfdestructed_storage() {
         let address = Address::repeat_byte(1);
         let retained = Address::repeat_byte(2);
-        let info = reth_execution_types::ExecutionAccountInfo::default();
+        let info = AccountInfo::default();
         for account_first in [false, true] {
             let mut sink = PrewarmProofTargetsSink::default();
-            let destroyed = ExecutionAccountChangeRef {
+            let destroyed = AccountChangeRef {
                 address,
                 original: Some(&info),
                 current: None,
@@ -1631,7 +1633,7 @@ mod tests {
             }
             sink.storage_wipe(address).unwrap();
             for address in [address, retained] {
-                sink.storage(ExecutionStorageChange {
+                sink.storage(StorageChange {
                     address,
                     key: U256::from(7),
                     original: U256::ZERO,
@@ -1643,7 +1645,7 @@ mod tests {
                 sink.account(destroyed).unwrap();
             }
             // Lifecycle flags alone do not imply an account trie update.
-            sink.account(ExecutionAccountChangeRef {
+            sink.account(AccountChangeRef {
                 address: retained,
                 original: Some(&info),
                 current: Some(&info),
