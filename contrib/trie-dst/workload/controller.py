@@ -238,7 +238,8 @@ def main():
                 raise ValueError("explicit input exceeds 32 MiB")
             input_value = json.loads(supplied) if supplied is not None else None
             if input_value is not None:
-                args["blocks"] = native("validate-input", {"input": input_value})["blocks"]
+                validation = native("validate-input", {"input": input_value})
+                args.update(blocks=validation["blocks"], expected_roots=validation["expected_roots"])
             kill_blocks = sorted(random.Random(request["seed"]).sample(
                 range(1, args["blocks"] + 1), min(crashes, args["blocks"])))
             config = {"workload": args | {"seed": request["seed"], "input": input_value},

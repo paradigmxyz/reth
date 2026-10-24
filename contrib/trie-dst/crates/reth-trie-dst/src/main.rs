@@ -63,6 +63,7 @@ struct JournalBlock {
 struct Config {
     seed: u64,
     input: Option<Input>,
+    expected_roots: Option<Vec<B256>>,
     /// An atomic mailbox for snapshot continuations, applied before the next new block.
     input_file: Option<PathBuf>,
     datadir: Option<PathBuf>,
@@ -81,6 +82,7 @@ impl Default for Config {
         Self {
             seed: 0,
             input: None,
+            expected_roots: None,
             input_file: None,
             datadir: None,
             blocks: 64,
@@ -267,6 +269,10 @@ fn run(config: &mut Config, snapshotter: &Snapshotter) -> Result<()> {
     let input_blocks =
         input.operations.split_inclusive(|op| matches!(op, Operation::Commit)).collect::<Vec<_>>();
     let mut total_blocks = input_blocks.len() as u64;
+    ensure!(
+        config.expected_roots.as_ref().is_none_or(|roots| roots.len() == input_blocks.len()),
+        "expected root count does not match input"
+    );
     let overrides_path = datadir.join("input-overrides.json");
     #[derive(Default, Serialize, Deserialize)]
     struct Overrides {
@@ -429,6 +435,7 @@ fn run(config: &mut Config, snapshotter: &Snapshotter) -> Result<()> {
                 total_blocks = head + count as u64;
                 overrides.total_blocks = total_blocks;
                 overrides.applied = injection.id;
+                config.expected_roots = None;
                 shutdown = false;
                 waiting = false;
                 let tmp = overrides_path.with_extension("tmp");
@@ -654,11 +661,17 @@ fn run(config: &mut Config, snapshotter: &Snapshotter) -> Result<()> {
         drop(hints);
         stream.finish();
         let outcome = handle.take_state_root_rx().recv_timeout(timeout)??;
+        let expected_root = config
+            .expected_roots
+            .as_ref()
+            .and_then(|roots| roots.get(number as usize - 1))
+            .copied()
+            .unwrap_or_else(|| root(&state));
         ensure!(
-            outcome.state_root == root(&state),
+            outcome.state_root == expected_root,
             "seed {} block {number}: expected {}, actual {}",
             config.seed,
-            root(&state),
+            expected_root,
             outcome.state_root
         );
         let block = RecoveredBlock::new_unhashed(
@@ -863,9 +876,28 @@ fn main() -> Result<()> {
             };
             input.validate()?;
             if command.as_deref() == Some("validate-input") {
-                let blocks =
-                    input.operations.iter().filter(|op| matches!(op, Operation::Commit)).count();
-                println!("{}", json!({"blocks": blocks}));
+                let mut state = Model::default();
+                let expected_roots = input
+                    .operations
+                    .split_inclusive(|op| matches!(op, Operation::Commit))
+                    .enumerate()
+                    .map(|(i, block)| {
+                        let updates = block
+                            .iter()
+                            .flat_map(|op| match op {
+                                Operation::UpdateBatch { updates } => updates.as_slice(),
+                                _ => &[],
+                            })
+                            .cloned()
+                            .collect::<Vec<_>>();
+                        apply(&mut state, i as u64 + 1, &updates);
+                        root(&state)
+                    })
+                    .collect::<Vec<_>>();
+                println!(
+                    "{}",
+                    json!({"blocks": expected_roots.len(), "expected_roots": expected_roots})
+                );
                 return Ok(());
             }
             let output = serde_json::to_string(&input)?;
