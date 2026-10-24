@@ -47,7 +47,7 @@ use std::{
     os::unix::fs::MetadataExt,
     path::PathBuf,
     sync::{mpsc, Arc},
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 type Node = MockNodeTypesWithDB<Arc<DatabaseEnv>>;
@@ -201,6 +201,7 @@ fn metric_counts(snapshotter: &Snapshotter) -> BTreeMap<String, u64> {
 }
 
 fn run(config: &mut Config, snapshotter: &Snapshotter) -> Result<()> {
+    let started = Instant::now();
     ensure!((1..=1024).contains(&config.blocks), "blocks must be 1..=1024");
     ensure!((1..=4096).contains(&config.updates), "updates must be 1..=4096");
     ensure!((1..=16).contains(&config.proof_workers), "proof_workers must be 1..=16");
@@ -386,6 +387,10 @@ fn run(config: &mut Config, snapshotter: &Snapshotter) -> Result<()> {
     let mut shutdown = false;
     let mut waiting = false;
     let mut seen_input_file = None;
+    let startup_s = started.elapsed().as_secs_f64();
+    let mut apply_s = 0.0;
+    let mut root_wait_s = 0.0;
+    let mut reference_root_s = 0.0;
     loop {
         let head = base + blocks.len() as u64;
         if head < 1024 &&
@@ -551,7 +556,9 @@ fn run(config: &mut Config, snapshotter: &Snapshotter) -> Result<()> {
                 ),
             }
         }
+        let phase = Instant::now();
         let (bundle, updates) = apply(&mut state, number, &updates_input);
+        apply_s += phase.elapsed().as_secs_f64();
         // Print before entering production tasks so a panic still leaves the input on disk.
         println!(
             "{}",
@@ -657,12 +664,17 @@ fn run(config: &mut Config, snapshotter: &Snapshotter) -> Result<()> {
         }
         drop(hints);
         stream.finish();
+        let phase = Instant::now();
         let outcome = handle.take_state_root_rx().recv_timeout(timeout)??;
+        root_wait_s += phase.elapsed().as_secs_f64();
+        let phase = Instant::now();
+        let expected = root(&state);
+        reference_root_s += phase.elapsed().as_secs_f64();
         ensure!(
-            outcome.state_root == root(&state),
+            outcome.state_root == expected,
             "seed {} block {number}: expected {}, actual {}",
             config.seed,
-            root(&state),
+            expected,
             outcome.state_root
         );
         let block = RecoveredBlock::new_unhashed(
@@ -717,7 +729,10 @@ fn run(config: &mut Config, snapshotter: &Snapshotter) -> Result<()> {
         json!({"completed": true, "seed": config.seed, "blocks": total_blocks,
         "commits": commits, "partial_commits": partial_commits,
         "update_batches": update_batches, "hint_batches": hint_batches,
-        "metrics": metrics})
+        "metrics": metrics,
+        "timing_s": {"startup": startup_s, "apply": apply_s,
+            "root_wait": root_wait_s, "reference_root": reference_root_s,
+            "total": started.elapsed().as_secs_f64()}})
     );
     Ok(())
 }
