@@ -282,7 +282,8 @@ async fn test_connect_to_non_multiplex_peer() {
     let mut net = Testnet::create(2).await;
     let (tx, _) = mpsc::unbounded_channel();
     net.peers_mut()[1]
-        .add_rlpx_sub_protocol(PingPongProtoHandler { state: ProtocolState { events: tx } });
+        .add_rlpx_sub_protocol(PingPongProtoHandler { state: ProtocolState { events: tx } })
+        .unwrap();
     let net = net.spawn();
     let [peer0, peer] = net.peers_array();
     let mut event_stream = peer.event_stream();
@@ -302,11 +303,13 @@ async fn test_proto_multiplex() {
 
     let (tx, mut from_peer0) = mpsc::unbounded_channel();
     net.peers_mut()[0]
-        .add_rlpx_sub_protocol(PingPongProtoHandler { state: ProtocolState { events: tx } });
+        .add_rlpx_sub_protocol(PingPongProtoHandler { state: ProtocolState { events: tx } })
+        .unwrap();
 
     let (tx, mut from_peer1) = mpsc::unbounded_channel();
     net.peers_mut()[1]
-        .add_rlpx_sub_protocol(PingPongProtoHandler { state: ProtocolState { events: tx } });
+        .add_rlpx_sub_protocol(PingPongProtoHandler { state: ProtocolState { events: tx } })
+        .unwrap();
 
     let net = net.spawn();
     // connect all the peers
