@@ -1,6 +1,6 @@
 prepare: [./prepare.sh]
 compose: compose.yaml
-planner: controller.py
+planner: reth-trie-dst
 command: podman exec reth-trie-dst /usr/local/bin/controller.py
 fuzz_args: [--max-snaps=0, --run-secs=1]
 memory_mb: 1536

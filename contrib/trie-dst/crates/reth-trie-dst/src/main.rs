@@ -44,7 +44,7 @@ use std::{
     collections::{BTreeMap, BTreeSet},
     fs::{self, OpenOptions},
     io::Write,
-    os::unix::fs::MetadataExt,
+    os::unix::{fs::MetadataExt, process::CommandExt},
     path::PathBuf,
     sync::{mpsc, Arc},
     time::{Duration, Instant},
@@ -879,6 +879,10 @@ fn main() -> Result<()> {
                 println!("{output}");
             }
             return Ok(());
+        }
+        Some(hook @ ("parse-args" | "config" | "observe" | "seed-inputs" | "suffix-seed")) => {
+            let controller = std::env::current_exe()?.with_file_name("controller.py");
+            return Err(std::process::Command::new(controller).arg(hook).args(argv).exec().into());
         }
         Some("-") => std::io::read_to_string(std::io::stdin())?,
         Some(text) => text.to_string(),

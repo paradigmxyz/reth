@@ -306,10 +306,6 @@ def main():
 
 
 if __name__ == "__main__":
-    if sys.argv[1] in ("mutation-sites", "mutate-input") and sys.argv[2:] == ["-"]:
-        binary = str(Path(__file__).with_name("reth-trie-dst"))
-        os.environ.pop("BEDROCK_COVERAGE_DIR", None)
-        os.execv(binary, [binary, sys.argv[1], "-"])
     answer = main()
     if answer is not None:
         print(json.dumps(answer))
