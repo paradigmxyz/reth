@@ -18,7 +18,11 @@ use reth_storage_api::{
 };
 use reth_trie::{updates::TrieUpdatesSorted, HashedPostStateSorted, TrieInputSorted};
 use reth_trie_db::DatabaseHashedPostState;
-use revm::{bytecode::Bytecode, database::BundleState, state::AccountInfo};
+use revm::{
+    bytecode::Bytecode,
+    database::{BundleState, CacheState},
+    state::AccountInfo,
+};
 use std::{
     collections::VecDeque,
     ops::RangeInclusive,
@@ -154,9 +158,17 @@ impl ExecutionOverlay {
     }
 
     /// Extends this overlay with a later block, copying only shared trie paths.
-    pub(crate) fn extend_block<N: NodePrimitives>(&mut self, block: &ExecutedBlock<N>) {
+    pub(crate) fn extend_block<N: NodePrimitives>(
+        &mut self,
+        block: &ExecutedBlock<N>,
+        reads: Option<&CacheState>,
+    ) {
         let num_hash = block.recovered_block().num_hash();
-        let changes = self.extend_state(&block.execution_output.state, num_hash.number);
+        let changes = if let Some(reads) = reads {
+            self.extend_reads(reads, num_hash.number)
+        } else {
+            self.extend_state(&block.execution_output.state, num_hash.number)
+        };
         self.block_hashes.push(num_hash);
         self.changes.push_back(Arc::new(changes));
     }
@@ -213,47 +225,14 @@ impl ExecutionOverlay {
                 self.extend_bytecode(info.code_hash, code, block_number);
                 changes.code_hashes.push(info.code_hash);
             }
-            let value = ExecutionOverlayValue {
+            self.extend_account(
+                address,
+                account.info.as_ref(),
+                account.was_destroyed(),
+                account.storage.iter().map(|(slot, value)| (*slot, value.present_value)),
                 block_number,
-                value: Self::normalized_account_info(account.info.clone()),
-            };
-            if let Some(entry) = self.accounts.get_mut(address) {
-                *entry = value;
-            } else {
-                self.accounts.insert_mut(*address, value);
-            }
-            changes.accounts.push(*address);
-            if account.was_destroyed() {
-                self.storage_wipes.insert_mut(*address, block_number);
-                self.storage.remove_mut(address);
-            }
-            if let Some(storage) = self.storage.get_mut(address) {
-                for (slot, value) in &account.storage {
-                    let value = ExecutionOverlayValue { block_number, value: value.present_value };
-                    if let Some(entry) = storage.get_mut(slot) {
-                        *entry = value;
-                    } else {
-                        storage.insert_mut(*slot, value);
-                    }
-                }
-            } else if !account.storage.is_empty() {
-                self.storage.insert_mut(
-                    *address,
-                    account
-                        .storage
-                        .iter()
-                        .map(|(slot, value)| {
-                            (
-                                *slot,
-                                ExecutionOverlayValue { block_number, value: value.present_value },
-                            )
-                        })
-                        .collect(),
-                );
-            }
-            if !account.storage.is_empty() || account.was_destroyed() {
-                changes.storage.push((*address, account.storage.keys().copied().collect()));
-            }
+                &mut changes,
+            );
         }
         for (hash, code) in &state.contracts {
             self.extend_bytecode(*hash, code, block_number);
@@ -268,6 +247,88 @@ impl ExecutionOverlay {
             info.account_id = None;
         }
         info
+    }
+
+    fn extend_reads(
+        &mut self,
+        reads: &CacheState,
+        block_number: BlockNumber,
+    ) -> ExecutionOverlayChanges {
+        let mut changes = ExecutionOverlayChanges {
+            accounts: Vec::with_capacity(reads.accounts.len()),
+            storage: Vec::with_capacity(reads.accounts.len()),
+            code_hashes: Vec::with_capacity(reads.contracts.len()),
+        };
+        for (address, account) in &reads.accounts {
+            self.extend_account(
+                address,
+                account.account.as_ref().map(|account| &account.info),
+                account.status.is_storage_known(),
+                account
+                    .account
+                    .as_ref()
+                    .into_iter()
+                    .flat_map(|account| &account.storage)
+                    .map(|(slot, value)| (*slot, *value)),
+                block_number,
+                &mut changes,
+            );
+        }
+        for (hash, code) in &reads.contracts {
+            self.extend_bytecode(*hash, code, block_number);
+            changes.code_hashes.push(*hash);
+        }
+        changes
+    }
+
+    fn extend_account(
+        &mut self,
+        address: &Address,
+        info: Option<&AccountInfo>,
+        storage_known: bool,
+        storage: impl Iterator<Item = (U256, U256)>,
+        block_number: BlockNumber,
+        changes: &mut ExecutionOverlayChanges,
+    ) {
+        let value = ExecutionOverlayValue {
+            block_number,
+            value: Self::normalized_account_info(info.cloned()),
+        };
+        if let Some(entry) = self.accounts.get_mut(address) {
+            *entry = value;
+        } else {
+            self.accounts.insert_mut(*address, value);
+        }
+        changes.accounts.push(*address);
+        if storage_known {
+            self.storage_wipes.insert_mut(*address, block_number);
+            self.storage.remove_mut(address);
+        }
+        let mut storage = storage.peekable();
+        let mut keys = Vec::with_capacity(storage.size_hint().0);
+        if storage.peek().is_some() {
+            let storage = storage.map(|(slot, value)| {
+                keys.push(slot);
+                (slot, ExecutionOverlayValue { block_number, value })
+            });
+            if let Some(slots) = self.storage.get_mut(address) {
+                for (slot, value) in storage {
+                    if let Some(entry) = slots.get_mut(&slot) {
+                        *entry = value;
+                    } else {
+                        slots.insert_mut(slot, value);
+                    }
+                }
+            } else {
+                let slots = storage.collect::<HashTrieMapSync<_, _, FbBuildHasher<32>>>();
+                if !slots.is_empty() {
+                    self.storage.insert_mut(*address, slots);
+                }
+            }
+        }
+        if !keys.is_empty() || storage_known {
+            changes.storage.push((*address, keys));
+        }
     }
 
     fn extend_bytecode(&mut self, hash: B256, code: &Bytecode, block_number: BlockNumber) {

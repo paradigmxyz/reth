@@ -1120,6 +1120,11 @@ where
             revm: Arc::new(revm_bal),
         });
         let output = BlockExecutionOutput { result, state: db.take_bundle() };
+        if self.config.disable_state_cache() {
+            // Preserve read-only observations in the overlay as well as committed writes.
+            self.overlay_manager
+                .record_execution_reads(input.hash(), std::mem::take(&mut db.cache));
+        }
 
         let execution_duration = execution_start.elapsed();
         self.metrics.record_block_execution(&output, execution_duration);

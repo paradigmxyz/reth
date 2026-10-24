@@ -35,6 +35,8 @@ use std::{
 };
 use tracing::{debug, trace};
 
+pub use revm::database::CacheState;
+
 /// Manages state trie and execution overlays for in-memory blocks.
 ///
 /// The manager owns the in-memory block graph, changeset cache, and caches keyed by
@@ -46,6 +48,7 @@ pub struct OverlayManager<N: NodePrimitives = EthPrimitives> {
     execution_overlays: OverlayCache<ExecutionOverlay>,
     changeset_cache: ChangesetCache,
     preserved_sparse_trie: Arc<Mutex<Option<PreservedSparseTrie>>>,
+    execution_reads: Arc<Mutex<Option<ExecutionReads>>>,
     #[cfg(feature = "rayon")]
     worker_pool: Option<Arc<WorkerPool>>,
     metrics: StateTrieOverlayMetrics,
@@ -60,6 +63,7 @@ impl<N: NodePrimitives> Default for OverlayManager<N> {
             execution_overlays: Default::default(),
             changeset_cache: Default::default(),
             preserved_sparse_trie: Default::default(),
+            execution_reads: Default::default(),
             #[cfg(feature = "rayon")]
             worker_pool: None,
             metrics: Default::default(),
@@ -88,6 +92,7 @@ impl<N: NodePrimitives> OverlayManager<N> {
             execution_overlays: Default::default(),
             changeset_cache: Default::default(),
             preserved_sparse_trie: Default::default(),
+            execution_reads: Default::default(),
             worker_pool: Some(worker_pool),
             metrics: Default::default(),
             execution_metrics: Default::default(),
@@ -224,6 +229,14 @@ impl<N: NodePrimitives> OverlayManager<N> {
         elapsed
     }
 
+    /// Retains the executor's post-state reads for the next inserted block's overlay.
+    ///
+    /// Only one pending block is retained. A hash mismatch or a missing cached parent discards
+    /// these optional observations and builds the overlay from the block's writes instead.
+    pub fn record_execution_reads(&self, hash: B256, state: CacheState) {
+        *self.execution_reads.lock() = Some(ExecutionReads { hash, state });
+    }
+
     /// Inserts an executed in-memory block into the state trie overlay manager.
     #[tracing::instrument(
         level = "trace",
@@ -274,6 +287,7 @@ impl<N: NodePrimitives> OverlayManager<N> {
                 .then_some(*entry.key())
             })
             .collect::<Vec<_>>();
+        let reads = self.execution_reads.lock().take().filter(|reads| reads.hash == hash);
         let mut extended = false;
         for key in keys {
             if let Some(parent_input) = self.execution_overlays.take_ready(&key) {
@@ -286,6 +300,7 @@ impl<N: NodePrimitives> OverlayManager<N> {
                     ComputeOverlayInput::ExtendCached { block, parent_input },
                     key.anchor_hash,
                     &self.execution_metrics,
+                    reads.as_ref().map(|reads| &reads.state),
                 );
                 self.execution_metrics.overlay_cache_fills.increment(1);
                 self.execution_overlays
@@ -578,7 +593,9 @@ impl<N: NodePrimitives> OverlayManager<N> {
             anchor_hash,
             parent_state,
             cache_config,
-            |input, _| compute_execution_overlay_inner(input, anchor_hash, &self.execution_metrics),
+            |input, _| {
+                compute_execution_overlay_inner(input, anchor_hash, &self.execution_metrics, None)
+            },
         )
     }
 
@@ -896,6 +913,11 @@ impl<T> Clone for OverlayCacheEntry<T> {
     }
 }
 
+struct ExecutionReads {
+    hash: B256,
+    state: CacheState,
+}
+
 struct OverlayWaiter<T> {
     input: OnceLock<Arc<T>>,
 }
@@ -1048,6 +1070,7 @@ fn compute_execution_overlay_inner<N: NodePrimitives>(
     input: ComputeOverlayInput<N, ExecutionOverlay>,
     anchor_hash: B256,
     metrics: &ExecutionOverlayMetrics,
+    reads: Option<&CacheState>,
 ) -> ExecutionOverlay {
     let started_at = Instant::now();
     let block_count = match &input {
@@ -1061,13 +1084,13 @@ fn compute_execution_overlay_inner<N: NodePrimitives>(
     let overlay = match input {
         ComputeOverlayInput::ExtendCached { block, parent_input } => {
             let mut parent_input = parent_input;
-            Arc::make_mut(&mut parent_input).extend_block(&block);
+            Arc::make_mut(&mut parent_input).extend_block(&block, reads);
             Arc::try_unwrap(parent_input).expect("Arc::make_mut leaves the child overlay unique")
         }
         ComputeOverlayInput::MergeBlocks(blocks) => {
             let mut overlay = ExecutionOverlay::default();
             for block in blocks.iter().rev() {
-                overlay.extend_block(block);
+                overlay.extend_block(block, None);
             }
             overlay
         }
