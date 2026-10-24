@@ -1,14 +1,10 @@
 //! Reference state and generated execution outcomes, independent of trie-task output.
 
-use alloy_primitives::{
-    keccak256,
-    map::{HashMap, U256Map},
-    Address, B256, KECCAK256_EMPTY, U256,
-};
+use alloy_primitives::{keccak256, map::U256Map, Address, B256, KECCAK256_EMPTY, U256};
 use alloy_trie::{HashBuilder, Nibbles, TrieAccount};
 use rand::{rngs::StdRng, Rng};
 use reth_primitives_traits::Account;
-use reth_trie::{HashedPostState, HashedStorage};
+use reth_trie::HashedPostState;
 use revm::{database::BundleState, state::AccountInfo};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
@@ -30,8 +26,7 @@ pub enum Update {
 }
 
 impl Update {
-    fn apply(&self, state: &mut Model) -> (Address, HashedPostState) {
-        let mut delta = HashedPostState::default();
+    fn apply(&self, state: &mut Model, delta: &mut HashedPostState) -> Address {
         let address = match self {
             Self::Account { address, account } => {
                 state.entry(*address).or_default().account = account.to_owned();
@@ -49,14 +44,16 @@ impl Update {
                     entry.storage.insert(*slot, *value);
                     entry.hashed_storage.insert(hashed_slot, alloy_rlp::encode(value));
                 }
-                delta.storages.insert(
-                    keccak256(address),
-                    HashedStorage { storage: HashMap::from_iter([(hashed_slot, *value)]) },
-                );
+                delta
+                    .storages
+                    .entry(keccak256(address))
+                    .or_default()
+                    .storage
+                    .insert(hashed_slot, *value);
                 *address
             }
         };
-        (address, delta)
+        address
     }
 }
 
@@ -103,7 +100,7 @@ pub fn generate(rng: &mut StdRng, state: &Model, updates: usize) -> Vec<Update> 
             if !state.contains_key(&address) {
                 addresses.push(address);
             }
-            operation.apply(&mut state);
+            operation.apply(&mut state, &mut HashedPostState::default());
             operation
         })
         .collect()
@@ -113,18 +110,24 @@ pub fn apply(
     state: &mut Model,
     number: u64,
     operations: &[Update],
+    batch_sizes: impl IntoIterator<Item = usize>,
 ) -> (BundleState, Vec<HashedPostState>) {
     let before = state.clone();
     let mut touched = BTreeMap::<Address, BTreeSet<U256>>::new();
     let mut stream = Vec::new();
-    for operation in operations {
-        let (address, delta) = operation.apply(state);
-        let slots = touched.entry(address).or_default();
-        if let Update::Storage { slot, .. } = operation {
-            slots.insert(*slot);
+    let mut updates = operations.iter();
+    for size in batch_sizes {
+        let mut batch = HashedPostState::default();
+        for operation in updates.by_ref().take(size) {
+            let address = operation.apply(state, &mut batch);
+            let slots = touched.entry(address).or_default();
+            if let Update::Storage { slot, .. } = operation {
+                slots.insert(*slot);
+            }
         }
-        stream.push(delta);
+        stream.push(batch);
     }
+    debug_assert!(updates.next().is_none());
 
     let mut bundle = BundleState::builder(number..=number);
     for (address, slots) in touched {
@@ -208,6 +211,7 @@ mod tests {
                 address,
                 account: Account { bytecode_hash: Some(old_hash), ..Default::default() },
             }],
+            [1],
         );
         let (bundle, _) = apply(
             &mut state,
@@ -216,6 +220,7 @@ mod tests {
                 address,
                 account: Account { bytecode_hash: Some(new_hash), ..Default::default() },
             }],
+            [1],
         );
         let account = &bundle.state[&address];
         assert_eq!(account.original_info.as_ref().unwrap().code_hash, old_hash);
