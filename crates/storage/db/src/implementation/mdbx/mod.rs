@@ -117,9 +117,9 @@ pub struct DatabaseArguments {
     ///   This mode still maintains database integrity but may lose the most recent transactions if
     ///   the system crashes unexpectedly.
     ///
-    /// Choose `Durable` if consistency and crash safety are critical (e.g., production
-    /// environments). Choose `SafeNoSync` if performance is more important and occasional data
-    /// loss is acceptable (e.g., testing or ephemeral data).
+    /// Defaults to `SafeNoSync`: a crash can only roll the database back to an earlier
+    /// consistent commit, and the node syncs the lost blocks again on restart. Choose `Durable`
+    /// to flush every commit to disk.
     sync_mode: SyncMode,
 }
 
@@ -144,7 +144,7 @@ impl DatabaseArguments {
             max_read_transaction_duration: None,
             exclusive: None,
             max_readers: None,
-            sync_mode: SyncMode::Durable,
+            sync_mode: SyncMode::SafeNoSync,
         }
     }
 
