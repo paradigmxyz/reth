@@ -3,7 +3,7 @@ compose: compose.yaml
 planner: controller.py
 command: podman exec reth-trie-dst /usr/local/bin/controller.py
 fuzz_args: [--max-snaps=0]
-memory_mb: 1536
+memory_mb: 1024
 workload_args:
   blocks: 64
   updates: 64
