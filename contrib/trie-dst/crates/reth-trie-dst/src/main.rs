@@ -719,12 +719,29 @@ fn run(config: &mut Config, snapshotter: &Snapshotter) -> Result<()> {
         runtime.spawn_blocking_named(name, || {}).get();
     }
     let metrics = metric_counts(snapshotter);
+    let metric_sums = snapshotter
+        .snapshot()
+        .into_vec()
+        .into_iter()
+        .filter_map(|(key, _, _, value)| {
+            let name = key.key().name().to_string();
+            if !name.contains("tree.root") {
+                return None;
+            }
+            match value {
+                DebugValue::Histogram(values) => {
+                    Some((name, values.into_iter().map(|v| v.into_inner()).sum::<f64>()))
+                }
+                _ => None,
+            }
+        })
+        .collect::<BTreeMap<_, _>>();
     println!(
         "{}",
         json!({"completed": true, "seed": config.seed, "blocks": total_blocks,
         "commits": commits, "partial_commits": partial_commits,
         "update_batches": update_batches, "hint_batches": hint_batches,
-        "metrics": metrics})
+        "metrics": metrics, "metric_sums": metric_sums})
     );
     Ok(())
 }
