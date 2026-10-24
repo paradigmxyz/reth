@@ -762,8 +762,8 @@ fn main() -> Result<()> {
         Some("mutation-sites") => {
             let mut request = Vec::new();
             std::io::stdin().read_to_end(&mut request)?;
-            let value: serde_json::Value = serde_json::from_slice(&request)?;
-            let input: Input = match value["input"].clone() {
+            let mut value: serde_json::Value = serde_json::from_slice(&request)?;
+            let input: Input = match std::mem::take(&mut value["input"]) {
                 serde_json::Value::String(text) => serde_json::from_str(&text)?,
                 input => serde_json::from_value(input)?,
             };
@@ -795,7 +795,7 @@ fn main() -> Result<()> {
         Some("generate-input" | "generate-suffix" | "mutate-input" | "validate-input") => {
             let mut request = Vec::new();
             std::io::stdin().read_to_end(&mut request)?;
-            let value: serde_json::Value = serde_json::from_slice(&request)?;
+            let mut value: serde_json::Value = serde_json::from_slice(&request)?;
             let contract = value["input"].is_string();
             let input = match command.as_deref() {
                 Some("generate-input" | "generate-suffix") => {
@@ -841,7 +841,7 @@ fn main() -> Result<()> {
                     input
                 }
                 _ => {
-                    let mut input: Input = match value["input"].clone() {
+                    let mut input: Input = match std::mem::take(&mut value["input"]) {
                         serde_json::Value::String(text) => serde_json::from_str(&text)?,
                         input => serde_json::from_value(input)?,
                     };
@@ -849,9 +849,9 @@ fn main() -> Result<()> {
                         let seed = value["seed"]
                             .as_u64()
                             .ok_or_else(|| eyre::eyre!("missing mutation seed"))?;
-                        if let Some(operator) = value["operator"].as_str() {
+                        if let Some(operator) = value["operator"].as_str().map(str::to_owned) {
                             let path: Vec<String> = serde_json::from_value(value["path"].clone())?;
-                            let donor: Option<Input> = match value["donor"].clone() {
+                            let donor: Option<Input> = match std::mem::take(&mut value["donor"]) {
                                 serde_json::Value::String(text) => {
                                     Some(serde_json::from_str(&text)?)
                                 }
@@ -860,7 +860,7 @@ fn main() -> Result<()> {
                             let donor_path: Vec<String> =
                                 serde_json::from_value(value["donor_path"].clone())?;
                             input.mutate_at(
-                                operator,
+                                &operator,
                                 &path,
                                 seed,
                                 donor.as_ref().map(|donor| (donor, donor_path.as_slice())),
