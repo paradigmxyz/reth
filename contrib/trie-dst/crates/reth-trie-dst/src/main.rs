@@ -43,7 +43,7 @@ use serde_json::json;
 use std::{
     collections::{BTreeMap, BTreeSet},
     fs::{self, OpenOptions},
-    io::Write,
+    io::{Read, Write},
     os::unix::{fs::MetadataExt, process::CommandExt},
     path::PathBuf,
     sync::{mpsc, Arc},
@@ -760,7 +760,9 @@ fn main() -> Result<()> {
             return Ok(());
         }
         Some("mutation-sites") => {
-            let value: serde_json::Value = serde_json::from_reader(std::io::stdin())?;
+            let mut request = Vec::new();
+            std::io::stdin().read_to_end(&mut request)?;
+            let value: serde_json::Value = serde_json::from_slice(&request)?;
             let input: Input = match value["input"].clone() {
                 serde_json::Value::String(text) => serde_json::from_str(&text)?,
                 input => serde_json::from_value(input)?,
@@ -772,7 +774,9 @@ fn main() -> Result<()> {
             return Ok(());
         }
         Some("generate-input" | "generate-suffix" | "mutate-input" | "validate-input") => {
-            let value: serde_json::Value = serde_json::from_reader(std::io::stdin())?;
+            let mut request = Vec::new();
+            std::io::stdin().read_to_end(&mut request)?;
+            let value: serde_json::Value = serde_json::from_slice(&request)?;
             let contract = value["input"].is_string();
             let input = match command.as_deref() {
                 Some("generate-input" | "generate-suffix") => {
