@@ -11,7 +11,7 @@ use reth_provider::{
     DBProvider, DatabaseProviderFactory, PruneCheckpointReader, PruneCheckpointWriter,
     StageCheckpointReader,
 };
-use reth_prune_types::{PruneProgress, PrunedSegmentInfo, PrunerOutput};
+use reth_prune_types::{PruneMode, PruneProgress, PrunedSegmentInfo, PrunerOutput};
 use reth_stages_types::StageId;
 use reth_tokio_util::{EventSender, EventStream};
 use std::time::Duration;
@@ -203,6 +203,7 @@ where
                 break
             }
 
+            // Segments without a mode (receipts by logs) derive their own target from the tip.
             if let Some((to_block, prune_mode)) = segment
                 .mode()
                 .map(|mode| {
@@ -214,7 +215,7 @@ where
                     )
                 })
                 .transpose()?
-                .flatten()
+                .unwrap_or(Some((tip_block_number, PruneMode::Full)))
             {
                 // Check if segment has a required stage that must be finished first
                 if let Some(required_stage) = segment.required_stage() &&

@@ -233,14 +233,20 @@ where
 
 #[cfg(test)]
 mod tests {
-    use crate::segments::{user::ReceiptsByLogs, PruneInput, PruneLimiter, Segment};
+    use crate::{
+        segments::{user::ReceiptsByLogs, PruneInput, PruneLimiter, Segment},
+        PrunerBuilder,
+    };
     use alloy_primitives::B256;
     use assert_matches::assert_matches;
     use reth_db_api::{cursor::DbCursorRO, tables, transaction::DbTx};
     use reth_primitives_traits::InMemorySize;
-    use reth_provider::{BlockReader, DBProvider, DatabaseProviderFactory, PruneCheckpointReader};
+    use reth_provider::{
+        BlockReader, DBProvider, DatabaseProviderFactory, PruneCheckpointReader,
+        StaticFileProviderFactory,
+    };
     use reth_prune_types::{
-        PruneCheckpoint, PruneMode, PruneSegment, ReceiptsLogPruneConfig,
+        PruneCheckpoint, PruneMode, PruneModes, PruneSegment, ReceiptsLogPruneConfig,
         MINIMUM_UNWIND_SAFE_DISTANCE,
     };
     use reth_stages::test_utils::{StorageKind, TestStageDB};
@@ -311,6 +317,51 @@ mod tests {
                 assert_eq!(db.table::<tables::Receipts>().unwrap(), expected);
             }
         }
+    }
+
+    #[test]
+    fn pruner_runs_receipts_by_logs() {
+        let db = TestStageDB::default();
+        let mut rng = generators::rng();
+        let blocks = [
+            random_block_range(
+                &mut rng,
+                0..=1,
+                BlockRangeParams { tx_count: 0..1, ..Default::default() },
+            ),
+            random_block_range(
+                &mut rng,
+                2..=2,
+                BlockRangeParams { tx_count: 2..3, ..Default::default() },
+            ),
+        ]
+        .concat();
+        db.insert_blocks(blocks.iter(), StorageKind::Database(None)).unwrap();
+        let receipts = blocks[2]
+            .body()
+            .transactions
+            .iter()
+            .enumerate()
+            .map(|(id, tx)| (id as u64, random_receipt(&mut rng, tx, Some(0), None)))
+            .collect::<Vec<_>>();
+        db.insert_receipts(receipts).unwrap();
+
+        let (address, _) = random_eoa_account(&mut rng);
+        let provider = db.factory.database_provider_rw().unwrap();
+        let mut pruner = PrunerBuilder::default()
+            .segments(PruneModes {
+                receipts_log_filter: ReceiptsLogPruneConfig(BTreeMap::from([(
+                    address,
+                    PruneMode::Before(2),
+                )])),
+                ..Default::default()
+            })
+            .build(provider.static_file_provider());
+        let output = pruner.run_with_provider(&provider, MINIMUM_UNWIND_SAFE_DISTANCE + 2).unwrap();
+        assert!(output.progress.is_finished());
+        provider.commit().unwrap();
+
+        assert!(db.table::<tables::Receipts>().unwrap().is_empty());
     }
 
     #[test]
