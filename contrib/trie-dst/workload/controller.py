@@ -300,9 +300,12 @@ def main():
             assertion(False, "workload incomplete; " + (log.read_text()[-12000:] if log.exists() else "never started"))
         out = Path("/bedrock/out")
         out.mkdir(parents=True, exist_ok=True)
-        for name in ["run.log", "controller.log", "done.json", "data/blocks.jsonl", "data/input-overrides.json", "pending-input.json", "config.json"]:
-            if (STATE / name).exists():
-                shutil.copyfile(STATE / name, out / ("reth-trie-dst-" + Path(name).name))
+        complete = (STATE / "done.json").exists() and json.loads((STATE / "done.json").read_text()).get("ok")
+        fuzz = (STATE / "config.json").exists() and json.loads((STATE / "config.json").read_text()).get("run_secs") == 1
+        if not (fuzz and complete):
+            for name in ["run.log", "controller.log", "done.json", "data/blocks.jsonl", "data/input-overrides.json", "pending-input.json", "config.json"]:
+                if (STATE / name).exists():
+                    shutil.copyfile(STATE / name, out / ("reth-trie-dst-" + Path(name).name))
         collect(out / "assertions.jsonl")
     elif hook == "observe":
         return {"decisions": request["decisions"], "decision_diff": (["recorded decisions differ"] if request.get("original") is not None
