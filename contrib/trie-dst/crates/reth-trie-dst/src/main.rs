@@ -607,20 +607,6 @@ fn run(config: &mut Config, snapshotter: &Snapshotter) -> Result<()> {
         );
         let stream = handle.take_hashed_update_stream();
         let hints = handle.take_hint_stream();
-        let written = updates
-            .iter()
-            .flat_map(|update| {
-                update
-                    .accounts
-                    .keys()
-                    .chain(update.storages.keys())
-                    .map(|address| (*address, None))
-                    .chain(update.storages.iter().flat_map(|(address, storage)| {
-                        storage.storage.keys().map(move |slot| (*address, Some(*slot)))
-                    }))
-            })
-            .collect::<BTreeSet<_>>();
-        let mut hinted = BTreeSet::new();
         let mut updates = updates.into_iter();
         for operation in &operations {
             match operation {
@@ -629,13 +615,11 @@ fn run(config: &mut Config, snapshotter: &Snapshotter) -> Result<()> {
                     for address in accounts {
                         let address = keccak256(address);
                         hint.accounts.push(address);
-                        hinted.insert((address, None));
                     }
                     for storage in storages {
                         let address = keccak256(storage.address);
                         let slot = keccak256(B256::from(storage.slot));
                         hint.storages.entry(address).or_default().push(slot);
-                        hinted.insert((address, Some(slot)));
                     }
                     hints.on_access_hint(hint);
                     hint_batches += 1;
@@ -651,13 +635,6 @@ fn run(config: &mut Config, snapshotter: &Snapshotter) -> Result<()> {
                 Operation::Commit => {}
             }
         }
-        println!(
-            "{}",
-            json!({"block_number": number, "hint_coverage": {
-            "written": written.len(), "overlap": written.intersection(&hinted).count(),
-            "unhinted": written.difference(&hinted).count(),
-            "read_only": hinted.difference(&written).count()}})
-        );
         drop(hints);
         stream.finish();
         let outcome = handle.take_state_root_rx().recv_timeout(timeout)??;
