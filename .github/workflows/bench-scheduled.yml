@@ -375,6 +375,7 @@ jobs:
           version: "0.13.4"
 
       - name: Install dependencies
+        id: install-deps
         env:
           DEREK_TOKEN: ${{ secrets.DEREK_TOKEN }}
         run: |
@@ -419,6 +420,7 @@ jobs:
           fi
 
       - name: Check dependencies
+        id: check-deps
         run: |
           export PATH="$HOME/.local/bin:$HOME/.cargo/bin:$PATH"
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
@@ -1003,6 +1005,8 @@ jobs:
             if (!token || !channel) return;
 
             const steps_status = [
+              ['installing dependencies', '${{ steps.install-deps.outcome }}'],
+              ['checking dependencies', '${{ steps.check-deps.outcome }}'],
               ['building binaries', '${{ steps.build.outcome }}'],
               ['syncing snapshot', '${{ steps.snapshot-check.outcome }}'],
               ['running baseline benchmark (1/2)', '${{ steps.run-baseline-1.outcome }}'],
