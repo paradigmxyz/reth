@@ -167,7 +167,7 @@ def worker(config):
                             killed += 1
                             planned = True
                             output.write((json.dumps({"nemesis": "kill", "target": target,
-                                                      "block": event["block"], "kills": killed}) + "\n").encode())
+                                                      "block": position, "kills": killed}) + "\n").encode())
                             output.flush()
                 code = process.wait(timeout=max(0.001, deadline - time.monotonic()))
                 process.stdout.close()
