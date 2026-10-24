@@ -47,7 +47,7 @@ use std::{
     os::unix::{fs::MetadataExt, process::CommandExt},
     path::PathBuf,
     sync::{mpsc, Arc},
-    time::{Duration, Instant},
+    time::Duration,
 };
 
 type Node = MockNodeTypesWithDB<Arc<DatabaseEnv>>;
@@ -215,11 +215,6 @@ fn metric_counts(snapshotter: &Snapshotter) -> BTreeMap<String, u64> {
 }
 
 fn run(config: &mut Config, snapshotter: &Snapshotter) -> Result<()> {
-    let run_started = Instant::now();
-    let mut apply_time = Duration::ZERO;
-    let mut trie_time = Duration::ZERO;
-    let mut clone_time = Duration::ZERO;
-    let mut verify_time = Duration::ZERO;
     ensure!((1..=1024).contains(&config.blocks), "blocks must be 1..=1024");
     ensure!((1..=4096).contains(&config.updates), "updates must be 1..=4096");
     ensure!((1..=16).contains(&config.proof_workers), "proof_workers must be 1..=16");
@@ -474,9 +469,7 @@ fn run(config: &mut Config, snapshotter: &Snapshotter) -> Result<()> {
                 manager.evict_cached_changesets(
                     db_tip.saturating_sub(CHANGESET_CACHE_RETENTION_BLOCKS),
                 );
-                let started = Instant::now();
                 verify(&factory, &snapshots[(db_tip - base) as usize], db_tip, state_tip)?;
-                verify_time += started.elapsed();
                 manager.remove_blocks(
                     blocks
                         .iter()
@@ -581,9 +574,7 @@ fn run(config: &mut Config, snapshotter: &Snapshotter) -> Result<()> {
                 ),
             }
         }
-        let started = Instant::now();
         let (bundle, updates) = apply(&mut state, number, &updates_input);
-        apply_time += started.elapsed();
         // The full operations are in the journal before production tasks run.
         println!(
             "{}",
@@ -602,7 +593,6 @@ fn run(config: &mut Config, snapshotter: &Snapshotter) -> Result<()> {
                 .cloned()
                 .collect()
         });
-        let started = Instant::now();
         let (mut handle, pending) = strategy.spawn_state_root(
             &runtime,
             factory_view,
@@ -671,7 +661,6 @@ fn run(config: &mut Config, snapshotter: &Snapshotter) -> Result<()> {
         drop(hints);
         stream.finish();
         let outcome = handle.take_state_root_rx().recv_timeout(timeout)??;
-        trie_time += started.elapsed();
         let expected_root = config
             .expected_roots
             .as_ref()
@@ -718,9 +707,7 @@ fn run(config: &mut Config, snapshotter: &Snapshotter) -> Result<()> {
         manager.insert_block(executed.clone());
         publish_sparse_trie(&pending, manager, parent.hash(), outcome.state_root);
         blocks.push(executed);
-        let started = Instant::now();
         snapshots.push(state.clone());
-        clone_time += started.elapsed();
     }
     drop(request_tx);
     writer.join().map_err(|_| eyre::eyre!("persistence worker panicked"))?;
@@ -739,10 +726,7 @@ fn run(config: &mut Config, snapshotter: &Snapshotter) -> Result<()> {
         json!({"completed": true, "seed": config.seed, "blocks": total_blocks,
         "commits": commits, "partial_commits": partial_commits,
         "update_batches": update_batches, "hint_batches": hint_batches,
-        "metrics": metrics,
-        "perf_us": {"total": run_started.elapsed().as_micros(),
-                    "apply": apply_time.as_micros(), "trie": trie_time.as_micros(),
-                    "clone": clone_time.as_micros(), "verify": verify_time.as_micros()}})
+        "metrics": metrics})
     );
     Ok(())
 }
