@@ -18,7 +18,6 @@ reth-execution-types.workspace = true
 reth-primitives-traits.workspace = true
 reth-provider.workspace = true
 reth-rpc-api = { workspace = true, features = ["client"] }
-reth-tracing.workspace = true
 reth-trie.workspace = true
 
 # alloy
@@ -37,6 +36,7 @@ jsonrpsee.workspace = true
 pretty_assertions.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+tracing.workspace = true
 
 [dev-dependencies]
 alloy-eips.workspace = true

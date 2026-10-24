@@ -58,14 +58,14 @@ use reth_rpc_eth_api::{
 };
 use reth_rpc_eth_types::{error::FromEvmError, EthApiError};
 use reth_rpc_server_types::RethRpcModule;
-#[cfg(feature = "jit")]
-use reth_tracing::tracing::warn;
-use reth_tracing::tracing::{debug, info};
 use reth_transaction_pool::{
     blobstore::DiskFileBlobStore, EthTransactionPool, PoolPooledTx, PoolTransaction,
     TransactionPool, TransactionValidationTaskExecutor,
 };
 use std::{marker::PhantomData, sync::Arc, time::SystemTime};
+#[cfg(feature = "jit")]
+use tracing::warn;
+use tracing::{debug, info};
 
 pub use crate::{payload::EthereumPayloadBuilder, EthereumEngineValidator};
 

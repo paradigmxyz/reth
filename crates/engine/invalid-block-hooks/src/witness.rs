@@ -9,13 +9,13 @@ use reth_execution_types::BundleSource;
 use reth_primitives_traits::{NodePrimitives, RecoveredBlock, SealedHeader};
 use reth_provider::{BlockExecutionOutput, StateProvider, StateProviderFactory};
 use reth_rpc_api::DebugApiClient;
-use reth_tracing::tracing::warn;
 use reth_trie::{
     bundle_state::{AccountInfoRevert, AccountStatus, BundleState, RevertToSlot, StorageSlot},
     updates::TrieUpdates,
 };
 use serde::Serialize;
 use std::{collections::BTreeMap, fmt::Debug, fs::File, io::Write, path::PathBuf};
+use tracing::warn;
 
 /// Serializable version of `BundleState` for deterministic comparison
 #[derive(Debug, PartialEq, Eq)]

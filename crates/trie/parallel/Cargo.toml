@@ -50,7 +50,6 @@ reth-trie = { workspace = true, features = ["test-utils"] }
 
 # misc
 rand.workspace = true
-tokio = { workspace = true, features = ["rt", "rt-multi-thread", "macros"] }
 
 [features]
 default = ["metrics"]

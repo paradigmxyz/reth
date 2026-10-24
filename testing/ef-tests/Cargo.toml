@@ -33,7 +33,6 @@ reth-evm = { workspace = true, features = ["blst", "c-kzg", "p256-aws-lc-rs"] }
 reth-evm-ethereum = { workspace = true, features = ["std", "blst", "c-kzg", "p256-aws-lc-rs"] }
 reth-ethereum-consensus.workspace = true
 reth-tasks.workspace = true
-reth-tracing.workspace = true
 reth-trie.workspace = true
 reth-trie-db.workspace = true
 
@@ -48,3 +47,6 @@ serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
 rayon.workspace = true
+
+[dev-dependencies]
+reth-tracing.workspace = true

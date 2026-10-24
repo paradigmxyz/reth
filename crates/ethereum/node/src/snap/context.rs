@@ -6,9 +6,9 @@ use reth_provider::{
     providers::ProviderNodeTypes, BlockNumReader, DatabaseProviderFactory, ProviderFactory,
 };
 use reth_snap_sync::{SnapSyncContext, SnapSyncError};
-use reth_tracing::tracing::debug;
 use std::{pin::pin, time::Duration};
 use tokio::{sync::watch, time::Instant};
+use tracing::debug;
 
 // Sampling well below the block time resumes a stalled step soon after new peers connect.
 const DEFAULT_SAMPLE_INTERVAL: Duration = Duration::from_secs(2);

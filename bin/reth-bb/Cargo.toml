@@ -21,19 +21,13 @@ reth-node-core.workspace = true
 reth-node-ethereum.workspace = true
 reth-node-builder.workspace = true
 reth-node-api.workspace = true
-reth-ethereum-consensus.workspace = true
 reth-engine-primitives = { workspace = true, features = ["std"] }
-reth-engine-tree.workspace = true
 reth-primitives-traits.workspace = true
-reth-payload-primitives.workspace = true
 reth-provider.workspace = true
-reth-rpc-api.workspace = true
-reth-rpc-engine-api.workspace = true
 reth-evm.workspace = true
 reth-evm-ethereum.workspace = true
 reth-ethereum-forks.workspace = true
 reth-consensus.workspace = true
-reth-chain-state.workspace = true
 reth-errors.workspace = true
 reth-storage-errors.workspace = true
 reth-storage-api.workspace = true
@@ -41,7 +35,6 @@ reth-storage-api.workspace = true
 # alloy
 alloy-rpc-types = { workspace = true, features = ["engine"] }
 alloy-primitives.workspace = true
-alloy-rlp.workspace = true
 alloy-consensus.workspace = true
 alloy-eips.workspace = true
 
@@ -51,11 +44,6 @@ tracing.workspace = true
 # misc
 clap = { workspace = true, features = ["derive", "env"] }
 jsonrpsee = { workspace = true, features = ["server", "macros"] }
-async-trait.workspace = true
-derive_more.workspace = true
-crossbeam-channel.workspace = true
-tokio = { workspace = true, features = ["sync"] }
-alloy-hardforks.workspace = true
 metrics.workspace = true
 evm2.workspace = true
 
@@ -102,7 +90,6 @@ asm-keccak = [
     "reth-node-core/asm-keccak",
     "reth-ethereum-cli/asm-keccak",
     "reth-node-ethereum/asm-keccak",
-    "reth-engine-tree/asm-keccak",
     "reth-evm/asm-keccak",
     "reth-evm-ethereum/asm-keccak",
     "alloy-primitives/asm-keccak",
@@ -110,7 +97,6 @@ asm-keccak = [
 ]
 portable = [
     "reth-node-ethereum/portable",
-    "reth-engine-tree/portable",
     "reth-evm/portable",
     "reth-evm-ethereum/portable",
     "evm2/portable",

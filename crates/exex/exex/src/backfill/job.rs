@@ -19,7 +19,7 @@ use reth_provider::{
 };
 use reth_prune_types::PruneModes;
 use reth_stages_api::ExecutionStageThresholds;
-use reth_tracing::tracing::{debug, trace};
+use tracing::{debug, trace};
 
 pub(super) type BackfillJobResult<T> = Result<T, BlockExecutionError>;
 
