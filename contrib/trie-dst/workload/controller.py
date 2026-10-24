@@ -238,6 +238,7 @@ def main():
                 "run": {"seed": decisions["seed"], "rng_seed": decisions["rng_seed"],
                         "run_secs": decisions["config"]["run_secs"],
                         "preempt": decisions["preempt"], "swarm": {}},
+                "finalized_by_start": decisions["config"]["run_secs"] == 1,
                 "required": ["trie/input/completed"], "replays_exactly": True, "action": None,
                 "notes": [], "host_decisions": []}
     if hook == "warmup":
@@ -249,6 +250,7 @@ def main():
         if request["run_secs"] == 1:
             (STATE / "pending-input.finish").touch()
             worker(request)
+            collect(Path("/bedrock/out/assertions.jsonl"))
         else:
             config_path = STATE / "config.json"
             config_path.write_text(json.dumps(request))
