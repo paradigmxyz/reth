@@ -21,27 +21,20 @@ reth-node-core.workspace = true
 reth-node-ethereum.workspace = true
 reth-node-builder.workspace = true
 reth-node-api.workspace = true
-reth-ethereum-consensus.workspace = true
 reth-engine-primitives = { workspace = true, features = ["std"] }
-reth-engine-tree.workspace = true
 reth-primitives-traits.workspace = true
-reth-payload-primitives.workspace = true
 reth-provider.workspace = true
-reth-rpc-api.workspace = true
-reth-rpc-engine-api.workspace = true
 reth-evm.workspace = true
 reth-evm-ethereum.workspace = true
 reth-ethereum-forks.workspace = true
 reth-revm.workspace = true
 reth-consensus.workspace = true
-reth-chain-state.workspace = true
 reth-errors.workspace = true
 reth-storage-errors.workspace = true
 
 # alloy
 alloy-rpc-types = { workspace = true, features = ["engine"] }
 alloy-primitives.workspace = true
-alloy-rlp.workspace = true
 alloy-consensus.workspace = true
 alloy-eips.workspace = true
 alloy-evm.workspace = true
@@ -52,12 +45,7 @@ tracing.workspace = true
 # misc
 clap = { workspace = true, features = ["derive", "env"] }
 jsonrpsee = { workspace = true, features = ["server", "macros"] }
-async-trait.workspace = true
-derive_more.workspace = true
-crossbeam-channel.workspace = true
-tokio = { workspace = true, features = ["sync"] }
 revm.workspace = true
-alloy-hardforks.workspace = true
 metrics.workspace = true
 
 # std

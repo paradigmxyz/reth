@@ -593,7 +593,7 @@ rand_08 = { package = "rand", version = "0.8" }
 toml = "0.9"
 
 # rocksdb
-rocksdb = { version = "0.24" }
+rocksdb = { version = "0.24", default-features = false, features = ["lz4", "zstd", "bindgen-runtime"] }
 
 # otlp obs
 opentelemetry_sdk = "0.32"
