@@ -1028,7 +1028,7 @@ where
         InsertBlockErrorKind,
     >
     where
-        S: EvmStateProvider + Send,
+        S: EvmStateProvider + Send + 'static,
         Err: core::error::Error + Send + Sync + 'static,
         V: PayloadValidator<T, Block = N::Block>,
         T: PayloadTypes<BuiltPayload: BuiltPayload<Primitives = N>>,
@@ -1124,6 +1124,8 @@ where
             // Preserve read-only observations in the overlay as well as committed writes.
             self.overlay_manager
                 .record_execution_reads(input.hash(), std::mem::take(&mut db.cache));
+            // The provider may hold the last reference to an obsolete persistent overlay.
+            self.runtime.spawn_drop(db.database);
         }
 
         let execution_duration = execution_start.elapsed();
