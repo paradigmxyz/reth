@@ -31,7 +31,7 @@ use alloy_primitives::B256;
 use crossbeam_channel::{unbounded, Receiver as CrossbeamReceiver, Sender as CrossbeamSender};
 use reth_primitives_traits::FastInstant as Instant;
 use reth_provider::{DatabaseProviderROFactory, ProviderError, ProviderResult, StateProofProvider};
-use reth_tasks::{affinity::JobDomain, Runtime, WorkerPool};
+use reth_tasks::{Runtime, WorkerPool};
 use reth_trie::{DecodedMultiProofV2, MultiProofTargetsV2, ProofV2Target};
 use std::{
     sync::{
@@ -253,22 +253,13 @@ impl ProofWorkerHandle {
         let mut jobs = 0;
 
         for (hashed_address, targets) in storage_targets {
-            let job = StorageProofJob {
-                hashed_address,
-                targets,
-                dispatched_at,
-                domain: JobDomain::capture(),
-            };
+            let job = StorageProofJob { hashed_address, targets, dispatched_at };
             self.storage_work_tx.send(job).map_err(|_| ProofWorkersUnavailable)?;
             jobs += 1;
         }
 
         if !account_targets.is_empty() {
-            let job = AccountProofJob {
-                targets: account_targets,
-                dispatched_at,
-                domain: JobDomain::capture(),
-            };
+            let job = AccountProofJob { targets: account_targets, dispatched_at };
             self.account_work_tx.send(job).map_err(|_| ProofWorkersUnavailable)?;
             jobs += 1;
         }
@@ -449,10 +440,7 @@ struct ProofWorker<Factory, J> {
 impl<Factory, J> ProofWorker<Factory, J> {
     /// Runs `process` for every job until the handle is dropped, advertising the worker as busy
     /// while a job runs. Returns the total time spent waiting for jobs.
-    fn process_jobs(&self, worker_id: usize, mut process: impl FnMut(J)) -> Duration
-    where
-        J: PlacedJob,
-    {
+    fn process_jobs(&self, worker_id: usize, mut process: impl FnMut(J)) -> Duration {
         // Count this worker as available only after successful initialization.
         self.availability.mark_idle(worker_id);
 
@@ -476,7 +464,7 @@ impl<Factory, J> ProofWorker<Factory, J> {
                 std::thread::sleep(jitter);
             }
 
-            job.domain().run(|| process(job));
+            process(job);
 
             self.availability.mark_idle(worker_id);
             idle_start = Instant::now();
@@ -510,7 +498,7 @@ where
 
         let mut storage_proofs_processed = 0u64;
         let total_idle_time = self.process_jobs(worker_id, |job| {
-            let StorageProofJob { hashed_address, targets, dispatched_at, .. } = job;
+            let StorageProofJob { hashed_address, targets, dispatched_at } = job;
             let _span = debug_span!(
                 target: "trie::proof_task",
                 "Storage proof calculation",
@@ -570,7 +558,7 @@ where
 
         let mut account_proofs_processed = 0u64;
         let total_idle_time = self.process_jobs(worker_id, |job| {
-            let AccountProofJob { targets, dispatched_at, .. } = job;
+            let AccountProofJob { targets, dispatched_at } = job;
             let _span = debug_span!(
                 target: "trie::proof_task",
                 "Account proof calculation",
@@ -621,8 +609,6 @@ struct StorageProofJob {
     hashed_address: B256,
     targets: Vec<ProofV2Target>,
     dispatched_at: Instant,
-    /// LLC domain of the dispatching thread, which consumes the proof.
-    domain: JobDomain,
 }
 
 /// A queued account proof.
@@ -630,26 +616,6 @@ struct StorageProofJob {
 struct AccountProofJob {
     targets: Vec<ProofV2Target>,
     dispatched_at: Instant,
-    /// LLC domain of the dispatching thread, which consumes the proof.
-    domain: JobDomain,
-}
-
-/// A proof job that runs in the LLC domain of the thread that dispatched it.
-trait PlacedJob {
-    /// The dispatching thread's domain.
-    fn domain(&self) -> JobDomain;
-}
-
-impl PlacedJob for StorageProofJob {
-    fn domain(&self) -> JobDomain {
-        self.domain
-    }
-}
-
-impl PlacedJob for AccountProofJob {
-    fn domain(&self) -> JobDomain {
-        self.domain
-    }
 }
 
 /// Context for a provider failure that prevents a proof worker from starting.

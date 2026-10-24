@@ -68,6 +68,20 @@ impl JobDomain {
             imp::place_in(imp::topology(), domain);
         }
     }
+
+    /// Returns whether `threads` threads fit in the captured domain: whether the calling
+    /// thread's mask allows at least that many of the domain's CPUs. Placing more threads than
+    /// that crowds them into one domain, so fan-out work wider than the domain should not be
+    /// placed. Returns `false` when nothing was captured.
+    #[inline]
+    pub fn fits(self, threads: usize) -> bool {
+        #[cfg(target_os = "linux")]
+        if let Some(domain) = self.0 {
+            return imp::allowed_in(imp::topology(), domain) >= threads
+        }
+        let _ = threads;
+        false
+    }
 }
 
 /// Returns the number of LLC domains detected for placement, or zero when placement is disabled
@@ -400,6 +414,13 @@ mod imp {
         if allowed > 1 && set_thread_affinity(&effective) {
             set_thread_affinity(&saved);
         }
+    }
+
+    /// The number of the domain's CPUs the calling thread's mask allows, or zero when the domain
+    /// is unknown or the mask cannot be read.
+    pub(super) fn allowed_in(topology: &'static Topology, domain: u16) -> usize {
+        let Some(target) = topology.domain_sets.get(domain as usize) else { return 0 };
+        thread_affinity().map_or(0, |mask| target.within(&mask).1)
     }
 
     impl Drop for AffinityGuard {

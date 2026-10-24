@@ -183,8 +183,7 @@ where
             {
                 let pool = WorkerStatefulPool::new(pool);
                 let pool = &pool;
-                // Prewarmed state is read by execution on this thread's LLC domain.
-                pool.in_place_scope_placed(|s| {
+                pool.in_place_scope(|s| {
                     while let Ok((index, tx)) = pending.recv() {
                         if ctx.should_stop() {
                             trace!(
@@ -215,7 +214,7 @@ where
                             ctx.metrics.seeded_transactions.increment(1);
                         }
                         let parent_span = Span::current();
-                        s.spawn(move || {
+                        s.spawn(move |_| {
                             let _enter = trace_span!(
                                 target: "engine::tree::payload_processor::prewarm",
                                 parent: parent_span,
