@@ -91,7 +91,6 @@ def native(hook, request):
 
 def worker(config):
     process = None
-    perf = {}
     killed = 0
     recovered = 0
     plan = list(config["kill_blocks"])
@@ -135,8 +134,6 @@ def worker(config):
                             continue  # Rust errors/backtraces share stdout with JSON events.
                         if not isinstance(event, dict):
                             continue
-                        for key, value in event.get("perf", {}).items():
-                            perf[key] = perf.get(key, 0) + value
                         deadline = time.monotonic() + idle_budget
                         if event.get("input") == "waiting":
                             waiting = True
@@ -188,7 +185,6 @@ def worker(config):
     assertion(ok, detail)
     (STATE / "done.json").write_text(json.dumps({"ok": ok, "kills": killed,
                                                "armed": len(config["kill_blocks"]), "recoveries": recovered}))
-    print(json.dumps({"perf": perf}), flush=True)
 
 
 def main():
