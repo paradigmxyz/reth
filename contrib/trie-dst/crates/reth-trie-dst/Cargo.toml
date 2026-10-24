@@ -25,7 +25,7 @@ reth-storage-overlay = { workspace = true, features = ["rayon"] }
 reth-tasks = { workspace = true, features = ["rayon", "test-utils"] }
 reth-trie.workspace = true
 alloy-consensus.workspace = true
-alloy-primitives.workspace = true
+alloy-primitives = { workspace = true, features = ["asm-keccak"] }
 alloy-rlp.workspace = true
 alloy-trie.workspace = true
 eyre.workspace = true
