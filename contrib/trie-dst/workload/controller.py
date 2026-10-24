@@ -102,7 +102,6 @@ def worker(config):
     try:
         workload = config["workload"] | {"datadir": str(STATE / "data"),
                                          "input_file": str(STATE / "pending-input.json")}
-        (STATE / "config.json").write_text(json.dumps(config))
         workload_path = STATE / "workload.json"
         workload_path.write_text(json.dumps(workload))
         with (STATE / "run.log").open("wb") as output:
