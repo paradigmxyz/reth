@@ -57,6 +57,23 @@ pub trait DbTx: Debug + Send {
     fn prefetch(&self, _enabled: bool) -> &Self {
         self
     }
+
+    /// Gets the values of many encoded keys in table `T` at once.
+    ///
+    /// Calls `f` with each key's index and value, in key order, and stops at the first error.
+    /// Backends that can search keys together, such as MDBX, overlap their reads, which makes this
+    /// faster than [`DbTx::get_by_encoded_key`] for each key when the keys are scattered over a
+    /// large table. The default looks the keys up one at a time.
+    fn get_many<T: Table>(
+        &self,
+        keys: &[<T::Key as Encode>::Encoded],
+        mut f: impl FnMut(usize, Option<T::Value>),
+    ) -> Result<(), DatabaseError> {
+        for (index, key) in keys.iter().enumerate() {
+            f(index, self.get_by_encoded_key::<T>(key)?);
+        }
+        Ok(())
+    }
 }
 
 /// Read write transaction that allows writing to database

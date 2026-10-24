@@ -12454,6 +12454,206 @@ int mdbx_get(const MDBX_txn *txn, MDBX_dbi dbi, const MDBX_val *key, MDBX_val *d
   return LOG_IFERR(cursor_seek(&cx.outer, (MDBX_val *)key, data, MDBX_SET).err);
 }
 
+/* Batched point lookups (bbtree's batch mode): the B-tree descents of up to
+ * GET_BATCH_LANES keys run interleaved on one thread, one binary-search probe or
+ * page step per turn, each prefetching the line it reads next before yielding,
+ * so the cache misses of different keys overlap instead of chaining. */
+#define GET_BATCH_LANES 16
+/* Lanes once a search waited on storage: each lane keeps one page read in flight. */
+#define GET_BATCH_ADVISE_LANES 64
+/* Batches smaller than this have too few lanes to overlap; they use mdbx_get(). */
+#define GET_BATCH_MIN_KEYS 4
+/* Trees smaller than this mostly stay in a 32 MiB L3 cache, where interleaving only
+ * adds work; they are searched one key at a time, as bbtree does. */
+#define GET_BATCH_MIN_TREE_BYTES ((size_t)16 << 20)
+
+/* A page step taking this long faulted the page in from storage. CPU prefetches
+ * don't fault, so from then on each lane also advises the kernel to read the
+ * child page it steps to, overlapping the reads of all lanes. */
+#if defined(__x86_64__) && (defined(__GNUC__) || defined(__clang__))
+#define GET_BATCH_TICKS() __builtin_ia32_rdtsc()
+#define GET_BATCH_FAULT_TICKS 50000 /* about 15-25 us of TSC ticks */
+#elif defined(__aarch64__) && (defined(__GNUC__) || defined(__clang__))
+static inline uint64_t get_batch_ticks(void) {
+  uint64_t t;
+  __asm__ __volatile__("mrs %0, cntvct_el0" : "=r"(t));
+  return t;
+}
+#define GET_BATCH_TICKS() get_batch_ticks()
+#define GET_BATCH_FAULT_TICKS 500 /* 20 us at 25 MHz, 0.5 us at 1 GHz */
+#endif
+
+/* Asks the kernel to start reading a mapped page. */
+static inline void get_batch_advise(const MDBX_env *env, pgno_t pgno) {
+#if defined(MADV_WILLNEED)
+  const uintptr_t p = (uintptr_t)pgno2page(env, pgno);
+  (void)madvise((void *)(p & ~(uintptr_t)(globals.sys_pagesize - 1)), env->ps, MADV_WILLNEED);
+#else
+  (void)env;
+  (void)pgno;
+#endif
+}
+
+typedef struct get_batch_lane {
+  const page_t *mp;
+  intptr_t low, high, i;
+  size_t idx;
+  txnid_t front;
+  pgno_t pgno;
+  uint8_t state;
+} get_batch_lane_t;
+
+enum { GB_ENTER = 0, GB_PROBE = 1, GB_FETCH = 2 };
+
+int mdbx_get_batch(const MDBX_txn *txn, MDBX_dbi dbi, const MDBX_val *keys, MDBX_val *data, int *rcs, size_t count) {
+  if (unlikely(!keys || !data || !rcs))
+    return LOG_IFERR(MDBX_EINVAL);
+  if (unlikely(count == 0))
+    return MDBX_SUCCESS;
+
+  int rc = check_txn(txn, MDBX_TXN_BLOCKED);
+  if (unlikely(rc != MDBX_SUCCESS))
+    return LOG_IFERR(rc);
+
+  cursor_couple_t cx;
+  rc = cursor_init(&cx.outer, txn, dbi);
+  if (unlikely(rc != MDBX_SUCCESS))
+    return LOG_IFERR(rc);
+  MDBX_cursor *const mc = &cx.outer;
+
+  /* DUPSORT and custom comparators keep mdbx_get()'s general path. */
+  if (MDBX_UNALIGNED_OK < 8 || count < GET_BATCH_MIN_KEYS || (mc->tree->flags & MDBX_DUPSORT) ||
+      mc->clc->k.cmp != cmp_lexical ||
+      pgno2bytes(txn->env, (size_t)mc->tree->branch_pages + mc->tree->leaf_pages) < GET_BATCH_MIN_TREE_BYTES) {
+    for (size_t j = 0; j < count; ++j)
+      rcs[j] = mdbx_get(txn, dbi, &keys[j], &data[j]);
+    return MDBX_SUCCESS;
+  }
+
+  rc = tree_search(mc, &keys[0], Z_ROOTONLY);
+  if (rc == MDBX_NOTFOUND) {
+    for (size_t j = 0; j < count; ++j)
+      rcs[j] = MDBX_NOTFOUND;
+    return MDBX_SUCCESS;
+  }
+  if (unlikely(rc != MDBX_SUCCESS))
+    return LOG_IFERR(rc);
+
+  const page_t *const root = mc->pg[0];
+  const MDBX_env *const env = txn->env;
+  const bool mapped = (txn->flags & (MDBX_TXN_RDONLY | MDBX_WRITEMAP)) != 0;
+  bool advise = false;
+  get_batch_lane_t lanes[GET_BATCH_ADVISE_LANES];
+  size_t next = 0, active = 0;
+  while (active < GET_BATCH_LANES && next < count) {
+    lanes[active].mp = root;
+    lanes[active].state = GB_ENTER;
+    lanes[active].idx = next++;
+    ++active;
+  }
+
+  size_t l = 0;
+  while (active) {
+    get_batch_lane_t *const ln = &lanes[l];
+    const MDBX_val *const key = &keys[ln->idx];
+    int done_rc = MDBX_RESULT_TRUE;
+    switch (ln->state) {
+    case GB_FETCH: {
+      page_t *np;
+#ifdef GET_BATCH_TICKS
+      const uint64_t start = advise ? 0 : GET_BATCH_TICKS();
+#endif
+      int err = page_get(mc, ln->pgno, &np, ln->front);
+#ifdef GET_BATCH_TICKS
+      if (!advise && mapped && GET_BATCH_TICKS() - start > GET_BATCH_FAULT_TICKS) {
+        advise = true;
+        /* The other lanes' next pages are likely cold too. */
+        for (size_t j = 0; j < active; ++j)
+          if (lanes[j].state == GB_FETCH && &lanes[j] != ln)
+            get_batch_advise(env, lanes[j].pgno);
+      }
+#endif
+      if (unlikely(err != MDBX_SUCCESS)) {
+        done_rc = err;
+        break;
+      }
+      ln->mp = np;
+    }
+      /* fallthrough */
+    case GB_ENTER: {
+      const page_t *const mp = ln->mp;
+      ln->low = mp->flags & P_BRANCH;
+      ln->high = (intptr_t)page_numkeys(mp) - 1;
+      if (unlikely(ln->high < ln->low || is_dupfix_leaf(mp))) {
+        done_rc = (ln->high < ln->low) ? MDBX_NOTFOUND : mdbx_get(txn, dbi, key, &data[ln->idx]);
+        break;
+      }
+      ln->i = (ln->low + ln->high) >> 1;
+      __prefetch(page_node(mp, ln->i));
+      ln->state = GB_PROBE;
+      break;
+    }
+    case GB_PROBE: {
+      const page_t *const mp = ln->mp;
+      const node_t *const node = page_node(mp, ln->i);
+      MDBX_val nodekey = {node_key(node), node_ks(node)};
+      const int cr = cmp_lexical(key, &nodekey);
+      if (cr > 0)
+        ln->low = ln->i + 1;
+      else if (cr < 0)
+        ln->high = ln->i - 1;
+      if (cr != 0 && ln->low <= ln->high) {
+        ln->i = (ln->low + ln->high) >> 1;
+        __prefetch(page_node(mp, ln->i));
+        break;
+      }
+      if (is_branch(mp)) {
+        /* As tree_search_finalize(): follow the last node not greater than the key. */
+        const intptr_t ki = cr ? ln->low - 1 : ln->i;
+        ln->pgno = node_pgno(page_node(mp, ki));
+        ln->front = mp->txnid;
+        if (mapped) {
+          const uint8_t *const p = (const uint8_t *)pgno2page(env, ln->pgno);
+          if (advise)
+            get_batch_advise(env, ln->pgno);
+          __prefetch(p);
+          __prefetch(p + 64);
+          __prefetch(p + 128);
+          __prefetch(p + 192);
+        }
+        ln->state = GB_FETCH;
+        break;
+      }
+      done_rc = cr ? MDBX_NOTFOUND : node_read(mc, node, &data[ln->idx], mp);
+      break;
+    }
+    }
+
+    if (done_rc == MDBX_RESULT_TRUE) {
+      l = (l + 1 < active) ? l + 1 : 0;
+      continue;
+    }
+    rcs[ln->idx] = done_rc;
+    while (advise && active < GET_BATCH_ADVISE_LANES && next < count) {
+      lanes[active].mp = root;
+      lanes[active].state = GB_ENTER;
+      lanes[active].idx = next++;
+      ++active;
+    }
+    if (next < count) {
+      ln->mp = root;
+      ln->state = GB_ENTER;
+      ln->idx = next++;
+      l = (l + 1 < active) ? l + 1 : 0;
+    } else {
+      *ln = lanes[--active];
+      if (l >= active)
+        l = 0;
+    }
+  }
+  return MDBX_SUCCESS;
+}
+
 int mdbx_get_equal_or_great(const MDBX_txn *txn, MDBX_dbi dbi, MDBX_val *key, MDBX_val *data) {
   if (unlikely(!key || !data))
     return LOG_IFERR(MDBX_EINVAL);

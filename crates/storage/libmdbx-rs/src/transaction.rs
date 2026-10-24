@@ -167,6 +167,62 @@ where
         })?
     }
 
+    /// Gets the items of many keys from a database at once.
+    ///
+    /// Calls `f` with each key's index and item, in order, as [`Self::get`] would return it,
+    /// stopping at the first error. The searches of up to 16 keys run interleaved, so their cache
+    /// misses overlap and, once a search waits on storage, so do their page reads: for random keys
+    /// in a large table this is faster than calling [`Self::get`] for each key. Small tables,
+    /// small batches and `DUP_SORT` tables are searched one key at a time.
+    pub fn get_many<Key>(
+        &self,
+        dbi: ffi::MDBX_dbi,
+        keys: &[impl AsRef<[u8]>],
+        mut f: impl FnMut(usize, Option<Key>),
+    ) -> Result<()>
+    where
+        Key: TableObject,
+    {
+        const CHUNK: usize = 256;
+        let empty = ffi::MDBX_val { iov_len: 0, iov_base: ptr::null_mut() };
+        let mut key_vals = [empty; CHUNK];
+        let mut data_vals = [empty; CHUNK];
+        let mut rcs = [0; CHUNK];
+        self.txn_execute(|txn| {
+            for (chunk_index, chunk) in keys.chunks(CHUNK).enumerate() {
+                for (val, key) in key_vals.iter_mut().zip(chunk) {
+                    let key = key.as_ref();
+                    *val =
+                        ffi::MDBX_val { iov_len: key.len(), iov_base: key.as_ptr() as *mut c_void };
+                }
+                // SAFETY: The three buffers hold at least `chunk.len()` entries, and MDBX only
+                // reads the keys, which outlive the call.
+                mdbx_result(unsafe {
+                    ffi::mdbx_get_batch(
+                        txn,
+                        dbi,
+                        key_vals.as_ptr(),
+                        data_vals.as_mut_ptr(),
+                        rcs.as_mut_ptr(),
+                        chunk.len(),
+                    )
+                })?;
+                for (i, (&rc, &data_val)) in
+                    rcs.iter().zip(&data_vals).take(chunk.len()).enumerate()
+                {
+                    let item = match rc {
+                        // SAFETY: MDBX filled `data_val` for this live transaction.
+                        ffi::MDBX_SUCCESS => Some(unsafe { Key::decode_val::<K>(txn, data_val) }?),
+                        ffi::MDBX_NOTFOUND => None,
+                        err_code => return Err(Error::from_err_code(err_code)),
+                    };
+                    f(chunk_index * CHUNK + i, item);
+                }
+            }
+            Ok(())
+        })?
+    }
+
     /// Commits the transaction.
     ///
     /// Any pending operations will be saved.

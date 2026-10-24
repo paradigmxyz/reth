@@ -1,6 +1,7 @@
 use crate::{
-    database_state_frontiers, multiproof_calculator::OverlayMultiProofCalculator, ExecutionOverlay,
-    OverlayBuilder, StateTrieOverlay,
+    database_state_frontiers,
+    multiproof_calculator::{warm_account_proofs, OverlayMultiProofCalculator},
+    ExecutionOverlay, OverlayBuilder, StateTrieOverlay,
 };
 use alloy_primitives::{map::B256Map, Address, BlockHash, BlockNumber, B256, U256};
 use metrics::{Counter, Histogram};
@@ -800,6 +801,7 @@ where
                 slot.insert(CachedMultiProofCalculator { requires_masks, calculator })
             }
         };
+        warm_account_proofs(self.provider().tx(), &targets.account_targets, self.is_v2)?;
         cached.calculator.multiproof(targets)
     }
 
