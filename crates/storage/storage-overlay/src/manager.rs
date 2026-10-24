@@ -256,38 +256,59 @@ impl<N: NodePrimitives> OverlayManager<N> {
             }
         }
 
-        // Snapshot matching parent overlays before spawning so DashMap iteration guards are
-        // dropped.
-        let cached_parent_overlays = self
+        self.execution_overlays.retain(|key, entry| {
+            key.tip_hash == hash ||
+                !matches!(entry, OverlayCacheEntry::Ready(_)) ||
+                self.blocks
+                    .get(&key.tip_hash)
+                    .is_none_or(|block| block.recovered_block().parent_hash() != parent_hash)
+        });
+        let keys = self
             .execution_overlays
             .entries
             .iter()
             .filter_map(|entry| {
-                let key = *entry.key();
-                (key.tip_hash == parent_hash).then_some(key.anchor_hash)
+                (entry.key().tip_hash == parent_hash &&
+                    matches!(entry.value(), OverlayCacheEntry::Ready(_)))
+                .then_some(*entry.key())
             })
             .collect::<Vec<_>>();
-
-        debug!(
-            target: "storage::overlay::manager",
-            %hash,
-            %parent_hash,
-            "inserted block into state trie overlay manager"
-        );
-        if cached_parent_overlays.is_empty() {
+        let mut extended = false;
+        for key in keys {
+            if let Some(parent_input) = self.execution_overlays.take_ready(&key) {
+                // Persistence can remove the old anchor from the block graph while pruning is
+                // running. Extending its snapshot only needs the newly inserted block.
+                let Some(block) = self.blocks.get(&hash).map(|entry| entry.value().clone()) else {
+                    continue
+                };
+                let overlay = compute_execution_overlay_inner(
+                    ComputeOverlayInput::ExtendCached { block, parent_input },
+                    key.anchor_hash,
+                    &self.execution_metrics,
+                );
+                self.execution_metrics.overlay_cache_fills.increment(1);
+                self.execution_overlays
+                    .entries
+                    .entry(OverlayCacheKey { anchor_hash: key.anchor_hash, tip_hash: hash })
+                    .or_insert_with(|| OverlayCacheEntry::Ready(Arc::new(overlay)));
+                extended = true;
+            }
+        }
+        if extended {
             return
         }
 
-        #[cfg(not(feature = "rayon"))]
-        let _ = cached_parent_overlays;
-
-        // When a new block is inserted we optimistically and asynchronously flatten an execution
-        // overlay for it
-        #[cfg(feature = "rayon")]
-        {
-            for anchor_hash in cached_parent_overlays {
-                self.precompute_execution_overlay(hash, anchor_hash);
-            }
+        let Some(state) = self.block_state(hash) else { return };
+        let anchor_hash = state
+            .chain()
+            .last()
+            .map_or(parent_hash, |state| state.block_ref().recovered_block().parent_hash());
+        if let Err(err) = self.execution_overlay_for_parent_inner(
+            &state,
+            anchor_hash,
+            OverlayCacheConfig::default(),
+        ) {
+            debug!(target: "storage::overlay::manager", %err, "Skipping execution overlay update");
         }
     }
 
@@ -317,6 +338,69 @@ impl<N: NodePrimitives> OverlayManager<N> {
                 debug!(target: "storage::overlay::manager", %err, "Skipping execution overlay precompute");
             }
         });
+    }
+
+    /// Schedules pruning of persisted observations at the canonical tip and newer tips.
+    ///
+    /// Readers and subsequent blocks can reuse the unpruned snapshots while pruning runs. Without
+    /// a worker pool no pruning is scheduled. Pending children are also re-anchored because
+    /// newPayload can insert them before forkchoice advances the canonical head.
+    #[cfg(feature = "rayon")]
+    pub fn prune_execution_overlays(&self, tip_hash: B256, anchor: BlockNumHash) {
+        let Some(worker_pool) = &self.worker_pool else { return };
+        let Some(tip_number) =
+            self.blocks.get(&tip_hash).map(|block| block.recovered_block().number())
+        else {
+            return
+        };
+        let manager = self.clone();
+        let span = tracing::Span::current();
+        worker_pool.spawn(move || {
+            let _guard = span.enter();
+            manager.prune_execution_overlays_inner(tip_number, anchor);
+        });
+    }
+
+    #[cfg(any(feature = "rayon", test))]
+    fn prune_execution_overlays_inner(&self, tip_number: BlockNumber, anchor: BlockNumHash) {
+        let start = Instant::now();
+        let snapshots = self
+            .execution_overlays
+            .entries
+            .iter()
+            .filter_map(|entry| {
+                let key = *entry.key();
+                let OverlayCacheEntry::Ready(overlay) = entry.value() else { return None };
+                (key.anchor_hash != anchor.hash &&
+                    overlay.block_hashes().last().is_some_and(|tip| tip.number >= tip_number) &&
+                    overlay.block_hashes().contains(&anchor))
+                .then(|| (key, Arc::clone(overlay)))
+            })
+            .collect::<Vec<_>>();
+        for (key, snapshot) in snapshots {
+            let mut overlay = (*snapshot).clone();
+            overlay.prune(anchor.number);
+            // A child may have consumed the snapshot during pruning. Never replace a newer
+            // snapshot, and publish before removing the old key so readers always have one.
+            if self.execution_overlays.ready(&key).is_some_and(|old| Arc::ptr_eq(&old, &snapshot)) {
+                let new_key = OverlayCacheKey { anchor_hash: anchor.hash, tip_hash: key.tip_hash };
+                self.execution_overlays
+                    .entries
+                    .entry(new_key)
+                    .or_insert_with(|| OverlayCacheEntry::Ready(Arc::new(overlay)));
+                self.execution_overlays.entries.remove_if(&key, |_, entry| {
+                    matches!(entry, OverlayCacheEntry::Ready(old) if Arc::ptr_eq(old, &snapshot))
+                });
+                // A concurrent graph removal may have preceded publication.
+                if !self.blocks.contains_key(&key.tip_hash) {
+                    self.execution_overlays.entries.remove(&new_key);
+                }
+            }
+        }
+        self.execution_metrics
+            .overlay_pruning_duration_seconds
+            .record(start.elapsed().as_secs_f64());
+        trace!(target: "storage::overlay::manager", ?anchor, "Pruned execution overlays");
     }
 
     /// Removes blocks from the live block graph and prunes cached overlays that can no longer be
@@ -350,8 +434,13 @@ impl<N: NodePrimitives> OverlayManager<N> {
             self.state_trie_overlays.retain(|key, _| {
                 self.contains_hash(key.tip_hash, key.anchor_hash, key.anchor_hash)
             });
-            self.execution_overlays.retain(|key, _| {
-                self.contains_hash(key.tip_hash, key.anchor_hash, key.anchor_hash)
+            self.execution_overlays.retain(|key, entry| {
+                // Ready snapshots remain usable after their old anchor leaves the graph.
+                if matches!(entry, OverlayCacheEntry::Ready(_)) {
+                    self.blocks.contains_key(&key.tip_hash)
+                } else {
+                    self.contains_hash(key.tip_hash, key.anchor_hash, key.anchor_hash)
+                }
             });
             pruned_overlays = overlays_before
                 .saturating_sub(self.state_trie_overlays.len() + self.execution_overlays.len());
@@ -458,20 +547,35 @@ impl<N: NodePrimitives> OverlayManager<N> {
             return Ok(Some(Arc::new(ExecutionOverlay::default())))
         }
 
+        if let Some(overlay) =
+            self.execution_overlays.ready(&OverlayCacheKey { anchor_hash, tip_hash: parent_hash })
+        {
+            self.execution_metrics.overlay_cache_reuses.increment(1);
+            return Ok(Some(overlay))
+        }
+        // Earlier observations remain correct at this tip. Persistence may have committed before
+        // its notification reaches the engine, so reuse that snapshot until it can be pruned.
+        if let Some(overlay) = self.execution_overlays.entries.iter().find_map(|entry| {
+            if entry.key().tip_hash == parent_hash &&
+                let OverlayCacheEntry::Ready(overlay) = entry.value() &&
+                overlay.block_hashes().iter().any(|block| block.hash == anchor_hash)
+            {
+                Some(Arc::clone(overlay))
+            } else {
+                None
+            }
+        }) {
+            self.execution_metrics.overlay_cache_reuses.increment(1);
+            return Ok(Some(overlay))
+        }
+
         self.get_or_compute_overlay(
             &self.execution_overlays,
             &self.execution_metrics,
             anchor_hash,
             parent_state,
             cache_config,
-            |input, span| {
-                self.compute_execution_overlay(
-                    input,
-                    anchor_hash,
-                    span,
-                    cache_config.write_to_cache,
-                )
-            },
+            |input, _| compute_execution_overlay_inner(input, anchor_hash, &self.execution_metrics),
         )
     }
 
@@ -682,36 +786,6 @@ impl<N: NodePrimitives> OverlayManager<N> {
         }
 
         compute_overlay(compute_input, anchor_hash, &self.metrics)
-    }
-
-    fn compute_execution_overlay(
-        &self,
-        compute_input: ComputeOverlayInput<N, ExecutionOverlay>,
-        anchor_hash: B256,
-        _span: tracing::Span,
-        write_to_cache: bool,
-    ) -> ExecutionOverlay {
-        if !write_to_cache {
-            return compute_execution_overlay_inner(
-                compute_input,
-                anchor_hash,
-                &self.execution_metrics,
-            )
-        }
-
-        #[cfg(feature = "rayon")]
-        {
-            if let Some(worker_pool) = &self.worker_pool {
-                let compute_span = _span;
-                let metrics = self.execution_metrics.clone();
-                return worker_pool.spawn_and_wait(move || {
-                    let _guard = compute_span.enter();
-                    compute_execution_overlay_inner(compute_input, anchor_hash, &metrics)
-                })
-            }
-        }
-
-        compute_execution_overlay_inner(compute_input, anchor_hash, &self.execution_metrics)
     }
 }
 
@@ -1146,10 +1220,10 @@ mod tests {
         for id in 1..=3 {
             let address = Address::with_last_byte(id);
             let code_hash = B256::with_last_byte(id + 64);
-            assert_eq!(overlay.accounts()[&address].as_ref().unwrap().nonce, id as u64);
-            assert_eq!(overlay.accounts()[&address].as_ref().unwrap().account_id, None);
-            assert_eq!(overlay.storage()[&address][&U256::from(id)], U256::from(id));
-            assert_eq!(overlay.code_hashes()[&code_hash], Bytecode::new_raw(vec![id].into()));
+            assert_eq!(overlay.accounts()[&address].value.as_ref().unwrap().nonce, id as u64);
+            assert_eq!(overlay.accounts()[&address].value.as_ref().unwrap().account_id, None);
+            assert_eq!(overlay.storage()[&address][&U256::from(id)].value, U256::from(id));
+            assert_eq!(overlay.code_hashes()[&code_hash].value, Bytecode::new_raw(vec![id].into()));
         }
         assert_eq!(
             overlay.block_hashes(),
@@ -1162,10 +1236,14 @@ mod tests {
         assert!(Arc::ptr_eq(&overlay, &cached));
 
         let short_anchor = blocks[1].recovered_block().hash();
+        manager.prune_execution_overlays_inner(
+            blocks[2].recovered_block().number(),
+            blocks[1].recovered_block().num_hash(),
+        );
         let short = manager
             .execution_overlay_for_parent(blocks[2].recovered_block().hash(), short_anchor)
             .unwrap();
-        assert_eq!(short.accounts().len(), 1);
+        assert_eq!(short.accounts().size(), 1);
     }
 
     #[test]
@@ -1192,6 +1270,10 @@ mod tests {
             .entries
             .insert(first_key, OverlayCacheEntry::Ready(Arc::new(ExecutionOverlay::default())));
 
+        manager
+            .execution_overlays
+            .entries
+            .remove(&OverlayCacheKey { anchor_hash, tip_hash: sibling_hash });
         overlay_for_parent(&manager, sibling_hash, anchor_hash).unwrap();
         manager.execution_overlay_for_parent(sibling_hash, anchor_hash).unwrap();
 
@@ -1206,6 +1288,7 @@ mod tests {
         for block in &blocks {
             manager.insert_block(block.clone());
         }
+        manager.execution_overlays.entries.clear();
 
         let anchor_hash = blocks[0].recovered_block().parent_hash();
         let parent_hash = blocks[1].recovered_block().hash();
@@ -1232,6 +1315,7 @@ mod tests {
         for block in &blocks {
             manager.insert_block(block.clone());
         }
+        manager.execution_overlays.entries.clear();
 
         let anchor_hash = blocks[0].recovered_block().parent_hash();
         let parent_hash = blocks[1].recovered_block().hash();
@@ -1258,13 +1342,13 @@ mod tests {
         assert!(!manager.state_trie_overlays.entries.contains_key(&parent_key));
         assert!(!manager.execution_overlays.entries.contains_key(&parent_key));
         assert_eq!(state_parent.state.accounts.len(), 2);
-        assert_eq!(execution_parent.accounts().len(), 2);
+        assert_eq!(execution_parent.accounts().size(), 2);
         assert_eq!(child_state.accounts.len(), 3);
-        assert_eq!(child_execution.accounts().len(), 3);
+        assert_eq!(child_execution.accounts().size(), 3);
         assert!(child_execution
             .accounts()
             .values()
-            .flatten()
+            .filter_map(|entry| entry.value.as_ref())
             .all(|account| account.account_id.is_none()));
     }
 
@@ -1295,7 +1379,7 @@ mod tests {
             .unwrap();
 
         assert_eq!(state.accounts.len(), 3);
-        assert_eq!(execution.accounts().len(), 3);
+        assert_eq!(execution.accounts().size(), 3);
         assert!(manager.state_trie_overlays.entries.contains_key(&parent_key));
         assert!(!manager.state_trie_overlays.entries.contains_key(&child_key));
         assert!(manager.execution_overlays.entries.contains_key(&parent_key));
@@ -1370,13 +1454,13 @@ mod tests {
 
     #[cfg(feature = "rayon")]
     #[test]
-    fn precomputes_execution_overlay_after_anchor_advances() {
+    fn prunes_execution_overlay_after_anchor_advances() {
         let manager = OverlayManager::new(Arc::new(WorkerPool::new(1, "execution-overlay-test")));
         let blocks = test_blocks();
-        for block in &blocks {
+        for block in &blocks[..2] {
             manager.insert_block(block.clone());
         }
-        let tip_hash = blocks[2].recovered_block().hash();
+        let tip_hash = blocks[1].recovered_block().hash();
         let old_anchor = blocks[0].recovered_block().parent_hash();
         manager.execution_overlay_for_parent(tip_hash, old_anchor).unwrap();
 
@@ -1384,13 +1468,18 @@ mod tests {
         // Finish frontier, but its execution state must remain in the overlay until trie
         // persistence.
         let new_anchor = blocks[0].recovered_block().hash();
+        let (release_tx, release_rx) = mpsc::channel();
+        manager.worker_pool.as_ref().unwrap().spawn(move || release_rx.recv().unwrap());
+        manager.prune_execution_overlays(tip_hash, blocks[0].recovered_block().num_hash());
         manager.remove_blocks([new_anchor]);
-        assert!(!manager
+        assert!(manager
             .execution_overlays
             .entries
             .contains_key(&OverlayCacheKey { anchor_hash: old_anchor, tip_hash }));
 
-        manager.precompute_execution_overlay(tip_hash, new_anchor);
+        manager.insert_block(blocks[2].clone());
+        let tip_hash = blocks[2].recovered_block().hash();
+        release_tx.send(()).unwrap();
 
         let key = OverlayCacheKey { anchor_hash: new_anchor, tip_hash };
         let deadline = std::time::Instant::now() + Duration::from_secs(1);
@@ -1408,8 +1497,8 @@ mod tests {
         assert!(!overlay.accounts().contains_key(&Address::with_last_byte(1)));
         for id in 2..=3 {
             let address = Address::with_last_byte(id);
-            assert_eq!(overlay.accounts()[&address].as_ref().unwrap().nonce, id as u64);
-            assert_eq!(overlay.storage()[&address][&U256::from(id)], U256::from(id));
+            assert_eq!(overlay.accounts()[&address].value.as_ref().unwrap().nonce, id as u64);
+            assert_eq!(overlay.storage()[&address][&U256::from(id)].value, U256::from(id));
         }
         let cached = manager.execution_overlay_for_parent(tip_hash, new_anchor).unwrap();
         assert!(Arc::ptr_eq(&overlay, &cached));
@@ -1553,7 +1642,11 @@ mod tests {
             .is_err());
         assert!(manager
             .execution_overlay_for_parent(blocks[2].recovered_block().hash(), original_anchor)
-            .is_err());
+            .is_ok());
+        manager.prune_execution_overlays_inner(
+            blocks[2].recovered_block().number(),
+            blocks[1].recovered_block().num_hash(),
+        );
 
         let (_, state) =
             overlay_for_parent(&manager, blocks[2].recovered_block().hash(), anchor_hash).unwrap();
@@ -1561,6 +1654,6 @@ mod tests {
         let execution = manager
             .execution_overlay_for_parent(blocks[2].recovered_block().hash(), anchor_hash)
             .unwrap();
-        assert_eq!(execution.accounts().len(), 1);
+        assert_eq!(execution.accounts().size(), 1);
     }
 }

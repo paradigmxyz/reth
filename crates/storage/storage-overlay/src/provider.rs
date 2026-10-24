@@ -412,7 +412,7 @@ where
     fn basic_account(&self, address: &Address) -> ProviderResult<Option<Account>> {
         let (overlay, historical_fallback) = self.execution_overlay()?;
         if let Some(account) = overlay.accounts().get(address) {
-            return Ok(account.as_ref().map(Account::from))
+            return Ok(account.value.as_ref().map(Account::from))
         }
         if let Some(historical_fallback) = historical_fallback {
             return match self.provider().account_history_info(
@@ -512,7 +512,7 @@ where
     ) -> ProviderResult<Option<reth_primitives_traits::Bytecode>> {
         let (overlay, _) = self.execution_overlay()?;
         if let Some(bytecode) = overlay.code_hashes().get(code_hash) {
-            return Ok(Some(reth_primitives_traits::Bytecode(bytecode.clone())));
+            return Ok(Some(reth_primitives_traits::Bytecode(bytecode.value.clone())));
         }
         self.provider()
             .tx()
@@ -1275,14 +1275,23 @@ mod tests {
         let code_hash = B256::with_last_byte(6);
         let bytecode = RevmBytecode::new_raw([0x60, 0x01].into());
         let mut execution_overlay = ExecutionOverlay::default();
-        execution_overlay.accounts_mut().insert(address, Some(account_info.clone()));
+        execution_overlay.accounts_mut().insert_mut(
+            address,
+            crate::ExecutionOverlayValue { block_number: 1, value: Some(account_info.clone()) },
+        );
         execution_overlay.block_hashes_mut().push(BlockNumHash::new(1, block_hash));
-        execution_overlay
-            .storage_mut()
-            .entry(address)
-            .or_default()
-            .insert(U256::from_be_bytes(storage_key.0), storage_value);
-        execution_overlay.code_hashes_mut().insert(code_hash, bytecode.clone());
+        execution_overlay.storage_mut().insert_mut(
+            address,
+            std::iter::once((
+                U256::from_be_bytes(storage_key.0),
+                crate::ExecutionOverlayValue { block_number: 1, value: storage_value },
+            ))
+            .collect(),
+        );
+        execution_overlay.code_hashes_mut().insert_mut(
+            code_hash,
+            crate::ExecutionOverlayValue { block_number: 1, value: bytecode.clone() },
+        );
         let provider = OverlayStateProvider::<_, EthPrimitives>::new_with_execution(
             factory.provider().unwrap(),
             Arc::new(execution_overlay),

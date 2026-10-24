@@ -533,6 +533,7 @@ url = { version = "2.3", default-features = false }
 zstd = "0.13"
 byteorder = "1"
 fixed-cache = { version = "0.1.10", default-features = false, features = ["alloc"] }
+rpds = { version = "1.2.1", default-features = false }
 moka = "0.12"
 chrono = "0.4.41"
 

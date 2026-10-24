@@ -37,6 +37,7 @@ metrics.workspace = true
 
 # misc
 parking_lot.workspace = true
+rpds.workspace = true
 rayon = { workspace = true, optional = true }
 tracing.workspace = true
 revm.workspace = true

@@ -22,6 +22,8 @@ pub(crate) struct StateTrieOverlayMetrics {
 #[derive(Clone, Metrics)]
 #[metrics(scope = "sync.block_validation.execution_overlay")]
 pub(crate) struct ExecutionOverlayMetrics {
+    /// Time spent pruning observations covered by a new persistence anchor.
+    pub(crate) overlay_pruning_duration_seconds: Histogram,
     /// Duration of overlay computation in seconds.
     pub(crate) overlay_computation_duration_seconds: Histogram,
     /// Number of requests satisfied by an existing overlay cache entry.
