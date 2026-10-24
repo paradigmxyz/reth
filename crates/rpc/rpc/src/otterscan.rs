@@ -805,12 +805,12 @@ mod tests {
             }),
             Address::ZERO,
         );
-        let (inspector, result) = evm
-            .transact_with_inspector(
-                &tx,
-                TracingInspector::new(TracingInspectorConfig::default_parity()),
-            )
-            .unwrap();
+        let (inspector, result) = Evm::transact_with_inspector(
+            &mut evm,
+            &tx,
+            TracingInspector::new(TracingInspectorConfig::default_parity()),
+        )
+        .unwrap();
         (result.result, otterscan_traces(inspector.traces().nodes().to_vec()))
     }
 

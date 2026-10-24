@@ -1677,7 +1677,7 @@ mod tests {
             }),
             Address::ZERO,
         );
-        let err = evm.transact_with_inspector(&tx, inspector).unwrap_err();
+        let err = Evm::transact_with_inspector(&mut evm, &tx, inspector).unwrap_err();
         assert_eq!(err.to_string(), "fatal error: JavaScript tracing interrupted");
     }
 
