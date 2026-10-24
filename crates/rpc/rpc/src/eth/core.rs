@@ -16,7 +16,10 @@ use reth_network_api::noop::NoopNetwork;
 use reth_node_api::{FullNodeComponents, FullNodeTypes};
 use reth_rpc_convert::{RpcConvert, RpcConverter};
 use reth_rpc_eth_api::{
-    helpers::{pending_block::PendingEnvBuilder, spec::SignersForRpc, SpawnBlocking},
+    helpers::{
+        pending_block::PendingEnvBuilder, spec::SignersForRpc, transaction::SenderNonceLocks,
+        SpawnBlocking,
+    },
     node::{RpcNodeCoreAdapter, RpcNodeCoreExt},
     EthApiTypes, RpcNodeCore,
 };
@@ -232,6 +235,9 @@ pub struct EthApiInner<N: RpcNodeCore, Rpc: RpcConvert> {
     components: N,
     /// All configured Signers
     signers: SignersForRpc<N::Provider, Rpc::Network>,
+    /// Per-sender locks held by `eth_sendTransaction` from filling the nonce until the
+    /// transaction is in the pool.
+    send_transaction_nonce_locks: SenderNonceLocks,
     /// The async cache frontend for eth related data
     eth_cache: EthStateCache<N::Primitives>,
     /// The async gas oracle frontend for gas price suggestions
@@ -316,6 +322,7 @@ where
         Self {
             components,
             signers,
+            send_transaction_nonce_locks: Default::default(),
             eth_cache,
             gas_oracle,
             starting_block,
@@ -440,6 +447,13 @@ where
     #[inline]
     pub const fn signers(&self) -> &SignersForRpc<N::Provider, Rpc::Network> {
         &self.signers
+    }
+
+    /// Returns the per-sender locks `eth_sendTransaction` holds from filling the nonce until the
+    /// transaction is in the pool.
+    #[inline]
+    pub const fn send_transaction_nonce_locks(&self) -> &SenderNonceLocks {
+        &self.send_transaction_nonce_locks
     }
 
     /// Returns the starting block.
