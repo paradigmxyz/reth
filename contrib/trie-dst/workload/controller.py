@@ -144,7 +144,8 @@ def worker(config):
                             waiting = False
                         if event.get("completed"):
                             completed = True
-                            assertion(True, json.dumps(event), "trie/input/completed", "Sometimes")
+                            assertion(event.get("blocks") == config["workload"]["blocks"],
+                                      json.dumps(event), "trie/input/completed")
                         if event.get("input") == "injected":
                             assertion(True, json.dumps(event), "trie/input/injected", "Sometimes")
                         if event.get("persistence") == "complete":
@@ -249,7 +250,7 @@ def main():
                 "run": {"seed": decisions["seed"], "rng_seed": decisions["rng_seed"],
                         "run_secs": decisions["config"]["run_secs"],
                         "preempt": decisions["preempt"], "swarm": {}},
-                "required": [], "replays_exactly": True, "action": None,
+                "required": ["trie/input/completed"], "replays_exactly": True, "action": None,
                 "notes": [], "host_decisions": []}
     if hook == "warmup":
         return {"ready": True, "detail": "reth-trie-dst controller ready; each branch starts with empty state"}
