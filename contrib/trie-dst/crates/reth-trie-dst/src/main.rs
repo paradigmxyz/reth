@@ -664,13 +664,12 @@ fn run(config: &mut Config, snapshotter: &Snapshotter) -> Result<()> {
         }
         drop(hints);
         stream.finish();
-        let expected_root = root(&state);
         let outcome = handle.take_state_root_rx().recv_timeout(timeout)??;
         ensure!(
-            outcome.state_root == expected_root,
+            outcome.state_root == root(&state),
             "seed {} block {number}: expected {}, actual {}",
             config.seed,
-            expected_root,
+            root(&state),
             outcome.state_root
         );
         let block = RecoveredBlock::new_unhashed(
