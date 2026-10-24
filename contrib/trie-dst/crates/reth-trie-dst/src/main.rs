@@ -648,7 +648,8 @@ fn run(config: &mut Config, snapshotter: &Snapshotter) -> Result<()> {
                     println!(
                         "{}",
                         json!({"block_number": number, "batch": "hint",
-                    "accounts": hint.accounts, "storages": hint.storages})
+                    "accounts": hint.accounts.len(),
+                    "storages": hint.storages.values().map(Vec::len).sum::<usize>()})
                     );
                     hints.on_access_hint(hint);
                     hint_batches += 1;
