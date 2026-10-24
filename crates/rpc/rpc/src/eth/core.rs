@@ -550,7 +550,9 @@ where
 mod tests {
     use super::*;
     use alloy_consensus::{Block, BlockBody, Header};
-    use alloy_eips::{eip7702::Authorization, BlockId, BlockNumberOrTag};
+    use alloy_eips::{
+        eip4844::DATA_GAS_PER_BLOB, eip7702::Authorization, BlockId, BlockNumberOrTag,
+    };
     use alloy_genesis::{Genesis, GenesisAccount};
     use alloy_network::TransactionBuilder;
     use alloy_primitives::{Address, Bytes, Signature, B256, U256, U64};
@@ -560,13 +562,14 @@ mod tests {
         state::{AccountOverride, EvmOverrides, StateOverride},
         BlockOverrides, Bundle, TransactionRequest,
     };
+    use evm2::{bytecode::Bytecode, evm::CacheDB, AccountInfo};
     use jsonrpsee_types::error::INVALID_PARAMS_CODE;
     use rand::Rng;
     use reth_chain_state::CanonStateSubscriptions;
     use reth_chainspec::{ChainSpec, ChainSpecBuilder, ChainSpecProvider, EthChainSpec};
     use reth_db_common::init::init_genesis;
     use reth_ethereum_primitives::TransactionSigned;
-    use reth_evm::{EvmEnvFor, TxEnvFor};
+    use reth_evm::{ConfigureEvm, EvmEnv, EvmEnvFor, TransactionEnvMut, TxEnvFor};
     use reth_evm_ethereum::EthEvmConfig;
     use reth_network_api::noop::NoopNetwork;
     use reth_primitives_traits::crypto::secp256k1::sign_message;
@@ -580,7 +583,7 @@ mod tests {
     };
     use reth_rpc_convert::{EthTxEnvError, TryIntoTxEnv};
     use reth_rpc_eth_api::{
-        helpers::{EthBlocks, EthCall, SpawnBlocking},
+        helpers::{Call, EthBlocks, EthCall, SpawnBlocking},
         node::RpcNodeCoreAdapter,
         EthApiServer,
     };
@@ -1910,6 +1913,202 @@ mod tests {
             ]);
             let expected = ChainSpecBuilder::mainnet().cancun_activated().genesis(expected).build();
             assert_eq!(blocks[index].inner.header.state_root, expected.genesis_header().state_root);
+        }
+    }
+
+    #[tokio::test]
+    async fn blob_call_allowance_reserves_maximum_fee() {
+        let sender = Address::repeat_byte(0x11);
+        let target = Address::repeat_byte(0xaa);
+        let provider = MockEthProvider::default()
+            .with_chain_spec(ChainSpecBuilder::mainnet().cancun_activated().build());
+        let api = build_test_eth_api(provider);
+        let mut env = api.evm_config().evm_env(&Header::default()).unwrap();
+        env.block_env_mut().blob_basefee = U256::ZERO;
+        let mut db = CacheDB::default();
+        let balance = U256::from(1_000_000);
+        db.insert_account_info(&sender, AccountInfo { balance, ..Default::default() });
+
+        for blobs in [1, 2] {
+            for blob_cap in [0, 1, 3] {
+                for price in [0, 10] {
+                    let request = TransactionRequest {
+                        max_fee_per_gas: Some(price),
+                        max_priority_fee_per_gas: Some(price),
+                        max_fee_per_blob_gas: Some(blob_cap),
+                        blob_versioned_hashes: Some(vec![B256::repeat_byte(1); blobs]),
+                        value: Some(U256::from(1_000)),
+                        ..TransactionRequest::default().with_from(sender).with_to(target)
+                    };
+                    let tx = api.create_txn_env(&env, request, &mut db).unwrap();
+                    let allowance = api.caller_gas_allowance(&mut db, &env, &tx).unwrap();
+                    let expected = if price == 0 {
+                        0
+                    } else {
+                        (999_000 - DATA_GAS_PER_BLOB * blobs as u64 * blob_cap as u64) / 10
+                    };
+                    assert_eq!(allowance, expected);
+                }
+            }
+        }
+
+        for dynamic_fee in [false, true] {
+            let request = TransactionRequest {
+                gas_price: (!dynamic_fee).then_some(10),
+                max_fee_per_gas: dynamic_fee.then_some(10),
+                max_priority_fee_per_gas: dynamic_fee.then_some(10),
+                value: Some(U256::from(1_000)),
+                ..TransactionRequest::default().with_from(sender).with_to(target)
+            };
+            let tx = api.create_txn_env(&env, request, &mut db).unwrap();
+            assert_eq!(api.caller_gas_allowance(&mut db, &env, &tx).unwrap(), 99_900);
+        }
+    }
+
+    #[tokio::test]
+    async fn blob_call_allowance_rejects_unaffordable_fees() {
+        let sender = Address::repeat_byte(0x11);
+        let target = Address::repeat_byte(0xaa);
+        let provider = MockEthProvider::default()
+            .with_chain_spec(ChainSpecBuilder::mainnet().cancun_activated().build());
+        let api = build_test_eth_api(provider);
+        let env = api.evm_config().evm_env(&Header::default()).unwrap();
+        for (balance, value) in [
+            (U256::from(999), U256::from(1_000)),
+            (U256::from(394_215), U256::from(1_000)),
+            (U256::MAX, U256::MAX),
+        ] {
+            let mut db = CacheDB::default();
+            db.insert_account_info(&sender, AccountInfo { balance, ..Default::default() });
+            let request = TransactionRequest {
+                max_fee_per_gas: Some(10),
+                max_priority_fee_per_gas: Some(10),
+                max_fee_per_blob_gas: Some(3),
+                blob_versioned_hashes: Some(vec![B256::repeat_byte(1)]),
+                value: Some(value),
+                ..TransactionRequest::default().with_from(sender).with_to(target)
+            };
+            let tx = api.create_txn_env(&env, request, &mut db).unwrap();
+            let err = api.caller_gas_allowance(&mut db, &env, &tx).unwrap_err();
+            assert!(
+                matches!(
+                    err.as_invalid_transaction(),
+                    Some(RpcInvalidTransactionError::InsufficientFunds { cost, balance: actual })
+                        if *cost == value.saturating_add(U256::from(393_216)) && *actual == balance
+                ),
+                "{err}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn blob_call_allowance_funds_strict_execution() {
+        let sender = Address::repeat_byte(0x11);
+        let target = Address::repeat_byte(0xaa);
+        let provider = MockEthProvider::default()
+            .with_chain_spec(ChainSpecBuilder::mainnet().cancun_activated().build());
+        let api = build_test_eth_api(provider);
+        let env = api
+            .evm_config()
+            .evm_env(&Header {
+                gas_limit: 30_000_000,
+                excess_blob_gas: Some(0),
+                ..Default::default()
+            })
+            .unwrap();
+        let mut db = CacheDB::default();
+        db.insert_account_info(
+            &sender,
+            AccountInfo { balance: U256::from(894_216), ..Default::default() },
+        );
+        db.insert_account_info(
+            &target,
+            AccountInfo {
+                code: Some(Bytecode::new_raw(Bytes::from_static(&[
+                    0x33, 0x31, 0x60, 0x00, 0x52, 0x60, 0x20, 0x60, 0x00, 0xf3,
+                ]))),
+                ..Default::default()
+            },
+        );
+        let request = TransactionRequest {
+            max_fee_per_gas: Some(10),
+            max_priority_fee_per_gas: Some(10),
+            max_fee_per_blob_gas: Some(3),
+            blob_versioned_hashes: Some(vec![B256::repeat_byte(1)]),
+            value: Some(U256::from(1_000)),
+            ..TransactionRequest::default().with_from(sender).with_to(target)
+        };
+        let mut tx = api.create_txn_env(&env, request, &mut db).unwrap();
+        let allowance = api.caller_gas_allowance(&mut db, &env, &tx).unwrap();
+        tx.inner_mut().set_gas_limit(allowance);
+        let result = api.transact(db.clone(), env.clone(), tx.clone()).unwrap().result;
+        assert!(result.status);
+        assert_eq!(U256::from_be_slice(&result.output), U256::from(262_144));
+        assert_eq!(allowance, 50_000);
+        tx.inner_mut().set_gas_limit(allowance + 1);
+        let err = api.transact(db, env, tx).unwrap_err();
+        assert!(
+            matches!(
+                err.as_invalid_transaction(),
+                Some(RpcInvalidTransactionError::InsufficientFunds { .. })
+            ),
+            "{err}"
+        );
+    }
+
+    #[tokio::test]
+    async fn blob_call_allowance_rejects_underfunded_estimates() {
+        let sender = Address::repeat_byte(0x11);
+        let target = Address::repeat_byte(0xaa);
+        let provider = MockEthProvider::default()
+            .with_chain_spec(ChainSpecBuilder::mainnet().cancun_activated().build());
+        provider.add_block(
+            B256::repeat_byte(0x42),
+            Block {
+                header: Header {
+                    number: 1,
+                    gas_limit: 30_000_000,
+                    excess_blob_gas: Some(0),
+                    ..Default::default()
+                },
+                body: BlockBody::default(),
+            },
+        );
+        let api = build_test_eth_api(provider);
+        for blobs in [1, 2] {
+            for cap in [1, 3] {
+                for gas in [None, Some(50_000)] {
+                    let cost = U256::from(1_000 + DATA_GAS_PER_BLOB * blobs as u64 * cap);
+                    let balance = cost - U256::ONE;
+                    let request = TransactionRequest {
+                        gas,
+                        max_fee_per_gas: Some(10),
+                        max_priority_fee_per_gas: Some(10),
+                        max_fee_per_blob_gas: Some(u128::from(cap)),
+                        blob_versioned_hashes: Some(vec![B256::repeat_byte(1); blobs]),
+                        value: Some(U256::from(1_000)),
+                        ..TransactionRequest::default().with_from(sender).with_to(target)
+                    };
+                    let state = StateOverride::from_iter([(
+                        sender,
+                        AccountOverride { balance: Some(balance), ..Default::default() },
+                    )]);
+                    let err = EthCall::estimate_gas_at(
+                        &api,
+                        request,
+                        BlockId::latest(),
+                        EvmOverrides::state(Some(state)),
+                    )
+                    .await
+                    .unwrap_err();
+                    assert!(
+                        matches!(err.as_invalid_transaction(),
+                        Some(RpcInvalidTransactionError::InsufficientFunds { cost: actual_cost, balance: actual_balance })
+                            if *actual_cost == cost && *actual_balance == balance),
+                        "{err}"
+                    );
+                }
+            }
         }
     }
 }
