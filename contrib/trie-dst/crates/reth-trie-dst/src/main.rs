@@ -243,7 +243,7 @@ fn run(config: &mut Config, snapshotter: &Snapshotter) -> Result<()> {
     let runtime = RuntimeBuilder::new(RuntimeConfig {
         tokio: TokioConfig::with_worker_threads(2),
         rayon: RayonConfig {
-            cpu_threads: Some(2),
+            cpu_threads: Some(1),
             rpc_threads: Some(1),
             storage_threads: Some(2),
             proof_storage_worker_threads: Some(config.proof_workers),
