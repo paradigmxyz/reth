@@ -29,7 +29,7 @@ use std::{
     sync::Arc,
     time::{Duration, Instant},
 };
-use tracing::{debug, debug_span, error, instrument};
+use tracing::{debug, debug_span, instrument};
 
 pub use rpds::HashTrieMapSync;
 
@@ -260,18 +260,6 @@ impl ExecutionOverlay {
         for (address, account) in &reads.accounts {
             let storage = account.account.as_ref().into_iter().flat_map(|account| &account.storage);
             if let Some(writes) = state.state().get(address) {
-                if writes.info.as_ref() != account.account.as_ref().map(|account| &account.info) {
-                    error!(target: "storage::overlay::manager", block_number, %address, expected = ?writes.info.as_ref().map(|info| (info.nonce, info.balance, info.code_hash)), cached = ?account.account.as_ref().map(|account| (account.info.nonce, account.info.balance, account.info.code_hash)), "Executor cache differs from bundle account");
-                }
-                for (slot, value) in &writes.storage {
-                    if let Some(cached) =
-                        account.account.as_ref().and_then(|account| account.storage.get(slot)) &&
-                        *cached != value.present_value
-                    {
-                        error!(target: "storage::overlay::manager", block_number, %address, %slot, %cached, expected = %value.present_value, "Executor cache differs from bundle storage");
-                        break;
-                    }
-                }
                 self.extend_storage(
                     address,
                     false,
