@@ -1260,15 +1260,16 @@ jobs:
           fetch-depth: 0
           ref: ${{ steps.checkout-ref.outputs.ref }}
 
-      # Older candidates may not contain the chart project used by this workflow.
-      - name: Check out chart dependencies from workflow revision
-        if: env.BENCH_EXECUTION_MODE != 'call'
+      # Setup tools and chart dependencies must follow the workflow, including for older candidates.
+      - name: Check out dependencies from workflow revision
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: ${{ github.repository }}
           ref: ${{ github.workflow_sha }}
-          path: .bench-chart-workflow
-          sparse-checkout: scripts/bench-reth-charts
+          path: .bench-workflow
+          sparse-checkout: |
+            .github/scripts
+            scripts/bench-reth-charts
           persist-credentials: false
 
       - name: Initialize run summary and update status
@@ -1422,8 +1423,13 @@ jobs:
             chmod +x "$HOME/.local/bin/mc"
           fi
 
-          # llvm
-          .github/scripts/install_llvm.sh ubuntu
+          # Keep the candidate's LLVM version while using the workflow's fixed installer.
+          LLVM_VERSION=$(sed -n 's/^version=${2:-\([0-9][0-9]*\)}$/\1/p' .github/scripts/install_llvm.sh)
+          if ! [[ "$LLVM_VERSION" =~ ^[0-9]+$ ]]; then
+            echo "::error::Cannot determine the candidate's LLVM version"
+            exit 1
+          fi
+          "$GITHUB_WORKSPACE/.bench-workflow/.github/scripts/install_llvm.sh" ubuntu "$LLVM_VERSION"
 
           # uv (Python package manager)
           if ! command -v uv &>/dev/null; then
@@ -2173,7 +2179,7 @@ jobs:
           CHART_ARGS="$CHART_ARGS --baseline-name ${BASELINE_NAME}"
           CHART_ARGS="$CHART_ARGS --feature-name ${FEATURE_NAME}"
           # shellcheck disable=SC2086
-          uv run --frozen --project "$GITHUB_WORKSPACE/.bench-chart-workflow/scripts/bench-reth-charts" python3 .github/scripts/bench-reth-charts.py $CHART_ARGS
+          uv run --frozen --project "$GITHUB_WORKSPACE/.bench-workflow/scripts/bench-reth-charts" python3 .github/scripts/bench-reth-charts.py $CHART_ARGS
 
       - name: Upload chart attachments
         id: upload-charts
