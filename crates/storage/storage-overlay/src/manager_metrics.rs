@@ -1,5 +1,5 @@
 use reth_metrics::{
-    metrics::{Counter, Histogram},
+    metrics::{Counter, Gauge, Histogram},
     Metrics,
 };
 use std::time::Duration;
@@ -32,6 +32,18 @@ pub(crate) struct ExecutionOverlayMetrics {
     pub(crate) overlay_cache_fills: Counter,
     /// Time spent waiting for an in-progress overlay computation, in seconds.
     pub(crate) overlay_wait_duration_seconds: Histogram,
+    /// Blocks retained by the most recently computed execution overlay.
+    pub(crate) overlay_blocks: Gauge,
+    /// Accounts retained by the most recently computed execution overlay.
+    pub(crate) overlay_accounts: Gauge,
+    /// Storage-bearing accounts retained by the most recently computed execution overlay.
+    pub(crate) overlay_storage_accounts: Gauge,
+    /// Bytecodes retained by the most recently computed execution overlay.
+    pub(crate) overlay_bytecodes: Gauge,
+    /// Pruned snapshots published under a new persistence anchor.
+    pub(crate) overlay_prune_publications: Counter,
+    /// Pruned snapshots discarded because their source is no longer cached.
+    pub(crate) overlay_prune_discarded: Counter,
 }
 
 pub(crate) trait OverlayCacheMetrics {

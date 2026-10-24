@@ -385,10 +385,10 @@ impl<N: NodePrimitives> OverlayManager<N> {
             // snapshot, and publish before removing the old key so readers always have one.
             if self.execution_overlays.ready(&key).is_some_and(|old| Arc::ptr_eq(&old, &snapshot)) {
                 let new_key = OverlayCacheKey { anchor_hash: anchor.hash, tip_hash: key.tip_hash };
-                self.execution_overlays
-                    .entries
-                    .entry(new_key)
-                    .or_insert_with(|| OverlayCacheEntry::Ready(Arc::new(overlay)));
+                self.execution_overlays.entries.entry(new_key).or_insert_with(|| {
+                    self.execution_metrics.overlay_prune_publications.increment(1);
+                    OverlayCacheEntry::Ready(Arc::new(overlay))
+                });
                 self.execution_overlays.entries.remove_if(&key, |_, entry| {
                     matches!(entry, OverlayCacheEntry::Ready(old) if Arc::ptr_eq(old, &snapshot))
                 });
@@ -396,6 +396,8 @@ impl<N: NodePrimitives> OverlayManager<N> {
                 if !self.blocks.contains_key(&key.tip_hash) {
                     self.execution_overlays.entries.remove(&new_key);
                 }
+            } else {
+                self.execution_metrics.overlay_prune_discarded.increment(1);
             }
         }
         self.execution_metrics
@@ -1070,6 +1072,11 @@ fn compute_execution_overlay_inner<N: NodePrimitives>(
             overlay
         }
     };
+
+    metrics.overlay_blocks.set(overlay.block_hashes().len() as f64);
+    metrics.overlay_accounts.set(overlay.accounts().size() as f64);
+    metrics.overlay_storage_accounts.set(overlay.storage().size() as f64);
+    metrics.overlay_bytecodes.set(overlay.code_hashes().size() as f64);
 
     let elapsed = started_at.elapsed();
     metrics.overlay_computation_duration_seconds.record(elapsed.as_secs_f64());
