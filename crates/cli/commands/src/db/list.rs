@@ -133,10 +133,17 @@ impl<N: NodeTypes> TableViewer<()> for ListTableViewer<'_, N> {
                 Ok(())
             } else {
                 let list_filter = RefCell::new(list_filter);
-                DbListTUI::<_, T>::new(|skip, len| {
+                DbListTUI::new(Box::new(|skip, len| {
                     list_filter.borrow_mut().update_page(skip, len);
-                    self.tool.list::<T>(&list_filter.borrow()).unwrap().0
-                }, self.args.skip, self.args.len, total_entries, self.args.raw).run()
+                    self.tool.list::<T>(&list_filter.borrow()).unwrap().0.into_iter().map(|(key, value)| {
+                        let value = if self.args.raw {
+                            serde_json::to_string(RawValue::<T::Value>::from(value).raw_value())
+                        } else {
+                            serde_json::to_string_pretty(&value)
+                        };
+                        (format!("{key:?}"), value.unwrap_or_else(|error| format!("Error serializing value: {error}")))
+                    }).collect()
+                }), self.args.skip, self.args.len, total_entries).run()
             }
         })??;
 

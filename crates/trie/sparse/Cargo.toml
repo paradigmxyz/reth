@@ -40,12 +40,10 @@ reth-tracing.workspace = true
 
 arbitrary.workspace = true
 alloy-rlp.workspace = true
-itertools.workspace = true
 pretty_assertions.workspace = true
 proptest-arbitrary-interop.workspace = true
 proptest.workspace = true
 rand.workspace = true
-rand_08.workspace = true
 
 [features]
 dst = []

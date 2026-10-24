@@ -110,6 +110,11 @@ impl<TC, HC, VE: LeafValueEncoder> ProofCalculator<TC, HC, VE> {
         self.prefix_set = prefix_set;
         self
     }
+
+    /// Replaces the changed-key prefixes applied to subsequent calculations.
+    pub(super) fn set_prefix_set(&mut self, prefix_set: PrefixSet) {
+        self.prefix_set = prefix_set;
+    }
 }
 
 impl<TC, HC, VE> ProofCalculator<TC, HC, VE>
