@@ -98,6 +98,8 @@ where
         &self,
         trace_request: TraceCallRequest<RpcTxReq<Eth::NetworkTypes>>,
     ) -> Result<TraceResults, Eth::Error> {
+        let permit =
+            self.acquire_trace_permit().await.map_err(|_| EthApiError::InternalEthError)?;
         let at = trace_request.block_id.unwrap_or_default();
         let config = TracingInspectorConfig::from_parity_config(&trace_request.trace_types);
         let overrides =
@@ -106,6 +108,7 @@ where
         let this = self.clone();
         self.eth_api()
             .spawn_with_call_at(trace_request.call, at, overrides, move |db, evm_env, tx_env| {
+                let _permit = permit;
                 let res = this.eth_api().inspect(&mut *db, evm_env, tx_env, &mut inspector)?;
                 let trace_res = inspector
                     .into_parity_builder()
@@ -124,6 +127,8 @@ where
         trace_types: HashSet<TraceType>,
         block_id: Option<BlockId>,
     ) -> Result<TraceResults, Eth::Error> {
+        let permit =
+            self.acquire_trace_permit().await.map_err(|_| EthApiError::InternalEthError)?;
         let tx = self
             .eth_api()
             .recover_raw_transaction::<PoolPooledTx<Eth::Pool>>(&tx)?
@@ -133,6 +138,7 @@ where
 
         self.eth_api()
             .spawn_with_state_at_block(at, move |this, mut db| {
+                let _permit = permit;
                 let mut inspector =
                     TracingInspector::new(TracingInspectorConfig::from_parity_config(&trace_types));
                 let res = this.inspect(&mut db, evm_env, tx, &mut inspector)?;
@@ -154,12 +160,15 @@ where
         calls: Vec<(RpcTxReq<Eth::NetworkTypes>, HashSet<TraceType>)>,
         block_id: Option<BlockId>,
     ) -> Result<Vec<TraceResults>, Eth::Error> {
+        let permit =
+            self.acquire_trace_permit().await.map_err(|_| EthApiError::InternalEthError)?;
         let at = block_id.unwrap_or_default();
         let (evm_env, at) = self.eth_api().evm_env_at(at).await?;
 
         // execute all transactions on top of each other and record the traces
         self.eth_api()
             .spawn_with_state_at_block(at, move |eth_api, mut db| {
+                let _permit = permit;
                 let mut results = Vec::with_capacity(calls.len());
                 let mut calls = calls.into_iter().peekable();
 
@@ -202,9 +211,12 @@ where
         hash: B256,
         trace_types: HashSet<TraceType>,
     ) -> Result<Option<TraceResultsWithTransactionHash>, Eth::Error> {
+        let permit =
+            self.acquire_trace_permit().await.map_err(|_| EthApiError::InternalEthError)?;
         let config = TracingInspectorConfig::from_parity_config(&trace_types);
         self.eth_api()
             .spawn_trace_transaction_in_block(hash, config, move |_, inspector, res, db| {
+                let _permit = permit;
                 let trace_res = inspector
                     .into_parity_builder()
                     .into_trace_results_with_state(&res, &trace_types, &db)
@@ -225,11 +237,14 @@ where
         hash: B256,
         indices: Vec<usize>,
     ) -> Result<Option<LocalizedTransactionTrace>, Eth::Error> {
+        let permit =
+            self.acquire_trace_permit().await.map_err(|_| EthApiError::InternalEthError)?;
         self.eth_api()
             .spawn_trace_transaction_in_block(
                 hash,
                 TracingInspectorConfig::default_parity(),
                 move |tx_info, inspector, _, _| {
+                    let _permit = permit;
                     Ok(inspector
                         .into_parity_builder()
                         .into_localized_transaction_traces_iter(tx_info)
@@ -269,11 +284,14 @@ where
         &self,
         hash: B256,
     ) -> Result<Option<Vec<LocalizedTransactionTrace>>, Eth::Error> {
+        let permit =
+            self.acquire_trace_permit().await.map_err(|_| EthApiError::InternalEthError)?;
         self.eth_api()
             .spawn_trace_transaction_in_block(
                 hash,
                 TracingInspectorConfig::default_parity(),
                 move |tx_info, inspector, _, _| {
+                    let _permit = permit;
                     let traces =
                         inspector.into_parity_builder().into_localized_transaction_traces(tx_info);
                     Ok(traces)
@@ -288,11 +306,14 @@ where
         &self,
         tx_hash: B256,
     ) -> Result<Option<TransactionOpcodeGas>, Eth::Error> {
+        let permit =
+            self.acquire_trace_permit().await.map_err(|_| EthApiError::InternalEthError)?;
         self.eth_api()
             .spawn_trace_transaction_in_block_with_inspector(
                 tx_hash,
                 OpcodeGasInspector::default(),
                 move |_tx_info, inspector, _res, _| {
+                    let _permit = permit;
                     let trace = TransactionOpcodeGas {
                         transaction_hash: tx_hash,
                         opcode_gas: inspector.opcode_gas_iter().collect(),
@@ -523,6 +544,8 @@ where
         &self,
         block_id: BlockId,
     ) -> Result<Option<Vec<LocalizedTransactionTrace>>, Eth::Error> {
+        let permit =
+            self.acquire_trace_permit().await.map_err(|_| EthApiError::InternalEthError)?;
         let Some(block) = self.eth_api().recovered_block(block_id).await? else {
             return Err(EthApiError::HeaderNotFound(block_id).into());
         };
@@ -533,7 +556,8 @@ where
                 block_id,
                 Some(block.clone()),
                 TracingInspectorConfig::default_parity(),
-                |tx_info, mut ctx| {
+                move |tx_info, mut ctx| {
+                    let _permit = &permit;
                     let traces = ctx
                         .take_inspector()
                         .into_parity_builder()
@@ -564,12 +588,15 @@ where
         block_id: BlockId,
         trace_types: HashSet<TraceType>,
     ) -> Result<Option<Vec<TraceResultsWithTransactionHash>>, Eth::Error> {
+        let permit =
+            self.acquire_trace_permit().await.map_err(|_| EthApiError::InternalEthError)?;
         self.eth_api()
             .trace_block_with(
                 block_id,
                 None,
                 TracingInspectorConfig::from_parity_config(&trace_types),
                 move |tx_info, mut ctx| {
+                    let _permit = &permit;
                     let full_trace = ctx
                         .take_inspector()
                         .into_parity_builder()
@@ -599,6 +626,8 @@ where
         &self,
         block_id: BlockId,
     ) -> Result<Option<BlockOpcodeGas>, Eth::Error> {
+        let permit =
+            self.acquire_trace_permit().await.map_err(|_| EthApiError::InternalEthError)?;
         let Some(block) = self.eth_api().recovered_block(block_id).await? else {
             return Err(EthApiError::HeaderNotFound(block_id).into());
         };
@@ -610,6 +639,7 @@ where
                 Some(block.clone()),
                 OpcodeGasInspector::default,
                 move |tx_info, ctx| {
+                    let _permit = &permit;
                     let trace = TransactionOpcodeGas {
                         transaction_hash: tx_info.hash.expect("tx hash is set"),
                         opcode_gas: ctx.inspector.opcode_gas_iter().collect(),
@@ -714,7 +744,6 @@ where
         state_overrides: Option<StateOverride>,
         block_overrides: Option<Box<BlockOverrides>>,
     ) -> RpcResult<TraceResults> {
-        let _permit = self.acquire_trace_permit().await;
         let request =
             TraceCallRequest { call, trace_types, block_id, state_overrides, block_overrides };
         Ok(Self::trace_call(self, request).await.map_err(Into::into)?)
@@ -726,7 +755,6 @@ where
         calls: Vec<(RpcTxReq<Eth::NetworkTypes>, HashSet<TraceType>)>,
         block_id: Option<BlockId>,
     ) -> RpcResult<Vec<TraceResults>> {
-        let _permit = self.acquire_trace_permit().await;
         Ok(Self::trace_call_many(self, calls, block_id).await.map_err(Into::into)?)
     }
 
@@ -737,7 +765,6 @@ where
         trace_types: HashSet<TraceType>,
         block_id: Option<BlockId>,
     ) -> RpcResult<TraceResults> {
-        let _permit = self.acquire_trace_permit().await;
         Ok(Self::trace_raw_transaction(self, data, trace_types, block_id)
             .await
             .map_err(Into::into)?)
@@ -749,7 +776,6 @@ where
         block_id: BlockId,
         trace_types: HashSet<TraceType>,
     ) -> RpcResult<Option<Vec<TraceResultsWithTransactionHash>>> {
-        let _permit = self.acquire_trace_permit().await;
         Ok(Self::replay_block_transactions(self, block_id, trace_types)
             .await
             .map_err(Into::into)?)
@@ -761,7 +787,6 @@ where
         transaction: B256,
         trace_types: HashSet<TraceType>,
     ) -> RpcResult<Option<TraceResultsWithTransactionHash>> {
-        let _permit = self.acquire_trace_permit().await;
         Ok(Self::replay_transaction(self, transaction, trace_types).await.map_err(Into::into)?)
     }
 
@@ -770,7 +795,6 @@ where
         &self,
         block_id: BlockId,
     ) -> RpcResult<Option<Vec<LocalizedTransactionTrace>>> {
-        let _permit = self.acquire_trace_permit().await;
         Ok(Self::trace_block(self, block_id).await.map_err(Into::into)?)
     }
 
@@ -791,7 +815,6 @@ where
         hash: B256,
         indices: Vec<Index>,
     ) -> RpcResult<Option<LocalizedTransactionTrace>> {
-        let _permit = self.acquire_trace_permit().await;
         Ok(Self::trace_get(self, hash, indices.into_iter().map(Into::into).collect())
             .await
             .map_err(Into::into)?)
@@ -802,7 +825,6 @@ where
         &self,
         hash: B256,
     ) -> RpcResult<Option<Vec<LocalizedTransactionTrace>>> {
-        let _permit = self.acquire_trace_permit().await;
         Ok(Self::trace_transaction(self, hash).await.map_err(Into::into)?)
     }
 
@@ -811,13 +833,11 @@ where
         &self,
         tx_hash: B256,
     ) -> RpcResult<Option<TransactionOpcodeGas>> {
-        let _permit = self.acquire_trace_permit().await;
         Ok(Self::trace_transaction_opcode_gas(self, tx_hash).await.map_err(Into::into)?)
     }
 
     /// Handler for `trace_blockOpcodeGas`
     async fn trace_block_opcode_gas(&self, block_id: BlockId) -> RpcResult<Option<BlockOpcodeGas>> {
-        let _permit = self.acquire_trace_permit().await;
         Ok(Self::trace_block_opcode_gas(self, block_id).await.map_err(Into::into)?)
     }
 }
