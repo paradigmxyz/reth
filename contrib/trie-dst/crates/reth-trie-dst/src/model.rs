@@ -11,13 +11,17 @@ use reth_primitives_traits::Account;
 use reth_trie::{HashedPostState, HashedStorage};
 use revm::{database::BundleState, state::AccountInfo};
 use serde::{Deserialize, Serialize};
-use std::collections::{BTreeMap, BTreeSet};
+use std::{
+    cell::Cell,
+    collections::{BTreeMap, BTreeSet},
+};
 
 #[derive(Clone, Debug, Default)]
 pub struct ModelAccount {
     pub account: Account,
     pub storage: BTreeMap<U256, U256>,
     hashed_storage: BTreeMap<B256, Vec<u8>>,
+    storage_root: Cell<Option<B256>>,
     pub touched_slots: BTreeSet<U256>,
 }
 
@@ -40,6 +44,7 @@ impl Update {
             }
             Self::Storage { address, slot, value } => {
                 let entry = state.get_mut(address).expect("storage account exists");
+                entry.storage_root.set(None);
                 entry.touched_slots.insert(*slot);
                 let hashed_slot = keccak256(B256::from(*slot));
                 if value.is_zero() {
@@ -170,11 +175,16 @@ pub fn apply(
 }
 
 pub fn storage_root(account: &ModelAccount) -> B256 {
+    if let Some(root) = account.storage_root.get() {
+        return root;
+    }
     let mut builder = HashBuilder::default();
     for (key, value) in &account.hashed_storage {
         builder.add_leaf(Nibbles::unpack(*key), value);
     }
-    builder.root()
+    let root = builder.root();
+    account.storage_root.set(Some(root));
+    root
 }
 
 pub fn root(state: &Model) -> B256 {
