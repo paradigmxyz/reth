@@ -116,10 +116,22 @@ pub fn apply(
     number: u64,
     operations: &[Update],
 ) -> (BundleState, Vec<HashedPostState>) {
-    let before = state.clone();
+    let mut before_accounts = BTreeMap::new();
+    let mut before_storage = BTreeMap::new();
     let mut touched = BTreeMap::<Address, BTreeSet<U256>>::new();
     let mut stream = Vec::new();
     for operation in operations {
+        let address = match operation {
+            Update::Account { address, .. } | Update::Storage { address, .. } => *address,
+        };
+        before_accounts
+            .entry(address)
+            .or_insert_with(|| state.get(&address).map(|a| a.account.to_owned()));
+        if let Update::Storage { slot, .. } = operation {
+            before_storage.entry((address, *slot)).or_insert_with(|| {
+                state.get(&address).and_then(|a| a.storage.get(slot)).copied().unwrap_or_default()
+            });
+        }
         let (address, delta) = operation.apply(state);
         let slots = touched.entry(address).or_default();
         if let Update::Storage { slot, .. } = operation {
@@ -130,7 +142,7 @@ pub fn apply(
 
     let mut bundle = BundleState::builder(number..=number);
     for (address, slots) in touched {
-        let old = before.get(&address);
+        let old = before_accounts[&address].as_ref();
         let current = &state[&address];
         let info = AccountInfo {
             balance: current.account.balance,
@@ -139,10 +151,10 @@ pub fn apply(
             ..Default::default()
         };
         bundle = bundle.state_present_account_info(address, info);
-        let old_info = old.map(|entry| AccountInfo {
-            balance: entry.account.balance,
-            nonce: entry.account.nonce,
-            code_hash: entry.account.bytecode_hash.unwrap_or(KECCAK256_EMPTY),
+        let old_info = old.map(|account| AccountInfo {
+            balance: account.balance,
+            nonce: account.nonce,
+            code_hash: account.bytecode_hash.unwrap_or(KECCAK256_EMPTY),
             ..Default::default()
         });
         if let Some(info) = &old_info {
@@ -152,8 +164,7 @@ pub fn apply(
         let storage = slots
             .into_iter()
             .map(|slot| {
-                let original =
-                    old.and_then(|entry| entry.storage.get(&slot)).copied().unwrap_or_default();
+                let original = before_storage[&(address, slot)];
                 let present = current.storage.get(&slot).copied().unwrap_or_default();
                 (slot, (original, present))
             })
