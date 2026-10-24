@@ -93,7 +93,6 @@ jemalloc = [
     "reth-cli-util/jemalloc",
     "reth-node-core/jemalloc",
     "reth-ethereum-cli/jemalloc",
-    "reth-provider/jemalloc",
 ]
 
 asm-keccak = [
