@@ -14,3 +14,7 @@ rustflags = [
     # in line with Linux (whereas default for Windows is 1MB)
     "-Clink-arg=/STACK:10000000",
 ]
+
+# Keep the experimental pass enabled when benchmark runners set RUSTFLAGS.
+[build]
+rustc = "./.cargo/rustc-mir-move-elimination.sh"
