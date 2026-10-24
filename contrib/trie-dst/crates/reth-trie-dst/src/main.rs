@@ -269,7 +269,8 @@ fn run(config: &mut Config, snapshotter: &Snapshotter) -> Result<()> {
         .take()
         .unwrap_or_else(|| Input::generate(config.seed, config.blocks, config.updates));
     input.validate()?;
-    let input_blocks = input.blocks();
+    let input_blocks =
+        input.operations.split_inclusive(|op| matches!(op, Operation::Commit)).collect::<Vec<_>>();
     let mut total_blocks = input_blocks.len() as u64;
     let overrides_path = datadir.join("input-overrides.json");
     #[derive(Default, Serialize, Deserialize)]
@@ -304,8 +305,10 @@ fn run(config: &mut Config, snapshotter: &Snapshotter) -> Result<()> {
                 Err(error) => return Err(error.into()),
             };
             ensure!((1..=total_blocks).contains(&block.number), "journal block out of range");
-            if let Some(previous) = journal.insert(block.number, block.clone()) {
-                ensure!(previous == block, "conflicting journal block {}", block.number);
+            if let Some(previous) = journal.get(&block.number) {
+                ensure!(previous == &block, "conflicting journal block {}", block.number);
+            } else {
+                journal.insert(block.number, block);
             }
         }
     }
@@ -548,13 +551,13 @@ fn run(config: &mut Config, snapshotter: &Snapshotter) -> Result<()> {
             let block = overrides
                 .blocks
                 .get(&number)
-                .unwrap_or_else(|| &input_blocks[number as usize - 1])
-                .clone();
-            let record = serde_json::to_vec(&JournalBlock { number, operations: block.clone() })?;
+                .map_or_else(|| input_blocks[number as usize - 1].to_vec(), Clone::clone);
+            let journal_block = JournalBlock { number, operations: block };
+            let record = serde_json::to_vec(&journal_block)?;
             journal_file.write_all(b"\n")?;
             journal_file.write_all(&record)?;
             journal_file.write_all(b"\n")?;
-            block
+            journal_block.operations
         };
         let updates_input = operations
             .iter()
