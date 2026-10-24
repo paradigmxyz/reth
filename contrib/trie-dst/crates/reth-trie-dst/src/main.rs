@@ -37,7 +37,7 @@ use reth_provider::{
 use reth_stages_types::StageId;
 use reth_storage_overlay::{OverlayManager, OverlayStateProviderFactory};
 use reth_tasks::{RayonConfig, RuntimeBuilder, RuntimeConfig, TokioConfig};
-use reth_trie::{HashedPostState, SortedTrieData};
+use reth_trie::{HashedPostState, MultiProofTargets, SortedTrieData};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::{
@@ -114,29 +114,40 @@ fn verify(factory: &ProviderFactory<Node>, state: &Model, tip: u64, state_tip: u
     )
     .database_provider_ro()?;
     let expected_root = root(state);
-    for (address, entry) in state {
+    let slots_by_account = state
+        .values()
+        .map(|entry| {
+            entry
+                .touched_slots
+                .iter()
+                .copied()
+                .chain([U256::ZERO, U256::from(u32::MAX)])
+                .collect::<BTreeSet<_>>()
+                .into_iter()
+                .map(B256::from)
+                .collect::<Vec<_>>()
+        })
+        .collect::<Vec<_>>();
+    let targets = state
+        .keys()
+        .zip(&slots_by_account)
+        .map(|(address, slots)| (keccak256(address), slots.iter().map(keccak256).collect()))
+        .collect::<MultiProofTargets>();
+    let multiproof = view.multiproof(Default::default(), targets)?;
+    for ((address, entry), slots) in state.iter().zip(&slots_by_account) {
         ensure!(
             view.basic_account(address)?.as_ref() == Some(&entry.account),
             "plain account {address} at {tip}"
         );
         // Include deleted slots and both range endpoints, not only surviving leaves.
-        let slots = entry
-            .touched_slots
-            .iter()
-            .copied()
-            .chain([U256::ZERO, U256::from(u32::MAX)])
-            .collect::<BTreeSet<_>>()
-            .into_iter()
-            .map(B256::from)
-            .collect::<Vec<_>>();
-        for slot in &slots {
+        for slot in slots {
             ensure!(
                 view.storage(*address, *slot)?.unwrap_or_default() ==
                     entry.storage.get(&U256::from_be_bytes(slot.0)).copied().unwrap_or_default(),
                 "plain storage {address}/{slot} at {tip}"
             );
         }
-        let proof = view.proof(Default::default(), *address, &slots)?;
+        let proof = multiproof.account_proof(*address, slots)?;
         ensure!(proof.info.as_ref() == Some(&entry.account), "proof account {address} at {tip}");
         ensure!(proof.storage_root == storage_root(entry), "proof storage root {address} at {tip}");
         proof.verify(expected_root)?;
