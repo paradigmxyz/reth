@@ -10,7 +10,7 @@ use alloy_rpc_types_eth::{
     BlockOverrides, Index,
 };
 use alloy_rpc_types_trace::{
-    filter::TraceFilter,
+    filter::{TraceFilter, TraceFilterBlockOption},
     opcode::{BlockOpcodeGas, TransactionOpcodeGas},
     parity::*,
     tracerequest::TraceCallRequest,
@@ -366,14 +366,29 @@ where
     /// Returns all transaction traces that match the given filter.
     ///
     /// This is similar to [`Self::trace_block`] but only returns traces for transactions that match
-    /// the filter. Omitted range bounds default to the latest block.
+    /// the filter. Omitted range bounds default to the latest block, and a `blockHash` selects
+    /// exactly that canonical block.
     pub async fn trace_filter(
         &self,
         filter: TraceFilter,
     ) -> Result<Vec<LocalizedTransactionTrace>, Eth::Error> {
         // We'll reuse the matcher across multiple blocks that are traced in parallel
         let matcher = Arc::new(filter.matcher());
-        let TraceFilter { from_block, to_block, mut after, count, .. } = filter;
+        let block_option =
+            filter.block_option().map_err(|err| EthApiError::InvalidParams(err.to_string()))?;
+        let TraceFilter { mut after, count, .. } = filter;
+
+        let (from_block, to_block, block_hash) = match block_option {
+            TraceFilterBlockOption::Range { from_block, to_block } => (from_block, to_block, None),
+            TraceFilterBlockOption::AtBlockHash(hash) => {
+                let number = self
+                    .provider()
+                    .block_number(hash)
+                    .map_err(Eth::Error::from_eth_err)?
+                    .ok_or(EthApiError::HeaderNotFound(hash.into()))?;
+                (Some(number), Some(number), Some(hash))
+            }
+        };
 
         let latest_block = self.provider().best_block_number().map_err(Eth::Error::from_eth_err)?;
         let start = from_block.unwrap_or(latest_block);
@@ -429,6 +444,13 @@ where
                         .provider()
                         .recovered_block_range(chunk_start..=chunk_end)
                         .map_err(Eth::Error::from_eth_err)?;
+
+                    // A block selected by hash must still be canonical at its number.
+                    if let Some(hash) = block_hash &&
+                        blocks.first().is_none_or(|block| block.hash() != hash)
+                    {
+                        return Err(EthApiError::HeaderNotFound(hash.into()).into())
+                    }
 
                     Ok(blocks.into_iter().map(Arc::new).collect::<Vec<_>>())
                 })
@@ -969,6 +991,67 @@ mod tests {
                 "message": "invalid parameters: fromBlock cannot be greater than toBlock",
             })
         );
+    }
+
+    #[tokio::test]
+    async fn trace_filter_selects_block_by_hash() {
+        // Paris is not active at genesis, so block 1 carries a block reward.
+        let genesis = Genesis::default().with_gas_limit(30_000_000);
+        let chain_spec = Arc::new(ChainSpecBuilder::mainnet().genesis(genesis).build());
+        let factory = create_test_provider_factory_with_chain_spec(chain_spec);
+        let genesis_hash = init_genesis(&factory).unwrap();
+        let block = Block {
+            header: Header {
+                parent_hash: genesis_hash,
+                number: 1,
+                gas_limit: 30_000_000,
+                ..Default::default()
+            },
+            body: BlockBody::default(),
+        }
+        .seal_slow();
+        let block_hash = block.hash();
+        let provider_rw = factory.provider_rw().unwrap();
+        provider_rw.insert_block(&block.try_recover().unwrap()).unwrap();
+        provider_rw.update_pipeline_stages(1, false).unwrap();
+        provider_rw.commit().unwrap();
+
+        let provider = BlockchainProvider::new(factory).unwrap();
+        let eth_api = EthApiBuilder::new(
+            provider.clone(),
+            testing_pool(),
+            NoopNetwork::default(),
+            EthEvmConfig::new(provider.chain_spec()),
+        )
+        .build();
+        let api = TraceApi::new(eth_api, BlockingTaskGuard::new(1), EthConfig::default());
+
+        let by_hash =
+            api.trace_filter(TraceFilter::default().block_hash(block_hash)).await.unwrap();
+        assert_eq!(trace_order(&by_hash), [(1, None, true)]);
+        assert_eq!(
+            by_hash,
+            api.trace_filter(TraceFilter::default().from_block(1).to_block(1)).await.unwrap()
+        );
+        assert_eq!(
+            api.trace_filter(TraceFilter::default().block_hash(genesis_hash)).await.unwrap(),
+            vec![]
+        );
+
+        let err = api
+            .trace_filter(TraceFilter::default().block_hash(B256::repeat_byte(0xff)))
+            .await
+            .unwrap_err();
+        assert!(matches!(err, EthApiError::HeaderNotFound(_)), "{err}");
+
+        let module = api.into_rpc();
+        let request = serde_json::json!({
+            "jsonrpc": "2.0", "id": 1, "method": "trace_filter",
+            "params": [{"blockHash": block_hash, "fromBlock": "0x1"}],
+        });
+        let (response, _) = module.raw_json_request(&request.to_string(), 1).await.unwrap();
+        let response: serde_json::Value = serde_json::from_str(response.get()).unwrap();
+        assert_eq!(response["error"]["code"], -32602);
     }
 
     #[tokio::test]
