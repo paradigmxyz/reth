@@ -3,6 +3,7 @@ use alloy_primitives::{
     map::{AddressMap, HashMap},
     Address, BlockNumber, TxNumber, B256,
 };
+use rayon::prelude::*;
 use reth_config::config::EtlConfig;
 use reth_db_api::{
     cursor::{DbCursorRO, DbCursorRW},
@@ -10,24 +11,28 @@ use reth_db_api::{
         sharded_key::NUM_OF_INDICES_IN_SHARD, storage_sharded_key::StorageShardedKey,
         AccountBeforeTx, AddressStorageKey, BlockNumberAddress, ShardedKey,
     },
-    table::{Decode, Decompress, Table},
+    table::{Decode, Decompress, Key, Table},
     transaction::DbTx,
     BlockNumberList,
 };
 use reth_etl::Collector;
 use reth_primitives_traits::NodePrimitives;
 use reth_provider::{
-    providers::StaticFileProvider, to_range, BlockReader, DBProvider, EitherWriter, ProviderError,
+    providers::{RocksDBProvider, StaticFileProvider},
+    to_range, BlockReader, DBProvider, EitherWriter, ProviderError, ProviderResult,
     StaticFileProviderFactory,
 };
 use reth_stages_api::StageError;
 use reth_static_file_types::StaticFileSegment;
 use reth_storage_api::{ChangeSetReader, StorageChangeSetReader};
-use std::{hash::Hash, ops::RangeBounds};
+use std::{hash::Hash, mem, ops::RangeBounds};
 use tracing::info;
 
 /// Number of blocks before pushing indices from cache to [`Collector`]
 const DEFAULT_CACHE_THRESHOLD: u64 = 100_000;
+
+/// Number of block indices grouped before reading their last shards in parallel.
+const PARALLEL_LOAD_CHUNK_INDICES: usize = 100_000;
 
 /// Collects all history (`H`) indices for a range of changesets (`CS`) and stores them in a
 /// [`Collector`].
@@ -622,4 +627,170 @@ where
 
     list.clear();
     Ok(())
+}
+
+/// Loads account history into `RocksDB` on incremental sync, reading last shards in parallel.
+///
+/// Each address is merged with its committed last shard via
+/// [`RocksDBProvider::account_history_shards_to_put`], so this must only be used with a `RocksDB`
+/// writer.
+pub(crate) fn load_account_history_parallel<N, CURSOR>(
+    collector: Collector<ShardedKey<Address>, BlockNumberList>,
+    rocksdb: &RocksDBProvider,
+    writer: &mut EitherWriter<'_, CURSOR, N>,
+) -> Result<(), StageError>
+where
+    N: NodePrimitives,
+    CURSOR: DbCursorRW<reth_db_api::tables::AccountsHistory>
+        + DbCursorRO<reth_db_api::tables::AccountsHistory>,
+{
+    load_history_parallel(
+        collector,
+        PARALLEL_LOAD_CHUNK_INDICES,
+        |key: &ShardedKey<Address>| key.key,
+        |address, indices| rocksdb.account_history_shards_to_put(address, indices),
+        |key, value| writer.upsert_account_history(key, value),
+    )
+}
+
+/// Loads storage history into `RocksDB` on incremental sync, reading last shards in parallel.
+///
+/// Each slot is merged with its committed last shard via
+/// [`RocksDBProvider::storage_history_shards_to_put`], so this must only be used with a `RocksDB`
+/// writer.
+pub(crate) fn load_storage_history_parallel<N, CURSOR>(
+    collector: Collector<StorageShardedKey, BlockNumberList>,
+    rocksdb: &RocksDBProvider,
+    writer: &mut EitherWriter<'_, CURSOR, N>,
+) -> Result<(), StageError>
+where
+    N: NodePrimitives,
+    CURSOR: DbCursorRW<reth_db_api::tables::StoragesHistory>
+        + DbCursorRO<reth_db_api::tables::StoragesHistory>,
+{
+    load_history_parallel(
+        collector,
+        PARALLEL_LOAD_CHUNK_INDICES,
+        |key: &StorageShardedKey| (key.address, key.sharded_key.key),
+        |(address, slot), indices| rocksdb.storage_history_shards_to_put(address, slot, indices),
+        |key, value| writer.upsert_storage_history(key, value),
+    )
+}
+
+/// Groups the sorted collector by logical key into chunks of about `chunk_indices` block indices,
+/// prepares each chunk's shards in parallel, then writes them.
+///
+/// `shards_to_put` reads committed state only. A key never spans two chunks, so no read can miss
+/// a pending write for the same key.
+fn load_history_parallel<K, P>(
+    mut collector: Collector<K, BlockNumberList>,
+    chunk_indices: usize,
+    partial_key: impl Fn(&K) -> P,
+    shards_to_put: impl Fn(P, Vec<u64>) -> ProviderResult<Vec<(K, BlockNumberList)>> + Sync,
+    mut put: impl FnMut(K, &BlockNumberList) -> ProviderResult<()>,
+) -> Result<(), StageError>
+where
+    K: Key + Send,
+    P: Copy + Eq + Send,
+{
+    let mut flush = |chunk: Vec<(P, Vec<u64>)>| -> Result<(), StageError> {
+        let shards = chunk
+            .into_par_iter()
+            .map(|(key, indices)| shards_to_put(key, indices))
+            .collect::<ProviderResult<Vec<_>>>()?;
+        for (key, shard) in shards.into_iter().flatten() {
+            put(key, &shard)?;
+        }
+        Ok(())
+    };
+
+    let mut chunk = Vec::<(P, Vec<u64>)>::new();
+    let mut chunk_len = 0;
+
+    let total_entries = collector.len();
+    let interval = (total_entries / 10).max(1);
+
+    for (index, element) in collector.iter()?.enumerate() {
+        let (k, v) = element?;
+        let key = K::decode_owned(k)?;
+        let new_list = BlockNumberList::decompress_owned(v)?;
+
+        if index > 0 && index.is_multiple_of(interval) && total_entries > 10 {
+            info!(target: "sync::stages::index_history", progress = %format_args!("{:.2}%", (index as f64 / total_entries as f64) * 100.0), "Writing indices");
+        }
+
+        let partial_key = partial_key(&key);
+        if let Some((last_key, indices)) = chunk.last_mut() &&
+            *last_key == partial_key
+        {
+            indices.extend(new_list.iter());
+        } else {
+            // Only split at a key boundary.
+            if chunk_len >= chunk_indices {
+                flush(mem::take(&mut chunk))?;
+                chunk_len = 0;
+            }
+            chunk.push((partial_key, new_list.iter().collect()));
+        }
+        chunk_len += new_list.len() as usize;
+    }
+
+    flush(chunk)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::Mutex;
+
+    #[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
+    enum Event {
+        Prepare(u8, Vec<u64>),
+        Write(u8),
+    }
+
+    /// Chunks split only at key boundaries, and a key's rows spread across ETL files are merged
+    /// before its last shard is read.
+    #[test]
+    fn load_history_parallel_splits_at_key_boundaries() {
+        // A one-byte buffer puts every row in its own ETL file.
+        let mut collector = Collector::new(1, None);
+        for (byte, blocks) in [(1, &[1, 2][..]), (1, &[3]), (2, &[1]), (3, &[1, 2, 3]), (4, &[4])] {
+            let key = ShardedKey::new(Address::repeat_byte(byte), *blocks.last().unwrap());
+            collector.insert(key, BlockNumberList::new_pre_sorted(blocks.iter().copied())).unwrap();
+        }
+
+        let events = Mutex::new(Vec::new());
+        load_history_parallel(
+            collector,
+            2,
+            |key: &ShardedKey<Address>| key.key,
+            |address, indices| {
+                events.lock().unwrap().push(Event::Prepare(address[0], indices.clone()));
+                Ok(vec![(ShardedKey::last(address), BlockNumberList::new_pre_sorted(indices))])
+            },
+            |key, _| {
+                events.lock().unwrap().push(Event::Write(key.key[0]));
+                Ok(())
+            },
+        )
+        .unwrap();
+
+        // Prepares within a chunk run in parallel, so their order is not fixed.
+        let mut events = events.into_inner().unwrap();
+        events[2..4].sort();
+        assert_eq!(
+            events,
+            vec![
+                Event::Prepare(1, vec![1, 2, 3]),
+                Event::Write(1),
+                Event::Prepare(2, vec![1]),
+                Event::Prepare(3, vec![1, 2, 3]),
+                Event::Write(2),
+                Event::Write(3),
+                Event::Prepare(4, vec![4]),
+                Event::Write(4),
+            ]
+        );
+    }
 }
