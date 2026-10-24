@@ -60,7 +60,7 @@ async fn exex_receives_reorgs() -> eyre::Result<()> {
 }
 
 /// An `ExEx` whose head was reorged out before it processed the reorg gets the head reverted from
-/// the WAL after a restart, then the new canonical blocks backfilled.
+/// the WAL after a restart, then the new canonical blocks backfilled before resuming live delivery.
 #[tokio::test]
 async fn exex_reverts_orphaned_head_from_wal_after_restart() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
@@ -105,10 +105,13 @@ async fn exex_reverts_orphaned_head_from_wal_after_restart() -> eyre::Result<()>
     // The ExEx does not process the reorg, so its head stays at the orphaned block.
     let b1 = node.advance_block_on(genesis).await?.block().hash();
 
-    let node = node.restart().await?;
+    let mut node = node.restart().await?;
     assert_eq!(node.block_hash(1), b1);
     assert_eq!(recv_block_hashes(&mut notifications_rx).await?, (Some(vec![a1]), None));
     assert_eq!(recv_block_hashes(&mut notifications_rx).await?, (None, Some(vec![b1])));
+
+    let b2 = node.advance_block().await?.block().hash();
+    assert_eq!(recv_block_hashes(&mut notifications_rx).await?, (None, Some(vec![b2])));
 
     Ok(())
 }
