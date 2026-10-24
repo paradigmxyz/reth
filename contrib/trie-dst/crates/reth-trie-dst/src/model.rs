@@ -17,6 +17,7 @@ use std::collections::{BTreeMap, BTreeSet};
 pub struct ModelAccount {
     pub account: Account,
     pub storage: BTreeMap<U256, U256>,
+    hashed_storage: BTreeMap<B256, Vec<u8>>,
     pub touched_slots: BTreeSet<U256>,
 }
 
@@ -40,16 +41,17 @@ impl Update {
             Self::Storage { address, slot, value } => {
                 let entry = state.get_mut(address).expect("storage account exists");
                 entry.touched_slots.insert(*slot);
+                let hashed_slot = keccak256(B256::from(*slot));
                 if value.is_zero() {
                     entry.storage.remove(slot);
+                    entry.hashed_storage.remove(&hashed_slot);
                 } else {
                     entry.storage.insert(*slot, *value);
+                    entry.hashed_storage.insert(hashed_slot, alloy_rlp::encode(value));
                 }
                 delta.storages.insert(
                     keccak256(address),
-                    HashedStorage {
-                        storage: HashMap::from_iter([(keccak256(B256::from(*slot)), *value)]),
-                    },
+                    HashedStorage { storage: HashMap::from_iter([(hashed_slot, *value)]) },
                 );
                 *address
             }
@@ -166,14 +168,9 @@ pub fn apply(
 }
 
 pub fn storage_root(account: &ModelAccount) -> B256 {
-    let leaves = account
-        .storage
-        .iter()
-        .map(|(slot, value)| (keccak256(B256::from(*slot)), alloy_rlp::encode(value)))
-        .collect::<BTreeMap<_, _>>();
     let mut builder = HashBuilder::default();
-    for (key, value) in leaves {
-        builder.add_leaf(Nibbles::unpack(key), &value);
+    for (key, value) in &account.hashed_storage {
+        builder.add_leaf(Nibbles::unpack(*key), value);
     }
     builder.root()
 }
