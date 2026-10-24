@@ -902,11 +902,6 @@ pub trait Call:
             evm_env.cfg_env.tx_gas_limit_cap = Some(u64::MAX);
         }
 
-        // Disable additional fee charges, e.g. opstack operator fee charge
-        // See:
-        // <https://github.com/paradigmxyz/reth/issues/18470>
-        evm_env.cfg_env.disable_fee_charge = true;
-
         evm_env.cfg_env.memory_limit = self.evm_memory_limit();
 
         // set nonce to None so that the correct nonce is chosen by the EVM
@@ -925,6 +920,10 @@ pub trait Call:
         // lower the basefee to 0 to avoid breaking EVM invariants (basefee < gasprice): <https://github.com/ethereum/go-ethereum/blob/355228b011ef9a85ebc0f21e7196f892038d49f0/internal/ethapi/api.go#L700-L704>
         if tx_env.gas_price() == 0 {
             evm_env.block_env.inner_mut().basefee = 0;
+            // An unpriced call pays no fees, including additional ones such as the opstack
+            // operator fee: <https://github.com/paradigmxyz/reth/issues/18470>. A priced call is
+            // funded and charged like a transaction.
+            evm_env.cfg_env.disable_fee_charge = true;
         }
 
         if !request_has_gas_limit {
