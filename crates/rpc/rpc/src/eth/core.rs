@@ -1455,7 +1455,7 @@ mod tests {
                     (
                         sender,
                         AccountOverride {
-                            balance: Some(U256::from(if transfer { 20_000 } else { 50_000 })),
+                            balance: Some(U256::from(if transfer { 21_000 } else { 50_000 })),
                             ..Default::default()
                         },
                     ),
@@ -1490,6 +1490,101 @@ mod tests {
                         "{err}"
                     );
                 }
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn estimate_gas_transfer_respects_sender_allowance() {
+        let sender = Address::repeat_byte(0x11);
+        let target = Address::repeat_byte(0xaa);
+        let provider = MockEthProvider::default()
+            .with_chain_spec(ChainSpecBuilder::mainnet().osaka_activated().build());
+        provider.add_block(
+            B256::repeat_byte(0x42),
+            Block {
+                header: Header {
+                    number: 1,
+                    gas_limit: 100_000,
+                    base_fee_per_gas: Some(7),
+                    excess_blob_gas: Some(0),
+                    ..Default::default()
+                },
+                body: BlockBody::default(),
+            },
+        );
+        let api = build_test_eth_api_with_gas_cap(provider, 100_000);
+        for dynamic_fee in [false, true] {
+            let price = if dynamic_fee { 8 } else { 1 };
+            for value in [0, 1_000] {
+                for allowance in [20_000, 20_999, 21_000, 30_000] {
+                    for gas in [None, Some(20_999), Some(30_000)] {
+                        let request = TransactionRequest {
+                            gas,
+                            gas_price: (!dynamic_fee).then_some(price),
+                            max_fee_per_gas: dynamic_fee.then_some(price),
+                            max_priority_fee_per_gas: dynamic_fee.then_some(1),
+                            value: Some(U256::from(value)),
+                            ..TransactionRequest::default().with_from(sender).with_to(target)
+                        };
+                        let overrides = StateOverride::from_iter([
+                            (
+                                sender,
+                                AccountOverride {
+                                    balance: Some(U256::from(value + allowance * price)),
+                                    ..Default::default()
+                                },
+                            ),
+                            (
+                                target,
+                                AccountOverride { code: Some(Bytes::new()), ..Default::default() },
+                            ),
+                        ]);
+                        let result = EthCall::estimate_gas_at(
+                            &api,
+                            request,
+                            BlockId::latest(),
+                            EvmOverrides::state(Some(overrides)),
+                        )
+                        .await;
+                        if allowance >= 21_000 {
+                            assert_eq!(result.unwrap(), U256::from(21_000));
+                        } else {
+                            let err = result.unwrap_err();
+                            assert!(
+                                matches!(
+                                    err.as_invalid_transaction(),
+                                    Some(RpcInvalidTransactionError::GasRequiredExceedsAllowance { gas_limit })
+                                        if *gas_limit == allowance as u64
+                                ),
+                                "{err}"
+                            );
+                        }
+                    }
+                }
+            }
+        }
+
+        for value in [0, 1_000] {
+            for gas in [20_999, 21_000, 30_000] {
+                let request = TransactionRequest {
+                    gas: Some(gas),
+                    gas_price: Some(0),
+                    value: Some(U256::from(value)),
+                    ..TransactionRequest::default().with_from(sender).with_to(target)
+                };
+                let overrides = StateOverride::from_iter([(
+                    sender,
+                    AccountOverride { balance: Some(U256::from(value)), ..Default::default() },
+                )]);
+                let result = EthCall::estimate_gas_at(
+                    &api,
+                    request,
+                    BlockId::latest(),
+                    EvmOverrides::state(Some(overrides)),
+                )
+                .await;
+                assert_eq!(result.unwrap(), U256::from(21_000));
             }
         }
     }

@@ -123,10 +123,12 @@ pub trait EstimateCall: Call {
         // Check funds of the sender (only useful to check if transaction gas price is more than 0).
         //
         // The caller allowance is check by doing `(account.balance - tx.value) / tx.gas_price`
-        if request_gas_price > 0 {
-            let allowance = self.caller_gas_allowance(&mut db, &evm_env, &tx_env)?;
-            highest_gas_limit = highest_gas_limit.min(allowance);
-        }
+        let allowance = if request_gas_price > 0 {
+            self.caller_gas_allowance(&mut db, &evm_env, &tx_env)?
+        } else {
+            u64::MAX
+        };
+        highest_gas_limit = highest_gas_limit.min(allowance);
 
         trace!(target: "rpc::eth::estimate", ?tx_env, gas_limit = highest_gas_limit, is_basic_transfer, "Starting gas estimation");
 
@@ -138,7 +140,7 @@ pub trait EstimateCall: Call {
 
         // For basic transfers, try using minimum gas before running full binary search
         if is_basic_transfer &&
-            let Ok(res) = execute(MIN_TRANSACTION_GAS.min(max_gas_limit)) &&
+            let Ok(res) = execute(MIN_TRANSACTION_GAS.min(max_gas_limit).min(allowance)) &&
             res.status
         {
             return Ok(U256::from(res.tx_gas_used()))
