@@ -751,14 +751,15 @@ fn main() -> Result<()> {
         Some("mutation-sites") => {
             let mut request = Vec::new();
             std::io::stdin().read_to_end(&mut request)?;
-            let mut value: serde_json::Value = serde_json::from_slice(&request)?;
-            let input: Input = match std::mem::take(&mut value["input"]) {
-                serde_json::Value::String(text) => serde_json::from_str(&text)?,
-                input => serde_json::from_value(input)?,
-            };
+            #[derive(Deserialize)]
+            struct Request {
+                input: String,
+                operator: String,
+            }
+            let request: Request = serde_json::from_slice(&request)?;
+            let input: Input = serde_json::from_str(&request.input)?;
             input.validate()?;
-            let operator = value["operator"].as_str();
-            let sites = input.mutation_sites(operator);
+            let sites = input.mutation_sites(Some(&request.operator));
             println!("{}", serde_json::to_string(&sites)?);
             return Ok(());
         }
