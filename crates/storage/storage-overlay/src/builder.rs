@@ -360,6 +360,54 @@ impl ExecutionOverlay {
         }
     }
 
+    /// Advances a pruned snapshot using only observations made after its previous tip.
+    ///
+    /// Latest values keep their observation blocks and the matching journals, so later pruning
+    /// can expire them even when the same key was observed in several intervening blocks.
+    #[cfg(any(feature = "rayon", test))]
+    pub(crate) fn extend_snapshot(&mut self, newer: &Self, after: BlockNumber) {
+        for (block, changes) in newer.block_hashes.iter().zip(&newer.changes) {
+            if block.number <= after {
+                continue
+            }
+            for address in &changes.accounts {
+                if let Some(value) = newer.accounts.get(address) {
+                    self.accounts.insert_mut(*address, value.clone());
+                }
+            }
+            for (address, keys) in &changes.storage {
+                if let Some(number) = newer.storage_wipes.get(address) &&
+                    self.storage_wipes.get(address).is_none_or(|old| old < number)
+                {
+                    self.storage_wipes.insert_mut(*address, *number);
+                    self.storage.remove_mut(address);
+                }
+                if let Some(source) = newer.storage.get(address) {
+                    let values = keys
+                        .iter()
+                        .filter_map(|slot| source.get(slot).map(|value| (*slot, value.clone())));
+                    if let Some(storage) = self.storage.get_mut(address) {
+                        for (slot, value) in values {
+                            storage.insert_mut(slot, value);
+                        }
+                    } else {
+                        let storage = values.collect::<HashTrieMapSync<_, _, FbBuildHasher<32>>>();
+                        if !storage.is_empty() {
+                            self.storage.insert_mut(*address, storage);
+                        }
+                    }
+                }
+            }
+            for hash in &changes.code_hashes {
+                if let Some(value) = newer.code_hashes.get(hash) {
+                    self.code_hashes.insert_mut(*hash, value.clone());
+                }
+            }
+            self.block_hashes.push(*block);
+            self.changes.push_back(Arc::clone(changes));
+        }
+    }
+
     fn extend_bytecode(&mut self, hash: B256, code: &Bytecode, block_number: BlockNumber) {
         if let Some(entry) = self.code_hashes.get_mut(&hash) {
             entry.block_number = block_number;

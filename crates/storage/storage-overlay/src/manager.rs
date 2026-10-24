@@ -379,6 +379,7 @@ impl<N: NodePrimitives> OverlayManager<N> {
 
     #[cfg(any(feature = "rayon", test))]
     fn prune_execution_overlays_inner(&self, tip_number: BlockNumber, anchor: BlockNumHash) {
+        const MAX_CATCHUP_ATTEMPTS: usize = 8;
         let start = Instant::now();
         let snapshots = self
             .execution_overlays
@@ -393,25 +394,56 @@ impl<N: NodePrimitives> OverlayManager<N> {
                 .then(|| (key, Arc::clone(overlay)))
             })
             .collect::<Vec<_>>();
-        for (key, snapshot) in snapshots {
+        for (mut key, mut snapshot) in snapshots {
             let mut overlay = (*snapshot).clone();
             overlay.prune(anchor.number);
-            // A child may have consumed the snapshot during pruning. Never replace a newer
-            // snapshot, and publish before removing the old key so readers always have one.
-            if self.execution_overlays.ready(&key).is_some_and(|old| Arc::ptr_eq(&old, &snapshot)) {
-                let new_key = OverlayCacheKey { anchor_hash: anchor.hash, tip_hash: key.tip_hash };
-                self.execution_overlays.entries.entry(new_key).or_insert_with(|| {
-                    self.execution_metrics.overlay_prune_publications.increment(1);
-                    OverlayCacheEntry::Ready(Arc::new(overlay))
-                });
-                self.execution_overlays.entries.remove_if(&key, |_, entry| {
-                    matches!(entry, OverlayCacheEntry::Ready(old) if Arc::ptr_eq(old, &snapshot))
-                });
-                // A concurrent graph removal may have preceded publication.
-                if !self.blocks.contains_key(&key.tip_hash) {
-                    self.execution_overlays.entries.remove(&new_key);
+            let mut published = false;
+            for _ in 0..MAX_CATCHUP_ATTEMPTS {
+                // Publish before removing the source so readers always have a usable snapshot.
+                if self
+                    .execution_overlays
+                    .ready(&key)
+                    .is_some_and(|old| Arc::ptr_eq(&old, &snapshot))
+                {
+                    let new_key =
+                        OverlayCacheKey { anchor_hash: anchor.hash, tip_hash: key.tip_hash };
+                    self.execution_overlays.entries.entry(new_key).or_insert_with(|| {
+                        self.execution_metrics.overlay_prune_publications.increment(1);
+                        OverlayCacheEntry::Ready(Arc::new(overlay))
+                    });
+                    self.execution_overlays.entries.remove_if(&key, |_, entry| {
+                        matches!(entry, OverlayCacheEntry::Ready(old) if Arc::ptr_eq(old, &snapshot))
+                    });
+                    if !self.blocks.contains_key(&key.tip_hash) {
+                        self.execution_overlays.entries.remove(&new_key);
+                    }
+                    published = true;
+                    break
                 }
-            } else {
+                let Some(tip) = snapshot.block_hashes().last() else { break };
+                let Some((next_key, next_snapshot)) = self
+                    .execution_overlays
+                    .entries
+                    .iter()
+                    .filter_map(|entry| {
+                        let next_key = *entry.key();
+                        let OverlayCacheEntry::Ready(next) = entry.value() else { return None };
+                        (next_key.anchor_hash == key.anchor_hash &&
+                            next_key.tip_hash != key.tip_hash &&
+                            next.block_hashes().contains(tip))
+                        .then(|| (next_key, Arc::clone(next)))
+                    })
+                    .max_by_key(|(_, next)| next.block_hashes().last().map(|block| block.number))
+                else {
+                    break
+                };
+                // The source was consumed by a child during pruning. Catch up on this worker
+                // without reintroducing the expired entries from the child's unpruned maps.
+                overlay.extend_snapshot(&next_snapshot, tip.number);
+                key = next_key;
+                snapshot = next_snapshot;
+            }
+            if !published {
                 self.execution_metrics.overlay_prune_discarded.increment(1);
             }
         }
