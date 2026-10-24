@@ -30,8 +30,8 @@ use reth_rpc_eth_types::{
     EthResult, FillTransaction, SignError, TransactionSource,
 };
 use reth_storage_api::{
-    BlockNumReader, BlockReaderIdExt, ProviderBlock, ProviderReceipt, ProviderTx, ReceiptProvider,
-    TransactionsProvider,
+    BlockBodyIndicesProvider, BlockNumReader, BlockReaderIdExt, HeaderProvider, ProviderBlock,
+    ProviderReceipt, ProviderTx, ReceiptProvider, TransactionsProvider,
 };
 use reth_transaction_pool::{
     AddedTransactionOutcome, PoolPooledTx, PoolTransaction, PoolTx, TransactionOrigin,
@@ -376,28 +376,87 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
         Self: LoadBlock,
     {
         async move {
-            if let Some(block) = self.recovered_block(block_id).await? {
-                let block_hash = block.hash();
-                let block_number = block.number();
-                let block_timestamp = block.timestamp();
-                let base_fee_per_gas = block.base_fee_per_gas();
-                if let Some((signer, tx)) = block.transactions_with_sender().nth(index) {
-                    let tx_info = TransactionInfo {
-                        hash: Some(*tx.tx_hash()),
-                        block_hash: Some(block_hash),
-                        block_number: Some(block_number),
-                        block_timestamp: Some(block_timestamp),
-                        base_fee: base_fee_per_gas,
-                        index: Some(index as u64),
-                    };
+            let Some(tx) = self.transaction_source_by_block_and_tx_index(block_id, index).await?
+            else {
+                return Ok(None)
+            };
+            let (tx, tx_info) = tx.split();
+            Ok(Some(self.converter().fill(tx, tx_info)?))
+        }
+    }
 
-                    return Ok(Some(
-                        self.converter().fill(tx.clone().with_signer(*signer), tx_info)?,
-                    ))
-                }
+    /// Returns the transaction at the given index in the block, together with its block info.
+    ///
+    /// Uses the pending or cached block if there is one, otherwise reads only the header, the
+    /// block body indices and the transaction, without loading the block into the cache.
+    ///
+    /// Returns `Ok(None)` if the block does not exist, or index is out of range.
+    #[expect(clippy::type_complexity)]
+    fn transaction_source_by_block_and_tx_index(
+        &self,
+        block_id: BlockId,
+        index: usize,
+    ) -> impl Future<
+        Output = Result<Option<TransactionSource<ProviderTx<Self::Provider>>>, Self::Error>,
+    > + Send
+    where
+        Self: LoadBlock,
+    {
+        async move {
+            let Some((block_hash, block)) = self.block_hash_and_maybe_block(block_id).await? else {
+                return Ok(None)
+            };
+
+            if let Some(block) = block {
+                return Ok(block.transactions_with_sender().nth(index).map(|(signer, tx)| {
+                    TransactionSource::Block {
+                        transaction: tx.clone().with_signer(*signer),
+                        index: index as u64,
+                        block_hash,
+                        block_number: block.number(),
+                        block_timestamp: block.timestamp(),
+                        base_fee: block.base_fee_per_gas(),
+                    }
+                }))
             }
 
-            Ok(None)
+            self.spawn_blocking_io(move |this| {
+                let provider = this.provider();
+                let Some(header) =
+                    provider.header(block_hash).map_err(Self::Error::from_eth_err)?
+                else {
+                    return Ok(None)
+                };
+                let Some(tx_id) = provider
+                    .block_body_indices(header.number())
+                    .map_err(Self::Error::from_eth_err)?
+                    .and_then(|indices| indices.tx_num_range().nth(index))
+                else {
+                    return Ok(None)
+                };
+                let Some(tx) =
+                    provider.transaction_by_id(tx_id).map_err(Self::Error::from_eth_err)?
+                else {
+                    return Ok(None)
+                };
+                let transaction =
+                    match provider.transaction_sender(tx_id).map_err(Self::Error::from_eth_err)? {
+                        Some(signer) => tx.with_signer(signer),
+                        None => {
+                            this.recover_mined_transaction(tx).map_err(Self::Error::from_eth_err)?
+                        }
+                    };
+
+                Ok(Some(TransactionSource::Block {
+                    transaction,
+                    index: index as u64,
+                    block_hash,
+                    block_number: header.number(),
+                    block_timestamp: header.timestamp(),
+                    base_fee: header.base_fee_per_gas(),
+                }))
+            })
+            .await
         }
     }
 
@@ -487,13 +546,10 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
         Self: LoadBlock,
     {
         async move {
-            if let Some(block) = self.recovered_block(block_id).await? &&
-                let Some(tx) = block.body().transactions().get(index)
-            {
-                return Ok(Some(tx.encoded_2718().into()))
-            }
-
-            Ok(None)
+            Ok(self
+                .transaction_source_by_block_and_tx_index(block_id, index)
+                .await?
+                .map(|tx| tx.into_recovered().encoded_2718().into()))
         }
     }
 
