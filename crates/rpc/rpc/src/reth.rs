@@ -9,7 +9,7 @@ use reth_chain_state::{
     PersistedBlockSubscriptions,
 };
 use reth_errors::{RethError, RethResult};
-use reth_evm::{execute::Executor, ConfigureEvm};
+use reth_evm::{database::StateProviderDatabase, execute::Executor, ConfigureEvm};
 use reth_execution_types::{Chain, ExecutionOutcome};
 use reth_json_rpc::{PendingSubscriptionSink, RpcResult, SubscriptionSink};
 use reth_primitives_traits::{NodePrimitives, SealedHeader};
@@ -165,9 +165,7 @@ where
         }
 
         let state_provider = self.provider().history_by_block_number(start_block - 1)?;
-        let db = reth_revm::database::StateProviderDatabase::new(
-            (&state_provider).into_evm_state_provider(),
-        );
+        let db = StateProviderDatabase::new((&state_provider).into_evm_state_provider());
 
         let mut blocks = Vec::with_capacity(block_count as usize);
         for block_number in start_block..start_block + block_count {

@@ -194,7 +194,18 @@ impl From<EngineApiError> for reth_json_rpc::ErrorObject {
                         );
                     }
                 },
+                // Only attributes that the payload builder rejects are invalid payload attributes.
+                // Any other failure to start the payload job is a failure of this node and must
+                // not be reported as invalid attributes, which the consensus client would discard.
+                BeaconForkChoiceUpdateError::PayloadJob(
+                    PayloadBuilderError::InvalidAttributes(_),
+                ) => Self::owned(
+                    INVALID_PAYLOAD_ATTRIBUTES_ERROR,
+                    INVALID_PAYLOAD_ATTRIBUTES_ERROR_MSG,
+                    Some(ErrorData::new(error)),
+                ),
                 BeaconForkChoiceUpdateError::EngineUnavailable |
+                BeaconForkChoiceUpdateError::PayloadJob(_) |
                 BeaconForkChoiceUpdateError::Internal(_) => {
                     Self::owned(INTERNAL_ERROR_CODE, SERVER_ERROR_MSG, Some(ErrorData::new(error)))
                 }
@@ -215,6 +226,7 @@ impl From<EngineApiError> for reth_json_rpc::ErrorObject {
 mod tests {
     use super::*;
     use alloy_rpc_types_engine::ForkchoiceUpdateError;
+    use reth_payload_primitives::InvalidPayloadAttributesError;
     #[track_caller]
     fn ensure_engine_rpc_error(
         code: i32,
@@ -336,5 +348,43 @@ mod tests {
                 ),
             ),
         );
+    }
+
+    fn payload_job_error(err: PayloadBuilderError) -> reth_json_rpc::ErrorObject {
+        EngineApiError::ForkChoiceUpdate(BeaconForkChoiceUpdateError::PayloadJob(err)).into()
+    }
+
+    #[test]
+    fn payload_job_rejecting_the_attributes_is_invalid_payload_attributes() {
+        let err = payload_job_error(PayloadBuilderError::invalid_attributes(
+            InvalidPayloadAttributesError::InvalidTimestamp,
+        ));
+
+        assert_eq!(err.code(), INVALID_PAYLOAD_ATTRIBUTES_ERROR);
+        assert_eq!(err.message(), INVALID_PAYLOAD_ATTRIBUTES_ERROR_MSG);
+        assert_eq!(
+            err.data().unwrap().get(),
+            r#"{"err":"failed to start payload job: invalid payload attributes: invalid timestamp"}"#
+        );
+    }
+
+    #[test]
+    fn payload_job_failing_on_this_node_is_an_internal_error() {
+        let node_local = [
+            PayloadBuilderError::MissingParentHeader(B256::ZERO),
+            PayloadBuilderError::ChannelClosed,
+            PayloadBuilderError::other(std::io::Error::other("other")),
+        ];
+
+        for payload_job in node_local {
+            let message = payload_job.to_string();
+            let err = payload_job_error(payload_job);
+            assert_eq!(err.code(), INTERNAL_ERROR_CODE, "{message}");
+            assert_eq!(err.message(), SERVER_ERROR_MSG, "{message}");
+            assert_eq!(
+                err.data().unwrap().get(),
+                format!(r#"{{"err":"failed to start payload job: {message}"}}"#)
+            );
+        }
     }
 }

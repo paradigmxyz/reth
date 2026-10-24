@@ -48,5 +48,4 @@ client = [
 ]
 
 [dev-dependencies]
-tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 reth-json-rpc = { workspace = true, features = ["http-client"] }

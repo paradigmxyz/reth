@@ -538,6 +538,10 @@ pub enum PayloadServiceCommand<T: PayloadTypes> {
     ///
     /// Carries the caller's [`Span`] so the service can parent payload-building work under the
     /// originating Engine API trace.
+    ///
+    /// The sender receives the id of the started payload job. Answering with
+    /// [`PayloadBuilderError::InvalidAttributes`] rejects the payload attributes; any other error,
+    /// or dropping the sender, is reported to the CL as an internal error.
     BuildNewPayload(
         Box<BuildNewPayload<T::PayloadAttributes>>,
         Span,

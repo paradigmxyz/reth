@@ -4,14 +4,14 @@
 #[global_allocator]
 static ALLOC: reth_cli_util::allocator::Allocator = reth_cli_util::allocator::new_allocator();
 
-mod evm;
 mod evm_config;
 
+use alloy_consensus::Header;
 use alloy_primitives::Bytes;
 use alloy_rpc_types::engine::ExecutionData;
 use clap::Parser;
 use evm_config::{BbEvmConfig, BigBlockData};
-use reth_chainspec::{ChainSpec, EthereumHardforks};
+use reth_chainspec::{ChainSpec, EthChainSpec, EthereumHardforks};
 use reth_consensus::noop::NoopConsensus;
 use reth_ethereum_cli::{chainspec::EthereumChainSpecParser, interface::Cli};
 use reth_ethereum_primitives::{Block, EthPrimitives};
@@ -80,6 +80,13 @@ impl PayloadValidator<BbPayloadTypes> for BbEngineValidator {
         &self,
         payload: BigBlockData<ExecutionData>,
     ) -> Result<SealedBlock<Block>, NewPayloadError> {
+        if payload.env_switches.is_empty() {
+            return Err(NewPayloadError::other(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "big-block payload has no environment segments",
+            )))
+        }
+
         let mut blocks = payload
             .env_switches
             .into_iter()
@@ -130,7 +137,7 @@ where
     Node: FullNodeTypes<
         Types: NodeTypes<
             ChainSpec: reth_ethereum_forks::Hardforks
-                           + alloy_evm::eth::spec::EthExecutorSpec
+                           + EthChainSpec<Header = Header>
                            + EthereumHardforks,
             Primitives = EthPrimitives,
         >,

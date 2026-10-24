@@ -37,7 +37,6 @@ use reth_json_rpc::server::{HttpBody, HttpRequest, HttpResponse};
 use reth_provider::{BalProvider, BlockReader, StateProviderFactory};
 use reth_rpc::EngineApi;
 use reth_rpc_engine_api::EngineApiError;
-use reth_tracing::tracing::debug;
 use reth_transaction_pool::TransactionPool;
 use ssz::Decode;
 use std::{
@@ -47,6 +46,7 @@ use std::{
 };
 use tokio::sync::RwLock;
 use tower::{BoxError, Layer, Service};
+use tracing::debug;
 
 const OCTET_STREAM: &str = "application/octet-stream";
 const APPLICATION_JSON: &str = "application/json";
@@ -1442,6 +1442,7 @@ mod tests {
     async fn engine_errors_preserve_validation_semantics() {
         use alloy_rpc_types_engine::ForkchoiceUpdateError;
         use reth_engine_primitives::BeaconForkChoiceUpdateError;
+        use reth_payload_primitives::PayloadBuilderError;
         for (error, status, kind) in [
             (EngineApiError::UnknownPayload, 404, "unknown-payload"),
             (EngineApiError::BlobRequestTooLarge { len: 129 }, 413, "request-too-large"),
@@ -1462,6 +1463,13 @@ mod tests {
                 ),
                 422,
                 "invalid-attributes",
+            ),
+            (
+                EngineApiError::ForkChoiceUpdate(BeaconForkChoiceUpdateError::PayloadJob(
+                    PayloadBuilderError::MissingParentHeader(B256::ZERO),
+                )),
+                500,
+                "internal",
             ),
         ] {
             let response = engine_error_response(error);

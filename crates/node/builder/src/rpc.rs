@@ -1797,7 +1797,7 @@ mod tests {
 
             let chain = Chain::new(
                 blocks.clone(),
-                ExecutionOutcome { receipts: vec![vec![]; blocks.len()], ..Default::default() },
+                ExecutionOutcome::default().with_receipts(vec![vec![]; blocks.len()]),
                 Default::default(),
             );
             cache_new_blocks_task(

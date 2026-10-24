@@ -37,8 +37,8 @@ reth-evm.workspace = true
 
 # rpc/net
 reth-json-rpc = { workspace = true, features = ["server", "http-client", "ws-client"] }
-tower-http = { workspace = true, features = ["full"] }
-tower = { workspace = true, features = ["full"] }
+tower-http = { workspace = true, features = ["cors", "validate-request"] }
+tower.workspace = true
 http.workspace = true
 pin-project.workspace = true
 
