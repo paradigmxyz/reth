@@ -482,30 +482,37 @@ where
 {
     fn basic_account(&self, address: &Address) -> ProviderResult<Option<Account>> {
         let (overlay, historical_fallback) = self.execution_overlay()?;
-        if let Some(account) = overlay.account(address) {
-            return Ok(account.map(Account::from))
-        }
-        if let Some(historical_fallback) = historical_fallback {
-            return match self.provider().account_history_info(
-                *address,
-                historical_fallback.block_number,
-                historical_fallback.account_history_block_number,
-            )? {
-                HistoryInfo::NotYetWritten => Ok(None),
-                HistoryInfo::InChangeset(changeset_block_number) => self
-                    .provider()
-                    .get_account_before_block(changeset_block_number, *address)?
-                    .ok_or(ProviderError::AccountChangesetNotFound {
-                        block_number: changeset_block_number,
-                        address: *address,
-                    })
-                    .map(|account_before| account_before.info),
-                HistoryInfo::InPlainState | HistoryInfo::MaybeInPlainState => {
-                    self.basic_account_from_db(address)
+        let read = || {
+            if let Some(account) = overlay.account(address) {
+                return Ok(account.map(Account::from))
+            }
+            if let Some(historical_fallback) = historical_fallback {
+                return match self.provider().account_history_info(
+                    *address,
+                    historical_fallback.block_number,
+                    historical_fallback.account_history_block_number,
+                )? {
+                    HistoryInfo::NotYetWritten => Ok(None),
+                    HistoryInfo::InChangeset(changeset_block_number) => self
+                        .provider()
+                        .get_account_before_block(changeset_block_number, *address)?
+                        .ok_or(ProviderError::AccountChangesetNotFound {
+                            block_number: changeset_block_number,
+                            address: *address,
+                        })
+                        .map(|account_before| account_before.info),
+                    HistoryInfo::InPlainState | HistoryInfo::MaybeInPlainState => {
+                        self.basic_account_from_db(address)
+                    }
                 }
             }
+            self.basic_account_from_db(address)
+        };
+        if let Some(reads) = &overlay.reads {
+            reads.accounts.get_or_try_insert_with(*address, |_| read())
+        } else {
+            read()
         }
-        self.basic_account_from_db(address)
     }
 }
 
@@ -582,14 +589,21 @@ where
         code_hash: &B256,
     ) -> ProviderResult<Option<reth_primitives_traits::Bytecode>> {
         let (overlay, _) = self.execution_overlay()?;
-        if let Some(bytecode) = overlay.bytecode(code_hash) {
-            return Ok(Some(reth_primitives_traits::Bytecode(bytecode.clone())));
+        let read = || {
+            if let Some(bytecode) = overlay.bytecode(code_hash) {
+                return Ok(Some(reth_primitives_traits::Bytecode(bytecode.clone())));
+            }
+            self.provider()
+                .tx()
+                .prefetch(true)
+                .get_by_encoded_key::<tables::Bytecodes>(code_hash)
+                .map_err(Into::into)
+        };
+        if let Some(reads) = &overlay.reads {
+            reads.code.get_or_try_insert_with(*code_hash, |_| read())
+        } else {
+            read()
         }
-        self.provider()
-            .tx()
-            .prefetch(true)
-            .get_by_encoded_key::<tables::Bytecodes>(code_hash)
-            .map_err(Into::into)
     }
 }
 
@@ -891,32 +905,40 @@ where
         storage_key: alloy_primitives::StorageKey,
     ) -> ProviderResult<Option<alloy_primitives::StorageValue>> {
         let (overlay, historical_fallback) = self.execution_overlay()?;
-        if let Some(value) = overlay.storage_value(address, U256::from_be_bytes(storage_key.0)) {
-            return Ok(Some(value));
-        }
-        if let Some(historical_fallback) = historical_fallback {
-            return match self.provider().storage_history_info(
-                address,
-                storage_key,
-                historical_fallback.block_number,
-                historical_fallback.storage_history_block_number,
-            )? {
-                HistoryInfo::NotYetWritten => Ok(None),
-                HistoryInfo::InChangeset(changeset_block_number) => self
-                    .provider()
-                    .get_storage_before_block(changeset_block_number, address, storage_key)?
-                    .ok_or_else(|| ProviderError::StorageChangesetNotFound {
-                        block_number: changeset_block_number,
-                        address,
-                        storage_key: Box::new(storage_key),
-                    })
-                    .map(|entry| Some(entry.value)),
-                HistoryInfo::InPlainState | HistoryInfo::MaybeInPlainState => {
-                    self.storage_from_db(address, storage_key, true)
+        let read = || {
+            if let Some(value) = overlay.storage_value(address, U256::from_be_bytes(storage_key.0))
+            {
+                return Ok(Some(value));
+            }
+            if let Some(historical_fallback) = historical_fallback {
+                return match self.provider().storage_history_info(
+                    address,
+                    storage_key,
+                    historical_fallback.block_number,
+                    historical_fallback.storage_history_block_number,
+                )? {
+                    HistoryInfo::NotYetWritten => Ok(None),
+                    HistoryInfo::InChangeset(changeset_block_number) => self
+                        .provider()
+                        .get_storage_before_block(changeset_block_number, address, storage_key)?
+                        .ok_or_else(|| ProviderError::StorageChangesetNotFound {
+                            block_number: changeset_block_number,
+                            address,
+                            storage_key: Box::new(storage_key),
+                        })
+                        .map(|entry| Some(entry.value)),
+                    HistoryInfo::InPlainState | HistoryInfo::MaybeInPlainState => {
+                        self.storage_from_db(address, storage_key, true)
+                    }
                 }
             }
+            self.storage_from_db(address, storage_key, false)
+        };
+        if let Some(reads) = &overlay.reads {
+            reads.storage.get_or_try_insert_with((address, storage_key), |_| read())
+        } else {
+            read()
         }
-        self.storage_from_db(address, storage_key, false)
     }
 }
 

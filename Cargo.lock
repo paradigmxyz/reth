@@ -10765,6 +10765,7 @@ dependencies = [
  "alloy-consensus",
  "alloy-eips",
  "alloy-primitives",
+ "fixed-cache",
  "metrics",
  "parking_lot",
  "rayon",

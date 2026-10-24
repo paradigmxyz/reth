@@ -5,15 +5,18 @@ use crate::{
 };
 use alloy_eips::BlockNumHash;
 use alloy_primitives::{
-    map::{AddressSet, FbBuildHasher},
+    map::{AddressSet, DefaultHashBuilder, FbBuildHasher},
     Address, BlockHash, BlockNumber, B256, U256,
 };
+use fixed_cache::Cache;
 use metrics::{Counter, Histogram};
 use reth_chain_state::{BlockState, ExecutedBlock};
 use reth_errors::{ProviderError, ProviderResult};
 use reth_ethereum_primitives::EthPrimitives;
 use reth_metrics::Metrics;
-use reth_primitives_traits::{AlloyBlockHeader, NodePrimitives};
+use reth_primitives_traits::{
+    Account, AlloyBlockHeader, Bytecode as PrimitiveBytecode, NodePrimitives,
+};
 use reth_prune_types::PruneSegment;
 use reth_stages_types::StageId;
 use reth_storage_api::{
@@ -74,6 +77,7 @@ pub struct ExecutionOverlay {
     base: Arc<ExecutionOverlayData>,
     pending: Vec<Arc<ExecutionOverlayDelta>>,
     compiled: OnceLock<Arc<ExecutionOverlayData>>,
+    pub(crate) reads: Option<Arc<ExecutionOverlayReads>>,
 }
 
 impl ExecutionOverlay {
@@ -92,7 +96,7 @@ impl ExecutionOverlay {
         block_hashes.push(delta.block);
         pending.push(delta);
         metrics.overlay_unmerged_blocks.record(pending.len() as f64);
-        Self { block_hashes, base, pending, compiled: OnceLock::new() }
+        Self { block_hashes, base, pending, compiled: OnceLock::new(), reads: Some(Arc::default()) }
     }
 
     /// Returns the in-memory block hashes in ascending block-number order.
@@ -183,6 +187,7 @@ impl ExecutionOverlay {
 
     /// Extends a cold overlay from the committed writes of an executed block.
     pub(crate) fn extend_block<N: NodePrimitives>(&mut self, block: &ExecutedBlock<N>) {
+        self.reads = None;
         if !self.pending.is_empty() {
             self.base = self.flattened();
             self.pending.clear();
@@ -220,6 +225,7 @@ impl ExecutionOverlay {
         data.extend_snapshot(&newer.flattened(), &newer.block_hashes, after);
         self.block_hashes.extend(newer.block_hashes.iter().filter(|block| block.number > after));
         self.pending = newer.pending.last().cloned().into_iter().collect();
+        self.reads = newer.reads.clone();
         self.base = Arc::new(data);
         self.compiled = OnceLock::from(Arc::clone(&self.base));
     }
@@ -561,6 +567,30 @@ impl ExecutionOverlayDelta {
             state.contracts.insert(*hash, code.clone());
         }
         Self { block, state, storage_wipes }
+    }
+}
+
+/// Bounded read observations shared by readers of one immutable overlay tip.
+///
+/// A child gets a fresh layer, while pruning keeps the layer for the same tip. Buckets use
+/// nonblocking access: contention or eviction causes an ordinary provider read.
+#[derive(Debug)]
+pub(crate) struct ExecutionOverlayReads {
+    pub(crate) accounts: Cache<Address, Option<Account>, FbBuildHasher<20>>,
+    pub(crate) storage: Cache<(Address, B256), Option<U256>, DefaultHashBuilder>,
+    pub(crate) code: Cache<B256, Option<PrimitiveBytecode>, FbBuildHasher<32>>,
+}
+
+impl Default for ExecutionOverlayReads {
+    fn default() -> Self {
+        const ACCOUNT_CAPACITY: usize = 16_384;
+        const STORAGE_CAPACITY: usize = 65_536;
+        const CODE_CAPACITY: usize = 1_024;
+        Self {
+            accounts: Cache::new(ACCOUNT_CAPACITY, FbBuildHasher::default()),
+            storage: Cache::new(STORAGE_CAPACITY, DefaultHashBuilder::default()),
+            code: Cache::new(CODE_CAPACITY, FbBuildHasher::default()),
+        }
     }
 }
 

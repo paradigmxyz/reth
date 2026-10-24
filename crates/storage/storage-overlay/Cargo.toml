@@ -36,6 +36,7 @@ alloy-primitives.workspace = true
 metrics.workspace = true
 
 # misc
+fixed-cache.workspace = true
 parking_lot.workspace = true
 rpds.workspace = true
 rayon = { workspace = true, optional = true }
