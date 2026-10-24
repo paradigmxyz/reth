@@ -540,9 +540,21 @@ pub trait Call:
     /// Returns the max gas limit that the caller can afford given a transaction environment.
     fn caller_gas_allowance(
         &self,
+        db: impl Database<Error: Into<EthApiError>>,
+        evm_env: &EvmEnvFor<Self::Evm>,
+        tx_env: &TxEnvFor<Self::Evm>,
+    ) -> Result<u64, Self::Error> {
+        self.caller_gas_allowance_with_price(db, evm_env, tx_env, tx_env.effective_gas_price(None))
+    }
+
+    /// Returns the max gas limit affordable at the given execution gas price after reserving
+    /// the transaction value and maximum blob fee.
+    fn caller_gas_allowance_with_price(
+        &self,
         mut db: impl Database<Error: Into<EthApiError>>,
         _evm_env: &EvmEnvFor<Self::Evm>,
         tx_env: &TxEnvFor<Self::Evm>,
+        gas_price: u128,
     ) -> Result<u64, Self::Error> {
         let balance = db
             .get_account(&tx_env.signer())
@@ -569,10 +581,7 @@ pub trait Call:
                 })
             })?;
 
-        Ok(available
-            .checked_div(U256::from(tx_env.effective_gas_price(None)))
-            .unwrap_or_default()
-            .saturating_to())
+        Ok(available.checked_div(U256::from(gas_price)).unwrap_or_default().saturating_to())
     }
 
     /// Executes the `TxEnv` against the given [Database] without committing state
