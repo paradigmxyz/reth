@@ -565,11 +565,11 @@ fn run(config: &mut Config, snapshotter: &Snapshotter) -> Result<()> {
             }
         }
         let (bundle, updates) = apply(&mut state, number, &updates_input);
-        // Print before entering production tasks so a panic still leaves the input on disk.
+        // The full operations are in the journal before production tasks run.
         println!(
             "{}",
             json!({"block": number, "seed": config.seed, "db_tip": db_tip,
-            "state_tip": state_tip, "operations": operations})
+            "state_tip": state_tip, "operations": operations.len()})
         );
         let factory_view = OverlayStateProviderFactory::new(
             factory.clone(),
