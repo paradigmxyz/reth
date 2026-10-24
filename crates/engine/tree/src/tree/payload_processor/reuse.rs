@@ -1309,9 +1309,11 @@ mod tests {
             let speculative = SpeculativeTx::new(tx.signer(), tx.inner());
             drop(self.evm.take_state_cache());
             self.recording.start(Some((Arc::clone(self.results.predicted()), index)));
-            let result = self
-                .evm
-                .transact_with_inspector(&tx_env, BalanceTracker::new(self.recording.clone()));
+            let result = Evm::transact_with_inspector(
+                &mut self.evm,
+                &tx_env,
+                BalanceTracker::new(self.recording.clone()),
+            );
             let reads = self.recording.take_reads().unwrap();
             match result {
                 Ok((mut balances, result)) => {
@@ -1478,9 +1480,12 @@ mod tests {
             let speculative = SpeculativeTx::new(tx.signer(), tx.inner());
             drop(evm.take_state_cache());
             recording.start_recording_inner();
-            let (mut balances, result) = evm
-                .transact_with_inspector(&tx_env, BalanceTracker::new(recording.clone()))
-                .unwrap();
+            let (mut balances, result) = Evm::transact_with_inspector(
+                &mut evm,
+                &tx_env,
+                BalanceTracker::new(recording.clone()),
+            )
+            .unwrap();
             let reads = recording.take_reads().unwrap();
             results.store(*tx.tx_hash(), result, reads, &mut balances, speculative);
         }
