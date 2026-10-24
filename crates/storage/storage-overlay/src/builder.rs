@@ -1,9 +1,13 @@
 use crate::{
     manager::{OverlayCacheConfig, StateTrieOverlayError},
+    manager_metrics::ExecutionOverlayMetrics,
     OverlayManager,
 };
 use alloy_eips::BlockNumHash;
-use alloy_primitives::{map::FbBuildHasher, Address, BlockHash, BlockNumber, B256, U256};
+use alloy_primitives::{
+    map::{AddressSet, FbBuildHasher},
+    Address, BlockHash, BlockNumber, B256, U256,
+};
 use metrics::{Counter, Histogram};
 use reth_chain_state::{BlockState, ExecutedBlock};
 use reth_errors::{ProviderError, ProviderResult};
@@ -20,13 +24,13 @@ use reth_trie::{updates::TrieUpdatesSorted, HashedPostStateSorted, TrieInputSort
 use reth_trie_db::DatabaseHashedPostState;
 use revm::{
     bytecode::Bytecode,
-    database::{BundleState, CacheState},
+    database::{states::CacheAccount, BundleState, CacheState, PlainAccount},
     state::AccountInfo,
 };
 use std::{
     collections::VecDeque,
     ops::RangeInclusive,
-    sync::Arc,
+    sync::{Arc, OnceLock},
     time::{Duration, Instant},
 };
 use tracing::{debug, debug_span, instrument};
@@ -62,12 +66,221 @@ impl StateTrieOverlay {
 
 /// Execution state required to initialize an overlay state provider.
 ///
-/// Account entries preserve known non-existence, while storage and code entries contain only data
-/// explicitly observed during execution. Accounts never retain database-context-local lookup IDs.
+/// A newly executed block is immediately readable through its observation layer. Workers merge
+/// layers into persistent maps; readers never wait for that merge to finish.
 #[derive(Clone, Debug, Default)]
 pub struct ExecutionOverlay {
-    /// In-memory block hashes in ascending block-number order.
     block_hashes: Vec<BlockNumHash>,
+    base: Arc<ExecutionOverlayData>,
+    pending: Vec<Arc<ExecutionOverlayDelta>>,
+    compiled: OnceLock<Arc<ExecutionOverlayData>>,
+}
+
+impl ExecutionOverlay {
+    /// Returns the in-memory block hashes in ascending block-number order.
+    pub const fn block_hashes(&self) -> &[BlockNumHash] {
+        self.block_hashes.as_slice()
+    }
+
+    pub(crate) fn account(&self, address: &Address) -> Option<Option<&AccountInfo>> {
+        let layers = if self.compiled.get().is_some() { 1 } else { self.pending.len() };
+        for delta in self.pending.iter().rev().take(layers) {
+            if let Some(account) = delta.state.accounts.get(address) {
+                return Some(account.account.as_ref().map(|account| &account.info));
+            }
+        }
+        self.data().accounts.get(address).map(|entry| entry.value.as_ref())
+    }
+
+    pub(crate) fn storage_value(&self, address: Address, slot: U256) -> Option<U256> {
+        let layers = if self.compiled.get().is_some() { 1 } else { self.pending.len() };
+        for delta in self.pending.iter().rev().take(layers) {
+            if let Some(account) = delta.state.accounts.get(&address) {
+                if let Some(value) =
+                    account.account.as_ref().and_then(|account| account.storage.get(&slot))
+                {
+                    return Some(*value);
+                }
+                if account.account.is_none() || delta.storage_wipes.contains(&address) {
+                    return Some(U256::ZERO);
+                }
+            }
+        }
+        let data = self.data();
+        data.storage
+            .get(&address)
+            .and_then(|storage| storage.get(&slot))
+            .map(|entry| entry.value)
+            .or_else(|| data.storage_wipes.contains_key(&address).then_some(U256::ZERO))
+    }
+
+    pub(crate) fn bytecode(&self, hash: &B256) -> Option<&Bytecode> {
+        let layers = if self.compiled.get().is_some() { 1 } else { self.pending.len() };
+        for delta in self.pending.iter().rev().take(layers) {
+            if let Some(code) = delta.state.contracts.get(hash) {
+                return Some(code);
+            }
+        }
+        self.data().code_hashes.get(hash).map(|entry| &entry.value)
+    }
+
+    /// Publishes the next block's observation layer without flattening its persistent maps.
+    pub(crate) fn extend_deferred(
+        &mut self,
+        delta: Arc<ExecutionOverlayDelta>,
+        metrics: &ExecutionOverlayMetrics,
+    ) {
+        if let Some(compiled) = self.compiled.take() {
+            self.base = compiled;
+            self.pending.clear();
+        }
+        self.block_hashes.push(delta.block);
+        self.pending.push(delta);
+        metrics.overlay_unmerged_blocks.record(self.pending.len() as f64);
+    }
+
+    pub(crate) fn compile(&self, metrics: &ExecutionOverlayMetrics) {
+        let start = Instant::now();
+        self.flattened();
+        self.record_metrics(metrics);
+        metrics.overlay_computation_duration_seconds.record(start.elapsed().as_secs_f64());
+    }
+
+    pub(crate) fn record_metrics(&self, metrics: &ExecutionOverlayMetrics) {
+        let data = self.data();
+        metrics.overlay_blocks.set(self.block_hashes.len() as f64);
+        metrics.overlay_accounts.set(data.accounts.size() as f64);
+        metrics.overlay_storage_accounts.set(data.storage.size() as f64);
+        metrics.overlay_bytecodes.set(data.code_hashes.size() as f64);
+    }
+
+    fn data(&self) -> &ExecutionOverlayData {
+        self.compiled.get().unwrap_or(&self.base)
+    }
+
+    fn flattened(&self) -> Arc<ExecutionOverlayData> {
+        if let Some(compiled) = self.compiled.get() {
+            return Arc::clone(compiled);
+        }
+        let data = self.build_data();
+        let _ = self.compiled.set(Arc::clone(&data));
+        data
+    }
+
+    fn build_data(&self) -> Arc<ExecutionOverlayData> {
+        if self.pending.is_empty() {
+            return Arc::clone(&self.base);
+        }
+        let mut data = (*self.base).clone();
+        for delta in &self.pending {
+            data.extend_delta(delta);
+        }
+        Arc::new(data)
+    }
+
+    /// Extends a cold overlay from the committed writes of an executed block.
+    pub(crate) fn extend_block<N: NodePrimitives>(&mut self, block: &ExecutedBlock<N>) {
+        if !self.pending.is_empty() {
+            self.base = self.flattened();
+            self.pending.clear();
+        }
+        if let Some(compiled) = self.compiled.take() {
+            self.base = compiled;
+        }
+        let block_number = block.recovered_block().number();
+        let data = Arc::make_mut(&mut self.base);
+        let changes = data.extend_state(&block.execution_output.state, block_number);
+        data.changes.push_back(Arc::new(changes));
+        self.block_hashes.push(block.recovered_block().num_hash());
+    }
+
+    #[cfg(any(feature = "rayon", test))]
+    pub(crate) fn prune(&mut self, anchor: BlockNumber) {
+        let mut data = (*self.flattened()).clone();
+        let count = self.block_hashes.partition_point(|block| block.number <= anchor);
+        self.block_hashes.drain(..count);
+        data.prune(count, anchor);
+        self.pending = self
+            .pending
+            .last()
+            .filter(|delta| delta.block.number > anchor)
+            .cloned()
+            .into_iter()
+            .collect();
+        self.base = Arc::new(data);
+        self.compiled = OnceLock::from(Arc::clone(&self.base));
+    }
+
+    #[cfg(any(feature = "rayon", test))]
+    pub(crate) fn extend_snapshot(&mut self, newer: &Self, after: BlockNumber) {
+        let mut data = (*self.flattened()).clone();
+        data.extend_snapshot(&newer.flattened(), &newer.block_hashes, after);
+        self.block_hashes.extend(newer.block_hashes.iter().filter(|block| block.number > after));
+        self.pending = newer.pending.last().cloned().into_iter().collect();
+        self.base = Arc::new(data);
+        self.compiled = OnceLock::from(Arc::clone(&self.base));
+    }
+
+    #[cfg(test)]
+    pub(crate) fn accounts(
+        &self,
+    ) -> &HashTrieMapSync<Address, ExecutionOverlayValue<Option<AccountInfo>>, FbBuildHasher<20>>
+    {
+        &self.compiled.get_or_init(|| self.build_data()).accounts
+    }
+
+    #[cfg(test)]
+    pub(crate) fn storage(
+        &self,
+    ) -> &HashTrieMapSync<
+        Address,
+        HashTrieMapSync<U256, ExecutionOverlayValue<U256>, FbBuildHasher<32>>,
+        FbBuildHasher<20>,
+    > {
+        &self.compiled.get_or_init(|| self.build_data()).storage
+    }
+
+    #[cfg(test)]
+    pub(crate) fn code_hashes(
+        &self,
+    ) -> &HashTrieMapSync<B256, ExecutionOverlayValue<Bytecode>, FbBuildHasher<32>> {
+        &self.compiled.get_or_init(|| self.build_data()).code_hashes
+    }
+
+    #[cfg(test)]
+    pub(crate) const fn block_hashes_mut(&mut self) -> &mut Vec<BlockNumHash> {
+        &mut self.block_hashes
+    }
+
+    #[cfg(test)]
+    pub(crate) fn accounts_mut(
+        &mut self,
+    ) -> &mut HashTrieMapSync<Address, ExecutionOverlayValue<Option<AccountInfo>>, FbBuildHasher<20>>
+    {
+        &mut Arc::make_mut(&mut self.base).accounts
+    }
+
+    #[cfg(test)]
+    pub(crate) fn storage_mut(
+        &mut self,
+    ) -> &mut HashTrieMapSync<
+        Address,
+        HashTrieMapSync<U256, ExecutionOverlayValue<U256>, FbBuildHasher<32>>,
+        FbBuildHasher<20>,
+    > {
+        &mut Arc::make_mut(&mut self.base).storage
+    }
+
+    #[cfg(test)]
+    pub(crate) fn code_hashes_mut(
+        &mut self,
+    ) -> &mut HashTrieMapSync<B256, ExecutionOverlayValue<Bytecode>, FbBuildHasher<32>> {
+        &mut Arc::make_mut(&mut self.base).code_hashes
+    }
+}
+
+#[derive(Clone, Debug, Default)]
+struct ExecutionOverlayData {
     /// Account state by address, without database-context-local lookup IDs.
     accounts:
         HashTrieMapSync<Address, ExecutionOverlayValue<Option<AccountInfo>>, FbBuildHasher<20>>,
@@ -81,103 +294,15 @@ pub struct ExecutionOverlay {
     storage_wipes: HashTrieMapSync<Address, BlockNumber, FbBuildHasher<20>>,
     /// Bytecode by code hash.
     code_hashes: HashTrieMapSync<B256, ExecutionOverlayValue<Bytecode>, FbBuildHasher<32>>,
-    /// Keys observed in each block, aligned with `block_hashes`, for incremental pruning.
+    /// Keys observed in each block, oldest first, for incremental pruning.
     changes: VecDeque<Arc<ExecutionOverlayChanges>>,
 }
 
-impl ExecutionOverlay {
-    /// Returns the in-memory block hashes in ascending block-number order.
-    pub const fn block_hashes(&self) -> &[BlockNumHash] {
-        self.block_hashes.as_slice()
-    }
-
-    /// Returns the account state and its last observed block by address.
-    pub const fn accounts(
-        &self,
-    ) -> &HashTrieMapSync<Address, ExecutionOverlayValue<Option<AccountInfo>>, FbBuildHasher<20>>
-    {
-        &self.accounts
-    }
-
-    /// Returns storage values and their last observed blocks by address and slot.
-    pub const fn storage(
-        &self,
-    ) -> &HashTrieMapSync<
-        Address,
-        HashTrieMapSync<U256, ExecutionOverlayValue<U256>, FbBuildHasher<32>>,
-        FbBuildHasher<20>,
-    > {
-        &self.storage
-    }
-
-    /// Returns an observed storage value, or zero if the account's storage was wiped.
-    pub(crate) fn storage_value(&self, address: Address, slot: U256) -> Option<U256> {
-        self.storage
-            .get(&address)
-            .and_then(|storage| storage.get(&slot))
-            .map(|entry| entry.value)
-            .or_else(|| self.storage_wipes.contains_key(&address).then_some(U256::ZERO))
-    }
-
-    /// Returns bytecode and its last observed block by code hash.
-    pub const fn code_hashes(
-        &self,
-    ) -> &HashTrieMapSync<B256, ExecutionOverlayValue<Bytecode>, FbBuildHasher<32>> {
-        &self.code_hashes
-    }
-
-    #[cfg(test)]
-    pub(crate) const fn block_hashes_mut(&mut self) -> &mut Vec<BlockNumHash> {
-        &mut self.block_hashes
-    }
-
-    #[cfg(test)]
-    pub(crate) const fn accounts_mut(
-        &mut self,
-    ) -> &mut HashTrieMapSync<Address, ExecutionOverlayValue<Option<AccountInfo>>, FbBuildHasher<20>>
-    {
-        &mut self.accounts
-    }
-
-    #[cfg(test)]
-    pub(crate) const fn storage_mut(
-        &mut self,
-    ) -> &mut HashTrieMapSync<
-        Address,
-        HashTrieMapSync<U256, ExecutionOverlayValue<U256>, FbBuildHasher<32>>,
-        FbBuildHasher<20>,
-    > {
-        &mut self.storage
-    }
-
-    #[cfg(test)]
-    pub(crate) const fn code_hashes_mut(
-        &mut self,
-    ) -> &mut HashTrieMapSync<B256, ExecutionOverlayValue<Bytecode>, FbBuildHasher<32>> {
-        &mut self.code_hashes
-    }
-
-    /// Extends this overlay with a later block, copying only shared trie paths.
-    pub(crate) fn extend_block<N: NodePrimitives>(
-        &mut self,
-        block: &ExecutedBlock<N>,
-        reads: Option<&CacheState>,
-    ) {
-        let num_hash = block.recovered_block().num_hash();
-        let changes = if let Some(reads) = reads {
-            self.extend_reads(&block.execution_output.state, reads, num_hash.number)
-        } else {
-            self.extend_state(&block.execution_output.state, num_hash.number)
-        };
-        self.block_hashes.push(num_hash);
-        self.changes.push_back(Arc::new(changes));
-    }
-
+impl ExecutionOverlayData {
     /// Removes observations at or below the durable anchor, retaining newer values of those keys.
     #[cfg(any(feature = "rayon", test))]
-    pub(crate) fn prune(&mut self, anchor: BlockNumber) {
-        let count = self.block_hashes.partition_point(|block| block.number <= anchor);
-        for (_, changes) in self.block_hashes.drain(..count).zip(self.changes.drain(..count)) {
+    pub(crate) fn prune(&mut self, count: usize, anchor: BlockNumber) {
+        for changes in self.changes.drain(..count) {
             for address in &changes.accounts {
                 if self.accounts.get(address).is_some_and(|entry| entry.block_number <= anchor) {
                     self.accounts.remove_mut(address);
@@ -249,42 +374,32 @@ impl ExecutionOverlay {
         info
     }
 
-    fn extend_reads(
-        &mut self,
-        state: &BundleState,
-        reads: &CacheState,
-        block_number: BlockNumber,
-    ) -> ExecutionOverlayChanges {
-        // BundleState is authoritative for writes; the executor cache supplies only other reads.
-        let mut changes = self.extend_state(state, block_number);
-        for (address, account) in &reads.accounts {
-            let storage = account.account.as_ref().into_iter().flat_map(|account| &account.storage);
-            if let Some(writes) = state.state().get(address) {
-                self.extend_storage(
-                    address,
-                    false,
-                    storage
-                        .filter(|(slot, _)| !writes.storage.contains_key(slot))
-                        .map(|(slot, value)| (*slot, *value)),
-                    block_number,
-                    &mut changes,
-                );
-                continue
-            }
+    fn extend_delta(&mut self, delta: &ExecutionOverlayDelta) {
+        let mut changes = ExecutionOverlayChanges {
+            accounts: Vec::with_capacity(delta.state.accounts.len()),
+            storage: Vec::with_capacity(delta.state.accounts.len()),
+            code_hashes: Vec::with_capacity(delta.state.contracts.len()),
+        };
+        for (address, account) in &delta.state.accounts {
             self.extend_account(
                 address,
                 account.account.as_ref().map(|account| &account.info),
-                account.status.is_storage_known(),
-                storage.map(|(slot, value)| (*slot, *value)),
-                block_number,
+                account.account.is_none() || delta.storage_wipes.contains(address),
+                account
+                    .account
+                    .as_ref()
+                    .into_iter()
+                    .flat_map(|account| &account.storage)
+                    .map(|(slot, value)| (*slot, *value)),
+                delta.block.number,
                 &mut changes,
             );
         }
-        for (hash, code) in &reads.contracts {
-            self.extend_bytecode(*hash, code, block_number);
+        for (hash, code) in &delta.state.contracts {
+            self.extend_bytecode(*hash, code, delta.block.number);
             changes.code_hashes.push(*hash);
         }
-        changes
+        self.changes.push_back(Arc::new(changes));
     }
 
     fn extend_account(
@@ -298,7 +413,7 @@ impl ExecutionOverlay {
     ) {
         let value = ExecutionOverlayValue {
             block_number,
-            value: Self::normalized_account_info(info.cloned()),
+            value: Self::normalized_account_info(info.map(AccountInfo::copy_without_code)),
         };
         if let Some(entry) = self.accounts.get_mut(address) {
             *entry = value;
@@ -353,8 +468,8 @@ impl ExecutionOverlay {
     /// Latest values keep their observation blocks and the matching journals, so later pruning
     /// can expire them even when the same key was observed in several intervening blocks.
     #[cfg(any(feature = "rayon", test))]
-    pub(crate) fn extend_snapshot(&mut self, newer: &Self, after: BlockNumber) {
-        for (block, changes) in newer.block_hashes.iter().zip(&newer.changes) {
+    fn extend_snapshot(&mut self, newer: &Self, blocks: &[BlockNumHash], after: BlockNumber) {
+        for (block, changes) in blocks.iter().zip(&newer.changes) {
             if block.number <= after {
                 continue
             }
@@ -391,7 +506,6 @@ impl ExecutionOverlay {
                     self.code_hashes.insert_mut(*hash, value.clone());
                 }
             }
-            self.block_hashes.push(*block);
             self.changes.push_back(Arc::clone(changes));
         }
     }
@@ -403,6 +517,47 @@ impl ExecutionOverlay {
             self.code_hashes
                 .insert_mut(hash, ExecutionOverlayValue { block_number, value: code.clone() });
         }
+    }
+}
+
+#[derive(Debug)]
+pub(crate) struct ExecutionOverlayDelta {
+    block: BlockNumHash,
+    state: CacheState,
+    storage_wipes: AddressSet,
+}
+
+impl ExecutionOverlayDelta {
+    pub(crate) fn new(block: BlockNumHash, writes: &BundleState, mut state: CacheState) -> Self {
+        let mut storage_wipes = AddressSet::default();
+        for (address, account) in writes.state() {
+            if account.was_destroyed() {
+                storage_wipes.insert(*address);
+            }
+            let cached = state
+                .accounts
+                .entry(*address)
+                .or_insert_with(CacheAccount::new_loaded_not_existing);
+            if let Some(info) = &account.info {
+                if let Some(code) = &info.code {
+                    state.contracts.entry(info.code_hash).or_insert_with(|| code.clone());
+                }
+                let cached = cached.account.get_or_insert_with(|| PlainAccount {
+                    info: info.copy_without_code(),
+                    storage: Default::default(),
+                });
+                cached.info = info.copy_without_code();
+                cached.storage.extend(
+                    account.storage.iter().map(|(slot, value)| (*slot, value.present_value)),
+                );
+            } else {
+                cached.account = None;
+            }
+        }
+        for (hash, code) in &writes.contracts {
+            state.contracts.insert(*hash, code.clone());
+        }
+        Self { block, state, storage_wipes }
     }
 }
 
@@ -1208,18 +1363,18 @@ mod tests {
         assert!(state.state()[&address].info.as_ref().unwrap().account_id.is_some());
 
         let mut overlay = ExecutionOverlay::default();
-        overlay.extend_state(&state, 1);
+        Arc::make_mut(&mut overlay.base).extend_state(&state, 1);
 
-        let stored_account = overlay.accounts[&address].value.as_ref().unwrap();
+        let stored_account = overlay.accounts()[&address].value.as_ref().unwrap();
         assert_eq!(stored_account.account_id, None);
         assert_eq!(
             stored_account,
             &AccountInfo { account_id: None, ..account },
             "normalization must preserve durable account fields"
         );
-        assert_eq!(stored_account.code, Some(code.clone()));
-        assert_eq!(overlay.storage[&address][&slot].value, value);
-        assert_eq!(overlay.code_hashes[&code_hash].value, code);
+        assert_eq!(stored_account.code, None);
+        assert_eq!(overlay.storage()[&address][&slot].value, value);
+        assert_eq!(overlay.code_hashes()[&code_hash].value, code);
     }
 
     #[test]
@@ -1237,7 +1392,7 @@ mod tests {
         );
 
         let mut overlay = ExecutionOverlay::default();
-        overlay.extend_state(&state, 1);
+        Arc::make_mut(&mut overlay.base).extend_state(&state, 1);
 
         assert_eq!(overlay.storage_value(address, U256::ZERO), Some(U256::ZERO));
     }
@@ -1470,9 +1625,9 @@ mod tests {
             .unwrap();
 
         assert_eq!(fallback_block_number, Some(2));
-        assert!(overlay.accounts.is_empty());
-        assert!(overlay.storage.is_empty());
-        assert!(overlay.code_hashes.is_empty());
+        assert!(overlay.accounts().is_empty());
+        assert!(overlay.storage().is_empty());
+        assert!(overlay.code_hashes().is_empty());
     }
 
     #[test]
@@ -1494,10 +1649,13 @@ mod tests {
         for id in [3, 4] {
             let address = Address::with_last_byte(id);
             let slot = U256::from(id);
-            assert_eq!(overlay.accounts[&address].value.as_ref().unwrap().balance, U256::from(id));
-            assert_eq!(overlay.accounts[&address].value.as_ref().unwrap().account_id, None);
-            assert_eq!(overlay.storage[&address][&slot].value, U256::from(id));
-            assert!(overlay.code_hashes.contains_key(&B256::with_last_byte(id + 64)));
+            assert_eq!(
+                overlay.accounts()[&address].value.as_ref().unwrap().balance,
+                U256::from(id)
+            );
+            assert_eq!(overlay.accounts()[&address].value.as_ref().unwrap().account_id, None);
+            assert_eq!(overlay.storage()[&address][&slot].value, U256::from(id));
+            assert!(overlay.code_hashes().contains_key(&B256::with_last_byte(id + 64)));
         }
         assert_eq!(
             overlay.block_hashes,
@@ -1564,9 +1722,9 @@ mod tests {
 
         assert_eq!(fallback_block_number, Some(2));
 
-        assert_eq!(overlay.accounts[&address].value.as_ref().unwrap().balance, U256::ONE);
-        assert_eq!(overlay.accounts[&address].value.as_ref().unwrap().account_id, None);
-        assert_eq!(overlay.storage[&address][&slot].value, U256::ONE);
+        assert_eq!(overlay.accounts()[&address].value.as_ref().unwrap().balance, U256::ONE);
+        assert_eq!(overlay.accounts()[&address].value.as_ref().unwrap().account_id, None);
+        assert_eq!(overlay.storage()[&address][&slot].value, U256::ONE);
         assert_eq!(
             overlay.block_hashes,
             [side_block_two, side_block_three]

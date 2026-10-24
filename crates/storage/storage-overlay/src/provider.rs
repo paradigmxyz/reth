@@ -482,8 +482,8 @@ where
 {
     fn basic_account(&self, address: &Address) -> ProviderResult<Option<Account>> {
         let (overlay, historical_fallback) = self.execution_overlay()?;
-        if let Some(account) = overlay.accounts().get(address) {
-            return Ok(account.value.as_ref().map(Account::from))
+        if let Some(account) = overlay.account(address) {
+            return Ok(account.map(Account::from))
         }
         if let Some(historical_fallback) = historical_fallback {
             return match self.provider().account_history_info(
@@ -582,8 +582,8 @@ where
         code_hash: &B256,
     ) -> ProviderResult<Option<reth_primitives_traits::Bytecode>> {
         let (overlay, _) = self.execution_overlay()?;
-        if let Some(bytecode) = overlay.code_hashes().get(code_hash) {
-            return Ok(Some(reth_primitives_traits::Bytecode(bytecode.value.clone())));
+        if let Some(bytecode) = overlay.bytecode(code_hash) {
+            return Ok(Some(reth_primitives_traits::Bytecode(bytecode.clone())));
         }
         self.provider()
             .tx()

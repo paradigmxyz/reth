@@ -42,6 +42,8 @@ pub(crate) struct ExecutionOverlayMetrics {
     pub(crate) overlay_bytecodes: Gauge,
     /// Pruned snapshots published under a new persistence anchor.
     pub(crate) overlay_prune_publications: Counter,
+    /// Unmerged observation layers when a new block is published.
+    pub(crate) overlay_unmerged_blocks: Histogram,
     /// Pruned snapshots discarded because their source is no longer cached.
     pub(crate) overlay_prune_discarded: Counter,
 }

@@ -5,6 +5,7 @@
 //! reusable state trie and execution overlays on demand.
 
 use crate::{
+    builder::ExecutionOverlayDelta,
     changeset_cache::compute_block_trie_updates,
     database_state_frontiers,
     manager_metrics::{ExecutionOverlayMetrics, OverlayCacheMetrics, StateTrieOverlayMetrics},
@@ -288,25 +289,44 @@ impl<N: NodePrimitives> OverlayManager<N> {
             })
             .collect::<Vec<_>>();
         let reads = self.execution_reads.lock().take().filter(|reads| reads.hash == hash);
+        let delta = if keys.is_empty() {
+            None
+        } else {
+            self.blocks.get(&hash).map(|entry| entry.value().clone()).map(|block| {
+                Arc::new(ExecutionOverlayDelta::new(
+                    block.recovered_block().num_hash(),
+                    &block.execution_output.state,
+                    reads.map(|reads| reads.state).unwrap_or_default(),
+                ))
+            })
+        };
         let mut extended = false;
         for key in keys {
-            if let Some(parent_input) = self.execution_overlays.take_ready(&key) {
-                // Persistence can remove the old anchor from the block graph while pruning is
-                // running. Extending its snapshot only needs the newly inserted block.
-                let Some(block) = self.blocks.get(&hash).map(|entry| entry.value().clone()) else {
-                    continue
-                };
-                let overlay = compute_execution_overlay_inner(
-                    ComputeOverlayInput::ExtendCached { block, parent_input },
-                    key.anchor_hash,
-                    &self.execution_metrics,
-                    reads.as_ref().map(|reads| &reads.state),
-                );
+            if let Some(parent_input) = self.execution_overlays.take_ready(&key) &&
+                let Some(delta) = &delta
+            {
+                let mut overlay = Arc::unwrap_or_clone(parent_input);
+                overlay.extend_deferred(Arc::clone(delta), &self.execution_metrics);
+                let overlay = Arc::new(overlay);
                 self.execution_metrics.overlay_cache_fills.increment(1);
                 self.execution_overlays
                     .entries
                     .entry(OverlayCacheKey { anchor_hash: key.anchor_hash, tip_hash: hash })
-                    .or_insert_with(|| OverlayCacheEntry::Ready(Arc::new(overlay)));
+                    .or_insert_with(|| OverlayCacheEntry::Ready(Arc::clone(&overlay)));
+                #[cfg(feature = "rayon")]
+                if let Some(worker_pool) = &self.worker_pool {
+                    let overlay = Arc::clone(&overlay);
+                    let metrics = self.execution_metrics.clone();
+                    let span = tracing::Span::current();
+                    worker_pool.spawn(move || {
+                        let _guard = span.enter();
+                        overlay.compile(&metrics);
+                    });
+                } else {
+                    overlay.compile(&self.execution_metrics);
+                }
+                #[cfg(not(feature = "rayon"))]
+                overlay.compile(&self.execution_metrics);
                 extended = true;
             }
         }
@@ -625,9 +645,7 @@ impl<N: NodePrimitives> OverlayManager<N> {
             anchor_hash,
             parent_state,
             cache_config,
-            |input, _| {
-                compute_execution_overlay_inner(input, anchor_hash, &self.execution_metrics, None)
-            },
+            |input, _| compute_execution_overlay_inner(input, anchor_hash, &self.execution_metrics),
         )
     }
 
@@ -1102,7 +1120,6 @@ fn compute_execution_overlay_inner<N: NodePrimitives>(
     input: ComputeOverlayInput<N, ExecutionOverlay>,
     anchor_hash: B256,
     metrics: &ExecutionOverlayMetrics,
-    reads: Option<&CacheState>,
 ) -> ExecutionOverlay {
     let started_at = Instant::now();
     let block_count = match &input {
@@ -1116,22 +1133,19 @@ fn compute_execution_overlay_inner<N: NodePrimitives>(
     let overlay = match input {
         ComputeOverlayInput::ExtendCached { block, parent_input } => {
             let mut parent_input = parent_input;
-            Arc::make_mut(&mut parent_input).extend_block(&block, reads);
+            Arc::make_mut(&mut parent_input).extend_block(&block);
             Arc::try_unwrap(parent_input).expect("Arc::make_mut leaves the child overlay unique")
         }
         ComputeOverlayInput::MergeBlocks(blocks) => {
             let mut overlay = ExecutionOverlay::default();
             for block in blocks.iter().rev() {
-                overlay.extend_block(block, None);
+                overlay.extend_block(block);
             }
             overlay
         }
     };
 
-    metrics.overlay_blocks.set(overlay.block_hashes().len() as f64);
-    metrics.overlay_accounts.set(overlay.accounts().size() as f64);
-    metrics.overlay_storage_accounts.set(overlay.storage().size() as f64);
-    metrics.overlay_bytecodes.set(overlay.code_hashes().size() as f64);
+    overlay.record_metrics(metrics);
 
     let elapsed = started_at.elapsed();
     metrics.overlay_computation_duration_seconds.record(elapsed.as_secs_f64());
