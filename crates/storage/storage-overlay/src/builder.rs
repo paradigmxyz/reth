@@ -5,7 +5,7 @@ use crate::{
 };
 use alloy_eips::BlockNumHash;
 use alloy_primitives::{
-    map::{AddressSet, DefaultHashBuilder, FbBuildHasher},
+    map::{DefaultHashBuilder, FbBuildHasher},
     Address, BlockHash, BlockNumber, B256, U256,
 };
 use fixed_cache::Cache;
@@ -27,11 +27,12 @@ use reth_trie::{updates::TrieUpdatesSorted, HashedPostStateSorted, TrieInputSort
 use reth_trie_db::DatabaseHashedPostState;
 use revm::{
     bytecode::Bytecode,
-    database::{states::CacheAccount, BundleState, CacheState, PlainAccount},
+    database::{BundleState, CacheState},
     state::AccountInfo,
 };
 use std::{
     collections::VecDeque,
+    fmt::Debug,
     ops::RangeInclusive,
     sync::{Arc, OnceLock},
     time::{Duration, Instant},
@@ -77,7 +78,6 @@ pub struct ExecutionOverlay {
     base: Arc<ExecutionOverlayData>,
     pending: Vec<Arc<ExecutionOverlayDelta>>,
     compiled: OnceLock<Arc<ExecutionOverlayData>>,
-    pub(crate) reads: Option<Arc<ExecutionOverlayReads>>,
 }
 
 impl ExecutionOverlay {
@@ -96,7 +96,7 @@ impl ExecutionOverlay {
         block_hashes.push(delta.block);
         pending.push(delta);
         metrics.overlay_unmerged_blocks.record(pending.len() as f64);
-        Self { block_hashes, base, pending, compiled: OnceLock::new(), reads: Some(Arc::default()) }
+        Self { block_hashes, base, pending, compiled: OnceLock::new() }
     }
 
     /// Returns the in-memory block hashes in ascending block-number order.
@@ -107,6 +107,9 @@ impl ExecutionOverlay {
     pub(crate) fn account(&self, address: &Address) -> Option<Option<&AccountInfo>> {
         let layers = if self.compiled.get().is_some() { 1 } else { self.pending.len() };
         for delta in self.pending.iter().rev().take(layers) {
+            if let Some(account) = delta.writes.bundle().state().get(address) {
+                return Some(account.info.as_ref());
+            }
             if let Some(account) = delta.state.accounts.get(address) {
                 return Some(account.account.as_ref().map(|account| &account.info));
             }
@@ -117,13 +120,22 @@ impl ExecutionOverlay {
     pub(crate) fn storage_value(&self, address: Address, slot: U256) -> Option<U256> {
         let layers = if self.compiled.get().is_some() { 1 } else { self.pending.len() };
         for delta in self.pending.iter().rev().take(layers) {
+            let written = delta.writes.bundle().state().get(&address);
+            if let Some(account) = written {
+                if let Some(value) = account.storage.get(&slot) {
+                    return Some(value.present_value);
+                }
+                if account.was_destroyed() || account.info.is_none() {
+                    return Some(U256::ZERO);
+                }
+            }
             if let Some(account) = delta.state.accounts.get(&address) {
                 if let Some(value) =
                     account.account.as_ref().and_then(|account| account.storage.get(&slot))
                 {
                     return Some(*value);
                 }
-                if account.account.is_none() || delta.storage_wipes.contains(&address) {
+                if account.account.is_none() && written.is_none() {
                     return Some(U256::ZERO);
                 }
             }
@@ -139,14 +151,35 @@ impl ExecutionOverlay {
     pub(crate) fn bytecode(&self, hash: &B256) -> Option<&Bytecode> {
         let layers = if self.compiled.get().is_some() { 1 } else { self.pending.len() };
         for delta in self.pending.iter().rev().take(layers) {
-            if let Some(code) = delta.state.contracts.get(hash) {
+            if let Some(code) = delta
+                .writes
+                .bundle()
+                .contracts
+                .get(hash)
+                .or_else(|| delta.state.contracts.get(hash))
+            {
                 return Some(code);
             }
         }
         self.data().code_hashes.get(hash).map(|entry| &entry.value)
     }
 
+    /// Returns shared read observations if their worker-side allocation has completed.
+    pub(crate) fn reads(&self) -> Option<&ExecutionOverlayReads> {
+        self.pending.last()?.reads.get().map(Arc::as_ref)
+    }
+
+    /// Allocates the tip's shared read layer without making readers wait for it.
+    pub(crate) fn prepare_reads(&self) {
+        if let Some(delta) = self.pending.last() &&
+            delta.reads.get().is_none()
+        {
+            let _ = delta.reads.set(Arc::default());
+        }
+    }
+
     pub(crate) fn compile(&self, metrics: &ExecutionOverlayMetrics) {
+        self.prepare_reads();
         let start = Instant::now();
         self.flattened();
         self.record_metrics(metrics);
@@ -187,7 +220,6 @@ impl ExecutionOverlay {
 
     /// Extends a cold overlay from the committed writes of an executed block.
     pub(crate) fn extend_block<N: NodePrimitives>(&mut self, block: &ExecutedBlock<N>) {
-        self.reads = None;
         if !self.pending.is_empty() {
             self.base = self.flattened();
             self.pending.clear();
@@ -225,7 +257,6 @@ impl ExecutionOverlay {
         data.extend_snapshot(&newer.flattened(), &newer.block_hashes, after);
         self.block_hashes.extend(newer.block_hashes.iter().filter(|block| block.number > after));
         self.pending = newer.pending.last().cloned().into_iter().collect();
-        self.reads = newer.reads.clone();
         self.base = Arc::new(data);
         self.compiled = OnceLock::from(Arc::clone(&self.base));
     }
@@ -384,25 +415,30 @@ impl ExecutionOverlayData {
     }
 
     fn extend_delta(&mut self, delta: &ExecutionOverlayDelta) {
-        let mut changes = ExecutionOverlayChanges {
-            accounts: Vec::with_capacity(delta.state.accounts.len()),
-            storage: Vec::with_capacity(delta.state.accounts.len()),
-            code_hashes: Vec::with_capacity(delta.state.contracts.len()),
-        };
+        let writes = delta.writes.bundle();
+        let mut changes = self.extend_state(writes, delta.block.number);
         for (address, account) in &delta.state.accounts {
-            self.extend_account(
-                address,
-                account.account.as_ref().map(|account| &account.info),
-                account.account.is_none() || delta.storage_wipes.contains(address),
-                account
-                    .account
-                    .as_ref()
-                    .into_iter()
-                    .flat_map(|account| &account.storage)
-                    .map(|(slot, value)| (*slot, *value)),
-                delta.block.number,
-                &mut changes,
-            );
+            let storage = account.account.as_ref().into_iter().flat_map(|account| &account.storage);
+            if let Some(written) = writes.state().get(address) {
+                self.extend_storage(
+                    address,
+                    false,
+                    storage
+                        .filter(|(slot, _)| !written.storage.contains_key(slot))
+                        .map(|(slot, value)| (*slot, *value)),
+                    delta.block.number,
+                    &mut changes,
+                );
+            } else {
+                self.extend_account(
+                    address,
+                    account.account.as_ref().map(|account| &account.info),
+                    account.account.is_none(),
+                    storage.map(|(slot, value)| (*slot, *value)),
+                    delta.block.number,
+                    &mut changes,
+                );
+            }
         }
         for (hash, code) in &delta.state.contracts {
             self.extend_bytecode(*hash, code, delta.block.number);
@@ -532,41 +568,30 @@ impl ExecutionOverlayData {
 #[derive(Debug)]
 pub(crate) struct ExecutionOverlayDelta {
     block: BlockNumHash,
+    writes: Arc<dyn ExecutionOverlaySource>,
     state: CacheState,
-    storage_wipes: AddressSet,
+    reads: OnceLock<Arc<ExecutionOverlayReads>>,
 }
 
 impl ExecutionOverlayDelta {
-    pub(crate) fn new(block: BlockNumHash, writes: &BundleState, mut state: CacheState) -> Self {
-        let mut storage_wipes = AddressSet::default();
-        for (address, account) in writes.state() {
-            if account.was_destroyed() {
-                storage_wipes.insert(*address);
-            }
-            let cached = state
-                .accounts
-                .entry(*address)
-                .or_insert_with(CacheAccount::new_loaded_not_existing);
-            if let Some(info) = &account.info {
-                if let Some(code) = &info.code {
-                    state.contracts.entry(info.code_hash).or_insert_with(|| code.clone());
-                }
-                let cached = cached.account.get_or_insert_with(|| PlainAccount {
-                    info: info.copy_without_code(),
-                    storage: Default::default(),
-                });
-                cached.info = info.copy_without_code();
-                cached.storage.extend(
-                    account.storage.iter().map(|(slot, value)| (*slot, value.present_value)),
-                );
-            } else {
-                cached.account = None;
-            }
+    pub(crate) fn new<N: NodePrimitives>(block: ExecutedBlock<N>, state: CacheState) -> Self {
+        Self {
+            block: block.recovered_block().num_hash(),
+            writes: Arc::new(block),
+            state,
+            reads: OnceLock::new(),
         }
-        for (hash, code) in &writes.contracts {
-            state.contracts.insert(*hash, code.clone());
-        }
-        Self { block, state, storage_wipes }
+    }
+}
+
+/// Erases the block's receipt type while retaining its shared authoritative bundle.
+trait ExecutionOverlaySource: Debug + Send + Sync {
+    fn bundle(&self) -> &BundleState;
+}
+
+impl<N: NodePrimitives> ExecutionOverlaySource for ExecutedBlock<N> {
+    fn bundle(&self) -> &BundleState {
+        &self.execution_output.state
     }
 }
 

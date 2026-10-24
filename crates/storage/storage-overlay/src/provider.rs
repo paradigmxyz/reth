@@ -508,7 +508,7 @@ where
             }
             self.basic_account_from_db(address)
         };
-        if let Some(reads) = &overlay.reads {
+        if let Some(reads) = overlay.reads() {
             reads.accounts.get_or_try_insert_with(*address, |_| read())
         } else {
             read()
@@ -599,7 +599,7 @@ where
                 .get_by_encoded_key::<tables::Bytecodes>(code_hash)
                 .map_err(Into::into)
         };
-        if let Some(reads) = &overlay.reads {
+        if let Some(reads) = overlay.reads() {
             reads.code.get_or_try_insert_with(*code_hash, |_| read())
         } else {
             read()
@@ -934,7 +934,7 @@ where
             }
             self.storage_from_db(address, storage_key, false)
         };
-        if let Some(reads) = &overlay.reads {
+        if let Some(reads) = overlay.reads() {
             reads.storage.get_or_try_insert_with((address, storage_key), |_| read())
         } else {
             read()

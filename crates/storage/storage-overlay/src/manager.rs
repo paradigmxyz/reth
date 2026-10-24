@@ -294,8 +294,7 @@ impl<N: NodePrimitives> OverlayManager<N> {
         } else {
             self.blocks.get(&hash).map(|entry| entry.value().clone()).map(|block| {
                 Arc::new(ExecutionOverlayDelta::new(
-                    block.recovered_block().num_hash(),
-                    &block.execution_output.state,
+                    block,
                     reads.map(|reads| reads.state).unwrap_or_default(),
                 ))
             })
@@ -322,6 +321,7 @@ impl<N: NodePrimitives> OverlayManager<N> {
                     let span = tracing::Span::current();
                     worker_pool.spawn(move || {
                         let _guard = span.enter();
+                        overlay.prepare_reads();
                         drop(parent_input);
                         overlay.compile(&metrics);
                     });
