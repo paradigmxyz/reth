@@ -47,7 +47,7 @@ use std::{
     os::unix::{fs::MetadataExt, process::CommandExt},
     path::PathBuf,
     sync::{mpsc, Arc},
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 type Node = MockNodeTypesWithDB<Arc<DatabaseEnv>>;
@@ -213,6 +213,7 @@ fn metric_counts(snapshotter: &Snapshotter) -> BTreeMap<String, u64> {
 }
 
 fn run(config: &mut Config, snapshotter: &Snapshotter) -> Result<()> {
+    let perf_start = Instant::now();
     ensure!((1..=1024).contains(&config.blocks), "blocks must be 1..=1024");
     ensure!((1..=4096).contains(&config.updates), "updates must be 1..=4096");
     ensure!((1..=16).contains(&config.proof_workers), "proof_workers must be 1..=16");
@@ -371,6 +372,7 @@ fn run(config: &mut Config, snapshotter: &Snapshotter) -> Result<()> {
     }
     let recovered_root = root(&state);
     ensure!(recovered_root == parent.state_root(), "recovered root at {base}");
+    println!("{}", json!({"perf": {"init_ns": perf_start.elapsed().as_nanos()}}));
     println!("{}", json!({"recovery": "complete", "head": base, "root": recovered_root}));
     let mut blocks = Vec::<ExecutedBlock<EthPrimitives>>::new();
     let mut snapshots = vec![state.clone()];
@@ -453,6 +455,7 @@ fn run(config: &mut Config, snapshotter: &Snapshotter) -> Result<()> {
                 }
             };
             if let Some(result) = result {
+                let perf_start = Instant::now();
                 result?;
                 pending_save = None;
                 db_tip = next_db;
@@ -481,6 +484,10 @@ fn run(config: &mut Config, snapshotter: &Snapshotter) -> Result<()> {
                 };
                 manager.precompute_execution_overlay(parent.hash(), anchor);
                 prune_requested = true;
+                println!(
+                    "{}",
+                    json!({"perf": {"persistence_ns": perf_start.elapsed().as_nanos()}})
+                );
                 continue;
             }
         }
@@ -547,6 +554,7 @@ fn run(config: &mut Config, snapshotter: &Snapshotter) -> Result<()> {
             journal_file.write_all(b"\n")?;
             journal_block.operations
         };
+        let perf_start = Instant::now();
         let updates_input = operations
             .iter()
             .flat_map(|op| match op {
@@ -568,6 +576,7 @@ fn run(config: &mut Config, snapshotter: &Snapshotter) -> Result<()> {
             }
         }
         let (bundle, updates) = apply(&mut state, number, &updates_input);
+        let model_ns = perf_start.elapsed().as_nanos();
         // The full operations are in the journal before production tasks run.
         println!(
             "{}",
@@ -665,6 +674,7 @@ fn run(config: &mut Config, snapshotter: &Snapshotter) -> Result<()> {
         drop(hints);
         stream.finish();
         let outcome = handle.take_state_root_rx().recv_timeout(timeout)??;
+        let trie_ns = perf_start.elapsed().as_nanos() - model_ns;
         ensure!(
             outcome.state_root == root(&state),
             "seed {} block {number}: expected {}, actual {}",
@@ -706,7 +716,13 @@ fn run(config: &mut Config, snapshotter: &Snapshotter) -> Result<()> {
         publish_sparse_trie(&pending, manager, parent.hash(), outcome.state_root);
         blocks.push(executed);
         snapshots.push(state.clone());
+        println!(
+            "{}",
+            json!({"perf": {"model_ns": model_ns,
+            "trie_ns": trie_ns, "post_ns": perf_start.elapsed().as_nanos() - model_ns - trie_ns}})
+        );
     }
+    let perf_start = Instant::now();
     drop(request_tx);
     writer.join().map_err(|_| eyre::eyre!("persistence worker panicked"))?;
     // Synchronize final trie completion before taking the metrics snapshot.
@@ -719,6 +735,7 @@ fn run(config: &mut Config, snapshotter: &Snapshotter) -> Result<()> {
         runtime.spawn_blocking_named(name, || {}).get();
     }
     let metrics = metric_counts(snapshotter);
+    println!("{}", json!({"perf": {"shutdown_ns": perf_start.elapsed().as_nanos()}}));
     println!(
         "{}",
         json!({"completed": true, "seed": config.seed, "blocks": total_blocks,
