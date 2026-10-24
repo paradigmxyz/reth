@@ -44,7 +44,7 @@ DOCKERFILE
   -w /workspace bedrock/reth-trie-dst-builder:rust1.96-sccache0.14 bash -seu <<'BUILD'
 export HOME=/cache CARGO_HOME=/cache/cargo CARGO_TARGET_DIR=/cache/target/reth-trie-dst
 export SCCACHE_DIR=/cache/sccache RUSTC_WRAPPER=sccache CARGO_INCREMENTAL=0
-export CC='sccache gcc' CXX='sccache g++' RUSTFLAGS='-C link-arg=-fuse-ld=mold'
+export CC='sccache gcc' CXX='sccache g++' RUSTFLAGS='-C target-cpu=x86-64-v3 -C link-arg=-fuse-ld=mold'
 mkdir -p "$CARGO_HOME" "$CARGO_TARGET_DIR" "$SCCACHE_DIR"
 touch "$CARGO_HOME" "$CARGO_TARGET_DIR"
 sccache --zero-stats >/dev/null
