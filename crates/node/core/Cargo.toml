@@ -76,7 +76,7 @@ proptest.workspace = true
 tokio.workspace = true
 
 [features]
-# Features for vergen to generate correct env vars
+# Features for smolgen to generate correct env vars
 jemalloc = ["reth-cli-util/jemalloc"]
 asm-keccak = [
     "alloy-primitives/asm-keccak",
@@ -96,5 +96,4 @@ min-trace-logs = ["tracing/release_max_level_trace"]
 trie-debug = ["reth-engine-primitives/trie-debug"]
 
 [build-dependencies]
-vergen = { workspace = true, features = ["build", "cargo", "emit_and_set"] }
-vergen-git2.workspace = true
+smolgen = { workspace = true, features = ["build", "cargo", "emit_and_set", "git2"] }
