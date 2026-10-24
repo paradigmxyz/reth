@@ -29,7 +29,7 @@ use std::{
     sync::Arc,
     time::{Duration, Instant},
 };
-use tracing::{debug, debug_span, instrument};
+use tracing::{debug, debug_span, error, instrument};
 
 pub use rpds::HashTrieMapSync;
 
@@ -165,7 +165,7 @@ impl ExecutionOverlay {
     ) {
         let num_hash = block.recovered_block().num_hash();
         let changes = if let Some(reads) = reads {
-            self.extend_reads(reads, num_hash.number)
+            self.extend_reads(&block.execution_output.state, reads, num_hash.number)
         } else {
             self.extend_state(&block.execution_output.state, num_hash.number)
         };
@@ -251,25 +251,43 @@ impl ExecutionOverlay {
 
     fn extend_reads(
         &mut self,
+        state: &BundleState,
         reads: &CacheState,
         block_number: BlockNumber,
     ) -> ExecutionOverlayChanges {
-        let mut changes = ExecutionOverlayChanges {
-            accounts: Vec::with_capacity(reads.accounts.len()),
-            storage: Vec::with_capacity(reads.accounts.len()),
-            code_hashes: Vec::with_capacity(reads.contracts.len()),
-        };
+        // BundleState is authoritative for writes; the executor cache supplies only other reads.
+        let mut changes = self.extend_state(state, block_number);
         for (address, account) in &reads.accounts {
+            let storage = account.account.as_ref().into_iter().flat_map(|account| &account.storage);
+            if let Some(writes) = state.state().get(address) {
+                if writes.info.as_ref() != account.account.as_ref().map(|account| &account.info) {
+                    error!(target: "storage::overlay::manager", block_number, %address, expected = ?writes.info.as_ref().map(|info| (info.nonce, info.balance, info.code_hash)), cached = ?account.account.as_ref().map(|account| (account.info.nonce, account.info.balance, account.info.code_hash)), "Executor cache differs from bundle account");
+                }
+                for (slot, value) in &writes.storage {
+                    if let Some(cached) =
+                        account.account.as_ref().and_then(|account| account.storage.get(slot)) &&
+                        *cached != value.present_value
+                    {
+                        error!(target: "storage::overlay::manager", block_number, %address, %slot, %cached, expected = %value.present_value, "Executor cache differs from bundle storage");
+                        break;
+                    }
+                }
+                self.extend_storage(
+                    address,
+                    false,
+                    storage
+                        .filter(|(slot, _)| !writes.storage.contains_key(slot))
+                        .map(|(slot, value)| (*slot, *value)),
+                    block_number,
+                    &mut changes,
+                );
+                continue
+            }
             self.extend_account(
                 address,
                 account.account.as_ref().map(|account| &account.info),
                 account.status.is_storage_known(),
-                account
-                    .account
-                    .as_ref()
-                    .into_iter()
-                    .flat_map(|account| &account.storage)
-                    .map(|(slot, value)| (*slot, *value)),
+                storage.map(|(slot, value)| (*slot, *value)),
                 block_number,
                 &mut changes,
             );
@@ -304,6 +322,17 @@ impl ExecutionOverlay {
             self.storage_wipes.insert_mut(*address, block_number);
             self.storage.remove_mut(address);
         }
+        self.extend_storage(address, storage_known, storage, block_number, changes);
+    }
+
+    fn extend_storage(
+        &mut self,
+        address: &Address,
+        storage_known: bool,
+        storage: impl Iterator<Item = (U256, U256)>,
+        block_number: BlockNumber,
+        changes: &mut ExecutionOverlayChanges,
+    ) {
         let mut storage = storage.peekable();
         let mut keys = Vec::with_capacity(storage.size_hint().0);
         if storage.peek().is_some() {
