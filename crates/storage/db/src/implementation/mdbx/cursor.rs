@@ -58,16 +58,20 @@ impl<K: TransactionKind, T: Table> Cursor<K, T> {
     /// size.
     ///
     /// Otherwise, just execute the closure.
+    ///
+    /// The closure receives the inner cursor and the compression buffer, so the metric handles are
+    /// borrowed instead of cloning their [`Arc`](std::sync::Arc) on every operation.
     fn execute_with_operation_metric<R>(
         &mut self,
         operation: Operation,
         value_size: Option<usize>,
-        f: impl FnOnce(&mut Self) -> R,
+        f: impl FnOnce(&mut reth_libmdbx::Cursor<K>, &[u8]) -> R,
     ) -> R {
-        if let Some(metrics) = self.metrics.clone() {
-            metrics[operation.index()].record(value_size, || f(self))
+        let Self { inner, buf, metrics, .. } = self;
+        if let Some(metrics) = metrics {
+            metrics[operation.index()].record(value_size, || f(inner, buf))
         } else {
-            f(self)
+            f(inner, buf)
         }
     }
 }
@@ -301,18 +305,16 @@ impl<T: Table> DbCursorRW<T> for Cursor<RW, T> {
         self.execute_with_operation_metric(
             Operation::CursorUpsert,
             Some(value.unwrap_or(&self.buf).len()),
-            |this| {
-                this.inner
-                    .put(key.as_ref(), value.unwrap_or(&this.buf), WriteFlags::UPSERT)
-                    .map_err(|e| {
-                        DatabaseWriteError {
-                            info: e.into(),
-                            operation: DatabaseWriteOperation::CursorUpsert,
-                            table_name: T::NAME,
-                            key: key.into_vec(),
-                        }
-                        .into()
-                    })
+            |inner, buf| {
+                inner.put(key.as_ref(), value.unwrap_or(buf), WriteFlags::UPSERT).map_err(|e| {
+                    DatabaseWriteError {
+                        info: e.into(),
+                        operation: DatabaseWriteOperation::CursorUpsert,
+                        table_name: T::NAME,
+                        key: key.into_vec(),
+                    }
+                    .into()
+                })
             },
         )
     }
@@ -323,10 +325,9 @@ impl<T: Table> DbCursorRW<T> for Cursor<RW, T> {
         self.execute_with_operation_metric(
             Operation::CursorInsert,
             Some(value.unwrap_or(&self.buf).len()),
-            |this| {
-                this.inner
-                    .put(key.as_ref(), value.unwrap_or(&this.buf), WriteFlags::NO_OVERWRITE)
-                    .map_err(|e| {
+            |inner, buf| {
+                inner.put(key.as_ref(), value.unwrap_or(buf), WriteFlags::NO_OVERWRITE).map_err(
+                    |e| {
                         DatabaseWriteError {
                             info: e.into(),
                             operation: DatabaseWriteOperation::CursorInsert,
@@ -334,7 +335,8 @@ impl<T: Table> DbCursorRW<T> for Cursor<RW, T> {
                             key: key.into_vec(),
                         }
                         .into()
-                    })
+                    },
+                )
             },
         )
     }
@@ -347,34 +349,36 @@ impl<T: Table> DbCursorRW<T> for Cursor<RW, T> {
         self.execute_with_operation_metric(
             Operation::CursorAppend,
             Some(value.unwrap_or(&self.buf).len()),
-            |this| {
-                this.inner
-                    .put(key.as_ref(), value.unwrap_or(&this.buf), WriteFlags::APPEND)
-                    .map_err(|e| {
-                        DatabaseWriteError {
-                            info: e.into(),
-                            operation: DatabaseWriteOperation::CursorAppend,
-                            table_name: T::NAME,
-                            key: key.into_vec(),
-                        }
-                        .into()
-                    })
+            |inner, buf| {
+                inner.put(key.as_ref(), value.unwrap_or(buf), WriteFlags::APPEND).map_err(|e| {
+                    DatabaseWriteError {
+                        info: e.into(),
+                        operation: DatabaseWriteOperation::CursorAppend,
+                        table_name: T::NAME,
+                        key: key.into_vec(),
+                    }
+                    .into()
+                })
             },
         )
     }
 
     fn delete_current(&mut self) -> Result<(), DatabaseError> {
-        self.execute_with_operation_metric(Operation::CursorDeleteCurrent, None, |this| {
-            this.inner.del(WriteFlags::CURRENT).map_err(|e| DatabaseError::Delete(e.into()))
+        self.execute_with_operation_metric(Operation::CursorDeleteCurrent, None, |inner, _| {
+            inner.del(WriteFlags::CURRENT).map_err(|e| DatabaseError::Delete(e.into()))
         })
     }
 }
 
 impl<T: DupSort> DbDupCursorRW<T> for Cursor<RW, T> {
     fn delete_current_duplicates(&mut self) -> Result<(), DatabaseError> {
-        self.execute_with_operation_metric(Operation::CursorDeleteCurrentDuplicates, None, |this| {
-            this.inner.del(WriteFlags::NO_DUP_DATA).map_err(|e| DatabaseError::Delete(e.into()))
-        })
+        self.execute_with_operation_metric(
+            Operation::CursorDeleteCurrentDuplicates,
+            None,
+            |inner, _| {
+                inner.del(WriteFlags::NO_DUP_DATA).map_err(|e| DatabaseError::Delete(e.into()))
+            },
+        )
     }
 
     fn append_dup(&mut self, key: T::Key, value: T::Value) -> Result<(), DatabaseError> {
@@ -383,18 +387,16 @@ impl<T: DupSort> DbDupCursorRW<T> for Cursor<RW, T> {
         self.execute_with_operation_metric(
             Operation::CursorAppendDup,
             Some(value.unwrap_or(&self.buf).len()),
-            |this| {
-                this.inner
-                    .put(key.as_ref(), value.unwrap_or(&this.buf), WriteFlags::APPEND_DUP)
-                    .map_err(|e| {
-                        DatabaseWriteError {
-                            info: e.into(),
-                            operation: DatabaseWriteOperation::CursorAppendDup,
-                            table_name: T::NAME,
-                            key: key.into_vec(),
-                        }
-                        .into()
-                    })
+            |inner, buf| {
+                inner.put(key.as_ref(), value.unwrap_or(buf), WriteFlags::APPEND_DUP).map_err(|e| {
+                    DatabaseWriteError {
+                        info: e.into(),
+                        operation: DatabaseWriteOperation::CursorAppendDup,
+                        table_name: T::NAME,
+                        key: key.into_vec(),
+                    }
+                    .into()
+                })
             },
         )
     }

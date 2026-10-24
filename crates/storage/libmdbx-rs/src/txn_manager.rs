@@ -1,12 +1,15 @@
 use crate::{
     environment::EnvPtr,
     error::{mdbx_result, Result},
-    CommitLatency,
+    CommitLatency, Error,
 };
 use std::{
+    collections::VecDeque,
     fmt, ptr,
-    sync::mpsc::{sync_channel, Receiver, SyncSender},
+    sync::mpsc::{sync_channel, Receiver, RecvTimeoutError, SyncSender},
+    time::Duration,
 };
+use tracing::warn;
 
 #[derive(Copy, Clone, Debug)]
 pub(crate) struct TxnPtr(pub(crate) *mut ffi::MDBX_txn);
@@ -63,35 +66,37 @@ impl TxnManager {
     /// - [`TxnManagerMessage::Begin`] opens a new transaction with [`ffi::mdbx_txn_begin_ex`]
     /// - [`TxnManagerMessage::Abort`] aborts a transaction with [`ffi::mdbx_txn_abort`]
     /// - [`TxnManagerMessage::Commit`] commits a transaction with [`ffi::mdbx_txn_commit_ex`]
+    ///
+    /// All write transactions are started on this thread, so MDBX returns [`Error::Busy`] for a
+    /// new write transaction while another one is open. Such requests are queued and retried as
+    /// soon as a transaction is committed or aborted, instead of making the caller poll.
     fn start_message_listener(&self, env: EnvPtr, rx: Receiver<TxnManagerMessage>) {
         let task = move || {
             let env = env;
+            let mut pending = VecDeque::new();
             loop {
-                let msg = rx.recv();
+                let msg = if pending.is_empty() {
+                    rx.recv().map_err(|_| RecvTimeoutError::Disconnected)
+                } else {
+                    // Retry periodically too, in case the lock is released another way.
+                    rx.recv_timeout(PENDING_BEGIN_RETRY_INTERVAL)
+                };
                 tracing::debug!(target: "libmdbx::txn", ?msg, "txn-mngr received");
                 match msg {
                     Ok(msg) => match msg {
                         TxnManagerMessage::Begin { parent, flags, sender } => {
-                            let _span =
-                                tracing::debug_span!(target: "libmdbx::txn", "begin", flags)
-                                    .entered();
-                            let mut txn: *mut ffi::MDBX_txn = ptr::null_mut();
-                            let res = mdbx_result(unsafe {
-                                ffi::mdbx_txn_begin_ex(
-                                    env.0,
-                                    parent.0,
-                                    flags,
-                                    &mut txn,
-                                    ptr::null_mut(),
-                                )
-                            })
-                            .map(|_| TxnPtr(txn));
-                            sender.send(res).unwrap();
+                            if parent.0.is_null() {
+                                pending.push_back(PendingBegin { flags, sender, warned: false });
+                                begin_pending(env, &mut pending);
+                            } else {
+                                sender.send(begin(env, parent, flags)).unwrap();
+                            }
                         }
                         TxnManagerMessage::Abort { tx, sender } => {
                             let _span =
                                 tracing::debug_span!(target: "libmdbx::txn", "abort").entered();
                             sender.send(mdbx_result(unsafe { ffi::mdbx_txn_abort(tx.0) })).unwrap();
+                            begin_pending(env, &mut pending);
                         }
                         TxnManagerMessage::Commit { tx, sender } => {
                             let _span =
@@ -105,9 +110,11 @@ impl TxnManager {
                                     .map(|v| (v, latency))
                                 })
                                 .unwrap();
+                            begin_pending(env, &mut pending);
                         }
                     },
-                    Err(_) => return,
+                    Err(RecvTimeoutError::Timeout) => begin_pending(env, &mut pending),
+                    Err(RecvTimeoutError::Disconnected) => return,
                 }
             }
         };
@@ -119,6 +126,81 @@ impl TxnManager {
     }
 }
 
+/// How often queued write transaction requests are retried if no transaction is committed or
+/// aborted in the meantime.
+const PENDING_BEGIN_RETRY_INTERVAL: Duration = Duration::from_millis(250);
+
+/// A request for a write transaction that waits for the open one to finish.
+struct PendingBegin {
+    flags: ffi::MDBX_txn_flags_t,
+    sender: SyncSender<Result<TxnPtr>>,
+    /// Whether the stall has already been logged.
+    warned: bool,
+}
+
+/// Opens a transaction with [`ffi::mdbx_txn_begin_ex`].
+fn begin(env: EnvPtr, parent: TxnPtr, flags: ffi::MDBX_txn_flags_t) -> Result<TxnPtr> {
+    let _span = tracing::debug_span!(target: "libmdbx::txn", "begin", flags).entered();
+    let mut txn: *mut ffi::MDBX_txn = ptr::null_mut();
+    mdbx_result(unsafe {
+        ffi::mdbx_txn_begin_ex(env.0, parent.0, flags, &mut txn, ptr::null_mut())
+    })
+    .map(|_| TxnPtr(txn))
+}
+
+/// Opens write transactions for queued requests in order, until MDBX returns [`Error::Busy`]
+/// because a write transaction is open.
+fn begin_pending(env: EnvPtr, pending: &mut VecDeque<PendingBegin>) {
+    while let Some(request) = pending.front_mut() {
+        let res = begin(env, TxnPtr(ptr::null_mut()), request.flags);
+        if matches!(res, Err(Error::Busy)) {
+            if !request.warned {
+                request.warned = true;
+                warn!(target: "libmdbx", "Process stalled, awaiting read-write transaction lock.");
+            }
+            return
+        }
+        pending.pop_front().unwrap().sender.send(res).unwrap();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::{Environment, WriteFlags};
+    use std::{sync::Barrier, thread};
+
+    #[test]
+    fn queued_write_transactions_start_after_commit() {
+        let dir = tempfile::tempdir().unwrap();
+        let env = Environment::builder().open(dir.path()).unwrap();
+        let barrier = Barrier::new(4);
+
+        thread::scope(|s| {
+            let txn = env.begin_rw_txn().unwrap();
+            for i in 0u8..3 {
+                let (env, barrier) = (&env, &barrier);
+                s.spawn(move || {
+                    barrier.wait();
+                    let txn = env.begin_rw_txn().unwrap();
+                    let db = txn.open_db(None).unwrap();
+                    txn.put(db.dbi(), [i], [i], WriteFlags::empty()).unwrap();
+                    txn.commit().unwrap();
+                });
+            }
+            barrier.wait();
+            let db = txn.open_db(None).unwrap();
+            txn.put(db.dbi(), [3], [3], WriteFlags::empty()).unwrap();
+            txn.commit().unwrap();
+        });
+
+        let txn = env.begin_ro_txn().unwrap();
+        let db = txn.open_db(None).unwrap();
+        for i in 0u8..4 {
+            assert_eq!(txn.get::<[u8; 1]>(db.dbi(), &[i]).unwrap(), Some([i]));
+        }
+    }
+}
+
 #[cfg(feature = "read-tx-timeouts")]
 mod read_transactions {
     use crate::{
@@ -126,6 +208,7 @@ mod read_transactions {
         txn_manager::TxnManager,
     };
     use dashmap::{DashMap, DashSet};
+    use rustc_hash::FxBuildHasher;
     use std::{
         backtrace::Backtrace,
         sync::{mpsc::sync_channel, Arc},
@@ -167,9 +250,16 @@ mod read_transactions {
 
         /// Removes a transaction from the list of active read transactions.
         ///
+        /// `timed_out` must be `true` if the transaction may have been timed out, so that it is
+        /// also removed from the list of timed out transactions.
+        ///
         /// Returns `true` if the transaction was found and removed.
-        pub(crate) fn remove_active_read_transaction(&self, ptr: *mut ffi::MDBX_txn) -> bool {
-            self.read_transactions.as_ref().is_some_and(|txs| txs.remove_active(ptr))
+        pub(crate) fn remove_active_read_transaction(
+            &self,
+            ptr: *mut ffi::MDBX_txn,
+            timed_out: bool,
+        ) -> bool {
+            self.read_transactions.as_ref().is_some_and(|txs| txs.remove_active(ptr, timed_out))
         }
 
         /// Returns the number of timed out transactions that were not aborted by the user yet.
@@ -192,10 +282,13 @@ mod read_transactions {
         ///
         /// The backtrace of the transaction opening is recorded only when debug assertions are
         /// enabled outside DST.
-        active: DashMap<usize, (TransactionPtr, Instant, Option<Arc<Backtrace>>)>,
+        ///
+        /// Keys are pointers, so the map uses [`FxBuildHasher`] instead of the slower default
+        /// `SipHash`, which matters because every read transaction inserts and removes an entry.
+        active: DashMap<usize, (TransactionPtr, Instant, Option<Arc<Backtrace>>), FxBuildHasher>,
         /// List of timed out transactions that were not aborted by the user yet, hence have a
         /// dangling read transaction pointer.
-        timed_out_not_aborted: DashSet<usize>,
+        timed_out_not_aborted: DashSet<usize, FxBuildHasher>,
     }
 
     impl ReadTransactions {
@@ -216,9 +309,16 @@ mod read_transactions {
             );
         }
 
-        /// Removes a transaction from the list of active read transactions.
-        pub(super) fn remove_active(&self, ptr: *mut ffi::MDBX_txn) -> bool {
-            self.timed_out_not_aborted.remove(&(ptr as usize));
+        /// Removes a transaction from the list of active read transactions, and from the list of
+        /// timed out transactions if `timed_out` is `true`.
+        ///
+        /// The monitor marks a transaction as timed out before adding it to the list of timed out
+        /// transactions, so a transaction that isn't marked can't be in that list, and skipping
+        /// the removal saves a lookup on every read transaction.
+        pub(super) fn remove_active(&self, ptr: *mut ffi::MDBX_txn, timed_out: bool) -> bool {
+            if timed_out {
+                self.timed_out_not_aborted.remove(&(ptr as usize));
+            }
             self.active.remove(&(ptr as usize)).is_some()
         }
 
@@ -288,7 +388,7 @@ mod read_transactions {
                     // transactions.
                     for (ptr, open_duration, backtrace, err) in timed_out_active.iter().cloned() {
                         // Try deleting the transaction from the list of active transactions.
-                        let was_in_active = self.remove_active(ptr);
+                        let was_in_active = self.remove_active(ptr, false);
                         if let Err(err) = err {
                             if was_in_active {
                                 // If the transaction was in the list of active transactions,
