@@ -11,6 +11,7 @@ repository.workspace = true
 workspace = true
 
 [dependencies]
+evm2.workspace = true
 # reth
 reth-chain-state.workspace = true
 reth-chainspec = { workspace = true, optional = true }
@@ -28,7 +29,6 @@ reth-primitives-traits = { workspace = true, features = ["rayon", "dashmap", "ei
 reth-ethereum-primitives.workspace = true
 reth-provider.workspace = true
 reth-prune.workspace = true
-reth-revm = { workspace = true, features = ["optional-balance-check", "optional-no-base-fee"] }
 reth-stages-api.workspace = true
 reth-storage-overlay = { workspace = true, features = ["rayon"] }
 reth-tasks = { workspace = true, features = ["rayon"] }
@@ -38,15 +38,12 @@ reth-trie.workspace = true
 reth-trie-common.workspace = true
 
 # alloy
-alloy-evm.workspace = true
 alloy-consensus.workspace = true
+alloy-eip7928.workspace = true
 alloy-eips.workspace = true
-alloy-eip7928 = { workspace = true, features = ["rlp"] }
 alloy-primitives.workspace = true
 alloy-rlp.workspace = true
 alloy-rpc-types-engine.workspace = true
-
-revm.workspace = true
 
 # common
 futures.workspace = true
@@ -65,6 +62,7 @@ schnellru.workspace = true
 rayon.workspace = true
 tracing.workspace = true
 derive_more.workspace = true
+derive-where.workspace = true
 crossbeam-channel.workspace = true
 
 # optional deps for test-utils
@@ -101,6 +99,19 @@ rand.workspace = true
 tracing-subscriber = { workspace = true, features = ["registry"] }
 
 [features]
+asm-keccak = [
+    "reth-evm/asm-keccak",
+    "alloy-primitives/asm-keccak",
+    "reth-node-ethereum/asm-keccak",
+    "reth-evm-ethereum/asm-keccak",
+    "evm2/asm-keccak",
+]
+portable = [
+    "reth-evm/portable",
+    "reth-node-ethereum/portable",
+    "reth-evm-ethereum/portable",
+    "evm2/portable",
+]
 test-utils = [
     "reth-chain-state/test-utils",
     "reth-chainspec/test-utils",
@@ -113,7 +124,6 @@ test-utils = [
     "reth-provider/test-utils",
     "reth-prune-types",
     "reth-prune-types?/test-utils",
-    "reth-revm/test-utils",
     "reth-stages-api/test-utils",
     "reth-stages/test-utils",
     "reth-static-file",

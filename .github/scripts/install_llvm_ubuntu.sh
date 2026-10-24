@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -eo pipefail
 
-v=${1:-22}
+v=${1:-23}
 bins=(clang llvm-config lld ld.lld FileCheck)
 
 apt-get update -qq
@@ -41,4 +41,4 @@ for bin in "${bins[@]}"; do
 done
 
 echo "LLVM $v installed:"
-llvm-config --version
+llvm-config --version --bindir --libdir
