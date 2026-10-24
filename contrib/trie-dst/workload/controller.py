@@ -259,6 +259,7 @@ def main():
         if (STATE / "worker.pid").exists():
             raise RuntimeError("workload already started")
         if request["run_secs"] == 1:
+            (STATE / "pending-input.finish").touch()
             worker(request)
         else:
             config_path = STATE / "config.json"
