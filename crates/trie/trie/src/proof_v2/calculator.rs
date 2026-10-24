@@ -1434,7 +1434,7 @@ where
         let mut hashed_cursor_state = HashedCursorState::unseeked();
         let mut previous_traversal_bounds: Option<(Nibbles, Option<Nibbles>)> = None;
 
-        // Divide targets into bounded ranges, each corresponding to the direct children of one
+        // Divide targets into bounded ranges, each corresponding to one direct child of an
         // already-revealed parent, and handle all proofs within that range.
         for sub_trie_targets in iter_sub_trie_targets(targets) {
             let traversal_lower_bound = sub_trie_targets.lower_bound;
