@@ -373,7 +373,7 @@ fn run(config: &mut Config, snapshotter: &Snapshotter) -> Result<()> {
     ensure!(recovered_root == parent.state_root(), "recovered root at {base}");
     println!("{}", json!({"recovery": "complete", "head": base, "root": recovered_root}));
     let mut blocks = Vec::<ExecutedBlock<EthPrimitives>>::new();
-    let mut snapshots = vec![state.clone()];
+    let mut snapshots = vec![Some(state.clone())];
     let timeout = Duration::from_secs(config.timeout_secs);
     let (request_tx, request_rx) = mpsc::sync_channel::<SaveBlocksInput>(1);
     let (ack_tx, ack_rx) = mpsc::sync_channel(1);
@@ -467,7 +467,14 @@ fn run(config: &mut Config, snapshotter: &Snapshotter) -> Result<()> {
                 manager.evict_cached_changesets(
                     db_tip.saturating_sub(CHANGESET_CACHE_RETENTION_BLOCKS),
                 );
-                verify(&factory, &snapshots[(db_tip - base) as usize], db_tip, state_tip)?;
+                let snapshot = if db_tip == head {
+                    &state
+                } else {
+                    snapshots[(db_tip - base) as usize]
+                        .as_ref()
+                        .ok_or_else(|| eyre::eyre!("missing persistence snapshot at {db_tip}"))?
+                };
+                verify(&factory, snapshot, db_tip, state_tip)?;
                 manager.remove_blocks(
                     blocks
                         .iter()
@@ -694,7 +701,10 @@ fn run(config: &mut Config, snapshotter: &Snapshotter) -> Result<()> {
         manager.insert_block(executed.clone());
         publish_sparse_trie(&pending, manager, parent.hash(), outcome.state_root);
         blocks.push(executed);
-        snapshots.push(state.clone());
+        snapshots.push(
+            (number.saturating_add(buffer) > base.saturating_add(config.persistence_threshold))
+                .then(|| state.clone()),
+        );
     }
     drop(request_tx);
     writer.join().map_err(|_| eyre::eyre!("persistence worker panicked"))?;
