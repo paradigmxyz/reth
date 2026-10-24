@@ -17,7 +17,7 @@ use crate::tree::{
 use alloy_consensus::transaction::Recovered;
 use alloy_primitives::{Address, B256};
 use parking_lot::RwLock;
-use reth_evm::{ConfigureEvm, EvmEnv, EvmEnvFor, HaltReasonFor};
+use reth_evm::{ConfigureEvm, EvmEnv, EvmEnvFor, EvmTypesFor};
 use reth_primitives_traits::{NodePrimitives, SealedHeader, TxTy};
 use reth_provider::{
     BlockNumReader, ChangeSetReader, DatabaseProviderFactory, DatabaseProviderROFactory,
@@ -25,7 +25,6 @@ use reth_provider::{
     StorageSettingsCache,
 };
 use reth_storage_overlay::OverlayStateProviderFactory;
-use revm::context::Block;
 use std::{fmt::Debug, sync::Arc};
 
 /// Coordinates a long-lived worker and the latest completed immutable snapshot.
@@ -125,7 +124,7 @@ where
                 .record_results
                 .then(|| self.evm_config.speculative_next_evm_env(parent, POOL_BENEFICIARY))
                 .flatten()
-                .filter(|evm_env| cfg_reuses_prewarm_results(&evm_env.cfg_env))
+                .filter(|evm_env| cfg_reuses_prewarm_results(evm_env.version()))
                 .map(|evm_env| Speculation {
                     parent_hash: parent.hash(),
                     evm_env,
@@ -147,7 +146,7 @@ where
         &self,
         parent_hash: B256,
         evm_env: &EvmEnvFor<Evm>,
-    ) -> Option<PoolSeeds<HaltReasonFor<Evm>>> {
+    ) -> Option<PoolSeeds<EvmTypesFor<Evm>>> {
         let speculation = self.speculation.read();
         let speculation = speculation
             .as_ref()
@@ -155,7 +154,7 @@ where
         let differs = env_differences(&speculation.evm_env, evm_env)?;
         Some(PoolSeeds::new(
             Arc::clone(&speculation.results),
-            evm_env.block_env.beneficiary(),
+            evm_env.block_env().beneficiary,
             differs,
         ))
     }
@@ -165,35 +164,40 @@ where
 struct Speculation<Evm: ConfigureEvm> {
     parent_hash: B256,
     evm_env: EvmEnvFor<Evm>,
-    results: Arc<PoolResults<HaltReasonFor<Evm>>>,
+    results: Arc<PoolResults<EvmTypesFor<Evm>>>,
 }
 
 /// Returns the block environment fields that differ between the `predicted` environment and the
 /// `actual` one, or `None` if they differ in a way that every execution may depend on.
-fn env_differences<Spec: Clone + PartialEq, B: Block>(
-    predicted: &EvmEnv<Spec, B>,
-    actual: &EvmEnv<Spec, B>,
-) -> Option<BlockEnvFields> {
-    let mut cfg_env = predicted.cfg_env.clone();
-    // Results are recorded with these checks disabled and show that the checks would pass.
-    cfg_env.disable_nonce_check = actual.cfg_env.disable_nonce_check;
-    cfg_env.disable_balance_check = actual.cfg_env.disable_balance_check;
-    if cfg_env != actual.cfg_env {
+fn env_differences<E: EvmEnv>(predicted: &E, actual: &E) -> Option<BlockEnvFields> {
+    let predicted_version = predicted.version();
+    let actual_version = actual.version();
+    let checks = evm2::EvmFeatures::NONCE_CHECK | evm2::EvmFeatures::BALANCE_CHECK;
+    if Into::<evm2::SpecId>::into(predicted.spec_id()) !=
+        Into::<evm2::SpecId>::into(actual.spec_id()) ||
+        predicted_version.gas_params != actual_version.gas_params ||
+        (predicted_version.features | checks) != (actual_version.features | checks) ||
+        predicted_version.chain_id != actual_version.chain_id ||
+        predicted_version.tx_gas_limit_cap != actual_version.tx_gas_limit_cap ||
+        predicted_version.memory_limit != actual_version.memory_limit ||
+        predicted_version.max_code_size != actual_version.max_code_size ||
+        predicted_version.max_initcode_size != actual_version.max_initcode_size ||
+        predicted_version.max_blobs_per_tx != actual_version.max_blobs_per_tx
+    {
         return None
     }
-    let (predicted, actual) = (&predicted.block_env, &actual.block_env);
-    (predicted.number() == actual.number() &&
-        predicted.basefee() == actual.basefee() &&
-        predicted.difficulty() == actual.difficulty() &&
-        predicted.blob_excess_gas_and_price() == actual.blob_excess_gas_and_price() &&
-        predicted.slot_num() == actual.slot_num())
-    .then(|| BlockEnvFields {
-        // Recorded results never access the beneficiary.
-        beneficiary: false,
-        timestamp: predicted.timestamp() != actual.timestamp(),
-        prevrandao: predicted.prevrandao() != actual.prevrandao(),
-        gas_limit: predicted.gas_limit() != actual.gas_limit(),
-    })
+    let (predicted, actual) = (predicted.block_env(), actual.block_env());
+    (predicted.number == actual.number &&
+        predicted.basefee == actual.basefee &&
+        predicted.difficulty == actual.difficulty &&
+        predicted.blob_basefee == actual.blob_basefee &&
+        predicted.slot_num == actual.slot_num)
+        .then(|| BlockEnvFields {
+            beneficiary: false,
+            timestamp: predicted.timestamp != actual.timestamp,
+            prevrandao: predicted.prevrandao != actual.prevrandao,
+            gas_limit: predicted.gas_limit != actual.gas_limit,
+        })
 }
 
 /// A live, forward-only view of the pool's best transactions for one canonical parent.
@@ -229,7 +233,7 @@ struct Job<N: NodePrimitives, P, Evm: ConfigureEvm<Primitives = N>> {
     state_provider_factory: OverlayStateProviderFactory<P, N>,
     /// Where to record results of pool transactions, if `evm_env` is the predicted environment
     /// of the next block.
-    results: Option<Arc<PoolResults<HaltReasonFor<Evm>>>>,
+    results: Option<Arc<PoolResults<EvmTypesFor<Evm>>>>,
 }
 
 #[cfg(test)]
@@ -237,13 +241,13 @@ mod tests {
     use super::*;
     use alloy_consensus::Header;
     use alloy_primitives::U256;
+    use evm2::BaseEvmTypes;
     use reth_chainspec::ChainSpecBuilder;
     use reth_ethereum_primitives::EthPrimitives;
     use reth_evm_ethereum::EthEvmConfig;
     use reth_provider::test_utils::MockEthProvider;
     use reth_storage_overlay::OverlayManager;
     use reth_tasks::Runtime;
-    use revm::context::result::HaltReason;
 
     type TestHandle = Handle<EthPrimitives, MockEthProvider, EthEvmConfig>;
 
@@ -265,7 +269,7 @@ mod tests {
         handle.start(parent, Default::default(), state_provider_factory);
     }
 
-    fn recorded(handle: &TestHandle) -> Option<Arc<PoolResults<HaltReason>>> {
+    fn recorded(handle: &TestHandle) -> Option<Arc<PoolResults<BaseEvmTypes>>> {
         handle.speculation.read().as_ref().map(|s| Arc::clone(&s.results))
     }
 
@@ -328,14 +332,14 @@ mod tests {
             .speculative_next_evm_env(&SealedHeader::seal_slow(parent), POOL_BENEFICIARY)
             .unwrap();
         // Recorded results disable the nonce check.
-        predicted.cfg_env.disable_nonce_check = true;
+        predicted.version.features.remove(evm2::EvmFeatures::NONCE_CHECK);
         let mut actual = config.evm_env(&block).unwrap();
         assert_eq!(
             env_differences(&predicted, &actual),
             Some(BlockEnvFields { prevrandao: true, gas_limit: true, ..Default::default() })
         );
 
-        actual.block_env.timestamp += U256::from(12);
+        actual.block.timestamp += U256::from(12);
         assert_eq!(
             env_differences(&predicted, &actual),
             Some(BlockEnvFields {
@@ -347,10 +351,10 @@ mod tests {
         );
 
         let mut other_chain = actual.clone();
-        other_chain.cfg_env.chain_id += 1;
+        other_chain.version.chain_id += 1;
         assert_eq!(env_differences(&predicted, &other_chain), None);
 
-        actual.block_env.basefee += 1;
+        actual.block.basefee += U256::ONE;
         assert_eq!(env_differences(&predicted, &actual), None);
     }
 }

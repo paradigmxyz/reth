@@ -5,7 +5,6 @@
 //! - [`SavedCache`]: An execution cache snapshot associated with a specific block hash
 //! - [`PayloadExecutionCache`]: Thread-safe wrapper for sharing cached state across payload
 //!   processing tasks
-//! - [`precompile_cache`]: Cross-block cache of precompile results
 
 #![doc(
     html_logo_url = "https://raw.githubusercontent.com/paradigmxyz/reth/main/assets/reth-docs.png",
@@ -20,8 +19,6 @@ pub use cached_state::*;
 
 mod txpool;
 pub use txpool::*;
-
-pub mod precompile_cache;
 
 use alloy_primitives::B256;
 use metrics::{Counter, Histogram};

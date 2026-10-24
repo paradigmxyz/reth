@@ -11,6 +11,24 @@
 
 extern crate alloc;
 
+/// Receives per-transaction state changes streamed from block execution.
+pub trait OnStateHook: Send + 'static {
+    /// Observes one committed state update.
+    fn on_state(&mut self, state: StateUpdate);
+}
+
+impl<F> OnStateHook for F
+where
+    F: FnMut(StateUpdate) + Send + 'static,
+{
+    fn on_state(&mut self, state: StateUpdate) {
+        self(state)
+    }
+}
+
+mod compat;
+pub use compat::*;
+
 mod bal;
 pub use bal::*;
 

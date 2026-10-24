@@ -35,7 +35,7 @@ use reth_e2e_test_utils::{
 };
 use reth_node_ethereum::EthereumNode;
 use reth_provider::Chain;
-use reth_revm::db::BundleAccount;
+use reth_trie_common::bundle_state::BundleAccount;
 use std::sync::Arc;
 
 const ETH: u128 = 1_000_000_000_000_000_000;

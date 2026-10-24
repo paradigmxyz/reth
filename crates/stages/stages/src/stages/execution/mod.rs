@@ -7,7 +7,9 @@ use reth_chainspec::{ChainSpecProvider, EthereumHardforks};
 use reth_config::config::ExecutionConfig;
 use reth_consensus::FullConsensus;
 use reth_db::{static_file::HeaderMask, tables};
-use reth_evm::{execute::Executor, metrics::ExecutorMetrics, ConfigureEvm};
+use reth_evm::{
+    database::StateProviderDatabase, execute::Executor, metrics::ExecutorMetrics, ConfigureEvm,
+};
 use reth_execution_types::Chain;
 use reth_exex::{ExExManagerHandle, ExExNotification, ExExNotificationSource};
 use reth_primitives_traits::{format_gas_throughput, BlockBody, NodePrimitives};
@@ -18,7 +20,6 @@ use reth_provider::{
     StateWriteConfig, StateWriter, StaticFileProviderFactory, StatsReader, StoragePath,
     StorageSettingsCache, TransactionVariant,
 };
-use reth_revm::database::StateProviderDatabase;
 use reth_stages_api::{
     BlockErrorKind, CheckpointBlockRange, EntitiesCheckpoint, ExecInput, ExecOutput,
     ExecutionCheckpoint, ExecutionStageThresholds, Stage, StageCheckpoint, StageError, StageId,
@@ -418,11 +419,7 @@ where
 
         // prepare execution output for writing
         let time = Instant::now();
-        let mut state = ExecutionOutcome::from_blocks(
-            start_block,
-            executor.into_state().take_bundle(),
-            results,
-        );
+        let mut state = ExecutionOutcome::from_blocks(start_block, executor.into_state(), results);
         let write_preparation_duration = time.elapsed();
 
         // log the gas per second for the range we just executed
@@ -801,9 +798,9 @@ mod tests {
     };
     use reth_prune::PruneModes;
     use reth_prune_types::{PruneMode, ReceiptsLogPruneConfig};
-    use reth_revm::revm::database::{AccountStatus, BundleAccount};
     use reth_stages_api::StageUnitCheckpoint;
     use reth_testing_utils::generators;
+    use reth_trie::bundle_state::{AccountStatus, BundleAccount};
     use std::collections::BTreeMap;
 
     fn stage() -> ExecutionStage<EthEvmConfig> {
