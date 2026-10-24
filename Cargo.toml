@@ -533,7 +533,7 @@ tracing-appender = "0.2.5"
 url = { version = "2.3", default-features = false }
 zstd = "0.13"
 byteorder = "1"
-fixed-cache = { version = "0.1.10", default-features = false, features = ["alloc"] }
+fixed-cache = { version = "0.1.11", default-features = false, features = ["alloc"] }
 moka = "0.12"
 chrono = "0.4.41"
 
@@ -671,3 +671,7 @@ vergen-git2 = "10.0.1"
 
 # networking
 ipnet = "2.11"
+
+[patch.crates-io]
+# Lock-free hits in the global keccak cache (alloy-rs/core pyramid/keccak-lock-free-reads).
+alloy-primitives = { git = "https://github.com/alloy-rs/core", rev = "44a924677ede8cbe1ab84399dfa655efb2148715" }

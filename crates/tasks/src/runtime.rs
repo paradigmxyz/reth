@@ -591,8 +591,18 @@ impl Runtime {
     /// This is useful when dropping a value is expensive (e.g. large nested collections)
     /// and should not block the current task. Uses a persistent named thread (`"drop"`)
     /// to avoid thread creation overhead on hot paths.
+    ///
+    /// On hosts with several LLC domains, each domain gets its own drop thread (`"drop-{domain}"`)
+    /// that runs next to the caller: freeing on another domain pulls the allocator's metadata and
+    /// the freed lines over to it, which makes the producer's next allocations miss.
     pub fn spawn_drop<T: Send + 'static>(&self, value: T) {
-        self.spawn_blocking_named("drop", move || drop(value));
+        const DROP_THREAD_NAMES: [&str; 16] = [
+            "drop-0", "drop-1", "drop-2", "drop-3", "drop-4", "drop-5", "drop-6", "drop-7",
+            "drop-8", "drop-9", "drop-10", "drop-11", "drop-12", "drop-13", "drop-14", "drop-15",
+        ];
+        let name = crate::affinity::current_domain()
+            .map_or("drop", |domain| DROP_THREAD_NAMES[domain % DROP_THREAD_NAMES.len()]);
+        self.spawn_blocking_named(name, move || drop(value));
     }
 
     /// Spawns a blocking closure on a dedicated, named OS thread.

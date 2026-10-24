@@ -43,7 +43,7 @@ use revm::{
     Database, Inspector,
 };
 use std::sync::{
-    atomic::{AtomicUsize, Ordering},
+    atomic::{AtomicBool, AtomicUsize, Ordering},
     Arc,
 };
 
@@ -532,8 +532,14 @@ pub(super) struct PredictedState {
     storage: DashMap<(Address, StorageKey), Writes<StorageValue>, DefaultHashBuilder>,
     /// Transactions that cleared an account's storage by creating or destroying it.
     cleared: DashMap<Address, Writes<()>, DefaultHashBuilder>,
+    /// Whether `cleared` ever had a write published. Storage reads, which every speculative
+    /// execution makes from threads on several LLC domains, skip `cleared`'s shard lock while it
+    /// is empty, as it is for most blocks.
+    any_cleared: AtomicBool,
     /// Bytecode deployed by predicted writes.
     code: DashMap<B256, Bytecode, DefaultHashBuilder>,
+    /// Whether `code` is non-empty, so code reads skip its shard lock while it is empty.
+    any_code: AtomicBool,
     /// Number of actual execution or rebased account updates published by block execution.
     generation: AtomicUsize,
 }
@@ -553,7 +559,11 @@ impl PredictedState {
 
     /// Returns the latest storage value predicted before the transaction at `index`.
     fn storage(&self, address: Address, slot: StorageKey, index: usize) -> Option<StorageValue> {
-        let cleared = self.cleared.get(&address).and_then(|w| latest(&w, index).map(|(i, _)| *i));
+        let cleared = self
+            .any_cleared
+            .load(Ordering::Acquire)
+            .then(|| self.cleared.get(&address).and_then(|w| latest(&w, index).map(|(i, _)| *i)))
+            .flatten();
         let written = self.storage.get(&(address, slot)).and_then(|w| latest(&w, index).copied());
         match (written, cleared) {
             (Some((written, value)), Some(cleared)) if written >= cleared => Some(value),
@@ -564,6 +574,9 @@ impl PredictedState {
 
     /// Returns predicted bytecode by its hash.
     fn code(&self, code_hash: B256) -> Option<Bytecode> {
+        if !self.any_code.load(Ordering::Acquire) {
+            return None
+        }
         self.code.get(&code_hash).map(|code| code.clone())
     }
 
@@ -575,6 +588,7 @@ impl PredictedState {
                 account.is_created() &&
                 let Some(code) = &account.info.code
             {
+                self.any_code.store(true, Ordering::Release);
                 self.code.insert(account.info.code_hash, code.clone());
             }
         }
@@ -644,6 +658,9 @@ impl PredictedState {
             // Touched empty accounts are removed by EIP-161 state clearing.
             let destroyed = account.is_selfdestructed() || account.info.is_empty();
             if destroyed || account.is_created() {
+                if publish {
+                    self.any_cleared.store(true, Ordering::Release);
+                }
                 write(&mut self.cleared.entry(*address).or_default(), index, publish.then_some(()));
             }
             // Created bytecode is kept separately, the rest is known to the database.

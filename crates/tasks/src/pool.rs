@@ -348,6 +348,17 @@ impl WorkerPool {
         self.pool().in_place_scope(f)
     }
 
+    /// Like [`in_place_scope`](Self::in_place_scope), but every job spawned through the
+    /// [`PlacedScope`] runs in the caller's LLC domain (see [`JobDomain`]), so data the jobs
+    /// produce for the caller stays in its last-level cache.
+    pub fn in_place_scope_placed<'scope, R>(
+        &self,
+        f: impl FnOnce(&PlacedScope<'_, 'scope>) -> R,
+    ) -> R {
+        let domain = JobDomain::capture();
+        self.pool().in_place_scope(|scope| f(&PlacedScope { scope, domain }))
+    }
+
     /// Accesses the current thread's [`Worker`] from within a pool closure.
     ///
     /// This is useful for accessing the worker from inside `par_iter` where the initial `&Worker`
@@ -390,6 +401,23 @@ impl WorkerPool {
     /// `with_worker` or `with_worker_mut` call.
     pub fn with_worker_mut<R>(f: impl FnOnce(&mut Worker) -> R) -> R {
         WORKER.with_borrow_mut(|worker| f(worker))
+    }
+}
+
+/// A [`rayon::Scope`] whose spawned jobs run in the LLC domain of the thread that opened it.
+///
+/// Created by [`WorkerPool::in_place_scope_placed`].
+#[derive(Debug)]
+pub struct PlacedScope<'a, 'scope> {
+    scope: &'a rayon::Scope<'scope>,
+    domain: JobDomain,
+}
+
+impl<'scope> PlacedScope<'_, 'scope> {
+    /// Spawns `f` into the scope, pinned to the captured domain while it runs.
+    pub fn spawn(&self, f: impl FnOnce() + Send + 'scope) {
+        let domain = self.domain;
+        self.scope.spawn(move |_| domain.run(f));
     }
 }
 

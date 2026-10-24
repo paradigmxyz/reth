@@ -83,6 +83,21 @@ pub fn llc_domains() -> usize {
     0
 }
 
+/// Returns the LLC domain the calling thread currently runs on, for sharding shared state by
+/// domain. Advisory: the thread may migrate right after. Returns `None` when the host has fewer
+/// than two domains, placement is disabled, or the domain is unknown.
+#[inline]
+pub fn current_domain() -> Option<usize> {
+    #[cfg(target_os = "linux")]
+    {
+        let topology = imp::topology();
+        if topology.domains() > 1 {
+            return topology.current_domain().map(usize::from)
+        }
+    }
+    None
+}
+
 #[cfg(target_os = "linux")]
 mod imp {
     use std::sync::{
