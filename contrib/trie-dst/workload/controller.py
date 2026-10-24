@@ -103,14 +103,14 @@ def worker(config):
         workload = config["workload"] | {"datadir": str(STATE / "data"),
                                          "input_file": str(STATE / "pending-input.json")}
         (STATE / "config.json").write_text(json.dumps(config))
+        workload_path = STATE / "workload.json"
+        workload_path.write_text(json.dumps(workload))
         with (STATE / "run.log").open("wb") as output:
             while True:
                 completed = False
                 process = subprocess.Popen(
                     ["/usr/local/bin/thread-fuzz", "/usr/local/bin/reth-trie-dst",
-                     "-"], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
-                process.stdin.write(json.dumps(workload).encode())
-                process.stdin.close()
+                     "@" + str(workload_path)], stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
                 pending = b""
                 planned = False
                 while True:

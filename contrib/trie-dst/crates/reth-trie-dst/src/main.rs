@@ -892,6 +892,7 @@ fn main() -> Result<()> {
             return Err(std::process::Command::new(controller).arg(hook).args(argv).exec().into());
         }
         Some("-") => std::io::read_to_string(std::io::stdin())?,
+        Some(path) if path.starts_with('@') => fs::read_to_string(&path[1..])?,
         Some(text) => text.to_string(),
         None => "{}".into(),
     };
