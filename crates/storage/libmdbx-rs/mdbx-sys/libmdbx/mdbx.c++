@@ -2,7 +2,7 @@
 /// \author Леонид Юрьев aka Leonid Yuriev <leo@yuriev.ru> \date 2015-2026
 /* clang-format off */
 
-#define MDBX_BUILD_SOURCERY a575a490fc080ca11e89ff6db9f0bd38aa830959905998cac0e45274b9e6bb0e_v0_13_12_0_gf619d43d
+#define MDBX_BUILD_SOURCERY 66b709f51a75e4768d4900bbe763b83ba1e0cc0c2de0a37691c626d926a05779_v0_13_12_164_g7aca4951
 
 #define LIBMDBX_INTERNALS
 #define MDBX_DEPRECATED
@@ -558,6 +558,10 @@ __extern_C key_t ftok(const char *, int);
 /*----------------------------------------------------------------------------*/
 /* Compiler's includes for builtins/intrinsics */
 
+#ifdef __ARM_NEON
+#include <arm_neon.h>
+#endif
+
 #if defined(_MSC_VER) || defined(__INTEL_COMPILER)
 #include <intrin.h>
 #elif __GNUC_PREREQ(4, 4) || defined(__clang__)
@@ -565,13 +569,12 @@ __extern_C key_t ftok(const char *, int);
 #include <e2kintrin.h>
 #include <x86intrin.h>
 #endif /* __e2k__ */
+
 #if defined(__ia32__)
 #include <cpuid.h>
 #include <x86intrin.h>
 #endif /* __ia32__ */
-#ifdef __ARM_NEON
-#include <arm_neon.h>
-#endif
+
 #elif defined(__SUNPRO_C) || defined(__sun) || defined(sun)
 #include <mbarrier.h>
 #elif (defined(_HPUX_SOURCE) || defined(__hpux) || defined(__HP_aCC)) && (defined(HP_IA64) || defined(__ia64))
@@ -881,6 +884,17 @@ __extern_C key_t ftok(const char *, int);
 #define ASAN_UNPOISON_MEMORY_REGION(addr, size) ((void)(addr), (void)(size))
 #endif /* __SANITIZE_ADDRESS__ */
 
+#ifndef RUNNING_ON_ASAN
+#define RUNNING_ON_ASAN (0)
+#endif
+
+#if defined(__SANITIZE_ADDRESS__) && !defined(MDBX_ATTRIBUTE_NO_SANITIZE_ADDRESS)
+/* Avoid ASAN-trap due the target TLS-variable feed by Darwin's tlv_free() */
+#define MDBX_ATTRIBUTE_NO_SANITIZE_ADDRESS(ELSEWISE) __attribute__((__no_sanitize_address__, __noinline__))
+#else
+#define MDBX_ATTRIBUTE_NO_SANITIZE_ADDRESS(ELSEWISE) ELSEWISE
+#endif
+
 /*----------------------------------------------------------------------------*/
 
 #ifndef ARRAY_LENGTH
@@ -1005,6 +1019,11 @@ template <typename T, size_t N> char (&__ArraySizeHelper(T (&array)[N]))[N];
 
 #include "mdbx.h++"
 
+#if MDBX_WITHOUT_MSVC_CRT && !defined(_DEBUG) && defined(_MSC_VER) && !defined(__clang__)
+#pragma check_stack(off)
+#pragma runtime_checks("scu", off)
+#endif /* MDBX_WITHOUT_MSVC_CRT && !_DEBUG */
+
 /*----------------------------------------------------------------------------*/
 /* Basic constants and types */
 
@@ -1088,32 +1107,38 @@ typedef struct {
 } osal_condpair_t;
 typedef CRITICAL_SECTION osal_fastmutex_t;
 
-#if !defined(_MSC_VER) && !defined(__try)
-#define __try
-#define __except(COND) if (/* (void)(COND), */ false)
+#if (defined(_MSC_VER) && !defined(_clang__) && (!MDBX_WITHOUT_MSVC_CRT || !defined(_M_IX86))) ||                      \
+    (defined(__try) && defined(__except))
+#define SEH_TRY __try
+#define SEH_EXCEPT(COND) __except(COND)
+#else
+#define SEH_TRY
+#define SEH_EXCEPT(COND) if (/* (void)(COND), */ false)
 #endif /* stub for MSVC's __try/__except */
 
 #if MDBX_WITHOUT_MSVC_CRT
 
 #ifndef osal_malloc
-static inline void *osal_malloc(size_t bytes) { return HeapAlloc(GetProcessHeap(), 0, bytes); }
+MDBX_MAYBE_UNUSED static inline void *osal_malloc(size_t bytes) { return HeapAlloc(GetProcessHeap(), 0, bytes); }
 #endif /* osal_malloc */
 
 #ifndef osal_calloc
-static inline void *osal_calloc(size_t nelem, size_t size) {
+MDBX_MAYBE_UNUSED static inline void *osal_calloc(size_t nelem, size_t size) {
   return HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, nelem * size);
 }
 #endif /* osal_calloc */
 
 #ifndef osal_realloc
-static inline void *osal_realloc(void *ptr, size_t bytes) {
+MDBX_MAYBE_UNUSED static inline void *osal_realloc(void *ptr, size_t bytes) {
   return ptr ? HeapReAlloc(GetProcessHeap(), 0, ptr, bytes) : HeapAlloc(GetProcessHeap(), 0, bytes);
 }
 #endif /* osal_realloc */
 
 #ifndef osal_free
-static inline void osal_free(void *ptr) { HeapFree(GetProcessHeap(), 0, ptr); }
+MDBX_MAYBE_UNUSED static inline void osal_free(void *ptr) { HeapFree(GetProcessHeap(), 0, ptr); }
 #endif /* osal_free */
+
+#define osal_alloca(size) _alloca(size)
 
 #else /* MDBX_WITHOUT_MSVC_CRT */
 
@@ -1159,6 +1184,14 @@ typedef pthread_mutex_t osal_fastmutex_t;
 #elif defined(_MSC_VER) && !MDBX_WITHOUT_MSVC_CRT
 #define osal_malloc_usable_size(ptr) _msize(ptr)
 #endif /* osal_malloc_usable_size */
+
+#ifndef osal_strdup
+LIBMDBX_API char *osal_strdup(const char *str);
+#endif
+
+#ifndef osal_alloca
+#define osal_alloca(size) alloca(size)
+#endif /* osal_alloca */
 
 /*----------------------------------------------------------------------------*/
 /* OS abstraction layer stuff */
@@ -1207,9 +1240,9 @@ MDBX_INTERNAL int osal_waitstatus2errcode(DWORD result);
  * https://android.googlesource.com/platform/bionic/+/master/docs/32-bit-abi.md */
 #define MDBX_HAVE_PWRITEV 0
 #if defined(_FILE_OFFSET_BITS) && _FILE_OFFSET_BITS != MDBX_WORDBITS
-#error "_FILE_OFFSET_BITS != MDBX_WORDBITS and __ANDROID_API__ < 24" (_FILE_OFFSET_BITS != MDBX_WORDBITS)
+#error "_FILE_OFFSET_BITS != MDBX_WORDBITS and __ANDROID_API__ < 24"
 #elif defined(__FILE_OFFSET_BITS) && __FILE_OFFSET_BITS != MDBX_WORDBITS
-#error "__FILE_OFFSET_BITS != MDBX_WORDBITS and __ANDROID_API__ < 24" (__FILE_OFFSET_BITS != MDBX_WORDBITS)
+#error "__FILE_OFFSET_BITS != MDBX_WORDBITS and __ANDROID_API__ < 24"
 #endif
 #else
 #define MDBX_HAVE_PWRITEV 1
@@ -1329,7 +1362,7 @@ MDBX_MAYBE_UNUSED static inline int osal_ioring_prepare(osal_ioring_t *ior, size
 /*----------------------------------------------------------------------------*/
 /* libc compatibility stuff */
 
-#if (!defined(__GLIBC__) && __GLIBC_PREREQ(2, 1)) && (defined(_GNU_SOURCE) || defined(_BSD_SOURCE))
+#if (defined(__GLIBC__) && __GLIBC_PREREQ(2, 1)) && (defined(_GNU_SOURCE) || defined(_BSD_SOURCE))
 #define osal_asprintf asprintf
 #define osal_vasprintf vasprintf
 #else
@@ -1392,10 +1425,6 @@ MDBX_MAYBE_UNUSED MDBX_INTERNAL void osal_jitter(bool tiny);
 #endif /* MDBX_F_OFD_SETLK64, MDBX_F_OFD_SETLKW64, MDBX_F_OFD_GETLK64 */
 
 #endif /* !Windows */
-
-#ifndef osal_strdup
-LIBMDBX_API char *osal_strdup(const char *str);
-#endif
 
 MDBX_MAYBE_UNUSED static inline int osal_get_errno(void) {
 #if defined(_WIN32) || defined(_WIN64)
@@ -1778,7 +1807,7 @@ MDBX_MAYBE_UNUSED MDBX_NOTHROW_PURE_FUNCTION static inline uint32_t osal_bswap32
 #error MDBX_PNL_ASCENDING must be defined as 0 or 1
 #endif /* MDBX_PNL_ASCENDING */
 
-/** Avoid dependence from MSVC CRT and use ntdll.dll instead. */
+/** Windows: Avoids dependence from MSVC CRT or other libraries provided by compiler, but use ntdll.dll instead. */
 #ifndef MDBX_WITHOUT_MSVC_CRT
 #if defined(MDBX_BUILD_CXX) && !MDBX_BUILD_CXX
 #define MDBX_WITHOUT_MSVC_CRT 1
@@ -2085,7 +2114,7 @@ MDBX_MAYBE_UNUSED MDBX_NOTHROW_PURE_FUNCTION static inline uint32_t osal_bswap32
 #endif
 #endif /* MDBX_CACHELINE_SIZE */
 
-/* Max length of iov-vector passed to writev() call, used for auxilary writes */
+/* Max length of iov-vector passed to writev() call, used for auxiliary writes */
 #ifndef MDBX_AUXILARY_IOV_MAX
 #define MDBX_AUXILARY_IOV_MAX 64
 #endif
@@ -2484,12 +2513,13 @@ typedef enum node_flags {
 
 #pragma pack(pop)
 
-MDBX_MAYBE_UNUSED MDBX_NOTHROW_PURE_FUNCTION static inline uint8_t page_type(const page_t *mp) { return mp->flags; }
+MDBX_MAYBE_UNUSED MDBX_NOTHROW_PURE_FUNCTION static inline uint8_t page_type(const page_t *mp) {
+  return (uint8_t)mp->flags;
+}
 
 MDBX_MAYBE_UNUSED MDBX_NOTHROW_PURE_FUNCTION static inline uint8_t page_type_compat(const page_t *mp) {
-  /* Drop legacy P_DIRTY flag for sub-pages for compatilibity,
-   * for assertions only. */
-  return unlikely(mp->flags & P_SUBP) ? mp->flags & ~(P_SUBP | P_LEGACY_DIRTY) : mp->flags;
+  /* Drop legacy P_DIRTY flag for sub-pages for compatibility, for assertions only. */
+  return unlikely(mp->flags & P_SUBP) ? (uint8_t)(mp->flags & ~(P_SUBP | P_LEGACY_DIRTY)) : (uint8_t)mp->flags;
 }
 
 MDBX_MAYBE_UNUSED MDBX_NOTHROW_PURE_FUNCTION static inline bool is_leaf(const page_t *mp) {
@@ -2767,7 +2797,7 @@ typedef struct shared_lck {
   MDBX_ALIGNAS(MDBX_CACHELINE_SIZE) /* cacheline ----------------------------*/
 
 #if MDBX_LOCKING > 0
-  /* Readeaders table lock. */
+  /* Readers table lock. */
   osal_ipclock_t rdt_lock;
 #endif /* MDBX_LOCKING > 0 */
 
@@ -2809,7 +2839,6 @@ typedef struct shared_lck {
 #define PAGELIST_LIMIT (MAX_MAPSIZE32 / MDBX_MIN_PAGESIZE)
 #endif /* MDBX_WORDBITS */
 
-#define MDBX_GOLD_RATIO_DBL 1.6180339887498948482
 #define MEGABYTE ((size_t)1 << 20)
 
 /*----------------------------------------------------------------------------*/
@@ -3652,7 +3681,7 @@ __cold void error::throw_exception() const {
     CASE_EXCEPTION(thread_mismatch, MDBX_THREAD_MISMATCH);
     CASE_EXCEPTION(transaction_full, MDBX_TXN_FULL);
     CASE_EXCEPTION(transaction_overlapping, MDBX_TXN_OVERLAPPING);
-    CASE_EXCEPTION(duplicated_lck_file, MDBX_DUPLICATED_CLK);
+    CASE_EXCEPTION(duplicated_lck_file, MDBX_DUPLICATED_LCK);
     CASE_EXCEPTION(dangling_map_id, MDBX_DANGLING_DBI);
     CASE_EXCEPTION(transaction_ousted, MDBX_OUSTED);
     CASE_EXCEPTION(mvcc_retarded, MDBX_MVCC_RETARDED);
@@ -3691,7 +3720,7 @@ bool slice::is_printable(bool disable_utf8) const noexcept {
     EE = 3 << LS | r80_BF, // U+00E000..U+00FFFF | EE..EF | 80..BF | 80..BF |
     F0 = 4 << LS | r90_BF, // U+010000..U+03FFFF | F0     | 90..BF | 80..BF |...
     F1 = 4 << LS | r80_BF, // U+040000..U+0FFFFF | F1..F3 | 80..BF | 80..BF |...
-    F4 = 4 << LS | r80_BF, // U+100000..U+10FFFF | F4     | 80..8F | 80..BF |...
+    F4 = 4 << LS | r80_8F, // U+100000..U+10FFFF | F4     | 80..8F | 80..BF |...
   };
 
   static const byte range_from[] = {0x80, 0xA0, 0x80, 0x90, 0x80};
@@ -3748,7 +3777,7 @@ bool slice::is_printable(bool disable_utf8) const noexcept {
       src += 2;
       continue;
     case 3:
-      if (MDBX_UNLIKELY(src + 3 >= end))
+      if (MDBX_UNLIKELY(src + 2 >= end))
         MDBX_CXX20_UNLIKELY return false;
       if (MDBX_UNLIKELY(src[1] < second_from || src[1] > second_to))
         MDBX_CXX20_UNLIKELY return false;
@@ -3757,7 +3786,7 @@ bool slice::is_printable(bool disable_utf8) const noexcept {
       src += 3;
       continue;
     case 4:
-      if (MDBX_UNLIKELY(src + 4 >= end))
+      if (MDBX_UNLIKELY(src + 3 >= end))
         MDBX_CXX20_UNLIKELY return false;
       if (MDBX_UNLIKELY(src[1] < second_from || src[1] > second_to))
         MDBX_CXX20_UNLIKELY return false;
@@ -3840,7 +3869,7 @@ MDBX_I128_TYPE slice::as_int128_adapt() const {
 int64_t slice::as_int64_adapt() const {
   static_assert(sizeof(int64_t) == 8, "WTF?");
   if (size() == 8) {
-    uint64_t r;
+    int64_t r;
     memcpy(&r, data(), sizeof(r));
     return r;
   } else
@@ -3938,7 +3967,7 @@ char *from_hex::write_bytes(char *__restrict const dest, size_t dest_size) const
       continue;
     }
 
-    if (MDBX_UNLIKELY(left < 1 || !isxdigit(src[0]) || !isxdigit(src[1])))
+    if (MDBX_UNLIKELY(left < 2 || !isxdigit(src[0]) || !isxdigit(src[1])))
       MDBX_CXX20_UNLIKELY throw std::domain_error("mdbx::from_hex:: invalid hexadecimal string");
 
     int8_t hi = src[0];
@@ -3970,7 +3999,7 @@ bool from_hex::is_erroneous() const noexcept {
       continue;
     }
 
-    if (MDBX_UNLIKELY(left < 1 || !isxdigit(src[0]) || !isxdigit(src[1])))
+    if (MDBX_UNLIKELY(left < 2 || !isxdigit(src[0]) || !isxdigit(src[1])))
       MDBX_CXX20_UNLIKELY return true;
 
     got = true;
@@ -4341,7 +4370,7 @@ char *from_base64::write_bytes(char *__restrict const dest, size_t dest_size) co
       continue;
     }
 
-    if (MDBX_UNLIKELY(left < 3))
+    if (MDBX_UNLIKELY(left < 4))
       MDBX_CXX20_UNLIKELY {
       bailout:
         throw std::domain_error("mdbx::from_base64:: invalid base64 string");
@@ -4381,8 +4410,8 @@ bool from_base64::is_erroneous() const noexcept {
       continue;
     }
 
-    if (MDBX_UNLIKELY(left < 3))
-      MDBX_CXX20_UNLIKELY return false;
+    if (MDBX_UNLIKELY(left < 4))
+      MDBX_CXX20_UNLIKELY return true;
     const signed char a = b64_map[src[0]], b = b64_map[src[1]], c = b64_map[src[2]], d = b64_map[src[3]];
     if (MDBX_UNLIKELY((a | b | c | d) < 0))
       MDBX_CXX20_UNLIKELY {
@@ -4507,7 +4536,8 @@ env::operate_options::operate_options(MDBX_env_flags_t flags) noexcept
     : no_sticky_threads(((flags & (MDBX_NOSTICKYTHREADS | MDBX_EXCLUSIVE)) == MDBX_NOSTICKYTHREADS) ? true : false),
       nested_write_transactions((flags & (MDBX_WRITEMAP | MDBX_RDONLY)) ? false : true),
       exclusive((flags & MDBX_EXCLUSIVE) ? true : false), disable_readahead((flags & MDBX_NORDAHEAD) ? true : false),
-      disable_clear_memory((flags & MDBX_NOMEMINIT) ? true : false) {}
+      disable_clear_memory((flags & MDBX_NOMEMINIT) ? true : false),
+      enable_validation((flags & MDBX_VALIDATION) ? true : false) {}
 
 bool env::is_pristine() const { return get_stat().ms_mod_txnid == 0 && get_info().mi_recent_txnid == INITIAL_TXNID; }
 
@@ -4983,6 +5013,10 @@ __cold ::std::ostream &operator<<(::std::ostream &out, const env::operate_option
   }
   if (it.exclusive) {
     out << delimiter << "exclusive";
+    delimiter = comma;
+  }
+  if (it.enable_validation) {
+    out << delimiter << "enable_validation";
     delimiter = comma;
   }
   if (it.disable_readahead) {
