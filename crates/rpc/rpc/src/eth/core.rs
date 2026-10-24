@@ -1427,6 +1427,212 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn estimate_gas_reserves_original_fee_cap() {
+        let sender = Address::repeat_byte(0x11);
+        let target = Address::repeat_byte(0xaa);
+        let provider = MockEthProvider::default()
+            .with_chain_spec(ChainSpecBuilder::mainnet().cancun_activated().build());
+        provider.add_block(
+            B256::repeat_byte(0x42),
+            Block {
+                header: Header {
+                    number: 1,
+                    gas_limit: 100_000,
+                    excess_blob_gas: Some(0),
+                    ..Default::default()
+                },
+                body: BlockBody::default(),
+            },
+        );
+        let api = build_test_eth_api_with_gas_cap(provider, 100_000);
+        for (cap, tip, base_fee) in
+            [(10u128, Some(1), 7), (1, Some(0), 0), (10, None, 7), (u128::MAX, Some(1), 7)]
+        {
+            for affordable in [20_000, 21_000] {
+                for value in [0, 1_000] {
+                    for blobs in [0, 1] {
+                        for gas in [None, Some(30_000)] {
+                            let balance = U256::from(affordable) * U256::from(cap) +
+                                U256::from(value + blobs * DATA_GAS_PER_BLOB * 3);
+                            let request = TransactionRequest {
+                                gas,
+                                max_fee_per_gas: Some(cap),
+                                max_priority_fee_per_gas: tip,
+                                max_fee_per_blob_gas: (blobs > 0).then_some(3),
+                                blob_versioned_hashes: (blobs > 0)
+                                    .then(|| vec![B256::repeat_byte(1)]),
+                                value: Some(U256::from(value)),
+                                ..TransactionRequest::default().with_from(sender).with_to(target)
+                            };
+                            // STOP forces the full estimator instead of the empty-code shortcut.
+                            let overrides = EvmOverrides::state(Some(StateOverride::from_iter([
+                                (
+                                    sender,
+                                    AccountOverride {
+                                        balance: Some(balance),
+                                        ..Default::default()
+                                    },
+                                ),
+                                (
+                                    target,
+                                    AccountOverride {
+                                        code: Some(Bytes::from_static(&[0x00])),
+                                        ..Default::default()
+                                    },
+                                ),
+                            ])))
+                            .with_block(Box::new(BlockOverrides {
+                                base_fee: Some(U256::from(base_fee)),
+                                ..Default::default()
+                            }));
+                            let result = EthCall::estimate_gas_at(
+                                &api,
+                                request,
+                                BlockId::latest(),
+                                overrides,
+                            )
+                            .await;
+                            if affordable == 20_000 {
+                                let err = result.unwrap_err();
+                                assert!(matches!(err.as_invalid_transaction(), Some(RpcInvalidTransactionError::GasRequiredExceedsAllowance { gas_limit: 20_000 })), "cap={cap}, tip={tip:?}, blobs={blobs}, gas={gas:?}: {err}");
+                            } else {
+                                assert_eq!(result.unwrap(), U256::from(21_000));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn estimate_gas_fee_cap_preserves_execution_price() {
+        let sender = Address::repeat_byte(0x11);
+        let target = Address::repeat_byte(0xaa);
+        let provider = MockEthProvider::default()
+            .with_chain_spec(ChainSpecBuilder::mainnet().cancun_activated().build());
+        provider.add_block(
+            B256::repeat_byte(0x42),
+            Block {
+                header: Header {
+                    number: 1,
+                    gas_limit: 100_000,
+                    excess_blob_gas: Some(0),
+                    ..Default::default()
+                },
+                body: BlockBody::default(),
+            },
+        );
+        let api = build_test_eth_api_with_gas_cap(provider, 100_000);
+        for (price, cap, tip, base_fee, expected_price, balance) in [
+            (None, Some(10), Some(1), 7, 8, U256::from(300_000)),
+            (None, Some(1), Some(0), 0, 0, U256::from(30_000)),
+            (None, Some(7), Some(0), 7, 7, U256::from(210_000)),
+            (None, Some(10), None, 7, 7, U256::from(300_000)),
+            (None, None, Some(1), 7, 8, U256::from(300_000)),
+            (None, None, None, 7, 0, U256::ZERO),
+            (Some(0), None, None, 7, 0, U256::ZERO),
+            (None, Some(0), Some(0), 7, 0, U256::ZERO),
+            (None, Some(u128::MAX), Some(1), 7, 8, U256::MAX),
+            (Some(1), None, None, 0, 1, U256::MAX),
+        ] {
+            // Revert unless GASPRICE equals the effective price, not the reservation cap.
+            let code = Bytes::from(vec![
+                0x3a,
+                0x60,
+                expected_price,
+                0x14,
+                0x60,
+                0x0a,
+                0x57,
+                0x5f,
+                0x5f,
+                0xfd,
+                0x5b,
+                0x00,
+            ]);
+            let overrides = EvmOverrides::state(Some(StateOverride::from_iter([
+                (sender, AccountOverride { balance: Some(balance), ..Default::default() }),
+                (target, AccountOverride { code: Some(code), ..Default::default() }),
+            ])))
+            .with_block(Box::new(BlockOverrides {
+                base_fee: Some(U256::from(base_fee)),
+                ..Default::default()
+            }));
+            let result = EthCall::estimate_gas_at(
+                &api,
+                TransactionRequest {
+                    gas: Some(30_000),
+                    gas_price: price,
+                    max_fee_per_gas: cap,
+                    max_priority_fee_per_gas: tip,
+                    ..TransactionRequest::default().with_from(sender).with_to(target)
+                },
+                BlockId::latest(),
+                overrides,
+            )
+            .await;
+            let estimated = result.unwrap();
+            assert!(estimated > U256::from(21_000) && estimated <= U256::from(30_000));
+        }
+    }
+
+    #[tokio::test]
+    async fn estimate_gas_fee_cap_validation_and_retry() {
+        let sender = Address::repeat_byte(0x11);
+        let target = Address::repeat_byte(0xaa);
+        let provider = MockEthProvider::default()
+            .with_chain_spec(ChainSpecBuilder::mainnet().cancun_activated().build());
+        provider.add_block(
+            B256::repeat_byte(0x42),
+            Block {
+                header: Header {
+                    number: 1,
+                    gas_limit: 100_000,
+                    base_fee_per_gas: Some(7),
+                    excess_blob_gas: Some(0),
+                    ..Default::default()
+                },
+                body: BlockBody::default(),
+            },
+        );
+        let api = build_test_eth_api_with_gas_cap(provider, 100_000);
+        for (cap, tip, code, expected_error) in [
+            (6, 1, Bytes::from_static(&[0x00]), "max fee per gas less than block base fee"),
+            (
+                10,
+                11,
+                Bytes::from_static(&[0x00]),
+                "max priority fee per gas higher than max fee per gas",
+            ),
+            // The 100,000-gas diagnostic retry exceeds the 25,000-gas allowance.
+            (10, 1, Bytes::from_static(&[0x5f, 0x5f, 0xfd]), "execution reverted"),
+        ] {
+            let overrides = EvmOverrides::state(Some(StateOverride::from_iter([
+                (
+                    sender,
+                    AccountOverride { balance: Some(U256::from(250_000)), ..Default::default() },
+                ),
+                (target, AccountOverride { code: Some(code), ..Default::default() }),
+            ])));
+            let err = EthCall::estimate_gas_at(
+                &api,
+                TransactionRequest {
+                    gas: Some(30_000),
+                    max_fee_per_gas: Some(cap),
+                    max_priority_fee_per_gas: Some(tip),
+                    ..TransactionRequest::default().with_from(sender).with_to(target)
+                },
+                BlockId::latest(),
+                overrides,
+            )
+            .await
+            .unwrap_err();
+            assert!(err.to_string().contains(expected_error), "{err}");
+        }
+    }
+
+    #[tokio::test]
     async fn estimate_gas_fee_free_retries_and_transfer() {
         let sender = Address::repeat_byte(0x11);
         let target = Address::repeat_byte(0xaa);

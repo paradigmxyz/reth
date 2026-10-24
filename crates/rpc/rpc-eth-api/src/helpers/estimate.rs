@@ -117,15 +117,18 @@ pub trait EstimateCall: Call {
             false
         };
 
-        let request_gas_price = request_gas_price(request.as_ref(), evm_env.block_base_fee());
+        let fee_cap = request
+            .as_ref()
+            .gas_price()
+            .or_else(|| request.as_ref().max_fee_per_gas())
+            .unwrap_or_else(|| request_gas_price(request.as_ref(), evm_env.block_base_fee()));
         let mut tx_env = self.create_txn_env(&evm_env, request, &mut db)?;
 
-        // Check funds of the sender (only useful to check if transaction gas price is more than 0).
-        //
-        // The caller allowance reserves the value and maximum blob fee before funding execution
-        // gas at the transaction's gas price.
-        if request_gas_price > 0 {
-            let allowance = self.caller_gas_allowance(&mut db, &evm_env, &tx_env)?;
+        // Reserve funds at the original fee cap, even when the effective execution price is zero.
+        // The converted transaction keeps its effective price for GASPRICE and simulation.
+        if fee_cap > 0 {
+            let allowance =
+                self.caller_gas_allowance_with_price(&mut db, &evm_env, &tx_env, fee_cap)?;
             highest_gas_limit = highest_gas_limit.min(allowance);
         }
 
