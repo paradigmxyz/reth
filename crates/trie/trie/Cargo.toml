@@ -37,6 +37,7 @@ tracing = { workspace = true, features = ["attributes"] }
 auto_impl.workspace = true
 itertools.workspace = true
 parking_lot.workspace = true
+rayon.workspace = true
 
 # `metrics` feature
 reth-metrics = { workspace = true, optional = true }
@@ -44,6 +45,10 @@ metrics = { workspace = true, optional = true }
 
 # `test-utils` feature
 triehash = { workspace = true, optional = true }
+
+[target.'cfg(not(target_family = "wasm"))'.dependencies]
+reth-tasks = { workspace = true, features = ["rayon"] }
+crossbeam-channel.workspace = true
 
 [dev-dependencies]
 # reth
@@ -79,6 +84,7 @@ serde = [
 ]
 test-utils = [
     "triehash",
+    "reth-tasks/test-utils",
     "reth-primitives-traits/test-utils",
     "reth-trie-common/test-utils",
     "reth-trie-sparse/test-utils",

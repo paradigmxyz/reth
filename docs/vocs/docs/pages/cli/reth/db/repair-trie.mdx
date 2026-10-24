@@ -12,6 +12,14 @@ Options:
       --dry-run
           Only show inconsistencies without making any repairs
 
+      --storage-workers <STORAGE_WORKERS>
+          Number of storage verification workers. Defaults to the number of available CPUs
+
+      --storage-root-limit <STORAGE_ROOT_LIMIT>
+          Maximum storage roots computed or in flight ahead of the account walk
+
+          [default: 25000000]
+
       --metrics <ADDR:PORT>
           Enable Prometheus metrics.
 

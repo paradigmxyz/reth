@@ -1,11 +1,11 @@
 use alloy_consensus::BlockHeader as AlloyBlockHeader;
-use clap::Parser;
+use clap::{builder::RangedU64ValueParser, Parser};
 use metrics::{self, Counter};
 use reth_chainspec::EthChainSpec;
 use reth_cli_util::parse_socket_address;
+use reth_db::DatabaseEnv;
 use reth_db_api::{
     cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO},
-    database::Database,
     transaction::{DbTx, DbTxMut},
 };
 use reth_db_common::DbTool;
@@ -26,11 +26,11 @@ use reth_stages::StageId;
 use reth_storage_api::StorageSettingsCache;
 use reth_tasks::TaskExecutor;
 use reth_trie::{
-    verify::{Output, Verifier},
+    verify::{default_storage_workers, Output, DEFAULT_STORAGE_ROOT_LIMIT},
     Nibbles,
 };
 use reth_trie_db::{
-    DatabaseHashedCursorFactory, DatabaseStateRoot, DatabaseTrieCursorFactory,
+    DatabaseHashedCursorFactory, DatabaseStateRoot, DatabaseTrieCursorFactory, DatabaseVerifier,
     StorageTrieEntryLike, TrieTableAdapter,
 };
 use std::{
@@ -48,6 +48,14 @@ pub struct Command {
     #[arg(long)]
     pub(crate) dry_run: bool,
 
+    /// Number of storage verification workers. Defaults to the number of available CPUs.
+    #[arg(long, default_value_t = default_storage_workers(), hide_default_value = true, value_parser = RangedU64ValueParser::<usize>::new().range(1..))]
+    pub(crate) storage_workers: usize,
+
+    /// Maximum storage roots computed or in flight ahead of the account walk.
+    #[arg(long, default_value_t = DEFAULT_STORAGE_ROOT_LIMIT, value_parser = RangedU64ValueParser::<usize>::new().range(1..))]
+    pub(crate) storage_root_limit: usize,
+
     /// Enable Prometheus metrics.
     ///
     /// The metrics will be served at the given interface and port.
@@ -57,7 +65,7 @@ pub struct Command {
 
 impl Command {
     /// Execute `db repair-trie` command
-    pub fn execute<N: ProviderNodeTypes>(
+    pub fn execute<N: ProviderNodeTypes<DB = DatabaseEnv>>(
         self,
         tool: &DbTool<N>,
         task_executor: TaskExecutor,
@@ -98,16 +106,20 @@ impl Command {
         };
 
         if self.dry_run {
-            verify_only(tool)?
+            verify_only(tool, self.storage_workers, self.storage_root_limit)?
         } else {
-            verify_and_repair(tool)?
+            verify_and_repair(tool, self.storage_workers, self.storage_root_limit)?
         }
 
         Ok(())
     }
 }
 
-fn verify_only<N: ProviderNodeTypes>(tool: &DbTool<N>) -> eyre::Result<()> {
+fn verify_only<N: ProviderNodeTypes<DB = DatabaseEnv>>(
+    tool: &DbTool<N>,
+    storage_workers: usize,
+    storage_root_limit: usize,
+) -> eyre::Result<()> {
     // Log the database block tip from Finish stage checkpoint
     let finish_checkpoint = tool
         .provider_factory
@@ -116,19 +128,21 @@ fn verify_only<N: ProviderNodeTypes>(tool: &DbTool<N>) -> eyre::Result<()> {
         .unwrap_or_default();
     info!("Database block tip: {}", finish_checkpoint.block_number);
 
-    // Get a database transaction directly from the database
     let db = tool.provider_factory.db_ref();
-    let mut tx = db.tx()?;
-    tx.disable_long_read_transaction_safety();
-
-    reth_trie_db::with_adapter!(tool.provider_factory, |A| do_verify_only::<_, A>(&tx))
+    reth_trie_db::with_adapter!(tool.provider_factory, |A| do_verify_only::<A>(
+        db,
+        storage_workers,
+        storage_root_limit
+    ))
 }
 
-fn do_verify_only<TX: DbTx, A: TrieTableAdapter>(tx: &TX) -> eyre::Result<()> {
-    // Create the verifier
-    let hashed_cursor_factory = DatabaseHashedCursorFactory::new(tx);
-    let trie_cursor_factory = DatabaseTrieCursorFactory::<_, A>::new(tx);
-    let verifier = Verifier::new(&trie_cursor_factory, hashed_cursor_factory)?;
+fn do_verify_only<A: TrieTableAdapter>(
+    db: &DatabaseEnv,
+    storage_workers: usize,
+    storage_root_limit: usize,
+) -> eyre::Result<()> {
+    let db = db.clone().with_disable_long_read_transaction_safety();
+    let verifier = DatabaseVerifier::<_, A>::new(&db, storage_workers, storage_root_limit)?;
 
     let metrics = RepairTrieMetrics::new();
 
@@ -207,7 +221,11 @@ fn verify_checkpoints(provider: impl StageCheckpointReader) -> eyre::Result<()> 
     Ok(())
 }
 
-fn verify_and_repair<N: ProviderNodeTypes>(tool: &DbTool<N>) -> eyre::Result<()> {
+fn verify_and_repair<N: ProviderNodeTypes<DB = DatabaseEnv>>(
+    tool: &DbTool<N>,
+    storage_workers: usize,
+    storage_root_limit: usize,
+) -> eyre::Result<()> {
     // Get a read-write database provider
     let mut provider_rw = tool.provider_factory.provider_rw()?;
 
@@ -219,7 +237,13 @@ fn verify_and_repair<N: ProviderNodeTypes>(tool: &DbTool<N>) -> eyre::Result<()>
     verify_checkpoints(provider_rw.as_ref())?;
 
     let inconsistent_nodes = reth_trie_db::with_adapter!(tool.provider_factory, |A| {
-        do_verify_and_repair::<_, A>(&mut provider_rw, finish_checkpoint.block_number)?
+        do_verify_and_repair::<_, A>(
+            &mut provider_rw,
+            tool.provider_factory.db_ref(),
+            finish_checkpoint.block_number,
+            storage_workers,
+            storage_root_limit,
+        )?
     });
 
     if inconsistent_nodes == 0 {
@@ -232,27 +256,22 @@ fn verify_and_repair<N: ProviderNodeTypes>(tool: &DbTool<N>) -> eyre::Result<()>
     Ok(())
 }
 
-fn do_verify_and_repair<N: ProviderNodeTypes, A: TrieTableAdapter>(
+fn do_verify_and_repair<N: ProviderNodeTypes<DB = DatabaseEnv>, A: TrieTableAdapter>(
     provider_rw: &mut reth_provider::DatabaseProviderRW<N::DB, N>,
+    db: &N::DB,
     block_number: u64,
-) -> eyre::Result<usize>
-where
-    <N::DB as reth_db_api::database::Database>::TXMut: DbTxMut + DbTx,
-{
+    storage_workers: usize,
+    storage_root_limit: usize,
+) -> eyre::Result<usize> {
     // Create cursors for making modifications with
     let tx = provider_rw.tx_mut();
     tx.disable_long_read_transaction_safety();
     let mut account_trie_cursor = tx.cursor_write::<A::AccountTrieTable>()?;
     let mut storage_trie_cursor = tx.cursor_dup_write::<A::StorageTrieTable>()?;
 
-    // Create the cursor factories. These cannot accept the `&mut` tx above because they
-    // require it to be AsRef.
-    let tx = provider_rw.tx_ref();
-    let hashed_cursor_factory = DatabaseHashedCursorFactory::new(tx);
-    let trie_cursor_factory = DatabaseTrieCursorFactory::<_, A>::new(tx);
-
-    // Create the verifier
-    let verifier = Verifier::new(&trie_cursor_factory, hashed_cursor_factory)?;
+    // Open every read snapshot before any repairs are applied.
+    let db = db.clone().with_disable_long_read_transaction_safety();
+    let verifier = DatabaseVerifier::<_, A>::new(&db, storage_workers, storage_root_limit)?;
 
     let metrics = RepairTrieMetrics::new();
 
