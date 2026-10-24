@@ -18,8 +18,8 @@ use reth_metrics::Metrics;
 use reth_primitives_traits::{Account, FastInstant as Instant};
 use reth_tasks::Runtime;
 use reth_trie::{
-    updates::TrieUpdates, DecodedMultiProofV2, HashedPostState, TrieAccount, EMPTY_ROOT_HASH,
-    TRIE_ACCOUNT_RLP_MAX_SIZE,
+    updates::{StorageTrieUpdates, TrieUpdates},
+    DecodedMultiProofV2, HashedPostState, TrieAccount, EMPTY_ROOT_HASH, TRIE_ACCOUNT_RLP_MAX_SIZE,
 };
 use reth_trie_common::{MultiProofTargetsV2, ProofTrieNodeV2, ProofV2Target, ProofV2TargetParent};
 use reth_trie_parallel::{
@@ -472,22 +472,23 @@ where
         debug!(target: "engine::root", "All proofs processed, ending calculation");
 
         let start = Instant::now();
-        self.return_storage_tries();
-        let (state_root, trie_updates) = match self.trie.root_with_updates(self.new_epoch) {
-            Ok(result) => result,
-            Err(err)
-                if matches!(
-                    err.kind(),
-                    SparseStateTrieErrorKind::Sparse(SparseTrieErrorKind::Blind)
-                ) =>
-            {
-                // A still-blind account trie means this block never changed state, so preserve
-                // the cached parent root instead of fetching and revealing
-                // the unchanged root node.
-                (self.parent_state_root, TrieUpdates::default())
-            }
-            Err(err) => return Err(StateRootTaskError::Other(err.into())),
-        };
+        let storage_updates = self.return_storage_tries();
+        let (state_root, trie_updates) =
+            match self.trie.root_with_storage_updates(self.new_epoch, storage_updates) {
+                Ok(result) => result,
+                Err(err)
+                    if matches!(
+                        err.kind(),
+                        SparseStateTrieErrorKind::Sparse(SparseTrieErrorKind::Blind)
+                    ) =>
+                {
+                    // A still-blind account trie means this block never changed state, so preserve
+                    // the cached parent root instead of fetching and revealing
+                    // the unchanged root node.
+                    (self.parent_state_root, TrieUpdates::default())
+                }
+                Err(err) => return Err(StateRootTaskError::Other(err.into())),
+            };
 
         let end = Instant::now();
         self.metrics.sparse_trie_final_update_duration_histogram.record(end.duration_since(start));
@@ -1000,20 +1001,32 @@ where
         Ok(())
     }
 
-    /// Puts every storage trie back into the sparse state trie.
+    /// Collects updates while returning every touched storage trie to the sparse state trie.
     ///
-    /// The final root and everything after it - trie updates, preservation, pruning - reads the
-    /// storage tries through [`SparseStateTrie`], so no trie may remain in the task's storage map.
-    fn return_storage_tries(&mut self) {
+    /// Only checked-out tries can have changed, so collecting here avoids scanning all retained
+    /// tries. No trie may remain checked out when the result is published or preserved.
+    fn return_storage_tries(&mut self) -> B256Map<StorageTrieUpdates> {
+        let mut updates = B256Map::default();
         let mut storage = core::mem::take(&mut self.storage);
         for (address, state) in &mut storage {
             let StorageTrieState::Idle(work) = state else {
                 unreachable!("completion must wait for every storage job")
             };
+            if let Some(trie) = work.trie.as_revealed_mut() {
+                let changed = trie.take_updates();
+                let changed = StorageTrieUpdates {
+                    storage_nodes: changed.updated_nodes,
+                    removed_nodes: changed.removed_nodes,
+                };
+                if !changed.is_empty() {
+                    updates.insert(*address, changed);
+                }
+            }
             self.trie.insert_storage_trie(*address, core::mem::take(&mut work.trie));
         }
         // Keep the maps and proof buffers until the result has been published.
         self.storage_to_drop = storage;
+        updates
     }
 
     /// Promotes the pending account updates whose storage root is already available into proper

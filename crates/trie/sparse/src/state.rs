@@ -402,20 +402,8 @@ where
         &mut self,
         new_epoch: TrieNodeEpoch,
     ) -> SparseStateTrieResult<(B256, TrieUpdates)> {
-        // record revealed node metrics
-        #[cfg(feature = "metrics")]
-        self.metrics.record();
-
         let storage_tries = self.storage_trie_updates();
-        let revealed = self.revealed_trie_mut()?;
-
-        let (root, updates) = (revealed.root(new_epoch), revealed.take_updates());
-        let updates = TrieUpdates {
-            account_nodes: updates.updated_nodes,
-            removed_nodes: updates.removed_nodes,
-            storage_tries,
-        };
-        Ok((root, updates))
+        self.root_with_storage_updates(new_epoch, storage_tries)
     }
 
     /// Returns storage trie updates for tries that have been revealed.
@@ -451,6 +439,33 @@ where
                 storage_tries,
             }
         })
+    }
+
+    /// Returns the account root and updates together with already collected storage updates.
+    ///
+    /// Callers must finalize every modified storage trie and drain its updates into
+    /// `storage_tries` first. This avoids scanning retained, unchanged storage tries. Storage
+    /// updates not supplied here remain in their tries. Returns an error if the account trie
+    /// is still blind.
+    #[instrument(level = "debug", target = "trie::sparse", skip_all)]
+    pub fn root_with_storage_updates(
+        &mut self,
+        new_epoch: TrieNodeEpoch,
+        storage_tries: B256Map<StorageTrieUpdates>,
+    ) -> SparseStateTrieResult<(B256, TrieUpdates)> {
+        #[cfg(feature = "metrics")]
+        self.metrics.record();
+
+        let revealed = self.revealed_trie_mut()?;
+        let (root, updates) = (revealed.root(new_epoch), revealed.take_updates());
+        Ok((
+            root,
+            TrieUpdates {
+                account_nodes: updates.updated_nodes,
+                removed_nodes: updates.removed_nodes,
+                storage_tries,
+            },
+        ))
     }
 }
 
