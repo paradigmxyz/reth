@@ -51,9 +51,7 @@ impl Update {
                 }
                 delta.storages.insert(
                     keccak256(address),
-                    HashedStorage {
-                        storage: HashMap::from_iter([(keccak256(B256::from(*slot)), *value)]),
-                    },
+                    HashedStorage { storage: HashMap::from_iter([(hashed_slot, *value)]) },
                 );
                 *address
             }
