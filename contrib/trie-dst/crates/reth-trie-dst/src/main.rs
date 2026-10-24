@@ -773,6 +773,25 @@ fn main() -> Result<()> {
             println!("{}", serde_json::to_string(&sites)?);
             return Ok(());
         }
+        Some("observe") => {
+            let mut request = Vec::new();
+            std::io::stdin().read_to_end(&mut request)?;
+            let value: serde_json::Value = serde_json::from_slice(&request)?;
+            let decisions =
+                value.get("decisions").ok_or_else(|| eyre::eyre!("missing decisions"))?;
+            let changed = value
+                .get("original")
+                .is_some_and(|original| !original.is_null() && original != decisions);
+            println!(
+                "{}",
+                json!({
+                    "decisions": decisions,
+                    "decision_diff": if changed { vec!["recorded decisions differ"] } else { vec![] },
+                    "moments": [], "events_origin_ns": null
+                })
+            );
+            return Ok(());
+        }
         Some("generate-input" | "generate-suffix" | "mutate-input" | "validate-input") => {
             let mut request = Vec::new();
             std::io::stdin().read_to_end(&mut request)?;
@@ -868,7 +887,7 @@ fn main() -> Result<()> {
             }
             return Ok(());
         }
-        Some(hook @ ("parse-args" | "config" | "observe" | "seed-inputs" | "suffix-seed")) => {
+        Some(hook @ ("parse-args" | "config" | "seed-inputs" | "suffix-seed")) => {
             let controller = std::env::current_exe()?.with_file_name("controller.py");
             return Err(std::process::Command::new(controller).arg(hook).args(argv).exec().into());
         }

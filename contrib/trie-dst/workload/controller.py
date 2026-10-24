@@ -288,10 +288,6 @@ def main():
             log = STATE / "run.log"
             assertion(False, "workload incomplete; " + (log.read_text()[-12000:] if log.exists() else "never started"))
         collect(Path("/bedrock/out/assertions.jsonl"))
-    elif hook == "observe":
-        return {"decisions": request["decisions"], "decision_diff": (["recorded decisions differ"] if request.get("original") is not None
-                                  and request["original"] != request["decisions"] else []), "moments": [],
-                "events_origin_ns": None}
     else:
         raise ValueError(f"unknown hook: {hook}")
 
