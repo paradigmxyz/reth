@@ -1,5 +1,6 @@
 use crate::{
-    wal::Wal, ExExEvent, ExExNotification, ExExNotifications, FinishedExExHeight, WalHandle,
+    wal::{Wal, WalResult},
+    ExExEvent, ExExNotification, ExExNotifications, FinishedExExHeight, WalHandle,
 };
 use alloy_consensus::BlockHeader;
 use alloy_eips::BlockNumHash;
@@ -25,9 +26,12 @@ use std::{
     },
     task::{ready, Context, Poll},
 };
-use tokio::sync::{
-    mpsc::{self, error::SendError, UnboundedReceiver, UnboundedSender},
-    watch,
+use tokio::{
+    sync::{
+        mpsc::{self, error::SendError, UnboundedReceiver, UnboundedSender},
+        watch,
+    },
+    task::JoinHandle,
 };
 use tokio_util::sync::{PollSendError, PollSender, ReusableBoxFuture};
 use tracing::{debug, warn};
@@ -188,6 +192,26 @@ impl<N: NodePrimitives> ExExHandle<N> {
     }
 }
 
+/// WAL work the manager runs on the blocking pool.
+#[derive(Debug)]
+enum WalTask<N: NodePrimitives> {
+    /// Commits the notification, which then joins the buffer.
+    Commit(ExExNotification<N>),
+    /// Finalizes the WAL up to the block, then checks its size.
+    Finalize(BlockNumHash),
+}
+
+impl<N: NodePrimitives> WalTask<N> {
+    /// Runs the work and hands the task back.
+    fn run(self, wal: &Wal<N>) -> WalResult<Self> {
+        match &self {
+            Self::Commit(notification) => wal.commit(notification)?,
+            Self::Finalize(to_block) => wal.finalize(*to_block)?,
+        }
+        Ok(self)
+    }
+}
+
 /// Metrics for the `ExEx` manager.
 #[derive(Metrics)]
 #[metrics(scope = "exex.manager")]
@@ -252,6 +276,10 @@ pub struct ExExManager<P, N: NodePrimitives> {
     finalized_header_stream: ForkChoiceStream<SealedHeader<N::BlockHeader>>,
     /// The threshold for the number of blocks in the WAL before emitting a warning.
     wal_blocks_warning: usize,
+    /// WAL work in flight.
+    wal_task: Option<JoinHandle<WalResult<WalTask<N>>>>,
+    /// The last finalized header, not yet applied to the WAL.
+    finalize_to: Option<SealedHeader<N::BlockHeader>>,
 
     /// A handle to the `ExEx` manager.
     handle: ExExManagerHandle<N>,
@@ -312,6 +340,8 @@ where
             wal,
             finalized_header_stream,
             wal_blocks_warning: DEFAULT_WAL_BLOCKS_WARNING,
+            wal_task: None,
+            finalize_to: None,
 
             handle: ExExManagerHandle {
                 exex_tx: handle_tx,
@@ -360,6 +390,33 @@ where
         self.buffer.push_back((next_id, notification));
         self.next_id += 1;
     }
+
+    /// Runs the task on the blocking pool.
+    fn spawn_wal(&mut self, task: WalTask<N>) {
+        let wal = self.wal.clone();
+        self.wal_task = Some(tokio::task::spawn_blocking(move || task.run(&wal)));
+    }
+
+    /// Polls the WAL work in flight and takes in its result.
+    fn poll_wal(&mut self, cx: &mut Context<'_>) -> Poll<eyre::Result<()>> {
+        let Some(handle) = &mut self.wal_task else { return Poll::Ready(Ok(())) };
+        let result = ready!(Pin::new(handle).poll(cx));
+        self.wal_task = None;
+        match result?? {
+            WalTask::Commit(notification) => self.push_notification(notification),
+            WalTask::Finalize(_) => {
+                if self.wal.num_blocks() > self.wal_blocks_warning {
+                    warn!(
+                        target: "exex::manager",
+                        blocks = ?self.wal.num_blocks(),
+                        threshold = self.wal_blocks_warning,
+                        "WAL contains too many blocks and is not getting cleared. That will lead to increased disk space usage. Check that you emit the FinishedHeight event from your ExExes."
+                    );
+                }
+            }
+        }
+        Poll::Ready(Ok(()))
+    }
 }
 
 impl<P, N> ExExManager<P, N>
@@ -371,7 +428,7 @@ where
     ///
     /// This function checks if all ExExes are on the canonical chain and finalizes the WAL if
     /// necessary.
-    fn finalize_wal(&self, finalized_header: SealedHeader<N::BlockHeader>) -> eyre::Result<()> {
+    fn finalize_wal(&mut self, finalized_header: SealedHeader<N::BlockHeader>) -> eyre::Result<()> {
         debug!(target: "exex::manager", header = ?finalized_header.num_hash(), "Received finalized header");
 
         // Check if all ExExes are on the canonical chain
@@ -405,15 +462,7 @@ where
                 .min_by_key(|num_hash| num_hash.number)
                 .unwrap();
 
-            self.wal.finalize(lowest_finished_height)?;
-            if self.wal.num_blocks() > self.wal_blocks_warning {
-                warn!(
-                    target: "exex::manager",
-                    blocks = ?self.wal.num_blocks(),
-                    threshold = self.wal_blocks_warning,
-                    "WAL contains too many blocks and is not getting cleared. That will lead to increased disk space usage. Check that you emit the FinishedHeight event from your ExExes."
-                );
-            }
+            self.spawn_wal(WalTask::Finalize(lowest_finished_height));
         } else {
             let unfinalized_exexes = exex_finished_heights
                 .into_iter()
@@ -447,14 +496,14 @@ where
     /// Main loop of the [`ExExManager`]. The order of operations is as follows:
     /// 1. Handle incoming ExEx events. We do it before finalizing the WAL, because it depends on
     ///    the latest state of [`ExExEvent::FinishedHeight`] events.
-    /// 2. Finalize the WAL with the finalized header, if necessary.
-    /// 3. Drain [`ExExManagerHandle`] notifications, push them to the internal buffer and update
-    ///    the internal buffer capacity.
-    /// 5. Send notifications from the internal buffer to those ExExes that are ready to receive new
-    ///    notifications.
-    /// 5. Remove notifications from the internal buffer that have been sent to **all** ExExes and
+    /// 2. Drain the finalized header stream.
+    /// 3. Send notifications from the internal buffer to those ExExes that are ready to receive new
+    ///    notifications, then finalize the WAL or take the next [`ExExManagerHandle`] notification
+    ///    into the buffer; repeat until none is pending, the buffer is full or a WAL write is in
+    ///    flight.
+    /// 4. Remove notifications from the internal buffer that have been sent to **all** ExExes and
     ///    update the internal buffer capacity.
-    /// 6. Update the channel with the lowest [`FinishedExExHeight`] among all ExExes.
+    /// 5. Update the channel with the lowest [`FinishedExExHeight`] among all ExExes.
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let this = self.get_mut();
 
@@ -469,66 +518,78 @@ where
             }
         }
 
-        // Drain the finalized header stream and finalize the WAL with the last header
-        let mut last_finalized_header = None;
+        // Drain the finalized header stream
         while let Poll::Ready(finalized_header) = this.finalized_header_stream.poll_next_unpin(cx) {
-            last_finalized_header = finalized_header;
-        }
-        if let Some(header) = last_finalized_header {
-            this.finalize_wal(header)?;
+            this.finalize_to = finalized_header;
         }
 
-        // Drain handle notifications
-        while this.buffer.len() < this.max_capacity {
-            if let Poll::Ready(Some((source, notification))) = this.handle_rx.poll_recv(cx) {
-                let committed_tip =
-                    notification.committed_chain().map(|chain| chain.tip().number());
-                let reverted_tip = notification.reverted_chain().map(|chain| chain.tip().number());
-                debug!(target: "exex::manager", ?committed_tip, ?reverted_tip, "Received new notification");
+        // Offer buffered notifications before taking each new one: taking the whole backlog first
+        // spends the cooperative budget, and the ExExes wait behind the whole backlog.
+        loop {
+            // Land the WAL work in flight
+            let wal_busy = this.poll_wal(cx)?.is_pending();
 
-                // Commit to WAL only notifications from blockchain tree. Pipeline notifications
-                // always contain only finalized blocks.
-                match source {
-                    ExExNotificationSource::BlockchainTree => {
-                        debug!(target: "exex::manager", ?committed_tip, ?reverted_tip, "Committing notification to WAL");
-                        this.wal.commit(&notification)?;
-                    }
-                    ExExNotificationSource::Pipeline => {
-                        debug!(target: "exex::manager", ?committed_tip, ?reverted_tip, "Notification was sent from pipeline, skipping WAL commit");
-                    }
+            // Advance all poll senders
+            for exex in &mut this.exex_handles {
+                // It is a logic error for this to ever underflow since the manager manages the
+                // notification IDs
+                let notification_index = exex
+                    .next_notification_id
+                    .checked_sub(this.min_id)
+                    .expect("exex expected notification ID outside the manager's range");
+                if let Some(notification) = this.buffer.get(notification_index) &&
+                    let Poll::Ready(Err(err)) = exex.send(cx, notification)
+                {
+                    // The channel was closed, which is irrecoverable for the manager
+                    return Poll::Ready(Err(err.into()))
                 }
+            }
 
-                this.push_notification(notification);
+            if wal_busy {
+                break
+            }
+            if let Some(header) = this.finalize_to.take() {
+                this.finalize_wal(header)?;
                 continue
             }
-            break
+
+            // Take the next handle notification
+            if this.buffer.len() >= this.max_capacity {
+                break
+            }
+            let Poll::Ready(Some((source, notification))) = this.handle_rx.poll_recv(cx) else {
+                break
+            };
+            let committed_tip = notification.committed_chain().map(|chain| chain.tip().number());
+            let reverted_tip = notification.reverted_chain().map(|chain| chain.tip().number());
+            debug!(target: "exex::manager", ?committed_tip, ?reverted_tip, "Received new notification");
+
+            // Commit to WAL only notifications from blockchain tree. Pipeline notifications
+            // always contain only finalized blocks.
+            match source {
+                ExExNotificationSource::BlockchainTree => {
+                    debug!(target: "exex::manager", ?committed_tip, ?reverted_tip, "Committing notification to WAL");
+                    this.spawn_wal(WalTask::Commit(notification));
+                }
+                ExExNotificationSource::Pipeline => {
+                    debug!(target: "exex::manager", ?committed_tip, ?reverted_tip, "Notification was sent from pipeline, skipping WAL commit");
+                    this.push_notification(notification);
+                }
+            }
         }
         let buffer_full = this.buffer.len() >= this.max_capacity;
 
-        // Advance all poll senders
-        let mut min_id = usize::MAX;
-        for idx in (0..this.exex_handles.len()).rev() {
-            let mut exex = this.exex_handles.swap_remove(idx);
-
-            // It is a logic error for this to ever underflow since the manager manages the
-            // notification IDs
-            let notification_index = exex
-                .next_notification_id
-                .checked_sub(this.min_id)
-                .expect("exex expected notification ID outside the manager's range");
-            if let Some(notification) = this.buffer.get(notification_index) &&
-                let Poll::Ready(Err(err)) = exex.send(cx, notification)
-            {
-                // The channel was closed, which is irrecoverable for the manager
-                return Poll::Ready(Err(err.into()))
-            }
-            min_id = min_id.min(exex.next_notification_id);
-            this.exex_handles.push(exex);
-        }
-
         // Remove processed buffered notifications
+        let min_id = this
+            .exex_handles
+            .iter()
+            .map(|exex| exex.next_notification_id)
+            .min()
+            .unwrap_or(usize::MAX);
         debug!(target: "exex::manager", %min_id, "Updating lowest notification id in buffer");
-        this.buffer.retain(|&(id, _)| id >= min_id);
+        while this.buffer.front().is_some_and(|&(id, _)| id < min_id) {
+            this.buffer.pop_front();
+        }
         this.min_id = min_id;
 
         // Update capacity
@@ -679,7 +740,6 @@ impl<N: NodePrimitives> Clone for ExExManagerHandle<N> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::wal::WalResult;
     use alloy_primitives::B256;
     use futures::{StreamExt, TryStreamExt};
     use rand::Rng;
@@ -697,6 +757,18 @@ mod tests {
         // Do not drop the sender, otherwise the receiver will always return an error
         std::mem::forget(tx);
         ForkChoiceStream::new(rx)
+    }
+
+    /// Polls the manager until its WAL work has landed.
+    async fn settle<P: HeaderProvider + Unpin + 'static, N: NodePrimitives>(
+        manager: &mut Pin<&mut ExExManager<P, N>>,
+    ) -> eyre::Result<()> {
+        poll_fn(|cx| match manager.as_mut().poll(cx) {
+            Poll::Ready(result) => Poll::Ready(result),
+            Poll::Pending if manager.wal_task.is_none() => Poll::Ready(Ok(())),
+            Poll::Pending => Poll::Pending,
+        })
+        .await
     }
 
     #[tokio::test]
@@ -1055,7 +1127,7 @@ mod tests {
 
         let provider_factory = create_test_provider_factory();
 
-        let (exex_handle_1, _, _) = ExExHandle::new(
+        let (exex_handle_1, _, _notifications) = ExExHandle::new(
             "test_exex_1".to_string(),
             Default::default(),
             (),
@@ -1088,18 +1160,14 @@ mod tests {
         exex_manager
             .handle
             .exex_tx
-            .send((ExExNotificationSource::BlockchainTree, notification.clone()))
+            .send((ExExNotificationSource::Pipeline, notification.clone()))
             .unwrap();
         exex_manager
             .handle
             .exex_tx
-            .send((ExExNotificationSource::BlockchainTree, notification.clone()))
+            .send((ExExNotificationSource::Pipeline, notification.clone()))
             .unwrap();
-        exex_manager
-            .handle
-            .exex_tx
-            .send((ExExNotificationSource::BlockchainTree, notification))
-            .unwrap();
+        exex_manager.handle.exex_tx.send((ExExNotificationSource::Pipeline, notification)).unwrap();
 
         // Pin the ExExManager to call the poll method
         let mut pinned_manager = std::pin::pin!(exex_manager);
@@ -1110,9 +1178,50 @@ mod tests {
 
         let _ = pinned_manager.as_mut().poll(&mut cx);
 
-        // After polling, the next notification ID and buffer size should be updated
+        // The first went to the ExEx, the second waits in the buffer, the third in the channel
         assert_eq!(pinned_manager.next_id, 2);
-        assert_eq!(pinned_manager.buffer.len(), 2);
+        assert_eq!(pinned_manager.buffer.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn test_backlog_past_the_budget_still_reaches_the_exex() -> eyre::Result<()> {
+        let temp_dir = tempfile::tempdir()?;
+        let wal = Wal::new(temp_dir.path())?;
+        let (exex_handle, _, _notifications) = ExExHandle::new(
+            "test_exex".to_string(),
+            Default::default(),
+            (),
+            EthEvmConfig::mainnet(),
+            wal.handle(),
+        );
+        let exex_manager = ExExManager::new(
+            create_test_provider_factory(),
+            vec![exex_handle],
+            DEFAULT_EXEX_MANAGER_CAPACITY,
+            wal,
+            empty_finalized_header_stream(),
+        );
+        let notification = ExExNotification::ChainCommitted {
+            new: Arc::new(Chain::new(
+                vec![RecoveredBlock::default()],
+                Default::default(),
+                Default::default(),
+            )),
+        };
+        // More than tokio's cooperative budget of 128
+        for _ in 0..200 {
+            exex_manager.handle().send(ExExNotificationSource::Pipeline, notification.clone())?;
+        }
+
+        let mut cx = Context::from_waker(futures::task::noop_waker_ref());
+        let mut exex_manager = std::pin::pin!(exex_manager);
+        assert!(exex_manager.as_mut().poll(&mut cx).is_pending());
+        assert!(exex_manager.next_id < 200, "the budget ran out before the backlog did");
+        assert_eq!(
+            exex_manager.exex_handles[0].next_notification_id, 1,
+            "the ExEx was handed the first"
+        );
+        Ok(())
     }
 
     #[tokio::test]
@@ -1375,7 +1484,7 @@ mod tests {
             notifications.try_poll_next_unpin(&mut cx)?,
             Poll::Ready(Some(genesis_notification))
         );
-        assert!(exex_manager.as_mut().poll(&mut cx)?.is_pending());
+        settle(&mut exex_manager).await?;
         assert_eq!(
             notifications.try_poll_next_unpin(&mut cx)?,
             Poll::Ready(Some(notification.clone()))
@@ -1412,7 +1521,7 @@ mod tests {
         events_tx.send(ExExEvent::FinishedHeight(block.num_hash())).unwrap();
 
         finalized_headers_tx.send(Some(block.clone_sealed_header()))?;
-        assert!(exex_manager.as_mut().poll(&mut cx).is_pending());
+        settle(&mut exex_manager).await?;
         // WAL is finalized
         assert_eq!(exex_manager.wal.iter_notifications()?.next().transpose()?, None);
 
@@ -1491,5 +1600,40 @@ mod tests {
             result.is_ok(),
             "Deadlock detected! Manager failed to wake up and process Pending Item #100."
         );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_wal_commit_inside_a_local_set() -> eyre::Result<()> {
+        let temp_dir = tempfile::tempdir()?;
+        let wal = Wal::new(temp_dir.path())?;
+        let (exex_handle, _, _notifications) = ExExHandle::new(
+            "test_exex".to_string(),
+            Default::default(),
+            (),
+            EthEvmConfig::mainnet(),
+            wal.handle(),
+        );
+        let mut exex_manager = std::pin::pin!(ExExManager::new(
+            create_test_provider_factory(),
+            vec![exex_handle],
+            DEFAULT_EXEX_MANAGER_CAPACITY,
+            wal,
+            empty_finalized_header_stream(),
+        ));
+        let notification = ExExNotification::ChainCommitted {
+            new: Arc::new(Chain::new(
+                vec![RecoveredBlock::default()],
+                Default::default(),
+                Default::default(),
+            )),
+        };
+        exex_manager.handle().send(ExExNotificationSource::BlockchainTree, notification.clone())?;
+
+        tokio::task::LocalSet::new().run_until(settle(&mut exex_manager)).await?;
+        assert_eq!(
+            exex_manager.wal.iter_notifications()?.collect::<WalResult<Vec<_>>>()?,
+            [notification]
+        );
+        Ok(())
     }
 }
