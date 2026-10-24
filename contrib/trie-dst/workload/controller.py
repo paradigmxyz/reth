@@ -120,13 +120,12 @@ def worker(config):
                         remaining = 1
                     elif remaining <= 0:
                         raise TimeoutError("workload recovery campaign timed out")
-                    if not select.select([process.stdout], [], [], min(remaining, 0.1))[0]:
+                    if not select.select([process.stdout], [], [], remaining)[0]:
                         continue
                     data = os.read(process.stdout.fileno(), 65536)
                     if not data:
                         break
                     output.write(data)
-                    output.flush()
                     pending += data
                     while b"\n" in pending:
                         line, pending = pending.split(b"\n", 1)
