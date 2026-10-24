@@ -110,6 +110,12 @@ struct SenderRecoveryCacheConfig;
 
 impl fixed_cache::CacheConfig for SenderRecoveryCacheConfig {
     const STATS: bool = false;
+    // Hits read the bucket without locking it, so concurrent lookups from threads in different
+    // LLC domains don't bounce the bucket's cache line between them.
+    // SAFETY: `B256` and `Address` are byte arrays: bitwise-copyable, with no padding or
+    // uninitialized bytes, and `(B256, Address)` has none either.
+    const LOCK_FREE_READS: fixed_cache::LockFreeReads =
+        unsafe { fixed_cache::LockFreeReads::enabled() };
 }
 
 #[cfg(test)]

@@ -13,6 +13,7 @@ workspace = true
 
 [dependencies]
 alloy-primitives.workspace = true
+crossbeam-utils.workspace = true
 fixed-cache = { workspace = true, features = ["stats"] }
 metrics.workspace = true
 moka = { workspace = true, features = ["sync"] }
@@ -31,6 +32,9 @@ metrics-util = { workspace = true, features = ["debugging"] }
 reth-provider = { workspace = true, features = ["test-utils"] }
 reth-revm = { workspace = true, features = ["test-utils"] }
 revm.workspace = true
+
+[target.'cfg(target_os = "linux")'.dev-dependencies]
+libc.workspace = true
 
 [features]
 test-utils = [

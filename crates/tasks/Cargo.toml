@@ -37,7 +37,12 @@ pin-project = { workspace = true, optional = true }
 libc.workspace = true
 
 [dev-dependencies]
+crossbeam-channel.workspace = true
 tokio = { workspace = true, features = ["sync", "rt", "rt-multi-thread", "time", "macros"] }
+
+[[example]]
+name = "llc_bench"
+required-features = ["rayon"]
 
 [features]
 rayon = ["dep:rayon", "dep:crossbeam-utils", "pin-project"]

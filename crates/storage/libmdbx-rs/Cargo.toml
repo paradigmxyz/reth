@@ -25,6 +25,9 @@ tracing.workspace = true
 
 dashmap = { workspace = true, features = ["inline"], optional = true }
 
+[target.'cfg(target_os = "linux")'.dependencies]
+libc.workspace = true
+
 [features]
 dst = []
 default = []

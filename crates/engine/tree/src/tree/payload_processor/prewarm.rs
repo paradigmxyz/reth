@@ -320,7 +320,7 @@ where
     /// Executes a single prewarm transaction on the current pool thread's EVM, or only loads the
     /// reads of its `seeded` pool transaction result.
     ///
-    /// Lazily initialises per-thread [`PrewarmEvmState`] via
+    /// Lazily initialises per-thread [`PrewarmWorker`] state via
     /// [`get_or_init`](reth_tasks::WorkerStatefulPool::get_or_init) on first access.
     fn transact_worker<Tx>(
         ctx: &PrewarmContext<N, P, Evm>,
@@ -337,19 +337,23 @@ where
         }
 
         pool.get_or_init(
-            || ctx.evm_for_ctx(),
+            || PrewarmWorker {
+                evm: ctx.evm_for_ctx(),
+                samples: PrewarmSamples::new(ctx.metrics.clone()),
+            },
             |state| {
-                let Some(evm) = state.as_mut() else { return };
+                let PrewarmWorker { evm, samples } = state;
+                let Some(evm) = evm.as_mut() else { return };
 
                 let start = Instant::now();
 
                 let (tx_env, tx) = tx.into_parts();
-                let send_hints = |state: &EvmState| {
+                let send_hints = |samples: &mut PrewarmSamples, state: &EvmState| {
                     if index > 0 &&
                         let Some(state_root_hint_stream) = state_root_hint_stream
                     {
                         let (targets, storage_targets) = MultiProofTargetsV2::from_state(state);
-                        ctx.metrics.prefetch_storage_targets.record(storage_targets as f64);
+                        samples.prefetch_storage_targets.push(storage_targets as f64);
                         state_root_hint_stream.on_access_hint(targets.into());
                     }
                 };
@@ -364,7 +368,7 @@ where
                             "Failed to load reads of seeded pool transaction",
                         );
                     }
-                    send_hints(seeded.state());
+                    send_hints(samples, seeded.state());
                     return;
                 }
 
@@ -400,13 +404,13 @@ where
                         return;
                     }
                 };
-                ctx.metrics.execution_duration.record(start.elapsed());
+                samples.execution_duration.push(start.elapsed().as_secs_f64());
 
                 if ctx.should_stop() {
                     return;
                 }
 
-                send_hints(&res.state);
+                send_hints(samples, &res.state);
 
                 if let Some(results) = &ctx.prewarm_results &&
                     let Some(reads) = reads &&
@@ -415,7 +419,7 @@ where
                     results.store(index, res, reads, evm.inspector_mut(), speculative);
                 }
 
-                ctx.metrics.total_runtime.record(start.elapsed());
+                samples.total_runtime.push(start.elapsed().as_secs_f64());
             },
         );
     }
@@ -731,10 +735,56 @@ where
     pub(crate) prewarm_results: Option<Arc<PrewarmResults<HaltReasonFor<Evm>>>>,
 }
 
-/// Per-thread EVM state initialised by [`PrewarmContext::evm_for_ctx`] and stored in
-/// workers via [`WorkerStatefulPool::get_or_init`].
+/// Per-thread EVM state initialised by [`PrewarmContext::evm_for_ctx`].
 type PrewarmEvmState<Evm> =
     Option<EvmFor<Evm, RecordingDb<StateProviderDatabase<EvmStateProviderBox>>, BalanceTracker>>;
+
+/// Per-thread prewarm state, stored in workers via [`WorkerStatefulPool::get_or_init`] and
+/// dropped when the block's prewarming ends.
+struct PrewarmWorker<E> {
+    /// The worker's EVM, `None` if it could not be built.
+    evm: Option<E>,
+    /// The worker's per-transaction metric samples.
+    samples: PrewarmSamples,
+}
+
+/// Per-transaction prewarm metric samples of one worker, recorded into [`PrewarmMetrics`] when
+/// the worker's state is dropped at the end of the block.
+///
+/// Recording a histogram sample appends to a bucket shared by all threads, so recording each
+/// transaction from every worker would bounce the bucket's cache lines between the workers' LLC
+/// domains while they execute.
+struct PrewarmSamples {
+    metrics: PrewarmMetrics,
+    total_runtime: Vec<f64>,
+    execution_duration: Vec<f64>,
+    prefetch_storage_targets: Vec<f64>,
+}
+
+impl PrewarmSamples {
+    const fn new(metrics: PrewarmMetrics) -> Self {
+        Self {
+            metrics,
+            total_runtime: Vec::new(),
+            execution_duration: Vec::new(),
+            prefetch_storage_targets: Vec::new(),
+        }
+    }
+}
+
+impl Drop for PrewarmSamples {
+    fn drop(&mut self) {
+        for &sample in &self.total_runtime {
+            self.metrics.total_runtime.record(sample);
+        }
+        for &sample in &self.execution_duration {
+            self.metrics.execution_duration.record(sample);
+        }
+        for &sample in &self.prefetch_storage_targets {
+            self.metrics.prefetch_storage_targets.record(sample);
+        }
+    }
+}
 
 impl<N, P, Evm> PrewarmContext<N, P, Evm>
 where
