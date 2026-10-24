@@ -1,7 +1,7 @@
 #![allow(missing_docs)]
 
-use std::{env, error::Error};
 use smolgen::{Build, Cargo, Emitter, Git2};
+use std::{env, error::Error};
 
 fn main() -> Result<(), Box<dyn Error>> {
     let mut emitter = Emitter::default();
