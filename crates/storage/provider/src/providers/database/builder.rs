@@ -71,9 +71,9 @@ impl<N> ProviderFactoryBuilder<N> {
     ///
     /// # Open an instance with disabled read-transaction timeout
     ///
-    /// By default, read transactions are automatically terminated after a timeout to prevent
-    /// database free list growth. However, if the database is static (no writes occurring), this
-    /// safety mechanism can be disabled using
+    /// By default, read transactions time out to limit database free list growth: every read on a
+    /// timed out transaction fails, and it keeps its snapshot until it is dropped. However, if the
+    /// database is static (no writes occurring), this safety mechanism can be disabled using
     /// [`ReadOnlyConfig::disable_long_read_transaction_safety`].
     ///
     /// ```no_run

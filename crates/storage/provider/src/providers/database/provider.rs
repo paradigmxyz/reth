@@ -4727,6 +4727,8 @@ mod tests {
             .unwrap();
         assert_eq!(storage_entries2.len(), 0, "Storage address2 should be empty after removal");
 
+        drop(cursor);
+        drop(storage_cursor);
         provider_rw.commit().unwrap();
     }
 

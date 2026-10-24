@@ -860,6 +860,7 @@ mod tests {
             provider
                 .save_stage_checkpoint(StageId::IndexAccountHistory, StageCheckpoint::new(0))
                 .unwrap();
+            drop(cursor);
             provider.commit().unwrap();
         }
 

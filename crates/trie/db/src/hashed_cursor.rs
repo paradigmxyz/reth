@@ -19,13 +19,14 @@ impl<T> DatabaseHashedCursorFactory<T> {
     }
 }
 
-impl<TX: DbTx> HashedCursorFactory for DatabaseHashedCursorFactory<&TX> {
+impl<'tx, TX: DbTx> HashedCursorFactory for DatabaseHashedCursorFactory<&'tx TX> {
+    // The cursors borrow the transaction, not the factory, so they can outlive the factory.
     type AccountCursor<'a>
-        = DatabaseHashedAccountCursor<<TX as DbTx>::Cursor<tables::HashedAccounts>>
+        = DatabaseHashedAccountCursor<<TX as DbTx>::Cursor<'tx, tables::HashedAccounts>>
     where
         Self: 'a;
     type StorageCursor<'a>
-        = DatabaseHashedStorageCursor<<TX as DbTx>::DupCursor<tables::HashedStorages>>
+        = DatabaseHashedStorageCursor<<TX as DbTx>::DupCursor<'tx, tables::HashedStorages>>
     where
         Self: 'a;
 

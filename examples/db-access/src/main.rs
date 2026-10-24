@@ -59,7 +59,7 @@ fn main() -> eyre::Result<()> {
 }
 
 /// The `HeaderProvider` allows querying the headers-related tables.
-fn header_provider_example<T: HeaderProvider>(provider: T, number: u64) -> eyre::Result<()> {
+fn header_provider_example<T: HeaderProvider>(provider: &T, number: u64) -> eyre::Result<()> {
     // Can query the header by number
     let header = provider.header_by_number(number)?.ok_or(eyre::eyre!("header not found"))?;
 
@@ -81,7 +81,7 @@ fn header_provider_example<T: HeaderProvider>(provider: T, number: u64) -> eyre:
 
 /// The `TransactionsProvider` allows querying transaction-related information
 fn txs_provider_example<T: TransactionsProvider<Transaction = TransactionSigned>>(
-    provider: T,
+    provider: &T,
 ) -> eyre::Result<()> {
     // Try the 5th tx
     let txid = 5;
@@ -114,7 +114,7 @@ fn txs_provider_example<T: TransactionsProvider<Transaction = TransactionSigned>
 
 /// The `BlockReader` allows querying the headers-related tables.
 fn block_provider_example<T: BlockReader<Block = reth_ethereum::Block>>(
-    provider: T,
+    provider: &T,
     number: u64,
 ) -> eyre::Result<()> {
     // Can query a block by number
@@ -158,7 +158,7 @@ fn receipts_provider_example<
         + TransactionsProvider<Transaction = TransactionSigned>
         + HeaderProvider,
 >(
-    provider: T,
+    provider: &T,
 ) -> eyre::Result<()> {
     let txid = 5;
     let header_num = 100;

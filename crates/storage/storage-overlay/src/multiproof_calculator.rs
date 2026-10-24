@@ -86,7 +86,8 @@ impl<TX: DbTx + 'static> OverlayMultiProofCalculator<TX> {
 
 // SAFETY: `new` requires the calculator to move between threads only together with its
 // transaction, or the transaction to be `Sync`, so the borrowed transaction is never shared across
-// threads without synchronization.
+// threads without synchronization. `DbTx` requires cursors to be safe to move together with their
+// transaction, and on their own if the transaction is `Sync`.
 unsafe impl<TX: DbTx + 'static> Send for OverlayMultiProofCalculator<TX> {}
 
 /// Multiproof calculator over trie table layout `A`, whose borrows of the transaction and overlay
