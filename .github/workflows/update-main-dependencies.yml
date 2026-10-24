@@ -1,0 +1,49 @@
+# Advances the interconnected nightly branches in dependency order.
+
+name: Update nightly dependency branches
+
+on:
+  schedule:
+    - cron: "0 3 * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: update-nightly-dependency-branches
+  cancel-in-progress: false
+
+permissions: {}
+
+jobs:
+  update:
+    name: Update nightly branches
+    if: github.event_name != 'schedule' || github.repository == 'paradigmxyz/reth'
+    runs-on: depot-ubuntu-latest-16
+    timeout-minutes: 360
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install nightly Rust
+        uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: rustfmt
+
+      - name: Install stable Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libgmp-dev
+          npm install --global @anthropic-ai/claude-code@2.1.252
+
+      - name: Advance nightly branches
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          GH_TOKEN: ${{ secrets.DEREK_TOKEN }}
+        run: bash .github/scripts/update-nightly-dependencies.sh
