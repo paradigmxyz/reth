@@ -112,7 +112,7 @@ def worker(config):
             while True:
                 completed = False
                 process = subprocess.Popen(
-                    ["/usr/local/bin/reth-trie-dst",
+                    ["/usr/local/bin/thread-fuzz", "/usr/local/bin/reth-trie-dst",
                      "@" + str(workload_path)], stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
                 pending = b""
                 planned = False
