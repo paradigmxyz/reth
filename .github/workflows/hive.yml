@@ -74,18 +74,9 @@ jobs:
         if: steps.cache-hive.outputs.cache-hit != 'true'
         run: .github/scripts/hive/build_simulators.sh ${{ matrix.variant }}
 
-      - name: Load cached Docker images
+      - name: Prepare cached hive binary
         if: steps.cache-hive.outputs.cache-hit == 'true'
-        run: |
-          cd hive_assets
-          for tar_file in *.tar; do
-            if [ -f "$tar_file" ]; then
-              echo "Loading $tar_file..."
-              docker load -i "$tar_file"
-            fi
-          done
-          # Make hive binary executable
-          chmod +x hive
+        run: chmod +x hive_assets/hive
 
       - name: Upload hive assets
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
