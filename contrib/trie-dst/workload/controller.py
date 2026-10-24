@@ -223,9 +223,9 @@ def main():
             supplied = request.get("base_input")
             if supplied is not None and len(supplied) > 32 << 20:
                 raise ValueError("explicit input exceeds 32 MiB")
-            input_value = native("validate-input", {"input": json.loads(supplied)}) if supplied is not None else None
+            input_value = json.loads(supplied) if supplied is not None else None
             if input_value is not None:
-                args["blocks"] = sum(op["kind"] == "commit" for op in input_value["operations"])
+                args["blocks"] = native("validate-input", {"input": input_value})["blocks"]
             kill_blocks = sorted(random.Random(request["seed"]).sample(
                 range(1, args["blocks"] + 1), min(crashes, args["blocks"])))
             config = {"workload": args | {"seed": request["seed"], "input": input_value},

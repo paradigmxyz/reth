@@ -854,6 +854,12 @@ fn main() -> Result<()> {
                 }
             };
             input.validate()?;
+            if command.as_deref() == Some("validate-input") {
+                let blocks =
+                    input.operations.iter().filter(|op| matches!(op, Operation::Commit)).count();
+                println!("{}", json!({"blocks": blocks}));
+                return Ok(());
+            }
             let output = serde_json::to_string(&input)?;
             if command.as_deref() == Some("mutate-input") && contract {
                 println!("{}", serde_json::to_string(&output)?);
