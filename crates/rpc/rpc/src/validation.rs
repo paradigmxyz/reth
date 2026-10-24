@@ -22,11 +22,14 @@ use core::fmt;
 use jsonrpsee::core::RpcResult;
 use jsonrpsee_types::error::ErrorObject;
 use reth_chainspec::{ChainSpecProvider, EthereumHardforks};
-use reth_consensus::{Consensus, FullConsensus};
+use reth_consensus::FullConsensus;
 use reth_consensus_common::validation::MAX_RLP_BLOCK_SIZE;
 use reth_engine_primitives::PayloadValidator;
 use reth_errors::{BlockExecutionError, ConsensusError, ProviderError};
-use reth_evm::{execute::Executor, ConfigureEvm, SenderRecoveryCache};
+use reth_evm::{
+    cached::CachedReads, database::StateProviderDatabase, execute::Executor, ConfigureEvm,
+    SenderRecoveryCache,
+};
 use reth_execution_types::BlockExecutionOutput;
 use reth_metrics::{
     metrics,
@@ -38,7 +41,6 @@ use reth_primitives_traits::{
     block::error::SealedBlockRecoveryError, BlockBody, GotExpected, NodePrimitives, RecoveredBlock,
     SealedBlock, SealedHeaderFor,
 };
-use reth_revm::{cached::CachedReads, database::StateProviderDatabase};
 use reth_rpc_api::BlockSubmissionValidationApiServer;
 use reth_rpc_eth_types::EthStateCache;
 use reth_rpc_server_types::result::{internal_rpc_err, invalid_params_rpc_err};
@@ -326,21 +328,18 @@ where
             let block_access_list_hash =
                 executor.take_bal().map(|bal| compute_block_access_list_hash(&bal));
 
-            let mut state = executor.into_state();
+            let state = executor.into_state();
             if !self.disallow.is_empty() {
                 // Check whether the submission interacted with any blacklisted account by
-                // scanning the `State`'s cache that records everything read from database
-                // during execution.
-                for account in state.cache.accounts.keys() {
+                // scanning the cached reads and the accounts changed during execution.
+                for account in request_cache.accounts.keys().chain(state.state.keys()) {
                     if self.disallow.contains(account) {
                         return Err(ValidationApiError::Blacklist(*account))
                     }
                 }
             }
 
-            let output = BlockExecutionOutput { state: state.take_bundle(), result };
-            drop(state);
-            (output, block_access_list_hash)
+            (BlockExecutionOutput { state, result }, block_access_list_hash)
         };
 
         self.update_cached_reads(parent_header_hash, request_cache).await;
@@ -414,7 +413,7 @@ where
         }
 
         let (mut balance_before, balance_after) = if let Some(acc) =
-            output.state.account(&message.proposer_fee_recipient)
+            output.account_state(&message.proposer_fee_recipient)
         {
             let balance_before = acc.original_info.as_ref().map(|i| i.balance).unwrap_or_default();
             let balance_after = acc.info.as_ref().map(|i| i.balance).unwrap_or_default();
@@ -964,10 +963,14 @@ pub(crate) struct ValidationMetrics {
 mod tests {
     use super::*;
     use alloy_consensus::{BlockHeader, Header};
+    use alloy_eip7928::StorageChange;
     use alloy_eips::NumHash;
     use alloy_primitives::{Address, Bytes, B256, U256};
     use alloy_rpc_types_beacon::relay::BidTrace;
     use alloy_rpc_types_engine::{ExecutionData, ExecutionPayload, ExecutionPayloadV1};
+    use evm2::evm::{
+        AccountBal, AccountInfo, Bal, BalChanges, BlockAccessIndex, Database, EmptyDB,
+    };
     use reth_consensus::noop::NoopConsensus;
     use reth_engine_primitives::PayloadValidator;
     use reth_ethereum_engine_primitives::EthPayloadTypes;
@@ -977,18 +980,10 @@ mod tests {
     use reth_node_api::NewPayloadError;
     use reth_primitives_traits::{RecoveredBlock, SealedBlock, SealedHeader};
     use reth_provider::{test_utils::MockEthProvider, InMemoryBalStore};
-    use reth_revm::db::{states::bundle_state::BundleState, AccountStatus, BundleAccount};
     use reth_rpc_eth_types::EthStateCacheConfig;
     use reth_storage_api::{BalStoreHandle, RawBal};
     use reth_tasks::Runtime;
-    use revm::{
-        database::EmptyDB,
-        state::{
-            bal::{AccountBal, Bal, BalWrites, BlockAccessIndex},
-            AccountInfo,
-        },
-        DatabaseRef,
-    };
+    use reth_trie_common::bundle_state::{AccountStatus, BundleAccount, BundleState};
     use std::{
         sync::{mpsc, Arc},
         time::Duration,
@@ -1241,6 +1236,43 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn execution_invalid_submission_is_invalid_params() {
+        let (provider, parent_block, mut message) = payment_free_submission();
+        let transaction = reth_ethereum_primitives::TransactionSigned::new_unhashed(
+            reth_ethereum_primitives::Transaction::Legacy(alloy_consensus::TxLegacy {
+                gas_limit: 20_999,
+                to: alloy_primitives::TxKind::Call(Address::with_last_byte(1)),
+                ..Default::default()
+            }),
+            alloy_primitives::Signature::test_signature(),
+        );
+        let block = RecoveredBlock::new_unhashed(
+            Block {
+                header: parent_block.clone_header(),
+                body: alloy_consensus::BlockBody {
+                    transactions: vec![transaction],
+                    ..Default::default()
+                },
+            },
+            vec![Address::ZERO],
+        );
+        message.block_hash = block.hash();
+        let error = test_validation_api(provider)
+            .validate_message_against_block(block, message, parent_block.gas_limit(), None)
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(
+                error,
+                ValidationApiError::Execution(reth_errors::BlockExecutionError::Validation(_))
+            ),
+            "{error}"
+        );
+        let error = jsonrpsee::types::ErrorObjectOwned::from(error);
+        assert_eq!(error.code(), jsonrpsee::types::error::INVALID_PARAMS_CODE);
+    }
+
+    #[tokio::test]
     async fn test_payment_check_runs_for_a_nonzero_bid() {
         let (provider, block, message) = payment_free_submission();
         let registered_gas_limit = block.gas_limit();
@@ -1327,11 +1359,11 @@ mod tests {
         let mut account = AccountBal::default();
         account.storage.storage.insert(
             U256::from(1),
-            BalWrites::new(vec![(BlockAccessIndex::new(4), U256::from(value))]),
+            BalChanges::new(vec![StorageChange::new(BlockAccessIndex::new(4), U256::from(value))]),
         );
         let mut bal = Bal::default();
         bal.accounts.insert(Address::repeat_byte(1), account);
-        let raw: Bytes = alloy_rlp::encode(bal.clone().into_alloy_bal()).into();
+        let raw: Bytes = alloy_rlp::encode(bal.to_alloy_bal()).into();
         let hash = alloy_primitives::keccak256(&raw);
         Arc::new(DecodedBal::new_unchecked(Arc::new(bal), raw, hash))
     }
@@ -1372,7 +1404,7 @@ mod tests {
         let fork_bal = api.parent_bal(fork, 1).await.unwrap().unwrap();
         assert_eq!(
             ParentBalDb::new(EmptyDB::default(), Some(fork_bal.as_bal().as_ref()))
-                .storage_ref(Address::repeat_byte(1), U256::from(1))
+                .get_storage(&Address::repeat_byte(1), &U256::from(1))
                 .unwrap(),
             U256::from(77)
         );

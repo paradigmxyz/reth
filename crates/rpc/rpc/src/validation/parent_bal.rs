@@ -1,15 +1,15 @@
 //! Read-only parent post-state beneath `CachedReads` and the child executor's mutable `State`.
 
-use alloy_eip7928::bal::DecodedBal;
-use alloy_primitives::{Address, B256, U256};
-use revm::{
+use alloy_primitives::{Address, B256};
+use evm2::{
     bytecode::Bytecode,
-    state::{bal::Bal, AccountInfo},
-    DatabaseRef,
+    evm::{AccountInfo, Bal, BalChange, Database},
+    interpreter::Word,
 };
-use std::{cell::Cell, sync::Arc};
+use reth_execution_types::DecodedEvmBal;
+use std::sync::Arc;
 
-pub(super) type SharedBal = Arc<DecodedBal<Arc<Bal>>>;
+pub(super) type SharedBal = Arc<DecodedEvmBal>;
 
 /// The provider must expose the post-state of the same parent as `bal`.
 pub(super) struct ParentBalDb<'a, DB> {
@@ -30,39 +30,37 @@ impl<DB> std::fmt::Debug for ParentBalDb<'_, DB> {
     }
 }
 
-impl<DB: DatabaseRef> DatabaseRef for ParentBalDb<'_, DB> {
+impl<DB: Database> Database for ParentBalDb<'_, DB> {
     type Error = DB::Error;
 
-    fn basic_ref(&self, address: Address) -> Result<Option<AccountInfo>, Self::Error> {
-        let Some(account) = self.bal.and_then(|bal| bal.accounts.get(&address)) else {
-            self.reads.provider_accounts.set(self.reads.provider_accounts.get() + 1);
-            return self.db.basic_ref(address)
+    fn is_fatal(error: &Self::Error) -> bool {
+        DB::is_fatal(error)
+    }
+
+    fn get_account(&mut self, address: &Address) -> Result<Option<AccountInfo>, Self::Error> {
+        let Some(account) = self.bal.and_then(|bal| bal.accounts.get(address)) else {
+            self.reads.provider_accounts += 1;
+            return self.db.get_account(address)
         };
         // Select the last write directly, including post-execution writes. Indexed BAL reads
         // are exclusive and positioning at the post-execution index would miss its writes.
-        let balance = account.balance.writes.last().map(|(_, value)| *value);
-        let nonce = account.nonce.writes.last().map(|(_, value)| *value);
-        let code = account.code.writes.last().map(|(_, value)| value);
+        let balance = account.account_info.balance.changes.last().map(|change| *change.value());
+        let nonce = account.account_info.nonce.changes.last().map(|change| *change.value());
+        let code = account.account_info.code.changes.last().map(BalChange::value);
 
         // BALs do not encode account existence or storage-wide clears. Only a complete,
         // nonempty account can be reconstructed without consulting the parent state provider.
         // Empty/deleted accounts and partial fields must retain provider existence semantics.
         #[cfg(not(feature = "account-ext"))]
         if let (Some(balance), Some(nonce), Some((code_hash, code))) = (balance, nonce, code) {
-            let info = AccountInfo {
-                balance,
-                nonce,
-                code_hash: *code_hash,
-                code: Some(code.clone()),
-                ..Default::default()
-            };
+            let info = AccountInfo::new(balance, nonce, *code_hash, Some(code.clone()));
             if !info.is_empty() {
-                self.reads.bal_accounts.set(self.reads.bal_accounts.get() + 1);
+                self.reads.bal_accounts += 1;
                 return Ok(Some(info))
             }
         }
-        self.reads.provider_accounts.set(self.reads.provider_accounts.get() + 1);
-        let Some(mut info) = self.db.basic_ref(address)? else { return Ok(None) };
+        self.reads.provider_accounts += 1;
+        let Some(mut info) = self.db.get_account(address)? else { return Ok(None) };
         if let Some(balance) = balance {
             info.balance = balance;
         }
@@ -76,55 +74,55 @@ impl<DB: DatabaseRef> DatabaseRef for ParentBalDb<'_, DB> {
         Ok(Some(info))
     }
 
-    fn storage_ref(&self, address: Address, index: U256) -> Result<U256, Self::Error> {
+    fn get_storage(&mut self, address: &Address, index: &Word) -> Result<Word, Self::Error> {
         if let Some(value) = self
             .bal
-            .and_then(|bal| bal.accounts.get(&address))
-            .and_then(|account| account.storage.storage.get(&index))
-            .and_then(|writes| writes.writes.last())
+            .and_then(|bal| bal.accounts.get(address))
+            .and_then(|account| account.storage.storage.get(index))
+            .and_then(|writes| writes.changes.last())
         {
-            self.reads.bal_slots.set(self.reads.bal_slots.get() + 1);
-            return Ok(value.1)
+            self.reads.bal_slots += 1;
+            return Ok(*value.value())
         }
         // A read-only slot has no value, and an omitted slot may have been cleared by a
         // deletion. The underlying DB is already at the parent's post-state, not pre-state.
-        self.reads.provider_slots.set(self.reads.provider_slots.get() + 1);
-        self.db.storage_ref(address, index)
+        self.reads.provider_slots += 1;
+        self.db.get_storage(address, index)
     }
 
-    fn code_by_hash_ref(&self, hash: B256) -> Result<Bytecode, Self::Error> {
-        // Changed code is supplied inline by basic_ref. Avoid an O(BAL size) hash scan here;
+    fn get_code_by_hash(&mut self, hash: &B256) -> Result<Bytecode, Self::Error> {
+        // Changed code is supplied inline by get_account. Avoid an O(BAL size) hash scan here;
         // code referenced only by hash (including unchanged code) uses the parent's provider.
-        self.reads.provider_code.set(self.reads.provider_code.get() + 1);
-        self.db.code_by_hash_ref(hash)
+        self.reads.provider_code += 1;
+        self.db.get_code_by_hash(hash)
     }
 
-    fn block_hash_ref(&self, number: u64) -> Result<B256, Self::Error> {
-        self.reads.provider_hashes.set(self.reads.provider_hashes.get() + 1);
-        self.db.block_hash_ref(number)
+    fn get_block_hash(&mut self, number: &Word) -> Result<B256, Self::Error> {
+        self.reads.provider_hashes += 1;
+        self.db.get_block_hash(number)
     }
 }
 
 /// Aggregate on the execution worker; publish once instead of resolving metric handles per read.
 #[derive(Debug, Default)]
 struct ParentBalReads {
-    bal_accounts: Cell<u64>,
-    bal_slots: Cell<u64>,
-    provider_accounts: Cell<u64>,
-    provider_slots: Cell<u64>,
-    provider_code: Cell<u64>,
-    provider_hashes: Cell<u64>,
+    bal_accounts: u64,
+    bal_slots: u64,
+    provider_accounts: u64,
+    provider_slots: u64,
+    provider_code: u64,
+    provider_hashes: u64,
 }
 
 impl Drop for ParentBalReads {
     fn drop(&mut self) {
         for (kind, value) in [
-            ("bal_accounts", self.bal_accounts.get()),
-            ("bal_slots", self.bal_slots.get()),
-            ("provider_accounts", self.provider_accounts.get()),
-            ("provider_slots", self.provider_slots.get()),
-            ("provider_code", self.provider_code.get()),
-            ("provider_hashes", self.provider_hashes.get()),
+            ("bal_accounts", self.bal_accounts),
+            ("bal_slots", self.bal_slots),
+            ("provider_accounts", self.provider_accounts),
+            ("provider_slots", self.provider_slots),
+            ("provider_code", self.provider_code),
+            ("provider_hashes", self.provider_hashes),
         ] {
             if value != 0 {
                 reth_metrics::metrics::counter!("builder.validation.parent_bal.reads", "kind" => kind).increment(value);
@@ -149,36 +147,30 @@ pub(super) fn committed_bal(bal: Option<SharedBal>, expected: Option<B256>) -> O
 mod tests {
     use super::*;
     use alloy_consensus::{Header, SignableTransaction, TxLegacy};
-    use alloy_primitives::{map::HashMap, Bytes, Signature, TxKind};
+    use alloy_eip7928::bal::DecodedBal;
+    use alloy_primitives::{Bytes, Signature, TxKind, U256};
+    use evm2::evm::{
+        AccountBal, AccountInfoBal, BalChanges, BlockAccessIndex, CacheDB, Db, EmptyDB, State,
+    };
     use reth_chainspec::{ChainSpecBuilder, MAINNET};
     use reth_ethereum_primitives::{Block, BlockBody, TransactionSigned};
-    use reth_evm::{execute::Executor, ConfigureEvm};
+    use reth_evm::{cached::CachedReads, execute::Executor, ConfigureEvm};
     use reth_evm_ethereum::EthEvmConfig;
     use reth_primitives_traits::RecoveredBlock;
-    use reth_revm::cached::CachedReads;
     use reth_trie_common::{
         root::{state_root_unhashed, storage_root_unhashed},
         TrieAccount,
     };
-    use revm::{
-        database::{CacheDB, EmptyDB, State},
-        state::{
-            bal::{AccountBal, AccountInfoBal, BalWrites, BlockAccessIndex},
-            Account, EvmStorageSlot,
-        },
-        Database, DatabaseCommit,
-    };
-    use std::cell::Cell;
 
     const ADDRESS: Address = Address::repeat_byte(1);
     const OTHER: Address = Address::repeat_byte(2);
 
     #[derive(Default)]
     struct Reads {
-        basic: Cell<usize>,
-        storage: Cell<usize>,
-        code: Cell<usize>,
-        hash: Cell<usize>,
+        basic: usize,
+        storage: usize,
+        code: usize,
+        hash: usize,
     }
 
     struct CountingDb<DB = CacheDB<EmptyDB>> {
@@ -186,38 +178,50 @@ mod tests {
         reads: Reads,
     }
 
-    impl<DB: DatabaseRef> DatabaseRef for CountingDb<DB> {
+    impl<DB: Database> Database for CountingDb<DB> {
         type Error = DB::Error;
-        fn basic_ref(&self, a: Address) -> Result<Option<AccountInfo>, Self::Error> {
-            self.reads.basic.set(self.reads.basic.get() + 1);
-            self.db.basic_ref(a)
+
+        fn is_fatal(error: &Self::Error) -> bool {
+            DB::is_fatal(error)
         }
-        fn storage_ref(&self, a: Address, k: U256) -> Result<U256, Self::Error> {
-            self.reads.storage.set(self.reads.storage.get() + 1);
-            self.db.storage_ref(a, k)
+
+        fn get_account(&mut self, a: &Address) -> Result<Option<AccountInfo>, Self::Error> {
+            self.reads.basic += 1;
+            self.db.get_account(a)
         }
-        fn code_by_hash_ref(&self, h: B256) -> Result<Bytecode, Self::Error> {
-            self.reads.code.set(self.reads.code.get() + 1);
-            self.db.code_by_hash_ref(h)
+
+        fn get_storage(&mut self, a: &Address, k: &Word) -> Result<Word, Self::Error> {
+            self.reads.storage += 1;
+            self.db.get_storage(a, k)
         }
-        fn block_hash_ref(&self, n: u64) -> Result<B256, Self::Error> {
-            self.reads.hash.set(self.reads.hash.get() + 1);
-            self.db.block_hash_ref(n)
+
+        fn get_code_by_hash(&mut self, h: &B256) -> Result<Bytecode, Self::Error> {
+            self.reads.code += 1;
+            self.db.get_code_by_hash(h)
         }
+
+        fn get_block_hash(&mut self, n: &Word) -> Result<B256, Self::Error> {
+            self.reads.hash += 1;
+            self.db.get_block_hash(n)
+        }
+    }
+
+    fn changes<T: BalChange>(writes: Vec<(BlockAccessIndex, T::Value)>) -> BalChanges<T> {
+        BalChanges::new(writes.into_iter().map(|(index, value)| T::new(index, value)).collect())
     }
 
     fn fixture() -> (CountingDb, Bal) {
         let mut db = CacheDB::new(EmptyDB::default());
         db.insert_account_info(
-            ADDRESS,
+            &ADDRESS,
             AccountInfo { balance: U256::from(100), nonce: 7, ..Default::default() },
         );
         for (slot, value) in [(1, 42), (2, 99), (3, 0)] {
-            db.insert_account_storage(ADDRESS, U256::from(slot), U256::from(value)).unwrap();
+            db.insert_account_storage(&ADDRESS, &U256::from(slot), &U256::from(value));
         }
         let mut account = AccountBal {
             account_info: AccountInfoBal {
-                balance: BalWrites::new(vec![
+                balance: changes(vec![
                     (BlockAccessIndex::new(0), U256::from(80)),
                     (BlockAccessIndex::new(4), U256::from(100)),
                 ]),
@@ -227,16 +231,16 @@ mod tests {
         };
         account.storage.storage.insert(
             U256::from(1),
-            BalWrites::new(vec![
+            changes(vec![
                 (BlockAccessIndex::new(1), U256::from(20)),
                 (BlockAccessIndex::new(4), U256::from(42)),
             ]),
         );
-        account.storage.storage.insert(U256::from(2), BalWrites::default());
+        account.storage.storage.insert(U256::from(2), BalChanges::default());
         account
             .storage
             .storage
-            .insert(U256::from(3), BalWrites::new(vec![(BlockAccessIndex::new(4), U256::ZERO)]));
+            .insert(U256::from(3), changes(vec![(BlockAccessIndex::new(4), U256::ZERO)]));
         let mut bal = Bal::default();
         bal.accounts.insert(ADDRESS, account);
         (CountingDb { db, reads: Reads::default() }, bal)
@@ -244,80 +248,82 @@ mod tests {
 
     #[test]
     fn final_writes_partial_accounts_and_provider_fallback() {
-        let (db, bal) = fixture();
-        let db_bal = ParentBalDb::new(&db, Some(&bal));
-        let info = db_bal.basic_ref(ADDRESS).unwrap().unwrap();
+        let (mut db, bal) = fixture();
+        let mut db_bal = ParentBalDb::new(&mut db, Some(&bal));
+        let info = db_bal.get_account(&ADDRESS).unwrap().unwrap();
         assert_eq!(info.balance, U256::from(100));
         assert_eq!(info.nonce, 7); // not in BAL: retain complete provider metadata
-        assert_eq!(db.reads.basic.get(), 1);
-        assert_eq!(db_bal.storage_ref(ADDRESS, U256::from(1)).unwrap(), U256::from(42));
-        assert_eq!(db_bal.storage_ref(ADDRESS, U256::from(3)).unwrap(), U256::ZERO);
-        assert_eq!(db.reads.storage.get(), 0);
-        assert_eq!(db_bal.storage_ref(ADDRESS, U256::from(2)).unwrap(), U256::from(99));
-        assert_eq!(db_bal.storage_ref(ADDRESS, U256::from(4)).unwrap(), U256::ZERO);
-        assert_eq!(db.reads.storage.get(), 2);
-        assert_eq!(db_bal.basic_ref(OTHER).unwrap(), None);
-        db_bal.code_by_hash_ref(B256::ZERO).unwrap();
-        db_bal.block_hash_ref(10).unwrap();
-        assert_eq!(db.reads.code.get(), 1);
-        assert_eq!(db.reads.hash.get(), 1);
+        assert_eq!(db_bal.db.reads.basic, 1);
+        assert_eq!(db_bal.get_storage(&ADDRESS, &U256::from(1)).unwrap(), U256::from(42));
+        assert_eq!(db_bal.get_storage(&ADDRESS, &U256::from(3)).unwrap(), U256::ZERO);
+        assert_eq!(db_bal.db.reads.storage, 0);
+        assert_eq!(db_bal.get_storage(&ADDRESS, &U256::from(2)).unwrap(), U256::from(99));
+        assert_eq!(db_bal.get_storage(&ADDRESS, &U256::from(4)).unwrap(), U256::ZERO);
+        assert_eq!(db_bal.db.reads.storage, 2);
+        assert_eq!(db_bal.get_account(&OTHER).unwrap(), None);
+        db_bal.get_code_by_hash(&B256::ZERO).unwrap();
+        db_bal.get_block_hash(&U256::from(10)).unwrap();
+        assert_eq!(db_bal.db.reads.code, 1);
+        assert_eq!(db_bal.db.reads.hash, 1);
     }
 
     #[test]
     fn missing_bal_preserves_provider_reads() {
-        let (db, _) = fixture();
-        let db_bal = ParentBalDb::new(&db, None);
-        assert_eq!(db_bal.basic_ref(ADDRESS).unwrap(), db.db.basic_ref(ADDRESS).unwrap());
-        assert_eq!(db_bal.storage_ref(ADDRESS, U256::from(1)).unwrap(), U256::from(42));
-        assert_eq!(db_bal.storage_ref(ADDRESS, U256::from(2)).unwrap(), U256::from(99));
-        assert_eq!(db.reads.storage.get(), 2);
+        let (mut db, _) = fixture();
+        let expected = db.db.get_account(&ADDRESS).unwrap();
+        let mut db_bal = ParentBalDb::new(&mut db, None);
+        assert_eq!(db_bal.get_account(&ADDRESS).unwrap(), expected);
+        assert_eq!(db_bal.get_storage(&ADDRESS, &U256::from(1)).unwrap(), U256::from(42));
+        assert_eq!(db_bal.get_storage(&ADDRESS, &U256::from(2)).unwrap(), U256::from(99));
+        assert_eq!(db_bal.db.reads.storage, 2);
     }
 
     #[test]
     fn cached_reads_reuse_complete_parent_values() {
-        let (db, bal) = fixture();
+        let (mut db, bal) = fixture();
         let mut cache = CachedReads::default();
         {
-            let mut cached = cache.as_db_mut(ParentBalDb::new(&db, Some(&bal)));
+            let mut cached = cache.as_db_mut(ParentBalDb::new(&mut db, Some(&bal)));
             // Slot-first reads must still load complete metadata for a partial BAL account.
-            assert_eq!(cached.storage(ADDRESS, U256::from(1)).unwrap(), U256::from(42));
-            assert_eq!(cached.basic(ADDRESS).unwrap().unwrap().nonce, 7);
+            assert_eq!(cached.get_storage(&ADDRESS, &U256::from(1)).unwrap(), U256::from(42));
+            assert_eq!(cached.get_account(&ADDRESS).unwrap().unwrap().nonce, 7);
         }
-        let mut cached = cache.as_db_mut(ParentBalDb::new(&db, None));
-        assert_eq!(cached.storage(ADDRESS, U256::from(1)).unwrap(), U256::from(42));
-        assert_eq!(cached.basic(ADDRESS).unwrap().unwrap().balance, U256::from(100));
-        assert_eq!(db.reads.basic.get(), 1);
-        assert_eq!(db.reads.storage.get(), 0);
+        let mut cached = cache.as_db_mut(ParentBalDb::new(&mut db, None));
+        assert_eq!(cached.get_storage(&ADDRESS, &U256::from(1)).unwrap(), U256::from(42));
+        assert_eq!(cached.get_account(&ADDRESS).unwrap().unwrap().balance, U256::from(100));
+        drop(cached);
+        assert_eq!(db.reads.basic, 1);
+        assert_eq!(db.reads.storage, 0);
     }
 
     #[test]
     fn complete_account_and_changed_code_avoid_provider_reads() {
-        let (db, mut bal) = fixture();
+        let (mut db, mut bal) = fixture();
         let code = Bytecode::new_raw(Bytes::from_static(&[0x60, 0, 0x00]));
         let account = bal.accounts.get_mut(&ADDRESS).unwrap();
-        account.nonce = BalWrites::new(vec![(BlockAccessIndex::new(4), 7)]);
-        account.code =
-            BalWrites::new(vec![(BlockAccessIndex::new(4), (code.hash_slow(), code.clone()))]);
-        let info = ParentBalDb::new(&db, Some(&bal)).basic_ref(ADDRESS).unwrap().unwrap();
+        account.account_info.nonce = changes(vec![(BlockAccessIndex::new(4), 7)]);
+        account.account_info.code =
+            changes(vec![(BlockAccessIndex::new(4), (code.hash_slow(), code.clone()))]);
+        let info = ParentBalDb::new(&mut db, Some(&bal)).get_account(&ADDRESS).unwrap().unwrap();
         assert_eq!(info.code, Some(code));
         assert_eq!(info.nonce, 7);
         #[cfg(not(feature = "account-ext"))]
-        assert_eq!(db.reads.basic.get(), 0);
+        assert_eq!(db.reads.basic, 0);
     }
 
     #[test]
     fn partial_code_change_preserves_nonce_balance_and_existence() {
-        let (db, mut bal) = fixture();
+        let (mut db, mut bal) = fixture();
         let code = Bytecode::new_raw(Bytes::from_static(&[0x00]));
         let account = bal.accounts.get_mut(&ADDRESS).unwrap();
-        account.balance = Default::default();
-        account.code =
-            BalWrites::new(vec![(BlockAccessIndex::new(4), (code.hash_slow(), code.clone()))]);
-        let info = ParentBalDb::new(&db, Some(&bal)).basic_ref(ADDRESS).unwrap().unwrap();
+        account.account_info.balance = Default::default();
+        account.account_info.code =
+            changes(vec![(BlockAccessIndex::new(4), (code.hash_slow(), code.clone()))]);
+        let info = ParentBalDb::new(&mut db, Some(&bal)).get_account(&ADDRESS).unwrap().unwrap();
         assert_eq!(info.code, Some(code));
         assert_eq!(info.nonce, 7);
         assert_eq!(info.balance, U256::from(100));
-        assert_eq!(db.reads.basic.get(), 1);
+        assert_eq!(db.reads.basic, 1);
     }
 
     #[test]
@@ -325,10 +331,11 @@ mod tests {
         let (mut db, mut bal) = fixture();
         // The BAL has no existence bit. All-zero final fields must not turn None into Some.
         db.db.cache.accounts.remove(&ADDRESS);
+        db.db.cache.storage.remove(&ADDRESS);
         let account = bal.accounts.get_mut(&ADDRESS).unwrap();
-        account.balance = BalWrites::new(vec![(BlockAccessIndex::new(4), U256::ZERO)]);
-        account.nonce = BalWrites::new(vec![(BlockAccessIndex::new(4), 0)]);
-        account.code = BalWrites::new(vec![(
+        account.account_info.balance = changes(vec![(BlockAccessIndex::new(4), U256::ZERO)]);
+        account.account_info.nonce = changes(vec![(BlockAccessIndex::new(4), 0)]);
+        account.account_info.code = changes(vec![(
             BlockAccessIndex::new(4),
             (alloy_consensus::constants::KECCAK_EMPTY, Bytecode::default()),
         )]);
@@ -338,51 +345,51 @@ mod tests {
             .get_mut(&U256::from(1))
             .unwrap()
             .force_update(BlockAccessIndex::new(4), U256::ZERO);
-        let db_bal = ParentBalDb::new(&db, Some(&bal));
-        assert_eq!(db_bal.basic_ref(ADDRESS).unwrap(), None);
-        assert_eq!(db_bal.storage_ref(ADDRESS, U256::from(1)).unwrap(), U256::ZERO);
+        let mut db_bal = ParentBalDb::new(&mut db, Some(&bal));
+        assert_eq!(db_bal.get_account(&ADDRESS).unwrap(), None);
+        assert_eq!(db_bal.get_storage(&ADDRESS, &U256::from(1)).unwrap(), U256::ZERO);
         // Omitted/read-only slots may have been wiped. Parent post-state, not BAL defaults.
-        assert_eq!(db_bal.storage_ref(ADDRESS, U256::from(2)).unwrap(), U256::ZERO);
-        assert_eq!(db_bal.storage_ref(ADDRESS, U256::from(4)).unwrap(), U256::ZERO);
+        assert_eq!(db_bal.get_storage(&ADDRESS, &U256::from(2)).unwrap(), U256::ZERO);
+        assert_eq!(db_bal.get_storage(&ADDRESS, &U256::from(4)).unwrap(), U256::ZERO);
     }
 
     #[test]
     fn child_writes_and_child_storage_clears_win_over_parent_bal() {
-        let (db, bal) = fixture();
+        let (mut db, bal) = fixture();
         let mut cache = CachedReads::default();
         {
-            let mut state = State::builder()
-                .with_database(cache.as_db_mut(ParentBalDb::new(&db, Some(&bal))))
-                .build();
-            let mut info = state.basic(ADDRESS).unwrap().unwrap();
-            assert_eq!(state.storage(ADDRESS, U256::from(1)).unwrap(), U256::from(42));
-            info.balance = U256::from(200);
-            info.nonce = 8;
-            let child_code = Bytecode::new_raw(Bytes::from_static(&[0x60, 0x01, 0x00]));
-            info.code_hash = child_code.hash_slow();
-            info.code = Some(child_code.clone());
-            let mut child = Account::from(info.clone()).with_touched_mark();
-            child.storage.insert(
-                U256::from(1),
-                EvmStorageSlot::new_changed(U256::from(42), U256::from(88), Default::default()),
+            let mut state =
+                State::new(Db::new(cache.as_db_mut(ParentBalDb::new(&mut db, Some(&bal)))));
+            assert_eq!(
+                state.storage_slot(&ADDRESS, U256::from(1)).unwrap().current(),
+                U256::from(42)
             );
-            state.commit(HashMap::from_iter([(ADDRESS, child)]));
-            assert_eq!(state.basic(ADDRESS).unwrap().unwrap().balance, U256::from(200));
-            assert_eq!(state.storage(ADDRESS, U256::from(1)).unwrap(), U256::from(88));
-            assert_eq!(state.basic(ADDRESS).unwrap().unwrap().nonce, 8);
-            assert_eq!(state.basic(ADDRESS).unwrap().unwrap().code, Some(child_code.clone()));
-            // A child creation clears old storage, including slots present in the parent's BAL.
-            state.commit(HashMap::from_iter([(
-                ADDRESS,
-                Account::from(info).with_touched_mark().with_created_mark(),
-            )]));
-            assert_eq!(state.storage(ADDRESS, U256::from(1)).unwrap(), U256::ZERO);
-            assert_eq!(state.code_by_hash(child_code.hash_slow()).unwrap(), child_code);
+            let child_code = Bytecode::new_raw(Bytes::from_static(&[0x60, 0x01, 0x00]));
+            {
+                let mut account = state.account(&ADDRESS).unwrap();
+                account.set_balance(U256::from(200));
+                account.set_nonce(8);
+                account.set_code_slow(child_code.clone());
+            }
+            state.storage_slot(&ADDRESS, U256::from(1)).unwrap().set(U256::from(88));
+            state.commit_transaction();
+            let info = state.account_info_untracked(&ADDRESS).unwrap().unwrap();
+            assert_eq!(info.balance, U256::from(200));
+            assert_eq!(info.nonce, 8);
+            assert_eq!(info.code_hash, child_code.hash_slow());
+            assert_eq!(state.account(&ADDRESS).unwrap().load_code().unwrap(), child_code);
+            assert_eq!(
+                state.storage_slot(&ADDRESS, U256::from(1)).unwrap().current(),
+                U256::from(88)
+            );
+            state.storage(&ADDRESS).unwrap().wipe();
+            state.commit_transaction();
+            assert_eq!(state.storage_slot(&ADDRESS, U256::from(1)).unwrap().current(), U256::ZERO);
         }
         // CachedReads stores only parent values, never committed child modifications.
-        let mut next = cache.as_db_mut(ParentBalDb::new(&db, Some(&bal)));
-        assert_eq!(next.basic(ADDRESS).unwrap().unwrap().balance, U256::from(100));
-        assert_eq!(next.storage(ADDRESS, U256::from(1)).unwrap(), U256::from(42));
+        let mut next = cache.as_db_mut(ParentBalDb::new(&mut db, Some(&bal)));
+        assert_eq!(next.get_account(&ADDRESS).unwrap().unwrap().balance, U256::from(100));
+        assert_eq!(next.get_storage(&ADDRESS, &U256::from(1)).unwrap(), U256::from(42));
     }
 
     #[test]
@@ -442,19 +449,17 @@ mod tests {
             for enabled in [false, true] {
                 let (mut db, mut bal) = fixture();
                 db.db.insert_account_info(
-                    OTHER,
+                    &OTHER,
                     AccountInfo { balance: U256::from(1_000_000), ..Default::default() },
                 );
-                let mut contract = db.db.basic_ref(ADDRESS).unwrap().unwrap();
+                let mut contract = db.db.get_account(&ADDRESS).unwrap().unwrap();
                 contract.code_hash = code.hash_slow();
                 contract.code = Some(code.clone());
-                db.db.insert_account_info(ADDRESS, contract);
-                bal.accounts.get_mut(&ADDRESS).unwrap().code = BalWrites::new(vec![(
-                    BlockAccessIndex::new(4),
-                    (code.hash_slow(), code.clone()),
-                )]);
+                db.db.insert_account_info(&ADDRESS, contract);
+                bal.accounts.get_mut(&ADDRESS).unwrap().account_info.code =
+                    changes(vec![(BlockAccessIndex::new(4), (code.hash_slow(), code.clone()))]);
                 if matches!(case, "cleared" | "deleted") {
-                    db.db.insert_account_storage(ADDRESS, U256::from(1), U256::ZERO).unwrap();
+                    db.db.insert_account_storage(&ADDRESS, &U256::from(1), &U256::ZERO);
                     bal.accounts
                         .get_mut(&ADDRESS)
                         .unwrap()
@@ -465,15 +470,17 @@ mod tests {
                         .force_update(BlockAccessIndex::new(4), U256::ZERO);
                 }
                 if case == "created" {
-                    bal.accounts.get_mut(&ADDRESS).unwrap().nonce =
-                        BalWrites::new(vec![(BlockAccessIndex::new(4), 7)]);
+                    bal.accounts.get_mut(&ADDRESS).unwrap().account_info.nonce =
+                        changes(vec![(BlockAccessIndex::new(4), 7)]);
                 }
                 if case == "deleted" {
                     db.db.cache.accounts.remove(&ADDRESS);
+                    db.db.cache.storage.remove(&ADDRESS);
                     let account = bal.accounts.get_mut(&ADDRESS).unwrap();
-                    account.balance = BalWrites::new(vec![(BlockAccessIndex::new(4), U256::ZERO)]);
-                    account.nonce = BalWrites::new(vec![(BlockAccessIndex::new(4), 0)]);
-                    account.code = BalWrites::new(vec![(
+                    account.account_info.balance =
+                        changes(vec![(BlockAccessIndex::new(4), U256::ZERO)]);
+                    account.account_info.nonce = changes(vec![(BlockAccessIndex::new(4), 0)]);
+                    account.account_info.code = changes(vec![(
                         BlockAccessIndex::new(4),
                         (alloy_consensus::constants::KECCAK_EMPTY, Bytecode::default()),
                     )]);
@@ -481,7 +488,7 @@ mod tests {
                 let mut cache = CachedReads::default();
                 let parent_bal = (enabled && case != "missing").then_some(&bal);
                 let mut executor =
-                    evm.batch_executor(cache.as_db_mut(ParentBalDb::new(&db, parent_bal)));
+                    evm.batch_executor(cache.as_db_mut(ParentBalDb::new(&mut db, parent_bal)));
                 let result = executor.execute_one(&block).unwrap();
                 assert!(
                     result.receipts.iter().all(|receipt| receipt.success),
@@ -489,9 +496,7 @@ mod tests {
                     result.receipts
                 );
                 let rebuilt_bal = executor.take_bal().unwrap();
-                let mut state = executor.into_state();
-                let bundle = state.take_bundle();
-                drop(state);
+                let bundle = executor.into_state();
                 if case != "deleted" {
                     assert_eq!(
                         bundle.state[&ADDRESS].storage[&U256::from(1)].present_value,
@@ -514,16 +519,16 @@ mod tests {
                     let changed = bundle.state.get(&address);
                     let info = changed
                         .map(|account| account.info.clone())
-                        .unwrap_or_else(|| db.db.basic_ref(address).unwrap())?;
+                        .unwrap_or_else(|| db.db.get_account(&address).unwrap())?;
                     if info.is_empty() {
                         return None
                     }
                     let mut slots = db
                         .db
                         .cache
-                        .accounts
+                        .storage
                         .get(&address)
-                        .map(|a| a.storage.clone())
+                        .map(|a| a.slots.clone())
                         .unwrap_or_default();
                     if let Some(account) = changed {
                         if account.was_destroyed() {
@@ -545,7 +550,7 @@ mod tests {
                     ))
                 });
                 let root = state_root_unhashed(accounts);
-                outputs.push((result, rebuilt_bal, bundle, root, db.reads.storage.get()));
+                outputs.push((result, rebuilt_bal, bundle, root, db.reads.storage));
             }
             assert_eq!(outputs[0].0, outputs[1].0);
             assert_eq!(outputs[0].1, outputs[1].1);
@@ -570,37 +575,38 @@ mod tests {
                 code: None,
                 ..Default::default()
             };
-            db.db.insert_account_info(ADDRESS, provider_info.clone());
+            db.db.insert_account_info(&ADDRESS, provider_info.clone());
             let account = bal.accounts.get_mut(&ADDRESS).unwrap();
-            account.balance = if fields & 1 != 0 {
-                BalWrites::new(vec![(BlockAccessIndex::new(4), U256::from(100))])
+            account.account_info.balance = if fields & 1 != 0 {
+                changes(vec![(BlockAccessIndex::new(4), U256::from(100))])
             } else {
                 Default::default()
             };
-            account.nonce = if fields & 2 != 0 {
-                BalWrites::new(vec![(BlockAccessIndex::new(4), 7)])
+            account.account_info.nonce = if fields & 2 != 0 {
+                changes(vec![(BlockAccessIndex::new(4), 7)])
             } else {
                 Default::default()
             };
-            account.code = if fields & 4 != 0 {
-                BalWrites::new(vec![(BlockAccessIndex::new(4), (code.hash_slow(), code.clone()))])
+            account.account_info.code = if fields & 4 != 0 {
+                changes(vec![(BlockAccessIndex::new(4), (code.hash_slow(), code.clone()))])
             } else {
                 Default::default()
             };
-            let info = ParentBalDb::new(&db, Some(&bal)).basic_ref(ADDRESS).unwrap().unwrap();
+            let info =
+                ParentBalDb::new(&mut db, Some(&bal)).get_account(&ADDRESS).unwrap().unwrap();
             assert_eq!(info, provider_info, "field mask {fields}");
             if fields & 4 != 0 {
                 assert_eq!(info.code, Some(code.clone()));
             }
             #[cfg(not(feature = "account-ext"))]
-            assert_eq!(db.reads.basic.get(), usize::from(fields != 7));
+            assert_eq!(db.reads.basic, usize::from(fields != 7));
         }
     }
 
     #[test]
     fn commitment_guard_preserves_fallback_and_shares_payload() {
         let (_, bal) = fixture();
-        let raw: Bytes = alloy_rlp::encode(bal.clone().into_alloy_bal()).into();
+        let raw: Bytes = alloy_rlp::encode(bal.to_alloy_bal()).into();
         let hash = alloy_primitives::keccak256(&raw);
         let bal = Arc::new(DecodedBal::new_unchecked(Arc::new(bal), raw, hash));
         assert!(committed_bal(Some(bal.clone()), None).is_none());
@@ -616,34 +622,44 @@ mod tests {
     #[test]
     fn fallback_provider_errors_are_not_hidden() {
         struct FailingDb;
-        impl DatabaseRef for FailingDb {
+        impl Database for FailingDb {
             type Error = reth_errors::ProviderError;
-            fn basic_ref(&self, _: Address) -> Result<Option<AccountInfo>, Self::Error> {
+
+            fn is_fatal(_: &Self::Error) -> bool {
+                false
+            }
+
+            fn get_account(&mut self, _: &Address) -> Result<Option<AccountInfo>, Self::Error> {
                 Err(reth_errors::ProviderError::other(std::io::Error::other("account read failed")))
             }
-            fn storage_ref(&self, _: Address, _: U256) -> Result<U256, Self::Error> {
+            fn get_storage(&mut self, _: &Address, _: &Word) -> Result<Word, Self::Error> {
                 Err(reth_errors::ProviderError::other(std::io::Error::other("storage read failed")))
             }
-            fn code_by_hash_ref(&self, _: B256) -> Result<Bytecode, Self::Error> {
+            fn get_code_by_hash(&mut self, _: &B256) -> Result<Bytecode, Self::Error> {
                 Err(reth_errors::ProviderError::other(std::io::Error::other("code read failed")))
             }
-            fn block_hash_ref(&self, _: u64) -> Result<B256, Self::Error> {
+            fn get_block_hash(&mut self, _: &Word) -> Result<B256, Self::Error> {
                 Err(reth_errors::ProviderError::other(std::io::Error::other("hash read failed")))
             }
         }
         let (_, bal) = fixture();
-        let db = CountingDb { db: FailingDb, reads: Reads::default() };
-        let db_bal = ParentBalDb::new(&db, Some(&bal));
-        assert_eq!(db_bal.storage_ref(ADDRESS, U256::from(1)).unwrap(), U256::from(42));
+        let error = reth_errors::ProviderError::other(std::io::Error::other("test"));
+        assert!(!ParentBalDb::<FailingDb>::is_fatal(&error));
+        let mut db = CountingDb { db: FailingDb, reads: Reads::default() };
+        let mut db_bal = ParentBalDb::new(&mut db, Some(&bal));
+        assert_eq!(db_bal.get_storage(&ADDRESS, &U256::from(1)).unwrap(), U256::from(42));
         assert_eq!(
-            db_bal.storage_ref(ADDRESS, U256::from(2)).unwrap_err().to_string(),
+            db_bal.get_storage(&ADDRESS, &U256::from(2)).unwrap_err().to_string(),
             "storage read failed"
         );
-        assert_eq!(db_bal.basic_ref(ADDRESS).unwrap_err().to_string(), "account read failed");
+        assert_eq!(db_bal.get_account(&ADDRESS).unwrap_err().to_string(), "account read failed");
         assert_eq!(
-            db_bal.code_by_hash_ref(B256::ZERO).unwrap_err().to_string(),
+            db_bal.get_code_by_hash(&B256::ZERO).unwrap_err().to_string(),
             "code read failed"
         );
-        assert_eq!(db_bal.block_hash_ref(1).unwrap_err().to_string(), "hash read failed");
+        assert_eq!(
+            db_bal.get_block_hash(&U256::from(1)).unwrap_err().to_string(),
+            "hash read failed"
+        );
     }
 }

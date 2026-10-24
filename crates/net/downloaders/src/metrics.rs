@@ -143,3 +143,11 @@ impl HeaderDownloaderMetrics {
         }
     }
 }
+
+/// Metrics for snap/2 requests, shared by every snap range downloader.
+#[derive(Clone, Metrics)]
+#[metrics(scope = "downloaders.snap")]
+pub struct SnapDownloaderMetrics {
+    /// Responses that failed verification, each penalizing its peer.
+    pub invalid_responses: Counter,
+}

@@ -35,3 +35,25 @@ updates:
         applies-to: "version-updates"
         patterns: ["*"]
         update-types: ["minor", "patch"]
+  - package-ecosystem: uv
+    directory: /scripts/bench-reth-charts
+    allow:
+      - dependency-type: all
+    schedule:
+      interval: weekly
+      day: monday
+      time: "09:00"
+      timezone: UTC
+    cooldown:
+      default-days: 7
+    labels:
+      - "A-dependencies"
+      - "C-benchmark"
+    commit-message:
+      prefix: "chore(deps)"
+    open-pull-requests-limit: 3
+    groups:
+      chart-weekly:
+        applies-to: "version-updates"
+        patterns: ["*"]
+        update-types: ["minor", "patch"]

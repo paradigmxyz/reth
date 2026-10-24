@@ -37,7 +37,6 @@ use reth_ethereum_engine_primitives::EthEngineTypes;
 use reth_provider::{BalProvider, BlockReader, StateProviderFactory};
 use reth_rpc::EngineApi;
 use reth_rpc_engine_api::EngineApiError;
-use reth_tracing::tracing::debug;
 use reth_transaction_pool::TransactionPool;
 use ssz::Decode;
 use std::{
@@ -47,6 +46,7 @@ use std::{
 };
 use tokio::sync::RwLock;
 use tower::{BoxError, Layer, Service};
+use tracing::debug;
 
 const OCTET_STREAM: &str = "application/octet-stream";
 const APPLICATION_JSON: &str = "application/json";
