@@ -107,11 +107,9 @@ def worker(config):
         with (STATE / "run.log").open("wb") as output:
             while True:
                 completed = False
-                command = ["/usr/local/bin/reth-trie-dst", "-"]
-                if not os.environ.get("TRIE_DST_NO_THREAD_FUZZ"):
-                    command.insert(0, "/usr/local/bin/thread-fuzz")
                 process = subprocess.Popen(
-                    command, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+                    ["/usr/local/bin/thread-fuzz", "/usr/local/bin/reth-trie-dst",
+                     "-"], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
                 process.stdin.write(json.dumps(workload).encode())
                 process.stdin.close()
                 pending = b""
