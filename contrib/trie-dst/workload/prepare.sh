@@ -37,8 +37,10 @@ DOCKERFILE
   --mount "type=bind,src=$context,dst=/out" \
   --mount "type=bind,src=$RUN_DIR,dst=/run-info" \
   --mount "type=bind,src=$BEDROCK_ROOT/guest,dst=/bedrock-guest,readonly" \
+  --mount "type=bind,src=$BEDROCK_ROOT/scripts/dst/rust-coverage.sh,dst=/bedrock-rust-coverage.sh,readonly" \
   -e CARGO_BUILD_JOBS="${CARGO_BUILD_JOBS:-6}" \
   -e SCCACHE_CACHE_SIZE="${SCCACHE_CACHE_SIZE:-10G}" \
+  -e DST_CMD="${DST_CMD:-campaign}" \
   -w /workspace bedrock/reth-trie-dst-builder:rust1.96-sccache0.14 bash -seu <<'BUILD'
 export HOME=/cache CARGO_HOME=/cache/cargo CARGO_TARGET_DIR=/cache/target/reth-trie-dst
 export SCCACHE_DIR=/cache/sccache RUSTC_WRAPPER=sccache CARGO_INCREMENTAL=0
@@ -47,10 +49,20 @@ mkdir -p "$CARGO_HOME" "$CARGO_TARGET_DIR" "$SCCACHE_DIR"
 touch "$CARGO_HOME" "$CARGO_TARGET_DIR"
 sccache --zero-stats >/dev/null
 trap 'sccache --show-stats > /run-info/sccache.txt; cat /run-info/sccache.txt' EXIT
-cargo build --locked -p reth-trie-dst --profile dst
+# Keep the DST profile: it inherits profiling and enables debug assertions and
+# overflow checks for the harness. Do not switch these builds to profiling.
+if [ "${DST_CMD:-campaign}" = fuzz ]; then
+  source /bedrock-rust-coverage.sh
+  binary=$(bedrock_rust_coverage_build /bedrock-guest /out reth-trie-dst dst --locked -p reth-trie-dst)
+  bedrock_rust_coverage_check "$binary" --version
+else
+  cargo build --locked -p reth-trie-dst --profile dst
+  binary="$CARGO_TARGET_DIR/dst/reth-trie-dst"
+fi
 printf 'cargo_secs=%s\n' "$SECONDS" >> /run-info/cache-info.env
 # Keep symbols in the cached executable for debugging recorded failures.
-objcopy --strip-debug "$CARGO_TARGET_DIR/dst/reth-trie-dst" /out/reth-trie-dst
+objcopy --strip-debug "$binary" /run-info/reth-trie-dst
+objcopy --strip-debug "$binary" /out/reth-trie-dst
 sccache gcc -O2 -I /bedrock-guest -x c - -o /out/bedrock-ready <<'C'
 #include "libvmcall.h"
 int main(void) {
@@ -59,6 +71,7 @@ int main(void) {
 }
 C
 BUILD
+rm -f "$context/libfeedback.o" "$context/libpcguard.o" "$context/rt.a"
 cp "$root/workload/controller.py" "$context/controller.py"
 "${docker_cmd[@]}" build -f - -t bedrock/reth-trie-dst:latest "$context" <<'DOCKERFILE'
 FROM debian:trixie-slim

@@ -1,13 +1,14 @@
 //! Bounded workload for the sparse-trie, proof, overlay and persistence pipeline.
 
+mod input;
 mod model;
 
 use alloy_consensus::Header;
-use alloy_primitives::{keccak256, Address, B256, U256};
+use alloy_primitives::{keccak256, B256, U256};
 use eyre::{ensure, Context, Result};
+use input::{Input, Operation};
 use metrics_util::debugging::{DebugValue, DebuggingRecorder, Snapshotter};
-use model::{apply, generate, root, storage_root, Model, Operation};
-use rand::{rngs::StdRng, seq::SliceRandom, Rng, SeedableRng};
+use model::{apply, root, storage_root, Model};
 use reth_chain_state::ExecutedBlock;
 use reth_chainspec::ChainSpec;
 use reth_db::{init_db, DatabaseEnv};
@@ -36,13 +37,14 @@ use reth_provider::{
 use reth_stages_types::StageId;
 use reth_storage_overlay::{OverlayManager, OverlayStateProviderFactory};
 use reth_tasks::{RayonConfig, RuntimeBuilder, RuntimeConfig, TokioConfig};
-use reth_trie::{HashedPostState, SortedTrieData};
+use reth_trie::{HashedPostState, MultiProofTargets, SortedTrieData};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::{
     collections::{BTreeMap, BTreeSet},
     fs::{self, OpenOptions},
-    io::Write,
+    io::{Read, Write},
+    os::unix::{fs::MetadataExt, process::CommandExt},
     path::PathBuf,
     sync::{mpsc, Arc},
     time::Duration,
@@ -60,6 +62,9 @@ struct JournalBlock {
 #[serde(default, deny_unknown_fields)]
 struct Config {
     seed: u64,
+    input: Option<Input>,
+    /// An atomic mailbox for snapshot continuations, applied before the next new block.
+    input_file: Option<PathBuf>,
     datadir: Option<PathBuf>,
     blocks: u64,
     updates: usize,
@@ -75,6 +80,8 @@ impl Default for Config {
         let tree = TreeConfig::default();
         Self {
             seed: 0,
+            input: None,
+            input_file: None,
             datadir: None,
             blocks: 64,
             updates: 64,
@@ -106,24 +113,44 @@ fn verify(factory: &ProviderFactory<Node>, state: &Model, tip: u64, state_tip: u
         factory.overlay_manager().overlay_builder(hash),
     )
     .database_provider_ro()?;
-    for (address, entry) in state {
+    let expected_root = root(state);
+    let slots_by_account = state
+        .values()
+        .map(|entry| {
+            entry
+                .touched_slots
+                .iter()
+                .copied()
+                .chain([U256::ZERO, U256::from(u32::MAX)])
+                .collect::<BTreeSet<_>>()
+                .into_iter()
+                .map(B256::from)
+                .collect::<Vec<_>>()
+        })
+        .collect::<Vec<_>>();
+    let targets = state
+        .keys()
+        .zip(&slots_by_account)
+        .map(|(address, slots)| (keccak256(address), slots.iter().map(keccak256).collect()))
+        .collect::<MultiProofTargets>();
+    let multiproof = view.multiproof(Default::default(), targets)?;
+    for ((address, entry), slots) in state.iter().zip(&slots_by_account) {
         ensure!(
             view.basic_account(address)?.as_ref() == Some(&entry.account),
             "plain account {address} at {tip}"
         );
-        // Include deleted and never-written slots, not only surviving leaves.
-        let slots = (0..64).map(|slot| B256::from(U256::from(slot))).collect::<Vec<_>>();
-        for slot in &slots {
+        // Include deleted slots and both range endpoints, not only surviving leaves.
+        for slot in slots {
             ensure!(
                 view.storage(*address, *slot)?.unwrap_or_default() ==
                     entry.storage.get(&U256::from_be_bytes(slot.0)).copied().unwrap_or_default(),
                 "plain storage {address}/{slot} at {tip}"
             );
         }
-        let proof = view.proof(Default::default(), *address, &slots)?;
+        let proof = multiproof.account_proof(*address, slots)?;
         ensure!(proof.info.as_ref() == Some(&entry.account), "proof account {address} at {tip}");
         ensure!(proof.storage_root == storage_root(entry), "proof storage root {address} at {tip}");
-        proof.verify(root(state))?;
+        proof.verify(expected_root)?;
     }
     drop(view);
     if tip == state_tip {
@@ -155,7 +182,7 @@ fn verify(factory: &ProviderFactory<Node>, state: &Model, tip: u64, state_tip: u
         ensure!(storage == expected, "persisted hashed storage at {tip}");
         let latest = LatestStateProviderRef::new(&provider);
         ensure!(
-            latest.state_root(HashedPostState::default())? == root(state),
+            latest.state_root(HashedPostState::default())? == expected_root,
             "persisted root at {tip}"
         );
     }
@@ -185,7 +212,7 @@ fn metric_counts(snapshotter: &Snapshotter) -> BTreeMap<String, u64> {
         .collect()
 }
 
-fn run(config: &Config, snapshotter: &Snapshotter) -> Result<()> {
+fn run(config: &mut Config, snapshotter: &Snapshotter) -> Result<()> {
     ensure!((1..=1024).contains(&config.blocks), "blocks must be 1..=1024");
     ensure!((1..=4096).contains(&config.updates), "updates must be 1..=4096");
     ensure!((1..=16).contains(&config.proof_workers), "proof_workers must be 1..=16");
@@ -232,6 +259,34 @@ fn run(config: &Config, snapshotter: &Snapshotter) -> Result<()> {
     let temporary = config.datadir.is_none().then(tempfile::tempdir).transpose()?;
     let datadir = config.datadir.as_deref().unwrap_or_else(|| temporary.as_ref().unwrap().path());
     fs::create_dir_all(datadir)?;
+    let input = config
+        .input
+        .take()
+        .unwrap_or_else(|| Input::generate(config.seed, config.blocks, config.updates));
+    input.validate()?;
+    let input_blocks =
+        input.operations.split_inclusive(|op| matches!(op, Operation::Commit)).collect::<Vec<_>>();
+    let mut total_blocks = input_blocks.len() as u64;
+    let overrides_path = datadir.join("input-overrides.json");
+    #[derive(Default, Serialize, Deserialize)]
+    struct Overrides {
+        applied: u64,
+        blocks: BTreeMap<u64, Vec<Operation>>,
+        total_blocks: u64,
+    }
+    #[derive(Deserialize)]
+    struct Injection {
+        id: u64,
+        input: Input,
+    }
+    let mut overrides: Overrides = if overrides_path.exists() {
+        serde_json::from_slice(&fs::read(&overrides_path)?)?
+    } else {
+        Overrides::default()
+    };
+    if overrides.total_blocks != 0 {
+        total_blocks = overrides.total_blocks;
+    }
     let journal_path = datadir.join("blocks.jsonl");
     let mut journal = BTreeMap::<u64, JournalBlock>::new();
     if journal_path.exists() {
@@ -244,9 +299,11 @@ fn run(config: &Config, snapshotter: &Snapshotter) -> Result<()> {
                 Err(error) if error.is_eof() => continue,
                 Err(error) => return Err(error.into()),
             };
-            ensure!((1..=config.blocks).contains(&block.number), "journal block out of range");
-            if let Some(previous) = journal.insert(block.number, block.clone()) {
-                ensure!(previous == block, "conflicting journal block {}", block.number);
+            ensure!((1..=total_blocks).contains(&block.number), "journal block out of range");
+            if let Some(previous) = journal.get(&block.number) {
+                ensure!(previous == &block, "conflicting journal block {}", block.number);
+            } else {
+                journal.insert(block.number, block);
             }
         }
     }
@@ -298,13 +355,23 @@ fn run(config: &Config, snapshotter: &Snapshotter) -> Result<()> {
     for number in 1..=base {
         let block =
             journal.get(&number).ok_or_else(|| eyre::eyre!("missing journal block {number}"))?;
-        apply(&mut state, number, &block.operations);
+        let updates = block
+            .operations
+            .iter()
+            .flat_map(|op| match op {
+                Operation::UpdateBatch { updates } => updates.as_slice(),
+                _ => &[],
+            })
+            .cloned()
+            .collect::<Vec<_>>();
+        apply(&mut state, number, &updates);
     }
     if base > 0 {
         verify(&factory, &state, base, base)?;
     }
-    ensure!(root(&state) == parent.state_root(), "recovered root at {base}");
-    println!("{}", json!({"recovery": "complete", "head": base, "root": root(&state)}));
+    let recovered_root = root(&state);
+    ensure!(recovered_root == parent.state_root(), "recovered root at {base}");
+    println!("{}", json!({"recovery": "complete", "head": base, "root": recovered_root}));
     let mut blocks = Vec::<ExecutedBlock<EthPrimitives>>::new();
     let mut snapshots = vec![state.clone()];
     let timeout = Duration::from_secs(config.timeout_secs);
@@ -333,8 +400,44 @@ fn run(config: &Config, snapshotter: &Snapshotter) -> Result<()> {
     let mut pending_save = None;
     let mut prune_requested = false;
     let mut shutdown = false;
+    let mut waiting = false;
+    let mut seen_input_file = None;
     loop {
         let head = base + blocks.len() as u64;
+        if head < 1024 &&
+            journal.range((head + 1)..).next().is_none() &&
+            let Some((path, file_stamp)) = config.input_file.as_ref().and_then(|path| {
+                fs::metadata(path).ok().map(|metadata| {
+                    (
+                        path,
+                        (metadata.ino(), metadata.mtime(), metadata.mtime_nsec(), metadata.len()),
+                    )
+                })
+            }) &&
+            seen_input_file != Some(file_stamp)
+        {
+            let injection: Injection = serde_json::from_slice(&fs::read(path)?)?;
+            if injection.id != overrides.applied {
+                injection.input.validate()?;
+                let injected = injection.input.blocks();
+                let count = injected.len().min((1024 - head) as usize);
+                ensure!(count > 0, "continuation exceeds the 1024-block limit");
+                overrides.blocks.retain(|n, _| *n < (head + 1));
+                for (i, block) in injected.into_iter().take(count).enumerate() {
+                    overrides.blocks.insert((head + 1) + i as u64, block);
+                }
+                total_blocks = head + count as u64;
+                overrides.total_blocks = total_blocks;
+                overrides.applied = injection.id;
+                shutdown = false;
+                waiting = false;
+                let tmp = overrides_path.with_extension("tmp");
+                fs::write(&tmp, serde_json::to_vec(&overrides)?)?;
+                fs::rename(tmp, &overrides_path)?;
+                println!("{}", json!({"input": "injected", "block": (head + 1), "blocks": count}));
+            }
+            seen_input_file = Some(file_stamp);
+        }
         if let Some((next_db, next_state)) = pending_save {
             let result = if shutdown ||
                 head.saturating_sub(state_tip).saturating_sub(buffer) >= backpressure
@@ -410,8 +513,19 @@ fn run(config: &Config, snapshotter: &Snapshotter) -> Result<()> {
                 }
             }
         }
-        if head == config.blocks {
+        if head == total_blocks {
             if shutdown {
+                if head < 1024 &&
+                    let Some(path) = &config.input_file &&
+                    !path.with_extension("finish").exists()
+                {
+                    if !waiting {
+                        println!("{}", json!({"input": "waiting", "head": head}));
+                        waiting = true;
+                    }
+                    std::thread::sleep(Duration::from_millis(10));
+                    continue;
+                }
                 break;
             }
             // Let the last block trigger normal threshold persistence before shutdown.
@@ -422,23 +536,43 @@ fn run(config: &Config, snapshotter: &Snapshotter) -> Result<()> {
         let operations = if let Some(block) = journal.get(&number) {
             block.operations.clone()
         } else {
-            // New input is journaled before it can reach persistence. Replayed input is read,
-            // never regenerated, so a completed commit does not depend on its acknowledgement.
-            let mut rng = StdRng::seed_from_u64(config.seed.wrapping_add(number));
-            let operations = generate(&mut rng, &state, config.updates);
-            let record =
-                serde_json::to_vec(&JournalBlock { number, operations: operations.clone() })?;
+            let block = overrides
+                .blocks
+                .get(&number)
+                .map_or_else(|| input_blocks[number as usize - 1].to_vec(), Clone::clone);
+            let journal_block = JournalBlock { number, operations: block };
+            let record = serde_json::to_vec(&journal_block)?;
             journal_file.write_all(b"\n")?;
             journal_file.write_all(&record)?;
             journal_file.write_all(b"\n")?;
-            operations
+            journal_block.operations
         };
-        let (bundle, updates) = apply(&mut state, number, &operations);
-        // Print before entering production tasks so a panic still leaves the input on disk.
+        let updates_input = operations
+            .iter()
+            .flat_map(|op| match op {
+                Operation::UpdateBatch { updates } => updates.as_slice(),
+                _ => &[],
+            })
+            .cloned()
+            .collect::<Vec<_>>();
+        let mut accounts = state.keys().copied().collect::<BTreeSet<_>>();
+        for op in &updates_input {
+            match op {
+                model::Update::Account { address, .. } => {
+                    accounts.insert(*address);
+                }
+                model::Update::Storage { address, .. } => ensure!(
+                    accounts.contains(address),
+                    "storage before account creation: {address}"
+                ),
+            }
+        }
+        let (bundle, updates) = apply(&mut state, number, &updates_input);
+        // The full operations are in the journal before production tasks run.
         println!(
             "{}",
             json!({"block": number, "seed": config.seed, "db_tip": db_tip,
-            "state_tip": state_tip, "operations": operations})
+            "state_tip": state_tip, "operations": operations.len()})
         );
         let factory_view = OverlayStateProviderFactory::new(
             factory.clone(),
@@ -466,7 +600,6 @@ fn run(config: &Config, snapshotter: &Snapshotter) -> Result<()> {
         );
         let stream = handle.take_hashed_update_stream();
         let hints = handle.take_hint_stream();
-        let mut rng = StdRng::seed_from_u64(config.seed.wrapping_add(number).rotate_left(32));
         let written = updates
             .iter()
             .flat_map(|update| {
@@ -480,23 +613,37 @@ fn run(config: &Config, snapshotter: &Snapshotter) -> Result<()> {
                     }))
             })
             .collect::<BTreeSet<_>>();
-        let mut targets = written.iter().copied().collect::<Vec<_>>();
-        targets.shuffle(&mut rng);
-        // Prewarming sees only some writes; synthetic read-only accesses add false positives.
-        let count =
-            if targets.len() > 1 { rng.random_range(1..targets.len()) } else { targets.len() };
-        targets.truncate(count);
-        for _ in 0..rng.random_range(1..=8) {
-            let address = Address::from_word(B256::from(U256::from(rng.random_range(17..=32u64))));
-            let slot = rng
-                .random_bool(0.5)
-                .then(|| keccak256(B256::from(U256::from(rng.random_range(0..64u64)))));
-            targets.push((keccak256(address), slot));
+        let mut hinted = BTreeSet::new();
+        let mut updates = updates.into_iter();
+        for operation in &operations {
+            match operation {
+                Operation::PrewarmBatch { accounts, storages } => {
+                    let mut hint = StateAccessHint::default();
+                    for address in accounts {
+                        let address = keccak256(address);
+                        hint.accounts.push(address);
+                        hinted.insert((address, None));
+                    }
+                    for storage in storages {
+                        let address = keccak256(storage.address);
+                        let slot = keccak256(B256::from(storage.slot));
+                        hint.storages.entry(address).or_default().push(slot);
+                        hinted.insert((address, Some(slot)));
+                    }
+                    hints.on_access_hint(hint);
+                    hint_batches += 1;
+                }
+                Operation::UpdateBatch { updates: batch_updates } => {
+                    let mut batch = HashedPostState::default();
+                    for update in updates.by_ref().take(batch_updates.len()) {
+                        batch.extend(update);
+                    }
+                    stream.on_hashed_state_update(batch);
+                    update_batches += 1;
+                }
+                Operation::Commit => {}
+            }
         }
-        let hinted = targets
-            .iter()
-            .flat_map(|(address, slot)| [(*address, None), (*address, *slot)])
-            .collect::<BTreeSet<_>>();
         println!(
             "{}",
             json!({"block_number": number, "hint_coverage": {
@@ -504,41 +651,6 @@ fn run(config: &Config, snapshotter: &Snapshotter) -> Result<()> {
             "unhinted": written.difference(&hinted).count(),
             "read_only": hinted.difference(&written).count()}})
         );
-        targets.shuffle(&mut rng);
-        let mut targets = targets.into_iter();
-        let mut updates = updates.into_iter();
-        while targets.len() > 0 || updates.len() > 0 {
-            if targets.len() > 0 && (updates.len() == 0 || rng.random_bool(0.5)) {
-                let size = rng.random_range(1..=targets.len().min(16));
-                let mut hint = StateAccessHint::default();
-                for (address, slot) in targets.by_ref().take(size) {
-                    if let Some(slot) = slot {
-                        hint.storages.entry(address).or_default().push(slot);
-                    } else {
-                        hint.accounts.push(address);
-                    }
-                }
-                println!(
-                    "{}",
-                    json!({"block_number": number, "batch": "hint",
-                    "accounts": hint.accounts, "storages": hint.storages})
-                );
-                hints.on_access_hint(hint);
-                hint_batches += 1;
-            } else {
-                let size = rng.random_range(1..=updates.len().min(16));
-                let mut batch = HashedPostState::default();
-                for update in updates.by_ref().take(size) {
-                    batch.extend(update);
-                }
-                println!(
-                    "{}",
-                    json!({"block_number": number, "batch": "update", "operations": size})
-                );
-                stream.on_hashed_state_update(batch);
-                update_batches += 1;
-            }
-        }
         drop(hints);
         stream.finish();
         let outcome = handle.take_state_root_rx().recv_timeout(timeout)??;
@@ -598,7 +710,7 @@ fn run(config: &Config, snapshotter: &Snapshotter) -> Result<()> {
     let metrics = metric_counts(snapshotter);
     println!(
         "{}",
-        json!({"completed": true, "seed": config.seed, "blocks": config.blocks,
+        json!({"completed": true, "seed": config.seed, "blocks": total_blocks,
         "commits": commits, "partial_commits": partial_commits,
         "update_batches": update_batches, "hint_batches": hint_batches,
         "metrics": metrics})
@@ -607,13 +719,180 @@ fn run(config: &Config, snapshotter: &Snapshotter) -> Result<()> {
 }
 
 fn main() -> Result<()> {
-    let config = std::env::args()
-        .nth(1)
-        .map(|value| serde_json::from_str::<Config>(&value))
-        .transpose()?
-        .unwrap_or_default();
+    let mut argv = std::env::args().skip(1);
+    let command = argv.next();
+    let text = match command.as_deref() {
+        Some("mutation-operators") => {
+            println!(
+                "{}",
+                json!([
+                {"name": "account.address"},
+                {"name": "account.balance"},
+                {"name": "account.nonce"},
+                {"name": "account.bytecode_hash"},
+                {"name": "storage.address"},
+                {"name": "storage.slot"},
+                {"name": "storage.value"},
+                    {"name": "prewarm.account"},
+                {"name": "prewarm.storage.address"},
+                {"name": "prewarm.storage.slot"},
+                {"name": "update.duplicate"},
+                {"name": "update.remove"},
+                {"name": "update.crossover", "donor": true},
+                    {"name": "batch.duplicate"},
+                    {"name": "batch.remove"},
+                {"name": "batch.crossover", "donor": true},
+                {"name": "commit.insert"},
+                {"name": "commit.remove"}
+                ])
+            );
+            return Ok(());
+        }
+        Some("mutation-sites") => {
+            let mut request = Vec::new();
+            std::io::stdin().read_to_end(&mut request)?;
+            let mut value: serde_json::Value = serde_json::from_slice(&request)?;
+            let input: Input = match std::mem::take(&mut value["input"]) {
+                serde_json::Value::String(text) => serde_json::from_str(&text)?,
+                input => serde_json::from_value(input)?,
+            };
+            input.validate()?;
+            let operator = value["operator"].as_str();
+            let sites = input.mutation_sites(operator);
+            println!("{}", serde_json::to_string(&sites)?);
+            return Ok(());
+        }
+        Some("observe") => {
+            let mut request = Vec::new();
+            std::io::stdin().read_to_end(&mut request)?;
+            let value: serde_json::Value = serde_json::from_slice(&request)?;
+            let decisions =
+                value.get("decisions").ok_or_else(|| eyre::eyre!("missing decisions"))?;
+            let changed = value
+                .get("original")
+                .is_some_and(|original| !original.is_null() && original != decisions);
+            println!(
+                "{}",
+                json!({
+                    "decisions": decisions,
+                    "decision_diff": if changed { vec!["recorded decisions differ"] } else { vec![] },
+                    "moments": [], "events_origin_ns": null
+                })
+            );
+            return Ok(());
+        }
+        Some("generate-input" | "generate-suffix" | "mutate-input" | "validate-input") => {
+            let mut request = Vec::new();
+            std::io::stdin().read_to_end(&mut request)?;
+            let mut value: serde_json::Value = serde_json::from_slice(&request)?;
+            let contract = value["input"].is_string();
+            let input = match command.as_deref() {
+                Some("generate-input" | "generate-suffix") => {
+                    let config: Config = serde_json::from_value(value)?;
+                    ensure!(
+                        (1..=1024).contains(&config.blocks) && (1..=4096).contains(&config.updates),
+                        "invalid input size"
+                    );
+                    let mut input = Input::generate(config.seed, config.blocks, config.updates);
+                    if command.as_deref() == Some("generate-suffix") {
+                        let accounts = input
+                            .operations
+                            .iter()
+                            .filter_map(|op| match op {
+                                Operation::UpdateBatch { updates } => Some(updates.iter()),
+                                _ => None,
+                            })
+                            .flatten()
+                            .filter_map(|update| match update {
+                                model::Update::Account { address, .. } => Some(*address),
+                                _ => None,
+                            })
+                            .collect::<BTreeSet<_>>()
+                            .into_iter()
+                            .map(|address| model::Update::Account {
+                                address,
+                                account: reth_primitives_traits::Account {
+                                    nonce: 1,
+                                    ..Default::default()
+                                },
+                            })
+                            .collect::<Vec<_>>();
+                        let Operation::UpdateBatch { updates } = input
+                            .operations
+                            .iter_mut()
+                            .find(|op| matches!(op, Operation::UpdateBatch { .. }))
+                            .expect("generated update batch")
+                        else {
+                            unreachable!()
+                        };
+                        updates.splice(0..0, accounts);
+                    }
+                    input
+                }
+                _ => {
+                    let mut input: Input = match std::mem::take(&mut value["input"]) {
+                        serde_json::Value::String(text) => serde_json::from_str(&text)?,
+                        input => serde_json::from_value(input)?,
+                    };
+                    if command.as_deref() == Some("mutate-input") {
+                        let seed = value["seed"]
+                            .as_u64()
+                            .ok_or_else(|| eyre::eyre!("missing mutation seed"))?;
+                        if let Some(operator) = value["operator"].as_str().map(str::to_owned) {
+                            let path: Vec<String> = serde_json::from_value(value["path"].clone())?;
+                            let donor: Option<Input> = match std::mem::take(&mut value["donor"]) {
+                                serde_json::Value::String(text) => {
+                                    Some(serde_json::from_str(&text)?)
+                                }
+                                donor => serde_json::from_value(donor)?,
+                            };
+                            let donor_path: Vec<String> =
+                                serde_json::from_value(value["donor_path"].clone())?;
+                            input.mutate_at(
+                                &operator,
+                                &path,
+                                seed,
+                                donor.as_ref().map(|donor| (donor, donor_path.as_slice())),
+                            )?;
+                        } else {
+                            input.mutate(seed)?;
+                        }
+                    }
+                    input
+                }
+            };
+            input.validate()?;
+            if command.as_deref() == Some("validate-input") {
+                let blocks =
+                    input.operations.iter().filter(|op| matches!(op, Operation::Commit)).count();
+                println!("{}", json!({"blocks": blocks}));
+                return Ok(());
+            }
+            let output = serde_json::to_string(&input)?;
+            if command.as_deref() == Some("mutate-input") && contract {
+                println!("{}", serde_json::to_string(&output)?);
+            } else {
+                println!("{output}");
+            }
+            return Ok(());
+        }
+        Some(hook @ ("parse-args" | "config" | "seed-inputs" | "suffix-seed")) => {
+            let controller = std::env::current_exe()?.with_file_name("controller.py");
+            return Err(std::process::Command::new(controller).arg(hook).args(argv).exec().into());
+        }
+        Some("-") => std::io::read_to_string(std::io::stdin())?,
+        Some(path) if path.starts_with('@') => fs::read_to_string(&path[1..])?,
+        Some(text) => text.to_string(),
+        None => "{}".into(),
+    };
+    let mut config: Config = serde_json::from_str(&text)?;
+    drop(text);
+    if let Some(input) = &config.input {
+        input.validate()?;
+    }
     let recorder = DebuggingRecorder::new();
     let snapshotter = recorder.snapshotter();
     recorder.install()?;
-    run(&config, &snapshotter).wrap_err_with(|| format!("reth-trie-dst {config:?}"))
+    run(&mut config, &snapshotter)
+        .wrap_err_with(|| format!("reth-trie-dst seed={} blocks={}", config.seed, config.blocks))
 }
