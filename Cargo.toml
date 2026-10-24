@@ -438,9 +438,9 @@ reth-trie-sparse = { path = "crates/trie/sparse", default-features = false }
 reth-zstd-compressors = { version = "0.8.2", default-features = false }
 
 # evm2
-evm2 = { git = "https://github.com/alloy-rs/evm2", rev = "c8bb5a210d8597f48f0801d276c3bf40e48505d2", default-features = false }
-evm2-inspectors = { git = "https://github.com/alloy-rs/evm2", rev = "c8bb5a210d8597f48f0801d276c3bf40e48505d2", default-features = false }
-evm2-jit = { git = "https://github.com/alloy-rs/evm2", rev = "c8bb5a210d8597f48f0801d276c3bf40e48505d2", default-features = false }
+evm2 = { git = "https://github.com/alloy-rs/evm2", rev = "f09618ba6b8f3216b8a6b018014e09fdf0e26d95", default-features = false }
+evm2-inspectors = { git = "https://github.com/alloy-rs/evm2", rev = "f09618ba6b8f3216b8a6b018014e09fdf0e26d95", default-features = false }
+evm2-jit = { git = "https://github.com/alloy-rs/evm2", rev = "f09618ba6b8f3216b8a6b018014e09fdf0e26d95", default-features = false }
 
 # eth
 alloy-dyn-abi = "1.6.1"
@@ -674,9 +674,9 @@ ipnet = "2.11"
 # evm2 is patched through its pre-transfer URL, which redirects to alloy-rs/evm2, because Cargo
 # rejects a patch from the same source.
 [patch."https://github.com/alloy-rs/evm2"]
-evm2 = { git = "https://github.com/DaniPopes/evm2", rev = "c8bb5a210d8597f48f0801d276c3bf40e48505d2" }
-evm2-inspectors = { git = "https://github.com/DaniPopes/evm2", rev = "c8bb5a210d8597f48f0801d276c3bf40e48505d2" }
-evm2-jit = { git = "https://github.com/DaniPopes/evm2", rev = "c8bb5a210d8597f48f0801d276c3bf40e48505d2" }
+evm2 = { git = "https://github.com/DaniPopes/evm2", rev = "f09618ba6b8f3216b8a6b018014e09fdf0e26d95" }
+evm2-inspectors = { git = "https://github.com/DaniPopes/evm2", rev = "f09618ba6b8f3216b8a6b018014e09fdf0e26d95" }
+evm2-jit = { git = "https://github.com/DaniPopes/evm2", rev = "f09618ba6b8f3216b8a6b018014e09fdf0e26d95" }
 
 [patch.crates-io]
 # LLVM 23 support is not released yet.
