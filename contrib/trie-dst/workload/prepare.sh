@@ -45,6 +45,7 @@ DOCKERFILE
 export HOME=/cache CARGO_HOME=/cache/cargo CARGO_TARGET_DIR=/cache/target/reth-trie-dst
 export SCCACHE_DIR=/cache/sccache RUSTC_WRAPPER=sccache CARGO_INCREMENTAL=0
 export CC='sccache gcc' CXX='sccache g++' RUSTFLAGS='-C link-arg=-fuse-ld=mold'
+export CARGO_PROFILE_DST_CODEGEN_UNITS=1
 mkdir -p "$CARGO_HOME" "$CARGO_TARGET_DIR" "$SCCACHE_DIR"
 touch "$CARGO_HOME" "$CARGO_TARGET_DIR"
 sccache --zero-stats >/dev/null
