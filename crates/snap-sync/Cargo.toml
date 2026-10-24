@@ -34,6 +34,10 @@ alloy-eip7928.workspace = true
 alloy-eips = { workspace = true, features = ["serde"] }
 alloy-primitives.workspace = true
 
+# metrics
+reth-metrics.workspace = true
+metrics.workspace = true
+
 # misc
 futures.workspace = true
 serde = { workspace = true, features = ["derive"] }
@@ -45,6 +49,7 @@ tracing.workspace = true
 [dev-dependencies]
 alloy-consensus.workspace = true
 alloy-rlp.workspace = true
+metrics-util = { workspace = true, features = ["debugging"] }
 reth-chainspec.workspace = true
 reth-ethereum-primitives.workspace = true
 reth-evm.workspace = true
