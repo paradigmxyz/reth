@@ -4,6 +4,7 @@ use alloy_consensus::{constants::ETH_TO_WEI, Header, TxEip1559, TxReceipt};
 use alloy_eips::eip1559::INITIAL_BASE_FEE;
 use alloy_genesis::{Genesis, GenesisAccount};
 use alloy_primitives::{bytes, Address, Bytes, TxKind, B256, U256};
+use futures_util::{FutureExt, StreamExt};
 use reth_chainspec::{ChainSpecBuilder, ChainSpecProvider, MAINNET};
 use reth_config::config::StageConfig;
 use reth_consensus::noop::NoopConsensus;
@@ -36,8 +37,8 @@ use reth_prune_types::PruneModes;
 use reth_revm::database::StateProviderDatabase;
 use reth_stages::{sets::DefaultStages, stages::StorageHashingStage};
 use reth_stages_api::{
-    ExecInput, ExecOutput, Pipeline, Stage, StageError, StageId, StageSet, UnwindInput,
-    UnwindOutput,
+    ExecInput, ExecOutput, Pipeline, PipelineEvent, Stage, StageError, StageId, StageSet,
+    UnwindInput, UnwindOutput,
 };
 use reth_static_file::StaticFileProducer;
 use reth_storage_api::{
@@ -425,6 +426,7 @@ async fn run_pipeline_forward_and_unwind(
     let tip = file_client.tip().expect("tip");
 
     let mut stages_config = StageConfig::default();
+    stages_config.execution.max_blocks = Some(1);
     if interrupt_unwind {
         // Exercise full Merkle rebuilds with the five-block interruption fixture.
         stages_config.merkle.rebuild_threshold = 1;
@@ -541,7 +543,16 @@ async fn run_pipeline_forward_and_unwind(
         assert_eq!(pipeline_provider_factory.provider()?.pipeline_unwind()?, None);
         pipeline_provider_factory.clone().assert_consistent()?;
     } else {
+        let mut events = pipeline.events();
         pipeline.unwind(unwind_target, None)?;
+        let mut execution_tip = num_blocks;
+        while let Some(Some(event)) = events.next().now_or_never() {
+            if let PipelineEvent::Unwound { stage_id: StageId::Execution, result } = event {
+                assert_eq!(result.checkpoint.block_number, execution_tip - 1);
+                execution_tip = result.checkpoint.block_number;
+            }
+        }
+        assert_eq!(execution_tip, unwind_target);
     }
 
     // Verify unwind
