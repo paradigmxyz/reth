@@ -10,8 +10,8 @@ use parking_lot::Once;
 use reth_errors::ProviderResult;
 use reth_metrics::Metrics;
 use reth_primitives_traits::{Account, Bytecode};
-use reth_revm::db::BundleState;
 use reth_storage_api::EvmStateProvider;
+use reth_trie_common::bundle_state::BundleState;
 use std::{
     cell::Cell,
     fmt,
@@ -1310,10 +1310,10 @@ impl SavedCache {
 mod tests {
     use super::*;
     use alloy_primitives::{map::HashMap, U256};
+    use evm2::evm::AccountInfo;
     use reth_provider::test_utils::{ExtendedAccount, MockEthProvider};
-    use reth_revm::db::{AccountStatus, BundleAccount};
     use reth_storage_api::StateProvider;
-    use revm::state::AccountInfo;
+    use reth_trie_common::bundle_state::{AccountStatus, BundleAccount};
 
     #[test]
     fn test_empty_storage_cached_state_provider() {

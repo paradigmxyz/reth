@@ -27,17 +27,16 @@ reth-provider.workspace = true
 reth-evm.workspace = true
 reth-evm-ethereum.workspace = true
 reth-ethereum-forks.workspace = true
-reth-revm.workspace = true
 reth-consensus.workspace = true
 reth-errors.workspace = true
 reth-storage-errors.workspace = true
+reth-storage-api.workspace = true
 
 # alloy
 alloy-rpc-types = { workspace = true, features = ["engine"] }
 alloy-primitives.workspace = true
 alloy-consensus.workspace = true
 alloy-eips.workspace = true
-alloy-evm.workspace = true
 
 # tracing
 tracing.workspace = true
@@ -45,11 +44,14 @@ tracing.workspace = true
 # misc
 clap = { workspace = true, features = ["derive", "env"] }
 jsonrpsee = { workspace = true, features = ["server", "macros"] }
-revm.workspace = true
 metrics.workspace = true
+evm2.workspace = true
 
 # std
 eyre.workspace = true
+
+[dev-dependencies]
+metrics-util = { workspace = true, features = ["debugging"] }
 
 [features]
 default = [
@@ -60,8 +62,8 @@ default = [
     "min-trace-logs",
     "otlp",
     "otlp-logs",
-    "reth-revm/portable",
     "js-tracer",
+    "portable",
 ]
 
 otlp = [
@@ -87,9 +89,16 @@ asm-keccak = [
     "reth-node-core/asm-keccak",
     "reth-ethereum-cli/asm-keccak",
     "reth-node-ethereum/asm-keccak",
+    "reth-evm/asm-keccak",
+    "reth-evm-ethereum/asm-keccak",
     "alloy-primitives/asm-keccak",
-    "alloy-evm/asm-keccak",
-    "revm/asm-keccak",
+    "evm2/asm-keccak",
+]
+portable = [
+    "reth-node-ethereum/portable",
+    "reth-evm/portable",
+    "reth-evm-ethereum/portable",
+    "evm2/portable",
 ]
 
 keccak-cache-global = [

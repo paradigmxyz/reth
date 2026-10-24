@@ -2246,11 +2246,16 @@ impl RpcServerHandle {
 
     /// Tell the server to stop without waiting for the server to stop.
     pub fn stop(self) -> Result<(), AlreadyStoppedError> {
+        // HTTP and WS share one server, and one stop handle, when they use the same address.
+        // Stopping it twice would race with the server shutting down after the first stop.
+        let shared_server =
+            self.http_local_addr.is_some() && self.http_local_addr == self.ws_local_addr;
+
         if let Some(handle) = self.http {
             handle.stop()?
         }
 
-        if let Some(handle) = self.ws {
+        if let Some(handle) = self.ws.filter(|_| !shared_server) {
             handle.stop()?
         }
 
