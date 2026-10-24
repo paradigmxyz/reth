@@ -1847,40 +1847,7 @@ Post-merge hard forks (timestamp based):
                         timestamp: hoodi::HOODI_BPO2_TIMESTAMP,
                         ..Default::default()
                     },
-                    ForkId {
-                        hash: ForkHash(hex!("0x23aa1351")),
-                        next: hoodi::HOODI_AMSTERDAM_TIMESTAMP,
-                    },
-                ),
-                // Last block before Amsterdam.
-                (
-                    Head {
-                        number: 0,
-                        timestamp: hoodi::HOODI_AMSTERDAM_TIMESTAMP - 1,
-                        ..Default::default()
-                    },
-                    ForkId {
-                        hash: ForkHash(hex!("0x23aa1351")),
-                        next: hoodi::HOODI_AMSTERDAM_TIMESTAMP,
-                    },
-                ),
-                // First Amsterdam block.
-                (
-                    Head {
-                        number: 0,
-                        timestamp: hoodi::HOODI_AMSTERDAM_TIMESTAMP,
-                        ..Default::default()
-                    },
-                    ForkId { hash: ForkHash(hex!("0x3d068b59")), next: 0 },
-                ),
-                // After Amsterdam.
-                (
-                    Head {
-                        number: 0,
-                        timestamp: hoodi::HOODI_AMSTERDAM_TIMESTAMP + 1,
-                        ..Default::default()
-                    },
-                    ForkId { hash: ForkHash(hex!("0x3d068b59")), next: 0 },
+                    ForkId { hash: ForkHash(hex!("0x23aa1351")), next: 0 },
                 ),
             ],
         )
@@ -2901,8 +2868,8 @@ Post-merge hard forks (timestamp based):
 
     #[test]
     fn latest_hoodi_mainnet_fork_id() {
-        // Amsterdam.
-        assert_eq!(ForkId { hash: ForkHash(hex!("0x3d068b59")), next: 0 }, HOODI.latest_fork_id())
+        // BPO2
+        assert_eq!(ForkId { hash: ForkHash(hex!("0x23aa1351")), next: 0 }, HOODI.latest_fork_id())
     }
 
     #[test]
