@@ -159,8 +159,7 @@ def worker(config):
                         position = event.get("block", event.get("head", 0))
                         if (not planned and plan and position >= plan[0] and
                                 ("operations" in event or
-                                 (event.get("persistence") == "complete" and
-                                  position < config["workload"]["blocks"])) and
+                                 event.get("persistence") == "complete") and
                                 (persisted or not require_persisted)):
                             process.send_signal(signal.SIGKILL)
                             target = plan.pop(0)
