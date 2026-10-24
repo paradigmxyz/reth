@@ -77,6 +77,24 @@ pub struct ExecutionOverlay {
 }
 
 impl ExecutionOverlay {
+    /// Builds a readable child layer; the parent can then be dropped by the merge worker.
+    pub(crate) fn with_block(
+        parent: &Self,
+        delta: Arc<ExecutionOverlayDelta>,
+        metrics: &ExecutionOverlayMetrics,
+    ) -> Self {
+        let (base, mut pending) = if let Some(compiled) = parent.compiled.get() {
+            (Arc::clone(compiled), Vec::new())
+        } else {
+            (Arc::clone(&parent.base), parent.pending.clone())
+        };
+        let mut block_hashes = parent.block_hashes.clone();
+        block_hashes.push(delta.block);
+        pending.push(delta);
+        metrics.overlay_unmerged_blocks.record(pending.len() as f64);
+        Self { block_hashes, base, pending, compiled: OnceLock::new() }
+    }
+
     /// Returns the in-memory block hashes in ascending block-number order.
     pub const fn block_hashes(&self) -> &[BlockNumHash] {
         self.block_hashes.as_slice()
@@ -122,21 +140,6 @@ impl ExecutionOverlay {
             }
         }
         self.data().code_hashes.get(hash).map(|entry| &entry.value)
-    }
-
-    /// Publishes the next block's observation layer without flattening its persistent maps.
-    pub(crate) fn extend_deferred(
-        &mut self,
-        delta: Arc<ExecutionOverlayDelta>,
-        metrics: &ExecutionOverlayMetrics,
-    ) {
-        if let Some(compiled) = self.compiled.take() {
-            self.base = compiled;
-            self.pending.clear();
-        }
-        self.block_hashes.push(delta.block);
-        self.pending.push(delta);
-        metrics.overlay_unmerged_blocks.record(self.pending.len() as f64);
     }
 
     pub(crate) fn compile(&self, metrics: &ExecutionOverlayMetrics) {

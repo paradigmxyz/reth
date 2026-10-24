@@ -305,9 +305,11 @@ impl<N: NodePrimitives> OverlayManager<N> {
             if let Some(parent_input) = self.execution_overlays.take_ready(&key) &&
                 let Some(delta) = &delta
             {
-                let mut overlay = Arc::unwrap_or_clone(parent_input);
-                overlay.extend_deferred(Arc::clone(delta), &self.execution_metrics);
-                let overlay = Arc::new(overlay);
+                let overlay = Arc::new(ExecutionOverlay::with_block(
+                    &parent_input,
+                    Arc::clone(delta),
+                    &self.execution_metrics,
+                ));
                 self.execution_metrics.overlay_cache_fills.increment(1);
                 self.execution_overlays
                     .entries
@@ -320,13 +322,18 @@ impl<N: NodePrimitives> OverlayManager<N> {
                     let span = tracing::Span::current();
                     worker_pool.spawn(move || {
                         let _guard = span.enter();
+                        drop(parent_input);
                         overlay.compile(&metrics);
                     });
                 } else {
+                    drop(parent_input);
                     overlay.compile(&self.execution_metrics);
                 }
                 #[cfg(not(feature = "rayon"))]
-                overlay.compile(&self.execution_metrics);
+                {
+                    drop(parent_input);
+                    overlay.compile(&self.execution_metrics);
+                }
                 extended = true;
             }
         }
