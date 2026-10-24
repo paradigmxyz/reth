@@ -243,7 +243,7 @@ fn run(config: &mut Config, snapshotter: &Snapshotter) -> Result<()> {
         .with_memory_block_buffer_target(buffer)
         .with_persistence_backpressure_threshold(backpressure);
     let runtime = RuntimeBuilder::new(RuntimeConfig {
-        tokio: TokioConfig::with_worker_threads(1),
+        tokio: TokioConfig::with_worker_threads(2),
         rayon: RayonConfig {
             cpu_threads: Some(2),
             rpc_threads: Some(1),
