@@ -613,40 +613,22 @@ fn run(config: &mut Config, snapshotter: &Snapshotter) -> Result<()> {
                     }))
             })
             .collect::<BTreeSet<_>>();
-        let hinted = operations
-            .iter()
-            .filter_map(|op| match op {
-                Operation::PrewarmBatch { accounts, storages } => Some((accounts, storages)),
-                _ => None,
-            })
-            .flat_map(|(accounts, storages)| {
-                accounts.iter().map(|address| (keccak256(address), None)).chain(
-                    storages.iter().map(|hint| {
-                        (keccak256(hint.address), Some(keccak256(B256::from(hint.slot))))
-                    }),
-                )
-            })
-            .collect::<BTreeSet<_>>();
-        println!(
-            "{}",
-            json!({"block_number": number, "hint_coverage": {
-            "written": written.len(), "overlap": written.intersection(&hinted).count(),
-            "unhinted": written.difference(&hinted).count(),
-            "read_only": hinted.difference(&written).count()}})
-        );
+        let mut hinted = BTreeSet::new();
         let mut updates = updates.into_iter();
         for operation in &operations {
             match operation {
                 Operation::PrewarmBatch { accounts, storages } => {
                     let mut hint = StateAccessHint::default();
                     for address in accounts {
-                        hint.accounts.push(keccak256(address));
+                        let address = keccak256(address);
+                        hint.accounts.push(address);
+                        hinted.insert((address, None));
                     }
                     for storage in storages {
-                        hint.storages
-                            .entry(keccak256(storage.address))
-                            .or_default()
-                            .push(keccak256(B256::from(storage.slot)));
+                        let address = keccak256(storage.address);
+                        let slot = keccak256(B256::from(storage.slot));
+                        hint.storages.entry(address).or_default().push(slot);
+                        hinted.insert((address, Some(slot)));
                     }
                     hints.on_access_hint(hint);
                     hint_batches += 1;
@@ -662,6 +644,13 @@ fn run(config: &mut Config, snapshotter: &Snapshotter) -> Result<()> {
                 Operation::Commit => {}
             }
         }
+        println!(
+            "{}",
+            json!({"block_number": number, "hint_coverage": {
+            "written": written.len(), "overlap": written.intersection(&hinted).count(),
+            "unhinted": written.difference(&hinted).count(),
+            "read_only": hinted.difference(&written).count()}})
+        );
         drop(hints);
         stream.finish();
         let outcome = handle.take_state_root_rx().recv_timeout(timeout)??;
