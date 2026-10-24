@@ -47,7 +47,7 @@ use std::{
     os::unix::fs::MetadataExt,
     path::PathBuf,
     sync::{mpsc, Arc},
-    time::{Duration, Instant},
+    time::Duration,
 };
 
 type Node = MockNodeTypesWithDB<Arc<DatabaseEnv>>;
@@ -213,11 +213,6 @@ fn metric_counts(snapshotter: &Snapshotter) -> BTreeMap<String, u64> {
 }
 
 fn run(config: &mut Config, snapshotter: &Snapshotter) -> Result<()> {
-    let diagnostic_start = Instant::now();
-    let mut apply_time = Duration::ZERO;
-    let mut root_task_time = Duration::ZERO;
-    let mut reference_root_time = Duration::ZERO;
-    let mut verify_time = Duration::ZERO;
     ensure!((1..=1024).contains(&config.blocks), "blocks must be 1..=1024");
     ensure!((1..=4096).contains(&config.updates), "updates must be 1..=4096");
     ensure!((1..=16).contains(&config.proof_workers), "proof_workers must be 1..=16");
@@ -469,9 +464,7 @@ fn run(config: &mut Config, snapshotter: &Snapshotter) -> Result<()> {
                 manager.evict_cached_changesets(
                     db_tip.saturating_sub(CHANGESET_CACHE_RETENTION_BLOCKS),
                 );
-                let start = Instant::now();
                 verify(&factory, &snapshots[(db_tip - base) as usize], db_tip, state_tip)?;
-                verify_time += start.elapsed();
                 manager.remove_blocks(
                     blocks
                         .iter()
@@ -537,7 +530,6 @@ fn run(config: &mut Config, snapshotter: &Snapshotter) -> Result<()> {
             continue;
         }
         let number = head + 1;
-        let start = Instant::now();
         let operations = if let Some(block) = journal.get(&number) {
             block.operations.clone()
         } else {
@@ -573,7 +565,6 @@ fn run(config: &mut Config, snapshotter: &Snapshotter) -> Result<()> {
             }
         }
         let (bundle, updates) = apply(&mut state, number, &updates_input);
-        apply_time += start.elapsed();
         // The full operations are in the journal before production tasks run.
         println!(
             "{}",
@@ -592,7 +583,6 @@ fn run(config: &mut Config, snapshotter: &Snapshotter) -> Result<()> {
                 .cloned()
                 .collect()
         });
-        let start = Instant::now();
         let (mut handle, pending) = strategy.spawn_state_root(
             &runtime,
             factory_view,
@@ -655,12 +645,6 @@ fn run(config: &mut Config, snapshotter: &Snapshotter) -> Result<()> {
                             .or_default()
                             .push(keccak256(B256::from(storage.slot)));
                     }
-                    println!(
-                        "{}",
-                        json!({"block_number": number, "batch": "hint",
-                    "accounts": hint.accounts.len(),
-                    "storages": hint.storages.values().map(Vec::len).sum::<usize>()})
-                    );
                     hints.on_access_hint(hint);
                     hint_batches += 1;
                 }
@@ -669,10 +653,6 @@ fn run(config: &mut Config, snapshotter: &Snapshotter) -> Result<()> {
                     for update in updates.by_ref().take(batch_updates.len()) {
                         batch.extend(update);
                     }
-                    println!(
-                        "{}",
-                        json!({"block_number": number, "batch": "update", "operations": batch_updates.len()})
-                    );
                     stream.on_hashed_state_update(batch);
                     update_batches += 1;
                 }
@@ -682,8 +662,6 @@ fn run(config: &mut Config, snapshotter: &Snapshotter) -> Result<()> {
         drop(hints);
         stream.finish();
         let outcome = handle.take_state_root_rx().recv_timeout(timeout)??;
-        root_task_time += start.elapsed();
-        let start = Instant::now();
         ensure!(
             outcome.state_root == root(&state),
             "seed {} block {number}: expected {}, actual {}",
@@ -691,7 +669,6 @@ fn run(config: &mut Config, snapshotter: &Snapshotter) -> Result<()> {
             root(&state),
             outcome.state_root
         );
-        reference_root_time += start.elapsed();
         let block = RecoveredBlock::new_unhashed(
             Block {
                 header: Header {
@@ -744,12 +721,7 @@ fn run(config: &mut Config, snapshotter: &Snapshotter) -> Result<()> {
         json!({"completed": true, "seed": config.seed, "blocks": total_blocks,
         "commits": commits, "partial_commits": partial_commits,
         "update_batches": update_batches, "hint_batches": hint_batches,
-        "metrics": metrics, "diagnostic_ms": {
-            "total": diagnostic_start.elapsed().as_millis(),
-            "apply": apply_time.as_millis(),
-            "root_task": root_task_time.as_millis(),
-            "reference_root": reference_root_time.as_millis(),
-            "verify": verify_time.as_millis()}})
+        "metrics": metrics})
     );
     Ok(())
 }
