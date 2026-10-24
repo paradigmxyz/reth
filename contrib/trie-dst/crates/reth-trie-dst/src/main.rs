@@ -113,6 +113,7 @@ fn verify(factory: &ProviderFactory<Node>, state: &Model, tip: u64, state_tip: u
         factory.overlay_manager().overlay_builder(hash),
     )
     .database_provider_ro()?;
+    let expected_root = root(state);
     for (address, entry) in state {
         ensure!(
             view.basic_account(address)?.as_ref() == Some(&entry.account),
@@ -138,7 +139,7 @@ fn verify(factory: &ProviderFactory<Node>, state: &Model, tip: u64, state_tip: u
         let proof = view.proof(Default::default(), *address, &slots)?;
         ensure!(proof.info.as_ref() == Some(&entry.account), "proof account {address} at {tip}");
         ensure!(proof.storage_root == storage_root(entry), "proof storage root {address} at {tip}");
-        proof.verify(root(state))?;
+        proof.verify(expected_root)?;
     }
     drop(view);
     if tip == state_tip {
@@ -170,7 +171,7 @@ fn verify(factory: &ProviderFactory<Node>, state: &Model, tip: u64, state_tip: u
         ensure!(storage == expected, "persisted hashed storage at {tip}");
         let latest = LatestStateProviderRef::new(&provider);
         ensure!(
-            latest.state_root(HashedPostState::default())? == root(state),
+            latest.state_root(HashedPostState::default())? == expected_root,
             "persisted root at {tip}"
         );
     }
@@ -354,8 +355,9 @@ fn run(config: &mut Config, snapshotter: &Snapshotter) -> Result<()> {
     if base > 0 {
         verify(&factory, &state, base, base)?;
     }
-    ensure!(root(&state) == parent.state_root(), "recovered root at {base}");
-    println!("{}", json!({"recovery": "complete", "head": base, "root": root(&state)}));
+    let recovered_root = root(&state);
+    ensure!(recovered_root == parent.state_root(), "recovered root at {base}");
+    println!("{}", json!({"recovery": "complete", "head": base, "root": recovered_root}));
     let mut blocks = Vec::<ExecutedBlock<EthPrimitives>>::new();
     let mut snapshots = vec![state.clone()];
     let timeout = Duration::from_secs(config.timeout_secs);
