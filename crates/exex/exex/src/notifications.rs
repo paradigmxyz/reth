@@ -81,8 +81,7 @@ where
 {
     /// A stream of [`ExExNotification`]s. The stream will emit notifications for all blocks.
     WithoutHead(ExExNotificationsWithoutHead<P, E>),
-    /// A stream of [`ExExNotification`]s. The stream will only emit notifications for blocks that
-    /// are committed or reverted after the given head.
+    /// A stream of [`ExExNotification`]s configured with the ExEx head.
     WithHead(Box<ExExNotificationsWithHead<P, E>>),
     /// Internal state used when transitioning between [`ExExNotificationsInner::WithoutHead`] and
     /// [`ExExNotificationsInner::WithHead`].
@@ -304,11 +303,10 @@ where
     }
 }
 
-/// A stream of [`ExExNotification`]s. The stream will only emit notifications for blocks that are
-/// committed or reverted after the given head. The head is the ExEx's latest view of the host
-/// chain.
+/// A stream of [`ExExNotification`]s that resumes commits after the given head, the ExEx's latest
+/// view of the host chain. Reorgs and reverts are always emitted, even at or below that head.
 ///
-/// Notifications will be sent starting from the head, not inclusive. For example, if
+/// Commit notifications will be sent starting from the head, not inclusive. For example, if
 /// `exex_head.number == 10`, then the first notification will be with `block.number == 11`. An
 /// `exex_head.number` of 10 indicates that the ExEx has processed up to block 10, and is ready to
 /// process block 11.
@@ -552,12 +550,11 @@ where
                 return Poll::Ready(None)
             };
 
-            // 6. In case the exex is ahead of the new tip, we must skip it
-            if let Some(committed) = notification.committed_chain() {
-                // inclusive check because we should start with `exex.head + 1`
-                if this.initial_exex_head.block.number >= committed.tip().number() {
-                    continue
-                }
+            // Reorgs can invalidate blocks at or below the restored head.
+            if let ExExNotification::ChainCommitted { new } = &notification &&
+                this.initial_exex_head.block.number >= new.tip().number()
+            {
+                continue
             }
 
             return Poll::Ready(Some(Ok(notification)))
@@ -1097,6 +1094,55 @@ mod tests {
         let probe = notifications.next().await.transpose()?;
         assert_eq!(probe, Some(probe_notification));
 
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn exex_notifications_reorg_at_restored_head() -> eyre::Result<()> {
+        let mut rng = generators::rng();
+        let temp_dir = tempfile::tempdir()?;
+        let wal = Wal::new(temp_dir.path())?;
+        let provider_factory = create_test_provider_factory();
+        let genesis_hash = init_genesis(&provider_factory)?;
+        let old_block = random_block(
+            &mut rng,
+            1,
+            BlockParams { parent: Some(genesis_hash), tx_count: Some(0), ..Default::default() },
+        )
+        .try_recover()?;
+        let new_block = random_block(
+            &mut rng,
+            1,
+            BlockParams { parent: Some(genesis_hash), tx_count: Some(0), ..Default::default() },
+        )
+        .try_recover()?;
+        let head = old_block.num_hash();
+        let provider_rw = provider_factory.provider_rw()?;
+        provider_rw.insert_block(&old_block)?;
+        provider_rw.commit()?;
+
+        let old = Arc::new(Chain::new(vec![old_block], Default::default(), BTreeMap::new()));
+        let notification = ExExNotification::ChainReorged {
+            old: old.clone(),
+            new: Arc::new(Chain::new(vec![new_block], Default::default(), BTreeMap::new())),
+        };
+        let (notifications_tx, notifications_rx) = mpsc::channel(2);
+        notifications_tx.send(ExExNotification::ChainCommitted { new: old }).await?;
+        notifications_tx.send(notification.clone()).await?;
+        drop(notifications_tx);
+
+        let mut notifications = ExExNotifications::new(
+            head,
+            BlockchainProvider::new(provider_factory)?,
+            EthEvmConfig::mainnet(),
+            notifications_rx,
+            wal.handle(),
+        )
+        .with_head(ExExHead::new(head));
+
+        // The restored commit is skipped, but the reorg must still reach the ExEx.
+        assert_eq!(notifications.next().await.transpose()?, Some(notification));
+        assert_eq!(notifications.next().await.transpose()?, None);
         Ok(())
     }
 }
