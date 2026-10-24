@@ -218,9 +218,6 @@ fn run(config: &mut Config, snapshotter: &Snapshotter) -> Result<()> {
     let run_started = Instant::now();
     let mut apply_time = Duration::ZERO;
     let mut trie_time = Duration::ZERO;
-    let mut spawn_time = Duration::ZERO;
-    let mut stream_time = Duration::ZERO;
-    let mut wait_time = Duration::ZERO;
     let mut clone_time = Duration::ZERO;
     let mut verify_time = Duration::ZERO;
     ensure!((1..=1024).contains(&config.blocks), "blocks must be 1..=1024");
@@ -618,8 +615,6 @@ fn run(config: &mut Config, snapshotter: &Snapshotter) -> Result<()> {
                 pending_sparse_trie_prune_blocks: retained,
             },
         );
-        spawn_time += started.elapsed();
-        let stream_started = Instant::now();
         let stream = handle.take_hashed_update_stream();
         let hints = handle.take_hint_stream();
         let written = updates
@@ -675,10 +670,7 @@ fn run(config: &mut Config, snapshotter: &Snapshotter) -> Result<()> {
         );
         drop(hints);
         stream.finish();
-        stream_time += stream_started.elapsed();
-        let wait_started = Instant::now();
         let outcome = handle.take_state_root_rx().recv_timeout(timeout)??;
-        wait_time += wait_started.elapsed();
         trie_time += started.elapsed();
         let expected_root = config
             .expected_roots
@@ -750,8 +742,6 @@ fn run(config: &mut Config, snapshotter: &Snapshotter) -> Result<()> {
         "metrics": metrics,
         "perf_us": {"total": run_started.elapsed().as_micros(),
                     "apply": apply_time.as_micros(), "trie": trie_time.as_micros(),
-                    "spawn": spawn_time.as_micros(), "stream": stream_time.as_micros(),
-                    "wait": wait_time.as_micros(),
                     "clone": clone_time.as_micros(), "verify": verify_time.as_micros()}})
     );
     Ok(())
