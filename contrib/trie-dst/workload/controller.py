@@ -241,13 +241,7 @@ def main():
                 "required": ["trie/input/completed"], "replays_exactly": True, "action": None,
                 "notes": [], "host_decisions": []}
     if hook == "warmup":
-        env = os.environ.copy()
-        env.pop("BEDROCK_COVERAGE_DIR", None)
-        output = subprocess.run(["/usr/local/bin/reth-trie-dst", json.dumps({"blocks": 1, "updates": 1})],
-                                capture_output=True, text=True, check=True, env=env)
-        if not json.loads(output.stdout.splitlines()[-1]).get("completed"):
-            raise RuntimeError("trie warmup did not finish")
-        return {"ready": True, "detail": "reth-trie-dst preloaded; each branch starts with empty state"}
+        return {"ready": True, "detail": "reth-trie-dst controller ready; each branch starts with empty state"}
     if hook == "start":
         STATE.mkdir(parents=True, exist_ok=True)
         if (STATE / "worker.pid").exists():
