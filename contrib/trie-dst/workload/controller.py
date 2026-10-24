@@ -100,7 +100,6 @@ def worker(config):
     idle_budget = 2 * config["workload"]["timeout_secs"] + config["run_secs"]
     deadline = time.monotonic() + idle_budget
     waiting = False
-    diagnostic = None
     try:
         workload = config["workload"] | {"datadir": str(STATE / "data"),
                                          "input_file": str(STATE / "pending-input.json")}
@@ -144,7 +143,6 @@ def worker(config):
                             waiting = False
                         if event.get("completed"):
                             completed = True
-                            diagnostic = event.get("diagnostic_ms")
                             assertion(event.get("blocks") == config["workload"]["blocks"],
                                       json.dumps(event), "trie/input/completed")
                         if event.get("input") == "injected":
@@ -188,7 +186,6 @@ def worker(config):
     assertion(ok, detail)
     (STATE / "done.json").write_text(json.dumps({"ok": ok, "kills": killed,
                                                "armed": len(config["kill_blocks"]), "recoveries": recovered}))
-    return {"diagnostic_ms": diagnostic}
 
 
 def main():
@@ -252,7 +249,7 @@ def main():
             raise RuntimeError("workload already started")
         if request["run_secs"] == 1:
             (STATE / "pending-input.finish").touch()
-            return worker(request)
+            worker(request)
         else:
             config_path = STATE / "config.json"
             config_path.write_text(json.dumps(request))
