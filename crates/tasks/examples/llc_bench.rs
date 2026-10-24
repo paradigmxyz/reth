@@ -1,12 +1,18 @@
+//! Run: `LLC_BENCH_CPUS=0,1,2,3,4,5 cargo run --release -p reth-tasks --features rayon --example
+//! llc_bench -- handoff 2048 24 500`, then again with a spread list such as
+//! `LLC_BENCH_CPUS=0,6,12,18,1,7`.
+//!
 //! Microbenchmark for LLC-aware job placement in reth-tasks.
 //!
 //! Each workload hands a working set between a submitting thread and a [`WorkerPool`] the way the
-//! engine does (`install_fn` round trips, `broadcast` to long-lived proof-style workers, and
-//! `spawn` streams), and reports per-iteration latency. Run it twice, with and without
-//! `RETH_CACHE_AFFINITY=0`, in fresh processes, to compare placement.
+//! engine does (`install_fn` handoffs and round trips, `broadcast` to long-lived proof-style
+//! workers, and `spawn` streams), and reports per-iteration latency. Run it twice, with and
+//! without `RETH_CACHE_AFFINITY=0`, in fresh processes, or on the base commit, to compare
+//! placement. `LLC_BENCH_CPUS` restricts the pool to those CPUs and pins the submitter to the
+//! first.
 //!
 //! `cargo run --release -p reth-tasks --features rayon --example llc_bench -- <workload> <kib>
-//! <threads> <iters>`
+//! <threads> <iters>`, with workload `handoff`, `install`, `broadcast`, `stream` or `par`.
 
 use reth_tasks::{affinity, WorkerPool};
 use std::{
@@ -23,6 +29,23 @@ use std::{
 const fn mix(x: u64) -> u64 {
     let x = x ^ (x >> 31);
     x.wrapping_mul(0x9e37_79b9_7f4a_7c15)
+}
+
+/// Submitter writes the buffer and a single `install_fn` job reads all of it, like a driver
+/// handing a working set it just built to the pool.
+fn install_handoff(pool: &WorkerPool, words: usize, iters: usize) -> Vec<Duration> {
+    let mut buf = vec![0u64; words];
+    let mut out = Vec::with_capacity(iters);
+    for it in 0..iters as u64 {
+        let start = Instant::now();
+        for (i, w) in buf.iter_mut().enumerate() {
+            *w = mix(it ^ i as u64);
+        }
+        let b = &buf;
+        black_box(pool.install_fn(|| b.iter().fold(0u64, |a, w| a.wrapping_add(*w))));
+        out.push(start.elapsed());
+    }
+    out
 }
 
 /// Submitter dirties the buffer, a pool job reads and rewrites all of it, the submitter reads
@@ -172,8 +195,18 @@ fn main() {
     let iters: usize = args.get(4).and_then(|s| s.parse().ok()).unwrap_or(500);
     let words = kib * 1024 / 8;
 
+    // With `LLC_BENCH_CPUS`, pool workers inherit the list as their mask from the thread that
+    // builds the pool, and the submitter then runs on the first listed CPU.
+    let cpus = bench_cpus();
+    if let Some(cpus) = &cpus {
+        set_affinity(cpus);
+    }
     let pool = WorkerPool::new(threads, "bench");
+    if let Some(cpus) = &cpus {
+        set_affinity(&cpus[..1]);
+    }
     let run = |n| match workload {
+        "handoff" => install_handoff(&pool, words, n),
         "install" => install_roundtrip(&pool, words, n),
         "broadcast" => broadcast_workers(&pool, words, n),
         "stream" => spawn_stream(&pool, words, n),
@@ -192,4 +225,26 @@ fn main() {
         "workload={workload} kib={kib} threads={threads} llc_domains={} p50_us={p50:.1} p90_us={p90:.1} mean_us={mean:.1}",
         affinity::llc_domains()
     );
+}
+
+/// CPUs listed in `LLC_BENCH_CPUS` (comma-separated), if set.
+fn bench_cpus() -> Option<Vec<usize>> {
+    let cpus = std::env::var("LLC_BENCH_CPUS").ok()?;
+    Some(cpus.split(',').map(|c| c.trim().parse().expect("bad LLC_BENCH_CPUS")).collect())
+}
+
+/// Restricts the calling thread to `cpus`. Linux only; elsewhere threads stay unpinned.
+fn set_affinity(cpus: &[usize]) {
+    #[cfg(target_os = "linux")]
+    // SAFETY: an all-zero `cpu_set_t` is the empty set, and pid 0 is the calling thread.
+    unsafe {
+        let mut set: libc::cpu_set_t = std::mem::zeroed();
+        for &cpu in cpus {
+            libc::CPU_SET(cpu, &mut set);
+        }
+        let rc = libc::sched_setaffinity(0, size_of::<libc::cpu_set_t>(), &raw const set);
+        assert_eq!(rc, 0, "sched_setaffinity({cpus:?}): {}", std::io::Error::last_os_error());
+    }
+    #[cfg(not(target_os = "linux"))]
+    let _ = cpus;
 }

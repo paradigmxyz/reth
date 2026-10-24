@@ -33,6 +33,9 @@ reth-provider = { workspace = true, features = ["test-utils"] }
 reth-revm = { workspace = true, features = ["test-utils"] }
 revm.workspace = true
 
+[target.'cfg(target_os = "linux")'.dev-dependencies]
+libc.workspace = true
+
 [features]
 test-utils = [
     "reth-primitives-traits/test-utils",

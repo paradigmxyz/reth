@@ -48,6 +48,9 @@ proptest.workspace = true
 rand.workspace = true
 rand_08.workspace = true
 
+[target.'cfg(target_os = "linux")'.dev-dependencies]
+libc.workspace = true
+
 [[example]]
 name = "llc_trie"
 required-features = ["std"]

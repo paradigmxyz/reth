@@ -1,9 +1,13 @@
+//! Run: `LLC_BENCH_CPUS=0,1,2,3,4,5 cargo run --release -p reth-trie-sparse --example llc_trie`,
+//! then again with a spread list such as `LLC_BENCH_CPUS=0,6,12,18,1,7`.
+//!
 //! LLC placement microbenchmark on the real sparse trie: one block's worth of leaf updates and a
 //! root computation per iteration, run on a `reth_tasks::WorkerPool` through `install_fn`. Both
 //! `update_leaves` and `update_subtrie_hashes` fan subtries out with `par_iter` on that pool.
 //!
 //! Compare `RETH_CACHE_AFFINITY=0` (unplaced), the default (entry job pinned to the submitter's
 //! LLC), and `taskset` to one LLC domain (every worker shares the submitter's cache).
+//! `LLC_BENCH_CPUS` restricts the pool to those CPUs and pins the submitter to the first.
 //!
 //! `cargo run --release -p reth-trie-sparse --example llc_trie -- <leaves> <updates> <threads>
 //! <iters>`
@@ -46,7 +50,16 @@ fn main() {
     let threads: usize = args.get(3).and_then(|s| s.parse().ok()).unwrap_or(8);
     let iters: usize = args.get(4).and_then(|s| s.parse().ok()).unwrap_or(100);
 
+    // With `LLC_BENCH_CPUS`, pool workers inherit the list as their mask from the thread that
+    // builds the pool, and the submitter then runs on the first listed CPU.
+    let cpus = bench_cpus();
+    if let Some(cpus) = &cpus {
+        set_affinity(cpus);
+    }
     let pool = WorkerPool::new(threads, "trie");
+    if let Some(cpus) = &cpus {
+        set_affinity(&cpus[..1]);
+    }
     // Before each block, pull every pool worker into the submitter's LLC with a pinned no-op
     // broadcast, so the par_iter splits that follow run there too.
     let gather = std::env::var("LLC_GATHER").is_ok_and(|v| v == "1");
@@ -100,4 +113,26 @@ fn main() {
         us(samples[samples.len() / 2]),
         us(samples[samples.len() * 9 / 10]),
     );
+}
+
+/// CPUs listed in `LLC_BENCH_CPUS` (comma-separated), if set.
+fn bench_cpus() -> Option<Vec<usize>> {
+    let cpus = std::env::var("LLC_BENCH_CPUS").ok()?;
+    Some(cpus.split(',').map(|c| c.trim().parse().expect("bad LLC_BENCH_CPUS")).collect())
+}
+
+/// Restricts the calling thread to `cpus`. Linux only; elsewhere threads stay unpinned.
+fn set_affinity(cpus: &[usize]) {
+    #[cfg(target_os = "linux")]
+    // SAFETY: an all-zero `cpu_set_t` is the empty set, and pid 0 is the calling thread.
+    unsafe {
+        let mut set: libc::cpu_set_t = std::mem::zeroed();
+        for &cpu in cpus {
+            libc::CPU_SET(cpu, &mut set);
+        }
+        let rc = libc::sched_setaffinity(0, size_of::<libc::cpu_set_t>(), &raw const set);
+        assert_eq!(rc, 0, "sched_setaffinity({cpus:?}): {}", std::io::Error::last_os_error());
+    }
+    #[cfg(not(target_os = "linux"))]
+    let _ = cpus;
 }
