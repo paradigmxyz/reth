@@ -8,9 +8,9 @@ use alloy_rpc_types_mev::{
     SimBundleResponse, Validity,
 };
 use evm2::evm::DynDatabase;
-use jsonrpsee::core::RpcResult;
 use reth_errors::RethError;
 use reth_evm::{ConfigureEvm, Evm, EvmEnv};
+use reth_json_rpc::RpcResult;
 use reth_primitives_traits::Recovered;
 use reth_rpc_api::MevSimApiServer;
 use reth_rpc_eth_api::{
@@ -486,7 +486,6 @@ where
     }
 }
 
-#[async_trait::async_trait]
 impl<Eth> MevSimApiServer for EthSimBundle<Eth>
 where
     Eth: EthTransactions + LoadBlock + Call,

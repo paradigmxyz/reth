@@ -27,8 +27,8 @@
 // This basis of this file has been taken from the deprecated jsonrpc codebase:
 // https://github.com/paritytech/jsonrpc
 
-use bytes::{Buf, BufMut, BytesMut};
-use std::{io, str};
+use bytes::{Buf, BufMut, Bytes, BytesMut};
+use std::io;
 
 /// Separator for enveloping messages in streaming codecs
 #[derive(Debug, Clone)]
@@ -127,20 +127,9 @@ const fn is_whitespace(byte: u8) -> bool {
     matches!(byte, 0x0D | 0x0A | 0x20 | 0x09)
 }
 
-/// Converts the start of a truncated message, which may end inside a UTF-8 sequence.
-///
-/// The reader rejects the message by its length alone, so non-ASCII bytes are replaced with `?`
-/// in place, which keeps the length.
-fn lossy(truncated: BytesMut) -> String {
-    String::from_utf8(truncated.into()).unwrap_or_else(|err| {
-        let mut bytes = err.into_bytes();
-        bytes.iter_mut().filter(|b| !b.is_ascii()).for_each(|b| *b = b'?');
-        String::from_utf8(bytes).expect("ASCII is valid UTF-8")
-    })
-}
-
 impl tokio_util::codec::Decoder for StreamCodec {
-    type Item = String;
+    /// Messages are not checked for valid UTF-8, the JSON parser does that.
+    type Item = Bytes;
     type Error = io::Error;
 
     fn decode(&mut self, buf: &mut BytesMut) -> io::Result<Option<Self::Item>> {
@@ -148,14 +137,7 @@ impl tokio_util::codec::Decoder for StreamCodec {
             if let Some(i) = buf.as_ref().iter().position(|&b| b == separator) {
                 let line = buf.split_to(i);
                 buf.advance(1);
-                if let Some(truncated) = self.truncated.take() {
-                    return Ok(Some(lossy(truncated)))
-                }
-
-                match str::from_utf8(line.as_ref()) {
-                    Ok(s) => Ok(Some(s.to_string())),
-                    Err(_) => Err(io::Error::other("invalid UTF-8")),
-                }
+                Ok(Some(self.truncated.take().unwrap_or(line).freeze()))
             } else {
                 if self.truncated.is_some() {
                     buf.clear();
@@ -189,7 +171,7 @@ impl tokio_util::codec::Decoder for StreamCodec {
                 {
                     self.scan = ScanState::new();
                     buf.advance(idx + 1);
-                    return Ok(Some(lossy(truncated)))
+                    return Ok(Some(truncated.freeze()))
                 }
                 if self.scan.depth == 0 &&
                     idx != self.scan.start_idx &&
@@ -202,13 +184,7 @@ impl tokio_util::codec::Decoder for StreamCodec {
                     if start > 0 {
                         buf.advance(start);
                     }
-                    let bts = buf.split_to(end - start);
-                    // Skip invalid UTF-8 and keep scanning, the rest of the buffer may hold more
-                    // messages.
-                    match String::from_utf8(bts.into()) {
-                        Ok(msg) => return Ok(Some(msg)),
-                        Err(_) => continue,
-                    }
+                    return Ok(Some(buf.split_to(end - start).freeze()))
                 }
 
                 self.scan.cursor += 1;
@@ -449,12 +425,10 @@ mod tests {
 
     /// The stateless `Separator::Empty` decode loop that `ScanState` replaced, kept as the
     /// reference implementation for the differential tests below.
-    ///
-    /// Messages with invalid UTF-8 are skipped.
     struct ReferenceDecoder;
 
     impl Decoder for ReferenceDecoder {
-        type Item = String;
+        type Item = Bytes;
         type Error = io::Error;
 
         fn decode(&mut self, buf: &mut BytesMut) -> io::Result<Option<Self::Item>> {
@@ -485,11 +459,7 @@ mod tests {
                     if start_idx > 0 {
                         buf.advance(start_idx);
                     }
-                    let bts = buf.split_to(idx + 1 - start_idx);
-                    return match String::from_utf8(bts.into()) {
-                        Ok(msg) => Ok(Some(msg)),
-                        Err(_) => self.decode(buf),
-                    }
+                    return Ok(Some(buf.split_to(idx + 1 - start_idx).freeze()))
                 }
             }
             Ok(None)
@@ -498,7 +468,7 @@ mod tests {
 
     /// Feeds the same bytes with the same chunk boundaries to the codec and the reference
     /// decoder and returns the decode results of both. Asserts that both consume the same bytes.
-    fn drain_both(bytes: &[u8], chunks: &[usize]) -> (Vec<Option<String>>, Vec<Option<String>>) {
+    fn drain_both(bytes: &[u8], chunks: &[usize]) -> (Vec<Option<Bytes>>, Vec<Option<Bytes>>) {
         let mut ours = StreamCodec::stream_incoming();
         let mut theirs = ReferenceDecoder;
 
@@ -703,11 +673,6 @@ mod tests {
         buf.put_slice(b"gh\nij\n");
         assert_eq!(codec.decode(&mut buf).unwrap().unwrap(), "abcde");
         assert_eq!(codec.decode(&mut buf).unwrap().unwrap(), "ij");
-
-        let mut buf = BytesMut::from(&b"\xff\xffcd\xe2\x82\xacgh"[..]);
-        assert!(codec.decode(&mut buf).unwrap().is_none());
-        buf.put_slice(b"\n");
-        assert_eq!(codec.decode(&mut buf).unwrap().unwrap(), "??cd?");
     }
 
     /// Random input under random chunk schedules never leaves more than `max_length` bytes

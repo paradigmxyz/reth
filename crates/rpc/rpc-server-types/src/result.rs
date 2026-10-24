@@ -3,13 +3,13 @@
 use std::fmt;
 
 use alloy_rpc_types_engine::PayloadError;
-use jsonrpsee_core::RpcResult;
 use reth_errors::ConsensusError;
+use reth_json_rpc::RpcResult;
 
 /// Helper trait to easily convert various `Result` types into [`RpcResult`]
 pub trait ToRpcResult<Ok, Err>: Sized {
     /// Converts result to [`RpcResult`] by converting error variant to
-    /// [`jsonrpsee_types::error::ErrorObject`]
+    /// [`reth_json_rpc::ErrorObject`]
     fn to_rpc_result(self) -> RpcResult<Ok>
     where
         Err: fmt::Display,
@@ -24,14 +24,14 @@ pub trait ToRpcResult<Ok, Err>: Sized {
         M: Into<String>;
 
     /// Converts this type into an [`RpcResult`] with the
-    /// [`jsonrpsee_types::error::INTERNAL_ERROR_CODE`] and the given message.
+    /// [`reth_json_rpc::INTERNAL_ERROR_CODE`] and the given message.
     fn map_internal_err<F, M>(self, op: F) -> RpcResult<Ok>
     where
         F: FnOnce(Err) -> M,
         M: Into<String>;
 
     /// Converts this type into an [`RpcResult`] with the
-    /// [`jsonrpsee_types::error::INTERNAL_ERROR_CODE`] and given message and data.
+    /// [`reth_json_rpc::INTERNAL_ERROR_CODE`] and given message and data.
     fn map_internal_err_with_data<'a, F, M>(self, op: F) -> RpcResult<Ok>
     where
         F: FnOnce(Err) -> (M, &'a [u8]),
@@ -49,7 +49,7 @@ macro_rules! impl_to_rpc_result {
     ($err:ty) => {
         impl<Ok> ToRpcResult<Ok, $err> for Result<Ok, $err> {
             #[inline]
-            fn map_rpc_err<'a, F, M>(self, op: F) -> jsonrpsee_core::RpcResult<Ok>
+            fn map_rpc_err<'a, F, M>(self, op: F) -> reth_json_rpc::RpcResult<Ok>
             where
                 F: FnOnce($err) -> (i32, M, Option<&'a [u8]>),
                 M: Into<String>,
@@ -64,7 +64,7 @@ macro_rules! impl_to_rpc_result {
             }
 
             #[inline]
-            fn map_internal_err<F, M>(self, op: F) -> jsonrpsee_core::RpcResult<Ok>
+            fn map_internal_err<F, M>(self, op: F) -> reth_json_rpc::RpcResult<Ok>
             where
                 F: FnOnce($err) -> M,
                 M: Into<String>,
@@ -73,7 +73,7 @@ macro_rules! impl_to_rpc_result {
             }
 
             #[inline]
-            fn map_internal_err_with_data<'a, F, M>(self, op: F) -> jsonrpsee_core::RpcResult<Ok>
+            fn map_internal_err_with_data<'a, F, M>(self, op: F) -> reth_json_rpc::RpcResult<Ok>
             where
                 F: FnOnce($err) -> (M, &'a [u8]),
                 M: Into<String>,
@@ -88,7 +88,7 @@ macro_rules! impl_to_rpc_result {
             }
 
             #[inline]
-            fn with_message(self, msg: &str) -> jsonrpsee_core::RpcResult<Ok> {
+            fn with_message(self, msg: &str) -> reth_json_rpc::RpcResult<Ok> {
                 match self {
                     Ok(t) => Ok(t),
                     Err(err) => {
@@ -108,30 +108,25 @@ impl_to_rpc_result!(reth_errors::ProviderError);
 impl_to_rpc_result!(reth_network_api::NetworkError);
 
 /// Constructs an invalid params JSON-RPC error.
-pub fn invalid_params_rpc_err(
-    msg: impl Into<String>,
-) -> jsonrpsee_types::error::ErrorObject<'static> {
-    rpc_err(jsonrpsee_types::error::INVALID_PARAMS_CODE, msg, None)
+pub fn invalid_params_rpc_err(msg: impl Into<String>) -> reth_json_rpc::ErrorObject {
+    rpc_err(reth_json_rpc::INVALID_PARAMS_CODE, msg, None)
 }
 
 /// Constructs an internal JSON-RPC error.
-pub fn internal_rpc_err(msg: impl Into<String>) -> jsonrpsee_types::error::ErrorObject<'static> {
-    rpc_err(jsonrpsee_types::error::INTERNAL_ERROR_CODE, msg, None)
+pub fn internal_rpc_err(msg: impl Into<String>) -> reth_json_rpc::ErrorObject {
+    rpc_err(reth_json_rpc::INTERNAL_ERROR_CODE, msg, None)
 }
 
 /// Constructs an internal JSON-RPC error with data
 pub fn internal_rpc_err_with_data(
     msg: impl Into<String>,
     data: &[u8],
-) -> jsonrpsee_types::error::ErrorObject<'static> {
-    rpc_err(jsonrpsee_types::error::INTERNAL_ERROR_CODE, msg, Some(data))
+) -> reth_json_rpc::ErrorObject {
+    rpc_err(reth_json_rpc::INTERNAL_ERROR_CODE, msg, Some(data))
 }
 
 /// Constructs an internal JSON-RPC error with code and message
-pub fn rpc_error_with_code(
-    code: i32,
-    msg: impl Into<String>,
-) -> jsonrpsee_types::error::ErrorObject<'static> {
+pub fn rpc_error_with_code(code: i32, msg: impl Into<String>) -> reth_json_rpc::ErrorObject {
     rpc_err(code, msg, None)
 }
 
@@ -140,15 +135,8 @@ pub fn rpc_err(
     code: i32,
     msg: impl Into<String>,
     data: Option<&[u8]>,
-) -> jsonrpsee_types::error::ErrorObject<'static> {
-    jsonrpsee_types::error::ErrorObject::owned(
-        code,
-        msg.into(),
-        data.map(|data| {
-            jsonrpsee_core::to_json_raw_value(&alloy_primitives::hex::encode_prefixed(data))
-                .expect("serializing String can't fail")
-        }),
-    )
+) -> reth_json_rpc::ErrorObject {
+    reth_json_rpc::ErrorObject::owned(code, msg, data.map(alloy_primitives::hex::encode_prefixed))
 }
 
 #[cfg(test)]

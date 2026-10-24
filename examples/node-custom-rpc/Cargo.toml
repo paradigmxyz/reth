@@ -9,9 +9,10 @@ license.workspace = true
 reth-ethereum = { workspace = true, features = ["node", "pool", "cli"] }
 
 clap = { workspace = true, features = ["derive"] }
-jsonrpsee = { workspace = true, features = ["server", "macros"] }
+reth-json-rpc = { workspace = true, features = ["macros"] }
 tokio.workspace = true
-serde_json.workspace = true
 
 [dev-dependencies]
+reth-json-rpc = { workspace = true, features = ["http-client", "server", "ws-client"] }
+
 [lints]

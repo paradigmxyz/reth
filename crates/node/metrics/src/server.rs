@@ -234,9 +234,10 @@ impl MetricServer {
 
             let mut shutdown = signal.clone().ignore_guard();
             tokio::task::spawn(async move {
-                let _ = jsonrpsee_server::serve_with_graceful_shutdown(io, service, &mut shutdown)
-                    .await
-                    .inspect_err(|error| tracing::debug!(%error, "failed to serve request"));
+                let _ =
+                    reth_json_rpc::server::serve_with_graceful_shutdown(io, service, &mut shutdown)
+                        .await
+                        .inspect_err(|error| tracing::debug!(%error, "failed to serve request"));
             });
         });
 
@@ -484,6 +485,15 @@ fn handle_pprof_heap(pprof_dump_dir: &PathBuf) -> Response<Full<Bytes>> {
     }
 }
 
+#[cfg(not(all(feature = "jemalloc-prof", unix)))]
+fn handle_pprof_heap(_pprof_dump_dir: &PathBuf) -> Response<Full<Bytes>> {
+    let mut response = Response::new(Full::new(Bytes::from_static(
+        b"jemalloc pprof support not compiled. Rebuild with the jemalloc-prof feature.",
+    )));
+    *response.status_mut() = StatusCode::NOT_IMPLEMENTED;
+    response
+}
+
 /// Equivalent to [`jemalloc_pprof::JemallocProfCtl::dump`], but accepts a directory that the
 /// temporary pprof file will be written to. The file is deleted when the function exits.
 #[cfg(all(feature = "jemalloc-prof", unix))]
@@ -508,15 +518,6 @@ fn jemalloc_pprof_dump(pprof_dump_dir: &PathBuf) -> eyre::Result<Vec<u8>> {
     let pprof = profile.to_pprof(("inuse_space", "bytes"), ("space", "bytes"), None);
 
     Ok(pprof)
-}
-
-#[cfg(not(all(feature = "jemalloc-prof", unix)))]
-fn handle_pprof_heap(_pprof_dump_dir: &PathBuf) -> Response<Full<Bytes>> {
-    let mut response = Response::new(Full::new(Bytes::from_static(
-        b"jemalloc pprof support not compiled. Rebuild with the jemalloc-prof feature.",
-    )));
-    *response.status_mut() = StatusCode::NOT_IMPLEMENTED;
-    response
 }
 
 #[cfg(tokio_unstable)]
