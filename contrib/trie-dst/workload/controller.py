@@ -93,7 +93,11 @@ def worker(config):
     process = None
     killed = 0
     recovered = 0
+    recovered_persisted = 0
     plan = list(config["kill_blocks"])
+    require_persisted = (bool(plan) and
+                         config["workload"]["blocks"] >= config["workload"]["persistence_threshold"] + 4)
+    persisted = False
     # Rust may make two sequential timeout-bounded waits before its next event;
     # recovery has no internal timeout and can use the campaign horizon.
     idle_budget = 2 * config["workload"]["timeout_secs"] + config["run_secs"]
@@ -147,10 +151,17 @@ def worker(config):
                             assertion(True, json.dumps(event), "trie/input/injected", "Sometimes")
                         if event.get("persistence") == "complete":
                             assertion(True, json.dumps(event), "trie/persistence/committed", "Sometimes")
+                            persisted |= event.get("db_tip", 0) > 0
                         if event.get("recovery") == "complete":
                             recovered += 1
+                            recovered_persisted += int(killed > 0 and event.get("head", 0) > 0)
                             assertion(True, json.dumps(event), "trie/recovery/checked", "Sometimes")
-                        if not planned and plan and "operations" in event and event.get("block", 0) >= plan[0]:
+                        position = event.get("block", event.get("head", 0))
+                        if (not planned and plan and position >= plan[0] and
+                                ("operations" in event or
+                                 (event.get("persistence") == "complete" and
+                                  position < config["workload"]["blocks"])) and
+                                (persisted or not require_persisted)):
                             process.send_signal(signal.SIGKILL)
                             target = plan.pop(0)
                             killed += 1
@@ -182,8 +193,12 @@ def worker(config):
     if not ok:
         detail += "; " + (STATE / "run.log").read_text(errors="replace")[-12000:]
     assertion(ok, detail)
+    if require_persisted:
+        assertion(recovered_persisted > 0, f"post-crash recovery from persisted head: {recovered_persisted}",
+                  "trie/recovery/persisted")
     (STATE / "done.json").write_text(json.dumps({"ok": ok, "kills": killed,
-                                               "armed": len(config["kill_blocks"]), "recoveries": recovered}))
+                                               "armed": len(config["kill_blocks"]), "recoveries": recovered,
+                                               "persisted_recoveries": recovered_persisted}))
 
 
 def main():

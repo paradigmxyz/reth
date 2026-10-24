@@ -459,11 +459,6 @@ fn run(config: &mut Config, snapshotter: &Snapshotter) -> Result<()> {
                 state_tip = next_state;
                 commits += 1;
                 partial_commits += u64::from(db_tip != state_tip);
-                println!(
-                    "{}",
-                    json!({"persistence": "complete", "head": head,
-                    "db_tip": db_tip, "state_tip": state_tip})
-                );
                 manager.evict_cached_changesets(
                     db_tip.saturating_sub(CHANGESET_CACHE_RETENTION_BLOCKS),
                 );
@@ -481,6 +476,11 @@ fn run(config: &mut Config, snapshotter: &Snapshotter) -> Result<()> {
                 };
                 manager.precompute_execution_overlay(parent.hash(), anchor);
                 prune_requested = true;
+                println!(
+                    "{}",
+                    json!({"persistence": "complete", "head": head,
+                    "db_tip": db_tip, "state_tip": state_tip})
+                );
                 continue;
             }
         }
