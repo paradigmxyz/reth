@@ -12,6 +12,15 @@ apt-get install -y --no-install-recommends \
     lsb-release wget gnupg ca-certificates
 apt-get install -y --no-install-recommends software-properties-common 2>/dev/null || true
 
+# Every python3-lldb-* package conflicts with the others, so remove other versions that
+# self-hosted runners keep from earlier jobs before llvm.sh installs this one.
+other_lldb=$(dpkg-query -W -f '${db:Status-Abbrev} ${Package}\n' 'python3-lldb-*' 2>/dev/null |
+    awk -v keep="python3-lldb-$v" 'substr($1, 2, 1) == "i" && $2 != keep { print $2 }' || true)
+if [[ -n "$other_lldb" ]]; then
+    # shellcheck disable=SC2086
+    apt-get remove -y $other_lldb
+fi
+
 # Use the official LLVM install script which handles distro detection,
 # GPG key import, and apt source configuration for all Debian/Ubuntu versions.
 llvm_sh=$(mktemp)
