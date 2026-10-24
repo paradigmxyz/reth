@@ -1682,6 +1682,7 @@ mod tests {
             runtime,
             ProofTaskCtx::new(state_provider_factory),
             ProofWorkerCounts::full(runtime),
+            Default::default(),
         );
         let (updates_tx, updates_rx) = crossbeam_channel::unbounded();
         let (cancel_guard, cancel_rx) = crossbeam_channel::bounded(0);
@@ -2264,6 +2265,7 @@ mod tests {
             &runtime,
             ProofTaskCtx::new(state_provider_factory),
             ProofWorkerCounts::full(&runtime),
+            Default::default(),
         );
 
         let default_trie = RevealableSparseTrie::blind_from(ArenaParallelSparseTrie::default());
@@ -2344,6 +2346,7 @@ mod tests {
             &runtime,
             ProofTaskCtx::new(state_provider_factory),
             ProofWorkerCounts::full(&runtime),
+            Default::default(),
         );
 
         let default_trie = RevealableSparseTrie::blind_from(ArenaParallelSparseTrie::default());
@@ -2395,6 +2398,7 @@ mod tests {
             &runtime,
             ProofTaskCtx::new(state_provider_factory),
             ProofWorkerCounts::full(&runtime),
+            Default::default(),
         );
 
         let default_trie = RevealableSparseTrie::blind_from(ArenaParallelSparseTrie::default());
@@ -2478,6 +2482,7 @@ mod tests {
             &runtime,
             ProofTaskCtx::new(state_provider_factory),
             ProofWorkerCounts::full(&runtime),
+            Default::default(),
         );
 
         let default_trie = RevealableSparseTrie::blind_from(ArenaParallelSparseTrie::default());

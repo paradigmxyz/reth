@@ -100,7 +100,7 @@ pub mod state;
 ///
 /// This ensures that recent changesets are kept in memory for potential reorgs,
 /// even when the finalized block is not set (e.g., on L2s like Optimism).
-const CHANGESET_CACHE_RETENTION_BLOCKS: u64 = 64;
+pub const CHANGESET_CACHE_RETENTION_BLOCKS: u64 = 64;
 
 /// Tracks the state of the engine api internals.
 ///
@@ -2685,12 +2685,12 @@ where
     /// and block body itself.
     fn validate_block(&self, block: &SealedBlock<N::Block>) -> Result<(), ConsensusError> {
         if let Err(e) = self.consensus.validate_header(block.sealed_header()) {
-            error!(target: "engine::tree", ?block, "Failed to validate header {}: {e}", block.hash());
+            error!(target: "engine::tree", block = ?block.block_with_parent(), %e, "Failed to validate header");
             return Err(e)
         }
 
         if let Err(e) = self.consensus.validate_block_pre_execution(block) {
-            error!(target: "engine::tree", ?block, "Failed to validate block {}: {e}", block.hash());
+            error!(target: "engine::tree", block = ?block.block_with_parent(), %e, "Failed to validate block");
             return Err(e)
         }
 

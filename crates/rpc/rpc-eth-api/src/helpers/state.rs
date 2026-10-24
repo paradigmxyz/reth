@@ -179,7 +179,7 @@ pub trait EthState: LoadState + SpawnBlocking {
                 let proof = state
                     .proof(Default::default(), address, &storage_keys)
                     .map_err(Self::Error::from_eth_err)?;
-                Ok(proof.into_eip1186_response(keys))
+                Ok(proof.into_eip1186_response_with(keys, true))
             })
             .await
         })
@@ -215,16 +215,17 @@ pub trait EthState: LoadState + SpawnBlocking {
                 for (address, slots) in &targets {
                     let hashed_address = keccak256(address);
                     proof_targets.account_targets.push(ProofV2Target::new(hashed_address));
-                    proof_targets
-                        .storage_targets
-                        .entry(hashed_address)
-                        .or_default()
-                        .extend(slots.iter().map(|slot| ProofV2Target::new(keccak256(slot))));
+                    if !slots.is_empty() {
+                        proof_targets
+                            .storage_targets
+                            .entry(hashed_address)
+                            .or_default()
+                            .extend(slots.iter().map(|slot| ProofV2Target::new(keccak256(slot))));
+                    }
                 }
 
-                let multiproof = state
-                    .multiproof_v2(Default::default(), proof_targets)
-                    .map_err(Self::Error::from_eth_err)?;
+                let multiproof =
+                    state.multiproof_v2(proof_targets, false).map_err(Self::Error::from_eth_err)?;
 
                 targets
                     .into_iter()
@@ -235,7 +236,7 @@ pub trait EthState: LoadState + SpawnBlocking {
                             .map_err(Self::Error::from_eth_err)?;
                         let storage_keys =
                             slots.into_iter().map(JsonStorageKey::from).collect::<Vec<_>>();
-                        Ok(proof.into_eip1186_response(storage_keys))
+                        Ok(proof.into_eip1186_response_with(storage_keys, true))
                     })
                     .collect::<Result<Vec<_>, Self::Error>>()
             })

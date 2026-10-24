@@ -1,0 +1,7 @@
+# Dependabot maintains this project and uv.lock together.
+# For manual upgrades, use --exclude-newer with a cutoff at least seven days old.
+[project]
+name = "bench-reth-charts"
+version = "0.0.0"
+requires-python = ">=3.10"
+dependencies = ["matplotlib==3.10.8", "numpy", "pillow==12.3.0"]
