@@ -11,7 +11,69 @@ use ffi::{
     MDBX_NEXT_MULTIPLE, MDBX_NEXT_NODUP, MDBX_PREV, MDBX_PREV_DUP, MDBX_PREV_MULTIPLE,
     MDBX_PREV_NODUP, MDBX_SET, MDBX_SET_KEY, MDBX_SET_LOWERBOUND, MDBX_SET_RANGE,
 };
-use std::{borrow::Cow, ffi::c_void, fmt, marker::PhantomData, mem, ptr};
+use std::{borrow::Cow, cell::RefCell, ffi::c_void, fmt, marker::PhantomData, mem, ptr};
+
+/// Maximum number of unbound cursors each thread keeps for reuse.
+const CURSOR_POOL_CAPACITY: usize = 32;
+
+thread_local! {
+    /// Unbound cursors kept for reuse, so opening a cursor doesn't allocate.
+    static CURSOR_POOL: RefCell<CursorPool> = const { RefCell::new(CursorPool(Vec::new())) };
+}
+
+/// Unbound MDBX cursors owned by the current thread.
+struct CursorPool(Vec<*mut ffi::MDBX_cursor>);
+
+impl Drop for CursorPool {
+    fn drop(&mut self) {
+        for cursor in self.0.drain(..) {
+            // SAFETY: Pooled cursors are unbound and owned by the pool.
+            unsafe { ffi::mdbx_cursor_close(cursor) }
+        }
+    }
+}
+
+/// Takes an unbound cursor from the current thread's pool, or creates a new one.
+fn create_cursor() -> Result<*mut ffi::MDBX_cursor> {
+    let cursor = CURSOR_POOL
+        .try_with(|pool| pool.try_borrow_mut().ok().and_then(|mut pool| pool.0.pop()))
+        .ok()
+        .flatten()
+        // SAFETY: Creating an unbound cursor has no preconditions.
+        .unwrap_or_else(|| unsafe { ffi::mdbx_cursor_create(ptr::null_mut()) });
+    if cursor.is_null() {
+        return Err(Error::from_err_code(ffi::MDBX_ENOMEM))
+    }
+    Ok(cursor)
+}
+
+/// Unbinds the cursor and returns it to the current thread's pool, or closes it if it can't be
+/// unbound or the pool is full.
+///
+/// # Safety
+///
+/// The cursor must be valid and must not be used afterwards. If it is bound, its transaction
+/// must be usable, as required by `mdbx_cursor_close`.
+unsafe fn release_cursor(cursor: *mut ffi::MDBX_cursor) {
+    // Unbinding fails where closing must take another path, e.g. for a cursor of a parent of an
+    // active nested transaction. Closing handles every case, as before pooling.
+    if unsafe { ffi::mdbx_cursor_unbind(cursor) } == ffi::MDBX_SUCCESS &&
+        CURSOR_POOL
+            .try_with(|pool| {
+                let Ok(mut pool) = pool.try_borrow_mut() else { return false };
+                if pool.0.len() < CURSOR_POOL_CAPACITY {
+                    pool.0.push(cursor);
+                    true
+                } else {
+                    false
+                }
+            })
+            .unwrap_or(false)
+    {
+        return
+    }
+    unsafe { ffi::mdbx_cursor_close(cursor) }
+}
 
 /// A cursor for navigating the items within a database.
 pub struct Cursor<K>
@@ -27,18 +89,19 @@ where
     K: TransactionKind,
 {
     pub(crate) fn new(txn: Transaction<K>, dbi: ffi::MDBX_dbi) -> Result<Self> {
-        let mut cursor: *mut ffi::MDBX_cursor = ptr::null_mut();
-        unsafe {
-            txn.txn_execute(|txn_ptr| {
-                mdbx_result(ffi::mdbx_cursor_open(txn_ptr, dbi, &mut cursor))
-            })??;
+        let cursor = create_cursor()?;
+        let res = txn.txn_execute(|txn_ptr| unsafe { ffi::mdbx_cursor_bind(txn_ptr, cursor, dbi) });
+        if let Err(err) = res.and_then(mdbx_result) {
+            // SAFETY: The cursor failed to bind, so it's unbound and unused.
+            unsafe { ffi::mdbx_cursor_close(cursor) };
+            return Err(err)
         }
         Ok(Self { txn, cursor })
     }
 
     fn new_at_position(other: &Self) -> Result<Self> {
         unsafe {
-            let cursor = ffi::mdbx_cursor_create(ptr::null_mut());
+            let cursor = create_cursor()?;
 
             let res = ffi::mdbx_cursor_copy(other.cursor(), cursor);
 
@@ -487,9 +550,7 @@ where
     fn drop(&mut self) {
         // To be able to close a cursor of a timed out transaction, we need to renew it first.
         // Hence the usage of `txn_execute_renew_on_timeout` here.
-        let _ = self
-            .txn
-            .txn_execute_renew_on_timeout(|_| unsafe { ffi::mdbx_cursor_close(self.cursor) });
+        let _ = self.txn.txn_execute_renew_on_timeout(|_| unsafe { release_cursor(self.cursor) });
     }
 }
 
