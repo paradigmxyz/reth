@@ -1,6 +1,6 @@
 //! Additional helpers for executing tracing calls
 
-use crate::metrics::WorkerPoolMetrics;
+use crate::{affinity::JobDomain, metrics::WorkerPoolMetrics};
 use std::{
     any::Any,
     cell::RefCell,
@@ -233,9 +233,13 @@ impl WorkerPool {
     /// The closure runs with exclusive access to each selected thread's worker.
     /// Only `num_threads` threads execute the closure; the rest skip it.
     pub fn broadcast(&self, num_threads: usize, f: impl Fn(&mut Worker) + Sync) {
+        // Broadcast closures often run for a whole block, so workers are moved next to the caller
+        // without holding a slot; short jobs they run pin themselves.
+        let domain = JobDomain::capture();
         if num_threads >= self.pool().current_num_threads() {
             // Fast path: run on every thread, no atomic coordination needed.
             self.pool().broadcast(|_| {
+                domain.place();
                 WORKER.with_borrow_mut(|worker| f(worker));
             });
         } else {
@@ -257,6 +261,7 @@ impl WorkerPool {
                         Err(actual) => current = actual,
                     }
                 }
+                domain.place();
                 WORKER.with_borrow_mut(|worker| f(worker));
             });
         }
@@ -271,12 +276,13 @@ impl WorkerPool {
         let pool = self.pool();
         let metrics = self.metrics().clone();
         let queued_at = Instant::now();
+        let domain = JobDomain::capture();
 
         pool.install(move || {
             let started_at = Instant::now();
             metrics.record_job_queue_wait(started_at.saturating_duration_since(queued_at));
             let _record_job_duration = RecordWorkerPoolJobDurationOnDrop::new(metrics, started_at);
-            WORKER.with_borrow(|worker| f(worker))
+            domain.run(|| WORKER.with_borrow(|worker| f(worker)))
         })
     }
 
@@ -288,12 +294,13 @@ impl WorkerPool {
         let pool = self.pool();
         let metrics = self.metrics().clone();
         let queued_at = Instant::now();
+        let domain = JobDomain::capture();
 
         pool.install(move || {
             let started_at = Instant::now();
             metrics.record_job_queue_wait(started_at.saturating_duration_since(queued_at));
             let _record_job_duration = RecordWorkerPoolJobDurationOnDrop::new(metrics, started_at);
-            f()
+            domain.run(f)
         })
     }
 
@@ -324,12 +331,13 @@ impl WorkerPool {
         let pool = self.pool();
         let metrics = self.metrics().clone();
         let queued_at = Instant::now();
+        let domain = JobDomain::capture();
 
         pool.spawn(move || {
             let started_at = Instant::now();
             metrics.record_job_queue_wait(started_at.saturating_duration_since(queued_at));
             let _record_job_duration = RecordWorkerPoolJobDurationOnDrop::new(metrics, started_at);
-            f();
+            domain.run(f);
         });
     }
 

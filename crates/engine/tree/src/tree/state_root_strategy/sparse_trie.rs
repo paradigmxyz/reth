@@ -16,7 +16,7 @@ use crossbeam_channel::{Receiver as CrossbeamReceiver, Sender as CrossbeamSender
 use metrics::{Gauge, Histogram};
 use reth_metrics::Metrics;
 use reth_primitives_traits::{Account, FastInstant as Instant};
-use reth_tasks::Runtime;
+use reth_tasks::{affinity::JobDomain, Runtime};
 use reth_trie::{
     updates::TrieUpdates, DecodedMultiProofV2, HashedPostState, TrieAccount, EMPTY_ROOT_HASH,
     TRIE_ACCOUNT_RLP_MAX_SIZE,
@@ -927,31 +927,35 @@ where
         let chunk_len = storage_job_chunk_len(jobs.len());
         let new_epoch = self.new_epoch;
         let retain_updates = self.trie.retains_updates();
+        // The tries come back to this thread, so run the jobs in its LLC domain.
+        let domain = JobDomain::capture();
         while !jobs.is_empty() {
             let chunk = jobs.split_off(jobs.len().saturating_sub(chunk_len));
             let storage_done_tx = self.storage_done_tx.clone();
             let parent_span = parent_span.clone();
             rayon::spawn(move || {
-                let _enter = debug_span!(
-                    target: "engine::tree::payload_processor::sparse_trie",
-                    parent: &parent_span,
-                    "storage_jobs",
-                    n = chunk.len(),
-                )
-                .entered();
-                for job in chunk {
-                    let address = job.address;
-                    let message = match panic::catch_unwind(AssertUnwindSafe(|| {
-                        job.run(new_epoch, retain_updates)
-                    })) {
-                        Ok(done) => StorageJobMessage::Done(done),
-                        Err(payload) => StorageJobMessage::Panicked { address, payload },
-                    };
-                    if storage_done_tx.send(message).is_err() {
-                        // Nobody is waiting for the result anymore, drop the rest here.
-                        return;
+                domain.run(|| {
+                    let _enter = debug_span!(
+                        target: "engine::tree::payload_processor::sparse_trie",
+                        parent: &parent_span,
+                        "storage_jobs",
+                        n = chunk.len(),
+                    )
+                    .entered();
+                    for job in chunk {
+                        let address = job.address;
+                        let message = match panic::catch_unwind(AssertUnwindSafe(|| {
+                            job.run(new_epoch, retain_updates)
+                        })) {
+                            Ok(done) => StorageJobMessage::Done(done),
+                            Err(payload) => StorageJobMessage::Panicked { address, payload },
+                        };
+                        if storage_done_tx.send(message).is_err() {
+                            // Nobody is waiting for the result anymore, drop the rest here.
+                            return;
+                        }
                     }
-                }
+                })
             });
         }
     }

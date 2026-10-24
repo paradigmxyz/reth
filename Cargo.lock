@@ -10820,6 +10820,7 @@ dependencies = [
 name = "reth-tasks"
 version = "2.8.1"
 dependencies = [
+ "crossbeam-channel",
  "crossbeam-utils",
  "dashmap",
  "futures-util",
@@ -11122,6 +11123,7 @@ dependencies = [
  "reth-execution-errors",
  "reth-metrics",
  "reth-primitives-traits",
+ "reth-tasks",
  "reth-tracing",
  "reth-trie",
  "reth-trie-common",

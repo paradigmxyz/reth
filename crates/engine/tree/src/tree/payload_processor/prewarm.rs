@@ -42,7 +42,7 @@ use reth_provider::{
 };
 use reth_revm::database::StateProviderDatabase;
 use reth_storage_overlay::OverlayStateProviderFactory;
-use reth_tasks::{Runtime, WorkerStatefulPool};
+use reth_tasks::{affinity::JobDomain, Runtime, WorkerStatefulPool};
 use reth_trie_common::MultiProofTargetsV2;
 use revm::{context::Transaction as _, state::EvmState};
 use std::{
@@ -183,6 +183,8 @@ where
             {
                 let pool = WorkerStatefulPool::new(pool);
                 let pool = &pool;
+                // Prewarmed state is read by execution on this thread's LLC domain.
+                let domain = JobDomain::capture();
                 pool.in_place_scope(|s| {
                     while let Ok((index, tx)) = pending.recv() {
                         if ctx.should_stop() {
@@ -215,21 +217,23 @@ where
                         }
                         let parent_span = Span::current();
                         s.spawn(move |_| {
-                            let _enter = trace_span!(
-                                target: "engine::tree::payload_processor::prewarm",
-                                parent: parent_span,
-                                "prewarm_tx",
-                                i = index,
-                            )
-                            .entered();
-                            Self::transact_worker(
-                                ctx,
-                                pool,
-                                index,
-                                tx,
-                                seeded,
-                                state_root_hint_stream,
-                            );
+                            domain.run(|| {
+                                let _enter = trace_span!(
+                                    target: "engine::tree::payload_processor::prewarm",
+                                    parent: parent_span,
+                                    "prewarm_tx",
+                                    i = index,
+                                )
+                                .entered();
+                                Self::transact_worker(
+                                    ctx,
+                                    pool,
+                                    index,
+                                    tx,
+                                    seeded,
+                                    state_root_hint_stream,
+                                );
+                            })
                         });
                     }
 
