@@ -880,17 +880,14 @@ fn main() -> Result<()> {
                 let expected_roots = input
                     .operations
                     .split_inclusive(|op| matches!(op, Operation::Commit))
-                    .enumerate()
-                    .map(|(i, block)| {
-                        let updates = block
-                            .iter()
-                            .flat_map(|op| match op {
-                                Operation::UpdateBatch { updates } => updates.as_slice(),
-                                _ => &[],
-                            })
-                            .cloned()
-                            .collect::<Vec<_>>();
-                        apply(&mut state, i as u64 + 1, &updates);
+                    .map(|block| {
+                        for op in block {
+                            if let Operation::UpdateBatch { updates } = op {
+                                for update in updates {
+                                    update.apply_to_model(&mut state);
+                                }
+                            }
+                        }
                         root(&state)
                     })
                     .collect::<Vec<_>>();

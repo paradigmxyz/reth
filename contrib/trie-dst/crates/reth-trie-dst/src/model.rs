@@ -30,13 +30,11 @@ pub enum Update {
 }
 
 impl Update {
-    fn apply(&self, state: &mut Model) -> (Address, HashedPostState) {
-        let mut delta = HashedPostState::default();
-        let address = match self {
+    pub(crate) fn apply_to_model(&self, state: &mut Model) -> (Address, Option<B256>) {
+        match self {
             Self::Account { address, account } => {
                 state.entry(*address).or_default().account = account.to_owned();
-                delta.accounts.insert(keccak256(address), Some(account.to_owned()));
-                *address
+                (*address, None)
             }
             Self::Storage { address, slot, value } => {
                 let entry = state.get_mut(address).expect("storage account exists");
@@ -49,13 +47,27 @@ impl Update {
                     entry.storage.insert(*slot, *value);
                     entry.hashed_storage.insert(hashed_slot, alloy_rlp::encode(value));
                 }
+                (*address, Some(hashed_slot))
+            }
+        }
+    }
+
+    fn apply(&self, state: &mut Model) -> (Address, HashedPostState) {
+        let (address, hashed_slot) = self.apply_to_model(state);
+        let mut delta = HashedPostState::default();
+        match self {
+            Self::Account { account, .. } => {
+                delta.accounts.insert(keccak256(address), Some(account.to_owned()));
+            }
+            Self::Storage { value, .. } => {
                 delta.storages.insert(
                     keccak256(address),
-                    HashedStorage { storage: HashMap::from_iter([(hashed_slot, *value)]) },
+                    HashedStorage {
+                        storage: HashMap::from_iter([(hashed_slot.expect("storage slot"), *value)]),
+                    },
                 );
-                *address
             }
-        };
+        }
         (address, delta)
     }
 }
