@@ -206,6 +206,13 @@ impl ExecutionOverlay {
             code_hashes: Vec::with_capacity(state.contracts.len()),
         };
         for (address, account) in state.state() {
+            // Loaded code is retained on account info, while `contracts` only contains new code.
+            if let Some(info) = &account.info &&
+                let Some(code) = &info.code
+            {
+                self.extend_bytecode(info.code_hash, code, block_number);
+                changes.code_hashes.push(info.code_hash);
+            }
             let value = ExecutionOverlayValue {
                 block_number,
                 value: Self::normalized_account_info(account.info.clone()),
@@ -249,12 +256,7 @@ impl ExecutionOverlay {
             }
         }
         for (hash, code) in &state.contracts {
-            if let Some(entry) = self.code_hashes.get_mut(hash) {
-                entry.block_number = block_number;
-            } else {
-                self.code_hashes
-                    .insert_mut(*hash, ExecutionOverlayValue { block_number, value: code.clone() });
-            }
+            self.extend_bytecode(*hash, code, block_number);
             changes.code_hashes.push(*hash);
         }
         changes
@@ -266,6 +268,15 @@ impl ExecutionOverlay {
             info.account_id = None;
         }
         info
+    }
+
+    fn extend_bytecode(&mut self, hash: B256, code: &Bytecode, block_number: BlockNumber) {
+        if let Some(entry) = self.code_hashes.get_mut(&hash) {
+            entry.block_number = block_number;
+        } else {
+            self.code_hashes
+                .insert_mut(hash, ExecutionOverlayValue { block_number, value: code.clone() });
+        }
     }
 }
 
