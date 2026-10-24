@@ -6,11 +6,11 @@ use alloy_eips::{
     eip7910::{EthConfig, EthForkConfig, SystemContract},
 };
 use alloy_primitives::Address;
+use evm2::evm::EmptyDB;
 use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthereumHardforks, Hardforks, Head};
 use reth_errors::{ProviderError, RethError};
 use reth_evm::{ConfigureEvm, Evm};
 use reth_json_rpc::{rpc, RpcResult};
-use evm2::evm::EmptyDB;
 use reth_node_api::NodePrimitives;
 use reth_primitives_traits::header::HeaderMut;
 use reth_rpc_eth_types::EthApiError;

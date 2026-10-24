@@ -12,6 +12,8 @@ use alloy_rpc_types_trace::geth::{
     ChainBlockTraceResult, GethDebugTracingCallOptions, GethDebugTracingOptions, GethTrace,
     TraceResult,
 };
+use evm2::evm::StateChangeSource;
+use evm2_inspectors::tracing::{DebugInspector, TransactionContext};
 use futures::Stream;
 use parking_lot::RwLock;
 use reth_chainspec::{ChainSpecProvider, EthereumHardforks};
@@ -22,8 +24,6 @@ use reth_evm::{
     EvmEnvFor,
 };
 use reth_json_rpc::{PendingSubscriptionSink, RpcResult};
-use evm2::evm::StateChangeSource;
-use evm2_inspectors::tracing::{DebugInspector, TransactionContext};
 use reth_primitives_traits::{
     Block as BlockTrait, BlockBody, BlockTy, ReceiptWithBloom, RecoveredBlock,
 };

@@ -7,10 +7,10 @@ use alloy_rpc_types_mev::{
     BundleItem, Inclusion, MevSendBundle, Privacy, RefundConfig, SimBundleLogs, SimBundleOverrides,
     SimBundleResponse, Validity,
 };
+use evm2::evm::DynDatabase;
 use reth_errors::RethError;
 use reth_evm::{ConfigureEvm, Evm, EvmEnv};
 use reth_json_rpc::RpcResult;
-use evm2::evm::DynDatabase;
 use reth_primitives_traits::Recovered;
 use reth_rpc_api::MevSimApiServer;
 use reth_rpc_eth_api::{

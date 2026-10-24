@@ -14,15 +14,15 @@ use alloy_rpc_types_trace::{
     parity::*,
     tracerequest::TraceCallRequest,
 };
-use futures::{FutureExt, StreamExt};
-use reth_evm::ConfigureEvm;
-use reth_json_rpc::RpcResult;
 use evm2_inspectors::{
     opcode::OpcodeGasInspector,
     storage::StorageInspector,
     tracing::{TracingInspector, TracingInspectorConfig},
 };
+use futures::{FutureExt, StreamExt};
 use reth_chainspec::{ChainSpecProvider, EthereumHardforks};
+use reth_evm::ConfigureEvm;
+use reth_json_rpc::RpcResult;
 use reth_primitives_traits::{BlockBody, BlockHeader};
 use reth_rpc_api::TraceApiServer;
 use reth_rpc_convert::RpcTxReq;
