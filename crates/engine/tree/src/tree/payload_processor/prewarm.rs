@@ -754,7 +754,9 @@ where
     #[instrument(level = "debug", target = "engine::tree::payload_processor::prewarm", skip_all)]
     fn evm_for_ctx(&self) -> PrewarmEvmState<Evm> {
         let mut state_provider = match self.provider.database_provider_ro() {
-            Ok(provider) => Box::new(provider.into_evm_state_provider()) as EvmStateProviderBox,
+            Ok(provider) => {
+                Box::new(provider.with_read_fills().into_evm_state_provider()) as EvmStateProviderBox
+            }
             Err(err) => {
                 trace!(
                     target: "engine::tree::payload_processor::prewarm",

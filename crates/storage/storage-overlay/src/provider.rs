@@ -181,6 +181,7 @@ where
     state_trie_overlay_with_trie_changesets: OnceCell<StateTrieOverlay>,
     execution_overlay: OnceCell<CachedExecutionOverlay>,
     is_v2: bool,
+    fill_reads: bool,
 }
 
 impl<Provider: DBProvider, N: NodePrimitives> OverlayStateProvider<OwnedProvider<Provider>, N> {
@@ -290,7 +291,15 @@ where
             state_trie_overlay_with_trie_changesets: OnceCell::new(),
             execution_overlay: OnceCell::new(),
             is_v2,
+            fill_reads: false,
         }
+    }
+
+    /// Allows prewarming reads to fill the shared per-tip cache. Other providers only look up
+    /// entries, so cache misses do not add insertion work to validation.
+    pub const fn with_read_fills(mut self) -> Self {
+        self.fill_reads = true;
+        self
     }
 
     fn provider(&self) -> &Provider::Target {
@@ -509,10 +518,14 @@ where
             self.basic_account_from_db(address)
         };
         if let Some(reads) = overlay.reads() {
-            reads.accounts.get_or_try_insert_with(*address, |_| read())
-        } else {
-            read()
+            if self.fill_reads {
+                return reads.accounts.get_or_try_insert_with(*address, |_| read())
+            }
+            if let Some(value) = reads.accounts.get(address) {
+                return Ok(value)
+            }
         }
+        read()
     }
 }
 
@@ -600,10 +613,14 @@ where
                 .map_err(Into::into)
         };
         if let Some(reads) = overlay.reads() {
-            reads.code.get_or_try_insert_with(*code_hash, |_| read())
-        } else {
-            read()
+            if self.fill_reads {
+                return reads.code.get_or_try_insert_with(*code_hash, |_| read())
+            }
+            if let Some(value) = reads.code.get(code_hash) {
+                return Ok(value)
+            }
         }
+        read()
     }
 }
 
@@ -935,10 +952,14 @@ where
             self.storage_from_db(address, storage_key, false)
         };
         if let Some(reads) = overlay.reads() {
-            reads.storage.get_or_try_insert_with((address, storage_key), |_| read())
-        } else {
-            read()
+            if self.fill_reads {
+                return reads.storage.get_or_try_insert_with((address, storage_key), |_| read())
+            }
+            if let Some(value) = reads.storage.get(&(address, storage_key)) {
+                return Ok(value)
+            }
         }
+        read()
     }
 }
 
