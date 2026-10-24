@@ -6,7 +6,6 @@ import os
 import random
 import select
 from pathlib import Path
-import shutil
 import signal
 import subprocess
 import sys
@@ -288,12 +287,7 @@ def main():
                     pass
             log = STATE / "run.log"
             assertion(False, "workload incomplete; " + (log.read_text()[-12000:] if log.exists() else "never started"))
-        out = Path("/bedrock/out")
-        out.mkdir(parents=True, exist_ok=True)
-        for name in ["run.log", "controller.log", "done.json", "data/blocks.jsonl", "data/input-overrides.json", "pending-input.json", "config.json"]:
-            if (STATE / name).exists():
-                shutil.copyfile(STATE / name, out / ("reth-trie-dst-" + Path(name).name))
-        collect(out / "assertions.jsonl")
+        collect(Path("/bedrock/out/assertions.jsonl"))
     elif hook == "observe":
         return {"decisions": request["decisions"], "decision_diff": (["recorded decisions differ"] if request.get("original") is not None
                                   and request["original"] != request["decisions"] else []), "moments": [],
