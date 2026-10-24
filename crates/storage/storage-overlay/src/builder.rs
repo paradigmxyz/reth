@@ -169,12 +169,26 @@ impl ExecutionOverlay {
         self.pending.last()?.reads.get().map(Arc::as_ref)
     }
 
-    /// Allocates the tip's shared read layer without making readers wait for it.
+    /// Seeds the tip's shared read layer without making readers wait for it.
     pub(crate) fn prepare_reads(&self) {
         if let Some(delta) = self.pending.last() &&
             delta.reads.get().is_none()
         {
-            let _ = delta.reads.set(Arc::default());
+            let reads = Arc::<ExecutionOverlayReads>::default();
+            for (address, account) in &delta.state.accounts {
+                // Resolve through the overlay so authoritative writes override cached reads.
+                if let Some(info) = self.account(address) {
+                    reads.accounts.insert(*address, info.map(Account::from));
+                }
+                if let Some(account) = &account.account {
+                    for slot in account.storage.keys() {
+                        if let Some(value) = self.storage_value(*address, *slot) {
+                            reads.storage.insert((*address, B256::from(*slot)), Some(value));
+                        }
+                    }
+                }
+            }
+            let _ = delta.reads.set(reads);
         }
     }
 
