@@ -258,12 +258,15 @@ def main():
         STATE.mkdir(parents=True, exist_ok=True)
         if (STATE / "worker.pid").exists():
             raise RuntimeError("workload already started")
-        config_path = STATE / "config.json"
-        config_path.write_text(json.dumps(request))
-        with (STATE / "controller.log").open("w") as output:
-            process = subprocess.Popen([sys.executable, __file__, "worker", "@" + str(config_path)],
-                                       stdout=output, stderr=subprocess.STDOUT, start_new_session=True)
-        (STATE / "worker.pid").write_text(str(process.pid))
+        if request["run_secs"] == 1:
+            worker(request)
+        else:
+            config_path = STATE / "config.json"
+            config_path.write_text(json.dumps(request))
+            with (STATE / "controller.log").open("w") as output:
+                process = subprocess.Popen([sys.executable, __file__, "worker", "@" + str(config_path)],
+                                           stdout=output, stderr=subprocess.STDOUT, start_new_session=True)
+            (STATE / "worker.pid").write_text(str(process.pid))
     elif hook == "worker":
         worker(request)
     elif hook == "set-input":
