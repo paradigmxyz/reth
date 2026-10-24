@@ -18,6 +18,7 @@ use reth_provider::{
     providers::ProviderNodeTypes, BlockIdReader, BlockNumReader, DatabaseProviderFactory,
     HeaderProvider,
 };
+use reth_tasks::Runtime;
 use reth_transaction_pool::TransactionPool;
 use std::{
     future::Future,
@@ -297,7 +298,53 @@ async fn stop_releases_database_after_backfill_task_drops() -> eyre::Result<()> 
     Ok(())
 }
 
-// Emits a dropped-task event on demand, independently of the shutdown signal.
+/// Backfill cancellation after the shutdown branch was polled must still exit successfully.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn shutdown_cancelling_backfill_exits_cleanly() -> eyre::Result<()> {
+    reth_tracing::init_test_tracing();
+
+    let runtime = Runtime::test();
+    let cancel = Arc::new(Notify::new());
+    let (mut node, _) = EthereumNode::test_setup_for(EthereumHardfork::Prague)
+        .with_runtime(runtime.clone())
+        .with_backfill({
+            let runtime = runtime.clone();
+            let cancel = cancel.clone();
+            move |_| {
+                let runtime = runtime.clone();
+                let cancel = cancel.clone();
+                DroppedBackfill(Box::pin(async move {
+                    cancel.notified().await;
+                    // Fire shutdown during this backfill poll, without returning Pending to the
+                    // select. The task manager runs on another worker while this one is blocked.
+                    tokio::task::block_in_place(|| {
+                        runtime.handle().block_on(async {
+                            drop(
+                                tokio::time::timeout(
+                                    WAIT_TIMEOUT,
+                                    runtime.initiate_graceful_shutdown().unwrap(),
+                                )
+                                .await
+                                .unwrap(),
+                            );
+                        });
+                    });
+                }))
+            }
+        })
+        .build_single()
+        .await?;
+    let exit = node.take_exit_future().expect("the node has an exit future");
+    cancel.notify_one();
+    tokio::time::timeout(WAIT_TIMEOUT, exit).await??;
+    assert!(
+        tokio::task::spawn_blocking(move || runtime.graceful_shutdown_with_timeout(WAIT_TIMEOUT))
+            .await?
+    );
+    Ok(())
+}
+
+// Emits a dropped-task event when the supplied future completes.
 struct DroppedBackfill(Pin<Box<dyn Future<Output = ()> + Send>>);
 
 impl<N: ProviderNodeTypes, C> BackfillSyncBuilder<N, C> for DroppedBackfill {

@@ -379,6 +379,11 @@ impl<B> EngineNodeLauncher<B> {
                                 network_handle.update_sync_state(SyncState::Syncing);
                             }
                             ChainEvent::FatalError => {
+                                // Shutdown can cancel backfill after the select polls its signal.
+                                if let Some(guard) = FutureExt::now_or_never(&mut on_graceful_shutdown) {
+                                    debug!(target: "reth::cli", "engine event received during shutdown");
+                                    break Some(guard)
+                                }
                                 error!(target: "reth::cli", "Fatal error in consensus engine");
                                 res = Err(eyre::eyre!("Fatal error in consensus engine"));
                                 break None
