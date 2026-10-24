@@ -1125,7 +1125,11 @@ where
             self.overlay_manager
                 .record_execution_reads(input.hash(), std::mem::take(&mut db.cache));
             // The provider may hold the last reference to an obsolete persistent overlay.
-            self.runtime.spawn_drop(db.database);
+            let parent_span = Span::current();
+            self.runtime.spawn_blocking_named("drop", move || {
+                let _span = parent_span.entered();
+                drop(db.database);
+            });
         }
 
         let execution_duration = execution_start.elapsed();
