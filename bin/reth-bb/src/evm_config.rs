@@ -88,6 +88,14 @@ where
         &self.executor_factory
     }
 
+    fn with_jit_support_enabled(self, enabled: bool) -> Self {
+        Self::new(self.inner.with_jit_support_enabled(enabled))
+    }
+
+    fn jit_backend(&self) -> Option<&dyn reth_evm::JitBackend> {
+        self.inner.jit_backend()
+    }
+
     fn block_assembler(&self) -> &Self::BlockAssembler {
         &self.block_assembler
     }
