@@ -304,9 +304,6 @@ inherits = "profiling"
 debug-assertions = true
 overflow-checks = true
 
-[profile.dst.package.reth-trie-dst]
-codegen-units = 1
-
 # Include debug info in benchmarks too.
 [profile.bench]
 inherits = "profiling"
