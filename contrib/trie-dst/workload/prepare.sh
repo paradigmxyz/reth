@@ -53,9 +53,7 @@ trap 'sccache --show-stats > /run-info/sccache.txt; cat /run-info/sccache.txt' E
 # overflow checks for the harness. Do not switch these builds to profiling.
 if [ "${DST_CMD:-campaign}" = fuzz ]; then
   source /bedrock-rust-coverage.sh
-  bedrock_rust_coverage_build /bedrock-guest /out reth-trie-dst dst --locked -p reth-trie-dst > /run-info/coverage-binary-path
-  binary=$(cat /run-info/coverage-binary-path)
-  cargo rustc --locked -p reth-trie-dst --profile dst --target "$(rustc -vV | sed -n 's/^host: //p')" -- -C target-cpu=native
+  binary=$(bedrock_rust_coverage_build /bedrock-guest /out reth-trie-dst dst --locked -p reth-trie-dst)
   bedrock_rust_coverage_check "$binary" --version
 else
   cargo build --locked -p reth-trie-dst --profile dst
