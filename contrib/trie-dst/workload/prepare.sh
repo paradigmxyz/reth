@@ -55,19 +55,6 @@ if [ "${DST_CMD:-campaign}" = fuzz ]; then
   source /bedrock-rust-coverage.sh
   binary=$(bedrock_rust_coverage_build /bedrock-guest /out reth-trie-dst dst --locked -p reth-trie-dst)
   bedrock_rust_coverage_check "$binary" --version
-  for sample in 1 2 3 4 5; do
-    for mode in off on; do
-      start_ns=$(date +%s%N)
-      if [ "$mode" = on ]; then
-        coverage_dir=$(mktemp -d /out/coverage-bench.XXXXXX)
-        BEDROCK_COVERAGE_DIR="$coverage_dir" "$binary" '{"seed":1,"blocks":64,"updates":64}' >/dev/null
-      else
-        env -u BEDROCK_COVERAGE_DIR "$binary" '{"seed":1,"blocks":64,"updates":64}' >/dev/null
-      fi
-      printf 'native_coverage_%s_%s_ms=%s\n' "$mode" "$sample" "$((($(date +%s%N) - start_ns) / 1000000))" >> /run-info/cache-info.env
-      if [ "$mode" = on ]; then rm -rf "$coverage_dir"; fi
-    done
-  done
 else
   cargo build --locked -p reth-trie-dst --profile dst
   binary="$CARGO_TARGET_DIR/dst/reth-trie-dst"
