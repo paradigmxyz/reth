@@ -364,7 +364,7 @@ fn run(config: &mut Config, snapshotter: &Snapshotter) -> Result<()> {
             })
             .cloned()
             .collect::<Vec<_>>();
-        apply(&mut state, number, &updates, [updates.len()]);
+        apply(&mut state, number, &updates);
     }
     if base > 0 {
         verify(&factory, &state, base, base)?;
@@ -567,15 +567,7 @@ fn run(config: &mut Config, snapshotter: &Snapshotter) -> Result<()> {
                 ),
             }
         }
-        let (bundle, updates) = apply(
-            &mut state,
-            number,
-            &updates_input,
-            operations.iter().filter_map(|op| match op {
-                Operation::UpdateBatch { updates } => Some(updates.len()),
-                _ => None,
-            }),
-        );
+        let (bundle, updates) = apply(&mut state, number, &updates_input);
         // The full operations are in the journal before production tasks run.
         println!(
             "{}",
@@ -659,10 +651,12 @@ fn run(config: &mut Config, snapshotter: &Snapshotter) -> Result<()> {
                     hints.on_access_hint(hint);
                     hint_batches += 1;
                 }
-                Operation::UpdateBatch { .. } => {
-                    stream.on_hashed_state_update(
-                        updates.next().expect("one state per update batch"),
-                    );
+                Operation::UpdateBatch { updates: batch_updates } => {
+                    let mut batch = HashedPostState::default();
+                    for update in updates.by_ref().take(batch_updates.len()) {
+                        batch.extend(update);
+                    }
+                    stream.on_hashed_state_update(batch);
                     update_batches += 1;
                 }
                 Operation::Commit => {}

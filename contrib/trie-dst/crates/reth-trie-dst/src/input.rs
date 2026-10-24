@@ -41,7 +41,7 @@ impl Input {
         for number in 1..=blocks {
             let mut rng = StdRng::seed_from_u64(seed.wrapping_add(number));
             let generated = generate(&mut rng, &state, updates);
-            apply(&mut state, number, &generated, [generated.len()]);
+            apply(&mut state, number, &generated);
             let mut targets = generated
                 .iter()
                 .map(|update| match update {
