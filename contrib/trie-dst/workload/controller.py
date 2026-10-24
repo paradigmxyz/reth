@@ -197,21 +197,11 @@ def main():
     request = (json.load(sys.stdin) if value == "-" else
                json.loads(Path(value[1:]).read_text()) if value and value.startswith("@") else
                json.loads(value) if value else None)
-    if hook in ("mutation-operators", "mutation-sites"):
-        if hook == "mutation-operators":
-            return native(hook, {})
-        return native(hook, {"input": json.loads(request["input"]),
-                             "operator": request["operator"]})
-    if hook in ("seed-inputs", "suffix-seed", "mutate-input"):
+    if hook == "mutation-operators":
+        return native(hook, {})
+    if hook in ("seed-inputs", "suffix-seed"):
         args = arguments(request["args"])
         args.pop("crashes")
-        if hook == "mutate-input":
-            return json.dumps(native("mutate-input", {
-                "input": json.loads(request["input"]), "seed": request["seed"],
-                "operator": request.get("operator") or None, "path": request.get("path", []),
-                "donor": json.loads(request["donor"]) if request.get("donor") else None,
-                "donor_path": request.get("donor_path", []),
-            }))
         if hook == "suffix-seed":
             # Each block establishes its own accounts, so it also runs at a deep snapshot.
             args.update(blocks=4, updates=min(4080, args["updates"]))
@@ -316,6 +306,10 @@ def main():
 
 
 if __name__ == "__main__":
+    if sys.argv[1] in ("mutation-sites", "mutate-input") and sys.argv[2:] == ["-"]:
+        binary = str(Path(__file__).with_name("reth-trie-dst"))
+        os.environ.pop("BEDROCK_COVERAGE_DIR", None)
+        os.execv(binary, [binary, sys.argv[1], "-"])
     answer = main()
     if answer is not None:
         print(json.dumps(answer))

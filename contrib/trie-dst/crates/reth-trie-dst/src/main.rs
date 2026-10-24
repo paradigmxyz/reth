@@ -780,7 +780,10 @@ fn main() -> Result<()> {
         }
         Some("mutation-sites") => {
             let value: serde_json::Value = serde_json::from_reader(std::io::stdin())?;
-            let input: Input = serde_json::from_value(value["input"].clone())?;
+            let input: Input = match value["input"].clone() {
+                serde_json::Value::String(text) => serde_json::from_str(&text)?,
+                input => serde_json::from_value(input)?,
+            };
             input.validate()?;
             let operator = value["operator"].as_str();
             let sites = input.mutation_sites(operator);
@@ -789,6 +792,7 @@ fn main() -> Result<()> {
         }
         Some("generate-input" | "generate-suffix" | "mutate-input" | "validate-input") => {
             let value: serde_json::Value = serde_json::from_reader(std::io::stdin())?;
+            let contract = value["input"].is_string();
             let input = match command.as_deref() {
                 Some("generate-input" | "generate-suffix") => {
                     let config: Config = serde_json::from_value(value)?;
@@ -833,15 +837,22 @@ fn main() -> Result<()> {
                     input
                 }
                 _ => {
-                    let mut input: Input = serde_json::from_value(value["input"].clone())?;
+                    let mut input: Input = match value["input"].clone() {
+                        serde_json::Value::String(text) => serde_json::from_str(&text)?,
+                        input => serde_json::from_value(input)?,
+                    };
                     if command.as_deref() == Some("mutate-input") {
                         let seed = value["seed"]
                             .as_u64()
                             .ok_or_else(|| eyre::eyre!("missing mutation seed"))?;
                         if let Some(operator) = value["operator"].as_str() {
                             let path: Vec<String> = serde_json::from_value(value["path"].clone())?;
-                            let donor: Option<Input> =
-                                serde_json::from_value(value["donor"].clone())?;
+                            let donor: Option<Input> = match value["donor"].clone() {
+                                serde_json::Value::String(text) => {
+                                    Some(serde_json::from_str(&text)?)
+                                }
+                                donor => serde_json::from_value(donor)?,
+                            };
                             let donor_path: Vec<String> =
                                 serde_json::from_value(value["donor_path"].clone())?;
                             input.mutate_at(
@@ -858,7 +869,12 @@ fn main() -> Result<()> {
                 }
             };
             input.validate()?;
-            println!("{}", serde_json::to_string(&input)?);
+            let output = serde_json::to_string(&input)?;
+            if command.as_deref() == Some("mutate-input") && contract {
+                println!("{}", serde_json::to_string(&output)?);
+            } else {
+                println!("{output}");
+            }
             return Ok(());
         }
         Some("-") => std::io::read_to_string(std::io::stdin())?,
