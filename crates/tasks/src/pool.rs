@@ -237,7 +237,8 @@ impl WorkerPool {
         // without holding a slot, but only when they all fit in the caller's domain: a wider
         // broadcast would crowd its workers into one domain and leave them there.
         let domain = JobDomain::capture();
-        let place = domain.fits(num_threads.min(self.pool().current_num_threads()));
+        // Experiment: place every broadcast, including pools wider than one domain.
+        let place = true;
         if num_threads >= self.pool().current_num_threads() {
             // Fast path: run on every thread, no atomic coordination needed.
             self.pool().broadcast(|_| {
