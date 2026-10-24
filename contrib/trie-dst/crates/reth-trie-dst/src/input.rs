@@ -136,36 +136,43 @@ impl Input {
         Ok(())
     }
 
-    pub fn mutation_sites(&self) -> Vec<MutationSite> {
+    pub fn mutation_sites(&self, only: Option<&str>) -> Vec<MutationSite> {
         let mut sites = Vec::new();
         for (i, op) in self.operations.iter().enumerate() {
             let root = vec!["operations".into(), i.to_string()];
             match op {
                 Operation::UpdateBatch { updates } => {
-                    for (j, update) in updates.iter().enumerate() {
-                        let mut path = root.clone();
-                        path.extend(["updates".into(), j.to_string()]);
-                        for operator in ["update.duplicate", "update.remove", "update.crossover"] {
-                            sites.push(MutationSite { operator, path: path.clone() });
-                        }
-                        let (variant, fields): (&str, &[&str]) = match update {
-                            Update::Account { .. } => (
-                                "Account",
-                                &[
-                                    "address",
-                                    "account/balance",
-                                    "account/nonce",
-                                    "account/bytecode_hash",
-                                ],
-                            ),
-                            Update::Storage { .. } => ("Storage", &["address", "slot", "value"]),
-                        };
-                        for field in fields {
-                            let mut field_path = path.clone();
-                            field_path.push(variant.into());
-                            field_path.extend(field.split('/').map(str::to_string));
-                            sites.push(MutationSite {
-                                operator: match (variant, *field) {
+                    if only.is_none_or(|name| {
+                        name.starts_with("update.") ||
+                            name.starts_with("account.") ||
+                            name.starts_with("storage.")
+                    }) {
+                        for (j, update) in updates.iter().enumerate() {
+                            let mut path = root.clone();
+                            path.extend(["updates".into(), j.to_string()]);
+                            for operator in
+                                ["update.duplicate", "update.remove", "update.crossover"]
+                            {
+                                if only.is_none_or(|name| name == operator) {
+                                    sites.push(MutationSite { operator, path: path.clone() });
+                                }
+                            }
+                            let (variant, fields): (&str, &[&str]) = match update {
+                                Update::Account { .. } => (
+                                    "Account",
+                                    &[
+                                        "address",
+                                        "account/balance",
+                                        "account/nonce",
+                                        "account/bytecode_hash",
+                                    ],
+                                ),
+                                Update::Storage { .. } => {
+                                    ("Storage", &["address", "slot", "value"])
+                                }
+                            };
+                            for field in fields {
+                                let operator = match (variant, *field) {
                                     ("Account", "address") => "account.address",
                                     ("Account", "account/balance") => "account.balance",
                                     ("Account", "account/nonce") => "account.nonce",
@@ -173,41 +180,58 @@ impl Input {
                                     ("Storage", "address") => "storage.address",
                                     ("Storage", "slot") => "storage.slot",
                                     _ => "storage.value",
-                                },
-                                path: field_path,
-                            });
+                                };
+                                if only.is_none_or(|name| name == operator) {
+                                    let mut field_path = path.clone();
+                                    field_path.push(variant.into());
+                                    field_path.extend(field.split('/').map(str::to_string));
+                                    sites.push(MutationSite { operator, path: field_path });
+                                }
+                            }
                         }
                     }
-                    sites.push(MutationSite { operator: "commit.insert", path: root.clone() });
+                    if only.is_none_or(|name| name == "commit.insert") {
+                        sites.push(MutationSite { operator: "commit.insert", path: root.clone() });
+                    }
                 }
                 Operation::PrewarmBatch { accounts, storages } => {
-                    for j in 0..accounts.len() {
-                        let mut path = root.clone();
-                        path.extend(["accounts".into(), j.to_string()]);
-                        sites.push(MutationSite { operator: "prewarm.account", path });
+                    if only.is_none_or(|name| name == "prewarm.account") {
+                        for j in 0..accounts.len() {
+                            let mut path = root.clone();
+                            path.extend(["accounts".into(), j.to_string()]);
+                            sites.push(MutationSite { operator: "prewarm.account", path });
+                        }
                     }
-                    for j in 0..storages.len() {
-                        let mut path = root.clone();
-                        path.extend(["storages".into(), j.to_string()]);
-                        for (operator, field) in [
-                            ("prewarm.storage.address", "address"),
-                            ("prewarm.storage.slot", "slot"),
-                        ] {
-                            let mut field_path = path.clone();
-                            field_path.push(field.into());
-                            sites.push(MutationSite { operator, path: field_path });
+                    if only.is_none_or(|name| name.starts_with("prewarm.storage.")) {
+                        for j in 0..storages.len() {
+                            let mut path = root.clone();
+                            path.extend(["storages".into(), j.to_string()]);
+                            for (operator, field) in [
+                                ("prewarm.storage.address", "address"),
+                                ("prewarm.storage.slot", "slot"),
+                            ] {
+                                if only.is_none_or(|name| name == operator) {
+                                    let mut field_path = path.clone();
+                                    field_path.push(field.into());
+                                    sites.push(MutationSite { operator, path: field_path });
+                                }
+                            }
                         }
                     }
                 }
                 Operation::Commit => {
-                    if i + 1 < self.operations.len() {
+                    if i + 1 < self.operations.len() &&
+                        only.is_none_or(|name| name == "commit.remove")
+                    {
                         sites.push(MutationSite { operator: "commit.remove", path: root });
                     }
                     continue;
                 }
             }
             for operator in ["batch.duplicate", "batch.remove", "batch.crossover"] {
-                sites.push(MutationSite { operator, path: root.clone() });
+                if only.is_none_or(|name| name == operator) {
+                    sites.push(MutationSite { operator, path: root.clone() });
+                }
             }
         }
         sites
@@ -454,7 +478,7 @@ impl Input {
 
     pub fn mutate(&mut self, seed: u64) -> Result<()> {
         let sites = self
-            .mutation_sites()
+            .mutation_sites(None)
             .into_iter()
             .filter(|site| !site.operator.ends_with(".crossover"))
             .collect::<Vec<_>>();

@@ -757,11 +757,7 @@ fn main() -> Result<()> {
             let input: Input = serde_json::from_value(value["input"].clone())?;
             input.validate()?;
             let operator = value["operator"].as_str();
-            let sites = input
-                .mutation_sites()
-                .into_iter()
-                .filter(|site| operator.is_none_or(|name| name == site.operator))
-                .collect::<Vec<_>>();
+            let sites = input.mutation_sites(operator);
             println!("{}", serde_json::to_string(&sites)?);
             return Ok(());
         }
