@@ -675,14 +675,11 @@ fn run(config: &mut Config, snapshotter: &Snapshotter) -> Result<()> {
         stream.finish();
         let outcome = handle.take_state_root_rx().recv_timeout(timeout)??;
         let trie_ns = perf_start.elapsed().as_nanos() - model_ns;
-        let root_start = Instant::now();
-        let expected_root = root(&state);
-        let root_ns = root_start.elapsed().as_nanos();
         ensure!(
-            outcome.state_root == expected_root,
+            outcome.state_root == root(&state),
             "seed {} block {number}: expected {}, actual {}",
             config.seed,
-            expected_root,
+            root(&state),
             outcome.state_root
         );
         let block = RecoveredBlock::new_unhashed(
@@ -718,14 +715,11 @@ fn run(config: &mut Config, snapshotter: &Snapshotter) -> Result<()> {
         manager.insert_block(executed.clone());
         publish_sparse_trie(&pending, manager, parent.hash(), outcome.state_root);
         blocks.push(executed);
-        let snapshot_start = Instant::now();
         snapshots.push(state.clone());
-        let snapshot_ns = snapshot_start.elapsed().as_nanos();
         println!(
             "{}",
             json!({"perf": {"model_ns": model_ns,
-            "trie_ns": trie_ns, "post_ns": perf_start.elapsed().as_nanos() - model_ns - trie_ns,
-            "root_ns": root_ns, "snapshot_ns": snapshot_ns}})
+            "trie_ns": trie_ns, "post_ns": perf_start.elapsed().as_nanos() - model_ns - trie_ns}})
         );
     }
     let perf_start = Instant::now();
