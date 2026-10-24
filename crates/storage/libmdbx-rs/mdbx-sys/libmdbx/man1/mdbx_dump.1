@@ -2,7 +2,7 @@
 .\" Copyright 2015,2016 Peter-Service R&D LLC <http://billing.ru/>.
 .\" Copyright 2014-2015 Howard Chu, Symas Corp. All Rights Reserved.
 .\" Copying restrictions apply.  See COPYRIGHT/LICENSE.
-.TH MDBX_DUMP 1 "2024-08-29" "MDBX 0.13"
+.TH MDBX_DUMP 1 "2026-07-07" "MDBX 0.14"
 .SH NAME
 mdbx_dump \- MDBX environment export tool
 .SH SYNOPSIS
@@ -11,6 +11,8 @@ mdbx_dump \- MDBX environment export tool
 .BR \-V ]
 [\c
 .BR \-q ]
+[\c
+.BR \-c ]
 [\c
 .BI \-f \ file\fR]
 [\c
@@ -22,6 +24,10 @@ mdbx_dump \- MDBX environment export tool
 .BI \-s \ table\fR]
 [\c
 .BR \-r ]
+[\c
+.BR \-u ]
+[\c
+.BR \-U ]
 [\c
 .BR \-n ]
 .BR \ dbpath
@@ -40,6 +46,9 @@ Write the library version number to the standard output, and exit.
 .TP
 .BR \-q
 Be quiet.
+.TP
+.BR \-c
+Concise mode without repeating keys in a dump, but incompatible with Berkeley DB and LMDB.
 .TP
 .BR \-f \ file
 Write to the specified file instead of to the standard output.
@@ -64,7 +73,7 @@ Dump all of the tables in the environment.
 Dump a specific table. If no database is specified, only the main table is dumped.
 .TP
 .BR \-r
-Rescure mode. Ignore some errors to dump corrupted DB.
+Rescue mode. Ignore some errors to dump corrupted DB.
 .TP
 .BR \-u
 Warms up the DB before dumping via notifying OS kernel of subsequent access to the database pages.
@@ -74,7 +83,7 @@ Warms up the DB before dumping, notifying the OS kernel of subsequent access to 
 then forcibly loads ones by sequential access and tries to lock database pages in memory.
 .TP
 .BR \-n
-Dump an MDBX database which does not use subdirectories.
+Open an MDBX database which does not use subdirectories.
 This is legacy option. For now MDBX handles this automatically.
 
 .SH DIAGNOSTICS
@@ -98,4 +107,4 @@ utility to load the database using the correct comparison functions.
 .BR mdbx_drop (1)
 .SH AUTHOR
 Howard Chu of Symas Corporation <http://www.symas.com>,
-Leonid Yuriev <https://gitflic.ru/user/erthink>
+Leonid Yuriev <https://libmdbx.dqdkfa.ru>
