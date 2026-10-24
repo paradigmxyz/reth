@@ -55,12 +55,7 @@ impl WorkerThread {
             })
             .unwrap_or_else(|e| panic!("failed to spawn worker thread {name:?}: {e}"));
 
-        Self {
-            tx,
-            metrics,
-            pending: Arc::new(AtomicUsize::new(0)),
-            handle: Some(handle),
-        }
+        Self { tx, metrics, pending: Arc::new(AtomicUsize::new(0)), handle: Some(handle) }
     }
 
     /// Spawns a closure on this worker.

@@ -219,7 +219,6 @@ impl LazyTrieDataProducer {
         computed
     }
 
-
     /// Sorts block execution outputs.
     pub fn sort(
         hashed_state: Arc<HashedPostState>,
@@ -258,7 +257,7 @@ impl Drop for LazyTrieDataProducer {
         // Note: `Drop::drop` cannot consume self, so take a shaping clone of the inputs and
         // publish through the shared OnceLock directly. `set` on an occupied lock is a no-op.
         if self.value.get().is_none() {
-            let computed = LazyTrieDataProducer::sort(
+            let computed = Self::sort(
                 Arc::clone(&self.inputs.hashed_state),
                 Arc::clone(&self.inputs.trie_updates),
             );
