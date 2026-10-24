@@ -18,6 +18,9 @@ workflows:
         # Ignore the case that `A` it outside of the workspace. Otherwise it will report errors in external dependencies that we have no influence on.
 
         "--left-side-outside-workspace=ignore",
+        # `reth-provider/jemalloc` only enables `rocksdb/jemalloc`, which delays the build and is not needed: the binary already uses jemalloc as its global allocator.
+        "--ignore-missing-propagate=reth/jemalloc:reth-provider/jemalloc",
+        "--ignore-missing-propagate=reth-ethereum/jemalloc:reth-provider/jemalloc",
         # Auxiliary flags:
         "--offline",
         "--locked",
