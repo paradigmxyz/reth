@@ -12040,133 +12040,6 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "description": "What the snap sync run is doing.",
-          "fieldConfig": {
-            "defaults": {
-              "color": {
-                "mode": "thresholds"
-              },
-              "mappings": [
-                {
-                  "type": "value",
-                  "options": {
-                    "0": {
-                      "index": 0,
-                      "text": "Waiting"
-                    }
-                  }
-                },
-                {
-                  "type": "value",
-                  "options": {
-                    "1": {
-                      "index": 1,
-                      "text": "Downloading"
-                    }
-                  }
-                },
-                {
-                  "type": "value",
-                  "options": {
-                    "2": {
-                      "index": 2,
-                      "text": "Catching up"
-                    }
-                  }
-                },
-                {
-                  "type": "value",
-                  "options": {
-                    "3": {
-                      "index": 3,
-                      "text": "Repairing"
-                    }
-                  }
-                },
-                {
-                  "type": "value",
-                  "options": {
-                    "4": {
-                      "index": 4,
-                      "text": "Recovering"
-                    }
-                  }
-                },
-                {
-                  "type": "value",
-                  "options": {
-                    "5": {
-                      "index": 5,
-                      "text": "Verifying"
-                    }
-                  }
-                },
-                {
-                  "type": "value",
-                  "options": {
-                    "6": {
-                      "index": 6,
-                      "text": "Handed off"
-                    }
-                  }
-                }
-              ],
-              "thresholds": {
-                "mode": "absolute",
-                "steps": [
-                  {
-                    "color": "green",
-                    "value": null
-                  }
-                ]
-              }
-            },
-            "overrides": []
-          },
-          "gridPos": {
-            "h": 8,
-            "w": 6,
-            "x": 0,
-            "y": 383
-          },
-          "id": 1038,
-          "options": {
-            "colorMode": "value",
-            "graphMode": "none",
-            "justifyMode": "auto",
-            "orientation": "auto",
-            "reduceOptions": {
-              "calcs": [
-                "lastNotNull"
-              ],
-              "fields": "",
-              "values": false
-            },
-            "textMode": "value",
-            "wideLayout": true
-          },
-          "pluginVersion": "11.4.0",
-          "targets": [
-            {
-              "datasource": {
-                "type": "prometheus",
-                "uid": "${datasource}"
-              },
-              "editorMode": "code",
-              "expr": "reth_sync_snap_phase{$instance_label=\"$instance\"}",
-              "legendFormat": "Phase",
-              "range": true,
-              "refId": "A"
-            }
-          ],
-          "title": "Phase",
-          "type": "stat"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          },
           "description": "Share of the account keyspace downloaded. Accounts download in key order.",
           "fieldConfig": {
             "defaults": {
@@ -12190,8 +12063,8 @@
           },
           "gridPos": {
             "h": 8,
-            "w": 6,
-            "x": 6,
+            "w": 8,
+            "x": 0,
             "y": 383
           },
           "id": 1039,
@@ -12286,8 +12159,8 @@
           },
           "gridPos": {
             "h": 8,
-            "w": 12,
-            "x": 12,
+            "w": 16,
+            "x": 8,
             "y": 383
           },
           "id": 1040,
@@ -12347,7 +12220,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "description": "Why the run stopped to wait: no eligible pivot, no snap/2 peer, a peer without the requested data, or a transient failure. Invalid responses penalize their peer and are retried.",
+          "description": "Attempts abandoned and started over, and downloader responses rejected by verification.",
           "fieldConfig": {
             "defaults": {
               "color": {
@@ -12402,146 +12275,8 @@
           },
           "gridPos": {
             "h": 8,
-            "w": 12,
+            "w": 24,
             "x": 0,
-            "y": 391
-          },
-          "id": 1041,
-          "options": {
-            "legend": {
-              "calcs": [],
-              "displayMode": "list",
-              "placement": "bottom",
-              "showLegend": true
-            },
-            "tooltip": {
-              "mode": "multi",
-              "sort": "none"
-            }
-          },
-          "pluginVersion": "11.4.0",
-          "targets": [
-            {
-              "datasource": {
-                "type": "prometheus",
-                "uid": "${datasource}"
-              },
-              "editorMode": "code",
-              "expr": "increase(reth_sync_snap_pivot_waits{$instance_label=\"$instance\"}[$__rate_interval])",
-              "legendFormat": "No pivot",
-              "range": true,
-              "refId": "A"
-            },
-            {
-              "datasource": {
-                "type": "prometheus",
-                "uid": "${datasource}"
-              },
-              "editorMode": "code",
-              "expr": "increase(reth_sync_snap_snap_peer_waits{$instance_label=\"$instance\"}[$__rate_interval])",
-              "legendFormat": "No snap/2 peer",
-              "range": true,
-              "refId": "B"
-            },
-            {
-              "datasource": {
-                "type": "prometheus",
-                "uid": "${datasource}"
-              },
-              "editorMode": "code",
-              "expr": "increase(reth_sync_snap_unavailable_waits{$instance_label=\"$instance\"}[$__rate_interval])",
-              "legendFormat": "Data unavailable",
-              "range": true,
-              "refId": "C"
-            },
-            {
-              "datasource": {
-                "type": "prometheus",
-                "uid": "${datasource}"
-              },
-              "editorMode": "code",
-              "expr": "increase(reth_sync_snap_transient_waits{$instance_label=\"$instance\"}[$__rate_interval])",
-              "legendFormat": "Transient",
-              "range": true,
-              "refId": "D"
-            },
-            {
-              "datasource": {
-                "type": "prometheus",
-                "uid": "${datasource}"
-              },
-              "editorMode": "code",
-              "expr": "increase(reth_downloaders_snap_invalid_responses{$instance_label=\"$instance\"}[$__rate_interval])",
-              "legendFormat": "Invalid responses",
-              "range": true,
-              "refId": "E"
-            }
-          ],
-          "title": "Waits by reason",
-          "type": "timeseries"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          },
-          "description": "Pivot advances, reorgs across the pivot repaired in place, and attempts abandoned and started over.",
-          "fieldConfig": {
-            "defaults": {
-              "color": {
-                "mode": "palette-classic"
-              },
-              "custom": {
-                "axisBorderShow": false,
-                "axisCenteredZero": false,
-                "axisColorMode": "text",
-                "axisLabel": "",
-                "axisPlacement": "auto",
-                "barAlignment": 0,
-                "drawStyle": "line",
-                "fillOpacity": 0,
-                "gradientMode": "none",
-                "hideFrom": {
-                  "legend": false,
-                  "tooltip": false,
-                  "viz": false
-                },
-                "insertNulls": false,
-                "lineInterpolation": "linear",
-                "lineWidth": 1,
-                "pointSize": 5,
-                "scaleDistribution": {
-                  "type": "linear"
-                },
-                "showPoints": "auto",
-                "spanNulls": false,
-                "stacking": {
-                  "group": "A",
-                  "mode": "none"
-                },
-                "thresholdsStyle": {
-                  "mode": "off"
-                }
-              },
-              "thresholds": {
-                "mode": "absolute",
-                "steps": [
-                  {
-                    "color": "green",
-                    "value": null
-                  },
-                  {
-                    "color": "red",
-                    "value": 80
-                  }
-                ]
-              }
-            }
-          },
-          "gridPos": {
-            "h": 8,
-            "w": 12,
-            "x": 12,
             "y": 391
           },
           "id": 1042,
@@ -12565,125 +12300,9 @@
                 "uid": "${datasource}"
               },
               "editorMode": "code",
-              "expr": "increase(reth_sync_snap_pivot_advances{$instance_label=\"$instance\"}[$__rate_interval])",
-              "legendFormat": "Pivot advances",
-              "range": true,
-              "refId": "A"
-            },
-            {
-              "datasource": {
-                "type": "prometheus",
-                "uid": "${datasource}"
-              },
-              "editorMode": "code",
-              "expr": "increase(reth_sync_snap_reorg_recoveries{$instance_label=\"$instance\"}[$__rate_interval])",
-              "legendFormat": "Reorg recoveries",
-              "range": true,
-              "refId": "B"
-            },
-            {
-              "datasource": {
-                "type": "prometheus",
-                "uid": "${datasource}"
-              },
-              "editorMode": "code",
               "expr": "increase(reth_sync_snap_restarts{$instance_label=\"$instance\"}[$__rate_interval])",
               "legendFormat": "Restarts",
               "range": true,
-              "refId": "C"
-            }
-          ],
-          "title": "Pivot changes and restarts",
-          "type": "timeseries"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          },
-          "description": "Storage responses committed, which advance while a large contract holds the account cursor, and accounts a reorg left scheduled for repair.",
-          "fieldConfig": {
-            "defaults": {
-              "color": {
-                "mode": "palette-classic"
-              },
-              "custom": {
-                "axisBorderShow": false,
-                "axisCenteredZero": false,
-                "axisColorMode": "text",
-                "axisLabel": "",
-                "axisPlacement": "auto",
-                "barAlignment": 0,
-                "drawStyle": "line",
-                "fillOpacity": 0,
-                "gradientMode": "none",
-                "hideFrom": {
-                  "legend": false,
-                  "tooltip": false,
-                  "viz": false
-                },
-                "insertNulls": false,
-                "lineInterpolation": "linear",
-                "lineWidth": 1,
-                "pointSize": 5,
-                "scaleDistribution": {
-                  "type": "linear"
-                },
-                "showPoints": "auto",
-                "spanNulls": false,
-                "stacking": {
-                  "group": "A",
-                  "mode": "none"
-                },
-                "thresholdsStyle": {
-                  "mode": "off"
-                }
-              },
-              "thresholds": {
-                "mode": "absolute",
-                "steps": [
-                  {
-                    "color": "green",
-                    "value": null
-                  },
-                  {
-                    "color": "red",
-                    "value": 80
-                  }
-                ]
-              }
-            }
-          },
-          "gridPos": {
-            "h": 8,
-            "w": 12,
-            "x": 0,
-            "y": 399
-          },
-          "id": 1043,
-          "options": {
-            "legend": {
-              "calcs": [],
-              "displayMode": "list",
-              "placement": "bottom",
-              "showLegend": true
-            },
-            "tooltip": {
-              "mode": "multi",
-              "sort": "none"
-            }
-          },
-          "pluginVersion": "11.4.0",
-          "targets": [
-            {
-              "datasource": {
-                "type": "prometheus",
-                "uid": "${datasource}"
-              },
-              "editorMode": "code",
-              "expr": "rate(reth_sync_snap_storage_responses{$instance_label=\"$instance\"}[$__rate_interval])",
-              "legendFormat": "Storage responses/s",
-              "range": true,
               "refId": "A"
             },
             {
@@ -12692,13 +12311,13 @@
                 "uid": "${datasource}"
               },
               "editorMode": "code",
-              "expr": "reth_sync_snap_pending_repairs{$instance_label=\"$instance\"}",
-              "legendFormat": "Pending repairs",
+              "expr": "increase(reth_downloaders_snap_invalid_responses{$instance_label=\"$instance\"}[$__rate_interval])",
+              "legendFormat": "Invalid responses",
               "range": true,
               "refId": "B"
             }
           ],
-          "title": "Storage and repairs",
+          "title": "Restarts and invalid responses",
           "type": "timeseries"
         }
       ],
