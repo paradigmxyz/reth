@@ -287,7 +287,7 @@ impl Default for TreeConfig {
             disable_bal_parallel_execution: false,
             disable_bal_parallel_state_root: false,
             disable_bal_batch_io: false,
-            prewarm_reuse: false,
+            prewarm_reuse: true,
             skip_state_root: false,
             #[cfg(feature = "trie-debug")]
             proof_jitter: None,
@@ -379,7 +379,7 @@ impl TreeConfig {
             disable_bal_parallel_execution: false,
             disable_bal_parallel_state_root: false,
             disable_bal_batch_io: false,
-            prewarm_reuse: false,
+            prewarm_reuse: true,
             skip_state_root: false,
             #[cfg(feature = "trie-debug")]
             proof_jitter: None,
