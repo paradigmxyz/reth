@@ -53,7 +53,8 @@ trap 'sccache --show-stats > /run-info/sccache.txt; cat /run-info/sccache.txt' E
 # overflow checks for the harness. Do not switch these builds to profiling.
 if [ "${DST_CMD:-campaign}" = fuzz ]; then
   source /bedrock-rust-coverage.sh
-  binary=$(bedrock_rust_coverage_build /bedrock-guest /out reth-trie-dst dst --locked -p reth-trie-dst)
+  binary=$(bedrock_rust_coverage_build /bedrock-guest /out reth-trie-dst dst \
+    --inline --locked -p reth-trie-dst --features inline-coverage)
   bedrock_rust_coverage_check "$binary" --version
 else
   cargo build --locked -p reth-trie-dst --profile dst
@@ -71,7 +72,7 @@ int main(void) {
 }
 C
 BUILD
-rm -f "$context/libfeedback.o" "$context/libpcguard.o" "$context/rt.a"
+rm -f "$context/libfeedback.o" "$context/frontend.o" "$context/rt.a"
 cp "$root/workload/controller.py" "$context/controller.py"
 "${docker_cmd[@]}" build -f - -t bedrock/reth-trie-dst:latest "$context" <<'DOCKERFILE'
 FROM debian:trixie-slim

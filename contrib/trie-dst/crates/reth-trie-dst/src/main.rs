@@ -52,6 +52,11 @@ use std::{
 
 type Node = MockNodeTypesWithDB<Arc<DatabaseEnv>>;
 
+#[cfg(feature = "inline-coverage")]
+unsafe extern "C" {
+    fn bedrock_coverage_flush();
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 struct JournalBlock {
     number: u64,
@@ -480,6 +485,11 @@ fn run(config: &mut Config, snapshotter: &Snapshotter) -> Result<()> {
                 };
                 manager.precompute_execution_overlay(parent.hash(), anchor);
                 prune_requested = true;
+                // The controller may SIGKILL this process after this event.
+                #[cfg(feature = "inline-coverage")]
+                unsafe {
+                    bedrock_coverage_flush();
+                }
                 println!(
                     "{}",
                     json!({"persistence": "complete", "head": head,
@@ -573,6 +583,10 @@ fn run(config: &mut Config, snapshotter: &Snapshotter) -> Result<()> {
         }
         let (bundle, updates) = apply(&mut state, number, &updates_input);
         // The full operations are in the journal before production tasks run.
+        #[cfg(feature = "inline-coverage")]
+        unsafe {
+            bedrock_coverage_flush();
+        }
         println!(
             "{}",
             json!({"block": number, "seed": config.seed, "db_tip": db_tip,
