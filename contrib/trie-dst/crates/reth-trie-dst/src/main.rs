@@ -672,6 +672,7 @@ fn run(config: &mut Config, snapshotter: &Snapshotter) -> Result<()> {
         drop(hints);
         stream.finish();
         let outcome = handle.take_state_root_rx().recv_timeout(timeout)??;
+        drop(handle);
         let expected_root = config
             .expected_roots
             .as_ref()
@@ -711,8 +712,14 @@ fn run(config: &mut Config, snapshotter: &Snapshotter) -> Result<()> {
                 },
             }),
             SortedTrieData {
-                hashed_state: Arc::new(outcome.hashed_state.as_ref().clone().into_sorted()),
-                trie_updates: Arc::new(outcome.trie_updates.clone_into_sorted()),
+                hashed_state: Arc::new(match Arc::try_unwrap(outcome.hashed_state) {
+                    Ok(state) => state.into_sorted(),
+                    Err(state) => state.clone_into_sorted(),
+                }),
+                trie_updates: Arc::new(match Arc::try_unwrap(outcome.trie_updates) {
+                    Ok(updates) => updates.into_sorted(),
+                    Err(updates) => updates.clone_into_sorted(),
+                }),
             },
         );
         manager.insert_block(executed.clone());
