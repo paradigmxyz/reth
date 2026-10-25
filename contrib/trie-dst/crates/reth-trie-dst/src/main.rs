@@ -191,38 +191,27 @@ fn verify(factory: &ProviderFactory<Node>, state: &Model, tip: u64, state_tip: u
     Ok(())
 }
 
-fn metric_counts(
-    snapshotter: &Snapshotter,
-) -> (BTreeMap<String, u64>, BTreeMap<String, serde_json::Value>) {
-    let mut counts = BTreeMap::new();
-    let mut durations = BTreeMap::new();
-    for (key, _, _, value) in snapshotter.snapshot().into_vec() {
-        let name = key.key().name().to_string();
-        if !(name.contains("tree.root") ||
-            name.contains("state_trie_overlay") ||
-            name.contains("storage.overlay"))
-        {
-            continue;
-        }
-        match value {
-            DebugValue::Counter(count) => {
-                counts.insert(name, count);
+fn metric_counts(snapshotter: &Snapshotter) -> BTreeMap<String, u64> {
+    snapshotter
+        .snapshot()
+        .into_vec()
+        .into_iter()
+        .filter_map(|(key, _, _, value)| {
+            let name = key.key().name().to_string();
+            if !(name.contains("tree.root") ||
+                name.contains("state_trie_overlay") ||
+                name.contains("storage.overlay"))
+            {
+                return None;
             }
-            DebugValue::Histogram(values) => {
-                counts.insert(name.clone(), values.len() as u64);
-                if name.contains("tree.root") {
-                    let sum_secs: f64 = values.iter().map(|value| value.into_inner()).sum();
-                    let max_secs = values.iter().map(|value| value.into_inner()).fold(0.0, f64::max);
-                    durations.insert(
-                        name,
-                        json!({"count": values.len(), "sum_secs": sum_secs, "max_secs": max_secs}),
-                    );
-                }
-            }
-            _ => {}
-        }
-    }
-    (counts, durations)
+            let count = match value {
+                DebugValue::Counter(count) => count,
+                DebugValue::Histogram(values) => values.len() as u64,
+                _ => return None,
+            };
+            Some((name, count))
+        })
+        .collect()
 }
 
 fn run(config: &mut Config, snapshotter: &Snapshotter) -> Result<()> {
@@ -731,7 +720,21 @@ fn run(config: &mut Config, snapshotter: &Snapshotter) -> Result<()> {
     for name in ["sparse-trie", "trie-hashing", "storage-workers", "account-workers", "drop"] {
         runtime.spawn_blocking_named(name, || {}).get();
     }
-    let (metrics, metric_durations) = metric_counts(snapshotter);
+    let metrics = metric_counts(snapshotter);
+    let metric_durations = snapshotter
+        .snapshot()
+        .into_vec()
+        .into_iter()
+        .filter_map(|(key, _, _, value)| {
+            let name = key.key().name().to_string();
+            let DebugValue::Histogram(values) = value else { return None };
+            name.contains("tree.root").then(|| {
+                let sum_secs: f64 = values.iter().map(|value| value.into_inner()).sum();
+                let max_secs = values.iter().map(|value| value.into_inner()).fold(0.0, f64::max);
+                (name, json!({"count": values.len(), "sum_secs": sum_secs, "max_secs": max_secs}))
+            })
+        })
+        .collect::<BTreeMap<_, _>>();
     println!(
         "{}",
         json!({"completed": true, "seed": config.seed, "blocks": total_blocks,
