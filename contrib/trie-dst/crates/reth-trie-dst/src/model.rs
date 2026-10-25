@@ -14,15 +14,15 @@ use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 
 #[derive(Clone, Debug, Default)]
-pub struct ModelAccount {
+pub(crate) struct ModelAccount {
     pub account: Account,
     pub storage: BTreeMap<U256, U256>,
 }
 
-pub type Model = BTreeMap<Address, ModelAccount>;
+pub(crate) type Model = BTreeMap<Address, ModelAccount>;
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub enum Operation {
+pub(crate) enum Operation {
     Account { address: Address, account: Account },
     Storage { address: Address, slot: U256, value: U256 },
 }
@@ -56,14 +56,14 @@ impl Operation {
     }
 }
 
-pub fn generate(rng: &mut StdRng, state: &Model, updates: usize) -> Vec<Operation> {
+pub(crate) fn generate(rng: &mut StdRng, state: &Model, updates: usize) -> Vec<Operation> {
     let mut state = state.clone();
     (0..updates)
         .map(|_| {
             let address = Address::from_word(B256::from(U256::from(rng.random_range(1..=16u64))));
             let operation = if !state.contains_key(&address) || rng.random_ratio(1, 4) {
                 let mut account =
-                    state.get(&address).map(|entry| entry.account.to_owned()).unwrap_or_default();
+                    state.get(&address).map(|entry| entry.account.clone()).unwrap_or_default();
                 account.nonce += 1;
                 account.balance = U256::from(rng.random_range(1..=1_000_000u64));
                 Operation::Account { address, account }
@@ -82,7 +82,7 @@ pub fn generate(rng: &mut StdRng, state: &Model, updates: usize) -> Vec<Operatio
         .collect()
 }
 
-pub fn apply(
+pub(crate) fn apply(
     state: &mut Model,
     number: u64,
     operations: &[Operation],
@@ -138,7 +138,7 @@ pub fn apply(
     (bundle.build(), stream)
 }
 
-pub fn storage_root(account: &ModelAccount) -> B256 {
+pub(crate) fn storage_root(account: &ModelAccount) -> B256 {
     let leaves = account
         .storage
         .iter()
@@ -151,12 +151,11 @@ pub fn storage_root(account: &ModelAccount) -> B256 {
     builder.root()
 }
 
-pub fn root(state: &Model) -> B256 {
+pub(crate) fn root(state: &Model) -> B256 {
     let leaves = state
         .iter()
         .map(|(address, entry)| {
-            let account: TrieAccount =
-                entry.account.to_owned().into_trie_account(storage_root(entry));
+            let account: TrieAccount = entry.account.clone().into_trie_account(storage_root(entry));
             (keccak256(address), alloy_rlp::encode(account))
         })
         .collect::<BTreeMap<_, _>>();
