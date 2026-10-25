@@ -721,26 +721,12 @@ fn run(config: &mut Config, snapshotter: &Snapshotter) -> Result<()> {
         runtime.spawn_blocking_named(name, || {}).get();
     }
     let metrics = metric_counts(snapshotter);
-    let metric_durations = snapshotter
-        .snapshot()
-        .into_vec()
-        .into_iter()
-        .filter_map(|(key, _, _, value)| {
-            let name = key.key().name().to_string();
-            let DebugValue::Histogram(values) = value else { return None };
-            name.contains("tree.root").then(|| {
-                let sum_secs: f64 = values.iter().map(|value| value.into_inner()).sum();
-                let max_secs = values.iter().map(|value| value.into_inner()).fold(0.0, f64::max);
-                (name, json!({"count": values.len(), "sum_secs": sum_secs, "max_secs": max_secs}))
-            })
-        })
-        .collect::<BTreeMap<_, _>>();
     println!(
         "{}",
         json!({"completed": true, "seed": config.seed, "blocks": total_blocks,
         "commits": commits, "partial_commits": partial_commits,
         "update_batches": update_batches, "hint_batches": hint_batches,
-        "metrics": metrics, "metric_durations": metric_durations})
+        "metrics": metrics})
     );
     Ok(())
 }
