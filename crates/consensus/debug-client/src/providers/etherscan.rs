@@ -135,9 +135,8 @@ where
 
 /// Requests a block from Etherscan and returns the raw response body.
 ///
-/// This does not depend on the block type. It returns a boxed future because the body of an
-/// `async fn` is compiled in every crate that polls it, which would be each binary that
-/// instantiates the provider.
+/// It returns a boxed future because the body of an `async fn` is compiled in every crate that
+/// polls it, which would be each binary that instantiates the provider.
 fn fetch_block<'a>(
     http_client: &'a Client,
     base_url: &'a str,

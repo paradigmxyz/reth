@@ -9,7 +9,7 @@ use alloy_rpc_types_engine::PayloadExtras;
 use alloy_transport::TransportResult;
 use futures::{future::BoxFuture, stream::BoxStream, StreamExt};
 use reth_node_api::ExecutionPayload;
-use std::{sync::Arc, time::Duration};
+use std::sync::Arc;
 use tokio::sync::mpsc::Sender;
 use tracing::{debug, warn};
 
@@ -49,16 +49,50 @@ where
     type ExecutionData = ExecutionData;
 
     async fn subscribe_payloads(&self, tx: Sender<Self::ExecutionData>) {
-        let mut stream = None;
-        // Exit if the receiver has been dropped (e.g. during shutdown) so we don't keep retrying
-        // after the consumer is gone.
-        while let Some((block, extras)) =
-            self.client.next_block(&mut stream, &|| tx.is_closed()).await
-        {
-            if tx.send((self.convert)(block, extras)).await.is_err() {
-                // Channel closed - receiver dropped, exit completely.
-                return;
+        loop {
+            let Ok(mut stream) = self.client.full_block_stream().await.inspect_err(|err| {
+                warn!(
+                    target: "consensus::debug-client",
+                    %err,
+                    url=%self.client.url,
+                    "Failed to subscribe to blocks, retrying in 5s",
+                );
+            }) else {
+                // Exit if the receiver has been dropped (e.g. during shutdown) so we
+                // don't keep retrying after the consumer is gone.
+                if tx.is_closed() {
+                    return;
+                }
+                tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+                continue
+            };
+
+            while let Some(res) = stream.next().await {
+                match res {
+                    Ok(block) => {
+                        let extras = self.client.payload_extras(block.header()).await;
+                        let payload = (self.convert)(block, extras);
+                        if tx.send(payload).await.is_err() {
+                            // Channel closed - receiver dropped, exit completely.
+                            return;
+                        }
+                    }
+                    Err(err) => {
+                        warn!(
+                            target: "consensus::debug-client",
+                            %err,
+                            url=%self.client.url,
+                            "Failed to fetch a block",
+                        );
+                    }
+                }
             }
+            // if stream terminated we want to re-establish it again
+            debug!(
+                target: "consensus::debug-client",
+                url=%self.client.url,
+                "Re-establishing block subscription",
+            );
         }
     }
 
@@ -74,7 +108,7 @@ type BlockStream = BoxStream<'static, TransportResult<AnyRpcBlock>>;
 ///
 /// The methods called from generic code return boxed futures: the body of an `async fn` is
 /// compiled in every crate that polls it, whereas a boxed future is polled through a vtable built
-/// here.
+/// here. This keeps the alloy provider, pubsub, and transport code out of downstream binaries.
 #[derive(derive_more::Debug, Clone)]
 struct AnyRpcClient {
     #[debug(skip)]
@@ -110,75 +144,19 @@ impl AnyRpcClient {
     ///
     /// This first attempts to obtain an `eth_subscribe` subscription, if that fails because the
     /// connection is not a websocket, this falls back to poll based subscription.
-    async fn full_block_stream(&self) -> TransportResult<BlockStream> {
-        // first try to obtain a regular subscription
-        match self.provider.subscribe_full_blocks().full().into_stream().await {
-            Ok(sub) => Ok(sub.boxed()),
-            Err(err) => {
-                debug!(
-                    target: "consensus::debug-client",
-                    %err,
-                    url=%self.url,
-                    "Failed to establish block subscription",
-                );
-                Ok(self.provider.watch_full_blocks().await?.full().into_stream().boxed())
-            }
-        }
-    }
-
-    /// Returns the next block of `stream` with its payload extras, (re-)establishing the stream
-    /// whenever it is missing or terminated.
-    ///
-    /// Returns `None` if the stream cannot be established and `is_closed` returns `true`.
-    fn next_block<'a>(
-        &'a self,
-        stream: &'a mut Option<BlockStream>,
-        is_closed: &'a (dyn Fn() -> bool + Sync),
-    ) -> BoxFuture<'a, Option<(AnyRpcBlock, PayloadExtras)>> {
+    fn full_block_stream(&self) -> BoxFuture<'_, TransportResult<BlockStream>> {
         Box::pin(async move {
-            loop {
-                let active = match stream {
-                    Some(active) => active,
-                    None => match self.full_block_stream().await {
-                        Ok(active) => stream.insert(active),
-                        Err(err) => {
-                            warn!(
-                                target: "consensus::debug-client",
-                                %err,
-                                url=%self.url,
-                                "Failed to subscribe to blocks, retrying in 5s",
-                            );
-                            if is_closed() {
-                                return None;
-                            }
-                            tokio::time::sleep(Duration::from_secs(5)).await;
-                            continue
-                        }
-                    },
-                };
-
-                match active.next().await {
-                    Some(Ok(block)) => {
-                        let extras = self.payload_extras(block.header()).await;
-                        return Some((block, extras));
-                    }
-                    Some(Err(err)) => {
-                        warn!(
-                            target: "consensus::debug-client",
-                            %err,
-                            url=%self.url,
-                            "Failed to fetch a block",
-                        );
-                    }
-                    None => {
-                        // if stream terminated we want to re-establish it again
-                        *stream = None;
-                        debug!(
-                            target: "consensus::debug-client",
-                            url=%self.url,
-                            "Re-establishing block subscription",
-                        );
-                    }
+            // first try to obtain a regular subscription
+            match self.provider.subscribe_full_blocks().full().into_stream().await {
+                Ok(sub) => Ok(sub.boxed()),
+                Err(err) => {
+                    debug!(
+                        target: "consensus::debug-client",
+                        %err,
+                        url=%self.url,
+                        "Failed to establish block subscription",
+                    );
+                    Ok(self.provider.watch_full_blocks().await?.full().into_stream().boxed())
                 }
             }
         })
@@ -204,32 +182,34 @@ impl AnyRpcClient {
     ///
     /// Block access lists are best effort here: RPC providers may not support
     /// `eth_getBlockAccessListByHash`, so failed or missing responses fall back to empty extras.
-    async fn payload_extras(&self, header: &AnyRpcHeader) -> PayloadExtras {
-        if !self.fetch_block_access_list {
-            return PayloadExtras::default()
-        }
+    fn payload_extras<'a>(&'a self, header: &'a AnyRpcHeader) -> BoxFuture<'a, PayloadExtras> {
+        Box::pin(async move {
+            if !self.fetch_block_access_list {
+                return PayloadExtras::default()
+            }
 
-        let block_hash = header.hash();
-        if header.block_access_list_hash().is_none() {
-            return PayloadExtras::default()
-        };
+            let block_hash = header.hash();
+            if header.block_access_list_hash().is_none() {
+                return PayloadExtras::default()
+            };
 
-        let block_access_list = self
-            .provider
-            .get_block_access_list_raw(BlockId::from(block_hash))
-            .await
-            .inspect_err(|err| {
-                warn!(
-                    target: "consensus::debug-client",
-                    %err,
-                    url=%self.url,
-                    %block_hash,
-                    "Failed to fetch block access list",
-                );
-            })
-            .ok()
-            .flatten();
+            let block_access_list = self
+                .provider
+                .get_block_access_list_raw(BlockId::from(block_hash))
+                .await
+                .inspect_err(|err| {
+                    warn!(
+                        target: "consensus::debug-client",
+                        %err,
+                        url=%self.url,
+                        %block_hash,
+                        "Failed to fetch block access list",
+                    );
+                })
+                .ok()
+                .flatten();
 
-        PayloadExtras::from(block_access_list)
+            PayloadExtras::from(block_access_list)
+        })
     }
 }
