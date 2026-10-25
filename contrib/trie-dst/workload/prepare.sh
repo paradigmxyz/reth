@@ -52,6 +52,7 @@ trap 'sccache --show-stats > /run-info/sccache.txt; cat /run-info/sccache.txt' E
 # Keep the DST profile: it inherits profiling and enables debug assertions and
 # overflow checks for the harness. Do not switch these builds to profiling.
 if [ "${DST_CMD:-campaign}" = fuzz ]; then
+  export CARGO_PROFILE_DST_LTO=fat CARGO_PROFILE_DST_CODEGEN_UNITS=1
   source /bedrock-rust-coverage.sh
   binary=$(bedrock_rust_coverage_build /bedrock-guest /out reth-trie-dst dst \
     --inline --locked -p reth-trie-dst --features inline-coverage)
