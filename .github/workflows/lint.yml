@@ -234,6 +234,12 @@ jobs:
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           cache-on-failure: true
+      - name: Check compiler cache availability
+        run: |
+          if ! sccache rustc -vV; then
+            echo "::warning::sccache unavailable; building documentation without compiler cache."
+            echo "RUSTC_WRAPPER=" >> "$GITHUB_ENV"
+          fi
       - run: cargo docs --document-private-items
         env:
           # Keep in sync with ./book.yml:jobs.build
