@@ -582,7 +582,9 @@ impl Runtime {
         F: FnOnce() -> R + Send + 'static,
         R: Send + 'static,
     {
-        self.0.handle.spawn_blocking(func)
+        // Erases the closure type so tokio's blocking task machinery is instantiated once per `R`
+        // instead of once per closure.
+        self.0.handle.spawn_blocking(Box::new(func) as Box<dyn FnOnce() -> R + Send>)
     }
 
     /// Moves the given value to a dedicated background thread for deallocation.

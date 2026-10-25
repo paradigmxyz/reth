@@ -11,7 +11,12 @@
 //! Entrypoint for running commands.
 
 use reth_tasks::{PanickedTaskError, TaskExecutor};
-use std::{future::Future, pin::pin, sync::mpsc, time::Duration};
+use std::{
+    future::Future,
+    pin::{pin, Pin},
+    sync::mpsc,
+    time::Duration,
+};
 use tokio::task::JoinHandle;
 use tracing::{debug, error, info};
 
@@ -57,7 +62,7 @@ impl CliRunner {
     where
         F: Future<Output = T>,
     {
-        self.runtime.handle().block_on(fut)
+        self.runtime.handle().block_on(pin!(fut) as Pin<&mut dyn Future<Output = T>>)
     }
 
     /// Executes the given _async_ command on the tokio runtime until the command future resolves or
@@ -79,12 +84,28 @@ impl CliRunner {
             + 'static,
     {
         let (context, task_manager_handle) = cli_context(&self.runtime);
+        self.run_until_exit(task_manager_handle, pin!(command(context)))
+    }
 
+    /// Runs the type-erased command until it finished or ctrl-c was fired, then shuts down.
+    fn run_until_exit<E>(
+        self,
+        task_manager_handle: JoinHandle<Result<(), PanickedTaskError>>,
+        command: Pin<&mut dyn Future<Output = Result<(), E>>>,
+    ) -> Result<(), E>
+    where
+        E: Send
+            + Sync
+            + std::fmt::Display
+            + From<std::io::Error>
+            + From<reth_tasks::PanickedTaskError>
+            + 'static,
+    {
         // Executes the command until it finished or ctrl-c was fired
-        let command_res = self.runtime.handle().block_on(run_to_completion_or_panic(
-            task_manager_handle,
-            run_until_ctrl_c(command(context)),
-        ));
+        let command_res = self
+            .runtime
+            .handle()
+            .block_on(run_to_completion_or_panic(task_manager_handle, run_until_ctrl_c(command)));
 
         if let Err(err) = &command_res {
             error!(target: "reth::cli", %err, "shutting down due to error");
@@ -117,12 +138,28 @@ impl CliRunner {
             + From<reth_tasks::PanickedTaskError>
             + 'static,
     {
+        self.run_blocking_until_exit(Box::new(move |context| Box::pin(command(context))))
+    }
+
+    /// Runs the type-erased command on the blocking thread pool until it finished or ctrl-c was
+    /// fired, then shuts down.
+    fn run_blocking_until_exit<E>(
+        self,
+        command: Box<dyn FnOnce(CliContext) -> BoxedCommand<E> + Send>,
+    ) -> Result<(), E>
+    where
+        E: Send
+            + Sync
+            + std::fmt::Display
+            + From<std::io::Error>
+            + From<reth_tasks::PanickedTaskError>
+            + 'static,
+    {
         let (context, task_manager_handle) = cli_context(&self.runtime);
 
         // Spawn the command on the blocking thread pool
         let handle = self.runtime.handle().clone();
-        let handle2 = handle.clone();
-        let command_handle = handle.spawn_blocking(move || handle2.block_on(command(context)));
+        let command_handle = self.runtime.spawn_blocking(move || handle.block_on(command(context)));
 
         // Wait for the command to complete or ctrl-c
         let command_res = self.runtime.handle().block_on(run_to_completion_or_panic(
@@ -150,7 +187,9 @@ impl CliRunner {
         F: Future<Output = Result<(), E>>,
         E: Send + Sync + From<std::io::Error> + 'static,
     {
-        self.runtime.handle().block_on(run_until_ctrl_c(fut))?;
+        self.runtime.handle().block_on(run_until_ctrl_c(
+            pin!(fut) as Pin<&mut dyn Future<Output = Result<(), E>>>
+        ))?;
         Ok(())
     }
 
@@ -163,9 +202,15 @@ impl CliRunner {
         F: Future<Output = Result<(), E>> + Send + 'static,
         E: Send + Sync + From<std::io::Error> + 'static,
     {
+        self.run_blocking_until_ctrl_c_boxed(Box::pin(fut))
+    }
+
+    fn run_blocking_until_ctrl_c_boxed<E>(self, fut: BoxedCommand<E>) -> Result<(), E>
+    where
+        E: Send + Sync + From<std::io::Error> + 'static,
+    {
         let handle = self.runtime.handle().clone();
-        let handle2 = handle.clone();
-        let fut = handle.spawn_blocking(move || handle2.block_on(fut));
+        let fut = self.runtime.spawn_blocking(move || handle.block_on(fut));
         self.runtime
             .handle()
             .block_on(run_until_ctrl_c(async move { fut.await.expect("Failed to join task") }))?;
@@ -175,6 +220,9 @@ impl CliRunner {
         Ok(())
     }
 }
+
+/// A type-erased command future, so that code driving it is not instantiated per command.
+type BoxedCommand<E> = Pin<Box<dyn Future<Output = Result<(), E>> + Send>>;
 
 /// Extracts the task manager handle from the runtime and creates the [`CliContext`].
 fn cli_context(
