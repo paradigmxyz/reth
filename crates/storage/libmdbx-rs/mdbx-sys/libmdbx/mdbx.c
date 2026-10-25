@@ -5164,31 +5164,6 @@ MDBX_NOTHROW_PURE_FUNCTION static inline bool eq_fast(const MDBX_val *a, const M
   return unlikely(a->iov_len == b->iov_len) && eq_fast_slowpath(a->iov_base, b->iov_base, a->iov_len);
 }
 
-/* Inlinable equivalent of cmp_lexical() for hot search loops: compares 64-bit
- * words in big-endian order instead of calling memcmp() via a pointer.
- * As with cmp_lexical(), only the sign of the result is meaningful. */
-MDBX_NOTHROW_PURE_FUNCTION static __always_inline int cmp_lexical_inline(const MDBX_val *a, const MDBX_val *b) {
-  const size_t shortest = (a->iov_len < b->iov_len) ? a->iov_len : b->iov_len;
-  const uint8_t *const pa = a->iov_base;
-  const uint8_t *const pb = b->iov_base;
-  size_t i = 0;
-  for (; i + 8 <= shortest; i += 8) {
-    uint64_t xa = unaligned_peek_u64(1, pa + i);
-    uint64_t xb = unaligned_peek_u64(1, pb + i);
-    if (xa != xb) {
-#if __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
-      xa = osal_bswap64(xa);
-      xb = osal_bswap64(xb);
-#endif /* __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__ */
-      return (xa < xb) ? -1 : 1;
-    }
-  }
-  for (; i < shortest; ++i)
-    if (pa[i] != pb[i])
-      return (pa[i] < pb[i]) ? -1 : 1;
-  return CMP2INT(a->iov_len, b->iov_len);
-}
-
 MDBX_NOTHROW_PURE_FUNCTION MDBX_INTERNAL int cmp_equal_or_greater(const MDBX_val *a, const MDBX_val *b);
 
 MDBX_NOTHROW_PURE_FUNCTION MDBX_INTERNAL int cmp_equal_or_wrong(const MDBX_val *a, const MDBX_val *b);
@@ -16803,22 +16778,9 @@ static __always_inline int cursor_step(const bool inner, const bool forward, MDB
   DEBUG("turn-%s: top page was %" PRIaPGNO " in cursor %p, ki %zi of %zi", forward ? "next" : "prev", mp->pgno,
         __Wpedantic_format_voidptr(mc), ki, nkeys);
   if (forward) {
-    if (likely(++ki < nkeys)) {
+    if (likely(++ki < nkeys))
       mc->ki[mc->top] = (indx_t)ki;
-      /* Prefetch the node of the following step, since nodes are placed
-       * within a page in insertion order rather than in key order. */
-      if (ki + 1 < nkeys) {
-        if (!is_dupfix_leaf(mp))
-          __prefetch(page_node(mp, ki + 1));
-      }
-      else if (mc->top > 0) {
-        /* Last node of the page, so prefetch the right sibling page. */
-        const page_t *const parent = mc->pg[mc->top - 1];
-        const size_t pki = mc->ki[mc->top - 1] + (size_t)1;
-        if (pki < page_numkeys(parent))
-          __prefetch(pgno2page(mc->txn->env, node_pgno(page_node(parent, pki))));
-      }
-    } else {
+    else {
       DEBUG("%s", "=====> move to next sibling page");
       int err = cursor_sibling_right(mc);
       if (unlikely(err != MDBX_SUCCESS))
@@ -16827,12 +16789,9 @@ static __always_inline int cursor_step(const bool inner, const bool forward, MDB
       DEBUG("next page is %" PRIaPGNO ", key index %u", mp->pgno, mc->ki[mc->top]);
     }
   } else {
-    if (likely(--ki >= 0)) {
+    if (likely(--ki >= 0))
       mc->ki[mc->top] = (indx_t)ki;
-      /* Prefetch the node of the following step, see above. */
-      if (ki > 0 && !is_dupfix_leaf(mp))
-        __prefetch(page_node(mp, ki - 1));
-    } else {
+    else {
       DEBUG("%s", "=====> move to prev sibling page");
       int err = cursor_sibling_left(mc);
       if (unlikely(err != MDBX_SUCCESS))
@@ -27766,45 +27725,6 @@ node_t *node_shrink(page_t *mp, size_t indx, node_t *node) {
   return ptr_disp(node, delta);
 }
 
-/* Binary search over the nodes of a non-DUPFIX page within [low, high].
- * Returns the index of the first node not less than the key and sets *exact
- * when that node's key is equal to it. */
-static __always_inline intptr_t node_search_nodes(MDBX_cursor *mc, const page_t *mp, const MDBX_val *key,
-                                                  intptr_t low, intptr_t high, MDBX_cmp_func *cmp, bool *exact) {
-  DKBUF_DEBUG;
-  (void)mc;
-  intptr_t i;
-  node_t *node;
-  MDBX_val nodekey;
-  do {
-    i = (low + high) >> 1;
-    /* Prefetch the nodes of both candidates for the next probe, so their
-     * cache misses overlap with the miss of the current one. */
-    if (low < i)
-      __prefetch(page_node(mp, (low + i - 1) >> 1));
-    if (i < high)
-      __prefetch(page_node(mp, (i + 1 + high) >> 1));
-    node = page_node(mp, i);
-    nodekey.iov_len = node_ks(node);
-    nodekey.iov_base = node_key(node);
-    cASSERT(mc, ptr_disp(mp, mc->txn->env->ps) >= ptr_disp(nodekey.iov_base, nodekey.iov_len));
-    int cr = cmp(key, &nodekey);
-    if (is_leaf(mp))
-      DEBUG("found leaf index %zu [%s], rc = %i", i, DKEY_DEBUG(&nodekey), cr);
-    else
-      DEBUG("found branch index %zu [%s -> %" PRIaPGNO "], rc = %i", i, DKEY_DEBUG(&nodekey), node_pgno(node), cr);
-    if (cr > 0)
-      low = ++i;
-    else if (cr < 0)
-      high = i - 1;
-    else {
-      *exact = true;
-      break;
-    }
-  } while (likely(low <= high));
-  return i;
-}
-
 __hot struct node_search_result node_search(MDBX_cursor *mc, const MDBX_val *key) {
   page_t *mp = mc->pg[mc->top];
   const intptr_t nkeys = page_numkeys(mp);
@@ -27858,10 +27778,27 @@ __hot struct node_search_result node_search(MDBX_cursor *mc, const MDBX_val *key
      * alignment is guaranteed. Use faster cmp_int_align4(). */
     cmp = cmp_int_align4;
 
-  /* Inline the default lexical comparator into the search loop. */
-  i = (MDBX_UNALIGNED_OK >= 8 && cmp == cmp_lexical)
-          ? node_search_nodes(mc, mp, key, low, high, cmp_lexical_inline, &ret.exact)
-          : node_search_nodes(mc, mp, key, low, high, cmp, &ret.exact);
+  node_t *node;
+  do {
+    i = (low + high) >> 1;
+    node = page_node(mp, i);
+    nodekey.iov_len = node_ks(node);
+    nodekey.iov_base = node_key(node);
+    cASSERT(mc, ptr_disp(mp, mc->txn->env->ps) >= ptr_disp(nodekey.iov_base, nodekey.iov_len));
+    int cr = cmp(key, &nodekey);
+    if (is_leaf(mp))
+      DEBUG("found leaf index %zu [%s], rc = %i", i, DKEY_DEBUG(&nodekey), cr);
+    else
+      DEBUG("found branch index %zu [%s -> %" PRIaPGNO "], rc = %i", i, DKEY_DEBUG(&nodekey), node_pgno(node), cr);
+    if (cr > 0)
+      low = ++i;
+    else if (cr < 0)
+      high = i - 1;
+    else {
+      ret.exact = true;
+      break;
+    }
+  } while (likely(low <= high));
 
   /* store the key index */
   mc->ki[mc->top] = (indx_t)i;
