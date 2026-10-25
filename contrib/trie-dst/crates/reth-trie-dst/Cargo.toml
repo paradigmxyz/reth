@@ -5,6 +5,9 @@ edition.workspace = true
 license.workspace = true
 publish = false
 
+[lints]
+workspace = true
+
 [dependencies]
 reth-chain-state.workspace = true
 reth-chainspec.workspace = true
