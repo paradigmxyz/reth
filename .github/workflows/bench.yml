@@ -159,6 +159,7 @@ jobs:
     name: bench-ack
     runs-on: ubuntu-latest
     permissions:
+      actions: read
       contents: read
       issues: write
       pull-requests: write
@@ -265,7 +266,9 @@ jobs:
 
             const shouldHideComment = (comment) => {
               const body = comment.body.trim();
-              return comment.user.login === 'decofe' || body.startsWith('derek') || body.startsWith('@decofe');
+              return comment.user.login === 'decofe'
+                || (comment.user.login === 'github-actions[bot]' && /Benchmark (queued|started|complete|failed|cancelled)/i.test(body))
+                || body.startsWith('derek') || body.startsWith('@decofe');
             };
             const comments = await github.paginate(github.rest.issues.listComments, {
               owner: context.repo.owner,
@@ -321,7 +324,7 @@ jobs:
           INPUT_WARMUP: ${{ github.event.inputs.warmup }}
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         with:
-          github-token: ${{ secrets.DEREK_PAT }}
+          github-token: ${{ github.token }}
           script: |
             const validBalModes = new Set(['false', 'true', 'feature', 'baseline']);
             const validSlackModes = new Set(['always', 'on-win', 'on-error', 'never']);
@@ -896,7 +899,7 @@ jobs:
           INPUT_MEMPOOL: ${{ steps.args.outputs.mempool }}
           INPUT_WARMUP: ${{ steps.args.outputs.warmup }}
         with:
-          github-token: ${{ secrets.DEREK_PAT }}
+          github-token: ${{ github.token }}
           script: |
             if (context.eventName === 'issue_comment') {
               await github.rest.reactions.createForIssueComment({
@@ -1051,7 +1054,7 @@ jobs:
           INPUT_MEMPOOL: ${{ steps.args.outputs.mempool }}
           INPUT_WARMUP: ${{ steps.args.outputs.warmup }}
         with:
-          github-token: ${{ secrets.DEREK_PAT }}
+          github-token: ${{ github.token }}
           script: |
             const pr = process.env.INPUT_PR;
             const commentId = parseInt(process.env.INPUT_COMMENT_ID);
@@ -1168,6 +1171,7 @@ jobs:
     name: bench-txgen
     runs-on: [self-hosted, Linux, X64, available]
     permissions:
+      actions: read
       id-token: write
       contents: read
       pull-requests: write
@@ -1277,7 +1281,7 @@ jobs:
           INPUT_BASELINE_NAME: ${{ needs.bench-ack.outputs.baseline-name }}
           INPUT_FEATURE_NAME: ${{ needs.bench-ack.outputs.feature-name }}
         with:
-          github-token: ${{ secrets.DEREK_PAT }}
+          github-token: ${{ github.token }}
           script: |
             const { data: jobs } = await github.rest.actions.listJobsForWorkflowRun({
               owner: context.repo.owner,
@@ -1777,7 +1781,7 @@ jobs:
         env:
           BASELINE_REF: ${{ steps.refs.outputs.baseline-ref }}
           FEATURE_REF: ${{ steps.refs.outputs.feature-ref }}
-          BENCH_GH_TOKEN: ${{ secrets.DEREK_PAT }}
+          BENCH_GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
 
@@ -2201,7 +2205,7 @@ jobs:
         env:
           BENCH_RESULTS_URL: ${{ steps.upload-results.outputs.artifact-url }}
         with:
-          github-token: ${{ secrets.DEREK_PAT }}
+          github-token: ${{ github.token }}
           script: |
             const fs = require('fs');
 
@@ -2288,7 +2292,7 @@ jobs:
         if: failure() && env.BENCH_COMMENT_ID
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         with:
-          github-token: ${{ secrets.DEREK_PAT }}
+          github-token: ${{ github.token }}
           script: |
             const steps_status = [
               ['installing dependencies', '${{ steps.install-deps.outcome }}'],
@@ -2342,7 +2346,7 @@ jobs:
         if: cancelled() && env.BENCH_COMMENT_ID
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         with:
-          github-token: ${{ secrets.DEREK_PAT }}
+          github-token: ${{ github.token }}
           script: |
             const jobUrl = process.env.BENCH_JOB_URL || `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
             await github.rest.issues.updateComment({

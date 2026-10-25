@@ -746,11 +746,9 @@ if [ -n "${BENCH_VICTORIAMETRICS_URL:-}" ]; then
   PROMETHEUS_REPORT+=(--report "victoriametrics:$BENCH_VICTORIAMETRICS_URL")
 
   if [ -n "${BENCH_LABELS_FILE:-}" ] && [ -f "$BENCH_LABELS_FILE" ]; then
-    BENCHMARK_START=$(jq -r '.run_start_epoch // empty' "$BENCH_LABELS_FILE")
-    if [ -n "$BENCHMARK_START" ]; then
-      METRICS_ARGS+=(--metrics-align "$BENCHMARK_START")
-    fi
-
+    # Keep sample timestamps on the wall clock used by target-metrics-range.json.
+    # run_start_epoch predates node startup and warmup; aligning to it shifts
+    # measured scrapes outside that range.
     for key in benchmark_run run_type benchmark_id run_start_epoch reference_epoch bench_sha; do
       value=$(jq -r --arg key "$key" '.[$key] // empty' "$BENCH_LABELS_FILE")
       if [ -n "$value" ]; then
