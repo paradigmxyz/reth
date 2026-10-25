@@ -1490,9 +1490,6 @@ fn storage_job_chunk_len(tries: usize) -> usize {
     /// Upper bound on how many tries a single slow one can hold up.
     const MAX_CHUNK_LEN: usize = 32;
 
-    if rayon::current_num_threads() == 1 {
-        return tries.clamp(1, MAX_CHUNK_LEN);
-    }
     tries.div_ceil(rayon::current_num_threads().max(1) * 4).clamp(1, MAX_CHUNK_LEN)
 }
 
