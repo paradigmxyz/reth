@@ -826,7 +826,8 @@ where
             return Ok(())
         }
 
-        let inline_round = job_units <= INLINE_STORAGE_WORK_UNITS;
+        let inline_round =
+            job_units <= INLINE_STORAGE_WORK_UNITS || rayon::current_num_threads() == 1;
         let new_epoch = self.new_epoch;
         let retain_updates = self.trie.retains_updates();
         let started = Instant::now();
