@@ -599,10 +599,14 @@ pub struct EngineArgs {
 
     /// Reuse transaction prewarming results during block execution instead of executing
     /// transactions again when their prewarm reads are still valid.
+    ///
+    /// Enabled by default, use `--engine.prewarm-reuse=false` to disable it.
     #[arg(
         long = "engine.prewarm-reuse",
         env = "RETH_ENGINE_PREWARM_REUSE",
-        default_value_t = false
+        default_value_t = true,
+        num_args = 0..=1,
+        default_missing_value = "true",
     )]
     pub prewarm_reuse: bool,
 
@@ -699,7 +703,7 @@ impl Default for EngineArgs {
             bal_parallel_execution_disabled,
             bal_parallel_state_root_disabled,
             disable_bal_batch_io: false,
-            prewarm_reuse: false,
+            prewarm_reuse: true,
             #[cfg(feature = "trie-debug")]
             proof_jitter: None,
         }
