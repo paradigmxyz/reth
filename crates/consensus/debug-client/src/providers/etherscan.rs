@@ -135,8 +135,7 @@ where
 
 /// Requests a block from Etherscan and returns the raw response body.
 ///
-/// It returns a boxed future because the body of an `async fn` is compiled in every crate that
-/// polls it, which would be each binary that instantiates the provider.
+/// Boxed so the `reqwest` future is compiled here, not in each crate that polls it.
 fn fetch_block<'a>(
     http_client: &'a Client,
     base_url: &'a str,

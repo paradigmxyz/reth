@@ -15,10 +15,6 @@ use tracing::{debug, warn};
 
 /// Block provider that fetches new blocks from an RPC endpoint using a connection that supports
 /// RPC subscriptions.
-///
-/// Only the conversion into `ExecutionData` is generic. Everything that talks to the endpoint
-/// lives in a non-generic client, so it is compiled once in this crate instead of in
-/// every binary that instantiates the provider.
 #[derive(derive_more::Debug, Clone)]
 pub struct RpcBlockProvider<ExecutionData> {
     client: AnyRpcClient,
