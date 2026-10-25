@@ -23,7 +23,6 @@ use std::{
     time::{Duration, Instant},
 };
 use tar::Archive;
-use tokio::task;
 use tracing::{info, warn};
 use url::Url;
 use zstd::stream::read::Decoder as ZstdDecoder;
@@ -605,7 +604,7 @@ pub(crate) async fn stream_and_extract(
     let target_dir = target_dir.to_path_buf();
     let static_files_dir = static_files_dir.map(Path::to_path_buf);
     let url = url.to_string();
-    task::spawn_blocking(move || {
+    reth_tasks::spawn_blocking(move || {
         blocking_download_and_extract(
             &url,
             &target_dir,
