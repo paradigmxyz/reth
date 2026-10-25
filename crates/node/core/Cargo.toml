@@ -14,6 +14,7 @@ workspace = true
 # reth
 reth-chainspec.workspace = true
 reth-consensus.workspace = true
+reth-fs-util.workspace = true
 reth-primitives-traits = { workspace = true, features = ["rayon"] }
 reth-cli-util.workspace = true
 reth-db = { workspace = true, features = ["mdbx"] }
@@ -73,6 +74,7 @@ futures.workspace = true
 [dev-dependencies]
 # test vectors generation
 proptest.workspace = true
+tempfile.workspace = true
 tokio.workspace = true
 
 [features]

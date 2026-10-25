@@ -8333,6 +8333,7 @@ dependencies = [
  "secp256k1 0.30.0",
  "serde",
  "snmalloc-rs",
+ "tempfile",
  "thiserror 2.0.21",
  "tikv-jemalloc-sys",
  "tikv-jemallocator",
@@ -9430,6 +9431,7 @@ version = "2.8.1"
 dependencies = [
  "serde",
  "serde_json",
+ "tempfile",
  "thiserror 2.0.21",
 ]
 
@@ -9835,6 +9837,7 @@ dependencies = [
  "reth-engine-local",
  "reth-engine-primitives",
  "reth-ethereum-forks",
+ "reth-fs-util",
  "reth-net-banlist",
  "reth-net-nat",
  "reth-network",
@@ -9856,6 +9859,7 @@ dependencies = [
  "serde",
  "smolgen",
  "strum 0.27.2",
+ "tempfile",
  "thiserror 2.0.21",
  "tokio",
  "toml",
