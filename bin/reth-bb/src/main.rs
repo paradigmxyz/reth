@@ -15,7 +15,6 @@ use reth_chainspec::{ChainSpec, EthChainSpec, EthereumHardforks};
 use reth_consensus::noop::NoopConsensus;
 use reth_ethereum_cli::{chainspec::EthereumChainSpecParser, interface::Cli};
 use reth_ethereum_primitives::{Block, EthPrimitives};
-use reth_evm_ethereum::EthEvmConfig;
 use reth_node_api::{
     AddOnsContext, FullNodeComponents, NewPayloadError, NodeTypes, PayloadTypes, PayloadValidator,
 };
@@ -29,8 +28,8 @@ use reth_node_builder::{
 };
 use reth_node_core::args::DefaultEngineValues;
 use reth_node_ethereum::{
-    EthPayloadTypes, EthereumEngineValidator, EthereumEthApiBuilder, EthereumNetworkBuilder,
-    EthereumNode, EthereumPayloadBuilder, EthereumPoolBuilder,
+    EthPayloadTypes, EthereumEngineValidator, EthereumEthApiBuilder, EthereumExecutorBuilder,
+    EthereumNetworkBuilder, EthereumNode, EthereumPayloadBuilder, EthereumPoolBuilder,
 };
 use reth_primitives_traits::SealedBlock;
 use reth_provider::EthStorage;
@@ -146,7 +145,7 @@ where
     type EVM = BbEvmConfig<<Node::Types as NodeTypes>::ChainSpec>;
 
     async fn build_evm(self, ctx: &BuilderContext<Node>) -> eyre::Result<Self::EVM> {
-        Ok(BbEvmConfig::new(EthEvmConfig::new(ctx.chain_spec())))
+        Ok(BbEvmConfig::new(EthereumExecutorBuilder::default().build_evm(ctx).await?))
     }
 }
 
@@ -221,6 +220,16 @@ where
 // ---------------------------------------------------------------------------
 
 fn main() {
+    #[cfg(feature = "jit")]
+    match reth_node_ethereum::node::maybe_run_jit_helper() {
+        Ok(std::ops::ControlFlow::Break(())) => return,
+        Ok(std::ops::ControlFlow::Continue(())) => {}
+        Err(err) => {
+            eprintln!("Error: {err:?}");
+            std::process::exit(1);
+        }
+    }
+
     reth_cli_util::sigsegv_handler::install();
 
     if std::env::var_os("RUST_BACKTRACE").is_none() {
