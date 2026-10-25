@@ -60,8 +60,23 @@ jobs:
         run: |
           cargo install --locked --path bin/reth
       - name: Run headers stage
+        timeout-minutes: 10
         run: |
-          reth stage run headers --from ${{ env.FROM_BLOCK }} --to ${{ env.TO_BLOCK }} --commit --checkpoints
+          # Public peers can disconnect or lack the requested historical header.
+          # A fresh invocation can discover new peers after the CLI exhausts its retries.
+          for attempt in 1 2 3; do
+            status=0
+            reth stage run headers --from ${{ env.FROM_BLOCK }} --to ${{ env.TO_BLOCK }} --commit --checkpoints >headers.log 2>&1 || status=$?
+            cat headers.log
+            if [ "$status" -eq 0 ]; then
+              break
+            fi
+            if [ "$attempt" -eq 3 ] || ! grep -Eq '^Error: (connection to a peer dropped while handling the request|Invalid number of headers received\. Expected: 1\. Received: 0)$' headers.log; then
+              exit "$status"
+            fi
+            echo "Retrying headers stage after peer failure (attempt $attempt/3)"
+            sleep 10
+          done
       - name: Run bodies stage
         run: |
           reth stage run bodies --from ${{ env.FROM_BLOCK }} --to ${{ env.TO_BLOCK }} --commit --checkpoints
