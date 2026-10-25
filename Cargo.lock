@@ -9745,7 +9745,6 @@ dependencies = [
  "alloy-eips",
  "alloy-network",
  "alloy-primitives",
- "alloy-provider",
  "alloy-rpc-types",
  "alloy-rpc-types-engine",
  "aquamarine",
