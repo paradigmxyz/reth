@@ -43,6 +43,7 @@ alloy-genesis.workspace = true
 
 [features]
 gmp = ["evm2/gmp", "reth-evm/gmp"]
+bn254-mcl = ["evm2/bn254-mcl", "reth-evm/bn254-mcl"]
 default = ["std"]
 asm-keccak = [
     "evm2/asm-keccak",

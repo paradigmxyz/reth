@@ -312,6 +312,20 @@ impl<R, C, F: EvmFactory> EthBlockExecutorFactory<R, C, F> {
         let registry = self.evm_factory.tx_registry(spec);
         let precompiles = self.evm_factory.precompiles(spec);
 
+        // Keep a precompile cache installed by `build_evm_with_precompile_cache`, otherwise every
+        // segment runs precompiles uncached.
+        #[cfg(feature = "std")]
+        if let Some(cached) = CachedPrecompileProvider::<F::Types, F::SpecId>::installed(evm) {
+            let precompiles = cached.with_precompiles(
+                precompiles,
+                spec,
+                self.evm_factory.precompile_cache_policy(spec),
+            );
+            evm.set_block_and_execution_config(env.block, config, spec, registry, precompiles);
+            self.evm_factory.configure_evm(evm);
+            return
+        }
+
         evm.set_block_and_execution_config(env.block, config, spec, registry, precompiles);
         self.evm_factory.configure_evm(evm);
     }
@@ -648,5 +662,37 @@ impl JitMetrics {
         self.jit_translate_duration.record(event.timings.translate.as_secs_f64());
         self.jit_optimize_duration.record(event.timings.optimize.as_secs_f64());
         self.jit_codegen_duration.record(event.timings.codegen.as_secs_f64());
+    }
+}
+
+#[cfg(all(test, feature = "std"))]
+mod tests {
+    use super::*;
+    use alloy_primitives::{Address, Bytes};
+    use evm2::evm::{EmptyDB, SystemTx};
+
+    #[test]
+    fn reconfigure_keeps_precompile_cache() {
+        let factory = EthBlockExecutorFactory::new(Arc::new(ChainSpec::default()));
+        let installed = |evm: &evm2::Evm<'_, evm2::BaseEvmTypes>| {
+            CachedPrecompileProvider::<evm2::BaseEvmTypes, evm2::SpecId>::installed(evm).is_some()
+        };
+
+        let mut cached = factory.build_evm_with_precompile_cache(
+            EmptyDB::default(),
+            EthEvmEnv::default(),
+            PrecompileCacheMap::default(),
+            false,
+        );
+        assert!(installed(&cached));
+        factory.reconfigure_evm(&mut cached, &EthEvmEnv::default());
+        assert!(installed(&cached));
+        let identity = Address::with_last_byte(4);
+        let call = SystemTx::new(identity, Bytes::from_static(b"input"));
+        assert!(cached.system_call(call).unwrap().commit().status);
+
+        let mut uncached = factory.build_evm_with_env(EmptyDB::default(), EthEvmEnv::default());
+        factory.reconfigure_evm(&mut uncached, &EthEvmEnv::default());
+        assert!(!installed(&uncached));
     }
 }

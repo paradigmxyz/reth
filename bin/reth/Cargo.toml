@@ -97,6 +97,7 @@ default = [
     "gmp",
     "min-trace-logs",
     "portable",
+    "bn254-mcl",
 ]
 
 jit = [
@@ -107,6 +108,7 @@ gmp = [
     "reth-ethereum-cli/gmp",
     "reth-node-ethereum/gmp",
 ]
+bn254-mcl = ["reth-node-ethereum/bn254-mcl"]
 
 otlp = [
     "reth-ethereum-cli/otlp",

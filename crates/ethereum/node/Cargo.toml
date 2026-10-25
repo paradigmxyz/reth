@@ -109,6 +109,7 @@ reth-consensus.workspace = true
 [features]
 default = []
 gmp = ["evm2/gmp", "reth-evm/gmp", "reth-evm-ethereum/gmp"]
+bn254-mcl = ["evm2/bn254-mcl", "reth-evm/bn254-mcl", "reth-evm-ethereum/bn254-mcl"]
 account-ext = [
     "reth-provider/account-ext",
     "reth-evm/account-ext",

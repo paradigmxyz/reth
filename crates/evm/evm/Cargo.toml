@@ -50,6 +50,7 @@ account-ext = [
 ]
 default = ["std"]
 gmp = ["evm2/gmp"]
+bn254-mcl = ["evm2/bn254-mcl"]
 asm-keccak = [
     "evm2/asm-keccak",
     "alloy-primitives/asm-keccak",

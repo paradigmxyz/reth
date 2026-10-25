@@ -65,11 +65,19 @@ default = [
     "js-tracer",
     "portable",
     "jit",
+    "bn254-mcl",
 ]
 
 jit = [
     "reth-ethereum-cli/jit",
     "reth-node-ethereum/jit",
+]
+
+bn254-mcl = [
+    "reth-node-ethereum/bn254-mcl",
+    "reth-evm/bn254-mcl",
+    "reth-evm-ethereum/bn254-mcl",
+    "evm2/bn254-mcl",
 ]
 
 otlp = [

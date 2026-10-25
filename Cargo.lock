@@ -3691,6 +3691,7 @@ dependencies = [
  "evm2-macros",
  "gmp-mpfr-sys",
  "k256 0.14.0",
+ "mcl_rust",
  "once_cell",
  "p256",
  "paste",
@@ -6148,6 +6149,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "link-cplusplus"
+version = "1.0.12"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7f78c730aaa7d0b9336a299029ea49f9ee53b0ed06e9202e8cb7db9bae7b8c82"
+dependencies = [
+ "cc",
+]
+
+[[package]]
 name = "linked-hash-map"
 version = "0.5.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6321,6 +6331,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d1525a2a28c7f4fa0fc98bb91ae755d1e2d1505079e05539e35bc876b5d65ae9"
 dependencies = [
  "regex-automata",
+]
+
+[[package]]
+name = "mcl_rust"
+version = "1.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "88499fcb43004fcd168d24b108c003a54d8f53d72f31bb3d1910df33138e59fb"
+dependencies = [
+ "cmake",
+ "getrandom 0.2.17",
+ "link-cplusplus",
 ]
 
 [[package]]

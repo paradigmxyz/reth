@@ -5,7 +5,10 @@ use alloy_primitives::{
     Address, Bytes,
 };
 use evm2::{
-    evm::precompile::{PrecompileOutput, PrecompileProvider},
+    evm::{
+        precompile::{PrecompileOutput, PrecompileProvider},
+        NonStaticAny,
+    },
     interpreter::{GasTracker, Message},
     Evm, EvmTypesHost, PrecompileError,
 };
@@ -13,7 +16,7 @@ use moka::policy::EvictionPolicy;
 #[cfg(feature = "metrics")]
 use reth_metrics::Metrics;
 use reth_primitives_traits::dashmap::DashMap;
-use std::{fmt, hash::Hash, sync::Arc};
+use std::{any::TypeId, fmt, hash::Hash, sync::Arc};
 use tracing::error;
 
 /// Default max cache size for [`PrecompileCache`].
@@ -124,6 +127,8 @@ where
     policy: PrecompileCachePolicy,
     #[cfg_attr(not(feature = "metrics"), allow(dead_code))]
     metrics_enabled: bool,
+    /// Whether precompiles were relocated, giving this provider a private `cache_map`.
+    relocated: bool,
 }
 
 impl<T, S> fmt::Debug for CachedPrecompileProvider<T, S>
@@ -152,7 +157,46 @@ where
         policy: PrecompileCachePolicy,
         metrics_enabled: bool,
     ) -> Self {
-        Self { inner, cache_map, caches: Default::default(), spec_id, policy, metrics_enabled }
+        Self {
+            inner,
+            cache_map,
+            caches: Default::default(),
+            spec_id,
+            policy,
+            metrics_enabled,
+            relocated: false,
+        }
+    }
+
+    /// Returns the cached provider installed in `evm`, or `None` if its precompile provider has
+    /// another type.
+    pub fn installed<'e>(evm: &'e Evm<'_, T>) -> Option<&'e Self>
+    where
+        T: evm2::EvmTypes + 'static,
+    {
+        let erased: &dyn NonStaticAny = &**evm.precompiles();
+        (erased.type_id() == TypeId::of::<Self>()).then(|| {
+            // SAFETY: The type IDs match and `Self` is `'static`, so the erased provider is a
+            // valid `Self` with no lifetimes to erase.
+            unsafe { erased.downcast_ref_unchecked() }
+        })
+    }
+
+    /// Returns a provider for `inner` at `spec_id` that keeps caching into this provider's
+    /// shared cache.
+    ///
+    /// Used when an EVM's precompile table is replaced, such as at a big-block segment boundary,
+    /// so results stay cached. If this provider relocated precompiles, its private cache no
+    /// longer matches the shared table and the new provider starts with an empty private cache.
+    pub fn with_precompiles(
+        &self,
+        inner: evm2::Precompiles<T>,
+        spec_id: S,
+        policy: PrecompileCachePolicy,
+    ) -> Self {
+        let cache_map =
+            if self.relocated { PrecompileCacheMap::default() } else { self.cache_map.clone() };
+        Self::new(inner, cache_map, spec_id, policy, self.metrics_enabled)
     }
 }
 
@@ -199,6 +243,7 @@ where
             // the same precompile implementation.
             self.cache_map = PrecompileCacheMap::default();
             self.caches.clear();
+            self.relocated = true;
         }
         Ok(())
     }
