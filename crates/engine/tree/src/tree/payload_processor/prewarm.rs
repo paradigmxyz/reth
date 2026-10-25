@@ -43,9 +43,10 @@ use reth_provider::{
     StorageSettingsCache,
 };
 use reth_storage_overlay::OverlayStateProviderFactory;
-use reth_tasks::{Runtime, WorkerStatefulPool};
+use reth_tasks::{utils::lower_current_thread_priority, Runtime, WorkerStatefulPool};
 use reth_trie_common::MultiProofTargetsV2;
 use std::{
+    cell::Cell,
     sync::{
         atomic::{AtomicBool, AtomicUsize, Ordering},
         mpsc::{self, channel, Receiver, Sender},
@@ -75,6 +76,10 @@ const PREWARM_CHUNKS_PER_THREAD: usize = 4;
 /// Number of leading transactions prewarmed one by one, because block execution starts on them
 /// right away and prewarming can only stay ahead of it by spreading them across all threads.
 const UNCHUNKED_PREWARM_TXS: usize = 64;
+
+/// Niceness steps prewarm threads run below the process, so that they yield the CPU to block
+/// execution when the machine is oversubscribed.
+const PREWARM_THREAD_NICE_DELTA: i32 = 5;
 
 /// Determines the prewarming mode: transaction-based, BAL-based, or skipped.
 ///
@@ -895,6 +900,16 @@ where
     /// Creates a per-thread EVM for prewarming.
     #[instrument(level = "debug", target = "engine::tree::payload_processor::prewarm", skip_all)]
     fn evm_for_ctx(&self) -> PrewarmEvmState<Evm> {
+        thread_local! {
+            static DEPRIORITIZED: Cell<bool> = const { Cell::new(false) };
+        }
+        // Block execution starts together with prewarming and both are CPU bound until prewarming
+        // runs out of transactions. The engine thread's priority bump does nothing when the process
+        // already runs at the highest priority, so lower the prewarm threads instead.
+        if !DEPRIORITIZED.replace(true) {
+            lower_current_thread_priority(PREWARM_THREAD_NICE_DELTA);
+        }
+
         let mut state_provider = match self.provider.database_provider_ro() {
             Ok(provider) => Box::new(provider.into_evm_state_provider()) as EvmStateProviderBox,
             Err(err) => {

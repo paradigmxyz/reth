@@ -34,6 +34,30 @@ pub fn increase_thread_priority() {
     }
 }
 
+/// Lowers the current thread's priority by `nice_delta` niceness steps below its current value.
+///
+/// Unlike [`increase_thread_priority`], this keeps a gap to latency-critical threads when the
+/// process already runs at the highest priority (for example under `nice -n -20`), where raising
+/// those threads changes nothing. Failures are logged at `debug` level.
+///
+/// No-op on non-Linux platforms.
+#[allow(clippy::missing_const_for_fn)]
+pub fn lower_current_thread_priority(nice_delta: i32) {
+    #[cfg(target_os = "linux")]
+    // SAFETY: getpriority and setpriority only read and change the calling thread's niceness.
+    unsafe {
+        let tid = libc::gettid() as libc::id_t;
+        let nice = libc::getpriority(libc::PRIO_PROCESS, tid);
+        if libc::setpriority(libc::PRIO_PROCESS, tid, nice.saturating_add(nice_delta)) != 0 {
+            tracing::debug!(
+                tid,
+                err = std::io::Error::last_os_error().to_string(),
+                "failed to lower thread priority"
+            );
+        }
+    }
+}
+
 /// Deprioritizes known background threads spawned by third-party libraries (`tracing-appender`,
 /// `reqwest`) by scanning `/proc/<pid>/task/` for matching thread names and setting `SCHED_IDLE`
 /// scheduling policy on them.
