@@ -56,6 +56,7 @@ impl Operation {
     }
 }
 
+#[allow(clippy::clone_on_copy, reason = "Account is not Copy with account-ext enabled.")]
 pub(crate) fn generate(rng: &mut StdRng, state: &Model, updates: usize) -> Vec<Operation> {
     let mut state = state.clone();
     (0..updates)
@@ -151,6 +152,7 @@ pub(crate) fn storage_root(account: &ModelAccount) -> B256 {
     builder.root()
 }
 
+#[allow(clippy::clone_on_copy, reason = "Account is not Copy with account-ext enabled.")]
 pub(crate) fn root(state: &Model) -> B256 {
     let leaves = state
         .iter()
