@@ -560,6 +560,7 @@ impl<N: ProviderNodeTypes> TableViewer<()> for GetValueViewer<'_, N> {
                 let (k, v) = result?;
                 print_json(&row_json::<T>(k, v, self.raw))?;
             }
+            drop(cursor);
             tx.commit()?;
         } else {
             // Single key lookup
@@ -623,6 +624,7 @@ impl<N: ProviderNodeTypes> TableViewer<()> for GetValueViewer<'_, N> {
                 // Move to next entry
                 current = cursor.next()?;
             }
+            drop(cursor);
             tx.commit()?;
         } else {
             // Single key/subkey lookup
