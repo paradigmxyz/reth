@@ -22,7 +22,7 @@ use crate::tree::{
     CachedStateCacheMetrics, CachedStateMetrics, CachedStateProvider, ExecutionEnv,
     PayloadExecutionCache, SavedCache,
 };
-use alloy_consensus::transaction::TxHashRef;
+use alloy_consensus::{transaction::TxHashRef, Transaction};
 use alloy_eip7928::bal::DecodedBal;
 use alloy_eips::eip4895::Withdrawal;
 use alloy_primitives::keccak256;
@@ -180,11 +180,34 @@ where
             let state_root_hint_stream = state_root_hint_stream.as_ref();
             // Transactions to execute again when their results become stale.
             let mut refresh_txs = Vec::new();
+            // Warms the keys each transaction names (sender, recipient and its code, access list)
+            // on the key prefetch pool. These reads are cheap next to executing the transaction, so
+            // they run ahead of both prewarm and block execution and take the cold page faults off
+            // the engine thread.
+            let key_prefetch = ctx.key_prefetch_pool.as_ref().zip(ctx.saved_cache.as_ref()).map(
+                |(key_pool, saved_cache)| {
+                    let state_provider_factory = ctx.provider.clone();
+                    let build = Arc::new(move || {
+                        state_provider_factory.database_provider_ro().map(|provider| {
+                            Box::new(provider.into_evm_state_provider()) as EvmStateProviderBox
+                        })
+                    });
+                    key_pool.begin_block(
+                        build,
+                        saved_cache.cache().clone(),
+                        ctx.env.txpool_snapshot.clone(),
+                    );
+                    key_pool
+                },
+            );
             {
                 let pool = WorkerStatefulPool::new(pool);
                 let pool = &pool;
                 pool.in_place_scope(|s| {
                     while let Ok((index, tx)) = pending.recv() {
+                        if let Some(key_pool) = key_prefetch {
+                            Self::prefetch_tx_keys(key_pool, &tx);
+                        }
                         if ctx.should_stop() {
                             trace!(
                                 target: "engine::tree::payload_processor::prewarm",
@@ -247,10 +270,31 @@ where
                     Self::refresh_results(ctx, pool, results, &refresh_txs);
                 }
             }
+            if let Some(key_pool) = key_prefetch {
+                key_pool.end_block();
+            }
 
             let _ = actions_tx
                 .send(PrewarmTaskEvent::FinishedTxExecution { executed_transactions: tx_count });
         });
+    }
+
+    /// Queues the keys a transaction names before it executes: its sender, its recipient with
+    /// code, and its access list.
+    fn prefetch_tx_keys<Tx>(key_pool: &BalPrewarmPool, tx: &Tx)
+    where
+        Tx: ExecutableTxFor<Evm>,
+    {
+        key_pool.warm_account(*tx.signer(), []);
+        let inner = tx.tx();
+        if let Some(to) = inner.to() {
+            key_pool.warm_account_with_code(to, []);
+        }
+        if let Some(access_list) = inner.access_list() {
+            for item in access_list.iter() {
+                key_pool.warm_account_with_code(item.address, item.storage_keys.iter().copied());
+            }
+        }
     }
 
     /// Executes transactions again whose results became stale, because the predicted writes of
@@ -734,6 +778,9 @@ where
     /// Dedicated blocking pool for warming the BAL read-set. `Some` only on the BAL parallel
     /// execution path; the pool is owned by the [`PayloadProcessor`](super::PayloadProcessor).
     pub(crate) bal_prewarm_pool: Option<Arc<BalPrewarmPool>>,
+    /// Pool warming the keys transactions name before they execute. Set on the transaction
+    /// prewarm path.
+    pub(crate) key_prefetch_pool: Option<Arc<BalPrewarmPool>>,
     /// The metrics for the prewarm task.
     pub metrics: PrewarmMetrics,
     /// Metrics for the execution cache.
@@ -1063,6 +1110,7 @@ mod tests {
                 OverlayManager::default().overlay_builder(B256::ZERO),
             ),
             bal_prewarm_pool: None,
+            key_prefetch_pool: None,
             metrics: PrewarmMetrics::default(),
             cache_metrics: None,
             cache_state_metrics: None,
@@ -1126,6 +1174,8 @@ mod tests {
                     OverlayManager::default().overlay_builder(B256::ZERO),
                 ),
                 bal_prewarm_pool: None,
+                key_prefetch_pool: None,
+                key_prefetch_pool: None,
                 metrics: PrewarmMetrics::default(),
                 cache_metrics: None,
                 cache_state_metrics: None,
@@ -1215,6 +1265,7 @@ mod tests {
                 OverlayManager::default().overlay_builder(B256::ZERO),
             ),
             bal_prewarm_pool: None,
+            key_prefetch_pool: None,
             metrics: PrewarmMetrics {
                 cache_saving_duration: saving_duration,
                 ..Default::default()

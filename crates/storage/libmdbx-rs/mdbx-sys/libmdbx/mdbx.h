@@ -4861,12 +4861,6 @@ LIBMDBX_API int mdbx_drop(MDBX_txn *txn, MDBX_dbi dbi, bool del);
  * \retval MDBX_EINVAL    An invalid parameter was specified. */
 LIBMDBX_API int mdbx_get(const MDBX_txn *txn, MDBX_dbi dbi, const MDBX_val *key, MDBX_val *data);
 
-/** \brief Look up many keys of a table at once, interleaving their searches.
- * Fills data[i] and rcs[i] (MDBX_SUCCESS or MDBX_NOTFOUND or an error) as
- * mdbx_get() would for keys[i]. Returns an error only for invalid arguments. */
-LIBMDBX_API int mdbx_get_batch(const MDBX_txn *txn, MDBX_dbi dbi, const MDBX_val *keys, MDBX_val *data, int *rcs,
-                               size_t count);
-
 /** \brief Get items from a table
  * and optionally number of data items for a given key.
  *

@@ -15,7 +15,6 @@ use reth_storage_errors::db::{DatabaseWriteError, DatabaseWriteOperation};
 use rustc_hash::FxHashMap;
 use std::{
     backtrace::Backtrace,
-    borrow::Cow,
     marker::PhantomData,
     sync::{
         atomic::{AtomicBool, Ordering},
@@ -376,27 +375,6 @@ impl<K: TransactionKind> DbTx for Tx<K> {
     fn prefetch(&self, enabled: bool) -> &Self {
         self.prefetch.store(enabled, Ordering::Relaxed);
         self
-    }
-
-    fn get_many<T: Table>(
-        &self,
-        keys: &[<T::Key as Encode>::Encoded],
-        mut f: impl FnMut(usize, Option<T::Value>),
-    ) -> Result<(), DatabaseError> {
-        self.execute_with_operation_metric::<T, _>(Operation::Get, None, |tx| {
-            let mut decode_error = None;
-            tx.get_many::<Cow<'_, [u8]>>(self.get_dbi::<T>()?, keys, |index, value| {
-                if decode_error.is_some() {
-                    return
-                }
-                match value.map(decode_one::<T>).transpose() {
-                    Ok(value) => f(index, value),
-                    Err(err) => decode_error = Some(err),
-                }
-            })
-            .map_err(|e| DatabaseError::Read(e.into()))?;
-            decode_error.map_or(Ok(()), Err)
-        })
     }
 }
 

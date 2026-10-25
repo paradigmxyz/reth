@@ -1,7 +1,7 @@
 //! Multiproof calculators over database trie tables with an immutable in-memory overlay.
 
 use alloy_primitives::{map::B256Map, B256};
-use reth_db_api::{table::Encode, tables, transaction::DbTx};
+use reth_db_api::transaction::DbTx;
 use reth_errors::ProviderResult;
 use reth_trie::{
     hashed_cursor::{HashedPostStateCursorFactory, InstrumentedHashedCursorFactory},
@@ -9,19 +9,13 @@ use reth_trie::{
     proof_v2::{MultiProofCalculator, ProofCursorMetrics},
     trie_cursor::{InMemoryTrieCursorFactory, InstrumentedTrieCursorFactory},
     updates::TrieUpdatesSorted,
-    DecodedMultiProofV2, HashedPostStateSorted, MultiProofTargetsV2, ProofV2Target,
-    TrieInputSorted,
+    DecodedMultiProofV2, HashedPostStateSorted, MultiProofTargetsV2, TrieInputSorted,
 };
 use reth_trie_db::{
     DatabaseHashedCursorFactory, DatabaseTrieCursorFactory, LegacyKeyAdapter, PackedKeyAdapter,
     TrieTableAdapter,
 };
 use std::sync::Arc;
-
-/// Number of account trie path lengths looked up for each account proof target.
-///
-/// Tries of up to about 16^8 accounts rarely have branch nodes deeper than this.
-const WARM_ACCOUNT_TRIE_DEPTH: usize = 8;
 
 /// Multiproof calculator for the database's trie table layout.
 ///
@@ -134,43 +128,4 @@ fn table_multiproof_calculator<TX: DbTx + 'static, A: TrieTableAdapter>(
         prefix_sets,
         known_storage_roots,
     )
-}
-
-/// Looks up the hashed accounts and account trie nodes that proofs of `targets` read from `tx`,
-/// all at once.
-///
-/// A proof reads these entries one after another, so each cache miss or page read waits for the
-/// previous one. Batched lookups overlap them, leaving the pages cached for the proof.
-/// `is_v2` selects the packed trie tables used by v2 storage settings.
-pub(crate) fn warm_account_proofs<TX: DbTx>(
-    tx: &TX,
-    targets: &[ProofV2Target],
-    is_v2: bool,
-) -> ProviderResult<()> {
-    if targets.is_empty() {
-        return Ok(())
-    }
-    let keys: Vec<_> = targets.iter().map(|target| target.key().encode()).collect();
-    tx.get_many::<tables::HashedAccounts>(&keys, |_, _| {})?;
-    if is_v2 {
-        warm_account_trie::<TX, PackedKeyAdapter>(tx, targets)
-    } else {
-        warm_account_trie::<TX, LegacyKeyAdapter>(tx, targets)
-    }
-}
-
-/// Looks up the account trie nodes on the paths to `targets` in table layout `A`.
-fn warm_account_trie<TX: DbTx, A: TrieTableAdapter>(
-    tx: &TX,
-    targets: &[ProofV2Target],
-) -> ProviderResult<()> {
-    let keys: Vec<_> = targets
-        .iter()
-        .flat_map(|target| {
-            (1..=WARM_ACCOUNT_TRIE_DEPTH)
-                .map(|len| A::AccountKey::from(target.key_nibbles.slice(..len)).encode())
-        })
-        .collect();
-    tx.get_many::<A::AccountTrieTable>(&keys, |_, _| {})?;
-    Ok(())
 }

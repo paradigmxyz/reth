@@ -21,6 +21,8 @@ pub type BuildProviderFn = dyn Fn() -> ProviderResult<EvmStateProviderBox> + Sen
 /// on their own.
 enum PrewarmTarget {
     Account(Address, Box<[StorageKey]>),
+    /// An account, its bytecode and a batch of its storage slots.
+    AccountWithCode(Address, Box<[StorageKey]>),
     Storage(Address, Box<[StorageKey]>),
 }
 
@@ -105,6 +107,26 @@ impl BalPrewarmPool {
         }
     }
 
+    /// Queues the account at the address, its bytecode and the given storage slots for warming.
+    ///
+    /// Used for accounts a transaction is known to call before it executes.
+    pub fn warm_account_with_code(
+        &self,
+        addr: Address,
+        slots: impl IntoIterator<Item = StorageKey>,
+    ) {
+        let mut slots = slots.into_iter();
+        let batch: Box<[StorageKey]> = slots.by_ref().take(WARM_BATCH_SIZE).collect();
+        self.send_warm(PrewarmTarget::AccountWithCode(addr, batch));
+        loop {
+            let batch: Box<[StorageKey]> = slots.by_ref().take(WARM_BATCH_SIZE).collect();
+            if batch.is_empty() {
+                break
+            }
+            self.send_warm(PrewarmTarget::Storage(addr, batch));
+        }
+    }
+
     /// Ends the block: every worker drops its provider (and read txn) once it has drained the warm
     /// requests queued ahead of this message.
     ///
@@ -181,6 +203,16 @@ fn prewarm_loop(rx: crossbeam_channel::Receiver<PrewarmMsg>) {
                 match target {
                     PrewarmTarget::Account(addr, slots) => {
                         let _ = provider.basic_account(&addr);
+                        for &slot in &slots {
+                            let _ = provider.storage(addr, slot);
+                        }
+                    }
+                    PrewarmTarget::AccountWithCode(addr, slots) => {
+                        if let Ok(Some(account)) = provider.basic_account(&addr) &&
+                            let Some(code_hash) = account.bytecode_hash
+                        {
+                            let _ = provider.bytecode_by_hash(&code_hash);
+                        }
                         for &slot in &slots {
                             let _ = provider.storage(addr, slot);
                         }

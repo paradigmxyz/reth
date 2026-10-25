@@ -463,6 +463,8 @@ where
             saved_cache: saved_cache.clone(),
             provider: state_provider_factory,
             bal_prewarm_pool: parallel_bal_execution.then(|| self.bal_prewarm_pool()),
+            key_prefetch_pool: matches!(mode, PrewarmMode::Transactions { .. })
+                .then(|| self.bal_prewarm_pool()),
             metrics: PrewarmMetrics::default(),
             cache_metrics: self.cache_metrics.clone(),
             cache_state_metrics: self.cache_state_metrics.clone(),
