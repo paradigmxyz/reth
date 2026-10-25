@@ -101,10 +101,10 @@ where
     // Tracks the index of a log in the entire block.
     let mut log_index: u64 = 0;
 
-    // Lazy loaded number of the first transaction in the block.
+    // Lazy loaded number of the first transaction in the block and the block's transactions.
     // This is useful for blocks with multiple matching logs because it
-    // prevents re-querying the block body indices.
-    let mut loaded_first_tx_num = None;
+    // reads all transactions with one query instead of one query per receipt.
+    let mut loaded_transactions = None;
 
     // Iterate over receipts and append matching logs.
     for (receipt_idx, receipt) in receipts.iter().enumerate() {
@@ -120,26 +120,28 @@ where
                             block.body().transactions().get(receipt_idx).map(|t| *t.tx_hash())
                         }
                         ProviderOrBlock::Provider(provider) => {
-                            let first_tx_num = match loaded_first_tx_num {
-                                Some(num) => num,
+                            let (first_tx_num, transactions) = match &loaded_transactions {
+                                Some(loaded) => loaded,
                                 None => {
                                     let block_body_indices = provider
                                         .block_body_indices(block_num_hash.number)?
                                         .ok_or(ProviderError::BlockBodyIndicesNotFound(
                                             block_num_hash.number,
                                         ))?;
-                                    loaded_first_tx_num = Some(block_body_indices.first_tx_num);
-                                    block_body_indices.first_tx_num
+                                    let transactions = provider.transactions_by_tx_range(
+                                        block_body_indices.tx_num_range(),
+                                    )?;
+                                    loaded_transactions
+                                        .insert((block_body_indices.first_tx_num, transactions))
                                 }
                             };
 
                             // This is safe because Transactions and Receipts have the same
                             // keys.
                             let transaction_id = first_tx_num + receipt_idx as u64;
-                            let transaction =
-                                provider.transaction_by_id(transaction_id)?.ok_or_else(|| {
-                                    ProviderError::TransactionNotFound(transaction_id.into())
-                                })?;
+                            let transaction = transactions.get(receipt_idx).ok_or_else(|| {
+                                ProviderError::TransactionNotFound(transaction_id.into())
+                            })?;
 
                             Some(*transaction.tx_hash())
                         }

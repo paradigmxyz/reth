@@ -10277,7 +10277,6 @@ dependencies = [
  "evm2-inspectors",
  "futures",
  "humantime",
- "itertools 0.14.0",
  "jsonrpsee",
  "jsonrpsee-types",
  "parking_lot",
