@@ -86,7 +86,7 @@ use std::{
     fmt::Debug,
     ops::{Deref, DerefMut, Range, RangeBounds, RangeInclusive},
     path::PathBuf,
-    sync::{Arc, OnceLock},
+    sync::{mpsc, Arc, OnceLock},
 };
 use tracing::{debug, instrument, trace};
 
@@ -659,6 +659,29 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
                 });
             }
 
+            // Merge hashed state and trie updates on the storage pool so the merges overlap with
+            // the MDBX writes below. The trie merge in particular is CPU heavy for large batches
+            // and only needed after the hashed state is written.
+            let merge_state_trie = save_mode.with_state() && !state_trie_blocks.is_empty();
+            let (hashed_state_tx, hashed_state_rx) = mpsc::sync_channel(1);
+            let (trie_tx, trie_rx) = mpsc::sync_channel(1);
+            if merge_state_trie {
+                let span = &span;
+                s.spawn(move |_| {
+                    let _guard = span.enter();
+                    let batch = ExecutedBlock::hashed_state_refs(state_trie_blocks);
+                    let mask = ExecutedBlock::hashed_state_refs(state_trie_masking_blocks);
+                    let _ = hashed_state_tx
+                        .send(HashedPostStateSorted::disjointed_merge_batch(&batch, &mask));
+                });
+                s.spawn(move |_| {
+                    let _guard = span.enter();
+                    let batch = ExecutedBlock::trie_updates_refs(state_trie_blocks);
+                    let mask = ExecutedBlock::trie_updates_refs(state_trie_masking_blocks);
+                    let _ = trie_tx.send(TrieUpdatesSorted::disjointed_merge_batch(&batch, &mask));
+                });
+            }
+
             // MDBX writes
             let mdbx_start = Instant::now();
 
@@ -731,22 +754,24 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
 
             // Write all hashed state and trie updates in single batches.
             // This reduces cursor open/close overhead from N calls to 1.
-            if save_mode.with_state() && !state_trie_blocks.is_empty() {
+            if merge_state_trie {
                 let start = Instant::now();
-                let batch = ExecutedBlock::hashed_state_refs(state_trie_blocks);
-                let mask = ExecutedBlock::hashed_state_refs(state_trie_masking_blocks);
-                let merged_hashed_state =
-                    HashedPostStateSorted::disjointed_merge_batch(&batch, &mask);
+                let merged_hashed_state = hashed_state_rx.recv().map_err(|_| {
+                    ProviderError::Database(reth_db_api::DatabaseError::Other(
+                        "hashed state merge thread panicked".into(),
+                    ))
+                })?;
                 if !merged_hashed_state.is_empty() {
                     self.write_hashed_state(&merged_hashed_state)?;
                 }
                 timings.write_hashed_state += start.elapsed();
 
                 let start = Instant::now();
-                let batch = ExecutedBlock::trie_updates_refs(state_trie_blocks);
-                let mask = ExecutedBlock::trie_updates_refs(state_trie_masking_blocks);
-                let merged_trie =
-                    Arc::new(TrieUpdatesSorted::disjointed_merge_batch(&batch, &mask));
+                let merged_trie = trie_rx.recv().map_err(|_| {
+                    ProviderError::Database(reth_db_api::DatabaseError::Other(
+                        "trie updates merge thread panicked".into(),
+                    ))
+                })?;
                 if !merged_trie.is_empty() {
                     self.write_trie_updates_sorted(&merged_trie)?;
                 }
