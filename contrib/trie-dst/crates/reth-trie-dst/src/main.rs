@@ -739,24 +739,24 @@ fn main() -> Result<()> {
             println!(
                 "{}",
                 json!([
-                {"name": "account.address"},
-                {"name": "account.balance"},
-                {"name": "account.nonce"},
-                {"name": "account.bytecode_hash"},
-                {"name": "storage.address"},
-                {"name": "storage.slot"},
-                {"name": "storage.value"},
-                    {"name": "prewarm.account"},
-                {"name": "prewarm.storage.address"},
-                {"name": "prewarm.storage.slot"},
-                {"name": "update.duplicate"},
-                {"name": "update.remove"},
-                {"name": "update.crossover", "donor": true},
-                    {"name": "batch.duplicate"},
-                    {"name": "batch.remove"},
-                {"name": "batch.crossover", "donor": true},
-                {"name": "commit.insert"},
-                {"name": "commit.remove"}
+                {"name": "account.address", "selector": {"path": ["operations", "*", "updates", "*", "Account", "address"]}},
+                {"name": "account.balance", "selector": {"path": ["operations", "*", "updates", "*", "Account", "account", "balance"]}},
+                {"name": "account.nonce", "selector": {"path": ["operations", "*", "updates", "*", "Account", "account", "nonce"]}},
+                {"name": "account.bytecode_hash", "selector": {"path": ["operations", "*", "updates", "*", "Account", "account", "bytecode_hash"]}},
+                {"name": "storage.address", "selector": {"path": ["operations", "*", "updates", "*", "Storage", "address"]}},
+                {"name": "storage.slot", "selector": {"path": ["operations", "*", "updates", "*", "Storage", "slot"]}},
+                {"name": "storage.value", "selector": {"path": ["operations", "*", "updates", "*", "Storage", "value"]}},
+                {"name": "prewarm.account", "selector": {"path": ["operations", "*", "accounts", "*"]}},
+                {"name": "prewarm.storage.address", "selector": {"path": ["operations", "*", "storages", "*", "address"]}},
+                {"name": "prewarm.storage.slot", "selector": {"path": ["operations", "*", "storages", "*", "slot"]}},
+                {"name": "update.duplicate", "selector": {"path": ["operations", "*", "updates", "*"]}},
+                {"name": "update.remove", "selector": {"path": ["operations", "*", "updates", "*"]}},
+                {"name": "update.crossover", "donor": true, "selector": {"path": ["operations", "*", "updates", "*"]}},
+                {"name": "batch.duplicate", "selector": {"path": ["operations", "*"], "kinds": ["update_batch", "prewarm_batch"]}},
+                {"name": "batch.remove", "selector": {"path": ["operations", "*"], "kinds": ["update_batch", "prewarm_batch"]}},
+                {"name": "batch.crossover", "donor": true, "selector": {"path": ["operations", "*"], "kinds": ["update_batch", "prewarm_batch"]}},
+                {"name": "commit.insert", "selector": {"path": ["operations", "*"], "kinds": ["update_batch"]}},
+                {"name": "commit.remove", "selector": {"path": ["operations", "*"], "kinds": ["commit"], "exclude_last": true}}
                 ])
             );
             return Ok(());
