@@ -361,16 +361,13 @@ fn run(config: &mut Config, snapshotter: &Snapshotter) -> Result<()> {
     for number in 1..=base {
         let block =
             journal.get(&number).ok_or_else(|| eyre::eyre!("missing journal block {number}"))?;
-        let updates = block
-            .operations
-            .iter()
-            .flat_map(|op| match op {
-                Operation::UpdateBatch { updates } => updates.as_slice(),
-                _ => &[],
-            })
-            .cloned()
-            .collect::<Vec<_>>();
-        apply(&mut state, number, &updates);
+        for operation in &block.operations {
+            if let Operation::UpdateBatch { updates } = operation {
+                for update in updates {
+                    update.apply_to_model(&mut state);
+                }
+            }
+        }
     }
     if base > 0 {
         verify(&factory, &state, base, base)?;
