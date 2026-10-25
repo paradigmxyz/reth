@@ -575,7 +575,7 @@ impl<C: Send + Sync, N: NodePrimitives> StateProofProvider for NoopProvider<C, N
 impl<C: Send + Sync, N: NodePrimitives> HashedPostStateProvider for NoopProvider<C, N> {
     fn hashed_post_state(
         &self,
-        _bundle_state: &revm::database::BundleState,
+        _bundle_state: &reth_trie_common::bundle_state::BundleState,
     ) -> ProviderResult<HashedPostState> {
         Ok(HashedPostState::default())
     }

@@ -133,7 +133,7 @@ mod tests {
     use alloy_primitives::Address;
 
     fn output(index: usize, result: u64) -> BalWorkerOutput<u64> {
-        BalWorkerOutput { index, signer: Address::ZERO, tx_gas_limit: 0, result }
+        BalWorkerOutput { index, signer: Address::ZERO, tx_gas_limit: 21_000, result }
     }
 
     fn expect_err_contains<R>(
@@ -165,7 +165,7 @@ mod tests {
     fn forwards_worker_errors_and_then_stops() {
         let (tx, rx) = crossbeam_channel::unbounded();
         tx.send(Err(BalWorkerError::Setup(BalExecutionError::Execution(
-            alloy_evm::block::BlockExecutionError::msg("worker failed"),
+            reth_evm::BlockExecutionError::msg("worker failed"),
         ))))
         .unwrap();
         drop(tx);
@@ -182,7 +182,7 @@ mod tests {
         tx.send(Err(BalWorkerError::Execution {
             tx_index: 2,
             tx_gas_limit: 42,
-            source: alloy_evm::block::BlockExecutionError::msg("bal miss"),
+            source: reth_evm::BlockExecutionError::msg("bal miss"),
         }))
         .unwrap();
         tx.send(Err(BalWorkerError::Transaction {

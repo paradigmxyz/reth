@@ -12,7 +12,6 @@ use reth_db_api::{
 use reth_libmdbx::{ffi::MDBX_dbi, CommitLatency, Transaction, TransactionKind, WriteFlags, RW};
 use reth_primitives_traits::FastInstant as Instant;
 use reth_storage_errors::db::{DatabaseWriteError, DatabaseWriteOperation};
-use reth_tracing::tracing::{debug, instrument, trace, warn};
 use rustc_hash::FxHashMap;
 use std::{
     backtrace::Backtrace,
@@ -24,6 +23,7 @@ use std::{
     },
     time::Duration,
 };
+use tracing::{debug, instrument, trace, warn};
 
 /// Duration after which we emit the log about long-lived database transactions.
 const LONG_TRANSACTION_DURATION: Duration = Duration::from_secs(60);

@@ -32,7 +32,7 @@ use reth_e2e_test_utils::{
     node::Finality,
     snap::SnapControl,
     trie::assert_trie_consistency,
-    wait::{assert_holds_for, poll_until},
+    wait::{assert_holds_for, poll_until, WAIT_TIMEOUT},
     E2ETestSetupBuilder, E2ETestSetupExt, NodeHelperType,
 };
 use reth_eth_wire_types::snap::SnapProtocolMessage;
@@ -303,6 +303,13 @@ async fn partial_storage_resumes_after_restart() -> eyre::Result<()> {
         assert_eq!(provider.storage_progress(write, origin)?.resume_at(account), Some(resume_at));
         (write, origin, account, resume_at)
     };
+    // Stop the engine before cancelling the paused backfill, whose dropped-task event can
+    // otherwise race the engine's shutdown signal and leave its database handles alive.
+    tokio::time::timeout(
+        WAIT_TIMEOUT,
+        client.inner.add_ons_handle.engine_shutdown.shutdown().expect("engine is running"),
+    )
+    .await??;
     let stopped = client.stop().await?;
     let resumed = control.pause_on(move |request| {
         matches!(request,

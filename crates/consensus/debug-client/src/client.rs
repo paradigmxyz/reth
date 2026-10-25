@@ -1,9 +1,9 @@
 use alloy_primitives::B256;
 use reth_node_api::{ConsensusEngineHandle, ExecutionPayload, PayloadTypes};
-use reth_tracing::tracing::warn;
 use ringbuffer::{AllocRingBuffer, RingBuffer};
 use std::future::Future;
 use tokio::sync::mpsc;
+use tracing::warn;
 
 /// Supplies consensus client with new execution payloads sent in `tx` and a callback to find
 /// specific payloads by number to fetch past finalized and safe block hashes.
