@@ -26,8 +26,7 @@ use reth_evm::{
     TxEnvFor, TxResultWithStateFor,
 };
 use reth_execution_types::BundleSource;
-use reth_node_api::BlockBody;
-use reth_primitives_traits::Recovered;
+use reth_primitives_traits::{BlockBody, Recovered};
 use reth_rpc_convert::{RpcConvert, RpcTxReq};
 use reth_rpc_eth_types::{
     cache::db::{
