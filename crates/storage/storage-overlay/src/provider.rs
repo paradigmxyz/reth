@@ -848,7 +848,7 @@ where
 {
     fn hashed_post_state(
         &self,
-        bundle_state: &revm::database::BundleState,
+        bundle_state: &reth_trie_common::bundle_state::BundleState,
     ) -> ProviderResult<HashedPostState> {
         let mut hashed_state =
             HashedPostState::from_bundle_state::<KeccakKeyHasher>(bundle_state.state());
@@ -1124,6 +1124,7 @@ mod tests {
     use crate::{ExecutionOverlay, OverlayManager};
     use alloy_eips::BlockNumHash;
     use alloy_primitives::{Address, U256};
+    use evm2::{bytecode::Bytecode, evm::AccountInfo};
     use reth_chain_state::{test_utils::TestBlockBuilder, ExecutedBlock};
     use reth_db_api::{
         models::{
@@ -1144,7 +1145,6 @@ mod tests {
         updates::TrieUpdatesSorted, BranchNodeCompact, HashedPostState, HashedStorage, Nibbles,
         SortedTrieData,
     };
-    use revm::{bytecode::Bytecode as RevmBytecode, state::AccountInfo};
 
     fn with_unique_trie_data(
         block: &ExecutedBlock<EthPrimitives>,
@@ -1366,7 +1366,7 @@ mod tests {
         let storage_key = B256::with_last_byte(4);
         let storage_value = U256::from(5);
         let code_hash = B256::with_last_byte(6);
-        let bytecode = RevmBytecode::new_raw([0x60, 0x01].into());
+        let bytecode = Bytecode::new_raw([0x60, 0x01].into());
         let mut execution_overlay = ExecutionOverlay::default();
         execution_overlay.accounts_mut().insert(address, Some(account_info.clone()));
         execution_overlay.block_hashes_mut().push(BlockNumHash::new(1, block_hash));
@@ -1382,7 +1382,7 @@ mod tests {
             false,
         );
 
-        assert_eq!(provider.basic_account(&address).unwrap(), Some(Account::from(account_info)));
+        assert_eq!(provider.basic_account(&address).unwrap(), Some(Account::from(&account_info)));
         assert!(provider.basic_account(&Address::with_last_byte(2)).unwrap().is_none());
         assert_eq!(provider.block_hash(1).unwrap(), Some(block_hash));
         assert_eq!(provider.canonical_hashes_range(1, 2).unwrap(), vec![block_hash]);

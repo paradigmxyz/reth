@@ -28,10 +28,10 @@ alloy-consensus.workspace = true
 alloy-primitives.workspace = true
 alloy-rlp.workspace = true
 alloy-trie.workspace = true
+evm2 = { workspace = true, features = ["std"] }
 eyre.workspace = true
 metrics-util = { workspace = true, features = ["debugging"] }
 rand.workspace = true
-revm = { workspace = true, features = ["std"] }
 serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
 tempfile.workspace = true

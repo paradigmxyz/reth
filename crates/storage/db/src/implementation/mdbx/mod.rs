@@ -21,7 +21,6 @@ use reth_libmdbx::{
     MaxReadTransactionDuration, Mode, PageSize, SyncMode, RO, RW,
 };
 use reth_storage_errors::db::LogLevel;
-use reth_tracing::tracing::error;
 use rustc_hash::FxHashMap;
 use std::{
     ops::{Deref, Range},
@@ -29,6 +28,7 @@ use std::{
     sync::Arc,
     time::{SystemTime, UNIX_EPOCH},
 };
+use tracing::error;
 use tx::Tx;
 
 pub mod cursor;
@@ -450,7 +450,7 @@ impl DatabaseEnv {
                     "External process has a long-lived database transaction that grows the database file. \
                      Use shorter-lived read transactions or shut down the node."
                 };
-                reth_tracing::tracing::warn!(
+                tracing::warn!(
                     target: "storage::db::mdbx",
                     ?process_id,
                     ?thread_id,
