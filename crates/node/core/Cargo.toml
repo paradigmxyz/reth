@@ -96,4 +96,4 @@ min-trace-logs = ["tracing/release_max_level_trace"]
 trie-debug = ["reth-engine-primitives/trie-debug"]
 
 [build-dependencies]
-smolgen = { workspace = true, features = ["build", "cargo", "emit_and_set", "gitcl"] }
+smolgen = { workspace = true, features = ["build", "cargo", "gitcl"] }
