@@ -62,7 +62,7 @@ impl CliRunner {
     where
         F: Future<Output = T>,
     {
-        self.runtime.handle().block_on(pin!(fut) as Pin<&mut dyn Future<Output = T>>)
+        self.runtime.handle().block_on(Box::pin(fut) as Pin<Box<dyn Future<Output = T> + '_>>)
     }
 
     /// Executes the given _async_ command on the tokio runtime until the command future resolves or
@@ -84,14 +84,14 @@ impl CliRunner {
             + 'static,
     {
         let (context, task_manager_handle) = cli_context(&self.runtime);
-        self.run_until_exit(task_manager_handle, pin!(command(context)))
+        self.run_until_exit(task_manager_handle, Box::pin(command(context)))
     }
 
     /// Runs the type-erased command until it finished or ctrl-c was fired, then shuts down.
     fn run_until_exit<E>(
         self,
         task_manager_handle: JoinHandle<Result<(), PanickedTaskError>>,
-        command: Pin<&mut dyn Future<Output = Result<(), E>>>,
+        command: Pin<Box<dyn Future<Output = Result<(), E>> + '_>>,
     ) -> Result<(), E>
     where
         E: Send
@@ -188,7 +188,7 @@ impl CliRunner {
         E: Send + Sync + From<std::io::Error> + 'static,
     {
         self.runtime.handle().block_on(run_until_ctrl_c(
-            pin!(fut) as Pin<&mut dyn Future<Output = Result<(), E>>>
+            Box::pin(fut) as Pin<Box<dyn Future<Output = Result<(), E>> + '_>>
         ))?;
         Ok(())
     }
