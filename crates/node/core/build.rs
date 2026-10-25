@@ -1,7 +1,7 @@
 #![allow(missing_docs)]
 
-use smolgen::{Build, Cargo, Emitter, Gitcl};
-use std::{collections::BTreeMap, env, error::Error};
+use smolgen::{Build, Cargo, Emitter, Gitcl, VergenKey};
+use std::{env, error::Error};
 
 fn main() -> Result<(), Box<dyn Error>> {
     let mut emitter = Emitter::default();
@@ -32,22 +32,18 @@ fn main() -> Result<(), Box<dyn Error>> {
         }
     }
 
-    let vars = emitter
-        .cargo_rustc_env_map()
-        .iter()
-        .map(|(key, value)| (key.name(), value.as_str()))
-        .collect::<BTreeMap<_, _>>();
-    let var = |name: &str| vars.get(name).copied().ok_or_else(|| format!("{name} is not set"));
+    let vars = emitter.cargo_rustc_env_map();
+    let var = |key: VergenKey| vars.get(&key).ok_or_else(|| format!("{} is not set", key.name()));
 
-    let sha = var("VERGEN_GIT_SHA")?;
+    let sha = var(VergenKey::GitSha)?;
     let sha_short = &sha[0..7];
 
-    let is_dirty = var("VERGEN_GIT_DIRTY")? == "true";
+    let is_dirty = var(VergenKey::GitDirty)? == "true";
     // > git describe --always --tags
     // if not on a tag: v0.2.0-beta.3-82-g1939939b
     // if on a tag: v0.2.0-beta.3
     // git picks the abbreviated hash length from the repository size, so match any SHA prefix.
-    let not_on_tag = var("VERGEN_GIT_DESCRIBE")?
+    let not_on_tag = var(VergenKey::GitDescribe)?
         .rsplit_once("-g")
         .is_some_and(|(_, hash)| sha.starts_with(hash));
     let version_suffix = if is_dirty || not_on_tag { "-dev" } else { "" };
@@ -92,11 +88,11 @@ fn main() -> Result<(), Box<dyn Error>> {
     println!("cargo:rustc-env=RETH_LONG_VERSION_1=Commit SHA: {sha}");
     println!(
         "cargo:rustc-env=RETH_LONG_VERSION_2=Build Timestamp: {}",
-        var("VERGEN_BUILD_TIMESTAMP")?
+        var(VergenKey::BuildTimestamp)?
     );
     println!(
         "cargo:rustc-env=RETH_LONG_VERSION_3=Build Features: {}",
-        var("VERGEN_CARGO_FEATURES")?
+        var(VergenKey::CargoFeatures)?
     );
     println!("cargo:rustc-env=RETH_LONG_VERSION_4=Build Profile: {profile}");
 
@@ -107,7 +103,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     // Example: reth/v0.1.0-alpha.1-428a6dc2f/aarch64-apple-darwin
     println!(
         "cargo:rustc-env=RETH_P2P_CLIENT_VERSION={}",
-        format_args!("reth/v{pkg_version}-{sha_short}/{}", var("VERGEN_CARGO_TARGET_TRIPLE")?)
+        format_args!("reth/v{pkg_version}-{sha_short}/{}", var(VergenKey::CargoTargetTriple)?)
     );
 
     Ok(())
