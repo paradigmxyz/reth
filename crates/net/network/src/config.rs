@@ -7,6 +7,7 @@ use crate::{
     NetworkHandle, NetworkManager,
 };
 use alloy_eips::BlockNumHash;
+use futures::FutureExt;
 use reth_chainspec::{ChainSpecProvider, EthChainSpec, Hardforks};
 use reth_discv4::{Discv4Config, Discv4ConfigBuilder, NatResolver, DEFAULT_DISCOVERY_ADDRESS};
 use reth_discv5::NetworkStackId;
@@ -179,8 +180,8 @@ where
             .request_handler::<C>(client)
             .split_with_handle();
 
-        tokio::task::spawn(network);
-        tokio::task::spawn(eth);
+        tokio::task::spawn(network.boxed());
+        tokio::task::spawn(eth.boxed());
         Ok(handle)
     }
 }

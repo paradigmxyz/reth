@@ -43,7 +43,9 @@ reth-prune.workspace = true
 reth-rpc.workspace = true
 reth-rpc-api.workspace = true
 reth-rpc-builder.workspace = true
+reth-rpc-convert.workspace = true
 reth-rpc-engine-api.workspace = true
+reth-rpc-eth-api.workspace = true
 reth-rpc-eth-types.workspace = true
 reth-rpc-layer.workspace = true
 reth-stages.workspace = true
@@ -58,8 +60,8 @@ reth-node-ethstats.workspace = true
 
 ## ethereum
 alloy-consensus.workspace = true
+alloy-network.workspace = true
 alloy-primitives.workspace = true
-alloy-provider.workspace = true
 alloy-rpc-types = { workspace = true, features = ["engine"] }
 alloy-eips = { workspace = true, features = ["kzg"] }
 alloy-rpc-types-engine.workspace = true
@@ -98,6 +100,7 @@ js-tracer = [
     "reth-rpc/js-tracer",
     "reth-node-ethereum/js-tracer",
     "reth-rpc-eth-types/js-tracer",
+    "reth-rpc-eth-api/js-tracer",
 ]
 test-utils = [
     "reth-db/test-utils",

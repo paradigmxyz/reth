@@ -1356,7 +1356,7 @@ impl<
                 .try_acquire_owned()
             {
                 Ok(permit) => Box::pin(async move {
-                    let chunk_task = tokio::task::spawn_blocking(move || {
+                    let chunk_task = reth_tasks::spawn_blocking(move || {
                         let _permit = permit;
                         fetch()
                     });

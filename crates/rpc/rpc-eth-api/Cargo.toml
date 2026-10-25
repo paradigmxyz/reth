@@ -15,7 +15,7 @@ workspace = true
 reth-execution-types.workspace = true
 # reth
 evm2.workspace = true
-reth-chain-state.workspace = true
+reth-chain-state = { workspace = true, features = ["serde"] }
 evm2-inspectors = { workspace = true, features = ["std"] }
 reth-primitives-traits = { workspace = true, features = ["rpc-compat"] }
 reth-errors.workspace = true
@@ -28,7 +28,6 @@ reth-chainspec.workspace = true
 reth-rpc-eth-types.workspace = true
 reth-rpc-server-types.workspace = true
 reth-network-api.workspace = true
-reth-node-api.workspace = true
 reth-trie-common = { workspace = true, features = ["eip1186"] }
 reth-prune-types.workspace = true
 

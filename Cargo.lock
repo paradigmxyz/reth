@@ -3664,7 +3664,7 @@ dependencies = [
 [[package]]
 name = "evm2"
 version = "0.1.0"
-source = "git+https://github.com/DaniPopes/evm2?rev=301852ff4b0cc1f9878ed6e9ff58b35e5eb95152#301852ff4b0cc1f9878ed6e9ff58b35e5eb95152"
+source = "git+https://github.com/DaniPopes/evm2?rev=19ae5411cb505639b7766c1ffd1cf29aa2803d20#19ae5411cb505639b7766c1ffd1cf29aa2803d20"
 dependencies = [
  "alloy-consensus",
  "alloy-eip7928",
@@ -3702,10 +3702,11 @@ dependencies = [
 [[package]]
 name = "evm2-inspectors"
 version = "0.1.0"
-source = "git+https://github.com/DaniPopes/evm2?rev=301852ff4b0cc1f9878ed6e9ff58b35e5eb95152#301852ff4b0cc1f9878ed6e9ff58b35e5eb95152"
+source = "git+https://github.com/DaniPopes/evm2?rev=19ae5411cb505639b7766c1ffd1cf29aa2803d20#19ae5411cb505639b7766c1ffd1cf29aa2803d20"
 dependencies = [
  "alloy-consensus",
  "alloy-eip2930",
+ "alloy-eips",
  "alloy-primitives",
  "alloy-rpc-types-eth",
  "alloy-rpc-types-trace",
@@ -3724,7 +3725,7 @@ dependencies = [
 [[package]]
 name = "evm2-jit"
 version = "0.1.0"
-source = "git+https://github.com/DaniPopes/evm2?rev=301852ff4b0cc1f9878ed6e9ff58b35e5eb95152#301852ff4b0cc1f9878ed6e9ff58b35e5eb95152"
+source = "git+https://github.com/DaniPopes/evm2?rev=19ae5411cb505639b7766c1ffd1cf29aa2803d20#19ae5411cb505639b7766c1ffd1cf29aa2803d20"
 dependencies = [
  "evm2",
  "evm2-jit-backend",
@@ -3739,7 +3740,7 @@ dependencies = [
 [[package]]
 name = "evm2-jit-backend"
 version = "0.1.0"
-source = "git+https://github.com/DaniPopes/evm2?rev=301852ff4b0cc1f9878ed6e9ff58b35e5eb95152#301852ff4b0cc1f9878ed6e9ff58b35e5eb95152"
+source = "git+https://github.com/DaniPopes/evm2?rev=19ae5411cb505639b7766c1ffd1cf29aa2803d20#19ae5411cb505639b7766c1ffd1cf29aa2803d20"
 dependencies = [
  "eyre",
  "ruint",
@@ -3748,12 +3749,12 @@ dependencies = [
 [[package]]
 name = "evm2-jit-build"
 version = "0.1.0"
-source = "git+https://github.com/DaniPopes/evm2?rev=301852ff4b0cc1f9878ed6e9ff58b35e5eb95152#301852ff4b0cc1f9878ed6e9ff58b35e5eb95152"
+source = "git+https://github.com/DaniPopes/evm2?rev=19ae5411cb505639b7766c1ffd1cf29aa2803d20#19ae5411cb505639b7766c1ffd1cf29aa2803d20"
 
 [[package]]
 name = "evm2-jit-builtins"
 version = "0.1.0"
-source = "git+https://github.com/DaniPopes/evm2?rev=301852ff4b0cc1f9878ed6e9ff58b35e5eb95152#301852ff4b0cc1f9878ed6e9ff58b35e5eb95152"
+source = "git+https://github.com/DaniPopes/evm2?rev=19ae5411cb505639b7766c1ffd1cf29aa2803d20#19ae5411cb505639b7766c1ffd1cf29aa2803d20"
 dependencies = [
  "alloy-primitives",
  "evm2",
@@ -3766,7 +3767,7 @@ dependencies = [
 [[package]]
 name = "evm2-jit-codegen"
 version = "0.1.0"
-source = "git+https://github.com/DaniPopes/evm2?rev=301852ff4b0cc1f9878ed6e9ff58b35e5eb95152#301852ff4b0cc1f9878ed6e9ff58b35e5eb95152"
+source = "git+https://github.com/DaniPopes/evm2?rev=19ae5411cb505639b7766c1ffd1cf29aa2803d20#19ae5411cb505639b7766c1ffd1cf29aa2803d20"
 dependencies = [
  "alloy-primitives",
  "bitflags 2.13.2",
@@ -3789,7 +3790,7 @@ dependencies = [
 [[package]]
 name = "evm2-jit-context"
 version = "0.1.0"
-source = "git+https://github.com/DaniPopes/evm2?rev=301852ff4b0cc1f9878ed6e9ff58b35e5eb95152#301852ff4b0cc1f9878ed6e9ff58b35e5eb95152"
+source = "git+https://github.com/DaniPopes/evm2?rev=19ae5411cb505639b7766c1ffd1cf29aa2803d20#19ae5411cb505639b7766c1ffd1cf29aa2803d20"
 dependencies = [
  "alloy-primitives",
  "evm2",
@@ -3799,7 +3800,7 @@ dependencies = [
 [[package]]
 name = "evm2-jit-llvm"
 version = "0.1.0"
-source = "git+https://github.com/DaniPopes/evm2?rev=301852ff4b0cc1f9878ed6e9ff58b35e5eb95152#301852ff4b0cc1f9878ed6e9ff58b35e5eb95152"
+source = "git+https://github.com/DaniPopes/evm2?rev=19ae5411cb505639b7766c1ffd1cf29aa2803d20#19ae5411cb505639b7766c1ffd1cf29aa2803d20"
 dependencies = [
  "alloy-primitives",
  "cc",
@@ -3812,7 +3813,7 @@ dependencies = [
 [[package]]
 name = "evm2-jit-runtime"
 version = "0.1.0"
-source = "git+https://github.com/DaniPopes/evm2?rev=301852ff4b0cc1f9878ed6e9ff58b35e5eb95152#301852ff4b0cc1f9878ed6e9ff58b35e5eb95152"
+source = "git+https://github.com/DaniPopes/evm2?rev=19ae5411cb505639b7766c1ffd1cf29aa2803d20#19ae5411cb505639b7766c1ffd1cf29aa2803d20"
 dependencies = [
  "alloy-primitives",
  "crossbeam-channel",
@@ -3839,7 +3840,7 @@ dependencies = [
 [[package]]
 name = "evm2-macros"
 version = "0.1.0"
-source = "git+https://github.com/DaniPopes/evm2?rev=301852ff4b0cc1f9878ed6e9ff58b35e5eb95152#301852ff4b0cc1f9878ed6e9ff58b35e5eb95152"
+source = "git+https://github.com/DaniPopes/evm2?rev=19ae5411cb505639b7766c1ffd1cf29aa2803d20#19ae5411cb505639b7766c1ffd1cf29aa2803d20"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -9513,8 +9514,8 @@ version = "2.8.1"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
+ "alloy-network",
  "alloy-primitives",
- "alloy-provider",
  "alloy-rpc-types",
  "alloy-rpc-types-engine",
  "aquamarine",
@@ -9560,7 +9561,9 @@ dependencies = [
  "reth-rpc",
  "reth-rpc-api",
  "reth-rpc-builder",
+ "reth-rpc-convert",
  "reth-rpc-engine-api",
+ "reth-rpc-eth-api",
  "reth-rpc-eth-types",
  "reth-rpc-layer",
  "reth-stages",
@@ -10068,7 +10071,6 @@ dependencies = [
  "reth-network-api",
  "reth-network-peers",
  "reth-network-types",
- "reth-node-api",
  "reth-payload-primitives",
  "reth-primitives-traits",
  "reth-provider",
@@ -10282,7 +10284,6 @@ dependencies = [
  "reth-execution-types",
  "reth-json-rpc",
  "reth-network-api",
- "reth-node-api",
  "reth-primitives-traits",
  "reth-prune-types",
  "reth-rpc-convert",
@@ -10405,6 +10406,8 @@ dependencies = [
  "alloy-rlp",
  "evm2",
  "futures",
+ "metrics",
+ "metrics-util",
  "reth-chainspec",
  "reth-db-api",
  "reth-downloaders",
@@ -10412,6 +10415,7 @@ dependencies = [
  "reth-ethereum-primitives",
  "reth-evm",
  "reth-evm-ethereum",
+ "reth-metrics",
  "reth-network-p2p",
  "reth-network-peers",
  "reth-primitives-traits",

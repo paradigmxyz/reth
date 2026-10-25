@@ -15,6 +15,7 @@ use crate::{
 };
 use alloy_consensus::BlockHeader;
 use alloy_eips::BlockId;
+use alloy_network::Ethereum;
 use alloy_rpc_types::engine::ClientVersionV1;
 use alloy_rpc_types_engine::ExecutionData;
 use futures::{Stream, StreamExt};
@@ -34,8 +35,8 @@ use reth_node_core::{
 use reth_payload_builder::{PayloadBuilderHandle, PayloadStore};
 use reth_primitives_traits::NodePrimitives;
 use reth_rpc::{
-    eth::{core::EthRpcConverterFor, DevSigner, EthApiTypes, FullEthApiServer},
-    AdminApi,
+    eth::{DevSigner, EthApiTypes, FullEthApiServer},
+    AdminApi, EthApi,
 };
 use reth_rpc_api::{
     eth::helpers::{EthTransactions, GetBlockAccessList},
@@ -46,8 +47,12 @@ use reth_rpc_builder::{
     config::RethRpcServerConfig,
     RpcModuleBuilder, RpcRegistryInner, RpcServerConfig, RpcServerHandle, TransportRpcModules,
 };
+use reth_rpc_convert::RpcConverter;
 use reth_rpc_engine_api::{capabilities::EngineCapabilities, EngineApi};
-use reth_rpc_eth_types::{cache::cache_new_blocks_task, EthConfig, EthStateCache};
+use reth_rpc_eth_api::node::RpcNodeCoreAdapter;
+use reth_rpc_eth_types::{
+    cache::cache_new_blocks_task, receipt::EthReceiptConverter, EthConfig, EthStateCache,
+};
 use reth_tokio_util::EventSender;
 use reth_tracing::tracing::{debug, info};
 use std::{
@@ -1343,6 +1348,31 @@ where
     }
 }
 
+/// Helper type alias for [`RpcNodeCoreAdapter`] with components from the given
+/// [`FullNodeComponents`].
+pub type RpcNodeCoreFor<N> = RpcNodeCoreAdapter<
+    <N as FullNodeTypes>::Provider,
+    <N as FullNodeComponents>::Pool,
+    <N as FullNodeComponents>::Network,
+    <N as FullNodeComponents>::Evm,
+>;
+
+/// Helper type alias for [`RpcConverter`] with components from the given [`FullNodeComponents`].
+pub type EthRpcConverterFor<N, NetworkT = Ethereum> = RpcConverter<
+    NetworkT,
+    <N as FullNodeComponents>::Evm,
+    EthReceiptConverter<<<N as FullNodeTypes>::Provider as ChainSpecProvider>::ChainSpec>,
+>;
+
+/// Helper type alias for [`EthApi`] with components from the given [`FullNodeComponents`].
+pub type EthApiFor<N, NetworkT = Ethereum> =
+    EthApi<RpcNodeCoreFor<N>, EthRpcConverterFor<N, NetworkT>>;
+
+/// Helper type alias for [`EthApiBuilder`](reth_rpc::EthApiBuilder) with components from the given
+/// [`FullNodeComponents`].
+pub type EthApiBuilderFor<N, NetworkT = Ethereum> =
+    reth_rpc::EthApiBuilder<RpcNodeCoreFor<N>, EthRpcConverterFor<N, NetworkT>>;
+
 /// `EthApiCtx` struct
 /// This struct is used to pass the necessary context to the `EthApiBuilder` to build the `EthApi`.
 #[derive(Debug)]
@@ -1363,25 +1393,30 @@ impl<'a, N: FullNodeComponents<Types: NodeTypes<ChainSpec: Hardforks + EthereumH
     EthApiCtx<'a, N>
 {
     /// Provides a [`EthApiBuilder`] with preconfigured config and components.
-    pub fn eth_api_builder(self) -> reth_rpc::EthApiBuilder<N, EthRpcConverterFor<N>> {
-        reth_rpc::EthApiBuilder::new_with_components(self.components.clone())
-            .eth_cache(self.cache)
-            .sender_recovery_cache(self.sender_recovery_cache)
-            .eth_state_cache_config(self.config.cache)
-            .task_spawner(self.components.task_executor().clone())
-            .gas_cap(self.config.rpc_gas_cap.into())
-            .max_simulate_blocks(self.config.rpc_max_simulate_blocks)
-            .compute_state_root_for_eth_simulate(self.config.compute_state_root_for_eth_simulate)
-            .eth_proof_window(self.config.eth_proof_window)
-            .fee_history_cache_config(self.config.fee_history_cache)
-            .proof_permits(self.config.proof_permits)
-            .gas_oracle_config(self.config.gas_oracle)
-            .max_batch_size(self.config.max_batch_size)
-            .max_blocking_io_requests(self.config.max_blocking_io_requests)
-            .pending_block_kind(self.config.pending_block_kind)
-            .raw_tx_forwarder(self.config.raw_tx_forwarder)
-            .evm_memory_limit(self.config.rpc_evm_memory_limit)
-            .force_blob_sidecar_upcasting(self.config.force_blob_sidecar_upcasting)
+    pub fn eth_api_builder(self) -> EthApiBuilderFor<N> {
+        reth_rpc::EthApiBuilder::new(
+            self.components.provider().clone(),
+            self.components.pool().clone(),
+            self.components.network().clone(),
+            self.components.evm_config().clone(),
+        )
+        .eth_cache(self.cache)
+        .sender_recovery_cache(self.sender_recovery_cache)
+        .eth_state_cache_config(self.config.cache)
+        .task_spawner(self.components.task_executor().clone())
+        .gas_cap(self.config.rpc_gas_cap.into())
+        .max_simulate_blocks(self.config.rpc_max_simulate_blocks)
+        .compute_state_root_for_eth_simulate(self.config.compute_state_root_for_eth_simulate)
+        .eth_proof_window(self.config.eth_proof_window)
+        .fee_history_cache_config(self.config.fee_history_cache)
+        .proof_permits(self.config.proof_permits)
+        .gas_oracle_config(self.config.gas_oracle)
+        .max_batch_size(self.config.max_batch_size)
+        .max_blocking_io_requests(self.config.max_blocking_io_requests)
+        .pending_block_kind(self.config.pending_block_kind)
+        .raw_tx_forwarder(self.config.raw_tx_forwarder)
+        .evm_memory_limit(self.config.rpc_evm_memory_limit)
+        .force_blob_sidecar_upcasting(self.config.force_blob_sidecar_upcasting)
     }
 }
 

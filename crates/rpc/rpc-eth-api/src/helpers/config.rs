@@ -11,8 +11,7 @@ use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthereumHardforks, Hardfor
 use reth_errors::{ProviderError, RethError};
 use reth_evm::{ConfigureEvm, Evm};
 use reth_json_rpc::{rpc, RpcResult};
-use reth_node_api::NodePrimitives;
-use reth_primitives_traits::header::HeaderMut;
+use reth_primitives_traits::{header::HeaderMut, NodePrimitives};
 use reth_rpc_eth_types::EthApiError;
 use reth_storage_api::BlockReaderIdExt;
 use std::collections::BTreeMap;
