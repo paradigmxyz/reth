@@ -10,6 +10,10 @@ use revm::{bytecode::Bytecode, state::AccountInfo, Database, DatabaseRef};
 ///
 /// This serves as the data layer for [`Database`].
 pub trait EvmStateProvider {
+    /// Get a canonical ancestor's timestamp for irregular fork transitions.
+    fn block_timestamp(&self, _number: BlockNumber) -> ProviderResult<Option<u64>> {
+        Ok(None)
+    }
     /// Get basic account information.
     ///
     /// Returns [`None`] if the account doesn't exist.
@@ -35,6 +39,9 @@ pub trait EvmStateProvider {
 
 // Blanket implementation of EvmStateProvider for any type that implements StateProvider.
 impl<T: StateProvider> EvmStateProvider for T {
+    fn block_timestamp(&self, number: BlockNumber) -> ProviderResult<Option<u64>> {
+        <T as BlockHashReader>::block_timestamp(self, number)
+    }
     fn basic_account(&self, address: &Address) -> ProviderResult<Option<Account>> {
         <T as AccountReader>::basic_account(self, address)
     }
@@ -103,6 +110,9 @@ impl<DB> DerefMut for StateProviderDatabase<DB> {
 }
 
 impl<DB: EvmStateProvider> Database for StateProviderDatabase<DB> {
+    fn block_timestamp(&mut self, number: u64) -> Result<Option<u64>, Self::Error> {
+        self.0.block_timestamp(number)
+    }
     type Error = ProviderError;
 
     /// Retrieves basic account information for a given address.
@@ -137,6 +147,9 @@ impl<DB: EvmStateProvider> Database for StateProviderDatabase<DB> {
 }
 
 impl<DB: EvmStateProvider> DatabaseRef for StateProviderDatabase<DB> {
+    fn block_timestamp_ref(&self, number: u64) -> Result<Option<u64>, Self::Error> {
+        self.0.block_timestamp(number)
+    }
     type Error = <Self as Database>::Error;
 
     /// Retrieves basic account information for a given address.

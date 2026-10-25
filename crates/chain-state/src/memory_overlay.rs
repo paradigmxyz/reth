@@ -71,6 +71,14 @@ impl<'a, N: NodePrimitives> MemoryOverlayStateProviderRef<'a, N> {
 }
 
 impl<N: NodePrimitives> BlockHashReader for MemoryOverlayStateProviderRef<'_, N> {
+    fn block_timestamp(&self, number: BlockNumber) -> ProviderResult<Option<u64>> {
+        for block in self.in_memory.iter() {
+            if block.recovered_block().number() == number {
+                return Ok(Some(block.recovered_block().timestamp()));
+            }
+        }
+        self.historical.block_timestamp(number)
+    }
     fn block_hash(&self, number: BlockNumber) -> ProviderResult<Option<B256>> {
         for block in self.in_memory.iter() {
             if block.recovered_block().number() == number {

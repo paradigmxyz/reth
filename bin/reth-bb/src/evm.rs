@@ -51,7 +51,12 @@ pub struct BbEvmPlan<'a> {
 
 impl<'a> BbEvmPlan<'a> {
     /// Creates a new `BbEvmPlan` from segments and hardfork flags.
-    pub(crate) fn new(segments: Vec<BigBlockSegment<'a>>) -> Self {
+    pub(crate) fn new(mut segments: Vec<BigBlockSegment<'a>>) -> Self {
+        // Earlier segments are not persisted yet, so fork transitions need their in-memory times.
+        for index in 1..segments.len() {
+            let parent_timestamp = segments[index - 1].evm_env.block_env.timestamp;
+            segments[index].ctx.parent_timestamp = Some(parent_timestamp.saturating_to());
+        }
         // Pre-compute all inter-segment block hashes.
         let mut block_hashes_to_seed = Vec::new();
         for seg in segments.iter().skip(1) {
@@ -461,6 +466,7 @@ where
         let last_seg = self.plan.segments.last().unwrap();
         let last_ctx = EthBlockExecutionCtx {
             parent_hash: last_seg.ctx.parent_hash,
+            parent_timestamp: last_seg.ctx.parent_timestamp,
             parent_beacon_block_root: last_seg.ctx.parent_beacon_block_root,
             ommers: last_seg.ctx.ommers,
             withdrawals: last_seg.ctx.withdrawals.clone(),
@@ -606,5 +612,43 @@ where
         I: Inspector<EthEvmContext<DB>>,
     {
         BbBlockExecutor::new(evm, ctx, &self.spec, self.receipt_builder, None, None, None, None)
+    }
+}
+
+#[cfg(test)]
+mod timestamp_tests {
+    use super::*;
+    use alloy_evm::EvmEnv;
+    use alloy_primitives::{Bytes, U256};
+
+    #[test]
+    fn segment_parents_use_virtual_ancestry_across_skipped_slots() {
+        let segments = [14u64, 20, 21]
+            .into_iter()
+            .enumerate()
+            .map(|(index, timestamp)| {
+                let mut evm_env: EvmEnv = EvmEnv::new(Default::default(), Default::default());
+                evm_env.block_env.number = U256::from(index + 1);
+                evm_env.block_env.timestamp = U256::from(timestamp);
+                BigBlockSegment {
+                    start_tx: index,
+                    evm_env,
+                    ctx: EthBlockExecutionCtx {
+                        parent_hash: B256::ZERO,
+                        parent_timestamp: None,
+                        parent_beacon_block_root: None,
+                        ommers: &[],
+                        withdrawals: None,
+                        extra_data: Bytes::new(),
+                        tx_count_hint: None,
+                        slot_number: None,
+                    },
+                }
+            })
+            .collect();
+        let plan = BbEvmPlan::new(segments);
+        assert_eq!(plan.segments[0].ctx.parent_timestamp, None);
+        assert_eq!(plan.segments[1].ctx.parent_timestamp, Some(14));
+        assert_eq!(plan.segments[2].ctx.parent_timestamp, Some(20));
     }
 }

@@ -160,6 +160,10 @@ impl<DB: DatabaseRef> Database for CachedReadsDbMut<'_, DB> {
         };
         Ok(hash)
     }
+
+    fn block_timestamp(&mut self, number: u64) -> Result<Option<u64>, Self::Error> {
+        self.db.block_timestamp_ref(number)
+    }
 }
 
 /// A [`DatabaseRef`] that caches reads inside [`CachedReads`].
@@ -194,6 +198,10 @@ impl<DB: DatabaseRef> DatabaseRef for CachedReadsDBRef<'_, DB> {
 
     fn block_hash_ref(&self, number: u64) -> Result<B256, Self::Error> {
         self.inner.borrow_mut().block_hash(number)
+    }
+
+    fn block_timestamp_ref(&self, number: u64) -> Result<Option<u64>, Self::Error> {
+        self.inner.borrow_mut().block_timestamp(number)
     }
 }
 

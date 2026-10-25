@@ -29,6 +29,7 @@ pub struct FrameValidationInspector {
     error: Option<&'static str>,
     accounts: BTreeSet<Address>,
     code: BTreeSet<Address>,
+    mutable_code: BTreeSet<Address>,
     storage: BTreeSet<(Address, U256)>,
     expiry: Option<u64>,
 }
@@ -43,6 +44,7 @@ impl FrameValidationInspector {
             error: None,
             accounts: BTreeSet::new(),
             code: BTreeSet::new(),
+            mutable_code: BTreeSet::new(),
             storage: BTreeSet::new(),
             expiry: None,
         }
@@ -63,6 +65,7 @@ impl FrameValidationInspector {
         FrameDependencies {
             accounts: self.accounts.iter().copied().chain([self.sender]).collect(),
             code: self.code.iter().copied().collect(),
+            mutable_code: self.mutable_code.iter().copied().collect(),
             storage: self.storage.iter().copied().collect(),
         }
     }
@@ -147,6 +150,18 @@ impl FrameValidationInspector {
                     .code_by_hash(info.code_hash)
                     .map_err(|_| "frame code read failed")?,
             };
+            let mut can_adopt = false;
+            let mut can_delegate = false;
+            for opcode in code.iter_opcodes() {
+                can_adopt |= opcode == 0xa7;
+                can_delegate |= matches!(opcode, 0xf2 | 0xf4);
+            }
+            if can_adopt && !(sender_entry && address == self.sender) {
+                return Err("validation accessed mutable code")
+            }
+            if can_delegate {
+                self.mutable_code.insert(address);
+            }
             if let Some(delegate) = code.eip7702_address() {
                 // Top-level sender verification can execute code installed by a deploy frame.
                 // CALL*/EXTCODE* may not follow arbitrary third-party delegations.
@@ -188,7 +203,7 @@ where
 
         match opcode {
             // Environment-dependent opcodes, arbitrary balance reads and state destruction.
-            0x31 | 0x3a | 0x40 | 0x41 | 0x43..=0x45 | 0x47 | 0x48 | 0x4a | 0xfe | 0xff => {
+            0x31 | 0x3a | 0x40 | 0x41 | 0x43..=0x45 | 0x47 | 0x48 | 0x4a | 0xa7 | 0xfe | 0xff => {
                 self.reject("banned opcode in validation prefix")
             }
             0x42 if !expiry_timestamp => self.reject("TIMESTAMP outside canonical expiry verifier"),
@@ -348,9 +363,10 @@ mod tests {
 
     #[test]
     fn rejects_environment_reads_and_requires_immediate_call_after_gas() {
-        for opcode in
-            [0x31, 0x3a, 0x40, 0x41, 0x42, 0x43, 0x44, 0x45, 0x47, 0x48, 0x4a, 0x4b, 0xfe, 0xff]
-        {
+        for opcode in [
+            0x31, 0x3a, 0x40, 0x41, 0x42, 0x43, 0x44, 0x45, 0x47, 0x48, 0x4a, 0x4b, 0xa7, 0xfe,
+            0xff,
+        ] {
             let mut inspector = FrameValidationInspector::new(Address::ZERO, policy());
             let mut ctx = Context::mainnet();
             let mut interp = Interpreter {
@@ -369,6 +385,29 @@ mod tests {
             };
             inspector.step(&mut interp, &mut ctx);
             assert_eq!(inspector.error().is_none(), matches!(next, 0xf1 | 0xf2 | 0xf4 | 0xfa));
+        }
+    }
+
+    #[test]
+    fn mutable_code_scan_skips_push_data_and_tracks_proxies() {
+        let address = Address::repeat_byte(9);
+        for (code, allowed, proxy) in [
+            (vec![0x60, 0xa7, 0x00], true, false),
+            (vec![0x60, 0xf4, 0x00], true, false),
+            (vec![0xa7], false, false),
+            (vec![0xf4], true, true),
+            (vec![0xf2], true, true),
+        ] {
+            let mut db = CacheDB::<EmptyDB>::default();
+            db.insert_account_info(
+                address,
+                AccountInfo::default().with_code(Bytecode::new_legacy(code.into())),
+            );
+            let mut ctx = Context::mainnet().with_db(db);
+            let mut inspector = FrameValidationInspector::new(Address::ZERO, policy());
+            assert_eq!(inspector.check_code(&mut ctx, address, false, false), allowed);
+            assert_eq!(inspector.dependencies().mutable_code.contains(&address), proxy);
+            assert!(ctx.journal().evm_state().is_empty());
         }
     }
 

@@ -6,6 +6,10 @@ use reth_storage_errors::provider::ProviderResult;
 /// Client trait for fetching block hashes by number.
 #[auto_impl::auto_impl(&, Box, Arc)]
 pub trait BlockHashReader {
+    /// Get a canonical block's timestamp for fork-boundary state transitions.
+    fn block_timestamp(&self, _number: BlockNumber) -> ProviderResult<Option<u64>> {
+        Ok(None)
+    }
     /// Get the hash of the block with the given number. Returns `None` if no block with this number
     /// exists.
     fn block_hash(&self, number: BlockNumber) -> ProviderResult<Option<B256>>;

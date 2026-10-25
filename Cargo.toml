@@ -698,6 +698,7 @@ vergen-git2 = "10.0.1"
 ipnet = "2.11"
 
 [patch.crates-io]
+alloy-eip7928 = { git = "https://github.com/Rimeeeeee/eips", branch = "bogota-devnet-2" }
 revm-inspectors = { git = "https://github.com/Rimeeeeee/revm-inspectors", branch = "bogota-devnet-2" }
 # EIP-8141 Alloy consensus, networking, RPC, signer, and transport stack.
 alloy-consensus = { git = "https://github.com/Rimeeeeee/alloy", branch = "bogota-devnet-2" }

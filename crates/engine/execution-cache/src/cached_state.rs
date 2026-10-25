@@ -1045,6 +1045,12 @@ impl<S: StorageRootProvider> StorageRootProvider for CachedStateProvider<S> {
 }
 
 impl<S: BlockHashReader> BlockHashReader for CachedStateProvider<S> {
+    fn block_timestamp(
+        &self,
+        number: alloy_primitives::BlockNumber,
+    ) -> ProviderResult<Option<u64>> {
+        self.state_provider.block_timestamp(number)
+    }
     fn block_hash(&self, number: alloy_primitives::BlockNumber) -> ProviderResult<Option<B256>> {
         self.state_provider.block_hash(number)
     }

@@ -277,6 +277,16 @@ where
     N: Network,
     Node: NodeTypes,
 {
+    fn block_timestamp(&self, number: BlockNumber) -> Result<Option<u64>, ProviderError> {
+        self.block_on_async(async {
+            let block = self
+                .provider
+                .get_block_by_number(number.into())
+                .await
+                .map_err(ProviderError::other)?;
+            Ok(block.map(|block| block.header().timestamp()))
+        })
+    }
     fn block_hash(&self, number: BlockNumber) -> Result<Option<B256>, ProviderError> {
         let block = self.block_on_async(async {
             self.provider.get_block_by_number(number.into()).await.map_err(ProviderError::other)
@@ -1444,6 +1454,16 @@ where
     N: Network,
     Node: NodeTypes,
 {
+    fn block_timestamp(&self, number: BlockNumber) -> Result<Option<u64>, ProviderError> {
+        self.block_on_async(async {
+            let block = self
+                .provider
+                .get_block_by_number(number.into())
+                .await
+                .map_err(ProviderError::other)?;
+            Ok(block.map(|block| block.header().timestamp()))
+        })
+    }
     fn block_hash(&self, number: u64) -> Result<Option<B256>, ProviderError> {
         self.block_on_async(async {
             let block = self

@@ -83,6 +83,9 @@ impl<Provider: DBProvider + StorageSettingsCache> AccountReader
 }
 
 impl<Provider: BlockHashReader> BlockHashReader for LatestStateProviderRef<'_, Provider> {
+    fn block_timestamp(&self, number: BlockNumber) -> ProviderResult<Option<u64>> {
+        self.0.block_timestamp(number)
+    }
     /// Get block hash by number.
     fn block_hash(&self, number: u64) -> ProviderResult<Option<B256>> {
         self.0.block_hash(number)

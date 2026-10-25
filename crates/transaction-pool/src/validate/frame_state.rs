@@ -46,6 +46,8 @@ pub struct FrameDependencies {
     pub accounts: Vec<Address>,
     /// Accounts whose code can affect validation.
     pub code: Vec<Address>,
+    /// Proxy code that can reach code adoption through CALLCODE or DELEGATECALL.
+    pub mutable_code: Vec<Address>,
     /// Storage slots whose values can affect validation.
     pub storage: Vec<(Address, U256)>,
 }
@@ -107,6 +109,18 @@ impl FrameReservations {
             return Err("duplicate hash");
         }
         let old = replaces.and_then(|h| self.frames.get(&h).cloned());
+        // Bound invalidation work when one proxy changes the code used by many prefixes.
+        const MAX_MUTABLE_CODE_DEPENDENTS: usize = 64;
+        for address in &metadata.dependencies.mutable_code {
+            let dependents = self.code.get(address);
+            let replacing =
+                replaces.is_some_and(|hash| dependents.is_some_and(|set| set.contains(&hash)));
+            if dependents.map_or(0, HashSet::len).saturating_sub(usize::from(replacing)) >=
+                MAX_MUTABLE_CODE_DEPENDENTS
+            {
+                return Err("mutable code dependency capacity exceeded");
+            }
+        }
         if replaces.is_some() && old.is_none() {
             return Err("replacement not found");
         }
@@ -325,6 +339,7 @@ mod tests {
             dependencies: FrameDependencies {
                 accounts: vec![Address::repeat_byte(9), Address::repeat_byte(9)],
                 code: vec![],
+                mutable_code: vec![],
                 storage: vec![],
             },
             expires_at: None,
@@ -533,5 +548,38 @@ mod tests {
 
         r.remove(&B256::repeat_byte(1));
         assert!(r.affected(&FrameDependencies::default(), 0, Some(u64::MAX)).is_empty());
+    }
+    #[test]
+    fn mutable_proxy_capacity_allows_replacement_and_releases_slots() {
+        let proxy = Address::repeat_byte(0x80);
+        let metadata = |sender| {
+            let mut frame = m(sender, 0, sender, 0);
+            frame.dependencies.code.push(proxy);
+            frame.dependencies.mutable_code.push(proxy);
+            frame
+        };
+        let mut reservations = FrameReservations::default();
+        for sender in 1..=64 {
+            put(&mut reservations, sender, metadata(sender)).unwrap();
+        }
+        assert_eq!(
+            put(&mut reservations, 65, metadata(65)),
+            Err("mutable code dependency capacity exceeded")
+        );
+        reservations
+            .replace(
+                B256::repeat_byte(66),
+                Arc::new(metadata(1)),
+                Some(B256::repeat_byte(1)),
+                U256::ZERO,
+                B256::ZERO,
+            )
+            .unwrap();
+        assert_eq!(reservations.hashes().count(), 64);
+        let changed = FrameDependencies { code: vec![proxy], ..Default::default() };
+        assert_eq!(reservations.affected(&changed, 0, None).len(), 64);
+        reservations.remove(&B256::repeat_byte(66));
+        put(&mut reservations, 65, metadata(65)).unwrap();
+        assert_eq!(reservations.hashes().count(), 64);
     }
 }

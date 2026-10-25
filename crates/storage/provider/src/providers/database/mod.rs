@@ -668,6 +668,9 @@ impl<N: ProviderNodeTypes> HeaderProvider for ProviderFactory<N> {
 }
 
 impl<N: ProviderNodeTypes> BlockHashReader for ProviderFactory<N> {
+    fn block_timestamp(&self, number: BlockNumber) -> ProviderResult<Option<u64>> {
+        self.caught_up_static_file_provider()?.block_timestamp(number)
+    }
     fn block_hash(&self, number: u64) -> ProviderResult<Option<B256>> {
         self.caught_up_static_file_provider()?.block_hash(number)
     }

@@ -208,6 +208,16 @@ impl<N: NodePrimitives<BlockHeader: Value>> HeaderProvider for StaticFileJarProv
 }
 
 impl<N: NodePrimitives> BlockHashReader for StaticFileJarProvider<'_, N> {
+    fn block_timestamp(&self, number: BlockNumber) -> ProviderResult<Option<u64>> {
+        let mut cursor = self.cursor()?;
+        // Headers occupy the first column and use the node's Compact encoding.
+        // Reading it does not require the database write traits of HeaderProvider.
+        Ok(cursor.get(number.into(), 0b001)?.map(|row| {
+            let (header, _) =
+                <N::BlockHeader as reth_codecs::Compact>::from_compact(row[0], row[0].len());
+            reth_primitives_traits::AlloyBlockHeader::timestamp(&header)
+        }))
+    }
     fn block_hash(&self, number: u64) -> ProviderResult<Option<B256>> {
         self.cursor()?.get_one::<BlockHashMask>(number.into())
     }

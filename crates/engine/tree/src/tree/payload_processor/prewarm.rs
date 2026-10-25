@@ -769,13 +769,7 @@ impl BalAccountStateFields {
         Self {
             balance: account_changes.balance_post_state(),
             nonce: account_changes.nonce_post_state(),
-            code_hash: account_changes.code_post_state().map(|code| {
-                if code.is_empty() {
-                    alloy_consensus::constants::KECCAK_EMPTY
-                } else {
-                    keccak256(code)
-                }
-            }),
+            code_hash: account_changes.code_post_state_with_hash().map(|(hash, _)| hash),
         }
     }
 
@@ -948,6 +942,24 @@ mod tests {
 
         assert!(fields.is_empty());
         assert!(!bal_account_changes_state_root(&changes, fields));
+    }
+
+    #[test]
+    fn bal_code_adoption_uses_referenced_hash_in_state_root() {
+        let hash = B256::repeat_byte(0x42);
+        let changes = AccountChanges::new(address!("0000000000000000000000000000000000000001"))
+            .with_code_change(CodeChange::new_hash(BlockAccessIndex::new(1), hash));
+        let fields = BalAccountStateFields::from_changes(&changes);
+        assert_eq!(fields.code_hash, Some(hash));
+        assert!(bal_account_changes_state_root(&changes, fields));
+        let account = fields.into_account(Some(Account {
+            nonce: 7,
+            balance: U256::from(19),
+            bytecode_hash: None,
+        }));
+        assert_eq!(account.bytecode_hash, Some(hash));
+        assert_eq!(account.nonce, 7);
+        assert_eq!(account.balance, U256::from(19));
     }
 
     #[test]
