@@ -895,8 +895,11 @@ fn main() -> Result<()> {
                                 }
                                 donor => serde_json::from_value(donor)?,
                             };
-                            let donor_path: Vec<String> =
-                                serde_json::from_value(value["donor_path"].clone())?;
+                            let donor_path: Vec<String> = if donor.is_some() {
+                                serde_json::from_value(value["donor_path"].clone())?
+                            } else {
+                                Vec::new()
+                            };
                             input.mutate_at(
                                 &operator,
                                 &path,
