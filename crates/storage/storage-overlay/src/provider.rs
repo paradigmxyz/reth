@@ -1,6 +1,8 @@
 use crate::{
     database_state_frontiers,
-    multiproof_calculator::{prefetch_account_proofs, OverlayMultiProofCalculator},
+    multiproof_calculator::{
+        prefetch_account_proofs, prefetch_storage_proofs, OverlayMultiProofCalculator,
+    },
     ExecutionOverlay, OverlayBuilder, StateTrieOverlay,
 };
 use alloy_primitives::{map::B256Map, Address, BlockHash, BlockNumber, B256, U256};
@@ -802,6 +804,7 @@ where
             }
         };
         prefetch_account_proofs(self.provider().tx(), &targets.account_targets, self.is_v2);
+        prefetch_storage_proofs(self.provider().tx(), &targets.storage_targets, self.is_v2);
         cached.calculator.multiproof(targets)
     }
 

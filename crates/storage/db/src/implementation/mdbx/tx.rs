@@ -24,6 +24,9 @@ use std::{
 };
 use tracing::{debug, instrument, trace, warn};
 
+#[cfg(target_os = "linux")]
+use reth_db_api::transaction::EncodedDupKey;
+
 /// Duration after which we emit the log about long-lived database transactions.
 const LONG_TRANSACTION_DURATION: Duration = Duration::from_secs(60);
 
@@ -384,6 +387,17 @@ impl<K: TransactionKind> DbTx for Tx<K> {
             // SAFETY: The transaction is live and read-only.
             let _ = self.inner.txn_execute(|txn| unsafe {
                 super::value_prefetch::prefetch_keys(txn, T::NAME, keys)
+            });
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    fn prefetch_dup_keys<T: DupSort>(&self, keys: &[EncodedDupKey<T>]) {
+        // Writable transactions can have uncommitted trees, which the walk can't read.
+        if K::IS_READ_ONLY {
+            // SAFETY: The transaction is live and read-only.
+            let _ = self.inner.txn_execute(|txn| unsafe {
+                super::value_prefetch::prefetch_dup_keys(txn, T::NAME, keys)
             });
         }
     }

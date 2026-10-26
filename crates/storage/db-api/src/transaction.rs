@@ -17,6 +17,10 @@ pub type CursorMutTy<TX, T> = <TX as DbTxMut>::CursorMut<T>;
 /// Helper adapter type for accessing [`DbTxMut`] mutable dup cursor.
 pub type DupCursorMutTy<TX, T> = <TX as DbTxMut>::DupCursorMut<T>;
 
+/// Encoded key and subkey of a duplicate in [`DupSort`] table `T`.
+pub type EncodedDupKey<T> =
+    (<<T as Table>::Key as Encode>::Encoded, <<T as DupSort>::SubKey as Encode>::Encoded);
+
 /// Read only transaction
 pub trait DbTx: Debug + Send {
     /// Cursor type for this read-only transaction
@@ -64,6 +68,15 @@ pub trait DbTx: Debug + Send {
     /// not read values. Backends and transactions without support ignore it.
     #[inline]
     fn prefetch_keys<T: Table>(&self, _keys: &[<T::Key as Encode>::Encoded]) {}
+
+    /// Advises best-effort read-ahead of the pages holding the duplicates at encoded
+    /// `(key, subkey)` pairs in table `T`.
+    ///
+    /// Like [`Self::prefetch_keys`], and also follows each key's duplicates to the page where a
+    /// lookup of `subkey` among them starts. Does not read values. Backends and transactions
+    /// without support ignore it.
+    #[inline]
+    fn prefetch_dup_keys<T: DupSort>(&self, _keys: &[EncodedDupKey<T>]) {}
 }
 
 /// Read write transaction that allows writing to database

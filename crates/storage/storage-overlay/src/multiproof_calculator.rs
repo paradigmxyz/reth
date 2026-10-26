@@ -23,6 +23,11 @@ use std::sync::Arc;
 /// Tries of up to about 16^8 accounts rarely have branch nodes deeper than this.
 const PREFETCH_ACCOUNT_TRIE_DEPTH: usize = 8;
 
+/// Number of storage trie path lengths advised for each storage proof target, after the root.
+///
+/// Storage tries are smaller than the account trie, so this also covers the largest ones.
+const PREFETCH_STORAGE_TRIE_DEPTH: usize = 8;
+
 /// Multiproof calculator for the database's trie table layout.
 ///
 /// The calculator borrows a transaction and overlay it does not own, so its owner must keep both
@@ -164,4 +169,54 @@ fn prefetch_account_trie<TX: DbTx, A: TrieTableAdapter>(tx: &TX, targets: &[Proo
         })
         .collect();
     tx.prefetch_keys::<A::AccountTrieTable>(&keys);
+}
+
+/// Advises read-ahead of the hashed storage slots and storage trie nodes that proofs of `targets`
+/// read from `tx`.
+///
+/// Like [`prefetch_account_proofs`], for the storage tries of each target account.
+pub(crate) fn prefetch_storage_proofs<TX: DbTx>(
+    tx: &TX,
+    targets: &B256Map<Vec<ProofV2Target>>,
+    is_v2: bool,
+) {
+    if targets.is_empty() {
+        return
+    }
+    let keys: Vec<_> = targets
+        .iter()
+        .flat_map(|(address, slots)| {
+            slots.iter().map(|slot| (address.encode(), slot.key().encode()))
+        })
+        .collect();
+    tx.prefetch_dup_keys::<tables::HashedStorages>(&keys);
+    if is_v2 {
+        prefetch_storage_trie::<TX, PackedKeyAdapter>(tx, targets);
+    } else {
+        prefetch_storage_trie::<TX, LegacyKeyAdapter>(tx, targets);
+    }
+}
+
+/// Advises read-ahead of the storage trie nodes on the paths to `targets` in table layout `A`.
+///
+/// Paths at or above a target's known parent are skipped, since its proof starts below them.
+fn prefetch_storage_trie<TX: DbTx, A: TrieTableAdapter>(
+    tx: &TX,
+    targets: &B256Map<Vec<ProofV2Target>>,
+) {
+    let keys: Vec<_> = targets
+        .iter()
+        .flat_map(|(address, slots)| {
+            slots.iter().flat_map(|slot| {
+                let start = slot.parent.path_len().map_or(0, |len| len + 1);
+                (start..=PREFETCH_STORAGE_TRIE_DEPTH).map(|len| {
+                    (
+                        address.encode(),
+                        A::StorageSubKey::from(slot.key_nibbles.slice(..len)).encode(),
+                    )
+                })
+            })
+        })
+        .collect();
+    tx.prefetch_dup_keys::<A::StorageTrieTable>(&keys);
 }

@@ -71,6 +71,16 @@ const NODE_HEADER: usize = 8;
 const P_BRANCH: u16 = 0x01;
 /// MDBX page flag of leaf pages (`P_LEAF`).
 const P_LEAF: u16 = 0x02;
+/// MDBX page flag of leaf pages holding fixed-size entries without nodes (`P_DUPFIX`).
+const P_DUPFIX: u16 = 0x20;
+/// MDBX node flag of a value holding a nested B-tree of duplicates (`N_TREE`).
+const N_TREE: u8 = 0x02;
+/// MDBX table flag of tables with sorted duplicates (`MDBX_DUPSORT`).
+const MDBX_DUPSORT: u16 = 0x04;
+/// MDBX table flags that change the key or duplicate order from lexicographic, or store
+/// duplicates without nodes: `MDBX_REVERSEKEY`, `MDBX_INTEGERKEY`, `MDBX_DUPFIXED`,
+/// `MDBX_INTEGERDUP` and `MDBX_REVERSEDUP`.
+const NON_LEXICOGRAPHIC: u16 = 0x02 | 0x08 | 0x10 | 0x20 | 0x40;
 
 /// Advises the kernel to read the leaf pages holding `keys` in `table` before they are looked up.
 ///
@@ -80,8 +90,8 @@ const P_LEAF: u16 = 0x02;
 /// find the next one. A batch then waits for about one read per tree level, and the leaf reads are
 /// still in flight when this returns.
 ///
-/// Duplicate subtrees are not followed. Advice is best-effort: an unexpected page layout ends the
-/// walk without an error.
+/// Duplicate subtrees are not followed; see [`prefetch_dup_keys`]. Advice is best-effort: an
+/// unexpected page layout ends the walk without an error.
 ///
 /// # Safety
 /// `txn` must be a live read-only MDBX transaction.
@@ -92,6 +102,29 @@ pub(super) unsafe fn prefetch_keys<Key: AsRef<[u8]>>(
 ) {
     // SAFETY: The caller guarantees a live read-only transaction.
     let _ = unsafe { leaf_pages(txn, table, keys) };
+}
+
+/// Advises the kernel to read the pages holding the duplicates at `(key, subkey)` pairs in the
+/// `MDBX_DUPSORT` `table` before they are looked up.
+///
+/// Walks the main B-tree like [`prefetch_keys`], then reads each key's leaf node. Few duplicates
+/// are stored inline in that leaf, which is then already advised. Otherwise the node holds a
+/// nested B-tree of the duplicates, which is descended the same way with `subkey`, all pairs
+/// together, one level at a time.
+///
+/// Within the nested tree this follows the path a lookup of `subkey` takes. When the first
+/// duplicate at or after `subkey` starts the next leaf, the lookup also reads that leaf, which is
+/// not advised.
+///
+/// # Safety
+/// `txn` must be a live read-only MDBX transaction.
+pub(super) unsafe fn prefetch_dup_keys<Key: AsRef<[u8]>, SubKey: AsRef<[u8]>>(
+    txn: *mut ffi::MDBX_txn,
+    table: &str,
+    keys: &[(Key, SubKey)],
+) {
+    // SAFETY: The caller guarantees a live read-only transaction.
+    let _ = unsafe { dup_leaf_pages(txn, table, keys) };
 }
 
 /// Advises each level of `table`'s B-tree for `keys` and returns their leaf page numbers.
@@ -105,22 +138,43 @@ unsafe fn leaf_pages<Key: AsRef<[u8]>>(
 ) -> Option<Vec<usize>> {
     // SAFETY: The caller guarantees a live read-only transaction.
     let tree = unsafe { Tree::open(txn, table)? };
-    let mut pages = vec![tree.root; keys.len()];
-    let mut level = Vec::with_capacity(keys.len());
-    for depth in 1..=tree.height {
-        level.clear();
-        level.extend_from_slice(&pages);
-        level.sort_unstable();
-        level.dedup();
-        tree.advise(&level);
-        if depth < tree.height {
-            // Reads of this level's pages were queued above, so they complete concurrently.
-            for (page, key) in pages.iter_mut().zip(keys) {
-                *page = branch_child(tree.page(*page, P_BRANCH)?, key.as_ref())?;
-            }
-        }
+    let mut walks = vec![(tree.root, tree.height); keys.len()];
+    tree.descend(&mut walks, keys)?;
+    Some(walks.into_iter().map(|(page, _)| page).collect())
+}
+
+/// Advises the main and nested B-tree levels of `table` for `(key, subkey)` pairs, and returns
+/// for each pair the leaf page reached and the height of the key's nested tree.
+///
+/// Pairs whose duplicates are stored inline, or whose key is missing, end at their main-tree leaf
+/// with height 0.
+///
+/// # Safety
+/// `txn` must be a live read-only MDBX transaction.
+unsafe fn dup_leaf_pages<Key: AsRef<[u8]>, SubKey: AsRef<[u8]>>(
+    txn: *mut ffi::MDBX_txn,
+    table: &str,
+    keys: &[(Key, SubKey)],
+) -> Option<Vec<(usize, usize)>> {
+    // SAFETY: The caller guarantees a live read-only transaction.
+    let tree = unsafe { Tree::open(txn, table)? };
+    if tree.flags & MDBX_DUPSORT == 0 || tree.flags & NON_LEXICOGRAPHIC != 0 || tree.height == 0 {
+        return None
     }
-    Some(pages)
+    let main_keys: Vec<_> = keys.iter().map(|(key, _)| key.as_ref()).collect();
+    let mut walks = vec![(tree.root, tree.height); keys.len()];
+    tree.descend(&mut walks, &main_keys)?;
+    // The leaves' reads were queued by the walk, so reading them here waits for them together.
+    let mut heights = Vec::with_capacity(keys.len());
+    for ((page, levels), key) in walks.iter_mut().zip(&main_keys) {
+        if let Some((root, height)) = tree.nested_tree(*page, key)? {
+            (*page, *levels) = (root, height);
+        }
+        heights.push(*levels);
+    }
+    let subkeys: Vec<_> = keys.iter().map(|(_, subkey)| subkey.as_ref()).collect();
+    tree.descend(&mut walks, &subkeys)?;
+    Some(walks.into_iter().zip(heights).map(|((page, _), height)| (page, height)).collect())
 }
 
 /// A table's B-tree within the memory map of a read-only transaction's snapshot.
@@ -135,6 +189,8 @@ struct Tree {
     root: usize,
     /// Number of levels, including the leaves.
     height: usize,
+    /// Table flags, such as `MDBX_DUPSORT`.
+    flags: u16,
 }
 
 impl Tree {
@@ -184,6 +240,7 @@ impl Tree {
             pages: usize::try_from(info.mi_geo.current).ok()? / page_size,
             root: read_u32(record, 8)? as usize,
             height: usize::from(read_u16(record, 2)?),
+            flags: read_u16(record, 0)?,
         };
         tree.page(leaf_pgno, P_LEAF)?;
         Some(tree)
@@ -204,6 +261,65 @@ impl Tree {
             )
         };
         (read_u16(page, 10)? & flag != 0 && read_u32(page, 16)? as usize == pgno).then_some(page)
+    }
+
+    /// Descends from each walk's `(page, levels)` to the leaf on `keys`' path, one level at a
+    /// time, advising each level's pages before reading them.
+    ///
+    /// Each walk ends at its leaf with 0 levels left. Walks with 0 levels are left unchanged.
+    fn descend<Key: AsRef<[u8]>>(&self, walks: &mut [(usize, usize)], keys: &[Key]) -> Option<()> {
+        let mut level = Vec::with_capacity(walks.len());
+        loop {
+            level.clear();
+            level.extend(walks.iter().filter(|(_, levels)| *levels > 0).map(|(page, _)| *page));
+            if level.is_empty() {
+                return Some(())
+            }
+            level.sort_unstable();
+            level.dedup();
+            self.advise(&level);
+            // Reads of this level's pages were queued above, so they complete concurrently.
+            for ((page, levels), key) in walks.iter_mut().zip(keys) {
+                if *levels > 1 {
+                    *page = branch_child(self.page(*page, P_BRANCH)?, key.as_ref())?;
+                }
+                *levels = levels.saturating_sub(1);
+            }
+        }
+    }
+
+    /// Returns the root page and height of the nested duplicate tree of `key` in leaf page `pgno`.
+    ///
+    /// Returns `Some(None)` if `key` is missing or its duplicates are stored inline, and `None` if
+    /// the page layout is unexpected.
+    fn nested_tree(&self, pgno: usize, key: &[u8]) -> Option<Option<(usize, usize)>> {
+        let page = self.page(pgno, P_LEAF)?;
+        if read_u16(page, 10)? & P_DUPFIX != 0 {
+            return None
+        }
+        let (mut low, mut high) = (0, node_count(page)?);
+        while low < high {
+            let mid = low + (high - low) / 2;
+            match node_key(page, mid)?.cmp(key) {
+                std::cmp::Ordering::Less => low = mid + 1,
+                std::cmp::Ordering::Greater => high = mid,
+                std::cmp::Ordering::Equal => {
+                    let node = node(page, mid)?;
+                    if page.get(node + 4)? & N_TREE == 0 {
+                        return Some(None)
+                    }
+                    // The node's data is the nested tree's descriptor (`tree_t`).
+                    let start = node + NODE_HEADER + usize::from(read_u16(page, node + 6)?);
+                    let data =
+                        page.get(start..start.checked_add(read_u32(page, node)? as usize)?)?;
+                    return Some(Some((
+                        read_u32(data, 8)? as usize,
+                        usize::from(read_u16(data, 2)?),
+                    )))
+                }
+            }
+        }
+        Some(None)
     }
 
     /// Advises `pages`, sorted and unique, coalescing consecutive pages into one call.
@@ -230,26 +346,36 @@ impl Tree {
 /// The first node's key is implicitly lower than every key. Other keys use MDBX's default
 /// lexicographic order, which matches slice ordering.
 fn branch_child(page: &[u8], key: &[u8]) -> Option<usize> {
-    let count = usize::from(read_u16(page, 12)?) / 2;
-    let node =
-        |index: usize| Some(PAGE_HEADER + usize::from(read_u16(page, PAGE_HEADER + 2 * index)?));
-    let node_key = |index: usize| {
-        let node = node(index)?;
-        page.get(node + NODE_HEADER..node + NODE_HEADER + usize::from(read_u16(page, node + 6)?))
-    };
+    let count = node_count(page)?;
     if count == 0 {
         return None;
     }
     let (mut low, mut high) = (1, count);
     while low < high {
         let mid = low + (high - low) / 2;
-        if node_key(mid)? <= key {
+        if node_key(page, mid)? <= key {
             low = mid + 1;
         } else {
             high = mid;
         }
     }
-    Some(read_u32(page, node(low - 1)?)? as usize)
+    Some(read_u32(page, node(page, low - 1)?)? as usize)
+}
+
+/// Returns the number of nodes in branch or leaf `page`.
+fn node_count(page: &[u8]) -> Option<usize> {
+    Some(usize::from(read_u16(page, 12)?) / 2)
+}
+
+/// Returns the offset of node `index` in `page`.
+fn node(page: &[u8], index: usize) -> Option<usize> {
+    Some(PAGE_HEADER + usize::from(read_u16(page, PAGE_HEADER + 2 * index)?))
+}
+
+/// Returns the key of node `index` in `page`.
+fn node_key(page: &[u8], index: usize) -> Option<&[u8]> {
+    let node = node(page, index)?;
+    page.get(node + NODE_HEADER..node + NODE_HEADER + usize::from(read_u16(page, node + 6)?))
 }
 
 /// Reads a little-endian `u16` at `offset`.
@@ -274,7 +400,7 @@ mod tests {
         cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO},
         database::Database,
         models::{ClientVersion, ShardedKey},
-        table::{Encode, Table},
+        table::{Compress, Encode, Table},
         transaction::{DbTx, DbTxMut},
     };
     use reth_primitives_traits::{Account, Bytecode, StorageEntry};
@@ -333,6 +459,99 @@ mod tests {
         }
         tx.prefetch_keys::<tables::HashedAccounts>(&encoded);
         assert_eq!(tx.entries::<tables::HashedAccounts>().unwrap(), keys.len());
+    }
+
+    #[test]
+    fn prefetch_dup_keys_resolves_leaf_pages() {
+        let db = create_test_rw_db();
+        let slots: Vec<B256> =
+            (0..20_000u64).map(|i| alloy_primitives::keccak256(i.to_be_bytes())).collect();
+        let entry = |slot: B256| StorageEntry {
+            key: slot,
+            value: U256::from_be_bytes(alloy_primitives::keccak256(slot).0),
+        };
+        // Duplicates of the large address form a nested tree, the small address's stay inline.
+        let (large, medium, small) =
+            (B256::repeat_byte(1), B256::repeat_byte(2), B256::repeat_byte(3));
+        let tx = db.tx_mut().unwrap();
+        for (address, count) in [(large, slots.len()), (medium, 500), (small, 3)] {
+            for slot in &slots[..count] {
+                tx.put::<tables::HashedStorages>(address, entry(*slot)).unwrap();
+            }
+        }
+        let pairs: Vec<_> = slots.iter().map(|slot| (large.encode(), slot.encode())).collect();
+        // Writable transactions are ignored.
+        tx.prefetch_dup_keys::<tables::HashedStorages>(&pairs);
+        tx.commit().unwrap();
+
+        let tx = db.tx().unwrap();
+        let dbi = tx.get_dbi::<tables::HashedStorages>().unwrap();
+        let page_size = page_size::get();
+        let page_of = |value: &[u8]| {
+            let page = value.as_ptr() as usize & !(page_size - 1);
+            // SAFETY: The page is mapped while the transaction is live.
+            unsafe { std::slice::from_raw_parts(page as *const u8, page_size) }
+        };
+        let missing = B256::repeat_byte(0xff);
+        let mut probes: Vec<_> = slots.iter().step_by(7).map(|slot| (large, *slot)).collect();
+        probes.extend(slots[..500].iter().step_by(3).map(|slot| (medium, *slot)));
+        probes.extend(slots[..3].iter().map(|slot| (small, *slot)));
+
+        // Probing with complete duplicates resolves to the leaf holding them.
+        let values: Vec<_> =
+            probes.iter().map(|(address, slot)| (*address, entry(*slot).compress())).collect();
+        let leaves = tx
+            .inner()
+            .txn_execute(|txn| unsafe {
+                dup_leaf_pages(txn, tables::HashedStorages::NAME, &values)
+            })
+            .unwrap()
+            .unwrap();
+        for ((address, value), (leaf, height)) in values.iter().zip(leaves) {
+            let mut cursor = tx.inner().cursor_with_dbi(dbi).unwrap();
+            let found: Cow<'_, [u8]> =
+                cursor.get_both_range(address.as_slice(), value).unwrap().unwrap();
+            let Cow::Borrowed(found) = found else { panic!("read-only values are borrowed") };
+            assert_eq!(found, value.as_slice());
+            assert_eq!(leaf, read_u32(page_of(found), 16).unwrap() as usize);
+            match *address {
+                address if address == large => assert!(height >= 3),
+                address if address == small => assert_eq!(height, 0),
+                _ => assert!(height >= 1),
+            }
+        }
+
+        // Subkeys and missing pairs resolve to the leaf a lookup starts at. When that leaf holds
+        // no duplicate at or after the subkey, the lookup moves on to the first one of the next.
+        probes.extend([(large, missing), (missing, slots[0])]);
+        let subkeys: Vec<_> =
+            probes.iter().map(|(address, slot)| (address.encode(), slot.encode())).collect();
+        let leaves = tx
+            .inner()
+            .txn_execute(|txn| unsafe {
+                dup_leaf_pages(txn, tables::HashedStorages::NAME, &subkeys)
+            })
+            .unwrap()
+            .unwrap();
+        let mut moved = 0;
+        for ((address, slot), (leaf, _)) in probes.iter().zip(leaves) {
+            let mut cursor = tx.inner().cursor_with_dbi(dbi).unwrap();
+            let found: Option<Cow<'_, [u8]>> =
+                cursor.get_both_range(address.as_slice(), slot.as_slice()).unwrap();
+            let Some(Cow::Borrowed(found)) = found else {
+                // Missing keys and subkeys after the last duplicate find nothing.
+                assert!(*address == missing || *slot == missing);
+                continue
+            };
+            let page = page_of(found);
+            if leaf != read_u32(page, 16).unwrap() as usize {
+                assert_eq!(node_key(page, 0), Some(found));
+                moved += 1;
+            }
+        }
+        assert!(moved < probes.len() / 10);
+        tx.prefetch_dup_keys::<tables::HashedStorages>(&subkeys);
+        assert_eq!(tx.entries::<tables::HashedStorages>().unwrap(), slots.len() + 503);
     }
 
     #[test]
