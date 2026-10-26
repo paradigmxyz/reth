@@ -82,7 +82,7 @@ def collect(destination, progress=False):
     if progress:
         cursor.write_text(json.dumps(offsets))
     else:
-        for name in ("run.log", "controller.log", "done.json", "init.log", "warm-ready.json", "data/blocks.jsonl"):
+        for name in ("run.log", "controller.log", "done.json", "stdout.log", "init.log", "warm-ready.json", "data/blocks.jsonl"):
             source = STATE / name
             if source.exists():
                 shutil.copyfile(source, destination.parent / ("reth-trie-dst-" + source.name))
@@ -106,11 +106,11 @@ def alive(pid):
         return False
 
 
-def barrier(message, expected):
+def barrier(message, expected, timeout=1):
     with tempfile.TemporaryDirectory(dir=STATE) as directory:
         with socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM) as connection:
             connection.bind(str(Path(directory) / "reply"))
-            connection.settimeout(1)
+            connection.settimeout(timeout)
             connection.sendto(message.encode(), str(STATE / "init.sock"))
             if connection.recv(128) != expected:
                 raise RuntimeError("invalid initialization barrier response")
@@ -260,7 +260,11 @@ def worker(config):
                     output.write((json.dumps({"warm": "reused", "pid": process.pid,
                                               "stdout_offset": offset}) + "\n").encode())
                     output.flush()
-                    barrier(str(workload_path), b"started")
+                    try:
+                        barrier(str(workload_path), b"started",
+                                timeout=max(0.001, deadline - time.monotonic()))
+                    except (OSError, RuntimeError) as error:
+                        raise RuntimeError(warm_failure(f"warm start handshake failed: {error}")) from error
                     warm = False
                 else:
                     with (STATE / "stdout.log").open("wb") as stdout:
