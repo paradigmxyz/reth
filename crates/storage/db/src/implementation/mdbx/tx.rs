@@ -1,9 +1,9 @@
 //! Transaction wrapper for libmdbx-sys.
 
-use super::{cursor::Cursor, utils::*};
+use super::{cursor::Cursor, utils::*, TableDbis};
 use crate::{
     metrics::{DatabaseEnvMetrics, Operation, TransactionMode, TransactionOutcome},
-    DatabaseError,
+    DatabaseError, Tables,
 };
 use reth_db_api::{
     table::{Compress, DupSort, Encode, IntoVec, Table, TableImporter},
@@ -12,7 +12,6 @@ use reth_db_api::{
 use reth_libmdbx::{ffi::MDBX_dbi, CommitLatency, Transaction, TransactionKind, WriteFlags, RW};
 use reth_primitives_traits::FastInstant as Instant;
 use reth_storage_errors::db::{DatabaseWriteError, DatabaseWriteOperation};
-use rustc_hash::FxHashMap;
 use std::{
     backtrace::Backtrace,
     cell::RefCell,
@@ -44,7 +43,7 @@ pub struct Tx<K: TransactionKind> {
     inner: Transaction<K>,
 
     /// Cached MDBX DBIs for reuse.
-    dbis: Arc<FxHashMap<&'static str, MDBX_dbi>>,
+    dbis: Arc<TableDbis>,
 
     /// Handler for metrics with its own [Drop] implementation for cases when the transaction isn't
     /// closed by [`Tx::commit`] or [`Tx::abort`], but we still need to report it in the metrics.
@@ -62,7 +61,7 @@ impl<K: TransactionKind> Tx<K> {
     #[track_caller]
     pub(crate) fn new(
         inner: Transaction<K>,
-        dbis: Arc<FxHashMap<&'static str, MDBX_dbi>>,
+        dbis: Arc<TableDbis>,
         env_metrics: Option<Arc<DatabaseEnvMetrics>>,
     ) -> reth_libmdbx::Result<Self> {
         let metrics_handler = env_metrics
@@ -95,20 +94,26 @@ impl<K: TransactionKind> Tx<K> {
     /// Gets a table database handle by name if it exists, otherwise, check the
     /// database, opening the DB if it exists.
     pub fn get_dbi_raw(&self, name: &str) -> Result<MDBX_dbi, DatabaseError> {
-        if let Some(dbi) = self.dbis.get(name) {
-            Ok(*dbi)
+        self.get_table_dbi(name.parse::<Tables>().ok(), name)
+    }
+
+    /// Gets a table database handle by name if it exists, otherwise, check the
+    /// database, opening the DB if it exists.
+    pub fn get_dbi<T: Table>(&self) -> Result<MDBX_dbi, DatabaseError> {
+        self.get_table_dbi(T::TABLE, T::NAME)
+    }
+
+    /// Gets the tracked database handle of a table, which is looked up by `table` if it is a
+    /// [`Tables`] entry and by `name` otherwise, opening the DB by name if it is not tracked.
+    fn get_table_dbi(&self, table: Option<Tables>, name: &str) -> Result<MDBX_dbi, DatabaseError> {
+        if let Some(dbi) = self.dbis.get(table, name) {
+            Ok(dbi)
         } else {
             self.inner
                 .open_db(Some(name))
                 .map(|db| db.dbi())
                 .map_err(|e| DatabaseError::Open(e.into()))
         }
-    }
-
-    /// Gets a table database handle by name if it exists, otherwise, check the
-    /// database, opening the DB if it exists.
-    pub fn get_dbi<T: Table>(&self) -> Result<MDBX_dbi, DatabaseError> {
-        self.get_dbi_raw(T::NAME)
     }
 
     /// Create db Cursor
@@ -123,7 +128,10 @@ impl<K: TransactionKind> Tx<K> {
         let metrics = if K::IS_READ_ONLY {
             None
         } else {
-            self.metrics_handler.as_ref().map(|h| h.env_metrics.table_operation_metrics(T::NAME))
+            self.metrics_handler
+                .as_ref()
+                .zip(T::TABLE)
+                .map(|(h, table)| h.env_metrics.table_operation_metrics(table))
         };
         Ok(Cursor::new_with_metrics(
             inner,
@@ -194,7 +202,7 @@ impl<K: TransactionKind> Tx<K> {
             metrics_handler.log_backtrace_on_long_read_transaction();
             metrics_handler
                 .env_metrics
-                .record_operation(T::NAME, operation, value_size, || f(&self.inner))
+                .record_operation(T::TABLE, operation, value_size, || f(&self.inner))
         } else {
             f(&self.inner)
         }
@@ -212,8 +220,11 @@ struct MetricsHandler<K: TransactionKind> {
     /// [`MetricsHandler::log_backtrace_on_long_read_transaction`] reads it on every database
     /// operation.
     start: Instant,
-    /// Duration after which we emit the log about long-lived database transactions.
-    long_transaction_duration: Duration,
+    /// The time after which we emit the log about long-lived database transactions.
+    ///
+    /// Stored as a deadline so that the check on every database operation only compares two
+    /// timestamps instead of computing the open duration.
+    long_transaction_deadline: Instant,
     /// If `true`, the metric about transaction closing has already been recorded and we don't need
     /// to do anything on [`Drop::drop`].
     close_recorded: bool,
@@ -234,10 +245,11 @@ struct MetricsHandler<K: TransactionKind> {
 
 impl<K: TransactionKind> MetricsHandler<K> {
     fn new(txn_id: u64, env_metrics: Arc<DatabaseEnvMetrics>) -> Self {
+        let start = Instant::now();
         Self {
             txn_id,
-            start: Instant::now(),
-            long_transaction_duration: LONG_TRANSACTION_DURATION,
+            start,
+            long_transaction_deadline: start + LONG_TRANSACTION_DURATION,
             close_recorded: false,
             record_backtrace: true,
             backtrace_recorded: AtomicBool::new(false),
@@ -279,8 +291,9 @@ impl<K: TransactionKind> MetricsHandler<K> {
             !self.backtrace_recorded.load(Ordering::Relaxed) &&
             self.transaction_mode().is_read_only()
         {
-            let open_duration = self.start.elapsed();
-            if open_duration >= self.long_transaction_duration {
+            let now = Instant::now();
+            if now >= self.long_transaction_deadline {
+                let open_duration = now - self.start;
                 self.backtrace_recorded.store(true, Ordering::Relaxed);
                 #[cfg(all(debug_assertions, not(feature = "dst")))]
                 let open_backtrace = format_args!("{}", self.open_backtrace);
@@ -529,7 +542,8 @@ mod tests {
         let db = DatabaseEnv::open(dir.path(), DatabaseEnvKind::RW, args).unwrap().with_metrics();
 
         let mut tx = db.tx().unwrap();
-        tx.metrics_handler.as_mut().unwrap().long_transaction_duration = MAX_DURATION;
+        let metrics_handler = tx.metrics_handler.as_mut().unwrap();
+        metrics_handler.long_transaction_deadline = metrics_handler.start + MAX_DURATION;
         tx.disable_long_read_transaction_safety();
         // Give the `TxnManager` some time to time out the transaction.
         sleep(MAX_DURATION + Duration::from_millis(100));
@@ -554,7 +568,8 @@ mod tests {
         let db = DatabaseEnv::open(dir.path(), DatabaseEnvKind::RW, args).unwrap().with_metrics();
 
         let mut tx = db.tx().unwrap();
-        tx.metrics_handler.as_mut().unwrap().long_transaction_duration = MAX_DURATION;
+        let metrics_handler = tx.metrics_handler.as_mut().unwrap();
+        metrics_handler.long_transaction_deadline = metrics_handler.start + MAX_DURATION;
         // Give the `TxnManager` some time to time out the transaction.
         sleep(MAX_DURATION + Duration::from_millis(100));
 

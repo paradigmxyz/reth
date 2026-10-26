@@ -571,7 +571,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCo
         let downloads = {
             let (target_dir, static_files_dir) =
                 (target_dir.to_path_buf(), static_files_dir.clone());
-            tokio::task::spawn_blocking(move || {
+            reth_tasks::spawn_blocking(move || {
                 planned.partition_reusable(&target_dir, static_files_dir.as_deref())
             })
             .await??

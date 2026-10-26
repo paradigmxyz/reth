@@ -1159,8 +1159,9 @@ impl ExecutionCache {
             // because we can't efficiently invalidate all storage slots for a single address.
             // This should only happen on pre-Dencun networks.
             //
-            // If the original account had no code (was an EOA or a not yet deployed contract), we
-            // just remove the account from cache - no storage exists for it.
+            // If the original account had no code (was an EOA or a not yet deployed contract), a
+            // destroyed account can be removed from the cache. A re-created account still has
+            // post-block storage and info that must be written below.
             if account.was_destroyed() {
                 let had_code =
                     account.original_info.as_ref().is_some_and(|info| !info.is_empty_code_hash());
@@ -1178,8 +1179,10 @@ impl ExecutionCache {
                     return Ok(())
                 }
 
-                self.0.account_cache.remove(addr);
-                continue;
+                if account.info.is_none() {
+                    self.0.account_cache.remove(addr);
+                    continue;
+                }
             }
 
             // If we have an account that was modified, but it has a `None` account info, some wild
@@ -1313,7 +1316,7 @@ mod tests {
     use evm2::evm::AccountInfo;
     use reth_provider::test_utils::{ExtendedAccount, MockEthProvider};
     use reth_storage_api::StateProvider;
-    use reth_trie_common::bundle_state::{AccountStatus, BundleAccount};
+    use reth_trie_common::bundle_state::{AccountStatus, BundleAccount, StorageSlot};
 
     #[test]
     fn test_empty_storage_cached_state_provider() {
@@ -1510,6 +1513,51 @@ mod tests {
         assert!(caches.0.account_cache.get(&addr1).is_none());
         assert!(caches.0.account_cache.get(&addr2).is_some());
         assert!(caches.0.storage_cache.get(&(addr1, storage_key)).is_some());
+    }
+
+    #[test]
+    fn test_insert_state_recreated_account_updates_cached_storage() {
+        let caches = ExecutionCache::new(1000);
+        let addr = Address::random();
+        let other_addr = Address::random();
+        let key = StorageKey::from(U256::from(1));
+        let other_key = StorageKey::from(U256::from(2));
+        let provider = MockEthProvider::default();
+        provider.extend_accounts(vec![(addr, ExtendedAccount::new(0, U256::from(100)))]);
+        let state_provider =
+            CachedStateProvider::new_prewarm(provider.into_evm_state_provider(), caches.clone());
+        assert_eq!(state_provider.storage(addr, key).unwrap(), None);
+        assert_eq!(caches.0.storage_cache.get(&(addr, key)), Some(U256::ZERO));
+        drop(state_provider);
+        caches.insert_storage(other_addr, other_key, Some(U256::from(42)));
+
+        let current_info =
+            AccountInfo { nonce: 1, code_hash: B256::random(), ..Default::default() };
+        let bundle = BundleState {
+            state: HashMap::from_iter([(
+                addr,
+                BundleAccount::new(
+                    Some(AccountInfo {
+                        balance: U256::from(100),
+                        code_hash: alloy_primitives::KECCAK256_EMPTY,
+                        ..Default::default()
+                    }),
+                    Some(current_info.clone()),
+                    HashMap::from_iter([(
+                        U256::from(1),
+                        StorageSlot::new_changed(U256::ZERO, U256::from(7)),
+                    )]),
+                    AccountStatus::DestroyedChanged,
+                ),
+            )]),
+            ..Default::default()
+        };
+
+        assert!(caches.insert_state(&bundle).is_ok());
+        assert_eq!(caches.0.storage_cache.get(&(addr, key)), Some(U256::from(7)));
+        let cached_account = caches.0.account_cache.get(&addr).flatten().unwrap();
+        assert_eq!(cached_account.bytecode_hash, Some(current_info.code_hash));
+        assert_eq!(caches.0.storage_cache.get(&(other_addr, other_key)), Some(U256::from(42)));
     }
 
     #[test]
