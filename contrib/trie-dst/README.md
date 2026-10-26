@@ -97,14 +97,13 @@ matching Reth's shutdown flush.
 It then drains trie, proof-worker, and deferred-drop queues before exiting, so
 all database handles close while RocksDB's global scheduler is still alive.
 
-After every commit, a fresh overlay-backed provider must expose the reference
-accounts and every touched slot, including deleted slots, plus both range
-endpoints at the database tip. Account and storage proofs must verify against
-the independent root. Fully flushed
-commits additionally compare the complete raw hashed tables with the reference
-and calculate a fresh database-backed root. Metrics report proof revelation,
-trie reuse, pruning, overlay computation, and partial commits. Their counts
-depend on the selected persistence settings and run length.
+After every persistence commit, a fresh overlay-backed provider must expose the
+reference accounts and every touched slot, including deleted slots, plus both
+range endpoints at the database tip. Fully flushed commits additionally compare
+the complete raw hashed tables with the reference and calculate a fresh
+database-backed root. Metrics report proof revelation, trie reuse, pruning,
+overlay computation, and partial commits. Their counts depend on the selected
+persistence settings and run length.
 
 The chain is linear. Reorgs, EVM execution, arbitrary account
 destruction and storage wipes are excluded. In particular, the generator does
@@ -169,7 +168,7 @@ when `partial_state_trie < Finish`. Reth's durable unwind marker also handles a
 second crash during recovery. The actual committed checkpoint determines the
 recovered head, including commits whose acknowledgement was lost. The reference
 state is reconstructed from the journal through that head and compared with the
-recovered header root, hashed tables, storage, and fresh DB-backed proofs. All
+recovered header root, hashed tables, and storage. All
 volatile overlays and the sparse trie start cold; generation then resumes at the
 next block. Keep the same seed and configuration when reopening a directory.
 

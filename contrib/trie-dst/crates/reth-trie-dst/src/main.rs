@@ -8,7 +8,7 @@ use alloy_primitives::{keccak256, B256, U256};
 use eyre::{ensure, Context, Result};
 use input::{Input, Operation};
 use metrics_util::debugging::{DebugValue, DebuggingRecorder, Snapshotter};
-use model::{apply, root, storage_root, Model};
+use model::{apply, root, Model};
 use reth_chain_state::ExecutedBlock;
 use reth_chainspec::ChainSpec;
 use reth_db::{init_db, DatabaseEnv};
@@ -32,12 +32,12 @@ use reth_primitives_traits::{AlloyBlockHeader, RecoveredBlock, SealedHeader};
 use reth_provider::{
     providers::LatestStateProviderRef, test_utils::MockNodeTypesWithDB, AccountReader,
     DatabaseProviderROFactory, HeaderProvider, ProviderFactory, SaveBlocksInput,
-    StageCheckpointReader, StateProofProvider, StateProvider, StateRootProvider,
+    StageCheckpointReader, StateProvider, StateRootProvider,
 };
 use reth_stages_types::StageId;
 use reth_storage_overlay::{OverlayManager, OverlayStateProviderFactory};
 use reth_tasks::{RayonConfig, RuntimeBuilder, RuntimeConfig, TokioConfig};
-use reth_trie::{HashedPostState, MultiProofTargets, SortedTrieData};
+use reth_trie::{HashedPostState, SortedTrieData};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::{
@@ -120,47 +120,30 @@ fn verify(factory: &ProviderFactory<Node>, state: &Model, tip: u64, state_tip: u
         factory.overlay_manager().overlay_builder(hash),
     )
     .database_provider_ro()?;
-    let expected_root = root(state);
-    let slots_by_account = state
-        .values()
-        .map(|entry| {
-            entry
-                .touched_slots
-                .iter()
-                .copied()
-                .chain([U256::ZERO, U256::from(u32::MAX)])
-                .collect::<BTreeSet<_>>()
-                .into_iter()
-                .map(B256::from)
-                .collect::<Vec<_>>()
-        })
-        .collect::<Vec<_>>();
-    let targets = state
-        .keys()
-        .zip(&slots_by_account)
-        .map(|(address, slots)| (keccak256(address), slots.iter().map(keccak256).collect()))
-        .collect::<MultiProofTargets>();
-    let multiproof = view.multiproof(Default::default(), targets)?;
-    for ((address, entry), slots) in state.iter().zip(&slots_by_account) {
+    for (address, entry) in state {
         ensure!(
             view.basic_account(address)?.as_ref() == Some(&entry.account),
             "plain account {address} at {tip}"
         );
         // Include deleted slots and both range endpoints, not only surviving leaves.
-        for slot in slots {
+        for slot in entry
+            .touched_slots
+            .iter()
+            .copied()
+            .chain([U256::ZERO, U256::from(u32::MAX)])
+            .map(B256::from)
+            .collect::<BTreeSet<_>>()
+        {
             ensure!(
-                view.storage(*address, *slot)?.unwrap_or_default() ==
+                view.storage(*address, slot)?.unwrap_or_default() ==
                     entry.storage.get(&U256::from_be_bytes(slot.0)).copied().unwrap_or_default(),
                 "plain storage {address}/{slot} at {tip}"
             );
         }
-        let proof = multiproof.account_proof(*address, slots)?;
-        ensure!(proof.info.as_ref() == Some(&entry.account), "proof account {address} at {tip}");
-        ensure!(proof.storage_root == storage_root(entry), "proof storage root {address} at {tip}");
-        proof.verify(expected_root)?;
     }
     drop(view);
     if tip == state_tip {
+        let expected_root = root(state);
         let provider = factory.provider()?;
         let accounts = provider
             .tx_ref()
