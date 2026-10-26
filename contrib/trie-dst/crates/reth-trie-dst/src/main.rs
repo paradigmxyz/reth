@@ -281,6 +281,9 @@ fn run(config: &mut Config, snapshotter: &Snapshotter) -> Result<()> {
     };
     if overrides.total_blocks != 0 {
         total_blocks = overrides.total_blocks;
+        // Saved continuations no longer match roots precomputed for the original input.
+        config.expected_roots = None;
+        println!("{}", json!({"input": "restored", "blocks": total_blocks}));
     }
     let journal_path = datadir.join("blocks.jsonl");
     let mut journal = BTreeMap::<u64, JournalBlock>::new();

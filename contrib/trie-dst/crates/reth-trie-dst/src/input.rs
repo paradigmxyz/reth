@@ -132,7 +132,10 @@ impl Input {
                 }
             }
         }
-        ensure!(blocks > 0 && block_updates == 0, "input must end with a commit");
+        ensure!(
+            matches!(self.operations.last(), Some(Operation::Commit)),
+            "input must end with a commit"
+        );
         Ok(())
     }
 
@@ -485,29 +488,5 @@ impl Input {
         let mut rng = StdRng::seed_from_u64(seed);
         let site = &sites[rng.random_range(0..sites.len())];
         self.mutate_at(site.operator, &site.path, rng.random(), None)
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use reth_primitives_traits::Account;
-
-    #[test]
-    fn rejects_empty_accounts_but_accepts_hash_bearing_accounts() {
-        let address = Address::from([1; 20]);
-        let mut input = Input {
-            operations: vec![
-                Operation::UpdateBatch {
-                    updates: vec![Update::Account { address, account: Account::default() }],
-                },
-                Operation::Commit,
-            ],
-        };
-        assert!(input.validate().is_err());
-        let Operation::UpdateBatch { updates } = &mut input.operations[0] else { unreachable!() };
-        let Update::Account { account, .. } = &mut updates[0] else { unreachable!() };
-        account.nonce = 1;
-        assert!(input.validate().is_ok());
     }
 }

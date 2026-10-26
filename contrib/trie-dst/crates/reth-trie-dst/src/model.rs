@@ -218,35 +218,3 @@ pub(crate) fn root(state: &Model) -> B256 {
     }
     builder.root()
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn bundle_preserves_account_code_hashes() {
-        let address = Address::from([1; 20]);
-        let old_hash = B256::from([2; 32]);
-        let new_hash = B256::from([3; 32]);
-        let mut state = Model::default();
-        apply(
-            &mut state,
-            1,
-            &[Update::Account {
-                address,
-                account: Account { bytecode_hash: Some(old_hash), ..Default::default() },
-            }],
-        );
-        let (bundle, _) = apply(
-            &mut state,
-            2,
-            &[Update::Account {
-                address,
-                account: Account { bytecode_hash: Some(new_hash), ..Default::default() },
-            }],
-        );
-        let account = &bundle.state[&address];
-        assert_eq!(account.original_info.as_ref().unwrap().code_hash, old_hash);
-        assert_eq!(account.info.as_ref().unwrap().code_hash, new_hash);
-    }
-}

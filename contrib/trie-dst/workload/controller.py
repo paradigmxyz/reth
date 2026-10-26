@@ -103,6 +103,7 @@ def worker(config):
     idle_budget = 2 * config["workload"]["timeout_secs"] + config["run_secs"]
     deadline = time.monotonic() + idle_budget
     waiting = False
+    expected_blocks = config["workload"]["blocks"]
     try:
         workload = config["workload"] | {"datadir": str(STATE / "data"),
                                          "input_file": str(STATE / "pending-input.json")}
@@ -141,11 +142,15 @@ def worker(config):
                         if event.get("input") == "waiting":
                             waiting = True
                             assertion(True, json.dumps(event), "trie/input/checked", "Sometimes")
+                        if event.get("input") == "restored":
+                            expected_blocks = event["blocks"]
                         if event.get("input") == "injected":
                             waiting = False
+                            # An injection replaces the remaining suffix, rather than appending it.
+                            expected_blocks = event["block"] - 1 + event["blocks"]
                         if event.get("completed"):
                             completed = True
-                            assertion(event.get("blocks") == config["workload"]["blocks"],
+                            assertion(event.get("blocks") == expected_blocks,
                                       json.dumps(event), "trie/input/completed")
                         if event.get("input") == "injected":
                             assertion(True, json.dumps(event), "trie/input/injected", "Sometimes")
