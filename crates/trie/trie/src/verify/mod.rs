@@ -40,12 +40,12 @@ pub use storage::{StorageJob, StorageWorker};
 /// Findings use a bounded channel shared by account and storage producers, so a slow consumer
 /// applies backpressure without buffering an entire storage trie while waiting for its root.
 #[derive(Debug)]
-pub struct Verifier<T: TrieCursor, H, S> {
+pub struct Verifier<T: TrieCursor, H> {
     events: Receiver<Result<Output, StateRootError>>,
     // The sole sender is dropped to broadcast cancellation to every producer.
     cancel: Option<Sender<()>>,
     // Retain account cursors until all producers have joined, before backing transactions drop.
-    background: Option<JoinHandle<AccountVerifier<T, H, S>>>,
+    background: Option<JoinHandle<AccountVerifier<T, H>>>,
 }
 
 const FINDINGS_CAPACITY: usize = 1024;
@@ -53,26 +53,23 @@ const FINDINGS_CAPACITY: usize = 1024;
 const ACCOUNT_UPDATE_THRESHOLD: usize = 1024;
 
 /// Default maximum number of storage roots computed or in flight ahead of the account walk.
-pub const DEFAULT_STORAGE_ROOT_LIMIT: usize = 25_000_000;
+pub const DEFAULT_STORAGE_ROOT_LIMIT: usize = 1024;
 
-impl<T, H, S> Verifier<T, H, S>
+impl<T, H> Verifier<T, H>
 where
     T: TrieCursor + Send + 'static,
     H: HashedCursor<Value = Account> + Send + 'static,
-    S: HashedStorageCursor<Value = U256> + Send + 'static,
 {
     /// Starts verification and its background storage root computation.
     ///
     /// - `trie` reads the account trie table.
-    /// - `accounts` yields account leaves in ascending address order, including default accounts
-    ///   for addresses with hashed storage but no account row.
+    /// - `accounts` reads the hashed accounts table in ascending address order.
     /// - `storage_addresses` yields a job for each address present in hashed storage or stored
     ///   storage tries exactly once, in ascending address order, including addresses without an
     ///   account row. Jobs with hashed storage must request a root even without an account row. It
     ///   is walked on a background thread to schedule storage work ahead of `accounts`.
-    /// - `storage` reads the hashed storage table.
-    /// - `storage_root_limit` bounds account-backed storage jobs whose roots have not been
-    ///   consumed.
+    /// - `storage_root_limit` bounds storage jobs whose requested roots have not been consumed,
+    ///   including storage without a hashed account row.
     /// - `storage_workers` sets the storage parallelism, one thread per worker.
     ///
     /// Storage cursors may start at any hashed address. All cursors must read the same database
@@ -92,7 +89,6 @@ where
     pub fn new<L, W, C, TX>(
         trie: T,
         accounts: H,
-        storage: S,
         storage_addresses: L,
         storage_workers: Vec<StorageWorker<W, C, TX>>,
         storage_root_limit: usize,
@@ -105,12 +101,12 @@ where
     {
         let account_verifier = SingleVerifier::new(None, trie)?;
         assert!(!storage_workers.is_empty(), "verification requires storage workers");
+        assert!(storage_root_limit > 0, "storage root limit must be positive");
         let (events_tx, events) = crossbeam_channel::bounded(FINDINGS_CAPACITY);
         let (cancel, cancel_rx) = crossbeam_channel::bounded(0);
-        let context = WorkerContext::new(events_tx, cancel_rx, storage_root_limit);
+        let context = WorkerContext::new(events_tx, cancel_rx);
         let mut account = AccountVerifier {
             accounts,
-            storage,
             account_verifier,
             hash_builder: crate::HashBuilder::default().with_updates(true),
             account_rlp: Vec::with_capacity(crate::TRIE_ACCOUNT_RLP_MAX_SIZE),
@@ -120,7 +116,12 @@ where
             .name("trie-accounts".into())
             .spawn(move || {
                 let _entered = span.enter();
-                match StoragePipeline::spawn(storage_addresses, storage_workers, context.clone()) {
+                match StoragePipeline::spawn(
+                    storage_addresses,
+                    storage_workers,
+                    context.clone(),
+                    storage_root_limit,
+                ) {
                     Ok(mut pipeline) => {
                         // Report failures before joining: the consumer cancels all producers on
                         // error.
@@ -136,7 +137,7 @@ where
     }
 }
 
-impl<T: TrieCursor, H, S> Verifier<T, H, S> {
+impl<T: TrieCursor, H> Verifier<T, H> {
     fn stop(&mut self) {
         self.cancel.take();
         if let Some(background) = self.background.take() &&
@@ -148,7 +149,7 @@ impl<T: TrieCursor, H, S> Verifier<T, H, S> {
     }
 }
 
-impl<T: TrieCursor, H, S> Iterator for Verifier<T, H, S> {
+impl<T: TrieCursor, H> Iterator for Verifier<T, H> {
     type Item = Result<Output, StateRootError>;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -167,7 +168,7 @@ impl<T: TrieCursor, H, S> Iterator for Verifier<T, H, S> {
     }
 }
 
-impl<T: TrieCursor, H, S> Drop for Verifier<T, H, S> {
+impl<T: TrieCursor, H> Drop for Verifier<T, H> {
     fn drop(&mut self) {
         self.stop();
     }
@@ -175,37 +176,51 @@ impl<T: TrieCursor, H, S> Drop for Verifier<T, H, S> {
 
 /// Account producer state, returned from its thread so cursor lifetimes remain tied to `Verifier`.
 #[derive(Debug)]
-struct AccountVerifier<T: TrieCursor, H, S> {
+struct AccountVerifier<T: TrieCursor, H> {
     accounts: H,
-    storage: S,
     account_verifier: SingleVerifier<DepthFirstTrieIterator<T>>,
     hash_builder: crate::HashBuilder,
     account_rlp: Vec<u8>,
 }
 
-impl<T, H, S> AccountVerifier<T, H, S>
+impl<T, H> AccountVerifier<T, H>
 where
     T: TrieCursor,
     H: HashedCursor<Value = Account>,
-    S: HashedStorageCursor<Value = U256>,
 {
     fn run(
         &mut self,
         pipeline: &mut StoragePipeline,
         context: &WorkerContext,
     ) -> Result<(), StateRootError> {
-        let mut next = self.accounts.seek(B256::ZERO)?;
-        while let Some((address, account)) = next {
+        let mut next_account = self.accounts.seek(B256::ZERO)?;
+        loop {
             if context.is_cancelled() {
                 return Ok(());
             }
-            // Workers only send roots for non-empty storage.
-            self.storage.set_hashed_address(address);
-            let root = if self.storage.is_storage_empty()? {
-                alloy_consensus::EMPTY_ROOT_HASH
-            } else {
-                let Some(root) = pipeline.root(address)? else { return Ok(()) };
-                root
+            // The scheduler announces storage addresses in order before dispatching their jobs.
+            let next_root = pipeline.next_root(next_account.as_ref().map(|(address, _)| *address));
+            if context.is_cancelled() {
+                return Ok(());
+            }
+            let (address, root) = match (next_account.as_ref(), next_root) {
+                (_, Some(storage)) => storage,
+                (Some((address, _)), None) => (*address, alloy_consensus::EMPTY_ROOT_HASH),
+                (None, None) => break,
+            };
+            let account = match next_account.take() {
+                Some((key, account)) if key == address => {
+                    next_account = self.accounts.next()?;
+                    account
+                }
+                next => {
+                    next_account = next;
+                    // Empty storage must not create a default account leaf.
+                    if root == alloy_consensus::EMPTY_ROOT_HASH {
+                        continue;
+                    }
+                    Account::default()
+                }
             };
             self.account_rlp.clear();
             account.into_trie_account(root).encode(&mut self.account_rlp);
@@ -215,7 +230,6 @@ where
             {
                 return Ok(());
             }
-            next = self.accounts.next()?;
         }
         // Computing the root flushes the remaining branch node updates.
         self.hash_builder.root();
@@ -323,7 +337,6 @@ mod tests {
         let verifier = Verifier::new(
             factory.account_trie_cursor().unwrap(),
             NoopHashedCursor::<Account>::default(),
-            NoopHashedCursor::<U256>::default(),
             std::iter::empty(),
             vec![StorageWorker {
                 trie: NoopStorageTrieCursor::default(),
@@ -361,7 +374,6 @@ mod tests {
                 let mut verifier = Verifier::new(
                     crate::trie_cursor::noop::NoopAccountTrieCursor::default(),
                     accounts.hashed_account_cursor().unwrap(),
-                    FailingStorage { panic },
                     std::iter::once(Ok(StorageJob { address: B256::ZERO, root_required: true })),
                     vec![StorageWorker {
                         trie: NoopStorageTrieCursor::default(),
@@ -386,6 +398,95 @@ mod tests {
             });
             done_rx.recv_timeout(Duration::from_secs(10)).unwrap();
             task.join().unwrap();
+        }
+    }
+
+    #[test]
+    fn empty_storage_roots_do_not_create_account_leaves() {
+        let (done_tx, done_rx) = crossbeam_channel::bounded(1);
+        let task = thread::spawn(move || {
+            let (events, outputs) = crossbeam_channel::bounded(FINDINGS_CAPACITY);
+            let (_cancel, cancel_rx) = crossbeam_channel::bounded(0);
+            let context = WorkerContext::new(events, cancel_rx);
+            let jobs = [1, 2, 3]
+                .into_iter()
+                .map(|n| Ok(StorageJob { address: B256::repeat_byte(n), root_required: true }));
+            let mut pipeline = StoragePipeline::spawn(
+                jobs,
+                vec![StorageWorker {
+                    trie: NoopStorageTrieCursor::default(),
+                    hashed: NoopHashedCursor::<U256>::default(),
+                    tx: (),
+                }],
+                context.clone(),
+                1,
+            )
+            .unwrap();
+            let mut accounts = AccountVerifier {
+                accounts: NoopHashedCursor::<Account>::default(),
+                account_verifier: SingleVerifier::new(
+                    None,
+                    crate::trie_cursor::noop::NoopAccountTrieCursor::default(),
+                )
+                .unwrap(),
+                hash_builder: crate::HashBuilder::default().with_updates(true),
+                account_rlp: Vec::new(),
+            };
+            accounts.run(&mut pipeline, &context).unwrap();
+            pipeline.finish();
+            assert_eq!(accounts.hash_builder.root(), alloy_consensus::EMPTY_ROOT_HASH);
+            assert!(outputs.is_empty());
+            done_tx.send(()).unwrap();
+        });
+        done_rx.recv_timeout(Duration::from_secs(10)).unwrap();
+        task.join().unwrap();
+    }
+
+    #[test]
+    fn scheduler_error_and_panic_stop_scan_wait_and_fuse_iterator() {
+        for panic in [false, true] {
+            for root_first in [false, true] {
+                let (done_tx, done_rx) = crossbeam_channel::bounded(1);
+                let task = thread::spawn(move || {
+                    let mut step = 0;
+                    let jobs = std::iter::from_fn(move || {
+                        step += 1;
+                        if root_first && step == 1 {
+                            return Some(Ok(StorageJob {
+                                address: B256::ZERO,
+                                root_required: true,
+                            }));
+                        }
+                        assert!(!panic, "address scan failed");
+                        Some(Err(DatabaseError::Other("address scan failed".into())))
+                    });
+                    let mut verifier = Verifier::new(
+                        crate::trie_cursor::noop::NoopAccountTrieCursor::default(),
+                        NoopHashedCursor::<Account>::default(),
+                        jobs,
+                        vec![StorageWorker {
+                            trie: NoopStorageTrieCursor::default(),
+                            hashed: NoopHashedCursor::<U256>::default(),
+                            tx: (),
+                        }],
+                        1,
+                    )
+                    .unwrap();
+                    assert_eq!(
+                        verifier.next().unwrap().unwrap_err().to_string(),
+                        if panic {
+                            "trie verification thread panicked: address scan failed"
+                        } else {
+                            "address scan failed"
+                        }
+                    );
+                    assert!(verifier.next().is_none());
+                    drop(verifier);
+                    done_tx.send(()).unwrap();
+                });
+                done_rx.recv_timeout(Duration::from_secs(10)).unwrap();
+                task.join().unwrap();
+            }
         }
     }
 

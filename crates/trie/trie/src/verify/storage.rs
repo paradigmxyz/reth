@@ -7,6 +7,7 @@ use crate::{
     trie_cursor::{depth_first, noop::NoopStorageTrieCursor, TrieStorageCursor},
     StorageRootProgress,
 };
+use alloy_consensus::EMPTY_ROOT_HASH;
 use alloy_primitives::{B256, U256};
 use crossbeam_channel::{Receiver, Sender};
 use reth_execution_errors::StateRootError;
@@ -30,35 +31,32 @@ where
     T: TrieStorageCursor,
     H: HashedStorageCursor<Value = U256>,
 {
-    /// Verifies the storage of each address received from `jobs`, sending roots of non-empty
-    /// storages to `roots` and findings through `context`. Returns once `jobs` is exhausted or
+    /// Verifies the storage of each address received from `jobs`, completing requested roots
+    /// and reporting findings through `context`. Returns once `jobs` is exhausted or
     /// verification is cancelled.
     pub(super) fn run(
         mut self,
-        jobs: Receiver<StorageJob>,
-        roots: &Sender<(B256, B256)>,
+        jobs: Receiver<(B256, Option<Sender<B256>>)>,
         context: &WorkerContext,
     ) -> Result<(), StateRootError> {
         loop {
-            let Some(job) = context.receive(&jobs) else { return Ok(()) };
-            let address = job.address;
+            let Some((address, root_sender)) = context.receive(&jobs) else { return Ok(()) };
             self.hashed.set_hashed_address(address);
             self.trie.set_hashed_address(address);
-            // The account side assumes `EMPTY_ROOT_HASH` for empty storage and doesn't wait for a
-            // root, so only leftover trie nodes are reported.
-            if self.hashed.is_storage_empty()? {
+            let root = if self.hashed.is_storage_empty()? {
                 let mut verifier = SingleVerifier::new(Some(address), &mut self.trie)?;
                 if !verifier.finalize(&mut |output| context.report_one(output))? {
                     return Ok(());
                 }
-                if job.root_required {
-                    context.root_window.release();
-                }
+                EMPTY_ROOT_HASH
             } else {
                 let Some(root) = self.verify_storage(address, context)? else { return Ok(()) };
-                if job.root_required && !context.send(roots, (address, root)) {
-                    return Ok(());
-                }
+                root
+            };
+            if let Some(sender) = root_sender &&
+                !context.send(&sender, root)
+            {
+                return Ok(());
             }
         }
     }
