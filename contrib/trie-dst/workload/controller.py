@@ -5,6 +5,7 @@ import json
 import os
 import random
 import select
+import shutil
 from pathlib import Path
 import signal
 import subprocess
@@ -77,6 +78,11 @@ def collect(destination, progress=False):
     destination.write_text("".join(line + "\n" for line in records))
     if progress:
         cursor.write_text(json.dumps(offsets))
+    else:
+        for name in ("run.log", "controller.log", "done.json", "data/blocks.jsonl"):
+            source = STATE / name
+            if source.exists():
+                shutil.copyfile(source, destination.parent / ("reth-trie-dst-" + source.name))
 
 
 def native(hook, request):

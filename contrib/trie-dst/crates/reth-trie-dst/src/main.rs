@@ -41,7 +41,7 @@ use reth_trie::{HashedPostState, SortedTrieData};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::{
-    collections::{BTreeMap, BTreeSet},
+    collections::{btree_map::Entry, BTreeMap, BTreeSet},
     fs::{self, OpenOptions},
     io::{Read, Write},
     os::unix::{fs::MetadataExt, process::CommandExt},
@@ -368,7 +368,8 @@ fn run(config: &mut Config, snapshotter: &Snapshotter) -> Result<()> {
     ensure!(recovered_root == parent.state_root(), "recovered root at {base}");
     println!("{}", json!({"recovery": "complete", "head": base, "root": recovered_root}));
     let mut blocks = Vec::<ExecutedBlock<EthPrimitives>>::new();
-    let mut snapshots = vec![state.clone()];
+    // Replay journal updates instead of retaining a full model for every block.
+    let mut persisted_state = state.clone();
     let timeout = Duration::from_secs(config.timeout_secs);
     let (request_tx, request_rx) = mpsc::sync_channel::<SaveBlocksInput>(1);
     let (ack_tx, ack_rx) = mpsc::sync_channel(1);
@@ -451,6 +452,18 @@ fn run(config: &mut Config, snapshotter: &Snapshotter) -> Result<()> {
             if let Some(result) = result {
                 result?;
                 pending_save = None;
+                for number in (db_tip + 1)..=next_db {
+                    let block = journal
+                        .get(&number)
+                        .ok_or_else(|| eyre::eyre!("missing journal block {number}"))?;
+                    for operation in &block.operations {
+                        if let Operation::UpdateBatch { updates } = operation {
+                            for update in updates {
+                                update.apply_to_model(&mut persisted_state);
+                            }
+                        }
+                    }
+                }
                 db_tip = next_db;
                 state_tip = next_state;
                 commits += 1;
@@ -458,7 +471,7 @@ fn run(config: &mut Config, snapshotter: &Snapshotter) -> Result<()> {
                 manager.evict_cached_changesets(
                     db_tip.saturating_sub(CHANGESET_CACHE_RETENTION_BLOCKS),
                 );
-                verify(&factory, &snapshots[(db_tip - base) as usize], db_tip, state_tip)?;
+                verify(&factory, &persisted_state, db_tip, state_tip)?;
                 manager.remove_blocks(
                     blocks
                         .iter()
@@ -534,20 +547,22 @@ fn run(config: &mut Config, snapshotter: &Snapshotter) -> Result<()> {
             continue;
         }
         let number = head + 1;
-        let operations = if let Some(block) = journal.get(&number) {
-            block.operations.clone()
-        } else {
-            let block = overrides
-                .blocks
-                .get(&number)
-                .map_or_else(|| input_blocks[number as usize - 1].to_vec(), Clone::clone);
-            let journal_block = JournalBlock { number, operations: block };
-            let record = serde_json::to_vec(&journal_block)?;
-            journal_file.write_all(b"\n")?;
-            journal_file.write_all(&record)?;
-            journal_file.write_all(b"\n")?;
-            journal_block.operations
+        let block = match journal.entry(number) {
+            Entry::Occupied(entry) => entry.into_mut(),
+            Entry::Vacant(entry) => {
+                let block = overrides
+                    .blocks
+                    .get(&number)
+                    .map_or_else(|| input_blocks[number as usize - 1].to_vec(), Clone::clone);
+                let journal_block = JournalBlock { number, operations: block };
+                let record = serde_json::to_vec(&journal_block)?;
+                journal_file.write_all(b"\n")?;
+                journal_file.write_all(&record)?;
+                journal_file.write_all(b"\n")?;
+                entry.insert(journal_block)
+            }
         };
+        let operations = block.operations.clone();
         let updates_input = operations
             .iter()
             .flat_map(|op| match op {
@@ -712,7 +727,6 @@ fn run(config: &mut Config, snapshotter: &Snapshotter) -> Result<()> {
         manager.insert_block(executed.clone());
         publish_sparse_trie(&pending, manager, parent.hash(), outcome.state_root);
         blocks.push(executed);
-        snapshots.push(state.clone());
     }
     drop(request_tx);
     writer.join().map_err(|_| eyre::eyre!("persistence worker panicked"))?;
