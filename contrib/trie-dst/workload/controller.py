@@ -148,6 +148,11 @@ def worker(config):
                             waiting = False
                             # An injection replaces the remaining suffix, rather than appending it.
                             expected_blocks = event["block"] - 1 + event["blocks"]
+                        if event.get("input") in ("injected", "restored"):
+                            # A shorter suffix can make pending crash targets unreachable.
+                            plan = [block for block in plan if block <= expected_blocks]
+                            require_persisted = (bool(plan or require_persisted) and expected_blocks >=
+                                                 config["workload"]["persistence_threshold"] + 4)
                         if event.get("completed"):
                             completed = True
                             assertion(event.get("blocks") == expected_blocks,
@@ -201,7 +206,7 @@ def worker(config):
         assertion(recovered_persisted > 0, f"post-crash recovery from persisted head: {recovered_persisted}",
                   "trie/recovery/persisted")
     (STATE / "done.json").write_text(json.dumps({"ok": ok, "kills": killed,
-                                               "armed": len(config["kill_blocks"]), "recoveries": recovered,
+                                               "armed": killed + len(plan), "recoveries": recovered,
                                                "persisted_recoveries": recovered_persisted}))
 
 
