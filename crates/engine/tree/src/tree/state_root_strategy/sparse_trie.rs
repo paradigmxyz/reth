@@ -288,6 +288,7 @@ where
     ) {
         let mut total_idle_time = std::time::Duration::ZERO;
         let mut idle_start = Instant::now();
+        let mut restored_storage = reth_execution_types::RestoredStorageTracker::default();
 
         while let Ok(message) = updates.recv() {
             total_idle_time += idle_start.elapsed();
@@ -299,12 +300,16 @@ where
                 StateRootMessage::StateUpdate(state) => {
                     let _span = trace_span!(target: "engine::tree::payload_processor::sparse_trie", "hashing_state_update").entered();
                     let hashed = reth_execution_types::state_update_to_hashed_post_state(&state);
+                    restored_storage.record(&state);
                     SparseTrieTaskMessage::HashedState(hashed)
                 }
                 StateRootMessage::FinishedStateUpdates => {
-                    SparseTrieTaskMessage::FinishedStateUpdates
+                    SparseTrieTaskMessage::FinishedStateUpdates(core::mem::take(
+                        &mut restored_storage,
+                    ))
                 }
                 StateRootMessage::HashedStateUpdate(state) => {
+                    restored_storage.record_hashed(&state);
                     SparseTrieTaskMessage::HashedState(state)
                 }
             };
@@ -597,7 +602,10 @@ where
                 self.on_hashed_state_update(hashed_state);
                 None
             }
-            SparseTrieTaskMessage::FinishedStateUpdates => {
+            SparseTrieTaskMessage::FinishedStateUpdates(restored_storage) => {
+                // Match the block's bundle, which drops slots restored to their pre-block value.
+                // Persistence must not see them as writes.
+                restored_storage.remove_restored(&mut self.final_hashed_state);
                 let hashed_state = Arc::new(core::mem::take(&mut self.final_hashed_state));
                 let _ = self.final_hashed_state_tx.take().unwrap().send(Arc::clone(&hashed_state));
                 self.finished_state_updates = true;
@@ -1644,8 +1652,9 @@ enum SparseTrieTaskMessage {
     HashedState(HashedPostState),
     /// Prefetch proof targets (passed through directly).
     PrefetchProofs(MultiProofTargetsV2),
-    /// Signals that all state updates have been received.
-    FinishedStateUpdates,
+    /// Signals that all state updates have been received, with the block's storage slots to drop
+    /// from the final hashed state.
+    FinishedStateUpdates(reth_execution_types::RestoredStorageTracker),
 }
 
 #[cfg(test)]

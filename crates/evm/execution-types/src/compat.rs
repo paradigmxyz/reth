@@ -3,7 +3,7 @@
 use alloc::vec::Vec;
 use alloy_primitives::{
     keccak256,
-    map::{hash_map::Entry, AddressMap, B256Map, U256Map},
+    map::{hash_map::Entry, AddressMap, B256Map, B256Set, U256Map},
     Address, B256, U256,
 };
 use evm2::{bytecode::Bytecode, evm::AccountInfo};
@@ -318,6 +318,73 @@ pub fn state_update_to_hashed_post_state(update: &StateUpdate) -> HashedPostStat
         }
     }
     hashed_state
+}
+
+/// Tracks the storage slots of a block's streamed [`StateUpdate`]s so the block's hashed state can
+/// drop slots that end the block at their pre-block value.
+///
+/// [`BlockState`] removes such slots from the block's bundle, but hashing each transaction's update
+/// separately keeps them: a slot set by one transaction and restored by a later one stays in the
+/// merged [`HashedPostState`] as a write of its unchanged value. Persistence then treats that
+/// write as a change of the slot.
+#[derive(Debug, Default)]
+pub struct RestoredStorageTracker {
+    /// Hashed slots per hashed address with their pre-block and latest values.
+    slots: B256Map<B256Map<(U256, U256)>>,
+    /// Accounts whose storage was destroyed or wiped in the block, or that arrived pre-hashed.
+    /// Their slots are always kept.
+    skipped: B256Set,
+}
+
+impl RestoredStorageTracker {
+    /// Records one transaction's update, in block order.
+    pub fn record(&mut self, update: &StateUpdate) {
+        for account in &update.accounts {
+            let hashed_address = keccak256(account.address);
+            if account.current.is_none() || account.wiped {
+                self.skip(hashed_address);
+                continue
+            }
+            if self.skipped.contains(&hashed_address) {
+                continue
+            }
+            let slots = self.slots.entry(hashed_address).or_default();
+            for (key, slot) in &account.storage {
+                slots
+                    .entry(keccak256(B256::from(*key)))
+                    .or_insert_with(|| (slot.original_value(), slot.present_value))
+                    .1 = slot.present_value;
+            }
+        }
+    }
+
+    /// Keeps every slot of the accounts in an already hashed update, whose pre-block values are
+    /// unknown.
+    pub fn record_hashed(&mut self, update: &HashedPostState) {
+        for address in update.accounts.keys().chain(update.storages.keys()) {
+            self.skip(*address);
+        }
+    }
+
+    fn skip(&mut self, hashed_address: B256) {
+        self.skipped.insert(hashed_address);
+        self.slots.remove(&hashed_address);
+    }
+
+    /// Removes the slots that ended the block at their pre-block value from `state`.
+    pub fn remove_restored(self, state: &mut HashedPostState) {
+        for (address, slots) in self.slots {
+            let Entry::Occupied(mut storage) = state.storages.entry(address) else { continue };
+            for (slot, (original, present)) in slots {
+                if original == present {
+                    storage.get_mut().storage.remove(&slot);
+                }
+            }
+            if storage.get().is_empty() {
+                storage.remove();
+            }
+        }
+    }
 }
 
 fn without_code(info: &AccountInfo) -> AccountInfo {

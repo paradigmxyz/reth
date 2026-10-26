@@ -757,9 +757,12 @@ mod tests {
             .execute_with_state_hook(&block, move |state| tx.send(state).unwrap())?;
         assert_eq!(without_hook, output);
         let mut streamed = HashedPostState::default();
+        let mut restored = reth_execution_types::RestoredStorageTracker::default();
         for update in rx.try_iter() {
             streamed.extend(reth_execution_types::state_update_to_hashed_post_state(&update));
+            restored.record(&update);
         }
+        restored.remove_restored(&mut streamed);
         let recomputed = HashedPostState::from_bundle_state::<KeccakKeyHasher>(&output.state.state);
         assert_eq!(streamed.into_sorted(), recomputed.into_sorted());
         Ok(output)
