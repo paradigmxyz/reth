@@ -150,7 +150,9 @@ def launch():
         process = subprocess.Popen(
             ["/usr/local/bin/thread-fuzz", "/usr/local/bin/reth-trie-dst",
              "@" + str(STATE / "init.json")], stdout=output, stderr=subprocess.STDOUT)
-        (STATE / "warm.pid").write_text(str(process.pid))
+        tmp = STATE / "warm.pid.tmp"
+        tmp.write_text(str(process.pid))
+        tmp.replace(STATE / "warm.pid")
         code = process.wait()
         tmp = STATE / "warm.exit.tmp"
         tmp.write_text(str(code))
