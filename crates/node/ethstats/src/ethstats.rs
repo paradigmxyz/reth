@@ -16,6 +16,7 @@ use reth_storage_api::{BlockReader, BlockReaderIdExt};
 use reth_transaction_pool::TransactionPool;
 
 use chrono::Local;
+use futures_util::FutureExt;
 use serde_json::Value;
 use std::{
     str::FromStr,
@@ -241,25 +242,28 @@ where
         // Start ping timeout
         let active_ping = self.last_ping.clone();
         let conn_ref = self.conn.clone();
-        tokio::spawn(async move {
-            sleep(PING_TIMEOUT).await;
-            let timed_out = {
-                let mut active = active_ping.lock().await;
-                let timed_out = active.is_some();
-                if timed_out {
-                    *active = None;
-                }
-                timed_out
-            };
+        tokio::spawn(
+            async move {
+                sleep(PING_TIMEOUT).await;
+                let timed_out = {
+                    let mut active = active_ping.lock().await;
+                    let timed_out = active.is_some();
+                    if timed_out {
+                        *active = None;
+                    }
+                    timed_out
+                };
 
-            if timed_out {
-                debug!(target: "ethstats", "Ping timeout");
-                // Clear connection to trigger reconnect
-                if let Some(conn) = conn_ref.write().await.take() {
-                    let _ = conn.close().await;
+                if timed_out {
+                    debug!(target: "ethstats", "Ping timeout");
+                    // Clear connection to trigger reconnect
+                    if let Some(conn) = conn_ref.write().await.take() {
+                        let _ = conn.close().await;
+                    }
                 }
             }
-        });
+            .boxed(),
+        );
 
         Ok(())
     }
@@ -641,7 +645,8 @@ where
                 }
 
                 let _ = shutdown_tx.send(()).await;
-            })
+            }
+            .boxed())
         };
 
         let canonical_stream_handle = {
@@ -649,15 +654,18 @@ where
             let head_tx = head_tx.clone();
             let shutdown_tx = shutdown_tx.clone();
 
-            tokio::spawn(async move {
-                while let Some(head) = canonical_stream.next().await {
-                    if head_tx.send(head).await.is_err() {
-                        break;
+            tokio::spawn(
+                async move {
+                    while let Some(head) = canonical_stream.next().await {
+                        if head_tx.send(head).await.is_err() {
+                            break;
+                        }
                     }
-                }
 
-                let _ = shutdown_tx.send(()).await;
-            })
+                    let _ = shutdown_tx.send(()).await;
+                }
+                .boxed(),
+            )
         };
 
         let mut pending_tx_receiver = self.pool.pending_transactions_listener();

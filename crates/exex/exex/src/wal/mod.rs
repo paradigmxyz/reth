@@ -23,7 +23,7 @@ use alloy_eips::BlockNumHash;
 use alloy_primitives::B256;
 use parking_lot::{RwLock, RwLockReadGuard};
 use reth_exex_types::ExExNotification;
-use reth_tracing::tracing::{debug, instrument};
+use tracing::{debug, instrument};
 
 /// WAL is a write-ahead log (WAL) that stores the notifications sent to ExExes.
 ///

@@ -21,7 +21,6 @@ use reth_libmdbx::{
     MaxReadTransactionDuration, Mode, PageSize, SyncMode, RO, RW,
 };
 use reth_storage_errors::db::LogLevel;
-use reth_tracing::tracing::error;
 use rustc_hash::FxHashMap;
 use std::{
     ops::{Deref, Range},
@@ -29,6 +28,7 @@ use std::{
     sync::Arc,
     time::{SystemTime, UNIX_EPOCH},
 };
+use tracing::error;
 use tx::Tx;
 
 pub mod cursor;
@@ -253,11 +253,49 @@ pub struct DatabaseEnv {
     /// More generally, do not dynamically create, re-open, or drop tables at
     /// runtime. It's better to perform table creation and migration only once
     /// at startup.
-    dbis: Arc<FxHashMap<&'static str, ffi::MDBX_dbi>>,
+    dbis: Arc<TableDbis>,
     /// Cache for metric handles. If `None`, metrics are not recorded.
     metrics: Option<Arc<DatabaseEnvMetrics>>,
     /// Write lock for when dealing with a read-write environment.
     _lock_file: Option<StorageLock>,
+}
+
+/// MDBX DBIs of the tables tracked by a [`DatabaseEnv`].
+#[derive(Debug, Clone)]
+pub(crate) struct TableDbis {
+    /// DBIs of [`Tables`] entries, indexed by the entry's position in [`Tables::ALL`].
+    tables: [Option<ffi::MDBX_dbi>; Tables::COUNT],
+    /// DBIs of tables defined outside of [`Tables`], by name.
+    other: FxHashMap<&'static str, ffi::MDBX_dbi>,
+}
+
+impl Default for TableDbis {
+    fn default() -> Self {
+        Self { tables: [None; Tables::COUNT], other: FxHashMap::default() }
+    }
+}
+
+impl TableDbis {
+    /// Returns the tracked DBI of a table, which is looked up by `table` if it is a [`Tables`]
+    /// entry and by `name` otherwise.
+    ///
+    /// Returns `None` if the table is not tracked.
+    pub(crate) fn get(&self, table: Option<Tables>, name: &str) -> Option<ffi::MDBX_dbi> {
+        match table {
+            Some(table) => self.tables[table as usize],
+            None => self.other.get(name).copied(),
+        }
+    }
+
+    /// Tracks the DBI of the table with the given name.
+    fn insert(&mut self, name: &'static str, dbi: ffi::MDBX_dbi) {
+        match name.parse::<Tables>() {
+            Ok(table) => self.tables[table as usize] = Some(dbi),
+            Err(_) => {
+                self.other.insert(name, dbi);
+            }
+        }
+    }
 }
 
 impl Database for DatabaseEnv {
@@ -450,7 +488,7 @@ impl DatabaseEnv {
                     "External process has a long-lived database transaction that grows the database file. \
                      Use shorter-lived read transactions or shut down the node."
                 };
-                reth_tracing::tracing::warn!(
+                tracing::warn!(
                     target: "storage::db::mdbx",
                     ?process_id,
                     ?thread_id,
@@ -575,7 +613,9 @@ impl DatabaseEnv {
         // Note: This is okay because self has mutable access here and `DatabaseEnv` must be Arc'ed
         // before it can be shared.
         let dbis = Arc::make_mut(&mut self.dbis);
-        dbis.extend(handles);
+        for (name, dbi) in handles {
+            dbis.insert(name, dbi);
+        }
 
         Ok(())
     }
@@ -591,7 +631,9 @@ impl DatabaseEnv {
         if let Some(db) = Arc::get_mut(self) {
             // Note: The db is unique and the dbis as well, and they can also be cloned.
             let dbis = Arc::make_mut(&mut db.dbis);
-            dbis.extend(handles);
+            for (name, dbi) in handles {
+                dbis.insert(name, dbi);
+            }
         }
         Ok(())
     }
@@ -692,7 +734,8 @@ mod tests {
     use reth_db_api::{
         cursor::{DbDupCursorRO, DbDupCursorRW, ReverseWalker, Walker},
         models::{AccountBeforeTx, IntegerList, ShardedKey},
-        table::{Encode, Table},
+        table::{Encode, Table, TableInfo},
+        tables_to_generic,
     };
     use reth_libmdbx::Error;
     use reth_primitives_traits::{Account, StorageEntry};
@@ -1657,5 +1700,57 @@ mod tests {
             let list400 = IntegerList::new_pre_sorted([400u64]);
             assert_eq!(list400, list);
         }
+    }
+
+    #[test]
+    fn db_tracks_table_dbis() {
+        #[derive(Debug)]
+        struct CustomTable;
+
+        impl Table for CustomTable {
+            const NAME: &'static str = "CustomTable";
+            const DUPSORT: bool = false;
+
+            type Key = u64;
+            type Value = u64;
+        }
+
+        impl TableInfo for CustomTable {
+            fn name(&self) -> &'static str {
+                Self::NAME
+            }
+
+            fn is_dupsort(&self) -> bool {
+                Self::DUPSORT
+            }
+        }
+
+        impl TableSet for CustomTable {
+            fn tables() -> Box<dyn Iterator<Item = Box<dyn TableInfo>>> {
+                Box::new(std::iter::once(Box::new(Self) as Box<dyn TableInfo>))
+            }
+        }
+
+        let (_tempdir, mut env) = create_test_db(DatabaseEnvKind::RW);
+        env.create_and_track_tables_for::<CustomTable>().expect(ERROR_TABLE_CREATION);
+        let env = env.with_metrics();
+
+        let tx = env.tx_mut().expect(ERROR_INIT_TX);
+        for table in Tables::ALL {
+            let dbi = tables_to_generic!(table, |T| tx.get_dbi::<T>()).unwrap();
+            assert_eq!(env.dbis.get(Some(*table), table.name()), Some(dbi), "{table}");
+            assert_eq!(tx.inner().open_db(Some(table.name())).unwrap().dbi(), dbi, "{table}");
+        }
+
+        let dbi = tx.get_dbi::<CustomTable>().unwrap();
+        assert_eq!(env.dbis.get(None, CustomTable::NAME), Some(dbi));
+        assert_eq!(tx.inner().open_db(Some(CustomTable::NAME)).unwrap().dbi(), dbi);
+        tx.put::<CustomTable>(1, 2).expect(ERROR_PUT);
+        tx.cursor_write::<CustomTable>().unwrap().upsert(3, &4).expect(ERROR_UPSERT);
+        tx.commit().expect(ERROR_COMMIT);
+
+        let tx = env.tx().expect(ERROR_INIT_TX);
+        assert_eq!(tx.get::<CustomTable>(1).expect(ERROR_GET), Some(2));
+        assert_eq!(tx.get::<CustomTable>(3).expect(ERROR_GET), Some(4));
     }
 }
