@@ -106,14 +106,25 @@ def alive(pid):
         return False
 
 
-def barrier(message, expected, timeout=1):
+def barrier(message, expected, timeout=1, process=None):
     with tempfile.TemporaryDirectory(dir=STATE) as directory:
         with socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM) as connection:
             connection.bind(str(Path(directory) / "reply"))
-            connection.settimeout(timeout)
+            deadline = time.monotonic() + timeout
             connection.sendto(message.encode(), str(STATE / "init.sock"))
-            if connection.recv(128) != expected:
-                raise RuntimeError("invalid initialization barrier response")
+            while True:
+                connection.settimeout(max(0.001, min(0.1, deadline - time.monotonic())))
+                try:
+                    response = connection.recv(128)
+                except TimeoutError:
+                    if process is not None and (code := process.poll()) is not None:
+                        raise RuntimeError(f"warm worker exited during handshake: exit={code}")
+                    if time.monotonic() >= deadline:
+                        raise
+                    continue
+                if response != expected:
+                    raise RuntimeError("invalid initialization barrier response")
+                return
 
 
 class WarmProcess:
@@ -262,7 +273,7 @@ def worker(config):
                     output.flush()
                     try:
                         barrier(str(workload_path), b"started",
-                                timeout=max(0.001, deadline - time.monotonic()))
+                                timeout=max(0.001, deadline - time.monotonic()), process=process)
                     except (OSError, RuntimeError) as error:
                         raise RuntimeError(warm_failure(f"warm start handshake failed: {error}")) from error
                     warm = False
