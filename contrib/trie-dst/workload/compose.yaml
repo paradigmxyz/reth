@@ -4,6 +4,8 @@ services:
     pull_policy: never
     container_name: reth-trie-dst
     privileged: true
+    environment:
+      BEDROCK_COVERAGE_DIR: /bedrock/coverage
     volumes:
       - /bedrock/in:/bedrock/in:ro
       - /bedrock/out:/bedrock/out
