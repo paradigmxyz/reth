@@ -1,6 +1,7 @@
 //! Standalone bootnode command
 
 use clap::Parser;
+use futures::FutureExt;
 use reth_cli_util::{get_secret_key, load_secret_key::rng_secret_key};
 use reth_discv4::{DiscoveryUpdate, Discv4, Discv4Config};
 use reth_discv5::{
@@ -110,20 +111,23 @@ impl Command {
             log_discv5_enr(&discv5);
 
             // A dedicated task forwards discv4 frames to their ingress and logs discv5 sessions.
-            let forwarder = tokio::spawn(async move {
-                while let Some(event) = updates.recv().await {
-                    match event {
-                        Event::UnrecognizedFrame(frame) => {
-                            ingress.handle_packet(&frame.packet, frame.src_address).await
+            let forwarder = tokio::spawn(
+                async move {
+                    while let Some(event) = updates.recv().await {
+                        match event {
+                            Event::UnrecognizedFrame(frame) => {
+                                ingress.handle_packet(&frame.packet, frame.src_address).await
+                            }
+                            Event::SessionEstablished(enr, _) => {
+                                info!("(Discv5) new peer added, peer_id={:?}", enr.id())
+                            }
+                            _ => {}
                         }
-                        Event::SessionEstablished(enr, _) => {
-                            info!("(Discv5) new peer added, peer_id={:?}", enr.id())
-                        }
-                        _ => {}
                     }
+                    info!("(Discv5) update stream ended.");
                 }
-                info!("(Discv5) update stream ended.");
-            });
+                .boxed(),
+            );
 
             (discv4, discv4_service, Some(discv5), Some(forwarder))
         } else {

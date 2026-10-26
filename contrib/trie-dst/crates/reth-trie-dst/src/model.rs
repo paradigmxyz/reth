@@ -6,25 +6,25 @@ use alloy_primitives::{
     Address, B256, KECCAK256_EMPTY, U256,
 };
 use alloy_trie::{HashBuilder, Nibbles, TrieAccount};
+use evm2::evm::AccountInfo;
 use rand::{rngs::StdRng, Rng};
 use reth_primitives_traits::Account;
-use reth_trie::{HashedPostState, HashedStorage};
-use revm::{database::BundleState, state::AccountInfo};
+use reth_trie::{bundle_state::BundleState, HashedPostState, HashedStorage};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 
 #[derive(Clone, Debug, Default)]
-pub struct ModelAccount {
+pub(crate) struct ModelAccount {
     pub account: Account,
     pub storage: BTreeMap<U256, U256>,
     hashed_storage: BTreeMap<B256, Vec<u8>>,
     pub touched_slots: BTreeSet<U256>,
 }
 
-pub type Model = BTreeMap<Address, ModelAccount>;
+pub(crate) type Model = BTreeMap<Address, ModelAccount>;
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub enum Update {
+pub(crate) enum Update {
     Account { address: Address, account: Account },
     Storage { address: Address, slot: U256, value: U256 },
 }
@@ -72,15 +72,16 @@ impl Update {
     }
 }
 
-pub fn random_address(rng: &mut impl Rng) -> Address {
+pub(crate) fn random_address(rng: &mut impl Rng) -> Address {
     Address::from_word(B256::from(U256::from(rng.random::<u32>())))
 }
 
-pub fn random_slot(rng: &mut impl Rng) -> U256 {
+pub(crate) fn random_slot(rng: &mut impl Rng) -> U256 {
     U256::from(rng.random::<u32>())
 }
 
-pub fn generate(rng: &mut StdRng, state: &Model, updates: usize) -> Vec<Update> {
+#[allow(clippy::clone_on_copy, reason = "Account is not Copy with account-ext enabled.")]
+pub(crate) fn generate(rng: &mut StdRng, state: &Model, updates: usize) -> Vec<Update> {
     let mut state = state.clone();
     let mut addresses = state.keys().copied().collect::<Vec<_>>();
     (0..updates)
@@ -94,7 +95,7 @@ pub fn generate(rng: &mut StdRng, state: &Model, updates: usize) -> Vec<Update> 
                 };
             let operation = if !state.contains_key(&address) || rng.random_ratio(1, 4) {
                 let mut account =
-                    state.get(&address).map(|entry| entry.account.to_owned()).unwrap_or_default();
+                    state.get(&address).map(|entry| entry.account.clone()).unwrap_or_default();
                 account.nonce += 1;
                 account.balance = U256::from(rng.random_range(1..=1_000_000u64));
                 Update::Account { address, account }
@@ -121,7 +122,8 @@ pub fn generate(rng: &mut StdRng, state: &Model, updates: usize) -> Vec<Update> 
         .collect()
 }
 
-pub fn apply(
+#[allow(clippy::clone_on_copy, reason = "Account is not Copy with account-ext enabled.")]
+pub(crate) fn apply(
     state: &mut Model,
     number: u64,
     operations: &[Update],
@@ -193,7 +195,7 @@ pub fn apply(
     (bundle.build(), stream)
 }
 
-pub fn storage_root(account: &ModelAccount) -> B256 {
+pub(crate) fn storage_root(account: &ModelAccount) -> B256 {
     let mut builder = HashBuilder::default();
     for (key, value) in &account.hashed_storage {
         builder.add_leaf(Nibbles::unpack(*key), value);
@@ -201,12 +203,12 @@ pub fn storage_root(account: &ModelAccount) -> B256 {
     builder.root()
 }
 
-pub fn root(state: &Model) -> B256 {
+#[allow(clippy::clone_on_copy, reason = "Account is not Copy with account-ext enabled.")]
+pub(crate) fn root(state: &Model) -> B256 {
     let leaves = state
         .iter()
         .map(|(address, entry)| {
-            let account: TrieAccount =
-                entry.account.to_owned().into_trie_account(storage_root(entry));
+            let account: TrieAccount = entry.account.clone().into_trie_account(storage_root(entry));
             (keccak256(address), alloy_rlp::encode(account))
         })
         .collect::<BTreeMap<_, _>>();

@@ -9,33 +9,33 @@ use std::collections::BTreeSet;
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct Input {
+pub(crate) struct Input {
     pub operations: Vec<Operation>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct StorageHint {
+pub(crate) struct StorageHint {
     pub address: Address,
     pub slot: U256,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
-pub enum Operation {
+pub(crate) enum Operation {
     UpdateBatch { updates: Vec<Update> },
     PrewarmBatch { accounts: Vec<Address>, storages: Vec<StorageHint> },
     Commit,
 }
 
 #[derive(Serialize)]
-pub struct MutationSite {
+pub(crate) struct MutationSite {
     pub operator: &'static str,
     pub path: Vec<String>,
 }
 
 impl Input {
-    pub fn generate(seed: u64, blocks: u64, updates: usize) -> Self {
+    pub(crate) fn generate(seed: u64, blocks: u64, updates: usize) -> Self {
         let mut state = Model::default();
         let mut operations = Vec::new();
         for number in 1..=blocks {
@@ -85,14 +85,14 @@ impl Input {
         Self { operations }
     }
 
-    pub fn blocks(&self) -> Vec<Vec<Operation>> {
+    pub(crate) fn blocks(&self) -> Vec<Vec<Operation>> {
         self.operations
             .split_inclusive(|op| matches!(op, Operation::Commit))
             .map(<[Operation]>::to_vec)
             .collect()
     }
 
-    pub fn validate(&self) -> Result<()> {
+    pub(crate) fn validate(&self) -> Result<()> {
         let mut accounts = BTreeSet::new();
         let mut blocks = 0;
         let mut block_updates = 0;
@@ -136,7 +136,7 @@ impl Input {
         Ok(())
     }
 
-    pub fn mutation_sites(&self, only: Option<&str>) -> Vec<MutationSite> {
+    pub(crate) fn mutation_sites(&self, only: Option<&str>) -> Vec<MutationSite> {
         let mut sites = Vec::new();
         for (i, op) in self.operations.iter().enumerate() {
             let root = vec!["operations".into(), i.to_string()];
@@ -237,12 +237,12 @@ impl Input {
         sites
     }
 
-    pub fn mutate_at(
+    pub(crate) fn mutate_at(
         &mut self,
         operator: &str,
         path: &[String],
         seed: u64,
-        donor: Option<(&Input, &[String])>,
+        donor: Option<(&Self, &[String])>,
     ) -> Result<()> {
         self.validate()?;
         let original = self.clone();
@@ -476,7 +476,7 @@ impl Input {
         Ok(())
     }
 
-    pub fn mutate(&mut self, seed: u64) -> Result<()> {
+    pub(crate) fn mutate(&mut self, seed: u64) -> Result<()> {
         let sites = self
             .mutation_sites(None)
             .into_iter()

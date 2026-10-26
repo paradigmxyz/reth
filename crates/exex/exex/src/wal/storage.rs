@@ -8,8 +8,7 @@ use crate::wal::{WalError, WalResult};
 use reth_ethereum_primitives::EthPrimitives;
 use reth_exex_types::ExExNotification;
 use reth_node_api::NodePrimitives;
-use reth_tracing::tracing::debug;
-use tracing::instrument;
+use tracing::{debug, instrument};
 
 static FILE_EXTENSION: &str = "wal";
 
@@ -181,14 +180,17 @@ mod tests {
     use super::Storage;
     use alloy_consensus::BlockHeader;
     use alloy_primitives::{
+        bytes,
         map::{HashMap, HashSet},
-        B256, U256,
+        Address, B256, U256,
     };
+    use evm2::{bytecode::Bytecode, evm::AccountInfo};
     use reth_exex_types::ExExNotification;
     use reth_primitives_traits::Account;
     use reth_provider::Chain;
     use reth_testing_utils::generators::{self, random_block};
     use reth_trie_common::{
+        bundle_state::BundleState,
         serde_bincode_compat,
         updates::{StorageTrieUpdates, StorageTrieUpdatesSorted, TrieUpdates},
         BranchNodeCompact, HashedPostState, HashedStorage, HashedStorageSorted, LazyTrieData,
@@ -239,6 +241,62 @@ mod tests {
             rmp_serde::decode::from_slice(&encoded)?;
         let decoded: HashedStorageSorted = decoded.into();
         assert_eq!(decoded.storage_slots, storage_slots);
+
+        Ok(())
+    }
+
+    /// Decodes `test-data/contracts.wal`, which stores bytecode in the legacy encoding.
+    #[test]
+    fn test_decode_legacy_bytecode() -> eyre::Result<()> {
+        let encoded = std::fs::read(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("test-data/contracts.wal"),
+        )?;
+        let notification: reth_exex_types::serde_bincode_compat::ExExNotification<
+            '_,
+            reth_ethereum_primitives::EthPrimitives,
+        > = rmp_serde::decode::from_slice(&encoded)?;
+        let notification = ExExNotification::from(notification);
+        let chain = notification.committed_chain().unwrap();
+
+        let legacy = Bytecode::new_raw(bytes!("5b600160005500"));
+        let delegated = Bytecode::new_eip7702(Address::with_last_byte(0x42));
+        let contract = Address::with_last_byte(1);
+        let eoa = Address::with_last_byte(2);
+        let bundle = BundleState::new(
+            [
+                (
+                    contract,
+                    None,
+                    Some(AccountInfo {
+                        balance: U256::from(1),
+                        nonce: 1,
+                        code_hash: legacy.hash_slow(),
+                        code: Some(legacy.clone()),
+                        ..Default::default()
+                    }),
+                    HashMap::default(),
+                ),
+                (
+                    eoa,
+                    None,
+                    Some(AccountInfo {
+                        nonce: 2,
+                        code_hash: delegated.hash_slow(),
+                        code: Some(delegated.clone()),
+                        ..Default::default()
+                    }),
+                    HashMap::default(),
+                ),
+            ],
+            vec![vec![(contract, Some(None), vec![]), (eoa, Some(None), vec![])]],
+            [(legacy.hash_slow(), legacy.clone()), (delegated.hash_slow(), delegated.clone())],
+        );
+        assert_eq!(chain.execution_outcome().bundle, bundle);
+
+        // `AccountInfo` equality skips the code, so compare it separately.
+        let state = chain.execution_outcome().state();
+        assert_eq!(state.account(&contract).unwrap().info.as_ref().unwrap().code, Some(legacy));
+        assert_eq!(state.account(&eoa).unwrap().info.as_ref().unwrap().code, Some(delegated));
 
         Ok(())
     }

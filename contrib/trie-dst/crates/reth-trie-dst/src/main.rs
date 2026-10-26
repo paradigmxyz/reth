@@ -101,6 +101,7 @@ impl Default for Config {
     }
 }
 
+#[allow(clippy::clone_on_copy, reason = "Account is not Copy with account-ext enabled.")]
 fn verify(factory: &ProviderFactory<Node>, state: &Model, tip: u64, state_tip: u64) -> Result<()> {
     let provider = factory.provider()?;
     let checkpoint = provider
@@ -152,7 +153,7 @@ fn verify(factory: &ProviderFactory<Node>, state: &Model, tip: u64, state_tip: u
             .collect::<Result<BTreeMap<_, _>, _>>()?;
         let expected = state
             .iter()
-            .map(|(address, entry)| (keccak256(address), entry.account.to_owned()))
+            .map(|(address, entry)| (keccak256(address), entry.account.clone()))
             .collect::<BTreeMap<_, _>>();
         ensure!(accounts == expected, "persisted hashed accounts at {tip}");
         let storage = provider
