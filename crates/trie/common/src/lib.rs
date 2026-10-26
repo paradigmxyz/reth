@@ -39,6 +39,8 @@ pub use constants::*;
 mod account;
 pub use account::TrieAccount;
 
+pub mod bundle_state;
+
 /// V2 proof targets and chunking.
 pub mod target_v2;
 pub use target_v2::{

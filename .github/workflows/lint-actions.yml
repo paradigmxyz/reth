@@ -33,6 +33,7 @@ jobs:
         shell: bash
       - name: Test benchmark CI helpers
         run: |
+          bash .github/scripts/install_llvm_ubuntu-test.sh
           bash .github/scripts/bench-state-test.sh
           bash .github/scripts/bench-upload-charts-test.sh
           bash .github/scripts/bench-txgen-build-test.sh
