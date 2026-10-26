@@ -48,18 +48,16 @@ where
             // root, so only leftover trie nodes are reported.
             if self.hashed.is_storage_empty()? {
                 let mut verifier = SingleVerifier::new(Some(address), &mut self.trie)?;
-                let mut found = Vec::new();
-                verifier.finalize(&mut found)?;
+                if !verifier.finalize(&mut |output| context.report_one(output))? {
+                    return Ok(());
+                }
                 if job.root_required {
                     context.root_window.release();
-                }
-                if !context.report(found) {
-                    return Ok(())
                 }
             } else {
                 let Some(root) = self.verify_storage(address, context)? else { return Ok(()) };
                 if job.root_required && !context.send(roots, (address, root)) {
-                    return Ok(())
+                    return Ok(());
                 }
             }
         }
@@ -79,7 +77,7 @@ where
         let mut state = None;
         loop {
             if context.is_cancelled() {
-                return Ok(None)
+                return Ok(None);
             }
             let result = StorageRootCalculation {
                 hashed_address: address,
@@ -104,18 +102,20 @@ where
             };
             let mut nodes = updates.storage_nodes.into_iter().collect::<Vec<_>>();
             nodes.sort_unstable_by(|a, b| depth_first::cmp(&a.0, &b.0));
-            let mut found = Vec::new();
+            let mut emit = |output| context.report_one(output);
             for (path, node) in nodes {
-                verifier.next(&mut found, path, node)?;
+                if context.is_cancelled() {
+                    return Ok(None);
+                }
+                if !verifier.next(&mut emit, path, node)? {
+                    return Ok(None);
+                }
             }
-            if root.is_some() {
-                verifier.finalize(&mut found)?;
-            }
-            if !context.report(found) {
-                return Ok(None)
-            }
-            if root.is_some() {
-                return Ok(root)
+            if let Some(root) = root {
+                if !verifier.finalize(&mut emit)? {
+                    return Ok(None);
+                }
+                return Ok(Some(root));
             }
         }
     }

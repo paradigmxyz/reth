@@ -7,7 +7,6 @@ use crossbeam_channel::{Receiver, Sender, TrySendError};
 use reth_execution_errors::StateRootError;
 use reth_storage_errors::db::DatabaseError;
 use std::{
-    collections::VecDeque,
     panic::{catch_unwind, AssertUnwindSafe},
     sync::{
         atomic::{AtomicUsize, Ordering},
@@ -16,17 +15,12 @@ use std::{
     thread::{self, JoinHandle},
 };
 
-/// Owns background work, buffers completed roots, and merges findings for the account consumer.
+/// Owns storage scheduling and buffers roots for the account producer.
 #[derive(Debug)]
 pub(super) struct StoragePipeline {
     roots_rx: Receiver<(B256, B256)>,
     roots: B256Map<B256>,
-    root_window: Arc<StorageRootWindow>,
-    // Held so `events_rx` never disconnects, even after every background thread has exited.
-    _events_tx: Sender<Result<Output, StateRootError>>,
-    events_rx: Receiver<Result<Output, StateRootError>>,
-    // Disconnecting the sole sender broadcasts cancellation to every worker.
-    cancel: Option<Sender<()>>,
+    context: WorkerContext,
     background: Option<JoinHandle<()>>,
 }
 
@@ -36,11 +30,11 @@ impl StoragePipeline {
     ///
     /// # Panics
     ///
-    /// Panics if `workers` is empty or `storage_root_limit` is zero.
+    /// Panics if `workers` is empty.
     pub(super) fn spawn<L, T, H, TX>(
         addresses: L,
         workers: Vec<StorageWorker<T, H, TX>>,
-        storage_root_limit: usize,
+        context: WorkerContext,
     ) -> Result<Self, DatabaseError>
     where
         L: Iterator<Item = Result<StorageJob, DatabaseError>> + Send + 'static,
@@ -49,20 +43,9 @@ impl StoragePipeline {
         TX: Send + 'static,
     {
         assert!(!workers.is_empty(), "verification requires storage workers");
-        let (events_tx, events_rx) = crossbeam_channel::unbounded();
         let (roots_tx, roots_rx) = crossbeam_channel::unbounded();
-        let (cancel_tx, cancel_rx) = crossbeam_channel::bounded::<()>(0);
-        let root_window = Arc::new(StorageRootWindow::new(storage_root_limit));
-        let scheduler = StorageScheduler {
-            addresses,
-            workers,
-            roots: roots_tx,
-            context: WorkerContext {
-                events: events_tx.clone(),
-                cancel: cancel_rx,
-                root_window: root_window.clone(),
-            },
-        };
+        let scheduler =
+            StorageScheduler { addresses, workers, roots: roots_tx, context: context.clone() };
         let span = tracing::Span::current();
         let background = thread::Builder::new()
             .name("trie-lookahead".into())
@@ -71,47 +54,28 @@ impl StoragePipeline {
                 scheduler.run();
             })
             .map_err(|error| DatabaseError::Custom(Arc::new(error)))?;
-        Ok(Self {
-            roots_rx,
-            roots: Default::default(),
-            root_window,
-            _events_tx: events_tx,
-            events_rx,
-            cancel: Some(cancel_tx),
-            background: Some(background),
-        })
+        Ok(Self { roots_rx, roots: Default::default(), context, background: Some(background) })
     }
 
-    /// Blocks until the storage root of `address` is computed, buffering roots of other accounts
-    /// and moving findings into `outputs` while waiting.
-    ///
-    /// `address` must have non-empty storage, and each root can only be taken once.
-    pub(super) fn root(
-        &mut self,
-        address: B256,
-        outputs: &mut VecDeque<Result<Output, StateRootError>>,
-    ) -> Result<B256, StateRootError> {
+    /// Waits only for roots; the iterator consumes findings independently. Returns `None` on
+    /// cancellation. Each non-empty account storage root must be requested exactly once.
+    pub(super) fn root(&mut self, address: B256) -> Result<Option<B256>, StateRootError> {
         if let Some(root) = self.roots.remove(&address) {
-            self.root_window.release();
-            return Ok(root)
+            self.context.root_window.release();
+            return Ok(Some(root));
         }
         loop {
             crossbeam_channel::select! {
-                // Never disconnects, see `_events_tx`.
-                recv(self.events_rx) -> event => {
-                    if let Ok(event) = event { outputs.push_back(Ok(event?)); }
-                }
+                recv(self.context.cancel) -> _ => return Ok(None),
                 recv(self.roots_rx) -> root => {
                     let Ok((root_address, root)) = root else {
-                        self.drain(outputs)?;
                         return Err(DatabaseError::Other(format!(
                             "storage root of {address} was never computed"
-                        ))
-                        .into())
+                        )).into())
                     };
                     if root_address == address {
-                        self.root_window.release();
-                        return Ok(root)
+                        self.context.root_window.release();
+                        return Ok(Some(root))
                     }
                     self.roots.insert(root_address, root);
                 }
@@ -119,38 +83,8 @@ impl StoragePipeline {
         }
     }
 
-    /// Moves already received findings into `outputs` without blocking, stopping at the first
-    /// error.
-    pub(super) fn drain(
-        &self,
-        outputs: &mut VecDeque<Result<Output, StateRootError>>,
-    ) -> Result<(), StateRootError> {
-        for event in self.events_rx.try_iter() {
-            outputs.push_back(Ok(event?));
-        }
-        Ok(())
-    }
-
-    /// Appends `found` to `outputs` after any findings already received from background threads.
-    pub(super) fn report(
-        &self,
-        found: Vec<Output>,
-        outputs: &mut VecDeque<Result<Output, StateRootError>>,
-    ) -> Result<(), StateRootError> {
-        self.drain(outputs)?;
-        outputs.extend(found.into_iter().map(Ok));
-        Ok(())
-    }
-
-    /// Waits for all scheduled work to complete; queued findings and failures remain available to
-    /// drain.
+    /// Joins storage producers while the caller's iterator continues consuming findings.
     pub(super) fn finish(&mut self) {
-        self.join();
-    }
-
-    /// Cancels outstanding work and waits for background threads to exit.
-    pub(super) fn stop(&mut self) {
-        self.cancel.take();
         self.join();
     }
 
@@ -167,7 +101,7 @@ impl StoragePipeline {
 
 impl Drop for StoragePipeline {
     fn drop(&mut self) {
-        self.stop();
+        self.join();
     }
 }
 
@@ -206,6 +140,7 @@ where
                         context.run(|| worker.run(jobs, &roots, &context));
                     });
                 }
+                drop(jobs_rx);
                 context.run(|| self.produce(jobs_tx));
             });
             Ok(())
@@ -216,10 +151,10 @@ where
         for job in self.addresses.by_ref() {
             let job = job?;
             if job.root_required && !self.context.root_window.acquire(&self.context.cancel) {
-                return Ok(())
+                return Ok(());
             }
             if !self.context.send(&jobs, job) {
-                return Ok(())
+                return Ok(());
             }
         }
         Ok(())
@@ -237,6 +172,14 @@ pub(super) struct WorkerContext {
 }
 
 impl WorkerContext {
+    pub(super) fn new(
+        events: Sender<Result<Output, StateRootError>>,
+        cancel: Receiver<()>,
+        storage_root_limit: usize,
+    ) -> Self {
+        Self { events, cancel, root_window: Arc::new(StorageRootWindow::new(storage_root_limit)) }
+    }
+
     /// Sends `value`, returning `false` if it was not sent because verification was cancelled or
     /// `sender` disconnected.
     pub(super) fn send<T>(&self, sender: &Sender<T>, value: T) -> bool {
@@ -260,19 +203,13 @@ impl WorkerContext {
         self.cancel.try_recv() == Err(crossbeam_channel::TryRecvError::Disconnected)
     }
 
-    /// Sends each finding, returning `false` if one was not sent because verification was
-    /// cancelled.
-    pub(super) fn report(&self, found: Vec<Output>) -> bool {
-        for output in found {
-            if !self.send(&self.events, Ok(output)) {
-                return false
-            }
-        }
-        true
+    /// Reports one finding, applying backpressure until it is consumed or verification stops.
+    pub(super) fn report_one(&self, output: Output) -> bool {
+        self.send(&self.events, Ok(output))
     }
 
     /// Runs `work`, reporting its error or panic as a verification error.
-    fn run(&self, work: impl FnOnce() -> Result<(), StateRootError>) {
+    pub(super) fn run(&self, work: impl FnOnce() -> Result<(), StateRootError>) {
         let result = catch_unwind(AssertUnwindSafe(work)).unwrap_or_else(|panic| {
             let message = panic
                 .downcast_ref::<&str>()
@@ -313,7 +250,7 @@ impl StorageRootWindow {
                 .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |n| n.checked_sub(1))
                 .is_ok()
             {
-                return true
+                return true;
             }
             crossbeam_channel::select! {
                 recv(self.wake_rx) -> _ => {},
@@ -332,5 +269,70 @@ impl StorageRootWindow {
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::Nibbles;
+    use std::time::Duration;
+
+    const TIMEOUT: Duration = Duration::from_secs(10);
+
+    #[test]
+    fn full_findings_channel_observes_cancellation() {
+        let (events_tx, events_rx) = crossbeam_channel::bounded(1);
+        let (cancel_tx, cancel_rx) = crossbeam_channel::bounded(0);
+        let context = WorkerContext::new(events_tx, cancel_rx, 1);
+        assert!(context.report_one(Output::Progress(Nibbles::new())));
+        let (done_tx, done_rx) = crossbeam_channel::bounded(1);
+        let worker = thread::spawn(move || {
+            done_tx.send(context.report_one(Output::Progress(Nibbles::new()))).unwrap();
+        });
+        assert_eq!(events_rx.len(), 1);
+        drop(cancel_tx);
+        assert!(!done_rx.recv_timeout(TIMEOUT).unwrap());
+        worker.join().unwrap();
+    }
+
+    #[test]
+    fn root_wait_observes_cancellation() {
+        let (events_tx, _events_rx) = crossbeam_channel::bounded(1);
+        let (cancel_tx, cancel_rx) = crossbeam_channel::bounded(0);
+        let context = WorkerContext::new(events_tx, cancel_rx, 1);
+        let (_roots_tx, roots_rx) = crossbeam_channel::unbounded();
+        let mut pipeline =
+            StoragePipeline { roots_rx, roots: Default::default(), context, background: None };
+        let (done_tx, done_rx) = crossbeam_channel::bounded(1);
+        let worker = thread::spawn(move || {
+            done_tx.send(pipeline.root(B256::ZERO).unwrap()).unwrap();
+        });
+        drop(cancel_tx);
+        assert_eq!(done_rx.recv_timeout(TIMEOUT).unwrap(), None);
+        worker.join().unwrap();
+    }
+
+    #[test]
+    fn roots_are_buffered_without_consuming_findings() {
+        let (events_tx, events_rx) = crossbeam_channel::bounded(1);
+        let (_cancel_tx, cancel_rx) = crossbeam_channel::bounded(0);
+        let context = WorkerContext::new(events_tx, cancel_rx, 2);
+        assert!(context.root_window.acquire(&context.cancel));
+        assert!(context.root_window.acquire(&context.cancel));
+        assert!(context.report_one(Output::Progress(Nibbles::new())));
+        let (roots_tx, roots_rx) = crossbeam_channel::unbounded();
+        let first = B256::repeat_byte(1);
+        let second = B256::repeat_byte(2);
+        roots_tx.send((second, second)).unwrap();
+        roots_tx.send((first, first)).unwrap();
+        let mut pipeline =
+            StoragePipeline { roots_rx, roots: Default::default(), context, background: None };
+        assert_eq!(pipeline.root(first).unwrap(), Some(first));
+        assert_eq!(pipeline.roots.len(), 1);
+        assert_eq!(events_rx.len(), 1);
+        assert_eq!(pipeline.root(second).unwrap(), Some(second));
+        assert!(pipeline.roots.is_empty());
+        assert_eq!(pipeline.context.root_window.available.load(Ordering::Relaxed), 2);
     }
 }

@@ -29,7 +29,12 @@ impl<C: TrieCursor> SingleVerifier<DepthFirstTrieIterator<C>> {
         let curr = trie_iter.next().transpose()?;
         Ok(Self { account, trie_iter, curr })
     }
+}
 
+impl<I> SingleVerifier<I>
+where
+    I: Iterator<Item = Result<(Nibbles, BranchNodeCompact), DatabaseError>>,
+{
     const fn output_extra(&self, path: Nibbles, node: BranchNodeCompact) -> Output {
         if let Some(account) = self.account {
             Output::StorageExtra(account, path, node)
@@ -60,22 +65,22 @@ impl<C: TrieCursor> SingleVerifier<DepthFirstTrieIterator<C>> {
     }
 
     /// Called with the next path and node in the canonical sequence of stored trie nodes. Will
-    /// append to the given `outputs` Vec if walking the trie cursor produces data
-    /// inconsistent with that given.
+    /// emit findings immediately if walking the trie cursor produces inconsistent data.
+    /// Returning `false` from the callback cancels comparison before advancing the cursor again.
     ///
-    /// `next` must be called with paths in depth-first order.
+    /// `next` must be called with paths in depth-first order. Returns `true` on completion and
+    /// `false` on cancellation. The verifier must not be reused after cancellation.
     pub(super) fn next(
         &mut self,
-        outputs: &mut Vec<Output>,
+        emit: &mut impl FnMut(Output) -> bool,
         path: Nibbles,
         node: BranchNodeCompact,
-    ) -> Result<(), DatabaseError> {
+    ) -> Result<bool, DatabaseError> {
         loop {
             // `curr` is None only if the end of the iterator has been reached. Any further nodes
             // found must be considered missing.
             if self.curr.is_none() {
-                outputs.push(self.output_missing(path, node));
-                return Ok(())
+                return Ok(emit(self.output_missing(path, node)))
             }
 
             let (curr_path, curr_node) = self.curr.as_ref().expect("not None");
@@ -86,24 +91,26 @@ impl<C: TrieCursor> SingleVerifier<DepthFirstTrieIterator<C>> {
                 Ordering::Less => {
                     // If the given path comes before the cursor's current path in depth-first
                     // order, then the given path was not produced by the cursor.
-                    outputs.push(self.output_missing(path, node));
-                    return Ok(())
+                    return Ok(emit(self.output_missing(path, node)))
                 }
                 Ordering::Equal => {
                     // If the current path matches the given one (happy path) but the nodes
                     // aren't equal then we produce a wrong node. Either way we want to move the
                     // iterator forward.
-                    if *curr_node != node {
-                        outputs.push(self.output_wrong(path, node, curr_node.clone()))
+                    if *curr_node != node && !emit(self.output_wrong(path, node, curr_node.clone()))
+                    {
+                        return Ok(false)
                     }
                     self.curr = self.trie_iter.next().transpose()?;
-                    return Ok(())
+                    return Ok(true);
                 }
                 Ordering::Greater => {
                     // If the given path comes after the current path in depth-first order,
                     // it means the cursor's path was not found by the caller (otherwise it would
                     // have hit the equal case) and so is extraneous.
-                    outputs.push(self.output_extra(*curr_path, curr_node.clone()));
+                    if !emit(self.output_extra(*curr_path, curr_node.clone())) {
+                        return Ok(false);
+                    }
                     self.curr = self.trie_iter.next().transpose()?;
                     // back to the top of the loop to check the latest `self.curr` value against the
                     // given path/node.
@@ -113,14 +120,21 @@ impl<C: TrieCursor> SingleVerifier<DepthFirstTrieIterator<C>> {
     }
 
     /// Must be called once there are no more calls to `next` to be made. All further nodes produced
-    /// by the iterator will be considered extraneous.
-    pub(super) fn finalize(&mut self, outputs: &mut Vec<Output>) -> Result<(), DatabaseError> {
+    /// by the iterator will be considered extraneous and emitted individually. Returning `false`
+    /// from the callback stops comparison immediately; the verifier must not be reused after
+    /// cancellation. Returns `true` on completion and `false` on cancellation.
+    pub(super) fn finalize(
+        &mut self,
+        emit: &mut impl FnMut(Output) -> bool,
+    ) -> Result<bool, DatabaseError> {
         loop {
             if let Some((curr_path, curr_node)) = self.curr.take() {
-                outputs.push(self.output_extra(curr_path, curr_node));
+                if !emit(self.output_extra(curr_path, curr_node)) {
+                    return Ok(false);
+                }
                 self.curr = self.trie_iter.next().transpose()?;
             } else {
-                return Ok(())
+                return Ok(true);
             }
         }
     }
@@ -136,7 +150,7 @@ mod tests {
     use alloy_primitives::map::B256Map;
     use alloy_trie::TrieMask;
     use assert_matches::assert_matches;
-    use std::collections::BTreeMap;
+    use std::{cell::Cell, collections::BTreeMap};
 
     /// Helper function to create a simple test `BranchNodeCompact`
     fn test_branch_node(
@@ -201,7 +215,7 @@ mod tests {
         let mut outputs = Vec::new();
 
         // Call next with the exact node that exists
-        verifier.next(&mut outputs, Nibbles::from_nibbles([0x1]), node1).unwrap();
+        verifier.next(&mut collect(&mut outputs), Nibbles::from_nibbles([0x1]), node1).unwrap();
 
         // Should have no outputs
         assert!(outputs.is_empty());
@@ -220,7 +234,9 @@ mod tests {
         let mut outputs = Vec::new();
 
         // Call next with different node value
-        verifier.next(&mut outputs, Nibbles::from_nibbles([0x1]), node_expected.clone()).unwrap();
+        verifier
+            .next(&mut collect(&mut outputs), Nibbles::from_nibbles([0x1]), node_expected.clone())
+            .unwrap();
 
         // Should have one "wrong" output
         assert_eq!(outputs.len(), 1);
@@ -244,7 +260,9 @@ mod tests {
         let mut outputs = Vec::new();
 
         // Call next with a node that comes before any in the trie
-        verifier.next(&mut outputs, Nibbles::from_nibbles([0x1]), node_missing.clone()).unwrap();
+        verifier
+            .next(&mut collect(&mut outputs), Nibbles::from_nibbles([0x1]), node_missing.clone())
+            .unwrap();
 
         // Should have one "missing" output
         assert_eq!(outputs.len(), 1);
@@ -277,9 +295,9 @@ mod tests {
 
         // The depth-first iterator produces in post-order: 0x1, 0x2, 0x3, root
         // We only provide 0x1 and 0x3, skipping 0x2 and root
-        verifier.next(&mut outputs, Nibbles::from_nibbles([0x1]), node1).unwrap();
-        verifier.next(&mut outputs, Nibbles::from_nibbles([0x3]), node3).unwrap();
-        verifier.finalize(&mut outputs).unwrap();
+        verifier.next(&mut collect(&mut outputs), Nibbles::from_nibbles([0x1]), node1).unwrap();
+        verifier.next(&mut collect(&mut outputs), Nibbles::from_nibbles([0x3]), node3).unwrap();
+        verifier.finalize(&mut collect(&mut outputs)).unwrap();
 
         // Should have two "extra" outputs for nodes in the trie that we skipped
         if outputs.len() != 2 {
@@ -322,12 +340,12 @@ mod tests {
 
         // The depth-first iterator produces in post-order: 0x1, 0x2, 0x3, root
         // Process first two nodes correctly
-        verifier.next(&mut outputs, Nibbles::from_nibbles([0x1]), node1).unwrap();
-        verifier.next(&mut outputs, Nibbles::from_nibbles([0x2]), node2).unwrap();
+        verifier.next(&mut collect(&mut outputs), Nibbles::from_nibbles([0x1]), node1).unwrap();
+        verifier.next(&mut collect(&mut outputs), Nibbles::from_nibbles([0x2]), node2).unwrap();
         assert!(outputs.is_empty());
 
         // Finalize - should mark remaining nodes (0x3 and root) as extra
-        verifier.finalize(&mut outputs).unwrap();
+        verifier.finalize(&mut collect(&mut outputs)).unwrap();
 
         // Should have two extra nodes
         assert_eq!(outputs.len(), 2);
@@ -357,7 +375,9 @@ mod tests {
 
         // Call next with missing node
         let missing_node = test_branch_node(0b0101, 0b0001, 0b0100, vec![B256::repeat_byte(2u8)]);
-        verifier.next(&mut outputs, Nibbles::from_nibbles([0x0]), missing_node.clone()).unwrap();
+        verifier
+            .next(&mut collect(&mut outputs), Nibbles::from_nibbles([0x0]), missing_node.clone())
+            .unwrap();
 
         // Should produce StorageMissing, not AccountMissing
         assert_eq!(outputs.len(), 1);
@@ -378,7 +398,9 @@ mod tests {
 
         // Any node should be marked as missing
         let node = test_branch_node(0b1111, 0, 0b1111, vec![B256::repeat_byte(1u8)]);
-        verifier.next(&mut outputs, Nibbles::from_nibbles([0x1]), node.clone()).unwrap();
+        verifier
+            .next(&mut collect(&mut outputs), Nibbles::from_nibbles([0x1]), node.clone())
+            .unwrap();
 
         assert_eq!(outputs.len(), 1);
         assert_matches!(
@@ -415,12 +437,16 @@ mod tests {
 
         // The depth-first iterator produces nodes in post-order (children before parents)
         // Order: 0x11, 0x12, 0x1, 0x2, root
-        verifier.next(&mut outputs, Nibbles::from_nibbles([0x1, 0x1]), node11).unwrap();
-        verifier.next(&mut outputs, Nibbles::from_nibbles([0x1, 0x2]), node12).unwrap();
-        verifier.next(&mut outputs, Nibbles::from_nibbles([0x1]), node1).unwrap();
-        verifier.next(&mut outputs, Nibbles::from_nibbles([0x2]), node2).unwrap();
-        verifier.next(&mut outputs, Nibbles::new(), node_root).unwrap();
-        verifier.finalize(&mut outputs).unwrap();
+        verifier
+            .next(&mut collect(&mut outputs), Nibbles::from_nibbles([0x1, 0x1]), node11)
+            .unwrap();
+        verifier
+            .next(&mut collect(&mut outputs), Nibbles::from_nibbles([0x1, 0x2]), node12)
+            .unwrap();
+        verifier.next(&mut collect(&mut outputs), Nibbles::from_nibbles([0x1]), node1).unwrap();
+        verifier.next(&mut collect(&mut outputs), Nibbles::from_nibbles([0x2]), node2).unwrap();
+        verifier.next(&mut collect(&mut outputs), Nibbles::new(), node_root).unwrap();
+        verifier.finalize(&mut collect(&mut outputs)).unwrap();
 
         // All should match, no outputs
         if !outputs.is_empty() {
@@ -456,9 +482,11 @@ mod tests {
         // Process in WRONG order (skip root, provide child before processing all nodes correctly)
         // The iterator will produce: root, 0x1, 0x11
         // But we provide: 0x11, root, 0x1 (completely wrong order)
-        verifier.next(&mut outputs, Nibbles::from_nibbles([0x1, 0x1]), node11).unwrap();
-        verifier.next(&mut outputs, Nibbles::new(), node_root).unwrap();
-        verifier.next(&mut outputs, Nibbles::from_nibbles([0x1]), node1).unwrap();
+        verifier
+            .next(&mut collect(&mut outputs), Nibbles::from_nibbles([0x1, 0x1]), node11)
+            .unwrap();
+        verifier.next(&mut collect(&mut outputs), Nibbles::new(), node_root).unwrap();
+        verifier.next(&mut collect(&mut outputs), Nibbles::from_nibbles([0x1]), node1).unwrap();
 
         // Should have outputs since we provided them in wrong order
         assert!(!outputs.is_empty());
@@ -497,15 +525,25 @@ mod tests {
 
         // The depth-first iterator produces nodes in post-order (children before parents)
         // Order: 0x111, 0x112, 0x11, 0x12, 0x1, 0x21, 0x2, root
-        verifier.next(&mut outputs, Nibbles::from_nibbles([0x1, 0x1, 0x1]), node111).unwrap();
-        verifier.next(&mut outputs, Nibbles::from_nibbles([0x1, 0x1, 0x2]), node112).unwrap();
-        verifier.next(&mut outputs, Nibbles::from_nibbles([0x1, 0x1]), node11).unwrap();
-        verifier.next(&mut outputs, Nibbles::from_nibbles([0x1, 0x2]), node12).unwrap();
-        verifier.next(&mut outputs, Nibbles::from_nibbles([0x1]), node1).unwrap();
-        verifier.next(&mut outputs, Nibbles::from_nibbles([0x2, 0x1]), node21).unwrap();
-        verifier.next(&mut outputs, Nibbles::from_nibbles([0x2]), node2).unwrap();
-        verifier.next(&mut outputs, Nibbles::new(), node_root).unwrap();
-        verifier.finalize(&mut outputs).unwrap();
+        verifier
+            .next(&mut collect(&mut outputs), Nibbles::from_nibbles([0x1, 0x1, 0x1]), node111)
+            .unwrap();
+        verifier
+            .next(&mut collect(&mut outputs), Nibbles::from_nibbles([0x1, 0x1, 0x2]), node112)
+            .unwrap();
+        verifier
+            .next(&mut collect(&mut outputs), Nibbles::from_nibbles([0x1, 0x1]), node11)
+            .unwrap();
+        verifier
+            .next(&mut collect(&mut outputs), Nibbles::from_nibbles([0x1, 0x2]), node12)
+            .unwrap();
+        verifier.next(&mut collect(&mut outputs), Nibbles::from_nibbles([0x1]), node1).unwrap();
+        verifier
+            .next(&mut collect(&mut outputs), Nibbles::from_nibbles([0x2, 0x1]), node21)
+            .unwrap();
+        verifier.next(&mut collect(&mut outputs), Nibbles::from_nibbles([0x2]), node2).unwrap();
+        verifier.next(&mut collect(&mut outputs), Nibbles::new(), node_root).unwrap();
+        verifier.finalize(&mut collect(&mut outputs)).unwrap();
 
         // All should match, no outputs
         if !outputs.is_empty() {
@@ -518,5 +556,85 @@ mod tests {
             }
         }
         assert!(outputs.is_empty());
+    }
+
+    #[test]
+    fn test_many_extras_stream_and_cancel() {
+        // A lazy source ensures neither comparison path needs to retain findings.
+        for finalize in [false, true] {
+            for cancel_after in [None, Some(17)] {
+                let read = Cell::new(0);
+                let nodes = (0..100_000).map(|_| {
+                    read.set(read.get() + 1);
+                    Ok((Nibbles::from_nibbles([1]), test_branch_node(1, 0, 0, vec![])))
+                });
+                let mut verifier = SingleVerifier { account: None, trie_iter: nodes, curr: None };
+                verifier.curr = verifier.trie_iter.next().transpose().unwrap();
+                let mut emitted = 0;
+                let mut emit = |output| {
+                    if matches!(output, Output::AccountMissing(..)) {
+                        assert!(!finalize);
+                        assert_eq!(emitted, 100_000);
+                        return true;
+                    }
+                    emitted += 1;
+                    assert_matches!(output, Output::AccountExtra(..));
+                    assert_eq!(read.get(), emitted);
+                    cancel_after != Some(emitted)
+                };
+                let result = if finalize {
+                    verifier.finalize(&mut emit)
+                } else {
+                    verifier.next(&mut emit, Nibbles::new(), test_branch_node(1, 0, 0, vec![]))
+                };
+                if let Some(limit) = cancel_after {
+                    assert_matches!(result, Ok(false));
+                    assert_eq!(emitted, limit);
+                    assert_eq!(read.get(), limit);
+                } else {
+                    // `next` also emits the missing canonical root after exhausting extras.
+                    assert_matches!(result, Ok(true));
+                    assert_eq!(emitted, 100_000);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn test_missing_and_wrong_cancel_before_advancing() {
+        for curr in [None, Some((Nibbles::new(), test_branch_node(1, 0, 0, vec![])))] {
+            let mut verifier = SingleVerifier {
+                account: None,
+                trie_iter: std::iter::once(Err(DatabaseError::Other("must not read".into()))),
+                curr,
+            };
+            let result =
+                verifier.next(&mut |_| false, Nibbles::new(), test_branch_node(2, 0, 0, vec![]));
+            assert_matches!(result, Ok(false));
+        }
+    }
+
+    #[test]
+    fn test_database_error_is_preserved() {
+        for finalize in [false, true] {
+            let mut verifier = SingleVerifier {
+                account: None,
+                trie_iter: std::iter::once(Err(DatabaseError::Other("cursor failed".into()))),
+                curr: Some((Nibbles::from_nibbles([1]), test_branch_node(1, 0, 0, vec![]))),
+            };
+            let result = if finalize {
+                verifier.finalize(&mut |_| true)
+            } else {
+                verifier.next(&mut |_| true, Nibbles::new(), test_branch_node(1, 0, 0, vec![]))
+            };
+            assert_matches!(result, Err(DatabaseError::Other(message)) if message == "cursor failed");
+        }
+    }
+
+    fn collect(outputs: &mut Vec<Output>) -> impl FnMut(Output) -> bool + '_ {
+        |output| {
+            outputs.push(output);
+            true
+        }
     }
 }
