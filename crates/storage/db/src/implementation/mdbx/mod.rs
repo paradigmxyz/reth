@@ -26,7 +26,7 @@ use std::{
     ops::{Deref, Range},
     path::{Path, PathBuf},
     sync::Arc,
-    time::{SystemTime, UNIX_EPOCH},
+    time::{Duration, SystemTime, UNIX_EPOCH},
 };
 use tracing::error;
 use tx::Tx;
@@ -449,6 +449,14 @@ impl DatabaseEnv {
             DatabaseEnvKind::RW => {
                 // enable writemap mode in RW mode
                 inner_env.write_map();
+                // In `SafeNoSync`, pages freed after the last steady (synced) commit can't be
+                // reused, and MDBX grows the file rather than syncing on its own: without a
+                // threshold the file grows by everything written until shutdown, and a crash rolls
+                // back to the last open. Make a commit steady once 1 GiB was written or a minute
+                // passed since the last steady one. A no-op in `Durable`, where every commit is
+                // steady.
+                inner_env.set_sync_bytes(GIGABYTE);
+                inner_env.set_sync_period(Duration::from_secs(60));
                 Mode::ReadWrite { sync_mode: args.sync_mode }
             }
         };
