@@ -113,13 +113,8 @@ impl<R: Read + Seek> BeaconBlockIterator<R> {
                 }
                 SLOT_INDEX => {
                     let slot_index = SlotIndex::from_entry(&entry)?;
-                    // if we haven't seen the state yet, the slot index is for blocks,
-                    // if we have seen the state, the slot index is for the state
-                    if self.state.is_none() {
-                        self.block_slot_index = Some(slot_index);
-                    } else {
-                        self.state_slot_index = Some(slot_index);
-                    }
+                    // Both indices follow the state, and the state index is always the last one.
+                    self.block_slot_index = self.state_slot_index.replace(slot_index);
                 }
                 _ => {
                     self.other_entries.push(entry);
@@ -333,5 +328,33 @@ impl<W: Write> EraWriter<W> {
             self.write_version()?;
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::test_utils::{create_beacon_block, create_beacon_state};
+    use std::io::Cursor;
+
+    #[test]
+    fn read_keeps_block_slot_index() {
+        let block_slot_index = SlotIndex::new(8192, vec![-200, -100]);
+        let state_slot_index = SlotIndex::new(16384, vec![-50]);
+        let group = EraGroup::with_block_index(
+            vec![create_beacon_block(10), create_beacon_block(15)],
+            create_beacon_state(50),
+            block_slot_index.clone(),
+            state_slot_index.clone(),
+        );
+        let file = EraFile::new(group, EraId::new("mainnet", 8192, 2));
+
+        let mut buffer = Vec::new();
+        EraWriter::new(&mut buffer).write_file(&file).unwrap();
+        let read = EraReader::new(Cursor::new(&buffer)).read("mainnet".to_string()).unwrap();
+
+        assert_eq!(read.group.slot_index, Some(block_slot_index));
+        assert_eq!(read.group.state_slot_index, state_slot_index);
+        assert_eq!((read.id.start_slot, read.id.slot_count), (8192, 2));
     }
 }
