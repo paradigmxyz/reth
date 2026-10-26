@@ -683,8 +683,8 @@ evm2-jit = { git = "https://github.com/DaniPopes/evm2", rev = "19ae5411cb505639b
 inkwell = { git = "https://github.com/TheDan64/inkwell", rev = "c9d9734ae17dbaf1d9902dab3b8ee9d2041781ff" }
 
 # reth-core
-reth-codecs = { git = "https://github.com/paradigmxyz/reth-core", rev = "bd0edad994bfbb1e5cea8ca5b4da5d8813baa5f1" }
-reth-codecs-derive = { git = "https://github.com/paradigmxyz/reth-core", rev = "bd0edad994bfbb1e5cea8ca5b4da5d8813baa5f1" }
-reth-primitives-traits = { git = "https://github.com/paradigmxyz/reth-core", rev = "bd0edad994bfbb1e5cea8ca5b4da5d8813baa5f1" }
-reth-rpc-traits = { git = "https://github.com/paradigmxyz/reth-core", rev = "bd0edad994bfbb1e5cea8ca5b4da5d8813baa5f1" }
-reth-zstd-compressors = { git = "https://github.com/paradigmxyz/reth-core", rev = "bd0edad994bfbb1e5cea8ca5b4da5d8813baa5f1" }
+reth-codecs = { git = "https://github.com/paradigmxyz/reth-core", rev = "53a5a22a07cdd114a49e5afe4b4581f194a6930d" }
+reth-codecs-derive = { git = "https://github.com/paradigmxyz/reth-core", rev = "53a5a22a07cdd114a49e5afe4b4581f194a6930d" }
+reth-primitives-traits = { git = "https://github.com/paradigmxyz/reth-core", rev = "53a5a22a07cdd114a49e5afe4b4581f194a6930d" }
+reth-rpc-traits = { git = "https://github.com/paradigmxyz/reth-core", rev = "53a5a22a07cdd114a49e5afe4b4581f194a6930d" }
+reth-zstd-compressors = { git = "https://github.com/paradigmxyz/reth-core", rev = "53a5a22a07cdd114a49e5afe4b4581f194a6930d" }
