@@ -414,7 +414,16 @@ where
         // block header's (synthetic) block_number would be used, writing to
         // wrong EIP-2935 slots and corrupting state.
         self.initialize()?;
-        self.inner_mut().apply_pre_execution_changes()
+        self.inner_mut().apply_pre_execution_changes()?;
+
+        // Leading empty segments have no transaction commit to advance their boundaries.
+        while self.plan.next_segment < self.plan.segments.len() &&
+            self.plan.segments[self.plan.next_segment].start_tx == 0
+        {
+            self.apply_segment_boundary()?;
+        }
+
+        Ok(())
     }
 
     fn execute_transaction_without_commit(
