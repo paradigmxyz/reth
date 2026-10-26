@@ -4,7 +4,7 @@ use alloy_primitives::{
     map::{DefaultHashBuilder, FbBuildHasher},
     Address, StorageKey, StorageValue, B256,
 };
-use fixed_cache::{AnyRef, CacheConfig, Stats, StatsHandler};
+use fixed_cache::{AnyRef, Bucket, CacheConfig, Stats, StatsHandler};
 use metrics::{Counter, Gauge, Histogram};
 use parking_lot::Once;
 use reth_errors::ProviderResult;
@@ -13,8 +13,13 @@ use reth_primitives_traits::{Account, Bytecode};
 use reth_storage_api::EvmStateProvider;
 use reth_trie_common::bundle_state::BundleState;
 use std::{
+    alloc::{alloc_zeroed, dealloc, handle_alloc_error, Layout},
     cell::Cell,
     fmt,
+    hash::{BuildHasher, Hash},
+    mem::{needs_drop, ManuallyDrop},
+    ops::Deref,
+    ptr::{self, NonNull},
     sync::{
         atomic::{AtomicU64, AtomicUsize, Ordering},
         Arc,
@@ -22,6 +27,9 @@ use std::{
     time::Duration,
 };
 use tracing::{debug_span, instrument, trace, warn};
+
+#[cfg(target_os = "linux")]
+use tracing::debug;
 
 /// Alignment in bytes for entries in the fixed-cache.
 ///
@@ -77,6 +85,9 @@ impl CacheConfig for EpochCacheConfig {
 
 /// Type alias for the fixed-cache used for accounts and storage.
 type FixedCache<K, V, H = DefaultHashBuilder> = fixed_cache::Cache<K, V, H, EpochCacheConfig>;
+
+/// Size of a transparent huge page on x86-64 and the default on aarch64 Linux.
+const HUGE_PAGE_SIZE: usize = 2 * 1024 * 1024;
 
 /// A wrapper of a state provider and a shared cache.
 ///
@@ -965,10 +976,10 @@ struct ExecutionCacheInner {
     code_cache: FixedCache<B256, Option<Bytecode>, FbBuildHasher<32>>,
 
     /// Flat storage cache: maps `(Address, StorageKey)` to storage value.
-    storage_cache: FixedCache<(Address, StorageKey), StorageValue>,
+    storage_cache: HugePageCache<(Address, StorageKey), StorageValue, DefaultHashBuilder>,
 
     /// Cache for basic account information (nonce, balance, code hash).
-    account_cache: FixedCache<Address, Option<Account>, FbBuildHasher<20>>,
+    account_cache: HugePageCache<Address, Option<Account>, FbBuildHasher<20>>,
 
     /// Stats handler for the code cache (shared with the cache via [`Stats`]).
     code_stats: Arc<CacheStatsHandler>,
@@ -1021,10 +1032,16 @@ impl ExecutionCache {
         Self(Arc::new(ExecutionCacheInner {
             code_cache: FixedCache::new(code_capacity, FbBuildHasher::<32>::default())
                 .with_stats(Some(Stats::new(code_stats.clone()))),
-            storage_cache: FixedCache::new(storage_capacity, DefaultHashBuilder::default())
-                .with_stats(Some(Stats::new(storage_stats.clone()))),
-            account_cache: FixedCache::new(account_capacity, FbBuildHasher::<20>::default())
-                .with_stats(Some(Stats::new(account_stats.clone()))),
+            storage_cache: HugePageCache::new(
+                storage_capacity,
+                DefaultHashBuilder::default(),
+                Stats::new(storage_stats.clone()),
+            ),
+            account_cache: HugePageCache::new(
+                account_capacity,
+                FbBuildHasher::<20>::default(),
+                Stats::new(account_stats.clone()),
+            ),
             code_stats,
             storage_stats,
             account_stats,
@@ -1303,6 +1320,84 @@ impl SavedCache {
     /// Clones the cache handle that acts as the availability guard.
     pub fn clone_guard_for_test(&self) -> ExecutionCache {
         self.caches.clone()
+    }
+}
+
+/// A [`FixedCache`] whose bucket array is aligned to a huge page and, on Linux, advised to use
+/// transparent huge pages.
+///
+/// The storage and account caches are hundreds of megabytes of randomly probed buckets, so with
+/// 4 KiB pages nearly every lookup also misses the TLB and walks the page tables.
+struct HugePageCache<K, V, S> {
+    /// Borrows the bucket array, so it is dropped in `Drop` before the array is freed.
+    cache: ManuallyDrop<FixedCache<K, V, S>>,
+    /// Start of the bucket array, owned by this cache.
+    buckets: NonNull<u8>,
+    /// Layout the bucket array was allocated with.
+    layout: Layout,
+}
+
+// SAFETY: `buckets` is only freed in `Drop`, and `cache` is `Send` and `Sync` for these bounds.
+unsafe impl<K: Send, V: Send, S: Send> Send for HugePageCache<K, V, S> {}
+// SAFETY: `buckets` is only freed in `Drop`, and `cache` is `Send` and `Sync` for these bounds.
+unsafe impl<K: Send, V: Send, S: Sync> Sync for HugePageCache<K, V, S> {}
+
+impl<K: Hash + Eq + 'static, V: 'static, S: BuildHasher> HugePageCache<K, V, S> {
+    /// Allocates a zeroed bucket array of `capacity` buckets and builds a cache on it.
+    fn new(capacity: usize, build_hasher: S, stats: Stats<K, V>) -> Self {
+        const { assert!(!needs_drop::<(K, V)>(), "entries are freed without being dropped") }
+        let layout = Layout::array::<Bucket<(K, V)>>(capacity)
+            .and_then(|layout| layout.align_to(HUGE_PAGE_SIZE))
+            .expect("cache capacity is bounded by the cache size in bytes");
+        // SAFETY: the layout is non-zero sized, since `capacity` is at least
+        // `ExecutionCache::MIN_CACHE_SIZE_WITH_EPOCHS`.
+        let Some(buckets) = NonNull::new(unsafe { alloc_zeroed(layout) }) else {
+            handle_alloc_error(layout)
+        };
+        #[cfg(target_os = "linux")]
+        // SAFETY: the range is the allocation above, and `MADV_HUGEPAGE` only changes which page
+        // size backs it.
+        if unsafe { libc::madvise(buckets.as_ptr().cast(), layout.size(), libc::MADV_HUGEPAGE) } !=
+            0
+        {
+            debug!(
+                target: "engine::caching",
+                err = %std::io::Error::last_os_error(),
+                "Transparent huge pages unavailable for execution cache"
+            );
+        }
+        // SAFETY: zeroed memory is an array of empty buckets (see `Bucket::new`), and it is only
+        // freed in `Drop`, after `cache` is dropped.
+        let entries = unsafe {
+            &*ptr::slice_from_raw_parts(buckets.as_ptr().cast::<Bucket<(K, V)>>(), capacity)
+        };
+        let cache = FixedCache::new_static(entries, build_hasher).with_stats(Some(stats));
+        Self { cache: ManuallyDrop::new(cache), buckets, layout }
+    }
+}
+
+impl<K, V, S> fmt::Debug for HugePageCache<K, V, S> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("HugePageCache").field("layout", &self.layout).finish_non_exhaustive()
+    }
+}
+
+impl<K, V, S> Deref for HugePageCache<K, V, S> {
+    type Target = FixedCache<K, V, S>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.cache
+    }
+}
+
+impl<K, V, S> Drop for HugePageCache<K, V, S> {
+    fn drop(&mut self) {
+        // SAFETY: `cache` is not used after this, and `buckets` was allocated with `layout` and is
+        // no longer borrowed once `cache` is dropped.
+        unsafe {
+            ManuallyDrop::drop(&mut self.cache);
+            dealloc(self.buckets.as_ptr(), self.layout);
+        }
     }
 }
 
@@ -1588,5 +1683,24 @@ mod tests {
             capacity, 16384,
             "code cache should have 16384 entries with default 4 GB budget"
         );
+    }
+
+    #[test]
+    fn huge_page_cache_roundtrip() {
+        let stats = Arc::new(CacheStatsHandler::new(ExecutionCache::MIN_CACHE_SIZE_WITH_EPOCHS));
+        let cache = HugePageCache::<Address, Option<Account>, FbBuildHasher<20>>::new(
+            ExecutionCache::MIN_CACHE_SIZE_WITH_EPOCHS,
+            FbBuildHasher::default(),
+            Stats::new(stats),
+        );
+        assert_eq!(cache.buckets.as_ptr() as usize % HUGE_PAGE_SIZE, 0);
+
+        let address = Address::with_last_byte(1);
+        let account = Some(Account { nonce: 1, ..Default::default() });
+        assert_eq!(cache.get(&address), None);
+        cache.insert(address, account);
+        assert_eq!(cache.get(&address), Some(account));
+        cache.clear();
+        assert_eq!(cache.get(&address), None);
     }
 }

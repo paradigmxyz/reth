@@ -24,6 +24,9 @@ reth-storage-api.workspace = true
 reth-trie-common.workspace = true
 tracing.workspace = true
 
+[target.'cfg(target_os = "linux")'.dependencies]
+libc.workspace = true
+
 [dev-dependencies]
 evm2.workspace = true
 alloy-primitives = { workspace = true, features = ["rand"] }
