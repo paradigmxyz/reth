@@ -48,12 +48,12 @@ echo "Building images"
     "${eels_blob_build_args[@]}" \
     --sim.buildarg fork="${eels_fork}" \
     --sim.timelimit 1s || true &
-./hive -client reth --sim "ethereum/engine" -sim.timelimit 1s || true &
-./hive -client reth --sim "devp2p" -sim.timelimit 1s || true &
-./hive -client reth --sim "ethereum/rpc-compat" -sim.timelimit 1s || true &
-./hive -client reth --sim "smoke/genesis" -sim.timelimit 1s || true &
-./hive -client reth --sim "smoke/network" -sim.timelimit 1s || true &
-./hive -client reth --sim "ethereum/sync" -sim.timelimit 1s || true &
+# ./hive -client reth --sim "ethereum/engine" -sim.timelimit 1s || true &
+# ./hive -client reth --sim "devp2p" -sim.timelimit 1s || true &
+# ./hive -client reth --sim "ethereum/rpc-compat" -sim.timelimit 1s || true &
+# ./hive -client reth --sim "smoke/genesis" -sim.timelimit 1s || true &
+# ./hive -client reth --sim "smoke/network" -sim.timelimit 1s || true &
+# ./hive -client reth --sim "ethereum/sync" -sim.timelimit 1s || true &
 wait
 
 # Export one image at a time and compress the stream to limit peak disk usage.
@@ -62,15 +62,15 @@ save_image() {
     docker save "$1" | gzip -1 > "../hive_assets/$2.tar.gz"
 }
 save_image hive/hiveproxy:latest hiveproxy
-save_image hive/simulators/devp2p:latest devp2p
-save_image hive/simulators/ethereum/engine:latest engine
-save_image hive/simulators/ethereum/rpc-compat:latest rpc_compat
+# save_image hive/simulators/devp2p:latest devp2p
+# save_image hive/simulators/ethereum/engine:latest engine
+# save_image hive/simulators/ethereum/rpc-compat:latest rpc_compat
 save_image hive/simulators/ethereum/eels/consume-engine:latest eels_engine
 save_image hive/simulators/ethereum/eels/consume-rlp:latest eels_rlp
 save_image hive/simulators/ethereum/eels/execute-blobs:latest eels_blobs
-save_image hive/simulators/smoke/genesis:latest smoke_genesis
-save_image hive/simulators/smoke/network:latest smoke_network
-save_image hive/simulators/ethereum/sync:latest ethereum_sync
+# save_image hive/simulators/smoke/genesis:latest smoke_genesis
+# save_image hive/simulators/smoke/network:latest smoke_network
+# save_image hive/simulators/ethereum/sync:latest ethereum_sync
 
 # Make sure we don't rebuild images on the CI jobs
 git apply ../.github/scripts/hive/no_sim_build.diff
