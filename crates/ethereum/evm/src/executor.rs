@@ -276,6 +276,13 @@ where
         &mut self,
         transaction_gas_limit: u64,
     ) -> Result<(), BlockExecutionError> {
+        if self.separate_block_gas && transaction_gas_limit > crate::MAX_TX_TOTAL_GAS_LIMIT {
+            return Err(BlockValidationError::TransactionGasLimitMoreThanCap {
+                transaction_gas_limit,
+                cap: crate::MAX_TX_TOTAL_GAS_LIMIT,
+            }
+            .into());
+        }
         let block_gas_limit = self.evm.block_env().gas_limit.to::<u64>();
         let unavailable = if self.separate_block_gas {
             let regular_available = block_gas_limit.saturating_sub(self.block_regular_gas_used);
@@ -1460,5 +1467,34 @@ mod tests {
         executor.execute_transaction(blob_tx(0)).expect("seven blobs fit the first segment cap");
         let err = executor.execute_transaction(blob_tx(1)).unwrap_err();
         assert!(err.to_string().contains("too many blobs: have 7, max 6"), "{err}");
+    }
+
+    #[test]
+    fn amsterdam_admission_enforces_total_transaction_gas_cap() {
+        let factory = super::super::factory::EthBlockExecutorFactory::new(Arc::new(
+            ChainSpecBuilder::mainnet().bogota_activated().build(),
+        ));
+        let env = EthEvmEnv::new(
+            SpecId::AMSTERDAM,
+            BlockEnv::<BaseEvmTypes> {
+                gas_limit: U256::from(5_000_000_000u64),
+                ..Default::default()
+            },
+            1,
+        );
+        let evm = factory.evm_with_env(Db::new(TestDatabase::default()), env);
+        let mut executor = factory.create_executor(evm, segment(0, 1, B256::ZERO).ctx);
+        assert!(executor.validate_transaction_gas_limit(crate::MAX_TX_TOTAL_GAS_LIMIT).is_ok());
+        assert!(matches!(
+            executor.validate_transaction_gas_limit(crate::MAX_TX_TOTAL_GAS_LIMIT + 1),
+            Err(BlockExecutionError::Validation(
+                BlockValidationError::TransactionGasLimitMoreThanCap {
+                    transaction_gas_limit: 4_294_967_296,
+                    cap: 4_294_967_295,
+                }
+            ))
+        ));
+        assert_eq!(executor.block_regular_gas_used, 0);
+        assert_eq!(executor.block_state_gas_used, 0);
     }
 }

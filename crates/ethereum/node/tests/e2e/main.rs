@@ -8,6 +8,7 @@ mod eth;
 mod exex;
 mod finality;
 mod forkchoice;
+mod inclusion_list;
 mod invalid_payload;
 mod p2p;
 mod pool;

@@ -50,6 +50,9 @@ use core::any::Any;
 
 pub use convert::spec_id_by_timestamp_and_block_number;
 
+/// EIP-8037 bounds total transaction gas independently of the regular-gas cap.
+pub(crate) const MAX_TX_TOTAL_GAS_LIMIT: u64 = u32::MAX as u64;
+
 /// Configured Ethereum EVM environment.
 pub struct EthEvmEnv<T = evm2::BaseEvmTypes>
 where
@@ -158,9 +161,9 @@ where
     }
 
     fn transaction_validation_limits(&self) -> reth_evm::EvmTransactionValidationLimits {
-        let tx_gas_limit_cap = if self.version.feature(evm2::EvmFeatures::EIP8037) ||
-            self.version.tx_gas_limit_cap == u64::MAX
-        {
+        let tx_gas_limit_cap = if self.version.feature(evm2::EvmFeatures::EIP8037) {
+            MAX_TX_TOTAL_GAS_LIMIT
+        } else if self.version.tx_gas_limit_cap == u64::MAX {
             0
         } else {
             self.version.tx_gas_limit_cap
@@ -428,7 +431,7 @@ where
         let base_fee = self
             .chain_spec()
             .as_ref()
-            .next_block_base_fee(parent, attributes.timestamp)
+            .next_block_base_fee_with_slot(parent, attributes.timestamp, attributes.slot_number)
             .unwrap_or_default();
         let blob_params = self.chain_spec().as_ref().blob_params_at_timestamp(attributes.timestamp);
         let header = Header {
@@ -594,7 +597,7 @@ mod tests {
     use super::*;
     use alloy_genesis::Genesis;
     use alloy_primitives::U256;
-    use reth_chainspec::{Chain, ChainSpec};
+    use reth_chainspec::{Chain, ChainSpec, ChainSpecBuilder};
 
     #[test]
     fn test_evm_env_for_header_uses_chain_blob_params() {
@@ -677,5 +680,31 @@ mod tests {
 
         let evm_config = evm_config.with_jit_support();
         assert!(evm_config.jit_backend().is_none());
+    }
+
+    #[test]
+    fn bogota_next_evm_env_uses_child_slot_number() {
+        let config =
+            EthEvmConfig::new(Arc::new(ChainSpecBuilder::mainnet().bogota_activated().build()));
+        let parent = Header {
+            gas_limit: 30_000_000,
+            gas_used: 30_000_000,
+            base_fee_per_gas: Some(1_000_000_000),
+            timestamp: 100,
+            slot_number: Some(10),
+            ..Default::default()
+        };
+        let attributes = NextBlockEnvAttributes {
+            timestamp: 127,
+            gas_limit: parent.gas_limit,
+            slot_number: Some(13),
+            suggested_fee_recipient: Default::default(),
+            prev_randao: Default::default(),
+            parent_beacon_block_root: None,
+            withdrawals: None,
+            extra_data: Default::default(),
+        };
+        let env = config.next_evm_env(&parent, &attributes).unwrap();
+        assert_eq!(env.block.basefee, alloy_primitives::U256::from(1_093_750_000u64));
     }
 }

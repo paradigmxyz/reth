@@ -20,7 +20,9 @@ use alloy_rpc_types_engine::{
 use async_trait::async_trait;
 use jsonrpsee_core::{server::RpcModule, RpcResult};
 use reth_chainspec::EthereumHardforks;
-use reth_engine_primitives::{ConsensusEngineHandle, EngineApiValidator, EngineTypes};
+use reth_engine_primitives::{
+    ConsensusEngineHandle, EngineApiValidator, EngineTypes, ExecutionPayload,
+};
 use reth_network_api::{CellCustody, NetworkInfo};
 use reth_payload_builder::PayloadStore;
 use reth_payload_primitives::{
@@ -31,7 +33,7 @@ use reth_primitives_traits::{AlloyBlockHeader, Block, BlockBody};
 use reth_rpc_api::{EngineApiServer, IntoEngineApiRpcModule};
 use reth_storage_api::{BalProvider, BlockReader, StateProviderFactory};
 use reth_tasks::Runtime;
-use reth_transaction_pool::{BestTransactions, TransactionPool};
+use reth_transaction_pool::TransactionPool;
 use std::{
     sync::Arc,
     time::{Instant, SystemTime},
@@ -301,6 +303,9 @@ where
         &self,
         payload: PayloadT::ExecutionData,
     ) -> EngineApiResult<PayloadStatusV2> {
+        let inclusion_list_transactions =
+            payload.inclusion_list_transactions().unwrap_or_default().to_vec();
+        let block_hash = payload.block_hash();
         let payload_or_attrs = PayloadOrAttributes::<
             '_,
             PayloadT::ExecutionData,
@@ -310,7 +315,21 @@ where
             .validator
             .validate_version_specific_fields(EngineApiMessageVersion::V6, payload_or_attrs)?;
 
-        Ok(self.inner.beacon_consensus.new_payload(payload).await?.into())
+        let payload_status = self
+            .inner
+            .beacon_consensus
+            .new_payload_with_inclusion_list(payload, inclusion_list_transactions)
+            .await?;
+        let inclusion_list_satisfied = if payload_status.is_valid() {
+            self.inner
+                .beacon_consensus
+                .inclusion_list_status(block_hash)
+                .await
+                .map_err(|error| EngineApiError::Internal(Box::new(error)))?
+        } else {
+            None
+        };
+        Ok(PayloadStatusV2::new(payload_status, inclusion_list_satisfied))
     }
 
     /// Metrics version of `new_payload_v6`.
@@ -459,11 +478,36 @@ where
             self.inner.cell_custody.set_from_engine_api(custody_columns);
         }
 
-        // Todo: Validate IL and populate `inclusion_list_satisfied` properly and test.
-        Ok(self
+        let head_block_hash = state.head_block_hash;
+        let updated = self
             .validate_and_execute_forkchoice(EngineApiMessageVersion::V5, state, payload_attrs)
-            .await?
-            .into())
+            .await?;
+
+        // Only a VALID head carries a verdict, computed from the retained list. A head with no
+        // retained list leaves the field unset.
+        let inclusion_list_satisfied = if updated.is_valid() {
+            self.inner
+                .beacon_consensus
+                .inclusion_list_status(head_block_hash)
+                .await
+                .map_err(|error| EngineApiError::Internal(Box::new(error)))?
+        } else {
+            None
+        };
+        // `None` for a VALID head means its list was never retained or has been evicted.
+        debug!(
+            target: "rpc::engine",
+            %head_block_hash,
+            status = ?updated.payload_status.status,
+            ?inclusion_list_satisfied,
+            "Forkchoice inclusion-list verdict"
+        );
+
+        let response = ForkchoiceUpdatedResponseV2::from(updated);
+        Ok(match inclusion_list_satisfied {
+            Some(satisfied) => response.with_inclusion_list_satisfied(satisfied),
+            None => response,
+        })
     }
 
     /// Metrics version of `fork_choice_updated_v5`
@@ -481,21 +525,7 @@ where
 
     /// Builds an EIP-7805 inclusion list from the local transaction pool.
     pub fn get_inclusion_list_v1(&self) -> EngineApiResult<Vec<Bytes>> {
-        let mut total_size = 0;
-        let mut inclusion_list = Vec::new();
-
-        for pool_tx in self.inner.tx_pool.best_transactions().without_blobs().without_updates() {
-            let encoded = pool_tx.encoded_2718_consensus();
-            let new_size = total_size + encoded.len();
-            if new_size > MAX_BYTES_PER_INCLUSION_LIST as usize {
-                break
-            }
-
-            total_size = new_size;
-            inclusion_list.push(encoded);
-        }
-
-        Ok(inclusion_list)
+        Ok(self.inner.tx_pool.build_inclusion_list(MAX_BYTES_PER_INCLUSION_LIST as usize))
     }
 
     /// Metrics version of `get_inclusion_list_v1`.
@@ -503,6 +533,14 @@ where
         let start = Instant::now();
         let result = Self::get_inclusion_list_v1(self);
         self.inner.metrics.latency.get_inclusion_list_v1.record(start.elapsed());
+        if let Ok(transactions) = &result {
+            debug!(
+                target: "rpc::engine",
+                txs = transactions.len(),
+                bytes = transactions.iter().map(|tx| tx.len()).sum::<usize>(),
+                "Served inclusion list"
+            );
+        }
         result
     }
 
@@ -735,9 +773,10 @@ where
             // > Client software MUST NOT return trailing null values if the request extends past the current latest known block.
             // truncate the end if it's greater than the last block
             if let Ok(best_block) = inner.provider.best_block_number()
-                && end > best_block {
-                    end = best_block;
-                }
+                && end > best_block
+            {
+                end = best_block;
+            }
 
             // Check if the requested range starts before the earliest available block due to pruning/expiry
             let earliest_block = inner.provider.earliest_block_number().unwrap_or(0);
@@ -1460,12 +1499,12 @@ where
             sidecar: ExecutionPayloadSidecar::v6(
                 CancunPayloadFields { versioned_hashes, parent_beacon_block_root },
                 PraguePayloadFields { requests: execution_requests },
-                BogotaPayloadFields { inclusion_list_transactions },
+                BogotaPayloadFields {
+                    inclusion_list_transactions: inclusion_list_transactions.clone(),
+                },
             ),
         };
 
-        // TODO: perform structural validation of the inclusion list transactions and populate
-        // `inclusion_list_satisfied` for VALID payloads
         Ok(self.new_payload_v6_metered(payload).await?)
     }
 
@@ -2314,6 +2353,76 @@ mod tests {
         });
 
         assert_matches!(engine_rx.recv().await, Some(BeaconEngineMessage::NewPayload { .. }));
+    }
+
+    // The union of up to 16 committee lists has no aggregate bound, so a legitimate list
+    // exceeds 8 KiB and must still reach the engine.
+    #[tokio::test]
+    async fn new_payload_v6_accepts_inclusion_list_over_single_list_limit() {
+        let chain_spec = Arc::new(ChainSpecBuilder::mainnet().bogota_activated().build());
+        let provider = Arc::new(MockEthProvider::default());
+        let payload_store = spawn_test_payload_service::<EthEngineTypes>();
+        let (to_engine, mut engine_rx) = unbounded_channel();
+
+        let api = EngineApi::new(
+            provider,
+            chain_spec.clone(),
+            ConsensusEngineHandle::new(to_engine),
+            payload_store.into(),
+            NoopTransactionPool::default(),
+            Runtime::test(),
+            ClientVersionV1 {
+                code: ClientCode::RH,
+                name: "Reth".to_string(),
+                version: "v0.0.0-test".to_string(),
+                commit: "test".to_string(),
+            },
+            EngineCapabilities::default(),
+            EthereumEngineValidator::new(chain_spec),
+            false,
+            NoopNetwork::default(),
+        );
+
+        let inclusion_list_transactions =
+            vec![Bytes::from(vec![0u8; MAX_BYTES_PER_INCLUSION_LIST as usize]); 2];
+        let expected = inclusion_list_transactions.clone();
+
+        tokio::spawn(async move {
+            let payload_v1 = ExecutionPayloadV1::from_block_slow(&Block::default());
+            let payload = ExecutionPayloadV4 {
+                payload_inner: ExecutionPayloadV3 {
+                    payload_inner: ExecutionPayloadV2 {
+                        payload_inner: payload_v1,
+                        withdrawals: Vec::new(),
+                    },
+                    blob_gas_used: 0,
+                    excess_blob_gas: 0,
+                },
+                block_access_list: Bytes::from_static(b"bal"),
+                slot_number: 1,
+            };
+            let execution_data = ExecutionData {
+                payload: payload.into(),
+                sidecar: ExecutionPayloadSidecar::v6(
+                    CancunPayloadFields {
+                        versioned_hashes: Vec::new(),
+                        parent_beacon_block_root: B256::ZERO,
+                    },
+                    PraguePayloadFields { requests: RequestsOrHash::Requests(Requests::default()) },
+                    BogotaPayloadFields { inclusion_list_transactions },
+                ),
+            };
+
+            let _ = api.new_payload_v6(execution_data).await;
+        });
+
+        let Some(BeaconEngineMessage::NewPayload {
+            inclusion_list_transactions: forwarded, ..
+        }) = engine_rx.recv().await
+        else {
+            panic!("oversized inclusion list was not forwarded to the engine")
+        };
+        assert_eq!(forwarded, Some(expected));
     }
 
     #[derive(Clone)]

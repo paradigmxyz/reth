@@ -24,6 +24,9 @@ pub trait EthChainSpec: Send + Sync + Unpin + Debug {
     }
 
     /// Get the [`BaseFeeParams`] for the chain at the given timestamp.
+    ///
+    /// Use [`Self::next_block_base_fee_with_slot`] for slot-dependent updates that cannot be
+    /// represented by these parameters.
     fn base_fee_params_at_timestamp(&self, timestamp: u64) -> BaseFeeParams;
 
     /// Get the [`BlobParams`] for the given timestamp
@@ -66,6 +69,18 @@ pub trait EthChainSpec: Send + Sync + Unpin + Debug {
     /// See [`AlloyBlockHeader::next_block_base_fee`].
     fn next_block_base_fee(&self, parent: &Self::Header, target_timestamp: u64) -> Option<u64> {
         parent.next_block_base_fee(self.base_fee_params_at_timestamp(target_timestamp))
+    }
+
+    /// Calculates the next base fee using the child slot number for EIP-8198.
+    ///
+    /// Chains without slot-dependent fees use the ordinary EIP-1559 calculation.
+    fn next_block_base_fee_with_slot(
+        &self,
+        parent: &Self::Header,
+        target_timestamp: u64,
+        _target_slot_number: Option<u64>,
+    ) -> Option<u64> {
+        self.next_block_base_fee(parent, target_timestamp)
     }
 }
 
@@ -128,5 +143,43 @@ impl<H: BlockHeader> EthChainSpec for ChainSpec<H> {
 
     fn final_paris_total_difficulty(&self) -> Option<U256> {
         self.get_final_paris_total_difficulty()
+    }
+
+    fn next_block_base_fee_with_slot(
+        &self,
+        parent: &Self::Header,
+        target_timestamp: u64,
+        target_slot_number: Option<u64>,
+    ) -> Option<u64> {
+        if !self.is_bogota_active_at_timestamp(target_timestamp) {
+            return self.next_block_base_fee(parent, target_timestamp);
+        }
+
+        let slots_elapsed = target_slot_number?.checked_sub(parent.slot_number()?)?;
+        if slots_elapsed == 0 {
+            return None;
+        }
+        let seconds_elapsed = target_timestamp.checked_sub(parent.timestamp())?;
+        let base_fee = parent.base_fee_per_gas()?;
+        let gas_target = parent.gas_limit() / 2;
+        if gas_target == 0 {
+            return Some(base_fee);
+        }
+        // Divide by the gas target first to preserve the execution spec's rounding.
+        // Wide arithmetic also covers slot gaps whose 96 * slots denominator exceeds u64.
+        let target_fee_gas_delta = U256::from(base_fee) *
+            U256::from(parent.gas_used().abs_diff(gas_target)) /
+            U256::from(gas_target);
+        let reference_seconds = U256::from(slots_elapsed) * U256::from(12);
+        let seconds_elapsed = U256::from(seconds_elapsed).min(reference_seconds);
+        let delta = u64::try_from(
+            target_fee_gas_delta * seconds_elapsed / (U256::from(8) * reference_seconds),
+        )
+        .ok()?;
+        Some(if parent.gas_used() > gas_target {
+            base_fee.saturating_add(delta.max(1))
+        } else {
+            base_fee.saturating_sub(delta)
+        })
     }
 }

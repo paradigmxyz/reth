@@ -2474,4 +2474,36 @@ mod tests {
             Err(InvalidPoolTransactionError::ExceedsGasLimit(60_000_001, 60_000_000))
         ));
     }
+
+    #[test]
+    fn total_transaction_gas_cap_survives_head_updates() {
+        let spec = ChainSpecBuilder::mainnet().bogota_activated().build();
+        let provider =
+            MockEthProvider::default().with_chain_spec(spec.clone()).with_genesis_block();
+        let validator =
+            EthTransactionValidatorBuilder::new(provider, EthEvmConfig::new(Arc::new(spec)))
+                .build(InMemoryBlobStore::default());
+        let head = alloy_consensus::Header { gas_limit: 5_000_000_000, ..Default::default() };
+        validator.block_gas_limit.store(head.gas_limit, std::sync::atomic::Ordering::Relaxed);
+        for update_head in [false, true] {
+            if update_head {
+                validator.on_new_head_block(&head);
+            }
+            let at_cap =
+                eip1559_tx(Address::repeat_byte(1), Address::repeat_byte(2), 0, u32::MAX as u64);
+            assert!(validator.validate_stateless(TransactionOrigin::External, &at_cap).is_ok());
+            let over_cap = eip1559_tx(
+                Address::repeat_byte(1),
+                Address::repeat_byte(2),
+                0,
+                u32::MAX as u64 + 1,
+            );
+            assert!(matches!(
+                validator.validate_stateless(TransactionOrigin::External, &over_cap),
+                Err(InvalidPoolTransactionError::Consensus(
+                    InvalidTransactionError::GasLimitTooHigh
+                ))
+            ));
+        }
+    }
 }

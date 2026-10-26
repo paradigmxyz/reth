@@ -421,6 +421,10 @@ pub trait LoadPendingBlock:
                         BlockValidationError::TransactionGasLimitMoreThanAvailableBlockGas {
                             transaction_gas_limit,
                             block_available_gas,
+                        } |
+                        BlockValidationError::TransactionGasLimitMoreThanCap {
+                            transaction_gas_limit,
+                            cap: block_available_gas,
                         },
                     )) => {
                         best_txs.mark_invalid(

@@ -81,6 +81,14 @@ impl InvalidTxError for EthInvalidTxError {
     fn as_any(&self) -> &(dyn Any + 'static) {
         &self.0
     }
+
+    fn is_nonce_too_high(&self) -> bool {
+        matches!(self.0, HandlerError::InvalidNonce { expected, got } if got > expected)
+    }
+
+    fn is_insufficient_funds(&self) -> bool {
+        matches!(self.0, HandlerError::InsufficientFunds { .. })
+    }
 }
 
 impl TryFrom<HandlerError> for EthInvalidTxError {

@@ -22,7 +22,10 @@ pub fn spec_id_by_timestamp_and_block_number<C>(
 where
     C: EthereumHardforks,
 {
-    if chain_spec.is_amsterdam_active_at_timestamp(timestamp) {
+    if chain_spec.is_bogota_active_at_timestamp(timestamp) ||
+        chain_spec.is_amsterdam_active_at_timestamp(timestamp)
+    {
+        // Bogota retains Amsterdam's EVM features; FOCIL is enforced by the engine.
         SpecId::AMSTERDAM
     } else if chain_spec.is_osaka_active_at_timestamp(timestamp) {
         SpecId::OSAKA
@@ -166,5 +169,12 @@ mod tests {
         let env = block_env_with_blob_params(&header, None);
 
         assert_eq!(env.slot_num, U256::from(42));
+    }
+
+    #[test]
+    fn bogota_selects_amsterdam_execution_features() {
+        let chain_spec = reth_chainspec::ChainSpecBuilder::mainnet().with_bogota_at(1).build();
+        assert_eq!(spec_id_by_timestamp_and_block_number(&chain_spec, 1, 0), SpecId::AMSTERDAM);
+        assert_eq!(spec_id_by_timestamp_and_block_number(&chain_spec, 0, 0), SpecId::FRONTIER);
     }
 }

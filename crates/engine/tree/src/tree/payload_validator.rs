@@ -99,6 +99,7 @@ use crate::tree::{
     error::{
         BlockAccessListDecodeError, InsertBlockError, InsertBlockErrorKind, InsertPayloadError,
     },
+    inclusion_list::{InclusionListExecution, InclusionListGas},
     instrumented_state::{InstrumentedStateProvider, StateProviderMetrics, StateProviderStats},
     metrics::PrewarmReuseStats,
     payload_processor::{
@@ -110,13 +111,16 @@ use crate::tree::{
     CacheWaitDurations, CachedStateProvider, EngineApiMetrics, EngineApiTreeState, ExecutionEnv,
     PayloadHandle, TreeConfig, WaitForCaches,
 };
-use alloy_consensus::{transaction::Either, Transaction as _};
+use alloy_consensus::{
+    transaction::{Either, TxHashRef},
+    Transaction as _, Typed2718 as _,
+};
 use alloy_eip7928::{
     bal::{Bal, DecodedBal},
     BlockAccessList,
 };
-use alloy_eips::{eip1898::BlockWithParent, eip4895::Withdrawal, NumHash};
-use alloy_primitives::{map::B256Set, B256};
+use alloy_eips::{eip1898::BlockWithParent, eip2718::Decodable2718, eip4895::Withdrawal, NumHash};
+use alloy_primitives::{map::B256Set, Bytes, B256};
 use reth_tasks::LazyHandle;
 
 use crate::tree::{
@@ -598,7 +602,14 @@ where
         // Get an iterator over the transactions in the payload
         let txs = self.tx_iterator_for(&input)?;
 
-        let parallel_bal_execution = ensure_ok!(self.bal_path_eligible(env.decoded_bal.as_deref()));
+        // Inclusion-list appendability is checked against the live post-body executor state and
+        // its two EIP-8037 gas counters. The BAL path currently consumes that state internally,
+        // so payloads with pending inclusion-list transactions use the serial executor.
+        let has_pending_inclusion_list = input
+            .inclusion_list_transactions()
+            .is_some_and(|transactions| !transactions.is_empty());
+        let parallel_bal_execution = !has_pending_inclusion_list &&
+            ensure_ok!(self.bal_path_eligible(env.decoded_bal.as_deref()));
 
         // Prepare the state-root job before execution so it can provide streaming hooks.
         let mut state_root_job =
@@ -732,7 +743,8 @@ where
         if let (Some(metrics), Some(stats)) = (&state_provider_metrics, &state_provider_stats) {
             metrics.record_totals(stats);
         }
-        let (output, senders, receipt_root_rx, executed_bal) = ensure_ok!(execution_result);
+        let (output, senders, receipt_root_rx, executed_bal, inclusion_list) =
+            ensure_ok!(execution_result);
         let (built_bal, evm_bal) =
             executed_bal.map(|ExecutedBal { alloy, evm }| (alloy, evm)).unzip();
 
@@ -911,6 +923,11 @@ where
             let _ = valid_block_tx.send(());
         }
 
+        ctx.state_mut().inclusion_lists.cache_gas(block.hash(), inclusion_list.gas);
+        if let Some(satisfied) = inclusion_list.satisfied {
+            ctx.state_mut().inclusion_lists.cache_result(block.hash(), satisfied);
+        }
+
         // The payload's raw bytes are already bound to this header: payload-to-block conversion
         // and downloaded-sidecar verification both check their hash against it, so pairing them
         // with the BAL this execution produced is sound. The zip leaves the BAL unset for a
@@ -1012,7 +1029,13 @@ where
         handle: &mut PayloadHandle<impl ExecutableTxFor<Evm>, Err, N::Receipt, EvmTypesFor<Evm>>,
         state_hook: Option<StateRootUpdateHook>,
     ) -> Result<
-        (BlockExecutionOutput<N::Receipt>, Vec<Address>, ReceiptRootReceiver, Option<ExecutedBal>),
+        (
+            BlockExecutionOutput<N::Receipt>,
+            Vec<Address>,
+            ReceiptRootReceiver,
+            Option<ExecutedBal>,
+            InclusionListExecution,
+        ),
         InsertBlockErrorKind,
     >
     where
@@ -1033,8 +1056,8 @@ where
         let evm_config = self.evm_config.clone().with_jit_support();
         let execution_ctx = self.execution_ctx_for(input).map_err(BlockExecutionError::other)?;
 
-        let (output, senders, built_bal) = debug_span!(target: "engine::tree", "execute_block")
-            .in_scope(|| {
+        let (output, senders, built_bal, inclusion_list) =
+            debug_span!(target: "engine::tree", "execute_block").in_scope(|| {
                 let db = StateProviderDatabase::new(state_provider);
                 let evm = if self.config.precompile_cache_disabled() {
                     evm_config.evm_with_env(db, env.evm_env)
@@ -1054,19 +1077,89 @@ where
                 if let Some(mut state_hook) = state_hook {
                     executor.set_state_hook(move |state| state_hook.on_state(state));
                 }
-                let senders = self.execute_transactions(
+                let (senders, executed_tx_hashes, gas) = self.execute_transactions(
                     &mut executor,
                     transaction_count,
                     handle.iter_transactions(),
                     &receipt_tx,
                     &executed_tx_index,
                     prewarm_results.as_deref(),
+                    input.inclusion_list_transactions().is_some_and(|txs| !txs.is_empty()),
                 )?;
+
+                // EIP-7805 evaluates missing inclusion-list transactions against the state and gas
+                // budgets immediately after the block body, before withdrawals and other
+                // post-execution operations. Running the normal executor without
+                // committing reuses the same transaction validation and EIP-8037
+                // gas admission rules as block execution.
+                let inclusion_list_satisfied = if let Some(transactions) =
+                    input.inclusion_list_transactions()
+                {
+                    let mut satisfied = true;
+                    for (il_index, encoded) in transactions.iter().enumerate() {
+                        let Ok(transaction) = N::SignedTx::decode_2718_exact(encoded) else {
+                            continue;
+                        };
+                        let tx_hash = reth_primitives_traits::SignedTransaction::recalculate_hash(
+                            &transaction,
+                        );
+                        if executed_tx_hashes
+                            .as_ref()
+                            .is_some_and(|hashes| hashes.contains(&tx_hash))
+                        {
+                            continue;
+                        }
+                        // EIP-7805 skips blob entries, then continues checking the remaining list.
+                        if transaction.is_eip4844() {
+                            continue;
+                        }
+                        let Ok(transaction) = SignerRecoverable::try_into_recovered(transaction)
+                        else {
+                            continue;
+                        };
+                        match executor.execute_transaction_without_commit(transaction) {
+                            Ok(_) => {
+                                info!(
+                                    target: "engine::tree",
+                                    block_hash = %input.hash(),
+                                    block_number = input.num_hash().number,
+                                    il_txs = transactions.len(),
+                                    path = "execution",
+                                    %tx_hash,
+                                    il_index,
+                                    "Inclusion list unsatisfied"
+                                );
+                                satisfied = false;
+                                break;
+                            }
+                            Err(BlockExecutionError::Validation(_)) => {}
+                            Err(err) => return Err(err.into()),
+                        }
+                    }
+                    if satisfied {
+                        debug!(
+                            target: "engine::tree",
+                            block_hash = %input.hash(),
+                            block_number = input.num_hash().number,
+                            il_txs = transactions.len(),
+                            path = "execution",
+                            "Inclusion list satisfied"
+                        );
+                    }
+                    Some(satisfied)
+                } else {
+                    None
+                };
 
                 let post_exec_start = Instant::now();
                 let (output, built_bal) = executor.finish_with_prepared_block_access_list()?;
                 self.metrics.record_post_execution(post_exec_start.elapsed());
-                Ok::<_, BlockExecutionError>((output, senders, built_bal))
+                Ok::<_, BlockExecutionError>((
+                    output,
+                    senders,
+                    built_bal,
+                    InclusionListExecution { satisfied: inclusion_list_satisfied, gas },
+                ))
             })?;
         drop(receipt_tx);
         // Free stale results off the execution path.
@@ -1081,7 +1174,7 @@ where
         self.metrics.record_block_execution_gas_bucket(output.result.gas_used, execution_duration);
         debug!(target: "engine::tree::payload_validator", elapsed = ?execution_duration, "Executed block");
 
-        Ok((output, senders, result_rx, built_bal))
+        Ok((output, senders, result_rx, built_bal, inclusion_list))
     }
 
     /// Returns true when the BAL execute path should be used for this block.
@@ -1124,7 +1217,13 @@ where
         handle: &PayloadHandle<Tx, Err, N::Receipt, EvmTypesFor<Evm>>,
         make_state_provider: &MakeStateProvider,
     ) -> Result<
-        (BlockExecutionOutput<N::Receipt>, Vec<Address>, ReceiptRootReceiver, Option<ExecutedBal>),
+        (
+            BlockExecutionOutput<N::Receipt>,
+            Vec<Address>,
+            ReceiptRootReceiver,
+            Option<ExecutedBal>,
+            InclusionListExecution,
+        ),
         InsertBlockErrorKind,
     >
     where
@@ -1150,7 +1249,7 @@ where
         let execution_start = Instant::now();
         let ctx =
             self.execution_ctx_for(input).map_err(|e| InsertBlockErrorKind::Other(Box::new(e)))?;
-        let (output, senders, built_bal, received_bal_evm) =
+        let (output, senders, built_bal, received_bal_evm, gas) =
             crate::tree::payload_processor::bal::execute_block(
                 &self.runtime,
                 &self.evm_config,
@@ -1180,6 +1279,13 @@ where
             senders,
             result_rx,
             Some(ExecutedBal { alloy: built_bal, evm: received_bal_evm }),
+            InclusionListExecution {
+                satisfied: input.inclusion_list_transactions().map(|transactions| {
+                    debug_assert!(transactions.is_empty());
+                    true
+                }),
+                gas,
+            },
         ))
     }
 
@@ -1196,13 +1302,18 @@ where
         (receipt_tx, result_rx)
     }
 
-    /// Executes transactions and collects senders, streaming receipts to a background task.
+    /// Executes transactions, collecting senders, optional hashes, and both gas totals.
     ///
     /// This method handles:
     /// - Applying pre-execution changes (e.g., beacon root updates)
     /// - Executing each transaction with timing metrics
     /// - Streaming receipts to the receipt root computation task
     /// - Collecting transaction senders for later use
+    /// - Recording regular/state gas and hashes needed for inclusion-list checks
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "Includes prewarm reuse and inclusion-list hash collection."
+    )]
     fn execute_transactions<Tx, Err>(
         &self,
         executor: &mut BlockExecutorFor<'_, Evm>,
@@ -1211,7 +1322,8 @@ where
         receipt_tx: &ReceiptRootSender<N>,
         executed_tx_index: &AtomicUsize,
         prewarm_results: Option<&PrewarmResults<EvmTypesFor<Evm>>>,
-    ) -> Result<Vec<Address>, BlockExecutionError>
+        collect_transaction_hashes: bool,
+    ) -> Result<(Vec<Address>, Option<B256Set>, InclusionListGas), BlockExecutionError>
     where
         Tx: ExecutableTxFor<Evm>,
         Err: core::error::Error + Send + Sync + 'static,
@@ -1226,6 +1338,8 @@ where
         let exec_span = debug_span!(target: "engine::tree", "execution").entered();
         let mut senders = Vec::with_capacity(transaction_count);
         let mut reuse_stats = PrewarmReuseStats::default();
+        let mut gas = InclusionListGas::default();
+        let mut transaction_hashes = collect_transaction_hashes.then(B256Set::default);
         let mut transactions = transactions.into_iter();
         // Some executors may execute transactions that do not append receipts during the
         // main loop (e.g., system transactions whose receipts are added during finalization).
@@ -1240,6 +1354,9 @@ where
             self.metrics.record_transaction_wait(wait_start.elapsed());
             let tx = tx_result.map_err(BlockValidationError::other)?;
             senders.push(*tx.signer());
+            if let Some(hashes) = &mut transaction_hashes {
+                hashes.insert(*tx.tx().tx_hash());
+            }
 
             let _enter = tracing::enabled!(target: "engine::tree", Level::TRACE).then(|| {
                 tracing::trace_span!(
@@ -1255,21 +1372,23 @@ where
 
             let tx_start = Instant::now();
             let index = senders.len() - 1;
-            match prewarm_results {
+            let used = match prewarm_results {
                 Some(results) => {
                     let outcome = self.commit_prewarm_result(executor, results, index, tx.tx())?;
-                    if outcome.is_err() {
-                        // Later prewarm results are refreshed against the actual writes.
-                        let result = executor.execute_transaction_without_commit(tx)?;
-                        results.publish_executed(index, &result.result().pending_state);
-                        executor.commit_transaction(result)?;
+                    reuse_stats.record(outcome.map(|_| ()));
+                    match outcome {
+                        Ok(used) => used,
+                        Err(_) => {
+                            let result = executor.execute_transaction_without_commit(tx)?;
+                            results.publish_executed(index, &result.result().pending_state);
+                            executor.commit_transaction(result)?
+                        }
                     }
-                    reuse_stats.record(outcome);
                 }
-                None => {
-                    executor.execute_transaction(tx)?;
-                }
-            }
+                None => executor.execute_transaction(tx)?,
+            };
+            gas.execution += used.regular_gas_used();
+            gas.state += used.state_gas_used();
             self.metrics.record_transaction_execution(tx_start.elapsed());
 
             // advance the shared counter so prewarm workers skip already-executed txs
@@ -1292,7 +1411,7 @@ where
         if prewarm_results.is_some() {
             self.metrics.prewarm_reuse.record(reuse_stats);
         }
-        Ok(senders)
+        Ok((senders, transaction_hashes, gas))
     }
 
     /// Commits the prewarm result of the transaction at `index` instead of executing it, if the
@@ -1303,7 +1422,7 @@ where
         results: &PrewarmResults<EvmTypesFor<Evm>>,
         index: usize,
         tx: &TxTy<N>,
-    ) -> Result<Result<(), ReuseMiss>, BlockExecutionError> {
+    ) -> Result<Result<reth_evm::GasOutput, ReuseMiss>, BlockExecutionError> {
         executor.validate_transaction_gas_limit(tx.gas_limit())?;
         let result = match results
             .take_valid(index, executor.evm_mut().state_db_mut())
@@ -1315,8 +1434,8 @@ where
         let Some(result) = self.evm_config.prewarm_tx_result(tx, result) else {
             return Ok(Err(ReuseMiss::Stale))
         };
-        executor.commit_transaction(result)?;
-        Ok(Ok(()))
+        let gas = executor.commit_transaction(result)?;
+        Ok(Ok(gas))
     }
 
     /// Validates the block after execution.
@@ -2057,6 +2176,17 @@ impl<T: PayloadTypes> BlockOrPayload<T> {
         }
     }
 
+    /// Returns the inclusion-list transactions supplied with an Engine API payload.
+    pub fn inclusion_list_transactions(&self) -> Option<&[Bytes]>
+    where
+        T::ExecutionData: ExecutionPayload,
+    {
+        match self {
+            Self::Payload(payload) => payload.inclusion_list_transactions(),
+            Self::Block(_) => None,
+        }
+    }
+
     /// Returns the number of transactions in the payload or block.
     pub fn transaction_count(&self) -> usize
     where
@@ -2098,6 +2228,28 @@ impl<T: PayloadTypes> BlockOrPayload<T> {
         match self {
             Self::Payload(payload) => payload.gas_limit(),
             Self::Block(block) => block.gas_limit(),
+        }
+    }
+
+    /// Returns the timestamp of the block.
+    pub fn timestamp(&self) -> u64
+    where
+        T::ExecutionData: ExecutionPayload,
+    {
+        match self {
+            Self::Payload(payload) => payload.timestamp(),
+            Self::Block(block) => block.timestamp(),
+        }
+    }
+
+    /// Returns the blob gas used by the block, `None` before Cancun.
+    pub fn blob_gas_used(&self) -> Option<u64>
+    where
+        T::ExecutionData: ExecutionPayload,
+    {
+        match self {
+            Self::Payload(payload) => payload.blob_gas_used(),
+            Self::Block(block) => block.blob_gas_used(),
         }
     }
 }

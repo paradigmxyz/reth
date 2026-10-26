@@ -23,21 +23,23 @@ use reth_engine_primitives::{
     NewPayloadTimings, OnForkChoiceUpdated, SlowBlockInfo,
 };
 use reth_errors::{ConsensusError, ProviderResult};
-use reth_evm::{debug_unreachable, ConfigureEvm};
+use reth_evm::{
+    database::StateProviderDatabase, debug_unreachable, BlockExecutor, ConfigureEvm, EvmEnv,
+};
 use reth_network_p2p::full_block::SealedBlockWithAccessList;
 use reth_payload_builder::{BuildNewPayload, PayloadBuilderHandle, PayloadBuilderLease};
 use reth_payload_primitives::{BuiltPayload, NewPayloadError, PayloadAttributes, PayloadTypes};
 use reth_primitives_traits::{
-    FastInstant as Instant, NodePrimitives, RecoveredBlock, SealedBlock, SealedHeader,
+    BlockBody, FastInstant as Instant, NodePrimitives, RecoveredBlock, SealedBlock, SealedHeader,
 };
 use reth_provider::{
     BalProvider, BlockExecutionOutput, BlockExecutionResult, BlockReader, ChangeSetReader,
-    DatabaseProviderFactory, ProviderError, PruneCheckpointReader, SaveBlocksInput,
-    StageCheckpointReader, StateProviderFactory, StateReader, StorageChangeSetReader,
-    StorageSettingsCache, TransactionVariant,
+    DatabaseProviderFactory, HistoryReader, ProviderError, PruneCheckpointReader, SaveBlocksInput,
+    StageCheckpointReader, StateProvider, StateProviderFactory, StateReader,
+    StorageChangeSetReader, StorageSettingsCache, TransactionVariant,
 };
 use reth_stages_api::ControlFlow;
-use reth_storage_overlay::OverlayManager;
+use reth_storage_overlay::{OverlayManager, OverlayStateProviderFactory};
 use reth_tasks::{spawn_os_thread, utils::increase_thread_priority};
 use reth_trie::{HashedPostState, KeccakKeyHasher, SortedTrieData};
 use state::TreeState;
@@ -59,6 +61,10 @@ use tokio::sync::{
 use tracing::*;
 
 mod block_buffer;
+mod inclusion_list;
+use inclusion_list::{
+    inclusion_list_satisfied, InclusionListContext, InclusionListGas, RetainedInclusionLists,
+};
 pub mod error;
 pub mod instrumented_state;
 mod invalid_headers;
@@ -115,6 +121,8 @@ pub struct EngineApiTreeState<N: NodePrimitives> {
     /// Tracks the header of invalid payloads that were rejected by the engine because they're
     /// invalid.
     invalid_headers: InvalidHeaderCache,
+    /// Inclusion lists supplied to `engine_newPayloadV6`.
+    inclusion_lists: RetainedInclusionLists,
 }
 
 impl<N: NodePrimitives> EngineApiTreeState<N> {
@@ -135,6 +143,7 @@ impl<N: NodePrimitives> EngineApiTreeState<N> {
             tree_state: TreeState::new(canonical_block, engine_kind, overlay_manager),
             pending_sparse_trie_prune: false,
             forkchoice_state_tracker: ForkchoiceStateTracker::default(),
+            inclusion_lists: RetainedInclusionLists::default(),
         }
     }
 
@@ -365,6 +374,7 @@ where
         + ChangeSetReader
         + StorageChangeSetReader
         + StorageSettingsCache
+        + HistoryReader
         + 'static,
     C: ConfigureEvm<Primitives = N> + 'static,
     T: PayloadTypes<BuiltPayload: BuiltPayload<Primitives = N>>,
@@ -1695,12 +1705,32 @@ where
                                     warn!(target: "engine::tree", ?state, elapsed=?start.elapsed(), "Failed to deliver forkchoiceUpdated response, receiver dropped (request cancelled): {err:?}");
                                 }
                             }
-                            BeaconEngineMessage::NewPayload { cause, payload, tx } => {
+                            BeaconEngineMessage::NewPayload {
+                                cause,
+                                payload,
+                                inclusion_list_transactions,
+                                tx,
+                            } => {
                                 let _cause = cause.enter();
                                 let start = Instant::now();
                                 let gas_used = payload.gas_used();
                                 let num_hash = payload.num_hash();
+                                if let Some(transactions) = inclusion_list_transactions {
+                                    debug!(
+                                        target: "engine::tree",
+                                        block_hash = %payload.block_hash(),
+                                        il_txs = transactions.len(),
+                                        il_bytes = transactions.iter().map(|tx| tx.len()).sum::<usize>(),
+                                        "Received inclusion list"
+                                    );
+                                    self.state
+                                        .inclusion_lists
+                                        .insert(payload.block_hash(), transactions);
+                                }
                                 let mut output = self.on_new_payload(payload);
+                                if output.as_ref().is_ok_and(|out| out.outcome.is_invalid()) {
+                                    self.state.inclusion_lists.remove(&num_hash.hash);
+                                }
                                 self.metrics.engine.new_payload.update_response_metrics(
                                     start,
                                     &mut self.metrics.engine.forkchoice_updated.latest_finish_at,
@@ -1724,6 +1754,13 @@ where
 
                                 // handle the event if any
                                 self.on_maybe_tree_event(maybe_event)?;
+                            }
+                            BeaconEngineMessage::InclusionListStatus { block_hash, tx } => {
+                                let result =
+                                    self.inclusion_list_status(block_hash).map_err(Into::into);
+                                if tx.send(result).is_err() {
+                                    warn!(target: "engine::tree", %block_hash, "Failed to deliver inclusion-list status");
+                                }
                             }
                             BeaconEngineMessage::RethNewPayload {
                                 cause,
@@ -3558,6 +3595,103 @@ where
         // This ensures that the safe block is consistent with the head block, i.e. the safe
         // block is an ancestor of the head block.
         self.update_safe_block(state.safe_block_hash)
+    }
+
+    /// Returns the cached EIP-7805 result, computing it against the payload post-state if needed.
+    fn inclusion_list_status(&mut self, block_hash: B256) -> ProviderResult<Option<bool>> {
+        if let Some(result) = self.state.inclusion_lists.cached_result(&block_hash) {
+            return Ok(Some(result));
+        }
+        // A list that was never retained, or has been evicted, reports nothing rather than
+        // guessing.
+        let Some(transactions) = self.state.inclusion_lists.get(&block_hash).cloned() else {
+            return Ok(None);
+        };
+        let block = if let Some(block) = self.state.tree_state.executed_block_by_hash(block_hash) {
+            block.recovered_block().clone()
+        } else {
+            let Some(block) = self
+                .provider
+                .sealed_block_with_senders(block_hash.into(), TransactionVariant::WithHash)?
+            else {
+                return Ok(None);
+            };
+            block
+        };
+        if transactions.is_empty() {
+            self.state.inclusion_lists.cache_result(block_hash, true);
+            return Ok(Some(true));
+        }
+        let provider_factory = OverlayStateProviderFactory::new(
+            self.provider.clone(),
+            self.state.tree_state.overlay_manager.overlay_builder(block_hash),
+        );
+        let state: reth_provider::StateProviderBox = Box::new(
+            reth_provider::DatabaseProviderROFactory::database_provider_ro(&provider_factory)?,
+        );
+
+        // The EVM environment supplies the chain id and the EIP-7825 gas cap the block was
+        // executed under. The spec permits a null result, so a failure here reports nothing.
+        let evm_env = match self.evm_config.evm_env(block.header()) {
+            Ok(evm_env) => evm_env,
+            Err(err) => {
+                warn!(target: "engine::tree", %block_hash, %err, "Failed to build EVM env for inclusion-list check");
+                return Ok(None);
+            }
+        };
+        // A header stores only the maximum of the two EIP-8037 gas totals. Replay once when
+        // accounting is unavailable, then retain both totals across replacement lists.
+        let gas = if let Some(gas) = self.state.inclusion_lists.gas(&block_hash) {
+            gas
+        } else {
+            let gas = self.inclusion_list_gas(&block)?;
+            self.state.inclusion_lists.cache_gas(block_hash, gas);
+            gas
+        };
+        let ctx = InclusionListContext {
+            chain_id: evm_env.chain_id(),
+            version: *evm_env.version(),
+            total_tx_gas_limit_cap: match evm_env.transaction_validation_limits().tx_gas_limit_cap {
+                0 => u64::MAX,
+                cap => cap,
+            },
+            base_fee_per_gas: block.base_fee_per_gas(),
+            available_gas: block.gas_limit().saturating_sub(gas.execution),
+            available_state_gas: block.gas_limit().saturating_sub(gas.state),
+            tx_gas_limit_cap: evm_env.regular_gas_limit_cap(),
+            max_initcode_size: evm_env.transaction_validation_limits().max_initcode_size,
+        };
+
+        let result = inclusion_list_satisfied::<N>(&block, &state, &ctx, &transactions)?;
+        self.state.inclusion_lists.cache_result(block_hash, result);
+        Ok(Some(result))
+    }
+
+    /// Recovers the gas budgets immediately after the transactions, before post-execution calls.
+    fn inclusion_list_gas(
+        &self,
+        block: &RecoveredBlock<N::Block>,
+    ) -> ProviderResult<InclusionListGas> {
+        if block.body().transactions_iter().next().is_none() {
+            return Ok(InclusionListGas::default());
+        }
+        let parent_hash = block.parent_hash();
+        let factory = OverlayStateProviderFactory::new(
+            self.provider.clone(),
+            self.state.tree_state.overlay_manager.overlay_builder(parent_hash),
+        );
+        let provider = reth_provider::DatabaseProviderROFactory::database_provider_ro(&factory)?;
+        let db = StateProviderDatabase::new(provider.into_evm_state_provider());
+        let mut executor =
+            self.evm_config.executor_for_block(db, block).map_err(ProviderError::other)?;
+        executor.apply_pre_execution_changes().map_err(ProviderError::other)?;
+        let mut gas = InclusionListGas::default();
+        for transaction in block.transactions_recovered() {
+            let used = executor.execute_transaction(transaction).map_err(ProviderError::other)?;
+            gas.execution += used.regular_gas_used();
+            gas.state += used.state_gas_used();
+        }
+        Ok(gas)
     }
 
     /// Validates the payload attributes with respect to the header and fork choice state.

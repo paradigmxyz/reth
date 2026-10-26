@@ -40,6 +40,16 @@ pub trait InvalidTxError: Error + Send + Sync + Any + 'static {
 
     /// Returns the error as [`Any`] for consumers that need engine-specific downcasts.
     fn as_any(&self) -> &(dyn Any + 'static);
+
+    /// Returns whether an earlier transaction could fill the sender's nonce gap.
+    fn is_nonce_too_high(&self) -> bool {
+        false
+    }
+
+    /// Returns whether an earlier transaction could fund the sender's upfront cost.
+    fn is_insufficient_funds(&self) -> bool {
+        false
+    }
 }
 
 /// Block validation error.
@@ -73,6 +83,14 @@ pub enum BlockValidationError {
         transaction_gas_limit: u64,
         /// The available block gas.
         block_available_gas: u64,
+    },
+    /// Error when a transaction exceeds the total gas cap, independently of block capacity.
+    #[error("transaction gas limit {transaction_gas_limit} exceeds total gas cap {cap}")]
+    TransactionGasLimitMoreThanCap {
+        /// The transaction's full gas limit, including its state-gas reservoir.
+        transaction_gas_limit: u64,
+        /// The active total transaction gas cap.
+        cap: u64,
     },
     /// Error for EIP-4788 when parent beacon block root is missing.
     #[error("EIP-4788 parent beacon block root missing for active Cancun block")]

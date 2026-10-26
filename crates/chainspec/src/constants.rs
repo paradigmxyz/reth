@@ -1,5 +1,5 @@
 use crate::spec::DepositContract;
-use alloy_eips::eip6110::MAINNET_DEPOSIT_CONTRACT_ADDRESS;
+use alloy_eips::{eip6110::MAINNET_DEPOSIT_CONTRACT_ADDRESS, eip7840::BlobParams};
 use alloy_primitives::b256;
 
 /// Gas per transaction not creating a contract.
@@ -14,3 +14,6 @@ pub(crate) const MAINNET_DEPOSIT_CONTRACT: DepositContract = DepositContract::ne
     11052984,
     b256!("0x649bbc62d0e31342afea4e5cd82d4049e7e1ee912fc0889aa790803be39038c5"),
 );
+
+/// Default Bogota blob schedule, inherited from Amsterdam.
+pub(crate) const BOGOTA_BLOB_PARAMS: BlobParams = BlobParams::bpo2();

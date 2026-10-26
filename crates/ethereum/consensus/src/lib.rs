@@ -275,6 +275,18 @@ where
 
         validate_against_parent_timestamp(header.header(), parent.header())?;
 
+        if self.chain_spec.is_bogota_active_at_timestamp(header.timestamp()) {
+            let parent_slot_number =
+                parent.slot_number().ok_or(ConsensusError::SlotNumberMissing)?;
+            let slot_number = header.slot_number().ok_or(ConsensusError::SlotNumberMissing)?;
+            if slot_number <= parent_slot_number {
+                return Err(ConsensusError::SlotNumberNotIncreasing {
+                    parent_slot_number,
+                    slot_number,
+                });
+            }
+        }
+
         if !self.skip_gas_limit_ramp_check {
             validate_against_parent_gas_limit(header, parent, &self.chain_spec)?;
         }
@@ -559,5 +571,84 @@ mod tests {
             .unwrap_err(),
             ConsensusError::BlockAccessListHashMissing
         ));
+    }
+
+    #[test]
+    fn bogota_slot_number_validation_starts_at_fork() {
+        let chain_spec = Arc::new(
+            ChainSpecBuilder::mainnet().amsterdam_activated().with_bogota_at(15_000).build(),
+        );
+        let consensus = EthBeaconConsensus::new(chain_spec);
+        let parent = SealedHeader::seal_slow(Header {
+            gas_limit: 30_000_000,
+            base_fee_per_gas: Some(7),
+            timestamp: 14_988,
+            slot_number: Some(42),
+            blob_gas_used: Some(0),
+            excess_blob_gas: Some(0),
+            ..Default::default()
+        });
+        for timestamp in [14_999, 15_000] {
+            for slot_number in [41, 42, 43, 44] {
+                let child = SealedHeader::seal_slow(Header {
+                    parent_hash: parent.hash(),
+                    number: 1,
+                    timestamp,
+                    slot_number: Some(slot_number),
+                    ..parent.header().clone()
+                });
+                let result = consensus.validate_header_against_parent(&child, &parent);
+                if timestamp >= 15_000 && slot_number <= 42 {
+                    assert!(matches!(
+                        result,
+                        Err(ConsensusError::SlotNumberNotIncreasing {
+                            parent_slot_number: 42,
+                            slot_number: got,
+                        }) if got == slot_number
+                    ));
+                } else {
+                    assert!(
+                        result.is_ok(),
+                        "timestamp={timestamp}, slot={slot_number}: {result:?}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn bogota_parent_validation_uses_derived_base_fee() {
+        let chain_spec = Arc::new(ChainSpecBuilder::mainnet().bogota_activated().build());
+        let consensus = EthBeaconConsensus::new(chain_spec);
+        let parent = SealedHeader::seal_slow(Header {
+            gas_limit: 30_000_000,
+            gas_used: 30_000_000,
+            base_fee_per_gas: Some(875_000_000),
+            timestamp: 14_999,
+            slot_number: Some(100),
+            blob_gas_used: Some(0),
+            excess_blob_gas: Some(0),
+            ..Default::default()
+        });
+        for base_fee in [975_260_416, 966_145_833] {
+            let child = SealedHeader::seal_slow(Header {
+                parent_hash: parent.hash(),
+                number: 1,
+                timestamp: 15_010,
+                slot_number: Some(101),
+                base_fee_per_gas: Some(base_fee),
+                ..parent.header().clone()
+            });
+            let result = consensus.validate_header_against_parent(&child, &parent);
+            if base_fee == 975_260_416 {
+                assert!(result.is_ok(), "{result:?}");
+            } else {
+                assert!(matches!(
+                    result,
+                    Err(ConsensusError::BaseFeeDiff(diff))
+                        if diff.got == base_fee && diff.expected == 975_260_416
+                ));
+            }
+        }
     }
 }

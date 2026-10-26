@@ -42,12 +42,14 @@ use reth_primitives_traits::ReceiptTy;
 use reth_tasks::Runtime;
 use std::sync::Arc;
 
-use crate::tree::payload_processor::receipt_root_task::IndexedReceipt;
+use crate::tree::{
+    inclusion_list::InclusionListGas, payload_processor::receipt_root_task::IndexedReceipt,
+};
 
 /// Executes one block on the BAL path using the runtime's persistent BAL worker pool.
 ///
 /// Returns the execution output, the recovered senders, the BAL rebuilt from this execution, and
-/// the received BAL in the evm2 representation the workers consumed.
+/// the received BAL in the evm2 representation the workers consumed, and the canonical gas totals.
 #[expect(clippy::too_many_arguments, clippy::type_complexity)]
 pub fn execute_block<'a, Evm, Tx, Err, DB, MakeDb>(
     runtime: &Runtime,
@@ -60,7 +62,13 @@ pub fn execute_block<'a, Evm, Tx, Err, DB, MakeDb>(
     txs: Receiver<(usize, Result<Tx, Err>)>,
     receipt_tx: Sender<IndexedReceipt<ReceiptTy<Evm::Primitives>>>,
 ) -> Result<
-    (BlockExecutionOutput<ReceiptTy<Evm::Primitives>>, Vec<Address>, BlockAccessList, Arc<EvmBal>),
+    (
+        BlockExecutionOutput<ReceiptTy<Evm::Primitives>>,
+        Vec<Address>,
+        BlockAccessList,
+        Arc<EvmBal>,
+        InclusionListGas,
+    ),
     BalExecutionError,
 >
 where
@@ -102,7 +110,13 @@ fn execute_block_inner<'scope, Evm, Tx, Err, DB, MakeDb>(
     receipt_tx: Sender<IndexedReceipt<ReceiptTy<Evm::Primitives>>>,
     worker_count: usize,
 ) -> Result<
-    (BlockExecutionOutput<ReceiptTy<Evm::Primitives>>, Vec<Address>, BlockAccessList, Arc<EvmBal>),
+    (
+        BlockExecutionOutput<ReceiptTy<Evm::Primitives>>,
+        Vec<Address>,
+        BlockAccessList,
+        Arc<EvmBal>,
+        InclusionListGas,
+    ),
     BalExecutionError,
 >
 where
@@ -155,6 +169,7 @@ where
     canonical_executor.apply_pre_execution_changes()?;
 
     let mut senders = Vec::with_capacity(transaction_count);
+    let mut gas = InclusionListGas::default();
     let mut last_sent_len = 0;
     for output in ordered_worker_outputs(&result_rx, transaction_count) {
         let output = match output {
@@ -177,7 +192,9 @@ where
             Err(error) => return Err(error.into()),
         };
         canonical_executor.validate_transaction_gas_limit(output.tx_gas_limit)?;
-        canonical_executor.commit_transaction(output.result)?;
+        let used = canonical_executor.commit_transaction(output.result)?;
+        gas.execution += used.regular_gas_used();
+        gas.state += used.state_gas_used();
         senders.push(output.signer);
 
         let current_len = canonical_executor.receipts().len();
@@ -193,7 +210,7 @@ where
     let (output, built_bal) = canonical_executor.finish_with_block_access_list()?;
     let built_bal = built_bal.expect("BAL builder was enabled for parallel execution");
     log_bal_divergence(&built_bal, input_bal.as_bal());
-    Ok((output, senders, built_bal, received_bal))
+    Ok((output, senders, built_bal, received_bal, gas))
 }
 
 fn log_bal_divergence(built_bal: &BlockAccessList, received_bal: &Bal) {
@@ -384,7 +401,7 @@ mod tests {
             tx_stream(txs),
             receipt_tx,
         )
-        .map(|(output, _, built_bal, _)| (output, built_bal))
+        .map(|(output, _, built_bal, _, _)| (output, built_bal))
     }
 
     /// Inserts `AccountInfo { nonce: 0, balance }` for `addr` into the canonical DB.

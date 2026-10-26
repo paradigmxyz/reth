@@ -142,7 +142,12 @@ where
             let next = ready!(this.stream.poll_next_unpin(cx));
             let item = match (next, &this.last_forkchoice_state) {
                 (
-                    Some(BeaconEngineMessage::NewPayload { cause, payload, tx }),
+                    Some(BeaconEngineMessage::NewPayload {
+                        cause,
+                        payload,
+                        inclusion_list_transactions,
+                        tx,
+                    }),
                     Some(last_forkchoice_state),
                 ) if this.forkchoice_states_forwarded > this.frequency &&
                         // Only enter reorg state if new payload attaches to current head.
@@ -172,6 +177,7 @@ where
                             return Poll::Ready(Some(BeaconEngineMessage::NewPayload {
                                 cause,
                                 payload,
+                                inclusion_list_transactions,
                                 tx,
                             }))
                         }
@@ -191,11 +197,17 @@ where
 
                     let queue = VecDeque::from([
                         // Current payload
-                        BeaconEngineMessage::NewPayload { cause: cause.clone(), payload, tx },
+                        BeaconEngineMessage::NewPayload {
+                            cause: cause.clone(),
+                            payload,
+                            inclusion_list_transactions,
+                            tx,
+                        },
                         // Reorg payload
                         BeaconEngineMessage::NewPayload {
                             cause: cause.clone(),
                             payload: T::block_to_payload(reorg_block, encoded_bal),
+                            inclusion_list_transactions: None,
                             tx: reorg_payload_tx,
                         },
                         // Reorg forkchoice state
