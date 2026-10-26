@@ -92,6 +92,7 @@ mod tests {
     };
     use alloy_consensus::{Header, SignableTransaction, Transaction, TxLegacy};
     use alloy_primitives::{Address, BlockHash, Signature, TxNumber, B256, U160, U256};
+    use assert_matches::assert_matches;
     use rand::seq::SliceRandom;
     use reth_db::{
         models::{AccountBeforeTx, StorageBeforeTx},
@@ -99,6 +100,7 @@ mod tests {
     };
     use reth_db_api::{transaction::DbTxMut, CanonicalHeaders, HeaderNumbers, Headers};
     use reth_ethereum_primitives::{EthPrimitives, Receipt, TransactionSigned};
+    use reth_nippy_jar::NippyJarError;
     use reth_primitives_traits::Account;
     use reth_static_file_types::{
         find_fixed_range, SegmentRangeInclusive, DEFAULT_BLOCKS_PER_STATIC_FILE,
@@ -1446,5 +1448,61 @@ mod tests {
 
         assert_eq!(sf_rw.block_hash(2).unwrap(), Some(hash(2)));
         assert_eq!(sf_rw.block_hash(3).unwrap(), None);
+    }
+
+    #[test]
+    fn test_header_read_errors_are_not_missing_blocks() {
+        for corrupt_offsets in [true, false] {
+            let (static_dir, _) = create_test_static_files_dir();
+            let provider = StaticFileProvider::<EthPrimitives>::read_write(&static_dir).unwrap();
+            let header = Header::default();
+            let hash = header.hash_slow();
+            {
+                let mut writer = provider.latest_writer(StaticFileSegment::Headers).unwrap();
+                writer.append_header(&header, &hash).unwrap();
+                writer.commit().unwrap();
+            }
+
+            assert_eq!(provider.header_by_number(0).unwrap(), Some(header));
+            assert_eq!(provider.block_hash(0).unwrap(), Some(hash));
+            assert_eq!(provider.header_by_number(1).unwrap(), None);
+            assert_eq!(provider.block_hash(1).unwrap(), None);
+
+            let jar = provider
+                .get_segment_provider_for_block(StaticFileSegment::Headers, 0, None)
+                .unwrap();
+            let path =
+                if corrupt_offsets { jar.offsets_path() } else { jar.data_path().to_path_buf() };
+            drop(jar);
+            drop(provider);
+
+            // Corrupt the files before opening any readers, retaining the committed row count.
+            let mut bytes = reth_fs_util::read(&path).unwrap();
+            if corrupt_offsets {
+                // Retain the offset-size byte, but point every offset beyond the data file.
+                bytes[1..].fill(u8::MAX);
+            } else {
+                // An unterminated LZ4 literal-length sequence cannot be decompressed.
+                bytes.fill(u8::MAX);
+            }
+            reth_fs_util::write(&path, bytes).unwrap();
+
+            let provider = StaticFileProvider::<EthPrimitives>::read_only(&static_dir).unwrap();
+            for error in [
+                provider.header_by_number(0).unwrap_err(),
+                provider.block_hash(0).unwrap_err(),
+                provider.sealed_header(0).unwrap_err(),
+                provider.headers_range(0..1).unwrap_err(),
+            ] {
+                let error = error.downcast_other_ref::<NippyJarError>().unwrap();
+                if corrupt_offsets {
+                    assert_matches!(error, NippyJarError::InconsistentState);
+                } else {
+                    assert_matches!(error, NippyJarError::OutputTooSmall);
+                }
+            }
+            assert_eq!(provider.header_by_number(1).unwrap(), None);
+            assert_eq!(provider.block_hash(1).unwrap(), None);
+        }
     }
 }

@@ -339,6 +339,17 @@ jobs:
           fetch-depth: 0
           ref: ${{ needs.resolve-refs.outputs.feature-ref }}
 
+      # Docker-build revisions may predate the chart project used by this workflow.
+      - name: Check out chart dependencies from workflow revision
+        if: env.BENCH_MODE != 'hourly'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ github.repository }}
+          ref: ${{ github.workflow_sha }}
+          path: .bench-chart-workflow
+          sparse-checkout: scripts/bench-reth-charts
+          persist-credentials: false
+
       - name: Resolve job URL
         id: job-url
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
@@ -364,6 +375,7 @@ jobs:
           version: "0.13.4"
 
       - name: Install dependencies
+        id: install-deps
         env:
           DEREK_TOKEN: ${{ secrets.DEREK_TOKEN }}
         run: |
@@ -408,6 +420,7 @@ jobs:
           fi
 
       - name: Check dependencies
+        id: check-deps
         run: |
           export PATH="$HOME/.local/bin:$HOME/.cargo/bin:$PATH"
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
@@ -740,7 +753,7 @@ jobs:
           CHART_ARGS="$CHART_ARGS --baseline-name ${BASELINE_NAME}"
           CHART_ARGS="$CHART_ARGS --feature-name ${FEATURE_NAME}"
           # shellcheck disable=SC2086
-          uv run --with matplotlib==3.10.8 --with pillow==12.3.0 python3 .github/scripts/bench-reth-charts.py $CHART_ARGS
+          uv run --frozen --project "$GITHUB_WORKSPACE/.bench-chart-workflow/scripts/bench-reth-charts" python3 .github/scripts/bench-reth-charts.py $CHART_ARGS
 
       - name: Upload results
         if: "!cancelled()"
@@ -992,6 +1005,8 @@ jobs:
             if (!token || !channel) return;
 
             const steps_status = [
+              ['installing dependencies', '${{ steps.install-deps.outcome }}'],
+              ['checking dependencies', '${{ steps.check-deps.outcome }}'],
               ['building binaries', '${{ steps.build.outcome }}'],
               ['syncing snapshot', '${{ steps.snapshot-check.outcome }}'],
               ['running baseline benchmark (1/2)', '${{ steps.run-baseline-1.outcome }}'],

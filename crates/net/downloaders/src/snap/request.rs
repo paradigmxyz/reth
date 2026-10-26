@@ -3,6 +3,7 @@
 //! Retries, peer attribution and blocking verification live here so every range downloader
 //! penalizes and reissues in exactly the same way.
 
+use crate::metrics::SnapDownloaderMetrics;
 use futures::FutureExt;
 use reth_eth_wire_types::snap::{
     GetAccountRangeMessage, GetBlockAccessListsMessage, GetByteCodesMessage,
@@ -40,6 +41,8 @@ pub(super) struct VerifyingRequest<C: SnapClient, V: SnapVerifier> {
     verification: Option<VerificationTask<V::Output>>,
     // Attempts already spent against `MAX_RETRIES`.
     retries: u8,
+    // Counts responses that fail verification.
+    metrics: SnapDownloaderMetrics,
 }
 
 impl<C, V> VerifyingRequest<C, V>
@@ -50,7 +53,16 @@ where
     /// Submits `request` and prepares to authenticate its response with `verifier`.
     pub(super) fn new(client: C, request: V::Request, verifier: V, runtime: Runtime) -> Self {
         let fut = request.send(&client, Priority::Normal);
-        Self { client, runtime, request, verifier, fut, verification: None, retries: 0 }
+        Self {
+            client,
+            runtime,
+            request,
+            verifier,
+            fut,
+            verification: None,
+            retries: 0,
+            metrics: SnapDownloaderMetrics::default(),
+        }
     }
 
     /// Polls until the request yields a verified response or a terminal error.
@@ -115,6 +127,7 @@ where
             Ok(Err(error)) => {
                 debug!(target: "downloaders::snap", ?peer_id, %error, "Invalid snap response");
                 self.client.report_bad_message(peer_id);
+                self.metrics.invalid_responses.increment(1);
                 Poll::Ready(self.retry().then_some(None).ok_or(error))
             }
             // A panic or a shutting-down runtime is local, so it must not penalize the responder.

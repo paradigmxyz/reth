@@ -269,6 +269,38 @@ mod tests {
     use super::*;
     use tempfile::tempdir;
 
+    fn test_manifest_with_component_tip(block: u64, total_blocks: u64) -> SnapshotManifest {
+        let chunk_count = total_blocks.div_ceil(10);
+        SnapshotManifest {
+            block,
+            chain_id: 1,
+            storage_version: 2,
+            timestamp: 0,
+            base_url: Some("https://example.com".to_string()),
+            reth_version: None,
+            components: BTreeMap::from([(
+                "transactions".to_string(),
+                ComponentManifest::Chunked(ChunkedArchive {
+                    blocks_per_file: 10,
+                    total_blocks,
+                    chunk_sizes: (1..=chunk_count).map(|i| i * 10).collect(),
+                    chunk_decompressed_sizes: (1..=chunk_count).map(|i| i * 100).collect(),
+                    chunk_files: vec![],
+                    chunk_output_files: (0..chunk_count)
+                        .map(|i| {
+                            vec![OutputFileChecksum {
+                                path: format!("static_files/tx-{i}"),
+                                size: (i + 1) * 100,
+                                blake3: format!("h{i}"),
+                            }]
+                        })
+                        .collect(),
+                }),
+            )]),
+            extensions: Default::default(),
+        }
+    }
+
     #[test]
     fn partition_reusable_moves_only_verified_archives() {
         let dir = tempdir().unwrap();
@@ -531,5 +563,122 @@ mod tests {
             err.to_string().contains("chunk_files length"),
             "expected chunk_files length error, got: {err}"
         );
+    }
+
+    #[test]
+    fn range_selections_use_snapshot_block_when_component_extends_past_it() {
+        // The snapshot ends at 20, but the final archive contains blocks 20 through 24.
+        let manifest = test_manifest_with_component_tip(20, 25);
+        let component = SnapshotComponentType::Transactions;
+        for (selection, expected_chunks) in [
+            (ComponentSelection::Since(19), vec![1, 2]),
+            (ComponentSelection::Distance(2), vec![1, 2]),
+            (ComponentSelection::Since(20), vec![2]),
+            (ComponentSelection::Distance(1), vec![2]),
+            (ComponentSelection::Since(10), vec![1, 2]),
+            (ComponentSelection::Since(9), vec![0, 1, 2]),
+            (ComponentSelection::Distance(0), vec![]),
+            (ComponentSelection::Distance(u64::MAX), vec![0, 1, 2]),
+            (ComponentSelection::All, vec![0, 1, 2]),
+        ] {
+            let planned =
+                collect_planned_archives(&manifest, &BTreeMap::from([(component, selection)]))
+                    .unwrap();
+            let expected_files = expected_chunks
+                .iter()
+                .map(|i| format!("transactions-{}-{}.tar.zst", i * 10, (i + 1) * 10 - 1))
+                .collect::<Vec<_>>();
+            let expected_size = expected_chunks.iter().map(|i| (i + 1) * 10).sum::<u64>();
+            assert_eq!(
+                planned.archives.iter().map(|a| a.archive.file_name.clone()).collect::<Vec<_>>(),
+                expected_files,
+                "{selection}"
+            );
+            assert_eq!(planned.total_download_size, expected_size, "{selection}");
+            assert_eq!(planned.total_output_size, expected_size * 10, "{selection}");
+
+            // The URL, count, and size APIs used by the UI must agree with the download plan.
+            let distance = selection_archive_distance(&selection, manifest.block).unwrap();
+            assert_eq!(
+                manifest.archive_urls_for_distance(component, distance),
+                expected_files
+                    .iter()
+                    .map(|file| format!("https://example.com/{file}"))
+                    .collect::<Vec<_>>(),
+                "{selection}"
+            );
+            assert_eq!(
+                manifest.chunks_for_distance(component, distance),
+                expected_chunks.len() as u64,
+                "{selection}"
+            );
+            assert_eq!(
+                manifest.size_for_distance(component, distance),
+                expected_size,
+                "{selection}"
+            );
+            assert_eq!(
+                manifest.output_size_for_distance(component, distance),
+                expected_size * 10,
+                "{selection}"
+            );
+        }
+    }
+
+    #[test]
+    fn range_selections_do_not_shift_back_to_a_shorter_component_tip() {
+        let manifest = test_manifest_with_component_tip(20, 18);
+        let component = SnapshotComponentType::Transactions;
+        for (selection, expected_files) in [
+            (ComponentSelection::Since(19), vec![]),
+            (ComponentSelection::Distance(2), vec![]),
+            (ComponentSelection::Since(17), vec!["transactions-10-19.tar.zst"]),
+            (ComponentSelection::Distance(4), vec!["transactions-10-19.tar.zst"]),
+        ] {
+            let planned =
+                collect_planned_archives(&manifest, &BTreeMap::from([(component, selection)]))
+                    .unwrap();
+            assert_eq!(
+                planned.archives.iter().map(|a| a.archive.file_name.as_str()).collect::<Vec<_>>(),
+                expected_files,
+                "{selection}"
+            );
+            let expected_size = if expected_files.is_empty() { 0 } else { 20 };
+            assert_eq!(planned.total_download_size, expected_size, "{selection}");
+            assert_eq!(planned.total_output_size, expected_size * 10, "{selection}");
+        }
+    }
+
+    #[test]
+    fn range_selections_preserve_legacy_tip_archives() {
+        // Legacy manifests stored the snapshot height in total_blocks, not the block count.
+        // At an exact chunk boundary, the legacy generator did not emit the next archive.
+        for (block, expected_files, expected_size) in
+            [(24, vec!["transactions-20-29.tar.zst"], 30), (20, vec![], 0)]
+        {
+            let manifest = test_manifest_with_component_tip(block, block);
+            let component = SnapshotComponentType::Transactions;
+            for selection in [ComponentSelection::Since(block), ComponentSelection::Distance(1)] {
+                let planned =
+                    collect_planned_archives(&manifest, &BTreeMap::from([(component, selection)]))
+                        .unwrap();
+                assert_eq!(
+                    planned
+                        .archives
+                        .iter()
+                        .map(|a| a.archive.file_name.as_str())
+                        .collect::<Vec<_>>(),
+                    expected_files,
+                    "{selection}"
+                );
+                assert_eq!(planned.total_download_size, expected_size, "{selection}");
+                assert_eq!(planned.total_output_size, expected_size * 10, "{selection}");
+                assert_eq!(
+                    manifest.chunks_for_distance(component, Some(1)),
+                    expected_files.len() as u64,
+                    "{selection}"
+                );
+            }
+        }
     }
 }
