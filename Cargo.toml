@@ -531,7 +531,7 @@ tar = "0.4.46"
 tracing = { version = "0.1.0", default-features = false, features = ["attributes"] }
 tracing-appender = "0.2.5"
 url = { version = "2.3", default-features = false }
-zstd = "0.13"
+zstd = "0.14.3"
 byteorder = "1"
 fixed-cache = { version = "0.1.10", default-features = false, features = ["alloc"] }
 moka = "0.12"
@@ -683,8 +683,8 @@ evm2-jit = { git = "https://github.com/DaniPopes/evm2", rev = "19ae5411cb505639b
 inkwell = { git = "https://github.com/TheDan64/inkwell", rev = "c9d9734ae17dbaf1d9902dab3b8ee9d2041781ff" }
 
 # reth-core
-reth-codecs = { git = "https://github.com/paradigmxyz/reth-core", rev = "bd0edad994bfbb1e5cea8ca5b4da5d8813baa5f1" }
-reth-codecs-derive = { git = "https://github.com/paradigmxyz/reth-core", rev = "bd0edad994bfbb1e5cea8ca5b4da5d8813baa5f1" }
-reth-primitives-traits = { git = "https://github.com/paradigmxyz/reth-core", rev = "bd0edad994bfbb1e5cea8ca5b4da5d8813baa5f1" }
-reth-rpc-traits = { git = "https://github.com/paradigmxyz/reth-core", rev = "bd0edad994bfbb1e5cea8ca5b4da5d8813baa5f1" }
-reth-zstd-compressors = { git = "https://github.com/paradigmxyz/reth-core", rev = "bd0edad994bfbb1e5cea8ca5b4da5d8813baa5f1" }
+reth-codecs = { git = "https://github.com/paradigmxyz/reth-core", rev = "33bfe6e8b7bacc4f2e464497262ee3f87c6c86ce" }
+reth-codecs-derive = { git = "https://github.com/paradigmxyz/reth-core", rev = "33bfe6e8b7bacc4f2e464497262ee3f87c6c86ce" }
+reth-primitives-traits = { git = "https://github.com/paradigmxyz/reth-core", rev = "33bfe6e8b7bacc4f2e464497262ee3f87c6c86ce" }
+reth-rpc-traits = { git = "https://github.com/paradigmxyz/reth-core", rev = "33bfe6e8b7bacc4f2e464497262ee3f87c6c86ce" }
+reth-zstd-compressors = { git = "https://github.com/paradigmxyz/reth-core", rev = "33bfe6e8b7bacc4f2e464497262ee3f87c6c86ce" }
