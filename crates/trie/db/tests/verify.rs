@@ -85,7 +85,7 @@ fn large_missing_account_trie_streams_every_node() {
 }
 
 #[test]
-fn large_missing_storage_streams_before_account_root_and_for_orphans() {
+fn large_missing_storage_streams_before_account_root_and_for_storage_only() {
     completes(|| {
         for account_backed in [true, false] {
             let db = create_test_rw_db();
@@ -217,4 +217,89 @@ fn completes(work: impl FnOnce() + Send + 'static) {
     });
     completion.recv_timeout(Duration::from_secs(120)).expect("verification failed to finish");
     worker.join().unwrap();
+}
+
+#[test]
+fn storage_only_accounts_contribute_to_account_trie() {
+    completes(|| verify_storage_only_account_trie(false));
+}
+
+#[test]
+fn interleaved_storage_only_accounts_preserve_real_accounts() {
+    completes(|| verify_storage_only_account_trie(true));
+}
+
+fn verify_storage_only_account_trie(interleaved: bool) {
+    for persist_account_trie in [true, false] {
+        let db = create_test_rw_db();
+        let tx = db.tx_mut().unwrap();
+        // Enough hashed addresses produce persisted branch nodes, unlike a single account leaf.
+        let mut addresses =
+            (0u64..257).map(|index| keccak256(index.to_be_bytes())).collect::<Vec<_>>();
+        addresses.sort_unstable();
+        for (index, address) in addresses.iter().enumerate() {
+            let real_account = interleaved && index % 2 == 1;
+            let account = if real_account {
+                Account {
+                    nonce: index as u64 + 1,
+                    balance: U256::from(index + 100),
+                    ..Default::default()
+                }
+            } else {
+                Account::default()
+            };
+            tx.put::<tables::HashedAccounts>(*address, account).unwrap();
+            // Include both an account-backed storage trie and a real account without storage.
+            if !real_account || index == 1 {
+                insert_storage(&tx, *address, 8);
+            }
+        }
+        // Calculate canonical nodes while default account rows still represent storage-only leaves.
+        let (_, updates) = DbStateRoot::from_tx(&tx).root_with_updates().unwrap();
+        let expected = updates
+            .account_nodes_ref()
+            .iter()
+            .map(|(path, node)| (*path, node.clone()))
+            .collect::<BTreeMap<_, _>>();
+        assert!(expected.len() > 1, "the fixture must exercise account branches");
+        if persist_account_trie {
+            for (path, node) in &expected {
+                tx.put::<tables::AccountsTrie>(StoredNibbles(*path), node.clone()).unwrap();
+            }
+        }
+        for (address, storage) in updates.storage_tries_ref() {
+            for (path, node) in storage.storage_nodes_ref() {
+                tx.put::<tables::StoragesTrie>(
+                    *address,
+                    StorageTrieEntry { nibbles: StoredNibblesSubKey(*path), node: node.clone() },
+                )
+                .unwrap();
+            }
+        }
+        for (index, address) in addresses.iter().enumerate() {
+            if !interleaved || index % 2 == 0 {
+                assert!(tx.delete::<tables::HashedAccounts>(*address, None).unwrap());
+            }
+        }
+        tx.commit().unwrap();
+
+        let mut found = BTreeMap::new();
+        let mut progress = 0;
+        // A single root in flight forces the merged account walk to resume across every address.
+        for output in DatabaseVerifier::<_, LegacyKeyAdapter>::new(db.as_ref(), 2, 1).unwrap() {
+            match output.unwrap() {
+                Output::AccountMissing(path, node) if !persist_account_trie => {
+                    assert!(found.insert(path, node).is_none());
+                }
+                Output::Progress(_) => progress += 1,
+                output => panic!("unexpected output: {output:?}"),
+            }
+        }
+        if persist_account_trie {
+            assert_eq!(progress, expected.len());
+            assert!(found.is_empty());
+        } else {
+            assert_eq!(found, expected);
+        }
+    }
 }

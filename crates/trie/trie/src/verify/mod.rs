@@ -64,10 +64,12 @@ where
     /// Starts verification and its background storage root computation.
     ///
     /// - `trie` reads the account trie table.
-    /// - `accounts` reads the hashed accounts table.
+    /// - `accounts` yields account leaves in ascending address order, including default accounts
+    ///   for addresses with hashed storage but no account row.
     /// - `storage_addresses` yields a job for each address present in hashed storage or stored
     ///   storage tries exactly once, in ascending address order, including addresses without an
-    ///   account. It is walked on a background thread to schedule storage work ahead of `accounts`.
+    ///   account row. Jobs with hashed storage must request a root even without an account row. It
+    ///   is walked on a background thread to schedule storage work ahead of `accounts`.
     /// - `storage` reads the hashed storage table.
     /// - `storage_root_limit` bounds account-backed storage jobs whose roots have not been
     ///   consumed.

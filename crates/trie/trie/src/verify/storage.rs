@@ -121,12 +121,13 @@ where
     }
 }
 
-/// Storage to verify, including whether its root belongs to an account in the hashed state.
+/// Storage to verify, including whether the account walk needs its root.
 #[derive(Debug)]
 pub struct StorageJob {
     /// Hashed address of the storage to verify.
     pub address: B256,
     /// Whether to return the computed root to the account walk. False still verifies the storage
-    /// trie, but discards its root and does not reserve space in the root backlog.
+    /// trie, but discards its root and does not reserve space in the root backlog. Hashed storage
+    /// needs a root even without a hashed account row; only stale trie-only storage may omit it.
     pub root_required: bool,
 }

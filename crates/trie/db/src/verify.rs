@@ -1,8 +1,8 @@
 //! Database-backed trie verification.
 
 use crate::{
-    DatabaseAccountTrieCursor, DatabaseHashedAccountCursor, DatabaseHashedCursorFactory,
-    DatabaseHashedStorageCursor, DatabaseTrieCursorFactory, TrieTableAdapter,
+    DatabaseAccountTrieCursor, DatabaseHashedCursorFactory, DatabaseHashedStorageCursor,
+    DatabaseTrieCursorFactory, TrieTableAdapter,
 };
 use alloy_primitives::B256;
 use reth_db_api::{
@@ -13,8 +13,9 @@ use reth_db_api::{
     DatabaseError,
 };
 use reth_execution_errors::StateRootError;
+use reth_primitives_traits::Account;
 use reth_trie::{
-    hashed_cursor::HashedCursorFactory,
+    hashed_cursor::{HashedCursor, HashedCursorFactory},
     trie_cursor::TrieCursorFactory,
     verify::{Output, StorageJob, StorageWorker, Verifier},
 };
@@ -23,7 +24,7 @@ use std::fmt;
 /// [`Verifier`] reading database tables through cursors of a `TX` transaction.
 type TxVerifier<TX, A> = Verifier<
     DatabaseAccountTrieCursor<CursorTy<TX, <A as TrieTableAdapter>::AccountTrieTable>, A>,
-    DatabaseHashedAccountCursor<CursorTy<TX, tables::HashedAccounts>>,
+    VerificationAccounts<TX>,
     DatabaseHashedStorageCursor<DupCursorTy<TX, tables::HashedStorages>>,
 >;
 
@@ -72,7 +73,12 @@ where
             .collect::<Result<Vec<_>, DatabaseError>>()?;
         let verifier = Verifier::new(
             DatabaseTrieCursorFactory::<_, A>::new(&account_tx).account_trie_cursor()?,
-            DatabaseHashedCursorFactory::new(&account_tx).hashed_account_cursor()?,
+            VerificationAccounts {
+                accounts: account_tx.cursor_read::<tables::HashedAccounts>()?,
+                storage: account_tx.cursor_dup_read::<tables::HashedStorages>()?,
+                next_account: None,
+                next_storage: None,
+            },
             DatabaseHashedCursorFactory::new(&account_tx).hashed_storage_cursor(B256::ZERO)?,
             StorageAddresses::<TX, A> {
                 accounts: lookahead_tx.cursor_read::<tables::HashedAccounts>()?,
@@ -126,13 +132,16 @@ impl<TX: DbTx, A: TrieTableAdapter> StorageAddresses<TX, A> {
             (Some(address), None) | (None, Some(address)) => address,
             (None, None) => return Ok(None),
         };
-        if self.next_hashed == Some(address) {
+        // Non-empty hashed storage needs an account leaf even without a hashed account row.
+        let has_storage = self.next_hashed == Some(address);
+        if has_storage {
             self.next_hashed = self.hashed.next_no_dup()?.map(|(address, _)| address);
         }
         if self.next_trie == Some(address) {
             self.next_trie = self.trie.next_no_dup()?.map(|(address, _)| address);
         }
-        let root_required = self.accounts.seek(address)?.is_some_and(|(key, _)| key == address);
+        let root_required =
+            has_storage || self.accounts.seek(address)?.is_some_and(|(key, _)| key == address);
         Ok(Some(StorageJob { address, root_required }))
     }
 }
@@ -142,5 +151,53 @@ impl<TX: DbTx, A: TrieTableAdapter> Iterator for StorageAddresses<TX, A> {
 
     fn next(&mut self) -> Option<Self::Item> {
         self.next_address().transpose()
+    }
+}
+
+/// Merges account rows with distinct hashed storage addresses for the account trie walk.
+/// Missing account rows have zero nonce and balance and no code, but their storage still belongs
+/// in an account leaf. Stored trie rows alone never create an account.
+struct VerificationAccounts<TX: DbTx> {
+    accounts: CursorTy<TX, tables::HashedAccounts>,
+    storage: DupCursorTy<TX, tables::HashedStorages>,
+    next_account: Option<(B256, Account)>,
+    next_storage: Option<B256>,
+}
+
+impl<TX: DbTx> HashedCursor for VerificationAccounts<TX> {
+    type Value = Account;
+
+    fn seek(&mut self, key: B256) -> Result<Option<(B256, Account)>, DatabaseError> {
+        self.next_account = self.accounts.seek(key)?;
+        self.next_storage = self.storage.seek(key)?.map(|(address, _)| address);
+        self.next()
+    }
+
+    fn next(&mut self) -> Result<Option<(B256, Account)>, DatabaseError> {
+        let address = match (self.next_account.as_ref(), self.next_storage) {
+            (Some((account, _)), Some(storage)) => (*account).min(storage),
+            (Some((address, _)), None) => *address,
+            (None, Some(address)) => address,
+            (None, None) => return Ok(None),
+        };
+        let account = match self.next_account.take() {
+            Some((key, account)) if key == address => {
+                self.next_account = self.accounts.next()?;
+                account
+            }
+            next => {
+                self.next_account = next;
+                Account::default()
+            }
+        };
+        if self.next_storage == Some(address) {
+            self.next_storage = self.storage.next_no_dup()?.map(|(address, _)| address);
+        }
+        Ok(Some((address, account)))
+    }
+
+    fn reset(&mut self) {
+        self.next_account = None;
+        self.next_storage = None;
     }
 }
