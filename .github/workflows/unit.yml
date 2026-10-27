@@ -133,6 +133,8 @@ jobs:
           mkdir -p /dev/shm/reth-tmp
       - name: Run ef-tests
         env:
+          # Deep EVM call fixtures exceed the default worker-thread stack with evm2.
+          RUST_MIN_STACK: 16777216
           # Every case creates and deletes a fresh test database, thousands of times per run.
           # tmpfs avoids the disk filesystem cost of those create/delete cycles.
           TMPDIR: /dev/shm/reth-tmp

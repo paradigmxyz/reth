@@ -1133,7 +1133,7 @@ where
                                 break;
                             }
                             Err(BlockExecutionError::Validation(_)) => {}
-                            Err(err) => return Err(err.into()),
+                            Err(err) => return Err(err),
                         }
                     }
                     if satisfied {
