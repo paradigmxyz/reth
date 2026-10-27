@@ -378,12 +378,11 @@ pub(super) struct PayloadScan {
 }
 
 impl PayloadScan {
-    /// Opens both scans over `first..=last`.
-    pub(super) async fn open(
-        reader: &DbReader,
-        first: &Record,
-        last: &Record,
-    ) -> eyre::Result<Self> {
+    /// Opens both scans over `records`, which must be non-empty.
+    pub(super) async fn open(reader: &DbReader, records: &[Record]) -> eyre::Result<Self> {
+        let (Some(first), Some(last)) = (records.first(), records.last()) else {
+            eyre::bail!("empty payload range")
+        };
         let tx_end = last
             .first_tx
             .checked_add(last.transactions)
@@ -444,26 +443,33 @@ impl PayloadScan {
     }
 }
 
-/// Runs `f` on each record's payloads, read through one [`PayloadScan`], after checking
-/// every transaction payload's digest.
-pub(super) async fn for_each_payload(
+/// Runs `f` on the payloads of every published record from `from` up to `to`, reading
+/// metadata in pages and each page's payloads through one [`PayloadScan`], after checking
+/// every transaction payload's digest. Fails unless the metadata ends exactly at `to`.
+pub(super) async fn for_each_published(
     reader: &DbReader,
-    records: &[Record],
+    from: Cursor,
+    to: &Cursor,
     mut f: impl FnMut(&Record, Bytes, Vec<Bytes>) -> eyre::Result<()>,
 ) -> eyre::Result<()> {
-    let (Some(first), Some(last)) = (records.first(), records.last()) else { return Ok(()) };
-    let mut payloads = PayloadScan::open(reader, first, last).await?;
-    for record in records {
-        let (block, cases) = payloads.next(record).await?;
-        for (bytes, expected) in cases.iter().zip(&record.cases) {
-            eyre::ensure!(
-                blake3::hash(bytes).to_hex().as_str() == expected.digest,
-                "transaction record integrity mismatch"
-            );
+    let mut pages = MetadataPages::open(reader, from, to.next).await?;
+    while pages.cursor.next < to.next {
+        let records = pages.next_page().await?;
+        let mut payloads = PayloadScan::open(reader, &records).await?;
+        for record in &records {
+            let (block, cases) = payloads.next(record).await?;
+            for (bytes, expected) in cases.iter().zip(&record.cases) {
+                eyre::ensure!(
+                    blake3::hash(bytes).to_hex().as_str() == expected.digest,
+                    "transaction record integrity mismatch"
+                );
+            }
+            f(record, block, cases)?;
         }
-        f(record, block, cases)?;
+        payloads.finish().await?;
     }
-    payloads.finish().await
+    eyre::ensure!(pages.cursor == *to, "published metadata boundary mismatch");
+    Ok(())
 }
 
 /// All phase comparisons, consensus and history checks share one actual execution.
@@ -623,7 +629,7 @@ impl MetadataPages {
 }
 
 #[cfg(test)]
-mod tests {
+pub(super) mod tests {
     use super::*;
     use alloy_primitives::B256;
     use object_store::memory::InMemory;
@@ -767,91 +773,97 @@ mod tests {
         Ok(())
     }
 
+    /// Checkpoints `db` and opens a reader pinned to that checkpoint.
+    pub(in super::super) async fn checkpoint_reader(
+        db: &Db,
+        path: &str,
+        objects: Arc<InMemory>,
+    ) -> eyre::Result<DbReader> {
+        let id =
+            db.create_checkpoint(CheckpointScope::All, &CheckpointOptions::default()).await?.id;
+        let mode = DbReaderMode::Checkpoint(id);
+        Ok(DbReader::open(path, objects, mode, DbReaderOptions::default()).await?)
+    }
+
     #[tokio::test]
-    async fn batched_payloads_match_records_and_reject_gaps() -> eyre::Result<()> {
+    async fn published_payloads_match_records_and_reject_corruption() -> eyre::Result<()> {
         let objects = Arc::new(InMemory::new());
         let db = Db::open("payloads", objects.clone()).await?;
-        let mut records = Vec::new();
-        let mut tx = 0;
+        let mut cursor = Cursor { next: 1, tx: 0, parent: [0; 32] };
+        let mut cursors = vec![cursor.clone()];
         for (start, count) in [(1u64, 2u64), (2, 0), (3, 1)] {
-            let mut cases = Vec::new();
-            for index in 0..count {
-                let value = format!("t{}", tx + index).into_bytes();
-                cases.push(CaseRecord {
-                    index,
-                    bytes: value.len(),
-                    digest: blake3::hash(&value).to_hex().to_string(),
-                });
-                db.put(transaction_key(tx + index), &value).await?;
-            }
-            let block = format!("b{start}").into_bytes();
-            db.put(key(start), &block).await?;
-            records.push(Record {
+            let cases: Vec<_> = (cursor.tx..cursor.tx + count).map(|tx| format!("t{tx}")).collect();
+            let block = format!("b{start}");
+            let record = Record {
                 start,
                 end: start + 1,
                 parent: [0; 32],
                 tip: [0; 32],
-                bytes: block.len() + cases.iter().map(|c| c.bytes).sum::<usize>(),
+                bytes: block.len() + cases.iter().map(String::len).sum::<usize>(),
                 block_bytes: block.len(),
                 digest: String::new(),
                 transactions: count,
                 gas: 0,
-                first_tx: tx,
-                cases,
-            });
-            tx += count;
+                first_tx: cursor.tx,
+                cases: cases
+                    .iter()
+                    .zip(0..)
+                    .map(|(case, index)| CaseRecord {
+                        index,
+                        bytes: case.len(),
+                        digest: blake3::hash(case.as_bytes()).to_hex().to_string(),
+                    })
+                    .collect(),
+            };
+            for (tx, case) in (cursor.tx..).zip(&cases) {
+                db.put(transaction_key(tx), case).await?;
+            }
+            db.put(key(start), &block).await?;
+            db.put(metadata_key(start), serde_json::to_vec(&record)?).await?;
+            cursor.advance(&record)?;
+            cursors.push(cursor.clone());
         }
-        async fn open(db: &Db, objects: Arc<InMemory>) -> eyre::Result<DbReader> {
-            let id =
-                db.create_checkpoint(CheckpointScope::All, &CheckpointOptions::default()).await?.id;
-            let mode = DbReaderMode::Checkpoint(id);
-            Ok(DbReader::open("payloads", objects, mode, DbReaderOptions::default()).await?)
-        }
-        let reader = open(&db, objects.clone()).await?;
-        let mut seen = Vec::new();
-        for_each_payload(&reader, &records, |record, block, cases| {
-            seen.push((record.start, block, cases));
-            Ok(())
-        })
-        .await?;
+        let run = async |from: &Cursor, to: &Cursor| {
+            let reader = checkpoint_reader(&db, "payloads", objects.clone()).await?;
+            let mut seen = Vec::new();
+            let result = for_each_published(&reader, from.clone(), to, |record, block, cases| {
+                seen.push((record.start, block, cases));
+                Ok(())
+            })
+            .await;
+            reader.close().await?;
+            result.map(|()| seen)
+        };
+        let (first, second, end) = (&cursors[0], &cursors[1], &cursors[3]);
         let expected: Vec<(u64, Bytes, Vec<Bytes>)> = vec![
             (1, "b1".into(), vec!["t0".into(), "t1".into()]),
             (2, "b2".into(), vec![]),
             (3, "b3".into(), vec!["t2".into()]),
         ];
-        assert_eq!(seen, expected);
-        reader.close().await?;
-
-        // Same size, different bytes: only the digest check catches it.
-        db.put(transaction_key(1), b"tX").await?;
-        let reader = open(&db, objects.clone()).await?;
-        let error = for_each_payload(&reader, &records, |_, _, _| Ok(())).await.unwrap_err();
-        assert_eq!(error.to_string(), "transaction record integrity mismatch");
-        reader.close().await?;
-
-        db.put(transaction_key(1), b"tampered").await?;
-        let reader = open(&db, objects.clone()).await?;
-        let error = for_each_payload(&reader, &records, |_, _, _| Ok(())).await.unwrap_err();
-        assert_eq!(error.to_string(), "transaction scan gap/order/size mismatch");
-        reader.close().await?;
-
-        db.delete(transaction_key(1)).await?;
-        let reader = open(&db, objects.clone()).await?;
-        let error = for_each_payload(&reader, &records, |_, _, _| Ok(())).await.unwrap_err();
-        assert_eq!(error.to_string(), "transaction scan gap/order/size mismatch");
-        reader.close().await?;
-
-        db.put(key(2), b"block2").await?;
-        let reader = open(&db, objects.clone()).await?;
-        let error = for_each_payload(&reader, &records[1..], |_, _, _| Ok(())).await.unwrap_err();
-        assert_eq!(error.to_string(), "block scan gap/order/size mismatch");
-        reader.close().await?;
-
-        db.delete(key(2)).await?;
-        let reader = open(&db, objects.clone()).await?;
-        let error = for_each_payload(&reader, &records[1..], |_, _, _| Ok(())).await.unwrap_err();
-        assert_eq!(error.to_string(), "block scan gap/order/size mismatch");
-        reader.close().await?;
+        assert_eq!(run(first, end).await?, expected);
+        let wrong_end = Cursor { parent: [1; 32], ..end.clone() };
+        let error = run(first, &wrong_end).await.unwrap_err();
+        assert_eq!(error.to_string(), "published metadata boundary mismatch");
+        // Each corruption accumulates on the previous ones.
+        for (key, value, from, message) in [
+            // Same size, different bytes: only the digest check catches it.
+            (transaction_key(1), Some(&b"tX"[..]), first, "transaction record integrity mismatch"),
+            (
+                transaction_key(1),
+                Some(b"tampered"),
+                first,
+                "transaction scan gap/order/size mismatch",
+            ),
+            (transaction_key(1), None, first, "transaction scan gap/order/size mismatch"),
+            (key(2), Some(b"block2"), second, "block scan gap/order/size mismatch"),
+            (key(2), None, second, "block scan gap/order/size mismatch"),
+        ] {
+            match value {
+                Some(value) => db.put(key, value).await?,
+                None => db.delete(key).await?,
+            };
+            assert_eq!(run(from, end).await.unwrap_err().to_string(), message);
+        }
         db.close().await?;
         Ok(())
     }

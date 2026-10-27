@@ -140,42 +140,30 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
             let consensus = components.consensus();
             if catalog.checkpoint.is_some() {
                 let reader = handle.block_on(store.reader(&catalog))?;
-                let verified = (|| -> eyre::Result<()> {
-                    if self.verify_existing {
-                        let mut pages = handle.block_on(store::MetadataPages::open(
+                // Errors must not skip closing the reader below.
+                let verified = if self.verify_existing {
+                    store::Cursor::initial(&catalog.context).and_then(|from| {
+                        handle.block_on(store::for_each_published(
                             &reader,
-                            store::Cursor::initial(&catalog.context)?,
-                            catalog.cursor.next,
-                        ))?;
-                        while pages.cursor.next < catalog.cursor.next {
-                            let records = handle.block_on(pages.next_page())?;
-                            handle.block_on(store::for_each_payload(
-                                &reader,
-                                &records,
-                                |record, bytes, cases| {
-                                    eyre::ensure!(
-                                        !cancellation.is_cancelled(),
-                                        "capture cancelled"
-                                    );
-                                    let chunk = store::decode(&bytes, record)?;
-                                    store::verify_cases(
-                                        &chunk,
-                                        &cases,
-                                        record,
-                                        &config,
-                                        consensus,
-                                        &cancellation,
-                                    )
-                                },
-                            ))?;
-                        }
-                        eyre::ensure!(
-                            pages.cursor == catalog.cursor,
-                            "published metadata boundary mismatch"
-                        );
-                    }
+                            from,
+                            &catalog.cursor,
+                            |record, bytes, cases| {
+                                eyre::ensure!(!cancellation.is_cancelled(), "capture cancelled");
+                                let chunk = store::decode(&bytes, record)?;
+                                store::verify_cases(
+                                    &chunk,
+                                    &cases,
+                                    record,
+                                    &config,
+                                    consensus,
+                                    &cancellation,
+                                )
+                            },
+                        ))
+                    })
+                } else {
                     Ok(())
-                })();
+                };
                 handle.block_on(reader.close())?;
                 verified?;
             }
@@ -370,26 +358,12 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
                     catalog.checkpoint = Some(checkpoint);
                     catalog.complete = stop == end;
                     let reader = handle.block_on(store.reader(&catalog))?;
-                    let checked = (|| -> eyre::Result<()> {
-                        let mut pages = handle.block_on(store::MetadataPages::open(
-                            &reader,
-                            page_cursor,
-                            catalog.cursor.next,
-                        ))?;
-                        while pages.cursor.next < catalog.cursor.next {
-                            let records = handle.block_on(pages.next_page())?;
-                            handle.block_on(store::for_each_payload(
-                                &reader,
-                                &records,
-                                |record, bytes, _| store::decode(&bytes, record).map(drop),
-                            ))?;
-                        }
-                        eyre::ensure!(
-                            pages.cursor == catalog.cursor,
-                            "durable metadata boundary mismatch"
-                        );
-                        Ok(())
-                    })();
+                    let checked = handle.block_on(store::for_each_published(
+                        &reader,
+                        page_cursor,
+                        &catalog.cursor,
+                        |record, bytes, _| store::decode(&bytes, record).map(drop),
+                    ));
                     handle.block_on(reader.close())?;
                     checked?;
                     version = handle.block_on(store.publish(&catalog, Some(version)))?;
