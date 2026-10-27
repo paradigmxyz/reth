@@ -319,6 +319,7 @@ where
                     // failures are adjudicated in transaction order by the BAL commit loop.
                     // Earlier slots may still be unconverted.
                     executor.cpu_pool().install(|| {
+                        let _entered = span.enter();
                         let _ = transactions
                             .into_par_iter()
                             .enumerate()
@@ -359,8 +360,12 @@ where
                             // A pool thread spawns the other workers, so this thread starts at
                             // once.
                             scope.spawn(|scope| {
+                                let _entered = span.enter();
                                 for _ in 1..workers {
-                                    scope.spawn(|_| convert_claimed());
+                                    scope.spawn(|_| {
+                                        let _entered = span.enter();
+                                        convert_claimed();
+                                    });
                                 }
                                 convert_claimed();
                             });
