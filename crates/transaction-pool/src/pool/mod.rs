@@ -1741,10 +1741,13 @@ mod tests {
         TransactionValidationOutcome, ValidPoolTransaction, U256,
     };
     use alloy_consensus::Transaction;
-    use alloy_eips::{eip4844::BlobTransactionSidecar, eip7594::BlobTransactionSidecarVariant};
+    use alloy_eips::{
+        eip4844::{Blob, BlobTransactionSidecar, Bytes48},
+        eip7594::BlobTransactionSidecarVariant,
+    };
     use alloy_primitives::{Address, B256};
     use futures_util::{FutureExt, StreamExt};
-    use std::{fs, path::PathBuf, sync::Arc};
+    use std::sync::Arc;
     use tokio::sync::mpsc::error::TryRecvError;
 
     /// Inserts a transaction with an explicit validator snapshot, without running maintenance.
@@ -1984,33 +1987,15 @@ mod tests {
 
     #[test]
     fn test_discard_blobs_on_blob_tx_eviction() {
-        let blobs = {
-            // Read the contents of the JSON file into a string.
-            let json_content = fs::read_to_string(
-                PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("test_data/blob1.json"),
-            )
-            .expect("Failed to read the blob data file");
-
-            // Parse the JSON contents into a serde_json::Value.
-            let json_value: serde_json::Value =
-                serde_json::from_str(&json_content).expect("Failed to deserialize JSON");
-
-            // Extract blob data from JSON and convert it to Blob.
-            vec![
-                // Extract the "data" field from the JSON and parse it as a string.
-                json_value
-                    .get("data")
-                    .unwrap()
-                    .as_str()
-                    .expect("Data is not a valid string")
-                    .to_string(),
-            ]
-        };
-
-        // Generate a BlobTransactionSidecar from the blobs.
-        let sidecar = BlobTransactionSidecarVariant::Eip4844(
-            BlobTransactionSidecar::try_from_blobs_hex(blobs).unwrap(),
-        );
+        // A zero blob, whose commitment and proof are the point at infinity, is a valid sidecar
+        // that doesn't need the KZG trusted setup.
+        let mut point_at_infinity = [0; 48];
+        point_at_infinity[0] = 0xc0;
+        let sidecar = BlobTransactionSidecarVariant::Eip4844(BlobTransactionSidecar::new(
+            vec![Blob::default()],
+            vec![Bytes48::from(point_at_infinity)],
+            vec![Bytes48::from(point_at_infinity)],
+        ));
 
         // Define the maximum limit for blobs in the sub-pool.
         let blob_limit = SubPoolLimit::new(1000, usize::MAX);

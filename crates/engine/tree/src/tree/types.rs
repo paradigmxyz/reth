@@ -1,11 +1,11 @@
 //! Shared types for blockchain tree validation.
 
-use crate::tree::error::InsertPayloadError;
+use crate::tree::{error::InsertPayloadError, payload_processor::reuse::PoolSeeds};
 use alloy_eip7928::bal::DecodedBal;
 use alloy_eips::eip4895::Withdrawal;
 use alloy_primitives::B256;
 use reth_chain_state::{ExecutedBlock, ExecutionTimingStats};
-use reth_evm::{ConfigureEvm, EvmEnvFor};
+use reth_evm::{ConfigureEvm, EvmEnvFor, EvmTypesFor};
 use reth_execution_cache::TxPoolPrewarmCacheSnapshot;
 use reth_primitives_traits::{BlockTy, NodePrimitives};
 use std::sync::Arc;
@@ -37,6 +37,12 @@ pub struct ExecutionEnv<Evm: ConfigureEvm> {
     ///
     /// Can be None if txpool prewarming is disabled or the snapshot is not ready for some reason.
     pub txpool_snapshot: Option<TxPoolPrewarmCacheSnapshot>,
+    /// Results of pool transactions executed on top of the parent state that prewarming may
+    /// reuse.
+    ///
+    /// None if txpool prewarming does not record results or the block environment differs from
+    /// the predicted one.
+    pub(crate) pool_seeds: Option<PoolSeeds<EvmTypesFor<Evm>>>,
 }
 
 impl<Evm: ConfigureEvm> ExecutionEnv<Evm>
@@ -56,6 +62,7 @@ where
             withdrawals: None,
             decoded_bal: None,
             txpool_snapshot: None,
+            pool_seeds: None,
         }
     }
 }

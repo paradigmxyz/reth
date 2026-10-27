@@ -1,8 +1,7 @@
 use alloy_primitives::{keccak256, Address, B256, U256};
 use reth_primitives_traits::Account;
 use reth_storage_errors::db::DatabaseError;
-use reth_trie_common::HashedPostState;
-use revm::database::BundleAccount;
+use reth_trie_common::{bundle_state::BundleAccount, HashedPostState};
 
 /// Implementation of hashed state cursor traits for the post state.
 mod post_state;
@@ -16,10 +15,14 @@ pub mod noop;
 pub mod mock;
 
 /// Metrics tracking hashed cursor implementations.
+#[cfg(feature = "metrics")]
 pub mod metrics;
 #[cfg(feature = "metrics")]
-pub use metrics::HashedCursorMetrics;
-pub use metrics::{HashedCursorMetricsCache, InstrumentedHashedCursor};
+pub use metrics::{HashedCursorMetrics, InstrumentedHashedCursor, InstrumentedHashedCursorFactory};
+
+/// Uses the underlying factory directly when cursor metrics are disabled.
+#[cfg(not(feature = "metrics"))]
+pub type InstrumentedHashedCursorFactory<F> = F;
 
 /// The factory trait for creating cursors over the hashed state.
 #[auto_impl::auto_impl(&)]
@@ -117,7 +120,7 @@ pub fn zero_destroyed_account_storage<'a>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use revm::database::AccountStatus;
+    use reth_trie_common::bundle_state::AccountStatus;
 
     #[test]
     fn zero_destroyed_storage_skips_new_accounts() {

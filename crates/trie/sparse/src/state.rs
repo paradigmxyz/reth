@@ -369,6 +369,17 @@ where
         self.storage.tries.get_mut(account).and_then(|trie| trie.root(new_epoch))
     }
 
+    /// Returns the roots of all revealed storage tries, keyed by hashed account address.
+    ///
+    /// Dirty roots are computed at `new_epoch`; blind storage tries are omitted.
+    pub fn storage_roots(&mut self, new_epoch: TrieNodeEpoch) -> B256Map<B256> {
+        self.storage
+            .tries
+            .iter_mut()
+            .filter_map(|(address, trie)| trie.root(new_epoch).map(|root| (*address, root)))
+            .collect()
+    }
+
     /// Returns mutable reference to the revealed account sparse trie.
     fn revealed_trie_mut(&mut self) -> SparseStateTrieResult<&mut A> {
         self.state.as_revealed_mut().ok_or_else(|| SparseTrieErrorKind::Blind.into())

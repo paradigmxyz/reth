@@ -1,7 +1,7 @@
 use crate::{
     cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO, DbDupCursorRW},
     transaction::{DbTx, DbTxMut},
-    DatabaseError,
+    DatabaseError, Tables,
 };
 use serde::{Deserialize, Serialize};
 use std::fmt::Debug;
@@ -82,6 +82,13 @@ pub trait Table: Send + Sync + Debug + 'static {
 
     /// Whether the table is also a `DUPSORT` table.
     const DUPSORT: bool;
+
+    /// The [`Tables`] entry this table is stored in, or `None` for tables defined outside of
+    /// [`Tables`].
+    ///
+    /// Database implementations use it to find per-table state by position instead of by
+    /// [`Self::NAME`]. A table that reuses the name of a [`Tables`] entry must return that entry.
+    const TABLE: Option<Tables> = None;
 
     /// Key element of `Table`.
     ///

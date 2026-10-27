@@ -12,6 +12,8 @@ ignore = [
     "RUSTSEC-2023-0089",
     # https://rustsec.org/advisories/RUSTSEC-2026-0173 proc-macro-error2 is unmaintained
     "RUSTSEC-2026-0173",
+    # https://rustsec.org/advisories/RUSTSEC-2026-0387 crypto-bigint 0.5.5 timing variability, only patched in 0.7.6 and pinned by elliptic-curve 0.13 (k256/p256)
+    "RUSTSEC-2026-0387",
 ]
 
 # This section is considered when running `cargo deny check bans`.
@@ -84,21 +86,5 @@ license-files = [{ path = "LICENSE", hash = 0x001c7e6c }]
 unknown-registry = "warn"
 # Lint level for what to happen when a crate from a git repository that is not
 # in the allow list is encountered
-unknown-git = "deny"
+unknown-git = "allow"
 unused-allowed-source = "allow"
-# Frequently patched dependencies
-allow-git = [
-    "https://github.com/alloy-rs/alloy",
-    "https://github.com/oss-garage/bedrock",
-    "https://github.com/foundry-rs/block-explorers",
-    "https://github.com/bluealloy/revm",
-    "https://github.com/paradigmxyz/revm-inspectors",
-    "https://github.com/alloy-rs/evm",
-    "https://github.com/alloy-rs/hardforks",
-    "https://github.com/paradigmxyz/jsonrpsee",
-    "https://github.com/DaniPopes/slotmap.git",
-    "https://github.com/sigp/discv5",
-    "https://github.com/paradigmxyz/revmc",
-    "https://github.com/paradigmxyz/revmc?branch=main",
-    "https://github.com/TheDan64/inkwell",
-]

@@ -1,13 +1,175 @@
-//! EVM database types used by the RPC state cache.
+//! EVM database types and state/block override helpers used by the RPC state cache.
 
+use crate::error::StateOverrideError;
 use alloy_eip7928::{bal::DecodedBal, BlockAccessIndex};
-use reth_revm::database::StateProviderDatabase;
+use alloy_primitives::U256;
+use alloy_rpc_types_eth::{state::StateOverride, BlockOverrides};
+use evm2::{
+    bytecode::Bytecode,
+    evm::{
+        AccountChangeRef, Bal as EvmBal, CacheDB, Db, DynDatabase, StateChangeSink, StorageChange,
+    },
+};
+use reth_evm::{database::StateProviderDatabase, BundleState, EvmEnv};
+use reth_execution_types::{BlockState, TransactionChanges};
 use reth_storage_api::{EvmStateProviderAdapter, StateProviderBox};
-use revm::{database::State, state::bal::Bal as RevmBal, Database};
 use std::sync::Arc;
 
-/// Helper alias type for the state's [`State`]
-pub type StateCacheDb = State<StateProviderDatabase<EvmStateProviderAdapter<StateProviderBox>>>;
+/// Helper alias type for cached state access.
+pub type StateCacheDb =
+    CacheDB<Db<StateProviderDatabase<EvmStateProviderAdapter<StateProviderBox>>>>;
+
+/// Applies RPC block overrides to an evm2 environment and state cache.
+pub fn apply_block_overrides<DB>(
+    overrides: BlockOverrides,
+    db: &mut CacheDB<DB>,
+    evm_env: &mut impl EvmEnv,
+) {
+    let BlockOverrides {
+        number,
+        difficulty,
+        time,
+        gas_limit,
+        coinbase,
+        random,
+        base_fee,
+        blob_base_fee,
+        block_hash,
+        ..
+    } = overrides;
+
+    if let Some(block_hashes) = block_hash {
+        for (number, hash) in block_hashes {
+            db.insert_block_hash(&U256::from(number), &hash);
+        }
+    }
+
+    let block = evm_env.block_env_mut();
+    if let Some(number) = number {
+        block.number = number;
+    }
+    if let Some(difficulty) = difficulty {
+        block.difficulty = difficulty;
+    }
+    if let Some(time) = time {
+        block.timestamp = U256::from(time);
+    }
+    if let Some(gas_limit) = gas_limit {
+        block.gas_limit = U256::from(gas_limit);
+    }
+    if let Some(coinbase) = coinbase {
+        block.beneficiary = coinbase;
+    }
+    if let Some(random) = random {
+        block.prevrandao = U256::from_be_slice(random.as_slice());
+    }
+    if let Some(base_fee) = base_fee {
+        block.basefee = U256::from(base_fee.saturating_to::<u64>());
+    }
+    if let Some(blob_base_fee) = blob_base_fee {
+        block.blob_basefee = U256::from(blob_base_fee.saturating_to::<u128>());
+    }
+}
+
+/// Applies RPC state overrides to an evm2 state cache.
+pub fn apply_state_overrides<DB: DynDatabase>(
+    overrides: StateOverride,
+    db: &mut CacheDB<DB>,
+) -> Result<(), StateOverrideError<evm2::DatabaseError>> {
+    apply_state_overrides_with_state(overrides, db, None)
+}
+
+/// Applies overrides and optionally records them for simulated state-root computation.
+pub fn apply_state_overrides_with_state<DB: DynDatabase>(
+    overrides: StateOverride,
+    db: &mut CacheDB<DB>,
+    state: Option<&mut BundleState>,
+) -> Result<(), StateOverrideError<evm2::DatabaseError>> {
+    let mut changes = state.is_some().then(TransactionChanges::default);
+    for (address, account_override) in overrides {
+        let original = db.get_account(&address).map_err(StateOverrideError::Database)?;
+        let mut account = original.clone().unwrap_or_default();
+
+        if let Some(nonce) = account_override.nonce {
+            account.nonce = nonce;
+        }
+        if let Some(code) = account_override.code {
+            account.set_code(Bytecode::new_raw_checked(code)?);
+        }
+        if let Some(balance) = account_override.balance {
+            account.balance = balance;
+        }
+
+        let replaces_storage = account_override.state.is_some();
+        let storage = match (account_override.state, account_override.state_diff) {
+            (Some(_), Some(_)) => return Err(StateOverrideError::BothStateAndStateDiff(address)),
+            (Some(state), None) => {
+                db.cache.storage.entry(address).or_default().wipe();
+                if let Some(changes) = changes.as_mut() {
+                    let Ok(()) = changes.storage_wipe(address);
+                }
+                Some(state)
+            }
+            (None, Some(state)) => Some(state),
+            (None, None) => None,
+        };
+
+        // Account existence affects authorization refunds and new-account gas charges. The
+        // override touches the account, so under EIP-161 an empty result is removed regardless of
+        // whether the account existed before, unless storage materializes it. A full storage
+        // replacement always materializes the account, even with no slots.
+        if !account.is_empty() ||
+            replaces_storage ||
+            storage.as_ref().is_some_and(|state| !state.is_empty())
+        {
+            if let Some(changes) = changes.as_mut() {
+                let Ok(()) = changes.account(AccountChangeRef {
+                    address,
+                    original: original.as_ref(),
+                    current: Some(&account),
+                    created: original.is_none(),
+                    selfdestructed: false,
+                });
+            }
+            db.insert_account_info(&address, account);
+        } else if original.is_some() {
+            if let Some(changes) = changes.as_mut() {
+                let Ok(()) = changes.storage_wipe(address);
+                let Ok(()) = changes.account(AccountChangeRef {
+                    address,
+                    original: original.as_ref(),
+                    current: None,
+                    created: false,
+                    selfdestructed: true,
+                });
+            }
+            db.cache.accounts.insert(address, None);
+            db.cache.storage.entry(address).or_default().wipe();
+        }
+        if let Some(storage) = storage {
+            for (key, value) in storage {
+                let key = U256::from_be_bytes(key.0);
+                let current = U256::from_be_bytes(value.0);
+                if let Some(changes) = changes.as_mut() {
+                    let original =
+                        db.get_storage(&address, &key).map_err(StateOverrideError::Database)?;
+                    let Ok(()) = changes.storage(StorageChange { address, key, original, current });
+                }
+                db.insert_account_storage(&address, &key, &current);
+            }
+        }
+    }
+
+    if let Some(state) = state &&
+        let Some(changes) = changes
+    {
+        let mut block = BlockState::new();
+        block.commit(&changes);
+        state.extend(block.into_bundle());
+    }
+
+    Ok(())
+}
 
 /// Attaches `bal` to the database, positioned at the state right before the transaction at
 /// `tx_index`.
@@ -19,28 +181,73 @@ pub type StateCacheDb = State<StateProviderDatabase<EvmStateProviderAdapter<Stat
 /// Note: changes must not be committed to the database afterwards, because the attached BAL takes
 /// precedence over committed state when serving reads.
 #[inline]
-pub fn attach_bal_before_tx<DB: Database>(
-    db: &mut State<DB>,
-    bal: &DecodedBal<Arc<RevmBal>>,
+pub fn attach_bal_before_tx<DB: DynDatabase>(
+    db: &mut CacheDB<DB>,
+    bal: &DecodedBal<Arc<EvmBal>>,
     tx_index: usize,
 ) {
-    db.set_bal(Some(bal.as_bal().clone()));
-    db.set_allow_bal_db_fallback(true);
-    db.set_bal_index(BlockAccessIndex::from_tx_index(tx_index as u64));
+    db.bal_context.set_bal(bal.as_bal().clone());
+    db.bal_context.set_allow_db_fallback(true);
+    db.bal_context.set_bal_index(BlockAccessIndex::from_tx_index(tx_index as u64));
 }
 
 #[cfg(test)]
 mod tests {
 
     use super::*;
-    use alloy_primitives::{Address, Bytes, U256};
-    use revm::{
-        database::InMemoryDB,
-        state::{
-            bal::{AccountBal, Bal, BalWrites, BlockAccessIndex},
-            AccountInfo,
-        },
-    };
+    use alloy_eip7928::{BalanceChange, StorageChange};
+    use alloy_primitives::{Address, Bytes, B256, U256};
+    use alloy_rpc_types_eth::state::AccountOverride;
+    use evm2::evm::{AccountBal, AccountInfo, Bal, BalChanges, InMemoryDB};
+
+    #[test]
+    fn state_overrides_remove_accounts_left_empty() {
+        let emptied = Address::with_last_byte(1);
+        let absent = Address::with_last_byte(2);
+        let replaced = Address::with_last_byte(3);
+        let slot = U256::ONE;
+
+        let mut db = InMemoryDB::default();
+        for address in [emptied, replaced] {
+            db.insert_account_info(
+                &address,
+                AccountInfo { balance: U256::from(5), ..Default::default() },
+            );
+            db.insert_account_storage(&address, &slot, &U256::from(9));
+        }
+        let mut state = CacheDB::new(db);
+
+        let overrides = StateOverride::from_iter([
+            (emptied, AccountOverride::default().with_balance(U256::ZERO)),
+            (absent, AccountOverride::default()),
+            (
+                replaced,
+                AccountOverride::default()
+                    .with_balance(U256::ZERO)
+                    .with_state(std::iter::empty::<(B256, B256)>()),
+            ),
+        ]);
+        let mut bundle = BundleState::default();
+        apply_state_overrides_with_state(overrides, &mut state, Some(&mut bundle)).unwrap();
+
+        // An existing account touched into emptiness is removed under EIP-161, with its storage.
+        assert_eq!(state.get_account(&emptied).unwrap(), None);
+        assert_eq!(state.get_storage(&emptied, &slot).unwrap(), U256::ZERO);
+        let removed = bundle.account(&emptied).unwrap();
+        assert_eq!(removed.info, None);
+        assert!(removed.was_destroyed());
+        assert_eq!(state.get_account(&absent).unwrap(), None);
+        assert!(bundle.account(&absent).is_none());
+        // A full storage replacement materializes the account even when it is left empty.
+        assert_eq!(state.get_account(&replaced).unwrap(), Some(AccountInfo::default()));
+        assert_eq!(state.get_storage(&replaced, &slot).unwrap(), U256::ZERO);
+        assert!(bundle
+            .account(&replaced)
+            .unwrap()
+            .info
+            .as_ref()
+            .is_some_and(|info| info.is_empty()));
+    }
 
     #[test]
     fn attach_bal_before_tx_serves_positioned_reads() {
@@ -52,13 +259,13 @@ mod tests {
         // pre-block state
         let mut db = InMemoryDB::default();
         db.insert_account_info(
-            covered,
+            &covered,
             AccountInfo { balance: U256::from(7), nonce: 5, ..Default::default() },
         );
-        db.insert_account_storage(covered, written_slot, U256::from(11)).unwrap();
-        db.insert_account_storage(covered, read_slot, U256::from(99)).unwrap();
+        db.insert_account_storage(&covered, &written_slot, &U256::from(11));
+        db.insert_account_storage(&covered, &read_slot, &U256::from(99));
         db.insert_account_info(
-            uncovered,
+            &uncovered,
             AccountInfo { balance: U256::from(3), ..Default::default() },
         );
 
@@ -66,35 +273,37 @@ mod tests {
         let mut account = AccountBal::default();
         account.storage.storage.insert(
             written_slot,
-            BalWrites::new(vec![(BlockAccessIndex::from_tx_index(1), U256::from(42))]),
+            BalChanges::new(vec![StorageChange::new(
+                BlockAccessIndex::from_tx_index(1),
+                U256::from(42),
+            )]),
         );
-        account.account_info.balance =
-            BalWrites::new(vec![(BlockAccessIndex::from_tx_index(2), U256::from(1000))]);
+        account.account_info.balance = BalChanges::new(vec![BalanceChange::new(
+            BlockAccessIndex::from_tx_index(2),
+            U256::from(1000),
+        )]);
         let mut bal = Bal::default();
         bal.accounts.insert(covered, account);
         let bal = DecodedBal::new(Arc::new(bal), Bytes::new());
 
-        let mut state = State::builder().with_database(db).build();
+        let mut state = CacheDB::new(db);
 
         // before tx 0, none of the block's writes are visible
         attach_bal_before_tx(&mut state, &bal, 0);
-        assert_eq!(Database::storage(&mut state, covered, written_slot).unwrap(), U256::from(11));
-        assert_eq!(Database::basic(&mut state, covered).unwrap().unwrap().balance, U256::from(7));
+        assert_eq!(state.get_storage(&covered, &written_slot).unwrap(), U256::from(11));
+        assert_eq!(state.get_account(&covered).unwrap().unwrap().balance, U256::from(7));
 
         // before tx 2, the storage write of tx 1 is visible, the balance change of tx 2 is not
         attach_bal_before_tx(&mut state, &bal, 2);
-        assert_eq!(Database::storage(&mut state, covered, written_slot).unwrap(), U256::from(42));
-        assert_eq!(Database::basic(&mut state, covered).unwrap().unwrap().balance, U256::from(7));
+        assert_eq!(state.get_storage(&covered, &written_slot).unwrap(), U256::from(42));
+        assert_eq!(state.get_account(&covered).unwrap().unwrap().balance, U256::from(7));
 
         // before tx 3, the balance change of tx 2 is visible
         attach_bal_before_tx(&mut state, &bal, 3);
-        assert_eq!(
-            Database::basic(&mut state, covered).unwrap().unwrap().balance,
-            U256::from(1000)
-        );
+        assert_eq!(state.get_account(&covered).unwrap().unwrap().balance, U256::from(1000));
 
         // reads not covered by the BAL fall back to the underlying database
-        assert_eq!(Database::storage(&mut state, covered, read_slot).unwrap(), U256::from(99));
-        assert_eq!(Database::basic(&mut state, uncovered).unwrap().unwrap().balance, U256::from(3));
+        assert_eq!(state.get_storage(&covered, &read_slot).unwrap(), U256::from(99));
+        assert_eq!(state.get_account(&uncovered).unwrap().unwrap().balance, U256::from(3));
     }
 }

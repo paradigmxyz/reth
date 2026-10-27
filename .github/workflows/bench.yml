@@ -685,15 +685,15 @@ jobs:
               featureNodeArgs = [featureNodeArgs, '--debug.skip-state-root'].filter(Boolean).join(' ');
             }
 
-            const isBigBlocks = bigBlocks === 'true';
+            const useBigBlockDefaults = bigBlocks === 'true';
             // In call mode `blocks` counts the chain blocks a static corpus is generated
             // from and `warmup` is a warmup duration in seconds.
             const isCall = mode === 'call';
             if (!explicitBlocks) {
-              blocks = isCall ? '20' : defaultBlocks(isBigBlocks);
+              blocks = isCall ? '20' : defaultBlocks(useBigBlockDefaults);
             }
             if (!explicitRunPairs) {
-              runPairs = defaultRunPairs(isBigBlocks);
+              runPairs = defaultRunPairs(useBigBlockDefaults);
             }
             if (!/^\d+$/.test(blocks)) {
               core.setFailed(`Invalid blocks value: ${blocks} (must be a positive integer)`);
@@ -712,6 +712,15 @@ jobs:
             }
             const runOrder = benchRunOrder(runPairs);
 
+            // Historical block headers lack a BAL hash. Use the existing big-block
+            // payload format to retain BALs, including when replaying older baseline refs.
+            if (mode === 'engine' && bal !== 'false' && bigBlocks !== 'true') {
+              bigBlocks = 'true';
+              bigBlocksTargetGas = '1';
+            }
+
+            const isBigBlocks = bigBlocks === 'true';
+
             if (!validBalModes.has(bal)) {
               core.setFailed(`Invalid bal mode: ${bal}`);
               return;
@@ -722,6 +731,10 @@ jobs:
             }
             if (mode !== 'engine' && (isBigBlocks || reorg || bal !== 'false')) {
               core.setFailed(`${mode} mode does not support big-blocks, reorg, or BAL`);
+              return;
+            }
+            if (isBigBlocks && reorg) {
+              core.setFailed('reorg is not supported with big-blocks or BAL (reth-bb cannot build reorg blocks)');
               return;
             }
             if (mempool && (mode !== 'engine' || isBigBlocks || reorg)) {
@@ -1247,6 +1260,17 @@ jobs:
           fetch-depth: 0
           ref: ${{ steps.checkout-ref.outputs.ref }}
 
+      # Older candidates may not contain the chart project used by this workflow.
+      - name: Check out chart dependencies from workflow revision
+        if: env.BENCH_EXECUTION_MODE != 'call'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ github.repository }}
+          ref: ${{ github.workflow_sha }}
+          path: .bench-chart-workflow
+          sparse-checkout: scripts/bench-reth-charts
+          persist-credentials: false
+
       - name: Initialize run summary and update status
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         env:
@@ -1352,7 +1376,9 @@ jobs:
           toolchain: stable
       - uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
         continue-on-error: true
-      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        with:
+          version: "0.13.4"
 
       - name: Mask OTLP endpoints
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
@@ -1376,6 +1402,7 @@ jobs:
             }
 
       - name: Install dependencies
+        id: install-deps
         env:
           DEREK_TOKEN: ${{ secrets.DEREK_TOKEN }}
         run: |
@@ -1427,6 +1454,7 @@ jobs:
 
       # Verify all required tools are available
       - name: Check dependencies
+        id: check-deps
         run: |
           export PATH="$HOME/.local/bin:$HOME/.cargo/bin:$PATH"
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
@@ -1990,7 +2018,7 @@ jobs:
       # Results & charts
       - name: Upload raw results
         if: success()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: bench-raw-results
           # Replayed corpora can contain third-party traffic, so only their
@@ -2145,7 +2173,7 @@ jobs:
           CHART_ARGS="$CHART_ARGS --baseline-name ${BASELINE_NAME}"
           CHART_ARGS="$CHART_ARGS --feature-name ${FEATURE_NAME}"
           # shellcheck disable=SC2086
-          uv run --with matplotlib python3 .github/scripts/bench-reth-charts.py $CHART_ARGS
+          uv run --frozen --project "$GITHUB_WORKSPACE/.bench-chart-workflow/scripts/bench-reth-charts" python3 .github/scripts/bench-reth-charts.py $CHART_ARGS
 
       - name: Upload chart attachments
         id: upload-charts
@@ -2157,7 +2185,7 @@ jobs:
       - name: Upload results
         id: upload-results
         if: "!cancelled()"
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: bench-results
           # Replayed corpora can contain third-party traffic, so only their
@@ -2263,6 +2291,8 @@ jobs:
           github-token: ${{ secrets.DEREK_PAT }}
           script: |
             const steps_status = [
+              ['installing dependencies', '${{ steps.install-deps.outcome }}'],
+              ['checking dependencies', '${{ steps.check-deps.outcome }}'],
               ['building binaries', '${{ steps.build.outcome }}'],
               ['syncing snapshot', '${{ steps.snapshot-check.outcome }}'],
               ['running benchmarks', '${{ steps.run-benchmarks.outcome }}'],
@@ -2296,6 +2326,8 @@ jobs:
         with:
           script: |
             const steps_status = [
+              ['installing dependencies', '${{ steps.install-deps.outcome }}'],
+              ['checking dependencies', '${{ steps.check-deps.outcome }}'],
               ['building binaries', '${{ steps.build.outcome }}'],
               ['syncing snapshot', '${{ steps.snapshot-check.outcome }}'],
               ['running benchmarks', '${{ steps.run-benchmarks.outcome }}'],

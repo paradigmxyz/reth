@@ -337,14 +337,12 @@ impl Command {
                                 let mut local_keys = BTreeSet::new();
                                 let mut entries_in_chunk = 0usize;
 
-                                if let Ok(walker) = changeset_cursor.walk_range(start_key..=end_key)
-                                {
-                                    for (block_addr, storage_entry) in walker.flatten() {
-                                        if block_addr.address() == address {
-                                            local_keys.insert(storage_entry.key);
-                                        }
-                                        entries_in_chunk += 1;
+                                for entry in changeset_cursor.walk_range(start_key..=end_key)? {
+                                    let (block_addr, storage_entry) = entry?;
+                                    if block_addr.address() == address {
+                                        local_keys.insert(storage_entry.key);
                                     }
+                                    entries_in_chunk += 1;
                                 }
 
                                 // Merge into global state

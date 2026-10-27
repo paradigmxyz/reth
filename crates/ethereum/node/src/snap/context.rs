@@ -6,9 +6,9 @@ use reth_provider::{
     providers::ProviderNodeTypes, BlockNumReader, DatabaseProviderFactory, ProviderFactory,
 };
 use reth_snap_sync::{SnapSyncContext, SnapSyncError};
-use reth_tracing::tracing::debug;
 use std::{pin::pin, time::Duration};
 use tokio::{sync::watch, time::Instant};
+use tracing::debug;
 
 // Sampling well below the block time resumes a stalled step soon after new peers connect.
 const DEFAULT_SAMPLE_INTERVAL: Duration = Duration::from_secs(2);
@@ -68,13 +68,13 @@ where
         Ok(self.factory.database_provider_ro()?.last_block_number()?)
     }
 
-    fn finalized(&self) -> Option<u64> {
+    fn finalized(&self) -> Result<Option<u64>, SnapSyncError> {
         let hash = *self.finalized.borrow();
         if hash.is_zero() {
-            return None
+            return Ok(None)
         }
         // Only a finalized block whose header is synced can anchor the pivot.
-        self.factory.provider().ok()?.block_number(hash).ok()?
+        Ok(self.factory.provider()?.block_number(hash)?)
     }
 
     async fn wait_for_progress(&mut self, _head: u64) -> bool {
@@ -155,14 +155,14 @@ mod tests {
         let context = NodeSnapContext::new(factory, &peers, watch::channel(B256::ZERO).1, receiver);
 
         // Nothing is known as finalized until the engine reports a block.
-        assert_eq!(context.finalized(), None);
+        assert_eq!(context.finalized().unwrap(), None);
 
         finalized.send(headers[2].hash()).unwrap();
-        assert_eq!(context.finalized(), Some(2));
+        assert_eq!(context.finalized().unwrap(), Some(2));
 
         // A finalized block whose header isn't synced yet can't anchor a pivot.
         finalized.send(B256::repeat_byte(0xff)).unwrap();
-        assert_eq!(context.finalized(), None);
+        assert_eq!(context.finalized().unwrap(), None);
     }
 
     #[tokio::test]

@@ -11,6 +11,7 @@ use alloy_primitives::{
     map::{B256Map, B256Set},
     B256, KECCAK256_EMPTY, U256,
 };
+use evm2::bytecode::Bytecode;
 use reth_db_api::{
     tables,
     transaction::{DbTx, DbTxMut},
@@ -22,10 +23,9 @@ use reth_storage_api::{
     BlockHashReader, DBProvider, MetadataProvider, MetadataWriter, SnapAttemptId, StateWriter,
 };
 use reth_trie_common::{
-    root::storage_root, HashedPostState, HashedPostStateSorted, HashedStorage, TrieAccount,
-    EMPTY_ROOT_HASH,
+    bundle_state::StateChangeset, root::storage_root, HashedPostState, HashedPostStateSorted,
+    HashedStorage, TrieAccount, EMPTY_ROOT_HASH,
 };
-use revm::{bytecode::Bytecode, database::states::StateChangeset};
 use serde::{Deserialize, Serialize};
 use std::ops::Bound;
 
@@ -161,7 +161,7 @@ impl StoredCoverage {
 }
 
 impl<T: MetadataProvider> SnapAccountStore for T {
-    // Resumes the recorded coverage, so restarting an attempt keeps its progress.
+    // Resumes the recorded coverage, so resuming an attempt keeps its progress.
     fn start_account_coverage(&self, write: SnapWrite) -> Result<AccountCoverage, SnapSyncError>
     where
         Self: MetadataWriter,
@@ -203,14 +203,18 @@ impl<T: MetadataProvider> SnapAccountStore for T {
         let advanced = coverage.advance(range)?;
         let progress = self.storage_progress(write, range.origin())?;
         // Slots persisted before the pivot moved hold its old values until the lists reach it.
-        if progress != StorageProgress::START &&
-            let Some(catch_up) = self.catch_up_progress(write)? &&
-            catch_up.applied().number < attempt.pivot().number
-        {
-            return Err(SnapSyncError::CatchUpBehindPivot {
-                applied: catch_up.applied().number,
-                pivot: attempt.pivot().number,
-            })
+        if progress != StorageProgress::START {
+            let applied = self
+                .catch_up_progress(write)?
+                .ok_or(SnapSyncError::NoCatchUpProgress)?
+                .applied()
+                .number;
+            if applied < attempt.pivot().number {
+                return Err(SnapSyncError::CatchUpBehindPivot {
+                    applied,
+                    pivot: attempt.pivot().number,
+                })
+            }
         }
         let dependencies = RangeDependencies::new(range.accounts(), storages, bytecodes);
         let persisted = dependencies.verify(range.accounts(), &progress, self.tx_ref())?;
@@ -453,8 +457,8 @@ mod tests {
     use super::*;
     use crate::{
         test_utils::{
-            account, generation, hashed_factory, insert_generation_headers, key, state_root,
-            stored_slots, verified_range, verified_repair,
+            account, generation, hashed_factory_with_roots, key, state_root, stored_slots,
+            verified_range, verified_repair,
         },
         SnapGeneration, StorageChunk,
     };
@@ -502,7 +506,19 @@ mod tests {
     fn started(
         accounts: &[(B256, TrieAccount)],
     ) -> (ProviderFactory<MockNodeTypesWithDB>, SnapWrite, SnapGeneration) {
-        let factory = hashed_factory();
+        started_moving_to(accounts, accounts)
+    }
+
+    // `started`, with the later blocks committing to the state `moved`.
+    fn started_moving_to(
+        accounts: &[(B256, TrieAccount)],
+        moved: &[(B256, TrieAccount)],
+    ) -> (ProviderFactory<MockNodeTypesWithDB>, SnapWrite, SnapGeneration) {
+        let factory = hashed_factory_with_roots(&[
+            state_root(accounts),
+            state_root(moved),
+            state_root(moved),
+        ]);
         let generation = generation(1, state_root(accounts));
         let provider = factory.database_provider_rw().unwrap();
         let write = provider.start_snap_attempt(generation).unwrap();
@@ -736,7 +752,8 @@ mod tests {
     #[test]
     fn a_new_attempt_replaces_what_an_earlier_one_left_in_the_interval() {
         let earlier = accounts();
-        let (factory, write, _) = started(&earlier);
+        let current = vec![(key(1), account(9)), (FAR, account(3))];
+        let (factory, write, _) = started_moving_to(&earlier, &current);
         let (storages, bytecodes) = dependencies();
         let provider = factory.database_provider_rw().unwrap();
         let range = verified_range(&earlier, 0..3, B256::ZERO, &[]);
@@ -744,7 +761,6 @@ mod tests {
         provider.commit().unwrap();
 
         // At the new root the contract is gone and the first account changed.
-        let current = vec![(key(1), account(9)), (FAR, account(3))];
         let provider = factory.database_provider_rw().unwrap();
         let write = provider.start_snap_attempt(generation(2, state_root(&current))).unwrap();
         provider.start_account_coverage(write).unwrap();
@@ -775,7 +791,7 @@ mod tests {
     #[test]
     fn a_range_without_recorded_coverage_is_refused() {
         let accounts = accounts();
-        let factory = hashed_factory();
+        let factory = hashed_factory_with_roots(&[state_root(&accounts)]);
         let provider = factory.database_provider_rw().unwrap();
         let write = provider.start_snap_attempt(generation(1, state_root(&accounts))).unwrap();
         let range = verified_range(&accounts, 0..3, B256::ZERO, &[]);
@@ -864,7 +880,6 @@ mod tests {
         accounts: &[(B256, TrieAccount)],
     ) -> (ProviderFactory<MockNodeTypesWithDB>, SnapWrite) {
         let (factory, write, _) = started(accounts);
-        insert_generation_headers(&factory);
         let provider = factory.database_provider_rw().unwrap();
         let stale = HashedPostState::default()
             .with_accounts([

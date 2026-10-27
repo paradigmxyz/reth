@@ -5,6 +5,7 @@ use crate::{
     SnapWrite, MAX_HASH,
 };
 use alloy_primitives::{map::B256Map, B256, U256};
+use evm2::bytecode::Bytecode;
 use reth_db_api::transaction::DbTxMut;
 use reth_downloaders::snap::{AccountRangeDownloader, AccountRangeOutcome, VerifiedAccountRange};
 use reth_eth_wire_types::snap::GetAccountRangeMessage;
@@ -16,7 +17,6 @@ use reth_storage_api::{
 };
 use reth_tasks::Runtime;
 use reth_trie_common::HashedStorage;
-use revm::bytecode::Bytecode;
 use std::fmt;
 
 /// Downloads the account ranges an attempt still needs, one at a time in key order.
@@ -216,8 +216,8 @@ mod tests {
     use super::*;
     use crate::{
         test_utils::{
-            account, account_range, generation, hashed_factory, key, state_root, verified_range,
-            ScriptedSnapClient,
+            account, account_range, generation, hashed_factory, hashed_factory_with_roots, key,
+            state_root, verified_range, ScriptedSnapClient,
         },
         StateRepairs,
     };
@@ -236,7 +236,7 @@ mod tests {
     }
 
     fn started(accounts: &[(B256, TrieAccount)]) -> ProviderFactory<MockNodeTypesWithDB> {
-        let factory = hashed_factory();
+        let factory = hashed_factory_with_roots(&[state_root(accounts); 3]);
         let provider = factory.database_provider_rw().unwrap();
         let write = provider.start_snap_attempt(generation(1, state_root(accounts))).unwrap();
         provider.start_account_coverage(write).unwrap();
@@ -375,7 +375,7 @@ mod tests {
 
     #[tokio::test]
     async fn nothing_is_requested_without_recorded_coverage() {
-        let factory = hashed_factory();
+        let factory = hashed_factory_with_roots(&[state_root(&accounts())]);
         let provider = factory.database_provider_rw().unwrap();
         provider.start_snap_attempt(generation(1, state_root(&accounts()))).unwrap();
         provider.commit().unwrap();

@@ -538,7 +538,7 @@ pub struct EngineArgs {
     #[arg(
         long = "engine.state-root-task-timeout",
         value_parser = humantime::parse_duration,
-        default_value = DefaultEngineValues::get_global().state_root_task_timeout.as_deref().unwrap_or("4s"),
+        default_value = Resettable::from(DefaultEngineValues::get_global().state_root_task_timeout.as_ref().map(|v| v.as_str().into())),
     )]
     pub state_root_task_timeout: Option<Duration>,
 
@@ -599,7 +599,11 @@ pub struct EngineArgs {
 
     /// Reuse transaction prewarming results during block execution instead of executing
     /// transactions again when their prewarm reads are still valid.
-    #[arg(long = "engine.prewarm-reuse", default_value_t = false)]
+    #[arg(
+        long = "engine.prewarm-reuse",
+        env = "RETH_ENGINE_PREWARM_REUSE",
+        default_value_t = false
+    )]
     pub prewarm_reuse: bool,
 
     /// Add random jitter before each proof computation (trie-debug only).

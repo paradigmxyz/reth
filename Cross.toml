@@ -19,7 +19,7 @@ pre-build = [
 image = "ubuntu:24.04"
 pre-build = [
     "apt update",
-    "apt install --yes gcc gcc-riscv64-linux-gnu g++-riscv64-linux-gnu libclang-dev m4 make",
+    "apt install --yes gcc gcc-riscv64-linux-gnu g++-riscv64-linux-gnu git libclang-dev m4 make",
 ]
 env.passthrough = [
     "CARGO_TARGET_RISCV64GC_UNKNOWN_LINUX_GNU_LINKER=riscv64-linux-gnu-gcc",

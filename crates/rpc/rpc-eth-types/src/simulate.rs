@@ -7,30 +7,28 @@ use crate::{
 use alloy_chains::Chain;
 use alloy_consensus::{transaction::TxHashRef, BlockHeader, Transaction as _};
 use alloy_eips::eip2718::WithEncoded;
-use alloy_evm::{block::TxResult, precompiles::PrecompilesMap};
 use alloy_network::{NetworkTransactionBuilder, TransactionBuilder};
+use alloy_primitives::{keccak256, map::AddressMap, Address, Bytes, TxKind, U256};
 use alloy_rpc_types_eth::{
     simulate::{SimBlock, SimCallResult, SimulateError, SimulatedBlock},
     state::StateOverride,
     BlockId, BlockOverrides, BlockTransactionsKind,
 };
+use evm2::{interpreter::InstrStop, precompiles::MovePrecompileError, EvmFeatures, TxResult};
 use jsonrpsee_types::{error::INTERNAL_ERROR_CODE, ErrorObject};
+use reth_errors::ProviderResult;
 use reth_evm::{
-    execute::{BlockBuilder, BlockBuilderOutcome, BlockExecutor},
-    Evm, HaltReasonFor,
+    execute::{BlockBuilder, BlockBuilderOutcome, BlockTransactionResult},
+    BlockExecutionError, BundleState, Database, Evm as RethEvm, EvmEnv,
 };
 use reth_primitives_traits::{
     BlockBody as _, BlockTy, NodePrimitives, Recovered, RecoveredBlock, SealedHeader,
 };
 use reth_rpc_convert::{RpcBlock, RpcConvert, RpcTxReq};
 use reth_rpc_server_types::result::rpc_err;
-use reth_storage_api::{noop::NoopProvider, StateProvider};
-use revm::{
-    context::{Block, Cfg as _},
-    context_interface::result::ExecutionResult,
-    primitives::{hardfork::SpecId, Address, Bytes, TxKind, U256},
-    Database,
-};
+use reth_storage_api::{noop::NoopProvider, HashedPostStateProvider, StateProvider};
+use reth_trie_common::{HashedPostState, KeccakKeyHasher};
+use std::mem;
 
 /// Fallback seconds added between simulated block timestamps when neither the user nor the chain
 /// hint provides a value.
@@ -271,7 +269,7 @@ where
 /// is cleared (precompile removed) and the precompile is installed at the destination address.
 pub fn apply_precompile_overrides(
     state_overrides: &StateOverride,
-    precompiles: &mut PrecompilesMap,
+    evm: &mut impl RethEvm,
 ) -> Result<(), EthSimulateError> {
     let moves: Vec<_> = state_overrides
         .iter()
@@ -279,27 +277,28 @@ pub fn apply_precompile_overrides(
             account_override.move_precompile_to.map(|dest| (*source, dest))
         })
         .collect();
+    if moves.is_empty() {
+        return Ok(())
+    }
 
     for (source, dest) in &moves {
         if source == dest {
-            if precompiles.get(source).is_none() {
+            if !evm.has_precompile(source) {
                 return Err(EthSimulateError::NotAPrecompile(*source))
             }
             return Err(EthSimulateError::MovePrecompileToSelf(*source))
         }
     }
 
-    precompiles.move_precompiles(moves).map_err(
-        |alloy_evm::precompiles::MovePrecompileError::NotAPrecompile(addr)| {
-            EthSimulateError::NotAPrecompile(addr)
-        },
-    )?;
+    evm.move_precompiles(moves).map_err(|MovePrecompileError::NotAPrecompile(addr)| {
+        EthSimulateError::NotAPrecompile(addr)
+    })?;
 
     Ok(())
 }
 
 /// Converts all [`TransactionRequest`]s into [`Recovered`] transactions and applies them to the
-/// given [`BlockExecutor`].
+/// given [`BlockBuilder`].
 ///
 /// Returns all executed transactions and the result of the execution.
 ///
@@ -310,28 +309,19 @@ pub fn apply_precompile_overrides(
 ///
 /// [`TransactionRequest`]: alloy_rpc_types_eth::TransactionRequest
 #[expect(clippy::type_complexity)]
-pub fn execute_transactions<S, T>(
+pub fn execute_transactions<S, T, EvmTypes>(
     mut builder: S,
     state_provider: impl StateProvider,
     calls: Vec<RpcTxReq<T::Network>>,
     remaining_call_gas_limit: &mut Option<u64>,
     chain_id: u64,
-    compute_state_root: bool,
+    simulation_state: Option<&mut SimulatedState>,
     converter: &T,
-) -> Result<
-    (
-        BlockBuilderOutcome<S::Primitives>,
-        Vec<ExecutionResult<<<S::Executor as BlockExecutor>::Evm as Evm>::HaltReason>>,
-    ),
-    EthApiError,
->
+) -> Result<(BlockBuilderOutcome<S::Primitives>, Vec<TxResult<EvmTypes>>), EthApiError>
 where
-    S: BlockBuilder<
-        Executor: BlockExecutor<
-            Evm: Evm<DB: Database<Error: Into<EthApiError>>, Spec: Into<SpecId>>,
-        >,
-    >,
+    S: BlockBuilder<Executor: reth_evm::BlockExecutor<Evm: RethEvm<EvmTypes = EvmTypes>>>,
     T: RpcConvert<Primitives = S::Primitives>,
+    EvmTypes: evm2::EvmTypes,
 {
     builder.apply_pre_execution_changes()?;
 
@@ -339,33 +329,28 @@ where
     let mut cumulative_tx_gas_used: u64 = 0;
     let mut block_regular_gas_used: u64 = 0;
     let mut block_state_gas_used: u64 = 0;
-    let block_gas_limit = builder.evm().block().gas_limit();
-    let is_amsterdam = builder.evm().cfg_env().enable_amsterdam_eip8037;
-    let tx_gas_limit_cap = builder.evm().cfg_env().tx_gas_limit_cap();
+    let block_gas_limit = builder.evm_env().block_env().gas_limit.to::<u64>();
+    let is_amsterdam = builder.evm_env().version().feature(EvmFeatures::EIP8037);
+    let tx_gas_limit_cap = builder.evm_env().version().tx_gas_limit_cap;
     for mut call in calls {
         let block_gas_remaining = if is_amsterdam {
-            block_gas_limit
-                .saturating_sub(block_regular_gas_used)
-                .min(block_gas_limit.saturating_sub(block_state_gas_used))
+            let regular_available_gas = block_gas_limit.saturating_sub(block_regular_gas_used);
+            let state_available_gas = block_gas_limit.saturating_sub(block_state_gas_used);
+            // Gas above the tx gas cap goes to the state gas reservoir and only needs state gas.
+            if regular_available_gas >= tx_gas_limit_cap {
+                state_available_gas
+            } else {
+                regular_available_gas.min(state_available_gas)
+            }
         } else {
             block_gas_limit.saturating_sub(cumulative_tx_gas_used)
         };
         let mut default_gas_limit = block_gas_remaining;
 
-        if let Some(gas_limit) = call.as_ref().gas_limit() {
-            let exceeds_gas_limit = if is_amsterdam {
-                let regular_available_gas = block_gas_limit.saturating_sub(block_regular_gas_used);
-                let state_available_gas = block_gas_limit.saturating_sub(block_state_gas_used);
-                let regular_tx_gas_limit = gas_limit.min(tx_gas_limit_cap);
-
-                regular_tx_gas_limit > regular_available_gas || gas_limit > state_available_gas
-            } else {
-                gas_limit > block_gas_remaining
-            };
-
-            if exceeds_gas_limit {
-                return Err(EthApiError::other(EthSimulateError::BlockGasLimitExceeded))
-            }
+        if let Some(gas_limit) = call.as_ref().gas_limit() &&
+            gas_limit > block_gas_remaining
+        {
+            return Err(EthApiError::other(EthSimulateError::BlockGasLimitExceeded))
         }
 
         if let Some(remaining_call_gas_limit) = *remaining_call_gas_limit {
@@ -380,13 +365,13 @@ where
 
         // Resolve transaction, populate missing fields and enforce calls
         // correctness.
-        let tx = resolve_transaction(
+        let tx = resolve_transaction_with_evm(
             call,
             default_gas_limit,
-            builder.evm().block().basefee(),
+            builder.evm_env().block_base_fee(),
             chain_id,
-            builder.evm().cfg_env().disable_nonce_check,
-            builder.evm_mut().db_mut(),
+            !builder.evm_env().version().feature(EvmFeatures::NONCE_CHECK),
+            builder.evm_mut(),
             converter,
         )?;
         // Create transaction with an empty envelope.
@@ -394,9 +379,10 @@ where
         let tx = WithEncoded::new(Default::default(), tx);
 
         let mut tx_regular_gas_used = 0;
-        let gas_output = builder.execute_transaction_with_result_closure(tx, |result| {
-            tx_regular_gas_used = result.result().result.gas().block_regular_gas_used();
-            results.push(result.result().result.clone())
+        let gas_output = builder.execute_transaction_with_result_closure(tx, |output| {
+            let output = &output.result().result;
+            tx_regular_gas_used = output.execution_gas_spent();
+            results.push(output.clone())
         })?;
 
         let gas_used = gas_output.tx_gas_used();
@@ -412,8 +398,16 @@ where
         block_state_gas_used = block_state_gas_used.saturating_add(gas_output.state_gas_used());
     }
 
-    let result = if compute_state_root {
-        builder.finish(state_provider, None)?
+    let result = if let Some(simulation_state) = simulation_state {
+        builder.finish_with_state_root(&state_provider, |output| {
+            simulation_state
+                .extend(&state_provider, &output.state)
+                .map_err(BlockExecutionError::other)?;
+            state_provider
+                .state_root_with_updates(simulation_state.hashed_state().clone())
+                .map(Some)
+                .map_err(BlockExecutionError::other)
+        })?
     } else {
         builder.finish(NoopProvider::default(), None)?
     };
@@ -428,7 +422,7 @@ where
 ///
 /// [`TransactionRequest`]: alloy_rpc_types_eth::TransactionRequest
 pub fn resolve_transaction<DB: Database, Tx, T>(
-    mut tx: RpcTxReq<T::Network>,
+    tx: RpcTxReq<T::Network>,
     default_gas_limit: u64,
     block_base_fee_per_gas: u64,
     chain_id: u64,
@@ -439,6 +433,54 @@ pub fn resolve_transaction<DB: Database, Tx, T>(
 where
     DB::Error: Into<EthApiError>,
     T: RpcConvert<Primitives: NodePrimitives<SignedTx = Tx>>,
+{
+    resolve_transaction_with_account(
+        tx,
+        default_gas_limit,
+        block_base_fee_per_gas,
+        chain_id,
+        disable_nonce_check,
+        |address| db.get_account(address).map_err(Into::into),
+        converter,
+    )
+}
+
+fn resolve_transaction_with_evm<Tx, T, E>(
+    tx: RpcTxReq<T::Network>,
+    default_gas_limit: u64,
+    block_base_fee_per_gas: u64,
+    chain_id: u64,
+    disable_nonce_check: bool,
+    evm: &mut E,
+    converter: &T,
+) -> Result<Recovered<Tx>, EthApiError>
+where
+    T: RpcConvert<Primitives: NodePrimitives<SignedTx = Tx>>,
+    E: RethEvm,
+{
+    resolve_transaction_with_account(
+        tx,
+        default_gas_limit,
+        block_base_fee_per_gas,
+        chain_id,
+        disable_nonce_check,
+        |address| evm.account_info(address).map_err(Into::into),
+        converter,
+    )
+}
+
+fn resolve_transaction_with_account<Tx, T, F>(
+    mut tx: RpcTxReq<T::Network>,
+    default_gas_limit: u64,
+    block_base_fee_per_gas: u64,
+    chain_id: u64,
+    disable_nonce_check: bool,
+    mut account: F,
+    converter: &T,
+) -> Result<Recovered<Tx>, EthApiError>
+where
+    T: RpcConvert<Primitives: NodePrimitives<SignedTx = Tx>>,
+    F: FnMut(&Address) -> Result<Option<evm2::evm::AccountInfo>, EthApiError>,
 {
     // If we're missing any fields we try to fill nonce, gas and
     // gas price.
@@ -451,12 +493,16 @@ where
         Address::ZERO
     };
 
+    let state_nonce = account(&from)?.map(|acc| acc.nonce).unwrap_or_default();
     if tx.as_ref().nonce().is_none() {
-        tx.as_mut().set_nonce(
-            db.basic(from).map_err(Into::into)?.map(|acc| acc.nonce).unwrap_or_default(),
-        );
+        tx.as_mut().set_nonce(state_nonce);
     }
-    // eth_simulateV1 validation-off mode behaves like eth_call; avoid revm's max-nonce guard.
+    // EIP-2681 applies in both modes. Check it here before checking the fee cap.
+    if state_nonce == u64::MAX && (disable_nonce_check || tx.as_ref().nonce() == Some(u64::MAX)) {
+        return Err(EthApiError::other(EthSimulateError::NonceMaxValue))
+    }
+    // The EVM rejects a tx nonce of u64::MAX even with the nonce check disabled. The state nonce is
+    // below the limit here, so only the tx object changes.
     if disable_nonce_check && tx.as_ref().nonce() == Some(u64::MAX) {
         tx.as_mut().set_nonce(0);
     }
@@ -502,9 +548,9 @@ where
 }
 
 /// Handles outputs of the calls execution and builds a [`SimulatedBlock`].
-pub fn build_simulated_block<Err, T>(
+pub fn build_simulated_block<Err, T, EvmTypes>(
     block: RecoveredBlock<BlockTy<T::Primitives>>,
-    results: Vec<ExecutionResult<HaltReasonFor<T::Evm>>>,
+    results: Vec<TxResult<EvmTypes>>,
     txs_kind: BlockTransactionsKind,
     converter: &T,
 ) -> Result<SimulatedBlock<RpcBlock<T::Network>>, Err>
@@ -515,48 +561,22 @@ where
         + From<T::Error>
         + Into<jsonrpsee_types::ErrorObject<'static>>,
     T: RpcConvert,
+    EvmTypes: evm2::EvmTypes,
 {
     let mut calls: Vec<SimCallResult> = Vec::with_capacity(results.len());
 
     let mut log_index = 0;
     for (index, (result, tx)) in results.into_iter().zip(block.body().transactions()).enumerate() {
-        let call = match result {
-            ExecutionResult::Halt { reason, gas, .. } => {
-                let error = Err::from_evm_halt(reason, tx.gas_limit());
-                SimCallResult {
-                    return_data: Bytes::new(),
-                    error: Some(SimulateError {
-                        message: error.to_string(),
-                        code: SIMULATE_VM_ERROR_CODE,
-                        ..SimulateError::invalid_params()
-                    }),
-                    gas_used: gas.tx_gas_used(),
-                    max_used_gas: Some(gas.total_gas_spent().max(gas.floor_gas())),
-                    logs: Vec::new(),
-                    status: false,
-                }
-            }
-            ExecutionResult::Revert { output, gas, .. } => {
-                let error = Err::from_revert(output.clone());
-                SimCallResult {
-                    return_data: Bytes::new(),
-                    error: Some(SimulateError {
-                        message: error.to_string(),
-                        code: SIMULATE_REVERT_CODE,
-                        data: Some(output),
-                    }),
-                    gas_used: gas.tx_gas_used(),
-                    max_used_gas: Some(gas.total_gas_spent().max(gas.floor_gas())),
-                    status: false,
-                    logs: Vec::new(),
-                }
-            }
-            ExecutionResult::Success { output, gas, logs, .. } => SimCallResult {
-                return_data: output.into_data(),
+        let gas_used = result.tx_gas_used();
+        let max_used_gas = Some(result.total_gas_spent.max(result.floor_gas));
+        let call = if result.status {
+            SimCallResult {
+                return_data: result.output,
                 error: None,
-                gas_used: gas.tx_gas_used(),
-                max_used_gas: Some(gas.total_gas_spent().max(gas.floor_gas())),
-                logs: logs
+                gas_used,
+                max_used_gas,
+                logs: result
+                    .logs
                     .into_iter()
                     .map(|log| {
                         log_index += 1;
@@ -573,7 +593,35 @@ where
                     })
                     .collect(),
                 status: true,
-            },
+            }
+        } else if result.stop == InstrStop::Revert {
+            let error = Err::from_revert(result.output.clone());
+            SimCallResult {
+                return_data: Bytes::new(),
+                error: Some(SimulateError {
+                    message: error.to_string(),
+                    code: SIMULATE_REVERT_CODE,
+                    data: Some(result.output),
+                }),
+                gas_used,
+                max_used_gas,
+                status: false,
+                logs: Vec::new(),
+            }
+        } else {
+            let error = Err::from_evm_halt(result.stop, tx.gas_limit());
+            SimCallResult {
+                return_data: Bytes::new(),
+                error: Some(SimulateError {
+                    message: error.to_string(),
+                    code: SIMULATE_VM_ERROR_CODE,
+                    ..SimulateError::invalid_params()
+                }),
+                gas_used,
+                max_used_gas,
+                logs: Vec::new(),
+                status: false,
+            }
         };
 
         calls.push(call);
@@ -587,23 +635,150 @@ where
     Ok(SimulatedBlock { inner: block, calls })
 }
 
+/// The hashed post-state accumulated across simulated blocks, relative to the parent state.
+///
+/// Each block's changes are hashed once when they are added. Re-hashing a cumulative
+/// [`BundleState`] instead would read the parent storage of every destroyed account again for
+/// every block.
+#[derive(Debug, Default)]
+pub struct SimulatedState {
+    hashed: HashedPostState,
+    /// Whether the parent storage of an account still has to be zeroed in `hashed`, by the
+    /// account's first appearance in the changes.
+    parent_storage_unzeroed: AddressMap<bool>,
+}
+
+impl SimulatedState {
+    /// Returns the accumulated hashed post-state.
+    pub const fn hashed_state(&self) -> &HashedPostState {
+        &self.hashed
+    }
+
+    /// Adds the changes of a block or of state overrides on top of the accumulated state.
+    ///
+    /// A destroyed account drops every storage value recorded so far. Its parent storage is read
+    /// from `provider` only the first time, and later wipes zero the recorded slots in place.
+    pub fn extend(
+        &mut self,
+        provider: &impl HashedPostStateProvider,
+        changes: &BundleState,
+    ) -> ProviderResult<()> {
+        let mut parent_storage = BundleState::default();
+        for (address, account) in &changes.state {
+            // The first change to an account starts from its parent state.
+            let unzeroed = self
+                .parent_storage_unzeroed
+                .entry(*address)
+                .or_insert_with(|| account.original_info.is_some());
+            if !account.was_destroyed() {
+                continue
+            }
+            if let Some(storage) = self.hashed.storages.get_mut(&keccak256(address)) {
+                storage.storage.values_mut().for_each(|value| *value = U256::ZERO);
+            }
+            if mem::take(unzeroed) {
+                let mut account = account.clone();
+                account.storage.clear();
+                parent_storage.state.insert(*address, account);
+            }
+        }
+
+        if !parent_storage.state.is_empty() {
+            self.hashed.extend(provider.hashed_post_state(&parent_storage)?);
+        }
+
+        self.hashed.extend(HashedPostState::from_bundle_state::<KeccakKeyHasher>(&changes.state));
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
-        apply_precompile_overrides, sanitize_chain, EthSimulateError, INTERNAL_ERROR_CODE,
+        apply_precompile_overrides, sanitize_chain, EthSimulateError, ProviderResult,
+        SimulatedState, INTERNAL_ERROR_CODE,
     };
-    use crate::{error::ToRpcError, EthApiError};
+    use crate::{cache::db::apply_state_overrides_with_state, error::ToRpcError, EthApiError};
     use alloy_chains::Chain;
     use alloy_consensus::Header;
-    use alloy_evm::precompiles::PrecompilesMap;
-    use alloy_primitives::{address, Address, U256};
+    use alloy_primitives::{
+        address, keccak256,
+        map::{AddressMap, B256Map},
+        Address, B256, U256,
+    };
     use alloy_rpc_types_eth::{
         simulate::SimBlock,
         state::{AccountOverride, StateOverride},
         BlockOverrides, TransactionRequest,
     };
+    use evm2::{
+        ethereum::ethereum_tx_registry,
+        evm::{AccountInfo, CacheDB, EmptyDB, InMemoryDB},
+        BaseEvmTypes, Evm, Precompiles, SpecId,
+    };
+    use reth_evm::BundleState;
     use reth_primitives_traits::SealedHeader;
-    use revm::precompile::Precompiles;
+    use reth_storage_api::HashedPostStateProvider;
+    use reth_trie_common::{HashedPostState, KeccakKeyHasher};
+    use std::{
+        collections::BTreeMap,
+        sync::atomic::{AtomicUsize, Ordering},
+    };
+
+    fn test_evm() -> Evm<'static, BaseEvmTypes> {
+        Evm::new(
+            SpecId::PRAGUE,
+            Default::default(),
+            ethereum_tx_registry(SpecId::PRAGUE),
+            EmptyDB::default(),
+            Precompiles::base(SpecId::PRAGUE),
+        )
+    }
+
+    /// Mimics the parent-state storage reads of the database-backed providers and counts them.
+    #[derive(Default)]
+    struct CountingProvider {
+        storage: AddressMap<B256Map<U256>>,
+        scans: AtomicUsize,
+        reads: AtomicUsize,
+    }
+
+    impl CountingProvider {
+        /// Returns the non-zero storage that results from layering `hashed` over the parent state.
+        fn resulting_storage(&self, hashed: &HashedPostState) -> BTreeMap<(B256, B256), U256> {
+            let parent = self.storage.iter().flat_map(|(address, slots)| {
+                slots.iter().map(move |(slot, value)| ((keccak256(address), *slot), *value))
+            });
+            let changes = hashed.storages.iter().flat_map(|(address, storage)| {
+                storage.storage.iter().map(|(slot, value)| ((*address, *slot), *value))
+            });
+            parent
+                .chain(changes)
+                .collect::<BTreeMap<_, _>>()
+                .into_iter()
+                .filter(|(_, v)| !v.is_zero())
+                .collect()
+        }
+    }
+
+    impl HashedPostStateProvider for CountingProvider {
+        fn hashed_post_state(&self, bundle_state: &BundleState) -> ProviderResult<HashedPostState> {
+            let mut hashed =
+                HashedPostState::from_bundle_state::<KeccakKeyHasher>(&bundle_state.state);
+            for (address, account) in &bundle_state.state {
+                if account.was_destroyed() && account.original_info.is_some() {
+                    self.scans.fetch_add(1, Ordering::Relaxed);
+                    let storage = self.storage.get(address).into_iter().flatten();
+                    let slots = &mut hashed.storages.entry(keccak256(address)).or_default().storage;
+                    for (slot, _) in storage {
+                        self.reads.fetch_add(1, Ordering::Relaxed);
+                        slots.entry(*slot).or_insert(U256::ZERO);
+                    }
+                }
+            }
+            Ok(hashed)
+        }
+    }
 
     #[test]
     fn nonce_max_value_error_uses_internal_error_code() {
@@ -643,9 +818,9 @@ mod tests {
             address,
             AccountOverride { move_precompile_to: Some(address), ..Default::default() },
         );
-        let mut precompiles = PrecompilesMap::from_static(Precompiles::prague());
+        let mut evm = test_evm();
 
-        let err = apply_precompile_overrides(&state_overrides, &mut precompiles).unwrap_err();
+        let err = apply_precompile_overrides(&state_overrides, &mut evm).unwrap_err();
 
         assert!(matches!(err, EthSimulateError::NotAPrecompile(addr) if addr == address));
     }
@@ -658,9 +833,9 @@ mod tests {
             address,
             AccountOverride { move_precompile_to: Some(address), ..Default::default() },
         );
-        let mut precompiles = PrecompilesMap::from_static(Precompiles::prague());
+        let mut evm = test_evm();
 
-        let err = apply_precompile_overrides(&state_overrides, &mut precompiles).unwrap_err();
+        let err = apply_precompile_overrides(&state_overrides, &mut evm).unwrap_err();
 
         assert!(matches!(err, EthSimulateError::MovePrecompileToSelf(addr) if addr == address));
     }
@@ -674,12 +849,13 @@ mod tests {
             source,
             AccountOverride { move_precompile_to: Some(dest), ..Default::default() },
         );
-        let mut precompiles = PrecompilesMap::from_static(Precompiles::prague());
+        let mut evm = test_evm();
 
-        apply_precompile_overrides(&state_overrides, &mut precompiles).unwrap();
+        apply_precompile_overrides(&state_overrides, &mut evm).unwrap();
 
-        assert!(precompiles.get(&source).is_none());
-        assert!(precompiles.get(&dest).is_some());
+        let precompiles = evm.precompiles_as::<Precompiles>().unwrap().as_map();
+        assert!(!precompiles.contains(&source));
+        assert!(precompiles.contains(&dest));
     }
 
     #[test]
@@ -816,5 +992,99 @@ mod tests {
         let err = sanitize_chain(vec![block_with_number(257)], &parent, Chain::mainnet().id(), 256)
             .unwrap_err();
         assert!(matches!(err, EthApiError::Other(_)));
+    }
+
+    /// Hashing each block's changes once gives the same state as hashing the cumulative bundle
+    /// again after every block, without reading the parent storage of destroyed accounts again.
+    #[test]
+    fn simulated_state_reads_parent_storage_once() {
+        let wiped = Address::with_last_byte(1);
+        let emptied = Address::with_last_byte(2);
+        let created = Address::with_last_byte(3);
+        let slot = |n: u64| B256::from(U256::from(n));
+        let slots = |range: std::ops::Range<u64>| {
+            range.map(|n| (slot(n), slot(n + 1000))).collect::<Vec<_>>()
+        };
+
+        let mut db = InMemoryDB::default();
+        let mut provider = CountingProvider::default();
+        for (address, count) in [(wiped, 100), (emptied, 10)] {
+            db.insert_account_info(
+                &address,
+                AccountInfo { balance: U256::from(5), ..Default::default() },
+            );
+            for (key, value) in slots(0..count) {
+                db.insert_account_storage(
+                    &address,
+                    &U256::from_be_bytes(key.0),
+                    &U256::from_be_bytes(value.0),
+                );
+                provider
+                    .storage
+                    .entry(address)
+                    .or_default()
+                    .insert(keccak256(key), U256::from_be_bytes(value.0));
+            }
+        }
+        let mut db = CacheDB::new(db);
+
+        let blocks = [
+            // Full replacement of an existing account's storage, an emptied account, and a new
+            // account.
+            StateOverride::from_iter([
+                (
+                    wiped,
+                    AccountOverride::default()
+                        .with_state([(slot(1), slot(7)), (slot(500), slot(8))]),
+                ),
+                (emptied, AccountOverride::default().with_balance(U256::ZERO)),
+                (created, AccountOverride::default().with_balance(U256::from(3))),
+            ]),
+            // Later blocks touch the same account without wiping it. The new account has no
+            // parent storage to read when its storage is replaced.
+            StateOverride::from_iter([
+                (wiped, AccountOverride::default().with_state_diff([(slot(2), slot(9))])),
+                (created, AccountOverride::default().with_state([(slot(1), slot(4))])),
+            ]),
+            StateOverride::from_iter([(
+                wiped,
+                AccountOverride::default().with_balance(U256::from(6)),
+            )]),
+            // A second wipe, recreating a slot of the first.
+            StateOverride::from_iter([(
+                wiped,
+                AccountOverride::default().with_state([(slot(500), slot(10))]),
+            )]),
+            StateOverride::from_iter([(
+                wiped,
+                AccountOverride::default().with_state_diff([(slot(3), slot(11))]),
+            )]),
+        ];
+
+        let mut simulated = SimulatedState::default();
+        let mut cumulative = BundleState::default();
+        for (index, state_overrides) in blocks.into_iter().enumerate() {
+            let mut changes = BundleState::default();
+            apply_state_overrides_with_state(state_overrides, &mut db, Some(&mut changes)).unwrap();
+
+            simulated.extend(&provider, &changes).unwrap();
+            // Parent storage is read only when an account existing in the parent is first
+            // destroyed.
+            let reads = provider.reads.swap(0, Ordering::Relaxed);
+            assert_eq!(reads, [110, 0, 0, 0, 0][index], "block {index}");
+            let scans = provider.scans.swap(0, Ordering::Relaxed);
+            assert_eq!(scans, [2, 0, 0, 0, 0][index], "block {index}");
+
+            cumulative.extend(changes);
+            let expected = provider.hashed_post_state(&cumulative).unwrap();
+            provider.reads.store(0, Ordering::Relaxed);
+            provider.scans.store(0, Ordering::Relaxed);
+            assert_eq!(simulated.hashed_state().accounts, expected.accounts, "block {index}");
+            assert_eq!(
+                provider.resulting_storage(simulated.hashed_state()),
+                provider.resulting_storage(&expected),
+                "block {index}"
+            );
+        }
     }
 }

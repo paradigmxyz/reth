@@ -1,3 +1,4 @@
+use alloy_eips::eip7825::MAX_TX_GAS_LIMIT_OSAKA;
 use alloy_primitives::{address, bytes, Address, U256};
 use alloy_provider::Provider;
 use alloy_rpc_types_eth::{
@@ -44,11 +45,8 @@ async fn test_simulate_v1_transfer_logs_across_amsterdam() -> eyre::Result<()> {
                 assert!(logs.is_empty());
             } else {
                 assert_eq!(logs.len(), 1);
-                let emitter = if index == 0 {
-                    Address::repeat_byte(0xee)
-                } else {
-                    revm::primitives::eip7708::ETH_TRANSFER_LOG_ADDRESS
-                };
+                let emitter =
+                    if index == 0 { Address::repeat_byte(0xee) } else { evm2::evm::SYSTEM_ADDRESS };
                 assert_eq!(logs[0].address(), emitter);
             }
             assert!(!block.calls[1].status);
@@ -187,7 +185,7 @@ async fn assert_validation_uses_remaining_gas(fork: EthereumHardfork) -> eyre::R
     let txs = result[0].inner.transactions.as_transactions().expect("expected full transactions");
     assert_eq!(txs.len(), 1);
     assert_eq!(txs[0].gas_limit(), 30_000_000);
-    assert!(txs[0].gas_limit() > (1 << 24));
+    assert!(txs[0].gas_limit() > MAX_TX_GAS_LIMIT_OSAKA);
 
     Ok(())
 }
@@ -201,6 +199,86 @@ async fn test_simulate_v1_validation_omitted_gas_uses_remaining_gas_osaka() -> e
 async fn test_simulate_v1_validation_omitted_gas_uses_remaining_gas_amsterdam() -> eyre::Result<()>
 {
     assert_validation_uses_remaining_gas(EthereumHardfork::Amsterdam).await
+}
+
+#[tokio::test]
+async fn test_simulate_v1_validation_omitted_gas_uses_remaining_state_gas_amsterdam(
+) -> eyre::Result<()> {
+    reth_tracing::init_test_tracing();
+
+    let (node, wallet) =
+        EthereumNode::test_setup_for(EthereumHardfork::Amsterdam).build_single().await?;
+    let provider = node.rpc_provider_with_wallet(wallet.signer(0));
+
+    let contract = Address::with_last_byte(0x42);
+    let call =
+        TransactionRequest::default().to(contract).max_fee_per_gas(0).max_priority_fee_per_gas(0);
+    let sim_block = SimBlock::default()
+        .with_block_overrides(BlockOverrides {
+            gas_limit: Some(30_000_000),
+            base_fee: Some(U256::ZERO),
+            ..Default::default()
+        })
+        .with_state_overrides(StateOverride::from_iter([(
+            contract,
+            AccountOverride::default().with_code(bytes!("0x00")),
+        )]))
+        .call(call.clone().gas_limit(100_000))
+        .call(call);
+    let payload =
+        SimulatePayload::default().with_validation().with_full_transactions().extend(sim_block);
+
+    let result: Vec<SimulatedBlock> =
+        provider.raw_request("eth_simulateV1".into(), (&payload, "latest")).await?;
+
+    assert!(result[0].calls.iter().all(|call| call.status));
+    assert!(result[0].calls[0].gas_used > 0);
+    let txs = result[0].inner.transactions.as_transactions().expect("expected full transactions");
+    assert_eq!(txs[1].gas_limit(), 30_000_000);
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_simulate_v1_execution_gas_cap_amsterdam() -> eyre::Result<()> {
+    reth_tracing::init_test_tracing();
+
+    let (node, wallet) =
+        EthereumNode::test_setup_for(EthereumHardfork::Amsterdam).build_single().await?;
+    let provider = node.rpc_provider_with_wallet(wallet.signer(0));
+
+    let contract = Address::with_last_byte(0x42);
+    let sim_block = SimBlock::default()
+        .with_block_overrides(BlockOverrides {
+            gas_limit: Some(30_000_000),
+            base_fee: Some(U256::ZERO),
+            ..Default::default()
+        })
+        .with_state_overrides(StateOverride::from_iter([(
+            contract,
+            // Return the remaining gas using GAS.
+            AccountOverride::default().with_code(bytes!("0x5a5f5260205ff3")),
+        )]))
+        .call(
+            TransactionRequest::default()
+                .to(contract)
+                .max_fee_per_gas(0)
+                .max_priority_fee_per_gas(0),
+        );
+
+    for validation in [false, true] {
+        let mut payload = SimulatePayload::default().extend(sim_block.clone());
+        payload.validation = validation;
+
+        let result: Vec<SimulatedBlock> =
+            provider.raw_request("eth_simulateV1".into(), (&payload, "latest")).await?;
+
+        assert!(result[0].calls[0].status);
+        let gas = U256::from_be_slice(&result[0].calls[0].return_data);
+        assert_eq!(gas > U256::from(MAX_TX_GAS_LIMIT_OSAKA), !validation);
+    }
+
+    Ok(())
 }
 
 #[tokio::test]
@@ -263,6 +341,72 @@ async fn test_simulate_v1_explicit_gas_over_remaining_block_gas_errors() -> eyre
 
     assert_eq!(err.code, -38015);
     assert_eq!(err.message, "Block gas limit exceeded by the block's transactions");
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_simulate_v1_validation_error_codes() -> eyre::Result<()> {
+    reth_tracing::init_test_tracing();
+
+    let (node, wallet) =
+        EthereumNode::test_setup_for(EthereumHardfork::Cancun).build_single().await?;
+    let provider = node.rpc_provider_with_wallet(wallet.signer(0));
+
+    let from = address!("0xc000000000000000000000000000000000000000");
+    let tx = || {
+        TransactionRequest::default()
+            .from(from)
+            .to(Address::ZERO)
+            .max_fee_per_gas(1_000_000_000)
+            .max_priority_fee_per_gas(0)
+            .nonce(5)
+    };
+    let state_overrides = || {
+        StateOverridesBuilder::default()
+            .with_balance(from, U256::from(u64::MAX))
+            .with_nonce(from, 5)
+            .build()
+    };
+
+    let cases = [
+        ("nonce too low", tx().nonce(4), -38010, "nonce too low: next nonce 5, tx nonce 4"),
+        ("nonce too high", tx().nonce(6), -38011, "nonce too high"),
+        ("intrinsic gas too low", tx().gas_limit(20_000), -38013, "intrinsic gas too low"),
+        (
+            "base fee too low",
+            tx().max_fee_per_gas(1),
+            -38012,
+            "max fee per gas less than block base fee",
+        ),
+        (
+            "insufficient funds",
+            tx().gas_limit(21_000).value(U256::from(u64::MAX)),
+            -38014,
+            "insufficient funds for gas * price + value: have 18446744073709551615 want 18446765073709551615",
+        ),
+    ];
+
+    for (name, tx, code, message) in cases {
+        let sim_block = SimBlock::default()
+            .with_block_overrides(BlockOverrides {
+                base_fee: Some(U256::from(1_000_000)),
+                ..Default::default()
+            })
+            .with_state_overrides(state_overrides())
+            .call(tx);
+        let payload = SimulatePayload::default().with_validation().extend(sim_block);
+
+        let err = provider
+            .raw_request::<_, Vec<SimulatedBlock>>("eth_simulateV1".into(), (&payload, "latest"))
+            .await
+            .map(drop)
+            .expect_err(name);
+        let err = err.as_error_resp().expect("expected JSON-RPC error response");
+
+        assert_eq!(err.code, code, "{name}: {err:?}");
+        assert_eq!(err.message, message, "{name}");
+    }
 
     Ok(())
 }
@@ -339,6 +483,41 @@ async fn test_simulate_v1_too_many_blocks_error() -> eyre::Result<()> {
 
     assert_eq!(err.code, -38026);
     assert_eq!(err.message, "too many blocks");
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_simulate_v1_sender_at_max_nonce_errors() -> eyre::Result<()> {
+    reth_tracing::init_test_tracing();
+
+    let (node, _) =
+        EthereumNode::test_setup_for(EthereumHardfork::Amsterdam).build_single().await?;
+    let provider = node.rpc_provider();
+
+    let from = address!("0xc000000000000000000000000000000000000000");
+    let to = address!("0xc100000000000000000000000000000000000000");
+    let sim_block = SimBlock::default()
+        .with_state_overrides(StateOverride::from_iter([(
+            from,
+            AccountOverride::default().with_nonce(u64::MAX),
+        )]))
+        .call(TransactionRequest::default().from(from).to(to));
+
+    for validation in [false, true] {
+        let mut payload = SimulatePayload::default().extend(sim_block.clone());
+        payload.validation = validation;
+
+        let err = provider
+            .raw_request::<_, Vec<SimulatedBlock>>("eth_simulateV1".into(), (&payload, "latest"))
+            .await
+            .unwrap_err();
+        let err = err.as_error_resp().expect("expected JSON-RPC error response");
+
+        assert_eq!(err.code, -32603);
+        assert_eq!(err.message, "nonce has max value");
+        assert!(err.data.is_none());
+    }
 
     Ok(())
 }

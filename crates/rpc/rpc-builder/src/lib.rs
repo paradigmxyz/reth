@@ -67,7 +67,7 @@ use std::{
     net::{Ipv4Addr, SocketAddr, SocketAddrV4},
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
-use tower_http::cors::CorsLayer;
+use tower_http::{cors::CorsLayer, validate_request::ValidateRequestHeaderLayer};
 
 pub use cors::CorsDomainError;
 
@@ -1468,7 +1468,7 @@ impl<RpcMiddleware> RpcServerConfig<RpcMiddleware> {
                 let server = ServerBuilder::new()
                     .set_http_middleware(
                         tower::ServiceBuilder::new()
-                            .option_layer(Self::maybe_cors_layer(cors)?)
+                            .option_layer(Self::maybe_cors_layer(cors.clone())?)
                             .option_layer(Self::maybe_jwt_layer(self.jwt_secret))
                             .option_layer(Self::maybe_decompression_layer(
                                 self.http_max_request_body_size,
@@ -1478,6 +1478,9 @@ impl<RpcMiddleware> RpcServerConfig<RpcMiddleware> {
                                 http_socket_addr,
                                 self.http_disable_compression,
                                 self.http_compression_algorithms.as_deref(),
+                            ))
+                            .layer(ValidateRequestHeaderLayer::custom(
+                                cors::WsOriginValidator::new(cors.as_deref())?,
                             )),
                     )
                     .set_rpc_middleware(
@@ -1505,9 +1508,8 @@ impl<RpcMiddleware> RpcServerConfig<RpcMiddleware> {
                     RpcError::server_error(err, ServerKind::WsHttp(http_socket_addr))
                 })?;
                 if let Some(module) = modules.http.as_ref().or(modules.ws.as_ref()) {
-                    let handle = server.start(module.clone());
-                    http_handle = Some(handle.clone());
-                    ws_handle = Some(handle);
+                    // Both transports share one server, so only keep one shutdown handle.
+                    http_handle = Some(server.start(module.clone()));
                 }
                 return Ok(RpcServerHandle {
                     http_local_addr: Some(addr),
@@ -1532,7 +1534,10 @@ impl<RpcMiddleware> RpcServerConfig<RpcMiddleware> {
                 .set_http_middleware(
                     tower::ServiceBuilder::new()
                         .option_layer(Self::maybe_cors_layer(self.ws_cors_domains.clone())?)
-                        .option_layer(Self::maybe_jwt_layer(self.jwt_secret)),
+                        .option_layer(Self::maybe_jwt_layer(self.jwt_secret))
+                        .layer(ValidateRequestHeaderLayer::custom(cors::WsOriginValidator::new(
+                            self.ws_cors_domains.as_deref(),
+                        )?)),
                 )
                 .set_rpc_middleware(
                     RpcServiceBuilder::default()
@@ -2241,11 +2246,16 @@ impl RpcServerHandle {
 
     /// Tell the server to stop without waiting for the server to stop.
     pub fn stop(self) -> Result<(), AlreadyStoppedError> {
+        // HTTP and WS share one server, and one stop handle, when they use the same address.
+        // Stopping it twice would race with the server shutting down after the first stop.
+        let shared_server =
+            self.http_local_addr.is_some() && self.http_local_addr == self.ws_local_addr;
+
         if let Some(handle) = self.http {
             handle.stop()?
         }
 
-        if let Some(handle) = self.ws {
+        if let Some(handle) = self.ws.filter(|_| !shared_server) {
             handle.stop()?
         }
 
@@ -2815,5 +2825,29 @@ mod tests {
 
         assert!(result.is_ok());
         assert!(!closure_called, "Closure should NOT be called when module is not configured");
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn test_stop_rpc_servers() {
+        let modules = TransportRpcModules::default()
+            .with_http(create_test_module())
+            .with_ws(create_test_module());
+        for config in [
+            RpcServerConfig::http(Default::default()),
+            RpcServerConfig::ws(Default::default()),
+            RpcServerConfig::http(Default::default()).with_ws(Default::default()),
+        ] {
+            let addr = SocketAddr::from((Ipv4Addr::LOCALHOST, 0));
+            let handle =
+                config.with_http_address(addr).with_ws_address(addr).start(&modules).await.unwrap();
+            let servers = handle.http.iter().chain(handle.ws.iter()).cloned().collect::<Vec<_>>();
+            let cloned = handle.clone();
+
+            handle.stop().unwrap();
+            for server in servers {
+                tokio::time::timeout(Duration::from_secs(5), server.stopped()).await.unwrap();
+            }
+            assert!(matches!(cloned.stop(), Err(AlreadyStoppedError)));
+        }
     }
 }
