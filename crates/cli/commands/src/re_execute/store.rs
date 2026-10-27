@@ -28,10 +28,9 @@ pub(super) const PAGE_RECORDS: usize = 1000;
 /// comes close to this limit at normal bandwidth.
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(15);
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(2);
-/// Retries live only in SlateDB's wrapper, the one layer that retries conditional writes
-/// after a timeout and recognises a write that landed before its response was lost. The
-/// object_store client never retries, so the layers cannot compound; catalog requests
-/// outside SlateDB get one bounded attempt and surface failures to the caller.
+/// The object_store client retries each request at most twice within 20 s, but never a
+/// conditional write after a timeout. SlateDB's wrapper retries on top of that and is the
+/// one layer that recognises a conditional write that landed before its response was lost.
 pub(super) const SLATEDB_RETRIES: Option<u32> = Some(3);
 pub(super) const CONTEXT_KEY: &[u8] = b"reth-corpus-context";
 pub(super) const CURSOR_KEY: &[u8] = b"reth-corpus-cursor";
@@ -158,8 +157,8 @@ impl CredentialProvider for Credentials {
     }
 }
 
-/// Bounds every request to one attempt of at most `request`, without replacing other
-/// client options read from the environment.
+/// Bounds every request to at most three attempts of at most `request` each, without
+/// replacing other client options read from the environment.
 fn bounded(builder: AmazonS3Builder, request: Duration) -> AmazonS3Builder {
     let millis = |d: Duration| format!("{}ms", d.as_millis());
     builder
@@ -168,7 +167,11 @@ fn bounded(builder: AmazonS3Builder, request: Duration) -> AmazonS3Builder {
             AmazonS3ConfigKey::Client(ClientConfigKey::ConnectTimeout),
             millis(CONNECT_TIMEOUT.min(request)),
         )
-        .with_retry(RetryConfig { max_retries: 0, ..Default::default() })
+        .with_retry(RetryConfig {
+            max_retries: 2,
+            retry_timeout: Duration::from_secs(20),
+            ..Default::default()
+        })
 }
 
 impl Store {
@@ -767,8 +770,8 @@ pub(super) mod tests {
         let started = std::time::Instant::now();
         let error = objects.get(&Path::from("catalog.json")).await.unwrap_err();
         assert!(matches!(error, object_store::Error::Generic { .. }), "{error:?}");
-        // One 200 ms attempt, no retries.
-        assert!(started.elapsed() < Duration::from_secs(2), "{:?}", started.elapsed());
+        // Three 200 ms attempts plus backoff.
+        assert!(started.elapsed() < Duration::from_secs(5), "{:?}", started.elapsed());
         held.abort();
         Ok(())
     }
