@@ -18,8 +18,8 @@ fn target_child_prefix(target: &ProofV2Target) -> Nibbles {
         .map_or_else(Nibbles::new, |parent_len| target.key_nibbles.slice(0..parent_len + 1))
 }
 
-/// Describes targets below one direct child of an already-revealed parent and the bounded range
-/// traversed to calculate their proofs.
+/// Describes targets with the same already-revealed parent and the bounded range traversed to
+/// calculate their direct children.
 pub(crate) struct SubTrieTargets<'a> {
     /// The first path traversed for these targets.
     pub(crate) lower_bound: Nibbles,
@@ -35,27 +35,27 @@ pub(crate) struct SubTrieTargets<'a> {
 }
 
 /// Given a set of [`ProofV2Target`]s, returns an iterator over those same [`ProofV2Target`]s
-/// grouped by the direct child of their already-revealed parent. Targets without a known parent
-/// remain grouped together to calculate the root. A group never traverses another child of a
-/// revealed parent.
+/// grouped by their already-revealed parent. Each group traverses the bounded span from its first
+/// targeted direct child through its last targeted direct child.
 pub(crate) fn iter_sub_trie_targets(
     targets: &mut [ProofV2Target],
 ) -> impl Iterator<Item = SubTrieTargets<'_>> {
-    // Sort by parent context first so equal parents are contiguous, then by target key so targets
-    // below the same direct child are contiguous. `None` and a known root parent remain distinct.
+    // Sort by parent context first so equal parents are contiguous, then by target key so the
+    // first and last targets determine the traversal bounds for the group. `None` and a known root
+    // parent remain distinct.
     targets.sort_unstable_by(|a, b| {
         known_parent_prefix(a)
             .cmp(&known_parent_prefix(b))
             .then_with(|| a.key_nibbles.cmp(&b.key_nibbles))
     });
 
-    // A revealed sibling can contain updates that are not present in the database view.
     targets
-        .chunk_by_mut(|current, next| target_child_prefix(current) == target_child_prefix(next))
+        .chunk_by_mut(|current, next| known_parent_prefix(current) == known_parent_prefix(next))
         .map(|targets| {
             let parent_prefix = known_parent_prefix(&targets[0]);
             let lower_bound = target_child_prefix(&targets[0]);
-            let upper_bound = lower_bound.next_without_prefix();
+            let upper_bound = target_child_prefix(targets.last().expect("chunk is non-empty"))
+                .next_without_prefix();
             SubTrieTargets { lower_bound, upper_bound, parent_prefix, targets }
         })
 }
@@ -98,7 +98,7 @@ mod tests {
                     ],
                 )],
             ),
-            // Targets below children 0 and f of parent 2 use separate ranges.
+            // Targets below children 0 and f of parent 2 span [20, 3).
             (
                 vec![
                     ProofV2Target::new(B256::repeat_byte(0x20))
@@ -112,14 +112,11 @@ mod tests {
                     (
                         Some("2"),
                         "20",
-                        Some("21"),
-                        vec!["2020202020202020202020202020202020202020202020202020202020202020"],
-                    ),
-                    (
-                        Some("2"),
-                        "2f",
                         Some("3"),
-                        vec!["2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f"],
+                        vec![
+                            "2020202020202020202020202020202020202020202020202020202020202020",
+                            "2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f",
+                        ],
                     ),
                     (
                         Some("4"),
@@ -152,7 +149,7 @@ mod tests {
                     ),
                 ],
             ),
-            // A known-root child f range is unbounded.
+            // A known-root span ending in child f is unbounded.
             (
                 vec![
                     ProofV2Target::new(B256::repeat_byte(0x20))
@@ -160,20 +157,15 @@ mod tests {
                     ProofV2Target::new(B256::repeat_byte(0xf0))
                         .with_parent(ProofV2TargetParent::new(0)),
                 ],
-                vec![
-                    (
-                        Some(""),
-                        "2",
-                        Some("3"),
-                        vec!["2020202020202020202020202020202020202020202020202020202020202020"],
-                    ),
-                    (
-                        Some(""),
-                        "f",
-                        None,
-                        vec!["f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0"],
-                    ),
-                ],
+                vec![(
+                    Some(""),
+                    "2",
+                    None,
+                    vec![
+                        "2020202020202020202020202020202020202020202020202020202020202020",
+                        "f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0",
+                    ],
+                )],
             ),
             // Parent ordering can make traversal ranges move backwards (4 then 20).
             (
