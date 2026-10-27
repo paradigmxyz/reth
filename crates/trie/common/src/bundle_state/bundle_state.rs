@@ -34,12 +34,12 @@ pub struct BundleBuilder {
 /// Option for [`BundleState`] when converting it to the plain state.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum OriginalValuesKnown {
-    /// Checks changed with original values that [BundleState] has.
+    /// Checks changed with original values that [`BundleState`] has.
     ///
     /// If we don't expect parent blocks to be committed or unwinded from database, this option
     /// should be used.
     Yes,
-    /// Doesn't check original values, see the implementation of [BundleState::to_plain_state] for
+    /// Doesn't check original values, see the implementation of [`BundleState::to_plain_state`] for
     /// more info.
     ///
     /// If the Bundle can be split or extended, we would not be sure about original values, in that
@@ -523,7 +523,7 @@ impl BundleState {
     /// Consumes [`TransitionState`] by applying the changes and creating the
     /// reverts.
     ///
-    /// If [BundleRetention::includes_reverts] is `true`, then the reverts will
+    /// If [`BundleRetention::includes_reverts`] is `true`, then the reverts will
     /// be retained.
     pub fn apply_transitions_and_create_reverts(
         &mut self,
@@ -753,7 +753,7 @@ impl BundleState {
         self.reverts.extend(other.reverts);
     }
 
-    /// Takes first N raw reverts from the [BundleState].
+    /// Takes first N raw reverts from the [`BundleState`].
     pub fn take_n_reverts(&mut self, reverts_to_take: usize) -> Reverts {
         // Split is done as [0, num) and [num, len].
         if reverts_to_take > self.reverts.len() {
@@ -765,7 +765,7 @@ impl BundleState {
         mem::replace(&mut self.reverts, Reverts::new(this))
     }
 
-    /// Returns and clears all reverts from [BundleState].
+    /// Returns and clears all reverts from [`BundleState`].
     pub fn take_all_reverts(&mut self) -> Reverts {
         self.reverts_size = 0;
         mem::take(&mut self.reverts)
@@ -815,7 +815,7 @@ impl BundleState {
 
     /// Reverts the state changes by N transitions back.
     ///
-    /// See also [Self::revert_latest]
+    /// See also [`Self::revert_latest`]
     pub fn revert(&mut self, mut num_transitions: usize) {
         if num_transitions == 0 {
             return;
@@ -830,7 +830,7 @@ impl BundleState {
         }
     }
 
-    /// Prepends present the state with the given [BundleState].
+    /// Prepends present the state with the given [`BundleState`].
     ///
     /// It adds changes from the given state but does not override any existing changes.
     ///
