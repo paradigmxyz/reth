@@ -30,7 +30,6 @@ sha2.workspace = true
 
 [dev-dependencies]
 eyre.workspace = true
-rand.workspace = true
 reqwest.workspace = true
 reth-era-downloader.workspace = true
 reth-ethereum-primitives.workspace = true

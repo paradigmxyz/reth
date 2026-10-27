@@ -5,7 +5,7 @@ use crate::{
     error::{NetworkError, ServiceKind},
 };
 use enr::Enr;
-use futures::StreamExt;
+use futures::{FutureExt, StreamExt};
 use reth_discv4::{DiscoveryUpdate, Discv4, Discv4Config};
 use reth_discv5::{DiscoveredPeer, Discv5};
 use reth_dns_discovery::{
@@ -254,17 +254,20 @@ impl Discovery {
         let (discv5_updates, _discv5_forwarder) = match (discv4_ingress, discv5_updates) {
             (Some(mut ingress), Some(mut updates)) => {
                 let (tx, rx) = mpsc::channel(updates.max_capacity());
-                let handle = tokio::spawn(async move {
-                    while let Some(event) = updates.recv().await {
-                        if let discv5::Event::UnrecognizedFrame(frame) = &event {
-                            ingress.handle_packet(&frame.packet, frame.src_address).await;
-                            continue;
-                        }
-                        if tx.send(event).await.is_err() {
-                            break;
+                let handle = tokio::spawn(
+                    async move {
+                        while let Some(event) = updates.recv().await {
+                            if let discv5::Event::UnrecognizedFrame(frame) = &event {
+                                ingress.handle_packet(&frame.packet, frame.src_address).await;
+                                continue;
+                            }
+                            if tx.send(event).await.is_err() {
+                                break;
+                            }
                         }
                     }
-                });
+                    .boxed(),
+                );
                 (Some(ReceiverStream::new(rx)), Some(handle))
             }
             (_, updates) => (updates.map(ReceiverStream::new), None),

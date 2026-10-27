@@ -23,7 +23,7 @@ use reth_engine_primitives::{
     NewPayloadTimings, OnForkChoiceUpdated, SlowBlockInfo,
 };
 use reth_errors::{ConsensusError, ProviderResult};
-use reth_evm::ConfigureEvm;
+use reth_evm::{debug_unreachable, ConfigureEvm};
 use reth_network_p2p::full_block::SealedBlockWithAccessList;
 use reth_payload_builder::{BuildNewPayload, PayloadBuilderHandle, PayloadBuilderLease};
 use reth_payload_primitives::{BuiltPayload, NewPayloadError, PayloadAttributes, PayloadTypes};
@@ -36,12 +36,10 @@ use reth_provider::{
     StageCheckpointReader, StateProviderFactory, StateReader, StorageChangeSetReader,
     StorageSettingsCache, TransactionVariant,
 };
-use reth_revm::database::StateProviderDatabase;
 use reth_stages_api::ControlFlow;
 use reth_storage_overlay::OverlayManager;
 use reth_tasks::{spawn_os_thread, utils::increase_thread_priority};
 use reth_trie::{HashedPostState, KeccakKeyHasher, SortedTrieData};
-use revm::interpreter::debug_unreachable;
 use state::TreeState;
 use std::{
     fmt::Debug,
@@ -84,9 +82,8 @@ pub use payload_validator::{BasicEngineValidator, EngineValidator};
 pub use persistence_state::PersistenceState;
 pub use reth_engine_primitives::TreeConfig;
 pub use reth_execution_cache::{
-    precompile_cache, CachedStateCacheMetrics, CachedStateMetrics, CachedStateMetricsSource,
-    CachedStateProvider, ExecutionCache, PayloadExecutionCache, SavedCache,
-    TxPoolPrewarmCacheSnapshot,
+    CachedStateCacheMetrics, CachedStateMetrics, CachedStateMetricsSource, CachedStateProvider,
+    ExecutionCache, PayloadExecutionCache, SavedCache, TxPoolPrewarmCacheSnapshot,
 };
 pub use txpool_prewarm::{
     Source as TxPoolPrewarmSource, Transaction as TxPoolPrewarmTransaction,
@@ -100,7 +97,7 @@ pub mod state;
 ///
 /// This ensures that recent changesets are kept in memory for potential reorgs,
 /// even when the finalized block is not set (e.g., on L2s like Optimism).
-const CHANGESET_CACHE_RETENTION_BLOCKS: u64 = 64;
+pub const CHANGESET_CACHE_RETENTION_BLOCKS: u64 = 64;
 
 /// Tracks the state of the engine api internals.
 ///

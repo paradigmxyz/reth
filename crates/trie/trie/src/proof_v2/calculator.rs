@@ -110,6 +110,11 @@ impl<TC, HC, VE: LeafValueEncoder> ProofCalculator<TC, HC, VE> {
         self.prefix_set = prefix_set;
         self
     }
+
+    /// Replaces the changed-key prefixes applied to subsequent calculations.
+    pub(super) fn set_prefix_set(&mut self, prefix_set: PrefixSet) {
+        self.prefix_set = prefix_set;
+    }
 }
 
 impl<TC, HC, VE> ProofCalculator<TC, HC, VE>
@@ -1336,7 +1341,7 @@ where
 
         // A full-trie calculation always retains a root, using an empty root when traversal
         // produced no root node.
-        let Some(parent_prefix) = sub_trie_targets.parent_prefix else {
+        if sub_trie_targets.parent_prefix.is_none() {
             let mut root_node = if let Some(root_node) = root_node {
                 self.rlp_encode_buf.clear();
                 root_node.into_proof_trie_node(Nibbles::new(), &mut self.rlp_encode_buf)?
@@ -1358,38 +1363,19 @@ where
         let Some(mut root_node) = root_node else { return Ok(()) };
 
         let root_full_path = *root_node.short_key();
+        let child_path = sub_trie_targets.lower_bound;
 
-        // An exact match reconstructed the already-revealed parent; its targeted children were
-        // retained while that parent branch was popped.
-        if root_full_path == parent_prefix {
-            return Ok(())
-        }
-
-        // At this point we have a "root" node which the calculator has based at 0x (empty path),
-        // but the subtrie targets indicate that there is a known parent branch at parent_prefix
-        // which this root should be rebased onto.
-
-        // The local root of a partial calculation must be at or below its known parent.
-        if !root_full_path.starts_with(&parent_prefix) {
+        // A partial calculation traverses only one child of the known parent.
+        if !root_full_path.starts_with(&child_path) {
             return Err(StateProofError::TrieInconsistency(format!(
-                "local root path {root_full_path:?} does not start with parent prefix \
-                 {parent_prefix:?}",
+                "local root path {root_full_path:?} does not start with child path \
+                 {child_path:?}",
             )))
         }
 
         // Keep the parent branch's child nibble in the proof path so the local root attaches
         // directly below that parent.
-        let child_path_len = parent_prefix.len() + 1;
-        let child_path = root_full_path.slice_unchecked(0, child_path_len);
-
-        // It's possible that the local root lies on a child which is not targeted.
-        if !sub_trie_targets
-            .targets
-            .iter()
-            .any(|target| target.key_nibbles.starts_with(&child_path))
-        {
-            return Ok(())
-        }
+        let child_path_len = child_path.len();
 
         // Retain the requested child with only the path below its parent edge in the short key.
         root_node.trim_short_key_prefix(child_path_len);
@@ -1429,7 +1415,7 @@ where
         let mut hashed_cursor_state = HashedCursorState::unseeked();
         let mut previous_traversal_bounds: Option<(Nibbles, Option<Nibbles>)> = None;
 
-        // Divide targets into bounded ranges, each corresponding to the direct children of one
+        // Divide targets into bounded ranges, each corresponding to one direct child of an
         // already-revealed parent, and handle all proofs within that range.
         for sub_trie_targets in iter_sub_trie_targets(targets) {
             let traversal_lower_bound = sub_trie_targets.lower_bound;
@@ -2456,7 +2442,7 @@ mod tests {
     }
 
     #[test]
-    fn test_discards_reconstructed_known_parent_branch() {
+    fn test_known_parent_retains_child() {
         let slot_a = B256::right_padding_from(&[0xae, 0xd2]);
         let slot_b = B256::right_padding_from(&[0xae, 0xd4]);
         let slot_nibbles = Nibbles::unpack(slot_a);
@@ -2490,7 +2476,7 @@ mod tests {
     }
 
     #[test]
-    fn test_known_parent_sibling_span_retains_only_target_children() {
+    fn test_known_parent_separate_child_ranges() {
         let stored_slot_a = B256::right_padding_from(&[0xea, 0x53]);
         let stored_slot_b = B256::right_padding_from(&[0xeb, 0x53]);
         let stored_slot_c = B256::right_padding_from(&[0xec, 0x53]);

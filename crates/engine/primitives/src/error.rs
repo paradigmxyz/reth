@@ -2,6 +2,7 @@ use alloc::boxed::Box;
 use alloy_rpc_types_engine::ForkchoiceUpdateError;
 use reth_errors::{BlockExecutionError, BlockValidationError, ConsensusError, ProviderError};
 use reth_execution_errors::InternalBlockExecutionError;
+use reth_payload_primitives::PayloadBuilderError;
 
 /// Represents all error cases when handling a new payload.
 ///
@@ -57,6 +58,10 @@ pub enum BeaconForkChoiceUpdateError {
     /// Thrown when the engine task is unavailable/stopped.
     #[error("beacon consensus engine task stopped")]
     EngineUnavailable,
+    /// Thrown when the forkchoice update was applied, but the payload job for the provided payload
+    /// attributes could not be started.
+    #[error("failed to start payload job: {0}")]
+    PayloadJob(#[source] PayloadBuilderError),
     /// An internal error occurred, not necessarily related to the update.
     #[error(transparent)]
     Internal(Box<dyn core::error::Error + Send + Sync>),
