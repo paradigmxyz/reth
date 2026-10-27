@@ -152,7 +152,9 @@ where
                         let Ok(mode) = u32::from_str_radix(&perms_str.replace("0o", ""), 8)
                     {
                         let perms = std::fs::Permissions::from_mode(mode);
-                        let _ = std::fs::set_permissions(&self.endpoint, perms);
+                        if let Err(err) = std::fs::set_permissions(&self.endpoint, perms) {
+                            tracing::error!(%err, endpoint = ?self.endpoint, "failed to set IPC socket permissions");
+                        }
                     }
                 }
                 listener
@@ -802,7 +804,8 @@ mod tests {
     async fn test_ipc_socket_permissions() {
         use std::os::unix::fs::PermissionsExt;
         let endpoint = &dummy_name();
-        let perms = "0777";
+        // Use a mode that differs from the default so we verify the permissions are applied.
+        let perms = "0600";
         let server = Builder::default()
             .set_ipc_socket_permissions(Some(perms.to_string()))
             .build(endpoint.clone());
@@ -812,7 +815,7 @@ mod tests {
 
         let meta = std::fs::metadata(endpoint).unwrap();
         let perms = meta.permissions();
-        assert_eq!(perms.mode() & 0o777, 0o777);
+        assert_eq!(perms.mode() & 0o777, 0o600);
     }
 
     async fn pipe_from_stream_with_bounded_buffer(
