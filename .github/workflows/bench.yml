@@ -12,6 +12,18 @@ on:
     types: [created]
   workflow_dispatch:
     inputs:
+      allocator-config:
+        description: Allocator experiment configuration.
+        type: choice
+        default: default
+        options:
+          - default
+          - purge
+          - reserve
+          - prefault
+          - 1mb
+          - 2mb
+          - 4mb
       blocks:
         description: "Number of blocks to benchmark (default: 500, big blocks: 30)"
         required: false
@@ -141,6 +153,7 @@ env:
   CARGO_TERM_COLOR: always
   RUSTC_WRAPPER: "sccache"
   BENCH_RUNNERS: 4
+  ALLOCATOR_BENCH_CONFIG: ${{ inputs.allocator-config || 'default' }}
 
 name: bench
 
@@ -1772,6 +1785,14 @@ jobs:
 
       # Interleaved run order (A=feature, B=baseline) to reduce systematic bias
       # from thermal drift and cache warming.
+      - name: Start allocator memory sampling
+        run: |
+          monitor_dir="$RUNNER_TEMP/allocator-memory-${GITHUB_RUN_ID}"
+          mkdir -p "$monitor_dir"
+          echo "ALLOCATOR_MEMORY_DIR=$monitor_dir" >> "$GITHUB_ENV"
+          command -v uv >/dev/null
+          nohup sudo taskset -c 0 "$(command -v uv)" run --no-project python .github/scripts/bench-allocator-memory.py "$monitor_dir" reth > "$monitor_dir/monitor.log" 2>&1 < /dev/null &
+
       - name: Run benchmarks
         id: run-benchmarks
         env:
@@ -2374,3 +2395,19 @@ jobs:
           sudo pkill -f '^bench-cpu-dma-latency' 2>/dev/null || true
           sudo cpupower frequency-set -g powersave 2>/dev/null || true
           sudo systemctl start irqbalance cron atd 2>/dev/null || true
+
+      - name: Stop allocator memory sampling
+        if: always()
+        run: |
+          if [ -n "${ALLOCATOR_MEMORY_DIR:-}" ]; then
+            sudo touch "$ALLOCATOR_MEMORY_DIR/stop"
+            sleep 2
+          fi
+
+      - name: Upload allocator memory samples
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: allocator-memory
+          path: ${{ env.ALLOCATOR_MEMORY_DIR }}
+          if-no-files-found: warn

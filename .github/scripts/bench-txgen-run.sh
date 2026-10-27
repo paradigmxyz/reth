@@ -841,3 +841,6 @@ fi
 if [ "$EXECUTION_MODE" != "call" ]; then
   python3 .github/scripts/bench-txgen-report-to-reth-csv.py "$OUTPUT_DIR/report.json" "$OUTPUT_DIR"
 fi
+
+# Observe memory retention after measured load and before process teardown.
+sleep 15
