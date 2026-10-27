@@ -34,7 +34,8 @@ pub use storage::{StorageJob, StorageWorker};
 ///
 /// The hashed tables are the source of truth. Storage tries are recomputed in parallel, so storage
 /// findings are not ordered relative to account findings or to [`Output::Progress`]. Iteration
-/// stops after the first error.
+/// stops after the first error. Only hashed account rows contribute account leaves; orphan storage
+/// tries are still verified independently.
 ///
 /// Storage work ahead of the account walk is bounded by the configured storage root limit.
 /// Findings use a bounded channel shared by account and storage producers, so a slow consumer
@@ -215,11 +216,9 @@ where
                 }
                 next => {
                     next_account = next;
-                    // Empty storage must not create a default account leaf.
-                    if root == alloy_consensus::EMPTY_ROOT_HASH {
-                        continue;
-                    }
-                    Account::default()
+                    // Canonical state roots only include leaves present in hashed accounts.
+                    // Orphan storage is still verified, but cannot create an account leaf.
+                    continue;
                 }
             };
             self.account_rlp.clear();

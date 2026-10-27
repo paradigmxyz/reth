@@ -44,7 +44,9 @@ const PROGRESS_PERIOD: Duration = Duration::from_secs(5);
 /// The arguments for the `reth db repair-trie` command
 #[derive(Parser, Debug)]
 pub struct Command {
-    /// Only show inconsistencies without making any repairs
+    /// Only show inconsistencies without making any repairs.
+    ///
+    /// Requires the node to be stopped so all workers read the same database snapshot.
     #[arg(long)]
     pub(crate) dry_run: bool,
 

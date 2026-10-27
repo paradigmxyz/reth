@@ -34,7 +34,6 @@ tracing = { workspace = true, features = ["attributes"] }
 auto_impl.workspace = true
 itertools.workspace = true
 parking_lot.workspace = true
-rayon.workspace = true
 
 # `metrics` feature
 reth-metrics = { workspace = true, optional = true }

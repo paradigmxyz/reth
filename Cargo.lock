@@ -11080,7 +11080,6 @@ dependencies = [
  "proptest",
  "proptest-arbitrary-interop",
  "rand 0.9.5",
- "rayon",
  "reth-execution-errors",
  "reth-metrics",
  "reth-primitives-traits",

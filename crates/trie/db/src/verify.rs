@@ -123,7 +123,7 @@ impl<TX: DbTx, A: TrieTableAdapter> StorageAddresses<TX, A> {
             (Some(address), None) | (None, Some(address)) => address,
             (None, None) => return Ok(None),
         };
-        // Non-empty hashed storage needs an account leaf even without a hashed account row.
+        // Request roots for hashed storage; the account worker discards orphan roots.
         let has_storage = self.next_hashed == Some(address);
         if has_storage {
             self.next_hashed = self.hashed.next_no_dup()?.map(|(address, _)| address);

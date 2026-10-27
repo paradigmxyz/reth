@@ -136,6 +136,8 @@ where
 {
     fn run(mut self, announcements: Sender<(B256, Receiver<B256>)>) {
         let context = self.context.clone();
+        // Retain the sender across setup failures until their error has been reported.
+        let mut announcements = Some(announcements);
         context.run(|| {
             let worker_count = self.workers.len();
             let pool = reth_tasks::WorkerPool::new(worker_count, "trie-verify");
@@ -155,7 +157,11 @@ where
                 drop(jobs_rx);
                 // Close announcements before joining workers: account EOF must not depend on
                 // workers finishing their findings sends.
-                context.run(|| self.produce(jobs_tx, announcements));
+                // Keep scan failure ordered before EOF, including when `produce` panics.
+                if let Some(sender) = &announcements {
+                    context.run(|| self.produce(jobs_tx, sender));
+                }
+                drop(announcements.take());
             });
             Ok(())
         });
@@ -164,14 +170,14 @@ where
     fn produce(
         &mut self,
         jobs: Sender<(B256, Option<Sender<B256>>)>,
-        announcements: Sender<(B256, Receiver<B256>)>,
+        announcements: &Sender<(B256, Receiver<B256>)>,
     ) -> Result<(), StateRootError> {
         for job in self.addresses.by_ref() {
             let job = job?;
             let root = if job.root_required {
                 let (sender, receiver) = crossbeam_channel::bounded(1);
                 // Announce in scan order before dispatch, regardless of completion order.
-                if !self.context.send(&announcements, (job.address, receiver)) {
+                if !self.context.send(announcements, (job.address, receiver)) {
                     return Ok(());
                 }
                 Some(sender)
