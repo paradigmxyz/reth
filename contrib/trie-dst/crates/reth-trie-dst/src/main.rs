@@ -771,6 +771,35 @@ fn main() -> Result<()> {
     let mut argv = std::env::args().skip(1);
     let command = argv.next();
     let text = match command.as_deref() {
+        Some("describe") => {
+            println!(
+                "{}",
+                json!({"protocol": "rift-fuzz", "version": 1,
+                "capabilities": ["seed-inputs", "mutation-operators", "mutation-sites",
+                                 "mutate-input", "validate-input", "reduce-input"]})
+            );
+            return Ok(());
+        }
+        Some("reduce-input") => {
+            let mut request = Vec::new();
+            std::io::stdin().take((32 << 20) + 1).read_to_end(&mut request)?;
+            ensure!(request.len() <= 32 << 20, "reduction request exceeds 32 MiB");
+            let value: serde_json::Value = serde_json::from_slice(&request)?;
+            let text = value["input"]
+                .as_str()
+                .ok_or_else(|| eyre::eyre!("input must be a JSON string"))?;
+            let input: Input = serde_json::from_str(text)?;
+            let limit = match value.get("limit") {
+                None => 64,
+                Some(limit) => limit
+                    .as_u64()
+                    .filter(|limit| *limit > 0)
+                    .ok_or_else(|| eyre::eyre!("limit must be a positive integer"))?,
+            };
+            let candidates = input.reduce(usize::try_from(limit.min(1024))?, text.len())?;
+            println!("{}", serde_json::to_string(&candidates)?);
+            return Ok(());
+        }
         Some("mutation-operators") => {
             println!(
                 "{}",
@@ -895,8 +924,17 @@ fn main() -> Result<()> {
                                 }
                                 donor => serde_json::from_value(donor)?,
                             };
-                            let donor_path: Vec<String> = if donor.is_some() {
-                                serde_json::from_value(value["donor_path"].clone())?
+                            let donor_path: Vec<String> = if let Some(donor) = &donor {
+                                donor.validate()?;
+                                if let Some(path) = value.get("donor_path") {
+                                    serde_json::from_value(path.clone())?
+                                } else {
+                                    let sites = donor.mutation_sites(Some(&operator));
+                                    ensure!(!sites.is_empty(), "donor has no compatible sites");
+                                    sites[usize::try_from(seed % u64::try_from(sites.len())?)?]
+                                        .path
+                                        .clone()
+                                }
                             } else {
                                 Vec::new()
                             };

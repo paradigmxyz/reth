@@ -256,3 +256,12 @@ feedback map across the warm checkpoint; the initialization barrier alone does
 not remove initialization coverage from per-input feedback.
 
 Set `cold_start: true` in workload args to retain per-execution startup coverage.
+
+### Workload process protocol
+
+Bedrock preparation can export `fuzz-session.json` with `--prepare-only` and
+`--executor-manifest /absolute/run/fuzz-session.json` for SDK-free planner and
+executor consumers. The planner adds version discovery and bounded deterministic
+structural reduction while keeping the existing one-shot input hooks and
+standalone executable. See [the public protocol contract](workload/PROTOCOL.md)
+for argv, JSON schemas, validation semantics, and whole-input limitations.

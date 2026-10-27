@@ -386,8 +386,9 @@ def main():
     request = (json.load(sys.stdin) if value == "-" else
                json.loads(Path(value[1:]).read_text()) if value and value.startswith("@") else
                json.loads(value) if value else None)
-    if hook == "mutation-operators":
-        return native(hook, {})
+    if hook in ("describe", "mutation-operators", "mutation-sites", "mutate-input",
+                "validate-input", "reduce-input"):
+        return native(hook, request or {})
     if hook in ("seed-inputs", "suffix-seed"):
         args = arguments(request["args"])
         args.pop("crashes")

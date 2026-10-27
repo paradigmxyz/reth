@@ -489,4 +489,78 @@ impl Input {
         let site = &sites[rng.random_range(0..sites.len())];
         self.mutate_at(site.operator, &site.path, rng.random(), None)
     }
+
+    /// Returns deterministic structural deletions, validating each independently.
+    pub(crate) fn reduce(&self, limit: usize, max_bytes: usize) -> Result<Vec<String>> {
+        self.validate()?;
+        let mut candidates = Vec::new();
+        let mut seen = BTreeSet::new();
+        let mut attempts = 0;
+        let mut output_bytes = 0;
+        let mut consider = |candidate: Self| -> Result<bool> {
+            attempts += 1;
+            if candidate.validate().is_ok() {
+                let text = serde_json::to_string(&candidate)?;
+                if text.len() < max_bytes &&
+                    output_bytes + text.len() <= 32 << 20 &&
+                    seen.insert(text.clone())
+                {
+                    output_bytes += text.len();
+                    candidates.push(text);
+                }
+            }
+            Ok(candidates.len() >= limit || attempts >= limit * 16)
+        };
+        // Prefixes preserve account creation dependencies across retained blocks.
+        for (i, op) in self.operations.iter().enumerate() {
+            if matches!(op, Operation::Commit) &&
+                i + 1 < self.operations.len() &&
+                consider(Self { operations: self.operations[..=i].to_vec() })?
+            {
+                return Ok(candidates);
+            }
+        }
+        // Coarse-to-fine contiguous deletions also remove complete blocks.
+        let mut width = self.operations.len() / 2;
+        while width > 0 {
+            for start in (0..self.operations.len()).step_by(width) {
+                let mut candidate = self.clone();
+                candidate.operations.drain(start..(start + width).min(self.operations.len()));
+                if consider(candidate)? {
+                    return Ok(candidates);
+                }
+            }
+            width /= 2;
+        }
+        for (i, op) in self.operations.iter().enumerate() {
+            let fields: &[(&str, usize)] = match op {
+                Operation::UpdateBatch { updates } => &[("updates", updates.len())],
+                Operation::PrewarmBatch { accounts, storages } => {
+                    &[("accounts", accounts.len()), ("storages", storages.len())]
+                }
+                Operation::Commit => continue,
+            };
+            for &(field, len) in fields {
+                for j in 0..len {
+                    let mut candidate = self.clone();
+                    match &mut candidate.operations[i] {
+                        Operation::UpdateBatch { updates } => {
+                            updates.remove(j);
+                        }
+                        Operation::PrewarmBatch { accounts, .. } if field == "accounts" => {
+                            accounts.remove(j);
+                        }
+                        Operation::PrewarmBatch { storages, .. } => {
+                            storages.remove(j);
+                        }
+                        Operation::Commit => unreachable!(),
+                    }
+                    if consider(candidate)? {
+                        return Ok(candidates);
+                    }
+                }
+            }
+        }
+        Ok(candidates)
+    }
 }
