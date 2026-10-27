@@ -142,13 +142,13 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
                 let reader = handle.block_on(store.reader(&catalog))?;
                 let verified = (|| -> eyre::Result<()> {
                     if self.verify_existing {
-                        let mut cursor = store::Cursor::initial(&catalog.context)?;
-                        while cursor.next < catalog.cursor.next {
-                            let records = handle.block_on(store::read_page(
-                                &reader,
-                                &mut cursor,
-                                catalog.cursor.next,
-                            ))?;
+                        let mut pages = handle.block_on(store::MetadataPages::open(
+                            &reader,
+                            store::Cursor::initial(&catalog.context)?,
+                            catalog.cursor.next,
+                        ))?;
+                        while pages.cursor.next < catalog.cursor.next {
+                            let records = handle.block_on(pages.next_page())?;
                             for record in &records {
                                 eyre::ensure!(!cancellation.is_cancelled(), "capture cancelled");
                                 let bytes = handle
@@ -167,7 +167,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
                             }
                         }
                         eyre::ensure!(
-                            cursor == catalog.cursor,
+                            pages.cursor == catalog.cursor,
                             "published metadata boundary mismatch"
                         );
                     }
@@ -350,7 +350,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
                         start = stop;
                         continue;
                     }
-                    let mut page_cursor = catalog.cursor.clone();
+                    let page_cursor = catalog.cursor.clone();
                     catalog.seal()?;
                     metadata_bytes = 0;
                     handle.block_on(
@@ -368,12 +368,13 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
                     catalog.complete = stop == end;
                     let reader = handle.block_on(store.reader(&catalog))?;
                     let checked = (|| -> eyre::Result<()> {
-                        while page_cursor.next < catalog.cursor.next {
-                            let records = handle.block_on(store::read_page(
-                                &reader,
-                                &mut page_cursor,
-                                catalog.cursor.next,
-                            ))?;
+                        let mut pages = handle.block_on(store::MetadataPages::open(
+                            &reader,
+                            page_cursor,
+                            catalog.cursor.next,
+                        ))?;
+                        while pages.cursor.next < catalog.cursor.next {
+                            let records = handle.block_on(pages.next_page())?;
                             for record in &records {
                                 let stored = handle
                                     .block_on(reader.get(store::key(record.start)))?
@@ -385,7 +386,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
                             }
                         }
                         eyre::ensure!(
-                            page_cursor == catalog.cursor,
+                            pages.cursor == catalog.cursor,
                             "durable metadata boundary mismatch"
                         );
                         Ok(())

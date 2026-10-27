@@ -236,7 +236,9 @@ async fn feed_pages(
             let Some(record) = records.next() else { break };
             let mut bytes = record.bytes;
             let mut batch = vec![record];
-            while batch.len() < 1000 {
+            // Batches never span pages, so an unfiltered page under the byte limit is one
+            // scan task; read parallelism comes from pages in flight under the byte budget.
+            while batch.len() < store::PAGE_RECORDS {
                 let Some(next) = records.peek() else { break };
                 if next.start != batch.last().expect("nonempty batch").end ||
                     bytes + next.bytes > batch_limit
@@ -251,84 +253,97 @@ async fn feed_pages(
             let budget = budget.clone();
             let space = space.clone();
             tasks.spawn(async move {
-                    let waiting = Instant::now();
-                    let mut reservation = budget.acquire_many_owned(bytes as u32).await?;
-                    let budget_wait = waiting.elapsed();
-                    let mut queue_wait = Duration::ZERO;
-                    // Per-scan read-ahead belongs to SlateDB's additional memory,
-                    // not the serialized-record reservation above.
-                    let options = ScanOptions::default().with_read_ahead_bytes(1024 * 1024);
-                    let first = batch.first().expect("nonempty batch");
-                    let last = batch.last().expect("nonempty batch");
-                    let tx_end = last.first_tx + last.transactions;
-                    let mut block_scan = reader
-                        .scan_with_options(store::key(first.start)..store::key(last.end), &options)
-                        .await?;
-                    let mut tx_scan = if first.first_tx == tx_end {
-                        None
-                    } else {
-                        Some(
-                            reader
-                                .scan_with_options(
-                                    store::transaction_key(first.first_tx)..
-                                        store::transaction_key(tx_end),
-                                    &options,
-                                )
-                                .await?,
-                        )
-                    };
-                    for record in batch {
-                        let entry = block_scan.next().await?.ok_or_else(|| {
-                            eyre::eyre!("missing corpus record at {}", record.start)
-                        })?;
+                let waiting = Instant::now();
+                let mut reservation = budget.acquire_many_owned(bytes as u32).await?;
+                let budget_wait = waiting.elapsed();
+                let mut queue_wait = Duration::ZERO;
+                // Per-scan read-ahead belongs to SlateDB's additional memory,
+                // not the serialized-record reservation above.
+                let options = ScanOptions::default().with_read_ahead_bytes(1024 * 1024);
+                let first = batch.first().expect("nonempty batch");
+                let last = batch.last().expect("nonempty batch");
+                let tx_end = last.first_tx + last.transactions;
+                let mut block_scan = reader
+                    .scan_with_options(store::key(first.start)..store::key(last.end), &options)
+                    .await?;
+                let mut tx_scan = if first.first_tx == tx_end {
+                    None
+                } else {
+                    Some(
+                        reader
+                            .scan_with_options(
+                                store::transaction_key(first.first_tx)..
+                                    store::transaction_key(tx_end),
+                                &options,
+                            )
+                            .await?,
+                    )
+                };
+                for record in batch {
+                    let entry = block_scan
+                        .next()
+                        .await?
+                        .ok_or_else(|| eyre::eyre!("missing corpus record at {}", record.start))?;
+                    eyre::ensure!(
+                        entry.key.as_ref() == store::key(record.start) &&
+                            entry.value.len() == record.block_bytes,
+                        "unexpected corpus key/size"
+                    );
+                    let mut cases = Vec::with_capacity(record.cases.len());
+                    for (index, expected) in record.cases.iter().enumerate() {
+                        let entry = tx_scan
+                            .as_mut()
+                            .ok_or_else(|| eyre::eyre!("missing transaction scan"))?
+                            .next()
+                            .await?
+                            .ok_or_else(|| eyre::eyre!("missing transaction record"))?;
                         eyre::ensure!(
-                            entry.key.as_ref() == store::key(record.start) &&
-                                entry.value.len() == record.block_bytes,
-                            "unexpected corpus key/size"
+                            entry.key.as_ref() ==
+                                store::transaction_key(record.first_tx + index as u64) &&
+                                entry.value.len() == expected.bytes,
+                            "transaction scan gap/order/size mismatch"
                         );
-                        let mut cases = Vec::with_capacity(record.cases.len());
-                        for (index, expected) in record.cases.iter().enumerate() {
-                            let entry = tx_scan
-                                .as_mut()
-                                .ok_or_else(|| eyre::eyre!("missing transaction scan"))?
-                                .next()
-                                .await?
-                                .ok_or_else(|| eyre::eyre!("missing transaction record"))?;
-                            eyre::ensure!(
-                                entry.key.as_ref() ==
-                                    store::transaction_key(record.first_tx + index as u64) &&
-                                    entry.value.len() == expected.bytes,
-                                "transaction scan gap/order/size mismatch"
-                            );
-                            cases.push(entry.value);
-                        }
-                        let permit = reservation.split(record.bytes).expect("batch sum reserved");
-                        let mut ready = Ready { record, bytes: entry.value, cases, space: space.clone(), _reservation: permit };
-                        loop {
-                            // Register before checking capacity so a receive between
-                            // try_send and await cannot leave this producer asleep.
-                            let notified = space.notified();
-                            tokio::pin!(notified);
-                            notified.as_mut().enable();
-                            match sender.try_send(ready) {
-                                Ok(()) => break,
-                                Err(TrySendError::Full(item)) => ready = item,
-                                Err(TrySendError::Disconnected(_)) => {
-                                    eyre::bail!("execution workers disconnected")
-                                }
+                        cases.push(entry.value);
+                    }
+                    let permit = reservation.split(record.bytes).expect("batch sum reserved");
+                    let mut ready = Ready {
+                        record,
+                        bytes: entry.value,
+                        cases,
+                        space: space.clone(),
+                        _reservation: permit,
+                    };
+                    loop {
+                        // Register before checking capacity so a receive between
+                        // try_send and await cannot leave this producer asleep.
+                        let notified = space.notified();
+                        tokio::pin!(notified);
+                        notified.as_mut().enable();
+                        match sender.try_send(ready) {
+                            Ok(()) => break,
+                            Err(TrySendError::Full(item)) => ready = item,
+                            Err(TrySendError::Disconnected(_)) => {
+                                eyre::bail!("execution workers disconnected")
                             }
-                            let waiting = Instant::now();
-                            notified.await;
-                            queue_wait += waiting.elapsed();
                         }
+                        let waiting = Instant::now();
+                        notified.await;
+                        queue_wait += waiting.elapsed();
                     }
-                    eyre::ensure!(block_scan.next().await?.is_none(), "extra block record");
-                    if let Some(mut scan) = tx_scan {
-                        eyre::ensure!(scan.next().await?.is_none(), "extra transaction record");
-                    }
-                    tracing::debug!(target: "reth::corpus::feed", budget_us = budget_wait.as_micros() as u64, queue_us = queue_wait.as_micros() as u64, bytes, "Producer waits (overlap across tasks)");
-                    Ok(())
-                });
+                }
+                eyre::ensure!(block_scan.next().await?.is_none(), "extra block record");
+                if let Some(mut scan) = tx_scan {
+                    eyre::ensure!(scan.next().await?.is_none(), "extra transaction record");
+                }
+                tracing::debug!(
+                    target: "reth::corpus::feed",
+                    budget_us = budget_wait.as_micros() as u64,
+                    queue_us = queue_wait.as_micros() as u64,
+                    bytes,
+                    "Producer waits (overlap across tasks)"
+                );
+                Ok(())
+            });
         }
         if closed && records.peek().is_none() && tasks.is_empty() {
             return Ok(());
@@ -343,6 +358,7 @@ async fn feed_pages(
                     None => closed = true,
                 }
             }
+            // The token is a polled flag; re-check it while every arm is blocked.
             _ = tokio::time::sleep(Duration::from_millis(25)) => {}
         }
     }

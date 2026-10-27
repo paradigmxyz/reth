@@ -482,20 +482,9 @@ pub(super) async fn metadata(reader: &DbReader, block: u64) -> eyre::Result<Reco
     Ok(record)
 }
 
-/// Bounded metadata pages share the data checkpoint; no growing JSON list or separate publication.
-pub(super) async fn read_page(
-    reader: &DbReader,
-    cursor: &mut Cursor,
-    end: u64,
-) -> eyre::Result<Vec<Record>> {
-    let mut pages = MetadataPages::open(reader, cursor.clone(), end).await?;
-    let records = pages.next_page().await?;
-    *cursor = pages.cursor;
-    Ok(records)
-}
-
 /// One metadata scan over a whole range, read in bounded pages. Reopening a scan
 /// per page re-seeks the overlapping SSTs and serializes a fetch per page.
+/// Bounded metadata pages share the data checkpoint; no growing JSON list or separate publication.
 pub(super) struct MetadataPages {
     scan: slatedb::DbIterator,
     pub cursor: Cursor,
@@ -685,19 +674,23 @@ mod tests {
         assert!(old.get(metadata_key(1017)).await?.is_none());
         old.close().await?;
         let reader = store.reader(&resumed).await?;
-        let mut cursor = Cursor::initial(&resumed.context)?;
+        let mut pages =
+            MetadataPages::open(&reader, Cursor::initial(&resumed.context)?, resumed.cursor.next)
+                .await?;
         for expected in [1000, 1000, 3] {
-            let page = read_page(&reader, &mut cursor, resumed.cursor.next).await?;
-            assert_eq!(page.len(), expected);
+            assert_eq!(pages.next_page().await?.len(), expected);
         }
-        assert_eq!(cursor, resumed.cursor);
+        assert_eq!(pages.cursor, resumed.cursor);
+        drop(pages);
         reader.close().await?;
         // A deletion at the page boundary must not be hidden by paging/resume.
         db.delete(metadata_key(1017)).await?;
         resumed.checkpoint = Some(store.checkpoint(&db).await?);
         let corrupt = store.reader(&resumed).await?;
-        let mut cursor = partial.cursor.clone();
-        assert!(read_page(&corrupt, &mut cursor, resumed.cursor.next).await.is_err());
+        let mut pages =
+            MetadataPages::open(&corrupt, partial.cursor.clone(), resumed.cursor.next).await?;
+        assert!(pages.next_page().await.is_err());
+        drop(pages);
         corrupt.close().await?;
         // Restoring the key with a wrong parent is also rejected.
         let mut record = records[1000].clone();
@@ -705,8 +698,9 @@ mod tests {
         db.put(metadata_key(record.start), serde_json::to_vec(&record)?).await?;
         resumed.checkpoint = Some(store.checkpoint(&db).await?);
         let corrupt = store.reader(&resumed).await?;
-        let mut cursor = partial.cursor;
-        assert!(read_page(&corrupt, &mut cursor, resumed.cursor.next).await.is_err());
+        let mut pages = MetadataPages::open(&corrupt, partial.cursor, resumed.cursor.next).await?;
+        assert!(pages.next_page().await.is_err());
+        drop(pages);
         corrupt.close().await?;
         db.close().await?;
         Ok(())
