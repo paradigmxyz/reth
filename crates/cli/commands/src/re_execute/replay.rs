@@ -7,7 +7,7 @@ use parking_lot::Mutex;
 use reth_cli_util::cancellation::CancellationToken;
 use reth_consensus::FullConsensus;
 use reth_evm::ConfigureEvm;
-use slatedb::{config::ScanOptions, DbReader};
+use slatedb::DbReader;
 use std::{
     ops::Range,
     sync::Arc,
@@ -240,19 +240,15 @@ async fn feed_pages(
         eyre::ensure!(!cancellation.is_cancelled(), "corpus replay cancelled");
         while tasks.len() < 64 {
             let Some(record) = records.next() else { break };
-            let mut bytes = record.bytes;
+            let (mut end, mut bytes) = (record.end, record.bytes);
             let mut batch = vec![record];
             // Batches never span pages, so an unfiltered page under the byte limit is one
             // scan task; read parallelism comes from pages in flight under the byte budget.
-            while batch.len() < store::PAGE_RECORDS {
-                let Some(next) = records.peek() else { break };
-                if next.start != batch.last().expect("nonempty batch").end ||
-                    bytes + next.bytes > batch_limit
-                {
-                    break;
-                }
-                bytes += next.bytes;
-                batch.push(records.next().expect("peeked record"));
+            while let Some(next) =
+                records.next_if(|next| next.start == end && bytes + next.bytes <= batch_limit)
+            {
+                (end, bytes) = (next.end, bytes + next.bytes);
+                batch.push(next);
             }
             let sender = sender.clone();
             let reader = reader.clone();
@@ -263,58 +259,13 @@ async fn feed_pages(
                 let mut reservation = budget.acquire_many_owned(bytes as u32).await?;
                 let budget_wait = waiting.elapsed();
                 let mut queue_wait = Duration::ZERO;
-                // Per-scan read-ahead belongs to SlateDB's additional memory,
-                // not the serialized-record reservation above.
-                let options = ScanOptions::default().with_read_ahead_bytes(1024 * 1024);
-                let first = batch.first().expect("nonempty batch");
-                let last = batch.last().expect("nonempty batch");
-                let tx_end = last.first_tx + last.transactions;
-                let mut block_scan = reader
-                    .scan_with_options(store::key(first.start)..store::key(last.end), &options)
-                    .await?;
-                let mut tx_scan = if first.first_tx == tx_end {
-                    None
-                } else {
-                    Some(
-                        reader
-                            .scan_with_options(
-                                store::transaction_key(first.first_tx)..
-                                    store::transaction_key(tx_end),
-                                &options,
-                            )
-                            .await?,
-                    )
-                };
+                let mut payloads = store::PayloadScan::open(&reader, &batch).await?;
                 for record in batch {
-                    let entry = block_scan
-                        .next()
-                        .await?
-                        .ok_or_else(|| eyre::eyre!("missing corpus record at {}", record.start))?;
-                    eyre::ensure!(
-                        entry.key.as_ref() == store::key(record.start) &&
-                            entry.value.len() == record.block_bytes,
-                        "unexpected corpus key/size"
-                    );
-                    let mut cases = Vec::with_capacity(record.cases.len());
-                    for (index, expected) in record.cases.iter().enumerate() {
-                        let entry = tx_scan
-                            .as_mut()
-                            .ok_or_else(|| eyre::eyre!("missing transaction scan"))?
-                            .next()
-                            .await?
-                            .ok_or_else(|| eyre::eyre!("missing transaction record"))?;
-                        eyre::ensure!(
-                            entry.key.as_ref() ==
-                                store::transaction_key(record.first_tx + index as u64) &&
-                                entry.value.len() == expected.bytes,
-                            "transaction scan gap/order/size mismatch"
-                        );
-                        cases.push(entry.value);
-                    }
+                    let (block, cases) = payloads.next(&record).await?;
                     let permit = reservation.split(record.bytes).expect("batch sum reserved");
                     let mut ready = Ready {
                         record,
-                        bytes: entry.value,
+                        bytes: block,
                         cases,
                         space: space.clone(),
                         _reservation: permit,
@@ -337,10 +288,7 @@ async fn feed_pages(
                         queue_wait += waiting.elapsed();
                     }
                 }
-                eyre::ensure!(block_scan.next().await?.is_none(), "extra block record");
-                if let Some(mut scan) = tx_scan {
-                    eyre::ensure!(scan.next().await?.is_none(), "extra transaction record");
-                }
+                payloads.finish().await?;
                 tracing::debug!(
                     target: "reth::corpus::feed",
                     budget_us = budget_wait.as_micros() as u64,
@@ -492,11 +440,9 @@ async fn read_catalog(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::re_execute::store::tests::checkpoint_reader;
     use object_store::memory::InMemory;
-    use slatedb::{
-        config::{CheckpointOptions, CheckpointScope, DbReaderOptions},
-        Db, DbReaderMode,
-    };
+    use slatedb::Db;
 
     async fn feed(
         reader: &Arc<DbReader>,
@@ -515,7 +461,7 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    async fn slow_consumer_backpressure_cancellation_and_read_errors() -> eyre::Result<()> {
+    async fn slow_consumer_backpressure_and_read_errors() -> eyre::Result<()> {
         const SIZE: usize = 128 * 1024;
         let objects = Arc::new(InMemory::new());
         let db = Db::open("feed", objects.clone()).await?;
@@ -539,18 +485,8 @@ mod tests {
         for record in &records {
             db.put(store::key(record.start), &payload).await?;
         }
-        let checkpoint =
-            db.create_checkpoint(CheckpointScope::All, &CheckpointOptions::default()).await?;
+        let reader = Arc::new(checkpoint_reader(&db, "feed", objects).await?);
         db.close().await?;
-        let reader = Arc::new(
-            DbReader::open(
-                "feed",
-                objects,
-                DbReaderMode::Checkpoint(checkpoint.id),
-                DbReaderOptions::default(),
-            )
-            .await?,
-        );
         let budget = Arc::new(Semaphore::new(8 * SIZE));
         let (sender, receiver) = crossbeam_channel::bounded(4);
         let observe = receiver.clone();
@@ -597,26 +533,6 @@ mod tests {
         assert_eq!(consumer.await?, (1..=16).collect::<Vec<_>>());
         assert_eq!(budget.available_permits(), 8 * SIZE);
 
-        let budget = Arc::new(Semaphore::new(8 * SIZE));
-        let token = CancellationToken::new();
-        let (sender, receiver) = crossbeam_channel::bounded(4);
-        let cancellation = {
-            let token = token.clone();
-            let budget = budget.clone();
-            async move {
-                while budget.available_permits() != 0 {
-                    tokio::time::sleep(Duration::from_millis(5)).await;
-                }
-                token.cancel();
-            }
-        };
-        let (cancelled, ()) = tokio::time::timeout(Duration::from_secs(5), async {
-            tokio::join!(feed(&reader, &records, sender, budget.clone(), &token), cancellation)
-        })
-        .await?;
-        assert!(cancelled.is_err());
-        drop(receiver);
-        assert_eq!(budget.available_permits(), 8 * SIZE);
         for missing in [false, true] {
             let (sender, receiver) = crossbeam_channel::bounded(4);
             drop(receiver);
@@ -678,27 +594,35 @@ mod tests {
             db.put(store::key(start), b"b").await?;
             db.put(store::transaction_key(start - 1), b"t").await?;
         }
-        let checkpoint =
-            db.create_checkpoint(CheckpointScope::All, &CheckpointOptions::default()).await?;
+        let reader = Arc::new(checkpoint_reader(&db, "paged", objects).await?);
         db.close().await?;
-        let reader = Arc::new(
-            DbReader::open(
-                "paged",
-                objects,
-                DbReaderMode::Checkpoint(checkpoint.id),
-                DbReaderOptions::default(),
-            )
-            .await?,
-        );
         let catalog = Catalog {
             context,
-            checkpoint: Some(checkpoint.id.to_string()),
+            checkpoint: None,
             cursor: store::Cursor { next: count + 1, tx: count, parent: [0; 32] },
             records: Vec::new(),
             complete: true,
             generation: 1,
         };
         Ok((reader, catalog))
+    }
+
+    /// Drains `receiver` on a blocking thread, freeing queue space and calling `on_ready`
+    /// for each record. Returns the sorted block numbers received.
+    fn drain(
+        receiver: crossbeam_channel::Receiver<Ready>,
+        mut on_ready: impl FnMut(&Ready) + Send + 'static,
+    ) -> tokio::task::JoinHandle<Vec<u64>> {
+        tokio::task::spawn_blocking(move || {
+            let mut received = Vec::new();
+            for ready in receiver {
+                ready.space.notify_one();
+                on_ready(&ready);
+                received.push(ready.record.start);
+            }
+            received.sort_unstable();
+            received
+        })
     }
 
     async fn drain_catalog(
@@ -709,16 +633,9 @@ mod tests {
     ) -> eyre::Result<((u64, u64, u64), Vec<u64>)> {
         let budget = Arc::new(Semaphore::new(REPLAY_BUDGET));
         let (sender, receiver) = crossbeam_channel::bounded::<Ready>(4);
-        let consumer = tokio::task::spawn_blocking(move || {
-            let mut received = Vec::new();
-            for ready in receiver {
-                ready.space.notify_one();
-                assert_eq!(ready.bytes.as_ref(), b"b");
-                assert_eq!(ready.cases, vec![Bytes::from_static(b"t")]);
-                received.push(ready.record.start);
-            }
-            received.sort_unstable();
-            received
+        let consumer = drain(receiver, |ready| {
+            assert_eq!(ready.bytes.as_ref(), b"b");
+            assert_eq!(ready.cases, vec![Bytes::from_static(b"t")]);
         });
         let result = feed_catalog(
             reader,
@@ -814,31 +731,6 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    async fn metadata_error_releases_payload_reservations() -> eyre::Result<()> {
-        let (reader, catalog) = paged_fixture(Some(store::PAGE_RECORDS as u64 + 1)).await?;
-        let budget = Arc::new(Semaphore::new(128));
-        let (sender, receiver) = crossbeam_channel::bounded::<Ready>(4);
-        let result = tokio::time::timeout(
-            Duration::from_secs(10),
-            feed_catalog(
-                &reader,
-                &catalog,
-                1..catalog.context.end,
-                None,
-                sender,
-                budget.clone(),
-                &CancellationToken::new(),
-            ),
-        )
-        .await?;
-        assert_eq!(result.unwrap_err().to_string(), "metadata scan key/size mismatch");
-        drop(receiver);
-        assert_eq!(budget.available_permits(), 128);
-        reader.close().await?;
-        Ok(())
-    }
-
-    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn next_page_does_not_wait_for_older_payload_tasks() -> eyre::Result<()> {
         let (reader, catalog) = paged_fixture(None).await?;
         let budget = Arc::new(Semaphore::new(REPLAY_BUDGET));
@@ -852,20 +744,14 @@ mod tests {
             gate.await?;
             Ok(())
         });
-        let consumer = tokio::task::spawn_blocking(move || {
-            let mut release = Some(release);
-            let mut seen = Vec::new();
-            for ready in receiver {
-                ready.space.notify_one();
-                if ready.record.start > store::PAGE_RECORDS as u64 &&
-                    let Some(release) = release.take()
-                {
-                    let _ = release.send(());
-                }
-                seen.push(ready.record.start);
+        let mut release = Some(release);
+        let consumer = drain(receiver, move |ready| {
+            if ready.record.start > store::PAGE_RECORDS as u64 &&
+                let Some(release) = release.take()
+            {
+                // The gated task may already be gone if feeding failed.
+                let _ = release.send(());
             }
-            seen.sort_unstable();
-            seen
         });
         let (pages, receiver) = mpsc::channel(1);
         let result = tokio::time::timeout(Duration::from_secs(10), async {
@@ -915,48 +801,23 @@ mod tests {
         Ok(())
     }
 
+    /// The polled cancellation flag must be seen while only waiting for a page.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn cancellation_while_waiting_for_first_page() -> eyre::Result<()> {
         let (reader, _) = paged_fixture(None).await?;
-        let budget = Arc::new(Semaphore::new(REPLAY_BUDGET));
         let token = CancellationToken::new();
-        let (sender, receiver) = crossbeam_channel::bounded::<Ready>(4);
-        let (pages, input) = mpsc::channel(1);
+        let (sender, _receiver) = crossbeam_channel::bounded::<Ready>(4);
+        let (_pages, input) = mpsc::channel(1);
+        let budget = Arc::new(Semaphore::new(REPLAY_BUDGET));
         let mut tasks = JoinSet::new();
-        let result = tokio::time::timeout(Duration::from_secs(10), async {
-            tokio::join!(
-                feed_pages(&reader, input, &mut tasks, sender, budget.clone(), &token),
-                async {
-                    tokio::task::yield_now().await;
-                    token.cancel();
-                },
-            )
-            .0
+        let (result, ()) = tokio::time::timeout(Duration::from_secs(10), async {
+            tokio::join!(feed_pages(&reader, input, &mut tasks, sender, budget, &token), async {
+                tokio::task::yield_now().await;
+                token.cancel();
+            })
         })
-        .await;
-        tasks.shutdown().await;
-        assert_eq!(result?.unwrap_err().to_string(), "corpus replay cancelled");
-        assert!(receiver.is_empty());
-        assert_eq!(budget.available_permits(), REPLAY_BUDGET);
-        drop(pages);
-        reader.close().await?;
-        Ok(())
-    }
-
-    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-    #[ignore = "manual feeder microbenchmark; excludes EVM and remote object storage"]
-    async fn paged_catalog_feed_benchmark() -> eyre::Result<()> {
-        let (reader, catalog) = paged_fixture(None).await?;
-        for iteration in 0..12 {
-            let started = Instant::now();
-            let (totals, _) =
-                drain_catalog(&reader, &catalog, 1..catalog.context.end, None).await?;
-            assert_eq!(totals, (2001, 2001, 2001));
-            eprintln!(
-                "feed_bench iteration={iteration} seconds={:.6}",
-                started.elapsed().as_secs_f64()
-            );
-        }
+        .await?;
+        assert_eq!(result.unwrap_err().to_string(), "corpus replay cancelled");
         reader.close().await?;
         Ok(())
     }

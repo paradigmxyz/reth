@@ -23,15 +23,15 @@ use url::Url;
 pub(super) const MAX_RECORD_BYTES: usize = 64 * 1024 * 1024;
 const MAX_CATALOG_BYTES: usize = 1024 * 1024;
 pub(super) const PAGE_RECORDS: usize = 1000;
-/// A stuck object-store request must fail, not stall capture or replay for minutes.
-/// object_store owns retries: each attempt is cut at REQUEST_TIMEOUT and no retry
-/// starts after RETRY_TIMEOUT. The defaults (30 s, up to 10 retries within 3 min)
-/// under SlateDB's own retries let one stuck request stall a page for 5+ minutes.
+/// Cuts every object-store request attempt so a stuck request fails instead of stalling
+/// capture or replay. SlateDB uploads SSTs in 10 MiB multipart parts, so no request body
+/// comes close to this limit at normal bandwidth.
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(15);
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(2);
-const RETRY_TIMEOUT: Duration = Duration::from_secs(60);
-/// SlateDB's wrapper retries on top of object_store; disabled so they don't compound.
-pub(super) const SLATEDB_RETRIES: Option<u32> = Some(0);
+/// The object_store client retries each request at most twice within 20 s, but never a
+/// conditional write after a timeout. SlateDB's wrapper retries on top of that and is the
+/// one layer that recognises a conditional write that landed before its response was lost.
+pub(super) const SLATEDB_RETRIES: Option<u32> = Some(3);
 pub(super) const CONTEXT_KEY: &[u8] = b"reth-corpus-context";
 pub(super) const CURSOR_KEY: &[u8] = b"reth-corpus-cursor";
 
@@ -157,8 +157,9 @@ impl CredentialProvider for Credentials {
     }
 }
 
-/// Bounds every request without replacing other client options read from the environment.
-fn bounded(builder: AmazonS3Builder, request: Duration, retry: Duration) -> AmazonS3Builder {
+/// Bounds every request to at most three attempts of at most `request` each, without
+/// replacing other client options read from the environment.
+fn bounded(builder: AmazonS3Builder, request: Duration) -> AmazonS3Builder {
     let millis = |d: Duration| format!("{}ms", d.as_millis());
     builder
         .with_config(AmazonS3ConfigKey::Client(ClientConfigKey::Timeout), millis(request))
@@ -166,7 +167,11 @@ fn bounded(builder: AmazonS3Builder, request: Duration, retry: Duration) -> Amaz
             AmazonS3ConfigKey::Client(ClientConfigKey::ConnectTimeout),
             millis(CONNECT_TIMEOUT.min(request)),
         )
-        .with_retry(RetryConfig { max_retries: 5, retry_timeout: retry, ..Default::default() })
+        .with_retry(RetryConfig {
+            max_retries: 2,
+            retry_timeout: Duration::from_secs(20),
+            ..Default::default()
+        })
 }
 
 impl Store {
@@ -205,7 +210,6 @@ impl Store {
                         .with_region(sdk.region().map(|r| r.as_ref()).unwrap_or("us-east-1"))
                         .with_credentials(Arc::new(Credentials(credentials))),
                     REQUEST_TIMEOUT,
-                    RETRY_TIMEOUT,
                 );
                 if let Some(endpoint) = endpoint {
                     let endpoint_url = Url::parse(endpoint)?;
@@ -365,51 +369,109 @@ pub(super) fn decode_case(
     Ok(case)
 }
 
-/// Streams each record's block and transaction payloads with one block scan and one
-/// transaction scan per contiguous page, instead of a get plus a scan per block.
-pub(super) async fn for_each_payload(
-    reader: &DbReader,
-    records: &[Record],
-    mut f: impl FnMut(&Record, Bytes, Vec<Bytes>) -> eyre::Result<()>,
-) -> eyre::Result<()> {
-    let (Some(first), Some(last)) = (records.first(), records.last()) else { return Ok(()) };
-    let tx_end = last
-        .first_tx
-        .checked_add(last.transactions)
-        .ok_or_else(|| eyre::eyre!("transaction ordinal overflow"))?;
-    let options = slatedb::config::ScanOptions::default().with_read_ahead_bytes(1024 * 1024);
-    let mut blocks = reader.scan_with_options(key(first.start)..key(last.end), &options).await?;
-    let mut transactions = reader
-        .scan_with_options(transaction_key(first.first_tx)..transaction_key(tx_end), &options)
-        .await?;
-    for record in records {
+/// Streams the block and transaction payloads of a contiguous record range with one
+/// block scan and one transaction scan, checking each entry's key, order and size
+/// against its record. Pass every record of the range to [`Self::next`] in order, then
+/// call [`Self::finish`]. Contiguity and descriptor counts are enforced when metadata is
+/// read ([`Cursor::advance`]).
+pub(super) struct PayloadScan {
+    blocks: slatedb::DbIterator,
+    /// `None` when the range has no transactions.
+    transactions: Option<slatedb::DbIterator>,
+}
+
+impl PayloadScan {
+    /// Opens both scans over `records`, which must be non-empty.
+    pub(super) async fn open(reader: &DbReader, records: &[Record]) -> eyre::Result<Self> {
+        let (Some(first), Some(last)) = (records.first(), records.last()) else {
+            eyre::bail!("empty payload range")
+        };
+        let tx_end = last
+            .first_tx
+            .checked_add(last.transactions)
+            .ok_or_else(|| eyre::eyre!("transaction ordinal overflow"))?;
+        // Per-scan read-ahead is SlateDB memory outside the replay byte reservation.
+        let options = slatedb::config::ScanOptions::default().with_read_ahead_bytes(1024 * 1024);
+        let blocks = reader.scan_with_options(key(first.start)..key(last.end), &options).await?;
+        let transactions = if first.first_tx == tx_end {
+            None
+        } else {
+            Some(
+                reader
+                    .scan_with_options(
+                        transaction_key(first.first_tx)..transaction_key(tx_end),
+                        &options,
+                    )
+                    .await?,
+            )
+        };
+        Ok(Self { blocks, transactions })
+    }
+
+    /// Returns `record`'s block payload and its transaction payloads in index order.
+    pub(super) async fn next(&mut self, record: &Record) -> eyre::Result<(Bytes, Vec<Bytes>)> {
+        let block = self
+            .blocks
+            .next()
+            .await?
+            .ok_or_else(|| eyre::eyre!("missing block record at {}", record.start))?;
         eyre::ensure!(
-            record.cases.len() as u64 == record.transactions,
-            "transaction descriptor count mismatch"
+            block.key.as_ref() == key(record.start) && block.value.len() == record.block_bytes,
+            "block scan gap/order/size mismatch"
         );
-        let block = blocks.next().await?.ok_or_else(|| eyre::eyre!("missing published record"))?;
-        eyre::ensure!(block.key.as_ref() == key(record.start), "block scan gap/order mismatch");
         let mut cases = Vec::with_capacity(record.cases.len());
         for (index, expected) in record.cases.iter().enumerate() {
-            let entry = transactions
-                .next()
-                .await?
-                .ok_or_else(|| eyre::eyre!("missing transaction record"))?;
+            let entry = match self.transactions.as_mut() {
+                Some(scan) => scan.next().await?,
+                None => None,
+            }
+            .ok_or_else(|| eyre::eyre!("missing transaction record"))?;
             eyre::ensure!(
-                entry.key.as_ref() == transaction_key(record.first_tx + index as u64),
-                "transaction scan gap/order mismatch"
-            );
-            eyre::ensure!(
-                entry.value.len() == expected.bytes &&
-                    blake3::hash(&entry.value).to_hex().as_str() == expected.digest,
-                "transaction record integrity mismatch"
+                entry.key.as_ref() == transaction_key(record.first_tx + index as u64) &&
+                    entry.value.len() == expected.bytes,
+                "transaction scan gap/order/size mismatch"
             );
             cases.push(entry.value);
         }
-        f(record, block.value, cases)?;
+        Ok((block.value, cases))
     }
-    eyre::ensure!(blocks.next().await?.is_none(), "extra block record");
-    eyre::ensure!(transactions.next().await?.is_none(), "extra transaction record");
+
+    /// Fails if either scan holds entries beyond the opened range.
+    pub(super) async fn finish(mut self) -> eyre::Result<()> {
+        eyre::ensure!(self.blocks.next().await?.is_none(), "extra block record");
+        if let Some(mut scan) = self.transactions {
+            eyre::ensure!(scan.next().await?.is_none(), "extra transaction record");
+        }
+        Ok(())
+    }
+}
+
+/// Runs `f` on the payloads of every published record from `from` up to `to`, reading
+/// metadata in pages and each page's payloads through one [`PayloadScan`], after checking
+/// every transaction payload's digest. Fails unless the metadata ends exactly at `to`.
+pub(super) async fn for_each_published(
+    reader: &DbReader,
+    from: Cursor,
+    to: &Cursor,
+    mut f: impl FnMut(&Record, Bytes, Vec<Bytes>) -> eyre::Result<()>,
+) -> eyre::Result<()> {
+    let mut pages = MetadataPages::open(reader, from, to.next).await?;
+    while pages.cursor.next < to.next {
+        let records = pages.next_page().await?;
+        let mut payloads = PayloadScan::open(reader, &records).await?;
+        for record in &records {
+            let (block, cases) = payloads.next(record).await?;
+            for (bytes, expected) in cases.iter().zip(&record.cases) {
+                eyre::ensure!(
+                    blake3::hash(bytes).to_hex().as_str() == expected.digest,
+                    "transaction record integrity mismatch"
+                );
+            }
+            f(record, block, cases)?;
+        }
+        payloads.finish().await?;
+    }
+    eyre::ensure!(pages.cursor == *to, "published metadata boundary mismatch");
     Ok(())
 }
 
@@ -570,7 +632,7 @@ impl MetadataPages {
 }
 
 #[cfg(test)]
-mod tests {
+pub(super) mod tests {
     use super::*;
     use alloy_primitives::B256;
     use object_store::memory::InMemory;
@@ -703,87 +765,108 @@ mod tests {
                 .with_endpoint(format!("http://{address}"))
                 .with_allow_http(true),
             Duration::from_millis(200),
-            Duration::from_secs(1),
         )
         .build()?;
         let started = std::time::Instant::now();
-        assert!(objects.get(&Path::from("catalog.json")).await.is_err());
+        let error = objects.get(&Path::from("catalog.json")).await.unwrap_err();
+        assert!(matches!(error, object_store::Error::Generic { .. }), "{error:?}");
+        // Three 200 ms attempts plus backoff.
         assert!(started.elapsed() < Duration::from_secs(5), "{:?}", started.elapsed());
         held.abort();
         Ok(())
     }
 
+    /// Checkpoints `db` and opens a reader pinned to that checkpoint.
+    pub(in super::super) async fn checkpoint_reader(
+        db: &Db,
+        path: &str,
+        objects: Arc<InMemory>,
+    ) -> eyre::Result<DbReader> {
+        let id =
+            db.create_checkpoint(CheckpointScope::All, &CheckpointOptions::default()).await?.id;
+        let mode = DbReaderMode::Checkpoint(id);
+        Ok(DbReader::open(path, objects, mode, DbReaderOptions::default()).await?)
+    }
+
     #[tokio::test]
-    async fn batched_payloads_match_records_and_reject_gaps() -> eyre::Result<()> {
+    async fn published_payloads_match_records_and_reject_corruption() -> eyre::Result<()> {
         let objects = Arc::new(InMemory::new());
         let db = Db::open("payloads", objects.clone()).await?;
-        let mut records = Vec::new();
-        let mut tx = 0;
+        let mut cursor = Cursor { next: 1, tx: 0, parent: [0; 32] };
+        let mut cursors = vec![cursor.clone()];
         for (start, count) in [(1u64, 2u64), (2, 0), (3, 1)] {
-            let mut cases = Vec::new();
-            for index in 0..count {
-                let value = format!("t{}", tx + index).into_bytes();
-                cases.push(CaseRecord {
-                    index,
-                    bytes: value.len(),
-                    digest: blake3::hash(&value).to_hex().to_string(),
-                });
-                db.put(transaction_key(tx + index), &value).await?;
-            }
-            db.put(key(start), format!("b{start}").as_bytes()).await?;
-            records.push(Record {
+            let cases: Vec<_> = (cursor.tx..cursor.tx + count).map(|tx| format!("t{tx}")).collect();
+            let block = format!("b{start}");
+            let record = Record {
                 start,
                 end: start + 1,
                 parent: [0; 32],
                 tip: [0; 32],
-                bytes: 1,
-                block_bytes: 1,
+                bytes: block.len() + cases.iter().map(String::len).sum::<usize>(),
+                block_bytes: block.len(),
                 digest: String::new(),
                 transactions: count,
                 gas: 0,
-                first_tx: tx,
-                cases,
-            });
-            tx += count;
+                first_tx: cursor.tx,
+                cases: cases
+                    .iter()
+                    .zip(0..)
+                    .map(|(case, index)| CaseRecord {
+                        index,
+                        bytes: case.len(),
+                        digest: blake3::hash(case.as_bytes()).to_hex().to_string(),
+                    })
+                    .collect(),
+            };
+            for (tx, case) in (cursor.tx..).zip(&cases) {
+                db.put(transaction_key(tx), case).await?;
+            }
+            db.put(key(start), &block).await?;
+            db.put(metadata_key(start), serde_json::to_vec(&record)?).await?;
+            cursor.advance(&record)?;
+            cursors.push(cursor.clone());
         }
-        async fn open(db: &Db, objects: Arc<InMemory>) -> eyre::Result<DbReader> {
-            let id =
-                db.create_checkpoint(CheckpointScope::All, &CheckpointOptions::default()).await?.id;
-            let mode = DbReaderMode::Checkpoint(id);
-            Ok(DbReader::open("payloads", objects, mode, DbReaderOptions::default()).await?)
-        }
-        let reader = open(&db, objects.clone()).await?;
-        let mut seen = Vec::new();
-        for_each_payload(&reader, &records, |record, block, cases| {
-            seen.push((record.start, block, cases));
-            Ok(())
-        })
-        .await?;
+        let run = async |from: &Cursor, to: &Cursor| {
+            let reader = checkpoint_reader(&db, "payloads", objects.clone()).await?;
+            let mut seen = Vec::new();
+            let result = for_each_published(&reader, from.clone(), to, |record, block, cases| {
+                seen.push((record.start, block, cases));
+                Ok(())
+            })
+            .await;
+            reader.close().await?;
+            result.map(|()| seen)
+        };
+        let (first, second, end) = (&cursors[0], &cursors[1], &cursors[3]);
         let expected: Vec<(u64, Bytes, Vec<Bytes>)> = vec![
             (1, "b1".into(), vec!["t0".into(), "t1".into()]),
             (2, "b2".into(), vec![]),
             (3, "b3".into(), vec!["t2".into()]),
         ];
-        assert_eq!(seen, expected);
-        reader.close().await?;
-
-        db.put(transaction_key(1), b"tampered").await?;
-        let reader = open(&db, objects.clone()).await?;
-        let error = for_each_payload(&reader, &records, |_, _, _| Ok(())).await.unwrap_err();
-        assert_eq!(error.to_string(), "transaction record integrity mismatch");
-        reader.close().await?;
-
-        db.delete(transaction_key(1)).await?;
-        let reader = open(&db, objects.clone()).await?;
-        let error = for_each_payload(&reader, &records, |_, _, _| Ok(())).await.unwrap_err();
-        assert_eq!(error.to_string(), "transaction scan gap/order mismatch");
-        reader.close().await?;
-
-        db.delete(key(2)).await?;
-        let reader = open(&db, objects.clone()).await?;
-        let error = for_each_payload(&reader, &records[1..], |_, _, _| Ok(())).await.unwrap_err();
-        assert_eq!(error.to_string(), "block scan gap/order mismatch");
-        reader.close().await?;
+        assert_eq!(run(first, end).await?, expected);
+        let wrong_end = Cursor { parent: [1; 32], ..end.clone() };
+        let error = run(first, &wrong_end).await.unwrap_err();
+        assert_eq!(error.to_string(), "published metadata boundary mismatch");
+        // Each corruption accumulates on the previous ones.
+        for (key, value, from, message) in [
+            // Same size, different bytes: only the digest check catches it.
+            (transaction_key(1), Some(&b"tX"[..]), first, "transaction record integrity mismatch"),
+            (
+                transaction_key(1),
+                Some(b"tampered"),
+                first,
+                "transaction scan gap/order/size mismatch",
+            ),
+            (transaction_key(1), None, first, "transaction scan gap/order/size mismatch"),
+            (key(2), Some(b"block2"), second, "block scan gap/order/size mismatch"),
+            (key(2), None, second, "block scan gap/order/size mismatch"),
+        ] {
+            match value {
+                Some(value) => db.put(key, value).await?,
+                None => db.delete(key).await?,
+            };
+            assert_eq!(run(from, end).await.unwrap_err().to_string(), message);
+        }
         db.close().await?;
         Ok(())
     }
