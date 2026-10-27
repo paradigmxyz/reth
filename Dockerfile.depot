@@ -49,15 +49,17 @@ ENV VERGEN_GIT_DIRTY=$VERGEN_GIT_DIRTY
 # Platform-specific RUSTFLAGS: amd64 uses x86-64-v3 (Haswell+) with pclmulqdq for rocksdb
 ARG TARGETPLATFORM
 COPY --exclude=.git . .
-# Fetch dependencies under a locked cache, since cargo's own lock lives outside the cache mounts
-# and concurrent fresh git clones into the shared cache delete each other's checkouts.
-# sccache is disabled here because this step has no access to the Depot token.
-RUN --mount=type=cache,target=/usr/local/cargo/registry,sharing=locked \
-    --mount=type=cache,target=/usr/local/cargo/git,sharing=locked \
+# Cargo's own lock lives outside the cache mounts, so concurrent builds sharing one registry or git
+# cache race: fresh git clones delete each other's checkouts and crate unpacking collides on
+# .cargo-ok. Each platform and profile (e.g. the nightly ethereum and ethereum-profiling targets)
+# gets its own cargo cache, locked so only one build uses it at a time.
+# sccache is disabled in the fetch step because it has no access to the Depot token.
+RUN --mount=type=cache,id=cargo-registry-$TARGETPLATFORM-$BUILD_PROFILE,target=/usr/local/cargo/registry,sharing=locked \
+    --mount=type=cache,id=cargo-git-$TARGETPLATFORM-$BUILD_PROFILE,target=/usr/local/cargo/git,sharing=locked \
     RUSTC_WRAPPER= cargo fetch --locked
 RUN --mount=type=secret,id=DEPOT_TOKEN,env=SCCACHE_WEBDAV_TOKEN \
-    --mount=type=cache,target=/usr/local/cargo/registry,sharing=shared \
-    --mount=type=cache,target=/usr/local/cargo/git,sharing=shared \
+    --mount=type=cache,id=cargo-registry-$TARGETPLATFORM-$BUILD_PROFILE,target=/usr/local/cargo/registry,sharing=locked \
+    --mount=type=cache,id=cargo-git-$TARGETPLATFORM-$BUILD_PROFILE,target=/usr/local/cargo/git,sharing=locked \
     --mount=type=cache,target=$SCCACHE_DIR,sharing=shared \
     export RUSTC_WRAPPER=sccache SCCACHE_WEBDAV_ENDPOINT=https://cache.depot.dev SCCACHE_DIR=/sccache && \
     sccache --start-server && \
