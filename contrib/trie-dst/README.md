@@ -140,8 +140,9 @@ uploads with its artifacts.
 
 The controller implements `parse-args`, `config`, `warmup`, `start`, `progress`,
 `finalize` and `observe`. It starts the executable under Bedrock's `thread-fuzz`,
-so the scheduler varies the real task/proof/persistence interleavings. Each seed
-starts with a new empty database after the shared warm checkpoint. The seed
+so the scheduler varies the real task/proof/persistence interleavings. By default,
+each seed resumes the same live initialized worker and empty database from the
+shared warm checkpoint; `cold_start: true` instead creates them after branching. The seed
 controls generated operations and the recorded crash plan; Bedrock's recorded
 random/preemption streams control scheduling. Mid-run semantic decision editing
 is unsupported.
@@ -228,3 +229,30 @@ preparation builds a coverage-instrumented guest executable and keeps an
 uninstrumented executable beside the host controller for input hooks.
 The first scope is trie operation streams on a linear
 chain; it does not mutate Reth code or the VM's recorded scheduling decisions.
+
+### Warm initialization
+
+The default controller warmup starts a live worker from fixed `workload_args`,
+initializes its runtime, empty database, storage and genesis, and checks a
+Unix-datagram readiness handshake before returning `ready: true`. Repeated hooks
+poll the same process; dead workers and initialization exceeding 120 guest seconds
+are errors. The worker blocks in bounded socket I/O (one-hour guest deadline), not
+an input-dependent polling loop. No corpus input, generation or expected roots are
+loaded in this warm prefix.
+
+After branching, `start` sends the execution config path over that socket. The
+worker validates that proof-worker counts, storage directory and persistence/tree
+settings match the initialized configuration, then parses and runs the input and
+its normal initial assertions. Guest-local `stdout.log` retains output across hook
+processes; `init.log` and `warm-ready.json` capture the idle worker PID and output
+frontier. Adoption seeks past that frontier and emits a `warm: reused` PID event,
+so pre-checkpoint recovery output is not counted as per-execution recovery; `run.log` and the controller's SIGKILL/recovery monitor remain active.
+Subsequent crash restarts launch normally and reopen the real persisted database,
+without an initialization barrier. Continuation input and synchronous
+`run_secs: 1` execution use the same monitor as longer runs.
+
+The current coverage frontend retains inline counters and its crash-persistent
+feedback map across the warm checkpoint; the initialization barrier alone does
+not remove initialization coverage from per-input feedback.
+
+Set `cold_start: true` in workload args to retain per-execution startup coverage.

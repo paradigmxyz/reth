@@ -44,10 +44,10 @@ use std::{
     collections::{btree_map::Entry, BTreeMap, BTreeSet},
     fs::{self, OpenOptions},
     io::{Read, Write},
-    os::unix::{fs::MetadataExt, process::CommandExt},
+    os::unix::{fs::MetadataExt, net::UnixDatagram, process::CommandExt},
     path::PathBuf,
     sync::{mpsc, Arc},
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 type Node = MockNodeTypesWithDB<Arc<DatabaseEnv>>;
@@ -72,6 +72,8 @@ struct Config {
     /// An atomic mailbox for snapshot continuations, applied before the next new block.
     input_file: Option<PathBuf>,
     datadir: Option<PathBuf>,
+    /// Guest-local initialization barrier, used only by the first warm process.
+    init_socket: Option<PathBuf>,
     blocks: u64,
     updates: usize,
     proof_workers: usize,
@@ -90,6 +92,7 @@ impl Default for Config {
             expected_roots: None,
             input_file: None,
             datadir: None,
+            init_socket: None,
             blocks: 64,
             updates: 64,
             proof_workers: 2,
@@ -248,8 +251,55 @@ fn run(config: &mut Config, snapshotter: &Snapshotter) -> Result<()> {
     .build()?;
     // A supplied directory survives process death; standalone runs default to a temporary one.
     let temporary = config.datadir.is_none().then(tempfile::tempdir).transpose()?;
-    let datadir = config.datadir.as_deref().unwrap_or_else(|| temporary.as_ref().unwrap().path());
-    fs::create_dir_all(datadir)?;
+    let datadir =
+        config.datadir.clone().unwrap_or_else(|| temporary.as_ref().unwrap().path().to_path_buf());
+    fs::create_dir_all(&datadir)?;
+    let chain = Arc::new(ChainSpec::default());
+    let data_dir = ChainPath::<DataDirPath>::new(
+        datadir.to_string_lossy().parse()?,
+        chain.chain,
+        Default::default(),
+    );
+    let db = Arc::new(init_db(data_dir.db(), Default::default())?);
+    let context = LaunchContext::new(runtime.clone(), data_dir)
+        .with(WithConfigs { config: NodeConfig::new(chain), toml_config: Default::default() })
+        .attach(db);
+    println!("{}", json!({"recovery": "start"}));
+    // This is the node's startup path, including consistency checks, the durable unwind
+    // marker and Merkle's walk_all_changed_branch_children recovery mode.
+    let factory = runtime.handle().block_on(
+        context.create_provider_factory_with_recovery::<Node, EthEvmConfig>(
+            OverlayManager::new(runtime.state_trie_overlay_worker_pool()),
+            None,
+            &[],
+            |factory| {
+                let checkpoint =
+                    factory.provider()?.get_stage_checkpoint(StageId::Finish)?.unwrap_or_default();
+                let partial = checkpoint
+                    .finish_stage_checkpoint()
+                    .and_then(|finish| finish.partial_state_trie());
+                println!(
+                    "{}",
+                    json!({"recovery": "frontiers", "finish": checkpoint.block_number,
+                    "partial_state_trie": partial})
+                );
+                Ok(())
+            },
+        ),
+    )?;
+    reth_db_common::init::init_genesis(&factory)?;
+    if let Some(path) = config.init_socket.take() {
+        ensure!(
+            factory
+                .provider()?
+                .get_stage_checkpoint(StageId::Finish)?
+                .unwrap_or_default()
+                .block_number ==
+                0,
+            "warm initialization requires empty state"
+        );
+        wait_for_execution(config, &path)?;
+    }
     let input = config
         .input
         .take()
@@ -306,40 +356,7 @@ fn run(config: &mut Config, snapshotter: &Snapshotter) -> Result<()> {
         }
     }
     let mut journal_file = OpenOptions::new().create(true).append(true).open(&journal_path)?;
-    let chain = Arc::new(ChainSpec::default());
-    let data_dir = ChainPath::<DataDirPath>::new(
-        datadir.to_string_lossy().parse()?,
-        chain.chain,
-        Default::default(),
-    );
-    let db = Arc::new(init_db(data_dir.db(), Default::default())?);
-    let context = LaunchContext::new(runtime.clone(), data_dir)
-        .with(WithConfigs { config: NodeConfig::new(chain), toml_config: Default::default() })
-        .attach(db);
-    println!("{}", json!({"recovery": "start"}));
-    // This is the node's startup path, including consistency checks, the durable unwind
-    // marker and Merkle's walk_all_changed_branch_children recovery mode.
-    let factory = runtime.handle().block_on(
-        context.create_provider_factory_with_recovery::<Node, EthEvmConfig>(
-            OverlayManager::new(runtime.state_trie_overlay_worker_pool()),
-            None,
-            &[],
-            |factory| {
-                let checkpoint =
-                    factory.provider()?.get_stage_checkpoint(StageId::Finish)?.unwrap_or_default();
-                let partial = checkpoint
-                    .finish_stage_checkpoint()
-                    .and_then(|finish| finish.partial_state_trie());
-                println!(
-                    "{}",
-                    json!({"recovery": "frontiers", "finish": checkpoint.block_number,
-                    "partial_state_trie": partial})
-                );
-                Ok(())
-            },
-        ),
-    )?;
-    reth_db_common::init::init_genesis(&factory)?;
+
     let manager = factory.overlay_manager();
     let base =
         factory.provider()?.get_stage_checkpoint(StageId::Finish)?.unwrap_or_default().block_number;
@@ -878,8 +895,11 @@ fn main() -> Result<()> {
                                 }
                                 donor => serde_json::from_value(donor)?,
                             };
-                            let donor_path: Vec<String> =
-                                serde_json::from_value(value["donor_path"].clone())?;
+                            let donor_path: Vec<String> = if donor.is_some() {
+                                serde_json::from_value(value["donor_path"].clone())?
+                            } else {
+                                Vec::new()
+                            };
                             input.mutate_at(
                                 &operator,
                                 &path,
@@ -943,4 +963,47 @@ fn main() -> Result<()> {
     recorder.install()?;
     run(&mut config, &snapshotter)
         .wrap_err_with(|| format!("reth-trie-dst seed={} blocks={}", config.seed, config.blocks))
+}
+
+// Only these settings affect the runtime, tree configuration and storage initialized above.
+fn validate_initialization(initial: &Config, execution: &Config) -> Result<()> {
+    ensure!(
+        initial.proof_workers == execution.proof_workers &&
+            initial.persistence_threshold == execution.persistence_threshold &&
+            initial.num_state_masking_blocks == execution.num_state_masking_blocks &&
+            initial.memory_block_buffer_target == execution.memory_block_buffer_target &&
+            initial.datadir == execution.datadir &&
+            execution.init_socket.is_none(),
+        "execution changes initialized configuration"
+    );
+    ensure!((1..=1024).contains(&execution.blocks), "blocks must be 1..=1024");
+    ensure!((1..=4096).contains(&execution.updates), "updates must be 1..=4096");
+    ensure!((1..=3600).contains(&execution.timeout_secs), "timeout_secs must be 1..=3600");
+    Ok(())
+}
+
+fn wait_for_execution(config: &mut Config, path: &std::path::Path) -> Result<()> {
+    let socket = UnixDatagram::bind(path)?;
+    let deadline = Instant::now() + Duration::from_secs(3600);
+    let mut message = [0u8; 4096];
+    loop {
+        socket.set_read_timeout(Some(
+            deadline
+                .checked_duration_since(Instant::now())
+                .ok_or_else(|| eyre::eyre!("initialization barrier timed out"))?,
+        ))?;
+        let (size, peer) = socket.recv_from(&mut message)?;
+        let peer = peer.as_pathname().ok_or_else(|| eyre::eyre!("unnamed barrier peer"))?;
+        if &message[..size] == b"ready" {
+            socket.send_to(b"initialized", peer)?;
+            continue;
+        }
+        let execution: Config =
+            serde_json::from_slice(&fs::read(std::str::from_utf8(&message[..size])?)?)?;
+        validate_initialization(config, &execution)?;
+        *config = execution;
+        socket.send_to(b"started", peer)?;
+        fs::remove_file(path)?;
+        return Ok(());
+    }
 }
