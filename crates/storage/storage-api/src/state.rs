@@ -193,9 +193,9 @@ pub trait StateProviderFactory: BlockIdReader + Sync {
     /// Note: this only looks at historical blocks, not pending blocks.
     fn history_by_block_hash(&self, block: BlockHash) -> ProviderResult<StateProviderBox>;
 
-    /// Returns _any_ [StateProvider] with matching block hash.
+    /// Returns _any_ [`StateProvider`] with matching block hash.
     ///
-    /// This will return a [StateProvider] for either a historical or pending block.
+    /// This will return a [`StateProvider`] for either a historical or pending block.
     fn state_by_block_hash(&self, block: BlockHash) -> ProviderResult<StateProviderBox>;
 
     /// Storage provider for pending state.

@@ -136,7 +136,7 @@ impl PartialEq for Reverts {
 ///
 /// And it is used to revert new account state to the old account state.
 ///
-/// [AccountRevert] is structured in this way as we need to save it inside database.
+/// [`AccountRevert`] is structured in this way as we need to save it inside database.
 ///
 /// And we need to be able to read it from database.
 #[derive(Clone, Default, Debug, PartialEq, Eq)]
@@ -161,7 +161,7 @@ impl AccountRevert {
     }
 
     /// Very similar to new_selfdestructed but it will add additional zeros
-    /// ([RevertToSlot::Destroyed]) for the storage that are set if account is again created.
+    /// ([`RevertToSlot::Destroyed`]) for the storage that are set if account is again created.
     pub fn new_selfdestructed_again(
         status: AccountStatus,
         account: AccountInfoRevert,

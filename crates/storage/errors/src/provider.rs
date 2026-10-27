@@ -292,6 +292,17 @@ pub enum StaticFileWriterError {
     /// Other error with message.
     #[error("{0}")]
     Other(String),
+    /// An unwind would keep blocks below the block a pruned segment is anchored at, which the
+    /// segment no longer stores.
+    #[error("cannot unwind {segment} to block {target} below the pruned anchor at block {anchor}")]
+    UnwindBelowPrunedAnchor {
+        /// Segment being unwound.
+        segment: StaticFileSegment,
+        /// Highest block the unwind would keep.
+        target: BlockNumber,
+        /// Lowest block the segment stores.
+        anchor: BlockNumber,
+    },
 }
 
 impl StaticFileWriterError {
