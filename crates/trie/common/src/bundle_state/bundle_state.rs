@@ -39,8 +39,8 @@ pub enum OriginalValuesKnown {
     /// If we don't expect parent blocks to be committed or unwinded from database, this option
     /// should be used.
     Yes,
-    /// Doesn't check original values, see the implementation of [`BundleState::to_plain_state`] for
-    /// more info.
+    /// Doesn't check original values, see the implementation of [`BundleState::to_plain_state`]
+    /// for more info.
     ///
     /// If the Bundle can be split or extended, we would not be sure about original values, in that
     /// case this option should be used.
