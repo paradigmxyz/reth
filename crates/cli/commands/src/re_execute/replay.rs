@@ -7,7 +7,7 @@ use parking_lot::Mutex;
 use reth_cli_util::cancellation::CancellationToken;
 use reth_consensus::FullConsensus;
 use reth_evm::ConfigureEvm;
-use slatedb::{config::ScanOptions, DbReader};
+use slatedb::DbReader;
 use std::{
     ops::Range,
     sync::Arc,
@@ -263,58 +263,15 @@ async fn feed_pages(
                 let mut reservation = budget.acquire_many_owned(bytes as u32).await?;
                 let budget_wait = waiting.elapsed();
                 let mut queue_wait = Duration::ZERO;
-                // Per-scan read-ahead belongs to SlateDB's additional memory,
-                // not the serialized-record reservation above.
-                let options = ScanOptions::default().with_read_ahead_bytes(1024 * 1024);
                 let first = batch.first().expect("nonempty batch");
                 let last = batch.last().expect("nonempty batch");
-                let tx_end = last.first_tx + last.transactions;
-                let mut block_scan = reader
-                    .scan_with_options(store::key(first.start)..store::key(last.end), &options)
-                    .await?;
-                let mut tx_scan = if first.first_tx == tx_end {
-                    None
-                } else {
-                    Some(
-                        reader
-                            .scan_with_options(
-                                store::transaction_key(first.first_tx)..
-                                    store::transaction_key(tx_end),
-                                &options,
-                            )
-                            .await?,
-                    )
-                };
+                let mut payloads = store::PayloadScan::open(&reader, first, last).await?;
                 for record in batch {
-                    let entry = block_scan
-                        .next()
-                        .await?
-                        .ok_or_else(|| eyre::eyre!("missing corpus record at {}", record.start))?;
-                    eyre::ensure!(
-                        entry.key.as_ref() == store::key(record.start) &&
-                            entry.value.len() == record.block_bytes,
-                        "unexpected corpus key/size"
-                    );
-                    let mut cases = Vec::with_capacity(record.cases.len());
-                    for (index, expected) in record.cases.iter().enumerate() {
-                        let entry = tx_scan
-                            .as_mut()
-                            .ok_or_else(|| eyre::eyre!("missing transaction scan"))?
-                            .next()
-                            .await?
-                            .ok_or_else(|| eyre::eyre!("missing transaction record"))?;
-                        eyre::ensure!(
-                            entry.key.as_ref() ==
-                                store::transaction_key(record.first_tx + index as u64) &&
-                                entry.value.len() == expected.bytes,
-                            "transaction scan gap/order/size mismatch"
-                        );
-                        cases.push(entry.value);
-                    }
+                    let (block, cases) = payloads.next(&record).await?;
                     let permit = reservation.split(record.bytes).expect("batch sum reserved");
                     let mut ready = Ready {
                         record,
-                        bytes: entry.value,
+                        bytes: block,
                         cases,
                         space: space.clone(),
                         _reservation: permit,
@@ -337,10 +294,7 @@ async fn feed_pages(
                         queue_wait += waiting.elapsed();
                     }
                 }
-                eyre::ensure!(block_scan.next().await?.is_none(), "extra block record");
-                if let Some(mut scan) = tx_scan {
-                    eyre::ensure!(scan.next().await?.is_none(), "extra transaction record");
-                }
+                payloads.finish().await?;
                 tracing::debug!(
                     target: "reth::corpus::feed",
                     budget_us = budget_wait.as_micros() as u64,
