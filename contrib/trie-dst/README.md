@@ -218,6 +218,32 @@ fields, prewarm keys, nested updates, batches, and commit boundaries; crossover
 draws a second corpus entry. Invalid edits leave the input unchanged. The same input can
 also be supplied as `base_input` to the controller for replay.
 
+The additional structural operators are:
+
+| Operator | Effect |
+| --- | --- |
+| `account.insert` | Insert a fresh account update at a random position in an update batch. |
+| `storage.insert` | Insert a fresh slot write for an account already established at the insertion point. |
+| `storage.delete` | Insert a zero write for a live slot at the insertion point, deliberately deleting it. |
+| `update.move` | Move one update within or between update batches. |
+| `prewarm.account.insert`, `prewarm.storage.insert` | Insert a fresh account or storage access hint, including into an empty hint list. |
+| `prewarm.account.remove`, `prewarm.storage.remove` | Remove one hint. |
+| `prewarm.account.move`, `prewarm.storage.move` | Move one hint within or between prewarm batches. |
+| `batch.move` | Move an update or prewarm batch relative to other batches and commits. |
+
+Moves remove an emptied source batch. Hint removal also removes a batch when its
+last hint is removed. Destinations may cross block boundaries, but validation
+still requires account creation before storage writes and at least one update
+per block. Slot deletion leaves the input unchanged when no live slot is
+available at the chosen insertion point. No account deletion or storage wipe is
+introduced. There are no new split/merge, boundary-value, key-relationship or
+whole-block operators.
+
+Bedrock's `status.json` reports per-operator `[attempted, changed]` counts under
+`mutation_operators`, including these operators. Rejected edits and valid no-ops
+both count as attempted but unchanged; a changed input is not evidence that it
+was executed or that an individual deletion reached the trie task.
+
 At each completed block, the controller emits `trie/input/checked`, which gives
 Bedrock a pull point when mid-run snapshots are enabled. A suffix input is
 injected at the next new block boundary; already journaled blocks are never

@@ -153,9 +153,12 @@ impl Input {
                         for (j, update) in updates.iter().enumerate() {
                             let mut path = root.clone();
                             path.extend(["updates".into(), j.to_string()]);
-                            for operator in
-                                ["update.duplicate", "update.remove", "update.crossover"]
-                            {
+                            for operator in [
+                                "update.duplicate",
+                                "update.remove",
+                                "update.crossover",
+                                "update.move",
+                            ] {
                                 if only.is_none_or(|name| name == operator) {
                                     sites.push(MutationSite { operator, path: path.clone() });
                                 }
@@ -193,11 +196,43 @@ impl Input {
                             }
                         }
                     }
+                    for operator in ["account.insert", "storage.insert", "storage.delete"] {
+                        if only.is_none_or(|name| name == operator) {
+                            sites.push(MutationSite { operator, path: root.clone() });
+                        }
+                    }
                     if only.is_none_or(|name| name == "commit.insert") {
                         sites.push(MutationSite { operator: "commit.insert", path: root.clone() });
                     }
                 }
                 Operation::PrewarmBatch { accounts, storages } => {
+                    for operator in ["prewarm.account.insert", "prewarm.storage.insert"] {
+                        if only.is_none_or(|name| name == operator) {
+                            sites.push(MutationSite { operator, path: root.clone() });
+                        }
+                    }
+                    for (field, count, operators) in [
+                        (
+                            "accounts",
+                            accounts.len(),
+                            ["prewarm.account.remove", "prewarm.account.move"],
+                        ),
+                        (
+                            "storages",
+                            storages.len(),
+                            ["prewarm.storage.remove", "prewarm.storage.move"],
+                        ),
+                    ] {
+                        for j in 0..count {
+                            let mut path = root.clone();
+                            path.extend([field.into(), j.to_string()]);
+                            for operator in operators {
+                                if only.is_none_or(|name| name == operator) {
+                                    sites.push(MutationSite { operator, path: path.clone() });
+                                }
+                            }
+                        }
+                    }
                     if only.is_none_or(|name| name == "prewarm.account") {
                         for j in 0..accounts.len() {
                             let mut path = root.clone();
@@ -231,7 +266,7 @@ impl Input {
                     continue;
                 }
             }
-            for operator in ["batch.duplicate", "batch.remove", "batch.crossover"] {
+            for operator in ["batch.duplicate", "batch.remove", "batch.crossover", "batch.move"] {
                 if only.is_none_or(|name| name == operator) {
                     sites.push(MutationSite { operator, path: root.clone() });
                 }
@@ -254,6 +289,190 @@ impl Input {
         let i: usize =
             path.get(1).ok_or_else(|| eyre::eyre!("missing operation index"))?.parse()?;
         match operator {
+            "account.insert" | "storage.insert" | "storage.delete" => {
+                ensure!(path.len() == 2, "insertion needs a batch path");
+                let Some(Operation::UpdateBatch { updates }) = self.operations.get(i) else {
+                    eyre::bail!("not an update batch")
+                };
+                let j = rng.random_range(0..=updates.len());
+                let update = if operator == "account.insert" {
+                    let mut generated = generate(&mut rng, &Model::default(), 1);
+                    let mut update =
+                        generated.pop().ok_or_else(|| eyre::eyre!("no generated account"))?;
+                    if let Update::Account { address, .. } = &mut update {
+                        while self.operations.iter().any(|op| matches!(op,
+                            Operation::UpdateBatch { updates } if updates.iter().any(|update|
+                                matches!(update, Update::Account { address: existing, .. } if existing == address))))
+                        {
+                            *address = random_address(&mut rng);
+                        }
+                    }
+                    update
+                } else {
+                    let mut state = Model::default();
+                    for (index, op) in self.operations.iter().enumerate().take(i + 1) {
+                        if let Operation::UpdateBatch { updates } = op {
+                            for update in
+                                updates.iter().take(if index == i { j } else { updates.len() })
+                            {
+                                update.apply_to_model(&mut state);
+                            }
+                        }
+                    }
+                    if operator == "storage.delete" {
+                        let live_slots = state
+                            .iter()
+                            .flat_map(|(address, account)| {
+                                account.storage.keys().map(move |slot| (*address, *slot))
+                            })
+                            .collect::<Vec<_>>();
+                        if live_slots.is_empty() {
+                            return Ok(());
+                        }
+                        let (address, slot) = live_slots[rng.random_range(0..live_slots.len())];
+                        // Preserve the earlier nonzero write so this actually deletes a live slot.
+                        Update::Storage { address, slot, value: U256::ZERO }
+                    } else {
+                        if state.is_empty() {
+                            return Ok(());
+                        }
+                        let Some((address, account)) =
+                            state.iter().nth(rng.random_range(0..state.len()))
+                        else {
+                            eyre::bail!("missing established account")
+                        };
+                        let mut slot = random_slot(&mut rng);
+                        while account.touched_slots.contains(&slot) {
+                            slot = random_slot(&mut rng);
+                        }
+                        Update::Storage {
+                            address: *address,
+                            slot,
+                            value: U256::from(rng.random_range(1..=u64::MAX)),
+                        }
+                    }
+                };
+                if let Some(Operation::UpdateBatch { updates }) = self.operations.get_mut(i) {
+                    updates.insert(j, update);
+                }
+            }
+            "prewarm.account.insert" | "prewarm.storage.insert" => {
+                ensure!(path.len() == 2, "insertion needs a batch path");
+                let Some(Operation::PrewarmBatch { accounts, storages }) =
+                    self.operations.get_mut(i)
+                else {
+                    eyre::bail!("not a prewarm batch")
+                };
+                if operator == "prewarm.account.insert" {
+                    let mut address = random_address(&mut rng);
+                    while accounts.contains(&address) {
+                        address = random_address(&mut rng);
+                    }
+                    accounts.insert(rng.random_range(0..=accounts.len()), address);
+                } else {
+                    let mut hint = StorageHint {
+                        address: random_address(&mut rng),
+                        slot: random_slot(&mut rng),
+                    };
+                    while storages.contains(&hint) {
+                        hint = StorageHint {
+                            address: random_address(&mut rng),
+                            slot: random_slot(&mut rng),
+                        };
+                    }
+                    storages.insert(rng.random_range(0..=storages.len()), hint);
+                }
+            }
+            "update.move" => {
+                ensure!(
+                    path.len() == 4 && path.get(2).map(String::as_str) == Some("updates"),
+                    "invalid update path"
+                );
+                let j: usize =
+                    path.get(3).ok_or_else(|| eyre::eyre!("missing update index"))?.parse()?;
+                let Some(Operation::UpdateBatch { updates }) = self.operations.get(i) else {
+                    eyre::bail!("not an update batch")
+                };
+                ensure!(j < updates.len(), "update out of range");
+                if let Some((target, position)) = self.move_target(i, j, "updates", &mut rng) {
+                    let Operation::UpdateBatch { updates } = &mut self.operations[i] else {
+                        unreachable!()
+                    };
+                    let update = updates.remove(j);
+                    let Operation::UpdateBatch { updates } = &mut self.operations[target] else {
+                        unreachable!()
+                    };
+                    updates.insert(position, update);
+                    self.remove_empty_batch(i);
+                }
+            }
+            "prewarm.account.remove" |
+            "prewarm.storage.remove" |
+            "prewarm.account.move" |
+            "prewarm.storage.move" => {
+                let field =
+                    if operator.starts_with("prewarm.account.") { "accounts" } else { "storages" };
+                ensure!(
+                    path.len() == 4 && path.get(2).map(String::as_str) == Some(field),
+                    "invalid hint path"
+                );
+                let j: usize =
+                    path.get(3).ok_or_else(|| eyre::eyre!("missing hint index"))?.parse()?;
+                let Some(Operation::PrewarmBatch { accounts, storages }) = self.operations.get(i)
+                else {
+                    eyre::bail!("not a prewarm batch")
+                };
+                ensure!(
+                    j < if field == "accounts" { accounts.len() } else { storages.len() },
+                    "hint out of range"
+                );
+                let target = if operator.ends_with(".move") {
+                    let Some(target) = self.move_target(i, j, field, &mut rng) else {
+                        return Ok(());
+                    };
+                    Some(target)
+                } else {
+                    None
+                };
+                let Operation::PrewarmBatch { accounts, storages } = &mut self.operations[i] else {
+                    unreachable!()
+                };
+                if field == "accounts" {
+                    let hint = accounts.remove(j);
+                    if let Some((target, position)) = target {
+                        let Operation::PrewarmBatch { accounts, .. } = &mut self.operations[target]
+                        else {
+                            unreachable!()
+                        };
+                        accounts.insert(position, hint);
+                    }
+                } else {
+                    let hint = storages.remove(j);
+                    if let Some((target, position)) = target {
+                        let Operation::PrewarmBatch { storages, .. } = &mut self.operations[target]
+                        else {
+                            unreachable!()
+                        };
+                        storages.insert(position, hint);
+                    }
+                }
+                self.remove_empty_batch(i);
+            }
+            "batch.move" => {
+                ensure!(
+                    path.len() == 2 &&
+                        !matches!(self.operations.get(i), Some(Operation::Commit) | None),
+                    "batch move needs a batch path"
+                );
+                let positions = (0..self.operations.len() - 1)
+                    .filter(|position| *position != i)
+                    .collect::<Vec<_>>();
+                if !positions.is_empty() {
+                    let target = positions[rng.random_range(0..positions.len())];
+                    let batch = self.operations.remove(i);
+                    self.operations.insert(target, batch);
+                }
+            }
             "commit.insert" => {
                 ensure!(
                     matches!(self.operations.get(i), Some(Operation::UpdateBatch { .. })),
@@ -488,5 +707,43 @@ impl Input {
         let mut rng = StdRng::seed_from_u64(seed);
         let site = &sites[rng.random_range(0..sites.len())];
         self.mutate_at(site.operator, &site.path, rng.random(), None)
+    }
+
+    fn move_target(
+        &self,
+        source: usize,
+        item: usize,
+        field: &str,
+        rng: &mut StdRng,
+    ) -> Option<(usize, usize)> {
+        let mut targets = Vec::new();
+        for (index, op) in self.operations.iter().enumerate() {
+            let len = match (field, op) {
+                ("updates", Operation::UpdateBatch { updates }) => updates.len(),
+                ("accounts", Operation::PrewarmBatch { accounts, .. }) => accounts.len(),
+                ("storages", Operation::PrewarmBatch { storages, .. }) => storages.len(),
+                _ => continue,
+            };
+            // Positions refer to the destination after removing the source item.
+            for position in 0..=len - usize::from(index == source) {
+                if index != source || position != item {
+                    targets.push((index, position));
+                }
+            }
+        }
+        (!targets.is_empty()).then(|| targets[rng.random_range(0..targets.len())])
+    }
+
+    fn remove_empty_batch(&mut self, index: usize) {
+        let empty = match &self.operations[index] {
+            Operation::UpdateBatch { updates } => updates.is_empty(),
+            Operation::PrewarmBatch { accounts, storages } => {
+                accounts.is_empty() && storages.is_empty()
+            }
+            Operation::Commit => false,
+        };
+        if empty {
+            self.operations.remove(index);
+        }
     }
 }
