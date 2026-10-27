@@ -143,7 +143,7 @@ Storage:
           Number of tasks to run in parallel. Defaults to the number of available CPUs
 
       --blocks-per-chunk <BLOCKS_PER_CHUNK>
-          Number of blocks each worker processes before grabbing the next chunk
+          Local database blocks per worker chunk. Corpus records have no execution chunk size
 
           [default: 5000]
 
@@ -155,6 +155,12 @@ Storage:
 
       --s3-endpoint <S3_ENDPOINT>
           Optional S3-compatible endpoint. Credentials use the standard AWS chain
+
+      --tx-from <TX_FROM>
+          Replay independent transaction cases from this canonical global ordinal. This mode does not claim block/system or sequential-transition verification
+
+      --tx-to <TX_TO>
+          Exclusive global transaction ordinal for independent case replay
 
 JIT:
       --jit

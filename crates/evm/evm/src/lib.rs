@@ -218,6 +218,29 @@ pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
     /// Returns reference to the configured [`BlockAssembler`].
     fn block_assembler(&self) -> &Self::BlockAssembler;
 
+    /// Capture chain-owned non-database context at a committed transaction boundary.
+    ///
+    /// The versioned binary representation must include every counter and persistent EVM
+    /// field needed by isolated transaction execution. Database state is captured separately.
+    /// This is not a checkpoint for block finalization (prior receipts are not restored).
+    /// Configurations without an implementation explicitly reject independent case capture.
+    fn transaction_boundary<DB: block::StateDB>(
+        &self,
+        _executor: &BlockExecutorFor<'_, Self::BlockExecutorFactory, DB>,
+    ) -> Result<Bytes, BlockExecutionError> {
+        Err(BlockExecutionError::msg("transaction boundary capture is unsupported"))
+    }
+
+    /// Restore a boundary into a fresh executor without applying pre-block changes again.
+    /// The caller restores matching database prestate and sets the transaction's BAL index.
+    fn restore_transaction_boundary<DB: block::StateDB>(
+        &self,
+        _executor: &mut BlockExecutorFor<'_, Self::BlockExecutorFactory, DB>,
+        _boundary: &[u8],
+    ) -> Result<(), BlockExecutionError> {
+        Err(BlockExecutionError::msg("transaction boundary replay is unsupported"))
+    }
+
     /// Creates a new [`EvmEnv`] for the given header.
     fn evm_env(&self, header: &HeaderTy<Self::Primitives>) -> Result<EvmEnvFor<Self>, Self::Error>;
 

@@ -37,6 +37,7 @@ pub(super) struct Chunk {
     pub storage: BTreeMap<([u8; 20], [u8; 32]), Vec<(u64, [u8; 32])>>,
     pub code: BTreeMap<[u8; 32], Vec<u8>>,
     pub hashes: BTreeMap<u64, [u8; 32]>,
+    pub phases: Option<super::transaction::Phases>,
 }
 
 /// Canonical block and historical pre-change expectations, not replay-derived outputs.
@@ -49,7 +50,7 @@ pub(super) struct Block {
     pub storage: Vec<([u8; 20], [u8; 32], [u8; 32])>,
 }
 
-#[derive(Clone, Debug, SchemaRead, SchemaWrite)]
+#[derive(Clone, Debug, PartialEq, Eq, SchemaRead, SchemaWrite)]
 pub(super) struct Info {
     nonce: u64,
     balance: [u8; 32],
@@ -67,7 +68,7 @@ impl Info {
         Ok(info)
     }
 
-    fn account(&self) -> Account {
+    pub(super) fn account(&self) -> Account {
         Account {
             nonce: self.nonce,
             balance: U256::from_be_bytes(self.balance),
@@ -261,6 +262,7 @@ impl Chunk {
             storage: BTreeMap::new(),
             code: BTreeMap::new(),
             hashes: BTreeMap::new(),
+            phases: None,
         };
         let keys = keys.lock();
         let mut initial = db_at(start - 1)?;

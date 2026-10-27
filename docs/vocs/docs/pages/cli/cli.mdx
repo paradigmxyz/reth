@@ -15,12 +15,12 @@ Capture a finite range from an archive, then replay it without that archive:
 ```bash
 export AWS_PROFILE=corpus-writer
 reth re-execute-fill --chain mainnet --datadir /path/to/archive \
-  --from 20000001 --to 20001001 --blocks-per-chunk 100 \
+  --from 20000001 --to 20001001 \
   --corpus s3://my-corpus/ethereum-20000001-20001001
 
 export AWS_PROFILE=corpus-reader
 reth re-execute --chain mainnet \
-  --from 20000001 --to 20001001 --blocks-per-chunk 100 --num-tasks 16 \
+  --from 20000001 --to 20001001 --num-tasks 16 \
   --corpus s3://my-corpus/ethereum-20000001-20001001
 ```
 
@@ -38,12 +38,13 @@ access to the corpus, not archive-source credentials or a local database. Omitti
 
 ### Completion, resumption, and verification
 
-Repeating the same fill command resumes missing chunks, or performs a no-write
+Repeating the same fill command resumes missing blocks, or performs a no-write
 metadata/checkpoint check if complete. Add `--verify-existing` to read and fully
 replay previously published records. The default completeness check does **not**
 scan every stored payload. The prefix is bound to its chain ID, genesis, hardfork
-schedule, canonical range, schema, and chunk size; use a new prefix for a different
-configuration. Replay subranges must align with stored chunk boundaries.
+schedule, canonical range, transaction ordinals, and schema; use a new prefix for
+a different range. There is no persisted execution chunk size. Replay can select
+any block subrange within the published range.
 
 Each publication follows durable writes, checkpoint creation, and a readback
 integrity check. Concurrent fill invocations fence previous writers; a superseded
@@ -58,21 +59,93 @@ checks (including receipts/gas and applicable BAL checks), and historical change
 verifier. Neither path recomputes the global state root. Corpus mode fails on
 invalid execution and does not support `--skip-invalid-blocks`. Generic node
 components remain in use, including native protocol reads through the EVM database
-interface; capture discovers reads with fresh state per block so later executor
-resets do not lose values hidden by a warm cache.
+interface. Full corpus replay executes pre-execution changes, transactions, and
+post-execution changes once. It compares each ordered phase delta and transaction
+outcome/receipt while committing only actual execution results. Consensus and
+historical checks use that same execution. The extra phase comparisons remain
+additional validation work compared with the original local command.
+
+### Independent transaction cases
+
+Use canonical **global transaction ordinals**, not account nonces or block-local
+indices. The catalog reports `first_tx` and exclusive `end_tx`, taken from the
+archive's `BlockBodyIndices`. For example, if that range contains ordinals
+1000000–1000099:
+
+```bash
+reth re-execute --chain mainnet --num-tasks 16 \
+  --corpus s3://my-corpus/ethereum-20000001-20001001 \
+  --tx-from 1000000 --tx-to 1000100
+```
+
+Each case contains its delta, executor counters, outcome, and receipt. Canonical
+block context and the block-start witness are stored once per block. Independent
+replay derives its boundary from that witness and the expected pre-phase/prior
+transaction deltas, then executes only its target. It needs those shared records,
+but does not execute preceding transactions or open a local archive. Missing
+native protocol state is an error. Chains must
+implement the generic executor boundary capture/restore hooks; unsupported
+implementations fail explicitly. Ethereum and the accompanying Tempo integration
+implement these hooks.
+
+Independent mode checks cases, **not** block/system transitions or sequential
+state consistency; it reports zero fully verified blocks. Full block mode remains
+the default. Ordinals are stable only within the pinned canonical corpus identity;
+do not combine cases across different chains or reorg pins.
 
 ### Format and memory bounds
 
-The maintained `corpus-v1` layout uses typed wincode records with canonical RLP
-blocks and independently read historical expectations. The earlier experimental
-corpus format is incompatible and is not migrated automatically. Fill includes
-extra discovery and verification work; measure it separately from replay.
+The experimental `corpus-v5` layout stores one typed wincode value per transaction
+under `t || ordinal.to_be_bytes()` and separate block records under
+`b || block_number.to_be_bytes()`. The integer suffix is always eight bytes;
+lexicographic scans follow canonical order. SlateDB packs these values physically.
+Block records retain start-state dependencies, pre/post phase deltas, and historical
+changeset expectations, including empty blocks. Complete blocks are written atomically; checkpoint
+publication batching is an implementation detail, not part of corpus identity.
 
-Replay uses four asynchronous reader-runtime threads, at most 64 concurrent scans,
-1 MiB scan read-ahead, and a four-record ready queue feeding `--num-tasks` native
-execution threads. A 64 MiB serialized-byte budget covers materialized reads,
+Per-block metadata lives under `m || block_number.to_be_bytes()` in the same
+atomic batch and pinned checkpoint as the data. Root JSON contains only the chain/range,
+checkpoint, publication generation, and verified progress cursor (bounded to 1 MiB).
+Replay reads metadata incrementally, at most 1,000 records or an 8 MiB soft threshold
+per page, with a 64 MiB maximum single metadata record. It checks block/hash/ordinal
+continuity across pages and the final pinned boundary. Execution workers remain alive
+across pages; completion accounting does not retain a history-sized set. Independent
+transaction selection uses binary search over indexed block metadata rather than
+loading all preceding records. These metadata bounds exclude decoded allocations
+and SlateDB/SDK buffers, just like the serialized execution budget below.
+
+This layout is incompatible with `corpus-v1`, `corpus-v2`, `corpus-v3`, `corpus-v4`, and the earlier prototype. There is
+no automatic migration or full-history recapture. Fill performs extra discovery
+and verification work; measure it separately from replay. Generated phase deltas
+are checked against independently read canonical poststate during fill; those
+poststate copies are then discarded, leaving one expected delta representation.
+Deletion, creation/storage wipes, code and zero-valued writes remain distinct.
+Account deltas store only changed nonce, balance and code-hash fields; omitted fields
+preserve their prior value, while explicit zero/absent values reset them. Unchanged
+code is resolved from the shared witness rather than repeated in each delta.
+Logs live once in the receipt, but both actual transaction logs and the actual
+receipt are checked against it; output, halt/revert details and gas remain checked.
+Historical before-images remain independently captured expectations, not derived
+from the replay's own output. New SlateDB files use Zstd compression. Published
+checkpoints remain pinned; fill does not implicitly expire them or run retention GC.
+
+For a prepared local-copy control, `--corpus file:///directory` reads the same
+`corpus-v5` objects from disk without AWS credentials. Copy the pinned objects and
+catalog beforehand and measure that preparation separately. Local file reads,
+decode, execution and validation remain inside replay timing.
+
+Replay uses four asynchronous reader-runtime threads and at most 64 concurrent
+read tasks. Each task coalesces up to 512 contiguous blocks or 8 MiB into two
+ordered scans (block and transaction keys), with 4 MiB scan read-ahead. These are
+runtime read batches, never persisted execution chunks. A larger single record
+uses its own reservation. A four-record ready queue feeds `--num-tasks` native
+execution threads. A 64 MiB serialized-byte budget covers reserved future reads,
+materialized reads,
 queued records, and records being executed. Bytes move directly to workers without
 pipe framing. This is **not an RSS cap**: decoded blocks/state, SlateDB caches and
-read-ahead, and SDK allocations are additional. Wincode also checks each sequence
-against its default 4 MiB preallocation limit. Oversized captures fail; choose
-smaller chunks in a fresh prefix rather than disabling bounds.
+read-ahead, metadata, and SDK allocations are additional. The 1 MiB root metadata
+limit is separate from the replay budget. Wincode also checks each
+sequence against its default 4 MiB preallocation limit. A block and all its case
+values must fit the 64 MiB serialized limit. Canonical block context is shared
+instead of repeated in each case; oversized blocks
+fail explicitly instead of disabling bounds or inventing persisted batches.

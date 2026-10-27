@@ -120,6 +120,19 @@ fn deployment_zero_slot_survives_reset_and_missing_state_fails() -> eyre::Result
                 },
                 body: EthBody { transactions: vec![transaction], ..Default::default() },
             };
+            if nonce == count - 1 {
+                block.body.transactions.push(sign_tx_with_key_pair(
+                    key,
+                    Transaction::Eip2930(TxEip2930 {
+                        chain_id: 1,
+                        nonce: nonce + 1,
+                        gas_limit: 100_000,
+                        gas_price: 1_500_000_000,
+                        to: TxKind::Call(contract),
+                        ..Default::default()
+                    }),
+                ));
+            }
             // Build the canonical fixture using the normal executor, before capture.
             let output = config
                 .batch_executor(StateProviderDatabase::new(
@@ -207,7 +220,86 @@ fn deployment_zero_slot_survives_reset_and_missing_state_fails() -> eyre::Result
             assert!(wincode::deserialize_exact::<Chunk>(&bytes[..end]).is_err());
         }
         let restored = Arc::new(wincode::deserialize::<Chunk>(&bytes)?);
-        assert_eq!(restored.replay(&config, &consensus, &token)?.0, count);
+        assert_eq!(restored.replay(&config, &consensus, &token)?.0, count + 1);
+        let mut ordinal = 700;
+        for block in &blocks {
+            let mut input = Arc::new(Chunk::capture(
+                block.number()..block.number() + 1,
+                &config,
+                &consensus,
+                restored.as_ref(),
+                |at| Ok(View { chunk: restored.clone(), at }),
+                |_| Ok(block.clone()),
+                &token,
+            )?);
+            let (cases, phases) = super::super::transaction::execute(
+                &config, &consensus, &input, ordinal, None, &token,
+            )?;
+            Arc::get_mut(&mut input).unwrap().phases = Some(phases);
+            super::super::transaction::execute(
+                &config,
+                &consensus,
+                &input,
+                ordinal,
+                Some(&cases),
+                &token,
+            )?;
+            for (index, case) in cases.iter().enumerate().rev() {
+                case.replay(&config, &input, &cases[..index])?;
+            }
+            let target = cases.last().unwrap();
+            let prior = &cases[..cases.len() - 1];
+            let serialized = wincode::serialize(target)?;
+            let mut bad_state: super::super::transaction::Transaction =
+                wincode::deserialize_exact(&serialized)?;
+            if let Some(value) = bad_state
+                .delta
+                .0
+                .iter_mut()
+                .flat_map(|c| c.values_mut())
+                .flat_map(|a| a.storage.values_mut())
+                .next()
+            {
+                value[31] ^= 1;
+                assert_eq!(bad_state.receipt, target.receipt);
+                assert!(bad_state.replay(&config, &input, prior).is_err());
+            }
+            let mut bad_receipt: super::super::transaction::Transaction =
+                wincode::deserialize_exact(&serialized)?;
+            *bad_receipt.receipt.last_mut().unwrap() ^= 1;
+            assert!(bad_receipt.replay(&config, &input, prior).is_err());
+            // An explicit zero write is still an expectation, not an omitted slot.
+            let mut extra_write: super::super::transaction::Transaction =
+                wincode::deserialize_exact(&serialized)?;
+            extra_write
+                .delta
+                .0
+                .iter_mut()
+                .flat_map(|c| c.values_mut())
+                .next()
+                .unwrap()
+                .storage
+                .insert([0x99; 32], [0; 32]);
+            assert_eq!(extra_write.receipt, target.receipt);
+            assert!(extra_write.replay(&config, &input, prior).is_err());
+            let mut missing: Chunk =
+                wincode::deserialize_exact(&wincode::serialize(input.as_ref())?)?;
+            missing.storage.clear();
+            let missing_result = super::super::transaction::execute(
+                &config,
+                &consensus,
+                &Arc::new(missing),
+                ordinal,
+                Some(&cases),
+                &token,
+            );
+            // Creation legitimately supplies zero storage without reading old slots.
+            // The final block reads the existing contract and must require its witness.
+            if block.number() == count {
+                assert!(missing_result.is_err());
+            }
+            ordinal += cases.len() as u64;
+        }
         if recreate {
             for (at, values) in [(0, [7, 9]), (1, [0, 0]), (2, [0, 0])] {
                 let mut view = View { chunk: restored.clone(), at };

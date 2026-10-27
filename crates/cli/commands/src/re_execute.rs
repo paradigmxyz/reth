@@ -41,6 +41,7 @@ mod execute;
 mod fill;
 mod replay;
 mod store;
+mod transaction;
 
 pub use fill::FillCommand;
 
@@ -64,8 +65,8 @@ pub struct Command<C: ChainSpecParser> {
     #[arg(long)]
     num_tasks: Option<u64>,
 
-    /// Number of blocks each worker processes before grabbing the next chunk.
-    #[arg(long, default_value = "5000")]
+    /// Local database blocks per worker chunk. Corpus records have no execution chunk size.
+    #[arg(long, default_value = "5000", conflicts_with = "corpus")]
     blocks_per_chunk: u64,
 
     /// Continues with execution when an invalid block is encountered and collects these blocks.
@@ -80,6 +81,15 @@ pub struct Command<C: ChainSpecParser> {
     /// Optional S3-compatible endpoint. Credentials use the standard AWS chain.
     #[arg(long, requires = "corpus")]
     s3_endpoint: Option<String>,
+
+    /// Replay independent transaction cases from this canonical global ordinal.
+    /// This mode does not claim block/system or sequential-transition verification.
+    #[arg(long, requires_all = ["corpus", "tx_to"])]
+    tx_from: Option<u64>,
+
+    /// Exclusive global transaction ordinal for independent case replay.
+    #[arg(long, requires_all = ["corpus", "tx_from"])]
+    tx_to: Option<u64>,
 
     #[command(flatten)]
     pub jit: JitArgs,
@@ -118,22 +128,17 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
             );
             let end = self.to.unwrap_or(context.end).min(context.end);
             eyre::ensure!(
-                self.from >= context.start &&
-                    self.from < end &&
-                    self.blocks_per_chunk == context.chunk_blocks,
-                "corpus range/chunk configuration mismatch"
+                self.tx_from.is_some() || (self.from >= context.start && self.from < end),
+                "corpus block range mismatch"
             );
-            let records: Vec<_> = catalog
-                .records
-                .iter()
-                .filter(|r| r.start >= self.from && r.end <= end)
-                .cloned()
-                .collect();
-            eyre::ensure!(
-                records.first().map(|r| r.start) == Some(self.from) &&
-                    records.last().map(|r| r.end) == Some(end),
-                "corpus range must align with stored chunk boundaries"
-            );
+            let range = self.from..end;
+            let standalone = self.tx_from.zip(self.tx_to);
+            if let (Some(from), Some(to)) = (self.tx_from, self.tx_to) {
+                eyre::ensure!(
+                    from >= context.first_tx && from < to && to <= context.end_tx,
+                    "transaction ordinal range outside pinned corpus"
+                );
+            }
             let workers = self.num_tasks.map(usize::try_from).transpose()?.unwrap_or_else(|| {
                 std::thread::available_parallelism().map(|n| n.get()).unwrap_or(1)
             });
@@ -143,7 +148,16 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
             let cancellation = CancellationToken::new();
             let _guard = cancellation.drop_guard();
             return tokio::task::spawn_blocking(move || {
-                replay::run(store, catalog, records, config, consensus, workers, cancellation)
+                replay::run(
+                    store,
+                    catalog,
+                    range,
+                    config,
+                    consensus,
+                    workers,
+                    standalone,
+                    cancellation,
+                )
             })
             .await?;
         }

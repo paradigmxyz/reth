@@ -17,9 +17,10 @@
 
 extern crate alloc;
 
-use alloc::{borrow::Cow, sync::Arc};
+use alloc::{borrow::Cow, sync::Arc, vec::Vec};
 use alloy_consensus::Header;
 use alloy_evm::{
+    block::{BlockExecutionError, BlockExecutorFor, StateDB},
     eth::{EthBlockExecutionCtx, EthBlockExecutorFactory},
     EthEvmFactory, FromRecoveredTx, FromTxWithEncoded,
 };
@@ -165,6 +166,44 @@ where
 
     fn block_assembler(&self) -> &Self::BlockAssembler {
         &self.block_assembler
+    }
+
+    fn transaction_boundary<DB: StateDB>(
+        &self,
+        executor: &BlockExecutorFor<'_, Self::BlockExecutorFactory, DB>,
+    ) -> Result<Bytes, BlockExecutionError> {
+        let mut bytes = Vec::from(*b"ETHBND01");
+        for value in [
+            executor.cumulative_tx_gas_used,
+            executor.block_regular_gas_used,
+            executor.block_state_gas_used,
+            executor.blob_gas_used,
+        ] {
+            bytes.extend_from_slice(&value.to_be_bytes());
+        }
+        bytes.push(u8::from(executor.skip_state_gas_capacity_check));
+        Ok(bytes.into())
+    }
+
+    fn restore_transaction_boundary<DB: StateDB>(
+        &self,
+        executor: &mut BlockExecutorFor<'_, Self::BlockExecutorFactory, DB>,
+        boundary: &[u8],
+    ) -> Result<(), BlockExecutionError> {
+        if boundary.len() != 41 || &boundary[..8] != b"ETHBND01" || boundary[40] > 1 {
+            return Err(BlockExecutionError::msg("invalid Ethereum transaction boundary"));
+        }
+        let value = |offset| {
+            u64::from_be_bytes(
+                boundary[offset..offset + 8].try_into().expect("checked boundary size"),
+            )
+        };
+        executor.cumulative_tx_gas_used = value(8);
+        executor.block_regular_gas_used = value(16);
+        executor.block_state_gas_used = value(24);
+        executor.blob_gas_used = value(32);
+        executor.skip_state_gas_capacity_check = boundary[40] != 0;
+        Ok(())
     }
 
     fn with_jit_support_enabled(self, enabled: bool) -> Self
