@@ -9,6 +9,9 @@ pub struct EthereumBuilderConfig {
     pub desired_gas_limit: u64,
     /// Waits for the first payload to be built if there is no payload built when the payload is
     /// being resolved.
+    ///
+    /// Disabled by default: `engine_getPayload` must be answered immediately, so a missing
+    /// payload is raced against an empty one instead.
     pub await_payload_on_missing: bool,
     /// Maximum number of blobs to include per block (EIP-7872).
     ///
@@ -31,7 +34,7 @@ impl EthereumBuilderConfig {
     pub const fn new() -> Self {
         Self {
             desired_gas_limit: ETHEREUM_BLOCK_GAS_LIMIT_30M,
-            await_payload_on_missing: true,
+            await_payload_on_missing: false,
             max_blobs_per_block: None,
             extra_data: Bytes::new(),
             skip_state_root: false,
