@@ -149,22 +149,25 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
                         ))?;
                         while pages.cursor.next < catalog.cursor.next {
                             let records = handle.block_on(pages.next_page())?;
-                            for record in &records {
-                                eyre::ensure!(!cancellation.is_cancelled(), "capture cancelled");
-                                let bytes = handle
-                                    .block_on(reader.get(store::key(record.start)))?
-                                    .ok_or_else(|| eyre::eyre!("missing published record"))?;
-                                let chunk = store::decode(&bytes, record)?;
-                                let cases = handle.block_on(store::read_cases(&reader, record))?;
-                                store::verify_cases(
-                                    &chunk,
-                                    &cases,
-                                    record,
-                                    &config,
-                                    consensus,
-                                    &cancellation,
-                                )?;
-                            }
+                            handle.block_on(store::for_each_payload(
+                                &reader,
+                                &records,
+                                |record, bytes, cases| {
+                                    eyre::ensure!(
+                                        !cancellation.is_cancelled(),
+                                        "capture cancelled"
+                                    );
+                                    let chunk = store::decode(&bytes, record)?;
+                                    store::verify_cases(
+                                        &chunk,
+                                        &cases,
+                                        record,
+                                        &config,
+                                        consensus,
+                                        &cancellation,
+                                    )
+                                },
+                            ))?;
                         }
                         eyre::ensure!(
                             pages.cursor == catalog.cursor,
@@ -194,7 +197,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
             let db = handle.block_on(
                 Db::builder(store.path.clone().join("data"), store.objects.clone())
                     .with_settings(Settings {
-                        object_store_max_retries: Some(3),
+                        object_store_max_retries: store::SLATEDB_RETRIES,
                         compression_codec: Some(CompressionCodec::Zstd),
                         // Archival fill publishes checkpoints, not retention policy.
                         garbage_collector_options: None,
@@ -375,15 +378,11 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
                         ))?;
                         while pages.cursor.next < catalog.cursor.next {
                             let records = handle.block_on(pages.next_page())?;
-                            for record in &records {
-                                let stored = handle
-                                    .block_on(reader.get(store::key(record.start)))?
-                                    .ok_or_else(|| {
-                                        eyre::eyre!("durable checkpoint is missing new record")
-                                    })?;
-                                store::decode(&stored, record)?;
-                                handle.block_on(store::read_cases(&reader, record))?;
-                            }
+                            handle.block_on(store::for_each_payload(
+                                &reader,
+                                &records,
+                                |record, bytes, _| store::decode(&bytes, record).map(drop),
+                            ))?;
                         }
                         eyre::ensure!(
                             pages.cursor == catalog.cursor,
