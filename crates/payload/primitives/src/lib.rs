@@ -674,9 +674,8 @@ pub enum PayloadKind {
     /// returns whichever job finishes faster.
     ///
     /// This should be used when it's more important to return a valid payload as fast as possible.
-    /// For example, the engine API timeout for `engine_getPayload` is 1s and clients should rather
-    /// return an empty payload than indefinitely waiting for the pending payload job to finish and
-    /// risk missing the deadline.
+    /// For example, `engine_getPayload` must be served immediately, so clients should rather
+    /// return an empty payload than wait for the pending payload job to finish.
     #[default]
     Earliest,
     /// Only returns once we have at least one built payload.

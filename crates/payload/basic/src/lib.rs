@@ -579,7 +579,9 @@ where
         let mut empty_payload = None;
 
         if best_payload.is_none() {
-            if let Some(pending) = maybe_better.as_ref() {
+            if kind == PayloadKind::Earliest &&
+                let Some(pending) = maybe_better.as_ref()
+            {
                 pending.cancel.request_finalization();
             }
 
@@ -595,9 +597,6 @@ where
             };
 
             match self.builder.on_missing_payload(args) {
-                MissingPayloadBehaviour::AwaitInProgress => {
-                    debug!(target: "payload_builder", id=%self.config.payload_id(), "awaiting in progress payload build job");
-                }
                 MissingPayloadBehaviour::RaceEmptyPayload => {
                     debug!(target: "payload_builder", id=%self.config.payload_id(), "racing empty payload");
 
@@ -1032,8 +1031,6 @@ pub trait PayloadBuilder: Send + Sync + Clone {
 /// This situation can occur if the CL requests a payload before the first payload has been built.
 #[derive(Default)]
 pub enum MissingPayloadBehaviour<Payload> {
-    /// Await the regular scheduled payload process.
-    AwaitInProgress,
     /// Race the in progress payload process with an empty payload.
     #[default]
     RaceEmptyPayload,
@@ -1044,7 +1041,6 @@ pub enum MissingPayloadBehaviour<Payload> {
 impl<Payload> fmt::Debug for MissingPayloadBehaviour<Payload> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::AwaitInProgress => write!(f, "AwaitInProgress"),
             Self::RaceEmptyPayload => {
                 write!(f, "RaceEmptyPayload")
             }
@@ -1072,4 +1068,106 @@ fn duration_until(unix_timestamp_secs: u64) -> Duration {
     let unix_now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default();
     let timestamp = Duration::from_secs(unix_timestamp_secs);
     timestamp.saturating_sub(unix_now)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use alloy_rpc_types_engine::PayloadAttributes as EthPayloadAttributes;
+    use reth_ethereum_engine_primitives::EthBuiltPayload;
+
+    #[derive(Clone, Debug)]
+    struct SlowBuilder {
+        started: Arc<Semaphore>,
+        finalizing: Arc<Semaphore>,
+    }
+
+    impl PayloadBuilder for SlowBuilder {
+        type Attributes = EthPayloadAttributes;
+        type BuiltPayload = EthBuiltPayload;
+
+        fn try_build(
+            &self,
+            args: BuildArguments<Self::Attributes, Self::BuiltPayload>,
+        ) -> Result<BuildOutcome<Self::BuiltPayload>, PayloadBuilderError> {
+            self.started.add_permits(1);
+            while !args.cancel.is_interrupted() {
+                std::thread::yield_now();
+            }
+            if args.cancel.is_finalization_requested() {
+                self.finalizing.add_permits(1);
+            }
+            while !args.cancel.is_cancelled() {
+                std::thread::yield_now();
+            }
+            Ok(BuildOutcome::Cancelled)
+        }
+
+        fn build_empty_payload(
+            &self,
+            _config: PayloadConfig<Self::Attributes, HeaderForPayload<Self::BuiltPayload>>,
+        ) -> Result<Self::BuiltPayload, PayloadBuilderError> {
+            Ok(EthBuiltPayload::new(Default::default(), U256::ZERO, None, None))
+        }
+    }
+
+    fn slow_job() -> BasicPayloadJob<SlowBuilder> {
+        let builder = SlowBuilder {
+            started: Arc::new(Semaphore::new(0)),
+            finalizing: Arc::new(Semaphore::new(0)),
+        };
+        let config = PayloadConfig::new(
+            Arc::new(SealedHeader::seal_slow(Default::default())),
+            EthPayloadAttributes::default(),
+            PayloadId::new([0; 8]),
+        );
+        BasicPayloadJob {
+            config,
+            executor: Runtime::test(),
+            deadline: Box::pin(tokio::time::sleep(SLOT_DURATION)),
+            interval: tokio::time::interval(Duration::from_secs(1)),
+            best_payload: PayloadState::Missing,
+            pending_block: None,
+            payload_task_guard: PayloadTaskGuard::new(1),
+            cached_reads: None,
+            execution_cache: None,
+            state_root_handle: None,
+            leases: Vec::new(),
+            metrics: Default::default(),
+            builder,
+        }
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn resolve_returns_empty_payload_while_build_in_progress() {
+        let mut job = slow_job();
+        let builder = job.builder.clone();
+
+        job.spawn_build_job();
+        let _started = builder.started.acquire().await.unwrap();
+
+        let (mut fut, _) = job.resolve_kind(PayloadKind::Earliest);
+        let payload =
+            tokio::time::timeout(Duration::from_secs(1), &mut fut).await.unwrap().unwrap();
+        assert_eq!(payload.fees(), U256::ZERO);
+
+        let _finalizing =
+            tokio::time::timeout(Duration::from_secs(1), builder.finalizing.acquire())
+                .await
+                .unwrap()
+                .unwrap();
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn resolve_wait_for_pending_awaits_build_in_progress() {
+        let mut job = slow_job();
+        let builder = job.builder.clone();
+
+        job.spawn_build_job();
+        let _started = builder.started.acquire().await.unwrap();
+
+        let (mut fut, _) = job.resolve_kind(PayloadKind::WaitForPending);
+        assert!(tokio::time::timeout(Duration::from_millis(100), &mut fut).await.is_err());
+        assert_eq!(builder.finalizing.available_permits(), 0);
+    }
 }
