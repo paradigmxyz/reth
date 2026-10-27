@@ -135,14 +135,13 @@ catalog beforehand and measure that preparation separately. Local file reads,
 decode, execution and validation remain inside replay timing.
 
 Replay uses four asynchronous reader-runtime threads and at most 64 concurrent
-read tasks. Each task coalesces up to 512 contiguous blocks or 8 MiB into two
-ordered scans (block and transaction keys), with 4 MiB scan read-ahead. These are
-runtime read batches, never persisted execution chunks. A larger single record
-uses its own reservation. A four-record ready queue feeds `--num-tasks` native
-execution threads. A 64 MiB serialized-byte budget covers reserved future reads,
-materialized reads,
-queued records, and records being executed. Bytes move directly to workers without
-pipe framing. This is **not an RSS cap**: decoded blocks/state, SlateDB caches and
+read tasks. Each task coalesces up to 1,000 contiguous blocks (one metadata page)
+or 8 MiB into two ordered scans (block and transaction keys), with 1 MiB scan
+read-ahead. These are runtime read batches, never persisted execution chunks. A
+larger single record uses its own reservation. A four-record ready queue feeds
+`--num-tasks` native execution threads. A 128 MiB serialized-byte budget covers
+reserved future reads, materialized reads, queued records, and records being
+executed. Bytes move directly to workers without pipe framing. This is **not an RSS cap**: decoded blocks/state, SlateDB caches and
 read-ahead, metadata, and SDK allocations are additional. The 1 MiB root metadata
 limit is separate from the replay budget. Wincode also checks each
 sequence against its default 4 MiB preallocation limit. A block and all its case

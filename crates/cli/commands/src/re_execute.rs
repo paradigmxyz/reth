@@ -74,7 +74,7 @@ pub struct Command<C: ChainSpecParser> {
     skip_invalid_blocks: bool,
 
     /// Read a pinned corpus instead of opening a local database.
-    /// Uses 64 MiB serialized reservations, excluding decoded state and SDK/cache memory.
+    /// Reserves up to 128 MiB of serialized records, excluding decoded state and SDK/cache memory.
     #[arg(long, conflicts_with = "skip_invalid_blocks")]
     corpus: Option<String>,
 

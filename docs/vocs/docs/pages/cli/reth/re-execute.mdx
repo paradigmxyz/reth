@@ -151,7 +151,7 @@ Storage:
           Continues with execution when an invalid block is encountered and collects these blocks
 
       --corpus <CORPUS>
-          Read a pinned corpus instead of opening a local database. Uses 64 MiB serialized reservations, excluding decoded state and SDK/cache memory
+          Read a pinned corpus instead of opening a local database. Reserves up to 128 MiB of serialized records, excluding decoded state and SDK/cache memory
 
       --s3-endpoint <S3_ENDPOINT>
           Optional S3-compatible endpoint. Credentials use the standard AWS chain

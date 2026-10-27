@@ -1,6 +1,6 @@
 //! Bounded in-process checkpoint reads feeding native execution workers.
 
-use super::store::{self, Catalog, Record, Store, BYTE_BUDGET};
+use super::store::{self, Catalog, Record, Store, MAX_RECORD_BYTES};
 use bytes::Bytes;
 use crossbeam_channel::{RecvTimeoutError, Sender, TrySendError};
 use parking_lot::Mutex;
@@ -20,10 +20,10 @@ use tokio::{
 use tracing::info;
 
 /// Serialized bytes reserved across in-flight scans, queued and executing records.
-/// This is a reservation, not an RSS cap. Each scan reserves its whole batch (up to
-/// 8 MiB) before opening, so 64 MiB limited dense history to ~10 concurrent scans;
-/// two maximum-size records still fit.
-const REPLAY_BUDGET: usize = 2 * BYTE_BUDGET;
+/// Each scan reserves its whole batch (at most 8 MiB) before opening, so this fits
+/// ~16 maximum-size batches or two maximum-size records. Not an RSS cap: decoded
+/// state, SlateDB scan/cache buffers and SDK allocations are excluded.
+const REPLAY_BUDGET: usize = 2 * MAX_RECORD_BYTES;
 
 struct Ready {
     record: Record,
@@ -707,7 +707,7 @@ mod tests {
         range: Range<u64>,
         standalone: Option<(u64, u64)>,
     ) -> eyre::Result<((u64, u64, u64), Vec<u64>)> {
-        let budget = Arc::new(Semaphore::new(BYTE_BUDGET));
+        let budget = Arc::new(Semaphore::new(REPLAY_BUDGET));
         let (sender, receiver) = crossbeam_channel::bounded::<Ready>(4);
         let consumer = tokio::task::spawn_blocking(move || {
             let mut received = Vec::new();
@@ -732,7 +732,7 @@ mod tests {
         .await;
         // Join the consumer on both success and error before inspecting permits.
         let received = consumer.await?;
-        assert_eq!(budget.available_permits(), BYTE_BUDGET);
+        assert_eq!(budget.available_permits(), REPLAY_BUDGET);
         Ok((result?, received))
     }
 
@@ -841,7 +841,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn next_page_does_not_wait_for_older_payload_tasks() -> eyre::Result<()> {
         let (reader, catalog) = paged_fixture(None).await?;
-        let budget = Arc::new(Semaphore::new(BYTE_BUDGET));
+        let budget = Arc::new(Semaphore::new(REPLAY_BUDGET));
         let token = CancellationToken::new();
         let (sender, receiver) = crossbeam_channel::bounded::<Ready>(4);
         let (release, gate) = tokio::sync::oneshot::channel();
@@ -879,7 +879,7 @@ mod tests {
         let seen = consumer.await?;
         assert_eq!(result??.0, (2001, 2001, 2001));
         assert_eq!(seen, (1..catalog.context.end).collect::<Vec<_>>());
-        assert_eq!(budget.available_permits(), BYTE_BUDGET);
+        assert_eq!(budget.available_permits(), REPLAY_BUDGET);
         reader.close().await?;
         Ok(())
     }
@@ -887,7 +887,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn full_reader_pool_leaves_next_page_queued() -> eyre::Result<()> {
         let (reader, _) = paged_fixture(None).await?;
-        let budget = Arc::new(Semaphore::new(BYTE_BUDGET));
+        let budget = Arc::new(Semaphore::new(REPLAY_BUDGET));
         let token = CancellationToken::new();
         let (sender, receiver) = crossbeam_channel::bounded::<Ready>(4);
         let (pages, input) = mpsc::channel(1);
@@ -910,7 +910,7 @@ mod tests {
         drop(feeding);
         assert_eq!(tasks.len(), 64);
         tasks.shutdown().await;
-        assert_eq!(budget.available_permits(), BYTE_BUDGET);
+        assert_eq!(budget.available_permits(), REPLAY_BUDGET);
         reader.close().await?;
         Ok(())
     }
@@ -918,7 +918,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn cancellation_while_waiting_for_first_page() -> eyre::Result<()> {
         let (reader, _) = paged_fixture(None).await?;
-        let budget = Arc::new(Semaphore::new(BYTE_BUDGET));
+        let budget = Arc::new(Semaphore::new(REPLAY_BUDGET));
         let token = CancellationToken::new();
         let (sender, receiver) = crossbeam_channel::bounded::<Ready>(4);
         let (pages, input) = mpsc::channel(1);
@@ -937,7 +937,7 @@ mod tests {
         tasks.shutdown().await;
         assert_eq!(result?.unwrap_err().to_string(), "corpus replay cancelled");
         assert!(receiver.is_empty());
-        assert_eq!(budget.available_permits(), BYTE_BUDGET);
+        assert_eq!(budget.available_permits(), REPLAY_BUDGET);
         drop(pages);
         reader.close().await?;
         Ok(())

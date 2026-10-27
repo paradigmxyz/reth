@@ -2,7 +2,7 @@
 
 use super::{
     chunk::Chunk,
-    store::{self, CaseRecord, Catalog, Context, Record, Store, BYTE_BUDGET, CONTEXT_KEY},
+    store::{self, CaseRecord, Catalog, Context, Record, Store, CONTEXT_KEY, MAX_RECORD_BYTES},
     transaction,
 };
 use crate::common::{
@@ -287,8 +287,8 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
                             .ok_or_else(|| eyre::eyre!("serialized size overflow"))
                     })?;
                     eyre::ensure!(
-                        total_bytes <= BYTE_BUDGET,
-                        "block and independent transactions exceed 64 MiB serialized budget"
+                        total_bytes <= MAX_RECORD_BYTES,
+                        "block and independent transactions exceed 64 MiB record limit"
                     );
                     let record = Record {
                         start,
@@ -312,7 +312,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
                             .collect(),
                     };
                     let metadata = serde_json::to_vec(&record)?;
-                    eyre::ensure!(metadata.len() <= BYTE_BUDGET, "metadata record too large");
+                    eyre::ensure!(metadata.len() <= MAX_RECORD_BYTES, "metadata record too large");
                     metadata_bytes += metadata.len();
                     let mut batch = WriteBatch::new();
                     for (key, value) in

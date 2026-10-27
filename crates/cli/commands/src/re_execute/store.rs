@@ -17,9 +17,9 @@ use slatedb::{
 use std::sync::Arc;
 use url::Url;
 
-/// Serialized records, including in-flight reads and records executing on workers.
-/// Does not cap decoded EVM state, SlateDB scan/cache buffers, or SDK allocations.
-pub(super) const BYTE_BUDGET: usize = 64 * 1024 * 1024;
+/// Maximum serialized size of one block record (block plus its transactions) or one
+/// metadata entry. Capture rejects larger records; readers reject larger entries.
+pub(super) const MAX_RECORD_BYTES: usize = 64 * 1024 * 1024;
 const MAX_CATALOG_BYTES: usize = 1024 * 1024;
 pub(super) const PAGE_RECORDS: usize = 1000;
 pub(super) const CONTEXT_KEY: &[u8] = b"reth-corpus-context";
@@ -433,13 +433,13 @@ impl Cursor {
             "catalog block gap/duplicate"
         );
         eyre::ensure!(
-            record.parent == self.parent && record.bytes > 0 && record.bytes <= BYTE_BUDGET,
+            record.parent == self.parent && record.bytes > 0 && record.bytes <= MAX_RECORD_BYTES,
             "catalog hash chain or record size mismatch"
         );
         let bytes =
             record.cases.iter().enumerate().try_fold(record.block_bytes, |sum, (i, case)| {
                 eyre::ensure!(
-                    case.index == i as u64 && case.bytes > 0 && case.bytes <= BYTE_BUDGET,
+                    case.index == i as u64 && case.bytes > 0 && case.bytes <= MAX_RECORD_BYTES,
                     "transaction index/size mismatch"
                 );
                 sum.checked_add(case.bytes).ok_or_else(|| eyre::eyre!("record size overflow"))
@@ -472,7 +472,7 @@ pub(super) async fn metadata(reader: &DbReader, block: u64) -> eyre::Result<Reco
         .get(metadata_key(block))
         .await?
         .ok_or_else(|| eyre::eyre!("missing block metadata at {block}"))?;
-    eyre::ensure!(bytes.len() <= BYTE_BUDGET, "metadata record too large");
+    eyre::ensure!(bytes.len() <= MAX_RECORD_BYTES, "metadata record too large");
     let record: Record = serde_json::from_slice(&bytes)?;
     eyre::ensure!(
         record.start == block &&
@@ -511,7 +511,8 @@ impl MetadataPages {
                 .await?
                 .ok_or_else(|| eyre::eyre!("metadata gap at {}", cursor.next))?;
             eyre::ensure!(
-                entry.key.as_ref() == metadata_key(cursor.next) && entry.value.len() <= BYTE_BUDGET,
+                entry.key.as_ref() == metadata_key(cursor.next) &&
+                    entry.value.len() <= MAX_RECORD_BYTES,
                 "metadata scan key/size mismatch"
             );
             bytes += entry.value.len();
