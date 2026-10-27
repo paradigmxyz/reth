@@ -68,6 +68,7 @@ tracing.workspace = true
 # misc
 aquamarine.workspace = true
 clap = { workspace = true, features = ["derive", "env"] }
+mimalloc.workspace = true
 
 [dev-dependencies]
 alloy-node-bindings.workspace = true
@@ -87,7 +88,6 @@ zstd.workspace = true
 
 [features]
 default = [
-    "jemalloc",
     "otlp",
     "otlp-logs",
     "js-tracer",

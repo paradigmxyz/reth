@@ -1,7 +1,7 @@
 #![allow(missing_docs)]
 
 #[global_allocator]
-static ALLOC: reth_cli_util::allocator::Allocator = reth_cli_util::allocator::new_allocator();
+static ALLOC: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
 // Required for "override_allocator_on_supported_platforms".
 #[cfg(all(feature = "jemalloc", unix))]

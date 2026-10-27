@@ -671,6 +671,8 @@ walkdir = "2.3.3"
 # networking
 ipnet = "2.11"
 
+mimalloc = { version = "=0.1.52", default-features = false, features = ["override"] }
+
 # evm2 is patched through its pre-transfer URL, which redirects to alloy-rs/evm2, because Cargo
 # rejects a patch from the same source.
 [patch."https://github.com/alloy-rs/evm2"]
