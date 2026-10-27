@@ -19,6 +19,12 @@ use tokio::{
 };
 use tracing::info;
 
+/// Serialized bytes reserved across in-flight scans, queued and executing records.
+/// This is a reservation, not an RSS cap. Each scan reserves its whole batch (up to
+/// 8 MiB) before opening, so 64 MiB limited dense history to ~10 concurrent scans;
+/// two maximum-size records still fit.
+const REPLAY_BUDGET: usize = 2 * BYTE_BUDGET;
+
 struct Ready {
     record: Record,
     bytes: Bytes,
@@ -51,7 +57,7 @@ where
     if let Some((from, to)) = standalone {
         range = runtime.block_on(transaction_range(&reader, &catalog, from, to))?;
     }
-    let budget = Arc::new(Semaphore::new(BYTE_BUDGET));
+    let budget = Arc::new(Semaphore::new(REPLAY_BUDGET));
     let (sender, receiver) = crossbeam_channel::bounded::<Ready>(4);
     let started = Instant::now();
     // Save the triggering error before cancelling peers. Join order must not
@@ -203,7 +209,7 @@ where
             workers,
             standalone = standalone.is_some(),
             seconds = started.elapsed().as_secs_f64(),
-            serialized_budget = BYTE_BUDGET,
+            serialized_budget = REPLAY_BUDGET,
             "Corpus replay verified"
         );
         Ok(())
