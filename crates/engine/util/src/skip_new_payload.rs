@@ -61,7 +61,7 @@ where
                     }
                     *this.skipped = 0;
                     Some(BeaconEngineMessage::NewPayload {
-                        cause: cause.clone(),
+                        cause,
                         payload,
                         inclusion_list_transactions,
                         tx,
