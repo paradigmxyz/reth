@@ -213,5 +213,6 @@ use aquamarine as _;
 
 // used in main
 use clap as _;
+use mimalloc as _;
 use reth_cli_util as _;
 use tracing as _;
