@@ -400,9 +400,10 @@ async fn feed_catalog(
     };
     let initial_tx = cursor.tx;
     let mut totals = (0, 0, 0);
-    while cursor.next < range.end {
+    eyre::ensure!(!cancellation.is_cancelled(), "metadata read cancelled");
+    let mut page = store::read_page(reader, &mut cursor, range.end).await?;
+    while !page.is_empty() {
         eyre::ensure!(!cancellation.is_cancelled(), "metadata read cancelled");
-        let mut page = store::read_page(reader, &mut cursor, range.end).await?;
         if let Some((from, to)) = standalone {
             page.retain(|r| {
                 r.transactions > 0 && r.first_tx < to && r.first_tx + r.transactions > from
@@ -415,7 +416,21 @@ async fn feed_catalog(
             });
             totals.2 += record.gas;
         }
-        feed(reader, &page, sender.clone(), budget.clone(), cancellation).await?;
+        // Keep just one metadata page ahead of the current payload reads. Test
+        // emptiness before filtering: a standalone range may skip an entire page.
+        let (fed, next) = tokio::join!(
+            feed(reader, &page, sender.clone(), budget.clone(), cancellation),
+            async {
+                if cursor.next == range.end {
+                    return Ok(Vec::new());
+                }
+                eyre::ensure!(!cancellation.is_cancelled(), "metadata read cancelled");
+                store::read_page(reader, &mut cursor, range.end).await
+            }
+        );
+        // Finish feed's explicit abort/join cleanup even if metadata fails.
+        fed?;
+        page = next?;
     }
     if range.end == catalog.context.end {
         eyre::ensure!(cursor == catalog.cursor, "final metadata boundary mismatch");
@@ -568,6 +583,194 @@ mod tests {
             )
             .await?;
             assert!(result.is_err());
+        }
+        reader.close().await?;
+        Ok(())
+    }
+
+    /// Exercise the actual paged reader and payload feeder without EVM work.
+    async fn paged_fixture(missing: Option<u64>) -> eyre::Result<(Arc<DbReader>, Catalog)> {
+        let objects = Arc::new(InMemory::new());
+        let db = Db::open("paged", objects.clone()).await?;
+        let count = (2 * store::PAGE_RECORDS + 1) as u64;
+        let context = store::Context {
+            schema: 5,
+            chain_id: 1,
+            genesis: alloy_primitives::B256::ZERO.to_string(),
+            forks: "test".to_owned(),
+            start: 1,
+            end: count + 1,
+            parent: alloy_primitives::B256::ZERO.to_string(),
+            tip: alloy_primitives::B256::ZERO.to_string(),
+            first_tx: 0,
+            end_tx: count,
+        };
+        for start in 1..=count {
+            let record = Record {
+                start,
+                end: start + 1,
+                parent: [0; 32],
+                tip: [0; 32],
+                bytes: 2,
+                block_bytes: 1,
+                digest: String::new(),
+                transactions: 1,
+                gas: 1,
+                first_tx: start - 1,
+                cases: vec![store::CaseRecord { index: 0, bytes: 1, digest: String::new() }],
+            };
+            if missing != Some(start) {
+                db.put(store::metadata_key(start), serde_json::to_vec(&record)?).await?;
+            }
+            db.put(store::key(start), b"b").await?;
+            db.put(store::transaction_key(start - 1), b"t").await?;
+        }
+        let checkpoint =
+            db.create_checkpoint(CheckpointScope::All, &CheckpointOptions::default()).await?;
+        db.close().await?;
+        let reader = Arc::new(
+            DbReader::open(
+                "paged",
+                objects,
+                DbReaderMode::Checkpoint(checkpoint.id),
+                DbReaderOptions::default(),
+            )
+            .await?,
+        );
+        let catalog = Catalog {
+            context,
+            checkpoint: Some(checkpoint.id.to_string()),
+            cursor: store::Cursor { next: count + 1, tx: count, parent: [0; 32] },
+            records: Vec::new(),
+            complete: true,
+            generation: 1,
+        };
+        Ok((reader, catalog))
+    }
+
+    async fn drain_catalog(
+        reader: &Arc<DbReader>,
+        catalog: &Catalog,
+        range: Range<u64>,
+        standalone: Option<(u64, u64)>,
+    ) -> eyre::Result<((u64, u64, u64), Vec<u64>)> {
+        let budget = Arc::new(Semaphore::new(BYTE_BUDGET));
+        let (sender, receiver) = crossbeam_channel::bounded::<Ready>(4);
+        let consumer = tokio::task::spawn_blocking(move || {
+            let mut received = Vec::new();
+            for ready in receiver {
+                ready.space.notify_one();
+                assert_eq!(ready.bytes.as_ref(), b"b");
+                assert_eq!(ready.cases, vec![Bytes::from_static(b"t")]);
+                received.push(ready.record.start);
+            }
+            received.sort_unstable();
+            received
+        });
+        let result = feed_catalog(
+            reader,
+            catalog,
+            range,
+            standalone,
+            sender,
+            budget.clone(),
+            &CancellationToken::new(),
+        )
+        .await;
+        // Join the consumer on both success and error before inspecting permits.
+        let received = consumer.await?;
+        assert_eq!(budget.available_permits(), BYTE_BUDGET);
+        Ok((result?, received))
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn paged_catalog_ranges_and_failures() -> eyre::Result<()> {
+        tokio::time::timeout(Duration::from_secs(30), async {
+            let (reader, catalog) = paged_fixture(None).await?;
+            for (range, standalone) in [
+                (1..catalog.context.end, None),
+                (1..2, None),
+                (999..2001, None),
+                (999..2001, Some((999, 1999))),
+                (1..catalog.context.end, Some((2000, 2001))),
+            ] {
+                let (totals, received) =
+                    drain_catalog(&reader, &catalog, range.clone(), standalone).await?;
+                let expected: Vec<_> = range
+                    .filter(|start| {
+                        standalone.is_none_or(|(from, to)| *start > from && *start <= to)
+                    })
+                    .collect();
+                let count = expected.len() as u64;
+                assert_eq!(totals, (count, count, count));
+                assert_eq!(received, expected);
+            }
+            let mut corrupt = catalog.clone();
+            corrupt.cursor.parent = [1; 32];
+            let error =
+                drain_catalog(&reader, &corrupt, 1..catalog.context.end, None).await.unwrap_err();
+            assert_eq!(error.to_string(), "final metadata boundary mismatch");
+            reader.close().await?;
+
+            let (reader, catalog) = paged_fixture(Some(store::PAGE_RECORDS as u64 + 1)).await?;
+            let error =
+                drain_catalog(&reader, &catalog, 1..catalog.context.end, None).await.unwrap_err();
+            assert_eq!(error.to_string(), "metadata scan key/size mismatch");
+            reader.close().await?;
+            eyre::Ok(())
+        })
+        .await?
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn paged_catalog_cancellation_releases_reservations() -> eyre::Result<()> {
+        for missing in [None, Some(store::PAGE_RECORDS as u64 + 1)] {
+            let (reader, catalog) = paged_fixture(missing).await?;
+            let budget = Arc::new(Semaphore::new(128));
+            let token = CancellationToken::new();
+            let (sender, receiver) = crossbeam_channel::bounded::<Ready>(4);
+            let cancel = async {
+                while receiver.len() < 4 {
+                    tokio::task::yield_now().await;
+                }
+                token.cancel();
+            };
+            let (result, ()) = tokio::time::timeout(Duration::from_secs(10), async {
+                tokio::join!(
+                    feed_catalog(
+                        &reader,
+                        &catalog,
+                        1..catalog.context.end,
+                        None,
+                        sender,
+                        budget.clone(),
+                        &token
+                    ),
+                    cancel,
+                )
+            })
+            .await?;
+            assert_eq!(result.unwrap_err().to_string(), "corpus replay cancelled");
+            drop(receiver);
+            assert_eq!(budget.available_permits(), 128);
+            reader.close().await?;
+        }
+        Ok(())
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    #[ignore = "manual feeder microbenchmark; excludes EVM and remote object storage"]
+    async fn paged_catalog_feed_benchmark() -> eyre::Result<()> {
+        let (reader, catalog) = paged_fixture(None).await?;
+        for iteration in 0..12 {
+            let started = Instant::now();
+            let (totals, _) =
+                drain_catalog(&reader, &catalog, 1..catalog.context.end, None).await?;
+            assert_eq!(totals, (2001, 2001, 2001));
+            eprintln!(
+                "feed_bench iteration={iteration} seconds={:.6}",
+                started.elapsed().as_secs_f64()
+            );
         }
         reader.close().await?;
         Ok(())
