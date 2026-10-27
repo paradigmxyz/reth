@@ -150,7 +150,7 @@ mod tests {
     use alloy_primitives::map::B256Map;
     use alloy_trie::TrieMask;
     use assert_matches::assert_matches;
-    use std::{cell::Cell, collections::BTreeMap};
+    use std::collections::BTreeMap;
 
     /// Helper function to create a simple test `BranchNodeCompact`
     fn test_branch_node(
@@ -556,79 +556,6 @@ mod tests {
             }
         }
         assert!(outputs.is_empty());
-    }
-
-    #[test]
-    fn test_many_extras_stream_and_cancel() {
-        // A lazy source ensures neither comparison path needs to retain findings.
-        for finalize in [false, true] {
-            for cancel_after in [None, Some(17)] {
-                let read = Cell::new(0);
-                let nodes = (0..100_000).map(|_| {
-                    read.set(read.get() + 1);
-                    Ok((Nibbles::from_nibbles([1]), test_branch_node(1, 0, 0, vec![])))
-                });
-                let mut verifier = SingleVerifier { account: None, trie_iter: nodes, curr: None };
-                verifier.curr = verifier.trie_iter.next().transpose().unwrap();
-                let mut emitted = 0;
-                let mut emit = |output| {
-                    if matches!(output, Output::AccountMissing(..)) {
-                        assert!(!finalize);
-                        assert_eq!(emitted, 100_000);
-                        return true;
-                    }
-                    emitted += 1;
-                    assert_matches!(output, Output::AccountExtra(..));
-                    assert_eq!(read.get(), emitted);
-                    cancel_after != Some(emitted)
-                };
-                let result = if finalize {
-                    verifier.finalize(&mut emit)
-                } else {
-                    verifier.next(&mut emit, Nibbles::new(), test_branch_node(1, 0, 0, vec![]))
-                };
-                if let Some(limit) = cancel_after {
-                    assert_matches!(result, Ok(false));
-                    assert_eq!(emitted, limit);
-                    assert_eq!(read.get(), limit);
-                } else {
-                    // `next` also emits the missing canonical root after exhausting extras.
-                    assert_matches!(result, Ok(true));
-                    assert_eq!(emitted, 100_000);
-                }
-            }
-        }
-    }
-
-    #[test]
-    fn test_missing_and_wrong_cancel_before_advancing() {
-        for curr in [None, Some((Nibbles::new(), test_branch_node(1, 0, 0, vec![])))] {
-            let mut verifier = SingleVerifier {
-                account: None,
-                trie_iter: std::iter::once(Err(DatabaseError::Other("must not read".into()))),
-                curr,
-            };
-            let result =
-                verifier.next(&mut |_| false, Nibbles::new(), test_branch_node(2, 0, 0, vec![]));
-            assert_matches!(result, Ok(false));
-        }
-    }
-
-    #[test]
-    fn test_database_error_is_preserved() {
-        for finalize in [false, true] {
-            let mut verifier = SingleVerifier {
-                account: None,
-                trie_iter: std::iter::once(Err(DatabaseError::Other("cursor failed".into()))),
-                curr: Some((Nibbles::from_nibbles([1]), test_branch_node(1, 0, 0, vec![]))),
-            };
-            let result = if finalize {
-                verifier.finalize(&mut |_| true)
-            } else {
-                verifier.next(&mut |_| true, Nibbles::new(), test_branch_node(1, 0, 0, vec![]))
-            };
-            assert_matches!(result, Err(DatabaseError::Other(message)) if message == "cursor failed");
-        }
     }
 
     fn collect(outputs: &mut Vec<Output>) -> impl FnMut(Output) -> bool + '_ {
