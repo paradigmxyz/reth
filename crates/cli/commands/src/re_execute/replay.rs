@@ -14,7 +14,7 @@ use std::{
     time::{Duration, Instant},
 };
 use tokio::{
-    sync::{Notify, OwnedSemaphorePermit, Semaphore},
+    sync::{mpsc, Notify, OwnedSemaphorePermit, Semaphore},
     task::JoinSet,
 };
 use tracing::info;
@@ -215,49 +215,49 @@ where
 }
 
 /// Fetching owns serialized reservations until ownership moves to a worker.
-async fn feed(
+async fn feed_pages(
     reader: &Arc<DbReader>,
-    records: &[Record],
+    mut pages: mpsc::Receiver<Vec<Record>>,
+    tasks: &mut JoinSet<eyre::Result<()>>,
     sender: Sender<Ready>,
     budget: Arc<Semaphore>,
     cancellation: &CancellationToken,
 ) -> eyre::Result<()> {
-    let mut tasks = JoinSet::new();
     let space = Arc::new(Notify::new());
-    let mut records = records.iter().cloned().peekable();
+    let mut records = Vec::<Record>::new().into_iter().peekable();
+    let mut closed = false;
     // Reserve whole read batches before opening scans, then transfer exact byte
     // permits to individual ready records. No task acquires a second reservation
     // while retaining its first, including when a record fills the entire budget.
     let batch_limit = budget.available_permits().min(8 * 1024 * 1024);
-    let result = async {
-        loop {
-            eyre::ensure!(!cancellation.is_cancelled(), "corpus replay cancelled");
-            while tasks.len() < 64 {
-                let Some(record) = records.next() else { break };
-                let mut bytes = record.bytes;
-                let mut batch = vec![record];
-                while batch.len() < 512 {
-                    let Some(next) = records.peek() else { break };
-                    if next.start != batch.last().expect("nonempty batch").end ||
-                        bytes + next.bytes > batch_limit
-                    {
-                        break;
-                    }
-                    bytes += next.bytes;
-                    batch.push(records.next().expect("peeked record"));
+    loop {
+        eyre::ensure!(!cancellation.is_cancelled(), "corpus replay cancelled");
+        while tasks.len() < 64 {
+            let Some(record) = records.next() else { break };
+            let mut bytes = record.bytes;
+            let mut batch = vec![record];
+            while batch.len() < 1000 {
+                let Some(next) = records.peek() else { break };
+                if next.start != batch.last().expect("nonempty batch").end ||
+                    bytes + next.bytes > batch_limit
+                {
+                    break;
                 }
-                let sender = sender.clone();
-                let reader = reader.clone();
-                let budget = budget.clone();
-                let space = space.clone();
-                tasks.spawn(async move {
+                bytes += next.bytes;
+                batch.push(records.next().expect("peeked record"));
+            }
+            let sender = sender.clone();
+            let reader = reader.clone();
+            let budget = budget.clone();
+            let space = space.clone();
+            tasks.spawn(async move {
                     let waiting = Instant::now();
                     let mut reservation = budget.acquire_many_owned(bytes as u32).await?;
                     let budget_wait = waiting.elapsed();
                     let mut queue_wait = Duration::ZERO;
                     // Per-scan read-ahead belongs to SlateDB's additional memory,
                     // not the serialized-record reservation above.
-                    let options = ScanOptions::default().with_read_ahead_bytes(4 * 1024 * 1024);
+                    let options = ScanOptions::default().with_read_ahead_bytes(1024 * 1024);
                     let first = batch.first().expect("nonempty batch");
                     let last = batch.last().expect("nonempty batch");
                     let tx_end = last.first_tx + last.transactions;
@@ -329,21 +329,23 @@ async fn feed(
                     tracing::debug!(target: "reth::corpus::feed", budget_us = budget_wait.as_micros() as u64, queue_us = queue_wait.as_micros() as u64, bytes, "Producer waits (overlap across tasks)");
                     Ok(())
                 });
+        }
+        if closed && records.peek().is_none() && tasks.is_empty() {
+            return Ok(());
+        }
+        tokio::select! {
+            result = tasks.join_next(), if !tasks.is_empty() => {
+                result.expect("nonempty reader tasks")??;
             }
-            if tasks.is_empty() {
-                return eyre::Ok(());
+            page = pages.recv(), if !closed && records.peek().is_none() && tasks.len() < 64 => {
+                match page {
+                    Some(page) => records = page.into_iter().peekable(),
+                    None => closed = true,
+                }
             }
-            tokio::select! {
-                result = tasks.join_next() => { result.expect("nonempty reader tasks")??; }
-                _ = tokio::time::sleep(Duration::from_millis(25)) => {}
-            }
+            _ = tokio::time::sleep(Duration::from_millis(25)) => {}
         }
     }
-    .await;
-    // Abort and join failed/cancelled reads before closing the pinned reader.
-    tasks.shutdown().await;
-    drop(sender);
-    result
 }
 
 /// Locate independent cases without walking all preceding block metadata.
@@ -389,7 +391,29 @@ async fn feed_catalog(
     budget: Arc<Semaphore>,
     cancellation: &CancellationToken,
 ) -> eyre::Result<(u64, u64, u64)> {
-    let mut cursor = if range.start == catalog.context.start {
+    // One pool spans the entire range, so a slow payload batch cannot stall
+    // unrelated reads at a metadata page boundary.
+    let mut tasks = JoinSet::new();
+    let (pages, receiver) = mpsc::channel(1);
+    let result = tokio::try_join!(
+        read_catalog(reader, catalog, range, standalone, pages, cancellation),
+        feed_pages(reader, receiver, &mut tasks, sender, budget, cancellation),
+    );
+    // The sibling future is dropped on error. Abort and join its payload tasks
+    // before the caller closes the pinned reader, preserving the original error.
+    tasks.shutdown().await;
+    result.map(|(totals, ())| totals)
+}
+
+async fn read_catalog(
+    reader: &Arc<DbReader>,
+    catalog: &Catalog,
+    range: Range<u64>,
+    standalone: Option<(u64, u64)>,
+    pages: mpsc::Sender<Vec<Record>>,
+    cancellation: &CancellationToken,
+) -> eyre::Result<(u64, u64, u64)> {
+    let cursor = if range.start == catalog.context.start {
         store::Cursor::initial(&catalog.context)?
     } else {
         let previous = store::metadata(reader, range.start - 1).await?;
@@ -400,10 +424,13 @@ async fn feed_catalog(
     };
     let initial_tx = cursor.tx;
     let mut totals = (0, 0, 0);
-    eyre::ensure!(!cancellation.is_cancelled(), "metadata read cancelled");
-    let mut page = store::read_page(reader, &mut cursor, range.end).await?;
-    while !page.is_empty() {
+    let mut metadata = store::MetadataPages::open(reader, cursor, range.end).await?;
+    while metadata.cursor.next < range.end {
+        // Reserve before reading: only one queued/in-progress metadata page,
+        // in addition to the current page and descriptors owned by bounded tasks.
+        let slot = pages.reserve().await?;
         eyre::ensure!(!cancellation.is_cancelled(), "metadata read cancelled");
+        let mut page = metadata.next_page().await?;
         if let Some((from, to)) = standalone {
             page.retain(|r| {
                 r.transactions > 0 && r.first_tx < to && r.first_tx + r.transactions > from
@@ -416,22 +443,10 @@ async fn feed_catalog(
             });
             totals.2 += record.gas;
         }
-        // Keep just one metadata page ahead of the current payload reads. Test
-        // emptiness before filtering: a standalone range may skip an entire page.
-        let (fed, next) = tokio::join!(
-            feed(reader, &page, sender.clone(), budget.clone(), cancellation),
-            async {
-                if cursor.next == range.end {
-                    return Ok(Vec::new());
-                }
-                eyre::ensure!(!cancellation.is_cancelled(), "metadata read cancelled");
-                store::read_page(reader, &mut cursor, range.end).await
-            }
-        );
-        // Finish feed's explicit abort/join cleanup even if metadata fails.
-        fed?;
-        page = next?;
+        // An empty filtered page is not EOF; standalone replay can skip pages.
+        slot.send(page);
     }
+    let cursor = metadata.cursor;
     if range.end == catalog.context.end {
         eyre::ensure!(cursor == catalog.cursor, "final metadata boundary mismatch");
     } else {
@@ -460,6 +475,22 @@ mod tests {
         config::{CheckpointOptions, CheckpointScope, DbReaderOptions},
         Db, DbReaderMode,
     };
+
+    async fn feed(
+        reader: &Arc<DbReader>,
+        records: &[Record],
+        sender: Sender<Ready>,
+        budget: Arc<Semaphore>,
+        cancellation: &CancellationToken,
+    ) -> eyre::Result<()> {
+        let (pages, receiver) = mpsc::channel(1);
+        pages.send(records.to_vec()).await?;
+        drop(pages);
+        let mut tasks = JoinSet::new();
+        let result = feed_pages(reader, receiver, &mut tasks, sender, budget, cancellation).await;
+        tasks.shutdown().await;
+        result
+    }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn slow_consumer_backpressure_cancellation_and_read_errors() -> eyre::Result<()> {
@@ -724,37 +755,169 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn paged_catalog_cancellation_releases_reservations() -> eyre::Result<()> {
-        for missing in [None, Some(store::PAGE_RECORDS as u64 + 1)] {
-            let (reader, catalog) = paged_fixture(missing).await?;
-            let budget = Arc::new(Semaphore::new(128));
-            let token = CancellationToken::new();
-            let (sender, receiver) = crossbeam_channel::bounded::<Ready>(4);
-            let cancel = async {
-                while receiver.len() < 4 {
-                    tokio::task::yield_now().await;
+        let (reader, catalog) = paged_fixture(None).await?;
+        let budget = Arc::new(Semaphore::new(8));
+        let token = CancellationToken::new();
+        let (sender, receiver) = crossbeam_channel::bounded::<Ready>(4);
+        let cancel = async {
+            while receiver.len() < 4 {
+                tokio::task::yield_now().await;
+            }
+            token.cancel();
+        };
+        let (result, ()) = tokio::time::timeout(Duration::from_secs(10), async {
+            tokio::join!(
+                feed_catalog(
+                    &reader,
+                    &catalog,
+                    1..catalog.context.end,
+                    None,
+                    sender,
+                    budget.clone(),
+                    &token
+                ),
+                cancel,
+            )
+        })
+        .await?;
+        // Either sibling may observe cancellation first.
+        assert!(matches!(
+            result.unwrap_err().to_string().as_str(),
+            "corpus replay cancelled" | "metadata read cancelled"
+        ));
+        drop(receiver);
+        assert_eq!(budget.available_permits(), 8);
+        reader.close().await?;
+        Ok(())
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn metadata_error_releases_payload_reservations() -> eyre::Result<()> {
+        let (reader, catalog) = paged_fixture(Some(store::PAGE_RECORDS as u64 + 1)).await?;
+        let budget = Arc::new(Semaphore::new(128));
+        let (sender, receiver) = crossbeam_channel::bounded::<Ready>(4);
+        let result = tokio::time::timeout(
+            Duration::from_secs(10),
+            feed_catalog(
+                &reader,
+                &catalog,
+                1..catalog.context.end,
+                None,
+                sender,
+                budget.clone(),
+                &CancellationToken::new(),
+            ),
+        )
+        .await?;
+        assert_eq!(result.unwrap_err().to_string(), "metadata scan key/size mismatch");
+        drop(receiver);
+        assert_eq!(budget.available_permits(), 128);
+        reader.close().await?;
+        Ok(())
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn next_page_does_not_wait_for_older_payload_tasks() -> eyre::Result<()> {
+        let (reader, catalog) = paged_fixture(None).await?;
+        let budget = Arc::new(Semaphore::new(BYTE_BUDGET));
+        let token = CancellationToken::new();
+        let (sender, receiver) = crossbeam_channel::bounded::<Ready>(4);
+        let (release, gate) = tokio::sync::oneshot::channel();
+        let mut tasks = JoinSet::new();
+        // Model a lingering payload task from an earlier page. Page two must
+        // arrive before it can finish, not merely overlap metadata fetching.
+        tasks.spawn(async move {
+            gate.await?;
+            Ok(())
+        });
+        let consumer = tokio::task::spawn_blocking(move || {
+            let mut release = Some(release);
+            let mut seen = Vec::new();
+            for ready in receiver {
+                ready.space.notify_one();
+                if ready.record.start > store::PAGE_RECORDS as u64 &&
+                    let Some(release) = release.take()
+                {
+                    let _ = release.send(());
                 }
-                token.cancel();
-            };
-            let (result, ()) = tokio::time::timeout(Duration::from_secs(10), async {
-                tokio::join!(
-                    feed_catalog(
-                        &reader,
-                        &catalog,
-                        1..catalog.context.end,
-                        None,
-                        sender,
-                        budget.clone(),
-                        &token
-                    ),
-                    cancel,
-                )
-            })
-            .await?;
-            assert_eq!(result.unwrap_err().to_string(), "corpus replay cancelled");
-            drop(receiver);
-            assert_eq!(budget.available_permits(), 128);
-            reader.close().await?;
+                seen.push(ready.record.start);
+            }
+            seen.sort_unstable();
+            seen
+        });
+        let (pages, receiver) = mpsc::channel(1);
+        let result = tokio::time::timeout(Duration::from_secs(10), async {
+            tokio::try_join!(
+                read_catalog(&reader, &catalog, 1..catalog.context.end, None, pages, &token),
+                feed_pages(&reader, receiver, &mut tasks, sender, budget.clone(), &token),
+            )
+        })
+        .await;
+        tasks.shutdown().await;
+        let seen = consumer.await?;
+        assert_eq!(result??.0, (2001, 2001, 2001));
+        assert_eq!(seen, (1..catalog.context.end).collect::<Vec<_>>());
+        assert_eq!(budget.available_permits(), BYTE_BUDGET);
+        reader.close().await?;
+        Ok(())
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn full_reader_pool_leaves_next_page_queued() -> eyre::Result<()> {
+        let (reader, _) = paged_fixture(None).await?;
+        let budget = Arc::new(Semaphore::new(BYTE_BUDGET));
+        let token = CancellationToken::new();
+        let (sender, receiver) = crossbeam_channel::bounded::<Ready>(4);
+        let (pages, input) = mpsc::channel(1);
+        pages.send(vec![store::metadata(&reader, 1).await?]).await?;
+        let mut tasks = JoinSet::new();
+        for _ in 0..64 {
+            tasks.spawn(std::future::pending::<eyre::Result<()>>());
         }
+        let mut feeding =
+            Box::pin(feed_pages(&reader, input, &mut tasks, sender, budget.clone(), &token));
+        // Poll once with a full pool. A 65th task must not be admitted, and the
+        // next metadata page must stay queued rather than grow a pending list.
+        std::future::poll_fn(|cx| {
+            assert!(std::future::Future::poll(feeding.as_mut(), cx).is_pending());
+            std::task::Poll::Ready(())
+        })
+        .await;
+        assert_eq!(pages.capacity(), 0);
+        assert!(receiver.is_empty());
+        drop(feeding);
+        assert_eq!(tasks.len(), 64);
+        tasks.shutdown().await;
+        assert_eq!(budget.available_permits(), BYTE_BUDGET);
+        reader.close().await?;
+        Ok(())
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn cancellation_while_waiting_for_first_page() -> eyre::Result<()> {
+        let (reader, _) = paged_fixture(None).await?;
+        let budget = Arc::new(Semaphore::new(BYTE_BUDGET));
+        let token = CancellationToken::new();
+        let (sender, receiver) = crossbeam_channel::bounded::<Ready>(4);
+        let (pages, input) = mpsc::channel(1);
+        let mut tasks = JoinSet::new();
+        let result = tokio::time::timeout(Duration::from_secs(10), async {
+            tokio::join!(
+                feed_pages(&reader, input, &mut tasks, sender, budget.clone(), &token),
+                async {
+                    tokio::task::yield_now().await;
+                    token.cancel();
+                },
+            )
+            .0
+        })
+        .await;
+        tasks.shutdown().await;
+        assert_eq!(result?.unwrap_err().to_string(), "corpus replay cancelled");
+        assert!(receiver.is_empty());
+        assert_eq!(budget.available_permits(), BYTE_BUDGET);
+        drop(pages);
+        reader.close().await?;
         Ok(())
     }
 

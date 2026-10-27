@@ -488,27 +488,53 @@ pub(super) async fn read_page(
     cursor: &mut Cursor,
     end: u64,
 ) -> eyre::Result<Vec<Record>> {
-    let options = slatedb::config::ScanOptions::default().with_read_ahead_bytes(1024 * 1024);
-    let mut scan =
-        reader.scan_with_options(metadata_key(cursor.next)..metadata_key(end), &options).await?;
-    let mut records = Vec::new();
-    let mut bytes = 0;
-    while cursor.next < end && records.len() < PAGE_RECORDS && bytes < 8 * 1024 * 1024 {
-        let entry =
-            scan.next().await?.ok_or_else(|| eyre::eyre!("metadata gap at {}", cursor.next))?;
-        eyre::ensure!(
-            entry.key.as_ref() == metadata_key(cursor.next) && entry.value.len() <= BYTE_BUDGET,
-            "metadata scan key/size mismatch"
-        );
-        bytes += entry.value.len();
-        let record = serde_json::from_slice(&entry.value)?;
-        cursor.advance(&record)?;
-        records.push(record);
-    }
-    if cursor.next == end {
-        eyre::ensure!(scan.next().await?.is_none(), "extra metadata record");
-    }
+    let mut pages = MetadataPages::open(reader, cursor.clone(), end).await?;
+    let records = pages.next_page().await?;
+    *cursor = pages.cursor;
     Ok(records)
+}
+
+/// One metadata scan over a whole range, read in bounded pages. Reopening a scan
+/// per page re-seeks the overlapping SSTs and serializes a fetch per page.
+pub(super) struct MetadataPages {
+    scan: slatedb::DbIterator,
+    pub cursor: Cursor,
+    end: u64,
+}
+
+impl MetadataPages {
+    pub(super) async fn open(reader: &DbReader, cursor: Cursor, end: u64) -> eyre::Result<Self> {
+        let options = slatedb::config::ScanOptions::default().with_read_ahead_bytes(1024 * 1024);
+        let scan = reader
+            .scan_with_options(metadata_key(cursor.next)..metadata_key(end), &options)
+            .await?;
+        Ok(Self { scan, cursor, end })
+    }
+
+    pub(super) async fn next_page(&mut self) -> eyre::Result<Vec<Record>> {
+        let (cursor, end) = (&mut self.cursor, self.end);
+        let mut records = Vec::new();
+        let mut bytes = 0;
+        while cursor.next < end && records.len() < PAGE_RECORDS && bytes < 8 * 1024 * 1024 {
+            let entry = self
+                .scan
+                .next()
+                .await?
+                .ok_or_else(|| eyre::eyre!("metadata gap at {}", cursor.next))?;
+            eyre::ensure!(
+                entry.key.as_ref() == metadata_key(cursor.next) && entry.value.len() <= BYTE_BUDGET,
+                "metadata scan key/size mismatch"
+            );
+            bytes += entry.value.len();
+            let record = serde_json::from_slice(&entry.value)?;
+            cursor.advance(&record)?;
+            records.push(record);
+        }
+        if cursor.next == end {
+            eyre::ensure!(self.scan.next().await?.is_none(), "extra metadata record");
+        }
+        Ok(records)
+    }
 }
 
 #[cfg(test)]
