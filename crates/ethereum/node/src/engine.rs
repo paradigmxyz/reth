@@ -103,6 +103,7 @@ mod tests {
     use alloy_primitives::{Address, Bytes, B256};
     use alloy_rpc_types_engine::{ExecutionPayload, ExecutionPayloadSidecar, ExecutionPayloadV4};
     use reth_ethereum_engine_primitives::EthEngineTypes;
+    use reth_primitives_traits::Block as _;
 
     fn payload_with_nonce_bump() -> ExecutionData {
         let account = AccountChanges {
