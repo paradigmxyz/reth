@@ -6,7 +6,9 @@ use crate::{
     helpers::estimate::EstimateCall, FromEvmError, FullEthApiTypes, RpcBlock, RpcNodeCore,
 };
 use alloy_consensus::{transaction::Transaction, BlockHeader};
-use alloy_eips::{eip1559::calc_effective_gas_price, eip2930::AccessListResult};
+use alloy_eips::{
+    eip1559::calc_effective_gas_price, eip2718::Typed2718, eip2930::AccessListResult,
+};
 use alloy_network::TransactionBuilder;
 use alloy_primitives::{Bytes, B256, U256};
 use alloy_rpc_types_eth::{
@@ -548,14 +550,25 @@ pub trait Call:
             .map(|account| account.balance)
             .unwrap_or_default();
         let value = tx_env.value();
-        let balance = balance.checked_sub(value).ok_or_else(|| {
-            EthApiError::from(RpcInvalidTransactionError::InsufficientFunds {
-                cost: value,
-                balance,
-            })
-        })?;
+        let blob_fee = if tx_env.is_eip4844() {
+            U256::from(tx_env.blob_gas_used().unwrap_or_default()) *
+                U256::from(tx_env.max_fee_per_blob_gas().unwrap_or_default())
+        } else {
+            U256::ZERO
+        };
+        // Reserve the maximum blob fee before allocating execution gas. Subtract separately so
+        // an overflowing value plus blob fee cannot become an affordable allowance.
+        let available = balance
+            .checked_sub(value)
+            .and_then(|remaining| remaining.checked_sub(blob_fee))
+            .ok_or_else(|| {
+                EthApiError::from(RpcInvalidTransactionError::InsufficientFunds {
+                    cost: value.saturating_add(blob_fee),
+                    balance,
+                })
+            })?;
 
-        Ok(balance
+        Ok(available
             .checked_div(U256::from(tx_env.effective_gas_price(None)))
             .unwrap_or_default()
             .saturating_to())
