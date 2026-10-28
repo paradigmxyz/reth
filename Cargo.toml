@@ -1,7 +1,7 @@
 [workspace.package]
 version = "2.5.2"
 edition = "2024"
-rust-version = "1.95"
+rust-version = "1.96"
 license = "MIT OR Apache-2.0"
 homepage = "https://paradigmxyz.github.io/reth"
 repository = "https://github.com/paradigmxyz/reth"
