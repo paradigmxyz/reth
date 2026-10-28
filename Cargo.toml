@@ -671,6 +671,13 @@ walkdir = "2.3.3"
 # networking
 ipnet = "2.11"
 
+# evm2 is patched through its pre-transfer URL, which redirects to alloy-rs/evm2, because Cargo
+# rejects a patch from the same source.
+# [patch."https://github.com/alloy-rs/evm2"]
+# evm2 = { git = "https://github.com/DaniPopes/evm2", rev = "f93318f120f6300599b21170d6c7bef81ed63d87" }
+# evm2-inspectors = { git = "https://github.com/DaniPopes/evm2", rev = "f93318f120f6300599b21170d6c7bef81ed63d87" }
+# evm2-jit = { git = "https://github.com/DaniPopes/evm2", rev = "f93318f120f6300599b21170d6c7bef81ed63d87" }
+
 [patch.crates-io]
 # LLVM 23 support is not released yet.
 inkwell = { git = "https://github.com/TheDan64/inkwell", rev = "c9d9734ae17dbaf1d9902dab3b8ee9d2041781ff" }
