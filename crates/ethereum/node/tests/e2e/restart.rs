@@ -9,19 +9,28 @@ use reth_e2e_test_utils::{
     wait::{poll_until, WAIT_TIMEOUT},
     E2ETestSetupExt,
 };
+use reth_engine_tree::backfill::{BackfillAction, BackfillEvent, BackfillSync};
 use reth_exex::ExExEvent;
 use reth_network::PeersInfo;
+use reth_node_builder::sync::{BackfillContext, BackfillSyncBuilder};
 use reth_node_ethereum::EthereumNode;
-use reth_provider::{BlockIdReader, BlockNumReader, DatabaseProviderFactory, HeaderProvider};
+use reth_provider::{
+    providers::ProviderNodeTypes, BlockIdReader, BlockNumReader, DatabaseProviderFactory,
+    HeaderProvider,
+};
+use reth_tasks::Runtime;
 use reth_transaction_pool::TransactionPool;
 use std::{
+    future::Future,
+    pin::Pin,
     sync::{
         atomic::{AtomicUsize, Ordering},
         Arc,
     },
+    task::{Context, Poll},
     time::Duration,
 };
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, Notify};
 
 /// A restarted node reopens the chain it persisted, reinserts its pending local transactions and
 /// builds on its head, with both storage layouts.
@@ -261,4 +270,95 @@ async fn restart_applies_node_factory_and_builder_modifiers() -> eyre::Result<()
     .await??;
 
     Ok(())
+}
+
+/// A fatal backfill event must terminate the engine thread even if other engine handles remain.
+#[tokio::test]
+async fn stop_releases_database_after_backfill_task_drops() -> eyre::Result<()> {
+    reth_tracing::init_test_tracing();
+
+    let fail = Arc::new(Notify::new());
+    let (mut node, _) = EthereumNode::test_setup_for(EthereumHardfork::Prague)
+        .with_restartable_nodes()
+        .with_backfill({
+            let fail = fail.clone();
+            move |_| DroppedBackfill(Box::pin(fail.clone().notified_owned()))
+        })
+        .build_single()
+        .await?;
+    // Keeping a sender alive prevents channel closure from terminating the engine implicitly.
+    let engine = node.engine.clone();
+    let exit = node.take_exit_future().expect("the node has an exit future");
+    fail.notify_one();
+    let err = tokio::time::timeout(WAIT_TIMEOUT, exit).await?.unwrap_err();
+    assert_eq!(err.to_string(), "Fatal error in consensus engine");
+
+    node.stop().await?;
+    drop(engine);
+    Ok(())
+}
+
+/// Backfill cancellation after the shutdown branch was polled must still exit successfully.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn shutdown_cancelling_backfill_exits_cleanly() -> eyre::Result<()> {
+    reth_tracing::init_test_tracing();
+
+    let runtime = Runtime::test();
+    let cancel = Arc::new(Notify::new());
+    let (mut node, _) = EthereumNode::test_setup_for(EthereumHardfork::Prague)
+        .with_runtime(runtime.clone())
+        .with_backfill({
+            let runtime = runtime.clone();
+            let cancel = cancel.clone();
+            move |_| {
+                let runtime = runtime.clone();
+                let cancel = cancel.clone();
+                DroppedBackfill(Box::pin(async move {
+                    cancel.notified().await;
+                    // Fire shutdown during this backfill poll, without returning Pending to the
+                    // select. The task manager runs on another worker while this one is blocked.
+                    tokio::task::block_in_place(|| {
+                        runtime.handle().block_on(async {
+                            drop(
+                                tokio::time::timeout(
+                                    WAIT_TIMEOUT,
+                                    runtime.initiate_graceful_shutdown().unwrap(),
+                                )
+                                .await
+                                .unwrap(),
+                            );
+                        });
+                    });
+                }))
+            }
+        })
+        .build_single()
+        .await?;
+    let exit = node.take_exit_future().expect("the node has an exit future");
+    cancel.notify_one();
+    tokio::time::timeout(WAIT_TIMEOUT, exit).await??;
+    assert!(
+        tokio::task::spawn_blocking(move || runtime.graceful_shutdown_with_timeout(WAIT_TIMEOUT))
+            .await?
+    );
+    Ok(())
+}
+
+// Emits a dropped-task event when the supplied future completes.
+struct DroppedBackfill(Pin<Box<dyn Future<Output = ()> + Send>>);
+
+impl<N: ProviderNodeTypes, C> BackfillSyncBuilder<N, C> for DroppedBackfill {
+    type Backfill = Self;
+
+    fn build(self, _ctx: BackfillContext<N, C>) -> eyre::Result<Self::Backfill> {
+        Ok(self)
+    }
+}
+
+impl BackfillSync for DroppedBackfill {
+    fn on_action(&mut self, _action: BackfillAction) {}
+
+    fn poll(&mut self, cx: &mut Context<'_>) -> Poll<BackfillEvent> {
+        self.0.as_mut().poll(cx).map(|()| BackfillEvent::TaskDropped("channel closed".into()))
+    }
 }
