@@ -912,6 +912,9 @@ impl From<Genesis> for ChainSpec {
         // append the remaining unknown hardforks to ensure we don't filter any out
         ordered_hardforks.append(&mut hardforks);
 
+        // timestamp forks must be ordered by activation, regardless of their mainnet order
+        ordered_hardforks.sort_by_key(|(_, condition)| condition.as_timestamp());
+
         // Extract blob parameters directly from blob_schedule
         let blob_params = genesis.config.blob_schedule_blob_params();
 
@@ -3039,5 +3042,46 @@ Post-merge hard forks (timestamp based):
                 fork_block: None,
             }
         )
+    }
+
+    #[test]
+    fn genesis_timestamp_forks_are_ordered_by_activation() {
+        let s = r#"{
+            "config": {
+                "chainId": 1337,
+                "homesteadBlock": 0,
+                "eip150Block": 0,
+                "eip155Block": 0,
+                "eip158Block": 0,
+                "byzantiumBlock": 0,
+                "constantinopleBlock": 0,
+                "petersburgBlock": 0,
+                "istanbulBlock": 0,
+                "berlinBlock": 0,
+                "londonBlock": 0,
+                "terminalTotalDifficulty": 0,
+                "shanghaiTime": 0,
+                "cancunTime": 0,
+                "pragueTime": 0,
+                "osakaTime": 0,
+                "amsterdamTime": 100,
+                "bpo3Time": 200
+            },
+            "timestamp": "0x0",
+            "gasLimit": "0x1388",
+            "difficulty": "0x0",
+            "alloc": {}
+        }"#;
+        let chainspec = ChainSpec::from_genesis(serde_json::from_str::<Genesis>(s).unwrap());
+        let genesis = ForkHash::from(chainspec.genesis_hash());
+
+        let head = Head { timestamp: 150, ..Default::default() };
+        assert_eq!(chainspec.fork_id(&head), ForkId { hash: genesis + 100u64, next: 200 });
+        assert_eq!(chainspec.fork_id(&head), chainspec.fork_filter(head).current());
+
+        let head = Head { timestamp: 250, ..Default::default() };
+        assert_eq!(chainspec.fork_id(&head), ForkId { hash: genesis + 100u64 + 200u64, next: 0 });
+        assert_eq!(chainspec.fork_id(&head), chainspec.fork_filter(head).current());
+        assert_eq!(chainspec.hardforks.last().unwrap().0.name(), EthereumHardfork::Bpo3.name());
     }
 }
