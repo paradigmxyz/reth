@@ -26,7 +26,7 @@ use std::{
     ops::{Deref, Range},
     path::{Path, PathBuf},
     sync::Arc,
-    time::{SystemTime, UNIX_EPOCH},
+    time::{Duration, SystemTime, UNIX_EPOCH},
 };
 use tracing::error;
 use tx::Tx;
@@ -53,6 +53,17 @@ const DEFAULT_MAX_READERS: u64 = 32_000;
 /// Space that a read-only transaction can occupy until the warning is emitted.
 /// See [`reth_libmdbx::EnvironmentBuilder::set_handle_slow_readers`] for more information.
 const MAX_SAFE_READER_SPACE: usize = 10 * GIGABYTE;
+
+/// Longest time a [`SyncMode::SafeNoSync`] or [`SyncMode::UtterlyNoSync`] environment goes
+/// without a steady (synced) commit.
+///
+/// Commits in these modes are weak. After an unclean shutdown on a new boot (host reboot or power
+/// loss) MDBX discards all weak commits and rolls back to the last steady one, while static files
+/// and `RocksDB` sync on every commit and stay ahead. Without a period, steady commits only happen
+/// on a clean close or when the file fills up, so the rollback can span days and land below data
+/// that static file pruning already deleted, which startup healing cannot repair. MDBX checks the
+/// period on each commit.
+const NON_DURABLE_SYNC_PERIOD: Duration = Duration::from_secs(60);
 
 /// Environment used when opening a MDBX environment. RO/RW.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -114,8 +125,8 @@ pub struct DatabaseArguments {
     ///   considered committed.   This provides the highest level of durability and crash safety
     ///   but may have a performance cost.
     /// - [`SyncMode::SafeNoSync`]: Skips certain fsync operations to improve write performance.
-    ///   This mode still maintains database integrity but may lose the most recent transactions if
-    ///   the system crashes unexpectedly.
+    ///   This mode still maintains database integrity but may lose the transactions committed
+    ///   within the last [`NON_DURABLE_SYNC_PERIOD`] if the system crashes unexpectedly.
     ///
     /// Choose `Durable` if consistency and crash safety are critical (e.g., production
     /// environments). Choose `SafeNoSync` if performance is more important and occasional data
@@ -449,6 +460,9 @@ impl DatabaseEnv {
             DatabaseEnvKind::RW => {
                 // enable writemap mode in RW mode
                 inner_env.write_map();
+                if matches!(args.sync_mode, SyncMode::SafeNoSync | SyncMode::UtterlyNoSync) {
+                    inner_env.set_sync_period(NON_DURABLE_SYNC_PERIOD);
+                }
                 Mode::ReadWrite { sync_mode: args.sync_mode }
             }
         };
@@ -1752,5 +1766,30 @@ mod tests {
         let tx = env.tx().expect(ERROR_INIT_TX);
         assert_eq!(tx.get::<CustomTable>(1).expect(ERROR_GET), Some(2));
         assert_eq!(tx.get::<CustomTable>(3).expect(ERROR_GET), Some(4));
+    }
+
+    #[test]
+    fn non_durable_sync_period() {
+        let sync_period = |sync_mode| {
+            let tempdir = tempfile::TempDir::new().expect(ERROR_TEMPDIR);
+            let env = DatabaseEnv::open(
+                tempdir.path(),
+                DatabaseEnvKind::RW,
+                DatabaseArguments::test().with_sync_mode(Some(sync_mode)),
+            )
+            .expect(ERROR_DB_CREATION);
+            let mut period = 0;
+            // SAFETY: the pointer is only used within the closure, while `env` is open.
+            let rc = env.with_raw_env_ptr(|env| unsafe {
+                ffi::mdbx_env_get_option(env, ffi::MDBX_opt_sync_period, &raw mut period)
+            });
+            assert_eq!(rc, ffi::MDBX_SUCCESS);
+            // MDBX reports the period in 1/65536 of a second.
+            Duration::from_secs_f64(period as f64 / 65536.0)
+        };
+
+        assert_eq!(sync_period(SyncMode::Durable), Duration::ZERO);
+        assert_eq!(sync_period(SyncMode::SafeNoSync), NON_DURABLE_SYNC_PERIOD);
+        assert_eq!(sync_period(SyncMode::UtterlyNoSync), NON_DURABLE_SYNC_PERIOD);
     }
 }
