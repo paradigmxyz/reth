@@ -156,6 +156,9 @@ pub enum NewPayloadError {
     /// Payload validation error.
     #[error(transparent)]
     Eth(#[from] PayloadError),
+    /// Supplemental block access list bytes could not be decoded.
+    #[error("failed to decode block access list: {0}")]
+    BlockAccessListDecode(alloy_rlp::Error),
     /// Custom payload validation error.
     #[error(transparent)]
     Other(Box<dyn error::Error + Send + Sync>),
@@ -178,6 +181,12 @@ impl NewPayloadError {
     #[inline]
     pub const fn is_invalid_versioned_hashes(&self) -> bool {
         matches!(self, Self::Eth(PayloadError::InvalidVersionedHashes))
+    }
+
+    /// Returns `true` if the supplemental block access list could not be decoded.
+    #[inline]
+    pub const fn is_block_access_list_decode(&self) -> bool {
+        matches!(self, Self::BlockAccessListDecode(_))
     }
 }
 
