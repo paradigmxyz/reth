@@ -438,9 +438,9 @@ reth-trie-sparse = { path = "crates/trie/sparse", default-features = false }
 reth-zstd-compressors = { version = "0.8.2", default-features = false }
 
 # evm2
-evm2 = { git = "https://github.com/alloy-rs/evm2", rev = "4a53ec080dfbb904e98e3ca8f0abcc11ab8abae0", default-features = false }
-evm2-inspectors = { git = "https://github.com/alloy-rs/evm2", rev = "4a53ec080dfbb904e98e3ca8f0abcc11ab8abae0", default-features = false }
-evm2-jit = { git = "https://github.com/alloy-rs/evm2", rev = "4a53ec080dfbb904e98e3ca8f0abcc11ab8abae0", default-features = false }
+evm2 = { git = "https://github.com/alloy-rs/evm2", rev = "f93318f120f6300599b21170d6c7bef81ed63d87", default-features = false }
+evm2-inspectors = { git = "https://github.com/alloy-rs/evm2", rev = "f93318f120f6300599b21170d6c7bef81ed63d87", default-features = false }
+evm2-jit = { git = "https://github.com/alloy-rs/evm2", rev = "f93318f120f6300599b21170d6c7bef81ed63d87", default-features = false }
 
 # eth
 alloy-dyn-abi = "1.6.1"
@@ -673,18 +673,18 @@ ipnet = "2.11"
 
 # evm2 is patched through its pre-transfer URL, which redirects to alloy-rs/evm2, because Cargo
 # rejects a patch from the same source.
-[patch."https://github.com/alloy-rs/evm2"]
-evm2 = { git = "https://github.com/DaniPopes/evm2", rev = "4a53ec080dfbb904e98e3ca8f0abcc11ab8abae0" }
-evm2-inspectors = { git = "https://github.com/DaniPopes/evm2", rev = "4a53ec080dfbb904e98e3ca8f0abcc11ab8abae0" }
-evm2-jit = { git = "https://github.com/DaniPopes/evm2", rev = "4a53ec080dfbb904e98e3ca8f0abcc11ab8abae0" }
+# [patch."https://github.com/alloy-rs/evm2"]
+# evm2 = { git = "https://github.com/DaniPopes/evm2", rev = "f93318f120f6300599b21170d6c7bef81ed63d87" }
+# evm2-inspectors = { git = "https://github.com/DaniPopes/evm2", rev = "f93318f120f6300599b21170d6c7bef81ed63d87" }
+# evm2-jit = { git = "https://github.com/DaniPopes/evm2", rev = "f93318f120f6300599b21170d6c7bef81ed63d87" }
 
 [patch.crates-io]
 # LLVM 23 support is not released yet.
 inkwell = { git = "https://github.com/TheDan64/inkwell", rev = "c9d9734ae17dbaf1d9902dab3b8ee9d2041781ff" }
 
 # reth-core
-reth-codecs = { git = "https://github.com/paradigmxyz/reth-core", rev = "33bfe6e8b7bacc4f2e464497262ee3f87c6c86ce" }
-reth-codecs-derive = { git = "https://github.com/paradigmxyz/reth-core", rev = "33bfe6e8b7bacc4f2e464497262ee3f87c6c86ce" }
-reth-primitives-traits = { git = "https://github.com/paradigmxyz/reth-core", rev = "33bfe6e8b7bacc4f2e464497262ee3f87c6c86ce" }
-reth-rpc-traits = { git = "https://github.com/paradigmxyz/reth-core", rev = "33bfe6e8b7bacc4f2e464497262ee3f87c6c86ce" }
-reth-zstd-compressors = { git = "https://github.com/paradigmxyz/reth-core", rev = "33bfe6e8b7bacc4f2e464497262ee3f87c6c86ce" }
+reth-codecs = { git = "https://github.com/paradigmxyz/reth-core", rev = "275ce4cf5befeb9f1e8acd935ff2882d2d25fc61" }
+reth-codecs-derive = { git = "https://github.com/paradigmxyz/reth-core", rev = "275ce4cf5befeb9f1e8acd935ff2882d2d25fc61" }
+reth-primitives-traits = { git = "https://github.com/paradigmxyz/reth-core", rev = "275ce4cf5befeb9f1e8acd935ff2882d2d25fc61" }
+reth-rpc-traits = { git = "https://github.com/paradigmxyz/reth-core", rev = "275ce4cf5befeb9f1e8acd935ff2882d2d25fc61" }
+reth-zstd-compressors = { git = "https://github.com/paradigmxyz/reth-core", rev = "275ce4cf5befeb9f1e8acd935ff2882d2d25fc61" }

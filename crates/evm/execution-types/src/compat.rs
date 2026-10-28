@@ -405,6 +405,7 @@ mod tests {
                 current: Some(&updated),
                 created: false,
                 selfdestructed: false,
+                touched: false,
                 code: None,
                 storage: &StorageOverlay::default(),
             },
@@ -448,6 +449,7 @@ mod tests {
                     current: Some(&info),
                     created: false,
                     selfdestructed: false,
+                    touched: false,
                     code: None,
                     storage: &storage,
                 }
@@ -458,6 +460,7 @@ mod tests {
                     current: (step == 3 || step == 4).then_some(&info),
                     created: step == 3,
                     selfdestructed: step != 3,
+                    touched: false,
                     code: (step == 3).then(|| (code.hash_slow(), &code)),
                     storage: &storage,
                 }
@@ -470,6 +473,7 @@ mod tests {
                 current: Some(&info),
                 created: false,
                 selfdestructed: false,
+                touched: false,
                 code: None,
                 storage: &empty,
             };
