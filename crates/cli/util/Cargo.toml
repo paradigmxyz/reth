@@ -30,6 +30,7 @@ reth-tracing = { workspace = true, optional = true }
 
 [dev-dependencies]
 rand.workspace = true
+tempfile.workspace = true
 
 [target.'cfg(unix)'.dependencies]
 tikv-jemalloc-sys = { workspace = true, optional = true }

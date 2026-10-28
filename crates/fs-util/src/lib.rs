@@ -242,6 +242,36 @@ pub fn write(path: impl AsRef<Path>, contents: impl AsRef<[u8]>) -> Result<()> {
     fs::write(path, contents).map_err(|err| FsPathError::write(err, path))
 }
 
+/// Writes `contents` to `path`, restricting the file to its owner on Unix.
+///
+/// On Unix the file is created with mode `0o600`, and an existing file is tightened to that mode
+/// before the new contents are written. This is intended for secret material such as node keys and
+/// JWTs. On other platforms this is equivalent to [`write`].
+pub fn write_private(path: impl AsRef<Path>, contents: impl AsRef<[u8]>) -> Result<()> {
+    let path = path.as_ref();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+
+        let mut file = OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .mode(0o600)
+            .open(path)
+            .map_err(|err| FsPathError::write(err, path))?;
+        // `mode` only applies when creating the file. Tighten an existing file before writing the
+        // secret so its contents are never exposed through the previous permissions.
+        file.set_permissions(fs::Permissions::from_mode(0o600))
+            .map_err(|err| FsPathError::write(err, path))?;
+        file.write_all(contents.as_ref()).map_err(|err| FsPathError::write(err, path))
+    }
+    #[cfg(not(unix))]
+    {
+        fs::write(path, contents).map_err(|err| FsPathError::write(err, path))
+    }
+}
+
 /// Wrapper for `std::fs::remove_dir_all`
 pub fn remove_dir_all(path: impl AsRef<Path>) -> Result<()> {
     let path = path.as_ref();
@@ -367,4 +397,50 @@ where
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn write_private_writes_contents() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("secret");
+
+        write_private(&path, b"secret").unwrap();
+
+        assert_eq!(fs::read(&path).unwrap(), b"secret");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn write_private_creates_owner_only_file() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("secret");
+
+        write_private(&path, b"secret").unwrap();
+
+        let mode = fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o600);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn write_private_tightens_existing_file() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("secret");
+        fs::write(&path, b"old").unwrap();
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o644)).unwrap();
+
+        write_private(&path, b"new").unwrap();
+
+        let mode = fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o600);
+        assert_eq!(fs::read(&path).unwrap(), b"new");
+    }
 }

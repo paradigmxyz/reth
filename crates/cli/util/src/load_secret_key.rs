@@ -38,7 +38,7 @@ pub enum SecretKeyError {
 
 /// Attempts to load a [`SecretKey`] from a specified path. If no file exists there, then it
 /// generates a secret key and stores it in the provided path. I/O errors might occur during write
-/// operations in the form of a [`SecretKeyError`]
+/// operations in the form of a [`SecretKeyError`]. Newly created key files are owner-only on Unix.
 pub fn get_secret_key(secret_key_path: &Path) -> Result<SecretKey, SecretKeyError> {
     let exists = secret_key_path.try_exists();
 
@@ -55,7 +55,7 @@ pub fn get_secret_key(secret_key_path: &Path) -> Result<SecretKey, SecretKeyErro
 
             let secret = rng_secret_key();
             let hex = alloy_primitives::hex::encode(secret.as_ref());
-            fs::write(secret_key_path, hex)?;
+            fs::write_private(secret_key_path, hex)?;
             Ok(secret)
         }
         Err(error) => Err(SecretKeyError::FailedToAccessKeyFile {
@@ -134,5 +134,29 @@ mod tests {
         let hex = "";
         let result = parse_secret_key_from_hex(hex);
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_get_secret_key_roundtrip() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("discovery-secret");
+
+        let secret = get_secret_key(&path).unwrap();
+
+        assert_eq!(get_secret_key(&path).unwrap(), secret);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn test_get_secret_key_creates_owner_only_file() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("discovery-secret");
+
+        get_secret_key(&path).unwrap();
+
+        let mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o600);
     }
 }
