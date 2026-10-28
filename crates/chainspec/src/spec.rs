@@ -110,6 +110,17 @@ pub fn make_genesis_header(genesis: &Genesis, hardforks: &ChainHardforks) -> Hea
     }
 }
 
+/// Returns the Ethereum mainnet blob schedule: the Cancun, Prague and Osaka parameters and the
+/// scheduled BPO forks.
+///
+/// Unlike reading it from [`MAINNET`], this does not parse the mainnet genesis.
+pub fn mainnet_blob_params() -> BlobScheduleBlobParams {
+    BlobScheduleBlobParams::default().with_scheduled([
+        (mainnet::MAINNET_BPO1_TIMESTAMP, BlobParams::bpo1()),
+        (mainnet::MAINNET_BPO2_TIMESTAMP, BlobParams::bpo2()),
+    ])
+}
+
 /// The Ethereum mainnet spec
 pub static MAINNET: LazyLock<Arc<ChainSpec>> = LazyLock::new(|| {
     let genesis = serde_json::from_str(include_str!("../res/genesis/mainnet.json"))
@@ -132,10 +143,7 @@ pub static MAINNET: LazyLock<Arc<ChainSpec>> = LazyLock::new(|| {
         deposit_contract: Some(MAINNET_DEPOSIT_CONTRACT),
         base_fee_params: BaseFeeParamsKind::Constant(BaseFeeParams::ethereum()),
         prune_delete_limit: MAINNET_PRUNE_DELETE_LIMIT,
-        blob_params: BlobScheduleBlobParams::default().with_scheduled([
-            (mainnet::MAINNET_BPO1_TIMESTAMP, BlobParams::bpo1()),
-            (mainnet::MAINNET_BPO2_TIMESTAMP, BlobParams::bpo2()),
-        ]),
+        blob_params: mainnet_blob_params(),
     };
     spec.genesis.config.dao_fork_support = true;
     spec.into()
@@ -323,7 +331,7 @@ pub fn create_chain_config(
 /// Returns a [`ChainConfig`] for the current Ethereum mainnet chain.
 pub fn mainnet_chain_config() -> ChainConfig {
     let hardforks: ChainHardforks = EthereumHardfork::mainnet().into();
-    let blob_schedule = blob_params_to_schedule(&MAINNET.blob_params, &hardforks);
+    let blob_schedule = blob_params_to_schedule(&mainnet_blob_params(), &hardforks);
     create_chain_config(
         Some(Chain::mainnet()),
         &hardforks,
