@@ -248,7 +248,7 @@ where
 /// This stream emits _non-empty_ Bytes that start with the normalized message id, so that the first
 /// byte of each message starts from 0. If this stream only supports a single capability, for
 /// example `eth` then the first byte of each message will match
-/// [EthMessageID](reth_eth_wire_types::message::EthMessageID).
+/// [`EthMessageID`](reth_eth_wire_types::message::EthMessageID).
 ///
 /// ### Sink behavior
 ///
