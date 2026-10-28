@@ -23,7 +23,7 @@ use alloy_consensus::{
 use alloy_eips::{
     eip4844::env_settings::EnvKzgSettings, eip7840::BlobParams, merge::SLOT_DURATION_SECS, BlockId,
 };
-use alloy_primitives::U256;
+use alloy_primitives::{B256, U256};
 use alloy_rlp::Encodable;
 use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthereumHardforks};
 use reth_evm::{ConfigureEvm, EvmEnv, EvmTransactionValidationGasRules};
@@ -62,6 +62,13 @@ pub type StatefulValidationFn<T> = Arc<
         + Send
         + Sync,
 >;
+
+/// Allowed sender bytecode check signature.
+///
+/// Receives a reference to the transaction and the code hash of its sender's account, which is
+/// neither empty nor [`KECCAK_EMPTY`]. Returns `true` to accept the sender although its account
+/// has bytecode.
+pub type AllowedSenderBytecodeFn<T> = Arc<dyn Fn(&T, B256) -> bool + Send + Sync>;
 
 /// A [`TransactionValidator`] implementation that validates ethereum transaction.
 ///
@@ -132,6 +139,9 @@ pub struct EthTransactionValidator<Client, T, Evm> {
     /// Optional additional stateful validation check applied at the end of
     /// [`validate_stateful`](Self::validate_stateful).
     additional_stateful_validation: Option<StatefulValidationFn<T>>,
+    /// Optional check that accepts senders with bytecode in
+    /// [`validate_sender_bytecode`](Self::validate_sender_bytecode).
+    allowed_sender_bytecode: Option<AllowedSenderBytecodeFn<T>>,
 }
 
 impl<Client, Tx, Evm> fmt::Debug for EthTransactionValidator<Client, Tx, Evm> {
@@ -157,6 +167,7 @@ impl<Client, Tx, Evm> fmt::Debug for EthTransactionValidator<Client, Tx, Evm> {
                 "additional_stateful_validation",
                 &self.additional_stateful_validation.as_ref().map(|_| "..."),
             )
+            .field("allowed_sender_bytecode", &self.allowed_sender_bytecode.as_ref().map(|_| "..."))
             .finish()
     }
 }
@@ -353,6 +364,29 @@ impl<Client, Tx, Evm> EthTransactionValidator<Client, Tx, Evm> {
         f: Option<StatefulValidationFn<Tx>>,
     ) {
         self.additional_stateful_validation = f;
+    }
+
+    /// Sets a check that accepts a sender whose account has bytecode, which
+    /// [`validate_sender_bytecode`](Self::validate_sender_bytecode) otherwise rejects unless it
+    /// is an EIP-7702 delegation (EIP-3607).
+    ///
+    /// The check receives a reference to the transaction and the code hash of its sender's
+    /// account, and should return `true` to accept the sender. It runs before the EIP-7702 rule,
+    /// so an accepted sender's bytecode is not loaded. It runs on every validation, so a rule that
+    /// depends on the active fork reads that fork itself.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// let mut validator = builder.build(blob_store);
+    /// // Accept senders whose account holds a protocol-installed marker
+    /// validator.set_allowed_sender_bytecode(move |_tx, code_hash| code_hash == MARKER_CODE_HASH);
+    /// ```
+    pub fn set_allowed_sender_bytecode<F>(&mut self, f: F)
+    where
+        F: Fn(&Tx, B256) -> bool + Send + Sync + 'static,
+    {
+        self.allowed_sender_bytecode = Some(Arc::new(f));
     }
 }
 
@@ -744,10 +778,18 @@ where
         // If Prague is active, only EIP-7702 bytecode is allowed for the sender.
         //
         // Any other case means that the account is not an EOA, and should not be able to send
-        // transactions.
+        // transactions, unless the configured check accepts its code.
         if let Some(code_hash) = &sender.bytecode_hash &&
             *code_hash != KECCAK_EMPTY
         {
+            if self
+                .allowed_sender_bytecode
+                .as_ref()
+                .is_some_and(|allowed| allowed(transaction, *code_hash))
+            {
+                return Ok(Ok(()))
+            }
+
             let is_eip7702 = if self.fork_tracker.is_prague_activated() {
                 match state.bytecode_by_hash(code_hash) {
                     Ok(bytecode) => bytecode.is_some_and(|b| b.is_eip7702()),
@@ -1422,6 +1464,7 @@ impl<Client, Evm> EthTransactionValidatorBuilder<Client, Evm> {
             eip7594,
             additional_stateless_validation: None,
             additional_stateful_validation: None,
+            allowed_sender_bytecode: None,
         }
     }
 
@@ -1613,7 +1656,7 @@ mod tests {
         eip2930::{AccessList, AccessListItem},
         eip7702::Authorization,
     };
-    use alloy_primitives::{hex, Address, Bytes, Signature, B256, U256};
+    use alloy_primitives::{hex, keccak256, Address, Bytes, Signature, B256, U256};
     use reth_chainspec::{ChainSpecBuilder, MAINNET};
     use reth_ethereum_primitives::PooledTransactionVariant;
     use reth_evm_ethereum::EthEvmConfig;
@@ -1829,6 +1872,51 @@ mod tests {
         let outcome = validator.validate_one(TransactionOrigin::External, transaction);
 
         assert!(outcome.is_valid());
+    }
+
+    #[test]
+    fn allowed_sender_bytecode_accepts_sender_with_code() {
+        let transaction = get_transaction();
+        let code = Bytes::from_static(&[0x60, 0x00, 0x60, 0x00, 0xf3]);
+        let code_hash = keccak256(&code);
+        let provider = mock_provider();
+        provider.add_account(
+            transaction.sender(),
+            ExtendedAccount::new(transaction.nonce(), U256::MAX).with_bytecode(code),
+        );
+        let mut validator = EthTransactionValidatorBuilder::new(provider, test_evm_config())
+            .build(InMemoryBlobStore::default());
+        let is_rejected = |outcome: TransactionValidationOutcome<EthPooledTransaction>| {
+            matches!(
+                outcome,
+                TransactionValidationOutcome::Invalid(
+                    _,
+                    InvalidPoolTransactionError::Consensus(
+                        InvalidTransactionError::SignerAccountHasBytecode
+                    )
+                )
+            )
+        };
+
+        // Without a check the sender's code is rejected.
+        assert!(is_rejected(
+            validator.validate_one(TransactionOrigin::External, transaction.clone())
+        ));
+
+        // A check that accepts other code leaves it rejected.
+        validator.set_allowed_sender_bytecode(|_, hash| hash == B256::repeat_byte(1));
+        assert!(is_rejected(
+            validator.validate_one(TransactionOrigin::External, transaction.clone())
+        ));
+
+        // A check that accepts this code admits the sender and keeps its code hash.
+        validator.set_allowed_sender_bytecode(move |_, hash| hash == code_hash);
+        match validator.validate_one(TransactionOrigin::External, transaction) {
+            TransactionValidationOutcome::Valid { bytecode_hash, .. } => {
+                assert_eq!(bytecode_hash, Some(code_hash))
+            }
+            outcome => panic!("expected a valid outcome, got {outcome:?}"),
+        }
     }
 
     #[test]
