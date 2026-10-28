@@ -1,7 +1,7 @@
 [workspace.package]
 version = "2.5.2"
 edition = "2024"
-rust-version = "1.95"
+rust-version = "1.96"
 license = "MIT OR Apache-2.0"
 homepage = "https://paradigmxyz.github.io/reth"
 repository = "https://github.com/paradigmxyz/reth"
@@ -521,7 +521,7 @@ tar = "0.4.46"
 tracing = { version = "0.1.0", default-features = false, features = ["attributes"] }
 tracing-appender = "0.2.5"
 url = { version = "2.3", default-features = false }
-zstd = "0.13"
+zstd = "0.14.3"
 byteorder = "1"
 fixed-cache = { version = "0.1.10", default-features = false, features = ["alloc"] }
 moka = "0.12"
@@ -661,3 +661,7 @@ vergen-git2 = "10.0.1"
 
 # networking
 ipnet = "2.11"
+
+[patch.crates-io]
+# zstd 0.14.3 (RUSTSEC-2026-0391 and related zstd-safe advisories); not yet released on crates.io
+reth-zstd-compressors = { git = "https://github.com/paradigmxyz/reth-core", rev = "33bfe6e8b7bacc4f2e464497262ee3f87c6c86ce" }
