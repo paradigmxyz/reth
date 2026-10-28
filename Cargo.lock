@@ -122,7 +122,7 @@ dependencies = [
 [[package]]
 name = "alloy-consensus"
 version = "2.5.0"
-source = "git+https://github.com/Rimeeeeee/alloy?branch=bogota-devnet-2#def90e1c8dbb5615815568c198f3bc965eb4d8de"
+source = "git+https://github.com/Rimeeeeee/alloy?branch=bogota-devnet-2#2fe31347dc5c7928d64343b4783a8987a650b4ba"
 dependencies = [
  "alloy-eips 2.5.0",
  "alloy-primitives",
@@ -149,7 +149,7 @@ dependencies = [
 [[package]]
 name = "alloy-consensus-any"
 version = "2.5.0"
-source = "git+https://github.com/Rimeeeeee/alloy?branch=bogota-devnet-2#def90e1c8dbb5615815568c198f3bc965eb4d8de"
+source = "git+https://github.com/Rimeeeeee/alloy?branch=bogota-devnet-2#2fe31347dc5c7928d64343b4783a8987a650b4ba"
 dependencies = [
  "alloy-consensus",
  "alloy-eips 2.5.0",
@@ -163,7 +163,7 @@ dependencies = [
 [[package]]
 name = "alloy-contract"
 version = "2.5.0"
-source = "git+https://github.com/Rimeeeeee/alloy?branch=bogota-devnet-2#def90e1c8dbb5615815568c198f3bc965eb4d8de"
+source = "git+https://github.com/Rimeeeeee/alloy?branch=bogota-devnet-2#2fe31347dc5c7928d64343b4783a8987a650b4ba"
 dependencies = [
  "alloy-consensus",
  "alloy-dyn-abi",
@@ -300,7 +300,7 @@ dependencies = [
 [[package]]
 name = "alloy-eips"
 version = "2.5.0"
-source = "git+https://github.com/Rimeeeeee/alloy?branch=bogota-devnet-2#def90e1c8dbb5615815568c198f3bc965eb4d8de"
+source = "git+https://github.com/Rimeeeeee/alloy?branch=bogota-devnet-2#2fe31347dc5c7928d64343b4783a8987a650b4ba"
 dependencies = [
  "alloy-eip2124",
  "alloy-eip2930",
@@ -346,7 +346,7 @@ dependencies = [
 [[package]]
 name = "alloy-genesis"
 version = "2.5.0"
-source = "git+https://github.com/Rimeeeeee/alloy?branch=bogota-devnet-2#def90e1c8dbb5615815568c198f3bc965eb4d8de"
+source = "git+https://github.com/Rimeeeeee/alloy?branch=bogota-devnet-2#2fe31347dc5c7928d64343b4783a8987a650b4ba"
 dependencies = [
  "alloy-eips 2.5.0",
  "alloy-primitives",
@@ -399,7 +399,7 @@ dependencies = [
 [[package]]
 name = "alloy-json-rpc"
 version = "2.5.0"
-source = "git+https://github.com/Rimeeeeee/alloy?branch=bogota-devnet-2#def90e1c8dbb5615815568c198f3bc965eb4d8de"
+source = "git+https://github.com/Rimeeeeee/alloy?branch=bogota-devnet-2#2fe31347dc5c7928d64343b4783a8987a650b4ba"
 dependencies = [
  "alloy-primitives",
  "alloy-sol-types",
@@ -413,7 +413,7 @@ dependencies = [
 [[package]]
 name = "alloy-network"
 version = "2.5.0"
-source = "git+https://github.com/Rimeeeeee/alloy?branch=bogota-devnet-2#def90e1c8dbb5615815568c198f3bc965eb4d8de"
+source = "git+https://github.com/Rimeeeeee/alloy?branch=bogota-devnet-2#2fe31347dc5c7928d64343b4783a8987a650b4ba"
 dependencies = [
  "alloy-consensus",
  "alloy-consensus-any",
@@ -438,7 +438,7 @@ dependencies = [
 [[package]]
 name = "alloy-network-primitives"
 version = "2.5.0"
-source = "git+https://github.com/Rimeeeeee/alloy?branch=bogota-devnet-2#def90e1c8dbb5615815568c198f3bc965eb4d8de"
+source = "git+https://github.com/Rimeeeeee/alloy?branch=bogota-devnet-2#2fe31347dc5c7928d64343b4783a8987a650b4ba"
 dependencies = [
  "alloy-consensus",
  "alloy-eips 2.5.0",
@@ -450,7 +450,7 @@ dependencies = [
 [[package]]
 name = "alloy-node-bindings"
 version = "2.5.0"
-source = "git+https://github.com/Rimeeeeee/alloy?branch=bogota-devnet-2#def90e1c8dbb5615815568c198f3bc965eb4d8de"
+source = "git+https://github.com/Rimeeeeee/alloy?branch=bogota-devnet-2#2fe31347dc5c7928d64343b4783a8987a650b4ba"
 dependencies = [
  "alloy-genesis",
  "alloy-hardforks 0.2.13",
@@ -503,7 +503,7 @@ dependencies = [
 [[package]]
 name = "alloy-provider"
 version = "2.5.0"
-source = "git+https://github.com/Rimeeeeee/alloy?branch=bogota-devnet-2#def90e1c8dbb5615815568c198f3bc965eb4d8de"
+source = "git+https://github.com/Rimeeeeee/alloy?branch=bogota-devnet-2#2fe31347dc5c7928d64343b4783a8987a650b4ba"
 dependencies = [
  "alloy-chains",
  "alloy-consensus",
@@ -547,7 +547,7 @@ dependencies = [
 [[package]]
 name = "alloy-pubsub"
 version = "2.5.0"
-source = "git+https://github.com/Rimeeeeee/alloy?branch=bogota-devnet-2#def90e1c8dbb5615815568c198f3bc965eb4d8de"
+source = "git+https://github.com/Rimeeeeee/alloy?branch=bogota-devnet-2#2fe31347dc5c7928d64343b4783a8987a650b4ba"
 dependencies = [
  "alloy-json-rpc",
  "alloy-primitives",
@@ -590,7 +590,7 @@ dependencies = [
 [[package]]
 name = "alloy-rpc-client"
 version = "2.5.0"
-source = "git+https://github.com/Rimeeeeee/alloy?branch=bogota-devnet-2#def90e1c8dbb5615815568c198f3bc965eb4d8de"
+source = "git+https://github.com/Rimeeeeee/alloy?branch=bogota-devnet-2#2fe31347dc5c7928d64343b4783a8987a650b4ba"
 dependencies = [
  "alloy-json-rpc",
  "alloy-primitives",
@@ -615,7 +615,7 @@ dependencies = [
 [[package]]
 name = "alloy-rpc-types"
 version = "2.5.0"
-source = "git+https://github.com/Rimeeeeee/alloy?branch=bogota-devnet-2#def90e1c8dbb5615815568c198f3bc965eb4d8de"
+source = "git+https://github.com/Rimeeeeee/alloy?branch=bogota-devnet-2#2fe31347dc5c7928d64343b4783a8987a650b4ba"
 dependencies = [
  "alloy-primitives",
  "alloy-rpc-types-engine",
@@ -627,7 +627,7 @@ dependencies = [
 [[package]]
 name = "alloy-rpc-types-admin"
 version = "2.5.0"
-source = "git+https://github.com/Rimeeeeee/alloy?branch=bogota-devnet-2#def90e1c8dbb5615815568c198f3bc965eb4d8de"
+source = "git+https://github.com/Rimeeeeee/alloy?branch=bogota-devnet-2#2fe31347dc5c7928d64343b4783a8987a650b4ba"
 dependencies = [
  "alloy-genesis",
  "alloy-primitives",
@@ -638,7 +638,7 @@ dependencies = [
 [[package]]
 name = "alloy-rpc-types-anvil"
 version = "2.5.0"
-source = "git+https://github.com/Rimeeeeee/alloy?branch=bogota-devnet-2#def90e1c8dbb5615815568c198f3bc965eb4d8de"
+source = "git+https://github.com/Rimeeeeee/alloy?branch=bogota-devnet-2#2fe31347dc5c7928d64343b4783a8987a650b4ba"
 dependencies = [
  "alloy-primitives",
  "alloy-rpc-types-eth",
@@ -649,7 +649,7 @@ dependencies = [
 [[package]]
 name = "alloy-rpc-types-any"
 version = "2.5.0"
-source = "git+https://github.com/Rimeeeeee/alloy?branch=bogota-devnet-2#def90e1c8dbb5615815568c198f3bc965eb4d8de"
+source = "git+https://github.com/Rimeeeeee/alloy?branch=bogota-devnet-2#2fe31347dc5c7928d64343b4783a8987a650b4ba"
 dependencies = [
  "alloy-consensus-any",
  "alloy-network-primitives",
@@ -663,7 +663,7 @@ dependencies = [
 [[package]]
 name = "alloy-rpc-types-beacon"
 version = "2.5.0"
-source = "git+https://github.com/Rimeeeeee/alloy?branch=bogota-devnet-2#def90e1c8dbb5615815568c198f3bc965eb4d8de"
+source = "git+https://github.com/Rimeeeeee/alloy?branch=bogota-devnet-2#2fe31347dc5c7928d64343b4783a8987a650b4ba"
 dependencies = [
  "alloy-eips 2.5.0",
  "alloy-primitives",
@@ -682,7 +682,7 @@ dependencies = [
 [[package]]
 name = "alloy-rpc-types-debug"
 version = "2.5.0"
-source = "git+https://github.com/Rimeeeeee/alloy?branch=bogota-devnet-2#def90e1c8dbb5615815568c198f3bc965eb4d8de"
+source = "git+https://github.com/Rimeeeeee/alloy?branch=bogota-devnet-2#2fe31347dc5c7928d64343b4783a8987a650b4ba"
 dependencies = [
  "alloy-primitives",
  "alloy-rlp",
@@ -694,7 +694,7 @@ dependencies = [
 [[package]]
 name = "alloy-rpc-types-engine"
 version = "2.5.0"
-source = "git+https://github.com/Rimeeeeee/alloy?branch=bogota-devnet-2#def90e1c8dbb5615815568c198f3bc965eb4d8de"
+source = "git+https://github.com/Rimeeeeee/alloy?branch=bogota-devnet-2#2fe31347dc5c7928d64343b4783a8987a650b4ba"
 dependencies = [
  "alloy-consensus",
  "alloy-eips 2.5.0",
@@ -714,7 +714,7 @@ dependencies = [
 [[package]]
 name = "alloy-rpc-types-eth"
 version = "2.5.0"
-source = "git+https://github.com/Rimeeeeee/alloy?branch=bogota-devnet-2#def90e1c8dbb5615815568c198f3bc965eb4d8de"
+source = "git+https://github.com/Rimeeeeee/alloy?branch=bogota-devnet-2#2fe31347dc5c7928d64343b4783a8987a650b4ba"
 dependencies = [
  "alloy-consensus",
  "alloy-consensus-any",
@@ -736,7 +736,7 @@ dependencies = [
 [[package]]
 name = "alloy-rpc-types-mev"
 version = "2.5.0"
-source = "git+https://github.com/Rimeeeeee/alloy?branch=bogota-devnet-2#def90e1c8dbb5615815568c198f3bc965eb4d8de"
+source = "git+https://github.com/Rimeeeeee/alloy?branch=bogota-devnet-2#2fe31347dc5c7928d64343b4783a8987a650b4ba"
 dependencies = [
  "alloy-consensus",
  "alloy-eips 2.5.0",
@@ -750,7 +750,7 @@ dependencies = [
 [[package]]
 name = "alloy-rpc-types-trace"
 version = "2.5.0"
-source = "git+https://github.com/Rimeeeeee/alloy?branch=bogota-devnet-2#def90e1c8dbb5615815568c198f3bc965eb4d8de"
+source = "git+https://github.com/Rimeeeeee/alloy?branch=bogota-devnet-2#2fe31347dc5c7928d64343b4783a8987a650b4ba"
 dependencies = [
  "alloy-primitives",
  "alloy-rpc-types-eth",
@@ -763,7 +763,7 @@ dependencies = [
 [[package]]
 name = "alloy-rpc-types-txpool"
 version = "2.5.0"
-source = "git+https://github.com/Rimeeeeee/alloy?branch=bogota-devnet-2#def90e1c8dbb5615815568c198f3bc965eb4d8de"
+source = "git+https://github.com/Rimeeeeee/alloy?branch=bogota-devnet-2#2fe31347dc5c7928d64343b4783a8987a650b4ba"
 dependencies = [
  "alloy-primitives",
  "alloy-rpc-types-eth",
@@ -784,7 +784,7 @@ dependencies = [
 [[package]]
 name = "alloy-serde"
 version = "2.5.0"
-source = "git+https://github.com/Rimeeeeee/alloy?branch=bogota-devnet-2#def90e1c8dbb5615815568c198f3bc965eb4d8de"
+source = "git+https://github.com/Rimeeeeee/alloy?branch=bogota-devnet-2#2fe31347dc5c7928d64343b4783a8987a650b4ba"
 dependencies = [
  "alloy-primitives",
  "arbitrary",
@@ -795,7 +795,7 @@ dependencies = [
 [[package]]
 name = "alloy-signer"
 version = "2.5.0"
-source = "git+https://github.com/Rimeeeeee/alloy?branch=bogota-devnet-2#def90e1c8dbb5615815568c198f3bc965eb4d8de"
+source = "git+https://github.com/Rimeeeeee/alloy?branch=bogota-devnet-2#2fe31347dc5c7928d64343b4783a8987a650b4ba"
 dependencies = [
  "alloy-primitives",
  "async-trait",
@@ -809,7 +809,7 @@ dependencies = [
 [[package]]
 name = "alloy-signer-local"
 version = "2.5.0"
-source = "git+https://github.com/Rimeeeeee/alloy?branch=bogota-devnet-2#def90e1c8dbb5615815568c198f3bc965eb4d8de"
+source = "git+https://github.com/Rimeeeeee/alloy?branch=bogota-devnet-2#2fe31347dc5c7928d64343b4783a8987a650b4ba"
 dependencies = [
  "alloy-consensus",
  "alloy-network",
@@ -897,7 +897,7 @@ dependencies = [
 [[package]]
 name = "alloy-transport"
 version = "2.5.0"
-source = "git+https://github.com/Rimeeeeee/alloy?branch=bogota-devnet-2#def90e1c8dbb5615815568c198f3bc965eb4d8de"
+source = "git+https://github.com/Rimeeeeee/alloy?branch=bogota-devnet-2#2fe31347dc5c7928d64343b4783a8987a650b4ba"
 dependencies = [
  "alloy-json-rpc",
  "auto_impl",
@@ -919,7 +919,7 @@ dependencies = [
 [[package]]
 name = "alloy-transport-http"
 version = "2.5.0"
-source = "git+https://github.com/Rimeeeeee/alloy?branch=bogota-devnet-2#def90e1c8dbb5615815568c198f3bc965eb4d8de"
+source = "git+https://github.com/Rimeeeeee/alloy?branch=bogota-devnet-2#2fe31347dc5c7928d64343b4783a8987a650b4ba"
 dependencies = [
  "alloy-json-rpc",
  "alloy-transport",
@@ -934,7 +934,7 @@ dependencies = [
 [[package]]
 name = "alloy-transport-ipc"
 version = "2.5.0"
-source = "git+https://github.com/Rimeeeeee/alloy?branch=bogota-devnet-2#def90e1c8dbb5615815568c198f3bc965eb4d8de"
+source = "git+https://github.com/Rimeeeeee/alloy?branch=bogota-devnet-2#2fe31347dc5c7928d64343b4783a8987a650b4ba"
 dependencies = [
  "alloy-json-rpc",
  "alloy-pubsub",
@@ -954,7 +954,7 @@ dependencies = [
 [[package]]
 name = "alloy-transport-ws"
 version = "2.5.0"
-source = "git+https://github.com/Rimeeeeee/alloy?branch=bogota-devnet-2#def90e1c8dbb5615815568c198f3bc965eb4d8de"
+source = "git+https://github.com/Rimeeeeee/alloy?branch=bogota-devnet-2#2fe31347dc5c7928d64343b4783a8987a650b4ba"
 dependencies = [
  "alloy-pubsub",
  "alloy-transport",
@@ -992,7 +992,7 @@ dependencies = [
 [[package]]
 name = "alloy-tx-macros"
 version = "2.5.0"
-source = "git+https://github.com/Rimeeeeee/alloy?branch=bogota-devnet-2#def90e1c8dbb5615815568c198f3bc965eb4d8de"
+source = "git+https://github.com/Rimeeeeee/alloy?branch=bogota-devnet-2#2fe31347dc5c7928d64343b4783a8987a650b4ba"
 dependencies = [
  "darling 0.23.0",
  "proc-macro2",

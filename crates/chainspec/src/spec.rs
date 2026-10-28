@@ -1361,6 +1361,24 @@ mod tests {
         assert_eq!(ChainSpec::from(genesis).eip8253_accounts(), accounts);
     }
 
+    #[test]
+    fn eip8253_genesis_config_selects_fork_accounts() {
+        let accounts = [Address::repeat_byte(1), Address::repeat_byte(2)];
+        for key in ["zeroNonceStorageAccounts", "eip8253Accounts"] {
+            let mut value = serde_json::to_value(Genesis::default()).unwrap();
+            value["config"][key] = serde_json::to_value(accounts).unwrap();
+            let genesis: Genesis = serde_json::from_value(value).unwrap();
+            assert_eq!(ChainSpec::from(genesis).eip8253_accounts(), &accounts);
+        }
+
+        let mut value = serde_json::to_value(&MAINNET.genesis).unwrap();
+        value["config"]["zeroNonceStorageAccounts"] = serde_json::json!([]);
+        let genesis: Genesis = serde_json::from_value(value).unwrap();
+        let spec = ChainSpec::from(genesis);
+        assert_eq!(spec.genesis_header.hash(), MAINNET_GENESIS_HASH);
+        assert!(spec.eip8253_accounts().is_empty());
+    }
+
     fn test_hardfork_fork_ids(spec: &ChainSpec, cases: &[(EthereumHardfork, ForkId)]) {
         for (hardfork, expected_id) in cases {
             if let Some(computed_id) = spec.hardfork_fork_id(*hardfork) {
