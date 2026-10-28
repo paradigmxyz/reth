@@ -26,7 +26,7 @@ use std::{
     ops::{Deref, Range},
     path::{Path, PathBuf},
     sync::Arc,
-    time::{SystemTime, UNIX_EPOCH},
+    time::{Duration, SystemTime, UNIX_EPOCH},
 };
 use tracing::error;
 use tx::Tx;
@@ -53,6 +53,17 @@ const DEFAULT_MAX_READERS: u64 = 32_000;
 /// Space that a read-only transaction can occupy until the warning is emitted.
 /// See [`reth_libmdbx::EnvironmentBuilder::set_handle_slow_readers`] for more information.
 const MAX_SAFE_READER_SPACE: usize = 10 * GIGABYTE;
+
+/// Longest time a [`SyncMode::SafeNoSync`] or [`SyncMode::UtterlyNoSync`] environment goes
+/// without a steady (synced) commit.
+///
+/// Commits in these modes are weak. After an unclean shutdown on a new boot (host reboot or power
+/// loss) MDBX discards all weak commits and rolls back to the last steady one, while static files
+/// and `RocksDB` sync on every commit and stay ahead. Without a period, steady commits only happen
+/// on a clean close or when the file fills up, so the rollback can span days and land below data
+/// that static file pruning already deleted, which startup healing cannot repair. MDBX checks the
+/// period on each commit.
+const NON_DURABLE_SYNC_PERIOD: Duration = Duration::from_secs(60);
 
 /// Environment used when opening a MDBX environment. RO/RW.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -114,8 +125,8 @@ pub struct DatabaseArguments {
     ///   considered committed.   This provides the highest level of durability and crash safety
     ///   but may have a performance cost.
     /// - [`SyncMode::SafeNoSync`]: Skips certain fsync operations to improve write performance.
-    ///   This mode still maintains database integrity but may lose the most recent transactions if
-    ///   the system crashes unexpectedly.
+    ///   This mode still maintains database integrity but may lose the transactions committed
+    ///   within the last [`NON_DURABLE_SYNC_PERIOD`] if the system crashes unexpectedly.
     ///
     /// Choose `Durable` if consistency and crash safety are critical (e.g., production
     /// environments). Choose `SafeNoSync` if performance is more important and occasional data
@@ -253,11 +264,49 @@ pub struct DatabaseEnv {
     /// More generally, do not dynamically create, re-open, or drop tables at
     /// runtime. It's better to perform table creation and migration only once
     /// at startup.
-    dbis: Arc<FxHashMap<&'static str, ffi::MDBX_dbi>>,
+    dbis: Arc<TableDbis>,
     /// Cache for metric handles. If `None`, metrics are not recorded.
     metrics: Option<Arc<DatabaseEnvMetrics>>,
     /// Write lock for when dealing with a read-write environment.
     _lock_file: Option<StorageLock>,
+}
+
+/// MDBX DBIs of the tables tracked by a [`DatabaseEnv`].
+#[derive(Debug, Clone)]
+pub(crate) struct TableDbis {
+    /// DBIs of [`Tables`] entries, indexed by the entry's position in [`Tables::ALL`].
+    tables: [Option<ffi::MDBX_dbi>; Tables::COUNT],
+    /// DBIs of tables defined outside of [`Tables`], by name.
+    other: FxHashMap<&'static str, ffi::MDBX_dbi>,
+}
+
+impl Default for TableDbis {
+    fn default() -> Self {
+        Self { tables: [None; Tables::COUNT], other: FxHashMap::default() }
+    }
+}
+
+impl TableDbis {
+    /// Returns the tracked DBI of a table, which is looked up by `table` if it is a [`Tables`]
+    /// entry and by `name` otherwise.
+    ///
+    /// Returns `None` if the table is not tracked.
+    pub(crate) fn get(&self, table: Option<Tables>, name: &str) -> Option<ffi::MDBX_dbi> {
+        match table {
+            Some(table) => self.tables[table as usize],
+            None => self.other.get(name).copied(),
+        }
+    }
+
+    /// Tracks the DBI of the table with the given name.
+    fn insert(&mut self, name: &'static str, dbi: ffi::MDBX_dbi) {
+        match name.parse::<Tables>() {
+            Ok(table) => self.tables[table as usize] = Some(dbi),
+            Err(_) => {
+                self.other.insert(name, dbi);
+            }
+        }
+    }
 }
 
 impl Database for DatabaseEnv {
@@ -411,6 +460,9 @@ impl DatabaseEnv {
             DatabaseEnvKind::RW => {
                 // enable writemap mode in RW mode
                 inner_env.write_map();
+                if matches!(args.sync_mode, SyncMode::SafeNoSync | SyncMode::UtterlyNoSync) {
+                    inner_env.set_sync_period(NON_DURABLE_SYNC_PERIOD);
+                }
                 Mode::ReadWrite { sync_mode: args.sync_mode }
             }
         };
@@ -575,7 +627,9 @@ impl DatabaseEnv {
         // Note: This is okay because self has mutable access here and `DatabaseEnv` must be Arc'ed
         // before it can be shared.
         let dbis = Arc::make_mut(&mut self.dbis);
-        dbis.extend(handles);
+        for (name, dbi) in handles {
+            dbis.insert(name, dbi);
+        }
 
         Ok(())
     }
@@ -591,7 +645,9 @@ impl DatabaseEnv {
         if let Some(db) = Arc::get_mut(self) {
             // Note: The db is unique and the dbis as well, and they can also be cloned.
             let dbis = Arc::make_mut(&mut db.dbis);
-            dbis.extend(handles);
+            for (name, dbi) in handles {
+                dbis.insert(name, dbi);
+            }
         }
         Ok(())
     }
@@ -692,7 +748,8 @@ mod tests {
     use reth_db_api::{
         cursor::{DbDupCursorRO, DbDupCursorRW, ReverseWalker, Walker},
         models::{AccountBeforeTx, IntegerList, ShardedKey},
-        table::{Encode, Table},
+        table::{Encode, Table, TableInfo},
+        tables_to_generic,
     };
     use reth_libmdbx::Error;
     use reth_primitives_traits::{Account, StorageEntry};
@@ -1657,5 +1714,82 @@ mod tests {
             let list400 = IntegerList::new_pre_sorted([400u64]);
             assert_eq!(list400, list);
         }
+    }
+
+    #[test]
+    fn db_tracks_table_dbis() {
+        #[derive(Debug)]
+        struct CustomTable;
+
+        impl Table for CustomTable {
+            const NAME: &'static str = "CustomTable";
+            const DUPSORT: bool = false;
+
+            type Key = u64;
+            type Value = u64;
+        }
+
+        impl TableInfo for CustomTable {
+            fn name(&self) -> &'static str {
+                Self::NAME
+            }
+
+            fn is_dupsort(&self) -> bool {
+                Self::DUPSORT
+            }
+        }
+
+        impl TableSet for CustomTable {
+            fn tables() -> Box<dyn Iterator<Item = Box<dyn TableInfo>>> {
+                Box::new(std::iter::once(Box::new(Self) as Box<dyn TableInfo>))
+            }
+        }
+
+        let (_tempdir, mut env) = create_test_db(DatabaseEnvKind::RW);
+        env.create_and_track_tables_for::<CustomTable>().expect(ERROR_TABLE_CREATION);
+        let env = env.with_metrics();
+
+        let tx = env.tx_mut().expect(ERROR_INIT_TX);
+        for table in Tables::ALL {
+            let dbi = tables_to_generic!(table, |T| tx.get_dbi::<T>()).unwrap();
+            assert_eq!(env.dbis.get(Some(*table), table.name()), Some(dbi), "{table}");
+            assert_eq!(tx.inner().open_db(Some(table.name())).unwrap().dbi(), dbi, "{table}");
+        }
+
+        let dbi = tx.get_dbi::<CustomTable>().unwrap();
+        assert_eq!(env.dbis.get(None, CustomTable::NAME), Some(dbi));
+        assert_eq!(tx.inner().open_db(Some(CustomTable::NAME)).unwrap().dbi(), dbi);
+        tx.put::<CustomTable>(1, 2).expect(ERROR_PUT);
+        tx.cursor_write::<CustomTable>().unwrap().upsert(3, &4).expect(ERROR_UPSERT);
+        tx.commit().expect(ERROR_COMMIT);
+
+        let tx = env.tx().expect(ERROR_INIT_TX);
+        assert_eq!(tx.get::<CustomTable>(1).expect(ERROR_GET), Some(2));
+        assert_eq!(tx.get::<CustomTable>(3).expect(ERROR_GET), Some(4));
+    }
+
+    #[test]
+    fn non_durable_sync_period() {
+        let sync_period = |sync_mode| {
+            let tempdir = tempfile::TempDir::new().expect(ERROR_TEMPDIR);
+            let env = DatabaseEnv::open(
+                tempdir.path(),
+                DatabaseEnvKind::RW,
+                DatabaseArguments::test().with_sync_mode(Some(sync_mode)),
+            )
+            .expect(ERROR_DB_CREATION);
+            let mut period = 0;
+            // SAFETY: the pointer is only used within the closure, while `env` is open.
+            let rc = env.with_raw_env_ptr(|env| unsafe {
+                ffi::mdbx_env_get_option(env, ffi::MDBX_opt_sync_period, &raw mut period)
+            });
+            assert_eq!(rc, ffi::MDBX_SUCCESS);
+            // MDBX reports the period in 1/65536 of a second.
+            Duration::from_secs_f64(period as f64 / 65536.0)
+        };
+
+        assert_eq!(sync_period(SyncMode::Durable), Duration::ZERO);
+        assert_eq!(sync_period(SyncMode::SafeNoSync), NON_DURABLE_SYNC_PERIOD);
+        assert_eq!(sync_period(SyncMode::UtterlyNoSync), NON_DURABLE_SYNC_PERIOD);
     }
 }

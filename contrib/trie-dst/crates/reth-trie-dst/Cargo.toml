@@ -5,6 +5,12 @@ edition.workspace = true
 license.workspace = true
 publish = false
 
+[lints]
+workspace = true
+
+[features]
+inline-coverage = []
+
 [dependencies]
 reth-chain-state.workspace = true
 reth-chainspec.workspace = true
@@ -25,7 +31,7 @@ reth-storage-overlay = { workspace = true, features = ["rayon"] }
 reth-tasks = { workspace = true, features = ["rayon", "test-utils"] }
 reth-trie.workspace = true
 alloy-consensus.workspace = true
-alloy-primitives.workspace = true
+alloy-primitives = { workspace = true, features = ["asm-keccak"] }
 alloy-rlp.workspace = true
 alloy-trie.workspace = true
 evm2 = { workspace = true, features = ["std"] }

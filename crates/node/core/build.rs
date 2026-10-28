@@ -1,6 +1,6 @@
 #![allow(missing_docs)]
 
-use smolgen::{Build, Cargo, Emitter, Gitcl, VergenKey};
+use smolgen::{Build, Cargo, Emitter, Gitcl};
 use std::{env, error::Error};
 
 fn main() -> Result<(), Box<dyn Error>> {
@@ -14,36 +14,28 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     emitter.add_instructions(&cargo_builder)?;
 
-    let git_builder = Gitcl::builder().describe(false, true, None).dirty(true).sha(false).build();
-
-    emitter.add_instructions(&git_builder)?;
-
-    let mut instructions = Vec::new();
-    emitter.emit_to(&mut instructions)?;
     // Tracking the git HEAD reruns this script, and rebuilds everything above this crate, on every
     // commit and checkout. Debug builds skip it and keep the SHA from the last run of this script.
     // Release profiles keep tracking HEAD, so their version always matches the checkout.
-    let skip_head_tracking = env::var("PROFILE")? == "debug";
-    for line in String::from_utf8(instructions)?.lines() {
-        let is_git_path = line.starts_with("cargo:rerun-if-changed=") &&
-            line != "cargo:rerun-if-changed=build.rs";
-        if !(skip_head_tracking && is_git_path) {
-            println!("{line}");
-        }
-    }
+    let git_builder = Gitcl::builder()
+        .describe(false, true, None)
+        .dirty(true)
+        .sha(false)
+        .rerun_on_head_change(env::var("PROFILE")? != "debug")
+        .build();
 
-    let vars = emitter.cargo_rustc_env_map();
-    let var = |key: VergenKey| vars.get(&key).ok_or_else(|| format!("{} is not set", key.name()));
+    emitter.add_instructions(&git_builder)?;
 
-    let sha = var(VergenKey::GitSha)?;
+    emitter.emit_and_set()?;
+    let sha = env::var("VERGEN_GIT_SHA")?;
     let sha_short = &sha[0..7];
 
-    let is_dirty = var(VergenKey::GitDirty)? == "true";
+    let is_dirty = env::var("VERGEN_GIT_DIRTY")? == "true";
     // > git describe --always --tags
     // if not on a tag: v0.2.0-beta.3-82-g1939939b
     // if on a tag: v0.2.0-beta.3
     // git picks the abbreviated hash length from the repository size, so match any SHA prefix.
-    let not_on_tag = var(VergenKey::GitDescribe)?
+    let not_on_tag = env::var("VERGEN_GIT_DESCRIBE")?
         .rsplit_once("-g")
         .is_some_and(|(_, hash)| sha.starts_with(hash));
     let version_suffix = if is_dirty || not_on_tag { "-dev" } else { "" };
@@ -88,11 +80,11 @@ fn main() -> Result<(), Box<dyn Error>> {
     println!("cargo:rustc-env=RETH_LONG_VERSION_1=Commit SHA: {sha}");
     println!(
         "cargo:rustc-env=RETH_LONG_VERSION_2=Build Timestamp: {}",
-        var(VergenKey::BuildTimestamp)?
+        env::var("VERGEN_BUILD_TIMESTAMP")?
     );
     println!(
         "cargo:rustc-env=RETH_LONG_VERSION_3=Build Features: {}",
-        var(VergenKey::CargoFeatures)?
+        env::var("VERGEN_CARGO_FEATURES")?
     );
     println!("cargo:rustc-env=RETH_LONG_VERSION_4=Build Profile: {profile}");
 
@@ -103,7 +95,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     // Example: reth/v0.1.0-alpha.1-428a6dc2f/aarch64-apple-darwin
     println!(
         "cargo:rustc-env=RETH_P2P_CLIENT_VERSION={}",
-        format_args!("reth/v{pkg_version}-{sha_short}/{}", var(VergenKey::CargoTargetTriple)?)
+        format_args!("reth/v{pkg_version}-{sha_short}/{}", env::var("VERGEN_CARGO_TARGET_TRIPLE")?)
     );
 
     Ok(())

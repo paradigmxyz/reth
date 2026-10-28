@@ -108,9 +108,7 @@ impl EvmTransactionValidationGasRules {
         );
         if self.version.feature(evm2::EvmFeatures::EIP7702) {
             intrinsic_gas += authorization_list_len *
-                u64::from(
-                    self.version.gas_params.get(evm2::version::GasId::TxEip7702PerEmptyAccountCost),
-                );
+                self.version.gas_params.get(evm2::version::GasId::TxEip7702PerEmptyAccountCost);
         }
         EvmTransactionValidationGas { intrinsic_gas, floor_gas }
     }

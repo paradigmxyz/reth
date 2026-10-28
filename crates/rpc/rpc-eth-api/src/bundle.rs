@@ -9,7 +9,7 @@ use alloy_rpc_types_mev::{
 };
 use reth_json_rpc::rpc;
 
-/// A subset of the `EthBundleApi` API interface that only supports `eth_callBundle`.
+/// A subset of the [`EthBundleApiServer`] API interface that only supports `eth_callBundle`.
 #[cfg_attr(not(feature = "client"), rpc(server, namespace = "eth"))]
 #[cfg_attr(feature = "client", rpc(server, client, namespace = "eth"))]
 pub trait EthCallBundleApi {
