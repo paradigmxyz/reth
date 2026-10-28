@@ -1133,6 +1133,26 @@ mod tests {
         );
     }
 
+    /// An empty percentile list should omit rewards, like geth
+    #[tokio::test]
+    async fn test_fee_history_empty_percentiles() {
+        let block_count = 10;
+        let newest_block = 1337;
+
+        let (eth_api, _, _) =
+            prepare_eth_api(newest_block, None, block_count, MockEthProvider::default());
+
+        let fee_history = eth_api
+            .fee_history(U64::from(block_count), newest_block.into(), Some(vec![]))
+            .await
+            .unwrap();
+
+        assert!(
+            fee_history.reward.is_none(),
+            "empty: no percentiles were requested, so there should be no rewards result"
+        );
+    }
+
     #[tokio::test]
     async fn call_allowance_respects_rpc_gas_cap() {
         use alloy_rpc_types_trace::{parity::TraceType, tracerequest::TraceCallRequest};
