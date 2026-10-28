@@ -148,7 +148,7 @@ pub trait BytecodeReader {
 /// the parent block. For example, in order to trace block `n`, the state after block `n - 1` needs
 /// to be used, since block `n` was executed on its parent block's state.
 #[auto_impl(&, Box, Arc)]
-pub trait StateProviderFactory: BlockIdReader {
+pub trait StateProviderFactory: BlockIdReader + Sync {
     /// The node primitive types.
     type Primitives: NodePrimitives;
 

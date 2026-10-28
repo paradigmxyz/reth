@@ -90,6 +90,7 @@ impl SlotPreimages {
             cursor.put(hashed_slot.as_slice(), plain_slot.as_slice(), WriteFlags::empty())?;
         }
 
+        drop(cursor);
         tx.commit()?;
 
         trace!(target: "stages::slot_preimages", count = entries.len(), "Inserted slot preimages");

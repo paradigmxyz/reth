@@ -9495,7 +9495,6 @@ dependencies = [
  "crossbeam-queue",
  "dashmap",
  "derive_more",
- "parking_lot",
  "reth-mdbx-sys",
  "smallvec",
  "tempfile",

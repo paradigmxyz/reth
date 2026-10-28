@@ -964,18 +964,18 @@ where
         + StorageSettingsCache,
 {
     type AccountTrieCursor<'a>
-        = InMemoryTrieCursor<'a, Box<dyn TrieCursor + Send + 'a>>
+        = InMemoryTrieCursor<'a, Box<dyn TrieCursor + 'a>>
     where
         Self: 'a;
 
     type StorageTrieCursor<'a>
-        = InMemoryTrieCursor<'a, Box<dyn TrieStorageCursor + Send + 'a>>
+        = InMemoryTrieCursor<'a, Box<dyn TrieStorageCursor + 'a>>
     where
         Self: 'a;
 
     fn account_trie_cursor(&self) -> Result<Self::AccountTrieCursor<'_>, DatabaseError> {
         let overlay = self.state_trie_overlay(true).map_err(into_database_error)?;
-        let cursor: Box<dyn TrieCursor + Send> = if self.is_v2 {
+        let cursor: Box<dyn TrieCursor> = if self.is_v2 {
             Box::new(DatabaseAccountTrieCursor::<_, PackedKeyAdapter>::new(
                 self.provider().tx().cursor_read::<PackedAccountsTrie>()?,
             ))
@@ -992,7 +992,7 @@ where
         hashed_address: B256,
     ) -> Result<Self::StorageTrieCursor<'_>, DatabaseError> {
         let overlay = self.state_trie_overlay(true).map_err(into_database_error)?;
-        let cursor: Box<dyn TrieStorageCursor + Send> = if self.is_v2 {
+        let cursor: Box<dyn TrieStorageCursor> = if self.is_v2 {
             Box::new(DatabaseStorageTrieCursor::<_, PackedKeyAdapter>::new(
                 self.provider().tx().cursor_dup_read::<PackedStoragesTrie>()?,
                 hashed_address,

@@ -67,7 +67,7 @@ External reads while the node is syncing or processing blocks:
 
 ### Disabling long-lived read transactions:
 
-By default long lived read transactions are terminated after a few minutes, this is because long read transaction can cause the free list to grow if changes to the database are made (reth node is running).
+By default long lived read transactions time out after a few minutes, this is because long read transaction can cause the free list to grow if changes to the database are made (reth node is running). Every read on a timed out transaction fails, and it keeps its snapshot until it is dropped.
 To opt out of this, this safety mechanism can be disabled:
 
 ```rust

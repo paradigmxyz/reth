@@ -107,7 +107,7 @@ impl<K: TransactionKind> Tx<K> {
     }
 
     /// Create db Cursor
-    pub fn new_cursor<T: Table>(&self) -> Result<Cursor<K, T>, DatabaseError> {
+    pub fn new_cursor<T: Table>(&self) -> Result<Cursor<'_, K, T>, DatabaseError> {
         let inner = self
             .inner
             .cursor_with_dbi(self.get_dbi::<T>()?)
@@ -312,9 +312,12 @@ impl<K: TransactionKind> Drop for MetricsHandler<K> {
 
 impl TableImporter for Tx<RW> {}
 
-impl<K: TransactionKind> DbTx for Tx<K> {
-    type Cursor<T: Table> = Cursor<K, T>;
-    type DupCursor<T: DupSort> = Cursor<K, T>;
+// SAFETY: Besides `Send` fields, a cursor holds only a libmdbx cursor pointer and a reference to
+// the transaction, and MDBX allows a transaction and its cursors to move between threads together.
+// `Tx` is not `Sync`, so its cursors never need to move on their own.
+unsafe impl<K: TransactionKind> DbTx for Tx<K> {
+    type Cursor<'tx, T: Table> = Cursor<'tx, K, T>;
+    type DupCursor<'tx, T: DupSort> = Cursor<'tx, K, T>;
 
     fn get<T: Table>(&self, key: T::Key) -> Result<Option<<T as Table>::Value>, DatabaseError> {
         self.get_by_encoded_key::<T>(&key.encode())
@@ -356,12 +359,12 @@ impl<K: TransactionKind> DbTx for Tx<K> {
     }
 
     // Iterate over read only values in database.
-    fn cursor_read<T: Table>(&self) -> Result<Self::Cursor<T>, DatabaseError> {
+    fn cursor_read<T: Table>(&self) -> Result<Self::Cursor<'_, T>, DatabaseError> {
         self.new_cursor()
     }
 
     /// Iterate over read only values in database.
-    fn cursor_dup_read<T: DupSort>(&self) -> Result<Self::DupCursor<T>, DatabaseError> {
+    fn cursor_dup_read<T: DupSort>(&self) -> Result<Self::DupCursor<'_, T>, DatabaseError> {
         self.new_cursor()
     }
 
@@ -440,8 +443,8 @@ impl Tx<RW> {
 }
 
 impl DbTxMut for Tx<RW> {
-    type CursorMut<T: Table> = Cursor<RW, T>;
-    type DupCursorMut<T: DupSort> = Cursor<RW, T>;
+    type CursorMut<'tx, T: Table> = Cursor<'tx, RW, T>;
+    type DupCursorMut<'tx, T: DupSort> = Cursor<'tx, RW, T>;
 
     fn put<T: Table>(&self, key: T::Key, value: T::Value) -> Result<(), DatabaseError> {
         self.put::<T>(PutKind::Upsert, key, value)
@@ -475,11 +478,11 @@ impl DbTxMut for Tx<RW> {
         Ok(())
     }
 
-    fn cursor_write<T: Table>(&self) -> Result<Self::CursorMut<T>, DatabaseError> {
+    fn cursor_write<T: Table>(&self) -> Result<Self::CursorMut<'_, T>, DatabaseError> {
         self.new_cursor()
     }
 
-    fn cursor_dup_write<T: DupSort>(&self) -> Result<Self::DupCursorMut<T>, DatabaseError> {
+    fn cursor_dup_write<T: DupSort>(&self) -> Result<Self::DupCursorMut<'_, T>, DatabaseError> {
         self.new_cursor()
     }
 }
