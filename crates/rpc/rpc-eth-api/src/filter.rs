@@ -3,6 +3,7 @@
 use alloy_json_rpc::RpcObject;
 use alloy_rpc_types_eth::{Filter, FilterChanges, FilterId, PendingTransactionFilterKind};
 use jsonrpsee::{core::RpcResult, proc_macros::rpc};
+use reth_rpc_eth_types::logs_v2::{LogsV2Filter, LogsV2Result};
 use std::future::Future;
 
 /// Rpc Interface for poll-based ethereum filter API.
@@ -39,6 +40,15 @@ pub trait EthFilterApi<T: RpcObject, L: RpcObject> {
     /// Returns logs matching given filter object.
     #[method(name = "getLogs")]
     async fn logs(&self, filter: Filter) -> RpcResult<Vec<L>>;
+
+    /// Returns logs matching the filter, one page at a time.
+    ///
+    /// The scan starts at `fromBlock` or after the `after` cursor, which must be on the canonical
+    /// chain. The response's `nextCursor` resumes the scan, possibly inside a block.
+    ///
+    /// Prototype based on <https://github.com/ethereum/execution-apis/pull/900>.
+    #[method(name = "getLogsV2")]
+    async fn logs_v2(&self, filter: LogsV2Filter) -> RpcResult<LogsV2Result>;
 }
 
 /// Limits for logs queries
