@@ -443,6 +443,9 @@ impl<N: ProviderNodeTypes> HeaderProvider for BlockchainProvider<N> {
 }
 
 impl<N: ProviderNodeTypes> BlockHashReader for BlockchainProvider<N> {
+    fn block_timestamp(&self, number: BlockNumber) -> ProviderResult<Option<u64>> {
+        self.consistent_provider()?.block_timestamp(number)
+    }
     fn block_hash(&self, number: u64) -> ProviderResult<Option<B256>> {
         self.consistent_provider()?.block_hash(number)
     }

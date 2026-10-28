@@ -3,7 +3,7 @@
 use super::{Call, LoadPendingBlock};
 use crate::{AsEthApiError, FromEthApiError, IntoEthApiError};
 use alloy_evm::overrides::{apply_block_overrides, apply_state_overrides};
-use alloy_network::{NetworkTransactionBuilder, TransactionBuilder, TransactionBuilder4844};
+use alloy_network::{NetworkTransactionBuilder, TransactionBuilder};
 use alloy_primitives::{TxKind, U256};
 use alloy_rpc_types_eth::{state::EvmOverrides, BlockId};
 use futures::Future;
@@ -88,14 +88,11 @@ pub trait EstimateCall: Call {
                 request.as_mut().signatures = Some(Vec::new());
             }
             if request.as_ref().eip8141_fees.is_none() {
-                if request.as_ref().max_fee_per_gas().is_none() {
-                    request.as_mut().set_max_fee_per_gas(0);
+                if request.as_ref().max_fee.is_none() {
+                    request.as_mut().max_fee = Some(U256::MAX);
                 }
                 if request.as_ref().max_priority_fee_per_gas().is_none() {
                     request.as_mut().set_max_priority_fee_per_gas(0);
-                }
-                if request.as_ref().max_fee_per_blob_gas.is_none() {
-                    request.as_mut().set_max_fee_per_blob_gas(0);
                 }
             }
         } else {
@@ -372,7 +369,7 @@ pub trait EstimateCall: Call {
                 }) {
                     return Err(invalid("signed frame transactions must include nonceKeys"));
                 }
-                request.as_mut().nonce_keys = Some(vec![U256::ZERO]);
+                request.as_mut().nonce_keys = Some(vec![]);
             }
             let frames =
                 request.as_ref().frames.as_ref().ok_or_else(|| invalid("missing frames"))?;
@@ -407,6 +404,28 @@ pub trait EstimateCall: Call {
             let mut cap = block_limit;
             if self.call_gas_limit() != 0 {
                 cap = cap.min(self.call_gas_limit());
+            }
+            // Initial probes must fit the signed fee budget before gas limits can be refined.
+            if let Some(budget) = request
+                .as_ref()
+                .max_fee
+                .or_else(|| request.as_ref().eip8141_fees.map(|fees| fees.max_fee))
+            {
+                let block_overrides = overrides.block.as_ref();
+                let base_fee = block_overrides
+                    .and_then(|block| block.base_fee)
+                    .unwrap_or_else(|| U256::from(evm_env.block_env.basefee()));
+                let blob_fee =
+                    block_overrides.and_then(|block| block.blob_base_fee).unwrap_or_else(|| {
+                        U256::from(evm_env.block_env.blob_gasprice().unwrap_or_default())
+                    });
+                let blob_gas =
+                    request.as_ref().blob_versioned_hashes.as_ref().map_or(0, |hashes| {
+                        hashes.len() as u64 * alloy_eips::eip4844::DATA_GAS_PER_BLOB
+                    });
+                let affordable_gas = frame_fee_gas_limit(budget, base_fee, blob_fee, blob_gas)
+                    .ok_or_else(|| invalid("frame fee budget does not cover blob base fees"))?;
+                cap = cap.min(affordable_gas);
             }
             for frame in request.as_mut().frames.as_mut().unwrap() {
                 frame.execution_gas.get_or_insert(0);
@@ -630,4 +649,42 @@ pub fn update_estimated_gas_range<Halt>(
     };
 
     Ok(())
+}
+
+fn frame_fee_gas_limit(budget: U256, base_fee: U256, blob_fee: U256, blob_gas: u64) -> Option<u64> {
+    let remaining = budget.checked_sub(blob_fee.checked_mul(U256::from(blob_gas))?)?;
+    Some(if base_fee.is_zero() { u64::MAX } else { (remaining / base_fee).saturating_to() })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::frame_fee_gas_limit;
+    use alloy_primitives::U256;
+    use revm::context::transaction::FrameTransaction;
+
+    #[test]
+    fn frame_fee_gas_limit_agrees_with_execution_budget_validation() {
+        for (budget, base_fee, blob_fee, blob_gas) in [
+            (1200, 10, 100, 2),
+            (1201, 10, 100, 2),
+            (100, 3, 0, 0),
+            (0, 10, 0, 0),
+            (200, 0, 100, 2),
+        ] {
+            let payload = FrameTransaction { max_fee: U256::from(budget), ..Default::default() };
+            let cap = frame_fee_gas_limit(
+                payload.max_fee,
+                U256::from(base_fee),
+                U256::from(blob_fee),
+                blob_gas,
+            )
+            .unwrap();
+            assert!(payload.fee_budget(cap, base_fee, blob_gas, blob_fee).is_some());
+            if cap < u64::MAX {
+                assert!(payload.fee_budget(cap + 1, base_fee, blob_gas, blob_fee).is_none());
+            }
+        }
+        assert!(frame_fee_gas_limit(U256::from(199), U256::from(10), U256::from(100), 2).is_none());
+        assert!(frame_fee_gas_limit(U256::MAX, U256::ZERO, U256::MAX, 2).is_none());
+    }
 }

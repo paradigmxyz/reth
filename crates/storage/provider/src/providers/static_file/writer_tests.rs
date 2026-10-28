@@ -34,6 +34,28 @@ mod tests {
             .expect("Failed to build static file provider")
     }
 
+    #[test]
+    fn header_timestamps_are_available_for_fork_transitions() {
+        use alloy_consensus::Header;
+        use reth_storage_api::BlockHashReader;
+
+        let (static_dir, _) = create_test_static_files_dir();
+        let provider = setup_test_provider(&static_dir, 10);
+        let mut writer = provider.latest_writer(StaticFileSegment::Headers).unwrap();
+        for (number, timestamp) in [(0, 12), (1, 30)] {
+            let header = Header { number, timestamp, ..Default::default() };
+            writer.append_header(&header, &header.hash_slow()).unwrap();
+        }
+        writer.commit().unwrap();
+        drop(writer);
+        assert_eq!(provider.block_timestamp(0).unwrap(), Some(12));
+        assert_eq!(provider.block_timestamp(1).unwrap(), Some(30));
+        assert_eq!(provider.block_timestamp(100).unwrap(), None);
+        let jar =
+            provider.get_segment_provider_for_block(StaticFileSegment::Headers, 0, None).unwrap();
+        assert_eq!(jar.block_timestamp(0).unwrap(), Some(12));
+    }
+
     /// Generates test changeset data for a block.
     fn generate_test_changeset(block_num: u64, num_changes: usize) -> Vec<AccountBeforeTx> {
         (0..num_changes)

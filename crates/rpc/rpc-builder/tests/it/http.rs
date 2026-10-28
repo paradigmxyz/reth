@@ -536,15 +536,7 @@ where
     C: ClientT + SubscriptionClientT + Sync,
 {
     let block_id = BlockId::Number(BlockNumberOrTag::default());
-    let trace_filter = TraceFilter {
-        from_block: Default::default(),
-        to_block: Default::default(),
-        from_address: Default::default(),
-        to_address: Default::default(),
-        mode: Default::default(),
-        after: None,
-        count: None,
-    };
+    let trace_filter = TraceFilter::default();
 
     TraceApiClient::<TransactionRequest>::trace_raw_transaction(
         client,
@@ -1735,7 +1727,7 @@ async fn test_eth_get_transaction_count_rpc_call() {
         rpc_params![
             "0x407d73d8a49eeb85d32cf465507dd71d507100c1", // Address
             "latest",                                     // Block number or tag
-            ["0x0"],                                      // Legacy nonce key
+            Vec::<U256>::new(),                           // Legacy nonce behavior
             true                                          // Additional field
         ],
     )

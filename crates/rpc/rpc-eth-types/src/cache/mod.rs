@@ -834,7 +834,8 @@ fn revm_account_bal_heap_size(account: &RevmAccountBal) -> usize {
 }
 
 fn revm_account_info_bal_heap_size(account_info: &RevmAccountInfoBal) -> usize {
-    revm_bal_writes_heap_size(&account_info.nonce, |_| 0) +
+    account_info.code_adoptions.len() * core::mem::size_of::<alloy_eip7928::BlockAccessIndex>() +
+        revm_bal_writes_heap_size(&account_info.nonce, |_| 0) +
         revm_bal_writes_heap_size(&account_info.balance, |_| 0) +
         revm_bal_writes_heap_size(&account_info.code, revm_code_write_heap_size)
 }

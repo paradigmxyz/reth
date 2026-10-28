@@ -452,7 +452,7 @@ mod tests {
 
         assert_eq!(frame_tx.sender, address);
         assert_eq!(frame_tx.nonce, nonce);
-        assert_eq!(frame_tx.nonce_keys, Some(vec![U256::ZERO]));
+        assert_eq!(frame_tx.nonce_keys, Some(vec![]));
         assert_eq!(frame_tx.chain_id, 1);
         assert_eq!(frame_tx.frames[0].limits, limits);
         assert!(frame_tx.signatures.is_empty());
@@ -486,11 +486,15 @@ mod tests {
 
         assert_eq!(frame_tx.sender, address);
         assert_eq!(frame_tx.nonce, nonce);
-        assert_eq!(frame_tx.nonce_keys, Some(vec![U256::ZERO]));
+        assert_eq!(frame_tx.nonce_keys, Some(vec![]));
         assert_eq!(frame_tx.chain_id, 1);
         assert_eq!(frame_tx.frames[0].limits, limits);
         assert_eq!(frame_tx.signatures.len(), 1);
         assert!(frame_tx.signatures[0].signature.is_empty());
+        let mut completed = frame_tx.clone();
+        completed.signatures[0].signature = Bytes::from(vec![0; 65]);
+        let fee_rate = U256::from(2_000_000_000u64) + frame_tx.fees.max_priority_fee_per_gas;
+        assert!(frame_tx.fees.max_fee >= U256::from(completed.gas_limit()) * fee_rate);
         let json = serde_json::to_value(&filled).unwrap();
         assert_eq!(json["tx"]["signatures"][0]["scheme"], "0x1");
         assert!(json["tx"]["signatures"][0].get("signature").is_none());
@@ -587,14 +591,14 @@ mod tests {
             mock_eth_api(AddressMap::from_iter([(address, ExtendedAccount::new(0, U256::MAX))]));
         let request: TransactionRequest = serde_json::from_value(serde_json::json!({
             "type":"0x6", "from":address, "chainId":"0x1", "nonce":"0x0",
-            "maxFeePerGas":"0x0", "maxPriorityFeePerGas":"0x0", "maxFeePerBlobGas":"0x0",
+            "maxFee":"0x0", "maxPriorityFeePerGas":"0x0",
             "frames":[{"mode":"0x1", "flags":"0x3", "executionGas":"0xafc8", "stateGas":"0x0"}],
             "signatures":[{"scheme":"0x1", "signature": Bytes::from(vec![1; 65])}]
         }))
         .unwrap();
         let error = api.fill_transaction(request.clone()).await.unwrap_err();
         assert!(error.to_string().contains("signed frame transactions must include nonceKeys"));
-        for keys in [vec![U256::ZERO], vec![U256::from(1), U256::from(2)]] {
+        for keys in [vec![], vec![U256::ZERO], vec![U256::from(1), U256::from(2)]] {
             let mut request = request.clone();
             request.nonce_keys = Some(keys.clone());
             let expected = request.clone().build_8141().unwrap();
@@ -646,11 +650,10 @@ mod tests {
             .converter()
             .build_simulate_v1_transaction(TransactionRequest {
                 nonce: Some(0),
-                nonce_keys: Some(vec![U256::ZERO]),
+                nonce_keys: Some(vec![]),
                 gas: None,
-                max_fee_per_gas: Some(0),
+                max_fee: Some(U256::MAX),
                 max_priority_fee_per_gas: Some(0),
-                max_fee_per_blob_gas: Some(0),
                 signatures: Some(Vec::new()),
                 ..tx_req.clone()
             })

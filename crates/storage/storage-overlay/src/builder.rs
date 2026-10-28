@@ -66,6 +66,8 @@ impl StateTrieOverlay {
 pub struct ExecutionOverlay {
     /// In-memory block hashes in ascending block-number order.
     block_hashes: Vec<BlockNumHash>,
+    /// Timestamps of the same in-memory ancestors, used at timestamp fork boundaries.
+    block_timestamps: Vec<(u64, u64)>,
     /// Account state by address, without database-context-local [`AccountInfo::account_id`] hints.
     accounts: AddressMap<Option<AccountInfo>>,
     /// Storage values by address and slot.
@@ -80,6 +82,12 @@ pub struct ExecutionOverlay {
 }
 
 impl ExecutionOverlay {
+    /// Returns an in-memory ancestor's timestamp.
+    pub fn block_timestamp(&self, number: u64) -> Option<u64> {
+        self.block_timestamps
+            .iter()
+            .find_map(|(block, timestamp)| (*block == number).then_some(*timestamp))
+    }
     /// Returns the in-memory block hashes in ascending block-number order.
     pub const fn block_hashes(&self) -> &[BlockNumHash] {
         self.block_hashes.as_slice()
@@ -133,6 +141,8 @@ impl ExecutionOverlay {
     /// Extends this overlay with the execution state of a later block.
     pub(crate) fn extend_block<N: NodePrimitives>(&mut self, block: &ExecutedBlock<N>) {
         self.block_hashes.push(block.recovered_block().num_hash());
+        self.block_timestamps
+            .push((block.recovered_block().number(), block.recovered_block().timestamp()));
         self.extend_state(&block.execution_output.state);
     }
 
@@ -1306,6 +1316,22 @@ mod tests {
         let (trie, state) = builder.resolve_state_trie_overlays(parent_hash).unwrap();
         assert!(trie.is_empty());
         assert!(state.is_empty());
+    }
+
+    #[test]
+    fn execution_overlay_retains_ancestor_timestamps() {
+        let blocks = test_blocks();
+        let mut overlay = ExecutionOverlay::default();
+        for block in &blocks {
+            overlay.extend_block(block);
+        }
+        for block in &blocks {
+            assert_eq!(
+                overlay.block_timestamp(block.block_number()),
+                Some(block.recovered_block().timestamp())
+            );
+        }
+        assert_eq!(overlay.block_timestamp(u64::MAX), None);
     }
 
     #[test]

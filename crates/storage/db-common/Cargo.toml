@@ -28,6 +28,7 @@ reth-execution-errors.workspace = true
 alloy-consensus.workspace = true
 alloy-genesis.workspace = true
 alloy-primitives.workspace = true
+revm.workspace = true
 
 # misc
 eyre.workspace = true

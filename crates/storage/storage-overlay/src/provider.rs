@@ -457,6 +457,14 @@ where
         self.provider().block_hash(number)
     }
 
+    fn block_timestamp(&self, number: BlockNumber) -> ProviderResult<Option<u64>> {
+        let (overlay, _) = self.execution_overlay()?;
+        if let Some(timestamp) = overlay.block_timestamp(number) {
+            return Ok(Some(timestamp));
+        }
+        self.provider().block_timestamp(number)
+    }
+
     fn canonical_hashes_range(
         &self,
         start: BlockNumber,

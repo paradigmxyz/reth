@@ -2662,6 +2662,17 @@ impl<N: NodePrimitives<BlockHeader: Value>> HeaderProvider for StaticFileProvide
 }
 
 impl<N: NodePrimitives> BlockHashReader for StaticFileProvider<N> {
+    fn block_timestamp(&self, number: BlockNumber) -> ProviderResult<Option<u64>> {
+        self.get_segment_provider_for_block(StaticFileSegment::Headers, number, None)
+            .and_then(|provider| provider.block_timestamp(number))
+            .or_else(|err| {
+                if let ProviderError::MissingStaticFileBlock(_, _) = err {
+                    Ok(None)
+                } else {
+                    Err(err)
+                }
+            })
+    }
     fn block_hash(&self, num: u64) -> ProviderResult<Option<B256>> {
         self.get_segment_provider_for_block(StaticFileSegment::Headers, num, None)
             .and_then(|provider| provider.block_hash(num))

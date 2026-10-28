@@ -9,7 +9,7 @@ use crate::{
     TransactionOrigin,
 };
 use alloy_consensus::{transaction::TxHashRef, BlockHeader, Transaction};
-use alloy_eips::{BlockNumberOrTag, Decodable2718};
+use alloy_eips::{BlockNumberOrTag, Decodable2718, Typed2718};
 use alloy_primitives::{
     map::{AddressSet, HashSet},
     Address, BlockHash, BlockNumber, Bytes,
@@ -336,6 +336,10 @@ pub async fn maintain_transaction_pool<N, Client, P, St>(
 
                 let chain_spec = client.chain_spec();
 
+                if chain_spec.is_bogota_active_at_timestamp(new_tip.timestamp()) {
+                    evict_retired_key_transactions(&pool, new_state.state());
+                }
+
                 // fees for the next block: `new_tip+1`
                 let pending_block_base_fee = chain_spec
                     .next_block_base_fee(new_tip.header(), new_tip.timestamp())
@@ -449,6 +453,10 @@ pub async fn maintain_transaction_pool<N, Client, P, St>(
                 let (blocks, state) = new.inner();
                 let tip = blocks.tip();
                 let chain_spec = client.chain_spec();
+
+                if chain_spec.is_bogota_active_at_timestamp(tip.timestamp()) {
+                    evict_retired_key_transactions(&pool, state.state());
+                }
 
                 // fees for the next block: `tip+1`
                 let pending_block_base_fee = chain_spec
@@ -644,6 +652,36 @@ impl MaintainedPoolState {
     #[inline]
     const fn is_drifted(&self) -> bool {
         matches!(self, Self::Drifted)
+    }
+}
+
+/// EIP-8298 retires ECDSA origination when an account adopts regular code.
+fn evict_retired_key_transactions<P: TransactionPool>(
+    pool: &P,
+    state: &revm::database::BundleState,
+) {
+    for (address, account) in &state.state {
+        let Some(info) = &account.info else { continue };
+        if info.is_empty_code_hash() ||
+            account
+                .original_info
+                .as_ref()
+                .is_some_and(|original| original.code_hash == info.code_hash)
+        {
+            continue
+        }
+        let code = info.code.as_ref().or_else(|| state.contracts.get(&info.code_hash));
+        if code.is_some_and(|code| !code.is_eip7702()) {
+            let hashes = pool
+                .get_transactions_by_sender(*address)
+                .into_iter()
+                .filter(|tx| !tx.transaction.is_eip8141())
+                .map(|tx| *tx.hash())
+                .collect::<Vec<_>>();
+            if !hashes.is_empty() {
+                pool.remove_transactions(hashes);
+            }
+        }
     }
 }
 
@@ -877,6 +915,43 @@ mod tests {
     use reth_fs_util as fs;
     use reth_provider::test_utils::{ExtendedAccount, MockEthProvider};
     use reth_tasks::Runtime;
+
+    #[tokio::test]
+    async fn adopted_regular_code_evicts_pending_ecdsa_transactions() {
+        use crate::test_utils::{testing_pool, MockTransaction};
+        use revm::{
+            database::{AccountStatus, BundleAccount, BundleState},
+            state::{AccountInfo, Bytecode},
+        };
+        for (code, evicted) in [
+            (Bytecode::new_legacy(Bytes::from_static(&[0x00])), true),
+            (Bytecode::new_eip7702(Address::repeat_byte(0x22)), false),
+            (Bytecode::default(), false),
+        ] {
+            let pool = testing_pool();
+            let tx = MockTransaction::eip1559();
+            let sender = tx.sender();
+            let hash = *tx.hash();
+            pool.add_transaction(TransactionOrigin::External, tx).await.unwrap();
+            let original =
+                AccountInfo::default().with_code(Bytecode::new_eip7702(Address::repeat_byte(0x11)));
+            let mut info = AccountInfo::default().with_code(code.clone());
+            let mut state = BundleState::default();
+            state.contracts.insert(info.code_hash, code);
+            info.code = None;
+            state.state.insert(
+                sender,
+                BundleAccount::new(
+                    Some(original),
+                    Some(info),
+                    Default::default(),
+                    AccountStatus::Changed,
+                ),
+            );
+            evict_retired_key_transactions(&pool, &state);
+            assert_eq!(pool.get(&hash).is_none(), evicted);
+        }
+    }
 
     #[test]
     fn changed_acc_entry() {

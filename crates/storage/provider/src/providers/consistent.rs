@@ -495,6 +495,10 @@ impl<N: ProviderNodeTypes> HeaderProvider for ConsistentProvider<N> {
 }
 
 impl<N: ProviderNodeTypes> BlockHashReader for ConsistentProvider<N> {
+    fn block_timestamp(&self, number: BlockNumber) -> ProviderResult<Option<u64>> {
+        Ok(reth_storage_api::HeaderProvider::header_by_number(self, number)?
+            .map(|header| reth_primitives_traits::AlloyBlockHeader::timestamp(&header)))
+    }
     fn block_hash(&self, number: u64) -> ProviderResult<Option<B256>> {
         self.get_in_memory_or_storage_by_block(
             number.into(),

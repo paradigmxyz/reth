@@ -13,7 +13,7 @@ use alloy_consensus::{
 };
 use alloy_dyn_abi::TypedData;
 use alloy_eip7928::bal::DecodedBal;
-use alloy_eips::{eip2718::Encodable2718, BlockId};
+use alloy_eips::{eip2718::Encodable2718, eip4844::DATA_GAS_PER_BLOB, BlockId};
 use alloy_network::{NetworkTransactionBuilder, TransactionBuilder, TransactionBuilder4844};
 use alloy_primitives::{Address, Bytes, TxHash, B256, U256};
 use alloy_rpc_types_eth::{state::EvmOverrides, TransactionInfo};
@@ -617,7 +617,7 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
                 }
 
                 if request.as_ref().nonce_keys.is_none() {
-                    request.as_mut().nonce_keys = Some(vec![U256::ZERO]);
+                    request.as_mut().nonce_keys = Some(vec![]);
                 }
                 if request.as_ref().nonce().is_none() {
                     let nonce = self.next_available_nonce_for(&request).await?;
@@ -627,40 +627,70 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
                     request.as_mut().signatures = Some(Vec::new());
                 }
 
-                if request.as_ref().eip8141_fees.is_none() {
-                    if request.as_ref().max_fee_per_blob_gas().is_none() {
-                        let max_fee_per_blob_gas = if request
-                            .as_ref()
-                            .blob_versioned_hashes
-                            .as_ref()
-                            .is_some_and(|hashes| !hashes.is_empty())
-                        {
-                            self.blob_base_fee().await?.to::<u128>()
-                        } else {
-                            0
-                        };
-                        request.as_mut().set_max_fee_per_blob_gas(max_fee_per_blob_gas);
-                    }
-
-                    let tip = if let Some(tip) = request.as_ref().max_priority_fee_per_gas() {
-                        tip
-                    } else {
-                        let tip = self.suggested_priority_fee().await?.to::<u128>();
-                        request.as_mut().set_max_priority_fee_per_gas(tip);
-                        tip
-                    };
-                    if request.as_ref().max_fee_per_gas().is_none() {
-                        let header =
-                            self.provider().latest_header().map_err(Self::Error::from_eth_err)?;
-                        let base_fee =
-                            header.and_then(|h| h.base_fee_per_gas()).unwrap_or_default();
-                        request.as_mut().set_max_fee_per_gas(base_fee as u128 * 2 + tip);
-                    }
+                let needs_budget =
+                    request.as_ref().max_fee.is_none() && request.as_ref().eip8141_fees.is_none();
+                if request.as_ref().max_priority_fee_per_gas().is_none() &&
+                    request.as_ref().eip8141_fees.is_none()
+                {
+                    request.as_mut().set_max_priority_fee_per_gas(
+                        self.suggested_priority_fee().await?.to::<u128>(),
+                    );
+                }
+                if needs_budget {
+                    request.as_mut().max_fee = Some(U256::MAX);
                 }
 
                 request = self
                     .fill_frame_gas_at(request, BlockId::pending(), EvmOverrides::default())
                     .await?;
+                if needs_budget {
+                    let (evm_env, _) = self.evm_env_at(BlockId::pending()).await?;
+                    let preview = self.converter().tx_env(request.clone(), &evm_env)?;
+                    let gas_params = &evm_env.cfg_env.gas_params;
+                    let missing_signature_bytes = request
+                        .as_ref()
+                        .signatures
+                        .as_deref()
+                        .unwrap_or_default()
+                        .iter()
+                        .filter(|signature| signature.signature.is_empty())
+                        .filter_map(|signature| signature.scheme.signature_length())
+                        .fold(0u64, |sum, length| sum.saturating_add(length as u64));
+                    let signature_byte_cost = gas_params
+                        .tx_token_cost()
+                        .max(gas_params.tx_floor_cost_per_token())
+                        .saturating_mul(
+                            gas_params
+                                .tx_token_non_zero_byte_multiplier()
+                                .max(gas_params.tx_floor_token_zero_byte_multiplier())
+                                .max(1),
+                        );
+                    // Built-in witnesses are filled after this unsigned request is returned.
+                    let max_gas = revm::context_interface::Transaction::gas_limit(&preview)
+                        .saturating_add(
+                            missing_signature_bytes.saturating_mul(signature_byte_cost),
+                        );
+                    let header =
+                        self.provider().latest_header().map_err(Self::Error::from_eth_err)?;
+                    let base_fee = header.and_then(|h| h.base_fee_per_gas()).unwrap_or_default();
+                    let tip = request.as_ref().max_priority_fee_per_gas().unwrap_or_default();
+                    let blob_gas = request
+                        .as_ref()
+                        .blob_versioned_hashes
+                        .as_ref()
+                        .map_or(0, |hashes| hashes.len() as u64 * DATA_GAS_PER_BLOB);
+                    let blob_fee =
+                        if blob_gas == 0 { U256::ZERO } else { self.blob_base_fee().await? };
+                    request.as_mut().max_fee = Some(
+                        U256::from(max_gas)
+                            .saturating_mul(U256::from(base_fee) * U256::from(2) + U256::from(tip))
+                            .saturating_add(
+                                U256::from(blob_gas)
+                                    .saturating_mul(blob_fee)
+                                    .saturating_mul(U256::from(2)),
+                            ),
+                    );
+                }
                 let tx = self.converter().build_simulate_v1_transaction(request)?;
                 let raw = tx.encoded_2718().into();
                 return Ok(FillTransaction { raw, tx })

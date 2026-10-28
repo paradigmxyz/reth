@@ -5,31 +5,31 @@ simulator="${1:?missing simulator name}"
 
 case "${simulator}" in
     ethereum/eels/consume-engine)
-        simulator_image="/tmp/eels_engine.tar"
+        simulator_image="/tmp/eels_engine.tar.gz"
         ;;
     ethereum/eels/consume-rlp)
-        simulator_image="/tmp/eels_rlp.tar"
+        simulator_image="/tmp/eels_rlp.tar.gz"
         ;;
     ethereum/eels/execute-blobs)
-        simulator_image="/tmp/eels_blobs.tar"
+        simulator_image="/tmp/eels_blobs.tar.gz"
         ;;
     ethereum/engine)
-        simulator_image="/tmp/engine.tar"
+        simulator_image="/tmp/engine.tar.gz"
         ;;
     devp2p)
-        simulator_image="/tmp/devp2p.tar"
+        simulator_image="/tmp/devp2p.tar.gz"
         ;;
     ethereum/rpc-compat)
-        simulator_image="/tmp/rpc_compat.tar"
+        simulator_image="/tmp/rpc_compat.tar.gz"
         ;;
     smoke/genesis)
-        simulator_image="/tmp/smoke_genesis.tar"
+        simulator_image="/tmp/smoke_genesis.tar.gz"
         ;;
     smoke/network)
-        simulator_image="/tmp/smoke_network.tar"
+        simulator_image="/tmp/smoke_network.tar.gz"
         ;;
     ethereum/sync)
-        simulator_image="/tmp/ethereum_sync.tar"
+        simulator_image="/tmp/ethereum_sync.tar.gz"
         ;;
     *)
         echo "unknown simulator: ${simulator}" >&2
@@ -40,7 +40,7 @@ esac
 # Only the selected simulator needs to be loaded. The EELS images contain the
 # fixture cache and loading both of them can exhaust the runner's disk.
 IMAGES=(
-    "/tmp/hiveproxy.tar"
+    "/tmp/hiveproxy.tar.gz"
     "/tmp/reth_image.tar"
     "${simulator_image}"
 )

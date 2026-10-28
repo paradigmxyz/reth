@@ -149,10 +149,10 @@ impl TransactionId {
         Self::new(self.sender, self.next_nonce())
     }
 
-    /// Returns the nonce that follows immediately after this one.
+    /// Returns the next nonce, saturating at the exhausted single-use nonce sentinel.
     #[inline]
     pub const fn next_nonce(&self) -> u64 {
-        self.nonce + 1
+        self.nonce.saturating_add(1)
     }
 }
 

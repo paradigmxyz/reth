@@ -885,10 +885,7 @@ impl From<Genesis> for ChainSpec {
             None
         };
 
-        // Bogota activates EIP-8141 and the EIP-8250 keyed-nonce schema together on this
-        // frames devnet. Keep accepting genesis files that only contain Amsterdam, as older Hive
-        // genesis mappers do not emit a separate Bogota timestamp.
-        let bogota_time = genesis.config.bogota_time.or(genesis.config.amsterdam_time);
+        let bogota_time = genesis.config.bogota_time;
 
         // Time-based hardforks
         let time_hardfork_opts = [
@@ -1278,6 +1275,15 @@ impl From<&Arc<ChainSpec>> for ChainSpecBuilder {
 }
 
 impl<H: BlockHeader> EthExecutorSpec for ChainSpec<H> {
+    fn eip8253_accounts(&self) -> &[Address] {
+        self.genesis.config.eip8253_accounts.as_deref().unwrap_or_else(|| {
+            if self.chain.id() == 1 && self.genesis_header.hash() == MAINNET_GENESIS_HASH {
+                &alloy_evm::eth::eip8253::MAINNET_ACCOUNTS
+            } else {
+                &[]
+            }
+        })
+    }
     fn deposit_contract_address(&self) -> Option<Address> {
         self.deposit_contract.map(|deposit_contract| deposit_contract.address)
     }
@@ -1327,6 +1333,51 @@ mod tests {
     use core::ops::Deref;
     use reth_ethereum_forks::{ForkCondition, ForkHash, ForkId, Head};
     use std::{collections::HashMap, str::FromStr};
+
+    #[test]
+    fn eip8253_lists_are_chain_specific_and_alloc_preserves_legacy_storage() {
+        let accounts = &alloy_evm::eth::eip8253::MAINNET_ACCOUNTS;
+        assert_eq!(MAINNET.eip8253_accounts(), accounts);
+        assert!(SEPOLIA.eip8253_accounts().is_empty());
+        let mut copied_genesis = MAINNET.genesis.clone();
+        copied_genesis.config.chain_id = 1337;
+        assert!(ChainSpec::from(copied_genesis).eip8253_accounts().is_empty());
+        let alloc: std::collections::BTreeMap<Address, GenesisAccount> =
+            serde_json::from_str(include_str!("../res/genesis/bogota-eip8253-alloc.json")).unwrap();
+        assert_eq!(alloc.len(), 28);
+        assert_eq!(
+            alloc.values().map(|account| account.storage.as_ref().unwrap().len()).sum::<usize>(),
+            129
+        );
+        for address in accounts {
+            let account = &alloc[address];
+            assert_eq!(account.nonce, Some(0));
+            assert!(account.code.as_ref().is_none_or(|code| code.is_empty()));
+        }
+        let mut genesis = Genesis::default();
+        genesis.config.chain_id = 1;
+        assert!(ChainSpec::from(genesis.clone()).eip8253_accounts().is_empty());
+        genesis.config.eip8253_accounts = Some(accounts.to_vec());
+        assert_eq!(ChainSpec::from(genesis).eip8253_accounts(), accounts);
+    }
+
+    #[test]
+    fn eip8253_genesis_config_selects_fork_accounts() {
+        let accounts = [Address::repeat_byte(1), Address::repeat_byte(2)];
+        for key in ["zeroNonceStorageAccounts", "eip8253Accounts"] {
+            let mut value = serde_json::to_value(Genesis::default()).unwrap();
+            value["config"][key] = serde_json::to_value(accounts).unwrap();
+            let genesis: Genesis = serde_json::from_value(value).unwrap();
+            assert_eq!(ChainSpec::from(genesis).eip8253_accounts(), &accounts);
+        }
+
+        let mut value = serde_json::to_value(&MAINNET.genesis).unwrap();
+        value["config"]["zeroNonceStorageAccounts"] = serde_json::json!([]);
+        let genesis: Genesis = serde_json::from_value(value).unwrap();
+        let spec = ChainSpec::from(genesis);
+        assert_eq!(spec.genesis_header.hash(), MAINNET_GENESIS_HASH);
+        assert!(spec.eip8253_accounts().is_empty());
+    }
 
     fn test_hardfork_fork_ids(spec: &ChainSpec, cases: &[(EthereumHardfork, ForkId)]) {
         for (hardfork, expected_id) in cases {
@@ -1382,6 +1433,7 @@ mod tests {
             let mut amsterdam_only_genesis = genesis.clone();
             amsterdam_only_genesis.config.bogota_time = None;
             let fallback = ChainSpec::from(amsterdam_only_genesis.clone());
+            assert!(!fallback.is_bogota_active_at_timestamp(0));
             for (spec, original) in
                 [(parsed, &genesis), (built, &genesis), (fallback, &amsterdam_only_genesis)]
             {
