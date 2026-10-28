@@ -12,6 +12,24 @@ ignore = [
     "RUSTSEC-2023-0089",
     # https://rustsec.org/advisories/RUSTSEC-2026-0173 proc-macro-error2 is unmaintained
     "RUSTSEC-2026-0173",
+    # https://rustsec.org/advisories/RUSTSEC-2026-0387 crypto-bigint 0.5.5 timing variability, only patched in 0.7.6 and pinned by elliptic-curve 0.13 (k256/p256)
+    "RUSTSEC-2026-0387",
+    # slatedb 0.17 (historical execution corpus) pins zstd ^0.13 and figment->serde_yaml; no slatedb release
+    # on zstd 0.14 yet. Every other zstd user is on zstd 0.14.3 / zstd-safe 8.2.0.
+    "RUSTSEC-2024-0449",
+    "RUSTSEC-2026-0391",
+    "RUSTSEC-2026-0395",
+    "RUSTSEC-2026-0396",
+    "RUSTSEC-2026-0397",
+    "RUSTSEC-2026-0398",
+    "RUSTSEC-2026-0399",
+    "RUSTSEC-2026-0400",
+    "RUSTSEC-2026-0401",
+    "RUSTSEC-2026-0402",
+    "RUSTSEC-2026-0403",
+    "RUSTSEC-2026-0404",
+    "RUSTSEC-2026-0405",
+    "RUSTSEC-2026-0406",
 ]
 
 # This section is considered when running `cargo deny check bans`.
@@ -100,4 +118,5 @@ allow-git = [
     "https://github.com/paradigmxyz/revmc",
     "https://github.com/paradigmxyz/revmc?branch=main",
     "https://github.com/TheDan64/inkwell",
+    "https://github.com/paradigmxyz/reth-core",
 ]
