@@ -589,20 +589,6 @@ fn block_access_list_decode_returns_invalid_with_null_latest_valid_hash() {
     assert_eq!(status.latest_valid_hash, None);
 }
 
-#[test]
-fn payload_block_access_list_decode_returns_invalid_with_null_latest_valid_hash() {
-    let mut test_harness = TestHarness::new(MAINNET.clone());
-    let parent_hash = test_harness.tree.state.tree_state.canonical_block_hash();
-    let error = NewPayloadError::BlockAccessListDecode(alloy_rlp::Error::LeadingZero);
-    let status = test_harness
-        .tree
-        .on_new_payload_error(error, NumHash::new(1, B256::random()), parent_hash)
-        .unwrap();
-    assert_eq!(status.latest_valid_hash, None);
-    assert!(matches!(status.status, PayloadStatusEnum::Invalid { validation_error }
-        if validation_error.starts_with("failed to decode block access list:")));
-}
-
 #[tokio::test]
 async fn test_tree_persist_blocks() {
     let tree_config = TreeConfig::default();

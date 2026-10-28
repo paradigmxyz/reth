@@ -3384,18 +3384,15 @@ where
         error!(target: "engine::tree", payload=?payload_num_hash, %error, "Invalid payload");
         // we need to convert the error to a payload status (response to the CL)
 
-        let latest_valid_hash = if error.is_block_hash_mismatch() ||
-            error.is_invalid_versioned_hashes() ||
-            error.is_block_access_list_decode()
-        {
-            // Engine-API rules:
-            // > `latestValidHash: null` if the blockHash validation has failed (<https://github.com/ethereum/execution-apis/blob/fe8e13c288c592ec154ce25c534e26cb7ce0530d/src/engine/shanghai.md?plain=1#L113>)
-            // > `latestValidHash: null` if the expected and the actual arrays don't match (<https://github.com/ethereum/execution-apis/blob/fe8e13c288c592ec154ce25c534e26cb7ce0530d/src/engine/cancun.md?plain=1#L103>)
-            // Amsterdam also requires null when the block access list cannot be decoded.
-            None
-        } else {
-            self.latest_valid_hash_for_invalid_payload(parent_hash)?
-        };
+        let latest_valid_hash =
+            if error.is_block_hash_mismatch() || error.is_invalid_versioned_hashes() {
+                // Engine-API rules:
+                // > `latestValidHash: null` if the blockHash validation has failed (<https://github.com/ethereum/execution-apis/blob/fe8e13c288c592ec154ce25c534e26cb7ce0530d/src/engine/shanghai.md?plain=1#L113>)
+                // > `latestValidHash: null` if the expected and the actual arrays don't match (<https://github.com/ethereum/execution-apis/blob/fe8e13c288c592ec154ce25c534e26cb7ce0530d/src/engine/cancun.md?plain=1#L103>)
+                None
+            } else {
+                self.latest_valid_hash_for_invalid_payload(parent_hash)?
+            };
 
         let status = PayloadStatusEnum::from(error);
         Ok(PayloadStatus::new(status, latest_valid_hash))
