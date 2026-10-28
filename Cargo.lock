@@ -8452,6 +8452,7 @@ dependencies = [
  "reth-tasks",
  "reth-trie",
  "reth-trie-db",
+ "revm",
  "serde",
  "serde_json",
  "thiserror 2.0.21",
@@ -11124,7 +11125,7 @@ dependencies = [
 [[package]]
 name = "revm"
 version = "43.0.2"
-source = "git+https://github.com/Rimeeeeee/revm?branch=bogota-devnet-2#41da2014d22b1988b79595872f7e990a35794717"
+source = "git+https://github.com/Rimeeeeee/revm?branch=bogota-devnet-2#ea397db5a932cc63649cbe00d8e1455f44ff60bb"
 dependencies = [
  "revm-bytecode",
  "revm-context",
@@ -11142,7 +11143,7 @@ dependencies = [
 [[package]]
 name = "revm-bytecode"
 version = "43.0.0"
-source = "git+https://github.com/Rimeeeeee/revm?branch=bogota-devnet-2#41da2014d22b1988b79595872f7e990a35794717"
+source = "git+https://github.com/Rimeeeeee/revm?branch=bogota-devnet-2#ea397db5a932cc63649cbe00d8e1455f44ff60bb"
 dependencies = [
  "bitvec",
  "paste",
@@ -11154,7 +11155,7 @@ dependencies = [
 [[package]]
 name = "revm-context"
 version = "43.0.2"
-source = "git+https://github.com/Rimeeeeee/revm?branch=bogota-devnet-2#41da2014d22b1988b79595872f7e990a35794717"
+source = "git+https://github.com/Rimeeeeee/revm?branch=bogota-devnet-2#ea397db5a932cc63649cbe00d8e1455f44ff60bb"
 dependencies = [
  "alloy-eip8141",
  "bitvec",
@@ -11171,7 +11172,7 @@ dependencies = [
 [[package]]
 name = "revm-context-interface"
 version = "43.0.1"
-source = "git+https://github.com/Rimeeeeee/revm?branch=bogota-devnet-2#41da2014d22b1988b79595872f7e990a35794717"
+source = "git+https://github.com/Rimeeeeee/revm?branch=bogota-devnet-2#ea397db5a932cc63649cbe00d8e1455f44ff60bb"
 dependencies = [
  "alloy-eip2930",
  "alloy-eip7702",
@@ -11187,7 +11188,7 @@ dependencies = [
 [[package]]
 name = "revm-database"
 version = "43.0.0"
-source = "git+https://github.com/Rimeeeeee/revm?branch=bogota-devnet-2#41da2014d22b1988b79595872f7e990a35794717"
+source = "git+https://github.com/Rimeeeeee/revm?branch=bogota-devnet-2#ea397db5a932cc63649cbe00d8e1455f44ff60bb"
 dependencies = [
  "alloy-eips 2.4.1",
  "derive_more",
@@ -11202,7 +11203,7 @@ dependencies = [
 [[package]]
 name = "revm-database-interface"
 version = "43.0.0"
-source = "git+https://github.com/Rimeeeeee/revm?branch=bogota-devnet-2#41da2014d22b1988b79595872f7e990a35794717"
+source = "git+https://github.com/Rimeeeeee/revm?branch=bogota-devnet-2#ea397db5a932cc63649cbe00d8e1455f44ff60bb"
 dependencies = [
  "auto_impl",
  "either",
@@ -11215,7 +11216,7 @@ dependencies = [
 [[package]]
 name = "revm-handler"
 version = "43.0.2"
-source = "git+https://github.com/Rimeeeeee/revm?branch=bogota-devnet-2#41da2014d22b1988b79595872f7e990a35794717"
+source = "git+https://github.com/Rimeeeeee/revm?branch=bogota-devnet-2#ea397db5a932cc63649cbe00d8e1455f44ff60bb"
 dependencies = [
  "alloy-eip8141",
  "auto_impl",
@@ -11234,7 +11235,7 @@ dependencies = [
 [[package]]
 name = "revm-inspector"
 version = "43.0.2"
-source = "git+https://github.com/Rimeeeeee/revm?branch=bogota-devnet-2#41da2014d22b1988b79595872f7e990a35794717"
+source = "git+https://github.com/Rimeeeeee/revm?branch=bogota-devnet-2#ea397db5a932cc63649cbe00d8e1455f44ff60bb"
 dependencies = [
  "auto_impl",
  "either",
@@ -11274,7 +11275,7 @@ dependencies = [
 [[package]]
 name = "revm-interpreter"
 version = "43.0.1"
-source = "git+https://github.com/Rimeeeeee/revm?branch=bogota-devnet-2#41da2014d22b1988b79595872f7e990a35794717"
+source = "git+https://github.com/Rimeeeeee/revm?branch=bogota-devnet-2#ea397db5a932cc63649cbe00d8e1455f44ff60bb"
 dependencies = [
  "revm-bytecode",
  "revm-context-interface",
@@ -11286,7 +11287,7 @@ dependencies = [
 [[package]]
 name = "revm-precompile"
 version = "43.0.2"
-source = "git+https://github.com/Rimeeeeee/revm?branch=bogota-devnet-2#41da2014d22b1988b79595872f7e990a35794717"
+source = "git+https://github.com/Rimeeeeee/revm?branch=bogota-devnet-2#ea397db5a932cc63649cbe00d8e1455f44ff60bb"
 dependencies = [
  "ark-bls12-381",
  "ark-bn254",
@@ -11312,7 +11313,7 @@ dependencies = [
 [[package]]
 name = "revm-primitives"
 version = "43.0.0"
-source = "git+https://github.com/Rimeeeeee/revm?branch=bogota-devnet-2#41da2014d22b1988b79595872f7e990a35794717"
+source = "git+https://github.com/Rimeeeeee/revm?branch=bogota-devnet-2#ea397db5a932cc63649cbe00d8e1455f44ff60bb"
 dependencies = [
  "alloy-primitives",
  "once_cell",
@@ -11322,7 +11323,7 @@ dependencies = [
 [[package]]
 name = "revm-state"
 version = "43.0.0"
-source = "git+https://github.com/Rimeeeeee/revm?branch=bogota-devnet-2#41da2014d22b1988b79595872f7e990a35794717"
+source = "git+https://github.com/Rimeeeeee/revm?branch=bogota-devnet-2#ea397db5a932cc63649cbe00d8e1455f44ff60bb"
 dependencies = [
  "alloy-eip7928",
  "bitflags 2.13.2",

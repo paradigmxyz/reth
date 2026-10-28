@@ -5,7 +5,7 @@ use alloy_genesis::GenesisAccount;
 use alloy_primitives::{
     keccak256,
     map::{AddressMap, B256Map, B256Set, HashMap},
-    Address, B256, U256,
+    Address, Bytes, B256, U256,
 };
 use reth_chainspec::EthChainSpec;
 use reth_codecs::Compact;
@@ -40,6 +40,7 @@ use reth_trie::{
     StateRootProgress,
 };
 use reth_trie_db::DatabaseStateRoot;
+use revm::bytecode::Bytecode as RevmBytecode;
 
 type DbStateRoot<'a, TX, A> = StateRootComputer<
     reth_trie_db::DatabaseTrieCursorFactory<&'a TX, A>,
@@ -370,17 +371,10 @@ where
 
     for (address, account) in alloc {
         let bytecode_hash = if let Some(code) = &account.code {
-            match Bytecode::new_raw_checked(code.clone()) {
-                Ok(bytecode) => {
-                    let hash = bytecode.hash_slow();
-                    contracts.insert(hash, bytecode);
-                    Some(hash)
-                }
-                Err(err) => {
-                    error!(%address, %err, "Failed to decode genesis bytecode.");
-                    return Err(DatabaseError::Other(err.to_string()).into());
-                }
-            }
+            let bytecode = state_bytecode(code.clone());
+            let hash = bytecode.hash_slow();
+            contracts.insert(hash, bytecode);
+            Some(hash)
         } else {
             None
         };
@@ -437,6 +431,12 @@ where
     trace!(target: "reth::cli", "Inserted state");
 
     Ok(())
+}
+
+/// Decode stored state without requiring its code to be a valid delegation indicator.
+fn state_bytecode(code: Bytes) -> Bytecode {
+    Bytecode::new_raw_checked(code.clone())
+        .unwrap_or_else(|_| Bytecode(RevmBytecode::new_legacy(code)))
 }
 
 /// Inserts hashes for the genesis state.
@@ -982,8 +982,7 @@ fn write_account_to_db<TX: DbTxMut>(
     seen_bytecodes: &mut B256Set,
 ) -> Result<(), eyre::Error> {
     let bytecode_hash = if let Some(code) = &genesis_account.code {
-        let bytecode = Bytecode::new_raw_checked(code.clone())
-            .map_err(|e| eyre::eyre!("Invalid bytecode for {address}: {e}"))?;
+        let bytecode = state_bytecode(code.clone());
         let hash = bytecode.hash_slow();
         if seen_bytecodes.insert(hash) {
             tx.put::<tables::Bytecodes>(hash, bytecode)?;
@@ -1070,8 +1069,7 @@ where
     N: NodePrimitives,
 {
     let bytecode_hash = if let Some(code) = &genesis_account.code {
-        let bytecode = Bytecode::new_raw_checked(code.clone())
-            .map_err(|e| eyre::eyre!("Invalid bytecode for {address}: {e}"))?;
+        let bytecode = state_bytecode(code.clone());
         let hash = bytecode.hash_slow();
         if seen_bytecodes.insert(hash) {
             tx.put::<tables::Bytecodes>(hash, bytecode)?;
@@ -1308,6 +1306,38 @@ mod tests {
         ProviderFactory, RocksDBProviderFactory,
     };
     use std::{collections::BTreeMap, sync::Arc};
+
+    #[test]
+    fn state_bytecode_preserves_malformed_delegation_indicators() {
+        for (len, version) in [(22, 0), (24, 0), (23, 1), (65_536, 0)] {
+            let mut code = vec![0; len];
+            code[..3].copy_from_slice(&[0xef, 0x01, version]);
+            let code = Bytes::from(code);
+            assert!(Bytecode::new_raw_checked(code.clone()).is_err());
+
+            let bytecode = state_bytecode(code.clone());
+            assert!(!bytecode.is_eip7702());
+            assert_eq!(bytecode.original_bytes(), code);
+            assert_eq!(bytecode.hash_slow(), keccak256(&code));
+        }
+    }
+
+    #[test]
+    fn state_bytecode_recognizes_only_valid_delegation_indicators() {
+        let target = Address::repeat_byte(0x11);
+        let delegation = RevmBytecode::new_eip7702(target).original_bytes();
+        let bytecode = state_bytecode(delegation.clone());
+        assert!(bytecode.is_eip7702());
+        assert_eq!(bytecode.eip7702_address(), Some(target));
+        assert_eq!(bytecode.original_bytes(), delegation);
+
+        for code in [Bytes::new(), Bytes::from_static(&[0x00]), Bytes::from_static(&[0xef, 0x00])] {
+            let bytecode = state_bytecode(code.clone());
+            assert!(!bytecode.is_eip7702());
+            assert_eq!(bytecode.original_bytes(), code);
+            assert_eq!(bytecode.hash_slow(), keccak256(&code));
+        }
+    }
 
     fn collect_table_entries<DB, T>(
         tx: &<DB as Database>::TX,
