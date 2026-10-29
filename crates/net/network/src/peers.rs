@@ -918,9 +918,13 @@ impl PeersManager {
     }
 
     /// Adds a trusted peer that may use a hostname instead of an IP address.
+    ///
+    /// Also promotes an existing peer entry to [`PeerKind::Trusted`], matching
+    /// [`Self::add_trusted_peer_id`]. Without this, `admin_addTrustedPeer` with a
+    /// hostname URL leaves an already-known `Basic` peer untrusted.
     pub(crate) fn add_trusted_peer_node(&mut self, trusted: TrustedPeer) {
         let peer_id = trusted.id;
-        self.trusted_peer_ids.insert(peer_id);
+        self.add_trusted_peer_id(peer_id);
         self.trusted_peers_resolver.remove(peer_id);
         self.trusted_peers_resolver.trusted_peers.push(trusted);
         self.trusted_peers_resolver.interval.reset_immediately();
@@ -3751,6 +3755,31 @@ mod tests {
         let peer = manager.peers.get(&peer_id).expect("peer should be added after resolution");
         assert!(peer.kind.is_trusted());
         assert_eq!(peer.addr.tcp().ip(), "10.0.0.1".parse::<IpAddr>().unwrap());
+    }
+
+    #[tokio::test]
+    async fn test_add_trusted_peer_node_promotes_existing_basic_peer() {
+        let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 30303);
+        let peer_id = PeerId::random();
+        let mut manager = PeersManager::default();
+
+        // Peer is already known as Basic (e.g. inbound / discovery).
+        manager.add_peer(peer_id, PeerAddr::from_tcp(addr), None);
+        assert!(!manager.peers.get(&peer_id).unwrap().kind.is_trusted());
+
+        let trusted = TrustedPeer {
+            host: url::Host::Domain("seq-0.svc".to_string()),
+            tcp_port: 30303,
+            udp_port: 30303,
+            id: peer_id,
+        };
+        manager.add_trusted_peer_node(trusted);
+
+        assert!(manager.trusted_peer_ids.contains(&peer_id));
+        assert!(
+            manager.peers.get(&peer_id).unwrap().kind.is_trusted(),
+            "hostname trusted-peer path must promote an existing Basic peer"
+        );
     }
 
     #[tokio::test]
