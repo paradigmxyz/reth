@@ -151,7 +151,12 @@ impl PeersManager {
         for trusted_peer in &trusted_nodes {
             match trusted_peer.resolve_blocking() {
                 Ok(NodeRecord { address, tcp_port, udp_port, id }) => {
+                    // The id stays trusted, only its address is subject to the IP filter.
                     trusted_peer_ids.insert(id);
+                    if !ip_filter.is_allowed(&address) {
+                        trace!(target: "net::peers", ?id, ?address, "Skipping trusted peer address not in allowed ranges");
+                        continue
+                    }
                     peers.entry(id).or_insert_with(|| {
                         Peer::trusted(PeerAddr::new_with_ports(address, tcp_port, Some(udp_port)))
                     });
@@ -170,6 +175,10 @@ impl PeersManager {
                 continue
             }
             let NodeRecord { address, tcp_port, udp_port, id } = record;
+            if !ip_filter.is_allowed(&address) {
+                trace!(target: "net::peers", ?id, ?address, "Skipping persisted peer from IP not in allowed ranges");
+                continue
+            }
             peers.entry(id).or_insert_with(|| {
                 if kind.is_trusted() {
                     trusted_peer_ids.insert(id);
@@ -185,6 +194,10 @@ impl PeersManager {
         }
 
         for NodeRecord { address, tcp_port, udp_port, id } in basic_nodes {
+            if !ip_filter.is_allowed(&address) {
+                trace!(target: "net::peers", ?id, ?address, "Skipping basic peer from IP not in allowed ranges");
+                continue
+            }
             peers.entry(id).or_insert_with(|| {
                 Peer::new(PeerAddr::new_with_ports(address, tcp_port, Some(udp_port)))
             });
@@ -1264,6 +1277,11 @@ impl PeersManager {
     fn on_resolved_peer(&mut self, peer_id: PeerId, new_record: NodeRecord) {
         if !self.trusted_peer_ids.contains(&peer_id) {
             trace!(target: "net::peers", ?peer_id, "Ignoring resolved trusted peer after removal");
+            return
+        }
+
+        if !self.ip_filter.is_allowed(&new_record.address) {
+            trace!(target: "net::peers", ?peer_id, address=?new_record.address, "Ignoring resolved trusted peer address not in allowed ranges");
             return
         }
 
@@ -3702,6 +3720,30 @@ mod tests {
         assert!(peers.on_incoming_pending_session(ip1).is_ok());
         assert!(peers.on_incoming_pending_session(ip2).is_ok());
         assert!(peers.on_incoming_pending_session(ip3).is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_ip_filter_skips_configured_peers() {
+        let allowed = NodeRecord::new("192.168.1.1:30303".parse().unwrap(), PeerId::random());
+        let trusted = NodeRecord::new("10.0.0.1:30303".parse().unwrap(), PeerId::random());
+        let persisted = NodeRecord::new("10.0.0.2:30303".parse().unwrap(), PeerId::random());
+        let basic = NodeRecord::new("10.0.0.3:30303".parse().unwrap(), PeerId::random());
+
+        let mut config = PeersConfig::test()
+            .with_ip_filter(reth_net_banlist::IpFilter::from_cidr_string("192.168.0.0/16").unwrap())
+            .with_trusted_nodes(vec![trusted.into()])
+            .with_basic_nodes(std::iter::once(basic).collect());
+        config.persisted_peers =
+            [allowed, persisted].into_iter().map(PersistedPeerInfo::from_node_record).collect();
+        let mut peers = PeersManager::new(config);
+
+        assert_eq!(peers.peers.keys().collect::<Vec<_>>(), [&allowed.id]);
+        assert!(peers.trusted_peer_ids.contains(&trusted.id));
+
+        let resolved = NodeRecord::new("192.168.1.2:30303".parse().unwrap(), trusted.id);
+        peers.on_resolved_peer(trusted.id, resolved);
+        peers.on_resolved_peer(trusted.id, trusted);
+        assert_eq!(peers.peers[&trusted.id].addr.tcp(), resolved.tcp_addr());
     }
 
     #[tokio::test]
