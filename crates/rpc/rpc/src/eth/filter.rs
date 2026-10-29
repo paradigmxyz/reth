@@ -1346,7 +1346,9 @@ impl<
         // Spawn each chunk as a separate task directly into the FuturesOrdered stream
         for chunk_headers in header_chunks {
             let filter_inner = self.filter_inner.clone();
-            let fetch = move || Self::fetch_chunk_receipts(&filter_inner, chunk_headers);
+            let (cancel_tx, cancel_rx) = oneshot::channel();
+            let fetch =
+                move || Self::fetch_chunk_receipts(&filter_inner, chunk_headers, &cancel_tx);
 
             // A parallel task occupies an additional blocking thread, so it needs its own share
             // of the blocking IO budget. Without one the chunk is fetched on this task instead.
@@ -1358,6 +1360,9 @@ impl<
                 .try_acquire_owned()
             {
                 Ok(permit) => Box::pin(async move {
+                    // Dropping this future closes the channel, including after the blocking
+                    // worker has started and can no longer be aborted.
+                    let _cancel_rx = cancel_rx;
                     let chunk_task = reth_tasks::spawn_blocking(move || {
                         let _permit = permit;
                         fetch()
@@ -1372,7 +1377,10 @@ impl<
                         }
                     }
                 }),
-                Err(_) => Box::pin(async move { fetch() }),
+                Err(_) => Box::pin(async move {
+                    let _cancel_rx = cancel_rx;
+                    fetch()
+                }),
             };
 
             self.pending_tasks.push_back(chunk_task);
@@ -1383,10 +1391,14 @@ impl<
     fn fetch_chunk_receipts(
         filter_inner: &EthFilterInner<Eth>,
         chunk_headers: Vec<SealedHeader<<Eth::Provider as HeaderProvider>::Header>>,
+        cancel: &oneshot::Sender<()>,
     ) -> Result<Vec<ReceiptBlockResult<Eth::Provider>>, EthFilterError> {
         let mut chunk_results = Vec::with_capacity(chunk_headers.len());
 
         for header in chunk_headers {
+            if cancel.is_closed() {
+                break
+            }
             // Fetch directly from provider - RangeMode is used for older blocks
             // unlikely to be cached
             let receipts = match filter_inner.provider().receipts_by_block(header.hash().into())? {
@@ -2309,5 +2321,34 @@ mod tests {
             .await
             .unwrap();
         assert!(logs.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_receipt_chunk_skips_reads_after_cancellation() {
+        let header =
+            SealedHeader::seal_slow(alloy_consensus::Header { number: 100, ..Default::default() });
+        let eth_filter = EthFilter::new(
+            build_test_eth_api(MockEthProvider::default()),
+            EthFilterConfig::default(),
+            Runtime::test(),
+        );
+        let (cancel_tx, cancel_rx) = oneshot::channel();
+
+        // An active chunk attempts the read and reports the unavailable receipts.
+        let err = RangeBlockMode::fetch_chunk_receipts(
+            &eth_filter.inner,
+            vec![header.clone()],
+            &cancel_tx,
+        )
+        .err()
+        .unwrap();
+        assert!(matches!(err, EthFilterError::ReceiptsUnavailable(100)), "{err:?}");
+
+        // Dropping the waiting query prevents the same read from being attempted.
+        drop(cancel_rx);
+        let receipts =
+            RangeBlockMode::fetch_chunk_receipts(&eth_filter.inner, vec![header], &cancel_tx)
+                .unwrap();
+        assert!(receipts.is_empty());
     }
 }
