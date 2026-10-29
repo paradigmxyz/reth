@@ -645,14 +645,9 @@ where
         request: LogsV2Filter,
         limits: QueryLimits,
     ) -> Result<LogsV2Result, EthFilterError> {
-        let LogsV2Filter { start, to_block, direction, filter, max_logs, max_blocks, fields } =
-            request;
+        let LogsV2Filter { start, to_block, direction, filter, max_logs, fields } = request;
 
         let info = self.provider().chain_info()?;
-        let head_block = self
-            .provider()
-            .sealed_header(info.best_number)?
-            .ok_or_else(|| ProviderError::HeaderNotFound(info.best_number.into()))?;
         let finalized_block = match self.provider().finalized_block_number()? {
             Some(number) => self.provider().sealed_header(number)?,
             None => None,
@@ -661,7 +656,6 @@ where
             logs,
             blocks,
             next_cursor,
-            head_block: BlockRef::from(&head_block),
             finalized_block: finalized_block.as_ref().map(BlockRef::from),
         };
 
@@ -674,17 +668,12 @@ where
                 .convert_block_number(block)
                 .map(|number| number.unwrap_or(info.best_number)),
         };
+        // A `toBlock` past the head ends the page at the head, like any other limit.
         let to_block = match (to_block, direction) {
-            (Some(to_block), _) => resolve(to_block)?,
+            (Some(to_block), _) => resolve(to_block)?.min(info.best_number),
             (None, Direction::Asc) => info.best_number,
             (None, Direction::Desc) => earliest_block,
         };
-        if to_block > info.best_number {
-            return Err(EthFilterError::BlockRangeExceedsHead {
-                requested: to_block,
-                head: info.best_number,
-            });
-        }
         // Whether the scan has to go past `to_block` to reach `block`.
         let beyond_to_block = |block: u64| match direction {
             Direction::Asc => block > to_block,
@@ -730,9 +719,7 @@ where
 
         // The client's limits only narrow the server's. Each page holds at least one block and
         // one log, so that paging always makes progress.
-        let max_span = max_blocks
-            .map_or(u64::MAX, |max_blocks| max_blocks.saturating_sub(1))
-            .min(limits.max_blocks_per_filter.unwrap_or(u64::MAX));
+        let max_span = limits.max_blocks_per_filter.unwrap_or(u64::MAX);
         let end_block = match direction {
             Direction::Asc => to_block.min(from_block.saturating_add(max_span)),
             Direction::Desc => to_block.max(from_block.saturating_sub(max_span)),
@@ -2688,13 +2675,12 @@ mod tests {
             Runtime::test(),
         );
         let logs_v2 = |request, limits| eth_filter.inner.clone().logs_v2(request, limits);
-        let request = |start, max_logs, max_blocks| LogsV2Filter {
+        let request = |start, max_logs| LogsV2Filter {
             start,
             to_block: None,
             direction: Direction::Asc,
             filter: Filter::default(),
             max_logs,
-            max_blocks,
             fields: None,
         };
         let from_genesis = LogsV2Start::FromBlock(BlockNumberOrTag::Earliest);
@@ -2724,14 +2710,12 @@ mod tests {
         };
 
         // without limits the whole range up to the head is a single page
-        let result =
-            logs_v2(request(from_genesis, None, None), QueryLimits::default()).await.unwrap();
+        let result = logs_v2(request(from_genesis, None), QueryLimits::default()).await.unwrap();
         assert_eq!(
             positions(&result),
             [(5, 0), (1_200, 0), (1_200, 1), (1_200, 2), (1_201, 0), (2_400, 0)]
         );
         assert_eq!(result.next_cursor, cursor(2_500, None));
-        assert_eq!(result.head_block, block_ref(2_500));
         assert_eq!(result.finalized_block, None);
         assert_eq!(
             result.logs[0],
@@ -2757,8 +2741,7 @@ mod tests {
             (vec![], cursor(2_500, None)),
             (vec![], cursor(2_500, None)),
         ] {
-            let result =
-                logs_v2(request(start, Some(2), None), QueryLimits::default()).await.unwrap();
+            let result = logs_v2(request(start, Some(2)), QueryLimits::default()).await.unwrap();
             assert_eq!(positions(&result), expected_positions);
             assert_eq!(result.next_cursor, expected_cursor);
             start = LogsV2Start::After(result.next_cursor);
@@ -2775,7 +2758,7 @@ mod tests {
             (vec![], cursor(0, None)),
         ] {
             let result = logs_v2(
-                LogsV2Filter { direction: Direction::Desc, ..request(start, Some(2), None) },
+                LogsV2Filter { direction: Direction::Desc, ..request(start, Some(2)) },
                 QueryLimits::default(),
             )
             .await
@@ -2789,9 +2772,9 @@ mod tests {
         let result = logs_v2(
             LogsV2Filter {
                 direction: Direction::Desc,
-                ..request(LogsV2Start::FromBlock(BlockNumberOrTag::Latest), None, Some(1_000))
+                ..request(LogsV2Start::FromBlock(BlockNumberOrTag::Latest), None)
             },
-            QueryLimits::default(),
+            QueryLimits { max_blocks_per_filter: Some(999), max_logs_per_response: None },
         )
         .await
         .unwrap();
@@ -2803,7 +2786,7 @@ mod tests {
             LogsV2Filter {
                 to_block: Some(BlockNumberOrTag::Number(1_200)),
                 filter: Filter::new().address(Address::ZERO),
-                ..request(LogsV2Start::After(cursor(5, None)), None, None)
+                ..request(LogsV2Start::After(cursor(5, None)), None)
             },
             QueryLimits::default(),
         )
@@ -2816,7 +2799,7 @@ mod tests {
         let result = logs_v2(
             LogsV2Filter {
                 fields: Some(vec![LogField::TransactionHash]),
-                ..request(from_genesis, Some(1), None)
+                ..request(from_genesis, Some(1))
             },
             QueryLimits::default(),
         )
@@ -2837,26 +2820,22 @@ mod tests {
         assert_eq!(result.blocks, [LogBlock { number: 5, hash: hashes[5], timestamp: None }]);
 
         // the stricter of the client's and the server's limits ends the page
-        for (max_logs, max_blocks, limits, expected_positions, expected_cursor) in [
-            (None, Some(1_000), QueryLimits::default(), vec![(5, 0)], cursor(999, None)),
+        for (max_logs, limits, expected_positions, expected_cursor) in [
             (
                 None,
-                Some(2_000),
                 QueryLimits { max_blocks_per_filter: Some(1_000), max_logs_per_response: None },
                 vec![(5, 0)],
                 cursor(1_000, None),
             ),
             (
                 Some(10),
-                None,
                 QueryLimits { max_blocks_per_filter: None, max_logs_per_response: Some(1) },
                 vec![(5, 0)],
                 cursor(5, Some(0)),
             ),
-            (Some(0), None, QueryLimits::default(), vec![(5, 0)], cursor(5, Some(0))),
+            (Some(0), QueryLimits::default(), vec![(5, 0)], cursor(5, Some(0))),
         ] {
-            let result =
-                logs_v2(request(from_genesis, max_logs, max_blocks), limits).await.unwrap();
+            let result = logs_v2(request(from_genesis, max_logs), limits).await.unwrap();
             assert_eq!(positions(&result), expected_positions);
             assert_eq!(result.next_cursor, expected_cursor);
         }
@@ -2864,7 +2843,7 @@ mod tests {
         let err = logs_v2(
             LogsV2Filter {
                 to_block: Some(BlockNumberOrTag::Number(4)),
-                ..request(LogsV2Start::FromBlock(BlockNumberOrTag::Number(5)), None, None)
+                ..request(LogsV2Start::FromBlock(BlockNumberOrTag::Number(5)), None)
             },
             QueryLimits::default(),
         )
@@ -2876,7 +2855,7 @@ mod tests {
             LogsV2Filter {
                 to_block: Some(BlockNumberOrTag::Number(5)),
                 direction: Direction::Desc,
-                ..request(LogsV2Start::FromBlock(BlockNumberOrTag::Number(4)), None, None)
+                ..request(LogsV2Start::FromBlock(BlockNumberOrTag::Number(4)), None)
             },
             QueryLimits::default(),
         )
@@ -2884,23 +2863,22 @@ mod tests {
         .unwrap_err();
         assert!(matches!(err, EthFilterError::InvalidBlockRangeParams), "{err:?}");
 
-        let err = logs_v2(
+        // a `toBlock` past the head ends the page at the head
+        let result = logs_v2(
             LogsV2Filter {
                 to_block: Some(BlockNumberOrTag::Number(2_501)),
-                ..request(from_genesis, None, None)
+                ..request(LogsV2Start::After(cursor(2_400, None)), None)
             },
             QueryLimits::default(),
         )
         .await
-        .unwrap_err();
-        assert!(
-            matches!(err, EthFilterError::BlockRangeExceedsHead { requested: 2_501, head: 2_500 }),
-            "{err:?}"
-        );
+        .unwrap();
+        assert_eq!(positions(&result), []);
+        assert_eq!(result.next_cursor, cursor(2_500, None));
 
         // a reorged cursor is rejected with the canonical block at its height, if any
         let reorged = LogCursor { block_hash: B256::repeat_byte(0xab), ..cursor(1_200, Some(0)) };
-        let err = logs_v2(request(LogsV2Start::After(reorged), None, None), QueryLimits::default())
+        let err = logs_v2(request(LogsV2Start::After(reorged), None), QueryLimits::default())
             .await
             .unwrap_err();
         let err = jsonrpsee::types::error::ErrorObject::from(err);
@@ -2915,10 +2893,9 @@ mod tests {
         );
 
         let beyond_head = LogCursor { block_number: 3_000, ..reorged };
-        let err =
-            logs_v2(request(LogsV2Start::After(beyond_head), None, None), QueryLimits::default())
-                .await
-                .unwrap_err();
+        let err = logs_v2(request(LogsV2Start::After(beyond_head), None), QueryLimits::default())
+            .await
+            .unwrap_err();
         assert!(
             matches!(
                 err,

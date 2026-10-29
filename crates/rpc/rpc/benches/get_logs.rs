@@ -155,7 +155,6 @@ where
                 direction: Direction::Asc,
                 filter: scenario.filter.clone(),
                 max_logs: None,
-                max_blocks: None,
                 fields: fields.map(<[LogField]>::to_vec),
             };
             let result = EthFilterApiServer::logs_v2(filter, request).await.unwrap();
@@ -267,7 +266,6 @@ fn dedup<Eth>(
                     direction: Direction::Asc,
                     filter: scenario.filter.clone(),
                     max_logs: None,
-                    max_blocks: None,
                     fields: None,
                 },
             ))

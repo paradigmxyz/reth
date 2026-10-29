@@ -22,7 +22,7 @@ pub struct LogsV2Filter {
     /// Inclusive end of the scan.
     ///
     /// `None` means `latest` when scanning in ascending order, and the earliest available block
-    /// when scanning in descending order.
+    /// when scanning in descending order. A block past the head ends the page at the head.
     pub to_block: Option<BlockNumberOrTag>,
     /// Order in which blocks and logs are scanned.
     pub direction: Direction,
@@ -32,8 +32,6 @@ pub struct LogsV2Filter {
     pub filter: Filter,
     /// Maximum number of logs the client wants, the server may return fewer.
     pub max_logs: Option<u64>,
-    /// Maximum number of blocks the client wants scanned, the server may scan fewer.
-    pub max_blocks: Option<u64>,
     /// Optional log fields to return, `None` returns all of them.
     pub fields: Option<Vec<LogField>>,
 }
@@ -110,8 +108,6 @@ pub struct LogsV2Result {
     /// Following the head means polling with this cursor, which returns no logs and the same
     /// cursor until a new block arrives.
     pub next_cursor: LogCursor,
-    /// The canonical head when the server executed the query.
-    pub head_block: BlockRef,
     /// The finalized block when the server executed the query, `None` if unknown.
     pub finalized_block: Option<BlockRef>,
 }
@@ -304,8 +300,6 @@ struct RawLogsV2Filter {
     filter: Filter,
     #[serde(default, with = "alloy_serde::quantity::opt", skip_serializing_if = "Option::is_none")]
     max_logs: Option<u64>,
-    #[serde(default, with = "alloy_serde::quantity::opt", skip_serializing_if = "Option::is_none")]
-    max_blocks: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     fields: Option<Vec<LogField>>,
 }
@@ -328,7 +322,6 @@ impl TryFrom<RawLogsV2Filter> for LogsV2Filter {
             direction: raw.direction,
             filter: raw.filter,
             max_logs: raw.max_logs,
-            max_blocks: raw.max_blocks,
             fields: raw.fields,
         })
     }
@@ -347,7 +340,6 @@ impl From<LogsV2Filter> for RawLogsV2Filter {
             direction: filter.direction,
             filter: filter.filter,
             max_logs: filter.max_logs,
-            max_blocks: filter.max_blocks,
             fields: filter.fields,
         }
     }
@@ -402,7 +394,6 @@ mod tests {
                 filter: Filter::new()
                     .address(address!("0x42699a7612a82f1d9c36148af9c77354759b210b")),
                 max_logs: Some(10),
-                max_blocks: None,
                 fields: Some(vec![LogField::Topics, LogField::TransactionHash]),
             }
         );
