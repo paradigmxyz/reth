@@ -26,7 +26,7 @@ use reth_stages::StageId;
 use reth_storage_api::StorageSettingsCache;
 use reth_tasks::TaskExecutor;
 use reth_trie::{
-    verify::{default_storage_workers, Output, DEFAULT_STORAGE_ROOT_LIMIT},
+    verify::{default_storage_workers, Output, DEFAULT_STORAGE_LOOKAHEAD},
     Nibbles,
 };
 use reth_trie_db::{
@@ -55,8 +55,8 @@ pub struct Command {
     pub(crate) storage_workers: usize,
 
     /// Maximum storage roots computed or in flight ahead of the account walk.
-    #[arg(long, default_value_t = DEFAULT_STORAGE_ROOT_LIMIT, value_parser = RangedU64ValueParser::<usize>::new().range(1..))]
-    pub(crate) storage_root_limit: usize,
+    #[arg(long, default_value_t = DEFAULT_STORAGE_LOOKAHEAD, value_parser = RangedU64ValueParser::<usize>::new().range(1..))]
+    pub(crate) storage_lookahead: usize,
 
     /// Enable Prometheus metrics.
     ///
@@ -108,9 +108,9 @@ impl Command {
         };
 
         if self.dry_run {
-            verify_only(tool, self.storage_workers, self.storage_root_limit)?
+            verify_only(tool, self.storage_workers, self.storage_lookahead)?
         } else {
-            verify_and_repair(tool, self.storage_workers, self.storage_root_limit)?
+            verify_and_repair(tool, self.storage_workers, self.storage_lookahead)?
         }
 
         Ok(())
@@ -120,7 +120,7 @@ impl Command {
 fn verify_only<N: ProviderNodeTypes<DB = DatabaseEnv>>(
     tool: &DbTool<N>,
     storage_workers: usize,
-    storage_root_limit: usize,
+    storage_lookahead: usize,
 ) -> eyre::Result<()> {
     // Log the database block tip from Finish stage checkpoint
     let finish_checkpoint = tool
@@ -134,17 +134,17 @@ fn verify_only<N: ProviderNodeTypes<DB = DatabaseEnv>>(
     reth_trie_db::with_adapter!(tool.provider_factory, |A| do_verify_only::<A>(
         db,
         storage_workers,
-        storage_root_limit
+        storage_lookahead
     ))
 }
 
 fn do_verify_only<A: TrieTableAdapter>(
     db: &DatabaseEnv,
     storage_workers: usize,
-    storage_root_limit: usize,
+    storage_lookahead: usize,
 ) -> eyre::Result<()> {
     let db = db.clone().with_disable_long_read_transaction_safety();
-    let verifier = DatabaseVerifier::<_, A>::new(&db, storage_workers, storage_root_limit)?;
+    let verifier = DatabaseVerifier::<_, A>::new(&db, storage_workers, storage_lookahead)?;
 
     let metrics = RepairTrieMetrics::new();
 
@@ -226,7 +226,7 @@ fn verify_checkpoints(provider: impl StageCheckpointReader) -> eyre::Result<()> 
 fn verify_and_repair<N: ProviderNodeTypes<DB = DatabaseEnv>>(
     tool: &DbTool<N>,
     storage_workers: usize,
-    storage_root_limit: usize,
+    storage_lookahead: usize,
 ) -> eyre::Result<()> {
     // Get a read-write database provider
     let mut provider_rw = tool.provider_factory.provider_rw()?;
@@ -244,7 +244,7 @@ fn verify_and_repair<N: ProviderNodeTypes<DB = DatabaseEnv>>(
             tool.provider_factory.db_ref(),
             finish_checkpoint.block_number,
             storage_workers,
-            storage_root_limit,
+            storage_lookahead,
         )?
     });
 
@@ -263,7 +263,7 @@ fn do_verify_and_repair<N: ProviderNodeTypes<DB = DatabaseEnv>, A: TrieTableAdap
     db: &N::DB,
     block_number: u64,
     storage_workers: usize,
-    storage_root_limit: usize,
+    storage_lookahead: usize,
 ) -> eyre::Result<usize> {
     // Create cursors for making modifications with
     let tx = provider_rw.tx_mut();
@@ -273,7 +273,7 @@ fn do_verify_and_repair<N: ProviderNodeTypes<DB = DatabaseEnv>, A: TrieTableAdap
 
     // Open every read snapshot before any repairs are applied.
     let db = db.clone().with_disable_long_read_transaction_safety();
-    let verifier = DatabaseVerifier::<_, A>::new(&db, storage_workers, storage_root_limit)?;
+    let verifier = DatabaseVerifier::<_, A>::new(&db, storage_workers, storage_lookahead)?;
 
     let metrics = RepairTrieMetrics::new();
 

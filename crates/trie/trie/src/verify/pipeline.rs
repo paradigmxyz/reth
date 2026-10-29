@@ -27,12 +27,12 @@ impl StoragePipeline {
     ///
     /// # Panics
     ///
-    /// Panics if `workers` is empty or `storage_root_limit` is zero.
+    /// Panics if `workers` is empty or `storage_lookahead` is zero.
     pub(super) fn spawn<L, T, H, TX>(
         addresses: L,
         workers: Vec<StorageWorker<T, H, TX>>,
         context: WorkerContext,
-        storage_root_limit: usize,
+        storage_lookahead: usize,
     ) -> Result<Self, DatabaseError>
     where
         L: Iterator<Item = Result<StorageJob, DatabaseError>> + Send + 'static,
@@ -41,10 +41,10 @@ impl StoragePipeline {
         TX: Send + 'static,
     {
         assert!(!workers.is_empty(), "verification requires storage workers");
-        assert!(storage_root_limit > 0, "storage root limit must be positive");
+        assert!(storage_lookahead > 0, "storage lookahead must be positive");
         // The account producer retains one announcement outside the queue. Reserving its
         // slot here bounds all dispatched roots, including that lookahead, by the limit.
-        let (announcements_tx, announcements) = crossbeam_channel::bounded(storage_root_limit - 1);
+        let (announcements_tx, announcements) = crossbeam_channel::bounded(storage_lookahead - 1);
         let scheduler = StorageScheduler { addresses, workers, context: context.clone() };
         let span = tracing::Span::current();
         let background = thread::Builder::new()

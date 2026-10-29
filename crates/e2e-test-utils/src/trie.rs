@@ -8,7 +8,7 @@ use reth_provider::{
 };
 use reth_trie::{
     prefix_set::{PrefixSetMut, TriePrefixSets},
-    verify::{default_storage_workers, Output, DEFAULT_STORAGE_ROOT_LIMIT},
+    verify::{default_storage_workers, Output, DEFAULT_STORAGE_LOOKAHEAD},
     StateRoot,
 };
 use reth_trie_db::{DatabaseHashedCursorFactory, DatabaseTrieCursorFactory, DatabaseVerifier};
@@ -47,7 +47,7 @@ where
         let verifier = DatabaseVerifier::<_, A>::new(
             &db,
             default_storage_workers(),
-            DEFAULT_STORAGE_ROOT_LIMIT,
+            DEFAULT_STORAGE_LOOKAHEAD,
         )?;
         drop(snapshot_guard);
 

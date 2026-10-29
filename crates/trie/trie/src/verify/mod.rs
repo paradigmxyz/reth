@@ -37,7 +37,7 @@ pub use storage::{StorageJob, StorageWorker};
 /// stops after the first error. Only hashed account rows contribute account leaves; orphan storage
 /// tries are still verified independently.
 ///
-/// Storage work ahead of the account walk is bounded by the configured storage root limit.
+/// Storage work ahead of the account walk is bounded by the configured storage lookahead.
 /// Findings use a bounded channel shared by account and storage producers, so a slow consumer
 /// applies backpressure without buffering an entire storage trie while waiting for its root.
 #[derive(Debug)]
@@ -54,7 +54,7 @@ const FINDINGS_CAPACITY: usize = 1024;
 const ACCOUNT_UPDATE_THRESHOLD: usize = 1024;
 
 /// Default maximum number of storage roots computed or in flight ahead of the account walk.
-pub const DEFAULT_STORAGE_ROOT_LIMIT: usize = 1024;
+pub const DEFAULT_STORAGE_LOOKAHEAD: usize = 1024;
 
 impl<T, H> Verifier<T, H>
 where
@@ -69,7 +69,7 @@ where
     ///   storage tries exactly once, in ascending address order, including addresses without an
     ///   account row. Jobs with hashed storage must request a root even without an account row. It
     ///   is walked on a background thread to schedule storage work ahead of `accounts`.
-    /// - `storage_root_limit` bounds storage jobs whose requested roots have not been consumed,
+    /// - `storage_lookahead` bounds storage jobs whose requested roots have not been consumed,
     ///   including storage without a hashed account row.
     /// - `storage_workers` sets the storage parallelism, one thread per worker.
     ///
@@ -86,13 +86,13 @@ where
     ///
     /// # Panics
     ///
-    /// Panics if `storage_workers` is empty or `storage_root_limit` is zero.
+    /// Panics if `storage_workers` is empty or `storage_lookahead` is zero.
     pub fn new<L, W, C, TX>(
         trie: T,
         accounts: H,
         storage_addresses: L,
         storage_workers: Vec<StorageWorker<W, C, TX>>,
-        storage_root_limit: usize,
+        storage_lookahead: usize,
     ) -> Result<Self, DatabaseError>
     where
         L: Iterator<Item = Result<StorageJob, DatabaseError>> + Send + 'static,
@@ -102,7 +102,7 @@ where
     {
         let account_verifier = SingleVerifier::new(None, trie)?;
         assert!(!storage_workers.is_empty(), "verification requires storage workers");
-        assert!(storage_root_limit > 0, "storage root limit must be positive");
+        assert!(storage_lookahead > 0, "storage lookahead must be positive");
         let (events_tx, events) = crossbeam_channel::bounded(FINDINGS_CAPACITY);
         let (cancel, cancel_rx) = crossbeam_channel::bounded(0);
         let context = WorkerContext::new(events_tx, cancel_rx);
@@ -121,7 +121,7 @@ where
                     storage_addresses,
                     storage_workers,
                     context.clone(),
-                    storage_root_limit,
+                    storage_lookahead,
                 ) {
                     Ok(mut pipeline) => {
                         // Report failures before joining: the consumer cancels all producers on

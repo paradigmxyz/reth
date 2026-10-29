@@ -43,17 +43,17 @@ where
     ///
     /// Prevent commits while this constructor opens the transactions so they read the same database
     /// version. Each storage worker owns a separate transaction. For long-running verification,
-    /// configure `db` to disable long-lived read transaction safety. `storage_root_limit` bounds
+    /// configure `db` to disable long-lived read transaction safety. `storage_lookahead` bounds
     /// storage jobs whose requested roots have not yet been consumed, including storage without a
     /// hashed account row.
     ///
     /// # Panics
     ///
-    /// Panics if `storage_workers` or `storage_root_limit` is zero.
+    /// Panics if `storage_workers` or `storage_lookahead` is zero.
     pub fn new(
         db: &impl Database<TX = TX>,
         storage_workers: usize,
-        storage_root_limit: usize,
+        storage_lookahead: usize,
     ) -> Result<Self, DatabaseError> {
         assert!(storage_workers > 0, "at least one storage worker is required");
         let account_tx = db.tx()?;
@@ -81,7 +81,7 @@ where
                 initialized: false,
             },
             storage_workers,
-            storage_root_limit,
+            storage_lookahead,
         )?;
         Ok(Self { verifier, _txs: [account_tx, lookahead_tx] })
     }
