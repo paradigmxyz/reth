@@ -43,7 +43,7 @@ use serde_json::json;
 use std::{
     collections::{btree_map::Entry, BTreeMap, BTreeSet},
     fs::{self, OpenOptions},
-    io::{Read, Write},
+    io::{ErrorKind, Read, Write},
     os::unix::{fs::MetadataExt, net::UnixDatagram, process::CommandExt},
     path::PathBuf,
     sync::{mpsc, Arc},
@@ -74,6 +74,8 @@ struct Config {
     datadir: Option<PathBuf>,
     /// Guest-local initialization barrier, used only by the first warm process.
     init_socket: Option<PathBuf>,
+    /// Guest-local socket retained after warmup and rebound after each crash restart.
+    control_socket: Option<PathBuf>,
     blocks: u64,
     updates: usize,
     proof_workers: usize,
@@ -93,6 +95,7 @@ impl Default for Config {
             input_file: None,
             datadir: None,
             init_socket: None,
+            control_socket: None,
             blocks: 64,
             updates: 64,
             proof_workers: 2,
@@ -288,7 +291,7 @@ fn run(config: &mut Config, snapshotter: &Snapshotter) -> Result<()> {
         ),
     )?;
     reth_db_common::init::init_genesis(&factory)?;
-    if let Some(path) = config.init_socket.take() {
+    let control = if let Some(path) = config.init_socket.take() {
         ensure!(
             factory
                 .provider()?
@@ -298,8 +301,20 @@ fn run(config: &mut Config, snapshotter: &Snapshotter) -> Result<()> {
                 0,
             "warm initialization requires empty state"
         );
-        wait_for_execution(config, &path)?;
+        Some(wait_for_execution(config, &path)?)
+    } else if let Some(path) = &config.control_socket {
+        // A killed process leaves its socket pathname behind, but not its listener.
+        if path.exists() {
+            fs::remove_file(path)?;
+        }
+        Some(UnixDatagram::bind(path)?)
+    } else {
+        None
+    };
+    if let Some(socket) = &control {
+        socket.set_nonblocking(true)?;
     }
+    let mut finish_requested = false;
     let input = config
         .input
         .take()
@@ -416,6 +431,17 @@ fn run(config: &mut Config, snapshotter: &Snapshotter) -> Result<()> {
     let mut waiting = false;
     let mut seen_input_file = None;
     loop {
+        if let Some(socket) = &control {
+            let mut message = [0u8; 32];
+            match socket.recv_from(&mut message) {
+                Ok((size, _)) => {
+                    ensure!(&message[..size] == b"finish", "invalid control message");
+                    finish_requested = true;
+                }
+                Err(error) if error.kind() == ErrorKind::WouldBlock => {}
+                Err(error) => return Err(error.into()),
+            }
+        }
         let head = base + blocks.len() as u64;
         if head < 1024 &&
             journal.range((head + 1)..).next().is_none() &&
@@ -546,10 +572,7 @@ fn run(config: &mut Config, snapshotter: &Snapshotter) -> Result<()> {
         }
         if head == total_blocks {
             if shutdown {
-                if head < 1024 &&
-                    let Some(path) = &config.input_file &&
-                    !path.with_extension("finish").exists()
-                {
+                if head < 1024 && config.input_file.is_some() && !finish_requested {
                     if !waiting {
                         println!("{}", json!({"input": "waiting", "head": head}));
                         waiting = true;
@@ -764,6 +787,9 @@ fn run(config: &mut Config, snapshotter: &Snapshotter) -> Result<()> {
         "update_batches": update_batches, "hint_batches": hint_batches,
         "metrics": metrics})
     );
+    if let Some(path) = &config.control_socket {
+        fs::remove_file(path)?;
+    }
     Ok(())
 }
 
@@ -982,7 +1008,7 @@ fn validate_initialization(initial: &Config, execution: &Config) -> Result<()> {
     Ok(())
 }
 
-fn wait_for_execution(config: &mut Config, path: &std::path::Path) -> Result<()> {
+fn wait_for_execution(config: &mut Config, path: &std::path::Path) -> Result<UnixDatagram> {
     let socket = UnixDatagram::bind(path)?;
     let deadline = Instant::now() + Duration::from_secs(3600);
     let mut message = [0u8; 4096];
@@ -1001,9 +1027,12 @@ fn wait_for_execution(config: &mut Config, path: &std::path::Path) -> Result<()>
         let execution: Config =
             serde_json::from_slice(&fs::read(std::str::from_utf8(&message[..size])?)?)?;
         validate_initialization(config, &execution)?;
+        ensure!(
+            execution.control_socket.as_deref() == Some(path),
+            "execution changes control socket"
+        );
         *config = execution;
         socket.send_to(b"started", peer)?;
-        fs::remove_file(path)?;
-        return Ok(());
+        return Ok(socket);
     }
 }

@@ -239,6 +239,10 @@ def read_output(source, process):
 
 def worker(config):
     process = None
+    control = socket.socket(fileno=config["control_fd"])
+    control.setblocking(False)
+    finish_peer = None
+    finish_sent = False
     killed = 0
     recovered = 0
     recovered_persisted = 0
@@ -254,7 +258,8 @@ def worker(config):
     expected_blocks = config["workload"]["blocks"]
     try:
         workload = config["workload"] | {"datadir": str(STATE / "data"),
-                                         "input_file": str(STATE / "pending-input.json")}
+                                         "input_file": str(STATE / "pending-input.json"),
+                                         "control_socket": str(STATE / "init.sock")}
         workload_path = STATE / "workload.json"
         workload_path.write_text(json.dumps(workload))
         warm = (STATE / "warm.pid").exists()
@@ -286,12 +291,28 @@ def worker(config):
                 source.seek(offset)
                 pending = b""
                 planned = False
+                finish_sent = False
                 while True:
                     remaining = deadline - time.monotonic()
                     if waiting:
                         remaining = 1
                     elif remaining <= 0:
                         raise TimeoutError("workload recovery campaign timed out")
+                    while True:
+                        try:
+                            message, peer = control.recvfrom(128)
+                        except BlockingIOError:
+                            break
+                        if message == b"finish":
+                            finish_peer = peer
+                        else:
+                            raise RuntimeError("invalid controller control message")
+                    if finish_peer and not finish_sent:
+                        try:
+                            control.sendto(b"finish", str(STATE / "init.sock"))
+                            finish_sent = True
+                        except (FileNotFoundError, ConnectionRefusedError):
+                            pass  # The worker is starting or its previous process died.
                     data = read_output(source, process)
                     if data == b"":
                         break
@@ -375,9 +396,15 @@ def worker(config):
     if require_persisted:
         assertion(recovered_persisted > 0, f"post-crash recovery from persisted head: {recovered_persisted}",
                   "trie/recovery/persisted")
-    (STATE / "done.json").write_text(json.dumps({"ok": ok, "kills": killed,
-                                               "armed": killed + len(plan), "recoveries": recovered,
-                                               "persisted_recoveries": recovered_persisted}))
+    result = {"ok": ok, "kills": killed, "armed": killed + len(plan),
+              "recoveries": recovered, "persisted_recoveries": recovered_persisted}
+    (STATE / "done.json").write_text(json.dumps(result))
+    if finish_peer:
+        try:
+            control.sendto(json.dumps(result).encode(), finish_peer)
+        except (FileNotFoundError, ConnectionRefusedError):
+            pass  # Finalization timed out and removed its reply socket.
+    control.close()
 
 
 def main():
@@ -446,14 +473,21 @@ def main():
             raise RuntimeError("workload already started")
         config_path = STATE / "config.json"
         config_path.write_text(json.dumps(request))
-        with (STATE / "controller.log").open("w") as output:
-            process = subprocess.Popen([sys.executable, __file__, "worker", "@" + str(config_path)],
-                                       stdout=output, stderr=subprocess.STDOUT, start_new_session=True)
-        (STATE / "worker.pid").write_text(str(process.pid))
+        control = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
+        control.bind(str(STATE / "controller.sock"))
+        try:
+            with (STATE / "controller.log").open("w") as output:
+                process = subprocess.Popen([sys.executable, __file__, "worker", "@" + str(config_path)],
+                                           stdout=output, stderr=subprocess.STDOUT,
+                                           start_new_session=True, pass_fds=(control.fileno(),),
+                                           env=os.environ | {"TRIE_DST_CONTROL_FD": str(control.fileno())})
+            (STATE / "worker.pid").write_text(str(process.pid))
+        finally:
+            control.close()
     elif hook == "launch":
         launch()
     elif hook == "worker":
-        worker(request)
+        worker(request | {"control_fd": int(os.environ["TRIE_DST_CONTROL_FD"])})
     elif hook == "set-input":
         if (STATE / "done.json").exists():
             raise RuntimeError("input injection reached an already completed workload")
@@ -469,26 +503,36 @@ def main():
     elif hook == "progress":
         collect(Path("/bedrock/out/progress.jsonl"), progress=True)
     elif hook == "finalize":
-        if STATE.exists():
-            (STATE / "pending-input.finish").touch()
-        deadline = time.monotonic() + 5
-        while STATE.exists() and not (STATE / "done.json").exists() and time.monotonic() < deadline:
-            time.sleep(0.01)
-        if not (STATE / "done.json").exists():
-            pid = STATE / "worker.pid"
-            if pid.exists():
-                try:
-                    os.killpg(int(pid.read_text()), signal.SIGKILL)
-                except ProcessLookupError:
-                    pass
-            warm_pid = STATE / "warm.pid"
-            if warm_pid.exists() and alive(int(warm_pid.read_text())):
-                try:
-                    os.kill(int(warm_pid.read_text()), signal.SIGKILL)
-                except ProcessLookupError:
-                    pass
-            log = STATE / "run.log"
-            assertion(False, "workload incomplete; " + (log.read_text()[-12000:] if log.exists() else "never started"))
+        done = STATE / "done.json"
+        if not done.exists() and STATE.exists():
+            try:
+                with tempfile.TemporaryDirectory(dir=STATE) as directory:
+                    with socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM) as connection:
+                        connection.bind(str(Path(directory) / "reply"))
+                        connection.settimeout(5)
+                        connection.sendto(b"finish", str(STATE / "controller.sock"))
+                        result = json.loads(connection.recv(4096))
+                        if not isinstance(result.get("ok"), bool):
+                            raise RuntimeError("invalid controller completion response")
+            except (OSError, ValueError, RuntimeError) as error:
+                if not done.exists():
+                    pid = STATE / "worker.pid"
+                    if pid.exists():
+                        try:
+                            os.killpg(int(pid.read_text()), signal.SIGKILL)
+                        except ProcessLookupError:
+                            pass
+                    warm_pid = STATE / "warm.pid"
+                    if warm_pid.exists() and alive(int(warm_pid.read_text())):
+                        try:
+                            os.kill(int(warm_pid.read_text()), signal.SIGKILL)
+                        except ProcessLookupError:
+                            pass
+                    log = STATE / "run.log"
+                    assertion(False, f"workload incomplete ({error}); " +
+                              (log.read_text()[-12000:] if log.exists() else "never started"))
+        elif not done.exists():
+            assertion(False, "workload incomplete; never started")
         collect(Path("/bedrock/out/assertions.jsonl"))
     else:
         raise ValueError(f"unknown hook: {hook}")
