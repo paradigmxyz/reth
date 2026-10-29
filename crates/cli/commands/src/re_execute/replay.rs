@@ -695,12 +695,7 @@ mod tests {
         standalone: Option<(u64, u64)>,
     ) -> eyre::Result<((u64, u64, u64), Vec<u64>)> {
         let budget = Arc::new(Semaphore::new(REPLAY_BUDGET));
-        let (sender, receiver) = crossbeam_channel::bounded::<Ready>(
-            std::env::var("RETH_CORPUS_QUEUE")
-                .ok()
-                .and_then(|v| v.parse::<usize>().ok())
-                .unwrap_or(64),
-        );
+        let (sender, receiver) = crossbeam_channel::bounded::<Ready>(4);
         let consumer = drain(receiver, |ready| {
             assert_eq!(ready.bytes.as_ref(), b"b");
             assert_eq!(ready.cases, vec![Bytes::from_static(b"t")]);
@@ -765,12 +760,7 @@ mod tests {
         let (reader, catalog) = paged_fixture(None).await?;
         let budget = Arc::new(Semaphore::new(8));
         let token = CancellationToken::new();
-        let (sender, receiver) = crossbeam_channel::bounded::<Ready>(
-            std::env::var("RETH_CORPUS_QUEUE")
-                .ok()
-                .and_then(|v| v.parse::<usize>().ok())
-                .unwrap_or(64),
-        );
+        let (sender, receiver) = crossbeam_channel::bounded::<Ready>(4);
         let cancel = async {
             while receiver.len() < 4 {
                 tokio::task::yield_now().await;
@@ -808,12 +798,7 @@ mod tests {
         let (reader, catalog) = paged_fixture(None).await?;
         let budget = Arc::new(Semaphore::new(REPLAY_BUDGET));
         let token = CancellationToken::new();
-        let (sender, receiver) = crossbeam_channel::bounded::<Ready>(
-            std::env::var("RETH_CORPUS_QUEUE")
-                .ok()
-                .and_then(|v| v.parse::<usize>().ok())
-                .unwrap_or(64),
-        );
+        let (sender, receiver) = crossbeam_channel::bounded::<Ready>(4);
         let (release, gate) = tokio::sync::oneshot::channel();
         let mut tasks = JoinSet::new();
         // Model a lingering payload task from an earlier page. Page two must
@@ -853,12 +838,7 @@ mod tests {
         let (reader, _) = paged_fixture(None).await?;
         let budget = Arc::new(Semaphore::new(REPLAY_BUDGET));
         let token = CancellationToken::new();
-        let (sender, receiver) = crossbeam_channel::bounded::<Ready>(
-            std::env::var("RETH_CORPUS_QUEUE")
-                .ok()
-                .and_then(|v| v.parse::<usize>().ok())
-                .unwrap_or(64),
-        );
+        let (sender, receiver) = crossbeam_channel::bounded::<Ready>(4);
         let (pages, input) = mpsc::channel(1);
         pages.send(vec![store::metadata(&reader, 1).await?]).await?;
         let mut tasks = JoinSet::new();
