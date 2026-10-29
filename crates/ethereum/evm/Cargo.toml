@@ -19,7 +19,7 @@ reth-primitives-traits.workspace = true
 reth-ethereum-primitives.workspace = true
 reth-evm.workspace = true
 reth-storage-errors = { workspace = true, optional = true }
-evm2.workspace = true
+evm2 = { workspace = true, features = ["block"] }
 evm2-jit = { workspace = true, optional = true, features = ["llvm"] }
 
 # Alloy
