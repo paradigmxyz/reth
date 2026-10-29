@@ -1,6 +1,6 @@
 use super::{
     branch_child_idx::{BranchChildIdx, BranchChildIter},
-    ArenaSparseSubtrie, BranchChild, NodeArena,
+    ArenaSparseSubtrie, BranchChild, Index, NodeArena,
 };
 use alloc::{boxed::Box, vec::Vec};
 use alloy_primitives::{keccak256, B256};
@@ -62,9 +62,6 @@ pub(super) struct ArenaSparseNodeBranch {
     /// Bitmask indicating which of the 16 child slots are occupied (have an entry
     /// in `children`).
     pub(super) state_mask: TrieMask,
-    /// The short key (extension key) for this branch. When non-empty, the node's path is the
-    /// path of the parent extension node with this short key.
-    pub(super) short_key: Nibbles,
     /// Tree mask and hash mask for database persistence (`TrieUpdates`).
     pub(super) branch_masks: BranchNodeMasks,
 }
@@ -152,6 +149,13 @@ pub(super) enum ArenaSparseNode {
     },
     /// A branch node with up to 16 children.
     Branch(ArenaSparseNodeBranch),
+    /// An extension node with a revealed branch child.
+    Extension {
+        /// The extension key.
+        key: Nibbles,
+        /// The extension's branch child in the arena.
+        child: Index,
+    },
     /// A leaf node containing a value.
     Leaf {
         /// Cached or dirty state of this node.
@@ -178,7 +182,12 @@ impl ArenaSparseNode {
         match self {
             Self::EmptyRoot { state } | Self::Leaf { state, .. } => Some(state),
             Self::Branch(b) => Some(&b.state),
-            Self::Subtrie(s) => s.arena[s.root].state_ref(),
+            Self::Subtrie(s) => {
+                let root = &s.arena[s.root];
+                root.extension_child()
+                    .and_then(|child| s.arena[child].state_ref())
+                    .or_else(|| root.state_ref())
+            }
             _ => None,
         }
     }
@@ -201,11 +210,26 @@ impl ArenaSparseNode {
         self.state_ref().is_some_and(|s| matches!(s, ArenaSparseNodeState::Cached { .. }))
     }
 
-    /// Returns the short key of the branch or leaf, or None.
+    /// Returns the short key of the extension or leaf, or None.
     pub(super) const fn short_key(&self) -> Option<&Nibbles> {
         match self {
-            Self::Branch(b) => Some(&b.short_key),
-            Self::Leaf { key, .. } => Some(key),
+            Self::Extension { key, .. } | Self::Leaf { key, .. } => Some(key),
+            _ => None,
+        }
+    }
+
+    /// Returns the extension key, if this is an extension node.
+    pub(super) const fn extension_key(&self) -> Option<&Nibbles> {
+        match self {
+            Self::Extension { key, .. } => Some(key),
+            _ => None,
+        }
+    }
+
+    /// Returns the branch child of this extension node, if any.
+    pub(super) const fn extension_child(&self) -> Option<Index> {
+        match self {
+            Self::Extension { child, .. } => Some(*child),
             _ => None,
         }
     }
@@ -243,32 +267,18 @@ impl ArenaSparseNode {
         }
     }
 
-    /// Returns the branch data if this node (or its subtrie root) is a branch, or `None`.
-    pub(super) fn as_branch(&self) -> Option<&ArenaSparseNodeBranch> {
-        match self {
-            Self::Branch(b) => Some(b),
-            Self::Subtrie(s) => s.arena[s.root].as_branch(),
-            _ => None,
-        }
-    }
-
     /// Returns `true` if this node should contribute a set bit in its parent's `hash_mask`.
     ///
-    /// That is, if the node is a branch with no short key (no extension) whose cached
-    /// RLP is a hash (>= 32 bytes). Small branches whose RLP is embedded don't get a
-    /// `hash_mask` bit.
+    /// That is, if the node is a branch without a parent extension whose cached RLP is a hash
+    /// (>= 32 bytes). Small branches whose RLP is embedded don't get a `hash_mask` bit.
     pub(super) fn hash_mask_bit(&self) -> bool {
-        self.as_branch().is_some_and(|b| {
-            b.short_key.is_empty() &&
+        match self {
+            Self::Branch(b) => {
                 b.state.cached_rlp_node().expect("branch's RlpNode must be cached").is_hash()
-        })
-    }
-
-    /// Returns `true` if this node should contribute a set bit in its parent's `tree_mask`.
-    ///
-    /// That is, if the node is a branch with any non-empty `branch_masks`.
-    pub(super) fn tree_mask_bit(&self) -> bool {
-        self.as_branch().is_some_and(|b| !b.branch_masks.is_empty())
+            }
+            Self::Subtrie(s) => s.arena[s.root].hash_mask_bit(),
+            _ => false,
+        }
     }
 
     /// Returns the cached hash of this node. Panics if the node's state is not `Cached`.
@@ -306,6 +316,7 @@ impl ArenaSparseNode {
                 value: leaf.value,
             },
             TrieNodeV2::Branch(branch) => {
+                assert!(branch.key.is_empty(), "branches with a short key must be split first");
                 let children = branch.stack[..branch.state_mask.count_bits() as usize]
                     .iter()
                     .map(|rlp| arena.insert_blinded(rlp.clone()))
@@ -314,7 +325,6 @@ impl ArenaSparseNode {
                     state: ArenaSparseNodeState::Revealed,
                     children,
                     state_mask: branch.state_mask,
-                    short_key: branch.key,
                     branch_masks: masks.unwrap_or_default(),
                 })
             }
