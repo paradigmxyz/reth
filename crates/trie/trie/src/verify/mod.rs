@@ -54,7 +54,7 @@ const FINDINGS_CAPACITY: usize = 1024;
 const ACCOUNT_UPDATE_THRESHOLD: usize = 1024;
 
 /// Default maximum number of storage roots computed or in flight ahead of the account walk.
-pub const DEFAULT_STORAGE_LOOKAHEAD: usize = 1024;
+pub const DEFAULT_STORAGE_LOOKAHEAD: usize = 1_000_000;
 
 impl<T, H> Verifier<T, H>
 where
