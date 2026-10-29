@@ -246,9 +246,9 @@ def worker(config):
     require_persisted = (bool(plan) and
                          config["workload"]["blocks"] >= config["workload"]["persistence_threshold"] + 4)
     persisted = False
-    # Rust may make two sequential timeout-bounded waits before its next event;
-    # recovery has no internal timeout and can use the campaign horizon.
-    idle_budget = 2 * config["workload"]["timeout_secs"] + config["run_secs"]
+    # Allow sequential timeout-bounded waits and recovery without coupling the
+    # inactivity watchdog to the host's virtual-time run horizon.
+    idle_budget = 5 * config["workload"]["timeout_secs"]
     deadline = time.monotonic() + idle_budget
     waiting = False
     expected_blocks = config["workload"]["blocks"]
@@ -424,8 +424,7 @@ def main():
             kill_blocks = sorted(random.Random(request["seed"]).sample(
                 range(1, args["blocks"] + 1), min(crashes, args["blocks"])))
             config = {"workload": args | {"seed": request["seed"], "input": input_value},
-                      "kill_blocks": kill_blocks, "cold_start": cold_start,
-                      "run_secs": request["campaign"]["run_secs"]}
+                      "kill_blocks": kill_blocks, "cold_start": cold_start}
             decisions = {"config": config, "seed": request["seed"],
                          "rng_seed": request["seed"], "preempt": request["preempt"]}
         decisions = dict(decisions)
@@ -433,9 +432,8 @@ def main():
             decisions["rng_seed"] = request["rng_seed"]
         return {"config": decisions["config"], "decisions": decisions,
                 "run": {"seed": decisions["seed"], "rng_seed": decisions["rng_seed"],
-                        "run_secs": decisions["config"]["run_secs"],
                         "preempt": decisions["preempt"], "swarm": {}},
-                "finalized_by_start": decisions["config"]["run_secs"] == 1,
+                "finalized_by_start": False,
                 "required": ["trie/input/completed"], "replays_exactly": True, "action": None,
                 "notes": [], "host_decisions": []}
     if hook == "warmup":
@@ -446,17 +444,12 @@ def main():
         STATE.mkdir(parents=True, exist_ok=True)
         if (STATE / "worker.pid").exists() or (STATE / "done.json").exists():
             raise RuntimeError("workload already started")
-        if request["run_secs"] == 1:
-            (STATE / "pending-input.finish").touch()
-            worker(request)
-            collect(Path("/bedrock/out/assertions.jsonl"))
-        else:
-            config_path = STATE / "config.json"
-            config_path.write_text(json.dumps(request))
-            with (STATE / "controller.log").open("w") as output:
-                process = subprocess.Popen([sys.executable, __file__, "worker", "@" + str(config_path)],
-                                           stdout=output, stderr=subprocess.STDOUT, start_new_session=True)
-            (STATE / "worker.pid").write_text(str(process.pid))
+        config_path = STATE / "config.json"
+        config_path.write_text(json.dumps(request))
+        with (STATE / "controller.log").open("w") as output:
+            process = subprocess.Popen([sys.executable, __file__, "worker", "@" + str(config_path)],
+                                       stdout=output, stderr=subprocess.STDOUT, start_new_session=True)
+        (STATE / "worker.pid").write_text(str(process.pid))
     elif hook == "launch":
         launch()
     elif hook == "worker":
