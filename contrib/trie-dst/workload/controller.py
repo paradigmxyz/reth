@@ -432,7 +432,6 @@ def main():
             decisions["rng_seed"] = request["rng_seed"]
         return {"config": decisions["config"], "decisions": decisions,
                 "run": {"seed": decisions["seed"], "rng_seed": decisions["rng_seed"],
-                        "run_secs": request["campaign"]["run_secs"],
                         "preempt": decisions["preempt"], "swarm": {}},
                 "finalized_by_start": False,
                 "required": ["trie/input/completed"], "replays_exactly": True, "action": None,
