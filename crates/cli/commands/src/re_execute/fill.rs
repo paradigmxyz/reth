@@ -10,6 +10,7 @@ use crate::common::{
     EnvironmentArgs,
 };
 use clap::Parser;
+use rayon::prelude::*;
 use reth_chainspec::{EthChainSpec, EthereumHardforks, Hardforks};
 use reth_cli::chainspec::ChainSpecParser;
 use reth_cli_util::cancellation::CancellationToken;
@@ -25,7 +26,6 @@ use slatedb::{
     config::{CompressionCodec, Settings},
     Db, WriteBatch,
 };
-use rayon::prelude::*;
 use std::{
     collections::BTreeMap,
     sync::{
@@ -223,11 +223,13 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
                 let cancellation = &cancellation;
                 // Capture, replay and independent transaction execution are pure functions of
                 // the archive DB, so workers run them concurrently. One writer publishes the
-                // results strictly in block order, keeping pages, checkpoints and fencing as before.
+                // results strictly in block order, keeping pages, checkpoints and fencing as
+                // before.
                 let produce = |start: u64| -> eyre::Result<Produced> {
                     let stop = start + 1;
-                    let expected =
-                        provider_factory.database_provider_ro()?.disable_long_read_transaction_safety();
+                    let expected = provider_factory
+                        .database_provider_ro()?
+                        .disable_long_read_transaction_safety();
                     let mut chunk = Arc::new(Chunk::capture(
                         start..stop,
                         &config,
@@ -336,7 +338,8 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
                 let failed = AtomicBool::new(false);
                 info!(workers, from = begin, to = end, "Starting parallel corpus capture");
                 std::thread::scope(|scope| -> eyre::Result<()> {
-                    let (sender, receiver) = crossbeam_channel::unbounded::<eyre::Result<Produced>>();
+                    let (sender, receiver) =
+                        crossbeam_channel::unbounded::<eyre::Result<Produced>>();
                     for _ in 0..workers {
                         let sender = sender.clone();
                         let (next, written, failed, produce) = (&next, &written, &failed, &produce);
@@ -369,7 +372,8 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
                         // A superseded writer can only have written blocks of the page it
                         // never published, so reading keys back is needed for one page only.
                         let recheck_end = begin.saturating_add(PAGE_RECORDS_PER_PUBLISH as u64);
-                        // One write per page (or per 64 MiB) instead of one durable write per block.
+                        // One write per page (or per 64 MiB) instead of one durable write per
+                        // block.
                         let mut batch = WriteBatch::new();
                         let mut batch_bytes = 0usize;
                         let mut start = begin;
@@ -388,13 +392,17 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
                             let (transactions, gas, first_tx) =
                                 (record.transactions, record.gas, record.first_tx);
                             metadata_bytes += metadata.len();
-                            for (key, value) in
-                                [(store::key(start), &bytes), (store::metadata_key(start), &metadata)]
-                                    .into_iter()
-                                    .chain(case_bytes.iter().enumerate().map(|(i, b)| {
-                                        (store::transaction_key(first_tx + i as u64), b)
-                                    }))
-                            {
+                            for (key, value) in [
+                                (store::key(start), &bytes),
+                                (store::metadata_key(start), &metadata),
+                            ]
+                            .into_iter()
+                            .chain(
+                                case_bytes
+                                    .iter()
+                                    .enumerate()
+                                    .map(|(i, b)| (store::transaction_key(first_tx + i as u64), b)),
+                            ) {
                                 let stored = if start < recheck_end {
                                     handle.block_on(db.get(key))?
                                 } else {
@@ -424,8 +432,9 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
                                 batch_bytes = 0;
                             }
                             written.store(stop, Ordering::Release);
-                            // Publication frequency is runtime I/O batching, not part of the schema.
-                            // Every batch above is a complete block; no partial block is published.
+                            // Publication frequency is runtime I/O batching, not part of the
+                            // schema. Every batch above is a complete
+                            // block; no partial block is published.
                             if !seal {
                                 start = stop;
                                 continue;

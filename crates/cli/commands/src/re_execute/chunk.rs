@@ -17,9 +17,37 @@ use std::{
     collections::{BTreeMap, BTreeSet},
     fmt,
     ops::{Range, RangeBounds},
-    sync::Arc,
+    sync::{Arc, LazyLock},
 };
 use wincode::{SchemaRead, SchemaWrite};
+
+/// Analyzed bytecode shared across chunks, keyed by code hash. Every entry was checked
+/// against its hash once; later chunks compare their bytes instead of hashing again, and
+/// execution reuses the jump table instead of re-analyzing the same contract every block.
+static CODE_CACHE: LazyLock<parking_lot::RwLock<std::collections::HashMap<[u8; 32], Bytecode>>> =
+    LazyLock::new(Default::default);
+/// Distinct contracts are few; the cap only bounds memory against pathological inputs.
+const CODE_CACHE_ENTRIES: usize = 1 << 20;
+
+/// Returns analyzed bytecode for `code`, verifying it against `hash` unless an identical,
+/// already-verified copy is cached.
+fn cached_code(hash: &[u8; 32], code: &[u8]) -> eyre::Result<Bytecode> {
+    if let Some(cached) = CODE_CACHE.read().get(hash) {
+        eyre::ensure!(cached.original_byte_slice() == code, "corpus code hash mismatch");
+        return Ok(cached.clone());
+    }
+    eyre::ensure!(
+        alloy_primitives::keccak256(code).0 == *hash || (*hash == [0; 32] && code.is_empty()),
+        "corpus code hash mismatch"
+    );
+    let bytecode = Bytecode::new_raw_checked(code.to_vec().into())
+        .map_err(|err| eyre::eyre!("invalid corpus code {}: {err}", B256::from(*hash)))?;
+    let mut cache = CODE_CACHE.write();
+    if cache.len() < CODE_CACHE_ENTRIES {
+        cache.insert(*hash, bytecode.clone());
+    }
+    Ok(bytecode)
+}
 
 #[cfg(test)]
 mod tests;
@@ -164,7 +192,7 @@ impl reth_revm::Database for View {
             .code
             .get(&hash.0)
             .ok_or_else(|| Missing(format!("uncaptured code {hash}")))?;
-        Bytecode::new_raw_checked(code.clone().into()).map_err(|err| Missing(err.to_string()))
+        cached_code(&hash.0, code).map_err(|err| Missing(err.to_string()))
     }
     fn block_hash(&mut self, number: u64) -> Result<B256, Missing> {
         self.chunk
@@ -391,11 +419,7 @@ impl Chunk {
             self.validate_versions(versions)?;
         }
         for (hash, code) in &self.code {
-            eyre::ensure!(
-                alloy_primitives::keccak256(code).0 == *hash ||
-                    (*hash == [0; 32] && code.is_empty()),
-                "corpus code hash mismatch"
-            );
+            cached_code(hash, code)?;
         }
         Ok(())
     }
