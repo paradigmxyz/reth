@@ -1282,6 +1282,15 @@ mod tests {
     }
 
     #[test]
+    fn pre_amsterdam_block_access_list_err() {
+        let err: jsonrpsee_types::error::ErrorObject<'static> =
+            EthApiError::BlockAccessListNotAvailablePreAmsterdam.into();
+        assert_eq!(err.code(), EthRpcErrorCode::ResourceNotFound.code());
+        assert_eq!(err.code(), -32001);
+        assert_eq!(err.message(), "Block access list not available for pre-Amsterdam blocks");
+    }
+
+    #[test]
     fn revert_err_display() {
         let revert = Revert::from("test_revert_reason");
         let err = RevertError::new(revert.abi_encode().into());

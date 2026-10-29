@@ -3,6 +3,7 @@ use alloy_consensus::BlockHeader;
 use alloy_eip7928::{bal::DecodedBal, BlockAccessList};
 use alloy_primitives::Bytes;
 use alloy_rpc_types_eth::BlockId;
+use reth_chainspec::{ChainSpecProvider, EthereumHardforks};
 use reth_errors::RethError;
 use reth_evm::{database::StateProviderDatabase, BlockExecutor, ConfigureEvm};
 use reth_rpc_eth_types::{error::FromEthApiError, EthApiError};
@@ -29,6 +30,12 @@ pub trait GetBlockAccessList: Trace + LoadBlock {
             let Some(block) = self.recovered_block(block_id).await? else {
                 return Ok(None);
             };
+
+            if !self.provider().chain_spec().is_amsterdam_active_at_timestamp(block.timestamp()) {
+                return Err(Self::Error::from_eth_err(
+                    EthApiError::BlockAccessListNotAvailablePreAmsterdam,
+                ));
+            }
 
             if let Some(cached_bal) =
                 self.cache().get_bal(block.hash()).await.map_err(Self::Error::from_eth_err)?
@@ -89,6 +96,12 @@ pub trait GetBlockAccessList: Trace + LoadBlock {
                 .recovered_block(block_id)
                 .await?
                 .ok_or_else(|| EthApiError::HeaderNotFound(block_id))?;
+
+            if !self.provider().chain_spec().is_amsterdam_active_at_timestamp(block.timestamp()) {
+                return Err(Self::Error::from_eth_err(
+                    EthApiError::BlockAccessListNotAvailablePreAmsterdam,
+                ));
+            }
 
             if let Some(cached_bal) =
                 self.cache().get_bal(block.hash()).await.map_err(Self::Error::from_eth_err)?
