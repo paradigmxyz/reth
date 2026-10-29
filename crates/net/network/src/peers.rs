@@ -149,9 +149,11 @@ impl PeersManager {
             HashSet::with_capacity_and_hasher(trusted_nodes.len(), Default::default());
 
         for trusted_peer in &trusted_nodes {
+            // Tracked even if resolution fails, otherwise the resolver's later results for this
+            // peer are discarded as revoked.
+            trusted_peer_ids.insert(trusted_peer.id);
             match trusted_peer.resolve_blocking() {
                 Ok(NodeRecord { address, tcp_port, udp_port, id }) => {
-                    trusted_peer_ids.insert(id);
                     peers.entry(id).or_insert_with(|| {
                         Peer::trusted(PeerAddr::new_with_ports(address, tcp_port, Some(udp_port)))
                     });
@@ -3751,6 +3753,20 @@ mod tests {
         let peer = manager.peers.get(&peer_id).expect("peer should be added after resolution");
         assert!(peer.kind.is_trusted());
         assert_eq!(peer.addr.tcp().ip(), "10.0.0.1".parse::<IpAddr>().unwrap());
+    }
+
+    #[tokio::test]
+    async fn test_configured_trusted_peer_resolves_after_startup_failure() {
+        let peer_id = PeerId::random();
+        let trusted = TrustedPeer::new(Host::Domain("example.invalid".into()), 30303, peer_id);
+        let mut manager = PeersManager::new(PeersConfig::test().with_trusted_nodes(vec![trusted]));
+        assert!(!manager.peers.contains_key(&peer_id));
+
+        let addr = "10.0.0.1:30303".parse::<SocketAddr>().unwrap();
+        manager.on_resolved_peer(peer_id, NodeRecord::new(addr, peer_id));
+        let peer = manager.peers.get(&peer_id).expect("peer should be added after resolution");
+        assert!(peer.is_trusted());
+        assert_eq!(peer.addr.tcp(), addr);
     }
 
     #[tokio::test]
