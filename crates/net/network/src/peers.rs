@@ -170,6 +170,16 @@ impl PeersManager {
                 continue
             }
             let NodeRecord { address, tcp_port, udp_port, id } = record;
+            // Skip peers outside --netrestrict / ban list so known-peers.json cannot
+            // reinstate dials that discovery would reject (see #28184).
+            if !ip_filter.is_allowed(&address) {
+                trace!(target: "net::peers", ?id, ?address, "Skipping persisted peer from IP not in allowed ranges");
+                continue
+            }
+            if ban_list.is_banned(&id, &address) {
+                trace!(target: "net::peers", ?id, ?address, "Skipping banned persisted peer");
+                continue
+            }
             peers.entry(id).or_insert_with(|| {
                 if kind.is_trusted() {
                     trusted_peer_ids.insert(id);
@@ -185,6 +195,14 @@ impl PeersManager {
         }
 
         for NodeRecord { address, tcp_port, udp_port, id } in basic_nodes {
+            if !ip_filter.is_allowed(&address) {
+                trace!(target: "net::peers", ?id, ?address, "Skipping basic node from IP not in allowed ranges");
+                continue
+            }
+            if ban_list.is_banned(&id, &address) {
+                trace!(target: "net::peers", ?id, ?address, "Skipping banned basic node");
+                continue
+            }
             peers.entry(id).or_insert_with(|| {
                 Peer::new(PeerAddr::new_with_ports(address, tcp_port, Some(udp_port)))
             });
@@ -4127,6 +4145,47 @@ mod tests {
         let peers = PeersManager::new(config);
         assert!(!peers.trusted_peer_ids.contains(&peer_id));
         assert!(!peers.peers.contains_key(&peer_id));
+    }
+
+    #[tokio::test]
+    async fn test_netrestrict_skips_persisted_and_basic_peers() {
+        use reth_net_banlist::IpFilter;
+
+        let allowed_id = PeerId::random();
+        let blocked_persisted_id = PeerId::random();
+        let blocked_basic_id = PeerId::random();
+        let ip_filter = IpFilter::from_cidr_string("10.0.0.0/8").unwrap();
+        let mut config = PeersConfig::test().with_ip_filter(ip_filter);
+        config.persisted_peers.push(PersistedPeerInfo {
+            record: NodeRecord::new("10.0.0.1:30303".parse().unwrap(), allowed_id),
+            kind: PeerKind::Basic,
+            fork_id: None,
+            reputation: 0,
+        });
+        config.persisted_peers.push(PersistedPeerInfo {
+            record: NodeRecord::new("1.2.3.4:30303".parse().unwrap(), blocked_persisted_id),
+            kind: PeerKind::Trusted,
+            fork_id: None,
+            reputation: 0,
+        });
+        config.basic_nodes.insert(NodeRecord::new(
+            "8.8.8.8:30303".parse().unwrap(),
+            blocked_basic_id,
+        ));
+        let mut peers = PeersManager::new(config);
+        assert!(peers.peers.contains_key(&allowed_id));
+        assert!(!peers.peers.contains_key(&blocked_persisted_id));
+        assert!(!peers.trusted_peer_ids.contains(&blocked_persisted_id));
+        assert!(!peers.peers.contains_key(&blocked_basic_id));
+        peers.fill_outbound_slots();
+        assert!(
+            peers.queued_actions.iter().all(|action| !matches!(
+                action,
+                PeerAction::Connect { peer_id, .. }
+                    if *peer_id == blocked_persisted_id || *peer_id == blocked_basic_id
+            )),
+            "out-of-range persisted/basic peers must not be dialed"
+        );
     }
     #[tokio::test]
     async fn test_pending_dials_reserve_outbound_capacity() {
