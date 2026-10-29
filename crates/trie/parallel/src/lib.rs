@@ -1,4 +1,4 @@
-//! Parallel proof computation, trie verification, and state-root task interface types.
+//! Parallel proof computation and state-root task interface types.
 
 #![doc(
     html_logo_url = "https://raw.githubusercontent.com/paradigmxyz/reth/main/assets/reth-docs.png",
@@ -16,5 +16,3 @@ pub mod proof_task;
 
 /// State root task interface types shared between the engine tree and the payload builder.
 pub mod state_root_task;
-
-pub mod verify;

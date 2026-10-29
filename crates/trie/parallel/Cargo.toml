@@ -6,7 +6,7 @@ rust-version.workspace = true
 license.workspace = true
 homepage.workspace = true
 repository.workspace = true
-description = "Parallel Merkle root computation and trie verification"
+description = "Parallel implementation of merkle root algorithm"
 
 [lints]
 workspace = true
@@ -18,13 +18,10 @@ reth-execution-errors.workspace = true
 reth-execution-types.workspace = true
 reth-provider.workspace = true
 reth-tasks = { workspace = true, features = ["rayon"] }
-reth-trie = { workspace = true, features = ["metrics"] }
-reth-trie-db.workspace = true
-reth-db-api.workspace = true
+reth-trie.workspace = true
 
 # alloy
 alloy-primitives.workspace = true
-alloy-consensus.workspace = true
 
 # tracing
 tracing.workspace = true
@@ -64,8 +61,6 @@ test-utils = [
     "reth-primitives-traits/test-utils",
     "reth-provider/test-utils",
     "reth-trie/test-utils",
-    "reth-trie-db/test-utils",
-    "reth-db-api/test-utils",
     "reth-tasks/test-utils",
     "reth-chainspec/test-utils",
     "reth-ethereum-primitives/test-utils",

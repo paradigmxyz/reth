@@ -1,174 +1,303 @@
-//! Sequential comparison of persisted trie nodes against canonical updates.
+//! Parallel verification of persisted account and storage tries.
 
-use crate::{
-    trie_cursor::{depth_first, depth_first::DepthFirstTrieIterator, TrieCursor},
-    BranchNodeCompact, Nibbles,
+use self::{
+    compare::SingleVerifier,
+    pipeline::{StoragePipeline, WorkerContext},
 };
-use alloy_primitives::B256;
+use crate::{
+    hashed_cursor::{HashedCursor, HashedStorageCursor},
+    trie_cursor::{
+        depth_first::{self, DepthFirstTrieIterator},
+        TrieCursor, TrieStorageCursor,
+    },
+    Nibbles,
+};
+use alloy_primitives::{B256, U256};
+use alloy_rlp::Encodable;
+use alloy_trie::BranchNodeCompact;
+use crossbeam_channel::{Receiver, Sender};
+use reth_execution_errors::StateRootError;
+use reth_primitives_traits::Account;
 use reth_storage_errors::db::DatabaseError;
-use std::cmp::Ordering;
-use tracing::trace;
+use std::{
+    sync::Arc,
+    thread::{self, JoinHandle},
+};
 
-/// Compares one trie against updates computed from its hashed state.
+mod compare;
+mod pipeline;
+mod storage;
+pub use storage::{StorageJob, StorageWorker};
+
+/// Compares the persisted account and storage trie tables against tries recomputed from the hashed
+/// state tables, yielding an [`Output`] for every inconsistency found.
 ///
-/// This type does no hashing or scheduling and works with any [`TrieCursor`]. Feed successive
-/// canonical update batches to [`Self::verify_updates`], then call [`Self::finish`]. Findings are
-/// delivered immediately, so even an entirely stale trie does not need to be buffered in memory.
+/// The hashed tables are the source of truth. Storage tries are recomputed in parallel, so storage
+/// findings are not ordered relative to account findings or to [`Output::Progress`]. Iteration
+/// stops after the first error. Only hashed account rows contribute account leaves; orphan storage
+/// tries are still verified independently.
+///
+/// Storage work ahead of the account walk is bounded by the configured storage lookahead.
+/// Findings use a bounded channel shared by account and storage producers, so a slow consumer
+/// applies backpressure without buffering an entire storage trie while waiting for its root.
 #[derive(Debug)]
-pub struct Verifier<C: TrieCursor> {
-    trie: TrieKind,
-    trie_iter: DepthFirstTrieIterator<C>,
-    current: Option<(Nibbles, BranchNodeCompact)>,
+pub struct Verifier<T: TrieCursor, H> {
+    events: Receiver<Result<Output, StateRootError>>,
+    // The sole sender is dropped to broadcast cancellation to every producer.
+    cancel: Option<Sender<()>>,
+    // Retain account cursors until all producers have joined, before backing transactions drop.
+    background: Option<JoinHandle<AccountVerifier<T, H>>>,
 }
 
-impl<C: TrieCursor> Verifier<C> {
-    /// Opens the comparison cursor and reads its first node.
-    pub fn new(trie: TrieKind, trie_cursor: C) -> Result<Self, DatabaseError> {
-        let mut trie_iter = DepthFirstTrieIterator::new(trie_cursor);
-        let current = trie_iter.next().transpose()?;
-        Ok(Self { trie, trie_iter, current })
+const FINDINGS_CAPACITY: usize = 1024;
+
+const ACCOUNT_UPDATE_THRESHOLD: usize = 1024;
+
+/// Default maximum number of storage roots computed or in flight ahead of the account walk.
+pub const DEFAULT_STORAGE_LOOKAHEAD: usize = 1024;
+
+impl<T, H> Verifier<T, H>
+where
+    T: TrieCursor + Send + 'static,
+    H: HashedCursor<Value = Account> + Send + 'static,
+{
+    /// Starts verification and its background storage root computation.
+    ///
+    /// - `trie` reads the account trie table.
+    /// - `accounts` reads the hashed accounts table in ascending address order.
+    /// - `storage_addresses` yields a job for each address present in hashed storage or stored
+    ///   storage tries exactly once, in ascending address order, including addresses without an
+    ///   account row. Jobs with hashed storage must request a root even without an account row. It
+    ///   is walked on a background thread to schedule storage work ahead of `accounts`.
+    /// - `storage_lookahead` bounds storage jobs whose requested roots have not been consumed,
+    ///   including storage without a hashed account row.
+    /// - `storage_workers` sets the storage parallelism, one thread per worker.
+    ///
+    /// Storage cursors may start at any hashed address. All cursors must read the same database
+    /// version, and any transactions backing them must stay open until the verifier is dropped.
+    /// The account walk runs on a producer thread. Account and storage findings share a bounded
+    /// channel, consumed by this iterator independently of storage root waits. Account cursors
+    /// must be transferable to that thread. Dropping the verifier cancels and joins all work.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the account trie cannot be read or the account thread cannot be
+    /// spawned. Errors starting storage threads are yielded by the iterator.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `storage_workers` is empty or `storage_lookahead` is zero.
+    pub fn new<L, W, C, TX>(
+        trie: T,
+        accounts: H,
+        storage_addresses: L,
+        storage_workers: Vec<StorageWorker<W, C, TX>>,
+        storage_lookahead: usize,
+    ) -> Result<Self, DatabaseError>
+    where
+        L: Iterator<Item = Result<StorageJob, DatabaseError>> + Send + 'static,
+        W: TrieStorageCursor + Send + 'static,
+        C: HashedStorageCursor<Value = U256> + Send + 'static,
+        TX: Send + 'static,
+    {
+        let account_verifier = SingleVerifier::new(None, trie)?;
+        assert!(!storage_workers.is_empty(), "verification requires storage workers");
+        assert!(storage_lookahead > 0, "storage lookahead must be positive");
+        let (events_tx, events) = crossbeam_channel::bounded(FINDINGS_CAPACITY);
+        let (cancel, cancel_rx) = crossbeam_channel::bounded(0);
+        let context = WorkerContext::new(events_tx, cancel_rx);
+        let mut account = AccountVerifier {
+            accounts,
+            account_verifier,
+            hash_builder: crate::HashBuilder::default().with_updates(true),
+            account_rlp: Vec::with_capacity(crate::TRIE_ACCOUNT_RLP_MAX_SIZE),
+        };
+        let span = tracing::Span::current();
+        let background = thread::Builder::new()
+            .name("trie-accounts".into())
+            .spawn(move || {
+                let _entered = span.enter();
+                match StoragePipeline::spawn(
+                    storage_addresses,
+                    storage_workers,
+                    context.clone(),
+                    storage_lookahead,
+                ) {
+                    Ok(mut pipeline) => {
+                        // Report failures before joining: the consumer cancels all producers on
+                        // error.
+                        context.run(|| account.run(&mut pipeline, &context));
+                        pipeline.finish();
+                    }
+                    Err(error) => context.run(|| Err(error.into())),
+                }
+                account
+            })
+            .map_err(|error| DatabaseError::Custom(Arc::new(error)))?;
+        Ok(Self { events, cancel: Some(cancel), background: Some(background) })
+    }
+}
+
+impl<T: TrieCursor, H> Verifier<T, H> {
+    fn stop(&mut self) {
+        self.cancel.take();
+        if let Some(background) = self.background.take() &&
+            let Err(panic) = background.join() &&
+            !thread::panicking()
+        {
+            std::panic::resume_unwind(panic);
+        }
+    }
+}
+
+impl<T: TrieCursor, H> Iterator for Verifier<T, H> {
+    type Item = Result<Output, StateRootError>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.cancel.as_ref()?;
+        match self.events.recv() {
+            Ok(Ok(output)) => Some(Ok(output)),
+            Ok(Err(error)) => {
+                self.stop();
+                Some(Err(error))
+            }
+            Err(_) => {
+                self.stop();
+                None
+            }
+        }
+    }
+}
+
+impl<T: TrieCursor, H> Drop for Verifier<T, H> {
+    fn drop(&mut self) {
+        self.stop();
+    }
+}
+
+/// Account producer state, returned from its thread so cursor lifetimes remain tied to `Verifier`.
+#[derive(Debug)]
+struct AccountVerifier<T: TrieCursor, H> {
+    accounts: H,
+    account_verifier: SingleVerifier<DepthFirstTrieIterator<T>>,
+    hash_builder: crate::HashBuilder,
+    account_rlp: Vec<u8>,
+}
+
+impl<T, H> AccountVerifier<T, H>
+where
+    T: TrieCursor,
+    H: HashedCursor<Value = Account>,
+{
+    fn run(
+        &mut self,
+        pipeline: &mut StoragePipeline,
+        context: &WorkerContext,
+    ) -> Result<(), StateRootError> {
+        let mut next_account = self.accounts.seek(B256::ZERO)?;
+        loop {
+            if context.is_cancelled() {
+                return Ok(());
+            }
+            // The scheduler announces storage addresses in order before dispatching their jobs.
+            let next_root = pipeline.next_root(next_account.as_ref().map(|(address, _)| *address));
+            if context.is_cancelled() {
+                return Ok(());
+            }
+            let (address, root) = match (next_account.as_ref(), next_root) {
+                (_, Some(storage)) => storage,
+                (Some((address, _)), None) => (*address, alloy_consensus::EMPTY_ROOT_HASH),
+                (None, None) => break,
+            };
+            let account = match next_account.take() {
+                Some((key, account)) if key == address => {
+                    next_account = self.accounts.next()?;
+                    account
+                }
+                next => {
+                    next_account = next;
+                    // Canonical state roots only include leaves present in hashed accounts.
+                    // Orphan storage is still verified, but cannot create an account leaf.
+                    continue;
+                }
+            };
+            self.account_rlp.clear();
+            account.into_trie_account(root).encode(&mut self.account_rlp);
+            self.hash_builder.add_leaf(Nibbles::unpack(address), &self.account_rlp);
+            if self.hash_builder.updates_len() >= ACCOUNT_UPDATE_THRESHOLD &&
+                !self.verify_account_updates(context)?
+            {
+                return Ok(());
+            }
+        }
+        // Computing the root flushes the remaining branch node updates.
+        self.hash_builder.root();
+        if !self.verify_account_updates(context)? {
+            return Ok(());
+        }
+        self.account_verifier.finalize(&mut |output| context.report_one(output))?;
+        Ok(())
     }
 
-    /// Compares a batch of canonical updates, sorting them in depth-first order internally.
-    ///
-    /// Successive batches must continue the same canonical root calculation. Pass the account or
-    /// storage nodes from its progress updates, which exclude non-persisted empty root paths.
-    /// The callback is also called with account progress after each compared canonical node,
-    /// following any inconsistencies found while reaching it. Storage tries emit no progress.
-    /// A callback error stops comparison immediately; do not reuse the verifier after an error.
-    pub fn verify_updates<E: From<DatabaseError>>(
-        &mut self,
-        updates: impl IntoIterator<Item = (Nibbles, BranchNodeCompact)>,
-        output: &mut impl FnMut(Output) -> Result<(), E>,
-    ) -> Result<(), E> {
-        let mut nodes = updates.into_iter().collect::<Vec<_>>();
-        // HashBuilder completes descendants before their parents, including across batches.
+    fn verify_account_updates(&mut self, context: &WorkerContext) -> Result<bool, StateRootError> {
+        let (builder, updates) = std::mem::take(&mut self.hash_builder).split();
+        self.hash_builder = builder.with_updates(true);
+        // The account trie root is calculated but never persisted. Updates are sorted depth-first
+        // because that is the order in which the `HashBuilder` completes branch nodes, so each
+        // batch continues where the previous one ended.
+        let mut nodes =
+            updates.into_iter().filter(|(path, _)| !path.is_empty()).collect::<Vec<_>>();
         nodes.sort_unstable_by(|a, b| depth_first::cmp(&a.0, &b.0));
         for (path, node) in nodes {
-            self.verify_node(path, node, output)?;
-            if self.trie == TrieKind::Account {
-                output(Output::Progress(path))?;
+            if !self.account_verifier.next(&mut |output| context.report_one(output), path, node)? ||
+                !context.report_one(Output::Progress(path))
+            {
+                return Ok(false);
             }
         }
-        Ok(())
-    }
-
-    /// Reports all remaining persisted nodes as extra. Call once after the final update batch.
-    /// A callback error stops comparison immediately.
-    pub fn finish<E: From<DatabaseError>>(
-        &mut self,
-        output: &mut impl FnMut(Output) -> Result<(), E>,
-    ) -> Result<(), E> {
-        while let Some((path, found)) = self.current.take() {
-            output(Output::Inconsistency {
-                trie: self.trie,
-                path,
-                error: NodeDifference::Extra { found },
-            })?;
-            self.current = self.trie_iter.next().transpose()?;
-        }
-        Ok(())
-    }
-
-    fn verify_node<E: From<DatabaseError>>(
-        &mut self,
-        path: Nibbles,
-        expected: BranchNodeCompact,
-        output: &mut impl FnMut(Output) -> Result<(), E>,
-    ) -> Result<(), E> {
-        loop {
-            // Once the persisted cursor is exhausted, every further canonical node is missing.
-            let Some((current_path, found)) = &self.current else {
-                return output(Output::Inconsistency {
-                    trie: self.trie,
-                    path,
-                    error: NodeDifference::Missing { expected },
-                });
-            };
-            trace!(target: "trie::verify", trie = ?self.trie, ?current_path, ?path, "Current cursor node");
-
-            match depth_first::cmp(&path, current_path) {
-                Ordering::Less => {
-                    // A canonical path before the cursor's path was not produced by the cursor.
-                    return output(Output::Inconsistency {
-                        trie: self.trie,
-                        path,
-                        error: NodeDifference::Missing { expected },
-                    });
-                }
-                Ordering::Equal => {
-                    // Matching paths consume the persisted node even when its value is wrong.
-                    if *found != expected {
-                        output(Output::Inconsistency {
-                            trie: self.trie,
-                            path,
-                            error: NodeDifference::Wrong { expected, found: found.clone() },
-                        })?;
-                    }
-                    self.current = self.trie_iter.next().transpose()?;
-                    return Ok(());
-                }
-                Ordering::Greater => {
-                    // A persisted path before the canonical path is extra. Advance and compare
-                    // the same canonical node against the next persisted node.
-                    output(Output::Inconsistency {
-                        trie: self.trie,
-                        path: *current_path,
-                        error: NodeDifference::Extra { found: found.clone() },
-                    })?;
-                    self.current = self.trie_iter.next().transpose()?;
-                }
-            }
-        }
+        Ok(true)
     }
 }
 
-/// Identifies the trie containing an inconsistent node.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum TrieKind {
-    /// The account trie.
-    Account,
-    /// The storage trie for a hashed account address.
-    Storage {
-        /// Hashed address identifying the storage trie.
-        hashed_address: B256,
-    },
-}
-
-/// Difference between a persisted node and its canonical value.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum NodeDifference {
-    /// A node exists only in the persisted trie.
-    Extra {
-        /// Persisted node to remove.
-        found: BranchNodeCompact,
-    },
-    /// A node exists only in the canonical trie.
-    Missing {
-        /// Canonical node to insert.
-        expected: BranchNodeCompact,
-    },
-    /// A persisted node differs from its canonical value.
-    Wrong {
-        /// Canonical replacement.
-        expected: BranchNodeCompact,
-        /// Persisted node.
-        found: BranchNodeCompact,
-    },
-}
-
-/// A comparison finding or account-trie progress indicator. Hashed state is the source of truth.
+/// Output describes an inconsistency found when comparing the hashed state tables
+/// ([`HashedCursor`]) with that of the trie tables ([`TrieCursor`]). The hashed
+/// tables are considered the source of truth; outputs are on the part of the trie tables.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Output {
-    /// An inconsistent persisted node.
-    Inconsistency {
-        /// Trie containing the node.
-        trie: TrieKind,
-        /// Node path within the trie.
+    /// An extra account node was found.
+    AccountExtra(Nibbles, BranchNodeCompact),
+    /// An extra storage node was found.
+    StorageExtra(B256, Nibbles, BranchNodeCompact),
+    /// An account node had the wrong value.
+    AccountWrong {
+        /// Path of the node
         path: Nibbles,
-        /// Difference from the canonical trie.
-        error: NodeDifference,
+        /// The node's expected value.
+        expected: BranchNodeCompact,
+        /// The node's found value.
+        found: BranchNodeCompact,
     },
-    /// Path of the last compared canonical account node, not an inconsistency.
+    /// A storage node had the wrong value.
+    StorageWrong {
+        /// The account the storage trie belongs to.
+        account: B256,
+        /// Path of the node
+        path: Nibbles,
+        /// The node's expected value.
+        expected: BranchNodeCompact,
+        /// The node's found value.
+        found: BranchNodeCompact,
+    },
+    /// An account node was missing.
+    AccountMissing(Nibbles, BranchNodeCompact),
+    /// A storage node was missing.
+    StorageMissing(B256, Nibbles, BranchNodeCompact),
+    /// Progress indicator with the path of the last verified account trie node.
     Progress(Nibbles),
+}
+
+/// Returns the default number of [`StorageWorker`]s to pass to [`Verifier::new`]: one per available
+/// CPU, or one if the CPU count cannot be determined.
+pub fn default_storage_workers() -> usize {
+    thread::available_parallelism().map_or(1, usize::from)
 }

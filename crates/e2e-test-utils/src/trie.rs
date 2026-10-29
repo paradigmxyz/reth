@@ -1,24 +1,22 @@
 //! Helpers for verifying the persisted state and trie representation of test nodes.
 
+use crate::TmpDB;
 use alloy_consensus::BlockHeader;
 use eyre::{ensure, eyre, Result};
 use reth_provider::{
     BlockNumReader, DBProvider, DatabaseProviderFactory, HeaderProvider, StorageSettingsCache,
 };
-use reth_tasks::TaskExecutor;
 use reth_trie::{
     prefix_set::{PrefixSetMut, TriePrefixSets},
-    verify::Output,
+    verify::{default_storage_workers, Output, DEFAULT_STORAGE_LOOKAHEAD},
     StateRoot,
 };
-use reth_trie_db::{DatabaseHashedCursorFactory, DatabaseTrieCursorFactory};
-use reth_trie_parallel::verify::{DatabaseVerifier, DEFAULT_STORAGE_LOOKAHEAD};
-use std::num::NonZeroUsize;
+use reth_trie_db::{DatabaseHashedCursorFactory, DatabaseTrieCursorFactory, DatabaseVerifier};
 
 /// Asserts that the persisted state and trie representation is internally consistent and matches
 /// the state root of the latest persisted block.
 ///
-/// This performs two checks against a single database snapshot:
+/// This performs two checks against persisted database state:
 /// - the state root recomputed from the persisted hashed state matches the state root of the latest
 ///   persisted header, and
 /// - the persisted trie nodes match a recomputation from the hashed state (the library equivalent
@@ -27,21 +25,17 @@ use std::num::NonZeroUsize;
 /// Only on-disk data is read, so callers must ensure the blocks of interest have been persisted,
 /// e.g. via [`NodeTestContext::wait_for_persisted_block`].
 ///
-/// This briefly acquires the database write lock to open a consistent set of read transactions,
-/// blocking node persistence until they are open. Do not call while holding a write transaction:
-/// acquiring the same lock again would deadlock. Verification then releases the write lock but
-/// retains read snapshots until both checks complete.
-///
 /// [`NodeTestContext::wait_for_persisted_block`]: crate::node::NodeTestContext::wait_for_persisted_block
-pub fn assert_trie_consistency<F>(factory: &F, task_executor: &TaskExecutor) -> Result<()>
+pub fn assert_trie_consistency<F>(factory: &F) -> Result<()>
 where
     F: DatabaseProviderFactory<
-        Provider: DBProvider + StorageSettingsCache + BlockNumReader + HeaderProvider,
-    >,
+            DB = TmpDB,
+            Provider: DBProvider + StorageSettingsCache + BlockNumReader + HeaderProvider,
+        > + AsRef<F::DB>,
 {
     // Prevent commits while opening the independent snapshots.
     let snapshot_guard = factory.database_provider_rw()?;
-    let provider = factory.database_provider_ro()?.disable_long_read_transaction_safety();
+    let provider = factory.database_provider_ro()?;
     let tip = provider.best_block_number()?;
     let header = provider
         .header_by_number(tip)?
@@ -49,11 +43,10 @@ where
     let tx = provider.tx_ref();
 
     reth_trie_db::with_adapter!(provider, |A| {
-        let verifier = DatabaseVerifier::from_provider_factory::<_, A>(
-            factory,
-            task_executor,
-            NonZeroUsize::new(task_executor.cpu_pool().current_num_threads())
-                .unwrap_or(NonZeroUsize::MIN),
+        let db = factory.as_ref().db().clone().with_disable_long_read_transaction_safety();
+        let verifier = DatabaseVerifier::<_, A>::new(
+            &db,
+            default_storage_workers(),
             DEFAULT_STORAGE_LOOKAHEAD,
         )?;
         drop(snapshot_guard);

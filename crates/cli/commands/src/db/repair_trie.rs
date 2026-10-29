@@ -1,14 +1,11 @@
 use alloy_consensus::BlockHeader as AlloyBlockHeader;
-use clap::{
-    builder::{RangedU64ValueParser, TypedValueParser},
-    Parser,
-};
+use clap::{builder::RangedU64ValueParser, Parser};
 use metrics::{self, Counter};
 use reth_chainspec::EthChainSpec;
 use reth_cli_util::parse_socket_address;
+use reth_db::DatabaseEnv;
 use reth_db_api::{
     cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO},
-    database::Database,
     transaction::{DbTx, DbTxMut},
 };
 use reth_db_common::DbTool;
@@ -29,19 +26,15 @@ use reth_stages::StageId;
 use reth_storage_api::StorageSettingsCache;
 use reth_tasks::TaskExecutor;
 use reth_trie::{
-    verify::{NodeDifference, Output, TrieKind},
+    verify::{default_storage_workers, Output, DEFAULT_STORAGE_LOOKAHEAD},
     Nibbles,
 };
 use reth_trie_db::{
-    DatabaseHashedCursorFactory, DatabaseStateRoot, DatabaseTrieCursorFactory,
+    DatabaseHashedCursorFactory, DatabaseStateRoot, DatabaseTrieCursorFactory, DatabaseVerifier,
     StorageTrieEntryLike, TrieTableAdapter,
-};
-use reth_trie_parallel::verify::{
-    DatabaseVerifier, DEFAULT_STORAGE_LOOKAHEAD, MAX_STORAGE_LOOKAHEAD, MAX_STORAGE_WORKER_COUNT,
 };
 use std::{
     net::SocketAddr,
-    num::NonZeroUsize,
     time::{Duration, Instant},
 };
 use tracing::{info, warn};
@@ -53,20 +46,17 @@ const PROGRESS_PERIOD: Duration = Duration::from_secs(5);
 pub struct Command {
     /// Only show inconsistencies without making any repairs.
     ///
-    /// Can run alongside a node. If the database changes while opening the read snapshots,
-    /// verification fails before starting; retry when writes are quiescent.
+    /// Requires the node to be stopped so all workers read the same database snapshot.
     #[arg(long)]
     pub(crate) dry_run: bool,
 
     /// Number of storage verification workers. Defaults to the number of available CPUs.
-    #[arg(long, default_value_t = std::thread::available_parallelism().unwrap_or(NonZeroUsize::MIN).min(const { NonZeroUsize::new(MAX_STORAGE_WORKER_COUNT).unwrap() }), hide_default_value = true, value_parser = RangedU64ValueParser::<usize>::new().range(1..=MAX_STORAGE_WORKER_COUNT as u64).try_map(NonZeroUsize::try_from))]
-    pub(crate) storage_worker_count: NonZeroUsize,
+    #[arg(long, default_value_t = default_storage_workers(), hide_default_value = true, value_parser = RangedU64ValueParser::<usize>::new().range(1..))]
+    pub(crate) storage_workers: usize,
 
-    /// Maximum number of storage tries queued for verification at once.
-    ///
-    /// Higher values can improve throughput but retain more pending results in memory.
-    #[arg(long, default_value_t = DEFAULT_STORAGE_LOOKAHEAD, value_parser = RangedU64ValueParser::<usize>::new().range(1..=MAX_STORAGE_LOOKAHEAD as u64).try_map(NonZeroUsize::try_from))]
-    pub(crate) storage_lookahead: NonZeroUsize,
+    /// Maximum storage roots computed or in flight ahead of the account walk.
+    #[arg(long, default_value_t = DEFAULT_STORAGE_LOOKAHEAD, value_parser = RangedU64ValueParser::<usize>::new().range(1..))]
+    pub(crate) storage_lookahead: usize,
 
     /// Enable Prometheus metrics.
     ///
@@ -77,7 +67,7 @@ pub struct Command {
 
 impl Command {
     /// Execute `db repair-trie` command
-    pub fn execute<N: ProviderNodeTypes>(
+    pub fn execute<N: ProviderNodeTypes<DB = DatabaseEnv>>(
         self,
         tool: &DbTool<N>,
         task_executor: TaskExecutor,
@@ -118,25 +108,19 @@ impl Command {
         };
 
         if self.dry_run {
-            verify_only(tool, &task_executor, self.storage_worker_count, self.storage_lookahead)?
+            verify_only(tool, self.storage_workers, self.storage_lookahead)?
         } else {
-            verify_and_repair(
-                tool,
-                &task_executor,
-                self.storage_worker_count,
-                self.storage_lookahead,
-            )?
+            verify_and_repair(tool, self.storage_workers, self.storage_lookahead)?
         }
 
         Ok(())
     }
 }
 
-fn verify_only<N: ProviderNodeTypes>(
+fn verify_only<N: ProviderNodeTypes<DB = DatabaseEnv>>(
     tool: &DbTool<N>,
-    task_executor: &TaskExecutor,
-    storage_worker_count: NonZeroUsize,
-    storage_lookahead: NonZeroUsize,
+    storage_workers: usize,
+    storage_lookahead: usize,
 ) -> eyre::Result<()> {
     // Log the database block tip from Finish stage checkpoint
     let finish_checkpoint = tool
@@ -149,20 +133,18 @@ fn verify_only<N: ProviderNodeTypes>(
     let db = tool.provider_factory.db_ref();
     reth_trie_db::with_adapter!(tool.provider_factory, |A| do_verify_only::<A>(
         db,
-        task_executor,
-        storage_worker_count,
+        storage_workers,
         storage_lookahead
     ))
 }
 
 fn do_verify_only<A: TrieTableAdapter>(
-    db: &impl Database,
-    task_executor: &TaskExecutor,
-    storage_worker_count: NonZeroUsize,
-    storage_lookahead: NonZeroUsize,
+    db: &DatabaseEnv,
+    storage_workers: usize,
+    storage_lookahead: usize,
 ) -> eyre::Result<()> {
-    let verifier =
-        DatabaseVerifier::new::<_, A>(db, task_executor, storage_worker_count, storage_lookahead)?;
+    let db = db.clone().with_disable_long_read_transaction_safety();
+    let verifier = DatabaseVerifier::<_, A>::new(&db, storage_workers, storage_lookahead)?;
 
     let metrics = RepairTrieMetrics::new();
 
@@ -185,10 +167,14 @@ fn do_verify_only<A: TrieTableAdapter>(
 
             // Record metrics based on output type
             match output {
-                Output::Inconsistency { trie: TrieKind::Account, .. } => {
+                Output::AccountExtra(_, _) |
+                Output::AccountWrong { .. } |
+                Output::AccountMissing(_, _) => {
                     metrics.account_inconsistencies.increment(1);
                 }
-                Output::Inconsistency { trie: TrieKind::Storage { .. }, .. } => {
+                Output::StorageExtra(_, _, _) |
+                Output::StorageWrong { .. } |
+                Output::StorageMissing(_, _, _) => {
                     metrics.storage_inconsistencies.increment(1);
                 }
                 Output::Progress(_) => unreachable!(),
@@ -237,11 +223,10 @@ fn verify_checkpoints(provider: impl StageCheckpointReader) -> eyre::Result<()> 
     Ok(())
 }
 
-fn verify_and_repair<N: ProviderNodeTypes>(
+fn verify_and_repair<N: ProviderNodeTypes<DB = DatabaseEnv>>(
     tool: &DbTool<N>,
-    task_executor: &TaskExecutor,
-    storage_worker_count: NonZeroUsize,
-    storage_lookahead: NonZeroUsize,
+    storage_workers: usize,
+    storage_lookahead: usize,
 ) -> eyre::Result<()> {
     // Get a read-write database provider
     let mut provider_rw = tool.provider_factory.provider_rw()?;
@@ -258,8 +243,7 @@ fn verify_and_repair<N: ProviderNodeTypes>(
             &mut provider_rw,
             tool.provider_factory.db_ref(),
             finish_checkpoint.block_number,
-            task_executor,
-            storage_worker_count,
+            storage_workers,
             storage_lookahead,
         )?
     });
@@ -274,13 +258,12 @@ fn verify_and_repair<N: ProviderNodeTypes>(
     Ok(())
 }
 
-fn do_verify_and_repair<N: ProviderNodeTypes, A: TrieTableAdapter>(
+fn do_verify_and_repair<N: ProviderNodeTypes<DB = DatabaseEnv>, A: TrieTableAdapter>(
     provider_rw: &mut reth_provider::DatabaseProviderRW<N::DB, N>,
     db: &N::DB,
     block_number: u64,
-    task_executor: &TaskExecutor,
-    storage_worker_count: NonZeroUsize,
-    storage_lookahead: NonZeroUsize,
+    storage_workers: usize,
+    storage_lookahead: usize,
 ) -> eyre::Result<usize> {
     // Create cursors for making modifications with
     let tx = provider_rw.tx_mut();
@@ -288,9 +271,9 @@ fn do_verify_and_repair<N: ProviderNodeTypes, A: TrieTableAdapter>(
     let mut account_trie_cursor = tx.cursor_write::<A::AccountTrieTable>()?;
     let mut storage_trie_cursor = tx.cursor_dup_write::<A::StorageTrieTable>()?;
 
-    // The write transaction prevents concurrent commits while verification opens its snapshots.
-    let verifier =
-        DatabaseVerifier::new::<_, A>(db, task_executor, storage_worker_count, storage_lookahead)?;
+    // Open every read snapshot before any repairs are applied.
+    let db = db.clone().with_disable_long_read_transaction_safety();
+    let verifier = DatabaseVerifier::<_, A>::new(&db, storage_workers, storage_lookahead)?;
 
     let metrics = RepairTrieMetrics::new();
 
@@ -308,10 +291,14 @@ fn do_verify_and_repair<N: ProviderNodeTypes, A: TrieTableAdapter>(
 
             // Record metrics based on output type
             match &output {
-                Output::Inconsistency { trie: TrieKind::Account, .. } => {
+                Output::AccountExtra(_, _) |
+                Output::AccountWrong { .. } |
+                Output::AccountMissing(_, _) => {
                     metrics.account_inconsistencies.increment(1);
                 }
-                Output::Inconsistency { trie: TrieKind::Storage { .. }, .. } => {
+                Output::StorageExtra(_, _, _) |
+                Output::StorageWrong { .. } |
+                Output::StorageMissing(_, _, _) => {
                     metrics.storage_inconsistencies.increment(1);
                 }
                 Output::Progress(_) => {}
@@ -319,22 +306,14 @@ fn do_verify_and_repair<N: ProviderNodeTypes, A: TrieTableAdapter>(
         }
 
         match output {
-            Output::Inconsistency {
-                trie: TrieKind::Account,
-                path,
-                error: NodeDifference::Extra { .. },
-            } => {
+            Output::AccountExtra(path, _node) => {
                 // Extra account node in trie, remove it
                 let key: A::AccountKey = path.into();
                 if account_trie_cursor.seek_exact(key)?.is_some() {
                     account_trie_cursor.delete_current()?;
                 }
             }
-            Output::Inconsistency {
-                trie: TrieKind::Storage { hashed_address: account },
-                path,
-                error: NodeDifference::Extra { .. },
-            } => {
+            Output::StorageExtra(account, path, _node) => {
                 // Extra storage node in trie, remove it
                 let subkey: A::StorageSubKey = path.into();
                 if storage_trie_cursor
@@ -345,24 +324,14 @@ fn do_verify_and_repair<N: ProviderNodeTypes, A: TrieTableAdapter>(
                     storage_trie_cursor.delete_current()?;
                 }
             }
-            Output::Inconsistency {
-                trie: TrieKind::Account,
-                path,
-                error:
-                    NodeDifference::Wrong { expected: node, .. } |
-                    NodeDifference::Missing { expected: node },
-            } => {
+            Output::AccountWrong { path, expected: node, .. } |
+            Output::AccountMissing(path, node) => {
                 // Wrong/missing account node value, upsert it
                 let key: A::AccountKey = path.into();
                 account_trie_cursor.upsert(key, &node)?;
             }
-            Output::Inconsistency {
-                trie: TrieKind::Storage { hashed_address: account },
-                path,
-                error:
-                    NodeDifference::Wrong { expected: node, .. } |
-                    NodeDifference::Missing { expected: node },
-            } => {
+            Output::StorageWrong { account, path, expected: node, .. } |
+            Output::StorageMissing(account, path, node) => {
                 // Wrong/missing storage node value, upsert it
                 // (We can't just use `upsert` method with a dup cursor, it's not properly
                 // supported)

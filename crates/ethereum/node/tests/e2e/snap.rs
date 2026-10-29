@@ -152,7 +152,7 @@ async fn a_fresh_node_snap_syncs_to_the_head() -> eyre::Result<()> {
     assert_eq!(attempt.state_root(), pivot.state_root);
     // The blocks above the pivot executed on that state.
     client.wait_for_persisted_block(CHAIN_LENGTH).await?;
-    assert_trie_consistency(&client.inner.provider, &client.inner.task_executor)?;
+    assert_trie_consistency(&client.inner.provider)?;
     Ok(())
 }
 
@@ -164,7 +164,7 @@ async fn a_chain_before_amsterdam_syncs_with_the_staged_pipeline() -> eyre::Resu
     client.sync_to(server.block_hash(CHAIN_LENGTH)).await?;
 
     client.wait_for_persisted_block(CHAIN_LENGTH).await?;
-    assert_trie_consistency(&client.inner.provider, &client.inner.task_executor)?;
+    assert_trie_consistency(&client.inner.provider)?;
     assert!(client.inner.provider.database_provider_ro()?.snap_attempt()?.is_none());
     // The pipeline executed the chain.
     let execution = client.inner.provider.get_stage_checkpoint(StageId::Execution)?.unwrap();
@@ -233,7 +233,7 @@ async fn a_snap_synced_node_executes_downloaded_contract_code() -> eyre::Result<
     assert_eq!(provider.get_storage_at(contract, U256::ZERO).await?, U256::from(2));
     assert_eq!(provider.get_transaction_count(account.address()).await?, account.nonce());
     client.wait_for_persisted_block(CHAIN_LENGTH + 1).await?;
-    assert_trie_consistency(&client.inner.provider, &client.inner.task_executor)?;
+    assert_trie_consistency(&client.inner.provider)?;
     assert_eq!(client.inner.provider.database_provider_ro()?.snap_attempt()?, Some(attempt));
     Ok(())
 }
@@ -257,11 +257,11 @@ async fn a_completed_snap_sync_survives_restart() -> eyre::Result<()> {
     let client = client.restart().await?;
     assert_eq!(client.block_hash(CHAIN_LENGTH), server.block_hash(CHAIN_LENGTH));
     assert_eq!(client.inner.provider.database_provider_ro()?.snap_attempt()?, Some(attempt));
-    assert_trie_consistency(&client.inner.provider, &client.inner.task_executor)?;
+    assert_trie_consistency(&client.inner.provider)?;
     let next = server.mine([]).await?;
     client.import_payload(next.payload).await?;
     client.wait_for_persisted_block(CHAIN_LENGTH + 1).await?;
-    assert_trie_consistency(&client.inner.provider, &client.inner.task_executor)?;
+    assert_trie_consistency(&client.inner.provider)?;
     assert!(control.take_requests().is_empty(), "verified state must not be downloaded again");
     Ok(())
 }
@@ -337,7 +337,7 @@ async fn partial_storage_resumes_after_restart() -> eyre::Result<()> {
     let attempt = client.snap_attempt()?;
     assert_eq!(attempt.id(), write.attempt());
     assert!(attempt.is_verified());
-    assert_trie_consistency(&client.inner.provider, &client.inner.task_executor)?;
+    assert_trie_consistency(&client.inner.provider)?;
     Ok(())
 }
 
@@ -454,7 +454,7 @@ async fn an_expired_pivot_advances_with_bals_without_restarting() -> eyre::Resul
         client.rpc_provider().get_balance(recipient).await?,
         server.rpc_provider().get_balance(recipient).await?
     );
-    assert_trie_consistency(&client.inner.provider, &client.inner.task_executor)?;
+    assert_trie_consistency(&client.inner.provider)?;
     Ok(())
 }
 
@@ -506,7 +506,7 @@ async fn a_download_resumes_when_its_only_peer_returns() -> eyre::Result<()> {
     let completed = client.snap_attempt()?;
     assert_eq!(completed.id(), attempt.id());
     assert!(completed.is_verified());
-    assert_trie_consistency(&client.inner.provider, &client.inner.task_executor)?;
+    assert_trie_consistency(&client.inner.provider)?;
     Ok(())
 }
 
@@ -638,7 +638,7 @@ async fn a_reorged_pivot_repairs_orphaned_storage() -> eyre::Result<()> {
             U256::from(value)
         );
     }
-    assert_trie_consistency(&client.inner.provider, &client.inner.task_executor)?;
+    assert_trie_consistency(&client.inner.provider)?;
     Ok(())
 }
 
@@ -698,6 +698,6 @@ async fn a_fresh_node_executes_blocks_after_an_optimistic_snap_pivot() -> eyre::
         U256::from(DEFAULT_HEAD_DISTANCE + 1)
     );
     assert_eq!(provider.get_transaction_count(account.address()).await?, account.nonce());
-    assert_trie_consistency(&client.inner.provider, &client.inner.task_executor)?;
+    assert_trie_consistency(&client.inner.provider)?;
     Ok(())
 }
