@@ -21,14 +21,15 @@ target/dst/reth-trie-dst '{"seed":42,"blocks":64,"datadir":"/tmp/trie-42"}' > /t
 
 Prerequisites for native builds are reth's normal Rust/native build dependencies,
 including Clang for RocksDB's bindings. The crate belongs to the root workspace and uses its
-shared dependencies, `Cargo.lock`, and `dst` profile. That profile inherits
-`profiling` and enables debug assertions and overflow checks.
+shared dependencies, `Cargo.lock`, and the `dst` profile. Keep `dst` for this harness:
+it inherits `profiling` while enabling debug assertions and overflow checks.
 
 The executable accepts one optional JSON object:
 
 | Field | Default | Range |
 | --- | --- | --- |
 | `seed` | 0 | unsigned 64-bit integer |
+| `input` | generated from seed | explicit operation stream ending each block with `Commit` |
 | `datadir` | temporary directory | persistent database and journal directory; reuse to restart |
 | `blocks` | 64 | 1–1024 |
 | `updates` | 64 | 1–4096 per block |
@@ -50,22 +51,27 @@ unsuccessfully. Keep stdout and stderr.
 
 ## What runs
 
-The generator uses 16 accounts and 64 slots per account. It creates nonempty
-accounts, changes nonce/balance, performs storage-only updates, overwrites slots,
-and deletes individual slots. Each block receives the configured number of
+The generator draws new addresses and storage slots uniformly from the full
+32-bit range (0 through `0xFFFFFFFF`). It uses up to 16 generated accounts,
+reusing existing accounts and slots for storage-only updates. It creates
+nonempty accounts, changes nonce/balance, overwrites slots, and deletes
+individual slots. Each block receives the configured number of
 updates. It independently tracks the complete state and builds a per-block
 `BundleState` with original and final account/storage values and reverts.
 
-The production task consumes hashed updates in randomized batches of 1–16
-operations, preserving write order and merging repeated keys within each batch.
-Hint-only batches are randomly interleaved through the production prewarming
-stream, which produces `LeafUpdate::Touched` entries without changing state.
+The input is an ordered stream of `UpdateBatch`, `PrewarmBatch`, and `Commit`
+operations. Each update batch contains account and storage updates in write
+order; each prewarm batch contains account addresses and storage keys as
+access hints. `Commit` finishes the sparse-trie task, checks the reference
+root, and inserts the resulting block. The input records the batch order
+explicitly, so replay needs no stream seed. Prewarm batches produce
+`LeafUpdate::Touched` entries without changing state.
 Hints include a random nonempty subset of distinct written keys plus read-only
 accesses to unwritten accounts/storage. They overlap actual updates without
 always covering them, and may arrive before or after an overlapping write.
 Batch composition and hint targets are logged; the completion summary counts
-update and hint batches. Batching and hints are seeded per block for replay.
-At each block boundary, its root must equal a root rebuilt from the reference
+update and hint batches. The generator uses the seed to construct the initial
+stream. At each `Commit`, the root must equal a root rebuilt from the reference
 maps with `HashBuilder`:
 storage leaves first, followed by RLP account leaves. Its actual hashed state
 and trie updates are attached to the synthetic executed block alongside the
@@ -91,13 +97,13 @@ matching Reth's shutdown flush.
 It then drains trie, proof-worker, and deferred-drop queues before exiting, so
 all database handles close while RocksDB's global scheduler is still alive.
 
-After every commit, a fresh overlay-backed provider must expose the reference
-accounts and all 64 slots, including deleted slots, at the database tip. Account
-and storage proofs must verify against the independent root. Fully flushed
-commits additionally compare the complete raw hashed tables with the reference
-and calculate a fresh database-backed root. Metrics report proof revelation,
-trie reuse, pruning, overlay computation, and partial commits. Their counts
-depend on the selected persistence settings and run length.
+After every persistence commit, a fresh overlay-backed provider must expose the
+reference accounts and every touched slot, including deleted slots, plus both
+range endpoints at the database tip. Fully flushed commits additionally compare
+the complete raw hashed tables with the reference and calculate a fresh
+database-backed root. Metrics report proof revelation, trie reuse, pruning,
+overlay computation, and partial commits. Their counts depend on the selected
+persistence settings and run length.
 
 The chain is linear. Reorgs, EVM execution, arbitrary account
 destruction and storage wipes are excluded. In particular, the generator does
@@ -134,8 +140,9 @@ uploads with its artifacts.
 
 The controller implements `parse-args`, `config`, `warmup`, `start`, `progress`,
 `finalize` and `observe`. It starts the executable under Bedrock's `thread-fuzz`,
-so the scheduler varies the real task/proof/persistence interleavings. Each seed
-starts with a new empty database after the shared warm checkpoint. The seed
+so the scheduler varies the real task/proof/persistence interleavings. By default,
+each seed resumes the same live initialized worker and empty database from the
+shared warm checkpoint; `cold_start: true` instead creates them after branching. The seed
 controls generated operations and the recorded crash plan; Bedrock's recorded
 random/preemption streams control scheduling. Mid-run semantic decision editing
 is unsupported.
@@ -162,7 +169,7 @@ when `partial_state_trie < Finish`. Reth's durable unwind marker also handles a
 second crash during recovery. The actual committed checkpoint determines the
 recovered head, including commits whose acknowledgement was lost. The reference
 state is reconstructed from the journal through that head and compared with the
-recovered header root, hashed tables, storage, and fresh DB-backed proofs. All
+recovered header root, hashed tables, and storage. All
 volatile overlays and the sparse trie start cold; generation then resumes at the
 next block. Keep the same seed and configuration when reopening a directory.
 
@@ -198,3 +205,54 @@ CI's `duration` is the same host budget; `num_seeds` is a global cap, unlimited
 when blank. The workflow fetches the selected Reth revision. Preserve `RUN_DIR`
 and use the generic runner's `--prepared` option to reuse the exact inputs. For an actual recorded schedule, use Bedrock's replay command on the
 recorded run; rebuilding an image or changing the binary changes the World.
+
+## Fuzz explicit trie inputs
+
+With the accompanying Bedrock workload-input hooks, set `DST_CMD=fuzz` during
+preparation and execution. For example, dispatch the same CI workflow with
+`mode=fuzz`, `parallel_seeds=1`, and this workload URL. The workflow's
+`num_seeds` then caps fuzz executions. Each corpus entry is an `Input`: an
+ordered operation stream. Reth generates eight initial entries and exposes
+typed AST sites for LibAFL to choose. Its operators edit account/storage
+fields, prewarm keys, nested updates, batches, and commit boundaries; crossover
+draws a second corpus entry. Invalid edits leave the input unchanged. The same input can
+also be supplied as `base_input` to the controller for replay.
+
+At each completed block, the controller emits `trie/input/checked`, which gives
+Bedrock a pull point when mid-run snapshots are enabled. A suffix input is
+injected at the next new block boundary; already journaled blocks are never
+replaced. The worker waits after its original input until Bedrock either injects
+a suffix or finalizes the run. This workload sets `--max-snaps=0` in
+`bedrock.yaml`, so fuzzing currently uses only whole-input mutations from the
+warm checkpoint; the suffix path remains available for experiments. Fuzz
+preparation builds a coverage-instrumented guest executable and keeps an
+uninstrumented executable beside the host controller for input hooks.
+The first scope is trie operation streams on a linear
+chain; it does not mutate Reth code or the VM's recorded scheduling decisions.
+
+### Warm initialization
+
+The default controller warmup starts a live worker from fixed `workload_args`,
+initializes its runtime, empty database, storage and genesis, and checks a
+Unix-datagram readiness handshake before returning `ready: true`. Repeated hooks
+poll the same process; dead workers and initialization exceeding 120 guest seconds
+are errors. The worker blocks in bounded socket I/O (one-hour guest deadline), not
+an input-dependent polling loop. No corpus input, generation or expected roots are
+loaded in this warm prefix.
+
+After branching, `start` sends the execution config path over that socket. The
+worker validates that proof-worker counts, storage directory and persistence/tree
+settings match the initialized configuration, then parses and runs the input and
+its normal initial assertions. Guest-local `stdout.log` retains output across hook
+processes; `init.log` and `warm-ready.json` capture the idle worker PID and output
+frontier. Adoption seeks past that frontier and emits a `warm: reused` PID event,
+so pre-checkpoint recovery output is not counted as per-execution recovery; `run.log` and the controller's SIGKILL/recovery monitor remain active.
+Subsequent crash restarts launch normally and reopen the real persisted database,
+without an initialization barrier. Continuation input and synchronous
+`run_secs: 1` execution use the same monitor as longer runs.
+
+The current coverage frontend retains inline counters and its crash-persistent
+feedback map across the warm checkpoint; the initialization barrier alone does
+not remove initialization coverage from per-input feedback.
+
+Set `cold_start: true` in workload args to retain per-execution startup coverage.
