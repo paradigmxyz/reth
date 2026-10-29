@@ -55,10 +55,10 @@ if [ "${DST_CMD:-campaign}" = fuzz ]; then
   export CARGO_PROFILE_DST_LTO=fat CARGO_PROFILE_DST_CODEGEN_UNITS=1
   source /bedrock-rust-coverage.sh
   binary=$(bedrock_rust_coverage_build /bedrock-guest /out reth-trie-dst dst \
-    --inline --locked -p reth-trie-dst --features inline-coverage)
+    --inline --locked -p reth-trie-dst --features dst,inline-coverage)
   bedrock_rust_coverage_check "$binary" --version
 else
-  cargo build --locked -p reth-trie-dst --profile dst
+  cargo build --locked -p reth-trie-dst --profile dst --features dst
   binary="$CARGO_TARGET_DIR/dst/reth-trie-dst"
 fi
 printf 'cargo_secs=%s\n' "$SECONDS" >> /run-info/cache-info.env

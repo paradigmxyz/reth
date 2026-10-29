@@ -9,6 +9,7 @@ publish = false
 workspace = true
 
 [features]
+dst = ["reth-db/dst", "reth-trie/dst"]
 inline-coverage = []
 
 [dependencies]
