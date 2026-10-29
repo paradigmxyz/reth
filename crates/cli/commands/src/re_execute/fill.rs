@@ -327,8 +327,9 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
                     .workers
                     .unwrap_or_else(|| std::thread::available_parallelism().map_or(1, |n| n.get()))
                     .max(1);
-                // Bounds results held for in-order publication behind one slow block.
-                let window = workers as u64 * 8;
+                // Bounds results held for in-order publication; deep enough that workers
+                // keep capturing while the writer seals and verifies a publication.
+                let window = (workers as u64 * 8).max(2 * PAGE_RECORDS_PER_PUBLISH as u64);
                 let begin = catalog.cursor.next;
                 let next = AtomicU64::new(begin);
                 let written = AtomicU64::new(begin);
@@ -367,7 +368,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
                         let mut metadata_bytes = 0;
                         // A superseded writer can only have written blocks of the page it
                         // never published, so reading keys back is needed for one page only.
-                        let recheck_end = begin.saturating_add(store::PAGE_RECORDS as u64);
+                        let recheck_end = begin.saturating_add(PAGE_RECORDS_PER_PUBLISH as u64);
                         // One write per page (or per 64 MiB) instead of one durable write per block.
                         let mut batch = WriteBatch::new();
                         let mut batch_bytes = 0usize;
@@ -411,7 +412,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
                             }
                             catalog.records.push(record);
                             let seal = stop == end ||
-                                catalog.records.len() >= store::PAGE_RECORDS ||
+                                catalog.records.len() >= PAGE_RECORDS_PER_PUBLISH ||
                                 metadata_bytes >= 8 * 1024 * 1024;
                             // A prior writer may have durably written these blocks before
                             // publishing its checkpoint. Verify them above, but do not
@@ -483,6 +484,10 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
         .await?
     }
 }
+
+/// Blocks per checkpoint and catalog publication. Publication frequency is runtime I/O
+/// batching, not schema: readers page metadata independently of it.
+const PAGE_RECORDS_PER_PUBLISH: usize = 10 * store::PAGE_RECORDS;
 
 /// One captured, verified block awaiting in-order publication.
 struct Produced {
