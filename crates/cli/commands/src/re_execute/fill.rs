@@ -25,7 +25,14 @@ use slatedb::{
     config::{CompressionCodec, Settings},
     Db, WriteBatch,
 };
-use std::sync::Arc;
+use std::{
+    collections::BTreeMap,
+    sync::{
+        atomic::{AtomicBool, AtomicU64, Ordering},
+        Arc,
+    },
+    time::Duration,
+};
 use tracing::{info, warn};
 
 /// Ensure a pinned exclusive-end range has a durable, verified execution corpus.
@@ -48,6 +55,10 @@ pub struct FillCommand<C: ChainSpecParser> {
     /// Re-read and fully replay published records instead of checking metadata only.
     #[arg(long)]
     verify_existing: bool,
+    /// Capture worker threads. Blocks are captured concurrently and published in order by one
+    /// writer. Defaults to the available parallelism.
+    #[arg(long)]
+    workers: Option<usize>,
     #[command(flatten)]
     pub jit: JitArgs,
 }
@@ -208,11 +219,14 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
                     handle.block_on(db.put(CONTEXT_KEY, &context_bytes))?;
                 }
                 let state = BlockchainProvider::new(provider_factory.clone())?;
-                let mut start = catalog.cursor.next;
-                let mut metadata_bytes = 0;
-                while start < end {
-                    eyre::ensure!(!cancellation.is_cancelled(), "capture cancelled");
+                let cancellation = &cancellation;
+                // Capture, replay and independent transaction execution are pure functions of
+                // the archive DB, so workers run them concurrently. One writer publishes the
+                // results strictly in block order, keeping pages, checkpoints and fencing as before.
+                let produce = |start: u64| -> eyre::Result<Produced> {
                     let stop = start + 1;
+                    let expected =
+                        provider_factory.database_provider_ro()?.disable_long_read_transaction_safety();
                     let mut chunk = Arc::new(Chunk::capture(
                         start..stop,
                         &config,
@@ -236,9 +250,9 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
                                 .recovered_block(number.into(), TransactionVariant::NoHash)?
                                 .ok_or_else(|| eyre::eyre!("missing canonical block {number}"))
                         },
-                        &cancellation,
+                        cancellation,
                     )?);
-                    let (transactions, gas) = chunk.replay(&config, consensus, &cancellation)?;
+                    let (transactions, gas) = chunk.replay(&config, consensus, cancellation)?;
                     let indices = expected
                         .block_body_indices(start)?
                         .ok_or_else(|| eyre::eyre!("missing canonical body indices"))?;
@@ -253,7 +267,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
                         &chunk,
                         first_tx,
                         None,
-                        &cancellation,
+                        cancellation,
                     )?;
                     let captured =
                         Arc::get_mut(&mut chunk).expect("capture has no remaining views");
@@ -304,80 +318,144 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
                     };
                     let metadata = serde_json::to_vec(&record)?;
                     eyre::ensure!(metadata.len() <= MAX_RECORD_BYTES, "metadata record too large");
-                    metadata_bytes += metadata.len();
-                    let mut batch = WriteBatch::new();
-                    for (key, value) in
-                        [(store::key(start), &bytes), (store::metadata_key(start), &metadata)]
-                            .into_iter()
-                            .chain(
-                                case_bytes
-                                    .iter()
-                                    .enumerate()
-                                    .map(|(i, b)| (store::transaction_key(first_tx + i as u64), b)),
-                            )
-                    {
-                        if let Some(stored) = handle.block_on(db.get(key))? {
+                    Ok(Produced { record, bytes, metadata, case_bytes })
+                };
+                let workers = self
+                    .workers
+                    .unwrap_or_else(|| std::thread::available_parallelism().map_or(1, |n| n.get()))
+                    .max(1);
+                // Bounds results held for in-order publication behind one slow block.
+                let window = workers as u64 * 8;
+                let begin = catalog.cursor.next;
+                let next = AtomicU64::new(begin);
+                let written = AtomicU64::new(begin);
+                let failed = AtomicBool::new(false);
+                info!(workers, from = begin, to = end, "Starting parallel corpus capture");
+                std::thread::scope(|scope| -> eyre::Result<()> {
+                    let (sender, receiver) = crossbeam_channel::unbounded::<eyre::Result<Produced>>();
+                    for _ in 0..workers {
+                        let sender = sender.clone();
+                        let (next, written, failed, produce) = (&next, &written, &failed, &produce);
+                        scope.spawn(move || loop {
+                            let number = next.fetch_add(1, Ordering::Relaxed);
+                            if number >= end {
+                                return;
+                            }
+                            while number >= written.load(Ordering::Acquire) + window {
+                                if failed.load(Ordering::Relaxed) || cancellation.is_cancelled() {
+                                    return;
+                                }
+                                std::thread::sleep(Duration::from_millis(1));
+                            }
+                            if failed.load(Ordering::Relaxed) {
+                                return;
+                            }
+                            let result = produce(number);
+                            let error = result.is_err();
+                            if sender.send(result).is_err() || error {
+                                failed.store(true, Ordering::Relaxed);
+                                return;
+                            }
+                        });
+                    }
+                    drop(sender);
+                    let result = (|| -> eyre::Result<()> {
+                        let mut pending = BTreeMap::new();
+                        let mut metadata_bytes = 0;
+                        let mut start = begin;
+                        while start < end {
+                            eyre::ensure!(!cancellation.is_cancelled(), "capture cancelled");
+                            let Some(Produced { record, bytes, metadata, case_bytes }) =
+                                pending.remove(&start)
+                            else {
+                                let produced = receiver
+                                    .recv()
+                                    .map_err(|_| eyre::eyre!("corpus capture workers stopped"))??;
+                                pending.insert(produced.record.start, produced);
+                                continue;
+                            };
+                            let stop = record.end;
+                            let (transactions, gas, first_tx) =
+                                (record.transactions, record.gas, record.first_tx);
+                            metadata_bytes += metadata.len();
+                            let mut batch = WriteBatch::new();
+                            for (key, value) in
+                                [(store::key(start), &bytes), (store::metadata_key(start), &metadata)]
+                                    .into_iter()
+                                    .chain(case_bytes.iter().enumerate().map(|(i, b)| {
+                                        (store::transaction_key(first_tx + i as u64), b)
+                                    }))
+                            {
+                                if let Some(stored) = handle.block_on(db.get(key))? {
+                                    eyre::ensure!(
+                                        stored.as_ref() == value,
+                                        "unpublished record conflicts with canonical capture"
+                                    );
+                                } else {
+                                    batch.put(key, value);
+                                }
+                            }
+                            // A prior writer may have durably written this entire block
+                            // before publishing its checkpoint. Verify it above, but do
+                            // not submit the empty batch rejected by SlateDB on resume.
+                            if !batch.is_empty() {
+                                handle.block_on(db.write(batch))?;
+                            }
+                            catalog.records.push(record);
+                            written.store(stop, Ordering::Release);
+                            // Publication frequency is runtime I/O batching, not part of the schema.
+                            // Every batch above is a complete block; no partial block is published.
+                            if stop != end &&
+                                catalog.records.len() < store::PAGE_RECORDS &&
+                                metadata_bytes < 8 * 1024 * 1024
+                            {
+                                start = stop;
+                                continue;
+                            }
+                            let page_cursor = catalog.cursor.clone();
+                            catalog.seal()?;
+                            metadata_bytes = 0;
+                            handle.block_on(
+                                db.put(store::CURSOR_KEY, serde_json::to_vec(&catalog.cursor)?),
+                            )?;
+                            let checkpoint = handle.block_on(store.checkpoint(&db))?;
+                            // Check the current canonical pin, not merely the earlier RO snapshot.
+                            let current = provider_factory.database_provider_ro()?;
                             eyre::ensure!(
-                                stored.as_ref() == value,
-                                "unpublished record conflicts with canonical capture"
+                                current.block_hash(end - 1)?.map(|h| h.to_string()).as_ref() ==
+                                    Some(&catalog.context.tip),
+                                "canonical pin changed during capture"
                             );
-                        } else {
-                            batch.put(key, value);
+                            catalog.checkpoint = Some(checkpoint);
+                            catalog.complete = stop == end;
+                            let reader = handle.block_on(store.reader(&catalog))?;
+                            let checked = handle.block_on(store::for_each_published(
+                                &reader,
+                                page_cursor,
+                                &catalog.cursor,
+                                |record, bytes, _| store::decode(&bytes, record).map(drop),
+                            ));
+                            handle.block_on(reader.close())?;
+                            checked?;
+                            version = handle.block_on(store.publish(&catalog, Some(version)))?;
+                            info!(
+                                start,
+                                end = stop,
+                                blocks = catalog.cursor.next - catalog.context.start,
+                                transactions,
+                                gas,
+                                complete = catalog.complete,
+                                "Published verified corpus blocks and transactions"
+                            );
+                            start = stop;
                         }
+                        Ok(())
+                    })();
+                    if result.is_err() {
+                        failed.store(true, Ordering::Relaxed);
                     }
-                    // A prior writer may have durably written this entire block
-                    // before publishing its checkpoint. Verify it above, but do
-                    // not submit the empty batch rejected by SlateDB on resume.
-                    if !batch.is_empty() {
-                        handle.block_on(db.write(batch))?;
-                    }
-                    catalog.records.push(record);
-                    // Publication frequency is runtime I/O batching, not part of the schema.
-                    // Every batch above is a complete block; no partial block is published.
-                    if stop != end &&
-                        catalog.records.len() < store::PAGE_RECORDS &&
-                        metadata_bytes < 8 * 1024 * 1024
-                    {
-                        start = stop;
-                        continue;
-                    }
-                    let page_cursor = catalog.cursor.clone();
-                    catalog.seal()?;
-                    metadata_bytes = 0;
-                    handle.block_on(
-                        db.put(store::CURSOR_KEY, serde_json::to_vec(&catalog.cursor)?),
-                    )?;
-                    let checkpoint = handle.block_on(store.checkpoint(&db))?;
-                    // Check the current canonical pin, not merely the earlier RO snapshot.
-                    let current = provider_factory.database_provider_ro()?;
-                    eyre::ensure!(
-                        current.block_hash(end - 1)?.map(|h| h.to_string()).as_ref() ==
-                            Some(&catalog.context.tip),
-                        "canonical pin changed during capture"
-                    );
-                    catalog.checkpoint = Some(checkpoint);
-                    catalog.complete = stop == end;
-                    let reader = handle.block_on(store.reader(&catalog))?;
-                    let checked = handle.block_on(store::for_each_published(
-                        &reader,
-                        page_cursor,
-                        &catalog.cursor,
-                        |record, bytes, _| store::decode(&bytes, record).map(drop),
-                    ));
-                    handle.block_on(reader.close())?;
-                    checked?;
-                    version = handle.block_on(store.publish(&catalog, Some(version)))?;
-                    info!(
-                        start,
-                        end = stop,
-                        blocks = catalog.cursor.next - catalog.context.start,
-                        transactions,
-                        gas,
-                        complete = catalog.complete,
-                        "Published verified corpus blocks and transactions"
-                    );
-                    start = stop;
-                }
+                    result
+                })?;
                 Ok(())
             })();
             let closed = handle.block_on(db.close());
@@ -387,4 +465,12 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
         })
         .await?
     }
+}
+
+/// One captured, verified block awaiting in-order publication.
+struct Produced {
+    record: Record,
+    bytes: Vec<u8>,
+    metadata: Vec<u8>,
+    case_bytes: Vec<Vec<u8>>,
 }
