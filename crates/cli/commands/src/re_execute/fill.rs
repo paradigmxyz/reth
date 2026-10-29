@@ -25,6 +25,7 @@ use slatedb::{
     config::{CompressionCodec, Settings},
     Db, WriteBatch,
 };
+use rayon::prelude::*;
 use std::{
     collections::BTreeMap,
     sync::{
@@ -278,8 +279,10 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
                     for versions in captured.storage.values_mut() {
                         versions.truncate(1);
                     }
+                    // Each standalone check is independent of the others, so a dense block's
+                    // quadratic prior-delta replays spread over the pool.
                     let case_bytes = cases
-                        .iter()
+                        .par_iter()
                         .enumerate()
                         .map(|(index, case)| {
                             case.replay(&config, &chunk, &cases[..index])?;
