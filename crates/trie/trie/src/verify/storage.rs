@@ -12,6 +12,9 @@ use alloy_primitives::{B256, U256};
 use crossbeam_channel::{Receiver, Sender};
 use reth_execution_errors::StateRootError;
 
+#[cfg(feature = "metrics")]
+use crate::{metrics::TrieRootMetrics, trie::TrieType};
+
 /// Cursors for one parallel storage verification thread of a [`Verifier`](super::Verifier).
 ///
 /// Both cursors may start at any hashed address. `tx` is the transaction backing both cursors; it
@@ -39,6 +42,9 @@ where
         jobs: Receiver<(B256, Option<Sender<B256>>)>,
         context: &WorkerContext,
     ) -> Result<(), StateRootError> {
+        #[cfg(feature = "metrics")]
+        let metrics = TrieRootMetrics::new(TrieType::Storage);
+
         loop {
             let Some((address, root_sender)) = context.receive(&jobs) else { return Ok(()) };
             self.hashed.set_hashed_address(address);
@@ -50,7 +56,15 @@ where
                 }
                 EMPTY_ROOT_HASH
             } else {
-                let Some(root) = self.verify_storage(address, context)? else { return Ok(()) };
+                let Some(root) = self.verify_storage(
+                    address,
+                    context,
+                    #[cfg(feature = "metrics")]
+                    &metrics,
+                )?
+                else {
+                    return Ok(())
+                };
                 root
             };
             if let Some(sender) = root_sender &&
@@ -70,6 +84,7 @@ where
         &mut self,
         address: B256,
         context: &WorkerContext,
+        #[cfg(feature = "metrics")] metrics: &TrieRootMetrics,
     ) -> Result<Option<B256>, StateRootError> {
         let mut verifier = SingleVerifier::new(Some(address), &mut self.trie)?;
         let mut state = None;
@@ -89,7 +104,7 @@ where
                 &mut NoopStorageTrieCursor::default(),
                 &mut self.hashed,
                 #[cfg(feature = "metrics")]
-                &Default::default(),
+                metrics,
             )?;
             let (root, updates) = match result {
                 StorageRootProgress::Complete(root, _, updates) => (Some(root), updates),
