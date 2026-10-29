@@ -14,13 +14,15 @@ use reth_execution_errors::{StateRootError, StorageRootError};
 use reth_provider::{DBProvider, DatabaseProviderFactory, ProviderError};
 use reth_tasks::TaskExecutor;
 use reth_trie::{
-    hashed_cursor::HashedCursorFactory,
     metrics::TrieRootMetrics,
     trie_cursor::{noop::NoopTrieCursorFactory, TrieCursorFactory, TrieStorageCursor},
     verify::Verifier,
     StateRoot, StateRootProgress, StorageRoot, StorageRootProgress, TrieType,
 };
-use reth_trie_db::{DatabaseHashedCursorFactory, DatabaseTrieCursorFactory, TrieTableAdapter};
+use reth_trie_db::{
+    DatabaseHashedCursorFactory, DatabaseHashedStorageCursor, DatabaseStorageTrieCursor,
+    DatabaseTrieCursorFactory, TrieTableAdapter,
+};
 use std::{
     any::Any,
     collections::VecDeque,
@@ -161,12 +163,17 @@ impl DatabaseVerifier {
                 let _entered = span.enter();
                 catch_verification(|| {
                     debug!(target: "trie::verify", snapshot, "Starting trie verification");
+                    let (completions_tx, completions_rx) = crossbeam_channel::bounded(worker_count);
                     let mut storage = VerificationStorage::<_, A> {
                         addresses: VerificationStorageAddresses::new(&scan_tx)?,
-                        transactions,
+                        workers: transactions
+                            .into_iter()
+                            .map(VerificationStorageWorker::new)
+                            .collect::<Result<_, _>>()?,
                         pending: VecDeque::new(),
                         roots: B256Map::default(),
-                        completions: crossbeam_channel::bounded(worker_count),
+                        completions_tx,
+                        completions_rx,
                         storage_lookahead,
                         executor,
                         context: &context,
@@ -362,10 +369,11 @@ impl VerificationContext {
 /// Supplies ordered canonical roots while dispatching independent jobs to the injected pool.
 struct VerificationStorage<'a, TX: DbTx + 'static, A: TrieTableAdapter> {
     addresses: VerificationStorageAddresses<TX, A>,
-    transactions: Vec<TX>,
+    workers: Vec<VerificationStorageWorker<TX, A>>,
     pending: VecDeque<B256>,
     roots: B256Map<Result<B256, VerificationError>>,
-    completions: (Sender<VerificationCompletion<TX>>, Receiver<VerificationCompletion<TX>>),
+    completions_tx: Sender<VerificationCompletion<TX, A>>,
+    completions_rx: Receiver<VerificationCompletion<TX, A>>,
     storage_lookahead: NonZeroUsize,
     executor: TaskExecutor,
     context: &'a VerificationContext,
@@ -396,7 +404,7 @@ impl<TX: DbTx + 'static, A: TrieTableAdapter> VerificationStorage<'_, TX, A> {
                 self.pending.pop_front();
                 return Ok(Some((hashed_address, result?)));
             }
-            match self.completions.1.recv_timeout(CANCELLATION_POLL_INTERVAL) {
+            match self.completions_rx.recv_timeout(CANCELLATION_POLL_INTERVAL) {
                 Ok(completion) => self.complete(completion),
                 Err(RecvTimeoutError::Timeout) => self.context.check_cancelled()?,
                 Err(RecvTimeoutError::Disconnected) => {
@@ -406,15 +414,15 @@ impl<TX: DbTx + 'static, A: TrieTableAdapter> VerificationStorage<'_, TX, A> {
         }
     }
 
-    fn complete(&mut self, completion: VerificationCompletion<TX>) {
-        self.transactions.push(completion.tx);
+    fn complete(&mut self, completion: VerificationCompletion<TX, A>) {
+        self.workers.push(completion.worker);
         self.roots.insert(completion.hashed_address, completion.result);
     }
 
     fn dispatch(&mut self) -> Result<(), VerificationError> {
         self.context.check_cancelled()?;
         loop {
-            match self.completions.1.try_recv() {
+            match self.completions_rx.try_recv() {
                 Ok(completion) => self.complete(completion),
                 Err(TryRecvError::Empty) => break,
                 Err(TryRecvError::Disconnected) => {
@@ -423,22 +431,24 @@ impl<TX: DbTx + 'static, A: TrieTableAdapter> VerificationStorage<'_, TX, A> {
             }
         }
         while self.pending.len() < self.storage_lookahead.get() {
-            let Some(tx) = self.transactions.pop() else { break };
+            let Some(mut worker) = self.workers.pop() else { break };
             let Some(hashed_address) = self.addresses.next_address()? else {
-                self.transactions.push(tx);
+                self.workers.push(worker);
                 break;
             };
             self.pending.push_back(hashed_address);
             let context = self.context.clone();
-            let completions = self.completions.0.clone();
+            let completions = self.completions_tx.clone();
             let span = Span::current();
             self.executor.cpu_pool().spawn(move || {
                 let _entered = span.enter();
                 let result =
-                    catch_verification(|| verify_storage::<_, A>(&tx, hashed_address, &context));
-                // There can be at most one completion per transaction, so this queue cannot fill.
+                    catch_verification(|| verify_storage(&mut worker, hashed_address, &context));
+                // There can be at most one completion per worker, so this queue cannot fill.
                 // A disconnected receiver means the owning verifier has already been dropped.
-                if completions.send(VerificationCompletion { tx, hashed_address, result }).is_err()
+                if completions
+                    .send(VerificationCompletion { worker, hashed_address, result })
+                    .is_err()
                 {
                     debug!(target: "trie::verify", "Trie verification completion receiver dropped");
                 }
@@ -451,10 +461,10 @@ impl<TX: DbTx + 'static, A: TrieTableAdapter> VerificationStorage<'_, TX, A> {
 impl<TX: DbTx + 'static, A: TrieTableAdapter> Drop for VerificationStorage<'_, TX, A> {
     fn drop(&mut self) {
         self.context.cancelled.store(true, Ordering::Relaxed);
-        // Tasks own their transaction until sending completion, even on a caught panic. Drain
+        // Tasks own their worker until sending completion, even on a caught panic. Drain
         // before releasing the scan and account snapshots; cancellation releases findings sends.
         while self.pending.len() > self.roots.len() {
-            match self.completions.1.recv_timeout(CANCELLATION_POLL_INTERVAL) {
+            match self.completions_rx.recv_timeout(CANCELLATION_POLL_INTERVAL) {
                 Ok(completion) => self.complete(completion),
                 Err(RecvTimeoutError::Timeout) => {}
                 Err(RecvTimeoutError::Disconnected) => {
@@ -472,26 +482,47 @@ impl<TX: DbTx + 'static, A: TrieTableAdapter> Drop for VerificationStorage<'_, T
     }
 }
 
-struct VerificationCompletion<TX> {
+/// Reuses storage cursors across jobs while retaining their snapshot transaction.
+struct VerificationStorageWorker<TX: DbTx, A: TrieTableAdapter> {
+    storage_trie_cursor: DatabaseStorageTrieCursor<DupCursorTy<TX, A::StorageTrieTable>, A>,
+    hashed_storage_cursor: DatabaseHashedStorageCursor<DupCursorTy<TX, tables::HashedStorages>>,
+    // Backs both cursors, so it must be dropped after them.
     tx: TX,
+}
+
+impl<TX: DbTx, A: TrieTableAdapter> VerificationStorageWorker<TX, A> {
+    fn new(tx: TX) -> Result<Self, DatabaseError> {
+        Ok(Self {
+            storage_trie_cursor: DatabaseStorageTrieCursor::new(
+                tx.cursor_dup_read::<A::StorageTrieTable>()?,
+                B256::ZERO,
+            ),
+            hashed_storage_cursor: DatabaseHashedStorageCursor::new(
+                tx.cursor_dup_read::<tables::HashedStorages>()?,
+                B256::ZERO,
+            ),
+            tx,
+        })
+    }
+}
+
+struct VerificationCompletion<TX: DbTx, A: TrieTableAdapter> {
+    worker: VerificationStorageWorker<TX, A>,
     hashed_address: B256,
     result: Result<B256, VerificationError>,
 }
 
 fn verify_storage<TX: DbTx, A: TrieTableAdapter>(
-    tx: &TX,
+    worker: &mut VerificationStorageWorker<TX, A>,
     hashed_address: B256,
     context: &VerificationContext,
 ) -> Result<B256, VerificationError> {
-    let trie_cursor_factory = DatabaseTrieCursorFactory::<_, A>::new(tx);
-    let hashed_cursor_factory = DatabaseHashedCursorFactory::new(tx);
-    let mut storage_trie_cursor = trie_cursor_factory.storage_trie_cursor(B256::ZERO)?;
-    let mut hashed_storage_cursor = hashed_cursor_factory.hashed_storage_cursor(B256::ZERO)?;
+    let hashed_cursor_factory = DatabaseHashedCursorFactory::new(&worker.tx);
     let mut noop_cursor = NoopTrieCursorFactory::default().storage_trie_cursor(B256::ZERO)?;
     context.check_cancelled()?;
-    storage_trie_cursor.set_hashed_address(hashed_address);
+    worker.storage_trie_cursor.set_hashed_address(hashed_address);
     let mut verifier =
-        Verifier::new(TrieKind::Storage { hashed_address }, &mut storage_trie_cursor)?;
+        Verifier::new(TrieKind::Storage { hashed_address }, &mut worker.storage_trie_cursor)?;
     let mut state = None;
     loop {
         context.check_cancelled()?;
@@ -503,7 +534,7 @@ fn verify_storage<TX: DbTx, A: TrieTableAdapter>(
             context.storage_metrics.clone(),
         )
         .with_intermediate_state(state.take())
-        .root_with_progress_with_cursors(&mut noop_cursor, &mut hashed_storage_cursor)?;
+        .root_with_progress_with_cursors(&mut noop_cursor, &mut worker.hashed_storage_cursor)?;
         let (root, updates) = match progress {
             StorageRootProgress::Complete(root, _, updates) => (Some(root), updates),
             StorageRootProgress::Progress(next, _, updates) => {
