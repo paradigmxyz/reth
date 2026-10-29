@@ -11154,41 +11154,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "reth-trie-dst"
-version = "0.1.0"
-dependencies = [
- "alloy-consensus",
- "alloy-primitives",
- "alloy-rlp",
- "alloy-trie",
- "evm2",
- "eyre",
- "metrics-util",
- "rand 0.9.5",
- "reth-chain-state",
- "reth-chainspec",
- "reth-db",
- "reth-db-api",
- "reth-db-common",
- "reth-engine-primitives",
- "reth-engine-tree",
- "reth-ethereum-primitives",
- "reth-evm-ethereum",
- "reth-execution-types",
- "reth-node-builder",
- "reth-node-core",
- "reth-primitives-traits",
- "reth-provider",
- "reth-stages-types",
- "reth-storage-overlay",
- "reth-tasks",
- "reth-trie",
- "serde",
- "serde_json",
- "tempfile",
-]
-
-[[package]]
 name = "reth-trie-parallel"
 version = "2.9.0"
 dependencies = [

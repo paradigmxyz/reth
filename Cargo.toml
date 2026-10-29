@@ -11,7 +11,6 @@ exclude = [".github/"]
 members = [
     "bin/reth-bb/",
     "bin/reth/",
-    "contrib/trie-dst/crates/reth-trie-dst/",
     "crates/storage/rpc-provider/",
     "crates/chain-state/",
     "crates/chainspec/",
@@ -299,11 +298,6 @@ codegen-units = 16
 inherits = "release"
 debug = "full"
 strip = "none"
-
-[profile.dst]
-inherits = "profiling"
-debug-assertions = true
-overflow-checks = true
 
 # Include debug info in benchmarks too.
 [profile.bench]
