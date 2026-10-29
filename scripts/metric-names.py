@@ -222,14 +222,16 @@ def main() -> None:
     if current == rendered:
         return
 
-    def names(text: str) -> set[str]:
-        return {line.split()[0] for line in text.splitlines() if line and not line.startswith("#")}
+    def entries(text: str) -> dict[str, str]:
+        return dict(line.split() for line in text.splitlines() if line and not line.startswith("#"))
 
-    old, new = names(current), names(rendered)
-    for name in sorted(old - new):
+    old, new = entries(current), entries(rendered)
+    for name in sorted(old.keys() - new.keys()):
         print(f"removed: {name}")
-    for name in sorted(new - old):
+    for name in sorted(new.keys() - old.keys()):
         print(f"added:   {name}")
+    for name in sorted(n for n in old.keys() & new.keys() if old[n] != new[n]):
+        print(f"changed: {name} ({old[name]} -> {new[name]})")
     sys.exit(
         f"{INVENTORY.relative_to(ROOT)} is out of date. Run `scripts/metric-names.py --write`, commit the "
         "result, and note removed or renamed metrics in the release notes."
