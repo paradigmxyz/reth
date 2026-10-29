@@ -379,12 +379,6 @@ impl<N: ProviderNodeTypes> DatabaseProviderFactory for BlockchainProvider<N> {
     }
 }
 
-impl<N: ProviderNodeTypes> AsRef<N::DB> for BlockchainProvider<N> {
-    fn as_ref(&self) -> &N::DB {
-        self.database.db_ref()
-    }
-}
-
 impl<N: ProviderNodeTypes> StaticFileProviderFactory for BlockchainProvider<N> {
     fn static_file_provider(&self) -> StaticFileProvider<Self::Primitives> {
         self.database.static_file_provider()

@@ -119,7 +119,7 @@ RUST_LOG=info,engine::tree=debug cargo nextest run -p reth-node-ethereum --test 
 | Wait for the receipt of a transaction sent through a provider | `PendingTransactionExt::successful_receipt`, `receipt::await_successful_receipts` |
 | Query the node over JSON-RPC | `rpc_provider()`, `rpc_provider_with_wallet(w)`, `rpc_provider_for::<Net>()` for other networks |
 | Read node state directly | `node.inner.provider`, `node.inner.pool`, `node.current_forkchoice_state()`, `node.block_hash(n)` (panics if unknown) |
-| Check that the persisted state and trie are consistent | `trie::assert_trie_consistency(&node.inner.provider)`, after `wait_for_persisted_block` |
+| Check that the persisted state and trie are consistent | `trie::assert_trie_consistency(&node.inner.provider, &node.inner.task_executor)`, after `wait_for_persisted_block` |
 
 ## Recipes
 
@@ -361,7 +361,7 @@ async fn persists_and_prunes() -> eyre::Result<()> {
     }
     node.wait_for_persisted_block(20).await?;
     node.wait_for_prune_checkpoint(PruneSegment::AccountHistory, 15).await?;
-    assert_trie_consistency(&node.inner.provider)?;
+    assert_trie_consistency(&node.inner.provider, &node.inner.task_executor)?;
     Ok(())
 }
 ```

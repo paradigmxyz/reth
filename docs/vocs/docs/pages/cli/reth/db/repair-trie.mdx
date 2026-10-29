@@ -12,13 +12,15 @@ Options:
       --dry-run
           Only show inconsistencies without making any repairs.
 
-          Requires the node to be stopped so all workers read the same database snapshot.
+          Can run alongside a node. If the database changes while opening the read snapshots, verification fails before starting; retry when writes are quiescent.
 
-      --storage-workers <STORAGE_WORKERS>
+      --storage-worker-count <STORAGE_WORKER_COUNT>
           Number of storage verification workers. Defaults to the number of available CPUs
 
       --storage-lookahead <STORAGE_LOOKAHEAD>
-          Maximum storage roots computed or in flight ahead of the account walk
+          Maximum number of storage tries queued for verification at once.
+
+          Higher values can improve throughput but retain more pending results in memory.
 
           [default: 1024]
 

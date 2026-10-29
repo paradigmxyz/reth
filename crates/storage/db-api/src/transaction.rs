@@ -57,6 +57,16 @@ pub trait DbTx: Debug + Send {
     fn prefetch(&self, _enabled: bool) -> &Self {
         self
     }
+
+    /// Returns the identity of the committed snapshot read by this transaction.
+    ///
+    /// Equal identities from read transactions on the same database guarantee identical visible
+    /// data. Identities are not comparable across databases or to uncommitted write transactions.
+    /// Returns `None` if the backend cannot provide this guarantee, or an error if reading the
+    /// identity fails.
+    fn snapshot_id(&self) -> Result<Option<u64>, DatabaseError> {
+        Ok(None)
+    }
 }
 
 /// Read write transaction that allows writing to database

@@ -95,7 +95,7 @@ async fn run_selfdestruct_suite(fork: EthereumHardfork) -> eyre::Result<()> {
         ctx.mine_block(vec![]).await?;
     }
     ctx.node.wait_for_persisted_block(scenario_tip).await?;
-    assert_trie_consistency(&ctx.node.inner.provider)?;
+    assert_trie_consistency(&ctx.node.inner.provider, &ctx.node.inner.task_executor)?;
 
     Ok(())
 }

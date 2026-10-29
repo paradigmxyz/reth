@@ -18,14 +18,15 @@ use alloy_rlp::{BufMut, Encodable};
 use alloy_trie::proof::AddedRemovedKeys;
 use reth_execution_errors::{StateRootError, StorageRootError};
 use reth_primitives_traits::Account;
+use reth_storage_errors::db::DatabaseError;
 use tracing::{debug, instrument, trace, Span};
-
-/// The default updates after which root algorithms should return intermediate progress rather than
-/// finishing the computation.
-pub(crate) const DEFAULT_INTERMEDIATE_THRESHOLD: u64 = 100_000;
 
 #[cfg(feature = "metrics")]
 use crate::metrics::{StateRootMetrics, TrieRootMetrics};
+
+/// The default updates after which root algorithms should return intermediate progress rather than
+/// finishing the computation.
+const DEFAULT_INTERMEDIATE_THRESHOLD: u64 = 100_000;
 
 /// `StateRoot` is used to compute the root node of a state trie.
 #[derive(Debug)]
@@ -171,7 +172,44 @@ where
         self.calculate(true)
     }
 
+    /// Computes account-trie progress using externally calculated canonical storage roots.
+    ///
+    /// `storage_root` is called once for each hashed account leaf reached, in ascending
+    /// hashed-address order, and must return the canonical storage root from the same snapshot
+    /// as the cursor factories. Accounts in unchanged trie subtrees are not visited. Use a
+    /// no-op trie cursor factory to recompute all accounts from hashed state.
+    ///
+    /// Account encoding and hashing match [`Self::root_with_progress`], but only account updates
+    /// count toward the threshold and only account leaves count as walked entries. Batch boundaries
+    /// and walked-entry counts can therefore differ.
+    /// Storage updates are not calculated here, except that explicit destroyed accounts still
+    /// require reading their persisted storage nodes to produce deletion updates at completion.
+    ///
+    /// Resume only with an intermediate state returned by this method and the same root source.
+    /// Callback errors stop computation without returning this call's updates; earlier callback
+    /// side effects are not rolled back.
+    pub fn root_with_progress_with_storage_roots<E>(
+        self,
+        storage_root: &mut impl FnMut(B256) -> Result<B256, E>,
+    ) -> Result<StateRootProgress, E>
+    where
+        E: From<StateRootError> + From<StorageRootError> + From<DatabaseError>,
+    {
+        self.calculate_with_storage_roots(true, Some(storage_root))
+    }
+
     fn calculate(self, retain_updates: bool) -> Result<StateRootProgress, StateRootError> {
+        self.calculate_with_storage_roots(retain_updates, None)
+    }
+
+    fn calculate_with_storage_roots<E>(
+        self,
+        retain_updates: bool,
+        mut storage_root: Option<&mut dyn FnMut(B256) -> Result<B256, E>>,
+    ) -> Result<StateRootProgress, E>
+    where
+        E: From<StateRootError> + From<StorageRootError> + From<DatabaseError>,
+    {
         trace!(target: "trie::state_root", "calculating state root");
         let mut tracker = TrieTracker::default();
 
@@ -228,20 +266,20 @@ where
                         Some(self.trie_cursor_factory.storage_trie_cursor(hashed_address)?);
                 }
 
-                let storage_result = StorageRootCalculation {
-                    hashed_address,
-                    prefix_set: self
-                        .prefix_sets
-                        .storage_prefix_sets
-                        .get(&hashed_address)
-                        .cloned()
-                        .unwrap_or_default(),
-                    previous_state: Some(storage_state.state),
-                    walk_all_changed_branch_children: self.walk_all_changed_branch_children,
-                    threshold: remaining_threshold,
-                    retain_updates,
-                }
-                .calculate(
+                let storage_result = StorageRoot::<T, H>::calculate_with_cursors(
+                    StorageRootCalculation {
+                        hashed_address,
+                        prefix_set: self
+                            .prefix_sets
+                            .storage_prefix_sets
+                            .get(&hashed_address)
+                            .cloned()
+                            .unwrap_or_default(),
+                        previous_state: Some(storage_state.state),
+                        walk_all_changed_branch_children: self.walk_all_changed_branch_children,
+                        threshold: remaining_threshold,
+                        retain_updates,
+                    },
                     storage_trie_cursor.as_mut().expect("storage trie cursor is initialized"),
                     hashed_storage_cursor.as_mut().expect("hashed storage cursor is initialized"),
                     #[cfg(feature = "metrics")]
@@ -286,42 +324,53 @@ where
                     tracker.inc_leaf();
                     storage_ctx.hashed_entries_walked += 1;
 
-                    // calculate storage root, calculating the remaining threshold so we have
-                    // bounded memory usage even while in the middle of storage root calculation
-                    let remaining_threshold = self.threshold.saturating_sub(
-                        storage_ctx.total_updates_len(&account_node_iter, &hash_builder),
-                    );
+                    let storage_result = if let Some(storage_root) = &mut storage_root {
+                        StorageRootProgress::Complete(
+                            storage_root(hashed_address)?,
+                            0,
+                            StorageTrieUpdates::default(),
+                        )
+                    } else {
+                        // Bound retained updates even during a single storage root calculation.
+                        let remaining_threshold = self.threshold.saturating_sub(
+                            storage_ctx.total_updates_len(&account_node_iter, &hash_builder),
+                        );
 
-                    if hashed_storage_cursor.is_none() {
-                        hashed_storage_cursor =
-                            Some(self.hashed_cursor_factory.hashed_storage_cursor(hashed_address)?);
-                    }
-                    if storage_trie_cursor.is_none() {
-                        storage_trie_cursor =
-                            Some(self.trie_cursor_factory.storage_trie_cursor(hashed_address)?);
-                    }
+                        if hashed_storage_cursor.is_none() {
+                            hashed_storage_cursor = Some(
+                                self.hashed_cursor_factory.hashed_storage_cursor(hashed_address)?,
+                            );
+                        }
+                        if storage_trie_cursor.is_none() {
+                            storage_trie_cursor =
+                                Some(self.trie_cursor_factory.storage_trie_cursor(hashed_address)?);
+                        }
 
-                    let storage_result = StorageRootCalculation {
-                        hashed_address,
-                        prefix_set: self
-                            .prefix_sets
-                            .storage_prefix_sets
-                            .get(&hashed_address)
-                            .cloned()
-                            .unwrap_or_default(),
-                        previous_state: None,
-                        walk_all_changed_branch_children: self.walk_all_changed_branch_children,
-                        threshold: remaining_threshold,
-                        retain_updates,
-                    }
-                    .calculate(
-                        storage_trie_cursor.as_mut().expect("storage trie cursor is initialized"),
-                        hashed_storage_cursor
-                            .as_mut()
-                            .expect("hashed storage cursor is initialized"),
-                        #[cfg(feature = "metrics")]
-                        &self.metrics.storage_trie,
-                    )?;
+                        StorageRoot::<T, H>::calculate_with_cursors(
+                            StorageRootCalculation {
+                                hashed_address,
+                                prefix_set: self
+                                    .prefix_sets
+                                    .storage_prefix_sets
+                                    .get(&hashed_address)
+                                    .cloned()
+                                    .unwrap_or_default(),
+                                previous_state: None,
+                                walk_all_changed_branch_children: self
+                                    .walk_all_changed_branch_children,
+                                threshold: remaining_threshold,
+                                retain_updates,
+                            },
+                            storage_trie_cursor
+                                .as_mut()
+                                .expect("storage trie cursor is initialized"),
+                            hashed_storage_cursor
+                                .as_mut()
+                                .expect("hashed storage cursor is initialized"),
+                            #[cfg(feature = "metrics")]
+                            &self.metrics.storage_trie,
+                        )?
+                    };
                     if let Some(storage_state) = storage_ctx.process_storage_root_result(
                         storage_result,
                         hashed_address,
@@ -711,15 +760,15 @@ where
             hashed_cursor_factory.hashed_storage_cursor(hashed_address)?;
         let mut storage_trie_cursor = trie_cursor_factory.storage_trie_cursor(hashed_address)?;
 
-        StorageRootCalculation {
-            hashed_address,
-            prefix_set,
-            previous_state,
-            walk_all_changed_branch_children,
-            threshold,
-            retain_updates,
-        }
-        .calculate(
+        Self::calculate_with_cursors(
+            StorageRootCalculation {
+                hashed_address,
+                prefix_set,
+                previous_state,
+                walk_all_changed_branch_children,
+                threshold,
+                retain_updates,
+            },
             &mut storage_trie_cursor,
             &mut hashed_storage_cursor,
             #[cfg(feature = "metrics")]
@@ -754,38 +803,26 @@ where
 
         let mut storage_trie_cursor = trie_cursor_factory.storage_trie_cursor(hashed_address)?;
 
-        StorageRootCalculation {
-            hashed_address,
-            prefix_set,
-            previous_state,
-            walk_all_changed_branch_children,
-            threshold,
-            retain_updates,
-        }
-        .calculate(
+        Self::calculate_with_cursors(
+            StorageRootCalculation {
+                hashed_address,
+                prefix_set,
+                previous_state,
+                walk_all_changed_branch_children,
+                threshold,
+                retain_updates,
+            },
             &mut storage_trie_cursor,
             hashed_storage_cursor,
             #[cfg(feature = "metrics")]
             &metrics,
         )
     }
-}
 
-/// Parameters for a storage root calculation using pre-created cursors.
-pub(crate) struct StorageRootCalculation {
-    pub(crate) hashed_address: B256,
-    pub(crate) prefix_set: PrefixSet,
-    pub(crate) previous_state: Option<IntermediateRootState>,
-    pub(crate) walk_all_changed_branch_children: bool,
-    pub(crate) threshold: u64,
-    pub(crate) retain_updates: bool,
-}
-
-impl StorageRootCalculation {
     /// Walks the hashed storage table entries for a given address and calculates the storage root
     /// using pre-created cursors. The cursors will be repositioned to the given hashed address.
-    pub(crate) fn calculate<TC, HC>(
-        self,
+    fn calculate_with_cursors<TC, HC>(
+        calculation: StorageRootCalculation,
         trie_cursor: &mut TC,
         hashed_storage_cursor: &mut HC,
         #[cfg(feature = "metrics")] metrics: &TrieRootMetrics,
@@ -794,14 +831,14 @@ impl StorageRootCalculation {
         TC: TrieStorageCursor,
         HC: HashedStorageCursor<Value = U256>,
     {
-        let Self {
+        let StorageRootCalculation {
             hashed_address,
             prefix_set,
             previous_state,
             walk_all_changed_branch_children,
             threshold,
             retain_updates,
-        } = self;
+        } = calculation;
         hashed_storage_cursor.set_hashed_address(hashed_address);
 
         // Empty storage only needs to be walked when changed prefixes must produce trie updates.
@@ -910,6 +947,44 @@ impl StorageRootCalculation {
         let storage_slots_walked = stats.leaves_added() as usize;
         Ok(StorageRootProgress::Complete(root, storage_slots_walked, trie_updates))
     }
+
+    /// Calculates storage-root progress using caller-owned cursors instead of opening new ones.
+    ///
+    /// The cursor factories in `self` are not used. The supplied cursors must read the same state
+    /// snapshot. The hashed storage cursor is repositioned to this calculator's address; the trie
+    /// cursor is repositioned only when non-empty storage or changed prefixes require a walk.
+    /// Resume with the returned intermediate state for the same address and prefix set. Callers
+    /// may retain the cursors across progress rounds and storage tries.
+    pub fn root_with_progress_with_cursors(
+        self,
+        trie_cursor: &mut T::StorageTrieCursor<'_>,
+        hashed_storage_cursor: &mut H::StorageCursor<'_>,
+    ) -> Result<StorageRootProgress, StorageRootError> {
+        Self::calculate_with_cursors(
+            StorageRootCalculation {
+                hashed_address: self.hashed_address,
+                prefix_set: self.prefix_set,
+                previous_state: self.previous_state,
+                walk_all_changed_branch_children: self.walk_all_changed_branch_children,
+                threshold: self.threshold,
+                retain_updates: true,
+            },
+            trie_cursor,
+            hashed_storage_cursor,
+            #[cfg(feature = "metrics")]
+            &self.metrics,
+        )
+    }
+}
+
+/// Parameters for a storage root calculation using pre-created cursors.
+struct StorageRootCalculation {
+    hashed_address: B256,
+    prefix_set: PrefixSet,
+    previous_state: Option<IntermediateRootState>,
+    walk_all_changed_branch_children: bool,
+    threshold: u64,
+    retain_updates: bool,
 }
 
 /// Trie type for differentiating between various trie calculations.
