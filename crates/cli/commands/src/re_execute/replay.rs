@@ -55,13 +55,14 @@ where
 {
     eyre::ensure!(workers > 0, "num-tasks must be positive");
     let runtime =
-        tokio::runtime::Builder::new_multi_thread().worker_threads(4).enable_all().build()?;
+        tokio::runtime::Builder::new_multi_thread().worker_threads(std::env::var("RETH_CORPUS_IO_THREADS").ok().and_then(|v| v.parse::<usize>().ok()).unwrap_or(4)).enable_all().build()?;
     let reader = Arc::new(runtime.block_on(store.reader(&catalog))?);
     if let Some((from, to)) = standalone {
         range = runtime.block_on(transaction_range(&reader, &catalog, from, to))?;
     }
-    let budget = Arc::new(Semaphore::new(REPLAY_BUDGET));
-    let (sender, receiver) = crossbeam_channel::bounded::<Ready>(4);
+    let replay_budget = std::env::var("RETH_CORPUS_BUDGET_MIB").ok().and_then(|v| v.parse::<usize>().ok()).map_or(REPLAY_BUDGET, |mib| mib << 20);
+    let budget = Arc::new(Semaphore::new(replay_budget));
+    let (sender, receiver) = crossbeam_channel::bounded::<Ready>(std::env::var("RETH_CORPUS_QUEUE").ok().and_then(|v| v.parse::<usize>().ok()).unwrap_or(4));
     let started = Instant::now();
     // Save the triggering error before cancelling peers. Join order must not
     // replace missing/corrupt state with a secondary cancellation error.
@@ -283,7 +284,7 @@ async fn feed_pages(
     let batch_limit = budget.available_permits().min(8 * 1024 * 1024);
     loop {
         eyre::ensure!(!cancellation.is_cancelled(), "corpus replay cancelled");
-        while tasks.len() < 64 {
+        while tasks.len() < std::env::var("RETH_CORPUS_FETCH_TASKS").ok().and_then(|v| v.parse::<usize>().ok()).unwrap_or(64) {
             let Some(record) = records.next() else { break };
             let (mut end, mut bytes) = (record.end, record.bytes);
             let mut batch = vec![record];
@@ -677,7 +678,7 @@ mod tests {
         standalone: Option<(u64, u64)>,
     ) -> eyre::Result<((u64, u64, u64), Vec<u64>)> {
         let budget = Arc::new(Semaphore::new(REPLAY_BUDGET));
-        let (sender, receiver) = crossbeam_channel::bounded::<Ready>(4);
+        let (sender, receiver) = crossbeam_channel::bounded::<Ready>(std::env::var("RETH_CORPUS_QUEUE").ok().and_then(|v| v.parse::<usize>().ok()).unwrap_or(4));
         let consumer = drain(receiver, |ready| {
             assert_eq!(ready.bytes.as_ref(), b"b");
             assert_eq!(ready.cases, vec![Bytes::from_static(b"t")]);
@@ -742,7 +743,7 @@ mod tests {
         let (reader, catalog) = paged_fixture(None).await?;
         let budget = Arc::new(Semaphore::new(8));
         let token = CancellationToken::new();
-        let (sender, receiver) = crossbeam_channel::bounded::<Ready>(4);
+        let (sender, receiver) = crossbeam_channel::bounded::<Ready>(std::env::var("RETH_CORPUS_QUEUE").ok().and_then(|v| v.parse::<usize>().ok()).unwrap_or(4));
         let cancel = async {
             while receiver.len() < 4 {
                 tokio::task::yield_now().await;
@@ -780,7 +781,7 @@ mod tests {
         let (reader, catalog) = paged_fixture(None).await?;
         let budget = Arc::new(Semaphore::new(REPLAY_BUDGET));
         let token = CancellationToken::new();
-        let (sender, receiver) = crossbeam_channel::bounded::<Ready>(4);
+        let (sender, receiver) = crossbeam_channel::bounded::<Ready>(std::env::var("RETH_CORPUS_QUEUE").ok().and_then(|v| v.parse::<usize>().ok()).unwrap_or(4));
         let (release, gate) = tokio::sync::oneshot::channel();
         let mut tasks = JoinSet::new();
         // Model a lingering payload task from an earlier page. Page two must
@@ -820,7 +821,7 @@ mod tests {
         let (reader, _) = paged_fixture(None).await?;
         let budget = Arc::new(Semaphore::new(REPLAY_BUDGET));
         let token = CancellationToken::new();
-        let (sender, receiver) = crossbeam_channel::bounded::<Ready>(4);
+        let (sender, receiver) = crossbeam_channel::bounded::<Ready>(std::env::var("RETH_CORPUS_QUEUE").ok().and_then(|v| v.parse::<usize>().ok()).unwrap_or(4));
         let (pages, input) = mpsc::channel(1);
         pages.send(vec![store::metadata(&reader, 1).await?]).await?;
         let mut tasks = JoinSet::new();
