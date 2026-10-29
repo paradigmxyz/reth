@@ -365,6 +365,12 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
                     let result = (|| -> eyre::Result<()> {
                         let mut pending = BTreeMap::new();
                         let mut metadata_bytes = 0;
+                        // A superseded writer can only have written blocks of the page it
+                        // never published, so reading keys back is needed for one page only.
+                        let recheck_end = begin.saturating_add(store::PAGE_RECORDS as u64);
+                        // One write per page (or per 64 MiB) instead of one durable write per block.
+                        let mut batch = WriteBatch::new();
+                        let mut batch_bytes = 0usize;
                         let mut start = begin;
                         while start < end {
                             eyre::ensure!(!cancellation.is_cancelled(), "capture cancelled");
@@ -381,7 +387,6 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
                             let (transactions, gas, first_tx) =
                                 (record.transactions, record.gas, record.first_tx);
                             metadata_bytes += metadata.len();
-                            let mut batch = WriteBatch::new();
                             for (key, value) in
                                 [(store::key(start), &bytes), (store::metadata_key(start), &metadata)]
                                     .into_iter()
@@ -389,29 +394,38 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
                                         (store::transaction_key(first_tx + i as u64), b)
                                     }))
                             {
-                                if let Some(stored) = handle.block_on(db.get(key))? {
+                                let stored = if start < recheck_end {
+                                    handle.block_on(db.get(key))?
+                                } else {
+                                    None
+                                };
+                                if let Some(stored) = stored {
                                     eyre::ensure!(
                                         stored.as_ref() == value,
                                         "unpublished record conflicts with canonical capture"
                                     );
                                 } else {
+                                    batch_bytes += value.len();
                                     batch.put(key, value);
                                 }
                             }
-                            // A prior writer may have durably written this entire block
-                            // before publishing its checkpoint. Verify it above, but do
-                            // not submit the empty batch rejected by SlateDB on resume.
-                            if !batch.is_empty() {
-                                handle.block_on(db.write(batch))?;
-                            }
                             catalog.records.push(record);
+                            let seal = stop == end ||
+                                catalog.records.len() >= store::PAGE_RECORDS ||
+                                metadata_bytes >= 8 * 1024 * 1024;
+                            // A prior writer may have durably written these blocks before
+                            // publishing its checkpoint. Verify them above, but do not
+                            // submit the empty batch rejected by SlateDB on resume.
+                            if (seal || batch_bytes >= MAX_RECORD_BYTES) && !batch.is_empty() {
+                                handle.block_on(
+                                    db.write(std::mem::replace(&mut batch, WriteBatch::new())),
+                                )?;
+                                batch_bytes = 0;
+                            }
                             written.store(stop, Ordering::Release);
                             // Publication frequency is runtime I/O batching, not part of the schema.
                             // Every batch above is a complete block; no partial block is published.
-                            if stop != end &&
-                                catalog.records.len() < store::PAGE_RECORDS &&
-                                metadata_bytes < 8 * 1024 * 1024
-                            {
+                            if !seal {
                                 start = stop;
                                 continue;
                             }
