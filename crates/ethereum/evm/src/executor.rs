@@ -306,7 +306,7 @@ where
     fn execute_transaction_with_commit_condition(
         &mut self,
         transaction: impl ExecutorTx<Self>,
-        commit: impl FnOnce(&evm2::TxResult<T>) -> reth_evm::CommitChanges,
+        commit: impl FnOnce(&evm2::TxResult<T>, evm2::TxStateChanges<'_>) -> reth_evm::CommitChanges,
     ) -> Result<Option<GasOutput>, BlockExecutionError> {
         let (transaction, tx) = transaction.into_parts();
         self.set_transaction_block_access_index();
@@ -896,7 +896,10 @@ where
     fn execute_transaction_with_commit_condition(
         &mut self,
         transaction: impl ExecutorTx<Self>,
-        commit: impl FnOnce(&evm2::TxResult<F::Types>) -> reth_evm::CommitChanges,
+        commit: impl FnOnce(
+            &evm2::TxResult<F::Types>,
+            evm2::TxStateChanges<'_>,
+        ) -> reth_evm::CommitChanges,
     ) -> Result<Option<GasOutput>, BlockExecutionError> {
         self.initialize()?;
         let output = self.inner.execute_transaction_with_commit_condition(transaction, commit)?;
@@ -1112,19 +1115,24 @@ mod tests {
 
         executor.apply_pre_execution_changes().expect("first segment pre-execution");
         assert!(executor
-            .execute_transaction_with_commit_condition(transfer(from, first_target, 0), |_| {
-                CommitChanges::No
-            })
+            .execute_transaction_with_commit_condition(
+                transfer(from, first_target, 0),
+                |_, changes| {
+                    // The callback sees the uncommitted state changes before deciding.
+                    assert_eq!(changes.account_info(&from).expect("sender changed").nonce, 1);
+                    CommitChanges::No
+                }
+            )
             .expect("discarded transaction")
             .is_none());
         executor
-            .execute_transaction_with_commit_condition(transfer(from, first_target, 0), |_| {
+            .execute_transaction_with_commit_condition(transfer(from, first_target, 0), |_, _| {
                 CommitChanges::Yes
             })
             .expect("first segment transaction")
             .expect("transaction committed");
         executor
-            .execute_transaction_with_commit_condition(transfer(from, second_target, 1), |_| {
+            .execute_transaction_with_commit_condition(transfer(from, second_target, 1), |_, _| {
                 CommitChanges::Yes
             })
             .expect("second segment transaction")
