@@ -148,6 +148,9 @@ Storage:
       --verify-existing
           Re-read and fully replay published records instead of checking metadata only
 
+      --workers <WORKERS>
+          Capture worker threads. Blocks are captured concurrently and published in order by one writer. Defaults to the available parallelism
+
 JIT:
       --jit
           Enable JIT compilation of EVM bytecode
