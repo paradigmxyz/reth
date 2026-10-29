@@ -43,8 +43,8 @@ pub trait EthFilterApi<T: RpcObject, L: RpcObject> {
 
     /// Returns logs matching the filter, one page at a time.
     ///
-    /// The scan starts at `fromBlock` or after the `after` cursor, which must be on the canonical
-    /// chain. The response's `nextCursor` resumes the scan, possibly inside a block.
+    /// The scan starts at the `from` block, or after the `from` cursor, which must be on the
+    /// canonical chain. The response's `nextCursor` resumes the scan, possibly inside a block.
     ///
     /// Prototype based on <https://github.com/ethereum/execution-apis/pull/900>.
     #[method(name = "getLogsV2")]

@@ -36,8 +36,9 @@ pub struct LogsV2Filter {
     pub fields: Option<Vec<LogField>>,
 }
 
-/// Start of an `eth_getLogsV2` scan.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+/// Start of an `eth_getLogsV2` scan, the `from` field: a block number or tag, or a cursor.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(untagged)]
 pub enum LogsV2Start {
     /// Resume after the cursor, which must be on the canonical chain.
     After(LogCursor),
@@ -287,10 +288,7 @@ where
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct RawLogsV2Filter {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    after: Option<LogCursor>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    from_block: Option<BlockNumberOrTag>,
+    from: LogsV2Start,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     to_block: Option<BlockNumberOrTag>,
     #[serde(default)]
@@ -309,15 +307,10 @@ impl TryFrom<RawLogsV2Filter> for LogsV2Filter {
 
     fn try_from(raw: RawLogsV2Filter) -> Result<Self, Self::Error> {
         if raw.filter.block_option != FilterBlockOption::default() {
-            return Err(LogsV2FilterError::BlockHash);
+            return Err(LogsV2FilterError::BlockOption);
         }
-        let start = match (raw.after, raw.from_block) {
-            (Some(cursor), None) => LogsV2Start::After(cursor),
-            (None, Some(from_block)) => LogsV2Start::FromBlock(from_block),
-            _ => return Err(LogsV2FilterError::Start),
-        };
         Ok(Self {
-            start,
+            start: raw.from,
             to_block: raw.to_block,
             direction: raw.direction,
             filter: raw.filter,
@@ -329,13 +322,8 @@ impl TryFrom<RawLogsV2Filter> for LogsV2Filter {
 
 impl From<LogsV2Filter> for RawLogsV2Filter {
     fn from(filter: LogsV2Filter) -> Self {
-        let (after, from_block) = match filter.start {
-            LogsV2Start::After(cursor) => (Some(cursor), None),
-            LogsV2Start::FromBlock(from_block) => (None, Some(from_block)),
-        };
         Self {
-            after,
-            from_block,
+            from: filter.start,
             to_block: filter.to_block,
             direction: filter.direction,
             filter: filter.filter,
@@ -348,12 +336,9 @@ impl From<LogsV2Filter> for RawLogsV2Filter {
 /// Errors of decoding a [`LogsV2Filter`].
 #[derive(Debug, thiserror::Error)]
 pub enum LogsV2FilterError {
-    /// The filter contains `blockHash`.
-    #[error("blockHash is not supported, use after")]
-    BlockHash,
-    /// Neither or both of `after` and `fromBlock` are set.
-    #[error("exactly one of after and fromBlock must be set")]
-    Start,
+    /// The filter contains `fromBlock` or `blockHash`.
+    #[error("fromBlock and blockHash are not supported, use from")]
+    BlockOption,
 }
 
 #[cfg(test)]
@@ -365,7 +350,7 @@ mod tests {
     #[test]
     fn deserialize_filter() {
         let filter: LogsV2Filter = serde_json::from_value(json!({
-            "after": {
+            "from": {
                 "blockNumber": "0x233",
                 "blockHash": "0xfc139f5e2edee9e9c888d8df9a2d2226133a9bd87c88ccbd9c930d3d4c9f9ef5",
                 "logIndex": "0x4"
@@ -402,33 +387,34 @@ mod tests {
             filter
         );
 
-        let filter: LogsV2Filter =
-            serde_json::from_value(json!({ "fromBlock": "earliest" })).unwrap();
+        let filter: LogsV2Filter = serde_json::from_value(json!({ "from": "earliest" })).unwrap();
         assert_eq!(filter.start, LogsV2Start::FromBlock(BlockNumberOrTag::Earliest));
         assert_eq!(filter.direction, Direction::Asc);
     }
 
     #[test]
     fn reject_invalid_filters() {
-        let cursor = json!({ "blockNumber": "0x1", "blockHash": B256::ZERO });
         for (value, expected) in [
-            (json!({}), "exactly one of after and fromBlock must be set"),
+            (json!({}), "missing field `from`"),
             (
-                json!({ "after": cursor, "fromBlock": "0x1" }),
-                "exactly one of after and fromBlock must be set",
+                json!({ "from": { "blockNumber": "0x1" } }),
+                "data did not match any variant of untagged enum LogsV2Start",
             ),
             (
-                json!({ "fromBlock": "0x1", "blockHash": B256::ZERO }),
-                "blockHash is not supported, use after",
+                json!({ "from": "0x1", "fromBlock": "0x1" }),
+                "fromBlock and blockHash are not supported, use from",
+            ),
+            (
+                json!({ "from": "0x1", "blockHash": B256::ZERO }),
+                "fromBlock and blockHash are not supported, use from",
             ),
         ] {
             let err = serde_json::from_value::<LogsV2Filter>(value).unwrap_err();
             assert_eq!(err.to_string(), expected);
         }
-        let err = serde_json::from_value::<LogsV2Filter>(
-            json!({ "fromBlock": "0x1", "fields": ["removed"] }),
-        )
-        .unwrap_err();
+        let err =
+            serde_json::from_value::<LogsV2Filter>(json!({ "from": "0x1", "fields": ["removed"] }))
+                .unwrap_err();
         assert_eq!(
             err.to_string(),
             "unknown variant `removed`, expected one of `address`, `topics`, `data`, \
