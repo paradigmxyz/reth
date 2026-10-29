@@ -10,7 +10,10 @@ use reth_evm::ConfigureEvm;
 use slatedb::DbReader;
 use std::{
     ops::Range,
-    sync::Arc,
+    sync::{
+        atomic::{AtomicBool, AtomicU64, Ordering},
+        Arc,
+    },
     time::{Duration, Instant},
 };
 use tokio::{
@@ -63,7 +66,42 @@ where
     // Save the triggering error before cancelling peers. Join order must not
     // replace missing/corrupt state with a secondary cancellation error.
     let failure = Mutex::new(None);
+    // Shared counters for periodic progress, as the database path logs every 10 s.
+    let done_blocks = AtomicU64::new(0);
+    let done_transactions = AtomicU64::new(0);
+    let done_gas = AtomicU64::new(0);
+    let finished = AtomicBool::new(false);
+    let total_blocks = if standalone.is_some() { 0 } else { range.end - range.start };
     let result = std::thread::scope(|scope| -> eyre::Result<()> {
+        scope.spawn(|| {
+            let mut last = (Instant::now(), 0u64);
+            'report: loop {
+                for _ in 0..100 {
+                    if finished.load(Ordering::Relaxed) {
+                        break 'report;
+                    }
+                    std::thread::sleep(Duration::from_millis(100));
+                }
+                let blocks = done_blocks.load(Ordering::Relaxed);
+                let gas = done_gas.load(Ordering::Relaxed);
+                let interval = last.0.elapsed().as_secs_f64();
+                let throughput = (gas - last.1) as f64 / interval / 1e9;
+                last = (Instant::now(), gas);
+                let progress = if total_blocks == 0 {
+                    0.0
+                } else {
+                    100.0 * blocks as f64 / total_blocks as f64
+                };
+                info!(
+                    blocks,
+                    transactions = done_transactions.load(Ordering::Relaxed),
+                    progress = format!("{progress:.2}%"),
+                    throughput = format!("{throughput:.2}Ggas/second"),
+                    elapsed = format!("{:.0}s", started.elapsed().as_secs_f64()),
+                    "Corpus replay progress"
+                );
+            }
+        });
         let producer = scope.spawn(|| {
             match runtime.block_on(feed_catalog(
                 &reader,
@@ -91,6 +129,8 @@ where
             let cancellation = &cancellation;
             let budget = &budget;
             let failure = &failure;
+            let (done_blocks, done_transactions, done_gas) =
+                (&done_blocks, &done_transactions, &done_gas);
             threads.push(scope.spawn(move || {
                 let result = (|| -> eyre::Result<(u64, u64, u64)> {
                     let mut completed = (0, 0, 0);
@@ -152,6 +192,9 @@ where
                         completed.0 += 1;
                         completed.1 += transactions;
                         completed.2 += gas;
+                        done_blocks.fetch_add(1, Ordering::Relaxed);
+                        done_transactions.fetch_add(transactions, Ordering::Relaxed);
+                        done_gas.fetch_add(gas, Ordering::Relaxed);
                         // Drop decoded state, serialized Bytes, and its permit
                         // together, before receiving more work.
                     }
@@ -185,7 +228,9 @@ where
                 }
             }
         }
-        let wanted = producer.join().map_err(|_| eyre::eyre!("corpus reader panicked"))?;
+        let wanted = producer.join().map_err(|_| eyre::eyre!("corpus reader panicked"));
+        finished.store(true, Ordering::Relaxed);
+        let wanted = wanted?;
         if let Some(error) = failure.lock().take() {
             return Err(error);
         }
