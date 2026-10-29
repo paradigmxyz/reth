@@ -502,12 +502,14 @@ mod tests {
             .with_max_read_transaction_duration(Some(MaxReadTransactionDuration::Set(
                 MAX_DURATION,
             )));
-        let db = DatabaseEnv::open(dir.path(), DatabaseEnvKind::RW, args).unwrap().with_metrics();
+        let db = DatabaseEnv::open(dir.path(), DatabaseEnvKind::RW, args)
+            .unwrap()
+            .with_metrics()
+            .with_disable_long_read_transaction_safety();
 
         let mut tx = db.tx().unwrap();
         let metrics_handler = tx.metrics_handler.as_mut().unwrap();
         metrics_handler.long_transaction_deadline = metrics_handler.start + MAX_DURATION;
-        tx.disable_long_read_transaction_safety();
         // Give the `TxnManager` some time to time out the transaction.
         sleep(MAX_DURATION + Duration::from_millis(100));
 

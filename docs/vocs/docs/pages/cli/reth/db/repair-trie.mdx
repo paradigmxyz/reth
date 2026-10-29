@@ -10,7 +10,17 @@ Usage: reth db repair-trie [OPTIONS]
 
 Options:
       --dry-run
-          Only show inconsistencies without making any repairs
+          Only show inconsistencies without making any repairs.
+
+          Requires the node to be stopped so all workers read the same database snapshot.
+
+      --storage-workers <STORAGE_WORKERS>
+          Number of storage verification workers. Defaults to the number of available CPUs
+
+      --storage-lookahead <STORAGE_LOOKAHEAD>
+          Maximum storage roots computed or in flight ahead of the account walk
+
+          [default: 1000000]
 
       --metrics <ADDR:PORT>
           Enable Prometheus metrics.
