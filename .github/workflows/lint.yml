@@ -368,6 +368,21 @@ jobs:
       - name: Check dashboard JSON with jq
         run: jq empty etc/grafana/dashboards/overview.json
 
+  metric-names:
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+    timeout-minutes: 10
+    steps:
+      - name: Secure runner
+        uses: tempoxyz/gh-actions/actions/secure-runner@d5402286a7abdfb7232173b3228d56473feb8a66 # 2026-09-29T02-04-45Z-d5402286
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Check the metric name inventory
+        run: python3 scripts/metric-names.py --check
+
   no-test-deps:
     runs-on: ubuntu-latest
     permissions:
@@ -436,6 +451,7 @@ jobs:
       - book
       - typos
       - grafana
+      - metric-names
       - no-test-deps
       - feature-propagation
       - deny
