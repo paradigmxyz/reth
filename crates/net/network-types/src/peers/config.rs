@@ -284,6 +284,12 @@ impl PeersConfig {
         self
     }
 
+    /// Persisted peers available at launch.
+    pub fn with_persisted_peers(mut self, peers: Vec<PersistedPeerInfo>) -> Self {
+        self.persisted_peers = peers;
+        self
+    }
+
     /// Configures the max allowed backoff count.
     pub const fn with_max_backoff_count(mut self, max_backoff_count: u8) -> Self {
         self.max_backoff_count = max_backoff_count;

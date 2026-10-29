@@ -170,6 +170,17 @@ impl PeersManager {
                 continue
             }
             let NodeRecord { address, tcp_port, udp_port, id } = record;
+
+            // Check if the IP is in the allowed ranges (netrestrict)
+            if !ip_filter.is_allowed(&address) {
+                trace!(target: "net::peers", ?id, ?address, "Skipping persisted peer: IP not allowed");
+                continue
+            }
+            if ban_list.is_banned(&id, &address) {
+                trace!(target: "net::peers", ?id, ?address, "Skipping persisted peer: IP or peer is banned");
+                continue
+            }
+
             peers.entry(id).or_insert_with(|| {
                 if kind.is_trusted() {
                     trusted_peer_ids.insert(id);
@@ -185,6 +196,16 @@ impl PeersManager {
         }
 
         for NodeRecord { address, tcp_port, udp_port, id } in basic_nodes {
+            // Check if the IP is in the allowed ranges (netrestrict)
+            if !ip_filter.is_allowed(&address) {
+                trace!(target: "net::peers", ?id, ?address, "Skipping basic peer: IP not allowed");
+                continue
+            }
+            if ban_list.is_banned(&id, &address) {
+                trace!(target: "net::peers", ?id, ?address, "Skipping basic peer: IP or peer is banned");
+                continue
+            }
+
             peers.entry(id).or_insert_with(|| {
                 Peer::new(PeerAddr::new_with_ports(address, tcp_port, Some(udp_port)))
             });
@@ -257,8 +278,14 @@ impl PeersManager {
     /// Filters out backed-off and banned peers, and includes metadata like kind, fork ID, and
     /// reputation.
     pub(crate) fn persistable_peers(&self) -> impl Iterator<Item = PersistedPeerInfo> + '_ {
-        self.peers.iter().filter(|(_, peer)| !peer.is_backed_off() && !peer.is_banned()).map(
-            |(peer_id, peer)| PersistedPeerInfo {
+        self.peers
+            .iter()
+            .filter(|(_, peer)| {
+                !peer.is_backed_off() &&
+                    !peer.is_banned() &&
+                    self.ip_filter.is_allowed(&peer.addr.tcp().ip())
+            })
+            .map(|(peer_id, peer)| PersistedPeerInfo {
                 record: NodeRecord::new_with_ports(
                     peer.addr.tcp().ip(),
                     peer.addr.tcp().port(),
@@ -3702,6 +3729,59 @@ mod tests {
         assert!(peers.on_incoming_pending_session(ip1).is_ok());
         assert!(peers.on_incoming_pending_session(ip2).is_ok());
         assert!(peers.on_incoming_pending_session(ip3).is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_ip_filter_blocks_persisted_and_basic_peers() {
+        use reth_net_banlist::IpFilter;
+        use std::net::SocketAddr;
+
+        // Create a filter that only allows 192.168.0.0/16
+        let ip_filter = IpFilter::from_cidr_string("192.168.0.0/16").unwrap();
+
+        let allowed_addr: SocketAddr = "192.168.1.10:30303".parse().unwrap();
+        let disallowed_addr1: SocketAddr = "10.0.0.1:30303".parse().unwrap();
+        let disallowed_addr2: SocketAddr = "172.16.0.1:30303".parse().unwrap();
+
+        let allowed_peer_id = PeerId::repeat_byte(1);
+        let disallowed_peer_id1 = PeerId::repeat_byte(2);
+        let disallowed_peer_id2 = PeerId::repeat_byte(3);
+
+        let allowed_persisted = PersistedPeerInfo {
+            record: NodeRecord::new(allowed_addr, allowed_peer_id),
+            kind: PeerKind::Basic,
+            fork_id: None,
+            reputation: 0,
+        };
+        let disallowed_persisted = PersistedPeerInfo {
+            record: NodeRecord::new(disallowed_addr1, disallowed_peer_id1),
+            kind: PeerKind::Basic,
+            fork_id: None,
+            reputation: 0,
+        };
+
+        let disallowed_basic = NodeRecord::new(disallowed_addr2, disallowed_peer_id2);
+        let mut basic_nodes = HashSet::default();
+        basic_nodes.insert(disallowed_basic);
+
+        let config = PeersConfig::test()
+            .with_ip_filter(ip_filter)
+            .with_persisted_peers(vec![allowed_persisted, disallowed_persisted])
+            .with_basic_nodes(basic_nodes);
+
+        let peers = PeersManager::new(config);
+
+        // Allowed persisted peer is retained
+        assert!(peers.peers.contains_key(&allowed_peer_id));
+        // Disallowed persisted peer is rejected
+        assert!(!peers.peers.contains_key(&disallowed_peer_id1));
+        // Disallowed basic node is rejected
+        assert!(!peers.peers.contains_key(&disallowed_peer_id2));
+
+        // Persistable peers only contains allowed peers
+        let persistable: Vec<_> = peers.persistable_peers().collect();
+        assert_eq!(persistable.len(), 1);
+        assert_eq!(persistable[0].record.id, allowed_peer_id);
     }
 
     #[tokio::test]
