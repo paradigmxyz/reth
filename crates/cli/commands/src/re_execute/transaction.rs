@@ -33,6 +33,69 @@ pub(super) struct Transaction {
     pub delta: Delta,
 }
 
+/// Stored v6 form of a [`Transaction`]: its input (`before`) in full, and each output as a
+/// separate xxh3-128 digest, so replay detects any divergence and names the field without
+/// storing post values. Status, charged gas and the created address stay readable for triage.
+#[derive(Debug, PartialEq, Eq, SchemaRead, SchemaWrite)]
+pub(super) struct Case {
+    pub ordinal: u64,
+    pub index: u64,
+    pub hash: [u8; 32],
+    pub before: Vec<u8>,
+    pub status: u8,
+    pub charged_gas: u64,
+    pub created: Option<[u8; 20]>,
+    pub outputs: Outputs,
+}
+
+/// Per-field digests of a transaction's outputs.
+#[derive(Debug, PartialEq, Eq, SchemaRead, SchemaWrite)]
+pub(super) struct Outputs {
+    pub outcome: [u8; 16],
+    pub receipt: [u8; 16],
+    pub delta: [u8; 16],
+    pub after: [u8; 16],
+}
+
+fn digest(bytes: &[u8]) -> [u8; 16] {
+    xxhash_rust::xxh3::xxh3_128(bytes).to_le_bytes()
+}
+
+impl Case {
+    /// Compares an executed transaction against this record, field by field.
+    pub(super) fn check(&self, actual: &Transaction) -> eyre::Result<()> {
+        let actual = actual.stored()?;
+        let at = self.ordinal;
+        eyre::ensure!(
+            actual.ordinal == self.ordinal &&
+                actual.index == self.index &&
+                actual.hash == self.hash &&
+                actual.before == self.before,
+            "transaction context mismatch at {at}"
+        );
+        eyre::ensure!(
+            actual.status == self.status &&
+                actual.charged_gas == self.charged_gas &&
+                actual.created == self.created &&
+                actual.outputs.outcome == self.outputs.outcome,
+            "transaction outcome mismatch at {at}"
+        );
+        eyre::ensure!(
+            actual.outputs.receipt == self.outputs.receipt,
+            "transaction receipt mismatch at {at}"
+        );
+        eyre::ensure!(
+            actual.outputs.delta == self.outputs.delta,
+            "transaction delta mismatch at {at}"
+        );
+        eyre::ensure!(
+            actual.outputs.after == self.outputs.after,
+            "transaction boundary mismatch at {at}"
+        );
+        Ok(())
+    }
+}
+
 /// Preserve commit ordering inside a phase, including wipe then recreation.
 #[derive(Debug, Default, PartialEq, Eq, SchemaRead, SchemaWrite)]
 pub(super) struct Delta(pub Vec<BTreeMap<[u8; 20], Change>>);
@@ -263,6 +326,25 @@ impl Transaction {
         self.outcome.charged_gas
     }
 
+    /// The stored form: input in full, outputs as per-field digests.
+    pub(super) fn stored(&self) -> eyre::Result<Case> {
+        Ok(Case {
+            ordinal: self.ordinal,
+            index: self.index,
+            hash: self.hash,
+            before: self.before.clone(),
+            status: self.outcome.status,
+            charged_gas: self.outcome.charged_gas,
+            created: self.outcome.created,
+            outputs: Outputs {
+                outcome: digest(&wincode::serialize(&self.outcome)?),
+                receipt: digest(&self.receipt),
+                delta: digest(&wincode::serialize(&self.delta)?),
+                after: digest(&self.after),
+            },
+        })
+    }
+
     /// Execute only this target after deriving its boundary, never executing prior transactions.
     pub fn replay<E: ConfigureEvm>(
         &self,
@@ -338,7 +420,7 @@ pub(super) fn execute<E: ConfigureEvm, C: FullConsensus<E::Primitives> + ?Sized>
     consensus: &C,
     chunk: &Arc<Chunk>,
     first: u64,
-    expected: Option<&[Transaction]>,
+    expected: Option<&[Case]>,
     cancellation: &CancellationToken,
 ) -> eyre::Result<(Vec<Transaction>, Phases)> {
     eyre::ensure!(!cancellation.is_cancelled(), "phase replay cancelled");
@@ -373,16 +455,6 @@ pub(super) fn execute<E: ConfigureEvm, C: FullConsensus<E::Primitives> + ?Sized>
         let before = config.transaction_boundary(&executor)?.to_vec();
         let result = executor.execute_transaction_without_commit(tx)?;
         let outcome = Outcome::capture(&result);
-        if let Some(expected) = expected {
-            let case = expected
-                .get(index)
-                .ok_or_else(|| eyre::eyre!("missing transaction expectation"))?;
-            let receipt = alloy_rlp::decode_exact::<ReceiptTy<E::Primitives>>(&case.receipt)?;
-            eyre::ensure!(
-                result.result().result.logs() == receipt.logs(),
-                "transaction logs mismatch"
-            );
-        }
         executor.commit_transaction(result);
         let after = config.transaction_boundary(&executor)?.to_vec();
         let receipt = alloy_rlp::encode(
@@ -400,11 +472,10 @@ pub(super) fn execute<E: ConfigureEvm, C: FullConsensus<E::Primitives> + ?Sized>
             delta,
         };
         if let Some(expected) = expected {
-            eyre::ensure!(
-                expected.get(index) == Some(&case),
-                "transaction delta/outcome/context mismatch at {}",
-                case.ordinal
-            );
+            expected
+                .get(index)
+                .ok_or_else(|| eyre::eyre!("missing transaction expectation"))?
+                .check(&case)?;
         }
         cases.push(case);
     }

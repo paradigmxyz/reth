@@ -161,35 +161,29 @@ where
                         ready.space.notify_one();
                         let chunk = store::decode(&ready.bytes, &ready.record)?;
                         let (transactions, gas) = if let Some((from, to)) = standalone {
-                            let mut gas = 0;
-                            let cases = ready
-                                .cases
-                                .iter()
-                                .enumerate()
-                                .map(|(index, bytes)| {
-                                    store::decode_case(
-                                        bytes,
-                                        &ready.record.cases[index],
-                                        ready.record.first_tx + index as u64,
-                                    )
-                                })
-                                .collect::<eyre::Result<Vec<_>>>()?;
-                            let mut transactions = 0;
-                            for (index, case) in cases.iter().enumerate() {
+                            // Derive each target's prior deltas by executing the block once,
+                            // checked against the stored digests, then restore and replay
+                            // only the targets independently from their boundaries.
+                            let actual = store::verify_cases(
+                                &chunk,
+                                &ready.cases,
+                                &ready.record,
+                                config,
+                                consensus,
+                                cancellation,
+                            )?;
+                            let (mut transactions, mut gas) = (0, 0);
+                            for (index, case) in actual.iter().enumerate() {
                                 eyre::ensure!(
                                     !cancellation.is_cancelled(),
                                     "case replay cancelled"
                                 );
                                 if case.ordinal >= from && case.ordinal < to {
-                                    case.replay(config, &chunk, &cases[..index])?;
+                                    case.replay(config, &chunk, &actual[..index])?;
                                     gas += case.gas_used();
                                     transactions += 1;
                                 }
                             }
-                            eyre::ensure!(
-                                ready.cases.len() as u64 == ready.record.transactions,
-                                "missing standalone transactions"
-                            );
                             (transactions, gas)
                         } else {
                             store::verify_cases(
@@ -626,7 +620,7 @@ mod tests {
         let db = Db::open("paged", objects.clone()).await?;
         let count = (2 * store::PAGE_RECORDS + 1) as u64;
         let context = store::Context {
-            schema: 5,
+            schema: 6,
             chain_id: 1,
             genesis: alloy_primitives::B256::ZERO.to_string(),
             forks: "test".to_owned(),

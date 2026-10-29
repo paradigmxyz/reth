@@ -116,7 +116,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
                 .ok_or_else(|| eyre::eyre!("missing exclusive-end block indices"))?
                 .first_tx_num();
             let context = Context {
-                schema: 5,
+                schema: 6,
                 chain_id: chain.chain_id(),
                 genesis: chain.genesis_hash().to_string(),
                 forks: chain.display_hardforks().to_string(),
@@ -170,6 +170,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
                                     consensus,
                                     &cancellation,
                                 )
+                                .map(drop)
                             },
                         ))
                     })
@@ -288,7 +289,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
                         .enumerate()
                         .map(|(index, case)| {
                             case.replay(&config, &chunk, &cases[..index])?;
-                            wincode::serialize(case).map_err(Into::into)
+                            wincode::serialize(&case.stored()?).map_err(Into::into)
                         })
                         .collect::<eyre::Result<Vec<_>>>()?;
                     let bytes = wincode::serialize(chunk.as_ref())?;

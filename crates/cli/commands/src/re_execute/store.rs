@@ -90,7 +90,7 @@ impl Catalog {
     pub fn validate(&self) -> eyre::Result<()> {
         let c = &self.context;
         eyre::ensure!(
-            c.schema == 5 && c.start > 0 && c.end > c.start && c.end_tx >= c.first_tx,
+            c.schema == 6 && c.start > 0 && c.end > c.start && c.end_tx >= c.first_tx,
             "unsupported corpus context/range"
         );
         eyre::ensure!(
@@ -193,7 +193,7 @@ impl Store {
                     objects: Arc::new(object_store::local::LocalFileSystem::new_with_prefix(
                         directory,
                     )?),
-                    path: Path::from("corpus-v5"),
+                    path: Path::from("corpus-v6"),
                 })
             }
             "s3" => {
@@ -225,7 +225,7 @@ impl Store {
                 }
                 Ok(Self {
                     objects: Arc::new(builder.build()?),
-                    path: Path::from(prefix).join("corpus-v5"),
+                    path: Path::from(prefix).join("corpus-v6"),
                 })
             }
             _ => eyre::bail!("corpus must use s3://bucket/prefix or file:///directory"),
@@ -356,12 +356,12 @@ pub(super) fn decode_case(
     bytes: &[u8],
     expected: &CaseRecord,
     ordinal: u64,
-) -> eyre::Result<super::transaction::Transaction> {
+) -> eyre::Result<super::transaction::Case> {
     eyre::ensure!(
         bytes.len() == expected.bytes && blake3::hash(bytes).to_hex().as_str() == expected.digest,
         "transaction record integrity mismatch"
     );
-    let case: super::transaction::Transaction = wincode::deserialize_exact(bytes)?;
+    let case: super::transaction::Case = wincode::deserialize_exact(bytes)?;
     eyre::ensure!(
         case.ordinal == ordinal && case.index == expected.index,
         "transaction ordinal/index/key mismatch"
@@ -486,7 +486,7 @@ pub(super) fn verify_cases<
     config: &E,
     consensus: &C,
     cancellation: &reth_cli_util::cancellation::CancellationToken,
-) -> eyre::Result<()> {
+) -> eyre::Result<Vec<super::transaction::Transaction>> {
     eyre::ensure!(cases.len() == record.cases.len(), "transaction count mismatch");
     let expected = cases
         .iter()
@@ -506,7 +506,7 @@ pub(super) fn verify_cases<
             actual.iter().map(|c| c.gas_used()).sum::<u64>() == record.gas,
         "transaction/gas totals mismatch"
     );
-    Ok(())
+    Ok(actual)
 }
 
 /// Durable boundary after the last completely captured block.
@@ -663,7 +663,7 @@ pub(super) mod tests {
         Catalog {
             cursor: Cursor { next: start, tx: 0, parent: [0; 32] },
             context: Context {
-                schema: 5,
+                schema: 6,
                 chain_id: 1,
                 genesis: B256::ZERO.to_string(),
                 forks: "test".to_owned(),

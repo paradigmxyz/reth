@@ -236,12 +236,13 @@ fn deployment_zero_slot_survives_reset_and_missing_state_fails() -> eyre::Result
                 &config, &consensus, &input, ordinal, None, &token,
             )?;
             Arc::get_mut(&mut input).unwrap().phases = Some(phases);
+            let stored = cases.iter().map(|c| c.stored()).collect::<eyre::Result<Vec<_>>>()?;
             super::super::transaction::execute(
                 &config,
                 &consensus,
                 &input,
                 ordinal,
-                Some(&cases),
+                Some(&stored),
                 &token,
             )?;
             for (index, case) in cases.iter().enumerate().rev() {
@@ -290,7 +291,7 @@ fn deployment_zero_slot_survives_reset_and_missing_state_fails() -> eyre::Result
                 &consensus,
                 &Arc::new(missing),
                 ordinal,
-                Some(&cases),
+                Some(&stored),
                 &token,
             );
             // Creation legitimately supplies zero storage without reading old slots.
