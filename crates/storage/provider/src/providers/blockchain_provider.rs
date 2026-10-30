@@ -675,6 +675,45 @@ impl<N: ProviderNodeTypes> ReceiptProvider for BlockchainProvider<N> {
     ) -> ProviderResult<Vec<Vec<Self::Receipt>>> {
         self.consistent_provider()?.receipts_by_block_range(block_range)
     }
+
+    fn static_file_receipts_start_block(
+        &self,
+        tx: TxNumber,
+    ) -> ProviderResult<Option<BlockNumber>> {
+        let static_file_provider = self.database.caught_up_static_file_provider()?;
+        let segment = StaticFileSegment::Receipts;
+
+        // A transaction resolves to the static file whose transaction range would contain it, so
+        // check that the file actually stores it.
+        if static_file_provider
+            .get_highest_static_file_tx(segment)
+            .is_none_or(|highest| tx > highest) ||
+            !static_file_provider
+                .get_segment_provider_for_transaction(segment, tx, None)?
+                .user_header()
+                .tx_range()
+                .is_some_and(|range| range.contains(tx))
+        {
+            return Ok(None)
+        }
+
+        // Static files can start with blocks that have no receipts, e.g. after migrating a pruned
+        // database, so start at the block of the lowest stored receipt. Transaction 0 resolves to
+        // the lowest static file with receipts.
+        let Some(lowest_tx) = static_file_provider
+            .get_segment_provider_for_transaction(segment, 0, None)?
+            .user_header()
+            .tx_range()
+            .map(|range| range.start())
+        else {
+            return Ok(None)
+        };
+        if lowest_tx == 0 {
+            // No transaction precedes transaction 0, so earlier blocks have no receipts.
+            return Ok(Some(0))
+        }
+        self.database.provider()?.block_by_transaction_id(lowest_tx)
+    }
 }
 
 impl<N: ProviderNodeTypes> ReceiptProviderIdExt for BlockchainProvider<N> {
@@ -1065,7 +1104,7 @@ mod tests {
             create_test_provider_factory, create_test_provider_factory_with_chain_spec,
             MockNodeTypesWithDB,
         },
-        BlockWriter, CanonChainTracker, ProviderFactory, SaveBlocksInput,
+        BlockWriter, CanonChainTracker, ProviderFactory, SaveBlocksInput, StaticFileWriter,
     };
     use alloy_consensus::constants::EMPTY_ROOT_HASH;
     use alloy_eips::{BlockHashOrNumber, BlockNumHash, BlockNumberOrTag};
@@ -2084,6 +2123,76 @@ mod tests {
         assert_eq!(
             provider.receipts_by_number_or_tag(BlockNumberOrTag::Finalized)?.unwrap(),
             receipts.get(finalized_block.number as usize).unwrap().clone()
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_static_file_receipts_start_block() -> eyre::Result<()> {
+        let mut rng = generators::rng();
+        let (provider, database_blocks, _, _) = provider_with_random_blocks(
+            &mut rng,
+            TEST_BLOCKS_COUNT,
+            TEST_BLOCKS_COUNT,
+            BlockRangeParams { tx_count: 1..3, ..Default::default() },
+        )?;
+        let last_database_tx = provider
+            .block_body_indices(database_blocks.last().unwrap().number)?
+            .unwrap()
+            .last_tx_num();
+
+        assert_eq!(provider.static_file_receipts_start_block(last_database_tx)?, Some(0));
+        // In-memory blocks are not persisted, so their receipts are not in static files.
+        assert_eq!(provider.static_file_receipts_start_block(last_database_tx + 1)?, None);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_static_file_receipts_start_block_skips_blocks_without_receipts() -> eyre::Result<()> {
+        let mut rng = generators::rng();
+        let blocks = random_block_range(
+            &mut rng,
+            0..=9,
+            BlockRangeParams { parent: Some(B256::ZERO), tx_count: 1..3, ..Default::default() },
+        );
+
+        let factory = create_test_provider_factory();
+        let provider_rw = factory.provider_rw()?;
+        for block in &blocks {
+            provider_rw.insert_block(&block.clone().try_recover()?)?;
+        }
+        provider_rw.commit()?;
+
+        // Like a migrated database whose receipts were pruned up to block 4: static files cover
+        // blocks 0..=4 without receipts.
+        let first_block_with_receipts = 5;
+        let provider = factory.provider()?;
+        let static_file_provider = factory.static_file_provider();
+        let mut writer = static_file_provider.latest_writer(StaticFileSegment::Receipts)?;
+        for block in &blocks {
+            writer.increment_block(block.number)?;
+            if block.number < first_block_with_receipts {
+                continue
+            }
+            let first_tx = provider.block_body_indices(block.number)?.unwrap().first_tx_num;
+            for (tx, transaction) in (first_tx..).zip(&block.body().transactions) {
+                writer.append_receipt(tx, &random_receipt(&mut rng, transaction, Some(0), None))?;
+            }
+        }
+        writer.commit()?;
+        drop(writer);
+        let pruned_tx = provider.block_body_indices(4)?.unwrap().last_tx_num();
+        let stored_tx = provider.block_body_indices(6)?.unwrap().first_tx_num;
+        drop(provider);
+
+        let provider = BlockchainProvider::new(factory)?;
+
+        assert_eq!(provider.static_file_receipts_start_block(pruned_tx)?, None);
+        assert_eq!(
+            provider.static_file_receipts_start_block(stored_tx)?,
+            Some(first_block_with_receipts)
         );
 
         Ok(())
