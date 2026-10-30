@@ -343,3 +343,35 @@ fn test_put_del() {
         Some((Cow::Borrowed(b"key3" as &[u8]), Cow::Borrowed(b"val3" as &[u8])))
     );
 }
+
+#[test]
+fn test_reuse_cursor() {
+    let dir = tempdir().unwrap();
+    let env = Environment::builder().set_max_dbs(2).open(dir.path()).unwrap();
+
+    let txn = env.begin_rw_txn().unwrap();
+    let plain = txn.create_db(Some("plain"), DatabaseFlags::empty()).unwrap().dbi();
+    let dup = txn.create_db(Some("dup"), DatabaseFlags::DUP_SORT).unwrap().dbi();
+    txn.put(plain, b"key1", b"val1", WriteFlags::empty()).unwrap();
+    txn.put(dup, b"key1", b"val1", WriteFlags::empty()).unwrap();
+    txn.put(dup, b"key1", b"val2", WriteFlags::empty()).unwrap();
+
+    // A cursor dropped after its transaction committed is reused by the next transaction.
+    let mut cursor = txn.cursor(dup).unwrap();
+    assert_eq!(cursor.first().unwrap(), Some((*b"key1", *b"val1")));
+    txn.commit().unwrap();
+    drop(cursor);
+
+    // Reused cursors are rebound to databases with and without duplicates.
+    let txn = env.begin_ro_txn().unwrap();
+    for _ in 0..2 {
+        let mut cursor = txn.cursor(dup).unwrap();
+        assert_eq!(cursor.set(b"key1").unwrap(), Some(*b"val1"));
+        assert_eq!(cursor.next_dup().unwrap(), Some((*b"key1", *b"val2")));
+        drop(cursor);
+
+        let mut cursor = txn.cursor(plain).unwrap();
+        assert_eq!(cursor.first().unwrap(), Some((*b"key1", *b"val1")));
+        assert_eq!(cursor.next::<(), ()>().unwrap(), None);
+    }
+}

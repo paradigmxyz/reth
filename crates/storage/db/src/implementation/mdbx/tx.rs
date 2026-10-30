@@ -14,6 +14,7 @@ use reth_primitives_traits::FastInstant as Instant;
 use reth_storage_errors::db::{DatabaseWriteError, DatabaseWriteOperation};
 use std::{
     backtrace::Backtrace,
+    cell::RefCell,
     marker::PhantomData,
     sync::{
         atomic::{AtomicBool, Ordering},
@@ -25,6 +26,15 @@ use tracing::{debug, instrument, trace, warn};
 
 /// Duration after which we emit the log about long-lived database transactions.
 const LONG_TRANSACTION_DURATION: Duration = Duration::from_secs(60);
+
+/// Largest capacity [`PUT_BUF`] keeps between puts, so rare large values do not stay allocated.
+const PUT_BUF_MAX_RETAINED_CAPACITY: usize = 64 * 1024;
+
+thread_local! {
+    /// Reusable buffer that receives compressed values in [`Tx::put`], so that puts do not
+    /// allocate a new value buffer each time.
+    static PUT_BUF: RefCell<Vec<u8>> = const { RefCell::new(Vec::new()) };
+}
 
 /// Wrapper for the libmdbx transaction.
 #[derive(Debug)]
@@ -113,12 +123,19 @@ impl<K: TransactionKind> Tx<K> {
             .cursor_with_dbi(self.get_dbi::<T>()?)
             .map_err(|e| DatabaseError::InitCursor(e.into()))?;
 
-        Ok(Cursor::new_with_metrics(
-            inner,
+        // Read-only cursors never record operation metrics, so they skip the handle lookup and the
+        // clone of the shared handles, whose reference count parallel readers would contend on.
+        let metrics = if K::IS_READ_ONLY {
+            None
+        } else {
             self.metrics_handler
                 .as_ref()
                 .zip(T::TABLE)
-                .map(|(h, table)| h.env_metrics.table_operation_metrics(table)),
+                .map(|(h, table)| h.env_metrics.table_operation_metrics(table))
+        };
+        Ok(Cursor::new_with_metrics(
+            inner,
+            metrics,
             #[cfg(target_os = "linux")]
             self.prefetch.load(Ordering::Relaxed),
         ))
@@ -423,9 +440,29 @@ impl Tx<RW> {
         value: T::Value,
     ) -> Result<(), DatabaseError> {
         let key = key.encode();
-        let value = value.compress();
+        if let Some(value) = value.uncompressable_ref() {
+            return self.put_encoded::<T>(kind, key, value);
+        }
+        PUT_BUF.with_borrow_mut(|buf| {
+            buf.clear();
+            value.compress_to_buf(buf);
+            let result = self.put_encoded::<T>(kind, key, buf);
+            if buf.capacity() > PUT_BUF_MAX_RETAINED_CAPACITY {
+                *buf = Vec::new();
+            }
+            result
+        })
+    }
+
+    /// Puts an encoded key and compressed value with the given put kind.
+    fn put_encoded<T: Table>(
+        &self,
+        kind: PutKind,
+        key: <T::Key as Encode>::Encoded,
+        value: &[u8],
+    ) -> Result<(), DatabaseError> {
         let (operation, write_operation, flags) = kind.into_operation_and_flags();
-        self.execute_with_operation_metric::<T, _>(operation, Some(value.as_ref().len()), |tx| {
+        self.execute_with_operation_metric::<T, _>(operation, Some(value.len()), |tx| {
             tx.put(self.get_dbi::<T>()?, key.as_ref(), value, flags).map_err(|e| {
                 DatabaseWriteError {
                     info: e.into(),

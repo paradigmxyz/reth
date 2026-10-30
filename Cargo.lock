@@ -9499,6 +9499,7 @@ dependencies = [
  "derive_more",
  "parking_lot",
  "reth-mdbx-sys",
+ "rustc-hash",
  "smallvec",
  "tempfile",
  "thiserror 2.0.21",

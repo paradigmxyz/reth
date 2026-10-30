@@ -17,10 +17,8 @@ use std::{
     path::Path,
     ptr,
     sync::{mpsc::sync_channel, Arc},
-    thread::sleep,
     time::Duration,
 };
-use tracing::warn;
 
 /// The default maximum duration of a read transaction.
 #[cfg(feature = "read-tx-timeouts")]
@@ -116,26 +114,13 @@ impl Environment {
     /// Create a read-write transaction for use with the environment. This method will block while
     /// there are any other read-write transactions open on the environment.
     pub fn begin_rw_txn(&self) -> Result<Transaction<RW>> {
-        let mut warned = false;
-        let txn = loop {
-            let (tx, rx) = sync_channel(0);
-            self.txn_manager().send_message(TxnManagerMessage::Begin {
-                parent: TxnPtr(ptr::null_mut()),
-                flags: RW::OPEN_FLAGS,
-                sender: tx,
-            });
-            let res = rx.recv().unwrap();
-            if matches!(&res, Err(Error::Busy)) {
-                if !warned {
-                    warned = true;
-                    warn!(target: "libmdbx", "Process stalled, awaiting read-write transaction lock.");
-                }
-                sleep(Duration::from_millis(250));
-                continue
-            }
-
-            break res
-        }?;
+        let (tx, rx) = sync_channel(0);
+        self.txn_manager().send_message(TxnManagerMessage::Begin {
+            parent: TxnPtr(ptr::null_mut()),
+            flags: RW::OPEN_FLAGS,
+            sender: tx,
+        });
+        let txn = rx.recv().unwrap()?;
         Ok(Transaction::new_from_ptr(self.clone(), txn.0))
     }
 
