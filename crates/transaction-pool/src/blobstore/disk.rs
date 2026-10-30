@@ -518,6 +518,19 @@ impl DiskFileBlobStoreInner {
 
         self.blob_cache.lock().insert(tx, Arc::new(data));
 
+        // A sidecar that is inserted again before its deferred deletion ran must not keep the
+        // stale file, which may be another sidecar version and is removed by the next cleanup.
+        if self.txs_to_delete.write().remove(&tx) {
+            let path = self.blob_disk_file(tx);
+            let _lock = self.file_lock.write();
+            if let Ok(meta) = fs::metadata(&path) &&
+                fs::remove_file(&path).is_ok()
+            {
+                self.size_tracker.sub_size(meta.len() as usize);
+                self.size_tracker.sub_len(1);
+            }
+        }
+
         let size = self.write_one_encoded(tx, &buf)?;
 
         self.size_tracker.add_size(size);
@@ -932,6 +945,27 @@ mod tests {
         assert!(store.is_cached(&tx));
         let retrieved_blob = store.get(tx).unwrap().map(Arc::unwrap_or_clone).unwrap();
         assert_eq!(retrieved_blob, blob);
+    }
+
+    /// A sidecar that is inserted again while its deletion is still pending, e.g. a blob
+    /// transaction that is re-added to the pool, must be the one kept on disk.
+    #[test]
+    fn disk_reinsert_pending_delete() {
+        let (store, _dir) = tmp_store();
+
+        let (tx, blob) = rng_blobs(1).into_iter().next().unwrap();
+        store.insert(tx, blob.into()).unwrap();
+        store.delete(tx).unwrap();
+
+        let (sidecar, _, _) = eip7594_single_blob_sidecar();
+        store.insert(tx, sidecar.clone().into()).unwrap();
+        store.clear_cache();
+        assert_eq!(store.get(tx).unwrap().as_deref(), Some(&sidecar));
+
+        store.cleanup();
+        store.clear_cache();
+        assert_eq!(store.get(tx).unwrap().as_deref(), Some(&sidecar));
+        assert_eq!(store.blobs_len(), 1);
     }
 
     #[test]
