@@ -1147,7 +1147,8 @@ mod tests {
 
         let sender = Address::repeat_byte(0x11);
         let contract = Address::repeat_byte(0xaa);
-        // Return the initial execution gas and the caller's balance after the value transfer.
+        // Return the initial execution gas and the caller's balance after the value transfer and,
+        // for a priced call, the upfront gas charge.
         let code = Bytes::from_static(&[
             0x5a, 0x60, 0x00, 0x52, 0x33, 0x31, 0x60, 0x20, 0x52, 0x60, 0x40, 0x60, 0x00, 0xf3,
         ]);
@@ -1161,7 +1162,7 @@ mod tests {
             (50_000, Some(70_000), 1, 100_000, 100_000, 50_000),
             (50_000, Some(30_000), 1, 100_000, 100_000, 30_000),
             (50_000, Some(70_000), 1, 100_000, 40_000, 50_000),
-            (50_000, Some(30_000), 1, 0, 100_000, 30_000),
+            (50_000, Some(30_000), 1, 30_000, 100_000, 30_000),
             (50_000, Some(30_000), 0, 0, 100_000, 30_000),
             (0, None, 1, 100_000, 100_000, 100_000),
             (0, Some(70_000), 1, 100_000, 40_000, 70_000),
@@ -1223,7 +1224,10 @@ mod tests {
                     .unwrap();
 
                 assert_eq!(U256::from_be_slice(&output[..32]), U256::from(budget - 21_002));
-                assert_eq!(U256::from_be_slice(&output[32..]), U256::from(balance));
+                assert_eq!(
+                    U256::from_be_slice(&output[32..]),
+                    U256::from(balance - budget * price)
+                );
                 assert_eq!(traces.output, output);
             }
         }
