@@ -902,18 +902,6 @@ pub trait Call:
             evm_env.version_mut().tx_gas_limit_cap = u64::MAX;
         }
 
-        // Disable additional fee charges, e.g. opstack operator fee charge
-        // See:
-        // <https://github.com/paradigmxyz/reth/issues/18470>
-        evm_env.version_mut().features.remove(evm2::EvmFeatures::FEE_CHARGE);
-
-        // Calls do not pay upfront fees. Preserve the caller's actual balance so value transfers
-        // still fail during execution when it is insufficient, without topping up the account.
-        evm_env
-            .version_mut()
-            .features
-            .remove(evm2::EvmFeatures::BALANCE_CHECK | evm2::EvmFeatures::BALANCE_TOP_UP);
-
         evm_env.version_mut().memory_limit = self.evm_memory_limit();
 
         // set nonce to None so that the correct nonce is chosen by the EVM
@@ -949,6 +937,16 @@ pub trait Call:
         // lower the basefee to 0 to avoid breaking EVM invariants (basefee < gasprice): <https://github.com/ethereum/go-ethereum/blob/355228b011ef9a85ebc0f21e7196f892038d49f0/internal/ethapi/api.go#L700-L704>
         if gas_price == 0 {
             evm_env.block_env_mut().basefee = U256::ZERO;
+            // An unpriced call pays no fees, including additional ones such as the opstack
+            // operator fee: <https://github.com/paradigmxyz/reth/issues/18470>. It keeps the
+            // caller's actual balance, so value transfers still fail during execution when it is
+            // insufficient, without topping up the account. A priced call is funded and charged
+            // like a transaction.
+            evm_env.version_mut().features.remove(
+                evm2::EvmFeatures::FEE_CHARGE |
+                    evm2::EvmFeatures::BALANCE_CHECK |
+                    evm2::EvmFeatures::BALANCE_TOP_UP,
+            );
         }
 
         if requested_gas.is_none() {
