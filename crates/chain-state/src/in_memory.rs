@@ -337,7 +337,9 @@ impl<N: NodePrimitives> CanonicalInMemoryState<N> {
             }
         }
 
-        {
+        // The drained block states are dropped after the locks are released, so freeing removed
+        // blocks doesn't block readers.
+        let drained = {
             // acquire locks, starting with the numbers lock
             let mut numbers = self.inner.in_memory_state.numbers.write();
             let mut blocks = self.inner.in_memory_state.blocks.write();
@@ -348,10 +350,11 @@ impl<N: NodePrimitives> CanonicalInMemoryState<N> {
             numbers.clear();
 
             // Drain all blocks and keep only the suffix that still has to stay in memory.
-            let mut old_blocks = blocks
-                .drain()
-                .filter(|(_, b)| b.block_ref().recovered_block().number() > remove_until)
-                .map(|(_, b)| b.block.clone())
+            let drained = blocks.drain().map(|(_, b)| b).collect::<Vec<_>>();
+            let mut old_blocks = drained
+                .iter()
+                .filter(|b| b.block_ref().recovered_block().number() > remove_until)
+                .map(|b| b.block.clone())
                 .collect::<Vec<_>>();
 
             // sort the blocks by number so we can insert them back in natural order (low -> high)
@@ -375,7 +378,10 @@ impl<N: NodePrimitives> CanonicalInMemoryState<N> {
                     p.parent = blocks.get(&p.block_ref().recovered_block().parent_hash()).cloned();
                 }
             });
-        }
+
+            drained
+        };
+        drop(drained);
         self.inner.in_memory_state.update_metrics();
     }
 

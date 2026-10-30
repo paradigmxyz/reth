@@ -320,7 +320,7 @@ where
     /// Executes a single prewarm transaction on the current pool thread's EVM, or only loads the
     /// reads of its `seeded` pool transaction result.
     ///
-    /// Lazily initialises per-thread [`PrewarmEvmState`] via
+    /// Lazily initialises per-thread [`PrewarmWorker`] state via
     /// [`get_or_init`](reth_tasks::WorkerStatefulPool::get_or_init) on first access.
     fn transact_worker<Tx>(
         ctx: &PrewarmContext<N, P, Evm>,
@@ -337,20 +337,24 @@ where
         }
 
         pool.get_or_init(
-            || ctx.evm_for_ctx(),
+            || PrewarmWorker {
+                evm: ctx.evm_for_ctx(),
+                samples: PrewarmSamples::new(ctx.metrics.clone()),
+            },
             |state| {
-                let Some(evm) = state.evm.as_mut() else { return };
+                let PrewarmWorker { evm: PrewarmEvmState { evm, recording }, samples } = state;
+                let Some(evm) = evm.as_mut() else { return };
 
                 let start = Instant::now();
 
                 let (tx_env, tx) = tx.into_parts();
-                let send_hints = |state: &evm2::evm::PendingState| {
+                let send_hints = |samples: &mut PrewarmSamples, state: &evm2::evm::PendingState| {
                     if index > 0 &&
                         let Some(state_root_hint_stream) = state_root_hint_stream
                     {
                         let (targets, storage_targets) =
                             MultiProofTargetsV2::from_account_changes(state.account_changes());
-                        ctx.metrics.prefetch_storage_targets.record(storage_targets as f64);
+                        samples.prefetch_storage_targets.push(storage_targets as f64);
                         state_root_hint_stream.on_access_hint(targets.into());
                     }
                 };
@@ -365,7 +369,7 @@ where
                             "Failed to load reads of seeded pool transaction",
                         );
                     }
-                    send_hints(seeded.state());
+                    send_hints(samples, seeded.state());
                     return;
                 }
 
@@ -390,17 +394,17 @@ where
                             return;
                         }
                     };
-                    ctx.metrics.execution_duration.record(start.elapsed());
+                    samples.execution_duration.push(start.elapsed().as_secs_f64());
                     if ctx.should_stop() {
                         return;
                     }
                     if let Some(stream) = hint_stream &&
                         let Some((targets, storage_targets)) = hints
                     {
-                        ctx.metrics.prefetch_storage_targets.record(storage_targets as f64);
+                        samples.prefetch_storage_targets.push(storage_targets as f64);
                         stream.on_access_hint(targets.into());
                     }
-                    ctx.metrics.total_runtime.record(start.elapsed());
+                    samples.total_runtime.push(start.elapsed().as_secs_f64());
                     return;
                 };
 
@@ -410,10 +414,10 @@ where
                 // Clear evm2's read-through overlay so every read reaches the recording database
                 // and sees the latest prediction. The provider retains the shared warm cache.
                 drop(evm.take_state_cache());
-                state.recording.start(Some((Arc::clone(results.predicted()), index)));
-                let res = evm
-                    .transact_with_inspector(&tx_env, BalanceTracker::new(state.recording.clone()));
-                let reads = state.recording.take_reads();
+                recording.start(Some((Arc::clone(results.predicted()), index)));
+                let res =
+                    evm.transact_with_inspector(&tx_env, BalanceTracker::new(recording.clone()));
+                let reads = recording.take_reads();
                 let (mut balances, res) = match res {
                     Ok(res) => res,
                     Err(err) => {
@@ -431,20 +435,20 @@ where
                         return;
                     }
                 };
-                ctx.metrics.execution_duration.record(start.elapsed());
+                samples.execution_duration.push(start.elapsed().as_secs_f64());
 
                 if ctx.should_stop() {
                     return;
                 }
 
-                send_hints(&res.pending_state);
+                send_hints(samples, &res.pending_state);
 
                 if let Some(reads) = reads &&
                     index >= ctx.executed_tx_index.load(Ordering::Relaxed)
                 {
                     results.store(index, res, reads, &mut balances, speculative);
                 }
-                ctx.metrics.total_runtime.record(start.elapsed());
+                samples.total_runtime.push(start.elapsed().as_secs_f64());
             },
         );
     }
@@ -766,6 +770,53 @@ struct PrewarmEvmState<Evm: ConfigureEvm> {
     /// The EVM, `None` if its state provider could not be created.
     evm: Option<EvmFor<'static, Evm>>,
     recording: RecordingHandle,
+}
+
+/// Per-thread prewarm state, stored in workers via [`WorkerStatefulPool::get_or_init`] and
+/// dropped when the block's prewarming ends.
+struct PrewarmWorker<Evm: ConfigureEvm> {
+    /// The worker's EVM and recording handle.
+    evm: PrewarmEvmState<Evm>,
+    /// The worker's per-transaction metric samples.
+    samples: PrewarmSamples,
+}
+
+/// Per-transaction prewarm metric samples of one worker, recorded into [`PrewarmMetrics`] when
+/// the worker's state is dropped at the end of the block.
+///
+/// Recording a histogram sample appends to a bucket shared by all threads, so recording each
+/// transaction from every worker would bounce the bucket's cache lines between the workers' LLC
+/// domains while they execute.
+struct PrewarmSamples {
+    metrics: PrewarmMetrics,
+    total_runtime: Vec<f64>,
+    execution_duration: Vec<f64>,
+    prefetch_storage_targets: Vec<f64>,
+}
+
+impl PrewarmSamples {
+    const fn new(metrics: PrewarmMetrics) -> Self {
+        Self {
+            metrics,
+            total_runtime: Vec::new(),
+            execution_duration: Vec::new(),
+            prefetch_storage_targets: Vec::new(),
+        }
+    }
+}
+
+impl Drop for PrewarmSamples {
+    fn drop(&mut self) {
+        for &sample in &self.total_runtime {
+            self.metrics.total_runtime.record(sample);
+        }
+        for &sample in &self.execution_duration {
+            self.metrics.execution_duration.record(sample);
+        }
+        for &sample in &self.prefetch_storage_targets {
+            self.metrics.prefetch_storage_targets.record(sample);
+        }
+    }
 }
 
 impl<N, P, Evm> PrewarmContext<N, P, Evm>

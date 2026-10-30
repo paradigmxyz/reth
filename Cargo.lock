@@ -439,8 +439,7 @@ dependencies = [
 [[package]]
 name = "alloy-primitives"
 version = "1.7.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d5e9dbd49258ac3ab893a481d46be29b58be7f734dcac46cd80b6b13ee36566c"
+source = "git+https://github.com/alloy-rs/core?rev=44a924677ede8cbe1ab84399dfa655efb2148715#44a924677ede8cbe1ab84399dfa655efb2148715"
 dependencies = [
  "alloy-rlp",
  "arbitrary",
@@ -4333,9 +4332,9 @@ checksum = "aedcfb3409746eddb02b9e19ebda1c3394f759a152e48ee875a0844d1b955484"
 
 [[package]]
 name = "fixed-cache"
-version = "0.1.10"
+version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2fe63500644ef0269fe6b744e7e5dc5c20b5eebf3d881bc2be53f194636f6583"
+checksum = "57b811067c17dd16568d50c522f03fa65227c7f602c88f77d38e7842c51ba964"
 dependencies = [
  "equivalent",
  "rapidhash",
@@ -9286,8 +9285,10 @@ name = "reth-execution-cache"
 version = "2.9.0"
 dependencies = [
  "alloy-primitives",
+ "crossbeam-utils",
  "evm2",
  "fixed-cache",
+ "libc",
  "metrics",
  "parking_lot",
  "reth-errors",
@@ -9497,6 +9498,7 @@ dependencies = [
  "crossbeam-queue",
  "dashmap",
  "derive_more",
+ "libc",
  "parking_lot",
  "reth-mdbx-sys",
  "smallvec",
@@ -10933,6 +10935,7 @@ dependencies = [
 name = "reth-tasks"
 version = "2.9.0"
 dependencies = [
+ "crossbeam-channel",
  "crossbeam-utils",
  "dashmap",
  "futures-util",
@@ -11188,6 +11191,7 @@ dependencies = [
  "alloy-trie",
  "arbitrary",
  "either",
+ "libc",
  "metrics",
  "pretty_assertions",
  "proptest",
@@ -11197,6 +11201,7 @@ dependencies = [
  "reth-execution-errors",
  "reth-metrics",
  "reth-primitives-traits",
+ "reth-tasks",
  "reth-tracing",
  "reth-trie",
  "reth-trie-common",
