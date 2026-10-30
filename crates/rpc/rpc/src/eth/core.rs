@@ -1254,8 +1254,9 @@ mod tests {
         let api = build_test_eth_api(provider);
         let trace_api =
             crate::TraceApi::new(api.clone(), BlockingTaskGuard::new(1), EthConfig::default());
+        // The transfer uses 21,000 of its 30,000 gas, and the unused gas is refunded.
         let request = |gas_price| TransactionRequest {
-            gas: Some(21_000),
+            gas: Some(30_000),
             gas_price: Some(gas_price),
             ..TransactionRequest::default().with_from(sender).with_to(recipient)
         };
