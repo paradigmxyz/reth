@@ -4,10 +4,11 @@
 //! so a run stopped anywhere resumes from what the database holds.
 
 use crate::{
-    AccountRangeDownload, AccountRangeStep, BlockAccessListCatchUp, BytecodeDownload, BytecodeStep,
-    CatchUpStep, SnapAccountStore, SnapAttemptStore, SnapCatchUpStore, SnapGeneration,
-    SnapPivotPolicy, SnapStateVerifier, SnapSyncError, SnapSyncSession, SnapWrite,
-    StorageRangeDownload, StorageRangeStep, VerifiedRange, DEFAULT_SCAN_CHUNK,
+    metrics::SnapSyncMetrics, AccountRangeDownload, AccountRangeStep, BlockAccessListCatchUp,
+    BytecodeDownload, BytecodeStep, CatchUpStep, SnapAccountStore, SnapAttemptStore,
+    SnapCatchUpStore, SnapGeneration, SnapPivotPolicy, SnapStateVerifier, SnapSyncError,
+    SnapSyncSession, SnapWrite, StorageRangeDownload, StorageRangeStep, VerifiedRange,
+    DEFAULT_SCAN_CHUNK,
 };
 use alloy_eips::BlockNumHash;
 use reth_db_api::transaction::DbTxMut;
@@ -17,7 +18,6 @@ use reth_storage_api::{
     BlockHashReader, DBProvider, DatabaseProviderFactory, HeaderProvider, MetadataProvider,
     MetadataWriter, StageCheckpointWriter, StateWriter,
 };
-use reth_storage_errors::provider::ProviderError;
 use reth_tasks::Runtime;
 use std::{fmt, future::Future};
 use tokio_util::sync::CancellationToken;
@@ -51,6 +51,7 @@ pub struct SnapBootstrap<C, F, X> {
     storage: StorageRangeDownload<C, F>,
     bytecode: BytecodeDownload<C, F>,
     catch_up: BlockAccessListCatchUp<C, F>,
+    metrics: SnapSyncMetrics,
 }
 
 impl<C: Clone, F: Clone, X> SnapBootstrap<C, F, X> {
@@ -70,6 +71,7 @@ impl<C: Clone, F: Clone, X> SnapBootstrap<C, F, X> {
             ranges_per_check: DEFAULT_RANGES_PER_CHECK,
             cancel: CancellationToken::new(),
             shutdown: None,
+            metrics: SnapSyncMetrics::default(),
         }
     }
 }
@@ -165,7 +167,10 @@ where
                         Step::Continue
                     }
                     // Progress this build cannot read is unusable, so the attempt starts over.
-                    Err(error @ SnapSyncError::UnsupportedRecord { .. }) => {
+                    Err(
+                        error @ (SnapSyncError::UnsupportedRecord { .. } |
+                        SnapSyncError::UnreadableRecord { .. }),
+                    ) => {
                         info!(target: "sync::snap", %error, "Snap progress is unreadable, restarting");
                         Step::Restart
                     }
@@ -189,6 +194,8 @@ where
                     let provider = self.factory.database_provider_rw()?;
                     provider.abandon_snap_attempt()?;
                     provider.commit()?;
+                    self.metrics.restarts.increment(1);
+                    self.metrics.clear_attempt();
                 }
                 Step::Stop => return Ok(SnapBootstrapOutcome::Stopped),
             }
@@ -213,7 +220,7 @@ where
             }
         }
 
-        session.select(&provider, head, self.context.finalized())?;
+        session.select(&provider, head, self.context.finalized()?)?;
         let Some(generation) = session.start() else {
             // A head without a block access list predates them, so no block under it can anchor.
             // Once the staged pipeline executes past genesis, the node stays on it. The first
@@ -246,25 +253,36 @@ where
         let (applied, complete) = {
             let provider = self.factory.database_provider_ro()?;
             let generation = self.session.target().copied().ok_or(SnapSyncError::NoAttempt)?;
+            self.metrics.pivot_block.set(generation.target().number as f64);
             let handed_off = provider.is_trie_rebuild_started(write)?;
-            if !generation.is_canonical(&provider)? {
+            let canonical = generation.is_canonical(&provider)?;
+            if handed_off {
                 // Handed-off state may be partly rebuilt, so it cannot be repaired in place.
-                if handed_off {
+                if !canonical {
                     info!(target: "sync::snap", pivot = ?generation.target(), "Handed-off snap pivot was reorged, restarting");
                     return Ok(Step::Restart)
                 }
-                drop(provider);
-                return self.recover(write, head).await
-            }
-            if handed_off {
+                // The hand-off required every account, lists through the pivot and no repairs.
+                self.metrics.set_account_progress(None);
+                self.metrics.applied_block.set(generation.target().number as f64);
                 return Ok(Step::HandedOff(write))
             }
             let applied = provider
                 .catch_up_progress(write)?
                 .ok_or(SnapSyncError::NoCatchUpProgress)?
                 .applied();
+            let coverage = provider.account_coverage(write)?;
+            // Recovery can wait for orphaned lists, so publish the stored progress first.
+            self.metrics.applied_block.set(applied.number as f64);
+            if let Some(coverage) = coverage {
+                self.metrics.set_account_progress(coverage.next());
+            }
+            if !canonical {
+                drop(provider);
+                return self.recover(write, head).await
+            }
             // Repairs are fetched at the pivot, so pending ones still need it served.
-            let complete = provider.account_coverage(write)?.is_some_and(|c| c.is_complete()) &&
+            let complete = coverage.is_some_and(|c| c.is_complete()) &&
                 provider.snap_repairs(write)?.is_empty();
             (applied, complete)
         };
@@ -280,6 +298,7 @@ where
             return Ok(Step::Restart)
         }
         let write = self.advance_pivot(write, head)?;
+        self.metrics.pivot_block.set(self.pivot()?.number as f64);
         // Lists only update accounts already downloaded, so coverage grows once they reach the
         // pivot.
         if let Some(step) = self.catch_up(write).await? {
@@ -323,7 +342,7 @@ where
             info!(target: "sync::snap", ?pivot, ?ancestor, resume, head, "Orphaned block access lists expired, restarting");
             return Ok(Step::Restart)
         }
-        let generation = self.policy.select(&provider, head, self.context.finalized())?;
+        let generation = self.policy.select(&provider, head, self.context.finalized()?)?;
         // The new pivot must descend from the ancestor, or the new branch is still too short.
         // Checked first, so waiting for it does not fetch the orphaned lists on every pass.
         let Some(generation) = generation.filter(|g| g.target().number >= ancestor.number) else {
@@ -355,7 +374,7 @@ where
         let provider = self.factory.database_provider_rw()?;
         let from = self.pivot()?;
         let Some(advanced) =
-            self.session.advance(&provider, write, head, self.context.finalized())?
+            self.session.advance(&provider, write, head, self.context.finalized()?)?
         else {
             return Ok(write)
         };
@@ -373,6 +392,7 @@ where
                 CatchUpStep::Complete => return Ok(None),
                 CatchUpStep::Applied { progress, .. } => {
                     debug!(target: "sync::snap", applied = ?progress.applied(), pivot, "Applied block access lists");
+                    self.metrics.applied_block.set(progress.applied().number as f64);
                 }
                 CatchUpStep::Unavailable { peer_id, .. } => {
                     debug!(target: "sync::snap", ?peer_id, pivot, "Peer does not serve the pivot's block access lists");
@@ -428,7 +448,8 @@ where
             if let Some(step) = self.download_storage_and_code(&range).await? {
                 return Ok(step)
             }
-            self.accounts.commit(range, Default::default(), Vec::new()).await?;
+            let coverage = self.accounts.commit(range, Default::default(), Vec::new()).await?;
+            self.metrics.set_account_progress(coverage.next());
         }
         Ok(Step::Continue)
     }
@@ -502,7 +523,7 @@ where
                 Ok(())
             })
             .await
-            .map_err(|error| SnapSyncError::Provider(ProviderError::other(error)))?
+            .map_err(SnapSyncError::blocking_task)?
     }
 
     // Pivot of the attempt being driven.
@@ -555,13 +576,16 @@ pub trait SnapSyncContext: Send {
     /// Highest block whose canonical header is downloaded.
     fn head(&self) -> Result<u64, SnapSyncError>;
 
-    /// Latest finalized block, preferred as the pivot when recent enough.
-    fn finalized(&self) -> Option<u64> {
-        None
+    /// Latest finalized block, preferred as the pivot when recent enough. `None` if no finalized
+    /// block is known locally yet.
+    fn finalized(&self) -> Result<Option<u64>, SnapSyncError> {
+        Ok(None)
     }
 
-    /// Waits until the head moves past `head` or new peers connect, returning `false` once no
-    /// further progress will come.
+    /// Waits for a reason to retry the stalled step and returns `true` if one came, such as new
+    /// peers connecting or a retry delay passing. Returns `false` if the run should stop instead,
+    /// so the caller can refresh its headers, as when a new target arrived or the source of
+    /// targets is gone.
     fn wait_for_progress(&mut self, head: u64) -> impl Future<Output = bool> + Send;
 }
 
@@ -601,6 +625,8 @@ enum Wait {
 mod tests {
     use super::*;
     use crate::{
+        common::SnapRecord,
+        reorg::StoredAncestry,
         test_utils::{
             account, account_range, hashed_factory, header, key, policy, state_root,
             storage_ranges, storage_root_of, stored_slots, verified_range, ReorgFactoryExt,
@@ -611,14 +637,15 @@ mod tests {
     use alloy_eip7928::{
         compute_block_access_list_hash, AccountChanges, BalanceChange, BlockAccessIndex,
     };
-    use alloy_primitives::{keccak256, Address, B256, U256};
+    use alloy_primitives::{keccak256, Address, Bytes, B256, U256};
+    use metrics_util::debugging::{DebugValue, DebuggingRecorder, Snapshotter};
     use reth_eth_wire_types::{
         snap::{AccountRangeMessage, BlockAccessListsMessage},
         BlockAccessLists,
     };
     use reth_network_p2p::{error::PeerRequestResult, snap::client::SnapResponse};
     use reth_network_peers::{PeerId, WithPeerId};
-    use reth_primitives_traits::{Account, AlloyBlockHeader, SealedHeader};
+    use reth_primitives_traits::{Account, AlloyBlockHeader, Header, SealedHeader};
     use reth_provider::{
         test_utils::{insert_headers, MockNodeTypesWithDB},
         ProviderFactory,
@@ -628,7 +655,11 @@ mod tests {
     use reth_stages_types::StageId;
     use reth_storage_api::{SnapAttemptId, StageCheckpointReader};
     use reth_trie_common::{HashedPostState, TrieAccount};
-    use std::{cell::RefCell, collections::VecDeque, sync::Arc};
+    use std::{
+        cell::RefCell,
+        collections::{HashMap, VecDeque},
+        sync::Arc,
+    };
 
     type Factory = ProviderFactory<MockNodeTypesWithDB>;
     type Bootstrap = SnapBootstrap<Arc<ScriptedSnapClient>, Factory, TestContext>;
@@ -685,6 +716,29 @@ mod tests {
         provider.commit_account_range(write, &range, Default::default(), Vec::new()).unwrap();
         provider.commit().unwrap();
         write
+    }
+
+    // Gives `bootstrap` metrics recorded in the returned snapshotter. `default` handles are cached
+    // process-wide, so they are registered afresh for each recorder.
+    fn recorded(mut bootstrap: Bootstrap) -> (Snapshotter, Bootstrap) {
+        let recorder = DebuggingRecorder::new();
+        let snapshotter = recorder.snapshotter();
+        bootstrap.metrics = metrics::with_local_recorder(&recorder, || {
+            SnapSyncMetrics::new_with_labels(Vec::<metrics::Label>::new())
+        });
+        (snapshotter, bootstrap)
+    }
+
+    // Taking a snapshot resets every value, so it is taken once per check.
+    fn snapshot(snapshotter: &Snapshotter) -> HashMap<String, DebugValue> {
+        snapshotter
+            .snapshot()
+            .into_vec()
+            .into_iter()
+            .map(|(key, _, _, value)| {
+                (key.key().name().trim_start_matches("sync.snap.").to_owned(), value)
+            })
+            .collect()
     }
 
     fn attempt_id(factory: &Factory) -> SnapAttemptId {
@@ -1009,7 +1063,7 @@ mod tests {
         ];
         // The head moves past the advance window after the first range.
         let (client, bootstrap) = scripted(&factory, responses, [3, 8]);
-        let mut bootstrap = bootstrap.with_ranges_per_check(1);
+        let (snapshotter, mut bootstrap) = recorded(bootstrap.with_ranges_per_check(1));
 
         let outcome = bootstrap.run().await.unwrap();
 
@@ -1019,6 +1073,10 @@ mod tests {
         assert_eq!(pivot.number, 7);
         assert_eq!(*client.origins(), [B256::ZERO, key(2)]);
         assert_eq!(client.block_requests().len(), 1);
+        let metrics = snapshot(&snapshotter);
+        assert_eq!(metrics["pivot_block"], DebugValue::Gauge(7.0.into()));
+        assert_eq!(metrics["applied_block"], DebugValue::Gauge(7.0.into()));
+        assert_eq!(metrics["account_progress"], DebugValue::Gauge(1.0.into()));
 
         // The merkle stage rebuilds the trie, which the pivot's header then accepts.
         let verified = rebuild_and_verify(&factory, write, 7);
@@ -1080,25 +1138,37 @@ mod tests {
     async fn a_reorged_pivot_without_kept_blocks_restarts_the_attempt() {
         let accounts = accounts();
         let factory = hashed_factory();
-        insert_chain(&factory, 3, state_root(&accounts));
-        // A previous run anchored to a block the canonical chain no longer holds.
+        let blocks = chain(3, state_root(&accounts));
+        insert_headers(&factory, &blocks);
+        // A previous run anchored to a block the canonical chain then replaced.
         let provider = factory.database_provider_rw().unwrap();
-        let orphaned = SnapGeneration::new(
-            BlockNumHash::new(2, B256::repeat_byte(0xee)),
-            state_root(&accounts),
-        );
+        let orphaned = SnapGeneration::new(blocks[2].num_hash(), state_root(&accounts));
         provider.start_snap_attempt(orphaned).unwrap();
+        StoredAncestry::clear(&provider).unwrap();
         provider.commit().unwrap();
+        let mut replaced = chain(3, state_root(&accounts));
+        replaced[2] = SealedHeader::seal_slow(Header {
+            extra_data: Bytes::from_static(&[1]),
+            ..replaced[2].header().clone()
+        });
+        replaced[3] = SealedHeader::seal_slow(Header {
+            parent_hash: replaced[2].hash(),
+            ..replaced[3].header().clone()
+        });
+        factory.replace_headers_after(1, &replaced[2..]);
         let orphaned = attempt_id(&factory);
-        let (_, mut bootstrap) = scripted(&factory, [account_range(1, &accounts, 0..3, &[])], [3]);
+        let (_, bootstrap) = scripted(&factory, [account_range(1, &accounts, 0..3, &[])], [3]);
+        let (snapshotter, mut bootstrap) = recorded(bootstrap);
 
         let outcome = bootstrap.run().await.unwrap();
 
         let SnapBootstrapOutcome::TrieRebuild { pivot, .. } = outcome else {
             panic!("the state is complete: {outcome:?}")
         };
-        assert_ne!(pivot.hash, B256::repeat_byte(0xee));
+        assert_ne!(pivot.hash, blocks[2].hash());
         assert_ne!(attempt_id(&factory), orphaned);
+        let metrics = snapshot(&snapshotter);
+        assert_eq!(metrics["restarts"], DebugValue::Counter(1));
     }
 
     #[tokio::test]
@@ -1109,10 +1179,15 @@ mod tests {
         let (_, mut bootstrap) = scripted(&factory, [account_range(1, &accounts, 0..3, &[])], [3]);
         let first = bootstrap.run().await.unwrap();
 
-        let (client, mut resumed) = scripted(&factory, [], [3]);
+        let (client, resumed) = scripted(&factory, [], [3]);
+        let (snapshotter, mut resumed) = recorded(resumed);
 
         assert_eq!(resumed.run().await.unwrap(), first);
         assert!(client.origins().is_empty());
+        // The stored progress is reported while the trie rebuilds.
+        let metrics = snapshot(&snapshotter);
+        assert_eq!(metrics["account_progress"], DebugValue::Gauge(1.0.into()));
+        assert_eq!(metrics["applied_block"], DebugValue::Gauge(2.0.into()));
     }
 
     #[tokio::test]
@@ -1156,7 +1231,8 @@ mod tests {
         provider.commit().unwrap();
 
         // Block 3's list is past the served history under head 11, but nothing needs it.
-        let (client, mut resumed) = scripted(&factory, [], [11]);
+        let (client, resumed) = scripted(&factory, [], [11]);
+        let (snapshotter, mut resumed) = recorded(resumed);
         let outcome = resumed.run().await.unwrap();
 
         assert_eq!(
@@ -1165,33 +1241,42 @@ mod tests {
         );
         assert!(client.origins().is_empty());
         assert!(client.block_requests().is_empty());
+        // The resumed run reports the stored progress without committing anything.
+        let metrics = snapshot(&snapshotter);
+        assert_eq!(metrics["pivot_block"], DebugValue::Gauge(2.0.into()));
+        assert_eq!(metrics["account_progress"], DebugValue::Gauge(1.0.into()));
     }
 
     #[tokio::test]
     async fn unreadable_progress_restarts_the_attempt() {
-        let accounts = accounts();
-        let factory = hashed_factory();
-        insert_chain(&factory, 3, state_root(&accounts));
-        let (_, mut stopped) = scripted(&factory, [Err(RequestError::UnsupportedCapability)], [3]);
-        assert_eq!(stopped.run().await.unwrap(), SnapBootstrapOutcome::Stopped);
-        // Another build rewrote the coverage the attempt resumes from.
-        let provider = factory.database_provider_rw().unwrap();
-        let stale = provider.active_snap_write().unwrap().unwrap();
-        provider.write_metadata("snap_account_coverage", br#"{"version":999}"#.to_vec()).unwrap();
-        provider.commit().unwrap();
+        // A record another build wrote, and one that is not a record at all.
+        for record in [br#"{"version":999}"#.as_slice(), b"not json"] {
+            let accounts = accounts();
+            let factory = hashed_factory();
+            insert_chain(&factory, 3, state_root(&accounts));
+            let (_, mut stopped) =
+                scripted(&factory, [Err(RequestError::UnsupportedCapability)], [3]);
+            assert_eq!(stopped.run().await.unwrap(), SnapBootstrapOutcome::Stopped);
+            // Another build rewrote the coverage the attempt resumes from.
+            let provider = factory.database_provider_rw().unwrap();
+            let stale = provider.active_snap_write().unwrap().unwrap();
+            provider.write_metadata("snap_account_coverage", record.to_vec()).unwrap();
+            provider.commit().unwrap();
 
-        let (_, mut restarted) = scripted(&factory, [account_range(1, &accounts, 0..3, &[])], [3]);
-        let outcome = restarted.run().await.unwrap();
+            let (_, mut restarted) =
+                scripted(&factory, [account_range(1, &accounts, 0..3, &[])], [3]);
+            let outcome = restarted.run().await.unwrap();
 
-        let SnapBootstrapOutcome::TrieRebuild { write, .. } = outcome else {
-            panic!("the state is complete: {outcome:?}")
-        };
-        assert_ne!(write.attempt(), stale.attempt());
-        let provider = factory.database_provider_ro().unwrap();
-        assert!(matches!(
-            provider.authorize_snap_write(stale),
-            Err(SnapSyncError::StaleWrite { .. })
-        ));
+            let SnapBootstrapOutcome::TrieRebuild { write, .. } = outcome else {
+                panic!("the state is complete: {outcome:?}")
+            };
+            assert_ne!(write.attempt(), stale.attempt());
+            let provider = factory.database_provider_ro().unwrap();
+            assert!(matches!(
+                provider.authorize_snap_write(stale),
+                Err(SnapSyncError::StaleWrite { .. })
+            ));
+        }
     }
 
     #[tokio::test]
@@ -1330,9 +1415,13 @@ mod tests {
         let accounts = reorg_accounts();
         let factory = hashed_factory();
         let (attempt, orphaned, new) = reorged(&factory, [Vec::new(), Vec::new()]);
-        let (_, mut bootstrap) = scripted(&factory, [lists(1, &orphaned_lists(), false)], [5]);
+        let (_, bootstrap) = scripted(&factory, [lists(1, &orphaned_lists(), false)], [5]);
+        let (snapshotter, mut bootstrap) = recorded(bootstrap);
         assert_eq!(bootstrap.run().await.unwrap(), SnapBootstrapOutcome::Stopped);
         assert_eq!(attempt_id(&factory), attempt);
+        let metrics = snapshot(&snapshotter);
+        assert_eq!(metrics["account_progress"], DebugValue::Gauge(1.0.into()));
+        assert_eq!(metrics["applied_block"], DebugValue::Gauge(4.0.into()));
 
         // A restarted node resumes the orphaned attempt, and another peer serves them.
         let responses = [

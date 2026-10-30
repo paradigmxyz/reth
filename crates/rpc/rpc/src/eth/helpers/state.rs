@@ -385,6 +385,6 @@ mod tests {
             )
             .await
             .unwrap();
-        assert_eq!(res.result.output().unwrap()[..], B256::with_last_byte(42)[..]);
+        assert_eq!(res.result.output[..], B256::with_last_byte(42)[..]);
     }
 }

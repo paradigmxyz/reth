@@ -49,5 +49,4 @@ client = [
 ]
 
 [dev-dependencies]
-tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 jsonrpsee = { workspace = true, features = ["client", "async-client", "http-client"] }

@@ -23,7 +23,6 @@ use std::{
     time::{Duration, Instant},
 };
 use tar::Archive;
-use tokio::task;
 use tracing::{info, warn};
 use url::Url;
 use zstd::stream::read::Decoder as ZstdDecoder;
@@ -177,11 +176,13 @@ fn unpack_static_file<R: Read>(
     let mut current = root.clone();
     for part in relative_path.components() {
         current.push(part);
-        if let Ok(metadata) = std::fs::symlink_metadata(&current) {
-            eyre::ensure!(
+        match std::fs::symlink_metadata(&current) {
+            Ok(metadata) => eyre::ensure!(
                 !metadata.file_type().is_symlink(),
                 "Static file archive path contains a symlink"
-            );
+            ),
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
+            Err(err) => return Err(err.into()),
         }
     }
     if relative_path.as_os_str().is_empty() {
@@ -603,7 +604,7 @@ pub(crate) async fn stream_and_extract(
     let target_dir = target_dir.to_path_buf();
     let static_files_dir = static_files_dir.map(Path::to_path_buf);
     let url = url.to_string();
-    task::spawn_blocking(move || {
+    reth_tasks::spawn_blocking(move || {
         blocking_download_and_extract(
             &url,
             &target_dir,

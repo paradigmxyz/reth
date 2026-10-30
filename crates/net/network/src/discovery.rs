@@ -5,7 +5,7 @@ use crate::{
     error::{NetworkError, ServiceKind},
 };
 use enr::Enr;
-use futures::StreamExt;
+use futures::{FutureExt, StreamExt};
 use reth_discv4::{DiscoveryUpdate, Discv4, Discv4Config};
 use reth_discv5::{DiscoveredPeer, Discv5};
 use reth_dns_discovery::{
@@ -17,6 +17,7 @@ use reth_network_api::{DiscoveredEvent, DiscoveryEvent};
 use reth_network_peers::{NodeRecord, PeerId};
 use reth_network_types::PeerAddr;
 use secp256k1::SecretKey;
+use socket2::{Domain, Protocol, Socket, Type};
 use std::{
     collections::VecDeque,
     net::{IpAddr, SocketAddr},
@@ -105,16 +106,13 @@ impl Discovery {
         let bind_socket = async |addr: SocketAddr| {
             let result = match addr {
                 SocketAddr::V4(_) => UdpSocket::bind(addr).await,
-                SocketAddr::V6(_) => {
-                    use socket2::{Domain, Protocol, Socket, Type};
-                    (|| {
-                        let socket = Socket::new(Domain::IPV6, Type::DGRAM, Some(Protocol::UDP))?;
-                        socket.set_only_v6(true)?;
-                        socket.set_nonblocking(true)?;
-                        socket.bind(&addr.into())?;
-                        UdpSocket::from_std(socket.into())
-                    })()
-                }
+                SocketAddr::V6(_) => (|| {
+                    let socket = Socket::new(Domain::IPV6, Type::DGRAM, Some(Protocol::UDP))?;
+                    socket.set_only_v6(true)?;
+                    socket.set_nonblocking(true)?;
+                    socket.bind(&addr.into())?;
+                    UdpSocket::from_std(socket.into())
+                })(),
             };
             result
                 .map(Arc::new)
@@ -122,16 +120,53 @@ impl Discovery {
         };
 
         // In shared-port mode, bind the shared socket and start discv4 without its own receive
-        // loop. Unrecognized frames from discv5 will be forwarded to the ingress handler.
-        let (discv4, discv4_updates, _discv4_service, discv4_ingress, shared_socket) =
-            if let Some(config) = discv4_config {
+        // loop. Unrecognized frames from discv5 will be forwarded to the ingress handler, and
+        // discv5's opposite-family sibling socket doubles as discv4's secondary-family egress.
+        // The sibling binds at the shared port that discv4 advertises for both families, not at
+        // discv5's configured opposite-family port, and serves egress and replies only. Node
+        // config has no second-family external IP source, so the discv4 ENR advertises only the
+        // discovery address family. The discv5 ENR carries the dual-stack advertisement.
+        let (discv4, discv4_updates, _discv4_service, discv4_ingress, shared_sockets) =
+            if let Some(mut config) = discv4_config {
                 if let Some(discv5_config) = &mut discv5_config &&
                     discv5_config.has_matching_socket(discovery_v4_addr)
                 {
                     let socket = bind_socket(discovery_v4_addr).await?;
+                    let shared_port = socket
+                        .local_addr()
+                        .map_err(|err| {
+                            NetworkError::from_io_error(
+                                err,
+                                ServiceKind::Discovery(discovery_v4_addr),
+                            )
+                        })?
+                        .port();
+
+                    let listen_config = &discv5_config.discv5_config_mut().listen_config;
+                    let secondary_addr = reth_discv5::config::sibling_addr(
+                        listen_config,
+                        discovery_v4_addr,
+                        shared_port,
+                    );
+                    let secondary_socket = match secondary_addr {
+                        Some(addr) => Some(bind_socket(addr).await?),
+                        None => None,
+                    };
+
+                    if secondary_socket.is_some() {
+                        // The TCP listener's family can differ from the primary discovery socket.
+                        let (tcp4, tcp6) = if tcp_addr.is_ipv4() {
+                            (tcp_addr.port(), 0)
+                        } else {
+                            (0, tcp_addr.port())
+                        };
+                        config.add_eip868_pair("tcp", tcp4);
+                        config.add_eip868_pair("tcp6", tcp6);
+                    }
 
                     let (discv4, mut discv4_service, ingress) = Discv4::bind_shared(
                         socket.clone(),
+                        secondary_socket.clone(),
                         local_enr,
                         sk,
                         config,
@@ -148,7 +183,7 @@ impl Discovery {
                         Some(discv4_updates),
                         Some(discv4_service),
                         Some(ingress),
-                        Some(socket),
+                        Some((socket, secondary_socket)),
                     )
                 } else {
                     let (discv4, mut discv4_service) =
@@ -195,25 +230,14 @@ impl Discovery {
             // Set OS-assigned advertised RLPx ports to the bound listener port.
             set_bound_rlpx_port_if_unset(&mut config, tcp_addr.port());
 
-            if let Some(socket) = shared_socket {
-                let discv5_cfg = config.discv5_config_mut();
-
-                // The shared socket covers discv4's address family; bind the opposite family
-                // only if discv5 was configured for dual-stack.
-                let (mut ipv4, mut ipv6) = (None, None);
-                if discovery_v4_addr.is_ipv4() {
-                    ipv4 = Some(socket);
-                    if let Some(addr) = reth_discv5::config::ipv6(&discv5_cfg.listen_config) {
-                        ipv6 = Some(bind_socket(SocketAddr::V6(addr)).await?);
-                    }
+            if let Some((primary, secondary)) = shared_sockets {
+                let (ipv4, ipv6) = if discovery_v4_addr.is_ipv4() {
+                    (Some(primary), secondary)
                 } else {
-                    ipv6 = Some(socket);
-                    if let Some(addr) = reth_discv5::config::ipv4(&discv5_cfg.listen_config) {
-                        ipv4 = Some(bind_socket(SocketAddr::V4(addr)).await?);
-                    }
-                }
-
-                discv5_cfg.listen_config = discv5::ListenConfig::FromSockets { ipv4, ipv6 };
+                    (secondary, Some(primary))
+                };
+                config.discv5_config_mut().listen_config =
+                    discv5::ListenConfig::FromSockets { ipv4, ipv6 };
             }
 
             let (discv5, discv5_updates) = Discv5::start(&sk, config).await?;
@@ -230,17 +254,20 @@ impl Discovery {
         let (discv5_updates, _discv5_forwarder) = match (discv4_ingress, discv5_updates) {
             (Some(mut ingress), Some(mut updates)) => {
                 let (tx, rx) = mpsc::channel(updates.max_capacity());
-                let handle = tokio::spawn(async move {
-                    while let Some(event) = updates.recv().await {
-                        if let discv5::Event::UnrecognizedFrame(frame) = &event {
-                            ingress.handle_packet(&frame.packet, frame.src_address).await;
-                            continue;
-                        }
-                        if tx.send(event).await.is_err() {
-                            break;
+                let handle = tokio::spawn(
+                    async move {
+                        while let Some(event) = updates.recv().await {
+                            if let discv5::Event::UnrecognizedFrame(frame) = &event {
+                                ingress.handle_packet(&frame.packet, frame.src_address).await;
+                                continue;
+                            }
+                            if tx.send(event).await.is_err() {
+                                break;
+                            }
                         }
                     }
-                });
+                    .boxed(),
+                );
                 (Some(ReceiverStream::new(rx)), Some(handle))
             }
             (_, updates) => (updates.map(ReceiverStream::new), None),
@@ -541,7 +568,10 @@ impl Discovery {
 mod tests {
     use super::*;
     use secp256k1::SECP256K1;
-    use std::net::{Ipv4Addr, SocketAddrV4};
+    use std::{
+        net::{Ipv4Addr, Ipv6Addr, SocketAddrV4},
+        time::Duration,
+    };
 
     #[tokio::test(flavor = "multi_thread")]
     async fn test_discovery_setup() {
@@ -965,5 +995,129 @@ mod tests {
         )
         .await
         .expect("discovery should start with shared port + dual-stack");
+    }
+
+    /// A discv4 ping over the opposite family must complete the endpoint proof: the sibling
+    /// socket bound for discv5's dual-stack listen config is discv4's secondary-family egress.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_shared_port_dual_stack_answers_opposite_family_discv4() {
+        reth_tracing::init_test_tracing();
+
+        let Ok(probe6) = UdpSocket::bind("[::1]:0").await else {
+            // No IPv6 loopback on this host.
+            return;
+        };
+        drop(probe6);
+
+        let ips = [IpAddr::V4(Ipv4Addr::LOCALHOST), IpAddr::V6(Ipv6Addr::LOCALHOST)];
+        for primary_ip in ips {
+            for tcp_ip in ips {
+                assert_shared_port_dual_stack(primary_ip, tcp_ip).await;
+            }
+        }
+    }
+
+    async fn assert_shared_port_dual_stack(primary_ip: IpAddr, tcp_ip: IpAddr) {
+        let secondary_ip = if primary_ip.is_ipv4() {
+            IpAddr::V6(Ipv6Addr::LOCALHOST)
+        } else {
+            IpAddr::V4(Ipv4Addr::LOCALHOST)
+        };
+        let probe = UdpSocket::bind((primary_ip, 0)).await.expect("probe bind");
+        let port = probe.local_addr().unwrap().port();
+        drop(probe);
+
+        let secret_key = SecretKey::new(&mut rand_08::thread_rng());
+        let node_id = reth_network_peers::pk2id(&secret_key.public_key(SECP256K1));
+        let discovery_addr = SocketAddr::new(primary_ip, port);
+        let tcp_addr = SocketAddr::new(tcp_ip, 30303);
+
+        let discv4_config = Discv4ConfigBuilder::default().external_ip_resolver(None).build();
+        // The sibling must use discv4's shared port despite a different configured port.
+        let other_port = if port == u16::MAX { port - 1 } else { port + 1 };
+        let discv5_listen_config = discv5::ListenConfig::DualStack {
+            ipv4: Ipv4Addr::LOCALHOST,
+            ipv4_port: if primary_ip.is_ipv4() { port } else { other_port },
+            ipv6: Ipv6Addr::LOCALHOST,
+            ipv6_port: if primary_ip.is_ipv6() { port } else { other_port },
+        };
+        let discv5_config = reth_discv5::Config::builder(tcp_addr)
+            .discv5_config(discv5::ConfigBuilder::new(discv5_listen_config).build())
+            .build();
+
+        let _node = Discovery::new(
+            tcp_addr,
+            discovery_addr,
+            secret_key,
+            Some(discv4_config),
+            Some(discv5_config),
+            None,
+            None,
+        )
+        .await
+        .expect("discovery should start with shared port + dual-stack");
+
+        // Seed the discv4-only prober with the secondary endpoint.
+        let probe_sk = SecretKey::new(&mut rand_08::thread_rng());
+        let secondary_node =
+            NodeRecord { address: secondary_ip, udp_port: port, tcp_port: port, id: node_id };
+        let probe_config = Discv4ConfigBuilder::default()
+            .external_ip_resolver(None)
+            .add_boot_node(secondary_node)
+            .build();
+        let probe_addr = SocketAddr::new(secondary_ip, 0);
+        let probe_enr = NodeRecord::from_secret_key(probe_addr, &probe_sk);
+        let (_probe, mut probe_service) =
+            Discv4::bind(probe_addr, probe_enr, probe_sk, probe_config).await.unwrap();
+        let mut updates = probe_service.update_stream();
+        probe_service.spawn();
+
+        // The bootnode only becomes `Added` once its pong arrives over the secondary socket.
+        let added = tokio::time::timeout(Duration::from_secs(5), async {
+            while let Some(update) = updates.next().await {
+                if let DiscoveryUpdate::Added(record) = update &&
+                    record.id == node_id
+                {
+                    return true
+                }
+            }
+            false
+        })
+        .await
+        .unwrap_or(false);
+        assert!(added, "node should answer discv4 over its secondary family");
+
+        for peer_ip in [primary_ip, secondary_ip] {
+            let node = NodeRecord { address: peer_ip, ..secondary_node };
+            let socket = UdpSocket::bind((peer_ip, 0)).await.unwrap();
+            let secret_key = SecretKey::new(&mut rand_08::thread_rng());
+            let record = NodeRecord::from_secret_key(socket.local_addr().unwrap(), &secret_key);
+            let ping = reth_discv4::proto::Message::Ping(reth_discv4::proto::Ping {
+                from: record.into(),
+                to: node.into(),
+                expire: u32::MAX.into(),
+                enr_sq: None,
+            });
+            let (packet, _) = ping.encode(&secret_key);
+            socket.send_to(&packet, node.udp_addr()).await.unwrap();
+            let ping = tokio::time::timeout(Duration::from_secs(5), async {
+                let mut buf = [0u8; 1280];
+                loop {
+                    let (len, _) = socket.recv_from(&mut buf).await.unwrap();
+                    if let reth_discv4::proto::Message::Ping(ping) =
+                        reth_discv4::proto::Message::decode(&buf[..len]).unwrap().msg
+                    {
+                        break ping
+                    }
+                }
+            })
+            .await
+            .expect("node should ping the peer");
+            assert_eq!(
+                ping.from.tcp_port,
+                if peer_ip == tcp_ip { tcp_addr.port() } else { 0 },
+                "primary discovery IP: {primary_ip}, TCP IP: {tcp_ip}, peer IP: {peer_ip}"
+            );
+        }
     }
 }

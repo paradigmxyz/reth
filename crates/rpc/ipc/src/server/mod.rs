@@ -393,7 +393,7 @@ where
     }
 
     fn call(&mut self, request: String) -> Self::Future {
-        trace!("{:?}", request);
+        trace!(request_bytes = request.len(), "Received IPC request");
 
         let cfg = RpcServiceCfg {
             bounded_subscriptions: self.inner.bounded_subscriptions.clone(),

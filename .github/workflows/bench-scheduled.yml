@@ -293,6 +293,8 @@ jobs:
       contents: read
       actions: read
     timeout-minutes: 120
+    outputs:
+      failed-step: ${{ steps.slack-failure.outputs.failed-step }}
     env:
       BENCH_RPC_URL: http://ethereum-mainnet-stable-reth-greedy-goose:8545
       SCHELK_MOUNT: /reth-bench
@@ -339,6 +341,17 @@ jobs:
           fetch-depth: 0
           ref: ${{ needs.resolve-refs.outputs.feature-ref }}
 
+      # Docker-build revisions may predate the chart project used by this workflow.
+      - name: Check out chart dependencies from workflow revision
+        if: env.BENCH_MODE != 'hourly'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ github.repository }}
+          ref: ${{ github.workflow_sha }}
+          path: .bench-chart-workflow
+          sparse-checkout: scripts/bench-reth-charts
+          persist-credentials: false
+
       - name: Resolve job URL
         id: job-url
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
@@ -359,9 +372,12 @@ jobs:
           toolchain: stable
       - uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
         continue-on-error: true
-      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        with:
+          version: "0.13.4"
 
       - name: Install dependencies
+        id: install-deps
         env:
           DEREK_TOKEN: ${{ secrets.DEREK_TOKEN }}
         run: |
@@ -406,6 +422,7 @@ jobs:
           fi
 
       - name: Check dependencies
+        id: check-deps
         run: |
           export PATH="$HOME/.local/bin:$HOME/.cargo/bin:$PATH"
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
@@ -738,11 +755,11 @@ jobs:
           CHART_ARGS="$CHART_ARGS --baseline-name ${BASELINE_NAME}"
           CHART_ARGS="$CHART_ARGS --feature-name ${FEATURE_NAME}"
           # shellcheck disable=SC2086
-          uv run --with matplotlib python3 .github/scripts/bench-reth-charts.py $CHART_ARGS
+          uv run --frozen --project "$GITHUB_WORKSPACE/.bench-chart-workflow/scripts/bench-reth-charts" python3 .github/scripts/bench-reth-charts.py $CHART_ARGS
 
       - name: Upload results
         if: "!cancelled()"
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: bench-scheduled-results
           path: ${{ env.BENCH_WORK_DIR }}
@@ -978,6 +995,7 @@ jobs:
             }
 
       - name: Send Slack notification (failure)
+        id: slack-failure
         if: failure() && env.BENCH_SLACK != 'never' && env.BENCH_SLACK != 'on-win'
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         env:
@@ -985,11 +1003,9 @@ jobs:
           SLACK_BENCH_CHANNEL: ${{ secrets.SLACK_BENCH_CHANNEL }}
         with:
           script: |
-            const token = process.env.SLACK_BENCH_BOT_TOKEN;
-            const channel = process.env.SLACK_BENCH_CHANNEL;
-            if (!token || !channel) return;
-
             const steps_status = [
+              ['installing dependencies', '${{ steps.install-deps.outcome }}'],
+              ['checking dependencies', '${{ steps.check-deps.outcome }}'],
               ['building binaries', '${{ steps.build.outcome }}'],
               ['syncing snapshot', '${{ steps.snapshot-check.outcome }}'],
               ['running baseline benchmark (1/2)', '${{ steps.run-baseline-1.outcome }}'],
@@ -999,6 +1015,12 @@ jobs:
             ];
             const failed = steps_status.find(([, o]) => o === 'failure');
             const failedStep = failed ? failed[0] : 'unknown step';
+            // Read by the incident-io job.
+            core.setOutput('failed-step', failedStep);
+
+            const token = process.env.SLACK_BENCH_BOT_TOKEN;
+            const channel = process.env.SLACK_BENCH_CHANNEL;
+            if (!token || !channel) return;
 
             const repo = `${context.repo.owner}/${context.repo.repo}`;
             const jobUrl = process.env.BENCH_JOB_URL || `${context.serverUrl}/${repo}/actions/runs/${context.runId}`;
@@ -1013,7 +1035,7 @@ jobs:
               },
               {
                 type: 'section',
-                text: { type: 'mrkdwn', text: `*${modeLabel} regression* failed while *${failedStep}*\ncc <@U09FARE0B9Q> <@U09FAL2UMLJ>\n<@U0ANX3AM5RR> investigate this` },
+                text: { type: 'mrkdwn', text: `*${modeLabel} regression* failed while *${failedStep}*\ncc <@U09FARE0B9Q> <@U09FAL2UMLJ>` },
               },
               {
                 type: 'actions',
@@ -1055,7 +1077,118 @@ jobs:
           sudo systemctl start irqbalance cron atd 2>/dev/null || true
 
   # ---------------------------------------------------------------------------
-  # Job 3: Save state on success
+  # Job 3: Page reth on-call through incident.io on scheduled failures and resolve
+  # the same per-mode alert on the next successful scheduled run. Skipped runs (no
+  # new commits) leave the alert as it is. Skips when the secrets are not set.
+  # ---------------------------------------------------------------------------
+  incident-io:
+    needs: [resolve-refs, bench-scheduled]
+    if: "!cancelled() && github.event_name == 'schedule' && github.repository == 'paradigmxyz/reth'"
+    name: incident-io
+    runs-on: ubuntu-latest
+    permissions: {}
+    steps:
+      - name: Send incident.io alert event
+        env:
+          INCIDENT_IO_URL: ${{ secrets.INCIDENT_IO_RETH_CI_URL }}
+          INCIDENT_IO_TOKEN: ${{ secrets.INCIDENT_IO_RETH_CI_TOKEN }}
+          REFS_RESULT: ${{ needs.resolve-refs.result }}
+          BENCH_RESULT: ${{ needs.bench-scheduled.result }}
+          BENCH_MODE: ${{ needs.resolve-refs.outputs.mode }}
+          FAILED_STEP: ${{ needs.bench-scheduled.outputs.failed-step }}
+          IS_STALE: ${{ needs.resolve-refs.outputs.is-stale }}
+          BASELINE_REF: ${{ needs.resolve-refs.outputs.baseline-ref }}
+          FEATURE_REF: ${{ needs.resolve-refs.outputs.feature-ref }}
+          SHA: ${{ github.sha }}
+          BRANCH: ${{ github.ref_name }}
+        run: |
+          if [ "$REFS_RESULT" = "failure" ] || [ "$BENCH_RESULT" = "failure" ]; then
+            STATUS="firing"
+          elif [ "$BENCH_RESULT" = "success" ]; then
+            STATUS="resolved"
+          else
+            echo "Benchmark did not run (resolve-refs: $REFS_RESULT, bench-scheduled: $BENCH_RESULT); leaving the incident.io alert unchanged"
+            exit 0
+          fi
+
+          if [ -z "$INCIDENT_IO_URL" ] || [ -z "$INCIDENT_IO_TOKEN" ]; then
+            echo "::notice::INCIDENT_IO_RETH_CI_URL or INCIDENT_IO_RETH_CI_TOKEN is not set; skipping incident.io alert"
+            exit 0
+          fi
+
+          MODE="${BENCH_MODE:-unknown}"
+          case "$MODE" in
+            release) MODE_LABEL="Release" ;;
+            hourly) MODE_LABEL="Hourly" ;;
+            *) MODE_LABEL="Nightly" ;;
+          esac
+          DEDUP_KEY="reth:bench-$MODE"
+          RUN_URL="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+
+          if [ "$STATUS" = "resolved" ]; then
+            TITLE="Reth $MODE_LABEL bench recovered"
+            DETAIL="The scheduled $MODE bench (bench-scheduled.yml) succeeded."
+          elif [ "$REFS_RESULT" = "failure" ]; then
+            if [ "$IS_STALE" = "true" ]; then
+              TITLE="Reth $MODE_LABEL bench failed: nightly build is stale"
+              DETAIL="The scheduled $MODE bench (bench-scheduled.yml) aborted because the nightly Docker build is older than 24 hours."
+            else
+              TITLE="Reth $MODE_LABEL bench failed while resolving refs"
+              DETAIL="The scheduled $MODE bench (bench-scheduled.yml) failed while resolving benchmark refs."
+            fi
+          else
+            STEP="${FAILED_STEP:-unknown step}"
+            TITLE="Reth $MODE_LABEL bench failed while $STEP"
+            DETAIL="The scheduled $MODE bench (bench-scheduled.yml) failed while $STEP."
+          fi
+          DESCRIPTION=$(printf '%s\nBaseline: %s\nFeature: %s\nCommit: %s\nBranch: %s\nRun: %s' \
+            "$DETAIL" "${BASELINE_REF:-unknown}" "${FEATURE_REF:-unknown}" "$SHA" "$BRANCH" "$RUN_URL")
+
+          PAYLOAD=$(jq -n \
+            --arg title "$TITLE" \
+            --arg description "$DESCRIPTION" \
+            --arg status "$STATUS" \
+            --arg dedup "$DEDUP_KEY" \
+            --arg run_url "$RUN_URL" \
+            --arg repository "$GITHUB_REPOSITORY" \
+            --arg mode "$MODE" \
+            --arg failed_step "$FAILED_STEP" \
+            --arg baseline_ref "$BASELINE_REF" \
+            --arg feature_ref "$FEATURE_REF" \
+            --arg sha "$SHA" \
+            --arg branch "$BRANCH" \
+            --arg run_id "$GITHUB_RUN_ID" \
+            '{
+              title: $title,
+              description: $description,
+              status: $status,
+              deduplication_key: $dedup,
+              source_url: $run_url,
+              metadata: {
+                team: "reth",
+                repository: $repository,
+                workflow: "bench-scheduled.yml",
+                mode: $mode,
+                failed_step: $failed_step,
+                baseline_ref: $baseline_ref,
+                feature_ref: $feature_ref,
+                sha: $sha,
+                branch: $branch,
+                run_id: $run_id,
+                run_url: $run_url
+              }
+            }')
+
+          curl -fsS --retry 3 --retry-all-errors --max-time 30 \
+            -X POST "$INCIDENT_IO_URL" \
+            -H "Authorization: Bearer $INCIDENT_IO_TOKEN" \
+            -H "Content-Type: application/json" \
+            --data "$PAYLOAD"
+          echo
+          echo "Sent incident.io $STATUS event for $DEDUP_KEY"
+
+  # ---------------------------------------------------------------------------
+  # Job 4: Save state on success
   # ---------------------------------------------------------------------------
   save-state:
     needs: [resolve-refs, bench-scheduled]
@@ -1073,7 +1206,7 @@ jobs:
           printf '%s\n' "$FEATURE_REF" > "$RUNNER_TEMP/bench-state/feature-ref"
 
       - name: Save benchmark state
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: bench-state-${{ needs.resolve-refs.outputs.mode }}
           path: ${{ runner.temp }}/bench-state/feature-ref

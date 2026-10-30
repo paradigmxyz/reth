@@ -112,6 +112,9 @@ pub trait PayloadJobGenerator {
     ///
     /// This is called when the CL requests a new payload job via a fork choice update.
     ///
+    /// Return [`PayloadBuilderError::InvalidAttributes`] to reject the payload attributes; any
+    /// other error is reported to the CL as an internal error.
+    ///
     /// # Note
     ///
     /// This is expected to initially build a new (empty) payload without transactions, so it can be

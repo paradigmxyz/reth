@@ -2,16 +2,14 @@
 set -eo pipefail
 
 fixture_variant="${1:-amsterdam}"
+# EELS simulator image tag, tests@v21.0.1 covers Osaka, BPO and Amsterdam
+eels_tag="v21.0.1"
 
 case "${fixture_variant}" in
     amsterdam)
-        eels_fixtures="https://github.com/ethereum/execution-specs/releases/download/tests-glamsterdam-devnet@v7.2.1/fixtures_glamsterdam-devnet.tar.gz"
-        eels_branch="devnets/glamsterdam/7"
         eels_fork="Amsterdam"
         ;;
     osaka)
-        eels_fixtures="https://github.com/ethereum/execution-spec-tests/releases/download/v5.3.0/fixtures_develop.tar.gz"
-        eels_branch="mainnet"
         eels_fork="Osaka"
         ;;
     *)
@@ -31,15 +29,13 @@ go build .
 # Run each hive command in the background for each simulator and wait
 echo "Building images"
 ./hive -client reth --sim "ethereum/eels/consume-engine" \
-    --sim.buildarg fixtures="${eels_fixtures}" \
-    --sim.buildarg branch="${eels_branch}" \
+    --sim.buildarg tag="${eels_tag}" \
     --sim.timelimit 1s || true &
 ./hive -client reth --sim "ethereum/eels/consume-rlp" \
-    --sim.buildarg fixtures="${eels_fixtures}" \
-    --sim.buildarg branch="${eels_branch}" \
+    --sim.buildarg tag="${eels_tag}" \
     --sim.timelimit 1s || true &
 ./hive -client reth --sim "ethereum/eels/execute-blobs" \
-    --sim.buildarg branch="${eels_branch}" \
+    --sim.buildarg tag="${eels_tag}" \
     --sim.buildarg fork="${eels_fork}" \
     --sim.timelimit 1s || true &
 ./hive -client reth --sim "ethereum/engine" -sim.timelimit 1s || true &

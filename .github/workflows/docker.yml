@@ -110,6 +110,8 @@ jobs:
               echo "ethereum_set<<EOF"
               echo "ethereum.tags=${REGISTRY}/reth:nightly"
               echo "ethereum.args.RETH_ENGINE_TXPOOL_PREWARMING=true"
+              echo "*.args.RETH_ENGINE_PREWARM_REUSE=true"
+              echo "*.args.RETH_DB_SYNC_MODE=safe-no-sync"
               echo "EOF"
             } >> "$GITHUB_OUTPUT"
 
@@ -171,8 +173,76 @@ jobs:
             *Run:* <https://github.com/paradigmxyz/reth/actions/runs/${{ github.run_id }}|View logs>
 
             *Action required:* Re-run the workflow or investigate the build failure.
-
-            <@U0ANX3AM5RR> investigate and re-run if flaky
           SLACK_FOOTER: "paradigmxyz/reth · docker.yml"
           MSG_MINIMAL: true
           SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK_URL }}
+
+  # Pages reth on-call through incident.io on failure, and resolves the same alert on the
+  # next successful scheduled build. Skips when the incident.io secrets are not set.
+  incident-io:
+    name: Update incident.io alert
+    runs-on: ubuntu-latest
+    needs: build
+    if: "!cancelled() && github.event_name == 'schedule' && github.repository == 'paradigmxyz/reth' && (needs.build.result == 'success' || needs.build.result == 'failure')"
+    permissions: {}
+    steps:
+      - name: Send incident.io alert event
+        env:
+          INCIDENT_IO_URL: ${{ secrets.INCIDENT_IO_RETH_CI_URL }}
+          INCIDENT_IO_TOKEN: ${{ secrets.INCIDENT_IO_RETH_CI_TOKEN }}
+          BUILD_RESULT: ${{ needs.build.result }}
+          SHA: ${{ github.sha }}
+          BRANCH: ${{ github.ref_name }}
+        run: |
+          if [ -z "$INCIDENT_IO_URL" ] || [ -z "$INCIDENT_IO_TOKEN" ]; then
+            echo "::notice::INCIDENT_IO_RETH_CI_URL or INCIDENT_IO_RETH_CI_TOKEN is not set; skipping incident.io alert"
+            exit 0
+          fi
+
+          RUN_URL="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+          if [ "$BUILD_RESULT" = "success" ]; then
+            STATUS="resolved"
+            TITLE="Reth nightly Docker build recovered"
+            OUTCOME="succeeded"
+          else
+            STATUS="firing"
+            TITLE="Reth nightly Docker build failed"
+            OUTCOME="failed"
+          fi
+          DESCRIPTION=$(printf 'The scheduled nightly Docker build (docker.yml) %s.\nCommit: %s\nBranch: %s\nRun: %s\nRe-run the workflow if the failure is flaky; otherwise investigate the build.' \
+            "$OUTCOME" "$SHA" "$BRANCH" "$RUN_URL")
+
+          PAYLOAD=$(jq -n \
+            --arg title "$TITLE" \
+            --arg description "$DESCRIPTION" \
+            --arg status "$STATUS" \
+            --arg run_url "$RUN_URL" \
+            --arg repository "$GITHUB_REPOSITORY" \
+            --arg sha "$SHA" \
+            --arg branch "$BRANCH" \
+            --arg run_id "$GITHUB_RUN_ID" \
+            '{
+              title: $title,
+              description: $description,
+              status: $status,
+              deduplication_key: "reth:docker-nightly",
+              source_url: $run_url,
+              metadata: {
+                team: "reth",
+                repository: $repository,
+                workflow: "docker.yml",
+                mode: "nightly",
+                sha: $sha,
+                branch: $branch,
+                run_id: $run_id,
+                run_url: $run_url
+              }
+            }')
+
+          curl -fsS --retry 3 --retry-all-errors --max-time 30 \
+            -X POST "$INCIDENT_IO_URL" \
+            -H "Authorization: Bearer $INCIDENT_IO_TOKEN" \
+            -H "Content-Type: application/json" \
+            --data "$PAYLOAD"
+          echo
+          echo "Sent incident.io $STATUS event for reth:docker-nightly"

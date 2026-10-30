@@ -5,14 +5,10 @@ use std::{
     sync::{Arc, Mutex},
 };
 
-use reth_db::{
-    test_utils::{create_test_rw_db, TempDatabase},
-    DatabaseEnv,
-};
-use reth_node_api::NodeTypesWithDBAdapter;
+use reth_db::test_utils::create_test_rw_db;
 use reth_node_builder::{
     sync::{BackfillContext, BackfillSyncBuilder, PipelineBackfill},
-    EngineNodeLauncher, FullNodeComponents, NodeBuilder, NodeConfig,
+    FullNodeComponents, NodeBuilder, NodeConfig,
 };
 use reth_node_core::{
     args::DatadirArgs,
@@ -20,11 +16,11 @@ use reth_node_core::{
 };
 use reth_node_ethereum::node::{EthereumAddOns, EthereumNode};
 use reth_provider::{
-    providers::{BlockchainProvider, ProviderNodeTypes},
-    ProviderFactory, StageCheckpointReader,
+    providers::ProviderNodeTypes, DBProvider, DatabaseProviderFactory, MetadataProvider,
+    MetadataWriter, PipelineUnwind, ProviderFactory, StageCheckpointReader, StageCheckpointWriter,
 };
 use reth_rpc_builder::Identity;
-use reth_stages_types::StageId;
+use reth_stages_types::{StageCheckpoint, StageId};
 use reth_tasks::Runtime;
 use tempfile::{tempdir, TempDir};
 
@@ -35,6 +31,7 @@ struct RecordingBackfill {
     calls: Arc<Mutex<Vec<&'static str>>>,
     // Whether `recover` refuses the database.
     fail_recovery: bool,
+    pending_unwind: bool,
 }
 
 impl<N: ProviderNodeTypes, C> BackfillSyncBuilder<N, C> for RecordingBackfill {
@@ -42,6 +39,13 @@ impl<N: ProviderNodeTypes, C> BackfillSyncBuilder<N, C> for RecordingBackfill {
 
     fn build(self, ctx: BackfillContext<N, C>) -> eyre::Result<Self::Backfill> {
         self.calls.lock().unwrap().push("build");
+        assert_eq!(ctx.provider_factory().provider()?.pipeline_unwind()?, None);
+        if self.pending_unwind {
+            assert_eq!(
+                ctx.provider_factory().get_stage_checkpoint(StageId::Era)?,
+                Some(StageCheckpoint::new(0))
+            );
+        }
         PipelineBackfill.build(ctx)
     }
 
@@ -51,6 +55,16 @@ impl<N: ProviderNodeTypes, C> BackfillSyncBuilder<N, C> for RecordingBackfill {
         self.calls.lock().unwrap().push("recover");
         if self.fail_recovery {
             eyre::bail!("recovery refused the database")
+        }
+        if self.pending_unwind {
+            let provider = provider_factory.database_provider_rw()?;
+            provider.write_pipeline_unwind(Some(&PipelineUnwind {
+                target: 0,
+                stages: vec!["Era".into(), "Execution".into()],
+                bad_block: None,
+            }))?;
+            provider.save_stage_checkpoint(StageId::Era, StageCheckpoint::new(10))?;
+            provider.commit()?;
         }
         Ok(())
     }
@@ -100,72 +114,6 @@ fn test_basic_setup() {
         .check_launch();
 }
 
-#[tokio::test]
-async fn test_eth_launcher() {
-    let runtime = Runtime::test();
-    let config = NodeConfig::test();
-    let db = create_test_rw_db();
-    let _builder =
-        NodeBuilder::new(config)
-            .with_database(db)
-            .with_launch_context(runtime.clone())
-            .with_types_and_provider::<EthereumNode, BlockchainProvider<
-                NodeTypesWithDBAdapter<EthereumNode, Arc<TempDatabase<DatabaseEnv>>>,
-            >>()
-            .with_components(EthereumNode::components())
-            .with_add_ons(EthereumAddOns::default())
-            .apply(|builder| {
-                let _ = builder.db();
-                builder
-            })
-            .launch_with_fn(|builder| {
-                let launcher = EngineNodeLauncher::new(
-                    runtime.clone(),
-                    builder.config().datadir(),
-                    Default::default(),
-                );
-                builder.launch_with(launcher)
-            });
-}
-
-#[test]
-fn test_eth_launcher_with_tokio_runtime() {
-    // #[tokio::test] can not be used here because we need to create a custom tokio runtime
-    // and it would be dropped before the test is finished, resulting in a panic.
-    let main_rt = tokio::runtime::Runtime::new().expect("Failed to create tokio runtime");
-
-    let custom_rt = tokio::runtime::Runtime::new().expect("Failed to create tokio runtime");
-
-    main_rt.block_on(async {
-        let runtime = Runtime::test();
-        let config = NodeConfig::test();
-        let db = create_test_rw_db();
-        let _builder =
-            NodeBuilder::new(config)
-                .with_database(db)
-                .with_launch_context(runtime.clone())
-                .with_types_and_provider::<EthereumNode, BlockchainProvider<
-                    NodeTypesWithDBAdapter<EthereumNode, Arc<TempDatabase<DatabaseEnv>>>,
-                >>()
-                .with_components(EthereumNode::components())
-                .with_add_ons(
-                    EthereumAddOns::default().with_tokio_runtime(Some(custom_rt.handle().clone())),
-                )
-                .apply(|builder| {
-                    let _ = builder.db();
-                    builder
-                })
-                .launch_with_fn(|builder| {
-                    let launcher = EngineNodeLauncher::new(
-                        runtime.clone(),
-                        builder.config().datadir(),
-                        Default::default(),
-                    );
-                    builder.launch_with(launcher)
-                });
-    });
-}
-
 #[test]
 fn test_node_setup() {
     let config = NodeConfig::test();
@@ -210,4 +158,19 @@ async fn failed_backfill_recovery_stops_the_launch() {
 
     assert!(launched.is_err());
     assert_eq!(*calls.lock().unwrap(), ["recover"]);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn pending_genesis_unwind_recovers_before_backfill() -> eyre::Result<()> {
+    let (config, _datadir) = launch_config();
+    let backfill = RecordingBackfill { pending_unwind: true, ..Default::default() };
+    let _node = NodeBuilder::new(config)
+        .with_database(create_test_rw_db())
+        .with_launch_context(Runtime::test())
+        .with_types::<EthereumNode>()
+        .with_components(EthereumNode::components())
+        .with_add_ons(EthereumAddOns::default())
+        .launch_with_debug_capabilities_and_backfill(backfill)
+        .await?;
+    Ok(())
 }

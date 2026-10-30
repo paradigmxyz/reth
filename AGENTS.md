@@ -64,6 +64,8 @@ for performance claims; omit templates and validation boilerplate.
 
 ## Code Style
 
+- Before writing, changing, or reviewing Rust, load the `reth-rust-style` skill
+  (`.agents/skills/reth-rust-style/SKILL.md`) for the review feedback this file doesn't cover.
 - Follow existing patterns and keep changes focused: no drive-by fixes, renames, formatting-only
   changes, or moved tests. Put unrelated work in its own PR.
 - Before adding a helper, type, or constant, search reth and alloy for an existing one.

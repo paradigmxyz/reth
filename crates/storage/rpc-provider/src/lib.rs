@@ -1323,8 +1323,8 @@ where
 
     fn multiproof_v2(
         &self,
-        _input: TrieInput,
         _targets: reth_trie::MultiProofTargetsV2,
+        _requires_masks: bool,
     ) -> Result<reth_trie::DecodedMultiProofV2, ProviderError> {
         Err(ProviderError::UnsupportedProvider)
     }
@@ -1348,7 +1348,7 @@ where
 {
     fn hashed_post_state(
         &self,
-        bundle_state: &revm::database::BundleState,
+        bundle_state: &reth_trie::bundle_state::BundleState,
     ) -> ProviderResult<HashedPostState> {
         if bundle_state
             .state()

@@ -161,13 +161,14 @@ impl<R: Resolver> DnsDiscoveryService<R> {
     ///
     /// Note: requires a running runtime
     pub fn spawn(mut self) -> JoinHandle<()> {
-        tokio::task::spawn(async move {
+        let task = Box::pin(async move {
             self.bootstrap();
 
             while let Some(event) = self.next().await {
                 trace!(target: "disc::dns", ?event, "processed");
             }
-        })
+        });
+        tokio::task::spawn(task as Pin<Box<dyn Future<Output = ()> + Send>>)
     }
 
     /// Starts discovery with all configured bootstrap links
