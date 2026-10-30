@@ -133,7 +133,7 @@ pub struct TraceArgs {
     /// - HTTP: `http://localhost:4318/v1/traces`
     /// - gRPC: `http://localhost:4317`
     ///
-    /// A file:///absolute/path endpoint appends length-delimited OTLP protobuf batches without
+    /// A `file:///absolute/path` endpoint appends length-delimited OTLP protobuf batches without
     /// a collector. Use a separate file per process. The network protocol is ignored for files.
     ///
     /// Example: --tracing-otlp=http://collector:4318/v1/traces
