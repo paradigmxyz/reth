@@ -118,6 +118,26 @@ else()
   project(libmdbx C)
 endif()
 
+# Memcheck-options should be defined before including CTest.
+# Otherwise CTest just ignore it.
+if(NOT WIN32)
+  if(NOT MEMORYCHECK_COMMAND)
+    find_program(MEMORYCHECK_COMMAND valgrind)
+  endif()
+  if(MEMORYCHECK_COMMAND)
+    set(MEMORYCHECK_TYPE Valgrind)
+    set(MEMORYCHECK_SUPPRESSIONS_FILE
+        "${CMAKE_CURRENT_SOURCE_DIR}/valgrind_suppress.txt"
+        CACHE FILEPATH "Suppressions file for Valgrind" FORCE)
+    set(MEMORYCHECK_COMMAND_OPTIONS
+        "--trace-children=yes --leak-check=full --track-origins=yes --expensive-definedness-checks=yes --error-exitcode=42 --error-markers=@VALGRIND --errors-for-leak-kinds=definite --fair-sched=yes --suppressions=${MEMORYCHECK_SUPPRESSIONS_FILE}"
+        CACHE STRING "Valgrind options" FORCE)
+    set(MEMORYCHECK_COMMAND_OPTIONS
+        "${MEMORYCHECK_COMMAND_OPTIONS}"
+        CACHE STRING "Valgrind options" FORCE)
+  endif()
+endif()
+
 if(NOT ((DEFINED BUILD_TESTING AND NOT BUILD_TESTING) OR (DEFINED MDBX_ENABLE_TESTS AND NOT MDBX_ENABLE_TESTS)))
   include(CTest)
   option(MDBX_ENABLE_TESTS "Build MDBX tests" ${BUILD_TESTING})
@@ -126,8 +146,7 @@ endif()
 # Try to find a C++ compiler unless sure that this is unnecessary.
 if(NOT CMAKE_CXX_COMPILER_LOADED)
   include(CheckLanguage)
-  if(NOT (DEFINED MDBX_BUILD_CXX AND NOT MDBX_BUILD_CXX)
-     OR NOT (DEFINED MDBX_ENABLE_TESTS AND NOT MDBX_ENABLE_TESTS))
+  if(NOT (DEFINED MDBX_BUILD_CXX AND NOT MDBX_BUILD_CXX) OR NOT (DEFINED MDBX_ENABLE_TESTS AND NOT MDBX_ENABLE_TESTS))
     check_language(CXX)
     if(CMAKE_CXX_COMPILER)
       enable_language(CXX)
@@ -409,20 +428,25 @@ if(WIN32 AND EXISTS "${MDBX_SOURCE_DIR}/ntdll.def")
     else()
       message(WARNING "MSVC's lib.exe not found")
     endif()
-  elseif(MINGW OR MINGW64)
-    if(NOT MINGW_DLLTOOL_EXE)
+  else()
+    if(NOT DLLTOOL_EXE AND (MINGW OR MINGW64))
       # Find dlltool.exe
       get_filename_component(CC_DIR ${CMAKE_C_COMPILER} DIRECTORY)
-      find_program(MINGW_DLLTOOL_EXE "dlltool.exe" HINTS ${CC_DIR})
+      find_program(DLLTOOL_EXE "dlltool.exe" HINTS ${CC_DIR})
     endif()
-    if(MINGW_DLLTOOL_EXE)
-      message(STATUS "Found MINGW's dlltool: ${MINGW_DLLTOOL_EXE}")
+    if(NOT DLLTOOL_EXE AND CMAKE_COMPILER_IS_CLANG)
+      # Find dlltool.exe
+      get_filename_component(CC_DIR ${CMAKE_C_COMPILER} DIRECTORY)
+      find_program(DLLTOOL_EXE "llvm-dlltool.exe" HINTS ${CC_DIR})
+    endif()
+    if(DLLTOOL_EXE)
+      message(STATUS "Found MINGW or LLVM dlltool: ${DLLTOOL_EXE}")
       set(MDBX_NTDLL_EXTRA_IMPLIB "${CMAKE_CURRENT_BINARY_DIR}/mdbx_ntdll_extra.a")
       add_custom_command(
         OUTPUT "${MDBX_NTDLL_EXTRA_IMPLIB}"
         COMMENT "Create extra-import-library for ntdll.dll"
         MAIN_DEPENDENCY "${MDBX_SOURCE_DIR}/ntdll.def"
-        COMMAND ${MINGW_DLLTOOL_EXE} -d "${MDBX_SOURCE_DIR}/ntdll.def" -l "${MDBX_NTDLL_EXTRA_IMPLIB}")
+        COMMAND ${DLLTOOL_EXE} -d "${MDBX_SOURCE_DIR}/ntdll.def" -l "${MDBX_NTDLL_EXTRA_IMPLIB}")
     else()
       message(WARNING "MINGW's dlltool.exe not found")
     endif()
@@ -438,6 +462,72 @@ if(WIN32 AND EXISTS "${MDBX_SOURCE_DIR}/ntdll.def")
     add_dependencies(ntdll_extra ntdll_extra_target)
     # (3) specify where the library is (and where to find the headers)
     set_target_properties(ntdll_extra PROPERTIES IMPORTED_LOCATION "${MDBX_NTDLL_EXTRA_IMPLIB}")
+  endif()
+endif()
+
+# Checking needs of linking with `libatomic` for C11 atomics,
+# with ability to override/predefine by CMake command line option.
+if(NOT DEFINED MDBX_NEED_LIBATOMIC)
+  if(MSVC)
+    set(MDBX_NEED_LIBATOMIC OFF)
+  else()
+    include(CheckCSourceCompiles)
+    include(CMakePushCheckState)
+    function(check_working_c11_atomics varname)
+      cmake_push_check_state()
+      set(CMAKE_REQUIRED_FLAGS "-std=c11")
+      check_c_source_compiles("
+        #include <stdint.h>
+        #include <stdatomic.h>
+        volatile _Atomic uint32_t a32;
+        volatile _Atomic uint64_t a64;
+        int main() {
+        atomic_store_explicit(&a32, __LINE__, memory_order_relaxed);
+        atomic_thread_fence(memory_order_release);
+        atomic_store_explicit(&a64, __LINE__, memory_order_relaxed);
+        atomic_thread_fence(memory_order_acquire);
+        atomic_store_explicit(&a32, __LINE__, memory_order_release);
+        atomic_thread_fence(memory_order_seq_cst);
+        atomic_store_explicit(&a64, __LINE__, memory_order_release);
+        atomic_thread_fence(memory_order_acq_rel);
+        atomic_store_explicit(&a32, __LINE__, memory_order_seq_cst);
+        atomic_thread_fence(memory_order_relaxed);
+        atomic_store_explicit(&a64, __LINE__, memory_order_seq_cst);
+
+        uint64_t load =
+        atomic_load_explicit(&a32, memory_order_relaxed) + atomic_load_explicit(&a64, memory_order_relaxed) +
+        atomic_load_explicit(&a32, memory_order_acquire) + atomic_load_explicit(&a64, memory_order_acquire) +
+        atomic_load_explicit(&a32, memory_order_consume) + atomic_load_explicit(&a64, memory_order_consume) +
+        atomic_load_explicit(&a32, memory_order_seq_cst) + atomic_load_explicit(&a64, memory_order_seq_cst);
+
+        uint32_t u32 = __LINE__;
+        uint64_t u64 = __LINE__;
+        _Bool compare_exchange =
+        atomic_compare_exchange_strong(&a32, &u32, __LINE__) ^ atomic_compare_exchange_strong(&a64, &u64, __LINE__);
+
+        uint64_t fetch_add = atomic_fetch_add(&a32, __LINE__) + atomic_fetch_add(&a64, __LINE__);
+        return (load + compare_exchange + fetch_add) % 37;
+        }
+        " ${varname})
+      cmake_pop_check_state()
+    endfunction(check_working_c11_atomics)
+
+    check_working_c11_atomics(c11_atomics_without_libatomic)
+    if(c11_atomics_without_libatomic)
+      set(MDBX_NEED_LIBATOMIC OFF)
+      message(STATUS "No linking with additional library needed for C11 atomics")
+    else()
+      cmake_push_check_state()
+      list(APPEND CMAKE_REQUIRED_LIBRARIES "atomic")
+      check_working_c11_atomics(c11_atomics_with_libatomic)
+      cmake_pop_check_state()
+      if(c11_atomics_with_libatomic)
+        set(MDBX_NEED_LIBATOMIC ON)
+        message(STATUS "Linking with libatomics is required for C11 atomics")
+      else()
+        message(STATUS "C11 atomics is unusable")
+      endif()
+    endif()
   endif()
 endif()
 
@@ -529,8 +619,7 @@ else()
 endif()
 
 set(MDBX_CXX_AVAILABLE FALSE)
-if(CMAKE_CXX_COMPILER_LOADED
-   AND NOT MDBX_CXX_STANDARD LESS 11)
+if(CMAKE_CXX_COMPILER_LOADED AND NOT MDBX_CXX_STANDARD LESS 11)
   if(NOT MDBX_WITHOUT_MSVC_CRT
      AND NOT (CMAKE_COMPILER_IS_GNUCXX AND CMAKE_CXX_COMPILER_VERSION VERSION_LESS 4.8)
      AND NOT (CMAKE_COMPILER_IS_CLANG AND CMAKE_CXX_COMPILER_VERSION VERSION_LESS 3.9)
@@ -609,7 +698,7 @@ macro(target_setup_options TARGET)
       set_target_properties(${TARGET} PROPERTIES CXX_STANDARD ${MDBX_CXX_STANDARD} CXX_STANDARD_REQUIRED ON)
     endif()
     if(MSVC AND NOT MSVC_VERSION LESS 1910)
-      target_compile_options(${TARGET} INTERFACE "/Zc:__cplusplus")
+      target_compile_options(${TARGET} INTERFACE "$<$<COMPILE_LANGUAGE:CXX>:/Zc:__cplusplus>")
     endif()
   endif()
   if(CC_HAS_FASTMATH AND NOT (CMAKE_COMPILER_IS_CLANG AND CMAKE_CXX_COMPILER_VERSION VERSION_LESS 10))
@@ -621,6 +710,18 @@ macro(target_setup_options TARGET)
   if(BUILD_FOR_NATIVE_CPU AND CC_HAS_ARCH_NATIVE)
     target_compile_options(${TARGET} PRIVATE "-march=native")
   endif()
+  if(MSVC AND NOT CMAKE_COMPILER_IS_CLANG)
+    if(MSVC_C11_MAD_ATOMICS)
+      target_compile_options(${TARGET} PRIVATE "$<$<COMPILE_LANGUAGE:CXX,C>:/experimental:c11atomics>")
+    endif()
+    if(MDBX_WITHOUT_MSVC_CRT)
+      target_compile_options(${TARGET} PRIVATE "$<$<COMPILE_LANGUAGE:CXX,C>:/fp:fast;/fp:except-;/GS-;/Gs->")
+    endif()
+    if(CC_HAS_FORCE_INTERLOCKED_CALL)
+      target_compile_options(${TARGET}
+                             PRIVATE "$<$<COMPILE_LANGUAGE:CXX,C>:$<$<CONFIG:Release>:/forceInterlockedFunctions->>")
+    endif()
+  endif()
 endmacro()
 
 macro(libmdbx_setup_libs TARGET MODE)
@@ -628,6 +729,9 @@ macro(libmdbx_setup_libs TARGET MODE)
     target_link_libraries(${TARGET} ${MODE} ${CMAKE_THREAD_LIBS_INIT})
   else()
     target_link_libraries(${TARGET} ${MODE} Threads::Threads)
+  endif()
+  if(MDBX_NEED_LIBATOMIC)
+    target_link_libraries(${TARGET} PUBLIC "atomic")
   endif()
   if(WIN32)
     target_link_libraries(
@@ -674,6 +778,9 @@ else()
   set(MDBX_LIBRARY mdbx-static)
 endif()
 target_include_directories(mdbx-static INTERFACE "${CMAKE_CURRENT_SOURCE_DIR}")
+if(MDBX_CLANG_BUILTINS_LIB)
+  target_link_libraries(mdbx-static INTERFACE "${MDBX_CLANG_BUILTINS_LIB}")
+endif()
 
 # ######################################################################################################################
 
@@ -689,7 +796,7 @@ if(MDBX_BUILD_SHARED_LIBRARY)
   libmdbx_setup_libs(mdbx PRIVATE)
   if(MSVC)
     if(MDBX_NTDLL_EXTRA_IMPLIB AND MDBX_WITHOUT_MSVC_CRT)
-      set_property(TARGET mdbx PROPERTY LINKER_FLAGS "/NODEFAULTLIB")
+      set_property(TARGET mdbx PROPERTY LINK_OPTIONS "$<IF:$<CONFIG:Debug>,,/NODEFAULTLIB>")
     else()
       set_property(TARGET mdbx PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>DLL")
     endif()
@@ -699,6 +806,9 @@ if(MDBX_BUILD_SHARED_LIBRARY)
   endif()
   list(APPEND MDBX_BUILD_FLAGS ${CMAKE_SHARED_LINKER_FLAGS})
   target_include_directories(mdbx INTERFACE "${CMAKE_CURRENT_SOURCE_DIR}")
+  if(MDBX_CLANG_BUILTINS_LIB)
+    target_link_libraries(mdbx PRIVATE "${MDBX_CLANG_BUILTINS_LIB}")
+  endif()
 endif()
 
 if(MDBX_BUILD_SHARED_LIBRARY AND MDBX_LINK_TOOLS_NONSTATIC)
@@ -862,7 +972,7 @@ if(NOT DEFINED MDBX_BUILD_TIMESTAMP)
 endif()
 set(MDBX_BUILD_FLAGS ${CMAKE_C_FLAGS})
 if(MDBX_BUILD_CXX)
-  set(MDBX_BUILD_FLAGS ${CMAKE_CXX_FLAGS})
+  list(APPEND MDBX_BUILD_FLAGS ${CMAKE_CXX_FLAGS})
 endif()
 
 # append cmake's build-type flags and defines
@@ -886,12 +996,17 @@ if(defs_list)
   list(APPEND MDBX_BUILD_FLAGS ${defs_list})
 endif()
 
-# get target compile options
+# get target compile options & flags
 get_target_property(options_list ${target4fetch} COMPILE_OPTIONS)
 if(options_list)
   list(APPEND MDBX_BUILD_FLAGS ${options_list})
 endif()
+get_target_property(options_list ${target4fetch} COMPILE_FLAGS)
+if(options_list)
+  list(APPEND MDBX_BUILD_FLAGS ${options_list})
+endif()
 
+separate_arguments(MDBX_BUILD_FLAGS)
 list(REMOVE_DUPLICATES MDBX_BUILD_FLAGS)
 string(REPLACE ";" " " MDBX_BUILD_FLAGS "${MDBX_BUILD_FLAGS}")
 if(CMAKE_CONFIGURATION_TYPES)
@@ -980,8 +1095,8 @@ add_definitions(-DMDBX_CONFIG_H="${CMAKE_CURRENT_BINARY_DIR}/config-cmake.h")
 
 # ######################################################################################################################
 
-if(MDBX_ENABLE_TESTS)
   add_subdirectory(ut_and_examples)
+if(MDBX_ENABLE_TESTS)
 endif()
 
 # ######################################################################################################################

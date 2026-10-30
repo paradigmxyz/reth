@@ -1,13 +1,12 @@
 /// \copyright SPDX-License-Identifier: Apache-2.0
-/// \note Please refer to the COPYRIGHT file for explanations license change,
-/// credits and acknowledgments.
+/// \note Please refer to the COPYRIGHT file for explanation of license change, credits and acknowledgments.
 /// \author Леонид Юрьев aka Leonid Yuriev <leo@yuriev.ru> \date 2015-2026
 ///
 /// mdbx_load.c - memory-mapped database load tool
 ///
 
-/* clang-format off */
 #ifdef _MSC_VER
+/* clang-format off */
 #if _MSC_VER > 1800
 #pragma warning(disable : 4464) /* relative include path contains '..' */
 #endif
@@ -18,7 +17,7 @@
 /// \copyright SPDX-License-Identifier: Apache-2.0
 /// \author Леонид Юрьев aka Leonid Yuriev <leo@yuriev.ru> \date 2015-2026
 
-#define MDBX_BUILD_SOURCERY a575a490fc080ca11e89ff6db9f0bd38aa830959905998cac0e45274b9e6bb0e_v0_13_12_0_gf619d43d
+#define MDBX_BUILD_SOURCERY 66b709f51a75e4768d4900bbe763b83ba1e0cc0c2de0a37691c626d926a05779_v0_13_12_164_g7aca4951
 
 #define LIBMDBX_INTERNALS
 #define MDBX_DEPRECATED
@@ -574,6 +573,10 @@ __extern_C key_t ftok(const char *, int);
 /*----------------------------------------------------------------------------*/
 /* Compiler's includes for builtins/intrinsics */
 
+#ifdef __ARM_NEON
+#include <arm_neon.h>
+#endif
+
 #if defined(_MSC_VER) || defined(__INTEL_COMPILER)
 #include <intrin.h>
 #elif __GNUC_PREREQ(4, 4) || defined(__clang__)
@@ -581,13 +584,12 @@ __extern_C key_t ftok(const char *, int);
 #include <e2kintrin.h>
 #include <x86intrin.h>
 #endif /* __e2k__ */
+
 #if defined(__ia32__)
 #include <cpuid.h>
 #include <x86intrin.h>
 #endif /* __ia32__ */
-#ifdef __ARM_NEON
-#include <arm_neon.h>
-#endif
+
 #elif defined(__SUNPRO_C) || defined(__sun) || defined(sun)
 #include <mbarrier.h>
 #elif (defined(_HPUX_SOURCE) || defined(__hpux) || defined(__HP_aCC)) && (defined(HP_IA64) || defined(__ia64))
@@ -897,6 +899,17 @@ __extern_C key_t ftok(const char *, int);
 #define ASAN_UNPOISON_MEMORY_REGION(addr, size) ((void)(addr), (void)(size))
 #endif /* __SANITIZE_ADDRESS__ */
 
+#ifndef RUNNING_ON_ASAN
+#define RUNNING_ON_ASAN (0)
+#endif
+
+#if defined(__SANITIZE_ADDRESS__) && !defined(MDBX_ATTRIBUTE_NO_SANITIZE_ADDRESS)
+/* Avoid ASAN-trap due the target TLS-variable feed by Darwin's tlv_free() */
+#define MDBX_ATTRIBUTE_NO_SANITIZE_ADDRESS(ELSEWISE) __attribute__((__no_sanitize_address__, __noinline__))
+#else
+#define MDBX_ATTRIBUTE_NO_SANITIZE_ADDRESS(ELSEWISE) ELSEWISE
+#endif
+
 /*----------------------------------------------------------------------------*/
 
 #ifndef ARRAY_LENGTH
@@ -1021,6 +1034,11 @@ template <typename T, size_t N> char (&__ArraySizeHelper(T (&array)[N]))[N];
 
 #include "mdbx.h"
 
+#if MDBX_WITHOUT_MSVC_CRT && !defined(_DEBUG) && defined(_MSC_VER) && !defined(__clang__)
+#pragma check_stack(off)
+#pragma runtime_checks("scu", off)
+#endif /* MDBX_WITHOUT_MSVC_CRT && !_DEBUG */
+
 /*----------------------------------------------------------------------------*/
 /* Basic constants and types */
 
@@ -1104,32 +1122,38 @@ typedef struct {
 } osal_condpair_t;
 typedef CRITICAL_SECTION osal_fastmutex_t;
 
-#if !defined(_MSC_VER) && !defined(__try)
-#define __try
-#define __except(COND) if (/* (void)(COND), */ false)
+#if (defined(_MSC_VER) && !defined(_clang__) && (!MDBX_WITHOUT_MSVC_CRT || !defined(_M_IX86))) ||                      \
+    (defined(__try) && defined(__except))
+#define SEH_TRY __try
+#define SEH_EXCEPT(COND) __except(COND)
+#else
+#define SEH_TRY
+#define SEH_EXCEPT(COND) if (/* (void)(COND), */ false)
 #endif /* stub for MSVC's __try/__except */
 
 #if MDBX_WITHOUT_MSVC_CRT
 
 #ifndef osal_malloc
-static inline void *osal_malloc(size_t bytes) { return HeapAlloc(GetProcessHeap(), 0, bytes); }
+MDBX_MAYBE_UNUSED static inline void *osal_malloc(size_t bytes) { return HeapAlloc(GetProcessHeap(), 0, bytes); }
 #endif /* osal_malloc */
 
 #ifndef osal_calloc
-static inline void *osal_calloc(size_t nelem, size_t size) {
+MDBX_MAYBE_UNUSED static inline void *osal_calloc(size_t nelem, size_t size) {
   return HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, nelem * size);
 }
 #endif /* osal_calloc */
 
 #ifndef osal_realloc
-static inline void *osal_realloc(void *ptr, size_t bytes) {
+MDBX_MAYBE_UNUSED static inline void *osal_realloc(void *ptr, size_t bytes) {
   return ptr ? HeapReAlloc(GetProcessHeap(), 0, ptr, bytes) : HeapAlloc(GetProcessHeap(), 0, bytes);
 }
 #endif /* osal_realloc */
 
 #ifndef osal_free
-static inline void osal_free(void *ptr) { HeapFree(GetProcessHeap(), 0, ptr); }
+MDBX_MAYBE_UNUSED static inline void osal_free(void *ptr) { HeapFree(GetProcessHeap(), 0, ptr); }
 #endif /* osal_free */
+
+#define osal_alloca(size) _alloca(size)
 
 #else /* MDBX_WITHOUT_MSVC_CRT */
 
@@ -1175,6 +1199,14 @@ typedef pthread_mutex_t osal_fastmutex_t;
 #elif defined(_MSC_VER) && !MDBX_WITHOUT_MSVC_CRT
 #define osal_malloc_usable_size(ptr) _msize(ptr)
 #endif /* osal_malloc_usable_size */
+
+#ifndef osal_strdup
+LIBMDBX_API char *osal_strdup(const char *str);
+#endif
+
+#ifndef osal_alloca
+#define osal_alloca(size) alloca(size)
+#endif /* osal_alloca */
 
 /*----------------------------------------------------------------------------*/
 /* OS abstraction layer stuff */
@@ -1223,9 +1255,9 @@ MDBX_INTERNAL int osal_waitstatus2errcode(DWORD result);
  * https://android.googlesource.com/platform/bionic/+/master/docs/32-bit-abi.md */
 #define MDBX_HAVE_PWRITEV 0
 #if defined(_FILE_OFFSET_BITS) && _FILE_OFFSET_BITS != MDBX_WORDBITS
-#error "_FILE_OFFSET_BITS != MDBX_WORDBITS and __ANDROID_API__ < 24" (_FILE_OFFSET_BITS != MDBX_WORDBITS)
+#error "_FILE_OFFSET_BITS != MDBX_WORDBITS and __ANDROID_API__ < 24"
 #elif defined(__FILE_OFFSET_BITS) && __FILE_OFFSET_BITS != MDBX_WORDBITS
-#error "__FILE_OFFSET_BITS != MDBX_WORDBITS and __ANDROID_API__ < 24" (__FILE_OFFSET_BITS != MDBX_WORDBITS)
+#error "__FILE_OFFSET_BITS != MDBX_WORDBITS and __ANDROID_API__ < 24"
 #endif
 #else
 #define MDBX_HAVE_PWRITEV 1
@@ -1345,7 +1377,7 @@ MDBX_MAYBE_UNUSED static inline int osal_ioring_prepare(osal_ioring_t *ior, size
 /*----------------------------------------------------------------------------*/
 /* libc compatibility stuff */
 
-#if (!defined(__GLIBC__) && __GLIBC_PREREQ(2, 1)) && (defined(_GNU_SOURCE) || defined(_BSD_SOURCE))
+#if (defined(__GLIBC__) && __GLIBC_PREREQ(2, 1)) && (defined(_GNU_SOURCE) || defined(_BSD_SOURCE))
 #define osal_asprintf asprintf
 #define osal_vasprintf vasprintf
 #else
@@ -1408,10 +1440,6 @@ MDBX_MAYBE_UNUSED MDBX_INTERNAL void osal_jitter(bool tiny);
 #endif /* MDBX_F_OFD_SETLK64, MDBX_F_OFD_SETLKW64, MDBX_F_OFD_GETLK64 */
 
 #endif /* !Windows */
-
-#ifndef osal_strdup
-LIBMDBX_API char *osal_strdup(const char *str);
-#endif
 
 MDBX_MAYBE_UNUSED static inline int osal_get_errno(void) {
 #if defined(_WIN32) || defined(_WIN64)
@@ -1794,7 +1822,7 @@ MDBX_MAYBE_UNUSED MDBX_NOTHROW_PURE_FUNCTION static inline uint32_t osal_bswap32
 #error MDBX_PNL_ASCENDING must be defined as 0 or 1
 #endif /* MDBX_PNL_ASCENDING */
 
-/** Avoid dependence from MSVC CRT and use ntdll.dll instead. */
+/** Windows: Avoids dependence from MSVC CRT or other libraries provided by compiler, but use ntdll.dll instead. */
 #ifndef MDBX_WITHOUT_MSVC_CRT
 #if defined(MDBX_BUILD_CXX) && !MDBX_BUILD_CXX
 #define MDBX_WITHOUT_MSVC_CRT 1
@@ -2101,7 +2129,7 @@ MDBX_MAYBE_UNUSED MDBX_NOTHROW_PURE_FUNCTION static inline uint32_t osal_bswap32
 #endif
 #endif /* MDBX_CACHELINE_SIZE */
 
-/* Max length of iov-vector passed to writev() call, used for auxilary writes */
+/* Max length of iov-vector passed to writev() call, used for auxiliary writes */
 #ifndef MDBX_AUXILARY_IOV_MAX
 #define MDBX_AUXILARY_IOV_MAX 64
 #endif
@@ -2500,12 +2528,13 @@ typedef enum node_flags {
 
 #pragma pack(pop)
 
-MDBX_MAYBE_UNUSED MDBX_NOTHROW_PURE_FUNCTION static inline uint8_t page_type(const page_t *mp) { return mp->flags; }
+MDBX_MAYBE_UNUSED MDBX_NOTHROW_PURE_FUNCTION static inline uint8_t page_type(const page_t *mp) {
+  return (uint8_t)mp->flags;
+}
 
 MDBX_MAYBE_UNUSED MDBX_NOTHROW_PURE_FUNCTION static inline uint8_t page_type_compat(const page_t *mp) {
-  /* Drop legacy P_DIRTY flag for sub-pages for compatilibity,
-   * for assertions only. */
-  return unlikely(mp->flags & P_SUBP) ? mp->flags & ~(P_SUBP | P_LEGACY_DIRTY) : mp->flags;
+  /* Drop legacy P_DIRTY flag for sub-pages for compatibility, for assertions only. */
+  return unlikely(mp->flags & P_SUBP) ? (uint8_t)(mp->flags & ~(P_SUBP | P_LEGACY_DIRTY)) : (uint8_t)mp->flags;
 }
 
 MDBX_MAYBE_UNUSED MDBX_NOTHROW_PURE_FUNCTION static inline bool is_leaf(const page_t *mp) {
@@ -2783,7 +2812,7 @@ typedef struct shared_lck {
   MDBX_ALIGNAS(MDBX_CACHELINE_SIZE) /* cacheline ----------------------------*/
 
 #if MDBX_LOCKING > 0
-  /* Readeaders table lock. */
+  /* Readers table lock. */
   osal_ipclock_t rdt_lock;
 #endif /* MDBX_LOCKING > 0 */
 
@@ -2825,7 +2854,6 @@ typedef struct shared_lck {
 #define PAGELIST_LIMIT (MAX_MAPSIZE32 / MDBX_MIN_PAGESIZE)
 #endif /* MDBX_WORDBITS */
 
-#define MDBX_GOLD_RATIO_DBL 1.6180339887498948482
 #define MEGABYTE ((size_t)1 << 20)
 
 /*----------------------------------------------------------------------------*/
@@ -3802,6 +3830,7 @@ int main(int argc, char *argv[]) {
   MDBX_cursor *mc = nullptr;
   MDBX_dbi dbi;
   char *envname = nullptr;
+  char *input_file = nullptr;
   int envflags = MDBX_SAFE_NOSYNC | MDBX_ACCEDE, putflags = MDBX_UPSERT;
   bool rescue = false;
   bool purge = false;
@@ -3837,11 +3866,7 @@ int main(int argc, char *argv[]) {
       putflags |= MDBX_APPEND;
       break;
     case 'f':
-      if (freopen(optarg, "r", stdin) == nullptr) {
-        if (!quiet)
-          fprintf(stderr, "%s: %s: open: %s\n", prog, optarg, mdbx_strerror(errno));
-        exit(EXIT_FAILURE);
-      }
+      input_file = optarg;
       break;
     case 'n':
       envflags |= MDBX_NOSUBDIR;
@@ -3869,8 +3894,20 @@ int main(int argc, char *argv[]) {
     }
   }
 
-  if (optind != argc - 1)
-    usage();
+  if (optind != argc - 1) {
+    /* The man page promises the standard input by default and requires
+     * dbpath as the last argument. When '-f' consumed the only remaining
+     * argument as its file, treat that argument as the dbpath and fall
+     * back to stdin (issue #50). */
+    if (input_file && optind == argc) {
+      envname = input_file;
+      input_file = nullptr;
+    } else {
+      usage();
+    }
+  } else {
+    envname = argv[optind];
+  }
 
 #if defined(_WIN32) || defined(_WIN64)
   SetConsoleCtrlHandler(ConsoleBreakHandlerRoutine, true);
@@ -3885,7 +3922,13 @@ int main(int argc, char *argv[]) {
   signal(SIGTERM, signal_handler);
 #endif /* !WINDOWS */
 
-  envname = argv[optind];
+  if (input_file) {
+    if (freopen(input_file, "r", stdin) == nullptr) {
+      if (!quiet)
+        fprintf(stderr, "%s: %s: open: %s\n", prog, input_file, mdbx_strerror(errno));
+      exit(EXIT_FAILURE);
+    }
+  }
   if (!quiet) {
     printf("mdbx_load %s (%s, T-%s)\nRunning for %s...\n", mdbx_version.git.describe, mdbx_version.git.datetime,
            mdbx_version.git.tree, envname);
@@ -3961,8 +4004,9 @@ int main(int argc, char *argv[]) {
     goto bailout;
   }
 
-  kbuf.iov_len = mdbx_env_get_maxvalsize_ex(env, 0) + (size_t)1;
+  kbuf.iov_len = mdbx_env_get_maxkeysize_ex(env, 0) + (size_t)1;
   if (kbuf.iov_len >= INTPTR_MAX / 2) {
+    err = MDBX_PROBLEM;
     if (!quiet)
       fprintf(stderr, "mdbx_env_get_maxkeysize() failed, returns %zu\n", kbuf.iov_len);
     goto bailout;
