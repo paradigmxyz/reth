@@ -210,7 +210,7 @@ mod read_transactions {
                 (
                     tx,
                     Instant::now(),
-                    cfg!(all(debug_assertions, not(feature = "dst")))
+                    cfg!(all(debug_assertions, not(feature = "fuzz")))
                         .then(|| Arc::new(Backtrace::force_capture())),
                 ),
             );
@@ -367,7 +367,7 @@ mod read_transactions {
                 assert!(read_transactions.active.contains_key(&tx_ptr));
                 assert_eq!(
                     read_transactions.active.get(&tx_ptr).unwrap().2.is_some(),
-                    cfg!(all(debug_assertions, not(feature = "dst"))),
+                    cfg!(all(debug_assertions, not(feature = "fuzz"))),
                 );
 
                 tx.open_db(None).unwrap();
