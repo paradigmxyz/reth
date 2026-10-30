@@ -17,10 +17,10 @@ use reth_stages::{
     ControlFlow, Pipeline, PipelineError, PipelineTarget, PipelineWithResult, StageId,
 };
 use reth_tasks::Runtime;
-use reth_tracing::tracing::{debug, info, warn};
 use std::{pin::pin, time::Duration};
 use tokio::sync::watch;
 use tokio_util::sync::CancellationToken;
+use tracing::{debug, info, warn};
 
 // Minimum time between header refreshes while forkchoice moves.
 //
@@ -114,7 +114,12 @@ where
                 Pass::Done => {}
             }
             match self.download(&mut targets).await? {
-                SnapBootstrapOutcome::Stopped if self.stop.is_cancelled() => return Ok(STOPPED),
+                // A closed targets channel means the backfill is gone, so no head will follow.
+                SnapBootstrapOutcome::Stopped
+                    if self.stop.is_cancelled() || targets.has_changed().is_err() =>
+                {
+                    return Ok(STOPPED)
+                }
                 SnapBootstrapOutcome::Stopped => {
                     debug!(target: "sync::snap", "Refreshing headers before resuming snap sync");
                 }
@@ -186,7 +191,9 @@ where
             // resume.
             Err(error) => {
                 warn!(target: "sync::snap", %error, "Snap sync failed, retrying once forkchoice moves");
-                let _ = self.stop.run_until_cancelled(targets.changed()).await;
+                if let Some(Err(_)) = self.stop.run_until_cancelled(targets.changed()).await {
+                    debug!(target: "sync::snap", "Targets channel closed, stopping snap sync");
+                }
                 Ok(SnapBootstrapOutcome::Stopped)
             }
         }

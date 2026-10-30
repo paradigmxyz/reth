@@ -918,9 +918,11 @@ impl PeersManager {
     }
 
     /// Adds a trusted peer that may use a hostname instead of an IP address.
+    ///
+    /// An already tracked peer is marked as trusted right away.
     pub(crate) fn add_trusted_peer_node(&mut self, trusted: TrustedPeer) {
         let peer_id = trusted.id;
-        self.trusted_peer_ids.insert(peer_id);
+        self.add_trusted_peer_id(peer_id);
         self.trusted_peers_resolver.remove(peer_id);
         self.trusted_peers_resolver.trusted_peers.push(trusted);
         self.trusted_peers_resolver.interval.reset_immediately();
@@ -1274,6 +1276,9 @@ impl PeersManager {
         );
 
         if let Some(peer) = self.peers.get_mut(&peer_id) {
+            // The peer may have been added as basic by discovery or an inbound session before the
+            // first successful resolution.
+            peer.kind = PeerKind::Trusted;
             if peer.addr != new_addr {
                 peer.addr = new_addr;
                 trace!(target: "net::peers", ?peer_id, addr=?peer.addr, "Updated resolved trusted peer address");
@@ -3780,6 +3785,24 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_resolution_promotes_basic_trusted_peer() {
+        let peer_id = PeerId::random();
+        let trusted = TrustedPeer {
+            host: url::Host::Domain("example.invalid".to_string()),
+            tcp_port: 30303,
+            udp_port: 30303,
+            id: peer_id,
+        };
+        let addr = "10.0.0.1:30303".parse::<SocketAddr>().unwrap();
+
+        let mut manager = PeersManager::default();
+        manager.add_trusted_peer_node(trusted);
+        manager.add_peer(peer_id, PeerAddr::from_tcp(addr), None);
+        manager.on_resolved_peer(peer_id, NodeRecord::new(addr, peer_id));
+        assert!(manager.peers[&peer_id].is_trusted());
+    }
+
+    #[tokio::test]
     async fn test_rotation_disconnects_eligible_peer() {
         let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 1, 2)), 8008);
         let peer = PeerId::random();
@@ -4338,7 +4361,12 @@ mod tests {
             if !register_first {
                 peers.add_trusted_peer_node(trusted);
             }
-            assert_eq!(peers.peers[&peer_id].kind, PeerKind::Basic);
+            // A peer tracked before registration is promoted right away, one discovered afterwards
+            // only on resolution.
+            assert_eq!(
+                peers.peers[&peer_id].kind,
+                if register_first { PeerKind::Basic } else { PeerKind::Trusted }
+            );
             peers.queued_actions.clear();
             peers.fill_outbound_slots();
             assert!(

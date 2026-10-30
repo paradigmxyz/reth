@@ -13,6 +13,7 @@ use reth_db_common::init::{insert_genesis_hashes, insert_genesis_history, insert
 use reth_ethereum_consensus::{validate_block_post_execution, EthBeaconConsensus};
 use reth_ethereum_primitives::Block;
 use reth_evm::{
+    database::StateProviderDatabase,
     execute::{BlockExecutionOutput, Executor},
     ConfigureEvm,
 };
@@ -26,7 +27,6 @@ use reth_provider::{
     StaticFileProviderFactory, StaticFileSegment, StaticFileWriter, StorageSettingsCache,
     TrieWriter,
 };
-use reth_revm::database::StateProviderDatabase;
 use reth_tasks::Runtime;
 use reth_trie::StateRoot;
 use reth_trie_db::DatabaseStateRoot;
@@ -278,7 +278,7 @@ fn run_case(case: &BlockchainTest) -> Result<(), Error> {
             })
             .transpose()
             .map_err(|err| Error::block_failed(block_number, err))?;
-        let output = BlockExecutionOutput { state: executor.into_state().take_bundle(), result };
+        let output = BlockExecutionOutput { state: executor.into_state(), result };
 
         // Consensus checks after block execution
         validate_block_post_execution(block, &chain_spec, &output, None, block_access_list_hash)

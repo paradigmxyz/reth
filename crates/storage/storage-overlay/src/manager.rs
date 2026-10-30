@@ -124,7 +124,8 @@ impl<N: NodePrimitives> OverlayManager<N> {
         &self.changeset_cache
     }
 
-    /// Gets or computes cached changesets for an inclusive block range.
+    /// Gets complete trie before-values for an inclusive block range, oldest values taking
+    /// precedence. No updates from outside the requested range are included.
     pub fn get_or_compute_cached_changesets_range<P>(
         &self,
         provider: &P,
@@ -631,7 +632,10 @@ impl<N: NodePrimitives> OverlayManager<N> {
     }
 
     /// Returns every in-memory block in the chain whose tip is `parent_hash`.
-    fn parent_chain(&self, parent_hash: B256) -> impl Iterator<Item = ExecutedBlock<N>> + '_ {
+    pub(crate) fn parent_chain(
+        &self,
+        parent_hash: B256,
+    ) -> impl Iterator<Item = ExecutedBlock<N>> + '_ {
         let mut hash = parent_hash;
         std::iter::from_fn(move || {
             let block = self.blocks.get(&hash)?;
@@ -1012,17 +1016,14 @@ fn compute_execution_overlay_inner<N: NodePrimitives>(
 mod tests {
     use super::*;
     use alloy_primitives::{map::HashMap, Address, U256};
+    use evm2::{bytecode::Bytecode, evm::AccountInfo};
     use reth_chain_state::{test_utils::TestBlockBuilder, ExecutedBlock};
     use reth_ethereum_primitives::EthPrimitives;
     use reth_primitives_traits::Account;
     #[cfg(feature = "rayon")]
     use reth_tasks::WorkerPool;
     use reth_trie::{updates::TrieUpdatesSorted, HashedPostState, HashedStorage, SortedTrieData};
-    use revm::{
-        bytecode::Bytecode,
-        database::BundleState,
-        state::{AccountId, AccountInfo},
-    };
+    use reth_trie_common::bundle_state::BundleState;
     use std::{
         sync::{mpsc, Arc},
         thread,
@@ -1048,12 +1049,7 @@ mod tests {
         let state = BundleState::builder(block.block_number()..=block.block_number())
             .state_present_account_info(
                 address,
-                AccountInfo {
-                    nonce: id as u64,
-                    balance: U256::from(id),
-                    account_id: AccountId::new(id as usize),
-                    ..Default::default()
-                },
+                AccountInfo { nonce: id as u64, balance: U256::from(id), ..Default::default() },
             )
             .state_storage(address, HashMap::from_iter([(slot, (U256::ZERO, U256::from(id)))]))
             .contract(code_hash, Bytecode::new_raw(vec![id].into()))
@@ -1147,7 +1143,6 @@ mod tests {
             let address = Address::with_last_byte(id);
             let code_hash = B256::with_last_byte(id + 64);
             assert_eq!(overlay.accounts()[&address].as_ref().unwrap().nonce, id as u64);
-            assert_eq!(overlay.accounts()[&address].as_ref().unwrap().account_id, None);
             assert_eq!(overlay.storage()[&address][&U256::from(id)], U256::from(id));
             assert_eq!(overlay.code_hashes()[&code_hash], Bytecode::new_raw(vec![id].into()));
         }
@@ -1261,11 +1256,6 @@ mod tests {
         assert_eq!(execution_parent.accounts().len(), 2);
         assert_eq!(child_state.accounts.len(), 3);
         assert_eq!(child_execution.accounts().len(), 3);
-        assert!(child_execution
-            .accounts()
-            .values()
-            .flatten()
-            .all(|account| account.account_id.is_none()));
     }
 
     #[test]

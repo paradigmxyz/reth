@@ -4,7 +4,7 @@ use crate::args::{
     types::{MaxU32, ZeroAsNoneU64},
     GasPriceOracleArgs, RpcStateCacheArgs,
 };
-use alloy_primitives::map::AddressSet;
+use alloy_primitives::{map::AddressSet, utils::format_ether};
 use alloy_rpc_types_engine::JwtSecret;
 use clap::{
     builder::{PossibleValue, RangedU64ValueParser, Resettable, TypedValueParser},
@@ -678,7 +678,7 @@ pub struct RpcServerArgs {
         alias = "rpc-txfeecap",
         value_name = "TX_FEE_CAP",
         value_parser = parse_ether_value,
-        default_value = "1.0"
+        default_value = format_tx_fee_cap(DefaultRpcServerArgs::get_global().rpc_tx_fee_cap)
     )]
     pub rpc_tx_fee_cap: u128,
 
@@ -1038,6 +1038,11 @@ impl Default for RpcServerArgs {
             rpc_force_blob_sidecar_upcasting: false,
         }
     }
+}
+
+/// Formats a wei amount as the ether string `--rpc.txfeecap` parses, without trailing zeros.
+fn format_tx_fee_cap(wei: u128) -> String {
+    format_ether(wei).trim_end_matches('0').trim_end_matches('.').to_string()
 }
 
 /// clap value parser for [`RpcModuleSelection`] with configurable validation.

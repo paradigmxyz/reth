@@ -105,23 +105,18 @@ use crate::tree::{
         reuse::{PrewarmResults, ReuseMiss},
         PayloadProcessor,
     },
-    precompile_cache::{CachedPrecompile, CachedPrecompileMetrics, PrecompileCacheMap},
     txpool_prewarm,
     types::{InsertPayloadResult, ValidationOutput},
     CacheWaitDurations, CachedStateProvider, EngineApiMetrics, EngineApiTreeState, ExecutionEnv,
-    PayloadHandle, StateProviderDatabase, TreeConfig, WaitForCaches,
+    PayloadHandle, TreeConfig, WaitForCaches,
 };
-use alloy_consensus::{transaction::Either, Transaction as _, TxReceipt as _};
+use alloy_consensus::{transaction::Either, Transaction as _};
 use alloy_eip7928::{
     bal::{Bal, DecodedBal},
     BlockAccessList,
 };
 use alloy_eips::{eip1898::BlockWithParent, eip4895::Withdrawal, NumHash};
-use alloy_evm::Evm;
-use alloy_primitives::{
-    map::{AddressMap, B256Set},
-    B256,
-};
+use alloy_primitives::{map::B256Set, B256};
 use reth_tasks::LazyHandle;
 
 use crate::tree::{
@@ -129,10 +124,11 @@ use crate::tree::{
     state_root_strategy::{
         DefaultStateRootStrategy, LazyHashedPostState, PayloadStateRootHandle,
         PayloadStateRootJobContext, StateRootHintStream, StateRootJobContext, StateRootStrategy,
-        StateRootUpdateStream,
+        StateRootUpdateHook, StateRootUpdateStream,
     },
 };
 use alloy_primitives::Address;
+use evm2::evm::{AccountInfo, Bal as EvmBal};
 use reth_chain_state::{CanonicalInMemoryState, ExecutedBlock, ExecutionTimingStats};
 use reth_consensus::{ConsensusError, FullConsensus, ReceiptRootBloom};
 use reth_engine_primitives::{
@@ -140,13 +136,12 @@ use reth_engine_primitives::{
 };
 use reth_errors::{BlockExecutionError, BlockValidationError, ProviderResult};
 use reth_evm::{
-    block::{BlockExecutor, TxResult},
-    execute::ExecutableTxFor,
-    ConfigureEvm, EvmEnvFor, ExecutionCtxFor, HaltReasonFor, OnStateHook, SpecFor,
-    TxExecutionResultFor,
+    database::StateProviderDatabase, precompile_cache::PrecompileCacheMap, BlockExecutor,
+    BlockExecutorFactory, BlockExecutorFor, BlockTransactionResult, ConfigureEvm, Evm as _,
+    EvmEnvFor, EvmTypesFor, ExecutableTxFor, ExecutionCtxFor, OnStateHook, SpecFor,
 };
 use reth_execution_cache::{CacheFillMode, CacheStats};
-use reth_execution_types::DecodedRevmBal;
+use reth_execution_types::DecodedEvmBal;
 use reth_network_p2p::full_block::SealedBlockWithAccessList;
 use reth_payload_builder::{PayloadBuilderLease, PayloadBuilderResources};
 use reth_payload_primitives::{
@@ -163,13 +158,9 @@ use reth_provider::{
     PruneCheckpointReader, StageCheckpointReader, StateProvider, StateProviderFactory, StateReader,
     StorageChangeSetReader, StorageSettingsCache,
 };
-use reth_revm::db::{states::bundle_state::BundleRetention, BundleAccount, State};
 use reth_storage_overlay::{OverlayManager, OverlayStateProviderFactory};
 use reth_trie::{updates::TrieUpdates, HashedPostState, KeccakKeyHasher, LazyTrieData};
-use revm::{
-    context::Block as _,
-    state::{bal::Bal as RevmBal, AccountInfo},
-};
+use reth_trie_common::bundle_state::BundleAccount;
 use std::{
     sync::{
         atomic::{AtomicUsize, Ordering},
@@ -285,10 +276,8 @@ where
     config: TreeConfig,
     /// Payload processor for transaction conversion, prewarming, and execution caching.
     payload_processor: PayloadProcessor<Evm>,
-    /// Precompile cache map.
+    /// Precompile cache map, shared with the payload processor's prewarm EVMs.
     precompile_cache_map: PrecompileCacheMap<SpecFor<Evm>>,
-    /// Precompile cache metrics.
-    precompile_cache_metrics: AddressMap<CachedPrecompileMetrics>,
     /// Hook to call when invalid blocks are encountered.
     #[debug(skip)]
     invalid_block_hook: Box<dyn InvalidBlockHook<Evm::Primitives>>,
@@ -357,7 +346,6 @@ where
             evm_config,
             payload_processor,
             precompile_cache_map,
-            precompile_cache_metrics: AddressMap::default(),
             config,
             invalid_block_hook,
             metrics: EngineApiMetrics::default(),
@@ -745,8 +733,8 @@ where
             metrics.record_totals(stats);
         }
         let (output, senders, receipt_root_rx, executed_bal) = ensure_ok!(execution_result);
-        let (built_bal, revm_bal) =
-            executed_bal.map(|ExecutedBal { alloy, revm }| (alloy, revm)).unzip();
+        let (built_bal, evm_bal) =
+            executed_bal.map(|ExecutedBal { alloy, evm }| (alloy, evm)).unzip();
 
         // After executing the block we can stop prewarming transactions
         handle.stop_prewarming_execution();
@@ -927,8 +915,8 @@ where
         // and downloaded-sidecar verification both check their hash against it, so pairing them
         // with the BAL this execution produced is sound. The zip leaves the BAL unset for a
         // downloaded block that carried only a BAL hash and no sidecar.
-        let bal = revm_bal.zip(decoded_bal).map(|(revm_bal, decoded_bal)| {
-            Arc::new(DecodedRevmBal::with_raw_bal(revm_bal, decoded_bal.as_raw_bal().clone()))
+        let bal = evm_bal.zip(decoded_bal).map(|(evm_bal, decoded_bal)| {
+            Arc::new(DecodedEvmBal::with_raw_bal(evm_bal, decoded_bal.as_raw_bal().clone()))
         });
         let executed_block = self
             .spawn_deferred_trie_task(Arc::new(block), output, hashed_state, trie_output)
@@ -967,7 +955,7 @@ where
             };
 
             if let Err(e) = consensus.validate_header(block.sealed_header()) {
-                error!(target: "engine::tree::payload_validator", ?block, "Failed to validate header {}: {e}", block.hash());
+                error!(target: "engine::tree::payload_validator", block = ?block.block_with_parent(), %e, "Failed to validate header");
                 return Err(InsertBlockError::consensus_error(e, block).into())
             }
 
@@ -975,7 +963,7 @@ where
             let _enter = debug_span!(target: "engine::tree::payload_validator", "validate_header_against_parent").entered();
             if let Err(e) = consensus.validate_header_against_parent(block.sealed_header(), &parent)
             {
-                warn!(target: "engine::tree::payload_validator", ?block, "Failed to validate header {} against parent: {e}", block.hash());
+                warn!(target: "engine::tree::payload_validator", block = ?block.block_with_parent(), %e, "Failed to validate header against parent");
                 return Err(InsertBlockError::consensus_error(e, block).into())
             }
             drop(_enter);
@@ -983,7 +971,7 @@ where
             if let Err(e) =
                 consensus.validate_block_pre_execution_with_tx_root(&block, None)
             {
-                error!(target: "engine::tree::payload_validator", ?block, "Failed to validate block {}: {e}", block.hash());
+                error!(target: "engine::tree::payload_validator", block = ?block.block_with_parent(), %e, "Failed to validate block");
                 return Err(InsertBlockError::consensus_error(e, block).into())
             }
 
@@ -1017,12 +1005,12 @@ where
     #[instrument(level = "debug", target = "engine::tree::payload_validator", skip_all)]
     #[expect(clippy::type_complexity)]
     fn execute_block<S, Err, T>(
-        &mut self,
+        &self,
         state_provider: S,
         env: ExecutionEnv<Evm>,
         input: &BlockOrPayload<T>,
-        handle: &mut PayloadHandle<impl ExecutableTxFor<Evm>, Err, N::Receipt, HaltReasonFor<Evm>>,
-        state_hook: Option<Box<dyn OnStateHook + 'static>>,
+        handle: &mut PayloadHandle<impl ExecutableTxFor<Evm>, Err, N::Receipt, EvmTypesFor<Evm>>,
+        state_hook: Option<StateRootUpdateHook>,
     ) -> Result<
         (BlockExecutionOutput<N::Receipt>, Vec<Address>, ReceiptRootReceiver, Option<ExecutedBal>),
         InsertBlockErrorKind,
@@ -1036,90 +1024,57 @@ where
     {
         debug!(target: "engine::tree::payload_validator", "Executing block");
 
-        let has_bal = input.has_block_access_list();
-        let mut db = debug_span!(target: "engine::tree", "build_state_db").in_scope(|| {
-            State::builder()
-                .with_database(StateProviderDatabase::new(state_provider))
-                .with_bundle_update()
-                .with_bal_builder_if(has_bal)
-                .build()
-        });
-
-        let (spec_id, mut executor) = {
-            let _span = debug_span!(target: "engine::tree", "create_evm").entered();
-            let spec_id = *env.evm_env.spec_id();
-            let evm_config = self.evm_config.clone().with_jit_support();
-            let evm = evm_config.evm_with_env(&mut db, env.evm_env);
-            let ctx = self
-                .execution_ctx_for(input)
-                .map_err(|e| InsertBlockErrorKind::Other(Box::new(e)))?;
-            let executor = self.evm_config.create_executor(evm, ctx);
-            (spec_id, executor)
-        };
-
-        if !self.config.precompile_cache_disabled() {
-            let _span = debug_span!(target: "engine::tree", "setup_precompile_cache").entered();
-            executor.evm_mut().precompiles_mut().map_cacheable_precompiles(
-                |address, precompile| {
-                    let metrics = self
-                        .precompile_cache_metrics
-                        .entry(*address)
-                        .or_insert_with(|| CachedPrecompileMetrics::new_with_address(*address))
-                        .clone();
-                    CachedPrecompile::wrap(
-                        precompile,
-                        self.precompile_cache_map.cache_for_address(*address),
-                        spec_id,
-                        Some(metrics),
-                    )
-                },
-            );
-        }
-
         let transaction_count = input.transaction_count();
         let (receipt_tx, result_rx) = self.spawn_receipt_root_task(transaction_count);
         let executed_tx_index = Arc::clone(handle.executed_tx_index());
-        // Reads made to validate prewarm results would be recorded in the built BAL.
-        let prewarm_results = handle.prewarm_results().filter(|_| !has_bal);
-        executor.evm_mut().db_mut().set_state_hook(state_hook);
-
+        // Reuse validation reads must not alter a block's access list.
+        let prewarm_results = handle.prewarm_results().filter(|_| !input.has_block_access_list());
         let execution_start = Instant::now();
+        let evm_config = self.evm_config.clone().with_jit_support();
+        let execution_ctx = self.execution_ctx_for(input).map_err(BlockExecutionError::other)?;
 
-        // Execute all transactions and finalize
-        let (executor, senders) = self.execute_transactions(
-            executor,
-            transaction_count,
-            handle.iter_transactions(),
-            &receipt_tx,
-            &executed_tx_index,
-            has_bal,
-            prewarm_results.as_deref(),
-        )?;
+        let (output, senders, built_bal) = debug_span!(target: "engine::tree", "execute_block")
+            .in_scope(|| {
+                let db = StateProviderDatabase::new(state_provider);
+                let evm = if self.config.precompile_cache_disabled() {
+                    evm_config.evm_with_env(db, env.evm_env)
+                } else {
+                    evm_config.evm_with_precompile_cache(
+                        db,
+                        env.evm_env,
+                        self.precompile_cache_map.clone(),
+                        true,
+                    )
+                };
+                let mut executor =
+                    evm_config.block_executor_factory().create_executor(evm, execution_ctx);
+                if input.has_block_access_list() {
+                    executor.enable_block_access_list_builder();
+                }
+                if let Some(mut state_hook) = state_hook {
+                    executor.set_state_hook(move |state| state_hook.on_state(state));
+                }
+                let senders = self.execute_transactions(
+                    &mut executor,
+                    transaction_count,
+                    handle.iter_transactions(),
+                    &receipt_tx,
+                    &executed_tx_index,
+                    prewarm_results.as_deref(),
+                )?;
+
+                let post_exec_start = Instant::now();
+                let (output, built_bal) = executor.finish_with_prepared_block_access_list()?;
+                self.metrics.record_post_execution(post_exec_start.elapsed());
+                Ok::<_, BlockExecutionError>((output, senders, built_bal))
+            })?;
         drop(receipt_tx);
         // Free stale results off the execution path.
-        if let Some(prewarm_results) = prewarm_results {
-            self.runtime.spawn_drop(prewarm_results);
+        if let Some(results) = prewarm_results {
+            self.runtime.spawn_drop(results);
         }
-
-        // Finish execution and get the result
-        let post_exec_start = Instant::now();
-        let (_evm, result) = debug_span!(target: "engine::tree", "BlockExecutor::finish")
-            .in_scope(|| executor.finish())
-            .map(|(evm, result)| (evm.into_db(), result))?;
-        self.metrics.record_post_execution(post_exec_start.elapsed());
-
-        // Merge transitions into bundle state
-        debug_span!(target: "engine::tree", "merge_transitions")
-            .in_scope(|| db.merge_transitions(BundleRetention::Reverts));
-
-        // The builder only exists when the block declares a BAL. The revm form is the one shared
-        // with the executed block, so it must survive here; the clone only feeds the
-        // post-execution consensus checks, the sole consumer of the alloy form.
-        let built_bal = db.take_built_bal().map(|revm_bal| ExecutedBal {
-            alloy: revm_bal.clone().into_alloy_bal(),
-            revm: Arc::new(revm_bal),
-        });
-        let output = BlockExecutionOutput { result, state: db.take_bundle() };
+        let built_bal =
+            built_bal.map(|bal| ExecutedBal { alloy: (&bal).into(), evm: Arc::new(bal) });
 
         let execution_duration = execution_start.elapsed();
         self.metrics.record_block_execution(&output, execution_duration);
@@ -1158,7 +1113,7 @@ where
     /// 2. Relies on BAL prewarm to stream state-root updates and optional state prefetches.
     /// 3. Spawns the receipt-root task.
     /// 4. Calls [`crate::tree::payload_processor::bal::execute_block`].
-    /// 5. Returns the rebuilt BAL for post-execution consensus validation, paired with the revm
+    /// 5. Returns the rebuilt BAL for post-execution consensus validation, paired with the evm2
     ///    representation the workers consumed.
     #[instrument(level = "debug", target = "engine::tree::payload_validator", skip_all)]
     #[expect(clippy::type_complexity)]
@@ -1166,7 +1121,7 @@ where
         &self,
         env: ExecutionEnv<Evm>,
         input: &BlockOrPayload<T>,
-        handle: &PayloadHandle<Tx, Err, N::Receipt, HaltReasonFor<Evm>>,
+        handle: &PayloadHandle<Tx, Err, N::Receipt, EvmTypesFor<Evm>>,
         make_state_provider: &MakeStateProvider,
     ) -> Result<
         (BlockExecutionOutput<N::Receipt>, Vec<Address>, ReceiptRootReceiver, Option<ExecutedBal>),
@@ -1195,7 +1150,7 @@ where
         let execution_start = Instant::now();
         let ctx =
             self.execution_ctx_for(input).map_err(|e| InsertBlockErrorKind::Other(Box::new(e)))?;
-        let (output, senders, built_bal, received_bal_revm) =
+        let (output, senders, built_bal, received_bal_evm) =
             crate::tree::payload_processor::bal::execute_block(
                 &self.runtime,
                 &self.evm_config,
@@ -1217,14 +1172,14 @@ where
             "Executed block via BAL path",
         );
 
-        // The received BAL was already converted to the revm form to drive the workers. Once the
+        // The received BAL was already converted to the evm2 form to drive the workers. Once the
         // post-execution hash check against the rebuilt BAL passes, both have the same content, so
         // the converted one can be reused instead of converting the rebuilt BAL again.
         Ok((
             output,
             senders,
             result_rx,
-            Some(ExecutedBal { alloy: built_bal, revm: received_bal_revm }),
+            Some(ExecutedBal { alloy: built_bal, evm: received_bal_evm }),
         ))
     }
 
@@ -1248,45 +1203,29 @@ where
     /// - Executing each transaction with timing metrics
     /// - Streaming receipts to the receipt root computation task
     /// - Collecting transaction senders for later use
-    ///
-    /// Returns the executor (for finalization) and the collected senders.
-    #[expect(clippy::too_many_arguments)]
-    fn execute_transactions<'a, E, Tx, Err, DB>(
+    fn execute_transactions<Tx, Err>(
         &self,
-        mut executor: E,
+        executor: &mut BlockExecutorFor<'_, Evm>,
         transaction_count: usize,
         transactions: impl Iterator<Item = Result<Tx, Err>>,
-        receipt_tx: &crossbeam_channel::Sender<IndexedReceipt<N::Receipt>>,
+        receipt_tx: &ReceiptRootSender<N>,
         executed_tx_index: &AtomicUsize,
-        has_bal: bool,
-        prewarm_results: Option<&PrewarmResults<HaltReasonFor<Evm>>>,
-    ) -> Result<(E, Vec<Address>), BlockExecutionError>
+        prewarm_results: Option<&PrewarmResults<EvmTypesFor<Evm>>>,
+    ) -> Result<Vec<Address>, BlockExecutionError>
     where
-        E: BlockExecutor<
-            Receipt = N::Receipt,
-            Result = TxExecutionResultFor<Evm>,
-            Evm: alloy_evm::Evm<DB = &'a mut State<DB>, HaltReason = HaltReasonFor<Evm>>,
-        >,
-        Tx: alloy_evm::block::ExecutableTx<E> + alloy_evm::RecoveredTx<TxTy<N>>,
-        DB: revm::Database + 'a,
+        Tx: ExecutableTxFor<Evm>,
         Err: core::error::Error + Send + Sync + 'static,
     {
-        let mut senders = Vec::with_capacity(transaction_count);
-        let mut reuse_stats = PrewarmReuseStats::default();
-
         // Apply pre-execution changes (e.g., beacon root update)
         let pre_exec_start = Instant::now();
         debug_span!(target: "engine::tree", "pre_execution")
             .in_scope(|| executor.apply_pre_execution_changes())?;
         self.metrics.record_pre_execution(pre_exec_start.elapsed());
 
-        // Bump BAL index after pre-execution changes (EIP-7928: index 0 is pre-execution)
-        if has_bal {
-            executor.evm_mut().db_mut().bump_bal_index();
-        }
-
         // Execute transactions
         let exec_span = debug_span!(target: "engine::tree", "execution").entered();
+        let mut senders = Vec::with_capacity(transaction_count);
+        let mut reuse_stats = PrewarmReuseStats::default();
         let mut transactions = transactions.into_iter();
         // Some executors may execute transactions that do not append receipts during the
         // main loop (e.g., system transactions whose receipts are added during finalization).
@@ -1299,11 +1238,8 @@ where
             let wait_start = Instant::now();
             let Some(tx_result) = transactions.next() else { break };
             self.metrics.record_transaction_wait(wait_start.elapsed());
-
             let tx = tx_result.map_err(BlockValidationError::other)?;
-            let tx_signer = *<Tx as alloy_evm::RecoveredTx<TxTy<N>>>::signer(&tx);
-
-            senders.push(tx_signer);
+            senders.push(*tx.signer());
 
             let _enter = tracing::enabled!(target: "engine::tree", Level::TRACE).then(|| {
                 tracing::trace_span!(
@@ -1321,17 +1257,12 @@ where
             let index = senders.len() - 1;
             match prewarm_results {
                 Some(results) => {
-                    let outcome = self.commit_prewarm_result(
-                        &mut executor,
-                        results,
-                        index,
-                        <Tx as alloy_evm::RecoveredTx<TxTy<N>>>::tx(&tx),
-                    )?;
+                    let outcome = self.commit_prewarm_result(executor, results, index, tx.tx())?;
                     if outcome.is_err() {
                         // Later prewarm results are refreshed against the actual writes.
-                        executor.execute_transaction_with_result_closure(tx, |result| {
-                            results.publish_executed(index, &result.result().state)
-                        })?;
+                        let result = executor.execute_transaction_without_commit(tx)?;
+                        results.publish_executed(index, &result.result().pending_state);
+                        executor.commit_transaction(result)?;
                     }
                     reuse_stats.record(outcome);
                 }
@@ -1350,51 +1281,32 @@ where
                 // Send the latest receipt to the background task for incremental root computation.
                 if let Some(receipt) = executor.receipts().last() {
                     let tx_index = current_len - 1;
-                    let _ = receipt_tx.send(IndexedReceipt::new(tx_index, receipt.clone()));
+                    receipt_tx
+                        .send(IndexedReceipt::new(tx_index, receipt.clone()))
+                        .map_err(|_| BlockExecutionError::msg("receipt root task closed"))?;
                 }
-            }
-            // Bump BAL index after each transaction (EIP-7928)
-            if has_bal {
-                executor.evm_mut().db_mut().bump_bal_index();
             }
         }
 
         drop(exec_span);
-
         if prewarm_results.is_some() {
             self.metrics.prewarm_reuse.record(reuse_stats);
         }
-
-        Ok((executor, senders))
+        Ok(senders)
     }
 
     /// Commits the prewarm result of the transaction at `index` instead of executing it, if the
     /// result is ready and its reads match the current state.
-    fn commit_prewarm_result<'a, E, DB>(
+    fn commit_prewarm_result(
         &self,
-        executor: &mut E,
-        results: &PrewarmResults<HaltReasonFor<Evm>>,
+        executor: &mut BlockExecutorFor<'_, Evm>,
+        results: &PrewarmResults<EvmTypesFor<Evm>>,
         index: usize,
         tx: &TxTy<N>,
-    ) -> Result<Result<(), ReuseMiss>, BlockExecutionError>
-    where
-        E: BlockExecutor<
-            Receipt = N::Receipt,
-            Result = TxExecutionResultFor<Evm>,
-            Evm: alloy_evm::Evm<DB = &'a mut State<DB>, HaltReason = HaltReasonFor<Evm>>,
-        >,
-        DB: revm::Database + 'a,
-    {
-        // Skipping execution bypasses the block executor's available gas check. Ignoring the
-        // transaction gas limit cap makes this check stricter; normal execution handles the rest.
-        let block = executor.evm().block();
-        let block_gas_used = executor.receipts().last().map_or(0, |r| r.cumulative_gas_used());
-        if tx.gas_limit() > block.gas_limit().saturating_sub(block_gas_used) {
-            return Ok(Err(ReuseMiss::Stale))
-        }
-
+    ) -> Result<Result<(), ReuseMiss>, BlockExecutionError> {
+        executor.validate_transaction_gas_limit(tx.gas_limit())?;
         let result = match results
-            .take_valid(index, executor.evm_mut().db_mut())
+            .take_valid(index, executor.evm_mut().state_db_mut())
             .map_err(BlockExecutionError::other)?
         {
             Ok(result) => result,
@@ -1403,7 +1315,7 @@ where
         let Some(result) = self.evm_config.prewarm_tx_result(tx, result) else {
             return Ok(Err(ReuseMiss::Stale))
         };
-        executor.commit_transaction(result);
+        executor.commit_transaction(result)?;
         Ok(Ok(()))
     }
 
@@ -1499,7 +1411,7 @@ where
             impl ExecutableTxFor<Evm> + use<N, P, Evm, V, T>,
             impl core::error::Error + Send + Sync + 'static + use<N, P, Evm, V, T>,
             N::Receipt,
-            HaltReasonFor<Evm>,
+            EvmTypesFor<Evm>,
         >,
         InsertBlockErrorKind,
     > {
@@ -2194,6 +2106,6 @@ impl<T: PayloadTypes> BlockOrPayload<T> {
 struct ExecutedBal {
     /// Alloy form, only needed for the post-execution consensus checks (hash and gas limit).
     alloy: BlockAccessList,
-    /// Revm form, shared with the executed block so consumers can reuse it.
-    revm: Arc<RevmBal>,
+    /// evm2 form, shared with the executed block so consumers can reuse it.
+    evm: Arc<EvmBal>,
 }

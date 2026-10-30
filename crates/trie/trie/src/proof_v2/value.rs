@@ -1,14 +1,8 @@
 //! Generic value encoder types for proof calculation with lazy evaluation.
 
-use crate::{
-    hashed_cursor::HashedCursorFactory, prefix_set::PrefixSet, proof_v2::ProofCalculator,
-    trie_cursor::TrieCursorFactory,
-};
-use alloy_primitives::{map::B256Map, B256, U256};
+use alloy_primitives::{B256, U256};
 use alloy_rlp::Encodable;
 use reth_execution_errors::trie::StateProofError;
-use reth_primitives_traits::Account;
-use std::rc::Rc;
 
 /// A trait for deferred RLP-encoding of leaf values.
 pub trait DeferredValueEncoder {
@@ -71,96 +65,5 @@ impl LeafValueEncoder for StorageValueEncoder {
 
     fn deferred_encoder(&mut self, _key: B256, value: Self::Value) -> Self::DeferredEncoder {
         StorageDeferredValueEncoder(value)
-    }
-}
-
-/// An account value encoder that synchronously computes storage roots.
-///
-/// This encoder contains factories for creating trie and hashed cursors. Storage roots are
-/// computed synchronously within the deferred encoder using a `StorageProofCalculator`.
-#[derive(Debug, Clone)]
-pub struct SyncAccountValueEncoder<T, H> {
-    /// Factory for creating trie cursors.
-    trie_cursor_factory: Rc<T>,
-    /// Factory for creating hashed cursors.
-    hashed_cursor_factory: Rc<H>,
-    /// Storage prefix sets keyed by hashed address.
-    storage_prefix_sets: Rc<B256Map<PrefixSet>>,
-}
-
-impl<T, H> SyncAccountValueEncoder<T, H> {
-    /// Create a new account value encoder with the given factories.
-    pub fn new(trie_cursor_factory: T, hashed_cursor_factory: H) -> Self {
-        Self {
-            trie_cursor_factory: Rc::new(trie_cursor_factory),
-            hashed_cursor_factory: Rc::new(hashed_cursor_factory),
-            storage_prefix_sets: Rc::new(B256Map::default()),
-        }
-    }
-
-    /// Sets the storage prefix sets. When given, all cached storage trie hashes matching the
-    /// prefix sets will be invalidated during storage root calculation for the corresponding
-    /// accounts.
-    pub fn with_storage_prefix_sets(mut self, storage_prefix_sets: B256Map<PrefixSet>) -> Self {
-        self.storage_prefix_sets = Rc::new(storage_prefix_sets);
-        self
-    }
-}
-
-/// The deferred encoder for an account value with synchronous storage root calculation.
-#[derive(Debug, Clone)]
-pub struct SyncAccountDeferredValueEncoder<T, H> {
-    trie_cursor_factory: Rc<T>,
-    hashed_cursor_factory: Rc<H>,
-    storage_prefix_sets: Rc<B256Map<PrefixSet>>,
-    hashed_address: B256,
-    account: Account,
-}
-
-impl<T, H> DeferredValueEncoder for SyncAccountDeferredValueEncoder<T, H>
-where
-    T: TrieCursorFactory,
-    H: HashedCursorFactory,
-{
-    fn encode(self, buf: &mut Vec<u8>) -> Result<(), StateProofError> {
-        let trie_cursor = self.trie_cursor_factory.storage_trie_cursor(self.hashed_address)?;
-        let hashed_cursor =
-            self.hashed_cursor_factory.hashed_storage_cursor(self.hashed_address)?;
-
-        let mut storage_proof_calculator = ProofCalculator::new_storage(trie_cursor, hashed_cursor);
-        if let Some(prefix_set) = self.storage_prefix_sets.get(&self.hashed_address) {
-            storage_proof_calculator = storage_proof_calculator.with_prefix_set(prefix_set.clone());
-        }
-        let storage_root = storage_proof_calculator.storage_root(self.hashed_address)?;
-
-        let trie_account = self.account.into_trie_account(storage_root);
-        trie_account.encode(buf);
-
-        Ok(())
-    }
-}
-
-impl<T, H> LeafValueEncoder for SyncAccountValueEncoder<T, H>
-where
-    T: TrieCursorFactory,
-    H: HashedCursorFactory,
-{
-    type Value = Account;
-    type DeferredEncoder = SyncAccountDeferredValueEncoder<T, H>;
-
-    fn deferred_encoder(
-        &mut self,
-        hashed_address: B256,
-        account: Self::Value,
-    ) -> Self::DeferredEncoder {
-        // Return a deferred encoder that will synchronously compute the storage root when encode()
-        // is called.
-        SyncAccountDeferredValueEncoder {
-            trie_cursor_factory: Rc::clone(&self.trie_cursor_factory),
-            hashed_cursor_factory: Rc::clone(&self.hashed_cursor_factory),
-            storage_prefix_sets: Rc::clone(&self.storage_prefix_sets),
-            hashed_address,
-            account,
-        }
     }
 }

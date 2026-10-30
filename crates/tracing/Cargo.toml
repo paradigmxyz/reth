@@ -32,7 +32,7 @@ eyre = { workspace = true, optional = true }
 rolling-file = { workspace = true, optional = true }
 
 [features]
-default = ["std", "otlp"]
+default = ["std"]
 std = [
     "tracing-subscriber",
     "tracing-appender",
@@ -46,6 +46,6 @@ std = [
     "tracing/std",
     "tracing-subscriber?/std",
 ]
-otlp = ["reth-tracing-otlp"]
+otlp = ["reth-tracing-otlp/otlp"]
 otlp-logs = ["reth-tracing-otlp/otlp-logs"]
 tracy = ["tracing-tracy", "tracy-client"]

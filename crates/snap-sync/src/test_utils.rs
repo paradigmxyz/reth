@@ -99,12 +99,20 @@ pub(crate) fn generation(block: u64, state_root: B256) -> SnapGeneration {
 }
 
 /// Writes blocks `0..=3` hashed the way [`generation`] anchors them, so an attempt started from
-/// one finds its pivot on the canonical chain.
-pub(crate) fn insert_generation_headers(factory: &ProviderFactory<MockNodeTypesWithDB>) {
+/// one finds its pivot on the canonical chain. `roots` are the state roots of blocks `1..`, the
+/// ones attempts download against; later blocks keep their distinctive root.
+pub(crate) fn insert_generation_headers(
+    factory: &ProviderFactory<MockNodeTypesWithDB>,
+    roots: &[B256],
+) {
     let headers: Vec<_> = (0..=3u64)
         .map(|number| {
             let parent = number.checked_sub(1).map_or(B256::ZERO, |n| B256::repeat_byte(n as u8));
-            SealedHeader::new(header(number, parent, None), B256::repeat_byte(number as u8))
+            let mut header = header(number, parent, None);
+            if let Some(root) = number.checked_sub(1).and_then(|i| roots.get(i as usize)) {
+                header.state_root = *root;
+            }
+            SealedHeader::new(header, B256::repeat_byte(number as u8))
         })
         .collect();
     insert_headers(factory, &headers);
@@ -118,6 +126,13 @@ pub(crate) fn hashed_factory() -> ProviderFactory<MockNodeTypesWithDB> {
     provider.commit().unwrap();
     // Writers consult the cache, not the table.
     factory.set_storage_settings_cache(StorageSettings::v2());
+    factory
+}
+
+/// A hashed database holding the blocks of [`insert_generation_headers`] with `roots`.
+pub(crate) fn hashed_factory_with_roots(roots: &[B256]) -> ProviderFactory<MockNodeTypesWithDB> {
+    let factory = hashed_factory();
+    insert_generation_headers(&factory, roots);
     factory
 }
 
@@ -300,6 +315,40 @@ impl BalChain {
             headers.push(sealed);
         }
         Self { headers, pivot, lists }
+    }
+
+    /// The chain's headers with the state roots of the given blocks replaced, hashes unchanged, so
+    /// an attempt downloading against a root finds it in the canonical header.
+    pub(crate) fn headers_with_roots(&self, roots: &[(u64, B256)]) -> Vec<SealedHeader<Header>> {
+        self.headers
+            .iter()
+            .map(|sealed| {
+                let mut header = sealed.header().clone();
+                if let Some((_, root)) = roots.iter().find(|(number, _)| *number == header.number) {
+                    header.state_root = *root;
+                }
+                SealedHeader::new(header, sealed.hash())
+            })
+            .collect()
+    }
+
+    /// The chain's headers all committing to `state_root`, hashes unchanged.
+    pub(crate) fn headers_with_root(&self, state_root: B256) -> Vec<SealedHeader<Header>> {
+        let roots: Vec<_> =
+            self.headers.iter().map(|sealed| (sealed.number(), state_root)).collect();
+        self.headers_with_roots(&roots)
+    }
+
+    /// This chain with the state roots of the given blocks replaced, hashes unchanged.
+    pub(crate) fn with_state_roots(mut self, roots: &[(u64, B256)]) -> Self {
+        self.headers = self.headers_with_roots(roots);
+        self
+    }
+
+    /// This chain with every header committing to `state_root`, hashes unchanged.
+    pub(crate) fn with_state_root(mut self, state_root: B256) -> Self {
+        self.headers = self.headers_with_root(state_root);
+        self
     }
 
     /// Generation anchored to this chain's pivot, downloading against `state_root`.

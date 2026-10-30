@@ -22,7 +22,7 @@ impl BlobSidecarConverter {
         sidecar: BlobTransactionSidecar,
     ) -> Option<BlobTransactionSidecarEip7594> {
         let permit = SEMAPHORE.acquire().await.ok()?;
-        tokio::task::spawn_blocking(move || {
+        reth_tasks::spawn_blocking(move || {
             let _permit = permit;
             sidecar.try_into_7594(EnvKzgSettings::Default.get())
         })

@@ -29,7 +29,6 @@ reth-node-builder = { workspace = true, features = ["test-utils"] }
 reth-tokio-util.workspace = true
 reth-stages-types.workspace = true
 reth-network-peers.workspace = true
-reth-engine-local.workspace = true
 reth-engine-primitives.workspace = true
 reth-tasks.workspace = true
 reth-node-ethereum.workspace = true
@@ -44,6 +43,8 @@ reth-trie-db.workspace = true
 reth-transaction-pool.workspace = true
 reth-prune-types.workspace = true
 reth-fs-util.workspace = true
+reth-network-p2p.workspace = true
+reth-eth-wire-types.workspace = true
 
 tempfile.workspace = true
 
@@ -71,6 +72,7 @@ tokio-stream.workspace = true
 serde_json.workspace = true
 tracing.workspace = true
 derive_more.workspace = true
+parking_lot.workspace = true
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["test-util"] }

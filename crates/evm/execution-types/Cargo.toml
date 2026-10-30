@@ -15,10 +15,9 @@ reth-ethereum-primitives.workspace = true
 reth-primitives-traits.workspace = true
 reth-trie-common.workspace = true
 
-revm.workspace = true
+evm2.workspace = true
 
 # alloy
-alloy-evm.workspace = true
 alloy-consensus.workspace = true
 alloy-primitives.workspace = true
 alloy-eip7928.workspace = true
@@ -39,17 +38,22 @@ rand.workspace = true
 alloy-rlp.workspace = true
 
 [features]
+account-ext = [
+    "evm2/account-ext",
+    "reth-primitives-traits/account-ext",
+    "reth-trie-common/account-ext",
+]
 default = ["std"]
 serde = [
     "dep:serde",
     "rand/serde",
-    "revm/serde",
     "alloy-eips/serde",
     "alloy-primitives/serde",
     "reth-primitives-traits/serde",
     "alloy-consensus/serde",
     "reth-trie-common/serde",
     "reth-ethereum-primitives/serde",
+    "evm2/serde",
     "alloy-eip7928/serde",
 ]
 serde-bincode-compat = [
@@ -64,7 +68,6 @@ std = [
     "alloy-eip7928/std",
     "alloy-eips/std",
     "alloy-primitives/std",
-    "revm/std",
     "serde?/std",
     "reth-primitives-traits/std",
     "alloy-consensus/std",
@@ -72,6 +75,6 @@ std = [
     "derive_more/std",
     "reth-ethereum-primitives/std",
     "reth-trie-common/std",
-    "alloy-evm/std",
     "alloy-rlp?/std",
+    "evm2/std",
 ]

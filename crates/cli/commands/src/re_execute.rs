@@ -13,22 +13,16 @@ use reth_chainspec::{EthChainSpec, EthereumHardforks, Hardforks};
 use reth_cli::chainspec::ChainSpecParser;
 use reth_cli_util::cancellation::CancellationToken;
 use reth_consensus::FullConsensus;
-use reth_evm::{execute::Executor, ConfigureEvm};
+use reth_evm::{database::StateProviderDatabase, execute::Executor, ConfigureEvm};
 use reth_node_core::args::JitArgs;
 use reth_primitives_traits::{format_gas_throughput, Account, BlockBody, GotExpected};
 use reth_provider::{
     providers::BlockchainProvider, BlockHashReader, BlockNumReader, BlockReader, ChainSpecProvider,
     DatabaseProviderFactory, ReceiptProvider, StaticFileProviderFactory, TransactionVariant,
 };
-use reth_revm::{
-    database::StateProviderDatabase,
-    db::{
-        states::reverts::{AccountInfoRevert, RevertToSlot},
-        BundleState,
-    },
-};
 use reth_stages::stages::calculate_gas_used_from_headers;
 use reth_storage_api::{ChangeSetReader, DBProvider, StateProvider, StorageChangeSetReader};
+use reth_trie::bundle_state::{AccountInfoRevert, BundleState, RevertToSlot};
 use std::{
     collections::HashMap,
     sync::{
@@ -49,7 +43,7 @@ pub struct Command<C: ChainSpecParser> {
     env: EnvironmentArgs<C>,
 
     /// The height to start at.
-    #[arg(long, default_value = "1")]
+    #[arg(long, default_value = "1", value_parser = clap::value_parser!(u64).range(1..))]
     from: u64,
 
     /// The height to end at. Defaults to the latest block.
@@ -57,11 +51,11 @@ pub struct Command<C: ChainSpecParser> {
     to: Option<u64>,
 
     /// Number of tasks to run in parallel. Defaults to the number of available CPUs.
-    #[arg(long)]
+    #[arg(long, value_parser = clap::value_parser!(u64).range(1..))]
     num_tasks: Option<u64>,
 
     /// Number of blocks each worker processes before grabbing the next chunk.
-    #[arg(long, default_value = "5000")]
+    #[arg(long, default_value = "5000", value_parser = clap::value_parser!(u64).range(1..))]
     blocks_per_chunk: u64,
 
     /// Continues with execution when an invalid block is encountered and collects these blocks.
@@ -157,15 +151,16 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
                 let db_at = {
                     |block_number: u64| {
                         let provider = provider_factory
-                            .database_provider_ro()
-                            .unwrap()
+                            .database_provider_ro()?
                             .disable_long_read_transaction_safety();
-                        let hash = provider.block_hash(block_number).unwrap().unwrap();
-                        StateProviderDatabase(
+                        let hash = provider.block_hash(block_number)?.ok_or_else(|| {
+                            eyre::eyre!("hash for block {block_number} not found in the database")
+                        })?;
+                        eyre::Ok(StateProviderDatabase(
                             state_provider_factory
                                 .state_provider_from_database(provider, hash)
                                 .into_evm_state_provider(),
-                        )
+                        ))
                     }
                 };
 
@@ -182,7 +177,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
                     }
                     let chunk_end = (chunk_start + blocks_per_chunk).min(max_block);
 
-                    let mut executor = evm_config.batch_executor(db_at(chunk_start - 1));
+                    let mut executor = evm_config.batch_executor(db_at(chunk_start - 1)?);
                     let mut executor_created = Instant::now();
 
                     'blocks: for block in chunk_start..chunk_end {
@@ -192,14 +187,14 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
 
                         let block = provider_factory
                             .recovered_block(block.into(), TransactionVariant::NoHash)?
-                            .unwrap();
+                            .ok_or_else(|| eyre::eyre!("block {block} not found in the database"))?;
 
                         let result = match executor.execute_one(&block) {
                             Ok(result) => result,
                             Err(err) => {
                                 if skip_invalid_blocks {
                                     executor =
-                                        evm_config.batch_executor(db_at(block.number()));
+                                        evm_config.batch_executor(db_at(block.number())?);
                                     let _ =
                                         info_tx.send((block, eyre::Report::new(err)));
                                     continue
@@ -224,7 +219,12 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
                         {
                             let correct_receipts = provider_factory
                                 .receipts_by_block(block.number().into())?
-                                .unwrap();
+                                .ok_or_else(|| {
+                                    eyre::eyre!(
+                                        "receipts for block {} not found in the database",
+                                        block.number()
+                                    )
+                                })?;
 
                             for (i, (receipt, correct_receipt)) in
                                 result.receipts.iter().zip(correct_receipts.iter()).enumerate()
@@ -262,7 +262,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
                                         error!(number=?block.number(), ?mismatch, "Gas usage mismatch");
                                         if skip_invalid_blocks {
                                             executor = evm_config
-                                                .batch_executor(db_at(block.number()));
+                                                .batch_executor(db_at(block.number())?);
                                             let _ = info_tx.send((block, err));
                                             continue 'blocks;
                                         }
@@ -275,7 +275,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
 
                             if skip_invalid_blocks {
                                 executor =
-                                    evm_config.batch_executor(db_at(block.number()));
+                                    evm_config.batch_executor(db_at(block.number())?);
                                 let _ = info_tx.send((block, err));
                                 continue 'blocks;
                             }
@@ -290,9 +290,9 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
                             let last_block = block.number();
                             let old_executor = std::mem::replace(
                                 &mut executor,
-                                evm_config.batch_executor(db_at(last_block)),
+                                evm_config.batch_executor(db_at(last_block)?),
                             );
-                            let bundle = old_executor.into_state().take_bundle();
+                            let bundle = old_executor.into_state();
                             verify_bundle_against_changesets(
                                 &provider,
                                 &bundle,
@@ -303,7 +303,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
                     }
 
                     // Full verification at chunk end for remaining unverified blocks
-                    let bundle = executor.into_state().take_bundle();
+                    let bundle = executor.into_state();
                     verify_bundle_against_changesets(
                         &provider,
                         &bundle,
@@ -340,13 +340,13 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
                     invalid_blocks.push(block.num_hash());
                 }
                 result = tasks.join_next() => {
-                    if let Some(result) = result {
-                        if matches!(result, Err(_) | Ok(Err(_))) {
-                            error!(?result);
-                            return Err(eyre::eyre!("Re-execution failed: {result:?}"));
+                    let Some(result) = result else { break };
+                    match result {
+                        Ok(Ok(())) => {}
+                        Ok(Err(err)) => return Err(err.wrap_err("Re-execution failed")),
+                        Err(err) => {
+                            return Err(eyre::Report::new(err).wrap_err("Re-execution failed"))
                         }
-                    } else {
-                        break;
                     }
                 }
                 _ = interval.tick() => {

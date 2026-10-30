@@ -379,6 +379,12 @@ impl<N: ProviderNodeTypes> DatabaseProviderFactory for BlockchainProvider<N> {
     }
 }
 
+impl<N: ProviderNodeTypes> AsRef<N::DB> for BlockchainProvider<N> {
+    fn as_ref(&self) -> &N::DB {
+        self.database.db_ref()
+    }
+}
+
 impl<N: ProviderNodeTypes> StaticFileProviderFactory for BlockchainProvider<N> {
     fn static_file_provider(&self) -> StaticFileProvider<Self::Primitives> {
         self.database.static_file_provider()
@@ -1064,6 +1070,7 @@ mod tests {
     use alloy_consensus::constants::EMPTY_ROOT_HASH;
     use alloy_eips::{BlockHashOrNumber, BlockNumHash, BlockNumberOrTag};
     use alloy_primitives::{keccak256, Address, BlockNumber, TxNumber, B256, U256};
+    use evm2::evm::AccountInfo;
     use itertools::Itertools;
     use rand::Rng;
     use reth_chain_state::{
@@ -1093,8 +1100,11 @@ mod tests {
         self, random_block, random_block_range, random_changeset_range, random_eoa_accounts,
         random_receipt, BlockParams, BlockRangeParams,
     };
-    use reth_trie::{updates::TrieUpdates, HashedPostState, HashedStorage, SortedTrieData};
-    use revm::database::{BundleState, OriginalValuesKnown};
+    use reth_trie::{
+        bundle_state::{BundleState, OriginalValuesKnown},
+        updates::TrieUpdates,
+        HashedPostState, HashedStorage, SortedTrieData,
+    };
     use std::{
         collections::{BTreeMap, HashMap},
         ops::{Bound, Range, RangeBounds},
@@ -1106,7 +1116,6 @@ mod tests {
         use crate::{StaticFileProviderFactory, StaticFileSegment, StaticFileWriter};
         use reth_storage_api::{StorageSettings, StorageSettingsCache, TrieWriter};
         use reth_trie::{test_utils::TrieTestHarness, MultiProofTargetsV2};
-        use revm::state::AccountInfo;
 
         let address = Address::with_last_byte(1);
         let other_address = Address::with_last_byte(2);
@@ -1152,7 +1161,7 @@ mod tests {
                 let (_, updates) = trie.get_root_with_updates(&changes);
                 trie.apply_changeset(changes);
                 storage.insert(slot, value);
-                let info = AccountInfo::from_balance(account.balance);
+                let info = AccountInfo::default().with_balance(account.balance);
                 output.state = BundleState::builder(number..=number)
                     .state_original_account_info(address, info.clone())
                     .state_present_account_info(address, info)
@@ -1224,11 +1233,11 @@ mod tests {
             let root = blocks[number].recovered_block().state_root;
             state
                 .multiproof_v2(
-                    Default::default(),
                     MultiProofTargetsV2 {
                         account_targets: vec![keccak256(other_address).into()],
                         ..Default::default()
                     },
+                    false,
                 )?
                 .account_proof(other_address, &[])?
                 .verify(root)?;
@@ -2125,7 +2134,7 @@ mod tests {
                     }),
                     database_changesets.iter().map(|block_changesets| {
                         block_changesets.iter().map(|(address, account, _)| {
-                            (*address, Some(Some((account.clone()).into())), [])
+                            (*address, Some(Some(account.clone().into())), [])
                         })
                     }),
                     Vec::new(),
@@ -2156,7 +2165,7 @@ mod tests {
                                     (address, None, Some(account.into()), Default::default())
                                 }),
                                 [in_memory_changesets.iter().map(|(address, account, _)| {
-                                    (*address, Some(Some((account.clone()).into())), Vec::new())
+                                    (*address, Some(Some(account.clone().into())), Vec::new())
                                 })],
                                 [],
                             ),

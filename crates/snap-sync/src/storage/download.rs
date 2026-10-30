@@ -237,9 +237,8 @@ mod tests {
     use super::*;
     use crate::{
         test_utils::{
-            account, generation, hashed_factory, insert_generation_headers, key, state_root,
-            storage_ranges, storage_root_of, stored_slots, verified_range, verified_repair,
-            ScriptedSnapClient,
+            account, generation, hashed_factory_with_roots, key, state_root, storage_ranges,
+            storage_root_of, stored_slots, verified_range, verified_repair, ScriptedSnapClient,
         },
         SnapAccountStore, SnapAttemptStore, SnapCatchUpStore, StateRepairs,
     };
@@ -284,8 +283,15 @@ mod tests {
 
     // An attempt that fetched all of `accounts` as one range, not yet committed.
     fn started(accounts: &[(B256, TrieAccount)]) -> (Factory, VerifiedRange) {
-        let factory = hashed_factory();
-        insert_generation_headers(&factory);
+        started_moving_to(accounts, accounts)
+    }
+
+    // `started`, with the block after the pivot committing to the state `moved`.
+    fn started_moving_to(
+        accounts: &[(B256, TrieAccount)],
+        moved: &[(B256, TrieAccount)],
+    ) -> (Factory, VerifiedRange) {
+        let factory = hashed_factory_with_roots(&[state_root(accounts), state_root(moved)]);
         let provider = factory.database_provider_rw().unwrap();
         let write = provider.start_snap_attempt(generation(1, state_root(accounts))).unwrap();
         provider.start_account_coverage(write).unwrap();
@@ -431,11 +437,11 @@ mod tests {
     #[tokio::test]
     async fn storage_part_way_through_resumes_at_the_new_root() {
         let accounts = accounts();
-        let (factory, range) = started(&accounts);
         let (large, small) = (large(), small());
         // The new pivot turned the first account into a contract, ahead of the carried one.
         let mut moved = accounts.clone();
         moved[0].1 = contract(1, &small);
+        let (factory, range) = started_moving_to(&accounts, &moved);
         let responses = [
             storage_ranges(1, &[&large[..1]], &large, &[B256::ZERO, key(1)]),
             storage_ranges(2, &[&small[..]], &small, &[]),

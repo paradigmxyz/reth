@@ -307,6 +307,7 @@ mod tests {
     use alloy_consensus::TxLegacy;
     use alloy_eips::eip4895::{Withdrawal, Withdrawals};
     use alloy_primitives::{map::B256Map, Address, Bytes, Signature, U256};
+    use evm2::bytecode::Bytecode;
     use reth_db_api::transaction::DbTxMut;
     use reth_ethereum_primitives::{BlockBody, Receipt, Transaction, TransactionSigned};
     use reth_primitives_traits::SealedHeader;
@@ -320,7 +321,6 @@ mod tests {
     use reth_stages::stages::MerkleStage;
     use reth_stages_api::{ExecInput, Stage, StageError};
     use reth_trie_common::{root::storage_root_unsorted, HashedStorage, TrieAccount};
-    use revm::bytecode::Bytecode;
     use std::collections::BTreeMap;
 
     type Factory = ProviderFactory<MockNodeTypesWithDB>;
@@ -508,26 +508,6 @@ mod tests {
         ));
         run_merkle(&provider, 1).unwrap();
         provider.verify_state_root(write).unwrap();
-    }
-
-    #[test]
-    fn a_header_committing_to_another_root_is_refused() {
-        // Ranges authenticate against the attempt's root, but completion answers to the header.
-        let header_root = B256::repeat_byte(0xcc);
-        let (factory, write, _) = downloaded(header_root, accounts().len());
-        let provider = factory.database_provider_rw().unwrap();
-        start(&provider, write).unwrap();
-
-        assert!(matches!(run_merkle(&provider, 1), Err(StageError::Block { .. })));
-        match provider.verify_state_root(write) {
-            Err(SnapSyncError::Provider(ProviderError::StateRootMismatch(mismatch))) => {
-                assert_eq!(
-                    mismatch.root,
-                    GotExpected { got: state_root(&accounts()), expected: header_root }
-                );
-            }
-            other => panic!("expected a state root mismatch, got {other:?}"),
-        }
     }
 
     #[test]

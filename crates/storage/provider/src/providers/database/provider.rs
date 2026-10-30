@@ -74,13 +74,11 @@ use reth_storage_api::{
 use reth_storage_errors::provider::{ProviderResult, StaticFileWriterError};
 use reth_storage_overlay::OverlayManager;
 use reth_trie::{
+    bundle_state::{PlainStateReverts, PlainStorageChangeset, PlainStorageRevert, StateChangeset},
     updates::{StorageTrieUpdatesSorted, TrieUpdatesSorted},
     HashedPostStateSorted, SortedTrieData,
 };
 use reth_trie_db::{DatabaseStorageTrieCursor, TrieTableAdapter};
-use revm::database::states::{
-    PlainStateReverts, PlainStorageChangeset, PlainStorageRevert, StateChangeset,
-};
 use smallvec::SmallVec;
 use std::{
     cmp::Ordering,
@@ -879,6 +877,16 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
     /// This includes calculating the resulted state root and comparing it with the parent block
     /// state root.
     pub fn unwind_trie_state_from(&self, from: BlockNumber) -> ProviderResult<()> {
+        let finish =
+            self.get_stage_checkpoint(reth_stages_types::StageId::Finish)?.ok_or_else(|| {
+                ProviderError::InsufficientChangesets { requested: from, available: 0..=0 }
+            })?;
+
+        // Calculate changesets before modifying hashed state used to reconstruct historical tries.
+        let trie_revert = self
+            .overlay_manager
+            .get_or_compute_cached_changesets_range(self, from..=finish.block_number)?;
+
         let changed_accounts = self.account_changesets_range(from..)?;
 
         // Unwind account hashes.
@@ -895,20 +903,6 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
         // Unwind storage history indices.
         self.unwind_storage_history_indices(changed_storages.iter().copied())?;
 
-        // Unwind accounts/storages trie tables using the revert.
-        // Get the database tip block number
-        let db_tip_block = self
-            .get_stage_checkpoint(reth_stages_types::StageId::Finish)?
-            .as_ref()
-            .map(|chk| chk.block_number)
-            .ok_or_else(|| ProviderError::InsufficientChangesets {
-                requested: from,
-                available: 0..=0,
-            })?;
-
-        let trie_revert = self
-            .overlay_manager
-            .get_or_compute_cached_changesets_range(self, from..=db_tip_block)?;
         self.write_trie_updates_sorted(&trie_revert)?;
 
         Ok(())
@@ -4103,6 +4097,7 @@ mod tests {
         map::{AddressMap, B256Map},
         U256,
     };
+    use evm2::evm::AccountInfo;
     use reth_chain_state::{test_utils::TestBlockBuilder, ExecutedBlock};
     use reth_db_api::models::StorageSettings;
     use reth_ethereum_primitives::Receipt;
@@ -4111,10 +4106,9 @@ mod tests {
     use reth_storage_api::{DatabaseProviderFactory, MetadataWriter};
     use reth_testing_utils::generators::{self, random_block, BlockParams};
     use reth_trie::{
-        HashedPostState, KeccakKeyHasher, Nibbles, SortedTrieData, StoredNibbles,
-        StoredNibblesSubKey,
+        bundle_state::BundleState, HashedPostState, KeccakKeyHasher, Nibbles, SortedTrieData,
+        StoredNibbles, StoredNibblesSubKey,
     };
-    use revm::{database::BundleState, state::AccountInfo};
     use std::{sync::mpsc, time::Duration};
 
     /// Seeds block zero through the writer core because [`SaveBlocksInput`] only describes
@@ -4989,6 +4983,50 @@ mod tests {
     }
 
     #[test]
+    fn unwind_restores_trie_nodes_masked_above_the_frontier() {
+        let factory = create_test_provider_factory();
+        let blocks = TestBlockBuilder::eth().get_executed_blocks(0..11).collect::<Vec<_>>();
+        let provider = factory.provider_rw().unwrap();
+        for block in &blocks {
+            provider.insert_block(block.recovered_block()).unwrap();
+        }
+        for block in &blocks[6..] {
+            factory.overlay_manager().insert_block(block.clone());
+        }
+        provider
+            .save_stage_checkpoint(
+                StageId::Finish,
+                StageCheckpoint::new(10)
+                    .with_finish_stage_checkpoint(FinishCheckpoint { partial_state_trie: Some(5) }),
+            )
+            .unwrap();
+        let address = Address::with_last_byte(1);
+        // Block 9 deletes storage that existed at block 4. Its masking leaves the trie tables
+        // empty despite the persisted frontier being block 5; the changeset restores that storage.
+        provider
+            .tx_ref()
+            .put::<tables::AccountChangeSets>(
+                9,
+                AccountBeforeTx { address, info: Some(Account { nonce: 1, ..Default::default() }) },
+            )
+            .unwrap();
+        for slot in 0..257 {
+            provider
+                .tx_ref()
+                .put::<tables::StorageChangeSets>(
+                    BlockNumberAddress((9, address)),
+                    StorageEntry { key: B256::from(U256::from(slot)), value: U256::from(1) },
+                )
+                .unwrap();
+        }
+        provider.commit().unwrap();
+        let provider = factory.provider_rw().unwrap();
+        assert_eq!(provider.tx_ref().entries::<tables::StoragesTrie>().unwrap(), 0);
+        provider.unwind_trie_state_from(9).unwrap();
+        assert!(provider.tx_ref().entries::<tables::StoragesTrie>().unwrap() > 0);
+    }
+
+    #[test]
     fn remove_block_and_execution_above_returns_persistence_frontiers() {
         let factory = create_test_provider_factory();
         let mut test_block_builder = TestBlockBuilder::eth().with_state();
@@ -5421,7 +5459,6 @@ mod tests {
     #[test]
     fn test_write_state_hashed() {
         use reth_trie::{HashedPostState, KeccakKeyHasher};
-        use revm::{database::BundleState, state::AccountInfo};
 
         let factory = create_test_provider_factory();
         factory.set_storage_settings_cache(StorageSettings::v2());
