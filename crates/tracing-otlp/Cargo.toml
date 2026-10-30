@@ -9,10 +9,15 @@ repository.workspace = true
 exclude.workspace = true
 
 [dependencies]
+# reth
+reth-fs-util = { workspace = true, optional = true }
+
 # obs
 opentelemetry_sdk = { workspace = true, optional = true }
 opentelemetry = { workspace = true, optional = true }
 opentelemetry-otlp = { workspace = true, optional = true, features = ["grpc-tonic", "reqwest-rustls"] }
+opentelemetry-proto = { workspace = true, optional = true, features = ["gen-tonic-messages", "trace"] }
+prost = { workspace = true, optional = true }
 opentelemetry-semantic-conventions = { workspace = true, optional = true }
 opentelemetry-appender-tracing = { workspace = true, optional = true }
 tracing-opentelemetry = { workspace = true, optional = true }
@@ -23,7 +28,7 @@ tracing = { workspace = true, optional = true }
 base64 = { version = "0.23", optional = true }
 clap = { workspace = true, features = ["derive"] }
 eyre.workspace = true
-url.workspace = true
+url = { workspace = true, features = ["std"] }
 
 [lints]
 workspace = true
@@ -38,6 +43,9 @@ otlp = [
     "tracing",
     "tracing-subscriber",
     "base64",
+    "reth-fs-util",
+    "opentelemetry-proto",
+    "prost",
 ]
 
 otlp-logs = [
