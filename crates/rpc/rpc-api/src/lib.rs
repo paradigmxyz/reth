@@ -37,6 +37,7 @@ pub use testing::{
     TestingBuildBlockRequestV1, TestingBuildBlockResponseV1, TESTING_BUILD_BLOCK_V1,
     TESTING_COMMIT_BLOCK_V1,
 };
+pub use trace::TraceAddressIndex;
 
 /// re-export of all server traits
 pub use servers::*;
