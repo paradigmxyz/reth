@@ -1,4 +1,7 @@
-use self::blob_cache::BlobValidationCache;
+use self::{
+    blob_cache::BlobValidationCache,
+    parent_bal::{committed_bal, ParentBalDb, SharedBal},
+};
 use alloy_consensus::{
     BlobTransactionValidationError, BlockHeader, EnvKzgSettings, Transaction, TxReceipt,
 };
@@ -39,6 +42,7 @@ use reth_primitives_traits::{
     SealedBlock, SealedHeaderFor,
 };
 use reth_rpc_api::BlockSubmissionValidationApiServer;
+use reth_rpc_eth_types::EthStateCache;
 use reth_rpc_server_types::result::{internal_rpc_err, invalid_params_rpc_err};
 use reth_storage_api::{
     BlockReaderIdExt, HashedPostStateProvider, StateProvider, StateProviderFactory,
@@ -46,17 +50,23 @@ use reth_storage_api::{
 use reth_tasks::Runtime;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use std::sync::Arc;
+use std::{
+    sync::Arc,
+    time::{Duration, Instant},
+};
 use tokio::sync::{oneshot, RwLock};
-use tracing::warn;
+use tracing::{instrument::WithSubscriber, warn, Instrument};
 
 mod blob_cache;
+mod parent_bal;
 
 /// The type that implements the `validation` rpc namespace trait
-#[derive(Clone, Debug, derive_more::Deref)]
+#[derive(Clone, derive_more::Deref)]
 pub struct ValidationApi<Provider, E: ConfigureEvm, T: PayloadTypes> {
     #[deref]
     inner: Arc<ValidationApiInner<Provider, E, T>>,
+    /// Shared decoded BAL cache for this API handle and its subsequent clones.
+    parent_bal_cache: Option<EthStateCache<E::Primitives>>,
 }
 
 impl<Provider, E, T> ValidationApi<Provider, E, T>
@@ -101,7 +111,16 @@ where
         let hash_gauge = gauge!("builder_validation_disallow_hash", "hash" => disallow_hash);
         hash_gauge.set(1.0);
 
-        Self { inner }
+        Self { inner, parent_bal_cache: None }
+    }
+
+    /// Enables upfront parent BAL reads through the shared ETH cache.
+    ///
+    /// Each eligible submission requests its parent's decoded BAL before entering the execution
+    /// worker. Existing clones retain their configuration; omitting this uses provider-only reads.
+    pub fn with_parent_bal_cache(mut self, cache: EthStateCache<E::Primitives>) -> Self {
+        self.parent_bal_cache = Some(cache);
+        self
     }
 
     /// Returns the cached reads for the given head hash.
@@ -114,36 +133,39 @@ where
         }
     }
 
-    /// Updates the cached state for the given head hash.
+    /// Updates the read cache without mixing values from different parents.
     async fn update_cached_reads(&self, head: B256, cached_state: CachedReads) {
         let mut cache = self.inner.cached_state.write().await;
         if cache.0 == head {
             cache.1.extend(cached_state);
         } else {
-            *cache = (head, cached_state)
+            *cache = (head, cached_state);
         }
     }
 
-    /// Runs the validation on a blocking task.
+    /// Runs validation on the ordinary blocking pool after asynchronous BAL acquisition.
     ///
-    /// The validation is skipped if the request is dropped before it starts and stopped if the
-    /// request is dropped while the validation waits for the cached reads.
-    async fn spawn_validation<F>(&self, validation: F) -> RpcResult<()>
+    /// Dropped requests are skipped before execution and stopped while awaiting cached reads.
+    async fn spawn_validation<F>(&self, validation: F) -> Result<(), ValidationApiError>
     where
         F: Future<Output = Result<(), ValidationApiError>> + Send + 'static,
     {
         let (mut tx, rx) = oneshot::channel();
-
-        self.task_spawner.spawn_blocking_task(async move {
-            let result = tokio::select! {
-                biased;
-                _ = tx.closed() => return,
-                result = validation => result.map_err(ErrorObject::from),
-            };
-            let _ = tx.send(result);
-        });
-
-        rx.await.map_err(|_| internal_rpc_err("Internal blocking task error"))?
+        self.task_spawner.spawn_blocking_task(
+            async move {
+                let result = tokio::select! {
+                    biased;
+                    _ = tx.closed() => return,
+                    result = validation => result,
+                };
+                let _ = tx.send(result);
+            }
+            .in_current_span()
+            .with_current_subscriber(),
+        );
+        rx.await.map_err(|_| {
+            ProviderError::other(std::io::Error::other("Internal blocking task error"))
+        })?
     }
 }
 
@@ -163,6 +185,65 @@ where
         message: BidTrace,
         registered_gas_limit: u64,
         decoded_bal: Option<DecodedBal>,
+    ) -> Result<(), ValidationApiError> {
+        let parent_bal = self.parent_bal(block.parent_hash(), block.timestamp()).await?;
+        let this =
+            Self { inner: self.inner.clone(), parent_bal_cache: self.parent_bal_cache.clone() };
+        self.spawn_validation(async move {
+            this.validate_message_against_block_inner(
+                block,
+                message,
+                registered_gas_limit,
+                decoded_bal,
+                parent_bal,
+            )
+            .await
+        })
+        .await
+    }
+
+    /// Get the BAL before holding a blocking worker needed by the cache's provider fetches.
+    async fn parent_bal(
+        &self,
+        hash: B256,
+        child_timestamp: u64,
+    ) -> Result<Option<SharedBal>, ValidationApiError> {
+        let Some(cache) = &self.parent_bal_cache else { return Ok(None) };
+        if !self.provider.chain_spec().is_amsterdam_active_at_timestamp(child_timestamp) {
+            return Ok(None)
+        }
+        let start = Instant::now();
+        let bal = tokio::select! {
+            biased;
+            _ = self.task_spawner.on_shutdown_signal().clone() => {
+                return Err(ProviderError::other(std::io::Error::other("validation cancelled")).into())
+            }
+            result = tokio::time::timeout(PARENT_BAL_TIMEOUT, cache.get_bal(hash)) => match result {
+                Ok(Ok(bal)) => bal,
+                Ok(Err(err)) => {
+                    warn!(target: "rpc::validation", %err, %hash, "Parent BAL unavailable; using state provider");
+                    None
+                }
+                Err(err) => {
+                    warn!(target: "rpc::validation", %err, %hash, "Parent BAL acquisition timed out; using state provider");
+                    None
+                }
+            },
+        };
+        metrics::histogram!("builder.validation.parent_bal.load_seconds")
+            .record(start.elapsed().as_secs_f64());
+        metrics::counter!("builder.validation.parent_bal.loads").increment(1);
+        Ok(bal)
+    }
+
+    /// Validation body for callers already executing on the appropriate blocking worker.
+    async fn validate_message_against_block_inner(
+        &self,
+        block: RecoveredBlock<<E::Primitives as NodePrimitives>::Block>,
+        message: BidTrace,
+        registered_gas_limit: u64,
+        decoded_bal: Option<DecodedBal>,
+        parent_bal: Option<SharedBal>,
     ) -> Result<(), ValidationApiError> {
         self.validate_message_against_header(block.sealed_header(), &message)?;
 
@@ -230,12 +311,14 @@ where
         let state_provider = self.provider.state_by_block_hash(parent_header_hash)?;
 
         let mut request_cache = self.cached_reads(parent_header_hash).await;
-
+        let parent_bal = committed_bal(parent_bal, parent_header.block_access_list_hash());
         let (output, block_access_list_hash) = {
-            let cached_db = request_cache
-                .as_db_mut(StateProviderDatabase::new((&state_provider).into_evm_state_provider()));
+            let parent_db = ParentBalDb::new(
+                StateProviderDatabase::new((&state_provider).into_evm_state_provider()),
+                parent_bal.as_ref().map(|bal| bal.as_bal().as_ref()),
+            );
+            let cached_db = request_cache.as_db_mut(parent_db);
             let mut executor = self.evm_config.batch_executor(cached_db);
-
             let result = executor.execute_one(&block)?;
 
             // The executor rebuilds the block access list whenever the block header contains a
@@ -259,7 +342,6 @@ where
             (BlockExecutionOutput { state, result }, block_access_list_hash)
         };
 
-        // update the cached reads
         self.update_cached_reads(parent_header_hash, request_cache).await;
 
         self.consensus.validate_block_post_execution(
@@ -442,6 +524,7 @@ where
     async fn validate_builder_submission_v3(
         &self,
         request: BuilderBlockValidationRequestV3,
+        parent_bal: Option<SharedBal>,
     ) -> Result<(), ValidationApiError> {
         let block = self.recover_payload(ExecutionData {
             payload: ExecutionPayload::V3(request.request.execution_payload),
@@ -451,11 +534,12 @@ where
             }),
         })?;
 
-        self.validate_message_against_block(
+        self.validate_message_against_block_inner(
             block,
             request.request.message,
             request.registered_gas_limit,
             None,
+            parent_bal,
         )
         .await
     }
@@ -464,6 +548,7 @@ where
     async fn validate_builder_submission_v4(
         &self,
         request: BuilderBlockValidationRequestV4,
+        parent_bal: Option<SharedBal>,
     ) -> Result<(), ValidationApiError> {
         let block = self.recover_payload(ExecutionData {
             payload: ExecutionPayload::V3(request.request.execution_payload),
@@ -480,11 +565,12 @@ where
             ),
         })?;
 
-        self.validate_message_against_block(
+        self.validate_message_against_block_inner(
             block,
             request.request.message,
             request.registered_gas_limit,
             None,
+            parent_bal,
         )
         .await
     }
@@ -493,6 +579,7 @@ where
     async fn validate_builder_submission_v5(
         &self,
         request: BuilderBlockValidationRequestV5,
+        parent_bal: Option<SharedBal>,
     ) -> Result<(), ValidationApiError> {
         let payload = ExecutionPayload::V3(request.request.execution_payload);
         validate_message_against_payload(&request.request.message, &payload)?;
@@ -525,11 +612,12 @@ where
             }
         }
 
-        self.validate_message_against_block(
+        self.validate_message_against_block_inner(
             block,
             request.request.message,
             request.registered_gas_limit,
             None,
+            parent_bal,
         )
         .await
     }
@@ -538,6 +626,7 @@ where
     async fn validate_builder_submission_v6(
         &self,
         request: BuilderBlockValidationRequestV6,
+        parent_bal: Option<SharedBal>,
     ) -> Result<(), ValidationApiError> {
         let payload = ExecutionPayload::V4(request.request.execution_payload);
         validate_message_against_payload(&request.request.message, &payload)?;
@@ -573,11 +662,12 @@ where
             }
         }
 
-        self.validate_message_against_block(
+        self.validate_message_against_block_inner(
             block,
             request.request.message,
             request.registered_gas_limit,
             Some(decoded_bal),
+            parent_bal,
         )
         .await
     }
@@ -615,9 +705,15 @@ where
         &self,
         request: BuilderBlockValidationRequestV3,
     ) -> RpcResult<()> {
+        let payload = &request.request.execution_payload.payload_inner.payload_inner;
+        let parent_bal = self
+            .parent_bal(payload.parent_hash, payload.timestamp)
+            .await
+            .map_err(ErrorObject::from)?;
         let this = self.clone();
-        let validation = async move { Self::validate_builder_submission_v3(&this, request).await };
-        self.spawn_validation(validation).await
+        let validation =
+            async move { Self::validate_builder_submission_v3(&this, request, parent_bal).await };
+        self.spawn_validation(validation).await.map_err(ErrorObject::from)
     }
 
     /// Validates a block submitted to the relay
@@ -625,9 +721,15 @@ where
         &self,
         request: BuilderBlockValidationRequestV4,
     ) -> RpcResult<()> {
+        let payload = &request.request.execution_payload.payload_inner.payload_inner;
+        let parent_bal = self
+            .parent_bal(payload.parent_hash, payload.timestamp)
+            .await
+            .map_err(ErrorObject::from)?;
         let this = self.clone();
-        let validation = async move { Self::validate_builder_submission_v4(&this, request).await };
-        self.spawn_validation(validation).await
+        let validation =
+            async move { Self::validate_builder_submission_v4(&this, request, parent_bal).await };
+        self.spawn_validation(validation).await.map_err(ErrorObject::from)
     }
 
     /// Validates a block submitted to the relay
@@ -635,9 +737,15 @@ where
         &self,
         request: BuilderBlockValidationRequestV5,
     ) -> RpcResult<()> {
+        let payload = &request.request.execution_payload.payload_inner.payload_inner;
+        let parent_bal = self
+            .parent_bal(payload.parent_hash, payload.timestamp)
+            .await
+            .map_err(ErrorObject::from)?;
         let this = self.clone();
-        let validation = async move { Self::validate_builder_submission_v5(&this, request).await };
-        self.spawn_validation(validation).await
+        let validation =
+            async move { Self::validate_builder_submission_v5(&this, request, parent_bal).await };
+        self.spawn_validation(validation).await.map_err(ErrorObject::from)
     }
 
     /// Validates a block submitted to the relay
@@ -645,9 +753,15 @@ where
         &self,
         request: BuilderBlockValidationRequestV6,
     ) -> RpcResult<()> {
+        let payload = &request.request.execution_payload.payload_inner.payload_inner.payload_inner;
+        let parent_bal = self
+            .parent_bal(payload.parent_hash, payload.timestamp)
+            .await
+            .map_err(ErrorObject::from)?;
         let this = self.clone();
-        let validation = async move { Self::validate_builder_submission_v6(&this, request).await };
-        self.spawn_validation(validation).await
+        let validation =
+            async move { Self::validate_builder_submission_v6(&this, request, parent_bal).await };
+        self.spawn_validation(validation).await.map_err(ErrorObject::from)
     }
 }
 
@@ -665,10 +779,7 @@ pub struct ValidationApiInner<Provider, E: ConfigureEvm, T: PayloadTypes> {
     disallow: AddressSet,
     /// The maximum block distance - parent to latest - allowed for validation
     validation_window: u64,
-    /// Cached state reads to avoid redundant disk I/O across multiple validation attempts
-    /// targeting the same state. Stores a tuple of (`block_hash`, `cached_reads`) for the
-    /// latest head block state. Uses async `RwLock` to safely handle concurrent validation
-    /// requests.
+    /// Cached state reads targeting the same parent hash.
     cached_state: RwLock<(B256, CachedReads)>,
     /// Recently validated blob, commitment, and cell-proof tuples shared by V2 submissions.
     validated_blobs: BlobValidationCache,
@@ -734,6 +845,18 @@ impl<Provider, E: ConfigureEvm, T: PayloadTypes> fmt::Debug for ValidationApiInn
         f.debug_struct("ValidationApiInner").finish_non_exhaustive()
     }
 }
+
+impl<Provider, E: ConfigureEvm, T: PayloadTypes> fmt::Debug for ValidationApi<Provider, E, T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("ValidationApi")
+            .field("inner", &self.inner)
+            .field("parent_bal_enabled", &self.parent_bal_cache.is_some())
+            .finish()
+    }
+}
+
+/// Optional BAL lookup must not delay provider-only fallback indefinitely.
+const PARENT_BAL_TIMEOUT: Duration = Duration::from_secs(1);
 
 /// Configuration for validation API.
 #[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
@@ -838,27 +961,33 @@ pub(crate) struct ValidationMetrics {
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        hash_disallow_list, validate_message_against_payload, AddressSet, ValidationApi,
-        ValidationApiConfig, ValidationApiError,
-    };
+    use super::*;
     use alloy_consensus::{BlockHeader, Header};
-    use alloy_primitives::{Address, B256, U256};
+    use alloy_eip7928::StorageChange;
+    use alloy_eips::NumHash;
+    use alloy_primitives::{Address, Bytes, B256, U256};
     use alloy_rpc_types_beacon::relay::BidTrace;
     use alloy_rpc_types_engine::{ExecutionData, ExecutionPayload, ExecutionPayloadV1};
-    use evm2::evm::AccountInfo;
+    use evm2::evm::{
+        AccountBal, AccountInfo, Bal, BalChanges, BlockAccessIndex, Database, EmptyDB,
+    };
     use reth_consensus::noop::NoopConsensus;
     use reth_engine_primitives::PayloadValidator;
     use reth_ethereum_engine_primitives::EthPayloadTypes;
-    use reth_ethereum_primitives::Block;
+    use reth_ethereum_primitives::{Block, EthPrimitives};
     use reth_evm_ethereum::EthEvmConfig;
     use reth_execution_types::BlockExecutionOutput;
     use reth_payload_primitives::NewPayloadError;
     use reth_primitives_traits::{RecoveredBlock, SealedBlock, SealedHeader};
-    use reth_provider::test_utils::MockEthProvider;
+    use reth_provider::{test_utils::MockEthProvider, InMemoryBalStore};
+    use reth_rpc_eth_types::EthStateCacheConfig;
+    use reth_storage_api::{BalStoreHandle, RawBal};
     use reth_tasks::Runtime;
     use reth_trie_common::bundle_state::{AccountStatus, BundleAccount, BundleState};
-    use std::sync::Arc;
+    use std::{
+        sync::{mpsc, Arc},
+        time::Duration,
+    };
 
     fn test_execution_payload() -> ExecutionPayload {
         ExecutionPayload::V1(ExecutionPayloadV1 {
@@ -1203,5 +1332,213 @@ mod tests {
             },
         );
         state
+    }
+
+    #[tokio::test]
+    async fn cached_reads_are_isolated_by_parent_without_premature_eviction() {
+        let api = test_validation_api(MockEthProvider::default());
+        let first = B256::repeat_byte(1);
+        let fork = B256::repeat_byte(2);
+        let mut reads = api.cached_reads(first).await;
+        reads.insert_account(
+            Address::ZERO,
+            AccountInfo { nonce: 9, ..Default::default() },
+            Default::default(),
+        );
+        api.update_cached_reads(first, reads).await;
+        assert!(api.cached_reads(fork).await.accounts.is_empty());
+        assert_eq!(
+            api.cached_reads(first).await.accounts[&Address::ZERO].info.as_ref().unwrap().nonce,
+            9
+        );
+        api.update_cached_reads(fork, Default::default()).await;
+        assert!(api.cached_reads(first).await.accounts.is_empty());
+    }
+
+    fn storage_bal(value: u64) -> SharedBal {
+        let mut account = AccountBal::default();
+        account.storage.storage.insert(
+            U256::from(1),
+            BalChanges::new(vec![StorageChange::new(BlockAccessIndex::new(4), U256::from(value))]),
+        );
+        let mut bal = Bal::default();
+        bal.accounts.insert(Address::repeat_byte(1), account);
+        let raw: Bytes = alloy_rlp::encode(bal.to_alloy_bal()).into();
+        let hash = alloy_primitives::keccak256(&raw);
+        Arc::new(DecodedBal::new_unchecked(Arc::new(bal), raw, hash))
+    }
+
+    fn parent_bal_api(
+        mut provider: MockEthProvider,
+    ) -> ValidationApi<MockEthProvider, EthEvmConfig, EthPayloadTypes> {
+        let chain = Arc::new(
+            reth_chainspec::ChainSpecBuilder::from(&*reth_chainspec::MAINNET)
+                .amsterdam_activated()
+                .build(),
+        );
+        provider.chain_spec = chain.clone();
+        let cache = EthStateCache::<EthPrimitives>::spawn_with(
+            provider.clone(),
+            EthStateCacheConfig::default(),
+            Runtime::test(),
+        );
+        let mut api = test_validation_api(provider).with_parent_bal_cache(cache);
+        Arc::get_mut(&mut api.inner).unwrap().evm_config = EthEvmConfig::new(chain);
+        api
+    }
+
+    #[tokio::test]
+    async fn upfront_requests_reuse_the_eth_cache_and_select_the_exact_parent() {
+        let api = parent_bal_api(MockEthProvider::default());
+        let cache = api.parent_bal_cache.as_ref().unwrap().clone();
+        let first = B256::repeat_byte(1);
+        let fork = B256::repeat_byte(2);
+        for (hash, value) in [(first, 42), (fork, 77)] {
+            cache.insert_bal(hash, Arc::unwrap_or_clone(storage_bal(value)));
+        }
+        let original = api.parent_bal(first, 1).await.unwrap().unwrap();
+        // Even with a populated read cache, the next submission asks EthStateCache again.
+        api.update_cached_reads(first, Default::default()).await;
+        let repeated = api.parent_bal(first, 1).await.unwrap().unwrap();
+        assert!(Arc::ptr_eq(&original, &repeated));
+        let fork_bal = api.parent_bal(fork, 1).await.unwrap().unwrap();
+        assert_eq!(
+            ParentBalDb::new(EmptyDB::default(), Some(fork_bal.as_bal().as_ref()))
+                .get_storage(&Address::repeat_byte(1), &U256::from(1))
+                .unwrap(),
+            U256::from(77)
+        );
+        assert!(api.parent_bal(B256::repeat_byte(3), 1).await.unwrap().is_none());
+        let unconfigured = test_validation_api(MockEthProvider::default());
+        let original_handle = unconfigured.clone();
+        let configured = unconfigured.with_parent_bal_cache(cache);
+        assert!(original_handle.parent_bal_cache.is_none());
+        assert!(configured.parent_bal_cache.is_some());
+    }
+
+    #[tokio::test]
+    async fn unavailable_and_pre_amsterdam_bal_use_provider_fallback() {
+        let provider = MockEthProvider::default();
+        let cache_runtime = Runtime::test();
+        let cache = EthStateCache::<EthPrimitives>::spawn_with(
+            provider.clone(),
+            EthStateCacheConfig::default(),
+            cache_runtime.clone(),
+        );
+        cache_runtime.graceful_shutdown();
+        cache_runtime.on_shutdown_signal().clone().await;
+        let pre_amsterdam =
+            test_validation_api(provider.clone()).with_parent_bal_cache(cache.clone());
+        assert!(pre_amsterdam.parent_bal(B256::ZERO, 1).await.unwrap().is_none());
+        let active = parent_bal_api(provider).with_parent_bal_cache(cache);
+        assert!(active.parent_bal(B256::ZERO, 1).await.unwrap().is_none());
+    }
+
+    fn single_blocking_runtime() -> tokio::runtime::Runtime {
+        tokio::runtime::Builder::new_current_thread()
+            .max_blocking_threads(1)
+            .enable_all()
+            .build()
+            .unwrap()
+    }
+
+    #[test]
+    fn upfront_public_validation_does_not_hold_the_bal_fetch_worker() {
+        let runtime = single_blocking_runtime();
+        runtime.block_on(async {
+            let mut provider = MockEthProvider::default();
+            let bal = storage_bal(42);
+            let parent = SealedHeader::seal_slow(Header {
+                gas_limit: 30_000_000,
+                block_access_list_hash: Some(bal.hash()),
+                ..Default::default()
+            });
+            provider.add_block(
+                parent.hash(),
+                Block { header: parent.clone_header(), body: Default::default() },
+            );
+            provider.bal_store = BalStoreHandle::new(InMemoryBalStore::new(Default::default()));
+            provider
+                .bal_store
+                .insert(NumHash::new(0, parent.hash()), RawBal::from(bal.as_raw().clone()))
+                .unwrap();
+            let block = RecoveredBlock::new_unhashed(
+                Block {
+                    header: Header {
+                        parent_hash: parent.hash(),
+                        number: 1,
+                        timestamp: 12,
+                        gas_limit: parent.gas_limit(),
+                        base_fee_per_gas: Some(0),
+                        excess_blob_gas: Some(0),
+                        parent_beacon_block_root: Some(B256::ZERO),
+                        block_access_list_hash: Some(B256::ZERO),
+                        ..Default::default()
+                    },
+                    body: reth_ethereum_primitives::BlockBody {
+                        withdrawals: Some(Default::default()),
+                        ..Default::default()
+                    },
+                },
+                vec![],
+            );
+            let message = BidTrace {
+                block_hash: block.hash(),
+                parent_hash: parent.hash(),
+                gas_limit: block.gas_limit(),
+                ..Default::default()
+            };
+            let api = parent_bal_api(provider.clone());
+            for _ in 0..2 {
+                provider.state_roots.lock().push(block.state_root());
+                tokio::time::timeout(
+                    Duration::from_secs(2),
+                    api.validate_message_against_block(
+                        block.clone(),
+                        message.clone(),
+                        block.gas_limit(),
+                        None,
+                    ),
+                )
+                .await
+                .unwrap()
+                .unwrap();
+            }
+            let cached = api.parent_bal(parent.hash(), 12).await.unwrap().unwrap();
+            assert_eq!(cached.hash(), bal.hash());
+        });
+        runtime.shutdown_timeout(Duration::from_secs(2));
+    }
+
+    #[test]
+    fn timed_out_upfront_fetch_falls_back_and_later_requests_retry() {
+        let runtime = single_blocking_runtime();
+        runtime.block_on(async {
+            let api = parent_bal_api(MockEthProvider::default());
+            let (entered_tx, entered_rx) = oneshot::channel();
+            let (release_tx, release_rx) = mpsc::channel();
+            let blocker = api.task_spawner.spawn_blocking(move || {
+                entered_tx.send(()).unwrap();
+                release_rx.recv_timeout(Duration::from_secs(3)).unwrap();
+            });
+            tokio::time::timeout(Duration::from_secs(2), entered_rx).await.unwrap().unwrap();
+            let hash = B256::repeat_byte(1);
+            assert!(tokio::time::timeout(Duration::from_secs(2), api.parent_bal(hash, 1))
+                .await
+                .unwrap()
+                .unwrap()
+                .is_none());
+            release_tx.send(()).unwrap();
+            blocker.await.unwrap();
+            api.parent_bal_cache
+                .as_ref()
+                .unwrap()
+                .insert_bal(hash, Arc::unwrap_or_clone(storage_bal(42)));
+            assert_eq!(
+                api.parent_bal(hash, 1).await.unwrap().unwrap().hash(),
+                storage_bal(42).hash()
+            );
+        });
+        runtime.shutdown_timeout(Duration::from_secs(2));
     }
 }
