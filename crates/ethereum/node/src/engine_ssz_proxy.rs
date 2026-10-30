@@ -22,11 +22,11 @@ use alloy_rpc_types_engine::{
         ForkchoiceUpdateAmsterdam, ForkchoiceUpdateCancun, ForkchoiceUpdateOsaka,
         ForkchoiceUpdateParis, ForkchoiceUpdatePrague, ForkchoiceUpdateResponse,
         ForkchoiceUpdateShanghai, Optional, PayloadStatus as EngineSszPayloadStatus,
-        PayloadStatusKind, MAX_BLOBS_REQUEST, MAX_BODIES_REQUEST,
+        PayloadStatusKind, MAX_BLOBS_REQUEST, MAX_BODIES_REQUEST, MAX_ERROR_BYTES,
     },
     CancunPayloadFields, ExecutionData, ExecutionPayload, ExecutionPayloadBodyV1,
     ExecutionPayloadFieldV2, ExecutionPayloadSidecar, ForkchoiceState, PayloadAttributes,
-    PayloadId, PraguePayloadFields,
+    PayloadId, PayloadStatusEnum, PraguePayloadFields,
 };
 use futures::future::{BoxFuture, Either};
 use http_body_util::{BodyExt, LengthLimitError, Limited};
@@ -812,7 +812,7 @@ where
     Validator: EngineApiValidator<EthEngineTypes>,
     ChainSpec: EthereumHardforks + Send + Sync + 'static,
 {
-    let status = match fork.payloads_version() {
+    let mut status = match fork.payloads_version() {
         1 => engine_api.new_payload_v1(payload).await,
         2 => engine_api.new_payload_v2(payload).await,
         3 => engine_api.new_payload_v3(payload).await,
@@ -821,6 +821,10 @@ where
         _ => return Err(problem_response(STATUS_BAD_REQUEST, "unsupported-fork", None)),
     }
     .map_err(engine_error_response)?;
+    // The SSZ error string is bounded, truncate it rather than losing the INVALID verdict.
+    if let PayloadStatusEnum::Invalid { validation_error } = &mut status.status {
+        validation_error.truncate(validation_error.floor_char_boundary(MAX_ERROR_BYTES));
+    }
     EngineSszPayloadStatus::try_from(status).map_err(|error| {
         problem_response(STATUS_INTERNAL_SERVER_ERROR, "internal", Some(error.to_string()))
     })
@@ -1374,6 +1378,55 @@ mod tests {
             decode_new_payload_request(EngineSszFork::Paris, &paris.as_ssz_bytes()),
             Err(PayloadDecodeError::Ssz(_))
         ));
+    }
+
+    #[tokio::test]
+    async fn new_payload_keeps_invalid_status_with_long_validation_error() {
+        let (to_engine, mut engine_rx) = tokio::sync::mpsc::unbounded_channel();
+        let chain_spec = reth_chainspec::MAINNET.clone();
+        let api = EngineApi::new(
+            reth_storage_api::noop::NoopProvider::default(),
+            chain_spec.clone(),
+            reth_engine_primitives::ConsensusEngineHandle::new(to_engine),
+            reth_payload_builder::PayloadBuilderHandle::new(
+                tokio::sync::mpsc::unbounded_channel().0,
+            )
+            .into(),
+            reth_transaction_pool::noop::NoopTransactionPool::default(),
+            reth_tasks::Runtime::test(),
+            alloy_rpc_types_engine::ClientVersionV1 {
+                code: alloy_rpc_types_engine::ClientCode::RH,
+                name: "Reth".to_string(),
+                version: String::new(),
+                commit: String::new(),
+            },
+            Default::default(),
+            crate::EthereumEngineValidator::new(chain_spec),
+            false,
+            reth_network_api::noop::NoopNetwork::default(),
+        );
+        tokio::spawn(async move {
+            if let Some(reth_engine_primitives::BeaconEngineMessage::NewPayload { tx, .. }) =
+                engine_rx.recv().await
+            {
+                let status = alloy_rpc_types_engine::PayloadStatusEnum::Invalid {
+                    validation_error: "x".repeat(2000),
+                };
+                let _ = tx.send(Ok(alloy_rpc_types_engine::PayloadStatus::new(status, None)));
+            }
+        });
+
+        let envelope = ExecutionPayloadEnvelopeParis {
+            payload: alloy_rpc_types_engine::ExecutionPayloadV1::from_block_unchecked(
+                B256::ZERO,
+                &reth_ethereum_primitives::Block::default(),
+            ),
+        };
+        let response = api.new_payload(EngineSszFork::Paris, envelope.as_ssz_bytes().into()).await;
+        assert_eq!(response.status(), STATUS_OK);
+        let body = response.into_body().collect().await.unwrap().to_bytes();
+        let status = EngineSszPayloadStatus::from_ssz_bytes(&body).unwrap();
+        assert_eq!(status.status, PayloadStatusKind::Invalid);
     }
 
     #[test]
