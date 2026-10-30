@@ -1,15 +1,17 @@
 //! Implementation of the [`jsonrpsee`] generated [`EthApiServer`] trait. Handles RPC requests for
 //! the `eth_` namespace.
 use crate::{
-    helpers::{EthApiSpec, EthBlocks, EthCall, EthFees, EthState, EthTransactions, FullEthApi},
-    RpcBlock, RpcHeader, RpcReceipt, RpcTransaction,
+    helpers::{
+        Call, EthApiSpec, EthBlocks, EthCall, EthFees, EthState, EthTransactions, FullEthApi,
+    },
+    RpcBlock, RpcHeader, RpcReceipt, RpcTransaction, SimulateV1Request,
 };
 use alloy_dyn_abi::TypedData;
 use alloy_eips::{eip2930::AccessListResult, BlockId, BlockNumberOrTag};
 use alloy_json_rpc::RpcObject;
 use alloy_primitives::{Address, Bytes, B256, B64, U256, U64};
 use alloy_rpc_types_eth::{
-    simulate::{SimulatePayload, SimulatedBlock},
+    simulate::SimulatedBlock,
     state::{EvmOverrides, StateOverride},
     BlockOverrides, Bundle, EIP1186AccountProofResponse, EthCallResponse, FeeHistory, Index,
     StateContext, SyncStatus, Work,
@@ -245,7 +247,7 @@ pub trait EthApi<
     #[method(name = "simulateV1")]
     async fn simulate_v1(
         &self,
-        opts: SimulatePayload<TxReq>,
+        opts: SimulateV1Request<TxReq>,
         block_number: Option<BlockId>,
     ) -> RpcResult<Vec<SimulatedBlock<B>>>;
 
@@ -751,10 +753,12 @@ where
     /// Handler for: `eth_simulateV1`
     async fn simulate_v1(
         &self,
-        payload: SimulatePayload<RpcTxReq<T::NetworkTypes>>,
+        payload: SimulateV1Request<RpcTxReq<T::NetworkTypes>>,
         block_number: Option<BlockId>,
     ) -> RpcResult<Vec<SimulatedBlock<RpcBlock<T::NetworkTypes>>>> {
         trace!(target: "rpc::eth", ?block_number, "Serving eth_simulateV1");
+        let max_blocks = usize::try_from(Call::max_simulate_blocks(self)).unwrap_or(usize::MAX);
+        let payload = payload.into_inner(max_blocks)?;
         let _permit = self.tracing_task_guard().clone().acquire_owned().await;
         Ok(EthCall::simulate_v1(self, payload, block_number).await?)
     }
