@@ -122,15 +122,6 @@ pub fn log_layer(
 }
 
 /// Configuration for OTLP trace export.
-///
-/// A `file:///absolute/path` endpoint appends protobuf length-delimited
-/// `ExportTraceServiceRequest` messages, one per SDK batch, without a collector.
-/// Each batch is flushed to the OS, not synced to durable storage. Parent directories must
-/// already exist. The exporter holds an exclusive file lock until its provider is dropped;
-/// use a separate file per process. Reopening a cleanly closed file appends new batches.
-/// A killed process can leave a partial final frame, which readers must tolerate;
-/// remove that partial frame before appending after a crash. Unexported queued spans are lost.
-/// File export ignores the network protocol and OTLP authentication environment variables.
 #[derive(Debug, Clone)]
 pub struct OtlpConfig {
     /// Service name for trace identification
