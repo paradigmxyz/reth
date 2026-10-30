@@ -2543,7 +2543,7 @@ mod tests {
             let extra_blocks = [$(stringify!($method)),*].len();
 
             let mut rng = generators::rng();
-            let (provider, mut database_blocks, mut in_memory_blocks, _) = provider_with_random_blocks(
+            let (provider, mut database_blocks, mut in_memory_blocks, receipts) = provider_with_random_blocks(
                 &mut rng,
                 TEST_BLOCKS_COUNT,
                 TEST_BLOCKS_COUNT + extra_blocks,
@@ -2563,12 +2563,12 @@ mod tests {
 
                 // Retrieve the expected database data
                 let database_data =
-                    database_blocks.iter().map(|b| $data_extractor(b)).collect::<Vec<_>>();
+                    database_blocks.iter().map(|b| $data_extractor(b, &receipts)).collect::<Vec<_>>();
                 assert_eq!(provider.$method(db_range.clone())?, database_data);
 
                 // Retrieve the expected in-memory data
                 let in_memory_data =
-                    in_memory_blocks.iter().map(|b| $data_extractor(b)).collect::<Vec<_>>();
+                    in_memory_blocks.iter().map(|b| $data_extractor(b, &receipts)).collect::<Vec<_>>();
                 assert_eq!(provider.$method(in_mem_range.clone())?, in_memory_data);
 
                 // Test partial in-memory range
@@ -2614,21 +2614,31 @@ mod tests {
         // todo(joshie) add canonical_hashes_range below after changing its interface into range
         // instead start end
         test_by_block_range!([
-            (headers_range, |block: &SealedBlock<Block>| block.header().clone()),
-            (sealed_headers_range, |block: &SealedBlock<Block>| block.clone_sealed_header()),
-            (block_range, |block: &SealedBlock<Block>| block.clone().into_block()),
-            (block_with_senders_range, |block: &SealedBlock<Block>| block
-                .clone()
-                .try_recover()
-                .unwrap()),
-            (recovered_block_range, |block: &SealedBlock<Block>| block
-                .clone()
-                .try_recover()
-                .unwrap()),
-            (transactions_by_block_range, |block: &SealedBlock<Block>| block
-                .body()
-                .transactions
+            (headers_range, |block: &SealedBlock<Block>, _: &Vec<Vec<Receipt>>| block
+                .header()
                 .clone()),
+            (sealed_headers_range, |block: &SealedBlock<Block>, _: &Vec<Vec<Receipt>>| block
+                .clone_sealed_header()),
+            (block_range, |block: &SealedBlock<Block>, _: &Vec<Vec<Receipt>>| block
+                .clone()
+                .into_block()),
+            (block_with_senders_range, |block: &SealedBlock<Block>, _: &Vec<Vec<Receipt>>| block
+                .clone()
+                .try_recover()
+                .unwrap()),
+            (recovered_block_range, |block: &SealedBlock<Block>, _: &Vec<Vec<Receipt>>| block
+                .clone()
+                .try_recover()
+                .unwrap()),
+            (transactions_by_block_range, |block: &SealedBlock<Block>, _: &Vec<Vec<Receipt>>| {
+                block.body().transactions.clone()
+            }),
+            (
+                receipts_by_block_range,
+                |block: &SealedBlock<Block>, receipts: &Vec<Vec<Receipt>>| {
+                    receipts[block.number as usize].clone()
+                }
+            ),
         ]);
 
         Ok(())
