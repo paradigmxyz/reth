@@ -1,4 +1,4 @@
-//! Implementation of the [`jsonrpsee`] generated [`EthApiServer`](crate::EthApi) trait
+//! Implementation of the RPC macro generated [`EthApiServer`](crate::EthApi) trait
 //! Handles RPC requests for the `eth_` namespace.
 
 use std::{sync::Arc, time::Duration};
@@ -43,7 +43,7 @@ const DEFAULT_BROADCAST_CAPACITY: usize = 2000;
 /// [`EthApiSpec`](reth_rpc_eth_api::helpers::EthApiSpec) trait. Additionally, the required server
 /// implementations (e.g. [`EthApiServer`](reth_rpc_eth_api::EthApiServer)) are implemented
 /// separately in submodules. The rpc handler implementation can then delegate to the main impls.
-/// This way [`EthApi`] is not limited to [`jsonrpsee`] and can be used standalone or in other
+/// This way [`EthApi`] is not limited to the RPC server and can be used standalone or in other
 /// network handlers (for example ipc).
 ///
 /// ## Trait requirements
@@ -548,7 +548,6 @@ mod tests {
         BlockOverrides, Bundle, TransactionRequest,
     };
     use evm2::{evm::CacheDB, AccountInfo};
-    use jsonrpsee_types::error::INVALID_PARAMS_CODE;
     use rand::Rng;
     use reth_chain_state::CanonStateSubscriptions;
     use reth_chainspec::{ChainSpec, ChainSpecBuilder, ChainSpecProvider, EthChainSpec};
@@ -556,6 +555,7 @@ mod tests {
     use reth_ethereum_primitives::TransactionSigned;
     use reth_evm::{ConfigureEvm, EvmEnvFor, TxEnvFor};
     use reth_evm_ethereum::EthEvmConfig;
+    use reth_json_rpc::INVALID_PARAMS_CODE;
     use reth_network_api::noop::NoopNetwork;
     use reth_primitives_traits::crypto::secp256k1::sign_message;
     use reth_provider::{
@@ -1330,7 +1330,7 @@ mod tests {
                 }
                 other => panic!("unexpected error: {other}"),
             }
-            let rpc: jsonrpsee::types::ErrorObjectOwned = err.into();
+            let rpc: reth_json_rpc::ErrorObject = err.into();
             if stop == evm2::interpreter::InstrStop::Revert {
                 assert_eq!(rpc.code(), 3);
                 assert_eq!(

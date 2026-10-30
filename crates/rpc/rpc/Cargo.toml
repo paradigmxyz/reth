@@ -66,9 +66,8 @@ alloy-rpc-types-engine = { workspace = true, features = ["kzg"] }
 alloy-serde.workspace = true
 
 # rpc
-jsonrpsee.workspace = true
+reth-json-rpc.workspace = true
 serde_json.workspace = true
-jsonrpsee-types.workspace = true
 
 # async
 async-trait.workspace = true
@@ -100,7 +99,7 @@ reth-storage-overlay.workspace = true
 
 rand.workspace = true
 
-jsonrpsee = { workspace = true, features = ["client"] }
+reth-json-rpc = { workspace = true, features = ["client"] }
 
 [features]
 js-tracer = [

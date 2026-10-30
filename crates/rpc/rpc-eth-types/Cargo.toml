@@ -43,8 +43,7 @@ alloy-serde.workspace = true
 evm2-inspectors = { workspace = true, features = ["std"] }
 
 # rpc
-jsonrpsee-core.workspace = true
-jsonrpsee-types.workspace = true
+reth-json-rpc.workspace = true
 
 # async
 futures.workspace = true

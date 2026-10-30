@@ -12,11 +12,9 @@ use alloy_rpc_types_trace::geth::{
     ChainBlockTraceResult, GethDebugTracingCallOptions, GethDebugTracingOptions, GethTrace,
     TraceResult,
 };
-use async_trait::async_trait;
 use evm2::evm::StateChangeSource;
 use evm2_inspectors::tracing::{DebugInspector, TransactionContext};
 use futures::Stream;
-use jsonrpsee::{core::RpcResult, PendingSubscriptionSink, SubscriptionMessage};
 use parking_lot::RwLock;
 use reth_chainspec::{ChainSpecProvider, EthereumHardforks};
 use reth_engine_primitives::ConsensusEngineEvent;
@@ -25,6 +23,7 @@ use reth_evm::{
     execute::Executor, witness::ExecutionWitnessRecord, ConfigureEvm, DynDatabase, Evm, EvmEnv,
     EvmEnvFor,
 };
+use reth_json_rpc::{PendingSubscriptionSink, RpcResult};
 use reth_primitives_traits::{
     Block as BlockTrait, BlockBody, BlockTy, ReceiptWithBloom, RecoveredBlock,
 };
@@ -850,7 +849,6 @@ where
     }
 }
 
-#[async_trait]
 impl<Eth> DebugApiServer<RpcTxReq<Eth::NetworkTypes>> for DebugApi<Eth>
 where
     Eth: EthTransactions + TraceExt,
@@ -982,13 +980,11 @@ where
         start_exclusive: BlockNumberOrTag,
         end_inclusive: BlockNumberOrTag,
         opts: Option<GethDebugTracingOptions>,
-    ) -> jsonrpsee::core::SubscriptionResult {
+    ) -> reth_json_rpc::SubscriptionResult {
         if subscription != "traceChain" {
-            pending
-                .reject(EthApiError::InvalidParams(format!(
-                    "unsupported debug subscription: {subscription}"
-                )))
-                .await;
+            pending.reject(EthApiError::InvalidParams(format!(
+                "unsupported debug subscription: {subscription}"
+            )));
             return Ok(())
         }
 
@@ -996,11 +992,11 @@ where
         let start = match self.eth_api().recovered_block(start_id).await {
             Ok(Some(block)) => block,
             Ok(None) => {
-                pending.reject(EthApiError::TracingBlockNotFound(start_id)).await;
+                pending.reject(EthApiError::TracingBlockNotFound(start_id));
                 return Ok(())
             }
             Err(err) => {
-                pending.reject(err).await;
+                pending.reject(err);
                 return Ok(())
             }
         };
@@ -1008,23 +1004,21 @@ where
         let end = match self.eth_api().recovered_block(end_id).await {
             Ok(Some(block)) => block,
             Ok(None) => {
-                pending.reject(EthApiError::TracingBlockNotFound(end_id)).await;
+                pending.reject(EthApiError::TracingBlockNotFound(end_id));
                 return Ok(())
             }
             Err(err) => {
-                pending.reject(err).await;
+                pending.reject(err);
                 return Ok(())
             }
         };
 
         if start.number() >= end.number() {
-            pending
-                .reject(EthApiError::InvalidParams(format!(
-                    "end block (#{}) needs to come after start block (#{})",
-                    end.number(),
-                    start.number()
-                )))
-                .await;
+            pending.reject(EthApiError::InvalidParams(format!(
+                "end block (#{}) needs to come after start block (#{})",
+                end.number(),
+                start.number()
+            )));
             return Ok(())
         }
 
@@ -1082,23 +1076,12 @@ where
                     hash: block.hash(),
                     traces,
                 };
-                let message = match SubscriptionMessage::new(
-                    sink.method_name(),
-                    sink.subscription_id(),
-                    &result,
-                ) {
-                    Ok(message) => message,
-                    Err(err) => {
-                        tracing::warn!(target: "rpc::debug", %number, %err, "Failed to serialize chain trace");
-                        break
-                    }
-                };
-                if sink.send(message).await.is_err() {
+                if sink.send(&result).await.is_err() {
                     break
                 }
             }
 
-            // Dropping jsonrpsee's final sink unregisters the subscription without notifying the
+            // Dropping the final sink unregisters the subscription without notifying the
             // client that this finite stream completed. Retain it so the subscription remains
             // explicitly unsubscribable until the client unsubscribes or disconnects.
             sink.closed().await;
@@ -1266,9 +1249,11 @@ where
     /// * Contract bytecode associated with a code hash. The key format is: `<0x63><code_hash>`
     ///     * Prefix byte: 0x63 (required)
     ///     * Code hash: 32 bytes
+    ///
     ///   Must be provided as either:
     ///     * Hex string: "0x63..." (66 hex characters after 0x)
     ///     * Raw byte string: raw byte string (33 bytes)
+    ///
     ///   See Geth impl: <https://github.com/ethereum/go-ethereum/blob/737ffd1bf0cbee378d0111a5b17ae4724fb2216c/core/rawdb/schema.go#L120>
     async fn debug_db_get(&self, key: String) -> RpcResult<Option<Bytes>> {
         let key_bytes = if key.starts_with("0x") {
