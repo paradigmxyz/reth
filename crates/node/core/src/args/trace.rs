@@ -127,11 +127,14 @@ impl DefaultTraceValues {
 /// CLI arguments for configuring `Opentelemetry` trace and logs export.
 #[derive(Debug, Clone, Parser)]
 pub struct TraceArgs {
-    /// Enable `Opentelemetry` tracing export to an OTLP endpoint.
+    /// Enable `Opentelemetry` tracing export to an OTLP endpoint or local file.
     ///
     /// If no value provided, defaults based on protocol:
     /// - HTTP: `http://localhost:4318/v1/traces`
     /// - gRPC: `http://localhost:4317`
+    ///
+    /// A file:///absolute/path endpoint appends length-delimited OTLP protobuf batches without
+    /// a collector. Use a separate file per process. The network protocol is ignored for files.
     ///
     /// Example: --tracing-otlp=http://collector:4318/v1/traces
     #[arg(
