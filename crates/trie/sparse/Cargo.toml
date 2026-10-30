@@ -46,7 +46,7 @@ proptest.workspace = true
 rand.workspace = true
 
 [features]
-dst = []
+fuzz = []
 default = ["std", "metrics"]
 std = [
     "dep:either",
