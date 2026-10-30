@@ -23,6 +23,9 @@ use std::{
 };
 use url::Url;
 
+#[cfg(unix)]
+use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+
 #[derive(Debug)]
 pub(crate) struct FileSpanExporter {
     file: Mutex<Option<File>>,
@@ -32,12 +35,17 @@ pub(crate) struct FileSpanExporter {
 impl FileSpanExporter {
     pub(crate) fn new(endpoint: &Url) -> eyre::Result<Self> {
         let path = trace_file_path(endpoint)?;
-        let file = OpenOptions::new()
-            .create(true)
-            .read(true)
-            .append(true)
-            .open(&path)
-            .map_err(|err| FsPathError::open(err, &path))?;
+        let mut options = OpenOptions::new();
+        options.create(true).read(true).append(true);
+        #[cfg(unix)]
+        options.mode(0o600);
+        let file = options.open(&path).map_err(|err| FsPathError::open(err, &path))?;
+        // Readers can acquire advisory locks too, so reject shared existing files.
+        #[cfg(unix)]
+        eyre::ensure!(
+            file.metadata()?.permissions().mode() & 0o077 == 0,
+            "Trace file {path:?} must be owner-only; restrict its permissions to 0600"
+        );
         // Keep the lock for the exporter's lifetime so partial writes cannot interleave.
         file.try_lock()
             .wrap_err_with(|| format!("Could not exclusively lock trace file {path:?}"))?;
