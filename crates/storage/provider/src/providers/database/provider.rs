@@ -3025,8 +3025,23 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
     fn take_state_above(
         &self,
         block: BlockNumber,
+        end: BlockNumber,
     ) -> ProviderResult<ExecutionOutcome<Self::Receipt>> {
-        let range = block + 1..=self.last_block_number()?;
+        // Truncation removes everything above `block`, so reject an incomplete execution range.
+        if self.cached_storage_settings().storage_v2 {
+            for segment in
+                [StaticFileSegment::AccountChangeSets, StaticFileSegment::StorageChangeSets]
+            {
+                if let Some(tip) = self.static_file_provider.get_highest_static_file_block(segment) &&
+                    tip > end
+                {
+                    return Err(ProviderError::other(std::io::Error::other(format!(
+                        "cannot take state through block {end}: {segment} changesets extend to block {tip}"
+                    ))))
+                }
+            }
+        }
+        let range = block + 1..=end;
 
         if range.is_empty() {
             return Ok(ExecutionOutcome::default())
@@ -3597,7 +3612,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> BlockExecutionWriter
         self.unwind_trie_state_from(block + 1)?;
 
         // get execution res
-        let execution_state = self.take_state_above(block)?;
+        let execution_state = self.take_state_above(block, *range.end())?;
 
         let blocks = self.recovered_block_range(range)?;
 
@@ -6032,5 +6047,62 @@ mod tests {
         assert!(all_blocks.contains(&3), "block 3 should remain");
         assert!(!all_blocks.contains(&7), "block 7 should be unwound");
         assert!(!all_blocks.contains(&10), "block 10 should be unwound");
+    }
+
+    #[test]
+    fn take_state_stops_at_execution_tip() {
+        let factory = create_test_provider_factory();
+        let provider = factory.database_provider_rw().unwrap();
+        for block in 0..=3 {
+            provider
+                .tx_ref()
+                .put::<tables::BlockBodyIndices>(
+                    block,
+                    StoredBlockBodyIndices { first_tx_num: 0, tx_count: 0 },
+                )
+                .unwrap();
+        }
+        let sf = factory.static_file_provider();
+        let mut headers = sf.latest_writer(StaticFileSegment::Headers).unwrap();
+        for number in 0..=3 {
+            let header = Header { number, ..Default::default() };
+            headers.append_header(&header, &header.hash_slow()).unwrap();
+        }
+        headers.commit().unwrap();
+        drop(headers);
+        assert_eq!(provider.last_block_number().unwrap(), 3);
+        let outcome = provider.take_state_above(1, 2).unwrap();
+        assert_eq!(outcome.first_block(), 2);
+        assert_eq!(outcome.len(), 1);
+    }
+
+    #[test]
+    fn take_state_rejects_changesets_above_execution_tip() {
+        for segment in [StaticFileSegment::AccountChangeSets, StaticFileSegment::StorageChangeSets]
+        {
+            let factory = create_test_provider_factory();
+            factory.set_storage_settings_cache(StorageSettings::v2());
+            let sf = factory.static_file_provider();
+            {
+                let mut writer = sf.latest_writer(segment).unwrap();
+                for block in 0..=3 {
+                    if segment == StaticFileSegment::AccountChangeSets {
+                        writer.append_account_changeset(vec![], block).unwrap();
+                    } else {
+                        writer.append_storage_changeset(vec![], block).unwrap();
+                    }
+                }
+                writer.commit().unwrap();
+            }
+            let provider = factory.database_provider_rw().unwrap();
+            assert_eq!(
+                provider.take_state_above(1, 2).unwrap_err().to_string(),
+                format!(
+                    "cannot take state through block 2: {segment} changesets extend to block 3"
+                )
+            );
+            provider.commit().unwrap();
+            assert_eq!(sf.get_highest_static_file_block(segment), Some(3));
+        }
     }
 }
