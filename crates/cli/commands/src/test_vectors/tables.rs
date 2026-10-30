@@ -115,7 +115,7 @@ where
 /// subkeys are sorted.
 fn generate_dupsort_vector<T>(runner: &mut TestRunner, per_table: usize) -> Result<()>
 where
-    T: Table + DupSort,
+    T: DupSort,
     T::Key: for<'a> Arbitrary<'a> + serde::Serialize + Ord + std::hash::Hash + Clone,
     T::Value: for<'a> Arbitrary<'a> + serde::Serialize + Ord + Clone,
 {

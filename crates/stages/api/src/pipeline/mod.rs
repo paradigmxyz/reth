@@ -8,8 +8,9 @@ use futures_util::Future;
 use reth_primitives_traits::constants::BEACON_CONSENSUS_REORG_UNWIND_DEPTH;
 use reth_provider::{
     providers::ProviderNodeTypes, BlockHashReader, BlockNumReader, ChainStateBlockReader,
-    ChainStateBlockWriter, DBProvider, DatabaseProviderFactory, ProviderFactory,
-    PruneCheckpointReader, StageCheckpointReader, StageCheckpointWriter, StorageSettingsCache,
+    ChainStateBlockWriter, DBProvider, DatabaseProviderFactory, MetadataProvider, MetadataWriter,
+    PipelineUnwind, ProviderError, ProviderFactory, PruneCheckpointReader, StageCheckpointReader,
+    StageCheckpointWriter, StaticFileProviderFactory, StorageSettingsCache,
 };
 use reth_prune::PrunerBuilder;
 use reth_static_file::StaticFileProducer;
@@ -221,6 +222,50 @@ impl<N: ProviderNodeTypes> Pipeline<N> {
     /// the pipeline (for example the `Finish` stage). Or [`ControlFlow::Unwind`] of the stage
     /// that caused the unwind.
     pub async fn run_loop(&mut self) -> Result<ControlFlow, PipelineError> {
+        self.run_loop_until(None).await
+    }
+
+    /// Runs one pipeline pass through `last_stage`, including that stage.
+    ///
+    /// Each stage in the selected prefix runs to completion; later stages are not executed.
+    /// A [`PipelineTarget::Sync`] updates the tip before running the prefix, while a
+    /// [`PipelineTarget::Unwind`] unwinds the entire pipeline and returns without executing stages.
+    /// Stage errors that request an unwind also unwind the entire pipeline. Normal static-file
+    /// migration and pruning still run.
+    ///
+    /// Returns the control flow of the partial pass, or [`PipelineError::MissingStage`] if
+    /// `last_stage` is absent from the pipeline.
+    pub async fn run_until(
+        &mut self,
+        last_stage: StageId,
+        target: Option<PipelineTarget>,
+    ) -> Result<ControlFlow, PipelineError> {
+        let _ = self.register_metrics();
+        if !self.stages.iter().any(|stage| stage.id() == last_stage) {
+            return Err(PipelineError::MissingStage(last_stage))
+        }
+
+        match target {
+            Some(PipelineTarget::Sync(tip)) => self.set_tip(tip),
+            // An unwind rewinds every stage, so stopping part way through has no meaning.
+            Some(PipelineTarget::Unwind(target)) => {
+                self.move_to_static_files()?;
+                self.unwind(target, None)?;
+                self.progress.update(target);
+                return Ok(ControlFlow::Continue { block_number: target })
+            }
+            None => {}
+        }
+
+        self.run_loop_until(Some(last_stage)).await
+    }
+
+    // Shared stage loop. `last_stage` stops the pass once that stage has been executed.
+    async fn run_loop_until(
+        &mut self,
+        last_stage: Option<StageId>,
+    ) -> Result<ControlFlow, PipelineError> {
+        self.resume_unwind()?;
         self.move_to_static_files()?;
 
         let mut previous_stage = None;
@@ -253,6 +298,10 @@ impl<N: ProviderNodeTypes> Pipeline<N> {
                     .unwrap_or_default()
                     .block_number,
             );
+
+            if last_stage == Some(stage_id) {
+                break
+            }
         }
 
         Ok(self.progress.next_ctrl())
@@ -305,7 +354,39 @@ impl<N: ProviderNodeTypes> Pipeline<N> {
         to: BlockNumber,
         bad_block: Option<BlockNumber>,
     ) -> Result<(), PipelineError> {
-        // Add validation before starting unwind
+        self.resume_unwind()?;
+        self.unwind_stages(PipelineUnwind {
+            target: to,
+            stages: self.stages.iter().map(|stage| stage.id().to_string()).collect(),
+            bad_block,
+        })
+    }
+
+    /// Completes a recorded unwind without unwinding stages outside its original scope.
+    pub fn resume_unwind(&mut self) -> Result<(), PipelineError> {
+        let unwind = self.provider_factory.provider()?.pipeline_unwind()?;
+        if let Some(unwind) = unwind {
+            self.unwind_stages(unwind)?;
+        }
+        Ok(())
+    }
+
+    fn unwind_stages(&mut self, unwind: PipelineUnwind) -> Result<(), PipelineError> {
+        // Validate the entire scope before committing anything. A different pipeline must not
+        // silently clear work belonging to a disabled or custom stage.
+        for id in &unwind.stages {
+            if !self.stages.iter().any(|stage| stage.id().as_str() == id) {
+                return Err(ProviderError::other(std::io::Error::other(format!(
+                    "cannot resume interrupted unwind to block {}: pipeline is missing stage {id}; \
+                     restart the node with the original stages enabled or rerun `reth stage unwind` \
+                     without `--offline`",
+                    unwind.target,
+                )))
+                .into())
+            }
+        }
+        let to = unwind.target;
+        let bad_block = unwind.bad_block;
         let (latest_block, prune_modes, checkpoints) = {
             let provider = self.provider_factory.provider()?;
             (
@@ -316,17 +397,40 @@ impl<N: ProviderNodeTypes> Pipeline<N> {
         };
         prune_modes.ensure_unwind_target_unpruned(latest_block, to, &checkpoints)?;
 
-        // Unwind stages in reverse order of execution
-        let unwind_pipeline = self.stages.iter_mut().rev();
-
-        // Legacy Engine: This prevents a race condition in which the `StaticFileProducer` could
-        // attempt to proceed with a finalized block which has been unwinded
+        // Legacy Engine: Prevent the static file producer from racing the unwind.
         let _locked_sf_producer = self.static_file_producer.lock();
-
         let mut provider_rw =
             self.provider_factory.unwind_provider_rw()?.disable_long_read_transaction_safety();
 
-        for stage in unwind_pipeline {
+        // Reject unreachable targets before recording intent or committing any stage. Only
+        // validate the recorded scope: recovery must not adopt unrelated stages.
+        for stage in &mut self.stages {
+            let stage_id = stage.id();
+            if unwind.stages.iter().any(|id| id == stage_id.as_str()) {
+                let checkpoint = provider_rw.get_stage_checkpoint(stage_id)?.unwrap_or_default();
+                if checkpoint.block_number > to &&
+                    let Err(err) = stage.validate_unwind(
+                        &provider_rw,
+                        UnwindInput { checkpoint, unwind_to: to, bad_block },
+                    )
+                {
+                    self.event_sender.notify(PipelineEvent::Error { stage_id });
+                    return Err(PipelineError::Stage(StageError::Fatal(Box::new(err))))
+                }
+            }
+        }
+
+        // The intent must be durable before the first stage commits independently.
+        provider_rw.write_pipeline_unwind(Some(&unwind))?;
+        provider_rw.commit()?;
+        provider_rw = self.provider_factory.unwind_provider_rw()?;
+
+        for id in unwind.stages.iter().rev() {
+            let stage = self
+                .stages
+                .iter_mut()
+                .find(|stage| stage.id().as_str() == id)
+                .expect("unwind stages validated above");
             let stage_id = stage.id();
             let span = info_span!("Unwinding", stage = %stage_id);
             let _enter = span.enter();
@@ -425,6 +529,8 @@ impl<N: ProviderNodeTypes> Pipeline<N> {
             }
         }
 
+        provider_rw.write_pipeline_unwind(None)?;
+        provider_rw.commit()?;
         Ok(())
     }
 
@@ -574,7 +680,7 @@ impl<N: ProviderNodeTypes> Pipeline<N> {
                 .saturating_sub(
                     BEACON_CONSENSUS_REORG_UNWIND_DEPTH.saturating_mul(self.detached_head_attempts),
                 )
-                .max(1);
+                .max(self.provider_factory.static_file_provider().genesis_block_number());
 
             self.last_detached_head_unwind_target = self.provider_factory.block_hash(unwind_to)?;
             Ok(Some(ControlFlow::Unwind { target: unwind_to, bad_block: local_head }))
@@ -668,10 +774,14 @@ mod tests {
 
     use super::*;
     use crate::{test_utils::TestStage, UnwindOutput};
+    use alloy_eips::{eip1898::BlockWithParent, BlockNumHash};
     use assert_matches::assert_matches;
     use reth_consensus::ConsensusError;
     use reth_errors::ProviderError;
-    use reth_provider::test_utils::{create_test_provider_factory, MockNodeTypesWithDB};
+    use reth_provider::test_utils::{
+        create_test_provider_factory, create_test_provider_factory_with_genesis_block_number,
+        MockNodeTypesWithDB,
+    };
     use reth_prune::PruneModes;
     use reth_testing_utils::generators::{self, random_block_with_parent};
     use tokio_stream::StreamExt;
@@ -703,18 +813,63 @@ mod tests {
         assert_eq!(progress.next_ctrl(), ControlFlow::Continue { block_number: 1 });
     }
 
+    /// Runs only the requested prefix of the pipeline.
+    #[tokio::test]
+    async fn run_until_stops_after_the_named_stage() {
+        let provider_factory = create_test_provider_factory();
+
+        let mut pipeline = Pipeline::<MockNodeTypesWithDB>::builder()
+            .add_stage(
+                TestStage::new(StageId::Other("A"))
+                    .add_exec(Ok(ExecOutput::done(StageCheckpoint::new(10)))),
+            )
+            // No execution is queued for B, so running it would panic on the empty script.
+            .add_stage(TestStage::new(StageId::Other("B")))
+            .with_max_block(10)
+            .build(
+                provider_factory.clone(),
+                StaticFileProducer::new(provider_factory.clone(), PruneModes::default()),
+            );
+
+        pipeline.run_until(StageId::Other("A"), None).await.unwrap();
+
+        let provider = provider_factory.provider().unwrap();
+        assert_eq!(
+            provider.get_stage_checkpoint(StageId::Other("A")).unwrap(),
+            Some(StageCheckpoint::new(10))
+        );
+        assert_eq!(provider.get_stage_checkpoint(StageId::Other("B")).unwrap(), None);
+    }
+
+    /// A prefix run naming a stage the pipeline does not have is an error, not a full run.
+    #[tokio::test]
+    async fn run_until_rejects_an_unknown_stage() {
+        let provider_factory = create_test_provider_factory();
+
+        let mut pipeline = Pipeline::<MockNodeTypesWithDB>::builder()
+            .add_stage(TestStage::new(StageId::Other("A")))
+            .build(
+                provider_factory.clone(),
+                StaticFileProducer::new(provider_factory.clone(), PruneModes::default()),
+            );
+
+        let result = pipeline.run_until(StageId::Other("Z"), None).await;
+
+        assert_matches!(result, Err(PipelineError::MissingStage(StageId::Other("Z"))));
+    }
+
     /// Runs a simple pipeline.
     #[tokio::test]
     async fn run_pipeline() {
         let provider_factory = create_test_provider_factory();
 
         let stage_a = TestStage::new(StageId::Other("A"))
-            .add_exec(Ok(ExecOutput { checkpoint: StageCheckpoint::new(20), done: true }));
+            .add_exec(Ok(ExecOutput::done(StageCheckpoint::new(20))));
         let (stage_a, post_execute_commit_counter_a) = stage_a.with_post_execute_commit_counter();
         let (stage_a, post_unwind_commit_counter_a) = stage_a.with_post_unwind_commit_counter();
 
         let stage_b = TestStage::new(StageId::Other("B"))
-            .add_exec(Ok(ExecOutput { checkpoint: StageCheckpoint::new(10), done: true }));
+            .add_exec(Ok(ExecOutput::done(StageCheckpoint::new(10))));
         let (stage_b, post_execute_commit_counter_b) = stage_b.with_post_execute_commit_counter();
         let (stage_b, post_unwind_commit_counter_b) = stage_b.with_post_unwind_commit_counter();
 
@@ -752,7 +907,7 @@ mod tests {
                 PipelineEvent::Ran {
                     pipeline_stages_progress: PipelineStagesProgress { current: 1, total: 2 },
                     stage_id: StageId::Other("A"),
-                    result: ExecOutput { checkpoint: StageCheckpoint::new(20), done: true },
+                    result: ExecOutput::done(StageCheckpoint::new(20)),
                 },
                 PipelineEvent::Prepare {
                     pipeline_stages_progress: PipelineStagesProgress { current: 2, total: 2 },
@@ -769,7 +924,7 @@ mod tests {
                 PipelineEvent::Ran {
                     pipeline_stages_progress: PipelineStagesProgress { current: 2, total: 2 },
                     stage_id: StageId::Other("B"),
-                    result: ExecOutput { checkpoint: StageCheckpoint::new(10), done: true },
+                    result: ExecOutput::done(StageCheckpoint::new(10)),
                 },
             ]
         );
@@ -787,19 +942,19 @@ mod tests {
         let provider_factory = create_test_provider_factory();
 
         let stage_a = TestStage::new(StageId::Other("A"))
-            .add_exec(Ok(ExecOutput { checkpoint: StageCheckpoint::new(100), done: true }))
+            .add_exec(Ok(ExecOutput::done(StageCheckpoint::new(100))))
             .add_unwind(Ok(UnwindOutput { checkpoint: StageCheckpoint::new(1) }));
         let (stage_a, post_execute_commit_counter_a) = stage_a.with_post_execute_commit_counter();
         let (stage_a, post_unwind_commit_counter_a) = stage_a.with_post_unwind_commit_counter();
 
         let stage_b = TestStage::new(StageId::Other("B"))
-            .add_exec(Ok(ExecOutput { checkpoint: StageCheckpoint::new(10), done: true }))
+            .add_exec(Ok(ExecOutput::done(StageCheckpoint::new(10))))
             .add_unwind(Ok(UnwindOutput { checkpoint: StageCheckpoint::new(1) }));
         let (stage_b, post_execute_commit_counter_b) = stage_b.with_post_execute_commit_counter();
         let (stage_b, post_unwind_commit_counter_b) = stage_b.with_post_unwind_commit_counter();
 
         let stage_c = TestStage::new(StageId::Other("C"))
-            .add_exec(Ok(ExecOutput { checkpoint: StageCheckpoint::new(20), done: true }))
+            .add_exec(Ok(ExecOutput::done(StageCheckpoint::new(20))))
             .add_unwind(Ok(UnwindOutput { checkpoint: StageCheckpoint::new(1) }));
         let (stage_c, post_execute_commit_counter_c) = stage_c.with_post_execute_commit_counter();
         let (stage_c, post_unwind_commit_counter_c) = stage_c.with_post_unwind_commit_counter();
@@ -844,7 +999,7 @@ mod tests {
                 PipelineEvent::Ran {
                     pipeline_stages_progress: PipelineStagesProgress { current: 1, total: 3 },
                     stage_id: StageId::Other("A"),
-                    result: ExecOutput { checkpoint: StageCheckpoint::new(100), done: true },
+                    result: ExecOutput::done(StageCheckpoint::new(100)),
                 },
                 PipelineEvent::Prepare {
                     pipeline_stages_progress: PipelineStagesProgress { current: 2, total: 3 },
@@ -861,7 +1016,7 @@ mod tests {
                 PipelineEvent::Ran {
                     pipeline_stages_progress: PipelineStagesProgress { current: 2, total: 3 },
                     stage_id: StageId::Other("B"),
-                    result: ExecOutput { checkpoint: StageCheckpoint::new(10), done: true },
+                    result: ExecOutput::done(StageCheckpoint::new(10)),
                 },
                 PipelineEvent::Prepare {
                     pipeline_stages_progress: PipelineStagesProgress { current: 3, total: 3 },
@@ -878,7 +1033,7 @@ mod tests {
                 PipelineEvent::Ran {
                     pipeline_stages_progress: PipelineStagesProgress { current: 3, total: 3 },
                     stage_id: StageId::Other("C"),
-                    result: ExecOutput { checkpoint: StageCheckpoint::new(20), done: true },
+                    result: ExecOutput::done(StageCheckpoint::new(20)),
                 },
                 // Unwinding
                 PipelineEvent::Unwind {
@@ -938,12 +1093,12 @@ mod tests {
         let mut pipeline = Pipeline::<MockNodeTypesWithDB>::builder()
             .add_stage(
                 TestStage::new(StageId::Other("A"))
-                    .add_exec(Ok(ExecOutput { checkpoint: StageCheckpoint::new(100), done: true }))
+                    .add_exec(Ok(ExecOutput::done(StageCheckpoint::new(100))))
                     .add_unwind(Ok(UnwindOutput { checkpoint: StageCheckpoint::new(50) })),
             )
             .add_stage(
                 TestStage::new(StageId::Other("B"))
-                    .add_exec(Ok(ExecOutput { checkpoint: StageCheckpoint::new(10), done: true })),
+                    .add_exec(Ok(ExecOutput::done(StageCheckpoint::new(10)))),
             )
             .with_max_block(10)
             .build(
@@ -981,7 +1136,7 @@ mod tests {
                 PipelineEvent::Ran {
                     pipeline_stages_progress: PipelineStagesProgress { current: 1, total: 2 },
                     stage_id: StageId::Other("A"),
-                    result: ExecOutput { checkpoint: StageCheckpoint::new(100), done: true },
+                    result: ExecOutput::done(StageCheckpoint::new(100)),
                 },
                 PipelineEvent::Prepare {
                     pipeline_stages_progress: PipelineStagesProgress { current: 2, total: 2 },
@@ -998,7 +1153,7 @@ mod tests {
                 PipelineEvent::Ran {
                     pipeline_stages_progress: PipelineStagesProgress { current: 2, total: 2 },
                     stage_id: StageId::Other("B"),
-                    result: ExecOutput { checkpoint: StageCheckpoint::new(10), done: true },
+                    result: ExecOutput::done(StageCheckpoint::new(10)),
                 },
                 // Unwinding
                 // Nothing to unwind in stage "B"
@@ -1038,9 +1193,9 @@ mod tests {
         let mut pipeline = Pipeline::<MockNodeTypesWithDB>::builder()
             .add_stage(
                 TestStage::new(StageId::Other("A"))
-                    .add_exec(Ok(ExecOutput { checkpoint: StageCheckpoint::new(10), done: true }))
+                    .add_exec(Ok(ExecOutput::done(StageCheckpoint::new(10))))
                     .add_unwind(Ok(UnwindOutput { checkpoint: StageCheckpoint::new(0) }))
-                    .add_exec(Ok(ExecOutput { checkpoint: StageCheckpoint::new(10), done: true })),
+                    .add_exec(Ok(ExecOutput::done(StageCheckpoint::new(10)))),
             )
             .add_stage(
                 TestStage::new(StageId::Other("B"))
@@ -1053,7 +1208,7 @@ mod tests {
                         error: BlockErrorKind::Validation(ConsensusError::BaseFeeMissing),
                     }))
                     .add_unwind(Ok(UnwindOutput { checkpoint: StageCheckpoint::new(0) }))
-                    .add_exec(Ok(ExecOutput { checkpoint: StageCheckpoint::new(10), done: true })),
+                    .add_exec(Ok(ExecOutput::done(StageCheckpoint::new(10)))),
             )
             .with_max_block(10)
             .build(
@@ -1086,7 +1241,7 @@ mod tests {
                 PipelineEvent::Ran {
                     pipeline_stages_progress: PipelineStagesProgress { current: 1, total: 2 },
                     stage_id: StageId::Other("A"),
-                    result: ExecOutput { checkpoint: StageCheckpoint::new(10), done: true },
+                    result: ExecOutput::done(StageCheckpoint::new(10)),
                 },
                 PipelineEvent::Prepare {
                     pipeline_stages_progress: PipelineStagesProgress { current: 2, total: 2 },
@@ -1128,7 +1283,7 @@ mod tests {
                 PipelineEvent::Ran {
                     pipeline_stages_progress: PipelineStagesProgress { current: 1, total: 2 },
                     stage_id: StageId::Other("A"),
-                    result: ExecOutput { checkpoint: StageCheckpoint::new(10), done: true },
+                    result: ExecOutput::done(StageCheckpoint::new(10)),
                 },
                 PipelineEvent::Prepare {
                     pipeline_stages_progress: PipelineStagesProgress { current: 2, total: 2 },
@@ -1145,7 +1300,7 @@ mod tests {
                 PipelineEvent::Ran {
                     pipeline_stages_progress: PipelineStagesProgress { current: 2, total: 2 },
                     stage_id: StageId::Other("B"),
-                    result: ExecOutput { checkpoint: StageCheckpoint::new(10), done: true },
+                    result: ExecOutput::done(StageCheckpoint::new(10)),
                 },
             ]
         );
@@ -1160,7 +1315,7 @@ mod tests {
             .add_stage(
                 TestStage::new(StageId::Other("NonFatal"))
                     .add_exec(Err(StageError::Recoverable(Box::new(std::fmt::Error))))
-                    .add_exec(Ok(ExecOutput { checkpoint: StageCheckpoint::new(10), done: true })),
+                    .add_exec(Ok(ExecOutput::done(StageCheckpoint::new(10)))),
             )
             .with_max_block(10)
             .build(
@@ -1187,5 +1342,186 @@ mod tests {
                 ProviderError::BlockBodyIndicesNotFound(5)
             )))
         );
+    }
+
+    #[test]
+    fn detached_head_unwinds_no_lower_than_genesis() {
+        for genesis in [0, 5] {
+            let factory = create_test_provider_factory_with_genesis_block_number(genesis);
+            let mut pipeline = Pipeline::<MockNodeTypesWithDB>::builder()
+                .build(factory.clone(), StaticFileProducer::new(factory, PruneModes::default()));
+            let block = |number| {
+                Box::new(BlockWithParent {
+                    parent: B256::ZERO,
+                    block: BlockNumHash::new(number, B256::repeat_byte(1)),
+                })
+            };
+            let error = StageError::DetachedHead {
+                local_head: block(genesis + 1),
+                header: block(genesis + 2),
+                error: Box::new(ConsensusError::BaseFeeMissing),
+            };
+
+            let flow = pipeline.on_stage_error(StageId::Headers, None, error).unwrap();
+
+            assert_eq!(
+                flow,
+                Some(ControlFlow::Unwind { target: genesis, bad_block: block(genesis + 1) })
+            );
+        }
+    }
+
+    #[test]
+    fn interrupted_unwind_preserves_scope_and_target() {
+        for target in [0, 2] {
+            let factory = create_test_provider_factory();
+            let provider = factory.database_provider_rw().unwrap();
+            for id in
+                [StageId::Headers, StageId::Execution, StageId::StorageHashing, StageId::Finish]
+            {
+                provider.save_stage_checkpoint(id, StageCheckpoint::new(10)).unwrap();
+            }
+            provider.commit().unwrap();
+            let build = |builder: PipelineBuilder<_>| {
+                builder.build(
+                    factory.clone(),
+                    StaticFileProducer::new(factory.clone(), PruneModes::default()),
+                )
+            };
+            // Like an offline unwind, this pipeline does not own Headers or Finish.
+            let mut pipeline =
+                build(
+                    Pipeline::builder()
+                        .add_stage(
+                            TestStage::new(StageId::Execution)
+                                .add_unwind(Err(StageError::MissingDownloadBuffer)),
+                        )
+                        .add_stage(TestStage::new(StageId::StorageHashing).add_unwind(Ok(
+                            UnwindOutput { checkpoint: StageCheckpoint::new(target) },
+                        ))),
+                );
+            assert!(pipeline.unwind(target, None).is_err());
+            drop(pipeline);
+            let pending = factory.provider().unwrap().pipeline_unwind().unwrap().unwrap();
+            assert_eq!(pending.target, target);
+            assert_eq!(pending.stages, ["Execution", "StorageHashing"]);
+
+            // A pipeline with missing stages cannot adopt and clear the unfinished unwind.
+            assert_eq!(
+                build(Pipeline::builder()).resume_unwind().unwrap_err().to_string(),
+                format!(
+                    "cannot resume interrupted unwind to block {target}: pipeline is missing stage Execution; \
+                     restart the node with the original stages enabled or rerun `reth stage unwind` without `--offline`"
+                )
+            );
+            assert_eq!(
+                factory.provider().unwrap().pipeline_unwind().unwrap(),
+                Some(pending.clone())
+            );
+
+            let mut pipeline = build(
+                Pipeline::builder()
+                    .add_stage(
+                        TestStage::new(StageId::Headers)
+                            .add_validate_unwind(Err(StageError::MissingDownloadBuffer)),
+                    )
+                    .add_stage(
+                        TestStage::new(StageId::Execution)
+                            .add_unwind(Err(StageError::MissingDownloadBuffer))
+                            .add_unwind(Ok(UnwindOutput {
+                                checkpoint: StageCheckpoint::new(target),
+                            })),
+                    )
+                    .add_stage(TestStage::new(StageId::StorageHashing))
+                    .add_stage(TestStage::new(StageId::Finish)),
+            );
+            assert!(pipeline.resume_unwind().is_err());
+            assert_eq!(factory.provider().unwrap().pipeline_unwind().unwrap(), Some(pending));
+            pipeline.resume_unwind().unwrap();
+            let provider = factory.provider().unwrap();
+            assert_eq!(provider.pipeline_unwind().unwrap(), None);
+            for id in [StageId::Execution, StageId::StorageHashing] {
+                assert_eq!(
+                    provider.get_stage_checkpoint(id).unwrap().unwrap().block_number,
+                    target
+                );
+            }
+            for id in [StageId::Headers, StageId::Finish] {
+                assert_eq!(provider.get_stage_checkpoint(id).unwrap().unwrap().block_number, 10);
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn forward_sync_resumes_unwind_first() {
+        let factory = create_test_provider_factory();
+        factory.set_storage_settings_cache(reth_provider::StorageSettings::v2());
+        let provider = factory.database_provider_rw().unwrap();
+        provider.save_stage_checkpoint(StageId::Execution, StageCheckpoint::new(10)).unwrap();
+        provider
+            .write_pipeline_unwind(Some(&PipelineUnwind {
+                target: 2,
+                stages: vec!["Execution".into()],
+                bad_block: None,
+            }))
+            .unwrap();
+        provider.commit().unwrap();
+        let mut pipeline = Pipeline::builder()
+            .with_max_block(10)
+            .add_stage(
+                TestStage::new(StageId::Execution)
+                    .add_unwind(Ok(UnwindOutput { checkpoint: StageCheckpoint::new(2) }))
+                    .add_exec(Ok(ExecOutput::done(StageCheckpoint::new(10)))),
+            )
+            .build(
+                factory.clone(),
+                StaticFileProducer::new(factory.clone(), PruneModes::default()),
+            );
+        pipeline.run_loop().await.unwrap();
+        assert_eq!(factory.provider().unwrap().pipeline_unwind().unwrap(), None);
+        assert_eq!(
+            factory.get_stage_checkpoint(StageId::Execution).unwrap().unwrap().block_number,
+            10
+        );
+    }
+
+    #[test]
+    fn malformed_unwind_is_not_ignored() {
+        let factory = create_test_provider_factory();
+        let provider = factory.database_provider_rw().unwrap();
+        provider.write_metadata("pipeline_unwind", vec![0xff]).unwrap();
+        provider.commit().unwrap();
+        assert!(factory.provider().unwrap().pipeline_unwind().is_err());
+    }
+    /// A target rejected by an earlier stage must not leave the later stages unwound.
+    #[test]
+    fn rejected_unwind_target_leaves_all_stages_intact() {
+        let factory = create_test_provider_factory();
+        let provider = factory.database_provider_rw().unwrap();
+        for id in [StageId::Other("A"), StageId::Other("B")] {
+            provider.save_stage_checkpoint(id, StageCheckpoint::new(10)).unwrap();
+        }
+        provider.commit().unwrap();
+
+        let mut pipeline = Pipeline::<MockNodeTypesWithDB>::builder()
+            .add_stage(
+                TestStage::new(StageId::Other("A"))
+                    .add_validate_unwind(Err(StageError::MissingDownloadBuffer)),
+            )
+            .add_stage(
+                TestStage::new(StageId::Other("B"))
+                    .add_unwind(Ok(UnwindOutput { checkpoint: StageCheckpoint::new(1) })),
+            )
+            .build(
+                factory.clone(),
+                StaticFileProducer::new(factory.clone(), PruneModes::default()),
+            );
+
+        assert_matches!(pipeline.unwind(1, None), Err(PipelineError::Stage(StageError::Fatal(_))));
+        let provider = factory.provider().unwrap();
+        assert_eq!(provider.pipeline_unwind().unwrap(), None);
+        for id in [StageId::Other("A"), StageId::Other("B")] {
+            assert_eq!(provider.get_stage_checkpoint(id).unwrap(), Some(StageCheckpoint::new(10)));
+        }
     }
 }

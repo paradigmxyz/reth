@@ -1,4 +1,4 @@
-//! clap [Args](clap::Args) for engine purposes
+//! clap [`Args`] for engine purposes.
 
 use clap::{
     builder::{RangedU64ValueParser, Resettable},
@@ -7,10 +7,11 @@ use clap::{
 use eyre::ensure;
 use reth_cli_util::{parse_duration_from_secs_or_ms, parsers::format_duration_as_secs_or_ms};
 use reth_engine_primitives::{
-    TreeConfig, DEFAULT_INVALID_HEADER_HIT_EVICTION_THRESHOLD, DEFAULT_MULTIPROOF_TASK_CHUNK_SIZE,
-    DEFAULT_NUM_STATE_MASKING_BLOCKS, MIN_PERSISTENCE_BACKPRESSURE_THRESHOLD,
+    TreeConfig, DEFAULT_BACKFILL_RUN_THRESHOLD, DEFAULT_INVALID_HEADER_HIT_EVICTION_THRESHOLD,
+    DEFAULT_MULTIPROOF_TASK_CHUNK_SIZE, DEFAULT_NUM_STATE_MASKING_BLOCKS,
+    MIN_PERSISTENCE_BACKPRESSURE_THRESHOLD,
 };
-use std::{sync::OnceLock, time::Duration};
+use std::{num::NonZeroUsize, sync::OnceLock, time::Duration};
 
 use crate::node_config::{
     DEFAULT_CROSS_BLOCK_CACHE_SIZE_MB, DEFAULT_MEMORY_BLOCK_BUFFER_TARGET,
@@ -29,6 +30,7 @@ pub struct DefaultEngineValues {
     persistence_backpressure_threshold: u64,
     num_state_masking_blocks: u64,
     memory_block_buffer_target: u64,
+    backfill_run_threshold: u64,
     invalid_header_hit_eviction_threshold: u8,
     state_cache_disabled: bool,
     prewarming_disabled: bool,
@@ -90,6 +92,12 @@ impl DefaultEngineValues {
     /// Set the default memory block buffer target
     pub const fn with_memory_block_buffer_target(mut self, v: u64) -> Self {
         self.memory_block_buffer_target = v;
+        self
+    }
+
+    /// Set the default backfill run threshold
+    pub const fn with_backfill_run_threshold(mut self, v: u64) -> Self {
+        self.backfill_run_threshold = v;
         self
     }
 
@@ -266,11 +274,12 @@ impl Default for DefaultEngineValues {
             persistence_backpressure_threshold: MIN_PERSISTENCE_BACKPRESSURE_THRESHOLD,
             num_state_masking_blocks: DEFAULT_NUM_STATE_MASKING_BLOCKS,
             memory_block_buffer_target: DEFAULT_MEMORY_BLOCK_BUFFER_TARGET,
+            backfill_run_threshold: DEFAULT_BACKFILL_RUN_THRESHOLD,
             invalid_header_hit_eviction_threshold: DEFAULT_INVALID_HEADER_HIT_EVICTION_THRESHOLD,
             state_cache_disabled: false,
             prewarming_disabled: false,
             txpool_prewarming_enabled: false,
-            sender_recovery_cache_enabled: false,
+            sender_recovery_cache_enabled: true,
             state_provider_metrics: false,
             cross_block_cache_size: DEFAULT_CROSS_BLOCK_CACHE_SIZE_MB,
             state_root_task_compare_updates: false,
@@ -346,6 +355,20 @@ pub struct EngineArgs {
     #[arg(long = "engine.memory-block-buffer-target")]
     pub memory_block_buffer_target: Option<u64>,
 
+    /// Configure the largest gap, in blocks, between the local head and the forkchoice head that
+    /// is closed by downloading the missing blocks directly. Larger gaps trigger a full pipeline
+    /// (backfill) run instead.
+    ///
+    /// On chains with short block times a pipeline run may take longer than it takes the chain to
+    /// produce another gap of this size, in which case raising this value lets the node catch up
+    /// via live sync. Values above 1024 are clamped to the peer header response limit.
+    #[arg(
+        long = "engine.backfill-threshold",
+        env = "RETH_ENGINE_BACKFILL_THRESHOLD",
+        default_value_t = DefaultEngineValues::get_global().backfill_run_threshold
+    )]
+    pub backfill_run_threshold: u64,
+
     /// Configure how many cache hits an invalid header can accumulate before it is evicted and
     /// reprocessed.
     ///
@@ -382,12 +405,15 @@ pub struct EngineArgs {
     )]
     pub txpool_prewarming_enabled: bool,
 
-    /// Enable caching recovered transaction senders across transaction ingress and payload
-    /// execution.
+    /// Cache recovered transaction senders across transaction ingress and payload execution.
+    ///
+    /// Enabled by default, use `--engine.sender-recovery-cache=false` to disable it.
     #[arg(
         long = "engine.sender-recovery-cache",
         env = "RETH_ENGINE_SENDER_RECOVERY_CACHE",
-        default_value_t = DefaultEngineValues::get_global().sender_recovery_cache_enabled
+        default_value_t = DefaultEngineValues::get_global().sender_recovery_cache_enabled,
+        num_args = 0..=1,
+        default_missing_value = "true",
     )]
     pub sender_recovery_cache_enabled: bool,
 
@@ -428,6 +454,11 @@ pub struct EngineArgs {
     #[arg(long = "engine.reserved-cpu-cores", default_value_t = DefaultEngineValues::get_global().reserved_cpu_cores)]
     pub reserved_cpu_cores: usize,
 
+    /// Override the available CPU count for node thread pools and parallel execution decisions.
+    /// Does not change CPU affinity. Explicit thread counts take precedence.
+    #[arg(long = "cpu-cores", value_name = "COUNT")]
+    pub cpu_cores: Option<NonZeroUsize>,
+
     /// CAUTION: This CLI flag has no effect anymore, use --engine.disable-precompile-cache
     /// if you want to disable precompile cache
     #[arg(long = "engine.precompile-cache", default_value = "true", hide = true)]
@@ -458,13 +489,15 @@ pub struct EngineArgs {
     #[arg(long = "engine.allow-unwind-canonical-header", default_value_t = DefaultEngineValues::get_global().allow_unwind_canonical_header)]
     pub allow_unwind_canonical_header: bool,
 
-    /// Configure the number of storage proof workers in the Tokio blocking pool.
-    /// If not specified, defaults to 2x available parallelism.
+    /// Configure the number of storage proof workers spawned for each block.
+    /// If not specified or zero, the count is derived from the block: 2x available parallelism,
+    /// halved for blocks with few transactions and doubled for blocks at or above 100M gas.
     #[arg(long = "engine.storage-worker-count", default_value = Resettable::from(DefaultEngineValues::get_global().storage_worker_count.map(|v| v.to_string().into())))]
     pub storage_worker_count: Option<usize>,
 
-    /// Configure the number of account proof workers in the Tokio blocking pool.
-    /// If not specified, defaults to the same count as storage workers.
+    /// Configure the number of account proof workers spawned for each block.
+    /// If not specified or zero, the count is derived from the block the same way as for storage
+    /// workers.
     #[arg(long = "engine.account-worker-count", default_value = Resettable::from(DefaultEngineValues::get_global().account_worker_count.map(|v| v.to_string().into())))]
     pub account_worker_count: Option<usize>,
 
@@ -505,7 +538,7 @@ pub struct EngineArgs {
     #[arg(
         long = "engine.state-root-task-timeout",
         value_parser = humantime::parse_duration,
-        default_value = DefaultEngineValues::get_global().state_root_task_timeout.as_deref().unwrap_or("4s"),
+        default_value = Resettable::from(DefaultEngineValues::get_global().state_root_task_timeout.as_ref().map(|v| v.as_str().into())),
     )]
     pub state_root_task_timeout: Option<Duration>,
 
@@ -564,6 +597,15 @@ pub struct EngineArgs {
     #[arg(long = "engine.disable-bal-batch-io", default_value_t = false)]
     pub disable_bal_batch_io: bool,
 
+    /// Reuse transaction prewarming results during block execution instead of executing
+    /// transactions again when their prewarm reads are still valid.
+    #[arg(
+        long = "engine.prewarm-reuse",
+        env = "RETH_ENGINE_PREWARM_REUSE",
+        default_value_t = false
+    )]
+    pub prewarm_reuse: bool,
+
     /// Add random jitter before each proof computation (trie-debug only).
     /// Each proof worker sleeps for a random duration up to this value before
     /// starting work. Useful for stress-testing timing-sensitive proof logic.
@@ -586,6 +628,7 @@ impl Default for EngineArgs {
             persistence_backpressure_threshold: _,
             num_state_masking_blocks,
             memory_block_buffer_target: _,
+            backfill_run_threshold,
             invalid_header_hit_eviction_threshold,
             state_cache_disabled,
             prewarming_disabled,
@@ -619,6 +662,7 @@ impl Default for EngineArgs {
             persistence_backpressure_threshold: None,
             num_state_masking_blocks,
             memory_block_buffer_target: None,
+            backfill_run_threshold,
             invalid_header_hit_eviction_threshold,
             state_root_task_compare_updates,
             legacy_state_root_task_enabled: false,
@@ -634,6 +678,7 @@ impl Default for EngineArgs {
             accept_execution_requests_hash,
             multiproof_chunk_size,
             reserved_cpu_cores,
+            cpu_cores: None,
             precompile_cache_enabled: true,
             precompile_cache_disabled,
             state_root_fallback,
@@ -654,6 +699,7 @@ impl Default for EngineArgs {
             bal_parallel_execution_disabled,
             bal_parallel_state_root_disabled,
             disable_bal_batch_io: false,
+            prewarm_reuse: false,
             #[cfg(feature = "trie-debug")]
             proof_jitter: None,
         }
@@ -737,6 +783,7 @@ impl EngineArgs {
             .with_persistence_threshold(self.persistence_threshold)
             .with_memory_block_buffer_target(self.memory_block_buffer_target())
             .with_num_state_masking_blocks(self.num_state_masking_blocks())
+            .with_backfill_run_threshold(self.backfill_run_threshold)
             .with_invalid_header_hit_eviction_threshold(self.invalid_header_hit_eviction_threshold)
             .without_state_cache(self.state_cache_disabled)
             .without_prewarming(self.prewarming_disabled)
@@ -765,10 +812,15 @@ impl EngineArgs {
             .with_suppress_persistence_during_build(self.suppress_persistence_during_build)
             .without_bal_parallel_execution(self.bal_parallel_execution_disabled)
             .without_bal_parallel_state_root(self.bal_parallel_state_root_disabled)
-            .without_bal_batch_io(self.disable_bal_batch_io);
+            .without_bal_batch_io(self.disable_bal_batch_io)
+            .with_prewarm_reuse(self.prewarm_reuse);
         #[cfg(feature = "trie-debug")]
         let config = config.with_proof_jitter(self.proof_jitter);
-        config
+        if let Some(cpu_cores) = self.cpu_cores {
+            config.with_has_enough_parallelism(cpu_cores.get() >= 5)
+        } else {
+            config
+        }
     }
 }
 
@@ -782,6 +834,32 @@ mod tests {
     struct CommandParser<T: Args> {
         #[command(flatten)]
         args: T,
+    }
+
+    #[test]
+    fn cpu_cores_override_controls_parallel_state_root() {
+        for (cores, enabled) in [(1, false), (4, false), (5, true), (8, true)] {
+            let args = CommandParser::<EngineArgs>::parse_from([
+                "reth",
+                "--cpu-cores",
+                &cores.to_string(),
+            ])
+            .args;
+            assert_eq!(args.cpu_cores.unwrap().get(), cores);
+            assert_eq!(args.tree_config().use_state_root_task(), enabled);
+        }
+    }
+
+    #[test]
+    fn cpu_cores_override_preserves_state_root_fallback() {
+        let args = CommandParser::<EngineArgs>::parse_from([
+            "reth",
+            "--cpu-cores",
+            "8",
+            "--engine.state-root-fallback",
+        ])
+        .args;
+        assert!(!args.tree_config().use_state_root_task());
     }
 
     #[test]
@@ -878,14 +956,36 @@ mod tests {
     }
 
     #[test]
-    fn sender_recovery_cache_is_disabled_by_default_and_can_be_enabled() {
+    fn sender_recovery_cache_is_enabled_by_default_and_can_be_disabled() {
         let args = CommandParser::<EngineArgs>::parse_from(["reth"]).args;
-        assert!(!args.sender_recovery_cache_enabled);
+        assert!(args.sender_recovery_cache_enabled);
 
         let args =
             CommandParser::<EngineArgs>::parse_from(["reth", "--engine.sender-recovery-cache"])
                 .args;
         assert!(args.sender_recovery_cache_enabled);
+
+        let args = CommandParser::<EngineArgs>::parse_from([
+            "reth",
+            "--engine.sender-recovery-cache=true",
+        ])
+        .args;
+        assert!(args.sender_recovery_cache_enabled);
+
+        let args = CommandParser::<EngineArgs>::parse_from([
+            "reth",
+            "--engine.sender-recovery-cache=false",
+        ])
+        .args;
+        assert!(!args.sender_recovery_cache_enabled);
+
+        let args = CommandParser::<EngineArgs>::parse_from([
+            "reth",
+            "--engine.sender-recovery-cache",
+            "false",
+        ])
+        .args;
+        assert!(!args.sender_recovery_cache_enabled);
     }
 
     #[test]
@@ -896,6 +996,7 @@ mod tests {
             persistence_backpressure_threshold: Some(101),
             num_state_masking_blocks: DEFAULT_NUM_STATE_MASKING_BLOCKS,
             memory_block_buffer_target: Some(50),
+            backfill_run_threshold: 100,
             invalid_header_hit_eviction_threshold: 7,
             legacy_state_root_task_enabled: true,
             caching_and_prewarming_enabled: true,
@@ -912,6 +1013,7 @@ mod tests {
             accept_execution_requests_hash: true,
             multiproof_chunk_size: 512,
             reserved_cpu_cores: 4,
+            cpu_cores: Some(NonZeroUsize::new(8).unwrap()),
             precompile_cache_enabled: true,
             precompile_cache_disabled: true,
             state_root_fallback: true,
@@ -930,6 +1032,7 @@ mod tests {
             bal_parallel_execution_disabled: true,
             bal_parallel_state_root_disabled: true,
             disable_bal_batch_io: true,
+            prewarm_reuse: true,
             #[cfg(feature = "trie-debug")]
             proof_jitter: None,
         };
@@ -942,6 +1045,8 @@ mod tests {
             "101",
             "--engine.memory-block-buffer-target",
             "50",
+            "--engine.backfill-threshold",
+            "100",
             "--engine.invalid-header-cache-hit-eviction-threshold",
             "7",
             "--engine.legacy-state-root",
@@ -957,6 +1062,8 @@ mod tests {
             "512",
             "--engine.reserved-cpu-cores",
             "4",
+            "--cpu-cores",
+            "8",
             "--engine.disable-precompile-cache",
             "--engine.state-root-fallback",
             "--engine.always-process-payload-attributes-on-canonical-head",
@@ -974,6 +1081,7 @@ mod tests {
             "--engine.disable-bal-parallel-execution",
             "--engine.disable-bal-parallel-state-root",
             "--engine.disable-bal-batch-io",
+            "--engine.prewarm-reuse",
         ])
         .args;
 
@@ -1010,17 +1118,20 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_num_state_masking_blocks() {
-        let args = CommandParser::<EngineArgs>::parse_from([
-            "reth",
-            "--engine.persistence-threshold",
-            "13",
-            "--engine.num-state-masking-blocks",
-            "7",
-        ])
-        .args;
+    fn test_parse_backfill_threshold() {
+        let args = CommandParser::<EngineArgs>::parse_from(["reth"]).args;
+        let config = args.tree_config();
+        assert_eq!(config.backfill_run_threshold(), DEFAULT_BACKFILL_RUN_THRESHOLD);
 
-        assert_eq!(args.tree_config().num_state_masking_blocks(), 7);
+        for (threshold, expected) in [("500", 500), ("2048", 1024)] {
+            let args = CommandParser::<EngineArgs>::parse_from([
+                "reth",
+                "--engine.backfill-threshold",
+                threshold,
+            ])
+            .args;
+            assert_eq!(args.tree_config().backfill_run_threshold(), expected);
+        }
     }
 
     #[test]
@@ -1082,17 +1193,6 @@ mod tests {
         assert_eq!(config.num_state_masking_blocks(), 0);
         assert_eq!(config.memory_block_buffer_target(), 0);
         assert_eq!(config.persistence_backpressure_threshold(), 1);
-    }
-
-    #[test]
-    fn zero_persistence_threshold_disables_explicit_state_masking() {
-        let args = EngineArgs {
-            persistence_threshold: 0,
-            num_state_masking_blocks: u64::MAX,
-            ..EngineArgs::default()
-        };
-        args.validate().unwrap();
-        assert_eq!(args.tree_config().num_state_masking_blocks(), 0);
     }
 
     #[test]

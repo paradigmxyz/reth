@@ -22,6 +22,7 @@ reth-network-api.workspace = true
 reth-network-p2p.workspace = true
 reth-discv4.workspace = true
 reth-discv5.workspace = true
+reth-net-nat.workspace = true
 reth-dns-discovery.workspace = true
 reth-ethereum-forks.workspace = true
 reth-evm.workspace = true

@@ -348,6 +348,10 @@ impl From<Vec<Capability>> for Capabilities {
 }
 
 impl Encodable for Capabilities {
+    fn length(&self) -> usize {
+        self.inner.length()
+    }
+
     fn encode(&self, out: &mut dyn BufMut) {
         self.inner.encode(out)
     }
@@ -367,5 +371,28 @@ impl Decodable for Capabilities {
             eth_72: inner.iter().any(Capability::is_eth_v72),
             inner,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use proptest::prelude::*;
+
+    proptest! {
+        #[test]
+        fn capabilities_rlp_roundtrip_and_length(
+            versions in proptest::collection::vec(66usize..=72, 0..32),
+        ) {
+            let capabilities = Capabilities::new(
+                versions.into_iter().map(|version| Capability::new_static("eth", version)).collect(),
+            );
+            let encoded = alloy_rlp::encode(&capabilities);
+            prop_assert_eq!(capabilities.length(), encoded.len());
+            let mut buf = encoded.as_slice();
+            let decoded = Capabilities::decode(&mut buf)?;
+            prop_assert_eq!(decoded, capabilities);
+            prop_assert!(buf.is_empty());
+        }
     }
 }

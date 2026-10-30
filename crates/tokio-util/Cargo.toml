@@ -19,7 +19,7 @@ tokio = { workspace = true, features = ["sync"] }
 tokio-stream = { workspace = true, features = ["sync"] }
 
 [dev-dependencies]
-tokio = { workspace = true, features = ["full", "macros"] }
+tokio = { workspace = true, features = ["macros", "rt", "time"] }
 
 [features]
 time = ["tokio/time"]

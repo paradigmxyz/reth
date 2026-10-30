@@ -1,8 +1,32 @@
+use alloc::{sync::Arc, vec::Vec};
+use alloy_eips::eip7685::Requests;
 use alloy_primitives::{Address, B256, U256};
-use reth_primitives_traits::{Account, Bytecode};
-use revm::database::{states::BundleState, BundleAccount};
+use reth_primitives_traits::{Account, Block, Bytecode, RecoveredBlock};
+use reth_trie_common::bundle_state::{BundleAccount, BundleState};
 
-pub use alloy_evm::block::BlockExecutionResult;
+/// The result of executing a block.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BlockExecutionResult<T> {
+    /// All the receipts of the transactions in the block.
+    pub receipts: Vec<T>,
+    /// All the EIP-7685 requests in the block.
+    pub requests: Requests,
+    /// The total gas used by the block.
+    pub gas_used: u64,
+    /// Blob gas used by the block.
+    pub blob_gas_used: u64,
+}
+
+impl<T> Default for BlockExecutionResult<T> {
+    fn default() -> Self {
+        Self {
+            receipts: Default::default(),
+            requests: Default::default(),
+            gas_used: 0,
+            blob_gas_used: 0,
+        }
+    }
+}
 
 /// [`BlockExecutionResult`] combined with state.
 #[derive(
@@ -27,6 +51,11 @@ pub struct BlockExecutionOutput<T> {
 }
 
 impl<T> BlockExecutionOutput<T> {
+    /// Combines execution results with their persistent state.
+    pub const fn new(result: BlockExecutionResult<T>, state: BundleState) -> Self {
+        Self { result, state }
+    }
+
     /// Return bytecode if known.
     pub fn bytecode(&self, code_hash: &B256) -> Option<Bytecode> {
         self.state.bytecode(code_hash).map(Bytecode)
@@ -46,7 +75,7 @@ impl<T> BlockExecutionOutput<T> {
     ///
     /// This means that depending on status we can potentially return `U256::ZERO`.
     pub fn storage(&self, address: &Address, storage_key: U256) -> Option<U256> {
-        self.state.account(address).and_then(|a| a.storage_slot(storage_key))
+        self.state.storage(address, storage_key)
     }
 }
 
@@ -61,5 +90,39 @@ impl<T> Default for BlockExecutionOutput<T> {
             },
             state: Default::default(),
         }
+    }
+}
+
+/// A recovered block and its shared execution output.
+///
+/// The execution output contains the block's receipts.
+#[derive(Debug)]
+pub struct RecoveredBlockAndExecutionOutput<B: Block, R> {
+    block: Arc<RecoveredBlock<B>>,
+    execution_output: Arc<BlockExecutionOutput<R>>,
+}
+
+impl<B: Block, R> RecoveredBlockAndExecutionOutput<B, R> {
+    /// Creates a block with its execution output.
+    pub const fn new(
+        block: Arc<RecoveredBlock<B>>,
+        execution_output: Arc<BlockExecutionOutput<R>>,
+    ) -> Self {
+        Self { block, execution_output }
+    }
+
+    /// Returns the recovered block.
+    pub const fn block(&self) -> &Arc<RecoveredBlock<B>> {
+        &self.block
+    }
+
+    /// Returns the execution output.
+    pub const fn execution_output(&self) -> &Arc<BlockExecutionOutput<R>> {
+        &self.execution_output
+    }
+
+    /// Consumes the container and returns its shared parts.
+    pub fn into_parts(self) -> (Arc<RecoveredBlock<B>>, Arc<BlockExecutionOutput<R>>) {
+        (self.block, self.execution_output)
     }
 }

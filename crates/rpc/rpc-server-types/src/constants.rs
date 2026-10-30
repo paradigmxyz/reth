@@ -95,7 +95,7 @@ pub mod gas_oracle {
     pub const DEFAULT_MAX_GAS_PRICE: U256 = U256::from_limbs([500_000_000_000u64, 0, 0, 0]);
 
     /// The default minimum gas price, under which the sample will be ignored
-    pub const DEFAULT_IGNORE_GAS_PRICE: U256 = U256::ZERO;
+    pub const DEFAULT_IGNORE_GAS_PRICE: U256 = U256::from_limbs([2, 0, 0, 0]);
 
     /// The default gas limit for `eth_call` and adjacent calls.
     ///
@@ -114,6 +114,20 @@ pub mod gas_oracle {
 
 /// Cache specific constants
 pub mod cache {
+    use std::time::Duration;
+
+    /// Default estimated block payload limit: 2 GiB.
+    pub const DEFAULT_BLOCK_CACHE_MAX_BYTES: usize = 2 * 1024 * 1024 * 1024;
+
+    /// Default estimated receipts payload limit: 1 GiB.
+    pub const DEFAULT_RECEIPT_CACHE_MAX_BYTES: usize = 1024 * 1024 * 1024;
+
+    /// Default estimated block access list payload limit: 500 MiB.
+    pub const DEFAULT_BAL_CACHE_MAX_BYTES: usize = 500 * 1024 * 1024;
+
+    /// Default idle timeout for cached blocks, receipts, and block access lists.
+    pub const DEFAULT_CACHE_IDLE_TIMEOUT: Duration = Duration::from_secs(60 * 60);
+
     /// Default cache size for the block cache: 1000 blocks.
     pub const DEFAULT_BLOCK_CACHE_MAX_LEN: u32 = 1000;
 

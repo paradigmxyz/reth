@@ -12,15 +12,13 @@ use reth_engine_primitives::{
 use reth_engine_tree::tree::EngineValidator;
 use reth_errors::{BlockExecutionError, BlockValidationError, RethError, RethResult};
 use reth_evm::{
-    execute::{BlockBuilder, BlockBuilderOutcome},
-    ConfigureEvm,
+    database::StateProviderDatabase, BlockBuilder, BlockBuilderOutcome, BlockExecutor, ConfigureEvm,
 };
 use reth_payload_primitives::{BuiltPayload, PayloadTypes};
 use reth_primitives_traits::{
     block::Block as _, BlockBody as _, BlockTy, HeaderTy, SealedBlock, SignedTransaction,
 };
-use reth_revm::{database::StateProviderDatabase, db::State};
-use reth_storage_api::{errors::ProviderError, BlockReader, StateProviderFactory};
+use reth_storage_api::{errors::ProviderError, BlockReader, StateProvider, StateProviderFactory};
 use std::{
     collections::VecDeque,
     future::Future,
@@ -144,7 +142,7 @@ where
             let next = ready!(this.stream.poll_next_unpin(cx));
             let item = match (next, &this.last_forkchoice_state) {
                 (
-                    Some(BeaconEngineMessage::NewPayload { payload, tx }),
+                    Some(BeaconEngineMessage::NewPayload { cause, payload, tx }),
                     Some(last_forkchoice_state),
                 ) if this.forkchoice_states_forwarded > this.frequency &&
                         // Only enter reorg state if new payload attaches to current head.
@@ -172,6 +170,7 @@ where
                             // Forward the payload and attempt to create reorg on top of
                             // the next one
                             return Poll::Ready(Some(BeaconEngineMessage::NewPayload {
+                                cause,
                                 payload,
                                 tx,
                             }))
@@ -192,14 +191,16 @@ where
 
                     let queue = VecDeque::from([
                         // Current payload
-                        BeaconEngineMessage::NewPayload { payload, tx },
+                        BeaconEngineMessage::NewPayload { cause: cause.clone(), payload, tx },
                         // Reorg payload
                         BeaconEngineMessage::NewPayload {
+                            cause: cause.clone(),
                             payload: T::block_to_payload(reorg_block, encoded_bal),
                             tx: reorg_payload_tx,
                         },
                         // Reorg forkchoice state
                         BeaconEngineMessage::ForkchoiceUpdated {
+                            cause,
                             state: reorg_forkchoice_state,
                             payload_attrs: None,
                             tx: reorg_fcu_tx,
@@ -208,13 +209,21 @@ where
                     *this.state = EngineReorgState::Reorg { queue };
                     continue
                 }
-                (Some(BeaconEngineMessage::ForkchoiceUpdated { state, payload_attrs, tx }), _) => {
+                (
+                    Some(BeaconEngineMessage::ForkchoiceUpdated {
+                        cause,
+                        state,
+                        payload_attrs,
+                        tx,
+                    }),
+                    _,
+                ) => {
                     // Record last forkchoice state forwarded to the engine.
                     // We do not care if it's valid since engine should be able to handle
                     // reorgs that rely on invalid forkchoice state.
                     *this.last_forkchoice_state = Some(state);
                     *this.forkchoice_states_forwarded += 1;
-                    Some(BeaconEngineMessage::ForkchoiceUpdated { state, payload_attrs, tx })
+                    Some(BeaconEngineMessage::ForkchoiceUpdated { cause, state, payload_attrs, tx })
                 }
                 (item, _) => item,
             };
@@ -266,48 +275,44 @@ where
 
     debug!(target: "engine::stream::reorg", number = reorg_target.header().number(), hash = %previous_hash, "Selected reorg target");
 
-    // Configure state
     let has_bal = reorg_target.header().block_access_list_hash().is_some();
     let state_provider = provider.state_by_block_hash(reorg_target.header().parent_hash())?;
-    let mut state = State::builder()
-        .with_database_ref(StateProviderDatabase::new(&state_provider))
-        .with_bundle_update()
-        .with_bal_builder_if(has_bal)
-        .build();
-
+    let evm_env = evm_config.evm_env(reorg_target.header()).map_err(RethError::other)?;
+    let evm = evm_config.evm_with_env(
+        StateProviderDatabase::new(state_provider.as_ref().into_evm_state_provider()),
+        evm_env.clone(),
+    );
     let ctx = evm_config.context_for_block(&reorg_target).map_err(RethError::other)?;
-    let evm = evm_config.evm_for_block(&mut state, &reorg_target).map_err(RethError::other)?;
-    let mut builder = evm_config.create_block_builder(evm, &reorg_target_parent, ctx);
+    let mut builder = evm_config.create_block_builder(evm, evm_env, &reorg_target_parent, ctx);
+    if has_bal {
+        builder.executor_mut().enable_block_access_list_builder();
+    }
 
     builder.apply_pre_execution_changes()?;
 
-    let mut cumulative_gas_used = 0;
     for tx in candidate_transactions {
         // ensure we still have capacity for this transaction
-        if cumulative_gas_used + tx.gas_limit() > reorg_target.gas_limit() {
+        if builder.executor_mut().validate_transaction_gas_limit(tx.gas_limit()).is_err() {
             continue
         }
 
         let tx_recovered =
             tx.try_into_recovered().map_err(|_| ProviderError::SenderRecoveryError)?;
-        let gas_used = match builder.execute_transaction(tx_recovered) {
-            Ok(gas_used) => gas_used.tx_gas_used(),
+        match builder.execute_transaction(tx_recovered) {
+            Ok(_) => {}
             Err(BlockExecutionError::Validation(BlockValidationError::InvalidTx {
                 hash,
                 error,
             })) => {
                 trace!(target: "engine::stream::reorg", hash = %hash, ?error, "Error executing transaction from next block");
-                continue
             }
             // Treat error as fatal
             Err(error) => return Err(RethError::Execution(error)),
-        };
-
-        cumulative_gas_used += gas_used;
+        }
     }
 
     let BlockBuilderOutcome { block, block_access_list, .. } =
-        builder.finish(&state_provider, None)?;
+        builder.finish(state_provider.as_ref(), None)?;
 
     Ok((block.into_sealed_block(), block_access_list.map(|bal| bal.split().1)))
 }

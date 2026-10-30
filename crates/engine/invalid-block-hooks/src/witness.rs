@@ -1,31 +1,21 @@
 use alloy_consensus::BlockHeader;
-use alloy_primitives::{keccak256, Address, Bytes, B256, U256};
+use alloy_primitives::{Address, B256, U256};
 use alloy_rpc_types_debug::ExecutionWitness;
+use evm2::{bytecode::Bytecode, evm::AccountInfo};
 use pretty_assertions::Comparison;
 use reth_engine_primitives::InvalidBlockHook;
-use reth_evm::{execute::Executor, ConfigureEvm};
+use reth_evm::{database::StateProviderDatabase, ConfigureEvm, Executor};
+use reth_execution_types::BundleSource;
 use reth_primitives_traits::{NodePrimitives, RecoveredBlock, SealedHeader};
-use reth_provider::{BlockExecutionOutput, StateProvider, StateProviderBox, StateProviderFactory};
-use reth_revm::{
-    database::StateProviderDatabase,
-    db::{BundleState, State},
-};
+use reth_provider::{BlockExecutionOutput, StateProvider, StateProviderFactory};
 use reth_rpc_api::DebugApiClient;
-use reth_tracing::tracing::warn;
-use reth_trie::updates::TrieUpdates;
-use revm::{
-    bytecode::Bytecode,
-    database::{
-        states::{reverts::AccountInfoRevert, StorageSlot},
-        AccountStatus, RevertToSlot,
-    },
-    state::AccountInfo,
+use reth_trie::{
+    bundle_state::{AccountInfoRevert, AccountStatus, BundleState, RevertToSlot, StorageSlot},
+    updates::TrieUpdates,
 };
 use serde::Serialize;
 use std::{collections::BTreeMap, fmt::Debug, fs::File, io::Write, path::PathBuf};
-
-type CollectionResult =
-    (BTreeMap<B256, Bytes>, BTreeMap<B256, Bytes>, reth_trie::HashedPostState, BundleState);
+use tracing::warn;
 
 /// Serializable version of `BundleState` for deterministic comparison
 #[derive(Debug, PartialEq, Eq)]
@@ -114,64 +104,6 @@ fn sort_bundle_state_for_comparison(bundle_state: &BundleState) -> BundleStateSo
     }
 }
 
-/// Extracts execution data including codes, preimages, and hashed state from database
-fn collect_execution_data(
-    mut db: State<StateProviderDatabase<StateProviderBox>>,
-) -> eyre::Result<CollectionResult> {
-    let bundle_state = db.take_bundle();
-    let mut codes = BTreeMap::new();
-    let mut preimages = BTreeMap::new();
-    let mut hashed_state = db.database.hashed_post_state(&bundle_state)?;
-
-    // Collect codes
-    db.cache.contracts.values().chain(bundle_state.contracts.values()).for_each(|code| {
-        let code_bytes = code.original_bytes();
-        codes.insert(keccak256(&code_bytes), code_bytes);
-    });
-
-    // Collect preimages
-    for (address, account) in db.cache.accounts {
-        let hashed_address = keccak256(address);
-        hashed_state
-            .accounts
-            .insert(hashed_address, account.account.as_ref().map(|a| a.info.clone().into()));
-
-        if let Some(account_data) = account.account {
-            preimages.insert(hashed_address, alloy_rlp::encode(address).into());
-            let storage = hashed_state.storages.entry(hashed_address).or_default();
-
-            for (slot, value) in account_data.storage {
-                let slot_bytes = B256::from(slot);
-                let hashed_slot = keccak256(slot_bytes);
-                storage.storage.insert(hashed_slot, value);
-                preimages.insert(hashed_slot, alloy_rlp::encode(slot_bytes).into());
-            }
-        }
-    }
-
-    Ok((codes, preimages, hashed_state, bundle_state))
-}
-
-/// Generates execution witness from collected codes, preimages, and hashed state
-fn generate(
-    codes: BTreeMap<B256, Bytes>,
-    preimages: BTreeMap<B256, Bytes>,
-    hashed_state: reth_trie::HashedPostState,
-    state_provider: Box<dyn StateProvider>,
-) -> eyre::Result<ExecutionWitness> {
-    let state = state_provider.witness(
-        Default::default(),
-        hashed_state,
-        reth_trie::ExecutionWitnessMode::Legacy,
-    )?;
-    Ok(ExecutionWitness {
-        state,
-        codes: codes.into_values().collect(),
-        keys: preimages.into_values().collect(),
-        ..Default::default()
-    })
-}
-
 /// Hook for generating execution witnesses when invalid blocks are detected.
 ///
 /// This hook captures the execution state and generates witness data that can be used
@@ -203,7 +135,7 @@ impl<P, E> InvalidBlockWitnessHook<P, E> {
 
 impl<P, E, N> InvalidBlockWitnessHook<P, E>
 where
-    P: StateProviderFactory + Send + Sync + 'static,
+    P: StateProviderFactory + 'static,
     E: ConfigureEvm<Primitives = N> + 'static,
     N: NodePrimitives,
 {
@@ -212,19 +144,22 @@ where
         &self,
         parent_header: &SealedHeader<N::BlockHeader>,
         block: &RecoveredBlock<N::Block>,
-    ) -> eyre::Result<(ExecutionWitness, BundleState)> {
-        let mut executor = self.evm_config.batch_executor(StateProviderDatabase::new(
-            self.provider.state_by_block_hash(parent_header.hash())?,
-        ));
-
-        executor.execute_one(block)?;
-        let db = executor.into_state();
-        let (codes, preimages, hashed_state, bundle_state) = collect_execution_data(db)?;
-
+    ) -> eyre::Result<(ExecutionWitness, BundleState, reth_trie::HashedPostState)> {
         let state_provider = self.provider.state_by_block_hash(parent_header.hash())?;
-        let witness = generate(codes, preimages, hashed_state, state_provider)?;
+        let mut database = evm2::evm::CacheDB::new(evm2::evm::Db::new(StateProviderDatabase::new(
+            state_provider.as_ref().into_evm_state_provider(),
+        )));
+        let output = self.evm_config.executor(&mut database).execute(block)?;
+        let hashed_state = state_provider.hashed_post_state(&output.state)?;
+        database.commit_source(&BundleSource(&output.state));
+        let witness = reth_evm::witness::ExecutionWitnessRecord::new(&database)
+            .into_execution_witness_without_headers(
+                state_provider.as_ref(),
+                reth_trie::ExecutionWitnessMode::Legacy,
+            )?;
+        let bundle_state = output.state;
 
-        Ok((witness, bundle_state))
+        Ok((witness, bundle_state, hashed_state))
     }
 
     /// Handles witness generation, saving, and comparison with healthy node
@@ -300,12 +235,11 @@ where
         &self,
         parent_header: &SealedHeader<N::BlockHeader>,
         block: &RecoveredBlock<N::Block>,
-        bundle_state: &BundleState,
+        hashed_state: reth_trie::HashedPostState,
         trie_updates: Option<(&TrieUpdates, B256)>,
         block_prefix: &str,
     ) -> eyre::Result<()> {
         let state_provider = self.provider.state_by_block_hash(parent_header.hash())?;
-        let hashed_state = state_provider.hashed_post_state(bundle_state)?;
         let (re_executed_root, trie_output) =
             state_provider.state_root_with_updates(hashed_state)?;
 
@@ -325,11 +259,11 @@ where
             if &trie_output != original_updates {
                 let original_path = self.save_file(
                     format!("{}.trie_updates.original.json", block_prefix),
-                    &original_updates.into_sorted_ref(),
+                    &original_updates.to_sorted_ref(),
                 )?;
                 let re_executed_path = self.save_file(
                     format!("{}.trie_updates.re_executed.json", block_prefix),
-                    &trie_output.into_sorted_ref(),
+                    &trie_output.to_sorted_ref(),
                 )?;
                 warn!(
                     target: "engine::invalid_block_hooks::witness",
@@ -350,7 +284,7 @@ where
         trie_updates: Option<(&TrieUpdates, B256)>,
     ) -> eyre::Result<()> {
         // TODO(alexey): unify with `DebugApi::debug_execution_witness`
-        let (witness, bundle_state) = self.re_execute_block(parent_header, block)?;
+        let (witness, bundle_state, hashed_state) = self.re_execute_block(parent_header, block)?;
 
         let block_prefix = format!("{}_{}", block.number(), block.hash());
         self.handle_witness_operations(&witness, &block_prefix, block.number())?;
@@ -360,7 +294,7 @@ where
         self.validate_state_root_and_trie(
             parent_header,
             block,
-            &bundle_state,
+            hashed_state,
             trie_updates,
             &block_prefix,
         )?;
@@ -393,7 +327,7 @@ where
 
 impl<P, E, N: NodePrimitives> InvalidBlockHook<N> for InvalidBlockWitnessHook<P, E>
 where
-    P: StateProviderFactory + Send + Sync + 'static,
+    P: StateProviderFactory + 'static,
     E: ConfigureEvm<Primitives = N> + 'static,
 {
     fn on_invalid_block(
@@ -413,18 +347,16 @@ where
 mod tests {
     use super::*;
     use alloy_eips::eip7685::Requests;
-    use alloy_primitives::{map::HashMap, Address, Bytes, B256, U256};
+    use alloy_primitives::{map::HashMap, Bytes, B256, U256};
+    use evm2::evm::{CacheDB, EmptyDB};
     use reth_chainspec::ChainSpec;
     use reth_ethereum_primitives::EthPrimitives;
     use reth_evm_ethereum::EthEvmConfig;
     use reth_provider::test_utils::MockEthProvider;
-    use reth_revm::db::{BundleAccount, BundleState};
-    use revm::database::states::reverts::AccountRevert;
+    use reth_trie::bundle_state::{AccountRevert, BundleAccount};
     use tempfile::TempDir;
 
-    use reth_revm::test_utils::StateProviderTest;
     use reth_testing_utils::generators::{self, random_block, random_eoa_accounts, BlockParams};
-    use revm::bytecode::Bytecode;
 
     /// Creates a test `BundleState` with realistic accounts, contracts, and reverts
     fn create_bundle_state() -> BundleState {
@@ -452,14 +384,13 @@ mod tests {
                     nonce: account.nonce,
                     code_hash: account.bytecode_hash.unwrap_or_default(),
                     code: None,
-                    account_id: None,
+                    ..Default::default()
                 }),
                 original_info: (i == 0).then(|| AccountInfo {
                     balance: account.balance.checked_div(U256::from(2)).unwrap_or(U256::ZERO),
-                    nonce: 0,
                     code_hash: account.bytecode_hash.unwrap_or_default(),
                     code: None,
-                    account_id: None,
+                    ..Default::default()
                 }),
                 storage,
                 status: AccountStatus::default(),
@@ -495,6 +426,13 @@ mod tests {
 
         bundle_state
     }
+
+    fn hashed_state_for_bundle_state(bundle_state: BundleState) -> reth_trie::HashedPostState {
+        reth_trie::HashedPostState::from_bundle_state::<reth_trie::KeccakKeyHasher>(
+            &bundle_state.state,
+        )
+    }
+
     #[test]
     fn test_sort_bundle_state_for_comparison() {
         // Use the fixture function to create test data
@@ -526,43 +464,6 @@ mod tests {
             let _storage = &account_data.storage;
             let _status = &account_data.status;
         }
-    }
-
-    #[test]
-    fn test_data_collector_collect() {
-        // Create test data using the fixture function
-        let bundle_state = create_bundle_state();
-
-        // Create a State with StateProviderTest
-        let state_provider = StateProviderTest::default();
-        let mut state = State::builder()
-            .with_database(StateProviderDatabase::new(Box::new(state_provider) as StateProviderBox))
-            .with_bundle_update()
-            .build();
-
-        // Insert contracts from the fixture into the state cache
-        for (code_hash, bytecode) in &bundle_state.contracts {
-            state.cache.contracts.insert(*code_hash, bytecode.clone());
-        }
-
-        // Manually set the bundle state in the state object
-        state.bundle_state = bundle_state;
-
-        // Call the collect function
-        let result = collect_execution_data(state);
-        // Verify the function returns successfully
-        assert!(result.is_ok());
-
-        let (codes, _preimages, _hashed_state, returned_bundle_state) = result.unwrap();
-
-        // Verify that the returned data contains expected values
-        // Since we used the fixture data, we should have some codes and state
-        assert!(!codes.is_empty(), "Expected some bytecode entries");
-        assert!(!returned_bundle_state.state.is_empty(), "Expected some state entries");
-
-        // Verify the bundle state structure matches our fixture
-        assert_eq!(returned_bundle_state.state.len(), 3, "Expected 3 accounts from fixture");
-        assert_eq!(returned_bundle_state.contracts.len(), 3, "Expected 3 contracts from fixture");
     }
 
     #[test]
@@ -671,49 +572,23 @@ mod tests {
     }
 
     #[test]
-    fn test_proof_generator_generate() {
-        // Use existing MockEthProvider
-        let mock_provider = MockEthProvider::default();
-        let state_provider: Box<dyn StateProvider> = Box::new(mock_provider);
-
-        // Mock Data
-        let mut codes = BTreeMap::new();
-        codes.insert(B256::from([1u8; 32]), Bytes::from("contract_code_1"));
-        codes.insert(B256::from([2u8; 32]), Bytes::from("contract_code_2"));
-
-        let mut preimages = BTreeMap::new();
-        preimages.insert(B256::from([3u8; 32]), Bytes::from("preimage_1"));
-        preimages.insert(B256::from([4u8; 32]), Bytes::from("preimage_2"));
-
-        let hashed_state = reth_trie::HashedPostState::default();
-
-        // Call generate function
-        let result = generate(codes.clone(), preimages.clone(), hashed_state, state_provider);
-
-        // Verify result
-        assert!(result.is_ok(), "generate function should succeed");
-        let execution_witness = result.unwrap();
-
-        assert!(execution_witness.state.is_empty(), "State should be empty from MockEthProvider");
-
-        let expected_codes: Vec<Bytes> = codes.into_values().collect();
-        assert_eq!(
-            execution_witness.codes.len(),
-            expected_codes.len(),
-            "Codes length should match"
-        );
-        for code in &expected_codes {
-            assert!(
-                execution_witness.codes.contains(code),
-                "Codes should contain expected bytecode"
-            );
-        }
-
-        let expected_keys: Vec<Bytes> = preimages.into_values().collect();
-        assert_eq!(execution_witness.keys.len(), expected_keys.len(), "Keys length should match");
-        for key in &expected_keys {
-            assert!(execution_witness.keys.contains(key), "Keys should contain expected preimage");
-        }
+    fn witness_includes_unchanged_account_storage_and_code_reads() {
+        let provider = MockEthProvider::default();
+        let mut database = CacheDB::<EmptyDB>::default();
+        let address = Address::repeat_byte(1);
+        let slot = U256::from(7);
+        let code = Bytecode::new_raw(Bytes::from_static(&[0x60, 0x00]));
+        database.insert_account_info(&address, AccountInfo::default().with_code(code.clone()));
+        database.insert_account_storage(&address, &slot, &U256::from(8));
+        let witness = reth_evm::witness::ExecutionWitnessRecord::new(&database)
+            .into_execution_witness_without_headers(
+                &provider,
+                reth_trie::ExecutionWitnessMode::Legacy,
+            )
+            .unwrap();
+        assert!(witness.codes.contains(&code.original_bytes()));
+        assert!(witness.keys.contains(&Bytes::copy_from_slice(address.as_slice())));
+        assert!(witness.keys.contains(&Bytes::copy_from_slice(B256::from(slot).as_slice())));
     }
 
     #[test]
@@ -734,9 +609,9 @@ mod tests {
         let mut modified_state = create_bundle_state();
 
         // Modify the state to create a mismatch
-        let addr = Address::from([1u8; 20]);
+        let addr = Address::repeat_byte(1u8);
         if let Some(account) = modified_state.state.get_mut(&addr) &&
-            let Some(ref mut info) = account.info
+            let Some(info) = &mut account.info
         {
             info.balance = U256::from(999);
         }
@@ -767,11 +642,11 @@ mod tests {
         let mut account_nodes = HashMap::default();
         let nibbles = Nibbles::from_nibbles_unchecked([0x1, 0x2, 0x3]);
         let branch_node = BranchNodeCompact::new(
-            0b1010,                      // state_mask
-            0b1010,                      // tree_mask - must be subset of state_mask
-            0b1000,                      // hash_mask
-            vec![B256::from([1u8; 32])], // hashes
-            None,                        // root_hash
+            0b1010,                       // state_mask
+            0b1010,                       // tree_mask - must be subset of state_mask
+            0b1000,                       // hash_mask
+            vec![B256::repeat_byte(1u8)], // hashes
+            None,                         // root_hash
         );
         account_nodes.insert(nibbles, branch_node);
 
@@ -802,14 +677,15 @@ mod tests {
         .unwrap();
 
         let trie_updates = create_test_trie_updates();
-        let original_root = B256::from([2u8; 32]); // Different from what will be computed
+        let original_root = B256::repeat_byte(2u8); // Different from what will be computed
         let block_prefix = "test_state_root_with_trie";
+        let hashed_state = hashed_state_for_bundle_state(bundle_state);
 
         // Test with trie updates - this will likely produce warnings due to mock data
         let result = hook.validate_state_root_and_trie(
             &parent_header,
             &recovered_block,
-            &bundle_state,
+            hashed_state,
             Some((&trie_updates, original_root)),
             block_prefix,
         );
@@ -837,15 +713,15 @@ mod tests {
         .unwrap();
 
         // Create mock BlockExecutionOutput
-        let output = BlockExecutionOutput {
-            state: bundle_state,
-            result: reth_provider::BlockExecutionResult {
+        let output = BlockExecutionOutput::new(
+            reth_provider::BlockExecutionResult {
                 receipts: vec![],
                 requests: Requests::default(),
                 gas_used: 0,
                 blob_gas_used: 0,
             },
-        };
+            bundle_state,
+        );
 
         // Create test trie updates
         let trie_updates = create_test_trie_updates();
@@ -983,12 +859,13 @@ mod tests {
         .unwrap();
 
         let block_prefix = "no_trie_updates_test";
+        let hashed_state = hashed_state_for_bundle_state(bundle_state);
 
         // Test without trie updates (None case)
         let result = hook.validate_state_root_and_trie(
             &parent_header,
             &recovered_block,
-            &bundle_state,
+            hashed_state,
             None,
             block_prefix,
         );
@@ -1025,7 +902,7 @@ mod tests {
         let state_root_result = hook.validate_state_root_and_trie(
             &parent_header,
             &invalid_block,
-            &bundle_state,
+            hashed_state_for_bundle_state(bundle_state),
             Some((&trie_updates, B256::random())),
             "integration_test",
         );

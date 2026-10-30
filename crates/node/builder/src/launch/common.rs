@@ -49,7 +49,7 @@ use reth_db_common::init::{
 };
 use reth_downloaders::{bodies::noop::NoopBodiesDownloader, headers::noop::NoopHeaderDownloader};
 use reth_engine_local::MiningMode;
-use reth_evm::{noop::NoopEvmConfig, ConfigureEvm};
+use reth_evm::{noop::NoopEvmConfig, ConfigureEvm, SenderRecoveryCache};
 use reth_exex::ExExManagerHandle;
 use reth_fs_util as fs;
 use reth_network_p2p::headers::client::HeadersClient;
@@ -71,17 +71,17 @@ use reth_node_metrics::{
 };
 use reth_provider::{
     providers::{NodeTypesForProvider, ProviderNodeTypes, RocksDBProvider, StaticFileProvider},
-    BalConfig, BalStoreHandle, BlockHashReader, BlockNumReader, DBProvider,
-    DatabaseProviderFactory, InMemoryBalStore, MetadataProvider, MetadataWriter, ProviderError,
-    ProviderFactory, ProviderResult, RocksDBProviderFactory, StageCheckpointReader,
-    StaticFileProviderBuilder, StaticFileProviderFactory, StorageSettingsCache,
+    BalStoreHandle, BlockHashReader, BlockNumReader, DBProvider, DatabaseProviderFactory,
+    MetadataProvider, MetadataWriter, ProviderError, ProviderFactory, ProviderResult,
+    RocksDBBalStore, RocksDBProviderFactory, StageCheckpointReader, StaticFileProviderBuilder,
+    StaticFileProviderFactory, StorageSettingsCache,
 };
 use reth_prune::{PruneMode, PruneModes, PrunerBuilder};
 use reth_rpc_builder::config::RethRpcServerConfig;
 use reth_rpc_layer::JwtSecret;
 use reth_stages::{
     sets::DefaultStages,
-    stages::{EraImportSource, MerkleStage},
+    stages::{EraImportSource, EraStage, MerkleStage},
     MetricEvent, PipelineBuilder, PipelineTarget, StageId, StageSet,
 };
 use reth_static_file::{blocks_per_file_for_prune_distance, StaticFileProducer, StaticFileSegment};
@@ -89,7 +89,7 @@ use reth_storage_overlay::OverlayManager;
 use reth_tasks::TaskExecutor;
 use reth_tracing::tracing::{debug, error, info, warn};
 use reth_transaction_pool::TransactionPool;
-use std::{num::NonZeroUsize, sync::Arc, thread::available_parallelism, time::Duration};
+use std::{sync::Arc, time::Duration};
 use tokio::sync::{
     mpsc::{unbounded_channel, UnboundedSender},
     oneshot, watch,
@@ -236,7 +236,7 @@ impl LaunchContext {
         // TODO: reserved_cpu_cores is currently ignored because subtracting from thread pool
         // sizes doesn't actually reserve CPU cores for other processes.
         let _ = reserved_cpu_cores;
-        let num_threads = available_parallelism().map_or(1, NonZeroUsize::get);
+        let num_threads = self.task_executor.cpu_pool().current_num_threads();
         if let Err(err) = ThreadPoolBuilder::new()
             .num_threads(num_threads)
             .thread_name(|i| format!("rayon-{i:02}"))
@@ -484,6 +484,28 @@ where
         N: ProviderNodeTypes<DB = DB, ChainSpec = ChainSpec>,
         Evm: ConfigureEvm<Primitives = N::Primitives> + 'static,
     {
+        self.create_provider_factory_with_recovery::<N, Evm>(
+            overlay_manager,
+            rocksdb_provider,
+            disabled_stages,
+            |_| Ok(()),
+        )
+        .await
+    }
+
+    /// Like [`Self::create_provider_factory`], but first runs `recover` to finish writes an earlier
+    /// run left half-committed, before the consistency check.
+    pub async fn create_provider_factory_with_recovery<N, Evm>(
+        &self,
+        overlay_manager: OverlayManager<N::Primitives>,
+        rocksdb_provider: Option<RocksDBProvider>,
+        disabled_stages: &[StageId],
+        recover: impl FnOnce(&ProviderFactory<N>) -> eyre::Result<()>,
+    ) -> eyre::Result<ProviderFactory<N>>
+    where
+        N: ProviderNodeTypes<DB = DB, ChainSpec = ChainSpec>,
+        Evm: ConfigureEvm<Primitives = N::Primitives> + 'static,
+    {
         // Validate static files configuration
         let static_files_config = &self.toml_config().static_files;
         static_files_config.validate()?;
@@ -522,14 +544,15 @@ where
                 .build()?
         };
 
-        let balstore_cache_size = self
+        let bal_store = self
             .node_config()
             .db
             .balstore_cache_size
-            .unwrap_or(BalConfig::DEFAULT_IN_MEMORY_RETENTION_DISTANCE);
-        let bal_store = BalStoreHandle::new(InMemoryBalStore::new(
-            BalConfig::with_in_memory_retention_distance(balstore_cache_size),
-        ));
+            .map(|distance| {
+                RocksDBBalStore::with_buffer_retention_distance(rocksdb_provider.clone(), distance)
+            })
+            .unwrap_or_else(|| RocksDBBalStore::new(rocksdb_provider.clone()));
+        let bal_store = BalStoreHandle::new(bal_store);
         let factory = ProviderFactory::new(
             self.right().clone(),
             self.chain_spec(),
@@ -542,6 +565,8 @@ where
         .with_overlay_manager(overlay_manager)
         .with_bal_store(bal_store);
 
+        recover(&factory)?;
+
         // Check consistency between the database and static files, returning
         // the unwind targets for each storage layer if inconsistencies are
         // found.
@@ -551,6 +576,7 @@ where
         // resuming an interrupted partial trie unwind.
         let (partial_trie_unwind, has_persisted_partial_trie_unwind) =
             get_partial_trie_unwind_marker(&provider_ro)?;
+        let pending_pipeline_unwind = provider_ro.pipeline_unwind()?;
         drop(provider_ro);
         let persist_partial_trie_unwind =
             !has_persisted_partial_trie_unwind && partial_trie_unwind.is_some();
@@ -565,7 +591,10 @@ where
             partial_trie_unwind_target.is_none_or(|partial_trie| *unwind_block < partial_trie)
         });
 
-        if partial_trie_unwind_target.is_some() || storage_unwind.is_some() {
+        if partial_trie_unwind_target.is_some() ||
+            storage_unwind.is_some() ||
+            pending_pipeline_unwind.is_some()
+        {
             let build_unwind_pipeline = |walk_all_changed_branch_children| {
                 let (_tip_tx, tip_rx) = watch::channel(B256::ZERO);
                 let mut stages = DefaultStages::new(
@@ -580,6 +609,11 @@ where
                     None,
                 )
                 .builder()
+                // Recovery only moves the ERA checkpoint; it does not need an import source.
+                .add_before(
+                    EraStage::new(None::<EraImportSource>, self.toml_config().stages.etl.clone()),
+                    StageId::Headers,
+                )
                 .disable_all(disabled_stages);
 
                 if walk_all_changed_branch_children {
@@ -593,6 +627,10 @@ where
                     StaticFileProducer::new(factory.clone(), self.prune_modes()),
                 )
             };
+            let pending_unwind_target =
+                pending_pipeline_unwind.as_ref().map(|unwind| unwind.target);
+            let recovery_pipeline = pending_pipeline_unwind
+                .map(|_| build_unwind_pipeline(partial_trie_unwind_target.is_some()));
             let mut unwinds = Vec::with_capacity(2);
 
             if let Some(unwind_block) = partial_trie_unwind_target {
@@ -613,8 +651,8 @@ where
                     (None, Some(_)) => "static file",
                     (None, None) => unreachable!(),
                 };
-                assert_ne!(
-                    unwind_block, 0,
+                assert!(
+                    unwind_block != 0 || pending_unwind_target == Some(0),
                     "A {inconsistency_source} inconsistency was found that would trigger an unwind to block 0"
                 );
                 unwinds.push((
@@ -641,6 +679,9 @@ where
             // Pipeline should be run as blocking and panic if it fails.
             self.task_executor().spawn_critical_blocking_task("pipeline task", async move {
                 let result: Result<(), reth_stages::PipelineError> = async {
+                    if let Some(mut pipeline) = recovery_pipeline {
+                        pipeline.resume_unwind()?;
+                    }
                     for (unwind_target, inconsistency_source, pipeline, clear_partial_trie_unwind) in
                         unwinds
                     {
@@ -678,8 +719,35 @@ where
         N: ProviderNodeTypes<DB = DB, ChainSpec = ChainSpec>,
         Evm: ConfigureEvm<Primitives = N::Primitives> + 'static,
     {
+        self.with_provider_factory_and_recovery::<N, Evm>(
+            overlay_manager,
+            rocksdb_provider,
+            disabled_stages,
+            |_| Ok(()),
+        )
+        .await
+    }
+
+    /// Like [`Self::with_provider_factory`], but first runs `recover` to finish writes an earlier
+    /// run left half-committed, before the consistency check.
+    pub async fn with_provider_factory_and_recovery<N, Evm>(
+        self,
+        overlay_manager: OverlayManager<N::Primitives>,
+        rocksdb_provider: Option<RocksDBProvider>,
+        disabled_stages: &[StageId],
+        recover: impl FnOnce(&ProviderFactory<N>) -> eyre::Result<()>,
+    ) -> eyre::Result<LaunchContextWith<Attached<WithConfigs<ChainSpec>, ProviderFactory<N>>>>
+    where
+        N: ProviderNodeTypes<DB = DB, ChainSpec = ChainSpec>,
+        Evm: ConfigureEvm<Primitives = N::Primitives> + 'static,
+    {
         let factory = self
-            .create_provider_factory::<N, Evm>(overlay_manager, rocksdb_provider, disabled_stages)
+            .create_provider_factory_with_recovery::<N, Evm>(
+                overlay_manager,
+                rocksdb_provider,
+                disabled_stages,
+                recover,
+            )
             .await?;
         let ctx = LaunchContextWith {
             inner: self.inner,
@@ -945,6 +1013,7 @@ where
             },
             node_adapter,
             head,
+            sender_recovery_cache: builder_ctx.sender_recovery_cache().cloned(),
         };
 
         let ctx = LaunchContextWith {
@@ -1005,6 +1074,11 @@ where
     /// Returns mutable reference to the configured `NodeAdapter`.
     pub const fn node_adapter_mut(&mut self) -> &mut NodeAdapter<T, CB::Components> {
         &mut self.right_mut().node_adapter
+    }
+
+    /// Returns the cache of recovered transaction senders shared by node components, if enabled.
+    pub const fn sender_recovery_cache(&self) -> Option<&SenderRecoveryCache> {
+        self.right().sender_recovery_cache.as_ref()
     }
 
     /// Returns a reference to the blockchain provider.
@@ -1370,6 +1444,8 @@ where
     db_provider_container: WithMeteredProvider<NodeTypesWithDBAdapter<T::Types, T::DB>>,
     node_adapter: NodeAdapter<T, CB::Components>,
     head: Head,
+    /// Cache of recovered transaction senders shared by node components, if enabled.
+    sender_recovery_cache: Option<SenderRecoveryCache>,
 }
 
 /// Returns the metrics hooks for the node.

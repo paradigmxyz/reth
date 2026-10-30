@@ -4,6 +4,7 @@ use crate::{
     models::{BlockchainTest, ForkSpec},
     Case, Error, Suite,
 };
+use alloy_eip7928::bal::Bal;
 use alloy_rlp::Decodable;
 use rayon::iter::{IndexedParallelIterator, ParallelIterator};
 use reth_chainspec::ChainSpec;
@@ -11,23 +12,29 @@ use reth_consensus::{Consensus, HeaderValidator};
 use reth_db_common::init::{insert_genesis_hashes, insert_genesis_history, insert_genesis_state};
 use reth_ethereum_consensus::{validate_block_post_execution, EthBeaconConsensus};
 use reth_ethereum_primitives::Block;
-use reth_evm::{execute::Executor, ConfigureEvm};
+use reth_evm::{
+    database::StateProviderDatabase,
+    execute::{BlockExecutionOutput, Executor},
+    ConfigureEvm,
+};
 use reth_evm_ethereum::EthEvmConfig;
 use reth_primitives_traits::{ParallelBridgeBuffered, RecoveredBlock, SealedBlock};
 use reth_provider::{
-    test_utils::create_test_provider_factory_with_chain_spec, BlockWriter, DatabaseProviderFactory,
-    ExecutionOutcome, HashedPostStateProvider, HistoryWriter, OriginalValuesKnown,
-    StateWriteConfig, StateWriter, StaticFileProviderFactory, StaticFileSegment, StaticFileWriter,
-    StorageSettingsCache, TrieWriter,
+    providers::{RocksDBBuilder, RocksDBProvider, StaticFileProviderBuilder},
+    test_utils::MockNodeTypesWithDB,
+    BlockWriter, DatabaseProviderFactory, ExecutionOutcome, HashedPostStateProvider, HistoryWriter,
+    OriginalValuesKnown, ProviderFactory, StateProvider, StateWriteConfig, StateWriter,
+    StaticFileProviderFactory, StaticFileSegment, StaticFileWriter, StorageSettingsCache,
+    TrieWriter,
 };
-use reth_revm::database::StateProviderDatabase;
+use reth_tasks::Runtime;
 use reth_trie::StateRoot;
 use reth_trie_db::DatabaseStateRoot;
 use std::{
     collections::BTreeMap,
     fs,
     path::{Path, PathBuf},
-    sync::Arc,
+    sync::{Arc, LazyLock},
 };
 
 /// A handler for the blockchain test suite.
@@ -194,7 +201,7 @@ impl Case for BlockchainTestCase {
 fn run_case(case: &BlockchainTest) -> Result<(), Error> {
     // Create a new test database and initialize a provider for the test case.
     let chain_spec = case.network.to_chain_spec();
-    let factory = create_test_provider_factory_with_chain_spec(chain_spec.clone());
+    let factory = create_test_provider_factory(chain_spec.clone());
     let provider = factory.database_provider_rw().unwrap();
 
     // Insert initial test state into the provider.
@@ -222,11 +229,20 @@ fn run_case(case: &BlockchainTest) -> Result<(), Error> {
     insert_genesis_history(&provider, genesis_state.iter())
         .map_err(|err| Error::block_failed(0, err))?;
 
+    // Build the genesis trie, as `init_genesis` does, so block 1 reads stored nodes.
+    let (_, trie_updates) = reth_trie_db::with_adapter!(provider, |A| {
+        StateRoot::<reth_trie_db::DatabaseTrieCursorFactory<_, A>, _>::from_tx(provider.tx_ref())
+            .root_with_updates()
+    })
+    .map_err(|err| Error::block_failed(0, err))?;
+    provider.write_trie_updates(trie_updates).map_err(|err| Error::block_failed(0, err))?;
+
     // Decode blocks
     let blocks = decode_blocks(&case.blocks)?;
 
     let executor_provider = EthEvmConfig::ethereum(chain_spec.clone());
     let mut parent = genesis_block;
+    let mut bal_buf = Vec::new();
 
     for (block_index, block) in blocks.iter().enumerate() {
         // Note: same as the comment on `decode_blocks` as to why we cannot use block.number
@@ -245,15 +261,27 @@ fn run_case(case: &BlockchainTest) -> Result<(), Error> {
 
         // Execute the block
         let state_provider = provider.latest();
-        let state_db = StateProviderDatabase(&state_provider);
-        let executor = executor_provider.batch_executor(state_db);
+        let state_db = StateProviderDatabase((&state_provider).into_evm_state_provider());
+        let mut executor = executor_provider.batch_executor(state_db);
 
-        let output = executor
-            .execute(&(*block).clone())
+        let result = executor
+            .execute_one(&(*block).clone())
             .map_err(|err| Error::block_failed(block_number, err))?;
+        // Check the block access list size cap and compute its hash for post-Amsterdam blocks so
+        // the consensus check below validates it.
+        let block_access_list_hash = executor
+            .take_bal()
+            .map(|bal| {
+                let bal = Bal::from(bal);
+                bal.validate_gas_limit(block.gas_limit)
+                    .map(|()| bal.compute_hash_with_buf(&mut bal_buf))
+            })
+            .transpose()
+            .map_err(|err| Error::block_failed(block_number, err))?;
+        let output = BlockExecutionOutput { state: executor.into_state(), result };
 
         // Consensus checks after block execution
-        validate_block_post_execution(block, &chain_spec, &output, None, None)
+        validate_block_post_execution(block, &chain_spec, &output, None, block_access_list_hash)
             .map_err(|err| Error::block_failed(block_number, err))?;
 
         // Compute and check the post state root
@@ -430,4 +458,57 @@ pub fn should_skip(path: &Path) -> bool {
 fn path_contains(path_str: &str, rhs: &[&str]) -> bool {
     let rhs = rhs.join(std::path::MAIN_SEPARATOR_STR);
     path_str.contains(&rhs)
+}
+
+/// `RocksDB` instance shared by all test cases of the current process.
+///
+/// Opening `RocksDB` is expensive and ef-tests never use it: the storage settings stay at v1, so
+/// everything is stored in MDBX and static files. A fresh instance per case dominates the runtime.
+///
+/// The backing directory is created with [`reth_db::test_utils::tempdir_path`], which leaks it:
+/// statics are never dropped, so there is no point at which a temp dir guard could clean
+/// up. This costs one small, mostly empty directory in the system temp dir per test process.
+static SHARED_ROCKSDB: LazyLock<RocksDBProvider> = LazyLock::new(|| {
+    RocksDBBuilder::new(reth_db::test_utils::tempdir_path().join("rocksdb"))
+        .with_default_tables()
+        .build()
+        .expect("failed to create shared test RocksDB provider")
+});
+
+/// Creates a provider factory for a single test case.
+///
+/// Mirrors [`reth_provider::test_utils::create_test_provider_factory_with_chain_spec`], except
+/// that it reuses [`SHARED_ROCKSDB`] instead of opening a new `RocksDB` instance. The temp datadir,
+/// MDBX, static files and runtime stay isolated per case.
+fn create_test_provider_factory(
+    chain_spec: Arc<ChainSpec>,
+) -> ProviderFactory<MockNodeTypesWithDB> {
+    let genesis_block_number = chain_spec.genesis.number.unwrap_or_default();
+
+    // A single temp directory holds the MDBX and static file dirs. `TempDatabase` removes the
+    // entire directory on drop.
+    let datadir_path = reth_db::test_utils::tempdir_path();
+    let static_files_path = datadir_path.join("static_files");
+    fs::create_dir_all(&static_files_path).expect("failed to create static_files dir");
+
+    let db = reth_db::test_utils::create_test_rw_db_with_datadir(&datadir_path);
+
+    let factory = ProviderFactory::new(
+        db,
+        chain_spec,
+        StaticFileProviderBuilder::read_write(static_files_path)
+            .with_genesis_block_number(genesis_block_number)
+            .build()
+            .expect("static file provider"),
+        SHARED_ROCKSDB.clone(),
+        Runtime::test(),
+    )
+    .expect("failed to create test provider factory");
+
+    assert!(
+        !factory.cached_storage_settings().any_in_rocksdb(),
+        "the shared RocksDB is only valid while ef-tests run with v1 storage settings"
+    );
+
+    factory
 }

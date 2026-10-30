@@ -10,12 +10,13 @@ pub type RpcReceipt<T = TxType> = EthereumReceipt<T, alloy_rpc_types_eth::Log>;
 
 #[cfg(test)]
 mod tests {
+
     use super::*;
     use crate::TransactionSigned;
     use alloy_consensus::{ReceiptWithBloom, TxReceipt, TxType};
     use alloy_eips::eip2718::Encodable2718;
     use alloy_primitives::{
-        address, b256, bloom, bytes, hex_literal::hex, Address, Bloom, Bytes, Log, LogData,
+        address, b256, bytes, hex_literal::hex, Address, Bloom, Bytes, Log, LogData,
     };
     use alloy_rlp::{Decodable, Encodable};
     use reth_codecs::Compact;
@@ -49,7 +50,7 @@ mod tests {
                 tx_type: TxType::Legacy,
                 cumulative_gas_used: 0x1u64,
                 logs: vec![Log::new_unchecked(
-                    address!("0x0000000000000000000000000000000000000011"),
+                    Address::with_last_byte(0x11),
                     vec![
                         b256!("0x000000000000000000000000000000000000000000000000000000000000dead"),
                         b256!("0x000000000000000000000000000000000000000000000000000000000000beef"),
@@ -58,7 +59,7 @@ mod tests {
                 )],
                 success: false,
             },
-            logs_bloom: [0; 256].into(),
+            logs_bloom: Bloom::ZERO,
         };
 
         receipt.encode(&mut data);
@@ -81,7 +82,7 @@ mod tests {
                 tx_type: TxType::Legacy,
                 cumulative_gas_used: 0x1u64,
                 logs: vec![Log::new_unchecked(
-                    address!("0x0000000000000000000000000000000000000011"),
+                    Address::with_last_byte(0x11),
                     vec![
                         b256!("0x000000000000000000000000000000000000000000000000000000000000dead"),
                         b256!("0x000000000000000000000000000000000000000000000000000000000000beef"),
@@ -90,7 +91,7 @@ mod tests {
                 )],
                 success: false,
             },
-            logs_bloom: [0; 256].into(),
+            logs_bloom: Bloom::ZERO,
         };
 
         let receipt = ReceiptWithBloom::decode(&mut &data[..]).unwrap();
@@ -211,9 +212,7 @@ mod tests {
             address: Address::ZERO,
             data: LogData::new_unchecked(vec![], Default::default()),
         }];
-        let bloom = bloom!(
-            "00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001"
-        );
+        let bloom = Bloom::with_last_byte(1);
         let receipt = ReceiptWithBloom {
             receipt: Receipt {
                 tx_type: TxType::Eip2930,

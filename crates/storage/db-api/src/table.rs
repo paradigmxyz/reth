@@ -1,7 +1,7 @@
 use crate::{
     cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO, DbDupCursorRW},
     transaction::{DbTx, DbTxMut},
-    DatabaseError,
+    DatabaseError, Tables,
 };
 use serde::{Deserialize, Serialize};
 use std::fmt::Debug;
@@ -41,7 +41,7 @@ impl<const N: usize> IntoVec for arrayvec::ArrayVec<u8, N> {
 /// Trait that will transform the data to be saved in the DB.
 pub trait Encode: Send + Sync + Sized + Debug {
     /// Encoded type.
-    type Encoded: AsRef<[u8]> + IntoVec + Send + Sync + Ord + Debug;
+    type Encoded: IntoVec + Send + Sync + Ord + Debug;
 
     /// Encodes data going into the database.
     fn encode(self) -> Self::Encoded;
@@ -82,6 +82,13 @@ pub trait Table: Send + Sync + Debug + 'static {
 
     /// Whether the table is also a `DUPSORT` table.
     const DUPSORT: bool;
+
+    /// The [`Tables`] entry this table is stored in, or `None` for tables defined outside of
+    /// [`Tables`].
+    ///
+    /// Database implementations use it to find per-table state by position instead of by
+    /// [`Self::NAME`]. A table that reuses the name of a [`Tables`] entry must return that entry.
+    const TABLE: Option<Tables> = None;
 
     /// Key element of `Table`.
     ///

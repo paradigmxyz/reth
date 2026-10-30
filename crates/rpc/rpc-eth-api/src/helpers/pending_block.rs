@@ -1,38 +1,38 @@
-//! Loads a pending block from database. Helper trait for `eth_` block, transaction, call and trace
-//! RPC methods.
+//! Loads provider pending blocks or builds them from the transaction pool for `eth_` block,
+//! transaction, call and trace RPC methods.
 
 use super::SpawnBlocking;
 use crate::{EthApiTypes, FromEthApiError, FromEvmError, RpcNodeCore};
 use alloy_consensus::{BlockHeader, Transaction};
-use alloy_eips::eip7840::BlobParams;
-use alloy_primitives::{B256, U256};
-use alloy_rpc_types_eth::{BlockNumberOrTag, BlockOverrides};
+use alloy_eips::{eip7840::BlobParams, BlockId};
+use alloy_primitives::B256;
+use alloy_rpc_types_eth::BlockOverrides;
 use futures::Future;
-use reth_chain_state::{BlockState, ExecutedBlock};
+use reth_chain_state::ExecutedBlock;
 use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthereumHardforks};
 use reth_errors::{BlockExecutionError, BlockValidationError, ProviderError, RethError};
 use reth_evm::{
-    block::TxResult,
+    database::StateProviderDatabase,
     execute::{BlockBuilder, BlockBuilderOutcome, BlockExecutionOutput},
-    ConfigureEvm, Evm, EvmEnvFor, NextBlockEnvAttributes,
+    ConfigureEvm, EvmEnv, EvmEnvFor, NextBlockEnvAttributes,
 };
-use reth_primitives_traits::{transaction::error::InvalidTransactionError, HeaderTy, SealedHeader};
-use reth_revm::{database::StateProviderDatabase, db::State};
+use reth_primitives_traits::{
+    transaction::error::InvalidTransactionError, HeaderTy, NodePrimitives, SealedHeader,
+};
 use reth_rpc_convert::RpcConvert;
 use reth_rpc_eth_types::{
     block::BlockAndReceipts, builder::config::PendingBlockKind, EthApiError, PendingBlock,
     PendingBlockEnv, PendingBlockEnvOrigin,
 };
 use reth_storage_api::{
-    noop::NoopProvider, BlockReader, BlockReaderIdExt, ProviderHeader, ProviderTx,
+    noop::NoopProvider, BlockReader, BlockReaderIdExt, ProviderHeader, ProviderTx, StateProvider,
     StateProviderBox, StateProviderFactory,
 };
 use reth_transaction_pool::{
     error::InvalidPoolTransactionError, BestTransactions, BestTransactionsAttributes,
     PoolTransaction, TransactionPool,
 };
-use reth_trie_common::ComputedTrieData;
-use revm::context_interface::{Block, Cfg as _};
+use reth_trie_common::SortedTrieData;
 use std::{
     sync::Arc,
     time::{Duration, Instant},
@@ -40,7 +40,7 @@ use std::{
 use tokio::sync::Mutex;
 use tracing::debug;
 
-/// Loads a pending block from database.
+/// Loads a provider pending block or builds one from the transaction pool.
 ///
 /// Behaviour shared by several `eth_` RPC methods, not exclusive to `eth_` blocks RPC methods.
 pub trait LoadPendingBlock:
@@ -57,18 +57,21 @@ pub trait LoadPendingBlock:
     /// Returns a [`PendingEnvBuilder`] for the pending block.
     fn pending_env_builder(&self) -> &dyn PendingEnvBuilder<Self::Evm>;
 
-    /// Returns the pending block kind
+    /// Returns the pending block kind.
     fn pending_block_kind(&self) -> PendingBlockKind {
         self.eth_api_settings().pending_block_kind
     }
 
-    /// Configures the [`PendingBlockEnv`] for the pending block
+    /// Returns the pending block environment and its origin.
     ///
-    /// If no pending block is available, this will derive it from the `latest` block
+    /// Uses the provider's pending block when available; otherwise derives the next block
+    /// environment from the latest header. This method performs synchronous provider reads.
     fn pending_block_env_and_cfg(&self) -> Result<PendingBlockEnv<Self::Evm>, Self::Error> {
-        if let Some((block, receipts)) =
+        if let Some(pending) =
             self.provider().pending_block_and_receipts().map_err(Self::Error::from_eth_err)?
         {
+            let (block, output) = pending.into_parts();
+
             // Note: for the PENDING block we assume it is past the known merge block and
             // thus this will not fail when looking up the total
             // difficulty value for the blockenv.
@@ -80,7 +83,7 @@ pub trait LoadPendingBlock:
 
             return Ok(PendingBlockEnv::new(
                 evm_env,
-                PendingBlockEnvOrigin::ActualPending(Arc::new(block), Arc::new(receipts)),
+                PendingBlockEnvOrigin::ActualPending(block, output.into()),
             ));
         }
 
@@ -90,7 +93,7 @@ pub trait LoadPendingBlock:
             .provider()
             .latest_header()
             .map_err(Self::Error::from_eth_err)?
-            .ok_or(EthApiError::HeaderNotFound(BlockNumberOrTag::Latest.into()))?;
+            .ok_or(EthApiError::HeaderNotFound(BlockId::latest()))?;
 
         let evm_env = self
             .evm_config()
@@ -110,6 +113,10 @@ pub trait LoadPendingBlock:
     }
 
     /// Returns a [`StateProviderBox`] on a mem-pool built pending block overlaying latest.
+    ///
+    /// This is used by `state_at_block_id` and, by default, by
+    /// [`Self::local_pending_block_or_state`]. This method's default opens the provider state on a
+    /// blocking task after building the pending block.
     fn local_pending_state(
         &self,
     ) -> impl Future<Output = Result<Option<StateProviderBox>, Self::Error>> + Send
@@ -121,18 +128,40 @@ pub trait LoadPendingBlock:
                 return Ok(None);
             };
 
-            let latest_historical = self
-                .provider()
-                .history_by_block_hash(pending_block.block().parent_hash())
-                .map_err(Self::Error::from_eth_err)?;
-
-            let state = BlockState::from(pending_block);
-
-            Ok(Some(Box::new(state.state_provider(latest_historical)) as StateProviderBox))
+            self.spawn_blocking_io(move |this| {
+                Ok(Some(
+                    this.provider()
+                        .state_with_block_appended(
+                            pending_block.block().parent_hash(),
+                            pending_block.executed_block,
+                        )
+                        .map_err(Self::Error::from_eth_err)?,
+                ))
+            })
+            .await
         }
     }
 
-    /// Returns a mem-pool built pending block.
+    /// Selects the local pending source for state RPCs.
+    ///
+    /// By default, delegates to [`Self::local_pending_state`] so existing chain-specific overrides
+    /// continue to apply. Implementations can return [`PendingStateSource::Block`] to defer opening
+    /// the block's state provider until the state RPC's blocking task. Returning `None` falls back
+    /// to the provider's pending state.
+    fn local_pending_block_or_state(
+        &self,
+    ) -> impl Future<Output = Result<Option<PendingStateSource<Self::Primitives>>, Self::Error>> + Send
+    where
+        Self: SpawnBlocking,
+    {
+        async move { Ok(self.local_pending_state().await?.map(PendingStateSource::State)) }
+    }
+
+    /// Returns a cached or newly built pending block from the transaction pool.
+    ///
+    /// Returns `None` if local pending blocks are disabled or the provider has an actual pending
+    /// block. Resolves the environment before awaiting the cache lock, then may spawn a blocking
+    /// task to build the block. Callers must await this outside a blocking task.
     fn pool_pending_block(
         &self,
     ) -> impl Future<Output = Result<Option<PendingBlock<Self::Primitives>>, Self::Error>> + Send
@@ -153,10 +182,10 @@ pub trait LoadPendingBlock:
         }
     }
 
-    /// Builds or returns a cached pending block from the transaction pool.
+    /// Returns a cached or newly built pending block for the given parent and environment.
     ///
-    /// This is the shared implementation used by both [`Self::pool_pending_block`] and
-    /// [`Self::local_pending_block`] to avoid resolving the pending block environment twice.
+    /// Holds the async cache lock while rebuilding, which may spawn blocking work. The resolved
+    /// parent and environment let callers reuse the result of their provider lookup.
     fn build_pool_pending_block(
         &self,
         parent: SealedHeader<ProviderHeader<Self::Provider>>,
@@ -174,7 +203,7 @@ pub trait LoadPendingBlock:
             // Is the pending block cached?
             if let Some(pending_block) = lock.as_ref() {
                 // Is the cached block not expired and latest is its parent?
-                if evm_env.block_env.number() == U256::from(pending_block.block().number()) &&
+                if evm_env.block_env().number.to::<u64>() == pending_block.block().number() &&
                     parent.hash() == pending_block.block().parent_hash() &&
                     now <= pending_block.expires_at
                 {
@@ -207,7 +236,7 @@ pub trait LoadPendingBlock:
         }
     }
 
-    /// Returns the locally built pending block
+    /// When enabled, returns the provider's pending block or builds one from the pool.
     fn local_pending_block(
         &self,
     ) -> impl Future<Output = Result<Option<BlockAndReceipts<Self::Primitives>>, Self::Error>> + Send
@@ -255,24 +284,24 @@ pub trait LoadPendingBlock:
             .provider()
             .history_by_block_hash(parent.hash())
             .map_err(Self::Error::from_eth_err)?;
-        let state = StateProviderDatabase::new(state_provider);
-        let mut db = State::builder().with_database(state).with_bundle_update().build();
+        let state = StateProviderDatabase::new(state_provider.into_evm_state_provider());
 
         let mut builder = self
             .evm_config()
-            .builder_for_next_block(&mut db, parent, self.next_env_attributes(parent)?)
+            .builder_for_next_block(state, parent, self.next_env_attributes(parent)?)
             .map_err(RethError::other)
             .map_err(Self::Error::from_eth_err)?;
 
         builder.apply_pre_execution_changes().map_err(Self::Error::from_eth_err)?;
 
-        let block_gas_limit: u64 = builder.evm().block().gas_limit();
-        let is_amsterdam = self
+        let block_gas_limit = builder.evm_env().block_env().gas_limit.to::<u64>();
+        let is_amsterdam = builder.evm_env().uses_separate_block_gas();
+        let basefee = builder.evm_env().block_base_fee();
+        let blob_gasprice = self
             .provider()
             .chain_spec()
-            .is_amsterdam_active_at_timestamp(builder.evm().block().timestamp().saturating_to());
-        let basefee = builder.evm().block().basefee();
-        let blob_gasprice = builder.evm().block().blob_gasprice().map(|p| p as u64);
+            .is_cancun_active_at_timestamp(builder.evm_env().block_env().timestamp.to())
+            .then(|| builder.evm_env().block_blob_base_fee());
 
         let blob_params = self
             .provider()
@@ -283,7 +312,7 @@ pub trait LoadPendingBlock:
         let mut block_regular_gas_used = 0;
         let mut block_state_gas_used = 0;
         let mut sum_blob_gas_used = 0;
-        let tx_gas_limit_cap = builder.evm().cfg_env().tx_gas_limit_cap();
+        let tx_gas_limit_cap = builder.evm_env().regular_gas_limit_cap();
 
         // Only include transactions if not configured as Empty
         if !self.pending_block_kind().is_empty() {
@@ -368,48 +397,44 @@ pub trait LoadPendingBlock:
                     continue
                 }
 
-                let mut tx_regular_gas_used = 0;
-                let gas_output =
-                    match builder.execute_transaction_with_result_closure(tx, |result| {
-                        tx_regular_gas_used = result.result().result.gas().block_regular_gas_used();
-                    }) {
-                        Ok(gas_output) => gas_output,
-                        Err(BlockExecutionError::Validation(BlockValidationError::InvalidTx {
-                            error,
-                            ..
-                        })) => {
-                            if error.is_nonce_too_low() {
-                                // if the nonce is too low, we can skip this transaction
-                            } else {
-                                // if the transaction is invalid, we can skip it and all of its
-                                // descendants
-                                best_txs.mark_invalid(
-                                    &pool_tx,
-                                    InvalidPoolTransactionError::Consensus(
-                                        InvalidTransactionError::TxTypeNotSupported,
-                                    ),
-                                );
-                            }
-                            continue
-                        }
-                        Err(BlockExecutionError::Validation(
-                            BlockValidationError::TransactionGasLimitMoreThanAvailableBlockGas {
-                                transaction_gas_limit,
-                                block_available_gas,
-                            },
-                        )) => {
+                let gas_output = match builder.execute_transaction(tx) {
+                    Ok(gas_output) => gas_output,
+                    Err(BlockExecutionError::Validation(BlockValidationError::InvalidTx {
+                        error,
+                        ..
+                    })) => {
+                        if error.is_nonce_too_low() {
+                            // if the nonce is too low, we can skip this transaction
+                        } else {
+                            // if the transaction is invalid, we can skip it and all of its
+                            // descendants
                             best_txs.mark_invalid(
                                 &pool_tx,
-                                InvalidPoolTransactionError::ExceedsGasLimit(
-                                    transaction_gas_limit,
-                                    block_available_gas,
+                                InvalidPoolTransactionError::Consensus(
+                                    InvalidTransactionError::TxTypeNotSupported,
                                 ),
                             );
-                            continue
                         }
-                        // this is an error that we should treat as fatal for this attempt
-                        Err(err) => return Err(Self::Error::from_eth_err(err)),
-                    };
+                        continue
+                    }
+                    Err(BlockExecutionError::Validation(
+                        BlockValidationError::TransactionGasLimitMoreThanAvailableBlockGas {
+                            transaction_gas_limit,
+                            block_available_gas,
+                        },
+                    )) => {
+                        best_txs.mark_invalid(
+                            &pool_tx,
+                            InvalidPoolTransactionError::ExceedsGasLimit(
+                                transaction_gas_limit,
+                                block_available_gas,
+                            ),
+                        );
+                        continue
+                    }
+                    // this is an error that we should treat as fatal for this attempt
+                    Err(err) => return Err(Self::Error::from_eth_err(err)),
+                };
 
                 // add to the total blob gas used if the transaction successfully executed
                 if let Some(tx_blob_gas) = tx_blob_gas {
@@ -424,25 +449,48 @@ pub trait LoadPendingBlock:
                 // Track receipt gas and the Amsterdam block-capacity counter separately.
                 let gas_used = gas_output.tx_gas_used();
                 cumulative_tx_gas_used += gas_used;
-                block_regular_gas_used += tx_regular_gas_used;
+                block_regular_gas_used += gas_output.regular_gas_used();
                 block_state_gas_used += gas_output.state_gas_used();
             }
         }
 
-        let BlockBuilderOutcome { execution_result, block, hashed_state, trie_updates, .. } =
-            builder.finish(NoopProvider::default(), None).map_err(Self::Error::from_eth_err)?;
+        let BlockBuilderOutcome {
+            execution_result,
+            execution_state,
+            block,
+            hashed_state,
+            trie_updates,
+            ..
+        } = builder.finish(NoopProvider::default(), None).map_err(Self::Error::from_eth_err)?;
 
         let execution_outcome =
-            BlockExecutionOutput { state: db.take_bundle(), result: execution_result };
+            BlockExecutionOutput { state: execution_state, result: execution_result };
 
         Ok(ExecutedBlock::new(
             block.into(),
             Arc::new(execution_outcome),
-            ComputedTrieData::new(
+            SortedTrieData::new(
                 Arc::new(hashed_state.into_sorted()),
                 Arc::new(trie_updates.into_sorted()),
             ),
         ))
+    }
+}
+
+/// Local pending state selected for a state RPC.
+pub enum PendingStateSource<N: NodePrimitives> {
+    /// A block whose state provider must be opened on the state RPC's blocking task.
+    Block(PendingBlock<N>),
+    /// A chain-specific state provider that is already open.
+    State(StateProviderBox),
+}
+
+impl<N: NodePrimitives> std::fmt::Debug for PendingStateSource<N> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Block(_) => f.write_str("PendingStateSource::Block(..)"),
+            Self::State(_) => f.write_str("PendingStateSource::State(..)"),
+        }
     }
 }
 

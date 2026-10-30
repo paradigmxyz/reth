@@ -21,20 +21,22 @@ use reth_libmdbx::{
     MaxReadTransactionDuration, Mode, PageSize, SyncMode, RO, RW,
 };
 use reth_storage_errors::db::LogLevel;
-use reth_tracing::tracing::error;
 use rustc_hash::FxHashMap;
 use std::{
     ops::{Deref, Range},
     path::{Path, PathBuf},
     sync::Arc,
-    time::{SystemTime, UNIX_EPOCH},
+    time::{Duration, SystemTime, UNIX_EPOCH},
 };
+use tracing::error;
 use tx::Tx;
 
 pub mod cursor;
 pub mod tx;
 
 mod utils;
+#[cfg(target_os = "linux")]
+mod value_prefetch;
 
 /// 1 KB in bytes
 pub const KILOBYTE: usize = 1024;
@@ -51,6 +53,17 @@ const DEFAULT_MAX_READERS: u64 = 32_000;
 /// Space that a read-only transaction can occupy until the warning is emitted.
 /// See [`reth_libmdbx::EnvironmentBuilder::set_handle_slow_readers`] for more information.
 const MAX_SAFE_READER_SPACE: usize = 10 * GIGABYTE;
+
+/// Longest time a [`SyncMode::SafeNoSync`] or [`SyncMode::UtterlyNoSync`] environment goes
+/// without a steady (synced) commit.
+///
+/// Commits in these modes are weak. After an unclean shutdown on a new boot (host reboot or power
+/// loss) MDBX discards all weak commits and rolls back to the last steady one, while static files
+/// and `RocksDB` sync on every commit and stay ahead. Without a period, steady commits only happen
+/// on a clean close or when the file fills up, so the rollback can span days and land below data
+/// that static file pruning already deleted, which startup healing cannot repair. MDBX checks the
+/// period on each commit.
+const NON_DURABLE_SYNC_PERIOD: Duration = Duration::from_secs(60);
 
 /// Environment used when opening a MDBX environment. RO/RW.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -112,8 +125,8 @@ pub struct DatabaseArguments {
     ///   considered committed.   This provides the highest level of durability and crash safety
     ///   but may have a performance cost.
     /// - [`SyncMode::SafeNoSync`]: Skips certain fsync operations to improve write performance.
-    ///   This mode still maintains database integrity but may lose the most recent transactions if
-    ///   the system crashes unexpectedly.
+    ///   This mode still maintains database integrity but may lose the transactions committed
+    ///   within the last [`NON_DURABLE_SYNC_PERIOD`] if the system crashes unexpectedly.
     ///
     /// Choose `Durable` if consistency and crash safety are critical (e.g., production
     /// environments). Choose `SafeNoSync` if performance is more important and occasional data
@@ -251,11 +264,51 @@ pub struct DatabaseEnv {
     /// More generally, do not dynamically create, re-open, or drop tables at
     /// runtime. It's better to perform table creation and migration only once
     /// at startup.
-    dbis: Arc<FxHashMap<&'static str, ffi::MDBX_dbi>>,
+    dbis: Arc<TableDbis>,
     /// Cache for metric handles. If `None`, metrics are not recorded.
     metrics: Option<Arc<DatabaseEnvMetrics>>,
+    /// Disables long-lived read safety on transactions opened through this handle.
+    disable_long_read_transaction_safety: bool,
     /// Write lock for when dealing with a read-write environment.
     _lock_file: Option<StorageLock>,
+}
+
+/// MDBX DBIs of the tables tracked by a [`DatabaseEnv`].
+#[derive(Debug, Clone)]
+pub(crate) struct TableDbis {
+    /// DBIs of [`Tables`] entries, indexed by the entry's position in [`Tables::ALL`].
+    tables: [Option<ffi::MDBX_dbi>; Tables::COUNT],
+    /// DBIs of tables defined outside of [`Tables`], by name.
+    other: FxHashMap<&'static str, ffi::MDBX_dbi>,
+}
+
+impl Default for TableDbis {
+    fn default() -> Self {
+        Self { tables: [None; Tables::COUNT], other: FxHashMap::default() }
+    }
+}
+
+impl TableDbis {
+    /// Returns the tracked DBI of a table, which is looked up by `table` if it is a [`Tables`]
+    /// entry and by `name` otherwise.
+    ///
+    /// Returns `None` if the table is not tracked.
+    pub(crate) fn get(&self, table: Option<Tables>, name: &str) -> Option<ffi::MDBX_dbi> {
+        match table {
+            Some(table) => self.tables[table as usize],
+            None => self.other.get(name).copied(),
+        }
+    }
+
+    /// Tracks the DBI of the table with the given name.
+    fn insert(&mut self, name: &'static str, dbi: ffi::MDBX_dbi) {
+        match name.parse::<Tables>() {
+            Ok(table) => self.tables[table as usize] = Some(dbi),
+            Err(_) => {
+                self.other.insert(name, dbi);
+            }
+        }
+    }
 }
 
 impl Database for DatabaseEnv {
@@ -263,21 +316,29 @@ impl Database for DatabaseEnv {
     type TXMut = tx::Tx<RW>;
 
     fn tx(&self) -> Result<Self::TX, DatabaseError> {
-        Tx::new(
+        let mut tx = Tx::new(
             self.inner.begin_ro_txn().map_err(|e| DatabaseError::InitTx(e.into()))?,
             self.dbis.clone(),
             self.metrics.clone(),
         )
-        .map_err(|e| DatabaseError::InitTx(e.into()))
+        .map_err(|e| DatabaseError::InitTx(e.into()))?;
+        if self.disable_long_read_transaction_safety {
+            tx.disable_long_read_transaction_safety();
+        }
+        Ok(tx)
     }
 
     fn tx_mut(&self) -> Result<Self::TXMut, DatabaseError> {
-        Tx::new(
+        let mut tx = Tx::new(
             self.inner.begin_rw_txn().map_err(|e| DatabaseError::InitTx(e.into()))?,
             self.dbis.clone(),
             self.metrics.clone(),
         )
-        .map_err(|e| DatabaseError::InitTx(e.into()))
+        .map_err(|e| DatabaseError::InitTx(e.into()))?;
+        if self.disable_long_read_transaction_safety {
+            tx.disable_long_read_transaction_safety();
+        }
+        Ok(tx)
     }
 
     fn path(&self) -> PathBuf {
@@ -409,6 +470,9 @@ impl DatabaseEnv {
             DatabaseEnvKind::RW => {
                 // enable writemap mode in RW mode
                 inner_env.write_map();
+                if matches!(args.sync_mode, SyncMode::SafeNoSync | SyncMode::UtterlyNoSync) {
+                    inner_env.set_sync_period(NON_DURABLE_SYNC_PERIOD);
+                }
                 Mode::ReadWrite { sync_mode: args.sync_mode }
             }
         };
@@ -448,7 +512,7 @@ impl DatabaseEnv {
                     "External process has a long-lived database transaction that grows the database file. \
                      Use shorter-lived read transactions or shut down the node."
                 };
-                reth_tracing::tracing::warn!(
+                tracing::warn!(
                     target: "storage::db::mdbx",
                     ?process_id,
                     ?thread_id,
@@ -537,6 +601,7 @@ impl DatabaseEnv {
             path: path.to_path_buf(),
             dbis: Arc::default(),
             metrics: None,
+            disable_long_read_transaction_safety: false,
             _lock_file,
         };
 
@@ -573,7 +638,9 @@ impl DatabaseEnv {
         // Note: This is okay because self has mutable access here and `DatabaseEnv` must be Arc'ed
         // before it can be shared.
         let dbis = Arc::make_mut(&mut self.dbis);
-        dbis.extend(handles);
+        for (name, dbi) in handles {
+            dbis.insert(name, dbi);
+        }
 
         Ok(())
     }
@@ -589,7 +656,9 @@ impl DatabaseEnv {
         if let Some(db) = Arc::get_mut(self) {
             // Note: The db is unique and the dbis as well, and they can also be cloned.
             let dbis = Arc::make_mut(&mut db.dbis);
-            dbis.extend(handles);
+            for (name, dbi) in handles {
+                dbis.insert(name, dbi);
+            }
         }
         Ok(())
     }
@@ -664,6 +733,15 @@ impl DatabaseEnv {
 
         Ok(())
     }
+
+    /// Disables timeouts and long-read backtrace reporting for transactions opened through this
+    /// handle. Existing transactions and other previously cloned handles are unaffected.
+    ///
+    /// Use for offline work that intentionally holds transactions open.
+    pub const fn with_disable_long_read_transaction_safety(mut self) -> Self {
+        self.disable_long_read_transaction_safety = true;
+        self
+    }
 }
 
 impl Deref for DatabaseEnv {
@@ -676,6 +754,7 @@ impl Deref for DatabaseEnv {
 
 #[cfg(test)]
 mod tests {
+
     use super::*;
     use crate::{
         tables::{
@@ -689,12 +768,12 @@ mod tests {
     use reth_db_api::{
         cursor::{DbDupCursorRO, DbDupCursorRW, ReverseWalker, Walker},
         models::{AccountBeforeTx, IntegerList, ShardedKey},
-        table::{Encode, Table},
+        table::{Encode, Table, TableInfo},
+        tables_to_generic,
     };
     use reth_libmdbx::Error;
     use reth_primitives_traits::{Account, StorageEntry};
     use reth_storage_errors::db::{DatabaseWriteError, DatabaseWriteOperation};
-    use std::str::FromStr;
     use tempfile::TempDir;
 
     /// Create database for testing. Returns the `TempDir` to prevent cleanup until test ends.
@@ -722,7 +801,6 @@ mod tests {
     const ERROR_COMMIT: &str = "Not able to commit transaction.";
     const ERROR_RETURN_VALUE: &str = "Mismatching result.";
     const ERROR_INIT_TX: &str = "Failed to create a MDBX transaction.";
-    const ERROR_ETH_ADDRESS: &str = "Invalid address.";
 
     #[test]
     fn db_creation() {
@@ -795,8 +873,8 @@ mod tests {
 
         let mut dup_cursor = tx.cursor_dup_write::<PlainStorageState>().unwrap();
 
-        let entry_0 = StorageEntry { key: B256::with_last_byte(1), value: U256::from(0) };
-        let entry_1 = StorageEntry { key: B256::with_last_byte(1), value: U256::from(1) };
+        let entry_0 = StorageEntry { key: B256::with_last_byte(1), value: U256::ZERO };
+        let entry_1 = StorageEntry { key: B256::with_last_byte(1), value: U256::ONE };
 
         dup_cursor.upsert(Address::with_last_byte(1), &entry_0).expect(ERROR_UPSERT);
         dup_cursor.upsert(Address::with_last_byte(1), &entry_1).expect(ERROR_UPSERT);
@@ -1334,7 +1412,7 @@ mod tests {
         let mut dup_cursor = tx.cursor_dup_write::<PlainStorageState>().unwrap();
         let subkey = B256::random();
 
-        let value = U256::from(1);
+        let value = U256::ONE;
         let entry1 = StorageEntry { key: subkey, value };
         dup_cursor.upsert(key, &entry1).expect(ERROR_UPSERT);
         assert_eq!(dup_cursor.seek_by_key_subkey(key, subkey).unwrap(), Some(entry1));
@@ -1411,6 +1489,8 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::needless_update)]
+    #[allow(clippy::clone_on_copy)]
     fn db_closure_put_get() {
         let tempdir = TempDir::new().expect(ERROR_TEMPDIR);
         let path = tempdir.path();
@@ -1419,16 +1499,16 @@ mod tests {
             nonce: 18446744073709551615,
             bytecode_hash: Some(B256::random()),
             balance: U256::MAX,
+            ..Default::default()
         };
-        let key = Address::from_str("0xa2c122be93b0074270ebee7f6b7292c7deb45047")
-            .expect(ERROR_ETH_ADDRESS);
+        let key = address!("0xa2c122be93b0074270ebee7f6b7292c7deb45047");
 
         {
             let env = create_test_db_with_path(DatabaseEnvKind::RW, path);
 
             // PUT
             let result = env.update(|tx| {
-                tx.put::<PlainAccountState>(key, value).expect(ERROR_PUT);
+                tx.put::<PlainAccountState>(key, value.clone()).expect(ERROR_PUT);
                 200
             });
             assert_eq!(result.expect(ERROR_RETURN_VALUE), 200);
@@ -1451,8 +1531,7 @@ mod tests {
     #[test]
     fn db_dup_sort() {
         let (_tempdir, env) = create_test_db(DatabaseEnvKind::RW);
-        let key = Address::from_str("0xa2c122be93b0074270ebee7f6b7292c7deb45047")
-            .expect(ERROR_ETH_ADDRESS);
+        let key = address!("0xa2c122be93b0074270ebee7f6b7292c7deb45047");
 
         // PUT (0,0)
         let value00 = StorageEntry::default();
@@ -1463,7 +1542,7 @@ mod tests {
         env.update(|tx| tx.put::<PlainStorageState>(key, value22).expect(ERROR_PUT)).unwrap();
 
         // PUT (1,1)
-        let value11 = StorageEntry { key: B256::with_last_byte(1), value: U256::from(1) };
+        let value11 = StorageEntry { key: B256::with_last_byte(1), value: U256::ONE };
         env.update(|tx| tx.put::<PlainStorageState>(key, value11).expect(ERROR_PUT)).unwrap();
 
         // Iterate with cursor
@@ -1495,8 +1574,7 @@ mod tests {
     #[test]
     fn db_walk_dup_with_not_existing_key() {
         let (_tempdir, env) = create_test_db(DatabaseEnvKind::RW);
-        let key = Address::from_str("0xa2c122be93b0074270ebee7f6b7292c7deb45047")
-            .expect(ERROR_ETH_ADDRESS);
+        let key = address!("0xa2c122be93b0074270ebee7f6b7292c7deb45047");
 
         // PUT (0,0)
         let value00 = StorageEntry::default();
@@ -1507,7 +1585,7 @@ mod tests {
         env.update(|tx| tx.put::<PlainStorageState>(key, value22).expect(ERROR_PUT)).unwrap();
 
         // PUT (1,1)
-        let value11 = StorageEntry { key: B256::with_last_byte(1), value: U256::from(1) };
+        let value11 = StorageEntry { key: B256::with_last_byte(1), value: U256::ONE };
         env.update(|tx| tx.put::<PlainStorageState>(key, value11).expect(ERROR_PUT)).unwrap();
 
         // Try to walk_dup with not existing key should immediately return None
@@ -1523,17 +1601,15 @@ mod tests {
     #[test]
     fn db_iterate_over_all_dup_values() {
         let (_tempdir, env) = create_test_db(DatabaseEnvKind::RW);
-        let key1 = Address::from_str("0x1111111111111111111111111111111111111111")
-            .expect(ERROR_ETH_ADDRESS);
-        let key2 = Address::from_str("0x2222222222222222222222222222222222222222")
-            .expect(ERROR_ETH_ADDRESS);
+        let key1 = Address::repeat_byte(0x11);
+        let key2 = Address::repeat_byte(0x22);
 
         // PUT key1 (0,0)
         let value00 = StorageEntry::default();
         env.update(|tx| tx.put::<PlainStorageState>(key1, value00).expect(ERROR_PUT)).unwrap();
 
         // PUT key1 (1,1)
-        let value11 = StorageEntry { key: B256::with_last_byte(1), value: U256::from(1) };
+        let value11 = StorageEntry { key: B256::with_last_byte(1), value: U256::ONE };
         env.update(|tx| tx.put::<PlainStorageState>(key1, value11).expect(ERROR_PUT)).unwrap();
 
         // PUT key2 (2,2)
@@ -1569,11 +1645,11 @@ mod tests {
     #[test]
     fn dup_value_with_same_subkey() {
         let (_tempdir, env) = create_test_db(DatabaseEnvKind::RW);
-        let key1 = Address::new([0x11; 20]);
-        let key2 = Address::new([0x22; 20]);
+        let key1 = Address::repeat_byte(0x11);
+        let key2 = Address::repeat_byte(0x22);
 
         // PUT key1 (0,1)
-        let value01 = StorageEntry { key: B256::with_last_byte(0), value: U256::from(1) };
+        let value01 = StorageEntry { key: B256::with_last_byte(0), value: U256::ONE };
         env.update(|tx| tx.put::<PlainStorageState>(key1, value01).expect(ERROR_PUT)).unwrap();
 
         // PUT key1 (0,0)
@@ -1658,5 +1734,82 @@ mod tests {
             let list400 = IntegerList::new_pre_sorted([400u64]);
             assert_eq!(list400, list);
         }
+    }
+
+    #[test]
+    fn db_tracks_table_dbis() {
+        #[derive(Debug)]
+        struct CustomTable;
+
+        impl Table for CustomTable {
+            const NAME: &'static str = "CustomTable";
+            const DUPSORT: bool = false;
+
+            type Key = u64;
+            type Value = u64;
+        }
+
+        impl TableInfo for CustomTable {
+            fn name(&self) -> &'static str {
+                Self::NAME
+            }
+
+            fn is_dupsort(&self) -> bool {
+                Self::DUPSORT
+            }
+        }
+
+        impl TableSet for CustomTable {
+            fn tables() -> Box<dyn Iterator<Item = Box<dyn TableInfo>>> {
+                Box::new(std::iter::once(Box::new(Self) as Box<dyn TableInfo>))
+            }
+        }
+
+        let (_tempdir, mut env) = create_test_db(DatabaseEnvKind::RW);
+        env.create_and_track_tables_for::<CustomTable>().expect(ERROR_TABLE_CREATION);
+        let env = env.with_metrics();
+
+        let tx = env.tx_mut().expect(ERROR_INIT_TX);
+        for table in Tables::ALL {
+            let dbi = tables_to_generic!(table, |T| tx.get_dbi::<T>()).unwrap();
+            assert_eq!(env.dbis.get(Some(*table), table.name()), Some(dbi), "{table}");
+            assert_eq!(tx.inner().open_db(Some(table.name())).unwrap().dbi(), dbi, "{table}");
+        }
+
+        let dbi = tx.get_dbi::<CustomTable>().unwrap();
+        assert_eq!(env.dbis.get(None, CustomTable::NAME), Some(dbi));
+        assert_eq!(tx.inner().open_db(Some(CustomTable::NAME)).unwrap().dbi(), dbi);
+        tx.put::<CustomTable>(1, 2).expect(ERROR_PUT);
+        tx.cursor_write::<CustomTable>().unwrap().upsert(3, &4).expect(ERROR_UPSERT);
+        tx.commit().expect(ERROR_COMMIT);
+
+        let tx = env.tx().expect(ERROR_INIT_TX);
+        assert_eq!(tx.get::<CustomTable>(1).expect(ERROR_GET), Some(2));
+        assert_eq!(tx.get::<CustomTable>(3).expect(ERROR_GET), Some(4));
+    }
+
+    #[test]
+    fn non_durable_sync_period() {
+        let sync_period = |sync_mode| {
+            let tempdir = tempfile::TempDir::new().expect(ERROR_TEMPDIR);
+            let env = DatabaseEnv::open(
+                tempdir.path(),
+                DatabaseEnvKind::RW,
+                DatabaseArguments::test().with_sync_mode(Some(sync_mode)),
+            )
+            .expect(ERROR_DB_CREATION);
+            let mut period = 0;
+            // SAFETY: the pointer is only used within the closure, while `env` is open.
+            let rc = env.with_raw_env_ptr(|env| unsafe {
+                ffi::mdbx_env_get_option(env, ffi::MDBX_opt_sync_period, &raw mut period)
+            });
+            assert_eq!(rc, ffi::MDBX_SUCCESS);
+            // MDBX reports the period in 1/65536 of a second.
+            Duration::from_secs_f64(period as f64 / 65536.0)
+        };
+
+        assert_eq!(sync_period(SyncMode::Durable), Duration::ZERO);
+        assert_eq!(sync_period(SyncMode::SafeNoSync), NON_DURABLE_SYNC_PERIOD);
+        assert_eq!(sync_period(SyncMode::UtterlyNoSync), NON_DURABLE_SYNC_PERIOD);
     }
 }

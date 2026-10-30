@@ -1,6 +1,7 @@
 //! Metadata provider trait for reading and writing node metadata.
 
 use alloc::vec::Vec;
+pub use reth_db_api::models::PipelineUnwind;
 use reth_db_api::models::{SnapAttempt, StorageSettings, SNAP_ATTEMPT_VERSION};
 use reth_storage_errors::provider::{ProviderError, ProviderResult};
 
@@ -8,6 +9,9 @@ use reth_storage_errors::provider::{ProviderError, ProviderResult};
 pub mod keys {
     /// Storage configuration settings for this node.
     pub const STORAGE_SETTINGS: &str = "storage_settings";
+
+    /// A pipeline unwind that has not completed.
+    pub const PIPELINE_UNWIND: &str = "pipeline_unwind";
 
     /// The snap synchronization attempt that owns downloaded state.
     pub const SNAP_ATTEMPT: &str = "snap_attempt";
@@ -18,6 +22,14 @@ pub mod keys {
 pub trait MetadataProvider: Send {
     /// Get a metadata value by key
     fn get_metadata(&self, key: &str) -> ProviderResult<Option<Vec<u8>>>;
+
+    /// Returns an interrupted pipeline unwind. Unreadable records must not be ignored because
+    /// stage checkpoints may describe different versions of the state.
+    fn pipeline_unwind(&self) -> ProviderResult<Option<PipelineUnwind>> {
+        self.get_metadata(keys::PIPELINE_UNWIND)?
+            .map(|bytes| serde_json::from_slice(&bytes).map_err(ProviderError::other))
+            .transpose()
+    }
 
     /// Get storage settings for this node.
     ///
@@ -61,6 +73,17 @@ pub trait MetadataWriter: Send {
     /// Delete a metadata value.
     fn delete_metadata(&self, _key: &str) -> ProviderResult<()> {
         Err(ProviderError::UnsupportedProvider)
+    }
+
+    /// Records an unwind, or clears it after every selected stage has committed.
+    fn write_pipeline_unwind(&self, unwind: Option<&PipelineUnwind>) -> ProviderResult<()> {
+        match unwind {
+            Some(unwind) => self.write_metadata(
+                keys::PIPELINE_UNWIND,
+                serde_json::to_vec(unwind).map_err(ProviderError::other)?,
+            ),
+            None => self.delete_metadata(keys::PIPELINE_UNWIND),
+        }
     }
 
     /// Write storage settings for this node

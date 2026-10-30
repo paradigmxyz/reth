@@ -5,15 +5,13 @@ use alloy_eips::{
     eip7840::BlobParams,
     eip7910::{EthConfig, EthForkConfig, SystemContract},
 };
-use alloy_evm::precompiles::Precompile;
-use alloy_primitives::{address, Address};
+use alloy_primitives::Address;
+use evm2::evm::EmptyDB;
 use jsonrpsee::{core::RpcResult, proc_macros::rpc};
 use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthereumHardforks, Hardforks, Head};
 use reth_errors::{ProviderError, RethError};
-use reth_evm::{precompiles::PrecompilesMap, ConfigureEvm, Evm};
-use reth_node_api::NodePrimitives;
-use reth_primitives_traits::header::HeaderMut;
-use reth_revm::db::EmptyDB;
+use reth_evm::{ConfigureEvm, Evm};
+use reth_primitives_traits::{header::HeaderMut, NodePrimitives};
 use reth_rpc_eth_types::EthApiError;
 use reth_storage_api::BlockReaderIdExt;
 use std::collections::BTreeMap;
@@ -68,7 +66,7 @@ where
         }
 
         if chain_spec.is_amsterdam_active_at_timestamp(timestamp) {
-            system_contracts.extend(amsterdam_system_contracts());
+            system_contracts.extend(SystemContract::amsterdam());
         }
 
         // Fork config only exists for timestamp-based hardforks.
@@ -173,39 +171,6 @@ where
     }
 }
 
-/// Address of the builder deposit system contract introduced in Amsterdam
-/// ([EIP-8282](https://eips.ethereum.org/EIPS/eip-8282)).
-const BUILDER_DEPOSIT_CONTRACT_ADDRESS: Address =
-    address!("0x0000BFF46984E3725691FA540A8C7589300D8282");
-
-/// Address of the builder exit system contract introduced in Amsterdam
-/// ([EIP-8282](https://eips.ethereum.org/EIPS/eip-8282)).
-const BUILDER_EXIT_CONTRACT_ADDRESS: Address =
-    address!("0x000064D678505AD48F8CCB093BC65613800E8282");
-
-/// Returns the system contracts introduced in the Amsterdam hardfork
-/// ([EIP-8282](https://eips.ethereum.org/EIPS/eip-8282) builder execution requests).
-fn amsterdam_system_contracts() -> [(SystemContract, Address); 2] {
-    [
-        (
-            SystemContract::Other("BUILDER_DEPOSIT_CONTRACT_ADDRESS".to_string()),
-            BUILDER_DEPOSIT_CONTRACT_ADDRESS,
-        ),
-        (
-            SystemContract::Other("BUILDER_EXIT_CONTRACT_ADDRESS".to_string()),
-            BUILDER_EXIT_CONTRACT_ADDRESS,
-        ),
-    ]
-}
-
-fn evm_to_precompiles_map(
-    evm: impl Evm<Precompiles = PrecompilesMap>,
-) -> BTreeMap<String, Address> {
-    let precompiles = evm.precompiles();
-    precompiles
-        .addresses()
-        .filter_map(|address| {
-            Some((precompiles.get(address)?.precompile_id().name().to_string(), *address))
-        })
-        .collect()
+fn evm_to_precompiles_map(evm: impl Evm) -> BTreeMap<String, Address> {
+    evm.precompile_ids().into_iter().map(|(address, id)| (id.name().to_string(), address)).collect()
 }

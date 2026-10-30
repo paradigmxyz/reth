@@ -39,6 +39,7 @@ use crate::{
 };
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
+use tokio_util::task::AbortOnDropHandle;
 use tower::layer::{util::Stack, LayerFn};
 
 mod connection;
@@ -392,12 +393,10 @@ where
     }
 
     fn call(&mut self, request: String) -> Self::Future {
-        trace!("{:?}", request);
+        trace!(request_bytes = request.len(), "Received IPC request");
 
         let cfg = RpcServiceCfg {
-            bounded_subscriptions: BoundedSubscriptions::new(
-                self.inner.server_cfg.max_subscriptions_per_connection,
-            ),
+            bounded_subscriptions: self.inner.bounded_subscriptions.clone(),
             id_provider: self.inner.id_provider.clone(),
             sink: self.inner.method_sink.clone(),
         };
@@ -417,7 +416,10 @@ where
         // example tracing calls are relatively CPU expensive on serde::serialize alone, moving this
         // work to a separate task takes the pressure off the connection so all concurrent responses
         // are also serialized concurrently and the connection can focus on read+write
-        let f = tokio::task::spawn(async move {
+        //
+        // The connection drops its pending calls when it closes, so the call must not outlive the
+        // returned future, otherwise it keeps running without anyone waiting for the response.
+        let f = AbortOnDropHandle::new(tokio::task::spawn(async move {
             ipc::call_with_service(
                 request,
                 rpc_service,
@@ -426,9 +428,17 @@ where
                 conn,
             )
             .await
-        });
+        }));
 
-        Box::pin(async move { f.await.map_err(|err| err.into()) })
+        Box::pin(async move {
+            // Call panics are answered by the call itself. Anything left here has no request id to
+            // respond to, and the connection writes errors verbatim, which would corrupt the
+            // stream.
+            Ok(f.await.unwrap_or_else(|err| {
+                warn!(%err, "IPC call task failed");
+                None
+            }))
+        })
     }
 }
 
@@ -475,10 +485,9 @@ fn process_connection<RpcMiddleware, HttpMiddleware>(
         local_socket_stream,
     } = params;
 
-    let ipc = IpcConn(tokio_util::codec::Decoder::framed(
-        StreamCodec::stream_incoming(),
-        local_socket_stream,
-    ));
+    let codec =
+        StreamCodec::stream_incoming().with_max_length(server_cfg.max_request_body_size as usize);
+    let ipc = IpcConn(tokio_util::codec::Decoder::framed(codec, local_socket_stream));
 
     let (tx, rx) = mpsc::channel::<Box<JsonRawValue>>(server_cfg.message_buffer_capacity as usize);
     let method_sink = MethodSink::new_with_limit(tx, server_cfg.max_response_body_size);
@@ -780,7 +789,7 @@ mod tests {
             params::BatchRequestBuilder,
         },
         rpc_params,
-        types::Request,
+        types::{error::TOO_MANY_SUBSCRIPTIONS_CODE, ErrorCode, Request},
         PendingSubscriptionSink, RpcModule, SubscriptionMessage,
     };
     use reth_tracing::init_test_tracing;
@@ -926,6 +935,74 @@ mod tests {
         assert!(response4.is_ok());
     }
 
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_pending_call_aborted_on_disconnect() {
+        init_test_tracing();
+
+        let endpoint = &dummy_name();
+        let server = Builder::default().build(endpoint.clone());
+        let (started_tx, started_rx) = oneshot::channel::<()>();
+        let (dropped_tx, dropped_rx) = oneshot::channel::<()>();
+        let mut module = RpcModule::new(std::sync::Mutex::new(Some((started_tx, dropped_tx))));
+        module
+            .register_async_method("hang", |_, ctx, _| async move {
+                // `dropped_tx` is dropped together with the call
+                let (started_tx, _dropped_tx) = ctx.lock().unwrap().take().unwrap();
+                let _ = started_tx.send(());
+                std::future::pending::<()>().await;
+                "unreachable"
+            })
+            .unwrap();
+        let handle = server.start(module).await.unwrap();
+        tokio::spawn(handle.stopped());
+
+        let client = IpcClientBuilder::default().build(endpoint).await.unwrap();
+        tokio::select! {
+            _ = client.request::<String, _>("hang", rpc_params![]) => panic!("call completed"),
+            _ = started_rx => {}
+        }
+        drop(client);
+
+        let dropped = tokio::time::timeout(std::time::Duration::from_secs(5), dropped_rx).await;
+        assert!(dropped.is_ok(), "call kept running after the connection closed");
+    }
+
+    #[tokio::test]
+    async fn test_panicking_call_returns_internal_error() {
+        init_test_tracing();
+
+        let endpoint = &dummy_name();
+        let server = Builder::default().build(endpoint.clone());
+        let mut module = RpcModule::new(());
+        module
+            .register_async_method("maybe_panic", |params, _, _| async move {
+                assert!(!params.one::<bool>().unwrap(), "requested panic");
+                "ok"
+            })
+            .unwrap();
+        let handle = server.start(module).await.unwrap();
+        tokio::spawn(handle.stopped());
+
+        let client = IpcClientBuilder::default().build(endpoint).await.unwrap();
+        let err = client.request::<String, _>("maybe_panic", rpc_params![true]).await.unwrap_err();
+        assert!(
+            matches!(&err, Error::Call(err) if err.code() == ErrorCode::InternalError.code()),
+            "{err:?}"
+        );
+
+        let mut batch_request_builder = BatchRequestBuilder::new();
+        let _ = batch_request_builder.insert("maybe_panic", rpc_params![true]);
+        let _ = batch_request_builder.insert("maybe_panic", rpc_params![false]);
+        let responses = client
+            .batch_request::<String>(batch_request_builder)
+            .await
+            .unwrap()
+            .into_iter()
+            .collect::<Vec<_>>();
+        assert!(matches!(&responses[0], Err(err) if err.code() == ErrorCode::InternalError.code()));
+        assert_eq!(responses[1].as_deref(), Ok("ok"));
+    }
+
     #[tokio::test]
     async fn test_rpc_request() {
         init_test_tracing();
@@ -1014,6 +1091,38 @@ mod tests {
 
         let items = sub.take(16).collect::<Vec<_>>().await;
         assert_eq!(items.len(), 16);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_max_subscriptions_per_connection() {
+        let endpoint = &dummy_name();
+        let server = Builder::default().max_subscriptions_per_connection(1).build(endpoint.clone());
+        let mut module = RpcModule::new(());
+        module
+            .register_subscription(
+                "subscribe_hello",
+                "s_hello",
+                "unsubscribe_hello",
+                |_, pending, _, _| async move {
+                    let Ok(sink) = pending.accept().await else { return };
+                    sink.closed().await;
+                },
+            )
+            .unwrap();
+        let handle = server.start(module).await.unwrap();
+        tokio::spawn(handle.stopped());
+
+        let client = IpcClientBuilder::default().build(endpoint).await.unwrap();
+        let _sub: Subscription<usize> =
+            client.subscribe("subscribe_hello", rpc_params![], "unsubscribe_hello").await.unwrap();
+        let err = client
+            .subscribe::<usize, _>("subscribe_hello", rpc_params![], "unsubscribe_hello")
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(&err, Error::Call(err) if err.code() == TOO_MANY_SUBSCRIPTIONS_CODE),
+            "{err}"
+        );
     }
 
     #[tokio::test]

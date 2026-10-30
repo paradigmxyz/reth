@@ -6,20 +6,20 @@ use alloy_primitives::{
     map::{AddressMap, B256Map, HashMap},
     Address, BlockNumber, Bloom, Log, B256, U256,
 };
+use evm2::evm::AccountInfo;
 use reth_primitives_traits::{Account, Bytecode, Receipt, StorageEntry};
-use reth_trie_common::{HashedPostState, KeyHasher};
-use revm::{
-    database::{states::BundleState, BundleAccount},
-    state::AccountInfo,
+use reth_trie_common::{
+    bundle_state::{BundleAccount, BundleState},
+    HashedPostState, KeyHasher,
 };
 
-/// Type used to initialize revms bundle state.
+/// Type used to initialize bundle state.
 pub type BundleStateInit = AddressMap<(Option<Account>, Option<Account>, B256Map<(U256, U256)>)>;
 
-/// Types used inside `RevertsInit` to initialize revms reverts.
+/// Types used inside `RevertsInit` to initialize reverts.
 pub type AccountRevertInit = (Option<Option<Account>>, Vec<StorageEntry>);
 
-/// Type used to initialize revms reverts.
+/// Type used to initialize reverts.
 pub type RevertsInit = HashMap<BlockNumber, AddressMap<AccountRevertInit>>;
 
 /// Represents a changed account
@@ -105,7 +105,7 @@ impl<T> ExecutionOutcome<T> {
         let mut reverts = revert_init.into_iter().collect::<Vec<_>>();
         reverts.sort_unstable_by_key(|a| a.0);
 
-        // initialize revm bundle
+        // initialize bundle
         let bundle = BundleState::new(
             state_init.into_iter().map(|(address, (original, present, storage))| {
                 (
@@ -160,12 +160,12 @@ impl<T> ExecutionOutcome<T> {
         value
     }
 
-    /// Return revm bundle state.
+    /// Return bundle state.
     pub const fn state(&self) -> &BundleState {
         &self.bundle
     }
 
-    /// Returns mutable revm bundle state.
+    /// Returns mutable bundle state.
     pub const fn state_mut(&mut self) -> &mut BundleState {
         &mut self.bundle
     }
@@ -199,7 +199,7 @@ impl<T> ExecutionOutcome<T> {
     ///
     /// This means that depending on status we can potentially return `U256::ZERO`.
     pub fn storage(&self, address: &Address, storage_key: U256) -> Option<U256> {
-        self.bundle.account(address).and_then(|a| a.storage_slot(storage_key))
+        self.bundle.storage(address, storage_key)
     }
 
     /// Return bytecode if known.
@@ -428,7 +428,7 @@ pub(super) mod serde_bincode_compat {
     use alloy_eips::eip7685::Requests;
     use alloy_primitives::{BlockNumber, Bytes};
     use reth_primitives_traits::Receipt;
-    use revm::database::BundleState;
+    use reth_trie_common::bundle_state::BundleState;
     use serde::{Deserialize, Deserializer, Serialize, Serializer};
     use serde_with::{DeserializeAs, SerializeAs};
 
@@ -573,8 +573,8 @@ mod tests {
     fn test_initialization() {
         // Create a new BundleState object with initial data
         let bundle = BundleState::new(
-            vec![(Address::new([2; 20]), None, Some(AccountInfo::default()), HashMap::default())],
-            vec![vec![(Address::new([2; 20]), None, vec![])]],
+            vec![(Address::repeat_byte(2), None, Some(AccountInfo::default()), HashMap::default())],
+            vec![vec![(Address::repeat_byte(2), None, vec![])]],
             vec![],
         );
 
@@ -610,11 +610,11 @@ mod tests {
         // Create a BundleStateInit object and insert initial data
         let mut state_init: BundleStateInit = AddressMap::default();
         state_init
-            .insert(Address::new([2; 20]), (None, Some(Account::default()), B256Map::default()));
+            .insert(Address::repeat_byte(2), (None, Some(Account::default()), B256Map::default()));
 
         // Create an AddressMap for account reverts and insert initial data
         let mut revert_inner: AddressMap<AccountRevertInit> = AddressMap::default();
-        revert_inner.insert(Address::new([2; 20]), (None, vec![]));
+        revert_inner.insert(Address::repeat_byte(2), (None, vec![]));
 
         // Create a RevertsInit object and insert the revert_inner data
         let mut revert_init: RevertsInit = HashMap::default();
@@ -941,14 +941,14 @@ mod tests {
             balance: U256::from(100),
             code_hash: B256::ZERO,
             code: None,
-            account_id: None,
+            ..Default::default()
         };
         let account_info2 = AccountInfo {
             nonce: 2,
             balance: U256::from(200),
             code_hash: B256::ZERO,
             code: None,
-            account_id: None,
+            ..Default::default()
         };
 
         // Set up the bundle state with these accounts

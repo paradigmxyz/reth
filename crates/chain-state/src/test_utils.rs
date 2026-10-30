@@ -8,6 +8,7 @@ use alloy_primitives::{map::B256HashMap, Address, BlockNumber, B256, U256};
 use alloy_signer::SignerSync;
 use alloy_signer_local::PrivateKeySigner;
 use core::marker::PhantomData;
+use evm2::evm::AccountInfo;
 use rand::Rng;
 use reth_chainspec::{ChainSpec, EthereumHardfork, MIN_TRANSACTION_GAS};
 use reth_ethereum_primitives::{
@@ -19,9 +20,7 @@ use reth_primitives_traits::{
     Account, NodePrimitives, Recovered, RecoveredBlock, SealedBlock, SealedHeader,
     SignedTransaction,
 };
-use reth_storage_api::NodePrimitivesProvider;
-use reth_trie::{root::state_root_unhashed, ComputedTrieData, SortedTrieData};
-use revm::{database::BundleState, state::AccountInfo};
+use reth_trie::{bundle_state::BundleState, root::state_root_unhashed, SortedTrieData};
 use std::{
     ops::Range,
     sync::{Arc, Mutex},
@@ -29,7 +28,7 @@ use std::{
 use tokio::sync::broadcast::{self, Sender};
 
 /// Fixed address used for storage slot writes in test blocks.
-const TEST_STORAGE_ADDRESS: Address = Address::new([0xAA; 20]);
+const TEST_STORAGE_ADDRESS: Address = Address::repeat_byte(0xAA);
 
 /// Fixed storage slot key used in test blocks.
 const TEST_STORAGE_SLOT: U256 = U256::from_limbs([1, 0, 0, 0]);
@@ -61,7 +60,8 @@ pub struct TestBlockBuilder<N: NodePrimitives = EthPrimitives> {
 
 impl<N: NodePrimitives> Default for TestBlockBuilder<N> {
     fn default() -> Self {
-        let initial_account_info = AccountInfo::from_balance(U256::from(10).pow(U256::from(18)));
+        let initial_account_info =
+            AccountInfo::default().with_balance(U256::from(10).pow(U256::from(18)));
         let signer_pk = PrivateKeySigner::random();
         let signer = signer_pk.address();
         Self {
@@ -241,12 +241,12 @@ impl<N: NodePrimitives> TestBlockBuilder<N> {
                     },
                     state: BundleState::default(),
                 }),
-                ComputedTrieData::default(),
+                SortedTrieData::default(),
             );
             return executed;
         }
 
-        let initial_info = AccountInfo::from_balance(U256::from(10).pow(U256::from(18)));
+        let initial_info = AccountInfo::default().with_balance(U256::from(10).pow(U256::from(18)));
         let num_txs = recovered.body().transactions.len() as u64;
         let single_cost = Self::single_tx_cost();
 
@@ -269,7 +269,7 @@ impl<N: NodePrimitives> TestBlockBuilder<N> {
             Some(None)
         };
 
-        let new_slot_value = U256::from(block_number).wrapping_add(U256::from(1));
+        let new_slot_value = U256::from(block_number).wrapping_add(U256::ONE);
 
         let bundle = BundleState::builder(block_number..=block_number)
             .state_present_account_info(self.signer, post_info.clone())
@@ -310,9 +310,8 @@ impl<N: NodePrimitives> TestBlockBuilder<N> {
             receipts.into_iter().flatten().collect()
         };
 
-        let trie_data = ComputedTrieData {
-            sorted: SortedTrieData { hashed_state: Arc::new(hashed_state), ..Default::default() },
-        };
+        let trie_data =
+            SortedTrieData { hashed_state: Arc::new(hashed_state), ..Default::default() };
 
         let block_hash = recovered.hash();
         let executed = ExecutedBlock::new(
@@ -443,11 +442,9 @@ impl TestCanonStateSubscriptions {
     }
 }
 
-impl NodePrimitivesProvider for TestCanonStateSubscriptions {
-    type Primitives = EthPrimitives;
-}
-
 impl CanonStateSubscriptions for TestCanonStateSubscriptions {
+    type Primitives = EthPrimitives;
+
     /// Sets up a broadcast channel with a buffer size of 100.
     fn subscribe_to_canonical_state(&self) -> CanonStateNotifications {
         let (canon_notif_tx, canon_notif_rx) = broadcast::channel(100);
@@ -465,7 +462,7 @@ mod tests {
     fn test_revert_after_empty_parent() {
         let mut builder = TestBlockBuilder::eth().with_state();
         let parent_hash = B256::repeat_byte(1);
-        let initial_info = AccountInfo::from_balance(U256::from(10).pow(U256::from(18)));
+        let initial_info = AccountInfo::default().with_balance(U256::from(10).pow(U256::from(18)));
 
         // An empty parent still creates the signer with its initial balance and zero nonce.
         // Seed that state directly so the test doesn't depend on random transaction counts.

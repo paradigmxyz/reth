@@ -209,10 +209,8 @@ impl alloy_rlp::Decodable for PingNodeEndpoint {
         if !list {
             return Err(alloy_rlp::Error::UnexpectedString);
         }
+        // Payload length checked by Header::decode.
         let started_len = b.len();
-        if started_len < payload_length {
-            return Err(alloy_rlp::Error::InputTooShort);
-        }
 
         // Geth allows the ipaddr to be possibly empty:
         // <https://github.com/ethereum/go-ethereum/blob/380688c636a654becc8f114438c2a5d93d2db032/p2p/discover/v4_udp.go#L206-L209>
@@ -436,6 +434,15 @@ pub struct Ping {
 }
 
 impl Encodable for Ping {
+    fn length(&self) -> usize {
+        let mut payload_length =
+            4u32.length() + self.from.length() + self.to.length() + self.expire.length();
+        if let Some(enr_seq) = self.enr_sq {
+            payload_length += enr_seq.length();
+        }
+        payload_length + alloy_rlp::length_of_length(payload_length)
+    }
+
     fn encode(&self, out: &mut dyn BufMut) {
         #[derive(RlpEncodable)]
         struct V4PingMessage<'a> {
@@ -528,6 +535,14 @@ pub struct Pong {
 }
 
 impl Encodable for Pong {
+    fn length(&self) -> usize {
+        let mut payload_length = self.to.length() + self.echo.length() + self.expire.length();
+        if let Some(enr_seq) = self.enr_sq {
+            payload_length += enr_seq.length();
+        }
+        payload_length + alloy_rlp::length_of_length(payload_length)
+    }
+
     fn encode(&self, out: &mut dyn BufMut) {
         #[derive(RlpEncodable)]
         struct PongMessageEIP868<'a> {
@@ -648,8 +663,12 @@ mod tests {
                 enr_sq: None,
             };
 
-            let decoded = Ping::decode(&mut alloy_rlp::encode(&msg).as_slice()).unwrap();
+            let encoded = alloy_rlp::encode(&msg);
+            assert_eq!(msg.length(), encoded.len());
+            let mut buf = encoded.as_slice();
+            let decoded = Ping::decode(&mut buf).unwrap();
             assert_eq!(msg, decoded);
+            assert!(buf.is_empty());
         }
     }
 
@@ -666,8 +685,12 @@ mod tests {
                 enr_sq: Some(rng.r#gen()),
             };
 
-            let decoded = Ping::decode(&mut alloy_rlp::encode(&msg).as_slice()).unwrap();
+            let encoded = alloy_rlp::encode(&msg);
+            assert_eq!(msg.length(), encoded.len());
+            let mut buf = encoded.as_slice();
+            let decoded = Ping::decode(&mut buf).unwrap();
             assert_eq!(msg, decoded);
+            assert!(buf.is_empty());
         }
     }
 
@@ -684,8 +707,12 @@ mod tests {
                 enr_sq: None,
             };
 
-            let decoded = Pong::decode(&mut alloy_rlp::encode(&msg).as_slice()).unwrap();
+            let encoded = alloy_rlp::encode(&msg);
+            assert_eq!(msg.length(), encoded.len());
+            let mut buf = encoded.as_slice();
+            let decoded = Pong::decode(&mut buf).unwrap();
             assert_eq!(msg, decoded);
+            assert!(buf.is_empty());
         }
     }
 
@@ -702,8 +729,12 @@ mod tests {
                 enr_sq: Some(rng.r#gen()),
             };
 
-            let decoded = Pong::decode(&mut alloy_rlp::encode(&msg).as_slice()).unwrap();
+            let encoded = alloy_rlp::encode(&msg);
+            assert_eq!(msg.length(), encoded.len());
+            let mut buf = encoded.as_slice();
+            let decoded = Pong::decode(&mut buf).unwrap();
             assert_eq!(msg, decoded);
+            assert!(buf.is_empty());
         }
     }
 
@@ -952,6 +983,7 @@ mod tests {
 
     mod eip8 {
         use super::*;
+        use alloy_primitives::b512;
 
         fn junk_enr_request() -> Vec<u8> {
             let mut buf = Vec::new();
@@ -1016,7 +1048,7 @@ mod tests {
                 address: "99.33.22.55".parse().unwrap(),
                 tcp_port: 4444,
                 udp_port: 4445,
-                id: hex!("3155e1427f85f10a5c9a7755877748041af1bcd8d474ec065eb33df57a97babf54bfd2103575fa829115d224c523596b401065a97f74010610fce76382c0bf32").into(),
+                id: b512!("3155e1427f85f10a5c9a7755877748041af1bcd8d474ec065eb33df57a97babf54bfd2103575fa829115d224c523596b401065a97f74010610fce76382c0bf32"),
             }.length();
 
             let expected_nodes: Vec<NodeRecord> = vec![
@@ -1024,25 +1056,25 @@ mod tests {
                     address: "99.33.22.55".parse().unwrap(),
                     udp_port: 4444,
                     tcp_port: 4445,
-                    id: hex!("3155e1427f85f10a5c9a7755877748041af1bcd8d474ec065eb33df57a97babf54bfd2103575fa829115d224c523596b401065a97f74010610fce76382c0bf32").into(),
+                    id: b512!("3155e1427f85f10a5c9a7755877748041af1bcd8d474ec065eb33df57a97babf54bfd2103575fa829115d224c523596b401065a97f74010610fce76382c0bf32"),
                 },
                 NodeRecord {
                     address: "1.2.3.4".parse().unwrap(),
                     udp_port: 1,
                     tcp_port: 1,
-                    id: hex!("312c55512422cf9b8a4097e9a6ad79402e87a15ae909a4bfefa22398f03d20951933beea1e4dfa6f968212385e829f04c2d314fc2d4e255e0d3bc08792b069db").into(),
+                    id: b512!("312c55512422cf9b8a4097e9a6ad79402e87a15ae909a4bfefa22398f03d20951933beea1e4dfa6f968212385e829f04c2d314fc2d4e255e0d3bc08792b069db"),
                 },
                 NodeRecord {
                     address: "2001:db8:3c4d:15::abcd:ef12".parse().unwrap(),
                     udp_port: 3333,
                     tcp_port: 3333,
-                    id: hex!("38643200b172dcfef857492156971f0e6aa2c538d8b74010f8e140811d53b98c765dd2d96126051913f44582e8c199ad7c6d6819e9a56483f637feaac9448aac").into(),
+                    id: b512!("38643200b172dcfef857492156971f0e6aa2c538d8b74010f8e140811d53b98c765dd2d96126051913f44582e8c199ad7c6d6819e9a56483f637feaac9448aac"),
                 },
                 NodeRecord {
                     address: "2001:db8:85a3:8d3:1319:8a2e:370:7348".parse().unwrap(),
                     udp_port: 999,
                     tcp_port: 1000,
-                    id: hex!("8dcab8618c3253b558d459da53bd8fa68935a719aff8b811197101a4b2b47dd2d47295286fc00cc081bb542d760717d1bdd6bec2c37cd72eca367d6dd3b9df73").into(),
+                    id: b512!("8dcab8618c3253b558d459da53bd8fa68935a719aff8b811197101a4b2b47dd2d47295286fc00cc081bb542d760717d1bdd6bec2c37cd72eca367d6dd3b9df73"),
                 },
             ];
             assert_matches!(decoded.msg, Message::Neighbours(Neighbours { nodes, expire: 1136239445 }) if nodes == expected_nodes);

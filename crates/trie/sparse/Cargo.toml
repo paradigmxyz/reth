@@ -26,7 +26,6 @@ alloy-primitives.workspace = true
 either = { workspace = true, optional = true }
 rayon = { workspace = true, optional = true }
 smallvec = { workspace = true, optional = true }
-slotmap = { workspace = true, optional = true }
 strum = { workspace = true, features = ["derive"] }
 
 # metrics
@@ -41,21 +40,19 @@ reth-tracing.workspace = true
 
 arbitrary.workspace = true
 alloy-rlp.workspace = true
-itertools.workspace = true
 pretty_assertions.workspace = true
 proptest-arbitrary-interop.workspace = true
 proptest.workspace = true
 rand.workspace = true
-rand_08.workspace = true
 
 [features]
+fuzz = []
 default = ["std", "metrics"]
 std = [
     "dep:either",
     "dep:rayon",
     "dep:reth-primitives-traits",
     "dep:smallvec",
-    "dep:slotmap",
     "dep:tracing",
     "alloy-primitives/std",
     "alloy-rlp/std",
