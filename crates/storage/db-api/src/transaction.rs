@@ -57,6 +57,13 @@ pub trait DbTx: Debug + Send {
     fn prefetch(&self, _enabled: bool) -> &Self {
         self
     }
+
+    /// Advises best-effort read-ahead of the pages holding encoded `keys` in table `T`.
+    ///
+    /// Lets a batch of cold lookups wait for their reads together instead of one at a time. Does
+    /// not read values. Backends and transactions without support ignore it.
+    #[inline]
+    fn prefetch_keys<T: Table>(&self, _keys: &[<T::Key as Encode>::Encoded]) {}
 }
 
 /// Read write transaction that allows writing to database
