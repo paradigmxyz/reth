@@ -34,7 +34,7 @@ impl HttpClient for Client {
         &self,
         url: U,
     ) -> eyre::Result<impl Stream<Item = eyre::Result<Bytes>> + Unpin> {
-        let response = Self::get(self, url).send().await?;
+        let response = Self::get(self, url).send().await?.error_for_status()?;
 
         Ok(response.bytes_stream().map_err(|e| eyre::Error::new(e)))
     }
@@ -475,6 +475,23 @@ mod tests {
     #[test_case("<a href=\"checksums.txt\">", &[".erae", ".ere"], None; "no era file on line")]
     fn test_extract_era_filename(line: &str, exts: &[&str], expected: Option<&str>) {
         assert_eq!(extract_era_filename(line, exts), expected);
+    }
+
+    #[tokio::test]
+    async fn test_get_rejects_http_error_status() {
+        use std::io::{Read, Write};
+
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let url = Url::parse(&format!("http://{}/", listener.local_addr().unwrap())).unwrap();
+        std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let _ = stream.read(&mut [0; 1024]);
+            stream
+                .write_all(b"HTTP/1.1 503 Service Unavailable\r\ncontent-length: 4\r\n\r\nbusy")
+                .unwrap();
+        });
+
+        assert!(HttpClient::get(&Client::new(), url).await.is_err());
     }
 
     #[test]
