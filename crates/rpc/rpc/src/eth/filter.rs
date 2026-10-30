@@ -13,7 +13,7 @@ use futures::{
     stream::{FuturesOrdered, StreamExt},
     Future,
 };
-use itertools::Itertools;
+use itertools::{Either, Itertools};
 use jsonrpsee::{core::RpcResult, server::IdProvider};
 use reth_errors::ProviderError;
 use reth_primitives_traits::{NodePrimitives, SealedHeader};
@@ -24,6 +24,10 @@ use reth_rpc_eth_api::{
 };
 use reth_rpc_eth_types::{
     logs_utils::{self, append_matching_block_logs, ProviderOrBlock},
+    logs_v2::{
+        append_matching_block_logs_v2, BlockRef, Direction, LogCursor, LogsV2Filter, LogsV2Result,
+        LogsV2Start,
+    },
     EthApiError, EthFilterConfig, EthStateCache, EthSubscriptionIdProvider,
 };
 use reth_rpc_server_types::{result::rpc_error_with_code, ToRpcResult};
@@ -37,7 +41,7 @@ use std::{
     collections::{HashMap, VecDeque},
     fmt,
     iter::{Peekable, StepBy},
-    ops::RangeInclusive,
+    ops::{ControlFlow, RangeInclusive},
     pin::Pin,
     sync::Arc,
     time::{Duration, Instant},
@@ -236,7 +240,7 @@ where
 
             if filter.block > best_number {
                 // no new blocks since the last poll
-                return Ok(FilterChanges::Empty)
+                return Ok(FilterChanges::Empty);
             }
 
             // update filter
@@ -325,7 +329,7 @@ where
                 *inner_filter.clone()
             } else {
                 // Not a log filter
-                return Err(EthFilterError::FilterNotFound(id))
+                return Err(EthFilterError::FilterNotFound(id));
             }
         };
 
@@ -430,6 +434,12 @@ where
         trace!(target: "rpc::eth", "Serving eth_getLogs");
         Ok(self.logs_for_filter(filter, self.inner.query_limits).await?)
     }
+
+    /// Handler for `eth_getLogsV2`
+    async fn logs_v2(&self, filter: LogsV2Filter) -> RpcResult<LogsV2Result> {
+        trace!(target: "rpc::eth", "Serving eth_getLogsV2");
+        Ok(self.inner.clone().logs_v2(filter, self.inner.query_limits).await?)
+    }
 }
 
 impl<Eth> std::fmt::Debug for EthFilter<Eth>
@@ -504,7 +514,7 @@ where
                             }
                         }
                         None => ProviderError::HeaderNotFound(block_hash.into()).into(),
-                    })
+                    });
                 };
 
                 let header = if let Some(block) = &maybe_block {
@@ -528,7 +538,7 @@ where
                 }
 
                 if !filter.matches_bloom(header.logs_bloom()) {
-                    return Ok(Vec::new())
+                    return Ok(Vec::new());
                 }
 
                 let mut all_logs = Vec::new();
@@ -576,7 +586,7 @@ where
                                 &pending_block.receipts,
                                 false, // removed = false for pending blocks
                             )?;
-                            return Ok(all_logs)
+                            return Ok(all_logs);
                         }
                     }
                 }
@@ -625,6 +635,171 @@ where
         }
     }
 
+    /// Returns a page of logs matching the given `eth_getLogsV2` filter.
+    ///
+    /// Server limits end the page early instead of failing the request, the returned cursor
+    /// resumes the scan. The scan is checked to have run on a single chain: if the start or end of
+    /// the scanned range is reorged during the scan, the request fails and the client retries.
+    async fn logs_v2(
+        self: Arc<Self>,
+        request: LogsV2Filter,
+        limits: QueryLimits,
+    ) -> Result<LogsV2Result, EthFilterError> {
+        let LogsV2Filter { start, to_block, direction, filter, max_logs, fields } = request;
+
+        let info = self.provider().chain_info()?;
+        let finalized_block = match self.provider().finalized_block_number()? {
+            Some(number) => self.provider().sealed_header(number)?,
+            None => None,
+        };
+        let page = |logs, blocks, next_cursor| LogsV2Result {
+            logs,
+            blocks,
+            next_cursor,
+            finalized_block: finalized_block.as_ref().map(BlockRef::from),
+        };
+
+        let earliest_block = self.provider().earliest_block_number()?;
+        // Without a pending block to serve, `pending` resolves to the head like in `eth_getLogs`.
+        let resolve = |block: BlockNumberOrTag| match block {
+            BlockNumberOrTag::Pending => Ok(info.best_number),
+            block => self
+                .provider()
+                .convert_block_number(block)
+                .map(|number| number.unwrap_or(info.best_number)),
+        };
+        // A `toBlock` past the head ends the page at the head, like any other limit.
+        let to_block = match (to_block, direction) {
+            (Some(to_block), _) => resolve(to_block)?.min(info.best_number),
+            (None, Direction::Asc) => info.best_number,
+            (None, Direction::Desc) => earliest_block,
+        };
+        // Whether the scan has to go past `to_block` to reach `block`.
+        let beyond_to_block = |block: u64| match direction {
+            Direction::Asc => block > to_block,
+            Direction::Desc => block < to_block,
+        };
+
+        // The anchor is the block before the first log of the page, whose hash is checked again
+        // after the scan.
+        let (from_block, after_log_index, anchor) = match start {
+            LogsV2Start::After(cursor) => {
+                if self.provider().block_hash(cursor.block_number)? != Some(cursor.block_hash) {
+                    let canonical_block = self
+                        .provider()
+                        .sealed_header(cursor.block_number)?
+                        .as_ref()
+                        .map(BlockRef::from);
+                    return Err(EthFilterError::CursorNotCanonical { cursor, canonical_block });
+                }
+                // A client following the head polls with a cursor past `to_block`, a descending
+                // scan ends after genesis.
+                let from_block = match (cursor.log_index, direction) {
+                    (Some(_), _) => Some(cursor.block_number),
+                    (None, Direction::Asc) => cursor.block_number.checked_add(1),
+                    (None, Direction::Desc) => cursor.block_number.checked_sub(1),
+                };
+                let Some(from_block) = from_block.filter(|block| !beyond_to_block(*block)) else {
+                    return Ok(page(Vec::new(), Vec::new(), cursor));
+                };
+                (from_block, cursor.log_index, (cursor.block_number, cursor.block_hash))
+            }
+            LogsV2Start::FromBlock(from_block) => {
+                let from_block = resolve(from_block)?;
+                if beyond_to_block(from_block) {
+                    return Err(EthFilterError::InvalidBlockRangeParams);
+                }
+                let hash = self
+                    .provider()
+                    .block_hash(from_block)?
+                    .ok_or_else(|| ProviderError::HeaderNotFound(from_block.into()))?;
+                (from_block, None, (from_block, hash))
+            }
+        };
+
+        // The client's limits only narrow the server's. Each page holds at least one block and
+        // one log, so that paging always makes progress.
+        let max_span = limits.max_blocks_per_filter.unwrap_or(u64::MAX);
+        let end_block = match direction {
+            Direction::Asc => to_block.min(from_block.saturating_add(max_span)),
+            Direction::Desc => to_block.max(from_block.saturating_sub(max_span)),
+        };
+        let (low_block, high_block) = match direction {
+            Direction::Asc => (from_block, end_block),
+            Direction::Desc => (end_block, from_block),
+        };
+        if low_block < earliest_block {
+            return Err(EthApiError::PrunedHistoryUnavailable {
+                requested: low_block,
+                earliest_available: earliest_block,
+            }
+            .into());
+        }
+        let end_hash = self
+            .provider()
+            .block_hash(end_block)?
+            .ok_or_else(|| ProviderError::HeaderNotFound(end_block.into()))?;
+        let max_logs = max_logs
+            .map_or(usize::MAX, |max_logs| usize::try_from(max_logs).unwrap_or(usize::MAX))
+            .min(limits.max_logs_per_response.unwrap_or(usize::MAX))
+            .max(1);
+
+        let (logs, blocks, cut) = self
+            .clone()
+            .spawn_scan(move |this| async move {
+                let mut logs = Vec::new();
+                let mut blocks = Vec::new();
+                let mut cut = None;
+                this.scan_matching_blocks(
+                    &filter,
+                    low_block,
+                    high_block,
+                    direction,
+                    |header, receipts, provider_or_block| {
+                        let after_log_index =
+                            after_log_index.filter(|_| header.number() == from_block);
+                        if let Some(log_index) = append_matching_block_logs_v2(
+                            &mut logs,
+                            &mut blocks,
+                            &provider_or_block,
+                            &filter,
+                            fields.as_deref(),
+                            header,
+                            receipts,
+                            direction,
+                            after_log_index,
+                            max_logs,
+                        )? {
+                            cut = Some(LogCursor {
+                                block_number: header.number(),
+                                block_hash: header.hash(),
+                                log_index: Some(log_index),
+                            });
+                            return Ok(ControlFlow::Break(()));
+                        }
+                        Ok(ControlFlow::Continue(()))
+                    },
+                )
+                .await?;
+                Ok((logs, blocks, cut))
+            })
+            .await?;
+
+        // A reorg that touches the scanned range replaces its end block, or its start block too.
+        if self.provider().block_hash(anchor.0)? != Some(anchor.1) ||
+            self.provider().block_hash(end_block)? != Some(end_hash)
+        {
+            return Err(EthFilterError::ReorgDuringQuery);
+        }
+
+        let next_cursor = cut.unwrap_or(LogCursor {
+            block_number: end_block,
+            block_hash: end_hash,
+            log_index: None,
+        });
+        Ok(page(logs, blocks, next_cursor))
+    }
+
     /// Installs a new filter and returns the new identifier.
     async fn install_filter(
         &self,
@@ -665,15 +840,30 @@ where
 
         // perform boundary checks first
         if to_block < from_block {
-            return Err(EthFilterError::InvalidBlockRangeParams)
+            return Err(EthFilterError::InvalidBlockRangeParams);
         }
 
         if let Some(max_blocks_per_filter) =
             limits.max_blocks_per_filter.filter(|limit| to_block - from_block > *limit)
         {
-            return Err(EthFilterError::QueryExceedsMaxBlocks(max_blocks_per_filter))
+            return Err(EthFilterError::QueryExceedsMaxBlocks(max_blocks_per_filter));
         }
 
+        self.spawn_scan(move |this| async move {
+            this.get_logs_in_block_range_inner(&filter, from_block, to_block, limits).await
+        })
+        .await
+    }
+
+    /// Runs a log scan on a blocking task and returns its result.
+    ///
+    /// The scan is dropped at its next yield point once the caller stops waiting for it.
+    async fn spawn_scan<R, F, Fut>(self: Arc<Self>, scan: F) -> Result<R, EthFilterError>
+    where
+        R: Send + 'static,
+        F: FnOnce(Arc<Self>) -> Fut + Send + 'static,
+        Fut: Future<Output = Result<R, EthFilterError>> + Send,
+    {
         // The scan occupies a blocking thread until it completes, so it shares the budget for
         // blocking IO requests with `eth_call` and friends instead of pinning an unbounded number
         // of pool threads.
@@ -687,7 +877,7 @@ where
         let this = self.clone();
         self.task_spawner.spawn_blocking_task(async move {
             let _permit = permit;
-            let fut = this.get_logs_in_block_range_inner(&filter, from_block, to_block, limits);
+            let fut = scan(this);
             tokio::pin!(fut);
             let res = tokio::select! {
                 // Range scans perform blocking reads before their first yield.
@@ -705,12 +895,11 @@ where
 
     /// Returns all logs in the given _inclusive_ range that match the filter
     ///
-    /// Note: This function uses a mix of blocking db operations for fetching indices and header
-    /// ranges and utilizes the rpc cache for optimistically fetching receipts and blocks.
     /// This function is considered blocking and should thus be spawned on a blocking task.
     ///
     /// Returns an error if:
     ///  - underlying database error
+    ///  - amount of matches exceeds configured limit
     async fn get_logs_in_block_range_inner(
         self: Arc<Self>,
         filter: &Filter,
@@ -720,15 +909,103 @@ where
     ) -> Result<Vec<RpcLog<Eth::NetworkTypes>>, EthFilterError> {
         let mut all_logs = Vec::new();
 
+        // size check but only if range is multiple blocks, so we always return all
+        // logs of a single block
+        let is_multi_block_range = from_block != to_block;
+        self.clone()
+            .scan_matching_blocks(
+                filter,
+                from_block,
+                to_block,
+                Direction::Asc,
+                |header, receipts, provider_or_block| {
+                    append_matching_block_logs(
+                        &mut all_logs,
+                        self.eth_api.converter(),
+                        provider_or_block,
+                        filter,
+                        header,
+                        receipts,
+                        false,
+                    )?;
+
+                    if let Some(max_logs_per_response) = limits.max_logs_per_response &&
+                        is_multi_block_range &&
+                        all_logs.len() > max_logs_per_response
+                    {
+                        let block_number = header.number();
+                        let retry_to_block =
+                            if block_number == from_block { from_block } else { block_number - 1 };
+
+                        debug!(
+                            target: "rpc::eth::filter",
+                            logs_found = all_logs.len(),
+                            max_logs_per_response,
+                            from_block,
+                            to_block = retry_to_block,
+                            "Query exceeded max logs per response limit"
+                        );
+                        return Err(EthFilterError::QueryExceedsMaxResults {
+                            max_logs: max_logs_per_response,
+                            from_block,
+                            to_block: retry_to_block,
+                        });
+                    }
+                    Ok(ControlFlow::Continue(()))
+                },
+            )
+            .await?;
+
+        Ok(all_logs)
+    }
+
+    /// Scans the given _inclusive_ range in the given direction and calls `on_block` with the
+    /// header, receipts and transaction source of each block that matches the bloom filter.
+    ///
+    /// Returning [`ControlFlow::Break`] from `on_block` ends the scan, returning an error aborts
+    /// it.
+    ///
+    /// Note: This function uses a mix of blocking db operations for fetching indices and header
+    /// ranges and utilizes the rpc cache for optimistically fetching receipts and blocks.
+    /// This function is considered blocking and should thus be spawned on a blocking task.
+    async fn scan_matching_blocks<F>(
+        self: Arc<Self>,
+        filter: &Filter,
+        from_block: u64,
+        to_block: u64,
+        direction: Direction,
+        mut on_block: F,
+    ) -> Result<(), EthFilterError>
+    where
+        F: FnMut(
+                &SealedHeader<<Eth::Provider as HeaderProvider>::Header>,
+                &[ProviderReceipt<Eth::Provider>],
+                ProviderOrBlock<'_, Eth::Provider>,
+            ) -> Result<ControlFlow<()>, EthFilterError>
+            + Send,
+    {
         // get current chain tip to determine processing mode
         let chain_tip = self.provider().best_block_number()?;
 
         // Scan the range window by window so that receipts are fetched while headers are still
         // being read: the log limit can end the query after the first window, memory is bounded by
         // one window, and a cancelled query stops at the next window.
-        for (from, to) in
-            BlockRangeInclusiveIter::new(from_block..=to_block, self.max_headers_range)
-        {
+        //
+        // A descending scan reads each window in ascending order and replays it in reverse, so it
+        // holds the receipts of a whole window and keeps windows to the size of a parallel batch.
+        let windows = match direction {
+            Direction::Asc => Either::Left(BlockRangeInclusiveIter::new(
+                from_block..=to_block,
+                self.max_headers_range,
+            )),
+            Direction::Desc => Either::Right(
+                BlockRangeInclusiveIter::new(from_block..=to_block, MAX_PARALLEL_BATCH_SIZE as u64)
+                    .collect::<Vec<_>>()
+                    .into_iter()
+                    .rev(),
+            ),
+        };
+        for (from, to) in windows {
             // reading headers is blocking, this gives the cancellation check a chance to run
             tokio::task::yield_now().await;
 
@@ -740,7 +1017,7 @@ where
 
             while let Some(header) = headers_iter.next() {
                 if !filter.matches_bloom(header.logs_bloom()) {
-                    continue
+                    continue;
                 }
 
                 let current_number = header.number();
@@ -769,54 +1046,37 @@ where
                 chain_tip,
             );
 
+            let mut visit = |ReceiptBlockResult { receipts, recovered_block, header }| {
+                let provider_or_block = recovered_block
+                    .map(ProviderOrBlock::Block)
+                    .unwrap_or_else(|| ProviderOrBlock::Provider(self.provider()));
+                on_block(&header, &receipts, provider_or_block)
+            };
+
             // iterate through the range mode to get receipts and blocks
-            while let Some(ReceiptBlockResult { receipts, recovered_block, header }) =
-                range_mode.next().await?
-            {
-                let num_hash = header.num_hash();
-                append_matching_block_logs(
-                    &mut all_logs,
-                    self.eth_api.converter(),
-                    recovered_block
-                        .map(ProviderOrBlock::Block)
-                        .unwrap_or_else(|| ProviderOrBlock::Provider(self.provider())),
-                    filter,
-                    &header,
-                    &receipts,
-                    false,
-                )?;
-
-                // size check but only if range is multiple blocks, so we always return all
-                // logs of a single block
-                let is_multi_block_range = from_block != to_block;
-                if let Some(max_logs_per_response) = limits.max_logs_per_response &&
-                    is_multi_block_range &&
-                    all_logs.len() > max_logs_per_response
-                {
-                    let retry_to_block = if num_hash.number == from_block {
-                        from_block
-                    } else {
-                        num_hash.number - 1
-                    };
-
-                    debug!(
-                        target: "rpc::eth::filter",
-                        logs_found = all_logs.len(),
-                        max_logs_per_response,
-                        from_block,
-                        to_block = retry_to_block,
-                        "Query exceeded max logs per response limit"
-                    );
-                    return Err(EthFilterError::QueryExceedsMaxResults {
-                        max_logs: max_logs_per_response,
-                        from_block,
-                        to_block: retry_to_block,
-                    });
+            match direction {
+                Direction::Asc => {
+                    while let Some(result) = range_mode.next().await? {
+                        if visit(result)?.is_break() {
+                            return Ok(());
+                        }
+                    }
+                }
+                Direction::Desc => {
+                    let mut results = Vec::new();
+                    while let Some(result) = range_mode.next().await? {
+                        results.push(result);
+                    }
+                    for result in results.into_iter().rev() {
+                        if visit(result)?.is_break() {
+                            return Ok(());
+                        }
+                    }
                 }
             }
         }
 
-        Ok(all_logs)
+        Ok(())
     }
 }
 
@@ -992,7 +1252,7 @@ impl Iterator for BlockRangeInclusiveIter {
         let start = self.iter.next()?;
         let end = (start + self.step).min(self.end);
         if start > end {
-            return None
+            return None;
         }
         Some((start, end))
     }
@@ -1037,6 +1297,21 @@ pub enum EthFilterError {
     /// Error thrown when a spawned task failed to deliver a response.
     #[error("internal filter error")]
     InternalError,
+    /// The `eth_getLogsV2` cursor is not on the canonical chain.
+    #[error(
+        "cursor block {} at height {} not on canonical chain",
+        cursor.block_hash,
+        cursor.block_number
+    )]
+    CursorNotCanonical {
+        /// The cursor of the request.
+        cursor: LogCursor,
+        /// The canonical block at the cursor's height, `None` if the chain is shorter.
+        canonical_block: Option<BlockRef>,
+    },
+    /// The chain was reorged while `eth_getLogsV2` scanned it.
+    #[error("chain reorganized during query, retry")]
+    ReorgDuringQuery,
 }
 
 impl From<EthFilterError> for jsonrpsee::types::error::ErrorObject<'static> {
@@ -1051,6 +1326,17 @@ impl From<EthFilterError> for jsonrpsee::types::error::ErrorObject<'static> {
                 rpc_error_with_code(jsonrpsee::types::error::INTERNAL_ERROR_CODE, err.to_string())
             }
             EthFilterError::EthAPIError(err) => err.into(),
+            err @ EthFilterError::CursorNotCanonical { canonical_block, .. } => {
+                jsonrpsee::types::error::ErrorObject::owned(
+                    EthRpcErrorCode::ResourceNotFound.code(),
+                    err.to_string(),
+                    Some(serde_json::json!({ "canonicalBlock": canonical_block })),
+                )
+            }
+            err @ EthFilterError::ReorgDuringQuery => rpc_error_with_code(
+                jsonrpsee::types::error::CALL_EXECUTION_FAILED_CODE,
+                err.to_string(),
+            ),
             err @ EthFilterError::ReceiptsUnavailable(_) => {
                 rpc_error_with_code(EthRpcErrorCode::PrunedHistory.code(), err.to_string())
             }
@@ -1200,7 +1486,7 @@ impl<
         let Some((receipts, maybe_block)) =
             self.filter_inner.eth_cache().get_receipts_and_maybe_block(header.hash()).await?
         else {
-            return Err(EthFilterError::ReceiptsUnavailable(header.number()))
+            return Err(EthFilterError::ReceiptsUnavailable(header.number()));
         };
 
         Ok(Some(ReceiptBlockResult { receipts, recovered_block: maybe_block, header }))
@@ -2309,5 +2595,314 @@ mod tests {
             .await
             .unwrap();
         assert!(logs.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_logs_v2() {
+        use alloy_consensus::TxLegacy;
+        use alloy_primitives::{Address, Bytes, Log, LogData, Signature, B256};
+        use reth_db_api::models::StoredBlockBodyIndices;
+        use reth_ethereum_primitives::{Block, BlockBody, Receipt, TransactionSigned};
+        use reth_rpc_eth_types::logs_v2::{LogBlock, LogField, LogV2};
+
+        let provider = MockEthProvider::default();
+        let tx = TransactionSigned::new_unhashed(
+            TxLegacy {
+                chain_id: Some(1),
+                gas_price: 21_000,
+                gas_limit: 21_000,
+                ..Default::default()
+            }
+            .into(),
+            Signature::test_signature(),
+        );
+        let log = |address| Log {
+            address,
+            data: LogData::new_unchecked(vec![B256::repeat_byte(1)], Bytes::from_static(&[2])),
+        };
+
+        // block 1_200 has three logs, of which the second has another address, the others have
+        // one log each, and the blocks span three header windows
+        let matching_blocks = [5u64, 1_200, 1_201, 2_400];
+        let mut hashes = Vec::new();
+        let mut parent_hash = FixedBytes::default();
+        for number in 0..=2_500u64 {
+            let tx_num = matching_blocks.iter().position(|b| *b == number);
+            let header = alloy_consensus::Header {
+                number,
+                parent_hash,
+                logs_bloom: if tx_num.is_some() {
+                    Bloom::repeat_byte(0xff)
+                } else {
+                    Bloom::default()
+                },
+                ..Default::default()
+            };
+            parent_hash = header.hash_slow();
+            hashes.push(parent_hash);
+            let transactions = if tx_num.is_some() { vec![tx.clone()] } else { Vec::new() };
+            provider.add_block(
+                parent_hash,
+                Block { header, body: BlockBody { transactions, ..Default::default() } },
+            );
+            if let Some(tx_num) = tx_num {
+                let logs = if number == 1_200 {
+                    vec![log(Address::ZERO), log(Address::repeat_byte(1)), log(Address::ZERO)]
+                } else {
+                    vec![log(Address::ZERO)]
+                };
+                provider.add_receipts(
+                    number,
+                    vec![Receipt {
+                        tx_type: TxType::Legacy,
+                        cumulative_gas_used: 21_000,
+                        logs,
+                        success: true,
+                    }],
+                );
+                provider.add_block_body_indices(
+                    number,
+                    StoredBlockBodyIndices { first_tx_num: tx_num as u64, tx_count: 1 },
+                );
+            } else {
+                provider.add_receipts(number, vec![]);
+            }
+        }
+
+        let eth_filter = EthFilter::new(
+            build_test_eth_api(provider),
+            EthFilterConfig::default(),
+            Runtime::test(),
+        );
+        let logs_v2 = |request, limits| eth_filter.inner.clone().logs_v2(request, limits);
+        let request = |start, max_logs| LogsV2Filter {
+            start,
+            to_block: None,
+            direction: Direction::Asc,
+            filter: Filter::default(),
+            max_logs,
+            fields: None,
+        };
+        let from_genesis = LogsV2Start::FromBlock(BlockNumberOrTag::Earliest);
+        // Also checks that the page lists the blocks of its logs, once each and in order.
+        let positions = |result: &LogsV2Result| {
+            let mut block_numbers =
+                result.logs.iter().map(|log| log.block_number).collect::<Vec<_>>();
+            block_numbers.dedup();
+            assert_eq!(
+                result.blocks.iter().map(|block| (block.number, block.hash)).collect::<Vec<_>>(),
+                block_numbers
+                    .into_iter()
+                    .map(|number| (number, hashes[number as usize]))
+                    .collect::<Vec<_>>()
+            );
+            result.logs.iter().map(|log| (log.block_number, log.log_index)).collect::<Vec<_>>()
+        };
+        let cursor = |block_number: u64, log_index| LogCursor {
+            block_number,
+            block_hash: hashes[block_number as usize],
+            log_index,
+        };
+        let block_ref = |number: u64| BlockRef {
+            number,
+            hash: hashes[number as usize],
+            parent_hash: hashes[number as usize - 1],
+        };
+
+        // without limits the whole range up to the head is a single page
+        let result = logs_v2(request(from_genesis, None), QueryLimits::default()).await.unwrap();
+        assert_eq!(
+            positions(&result),
+            [(5, 0), (1_200, 0), (1_200, 1), (1_200, 2), (1_201, 0), (2_400, 0)]
+        );
+        assert_eq!(result.next_cursor, cursor(2_500, None));
+        assert_eq!(result.finalized_block, None);
+        assert_eq!(
+            result.logs[0],
+            LogV2 {
+                block_number: 5,
+                log_index: 0,
+                address: Some(Address::ZERO),
+                topics: Some(vec![B256::repeat_byte(1)]),
+                data: Some(Bytes::from_static(&[2])),
+                transaction_hash: Some(*tx.tx_hash()),
+                transaction_index: Some(0),
+            }
+        );
+        assert_eq!(result.blocks[0], LogBlock { number: 5, hash: hashes[5], timestamp: Some(0) });
+
+        // pages end inside a block and resume after their last log, and polling at the head
+        // returns the same cursor
+        let mut start = from_genesis;
+        for (expected_positions, expected_cursor) in [
+            (vec![(5, 0), (1_200, 0)], cursor(1_200, Some(0))),
+            (vec![(1_200, 1), (1_200, 2)], cursor(1_200, Some(2))),
+            (vec![(1_201, 0), (2_400, 0)], cursor(2_400, Some(0))),
+            (vec![], cursor(2_500, None)),
+            (vec![], cursor(2_500, None)),
+        ] {
+            let result = logs_v2(request(start, Some(2)), QueryLimits::default()).await.unwrap();
+            assert_eq!(positions(&result), expected_positions);
+            assert_eq!(result.next_cursor, expected_cursor);
+            start = LogsV2Start::After(result.next_cursor);
+        }
+
+        // descending pages run from the head to the earliest block, newest log first, and polling
+        // after the earliest block returns the same cursor
+        let mut start = LogsV2Start::FromBlock(BlockNumberOrTag::Latest);
+        for (expected_positions, expected_cursor) in [
+            (vec![(2_400, 0), (1_201, 0)], cursor(1_201, Some(0))),
+            (vec![(1_200, 2), (1_200, 1)], cursor(1_200, Some(1))),
+            (vec![(1_200, 0), (5, 0)], cursor(5, Some(0))),
+            (vec![], cursor(0, None)),
+            (vec![], cursor(0, None)),
+        ] {
+            let result = logs_v2(
+                LogsV2Filter { direction: Direction::Desc, ..request(start, Some(2)) },
+                QueryLimits::default(),
+            )
+            .await
+            .unwrap();
+            assert_eq!(positions(&result), expected_positions);
+            assert_eq!(result.next_cursor, expected_cursor);
+            start = LogsV2Start::After(result.next_cursor);
+        }
+
+        // a descending block limit ends the page below the start
+        let result = logs_v2(
+            LogsV2Filter {
+                direction: Direction::Desc,
+                ..request(LogsV2Start::FromBlock(BlockNumberOrTag::Latest), None)
+            },
+            QueryLimits { max_blocks_per_filter: Some(999), max_logs_per_response: None },
+        )
+        .await
+        .unwrap();
+        assert_eq!(positions(&result), [(2_400, 0)]);
+        assert_eq!(result.next_cursor, cursor(1_501, None));
+
+        // log indexes count the logs that don't match the filter
+        let result = logs_v2(
+            LogsV2Filter {
+                to_block: Some(BlockNumberOrTag::Number(1_200)),
+                filter: Filter::new().address(Address::ZERO),
+                ..request(LogsV2Start::After(cursor(5, None)), None)
+            },
+            QueryLimits::default(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(positions(&result), [(1_200, 0), (1_200, 2)]);
+        assert_eq!(result.next_cursor, cursor(1_200, None));
+
+        // only the selected fields are set
+        let result = logs_v2(
+            LogsV2Filter {
+                fields: Some(vec![LogField::TransactionHash]),
+                ..request(from_genesis, Some(1))
+            },
+            QueryLimits::default(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            result.logs,
+            [LogV2 {
+                block_number: 5,
+                log_index: 0,
+                address: None,
+                topics: None,
+                data: None,
+                transaction_hash: Some(*tx.tx_hash()),
+                transaction_index: None,
+            }]
+        );
+        assert_eq!(result.blocks, [LogBlock { number: 5, hash: hashes[5], timestamp: None }]);
+
+        // the stricter of the client's and the server's limits ends the page
+        for (max_logs, limits, expected_positions, expected_cursor) in [
+            (
+                None,
+                QueryLimits { max_blocks_per_filter: Some(1_000), max_logs_per_response: None },
+                vec![(5, 0)],
+                cursor(1_000, None),
+            ),
+            (
+                Some(10),
+                QueryLimits { max_blocks_per_filter: None, max_logs_per_response: Some(1) },
+                vec![(5, 0)],
+                cursor(5, Some(0)),
+            ),
+            (Some(0), QueryLimits::default(), vec![(5, 0)], cursor(5, Some(0))),
+        ] {
+            let result = logs_v2(request(from_genesis, max_logs), limits).await.unwrap();
+            assert_eq!(positions(&result), expected_positions);
+            assert_eq!(result.next_cursor, expected_cursor);
+        }
+
+        let err = logs_v2(
+            LogsV2Filter {
+                to_block: Some(BlockNumberOrTag::Number(4)),
+                ..request(LogsV2Start::FromBlock(BlockNumberOrTag::Number(5)), None)
+            },
+            QueryLimits::default(),
+        )
+        .await
+        .unwrap_err();
+        assert!(matches!(err, EthFilterError::InvalidBlockRangeParams), "{err:?}");
+
+        let err = logs_v2(
+            LogsV2Filter {
+                to_block: Some(BlockNumberOrTag::Number(5)),
+                direction: Direction::Desc,
+                ..request(LogsV2Start::FromBlock(BlockNumberOrTag::Number(4)), None)
+            },
+            QueryLimits::default(),
+        )
+        .await
+        .unwrap_err();
+        assert!(matches!(err, EthFilterError::InvalidBlockRangeParams), "{err:?}");
+
+        // a `toBlock` past the head ends the page at the head
+        let result = logs_v2(
+            LogsV2Filter {
+                to_block: Some(BlockNumberOrTag::Number(2_501)),
+                ..request(LogsV2Start::After(cursor(2_400, None)), None)
+            },
+            QueryLimits::default(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(positions(&result), []);
+        assert_eq!(result.next_cursor, cursor(2_500, None));
+
+        // a reorged cursor is rejected with the canonical block at its height, if any
+        let reorged = LogCursor { block_hash: B256::repeat_byte(0xab), ..cursor(1_200, Some(0)) };
+        let err = logs_v2(request(LogsV2Start::After(reorged), None), QueryLimits::default())
+            .await
+            .unwrap_err();
+        let err = jsonrpsee::types::error::ErrorObject::from(err);
+        assert_eq!(err.code(), -32001);
+        assert_eq!(
+            err.message(),
+            "cursor block 0xabababababababababababababababababababababababababababababababab at height 1200 not on canonical chain"
+        );
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(err.data().unwrap().get()).unwrap(),
+            serde_json::json!({ "canonicalBlock": block_ref(1_200) })
+        );
+
+        let beyond_head = LogCursor { block_number: 3_000, ..reorged };
+        let err = logs_v2(request(LogsV2Start::After(beyond_head), None), QueryLimits::default())
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(
+                err,
+                EthFilterError::CursorNotCanonical { cursor, canonical_block: None }
+                    if cursor == beyond_head
+            ),
+            "{err:?}"
+        );
     }
 }
