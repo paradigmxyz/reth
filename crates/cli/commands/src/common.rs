@@ -103,6 +103,18 @@ impl<C: ChainSpecParser> EnvironmentArgs<C> {
     where
         C: ChainSpecParser<ChainSpec = N::ChainSpec>,
     {
+        // Raise the fd limit of the process before opening RocksDB, which sizes its open file
+        // budget from the current limit. Read-only opens keep all table files open, so they fail
+        // on large databases under the default soft limit.
+        // Does not do anything on windows.
+        match fdlimit::raise_fd_limit() {
+            Ok(fdlimit::Outcome::LimitRaised { from, to }) => {
+                debug!(target: "reth::cli", from, to, "Raised file descriptor limit");
+            }
+            Ok(fdlimit::Outcome::Unsupported) => {}
+            Err(err) => warn!(target: "reth::cli", %err, "Failed to raise file descriptor limit"),
+        }
+
         let data_dir = self.datadir.clone().resolve_datadir(self.chain.chain());
         let db_path = data_dir.db();
         let sf_path = data_dir.static_files();
