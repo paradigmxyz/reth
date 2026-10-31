@@ -564,27 +564,25 @@ pub enum EthSimBundleError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_primitives::Bytes;
-    use alloy_rpc_types_mev::{Inclusion, ProtocolVersion};
+    use crate::EthApiBuilder;
+    use alloy_consensus::{transaction::SignerRecoverable, TxEip1559};
+    use alloy_eips::eip2718::Encodable2718;
+    use alloy_genesis::{Genesis, GenesisAccount};
+    use alloy_primitives::{Address, Bytes, TxKind, B256};
+    use alloy_rpc_types_eth::BlockOverrides;
+    use alloy_rpc_types_mev::{Inclusion, ProtocolVersion, Refund};
+    use reth_chainspec::{ChainSpecBuilder, ChainSpecProvider};
+    use reth_db_common::init::init_genesis;
+    use reth_evm_ethereum::EthEvmConfig;
+    use reth_network_api::noop::NoopNetwork;
+    use reth_provider::{
+        providers::BlockchainProvider, test_utils::create_test_provider_factory_with_chain_spec,
+    };
+    use reth_testing_utils::generators::{self, generate_key, sign_tx_with_key_pair};
+    use reth_transaction_pool::test_utils::testing_pool;
 
     #[tokio::test(flavor = "multi_thread")]
     async fn sim_bundle_uses_next_block_env_and_overrides() {
-        use crate::EthApiBuilder;
-        use alloy_consensus::{transaction::SignerRecoverable, TxEip1559};
-        use alloy_eips::eip2718::Encodable2718;
-        use alloy_genesis::{Genesis, GenesisAccount};
-        use alloy_primitives::{Address, TxKind, B256};
-        use alloy_rpc_types_eth::BlockOverrides;
-        use reth_chainspec::{ChainSpecBuilder, ChainSpecProvider};
-        use reth_db_common::init::init_genesis;
-        use reth_evm_ethereum::EthEvmConfig;
-        use reth_network_api::noop::NoopNetwork;
-        use reth_provider::{
-            providers::BlockchainProvider, test_utils::create_test_provider_factory_with_chain_spec,
-        };
-        use reth_testing_utils::generators::{self, generate_key, sign_tx_with_key_pair};
-        use reth_transaction_pool::test_utils::testing_pool;
-
         let contract = Address::repeat_byte(0xaa);
         let coinbase = Address::repeat_byte(0x11);
         let overridden_coinbase = Address::repeat_byte(0x22);
@@ -702,22 +700,6 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn sim_bundle_reports_refundable_value_before_payouts() {
-        use crate::EthApiBuilder;
-        use alloy_consensus::{transaction::SignerRecoverable, TxEip1559};
-        use alloy_eips::eip2718::Encodable2718;
-        use alloy_genesis::{Genesis, GenesisAccount};
-        use alloy_primitives::{Address, TxKind};
-        use alloy_rpc_types_mev::Refund;
-        use reth_chainspec::{ChainSpecBuilder, ChainSpecProvider};
-        use reth_db_common::init::init_genesis;
-        use reth_evm_ethereum::EthEvmConfig;
-        use reth_network_api::noop::NoopNetwork;
-        use reth_provider::{
-            providers::BlockchainProvider, test_utils::create_test_provider_factory_with_chain_spec,
-        };
-        use reth_testing_utils::generators::{self, generate_key, sign_tx_with_key_pair};
-        use reth_transaction_pool::test_utils::testing_pool;
-
         let mut rng = generators::rng();
         let mut transfer = |tip: u128| {
             sign_tx_with_key_pair(
@@ -733,7 +715,7 @@ mod tests {
                 }),
             )
         };
-        // the user transaction asks for a refund of half the value created by the backrun
+        // The user transaction asks for a refund of half the value created by the backrun.
         let user_tx = transfer(1_000_000_000);
         let backrun = transfer(100_000_000_000);
 
@@ -777,10 +759,10 @@ mod tests {
         };
         let response = api.sim_bundle(bundle, SimBundleOverrides::default()).await.unwrap();
 
-        // the next block's base fee is 0.875 gwei
+        // The next block's base fee is 0.875 gwei.
         let user_value = U256::from(21_000u64 * 1_000_000_000);
         let backrun_value = U256::from(21_000u64 * 100_000_000_000);
-        // only the backrun is refundable, and the value is reported before the refund is paid
+        // Only the backrun is refundable, and the value is reported before the refund is paid.
         assert_eq!(response.refundable_value, backrun_value);
         assert_eq!(response.profit, user_value + backrun_value - backrun_value / U256::from(2));
     }
