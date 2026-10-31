@@ -50,8 +50,8 @@ pub trait PayloadJob: Future<Output = Result<(), PayloadBuilderError>> {
     ///
     /// This is invoked on [`engine_getPayloadV2`](https://github.com/ethereum/execution-apis/blob/main/src/engine/shanghai.md#engine_getpayloadv2) and [`engine_getPayloadV1`](https://github.com/ethereum/execution-apis/blob/main/src/engine/paris.md#engine_getpayloadv1).
     ///
-    /// The timeout for returning the payload to the CL is 1s, thus the future returned should
-    /// resolve in under 1 second.
+    /// `engine_getPayload` must be answered immediately, thus the future returned must not wait for
+    /// an in-progress build to complete.
     ///
     /// Ideally this is the best payload built so far, or an empty block without transactions, if
     /// nothing has been built yet.
