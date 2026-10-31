@@ -435,7 +435,7 @@ pub struct NetworkArgs {
     /// Only peers with IP addresses within these ranges will be allowed to connect.
     ///
     /// Example: --netrestrict "192.168.0.0/16,10.0.0.0/8"
-    #[arg(long, value_name = "NETRESTRICT")]
+    #[arg(long, value_name = "NETRESTRICT", value_parser = |s: &str| IpFilter::from_cidr_string(s).map(|_| s.to_string()))]
     pub netrestrict: Option<String>,
 
     /// Enforce EIP-868 ENR fork ID validation for discovered peers.
@@ -1593,11 +1593,13 @@ mod tests {
 
     #[test]
     fn netrestrict_invalid_cidr() {
-        let args =
-            CommandParser::<NetworkArgs>::parse_from(["reth", "--netrestrict", "invalid-cidr"])
-                .args;
-
-        assert!(args.ip_filter().is_err());
+        for value in ["invalid-cidr", "10.0.0.1", "192.168.0.0/16,10.0.0.0/33"] {
+            assert!(
+                CommandParser::<NetworkArgs>::try_parse_from(["reth", "--netrestrict", value])
+                    .is_err(),
+                "accepted --netrestrict {value}"
+            );
+        }
     }
 
     #[test]
