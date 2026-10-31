@@ -355,7 +355,9 @@ where
                     }
 
                     let tx_env = eth_api.evm_config().tx_env(item.tx.clone());
-                    let result = evm.transact_commit(&tx_env).map_err(Eth::Error::from_evm_err)?;
+                    let result = evm
+                        .transact_commit(&tx_env)
+                        .map_err(|err| Eth::Error::from_evm_err_at(tx_index, err))?;
 
                     if !result.status && !item.can_revert {
                         return Err(EthApiError::InvalidParams(

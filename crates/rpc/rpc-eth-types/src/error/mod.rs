@@ -6,7 +6,7 @@ use alloy_primitives::{Address, Bytes, B256, U256};
 use alloy_rpc_types_eth::{error::EthRpcErrorCode, request::TransactionInputError, BlockError};
 use alloy_sol_types::RevertReason;
 use alloy_transport::{RpcError, TransportErrorKind};
-pub use api::{AsEthApiError, FromEthApiError, FromEvmError, IntoEthApiError};
+pub use api::{AsEthApiError, FromEthApiError, FromEvmError, Indexed, IntoEthApiError};
 use core::time::Duration;
 use evm2::{interpreter::InstrStop, registry::HandlerError};
 use evm2_inspectors::tracing::{DebugInspectorError, MuxError};
@@ -554,6 +554,12 @@ impl From<BlockExecutionError> for EthApiError {
                 Self::Internal(RethError::Execution(BlockExecutionError::Internal(internal_error)))
             }
         }
+    }
+}
+
+impl From<Indexed<BlockExecutionError>> for EthApiError {
+    fn from(indexed: Indexed<BlockExecutionError>) -> Self {
+        Self::EvmCustom(indexed.to_string())
     }
 }
 

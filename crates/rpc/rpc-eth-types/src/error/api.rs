@@ -117,6 +117,11 @@ pub trait FromEvmError<Evm: ConfigureEvm>:
         Self::from(err)
     }
 
+    /// Converts an execution error occurring at a specific transaction index.
+    fn from_evm_err_at(index: usize, err: BlockExecutionError) -> Self {
+        Self::from_eth_err(Indexed { index, error: err })
+    }
+
     /// Ensures the execution result is successful or returns an error.
     fn ensure_success<EvmTypes: evm2::EvmTypes>(result: TxResult<EvmTypes>) -> Result<Bytes, Self> {
         // evm2 also classifies failed call prechecks as reverts for gas-return purposes.
@@ -161,5 +166,46 @@ pub trait FromRevert {
 impl FromRevert for EthApiError {
     fn from_revert(output: Bytes) -> Self {
         RpcInvalidTransactionError::Revert(RevertError::new(output)).into()
+    }
+}
+
+/// Helper wrapper to contextualize EVM execution errors with transaction index.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Indexed<E> {
+    /// The transaction index where the error occurred.
+    pub index: usize,
+    /// The inner error.
+    pub error: E,
+}
+
+impl<E: core::fmt::Display> core::fmt::Display for Indexed<E> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        write!(f, "transaction execution failed (index {}): {}", self.index, self.error)
+    }
+}
+
+impl<E: core::error::Error + 'static> core::error::Error for Indexed<E> {
+    fn source(&self) -> Option<&(dyn core::error::Error + 'static)> {
+        Some(&self.error)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_indexed_evm_error_display() {
+        let err = Indexed { index: 0, error: "out of gas: gas exhausted: 50000000" };
+        assert_eq!(
+            err.to_string(),
+            "transaction execution failed (index 0): out of gas: gas exhausted: 50000000"
+        );
+
+        let err2 = Indexed { index: 4, error: "execution reverted" };
+        assert_eq!(
+            err2.to_string(),
+            "transaction execution failed (index 4): execution reverted"
+        );
     }
 }
