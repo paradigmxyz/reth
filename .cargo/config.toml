@@ -14,3 +14,7 @@ rustflags = [
     # in line with Linux (whereas default for Windows is 1MB)
     "-Clink-arg=/STACK:10000000",
 ]
+
+# Keep C allocations on mimalloc in the allocator experiment.
+[env]
+CFLAGS = { value = "-DMI_MALLOC_OVERRIDE=1", force = true }

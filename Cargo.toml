@@ -667,6 +667,8 @@ walkdir = "2.3.3"
 # networking
 ipnet = "2.11"
 
+commonware-allocator = { git = "https://github.com/commonwarexyz/monorepo", rev = "15aa24343a190a42bcc823e3f60ad354966e64d7" }
+
 # evm2 is patched through its pre-transfer URL, which redirects to alloy-rs/evm2, because Cargo
 # rejects a patch from the same source.
 [patch."https://github.com/alloy-rs/evm2"]
