@@ -42,6 +42,16 @@ use tokio_stream::wrappers::ReceiverStream;
 use tokio_util::task::AbortOnDropHandle;
 use tower::layer::{util::Stack, LayerFn};
 
+#[cfg(unix)]
+fn parse_ipc_socket_permissions(s: &str) -> Option<u32> {
+    let digits = s.strip_prefix("0o").unwrap_or(s);
+    if digits.is_empty() || !digits.bytes().all(|b| (b'0'..=b'7').contains(&b)) {
+        return None;
+    }
+    let mode = u32::from_str_radix(digits, 8).ok()?;
+    (mode <= 0o7777).then_some(mode)
+}
+
 mod connection;
 mod ipc;
 mod rpc_service;
@@ -149,10 +159,12 @@ where
                     // set permissions only on unix
                     use std::os::unix::fs::PermissionsExt;
                     if let Some(perms_str) = &self.cfg.ipc_socket_permissions &&
-                        let Ok(mode) = u32::from_str_radix(&perms_str.replace("0o", ""), 8)
+                        let Some(mode) = parse_ipc_socket_permissions(perms_str)
                     {
                         let perms = std::fs::Permissions::from_mode(mode);
-                        let _ = std::fs::set_permissions(&self.endpoint, perms);
+                        if let Err(err) = std::fs::set_permissions(&self.endpoint, perms) {
+                            tracing::error!(%err, endpoint = ?self.endpoint, "failed to set IPC socket permissions");
+                        }
                     }
                 }
                 listener
@@ -802,7 +814,8 @@ mod tests {
     async fn test_ipc_socket_permissions() {
         use std::os::unix::fs::PermissionsExt;
         let endpoint = &dummy_name();
-        let perms = "0777";
+        // Use a mode that differs from the default so we verify the permissions are applied.
+        let perms = "0600";
         let server = Builder::default()
             .set_ipc_socket_permissions(Some(perms.to_string()))
             .build(endpoint.clone());
@@ -812,7 +825,21 @@ mod tests {
 
         let meta = std::fs::metadata(endpoint).unwrap();
         let perms = meta.permissions();
-        assert_eq!(perms.mode() & 0o777, 0o777);
+        assert_eq!(perms.mode() & 0o777, 0o600);
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn test_parse_ipc_socket_permissions() {
+        assert_eq!(parse_ipc_socket_permissions("0600"), Some(0o600));
+        assert_eq!(parse_ipc_socket_permissions("0o600"), Some(0o600));
+        assert_eq!(parse_ipc_socket_permissions("7777"), Some(0o7777));
+
+        assert_eq!(parse_ipc_socket_permissions(""), None);
+        assert_eq!(parse_ipc_socket_permissions("0o9zz"), None);
+        assert_eq!(parse_ipc_socket_permissions("+600"), None);
+        assert_eq!(parse_ipc_socket_permissions("60o0"), None);
+        assert_eq!(parse_ipc_socket_permissions("77777"), None);
     }
 
     async fn pipe_from_stream_with_bounded_buffer(

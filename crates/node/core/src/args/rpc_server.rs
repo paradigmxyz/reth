@@ -532,7 +532,7 @@ pub struct RpcServerArgs {
     /// Set the permissions for the IPC socket file, in octal format.
     ///
     /// If not specified, the permissions will be set by the system's umask.
-    #[arg(long = "ipc.permissions", default_value = Resettable::from(DefaultRpcServerArgs::get_global().ipc_socket_permissions.as_ref().map(|v| v.to_string().into())))]
+    #[arg(long = "ipc.permissions", value_parser = parse_octal_permissions, default_value = Resettable::from(DefaultRpcServerArgs::get_global().ipc_socket_permissions.as_ref().map(|v| v.to_string().into())))]
     pub ipc_socket_permissions: Option<String>,
 
     /// Auth server address to listen on
@@ -1116,6 +1116,17 @@ where
     }
 }
 
+fn parse_octal_permissions(s: &str) -> Result<String, String> {
+    let digits = s.strip_prefix("0o").unwrap_or(s);
+    if digits.is_empty() || !digits.bytes().all(|b| (b'0'..=b'7').contains(&b)) {
+        return Err(format!("invalid octal permission `{s}`"));
+    }
+    match u32::from_str_radix(digits, 8) {
+        Ok(mode) if mode <= 0o7777 => Ok(s.to_string()),
+        _ => Err(format!("invalid octal permission `{s}`")),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1216,6 +1227,25 @@ mod tests {
         let result =
             CommandParser::<RpcServerArgs>::try_parse_from(["reth", "--http.compression", "gizp"]);
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_ipc_permissions_parse() {
+        for valid in ["0600", "0o600"] {
+            let args =
+                CommandParser::<RpcServerArgs>::parse_from(["reth", "--ipc.permissions", valid])
+                    .args;
+            assert_eq!(args.ipc_socket_permissions.as_deref(), Some(valid));
+        }
+
+        for invalid in ["0o9zz", "+600", "60o0", "77777"] {
+            let result = CommandParser::<RpcServerArgs>::try_parse_from([
+                "reth",
+                "--ipc.permissions",
+                invalid,
+            ]);
+            assert!(result.is_err(), "invalid permission `{invalid}` should be rejected");
+        }
     }
 
     #[test]
