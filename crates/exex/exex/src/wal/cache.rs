@@ -43,13 +43,18 @@ impl BlockCache {
     }
 
     /// Removes all files from the cache that has notifications with a tip block less than or equal
-    /// to the given block number.
+    /// to the given block number, except files with IDs of at least `retain_from`, if any.
     ///
     /// # Returns
     ///
     /// A set of file IDs that were removed.
-    pub(super) fn remove_before(&mut self, block_number: BlockNumber) -> HashSet<u32> {
+    pub(super) fn remove_before(
+        &mut self,
+        block_number: BlockNumber,
+        retain_from: Option<u32>,
+    ) -> HashSet<u32> {
         let mut file_ids = HashSet::default();
+        let mut retained = Vec::new();
 
         while let Some(block @ Reverse((max_block, file_id))) =
             self.notification_max_blocks.peek().copied()
@@ -57,11 +62,16 @@ impl BlockCache {
             if max_block <= block_number {
                 let popped_block = self.notification_max_blocks.pop().unwrap();
                 debug_assert_eq!(popped_block, block);
-                file_ids.insert(file_id);
+                if retain_from.is_some_and(|retain_from| file_id >= retain_from) {
+                    retained.push(block);
+                } else {
+                    file_ids.insert(file_id);
+                }
             } else {
                 break
             }
         }
+        self.notification_max_blocks.extend(retained);
 
         let (mut lowest_committed_block_height, mut highest_committed_block_height) = (None, None);
         self.committed_blocks.retain(|_, (file_id, block)| {
