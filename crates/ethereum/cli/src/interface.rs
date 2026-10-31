@@ -49,6 +49,21 @@ pub struct Cli<
     #[command(flatten)]
     pub traces: TraceArgs,
 
+    /// Maximum time to wait for graceful shutdown of spawned tasks after the
+    /// command exits (for example on SIGTERM).
+    ///
+    /// The default is 5 seconds. On mainnet, engine Head persistence can take
+    /// longer than that; operators with a larger process grace period (for
+    /// example Kubernetes `terminationGracePeriodSeconds`) should raise this
+    /// so the save can finish before the process is killed.
+    #[arg(
+        long = "graceful-shutdown-timeout",
+        value_name = "SECONDS",
+        default_value_t = 5,
+        global = true
+    )]
+    pub graceful_shutdown_timeout_secs: u64,
+
     /// Type marker for the RPC module validator
     #[arg(skip)]
     pub _phantom: PhantomData<Rpc>,
@@ -620,6 +635,21 @@ mod tests {
             "Error should mention the module name: {}",
             err_msg
         );
+    }
+
+    #[test]
+    fn parse_graceful_shutdown_timeout() {
+        let cli = Cli::try_parse_args_from([
+            "reth",
+            "config",
+            "--graceful-shutdown-timeout",
+            "600",
+        ])
+        .unwrap();
+        assert_eq!(cli.graceful_shutdown_timeout_secs, 600);
+
+        let cli = Cli::try_parse_args_from(["reth", "config"]).unwrap();
+        assert_eq!(cli.graceful_shutdown_timeout_secs, 5);
     }
 
     #[test]

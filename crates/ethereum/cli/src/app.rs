@@ -10,7 +10,8 @@ use reth_cli_commands::{
     common::{CliComponentsBuilder, CliNodeTypes, HeaderMut},
     launcher::{FnLauncher, Launcher},
 };
-use reth_cli_runner::CliRunner;
+use reth_cli_runner::{CliRunner, CliRunnerConfig};
+use std::time::Duration;
 use reth_db::DatabaseEnv;
 use reth_node_api::NodePrimitives;
 use reth_node_builder::{NodeBuilder, WithLaunchContext};
@@ -103,8 +104,12 @@ where
         N: CliNodeTypes<Primitives: NodePrimitives<BlockHeader: HeaderMut>, ChainSpec: Hardforks>,
         C: ChainSpecParser<ChainSpec = N::ChainSpec>,
     {
+        let graceful_shutdown_timeout =
+            Duration::from_secs(self.cli.graceful_shutdown_timeout_secs);
+        let runner_config =
+            CliRunnerConfig::new().with_graceful_shutdown_timeout(graceful_shutdown_timeout);
         let runner = match self.runner.take() {
-            Some(runner) => runner,
+            Some(runner) => runner.with_config(runner_config),
             None => {
                 let runtime_config = match &self.cli.command {
                     Commands::Node(command) => {
@@ -123,7 +128,7 @@ where
                     }
                     _ => reth_tasks::RuntimeConfig::default(),
                 };
-                CliRunner::try_with_runtime_config(runtime_config)?
+                CliRunner::try_with_runtime_config(runtime_config)?.with_config(runner_config)
             }
         };
 
