@@ -54,8 +54,8 @@ mod protocol;
 /// `provider`.
 ///
 /// The peers advertise `eth/71` plus `snap/2`: a session only negotiates the dedicated
-/// snap-carrying connection variant for exactly this pair; anything else falls back to a satellite
-/// connection that can't serve `GetSnap`.
+/// snap-carrying connection variant for exactly this pair. Additional `RLPx` protocols cannot be
+/// registered while snap/2 is enabled.
 async fn spawn_snap_testnet<C>(provider: C) -> TestnetHandle<C, TestPool>
 where
     C: TestnetProvider + ChainSpecProvider<ChainSpec: Hardforks> + Clone,

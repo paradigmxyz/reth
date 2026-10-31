@@ -60,7 +60,12 @@ pub trait RethNetworkConfig {
     /// the `eth` protocol.
     ///
     /// See also [`ProtocolHandler`](reth_network::protocol::ProtocolHandler)
-    fn add_rlpx_sub_protocol(&mut self, protocol: impl IntoRlpxSubProtocol);
+    ///
+    /// Returns an error when snap/2 is enabled because additional protocols are unsupported.
+    fn add_rlpx_sub_protocol(
+        &mut self,
+        protocol: impl IntoRlpxSubProtocol,
+    ) -> Result<(), reth_network::error::NetworkError>;
 
     /// Returns the secret key used for authenticating sessions.
     fn secret_key(&self) -> secp256k1::SecretKey;
@@ -69,8 +74,11 @@ pub trait RethNetworkConfig {
 }
 
 impl<N: NetworkPrimitives> RethNetworkConfig for reth_network::NetworkManager<N> {
-    fn add_rlpx_sub_protocol(&mut self, protocol: impl IntoRlpxSubProtocol) {
-        Self::add_rlpx_sub_protocol(self, protocol);
+    fn add_rlpx_sub_protocol(
+        &mut self,
+        protocol: impl IntoRlpxSubProtocol,
+    ) -> Result<(), reth_network::error::NetworkError> {
+        Self::add_rlpx_sub_protocol(self, protocol)
     }
 
     fn secret_key(&self) -> secp256k1::SecretKey {
