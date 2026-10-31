@@ -42,6 +42,10 @@ pub trait EthState: LoadState + SpawnBlocking {
     where
         Self: EthApiSpec,
     {
+        // The pending block builds on the chain tip, so it is always within the window.
+        if block_id.is_pending() {
+            return Ok(())
+        }
         let chain_info = self.chain_info().map_err(Self::Error::from_eth_err)?;
         let block_number = self
             .provider()

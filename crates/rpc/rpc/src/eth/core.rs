@@ -568,7 +568,7 @@ mod tests {
     };
     use reth_rpc_convert::{EthTxEnvError, TryIntoTxEnv};
     use reth_rpc_eth_api::{
-        helpers::{Call, EthBlocks, EthCall, SpawnBlocking},
+        helpers::{Call, EthBlocks, EthCall, EthState, SpawnBlocking},
         node::RpcNodeCoreAdapter,
         EthApiServer,
     };
@@ -1131,6 +1131,29 @@ mod tests {
             fee_history.reward.is_none(),
             "all: no percentiles were requested, so there should be no rewards result"
         );
+    }
+
+    #[tokio::test]
+    async fn get_proof_and_account_accept_pending_block() {
+        let provider = MockEthProvider::default();
+        provider.add_block(
+            B256::repeat_byte(0x42),
+            Block {
+                header: Header { number: 1, gas_limit: 30_000_000, ..Default::default() },
+                body: BlockBody::default(),
+            },
+        );
+        let address = Address::repeat_byte(0x11);
+        provider.add_account(address, ExtendedAccount::new(1, U256::from(10)));
+        let api = build_test_eth_api(provider);
+
+        // `pending` is always within the proof window, like `latest`.
+        let proof = EthState::get_proof(&api, address, vec![], Some(BlockId::pending()))
+            .unwrap()
+            .await
+            .unwrap();
+        assert_eq!(proof.address, address);
+        EthState::get_account(&api, address, BlockId::pending()).await.unwrap();
     }
 
     #[tokio::test]
