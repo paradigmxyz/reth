@@ -2410,6 +2410,16 @@ pub trait StaticFileWriter {
     /// Returns `true` if the static file provider has unwind queued.
     fn has_unwind_queued(&self) -> bool;
 
+    /// Takes queued changeset prune strategies without executing them.
+    ///
+    /// See [`StaticFileWriters::take_changeset_prunes`].
+    fn take_changeset_prunes(&self) -> Option<BlockNumber>;
+
+    /// Re-queues deferred changeset prunes for a later commit.
+    ///
+    /// See [`StaticFileWriters::requeue_changeset_prunes`].
+    fn requeue_changeset_prunes(&self, last_block: BlockNumber) -> ProviderResult<()>;
+
     /// Finalizes all static file writers by committing their configuration to disk.
     ///
     /// Returns an error if prune is queued (use [`Self::commit`] instead).
@@ -2451,6 +2461,14 @@ impl<N: NodePrimitives> StaticFileWriter for StaticFileProvider<N> {
 
     fn has_unwind_queued(&self) -> bool {
         self.writers.has_unwind_queued()
+    }
+
+    fn take_changeset_prunes(&self) -> Option<BlockNumber> {
+        self.writers.take_changeset_prunes()
+    }
+
+    fn requeue_changeset_prunes(&self, last_block: BlockNumber) -> ProviderResult<()> {
+        self.writers.requeue_changeset_prunes(last_block)
     }
 
     fn finalize(&self) -> ProviderResult<()> {
