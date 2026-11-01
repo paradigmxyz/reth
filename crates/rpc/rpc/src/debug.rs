@@ -810,12 +810,19 @@ where
     }
 
     /// Executes a block and returns the state root after each transaction.
+    ///
+    /// Looks up the block by hash from the provider (canonical) first, then falls back to the
+    /// bad-block cache so non-canonical hashes from `debug_getBadBlocks` work as documented.
     pub async fn intermediate_roots(&self, block_hash: B256) -> Result<Vec<B256>, Eth::Error> {
-        let block = self
-            .eth_api()
-            .recovered_block(block_hash.into())
-            .await?
-            .ok_or(EthApiError::HeaderNotFound(block_hash.into()))?;
+        let block = match self.eth_api().recovered_block(block_hash.into()).await? {
+            Some(block) => block,
+            None => self
+                .inner
+                .bad_block_store
+                .get(block_hash)
+                .map(|entry| entry.block)
+                .ok_or(EthApiError::HeaderNotFound(block_hash.into()))?,
+        };
         let evm_env = self.eth_api().evm_env_for_header(block.sealed_block().sealed_header())?;
 
         self.eth_api()
