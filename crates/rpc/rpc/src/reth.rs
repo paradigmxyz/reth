@@ -96,7 +96,9 @@ where
             |mut hash_map, account_before| -> RethResult<_> {
                 let current_balance = state.account_balance(&account_before.address)?;
                 let prev_balance = account_before.info.as_ref().map(|info| info.balance);
-                if current_balance != prev_balance {
+                // Treat missing accounts as balance 0 so a create-with-zero-value is not
+                // reported as a balance change (`None != Some(0)` would otherwise match).
+                if balance_changed(prev_balance, current_balance) {
                     hash_map.insert(account_before.address, current_balance.unwrap_or_default());
                 }
                 Ok(hash_map)
@@ -441,4 +443,33 @@ struct RethApiInner<Provider, EvmConfig> {
     blocking_task_guard: BlockingTaskGuard,
     /// The type that can spawn tasks which would otherwise block.
     task_spawner: Runtime,
+}
+
+/// Returns whether an account balance changed from `prev` to `current`.
+///
+/// Missing accounts are treated as balance 0, matching the documented
+/// `reth_getBalanceChangesInBlock` semantics that only include addresses whose
+/// balance actually changed.
+fn balance_changed(prev: Option<U256>, current: Option<U256>) -> bool {
+    prev.unwrap_or_default() != current.unwrap_or_default()
+}
+
+#[cfg(test)]
+mod balance_changed_tests {
+    use super::*;
+
+    #[test]
+    fn zero_create_is_not_a_change() {
+        assert!(!balance_changed(None, Some(U256::ZERO)));
+        assert!(!balance_changed(None, None));
+        assert!(!balance_changed(Some(U256::ZERO), Some(U256::ZERO)));
+    }
+
+    #[test]
+    fn real_balance_deltas_are_changes() {
+        assert!(balance_changed(None, Some(U256::from(1))));
+        assert!(balance_changed(Some(U256::from(1)), Some(U256::ZERO)));
+        assert!(balance_changed(Some(U256::from(1)), Some(U256::from(2))));
+        assert!(balance_changed(Some(U256::from(1)), None));
+    }
 }
