@@ -1381,6 +1381,75 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn blob_fee_is_priced_independently_of_execution() {
+        let sender = Address::repeat_byte(0x11);
+        let contract = Address::repeat_byte(0xaa);
+        // Return BLOBBASEFEE and the caller's balance after the upfront charge.
+        let code = Bytes::from_static(&[
+            0x4a, 0x60, 0x00, 0x52, 0x33, 0x31, 0x60, 0x20, 0x52, 0x60, 0x40, 0x60, 0x00, 0xf3,
+        ]);
+        let provider = MockEthProvider::default()
+            .with_chain_spec(ChainSpecBuilder::mainnet().cancun_activated().build());
+        provider.add_block(
+            B256::repeat_byte(0x42),
+            Block {
+                header: Header {
+                    number: 1,
+                    gas_limit: 30_000_000,
+                    excess_blob_gas: Some(0),
+                    ..Default::default()
+                },
+                body: BlockBody::default(),
+            },
+        );
+        let api = build_test_eth_api(provider);
+        let call = |execution_fee, max_fee_per_blob_gas, balance: u64| {
+            let request = TransactionRequest {
+                gas: Some(30_000),
+                max_fee_per_gas: Some(execution_fee),
+                max_priority_fee_per_gas: Some(execution_fee),
+                max_fee_per_blob_gas,
+                blob_versioned_hashes: Some(vec![B256::repeat_byte(1)]),
+                ..TransactionRequest::default().with_from(sender).with_to(contract)
+            };
+            let state = StateOverride::from_iter([
+                (
+                    sender,
+                    AccountOverride { balance: Some(U256::from(balance)), ..Default::default() },
+                ),
+                (contract, AccountOverride { code: Some(code.clone()), ..Default::default() }),
+            ]);
+            EthCall::call(&api, request, Some(BlockId::latest()), EvmOverrides::state(Some(state)))
+        };
+        let words = |output: Bytes| {
+            (U256::from_be_slice(&output[..32]), U256::from_be_slice(&output[32..]))
+        };
+
+        // A priced blob fee is funded and charged at the blob base fee of 1, even when execution
+        // is free.
+        let err = call(0, Some(1), 0).await.unwrap_err();
+        assert!(
+            matches!(
+                err,
+                EthApiError::InvalidTransaction(
+                    RpcInvalidTransactionError::InsufficientFunds { .. }
+                )
+            ),
+            "{err:?}"
+        );
+        assert_eq!(words(call(0, Some(1), 131_072).await.unwrap()), (U256::from(1), U256::ZERO));
+
+        // An omitted or zero blob fee cap runs at a zero blob base fee and pays no blob fee, even
+        // when execution is priced.
+        for max_fee_per_blob_gas in [None, Some(0)] {
+            assert_eq!(
+                words(call(1, max_fee_per_blob_gas, 30_000).await.unwrap()),
+                (U256::ZERO, U256::ZERO)
+            );
+        }
+    }
+
+    #[tokio::test]
     async fn call_converts_request_once_as_sent() {
         static CONVERTED_GAS: std::sync::Mutex<Vec<Option<u64>>> =
             std::sync::Mutex::new(Vec::new());
