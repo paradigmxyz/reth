@@ -1314,6 +1314,73 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn priced_call_is_funded_at_its_fee_cap() {
+        let sender = Address::repeat_byte(0x11);
+        let recipient = Address::repeat_byte(0x22);
+        let provider = MockEthProvider::default()
+            .with_chain_spec(ChainSpecBuilder::mainnet().cancun_activated().build());
+        provider.add_block(
+            B256::repeat_byte(0x42),
+            Block {
+                header: Header { number: 1, gas_limit: 30_000_000, ..Default::default() },
+                body: BlockBody::default(),
+            },
+        );
+        let api = build_test_eth_api(provider);
+        let trace_api =
+            crate::TraceApi::new(api.clone(), BlockingTaskGuard::new(1), EthConfig::default());
+        // With a zero base fee the call runs at its priority fee of 1, below its fee cap.
+        let request = |max_fee_per_gas| TransactionRequest {
+            gas: Some(30_000),
+            max_fee_per_gas: Some(max_fee_per_gas),
+            max_priority_fee_per_gas: Some(1),
+            ..TransactionRequest::default().with_from(sender).with_to(recipient)
+        };
+        let balance = |balance| {
+            StateOverride::from_iter([(
+                sender,
+                AccountOverride { balance: Some(U256::from(balance)), ..Default::default() },
+            )])
+        };
+
+        let traces = trace_api
+            .trace_call(TraceCallRequest {
+                call: request(2),
+                trace_types: std::iter::once(TraceType::StateDiff).collect(),
+                block_id: Some(BlockId::latest()),
+                state_overrides: Some(balance(60_000)),
+                block_overrides: None,
+            })
+            .await
+            .unwrap();
+        assert_eq!(
+            traces.state_diff.unwrap()[&sender].balance,
+            Delta::Changed(ChangedType {
+                from: U256::from(60_000),
+                to: U256::from(60_000 - 21_000)
+            })
+        );
+
+        let err = EthCall::call(
+            &api,
+            request(2),
+            Some(BlockId::latest()),
+            EvmOverrides::state(Some(balance(30_000))),
+        )
+        .await
+        .unwrap_err();
+        assert!(
+            matches!(
+                err,
+                EthApiError::InvalidTransaction(
+                    RpcInvalidTransactionError::InsufficientFunds { .. }
+                )
+            ),
+            "{err:?}"
+        );
+    }
+
+    #[tokio::test]
     async fn call_converts_request_once_as_sent() {
         static CONVERTED_GAS: std::sync::Mutex<Vec<Option<u64>>> =
             std::sync::Mutex::new(Vec::new());
