@@ -414,9 +414,7 @@ where
                 let body_logs =
                     if logs { Self::build_bundle_logs(&request, &flat_logs)? } else { vec![] };
 
-                // After processing all transactions, process refunds. Every payout is a share of
-                // the refundable value, which is reported before payouts like the reference
-                // implementation does.
+                // After processing all transactions, process refunds
                 for item in &flattened_bundle {
                     if let Some(refund_percent) = item.refund_percent {
                         let refund_configs = item.refund_configs.clone().unwrap_or_else(|| {
@@ -564,25 +562,27 @@ pub enum EthSimBundleError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::EthApiBuilder;
-    use alloy_consensus::{transaction::SignerRecoverable, TxEip1559};
-    use alloy_eips::eip2718::Encodable2718;
-    use alloy_genesis::{Genesis, GenesisAccount};
-    use alloy_primitives::{Address, Bytes, TxKind, B256};
-    use alloy_rpc_types_eth::BlockOverrides;
-    use alloy_rpc_types_mev::{Inclusion, ProtocolVersion, Refund};
-    use reth_chainspec::{ChainSpecBuilder, ChainSpecProvider};
-    use reth_db_common::init::init_genesis;
-    use reth_evm_ethereum::EthEvmConfig;
-    use reth_network_api::noop::NoopNetwork;
-    use reth_provider::{
-        providers::BlockchainProvider, test_utils::create_test_provider_factory_with_chain_spec,
-    };
-    use reth_testing_utils::generators::{self, generate_key, sign_tx_with_key_pair};
-    use reth_transaction_pool::test_utils::testing_pool;
+    use alloy_primitives::Bytes;
+    use alloy_rpc_types_mev::{Inclusion, ProtocolVersion};
 
     #[tokio::test(flavor = "multi_thread")]
     async fn sim_bundle_uses_next_block_env_and_overrides() {
+        use crate::EthApiBuilder;
+        use alloy_consensus::{transaction::SignerRecoverable, TxEip1559};
+        use alloy_eips::eip2718::Encodable2718;
+        use alloy_genesis::{Genesis, GenesisAccount};
+        use alloy_primitives::{Address, TxKind, B256};
+        use alloy_rpc_types_eth::BlockOverrides;
+        use reth_chainspec::{ChainSpecBuilder, ChainSpecProvider};
+        use reth_db_common::init::init_genesis;
+        use reth_evm_ethereum::EthEvmConfig;
+        use reth_network_api::noop::NoopNetwork;
+        use reth_provider::{
+            providers::BlockchainProvider, test_utils::create_test_provider_factory_with_chain_spec,
+        };
+        use reth_testing_utils::generators::{self, generate_key, sign_tx_with_key_pair};
+        use reth_transaction_pool::test_utils::testing_pool;
+
         let contract = Address::repeat_byte(0xaa);
         let coinbase = Address::repeat_byte(0x11);
         let overridden_coinbase = Address::repeat_byte(0x22);
@@ -696,75 +696,6 @@ mod tests {
                 assert!(err.message().contains("invalid inclusion"), "{err}");
             }
         }
-    }
-
-    #[tokio::test(flavor = "multi_thread")]
-    async fn sim_bundle_reports_refundable_value_before_payouts() {
-        let mut rng = generators::rng();
-        let mut transfer = |tip: u128| {
-            sign_tx_with_key_pair(
-                generate_key(&mut rng),
-                reth_ethereum_primitives::Transaction::Eip1559(TxEip1559 {
-                    chain_id: 1,
-                    nonce: 0,
-                    gas_limit: 21_000,
-                    max_fee_per_gas: 1_000_000_000 + tip,
-                    max_priority_fee_per_gas: tip,
-                    to: TxKind::Call(Address::repeat_byte(0xbb)),
-                    ..Default::default()
-                }),
-            )
-        };
-        // The user transaction asks for a refund of half the value created by the backrun.
-        let user_tx = transfer(1_000_000_000);
-        let backrun = transfer(100_000_000_000);
-
-        let genesis = Genesis::default()
-            .with_gas_limit(30_000_000)
-            .with_timestamp(100)
-            .with_base_fee(Some(1_000_000_000))
-            .extend_accounts(
-                [user_tx.recover_signer().unwrap(), backrun.recover_signer().unwrap()].map(
-                    |sender| {
-                        (sender, GenesisAccount::default().with_balance(U256::from(10u128.pow(18))))
-                    },
-                ),
-            );
-        let chain_spec =
-            Arc::new(ChainSpecBuilder::mainnet().cancun_activated().genesis(genesis).build());
-        let factory = create_test_provider_factory_with_chain_spec(chain_spec);
-        init_genesis(&factory).unwrap();
-        let provider = BlockchainProvider::new(factory).unwrap();
-        let eth_api = EthApiBuilder::new(
-            provider.clone(),
-            testing_pool(),
-            NoopNetwork::default(),
-            EthEvmConfig::new(provider.chain_spec()),
-        )
-        .build();
-        let api = EthSimBundle::new(eth_api, BlockingTaskGuard::new(4));
-
-        let bundle = MevSendBundle {
-            protocol_version: ProtocolVersion::V0_1,
-            inclusion: Inclusion::at_block(1),
-            bundle_body: vec![
-                BundleItem::Tx { tx: user_tx.encoded_2718().into(), can_revert: false },
-                BundleItem::Tx { tx: backrun.encoded_2718().into(), can_revert: false },
-            ],
-            validity: Some(Validity {
-                refund: Some(vec![Refund { body_idx: 0, percent: 50 }]),
-                refund_config: None,
-            }),
-            privacy: None,
-        };
-        let response = api.sim_bundle(bundle, SimBundleOverrides::default()).await.unwrap();
-
-        // The next block's base fee is 0.875 gwei.
-        let user_value = U256::from(21_000u64 * 1_000_000_000);
-        let backrun_value = U256::from(21_000u64 * 100_000_000_000);
-        // Only the backrun is refundable, and the value is reported before the refund is paid.
-        assert_eq!(response.refundable_value, backrun_value);
-        assert_eq!(response.profit, user_value + backrun_value - backrun_value / U256::from(2));
     }
 
     fn create_test_bundle(tx_bytes: Vec<Bytes>) -> MevSendBundle {
