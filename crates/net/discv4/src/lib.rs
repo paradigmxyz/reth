@@ -32,7 +32,7 @@ use alloy_primitives::{bytes::Bytes, hex, B256};
 use discv5::{
     kbucket,
     kbucket::{
-        BucketInsertResult, Distance, Entry as BucketEntry, InsertResult, KBucketsTable,
+        BucketInsertResult, Distance, Entry as BucketEntry, Filter, InsertResult, KBucketsTable,
         NodeStatus, MAX_NODES_PER_BUCKET,
     },
     ConnectionDirection, ConnectionState,
@@ -73,6 +73,7 @@ pub use config::{Discv4Config, Discv4ConfigBuilder};
 mod node;
 use node::{kad_key, NodeKey};
 
+mod filter;
 mod table;
 
 // reexport NodeRecord primitive
@@ -81,7 +82,10 @@ pub use reth_network_peers::NodeRecord;
 #[cfg(any(test, feature = "test-utils"))]
 pub mod test_utils;
 
-use crate::table::PongTable;
+use crate::{
+    filter::{SubnetBucketFilter, SubnetTableFilter},
+    table::PongTable,
+};
 use reth_net_nat::ResolveNatInterval;
 /// reexport to get public ip.
 pub use reth_net_nat::{external_ip, NatResolver};
@@ -608,8 +612,8 @@ impl Discv4Service {
             NodeKey::from(&local_node_record).into(),
             Duration::from_secs(60),
             MAX_NODES_PER_BUCKET,
-            None,
-            None,
+            Some(Box::new(SubnetTableFilter)),
+            Some(Box::new(SubnetBucketFilter)),
         );
 
         let self_lookup_interval = tokio::time::interval(config.lookup_interval);
@@ -1144,9 +1148,9 @@ impl Discv4Service {
     pub fn add_node(&mut self, record: NodeRecord) -> bool {
         let key = kad_key(record.id);
         match self.kbuckets.entry(&key) {
-            kbucket::Entry::Absent(entry) => {
+            kbucket::Entry::Absent(_) => {
                 let node = NodeEntry::new(record);
-                match entry.insert(
+                match self.insert_new_node(
                     node,
                     NodeStatus {
                         direction: ConnectionDirection::Outgoing,
@@ -1165,6 +1169,25 @@ impl Discv4Service {
         // send the initial ping to the _new_ node
         self.try_ping(record, PingReason::InitialInsert);
         true
+    }
+
+    /// Inserts a node that is not yet in the table.
+    ///
+    /// [`kbucket::AbsentEntry::insert`] only applies the bucket filter, the table filter is only
+    /// applied by [`KBucketsTable::insert_or_update`], so it is checked here before inserting.
+    fn insert_new_node(
+        &mut self,
+        node: NodeEntry,
+        status: NodeStatus,
+    ) -> BucketInsertResult<NodeKey> {
+        if !SubnetTableFilter.filter(&node, &mut self.kbuckets.iter_ref().map(|e| e.node.value)) {
+            return BucketInsertResult::FailedFilter
+        }
+
+        match self.kbuckets.entry(&kad_key(node.record.id)) {
+            BucketEntry::Absent(entry) => entry.insert(node, status),
+            _ => BucketInsertResult::NodeExists,
+        }
     }
 
     /// Encodes the packet, sends it and returns the hash.
@@ -1241,11 +1264,11 @@ impl Discv4Service {
                 }
                 entry.value_mut().update_with_enr(ping.enr_sq)
             }
-            kbucket::Entry::Absent(entry) => {
+            kbucket::Entry::Absent(_) => {
                 let mut node = NodeEntry::new(record);
                 node.last_enr_seq = ping.enr_sq;
 
-                match entry.insert(
+                match self.insert_new_node(
                     node,
                     NodeStatus {
                         direction: ConnectionDirection::Incoming,
@@ -1269,7 +1292,13 @@ impl Discv4Service {
                         needs_bond = true;
                         // insert unsuccessful but we still want to send the pong
                     }
-                    BucketInsertResult::FailedFilter => return,
+                    BucketInsertResult::FailedFilter => {
+                        // the node's subnet is over its limit: don't keep the node, but still
+                        // answer the ping. A bond ping would be pointless because its pong can't
+                        // add the node either.
+                        trace!(target: "discv4", ?record, "ignoring ping sender, subnet limit reached");
+                        needs_bond = false;
+                    }
                 }
 
                 None
@@ -1603,7 +1632,7 @@ impl Discv4Service {
         for closest in closest {
             let key = kad_key(closest.id);
             match self.kbuckets.entry(&key) {
-                BucketEntry::Absent(entry) => {
+                BucketEntry::Absent(_) => {
                     // the node's endpoint is not proven yet, so we need to ping it first, on
                     // success, we will add the node to the pending_lookup table, and wait to send
                     // back a Pong before initiating a FindNode request.
@@ -1611,7 +1640,7 @@ impl Discv4Service {
                     // while the ping is still active, we always mark it as queried.
                     ctx.mark_queried(closest.id);
                     let node = NodeEntry::new(closest);
-                    match entry.insert(
+                    match self.insert_new_node(
                         node,
                         NodeStatus {
                             direction: ConnectionDirection::Outgoing,
@@ -3972,5 +4001,76 @@ mod tests {
         let mapped = SocketAddr::from((Ipv4Addr::new(10, 0, 0, 1).to_ipv6_mapped(), 40404));
         handler.handle_packet(&packet, mapped).await;
         assert_matches::assert_matches!(rx.try_recv(), Err(mpsc::error::TryRecvError::Empty));
+    }
+
+    /// Sends pings from `count` distinct node ids at `ips` and returns the number of pongs sent.
+    fn ping_from_distinct_ids(
+        service: &mut Discv4Service,
+        packets: &mut mpsc::Receiver<(Bytes, SocketAddr)>,
+        ips: &[IpAddr],
+        count: usize,
+    ) -> usize {
+        for i in 0..count {
+            let addr = SocketAddr::new(ips[i % ips.len()], 30303);
+            let ping = Ping {
+                from: NodeRecord::new(addr, PeerId::random()).into(),
+                to: service.local_node_record.into(),
+                expire: service.ping_expiration(),
+                enr_sq: None,
+            };
+            service.on_ping(ping, addr, PeerId::random(), B256::random());
+        }
+
+        let mut pongs = 0;
+        while let Ok((packet, _)) = packets.try_recv() {
+            if matches!(Message::decode(&packet).unwrap().msg, Message::Pong(_)) {
+                pongs += 1;
+            }
+        }
+        pongs
+    }
+
+    #[tokio::test]
+    async fn test_ping_flood_from_public_subnet_is_limited() {
+        let (_discv4, mut service) = create_discv4().await;
+        let (egress, mut packets) = mpsc::channel(256);
+        service.egress = egress;
+
+        // many fresh ids from a single public IP.
+        let ips = [IpAddr::V4(Ipv4Addr::new(203, 0, 113, 7))];
+        let pongs = ping_from_distinct_ids(&mut service, &mut packets, &ips, 50);
+
+        // every ping is still answered, but at most the per-subnet table limit is kept.
+        assert_eq!(pongs, 50);
+        let in_table = service.kbuckets.buckets_iter().map(|b| b.num_entries()).sum::<usize>();
+        assert!(in_table > 0 && in_table <= filter::MAX_NODES_PER_SUBNET_TABLE, "{in_table}");
+        assert_eq!(service.pending_pings.len(), in_table);
+    }
+
+    #[tokio::test]
+    async fn test_ping_flood_from_loopback_is_not_limited() {
+        let (_discv4, mut service) = create_discv4().await;
+        let (egress, mut packets) = mpsc::channel(256);
+        service.egress = egress;
+
+        let ips = [IpAddr::V4(Ipv4Addr::LOCALHOST)];
+        let pongs = ping_from_distinct_ids(&mut service, &mut packets, &ips, 50);
+
+        assert_eq!(pongs, 50);
+        let in_table = service.kbuckets.buckets_iter().map(|b| b.num_entries()).sum::<usize>();
+        assert!(in_table > filter::MAX_NODES_PER_SUBNET_TABLE, "{in_table}");
+    }
+
+    #[tokio::test]
+    async fn test_add_node_from_public_subnet_is_limited() {
+        let (_discv4, mut service) = create_discv4().await;
+        let (egress, _packets) = mpsc::channel(256);
+        service.egress = egress;
+
+        let addr = SocketAddr::from((Ipv4Addr::new(203, 0, 113, 7), 30303));
+        let added = (0..50).filter(|_| service.add_node(NodeRecord::new(addr, PeerId::random())));
+        let added = added.count();
+
+        assert!(added > 0 && added <= filter::MAX_NODES_PER_SUBNET_TABLE, "{added}");
     }
 }
