@@ -530,21 +530,27 @@ fn transaction_request_to_evm2(
             max_fee_per_blob_gas: max_fee_per_blob_gas.unwrap_or_default().saturating_to(),
             input,
         })),
-        TxType::Eip7702 => TxEnvelope::Eip7702(
-            TxEip7702 {
-                chain_id,
-                nonce,
-                gas_limit,
-                max_fee_per_gas: gas_price,
-                max_priority_fee_per_gas,
-                to: to.to().copied().ok_or(EthTxEnvError::AuthorizationListInvalidFields)?,
-                value,
-                access_list,
-                authorization_list: authorization_list.unwrap_or_default(),
-                input,
+        TxType::Eip7702 => {
+            // No transaction type carries both blobs and an authorization list.
+            if blob_versioned_hashes.is_some() {
+                return Err(EthTxEnvError::AuthorizationListInvalidFields)
             }
-            .into(),
-        ),
+            TxEnvelope::Eip7702(
+                TxEip7702 {
+                    chain_id,
+                    nonce,
+                    gas_limit,
+                    max_fee_per_gas: gas_price,
+                    max_priority_fee_per_gas,
+                    to: to.to().copied().ok_or(EthTxEnvError::AuthorizationListInvalidFields)?,
+                    value,
+                    access_list,
+                    authorization_list: authorization_list.unwrap_or_default(),
+                    input,
+                }
+                .into(),
+            )
+        }
     };
     Ok(Recovered::new_unchecked(tx, caller))
 }
