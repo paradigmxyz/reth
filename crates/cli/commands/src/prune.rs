@@ -89,6 +89,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> PruneComma
                 .build_with_provider_factory(provider_factory.clone());
 
             let mut total_pruned = 0usize;
+            let mut last_checkpoints = Vec::new();
             loop {
                 if cancellation.is_cancelled() {
                     info!(target: "reth::cli", total_pruned, "Pruning interrupted by user");
@@ -104,12 +105,21 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> PruneComma
                     break;
                 }
 
-                if batch_pruned == 0 {
+                // A batch can advance checkpoints without deleting anything, e.g. clearing a
+                // `RocksDB` table, so that also counts as progress.
+                let checkpoints = output
+                    .segments
+                    .iter()
+                    .map(|(segment, output)| (*segment, output.checkpoint))
+                    .collect::<Vec<_>>();
+                if batch_pruned == 0 && checkpoints == last_checkpoints {
                     return Err(eyre::eyre!(
                         "pruner made no progress but reported more data remaining; \
                          aborting to prevent infinite loop"
                     ));
                 }
+
+                last_checkpoints = checkpoints;
 
                 info!(
                     target: "reth::cli",
