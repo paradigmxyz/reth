@@ -122,10 +122,6 @@ fn unpack_archive<R: Read>(
     static_files_dir: Option<&Path>,
     mut progress: Option<&mut ArchiveExtractionProgress>,
 ) -> Result<()> {
-    if static_files_dir.is_none() && progress.is_none() {
-        archive.unpack(target_dir)?;
-        return Ok(())
-    }
     let entries = archive.entries().wrap_err_with(|| {
         format!("failed to read archive entries for `{}`", target_dir.display())
     })?;
@@ -200,11 +196,12 @@ fn unpack_entry<R: Read>(
     target_dir: &Path,
     static_files_dir: Option<&Path>,
 ) -> Result<()> {
-    // A non-static entry could otherwise plant a symlink at a nested custom root before
-    // extraction or retry cleanup uses it.
+    // Snapshot archives contain only regular files and directories. Links would let one archive
+    // redirect the paths another concurrently extracting archive writes through.
+    let entry_type = entry.header().entry_type();
     eyre::ensure!(
-        static_files_dir.is_none() || !entry.header().entry_type().is_symlink(),
-        "Archive symlinks are unsupported with a custom static files directory"
+        !entry_type.is_symlink() && !entry_type.is_hard_link(),
+        "Archive links are unsupported"
     );
     let path = entry.path()?.into_owned();
     if let Some(static_files_dir) = static_files_dir &&
@@ -625,6 +622,27 @@ mod tests {
     use super::*;
 
     #[test]
+    fn archive_links_are_rejected_for_every_layout() {
+        for entry_type in [tar::EntryType::Symlink, tar::EntryType::Link] {
+            let target = tempfile::tempdir().unwrap();
+            let outside = tempfile::tempdir().unwrap();
+            let mut archive = tar::Builder::new(Vec::new());
+            let mut link = tar::Header::new_gnu();
+            link.set_entry_type(entry_type);
+            link.set_size(0);
+            link.set_mode(0o777);
+            archive.append_link(&mut link, "p", outside.path()).unwrap();
+            let tar = archive.into_inner().unwrap();
+
+            let err = unpack_archive(Archive::new(tar.as_slice()), target.path(), None, None)
+                .unwrap_err();
+
+            assert!(format!("{err:#}").contains("Archive links are unsupported"));
+            assert!(std::fs::symlink_metadata(target.path().join("p")).is_err());
+        }
+    }
+
+    #[test]
     fn custom_static_root_cannot_be_redirected_by_archive_symlinks() {
         for custom_path in ["custom", "custom/nested"] {
             let target = tempfile::tempdir().unwrap();
@@ -649,7 +667,7 @@ mod tests {
             let err =
                 unpack_archive(Archive::new(tar.as_slice()), target.path(), Some(&custom), None)
                     .unwrap_err();
-            assert!(format!("{err:#}").contains("Archive symlinks are unsupported"));
+            assert!(format!("{err:#}").contains("Archive links are unsupported"));
             let outputs = [super::super::manifest::OutputFileChecksum {
                 path: "static_files/headers".into(),
                 size: 4,
