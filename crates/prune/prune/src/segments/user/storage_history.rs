@@ -148,9 +148,10 @@ impl StorageHistory {
 
         // Delete static file jars only when fully processed
         if done && let Some(last_block) = last_changeset_pruned_block {
-            provider
-                .static_file_provider()
-                .delete_segment_below_block(StaticFileSegment::StorageChangeSets, last_block + 1)?;
+            provider.delete_segment_below_block_after_commit(
+                StaticFileSegment::StorageChangeSets,
+                last_block + 1,
+            )?;
         }
         trace!(target: "pruner", pruned = %pruned_changesets, %done, "Pruned storage history (changesets from static files)");
 
@@ -328,13 +329,13 @@ impl StorageHistory {
 
         trace!(target: "pruner", deleted = deleted_shards, updated = updated_shards, %done, "Pruned storage history (RocksDB indices)");
 
-        // Delete static file jars only when fully processed. During provider.commit(), RocksDB
-        // batch is committed before the MDBX checkpoint. If crash occurs after RocksDB commit
-        // but before MDBX commit, on restart the pruner checkpoint indicates data needs
-        // re-pruning, but the RocksDB shards are already pruned - this is safe because pruning
-        // is idempotent (re-pruning already-pruned shards is a no-op).
+        // Delete static file jars only when fully processed, and only after provider.commit()
+        // has written the RocksDB batch and then the MDBX prune checkpoint. A crash before the
+        // RocksDB commit leaves the jars, the index and the old checkpoint intact. A crash between
+        // the RocksDB and MDBX commits makes the next run re-prune already-pruned shards, which is
+        // a no-op. A crash after both leaves extra jars below the checkpoint for the next run.
         if done {
-            provider.static_file_provider().delete_segment_below_block(
+            provider.delete_segment_below_block_after_commit(
                 StaticFileSegment::StorageChangeSets,
                 last_changeset_pruned_block + 1,
             )?;
