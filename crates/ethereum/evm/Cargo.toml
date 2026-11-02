@@ -28,13 +28,13 @@ alloy-eips.workspace = true
 alloy-eip7928.workspace = true
 alloy-consensus.workspace = true
 alloy-rpc-types-engine.workspace = true
-alloy-sol-types.workspace = true
 
 # misc
 metrics = { workspace = true, optional = true }
 reth-metrics = { workspace = true, optional = true }
 
 [dev-dependencies]
+alloy-sol-types.workspace = true
 reth-testing-utils.workspace = true
 reth-trie-common.workspace = true
 reth-evm = { workspace = true, features = ["test-utils"] }
@@ -89,7 +89,6 @@ std = [
     "alloy-rpc-types-engine/std",
     "dep:reth-storage-errors",
     "reth-storage-errors/std",
-    "alloy-sol-types/std",
     "alloy-eip7928/std",
 ]
 test-utils = [
