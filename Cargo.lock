@@ -9206,7 +9206,6 @@ dependencies = [
  "alloy-rpc-types-debug",
  "auto_impl",
  "evm2",
- "evm2-inspectors",
  "fixed-cache",
  "futures-util",
  "metrics",

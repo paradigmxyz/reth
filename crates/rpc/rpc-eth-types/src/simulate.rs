@@ -15,6 +15,7 @@ use alloy_rpc_types_eth::{
     BlockId, BlockOverrides, BlockTransactionsKind,
 };
 use evm2::{interpreter::InstrStop, precompiles::MovePrecompileError, EvmFeatures, TxResult};
+use evm2_inspectors::transfer::TransferInspector;
 use jsonrpsee_types::{error::INTERNAL_ERROR_CODE, ErrorObject};
 use reth_errors::ProviderResult;
 use reth_evm::{
@@ -387,8 +388,12 @@ where
 
         // The transfer tracer keeps the transaction's logs, with the synthetic transfer logs
         // among them, outside the EVM's own logs.
-        if let Some(logs) = builder.evm_mut().take_transfer_logs() &&
-            let Some(result) = results.last_mut()
+        // SAFETY: `TransferInspector` has no lifetime parameters.
+        if let Some(logs) = unsafe {
+            builder
+                .evm_mut()
+                .with_inspector(|inspector: &mut TransferInspector| inspector.take_logs())
+        } && let Some(result) = results.last_mut()
         {
             result.logs = logs;
         }
