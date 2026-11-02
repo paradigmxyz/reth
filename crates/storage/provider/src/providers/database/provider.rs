@@ -191,12 +191,16 @@ impl SaveBlocksMode {
 /// Static file deletion a [`DatabaseProvider`] runs after its commit.
 #[derive(Debug)]
 enum PendingStaticFileDeletion {
-    /// Deletes the segment's jars with these headers.
-    Jars {
+    /// Deletes the segment's jars that end below the block, as
+    /// [`StaticFileProvider::delete_segment_below_block`] does.
+    ///
+    /// It keeps the cutoff rather than the jars, so running it again, or after an overlapping
+    /// deletion, deletes nothing more.
+    BelowBlock {
         /// Segment of the jars.
         segment: StaticFileSegment,
-        /// Headers of the jars, lowest first.
-        headers: Vec<SegmentHeader>,
+        /// Block below which the jars go.
+        block: BlockNumber,
     },
     /// Deletes every jar of the segment.
     Segment(StaticFileSegment),
@@ -209,10 +213,8 @@ impl PendingStaticFileDeletion {
         static_file_provider: &StaticFileProvider<N>,
     ) -> ProviderResult<()> {
         match self {
-            Self::Jars { segment, headers } => {
-                for header in headers {
-                    static_file_provider.delete_jar(segment, header.expected_block_start())?;
-                }
+            Self::BelowBlock { segment, block } => {
+                static_file_provider.delete_segment_below_block(segment, block)?;
             }
             Self::Segment(segment) => {
                 static_file_provider.delete_segment(segment)?;
@@ -383,7 +385,7 @@ impl<TX, N: NodeTypes> StaticFileProviderFactory for DatabaseProvider<TX, N> {
         if !headers.is_empty() {
             self.pending_static_file_deletions
                 .lock()
-                .push(PendingStaticFileDeletion::Jars { segment, headers: headers.clone() });
+                .push(PendingStaticFileDeletion::BelowBlock { segment, block });
         }
         Ok(headers)
     }
@@ -6155,8 +6157,10 @@ mod tests {
         drop(provider);
         assert_eq!(static_files.get_lowest_range_end(segment), Some(9));
 
-        // A committed provider deletes the jars only once its commit is done.
+        // A committed provider deletes the jars only once its commit is done, and the same
+        // deletion queued twice deletes nothing more.
         let provider = factory.database_provider_rw().unwrap();
+        provider.delete_segment_below_block_after_commit(segment, 20).unwrap();
         provider.delete_segment_below_block_after_commit(segment, 20).unwrap();
         assert_eq!(static_files.get_lowest_range_end(segment), Some(9));
         provider.commit().unwrap();
