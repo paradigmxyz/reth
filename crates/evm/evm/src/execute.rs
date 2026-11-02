@@ -15,6 +15,7 @@ use alloy_eips::{
 };
 use alloy_primitives::{Address, B256};
 use core::fmt::Debug;
+use evm2_inspectors::transfer::TransferInspector;
 use reth_execution_types::{BlockExecutionResult, StateUpdate};
 use reth_primitives_traits::{
     Block, HeaderTy, NodePrimitives, ReceiptTy, RecoveredBlock, SealedHeader, SignedTransaction,
@@ -96,10 +97,9 @@ pub trait Evm {
     where
         I: evm2::Inspector<Self::EvmTypes> + 'static;
 
-    /// Runs `f` on the inspector set by [`Self::set_inspector`] if it has type `I`.
-    fn with_inspector<I, R>(&mut self, f: impl FnOnce(&mut I) -> R) -> Option<R>
-    where
-        I: evm2::Inspector<Self::EvmTypes> + 'static;
+    /// Takes the logs of the [`TransferInspector`] set by [`Self::set_inspector`], or returns
+    /// `None` if another inspector or none is set.
+    fn take_transfer_logs(&mut self) -> Option<Vec<alloy_primitives::Log>>;
 
     /// Returns the accepted state overlay, including earlier committed transactions.
     fn state_db_mut(&mut self) -> &mut dyn DynDatabase;
@@ -184,17 +184,16 @@ impl<'a, T: evm2::EvmTypes<Tx: Typed2718>> Evm for evm2::Evm<'a, T> {
         evm2::Evm::set_inspector(self, inspector);
     }
 
-    fn with_inspector<I, R>(&mut self, f: impl FnOnce(&mut I) -> R) -> Option<R>
-    where
-        I: evm2::Inspector<T> + 'static,
-    {
+    fn take_transfer_logs(&mut self) -> Option<Vec<alloy_primitives::Log>> {
         let inspector: &mut (dyn evm2::evm::NonStaticAny + 'a) = &mut **self.inspector_mut()?;
-        if evm2::evm::NonStaticAny::type_id(inspector) != core::any::TypeId::of::<I>() {
+        if evm2::evm::NonStaticAny::type_id(inspector) !=
+            core::any::TypeId::of::<TransferInspector>()
+        {
             return None
         }
-        // SAFETY: the type ID check shows that the inspector is an `I`, which is `'static`, so
-        // no lifetime is erased.
-        Some(f(unsafe { inspector.downcast_mut_unchecked::<I>() }))
+        // SAFETY: the type ID check shows that the inspector is a `TransferInspector`, which has no
+        // lifetime parameters, so no lifetime is erased.
+        Some(unsafe { inspector.downcast_mut_unchecked::<TransferInspector>() }.take_logs())
     }
 
     fn state_db_mut(&mut self) -> &mut dyn DynDatabase {
