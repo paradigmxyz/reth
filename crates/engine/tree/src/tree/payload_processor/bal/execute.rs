@@ -235,9 +235,12 @@ mod tests {
         eip2935::{HISTORY_STORAGE_ADDRESS, HISTORY_STORAGE_CODE},
         eip4788::{BEACON_ROOTS_ADDRESS, BEACON_ROOTS_CODE},
         eip7002::{WITHDRAWAL_REQUEST_PREDEPLOY_ADDRESS, WITHDRAWAL_REQUEST_PREDEPLOY_CODE},
+        eip7251::{CONSOLIDATION_REQUEST_PREDEPLOY_ADDRESS, CONSOLIDATION_REQUEST_PREDEPLOY_CODE},
     };
     use alloy_primitives::{Bytes, B256, U256};
-    use evm2::evm::{CacheDB, EmptyDB};
+    use evm2::evm::{
+        CacheDB, EmptyDB, BUILDER_DEPOSIT_REQUEST_ADDRESS, BUILDER_EXIT_REQUEST_ADDRESS,
+    };
     use reth_chainspec::{ChainSpecBuilder, MAINNET};
     use reth_ethereum_primitives::{Block, BlockBody, Receipt, Transaction, TransactionSigned};
     use reth_evm::{
@@ -266,9 +269,10 @@ mod tests {
         Arc::new(DecodedBal::new(alloy_bal, raw))
     }
 
-    /// Builds an in-memory canonical DB pre-populated with the post-Cancun system contracts
-    /// that `apply_pre_execution_changes` calls: beacon roots (EIP-4788), withdrawal requests
-    /// (EIP-7002), and historical block hashes (EIP-2935).
+    /// Builds an in-memory canonical DB pre-populated with the system contracts that block
+    /// execution calls: beacon roots (EIP-4788), historical block hashes (EIP-2935), the
+    /// withdrawal (EIP-7002) and consolidation (EIP-7251) request contracts, and no-op builder
+    /// request contracts (EIP-8282).
     fn system_contracts_db() -> CacheDB<EmptyDB> {
         let mut db = CacheDB::<EmptyDB>::default();
         db.insert_account_info(
@@ -283,6 +287,20 @@ mod tests {
                 .with_nonce(1)
                 .with_code(Bytecode::new_raw(WITHDRAWAL_REQUEST_PREDEPLOY_CODE.clone())),
         );
+        db.insert_account_info(
+            &CONSOLIDATION_REQUEST_PREDEPLOY_ADDRESS,
+            AccountInfo::default()
+                .with_nonce(1)
+                .with_code(Bytecode::new_raw(CONSOLIDATION_REQUEST_PREDEPLOY_CODE.clone())),
+        );
+        for address in [BUILDER_DEPOSIT_REQUEST_ADDRESS, BUILDER_EXIT_REQUEST_ADDRESS] {
+            db.insert_account_info(
+                &address,
+                AccountInfo::default()
+                    .with_nonce(1)
+                    .with_code(Bytecode::new_legacy(Bytes::from_static(&[0x00]))),
+            );
+        }
         db.insert_account_info(
             &HISTORY_STORAGE_ADDRESS,
             AccountInfo::default()
