@@ -9206,6 +9206,7 @@ dependencies = [
  "alloy-rpc-types-debug",
  "auto_impl",
  "evm2",
+ "evm2-inspectors",
  "fixed-cache",
  "futures-util",
  "metrics",
@@ -14252,8 +14253,3 @@ dependencies = [
  "cc",
  "pkg-config",
 ]
-
-[[patch.unused]]
-name = "inkwell"
-version = "0.10.0"
-source = "git+https://github.com/TheDan64/inkwell?rev=c9d9734ae17dbaf1d9902dab3b8ee9d2041781ff#c9d9734ae17dbaf1d9902dab3b8ee9d2041781ff"

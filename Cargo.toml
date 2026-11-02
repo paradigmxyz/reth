@@ -675,9 +675,6 @@ evm2-inspectors = { git = "https://github.com/DaniPopes/evm2", rev = "d2200d8516
 evm2-jit = { git = "https://github.com/DaniPopes/evm2", rev = "d2200d85160ee8d380d2769c252da046171324d5" }
 
 [patch.crates-io]
-# LLVM 23 support is not released yet.
-inkwell = { git = "https://github.com/TheDan64/inkwell", rev = "c9d9734ae17dbaf1d9902dab3b8ee9d2041781ff" }
-
 # reth-core
 reth-codecs = { git = "https://github.com/paradigmxyz/reth-core", rev = "275ce4cf5befeb9f1e8acd935ff2882d2d25fc61" }
 reth-codecs-derive = { git = "https://github.com/paradigmxyz/reth-core", rev = "275ce4cf5befeb9f1e8acd935ff2882d2d25fc61" }
