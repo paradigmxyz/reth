@@ -591,6 +591,8 @@ rocksdb = { version = "0.24", default-features = false, features = ["lz4", "zstd
 opentelemetry_sdk = "0.32"
 opentelemetry = "0.32"
 opentelemetry-otlp = "0.32"
+opentelemetry-proto = { version = "0.32", default-features = false }
+prost = { version = "0.14", default-features = false }
 opentelemetry-semantic-conventions = "0.32"
 opentelemetry-appender-tracing = "0.32"
 tracing-opentelemetry = "0.33"
