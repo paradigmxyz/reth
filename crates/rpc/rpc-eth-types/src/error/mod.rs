@@ -890,14 +890,17 @@ impl From<HandlerError> for RpcInvalidTransactionError {
             HandlerError::InvalidChainId { .. } | HandlerError::MissingChainId => {
                 Self::InvalidChainId
             }
-            HandlerError::IntrinsicGasTooLow { .. } => Self::GasTooLow,
+            HandlerError::IntrinsicGasTooLow { .. } | HandlerError::GasLimitBelowFloor { .. } => {
+                Self::GasTooLow
+            }
             HandlerError::InsufficientFunds { fee, balance } => {
                 Self::InsufficientFunds { cost: fee, balance }
             }
             HandlerError::RejectCallerWithCode => Self::SenderNoEOA,
             HandlerError::NonceOverflow => Self::NonceMaxValue,
             HandlerError::GasLimitMoreThanBlock { .. } |
-            HandlerError::TxGasLimitGreaterThanCap { .. } => Self::GasTooHigh,
+            HandlerError::TxGasLimitGreaterThanCap { .. } |
+            HandlerError::IntrinsicGasGreaterThanCap { .. } => Self::GasTooHigh,
             HandlerError::CreateInitCodeSizeLimit { .. } => Self::MaxInitCodeSizeExceeded,
             HandlerError::UnsupportedTransactionType(_) |
             HandlerError::WrongTransactionType { .. } => Self::TxTypeNotSupported,
@@ -1145,6 +1148,24 @@ mod tests {
     use super::*;
     use alloy_primitives::b256;
     use alloy_sol_types::{Revert, SolError};
+
+    #[test]
+    fn gas_limit_handler_errors_map_to_gas_errors() {
+        assert!(matches!(
+            RpcInvalidTransactionError::from(HandlerError::GasLimitBelowFloor {
+                required: 2,
+                got: 1
+            }),
+            RpcInvalidTransactionError::GasTooLow
+        ));
+        assert!(matches!(
+            RpcInvalidTransactionError::from(HandlerError::IntrinsicGasGreaterThanCap {
+                required: 2,
+                cap: 1
+            }),
+            RpcInvalidTransactionError::GasTooHigh
+        ));
+    }
 
     #[test]
     fn timed_out_error() {
