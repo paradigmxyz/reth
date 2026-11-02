@@ -41,6 +41,7 @@ reth-consensus-common.workspace = true
 reth-ethereum-engine-primitives.workspace = true
 reth-payload-primitives.workspace = true
 reth-trie-common.workspace = true
+reth-tracing.workspace = true
 
 # ethereum
 alloy-consensus.workspace = true
