@@ -979,8 +979,20 @@ mod tests {
             );
             let evm = factory.evm_with_env(Db::new(database), env);
             let mut executor = factory.create_executor(evm, segment(0, 1, B256::ZERO).ctx);
+            let (tx, rx) = std::sync::mpsc::channel();
+            executor.set_state_hook(move |update| tx.send(update).unwrap());
             executor.apply_pre_execution_changes().unwrap();
-            executor.finish_with_block_access_list().unwrap().0
+            let output = executor.finish_with_block_access_list().unwrap().0;
+            // The streamed updates hash to the same state as the finished bundle.
+            let mut streamed = reth_trie_common::HashedPostState::default();
+            for update in rx.try_iter() {
+                streamed.extend(reth_execution_types::state_update_to_hashed_post_state(&update));
+            }
+            let bundled = reth_trie_common::HashedPostState::from_bundle_state::<
+                reth_trie_common::KeccakKeyHasher,
+            >(&output.state.state);
+            assert_eq!(streamed.into_sorted(), bundled.into_sorted());
+            output
         };
 
         // The fork predates EIP-161, so drained accounts stay, absent and empty ones included.

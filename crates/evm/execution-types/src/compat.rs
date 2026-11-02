@@ -1,7 +1,6 @@
 //! State conversion at the evm2 execution boundary.
 
 use alloy_primitives::{keccak256, B256};
-use evm2::evm::AccountInfo;
 use reth_primitives_traits::Account;
 use reth_trie_common::{HashedPostState, HashedStorage};
 
@@ -14,12 +13,10 @@ pub fn state_update_to_hashed_post_state(update: &StateUpdate) -> HashedPostStat
         let hashed_address = keccak256(account.address);
         let destroyed = account.current.is_none();
         let info = account.current.clone().unwrap_or_default();
-        let unchanged = account
-            .original
-            .as_ref()
-            .map_or_else(|| info == AccountInfo::default(), |original| info == *original);
-        // EIP-161: a touched account that ends up empty is deleted, unless it never existed.
-        if destroyed || (info.is_empty() && account.original.is_some()) {
+        let unchanged = account.original.as_ref() == Some(&info);
+        // A deletion is explicit: an account that ends up empty is still present unless the
+        // producer removed it, as EIP-161 does from Spurious Dragon on.
+        if destroyed {
             hashed_state.accounts.insert(hashed_address, None);
         } else if !unchanged {
             hashed_state.accounts.insert(hashed_address, Some(Account::from(&info)));
