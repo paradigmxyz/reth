@@ -340,8 +340,8 @@ mod tests {
             &mut BlockState::new(),
             false,
             &mut |_| {},
+            SpecId::AMSTERDAM,
             None,
-            false,
             1,
             Address::ZERO,
             None,
@@ -488,6 +488,14 @@ mod tests {
                 Bytes::from_static(&[op::INVALID]),
             ] {
                 let mut database = InMemoryDB::default();
+                for request_contract in [WITHDRAWAL_REQUEST_ADDRESS, CONSOLIDATION_REQUEST_ADDRESS]
+                {
+                    database.insert_account_info(
+                        &request_contract,
+                        AccountInfo::default()
+                            .with_code(Bytecode::new_legacy(Bytes::from_static(&[op::STOP]))),
+                    );
+                }
                 database.insert_account_info(
                     &address,
                     AccountInfo::default().with_code(Bytecode::new_legacy(code)),

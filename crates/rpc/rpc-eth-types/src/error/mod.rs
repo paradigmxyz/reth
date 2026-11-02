@@ -547,11 +547,11 @@ impl From<BlockExecutionError> for EthApiError {
                         ))
                     }
                 }
-                BlockValidationError::Other(error) => match error.downcast::<HandlerError>() {
-                    Ok(error) => Self::InvalidTransaction((*error).into()),
-                    Err(error) => Self::Internal(RethError::Execution(
-                        BlockExecutionError::Validation(BlockValidationError::Other(error)),
-                    )),
+                BlockValidationError::Other(error) => match error.downcast_ref::<HandlerError>() {
+                    Some(error) => Self::InvalidTransaction(error.clone().into()),
+                    None => Self::Internal(RethError::Execution(BlockExecutionError::Validation(
+                        BlockValidationError::Other(error),
+                    ))),
                 },
                 _ => Self::Internal(RethError::Execution(BlockExecutionError::Validation(
                     validation_error,

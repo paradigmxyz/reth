@@ -670,7 +670,11 @@ mod tests {
         block::ethereum::final_block_gas_used,
         bytecode::Bytecode,
         env::BlockEnv,
-        evm::{AccountInfo, Database, Db},
+        evm::{
+            AccountInfo, Database, Db, BUILDER_DEPOSIT_REQUEST_ADDRESS,
+            BUILDER_EXIT_REQUEST_ADDRESS, CONSOLIDATION_REQUEST_ADDRESS,
+            WITHDRAWAL_REQUEST_ADDRESS,
+        },
         interpreter::Word,
         BaseEvmTypes, SpecId,
     };
@@ -746,6 +750,19 @@ mod tests {
 
         fn get_block_hash(&mut self, _number: &Word) -> Result<B256, Self::Error> {
             Ok(B256::ZERO)
+        }
+    }
+
+    /// Deploys no-op request contracts, which blocks from Prague on call.
+    fn insert_request_contracts(database: &mut TestDatabase) {
+        let code = Bytecode::new_legacy(Bytes::from_static(&[0x00]));
+        for address in [
+            WITHDRAWAL_REQUEST_ADDRESS,
+            CONSOLIDATION_REQUEST_ADDRESS,
+            BUILDER_DEPOSIT_REQUEST_ADDRESS,
+            BUILDER_EXIT_REQUEST_ADDRESS,
+        ] {
+            database.accounts.insert(address, AccountInfo::default().with_code(code.clone()));
         }
     }
 
@@ -939,7 +956,7 @@ mod tests {
     }
 
     #[test]
-    fn dao_fork_drain_removes_empty_accounts() {
+    fn dao_fork_drain_keeps_empty_accounts() {
         let [absent, empty, empty_with_balance, nonce_only, ..] = dao_fork::DAO_HARDFORK_ACCOUNTS;
         let beneficiary = dao_fork::DAO_HARDFORK_BENEFICIARY;
 
@@ -966,24 +983,22 @@ mod tests {
             executor.finish_with_block_access_list().unwrap().0
         };
 
-        // Absent accounts stay absent, and accounts that are empty after the drain are removed,
-        // even before EIP-161.
+        // The fork predates EIP-161, so drained accounts stay, absent and empty ones included.
         let output = execute(&[
             (empty, AccountInfo::default()),
             (empty_with_balance, AccountInfo::default().with_balance(U256::from(7))),
             (nonce_only, AccountInfo { nonce: 1, balance: U256::from(3), ..Default::default() }),
         ]);
-        assert_eq!(output.account(&absent), None);
-        assert_eq!(output.account(&empty), Some(None));
-        assert_eq!(output.account(&empty_with_balance), Some(None));
+        assert_eq!(output.account(&absent).unwrap().unwrap().balance, U256::ZERO);
+        assert_eq!(output.account(&empty), None);
+        assert_eq!(output.account(&empty_with_balance).unwrap().unwrap().balance, U256::ZERO);
         let nonce_only_account = output.account(&nonce_only).unwrap().unwrap();
         assert_eq!((nonce_only_account.nonce, nonce_only_account.balance), (1, U256::ZERO));
         assert_eq!(output.account(&beneficiary).unwrap().unwrap().balance, U256::from(10));
 
-        // Nothing is drained, but the zero increment is still applied to the beneficiary, which
-        // removes it because it is empty.
+        // Nothing is drained, and the empty beneficiary stays unchanged.
         let output = execute(&[(beneficiary, AccountInfo::default())]);
-        assert_eq!(output.account(&beneficiary), Some(None));
+        assert_eq!(output.account(&beneficiary), None);
     }
 
     #[test]
@@ -1036,6 +1051,7 @@ mod tests {
             sender,
             AccountInfo::default().with_balance(U256::from(1_000_000_000_000_000_000u64)),
         );
+        insert_request_contracts(&mut database);
         let segments = (0..2)
             .map(|index| {
                 let mut segment = segment(index, index as u64 + 1, B256::ZERO);
@@ -1098,6 +1114,7 @@ mod tests {
             sender,
             AccountInfo::default().with_balance(U256::from(1_000_000_000_000_000_000u64)),
         );
+        insert_request_contracts(&mut database);
         let segments = [9, 6]
             .into_iter()
             .enumerate()
