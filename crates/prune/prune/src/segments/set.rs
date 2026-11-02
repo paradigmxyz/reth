@@ -75,11 +75,13 @@ where
         } = prune_modes;
 
         Self::default()
-            // Transaction lookup must run before bodies because it needs to read transaction
-            // data from static files before bodies deletes them.
-            .segment_opt(transaction_lookup.map(TransactionLookup::new))
-            // Bodies
+            // Bodies must run before transaction lookup. Bodies deletes static file jars on disk
+            // immediately and gates on the transaction lookup checkpoint, so it must see the
+            // checkpoint as of the last commit. If it saw this run's uncommitted checkpoint, a
+            // rollback would restore the lookup rows while their transactions are already deleted.
             .segment_opt(bodies_history.map(|mode| Bodies::new(mode, transaction_lookup)))
+            // Transaction lookup
+            .segment_opt(transaction_lookup.map(TransactionLookup::new))
             // Account history
             .segment_opt(account_history.map(AccountHistory::new))
             // Storage history

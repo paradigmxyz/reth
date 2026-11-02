@@ -130,7 +130,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::Pruner;
+    use crate::{segments::SegmentSet, Pruner};
     use alloy_primitives::BlockNumber;
     use reth_exex_types::FinishedExExHeight;
     use reth_provider::{
@@ -138,7 +138,7 @@ mod tests {
         DBProvider, DatabaseProviderFactory, ProviderFactory, PruneCheckpointWriter,
         StaticFileWriter,
     };
-    use reth_prune_types::{PruneMode, PruneProgress, PruneSegment};
+    use reth_prune_types::{PruneModes, PruneProgress, PruneSegment};
     use reth_static_file_types::{
         SegmentHeader, SegmentRangeInclusive, StaticFileSegment, DEFAULT_BLOCKS_PER_STATIC_FILE,
     };
@@ -580,5 +580,87 @@ mod tests {
             setup_static_file_jars(&factory, tip);
             run_prune_test(&factory, test_case, tip);
         }
+    }
+
+    /// Stands in for [`TransactionLookup`](crate::segments::TransactionLookup) and reports that it
+    /// pruned everything up to `block`.
+    #[derive(Debug)]
+    struct PrunedLookup {
+        mode: PruneMode,
+        block: BlockNumber,
+    }
+
+    impl<Provider> Segment<Provider> for PrunedLookup {
+        fn segment(&self) -> PruneSegment {
+            PruneSegment::TransactionLookup
+        }
+
+        fn mode(&self) -> Option<PruneMode> {
+            Some(self.mode)
+        }
+
+        fn purpose(&self) -> PrunePurpose {
+            PrunePurpose::User
+        }
+
+        fn prune(&self, _: &Provider, _: PruneInput) -> Result<SegmentOutput, PrunerError> {
+            Ok(SegmentOutput {
+                progress: PruneProgress::Finished,
+                pruned: 0,
+                checkpoint: Some(SegmentOutputCheckpoint {
+                    block_number: Some(self.block),
+                    tx_number: None,
+                }),
+            })
+        }
+    }
+
+    #[test]
+    fn rolled_back_tx_lookup_checkpoint_does_not_delete_bodies() {
+        // Bodies deletes jars from disk immediately, so it must not act on the transaction lookup
+        // checkpoint written earlier in the same uncommitted pruner transaction: after a rollback
+        // the lookup rows are restored but the transactions needed to prune them would be gone.
+        let factory = create_test_provider_factory();
+        let tip = 1_523_000;
+        setup_static_file_jars(&factory, tip);
+
+        let mode = PruneMode::Before(600_000);
+        let prune_modes = PruneModes {
+            transaction_lookup: Some(mode),
+            bodies_history: Some(mode),
+            ..Default::default()
+        };
+        let segments = SegmentSet::from_components(factory.static_file_provider(), prune_modes)
+            .into_vec()
+            .into_iter()
+            .map(|segment| match segment.segment() {
+                PruneSegment::TransactionLookup => {
+                    Box::new(PrunedLookup { mode, block: 599_999 }) as Box<dyn Segment<_>>
+                }
+                _ => segment,
+            })
+            .collect();
+
+        let (_, finished_exex_height_rx) = tokio::sync::watch::channel(FinishedExExHeight::NoExExs);
+        let mut pruner = Pruner::new_with_factory(
+            factory.clone(),
+            segments,
+            5,
+            10000,
+            None,
+            finished_exex_height_rx,
+        );
+
+        // Run the pruner and drop the provider without committing.
+        let provider = factory.database_provider_rw().unwrap();
+        pruner.run_with_provider(&provider, tip).unwrap();
+        drop(provider);
+
+        let provider = factory.database_provider_rw().unwrap();
+        assert_eq!(provider.get_prune_checkpoint(PruneSegment::TransactionLookup).unwrap(), None);
+        assert_eq!(
+            factory.static_file_provider().get_lowest_range_end(StaticFileSegment::Transactions),
+            Some(499_999)
+        );
     }
 }
