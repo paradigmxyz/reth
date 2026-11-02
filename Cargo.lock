@@ -2316,7 +2316,7 @@ checksum = "157a8ba7b480713b56f4c09fd13fc3e0a22a5dfab8097ba61cbc5feef950788a"
 dependencies = [
  "glob",
  "libc",
- "libloading 0.8.9",
+ "libloading",
 ]
 
 [[package]]
@@ -3670,14 +3670,13 @@ dependencies = [
 [[package]]
 name = "evm2"
 version = "0.1.0"
-source = "git+https://github.com/DaniPopes/evm2?rev=8318e818c472620e551e2b71eac9738ec73e2cec#8318e818c472620e551e2b71eac9738ec73e2cec"
+source = "git+https://github.com/DaniPopes/evm2?rev=e795508fcf58b328b89842d9799247ae6163dcf0#e795508fcf58b328b89842d9799247ae6163dcf0"
 dependencies = [
  "alloy-consensus",
  "alloy-eip7928",
  "alloy-eips",
  "alloy-hardforks 0.4.11",
  "alloy-primitives",
- "alloy-sol-types",
  "ark-bls12-381",
  "ark-bn254",
  "ark-ec",
@@ -3712,7 +3711,7 @@ dependencies = [
 [[package]]
 name = "evm2-inspectors"
 version = "0.1.0"
-source = "git+https://github.com/DaniPopes/evm2?rev=8318e818c472620e551e2b71eac9738ec73e2cec#8318e818c472620e551e2b71eac9738ec73e2cec"
+source = "git+https://github.com/DaniPopes/evm2?rev=e795508fcf58b328b89842d9799247ae6163dcf0#e795508fcf58b328b89842d9799247ae6163dcf0"
 dependencies = [
  "alloy-consensus",
  "alloy-eip2930",
@@ -3735,7 +3734,7 @@ dependencies = [
 [[package]]
 name = "evm2-jit"
 version = "0.1.0"
-source = "git+https://github.com/DaniPopes/evm2?rev=8318e818c472620e551e2b71eac9738ec73e2cec#8318e818c472620e551e2b71eac9738ec73e2cec"
+source = "git+https://github.com/DaniPopes/evm2?rev=e795508fcf58b328b89842d9799247ae6163dcf0#e795508fcf58b328b89842d9799247ae6163dcf0"
 dependencies = [
  "evm2",
  "evm2-jit-backend",
@@ -3750,7 +3749,7 @@ dependencies = [
 [[package]]
 name = "evm2-jit-backend"
 version = "0.1.0"
-source = "git+https://github.com/DaniPopes/evm2?rev=8318e818c472620e551e2b71eac9738ec73e2cec#8318e818c472620e551e2b71eac9738ec73e2cec"
+source = "git+https://github.com/DaniPopes/evm2?rev=e795508fcf58b328b89842d9799247ae6163dcf0#e795508fcf58b328b89842d9799247ae6163dcf0"
 dependencies = [
  "eyre",
  "ruint",
@@ -3759,12 +3758,12 @@ dependencies = [
 [[package]]
 name = "evm2-jit-build"
 version = "0.1.0"
-source = "git+https://github.com/DaniPopes/evm2?rev=8318e818c472620e551e2b71eac9738ec73e2cec#8318e818c472620e551e2b71eac9738ec73e2cec"
+source = "git+https://github.com/DaniPopes/evm2?rev=e795508fcf58b328b89842d9799247ae6163dcf0#e795508fcf58b328b89842d9799247ae6163dcf0"
 
 [[package]]
 name = "evm2-jit-builtins"
 version = "0.1.0"
-source = "git+https://github.com/DaniPopes/evm2?rev=8318e818c472620e551e2b71eac9738ec73e2cec#8318e818c472620e551e2b71eac9738ec73e2cec"
+source = "git+https://github.com/DaniPopes/evm2?rev=e795508fcf58b328b89842d9799247ae6163dcf0#e795508fcf58b328b89842d9799247ae6163dcf0"
 dependencies = [
  "alloy-primitives",
  "evm2",
@@ -3777,7 +3776,7 @@ dependencies = [
 [[package]]
 name = "evm2-jit-codegen"
 version = "0.1.0"
-source = "git+https://github.com/DaniPopes/evm2?rev=8318e818c472620e551e2b71eac9738ec73e2cec#8318e818c472620e551e2b71eac9738ec73e2cec"
+source = "git+https://github.com/DaniPopes/evm2?rev=e795508fcf58b328b89842d9799247ae6163dcf0#e795508fcf58b328b89842d9799247ae6163dcf0"
 dependencies = [
  "alloy-primitives",
  "bitflags 2.13.2",
@@ -3800,7 +3799,7 @@ dependencies = [
 [[package]]
 name = "evm2-jit-context"
 version = "0.1.0"
-source = "git+https://github.com/DaniPopes/evm2?rev=8318e818c472620e551e2b71eac9738ec73e2cec#8318e818c472620e551e2b71eac9738ec73e2cec"
+source = "git+https://github.com/DaniPopes/evm2?rev=e795508fcf58b328b89842d9799247ae6163dcf0#e795508fcf58b328b89842d9799247ae6163dcf0"
 dependencies = [
  "alloy-primitives",
  "evm2",
@@ -3810,12 +3809,12 @@ dependencies = [
 [[package]]
 name = "evm2-jit-llvm"
 version = "0.1.0"
-source = "git+https://github.com/DaniPopes/evm2?rev=8318e818c472620e551e2b71eac9738ec73e2cec#8318e818c472620e551e2b71eac9738ec73e2cec"
+source = "git+https://github.com/DaniPopes/evm2?rev=e795508fcf58b328b89842d9799247ae6163dcf0#e795508fcf58b328b89842d9799247ae6163dcf0"
 dependencies = [
  "alloy-primitives",
  "cc",
  "evm2-jit-backend",
- "inkwell",
+ "llvm-sys",
  "object 0.40.0",
  "tracing",
 ]
@@ -3823,7 +3822,7 @@ dependencies = [
 [[package]]
 name = "evm2-jit-runtime"
 version = "0.1.0"
-source = "git+https://github.com/DaniPopes/evm2?rev=8318e818c472620e551e2b71eac9738ec73e2cec#8318e818c472620e551e2b71eac9738ec73e2cec"
+source = "git+https://github.com/DaniPopes/evm2?rev=e795508fcf58b328b89842d9799247ae6163dcf0#e795508fcf58b328b89842d9799247ae6163dcf0"
 dependencies = [
  "alloy-primitives",
  "crossbeam-channel",
@@ -3838,7 +3837,6 @@ dependencies = [
  "evm2-jit-llvm",
  "eyre",
  "libc",
- "libloading 0.9.0",
  "quanta 0.13.0",
  "rayon",
  "tempfile",
@@ -3850,7 +3848,7 @@ dependencies = [
 [[package]]
 name = "evm2-macros"
 version = "0.1.0"
-source = "git+https://github.com/DaniPopes/evm2?rev=8318e818c472620e551e2b71eac9738ec73e2cec#8318e818c472620e551e2b71eac9738ec73e2cec"
+source = "git+https://github.com/DaniPopes/evm2?rev=e795508fcf58b328b89842d9799247ae6163dcf0#e795508fcf58b328b89842d9799247ae6163dcf0"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -5389,28 +5387,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "inkwell"
-version = "0.10.0"
-source = "git+https://github.com/TheDan64/inkwell?rev=c9d9734ae17dbaf1d9902dab3b8ee9d2041781ff#c9d9734ae17dbaf1d9902dab3b8ee9d2041781ff"
-dependencies = [
- "bitflags 2.13.2",
- "inkwell_internals",
- "libc",
- "llvm-sys",
- "thiserror 2.0.21",
-]
-
-[[package]]
-name = "inkwell_internals"
-version = "0.15.0"
-source = "git+https://github.com/TheDan64/inkwell?rev=c9d9734ae17dbaf1d9902dab3b8ee9d2041781ff#c9d9734ae17dbaf1d9902dab3b8ee9d2041781ff"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 3.0.6",
-]
-
-[[package]]
 name = "inotify"
 version = "0.11.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6056,16 +6032,6 @@ name = "libloading"
 version = "0.8.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d7c4b02199fee7c5d21a5ae7d8cfa79a6ef5bb2fc834d6e9058e89c825efdc55"
-dependencies = [
- "cfg-if",
- "windows-link",
-]
-
-[[package]]
-name = "libloading"
-version = "0.9.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "754ca22de805bb5744484a5b151a9e1a8e837d5dc232c2d7d8c2e3492edc8b60"
 dependencies = [
  "cfg-if",
  "windows-link",
@@ -14286,3 +14252,8 @@ dependencies = [
  "cc",
  "pkg-config",
 ]
+
+[[patch.unused]]
+name = "inkwell"
+version = "0.10.0"
+source = "git+https://github.com/TheDan64/inkwell?rev=c9d9734ae17dbaf1d9902dab3b8ee9d2041781ff#c9d9734ae17dbaf1d9902dab3b8ee9d2041781ff"

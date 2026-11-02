@@ -9,7 +9,7 @@ use crate::{
     factory::{EthBlockExecutorFactory, EvmFactory},
     EthBlockExecutionCtx, EthEvmEnv, RethReceiptBuilder,
 };
-use alloc::{sync::Arc, vec::Vec};
+use alloc::{borrow::Cow, sync::Arc, vec::Vec};
 use alloy_consensus::transaction::TransactionEnvelope;
 use alloy_eip7928::{BlockAccessIndex, BlockAccessList};
 use alloy_eips::{eip2718::Typed2718, eip7685::Requests};
@@ -68,7 +68,7 @@ fn evm2_ctx<'a>(ctx: &EthBlockExecutionCtx<'a>) -> evm2_eth::EthBlockExecutionCt
         tx_count_hint: ctx.tx_count_hint,
         parent_hash: ctx.parent_hash,
         parent_beacon_block_root: ctx.parent_beacon_block_root,
-        ommers: ctx.ommers,
+        ommers: Cow::Borrowed(ctx.ommers),
         withdrawals: ctx.withdrawals.clone(),
     }
 }
@@ -662,12 +662,12 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use evm2::block::ethereum::final_block_gas_used;
     use crate::dao_fork;
     use alloy_consensus::{SignableTransaction, TxEip4844, TxLegacy};
     use alloy_eip7928::BlockAccessIndex;
     use alloy_primitives::{address, Address, Bytes, Signature, TxKind, B256, U256};
     use evm2::{
+        block::ethereum::final_block_gas_used,
         bytecode::Bytecode,
         env::BlockEnv,
         evm::{AccountInfo, Database, Db},

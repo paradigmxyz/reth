@@ -30,14 +30,14 @@ use reth_execution_types::BundleSource;
 #[cfg(feature = "std")]
 use reth_primitives_traits::BlockTy;
 
-pub use reth_execution_errors::{
-    BlockExecutionError, BlockValidationError, InternalBlockExecutionError, InvalidTxError,
-};
-pub use reth_execution_types::{BlockExecutionOutput, ExecutionOutcome};
 pub use evm2::block::{
     map_database_error, map_handler_error, BlockTransactionResult, CommitChanges, GasOutput,
     ReceiptBuilderCtx,
 };
+pub use reth_execution_errors::{
+    BlockExecutionError, BlockValidationError, InternalBlockExecutionError, InvalidTxError,
+};
+pub use reth_execution_types::{BlockExecutionOutput, ExecutionOutcome};
 
 /// Builds chain-specific receipts from raw transaction execution results.
 #[auto_impl::auto_impl(&, Arc)]
@@ -1173,7 +1173,6 @@ where
         None
     }
 }
-
 
 /// Helper trait to abstract over different [`Recovered<T>`] implementations.
 ///

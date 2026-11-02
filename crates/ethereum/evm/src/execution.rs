@@ -20,6 +20,7 @@ use alloy_primitives::{map::AddressMap, Address, Bytes, Log, B256, U256};
 use alloy_sol_types::{sol, SolEvent};
 use core::any::Any;
 use evm2::{
+    block::ethereum::execution::*,
     evm::{
         AccountChangeRef, AccountInfo, StateChangeSink, SystemTx, BEACON_ROOTS_ADDRESS,
         BUILDER_DEPOSIT_REQUEST_ADDRESS, BUILDER_EXIT_REQUEST_ADDRESS,
@@ -35,7 +36,6 @@ use reth_evm::{
     BlockExecutionError, BlockValidationError, InternalBlockExecutionError, InvalidTxError,
 };
 use reth_execution_types::{BlockState, StateUpdate};
-use evm2::block::ethereum::execution::*;
 
 mod tests {
     use super::*;
@@ -53,6 +53,16 @@ mod tests {
     use reth_primitives_traits::RecoveredBlock;
     use reth_trie_common::{HashedPostState, KeccakKeyHasher};
     use std::sync::{mpsc, Arc};
+
+    sol! {
+        event DepositEvent(
+            bytes pubkey,
+            bytes withdrawal_credentials,
+            bytes amount,
+            bytes signature,
+            bytes index
+        );
+    }
 
     type BlockEnv = EvmBlockEnv<evm2::BaseEvmTypes>;
 
