@@ -68,6 +68,19 @@ where
             Some(range) => range,
             None => {
                 trace!(target: "pruner", "No account history to prune");
+                // A crash or error after an earlier run committed its checkpoint leaves the jars
+                // it queued for deletion on disk, and a fixed `Before` target never walks them
+                // again, so queue them here. Without jars below the checkpoint this is a no-op.
+                if let Some(checkpoint) = input.previous_checkpoint.and_then(|c| c.block_number) &&
+                    (provider.cached_storage_settings().storage_v2 ||
+                        EitherWriter::account_changesets_destination(provider)
+                            .is_static_file())
+                {
+                    provider.delete_segment_below_block_after_commit(
+                        StaticFileSegment::AccountChangeSets,
+                        checkpoint + 1,
+                    )?;
+                }
                 return Ok(SegmentOutput::done())
             }
         };
@@ -974,5 +987,52 @@ mod tests {
             );
         }
         assert_eq!(checkpoint.block_number, Some(7), "one dense block cleared per run");
+    }
+
+    /// Jars a committed run queued for deletion survive a crash before they go. With a fixed
+    /// `Before` target the checkpoint already covers them, so the next run must still delete them.
+    #[test]
+    fn reached_before_target_deletes_leftover_jars() {
+        use reth_provider::{StaticFileProviderFactory, StaticFileWriter};
+        use reth_static_file_types::{StaticFileSegment, DEFAULT_BLOCKS_PER_STATIC_FILE};
+
+        let db = TestStageDB::default();
+        let static_files = db.factory.static_file_provider();
+        let segment = StaticFileSegment::AccountChangeSets;
+
+        // Two jars: the first ends at block DEFAULT_BLOCKS_PER_STATIC_FILE - 1.
+        let mut writer = static_files.latest_writer(segment).unwrap();
+        for block in 0..DEFAULT_BLOCKS_PER_STATIC_FILE + 10 {
+            writer.append_account_changeset(Vec::new(), block).unwrap();
+        }
+        writer.commit().unwrap();
+        drop(writer);
+        assert_eq!(
+            static_files.get_lowest_range_end(segment),
+            Some(DEFAULT_BLOCKS_PER_STATIC_FILE - 1)
+        );
+
+        let prune_mode = PruneMode::Before(DEFAULT_BLOCKS_PER_STATIC_FILE);
+        let to_block = DEFAULT_BLOCKS_PER_STATIC_FILE - 1;
+        let input = PruneInput {
+            previous_checkpoint: Some(PruneCheckpoint {
+                block_number: Some(to_block),
+                tx_number: None,
+                prune_mode,
+            }),
+            to_block,
+            limiter: PruneLimiter::default(),
+        };
+
+        let provider = db.factory.database_provider_rw().unwrap();
+        provider.set_storage_settings_cache(StorageSettings::v2());
+        let output = AccountHistory::new(prune_mode).prune(&provider, input).unwrap();
+        assert!(output.progress.is_finished());
+        provider.commit().unwrap();
+
+        assert_eq!(
+            static_files.get_lowest_range_end(segment),
+            Some(DEFAULT_BLOCKS_PER_STATIC_FILE + 9)
+        );
     }
 }

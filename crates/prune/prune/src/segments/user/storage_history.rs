@@ -69,6 +69,19 @@ where
             Some(range) => range,
             None => {
                 trace!(target: "pruner", "No storage history to prune");
+                // A crash or error after an earlier run committed its checkpoint leaves the jars
+                // it queued for deletion on disk, and a fixed `Before` target never walks them
+                // again, so queue them here. Without jars below the checkpoint this is a no-op.
+                if let Some(checkpoint) = input.previous_checkpoint.and_then(|c| c.block_number) &&
+                    (provider.cached_storage_settings().storage_v2 ||
+                        EitherWriter::storage_changesets_destination(provider)
+                            .is_static_file())
+                {
+                    provider.delete_segment_below_block_after_commit(
+                        StaticFileSegment::StorageChangeSets,
+                        checkpoint + 1,
+                    )?;
+                }
                 return Ok(SegmentOutput::done())
             }
         };

@@ -1006,6 +1006,11 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
         segment: StaticFileSegment,
         block: BlockNumber,
     ) -> ProviderResult<Vec<SegmentHeader>> {
+        // Same stop condition as `delete_segment_below_block`, without reading any jar.
+        if self.get_lowest_range_end(segment).is_none_or(|end| end >= block) {
+            return Ok(Vec::new())
+        }
+
         let ranges = self.expected_block_ranges(segment);
         // The highest static file is never deleted.
         let Some((_, lower_ranges)) = ranges.split_last() else { return Ok(Vec::new()) };
