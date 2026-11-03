@@ -523,15 +523,11 @@ impl DiskFileBlobStoreInner {
             });
         }
 
+        self.write_one_encoded(tx, &buf)?;
+
+        // Cached only after the delete mark was handled under the file lock, otherwise a delete
+        // that observes this cache entry could be erased by the mark clearing in the write.
         self.blob_cache.lock().insert(tx, Arc::new(data));
-
-        let size = self.write_one_encoded(tx, &buf)?;
-
-        self.size_tracker.add_size(size);
-        // a zero size means the file already existed and was not written again
-        if size > 0 {
-            self.size_tracker.inc_len(1);
-        }
         Ok(())
     }
 
@@ -540,13 +536,12 @@ impl DiskFileBlobStoreInner {
         &self,
         txs: Vec<(B256, BlobTransactionSidecarVariant)>,
     ) -> Result<(), BlobStoreError> {
-        let hashes = txs.iter().map(|(tx, _)| *tx).collect::<Vec<_>>();
         let raw = txs
             .iter()
             .map(|(tx, data)| {
                 let mut buf = Vec::with_capacity(data.rlp_encoded_fields_length());
                 data.rlp_encode_fields(&mut buf);
-                (self.blob_disk_file(*tx), buf)
+                (*tx, self.blob_disk_file(*tx), buf)
             })
             .collect::<Vec<_>>();
 
@@ -560,40 +555,48 @@ impl DiskFileBlobStoreInner {
             }
         }
 
+        let mut add = 0;
+        let mut sub = 0;
+        let mut num = 0;
         {
-            // cache blobs
+            let _lock = self.file_lock.write();
+            let mut txs_to_delete = self.txs_to_delete.write();
+            for (tx, path, data) in raw {
+                // A pending delete mark is stale once the blob is re-added, otherwise a following
+                // cleanup would unlink the sidecar. The old file then holds the deleted data and
+                // must be replaced.
+                let replaces_deleted = txs_to_delete.remove(&tx);
+                let existing_size = fs::metadata(&path).ok().map(|meta| meta.len() as usize);
+                if existing_size.is_some() && !replaces_deleted {
+                    debug!(target:"txpool::blob", ?path, "Blob already exists");
+                } else if let Err(err) = fs::write(&path, &data) {
+                    debug!(target:"txpool::blob", %err, ?path, "Failed to write blob file");
+                    if replaces_deleted {
+                        // the old file is still the deleted data, keep it scheduled for removal
+                        txs_to_delete.insert(tx);
+                    }
+                } else {
+                    add += data.len();
+                    match existing_size {
+                        // the replaced file was already counted
+                        Some(old) => sub += old,
+                        None => num += 1,
+                    }
+                }
+            }
+        }
+        self.size_tracker.add_size(add);
+        self.size_tracker.sub_size(sub);
+        self.size_tracker.inc_len(num);
+
+        // Cached only after the delete marks were handled under the file lock, otherwise a delete
+        // that observes a cache entry could be erased by the mark clearing above.
+        {
             let mut cache = self.blob_cache.lock();
             for (tx, data) in txs {
                 cache.insert(tx, Arc::new(data));
             }
         }
-
-        let mut add = 0;
-        let mut num = 0;
-        {
-            let _lock = self.file_lock.write();
-            // Clear pending delete marks so a following cleanup doesn't unlink the re-added blobs
-            {
-                let mut txs_to_delete = self.txs_to_delete.write();
-                if !txs_to_delete.is_empty() {
-                    for tx in &hashes {
-                        txs_to_delete.remove(tx);
-                    }
-                }
-            }
-            for (path, data) in raw {
-                if path.exists() {
-                    debug!(target:"txpool::blob", ?path, "Blob already exists");
-                } else if let Err(err) = fs::write(&path, &data) {
-                    debug!(target:"txpool::blob", %err, ?path, "Failed to write blob file");
-                } else {
-                    add += data.len();
-                    num += 1;
-                }
-            }
-        }
-        self.size_tracker.add_size(add);
-        self.size_tracker.inc_len(num);
 
         Ok(())
     }
@@ -704,24 +707,37 @@ impl DiskFileBlobStoreInner {
         res
     }
 
-    /// Writes the blob data for the given transaction hash to the disk.
+    /// Writes the blob data for the given transaction hash to the disk and updates the size
+    /// tracking.
+    ///
+    /// An existing file is kept if the blob is a plain duplicate, but replaced if it was pending
+    /// deletion, because it then holds the data of the deleted blob.
     #[inline]
-    fn write_one_encoded(&self, tx: B256, data: &[u8]) -> Result<usize, DiskFileBlobStoreError> {
+    fn write_one_encoded(&self, tx: B256, data: &[u8]) -> Result<(), DiskFileBlobStoreError> {
         trace!(target:"txpool::blob", "[{:?}] writing blob file", tx);
-        let mut add = 0;
         let path = self.blob_disk_file(tx);
-        {
-            let _lock = self.file_lock.write();
-            // A pending delete mark is stale once the blob is re-added, otherwise a following
-            // cleanup would unlink the sidecar. Cleanup consumes marks under the same lock.
-            self.txs_to_delete.write().remove(&tx);
-            if !path.exists() {
-                fs::write(&path, data)
-                    .map_err(|e| DiskFileBlobStoreError::WriteFile(tx, path, e))?;
-                add = data.len();
-            }
+        let _lock = self.file_lock.write();
+        // A pending delete mark is stale once the blob is re-added, otherwise a following
+        // cleanup would unlink the sidecar. Cleanup consumes marks under the same lock.
+        let replaces_deleted = self.txs_to_delete.write().remove(&tx);
+        let existing_size = fs::metadata(&path).ok().map(|meta| meta.len() as usize);
+        if existing_size.is_some() && !replaces_deleted {
+            return Ok(())
         }
-        Ok(add)
+        if let Err(e) = fs::write(&path, data) {
+            if replaces_deleted {
+                // the old file is still the deleted data, keep it scheduled for removal
+                self.txs_to_delete.write().insert(tx);
+            }
+            return Err(DiskFileBlobStoreError::WriteFile(tx, path, e))
+        }
+        self.size_tracker.add_size(data.len());
+        match existing_size {
+            // the replaced file was already counted
+            Some(old) => self.size_tracker.sub_size(old),
+            None => self.size_tracker.inc_len(1),
+        }
+        Ok(())
     }
 
     /// Retrieves blobs for the given transaction hashes from the blob cache or disk.
@@ -1255,6 +1271,63 @@ mod tests {
         }
         assert_eq!(store.inner.size_tracker.blobs_len(), len - 2);
         assert!(store.data_size_hint() <= size);
+    }
+
+    #[test]
+    fn disk_reinsert_replaces_deleted_sidecar() {
+        let (store, _dir) = tmp_store();
+
+        let (tx, old) = rng_blobs(1).into_iter().next().unwrap();
+        let (new, _, _) = eip7594_single_blob_sidecar();
+        assert_ne!(old, new);
+        store.insert(tx, old.into()).unwrap();
+
+        // e.g. the Osaka conversion re-adds the same hash with a different sidecar
+        store.delete(tx).unwrap();
+        store.insert(tx, new.clone().into()).unwrap();
+        store.cleanup();
+        store.clear_cache();
+
+        assert_eq!(store.get(tx).unwrap().map(Arc::unwrap_or_clone), Some(new.clone()));
+        assert_eq!(store.inner.size_tracker.blobs_len(), 1);
+        assert_eq!(store.data_size_hint(), Some(new.rlp_encoded_fields_length()));
+
+        // a plain duplicate insert keeps the existing file
+        let other = rng_blobs(1).remove(0).1;
+        store.insert(tx, other.into()).unwrap();
+        store.clear_cache();
+        assert_eq!(store.get(tx).unwrap().map(Arc::unwrap_or_clone), Some(new));
+        assert_eq!(store.inner.size_tracker.blobs_len(), 1);
+    }
+
+    #[test]
+    fn disk_reinsert_all_replaces_deleted_sidecar() {
+        let (store, _dir) = tmp_store();
+
+        let old = rng_blobs(3);
+        let hashes = old.iter().map(|(tx, _)| *tx).collect::<Vec<_>>();
+        store.insert_all(wrapped_blobs(old)).unwrap();
+
+        // replace the first two, the third is not deleted and stays untouched
+        let (new, _, _) = eip7594_single_blob_sidecar();
+        store.delete_all(hashes[..2].to_vec()).unwrap();
+        let replacements = hashes[..2].iter().map(|tx| (*tx, new.clone())).collect::<Vec<_>>();
+        store.insert_all(wrapped_blobs(replacements)).unwrap();
+        store.cleanup();
+        store.clear_cache();
+
+        for tx in &hashes[..2] {
+            assert_eq!(store.get(*tx).unwrap().map(Arc::unwrap_or_clone), Some(new.clone()));
+        }
+        assert!(store.inner.blob_disk_file(hashes[2]).is_file());
+        assert_eq!(store.inner.size_tracker.blobs_len(), 3);
+        let empty_len = BlobTransactionSidecarVariant::Eip4844(BlobTransactionSidecar {
+            blobs: vec![],
+            commitments: vec![],
+            proofs: vec![],
+        })
+        .rlp_encoded_fields_length();
+        assert_eq!(store.data_size_hint(), Some(2 * new.rlp_encoded_fields_length() + empty_len));
     }
 
     #[test]
