@@ -424,10 +424,15 @@ impl Decodable for EnrResponse {
     // See https://eips.ethereum.org/EIPS/eip-8
     fn decode(buf: &mut &[u8]) -> alloy_rlp::Result<Self> {
         let mut payload = Header::decode_bytes(buf, true)?;
-        Ok(Self {
-            request_hash: Decodable::decode(&mut payload)?,
-            enr: Decodable::decode(&mut payload)?,
-        })
+        let request_hash = Decodable::decode(&mut payload)?;
+
+        // `Enr::decode` applies the ENR size limit to its whole input, so it only gets the
+        // record's own bytes and not the additional list elements after it.
+        let mut rest = payload;
+        Header::decode_bytes(&mut rest, true)?;
+        let mut enr = &payload[..payload.len() - rest.len()];
+
+        Ok(Self { request_hash, enr: Decodable::decode(&mut enr)? })
     }
 }
 
@@ -1093,13 +1098,14 @@ mod tests {
             assert_matches!(decoded.msg, Message::Neighbours(Neighbours { nodes, expire: 1136239445 }) if nodes == expected_nodes);
         }
 
-        // checks that junk data at the end of the packet is discarded according to eip-8
+        // checks that junk data at the end of the packet is discarded according to eip-8, even
+        // when the record and the junk together exceed the ENR size limit.
         #[test]
         fn eip8_decode_enr_response() {
             let key = SecretKey::new(&mut rand_08::rngs::OsRng);
             let enr = Enr::builder().build(&key).unwrap();
             let request_hash = B256::random();
-            let junk: u64 = 112233;
+            let junk = Bytes::from(vec![0xab; 300]);
 
             let mut buf = Vec::new();
             let payload_length = request_hash.length() + enr.length() + junk.length();
