@@ -177,6 +177,8 @@ where
                 let _permit = permit;
                 let coinbase = evm_env.block_env().beneficiary;
                 let basefee = evm_env.block_base_fee();
+                let separate_block_gas = evm_env.uses_separate_block_gas();
+                let regular_gas_limit_cap = evm_env.regular_gas_limit_cap();
 
                 let initial_coinbase = db
                     .get_account(&coinbase)
@@ -187,6 +189,8 @@ where
                 let mut coinbase_balance_before_tx = initial_coinbase;
                 let mut coinbase_balance_after_tx = initial_coinbase;
                 let mut total_gas_used = 0u64;
+                let mut block_regular_gas_used = 0u64;
+                let mut block_state_gas_used = 0u64;
                 let mut total_gas_fees = U256::ZERO;
                 let mut hasher = Keccak256::new();
 
@@ -197,8 +201,16 @@ where
                     }
 
                     // The EVM checks each transaction's gas limit against the block gas limit on
-                    // its own, so bound the bundle's total gas as a block would.
-                    if tx.gas_limit() > block_gas_limit.saturating_sub(total_gas_used) {
+                    // its own, so apply the block executor's admission rule to bound the bundle's
+                    // total gas as a block would.
+                    let regular_gas_limit = tx.gas_limit().min(regular_gas_limit_cap);
+                    let exceeds_block_gas = if separate_block_gas {
+                        regular_gas_limit > block_gas_limit.saturating_sub(block_regular_gas_used) ||
+                            tx.gas_limit() > block_gas_limit.saturating_sub(block_state_gas_used)
+                    } else {
+                        regular_gas_limit > block_gas_limit.saturating_sub(total_gas_used)
+                    };
+                    if exceeds_block_gas {
                         return Err(Eth::Error::from_eth_err(EthApiError::InvalidTransaction(
                             RpcInvalidTransactionError::GasTooHigh,
                         )))
@@ -235,6 +247,10 @@ where
 
                     let gas_used = result.tx_gas_used();
                     total_gas_used += gas_used;
+                    block_regular_gas_used =
+                        block_regular_gas_used.saturating_add(result.execution_gas_spent());
+                    block_state_gas_used =
+                        block_state_gas_used.saturating_add(result.state_gas_spent());
 
                     let gas_fees = U256::from(gas_used) * U256::from(gas_price);
                     total_gas_fees += gas_fees;
@@ -668,6 +684,83 @@ mod tests {
             matches!(error.as_invalid_transaction(), Some(RpcInvalidTransactionError::GasTooHigh)),
             "{error:?}"
         );
+    }
+
+    /// From Amsterdam, regular and state gas have separate block budgets, so a transaction that
+    /// fits both must be accepted even when it exceeds the block gas limit minus the receipt gas
+    /// of the earlier transactions.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn call_bundle_applies_separate_block_gas_budgets() {
+        let mut rng = generators::rng();
+        let key = generate_key(&mut rng);
+        let tip = INITIAL_BASE_FEE - INITIAL_BASE_FEE / 8 + 1;
+        let tx = |nonce, gas_limit, value| {
+            sign_tx_with_key_pair(
+                key,
+                reth_ethereum_primitives::Transaction::Eip1559(TxEip1559 {
+                    chain_id: 1,
+                    nonce,
+                    gas_limit,
+                    max_fee_per_gas: tip as u128 * 2,
+                    max_priority_fee_per_gas: tip as u128,
+                    to: TxKind::Call(Address::random()),
+                    value,
+                    ..Default::default()
+                }),
+            )
+        };
+        // Sending value to an empty account creates it, which spends state gas.
+        let create_account = tx(0, 1_000_000, U256::from(1));
+        let sender = create_account.recover_signer().unwrap();
+
+        let genesis = Genesis::default()
+            .with_gas_limit(30_000_000)
+            .with_base_fee(Some(INITIAL_BASE_FEE as u128))
+            .extend_accounts([(
+                sender,
+                GenesisAccount::default().with_balance(U256::from(10u128.pow(18))),
+            )]);
+        let chain_spec =
+            Arc::new(ChainSpecBuilder::mainnet().amsterdam_activated().genesis(genesis).build());
+        let factory = create_test_provider_factory_with_chain_spec(chain_spec);
+        init_genesis(&factory).unwrap();
+        let provider = BlockchainProvider::new(factory).unwrap();
+
+        let eth_api = EthApiBuilder::new(
+            provider.clone(),
+            testing_pool(),
+            NoopNetwork::default(),
+            EthEvmConfig::new(provider.chain_spec()),
+        )
+        .build();
+        let api = EthBundle::new(eth_api, BlockingTaskGuard::new(4));
+
+        let bundle = EthCallBundle {
+            txs: vec![create_account.encoded_2718().into()],
+            block_number: 1,
+            state_block_number: BlockNumberOrTag::Number(0),
+            ..Default::default()
+        };
+        let create_account_gas = api.call_bundle(bundle.clone()).await.unwrap().total_gas_used;
+
+        // The account creation spends both regular and state gas, so each budget has more than
+        // 21_000 gas left for the transfer, while the block gas limit minus the receipt gas is
+        // only 20_999.
+        let gas_limit = create_account_gas + 21_000 - 1;
+        let response = api
+            .call_bundle(EthCallBundle {
+                txs: vec![
+                    tx(0, gas_limit, U256::from(1)).encoded_2718().into(),
+                    tx(1, 21_000, U256::ZERO).encoded_2718().into(),
+                ],
+                gas_limit: Some(gas_limit),
+                ..bundle
+            })
+            .await
+            .unwrap();
+        assert_eq!(response.results.len(), 2);
+        assert_eq!(response.results[0].gas_used, create_account_gas);
+        assert_eq!(response.results[1].revert, None);
     }
 
     fn assert_bundle_fees(response: &EthCallBundleResponse, expected_tip: u128) {
