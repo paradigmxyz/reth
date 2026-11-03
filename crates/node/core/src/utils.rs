@@ -2,6 +2,7 @@
 //! blocks from the network.
 
 use alloy_eips::BlockHashOrNumber;
+use alloy_primitives::hex;
 use alloy_rpc_types_engine::{JwtError, JwtSecret};
 use eyre::Result;
 use reth_consensus::Consensus;
@@ -9,7 +10,10 @@ use reth_network_p2p::{
     bodies::client::BodiesClient, headers::client::HeadersClient, priority::Priority,
 };
 use reth_primitives_traits::{Block, SealedBlock, SealedHeader};
-use std::path::{Path, PathBuf};
+use std::{
+    io,
+    path::{Path, PathBuf},
+};
 use tracing::{debug, info};
 
 /// Parses a user-specified path into a [`PathBuf`].
@@ -18,14 +22,26 @@ pub fn parse_path(value: &str) -> PathBuf {
 }
 
 /// Attempts to retrieve or create a JWT secret from the specified path.
+///
+/// A newly created secret file is owner-only on Unix.
 pub fn get_or_create_jwt_secret_from_path(path: &Path) -> Result<JwtSecret, JwtError> {
     if path.exists() {
         debug!(target: "reth::cli", ?path, "Reading JWT auth secret file");
-        JwtSecret::from_file(path)
-    } else {
-        info!(target: "reth::cli", ?path, "Creating JWT auth secret file");
-        JwtSecret::try_create_random(path)
+        return JwtSecret::from_file(path)
     }
+
+    info!(target: "reth::cli", ?path, "Creating JWT auth secret file");
+    if let Some(dir) = path.parent() {
+        reth_fs_util::create_dir_all(dir).map_err(|err| JwtError::CreateDir {
+            source: io::Error::other(err),
+            path: dir.into(),
+        })?;
+    }
+
+    let secret = JwtSecret::random();
+    reth_fs_util::write_private(path, hex::encode(secret.as_bytes()))
+        .map_err(|err| JwtError::Write { source: io::Error::other(err), path: path.into() })?;
+    Ok(secret)
 }
 
 /// Get a single header from the network
@@ -78,4 +94,33 @@ where
     consensus.validate_block_pre_execution(&block)?;
 
     Ok(block)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn get_or_create_jwt_secret_roundtrips() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("jwt.hex");
+
+        let secret = get_or_create_jwt_secret_from_path(&path).unwrap();
+
+        assert_eq!(JwtSecret::from_file(&path).unwrap(), secret);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn get_or_create_jwt_secret_creates_owner_only_file() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("jwt.hex");
+
+        get_or_create_jwt_secret_from_path(&path).unwrap();
+
+        let mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o600);
+    }
 }
