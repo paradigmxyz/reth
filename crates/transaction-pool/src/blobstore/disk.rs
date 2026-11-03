@@ -240,12 +240,19 @@ impl BlobStore for DiskFileBlobStore {
     }
 
     fn cleanup(&self) -> BlobStoreCleanupStat {
-        let txs_to_delete = std::mem::take(&mut *self.inner.txs_to_delete.write());
+        let txs_to_delete: Vec<_> = self.inner.txs_to_delete.read().iter().copied().collect();
         let mut stat = BlobStoreCleanupStat::default();
         let mut subsize = 0;
         debug!(target:"txpool::blob", num_blobs=%txs_to_delete.len(), "Removing blobs from disk");
         for tx in txs_to_delete {
             let path = self.inner.blob_disk_file(tx);
+            // The delete mark is consumed under the same file lock that inserts hold when they
+            // clear it, so a blob that was re-inserted after being marked is never unlinked.
+            let _lock = self.inner.file_lock.write();
+            if !self.inner.txs_to_delete.write().remove(&tx) {
+                // Re-inserted since the snapshot, or already removed by a concurrent cleanup
+                continue
+            }
             let filesize = fs::metadata(&path).map_or(0, |meta| meta.len());
             match fs::remove_file(&path) {
                 Ok(_) => {
@@ -521,7 +528,10 @@ impl DiskFileBlobStoreInner {
         let size = self.write_one_encoded(tx, &buf)?;
 
         self.size_tracker.add_size(size);
-        self.size_tracker.inc_len(1);
+        // a zero size means the file already existed and was not written again
+        if size > 0 {
+            self.size_tracker.inc_len(1);
+        }
         Ok(())
     }
 
@@ -530,6 +540,7 @@ impl DiskFileBlobStoreInner {
         &self,
         txs: Vec<(B256, BlobTransactionSidecarVariant)>,
     ) -> Result<(), BlobStoreError> {
+        let hashes = txs.iter().map(|(tx, _)| *tx).collect::<Vec<_>>();
         let raw = txs
             .iter()
             .map(|(tx, data)| {
@@ -561,6 +572,15 @@ impl DiskFileBlobStoreInner {
         let mut num = 0;
         {
             let _lock = self.file_lock.write();
+            // Clear pending delete marks so a following cleanup doesn't unlink the re-added blobs
+            {
+                let mut txs_to_delete = self.txs_to_delete.write();
+                if !txs_to_delete.is_empty() {
+                    for tx in &hashes {
+                        txs_to_delete.remove(tx);
+                    }
+                }
+            }
             for (path, data) in raw {
                 if path.exists() {
                     debug!(target:"txpool::blob", ?path, "Blob already exists");
@@ -692,6 +712,9 @@ impl DiskFileBlobStoreInner {
         let path = self.blob_disk_file(tx);
         {
             let _lock = self.file_lock.write();
+            // A pending delete mark is stale once the blob is re-added, otherwise a following
+            // cleanup would unlink the sidecar. Cleanup consumes marks under the same lock.
+            self.txs_to_delete.write().remove(&tx);
             if !path.exists() {
                 fs::write(&path, data)
                     .map_err(|e| DiskFileBlobStoreError::WriteFile(tx, path, e))?;
@@ -1180,6 +1203,58 @@ mod tests {
         store.clear_cache();
 
         assert_eq!(store.get_cells(tx_hash, cell_mask).unwrap(), Some(expected));
+    }
+
+    #[test]
+    fn disk_reinsert_after_delete_survives_cleanup() {
+        let (store, _dir) = tmp_store();
+
+        let (tx, blob) = rng_blobs(1).into_iter().next().unwrap();
+        store.insert(tx, blob.clone().into()).unwrap();
+        let (len, size) = (store.inner.size_tracker.blobs_len(), store.data_size_hint());
+
+        store.delete(tx).unwrap();
+        assert!(store.inner.txs_to_delete.read().contains(&tx));
+        store.insert(tx, blob.clone().into()).unwrap();
+        assert!(!store.inner.txs_to_delete.read().contains(&tx));
+
+        let stat = store.cleanup();
+        assert_eq!(stat.delete_succeed, 0);
+        store.clear_cache();
+
+        assert!(store.inner.blob_disk_file(tx).is_file());
+        assert_eq!(store.get(tx).unwrap().map(Arc::unwrap_or_clone), Some(blob));
+        assert_eq!(store.inner.size_tracker.blobs_len(), len);
+        assert_eq!(store.data_size_hint(), size);
+    }
+
+    #[test]
+    fn disk_reinsert_all_after_delete_all_survives_cleanup() {
+        let (store, _dir) = tmp_store();
+
+        let blobs = rng_blobs(5);
+        let all_hashes = blobs.iter().map(|(tx, _)| *tx).collect::<Vec<_>>();
+        store.insert_all(wrapped_blobs(blobs.clone())).unwrap();
+        let (len, size) = (store.inner.size_tracker.blobs_len(), store.data_size_hint());
+
+        // re-add only a subset, the rest must still be removed
+        store.delete_all(all_hashes).unwrap();
+        store.insert_all(wrapped_blobs(blobs[..3].to_vec())).unwrap();
+        assert_eq!(store.inner.txs_to_delete.read().len(), 2);
+
+        let stat = store.cleanup();
+        assert_eq!(stat.delete_succeed, 2);
+        store.clear_cache();
+
+        for (tx, blob) in &blobs[..3] {
+            assert!(store.inner.blob_disk_file(*tx).is_file());
+            assert_eq!(store.get(*tx).unwrap().map(Arc::unwrap_or_clone).as_ref(), Some(blob));
+        }
+        for (tx, _) in &blobs[3..] {
+            assert!(!store.inner.blob_disk_file(*tx).exists());
+        }
+        assert_eq!(store.inner.size_tracker.blobs_len(), len - 2);
+        assert!(store.data_size_hint() <= size);
     }
 
     #[test]
