@@ -16,7 +16,7 @@ use reth_rpc_eth_types::{
     EthApiError, PendingBlockEnv, PendingBlockEnvOrigin, RpcInvalidTransactionError,
 };
 use reth_storage_api::BlockReaderIdExt;
-use reth_tasks::pool::BlockingTaskGuard;
+use reth_tasks::{cancel::is_cancelled, pool::BlockingTaskGuard};
 use reth_transaction_pool::{
     EthBlobTransactionSidecar, EthPoolTransaction, PoolPooledTx, PoolTransaction, TransactionPool,
 };
@@ -146,7 +146,8 @@ where
         }
 
         // Apply gas limit: default to call gas limit unless user requests a smaller limit
-        evm_env.block_env_mut().gas_limit = U256::from(gas_limit.unwrap_or(call_gas_limit));
+        let block_gas_limit = gas_limit.unwrap_or(call_gas_limit);
+        evm_env.block_env_mut().gas_limit = U256::from(block_gas_limit);
 
         // The bundle is simulated on top of the state block, so default to the next block's base
         // fee. <https://github.com/flashbots/mev-geth/blob/fddf97beec5877483f879a77b7dea2e58a58d653/internal/ethapi/api.go#L2130>
@@ -165,8 +166,15 @@ where
         // use the block number of the request
         evm_env.block_env_mut().number = U256::from(block_number);
 
+        let permit = self
+            .eth_api()
+            .acquire_owned_blocking_io()
+            .await
+            .map_err(|_| EthApiError::InternalEthError)?;
+
         self.eth_api()
             .spawn_with_state_at_block(at, move |eth_api, mut db| {
+                let _permit = permit;
                 let coinbase = evm_env.block_env().beneficiary;
                 let basefee = evm_env.block_base_fee();
 
@@ -184,6 +192,18 @@ where
 
                 let mut results = Vec::with_capacity(transactions.len());
                 for tx in transactions {
+                    if is_cancelled() {
+                        return Err(EthApiError::InternalEthError.into())
+                    }
+
+                    // Like in a block, the bundle's transactions share one gas pool.
+                    if tx.gas_limit() > block_gas_limit.saturating_sub(total_gas_used) {
+                        return Err(EthApiError::InvalidParams(
+                            EthBundleError::BundleGasLimitExceeded(block_gas_limit).to_string(),
+                        )
+                        .into())
+                    }
+
                     let signer = tx.signer();
                     let tx = {
                         let mut tx = <Eth::Pool as TransactionPool>::Transaction::from_pooled(tx);
@@ -322,6 +342,9 @@ pub enum EthBundleError {
     /// Thrown when the blob gas usage of the blob transactions in a bundle exceed the maximum.
     #[error("blob gas usage exceeds the limit of {0} gas per block.")]
     Eip4844BlobGasExceeded(u64),
+    /// Thrown when the gas limits of the bundle's transactions exceed the block gas limit.
+    #[error("bundle gas exceeds the block gas limit of {0}")]
+    BundleGasLimitExceeded(u64),
 }
 
 #[cfg(test)]
@@ -342,6 +365,7 @@ mod tests {
     use reth_provider::{
         providers::BlockchainProvider, test_utils::create_test_provider_factory_with_chain_spec,
     };
+    use reth_rpc_eth_api::helpers::SpawnBlocking;
     use reth_storage_overlay::OverlayManager;
     use reth_testing_utils::generators::{self, generate_key, sign_tx_with_key_pair};
     use reth_transaction_pool::test_utils::testing_pool;
@@ -455,6 +479,83 @@ mod tests {
                 (next_base_fee + 1) as u128 - base_fee.unwrap_or(pending_next_base_fee as u128);
             assert_bundle_fees(&response, expected_tip);
         }
+    }
+
+    /// The bundle's transactions share the block gas limit, and the simulation waits for a
+    /// blocking IO permit.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn call_bundle_shares_gas_limit_and_takes_blocking_io_permit() {
+        let mut rng = generators::rng();
+        let key = generate_key(&mut rng);
+        let txs: Vec<_> = (0..2)
+            .map(|nonce| {
+                sign_tx_with_key_pair(
+                    key,
+                    reth_ethereum_primitives::Transaction::Eip1559(TxEip1559 {
+                        chain_id: 1,
+                        nonce,
+                        gas_limit: 21_000,
+                        max_fee_per_gas: INITIAL_BASE_FEE as u128,
+                        to: TxKind::Call(Address::random()),
+                        ..Default::default()
+                    }),
+                )
+            })
+            .collect();
+        let sender = txs[0].recover_signer().unwrap();
+
+        let genesis = Genesis::default()
+            .with_gas_limit(30_000_000)
+            .with_base_fee(Some(INITIAL_BASE_FEE as u128))
+            .extend_accounts([(
+                sender,
+                GenesisAccount::default().with_balance(U256::from(10u128.pow(18))),
+            )]);
+        let chain_spec =
+            Arc::new(ChainSpecBuilder::mainnet().cancun_activated().genesis(genesis).build());
+        let factory = create_test_provider_factory_with_chain_spec(chain_spec);
+        init_genesis(&factory).unwrap();
+        let provider = BlockchainProvider::new(factory).unwrap();
+
+        let eth_api = EthApiBuilder::new(
+            provider.clone(),
+            testing_pool(),
+            NoopNetwork::default(),
+            EthEvmConfig::new(provider.chain_spec()),
+        )
+        .max_blocking_io_requests(1)
+        .build();
+        let api = EthBundle::new(eth_api.clone(), BlockingTaskGuard::new(4));
+
+        let bundle = EthCallBundle {
+            txs: txs.iter().map(|tx| tx.encoded_2718().into()).collect(),
+            block_number: 1,
+            state_block_number: BlockNumberOrTag::Number(0),
+            ..Default::default()
+        };
+
+        let error = api
+            .call_bundle(EthCallBundle { gas_limit: Some(41_999), ..bundle.clone() })
+            .await
+            .unwrap_err();
+        assert_eq!(
+            error.to_string(),
+            EthApiError::InvalidParams(EthBundleError::BundleGasLimitExceeded(41_999).to_string())
+                .to_string()
+        );
+
+        let bundle = EthCallBundle { gas_limit: Some(42_000), ..bundle };
+        let permit = eth_api.acquire_owned_blocking_io().await.unwrap();
+        assert!(tokio::time::timeout(
+            std::time::Duration::from_millis(200),
+            api.call_bundle(bundle.clone())
+        )
+        .await
+        .is_err());
+
+        drop(permit);
+        let response = api.call_bundle(bundle).await.unwrap();
+        assert_eq!(response.total_gas_used, 42_000);
     }
 
     /// A pre-London state has no base fee check in the EVM, so the bundle must reject a fee cap
