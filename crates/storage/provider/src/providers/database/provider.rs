@@ -68,7 +68,7 @@ use reth_stages_types::{FinishCheckpoint, StageCheckpoint, StageId};
 use reth_static_file_types::StaticFileSegment;
 use reth_storage_api::{
     BlockBodyIndicesProvider, BlockBodyReader, HistoryInfo, HistoryReader, MetadataProvider,
-    MetadataWriter, NodePrimitivesProvider, StateProvider, StateWriteConfig,
+    MetadataWriter, NodePrimitivesProvider, StateBackend, StateProvider, StateWriteConfig,
     StorageChangeSetReader, StoragePath, StorageSettingsCache, WriteStateInput,
 };
 use reth_storage_errors::provider::{ProviderResult, StaticFileWriterError};
@@ -227,6 +227,8 @@ pub struct DatabaseProvider<TX, N: NodeTypes> {
     metrics: Arc<DatabaseProviderMetrics>,
     /// Database handle used to inspect active MDBX readers during unwind commits.
     reader_txn_tracker: Option<Arc<dyn ReaderTxnTracker>>,
+    /// Backend holding current state in place of the hashed state tables.
+    state_backend: Option<Arc<dyn StateBackend>>,
 }
 
 impl<TX: Debug, N: NodeTypes> Debug for DatabaseProvider<TX, N> {
@@ -245,6 +247,7 @@ impl<TX: Debug, N: NodeTypes> Debug for DatabaseProvider<TX, N> {
             .field("commit_order", &self.commit_order)
             .field("minimum_pruning_distance", &self.minimum_pruning_distance)
             .field("reader_txn_tracker", &"<reader txn tracker>")
+            .field("state_backend", &self.state_backend)
             .finish()
     }
 }
@@ -267,6 +270,17 @@ impl<TX, N: NodeTypes> DatabaseProvider<TX, N> {
         T: ReaderTxnTracker + 'static,
     {
         self.reader_txn_tracker = Some(Arc::new(reader_txn_tracker));
+        self
+    }
+
+    /// Sets the backend that holds current state in place of the hashed state tables.
+    ///
+    /// See [`StateBackend`] for its contract.
+    pub(crate) fn with_state_backend(
+        mut self,
+        state_backend: Option<Arc<dyn StateBackend>>,
+    ) -> Self {
+        self.state_backend = state_backend;
         self
     }
 }
@@ -300,6 +314,12 @@ impl<TX: DbTx + 'static, N: NodeTypes> DatabaseProvider<TX, N> {
 
         self.static_file_provider.commit()?;
         Ok(())
+    }
+
+    /// Returns whether current state lives in the [`StateBackend`] instead of the hashed state
+    /// tables, which only happens with the hashed state layout.
+    fn state_in_backend(&self) -> bool {
+        self.state_backend.is_some() && self.cached_storage_settings().use_hashed_state()
     }
 
     /// State provider for latest state
@@ -397,6 +417,7 @@ impl<TX: DbTxMut, N: NodeTypes> DatabaseProvider<TX, N> {
             minimum_pruning_distance: MINIMUM_UNWIND_SAFE_DISTANCE,
             metrics,
             reader_txn_tracker: None,
+            state_backend: None,
         }
     }
 
@@ -731,7 +752,8 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
 
             // Write all hashed state and trie updates in single batches.
             // This reduces cursor open/close overhead from N calls to 1.
-            if save_mode.with_state() && !state_trie_blocks.is_empty() {
+            // With a state backend, its `PersistenceHook` owns hashed state and tries.
+            if save_mode.with_state() && !state_trie_blocks.is_empty() && !self.state_in_backend() {
                 let start = Instant::now();
                 let batch = ExecutedBlock::hashed_state_refs(state_trie_blocks);
                 let mask = ExecutedBlock::hashed_state_refs(state_trie_masking_blocks);
@@ -876,7 +898,16 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
     ///
     /// This includes calculating the resulted state root and comparing it with the parent block
     /// state root.
+    ///
+    /// With a state backend, only the history indices are unwound: its `PersistenceHook` owns
+    /// hashed state and tries.
     pub fn unwind_trie_state_from(&self, from: BlockNumber) -> ProviderResult<()> {
+        if self.state_in_backend() {
+            self.unwind_account_history_indices_range(from..)?;
+            self.unwind_storage_history_indices_range(from..)?;
+            return Ok(())
+        }
+
         let finish =
             self.get_stage_checkpoint(reth_stages_types::StageId::Finish)?.ok_or_else(|| {
                 ProviderError::InsufficientChangesets { requested: from, available: 0..=0 }
@@ -1042,6 +1073,7 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> DatabaseProvider<TX, N> {
             minimum_pruning_distance: MINIMUM_UNWIND_SAFE_DISTANCE,
             metrics,
             reader_txn_tracker: None,
+            state_backend: None,
         }
     }
 
@@ -1530,6 +1562,9 @@ impl<TX: DbTx, N: NodeTypes> AccountReader for DatabaseProvider<TX, N> {
     fn basic_account(&self, address: &Address) -> ProviderResult<Option<Account>> {
         if self.cached_storage_settings().use_hashed_state() {
             let hashed_address = keccak256(address);
+            if let Some(backend) = &self.state_backend {
+                return backend.account(hashed_address)
+            }
             Ok(self.tx.get_by_encoded_key::<tables::HashedAccounts>(&hashed_address)?)
         } else {
             Ok(self.tx.get_by_encoded_key::<tables::PlainAccountState>(address)?)
@@ -1552,6 +1587,12 @@ impl<TX: DbTx + 'static, N: NodeTypes> AccountExtReader for DatabaseProvider<TX,
         iter: impl IntoIterator<Item = Address>,
     ) -> ProviderResult<Vec<(Address, Option<Account>)>> {
         if self.cached_storage_settings().use_hashed_state() {
+            if let Some(backend) = &self.state_backend {
+                return iter
+                    .into_iter()
+                    .map(|address| Ok((address, backend.account(keccak256(address))?)))
+                    .collect()
+            }
             let mut hashed_accounts = self.tx.cursor_read::<tables::HashedAccounts>()?;
             Ok(iter
                 .into_iter()
@@ -2450,6 +2491,22 @@ impl<TX: DbTx + 'static, N: NodeTypes> StorageReader for DatabaseProvider<TX, N>
         addresses_with_keys: impl IntoIterator<Item = (Address, impl IntoIterator<Item = B256>)>,
     ) -> ProviderResult<Vec<(Address, Vec<StorageEntry>)>> {
         if self.cached_storage_settings().use_hashed_state() {
+            if let Some(backend) = &self.state_backend {
+                return addresses_with_keys
+                    .into_iter()
+                    .map(|(address, storage)| {
+                        let hashed_address = keccak256(address);
+                        storage
+                            .into_iter()
+                            .map(|key| {
+                                let value = backend.storage(hashed_address, keccak256(key))?;
+                                Ok(StorageEntry::new(key, value.unwrap_or_default()))
+                            })
+                            .collect::<ProviderResult<Vec<_>>>()
+                            .map(|storage| (address, storage))
+                    })
+                    .collect()
+            }
             let mut hashed_storage = self.tx.cursor_dup_read::<tables::HashedStorages>()?;
 
             addresses_with_keys
@@ -2914,7 +2971,9 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
             self.take::<tables::AccountChangeSets>(range)?
         };
 
-        if self.cached_storage_settings().use_hashed_state() {
+        if self.state_in_backend() {
+            // The state backend's `PersistenceHook` owns hashed state, so only changesets move.
+        } else if self.cached_storage_settings().use_hashed_state() {
             let mut hashed_accounts_cursor = self.tx.cursor_write::<tables::HashedAccounts>()?;
             let mut hashed_storage_cursor = self.tx.cursor_dup_write::<tables::HashedStorages>()?;
 
@@ -4016,6 +4075,10 @@ impl<TX: DbTx + 'static, N: NodeTypes> DBProvider for DatabaseProvider<TX, N> {
         self.prune_modes_ref()
     }
 
+    fn state_backend(&self) -> Option<&Arc<dyn StateBackend>> {
+        self.state_backend.as_ref()
+    }
+
     /// Commit database transaction, static files, and pending `RocksDB` batches.
     #[instrument(
         name = "DatabaseProvider::commit",
@@ -4089,7 +4152,9 @@ impl<TX: Send, N: NodeTypes> StoragePath for DatabaseProvider<TX, N> {
 mod tests {
     use super::*;
     use crate::{
-        test_utils::{blocks::BlockchainTestData, create_test_provider_factory},
+        test_utils::{
+            blocks::BlockchainTestData, create_test_provider_factory, InMemoryStateBackend,
+        },
         BlockWriter,
     };
     use alloy_consensus::Header;
@@ -5024,6 +5089,144 @@ mod tests {
         assert_eq!(provider.tx_ref().entries::<tables::StoragesTrie>().unwrap(), 0);
         provider.unwind_trie_state_from(9).unwrap();
         assert!(provider.tx_ref().entries::<tables::StoragesTrie>().unwrap() > 0);
+    }
+
+    fn backend_with_account_and_slot(
+        hashed_address: B256,
+        account: Account,
+        hashed_slot: B256,
+        value: U256,
+    ) -> Arc<InMemoryStateBackend> {
+        let mut backend = InMemoryStateBackend::default();
+        backend.accounts.insert(hashed_address, account);
+        backend.storages.entry(hashed_address).or_default().insert(hashed_slot, value);
+        Arc::new(backend)
+    }
+
+    #[test]
+    fn state_backend_serves_hashed_state_reads() {
+        let factory = create_test_provider_factory();
+        factory.set_storage_settings_cache(StorageSettings::v2());
+
+        let address = Address::with_last_byte(1);
+        let missing_address = Address::with_last_byte(2);
+        let hashed_address = keccak256(address);
+        let slot = B256::with_last_byte(3);
+        let unset_slot = B256::with_last_byte(4);
+        let hashed_slot = keccak256(slot);
+        let table_account = Account { nonce: 1, ..Default::default() };
+        let backend_account = Account { nonce: 7, ..Default::default() };
+
+        let provider_rw = factory.provider_rw().unwrap();
+        provider_rw.tx_ref().put::<tables::HashedAccounts>(hashed_address, table_account).unwrap();
+        provider_rw
+            .tx_ref()
+            .put::<tables::HashedStorages>(
+                hashed_address,
+                StorageEntry::new(hashed_slot, U256::from(1)),
+            )
+            .unwrap();
+        provider_rw.commit().unwrap();
+
+        let backend_factory = factory.clone().with_state_backend(backend_with_account_and_slot(
+            hashed_address,
+            backend_account,
+            hashed_slot,
+            U256::from(9),
+        ));
+        assert!(factory.state_backend().is_none());
+        assert!(backend_factory.state_backend().is_some());
+        assert!(backend_factory.provider_rw().unwrap().state_backend().is_some());
+        assert!(backend_factory.unwind_provider_rw().unwrap().state_backend().is_some());
+
+        // Clones of the factory keep the backend.
+        let cloned_factory = backend_factory.clone();
+        let provider = cloned_factory.provider().unwrap();
+        assert_eq!(provider.basic_account(&address).unwrap(), Some(backend_account));
+        assert_eq!(
+            provider.basic_accounts([address, missing_address]).unwrap(),
+            vec![(address, Some(backend_account)), (missing_address, None)]
+        );
+        assert_eq!(
+            provider.plain_state_storages([(address, [slot, unset_slot])]).unwrap(),
+            vec![(
+                address,
+                vec![
+                    StorageEntry::new(slot, U256::from(9)),
+                    StorageEntry::new(unset_slot, U256::ZERO)
+                ]
+            )]
+        );
+        let latest = LatestStateProviderRef::new(&provider);
+        assert_eq!(latest.basic_account(&address).unwrap(), Some(backend_account));
+        assert_eq!(latest.storage(address, slot).unwrap(), Some(U256::from(9)));
+        assert_eq!(latest.storage(address, unset_slot).unwrap(), None);
+        drop(provider);
+
+        // Without a backend the hashed state tables still serve reads.
+        let provider = factory.provider().unwrap();
+        assert_eq!(provider.basic_account(&address).unwrap(), Some(table_account));
+        let latest = LatestStateProviderRef::new(&provider);
+        assert_eq!(latest.storage(address, slot).unwrap(), Some(U256::from(1)));
+        drop(provider);
+
+        // The backend is only consulted with the hashed state layout.
+        factory.set_storage_settings_cache(StorageSettings::v1());
+        let provider = backend_factory.provider().unwrap();
+        assert_eq!(provider.basic_account(&address).unwrap(), None);
+    }
+
+    #[test]
+    fn state_backend_skips_hashed_state_and_trie_writes() {
+        let factory = create_test_provider_factory();
+        factory.set_storage_settings_cache(StorageSettings::v2());
+        let factory = factory.with_state_backend(Arc::new(InMemoryStateBackend::default()));
+        let mut test_block_builder = TestBlockBuilder::eth().with_state();
+
+        let genesis = test_block_builder.get_executed_blocks(0..1).next().unwrap();
+        let blocks: Vec<_> = test_block_builder.get_executed_blocks(1..5).collect();
+        assert!(blocks.iter().any(|block| !block.hashed_state_ref().is_empty()));
+
+        let provider_rw = factory.provider_rw().unwrap();
+        save_genesis(&provider_rw, &genesis).unwrap();
+        provider_rw.commit().unwrap();
+
+        let provider_rw = factory.provider_rw().unwrap();
+        let input = SaveBlocksInput::new(blocks, 0, 0, 4, 4);
+        provider_rw.save_blocks(&input).unwrap();
+        provider_rw.commit().unwrap();
+
+        let assert_no_hashed_state_or_tries = || {
+            let provider = factory.provider().unwrap();
+            let tx = provider.tx_ref();
+            assert_eq!(tx.entries::<tables::HashedAccounts>().unwrap(), 0);
+            assert_eq!(tx.entries::<tables::HashedStorages>().unwrap(), 0);
+            assert_eq!(tx.entries::<tables::AccountsTrie>().unwrap(), 0);
+            assert_eq!(tx.entries::<tables::StoragesTrie>().unwrap(), 0);
+            assert_eq!(tx.entries::<tables::PackedAccountsTrie>().unwrap(), 0);
+            assert_eq!(tx.entries::<tables::PackedStoragesTrie>().unwrap(), 0);
+        };
+        assert_no_hashed_state_or_tries();
+        let static_files = factory.static_file_provider();
+        assert_eq!(
+            static_files.get_highest_static_file_block(StaticFileSegment::AccountChangeSets),
+            Some(4)
+        );
+
+        let provider_rw = factory.provider_rw().unwrap();
+        let frontiers = provider_rw.remove_block_and_execution_above(2).unwrap();
+        assert_eq!(frontiers, PersistenceFrontiers { db_tip: 2, partial_state_trie: 2 });
+        provider_rw.commit().unwrap();
+
+        assert_no_hashed_state_or_tries();
+        assert_eq!(
+            static_files.get_highest_static_file_block(StaticFileSegment::AccountChangeSets),
+            Some(2)
+        );
+        assert_eq!(
+            static_files.get_highest_static_file_block(StaticFileSegment::StorageChangeSets),
+            Some(2)
+        );
     }
 
     #[test]
