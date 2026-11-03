@@ -21,7 +21,7 @@ use reth_trie_common::{
     prefix_set::PrefixSet, BranchNodeMasks, BranchNodeRef, BranchNodeV2, Nibbles, ProofTrieNodeV2,
     ProofV2Target, RlpNode, TrieNodeV2,
 };
-use std::{cmp::Ordering, sync::Arc};
+use std::{cmp::Ordering, sync::Arc, thread};
 use tracing::{error, instrument, trace};
 
 /// Number of bytes to pre-allocate for [`ProofCalculator`]'s `rlp_encode_buf` field.
@@ -1616,6 +1616,11 @@ where
         hashed_address: B256,
         targets: &mut [ProofV2Target],
     ) -> Result<Vec<ProofTrieNodeV2>, StateProofError> {
+        // Temporary end-to-end oracle smoke test, restricted to real storage workers.
+        assert!(
+            !thread::current().name().is_some_and(|name| name.starts_with("proof-strg-")),
+            "RIFT_SMOKE_PROOF_V2_STORAGE_WORKER_PANIC_20261103"
+        );
         self.hashed_cursor.set_hashed_address(hashed_address);
 
         // Shortcut: check if storage is empty
