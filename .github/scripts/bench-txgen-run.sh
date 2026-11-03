@@ -74,11 +74,6 @@ fi
 DATADIR="$SCHELK_MOUNT/$DATADIR_NAME"
 mkdir -p "$OUTPUT_DIR"
 LOG="${OUTPUT_DIR}/node.log"
-# reth runs as root and creates a missing JWT secret with 0600 permissions, which
-# the bench client (run as this user) cannot read. Create it here, owned by this
-# user outside the uploaded output dir, and pass it to both sides.
-JWT_SECRET="$(mktemp)"
-od -An -N32 -tx1 /dev/urandom | tr -d ' \n' > "$JWT_SECRET"
 TARGET_METRICS_RANGE="$OUTPUT_DIR/target-metrics-range.json"
 
 RETH_SCOPE="${RETH_SCOPE:-reth-bench.scope}"
@@ -304,7 +299,12 @@ cleanup() {
 }
 TAIL_PID=
 TRACY_PID=
+# reth runs as root and creates a missing JWT secret with 0600 permissions, which
+# the bench client (run as this user) cannot read. Create it owned by this user,
+# outside the uploaded output dir, once cleanup is set to remove it.
+JWT_SECRET="$(mktemp)"
 trap cleanup EXIT
+od -An -N32 -tx1 /dev/urandom | tr -d ' \n' > "$JWT_SECRET"
 
 sudo systemctl stop "$RETH_SCOPE" 2>/dev/null || true
 sudo systemctl reset-failed "$RETH_SCOPE" 2>/dev/null || true
