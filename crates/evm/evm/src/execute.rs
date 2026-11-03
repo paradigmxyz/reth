@@ -165,12 +165,8 @@ pub trait Evm {
     where
         I: evm2::Inspector<Self::EvmTypes> + 'static;
 
-    /// Removes the inspector installed by [`BlockExecutor::inspect_transaction_without_commit`]
-    /// and returns it, or returns `None` and leaves the active inspector in place if the slot holds
-    /// anything else.
-    fn take_traced_inspector<I>(&mut self) -> Option<I>
-    where
-        I: evm2::Inspector<Self::EvmTypes> + 'static;
+    /// Removes and returns the active inspector, if any.
+    fn take_inspector(&mut self) -> Option<Box<dyn evm2::Inspector<Self::EvmTypes> + '_>>;
 
     /// Returns the accepted state overlay, including earlier committed transactions.
     fn state_db_mut(&mut self) -> &mut dyn DynDatabase;
@@ -255,19 +251,8 @@ impl<'a, T: evm2::EvmTypes<Tx: Typed2718>> Evm for evm2::Evm<'a, T> {
         evm2::Evm::set_inspector(self, inspector);
     }
 
-    fn take_traced_inspector<I: evm2::Inspector<T> + 'static>(&mut self) -> Option<I> {
-        let inspector = self.clear_inspector()?;
-        let erased: &dyn evm2::evm::NonStaticAny = &**inspector;
-        if erased.type_id() != core::any::TypeId::of::<TracedInspector<I>>() {
-            self.set_boxed_inspector(inspector);
-            return None
-        }
-        // SAFETY: the erased type IDs match, and only this crate constructs a `TracedInspector`,
-        // always around a `'static` inspector, so the boxed value is a `TracedInspector<I>` and no
-        // lifetime is extended.
-        let traced =
-            unsafe { Box::from_raw(Box::into_raw(inspector).cast::<TracedInspector<I>>()) };
-        Some(traced.0)
+    fn take_inspector(&mut self) -> Option<Box<dyn evm2::Inspector<T> + '_>> {
+        self.clear_inspector()
     }
 
     fn state_db_mut(&mut self) -> &mut dyn DynDatabase {
@@ -327,11 +312,26 @@ fn execute_result<T: evm2::EvmTypes<Tx: Typed2718>>(
 
 /// Inspector installed by [`BlockExecutor::inspect_transaction_without_commit`].
 ///
-/// Only this crate constructs it, and only around a `'static` inspector, which is what lets
-/// [`Evm::take_traced_inspector`] downcast a matching inspector soundly: evm2's type IDs ignore
+/// Only this module constructs it, and only around a `'static` inspector, which is what lets
+/// [`TracedInspector::downcast`] cast a matching inspector soundly: evm2's type IDs ignore
 /// lifetimes, so a downcast to an arbitrary inspector type could extend a borrow.
 #[derive(Debug)]
-pub struct TracedInspector<I>(I);
+struct TracedInspector<I>(I);
+
+impl<I: 'static> TracedInspector<I> {
+    /// Returns the wrapped inspector if `inspector` is a `TracedInspector<I>`.
+    fn downcast<T: evm2::EvmTypesHost>(inspector: Box<dyn evm2::Inspector<T> + '_>) -> Option<I> {
+        let erased: &dyn evm2::evm::NonStaticAny = &*inspector;
+        if erased.type_id() != core::any::TypeId::of::<Self>() {
+            return None
+        }
+        // SAFETY: the erased type IDs match, and only this module constructs a `TracedInspector`,
+        // always around a `'static` inspector, so the boxed value is a `TracedInspector<I>` and no
+        // lifetime is extended.
+        let traced = unsafe { Box::from_raw(Box::into_raw(inspector).cast::<Self>()) };
+        Some(traced.0)
+    }
+}
 
 impl<T: evm2::EvmTypesHost, I: evm2::Inspector<T>> evm2::Inspector<T> for TracedInspector<I> {
     fn initialize_interp(&mut self, interp: &mut Interpreter<'_, '_, T>) {
@@ -518,9 +518,10 @@ pub trait BlockExecutor: Sized {
     {
         self.evm_mut().set_inspector(TracedInspector(inspector));
         let output = self.execute_transaction_without_commit(transaction);
-        let inspector = self.evm_mut().take_traced_inspector().ok_or_else(|| {
-            BlockExecutionError::msg("block executor replaced the tracing inspector")
-        });
+        let inspector =
+            self.evm_mut().take_inspector().and_then(TracedInspector::downcast).ok_or_else(|| {
+                BlockExecutionError::msg("block executor replaced the tracing inspector")
+            });
         let (inspector, output) = (inspector?, output?);
         Ok((inspector, output))
     }

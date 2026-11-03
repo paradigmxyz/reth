@@ -864,10 +864,5 @@ fn inspect_transaction_without_commit_returns_inspector() {
     assert_eq!(inspector.0, 1);
     assert_eq!(output.result().result.tx_gas_used(), 21_000);
     // the inspector is removed once the transaction is executed
-    assert!(executor.evm_mut().clear_inspector().is_none());
-
-    // an inspector installed directly is never taken as a traced one, even with the same type
-    executor.evm_mut().set_inspector(CallCounter::default());
-    assert!(executor.evm_mut().take_traced_inspector::<CallCounter>().is_none());
-    assert!(executor.evm_mut().clear_inspector().is_some());
+    assert!(executor.evm_mut().take_inspector().is_none());
 }
