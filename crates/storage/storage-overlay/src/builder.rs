@@ -497,7 +497,13 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
                 let (overlay_trie, overlay_state) =
                     self.resolve_state_trie_overlays(anchor.hash)?;
 
-                let trie_updates = if trie_reverts.is_empty() {
+                // Without trie changesets the reverts describe Finish, while the overlay trie
+                // nodes are relative to the anchor's trie. Mixing them can leave Finish-only nodes
+                // beneath anchor-relative branches, so only the prefix sets may describe the
+                // in-memory blocks.
+                let trie_updates = if !trie_changesets {
+                    trie_reverts
+                } else if trie_reverts.is_empty() {
                     overlay_trie
                 } else if !overlay_trie.is_empty() {
                     let mut trie_reverts = (*trie_reverts).clone();
@@ -518,8 +524,7 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
 
                 // Without trie changesets the trie nodes still describe Finish, so every key whose
                 // value differs from Finish must be invalidated: both the reverted keys and the
-                // keys changed by the in-memory blocks replayed on top of the anchor. The overlay
-                // trie nodes are only valid relative to the anchor's trie, not Finish's.
+                // keys changed by the in-memory blocks replayed on top of the anchor.
                 let prefix_sets = if trie_changesets {
                     Default::default()
                 } else {
@@ -1172,6 +1177,9 @@ mod tests {
             .with_appended_block(fork)
             .build_state_trie_overlay(&provider, false)
             .unwrap();
+
+        // The fork's trie nodes are relative to the anchor, not to the Finish trie on disk.
+        assert!(account_node_paths(&overlay).is_empty());
 
         let mut prefix_sets = overlay.input().prefix_sets.clone().freeze();
         assert!(prefix_sets
