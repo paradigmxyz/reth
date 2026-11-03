@@ -164,7 +164,7 @@ pub(crate) fn execute_transaction_with_condition<T: EvmTypes>(
     stream_state: bool,
     on_state_update: &mut impl FnMut(StateUpdate),
     transaction: &Recovered<T::Tx>,
-    commit: impl FnOnce(&TxResult<T>) -> reth_evm::CommitChanges,
+    commit: impl FnOnce(&TxResult<T>, evm2::TxStateChanges<'_>) -> reth_evm::CommitChanges,
 ) -> Result<Option<TxResult<T>>, HandlerError>
 where
     T::Tx: Typed2718,
@@ -172,7 +172,7 @@ where
     let mut update = StateUpdate::default();
     let result = match evm.transact(transaction) {
         Ok(executed) => {
-            if commit(executed.result()).should_commit() {
+            if commit(executed.result(), executed.changes()).should_commit() {
                 for changes in executed.account_changes() {
                     block_state
                         .commit_account_changes(changes, stream_state.then_some(&mut update));
@@ -664,7 +664,7 @@ mod tests {
                             stream_state,
                             &mut hook,
                             &transaction,
-                            |_| reth_evm::CommitChanges::Yes,
+                            |_, _| reth_evm::CommitChanges::Yes,
                         )
                         .unwrap()
                         .unwrap();

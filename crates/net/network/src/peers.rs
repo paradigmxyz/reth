@@ -149,9 +149,11 @@ impl PeersManager {
             HashSet::with_capacity_and_hasher(trusted_nodes.len(), Default::default());
 
         for trusted_peer in &trusted_nodes {
+            // Tracked even if resolution fails, otherwise the resolver's later results for this
+            // peer are discarded as revoked.
+            trusted_peer_ids.insert(trusted_peer.id);
             match trusted_peer.resolve_blocking() {
                 Ok(NodeRecord { address, tcp_port, udp_port, id }) => {
-                    trusted_peer_ids.insert(id);
                     peers.entry(id).or_insert_with(|| {
                         Peer::trusted(PeerAddr::new_with_ports(address, tcp_port, Some(udp_port)))
                     });
@@ -188,6 +190,14 @@ impl PeersManager {
             peers.entry(id).or_insert_with(|| {
                 Peer::new(PeerAddr::new_with_ports(address, tcp_port, Some(udp_port)))
             });
+        }
+
+        // A configured trusted peer that failed to resolve has no trusted entry yet, so a persisted
+        // or basic record for it must be promoted to keep the id set and the kind in sync.
+        for id in &trusted_peer_ids {
+            if let Some(peer) = peers.get_mut(id) {
+                peer.kind = PeerKind::Trusted;
+            }
         }
 
         trace!(target: "net::peers", trusted_peers=?trusted_peer_ids, "Initialized peers manager");
@@ -467,6 +477,9 @@ impl PeersManager {
                 let mut peer = Peer::with_state(PeerAddr::from_tcp(addr), PeerConnectionState::In);
                 peer.mark_connected();
                 peer.remove_after_disconnect = true;
+                if is_trusted {
+                    peer.kind = PeerKind::Trusted;
+                }
                 entry.insert(peer);
                 self.queued_actions.push_back(PeerAction::PeerAdded(peer_id));
             }
@@ -918,9 +931,11 @@ impl PeersManager {
     }
 
     /// Adds a trusted peer that may use a hostname instead of an IP address.
+    ///
+    /// An already tracked peer is marked as trusted right away.
     pub(crate) fn add_trusted_peer_node(&mut self, trusted: TrustedPeer) {
         let peer_id = trusted.id;
-        self.trusted_peer_ids.insert(peer_id);
+        self.add_trusted_peer_id(peer_id);
         self.trusted_peers_resolver.remove(peer_id);
         self.trusted_peers_resolver.trusted_peers.push(trusted);
         self.trusted_peers_resolver.interval.reset_immediately();
@@ -1274,6 +1289,13 @@ impl PeersManager {
         );
 
         if let Some(peer) = self.peers.get_mut(&peer_id) {
+            // The peer may have been added as basic by discovery or an inbound session before the
+            // first successful resolution.
+            peer.kind = PeerKind::Trusted;
+            if peer.state.is_incoming() {
+                // the resolved address replaces the inbound one, see `add_peer_kind`
+                peer.remove_after_disconnect = false;
+            }
             if peer.addr != new_addr {
                 peer.addr = new_addr;
                 trace!(target: "net::peers", ?peer_id, addr=?peer.addr, "Updated resolved trusted peer address");
@@ -3754,6 +3776,57 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_configured_trusted_peer_resolves_after_startup_failure() {
+        let peer_id = PeerId::random();
+        let trusted = TrustedPeer::new(Host::Domain("example.invalid".into()), 30303, peer_id);
+        let mut manager = PeersManager::new(PeersConfig::test().with_trusted_nodes(vec![trusted]));
+        assert!(!manager.peers.contains_key(&peer_id));
+
+        let addr = "10.0.0.1:30303".parse::<SocketAddr>().unwrap();
+        manager.on_resolved_peer(peer_id, NodeRecord::new(addr, peer_id));
+        let peer = manager.peers.get(&peer_id).expect("peer should be added after resolution");
+        assert!(peer.is_trusted());
+        assert_eq!(peer.addr.tcp(), addr);
+    }
+
+    #[tokio::test]
+    async fn test_unresolved_trusted_peer_promotes_persisted_entry() {
+        let peer_id = PeerId::random();
+        let trusted = TrustedPeer::new(Host::Domain("example.invalid".into()), 30303, peer_id);
+        let mut config = PeersConfig::test().with_trusted_nodes(vec![trusted]);
+        config.persisted_peers.push(PersistedPeerInfo {
+            record: NodeRecord::new("10.0.0.1:30303".parse().unwrap(), peer_id),
+            kind: PeerKind::Basic,
+            fork_id: None,
+            reputation: 0,
+        });
+        let manager = PeersManager::new(config);
+        assert!(manager.trusted_peer_ids.contains(&peer_id));
+        assert!(manager.peers.get(&peer_id).unwrap().is_trusted());
+    }
+
+    #[tokio::test]
+    async fn test_unresolved_trusted_peer_inbound_then_resolved() {
+        let peer_id = PeerId::random();
+        let trusted = TrustedPeer::new(Host::Domain("example.invalid".into()), 30303, peer_id);
+        let mut manager = PeersManager::new(
+            PeersConfig::test().with_trusted_nodes(vec![trusted]).with_trusted_nodes_only(true),
+        );
+
+        let inbound = "10.0.0.1:41234".parse::<SocketAddr>().unwrap();
+        assert!(manager.on_incoming_pending_session(inbound.ip()).is_ok());
+        manager.on_incoming_session_established(peer_id, inbound);
+        assert!(manager.peers.get(&peer_id).unwrap().is_trusted());
+
+        let addr = "10.0.0.1:30303".parse::<SocketAddr>().unwrap();
+        manager.on_resolved_peer(peer_id, NodeRecord::new(addr, peer_id));
+        let peer = manager.peers.get(&peer_id).unwrap();
+        assert!(peer.is_trusted());
+        assert!(!peer.remove_after_disconnect);
+        assert_eq!(peer.addr.tcp(), addr);
+    }
+
+    #[tokio::test]
     async fn test_removed_trusted_peer_ignores_late_resolution() {
         let peer_id = PeerId::random();
         let trusted = TrustedPeer {
@@ -3777,6 +3850,24 @@ mod tests {
 
         assert!(!manager.peers.contains_key(&peer_id));
         assert!(!manager.trusted_peer_ids.contains(&peer_id));
+    }
+
+    #[tokio::test]
+    async fn test_resolution_promotes_basic_trusted_peer() {
+        let peer_id = PeerId::random();
+        let trusted = TrustedPeer {
+            host: url::Host::Domain("example.invalid".to_string()),
+            tcp_port: 30303,
+            udp_port: 30303,
+            id: peer_id,
+        };
+        let addr = "10.0.0.1:30303".parse::<SocketAddr>().unwrap();
+
+        let mut manager = PeersManager::default();
+        manager.add_trusted_peer_node(trusted);
+        manager.add_peer(peer_id, PeerAddr::from_tcp(addr), None);
+        manager.on_resolved_peer(peer_id, NodeRecord::new(addr, peer_id));
+        assert!(manager.peers[&peer_id].is_trusted());
     }
 
     #[tokio::test]
@@ -4338,7 +4429,12 @@ mod tests {
             if !register_first {
                 peers.add_trusted_peer_node(trusted);
             }
-            assert_eq!(peers.peers[&peer_id].kind, PeerKind::Basic);
+            // A peer tracked before registration is promoted right away, one discovered afterwards
+            // only on resolution.
+            assert_eq!(
+                peers.peers[&peer_id].kind,
+                if register_first { PeerKind::Basic } else { PeerKind::Trusted }
+            );
             peers.queued_actions.clear();
             peers.fill_outbound_slots();
             assert!(

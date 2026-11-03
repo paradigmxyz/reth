@@ -157,7 +157,7 @@ impl ArenaSparseSubtrie {
     }
 
     /// Asserts that `num_leaves` and `num_dirty_leaves` match the actual counts in the arena.
-    #[cfg(all(debug_assertions, not(feature = "dst")))]
+    #[cfg(all(debug_assertions, not(feature = "fuzz")))]
     fn debug_assert_counters(&self) {
         let (actual_leaves, actual_dirty) =
             ArenaParallelSparseTrie::count_leaves_and_dirty(&self.arena, self.root);
@@ -273,7 +273,7 @@ impl ArenaSparseSubtrie {
         self.arena = new_arena;
         self.root = new_root;
 
-        #[cfg(all(debug_assertions, not(feature = "dst")))]
+        #[cfg(all(debug_assertions, not(feature = "fuzz")))]
         self.debug_assert_counters();
         return pruned;
 
@@ -408,7 +408,7 @@ impl ArenaSparseSubtrie {
         // Drain remaining cursor entries, propagating dirty state.
         self.buffers.cursor.drain(&mut self.arena);
 
-        #[cfg(all(debug_assertions, not(feature = "dst")))]
+        #[cfg(all(debug_assertions, not(feature = "fuzz")))]
         self.debug_assert_counters();
     }
 
@@ -444,7 +444,7 @@ impl ArenaSparseSubtrie {
         // Drain remaining cursor entries, propagating dirty state.
         self.buffers.cursor.drain(&mut self.arena);
 
-        #[cfg(all(debug_assertions, not(feature = "dst")))]
+        #[cfg(all(debug_assertions, not(feature = "fuzz")))]
         self.debug_assert_counters();
 
         Ok(())
@@ -463,7 +463,7 @@ impl ArenaSparseSubtrie {
             new_epoch,
         );
         self.num_dirty_leaves = 0;
-        #[cfg(all(debug_assertions, not(feature = "dst")))]
+        #[cfg(all(debug_assertions, not(feature = "fuzz")))]
         self.debug_assert_counters();
     }
 }
@@ -661,7 +661,7 @@ impl ArenaParallelSparseTrie {
         let (leaves, dirty) = Self::count_leaves_and_dirty(&subtrie.arena, subtrie.root);
         subtrie.num_leaves = leaves;
         subtrie.num_dirty_leaves = dirty;
-        #[cfg(all(debug_assertions, not(feature = "dst")))]
+        #[cfg(all(debug_assertions, not(feature = "fuzz")))]
         subtrie.debug_assert_counters();
         self.upper_arena[child_idx] = ArenaSparseNode::Subtrie(subtrie);
     }
@@ -1846,7 +1846,7 @@ impl ArenaParallelSparseTrie {
     ///
     /// Uses the cursor to DFS the upper arena, checking each visited node's path length.
     #[instrument(level = "trace", target = TRACE_TARGET, skip_all)]
-    #[cfg(all(debug_assertions, not(feature = "dst")))]
+    #[cfg(all(debug_assertions, not(feature = "fuzz")))]
     fn debug_assert_subtrie_structure(&mut self) {
         let mut cursor = mem::take(&mut self.buffers.cursor);
         cursor.reset(&self.upper_arena, self.root, Nibbles::default());
@@ -2017,7 +2017,7 @@ impl ArenaParallelSparseTrie {
         Some(child_idx)
     }
 
-    #[cfg(all(debug_assertions, not(feature = "dst")))]
+    #[cfg(all(debug_assertions, not(feature = "fuzz")))]
     fn collect_reachable_nodes(
         arena: &NodeArena,
         idx: Index,
@@ -2035,7 +2035,7 @@ impl ArenaParallelSparseTrie {
         }
     }
 
-    #[cfg(all(debug_assertions, not(feature = "dst")))]
+    #[cfg(all(debug_assertions, not(feature = "fuzz")))]
     fn assert_no_orphaned_nodes(arena: &NodeArena, root: Index, label: &str) {
         let mut reachable = alloy_primitives::map::HashSet::default();
         Self::collect_reachable_nodes(arena, root, &mut reachable);
@@ -2050,7 +2050,7 @@ impl ArenaParallelSparseTrie {
     }
 }
 
-#[cfg(all(debug_assertions, not(feature = "dst")))]
+#[cfg(all(debug_assertions, not(feature = "fuzz")))]
 impl Drop for ArenaParallelSparseTrie {
     fn drop(&mut self) {
         Self::assert_no_orphaned_nodes(&self.upper_arena, self.root, "upper arena");
@@ -2292,7 +2292,7 @@ impl SparseTrie for ArenaParallelSparseTrie {
             self.restore_taken_subtrie(idx, subtrie);
         }
 
-        #[cfg(all(debug_assertions, not(feature = "dst")))]
+        #[cfg(all(debug_assertions, not(feature = "fuzz")))]
         self.debug_assert_subtrie_structure();
 
         Ok(())
@@ -2805,7 +2805,7 @@ impl SparseTrie for ArenaParallelSparseTrie {
         self.buffers.cursor = cursor;
 
         if taken.is_empty() {
-            #[cfg(all(debug_assertions, not(feature = "dst")))]
+            #[cfg(all(debug_assertions, not(feature = "fuzz")))]
             self.debug_assert_subtrie_structure();
 
             return Ok(());
@@ -2882,7 +2882,7 @@ impl SparseTrie for ArenaParallelSparseTrie {
             self.buffers.cursor = cursor;
         }
 
-        #[cfg(all(debug_assertions, not(feature = "dst")))]
+        #[cfg(all(debug_assertions, not(feature = "fuzz")))]
         self.debug_assert_subtrie_structure();
 
         Ok(())
