@@ -1,7 +1,9 @@
 use crate::metrics::PersistenceMetrics;
 use alloy_eips::BlockNumHash;
+use alloy_primitives::BlockNumber;
 use crossbeam_channel::Sender as CrossbeamSender;
-use reth_errors::ProviderError;
+use reth_chain_state::ExecutedBlock;
+use reth_errors::{ProviderError, ProviderResult};
 use reth_ethereum_primitives::EthPrimitives;
 use reth_primitives_traits::{FastInstant as Instant, NodePrimitives};
 use reth_provider::{
@@ -12,6 +14,7 @@ use reth_prune::{PrunerError, PrunerWithFactory};
 use reth_stages_api::{MetricEvent, MetricEventsSender};
 use reth_tasks::spawn_os_thread;
 use std::{
+    fmt,
     sync::{
         mpsc::{Receiver, SendError, Sender},
         Arc,
@@ -31,6 +34,23 @@ pub struct PersistenceResult {
     pub last_state_trie_block: BlockNumHash,
     /// The commit duration, only available for save-blocks operations.
     pub commit_duration: Option<Duration>,
+}
+
+/// Keeps state stored outside the database, such as a custom state commitment, in step with the
+/// blocks the persistence service writes.
+///
+/// A state-root strategy that replaces the MPT supplies one through
+/// [`EngineValidator::persistence_hook`](crate::tree::EngineValidator::persistence_hook).
+pub trait PersistenceHook<N: NodePrimitives>: Send + Sync + fmt::Debug {
+    /// Called with the blocks whose state is being persisted, after they are written and before
+    /// the database transaction commits.
+    ///
+    /// Whatever the hook persists must be durable when it returns, so that after a crash its
+    /// store is never behind the database. An error aborts the save.
+    fn on_save_state(&self, blocks: &[ExecutedBlock<N>]) -> ProviderResult<()>;
+
+    /// Called after the blocks above `new_tip` are removed and the removal is committed.
+    fn on_remove_blocks_above(&self, new_tip: BlockNumber) -> ProviderResult<()>;
 }
 
 /// Writes parts of reth's in memory tree state to the database and static files.
@@ -61,6 +81,8 @@ where
     /// Pending safe block number to be committed with the next block save.
     /// This avoids triggering a separate fsync for each safe block update.
     pending_safe_block: Option<u64>,
+    /// Hook run alongside every save and removal, if any.
+    hook: Option<Arc<dyn PersistenceHook<N::Primitives>>>,
 }
 
 impl<N> PersistenceService<N>
@@ -73,6 +95,7 @@ where
         incoming: Receiver<PersistenceAction<N::Primitives>>,
         pruner: PrunerWithFactory<ProviderFactory<N>>,
         sync_metrics_tx: MetricEventsSender,
+        hook: Option<Arc<dyn PersistenceHook<N::Primitives>>>,
     ) -> Self {
         Self {
             provider,
@@ -82,6 +105,7 @@ where
             sync_metrics_tx,
             pending_finalized_block: None,
             pending_safe_block: None,
+            hook,
         }
     }
 }
@@ -153,6 +177,9 @@ where
             BlockNumHash::new(frontiers.partial_state_trie, hash)
         };
         provider_rw.commit()?;
+        if let Some(hook) = &self.hook {
+            hook.on_remove_blocks_above(new_tip_num)?;
+        }
 
         debug!(target: "engine::persistence", ?new_tip_num, ?new_tip_hash, "Removed blocks from disk");
         self.metrics.remove_blocks_above_duration_seconds.record(start_time.elapsed());
@@ -196,6 +223,9 @@ where
             BlockNumHash::new(number, hash)
         };
         provider_rw.save_blocks(&input)?;
+        if let Some(hook) = &self.hook {
+            hook.on_save_state(input.state_trie_blocks())?;
+        }
 
         if let Some(finalized) = pending_finalized {
             provider_rw.save_finalized_block_number(finalized.min(last_block.number))?;
@@ -308,6 +338,7 @@ impl<T: NodePrimitives> PersistenceHandle<T> {
         provider_factory: ProviderFactory<N>,
         pruner: PrunerWithFactory<ProviderFactory<N>>,
         sync_metrics_tx: MetricEventsSender,
+        hook: Option<Arc<dyn PersistenceHook<N::Primitives>>>,
     ) -> PersistenceHandle<N::Primitives>
     where
         N: ProviderNodeTypes,
@@ -317,7 +348,7 @@ impl<T: NodePrimitives> PersistenceHandle<T> {
 
         // spawn the persistence service
         let db_service =
-            PersistenceService::new(provider_factory, db_service_rx, pruner, sync_metrics_tx);
+            PersistenceService::new(provider_factory, db_service_rx, pruner, sync_metrics_tx, hook);
         let join_handle = spawn_os_thread("persistence", || {
             if let Err(err) = db_service.run() {
                 error!(target: "engine::persistence", ?err, "Persistence service failed");
@@ -419,10 +450,10 @@ mod tests {
     use reth_exex_types::FinishedExExHeight;
     use reth_provider::{
         providers::{BlockchainProvider, ProviderFactoryBuilder, ReadOnlyConfig},
-        test_utils::{create_test_provider_factory, MockNodeTypes},
-        AccountReader, BalConfig, BalStore, BalStoreHandle, ChainSpecProvider, HeaderProvider,
-        InMemoryBalStore, ProviderError, ProviderResult, RawBal, StateProviderFactory,
-        StorageSettingsCache,
+        test_utils::{create_test_provider_factory, MockNodeTypes, MockNodeTypesWithDB},
+        AccountReader, BalConfig, BalStore, BalStoreHandle, BlockNumReader, ChainSpecProvider,
+        HeaderProvider, InMemoryBalStore, ProviderError, ProviderResult, RawBal,
+        StateProviderFactory, StorageSettingsCache,
     };
     use reth_prune::Pruner;
     use reth_prune_types::PruneMode;
@@ -439,7 +470,7 @@ mod tests {
             Pruner::new_with_factory(provider.clone(), vec![], 5, 0, None, finished_exex_height_rx);
 
         let (sync_metrics_tx, _sync_metrics_rx) = unbounded_channel();
-        PersistenceHandle::<EthPrimitives>::spawn_service(provider, pruner, sync_metrics_tx)
+        PersistenceHandle::<EthPrimitives>::spawn_service(provider, pruner, sync_metrics_tx, None)
     }
 
     fn full_save_input(
@@ -478,7 +509,8 @@ mod tests {
             Pruner::new_with_factory(provider.clone(), vec![], 0, 0, None, finished_exex_height_rx);
         let (_db_service_tx, db_service_rx) = std::sync::mpsc::channel();
         let (sync_metrics_tx, _sync_metrics_rx) = unbounded_channel();
-        let mut service = PersistenceService::new(provider, db_service_rx, pruner, sync_metrics_tx);
+        let mut service =
+            PersistenceService::new(provider, db_service_rx, pruner, sync_metrics_tx, None);
 
         service.maybe_run_pruner(2).unwrap();
 
@@ -500,7 +532,8 @@ mod tests {
             Pruner::new_with_factory(provider.clone(), vec![], 0, 0, None, finished_exex_height_rx);
         let (_db_service_tx, db_service_rx) = std::sync::mpsc::channel();
         let (sync_metrics_tx, _sync_metrics_rx) = unbounded_channel();
-        let mut service = PersistenceService::new(provider, db_service_rx, pruner, sync_metrics_tx);
+        let mut service =
+            PersistenceService::new(provider, db_service_rx, pruner, sync_metrics_tx, None);
 
         service.maybe_run_pruner(2).unwrap();
     }
@@ -516,12 +549,87 @@ mod tests {
             Pruner::new_with_factory(provider.clone(), vec![], 5, 0, None, finished_exex_height_rx);
         let (_db_service_tx, db_service_rx) = std::sync::mpsc::channel();
         let (sync_metrics_tx, _sync_metrics_rx) = unbounded_channel();
-        let service = PersistenceService::new(provider, db_service_rx, pruner, sync_metrics_tx);
+        let service =
+            PersistenceService::new(provider, db_service_rx, pruner, sync_metrics_tx, None);
 
         assert!(matches!(
             service.on_remove_blocks_above(1),
             Err(PersistenceError::ProviderError(ProviderError::HeaderNotFound(_)))
         ));
+    }
+
+    /// Records the calls the persistence service makes to its hook.
+    #[derive(Debug, Default)]
+    struct RecordingHook {
+        saved: std::sync::Mutex<Vec<BlockNumber>>,
+        removed_above: std::sync::Mutex<Vec<BlockNumber>>,
+        fail_save: bool,
+    }
+
+    impl PersistenceHook<EthPrimitives> for RecordingHook {
+        fn on_save_state(&self, blocks: &[ExecutedBlock<EthPrimitives>]) -> ProviderResult<()> {
+            if self.fail_save {
+                return Err(ProviderError::other(std::io::Error::other("hook save failed")))
+            }
+            self.saved
+                .lock()
+                .unwrap()
+                .extend(blocks.iter().map(|block| block.recovered_block().number));
+            Ok(())
+        }
+
+        fn on_remove_blocks_above(&self, new_tip: BlockNumber) -> ProviderResult<()> {
+            self.removed_above.lock().unwrap().push(new_tip);
+            Ok(())
+        }
+    }
+
+    fn service_with_hook(
+        hook: Arc<RecordingHook>,
+    ) -> (PersistenceService<MockNodeTypesWithDB>, ProviderFactory<MockNodeTypesWithDB>) {
+        let provider = create_test_provider_factory();
+        init_genesis(&provider).unwrap();
+        let (_finished_exex_height_tx, finished_exex_height_rx) =
+            tokio::sync::watch::channel(FinishedExExHeight::NoExExs);
+        let pruner =
+            Pruner::new_with_factory(provider.clone(), vec![], 5, 0, None, finished_exex_height_rx);
+        let (_db_service_tx, db_service_rx) = std::sync::mpsc::channel();
+        let (sync_metrics_tx, _sync_metrics_rx) = unbounded_channel();
+        let service = PersistenceService::new(
+            provider.clone(),
+            db_service_rx,
+            pruner,
+            sync_metrics_tx,
+            Some(hook),
+        );
+        (service, provider)
+    }
+
+    #[test]
+    fn test_persistence_hook_runs_on_save_and_remove() {
+        let hook = Arc::new(RecordingHook::default());
+        let (mut service, _provider) = service_with_hook(hook.clone());
+        let blocks = TestBlockBuilder::eth().get_executed_blocks(1..3).collect::<Vec<_>>();
+
+        service.on_save_blocks(full_save_input(blocks)).unwrap();
+        assert_eq!(*hook.saved.lock().unwrap(), vec![1, 2]);
+
+        service.on_remove_blocks_above(1).unwrap();
+        assert_eq!(*hook.removed_above.lock().unwrap(), vec![1]);
+    }
+
+    #[test]
+    fn test_persistence_hook_error_aborts_save() {
+        let hook = Arc::new(RecordingHook { fail_save: true, ..Default::default() });
+        let (mut service, provider) = service_with_hook(hook);
+        let block = TestBlockBuilder::eth().get_executed_block_with_number(1, B256::random());
+
+        let err = service.on_save_blocks(full_save_input(vec![block])).unwrap_err();
+        assert!(
+            matches!(err, PersistenceError::ProviderError(ref e) if e.to_string() == "hook save failed"),
+            "{err}"
+        );
+        assert_eq!(provider.provider().unwrap().best_block_number().unwrap(), 0);
     }
 
     #[derive(Debug)]
@@ -588,6 +696,7 @@ mod tests {
             provider.clone(),
             pruner,
             sync_metrics_tx,
+            None,
         );
         let (tx, rx) = crossbeam_channel::bounded(1);
 

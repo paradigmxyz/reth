@@ -18,7 +18,10 @@ use reth_primitives_traits::{
     BlockBody as _, IndexedTx, NodePrimitives, RecoveredBlock, SealedBlock, SealedHeader,
     SignedTransaction,
 };
-use reth_trie::{updates::TrieUpdatesSorted, HashedPostStateSorted, LazyTrieData, SortedTrieData};
+use reth_trie::{
+    updates::TrieUpdatesSorted, HashedPostStateSorted, LazyTrieData, SortedTrieData,
+    StateCommitment,
+};
 use std::{collections::BTreeMap, sync::Arc, time::Instant};
 use tokio::sync::{broadcast, watch};
 
@@ -761,6 +764,11 @@ pub struct ExecutedBlock<N: NodePrimitives = EthPrimitives> {
     /// representation (for consumers like the RPC state cache), so that neither has to be
     /// re-derived after validation.
     pub bal: Option<Arc<DecodedEvmBal>>,
+    /// Commitment data a custom state-root strategy attached to the block, if any.
+    ///
+    /// `None` for blocks validated by the default MPT strategy and for blocks loaded from the
+    /// database, whose commitment is already persisted.
+    pub state_commitment: Option<StateCommitment>,
 }
 
 impl<N: NodePrimitives> Default for ExecutedBlock<N> {
@@ -778,6 +786,7 @@ impl<N: NodePrimitives> Default for ExecutedBlock<N> {
             }),
             trie_data: LazyTrieData::ready(SortedTrieData::default()),
             bal: None,
+            state_commitment: None,
         }
     }
 }
@@ -806,6 +815,7 @@ impl<N: NodePrimitives> ExecutedBlock<N> {
             execution_output,
             trie_data: LazyTrieData::ready(trie_data),
             bal: None,
+            state_commitment: None,
         }
     }
 
@@ -827,7 +837,7 @@ impl<N: NodePrimitives> ExecutedBlock<N> {
         execution_output: Arc<BlockExecutionOutput<N::Receipt>>,
         trie_data: LazyTrieData,
     ) -> Self {
-        Self { recovered_block, execution_output, trie_data, bal: None }
+        Self { recovered_block, execution_output, trie_data, bal: None, state_commitment: None }
     }
 
     /// Attaches the prepared block access list of the block, or clears it with `None`.
@@ -842,6 +852,18 @@ impl<N: NodePrimitives> ExecutedBlock<N> {
     #[inline]
     pub const fn bal(&self) -> Option<&Arc<DecodedEvmBal>> {
         self.bal.as_ref()
+    }
+
+    /// Attaches the state commitment of the block, or clears it with `None`.
+    pub fn with_state_commitment(mut self, state_commitment: Option<StateCommitment>) -> Self {
+        self.state_commitment = state_commitment;
+        self
+    }
+
+    /// Returns the state commitment a custom state-root strategy attached to the block.
+    #[inline]
+    pub const fn state_commitment(&self) -> Option<&StateCommitment> {
+        self.state_commitment.as_ref()
     }
 
     /// Returns a reference to an inner [`SealedBlock`]

@@ -72,7 +72,7 @@ use reth_provider::{
 };
 use reth_storage_overlay::{OverlayManager, OverlayStateProviderFactory};
 use reth_tasks::utils::increase_thread_priority;
-use reth_trie::{updates::TrieUpdates, HashedPostState};
+use reth_trie::{updates::TrieUpdates, HashedPostState, StateCommitment};
 use reth_trie_parallel::proof_task::{
     metrics::ProofWorkerIdleMetrics, ProofTaskCtx, ProofWorkerCounts, ProofWorkerHandle,
 };
@@ -439,17 +439,25 @@ pub struct StateRootJobOutcome {
     /// When set, the root was not derived from the streamed updates, so validation replaces its
     /// streaming-derived hashed post state with this one and re-runs hashed-state checks.
     pub hashed_state: Option<Arc<HashedPostState>>,
+    /// Commitment data the job attaches to the validated block, carried until it is persisted.
+    pub state_commitment: Option<StateCommitment>,
 }
 
 impl StateRootJobOutcome {
     /// Creates a state-root job outcome.
     pub const fn new(state_root: B256, trie_updates: Arc<TrieUpdates>) -> Self {
-        Self { state_root, trie_updates, hashed_state: None }
+        Self { state_root, trie_updates, hashed_state: None, state_commitment: None }
     }
 
     /// Sets the hashed post state recomputed by a fallback path.
     pub fn with_hashed_state(mut self, hashed_state: Option<Arc<HashedPostState>>) -> Self {
         self.hashed_state = hashed_state;
+        self
+    }
+
+    /// Sets the commitment data attached to the validated block.
+    pub fn with_state_commitment(mut self, state_commitment: Option<StateCommitment>) -> Self {
+        self.state_commitment = state_commitment;
         self
     }
 }
