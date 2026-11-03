@@ -561,7 +561,7 @@ mod tests {
     use reth_evm::{ConfigureEvm, EvmEnvFor, TxEnvFor};
     use reth_evm_ethereum::EthEvmConfig;
     use reth_network_api::noop::NoopNetwork;
-    use reth_primitives_traits::crypto::secp256k1::sign_message;
+    use reth_primitives_traits::{crypto::secp256k1::sign_message, SealedHeader};
     use reth_provider::{
         providers::BlockchainProvider,
         test_utils::{
@@ -572,7 +572,7 @@ mod tests {
     };
     use reth_rpc_convert::{EthTxEnvError, TryIntoTxEnv};
     use reth_rpc_eth_api::{
-        helpers::{Call, EthBlocks, EthCall, SpawnBlocking},
+        helpers::{Call, EthBlocks, EthCall, LoadPendingBlock, SpawnBlocking},
         node::RpcNodeCoreAdapter,
         EthApiServer,
     };
@@ -582,9 +582,12 @@ mod tests {
     use reth_storage_api::{
         BalProvider, BlockReaderIdExt, NodePrimitivesProvider, StateProviderFactory,
     };
-    use reth_tasks::{cancel::is_cancelled, pool::BlockingTaskGuard};
+    use reth_tasks::{
+        cancel::{is_cancelled, CancelOnDrop},
+        pool::BlockingTaskGuard,
+    };
     use reth_testing_utils::generators;
-    use reth_transaction_pool::test_utils::{testing_pool, TestPool};
+    use reth_transaction_pool::test_utils::{testing_pool, MockTransaction, TestPool};
     use std::time::{Duration, Instant};
 
     type FakeEthApi<P = MockEthProvider> = EthApi<
@@ -653,6 +656,26 @@ mod tests {
         }
 
         assert!(cancelled_rx.await.unwrap());
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn pending_block_build_stops_when_cancelled() {
+        let provider = MockEthProvider::default();
+        let parent =
+            Header { gas_limit: 30_000_000, base_fee_per_gas: Some(1), ..Default::default() };
+        let parent_hash = B256::random();
+        provider.add_header(parent_hash, parent.clone());
+        let api = build_test_eth_api(provider);
+        api.pool().add_external_transaction(MockTransaction::eip1559()).await.unwrap();
+
+        // dropping the request's handle cancels the build running in its scope
+        let request = CancelOnDrop::default();
+        let scope = request.clone();
+        drop(request);
+
+        let parent = SealedHeader::new(parent, parent_hash);
+        let err = scope.scope(|| api.build_block(&parent)).unwrap_err();
+        assert!(matches!(err, EthApiError::InternalEthError));
     }
 
     #[tokio::test]
