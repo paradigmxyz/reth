@@ -2,7 +2,6 @@
 //! blocks from the network.
 
 use alloy_eips::BlockHashOrNumber;
-use alloy_primitives::hex;
 use alloy_rpc_types_engine::{JwtError, JwtSecret};
 use eyre::Result;
 use reth_consensus::Consensus;
@@ -11,7 +10,7 @@ use reth_network_p2p::{
 };
 use reth_primitives_traits::{Block, SealedBlock, SealedHeader};
 use std::path::{Path, PathBuf};
-use tracing::{debug, info, warn};
+use tracing::{debug, info};
 
 /// Parses a user-specified path into a [`PathBuf`].
 pub fn parse_path(value: &str) -> PathBuf {
@@ -41,6 +40,7 @@ pub fn get_or_create_jwt_secret_from_path(path: &Path) -> Result<JwtSecret, JwtE
 /// by other users, unlike [`JwtSecret::try_create_random`] which relies on the process umask.
 #[cfg(unix)]
 fn create_jwt_secret_file(path: &Path) -> Result<JwtSecret, JwtError> {
+    use alloy_primitives::hex;
     use std::{fs, io::Write, os::unix::fs::OpenOptionsExt};
 
     if let Some(dir) = path.parent() {
@@ -70,6 +70,7 @@ fn create_jwt_secret_file(path: &Path) -> Result<JwtSecret, JwtError> {
 #[cfg(unix)]
 fn warn_if_jwt_secret_file_is_shared(path: &Path) {
     use std::os::unix::fs::PermissionsExt;
+    use tracing::warn;
 
     if let Ok(metadata) = std::fs::metadata(path) {
         let mode = metadata.permissions().mode() & 0o777;
@@ -139,6 +140,7 @@ where
 #[cfg(all(test, unix))]
 mod tests {
     use super::*;
+    use alloy_primitives::hex;
     use std::{fs, os::unix::fs::PermissionsExt};
 
     #[test]
