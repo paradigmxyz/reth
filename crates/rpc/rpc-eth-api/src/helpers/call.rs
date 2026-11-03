@@ -754,35 +754,41 @@ pub trait Call:
             let evm_env = self.evm_env_for_header(block.sealed_block().sealed_header())?;
 
             self.spawn_with_state_at_block(parent_block, move |this, mut db| {
-                let tx_index = tx_info.index.expect("included transaction has an index") as usize;
-                if let Some(bal) = &bal {
-                    // the BAL also covers the block's pre-execution changes
-                    attach_bal_before_tx(&mut db, bal, tx_index);
-                } else {
-                    let ctx = this
-                        .evm_config()
-                        .context_for_block(block.sealed_block())
-                        .map_err(RethError::other)
-                        .map_err(Self::Error::from_eth_err)?;
-                    let changes = this
-                        .evm_config()
-                        .pre_block_state_changes(&mut db, evm_env.clone(), ctx)
-                        .map_err(|err| EthApiError::EvmCustom(err.to_string()))
-                        .map_err(Self::Error::from_eth_err)?;
-                    db.commit_source(&reth_execution_types::BundleSource(&changes));
+                if let Some((bal, tx_index)) = bal.zip(tx_info.index) {
+                    attach_bal_before_tx(&mut db, &bal, tx_index as usize);
+
+                    let mut executor = this.block_executor(&block, &mut db, evm_env)?;
+                    executor.set_block_access_index(BlockAccessIndex::from_tx_index(tx_index));
+                    let res = executor
+                        .execute_transaction_without_commit(tx)
+                        .map_err(Self::Error::from_evm_err)?
+                        .into_result();
+                    let cache = executor.evm_mut().take_state_cache();
+                    drop(executor);
+                    db.cache.merge(cache);
+                    return f(tx_info, res, db)
                 }
 
+                let block_txs = block.transactions_recovered();
+
+                let ctx = this
+                    .evm_config()
+                    .context_for_block(block.sealed_block())
+                    .map_err(RethError::other)
+                    .map_err(Self::Error::from_eth_err)?;
+                let changes = this
+                    .evm_config()
+                    .pre_block_state_changes(&mut db, evm_env.clone(), ctx)
+                    .map_err(|err| EthApiError::EvmCustom(err.to_string()))
+                    .map_err(Self::Error::from_eth_err)?;
+                db.commit_source(&reth_execution_types::BundleSource(&changes));
+
                 let mut executor = this.block_executor(&block, &mut db, evm_env)?;
-                if bal.is_some() {
-                    executor
-                        .set_block_access_index(BlockAccessIndex::from_tx_index(tx_index as u64));
-                } else {
-                    this.replay_transactions_until_with_executor(
-                        &mut executor,
-                        block.transactions_recovered(),
-                        tx_index,
-                    )?;
-                }
+                this.replay_transactions_until_with_executor(
+                    &mut executor,
+                    block_txs,
+                    tx_info.index.expect("included transaction has an index") as usize,
+                )?;
                 let res = executor
                     .execute_transaction_without_commit(tx)
                     .map_err(Self::Error::from_evm_err)?
@@ -795,6 +801,33 @@ pub trait Call:
             .await
             .map(Some)
         }
+    }
+
+    /// Replays all transactions before the target transaction index through the given executor.
+    ///
+    /// If the target index is greater than or equal to the iterator length, all transactions are
+    /// replayed.
+    fn replay_transactions_until_with_executor<'a, Txs>(
+        &self,
+        executor: &mut BlockExecutorFor<'_, Self::Evm>,
+        transactions: Txs,
+        target_tx_index: usize,
+    ) -> Result<(), Self::Error>
+    where
+        Txs: IntoIterator<Item = Recovered<&'a ProviderTx<Self::Provider>>>,
+    {
+        for (index, tx) in transactions.into_iter().enumerate() {
+            if index == target_tx_index {
+                // reached the target transaction
+                break
+            }
+            if is_cancelled() {
+                return Err(EthApiError::InternalEthError.into())
+            }
+
+            executor.execute_transaction(tx).map_err(Self::Error::from_evm_err)?;
+        }
+        Ok(())
     }
 
     /// Creates a block executor for `block` on `db` with the given EVM environment.
@@ -817,28 +850,6 @@ pub trait Call:
             .map_err(Self::Error::from_eth_err)?;
         let evm = self.evm_config().evm_with_env(db, evm_env);
         Ok(self.evm_config().block_executor_factory().create_executor(evm, ctx))
-    }
-
-    /// Replays all transactions before the target transaction index through the given executor.
-    ///
-    /// If the target index is greater than or equal to the iterator length, all transactions are
-    /// replayed.
-    fn replay_transactions_until_with_executor<'a, Txs>(
-        &self,
-        executor: &mut BlockExecutorFor<'_, Self::Evm>,
-        transactions: Txs,
-        target_tx_index: usize,
-    ) -> Result<(), Self::Error>
-    where
-        Txs: IntoIterator<Item = Recovered<&'a ProviderTx<Self::Provider>>>,
-    {
-        for tx in transactions.into_iter().take(target_tx_index) {
-            if is_cancelled() {
-                return Err(EthApiError::InternalEthError.into())
-            }
-            executor.execute_transaction(tx).map_err(Self::Error::from_evm_err)?;
-        }
-        Ok(())
     }
 
     ///
