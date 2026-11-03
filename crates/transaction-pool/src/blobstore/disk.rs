@@ -250,7 +250,7 @@ impl BlobStore for DiskFileBlobStore {
             // clear it, so a blob that was re-inserted after being marked is never unlinked.
             let _lock = self.inner.file_lock.write();
             if !self.inner.txs_to_delete.write().remove(&tx) {
-                // Re-inserted since the snapshot, or already removed by a concurrent cleanup
+                // Re-inserted since the snapshot, or already removed by a concurrent cleanup.
                 continue
             }
             let filesize = fs::metadata(&path).map_or(0, |meta| meta.len());
@@ -572,13 +572,13 @@ impl DiskFileBlobStoreInner {
                 } else if let Err(err) = fs::write(&path, &data) {
                     debug!(target:"txpool::blob", %err, ?path, "Failed to write blob file");
                     if replaces_deleted {
-                        // the old file is still the deleted data, keep it scheduled for removal
+                        // the old file is still the deleted data, keep it scheduled for removal.
                         txs_to_delete.insert(tx);
                     }
                 } else {
                     add += data.len();
                     match existing_size {
-                        // the replaced file was already counted
+                        // the replaced file was already counted.
                         Some(old) => sub += old,
                         None => num += 1,
                     }
@@ -726,14 +726,14 @@ impl DiskFileBlobStoreInner {
         }
         if let Err(e) = fs::write(&path, data) {
             if replaces_deleted {
-                // the old file is still the deleted data, keep it scheduled for removal
+                // the old file is still the deleted data, keep it scheduled for removal.
                 self.txs_to_delete.write().insert(tx);
             }
             return Err(DiskFileBlobStoreError::WriteFile(tx, path, e))
         }
         self.size_tracker.add_size(data.len());
         match existing_size {
-            // the replaced file was already counted
+            // the replaced file was already counted.
             Some(old) => self.size_tracker.sub_size(old),
             None => self.size_tracker.inc_len(1),
         }
@@ -1253,7 +1253,7 @@ mod tests {
         store.insert_all(wrapped_blobs(blobs.clone())).unwrap();
         let (len, size) = (store.inner.size_tracker.blobs_len(), store.data_size_hint());
 
-        // re-add only a subset, the rest must still be removed
+        // re-add only a subset, the rest must still be removed.
         store.delete_all(all_hashes).unwrap();
         store.insert_all(wrapped_blobs(blobs[..3].to_vec())).unwrap();
         assert_eq!(store.inner.txs_to_delete.read().len(), 2);
@@ -1282,7 +1282,7 @@ mod tests {
         assert_ne!(old, new);
         store.insert(tx, old.into()).unwrap();
 
-        // e.g. the Osaka conversion re-adds the same hash with a different sidecar
+        // e.g. the Osaka conversion re-adds the same hash with a different sidecar.
         store.delete(tx).unwrap();
         store.insert(tx, new.clone().into()).unwrap();
         store.cleanup();
@@ -1292,7 +1292,7 @@ mod tests {
         assert_eq!(store.inner.size_tracker.blobs_len(), 1);
         assert_eq!(store.data_size_hint(), Some(new.rlp_encoded_fields_length()));
 
-        // a plain duplicate insert keeps the existing file
+        // a plain duplicate insert keeps the existing file.
         let other = rng_blobs(1).remove(0).1;
         store.insert(tx, other.into()).unwrap();
         store.clear_cache();
@@ -1308,7 +1308,7 @@ mod tests {
         let hashes = old.iter().map(|(tx, _)| *tx).collect::<Vec<_>>();
         store.insert_all(wrapped_blobs(old)).unwrap();
 
-        // replace the first two, the third is not deleted and stays untouched
+        // replace the first two, the third is not deleted and stays untouched.
         let (new, _, _) = eip7594_single_blob_sidecar();
         store.delete_all(hashes[..2].to_vec()).unwrap();
         let replacements = hashes[..2].iter().map(|tx| (*tx, new.clone())).collect::<Vec<_>>();
