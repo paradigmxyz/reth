@@ -1,12 +1,12 @@
 use super::LaunchNode;
 use crate::{rpc::RethRpcAddOns, EngineNodeLauncher, Node, NodeHandle};
 use alloy_consensus::transaction::Either;
-use jsonrpsee::core::{DeserializeOwned, Serialize};
 use reth_chainspec::EthChainSpec;
 use reth_consensus_debug_client::{
     DebugConsensusClient, EtherscanBlockProvider, PayloadProvider, RpcBlockProvider,
 };
 use reth_engine_local::{LocalMiner, MiningMode};
+use reth_json_rpc::{DeserializeOwned, Serialize};
 use reth_node_api::{
     BlockTy, FullNodeComponents, FullNodeTypes, HeaderTy, NodeTypes, PayloadAttrTy,
     PayloadAttributesBuilder, PayloadTypes,

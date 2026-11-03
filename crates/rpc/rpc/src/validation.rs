@@ -14,10 +14,7 @@ use alloy_rpc_types_engine::{
     BlobsBundleV1, BlobsBundleV2, CancunPayloadFields, ExecutionData, ExecutionPayload,
     ExecutionPayloadSidecar, PraguePayloadFields,
 };
-use async_trait::async_trait;
 use core::fmt;
-use jsonrpsee::core::RpcResult;
-use jsonrpsee_types::error::ErrorObject;
 use reth_chainspec::{ChainSpecProvider, EthereumHardforks};
 use reth_consensus::FullConsensus;
 use reth_consensus_common::validation::MAX_RLP_BLOCK_SIZE;
@@ -28,6 +25,7 @@ use reth_evm::{
     SenderRecoveryCache,
 };
 use reth_execution_types::BlockExecutionOutput;
+use reth_json_rpc::{ErrorObject, RpcResult};
 use reth_metrics::{
     metrics,
     metrics::{gauge, Gauge},
@@ -583,7 +581,6 @@ where
     }
 }
 
-#[async_trait]
 impl<Provider, E, T> BlockSubmissionValidationApiServer for ValidationApi<Provider, E, T>
 where
     Provider: BlockReaderIdExt<Header = <E::Primitives as NodePrimitives>::BlockHeader>
@@ -792,7 +789,7 @@ pub enum ValidationApiError {
     Payload(#[from] NewPayloadError),
 }
 
-impl From<ValidationApiError> for ErrorObject<'static> {
+impl From<ValidationApiError> for ErrorObject {
     fn from(error: ValidationApiError) -> Self {
         match error {
             ValidationApiError::GasLimitMismatch(_) |
@@ -1139,8 +1136,8 @@ mod tests {
             ),
             "{error}"
         );
-        let error = jsonrpsee::types::ErrorObjectOwned::from(error);
-        assert_eq!(error.code(), jsonrpsee::types::error::INVALID_PARAMS_CODE);
+        let error = reth_json_rpc::ErrorObject::from(error);
+        assert_eq!(error.code(), reth_json_rpc::INVALID_PARAMS_CODE);
     }
 
     #[tokio::test]

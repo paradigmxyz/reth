@@ -26,8 +26,6 @@ use alloy_rpc_types_engine::{
     ExecutionPayloadSidecar, ExecutionPayloadV3, ExecutionPayloadV4, ForkchoiceState,
     PayloadAttributes, PraguePayloadFields,
 };
-use async_trait::async_trait;
-use jsonrpsee::core::RpcResult;
 use reth_chainspec::{ChainSpecProvider, EthereumHardforks};
 use reth_consensus_common::validation::MAX_RLP_BLOCK_SIZE;
 use reth_engine_primitives::ConsensusEngineHandle;
@@ -38,6 +36,7 @@ use reth_evm::{
     execute::{BlockBuilder, BlockExecutor},
     ConfigureEvm, EvmEnv, NextBlockEnvAttributes,
 };
+use reth_json_rpc::RpcResult;
 use reth_payload_primitives::{BuiltPayload, PayloadTypes};
 use reth_primitives_traits::{
     transaction::{recover::try_recover_signers, signed::RecoveryError},
@@ -412,7 +411,6 @@ where
     }
 }
 
-#[async_trait]
 impl<Eth, Evm, Payload> TestingApiServer for TestingApi<Eth, Evm, Payload>
 where
     Payload: PayloadTypes<

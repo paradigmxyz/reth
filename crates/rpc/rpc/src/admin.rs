@@ -5,9 +5,8 @@ use alloy_rpc_types_admin::{
     EthInfo, EthPeerInfo, EthProtocolInfo, NodeInfo, PeerInfo, PeerNetworkInfo, PeerProtocolInfo,
     Ports, ProtocolInfo,
 };
-use async_trait::async_trait;
-use jsonrpsee::core::RpcResult;
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
+use reth_json_rpc::RpcResult;
 use reth_network_api::{NetworkInfo, Peers};
 use reth_network_peers::{AnyNode, NodeRecord};
 use reth_network_types::PeerKind;
@@ -34,7 +33,6 @@ impl<N, ChainSpec, Pool> AdminApi<N, ChainSpec, Pool> {
     }
 }
 
-#[async_trait]
 impl<N, ChainSpec, Pool> AdminApiServer for AdminApi<N, ChainSpec, Pool>
 where
     N: NetworkInfo + Peers + 'static,
@@ -149,8 +147,8 @@ where
     /// Handler for `admin_peerEvents`
     async fn subscribe_peer_events(
         &self,
-        _pending: jsonrpsee::PendingSubscriptionSink,
-    ) -> jsonrpsee::core::SubscriptionResult {
+        _pending: reth_json_rpc::PendingSubscriptionSink,
+    ) -> reth_json_rpc::SubscriptionResult {
         Err("admin_peerEvents is not implemented yet".into())
     }
 

@@ -21,17 +21,11 @@
 //! ```
 
 use clap::Parser;
-use jsonrpsee::{
-    core::{
-        middleware::{Batch, Notification, RpcServiceT},
-        server::MethodResponse,
-    },
-    types::{ErrorObjectOwned, Id, Request},
-};
 use reth_ethereum::{
     cli::{chainspec::EthereumChainSpecParser, interface::Cli},
     node::{EthereumAddOns, EthereumNode},
 };
+use reth_json_rpc::{ErrorObject, MethodResponse, Notification, Request, RpcServiceT};
 use tower::Layer;
 
 fn main() {
@@ -70,33 +64,23 @@ pub struct ResponseMutationService<S> {
 
 impl<S> RpcServiceT for ResponseMutationService<S>
 where
-    S: RpcServiceT<
-            MethodResponse = jsonrpsee::MethodResponse,
-            BatchResponse = jsonrpsee::MethodResponse,
-            NotificationResponse = jsonrpsee::MethodResponse,
-        > + Send
-        + Sync
-        + Clone
-        + 'static,
+    S: RpcServiceT + Send + Sync + Clone + 'static,
 {
-    type MethodResponse = S::MethodResponse;
-    type NotificationResponse = S::NotificationResponse;
-    type BatchResponse = S::BatchResponse;
-
-    fn call<'a>(&self, req: Request<'a>) -> impl Future<Output = Self::MethodResponse> + Send + 'a {
+    fn call(&self, req: Request) -> impl Future<Output = MethodResponse> + Send {
         tracing::info!("processed call {:?}", req);
         let service = self.service.clone();
         async move {
+            let id = req.id().clone();
             let resp = service.call(req).await;
 
             //we can modify the response with our own custom error
             if resp.is_error() {
-                let err = ErrorObjectOwned::owned(
+                let err = ErrorObject::owned(
                     -31404,
                     "CustomError",
                     Some("Our very own custom error message"),
                 );
-                return MethodResponse::error(Id::Number(1), err);
+                return MethodResponse::error(id, err)
             }
 
             //otherwise just return the original response
@@ -104,14 +88,11 @@ where
         }
     }
 
-    fn batch<'a>(&self, req: Batch<'a>) -> impl Future<Output = Self::BatchResponse> + Send + 'a {
-        self.service.batch(req)
+    fn batch(&self, reqs: Vec<Request>) -> impl Future<Output = Vec<MethodResponse>> + Send {
+        self.service.batch(reqs)
     }
 
-    fn notification<'a>(
-        &self,
-        n: Notification<'a>,
-    ) -> impl Future<Output = Self::NotificationResponse> + Send + 'a {
+    fn notification(&self, n: Notification) -> impl Future<Output = ()> + Send {
         self.service.notification(n)
     }
 }

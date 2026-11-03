@@ -5,7 +5,7 @@ use alloy_rpc_types_trace::otterscan::{
     BlockDetails, ContractCreator, InternalOperation, OtsBlockTransactions, TraceEntry,
     TransactionsWithReceipts,
 };
-use jsonrpsee::{core::RpcResult, proc_macros::rpc};
+use reth_json_rpc::{rpc, RpcResult};
 
 /// Otterscan RPC interface.
 ///
