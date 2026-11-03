@@ -2096,6 +2096,88 @@ impl ArenaParallelSparseTrie {
     }
 }
 
+/// The occupied child slots of a reachable branch in an arena sparse trie.
+///
+/// The callback receives the full logical nibble path of the branch, including
+/// its extension (`short_key`); `depth` is that path length. Each bit in a mask
+/// corresponds to a child nibble (0 through 15). A stable trie classifies each slot in
+/// one of `blinded`, `revealed_branch`, and `revealed_leaf`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BranchShape {
+    /// Logical nibble depth of this branch, equal to the callback path length.
+    pub depth: usize,
+    /// All occupied child slots, including blinded children.
+    pub occupied: TrieMask,
+    /// Occupied slots whose child is still an opaque RLP node.
+    pub blinded: TrieMask,
+    /// Occupied slots whose revealed child is a branch (including a subtrie root).
+    pub revealed_branch: TrieMask,
+    /// Occupied slots whose revealed child is a leaf (including a subtrie root).
+    pub revealed_leaf: TrieMask,
+}
+
+impl ArenaParallelSparseTrie {
+    /// Visits every reachable revealed branch in the upper arena and lower subtries.
+    ///
+    /// Branches are visited in preorder and child nibble order. An extension is
+    /// represented by its branch's `short_key`, not as an extra branch. Blinded
+    /// children are counted but not traversed. The path reference is valid for the
+    /// duration of each callback. This neither hashes nor mutates the trie.
+    pub fn for_each_branch(&self, mut visit: impl FnMut(&Nibbles, BranchShape)) {
+        visit_arena_branches(&self.upper_arena, self.root, Nibbles::default(), &mut visit);
+    }
+}
+
+fn visit_arena_branches(
+    arena: &NodeArena,
+    index: Index,
+    path: Nibbles,
+    visit: &mut impl FnMut(&Nibbles, BranchShape),
+) {
+    let branch = match &arena[index] {
+        ArenaSparseNode::Branch(branch) => branch,
+        ArenaSparseNode::Subtrie(subtrie) => {
+            visit_arena_branches(&subtrie.arena, subtrie.root, path, visit);
+            return;
+        }
+        _ => return,
+    };
+
+    let mut logical_path = path;
+    logical_path.extend(&branch.short_key);
+    let mut shape = BranchShape {
+        depth: logical_path.len(),
+        occupied: branch.state_mask,
+        blinded: TrieMask::new(0),
+        revealed_branch: TrieMask::new(0),
+        revealed_leaf: TrieMask::new(0),
+    };
+    for (nibble, child) in branch.child_iter() {
+        let Some(child_idx) = child.revealed_index() else {
+            shape.blinded.set_bit(nibble);
+            continue;
+        };
+        let node = match &arena[child_idx] {
+            ArenaSparseNode::Subtrie(subtrie) => &subtrie.arena[subtrie.root],
+            node => node,
+        };
+        match node {
+            ArenaSparseNode::Branch(_) => shape.revealed_branch.set_bit(nibble),
+            ArenaSparseNode::Leaf { .. } => shape.revealed_leaf.set_bit(nibble),
+            _ => {}
+        }
+    }
+    visit(&logical_path, shape);
+
+    for (nibble, child) in branch.child_iter() {
+        if let Some(child_idx) = child.revealed_index() {
+            let mut child_path = logical_path;
+            child_path.push_unchecked(nibble);
+            visit_arena_branches(arena, child_idx, child_path, visit);
+        }
+    }
+}
+
 impl SparseTrie for ArenaParallelSparseTrie {
     #[instrument(level = "trace", target = TRACE_TARGET, skip_all)]
     fn set_root(
@@ -2904,6 +2986,113 @@ mod tests {
 
     const fn epoch(value: u64) -> TrieNodeEpoch {
         TrieNodeEpoch::new(value)
+    }
+
+    #[test]
+    fn branch_shapes_include_logical_paths_and_both_subtrie_root_kinds() {
+        let mut trie = ArenaParallelSparseTrie::default();
+        let leaf = trie.upper_arena.insert(ArenaSparseNode::Leaf {
+            state: ArenaSparseNodeState::Revealed,
+            key: Nibbles::default(),
+            value: vec![1],
+        });
+        let nested_leaf = trie.upper_arena.insert(ArenaSparseNode::Leaf {
+            state: ArenaSparseNodeState::Revealed,
+            key: Nibbles::default(),
+            value: vec![2],
+        });
+        let nested_branch =
+            trie.upper_arena.insert(ArenaSparseNode::Branch(ArenaSparseNodeBranch {
+                state: ArenaSparseNodeState::Revealed,
+                children: [BranchChild::revealed(nested_leaf)].into_iter().collect(),
+                state_mask: TrieMask::new(1 << 1),
+                short_key: Nibbles::from_nibbles([7]),
+                branch_masks: Default::default(),
+            }));
+        let mut branch_subtrie = ArenaSparseSubtrie::new(false);
+        branch_subtrie.path = Nibbles::from_nibbles([3, 9]);
+        let subtrie_blind = branch_subtrie.arena.insert_blinded(RlpNode::word_rlp(&B256::ZERO));
+        branch_subtrie.arena[branch_subtrie.root] =
+            ArenaSparseNode::Branch(ArenaSparseNodeBranch {
+                state: ArenaSparseNodeState::Revealed,
+                children: [subtrie_blind].into_iter().collect(),
+                state_mask: TrieMask::new(1 << 6),
+                short_key: Nibbles::from_nibbles([4]),
+                branch_masks: Default::default(),
+            });
+        let branch_subtrie = trie.upper_arena.insert(ArenaSparseNode::Subtrie(branch_subtrie));
+        let mut leaf_subtrie = ArenaSparseSubtrie::new(false);
+        leaf_subtrie.path = Nibbles::from_nibbles([3, 10]);
+        leaf_subtrie.arena[leaf_subtrie.root] = ArenaSparseNode::Leaf {
+            state: ArenaSparseNodeState::Revealed,
+            key: Nibbles::default(),
+            value: vec![3],
+        };
+        let leaf_subtrie = trie.upper_arena.insert(ArenaSparseNode::Subtrie(leaf_subtrie));
+        let root_blind = trie.upper_arena.insert_blinded(RlpNode::word_rlp(&B256::ZERO));
+        trie.upper_arena[trie.root] = ArenaSparseNode::Branch(ArenaSparseNodeBranch {
+            state: ArenaSparseNodeState::Revealed,
+            children: [
+                root_blind,
+                BranchChild::revealed(leaf),
+                BranchChild::revealed(nested_branch),
+                BranchChild::revealed(branch_subtrie),
+                BranchChild::revealed(leaf_subtrie),
+            ]
+            .into_iter()
+            .collect(),
+            state_mask: TrieMask::new((1 << 0) | (1 << 2) | (1 << 5) | (1 << 9) | (1 << 10)),
+            short_key: Nibbles::from_nibbles([3]),
+            branch_masks: Default::default(),
+        });
+
+        let before = format!("{trie:?}");
+        let mut shapes = Vec::new();
+        trie.for_each_branch(|path, shape| shapes.push((*path, shape)));
+        assert_eq!(
+            shapes,
+            vec![
+                (
+                    Nibbles::from_nibbles([3]),
+                    BranchShape {
+                        depth: 1,
+                        occupied: TrieMask::new(
+                            (1 << 0) | (1 << 2) | (1 << 5) | (1 << 9) | (1 << 10)
+                        ),
+                        blinded: TrieMask::new(1 << 0),
+                        revealed_branch: TrieMask::new((1 << 5) | (1 << 9)),
+                        revealed_leaf: TrieMask::new((1 << 2) | (1 << 10)),
+                    }
+                ),
+                (
+                    Nibbles::from_nibbles([3, 5, 7]),
+                    BranchShape {
+                        depth: 3,
+                        occupied: TrieMask::new(1 << 1),
+                        blinded: TrieMask::new(0),
+                        revealed_branch: TrieMask::new(0),
+                        revealed_leaf: TrieMask::new(1 << 1),
+                    }
+                ),
+                (
+                    Nibbles::from_nibbles([3, 9, 4]),
+                    BranchShape {
+                        depth: 3,
+                        occupied: TrieMask::new(1 << 6),
+                        blinded: TrieMask::new(1 << 6),
+                        revealed_branch: TrieMask::new(0),
+                        revealed_leaf: TrieMask::new(0),
+                    }
+                ),
+            ]
+        );
+        assert_eq!(format!("{trie:?}"), before);
+    }
+
+    #[test]
+    fn empty_trie_has_no_branch_shapes() {
+        ArenaParallelSparseTrie::default()
+            .for_each_branch(|_, _| panic!("empty root is not a branch"));
     }
 
     #[test]
