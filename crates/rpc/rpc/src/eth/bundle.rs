@@ -183,10 +183,14 @@ where
                     .map_err(Eth::Error::from_eth_err)?
                     .map(|acc| acc.balance)
                     .unwrap_or_default();
+                let separate_block_gas = evm_env.version().feature(evm2::EvmFeatures::EIP8037);
+                let tx_gas_limit_cap = evm_env.version().tx_gas_limit_cap;
                 let mut evm = eth_api.evm_config().evm_with_env(&mut db, evm_env);
                 let mut coinbase_balance_before_tx = initial_coinbase;
                 let mut coinbase_balance_after_tx = initial_coinbase;
                 let mut total_gas_used = 0u64;
+                let mut regular_gas_used = 0u64;
+                let mut state_gas_used = 0u64;
                 let mut total_gas_fees = U256::ZERO;
                 let mut hasher = Keccak256::new();
 
@@ -196,8 +200,16 @@ where
                         return Err(EthApiError::InternalEthError.into())
                     }
 
-                    // Like in a block, the bundle's transactions share one gas pool.
-                    if tx.gas_limit() > block_gas_limit.saturating_sub(total_gas_used) {
+                    // Admit each transaction against the gas left in the block, like the block
+                    // executor does: EIP-8037 keeps separate regular and state gas pools.
+                    let regular_limit = tx.gas_limit().min(tx_gas_limit_cap);
+                    let exceeds_block_gas = if separate_block_gas {
+                        regular_limit > block_gas_limit.saturating_sub(regular_gas_used) ||
+                            tx.gas_limit() > block_gas_limit.saturating_sub(state_gas_used)
+                    } else {
+                        regular_limit > block_gas_limit.saturating_sub(total_gas_used)
+                    };
+                    if exceeds_block_gas {
                         return Err(EthApiError::InvalidParams(
                             EthBundleError::BundleGasLimitExceeded(block_gas_limit).to_string(),
                         )
@@ -235,6 +247,8 @@ where
 
                     let gas_used = result.tx_gas_used();
                     total_gas_used += gas_used;
+                    regular_gas_used += result.execution_gas_spent();
+                    state_gas_used += result.state_gas_spent();
 
                     let gas_fees = U256::from(gas_used) * U256::from(gas_price);
                     total_gas_fees += gas_fees;
@@ -556,6 +570,72 @@ mod tests {
         drop(permit);
         let response = api.call_bundle(bundle).await.unwrap();
         assert_eq!(response.total_gas_used, 42_000);
+    }
+
+    /// Under EIP-8037 the bundle admits transactions against separate regular and state gas
+    /// pools, so a bundle that fits a block is accepted even when its receipt gas does not fit
+    /// one pool.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn call_bundle_uses_separate_gas_pools_after_amsterdam() {
+        const TX_GAS_LIMIT: u64 = 1_000_000;
+
+        let mut rng = generators::rng();
+        let key = generate_key(&mut rng);
+        // Value transfers to new accounts spend both regular and state gas.
+        let txs: Vec<_> = (0..2)
+            .map(|nonce| {
+                sign_tx_with_key_pair(
+                    key,
+                    reth_ethereum_primitives::Transaction::Eip1559(TxEip1559 {
+                        chain_id: 1,
+                        nonce,
+                        gas_limit: TX_GAS_LIMIT,
+                        max_fee_per_gas: INITIAL_BASE_FEE as u128,
+                        to: TxKind::Call(Address::random()),
+                        value: U256::from(1),
+                        ..Default::default()
+                    }),
+                )
+            })
+            .collect();
+        let sender = txs[0].recover_signer().unwrap();
+
+        let genesis = Genesis::default()
+            .with_gas_limit(30_000_000)
+            .with_base_fee(Some(INITIAL_BASE_FEE as u128))
+            .extend_accounts([(
+                sender,
+                GenesisAccount::default().with_balance(U256::from(10u128.pow(18))),
+            )]);
+        let chain_spec =
+            Arc::new(ChainSpecBuilder::mainnet().amsterdam_activated().genesis(genesis).build());
+        let factory = create_test_provider_factory_with_chain_spec(chain_spec);
+        init_genesis(&factory).unwrap();
+        let provider = BlockchainProvider::new(factory).unwrap();
+
+        let eth_api = EthApiBuilder::new(
+            provider.clone(),
+            testing_pool(),
+            NoopNetwork::default(),
+            EthEvmConfig::new(provider.chain_spec()),
+        )
+        .build();
+        let api = EthBundle::new(eth_api, BlockingTaskGuard::new(4));
+
+        let bundle = EthCallBundle {
+            txs: txs.iter().map(|tx| tx.encoded_2718().into()).collect(),
+            block_number: 1,
+            state_block_number: BlockNumberOrTag::Number(0),
+            ..Default::default()
+        };
+        let first_gas_used = api.call_bundle(bundle.clone()).await.unwrap().results[0].gas_used;
+
+        // The second transaction fits both pools, but not one pool holding the first
+        // transaction's regular and state gas together.
+        let gas_limit = TX_GAS_LIMIT + first_gas_used - 1;
+        let response =
+            api.call_bundle(EthCallBundle { gas_limit: Some(gas_limit), ..bundle }).await.unwrap();
+        assert_eq!(response.results.len(), 2);
     }
 
     /// A pre-London state has no base fee check in the EVM, so the bundle must reject a fee cap
