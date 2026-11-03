@@ -35,7 +35,7 @@ use alloy_primitives::{
     Address, BlockHash, BlockNumber, StorageKey, StorageValue, TxHash, TxNumber, B256,
 };
 use itertools::Itertools;
-use parking_lot::RwLock;
+use parking_lot::{Mutex, RwLock};
 use rayon::slice::ParallelSliceMut;
 use reth_chain_state::ExecutedBlock;
 use reth_chainspec::{ChainInfo, ChainSpecProvider, EthChainSpec};
@@ -58,14 +58,14 @@ use reth_execution_types::{
 };
 use reth_node_types::{BlockTy, BodyTy, HeaderTy, NodeTypes, ReceiptTy, TxTy};
 use reth_primitives_traits::{
-    Account, Block as _, BlockBody as _, Bytecode, FastInstant as Instant, RecoveredBlock,
-    SealedHeader, StorageEntry,
+    Account, Block as _, BlockBody as _, Bytecode, FastInstant as Instant, NodePrimitives,
+    RecoveredBlock, SealedHeader, StorageEntry,
 };
 use reth_prune_types::{
     PruneCheckpoint, PruneMode, PruneModes, PruneSegment, MINIMUM_UNWIND_SAFE_DISTANCE,
 };
 use reth_stages_types::{FinishCheckpoint, StageCheckpoint, StageId};
-use reth_static_file_types::StaticFileSegment;
+use reth_static_file_types::{SegmentHeader, StaticFileSegment};
 use reth_storage_api::{
     BlockBodyIndicesProvider, BlockBodyReader, HistoryInfo, HistoryReader, MetadataProvider,
     MetadataWriter, NodePrimitivesProvider, StateProvider, StateWriteConfig,
@@ -188,6 +188,42 @@ impl SaveBlocksMode {
     }
 }
 
+/// Static file deletion a [`DatabaseProvider`] runs after its commit.
+#[derive(Debug)]
+enum PendingStaticFileDeletion {
+    /// Deletes the segment's jars that end below the block, as
+    /// [`StaticFileProvider::delete_segment_below_block`] does.
+    ///
+    /// It keeps the cutoff rather than the jars, so running it again, or after an overlapping
+    /// deletion, deletes nothing more.
+    BelowBlock {
+        /// Segment of the jars.
+        segment: StaticFileSegment,
+        /// Block below which the jars go.
+        block: BlockNumber,
+    },
+    /// Deletes every jar of the segment.
+    Segment(StaticFileSegment),
+}
+
+impl PendingStaticFileDeletion {
+    /// Deletes the jars from disk.
+    fn run<N: NodePrimitives>(
+        self,
+        static_file_provider: &StaticFileProvider<N>,
+    ) -> ProviderResult<()> {
+        match self {
+            Self::BelowBlock { segment, block } => {
+                static_file_provider.delete_segment_below_block(segment, block)?;
+            }
+            Self::Segment(segment) => {
+                static_file_provider.delete_segment(segment)?;
+            }
+        }
+        Ok(())
+    }
+}
+
 /// A provider struct that fetches data from the database.
 /// Wrapper around [`DbTx`] and [`DbTxMut`]. Example: [`HeaderProvider`] [`BlockHashReader`]
 pub struct DatabaseProvider<TX, N: NodeTypes> {
@@ -219,6 +255,8 @@ pub struct DatabaseProvider<TX, N: NodeTypes> {
     db_path: PathBuf,
     /// Pending `RocksDB` batches to be committed at provider commit time.
     pending_rocksdb_batches: PendingRocksDBBatches,
+    /// Static file jars to delete after the provider commits.
+    pending_static_file_deletions: Mutex<Vec<PendingStaticFileDeletion>>,
     /// Commit order for database operations.
     commit_order: CommitOrder,
     /// Minimum distance from tip required for pruning
@@ -242,6 +280,7 @@ impl<TX: Debug, N: NodeTypes> Debug for DatabaseProvider<TX, N> {
             .field("overlay_manager", &self.overlay_manager)
             .field("runtime", &self.runtime)
             .field("pending_rocksdb_batches", &"<pending batches>")
+            .field("pending_static_file_deletions", &self.pending_static_file_deletions)
             .field("commit_order", &self.commit_order)
             .field("minimum_pruning_distance", &self.minimum_pruning_distance)
             .field("reader_txn_tracker", &"<reader txn tracker>")
@@ -285,6 +324,7 @@ impl<TX: DbTx + 'static, N: NodeTypes> DatabaseProvider<TX, N> {
     fn commit_unwind(self) -> ProviderResult<()> {
         let storage_v2 = self.cached_storage_settings().storage_v2;
         let reader_txn_tracker = self.reader_txn_tracker.clone();
+        let deletions = std::mem::take(&mut *self.pending_static_file_deletions.lock());
         self.tx.commit()?;
 
         if let Some(reader_txn_tracker) = reader_txn_tracker.as_ref() {
@@ -299,6 +339,9 @@ impl<TX: DbTx + 'static, N: NodeTypes> DatabaseProvider<TX, N> {
         }
 
         self.static_file_provider.commit()?;
+        for deletion in deletions {
+            deletion.run(&self.static_file_provider)?;
+        }
         Ok(())
     }
 
@@ -331,6 +374,33 @@ impl<TX, N: NodeTypes> StaticFileProviderFactory for DatabaseProvider<TX, N> {
         segment: StaticFileSegment,
     ) -> ProviderResult<crate::providers::StaticFileProviderRWRefMut<'_, Self::Primitives>> {
         self.static_file_provider.get_writer(block, segment)
+    }
+
+    fn delete_segment_below_block_after_commit(
+        &self,
+        segment: StaticFileSegment,
+        block: BlockNumber,
+    ) -> ProviderResult<Vec<SegmentHeader>> {
+        let headers = self.static_file_provider.segment_headers_below_block(segment, block)?;
+        if !headers.is_empty() {
+            self.pending_static_file_deletions
+                .lock()
+                .push(PendingStaticFileDeletion::BelowBlock { segment, block });
+        }
+        Ok(headers)
+    }
+
+    fn delete_segment_after_commit(
+        &self,
+        segment: StaticFileSegment,
+    ) -> ProviderResult<Vec<SegmentHeader>> {
+        let headers = self.static_file_provider.segment_headers(segment)?;
+        if !headers.is_empty() {
+            self.pending_static_file_deletions
+                .lock()
+                .push(PendingStaticFileDeletion::Segment(segment));
+        }
+        Ok(headers)
     }
 }
 
@@ -393,6 +463,7 @@ impl<TX: DbTxMut, N: NodeTypes> DatabaseProvider<TX, N> {
             db_path,
             rocksdb_history_snapshot: OnceLock::new(),
             pending_rocksdb_batches: Default::default(),
+            pending_static_file_deletions: Default::default(),
             commit_order,
             minimum_pruning_distance: MINIMUM_UNWIND_SAFE_DISTANCE,
             metrics,
@@ -1038,6 +1109,7 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> DatabaseProvider<TX, N> {
             db_path,
             rocksdb_history_snapshot: OnceLock::new(),
             pending_rocksdb_batches: Default::default(),
+            pending_static_file_deletions: Default::default(),
             commit_order: CommitOrder::Normal,
             minimum_pruning_distance: MINIMUM_UNWIND_SAFE_DISTANCE,
             metrics,
@@ -4041,11 +4113,18 @@ impl<TX: DbTx + 'static, N: NodeTypes> DBProvider for DatabaseProvider<TX, N> {
             }
             timings.rocksdb = start.elapsed();
 
+            let deletions = std::mem::take(&mut *self.pending_static_file_deletions.lock());
             let start = Instant::now();
             self.tx.commit()?;
             timings.mdbx = start.elapsed();
 
             self.metrics.record_commit(&timings);
+
+            // Jars go only once the prune checkpoints covering them are durable, so an
+            // interruption leaves extra jars below a checkpoint rather than missing ones above it.
+            for deletion in deletions {
+                deletion.run(&self.static_file_provider)?;
+            }
         }
 
         Ok(())
@@ -4089,8 +4168,11 @@ impl<TX: Send, N: NodeTypes> StoragePath for DatabaseProvider<TX, N> {
 mod tests {
     use super::*;
     use crate::{
-        test_utils::{blocks::BlockchainTestData, create_test_provider_factory},
-        BlockWriter,
+        providers::{RocksDBBuilder, StaticFileProviderBuilder},
+        test_utils::{
+            blocks::BlockchainTestData, create_test_provider_factory, MockNodeTypesWithDB,
+        },
+        BlockWriter, ProviderFactory,
     };
     use alloy_consensus::Header;
     use alloy_primitives::{
@@ -4099,11 +4181,14 @@ mod tests {
     };
     use evm2::evm::AccountInfo;
     use reth_chain_state::{test_utils::TestBlockBuilder, ExecutedBlock};
+    use reth_chainspec::MAINNET;
+    use reth_db::test_utils::{create_test_rw_db_with_datadir, tempdir_path};
     use reth_db_api::models::StorageSettings;
     use reth_ethereum_primitives::Receipt;
     use reth_execution_types::{AccountRevertInit, BlockExecutionOutput, BlockExecutionResult};
     use reth_primitives_traits::SealedBlock;
     use reth_storage_api::{DatabaseProviderFactory, MetadataWriter};
+    use reth_tasks::Runtime;
     use reth_testing_utils::generators::{self, random_block, BlockParams};
     use reth_trie::{
         bundle_state::BundleState, HashedPostState, KeccakKeyHasher, Nibbles, SortedTrieData,
@@ -6032,5 +6117,53 @@ mod tests {
         assert!(all_blocks.contains(&3), "block 3 should remain");
         assert!(!all_blocks.contains(&7), "block 7 should be unwound");
         assert!(!all_blocks.contains(&10), "block 10 should be unwound");
+    }
+
+    #[test]
+    fn static_file_deletions_run_after_commit() {
+        let datadir = tempdir_path();
+        let static_files_path = datadir.join("static_files");
+        std::fs::create_dir_all(&static_files_path).unwrap();
+        let factory = ProviderFactory::<MockNodeTypesWithDB>::new(
+            create_test_rw_db_with_datadir(&datadir),
+            MAINNET.clone(),
+            StaticFileProviderBuilder::read_write(static_files_path)
+                .with_blocks_per_file(10)
+                .build()
+                .unwrap(),
+            RocksDBBuilder::new(datadir.join("rocksdb")).with_default_tables().build().unwrap(),
+            Runtime::test(),
+        )
+        .unwrap();
+
+        // Three jars: blocks 0..=9, 10..=19 and 20..=29.
+        let static_files = factory.static_file_provider();
+        let mut writer = static_files.latest_writer(StaticFileSegment::Headers).unwrap();
+        let mut header = Header::default();
+        for number in 0..30 {
+            header.number = number;
+            writer.append_header(&header, &B256::ZERO).unwrap();
+        }
+        writer.commit().unwrap();
+        drop(writer);
+        let segment = StaticFileSegment::Headers;
+        assert_eq!(static_files.get_lowest_range_end(segment), Some(9));
+
+        // A provider dropped without committing deletes nothing.
+        let provider = factory.database_provider_rw().unwrap();
+        let headers = provider.delete_segment_below_block_after_commit(segment, 20).unwrap();
+        assert_eq!(headers.len(), 2);
+        assert_eq!(static_files.get_lowest_range_end(segment), Some(9));
+        drop(provider);
+        assert_eq!(static_files.get_lowest_range_end(segment), Some(9));
+
+        // A committed provider deletes the jars only once its commit is done, and the same
+        // deletion queued twice deletes nothing more.
+        let provider = factory.database_provider_rw().unwrap();
+        provider.delete_segment_below_block_after_commit(segment, 20).unwrap();
+        provider.delete_segment_below_block_after_commit(segment, 20).unwrap();
+        assert_eq!(static_files.get_lowest_range_end(segment), Some(9));
+        provider.commit().unwrap();
+        assert_eq!(static_files.get_lowest_range_end(segment), Some(29));
     }
 }

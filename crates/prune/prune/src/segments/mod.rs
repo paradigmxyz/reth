@@ -38,7 +38,7 @@ where
     Provider: StaticFileProviderFactory,
 {
     let deleted_headers =
-        provider.static_file_provider().delete_segment_below_block(segment, input.to_block + 1)?;
+        provider.delete_segment_below_block_after_commit(segment, input.to_block + 1)?;
 
     if deleted_headers.is_empty() {
         return Ok(SegmentOutput {
@@ -83,7 +83,7 @@ pub(crate) fn delete_static_files_segment<Provider>(
 where
     Provider: StaticFileProviderFactory,
 {
-    let deleted_headers = provider.static_file_provider().delete_segment(segment)?;
+    let deleted_headers = provider.delete_segment_after_commit(segment)?;
 
     if deleted_headers.is_empty() {
         return Ok(SegmentOutput::done())

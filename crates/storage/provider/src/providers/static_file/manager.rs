@@ -999,6 +999,69 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
         Ok(deleted_headers)
     }
 
+    /// Returns the headers of the jars that [`Self::delete_segment_below_block`] would delete for
+    /// the same arguments, lowest first, without deleting them.
+    pub fn segment_headers_below_block(
+        &self,
+        segment: StaticFileSegment,
+        block: BlockNumber,
+    ) -> ProviderResult<Vec<SegmentHeader>> {
+        // Same stop condition as `delete_segment_below_block`, without reading any jar.
+        if self.get_lowest_range_end(segment).is_none_or(|end| end >= block) {
+            return Ok(Vec::new())
+        }
+
+        let ranges = self.expected_block_ranges(segment);
+        // The highest static file is never deleted.
+        let Some((_, lower_ranges)) = ranges.split_last() else { return Ok(Vec::new()) };
+
+        let mut headers = Vec::new();
+        for range in lower_ranges {
+            let header = self.jar_header(segment, range)?;
+            if header.block_range().is_none_or(|block_range| block_range.end() >= block) {
+                break
+            }
+            headers.push(header);
+        }
+        Ok(headers)
+    }
+
+    /// Returns the headers of every jar of the segment, lowest first: the jars
+    /// [`Self::delete_segment`] would delete.
+    pub fn segment_headers(
+        &self,
+        segment: StaticFileSegment,
+    ) -> ProviderResult<Vec<SegmentHeader>> {
+        self.expected_block_ranges(segment)
+            .iter()
+            .map(|range| self.jar_header(segment, range))
+            .collect()
+    }
+
+    /// Returns the expected block ranges of the segment's jars on disk, lowest first.
+    fn expected_block_ranges(&self, segment: StaticFileSegment) -> Vec<SegmentRangeInclusive> {
+        self.indexes
+            .read()
+            .get(segment)
+            .map(|index| index.expected_block_ranges_by_max_block.values().copied().collect())
+            .unwrap_or_default()
+    }
+
+    /// Reads the header of the segment's jar for the expected block range, from the cached jar
+    /// when there is one.
+    fn jar_header(
+        &self,
+        segment: StaticFileSegment,
+        fixed_block_range: &SegmentRangeInclusive,
+    ) -> ProviderResult<SegmentHeader> {
+        if let Some(jar) = self.map.get(&(fixed_block_range.end(), segment)) {
+            return Ok(jar.jar.user_header().clone())
+        }
+        let file = self.path.join(segment.filename(fixed_block_range));
+        let jar = NippyJar::<SegmentHeader>::load(&file).map_err(ProviderError::other)?;
+        Ok(jar.user_header().clone())
+    }
+
     /// Given a segment and block range it returns a cached
     /// [`StaticFileJarProvider`]. TODO(joshie): we should check the size and pop N if there's too
     /// many.
