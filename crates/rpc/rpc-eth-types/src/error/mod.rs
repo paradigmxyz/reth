@@ -186,9 +186,9 @@ pub enum EthApiError {
     /// Error encountered when converting a transaction type
     #[error(transparent)]
     TransactionConversionError(#[from] TransactionConversionError),
-    /// Error thrown when tracing with a muxTracer fails
-    #[error(transparent)]
-    MuxTracerError(#[from] MuxError),
+    /// Error message from a failed muxTracer, without thread-local JavaScript state.
+    #[error("{0}")]
+    MuxTracerError(String),
     /// Error thrown when waiting for transaction confirmation times out
     #[error(
         "Transaction {hash} was added to the mempool but wasn't confirmed within {duration:?}."
@@ -502,6 +502,13 @@ impl From<evm2_inspectors::tracing::js::JsInspectorError> for EthApiError {
             }
             err => Self::InvalidParams(err.to_string()),
         }
+    }
+}
+
+impl From<MuxError> for EthApiError {
+    fn from(error: MuxError) -> Self {
+        // Nested JavaScript errors can contain thread-local runtime state.
+        Self::MuxTracerError(error.to_string())
     }
 }
 
@@ -1165,6 +1172,9 @@ mod tests {
     use alloy_primitives::b256;
     use alloy_sol_types::{Revert, SolError};
 
+    #[cfg(feature = "js-tracer")]
+    use evm2_inspectors::tracing::js::JsInspectorError;
+
     #[test]
     fn timed_out_error() {
         let err = EthApiError::ExecutionTimedOut(Duration::from_secs(10));
@@ -1324,5 +1334,30 @@ mod tests {
         let err = RevertError::new(revert.abi_encode().into());
         let msg = err.to_string();
         assert_eq!(msg, "execution reverted: test_revert_reason");
+    }
+
+    #[test]
+    fn eth_api_error_is_send_and_sync() {
+        fn assert_send_sync<T: Send + Sync>() {}
+        assert_send_sync::<EthApiError>();
+    }
+
+    #[test]
+    fn mux_tracer_error_preserves_rpc_message() {
+        let error = MuxError::Child(Box::new(DebugInspectorError::InvalidTracerConfig));
+        let error = EthApiError::from(error).into_rpc_err();
+        assert_eq!(error.code(), jsonrpsee_types::error::INTERNAL_ERROR_CODE);
+        assert_eq!(error.message(), "invalid tracer config");
+    }
+
+    #[cfg(feature = "js-tracer")]
+    #[test]
+    fn mux_js_tracer_error_preserves_rpc_message() {
+        let error = DebugInspectorError::MuxInspector(MuxError::Child(Box::new(
+            DebugInspectorError::JsInspector(JsInspectorError::ExpectedJsObject),
+        )));
+        let error = EthApiError::from(error).into_rpc_err();
+        assert_eq!(error.code(), jsonrpsee_types::error::INTERNAL_ERROR_CODE);
+        assert_eq!(error.message(), "the evaluated code is not a JS object");
     }
 }
