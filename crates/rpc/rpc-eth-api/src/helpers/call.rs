@@ -2,10 +2,9 @@
 //! methods.
 
 use super::{LoadBlock, LoadPendingBlock, LoadState, LoadTransaction, SpawnBlocking, Trace};
-use crate::{
-    helpers::estimate::EstimateCall, FromEvmError, FullEthApiTypes, RpcBlock, RpcNodeCore,
-};
+use crate::{helpers::estimate::EstimateCall, FromEvmError, FullEthApiTypes, RpcBlock};
 use alloy_consensus::{transaction::Transaction, BlockHeader};
+use alloy_eip7928::BlockAccessIndex;
 use alloy_eips::{
     eip1559::calc_effective_gas_price, eip2718::Typed2718, eip2930::AccessListResult,
 };
@@ -23,12 +22,12 @@ use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthereumHardforks};
 use reth_errors::{ProviderError, RethError};
 use reth_evm::{
     database::StateProviderDatabase,
-    execute::{BlockBuilder, BlockExecutor},
-    BundleState, ConfigureEvm, Database, Evm, EvmEnv, EvmEnvFor, EvmTypesFor, TransactionEnvMut,
-    TxEnvFor, TxResultWithStateFor,
+    execute::{BlockBuilder, BlockExecutor, BlockExecutorFactory, BlockTransactionResult},
+    BlockExecutorFor, BundleState, ConfigureEvm, Database, Evm, EvmEnv, EvmEnvFor, EvmTypesFor,
+    TransactionEnvMut, TxEnvFor, TxResultWithStateFor,
 };
 use reth_execution_types::BundleSource;
-use reth_primitives_traits::{BlockBody, Recovered};
+use reth_primitives_traits::{BlockBody, BlockTy, Recovered, RecoveredBlock};
 use reth_rpc_convert::{RpcConvert, RpcTxReq};
 use reth_rpc_eth_types::{
     cache::db::{
@@ -717,7 +716,7 @@ pub trait Call:
     ///
     /// Before the transaction is executed, the state is positioned right before the transaction,
     /// either by attaching the block's cached BAL or by executing all previous transactions in the
-    /// block.
+    /// block. The transaction is executed through the block executor, see [`Call::block_executor`].
     /// The callback `f` is invoked with the [`TxResultWithStateFor`] after the transaction was
     /// executed and the database that points to the beginning of the transaction. The database
     /// may have the block's BAL attached and must only be used for reads, because an attached
@@ -755,39 +754,41 @@ pub trait Call:
             let evm_env = self.evm_env_for_header(block.sealed_block().sealed_header())?;
 
             self.spawn_with_state_at_block(parent_block, move |this, mut db| {
-                if let Some((bal, tx_index)) = bal.zip(tx_info.index) {
-                    attach_bal_before_tx(&mut db, &bal, tx_index as usize);
-
-                    let evm_env = this.evm_env_for_header(block.sealed_block().sealed_header())?;
-                    let tx_env = RpcNodeCore::evm_config(&this).tx_env(tx);
-                    let res = this.transact(&mut db, evm_env, tx_env)?;
-                    return f(tx_info, res, db)
+                let tx_index = tx_info.index.expect("included transaction has an index") as usize;
+                if let Some(bal) = &bal {
+                    // the BAL also covers the block's pre-execution changes
+                    attach_bal_before_tx(&mut db, bal, tx_index);
+                } else {
+                    let ctx = this
+                        .evm_config()
+                        .context_for_block(block.sealed_block())
+                        .map_err(RethError::other)
+                        .map_err(Self::Error::from_eth_err)?;
+                    let changes = this
+                        .evm_config()
+                        .pre_block_state_changes(&mut db, evm_env.clone(), ctx)
+                        .map_err(|err| EthApiError::EvmCustom(err.to_string()))
+                        .map_err(Self::Error::from_eth_err)?;
+                    db.commit_source(&reth_execution_types::BundleSource(&changes));
                 }
 
-                let block_txs = block.transactions_recovered();
-
-                let ctx = this
-                    .evm_config()
-                    .context_for_block(block.sealed_block())
-                    .map_err(RethError::other)
-                    .map_err(Self::Error::from_eth_err)?;
-                let changes = this
-                    .evm_config()
-                    .pre_block_state_changes(&mut db, evm_env.clone(), ctx)
-                    .map_err(|err| EthApiError::EvmCustom(err.to_string()))
-                    .map_err(Self::Error::from_eth_err)?;
-                db.commit_source(&reth_execution_types::BundleSource(&changes));
-
-                let mut evm = this.evm_config().evm_with_env(&mut db, evm_env);
-                this.replay_transactions_until_with_evm(
-                    &mut evm,
-                    block_txs,
-                    tx_info.index.expect("included transaction has an index") as usize,
-                )?;
-                let tx_env = RpcNodeCore::evm_config(&this).tx_env(tx);
-                let res = evm.transact(&tx_env).map_err(Self::Error::from_evm_err)?;
-                let cache = evm.take_state_cache();
-                drop(evm);
+                let mut executor = this.block_executor(&block, &mut db, evm_env)?;
+                if bal.is_some() {
+                    executor
+                        .set_block_access_index(BlockAccessIndex::from_tx_index(tx_index as u64));
+                } else {
+                    this.replay_transactions_until_with_executor(
+                        &mut executor,
+                        block.transactions_recovered(),
+                        tx_index,
+                    )?;
+                }
+                let res = executor
+                    .execute_transaction_without_commit(tx)
+                    .map_err(Self::Error::from_evm_err)?
+                    .into_result();
+                let cache = executor.evm_mut().take_state_cache();
+                drop(executor);
                 db.cache.merge(cache);
                 f(tx_info, res, db)
             })
@@ -796,39 +797,46 @@ pub trait Call:
         }
     }
 
-    /// Replays all transactions before the target transaction index on the given EVM.
+    /// Creates a block executor for `block` on `db` with the given EVM environment.
     ///
-    /// This executes on a caller provided EVM, so the target transaction can then be run on the
-    /// same EVM, keeping any block-scoped EVM state intact. The EVM's inspector configuration is
-    /// left untouched; see
-    /// [`Trace::inspect_transaction_in_block`] to replay without inspection and trace the target.
+    /// Replaying a block's own transactions through the executor rather than a bare EVM includes
+    /// the changes the executor applies on top of each EVM result, so replayed results agree with
+    /// the block's receipts and state. The executor does not apply the block's pre-execution
+    /// changes: callers apply them to `db` first or position `db` with the block's BAL, see
+    /// [`attach_bal_before_tx`].
+    fn block_executor<'a>(
+        &'a self,
+        block: &'a RecoveredBlock<BlockTy<Self::Primitives>>,
+        db: &'a mut StateCacheDb,
+        evm_env: EvmEnvFor<Self::Evm>,
+    ) -> Result<BlockExecutorFor<'a, Self::Evm>, Self::Error> {
+        let ctx = self
+            .evm_config()
+            .context_for_block(block.sealed_block())
+            .map_err(RethError::other)
+            .map_err(Self::Error::from_eth_err)?;
+        let evm = self.evm_config().evm_with_env(db, evm_env);
+        Ok(self.evm_config().block_executor_factory().create_executor(evm, ctx))
+    }
+
+    /// Replays all transactions before the target transaction index through the given executor.
     ///
     /// If the target index is greater than or equal to the iterator length, all transactions are
     /// replayed.
-    fn replay_transactions_until_with_evm<'a, E, Txs>(
+    fn replay_transactions_until_with_executor<'a, Txs>(
         &self,
-        evm: &mut E,
+        executor: &mut BlockExecutorFor<'_, Self::Evm>,
         transactions: Txs,
         target_tx_index: usize,
     ) -> Result<(), Self::Error>
     where
-        E: Evm<
-            EvmTypes = EvmTypesFor<Self::Evm>,
-            Transaction = <EvmTypesFor<Self::Evm> as evm2::EvmTypesHost>::Tx,
-        >,
         Txs: IntoIterator<Item = Recovered<&'a ProviderTx<Self::Provider>>>,
     {
-        for (index, tx) in transactions.into_iter().enumerate() {
-            if index == target_tx_index {
-                // reached the target transaction
-                break
-            }
+        for tx in transactions.into_iter().take(target_tx_index) {
             if is_cancelled() {
                 return Err(EthApiError::InternalEthError.into())
             }
-
-            let tx_env = self.evm_config().tx_env(tx.cloned());
-            let _ = evm.transact_commit(&tx_env).map_err(Self::Error::from_evm_err)?;
+            executor.execute_transaction(tx).map_err(Self::Error::from_evm_err)?;
         }
         Ok(())
     }

@@ -77,6 +77,10 @@ impl<T: EvmTypes, TxType> BlockTransactionResult<T> for EthTransactionResultWith
     fn result(&self) -> &TxResultWithState<T> {
         &self.result
     }
+
+    fn into_result(self) -> TxResultWithState<T> {
+        self.result
+    }
 }
 
 impl<T: EvmTypes, TxType> EthTransactionResultWithState<T, TxType> {

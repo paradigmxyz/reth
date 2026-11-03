@@ -117,6 +117,9 @@ pub trait ReceiptBuilder {
 pub trait BlockTransactionResult<T: evm2::EvmTypes> {
     /// Returns the raw transaction execution result.
     fn result(&self) -> &evm2::TxResultWithState<T>;
+
+    /// Consumes the output and returns the raw transaction execution result.
+    fn into_result(self) -> evm2::TxResultWithState<T>;
 }
 
 /// A configured EVM instance.
@@ -155,6 +158,11 @@ pub trait Evm {
 
     /// Sets the inspector used by subsequent transactions.
     fn set_inspector<I>(&mut self, inspector: I)
+    where
+        I: evm2::Inspector<Self::EvmTypes> + 'static;
+
+    /// Removes the inspector set by [`Evm::set_inspector`] if it has type `I`.
+    fn take_inspector<I>(&mut self) -> Option<I>
     where
         I: evm2::Inspector<Self::EvmTypes> + 'static;
 
@@ -239,6 +247,18 @@ impl<'a, T: evm2::EvmTypes<Tx: Typed2718>> Evm for evm2::Evm<'a, T> {
 
     fn set_inspector<I: evm2::Inspector<T> + 'a>(&mut self, inspector: I) {
         evm2::Evm::set_inspector(self, inspector);
+    }
+
+    fn take_inspector<I: evm2::Inspector<T> + 'static>(&mut self) -> Option<I> {
+        let inspector = self.clear_inspector()?;
+        let erased: &dyn evm2::evm::NonStaticAny = &**inspector;
+        if erased.type_id() != core::any::TypeId::of::<I>() {
+            self.set_boxed_inspector(inspector);
+            return None
+        }
+        // SAFETY: the erased type ID matches `I`, which is `'static`, so the boxed inspector is an
+        // `I` and no lifetime is extended.
+        Some(*unsafe { Box::from_raw(Box::into_raw(inspector).cast::<I>()) })
     }
 
     fn state_db_mut(&mut self) -> &mut dyn DynDatabase {
@@ -401,6 +421,27 @@ pub trait BlockExecutor: Sized {
         &mut self,
         transaction: impl ExecutorTx<Self>,
     ) -> Result<Self::TransactionResultWithState, BlockExecutionError>;
+
+    /// Executes a transaction with `inspector` and detaches its state changes without committing
+    /// them.
+    ///
+    /// Returns the inspector together with the output, so a tracer observes the transaction exactly
+    /// as the executor runs it, including any changes the executor applies on top of the EVM
+    /// result. Replaces any inspector already set on the executor's EVM.
+    fn inspect_transaction_without_commit<I>(
+        &mut self,
+        transaction: impl ExecutorTx<Self>,
+        inspector: I,
+    ) -> Result<(I, Self::TransactionResultWithState), BlockExecutionError>
+    where
+        I: evm2::Inspector<<Self::Evm as Evm>::EvmTypes> + 'static,
+    {
+        self.evm_mut().set_inspector(inspector);
+        let output = self.execute_transaction_without_commit(transaction);
+        let inspector =
+            self.evm_mut().take_inspector().expect("inspector was set before execution");
+        output.map(|output| (inspector, output))
+    }
 
     /// Commits detached transaction state and records its receipt and gas accounting.
     fn commit_transaction(

@@ -18,7 +18,7 @@ use reth_chainspec::{ChainSpecBuilder, EthereumHardfork, ForkCondition, MAINNET}
 use reth_ethereum_primitives::{Block, BlockBody, Transaction};
 use reth_evm::{
     execute::{BasicBlockExecutor, Executor},
-    BlockExecutor, BlockValidationError, ConfigureEvm,
+    BlockExecutor, BlockValidationError, ConfigureEvm, Evm,
 };
 use reth_evm_ethereum::EthEvmConfig;
 use reth_execution_types::{BlockExecutionResult, BundleSource, StateUpdate};
@@ -806,4 +806,71 @@ fn prepared_block_access_list_keeps_legacy_ef01_code() {
     assert_eq!(created.unwrap().code_changes[0].new_code, runtime);
     // Reparsing the canonical BAL into evm2's representation rejects the same code.
     assert!(evm2::evm::Bal::try_from(alloy_bal).is_err());
+}
+
+#[test]
+fn inspect_transaction_without_commit_returns_inspector() {
+    #[derive(Debug, Default)]
+    struct CallCounter(usize);
+
+    impl<T: evm2::EvmTypesHost> evm2::Inspector<T> for CallCounter {
+        fn call(
+            &mut self,
+            _interp: &mut evm2::interpreter::Interpreter<'_, '_, T>,
+            _message: &mut evm2::interpreter::Message<T>,
+        ) -> Option<evm2::interpreter::MessageResult<T>> {
+            self.0 += 1;
+            None
+        }
+    }
+
+    let chain_spec = Arc::new(ChainSpecBuilder::from(&*MAINNET).cancun_activated().build());
+
+    let sender_key_pair = generators::generate_key(&mut generators::rng());
+    let sender_address = public_key_to_address(sender_key_pair.public_key());
+    let mut db = InMemoryDB::default();
+    db.insert_account_info(
+        &sender_address,
+        AccountInfo { balance: U256::from(ETH_TO_WEI), ..Default::default() },
+    );
+
+    let mut header = chain_spec.genesis_header().clone();
+    header.gas_limit = 1_000_000;
+    let tx = sign_tx_with_key_pair(
+        sender_key_pair,
+        Transaction::Legacy(TxLegacy {
+            chain_id: Some(chain_spec.chain.id()),
+            nonce: 0,
+            gas_price: header.base_fee_per_gas.unwrap().into(),
+            gas_limit: 21_000,
+            to: TxKind::Call(address!("0x000000000000000000000000000000000000beef")),
+            value: U256::ONE,
+            input: Bytes::new(),
+        }),
+    );
+    let block = Block { header, body: BlockBody { transactions: vec![tx], ..Default::default() } }
+        .try_into_recovered()
+        .unwrap();
+
+    let evm_config = EthEvmConfig::new(chain_spec);
+    let mut executor = evm_config.executor_for_block(&mut db, block.sealed_block()).unwrap();
+
+    let (inspector, output) = executor
+        .inspect_transaction_without_commit(
+            block.transactions_recovered().next().unwrap(),
+            CallCounter::default(),
+        )
+        .unwrap();
+    assert_eq!(inspector.0, 1);
+    assert_eq!(output.result().result.tx_gas_used(), 21_000);
+    // the inspector is removed once the transaction is executed
+    assert!(executor.evm_mut().take_inspector::<CallCounter>().is_none());
+
+    // an inspector of another type stays installed
+    executor.evm_mut().set_inspector(CallCounter::default());
+    assert!(executor.evm_mut().take_inspector::<evm2::NoopInspector>().is_none());
+    assert_eq!(
+        executor.evm_mut().take_inspector::<CallCounter>().map(|inspector| inspector.0),
+        Some(0)
+    );
 }
