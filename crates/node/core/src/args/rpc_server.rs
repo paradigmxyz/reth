@@ -839,6 +839,8 @@ impl RpcServerArgs {
     /// * The `http_port` is scaled by a factor of `-instance`
     /// * The `ws_port` is scaled by a factor of `instance * 2`
     /// * The `ipcpath` is appended with the instance number: `/tmp/reth.ipc-<instance>`
+    /// * The `auth_ipc_path` is appended with the instance number:
+    ///   `/tmp/reth_engine_api.ipc-<instance>`
     ///
     /// # Panics
     /// Warning: if `instance` is zero in debug mode, this will panic.
@@ -859,6 +861,8 @@ impl RpcServerArgs {
             self.ws_port += instance * 2 - 2;
             // append instance file to ipc path
             self.ipcpath = format!("{}-{}", self.ipcpath, instance);
+            // append instance file to auth ipc path so instances don't share the engine API socket
+            self.auth_ipc_path = format!("{}-{}", self.auth_ipc_path, instance);
         }
     }
 
@@ -1487,5 +1491,35 @@ mod tests {
         ]);
 
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_adjust_instance_ports_suffixes_ipc_paths() {
+        let paths: Vec<_> = (1..=3u16)
+            .map(|instance| {
+                let mut args = RpcServerArgs::default();
+                let ipcpath = args.ipcpath.clone();
+                let auth_ipc_path = args.auth_ipc_path.clone();
+                args.adjust_instance_ports(Some(instance));
+                assert_eq!(args.ipcpath, format!("{ipcpath}-{instance}"));
+                assert_eq!(args.auth_ipc_path, format!("{auth_ipc_path}-{instance}"));
+                args.auth_ipc_path
+            })
+            .collect();
+
+        assert_eq!(
+            paths,
+            [
+                "/tmp/reth_engine_api.ipc-1",
+                "/tmp/reth_engine_api.ipc-2",
+                "/tmp/reth_engine_api.ipc-3"
+            ]
+        );
+
+        // Without an instance the paths are left untouched.
+        let mut args = RpcServerArgs::default();
+        let auth_ipc_path = args.auth_ipc_path.clone();
+        args.adjust_instance_ports(None);
+        assert_eq!(args.auth_ipc_path, auth_ipc_path);
     }
 }
