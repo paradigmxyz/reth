@@ -311,6 +311,16 @@ if [ ! -d "$DATADIR/db" ] || [ ! -d "$DATADIR/static_files" ]; then
   ls -la "$DATADIR" || true
   exit 1
 fi
+# reth runs as root and creates a missing JWT secret readable only by root
+# (0600), but the bench client runs as the runner user. Create the secret here,
+# owned by the runner user, so both can read it.
+JWT_SECRET="$DATADIR/jwt.hex"
+if ! sudo test -s "$JWT_SECRET"; then
+  od -An -N32 -tx1 /dev/urandom | tr -d ' \n' | sudo tee "$JWT_SECRET" >/dev/null
+fi
+sudo chown "$(id -un):$(id -gn)" "$JWT_SECRET"
+sudo chmod 0600 "$JWT_SECRET"
+
 sync
 sudo sh -c 'echo 3 > /proc/sys/vm/drop_caches'
 echo "=== Cache state after drop ==="
@@ -341,6 +351,7 @@ RETH_ARGS=(
   --ws
   --ws.api all
   --authrpc.port 8551
+  --authrpc.jwtsecret "$JWT_SECRET"
   --disable-discovery
   --no-persist-peers
 )
@@ -689,7 +700,7 @@ if [ "$WARMUP" -gt 0 ] 2>/dev/null; then
   else
     $BENCH_NICE "$TXGEN_BENCH" send-blocks \
       --engine http://127.0.0.1:8551 \
-      --jwt-secret "$DATADIR/jwt.hex" \
+      --jwt-secret "$JWT_SECRET" \
       --input "$WARMUP_BLOCKS" \
       "${TXGEN_SEND_ARGS[@]}" \
       --wait-for-persistence never \
@@ -791,7 +802,7 @@ elif [ "$EXECUTION_MODE" = "rpc" ]; then
   TXGEN_REPLAY_ARGS=(send --rpc-url http://127.0.0.1:8545 --drain-timeout 300)
   BENCH_SCENARIO="rpc-replay"
 else
-  TXGEN_REPLAY_ARGS=(send-blocks --engine http://127.0.0.1:8551 --jwt-secret "$DATADIR/jwt.hex" --wait-for-persistence never)
+  TXGEN_REPLAY_ARGS=(send-blocks --engine http://127.0.0.1:8551 --jwt-secret "$JWT_SECRET" --wait-for-persistence never)
 fi
 
 # No Engine API traffic in call mode, so `latest` must not move while measuring.
