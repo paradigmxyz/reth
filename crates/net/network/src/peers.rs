@@ -1139,13 +1139,13 @@ impl PeersManager {
     /// `trusted` peers, including registered trusted IDs whose addresses were discovered before
     /// hostname resolution. The same restriction applies when `trusted_only` is set.
     ///
-    /// Peers that are not `trusted` or `static` are skipped if their IP is in `dialing_ips`.
+    /// Peers on an IP in `dialing_ips` are skipped.
     ///
     /// Returns `None` if no peer is available.
     fn best_unconnected(
         &mut self,
         trusted_only: bool,
-        dialing_ips: &HashSet<IpAddr>,
+        dialing_ips: &[IpAddr],
     ) -> Option<(PeerId, &mut Peer)> {
         let mut unconnected = self.peers.iter_mut().filter(|(peer_id, peer)| {
             !peer.is_backed_off() &&
@@ -1154,8 +1154,7 @@ impl PeersManager {
                 (!(self.trusted_nodes_only || trusted_only) ||
                     peer.is_trusted() ||
                     self.trusted_peer_ids.contains(*peer_id)) &&
-                dial_limited_ip(peer_id, peer, &self.trusted_peer_ids)
-                    .is_none_or(|ip| !dialing_ips.contains(&ip))
+                dial_ip(peer).is_none_or(|ip| !dialing_ips.contains(&ip))
         });
 
         // keep track of the best peer, if there's one
@@ -1251,14 +1250,14 @@ impl PeersManager {
             return
         }
 
-        // Allow one pending dial per public IP, so a single host announcing many identities can't
-        // occupy all concurrent dial slots. Trusted and static peers are exempt.
-        let mut dialing_ips = self
+        // At most one pending dial per IP. Bounded by the concurrent dial limit, so a linear
+        // lookup is cheaper than hashing.
+        let mut dialing_ips: Vec<IpAddr> = self
             .peers
-            .iter()
-            .filter(|(_, peer)| peer.state.is_pending_out())
-            .filter_map(|(peer_id, peer)| dial_limited_ip(peer_id, peer, &self.trusted_peer_ids))
-            .collect::<HashSet<_>>();
+            .values()
+            .filter(|peer| peer.state.is_pending_out())
+            .filter_map(dial_ip)
+            .collect();
 
         // as long as there are slots available fill them with the best peers
         while self.connection_info.has_out_dial_capacity() {
@@ -1273,18 +1272,10 @@ impl PeersManager {
 
                 trace!(target: "net::peers", ?peer_id, addr=?peer.addr, "schedule outbound connection");
 
+                dialing_ips.extend(dial_ip(peer));
                 peer.state = PeerConnectionState::PendingOut;
                 PeerAction::Connect { peer_id, remote_addr: peer.addr.tcp() }
             };
-
-            if let PeerAction::Connect { peer_id, .. } = &action &&
-                let Some(ip) = self
-                    .peers
-                    .get(peer_id)
-                    .and_then(|peer| dial_limited_ip(peer_id, peer, &self.trusted_peer_ids))
-            {
-                dialing_ips.insert(ip);
-            }
 
             self.connection_info.inc_pending_out();
 
@@ -1622,17 +1613,9 @@ fn jitter_rotation_interval(mean: Duration) -> Duration {
     Duration::from_nanos(rand::rng().random_range(min_nanos..=max_nanos))
 }
 
-/// Returns the IP that limits concurrent dials to the peer, or `None` if the peer is exempt.
-///
-/// Trusted and static peers and peers on non-global IPs are never limited.
-fn dial_limited_ip(
-    peer_id: &PeerId,
-    peer: &Peer,
-    trusted_peer_ids: &HashSet<PeerId, FbBuildHasher<64>>,
-) -> Option<IpAddr> {
-    if peer.is_trusted() || peer.is_static() || trusted_peer_ids.contains(peer_id) {
-        return None
-    }
+/// Returns the IP that is limited to one pending dial, or `None` for non-global IPs so that local
+/// setups with several nodes on one host are not dialed one at a time.
+fn dial_ip(peer: &Peer) -> Option<IpAddr> {
     let ip = peer.addr.tcp().ip().to_canonical();
     is_global(&ip).then_some(ip)
 }
@@ -2919,7 +2902,7 @@ mod tests {
             PeerAddr::from_tcp(basic_sock),
             None,
         );
-        assert!(peers.best_unconnected(true, &HashSet::default()).is_none());
+        assert!(peers.best_unconnected(true, &[]).is_none());
         peers.queued_actions.clear();
 
         // a trusted peer is dialed regardless
@@ -3768,7 +3751,7 @@ mod tests {
         peers.add_peer(with_fork, PeerAddr::from_tcp(addr), None);
         peers.peers.get_mut(&with_fork).unwrap().fork_id = Some(Box::new(fork_id));
 
-        let (best_id, _) = peers.best_unconnected(false, &HashSet::default()).unwrap();
+        let (best_id, _) = peers.best_unconnected(false, &[]).unwrap();
         assert_eq!(best_id, with_fork, "fork_id should break tie when reputation is equal");
     }
 
@@ -4483,7 +4466,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_pending_dial_ip_limit_exempts_trusted_and_static_peers() {
+    async fn test_pending_dial_ip_limit_prefers_trusted_peer() {
         let mut peers = PeersManager::new(PeersConfig::default());
         let ip = IpAddr::V4(Ipv4Addr::new(203, 0, 113, 1));
         let addr = |port| PeerAddr::from_tcp(SocketAddr::new(ip, port));
@@ -4493,20 +4476,17 @@ mod tests {
         peers.fill_outbound_slots();
         assert!(peers.peers[&basic].state.is_pending_out());
 
+        // a trusted peer on the same IP waits for the pending dial, then goes first
         let trusted = PeerId::random();
-        let static_peer = PeerId::random();
-        let trusted_id = PeerId::random();
         let other_basic = PeerId::random();
         peers.add_peer_kind(trusted, Some(PeerKind::Trusted), addr(1), None);
-        peers.add_peer_kind(static_peer, Some(PeerKind::Static), addr(2), None);
-        peers.add_trusted_peer_id(trusted_id);
-        peers.add_peer(trusted_id, addr(3), None);
-        peers.add_peer(other_basic, addr(4), None);
+        peers.add_peer(other_basic, addr(2), None);
         peers.fill_outbound_slots();
+        assert!(peers.peers[&trusted].state.is_unconnected());
 
-        for peer_id in [trusted, static_peer, trusted_id] {
-            assert!(peers.peers[&peer_id].state.is_pending_out());
-        }
+        peers.on_active_outgoing_established(basic);
+        peers.fill_outbound_slots();
+        assert!(peers.peers[&trusted].state.is_pending_out());
         assert!(peers.peers[&other_basic].state.is_unconnected());
     }
 }
