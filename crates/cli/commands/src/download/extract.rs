@@ -150,6 +150,26 @@ pub(crate) fn static_file_relative_path(path: &Path) -> Option<&Path> {
     path.strip_prefix(".").unwrap_or(path).strip_prefix("static_files").ok()
 }
 
+/// Fails if any existing component of `relative_path` below `root` is a symlink.
+///
+/// Components that do not exist yet are ignored. `root` itself is trusted and not checked.
+pub(crate) fn ensure_no_symlinks(root: &Path, relative_path: &Path) -> Result<()> {
+    let mut current = root.to_path_buf();
+    for part in relative_path.components() {
+        current.push(part);
+        match std::fs::symlink_metadata(&current) {
+            Ok(metadata) => eyre::ensure!(
+                !metadata.file_type().is_symlink(),
+                "Archive path `{}` contains a symlink",
+                current.display()
+            ),
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
+            Err(err) => return Err(err.into()),
+        }
+    }
+    Ok(())
+}
+
 /// Extracts static files beneath their configured root without allowing archive paths or links
 /// to escape it.
 fn unpack_static_file<R: Read>(
@@ -173,18 +193,7 @@ fn unpack_static_file<R: Read>(
     let root = static_files_dir.to_path_buf();
     let dest = root.join(relative_path);
     // Check each existing ancestor before creating directories or replacing an output.
-    let mut current = root.clone();
-    for part in relative_path.components() {
-        current.push(part);
-        match std::fs::symlink_metadata(&current) {
-            Ok(metadata) => eyre::ensure!(
-                !metadata.file_type().is_symlink(),
-                "Static file archive path contains a symlink"
-            ),
-            Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
-            Err(err) => return Err(err.into()),
-        }
-    }
+    ensure_no_symlinks(&root, relative_path)?;
     if relative_path.as_os_str().is_empty() {
         return Ok(())
     }
