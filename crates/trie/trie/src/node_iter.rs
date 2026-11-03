@@ -404,8 +404,9 @@ mod tests {
             slot(&[0x10, 0xa1]),
         ];
         let inserted = slot(&[0x10, 0x00]);
-        let old_state =
-            HashedPostState::default().with_accounts([(address, Some(account))]).with_storages([(
+        let old_state = HashedPostState::default()
+            .with_accounts([(address, Some(account.clone()))])
+            .with_storages([(
                 address,
                 HashedStorage::from_iter(old_slots.map(|slot| (slot, U256::from(1)))),
             )]);
@@ -418,8 +419,9 @@ mod tests {
         .root_with_updates()
         .unwrap();
 
-        let new_state =
-            HashedPostState::default().with_accounts([(address, Some(account))]).with_storages([(
+        let new_state = HashedPostState::default()
+            .with_accounts([(address, Some(account.clone()))])
+            .with_storages([(
                 address,
                 HashedStorage::from_iter(
                     old_slots.into_iter().chain([inserted]).map(|slot| (slot, U256::from(1))),
