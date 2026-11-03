@@ -122,7 +122,7 @@ where
         self.inner.blocking_task_guard.clone().acquire_owned().await
     }
 
-    /// Traces every transaction of a block the node has validated, through the block executor, see
+    /// Traces every transaction of a block through the block executor, see
     /// [`Call::block_executor`].
     async fn trace_block(
         &self,
@@ -172,63 +172,6 @@ where
                         // need to apply the state changes of this transaction before executing the
                         // next transaction
                         executor.commit_transaction(output).map_err(Eth::Error::from_evm_err)?;
-                    }
-                }
-
-                Ok(results)
-            })
-            .await
-    }
-
-    /// Traces a caller-supplied or rejected block on a bare EVM, without the block executor's
-    /// validation, so blocks the executor would reject still trace.
-    async fn trace_unvalidated_block(
-        &self,
-        block: Arc<RecoveredBlock<ProviderBlock<Eth::Provider>>>,
-        evm_env: EvmEnvFor<Eth::Evm>,
-        opts: GethDebugTracingOptions,
-    ) -> Result<Vec<TraceResult>, Eth::Error> {
-        self.eth_api()
-            .spawn_with_state_at_block(block.parent_hash(), move |eth_api, mut db| {
-                let mut results = Vec::with_capacity(block.body().transactions().len());
-
-                eth_api.apply_pre_execution_changes(&block, &mut db)?;
-
-                let block_env = *evm_env.block_env();
-
-                let mut transactions = block.transactions_recovered().enumerate().peekable();
-                let mut inspector = DebugInspector::new(opts).map_err(Eth::Error::from_eth_err)?;
-                let mut evm = eth_api.evm_config().evm_with_env(&mut db, evm_env);
-                while let Some((index, tx)) = transactions.next() {
-                    if is_cancelled() {
-                        return Err(EthApiError::InternalEthError.into())
-                    }
-                    let tx_env = eth_api.evm_config().tx_env(tx.cloned());
-
-                    let (next_inspector, res) = evm
-                        .transact_with_inspector(&tx_env, inspector)
-                        .map_err(Eth::Error::from_evm_err)?;
-                    inspector = next_inspector;
-                    let result = inspector
-                        .get_result(
-                            Some(TransactionContext {
-                                block_hash: Some(block.hash()),
-                                tx_hash: Some(*tx.tx_hash()),
-                                tx_index: Some(index),
-                            }),
-                            &tx_env,
-                            &block_env,
-                            &res,
-                            evm.state_db_mut(),
-                        )
-                        .map_err(Eth::Error::from_eth_err)?;
-
-                    results.push(TraceResult::Success { result, tx_hash: Some(*tx.tx_hash()) });
-                    if transactions.peek().is_some() {
-                        inspector.fuse().map_err(Eth::Error::from_eth_err)?;
-                        // need to apply the state changes of this transaction before executing the
-                        // next transaction
-                        evm.commit_state(&res.pending_state)
                     }
                 }
 
@@ -363,12 +306,7 @@ where
             }
             .map_err(Eth::Error::from_eth_err)?;
 
-        self.trace_unvalidated_block(
-            Arc::new(block.into_recovered_with_signers(senders)),
-            evm_env,
-            opts,
-        )
-        .await
+        self.trace_block(Arc::new(block.into_recovered_with_signers(senders)), evm_env, opts).await
     }
 
     /// Replays a block and returns the trace of each transaction.
@@ -1507,7 +1445,7 @@ where
             .to_rpc_result()?;
 
         let opts = opts.map(|o| o.tracing_options).unwrap_or_default();
-        self.trace_unvalidated_block(entry.block.clone(), evm_env, opts).await.map_err(Into::into)
+        self.trace_block(entry.block.clone(), evm_env, opts).await.map_err(Into::into)
     }
 }
 
