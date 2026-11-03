@@ -79,7 +79,8 @@ impl<'a> OutputVerifier<'a> {
     /// Removes any declared output files so a fresh archive attempt can restart cleanly.
     ///
     /// Files are only removed if their path stays below the output root and no existing parent
-    /// directory is a symlink, because a previous extraction attempt may have planted one.
+    /// directory is a symlink. Extraction rejects link entries, so this guards against links
+    /// already present in the datadir; the check is not atomic with the removal.
     pub(crate) fn cleanup(&self, output_files: &[OutputFileChecksum]) {
         for output in output_files {
             match self.removal_path(output) {
