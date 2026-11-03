@@ -36,7 +36,7 @@ use reth_node_core::{
 use reth_node_events::node;
 use reth_provider::{
     providers::{BlockchainProvider, NodeTypesForProvider},
-    BlockNumReader, StorageSettingsCache,
+    BlockNumReader, StateBackend, StorageSettingsCache,
 };
 use reth_rpc_layer::JwtSecret;
 use reth_storage_overlay::OverlayManager;
@@ -62,6 +62,9 @@ pub struct EngineNodeLauncher<B = PipelineBackfill> {
 
     // Builds the backfill the engine runs while far behind the chain.
     backfill: B,
+
+    // Holds current state in place of the hashed state tables, if set.
+    state_backend: Option<Arc<dyn StateBackend>>,
 }
 
 impl EngineNodeLauncher {
@@ -75,6 +78,7 @@ impl EngineNodeLauncher {
             ctx: LaunchContext::new(task_executor, data_dir),
             engine_tree_config,
             backfill: PipelineBackfill,
+            state_backend: None,
         }
     }
 }
@@ -97,7 +101,7 @@ impl<B> EngineNodeLauncher<B> {
             + EngineValidatorAddOn<NodeAdapter<T, CB::Components>>,
         B: BackfillSyncBuilder<NodeTypesWithDBAdapter<N, DB>, BackfillClientFor<T, CB::Components>>,
     {
-        let Self { ctx, engine_tree_config, mut backfill } = self;
+        let Self { ctx, engine_tree_config, mut backfill, state_backend } = self;
         let NodeBuilderWithComponents {
             adapter: NodeTypesAdapter { database },
             rocksdb_provider,
@@ -130,6 +134,7 @@ impl<B> EngineNodeLauncher<B> {
                 overlay_manager.clone(),
                 rocksdb_provider,
                 disabled_stages,
+                state_backend,
                 |factory| backfill.recover(factory),
             )
             .await?
@@ -477,8 +482,18 @@ impl<B> EngineNodeLauncher<B> {
 
     /// Returns this launcher with the engine's backfill built by `backfill`.
     pub fn with_backfill<B2>(self, backfill: B2) -> EngineNodeLauncher<B2> {
-        let Self { ctx, engine_tree_config, .. } = self;
-        EngineNodeLauncher { ctx, engine_tree_config, backfill }
+        let Self { ctx, engine_tree_config, state_backend, .. } = self;
+        EngineNodeLauncher { ctx, engine_tree_config, backfill, state_backend }
+    }
+
+    /// Returns this launcher with current state kept in `backend` instead of the hashed state
+    /// tables, see
+    /// [`ProviderFactory::with_state_backend`](reth_provider::ProviderFactory::with_state_backend).
+    ///
+    /// The engine's state-root strategy must supply the matching persistence hook.
+    pub fn with_state_backend(mut self, backend: Arc<dyn StateBackend>) -> Self {
+        self.state_backend = Some(backend);
+        self
     }
 }
 
