@@ -122,10 +122,8 @@ fn unpack_archive<R: Read>(
     static_files_dir: Option<&Path>,
     mut progress: Option<&mut ArchiveExtractionProgress>,
 ) -> Result<()> {
-    if static_files_dir.is_none() && progress.is_none() {
-        archive.unpack(target_dir)?;
-        return Ok(())
-    }
+    // Every entry goes through `unpack_entry` so link entries are rejected; `Archive::unpack`
+    // would create them.
     let entries = archive.entries().wrap_err_with(|| {
         format!("failed to read archive entries for `{}`", target_dir.display())
     })?;
@@ -148,6 +146,27 @@ fn unpack_archive<R: Read>(
 /// Returns the path within the static files directory, accepting tar's optional `./` prefix.
 pub(crate) fn static_file_relative_path(path: &Path) -> Option<&Path> {
     path.strip_prefix(".").unwrap_or(path).strip_prefix("static_files").ok()
+}
+
+/// Fails if any existing component of `relative_path` below `root` is a symlink.
+///
+/// Components that do not exist yet are ignored. `root` itself is trusted and not checked. This
+/// is a point-in-time check: it does not stop a link from being created right after it returns.
+pub(crate) fn ensure_no_symlinks(root: &Path, relative_path: &Path) -> Result<()> {
+    let mut current = root.to_path_buf();
+    for part in relative_path.components() {
+        current.push(part);
+        match std::fs::symlink_metadata(&current) {
+            Ok(metadata) => eyre::ensure!(
+                !metadata.file_type().is_symlink(),
+                "Archive path `{}` contains a symlink",
+                current.display()
+            ),
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
+            Err(err) => return Err(err.into()),
+        }
+    }
+    Ok(())
 }
 
 /// Extracts static files beneath their configured root without allowing archive paths or links
@@ -173,18 +192,7 @@ fn unpack_static_file<R: Read>(
     let root = static_files_dir.to_path_buf();
     let dest = root.join(relative_path);
     // Check each existing ancestor before creating directories or replacing an output.
-    let mut current = root.clone();
-    for part in relative_path.components() {
-        current.push(part);
-        match std::fs::symlink_metadata(&current) {
-            Ok(metadata) => eyre::ensure!(
-                !metadata.file_type().is_symlink(),
-                "Static file archive path contains a symlink"
-            ),
-            Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
-            Err(err) => return Err(err.into()),
-        }
-    }
+    ensure_no_symlinks(&root, relative_path)?;
     if relative_path.as_os_str().is_empty() {
         return Ok(())
     }
@@ -200,11 +208,13 @@ fn unpack_entry<R: Read>(
     target_dir: &Path,
     static_files_dir: Option<&Path>,
 ) -> Result<()> {
-    // A non-static entry could otherwise plant a symlink at a nested custom root before
-    // extraction or retry cleanup uses it.
+    // Links planted by an archive could redirect later extraction, or retry cleanup running
+    // concurrently for another archive, outside the datadir. Snapshots never contain links.
+    let entry_type = entry.header().entry_type();
     eyre::ensure!(
-        static_files_dir.is_none() || !entry.header().entry_type().is_symlink(),
-        "Archive symlinks are unsupported with a custom static files directory"
+        !entry_type.is_symlink() && !entry_type.is_hard_link(),
+        "Archive links are unsupported: `{}`",
+        entry.path()?.display()
     );
     let path = entry.path()?.into_owned();
     if let Some(static_files_dir) = static_files_dir &&
@@ -649,7 +659,7 @@ mod tests {
             let err =
                 unpack_archive(Archive::new(tar.as_slice()), target.path(), Some(&custom), None)
                     .unwrap_err();
-            assert!(format!("{err:#}").contains("Archive symlinks are unsupported"));
+            assert!(format!("{err:#}").contains("Archive links are unsupported"));
             let outputs = [super::super::manifest::OutputFileChecksum {
                 path: "static_files/headers".into(),
                 size: 4,
@@ -659,6 +669,49 @@ mod tests {
                 .cleanup(&outputs);
             for path in ["headers", "nested/headers"] {
                 assert_eq!(fs::read(outside.path().join(path)).unwrap(), b"keep");
+            }
+        }
+    }
+
+    #[test]
+    fn link_entries_are_rejected_without_custom_static_dir() {
+        for entry_type in [tar::EntryType::Symlink, tar::EntryType::Link] {
+            for with_progress in [false, true] {
+                let root = tempfile::tempdir().unwrap();
+                let target = root.path().join("target");
+                let outside = root.path().join("outside");
+                fs::create_dir_all(&target).unwrap();
+                fs::create_dir_all(&outside).unwrap();
+                fs::write(outside.join("file"), b"keep").unwrap();
+
+                let mut archive = tar::Builder::new(Vec::new());
+                let mut link = tar::Header::new_gnu();
+                link.set_entry_type(entry_type);
+                link.set_size(0);
+                link.set_mode(0o777);
+                // A symlink to the outside directory would redirect the entry below, a hard link
+                // would alias the outside file.
+                let link_target =
+                    if entry_type.is_symlink() { outside.clone() } else { outside.join("file") };
+                archive.append_link(&mut link, "db", link_target).unwrap();
+                let mut file = tar::Header::new_gnu();
+                file.set_size(4);
+                file.set_mode(0o644);
+                file.set_cksum();
+                archive.append_data(&mut file, "db/file", b"data".as_slice()).unwrap();
+                let tar = archive.into_inner().unwrap();
+
+                let mut progress = ArchiveExtractionProgress::new(None);
+                let progress = with_progress.then_some(&mut progress);
+                let err = unpack_archive(Archive::new(tar.as_slice()), &target, None, progress)
+                    .unwrap_err();
+                assert!(format!("{err:#}").contains("Archive links are unsupported"));
+
+                assert!(
+                    !target.join("db").exists() && target.join("db").symlink_metadata().is_err()
+                );
+                assert_eq!(fs::read(outside.join("file")).unwrap(), b"keep");
+                assert_eq!(fs::read_dir(&outside).unwrap().count(), 1);
             }
         }
     }
