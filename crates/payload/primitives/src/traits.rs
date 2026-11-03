@@ -7,9 +7,9 @@ use alloy_primitives::{Bytes, B256, U256};
 use alloy_rpc_types_engine::{PayloadAttributes as EthPayloadAttributes, PayloadId};
 use core::fmt;
 use either::Either;
-use reth_execution_types::BlockExecutionOutput;
+use reth_execution_types::{BlockExecutionOutput, BlockExt};
 use reth_primitives_traits::{NodePrimitives, RecoveredBlock, SealedBlock, SealedHeader};
-use reth_trie_common::{updates::TrieUpdates, HashedPostState, StateCommitment};
+use reth_trie_common::{updates::TrieUpdates, HashedPostState};
 
 /// Represents an executed block for payload building purposes.
 ///
@@ -25,9 +25,8 @@ pub struct BuiltPayloadExecutedBlock<N: NodePrimitives> {
     pub hashed_state: Arc<HashedPostState>,
     /// Trie updates that result from calculating the state root for the block (unsorted).
     pub trie_updates: Arc<TrieUpdates>,
-    /// Commitment data the payload builder attaches to the block, carried until it is
-    /// persisted. See [`StateCommitment`].
-    pub state_commitment: Option<StateCommitment>,
+    /// Extension data the payload builder attaches to the block, carried until it is persisted.
+    pub ext: Option<BlockExt>,
 }
 
 /// Represents a successfully built execution payload (block).

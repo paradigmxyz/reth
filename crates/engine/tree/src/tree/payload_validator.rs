@@ -851,7 +851,7 @@ where
 
         let state_root = root_outcome.state_root;
         let trie_output = root_outcome.trie_updates;
-        let state_commitment = root_outcome.state_commitment;
+        let ext = root_outcome.ext;
 
         // A fallback path recomputed the hashed post state. Replace the streaming-derived one
         // and re-run hashed-state validation against it, since a failed state-root task may
@@ -934,7 +934,7 @@ where
         let executed_block = self
             .spawn_deferred_trie_task(Arc::new(block), output, hashed_state, trie_output)
             .with_bal(bal)
-            .with_state_commitment(state_commitment);
+            .with_ext(ext);
         Ok(ValidationOutput::new(executed_block, timing_stats))
     }
 
@@ -1795,7 +1795,7 @@ pub trait EngineValidator<
 
     /// Returns the hook the persistence service runs alongside every save and removal.
     ///
-    /// A validator whose state-root strategy keeps its commitment outside the database returns
+    /// A validator whose state-root strategy keeps state outside the database returns
     /// the hook that persists it.
     fn persistence_hook(&self) -> Option<Arc<dyn PersistenceHook<N>>> {
         None
@@ -1888,7 +1888,7 @@ where
                 LazyHashedPostState::ready(block.hashed_state),
                 block.trie_updates,
             )
-            .with_state_commitment(block.state_commitment))
+            .with_ext(block.ext))
     }
 
     fn persistence_hook(&self) -> Option<Arc<dyn PersistenceHook<N>>> {
