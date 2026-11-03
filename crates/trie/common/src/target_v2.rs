@@ -329,6 +329,7 @@ mod tests {
             selfdestructed,
             code: None,
             code_adopted: false,
+            touched: true,
             storage,
         }
     }
