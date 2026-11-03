@@ -441,7 +441,11 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
                     "Collecting trie reverts for overlay state provider"
                 );
 
-                let trie_reverts = if trie_changesets {
+                // Trie updates applied directly over the on-disk trie. With trie changesets these
+                // are exact reverts down to the anchor's trie; without them they are the in-memory
+                // nodes up to Finish (or nothing when the trie is already at Finish), and the
+                // prefix sets cover every key that differs from the anchor.
+                let base_trie_updates = if trie_changesets {
                     let _guard = debug_span!(target: "storage::overlay", "retrieving_trie_reverts")
                         .entered();
                     let start = Instant::now();
@@ -497,20 +501,20 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
                 let (overlay_trie, overlay_state) =
                     self.resolve_state_trie_overlays(anchor.hash)?;
 
-                // Without trie changesets the reverts describe Finish, while the overlay trie
-                // nodes are relative to the anchor's trie. Mixing them can leave Finish-only nodes
-                // beneath anchor-relative branches, so only the prefix sets may describe the
+                // Without trie changesets the base trie updates describe Finish, while the overlay
+                // trie nodes are relative to the anchor's trie. Mixing them can leave Finish-only
+                // nodes beneath anchor-relative branches, so only the prefix sets may describe the
                 // in-memory blocks.
                 let trie_updates = if !trie_changesets {
-                    trie_reverts
-                } else if trie_reverts.is_empty() {
+                    base_trie_updates
+                } else if base_trie_updates.is_empty() {
                     overlay_trie
                 } else if !overlay_trie.is_empty() {
-                    let mut trie_reverts = (*trie_reverts).clone();
-                    trie_reverts.extend_ref_and_sort(&overlay_trie);
-                    Arc::new(trie_reverts)
+                    let mut base_trie_updates = (*base_trie_updates).clone();
+                    base_trie_updates.extend_ref_and_sort(&overlay_trie);
+                    Arc::new(base_trie_updates)
                 } else {
-                    trie_reverts
+                    base_trie_updates
                 };
 
                 let hashed_state_updates = if hashed_state_reverts.is_empty() {
