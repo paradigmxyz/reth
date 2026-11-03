@@ -574,6 +574,15 @@ impl TransactionPtr {
         self.timed_out.store(true, std::sync::atomic::Ordering::SeqCst);
     }
 
+    /// Returns `true` if both pointers refer to the same transaction handle.
+    ///
+    /// Unlike comparing the raw pointers, this tells apart a transaction from a later one that
+    /// reuses the same MDBX handle.
+    #[cfg(feature = "read-tx-timeouts")]
+    pub(crate) fn is_same(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.lock, &other.lock)
+    }
+
     /// Acquires the inner transaction lock to guarantee exclusive access to the transaction
     /// pointer.
     fn lock(&self) -> MutexGuard<'_, ()> {
