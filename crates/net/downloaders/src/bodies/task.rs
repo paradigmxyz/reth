@@ -22,7 +22,7 @@ use tokio_util::sync::PollSender;
 /// The maximum number of [`BodyDownloaderResult`]s to hold in the buffer.
 pub const BODIES_TASK_BUFFER_SIZE: usize = 4;
 
-/// A [BodyDownloader] that drives a spawned [BodyDownloader] on a spawned task.
+/// A [`BodyDownloader`] that drives a spawned [`BodyDownloader`] on a spawned task.
 #[derive(Debug)]
 #[pin_project]
 pub struct TaskDownloader<B: Block> {
@@ -132,16 +132,13 @@ impl<T: BodyDownloader> Future for SpawnedDownloader<T> {
 mod tests {
     use super::*;
     use crate::{
-        bodies::{
-            bodies::BodiesDownloaderBuilder,
-            test_utils::{insert_headers, zip_blocks},
-        },
+        bodies::{bodies::BodiesDownloaderBuilder, test_utils::zip_blocks},
         test_utils::{generate_bodies, TestBodiesClient},
     };
     use assert_matches::assert_matches;
     use reth_consensus::test_utils::TestConsensus;
     use reth_network_p2p::error::DownloadError;
-    use reth_provider::test_utils::create_test_provider_factory;
+    use reth_provider::test_utils::{create_test_provider_factory, insert_headers};
     use std::sync::Arc;
 
     #[tokio::test(flavor = "multi_thread")]

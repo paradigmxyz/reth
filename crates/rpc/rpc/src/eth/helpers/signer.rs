@@ -2,7 +2,7 @@
 
 use alloy_dyn_abi::TypedData;
 use alloy_eips::eip2718::Decodable2718;
-use alloy_primitives::{eip191_hash_message, map::AddressMap, Address, Signature, B256};
+use alloy_primitives::{map::AddressMap, Address, Signature, B256};
 use alloy_signer::SignerSync;
 use alloy_signer_local::{coins_bip39::English, MnemonicBuilder, PrivateKeySigner};
 use reth_rpc_convert::SignableTxRequest;
@@ -82,10 +82,7 @@ impl<T: Decodable2718, TxReq: SignableTxRequest<T>> EthSigner<T, TxReq> for DevS
     }
 
     async fn sign(&self, address: Address, message: &[u8]) -> Result<Signature> {
-        // Hash message according to EIP 191:
-        // https://ethereum.org/es/developers/docs/apis/json-rpc/#eth_sign
-        let hash = eip191_hash_message(message);
-        self.sign_hash(hash, address)
+        self.get_key(address)?.sign_message_sync(message).map_err(|_| SignError::CouldNotSign)
     }
 
     async fn sign_transaction(&self, request: TxReq, address: &Address) -> Result<T> {
@@ -251,8 +248,8 @@ mod tests {
             gas_price: Some(1000u128),
             value: Some(U256::from(1000)),
             input: TransactionInput {
-                data: Some(Bytes::from(message.to_vec())),
-                input: Some(Bytes::from(message.to_vec())),
+                data: Some(Bytes::from(message)),
+                input: Some(Bytes::from(message)),
             },
             nonce: Some(0u64),
             ..Default::default()
@@ -261,6 +258,6 @@ mod tests {
             signer.sign_transaction(request, &from).await;
         assert!(txn_signed.is_ok());
 
-        assert_eq!(Bytes::from(message.to_vec()), txn_signed.unwrap().input().0);
+        assert_eq!(Bytes::from(message), txn_signed.unwrap().input().0);
     }
 }

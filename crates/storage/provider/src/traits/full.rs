@@ -12,7 +12,6 @@ use reth_node_types::{BlockTy, HeaderTy, NodeTypesWithDB, ReceiptTy, TxTy};
 use reth_storage_api::{
     HistoryReader, NodePrimitivesProvider, StorageChangeSetReader, StorageSettingsCache,
 };
-use std::fmt::Debug;
 
 /// Helper trait to unify all provider traits for simplicity.
 pub trait FullProvider<N: NodeTypesWithDB>:
@@ -35,19 +34,18 @@ pub trait FullProvider<N: NodeTypesWithDB>:
         Receipt = ReceiptTy<N>,
         Header = HeaderTy<N>,
     > + BalProvider
-    + StateProviderFactory
+    + StateProviderFactory<Primitives = N::Primitives>
     + StateRangeProviderFactory
     + StateReader
     + ChainSpecProvider<ChainSpec = N::ChainSpec>
     + ChangeSetReader
     + StorageChangeSetReader
-    + CanonStateSubscriptions
+    + CanonStateSubscriptions<Primitives = N::Primitives>
     + ForkChoiceSubscriptions<Header = HeaderTy<N>>
     + PersistedBlockSubscriptions
     + StageCheckpointReader
     + PruneCheckpointReader
     + Clone
-    + Debug
     + Unpin
     + 'static
 {
@@ -73,19 +71,18 @@ impl<T, N: NodeTypesWithDB> FullProvider<N> for T where
             Receipt = ReceiptTy<N>,
             Header = HeaderTy<N>,
         > + BalProvider
-        + StateProviderFactory
+        + StateProviderFactory<Primitives = N::Primitives>
         + StateRangeProviderFactory
         + StateReader
         + ChainSpecProvider<ChainSpec = N::ChainSpec>
         + ChangeSetReader
         + StorageChangeSetReader
-        + CanonStateSubscriptions
+        + CanonStateSubscriptions<Primitives = N::Primitives>
         + ForkChoiceSubscriptions<Header = HeaderTy<N>>
         + PersistedBlockSubscriptions
         + StageCheckpointReader
         + PruneCheckpointReader
         + Clone
-        + Debug
         + Unpin
         + 'static
 {

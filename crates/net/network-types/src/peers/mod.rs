@@ -152,13 +152,13 @@ impl Peer {
     /// Returns whether this peer is trusted
     #[inline]
     pub const fn is_trusted(&self) -> bool {
-        matches!(self.kind, PeerKind::Trusted)
+        self.kind.is_trusted()
     }
 
     /// Returns whether this peer is static
     #[inline]
     pub const fn is_static(&self) -> bool {
-        matches!(self.kind, PeerKind::Static)
+        self.kind.is_static()
     }
 }
 

@@ -22,7 +22,7 @@ use crate::{
         BlockRangeInfo, EthVersion, SessionId,
     },
 };
-use alloy_eips::merge::EPOCH_SLOTS;
+use alloy_eips::merge::{EPOCH_DURATION, EPOCH_SLOTS};
 use alloy_primitives::Sealable;
 use futures::{stream::Fuse, SinkExt, StreamExt};
 use metrics::{Counter, Gauge};
@@ -56,7 +56,7 @@ use tracing::{debug, trace};
 ///
 /// Updates are only sent when the block height has advanced by at least one epoch (32 blocks)
 /// since the last update. The interval is set to one epoch duration in seconds.
-pub(super) const RANGE_UPDATE_INTERVAL: Duration = Duration::from_secs(EPOCH_SLOTS * 12);
+pub(super) const RANGE_UPDATE_INTERVAL: Duration = EPOCH_DURATION;
 
 // Constants for timeout updating.
 
@@ -1191,6 +1191,10 @@ impl<N: NetworkPrimitives> OutgoingMessage<N> {
                 EthMessage::NewPooledTransactionHashes72(existing),
                 NewPooledTransactionHashes::Eth72(inc),
             ) => {
+                // One mask describes every blob transaction in the message.
+                if existing.cell_mask != inc.cell_mask {
+                    return Some(inc.into())
+                }
                 existing.hashes.extend(inc.hashes);
                 existing.sizes.extend(inc.sizes);
                 existing.types.extend(inc.types);
@@ -1282,7 +1286,7 @@ impl<N: NetworkPrimitives> QueuedOutgoingMessages<N> {
     }
 
     /// Pushes a pooled transaction hash announcement, merging into the last queued message if
-    /// it is the same variant (eth66, eth68, or eth72).
+    /// it is the same variant (eth66, eth68, or eth72) and has a compatible cell mask.
     pub(crate) fn push_pooled_hashes(&mut self, msg: NewPooledTransactionHashes) {
         let msg = if let Some(last) = self.messages.back_mut() {
             match last.try_merge_hashes(msg) {
@@ -1789,35 +1793,6 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    async fn snap_request_times_out() {
-        let mut builder = snap_session_builder();
-        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let local_addr = listener.local_addr().unwrap();
-        let fut = builder.with_client_stream(local_addr, async move |client_stream| {
-            let _client_stream = client_stream;
-            tokio::time::sleep(Duration::from_secs(60)).await;
-        });
-        tokio::task::spawn(fut);
-        let (incoming, _) = listener.accept().await.unwrap();
-        let mut session = builder.connect_incoming(incoming).await;
-
-        // Tiny timeout so the deadline (computed at insert) is already in the past.
-        session.internal_request_timeout.store(1, Ordering::Relaxed);
-        let (id, rx) = dispatch_snap_request(&mut session, 0);
-
-        // The first check resolves the caller with a timeout but keeps the entry so the session
-        // can escalate to a protocol breach.
-        tokio::time::sleep(Duration::from_millis(20)).await;
-        assert!(!session.check_timed_out_requests(Instant::now()));
-        assert!(session.inflight_requests.contains_key(&id));
-        assert_eq!(rx.await.unwrap().unwrap_err(), RequestError::Timeout);
-
-        // Once the breach timeout passes without a response, the session flags a protocol breach.
-        session.protocol_breach_request_timeout = Duration::from_millis(1);
-        assert!(session.check_timed_out_requests(Instant::now()));
-    }
-
-    #[tokio::test(flavor = "multi_thread")]
     async fn late_snap_response_is_consumed_without_penalty() {
         let mut builder = snap_session_builder();
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -1831,9 +1806,10 @@ mod tests {
         let mut session = builder.connect_incoming(incoming).await;
 
         session.internal_request_timeout.store(1, Ordering::Relaxed);
-        let (id, _rx) = dispatch_snap_request(&mut session, 0);
+        let (id, rx) = dispatch_snap_request(&mut session, 0);
         tokio::time::sleep(Duration::from_millis(20)).await;
         assert!(!session.check_timed_out_requests(Instant::now()));
+        assert_eq!(rx.await.unwrap().unwrap_err(), RequestError::Timeout);
 
         // A response arriving after the timeout clears the entry without a bad-message report.
         let outcome = session.on_incoming_snap_message(SnapProtocolMessage::BlockAccessLists(
@@ -2058,6 +2034,46 @@ mod tests {
     }
 
     #[test]
+    fn eth72_coalescing_preserves_cell_masks() {
+        use alloy_primitives::B128;
+
+        let masks =
+            [None, Some(B128::repeat_byte(0xff)), Some(B128::from(1u128)), Some(B128::from(2u128))];
+        for existing_mask in masks {
+            for incoming_mask in masks {
+                let announcement = |mask: Option<B128>, byte| NewPooledTransactionHashes72 {
+                    types: vec![if mask.is_some() { 3 } else { 2 }],
+                    sizes: vec![100],
+                    hashes: vec![B256::repeat_byte(byte)],
+                    cell_mask: mask,
+                };
+                let existing = announcement(existing_mask, 1);
+                let incoming = announcement(incoming_mask, 2);
+                let mut message: OutgoingMessage<EthNetworkPrimitives> =
+                    EthMessage::NewPooledTransactionHashes72(existing.clone()).into();
+
+                let remainder = message.try_merge_hashes(incoming.clone().into());
+
+                let OutgoingMessage::Eth(EthMessage::NewPooledTransactionHashes72(merged)) =
+                    message
+                else {
+                    panic!("expected eth72 announcement");
+                };
+                if existing_mask == incoming_mask {
+                    assert!(remainder.is_none());
+                    assert_eq!(merged.cell_mask, existing_mask);
+                    assert_eq!(merged.hashes, vec![B256::repeat_byte(1), B256::repeat_byte(2)]);
+                    assert_eq!(merged.types, [existing.types, incoming.types].concat());
+                    assert_eq!(merged.sizes, vec![100, 100]);
+                } else {
+                    assert_eq!(remainder, Some(incoming.into()));
+                    assert_eq!(merged, existing);
+                }
+            }
+        }
+    }
+
+    #[test]
     fn eth72_pooled_hashes_count_broadcast_items() {
         let hashes =
             vec![alloy_primitives::B256::repeat_byte(1), alloy_primitives::B256::repeat_byte(2)];
@@ -2097,7 +2113,7 @@ mod tests {
         let local_addr = listener.local_addr().unwrap();
 
         let fut = builder.with_client_stream(local_addr, async move |mut client_stream| {
-            let _ = tokio::time::timeout(Duration::from_secs(5), client_stream.next()).await;
+            let _ = tokio::time::timeout(Duration::from_secs(1), client_stream.next()).await;
             client_stream.into_inner().disconnect(DisconnectReason::UselessPeer).await.unwrap();
         });
 

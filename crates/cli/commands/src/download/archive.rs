@@ -2,7 +2,7 @@ use super::{
     extract::{extract_archive_raw, streaming_download_and_extract, CompressionFormat},
     fetch::ArchiveFetcher,
     manifest::SnapshotArchive,
-    planning::{PlannedArchive, PlannedDownloads},
+    planning::{CheckedDownloads, PlannedArchive},
     progress::{
         spawn_progress_display, ArchiveDownloadProgress, ArchiveExtractionProgress,
         ArchiveVerificationProgress, DownloadRequestLimiter, SharedProgress,
@@ -15,20 +15,16 @@ use eyre::Result;
 use futures::stream::{self, StreamExt};
 use reth_cli_util::cancellation::CancellationToken;
 use reth_fs_util as fs;
-use std::{
-    path::Path,
-    sync::{atomic::Ordering, Arc},
-    time::Duration,
-};
-use tokio::task;
+use std::{path::Path, sync::Arc, time::Duration};
 use tracing::{debug, info, warn};
 
 const DOWNLOAD_CACHE_DIR: &str = ".download-cache";
 
 /// Runs all planned modular archive downloads for one command invocation.
 pub(crate) async fn run_modular_downloads(
-    planned_downloads: PlannedDownloads,
+    planned_downloads: CheckedDownloads,
     target_dir: &Path,
+    static_files_dir: Option<&Path>,
     download_concurrency: usize,
     cancel_token: CancellationToken,
     retry_backoff: Option<Duration>,
@@ -48,8 +44,12 @@ pub(crate) async fn run_modular_downloads(
         cancel_token,
     )
     .with_retry_backoff(retry_backoff);
-    let ctx =
-        ArchiveProcessContext::new(target_dir.to_path_buf(), Some(download_cache_dir), session);
+    let ctx = ArchiveProcessContext::new(
+        target_dir.to_path_buf(),
+        static_files_dir.map(Path::to_path_buf),
+        Some(download_cache_dir),
+        session,
+    );
 
     ModularDownloadJob::new(ctx, download_concurrency).run(planned_downloads).await
 }
@@ -69,13 +69,17 @@ impl ModularDownloadJob {
     }
 
     /// Runs all planned archives and waits for the shared progress task to finish.
-    async fn run(self, planned_downloads: PlannedDownloads) -> Result<()> {
+    async fn run(self, planned_downloads: CheckedDownloads) -> Result<()> {
         let shared = Arc::clone(
             self.ctx.session().progress().expect("modular downloads always use shared progress"),
         );
         let progress_handle = spawn_progress_display(Arc::clone(&shared));
+        for reused in &planned_downloads.reused {
+            info!(target: "reth::cli", file = %reused.archive.file_name, component = %reused.component, "Skipping already verified plain files");
+            shared.record_reused_archive(reused.archive.size, reused.archive.output_size());
+        }
         let ctx = self.ctx.clone();
-        let results: Vec<Result<()>> = stream::iter(planned_downloads.archives)
+        let results: Vec<Result<()>> = stream::iter(planned_downloads.pending)
             .map(move |archive| {
                 let ctx = ctx.clone();
                 async move { Self::process_archive(ctx, archive).await }
@@ -84,7 +88,7 @@ impl ModularDownloadJob {
             .collect()
             .await;
 
-        shared.done.store(true, Ordering::Relaxed);
+        shared.done.notify_one();
         let _ = progress_handle.await;
 
         for result in results {
@@ -96,7 +100,7 @@ impl ModularDownloadJob {
 
     /// Runs one archive on the blocking pool so fetch and extraction stay off the async executor.
     async fn process_archive(ctx: ArchiveProcessContext, archive: PlannedArchive) -> Result<()> {
-        task::spawn_blocking(move || ArchiveProcessor::new(archive, ctx).run()).await??;
+        reth_tasks::spawn_blocking(move || ArchiveProcessor::new(archive, ctx).run()).await??;
         Ok(())
     }
 }
@@ -116,7 +120,7 @@ enum ArchiveAttemptState {
     Fail,
 }
 
-/// Processes one modular archive from reuse check through extraction and verification.
+/// Processes one modular archive through fetch, extraction, and verification.
 struct ArchiveProcessor {
     /// The concrete archive and component being processed.
     archive: PlannedArchive,
@@ -131,13 +135,10 @@ impl ArchiveProcessor {
     }
 
     /// Runs the archive retry state machine until outputs are verified or retries are exhausted.
+    ///
+    /// Callers only pass archives that failed the startup reuse check.
     fn run(self) -> Result<()> {
         let archive = self.archive();
-        if self.try_reuse_outputs()? {
-            info!(target: "reth::cli", file = %archive.file_name, component = %self.archive.component, "Skipping already verified plain files");
-            return Ok(());
-        }
-
         let mode = ArchiveMode::new(&self.ctx)?;
         let format = CompressionFormat::from_url(&archive.file_name)?;
         let mut attempt = 1;
@@ -220,34 +221,12 @@ impl ArchiveProcessor {
 
     /// Returns the verifier for this archive's output files.
     fn output_verifier(&self) -> OutputVerifier<'_> {
-        OutputVerifier::new(self.ctx.target_dir())
-    }
-
-    /// Returns `true` if this archive can be reused from existing verified outputs.
-    /// Returns `false` if a fresh archive attempt is still needed.
-    fn try_reuse_outputs(&self) -> Result<bool> {
-        if self.verify_outputs()? {
-            self.mark_complete();
-            return Ok(true);
-        }
-
-        Ok(false)
+        OutputVerifier::new(self.ctx.target_dir(), self.ctx.static_files_dir())
     }
 
     /// Removes any partial outputs before a fresh archive attempt.
     fn cleanup_outputs(&self) {
         self.output_verifier().cleanup(&self.archive().output_files);
-    }
-
-    /// Returns `true` if all declared plain outputs verify.
-    /// Returns `false` if any output is missing or does not match.
-    fn verify_outputs(&self) -> Result<bool> {
-        self.output_verifier().verify(&self.archive().output_files)
-    }
-
-    /// Records archive completion in shared progress once outputs verify.
-    fn mark_complete(&self) {
-        self.ctx.session().record_reused_archive(self.archive().size, self.archive().output_size());
     }
 
     /// Executes one archive attempt according to the selected cache-vs-stream mode.
@@ -304,6 +283,7 @@ impl ArchiveProcessor {
             &self.archive().url,
             format,
             self.ctx.target_dir(),
+            self.ctx.static_files_dir(),
             self.ctx.session(),
         )
     }
@@ -316,6 +296,7 @@ impl ArchiveProcessor {
             file,
             format,
             self.ctx.target_dir(),
+            self.ctx.static_files_dir(),
             Some(&mut extraction_progress),
         );
         extraction_progress.finish();
@@ -329,7 +310,7 @@ impl ArchiveProcessor {
             ArchiveVerificationProgress::new(self.ctx.session().progress());
         let verified = self
             .output_verifier()
-            .verify_with_progress(&self.archive().output_files, Some(&mut verification_progress))?;
+            .verify_with_progress(&self.archive().output_files, Some(&verification_progress))?;
         if verified {
             verification_progress.complete(self.archive().output_size());
         }

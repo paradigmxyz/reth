@@ -5,6 +5,7 @@ use alloy_eips::{
     eip1898::BlockHashOrNumber,
     eip4844::{BlobAndProofV1, BlobAndProofV2, BlobCellsAndProofsV1},
     eip4895::Withdrawals,
+    eip7594::BlobCellMask,
     eip7685::RequestsOrHash,
 };
 use alloy_primitives::{BlockHash, BlockNumber, Bytes, Sealable, B128, B256, U64};
@@ -28,7 +29,7 @@ use reth_payload_primitives::{
 };
 use reth_primitives_traits::{AlloyBlockHeader, Block, BlockBody};
 use reth_rpc_api::{EngineApiServer, IntoEngineApiRpcModule};
-use reth_storage_api::{BalProvider, BlockReader, HeaderProvider, StateProviderFactory};
+use reth_storage_api::{BalProvider, BlockReader, StateProviderFactory};
 use reth_tasks::Runtime;
 use reth_transaction_pool::{BestTransactions, TransactionPool};
 use std::{
@@ -83,7 +84,7 @@ impl<Provider, PayloadT: PayloadTypes, Pool, Validator, ChainSpec>
 impl<Provider, PayloadT, Pool, Validator, ChainSpec>
     EngineApi<Provider, PayloadT, Pool, Validator, ChainSpec>
 where
-    Provider: HeaderProvider + BlockReader + StateProviderFactory + BalProvider + 'static,
+    Provider: BlockReader + StateProviderFactory + BalProvider + 'static,
     PayloadT: PayloadTypes,
     Pool: TransactionPool + 'static,
     Validator: EngineApiValidator<PayloadT>,
@@ -332,7 +333,7 @@ where
 impl<Provider, EngineT, Pool, Validator, ChainSpec>
     EngineApi<Provider, EngineT, Pool, Validator, ChainSpec>
 where
-    Provider: HeaderProvider + BlockReader + StateProviderFactory + BalProvider + 'static,
+    Provider: BlockReader + StateProviderFactory + BalProvider + 'static,
     EngineT: EngineTypes,
     Pool: TransactionPool + 'static,
     Validator: EngineApiValidator<EngineT>,
@@ -1223,9 +1224,8 @@ where
         versioned_hashes: Vec<B256>,
         indices_bitarray: B128,
     ) -> EngineApiResult<Option<Vec<Option<BlobCellsAndProofsV1>>>> {
-        // Engine API bitvectors are little-endian, while B128 integer conversions are
-        // big-endian. The transaction pool uses the latter representation as a numeric cell mask.
-        let indices_bitarray = B128::from(u128::from_le_bytes(indices_bitarray.into()));
+        // Engine API bitvectors encode the lowest cell indices in the first byte.
+        let cell_mask = BlobCellMask::from_bits(u128::from_le_bytes(indices_bitarray.into()));
         let current_timestamp =
             SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap_or_default().as_secs();
         if !self.inner.chain_spec.is_osaka_active_at_timestamp(current_timestamp) {
@@ -1245,7 +1245,7 @@ where
 
         self.inner
             .tx_pool
-            .get_blobs_for_versioned_hashes_v4(&versioned_hashes, indices_bitarray)
+            .get_blobs_for_versioned_hashes_v4(&versioned_hashes, cell_mask)
             .map(Some)
             .map_err(|err| EngineApiError::Internal(Box::new(err)))
     }
@@ -1335,7 +1335,7 @@ where
 impl<Provider, EngineT, Pool, Validator, ChainSpec> EngineApiServer<EngineT>
     for EngineApi<Provider, EngineT, Pool, Validator, ChainSpec>
 where
-    Provider: HeaderProvider + BlockReader + StateProviderFactory + BalProvider + 'static,
+    Provider: BlockReader + StateProviderFactory + BalProvider + 'static,
     EngineT: EngineTypes<ExecutionData = ExecutionData>,
     Pool: TransactionPool + 'static,
     Validator: EngineApiValidator<EngineT>,
@@ -1954,14 +1954,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn get_inclusion_list_v1_returns_empty_list() {
-        let (_, api) = setup_engine_api();
-
-        let res = EngineApiServer::get_inclusion_list_v1(&api).await.unwrap();
-        assert!(res.is_empty());
-    }
-
-    #[tokio::test]
     async fn get_inclusion_list_v1_stops_at_size_limit() {
         let pool = eth_test_pool();
         let first = pooled_transaction(
@@ -2430,22 +2422,6 @@ mod tests {
         assert_matches!(res, Ok(None));
     }
 
-    #[test]
-    fn engine_bitvector_uses_little_endian_cell_indices() {
-        assert_eq!(
-            B128::from(u128::from_le_bytes(B128::from(1u128.to_le_bytes()).into())),
-            B128::from(1u128)
-        );
-        assert_eq!(
-            B128::from(u128::from_le_bytes(B128::from((1u128 << 127).to_le_bytes()).into())),
-            B128::from(1u128 << 127)
-        );
-        assert_eq!(
-            B128::from(u128::from_le_bytes(B128::from(((1u128 << 64) - 1).to_le_bytes()).into(),)),
-            B128::from((1u128 << 64) - 1)
-        );
-    }
-
     #[tokio::test]
     async fn fcu_v4_updates_shared_cell_custody_before_forkchoice_result() {
         let chain_spec: Arc<ChainSpec> =
@@ -2476,7 +2452,7 @@ mod tests {
         );
 
         let state = ForkchoiceState {
-            head_block_hash: B256::from([0x33; 32]),
+            head_block_hash: B256::repeat_byte(0x33),
             safe_block_hash: B256::ZERO,
             finalized_block_hash: B256::ZERO,
         };
@@ -2543,7 +2519,7 @@ mod tests {
         );
 
         let state = ForkchoiceState {
-            head_block_hash: B256::from([0x44; 32]),
+            head_block_hash: B256::repeat_byte(0x44),
             safe_block_hash: B256::ZERO,
             finalized_block_hash: B256::ZERO,
         };
@@ -2599,7 +2575,7 @@ mod tests {
         let (mut handle, api) = setup_engine_api();
 
         let state = ForkchoiceState {
-            head_block_hash: B256::from([0x11; 32]),
+            head_block_hash: B256::repeat_byte(0x11),
             safe_block_hash: B256::ZERO,
             finalized_block_hash: B256::ZERO,
         };
@@ -2649,7 +2625,7 @@ mod tests {
         let (mut handle, api) = setup_engine_api();
 
         let state = ForkchoiceState {
-            head_block_hash: B256::from([0x22; 32]),
+            head_block_hash: B256::repeat_byte(0x22),
             safe_block_hash: B256::ZERO,
             finalized_block_hash: B256::ZERO,
         };

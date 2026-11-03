@@ -7,7 +7,10 @@ use alloy_rpc_types_trace::otterscan::{
 };
 use jsonrpsee::{core::RpcResult, proc_macros::rpc};
 
-/// Otterscan rpc interface.
+/// Otterscan RPC interface.
+///
+/// Reth implements a subset of the API. In particular, address history search is unimplemented
+/// even though `getApiLevel` returns 8. Historical queries require the relevant state and history.
 #[cfg_attr(not(feature = "client"), rpc(server, namespace = "ots"))]
 #[cfg_attr(feature = "client", rpc(server, client, namespace = "ots"))]
 pub trait Otterscan<T: RpcObject, H: RpcObject> {
@@ -28,9 +31,8 @@ pub trait Otterscan<T: RpcObject, H: RpcObject> {
     #[method(name = "hasCode")]
     async fn has_code(&self, address: Address, block_id: Option<BlockId>) -> RpcResult<bool>;
 
-    /// Very simple API versioning scheme. Every time we add a new capability, the number is
-    /// incremented. This allows for Otterscan to check if the node contains all API it
-    /// needs.
+    /// Returns API level 8 for frontend compatibility, not a guarantee of complete support.
+    /// In particular, both address history search methods remain unimplemented.
     #[method(name = "getApiLevel")]
     async fn get_api_level(&self) -> RpcResult<u64>;
 
@@ -39,6 +41,8 @@ pub trait Otterscan<T: RpcObject, H: RpcObject> {
     async fn get_internal_operations(&self, tx_hash: TxHash) -> RpcResult<Vec<InternalOperation>>;
 
     /// Given a transaction hash, returns its raw revert reason.
+    /// Known transactions without revert data return empty bytes; unknown transactions return
+    /// `None`.
     #[method(name = "getTransactionError")]
     async fn get_transaction_error(&self, tx_hash: TxHash) -> RpcResult<Option<Bytes>>;
 
@@ -61,6 +65,7 @@ pub trait Otterscan<T: RpcObject, H: RpcObject> {
     async fn get_block_details_by_hash(&self, block_hash: B256) -> RpcResult<BlockDetails<H>>;
 
     /// Get paginated transactions for a certain block. Also remove some verbose fields like logs.
+    /// Page zero selects the block's last transactions; each page retains ascending block order.
     #[method(name = "getBlockTransactions")]
     async fn get_block_transactions(
         &self,
@@ -70,6 +75,9 @@ pub trait Otterscan<T: RpcObject, H: RpcObject> {
     ) -> RpcResult<OtsBlockTransactions<T, H>>;
 
     /// Gets paginated inbound/outbound transaction calls for a certain address.
+    ///
+    /// Unimplemented: returns JSON-RPC error -32603 with message "unimplemented".
+    /// See <https://github.com/paradigmxyz/reth/issues/13499>.
     #[method(name = "searchTransactionsBefore")]
     async fn search_transactions_before(
         &self,
@@ -79,6 +87,9 @@ pub trait Otterscan<T: RpcObject, H: RpcObject> {
     ) -> RpcResult<TransactionsWithReceipts>;
 
     /// Gets paginated inbound/outbound transaction calls for a certain address.
+    ///
+    /// Unimplemented: returns JSON-RPC error -32603 with message "unimplemented".
+    /// See <https://github.com/paradigmxyz/reth/issues/13499>.
     #[method(name = "searchTransactionsAfter")]
     async fn search_transactions_after(
         &self,
@@ -96,6 +107,8 @@ pub trait Otterscan<T: RpcObject, H: RpcObject> {
     ) -> RpcResult<Option<TxHash>>;
 
     /// Gets the transaction hash and the address who created a contract.
+    /// Requires historical state. Code-presence binary search is unreliable for destroyed and
+    /// redeployed contracts, and cannot identify genesis allocations or EIP-7702 delegations.
     #[method(name = "getContractCreator")]
     async fn get_contract_creator(&self, address: Address) -> RpcResult<Option<ContractCreator>>;
 }

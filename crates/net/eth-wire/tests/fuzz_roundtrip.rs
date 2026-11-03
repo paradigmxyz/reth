@@ -10,7 +10,7 @@ use std::fmt::Debug;
 /// The test will create a random instance of the type, encode it, and then decode it.
 fn roundtrip_encoding<T>(thing: T)
 where
-    T: Encodable + Decodable + Debug + PartialEq + Eq,
+    T: Encodable + Decodable + Debug + Eq,
 {
     let mut encoded = Vec::new();
     thing.encode(&mut encoded);
@@ -28,7 +28,7 @@ where
 /// Default, Clone, or Serialize, and fuzz the wrapper type instead.
 fn roundtrip_fuzz<T>(thing: T)
 where
-    T: Encodable + Decodable + Clone + Serialize + Debug + PartialEq + Eq,
+    T: Encodable + Decodable + Clone + Serialize + Debug + Eq,
 {
     roundtrip_encoding::<T>(thing)
 }
@@ -54,8 +54,8 @@ pub mod fuzz_rlp {
     use reth_eth_wire::{
         BlockBodies, BlockHeaders, DisconnectReason, GetBlockBodies, GetBlockHeaders, GetNodeData,
         GetPooledTransactions, GetReceipts, HelloMessage, NewBlock, NewBlockHashes,
-        NewPooledTransactionHashes66, NewPooledTransactionHashes68, NodeData, P2PMessage,
-        PooledTransactions, Receipts, Status, Transactions,
+        NewPooledTransactionHashes66, NewPooledTransactionHashes68, NewPooledTransactionHashes72,
+        NodeData, P2PMessage, PooledTransactions, Receipts, Status, Transactions,
     };
     use serde::{Deserialize, Serialize};
     use test_fuzz::test_fuzz;
@@ -154,6 +154,7 @@ pub mod fuzz_rlp {
     fuzz_type_and_name!(NewBlock, fuzz_NewBlock);
     fuzz_type_and_name!(NewPooledTransactionHashes66, fuzz_NewPooledTransactionHashes66);
     fuzz_type_and_name!(NewPooledTransactionHashes68, fuzz_NewPooledTransactionHashes68);
+    fuzz_type_and_name!(NewPooledTransactionHashes72, fuzz_NewPooledTransactionHashes72);
     fuzz_type_and_name!(GetPooledTransactions, fuzz_GetPooledTransactions);
     fuzz_type_and_name!(PooledTransactions, fuzz_PooledTransactions);
     fuzz_type_and_name!(GetNodeData, fuzz_GetNodeData);

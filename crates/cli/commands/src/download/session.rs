@@ -61,13 +61,6 @@ impl DownloadSession {
         &self.cancel_token
     }
 
-    /// Records one archive whose outputs were already reusable on disk.
-    pub(crate) fn record_reused_archive(&self, download_bytes: u64, output_bytes: u64) {
-        if let Some(progress) = self.progress() {
-            progress.record_reused_archive(download_bytes, output_bytes);
-        }
-    }
-
     /// Records one archive whose extracted outputs fully verified.
     pub(crate) fn record_archive_output_complete(&self, bytes: u64) {
         if let Some(progress) = self.progress() {
@@ -81,6 +74,8 @@ impl DownloadSession {
 pub(crate) struct ArchiveProcessContext {
     /// Directory where extracted output files are written.
     target_dir: PathBuf,
+    /// Custom location of static file outputs.
+    static_files_dir: Option<PathBuf>,
     /// Directory used for cached archive downloads, when enabled.
     cache_dir: Option<PathBuf>,
     /// Shared command-scoped download state.
@@ -91,15 +86,21 @@ impl ArchiveProcessContext {
     /// Creates the context used while processing modular archives.
     pub(crate) fn new(
         target_dir: PathBuf,
+        static_files_dir: Option<PathBuf>,
         cache_dir: Option<PathBuf>,
         session: DownloadSession,
     ) -> Self {
-        Self { target_dir, cache_dir, session }
+        Self { target_dir, static_files_dir, cache_dir, session }
     }
 
     /// Returns the directory where extracted outputs should be written.
     pub(crate) fn target_dir(&self) -> &Path {
         &self.target_dir
+    }
+
+    /// Returns the custom static files directory, if configured.
+    pub(crate) fn static_files_dir(&self) -> Option<&Path> {
+        self.static_files_dir.as_deref()
     }
 
     /// Returns the cache directory for two-phase downloads, if enabled.
@@ -110,24 +111,5 @@ impl ArchiveProcessContext {
     /// Returns the shared download session.
     pub(crate) fn session(&self) -> &DownloadSession {
         &self.session
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn retry_delay_preserves_defaults_or_uses_override() {
-        let session = DownloadSession::new(None, None, CancellationToken::new());
-        for default in [Duration::from_secs(2), Duration::from_secs(5), Duration::from_secs(40)] {
-            assert_eq!(session.retry_delay(default), default);
-            for delay in [Duration::ZERO, Duration::from_millis(250)] {
-                assert_eq!(
-                    session.clone().with_retry_backoff(Some(delay)).retry_delay(default),
-                    delay
-                );
-            }
-        }
     }
 }

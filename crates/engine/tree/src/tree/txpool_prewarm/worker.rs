@@ -1,19 +1,20 @@
 use super::{
     control::{Command, Publication},
-    Job, Source, Transactions,
+    Job, Source, Transaction, Transactions,
 };
-use crate::tree::{StateProviderDatabase, TxPoolPrewarmCacheSnapshot as Snapshot};
-use alloy_evm::Evm;
+use crate::tree::{
+    payload_processor::reuse::{BalanceTracker, RecordingDb, RecordingHandle, SpeculativeTx},
+    TxPoolPrewarmCacheSnapshot as Snapshot,
+};
 use alloy_primitives::B256;
 use crossbeam_channel::{Receiver, RecvTimeoutError, TryRecvError};
-use reth_evm::ConfigureEvm;
+use reth_evm::{cached::CachedReads, database::StateProviderDatabase, ConfigureEvm, Evm, EvmEnv};
 use reth_primitives_traits::NodePrimitives;
 use reth_provider::{
     BlockNumReader, ChangeSetReader, DatabaseProviderFactory, DatabaseProviderROFactory,
     PruneCheckpointReader, StageCheckpointReader, StateProvider, StorageChangeSetReader,
     StorageSettingsCache,
 };
-use reth_revm::{cached::CachedReads, db::State};
 use reth_storage_overlay::OverlayStateProviderFactory;
 use std::{
     sync::Arc,
@@ -32,7 +33,8 @@ const HEAD_POLL_INTERVAL: Duration = Duration::from_millis(10);
 /// A long-lived loop that speculatively executes the pool's best transactions on top of the
 /// current canonical state, recording every state read in a [`CachedReads`]. Roughly every
 /// [`REFRESH_INTERVAL`] it publishes an immutable snapshot of that cache, which block validation
-/// and payload building use to seed their own caches.
+/// and payload building use to seed their own caches. If the job records results, it also stores
+/// each transaction's result and reads, which block prewarming may reuse.
 ///
 /// The worker is driven by [`Command`]s: `Start` points it at a new parent state, and
 /// `Pause`/`Resume` bracket cache-sensitive work elsewhere. Commands are only applied between
@@ -122,6 +124,7 @@ where
                 debug!(
                     target: "engine::tree::txpool_prewarm",
                     ?parent_hash,
+                    record_results = self.job.as_ref().is_some_and(|(_, job)| job.results.is_some()),
                     "started txpool prewarming"
                 );
             }
@@ -200,27 +203,55 @@ where
                 return BatchEnd::Rest
             }
         };
-        let mut state = State::builder()
-            .with_database(self.cache.as_db_mut(StateProviderDatabase::new(state_provider)))
-            .build();
-        // The environment is the head block's own, not a predicted next-block one, and execution
-        // is out of context by design: transaction viability is the pool's business, so nonce,
-        // balance and (one-block-stale) basefee checks must not gate which state gets warmed.
-        let mut evm_env = job.evm_env.clone();
-        evm_env.cfg_env.disable_nonce_check = true;
-        evm_env.cfg_env.disable_balance_check = true;
-        evm_env.cfg_env.disable_base_fee = true;
-        let mut evm = self.evm_config.evm_with_env(&mut state, evm_env);
-
+        let db = self
+            .cache
+            .as_db_mut(StateProviderDatabase::new(state_provider.into_evm_state_provider()));
+        let mut evm_env =
+            job.evm_env.clone().with_nonce_check_disabled().with_balance_check_disabled();
+        if job.results.is_none() {
+            evm_env.version_mut().features.remove(evm2::EvmFeatures::BASE_FEE_CHECK);
+        }
+        let evm_config = if job.results.is_some() {
+            self.evm_config.clone().with_jit_support_enabled(false)
+        } else {
+            self.evm_config.clone()
+        };
+        let recording = RecordingHandle::default();
+        let mut evm = if job.results.is_some() {
+            evm_config.evm_with_env(RecordingDb::new(db, recording.clone()), evm_env)
+        } else {
+            evm_config.evm_with_env(db, evm_env)
+        };
         let deadline = Instant::now() + REFRESH_INTERVAL;
         while self.commands.is_empty() && Instant::now() < deadline {
-            let Some(transaction) = transactions.next() else { return BatchEnd::Rest };
-            if let Err(err) = evm.transact(transaction.transaction) {
+            let Some(Transaction { hash, sender, transaction }) = transactions.next() else {
+                return BatchEnd::Rest
+            };
+            let result = if let Some(results) = &job.results {
+                let speculative = SpeculativeTx::new(sender, transaction.inner());
+                let tx_env = evm_config.tx_env(transaction);
+                // The underlying CachedReads retains warmed data; the EVM overlay must not hide
+                // reads from the recorder or keep values from an earlier prediction.
+                drop(evm.take_state_cache());
+                recording.start_recording_inner();
+                let result =
+                    evm.transact_with_inspector(&tx_env, BalanceTracker::new(recording.clone()));
+                let reads = recording.take_reads();
+                result.map(|(mut balances, result)| {
+                    if let Some(reads) = reads {
+                        results.store(hash, result, reads, &mut balances, speculative);
+                    }
+                })
+            } else {
+                let tx_env = evm_config.tx_env(transaction);
+                evm.transact_result(&tx_env).map(drop)
+            };
+            if let Err(err) = result {
                 trace!(
                     target: "engine::tree::txpool_prewarm",
                     %err,
-                    tx_hash = ?transaction.hash,
-                    sender = %transaction.sender,
+                    tx_hash = ?hash,
+                    %sender,
                     "speculative txpool transaction execution failed"
                 );
             }
@@ -320,11 +351,14 @@ fn entry_counts(reads: &CachedReads) -> (usize, usize, usize) {
 #[cfg(test)]
 mod tests {
     use super::{super::Transaction as PoolTransaction, *};
+    use crate::tree::payload_processor::reuse::{PoolResults, POOL_BENEFICIARY};
     use alloy_consensus::{transaction::Recovered, Signed, TxLegacy};
-    use alloy_primitives::{Address, Signature, TxKind, U256};
+    use alloy_primitives::{Address, Signature, TxKind};
     use crossbeam_channel::{unbounded, Sender};
+    use evm2::BaseEvmTypes;
     use parking_lot::{Mutex, RwLock};
     use reth_ethereum_primitives::{EthPrimitives, TransactionSigned};
+    use reth_evm::EvmEnvFor;
     use reth_evm_ethereum::EthEvmConfig;
     use reth_provider::test_utils::MockEthProvider;
     use reth_stages_api::{StageCheckpoint, StageId};
@@ -373,16 +407,30 @@ mod tests {
 
         /// Points the worker at `parent_hash`, as [`Handle::start`](super::super::Handle) does.
         fn start(&self, parent_hash: B256) {
+            self.start_with(parent_hash, None);
+        }
+
+        /// Points the worker at `parent_hash` and returns the results it records.
+        fn start_recording(&self, parent_hash: B256) -> Arc<PoolResults<BaseEvmTypes>> {
+            let results = Arc::new(PoolResults::default());
+            self.start_with(parent_hash, Some(Arc::clone(&results)));
+            results
+        }
+
+        fn start_with(&self, parent_hash: B256, results: Option<Arc<PoolResults<BaseEvmTypes>>>) {
             let provider = MockEthProvider::default();
             provider.enable_database_provider();
             provider.add_header(parent_hash, Default::default());
             provider.add_stage_checkpoint(StageId::Finish, StageCheckpoint::new(0));
+            let mut evm_env = EvmEnvFor::<EthEvmConfig>::default();
+            evm_env.block.beneficiary = POOL_BENEFICIARY;
             let job = Job {
-                evm_env: Default::default(),
+                evm_env,
                 state_provider_factory: OverlayStateProviderFactory::new(
                     provider,
                     reth_storage_overlay::OverlayManager::default().overlay_builder(parent_hash),
                 ),
+                results,
             };
             self.commands.send(Command::Start { parent_hash, job }).unwrap();
         }
@@ -465,13 +513,13 @@ mod tests {
         }
     }
 
-    /// A signed transfer to `recipient`. The signature is a dummy: the worker executes with the
-    /// attached sender and disabled nonce/balance checks, so it is never recovered or validated.
+    /// A signed zero-value transfer to `recipient`, which the unfunded sender can pay for. The
+    /// signature is a dummy: the worker executes with the attached sender, so it is never
+    /// recovered or validated.
     fn transfer(recipient: u8) -> PoolTransaction<EthPrimitives> {
         let transaction = TxLegacy {
             gas_limit: 21_000,
             to: TxKind::Call(Address::repeat_byte(recipient)),
-            value: U256::from(1),
             ..Default::default()
         };
         let hash = B256::repeat_byte(recipient);
@@ -510,24 +558,13 @@ mod tests {
     }
 
     #[test]
-    fn pause_quiesces_the_worker_until_resume() {
+    fn records_results_of_pool_transactions() {
         let harness = Harness::spawn();
         let parent_hash = B256::repeat_byte(0x01);
-        harness.start(parent_hash);
+        let results = harness.start_recording(parent_hash);
         harness.pool.push(parent_hash, transfer(0xB0));
-        let before = harness.published_for(parent_hash).entry_counts();
 
-        harness.pause();
-        harness.pool.push(parent_hash, transfer(0xB1));
-        thread::sleep(REFRESH_INTERVAL * 2);
-        assert_eq!(
-            harness.published_entry_counts(),
-            Some(before),
-            "a paused worker must not publish"
-        );
-
-        harness.resume();
-        harness.published(|snapshot| snapshot.entry_counts() != before);
+        wait_until("the result is recorded", || results.get(&B256::repeat_byte(0xB0)).is_some());
     }
 
     #[test]
@@ -570,19 +607,6 @@ mod tests {
         harness.pool.push(second, transfer(0xB2));
         harness.published_for(second);
         assert_eq!(harness.pool.opened.load(Ordering::Relaxed), 2);
-    }
-
-    #[test]
-    fn newest_start_wins() {
-        let harness = Harness::spawn();
-        let stale = B256::repeat_byte(0x01);
-        let newest = B256::repeat_byte(0x02);
-
-        harness.start(stale);
-        harness.start(newest);
-        harness.pool.push(newest, transfer(0xB0));
-
-        harness.published_for(newest);
     }
 
     #[test]

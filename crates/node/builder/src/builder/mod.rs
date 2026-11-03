@@ -8,6 +8,7 @@ use crate::{
     components::NodeComponentsBuilder,
     node::FullNode,
     rpc::{RethRpcAddOns, RethRpcServerHandles, RpcContext},
+    sync::PipelineBackfill,
     BlockReaderFor, DebugNode, DebugNodeLauncher, EngineNodeLauncher, LaunchNode, Node,
 };
 use alloy_eips::eip4844::env_settings::EnvKzgSettings;
@@ -744,16 +745,23 @@ where
         T::Types: DebugNode<NodeAdapter<T, CB::Components>>,
         DebugNodeLauncher: LaunchNode<NodeBuilderWithComponents<T, CB, AO>>,
     {
-        let Self { builder, task_executor } = self;
+        self.launch_with_debug_capabilities_and_backfill(PipelineBackfill)
+    }
 
-        let engine_tree_config = builder.config.tree_config();
-
-        let launcher = DebugNodeLauncher::new(EngineNodeLauncher::new(
-            task_executor,
-            builder.config.datadir(),
-            engine_tree_config,
-        ));
-        builder.launch_with(launcher)
+    /// Launches the node with the [`DebugNodeLauncher`], with the engine's backfill built by
+    /// `backfill` instead of the staged pipeline.
+    pub fn launch_with_debug_capabilities_and_backfill<B>(
+        self,
+        backfill: B,
+    ) -> <DebugNodeLauncher<EngineNodeLauncher<B>> as LaunchNode<
+        NodeBuilderWithComponents<T, CB, AO>,
+    >>::Future
+    where
+        T::Types: DebugNode<NodeAdapter<T, CB::Components>>,
+        DebugNodeLauncher<EngineNodeLauncher<B>>: LaunchNode<NodeBuilderWithComponents<T, CB, AO>>,
+    {
+        let launcher = DebugNodeLauncher::new(self.engine_api_launcher().with_backfill(backfill));
+        self.builder.launch_with(launcher)
     }
 
     /// Returns an [`EngineNodeLauncher`] that can be used to launch the node with engine API

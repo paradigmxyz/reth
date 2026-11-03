@@ -8,8 +8,10 @@ use itertools::Itertools;
 use reth_chainspec::EthereumHardforks;
 use reth_db::{static_file::iter_static_files, DatabaseEnv};
 use reth_db_api::{
-    cursor::DbCursorRO, table::Table, transaction::DbTx, RawKey, RawTable, RawValue, TableViewer,
-    Tables,
+    cursor::DbCursorRO,
+    table::{Decode, Table},
+    transaction::DbTx,
+    DatabaseError, RawKey, RawTable, TableViewer, Tables,
 };
 use reth_db_common::DbTool;
 use reth_node_builder::{NodeTypesWithDB, NodeTypesWithDBAdapter};
@@ -17,6 +19,7 @@ use reth_provider::{providers::ProviderNodeTypes, DBProvider, StaticFileProvider
 use reth_static_file_types::{ChangesetOffset, StaticFileSegment};
 use std::{
     hash::{BuildHasher, Hasher},
+    ops::Bound,
     time::{Duration, Instant},
 };
 use tracing::{info, warn};
@@ -231,71 +234,78 @@ impl<N: ProviderNodeTypes> TableViewer<(u64, Duration)> for ChecksumViewer<'_, N
         let provider =
             self.tool.provider_factory.provider()?.disable_long_read_transaction_safety();
         let tx = provider.tx_ref();
-        info!(
-            "Start computing checksum, start={:?}, end={:?}, limit={:?}",
-            self.start_key, self.end_key, self.limit
-        );
+        log_checksum_start(&self.start_key, &self.end_key, self.limit);
 
         let mut cursor = tx.cursor_read::<RawTable<T>>()?;
-        let walker = match (self.start_key.as_deref(), self.end_key.as_deref()) {
-            (Some(start), Some(end)) => {
-                let start_key = table_key::<T>(start).map(RawKey::new)?;
-                let end_key = table_key::<T>(end).map(RawKey::new)?;
-                cursor.walk_range(start_key..=end_key)?
-            }
-            (None, Some(end)) => {
-                let end_key = table_key::<T>(end).map(RawKey::new)?;
+        let parse_key = |key: &str| table_key::<T>(key).map(RawKey::new);
+        let start = self.start_key.as_deref().map(parse_key).transpose()?;
+        let end = self.end_key.as_deref().map(parse_key).transpose()?;
+        let bound = |key: Option<RawKey<T::Key>>| key.map_or(Bound::Unbounded, Bound::Included);
+        let mut entries = cursor
+            .walk_range((bound(start), bound(end)))?
+            .map(|entry| entry.map(|(k, v)| (k.into_key(), v.into_value())));
 
-                cursor.walk_range(..=end_key)?
-            }
-            (Some(start), None) => {
-                let start_key = table_key::<T>(start).map(RawKey::new)?;
-                cursor.walk_range(start_key..)?
-            }
-            (None, None) => cursor.walk_range(..)?,
-        };
-
-        let start_time = Instant::now();
-        let mut hasher = checksum_hasher();
-        let mut total = 0;
-
-        let limit = self.limit.unwrap_or(usize::MAX);
-        let mut enumerate_start_key = None;
-        let mut enumerate_end_key = None;
-        for (index, entry) in walker.enumerate() {
-            let (k, v): (RawKey<T::Key>, RawValue<T::Value>) = entry?;
-
-            if index.is_multiple_of(PROGRESS_LOG_INTERVAL) {
-                info!("Hashed {index} entries.");
-            }
-
-            hasher.write(k.raw_key());
-            hasher.write(v.raw_value());
-
-            if enumerate_start_key.is_none() {
-                enumerate_start_key = Some(k.clone());
-            }
-            enumerate_end_key = Some(k);
-
-            total = index + 1;
-            if total >= limit {
-                break;
-            }
-        }
-
-        info!("Hashed {total} entries.");
-        if let (Some(s), Some(e)) = (enumerate_start_key, enumerate_end_key) {
-            info!("start-key: {}", serde_json::to_string(&s.key()?).unwrap_or_default());
-            info!("end-key: {}", serde_json::to_string(&e.key()?).unwrap_or_default());
-        }
-
-        let checksum = hasher.finish();
-        let elapsed = start_time.elapsed();
-
-        info!("Checksum for table `{}`: {:#x} (elapsed: {:?})", T::NAME, checksum, elapsed);
-
-        Ok((checksum, elapsed))
+        checksum_entries(
+            &mut entries,
+            self.limit.unwrap_or(usize::MAX),
+            &|key| Ok(serde_json::to_string(&T::Key::decode(key)?).unwrap_or_default()),
+            T::NAME,
+        )
     }
+}
+
+fn log_checksum_start(start: &Option<String>, end: &Option<String>, limit: Option<usize>) {
+    info!("Start computing checksum, start={:?}, end={:?}, limit={:?}", start, end, limit);
+}
+
+/// Hashes the raw key-value entries of a table and logs the result.
+///
+/// `key_json` serializes a raw key to JSON, as it can only be decoded with the table's key type.
+fn checksum_entries(
+    entries: &mut dyn Iterator<Item = Result<(Vec<u8>, Vec<u8>), DatabaseError>>,
+    limit: usize,
+    key_json: &dyn Fn(&[u8]) -> eyre::Result<String>,
+    table: &str,
+) -> eyre::Result<(u64, Duration)> {
+    let start_time = Instant::now();
+    let mut hasher = checksum_hasher();
+    let mut total = 0;
+
+    let mut enumerate_start_key = None;
+    let mut enumerate_end_key = None;
+    for (index, entry) in entries.enumerate() {
+        let (k, v) = entry?;
+
+        if index.is_multiple_of(PROGRESS_LOG_INTERVAL) {
+            info!("Hashed {index} entries.");
+        }
+
+        hasher.write(&k);
+        hasher.write(&v);
+
+        if enumerate_start_key.is_none() {
+            enumerate_start_key = Some(k.clone());
+        }
+        enumerate_end_key = Some(k);
+
+        total = index + 1;
+        if total >= limit {
+            break;
+        }
+    }
+
+    info!("Hashed {total} entries.");
+    if let (Some(s), Some(e)) = (enumerate_start_key, enumerate_end_key) {
+        info!("start-key: {}", key_json(&s)?);
+        info!("end-key: {}", key_json(&e)?);
+    }
+
+    let checksum = hasher.finish();
+    let elapsed = start_time.elapsed();
+
+    info!("Checksum for table `{}`: {:#x} (elapsed: {:?})", table, checksum, elapsed);
+
+    Ok((checksum, elapsed))
 }
 
 /// Accumulates a checksum over key-value entries, tracking count and limit.

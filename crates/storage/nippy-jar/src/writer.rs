@@ -319,6 +319,18 @@ impl<H: NippyJarHeader> NippyJarWriter<H> {
             }
         }
 
+        if remaining_to_prune > 0 {
+            // Every uncommitted row was pruned, so the remaining in-memory offset (the previous
+            // data file end) is stale: the on-disk prune shrank the data file below it.
+            self.offsets.clear();
+        } else {
+            // The config written below counts the uncommitted rows that were not pruned, so their
+            // offsets must be on disk too. If we crash before the config is written, the offsets
+            // file is longer than the config expects and the checker heals it as an interrupted
+            // append.
+            self.commit_offsets_inner()?;
+        }
+
         self.offsets_file.get_ref().sync_all()?;
         self.data_file.get_ref().sync_all()?;
 

@@ -33,7 +33,7 @@ pub trait BoxedLaunchExEx<Node: FullNodeComponents>: Send {
 /// Returns a [`BoxFuture`] that resolves to a [`BoxExEx`].
 impl<E, Node> BoxedLaunchExEx<Node> for E
 where
-    E: LaunchExEx<Node> + Send + 'static,
+    E: LaunchExEx<Node> + 'static,
     Node: FullNodeComponents,
 {
     fn launch(

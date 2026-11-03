@@ -1,4 +1,4 @@
-use alloy_consensus::{constants::KECCAK_EMPTY, BlockHeader};
+use alloy_consensus::BlockHeader;
 use alloy_primitives::{BlockNumber, Sealable, B256};
 use reth_codecs::Compact;
 use reth_consensus::ConsensusError;
@@ -292,21 +292,16 @@ where
                                     .map(StoredSubNode::from)
                                     .collect(),
                                 storage_state.state.hash_builder.into(),
-                                storage_state.account.nonce,
-                                storage_state.account.balance,
-                                storage_state.account.bytecode_hash.unwrap_or(KECCAK_EMPTY),
+                                storage_state.account,
                             ));
                     }
                     self.save_execution_checkpoint(provider, Some(checkpoint))?;
 
                     entities_checkpoint.processed += hashed_entries_walked as u64;
 
-                    return Ok(ExecOutput {
-                        checkpoint: input
-                            .checkpoint()
-                            .with_entities_stage_checkpoint(entities_checkpoint),
-                        done: false,
-                    })
+                    return Ok(ExecOutput::in_progress(
+                        input.checkpoint().with_entities_stage_checkpoint(entities_checkpoint),
+                    ))
                 }
                 StateRootProgress::Complete(root, hashed_entries_walked, updates) => {
                     provider.write_trie_updates(updates)?;
@@ -366,11 +361,9 @@ where
 
         validate_state_root(trie_root, SealedHeader::seal_slow(target_block), to_block)?;
 
-        Ok(ExecOutput {
-            checkpoint: StageCheckpoint::new(to_block)
-                .with_entities_stage_checkpoint(entities_checkpoint),
-            done: true,
-        })
+        Ok(ExecOutput::done(
+            StageCheckpoint::new(to_block).with_entities_stage_checkpoint(entities_checkpoint),
+        ))
     }
 
     /// Unwind the stage.
@@ -672,6 +665,7 @@ mod tests {
     impl ExecuteStageTestRunner for MerkleTestRunner {
         type Seed = Vec<SealedBlock<reth_ethereum_primitives::Block>>;
 
+        #[allow(clippy::clone_on_copy)]
         fn seed_execution(&mut self, input: ExecInput) -> Result<Self::Seed, TestRunnerError> {
             let stage_progress = input.checkpoint().block_number;
             let start = stage_progress + 1;
@@ -698,7 +692,7 @@ mod tests {
                 .collect::<BTreeMap<_, _>>();
 
             self.db.insert_accounts_and_storages(
-                accounts.iter().map(|(addr, acc)| (*addr, (*acc, std::iter::empty()))),
+                accounts.iter().map(|(addr, acc)| (*addr, (acc.clone(), std::iter::empty()))),
             )?;
 
             let (header, body) = random_block(

@@ -35,6 +35,7 @@ proptest.workspace = true
 proptest-arbitrary-interop.workspace = true
 serde_json.workspace = true
 toml.workspace = true
+modular-bitfield.workspace = true
 
 [features]
 default = ["std"]

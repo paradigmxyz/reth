@@ -522,7 +522,7 @@ mod tests {
             .unwrap();
 
         // Insert some data
-        let tx_hash = B256::from([1u8; 32]);
+        let tx_hash = B256::repeat_byte(1u8);
         provider.put::<tables::TransactionHashNumbers>(tx_hash, &100).unwrap();
 
         // RocksDB has data

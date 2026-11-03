@@ -99,7 +99,7 @@ pub struct TxpoolExt<Pool> {
 #[cfg(not(test))]
 impl<Pool> TxpoolExtApiServer for TxpoolExt<Pool>
 where
-    Pool: TransactionPool + Clone + 'static,
+    Pool: TransactionPool + 'static,
 {
     fn transaction_count(&self) -> RpcResult<usize> {
         Ok(self.pool.pool_size().total)
@@ -128,12 +128,18 @@ where
             };
 
             loop {
-                sleep(Duration::from_secs(delay)).await;
+                // stop once the client unsubscribes or disconnects
+                tokio::select! {
+                    _ = sink.closed() => break,
+                    _ = sleep(Duration::from_secs(delay)) => {}
+                }
 
                 let msg = SubscriptionMessage::from(
                     serde_json::value::to_raw_value(&pool.pool_size().total).expect("serialize"),
                 );
-                let _ = sink.send(msg).await;
+                if sink.send(msg).await.is_err() {
+                    break;
+                }
             }
         });
 
@@ -152,7 +158,7 @@ mod tests {
     #[cfg(test)]
     impl<Pool> TxpoolExtApiServer for TxpoolExt<Pool>
     where
-        Pool: TransactionPool + Clone + 'static,
+        Pool: TransactionPool + 'static,
     {
         fn transaction_count(&self) -> RpcResult<usize> {
             Ok(self.pool.pool_size().total)
@@ -183,14 +189,18 @@ mod tests {
 
                 // Send pool size repeatedly, with a 10-second delay
                 loop {
-                    sleep(Duration::from_millis(delay)).await;
+                    tokio::select! {
+                        _ = sink.closed() => break,
+                        _ = sleep(Duration::from_millis(delay)) => {}
+                    }
                     let message = SubscriptionMessage::from(
                         serde_json::value::to_raw_value(&pool.pool_size().total)
                             .expect("serialize usize"),
                     );
 
-                    // Just ignore errors if a client has dropped
-                    let _ = sink.send(message).await;
+                    if sink.send(message).await.is_err() {
+                        break;
+                    }
                 }
             });
             Ok(())

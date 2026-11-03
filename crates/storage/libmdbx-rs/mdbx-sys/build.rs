@@ -28,6 +28,11 @@ fn main() {
         // which works correctly on all filesystems.
         .define("MDBX_USE_FALLOCATE", "0");
 
+    if env::var("CARGO_CFG_TARGET_OS").unwrap() == "linux" {
+        // Avoid residency syscalls on the write path while retaining MDBX's prefault writes.
+        cc.define("MDBX_USE_MINCORE", "0");
+    }
+
     // Enable debugging on debug builds
     #[cfg(debug_assertions)]
     cc.define("MDBX_DEBUG", "1").define("MDBX_ENABLE_PROFGC", "1");

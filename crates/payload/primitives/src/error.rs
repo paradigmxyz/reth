@@ -31,6 +31,15 @@ pub enum PayloadBuilderError {
     /// Any other payload building errors.
     #[error(transparent)]
     Other(Box<dyn core::error::Error + Send + Sync>),
+    /// The payload attributes are invalid on top of the parent block, e.g. a transaction they
+    /// include is invalid.
+    ///
+    /// Returned from `PayloadJobGenerator::new_payload_job`, this is the only variant that rejects
+    /// the attributes; returned later from a running job, it is an internal error like any other.
+    /// Failures of this node, such as a failed state read during execution, must use another
+    /// variant.
+    #[error("invalid payload attributes: {0}")]
+    InvalidAttributes(Box<dyn core::error::Error + Send + Sync>),
 }
 
 impl PayloadBuilderError {
@@ -48,6 +57,14 @@ impl PayloadBuilderError {
         E: core::error::Error + Send + Sync + 'static,
     {
         Self::Other(Box::new(error))
+    }
+
+    /// Create a new error that rejects the payload attributes.
+    pub fn invalid_attributes<E>(error: E) -> Self
+    where
+        E: core::error::Error + Send + Sync + 'static,
+    {
+        Self::InvalidAttributes(Box::new(error))
     }
 }
 

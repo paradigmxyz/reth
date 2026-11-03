@@ -13,7 +13,6 @@ use reth_primitives_traits::NodePrimitives;
 use reth_provider::{
     errors::provider::ProviderResult, BlockReader, DBProvider, EitherWriter,
     NodePrimitivesProvider, PruneCheckpointWriter, StaticFileProviderFactory, StorageSettingsCache,
-    TransactionsProvider,
 };
 use reth_prune_types::{PruneCheckpoint, PruneSegment, SegmentOutput, SegmentOutputCheckpoint};
 use reth_static_file_types::StaticFileSegment;
@@ -25,7 +24,6 @@ pub(crate) fn prune<Provider>(
 ) -> Result<SegmentOutput, PrunerError>
 where
     Provider: DBProvider<Tx: DbTxMut>
-        + TransactionsProvider
         + BlockReader
         + StorageSettingsCache
         + StaticFileProviderFactory

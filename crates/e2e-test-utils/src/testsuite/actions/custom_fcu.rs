@@ -147,7 +147,7 @@ where
                 }
             } else {
                 // Just validate it's not an error
-                if matches!(fcu_response.payload_status.status, PayloadStatusEnum::Invalid { .. }) {
+                if fcu_response.is_invalid() {
                     return Err(eyre::eyre!(
                         "Node {node_idx}: FCU returned unexpected INVALID status: {:?}",
                         fcu_response.payload_status.status

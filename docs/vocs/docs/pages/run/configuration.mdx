@@ -4,6 +4,8 @@ description: How to configure Reth using reth.toml and its options.
 
 # Configuring Reth
 
+Use `reth node --cpu-cores 8` to override the available CPU count for node thread pool sizing and parallel execution decisions. This is useful in test environments that report fewer CPUs than the workload should simulate. The count must be nonzero and does not change CPU affinity or the operating system's reported topology. Explicit thread counts take precedence; fixed-size pools and RPC concurrency limits are unchanged. Without this flag, Reth detects the available CPUs as before.
+
 Reth places a configuration file named `reth.toml` in the data directory specified when starting the node. It is written in the [TOML] format.
 
 The default data directory is platform dependent:

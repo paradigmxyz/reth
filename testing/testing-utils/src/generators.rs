@@ -300,6 +300,7 @@ type AccountState = (Account, Vec<StorageEntry>);
 ///
 /// Returns a Vec of account and storage changes for each block,
 /// along with the final state of all accounts and storages.
+#[allow(clippy::clone_on_copy)]
 pub fn random_changeset_range<'a, R: Rng, IBlk, IAcc>(
     rng: &mut R,
     blocks: IBlk,
@@ -331,9 +332,9 @@ where
 
         // extract from sending account
         let (prev_from, _) = state.get_mut(&from).unwrap();
-        changeset.push((from, *prev_from, Vec::new()));
+        changeset.push((from, prev_from.clone(), Vec::new()));
 
-        transfer = max(min(transfer, prev_from.balance), U256::from(1));
+        transfer = max(min(transfer, prev_from.balance), U256::ONE);
         prev_from.balance = prev_from.balance.wrapping_sub(transfer);
 
         // deposit in receiving account and update storage
@@ -356,7 +357,7 @@ where
             .collect();
         old_entries.sort_by_key(|entry| entry.key);
 
-        changeset.push((to, *prev_to, old_entries));
+        changeset.push((to, prev_to.clone(), old_entries));
 
         changeset.sort_by_key(|(address, _, _)| *address);
 
@@ -421,7 +422,7 @@ pub fn random_eoa_account<R: Rng>(rng: &mut R) -> (Address, Account) {
     let balance = U256::from(rng.random::<u32>());
     let addr = Address::random();
 
-    (addr, Account { nonce, balance, bytecode_hash: None })
+    (addr, Account { nonce, balance, ..Default::default() })
 }
 
 /// Generate random Externally Owned Accounts
@@ -486,7 +487,7 @@ mod tests {
     use super::*;
     use alloy_consensus::TxEip1559;
     use alloy_eips::eip2930::AccessList;
-    use alloy_primitives::{hex, Signature};
+    use alloy_primitives::{address, b256, bytes, hex, Signature};
     use reth_primitives_traits::{
         crypto::secp256k1::{public_key_to_address, sign_message},
         SignerRecoverable,
@@ -501,9 +502,9 @@ mod tests {
             chain_id: 1,
             nonce: 0x42,
             gas_limit: 44386,
-            to: TxKind::Call(hex!("6069a6c32cf691f5982febae4faf8a6f3ab2f0f6").into()),
-            value: U256::from(0_u64),
-            input:  hex!("a22cb4650000000000000000000000005eee75727d804a2b13038928d36f8b188945a57a0000000000000000000000000000000000000000000000000000000000000000").into(),
+            to: TxKind::Call(address!("6069a6c32cf691f5982febae4faf8a6f3ab2f0f6")),
+            value: U256::ZERO,
+            input:  bytes!("a22cb4650000000000000000000000005eee75727d804a2b13038928d36f8b188945a57a0000000000000000000000000000000000000000000000000000000000000000"),
             max_fee_per_gas: 0x4a817c800,
             max_priority_fee_per_gas: 0x3b9aca00,
             access_list: AccessList::default(),
@@ -533,7 +534,7 @@ mod tests {
             nonce: 9,
             gas_price: 20 * 10_u128.pow(9),
             gas_limit: 21000,
-            to: TxKind::Call(hex!("3535353535353535353535353535353535353535").into()),
+            to: TxKind::Call(Address::repeat_byte(0x35)),
             value: U256::from(10_u128.pow(18)),
             input: Bytes::default(),
         };
@@ -543,14 +544,10 @@ mod tests {
         assert_eq!(expected.as_slice(), &alloy_rlp::encode(tx));
 
         let hash = transaction.signature_hash();
-        let expected =
-            B256::from_str("daf5a779ae972f972197303d7b574746c7ef83eadac0f2791ad23db92e4c8e53")
-                .unwrap();
+        let expected = b256!("daf5a779ae972f972197303d7b574746c7ef83eadac0f2791ad23db92e4c8e53");
         assert_eq!(expected, hash);
 
-        let secret =
-            B256::from_str("4646464646464646464646464646464646464646464646464646464646464646")
-                .unwrap();
+        let secret = B256::repeat_byte(0x46);
         let signature = sign_message(secret, hash).unwrap();
 
         let expected = Signature::new(

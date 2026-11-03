@@ -27,7 +27,7 @@ fn generate_test_data(
     let mut runner = TestRunner::deterministic();
 
     // Use a fixed hashed address for the storage trie
-    let hashed_address = B256::from([0x42; 32]);
+    let hashed_address = B256::repeat_byte(0x42);
 
     // Generate random storage slots (key -> value)
     let storage_strategy =

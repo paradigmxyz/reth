@@ -1,5 +1,6 @@
 //! Helpers for verifying the persisted state and trie representation of test nodes.
 
+use crate::TmpDB;
 use alloy_consensus::BlockHeader;
 use eyre::{ensure, eyre, Result};
 use reth_provider::{
@@ -7,50 +8,33 @@ use reth_provider::{
 };
 use reth_trie::{
     prefix_set::{PrefixSetMut, TriePrefixSets},
-    verify::{Output, Verifier},
+    verify::{default_storage_workers, Output, DEFAULT_STORAGE_LOOKAHEAD},
     StateRoot,
 };
-use reth_trie_db::{DatabaseHashedCursorFactory, DatabaseTrieCursorFactory};
-use std::time::{Duration, Instant};
-
-/// Waits until the node has persisted at least the given block number to disk.
-///
-/// The engine keeps the most recent blocks in memory, so tests that want to inspect the
-/// database, e.g. via [`assert_trie_consistency`], must first advance the chain far enough and
-/// wait for the persistence task to catch up. Unlike `NodeTestContext::wait_block` this only
-/// needs the block number and fails after `timeout` instead of polling indefinitely.
-pub async fn wait_for_persisted_block<F>(factory: &F, number: u64, timeout: Duration) -> Result<()>
-where
-    F: DatabaseProviderFactory<Provider: BlockNumReader>,
-{
-    let start = Instant::now();
-    loop {
-        // the finish checkpoint is committed in the same transaction as the block's state
-        if factory.database_provider_ro()?.best_block_number()? >= number {
-            return Ok(())
-        }
-        ensure!(start.elapsed() < timeout, "timed out waiting for block {number} to be persisted");
-        tokio::time::sleep(Duration::from_millis(50)).await;
-    }
-}
+use reth_trie_db::{DatabaseHashedCursorFactory, DatabaseTrieCursorFactory, DatabaseVerifier};
 
 /// Asserts that the persisted state and trie representation is internally consistent and matches
 /// the state root of the latest persisted block.
 ///
-/// This performs two checks against a single database snapshot:
+/// This performs two checks against persisted database state:
 /// - the state root recomputed from the persisted hashed state matches the state root of the latest
 ///   persisted header, and
 /// - the persisted trie nodes match a recomputation from the hashed state (the library equivalent
 ///   of a `reth db repair-trie --dry-run`).
 ///
 /// Only on-disk data is read, so callers must ensure the blocks of interest have been persisted,
-/// e.g. via [`wait_for_persisted_block`].
+/// e.g. via [`NodeTestContext::wait_for_persisted_block`].
+///
+/// [`NodeTestContext::wait_for_persisted_block`]: crate::node::NodeTestContext::wait_for_persisted_block
 pub fn assert_trie_consistency<F>(factory: &F) -> Result<()>
 where
     F: DatabaseProviderFactory<
-        Provider: DBProvider + StorageSettingsCache + BlockNumReader + HeaderProvider,
-    >,
+            DB = TmpDB,
+            Provider: DBProvider + StorageSettingsCache + BlockNumReader + HeaderProvider,
+        > + AsRef<F::DB>,
 {
+    // Prevent commits while opening the independent snapshots.
+    let snapshot_guard = factory.database_provider_rw()?;
     let provider = factory.database_provider_ro()?;
     let tip = provider.best_block_number()?;
     let header = provider
@@ -59,8 +43,16 @@ where
     let tx = provider.tx_ref();
 
     reth_trie_db::with_adapter!(provider, |A| {
+        let db = factory.as_ref().db().clone().with_disable_long_read_transaction_safety();
+        let verifier = DatabaseVerifier::<_, A>::new(
+            &db,
+            default_storage_workers(),
+            DEFAULT_STORAGE_LOOKAHEAD,
+        )?;
+        drop(snapshot_guard);
+
         // Recompute all account leaves from the persisted hashed state. Storage roots are taken
-        // from the persisted storage tries, which the verifier below checks against the hashed
+        // from the persisted storage tries, which the verifier checks against the hashed
         // storage tables.
         let recomputed = StateRoot::new(
             DatabaseTrieCursorFactory::<_, A>::new(tx),
@@ -77,8 +69,6 @@ where
             header.state_root()
         );
 
-        let trie_cursor_factory = DatabaseTrieCursorFactory::<_, A>::new(tx);
-        let verifier = Verifier::new(&trie_cursor_factory, DatabaseHashedCursorFactory::new(tx))?;
         let mut inconsistencies = Vec::new();
         for output in verifier {
             match output? {

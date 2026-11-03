@@ -66,7 +66,7 @@ impl MustNotIncludeKeys {
     /// Returns `true` if [`Enr`](discv5::Enr) passes filtering rules.
     pub fn filter(&self, enr: &discv5::Enr) -> FilterOutcome {
         for key in &self.keys {
-            if matches!(key.filter(enr), FilterOutcome::Ok) {
+            if key.filter(enr).is_ok() {
                 return FilterOutcome::Ignore {
                     reason: format!(
                         "{} forks not allowed",

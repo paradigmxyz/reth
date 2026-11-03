@@ -70,21 +70,22 @@ where
             provider.static_file_provider().get_lowest_range(StaticFileSegment::Transactions) &&
             input
                 .previous_checkpoint
-                .is_none_or(|checkpoint| checkpoint.block_number < Some(lowest_range.start()))
+                .is_none_or(|checkpoint| checkpoint.block_number < Some(lowest_range.start())) &&
+            let Some(previous_block) = lowest_range.start().checked_sub(1) &&
+            let Some(body_indices) = provider.block_body_indices(previous_block)? &&
+            let Some(tx_number) = body_indices.next_tx_num().checked_sub(1)
         {
-            let new_checkpoint = lowest_range.start().saturating_sub(1);
-            if let Some(body_indices) = provider.block_body_indices(new_checkpoint)? {
-                input.previous_checkpoint = Some(PruneCheckpoint {
-                    block_number: Some(new_checkpoint),
-                    tx_number: Some(body_indices.last_tx_num()),
-                    prune_mode: self.mode,
-                });
-                debug!(
-                    target: "pruner",
-                    static_file_checkpoint = ?input.previous_checkpoint,
-                    "Using static file transaction checkpoint as TransactionLookup starting point"
-                );
-            }
+            // Only skip earlier transactions if any exist.
+            input.previous_checkpoint = Some(PruneCheckpoint {
+                block_number: Some(previous_block),
+                tx_number: Some(tx_number),
+                prune_mode: self.mode,
+            });
+            debug!(
+                target: "pruner",
+                static_file_checkpoint = ?input.previous_checkpoint,
+                "Using static file transaction checkpoint as TransactionLookup starting point"
+            );
         }
 
         let (start, end) = match input.get_next_tx_num_range(provider)? {
@@ -316,6 +317,116 @@ mod tests {
     use reth_stages::test_utils::{StorageKind, TestStageDB};
     use reth_testing_utils::generators::{self, random_block_range, BlockRangeParams};
     use std::ops::Sub;
+
+    #[test]
+    fn prune_transaction_zero_after_empty_genesis() {
+        let db = TestStageDB::default();
+        let mut rng = generators::rng();
+        let blocks = [
+            random_block_range(
+                &mut rng,
+                0..=0,
+                BlockRangeParams { tx_count: 0..1, ..Default::default() },
+            ),
+            random_block_range(
+                &mut rng,
+                1..=2,
+                BlockRangeParams { tx_count: 1..2, ..Default::default() },
+            ),
+        ]
+        .concat();
+        db.insert_blocks(blocks.iter(), StorageKind::Static).unwrap();
+        let hashes = blocks
+            .iter()
+            .flat_map(|block| &block.body().transactions)
+            .map(|tx| *tx.tx_hash())
+            .collect::<Vec<_>>();
+        db.insert_tx_hash_numbers(hashes.iter().enumerate().map(|(id, hash)| (*hash, id as u64)))
+            .unwrap();
+
+        let provider = db.factory.database_provider_rw().unwrap();
+        let result = TransactionLookup::new(PruneMode::Before(2))
+            .prune(
+                &provider,
+                PruneInput {
+                    previous_checkpoint: None,
+                    to_block: 1,
+                    limiter: PruneLimiter::default().set_deleted_entries_limit(10),
+                },
+            )
+            .unwrap();
+        assert_eq!(result.pruned, 1);
+        assert_eq!(result.checkpoint.unwrap().tx_number, Some(0));
+        provider.commit().unwrap();
+        assert_eq!(db.table::<tables::TransactionHashNumbers>().unwrap(), vec![(hashes[1], 1)]);
+    }
+
+    #[test]
+    fn prune_transaction_zero_when_earlier_blocks_are_empty() {
+        use reth_provider::{StaticFileProviderFactory, StaticFileWriter};
+        use reth_static_file_types::{StaticFileSegment, DEFAULT_BLOCKS_PER_STATIC_FILE};
+
+        let db = TestStageDB::default();
+        let mut rng = generators::rng();
+        let first_retained_block = DEFAULT_BLOCKS_PER_STATIC_FILE;
+        let blocks = [
+            random_block_range(
+                &mut rng,
+                first_retained_block - 1..=first_retained_block - 1,
+                BlockRangeParams { tx_count: 0..1, ..Default::default() },
+            ),
+            random_block_range(
+                &mut rng,
+                first_retained_block..=first_retained_block + 1,
+                BlockRangeParams { tx_count: 1..2, ..Default::default() },
+            ),
+        ]
+        .concat();
+        db.insert_blocks(blocks.iter(), StorageKind::Database(None)).unwrap();
+
+        // Earlier blocks were empty, so this file contains transaction zero.
+        let static_files = db.factory.static_file_provider();
+        {
+            let mut writer = static_files
+                .get_writer(first_retained_block, StaticFileSegment::Transactions)
+                .unwrap();
+            for (tx_number, block) in blocks[1..].iter().enumerate() {
+                writer.append_transaction(tx_number as u64, &block.body().transactions[0]).unwrap();
+                writer.increment_block(block.number).unwrap();
+            }
+            writer.commit().unwrap();
+        }
+        assert_eq!(
+            static_files.get_lowest_range(StaticFileSegment::Transactions).unwrap().start(),
+            first_retained_block,
+        );
+
+        let hashes = blocks[1..]
+            .iter()
+            .map(|block| *block.body().transactions[0].tx_hash())
+            .collect::<Vec<_>>();
+        db.insert_tx_hash_numbers(hashes.iter().enumerate().map(|(id, hash)| (*hash, id as u64)))
+            .unwrap();
+
+        let provider = db.factory.database_provider_rw().unwrap();
+        let result = TransactionLookup::new(PruneMode::Before(first_retained_block + 1))
+            .prune(
+                &provider,
+                PruneInput {
+                    previous_checkpoint: None,
+                    to_block: first_retained_block,
+                    limiter: PruneLimiter::default().set_deleted_entries_limit(10),
+                },
+            )
+            .unwrap();
+        assert!(result.progress.is_finished());
+        assert_eq!(result.pruned, 1);
+        let checkpoint = result.checkpoint.unwrap();
+        assert_eq!(checkpoint.block_number, Some(first_retained_block));
+        assert_eq!(checkpoint.tx_number, Some(0));
+        provider.commit().unwrap();
+        assert_eq!(db.table::<tables::TransactionHashNumbers>().unwrap(), vec![(hashes[1], 1)]);
+    }
 
     #[test]
     fn prune() {

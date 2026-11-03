@@ -1,17 +1,20 @@
-//! clap [Args](clap::Args) for RPC related arguments.
+//! clap [`Args`] for RPC related arguments.
 
 use crate::args::{
     types::{MaxU32, ZeroAsNoneU64},
     GasPriceOracleArgs, RpcStateCacheArgs,
 };
-use alloy_primitives::map::AddressSet;
+use alloy_primitives::{map::AddressSet, utils::format_ether};
 use alloy_rpc_types_engine::JwtSecret;
 use clap::{
     builder::{PossibleValue, RangedU64ValueParser, Resettable, TypedValueParser},
+    parser::ValueSource,
     Arg, Args, Command,
 };
 use rand::Rng;
-use reth_cli_util::{parse_duration_from_secs_or_ms, parse_ether_value};
+use reth_cli_util::{
+    parse_duration_from_secs_or_ms, parse_ether_value, parsers::format_duration_as_secs_or_ms,
+};
 use reth_rpc_eth_types::builder::config::PendingBlockKind;
 use reth_rpc_server_types::{constants, RethRpcModule, RpcModuleSelection};
 use std::{
@@ -93,8 +96,8 @@ pub struct DefaultRpcServerArgs {
     rpc_pending_block: PendingBlockKind,
     rpc_forwarder: Option<Url>,
     builder_disallow: Option<AddressSet>,
-    rpc_state_cache: RpcStateCacheArgs,
-    gas_price_oracle: GasPriceOracleArgs,
+    pub(super) rpc_state_cache: RpcStateCacheArgs,
+    pub(super) gas_price_oracle: GasPriceOracleArgs,
     rpc_send_raw_transaction_sync_timeout: Duration,
 }
 
@@ -456,7 +459,9 @@ pub struct RpcServerArgs {
     #[arg(long = "http.port", default_value_t = DefaultRpcServerArgs::get_global().http_port)]
     pub http_port: u16,
 
-    /// Disable compression for HTTP responses
+    /// Disable compression for HTTP responses.
+    ///
+    /// Servers listening on a loopback address never compress responses.
     #[arg(long = "http.disable-compression", default_value_t = DefaultRpcServerArgs::get_global().http_disable_compression)]
     pub http_disable_compression: bool,
 
@@ -581,7 +586,18 @@ pub struct RpcServerArgs {
     ///
     /// This is __not__ used for the authenticated engine-API RPC server, see
     /// `--authrpc.jwtsecret`.
-    #[arg(long = "rpc.jwtsecret", value_name = "HEX", global = true, required = false, default_value = Resettable::from(DefaultRpcServerArgs::get_global().rpc_jwtsecret.as_ref().map(|v| format!("{:?}", v).into())))]
+    #[arg(
+        long = "rpc.jwtsecret",
+        value_name = "HEX",
+        global = true,
+        required = false,
+        value_parser = DefaultValueParser {
+            inner: |value: &str| JwtSecret::from_hex(value),
+            default: &DefaultRpcServerArgs::get_global().rpc_jwtsecret,
+        },
+        default_value = Resettable::from(DefaultRpcServerArgs::get_global().rpc_jwtsecret.as_ref().map(|_| "configured".into())),
+        hide_default_value = true,
+    )]
     pub rpc_jwtsecret: Option<JwtSecret>,
 
     /// Disable built-in RPC request metrics.
@@ -613,7 +629,7 @@ pub struct RpcServerArgs {
     /// Tracing requests are generally CPU bound.
     /// Choosing a value that is higher than the available CPU cores can have a negative impact on
     /// the performance of the node and affect the node's ability to maintain sync.
-    #[arg(long = "rpc.max-tracing-requests", alias = "rpc-max-tracing-requests", value_name = "COUNT", default_value_t = DefaultRpcServerArgs::get_global().rpc_max_tracing_requests)]
+    #[arg(long = "rpc.max-tracing-requests", alias = "rpc-max-tracing-requests", value_name = "COUNT", value_parser = RangedU64ValueParser::<usize>::new().range(1..), default_value_t = DefaultRpcServerArgs::get_global().rpc_max_tracing_requests)]
     pub rpc_max_tracing_requests: usize,
 
     /// Maximum number of concurrent blocking IO requests.
@@ -621,7 +637,7 @@ pub struct RpcServerArgs {
     /// Blocking IO requests include `eth_call`, `eth_estimateGas`, and similar methods that
     /// require EVM execution. These are spawned as blocking tasks to avoid blocking the async
     /// runtime.
-    #[arg(long = "rpc.max-blocking-io-requests", alias = "rpc-max-blocking-io-requests", value_name = "COUNT", default_value_t = DefaultRpcServerArgs::get_global().rpc_max_blocking_io_requests)]
+    #[arg(long = "rpc.max-blocking-io-requests", alias = "rpc-max-blocking-io-requests", value_name = "COUNT", value_parser = RangedU64ValueParser::<usize>::new().range(1..), default_value_t = DefaultRpcServerArgs::get_global().rpc_max_blocking_io_requests)]
     pub rpc_max_blocking_io_requests: usize,
 
     /// Maximum number of blocks for `trace_filter` requests.
@@ -636,7 +652,7 @@ pub struct RpcServerArgs {
     #[arg(long = "rpc.max-logs-per-response", alias = "rpc-max-logs-per-response", value_name = "COUNT", default_value_t = DefaultRpcServerArgs::get_global().rpc_max_logs_per_response)]
     pub rpc_max_logs_per_response: ZeroAsNoneU64,
 
-    /// Maximum gas limit for `eth_call` and call tracing RPC methods.
+    /// Maximum gas limit for `eth_call`, `eth_estimateGas`, and call tracing RPC methods.
     #[arg(
         long = "rpc.gascap",
         alias = "rpc-gascap",
@@ -662,7 +678,7 @@ pub struct RpcServerArgs {
         alias = "rpc-txfeecap",
         value_name = "TX_FEE_CAP",
         value_parser = parse_ether_value,
-        default_value = "1.0"
+        default_value = format_tx_fee_cap(DefaultRpcServerArgs::get_global().rpc_tx_fee_cap)
     )]
     pub rpc_tx_fee_cap: u128,
 
@@ -693,23 +709,50 @@ pub struct RpcServerArgs {
     pub rpc_eth_proof_window: u64,
 
     /// Maximum number of concurrent getproof requests.
-    #[arg(long = "rpc.proof-permits", alias = "rpc-proof-permits", value_name = "COUNT", default_value_t = DefaultRpcServerArgs::get_global().rpc_proof_permits)]
+    #[arg(long = "rpc.proof-permits", alias = "rpc-proof-permits", value_name = "COUNT", value_parser = RangedU64ValueParser::<usize>::new().range(1..), default_value_t = DefaultRpcServerArgs::get_global().rpc_proof_permits)]
     pub rpc_proof_permits: usize,
 
     /// Configures the pending block behavior for RPC responses.
     ///
     /// Options: full (include all transactions), empty (header only), none (disable pending
     /// blocks).
-    #[arg(long = "rpc.pending-block", default_value = "full", value_name = "KIND")]
+    #[arg(
+        long = "rpc.pending-block",
+        default_value = match DefaultRpcServerArgs::get_global().rpc_pending_block {
+            PendingBlockKind::Empty => "empty",
+            PendingBlockKind::None => "none",
+            PendingBlockKind::Full => "full",
+        },
+        value_name = "KIND",
+    )]
     pub rpc_pending_block: PendingBlockKind,
 
     /// Endpoint to forward transactions to.
-    #[arg(long = "rpc.forwarder", alias = "rpc-forwarder", value_name = "FORWARDER")]
+    #[arg(
+        long = "rpc.forwarder",
+        alias = "rpc-forwarder",
+        value_name = "FORWARDER",
+        value_parser = DefaultValueParser {
+            inner: Url::parse,
+            default: &DefaultRpcServerArgs::get_global().rpc_forwarder,
+        },
+        default_value = Resettable::from(DefaultRpcServerArgs::get_global().rpc_forwarder.as_ref().map(|_| "configured".into())),
+        hide_default_value = true,
+    )]
     pub rpc_forwarder: Option<Url>,
 
     /// Path to file containing disallowed addresses, json-encoded list of strings. Block
     /// validation API will reject blocks containing transactions from these addresses.
-    #[arg(long = "builder.disallow", value_name = "PATH", value_parser = reth_cli_util::parsers::read_json_from_file::<AddressSet>, default_value = Resettable::from(DefaultRpcServerArgs::get_global().builder_disallow.as_ref().map(|v| format!("{:?}", v).into())))]
+    #[arg(
+        long = "builder.disallow",
+        value_name = "PATH",
+        value_parser = DefaultValueParser {
+            inner: reth_cli_util::parsers::read_json_from_file::<AddressSet>,
+            default: &DefaultRpcServerArgs::get_global().builder_disallow,
+        },
+        default_value = Resettable::from(DefaultRpcServerArgs::get_global().builder_disallow.as_ref().map(|_| "configured".into())),
+        hide_default_value = true,
+    )]
     pub builder_disallow: Option<AddressSet>,
 
     /// State cache configuration.
@@ -724,7 +767,7 @@ pub struct RpcServerArgs {
     #[arg(
         long = "rpc.send-raw-transaction-sync-timeout",
         value_name = "SECONDS",
-        default_value = "30s",
+        default_value = format_duration_as_secs_or_ms(DefaultRpcServerArgs::get_global().rpc_send_raw_transaction_sync_timeout),
         value_parser = parse_duration_from_secs_or_ms,
     )]
     pub rpc_send_raw_transaction_sync_timeout: Duration,
@@ -997,6 +1040,11 @@ impl Default for RpcServerArgs {
     }
 }
 
+/// Formats a wei amount as the ether string `--rpc.txfeecap` parses, without trailing zeros.
+fn format_tx_fee_cap(wei: u128) -> String {
+    format_ether(wei).trim_end_matches('0').trim_end_matches('.').to_string()
+}
+
 /// clap value parser for [`RpcModuleSelection`] with configurable validation.
 #[derive(Clone, Debug, Default)]
 #[non_exhaustive]
@@ -1026,6 +1074,48 @@ impl TypedValueParser for RpcModuleSelectionValueParser {
     }
 }
 
+/// Uses a typed default without serializing secrets or treating address sets as file paths.
+#[derive(Clone)]
+struct DefaultValueParser<P: TypedValueParser>
+where
+    P::Value: 'static,
+{
+    inner: P,
+    default: &'static Option<P::Value>,
+}
+
+impl<P: TypedValueParser> TypedValueParser for DefaultValueParser<P>
+where
+    P::Value: 'static,
+{
+    type Value = P::Value;
+
+    fn parse_ref(
+        &self,
+        cmd: &Command,
+        arg: Option<&Arg>,
+        value: &OsStr,
+    ) -> Result<Self::Value, clap::Error> {
+        self.inner.parse_ref(cmd, arg, value)
+    }
+
+    fn parse_ref_(
+        &self,
+        cmd: &Command,
+        arg: Option<&Arg>,
+        value: &OsStr,
+        source: ValueSource,
+    ) -> Result<Self::Value, clap::Error> {
+        if source == ValueSource::DefaultValue &&
+            let Some(default) = self.default
+        {
+            Ok(default.clone())
+        } else {
+            self.inner.parse_ref_(cmd, arg, value, source)
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1036,6 +1126,19 @@ mod tests {
     struct CommandParser<T: Args> {
         #[command(flatten)]
         args: T,
+    }
+
+    #[test]
+    fn parse_bal_cache_modes() {
+        for (flag, cache_computed, prewarm) in [
+            ("--rpc-cache.cache-computed-bals", true, None),
+            ("--rpc-cache.prewarm-bals", false, Some(0)),
+            ("--rpc-cache.prewarm-bals=10", false, Some(10)),
+        ] {
+            let args = CommandParser::<RpcServerArgs>::parse_from(["reth", flag]).args;
+            assert_eq!(args.rpc_state_cache.cache_computed_bals, cache_computed);
+            assert_eq!(args.rpc_state_cache.prewarm_bals, prewarm);
+        }
     }
 
     #[test]
@@ -1068,6 +1171,30 @@ mod tests {
         let apis = args.http_api.unwrap();
         let expected = RpcModuleSelection::Selection(Default::default());
         assert_eq!(apis, expected);
+    }
+
+    #[test]
+    fn rpc_concurrency_limits_reject_zero() {
+        for flag in
+            ["--rpc.max-tracing-requests", "--rpc.max-blocking-io-requests", "--rpc.proof-permits"]
+        {
+            let result = CommandParser::<RpcServerArgs>::try_parse_from(["reth", flag, "0"]);
+            assert!(result.is_err(), "{flag} should reject zero");
+        }
+
+        let args = CommandParser::<RpcServerArgs>::parse_from([
+            "reth",
+            "--rpc.max-tracing-requests",
+            "1",
+            "--rpc.max-blocking-io-requests",
+            "2",
+            "--rpc.proof-permits",
+            "3",
+        ])
+        .args;
+        assert_eq!(args.rpc_max_tracing_requests, 1);
+        assert_eq!(args.rpc_max_blocking_io_requests, 2);
+        assert_eq!(args.rpc_proof_permits, 3);
     }
 
     #[test]
@@ -1221,8 +1348,11 @@ mod tests {
                 max_receipts: 2000,
                 max_headers: 1000,
                 max_bals: 1000,
+                cache_computed_bals: true,
+                prewarm_bals: Some(0),
                 max_concurrent_db_requests: 512,
-                max_cached_tx_hashes: 30_000,
+                max_cached_tx_hashes: 100_000,
+                ..Default::default()
             },
             gas_price_oracle: GasPriceOracleArgs {
                 blocks: 20,
@@ -1313,6 +1443,8 @@ mod tests {
             "1000",
             "--rpc-cache.max-bals",
             "1000",
+            "--rpc-cache.cache-computed-bals",
+            "--rpc-cache.prewarm-bals",
             "--rpc-cache.max-concurrent-db-requests",
             "512",
             "--gpo.blocks",
@@ -1335,18 +1467,6 @@ mod tests {
     #[test]
     fn parse_auth_jwtsecret_hex() {
         let hex = "1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef";
-        let args =
-            CommandParser::<RpcServerArgs>::parse_from(["reth", "--authrpc.jwtsecret-hex", hex])
-                .args;
-
-        let expected = JwtSecret::from_hex(hex).unwrap();
-        assert_eq!(args.auth_jwtsecret_hex, Some(expected));
-        assert_eq!(args.auth_jwtsecret, None);
-    }
-
-    #[test]
-    fn parse_auth_jwtsecret_hex_with_0x_prefix() {
-        let hex = "0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef";
         let args =
             CommandParser::<RpcServerArgs>::parse_from(["reth", "--authrpc.jwtsecret-hex", hex])
                 .args;

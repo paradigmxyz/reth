@@ -1,13 +1,20 @@
 //! Metadata provider trait for reading and writing node metadata.
 
 use alloc::vec::Vec;
-use reth_db_api::models::StorageSettings;
+pub use reth_db_api::models::PipelineUnwind;
+use reth_db_api::models::{SnapAttempt, StorageSettings, SNAP_ATTEMPT_VERSION};
 use reth_storage_errors::provider::{ProviderError, ProviderResult};
 
 /// Metadata keys.
 pub mod keys {
     /// Storage configuration settings for this node.
     pub const STORAGE_SETTINGS: &str = "storage_settings";
+
+    /// A pipeline unwind that has not completed.
+    pub const PIPELINE_UNWIND: &str = "pipeline_unwind";
+
+    /// The snap synchronization attempt that owns downloaded state.
+    pub const SNAP_ATTEMPT: &str = "snap_attempt";
 }
 
 /// Client trait for reading node metadata from the database.
@@ -15,6 +22,14 @@ pub mod keys {
 pub trait MetadataProvider: Send {
     /// Get a metadata value by key
     fn get_metadata(&self, key: &str) -> ProviderResult<Option<Vec<u8>>>;
+
+    /// Returns an interrupted pipeline unwind. Unreadable records must not be ignored because
+    /// stage checkpoints may describe different versions of the state.
+    fn pipeline_unwind(&self) -> ProviderResult<Option<PipelineUnwind>> {
+        self.get_metadata(keys::PIPELINE_UNWIND)?
+            .map(|bytes| serde_json::from_slice(&bytes).map_err(ProviderError::other))
+            .transpose()
+    }
 
     /// Get storage settings for this node.
     ///
@@ -25,6 +40,28 @@ pub trait MetadataProvider: Send {
         Ok(self
             .get_metadata(keys::STORAGE_SETTINGS)?
             .and_then(|bytes| serde_json::from_slice(&bytes).ok()))
+    }
+
+    /// Returns the snap synchronization attempt that owns the downloaded state.
+    ///
+    /// Unlike [`Self::storage_settings`], an unreadable record is an error: its state is already
+    /// in the canonical tables, so reporting it absent would let the node adopt it.
+    fn snap_attempt(&self) -> ProviderResult<Option<SnapAttempt>> {
+        let Some(bytes) = self.get_metadata(keys::SNAP_ATTEMPT)? else { return Ok(None) };
+
+        // Read the version first, so a future build's record is reported as unsupported rather
+        // than as a decode failure.
+        let value: serde_json::Value =
+            serde_json::from_slice(&bytes).map_err(ProviderError::other)?;
+        let found = value.get("version").and_then(serde_json::Value::as_u64);
+        if found != Some(SNAP_ATTEMPT_VERSION as u64) {
+            return Err(ProviderError::UnsupportedSnapAttemptVersion {
+                found,
+                supported: SNAP_ATTEMPT_VERSION,
+            })
+        }
+
+        serde_json::from_slice(&bytes).map(Some).map_err(ProviderError::other)
     }
 }
 
@@ -38,6 +75,17 @@ pub trait MetadataWriter: Send {
         Err(ProviderError::UnsupportedProvider)
     }
 
+    /// Records an unwind, or clears it after every selected stage has committed.
+    fn write_pipeline_unwind(&self, unwind: Option<&PipelineUnwind>) -> ProviderResult<()> {
+        match unwind {
+            Some(unwind) => self.write_metadata(
+                keys::PIPELINE_UNWIND,
+                serde_json::to_vec(unwind).map_err(ProviderError::other)?,
+            ),
+            None => self.delete_metadata(keys::PIPELINE_UNWIND),
+        }
+    }
+
     /// Write storage settings for this node
     ///
     /// Be sure to update provider factory cache with
@@ -46,6 +94,14 @@ pub trait MetadataWriter: Send {
         self.write_metadata(
             keys::STORAGE_SETTINGS,
             serde_json::to_vec(&settings).map_err(ProviderError::other)?,
+        )
+    }
+
+    /// Writes the snap synchronization attempt that owns the downloaded state.
+    fn write_snap_attempt(&self, attempt: &SnapAttempt) -> ProviderResult<()> {
+        self.write_metadata(
+            keys::SNAP_ATTEMPT,
+            serde_json::to_vec(attempt).map_err(ProviderError::other)?,
         )
     }
 }

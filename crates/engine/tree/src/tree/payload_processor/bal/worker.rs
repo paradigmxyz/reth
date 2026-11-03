@@ -1,15 +1,14 @@
 use super::BalExecutionError;
 use alloy_consensus::Transaction;
 use alloy_eip7928::BlockAccessIndex;
-use alloy_evm::{
-    block::{BlockExecutionError, BlockExecutor, BlockExecutorFactory, BlockValidationError},
-    Evm,
-};
-use alloy_primitives::Address;
+use alloy_primitives::{Address, B256, U256};
 use crossbeam_channel::{Receiver, Sender};
-use reth_evm::{execute::ExecutableTxFor, ConfigureEvm, Database, EvmEnvFor, ExecutionCtxFor};
-use revm::{database::State, state::bal::Bal as RevmBal};
-use std::sync::Arc;
+use evm2::{bytecode::Bytecode, evm::AccountInfo};
+use reth_evm::{
+    BlockExecutionError, BlockExecutor, BlockExecutorFactory, BlockExecutorFor,
+    BlockValidationError, ConfigureEvm, Database, EvmEnvFor, ExecutableTxFor, ExecutionCtxFor,
+};
+use std::{cell::RefCell, rc::Rc, sync::Arc};
 
 #[derive(Debug, thiserror::Error)]
 pub(super) enum BalWorkerError {
@@ -17,21 +16,35 @@ pub(super) enum BalWorkerError {
     #[error("BAL worker setup failed: {0}")]
     Setup(#[source] BalExecutionError),
     /// Transaction recovery or conversion failed before EVM execution.
-    #[error("BAL worker transaction conversion failed: {0}")]
-    Transaction(Box<dyn core::error::Error + Send + Sync + 'static>),
+    #[error("BAL worker transaction conversion failed for transaction {tx_index}: {source}")]
+    Transaction {
+        /// Index of the transaction that failed.
+        tx_index: usize,
+        /// The underlying recovery or conversion error.
+        #[source]
+        source: Box<dyn core::error::Error + Send + Sync + 'static>,
+    },
     /// EVM transaction execution failed.
-    #[error("BAL worker EVM execution failed: {0}")]
-    Execution(BlockExecutionError),
+    #[error("BAL worker EVM execution failed for transaction {tx_index}: {source}")]
+    Execution {
+        /// Index of the transaction that failed.
+        tx_index: usize,
+        /// Gas limit of the transaction that failed.
+        tx_gas_limit: u64,
+        /// The underlying execution error.
+        #[source]
+        source: BlockExecutionError,
+    },
 }
 
 impl From<BalWorkerError> for BalExecutionError {
     fn from(err: BalWorkerError) -> Self {
         match err {
             BalWorkerError::Setup(err) => err,
-            BalWorkerError::Transaction(err) => {
-                Self::Execution(BlockValidationError::Other(err).into())
+            BalWorkerError::Transaction { source, .. } => {
+                Self::Execution(BlockValidationError::Other(source).into())
             }
-            BalWorkerError::Execution(err) => Self::Execution(err),
+            BalWorkerError::Execution { source, .. } => Self::Execution(source),
         }
     }
 }
@@ -43,21 +56,21 @@ pub(super) struct BalWorkerOutput<R> {
     pub(super) result: R,
 }
 
-type WorkerExecutorResult<Cfg> =
-    <<Cfg as ConfigureEvm>::BlockExecutorFactory as BlockExecutorFactory>::TxExecutionResult;
+type WorkerExecutorResult<'a, Cfg> =
+    <BlockExecutorFor<'a, Cfg> as BlockExecutor>::TransactionResultWithState;
 
-type WorkerResultSender<Cfg> =
-    Sender<Result<BalWorkerOutput<WorkerExecutorResult<Cfg>>, BalWorkerError>>;
+type WorkerResultSender<'a, Cfg> =
+    Sender<Result<BalWorkerOutput<WorkerExecutorResult<'a, Cfg>>, BalWorkerError>>;
 
 #[expect(clippy::too_many_arguments)]
 pub(super) fn spawn_worker<'scope, Evm, Tx, Err, DB, MakeDb>(
     scope: &rayon::Scope<'scope>,
     tx_rx: Receiver<(usize, Result<Tx, Err>)>,
     abort_rx: Receiver<()>,
-    result_tx: WorkerResultSender<Evm>,
+    result_tx: WorkerResultSender<'scope, Evm>,
     evm_config: &'scope Evm,
     make_db: &'scope MakeDb,
-    received_bal_revm: Arc<RevmBal>,
+    received_bal: Arc<<BlockExecutorFor<'scope, Evm> as BlockExecutor>::BlockAccessList>,
     evm_env: EvmEnvFor<Evm>,
     ctx: ExecutionCtxFor<'scope, Evm>,
 ) where
@@ -69,39 +82,58 @@ pub(super) fn spawn_worker<'scope, Evm, Tx, Err, DB, MakeDb>(
 {
     scope.spawn(move |_| {
         let worker_result = (|| -> Result<(), BalWorkerError> {
-            // Create a database with fill_on_miss=true ensuring misses
-            // are inserted for the other workers.
-            let database = make_db(true).map_err(BalWorkerError::Setup)?;
-            let mut worker_state = State::builder()
-                .with_database(database)
-                .with_bal(received_bal_revm)
-                .with_bundle_update()
-                .build();
-            let evm = evm_config.evm_with_env(&mut worker_state, evm_env);
-            let mut executor = evm_config.create_executor_with_state(evm, ctx.clone());
+            // Keep the cache-filling database across executor resets so a speculative failure
+            // cannot introduce an unindexed provider setup error ahead of its ordered verdict.
+            let database = Rc::new(RefCell::new(make_db(true).map_err(BalWorkerError::Setup)?));
+            'worker: loop {
+                let evm =
+                    evm_config.evm_with_env(WorkerDatabase(database.clone()), evm_env.clone());
+                let mut executor =
+                    evm_config.block_executor_factory().create_executor(evm, ctx.clone());
+                executor.set_block_access_list(Arc::clone(&received_bal));
 
-            loop {
-                let (index, tx) = crossbeam_channel::select_biased! {
-                    recv(abort_rx) -> _ => break,
-                    recv(tx_rx) -> msg => match msg {
-                        Ok(ix_tx) => ix_tx,
-                        Err(_) => break,
-                    },
-                };
-                let tx = tx.map_err(|e| BalWorkerError::Transaction(Box::new(e)))?;
-                let signer = *tx.signer();
-                let tx_gas_limit = tx.tx().gas_limit();
+                loop {
+                    let (tx_index, tx) = crossbeam_channel::select_biased! {
+                        recv(abort_rx) -> _ => break 'worker,
+                        recv(tx_rx) -> msg => match msg {
+                            Ok(ix_tx) => ix_tx,
+                            Err(_) => break 'worker,
+                        },
+                    };
+                    let tx = match tx {
+                        Ok(tx) => tx,
+                        Err(source) => {
+                            let error =
+                                BalWorkerError::Transaction { tx_index, source: Box::new(source) };
+                            if result_tx.send(Err(error)).is_err() {
+                                break 'worker;
+                            }
+                            continue;
+                        }
+                    };
+                    let signer = *tx.signer();
+                    let tx_gas_limit = tx.tx().gas_limit();
 
-                executor.evm_mut().db_mut().set_bal_index(BlockAccessIndex::new(index as u64 + 1));
-                let result = executor
-                    .execute_transaction_without_commit(tx)
-                    .map_err(BalWorkerError::Execution)?;
-
-                if result_tx
-                    .send(Ok(BalWorkerOutput { index, signer, tx_gas_limit, result }))
-                    .is_err()
-                {
-                    break;
+                    executor
+                        .set_block_access_index(BlockAccessIndex::from_tx_index(tx_index as u64));
+                    let message = match executor.execute_transaction_without_commit(tx) {
+                        Ok(result) => {
+                            Ok(BalWorkerOutput { index: tx_index, signer, tx_gas_limit, result })
+                        }
+                        Err(source) => {
+                            Err(BalWorkerError::Execution { tx_index, tx_gas_limit, source })
+                        }
+                    };
+                    let failed = message.is_err();
+                    if result_tx.send(message).is_err() {
+                        break 'worker;
+                    }
+                    if failed {
+                        // The executor trait does not guarantee reuse after an error. Rebuild
+                        // its EVM and state before serving more work: the queue can still contain
+                        // earlier transactions whose verdict must precede this failure.
+                        break;
+                    }
                 }
             }
 
@@ -112,4 +144,32 @@ pub(super) fn spawn_worker<'scope, Evm, Tx, Err, DB, MakeDb>(
             let _ = result_tx.send(Err(err));
         }
     });
+}
+
+// Executor resets retain the same provider. The wrapper is created and used entirely on one
+// worker thread; its shared ownership decouples the database lifetime from each executor.
+struct WorkerDatabase<DB>(Rc<RefCell<DB>>);
+
+impl<DB: Database> Database for WorkerDatabase<DB> {
+    type Error = DB::Error;
+
+    fn is_fatal(error: &Self::Error) -> bool {
+        DB::is_fatal(error)
+    }
+
+    fn get_account(&mut self, address: &Address) -> Result<Option<AccountInfo>, Self::Error> {
+        self.0.borrow_mut().get_account(address)
+    }
+
+    fn get_code_by_hash(&mut self, hash: &B256) -> Result<Bytecode, Self::Error> {
+        self.0.borrow_mut().get_code_by_hash(hash)
+    }
+
+    fn get_storage(&mut self, address: &Address, key: &U256) -> Result<U256, Self::Error> {
+        self.0.borrow_mut().get_storage(address, key)
+    }
+
+    fn get_block_hash(&mut self, number: &U256) -> Result<B256, Self::Error> {
+        self.0.borrow_mut().get_block_hash(number)
+    }
 }

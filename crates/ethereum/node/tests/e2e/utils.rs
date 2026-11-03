@@ -1,48 +1,35 @@
-use alloy_eips::{eip2930::AccessListItem, eip7702::Authorization, BlockId, BlockNumberOrTag};
+use alloy_eips::{eip2930::AccessListItem, eip7702::Authorization, BlockId};
 use alloy_primitives::{bytes, U256};
 use alloy_provider::{
     network::{
         Ethereum, EthereumWallet, NetworkWallet, TransactionBuilder, TransactionBuilder7702,
     },
-    Provider, ProviderBuilder, SendableTx,
+    Provider, SendableTx,
 };
-use alloy_rpc_types_engine::PayloadAttributes;
 use alloy_rpc_types_eth::TransactionRequest;
 use alloy_signer::SignerSync;
+use eyre::{ensure, eyre};
 use rand::{seq::IndexedRandom, Rng};
-use reth_chainspec::EthereumHardfork;
-use reth_e2e_test_utils::{eth_payload_attributes_for_fork, wallet::Wallet, NodeHelperType, TmpDB};
+use reqwest::{header, RequestBuilder, Response, StatusCode};
+use reth_e2e_test_utils::{node::Finality, wallet::Wallet, NodeHelperType};
 use reth_ethereum_primitives::TxType;
-use reth_node_api::NodeTypesWithDBAdapter;
 use reth_node_ethereum::EthereumNode;
-use reth_provider::FullProvider;
-
-/// Helper function to create a new eth payload attributes
-pub(crate) fn eth_payload_attributes(timestamp: u64) -> PayloadAttributes {
-    eth_payload_attributes_for_fork(EthereumHardfork::Cancun, timestamp)
-}
-
-/// Helper function to create pre-Cancun (Shanghai) payload attributes.
-pub(crate) fn eth_payload_attributes_shanghai(timestamp: u64) -> PayloadAttributes {
-    eth_payload_attributes_for_fork(EthereumHardfork::Shanghai, timestamp)
-}
-
-/// Helper function to create Amsterdam payload attributes.
-pub(crate) fn eth_payload_attributes_amsterdam(timestamp: u64) -> PayloadAttributes {
-    eth_payload_attributes_for_fork(EthereumHardfork::Amsterdam, timestamp)
-}
+use reth_rpc_builder::auth::AuthServerHandle;
+use reth_rpc_layer::secret_to_bearer_header;
+use ssz::{Decode, Encode};
 
 /// Advances node by producing blocks with random transactions.
-pub(crate) async fn advance_with_random_transactions<Provider>(
-    node: &mut NodeHelperType<EthereumNode, Provider>,
+///
+/// The blocks become the safe and finalized block if `finalize` is set, otherwise the safe and
+/// finalized blocks stay. The node keeps the corresponding [`Finality`] policy afterwards.
+pub(crate) async fn advance_with_random_transactions(
+    node: &mut NodeHelperType<EthereumNode>,
     num_blocks: usize,
     rng: &mut impl Rng,
     finalize: bool,
-) -> eyre::Result<()>
-where
-    Provider: FullProvider<NodeTypesWithDBAdapter<EthereumNode, TmpDB>>,
-{
-    let provider = ProviderBuilder::new().connect_http(node.rpc_url());
+) -> eyre::Result<()> {
+    node.set_finality(if finalize { Finality::Head } else { Finality::Keep });
+    let provider = node.rpc_provider();
     let signers = Wallet::new(1).with_chain_id(provider.get_chain_id().await?).wallet_gen();
 
     // simple contract which writes to storage on any call
@@ -61,14 +48,14 @@ where
 
             let nonce = provider
                 .get_transaction_count(signer.address())
-                .block_id(BlockId::Number(BlockNumberOrTag::Pending))
+                .block_id(BlockId::pending())
                 .await?;
 
             let mut tx =
                 TransactionRequest::default().with_from(signer.address()).with_nonce(nonce);
 
             let should_create =
-                rng.random::<bool>() && tx_type != TxType::Eip4844 && tx_type != TxType::Eip7702;
+                rng.random::<bool>() && !tx_type.is_eip4844() && !tx_type.is_eip7702();
             if should_create {
                 tx = tx.into_create().with_input(dummy_bytecode.clone());
             } else {
@@ -81,7 +68,7 @@ where
                 tx = tx.with_gas_price(provider.get_gas_price().await?);
             }
 
-            if rng.random::<bool>() || tx_type == TxType::Eip2930 {
+            if rng.random::<bool>() || tx_type.is_eip2930() {
                 tx = tx.with_access_list(
                     vec![AccessListItem {
                         address: *call_destinations.choose(rng).unwrap(),
@@ -91,14 +78,14 @@ where
                 );
             }
 
-            if tx_type == TxType::Eip7702 {
+            if tx_type.is_eip7702() {
                 let signer = signers.choose(rng).unwrap();
                 let auth = Authorization {
                     chain_id: U256::from(provider.get_chain_id().await?),
                     address: *call_destinations.choose(rng).unwrap(),
                     nonce: provider
                         .get_transaction_count(signer.address())
-                        .block_id(BlockId::Number(BlockNumberOrTag::Pending))
+                        .block_id(BlockId::pending())
                         .await?,
                 };
                 let sig = signer.sign_hash_sync(&auth.signature_hash())?;
@@ -107,7 +94,7 @@ where
 
             let gas = provider
                 .estimate_gas(tx.clone())
-                .block(BlockId::Number(BlockNumberOrTag::Pending))
+                .block(BlockId::pending())
                 .await
                 .unwrap_or(1_000_000);
 
@@ -123,14 +110,7 @@ where
             }
         }
 
-        let payload = node.build_and_submit_payload().await?;
-        if finalize {
-            node.update_forkchoice(payload.block().hash(), payload.block().hash()).await?;
-        } else {
-            let last_safe =
-                provider.get_block_by_number(BlockNumberOrTag::Safe).await?.unwrap().header.hash;
-            node.update_forkchoice(last_safe, payload.block().hash()).await?;
-        }
+        node.advance_block().await?;
 
         for pending in pending {
             let receipt = pending.get_receipt().await?;
@@ -141,4 +121,61 @@ where
     }
 
     Ok(())
+}
+
+/// Header selecting the fork of fork-scoped SSZ engine API endpoints.
+const ENGINE_EXECUTION_VERSION_HEADER: &str = "Eth-Execution-Version";
+
+/// Extension trait for requests against the SSZ engine API.
+pub(crate) trait EngineSszRequestExt {
+    /// Authenticates the request with the JWT secret of the auth server.
+    fn jwt(self, auth: &AuthServerHandle) -> Self;
+
+    /// Selects the fork of a fork-scoped endpoint.
+    fn fork(self, fork: &str) -> Self;
+
+    /// Sets the SSZ encoded body.
+    fn ssz(self, body: &impl Encode) -> Self;
+}
+
+impl EngineSszRequestExt for RequestBuilder {
+    fn jwt(self, auth: &AuthServerHandle) -> Self {
+        self.header(header::AUTHORIZATION, secret_to_bearer_header(auth.jwt_secret()))
+    }
+
+    fn fork(self, fork: &str) -> Self {
+        self.header(ENGINE_EXECUTION_VERSION_HEADER, fork)
+    }
+
+    fn ssz(self, body: &impl Encode) -> Self {
+        self.header(header::CONTENT_TYPE, "application/octet-stream").body(body.as_ssz_bytes())
+    }
+}
+
+/// Extension trait for responses of the SSZ engine API.
+pub(crate) trait EngineSszResponseExt {
+    /// Decodes the SSZ body of a `200 OK` response.
+    async fn ssz<T: Decode>(self) -> eyre::Result<T>;
+
+    /// Returns the `type` of a problem details error response.
+    async fn problem_type(self) -> eyre::Result<String>;
+}
+
+impl EngineSszResponseExt for Response {
+    async fn ssz<T: Decode>(self) -> eyre::Result<T> {
+        let status = self.status();
+        let bytes = self.bytes().await?;
+        ensure!(status == StatusCode::OK, "{status}: {}", String::from_utf8_lossy(&bytes));
+        T::from_ssz_bytes(&bytes).map_err(|err| eyre!("failed to decode SSZ response: {err:?}"))
+    }
+
+    async fn problem_type(self) -> eyre::Result<String> {
+        let content_type = self.headers().get(header::CONTENT_TYPE).cloned();
+        ensure!(
+            content_type.as_ref().is_some_and(|value| value == "application/problem+json"),
+            "expected a problem details response, got {content_type:?}"
+        );
+        let problem = self.json::<serde_json::Value>().await?;
+        problem["type"].as_str().map(str::to_owned).ok_or_else(|| eyre!("missing type: {problem}"))
+    }
 }

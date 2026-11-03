@@ -163,7 +163,18 @@ where
                     return Ok(())
                 }
 
-                while canon_state.next().await.is_some() {
+                loop {
+                    // Sends only happen when the sync status changes, so a failed send cannot be
+                    // relied on to detect a closed subscription.
+                    tokio::select! {
+                        _ = accepted_sink.closed() => break,
+                        maybe_event = canon_state.next() => {
+                            if maybe_event.is_none() {
+                                break
+                            }
+                        }
+                    }
+
                     let current_syncing = self.inner.eth_api.network().is_syncing();
                     // Only send a new response if the sync status has changed
                     if current_syncing != initial_sync_status {

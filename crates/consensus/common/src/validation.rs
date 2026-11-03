@@ -187,7 +187,8 @@ where
 ///
 /// These fork-specific validations are:
 /// * EIP-4895 withdrawals validation, if shanghai is active based on the given chainspec. See more
-///   information about the specific checks in [`validate_shanghai_withdrawals`].
+///   information about the specific checks in [`validate_shanghai_withdrawals`]. Before shanghai,
+///   the block body must not contain withdrawals.
 /// * EIP-4844 blob gas validation, if cancun is active based on the given chainspec. See more
 ///   information about the specific checks in [`validate_cancun_gas`].
 /// * EIP-7934 block size limit validation, if osaka is active based on the given chainspec.
@@ -214,6 +215,10 @@ where
     // EIP-4895: Beacon chain push withdrawals as operations
     if chain_spec.is_shanghai_active_at_timestamp(block.timestamp()) {
         validate_shanghai_withdrawals(block)?;
+    } else if block.body().withdrawals().is_some() {
+        // Pre-Shanghai headers carry no withdrawals root, so body withdrawals are not committed
+        // to by the block hash and must be absent.
+        return Err(ConsensusError::BodyWithdrawalsUnexpected)
     }
 
     if chain_spec.is_cancun_active_at_timestamp(block.timestamp()) {
@@ -595,6 +600,28 @@ mod tests {
                 .unwrap_err(),
             ConsensusError::BodyTransactionRootDiff(diff)
                 if diff.0.got == wrong_root && diff.0.expected == tx_root
+        ));
+    }
+
+    #[test]
+    fn pre_shanghai_block_with_withdrawals_fails() {
+        let chain_spec = ChainSpecBuilder::mainnet().paris_activated().build();
+
+        let header = Header {
+            transactions_root: proofs::calculate_transaction_root::<TransactionSigned>(&[]),
+            ..Default::default()
+        };
+        let body = BlockBody::<TransactionSigned>::default();
+
+        let block =
+            SealedBlock::seal_slow(alloy_consensus::Block::new(header.clone(), body.clone()));
+        assert!(validate_block_pre_execution(&block, &chain_spec).is_ok());
+
+        let body = BlockBody { withdrawals: Some(Withdrawals::default()), ..body };
+        let block = SealedBlock::seal_slow(alloy_consensus::Block::new(header, body));
+        assert!(matches!(
+            validate_block_pre_execution(&block, &chain_spec).unwrap_err(),
+            ConsensusError::BodyWithdrawalsUnexpected
         ));
     }
 }

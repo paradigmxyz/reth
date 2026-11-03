@@ -84,7 +84,7 @@ pub struct EthConfig {
     pub max_blocks_per_filter: u64,
     /// Maximum number of logs that can be returned in a single response in `eth_getLogs` calls.
     pub max_logs_per_response: usize,
-    /// Gas limit for `eth_call` and call tracing RPC methods.
+    /// Gas limit for `eth_call`, `eth_estimateGas`, and call tracing RPC methods.
     ///
     /// Defaults to [`RPC_DEFAULT_GAS_CAP`]
     pub rpc_gas_cap: u64,
@@ -196,7 +196,8 @@ impl EthConfig {
         self
     }
 
-    /// Configures the maximum gas limit for `eth_call` and call tracing RPC methods
+    /// Configures the maximum gas limit for `eth_call`, `eth_estimateGas`, and call tracing RPC
+    /// methods.
     pub const fn rpc_gas_cap(mut self, rpc_gas_cap: u64) -> Self {
         self.rpc_gas_cap = rpc_gas_cap;
         self

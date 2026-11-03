@@ -45,6 +45,14 @@ Returns an array of EIP-2718 binary-encoded receipts.
 | ------ | ------------------------------------------------------- |
 | RPC    | `{"method": "debug_getRawReceipts", "params": [block]}` |
 
+## `debug_getRawBlockAccessList`
+
+Returns the RLP-encoded EIP-7928 block access list of the given block. Returns an error if the block is unknown.
+
+| Client | Method invocation                                                |
+| ------ | ---------------------------------------------------------------- |
+| RPC    | `{"method": "debug_getRawBlockAccessList", "params": [block]}`  |
+
 ## `debug_getBadBlocks`
 
 Returns an array of recent bad blocks that the client has seen on the network.
@@ -52,6 +60,22 @@ Returns an array of recent bad blocks that the client has seen on the network.
 | Client | Method invocation                                |
 | ------ | ------------------------------------------------ |
 | RPC    | `{"method": "debug_getBadBlocks", "params": []}` |
+
+## `debug_traceBadBlock`
+
+Re-executes a block from the bad block cache (see `debug_getBadBlocks`) and returns the structured logs of every transaction, using the same tracer options as `debug_traceBlock`.
+
+| Client | Method invocation                                                   |
+| ------ | ------------------------------------------------------------------- |
+| RPC    | `{"method": "debug_traceBadBlock", "params": [block_hash, opts]}`   |
+
+## `debug_clearTxpool`
+
+Removes all transactions from the transaction pool. Equivalent to `admin_clearTxpool`, but does not report the number of removed transactions.
+
+| Client | Method invocation                                |
+| ------ | ------------------------------------------------ |
+| RPC    | `{"method": "debug_clearTxpool", "params": []}` |
 
 ## `debug_subscribe`, `debug_unsubscribe`
 
@@ -184,6 +208,14 @@ Retrieves a raw value from the database.
 | Client | Method invocation                                  |
 | ------ | -------------------------------------------------- |
 | RPC    | `{"method": "debug_dbGet", "params": [key]}` |
+
+## `debug_stateRootWithUpdates`
+
+Computes the state root that results from applying the given `HashedPostState` on top of the state of the specified block and returns it together with the trie updates. If no block identifier is provided it defaults to `latest`.
+
+| Client | Method invocation                                                          |
+| ------ | -------------------------------------------------------------------------- |
+| RPC    | `{"method": "debug_stateRootWithUpdates", "params": [hashed_state, block]}` |
 
 ## `debug_storageRangeAt`
 

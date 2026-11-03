@@ -8,7 +8,7 @@ use core::{
     str::FromStr,
 };
 use serde_with::{DeserializeFromStr, SerializeDisplay};
-use url::Host;
+use url::{Host, Url};
 
 /// Represents the node record of a trusted peer. The only difference between this and a
 /// [`NodeRecord`] is that this does not contain the IP address of the peer, but rather a domain
@@ -128,18 +128,18 @@ impl FromStr for TrustedPeer {
             return Ok(record.into())
         }
 
-        use url::Url;
+        let url = Url::parse(s).map_err(|e| NodeRecordParseError::InvalidUrl(e.to_string()))?;
 
-        // Parse the URL with enode prefix replaced with http.
-        // The enode prefix causes the parser to use parse_opaque() on
-        // the host str which only handles domains and ipv6, not ipv4.
-        let url = Url::parse(s.replace("enode://", "http://").as_str())
-            .map_err(|e| NodeRecordParseError::InvalidUrl(e.to_string()))?;
-
-        let host = url
-            .host()
-            .ok_or_else(|| NodeRecordParseError::InvalidUrl("no host specified".to_string()))?
-            .to_owned();
+        // The enode scheme is not a special scheme, so the parser keeps the host as an opaque
+        // string, which covers domains and ipv6 but not ipv4. Parse it again as a regular host.
+        // Parsing the whole URL as http instead would drop port 80 as the default port.
+        let host = match url.host() {
+            Some(Host::Domain(domain)) => {
+                Host::parse(domain).map_err(|e| NodeRecordParseError::InvalidUrl(e.to_string()))?
+            }
+            Some(host) => host.to_owned(),
+            None => return Err(NodeRecordParseError::InvalidUrl("no host specified".to_string())),
+        };
 
         let port = url
             .port()
@@ -177,6 +177,7 @@ impl From<NodeRecord> for TrustedPeer {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloy_primitives::b512;
     use std::net::Ipv6Addr;
 
     #[test]
@@ -187,7 +188,7 @@ mod tests {
             host: Host::Ipv4([10,3,58,6].into()),
             tcp_port: 30303,
             udp_port: 30301,
-            id: "6f8a80d14311c39f35f516fa664deaaaa13e85b2f7493f37f6144d86991ec012937307647bd3b9a82abe2974e1407241d54947bbb39763a4cac9f77166ad92a0".parse().unwrap(),
+            id: b512!("6f8a80d14311c39f35f516fa664deaaaa13e85b2f7493f37f6144d86991ec012937307647bd3b9a82abe2974e1407241d54947bbb39763a4cac9f77166ad92a0"),
         })
     }
 
@@ -201,9 +202,9 @@ mod tests {
             host: Host::Ipv4([127, 0, 0, 1].into()),
             tcp_port: 30303,
             udp_port: 30303,
-            id: "ca634cae0d49acb401d8a4c6b6fe8c55b70d115bf400769cc1400f3258cd31387574077f301b421bc84df7266c44e9e6d569fc56be00812904767bf5ccd1fc7f"
-                .parse()
-                .unwrap(),
+            id: b512!(
+                "ca634cae0d49acb401d8a4c6b6fe8c55b70d115bf400769cc1400f3258cd31387574077f301b421bc84df7266c44e9e6d569fc56be00812904767bf5ccd1fc7f"
+            ),
         });
         assert!("enr:garbage".parse::<TrustedPeer>().is_err());
     }
@@ -231,7 +232,7 @@ mod tests {
                     host: Host::Ipv4([10, 3, 58, 6].into()),
                     tcp_port: 30303u16,
                     udp_port: 30301u16,
-                    id: PeerId::from_str("6f8a80d14311c39f35f516fa664deaaaa13e85b2f7493f37f6144d86991ec012937307647bd3b9a82abe2974e1407241d54947bbb39763a4cac9f77166ad92a0").unwrap(),
+                    id: b512!("6f8a80d14311c39f35f516fa664deaaaa13e85b2f7493f37f6144d86991ec012937307647bd3b9a82abe2974e1407241d54947bbb39763a4cac9f77166ad92a0"),
                 },
                 "\"enode://6f8a80d14311c39f35f516fa664deaaaa13e85b2f7493f37f6144d86991ec012937307647bd3b9a82abe2974e1407241d54947bbb39763a4cac9f77166ad92a0@10.3.58.6:30303?discport=30301\""
             ),
@@ -241,7 +242,7 @@ mod tests {
                     host: Host::Ipv6(Ipv6Addr::new(0x2001, 0xdb8, 0x3c4d, 0x15, 0x0, 0x0, 0xabcd, 0xef12)),
                     tcp_port: 52150u16,
                     udp_port: 52151u16,
-                    id: PeerId::from_str("1dd9d65c4552b5eb43d5ad55a2ee3f56c6cbc1c64a5c8d659f51fcd51bace24351232b8d7821617d2b29b54b81cdefb9b3e9c37d7fd5f63270bcc9e1a6f6a439").unwrap(),
+                    id: b512!("1dd9d65c4552b5eb43d5ad55a2ee3f56c6cbc1c64a5c8d659f51fcd51bace24351232b8d7821617d2b29b54b81cdefb9b3e9c37d7fd5f63270bcc9e1a6f6a439"),
                 },
                 "\"enode://1dd9d65c4552b5eb43d5ad55a2ee3f56c6cbc1c64a5c8d659f51fcd51bace24351232b8d7821617d2b29b54b81cdefb9b3e9c37d7fd5f63270bcc9e1a6f6a439@[2001:db8:3c4d:15::abcd:ef12]:52150?discport=52151\""
             ),
@@ -251,7 +252,7 @@ mod tests {
                     host: Host::Domain("my-domain".to_string()),
                     tcp_port: 52150u16,
                     udp_port: 52151u16,
-                    id: PeerId::from_str("1dd9d65c4552b5eb43d5ad55a2ee3f56c6cbc1c64a5c8d659f51fcd51bace24351232b8d7821617d2b29b54b81cdefb9b3e9c37d7fd5f63270bcc9e1a6f6a439").unwrap(),
+                    id: b512!("1dd9d65c4552b5eb43d5ad55a2ee3f56c6cbc1c64a5c8d659f51fcd51bace24351232b8d7821617d2b29b54b81cdefb9b3e9c37d7fd5f63270bcc9e1a6f6a439"),
                 },
                 "\"enode://1dd9d65c4552b5eb43d5ad55a2ee3f56c6cbc1c64a5c8d659f51fcd51bace24351232b8d7821617d2b29b54b81cdefb9b3e9c37d7fd5f63270bcc9e1a6f6a439@my-domain:52150?discport=52151\""
             ),
@@ -268,12 +269,12 @@ mod tests {
         let cases = vec![
             // IPv4
             (
-                "\"enode://6f8a80d14311c39f35f516fa664deaaaa13e85b2f7493f37f6144d86991ec012937307647bd3b9a82abe2974e1407241d54947bbb39763a4cac9f77166ad92a0@10.3.58.6:30303?discport=30301\"",
+                "\"enode://6f8a80d14311c39f35f516fa664deaaaa13e85b2f7493f37f6144d86991ec012937307647bd3b9a82abe2974e1407241d54947bbb39763a4cac9f77166ad92a0@10.3.58.6:80?discport=30301\"",
                 TrustedPeer {
                     host: Host::Ipv4([10, 3, 58, 6].into()),
-                    tcp_port: 30303u16,
+                    tcp_port: 80u16,
                     udp_port: 30301u16,
-                    id: PeerId::from_str("6f8a80d14311c39f35f516fa664deaaaa13e85b2f7493f37f6144d86991ec012937307647bd3b9a82abe2974e1407241d54947bbb39763a4cac9f77166ad92a0").unwrap(),
+                    id: b512!("6f8a80d14311c39f35f516fa664deaaaa13e85b2f7493f37f6144d86991ec012937307647bd3b9a82abe2974e1407241d54947bbb39763a4cac9f77166ad92a0"),
                 }
             ),
             // IPv6
@@ -283,17 +284,17 @@ mod tests {
                     host: Host::Ipv6(Ipv6Addr::new(0x2001, 0xdb8, 0x3c4d, 0x15, 0x0, 0x0, 0xabcd, 0xef12)),
                     tcp_port: 52150u16,
                     udp_port: 52151u16,
-                    id: PeerId::from_str("1dd9d65c4552b5eb43d5ad55a2ee3f56c6cbc1c64a5c8d659f51fcd51bace24351232b8d7821617d2b29b54b81cdefb9b3e9c37d7fd5f63270bcc9e1a6f6a439").unwrap(),
+                    id: b512!("1dd9d65c4552b5eb43d5ad55a2ee3f56c6cbc1c64a5c8d659f51fcd51bace24351232b8d7821617d2b29b54b81cdefb9b3e9c37d7fd5f63270bcc9e1a6f6a439"),
                 }
             ),
             // URL
             (
-                "\"enode://1dd9d65c4552b5eb43d5ad55a2ee3f56c6cbc1c64a5c8d659f51fcd51bace24351232b8d7821617d2b29b54b81cdefb9b3e9c37d7fd5f63270bcc9e1a6f6a439@my-domain:52150?discport=52151\"",
+                "\"enode://1dd9d65c4552b5eb43d5ad55a2ee3f56c6cbc1c64a5c8d659f51fcd51bace24351232b8d7821617d2b29b54b81cdefb9b3e9c37d7fd5f63270bcc9e1a6f6a439@my-domain:80?discport=52151\"",
                 TrustedPeer {
                     host: Host::Domain("my-domain".to_string()),
-                    tcp_port: 52150u16,
+                    tcp_port: 80u16,
                     udp_port: 52151u16,
-                    id: PeerId::from_str("1dd9d65c4552b5eb43d5ad55a2ee3f56c6cbc1c64a5c8d659f51fcd51bace24351232b8d7821617d2b29b54b81cdefb9b3e9c37d7fd5f63270bcc9e1a6f6a439").unwrap(),
+                    id: b512!("1dd9d65c4552b5eb43d5ad55a2ee3f56c6cbc1c64a5c8d659f51fcd51bace24351232b8d7821617d2b29b54b81cdefb9b3e9c37d7fd5f63270bcc9e1a6f6a439"),
                 }
             ),
         ];

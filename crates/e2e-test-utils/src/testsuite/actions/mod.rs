@@ -51,7 +51,7 @@ pub struct ActionBox<I>(Box<dyn Action<I>>);
 
 impl<I> ActionBox<I>
 where
-    I: EngineTypes + 'static,
+    I: EngineTypes,
 {
     /// Constructor for [`ActionBox`].
     pub fn new<A: Action<I>>(action: A) -> Self {
@@ -95,7 +95,7 @@ impl<I> Sequence<I> {
 
 impl<I> Action<I> for Sequence<I>
 where
-    I: EngineTypes + Sync + Send + 'static,
+    I: EngineTypes,
 {
     fn execute<'a>(&'a mut self, env: &'a mut Environment<I>) -> BoxFuture<'a, Result<()>> {
         Box::pin(async move {
@@ -130,7 +130,7 @@ impl MakeCanonical {
 
 impl<Engine> Action<Engine> for MakeCanonical
 where
-    Engine: EngineTypes + reth_node_api::PayloadTypes,
+    Engine: EngineTypes,
     Engine::PayloadAttributes: From<alloy_rpc_types_engine::PayloadAttributes> + Clone,
     Engine::ExecutionPayloadEnvelopeV3:
         Into<alloy_rpc_types_engine::payload::ExecutionPayloadEnvelopeV3>,

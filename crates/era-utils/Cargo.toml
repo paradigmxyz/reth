@@ -46,7 +46,6 @@ reth-static-file-types.workspace = true
 
 # async
 tokio-util.workspace = true
-bytes.workspace = true
 
 # http
 reqwest.workspace = true

@@ -10,3 +10,5 @@ reth-ethereum = { workspace = true, features = ["node", "pool", "node-api", "cli
 reth-tracing.workspace = true
 
 eyre.workspace = true
+
+[lints]

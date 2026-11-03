@@ -9,7 +9,7 @@ use alloy_eips::{
     eip7840::BlobParams,
     merge::EPOCH_SLOTS,
 };
-use alloy_primitives::{map::B256Set, TxHash, B128, B256};
+use alloy_primitives::{map::B256Set, TxHash, B256};
 use parking_lot::{Mutex, RwLock};
 use schnellru::{ByLength, LruMap};
 use std::{fmt, fs, io, path::PathBuf, sync::Arc};
@@ -143,9 +143,8 @@ impl DiskFileBlobStore {
     fn get_by_versioned_hashes_cells_eip7594(
         &self,
         versioned_hashes: &[B256],
-        indices_bitarray: B128,
+        cell_mask: BlobCellMask,
     ) -> Result<Vec<Option<BlobCellsAndProofsV1>>, BlobStoreError> {
-        let cell_mask = BlobCellMask::new(indices_bitarray);
         let mut result = vec![None; versioned_hashes.len()];
         let mut missing_count = result.len();
 
@@ -383,9 +382,9 @@ impl BlobStore for DiskFileBlobStore {
     fn get_by_versioned_hashes_v4(
         &self,
         versioned_hashes: &[B256],
-        indices_bitarray: B128,
+        cell_mask: BlobCellMask,
     ) -> Result<Vec<Option<BlobCellsAndProofsV1>>, BlobStoreError> {
-        self.get_by_versioned_hashes_cells_eip7594(versioned_hashes, indices_bitarray)
+        self.get_by_versioned_hashes_cells_eip7594(versioned_hashes, cell_mask)
     }
 
     fn has_versioned_hashes(&self, versioned_hashes: &[B256]) -> Result<Vec<bool>, BlobStoreError> {
@@ -428,7 +427,7 @@ impl BlobStore for DiskFileBlobStore {
     fn get_cells(
         &self,
         tx: B256,
-        indices_bitarray: B128,
+        cell_mask: BlobCellMask,
     ) -> Result<Option<Vec<Cell>>, BlobStoreError> {
         let Some(sidecar) = self.get(tx)? else {
             return Ok(None);
@@ -439,7 +438,7 @@ impl BlobStore for DiskFileBlobStore {
         };
 
         sidecar
-            .compute_matching_cells(BlobCellMask::new(indices_bitarray))
+            .compute_matching_cells(cell_mask)
             .map(Some)
             .map_err(|err| BlobStoreError::Other(Box::new(err)))
     }
@@ -1090,10 +1089,10 @@ mod tests {
         let (sidecar, versioned_hash, _) = eip7594_single_blob_sidecar();
         store.insert(TxHash::random(), sidecar.into()).unwrap();
 
-        let indices_bitarray = B128::from((1u128 << 0) | (1u128 << 7));
+        let cell_mask = BlobCellMask::from_bits((1u128 << 0) | (1u128 << 7));
         let request = vec![versioned_hash, B256::ZERO];
 
-        let v4 = store.get_by_versioned_hashes_v4(&request, indices_bitarray).unwrap();
+        let v4 = store.get_by_versioned_hashes_v4(&request, cell_mask).unwrap();
         assert_eq!(v4.len(), request.len());
         assert!(v4[1].is_none());
 
@@ -1150,7 +1149,9 @@ mod tests {
         store.insert(TxHash::random(), sidecar.into()).unwrap();
         store.clear_cache();
 
-        let v4 = store.get_by_versioned_hashes_v4(&[versioned_hash], B128::from(1u128)).unwrap();
+        let v4 = store
+            .get_by_versioned_hashes_v4(&[versioned_hash], BlobCellMask::from_bits(1u128))
+            .unwrap();
         let cells_and_proofs = v4[0].as_ref().unwrap();
         assert_eq!(cells_and_proofs.blob_cells.len(), 1);
         assert_eq!(cells_and_proofs.proofs, vec![Some(Bytes48::default())]);
@@ -1164,9 +1165,9 @@ mod tests {
         let (sidecar, versioned_hash, _) = eip7594_single_blob_sidecar();
         store.insert(tx_hash, sidecar.into()).unwrap();
 
-        let indices_bitarray = B128::from((1u128 << 0) | (1u128 << 7));
+        let cell_mask = BlobCellMask::from_bits((1u128 << 0) | (1u128 << 7));
         let expected = store
-            .get_by_versioned_hashes_v4(&[versioned_hash], indices_bitarray)
+            .get_by_versioned_hashes_v4(&[versioned_hash], cell_mask)
             .unwrap()
             .pop()
             .unwrap()
@@ -1178,7 +1179,7 @@ mod tests {
 
         store.clear_cache();
 
-        assert_eq!(store.get_cells(tx_hash, indices_bitarray).unwrap(), Some(expected));
+        assert_eq!(store.get_cells(tx_hash, cell_mask).unwrap(), Some(expected));
     }
 
     #[test]

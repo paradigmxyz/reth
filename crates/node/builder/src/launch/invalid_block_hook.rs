@@ -72,13 +72,8 @@ pub async fn create_invalid_block_hook<N, P, E>(
 ) -> eyre::Result<Box<dyn InvalidBlockHook<N>>>
 where
     N: NodePrimitives,
-    P: reth_provider::StateProviderFactory
-        + reth_provider::ChainSpecProvider
-        + Clone
-        + Send
-        + Sync
-        + 'static,
-    E: reth_evm::ConfigureEvm<Primitives = N> + Clone + 'static,
+    P: reth_provider::StateProviderFactory + reth_provider::ChainSpecProvider + Clone + 'static,
+    E: reth_evm::ConfigureEvm<Primitives = N> + 'static,
 {
     use reth_engine_primitives::{InvalidBlockHooks, NoopInvalidBlockHook};
     use reth_invalid_block_hooks::InvalidBlockWitnessHook;

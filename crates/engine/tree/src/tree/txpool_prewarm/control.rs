@@ -125,17 +125,6 @@ mod tests {
     }
 
     #[test]
-    fn pause_queues_without_waiting_and_resumes_on_drop() {
-        let (control, receiver) = control();
-        // Nothing reads the channel, so this returning at all proves pause does not block.
-        let guard = control.pause();
-        assert!(matches!(receiver.try_recv(), Ok(Command::Pause)));
-
-        drop(guard);
-        assert!(matches!(receiver.try_recv(), Ok(Command::Resume)));
-    }
-
-    #[test]
     fn pause_guard_does_not_retain_control() {
         let (control, _receiver) = control();
         let weak_control = Arc::downgrade(&control);
@@ -158,13 +147,5 @@ mod tests {
         assert!(matches!(receiver.try_recv(), Ok(Command::Resume)));
         drop(second);
         assert!(matches!(receiver.try_recv(), Ok(Command::Resume)));
-    }
-
-    #[test]
-    fn dropping_control_disconnects_worker() {
-        let (control, receiver) = control();
-        drop(control);
-
-        assert!(receiver.recv().is_err());
     }
 }

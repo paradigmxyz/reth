@@ -12,10 +12,11 @@ use alloy_primitives::U256;
 use reth_chain_state::{CanonStateNotification, CanonStateSubscriptions};
 use reth_network_api::{NetworkInfo, Peers};
 use reth_primitives_traits::{Block, BlockBody};
-use reth_storage_api::{BlockReader, BlockReaderIdExt, NodePrimitivesProvider};
+use reth_storage_api::{BlockReader, BlockReaderIdExt};
 use reth_transaction_pool::TransactionPool;
 
 use chrono::Local;
+use futures_util::FutureExt;
 use serde_json::Value;
 use std::{
     str::FromStr,
@@ -241,25 +242,28 @@ where
         // Start ping timeout
         let active_ping = self.last_ping.clone();
         let conn_ref = self.conn.clone();
-        tokio::spawn(async move {
-            sleep(PING_TIMEOUT).await;
-            let timed_out = {
-                let mut active = active_ping.lock().await;
-                let timed_out = active.is_some();
-                if timed_out {
-                    *active = None;
-                }
-                timed_out
-            };
+        tokio::spawn(
+            async move {
+                sleep(PING_TIMEOUT).await;
+                let timed_out = {
+                    let mut active = active_ping.lock().await;
+                    let timed_out = active.is_some();
+                    if timed_out {
+                        *active = None;
+                    }
+                    timed_out
+                };
 
-            if timed_out {
-                debug!(target: "ethstats", "Ping timeout");
-                // Clear connection to trigger reconnect
-                if let Some(conn) = conn_ref.write().await.take() {
-                    let _ = conn.close().await;
+                if timed_out {
+                    debug!(target: "ethstats", "Ping timeout");
+                    // Clear connection to trigger reconnect
+                    if let Some(conn) = conn_ref.write().await.take() {
+                        let _ = conn.close().await;
+                    }
                 }
             }
-        });
+            .boxed(),
+        );
 
         Ok(())
     }
@@ -320,7 +324,7 @@ where
     /// * `head` - Optional canonical state notification containing new block info
     async fn report_block(
         &self,
-        head: Option<CanonStateNotification<<Provider as NodePrimitivesProvider>::Primitives>>,
+        head: Option<CanonStateNotification<<Provider as CanonStateSubscriptions>::Primitives>>,
     ) -> Result<(), EthStatsError> {
         let conn = self.conn.read().await;
         let conn = conn.as_ref().ok_or(EthStatsError::NotConnected)?;
@@ -641,7 +645,8 @@ where
                 }
 
                 let _ = shutdown_tx.send(()).await;
-            })
+            }
+            .boxed())
         };
 
         let canonical_stream_handle = {
@@ -649,15 +654,18 @@ where
             let head_tx = head_tx.clone();
             let shutdown_tx = shutdown_tx.clone();
 
-            tokio::spawn(async move {
-                while let Some(head) = canonical_stream.next().await {
-                    if head_tx.send(head).await.is_err() {
-                        break;
+            tokio::spawn(
+                async move {
+                    while let Some(head) = canonical_stream.next().await {
+                        if head_tx.send(head).await.is_err() {
+                            break;
+                        }
                     }
-                }
 
-                let _ = shutdown_tx.send(()).await;
-            })
+                    let _ = shutdown_tx.send(()).await;
+                }
+                .boxed(),
+            )
         };
 
         let mut pending_tx_receiver = self.pool.pending_transactions_listener();
@@ -759,7 +767,7 @@ mod tests {
     use reth_storage_api::noop::NoopProvider;
     use reth_transaction_pool::noop::NoopTransactionPool;
     use serde_json::json;
-    use tokio::{net::TcpListener, sync::Notify};
+    use tokio::net::TcpListener;
     use tokio_tungstenite::tungstenite::protocol::{frame::Utf8Bytes, Message};
 
     const TEST_HOST: &str = "127.0.0.1";
@@ -892,31 +900,18 @@ mod tests {
         let mut last_ping_guard = service.last_ping.lock().await;
         *last_ping_guard = Some(Instant::now());
 
-        let started = Arc::new(Notify::new());
-        let started_clone = started.clone();
-        let service_clone = service.clone();
-        let handle = tokio::spawn(async move {
-            started_clone.notify_one();
-            let _ = service_clone.report_latency().await;
-        });
+        let mut report_latency = Box::pin(service.report_latency());
+        assert!(futures_util::poll!(report_latency.as_mut()).is_pending());
 
-        // Let the pong handler start and (in the unfixed version) hold conn.read().
-        started.notified().await;
-        tokio::task::yield_now().await;
-
-        // This represents the timeout task trying to take conn.write() to close after a timeout.
-        // In the unfixed lock order, it would block because report_latency holds conn.read().
-        let write_guard =
-            tokio::time::timeout(std::time::Duration::from_millis(100), service.conn.write())
-                .await
-                .expect(
-                    "conn write lock should not be held while report_latency waits on last_ping",
-                );
+        let write_guard = service
+            .conn
+            .try_write()
+            .expect("conn write lock should not be held while report_latency waits on last_ping");
 
         drop(write_guard);
         drop(last_ping_guard);
 
-        let _ = handle.await;
+        let _ = report_latency.await;
         server_handle.abort();
     }
 }

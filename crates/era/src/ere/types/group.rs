@@ -502,7 +502,7 @@ mod tests {
     fn test_ere_group_basic_construction() {
         let blocks = vec![sample_block(10), sample_block(15), sample_block(20)];
 
-        let accumulator = Accumulator::new(B256::from([0xDD; 32]));
+        let accumulator = Accumulator::new(B256::repeat_byte(0xDD));
         let block_index = DynamicBlockIndex::new(1000, 2, vec![100, 200, 300, 400, 500, 600]);
 
         let group = EreGroup::new(blocks, Some(accumulator.clone()), block_index);
@@ -529,7 +529,7 @@ mod tests {
     #[test]
     fn test_ere_group_add_entries() {
         let blocks = vec![sample_block(10)];
-        let accumulator = Accumulator::new(B256::from([0xDD; 32]));
+        let accumulator = Accumulator::new(B256::repeat_byte(0xDD));
         let block_index = DynamicBlockIndex::new(1000, 2, vec![100, 200]);
 
         let mut group = EreGroup::new(blocks, Some(accumulator), block_index);

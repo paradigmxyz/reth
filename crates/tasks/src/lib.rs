@@ -27,9 +27,11 @@ use std::{
 use tokio::{
     runtime::Handle,
     sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender},
+    task::JoinHandle,
 };
 use tracing::debug;
 
+pub mod cancel;
 pub mod lazy;
 pub mod metrics;
 pub mod runtime;
@@ -40,7 +42,7 @@ pub(crate) mod worker_map;
 #[cfg(feature = "rayon")]
 pub mod pool;
 #[cfg(feature = "rayon")]
-pub use pool::{build_pool_with_panic_handler, Worker, WorkerPool};
+pub use pool::{build_pool_with_panic_handler, Worker, WorkerPool, WorkerStatefulPool};
 
 /// Lock-free ordered parallel iterator extension trait.
 #[cfg(feature = "rayon")]
@@ -48,6 +50,7 @@ pub mod for_each_ordered;
 #[cfg(feature = "rayon")]
 pub use for_each_ordered::ForEachOrdered;
 
+pub use cancel::{CancelOnDrop, ManualCancel};
 pub use lazy::LazyHandle;
 #[cfg(feature = "rayon")]
 pub use runtime::RayonConfig;
@@ -99,6 +102,22 @@ where
             f()
         })
         .unwrap_or_else(|e| panic!("failed to spawn scoped thread {name:?}: {e}"))
+}
+
+/// Spawns a blocking closure on the current tokio runtime, like [`tokio::task::spawn_blocking`].
+///
+/// The closure is boxed first, so tokio's blocking task machinery is instantiated once per return
+/// type `R` instead of once per closure type.
+///
+/// # Panics
+///
+/// Panics if called outside of a tokio runtime context.
+pub fn spawn_blocking<F, R>(func: F) -> JoinHandle<R>
+where
+    F: FnOnce() -> R + Send + 'static,
+    R: Send + 'static,
+{
+    tokio::task::spawn_blocking(Box::new(func) as Box<dyn FnOnce() -> R + Send>)
 }
 
 /// Monitors critical tasks for panics and manages graceful shutdown.

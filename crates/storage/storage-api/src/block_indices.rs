@@ -1,8 +1,8 @@
 use alloc::vec::Vec;
-use alloy_primitives::BlockNumber;
+use alloy_primitives::{BlockNumber, TxNumber};
 use core::ops::RangeInclusive;
 use reth_db_models::StoredBlockBodyIndices;
-use reth_storage_errors::provider::ProviderResult;
+use reth_storage_errors::provider::{ProviderError, ProviderResult};
 
 ///  Client trait for fetching block body indices related data.
 #[auto_impl::auto_impl(&, Arc)]
@@ -17,4 +17,18 @@ pub trait BlockBodyIndicesProvider: Send {
         &self,
         range: RangeInclusive<BlockNumber>,
     ) -> ProviderResult<Vec<StoredBlockBodyIndices>>;
+
+    /// Returns the first transaction number after `block`, including when its body indices were
+    /// never written, e.g. at a snap sync pivot.
+    fn next_tx_num_after_block(&self, block: BlockNumber) -> ProviderResult<TxNumber> {
+        if let Some(indices) = self.block_body_indices(block)? {
+            return Ok(indices.next_tx_num())
+        }
+        if let Some(next) = block.checked_add(1) &&
+            let Some(indices) = self.block_body_indices(next)?
+        {
+            return Ok(indices.first_tx_num())
+        }
+        Err(ProviderError::BlockBodyIndicesNotFound(block))
+    }
 }

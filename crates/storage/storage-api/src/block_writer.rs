@@ -4,7 +4,7 @@ use alloy_primitives::BlockNumber;
 use reth_db_models::StoredBlockBodyIndices;
 use reth_execution_types::{Chain, ExecutionOutcome};
 use reth_primitives_traits::{Block, NodePrimitives, RecoveredBlock};
-use reth_storage_errors::provider::ProviderResult;
+use reth_storage_errors::provider::{ProviderError, ProviderResult};
 use reth_trie_common::HashedPostStateSorted;
 
 /// `BlockExecution` Writer
@@ -113,4 +113,11 @@ pub trait BlockWriter {
         execution_outcome: &ExecutionOutcome<Self::Receipt>,
         hashed_state: HashedPostStateSorted,
     ) -> ProviderResult<()>;
+
+    /// Clears the active transaction lookup index. `RocksDB` changes take effect immediately.
+    ///
+    /// Errors by default, so writers without a lookup index don't have to implement it.
+    fn clear_transaction_lookup(&self) -> ProviderResult<()> {
+        Err(ProviderError::UnsupportedProvider)
+    }
 }

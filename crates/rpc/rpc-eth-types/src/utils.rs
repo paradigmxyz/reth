@@ -33,15 +33,19 @@ pub fn calculate_gas_used_and_next_log_index(
 ///
 /// See [`alloy_eips::eip2718::Decodable2718::decode_2718_exact`]
 pub fn recover_raw_transaction<T: SignedTransaction>(data: &[u8]) -> EthResult<Recovered<T>> {
+    SignedTransaction::try_into_recovered(decode_raw_transaction::<T>(data)?)
+        .or(Err(EthApiError::InvalidTransactionSignature))
+}
+
+/// Decodes an EIP-2718 transaction without recovering its sender.
+///
+/// Rejects empty input, malformed transactions, and trailing bytes with RPC-specific errors.
+pub fn decode_raw_transaction<T: SignedTransaction>(data: &[u8]) -> EthResult<T> {
     if data.is_empty() {
         return Err(EthApiError::EmptyRawTransactionData)
     }
 
-    let transaction =
-        T::decode_2718_exact(data).map_err(|_| EthApiError::FailedToDecodeSignedTransaction)?;
-
-    SignedTransaction::try_into_recovered(transaction)
-        .or(Err(EthApiError::InvalidTransactionSignature))
+    T::decode_2718_exact(data).map_err(|_| EthApiError::FailedToDecodeSignedTransaction)
 }
 
 /// Performs a binary search within a given block range to find the desired block number.

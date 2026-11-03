@@ -24,7 +24,7 @@ use std::{
 };
 
 /// Result of the interactive component selector.
-pub struct SelectorOutput {
+pub(crate) struct SelectorOutput {
     /// User-confirmed selections with per-component ranges.
     pub selections: BTreeMap<SnapshotComponentType, ComponentSelection>,
     /// Last preset action used in the TUI, if any.
@@ -336,7 +336,7 @@ impl SelectorApp {
 }
 
 /// Runs the interactive component selector TUI.
-pub fn run_selector(
+pub(crate) fn run_selector(
     manifest: SnapshotManifest,
     minimal_preset: &BTreeMap<SnapshotComponentType, ComponentSelection>,
     full_preset: &BTreeMap<SnapshotComponentType, ComponentSelection>,

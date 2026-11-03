@@ -181,6 +181,8 @@ impl<St> RlpxProtocolMultiplexer<St> {
         let f = handshake(proxy);
         let mut f = pin!(f);
         let mut inbound_messages = 0;
+        let mut handshake_satellite_bytes = 0usize;
+        let mut handshake_satellite_messages = 0usize;
 
         // this polls the connection and the primary stream concurrently until the handshake is
         // complete
@@ -230,7 +232,19 @@ impl<St> RlpxProtocolMultiplexer<St> {
                                 // delegate to primary
                                 to_primary.try_send(msg).map_err(Into::into)?;
                             } else {
-                                // delegate to satellite
+                                // Satellite consumers may wait for authentication, so keep their
+                                // aggregate pre-handshake retention much smaller than active queues.
+                                handshake_satellite_bytes = handshake_satellite_bytes
+                                    .saturating_add(msg.capacity().max(msg.len()));
+                                handshake_satellite_messages += 1;
+                                if handshake_satellite_bytes > MAX_HANDSHAKE_SATELLITE_BYTES ||
+                                    handshake_satellite_messages > MAX_HANDSHAKE_SATELLITE_MESSAGES
+                                {
+                                    counter!("p2pstream.subprotocol_inbound_buffer_full").increment(1);
+                                    return Err(P2PStreamError::SubprotocolInboundBufferFull {
+                                        capability: cap.capability().into_owned(),
+                                    }.into())
+                                }
                                 self.inner.delegate_message(&cap, msg).map_err(Into::into)?;
                             }
                         } else {
@@ -1034,6 +1048,11 @@ fn yield_once() -> impl Future<Output = ()> {
 
 /// Aggregate byte budget for inbound messages queued across all protocols on one connection.
 const MAX_MUX_IN_BUFFER_BYTES: usize = 32 * 1024 * 1024;
+
+/// Aggregate satellite traffic accepted while the primary handshake is pending. These limits
+/// bound both payload retention and queue metadata before application consumers may start.
+const MAX_HANDSHAKE_SATELLITE_BYTES: usize = 256 * 1024;
+const MAX_HANDSHAKE_SATELLITE_MESSAGES: usize = 64;
 
 /// Maximum network messages delegated before yielding the connection task.
 const MAX_INBOUND_MESSAGES_PER_POLL: usize = 32;

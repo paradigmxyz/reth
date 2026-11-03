@@ -33,7 +33,6 @@ pub trait UnauthEth:
     Stream<Item = Result<BytesMut, P2PStreamError>>
     + Sink<Bytes, Error = P2PStreamError>
     + CanDisconnect<Bytes>
-    + Unpin
     + Send
 {
 }
@@ -42,7 +41,6 @@ impl<T> UnauthEth for T where
     T: Stream<Item = Result<BytesMut, P2PStreamError>>
         + Sink<Bytes, Error = P2PStreamError>
         + CanDisconnect<Bytes>
-        + Unpin
         + Send
 {
 }
@@ -74,9 +72,9 @@ impl EthRlpxHandshake for EthHandshake {
 #[derive(Debug)]
 pub struct EthereumEthHandshake<'a, S: ?Sized>(pub &'a mut S);
 
-impl<S: ?Sized, E> EthereumEthHandshake<'_, S>
+impl<S, E> EthereumEthHandshake<'_, S>
 where
-    S: Stream<Item = Result<BytesMut, E>> + CanDisconnect<Bytes> + Send + Unpin,
+    S: ?Sized + Stream<Item = Result<BytesMut, E>> + CanDisconnect<Bytes> + Send,
     EthStreamError: From<E> + From<<S as Sink<Bytes>>::Error>,
 {
     /// Performs the `eth` rlpx protocol handshake using the given input stream.

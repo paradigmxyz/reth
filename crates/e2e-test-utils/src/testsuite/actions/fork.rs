@@ -9,7 +9,7 @@ use alloy_rpc_types_eth::{Block, Header, Receipt, Transaction, TransactionReques
 use eyre::Result;
 use futures_util::future::BoxFuture;
 use reth_ethereum_primitives::TransactionSigned;
-use reth_node_api::{EngineTypes, PayloadTypes};
+use reth_node_api::EngineTypes;
 use reth_rpc_api::clients::EthApiClient;
 use std::marker::PhantomData;
 use tracing::debug;
@@ -52,7 +52,7 @@ impl<Engine> CreateFork<Engine> {
 
 impl<Engine> Action<Engine> for CreateFork<Engine>
 where
-    Engine: EngineTypes + PayloadTypes,
+    Engine: EngineTypes,
     Engine::PayloadAttributes: From<PayloadAttributes> + Clone,
     Engine::ExecutionPayloadEnvelopeV3:
         Into<alloy_rpc_types_engine::payload::ExecutionPayloadEnvelopeV3>,
@@ -157,11 +157,8 @@ where
             active_node_state.latest_header_time = fork_base_block.header.timestamp;
 
             // update fork choice state to the fork base
-            active_node_state.latest_fork_choice_state = ForkchoiceState {
-                head_block_hash: fork_base_block.header.hash,
-                safe_block_hash: fork_base_block.header.hash,
-                finalized_block_hash: fork_base_block.header.hash,
-            };
+            active_node_state.latest_fork_choice_state =
+                ForkchoiceState::same_hash(fork_base_block.header.hash);
 
             debug!(
                 "Set fork base to block {} (hash: {})",
@@ -192,11 +189,8 @@ where
             active_node_state.latest_header_time = block_info.timestamp;
 
             // update fork choice state to the fork base
-            active_node_state.latest_fork_choice_state = ForkchoiceState {
-                head_block_hash: block_info.hash,
-                safe_block_hash: block_info.hash,
-                finalized_block_hash: block_info.hash,
-            };
+            active_node_state.latest_fork_choice_state =
+                ForkchoiceState::same_hash(block_info.hash);
 
             debug!("Set fork base to block {} (hash: {})", block_info.number, block_info.hash);
 

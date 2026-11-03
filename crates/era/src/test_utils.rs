@@ -54,9 +54,9 @@ pub(crate) fn create_test_receipt(
         let data_byte = (i + 100) as u8;
 
         logs.push(Log {
-            address: Address::from([address_byte; 20]),
+            address: Address::repeat_byte(address_byte),
             data: LogData::new_unchecked(
-                vec![B256::from([topic_byte; 32]), B256::from([topic_byte + 1; 32])],
+                vec![B256::repeat_byte(topic_byte), B256::repeat_byte(topic_byte + 1)],
                 alloy_primitives::Bytes::from(vec![data_byte, data_byte + 1, data_byte + 2]),
             ),
         });

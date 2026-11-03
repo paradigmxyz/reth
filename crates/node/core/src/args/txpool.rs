@@ -342,7 +342,8 @@ pub struct TxPoolArgs {
     pub minimal_protocol_basefee: u64,
 
     /// Minimum priority fee required for transaction acceptance into the pool.
-    /// Transactions with priority fee below this value will be rejected.
+    /// Transactions with priority fee below this value will be rejected. For legacy and EIP-2930
+    /// transactions the gas price is used as the priority fee.
     #[arg(long = "txpool.minimum-priority-fee", default_value = Resettable::from(DefaultTxPoolValues::get_global().minimum_priority_fee.map(|v| v.to_string().into())))]
     pub minimum_priority_fee: Option<u128>,
 
@@ -543,6 +544,7 @@ impl RethTransactionPoolConfig for TxPoolArgs {
             max_new_pending_txs_notifications: self.max_new_pending_txs_notifications,
             max_queued_lifetime: self.max_queued_lifetime,
             max_inflight_delegated_slot_limit: default_config.max_inflight_delegated_slot_limit,
+            enforce_tracked_nonce: default_config.enforce_tracked_nonce,
         }
     }
 
@@ -554,8 +556,8 @@ impl RethTransactionPoolConfig for TxPoolArgs {
 
 #[cfg(test)]
 mod tests {
+
     use super::*;
-    use alloy_primitives::address;
     use clap::Parser;
 
     /// A helper type to parse Args more easily
@@ -626,10 +628,7 @@ mod tests {
             max_tx_input_bytes: 131072,
             max_cached_entries: 200,
             no_locals: true,
-            locals: vec![
-                address!("0x0000000000000000000000000000000000000001"),
-                address!("0x0000000000000000000000000000000000000002"),
-            ],
+            locals: vec![Address::with_last_byte(1), Address::with_last_byte(2)],
             no_local_transactions_propagation: true,
             additional_validation_tasks: 4,
             pending_tx_listener_buffer_size: 512,

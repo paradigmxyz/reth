@@ -27,7 +27,7 @@ The methods are grouped into namespaces, which are listed below:
 | [`admin`](/jsonrpc/admin)   | The `admin` API allows you to configure your node.                                                     | **Yes**   |
 | [`rpc`](/jsonrpc/rpc)       | The `rpc` API provides information about the RPC server and its modules.                               | No        |
 | [`reth`](/jsonrpc/reth)     | The `reth` API provides reth-specific methods like balance changes and chain notifications.            | No        |
-| `ots`                       | The `ots` API provides Otterscan-compatible methods for block exploration.                             | No        |
+| [`ots`](/jsonrpc/ots)       | The `ots` API provides partial Otterscan support; address history search is unimplemented.              | No        |
 | `flashbots`                 | The `flashbots` API provides block submission validation methods for builders.                         | No        |
 | `miner`                     | The `miner` API allows you to configure miner/builder settings like extra data and gas limits.         | **Yes**   |
 | `mev`                       | The `mev` API provides MEV bundle submission and simulation methods.                                   | No        |
@@ -67,7 +67,7 @@ To enable JSON-RPC namespaces on the HTTP server, pass each namespace separated 
 reth node --http --http.api eth,net,trace
 ```
 
-You can pass the `all` option, which is a convenient wrapper for all the JSON-RPC namespaces `admin,debug,eth,net,trace,txpool,web3,rpc,reth,ots,flashbots,miner,mev,testing` on the HTTP server:
+You can pass the `all` option, which enables the JSON-RPC namespaces `admin,debug,eth,net,trace,txpool,web3,rpc,reth,ots,flashbots,miner,mev` on the HTTP server. The `testing` namespace is excluded and must be selected explicitly:
 
 ```bash
 reth node --http --http.api all
@@ -76,6 +76,8 @@ reth node --http --http.api all
 ```bash
 reth node --http --http.api All
 ```
+
+To enable the testing namespace on a trusted endpoint, include `testing` in an explicit list, for example `--http.api eth,testing`.
 
 Similarly, you can pass the `none` option (also case-insensitive) to start the HTTP server without exposing any JSON-RPC namespaces on that transport:
 
@@ -116,7 +118,7 @@ The configuration of the WebSocket server follows the same pattern as the HTTP s
 
 IPC is a simpler transport protocol for use in local environments where the node and the client exist on the same machine.
 
-The IPC transport is enabled by default and has access to all namespaces, unless explicitly disabled with `--ipcdisable`.
+The IPC transport is enabled by default and has access to all namespaces except `testing`, unless explicitly disabled with `--ipcdisable`.
 
 Reth creates a UNIX socket on Linux and macOS at `/tmp/reth.ipc`. On Windows, IPC is provided using named pipes at `\\.\pipe\reth.ipc`.
 
@@ -131,7 +133,7 @@ You can use `curl`, a programming language with a low-level library, or a tool l
 As a reminder, you need to run the command below to enable all of these APIs using an HTTP transport:
 
 ```bash
-reth node --http --http.api "admin,debug,eth,net,trace,txpool,web3,rpc,reth,ots,flashbots,miner,mev,testing"
+reth node --http --http.api "admin,debug,eth,net,trace,txpool,web3,rpc,reth,ots,flashbots,miner,mev"
 ```
 
 This allows you to then call:

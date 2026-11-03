@@ -31,6 +31,16 @@ pub enum UnwindTargetPrunedError {
         /// The limit of the history
         limit: u64,
     },
+    /// The target block is below history that was already pruned
+    #[error("Cannot unwind to block {target_block} as {history_type} is pruned through block {pruned_block}")]
+    TargetBelowPrunedHistory {
+        /// The target block number
+        target_block: BlockNumber,
+        /// The type of history that was pruned
+        history_type: HistoryType,
+        /// The highest pruned block
+        pruned_block: BlockNumber,
+    },
 }
 
 #[derive(Debug, Display, Clone, PartialEq, Eq)]
@@ -165,6 +175,20 @@ impl PruneModes {
                     }
                 }
             }
+
+            // History pruned through a block can't be reverted below it, whatever the mode.
+            // Unwinding to the checkpoint itself only needs the changesets above it. The database
+            // pruner can stop inside a block and then records the block before it, so the block
+            // right above the checkpoint may be partly pruned.
+            if let Some(pruned_block) = checkpoint.and_then(|checkpoint| checkpoint.1.block_number) &&
+                target_block < pruned_block
+            {
+                return Err(UnwindTargetPrunedError::TargetBelowPrunedHistory {
+                    target_block,
+                    history_type: history_type.clone(),
+                    pruned_block,
+                })
+            }
         }
         Ok(())
     }
@@ -244,6 +268,24 @@ mod tests {
             serde_json::from_str::<V>(r#""full""#),
             Err(err) if err.to_string() == "invalid value: string \"full\", expected prune mode that leaves at least 10 blocks in the database"
         );
+    }
+
+    #[test]
+    fn unwind_below_recorded_history_checkpoint() {
+        let checkpoints = [(
+            PruneSegment::AccountHistory,
+            PruneCheckpoint {
+                block_number: Some(499),
+                tx_number: None,
+                prune_mode: PruneMode::Before(500),
+            },
+        )];
+        let before =
+            PruneModes { account_history: Some(PruneMode::Before(500)), ..Default::default() };
+        for prune_modes in [before, PruneModes::default()] {
+            assert!(prune_modes.ensure_unwind_target_unpruned(1000, 100, &checkpoints).is_err());
+            assert!(prune_modes.ensure_unwind_target_unpruned(1000, 499, &checkpoints).is_ok());
+        }
     }
 
     #[test]
