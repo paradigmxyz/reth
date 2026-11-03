@@ -10,7 +10,7 @@ use parking_lot::RwLock;
 use reth_chainspec::ChainInfo;
 use reth_ethereum_primitives::EthPrimitives;
 use reth_execution_types::{
-    BlockExecutionOutput, BlockExecutionResult, Chain, DecodedEvmBal, ExecutionOutcome,
+    BlockExecutionOutput, BlockExecutionResult, BlockExt, Chain, DecodedEvmBal, ExecutionOutcome,
     RecoveredBlockAndExecutionOutput,
 };
 use reth_metrics::{metrics::Gauge, Metrics};
@@ -761,6 +761,11 @@ pub struct ExecutedBlock<N: NodePrimitives = EthPrimitives> {
     /// representation (for consumers like the RPC state cache), so that neither has to be
     /// re-derived after validation.
     pub bal: Option<Arc<DecodedEvmBal>>,
+    /// Extension data attached to the block, for a persistence hook to use.
+    ///
+    /// `None` unless a custom state-root job or payload builder attached one. Blocks loaded from
+    /// the database never carry one.
+    pub ext: Option<BlockExt>,
 }
 
 impl<N: NodePrimitives> Default for ExecutedBlock<N> {
@@ -778,6 +783,7 @@ impl<N: NodePrimitives> Default for ExecutedBlock<N> {
             }),
             trie_data: LazyTrieData::ready(SortedTrieData::default()),
             bal: None,
+            ext: None,
         }
     }
 }
@@ -806,6 +812,7 @@ impl<N: NodePrimitives> ExecutedBlock<N> {
             execution_output,
             trie_data: LazyTrieData::ready(trie_data),
             bal: None,
+            ext: None,
         }
     }
 
@@ -827,7 +834,7 @@ impl<N: NodePrimitives> ExecutedBlock<N> {
         execution_output: Arc<BlockExecutionOutput<N::Receipt>>,
         trie_data: LazyTrieData,
     ) -> Self {
-        Self { recovered_block, execution_output, trie_data, bal: None }
+        Self { recovered_block, execution_output, trie_data, bal: None, ext: None }
     }
 
     /// Attaches the prepared block access list of the block, or clears it with `None`.
@@ -842,6 +849,18 @@ impl<N: NodePrimitives> ExecutedBlock<N> {
     #[inline]
     pub const fn bal(&self) -> Option<&Arc<DecodedEvmBal>> {
         self.bal.as_ref()
+    }
+
+    /// Attaches the extension of the block, or clears it with `None`.
+    pub fn with_ext(mut self, ext: Option<BlockExt>) -> Self {
+        self.ext = ext;
+        self
+    }
+
+    /// Returns the extension attached to the block.
+    #[inline]
+    pub const fn ext(&self) -> Option<&BlockExt> {
+        self.ext.as_ref()
     }
 
     /// Returns a reference to an inner [`SealedBlock`]

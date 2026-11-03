@@ -51,8 +51,8 @@ pub use reth_trie::bundle_state::OriginalValuesKnown;
 pub use reth_static_file_types as static_file;
 pub use reth_storage_api::{
     BalProvider, BalStore, BalStoreHandle, GetBlockAccessListLimit, HistoryWriter,
-    MetadataProvider, MetadataWriter, NoopBalStore, PipelineUnwind, RawBal, StateWriteConfig,
-    StatsReader, StorageSettings, StorageSettingsCache,
+    MetadataProvider, MetadataWriter, NoopBalStore, PipelineUnwind, RawBal, StateBackend,
+    StateWriteConfig, StatsReader, StorageSettings, StorageSettingsCache,
 };
 /// Re-export provider error.
 pub use reth_storage_errors::provider::{ProviderError, ProviderResult};

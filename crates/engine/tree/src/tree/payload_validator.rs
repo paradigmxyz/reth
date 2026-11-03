@@ -95,20 +95,23 @@
 //! before a payload build job starts. On failure, the engine returns
 //! `INVALID_PAYLOAD_ATTRIBUTES` without rolling back the forkchoice update.
 
-use crate::tree::{
-    error::{
-        BlockAccessListDecodeError, InsertBlockError, InsertBlockErrorKind, InsertPayloadError,
+use crate::{
+    persistence::PersistenceHook,
+    tree::{
+        error::{
+            BlockAccessListDecodeError, InsertBlockError, InsertBlockErrorKind, InsertPayloadError,
+        },
+        instrumented_state::{InstrumentedStateProvider, StateProviderMetrics, StateProviderStats},
+        metrics::PrewarmReuseStats,
+        payload_processor::{
+            reuse::{PrewarmResults, ReuseMiss},
+            PayloadProcessor,
+        },
+        txpool_prewarm,
+        types::{InsertPayloadResult, ValidationOutput},
+        CacheWaitDurations, CachedStateProvider, EngineApiMetrics, EngineApiTreeState,
+        ExecutionEnv, PayloadHandle, TreeConfig, WaitForCaches,
     },
-    instrumented_state::{InstrumentedStateProvider, StateProviderMetrics, StateProviderStats},
-    metrics::PrewarmReuseStats,
-    payload_processor::{
-        reuse::{PrewarmResults, ReuseMiss},
-        PayloadProcessor,
-    },
-    txpool_prewarm,
-    types::{InsertPayloadResult, ValidationOutput},
-    CacheWaitDurations, CachedStateProvider, EngineApiMetrics, EngineApiTreeState, ExecutionEnv,
-    PayloadHandle, TreeConfig, WaitForCaches,
 };
 use alloy_consensus::{transaction::Either, Transaction as _};
 use alloy_eip7928::{
@@ -292,6 +295,8 @@ where
     /// State-root strategy used to prepare per-block commitment tasks.
     #[debug(skip)]
     state_root_strategy: Arc<dyn StateRootStrategy<Evm::Primitives, P, Evm>>,
+    /// Hook the persistence service runs, returned by [`EngineValidator::persistence_hook`].
+    persistence_hook: Option<Arc<dyn PersistenceHook<Evm::Primitives>>>,
     /// Persistent txpool prewarming worker and its latest immutable snapshot.
     ///
     /// None if txpool prewarming is disabled.
@@ -353,6 +358,7 @@ where
             runtime,
             overlay_manager,
             state_root_strategy: Arc::new(DefaultStateRootStrategy::default()),
+            persistence_hook: None,
             txpool_prewarm: None,
             bal_hash_buf: Vec::new(),
         }
@@ -364,6 +370,12 @@ where
         state_root_strategy: Arc<dyn StateRootStrategy<N, P, Evm>>,
     ) -> Self {
         self.state_root_strategy = state_root_strategy;
+        self
+    }
+
+    /// Sets the hook the persistence service runs alongside every save and removal.
+    pub fn with_persistence_hook(mut self, persistence_hook: Arc<dyn PersistenceHook<N>>) -> Self {
+        self.persistence_hook = Some(persistence_hook);
         self
     }
 
@@ -839,6 +851,7 @@ where
 
         let state_root = root_outcome.state_root;
         let trie_output = root_outcome.trie_updates;
+        let ext = root_outcome.ext;
 
         // A fallback path recomputed the hashed post state. Replace the streaming-derived one
         // and re-run hashed-state validation against it, since a failed state-root task may
@@ -920,7 +933,8 @@ where
         });
         let executed_block = self
             .spawn_deferred_trie_task(Arc::new(block), output, hashed_state, trie_output)
-            .with_bal(bal);
+            .with_bal(bal)
+            .with_ext(ext);
         Ok(ValidationOutput::new(executed_block, timing_stats))
     }
 
@@ -1779,6 +1793,14 @@ pub trait EngineValidator<
         block: BuiltPayloadExecutedBlock<N>,
     ) -> ProviderResult<ExecutedBlock<N>>;
 
+    /// Returns the hook the persistence service runs alongside every save and removal.
+    ///
+    /// A validator whose state-root strategy keeps state outside the database returns
+    /// the hook that persists it.
+    fn persistence_hook(&self) -> Option<Arc<dyn PersistenceHook<N>>> {
+        None
+    }
+
     /// Notifies the validator that `hash` is the current canonical head.
     ///
     /// This may also be called when a forkchoice update reaffirms the existing head.
@@ -1859,12 +1881,18 @@ where
             &block.execution_output.state,
         );
 
-        Ok(self.spawn_deferred_trie_task(
-            block.recovered_block,
-            block.execution_output,
-            LazyHashedPostState::ready(block.hashed_state),
-            block.trie_updates,
-        ))
+        Ok(self
+            .spawn_deferred_trie_task(
+                block.recovered_block,
+                block.execution_output,
+                LazyHashedPostState::ready(block.hashed_state),
+                block.trie_updates,
+            )
+            .with_ext(block.ext))
+    }
+
+    fn persistence_hook(&self) -> Option<Arc<dyn PersistenceHook<N>>> {
+        self.persistence_hook.clone()
     }
 
     fn on_canonical_head_changed(&self, hash: B256, state: &EngineApiTreeState<N>) {

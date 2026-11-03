@@ -26,10 +26,12 @@ type DbStateRoot<'a, TX, A> = StateRoot<
 pub mod blocks;
 mod mock;
 mod noop;
+mod state_backend;
 
 pub use mock::{ExtendedAccount, MockEthProvider};
 pub use noop::NoopProvider;
 pub use reth_chain_state::test_utils::TestCanonStateSubscriptions;
+pub use state_backend::InMemoryStateBackend;
 
 /// Mock [`reth_node_types::NodeTypes`] for testing.
 pub type MockNodeTypes = reth_node_types::AnyNodeTypesWithEngine<
