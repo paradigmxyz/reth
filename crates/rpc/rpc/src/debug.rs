@@ -123,7 +123,7 @@ where
     }
 
     /// Traces every transaction of a block through the block executor, see
-    /// [`Call::block_executor`].
+    /// [`Call::block_executor`](reth_rpc_eth_api::helpers::Call::block_executor).
     async fn trace_block(
         &self,
         block: Arc<RecoveredBlock<ProviderBlock<Eth::Provider>>>,

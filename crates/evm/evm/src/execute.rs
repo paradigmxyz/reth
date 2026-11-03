@@ -15,7 +15,11 @@ use alloy_eips::{
 };
 use alloy_primitives::{Address, B256};
 use core::fmt::Debug;
-use evm2::{registry::HandlerError, DatabaseError};
+use evm2::{
+    interpreter::{Interpreter, Message, MessageResult},
+    registry::HandlerError,
+    DatabaseError,
+};
 use reth_execution_types::{BlockExecutionResult, StateUpdate};
 use reth_primitives_traits::{
     Block, HeaderTy, NodePrimitives, ReceiptTy, RecoveredBlock, SealedHeader, SignedTransaction,
@@ -161,8 +165,10 @@ pub trait Evm {
     where
         I: evm2::Inspector<Self::EvmTypes> + 'static;
 
-    /// Removes the inspector set by [`Evm::set_inspector`] if it has type `I`.
-    fn take_inspector<I>(&mut self) -> Option<I>
+    /// Removes the inspector installed by [`BlockExecutor::inspect_transaction_without_commit`]
+    /// and returns it, or returns `None` and leaves the active inspector in place if the slot holds
+    /// anything else.
+    fn take_traced_inspector<I>(&mut self) -> Option<I>
     where
         I: evm2::Inspector<Self::EvmTypes> + 'static;
 
@@ -249,16 +255,19 @@ impl<'a, T: evm2::EvmTypes<Tx: Typed2718>> Evm for evm2::Evm<'a, T> {
         evm2::Evm::set_inspector(self, inspector);
     }
 
-    fn take_inspector<I: evm2::Inspector<T> + 'static>(&mut self) -> Option<I> {
+    fn take_traced_inspector<I: evm2::Inspector<T> + 'static>(&mut self) -> Option<I> {
         let inspector = self.clear_inspector()?;
         let erased: &dyn evm2::evm::NonStaticAny = &**inspector;
-        if erased.type_id() != core::any::TypeId::of::<I>() {
+        if erased.type_id() != core::any::TypeId::of::<TracedInspector<I>>() {
             self.set_boxed_inspector(inspector);
             return None
         }
-        // SAFETY: the erased type ID matches `I`, which is `'static`, so the boxed inspector is an
-        // `I` and no lifetime is extended.
-        Some(*unsafe { Box::from_raw(Box::into_raw(inspector).cast::<I>()) })
+        // SAFETY: the erased type IDs match, and only this crate constructs a `TracedInspector`,
+        // always around a `'static` inspector, so the boxed value is a `TracedInspector<I>` and no
+        // lifetime is extended.
+        let traced =
+            unsafe { Box::from_raw(Box::into_raw(inspector).cast::<TracedInspector<I>>()) };
+        Some(traced.0)
     }
 
     fn state_db_mut(&mut self) -> &mut dyn DynDatabase {
@@ -314,6 +323,76 @@ fn execute_result<T: evm2::EvmTypes<Tx: Typed2718>>(
 ) -> Result<evm2::TxResult<T>, BlockExecutionError> {
     let executed = evm2::Evm::transact(evm, transaction).map_err(map_handler_error)?;
     Ok(if commit { executed.commit() } else { executed.discard() })
+}
+
+/// Inspector installed by [`BlockExecutor::inspect_transaction_without_commit`].
+///
+/// Only this crate constructs it, and only around a `'static` inspector, which is what lets
+/// [`Evm::take_traced_inspector`] downcast a matching inspector soundly: evm2's type IDs ignore
+/// lifetimes, so a downcast to an arbitrary inspector type could extend a borrow.
+#[derive(Debug)]
+pub struct TracedInspector<I>(I);
+
+impl<T: evm2::EvmTypesHost, I: evm2::Inspector<T>> evm2::Inspector<T> for TracedInspector<I> {
+    fn initialize_interp(&mut self, interp: &mut Interpreter<'_, '_, T>) {
+        self.0.initialize_interp(interp);
+    }
+
+    fn step(&mut self, interp: &mut Interpreter<'_, '_, T>) {
+        self.0.step(interp);
+    }
+
+    fn step_end(&mut self, interp: &mut Interpreter<'_, '_, T>) {
+        self.0.step_end(interp);
+    }
+
+    fn log(&mut self, log: &alloy_primitives::Log, host: &mut T::Host<'_>) {
+        self.0.log(log, host);
+    }
+
+    fn call(
+        &mut self,
+        interp: &mut Interpreter<'_, '_, T>,
+        message: &mut Message<T>,
+    ) -> Option<MessageResult<T>> {
+        self.0.call(interp, message)
+    }
+
+    fn call_end(
+        &mut self,
+        interp: &mut Interpreter<'_, '_, T>,
+        message: &Message<T>,
+        result: &mut MessageResult<T>,
+    ) {
+        self.0.call_end(interp, message, result);
+    }
+
+    fn create(
+        &mut self,
+        interp: &mut Interpreter<'_, '_, T>,
+        message: &mut Message<T>,
+    ) -> Option<MessageResult<T>> {
+        self.0.create(interp, message)
+    }
+
+    fn create_end(
+        &mut self,
+        interp: &mut Interpreter<'_, '_, T>,
+        message: &Message<T>,
+        result: &mut MessageResult<T>,
+    ) {
+        self.0.create_end(interp, message, result);
+    }
+
+    fn selfdestruct(
+        &mut self,
+        contract: &Address,
+        target: &Address,
+        value: &alloy_primitives::U256,
+        host: &mut T::Host<'_>,
+    ) {
+        self.0.selfdestruct(contract, target, value, host);
+    }
 }
 
 /// Converts a handler error into a block error without transaction hash context.
@@ -427,7 +506,8 @@ pub trait BlockExecutor: Sized {
     ///
     /// Returns the inspector together with the output, so a tracer observes the transaction exactly
     /// as the executor runs it, including any changes the executor applies on top of the EVM
-    /// result. Replaces any inspector already set on the executor's EVM.
+    /// result. Replaces any inspector already set on the executor's EVM. Returns an error if the
+    /// executor removed or replaced the inspector while executing the transaction.
     fn inspect_transaction_without_commit<I>(
         &mut self,
         transaction: impl ExecutorTx<Self>,
@@ -436,11 +516,13 @@ pub trait BlockExecutor: Sized {
     where
         I: evm2::Inspector<<Self::Evm as Evm>::EvmTypes> + 'static,
     {
-        self.evm_mut().set_inspector(inspector);
+        self.evm_mut().set_inspector(TracedInspector(inspector));
         let output = self.execute_transaction_without_commit(transaction);
-        let inspector =
-            self.evm_mut().take_inspector().expect("inspector was set before execution");
-        output.map(|output| (inspector, output))
+        let inspector = self.evm_mut().take_traced_inspector().ok_or_else(|| {
+            BlockExecutionError::msg("block executor replaced the tracing inspector")
+        });
+        let (inspector, output) = (inspector?, output?);
+        Ok((inspector, output))
     }
 
     /// Commits detached transaction state and records its receipt and gas accounting.
