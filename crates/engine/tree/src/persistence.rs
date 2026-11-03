@@ -36,8 +36,8 @@ pub struct PersistenceResult {
     pub commit_duration: Option<Duration>,
 }
 
-/// Keeps state stored outside the database, such as a custom state commitment, in step with the
-/// blocks the persistence service writes.
+/// Keeps state stored outside the database in step with the blocks the persistence service writes,
+/// using the [`BlockExt`](reth_execution_types::BlockExt) each block carries.
 ///
 /// A state-root strategy that replaces the MPT supplies one through
 /// [`EngineValidator::persistence_hook`](crate::tree::EngineValidator::persistence_hook).

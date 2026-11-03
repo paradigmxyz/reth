@@ -62,6 +62,7 @@ use crossbeam_channel::Receiver as CrossbeamReceiver;
 use reth_chain_state::{ExecutedBlock, PreservedSparseTrie, SparseTrieWithStorageRoots};
 use reth_errors::ProviderResult;
 use reth_evm::ConfigureEvm;
+use reth_execution_types::BlockExt;
 use reth_primitives_traits::{
     AlloyBlockHeader, FastInstant as Instant, NodePrimitives, RecoveredBlock, SealedHeader,
 };
@@ -72,7 +73,7 @@ use reth_provider::{
 };
 use reth_storage_overlay::{OverlayManager, OverlayStateProviderFactory};
 use reth_tasks::utils::increase_thread_priority;
-use reth_trie::{updates::TrieUpdates, HashedPostState, StateCommitment};
+use reth_trie::{updates::TrieUpdates, HashedPostState};
 use reth_trie_parallel::proof_task::{
     metrics::ProofWorkerIdleMetrics, ProofTaskCtx, ProofWorkerCounts, ProofWorkerHandle,
 };
@@ -439,14 +440,14 @@ pub struct StateRootJobOutcome {
     /// When set, the root was not derived from the streamed updates, so validation replaces its
     /// streaming-derived hashed post state with this one and re-runs hashed-state checks.
     pub hashed_state: Option<Arc<HashedPostState>>,
-    /// Commitment data the job attaches to the validated block, carried until it is persisted.
-    pub state_commitment: Option<StateCommitment>,
+    /// Extension data the job attaches to the validated block, carried until it is persisted.
+    pub ext: Option<BlockExt>,
 }
 
 impl StateRootJobOutcome {
     /// Creates a state-root job outcome.
     pub const fn new(state_root: B256, trie_updates: Arc<TrieUpdates>) -> Self {
-        Self { state_root, trie_updates, hashed_state: None, state_commitment: None }
+        Self { state_root, trie_updates, hashed_state: None, ext: None }
     }
 
     /// Sets the hashed post state recomputed by a fallback path.
@@ -455,9 +456,9 @@ impl StateRootJobOutcome {
         self
     }
 
-    /// Sets the commitment data attached to the validated block.
-    pub fn with_state_commitment(mut self, state_commitment: Option<StateCommitment>) -> Self {
-        self.state_commitment = state_commitment;
+    /// Sets the extension data attached to the validated block.
+    pub fn with_ext(mut self, ext: Option<BlockExt>) -> Self {
+        self.ext = ext;
         self
     }
 }

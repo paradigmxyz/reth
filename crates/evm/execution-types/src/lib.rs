@@ -32,6 +32,9 @@ pub use compat::*;
 mod bal;
 pub use bal::*;
 
+mod block_ext;
+pub use block_ext::BlockExt;
+
 mod chain;
 pub use chain::*;
 

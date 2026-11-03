@@ -56,9 +56,6 @@ pub use nibbles::{
     StoredNibblesSubKey,
 };
 
-mod state_commitment;
-pub use state_commitment::StateCommitment;
-
 mod storage;
 pub use storage::{PackedStorageTrieEntry, StorageTrieEntry};
 

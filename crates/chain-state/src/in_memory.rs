@@ -10,7 +10,7 @@ use parking_lot::RwLock;
 use reth_chainspec::ChainInfo;
 use reth_ethereum_primitives::EthPrimitives;
 use reth_execution_types::{
-    BlockExecutionOutput, BlockExecutionResult, Chain, DecodedEvmBal, ExecutionOutcome,
+    BlockExecutionOutput, BlockExecutionResult, BlockExt, Chain, DecodedEvmBal, ExecutionOutcome,
     RecoveredBlockAndExecutionOutput,
 };
 use reth_metrics::{metrics::Gauge, Metrics};
@@ -18,10 +18,7 @@ use reth_primitives_traits::{
     BlockBody as _, IndexedTx, NodePrimitives, RecoveredBlock, SealedBlock, SealedHeader,
     SignedTransaction,
 };
-use reth_trie::{
-    updates::TrieUpdatesSorted, HashedPostStateSorted, LazyTrieData, SortedTrieData,
-    StateCommitment,
-};
+use reth_trie::{updates::TrieUpdatesSorted, HashedPostStateSorted, LazyTrieData, SortedTrieData};
 use std::{collections::BTreeMap, sync::Arc, time::Instant};
 use tokio::sync::{broadcast, watch};
 
@@ -764,11 +761,11 @@ pub struct ExecutedBlock<N: NodePrimitives = EthPrimitives> {
     /// representation (for consumers like the RPC state cache), so that neither has to be
     /// re-derived after validation.
     pub bal: Option<Arc<DecodedEvmBal>>,
-    /// Commitment data a custom state-root strategy attached to the block, if any.
+    /// Extension data attached to the block, for a persistence hook to use.
     ///
-    /// `None` for blocks validated by the default MPT strategy and for blocks loaded from the
-    /// database, whose commitment is already persisted.
-    pub state_commitment: Option<StateCommitment>,
+    /// `None` unless a custom state-root job or payload builder attached one. Blocks loaded from
+    /// the database never carry one.
+    pub ext: Option<BlockExt>,
 }
 
 impl<N: NodePrimitives> Default for ExecutedBlock<N> {
@@ -786,7 +783,7 @@ impl<N: NodePrimitives> Default for ExecutedBlock<N> {
             }),
             trie_data: LazyTrieData::ready(SortedTrieData::default()),
             bal: None,
-            state_commitment: None,
+            ext: None,
         }
     }
 }
@@ -815,7 +812,7 @@ impl<N: NodePrimitives> ExecutedBlock<N> {
             execution_output,
             trie_data: LazyTrieData::ready(trie_data),
             bal: None,
-            state_commitment: None,
+            ext: None,
         }
     }
 
@@ -837,7 +834,7 @@ impl<N: NodePrimitives> ExecutedBlock<N> {
         execution_output: Arc<BlockExecutionOutput<N::Receipt>>,
         trie_data: LazyTrieData,
     ) -> Self {
-        Self { recovered_block, execution_output, trie_data, bal: None, state_commitment: None }
+        Self { recovered_block, execution_output, trie_data, bal: None, ext: None }
     }
 
     /// Attaches the prepared block access list of the block, or clears it with `None`.
@@ -854,16 +851,16 @@ impl<N: NodePrimitives> ExecutedBlock<N> {
         self.bal.as_ref()
     }
 
-    /// Attaches the state commitment of the block, or clears it with `None`.
-    pub fn with_state_commitment(mut self, state_commitment: Option<StateCommitment>) -> Self {
-        self.state_commitment = state_commitment;
+    /// Attaches the extension of the block, or clears it with `None`.
+    pub fn with_ext(mut self, ext: Option<BlockExt>) -> Self {
+        self.ext = ext;
         self
     }
 
-    /// Returns the state commitment a custom state-root strategy attached to the block.
+    /// Returns the extension attached to the block.
     #[inline]
-    pub const fn state_commitment(&self) -> Option<&StateCommitment> {
-        self.state_commitment.as_ref()
+    pub const fn ext(&self) -> Option<&BlockExt> {
+        self.ext.as_ref()
     }
 
     /// Returns a reference to an inner [`SealedBlock`]
