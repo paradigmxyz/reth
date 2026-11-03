@@ -138,8 +138,8 @@ where
     /// Collect fee history for the given range (inclusive `start_block..=end_block`).
     ///
     /// This function retrieves fee history entries from the cache for the specified range.
-    /// If the requested range (`start_block` to `end_block`) is within the cache bounds,
-    /// it returns the corresponding entries.
+    /// If the requested range (`start_block` to `end_block`) is within the cache bounds and every
+    /// block of the range is cached, it returns the corresponding entries.
     /// Otherwise it returns None.
     pub async fn get_history(
         &self,
@@ -159,7 +159,9 @@ where
                 .map(|(_, fee_entry)| fee_entry.clone())
                 .collect::<Vec<_>>();
 
-            if result.is_empty() {
+            // The cache can have holes inside its bounds, e.g. while missing blocks are still
+            // being backfilled, in which case the caller must fall back to the provider.
+            if result.len() as u64 != end_block - start_block + 1 {
                 return None
             }
 
@@ -431,6 +433,36 @@ mod tests {
                 .unwrap();
 
         assert_eq!(rewards, vec![low_tip]);
+    }
+
+    #[tokio::test]
+    async fn get_history_requires_a_contiguous_range() {
+        use reth_chainspec::MAINNET;
+        use reth_ethereum_primitives::Block;
+        use reth_primitives_traits::SealedBlock;
+
+        let cache = FeeHistoryCache::<alloy_consensus::Header>::new(FeeHistoryCacheConfig {
+            max_blocks: 10,
+            resolution: 4,
+        });
+        let block = |number: u64| {
+            SealedBlock::seal_slow(Block {
+                header: alloy_consensus::Header { number, gas_limit: 1, ..Default::default() },
+                ..Default::default()
+            })
+        };
+        // block 3 is missing from the cache (e.g. a lagged canonical notification)
+        let blocks = [block(1), block(2), block(4)];
+        let receipts: [Receipt; 0] = [];
+        cache.insert_blocks(blocks.iter().map(|b| (b, receipts.as_slice())), &*MAINNET).await;
+        assert_eq!((cache.lower_bound(), cache.upper_bound()), (1, 4));
+
+        assert_eq!(cache.get_history(1, 2).await.map(|e| e.len()), Some(2));
+        assert_eq!(cache.get_history(4, 4).await.map(|e| e.len()), Some(1));
+        // a range that spans the gap must not be served from the cache
+        assert!(cache.get_history(1, 4).await.is_none());
+        assert!(cache.get_history(3, 4).await.is_none());
+        assert!(cache.get_history(3, 3).await.is_none());
     }
 
     fn eip1559_transaction(tip: u128, base_fee: u64) -> TransactionSigned {
