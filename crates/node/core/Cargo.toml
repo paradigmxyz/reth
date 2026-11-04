@@ -74,6 +74,7 @@ futures.workspace = true
 # test vectors generation
 proptest.workspace = true
 tokio.workspace = true
+tempfile.workspace = true
 
 [features]
 # Features for smolgen to generate correct env vars
