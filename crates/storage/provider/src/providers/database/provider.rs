@@ -4093,13 +4093,14 @@ mod tests {
         BlockWriter,
     };
     use alloy_consensus::Header;
+    use alloy_eips::BlockNumHash;
     use alloy_primitives::{
         map::{AddressMap, B256Map},
         U256,
     };
     use evm2::evm::AccountInfo;
     use reth_chain_state::{test_utils::TestBlockBuilder, ExecutedBlock};
-    use reth_db_api::models::StorageSettings;
+    use reth_db_api::models::{SnapAttempt, StorageSettings};
     use reth_ethereum_primitives::Receipt;
     use reth_execution_types::{AccountRevertInit, BlockExecutionOutput, BlockExecutionResult};
     use reth_primitives_traits::SealedBlock;
@@ -4133,9 +4134,6 @@ mod tests {
 
     #[test]
     fn snap_attempt_guards_finish_checkpoint_writers() {
-        use alloy_eips::BlockNumHash;
-        use reth_db_api::models::SnapAttempt;
-
         let factory = create_test_provider_factory();
         let provider = factory.database_provider_rw().unwrap();
         provider.update_pipeline_stages(5, false).unwrap();
@@ -4187,9 +4185,6 @@ mod tests {
 
     #[test]
     fn snap_attempt_guards_partial_state_trie_advances() {
-        use alloy_eips::BlockNumHash;
-        use reth_db_api::models::SnapAttempt;
-
         for abandoned in [false, true] {
             let factory = create_test_provider_factory();
             let provider = factory.database_provider_rw().unwrap();

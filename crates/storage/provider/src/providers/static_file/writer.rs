@@ -20,6 +20,7 @@ use std::{
     borrow::Borrow,
     cmp::Ordering,
     fmt::Debug,
+    fs::OpenOptions,
     path::{Path, PathBuf},
     sync::{Arc, Weak},
 };
@@ -455,7 +456,6 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
 
             // Truncate sidecar file if it has invalid blocks
             if actual_sidecar_blocks > correct_blocks {
-                use std::fs::OpenOptions;
                 let file = OpenOptions::new()
                     .write(true)
                     .open(&csoff_path)

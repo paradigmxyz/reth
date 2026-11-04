@@ -1325,7 +1325,7 @@ mod tests {
     use super::*;
     use crate::session::{handle::PendingSessionEvent, start_pending_incoming_session};
     use alloy_eips::eip2124::ForkFilter;
-    use alloy_primitives::B256;
+    use alloy_primitives::{B128, B256};
     use futures::task::noop_waker;
     use reth_chainspec::MAINNET;
     use reth_ecies::stream::ECIESStream;
@@ -2035,8 +2035,6 @@ mod tests {
 
     #[test]
     fn eth72_coalescing_preserves_cell_masks() {
-        use alloy_primitives::B128;
-
         let masks =
             [None, Some(B128::repeat_byte(0xff)), Some(B128::from(1u128)), Some(B128::from(2u128))];
         for existing_mask in masks {
