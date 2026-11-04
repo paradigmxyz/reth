@@ -97,6 +97,8 @@ impl TryFrom<HandlerError> for EthInvalidTxError {
             HandlerError::InvalidChainId { .. } |
             HandlerError::MissingChainId |
             HandlerError::IntrinsicGasTooLow { .. } |
+            HandlerError::GasLimitBelowFloor { .. } |
+            HandlerError::IntrinsicGasGreaterThanCap { .. } |
             HandlerError::InsufficientFunds { .. } |
             HandlerError::RejectCallerWithCode |
             HandlerError::NonceOverflow |
