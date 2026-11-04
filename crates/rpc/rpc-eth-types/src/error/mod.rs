@@ -186,8 +186,8 @@ pub enum EthApiError {
     #[error(transparent)]
     TransactionConversionError(#[from] TransactionConversionError),
     /// Error thrown when tracing with a muxTracer fails
-    #[error(transparent)]
-    MuxTracerError(#[from] MuxError),
+    #[error("{0}")]
+    MuxTracerError(String),
     /// Error thrown when waiting for transaction confirmation times out
     #[error(
         "Transaction {hash} was added to the mempool but wasn't confirmed within {duration:?}."
@@ -379,7 +379,9 @@ impl From<EthApiError> for jsonrpsee_types::error::ErrorObject<'static> {
                 err.to_string(),
             ),
             EthApiError::Unsupported(msg) => internal_rpc_err(msg),
-            EthApiError::InternalJsTracerError(msg) => internal_rpc_err(msg),
+            EthApiError::InternalJsTracerError(msg) | EthApiError::MuxTracerError(msg) => {
+                internal_rpc_err(msg)
+            }
             EthApiError::InvalidParams(msg) => invalid_params_rpc_err(msg),
             err @ EthApiError::ExecutionTimedOut(_) => rpc_error_with_code(
                 jsonrpsee_types::error::CALL_EXECUTION_FAILED_CODE,
@@ -393,7 +395,6 @@ impl From<EthApiError> for jsonrpsee_types::error::ErrorObject<'static> {
                 rpc_error_with_code(EthRpcErrorCode::PrunedHistory.code(), error.to_string())
             }
             EthApiError::Other(err) => err.to_rpc_error(),
-            EthApiError::MuxTracerError(msg) => internal_rpc_err(msg.to_string()),
             EthApiError::BatchTxRecvError(err) => internal_rpc_err(err.to_string()),
             EthApiError::BatchTxSendError => {
                 internal_rpc_err("Batch transaction sender channel closed".to_string())
@@ -489,10 +490,16 @@ impl From<evm2_inspectors::tracing::js::JsInspectorError> for EthApiError {
     }
 }
 
+impl From<MuxError> for EthApiError {
+    fn from(error: MuxError) -> Self {
+        Self::MuxTracerError(error.to_string())
+    }
+}
+
 impl From<DebugInspectorError> for EthApiError {
     fn from(error: DebugInspectorError) -> Self {
         match error {
-            DebugInspectorError::InvalidTracerConfig => Self::InvalidTracerConfig,
+            DebugInspectorError::InvalidTracerConfig(_) => Self::InvalidTracerConfig,
             DebugInspectorError::UnsupportedTracer => Self::Unsupported("unsupported tracer"),
             DebugInspectorError::JsTracerNotEnabled => {
                 Self::Unsupported("JS Tracer is not enabled")
