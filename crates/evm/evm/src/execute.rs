@@ -158,6 +158,11 @@ pub trait Evm {
     where
         I: evm2::Inspector<Self::EvmTypes> + 'static;
 
+    /// Returns the inspector set by [`Self::set_inspector`] if it has type `I`.
+    fn inspector_mut_as<I>(&mut self) -> Option<&mut I>
+    where
+        I: evm2::Inspector<Self::EvmTypes> + 'static;
+
     /// Returns the accepted state overlay, including earlier committed transactions.
     fn state_db_mut(&mut self) -> &mut dyn DynDatabase;
 
@@ -239,6 +244,14 @@ impl<'a, T: evm2::EvmTypes<Tx: Typed2718>> Evm for evm2::Evm<'a, T> {
 
     fn set_inspector<I: evm2::Inspector<T> + 'a>(&mut self, inspector: I) {
         evm2::Evm::set_inspector(self, inspector);
+    }
+
+    fn inspector_mut_as<I: evm2::Inspector<T> + 'static>(&mut self) -> Option<&mut I> {
+        let inspector: &mut dyn evm2::evm::NonStaticAny = &mut **evm2::Evm::inspector_mut(self)?;
+        (inspector.type_id() == core::any::TypeId::of::<I>()).then(|| {
+            // SAFETY: the type IDs match and `I` is `'static`, so it has no erased lifetimes.
+            unsafe { inspector.downcast_mut_unchecked::<I>() }
+        })
     }
 
     fn state_db_mut(&mut self) -> &mut dyn DynDatabase {

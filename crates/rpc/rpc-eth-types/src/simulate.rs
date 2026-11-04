@@ -15,6 +15,7 @@ use alloy_rpc_types_eth::{
     BlockId, BlockOverrides, BlockTransactionsKind,
 };
 use evm2::{interpreter::InstrStop, precompiles::MovePrecompileError, EvmFeatures, TxResult};
+use evm2_inspectors::transfer::TransferInspector;
 use jsonrpsee_types::{error::INTERNAL_ERROR_CODE, ErrorObject};
 use reth_errors::ProviderResult;
 use reth_evm::{
@@ -384,6 +385,13 @@ where
             tx_regular_gas_used = output.execution_gas_spent();
             results.push(output.clone())
         })?;
+        // The transfer inspector keeps the call's logs, including the transfer logs, out of the
+        // receipt, so they replace the call's logs without changing the block's receipts.
+        if let Some(inspector) = builder.evm_mut().inspector_mut_as::<TransferInspector>() &&
+            let Some(result) = results.last_mut()
+        {
+            result.logs = inspector.take_logs();
+        }
 
         let gas_used = gas_output.tx_gas_used();
         if let Some(remaining_call_gas_limit) = remaining_call_gas_limit.as_mut() {
