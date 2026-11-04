@@ -89,7 +89,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> PruneComma
                 .build_with_provider_factory(provider_factory.clone());
 
             let mut total_pruned = 0usize;
-            let mut last_checkpoints = Vec::new();
+            let mut last_segments = Vec::new();
             loop {
                 if cancellation.is_cancelled() {
                     info!(target: "reth::cli", total_pruned, "Pruning interrupted by user");
@@ -100,26 +100,23 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> PruneComma
                 let batch_pruned: usize = output.segments.iter().map(|(_, seg)| seg.pruned).sum();
                 total_pruned = total_pruned.saturating_add(batch_pruned);
 
-                if output.progress.is_finished() {
-                    info!(target: "reth::cli", total_pruned, "Pruned data from database");
-                    break;
-                }
+                // Segments gate each other through committed checkpoints, e.g. bodies only prune
+                // up to the committed transaction lookup checkpoint, and a batch can advance a
+                // checkpoint without deleting anything, e.g. clearing a `RocksDB` table. Keep
+                // going until a batch changes nothing, even if it reports finished.
+                if batch_pruned == 0 && output.segments == last_segments {
+                    if output.progress.is_finished() {
+                        info!(target: "reth::cli", total_pruned, "Pruned data from database");
+                        break;
+                    }
 
-                // A batch can advance checkpoints without deleting anything, e.g. clearing a
-                // `RocksDB` table, so that also counts as progress.
-                let checkpoints = output
-                    .segments
-                    .iter()
-                    .map(|(segment, output)| (*segment, output.checkpoint))
-                    .collect::<Vec<_>>();
-                if batch_pruned == 0 && checkpoints == last_checkpoints {
                     return Err(eyre::eyre!(
                         "pruner made no progress but reported more data remaining; \
                          aborting to prevent infinite loop"
                     ));
                 }
 
-                last_checkpoints = checkpoints;
+                last_segments = output.segments;
 
                 info!(
                     target: "reth::cli",
