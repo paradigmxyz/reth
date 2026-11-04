@@ -210,8 +210,14 @@ impl BranchEntry {
             Ok(hash.to_string())
         }
 
+        let input = input.trim();
+        // A branch without children is valid, see geth's `parseBranch`.
+        if input.is_empty() {
+            return Ok(Self { children: Vec::new() })
+        }
+
         let children =
-            input.trim().split(',').map(ensure_valid_hash).collect::<ParseEntryResult<Vec<_>>>()?;
+            input.split(',').map(ensure_valid_hash).collect::<ParseEntryResult<Vec<_>>>()?;
         Ok(Self { children })
     }
 }
@@ -411,6 +417,14 @@ mod tests {
             }
             _ => unreachable!(),
         }
+    }
+
+    #[test]
+    fn parse_empty_branch_entry() {
+        let s = "enrtree-branch:";
+        let entry: BranchEntry = s.parse().unwrap();
+        assert!(entry.children.is_empty());
+        assert_eq!(entry.to_string(), s);
     }
 
     #[test]
