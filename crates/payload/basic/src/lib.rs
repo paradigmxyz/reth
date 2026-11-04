@@ -169,14 +169,12 @@ where
         let parent_header = if parent_hash.is_zero() {
             // Use latest header for genesis block case
             self.client
-                .latest_header()
-                .map_err(PayloadBuilderError::from)?
+                .latest_header()?
                 .ok_or_else(|| PayloadBuilderError::MissingParentHeader(B256::ZERO))?
         } else {
             // Fetch specific header by hash
             self.client
-                .sealed_header_by_hash(parent_hash)
-                .map_err(PayloadBuilderError::from)?
+                .sealed_header_by_hash(parent_hash)?
                 .ok_or_else(|| PayloadBuilderError::MissingParentHeader(parent_hash))?
         };
 
