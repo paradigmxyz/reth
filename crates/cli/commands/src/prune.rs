@@ -14,6 +14,7 @@ use reth_node_metrics::{
 };
 use reth_provider::RocksDBProviderFactory;
 use reth_prune::PrunerBuilder;
+use reth_prune_types::{PruneInterruptReason, PruneProgress, PruneSegment, SegmentOutput};
 use reth_static_file::StaticFileProducer;
 use std::sync::Arc;
 use tracing::info;
@@ -104,7 +105,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> PruneComma
                 // up to the committed lookup checkpoint, so stop only when a batch changes nothing.
                 if batch_pruned == 0 && output.segments == last_segments {
                     eyre::ensure!(
-                        output.progress.is_finished(),
+                        !is_stalled(&output.segments),
                         "pruner made no progress but reported more data remaining; \
                          aborting to prevent infinite loop"
                     );
@@ -138,5 +139,43 @@ impl<C: ChainSpecParser> PruneCommand<C> {
     /// Returns the underlying chain being used to run this command
     pub fn chain_spec(&self) -> Option<&Arc<C::ChainSpec>> {
         Some(&self.env.chain)
+    }
+}
+
+/// Returns whether a batch that changed nothing still has runnable work.
+///
+/// A segment that only waits on another segment cannot progress at this tip once the batch changed
+/// nothing, e.g. bodies waiting on a lookup `Distance` that has reached its current target.
+fn is_stalled(segments: &[(PruneSegment, SegmentOutput)]) -> bool {
+    segments.iter().any(|(_, output)| {
+        matches!(
+            output.progress,
+            PruneProgress::HasMoreData(reason)
+                if !matches!(reason, PruneInterruptReason::WaitingOnSegment(_))
+        )
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn stalled_only_on_runnable_work() {
+        let output = |progress| SegmentOutput { progress, pruned: 0, checkpoint: None };
+        let waiting = PruneProgress::HasMoreData(PruneInterruptReason::WaitingOnSegment(
+            PruneSegment::TransactionLookup,
+        ));
+        let limited = PruneProgress::HasMoreData(PruneInterruptReason::DeletedEntriesLimitReached);
+
+        assert!(!is_stalled(&[]));
+        assert!(!is_stalled(&[
+            (PruneSegment::TransactionLookup, output(PruneProgress::Finished)),
+            (PruneSegment::Bodies, output(waiting)),
+        ]));
+        assert!(is_stalled(&[
+            (PruneSegment::Bodies, output(waiting)),
+            (PruneSegment::AccountHistory, output(limited)),
+        ]));
     }
 }
