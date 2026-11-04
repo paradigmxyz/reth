@@ -1,21 +1,17 @@
 //! Canonical-snapshot validation of public frame transactions.
 
+use super::{
+    FrameValidation, FrameValidationError, FrameValidationInspector, FrameValidationPolicy,
+};
+use crate::{error::Eip8141PoolTransactionError, EthPoolTransaction};
 use alloy_consensus::BlockHeader;
 use alloy_eips::eip8141::{nonce_slot, NONCE_MANAGER};
 use alloy_primitives::U256;
-use reth_ethereum_primitives::TransactionSigned;
 use reth_evm::{
     database::StateProviderDatabase, ConfigureEvm, Evm, EvmEnv, FromRecoveredTx, TxEnvFor,
 };
-use reth_node_api::{FullNodeTypes, NodePrimitives, NodeTypes, PrimitivesTy};
+use reth_primitives_traits::{HeaderTy, TxTy};
 use reth_storage_api::{AccountReader, BlockReaderIdExt, StateProvider, StateProviderFactory};
-use reth_transaction_pool::{
-    error::Eip8141PoolTransactionError,
-    validate::{
-        FrameValidation, FrameValidationError, FrameValidationInspector, FrameValidationPolicy,
-    },
-    EthPooledTransaction, PoolTransaction,
-};
 use std::sync::Arc;
 use tracing::debug;
 
@@ -23,18 +19,18 @@ fn policy(reason: &'static str) -> FrameValidationError {
     FrameValidationError::Invalid(Eip8141PoolTransactionError::PublicMempoolPolicy(reason).into())
 }
 
-/// Uses the node's configured EVM, including its active precompiles and gas schedule.
-pub(super) fn validate<Node, EvmConfig>(
-    client: &Node::Provider,
+/// Uses the pool's configured EVM, including its active precompiles and gas schedule.
+pub(super) fn validate<Client, Tx, EvmConfig>(
+    client: &Client,
     evm_config: &EvmConfig,
-    transaction: &EthPooledTransaction,
+    transaction: &Tx,
 ) -> Result<Arc<FrameValidation>, FrameValidationError>
 where
-    Node: FullNodeTypes<Types: NodeTypes<Primitives: NodePrimitives<SignedTx = TransactionSigned>>>,
-    EvmConfig: ConfigureEvm<Primitives = PrimitivesTy<Node::Types>>,
+    Client: StateProviderFactory + BlockReaderIdExt<Header = HeaderTy<EvmConfig::Primitives>>,
+    Tx: EthPoolTransaction<Consensus = TxTy<EvmConfig::Primitives>>,
+    EvmConfig: ConfigureEvm,
 {
-    let frame =
-        transaction.transaction.as_eip8141().ok_or_else(|| policy("not a frame transaction"))?;
+    let frame = transaction.frame_transaction().ok_or_else(|| policy("not a frame transaction"))?;
     let tx_hash = *transaction.hash();
     debug!(
         target: "reth::eip8141::pool",

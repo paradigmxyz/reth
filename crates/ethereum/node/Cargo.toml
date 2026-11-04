@@ -21,7 +21,6 @@ reth-ethereum-primitives.workspace = true
 reth-primitives-traits = { workspace = true, features = ["secp256k1", "rayon"] }
 reth-node-builder.workspace = true
 reth-provider.workspace = true
-reth-storage-api.workspace = true
 reth-transaction-pool.workspace = true
 reth-network.workspace = true
 reth-evm = { workspace = true, features = ["blst", "c-kzg", "p256-aws-lc-rs"] }

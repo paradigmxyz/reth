@@ -31,7 +31,7 @@ use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthereumHardforks};
 use reth_evm::{ConfigureEvm, EvmEnv, EvmTransactionValidationGasRules};
 use reth_primitives_traits::{
     transaction::error::InvalidTransactionError, Account, BlockTy, GotExpected, HeaderTy,
-    SealedBlock,
+    SealedBlock, TxTy,
 };
 use reth_storage_api::{
     errors::ProviderError, AccountInfoReader, BlockReaderIdExt, BytecodeReader, StateProviderBox,
@@ -166,7 +166,7 @@ pub struct EthTransactionValidator<Client, T, Evm> {
     /// Optional additional stateful validation check applied at the end of
     /// [`validate_stateful`](Self::validate_stateful).
     additional_stateful_validation: Option<StatefulValidationFn<T>>,
-    /// Prefix executor installed by the node's EVM configuration.
+    /// Prefix executor using the pool's provider and EVM configuration.
     frame_validation: Option<FrameValidationFn<T>>,
 }
 
@@ -201,6 +201,24 @@ impl<Client, Tx, Evm> EthTransactionValidator<Client, Tx, Evm> {
     /// Installs public frame validation. Pool admission must also enforce reservations.
     pub fn set_frame_validation(&mut self, validation: FrameValidationFn<Tx>) {
         self.frame_validation = Some(validation);
+    }
+
+    /// Enables public frame validation using this pool's provider and configured EVM.
+    pub fn with_frame_validation(mut self) -> Self
+    where
+        Client: StateProviderFactory
+            + BlockReaderIdExt<Header = HeaderTy<Evm::Primitives>>
+            + Clone
+            + 'static,
+        Tx: EthPoolTransaction<Consensus = TxTy<Evm::Primitives>>,
+        Evm: ConfigureEvm + 'static,
+    {
+        let client = self.client.clone();
+        let evm_config = self.evm_config.clone();
+        self.set_frame_validation(Arc::new(move |tx| {
+            super::frame::validate(&client, &evm_config, tx)
+        }));
+        self
     }
 
     /// Returns the configured chain spec
@@ -1765,7 +1783,7 @@ mod tests {
         eip2718::{Decodable2718, Encodable2718},
         eip2930::{AccessList, AccessListItem},
         eip7702::Authorization,
-        eip8141::{Frame, TransactionFees},
+        eip8141::{Frame, FrameLimits, FrameMode, TransactionFees},
     };
     use alloy_primitives::{hex, Address, Bytes, Sealable, Signature, B256, U256};
     use reth_chainspec::{ChainSpecBuilder, MAINNET};
@@ -1773,6 +1791,7 @@ mod tests {
     use reth_evm_ethereum::EthEvmConfig;
     use reth_primitives_traits::SignedTransaction;
     use reth_provider::test_utils::{ExtendedAccount, MockEthProvider};
+    use reth_storage_api::AccountReader;
 
     fn test_evm_config() -> EthEvmConfig {
         EthEvmConfig::mainnet()
@@ -2047,6 +2066,72 @@ mod tests {
                 Eip8141PoolTransactionError::PublicMempoolValidationUnavailable
             ))
         ));
+        let validator = validator.with_frame_validation();
+        validator.validate_stateless(TransactionOrigin::External, &transaction).unwrap();
+    }
+
+    #[test]
+    fn eip8141_pool_validation_uses_configured_evm() {
+        let sender = Address::repeat_byte(0x41);
+        let balance = U256::from(1_000_000);
+        let provider = MockEthProvider::default()
+            .with_chain_spec(ChainSpecBuilder::mainnet().bogota_activated().build());
+        let evm_config = EthEvmConfig::new(provider.chain_spec());
+        let header = Header {
+            gas_limit: ETHEREUM_BLOCK_GAS_LIMIT_30M,
+            timestamp: 1,
+            base_fee_per_gas: Some(1),
+            excess_blob_gas: Some(0),
+            blob_gas_used: Some(0),
+            parent_beacon_block_root: Some(B256::ZERO),
+            slot_number: Some(1),
+            ..Default::default()
+        };
+        let head_hash = header.hash_slow();
+        provider
+            .add_block(head_hash, reth_ethereum_primitives::Block::new(header, Default::default()));
+        provider.add_account(
+            sender,
+            ExtendedAccount::new(0, balance).with_bytecode(hex!("60035f5faa00").into()),
+        );
+        let validator = EthTransactionValidatorBuilder::new(provider.clone(), evm_config)
+            .build(InMemoryBlobStore::default())
+            .with_frame_validation();
+        let frame = TxEip8141 {
+            chain_id: validator.chain_id(),
+            sender,
+            nonce_keys: Some(vec![]),
+            frames: vec![Frame {
+                mode: FrameMode::Verify,
+                flags: 3,
+                limits: FrameLimits { execution: 20_000, state: 0 },
+                ..Default::default()
+            }],
+            fees: TransactionFees { max_fee: balance, ..Default::default() },
+            ..Default::default()
+        };
+        let maximum_cost = U256::from(frame.gas_limit());
+        let encoded_length = frame.eip2718_encoded_length();
+        let transaction = EthPooledTransaction::new(
+            alloy_consensus::transaction::Recovered::new_unchecked(
+                reth_ethereum_primitives::TransactionSigned::Eip8141(frame.seal_slow()),
+                sender,
+            ),
+            encoded_length,
+        );
+        let outcome = validator.validate_one(TransactionOrigin::External, transaction);
+        let TransactionValidationOutcome::Valid { transaction, propagate, .. } = outcome else {
+            panic!("public frame validation failed: {outcome:?}")
+        };
+        let metadata = transaction.transaction().frame_validation().unwrap();
+        assert!(propagate);
+        assert_eq!(metadata.head_hash, head_hash);
+        assert_eq!(metadata.sender, sender);
+        assert_eq!(metadata.payer, sender);
+        assert_eq!(metadata.max_cost, maximum_cost);
+        assert_eq!(metadata.payer_balance, balance);
+        assert_eq!(metadata.nonce_keys, Some(vec![]));
+        assert_eq!(provider.basic_account(&sender).unwrap().unwrap().balance, balance);
     }
 
     #[test]

@@ -15,6 +15,7 @@ use std::{fmt, fmt::Debug, future::Future, time::Instant};
 
 mod constants;
 mod eth;
+mod frame;
 mod frame_inspector;
 mod frame_policy;
 mod frame_state;

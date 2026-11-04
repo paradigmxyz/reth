@@ -20,7 +20,6 @@ pub use evm::EthEvmConfig;
 pub use evm::EthExecutorProvider;
 
 pub use reth_ethereum_consensus as consensus;
-mod frame_validation;
 pub mod node;
 pub use node::*;
 
