@@ -535,7 +535,9 @@ where
 mod tests {
     use super::*;
     use alloy_consensus::{Block, BlockBody, Header};
-    use alloy_eips::{eip7702::Authorization, BlockId, BlockNumberOrTag};
+    use alloy_eips::{
+        eip4844::DATA_GAS_PER_BLOB, eip7702::Authorization, BlockId, BlockNumberOrTag,
+    };
     use alloy_genesis::{Genesis, GenesisAccount};
     use alloy_network::TransactionBuilder;
     use alloy_primitives::{Address, Bytes, Signature, B256, U256, U64};
@@ -545,16 +547,17 @@ mod tests {
         state::{AccountOverride, EvmOverrides, StateOverride},
         BlockOverrides, Bundle, TransactionRequest,
     };
+    use evm2::{evm::CacheDB, AccountInfo};
     use jsonrpsee_types::error::INVALID_PARAMS_CODE;
     use rand::Rng;
     use reth_chain_state::CanonStateSubscriptions;
     use reth_chainspec::{ChainSpec, ChainSpecBuilder, ChainSpecProvider, EthChainSpec};
     use reth_db_common::init::init_genesis;
     use reth_ethereum_primitives::TransactionSigned;
-    use reth_evm::{EvmEnvFor, TxEnvFor};
+    use reth_evm::{ConfigureEvm, EvmEnvFor, TxEnvFor};
     use reth_evm_ethereum::EthEvmConfig;
     use reth_network_api::noop::NoopNetwork;
-    use reth_primitives_traits::crypto::secp256k1::sign_message;
+    use reth_primitives_traits::{crypto::secp256k1::sign_message, SealedHeader};
     use reth_provider::{
         providers::BlockchainProvider,
         test_utils::{
@@ -565,7 +568,7 @@ mod tests {
     };
     use reth_rpc_convert::{EthTxEnvError, TryIntoTxEnv};
     use reth_rpc_eth_api::{
-        helpers::{EthBlocks, EthCall, SpawnBlocking},
+        helpers::{Call, EthBlocks, EthCall, LoadPendingBlock, SpawnBlocking},
         node::RpcNodeCoreAdapter,
         EthApiServer,
     };
@@ -573,9 +576,9 @@ mod tests {
     use reth_storage_api::{
         BalProvider, BlockReaderIdExt, NodePrimitivesProvider, StateProviderFactory,
     };
-    use reth_tasks::cancel::is_cancelled;
+    use reth_tasks::cancel::{is_cancelled, CancelOnDrop};
     use reth_testing_utils::generators;
-    use reth_transaction_pool::test_utils::{testing_pool, TestPool};
+    use reth_transaction_pool::test_utils::{testing_pool, MockTransaction, TestPool};
     use std::time::{Duration, Instant};
 
     type FakeEthApi<P = MockEthProvider> = EthApi<
@@ -644,6 +647,26 @@ mod tests {
         }
 
         assert!(cancelled_rx.await.unwrap());
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn pending_block_build_stops_when_cancelled() {
+        let provider = MockEthProvider::default();
+        let parent =
+            Header { gas_limit: 30_000_000, base_fee_per_gas: Some(1), ..Default::default() };
+        let parent_hash = B256::random();
+        provider.add_header(parent_hash, parent.clone());
+        let api = build_test_eth_api(provider);
+        api.pool().add_external_transaction(MockTransaction::eip1559()).await.unwrap();
+
+        // dropping the request's handle cancels the build running in its scope
+        let request = CancelOnDrop::default();
+        let scope = request.clone();
+        drop(request);
+
+        let parent = SealedHeader::new(parent, parent_hash);
+        let err = scope.scope(|| api.build_block(&parent)).unwrap_err();
+        assert!(matches!(err, EthApiError::InternalEthError));
     }
 
     #[tokio::test]
@@ -1895,6 +1918,49 @@ mod tests {
             ]);
             let expected = ChainSpecBuilder::mainnet().cancun_activated().genesis(expected).build();
             assert_eq!(blocks[index].inner.header.state_root, expected.genesis_header().state_root);
+        }
+    }
+
+    #[tokio::test]
+    async fn blob_call_allowance_reserves_maximum_fee() {
+        let sender = Address::repeat_byte(0x11);
+        let provider = MockEthProvider::default()
+            .with_chain_spec(ChainSpecBuilder::mainnet().cancun_activated().build());
+        let api = build_test_eth_api(provider);
+        let env = api.evm_config().evm_env(&Header::default()).unwrap();
+        let allowance = |balance, value| {
+            let mut db = CacheDB::default();
+            db.insert_account_info(&sender, AccountInfo { balance, ..Default::default() });
+            let request = TransactionRequest {
+                max_fee_per_gas: Some(10),
+                max_priority_fee_per_gas: Some(10),
+                max_fee_per_blob_gas: Some(3),
+                blob_versioned_hashes: Some(vec![B256::repeat_byte(1)]),
+                value: Some(value),
+                ..TransactionRequest::default()
+                    .with_from(sender)
+                    .with_to(Address::repeat_byte(0xaa))
+            };
+            let tx = api.create_txn_env(&env, request, &mut db).unwrap();
+            api.caller_gas_allowance(&mut db, &env, &tx)
+        };
+        let value = U256::from(1_000);
+        let blob_fee = U256::from(DATA_GAS_PER_BLOB * 3);
+
+        assert_eq!(
+            allowance(U256::from(1_000_000), value).unwrap(),
+            (1_000_000 - 1_000 - DATA_GAS_PER_BLOB * 3) / 10
+        );
+        for (balance, value) in [(value + blob_fee - U256::ONE, value), (U256::MAX, U256::MAX)] {
+            let err = allowance(balance, value).unwrap_err();
+            assert!(
+                matches!(
+                    err.as_invalid_transaction(),
+                    Some(RpcInvalidTransactionError::InsufficientFunds { cost, balance: actual })
+                        if *cost == value.saturating_add(blob_fee) && *actual == balance
+                ),
+                "{err}"
+            );
         }
     }
 }

@@ -406,7 +406,7 @@ mod tests {
                 created: false,
                 selfdestructed: false,
                 code_adopted: false,
-                touched: true,
+                touched: false,
                 code: None,
                 storage: &StorageOverlay::default(),
             },
@@ -451,7 +451,7 @@ mod tests {
                     created: false,
                     selfdestructed: false,
                     code_adopted: false,
-                    touched: true,
+                    touched: false,
                     code: None,
                     storage: &storage,
                 }
@@ -463,7 +463,7 @@ mod tests {
                     created: step == 3,
                     selfdestructed: step != 3,
                     code_adopted: false,
-                    touched: true,
+                    touched: false,
                     code: (step == 3).then(|| (code.hash_slow(), &code)),
                     storage: &storage,
                 }

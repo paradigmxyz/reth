@@ -1,5 +1,5 @@
 use blake3::Hasher;
-use eyre::Result;
+use eyre::{Result, WrapErr};
 use rayon::prelude::*;
 use reqwest::Client;
 use reth_db::static_file::iter_static_files;
@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use std::{
     collections::BTreeMap,
     io::Read,
-    path::{Path, PathBuf},
+    path::{Component, Path, PathBuf},
 };
 use tracing::info;
 use url::Url;
@@ -148,6 +148,24 @@ pub struct OutputFileChecksum {
     pub size: u64,
     /// BLAKE3 checksum of the plain file contents.
     pub blake3: String,
+}
+
+impl OutputFileChecksum {
+    /// Returns the path as a relative path that stays below the directory it is joined to.
+    ///
+    /// Only normal components are accepted, plus the `./` prefix tar adds to entry paths.
+    /// Absolute paths and `..` are rejected because the path is joined onto the datadir for
+    /// verification and for removal before retries.
+    pub(crate) fn relative_path(&self) -> Result<&Path> {
+        let path = Path::new(&self.path);
+        eyre::ensure!(
+            path.components().all(|part| matches!(part, Component::Normal(_) | Component::CurDir)) &&
+                path.components().any(|part| matches!(part, Component::Normal(_))),
+            "Invalid manifest output file path `{}`: must be a relative path without `..`",
+            self.path
+        );
+        Ok(path)
+    }
 }
 
 /// A concrete snapshot archive with its download and verification metadata.
@@ -387,6 +405,25 @@ impl SnapshotManifest {
                     .collect()
             }
         }
+    }
+
+    /// Fails if any output file path in the manifest is not a plain relative path.
+    ///
+    /// Output paths come from an untrusted manifest, so this is checked before any archive is
+    /// planned.
+    pub fn validate_output_paths(&self) -> Result<()> {
+        for (key, component) in &self.components {
+            let outputs: Box<dyn Iterator<Item = &OutputFileChecksum>> = match component {
+                ComponentManifest::Single(single) => Box::new(single.output_files.iter()),
+                ComponentManifest::Chunked(chunked) => {
+                    Box::new(chunked.chunk_output_files.iter().flatten())
+                }
+            };
+            for output in outputs {
+                output.relative_path().wrap_err_with(|| format!("In component `{key}`"))?;
+            }
+        }
+        Ok(())
     }
 
     /// Returns the exact download size for a component given a distance ending at [`Self::block`].
@@ -1318,6 +1355,46 @@ mod tests {
         assert_eq!(m.size_for_distance(SnapshotComponentType::State, Some(100)), 100);
         // Missing component
         assert_eq!(m.size_for_distance(SnapshotComponentType::Receipts, None), 0);
+    }
+
+    #[test]
+    fn manifest_output_paths_must_stay_relative() {
+        fn output(path: &str) -> OutputFileChecksum {
+            OutputFileChecksum { path: path.into(), size: 0, blake3: String::new() }
+        }
+
+        let mut manifest = test_manifest();
+        let mut with_outputs = |single: &[&str], chunks: &[&str]| {
+            manifest.components.insert(
+                "state".into(),
+                ComponentManifest::Single(SingleArchive {
+                    file: "state.tar.zst".into(),
+                    size: 1,
+                    decompressed_size: 0,
+                    blake3: None,
+                    output_files: single.iter().map(|path| output(path)).collect(),
+                }),
+            );
+            manifest.components.insert(
+                "transactions".into(),
+                ComponentManifest::Chunked(ChunkedArchive {
+                    blocks_per_file: 500_000,
+                    total_blocks: 500_000,
+                    chunk_sizes: vec![1],
+                    chunk_decompressed_sizes: vec![],
+                    chunk_files: vec![],
+                    chunk_output_files: vec![chunks.iter().map(|path| output(path)).collect()],
+                }),
+            );
+            manifest.validate_output_paths()
+        };
+
+        with_outputs(&["db/mdbx.dat", "./static_files/headers"], &["static_files/a/b"]).unwrap();
+        for bad in ["/etc/passwd", "../outside", "db/../../outside", "db/..", ".", "", "./"] {
+            let err = with_outputs(&[bad], &[]).unwrap_err();
+            assert!(format!("{err:#}").contains("Invalid manifest output file path"), "{bad}");
+            assert!(with_outputs(&[], &[bad]).is_err(), "{bad}");
+        }
     }
 
     #[test]

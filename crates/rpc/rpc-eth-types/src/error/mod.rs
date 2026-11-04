@@ -515,7 +515,7 @@ impl From<MuxError> for EthApiError {
 impl From<DebugInspectorError> for EthApiError {
     fn from(error: DebugInspectorError) -> Self {
         match error {
-            DebugInspectorError::InvalidTracerConfig => Self::InvalidTracerConfig,
+            DebugInspectorError::InvalidTracerConfig(_) => Self::InvalidTracerConfig,
             DebugInspectorError::UnsupportedTracer => Self::Unsupported("unsupported tracer"),
             DebugInspectorError::JsTracerNotEnabled => {
                 Self::Unsupported("JS Tracer is not enabled")
@@ -853,12 +853,7 @@ impl From<RpcInvalidTransactionError> for jsonrpsee_types::error::ErrorObject<'s
     fn from(err: RpcInvalidTransactionError) -> Self {
         match err {
             RpcInvalidTransactionError::Revert(revert) => {
-                // include out data if some
-                rpc_err(
-                    revert.error_code(),
-                    revert.to_string(),
-                    revert.output.as_ref().map(|out| out.as_ref()),
-                )
+                rpc_err(revert.error_code(), revert.to_string(), Some(revert.output.as_ref()))
             }
             RpcInvalidTransactionError::Other(err) => err.to_rpc_error(),
             err => rpc_err(err.error_code(), err.to_string(), None),
@@ -911,7 +906,9 @@ impl From<HandlerError> for RpcInvalidTransactionError {
             HandlerError::InvalidChainId { .. } | HandlerError::MissingChainId => {
                 Self::InvalidChainId
             }
-            HandlerError::IntrinsicGasTooLow { .. } => Self::GasTooLow,
+            HandlerError::IntrinsicGasTooLow { .. } | HandlerError::GasLimitBelowFloor { .. } => {
+                Self::GasTooLow
+            }
             HandlerError::InsufficientFunds { fee, balance } => {
                 Self::InsufficientFunds { cost: fee, balance }
             }
@@ -943,9 +940,7 @@ impl From<HandlerError> for RpcInvalidTransactionError {
 #[derive(Debug, Clone, thiserror::Error)]
 pub struct RevertError {
     /// The transaction output data
-    ///
-    /// Note: this is `None` if output was empty
-    output: Option<Bytes>,
+    output: Bytes,
 }
 
 // === impl RevertError ==
@@ -954,12 +949,8 @@ impl RevertError {
     /// Wraps the output bytes
     ///
     /// Note: this is intended to wrap an EVM revert output
-    pub fn new(output: Bytes) -> Self {
-        if output.is_empty() {
-            Self { output: None }
-        } else {
-            Self { output: Some(output) }
-        }
+    pub const fn new(output: Bytes) -> Self {
+        Self { output }
     }
 
     /// Returns error code to return for this error.
@@ -971,7 +962,9 @@ impl RevertError {
 impl std::fmt::Display for RevertError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str("execution reverted")?;
-        if let Some(reason) = self.output.as_ref().and_then(|out| RevertReason::decode(out)) {
+        if !self.output.is_empty() &&
+            let Some(reason) = RevertReason::decode(&self.output)
+        {
             let error = reason.to_string();
             let mut error = error.as_str();
             if reason.is_revert() {
@@ -1344,10 +1337,14 @@ mod tests {
 
     #[test]
     fn mux_tracer_error_preserves_rpc_message() {
-        let error = MuxError::Child(Box::new(DebugInspectorError::InvalidTracerConfig));
+        let source = serde_json::from_value::<u64>(true.into()).unwrap_err();
+        let error = MuxError::Child(Box::new(DebugInspectorError::InvalidTracerConfig(source)));
         let error = EthApiError::from(error).into_rpc_err();
         assert_eq!(error.code(), jsonrpsee_types::error::INTERNAL_ERROR_CODE);
-        assert_eq!(error.message(), "invalid tracer config");
+        assert_eq!(
+            error.message(),
+            "invalid tracer config: invalid type: boolean `true`, expected u64"
+        );
     }
 
     #[cfg(feature = "js-tracer")]
@@ -1359,5 +1356,35 @@ mod tests {
         let error = EthApiError::from(error).into_rpc_err();
         assert_eq!(error.code(), jsonrpsee_types::error::INTERNAL_ERROR_CODE);
         assert_eq!(error.message(), "the evaluated code is not a JS object");
+    }
+
+    #[test]
+    fn empty_revert_err_has_empty_data() {
+        let err: jsonrpsee_types::error::ErrorObject<'static> =
+            RpcInvalidTransactionError::Revert(RevertError::new(Bytes::new())).into();
+        assert_eq!(err.code(), 3);
+        assert_eq!(err.message(), "execution reverted");
+        assert_eq!(err.data().unwrap().get(), "\"0x\"");
+    }
+
+    #[test]
+    fn intrinsic_gas_errors_preserve_rpc_classification() {
+        for error in [
+            HandlerError::IntrinsicGasTooLow { required: 21_001, got: 21_000 },
+            HandlerError::GasLimitBelowFloor { required: 21_001, got: 21_000 },
+        ] {
+            let error = RpcInvalidTransactionError::from(error);
+            assert!(matches!(error, RpcInvalidTransactionError::GasTooLow));
+            let error = error.into_rpc_err();
+            assert_eq!(error.code(), EthRpcErrorCode::InvalidInput.code());
+            assert_eq!(error.message(), "intrinsic gas too low");
+        }
+        let error = RpcInvalidTransactionError::from(HandlerError::IntrinsicGasGreaterThanCap {
+            required: 21_001,
+            cap: 21_000,
+        })
+        .into_rpc_err();
+        assert_eq!(error.code(), EthRpcErrorCode::TransactionRejected.code());
+        assert_eq!(error.message(), "intrinsic gas exceeds cap: required 21001, cap 21000");
     }
 }

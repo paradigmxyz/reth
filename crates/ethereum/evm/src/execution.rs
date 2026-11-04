@@ -74,7 +74,10 @@ impl InvalidTxError for EthInvalidTxError {
     }
 
     fn is_gas_limit_too_low(&self) -> bool {
-        matches!(self.0, HandlerError::IntrinsicGasTooLow { .. })
+        matches!(
+            self.0,
+            HandlerError::IntrinsicGasTooLow { .. } | HandlerError::GasLimitBelowFloor { .. }
+        )
     }
 
     /// Exposes the wrapped [`HandlerError`] so RPC layers can recover the structured error.
@@ -97,6 +100,8 @@ impl TryFrom<HandlerError> for EthInvalidTxError {
             HandlerError::InvalidChainId { .. } |
             HandlerError::MissingChainId |
             HandlerError::IntrinsicGasTooLow { .. } |
+            HandlerError::GasLimitBelowFloor { .. } |
+            HandlerError::IntrinsicGasGreaterThanCap { .. } |
             HandlerError::InsufficientFunds { .. } |
             HandlerError::RejectCallerWithCode |
             HandlerError::NonceOverflow |
@@ -166,7 +171,7 @@ pub(crate) fn execute_transaction_with_condition<T: EvmTypes>(
     stream_state: bool,
     on_state_update: &mut impl FnMut(StateUpdate),
     transaction: &Recovered<T::Tx>,
-    commit: impl FnOnce(&TxResult<T>) -> reth_evm::CommitChanges,
+    commit: impl FnOnce(&TxResult<T>, evm2::TxStateChanges<'_>) -> reth_evm::CommitChanges,
 ) -> Result<Option<TxResult<T>>, HandlerError>
 where
     T::Tx: Typed2718,
@@ -174,7 +179,7 @@ where
     let mut update = StateUpdate::default();
     let result = match evm.transact(transaction) {
         Ok(executed) => {
-            if commit(executed.result()).should_commit() {
+            if commit(executed.result(), executed.changes()).should_commit() {
                 for changes in executed.account_changes() {
                     block_state
                         .commit_account_changes(changes, stream_state.then_some(&mut update));
@@ -685,7 +690,7 @@ mod tests {
                             stream_state,
                             &mut hook,
                             &transaction,
-                            |_| reth_evm::CommitChanges::Yes,
+                            |_, _| reth_evm::CommitChanges::Yes,
                         )
                         .unwrap()
                         .unwrap();
@@ -1115,13 +1120,21 @@ mod tests {
     }
 
     #[test]
-    fn frame_validation_errors_preserve_transaction_classification() {
+    fn validation_errors_preserve_transaction_classification() {
         let hash = B256::with_last_byte(1);
         for error in [
             HandlerError::InvalidFrameTransaction("EIP-8141 VERIFY frame failed"),
             HandlerError::FrameFeeBudgetTooLow { required: U256::from(2), got: U256::ONE },
+            HandlerError::GasLimitBelowFloor { required: 21_001, got: 21_000 },
+            HandlerError::IntrinsicGasGreaterThanCap { required: 21_001, cap: 21_000 },
         ] {
             let expected = error.clone();
+            let invalid = EthInvalidTxError::try_from(error.clone()).unwrap();
+            assert_eq!(
+                invalid.is_gas_limit_too_low(),
+                matches!(error, HandlerError::GasLimitBelowFloor { .. })
+            );
+            assert!(!invalid.is_gas_limit_too_high());
             assert!(matches!(
                 map_transaction_error(error, hash),
                 BlockExecutionError::Validation(BlockValidationError::InvalidTx {

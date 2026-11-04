@@ -323,6 +323,7 @@ mod tests {
             current,
             created: true,
             selfdestructed,
+            touched: false,
             code: None,
             code_adopted: false,
             touched: true,
