@@ -177,6 +177,22 @@ impl<T: TransactionOrdering> BestTransactions<T> {
         })
     }
 
+    /// If an incoming transaction has descendants in `self.independent`, demotes them by removing
+    /// them from `self.independent`.
+    ///
+    /// This ensures that earlier nonces are always yielded before their descendants, even if a
+    /// higher-nonce descendant was already present in `self.independent` (e.g. following a reorg
+    /// or out-of-order reinsertion).
+    fn demote_independent_descendants(&mut self, tx: &PendingTransaction<T>) {
+        let mut descendant_id = tx.unlocks();
+        while let Some(descendant) = self.all.get(&descendant_id) {
+            if self.independent.remove(descendant) {
+                break;
+            }
+            descendant_id = descendant.unlocks();
+        }
+    }
+
     /// Checks for new transactions that have come into the `PendingPool` after this iterator was
     /// created and inserts them
     fn add_new_transactions(&mut self) {
@@ -188,12 +204,16 @@ impl<T: TransactionOrdering> BestTransactions<T> {
                     IncomingTransaction::Process(tx) => {
                         let tx_id = *tx.transaction.id();
                         if self.ancestor(&tx_id).is_none() {
+                            self.demote_independent_descendants(&tx);
                             self.independent.insert(tx.clone());
                         }
                         self.all.insert(tx_id, tx);
                     }
                     IncomingTransaction::Stash(tx) => {
                         let tx_id = *tx.transaction.id();
+                        if self.ancestor(&tx_id).is_none() {
+                            self.demote_independent_descendants(&tx);
+                        }
                         self.all.insert(tx_id, tx);
                     }
                 }
@@ -1255,5 +1275,50 @@ mod tests {
             "expected a full blob block (5+1 blobs across senders)"
         );
         assert_eq!(included_txs, 2, "expected one 5-blob tx and one 1-blob tx in the block");
+    }
+
+    /// Reproduces issue #27475: when an earlier transaction arrives after its descendant was
+    /// already independent, the descendant must be demoted so nonce ordering is preserved.
+    #[test]
+    fn test_reorg_reinsert_earlier_nonce_order() {
+        let mut pool = PendingPool::new(MockOrdering::default());
+        let mut f = MockTransactionFactory::default();
+
+        // Sender has tx1 (nonce 1) in the pending pool with a higher tip/priority.
+        let tx1 = MockTransaction::eip1559()
+            .rng_hash()
+            .with_nonce(1)
+            .with_priority_fee(200)
+            .with_max_fee(200);
+        let valid_tx1 = f.validated(tx1);
+        pool.add_transaction(Arc::new(valid_tx1.clone()), 0);
+
+        let mut best = pool.best();
+
+        let (tx_sender, tx_receiver) =
+            tokio::sync::broadcast::channel::<PendingTransaction<MockOrdering>>(1000);
+        best.new_transaction_receiver = Some(tx_receiver);
+
+        // Later (e.g. after a chain reorg), tx0 (nonce 0) arrives with a lower tip/priority.
+        let tx0 = MockTransaction::eip1559()
+            .with_sender(valid_tx1.sender())
+            .with_nonce(0)
+            .with_priority_fee(100)
+            .with_max_fee(100);
+        let valid_tx0 = f.validated(tx0);
+
+        let pending_tx0 = PendingTransaction {
+            submission_id: 1,
+            transaction: Arc::new(valid_tx0),
+            priority: Priority::Value(100),
+        };
+        tx_sender.send(pending_tx0).unwrap();
+
+        // First transaction yielded MUST be nonce 0, then nonce 1.
+        let first = best.next().expect("should yield first transaction");
+        assert_eq!(first.nonce(), 0, "expected nonce 0 first, got nonce {}", first.nonce());
+
+        let second = best.next().expect("should yield second transaction");
+        assert_eq!(second.nonce(), 1, "expected nonce 1 second, got nonce {}", second.nonce());
     }
 }
