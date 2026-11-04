@@ -6,7 +6,7 @@ use reth_execution_errors::trie::StateProofError;
 
 /// A trait for deferred RLP-encoding of leaf values.
 pub trait DeferredValueEncoder {
-    /// RLP encodes the value into the provided buffer.
+    /// RLP encodes the value into the provided buffer, appending to the bytes already in it.
     ///
     /// # Arguments
     ///
