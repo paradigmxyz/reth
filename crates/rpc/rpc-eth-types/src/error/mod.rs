@@ -186,7 +186,7 @@ pub enum EthApiError {
     /// Error encountered when converting a transaction type
     #[error(transparent)]
     TransactionConversionError(#[from] TransactionConversionError),
-    /// Error message from a failed muxTracer, without thread-local JavaScript state.
+    /// Error message from a failed `muxTracer`, without thread-local `JavaScript` state.
     #[error("{0}")]
     MuxTracerError(String),
     /// Error thrown when waiting for transaction confirmation times out
@@ -407,7 +407,7 @@ impl From<EthApiError> for jsonrpsee_types::error::ErrorObject<'static> {
                 rpc_error_with_code(EthRpcErrorCode::PrunedHistory.code(), error.to_string())
             }
             EthApiError::Other(err) => err.to_rpc_error(),
-            EthApiError::MuxTracerError(msg) => internal_rpc_err(msg.to_string()),
+            EthApiError::MuxTracerError(msg) => internal_rpc_err(msg),
             EthApiError::BatchTxRecvError(err) => internal_rpc_err(err.to_string()),
             EthApiError::BatchTxSendError => {
                 internal_rpc_err("Batch transaction sender channel closed".to_string())

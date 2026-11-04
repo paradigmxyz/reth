@@ -378,7 +378,7 @@ where
         let tx_hash = *tx.tx_hash();
         let mut transaction_fees = U256::ZERO;
         let gas_output = match builder
-            .execute_transaction_with_commit_condition(tx.as_recovered_ref(), |result| {
+            .execute_transaction_with_commit_condition(tx.as_recovered_ref(), |result, _| {
                 transaction_fees = transaction_tip(
                     tx.inner(),
                     result.tx_gas_used(),

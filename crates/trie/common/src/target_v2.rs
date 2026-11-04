@@ -326,7 +326,6 @@ mod tests {
             touched: false,
             code: None,
             code_adopted: false,
-            touched: true,
             storage,
         }
     }
