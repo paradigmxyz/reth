@@ -21,7 +21,10 @@ use reth_trie_common::{
     keccak_batch, prefix_set::PrefixSet, BranchNodeMasks, BranchNodeRef, BranchNodeV2, Nibbles,
     ProofTrieNodeV2, ProofV2Target, RlpNode, TrieNodeV2,
 };
-use std::{cmp::Ordering, sync::Arc};
+use std::{
+    cmp::{Ordering, Reverse},
+    sync::Arc,
+};
 use tracing::{error, instrument, trace};
 
 /// Number of bytes to pre-allocate for [`ProofCalculator`]'s `rlp_encode_buf` field.
@@ -593,6 +596,12 @@ where
             rlp_nodes_buf.push(child_rlp_node);
         }
 
+        // Batch messages of similar length, since every lane of a batch runs as many
+        // permutations as its longest message.
+        let encoded_len = |index: usize| {
+            encoded_ends[index] - if index == 0 { 0 } else { encoded_ends[index - 1] }
+        };
+        to_hash[..num_to_hash].sort_unstable_by_key(|&index| Reverse(encoded_len(index)));
         for chunk in to_hash[..num_to_hash].chunks(keccak_batch::LANES) {
             let mut inputs = [&[][..]; keccak_batch::LANES];
             for (input, &index) in inputs.iter_mut().zip(chunk) {

@@ -12,7 +12,6 @@ use core::arch::x86_64::*;
 pub const LANES: usize = 8;
 
 /// Keccak-256 rate in bytes.
-#[cfg(all(feature = "std", target_arch = "x86_64"))]
 const RATE: usize = 136;
 
 /// Keccak-256 rate in 64-bit state words.
@@ -65,8 +64,13 @@ pub fn keccak256_batch(inputs: &[&[u8]], out: &mut [B256]) {
     assert_eq!(inputs.len(), out.len());
     assert!(inputs.len() <= LANES, "at most {LANES} inputs, got {}", inputs.len());
 
-    // One scalar permutation is faster than one vector permutation.
-    if inputs.len() == 1 {
+    // Every lane runs as many permutations as the longest message needs, and a vector
+    // permutation costs about 1.65 scalar ones, so batching only pays when the messages need
+    // enough permutations in total.
+    let blocks = |input: &&[u8]| input.len() / RATE + 1;
+    let total_blocks: usize = inputs.iter().map(blocks).sum();
+    let max_blocks = inputs.iter().map(blocks).max().unwrap_or(0);
+    if total_blocks * 3 <= max_blocks * 5 {
         return keccak256_batch_scalar(inputs, out);
     }
 

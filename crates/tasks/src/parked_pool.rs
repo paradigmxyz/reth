@@ -63,11 +63,15 @@ impl ParkedThreadPool {
                 job_finished: Condvar::new(),
             });
             for index in 0..self.num_threads {
-                let shared = Arc::clone(&shared);
-                thread::Builder::new()
+                let thread_shared = Arc::clone(&shared);
+                if let Err(err) = thread::Builder::new()
                     .name(format!("{prefix}-{index:02}"))
-                    .spawn(move || shared.run_thread())
-                    .unwrap_or_else(|err| panic!("failed to spawn {prefix} thread: {err}"));
+                    .spawn(move || thread_shared.run_thread())
+                {
+                    // Let the threads already spawned exit, since no handle will ever drop them.
+                    shared.shut_down();
+                    panic!("failed to spawn {prefix} thread: {err}");
+                }
             }
             shared
         })
@@ -116,8 +120,7 @@ impl ParkedThreadPool {
 impl Drop for ParkedThreadPool {
     fn drop(&mut self) {
         if let Some(shared) = self.shared.get() {
-            shared.lock().shutdown = true;
-            shared.job_available.notify_all();
+            shared.shut_down();
         }
     }
 }
@@ -136,6 +139,12 @@ impl Shared {
     fn lock(&self) -> MutexGuard<'_, State> {
         // Jobs run outside the lock, so nothing panics while holding it.
         self.state.lock().unwrap_or_else(|err| err.into_inner())
+    }
+
+    /// Makes the threads exit once the queue is empty.
+    fn shut_down(&self) {
+        self.lock().shutdown = true;
+        self.job_available.notify_all();
     }
 
     /// Runs broadcast jobs until the pool is dropped.
@@ -165,13 +174,29 @@ impl Shared {
             state = self.lock();
             // SAFETY: as above; the broadcast waits for this run to finish before it returns.
             let job = unsafe { &mut *job_ptr.0.as_ptr() };
+            let mut extra_panic = None;
             if let Err(panic) = result {
-                job.panic.get_or_insert(panic);
+                if job.panic.is_none() {
+                    job.panic = Some(panic);
+                } else {
+                    extra_panic = Some(panic);
+                }
             }
             job.unfinished -= 1;
             if job.unfinished == 0 {
                 // The job may be freed once the lock is released, so it is not touched again.
                 self.job_finished.notify_all();
+            }
+
+            if let Some(panic) = extra_panic {
+                // Only the first panic is resumed. Dropping a payload runs arbitrary code that
+                // may panic itself, so it happens outside the lock, and a payload whose drop
+                // panics is leaked, as std does.
+                drop(state);
+                if let Err(payload) = catch_unwind(AssertUnwindSafe(|| drop(panic))) {
+                    std::mem::forget(payload);
+                }
+                state = self.lock();
             }
         }
     }
@@ -231,6 +256,35 @@ mod tests {
     }
 
     #[test]
+    fn broadcast_survives_second_panic() {
+        /// A panic payload whose drop panics.
+        struct PanicOnDrop;
+
+        impl Drop for PanicOnDrop {
+            fn drop(&mut self) {
+                panic!("payload drop");
+            }
+        }
+
+        let pool = ParkedThreadPool::new(2, "parked-double");
+        let barrier = Barrier::new(2);
+        let result = catch_unwind(AssertUnwindSafe(|| {
+            pool.broadcast(2, || {
+                // Both runs panic, so one payload is dropped by the pool.
+                barrier.wait();
+                std::panic::panic_any(PanicOnDrop);
+            })
+        }));
+        std::mem::forget(result.unwrap_err());
+
+        let runs = AtomicUsize::new(0);
+        pool.broadcast(2, || {
+            runs.fetch_add(1, Ordering::Relaxed);
+        });
+        assert_eq!(runs.into_inner(), 2);
+    }
+
+    #[test]
     fn broadcast_caps_at_pool_size() {
         let pool = ParkedThreadPool::new(2, "parked-cap");
         let runs = AtomicUsize::new(0);
@@ -280,11 +334,14 @@ mod tests {
         assert!(panic.downcast_ref::<String>().unwrap().contains("worker panic"));
         assert_eq!(finished.load(Ordering::Relaxed), 2);
 
-        // The thread that panicked keeps serving broadcasts.
-        let runs = AtomicUsize::new(0);
+        // The thread that panicked keeps serving broadcasts: three runs that wait for each other
+        // need all three threads.
+        let names = Mutex::new(HashSet::new());
+        let barrier = Barrier::new(3);
         pool.broadcast(3, || {
-            runs.fetch_add(1, Ordering::Relaxed);
+            barrier.wait();
+            names.lock().unwrap().insert(thread::current().name().unwrap().to_string());
         });
-        assert_eq!(runs.into_inner(), 3);
+        assert_eq!(names.into_inner().unwrap().len(), 3);
     }
 }
