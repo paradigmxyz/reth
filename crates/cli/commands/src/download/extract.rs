@@ -27,6 +27,9 @@ use tracing::{info, warn};
 use url::Url;
 use zstd::stream::read::Decoder as ZstdDecoder;
 
+#[cfg(unix)]
+use std::{fs::Permissions, os::unix::fs::PermissionsExt};
+
 const EXTENSION_TAR_LZ4: &str = ".tar.lz4";
 const EXTENSION_TAR_ZSTD: &str = ".tar.zst";
 const STREAMING_EXTRACTION_PROGRESS_MIN_FILE_SIZE: u64 = 64 * 1024 * 1024;
@@ -126,6 +129,9 @@ fn unpack_archive<R: Read>(
         format!("failed to read archive entries for `{}`", target_dir.display())
     })?;
 
+    #[cfg(unix)]
+    let mut restricted_dirs = Vec::new();
+
     for entry in entries {
         let mut entry = entry.wrap_err_with(|| {
             format!("failed to read archive entry for `{}`", target_dir.display())
@@ -136,6 +142,45 @@ fn unpack_archive<R: Read>(
             static_files_dir,
             progress.as_deref_mut(),
         )?;
+
+        #[cfg(unix)]
+        if entry.header().entry_type().is_dir() &&
+            let Some(dir) = entry_destination_path(&entry, target_dir, static_files_dir)?
+        {
+            make_dir_writable(dir, &mut restricted_dirs)?;
+        }
+    }
+
+    #[cfg(unix)]
+    restore_dir_modes(restricted_dirs)?;
+
+    Ok(())
+}
+
+/// Adds the owner bits to a directory that the archive made unwritable, so its entries can be
+/// extracted, and records its archived mode for [`restore_dir_modes`].
+#[cfg(unix)]
+fn make_dir_writable(dir: PathBuf, restricted_dirs: &mut Vec<(PathBuf, u32)>) -> Result<()> {
+    let mode = std::fs::metadata(&dir)
+        .wrap_err_with(|| format!("failed to read mode of `{}`", dir.display()))?
+        .permissions()
+        .mode();
+    if mode & 0o700 != 0o700 {
+        std::fs::set_permissions(&dir, Permissions::from_mode(mode | 0o700))
+            .wrap_err_with(|| format!("failed to set mode of `{}`", dir.display()))?;
+        restricted_dirs.push((dir, mode));
+    }
+
+    Ok(())
+}
+
+/// Applies the archived modes of directories after their contents are extracted, deepest first.
+#[cfg(unix)]
+fn restore_dir_modes(mut restricted_dirs: Vec<(PathBuf, u32)>) -> Result<()> {
+    restricted_dirs.sort_unstable_by(|(a, _), (b, _)| b.cmp(a));
+    for (dir, mode) in restricted_dirs {
+        std::fs::set_permissions(&dir, Permissions::from_mode(mode))
+            .wrap_err_with(|| format!("failed to set mode of `{}`", dir.display()))?;
     }
 
     Ok(())
@@ -639,6 +684,61 @@ mod tests {
 
             assert!(format!("{err:#}").contains("Archive links are unsupported"));
             assert!(std::fs::symlink_metadata(target.path().join("p")).is_err());
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn read_only_directory_entries_extract_their_contents() {
+        for custom_static_files in [false, true] {
+            let target = tempfile::tempdir().unwrap();
+            let custom = target.path().join("custom");
+            let static_files = if custom_static_files {
+                custom.clone()
+            } else {
+                target.path().join("static_files")
+            };
+            let dirs = [("a", 0o555), ("a/b", 0o500), ("static_files/sub", 0o555)];
+            let mut archive = tar::Builder::new(Vec::new());
+            for (path, mode) in dirs {
+                let mut dir = tar::Header::new_gnu();
+                dir.set_entry_type(tar::EntryType::Directory);
+                dir.set_size(0);
+                dir.set_mode(mode);
+                dir.set_cksum();
+                archive.append_data(&mut dir, path, std::io::empty()).unwrap();
+            }
+            for path in ["a/b/file", "static_files/sub/headers"] {
+                let mut file = tar::Header::new_gnu();
+                file.set_size(4);
+                file.set_mode(0o644);
+                file.set_cksum();
+                archive.append_data(&mut file, path, b"data".as_slice()).unwrap();
+            }
+            let tar = archive.into_inner().unwrap();
+
+            unpack_archive(
+                Archive::new(tar.as_slice()),
+                target.path(),
+                custom_static_files.then_some(custom.as_path()),
+                None,
+            )
+            .unwrap();
+
+            assert_eq!(fs::read(target.path().join("a/b/file")).unwrap(), b"data");
+            assert_eq!(fs::read(static_files.join("sub/headers")).unwrap(), b"data");
+            let dirs = [
+                (target.path().join("a"), 0o555),
+                (target.path().join("a/b"), 0o500),
+                (static_files.join("sub"), 0o555),
+            ];
+            for (path, mode) in &dirs {
+                assert_eq!(std::fs::metadata(path).unwrap().permissions().mode() & 0o777, *mode);
+            }
+            // Make the directories removable.
+            for (path, _) in dirs.iter().rev() {
+                std::fs::set_permissions(path, Permissions::from_mode(0o755)).unwrap();
+            }
         }
     }
 
