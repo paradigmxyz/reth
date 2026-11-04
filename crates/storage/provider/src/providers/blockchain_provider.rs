@@ -343,8 +343,7 @@ impl<N: ProviderNodeTypes> StateRangeProvider for HistoricalStateRangeView<N> {
 
     fn account_range_proof(&self, keys: &[B256]) -> ProviderResult<Vec<Bytes>> {
         let multiproof = Proof::new(&self.provider, &self.provider)
-            .multiproof(MultiProofTargets::accounts(keys.iter().copied()))
-            .map_err(ProviderError::from)?;
+            .multiproof(MultiProofTargets::accounts(keys.iter().copied()))?;
         Ok(multiproof
             .account_subtree
             .into_nodes_sorted()
@@ -359,8 +358,7 @@ impl<N: ProviderNodeTypes> StateRangeProvider for HistoricalStateRangeView<N> {
         keys: &[B256],
     ) -> ProviderResult<Vec<Bytes>> {
         let multiproof = StorageProof::new_hashed(&self.provider, &self.provider, hashed_address)
-            .storage_multiproof(keys.iter().copied().collect())
-            .map_err(ProviderError::from)?;
+            .storage_multiproof(keys.iter().copied().collect())?;
         Ok(multiproof.subtree.into_nodes_sorted().into_iter().map(|(_, bytes)| bytes).collect())
     }
 }
