@@ -52,6 +52,22 @@ pub trait ReceiptProvider {
         &self,
         block_range: RangeInclusive<BlockNumber>,
     ) -> ProviderResult<Vec<Vec<Self::Receipt>>>;
+
+    /// Returns the block of the lowest receipt stored in static files, or `0` if receipts are
+    /// stored from transaction 0, if the receipt of transaction `tx` is stored in static files as
+    /// well.
+    ///
+    /// If the last transaction pruned by a receipts prune checkpoint is stored in static files,
+    /// its receipts were moved there rather than deleted.
+    ///
+    /// Returns `None` if the receipt of `tx` is not stored in static files or the provider does not
+    /// track them.
+    fn static_file_receipts_start_block(
+        &self,
+        _tx: TxNumber,
+    ) -> ProviderResult<Option<BlockNumber>> {
+        Ok(None)
+    }
 }
 
 /// Trait extension for `ReceiptProvider`, for types that implement `BlockId` conversion.
