@@ -9,7 +9,7 @@ use alloy_transport::{RpcError, TransportErrorKind};
 pub use api::{AsEthApiError, FromEthApiError, FromEvmError, IntoEthApiError};
 use core::time::Duration;
 use evm2::{interpreter::InstrStop, registry::HandlerError};
-use evm2_inspectors::tracing::{DebugInspectorError, MuxError};
+use evm2_inspectors::tracing::DebugInspectorError;
 use reth_errors::{BlockExecutionError, BlockValidationError, ProviderError, RethError};
 use reth_primitives_traits::transaction::{error::InvalidTransactionError, signed::RecoveryError};
 use reth_rpc_convert::{CallFeesError, EthTxEnvError, TransactionConversionError};
@@ -490,12 +490,6 @@ impl From<evm2_inspectors::tracing::js::JsInspectorError> for EthApiError {
     }
 }
 
-impl From<MuxError> for EthApiError {
-    fn from(error: MuxError) -> Self {
-        Self::MuxTracerError(error.to_string())
-    }
-}
-
 impl From<DebugInspectorError> for EthApiError {
     fn from(error: DebugInspectorError) -> Self {
         match error {
@@ -504,7 +498,7 @@ impl From<DebugInspectorError> for EthApiError {
             DebugInspectorError::JsTracerNotEnabled => {
                 Self::Unsupported("JS Tracer is not enabled")
             }
-            DebugInspectorError::MuxInspector(err) => err.into(),
+            DebugInspectorError::MuxInspector(err) => Self::MuxTracerError(err.to_string()),
             DebugInspectorError::Database(err) => Self::Internal(RethError::other(err)),
             #[cfg(feature = "js-tracer")]
             DebugInspectorError::JsInspector(err) => err.into(),
