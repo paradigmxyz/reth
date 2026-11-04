@@ -1362,11 +1362,15 @@ impl ArenaParallelSparseTrie {
         }
 
         // A job's children all have smaller heights, so hashing by increasing height hashes
-        // every job after its children.
+        // every job after its children. Within a height, longest first, so that each batch
+        // holds encodings of similar lengths and its lanes absorb a similar number of blocks.
         hashing.order.clear();
         hashing.order.extend(0..hashing.jobs.len() as u32);
         let jobs = &hashing.jobs;
-        hashing.order.sort_unstable_by_key(|&id| jobs[id as usize].height);
+        hashing.order.sort_unstable_by_key(|&id| {
+            let job = &jobs[id as usize];
+            (job.height, Reverse(job.len))
+        });
 
         let mut hashes = [B256::ZERO; keccak_batch::LANES];
         let jobs = &hashing.jobs;

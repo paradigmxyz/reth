@@ -104,7 +104,9 @@ fn run(len: usize, f: &(dyn Fn(usize) + Sync)) {
 
     // SAFETY: the job is closed and every worker that joined it has left.
     unsafe { *shared.job.get() = None };
-    let panic = own_panic.or_else(|| shared.panic.lock().unwrap_or_else(|e| e.into_inner()).take());
+    // Always empty the slot, so a worker's panic never leaks into a later job.
+    let worker_panic = shared.panic.lock().unwrap_or_else(|e| e.into_inner()).take();
+    let panic = own_panic.or(worker_panic);
     shared.busy.store(false, Ordering::Release);
     if let Some(payload) = panic {
         panic::resume_unwind(payload);
@@ -124,7 +126,8 @@ static SHARED: Shared = Shared {
 fn workers() -> &'static [Thread] {
     static WORKERS: OnceLock<Vec<Thread>> = OnceLock::new();
     WORKERS.get_or_init(|| {
-        let threads = thread::available_parallelism().map_or(1, |n| n.get());
+        // Size the pool like rayon's global pool, which reth limits to its configured cores.
+        let threads = rayon::current_num_threads();
         (1..threads)
             .filter_map(|i| {
                 thread::Builder::new()
