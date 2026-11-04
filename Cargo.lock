@@ -9860,7 +9860,6 @@ dependencies = [
  "serde",
  "smolgen",
  "strum 0.27.2",
- "tempfile",
  "thiserror 2.0.21",
  "tokio",
  "toml",
