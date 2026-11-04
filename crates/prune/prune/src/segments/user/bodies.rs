@@ -5,7 +5,7 @@ use crate::{
 use alloy_primitives::BlockNumber;
 use reth_provider::{BlockReader, PruneCheckpointReader, StaticFileProviderFactory};
 use reth_prune_types::{
-    PruneInterruptReason, PruneMode, PruneProgress, PrunePurpose, PruneSegment, SegmentOutput,
+    PruneInterruptReason, PruneMode, PrunePurpose, PruneSegment, SegmentOutput,
     SegmentOutputCheckpoint,
 };
 use reth_static_file_types::StaticFileSegment;
@@ -122,22 +122,8 @@ where
         };
 
         // Use the coordinated to_block instead of input.to_block
-        let target_block = input.to_block;
         let adjusted_input = PruneInput { to_block, ..input };
-        let mut output = segments::prune_static_files(
-            provider,
-            adjusted_input,
-            StaticFileSegment::Transactions,
-        )?;
-
-        // Limited by tx_lookup: more bodies become prunable once its checkpoint is committed.
-        if to_block < target_block {
-            output.progress = PruneProgress::HasMoreData(PruneInterruptReason::WaitingOnSegment(
-                PruneSegment::TransactionLookup,
-            ));
-        }
-
-        Ok(output)
+        segments::prune_static_files(provider, adjusted_input, StaticFileSegment::Transactions)
     }
 }
 
@@ -539,9 +525,6 @@ mod tests {
             TestCase::new()
                 .with_tx_lookup(PruneMode::Before(600_000), Some(250_000))
                 .with_bodies_mode(PruneMode::Before(600_000))
-                .with_expected_progress(PruneProgress::HasMoreData(
-                    PruneInterruptReason::WaitingOnSegment(PruneSegment::TransactionLookup),
-                ))
                 .with_lowest_block(499_999), // No jars deleted
             // Scenario 5: Both use Distance, tx_lookup caught up
             // With tip=1_523_000, Distance(500_000) targets block 1_023_000
@@ -561,9 +544,6 @@ mod tests {
                 .with_tx_lookup(PruneMode::Distance(1_000_000), Some(523_000))
                 .with_bodies_mode(PruneMode::Distance(500_000))
                 .with_expected_pruned(1000) // Jar 0 deleted
-                .with_expected_progress(PruneProgress::HasMoreData(
-                    PruneInterruptReason::WaitingOnSegment(PruneSegment::TransactionLookup),
-                ))
                 .with_lowest_block(999_999), // Jar 0 (0-499_999) deleted
             // Scenario 7: tx_lookup more aggressive than bodies (deletes jar 0 and 1)
             // tx_lookup: Before(1_100_000) -> prune up to 1_099_999
