@@ -1,6 +1,6 @@
 //! Multi-lane Keccak-256 that hashes up to [`LANES`] independent messages in one pass.
 //!
-//! A single Keccak-f[1600] permutation is latency bound, so running the permutations of
+//! A single Keccak-f\[1600\] permutation is latency bound, so running the permutations of
 //! independent messages side by side in SIMD registers costs about as much as running one.
 
 use alloy_primitives::{keccak256, B256};
@@ -23,7 +23,7 @@ const RATE_WORDS: usize = RATE / 8;
 #[cfg(target_arch = "x86_64")]
 const DIGEST_WORDS: usize = 4;
 
-/// Keccak-f[1600] round constants.
+/// Keccak-f\[1600\] round constants.
 #[cfg(target_arch = "x86_64")]
 const ROUND_CONSTANTS: [u64; 24] = [
     0x0000000000000001,
@@ -184,7 +184,7 @@ fn absorb_lanes(
     }
 }
 
-/// Expands to the 24 rounds of Keccak-f[1600] over `$a`, an array of 25 vectors that each hold
+/// Expands to the 24 rounds of Keccak-f\[1600\] over `$a`, an array of 25 vectors that each hold
 /// one state word of every lane.
 ///
 /// `$xor` and `$xor5` XOR 2 and 5 vectors, `$chi` computes `a ^ (!b & c)`, `$rol` is a macro
@@ -261,7 +261,7 @@ macro_rules! rol_avx2 {
     };
 }
 
-/// Keccak-f[1600] over 8 lanes.
+/// Keccak-f\[1600\] over 8 lanes.
 #[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "avx512f")]
 fn keccak_f1600_avx512(state: &mut [__m512i; 25]) {
@@ -285,7 +285,7 @@ fn chi_avx512(a: __m512i, b: __m512i, c: __m512i) -> __m512i {
     _mm512_ternarylogic_epi64::<0xD2>(a, b, c)
 }
 
-/// Keccak-f[1600] over 4 lanes.
+/// Keccak-f\[1600\] over 4 lanes.
 #[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "avx2")]
 fn keccak_f1600_avx2(state: &mut [__m256i; 25]) {
