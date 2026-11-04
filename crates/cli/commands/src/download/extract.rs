@@ -129,9 +129,6 @@ fn unpack_archive<R: Read>(
         format!("failed to read archive entries for `{}`", target_dir.display())
     })?;
 
-    #[cfg(unix)]
-    let mut restricted_dirs = Vec::new();
-
     for entry in entries {
         let mut entry = entry.wrap_err_with(|| {
             format!("failed to read archive entry for `{}`", target_dir.display())
@@ -145,41 +142,28 @@ fn unpack_archive<R: Read>(
 
         #[cfg(unix)]
         if entry.header().entry_type().is_dir() &&
-            let Some(dir) = entry_destination_path(&entry, target_dir, static_files_dir)?
+            let Some(dir) = entry_destination_path(&entry, target_dir, static_files_dir)? &&
+            static_files_dir != Some(dir.as_path())
         {
-            make_dir_writable(dir, &mut restricted_dirs)?;
+            make_dir_writable(&dir)?;
         }
     }
-
-    #[cfg(unix)]
-    restore_dir_modes(restricted_dirs)?;
 
     Ok(())
 }
 
-/// Adds the owner bits to a directory that the archive made unwritable, so its entries can be
-/// extracted, and records its archived mode for [`restore_dir_modes`].
+/// Gives the owner full access to a directory the archive made restrictive. tar applies a
+/// directory's archived mode as soon as it creates it, which would otherwise reject the entries
+/// inside it. The mode is not restored: reth must write into its datadir directories later, and a
+/// restore would race with other archives extracting into the same directory.
 #[cfg(unix)]
-fn make_dir_writable(dir: PathBuf, restricted_dirs: &mut Vec<(PathBuf, u32)>) -> Result<()> {
-    let mode = std::fs::metadata(&dir)
+fn make_dir_writable(dir: &Path) -> Result<()> {
+    let mode = std::fs::metadata(dir)
         .wrap_err_with(|| format!("failed to read mode of `{}`", dir.display()))?
         .permissions()
         .mode();
     if mode & 0o700 != 0o700 {
-        std::fs::set_permissions(&dir, Permissions::from_mode(mode | 0o700))
-            .wrap_err_with(|| format!("failed to set mode of `{}`", dir.display()))?;
-        restricted_dirs.push((dir, mode));
-    }
-
-    Ok(())
-}
-
-/// Applies the archived modes of directories after their contents are extracted, deepest first.
-#[cfg(unix)]
-fn restore_dir_modes(mut restricted_dirs: Vec<(PathBuf, u32)>) -> Result<()> {
-    restricted_dirs.sort_unstable_by(|(a, _), (b, _)| b.cmp(a));
-    for (dir, mode) in restricted_dirs {
-        std::fs::set_permissions(&dir, Permissions::from_mode(mode))
+        std::fs::set_permissions(dir, Permissions::from_mode(mode | 0o700))
             .wrap_err_with(|| format!("failed to set mode of `{}`", dir.display()))?;
     }
 
@@ -727,17 +711,11 @@ mod tests {
 
             assert_eq!(fs::read(target.path().join("a/b/file")).unwrap(), b"data");
             assert_eq!(fs::read(static_files.join("sub/headers")).unwrap(), b"data");
-            let dirs = [
-                (target.path().join("a"), 0o555),
-                (target.path().join("a/b"), 0o500),
-                (static_files.join("sub"), 0o555),
-            ];
-            for (path, mode) in &dirs {
-                assert_eq!(std::fs::metadata(path).unwrap().permissions().mode() & 0o777, *mode);
-            }
-            // Make the directories removable.
-            for (path, _) in dirs.iter().rev() {
-                std::fs::set_permissions(path, Permissions::from_mode(0o755)).unwrap();
+            for path in
+                [target.path().join("a"), target.path().join("a/b"), static_files.join("sub")]
+            {
+                let mode = std::fs::metadata(path).unwrap().permissions().mode();
+                assert_eq!(mode & 0o700, 0o700);
             }
         }
     }
