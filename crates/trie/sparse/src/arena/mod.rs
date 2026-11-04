@@ -2,6 +2,7 @@ mod branch_child_idx;
 mod cursor;
 mod node_arena;
 mod nodes;
+mod pool;
 
 use branch_child_idx::{BranchChildIdx, BranchChildIter};
 use cursor::{ArenaCursor, NextResult, SeekResult};
@@ -9,13 +10,14 @@ use node_arena::{BranchChild, Index, NodeArena};
 use nodes::{ArenaSparseNode, ArenaSparseNodeBranch, ArenaSparseNodeState};
 
 use crate::{
-    LeafLookup, LeafLookupError, LeafUpdate, SparseTrie, SparseTrieUpdates, TrieNodeEpoch,
+    keccak_batch, LeafLookup, LeafLookupError, LeafUpdate, SparseTrie, SparseTrieUpdates,
+    TrieNodeEpoch,
 };
 use alloc::{borrow::Cow, boxed::Box, vec::Vec};
 use alloy_primitives::{keccak256, map::B256Map, B256};
+use alloy_rlp::Encodable;
 use alloy_trie::TrieMask;
 use core::{cmp::Reverse, mem};
-use rayon::iter::{IntoParallelIterator, IntoParallelRefMutIterator, ParallelIterator};
 use reth_execution_errors::{SparseTrieErrorKind, SparseTrieResult};
 use reth_trie_common::{
     BranchNodeMasks, BranchNodeRef, ExtensionNodeRef, LeafNodeRef, Nibbles, ProofTrieNodeV2,
@@ -99,6 +101,8 @@ struct ArenaTrieBuffers {
     rlp_buf: Vec<u8>,
     /// Reusable buffer for child `RlpNode`s during hashing.
     rlp_node_buf: Vec<RlpNode>,
+    /// Reusable state for deferred, batched hashing.
+    hashing: DeferredHashing,
 }
 
 impl ArenaTrieBuffers {
@@ -108,6 +112,158 @@ impl ArenaTrieBuffers {
         }
         self.rlp_buf.clear();
         self.rlp_node_buf.clear();
+        self.hashing.clear();
+    }
+}
+
+/// Sentinel for "no hash job" in [`DeferredHashing`].
+const NO_HASH_JOB: u32 = u32::MAX;
+
+/// A node encoding waiting for its hash, see [`ArenaParallelSparseTrie::update_cached_rlp`].
+#[derive(Debug, Clone, Copy)]
+struct HashJob {
+    /// Offset of the encoding in [`DeferredHashing::bytes`].
+    start: u32,
+    /// Length of the encoding.
+    len: u32,
+    /// The job whose encoding embeds this job's hash, or [`NO_HASH_JOB`].
+    parent: u32,
+    /// Offset of this job's hash within its parent's encoding.
+    parent_offset: u32,
+    /// The arena node whose cached `RlpNode` this job's hash completes. `None` for a branch
+    /// wrapped in an extension, whose hash only completes the extension's encoding.
+    target: Option<Index>,
+    /// Zero for a job without hashed children, otherwise one more than its tallest child's.
+    height: u8,
+}
+
+/// Reusable state for the deferred, batched hashing of
+/// [`ArenaParallelSparseTrie::update_cached_rlp`].
+#[derive(Debug, Clone, Default)]
+struct DeferredHashing {
+    /// Encodings waiting for their hash.
+    jobs: Vec<HashJob>,
+    /// The encodings of `jobs`, back to back.
+    bytes: Vec<u8>,
+    /// Finished branches with a hash job whose parent branch is not encoded yet.
+    pending: Vec<(Index, u32)>,
+    /// Dirty branches whose trie update is recorded once their children's hashes are known.
+    updated_branches: Vec<(Index, Nibbles)>,
+    /// Job IDs sorted by height, built by the flush.
+    order: Vec<u32>,
+}
+
+impl DeferredHashing {
+    /// Drops all jobs, keeping the allocations.
+    fn clear(&mut self) {
+        self.jobs.clear();
+        self.bytes.clear();
+        self.pending.clear();
+        self.updated_branches.clear();
+    }
+
+    /// Registers the encoding at `start..` in `bytes` and returns its `RlpNode`: the encoding
+    /// itself when shorter than 32 bytes, otherwise a placeholder hash and the new job.
+    fn finish_encoding(
+        &mut self,
+        start: usize,
+        height: u8,
+        target: Option<Index>,
+    ) -> (RlpNode, u32) {
+        let len = self.bytes.len() - start;
+        if len < 32 {
+            let rlp_node = RlpNode::from_raw(&self.bytes[start..]).expect("encoding fits inline");
+            self.bytes.truncate(start);
+            return (rlp_node, NO_HASH_JOB);
+        }
+        let job = self.jobs.len() as u32;
+        self.jobs.push(HashJob {
+            start: start as u32,
+            len: len as u32,
+            parent: NO_HASH_JOB,
+            parent_offset: 0,
+            target,
+            height,
+        });
+        (RlpNode::word_rlp(&B256::ZERO), job)
+    }
+
+    /// Encodes a leaf, see [`Self::finish_encoding`].
+    fn push_leaf(&mut self, key: &Nibbles, value: &[u8], target: Index) -> (RlpNode, u32) {
+        let start = self.bytes.len();
+        LeafNodeRef { key, value }.encode(&mut self.bytes);
+        self.finish_encoding(start, 0, Some(target))
+    }
+
+    /// Encodes a branch over `children` and links the jobs of its hashed children to it, see
+    /// [`Self::finish_encoding`].
+    fn push_branch(
+        &mut self,
+        children: &[RlpNode],
+        state_mask: TrieMask,
+        child_jobs: &[u32; 16],
+        height: u8,
+        target: Option<Index>,
+    ) -> (RlpNode, u32) {
+        let start = self.bytes.len();
+        BranchNodeRef::new(children, state_mask).encode(&mut self.bytes);
+        let len = self.bytes.len() - start;
+        let (rlp_node, job) = self.finish_encoding(start, height, target);
+        if job == NO_HASH_JOB {
+            debug_assert!(
+                child_jobs.iter().all(|&j| j == NO_HASH_JOB),
+                "inline branch with hashed child"
+            );
+            return (rlp_node, job);
+        }
+
+        // The children follow the list header in nibble order, an absent child as one byte,
+        // and the empty value comes last.
+        let payload_len =
+            children.iter().map(|c| c.len()).sum::<usize>() + (16 - children.len()) + 1;
+        let mut offset = len - payload_len;
+        let mut dense = 0;
+        for nibble in 0..16u8 {
+            if !state_mask.is_bit_set(nibble) {
+                offset += 1;
+                continue;
+            }
+            let child_job = child_jobs[dense];
+            if child_job != NO_HASH_JOB {
+                // Skip the hash's one-byte string header.
+                let child = &mut self.jobs[child_job as usize];
+                child.parent = job;
+                child.parent_offset = offset as u32 + 1;
+            }
+            offset += children[dense].len();
+            dense += 1;
+        }
+        (rlp_node, job)
+    }
+
+    /// Encodes an extension over `child`, the `RlpNode` of the branch it wraps, and links the
+    /// branch's job to it, see [`Self::finish_encoding`].
+    fn push_extension(
+        &mut self,
+        short_key: &Nibbles,
+        child: &RlpNode,
+        child_job: u32,
+        target: Index,
+    ) -> (RlpNode, u32) {
+        let start = self.bytes.len();
+        ExtensionNodeRef::new(short_key, child).encode(&mut self.bytes);
+        let len = self.bytes.len() - start;
+        let height =
+            if child_job == NO_HASH_JOB { 0 } else { self.jobs[child_job as usize].height + 1 };
+        let (rlp_node, job) = self.finish_encoding(start, height, Some(target));
+        if child_job != NO_HASH_JOB {
+            debug_assert_ne!(job, NO_HASH_JOB, "inline extension with hashed child");
+            // The child's encoding, a hash, ends the extension's.
+            let child = &mut self.jobs[child_job as usize];
+            child.parent = job;
+            child.parent_offset = (len - 32) as u32;
+        }
+        (rlp_node, job)
     }
 }
 
@@ -572,8 +728,8 @@ impl Default for ArenaParallelismThresholds {
 /// Nodes are lazily revealed from proof data via [`SparseTrie::reveal_nodes`]. Each node is
 /// placed into the upper arena or delegated to its subtrie based on path depth. Unrevealed
 /// children are stored as blinded `BranchChild`s referencing their RLP encoding.
-/// When multiple subtries have pending reveals, they are processed in parallel using rayon
-/// (controlled by [`ArenaParallelismThresholds::min_revealed_nodes`]).
+/// When multiple subtries have pending reveals, they are processed in parallel on the arena's
+/// worker pool (controlled by [`ArenaParallelismThresholds::min_revealed_nodes`]).
 ///
 /// ## Leaf Operations
 ///
@@ -952,10 +1108,12 @@ impl ArenaParallelSparseTrie {
     ///   `rlp_node_buf`.
     /// - Dirty branch children are pushed onto `stack` and processed recursively first.
     ///
-    /// When a dirty branch child finishes and is popped, the parent resumes iteration after
-    /// the child's nibble. Once all children of a branch are processed, the branch is encoded
-    /// via `BranchNodeRef` using the last N entries on `rlp_node_buf`, then replaced with a
-    /// single result `RlpNode`.
+    /// Hashing is deferred: every node whose encoding is 32 bytes or longer is encoded with zeroed
+    /// child hashes and registered with [`DeferredHashing`], and its state is set to `Cached` with
+    /// a placeholder hash. Once the walk finishes, [`Self::flush_hash_jobs`] hashes the jobs
+    /// bottom-up, [`keccak_batch::LANES`] at a time, patches each hash into its parent's encoding
+    /// and replaces the placeholders. An encoding's layout depends only on whether its children
+    /// are hashed, never on the hashes themselves, so the placeholders change no layout.
     #[instrument(level = "trace", target = TRACE_TARGET, skip_all, fields(base_path = ?base_path), ret)]
     fn update_cached_rlp(
         arena: &mut NodeArena,
@@ -968,8 +1126,10 @@ impl ArenaParallelSparseTrie {
         let rlp_buf = &mut buffers.rlp_buf;
         let rlp_node_buf = &mut buffers.rlp_node_buf;
         let updates = &mut buffers.updates;
+        let hashing = &mut buffers.hashing;
 
         rlp_node_buf.clear();
+        hashing.clear();
 
         // Step 1: Handle trivial roots that don't need the stack-based walk.
         // Empty roots and leaves are encoded in place. Already-cached branches need no work.
@@ -1025,9 +1185,9 @@ impl ArenaParallelSparseTrie {
             let head_idx = cursor.head().expect("cursor is non-empty").index;
             let head_path = cursor.head_path();
 
-            // The branch at `head_idx` is exhausted. All its dirty child branches
-            // have already been encoded and cached. Collect all children's RLP nodes
-            // and encode the branch.
+            // The branch at `head_idx` is exhausted. All its dirty child branches have already
+            // been encoded, and those still waiting for their hash are on top of
+            // `hashing.pending`. Collect all children's RLP nodes and encode the branch.
             trace!(
                 target: TRACE_TARGET,
                 branch_path = ?head_path,
@@ -1036,7 +1196,25 @@ impl ArenaParallelSparseTrie {
                 "Calculating branch RlpNode",
             );
 
+            // The pending entries of this branch's children are the topmost ones: entries of
+            // deeper descendants were consumed by their own parents, and entries below them
+            // belong to earlier siblings of this branch.
+            let pending_start = {
+                let children = &arena[head_idx].branch_ref().children;
+                let mut start = hashing.pending.len();
+                while start > 0 &&
+                    children
+                        .iter()
+                        .any(|c| c.revealed_index() == Some(hashing.pending[start - 1].0))
+                {
+                    start -= 1;
+                }
+                start
+            };
+
             rlp_node_buf.clear();
+            let mut child_jobs = [NO_HASH_JOB; 16];
+            let mut height = 0u8;
             let mut node_epoch = TrieNodeEpoch::UNMODIFIED;
             let state_mask = arena[head_idx].branch_ref().state_mask;
             for (dense_idx, _nibble) in BranchChildIter::new(state_mask) {
@@ -1048,10 +1226,10 @@ impl ArenaParallelSparseTrie {
                     Some(child_idx) => {
                         match &arena[child_idx] {
                             ArenaSparseNode::Leaf { .. } => {
-                                Self::encode_leaf(
+                                child_jobs[dense_idx.get()] = Self::encode_leaf_deferred(
                                     arena,
                                     child_idx,
-                                    rlp_buf,
+                                    hashing,
                                     rlp_node_buf,
                                     new_epoch,
                                 );
@@ -1063,6 +1241,12 @@ impl ArenaParallelSparseTrie {
                                 };
                                 let rlp_node = rlp_node.clone();
                                 rlp_node_buf.push(rlp_node);
+                                if let Some(&(_, job)) = hashing.pending[pending_start..]
+                                    .iter()
+                                    .find(|(idx, _)| *idx == child_idx)
+                                {
+                                    child_jobs[dense_idx.get()] = job;
+                                }
                             }
                             ArenaSparseNode::Subtrie(subtrie) => {
                                 let subtrie_root = &subtrie.arena[subtrie.root];
@@ -1086,6 +1270,10 @@ impl ArenaParallelSparseTrie {
                                 unreachable!("Unexpected child {:?}", arena[child_idx]);
                             }
                         }
+                        let job = child_jobs[dense_idx.get()];
+                        if job != NO_HASH_JOB {
+                            height = height.max(hashing.jobs[job as usize].height + 1);
+                        }
                         let Some(ArenaSparseNodeState::Cached { epoch: child_epoch, .. }) =
                             arena[child_idx].state_ref()
                         else {
@@ -1095,11 +1283,11 @@ impl ArenaParallelSparseTrie {
                     }
                 }
             }
+            hashing.pending.truncate(pending_start);
 
             // Encode the branch, optionally wrapping in an extension if it has a short_key.
             let b = arena[head_idx].branch_ref();
             let short_key = b.short_key;
-            let state_mask = b.state_mask;
             let prev_branch_masks = b.branch_masks;
             let new_branch_masks = Self::get_branch_masks(arena, b);
             let was_dirty = matches!(b.state, ArenaSparseNodeState::Dirty);
@@ -1107,15 +1295,12 @@ impl ArenaParallelSparseTrie {
                 node_epoch = node_epoch.max(new_epoch);
             }
 
-            rlp_buf.clear();
-            let rlp_node = BranchNodeRef::new(rlp_node_buf, state_mask).rlp(rlp_buf);
-
-            let rlp_node = if short_key.is_empty() {
-                rlp_node
-            } else {
-                rlp_buf.clear();
-                ExtensionNodeRef::new(&short_key, &rlp_node).rlp(rlp_buf)
-            };
+            let branch_target = short_key.is_empty().then_some(head_idx);
+            let (mut rlp_node, mut job) =
+                hashing.push_branch(rlp_node_buf, state_mask, &child_jobs, height, branch_target);
+            if !short_key.is_empty() {
+                (rlp_node, job) = hashing.push_extension(&short_key, &rlp_node, job, head_idx);
+            }
 
             trace!(
                 target: TRACE_TARGET,
@@ -1129,6 +1314,9 @@ impl ArenaParallelSparseTrie {
             let branch = arena[head_idx].branch_mut();
             branch.state = ArenaSparseNodeState::Cached { rlp_node, epoch: node_epoch };
             branch.branch_masks = new_branch_masks;
+            if job != NO_HASH_JOB {
+                hashing.pending.push((head_idx, job));
+            }
 
             // Record trie updates for dirty branches only.
             // Skip the root node (empty logical path) as PST does.
@@ -1141,11 +1329,21 @@ impl ArenaParallelSparseTrie {
                         trie_updates.updated_nodes.remove(&logical_path);
                         trie_updates.removed_nodes.insert(logical_path);
                     } else if !new_branch_masks.is_empty() {
-                        let compact = arena[head_idx].branch_ref().branch_node_compact(arena);
-                        trie_updates.updated_nodes.insert(logical_path, compact);
-                        trie_updates.removed_nodes.remove(&logical_path);
+                        // The compact node holds its children's hashes, known only once the
+                        // jobs are flushed.
+                        hashing.updated_branches.push((head_idx, logical_path));
                     }
                 }
+            }
+        }
+
+        Self::flush_hash_jobs(arena, hashing);
+
+        if let Some(trie_updates) = updates.as_mut() {
+            for (idx, logical_path) in hashing.updated_branches.drain(..) {
+                let compact = arena[idx].branch_ref().branch_node_compact(arena);
+                trie_updates.updated_nodes.insert(logical_path, compact);
+                trie_updates.removed_nodes.remove(&logical_path);
             }
         }
 
@@ -1153,6 +1351,52 @@ impl ArenaParallelSparseTrie {
             panic!("root must be cached after update_cached_rlp");
         };
         rlp_node.clone()
+    }
+
+    /// Hashes the jobs registered by [`Self::update_cached_rlp`] bottom-up, by height, in batches
+    /// of [`keccak_batch::LANES`]. Each hash is written into its parent job's encoding and, for a
+    /// job of an arena node, replaces the placeholder in the node's cached `RlpNode`.
+    fn flush_hash_jobs(arena: &mut NodeArena, hashing: &mut DeferredHashing) {
+        if hashing.jobs.is_empty() {
+            return;
+        }
+
+        // A job's children all have smaller heights, so hashing by increasing height hashes
+        // every job after its children.
+        hashing.order.clear();
+        hashing.order.extend(0..hashing.jobs.len() as u32);
+        let jobs = &hashing.jobs;
+        hashing.order.sort_unstable_by_key(|&id| jobs[id as usize].height);
+
+        let mut hashes = [B256::ZERO; keccak_batch::LANES];
+        let jobs = &hashing.jobs;
+        for level in
+            hashing.order.chunk_by(|&a, &b| jobs[a as usize].height == jobs[b as usize].height)
+        {
+            for chunk in level.chunks(keccak_batch::LANES) {
+                let mut inputs: [&[u8]; keccak_batch::LANES] = [&[]; keccak_batch::LANES];
+                for (input, &id) in inputs.iter_mut().zip(chunk) {
+                    let job = &jobs[id as usize];
+                    *input = &hashing.bytes[job.start as usize..(job.start + job.len) as usize];
+                }
+                keccak_batch::keccak256_batch(&inputs[..chunk.len()], &mut hashes[..chunk.len()]);
+
+                for (hash, &id) in hashes.iter().zip(chunk) {
+                    let job = jobs[id as usize];
+                    if job.parent != NO_HASH_JOB {
+                        let at = (jobs[job.parent as usize].start + job.parent_offset) as usize;
+                        hashing.bytes[at..at + 32].copy_from_slice(hash.as_slice());
+                    }
+                    if let Some(idx) = job.target {
+                        let ArenaSparseNodeState::Cached { rlp_node, .. } = arena[idx].state_mut()
+                        else {
+                            panic!("hash job target must be cached with a placeholder");
+                        };
+                        *rlp_node = RlpNode::word_rlp(hash);
+                    }
+                }
+            }
+        }
     }
 
     /// Immutable traversal to find a leaf value at `full_path` starting from `root` in `arena`.
@@ -1309,6 +1553,35 @@ impl ArenaParallelSparseTrie {
         *arena[idx].state_mut() =
             ArenaSparseNodeState::Cached { rlp_node: rlp_node.clone(), epoch };
         rlp_node_buf.push(rlp_node);
+    }
+
+    /// Like [`Self::encode_leaf`], but registers the leaf with `hashing` instead of hashing it.
+    /// Returns the leaf's hash job, or [`NO_HASH_JOB`] when it needs no hash.
+    fn encode_leaf_deferred(
+        arena: &mut NodeArena,
+        idx: Index,
+        hashing: &mut DeferredHashing,
+        rlp_node_buf: &mut Vec<RlpNode>,
+        new_epoch: TrieNodeEpoch,
+    ) -> u32 {
+        let ArenaSparseNode::Leaf { key, value, state } = &arena[idx] else {
+            unreachable!("encode_leaf_deferred called on non-Leaf node")
+        };
+
+        let epoch = match state {
+            ArenaSparseNodeState::Cached { rlp_node, .. } => {
+                rlp_node_buf.push(rlp_node.clone());
+                return NO_HASH_JOB;
+            }
+            ArenaSparseNodeState::Revealed => TrieNodeEpoch::UNMODIFIED,
+            ArenaSparseNodeState::Dirty => new_epoch,
+        };
+
+        let (rlp_node, job) = hashing.push_leaf(key, value, idx);
+        *arena[idx].state_mut() =
+            ArenaSparseNodeState::Cached { rlp_node: rlp_node.clone(), epoch };
+        rlp_node_buf.push(rlp_node);
+        job
     }
 
     /// Creates a new leaf and a new branch that splits an existing child from the new leaf at
@@ -2269,20 +2542,20 @@ impl SparseTrie for ArenaParallelSparseTrie {
             subtrie.reveal_nodes(node_vec)?;
         } else {
             let parent_span = tracing::Span::current();
-            let results: Vec<SparseTrieResult<()>> = taken
-                .par_iter_mut()
-                .map(|(_, subtrie, node_vec)| {
-                    let _guard = parent_span.enter();
-                    subtrie.reveal_nodes(node_vec)
-                })
-                .collect();
+            let first_err = std::sync::Mutex::new(None);
+            pool::for_each_mut(&mut taken, |(_, subtrie, node_vec)| {
+                let _guard = parent_span.enter();
+                if let Err(err) = subtrie.reveal_nodes(node_vec) {
+                    first_err.lock().unwrap_or_else(|e| e.into_inner()).get_or_insert(err);
+                }
+            });
 
-            if let Some(err) = results.into_iter().find(|r| r.is_err()) {
+            if let Some(err) = first_err.into_inner().unwrap_or_else(|e| e.into_inner()) {
                 // Restore before returning so we don't leave TakenSubtrie holes.
                 for (idx, subtrie, _) in taken {
                     self.restore_taken_subtrie(idx, subtrie);
                 }
-                return err;
+                return Err(err);
             }
         }
 
@@ -2359,14 +2632,10 @@ impl SparseTrie for ArenaParallelSparseTrie {
                 }
             } else {
                 let parent_span = tracing::Span::current();
-                taken = taken
-                    .into_par_iter()
-                    .map(|(idx, mut subtrie)| {
-                        let _guard = parent_span.enter();
-                        subtrie.update_cached_rlp(new_epoch);
-                        (idx, subtrie)
-                    })
-                    .collect();
+                pool::for_each_mut(&mut taken, |(_, subtrie)| {
+                    let _guard = parent_span.enter();
+                    subtrie.update_cached_rlp(new_epoch);
+                });
             }
         }
 
@@ -2557,20 +2826,22 @@ impl SparseTrie for ArenaParallelSparseTrie {
                 pruned += subtrie.prune(prune_before);
             } else {
                 let parent_span = tracing::Span::current();
-                pruned += taken
-                    .par_iter_mut()
-                    .map(|(_, subtrie)| {
-                        let _guard = parent_span.enter();
-                        let _span = tracing::trace_span!(
-                            target: TRACE_TARGET,
-                            "subtrie_prune",
-                            subtrie = ?subtrie.path,
-                        )
-                        .entered();
+                let pruned_in_subtries = core::sync::atomic::AtomicUsize::new(0);
+                pool::for_each_mut(&mut taken, |(_, subtrie)| {
+                    let _guard = parent_span.enter();
+                    let _span = tracing::trace_span!(
+                        target: TRACE_TARGET,
+                        "subtrie_prune",
+                        subtrie = ?subtrie.path,
+                    )
+                    .entered();
 
-                        subtrie.prune(prune_before)
-                    })
-                    .sum::<usize>();
+                    pruned_in_subtries.fetch_add(
+                        subtrie.prune(prune_before),
+                        core::sync::atomic::Ordering::Relaxed,
+                    );
+                });
+                pruned += pruned_in_subtries.into_inner();
             }
 
             // Restore taken subtries into the upper arena.
@@ -2812,7 +3083,7 @@ impl SparseTrie for ArenaParallelSparseTrie {
             subtrie.update_leaves(&sorted[range.clone()]);
         } else {
             let parent_span = tracing::Span::current();
-            taken.par_iter_mut().for_each(|(_, subtrie, range)| {
+            pool::for_each_mut(&mut taken, |(_, subtrie, range)| {
                 let _guard = parent_span.enter();
                 subtrie.update_leaves(&sorted[range.clone()]);
             });
