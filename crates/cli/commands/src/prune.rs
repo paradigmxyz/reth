@@ -100,20 +100,16 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> PruneComma
                 let batch_pruned: usize = output.segments.iter().map(|(_, seg)| seg.pruned).sum();
                 total_pruned = total_pruned.saturating_add(batch_pruned);
 
-                // Segments gate each other through committed checkpoints, e.g. bodies only prune
-                // up to the committed transaction lookup checkpoint, and a batch can advance a
-                // checkpoint without deleting anything, e.g. clearing a `RocksDB` table. Keep
-                // going until a batch changes nothing, even if it reports finished.
+                // A batch can advance a checkpoint without deleting anything, and bodies only prune
+                // up to the committed lookup checkpoint, so stop only when a batch changes nothing.
                 if batch_pruned == 0 && output.segments == last_segments {
-                    if output.progress.is_finished() {
-                        info!(target: "reth::cli", total_pruned, "Pruned data from database");
-                        break;
-                    }
-
-                    return Err(eyre::eyre!(
+                    eyre::ensure!(
+                        output.progress.is_finished(),
                         "pruner made no progress but reported more data remaining; \
                          aborting to prevent infinite loop"
-                    ));
+                    );
+                    info!(target: "reth::cli", total_pruned, "Pruned data from database");
+                    break;
                 }
 
                 last_segments = output.segments;

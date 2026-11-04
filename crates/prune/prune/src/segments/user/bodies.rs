@@ -615,16 +615,16 @@ mod tests {
         }
     }
 
-    #[test]
-    fn rolled_back_tx_lookup_checkpoint_does_not_delete_bodies() {
-        // Bodies deletes jars from disk immediately, so it must not act on the transaction lookup
-        // checkpoint written earlier in the same uncommitted pruner transaction: after a rollback
-        // the lookup rows are restored but the transactions needed to prune them would be gone.
-        let factory = create_test_provider_factory();
-        let tip = 1_523_000;
-        setup_static_file_jars(&factory, tip);
-
-        let mode = PruneMode::Before(600_000);
+    /// Creates a pruner with the real segment order, where transaction lookup is replaced by a stub
+    /// that reports pruning up to `lookup_block`.
+    fn pruner_with_stub_lookup(
+        factory: &ProviderFactory<MockNodeTypesWithDB>,
+        mode: PruneMode,
+        lookup_block: BlockNumber,
+    ) -> Pruner<
+        <ProviderFactory<MockNodeTypesWithDB> as DatabaseProviderFactory>::ProviderRW,
+        ProviderFactory<MockNodeTypesWithDB>,
+    > {
         let prune_modes = PruneModes {
             transaction_lookup: Some(mode),
             bodies_history: Some(mode),
@@ -635,21 +635,27 @@ mod tests {
             .into_iter()
             .map(|segment| match segment.segment() {
                 PruneSegment::TransactionLookup => {
-                    Box::new(PrunedLookup { mode, block: 599_999 }) as Box<dyn Segment<_>>
+                    Box::new(PrunedLookup { mode, block: lookup_block }) as Box<dyn Segment<_>>
                 }
                 _ => segment,
             })
             .collect();
-
         let (_, finished_exex_height_rx) = tokio::sync::watch::channel(FinishedExExHeight::NoExExs);
-        let mut pruner = Pruner::new_with_factory(
-            factory.clone(),
-            segments,
-            5,
-            10000,
-            None,
-            finished_exex_height_rx,
-        );
+
+        Pruner::new_with_factory(factory.clone(), segments, 5, 10000, None, finished_exex_height_rx)
+    }
+
+    #[test]
+    fn rolled_back_tx_lookup_checkpoint_does_not_delete_bodies() {
+        // Bodies deletes jars from disk immediately, so it must not act on the transaction lookup
+        // checkpoint written earlier in the same uncommitted pruner transaction: after a rollback
+        // the lookup rows are restored but the transactions needed to prune them would be gone.
+        let factory = create_test_provider_factory();
+        let tip = 1_523_000;
+        setup_static_file_jars(&factory, tip);
+
+        let mode = PruneMode::Before(600_000);
+        let mut pruner = pruner_with_stub_lookup(&factory, mode, 599_999);
 
         // Run the pruner and drop the provider without committing.
         let provider = factory.database_provider_rw().unwrap();
@@ -683,30 +689,7 @@ mod tests {
             .unwrap();
         provider.commit().unwrap();
 
-        let prune_modes = PruneModes {
-            transaction_lookup: Some(mode),
-            bodies_history: Some(mode),
-            ..Default::default()
-        };
-        let segments = SegmentSet::from_components(factory.static_file_provider(), prune_modes)
-            .into_vec()
-            .into_iter()
-            .map(|segment| match segment.segment() {
-                PruneSegment::TransactionLookup => {
-                    Box::new(PrunedLookup { mode, block: 1_099_999 }) as Box<dyn Segment<_>>
-                }
-                _ => segment,
-            })
-            .collect();
-        let (_, finished_exex_height_rx) = tokio::sync::watch::channel(FinishedExExHeight::NoExExs);
-        let mut pruner = Pruner::new_with_factory(
-            factory.clone(),
-            segments,
-            5,
-            10000,
-            None,
-            finished_exex_height_rx,
-        );
+        let mut pruner = pruner_with_stub_lookup(&factory, mode, 1_099_999);
 
         let lowest_range_end =
             || factory.static_file_provider().get_lowest_range_end(StaticFileSegment::Transactions);
