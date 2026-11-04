@@ -176,6 +176,10 @@ impl DeferredHashing {
             self.bytes.truncate(start);
             return (rlp_node, NO_HASH_JOB);
         }
+        // Offsets, lengths and job IDs are stored as u32. Offsets within an encoding are
+        // smaller than its end, so bounding the buffer and the job count bounds them all.
+        assert!(self.bytes.len() <= u32::MAX as usize, "deferred hashing buffer exceeds 4 GiB");
+        assert!(self.jobs.len() < NO_HASH_JOB as usize, "too many deferred hash jobs");
         let job = self.jobs.len() as u32;
         self.jobs.push(HashJob {
             start: start as u32,
