@@ -877,14 +877,17 @@ impl From<HandlerError> for RpcInvalidTransactionError {
             HandlerError::InvalidChainId { .. } | HandlerError::MissingChainId => {
                 Self::InvalidChainId
             }
-            HandlerError::IntrinsicGasTooLow { .. } => Self::GasTooLow,
+            HandlerError::IntrinsicGasTooLow { .. } | HandlerError::GasLimitBelowFloor { .. } => {
+                Self::GasTooLow
+            }
             HandlerError::InsufficientFunds { fee, balance } => {
                 Self::InsufficientFunds { cost: fee, balance }
             }
             HandlerError::RejectCallerWithCode => Self::SenderNoEOA,
             HandlerError::NonceOverflow => Self::NonceMaxValue,
             HandlerError::GasLimitMoreThanBlock { .. } |
-            HandlerError::TxGasLimitGreaterThanCap { .. } => Self::GasTooHigh,
+            HandlerError::TxGasLimitGreaterThanCap { .. } |
+            HandlerError::IntrinsicGasGreaterThanCap { .. } => Self::GasTooHigh,
             HandlerError::CreateInitCodeSizeLimit { .. } => Self::MaxInitCodeSizeExceeded,
             HandlerError::UnsupportedTransactionType(_) |
             HandlerError::WrongTransactionType { .. } => Self::TxTypeNotSupported,
@@ -1285,5 +1288,20 @@ mod tests {
         assert_eq!(err.code(), 3);
         assert_eq!(err.message(), "execution reverted");
         assert_eq!(err.data().unwrap().get(), "\"0x\"");
+    }
+
+    #[test]
+    fn handler_gas_errors_map_to_gas_too_low_or_high() {
+        // Gas estimation only retries with more gas on GasTooLow.
+        let err = HandlerError::GasLimitBelowFloor { required: 31_050, got: 21_000 };
+        assert!(matches!(
+            RpcInvalidTransactionError::from(err),
+            RpcInvalidTransactionError::GasTooLow
+        ));
+        let err = HandlerError::IntrinsicGasGreaterThanCap { required: 31_050, cap: 21_000 };
+        assert!(matches!(
+            RpcInvalidTransactionError::from(err),
+            RpcInvalidTransactionError::GasTooHigh
+        ));
     }
 }
