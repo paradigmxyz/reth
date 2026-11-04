@@ -10,7 +10,7 @@ pub use api::{AsEthApiError, FromEthApiError, FromEvmError, IntoEthApiError};
 use core::time::Duration;
 use evm2::{interpreter::InstrStop, registry::HandlerError};
 use evm2_inspectors::tracing::{DebugInspectorError, MuxError};
-use reth_errors::{BlockExecutionError, BlockValidationError, RethError};
+use reth_errors::{BlockExecutionError, BlockValidationError, ProviderError, RethError};
 use reth_primitives_traits::transaction::{error::InvalidTransactionError, signed::RecoveryError};
 use reth_rpc_convert::{CallFeesError, EthTxEnvError, TransactionConversionError};
 use reth_rpc_server_types::result::{
@@ -568,7 +568,6 @@ impl From<evm2::DatabaseError> for EthApiError {
 
 impl From<reth_errors::ProviderError> for EthApiError {
     fn from(error: reth_errors::ProviderError) -> Self {
-        use reth_errors::ProviderError;
         match error {
             ProviderError::HeaderNotFound(hash) => Self::HeaderNotFound(hash.into()),
             ProviderError::BlockHashNotFound(hash) | ProviderError::UnknownBlockHash(hash) => {
@@ -837,7 +836,6 @@ impl From<RpcInvalidTransactionError> for jsonrpsee_types::error::ErrorObject<'s
 
 impl From<InvalidTransactionError> for RpcInvalidTransactionError {
     fn from(err: InvalidTransactionError) -> Self {
-        use InvalidTransactionError;
         // This conversion is used to convert any transaction errors that could occur inside the
         // txpool (e.g. `eth_sendRawTransaction`) to their corresponding RPC
         match err {
@@ -1129,6 +1127,7 @@ mod tests {
     use super::*;
     use alloy_primitives::b256;
     use alloy_sol_types::{Revert, SolError};
+    use reth_errors::ProviderError;
 
     #[test]
     fn timed_out_error() {
@@ -1208,8 +1207,6 @@ mod tests {
 
     #[test]
     fn pruned_state_errors_use_history_unavailable_code() {
-        use reth_errors::ProviderError;
-
         let err = EthApiError::from(ProviderError::InsufficientChangesets {
             requested: 1,
             available: 43..=48,

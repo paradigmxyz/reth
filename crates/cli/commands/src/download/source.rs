@@ -4,6 +4,7 @@ use super::{
 use eyre::{Result, WrapErr};
 use reqwest::Client;
 use reth_fs_util as fs;
+use serde::Deserialize;
 use std::path::{Path, PathBuf};
 use tracing::info;
 use url::Url;
@@ -71,7 +72,6 @@ fn deserialize_string_or_u64<'de, D>(deserializer: D) -> std::result::Result<u64
 where
     D: serde::Deserializer<'de>,
 {
-    use serde::Deserialize;
     let value = serde_json::Value::deserialize(deserializer)?;
     match &value {
         serde_json::Value::Number(n) => {

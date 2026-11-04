@@ -24,6 +24,7 @@ use reth_trie::{updates::TrieUpdatesSorted, HashedPostStateSorted, TrieInputSort
 use reth_trie_common::bundle_state::BundleState;
 use reth_trie_db::DatabaseHashedPostState;
 use std::{
+    io::Error,
     ops::RangeInclusive,
     sync::Arc,
     time::{Duration, Instant},
@@ -265,8 +266,6 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
     where
         Provider: BlockNumReader + PruneCheckpointReader,
     {
-        use std::io::Error;
-
         let mut in_mem_chain = self
             .parent_state
             .iter()
