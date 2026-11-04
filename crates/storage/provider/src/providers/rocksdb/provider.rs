@@ -2420,14 +2420,12 @@ impl<'a> RocksDBBatch<'a> {
             // 3. Invalid (no more keys)
             // If the current key's prefix >= our target prefix, we may be able to skip the seek.
             let needs_seek = if iter.valid() {
-                if let Some(current_key) = iter.key() {
-                    // If current key's prefix < target prefix, we need to seek forward
-                    // If current key's prefix > target prefix, this target has no shards (skip)
-                    // If current key's prefix == target prefix, we're already positioned
+                // If current key's prefix < target prefix, we need to seek forward
+                // If current key's prefix > target prefix, this target has no shards (skip)
+                // If current key's prefix == target prefix, we're already positioned
+                iter.key().is_none_or(|current_key| {
                     current_key.get(..PREFIX_LEN).is_none_or(|p| p < target_prefix)
-                } else {
-                    true
-                }
+                })
             } else {
                 true
             };
@@ -2576,14 +2574,12 @@ impl<'a> RocksDBBatch<'a> {
             // 3. Invalid (no more keys)
             // If the current key's prefix >= our target prefix, we may be able to skip the seek.
             let needs_seek = if iter.valid() {
-                if let Some(current_key) = iter.key() {
-                    // If current key's prefix < target prefix, we need to seek forward
-                    // If current key's prefix > target prefix, this target has no shards (skip)
-                    // If current key's prefix == target prefix, we're already positioned
+                // If current key's prefix < target prefix, we need to seek forward
+                // If current key's prefix > target prefix, this target has no shards (skip)
+                // If current key's prefix == target prefix, we're already positioned
+                iter.key().is_none_or(|current_key| {
                     current_key.get(..PREFIX_LEN).is_none_or(|p| p < target_prefix)
-                } else {
-                    true
-                }
+                })
             } else {
                 true
             };
