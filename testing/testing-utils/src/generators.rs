@@ -10,7 +10,7 @@ use alloy_eips::{
 };
 use alloy_primitives::{Address, BlockNumber, Bytes, TxKind, B256, B64, U256};
 pub use rand::Rng;
-use rand::{distr::uniform::SampleRange, rngs::StdRng, SeedableRng};
+use rand::{distr::uniform::SampleRange, prelude::IndexedRandom, rngs::StdRng, SeedableRng};
 use reth_ethereum_primitives::{Block, BlockBody, Receipt, Transaction, TransactionSigned};
 use reth_primitives_traits::{
     crypto::secp256k1::sign_message, proofs, Account, Block as _, Log, SealedBlock, SealedHeader,
@@ -384,7 +384,6 @@ pub fn random_account_change<R: Rng>(
     n_storage_changes: Range<u64>,
     key_range: Range<u64>,
 ) -> (Address, Address, U256, Vec<StorageEntry>) {
-    use rand::prelude::IndexedRandom;
     let mut addresses = valid_addresses.choose_multiple(rng, 2).copied();
 
     let addr_from = addresses.next().unwrap_or_else(Address::random);

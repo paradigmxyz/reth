@@ -398,7 +398,7 @@ impl Decodable for EnrRequest {
 ///
 /// This packet is used to respond to an `ENRRequest` packet and includes the requested ENR along
 /// with the hash of the original request.
-#[derive(Clone, Debug, Eq, PartialEq, RlpEncodable, RlpDecodable)]
+#[derive(Clone, Debug, Eq, PartialEq, RlpEncodable)]
 pub struct EnrResponse {
     /// The hash of the `ENRRequest` packet being replied to.
     pub request_hash: B256,
@@ -415,6 +415,24 @@ impl EnrResponse {
     pub fn eth_fork_id(&self) -> Option<ForkId> {
         let mut maybe_fork_id = self.enr.get_raw_rlp(b"eth")?;
         EnrForkIdEntry::decode(&mut maybe_fork_id).ok().map(Into::into)
+    }
+}
+
+impl Decodable for EnrResponse {
+    // Manual implementation to satisfy EIP-8: additional list elements are ignored.
+    //
+    // See https://eips.ethereum.org/EIPS/eip-8
+    fn decode(buf: &mut &[u8]) -> alloy_rlp::Result<Self> {
+        let mut payload = Header::decode_bytes(buf, true)?;
+        let request_hash = Decodable::decode(&mut payload)?;
+
+        // `Enr::decode` applies the ENR size limit to its whole input, so it only gets the
+        // record's own bytes and not the additional list elements after it.
+        let mut rest = payload;
+        Header::decode_bytes(&mut rest, true)?;
+        let mut enr = &payload[..payload.len() - rest.len()];
+
+        Ok(Self { request_hash, enr: Decodable::decode(&mut enr)? })
     }
 }
 
@@ -611,10 +629,12 @@ mod tests {
         DEFAULT_DISCOVERY_PORT, SAFE_MAX_DATAGRAM_NEIGHBOUR_RECORDS,
     };
     use alloy_primitives::hex;
+    use alloy_rlp::Decodable;
     use assert_matches::assert_matches;
-    use enr::EnrPublicKey;
+    use enr::{secp256k1::SecretKey, EnrPublicKey};
     use rand_08::{thread_rng as rng, Rng, RngCore};
     use reth_ethereum_forks::ForkHash;
+    use std::net::Ipv4Addr;
 
     #[test]
     fn test_endpoint_ipv_v4() {
@@ -829,10 +849,6 @@ mod tests {
 
     #[test]
     fn encode_decode_enr_msg() {
-        use alloy_rlp::Decodable;
-        use enr::secp256k1::SecretKey;
-        use std::net::Ipv4Addr;
-
         let mut rng = rand_08::rngs::OsRng;
         let key = SecretKey::new(&mut rng);
         let ip = Ipv4Addr::new(127, 0, 0, 1);
@@ -867,10 +883,6 @@ mod tests {
 
     #[test]
     fn encode_known_rlp_enr() {
-        use alloy_rlp::Decodable;
-        use enr::{secp256k1::SecretKey, EnrPublicKey};
-        use std::net::Ipv4Addr;
-
         let valid_record = hex!(
             "f884b8407098ad865b00a582051940cb9cf36836572411a47278783077011599ed5cd16b76f2635f4e234738f30813a89eb9137e3e3df5266e3a1f11df72ecf1145ccb9c01826964827634826970847f00000189736563703235366b31a103ca634cae0d49acb401d8a4c6b6fe8c55b70d115bf400769cc1400f3258cd31388375647082765f"
         );
@@ -901,9 +913,6 @@ mod tests {
     // <https://github.com/sigp/enr/blob/e59dcb45ea07e423a7091d2a6ede4ad6d8ef2840/src/lib.rs#L1019>
     #[test]
     fn decode_enr_rlp() {
-        use enr::secp256k1::SecretKey;
-        use std::net::Ipv4Addr;
-
         let valid_record = hex!(
             "f884b8407098ad865b00a582051940cb9cf36836572411a47278783077011599ed5cd16b76f2635f4e234738f30813a89eb9137e3e3df5266e3a1f11df72ecf1145ccb9c01826964827634826970847f00000189736563703235366b31a103ca634cae0d49acb401d8a4c6b6fe8c55b70d115bf400769cc1400f3258cd31388375647082765f"
         );
@@ -950,9 +959,6 @@ mod tests {
     // <https://github.com/sigp/enr/blob/e59dcb45ea07e423a7091d2a6ede4ad6d8ef2840/src/lib.rs#LL1206C35-L1206C35>
     #[test]
     fn encode_decode_enr_rlp() {
-        use enr::{secp256k1::SecretKey, EnrPublicKey};
-        use std::net::Ipv4Addr;
-
         let key = SecretKey::new(&mut rand_08::rngs::OsRng);
         let ip = Ipv4Addr::new(127, 0, 0, 1);
         let tcp = 3000;
@@ -1078,6 +1084,26 @@ mod tests {
                 },
             ];
             assert_matches!(decoded.msg, Message::Neighbours(Neighbours { nodes, expire: 1136239445 }) if nodes == expected_nodes);
+        }
+
+        // checks that junk data at the end of the packet is discarded according to eip-8, even
+        // when the record and the junk together exceed the ENR size limit.
+        #[test]
+        fn eip8_decode_enr_response() {
+            let key = SecretKey::new(&mut rand_08::rngs::OsRng);
+            let enr = Enr::builder().build(&key).unwrap();
+            let request_hash = B256::random();
+            let junk = Bytes::from(vec![0xab; 300]);
+
+            let mut buf = Vec::new();
+            let payload_length = request_hash.length() + enr.length() + junk.length();
+            alloy_rlp::Header { list: true, payload_length }.encode(&mut buf);
+            request_hash.encode(&mut buf);
+            enr.encode(&mut buf);
+            junk.encode(&mut buf);
+
+            let decoded = EnrResponse::decode(&mut buf.as_slice()).unwrap();
+            assert_eq!(decoded, EnrResponse { request_hash, enr });
         }
     }
 }

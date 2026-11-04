@@ -10,7 +10,7 @@ pub use api::{AsEthApiError, FromEthApiError, FromEvmError, IntoEthApiError};
 use core::time::Duration;
 use evm2::{interpreter::InstrStop, registry::HandlerError};
 use evm2_inspectors::tracing::{DebugInspectorError, MuxError};
-use reth_errors::{BlockExecutionError, BlockValidationError, RethError};
+use reth_errors::{BlockExecutionError, BlockValidationError, ProviderError, RethError};
 use reth_primitives_traits::transaction::{error::InvalidTransactionError, signed::RecoveryError};
 use reth_rpc_convert::{CallFeesError, EthTxEnvError, TransactionConversionError};
 use reth_rpc_server_types::result::{
@@ -568,7 +568,6 @@ impl From<evm2::DatabaseError> for EthApiError {
 
 impl From<reth_errors::ProviderError> for EthApiError {
     fn from(error: reth_errors::ProviderError) -> Self {
-        use reth_errors::ProviderError;
         match error {
             ProviderError::HeaderNotFound(hash) => Self::HeaderNotFound(hash.into()),
             ProviderError::BlockHashNotFound(hash) | ProviderError::UnknownBlockHash(hash) => {
@@ -827,12 +826,7 @@ impl From<RpcInvalidTransactionError> for jsonrpsee_types::error::ErrorObject<'s
     fn from(err: RpcInvalidTransactionError) -> Self {
         match err {
             RpcInvalidTransactionError::Revert(revert) => {
-                // include out data if some
-                rpc_err(
-                    revert.error_code(),
-                    revert.to_string(),
-                    revert.output.as_ref().map(|out| out.as_ref()),
-                )
+                rpc_err(revert.error_code(), revert.to_string(), Some(revert.output.as_ref()))
             }
             RpcInvalidTransactionError::Other(err) => err.to_rpc_error(),
             err => rpc_err(err.error_code(), err.to_string(), None),
@@ -842,7 +836,6 @@ impl From<RpcInvalidTransactionError> for jsonrpsee_types::error::ErrorObject<'s
 
 impl From<InvalidTransactionError> for RpcInvalidTransactionError {
     fn from(err: InvalidTransactionError) -> Self {
-        use InvalidTransactionError;
         // This conversion is used to convert any transaction errors that could occur inside the
         // txpool (e.g. `eth_sendRawTransaction`) to their corresponding RPC
         match err {
@@ -915,9 +908,7 @@ impl From<HandlerError> for RpcInvalidTransactionError {
 #[derive(Debug, Clone, thiserror::Error)]
 pub struct RevertError {
     /// The transaction output data
-    ///
-    /// Note: this is `None` if output was empty
-    output: Option<Bytes>,
+    output: Bytes,
 }
 
 // === impl RevertError ==
@@ -926,12 +917,8 @@ impl RevertError {
     /// Wraps the output bytes
     ///
     /// Note: this is intended to wrap an EVM revert output
-    pub fn new(output: Bytes) -> Self {
-        if output.is_empty() {
-            Self { output: None }
-        } else {
-            Self { output: Some(output) }
-        }
+    pub const fn new(output: Bytes) -> Self {
+        Self { output }
     }
 
     /// Returns error code to return for this error.
@@ -943,7 +930,9 @@ impl RevertError {
 impl std::fmt::Display for RevertError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str("execution reverted")?;
-        if let Some(reason) = self.output.as_ref().and_then(|out| RevertReason::decode(out)) {
+        if !self.output.is_empty() &&
+            let Some(reason) = RevertReason::decode(&self.output)
+        {
             let error = reason.to_string();
             let mut error = error.as_str();
             if reason.is_revert() {
@@ -1138,6 +1127,7 @@ mod tests {
     use super::*;
     use alloy_primitives::b256;
     use alloy_sol_types::{Revert, SolError};
+    use reth_errors::ProviderError;
 
     #[test]
     fn timed_out_error() {
@@ -1217,8 +1207,6 @@ mod tests {
 
     #[test]
     fn pruned_state_errors_use_history_unavailable_code() {
-        use reth_errors::ProviderError;
-
         let err = EthApiError::from(ProviderError::InsufficientChangesets {
             requested: 1,
             available: 43..=48,
@@ -1287,5 +1275,14 @@ mod tests {
         let err = RevertError::new(revert.abi_encode().into());
         let msg = err.to_string();
         assert_eq!(msg, "execution reverted: test_revert_reason");
+    }
+
+    #[test]
+    fn empty_revert_err_has_empty_data() {
+        let err: jsonrpsee_types::error::ErrorObject<'static> =
+            RpcInvalidTransactionError::Revert(RevertError::new(Bytes::new())).into();
+        assert_eq!(err.code(), 3);
+        assert_eq!(err.message(), "execution reverted");
+        assert_eq!(err.data().unwrap().get(), "\"0x\"");
     }
 }

@@ -890,9 +890,10 @@ mod tests {
     use crate::{
         message::RequestPair, BlockAccessLists, EthMessage, EthMessageID, EthNetworkPrimitives,
         EthVersion, GetBlockAccessLists, GetNodeData, NodeData, ProtocolMessage,
-        RawCapabilityMessage,
+        RawCapabilityMessage, Status, StatusMessage,
     };
-    use alloy_primitives::hex;
+    use alloy_hardforks::{ForkHash, ForkId};
+    use alloy_primitives::{hex, B256, U256};
     use alloy_rlp::{Decodable, Encodable, Error};
     use reth_ethereum_primitives::BlockBody;
 
@@ -1111,10 +1112,6 @@ mod tests {
 
     #[test]
     fn decode_status_success() {
-        use crate::{Status, StatusMessage};
-        use alloy_hardforks::{ForkHash, ForkId};
-        use alloy_primitives::{B256, U256};
-
         let status = Status {
             version: EthVersion::Eth68,
             chain: alloy_chains::Chain::mainnet(),

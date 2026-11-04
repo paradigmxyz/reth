@@ -547,6 +547,7 @@ mod tests {
         state::{AccountOverride, EvmOverrides, StateOverride},
         BlockOverrides, Bundle, TransactionRequest,
     };
+    use alloy_rpc_types_trace::{parity::TraceType, tracerequest::TraceCallRequest};
     use evm2::{evm::CacheDB, AccountInfo};
     use jsonrpsee_types::error::INVALID_PARAMS_CODE;
     use rand::Rng;
@@ -557,7 +558,9 @@ mod tests {
     use reth_evm::{ConfigureEvm, EvmEnvFor, TxEnvFor};
     use reth_evm_ethereum::EthEvmConfig;
     use reth_network_api::noop::NoopNetwork;
-    use reth_primitives_traits::crypto::secp256k1::sign_message;
+    use reth_primitives_traits::{
+        crypto::secp256k1::sign_message, SealedHeader, SignerRecoverable,
+    };
     use reth_provider::{
         providers::BlockchainProvider,
         test_utils::{
@@ -568,17 +571,17 @@ mod tests {
     };
     use reth_rpc_convert::{EthTxEnvError, TryIntoTxEnv};
     use reth_rpc_eth_api::{
-        helpers::{Call, EthBlocks, EthCall, SpawnBlocking},
+        helpers::{Call, EthBlocks, EthCall, EthTransactions, LoadPendingBlock, SpawnBlocking},
         node::RpcNodeCoreAdapter,
         EthApiServer,
     };
-    use reth_rpc_eth_types::{receipt::EthReceiptConverter, RpcInvalidTransactionError};
+    use reth_rpc_eth_types::{receipt::EthReceiptConverter, EthConfig, RpcInvalidTransactionError};
     use reth_storage_api::{
         BalProvider, BlockReaderIdExt, NodePrimitivesProvider, StateProviderFactory,
     };
-    use reth_tasks::cancel::is_cancelled;
+    use reth_tasks::cancel::{is_cancelled, CancelOnDrop};
     use reth_testing_utils::generators;
-    use reth_transaction_pool::test_utils::{testing_pool, TestPool};
+    use reth_transaction_pool::test_utils::{testing_pool, MockTransaction, TestPool};
     use std::time::{Duration, Instant};
 
     type FakeEthApi<P = MockEthProvider> = EthApi<
@@ -649,10 +652,28 @@ mod tests {
         assert!(cancelled_rx.await.unwrap());
     }
 
+    #[tokio::test(flavor = "multi_thread")]
+    async fn pending_block_build_stops_when_cancelled() {
+        let provider = MockEthProvider::default();
+        let parent =
+            Header { gas_limit: 30_000_000, base_fee_per_gas: Some(1), ..Default::default() };
+        let parent_hash = B256::random();
+        provider.add_header(parent_hash, parent.clone());
+        let api = build_test_eth_api(provider);
+        api.pool().add_external_transaction(MockTransaction::eip1559()).await.unwrap();
+
+        // dropping the request's handle cancels the build running in its scope
+        let request = CancelOnDrop::default();
+        let scope = request.clone();
+        drop(request);
+
+        let parent = SealedHeader::new(parent, parent_hash);
+        let err = scope.scope(|| api.build_block(&parent)).unwrap_err();
+        assert!(matches!(err, EthApiError::InternalEthError));
+    }
+
     #[tokio::test]
     async fn test_transaction_by_sender_and_nonce_without_sender_transaction_returns_none() {
-        use reth_rpc_eth_api::helpers::EthTransactions;
-
         let provider = MockEthProvider::default();
         let sender = Address::random();
         provider.add_account(sender, ExtendedAccount::new(1, U256::ZERO));
@@ -677,7 +698,6 @@ mod tests {
 
     #[tokio::test]
     async fn test_transaction_by_sender_and_nonce_missing_block_returns_error() {
-        use reth_rpc_eth_api::helpers::EthTransactions;
         use reth_rpc_eth_types::EthApiError;
 
         let provider = MockEthProvider::default();
@@ -695,9 +715,6 @@ mod tests {
 
     #[tokio::test]
     async fn test_transaction_by_sender_and_nonce_returns_matching_transaction() {
-        use reth_primitives_traits::SignerRecoverable;
-        use reth_rpc_eth_api::helpers::EthTransactions;
-
         let provider = MockEthProvider::default();
         let tx = TransactionSigned::new_unhashed(
             reth_ethereum_primitives::Transaction::Legacy(Default::default()),
@@ -1135,8 +1152,6 @@ mod tests {
 
     #[tokio::test]
     async fn call_allowance_respects_rpc_gas_cap() {
-        use alloy_rpc_types_trace::{parity::TraceType, tracerequest::TraceCallRequest};
-        use reth_rpc_eth_types::EthConfig;
         use reth_tasks::pool::BlockingTaskGuard;
 
         let sender = Address::repeat_byte(0x11);

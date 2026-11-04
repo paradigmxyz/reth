@@ -993,12 +993,11 @@ impl<N: NetworkPrimitives> Future for ActiveSession<N> {
             // Check if we should send a range update based on block height changes
             while interval.poll_tick(cx).is_ready() {
                 let current_latest = this.local_range_info.latest();
-                let should_send = if let Some(last_sent) = this.last_sent_latest_block {
-                    // Only send if block height has advanced by at least one epoch (32 blocks)
+                // The first update is always sent; after that, only send if block height has
+                // advanced by at least one epoch (32 blocks).
+                let should_send = this.last_sent_latest_block.is_none_or(|last_sent| {
                     current_latest.saturating_sub(last_sent) >= EPOCH_SLOTS
-                } else {
-                    true // First update, always send
-                };
+                });
 
                 if should_send {
                     this.queued_outgoing.push_back(
@@ -1325,7 +1324,7 @@ mod tests {
     use super::*;
     use crate::session::{handle::PendingSessionEvent, start_pending_incoming_session};
     use alloy_eips::eip2124::ForkFilter;
-    use alloy_primitives::B256;
+    use alloy_primitives::{B128, B256};
     use futures::task::noop_waker;
     use reth_chainspec::MAINNET;
     use reth_ecies::stream::ECIESStream;
@@ -2035,8 +2034,6 @@ mod tests {
 
     #[test]
     fn eth72_coalescing_preserves_cell_masks() {
-        use alloy_primitives::B128;
-
         let masks =
             [None, Some(B128::repeat_byte(0xff)), Some(B128::from(1u128)), Some(B128::from(2u128))];
         for existing_mask in masks {

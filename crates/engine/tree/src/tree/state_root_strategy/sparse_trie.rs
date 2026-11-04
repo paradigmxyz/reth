@@ -240,7 +240,7 @@ where
         let parent_span = tracing::Span::current();
         let hashing_metrics = metrics.clone();
         executor.spawn_blocking_named("trie-hashing", move || {
-            let _span = trace_span!(parent: parent_span, "run_hashing_task").entered();
+            let _span = trace_span!(parent: &parent_span, "run_hashing_task").entered();
             Self::run_hashing_task(updates, hashed_state_tx, hashing_metrics)
         });
 

@@ -343,8 +343,7 @@ impl<N: ProviderNodeTypes> StateRangeProvider for HistoricalStateRangeView<N> {
 
     fn account_range_proof(&self, keys: &[B256]) -> ProviderResult<Vec<Bytes>> {
         let multiproof = Proof::new(&self.provider, &self.provider)
-            .multiproof(MultiProofTargets::accounts(keys.iter().copied()))
-            .map_err(ProviderError::from)?;
+            .multiproof(MultiProofTargets::accounts(keys.iter().copied()))?;
         Ok(multiproof
             .account_subtree
             .into_nodes_sorted()
@@ -359,8 +358,7 @@ impl<N: ProviderNodeTypes> StateRangeProvider for HistoricalStateRangeView<N> {
         keys: &[B256],
     ) -> ProviderResult<Vec<Bytes>> {
         let multiproof = StorageProof::new_hashed(&self.provider, &self.provider, hashed_address)
-            .storage_multiproof(keys.iter().copied().collect())
-            .map_err(ProviderError::from)?;
+            .storage_multiproof(keys.iter().copied().collect())?;
         Ok(multiproof.subtree.into_nodes_sorted().into_iter().map(|(_, bytes)| bytes).collect())
     }
 }
@@ -1093,8 +1091,8 @@ mod tests {
         BlockReaderIdExt, BlockSource, ChangeSetReader, DBProvider, DatabaseProviderFactory,
         HashingWriter, HeaderProvider, RangeEnd, ReceiptProvider, ReceiptProviderIdExt,
         StageCheckpointWriter, StateProviderFactory, StateRangeProvider, StateRangeProviderFactory,
-        StateRootProvider, StateWriteConfig, StateWriter, StorageRootProvider, TransactionVariant,
-        TransactionsProvider,
+        StateRootProvider, StateWriteConfig, StateWriter, StorageRootProvider, StorageSettings,
+        StorageSettingsCache, TransactionVariant, TransactionsProvider, TrieWriter,
     };
     use reth_testing_utils::generators::{
         self, random_block, random_block_range, random_changeset_range, random_eoa_accounts,
@@ -1102,8 +1100,9 @@ mod tests {
     };
     use reth_trie::{
         bundle_state::{BundleState, OriginalValuesKnown},
+        test_utils::TrieTestHarness,
         updates::TrieUpdates,
-        HashedPostState, HashedStorage, SortedTrieData,
+        HashedPostState, HashedStorage, MultiProofTargetsV2, SortedTrieData,
     };
     use std::{
         collections::{BTreeMap, HashMap},
@@ -1114,8 +1113,6 @@ mod tests {
     #[test]
     fn historical_proofs_complete_masked_trie_rows() -> eyre::Result<()> {
         use crate::{StaticFileProviderFactory, StaticFileSegment, StaticFileWriter};
-        use reth_storage_api::{StorageSettings, StorageSettingsCache, TrieWriter};
-        use reth_trie::{test_utils::TrieTestHarness, MultiProofTargetsV2};
 
         let address = Address::with_last_byte(1);
         let other_address = Address::with_last_byte(2);
