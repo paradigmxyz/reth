@@ -15,7 +15,7 @@ use alloy_dyn_abi::TypedData;
 use alloy_eip7928::bal::DecodedBal;
 use alloy_eips::{eip2718::Encodable2718, BlockId};
 use alloy_network::{TransactionBuilder, TransactionBuilder4844};
-use alloy_primitives::{Address, Bytes, TxHash, B256, U256};
+use alloy_primitives::{map::AddressMap, Address, Bytes, TxHash, B256, U256};
 use alloy_rpc_types_eth::{state::EvmOverrides, TransactionInfo};
 use evm2::evm::Bal as EvmBal;
 use futures::{Future, StreamExt};
@@ -39,6 +39,7 @@ use reth_transaction_pool::{
     TransactionPool,
 };
 use std::{sync::Arc, time::Duration};
+use tokio::sync::{Mutex, OwnedMutexGuard};
 
 /// Transaction related functions for the [`EthApiServer`](crate::EthApiServer) trait in
 /// the `eth_` namespace.
@@ -76,6 +77,15 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
     /// Returns the timeout duration for `send_raw_transaction_sync` RPC method.
     fn send_raw_transaction_sync_timeout(&self) -> Duration {
         self.eth_api_settings().send_raw_transaction_sync_timeout
+    }
+
+    /// Returns the per-sender locks [`Self::send_transaction_request`] holds from filling the
+    /// nonce until the transaction is in the pool.
+    ///
+    /// `None` disables the locks, so concurrent requests from one sender that omit the nonce can
+    /// be assigned the same nonce.
+    fn send_transaction_nonce_locks(&self) -> Option<&SenderNonceLocks> {
+        None
     }
 
     /// Decodes and recovers the transaction and submits it to the pool.
@@ -516,11 +526,19 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
                 return Err(SignError::NoAccount.into_eth_err())
             }
 
-            // set nonce if not already set before
-            if request.as_ref().nonce().is_none() {
+            // set nonce if not already set before. The sender's lock is held until the
+            // transaction is in the pool, so a concurrent request can't read the same nonce.
+            let _nonce_guard = if request.as_ref().nonce().is_none() {
+                let guard = match self.send_transaction_nonce_locks() {
+                    Some(locks) => Some(locks.lock(from).await),
+                    None => None,
+                };
                 let nonce = self.next_available_nonce_for(&request).await?;
                 request.as_mut().set_nonce(nonce);
-            }
+                guard
+            } else {
+                None
+            };
 
             let chain_id = self.chain_id();
             // A caller that pins `chainId` is asserting which chain it means to sign for.
@@ -922,5 +940,22 @@ pub trait LoadTransaction: SpawnBlocking + FullEthApiTypes + RpcNodeCoreExt {
                 .map_err(Self::Error::from_eth_err)?;
             Ok(block_and_bal.map(|(block, bal)| (transaction, block, bal)))
         }
+    }
+}
+
+/// Per-sender locks that serialize `eth_sendTransaction` nonce assignment.
+///
+/// Entries are only created for senders that have a node-held signer, so the map is bounded by
+/// the number of configured signer accounts.
+#[derive(Debug, Default)]
+pub struct SenderNonceLocks {
+    locks: parking_lot::Mutex<AddressMap<Arc<Mutex<()>>>>,
+}
+
+impl SenderNonceLocks {
+    /// Waits for and returns the lock for `sender`.
+    pub async fn lock(&self, sender: Address) -> OwnedMutexGuard<()> {
+        let lock = self.locks.lock().entry(sender).or_default().clone();
+        lock.lock_owned().await
     }
 }
