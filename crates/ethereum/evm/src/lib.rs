@@ -13,7 +13,9 @@ extern crate alloc;
 
 use alloc::{borrow::Cow, sync::Arc};
 use alloy_consensus::{BlockHeader, Header};
-use alloy_eips::{eip4895::Withdrawal, eip7840::BlobParams, merge::SLOT_DURATION_SECS};
+use alloy_eips::{
+    eip1559::INITIAL_BASE_FEE, eip4895::Withdrawal, eip7840::BlobParams, merge::SLOT_DURATION_SECS,
+};
 use alloy_primitives::{Address, Bytes, B256};
 use convert::{block_env_with_blob_params, spec_id};
 use core::{any::TypeId, convert::Infallible, fmt::Debug};
@@ -425,17 +427,33 @@ where
         parent: &Header,
         attributes: &NextBlockEnvAttributes,
     ) -> Result<EvmEnvFor<Self>, Self::Error> {
-        let base_fee = self
-            .chain_spec()
-            .as_ref()
-            .next_block_base_fee(parent, attributes.timestamp)
-            .unwrap_or_default();
-        let blob_params = self.chain_spec().as_ref().blob_params_at_timestamp(attributes.timestamp);
+        let chain_spec = self.chain_spec().as_ref();
+        let block_number = parent.number + 1;
+
+        // The first London block must start at the initial base fee, and its gas limit is the
+        // parent's gas limit scaled by the EIP-1559 elasticity multiplier.
+        let (base_fee, gas_limit) = if chain_spec.is_london_active_at_block(block_number) &&
+            !chain_spec.is_london_active_at_block(parent.number)
+        {
+            let elasticity_multiplier =
+                chain_spec.base_fee_params_at_timestamp(attributes.timestamp).elasticity_multiplier;
+            let gas_limit =
+                u64::try_from(u128::from(parent.gas_limit).saturating_mul(elasticity_multiplier))
+                    .unwrap_or(u64::MAX);
+            (INITIAL_BASE_FEE, gas_limit)
+        } else {
+            (
+                chain_spec.next_block_base_fee(parent, attributes.timestamp).unwrap_or_default(),
+                attributes.gas_limit,
+            )
+        };
+
+        let blob_params = chain_spec.blob_params_at_timestamp(attributes.timestamp);
         let header = Header {
             beneficiary: attributes.suggested_fee_recipient,
             timestamp: attributes.timestamp,
-            number: parent.number + 1,
-            gas_limit: attributes.gas_limit,
+            number: block_number,
+            gas_limit,
             base_fee_per_gas: Some(base_fee),
             mix_hash: attributes.prev_randao,
             slot_number: attributes.slot_number,
@@ -617,6 +635,42 @@ mod tests {
 
             assert_eq!(env.blob_basefee, U256::from(blob_params.calc_blob_fee(excess_blob_gas)));
         }
+    }
+
+    #[test]
+    fn next_evm_env_sets_london_transition_fields() {
+        use alloy_eips::eip1559::INITIAL_BASE_FEE;
+        use reth_ethereum_forks::{EthereumHardfork, ForkCondition};
+
+        let chain_spec = ChainSpec::builder()
+            .chain(Chain::mainnet())
+            .genesis(Genesis::default())
+            .with_fork(EthereumHardfork::Frontier, ForkCondition::Block(0))
+            .with_fork(EthereumHardfork::London, ForkCondition::Block(1))
+            .build();
+        let evm_config = EthEvmConfig::new(Arc::new(chain_spec));
+
+        let parent = Header {
+            number: 0,
+            gas_limit: 15_000_000,
+            base_fee_per_gas: None,
+            ..Default::default()
+        };
+        let attributes = NextBlockEnvAttributes {
+            timestamp: 1,
+            suggested_fee_recipient: Address::ZERO,
+            prev_randao: B256::ZERO,
+            gas_limit: parent.gas_limit,
+            parent_beacon_block_root: None,
+            withdrawals: None,
+            extra_data: Bytes::new(),
+            slot_number: None,
+        };
+
+        let env = evm_config.next_evm_env(&parent, &attributes).unwrap().block;
+
+        assert_eq!(env.basefee, U256::from(INITIAL_BASE_FEE));
+        assert_eq!(env.gas_limit, U256::from(parent.gas_limit * 2));
     }
 
     #[derive(Debug, Clone)]
