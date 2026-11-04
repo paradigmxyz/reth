@@ -1254,10 +1254,16 @@ fn problem_response(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_rpc_types_engine::ssz_engine_types::{
-        PayloadAttributesAmsterdam, PayloadAttributesCancun, PayloadAttributesParis,
-        PayloadAttributesShanghai,
+    use alloy_rpc_types_engine::{
+        ssz_engine_types::{
+            PayloadAttributesAmsterdam, PayloadAttributesCancun, PayloadAttributesParis,
+            PayloadAttributesShanghai,
+        },
+        ExecutionPayloadV1, ExecutionPayloadV2, ExecutionPayloadV3, ForkchoiceUpdateError,
     };
+    use reth_chainspec::{ChainSpecBuilder, ForkCondition};
+    use reth_engine_primitives::BeaconForkChoiceUpdateError;
+    use reth_payload_primitives::PayloadBuilderError;
     use ssz::Encode;
 
     #[tokio::test]
@@ -1311,7 +1317,6 @@ mod tests {
 
     #[test]
     fn payload_schema_bounds() {
-        use alloy_rpc_types_engine::{ExecutionPayloadV1, ExecutionPayloadV2, ExecutionPayloadV3};
         let mut payload = ExecutionPayloadV3 {
             payload_inner: ExecutionPayloadV2 {
                 payload_inner: ExecutionPayloadV1::from_block_unchecked(
@@ -1440,9 +1445,6 @@ mod tests {
 
     #[tokio::test]
     async fn engine_errors_preserve_validation_semantics() {
-        use alloy_rpc_types_engine::ForkchoiceUpdateError;
-        use reth_engine_primitives::BeaconForkChoiceUpdateError;
-        use reth_payload_primitives::PayloadBuilderError;
         for (error, status, kind) in [
             (EngineApiError::UnknownPayload, 404, "unknown-payload"),
             (EngineApiError::BlobRequestTooLarge { len: 129 }, 413, "request-too-large"),
@@ -1495,7 +1497,6 @@ mod tests {
 
     #[test]
     fn payload_bodies_are_filtered_at_fork_boundaries() {
-        use reth_chainspec::{ChainSpecBuilder, ForkCondition};
         let chain_spec = ChainSpecBuilder::default()
             .chain(1.into())
             .genesis(Default::default())

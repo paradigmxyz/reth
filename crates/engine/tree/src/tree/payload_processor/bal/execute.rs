@@ -230,7 +230,9 @@ mod tests {
 
     use super::*;
     use alloy_consensus::{BlockHeader, Header, TxLegacy};
-    use alloy_eip7928::{bal::Bal as AlloyBal, BlockAccessList};
+    use alloy_eip7928::{
+        bal::Bal as AlloyBal, AccountChanges, BlockAccessIndex, BlockAccessList, CodeChange,
+    };
     use alloy_eips::{
         eip2935::{HISTORY_STORAGE_ADDRESS, HISTORY_STORAGE_CODE},
         eip4788::{BEACON_ROOTS_ADDRESS, BEACON_ROOTS_CODE},
@@ -239,6 +241,7 @@ mod tests {
     use alloy_primitives::{Bytes, B256, U256};
     use evm2::evm::{CacheDB, EmptyDB};
     use reth_chainspec::{ChainSpecBuilder, MAINNET};
+    use reth_engine_primitives::{InsertBlockErrorKind, InsertBlockValidationError};
     use reth_ethereum_primitives::{Block, BlockBody, Receipt, Transaction, TransactionSigned};
     use reth_evm::{
         cached::{AccountInfo, Bytecode},
@@ -249,7 +252,10 @@ mod tests {
         crypto::secp256k1::public_key_to_address, Block as _, Recovered, SealedBlock,
     };
     use reth_testing_utils::generators::{generate_key, rng, sign_tx_with_key_pair};
-    use std::convert::Infallible;
+    use std::{
+        convert::Infallible,
+        sync::atomic::{AtomicUsize, Ordering},
+    };
 
     fn test_evm_config() -> EthEvmConfig {
         EthEvmConfig::new(Arc::new(ChainSpecBuilder::mainnet().amsterdam_activated().build()))
@@ -498,8 +504,6 @@ mod tests {
 
     #[test]
     fn invalid_bal_bytecode_is_validation_error() {
-        use alloy_eip7928::{AccountChanges, BlockAccessIndex, CodeChange};
-        use reth_engine_primitives::{InsertBlockErrorKind, InsertBlockValidationError};
         let bal = vec![AccountChanges {
             address: Address::ZERO,
             code_changes: vec![CodeChange::new(
@@ -730,7 +734,6 @@ mod tests {
         // Build the BAL an empty block actually produces, then append a phantom address
         // that execution never touches. The rebuilt BAL omits it, and the outer consensus
         // validator is responsible for comparing that rebuilt hash to the header commitment.
-        use alloy_eip7928::AccountChanges;
 
         let evm_config = test_evm_config();
 
@@ -1056,8 +1059,6 @@ mod tests {
 
     #[test]
     fn worker_reuses_provider_after_failure_and_finishes_earlier_transactions() {
-        use std::sync::atomic::{AtomicUsize, Ordering};
-
         let evm_config = test_evm_config();
         let (pre_block_db, reference_bal, tx1, tx2) =
             two_transfers_with_reference_bal(&evm_config, 100_000, true);

@@ -577,9 +577,7 @@ impl TransactionPtr {
     /// Acquires the inner transaction lock to guarantee exclusive access to the transaction
     /// pointer.
     fn lock(&self) -> MutexGuard<'_, ()> {
-        if let Some(lock) = self.lock.try_lock() {
-            lock
-        } else {
+        self.lock.try_lock().unwrap_or_else(|| {
             tracing::trace!(
                 target: "libmdbx",
                 txn = %self.txn as usize,
@@ -588,7 +586,7 @@ impl TransactionPtr {
                 To display the full backtrace, run with `RUST_BACKTRACE=full` env variable."
             );
             self.lock.lock()
-        }
+        })
     }
 
     /// Executes the given closure once the lock on the transaction is acquired.

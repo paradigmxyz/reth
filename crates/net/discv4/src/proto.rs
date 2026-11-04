@@ -629,10 +629,12 @@ mod tests {
         DEFAULT_DISCOVERY_PORT, SAFE_MAX_DATAGRAM_NEIGHBOUR_RECORDS,
     };
     use alloy_primitives::hex;
+    use alloy_rlp::Decodable;
     use assert_matches::assert_matches;
-    use enr::EnrPublicKey;
+    use enr::{secp256k1::SecretKey, EnrPublicKey};
     use rand_08::{thread_rng as rng, Rng, RngCore};
     use reth_ethereum_forks::ForkHash;
+    use std::net::Ipv4Addr;
 
     #[test]
     fn test_endpoint_ipv_v4() {
@@ -847,10 +849,6 @@ mod tests {
 
     #[test]
     fn encode_decode_enr_msg() {
-        use alloy_rlp::Decodable;
-        use enr::secp256k1::SecretKey;
-        use std::net::Ipv4Addr;
-
         let mut rng = rand_08::rngs::OsRng;
         let key = SecretKey::new(&mut rng);
         let ip = Ipv4Addr::new(127, 0, 0, 1);
@@ -885,10 +883,6 @@ mod tests {
 
     #[test]
     fn encode_known_rlp_enr() {
-        use alloy_rlp::Decodable;
-        use enr::{secp256k1::SecretKey, EnrPublicKey};
-        use std::net::Ipv4Addr;
-
         let valid_record = hex!(
             "f884b8407098ad865b00a582051940cb9cf36836572411a47278783077011599ed5cd16b76f2635f4e234738f30813a89eb9137e3e3df5266e3a1f11df72ecf1145ccb9c01826964827634826970847f00000189736563703235366b31a103ca634cae0d49acb401d8a4c6b6fe8c55b70d115bf400769cc1400f3258cd31388375647082765f"
         );
@@ -919,9 +913,6 @@ mod tests {
     // <https://github.com/sigp/enr/blob/e59dcb45ea07e423a7091d2a6ede4ad6d8ef2840/src/lib.rs#L1019>
     #[test]
     fn decode_enr_rlp() {
-        use enr::secp256k1::SecretKey;
-        use std::net::Ipv4Addr;
-
         let valid_record = hex!(
             "f884b8407098ad865b00a582051940cb9cf36836572411a47278783077011599ed5cd16b76f2635f4e234738f30813a89eb9137e3e3df5266e3a1f11df72ecf1145ccb9c01826964827634826970847f00000189736563703235366b31a103ca634cae0d49acb401d8a4c6b6fe8c55b70d115bf400769cc1400f3258cd31388375647082765f"
         );
@@ -968,9 +959,6 @@ mod tests {
     // <https://github.com/sigp/enr/blob/e59dcb45ea07e423a7091d2a6ede4ad6d8ef2840/src/lib.rs#LL1206C35-L1206C35>
     #[test]
     fn encode_decode_enr_rlp() {
-        use enr::{secp256k1::SecretKey, EnrPublicKey};
-        use std::net::Ipv4Addr;
-
         let key = SecretKey::new(&mut rand_08::rngs::OsRng);
         let ip = Ipv4Addr::new(127, 0, 0, 1);
         let tcp = 3000;
