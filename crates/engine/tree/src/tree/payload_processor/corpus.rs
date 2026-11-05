@@ -439,15 +439,16 @@ fn execute_parallel(
             }
             idle = 0;
             let mut refreshed = false;
-            for index in from..(from + REFRESH_WINDOW).min(tx_count) {
-                if claimed[index].swap(true, Ordering::AcqRel) {
+            let window = from.min(tx_count)..(from + REFRESH_WINDOW).min(tx_count);
+            for (index, claim) in window.clone().zip(&claimed[window]) {
+                if claim.swap(true, Ordering::AcqRel) {
                     continue
                 }
                 if index >= committed.load(Ordering::Relaxed) && results.needs_refresh(index) {
                     speculate(index);
                     refreshed = true;
                 }
-                claimed[index].store(false, Ordering::Release);
+                claim.store(false, Ordering::Release);
                 if refreshed {
                     break
                 }
