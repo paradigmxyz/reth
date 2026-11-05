@@ -45,6 +45,8 @@ use tracing::{debug, debug_span, instrument, trace, trace_span, warn, Span};
 
 pub mod bal;
 pub mod bal_prewarm_pool;
+#[cfg(test)]
+mod corpus;
 pub mod prewarm;
 pub mod receipt_root_task;
 pub(crate) mod reuse;
