@@ -968,7 +968,7 @@ mod tests {
 
         let module = api.into_rpc();
         let (response, _) = module.raw_json_request(&request.to_string(), 1).await.unwrap();
-        let response: serde_json::Value = serde_json::from_str(response.get()).unwrap();
+        let response: serde_json::Value = serde_json::from_str(&response).unwrap();
         assert_eq!(response["result"], serde_json::to_value(latest).unwrap());
     }
 
@@ -1003,7 +1003,7 @@ mod tests {
             "jsonrpc": "2.0", "id": 1, "method": "trace_filter", "params": [{"toBlock": "0x1"}],
         });
         let (response, _) = module.raw_json_request(&request.to_string(), 1).await.unwrap();
-        let response: serde_json::Value = serde_json::from_str(response.get()).unwrap();
+        let response: serde_json::Value = serde_json::from_str(&response).unwrap();
         assert_eq!(
             response["error"],
             serde_json::json!({
@@ -1090,7 +1090,7 @@ mod tests {
                 "jsonrpc": "2.0", "id": 1, "method": "trace_get", "params": [hash, indices],
             });
             let (response, _) = module.raw_json_request(&request.to_string(), 1).await.unwrap();
-            let response: serde_json::Value = serde_json::from_str(response.get()).unwrap();
+            let response: serde_json::Value = serde_json::from_str(&response).unwrap();
             assert!(response.get("error").is_none(), "{response}");
             assert_eq!(response["result"], serde_json::to_value(expected).unwrap());
         }
@@ -1119,7 +1119,7 @@ mod tests {
                 "params": [B256::with_last_byte(1), types],
             });
             let (response, _) = module.raw_json_request(&request.to_string(), 1).await.unwrap();
-            let response: serde_json::Value = serde_json::from_str(response.get()).unwrap();
+            let response: serde_json::Value = serde_json::from_str(&response).unwrap();
             assert_eq!(response, serde_json::json!({"jsonrpc": "2.0", "id": 1, "result": null}));
         }
     }
@@ -1182,7 +1182,7 @@ mod tests {
                 "params": [hash, types],
             });
             let (response, _) = module.raw_json_request(&request.to_string(), 1).await.unwrap();
-            let response: serde_json::Value = serde_json::from_str(response.get()).unwrap();
+            let response: serde_json::Value = serde_json::from_str(&response).unwrap();
             assert!(response.get("error").is_none(), "{response}");
             assert_eq!(response["result"]["transactionHash"], serde_json::json!(hash));
 

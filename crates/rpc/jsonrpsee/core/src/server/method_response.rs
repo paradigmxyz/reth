@@ -38,7 +38,7 @@ use jsonrpsee_types::{
     Id, Response,
 };
 use serde::Serialize;
-use serde_json::value::{to_raw_value, RawValue};
+use serde_json::value::to_raw_value;
 
 pub use jsonrpsee_types::ResponsePayload;
 
@@ -58,8 +58,8 @@ enum ResponseKind {
 /// by calling [`MethodResponse::is_subscription`]
 #[derive(Debug)]
 pub struct MethodResponse {
-    /// Serialized JSON-RPC response,
-    json: Box<RawValue>,
+    /// Serialized JSON-RPC response.
+    json: String,
     /// Indicates whether the call was successful or not.
     success_or_error: MethodResponseResult,
     /// Indicates whether the call was a subscription response.
@@ -68,7 +68,7 @@ pub struct MethodResponse {
 
 impl AsRef<str> for MethodResponse {
     fn as_ref(&self) -> &str {
-        self.json.get()
+        &self.json
     }
 }
 
@@ -105,12 +105,12 @@ impl MethodResponse {
     }
 
     /// Consume the method response and extract the serialized JSON response.
-    pub fn into_json(self) -> Box<RawValue> {
+    pub fn into_json(self) -> String {
         self.json
     }
 
     /// Get the serialized JSON response.
-    pub fn to_json(&self) -> Box<RawValue> {
+    pub fn to_json(&self) -> String {
         self.json.clone()
     }
 
@@ -165,11 +165,8 @@ impl MethodResponse {
 
         match serde_json::to_writer(&mut writer, &Response::new(rp, id.clone())) {
             Ok(_) => {
-                // Safety - serde_json does not emit invalid UTF-8.
-                let result = unsafe { String::from_utf8_unchecked(writer.into_bytes()) };
-                // SAFETY: `result` is the complete output of `serde_json::to_writer` for a single
-                // `Response` value, and serde_json emits no leading or trailing whitespace.
-                let json = unsafe { RawValue::from_string_unchecked(result) };
+                // SAFETY: serde_json does not emit invalid UTF-8.
+                let json = unsafe { String::from_utf8_unchecked(writer.into_bytes()) };
 
                 Self {
                     json,
@@ -190,7 +187,7 @@ impl MethodResponse {
                         OVERSIZED_RESPONSE_MSG,
                         data.as_deref(),
                     ));
-                    let json = serde_json::value::to_raw_value(&Response::new(err, id))
+                    let json = serde_json::to_string(&Response::new(err, id))
                         .expect("JSON serialization infallible; qed");
 
                     Self {
@@ -201,7 +198,7 @@ impl MethodResponse {
                 } else {
                     let err = ErrorCode::InternalError;
                     let payload = ResponsePayload::<()>::error(err);
-                    let json = serde_json::value::to_raw_value(&Response::new(payload, id))
+                    let json = serde_json::to_string(&Response::new(payload, id))
                         .expect("JSON serialization infallible; qed");
                     Self {
                         json,
@@ -226,7 +223,7 @@ impl MethodResponse {
         let err: ErrorObject = err.into();
         let err_code = err.code();
         let err = ResponsePayload::<()>::error_borrowed(err);
-        let json = serde_json::value::to_raw_value(&Response::new(err, id))
+        let json = serde_json::to_string(&Response::new(err, id))
             .expect("JSON serialization infallible; qed");
         Self {
             json,
@@ -238,7 +235,7 @@ impl MethodResponse {
     /// Create notification response which is a response that doesn't expect a reply.
     pub fn notification() -> Self {
         Self {
-            json: RawValue::NULL.to_owned(),
+            json: String::from("null"),
             success_or_error: MethodResponseResult::Success,
             kind: ResponseKind::Notification,
         }
@@ -302,7 +299,7 @@ impl BatchResponseBuilder {
     pub fn append(&mut self, response: MethodResponse) -> Result<(), MethodResponse> {
         // `,` will occupy one extra byte for each entry
         // on the last item the `,` is replaced by `]`.
-        let len = response.json.get().len() + self.result.len() + 1;
+        let len = response.json.len() + self.result.len() + 1;
 
         if len > self.max_response_size {
             Err(MethodResponse::error(
@@ -310,7 +307,7 @@ impl BatchResponseBuilder {
                 reject_too_big_batch_response(self.max_response_size),
             ))
         } else {
-            self.result.push_str(response.json.get());
+            self.result.push_str(&response.json);
             self.result.push(',');
             Ok(())
         }
@@ -332,12 +329,7 @@ impl BatchResponseBuilder {
         } else {
             self.result.pop();
             self.result.push(']');
-            // SAFETY: `result` is `[`, followed by the contents of one or more `RawValue`s
-            // separated by `,`, followed by `]`. Each element upholds the `RawValue` invariant,
-            // so the concatenation is a single well-formed JSON array without surrounding
-            // whitespace.
-            let json = unsafe { RawValue::from_string_unchecked(self.result) };
-            BatchResponse { json }
+            BatchResponse { json: self.result }
         }
     }
 }
@@ -345,13 +337,13 @@ impl BatchResponseBuilder {
 /// Serialized batch response.
 #[derive(Debug, Clone)]
 pub struct BatchResponse {
-    json: Box<RawValue>,
+    json: String,
 }
 
 /// Create a JSON-RPC error response.
-pub fn batch_response_error(id: Id, err: impl Into<ErrorObject<'static>>) -> Box<RawValue> {
+pub fn batch_response_error(id: Id, err: impl Into<ErrorObject<'static>>) -> String {
     let err = ResponsePayload::<()>::error_borrowed(err);
-    serde_json::value::to_raw_value(&Response::new(err, id))
+    serde_json::to_string(&Response::new(err, id))
         .expect("JSON serialization infallible; qed")
 }
 
@@ -374,20 +366,33 @@ impl BoundedWriter {
     }
 }
 
+// serde_json emits a response as many small writes, so both methods are inlined into the
+// serializer and only check the limit, instead of going through the default `write_all` loop.
 impl io::Write for &mut BoundedWriter {
+    #[inline]
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        let len = self.buf.len() + buf.len();
-        if self.max_len >= len {
-            self.buf.extend_from_slice(buf);
-            Ok(buf.len())
-        } else {
-            Err(io::Error::new(io::ErrorKind::OutOfMemory, "Memory capacity exceeded"))
-        }
+        self.write_all(buf)?;
+        Ok(buf.len())
     }
 
+    #[inline]
+    fn write_all(&mut self, buf: &[u8]) -> io::Result<()> {
+        if buf.len() > self.max_len - self.buf.len() {
+            return Err(limit_exceeded());
+        }
+        self.buf.extend_from_slice(buf);
+        Ok(())
+    }
+
+    #[inline]
     fn flush(&mut self) -> io::Result<()> {
         Ok(())
     }
+}
+
+#[cold]
+fn limit_exceeded() -> io::Error {
+    io::Error::new(io::ErrorKind::OutOfMemory, "Memory capacity exceeded")
 }
 
 #[cfg(test)]
@@ -401,14 +406,14 @@ mod tests {
             ResponsePayload::success_borrowed(&"a"),
             usize::MAX,
         );
-        assert_eq!(method.json.get().len(), 37);
+        assert_eq!(method.json.len(), 37);
 
         // Recall a batch appends two bytes for the `[]`.
         let mut builder = BatchResponseBuilder::new_with_limit(39);
         builder.append(method).unwrap();
         let batch = builder.finish();
 
-        assert_eq!(batch.json.get(), r#"[{"jsonrpc":"2.0","id":1,"result":"a"}]"#)
+        assert_eq!(batch.json, r#"[{"jsonrpc":"2.0","id":1,"result":"a"}]"#)
     }
 
     #[test]
@@ -423,7 +428,7 @@ mod tests {
             ResponsePayload::success_borrowed(&"a"),
             usize::MAX,
         );
-        assert_eq!(m1.json.get().len(), 37);
+        assert_eq!(m1.json.len(), 37);
 
         // Recall a batch appends two bytes for the `[]` and one byte for `,` to append a method
         // call. so it should be 2 + (37 * n) + (n-1)
@@ -434,7 +439,7 @@ mod tests {
         let batch = builder.finish();
 
         assert_eq!(
-            batch.json.get(),
+            batch.json,
             r#"[{"jsonrpc":"2.0","id":1,"result":"a"},{"jsonrpc":"2.0","id":1,"result":"a"}]"#
         )
     }
@@ -445,7 +450,7 @@ mod tests {
 
         let exp_err =
             r#"{"jsonrpc":"2.0","id":null,"error":{"code":-32600,"message":"Invalid request"}}"#;
-        assert_eq!(batch.json.get(), exp_err);
+        assert_eq!(batch.json, exp_err);
     }
 
     #[test]
@@ -455,12 +460,12 @@ mod tests {
             ResponsePayload::success_borrowed(&"a".repeat(28)),
             128,
         );
-        assert_eq!(method.json.get().len(), 64);
+        assert_eq!(method.json.len(), 64);
 
         let batch = BatchResponseBuilder::new_with_limit(63).append(method).unwrap_err();
 
         let exp_err = r#"{"jsonrpc":"2.0","id":null,"error":{"code":-32011,"message":"The batch response was too large","data":"Exceeded max limit of 63"}}"#;
-        assert_eq!(batch.json.get(), exp_err);
+        assert_eq!(batch.json, exp_err);
     }
 
     #[test]
