@@ -7,17 +7,11 @@ use std::{
     },
 };
 
-use crate::{
-    serve_with_graceful_shutdown, stop_channel, RpcModule, Server, ServerBuilder,
-    ServerConfigBuilder, ServerHandle,
-};
+use crate::{RpcModule, ServerBuilder, ServerHandle};
 
-use futures_util::FutureExt;
-use jsonrpsee_core::{server::Methods, DeserializeOwned, RpcResult, SubscriptionError};
+use jsonrpsee_core::{DeserializeOwned, RpcResult, SubscriptionError};
 use jsonrpsee_test_utils::TimeoutFutureExt;
 use jsonrpsee_types::{error::ErrorCode, ErrorObject, ErrorObjectOwned, Response, ResponseSuccess};
-use tokio::net::TcpListener;
-use tower::Service;
 use tracing_subscriber::{EnvFilter, FmtSubscriber};
 
 pub(crate) struct TestContext;
@@ -239,77 +233,4 @@ impl From<MyAppError> for ErrorObjectOwned {
 
 fn invalid_params() -> ErrorObjectOwned {
     ErrorCode::InvalidParams.into()
-}
-
-#[derive(Debug, Clone, Default)]
-pub(crate) struct Metrics {
-    pub(crate) ws_sessions_opened: Arc<AtomicUsize>,
-    pub(crate) ws_sessions_closed: Arc<AtomicUsize>,
-}
-
-pub(crate) async fn ws_server_with_stats(metrics: Metrics) -> SocketAddr {
-    let listener = TcpListener::bind(SocketAddr::from(([127, 0, 0, 1], 0))).await.unwrap();
-    let addr = listener.local_addr().unwrap();
-    let (stop_handle, server_handle) = stop_channel();
-    let metrics = metrics.clone();
-
-    let rpc_svc = Server::builder()
-        .set_config(ServerConfigBuilder::new().max_connections(33).build())
-        .to_service_builder()
-        .build(Methods::new(), stop_handle.clone());
-
-    tokio::spawn(async move {
-        loop {
-            let sock = tokio::select! {
-                res = listener.accept() => {
-                    match res {
-                        Ok((stream, _remote_addr)) => stream,
-                        Err(e) => {
-                            tracing::error!("failed to accept v4 connection: {:?}", e);
-                            continue;
-                        }
-                    }
-                }
-                _ = stop_handle.clone().shutdown() => break,
-            };
-
-            let rpc_svc = rpc_svc.clone();
-            let metrics = metrics.clone();
-            let stop_handle = stop_handle.clone();
-
-            tokio::spawn(async move {
-                let rpc_svc = rpc_svc.clone();
-
-                let svc = tower::service_fn(move |req| {
-                    let is_websocket = crate::ws::is_upgrade_request(&req);
-                    let metrics = metrics.clone();
-                    let mut rpc_svc = rpc_svc.clone();
-
-                    if is_websocket {
-                        // This should work for each callback.
-                        let session_close1 = rpc_svc.on_session_closed();
-                        let session_close2 = rpc_svc.on_session_closed();
-
-                        tokio::spawn(async move {
-                            metrics.ws_sessions_opened.fetch_add(1, Ordering::SeqCst);
-                            tokio::join!(session_close2, session_close1);
-                            metrics.ws_sessions_closed.fetch_add(1, Ordering::SeqCst);
-                        });
-                    }
-
-                    async move { rpc_svc.call(req).await }.boxed()
-                });
-
-                tokio::spawn(serve_with_graceful_shutdown(
-                    sock,
-                    svc,
-                    stop_handle.clone().shutdown(),
-                ));
-            });
-        }
-    });
-
-    tokio::spawn(server_handle.stopped());
-
-    addr
 }
