@@ -228,7 +228,10 @@ where
         self.inner.eth_api.pool()
     }
 
-    /// Returns all the filter changes for the given id, if any
+    /// Returns all the filter changes for the given id, if any.
+    ///
+    /// Concurrent polls of the same filter are serialized. Collection errors or cancellation leave
+    /// its block cursor unchanged so a retry does not skip undelivered changes.
     pub async fn filter_changes(
         &self,
         id: FilterId,
@@ -236,39 +239,32 @@ where
         FilterChanges<RpcTransaction<Eth::NetworkTypes>, RpcLog<Eth::NetworkTypes>>,
         EthFilterError,
     > {
-        let info = self.provider().chain_info()?;
-        let best_number = info.best_number;
-
-        // start_block is the block from which we should start fetching changes, the next block from
-        // the last time changes were polled, in other words the best block at last poll + 1
-        let (start_block, kind) = {
+        let (block, kind) = {
             let mut filters = self.inner.active_filters.inner.lock().await;
             let filter = filters.get_mut(&id).ok_or(EthFilterError::FilterNotFound(id))?;
-
-            if filter.block > best_number {
-                // no new blocks since the last poll
-                return Ok(FilterChanges::Empty)
-            }
-
-            // update filter
-            // we fetch all changes from [filter.block..best_block], so we advance the filter's
-            // block to `best_block +1`, the next from which we should start fetching changes again
-            let mut block = best_number + 1;
-            std::mem::swap(&mut filter.block, &mut block);
             filter.last_poll_timestamp = Instant::now();
-
-            (block, filter.kind.clone())
+            (filter.block.clone(), filter.kind.clone())
         };
 
-        match kind {
-            FilterKind::PendingTransaction(filter) => Ok(match filter.drain().await {
+        // Hold only this filter's cursor while collecting, without blocking other filters.
+        let mut block = block.lock().await;
+        let info = self.provider().chain_info()?;
+        let best_number = info.best_number;
+        let start_block = *block;
+        if start_block > best_number {
+            // No new blocks since the last successful poll.
+            return Ok(FilterChanges::Empty)
+        }
+
+        let changes = match kind {
+            FilterKind::PendingTransaction(filter) => match filter.drain().await {
                 FilterChanges::Empty => FilterChanges::Empty,
                 FilterChanges::Hashes(hashes) => FilterChanges::Hashes(hashes),
                 FilterChanges::Transactions(transactions) => {
                     FilterChanges::Transactions(transactions)
                 }
                 FilterChanges::Logs(_) => unreachable!("pending transaction filter returned logs"),
-            }),
+            },
             FilterKind::Block => {
                 // Note: we need to fetch the block hashes from inclusive range
                 // [start_block..best_block]
@@ -277,7 +273,7 @@ where
                     self.provider().canonical_hashes_range(start_block, end_block).map_err(
                         |_| EthApiError::HeaderRangeNotFound(start_block.into(), end_block.into()),
                     )?;
-                Ok(FilterChanges::Hashes(block_hashes))
+                FilterChanges::Hashes(block_hashes)
             }
             FilterKind::Log(filter) => {
                 let (from_block_number, to_block_number) = match filter.block_option {
@@ -313,9 +309,11 @@ where
                         self.inner.query_limits,
                     )
                     .await?;
-                Ok(FilterChanges::Logs(logs))
+                FilterChanges::Logs(logs)
             }
-        }
+        };
+        *block = best_number + 1;
+        Ok(changes)
     }
 
     /// Returns an array of all logs matching filter with given id.
@@ -654,7 +652,7 @@ where
         filters.insert(
             id.clone(),
             ActiveFilter {
-                block: last_poll_block_number,
+                block: Arc::new(Mutex::new(last_poll_block_number)),
                 last_poll_timestamp: Instant::now(),
                 kind,
             },
@@ -869,8 +867,8 @@ impl<T> ActiveFilters<T> {
 /// An installed filter
 #[derive(Debug)]
 struct ActiveFilter<T> {
-    /// At which block the filter was polled last.
-    block: u64,
+    /// Next block to poll, locked until collection finishes to serialize concurrent polls.
+    block: Arc<Mutex<u64>>,
     /// Last time this filter was polled.
     last_poll_timestamp: Instant,
     /// What kind of filter it is.
@@ -1473,6 +1471,7 @@ mod tests {
     use alloy_consensus::TxLegacy;
     use alloy_network::Ethereum;
     use alloy_primitives::{Address, Bloom, Bytes, FixedBytes, Log, LogData, Signature};
+    use futures::FutureExt;
     use rand::Rng;
     use reth_chain_state::ExecutedBlock;
     use reth_chainspec::{ChainSpec, ChainSpecProvider};
@@ -2507,14 +2506,33 @@ mod tests {
             let id =
                 eth_filter.new_filter(Filter::new().from_block(1u64).to_block(1u64)).await.unwrap();
             let logs = EthFilterApiServer::filter_logs(&eth_filter, id.clone()).await;
-            let changes = EthFilterApiServer::filter_changes(&eth_filter, id).await;
+
+            // Cancel a poll while it waits for scan capacity; the next poll must still collect it.
+            let guard = eth_api.blocking_io_task_guard().clone();
+            let permits =
+                guard.clone().acquire_many_owned(guard.available_permits() as u32).await.unwrap();
+            assert!(eth_filter.filter_changes(id.clone()).now_or_never().is_none());
+            drop(permits);
+
+            // Concurrent polls must neither skip failed collections nor duplicate successful ones.
+            let (changes, retry) = tokio::time::timeout(Duration::from_secs(10), async {
+                tokio::join!(
+                    biased;
+                    EthFilterApiServer::filter_changes(&eth_filter, id.clone()),
+                    EthFilterApiServer::filter_changes(&eth_filter, id.clone()),
+                )
+            })
+            .await
+            .unwrap();
             if limit == 3 * 1024 {
                 assert_eq!(logs.unwrap_err().code(), OVERSIZED_RESPONSE_CODE);
                 assert_eq!(changes.unwrap_err().code(), OVERSIZED_RESPONSE_CODE);
+                assert_eq!(retry.unwrap_err().code(), OVERSIZED_RESPONSE_CODE);
             } else {
                 let logs = logs.unwrap();
                 assert_eq!(logs.len(), 2);
                 assert_eq!(changes.unwrap(), FilterChanges::Logs(logs));
+                assert_eq!(retry.unwrap(), FilterChanges::Empty);
             }
         }
     }
