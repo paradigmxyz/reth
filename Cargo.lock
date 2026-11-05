@@ -10220,6 +10220,7 @@ dependencies = [
  "dyn-clone",
  "http",
  "jsonrpsee",
+ "jsonrpsee-test-utils",
  "metrics",
  "pin-project",
  "reqwest",

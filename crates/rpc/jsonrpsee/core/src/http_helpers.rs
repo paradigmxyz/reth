@@ -226,16 +226,14 @@ pub fn read_header_value(
 
 #[cfg(test)]
 mod tests {
-    use super::{read_body, read_header_content_length, HttpError};
-    use http_body_util::BodyExt;
+    use super::{read_body, read_header_content_length};
 
     type Body = http_body_util::Full<bytes::Bytes>;
 
     #[tokio::test]
     async fn body_to_bytes_size_limit_works() {
         let headers = http::header::HeaderMap::new();
-        let full_body = Body::from(vec![0; 128]);
-        let body = full_body.map_err(|e| HttpError::Stream(e.into()));
+        let body = Body::from(vec![0; 128]);
         assert!(read_body(&headers, body, 127).await.is_err());
     }
 
