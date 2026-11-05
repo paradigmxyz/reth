@@ -165,13 +165,14 @@ impl StateRootHandle {
 
     /// Converts this sparse-trie handle into the opaque handle passed to payload builders.
     ///
-    /// The payload builder only executes transactions, so the handle carries the execution
-    /// hook; the hint capability is dropped here.
+    /// The handle carries the execution hook and the hint capability, so builders that prewarm
+    /// transactions can prefetch proofs ahead of execution.
     pub fn into_payload_state_root_handle(mut self) -> PayloadStateRootHandle {
         let hook = self.take_execution_hook();
         PayloadStateRootHandle {
             name: "sparse-trie",
             hook: Some(hook),
+            hint: self.hint.take(),
             cancel_guard: Some(self.cancel_guard),
             state_root_rx: self.state_root_rx.take(),
             hashed_state_rx: self.hashed_state_rx.take(),
@@ -201,6 +202,8 @@ pub struct PayloadStateRootHandle {
     name: &'static str,
     /// Execution hook that streams per-transaction updates; taken once when building starts.
     hook: Option<StateRootUpdateHook>,
+    /// Best-effort hint capability for transaction prewarming.
+    hint: Option<StateRootHintStream>,
     /// Cancels the backing task when the handle is dropped without consuming the result.
     cancel_guard: Option<StateRootTaskCancelGuard>,
     state_root_rx:
@@ -215,6 +218,7 @@ impl fmt::Debug for PayloadStateRootHandle {
         f.debug_struct("PayloadStateRootHandle")
             .field("name", &self.name)
             .field("has_hook", &self.hook.is_some())
+            .field("has_hint", &self.hint.is_some())
             .field("has_cancel_guard", &self.cancel_guard.is_some())
             .field("has_state_root_rx", &self.state_root_rx.is_some())
             .field("has_hashed_state_rx", &self.hashed_state_rx.is_some())
@@ -238,6 +242,7 @@ impl PayloadStateRootHandle {
         Self {
             name,
             hook,
+            hint: None,
             cancel_guard: None,
             state_root_rx: Some(state_root_rx),
             hashed_state_rx,
@@ -274,6 +279,12 @@ impl PayloadStateRootHandle {
     /// If the handle was created without an execution hook, or the hook was already taken.
     pub const fn take_state_hook(&mut self) -> StateRootUpdateHook {
         self.hook.take().expect("payload state root task missing execution hook")
+    }
+
+    /// Takes the best-effort hint capability, if the backing task accepts hints and it was not
+    /// taken yet.
+    pub const fn take_hint_stream(&mut self) -> Option<StateRootHintStream> {
+        self.hint.take()
     }
 
     /// Awaits the state root computation result.
