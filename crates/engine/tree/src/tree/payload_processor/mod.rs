@@ -455,7 +455,12 @@ where
             env.decoded_bal.is_none() &&
             cfg_reuses_prewarm_results(env.evm_env.version()) &&
             self.evm_config.reuses_prewarm_results())
-        .then(|| Arc::new(PrewarmResults::new(env.transaction_count)));
+        .then(|| {
+            Arc::new(PrewarmResults::with_unpredicted_account(
+                env.transaction_count,
+                env.evm_env.block_env().beneficiary,
+            ))
+        });
 
         let executed_tx_index = Arc::new(AtomicUsize::new(0));
         // configure prewarming
