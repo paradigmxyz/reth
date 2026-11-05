@@ -26,63 +26,70 @@
 
 //! Convenience wrapper for a stream (AsyncRead + AsyncWrite) which can either be plain TCP or TLS.
 
-use std::io::Error as IoError;
-use std::pin::Pin;
-use std::task::Context;
-use std::task::Poll;
+use std::{
+    io::Error as IoError,
+    pin::Pin,
+    task::{Context, Poll},
+};
 
 use pin_project::pin_project;
-use tokio::io::{AsyncRead, AsyncWrite};
-use tokio::net::TcpStream;
+use tokio::{
+    io::{AsyncRead, AsyncWrite},
+    net::TcpStream,
+};
 
 /// Stream to represent either a unencrypted or encrypted socket stream.
 #[pin_project(project = EitherStreamProj)]
 #[derive(Debug)]
 #[allow(clippy::large_enum_variant)]
 pub enum EitherStream {
-	/// Unencrypted socket stream.
-	Plain(#[pin] TcpStream),
-	/// Encrypted socket stream.
-	#[cfg(feature = "tls")]
-	Tls(#[pin] tokio_rustls::client::TlsStream<TcpStream>),
+    /// Unencrypted socket stream.
+    Plain(#[pin] TcpStream),
+    /// Encrypted socket stream.
+    #[cfg(feature = "tls")]
+    Tls(#[pin] tokio_rustls::client::TlsStream<TcpStream>),
 }
 
 impl AsyncRead for EitherStream {
-	fn poll_read(
-		self: Pin<&mut Self>,
-		cx: &mut Context,
-		buf: &mut tokio::io::ReadBuf<'_>,
-	) -> Poll<Result<(), IoError>> {
-		match self.project() {
-			EitherStreamProj::Plain(stream) => AsyncRead::poll_read(stream, cx, buf),
-			#[cfg(feature = "tls")]
-			EitherStreamProj::Tls(stream) => AsyncRead::poll_read(stream, cx, buf),
-		}
-	}
+    fn poll_read(
+        self: Pin<&mut Self>,
+        cx: &mut Context,
+        buf: &mut tokio::io::ReadBuf<'_>,
+    ) -> Poll<Result<(), IoError>> {
+        match self.project() {
+            EitherStreamProj::Plain(stream) => AsyncRead::poll_read(stream, cx, buf),
+            #[cfg(feature = "tls")]
+            EitherStreamProj::Tls(stream) => AsyncRead::poll_read(stream, cx, buf),
+        }
+    }
 }
 
 impl AsyncWrite for EitherStream {
-	fn poll_write(self: Pin<&mut Self>, cx: &mut Context, buf: &[u8]) -> Poll<Result<usize, IoError>> {
-		match self.project() {
-			EitherStreamProj::Plain(stream) => AsyncWrite::poll_write(stream, cx, buf),
-			#[cfg(feature = "tls")]
-			EitherStreamProj::Tls(stream) => AsyncWrite::poll_write(stream, cx, buf),
-		}
-	}
+    fn poll_write(
+        self: Pin<&mut Self>,
+        cx: &mut Context,
+        buf: &[u8],
+    ) -> Poll<Result<usize, IoError>> {
+        match self.project() {
+            EitherStreamProj::Plain(stream) => AsyncWrite::poll_write(stream, cx, buf),
+            #[cfg(feature = "tls")]
+            EitherStreamProj::Tls(stream) => AsyncWrite::poll_write(stream, cx, buf),
+        }
+    }
 
-	fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), IoError>> {
-		match self.project() {
-			EitherStreamProj::Plain(stream) => AsyncWrite::poll_flush(stream, cx),
-			#[cfg(feature = "tls")]
-			EitherStreamProj::Tls(stream) => AsyncWrite::poll_flush(stream, cx),
-		}
-	}
+    fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), IoError>> {
+        match self.project() {
+            EitherStreamProj::Plain(stream) => AsyncWrite::poll_flush(stream, cx),
+            #[cfg(feature = "tls")]
+            EitherStreamProj::Tls(stream) => AsyncWrite::poll_flush(stream, cx),
+        }
+    }
 
-	fn poll_shutdown(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), IoError>> {
-		match self.project() {
-			EitherStreamProj::Plain(stream) => AsyncWrite::poll_shutdown(stream, cx),
-			#[cfg(feature = "tls")]
-			EitherStreamProj::Tls(stream) => AsyncWrite::poll_shutdown(stream, cx),
-		}
-	}
+    fn poll_shutdown(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), IoError>> {
+        match self.project() {
+            EitherStreamProj::Plain(stream) => AsyncWrite::poll_shutdown(stream, cx),
+            #[cfg(feature = "tls")]
+            EitherStreamProj::Tls(stream) => AsyncWrite::poll_shutdown(stream, cx),
+        }
+    }
 }

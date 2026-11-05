@@ -1,5 +1,0 @@
-error: Missing argument `item`
- --> $DIR/sub_no_item.rs:6:4
-  |
-6 |     #[subscription(name = "sub")]
-  |       ^^^^^^^^^^^^

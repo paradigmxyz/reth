@@ -45,20 +45,23 @@ pub mod middleware;
 #[cfg(test)]
 mod tests;
 
-pub use future::{AlreadyStoppedError, ConnectionGuard, ConnectionPermit, ServerHandle, StopHandle, stop_channel};
-pub use jsonrpsee_core::error::RegisterMethodError;
-pub use jsonrpsee_core::server::*;
-pub use jsonrpsee_core::{id_providers::*, traits::IdProvider};
+pub use future::{
+    stop_channel, AlreadyStoppedError, ConnectionGuard, ConnectionPermit, ServerHandle, StopHandle,
+};
+pub use jsonrpsee_core::{
+    error::RegisterMethodError, id_providers::*, server::*, traits::IdProvider,
+};
 pub use jsonrpsee_types as types;
 pub use server::{
-	BatchRequestConfig, Builder as ServerBuilder, ConnectionState, PingConfig, Server, ServerConfig,
-	ServerConfigBuilder, TowerService, TowerServiceBuilder, TowerServiceNoHttp,
+    BatchRequestConfig, Builder as ServerBuilder, ConnectionState, PingConfig, Server,
+    ServerConfig, ServerConfigBuilder, TowerService, TowerServiceBuilder, TowerServiceNoHttp,
 };
 pub use tracing;
 
-pub use jsonrpsee_core::http_helpers::{Body as HttpBody, Request as HttpRequest, Response as HttpResponse};
-pub use transport::http;
-pub use transport::ws;
+pub use jsonrpsee_core::http_helpers::{
+    Body as HttpBody, Request as HttpRequest, Response as HttpResponse,
+};
+pub use transport::{http, ws};
 pub use utils::{serve, serve_with_graceful_shutdown};
 
 pub(crate) const LOG_TARGET: &str = "jsonrpsee-server";
