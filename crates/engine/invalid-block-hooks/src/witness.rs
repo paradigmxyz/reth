@@ -9,13 +9,25 @@ use reth_execution_types::BundleSource;
 use reth_primitives_traits::{NodePrimitives, RecoveredBlock, SealedHeader};
 use reth_provider::{BlockExecutionOutput, StateProvider, StateProviderFactory};
 use reth_rpc_api::DebugApiClient;
+use reth_tasks::spawn_os_thread;
 use reth_trie::{
     bundle_state::{AccountInfoRevert, AccountStatus, BundleState, RevertToSlot, StorageSlot},
     updates::TrieUpdates,
 };
 use serde::Serialize;
-use std::{collections::BTreeMap, fmt::Debug, fs::File, io::Write, path::PathBuf};
-use tracing::warn;
+use std::{
+    collections::BTreeMap,
+    fmt::Debug,
+    fs::File,
+    io::{BufWriter, Write},
+    path::{Path, PathBuf},
+    sync::mpsc::{sync_channel, SyncSender, TrySendError},
+    time::SystemTime,
+};
+use tracing::{error, warn, Span};
+
+/// Number of invalid blocks whose output files are kept in the output directory.
+const MAX_RETAINED_BLOCKS: usize = 10;
 
 /// Serializable version of `BundleState` for deterministic comparison
 #[derive(Debug, PartialEq, Eq)]
@@ -108,7 +120,12 @@ fn sort_bundle_state_for_comparison(bundle_state: &BundleState) -> BundleStateSo
 ///
 /// This hook captures the execution state and generates witness data that can be used
 /// for debugging and analysis of invalid block execution.
-#[derive(Debug)]
+///
+/// Blocks are processed on a dedicated thread, so the invalid payload status is returned without
+/// waiting for the re-execution. One block is processed at a time and at most one more waits;
+/// further invalid blocks are skipped until the thread catches up. Only the output of the
+/// [`MAX_RETAINED_BLOCKS`] most recently processed blocks is kept.
+#[derive(Debug, Clone)]
 pub struct InvalidBlockWitnessHook<P, E> {
     /// The provider to read the historical state and do the EVM execution.
     provider: P,
@@ -119,17 +136,32 @@ pub struct InvalidBlockWitnessHook<P, E> {
     output_directory: PathBuf,
     /// The healthy node client to compare the witness against.
     healthy_node_client: Option<jsonrpsee::http_client::HttpClient>,
+    /// Sends invalid blocks to the thread that processes them.
+    jobs: SyncSender<Box<dyn FnOnce() + Send>>,
 }
 
 impl<P, E> InvalidBlockWitnessHook<P, E> {
-    /// Creates a new witness hook.
-    pub const fn new(
+    /// Creates a new witness hook and spawns the thread that processes invalid blocks.
+    ///
+    /// The thread exits once the hook and all its clones are dropped.
+    pub fn new(
         provider: P,
         evm_config: E,
         output_directory: PathBuf,
         healthy_node_client: Option<jsonrpsee::http_client::HttpClient>,
     ) -> Self {
-        Self { provider, evm_config, output_directory, healthy_node_client }
+        let (jobs, rx) = sync_channel::<Box<dyn FnOnce() + Send>>(1);
+        let directory = output_directory.clone();
+        spawn_os_thread("witness-hook", move || {
+            // Output written before a restart counts towards the retention limit.
+            if let Err(err) = prune_output(&directory) {
+                warn!(target: "engine::invalid_block_hooks::witness", %err, "Failed to prune hook output");
+            }
+            while let Ok(job) = rx.recv() {
+                job();
+            }
+        });
+        Self { provider, evm_config, output_directory, healthy_node_client, jobs }
     }
 }
 
@@ -305,7 +337,9 @@ where
     /// Serializes and saves a value to a JSON file in the output directory
     fn save_file<T: Serialize>(&self, filename: String, value: &T) -> eyre::Result<PathBuf> {
         let path = self.output_directory.join(filename);
-        File::create(&path)?.write_all(serde_json::to_string(value)?.as_bytes())?;
+        let mut writer = BufWriter::new(File::create(&path)?);
+        serde_json::to_writer(&mut writer, value)?;
+        writer.flush()?;
 
         Ok(path)
     }
@@ -327,7 +361,7 @@ where
 
 impl<P, E, N: NodePrimitives> InvalidBlockHook<N> for InvalidBlockWitnessHook<P, E>
 where
-    P: StateProviderFactory + 'static,
+    P: StateProviderFactory + Clone + 'static,
     E: ConfigureEvm<Primitives = N> + 'static,
 {
     fn on_invalid_block(
@@ -337,10 +371,64 @@ where
         output: &BlockExecutionOutput<N::Receipt>,
         trie_updates: Option<(&TrieUpdates, B256)>,
     ) {
-        if let Err(err) = self.on_invalid_block(parent_header, block, output, trie_updates) {
-            warn!(target: "engine::invalid_block_hooks::witness", %err, "Failed to invoke hook");
+        let (block_number, block_hash) = (block.number(), block.hash());
+        let hook = self.clone();
+        let span = Span::current();
+        let parent_header = parent_header.clone();
+        let block = block.clone();
+        let output = output.clone();
+        let trie_updates = trie_updates.map(|(updates, root)| (updates.clone(), root));
+        let job = Box::new(move || {
+            let _enter = span.enter();
+            let trie_updates = trie_updates.as_ref().map(|(updates, root)| (updates, *root));
+            if let Err(err) = hook.on_invalid_block(&parent_header, &block, &output, trie_updates) {
+                warn!(target: "engine::invalid_block_hooks::witness", %err, "Failed to invoke hook");
+            }
+            if let Err(err) = prune_output(&hook.output_directory) {
+                warn!(target: "engine::invalid_block_hooks::witness", %err, "Failed to prune hook output");
+            }
+        });
+
+        match self.jobs.try_send(job) {
+            Ok(()) => {}
+            Err(TrySendError::Full(_)) => {
+                warn!(target: "engine::invalid_block_hooks::witness", block_number, %block_hash, "Skipping invalid block, hook is busy");
+            }
+            Err(TrySendError::Disconnected(_)) => {
+                error!(target: "engine::invalid_block_hooks::witness", block_number, %block_hash, "Skipping invalid block, hook thread exited");
+            }
         }
     }
+}
+
+/// Removes the output files of all but the [`MAX_RETAINED_BLOCKS`] most recently written blocks.
+///
+/// Only files named `{block_number}_{block_hash}.*` are considered, others are left alone.
+fn prune_output(output_directory: &Path) -> eyre::Result<()> {
+    let mut blocks = BTreeMap::<String, (SystemTime, Vec<PathBuf>)>::new();
+    for entry in reth_fs_util::read_dir(output_directory)? {
+        let entry = entry?;
+        let file_name = entry.file_name();
+        if let Some((prefix, _)) = file_name.to_str().and_then(|name| name.split_once('.')) &&
+            let Some((number, hash)) = prefix.split_once('_') &&
+            number.parse::<u64>().is_ok() &&
+            hash.parse::<B256>().is_ok()
+        {
+            let modified = entry.metadata()?.modified()?;
+            let (newest, paths) =
+                blocks.entry(prefix.to_string()).or_insert_with(|| (modified, Vec::new()));
+            *newest = (*newest).max(modified);
+            paths.push(entry.path());
+        }
+    }
+
+    let mut blocks = blocks.into_values().collect::<Vec<_>>();
+    blocks.sort_unstable_by(|(a, _), (b, _)| b.cmp(a));
+    for path in blocks.into_iter().skip(MAX_RETAINED_BLOCKS).flat_map(|(_, paths)| paths) {
+        reth_fs_util::remove_file(path)?;
+    }
+
+    Ok(())
 }
 
 #[cfg(test)]
@@ -350,14 +438,14 @@ mod tests {
     use alloy_primitives::{map::HashMap, Bytes, B256, U256};
     use evm2::evm::{CacheDB, EmptyDB};
     use reth_chainspec::ChainSpec;
-    use reth_ethereum_primitives::EthPrimitives;
+    use reth_ethereum_primitives::{Block, EthPrimitives, Receipt};
     use reth_evm_ethereum::EthEvmConfig;
     use reth_provider::test_utils::MockEthProvider;
     use reth_trie::bundle_state::{AccountRevert, BundleAccount};
     use tempfile::TempDir;
 
     use reth_testing_utils::generators::{self, random_block, random_eoa_accounts, BlockParams};
-    use std::collections::HashSet;
+    use std::{collections::HashSet, sync::mpsc, time::Duration};
 
     /// Creates a test `BundleState` with realistic accounts, contracts, and reverts
     fn create_bundle_state() -> BundleState {
@@ -935,5 +1023,131 @@ mod tests {
         let validation_result =
             hook.validate_bundle_state(&bundle_state, &bundle_state, "integration_component_test");
         assert!(validation_result.is_ok(), "Component validation should succeed");
+    }
+
+    #[test]
+    fn test_hook_processes_invalid_block_on_hook_thread() {
+        let (hook, output_dir, _temp_dir) = create_test_hook();
+        let (parent_header, block) = create_test_block(2);
+
+        InvalidBlockHook::<EthPrimitives>::on_invalid_block(
+            &hook,
+            &parent_header,
+            &block,
+            &create_test_output(),
+            None,
+        );
+        wait_for_hook_thread(&hook);
+
+        assert!(witness_path(&output_dir, &block).exists());
+    }
+
+    #[test]
+    fn test_hook_skips_invalid_block_when_busy() {
+        let (hook, output_dir, _temp_dir) = create_test_hook();
+        let (started_tx, started_rx) = mpsc::channel();
+        let (release_tx, release_rx) = mpsc::channel::<()>();
+        hook.jobs
+            .send(Box::new(move || {
+                started_tx.send(()).unwrap();
+                release_rx.recv().unwrap();
+            }))
+            .unwrap();
+        started_rx.recv().unwrap();
+
+        // The first block waits behind the running job and the second finds the queue full.
+        let (parent_header, queued) = create_test_block(2);
+        let (_, skipped) = create_test_block(3);
+        for block in [&queued, &skipped] {
+            InvalidBlockHook::<EthPrimitives>::on_invalid_block(
+                &hook,
+                &parent_header,
+                block,
+                &create_test_output(),
+                None,
+            );
+        }
+        release_tx.send(()).unwrap();
+        wait_for_hook_thread(&hook);
+
+        assert!(witness_path(&output_dir, &queued).exists());
+        assert!(!witness_path(&output_dir, &skipped).exists());
+    }
+
+    #[test]
+    fn test_prune_output_keeps_most_recent_blocks() {
+        let temp_dir = TempDir::new().unwrap();
+        let output_dir = temp_dir.path();
+        let blocks = (0..MAX_RETAINED_BLOCKS as u64 + 2)
+            .map(|number| {
+                let prefix = format!("{number}_{}", B256::with_last_byte(number as u8));
+                let files = [
+                    output_dir.join(format!("{prefix}.witness.re_executed.json")),
+                    output_dir.join(format!("{prefix}.bundle_state.diff")),
+                ];
+                for path in &files {
+                    File::create(path)
+                        .unwrap()
+                        .set_modified(SystemTime::UNIX_EPOCH + Duration::from_secs(number))
+                        .unwrap();
+                }
+                files
+            })
+            .collect::<Vec<_>>();
+        let unrelated = output_dir.join("notes.txt");
+        File::create(&unrelated).unwrap();
+
+        prune_output(output_dir).unwrap();
+
+        // The files of the two oldest blocks are removed.
+        for (index, files) in blocks.iter().enumerate() {
+            for path in files {
+                assert_eq!(path.exists(), index >= 2, "{}", path.display());
+            }
+        }
+        assert!(unrelated.exists());
+    }
+
+    /// Creates an empty block on top of a random parent header.
+    fn create_test_block(number: u64) -> (SealedHeader, RecoveredBlock<Block>) {
+        let mut rng = generators::rng();
+        let parent_header = generators::random_header(&mut rng, number - 1, None);
+        let block = random_block(
+            &mut rng,
+            number,
+            BlockParams {
+                parent: Some(parent_header.hash()),
+                tx_count: Some(0),
+                ..Default::default()
+            },
+        )
+        .try_recover()
+        .unwrap();
+        (parent_header, block)
+    }
+
+    /// Creates an empty `BlockExecutionOutput`.
+    fn create_test_output() -> BlockExecutionOutput<Receipt> {
+        BlockExecutionOutput::new(
+            reth_provider::BlockExecutionResult {
+                receipts: vec![],
+                requests: Requests::default(),
+                gas_used: 0,
+                blob_gas_used: 0,
+            },
+            BundleState::default(),
+        )
+    }
+
+    /// Returns the path of the re-executed witness the hook writes for `block`.
+    fn witness_path(output_dir: &Path, block: &RecoveredBlock<Block>) -> PathBuf {
+        output_dir.join(format!("{}_{}.witness.re_executed.json", block.number(), block.hash()))
+    }
+
+    /// Blocks until the hook thread has finished every job queued before this call.
+    fn wait_for_hook_thread<P, E>(hook: &InvalidBlockWitnessHook<P, E>) {
+        let (done_tx, done_rx) = mpsc::channel();
+        hook.jobs.send(Box::new(move || done_tx.send(()).unwrap())).unwrap();
+        done_rx.recv().unwrap();
     }
 }
