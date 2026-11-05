@@ -1,0 +1,5 @@
+error: Missing argument `name`
+ --> $DIR/sub_no_name.rs:6:4
+  |
+6 |     #[subscription(item = String)]
+  |       ^^^^^^^^^^^^

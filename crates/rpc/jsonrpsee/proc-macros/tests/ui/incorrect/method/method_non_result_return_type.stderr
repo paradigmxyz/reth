@@ -1,0 +1,14 @@
+error: Expecting something like 'Result<Foo, Err>' here, but got no generic args (eg no '<Foo,Err>').
+ --> tests/ui/incorrect/method/method_non_result_return_type.rs:6:23
+  |
+6 |     async fn a(&self) -> u16;
+  |                          ^^^
+
+error[E0271]: expected `impl Future<Output = Result<_, ClientError>> + Send` to be a future that resolves to `()`, but it resolves to `Result<_, ClientError>`
+ --> tests/ui/incorrect/method/method_non_result_return_type.rs:3:1
+  |
+3 | #[rpc(client)]
+  | ^^^^^^^^^^^^^^ expected `()`, found `Result<_, ClientError>`
+  |
+  = note: expected unit type `()`
+                  found enum `Result<_, ClientError>`

@@ -1,0 +1,5 @@
+error: Methods must have either 'method' or 'subscription' attribute
+ --> $DIR/rpc_not_qualified.rs:6:2
+  |
+6 |     async fn async_method(&self) -> jsonrpsee::core::RpcResult<u8>;
+  |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^

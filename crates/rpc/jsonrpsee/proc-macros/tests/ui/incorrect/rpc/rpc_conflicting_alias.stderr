@@ -1,0 +1,5 @@
+error: "foo_dup" is already defined
+ --> $DIR/rpc_conflicting_alias.rs:6:11
+  |
+6 |     async fn async_method(&self) -> RpcResult<u8>;
+  |              ^^^^^^^^^^^^
