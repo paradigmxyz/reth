@@ -1578,7 +1578,7 @@ const DEFAULT_MAX_TARGETS_FOR_CHUNKING: usize = 300;
 
 /// Update messages after which a continuous stream applies its buffered updates and promotes
 /// account updates, see [`SparseTrieCacheTask::window_due`].
-const UPDATE_WINDOW_LEN: usize = 64;
+const UPDATE_WINDOW_LEN: usize = 16;
 
 /// Time after which a continuous stream applies its buffered updates and promotes account updates,
 /// see [`SparseTrieCacheTask::window_due`].
@@ -2550,12 +2550,12 @@ mod tests {
     #[test]
     fn windowed_streams_produce_the_root_and_trie_updates_of_a_merged_update() {
         for seed in 0..2 {
-            let (messages, expected_root) = random_genesis_block(seed, UPDATE_WINDOW_LEN * 5);
+            let (messages, expected_root) = random_genesis_block(seed, UPDATE_WINDOW_LEN * 20);
             let (merged_root, merged_updates) = root_with_schedule(messages, Schedule::Merged);
             assert_eq!(merged_root, expected_root, "seed {seed}");
 
             for schedule in [Schedule::Continuous, Schedule::Gaps] {
-                let (messages, _) = random_genesis_block(seed, UPDATE_WINDOW_LEN * 5);
+                let (messages, _) = random_genesis_block(seed, UPDATE_WINDOW_LEN * 20);
                 let (root, updates) = root_with_schedule(messages, schedule);
                 assert_eq!(root, expected_root, "seed {seed}, {schedule:?}");
                 assert_eq!(updates, merged_updates, "seed {seed}, {schedule:?}");
