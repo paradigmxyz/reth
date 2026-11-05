@@ -696,10 +696,21 @@ impl PredictedState {
 
     /// Flags the transaction at `index` as possibly stale, waking an idle worker to check it.
     fn flag(&self, index: usize) {
-        if let Some(flag) = self.maybe_stale.get(index) &&
-            !flag.swap(true, Ordering::AcqRel)
-        {
+        if self.mark(index) {
             self.wake(false);
+        }
+    }
+
+    /// Flags the transaction at `index` as possibly stale without waking a worker, returning
+    /// whether it was not flagged yet.
+    fn mark(&self, index: usize) -> bool {
+        self.maybe_stale.get(index).is_some_and(|flag| !flag.swap(true, Ordering::AcqRel))
+    }
+
+    /// Wakes idle workers for `flagged` newly flagged transactions.
+    fn wake_for(&self, flagged: usize) {
+        if flagged > 0 {
+            self.wake(flagged > 1);
         }
     }
 
@@ -727,18 +738,17 @@ impl PredictedState {
         self.waiting.fetch_sub(1, Ordering::SeqCst);
     }
 
-    /// Flags the readers after `index` of the keys a changed prediction wrote.
+    /// Flags the readers after `index` of the keys a changed prediction wrote, without waking
+    /// workers, and returns how many were not flagged yet.
     fn flag_readers<K: Eq + core::hash::Hash>(
         &self,
         readers: &DashMap<K, Vec<usize>, DefaultHashBuilder>,
         key: &K,
         index: usize,
-    ) {
-        if let Some(readers) = readers.get(key) {
-            for &reader in readers.iter().filter(|&&reader| reader > index) {
-                self.flag(reader);
-            }
-        }
+    ) -> usize {
+        readers.get(key).map_or(0, |readers| {
+            readers.iter().filter(|&&reader| reader > index && self.mark(reader)).count()
+        })
     }
 
     /// Takes the first flagged transaction in `range`, clearing its flag.
@@ -789,12 +799,13 @@ impl PredictedState {
 
     /// Republishes the rebased balances of the accounts in `rebased`.
     fn publish_rebased(&self, index: usize, state: &PendingState, rebased: &[Address]) {
+        let mut flagged = 0;
         for account in state.account_changes() {
             if self.unpredicted == Some(account.address) || !rebased.contains(&account.address) {
                 continue
             }
             if let Some(current) = account.current {
-                self.flag_readers(&self.account_readers, &account.address, index);
+                flagged += self.flag_readers(&self.account_readers, &account.address, index);
                 write(
                     &mut self.accounts.entry(account.address).or_default(),
                     index,
@@ -802,6 +813,7 @@ impl PredictedState {
                 );
             }
         }
+        self.wake_for(flagged);
     }
 
     /// Retracts the transaction's predicted writes.
@@ -816,6 +828,7 @@ impl PredictedState {
         state: impl IntoIterator<Item = AccountChanges<'a>>,
         publish: bool,
     ) {
+        let mut flagged = 0;
         for account in state {
             if !account.is_changed() {
                 continue
@@ -836,11 +849,9 @@ impl PredictedState {
                 continue
             }
             if self.unpredicted == Some(address) {
-                for reader in index + 1..self.maybe_stale.len() {
-                    self.flag(reader);
-                }
+                flagged += (index + 1..self.maybe_stale.len()).filter(|&i| self.mark(i)).count();
             } else {
-                self.flag_readers(&self.account_readers, &address, index);
+                flagged += self.flag_readers(&self.account_readers, &address, index);
             }
             write(
                 &mut self.accounts.entry(address).or_default(),
@@ -854,7 +865,7 @@ impl PredictedState {
                 if (account.storage.wiped && !value.value.current.is_zero()) ||
                     (!account.storage.wiped && value.value.original != value.value.current)
                 {
-                    self.flag_readers(&self.storage_readers, &(address, slot), index);
+                    flagged += self.flag_readers(&self.storage_readers, &(address, slot), index);
                     write(
                         &mut self.storage.entry((address, slot)).or_default(),
                         index,
@@ -863,6 +874,7 @@ impl PredictedState {
                 }
             }
         }
+        self.wake_for(flagged);
     }
 }
 
