@@ -133,6 +133,7 @@ members = [
     "examples/custom-auth-http-middleware",
     "examples/custom-rpc-middleware",
     "examples/db-access",
+    "examples/exec-replay",
     "examples/exex-subscription",
     "examples/exex-test",
     "examples/full-contract-state",

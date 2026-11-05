@@ -4120,6 +4120,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "example-exec-replay"
+version = "0.0.0"
+dependencies = [
+ "alloy-consensus",
+ "alloy-primitives",
+ "alloy-rlp",
+ "clap",
+ "evm2",
+ "eyre",
+ "reth-ethereum",
+ "reth-evm",
+ "reth-evm-ethereum",
+ "reth-primitives-traits",
+ "reth-provider",
+ "reth-storage-api",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "example-exex-test"
 version = "0.0.0"
 dependencies = [
@@ -8872,7 +8892,10 @@ dependencies = [
  "reth-trie-common",
  "reth-trie-parallel",
  "reth-trie-sparse",
+ "serde",
+ "serde_json",
  "thiserror 2.0.21",
+ "tikv-jemallocator",
  "tokio",
  "tracing",
  "tracing-subscriber",
