@@ -182,19 +182,8 @@ where
             // Subscriptions are handled by the subscription callback and
             // "ordinary notifications" should not be sent back to the client.
             if rp.is_method_call() || rp.is_batch() {
-                let is_success = rp.is_success();
-                let (json, mut on_close) = rp.into_parts();
-
-                // The connection is closed, just quit.
-                if sink.send(json).await.is_err() {
-                    return;
-                }
-
-                // Notify that the message has been sent out to the internal
-                // WebSocket buffer.
-                if let Some(n) = on_close.take() {
-                    n.notify(is_success);
-                }
+                // An error means the connection is closed, so there is nothing left to do.
+                let _ = sink.send(rp.into_json()).await;
             }
         });
     };
