@@ -98,11 +98,7 @@ impl RpcService {
 }
 
 impl RpcServiceT for RpcService {
-    type BatchResponse = MethodResponse;
-    type MethodResponse = MethodResponse;
-    type NotificationResponse = MethodResponse;
-
-    fn call<'a>(&self, req: Request<'a>) -> impl Future<Output = Self::MethodResponse> + Send + 'a {
+    fn call<'a>(&self, req: Request<'a>) -> impl Future<Output = MethodResponse> + Send + 'a {
         let conn_id = self.conn_id;
         let max_response_body_size = self.max_response_body_size;
 
@@ -173,7 +169,7 @@ impl RpcServiceT for RpcService {
         }
     }
 
-    fn batch<'a>(&self, batch: Batch<'a>) -> impl Future<Output = Self::BatchResponse> + Send + 'a {
+    fn batch<'a>(&self, batch: Batch<'a>) -> impl Future<Output = MethodResponse> + Send + 'a {
         let mut batch_rp = BatchResponseBuilder::new_with_limit(self.max_response_body_size);
         let service = self.clone();
         async move {
@@ -216,7 +212,7 @@ impl RpcServiceT for RpcService {
     fn notification<'a>(
         &self,
         _n: Notification<'a>,
-    ) -> impl Future<Output = Self::BatchResponse> + Send + 'a {
+    ) -> impl Future<Output = MethodResponse> + Send + 'a {
         // Notifications are not answered.
         std::future::ready(MethodResponse::notification())
     }
