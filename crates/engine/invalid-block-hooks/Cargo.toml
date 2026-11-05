@@ -17,13 +17,14 @@ reth-evm = { workspace = true, features = ["witness"] }
 reth-execution-types.workspace = true
 reth-primitives-traits.workspace = true
 reth-provider.workspace = true
-reth-rpc-api = { workspace = true, features = ["client"] }
 reth-trie.workspace = true
 
 # alloy
 evm2.workspace = true
+alloy-eips.workspace = true
 alloy-primitives.workspace = true
 alloy-rlp.workspace = true
+alloy-rpc-client.workspace = true
 alloy-rpc-types-debug.workspace = true
 alloy-consensus.workspace = true
 
@@ -32,14 +33,12 @@ futures.workspace = true
 
 # misc
 eyre.workspace = true
-jsonrpsee.workspace = true
 pretty_assertions.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 tracing.workspace = true
 
 [dev-dependencies]
-alloy-eips.workspace = true
 reth-chainspec.workspace = true
 reth-ethereum-primitives.workspace = true
 reth-evm-ethereum = { workspace = true, features = ["std"] }

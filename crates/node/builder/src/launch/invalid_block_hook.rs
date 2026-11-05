@@ -1,9 +1,8 @@
 //! Invalid block hook helpers for the node builder.
 
 use crate::AddOnsContext;
-use alloy_consensus::TxEnvelope;
-use alloy_rpc_types::{Block, Header, Receipt, Transaction, TransactionRequest};
-use eyre::OptionExt;
+use alloy_primitives::U64;
+use alloy_rpc_client::{ClientBuilder, RpcClient};
 use reth_chainspec::EthChainSpec;
 use reth_engine_primitives::{InvalidBlockHook, InvalidBlockHooks, NoopInvalidBlockHook};
 use reth_invalid_block_hooks::InvalidBlockWitnessHook;
@@ -15,7 +14,6 @@ use reth_node_core::{
 };
 use reth_primitives_traits::NodePrimitives;
 use reth_provider::ChainSpecProvider;
-use reth_rpc_api::EthApiClient;
 
 /// Extension trait for [`AddOnsContext`] to create invalid block hooks.
 pub trait InvalidBlockHookExt {
@@ -111,7 +109,7 @@ where
 async fn get_healthy_node_client<C>(
     config: &NodeConfig<C>,
     chain_id: u64,
-) -> eyre::Result<Option<jsonrpsee::http_client::HttpClient>>
+) -> eyre::Result<Option<RpcClient>>
 where
     C: EthChainSpec,
 {
@@ -119,19 +117,10 @@ where
         return Ok(None);
     };
 
-    let client = jsonrpsee::http_client::HttpClientBuilder::default().build(url)?;
+    let client = ClientBuilder::default().http(url.parse()?);
 
     // Verify that the healthy node is running the same chain as the current node.
-    let healthy_chain_id = EthApiClient::<
-        TransactionRequest,
-        Transaction,
-        Block,
-        Receipt,
-        Header,
-        TxEnvelope,
-    >::chain_id(&client)
-    .await?
-    .ok_or_eyre("healthy node rpc client didn't return a chain id")?;
+    let healthy_chain_id: U64 = client.request_noparams("eth_chainId").await?;
 
     if healthy_chain_id.to::<u64>() != chain_id {
         eyre::bail!("Invalid chain ID. Expected {}, got {}", chain_id, healthy_chain_id);

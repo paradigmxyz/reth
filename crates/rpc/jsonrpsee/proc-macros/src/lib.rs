@@ -38,7 +38,6 @@ use rpc_macro::RpcDescription;
 
 mod attributes;
 mod helpers;
-mod render_client;
 mod render_server;
 mod rpc_macro;
 pub(crate) mod visitor;
@@ -47,16 +46,8 @@ pub(crate) mod visitor;
 ///
 /// ## Description
 ///
-/// This macro is capable of generating both server and client implementations on demand.
-/// Based on the attributes provided to the `rpc` macro, either one or both of implementations
-/// will be generated.
-///
-/// For clients, it will be an extension trait that adds all the required methods to a
-/// type that implements `Client` or `SubscriptionClient` (depending on whether trait has
-/// subscriptions methods or not), namely `HttpClient` and `WsClient`.
-///
-/// For servers, it will generate a trait mostly equivalent to the input, with the following
-/// differences:
+/// This macro generates the server implementation of an RPC trait, a trait mostly equivalent to
+/// the input, with the following differences:
 ///
 /// - The trait will have one additional (already implemented) method, `into_rpc`, which turns any
 ///   object that implements the server trait into an `RpcModule`.
@@ -66,12 +57,8 @@ pub(crate) mod visitor;
 ///     to the subscribers.
 ///   - The return type of the subscription method must implement `IntoSubscriptionCloseResponse`.
 ///
-/// Since this macro can generate up to two traits, both server and client traits will have
-/// a new name. For the `Foo` trait, server trait will be named `FooServer`, and client,
-/// correspondingly, `FooClient`.
-///
-/// To use the `FooClient`, just import it in the context. To use the server, the `FooServer` trait
-/// must be implemented on your type first.
+/// For the `Foo` trait, the server trait will be named `FooServer`, which must be implemented on
+/// your type.
 ///
 /// Note: you need to import the `jsonrpsee` façade crate in your code for the macro to work
 /// properly.
@@ -87,7 +74,7 @@ pub(crate) mod visitor;
 /// that generated for it by the macro.
 ///
 /// ```ignore
-/// #[rpc(client, server, namespace = "foo", namespace_separator = ".")]
+/// #[rpc(server, namespace = "foo", namespace_separator = ".")]
 /// pub trait Rpc {
 ///     #[method(name = "foo")]
 ///     async fn async_method(&self, param_a: u8, param_b: String) -> u16;
@@ -118,29 +105,6 @@ pub(crate) mod visitor;
 /// }
 /// ```
 ///
-/// Client code that will be generated:
-///
-/// ```ignore
-/// #[async_trait]
-/// pub trait RpcClient: SubscriptionClient {
-///     // In client implementation all the methods are (obviously) async.
-///     async fn async_method(&self, param_a: u8, param_b: String) -> Result<u16, Error> {
-///         // Actual implementations are stripped, but inside a corresponding `Client` or
-///         // `SubscriptionClient` method is called.
-///     }
-///     async fn sync_method(&self) -> Result<String, Error> {
-///         // ...
-///     }
-///
-///     // Subscription method returns `Subscription` object in case of success.
-///     async fn sub(&self) -> Result<Subscription<String>, Error> {
-///         // ...
-///     }
-/// }
-///
-/// impl<T> RpcClient for T where T: SubscriptionClient {}
-/// ```
-///
 /// ## Attributes
 ///
 /// ### `rpc` attribute
@@ -149,9 +113,7 @@ pub(crate) mod visitor;
 ///
 /// **Arguments:**
 ///
-/// - `server`: generate `<Trait>Server` trait for the server implementation.
-/// - `client`: generate `<Trait>Client` extension trait that builds RPC clients to invoke a
-///   concrete RPC implementation's methods conveniently.
+/// - `server` (mandatory): generate `<Trait>Server` trait for the server implementation.
 /// - `namespace`: add a prefix to all the methods and subscriptions in this RPC. For example, with
 ///   namespace `foo` and method `spam`, the resulting method name will be `foo_spam`.
 /// - `namespace_separator`: customize the separator used between namespace and method name.
@@ -159,8 +121,6 @@ pub(crate) mod visitor;
 ///   names like `foo.bar` instead of `foo_bar`.
 /// - `server_bounds`: replace *all* auto-generated trait bounds with the user-defined ones for the
 ///   server implementation.
-/// - `client_bounds`: replace *all* auto-generated trait bounds with the user-defined ones for the
-///   client implementation.
 ///
 /// **Trait requirements:**
 ///
@@ -169,9 +129,6 @@ pub(crate) mod visitor;
 /// - have associated types or constants;
 /// - have Rust methods not marked with either the `method` or `subscription` attribute;
 /// - be empty.
-///
-/// At least one of the `server` or `client` flags must be provided, otherwise the compilation will
-/// err.
 ///
 /// ### `method` attribute
 ///
@@ -185,8 +142,6 @@ pub(crate) mod visitor;
 ///   processed ignoring the namespace, so add the complete name, including the namespace.
 /// - `blocking`: when set method execution will always spawn on a dedicated thread. Only usable
 ///   with non-`async` methods.
-/// - `param_kind`: kind of structure to use for parameter passing. Can be "array" or "map",
-///   defaults to "array".
 ///
 /// **Method requirements:**
 ///
@@ -212,8 +167,6 @@ pub(crate) mod visitor;
 /// - `unsubscribe_aliases` (optional): Similar to `aliases` but for `unsubscribe`.
 /// - `item` (mandatory): type of items yielded by the subscription. Note that it must be the type,
 ///   not string.
-/// - `param_kind`: kind of structure to use for parameter passing. Can be "array" or "map",
-///   defaults to "array".
 ///
 /// **Method requirements:**
 ///
@@ -238,12 +191,11 @@ pub(crate) mod visitor;
 /// ## Full workflow example
 ///
 /// ```rust
-/// //! Example of using proc macro to generate working client and server.
+/// //! Example of using proc macro to generate a working server.
 ///
 /// use std::net::SocketAddr;
 ///
-/// use futures_channel::oneshot;
-/// use jsonrpsee::{ws_client::*, server::ServerBuilder};
+/// use jsonrpsee::server::ServerBuilder;
 ///
 /// // RPC is put into a separate module to clearly show names of generated entities.
 /// mod rpc_impl {
@@ -271,8 +223,8 @@ pub(crate) mod visitor;
 ///         }
 ///     }
 ///
-///     // Generate both server and client implementations, prepend all the methods with `foo_` prefix.
-///     #[rpc(client, server, namespace = "foo")]
+///     // Generate the server implementation, prepend all the methods with `foo_` prefix.
+///     #[rpc(server, namespace = "foo")]
 ///     pub trait MyRpc {
 ///         #[method(name = "foo")]
 ///         async fn async_method(
@@ -388,8 +340,8 @@ pub(crate) mod visitor;
 ///     }
 /// }
 ///
-/// // Use the generated implementations of server and client.
-/// use rpc_impl::{MyRpcClient, MyRpcServer, RpcServerImpl};
+/// // Use the generated server implementation.
+/// use rpc_impl::{MyRpcServer, RpcServerImpl};
 ///
 /// pub async fn server() -> SocketAddr {
 ///     let server = ServerBuilder::default().build("127.0.0.1:0").await.unwrap();
@@ -402,26 +354,14 @@ pub(crate) mod visitor;
 ///     addr
 /// }
 ///
-/// // In the main function, we start the server, create a client connected to this server,
-/// // and call the available methods.
 /// #[tokio::main]
 /// async fn main() {
-///     let server_addr = server().await;
-///     let server_url = format!("ws://{}", server_addr);
-///     // Note that we create the client as usual, but thanks to the `use rpc_impl::MyRpcClient`,
-///     // the client object will have all the methods to interact with the server.
-///     let client = WsClientBuilder::default().build(&server_url).await.unwrap();
+///     // The generated `RpcModule` can also be called directly without a transport.
+///     let module = RpcServerImpl.into_rpc();
+///     let res: u16 = module.call("foo_bar", jsonrpsee::core::EmptyServerParams::new()).await.unwrap();
+///     assert_eq!(res, 10);
 ///
-///     // Invoke RPC methods.
-///     assert_eq!(client.async_method(10, "a".into()).await.unwrap(), 42);
-///     assert_eq!(client.sync_method().await.unwrap(), 10);
-///
-///     // Subscribe and receive messages from the subscription.
-///     let mut sub = client.sub().await.unwrap();
-///     let first_recv = sub.next().await.unwrap().unwrap();
-///     assert_eq!(first_recv, "Response_A".to_string());
-///     let second_recv = sub.next().await.unwrap().unwrap();
-///     assert_eq!(second_recv, "Response_B".to_string());
+///     server().await;
 /// }
 /// ```
 #[proc_macro_attribute]

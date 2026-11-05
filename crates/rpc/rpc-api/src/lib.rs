@@ -67,35 +67,3 @@ pub mod servers {
         EthFilterApiServer, EthPubSubApiServer, L2EthApiExtServer,
     };
 }
-
-/// re-export of all client traits
-#[cfg(feature = "client")]
-pub use clients::*;
-
-/// Aggregates all client traits.
-#[cfg(feature = "client")]
-pub mod clients {
-    pub use crate::{
-        admin::AdminApiClient,
-        anvil::AnvilApiClient,
-        debug::DebugApiClient,
-        engine::{EngineApiClient, EngineEthApiClient},
-        hardhat::HardhatApiClient,
-        mev::{MevFullApiClient, MevSimApiClient},
-        miner::MinerApiClient,
-        net::NetApiClient,
-        otterscan::OtterscanClient,
-        reth::RethApiClient,
-        reth_engine::RethEngineApiClient,
-        rpc::RpcApiClient,
-        testing::TestingApiClient,
-        trace::TraceApiClient,
-        txpool::TxPoolApiClient,
-        validation::BlockSubmissionValidationApiClient,
-        web3::Web3ApiClient,
-    };
-    pub use reth_rpc_eth_api::{
-        EthApiClient, EthBundleApiClient, EthCallBundleApiClient, EthConfigApiClient,
-        EthFilterApiClient, L2EthApiExtClient,
-    };
-}

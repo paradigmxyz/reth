@@ -29,13 +29,5 @@ proc-macro-crate = { version = "3" }
 heck = { version = "0.5.0" }
 
 [dev-dependencies]
-jsonrpsee = { path = "../jsonrpsee", features = ["server", "client-core", "http-client", "ws-client", "macros"] }
-hyper = { workspace = true }
-hyper-util = { workspace = true, features = ["client", "client-legacy"] }
-futures-channel = { version = "0.3.14", default-features = false }
-futures-util = { workspace = true }
-serde_json = { workspace = true, features = ["raw_value"] }
-serde = { workspace = true, features = ["derive", "alloc"] }
-trybuild = { version = "1.0.97" }
+jsonrpsee = { path = "../jsonrpsee", features = ["server", "macros"] }
 tokio = { workspace = true, features = ["rt", "macros"] }
-tower = { workspace = true }
