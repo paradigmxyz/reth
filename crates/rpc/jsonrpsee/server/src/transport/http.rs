@@ -124,7 +124,7 @@ pub mod response {
             .status(status)
             .header("content-type", hyper::header::HeaderValue::from_static(content_type))
             .body(body.into())
-            // Parsing `StatusCode` and `HeaderValue` is infalliable but
+            // Parsing `StatusCode` and `HeaderValue` is infallible but
             // parsing body content is not.
             .expect("Unable to parse response body for type conversion")
     }
