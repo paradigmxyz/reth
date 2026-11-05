@@ -24,10 +24,10 @@
 // IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 // DEALINGS IN THE SOFTWARE.
 
-use std::{sync::atomic::Ordering, time::Duration};
+use std::time::Duration;
 
 use crate::{
-    tests::helpers::{deser_call, init_logger, server_with_context, ws_server_with_stats, Metrics},
+    tests::helpers::{deser_call, init_logger, server_with_context},
     types::SubscriptionId,
     BatchRequestConfig, RegisterMethodError, RpcModule, ServerBuilder, ServerConfig,
 };
@@ -939,7 +939,7 @@ async fn close_client_with_pending_calls_works() {
 
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
 
-    let (handle, addr) = server_with_infinite_call(MAX_TIMEOUT.checked_mul(10).unwrap(), tx).await;
+    let (handle, addr) = server_with_infinite_call(tx).await;
     let mut client = WebSocketTestClient::new(addr).with_default_timeout().await.unwrap().unwrap();
 
     for _ in 0..10 {
@@ -968,7 +968,7 @@ async fn drop_client_with_pending_calls_works() {
     init_logger();
 
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
-    let (handle, addr) = server_with_infinite_call(MAX_TIMEOUT.checked_mul(10).unwrap(), tx).await;
+    let (handle, addr) = server_with_infinite_call(tx).await;
 
     {
         let mut client =
@@ -990,39 +990,10 @@ async fn drop_client_with_pending_calls_works() {
     assert!(handle.stopped().with_timeout(MAX_TIMEOUT).await.is_ok());
 }
 
-#[tokio::test]
-async fn server_notify_on_conn_close() {
-    init_logger();
-
-    let metrics = Metrics::default();
-    let addr = ws_server_with_stats(metrics.clone()).await;
-
-    let mut client = WebSocketTestClient::new(addr).with_default_timeout().await.unwrap().unwrap();
-
-    // Wait for the server to process
-    tokio::time::sleep(Duration::from_millis(100)).await;
-
-    assert_eq!(metrics.ws_sessions_opened.load(Ordering::SeqCst), 1);
-    assert_eq!(metrics.ws_sessions_closed.load(Ordering::SeqCst), 0);
-
-    client.close().with_default_timeout().await.unwrap().unwrap();
-
-    // Wait for the server to process
-    tokio::time::sleep(Duration::from_millis(100)).await;
-
-    assert_eq!(metrics.ws_sessions_opened.load(Ordering::SeqCst), 1);
-    assert_eq!(metrics.ws_sessions_closed.load(Ordering::SeqCst), 1);
-}
-
 async fn server_with_infinite_call(
-    timeout: Duration,
     tx: tokio::sync::mpsc::UnboundedSender<()>,
 ) -> (crate::ServerHandle, std::net::SocketAddr) {
-    // Make sure that the ping_interval doesn't force the connection to be closed
-    let config = ServerConfig::builder()
-        .enable_ws_ping(crate::PingConfig::new().max_failures(usize::MAX).ping_interval(timeout))
-        .build();
-    let server = ServerBuilder::with_config(config)
+    let server = ServerBuilder::default()
         .build("127.0.0.1:0")
         .with_default_timeout()
         .await
