@@ -53,8 +53,8 @@ pub use jsonrpsee_core::{
 };
 pub use jsonrpsee_types as types;
 pub use server::{
-    BatchRequestConfig, Builder as ServerBuilder, ConnectionState, PingConfig, Server,
-    ServerConfig, ServerConfigBuilder, TowerService, TowerServiceBuilder, TowerServiceNoHttp,
+    BatchRequestConfig, Builder as ServerBuilder, ConnectionState, Server, ServerConfig,
+    ServerConfigBuilder, TowerServiceNoHttp,
 };
 pub use tracing;
 

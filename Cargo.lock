@@ -5701,17 +5701,14 @@ dependencies = [
  "futures-util",
  "http",
  "http-body",
- "http-body-util",
  "hyper",
  "hyper-util",
  "jsonrpsee-core",
  "jsonrpsee-test-utils",
  "jsonrpsee-types",
  "pin-project",
- "route-recognizer",
  "serde",
  "serde_json",
- "socket2",
  "soketto",
  "thiserror 2.0.21",
  "tokio",
@@ -11191,12 +11188,6 @@ checksum = "8395b4f860856b740f20a296ea2cd4d823e81a2658cf05ef61be22916026a906"
 dependencies = [
  "chrono",
 ]
-
-[[package]]
-name = "route-recognizer"
-version = "0.3.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "afab94fb28594581f62d981211a9a4d53cc8130bbcbbb89a0440d9b8e81a7746"
 
 [[package]]
 name = "ruint"

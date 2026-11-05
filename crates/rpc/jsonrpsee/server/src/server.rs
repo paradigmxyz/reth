@@ -24,19 +24,10 @@
 // IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 // DEALINGS IN THE SOFTWARE.
 
-use std::{
-    future::Future,
-    net::{SocketAddr, TcpListener as StdTcpListener},
-    pin::Pin,
-    sync::{atomic::AtomicU32, Arc},
-    task::Poll,
-    time::Duration,
-};
+use std::{future::Future, net::SocketAddr, pin::Pin, sync::Arc, task::Poll, time::Duration};
 
 use crate::{
-    future::{
-        session_close, ConnectionGuard, ServerHandle, SessionClose, SessionClosedFuture, StopHandle,
-    },
+    future::{ConnectionGuard, ServerHandle, StopHandle},
     middleware::rpc::{RpcService, RpcServiceCfg},
     transport::{http, ws, ws::BackgroundTaskParams},
     utils::{
@@ -214,16 +205,8 @@ pub struct ServerConfig {
     pub(crate) enable_ws: bool,
     /// Number of messages that server is allowed to `buffer` until backpressure kicks in.
     pub(crate) message_buffer_capacity: u32,
-    /// Ping settings.
-    pub(crate) ping_config: Option<PingConfig>,
     /// ID provider.
     pub(crate) id_provider: Arc<dyn IdProvider>,
-    /// `TCP_NODELAY` settings.
-    pub(crate) tcp_no_delay: bool,
-    /// `KEEP_ALIVE` duration.
-    pub(crate) keep_alive: Option<std::time::Duration>,
-    /// `KEEP_ALIVE_TIMEOUT` duration.
-    pub(crate) keep_alive_timeout: Duration,
     /// Timeout for receiving the first request of a connection.
     pub(crate) first_request_timeout: Option<Duration>,
     /// Timeout for writing a single message to a WebSocket connection.
@@ -251,35 +234,12 @@ pub struct ServerConfigBuilder {
     enable_ws: bool,
     /// Number of messages that server is allowed to `buffer` until backpressure kicks in.
     message_buffer_capacity: u32,
-    /// Ping settings.
-    ping_config: Option<PingConfig>,
     /// ID provider.
     id_provider: Arc<dyn IdProvider>,
-    /// `TCP_NODELAY` settings.
-    tcp_no_delay: bool,
-    /// `KEEP_ALIVE` duration.
-    keep_alive: Option<std::time::Duration>,
-    /// `KEEP_ALIVE_TIMEOUT` duration.
-    keep_alive_timeout: std::time::Duration,
     /// Timeout for receiving the first request of a connection.
     first_request_timeout: Option<Duration>,
     /// Timeout for writing a single message to a WebSocket connection.
     ws_write_timeout: Duration,
-}
-
-/// Builder for [`TowerService`].
-#[derive(Debug, Clone)]
-pub struct TowerServiceBuilder<RpcMiddleware, HttpMiddleware> {
-    /// ServerConfig
-    pub(crate) server_cfg: ServerConfig,
-    /// RPC middleware.
-    pub(crate) rpc_middleware: RpcServiceBuilder<RpcMiddleware>,
-    /// HTTP middleware.
-    pub(crate) http_middleware: tower::ServiceBuilder<HttpMiddleware>,
-    /// Connection ID.
-    pub(crate) conn_id: Arc<AtomicU32>,
-    /// Connection guard.
-    pub(crate) conn_guard: ConnectionGuard,
 }
 
 /// Configuration for batch request handling.
@@ -317,73 +277,6 @@ impl ConnectionState {
     }
 }
 
-/// Configuration for WebSocket ping/pong mechanism and it may be used to disconnect
-/// an inactive connection.
-///
-/// jsonrpsee doesn't associate the ping/pong frames just that if
-/// a pong frame isn't received within the `inactive_limit` then it's regarded
-/// as missed.
-///
-/// Such that the `inactive_limit` should be configured to longer than a single
-/// WebSocket ping takes or it might be missed and may end up
-/// terminating the connection.
-///
-/// Default: ping_interval: 30 seconds, max failures: 1 and inactive limit: 40 seconds.
-#[derive(Debug, Copy, Clone)]
-pub struct PingConfig {
-    /// Period which the server pings the connected client.
-    pub(crate) ping_interval: Duration,
-    /// Max allowed time for a connection to stay idle.
-    pub(crate) inactive_limit: Duration,
-    /// Max failures.
-    pub(crate) max_failures: usize,
-}
-
-impl Default for PingConfig {
-    fn default() -> Self {
-        Self {
-            ping_interval: Duration::from_secs(30),
-            max_failures: 1,
-            inactive_limit: Duration::from_secs(40),
-        }
-    }
-}
-
-impl PingConfig {
-    /// Create a new PingConfig.
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    /// Configure the interval when the WebSocket pings are sent out.
-    pub fn ping_interval(mut self, ping_interval: Duration) -> Self {
-        self.ping_interval = ping_interval;
-        self
-    }
-
-    /// Configure how long to wait for the WebSocket pong.
-    /// When this limit is expired it's regarded as the client is unresponsive.
-    ///
-    /// You may configure how many times the client is allowed to be "inactive" by
-    /// [`PingConfig::max_failures`].
-    pub fn inactive_limit(mut self, inactivity_limit: Duration) -> Self {
-        self.inactive_limit = inactivity_limit;
-        self
-    }
-
-    /// Configure how many times the remote peer is allowed be
-    /// inactive until the connection is closed.
-    ///
-    /// # Panics
-    ///
-    /// This method panics if `max` == 0.
-    pub fn max_failures(mut self, max: usize) -> Self {
-        assert!(max > 0);
-        self.max_failures = max;
-        self
-    }
-}
-
 impl Default for ServerConfig {
     fn default() -> Self {
         ServerConfig::builder().build()
@@ -409,12 +302,7 @@ impl Default for ServerConfigBuilder {
             enable_http: true,
             enable_ws: true,
             message_buffer_capacity: 1024,
-            ping_config: None,
             id_provider: Arc::new(RandomIntegerIdProvider),
-            tcp_no_delay: true,
-            keep_alive: None,
-            //same as `hyper` default
-            keep_alive_timeout: Duration::from_secs(20),
             first_request_timeout: Some(DEFAULT_FIRST_REQUEST_TIMEOUT),
             ws_write_timeout: DEFAULT_WS_WRITE_TIMEOUT,
         }
@@ -512,33 +400,6 @@ impl ServerConfigBuilder {
         self
     }
 
-    /// Enable WebSocket ping/pong on the server.
-    ///
-    /// Default: pings are disabled.
-    ///
-    /// # Examples
-    ///
-    /// ```rust
-    /// use std::{time::Duration, num::NonZeroUsize};
-    /// use jsonrpsee_server::{ServerConfigBuilder, PingConfig};
-    ///
-    /// // Set the ping interval to 10 seconds but terminates the connection if a client is inactive for more than 2 minutes
-    /// let ping_cfg = PingConfig::new().ping_interval(Duration::from_secs(10)).inactive_limit(Duration::from_secs(60 * 2));
-    /// let builder = ServerConfigBuilder::default().enable_ws_ping(ping_cfg);
-    /// ```
-    pub fn enable_ws_ping(mut self, config: PingConfig) -> Self {
-        self.ping_config = Some(config);
-        self
-    }
-
-    /// Disable WebSocket ping/pong on the server.
-    ///
-    /// Default: pings are disabled.
-    pub fn disable_ws_ping(mut self) -> Self {
-        self.ping_config = None;
-        self
-    }
-
     /// Configure custom `subscription ID` provider for the server to use
     /// to when getting new subscription calls.
     ///
@@ -561,26 +422,6 @@ impl ServerConfigBuilder {
     /// ```
     pub fn set_id_provider<I: IdProvider + 'static>(mut self, id_provider: I) -> Self {
         self.id_provider = Arc::new(id_provider);
-        self
-    }
-
-    /// Configure `TCP_NODELAY` on the socket to the supplied value `nodelay`.
-    ///
-    /// Default is `true`.
-    pub fn set_tcp_no_delay(mut self, no_delay: bool) -> Self {
-        self.tcp_no_delay = no_delay;
-        self
-    }
-
-    /// Configure `KEEP_ALIVE` hyper to the supplied value `keep_alive`.
-    pub fn set_keep_alive(mut self, keep_alive: Option<std::time::Duration>) -> Self {
-        self.keep_alive = keep_alive;
-        self
-    }
-
-    /// Configure `KEEP_ALIVE_TIMEOUT` hyper to the supplied value `keep_alive_timeout`.
-    pub fn set_keep_alive_timeout(mut self, keep_alive_timeout: Duration) -> Self {
-        self.keep_alive_timeout = keep_alive_timeout;
         self
     }
 
@@ -618,11 +459,7 @@ impl ServerConfigBuilder {
             enable_http: self.enable_http,
             enable_ws: self.enable_ws,
             message_buffer_capacity: self.message_buffer_capacity,
-            ping_config: self.ping_config,
             id_provider: self.id_provider,
-            tcp_no_delay: self.tcp_no_delay,
-            keep_alive: self.keep_alive,
-            keep_alive_timeout: self.keep_alive_timeout,
             first_request_timeout: self.first_request_timeout,
             ws_write_timeout: self.ws_write_timeout,
         }
@@ -656,73 +493,6 @@ impl Builder<Identity, Identity> {
     /// Create a server builder with the given [`ServerConfig`].
     pub fn with_config(config: ServerConfig) -> Self {
         Self { server_cfg: config, ..Default::default() }
-    }
-}
-
-impl<RpcMiddleware, HttpMiddleware> TowerServiceBuilder<RpcMiddleware, HttpMiddleware> {
-    /// Build a tower service.
-    pub fn build(
-        self,
-        methods: impl Into<Methods>,
-        stop_handle: StopHandle,
-    ) -> TowerService<RpcMiddleware, HttpMiddleware> {
-        let conn_id = self.conn_id.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-
-        let rpc_middleware = TowerServiceNoHttp {
-            rpc_middleware: self.rpc_middleware,
-            inner: ServiceData {
-                methods: methods.into(),
-                stop_handle,
-                conn_id,
-                conn_guard: self.conn_guard,
-                server_cfg: self.server_cfg,
-            },
-            on_session_close: None,
-        };
-
-        TowerService { rpc_middleware, http_middleware: self.http_middleware }
-    }
-
-    /// Configure the connection id.
-    ///
-    /// This is incremented every time `build` is called.
-    pub fn connection_id(mut self, id: u32) -> Self {
-        self.conn_id = Arc::new(AtomicU32::new(id));
-        self
-    }
-
-    /// Configure the max allowed connections on the server.
-    pub fn max_connections(mut self, limit: u32) -> Self {
-        self.conn_guard = ConnectionGuard::new(limit as usize);
-        self
-    }
-
-    /// Configure rpc middleware.
-    pub fn set_rpc_middleware<T>(
-        self,
-        rpc_middleware: RpcServiceBuilder<T>,
-    ) -> TowerServiceBuilder<T, HttpMiddleware> {
-        TowerServiceBuilder {
-            server_cfg: self.server_cfg,
-            rpc_middleware,
-            http_middleware: self.http_middleware,
-            conn_id: self.conn_id,
-            conn_guard: self.conn_guard,
-        }
-    }
-
-    /// Configure http middleware.
-    pub fn set_http_middleware<T>(
-        self,
-        http_middleware: tower::ServiceBuilder<T>,
-    ) -> TowerServiceBuilder<RpcMiddleware, T> {
-        TowerServiceBuilder {
-            server_cfg: self.server_cfg,
-            rpc_middleware: self.rpc_middleware,
-            http_middleware,
-            conn_id: self.conn_id,
-            conn_guard: self.conn_guard,
-        }
     }
 }
 
@@ -864,93 +634,6 @@ impl<HttpMiddleware, RpcMiddleware> Builder<HttpMiddleware, RpcMiddleware> {
         }
     }
 
-    /// Convert the server builder to a [`TowerServiceBuilder`].
-    ///
-    /// This can be used to utilize the [`TowerService`] from jsonrpsee.
-    ///
-    /// # Examples
-    ///
-    /// ```no_run
-    /// use jsonrpsee_server::{Methods, ServerConfig, ServerHandle, ws, stop_channel, serve_with_graceful_shutdown};
-    /// use tower::Service;
-    /// use std::{error::Error as StdError, net::SocketAddr};
-    /// use futures_util::future::{self, Either};
-    /// use hyper_util::rt::{TokioIo, TokioExecutor};
-    ///
-    /// fn run_server() -> ServerHandle {
-    ///     let (stop_handle, server_handle) = stop_channel();
-    ///     let svc_builder = jsonrpsee_server::Server::builder()
-    ///         .set_config(ServerConfig::builder().max_connections(33).build())
-    ///         .to_service_builder();
-    ///     let methods = Methods::new();
-    ///     let stop_handle = stop_handle.clone();
-    ///
-    ///     tokio::spawn(async move {
-    ///         let listener = tokio::net::TcpListener::bind(SocketAddr::from(([127, 0, 0, 1], 0))).await.unwrap();
-    ///
-    ///         loop {
-    ///              // The `tokio::select!` macro is used to wait for either of the
-    ///              // listeners to accept a new connection or for the server to be
-    ///              // stopped.
-    ///              let (sock, remote_addr) = tokio::select! {
-    ///                  res = listener.accept() => {
-    ///                      match res {
-    ///                         Ok(sock) => sock,
-    ///                         Err(e) => {
-    ///                             tracing::error!("failed to accept v4 connection: {:?}", e);
-    ///                             continue;
-    ///                         }
-    ///                       }
-    ///                  }
-    ///                  _ = stop_handle.clone().shutdown() => break,
-    ///              };
-    ///
-    ///              let stop_handle2 = stop_handle.clone();
-    ///              let svc_builder2 = svc_builder.clone();
-    ///              let methods2 = methods.clone();
-    ///
-    ///              let svc = tower::service_fn(move |req| {
-    ///                   let stop_handle = stop_handle2.clone();
-    ///                   let svc_builder = svc_builder2.clone();
-    ///                   let methods = methods2.clone();
-    ///
-    ///                   let mut svc = svc_builder.build(methods, stop_handle.clone());
-    ///
-    ///                   // It's not possible to know whether the websocket upgrade handshake failed or not here.
-    ///                   let is_websocket = ws::is_upgrade_request(&req);
-    ///
-    ///                   if is_websocket {
-    ///                       println!("websocket")
-    ///                   } else {
-    ///                       println!("http")
-    ///                   }
-    ///
-    ///                   // Call the jsonrpsee service which
-    ///                   // may upgrade it to a WebSocket connection
-    ///                   // or treat it as "ordinary HTTP request".
-    ///                   async move { svc.call(req).await }
-    ///               });
-    ///
-    ///               // Upgrade the connection to a HTTP service with graceful shutdown.
-    ///               tokio::spawn(serve_with_graceful_shutdown(sock, svc, stop_handle.clone().shutdown()));
-    ///          }
-    ///     });
-    ///
-    ///     server_handle
-    /// }
-    /// ```
-    pub fn to_service_builder(self) -> TowerServiceBuilder<RpcMiddleware, HttpMiddleware> {
-        let max_conns = self.server_cfg.max_connections as usize;
-
-        TowerServiceBuilder {
-            server_cfg: self.server_cfg,
-            rpc_middleware: self.rpc_middleware,
-            http_middleware: self.http_middleware,
-            conn_id: Arc::new(AtomicU32::new(0)),
-            conn_guard: ConnectionGuard::new(max_conns),
-        }
-    }
-
     /// Finalize the configuration of the server. Consumes the [`Builder`].
     ///
     /// ```rust
@@ -976,43 +659,6 @@ impl<HttpMiddleware, RpcMiddleware> Builder<HttpMiddleware, RpcMiddleware> {
             http_middleware: self.http_middleware,
         })
     }
-
-    /// Finalizes the configuration of the server with customized TCP settings on the socket.
-    ///
-    ///
-    /// ```rust
-    /// use jsonrpsee_server::Server;
-    /// use socket2::{Domain, Socket, Type};
-    /// use std::time::Duration;
-    ///
-    /// #[tokio::main]
-    /// async fn main() {
-    ///     let addr = "127.0.0.1:0".parse().unwrap();
-    ///     let domain = Domain::for_address(addr);
-    ///     let socket = Socket::new(domain, Type::STREAM, None).unwrap();
-    ///     socket.set_nonblocking(true).unwrap();
-    ///
-    ///     let address = addr.into();
-    ///     socket.bind(&address).unwrap();
-    ///
-    ///     socket.listen(4096).unwrap();
-    ///
-    ///     let server = Server::builder().build_from_tcp(socket).unwrap();
-    /// }
-    /// ```
-    pub fn build_from_tcp(
-        self,
-        listener: impl Into<StdTcpListener>,
-    ) -> std::io::Result<Server<HttpMiddleware, RpcMiddleware>> {
-        let listener = TcpListener::from_std(listener.into())?;
-
-        Ok(Server {
-            listener,
-            server_cfg: self.server_cfg,
-            rpc_middleware: self.rpc_middleware,
-            http_middleware: self.http_middleware,
-        })
-    }
 }
 
 /// Data required by the server to handle requests.
@@ -1030,61 +676,6 @@ struct ServiceData {
     server_cfg: ServerConfig,
 }
 
-/// jsonrpsee tower service
-///
-/// This will enable both `http_middleware` and `rpc_middleware`
-/// that may be enabled by [`Builder`] or [`TowerServiceBuilder`].
-#[derive(Debug, Clone)]
-pub struct TowerService<RpcMiddleware, HttpMiddleware> {
-    rpc_middleware: TowerServiceNoHttp<RpcMiddleware>,
-    http_middleware: tower::ServiceBuilder<HttpMiddleware>,
-}
-
-impl<RpcMiddleware, HttpMiddleware> TowerService<RpcMiddleware, HttpMiddleware> {
-    /// A future that returns when the connection has been closed.
-    ///
-    /// This method must be called before every [`TowerService::call`]
-    /// because the `SessionClosedFuture` may already been consumed or
-    /// not used.
-    pub fn on_session_closed(&mut self) -> SessionClosedFuture {
-        if let Some(n) = self.rpc_middleware.on_session_close.as_mut() {
-            // If it's called more then once another listener is created.
-            n.closed()
-        } else {
-            let (session_close, fut) = session_close();
-            self.rpc_middleware.on_session_close = Some(session_close);
-            fut
-        }
-    }
-}
-
-impl<RequestBody, ResponseBody, RpcMiddleware, HttpMiddleware> Service<HttpRequest<RequestBody>>
-    for TowerService<RpcMiddleware, HttpMiddleware>
-where
-    RpcMiddleware: Layer<RpcService> + Clone,
-    <RpcMiddleware as Layer<RpcService>>::Service: RpcServiceT + 'static,
-    HttpMiddleware: Layer<TowerServiceNoHttp<RpcMiddleware>> + Send + 'static,
-    <HttpMiddleware as Layer<TowerServiceNoHttp<RpcMiddleware>>>::Service: Service<HttpRequest<RequestBody>, Response = HttpResponse<ResponseBody>, Error = BoxError>
-        + Send,
-    <<HttpMiddleware as Layer<TowerServiceNoHttp<RpcMiddleware>>>::Service as Service<
-        HttpRequest<RequestBody>,
-    >>::Future: Send + 'static,
-    RequestBody: http_body::Body<Data = Bytes> + Send + 'static,
-    <RequestBody as http_body::Body>::Error: Into<BoxError>,
-{
-    type Response = HttpResponse<ResponseBody>;
-    type Error = BoxError;
-    type Future = Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send>>;
-
-    fn poll_ready(&mut self, _cx: &mut std::task::Context<'_>) -> Poll<Result<(), Self::Error>> {
-        Poll::Ready(Ok(()))
-    }
-
-    fn call(&mut self, request: HttpRequest<RequestBody>) -> Self::Future {
-        Box::pin(self.http_middleware.service(self.rpc_middleware.clone()).call(request))
-    }
-}
-
 /// jsonrpsee tower service without HTTP specific middleware.
 ///
 /// # Note
@@ -1093,7 +684,6 @@ where
 pub struct TowerServiceNoHttp<L> {
     inner: ServiceData,
     rpc_middleware: RpcServiceBuilder<L>,
-    on_session_close: Option<SessionClose>,
 }
 
 impl<Body, RpcMiddleware> Service<HttpRequest<Body>> for TowerServiceNoHttp<RpcMiddleware>
@@ -1128,7 +718,6 @@ where
         let conn_guard = &self.inner.conn_guard;
         let stop_handle = self.inner.stop_handle.clone();
         let conn_id = self.inner.conn_id;
-        let on_session_close = self.on_session_close.take();
 
         tracing::trace!(target: LOG_TARGET, "{:?}", request);
 
@@ -1209,7 +798,6 @@ where
                                 sink,
                                 rx,
                                 pending_calls_completed,
-                                on_session_close,
                                 extensions,
                             };
 
@@ -1299,13 +887,11 @@ fn process_connection<RpcMiddleware, HttpMiddleware, Body>(
         ..
     } = params;
 
-    if let Err(e) = socket.set_nodelay(server_cfg.tcp_no_delay) {
+    if let Err(e) = socket.set_nodelay(true) {
         tracing::warn!(target: LOG_TARGET, "Could not set NODELAY on socket: {:?}", e);
         return;
     }
 
-    let keep_alive = server_cfg.keep_alive;
-    let keep_alive_timeout = server_cfg.keep_alive_timeout;
     let first_request_timeout = server_cfg.first_request_timeout;
 
     let tower_service = TowerServiceNoHttp {
@@ -1317,7 +903,6 @@ fn process_connection<RpcMiddleware, HttpMiddleware, Body>(
             conn_guard: conn_guard.clone(),
         },
         rpc_middleware,
-        on_session_close: None,
     };
 
     let service = http_middleware.service(tower_service);
@@ -1330,12 +915,7 @@ fn process_connection<RpcMiddleware, HttpMiddleware, Body>(
             request_received.clone(),
         );
         let io = TokioIo::new(socket);
-        let mut builder = hyper_util::server::conn::auto::Builder::new(TokioExecutor::new());
-
-        //default is true for http1, if set to false then websocket connections will not be
-        // upgraded.
-        builder.http2().keep_alive_interval(keep_alive).keep_alive_timeout(keep_alive_timeout);
-
+        let builder = hyper_util::server::conn::auto::Builder::new(TokioExecutor::new());
         let conn = builder.serve_connection_with_upgrades(io, service);
         let stopped = stop_handle.shutdown();
 

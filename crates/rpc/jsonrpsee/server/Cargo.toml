@@ -23,13 +23,11 @@ result_large_err = "allow"
 futures-util = { workspace = true, features = ["io", "async-await-macro"] }
 http = { workspace = true }
 http-body = { version = "1" }
-http-body-util = { workspace = true }
 hyper = { workspace = true, features = ["server", "http1", "http2"] }
 hyper-util = { workspace = true, features = ["tokio", "service", "server-auto"] }
 jsonrpsee-core = { workspace = true, features = ["server", "http-helpers"] }
 jsonrpsee-types = { workspace = true }
 pin-project = { workspace = true }
-route-recognizer = { version = "0.3.1" }
 serde = { workspace = true, features = ["std"] }
 serde_json = { workspace = true, features = ["std", "raw_value"] }
 soketto = { version = "0.8.1", features = ["http"] }
@@ -42,7 +40,6 @@ tracing = { workspace = true, features = ["std"] }
 
 [dev-dependencies]
 jsonrpsee-test-utils = { path = "../test-utils" }
-socket2 = { workspace = true }
 tokio = { workspace = true, features = ["test-util"] }
 tower = { workspace = true, features = ["limit", "timeout"] }
 tracing-subscriber = { workspace = true, features = ["env-filter", "fmt"] }
