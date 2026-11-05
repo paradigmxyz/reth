@@ -1,0 +1,5 @@
+error: "one" is already defined
+ --> $DIR/sub_name_override.rs:7:11
+  |
+7 |     async fn one(&self);
+  |              ^^^
