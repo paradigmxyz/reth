@@ -248,9 +248,7 @@ mod tests {
         BlockExecutionOutput, BlockValidationError,
     };
     use reth_evm_ethereum::EthEvmConfig;
-    use reth_primitives_traits::{
-        crypto::secp256k1::public_key_to_address, Block as _, Recovered, SealedBlock,
-    };
+    use reth_primitives_traits::{Block as _, Recovered, SealedBlock};
     use reth_testing_utils::generators::{generate_key, rng, sign_tx_with_key_pair};
     use std::{
         convert::Infallible,
@@ -563,9 +561,10 @@ mod tests {
 
         // Generate keypairs + derive sender addresses.
         let alice_kp = generate_key(&mut rng());
-        let alice = public_key_to_address(alice_kp.public_key());
+        let alice =
+            Address::from_raw_public_key(&alice_kp.public_key().serialize_uncompressed()[1..]);
         let bob_kp = generate_key(&mut rng());
-        let bob = public_key_to_address(bob_kp.public_key());
+        let bob = Address::from_raw_public_key(&bob_kp.public_key().serialize_uncompressed()[1..]);
 
         // Sign txs.
         let txs = vec![
@@ -620,9 +619,10 @@ mod tests {
         let carol = Address::repeat_byte(0xca);
         let sender_balance = U256::from(alloy_consensus::constants::ETH_TO_WEI);
         let alice_kp = generate_key(&mut rng());
-        let alice = public_key_to_address(alice_kp.public_key());
+        let alice =
+            Address::from_raw_public_key(&alice_kp.public_key().serialize_uncompressed()[1..]);
         let bob_kp = generate_key(&mut rng());
-        let bob = public_key_to_address(bob_kp.public_key());
+        let bob = Address::from_raw_public_key(&bob_kp.public_key().serialize_uncompressed()[1..]);
         let mut db = system_contracts_db();
         insert_funded(&mut db, alice, sender_balance);
         insert_funded(&mut db, bob, sender_balance);
@@ -642,9 +642,10 @@ mod tests {
         let carol = Address::repeat_byte(0xca);
         let sender_balance = U256::from(alloy_consensus::constants::ETH_TO_WEI);
         let alice_kp = generate_key(&mut rng());
-        let alice = public_key_to_address(alice_kp.public_key());
+        let alice =
+            Address::from_raw_public_key(&alice_kp.public_key().serialize_uncompressed()[1..]);
         let bob_kp = generate_key(&mut rng());
-        let bob = public_key_to_address(bob_kp.public_key());
+        let bob = Address::from_raw_public_key(&bob_kp.public_key().serialize_uncompressed()[1..]);
         let txs = vec![
             signed_transfer!(alice_kp, alice, carol, 100, 0, 990_000),
             signed_transfer!(bob_kp, bob, carol, 200, 0, 990_000),
@@ -693,7 +694,7 @@ mod tests {
         let evm_config = test_evm_config();
         let contract = Address::repeat_byte(0xde);
         let key = generate_key(&mut rng());
-        let signer = public_key_to_address(key.public_key());
+        let signer = Address::from_raw_public_key(&key.public_key().serialize_uncompressed()[1..]);
         let mut db = system_contracts_db();
         insert_funded(&mut db, signer, U256::from(alloy_consensus::constants::ETH_TO_WEI));
         db.insert_account_info(
@@ -716,7 +717,7 @@ mod tests {
         let evm_config = test_evm_config();
         let contract = Address::repeat_byte(0x55);
         let key = generate_key(&mut rng());
-        let signer = public_key_to_address(key.public_key());
+        let signer = Address::from_raw_public_key(&key.public_key().serialize_uncompressed()[1..]);
         let mut db = system_contracts_db();
         insert_funded(&mut db, signer, U256::from(alloy_consensus::constants::ETH_TO_WEI));
         db.insert_account_info(
@@ -826,9 +827,10 @@ mod tests {
         let recipient = Address::repeat_byte(0xca);
         let balance = U256::from(alloy_consensus::constants::ETH_TO_WEI);
         let alice_key = generate_key(&mut rng());
-        let alice = public_key_to_address(alice_key.public_key());
+        let alice =
+            Address::from_raw_public_key(&alice_key.public_key().serialize_uncompressed()[1..]);
         let bob_key = generate_key(&mut rng());
-        let bob = public_key_to_address(bob_key.public_key());
+        let bob = Address::from_raw_public_key(&bob_key.public_key().serialize_uncompressed()[1..]);
         let txs = vec![
             signed_transfer!(alice_key, alice, recipient, 1, 0, 21_000),
             signed_transfer!(bob_key, bob, recipient, 1, 0, 980_000),
@@ -868,7 +870,7 @@ mod tests {
         let loop_contract = Address::repeat_byte(0x44);
         let recipient = Address::repeat_byte(0xca);
         let key = generate_key(&mut rng());
-        let signer = public_key_to_address(key.public_key());
+        let signer = Address::from_raw_public_key(&key.public_key().serialize_uncompressed()[1..]);
         let mut db = system_contracts_db();
         insert_funded(&mut db, signer, U256::from(alloy_consensus::constants::ETH_TO_WEI));
         db.insert_account_info(
@@ -909,9 +911,10 @@ mod tests {
         let balance = U256::from(alloy_consensus::constants::ETH_TO_WEI);
 
         let alice_kp = generate_key(&mut rng());
-        let alice = public_key_to_address(alice_kp.public_key());
+        let alice =
+            Address::from_raw_public_key(&alice_kp.public_key().serialize_uncompressed()[1..]);
         let bob_kp = generate_key(&mut rng());
-        let bob = public_key_to_address(bob_kp.public_key());
+        let bob = Address::from_raw_public_key(&bob_kp.public_key().serialize_uncompressed()[1..]);
 
         let mut pre_block_db = system_contracts_db();
         insert_funded(&mut pre_block_db, alice, balance);

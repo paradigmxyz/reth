@@ -9,7 +9,9 @@ use alloy_eips::{
     eip7002::{WITHDRAWAL_REQUEST_PREDEPLOY_ADDRESS, WITHDRAWAL_REQUEST_PREDEPLOY_CODE},
     eip7685::EMPTY_REQUESTS_HASH,
 };
-use alloy_primitives::{address, b256, bytes, fixed_bytes, keccak256, Bytes, TxKind, B256, U256};
+use alloy_primitives::{
+    address, b256, bytes, fixed_bytes, keccak256, Address, Bytes, TxKind, B256, U256,
+};
 use evm2::{
     bytecode::Bytecode,
     evm::{AccountInfo, Database, InMemoryDB},
@@ -22,9 +24,7 @@ use reth_evm::{
 };
 use reth_evm_ethereum::EthEvmConfig;
 use reth_execution_types::{BlockExecutionResult, BundleSource, StateUpdate};
-use reth_primitives_traits::{
-    crypto::secp256k1::public_key_to_address, Block as _, RecoveredBlock,
-};
+use reth_primitives_traits::{Block as _, RecoveredBlock};
 use reth_testing_utils::generators::{self, sign_tx_with_key_pair};
 use std::sync::{mpsc, Arc};
 
@@ -554,7 +554,8 @@ fn eip_7002() {
     let mut db = create_database_with_withdrawal_requests_contract();
 
     let sender_key_pair = generators::generate_key(&mut generators::rng());
-    let sender_address = public_key_to_address(sender_key_pair.public_key());
+    let sender_address =
+        Address::from_raw_public_key(&sender_key_pair.public_key().serialize_uncompressed()[1..]);
 
     db.insert_account_info(
         &sender_address,
@@ -627,7 +628,8 @@ fn block_gas_limit_error() {
     // Generate a new key pair for the sender
     let sender_key_pair = generators::generate_key(&mut generators::rng());
     // Get the sender's address from the public key
-    let sender_address = public_key_to_address(sender_key_pair.public_key());
+    let sender_address =
+        Address::from_raw_public_key(&sender_key_pair.public_key().serialize_uncompressed()[1..]);
 
     // Insert the sender account into the state with a nonce of 1 and a balance of 1 ETH in Wei
     db.insert_account_info(
@@ -765,7 +767,8 @@ fn prepared_block_access_list_keeps_legacy_ef01_code() {
     let chain_spec = Arc::new(ChainSpecBuilder::from(&*MAINNET).berlin_activated().build());
 
     let sender_key_pair = generators::generate_key(&mut generators::rng());
-    let sender_address = public_key_to_address(sender_key_pair.public_key());
+    let sender_address =
+        Address::from_raw_public_key(&sender_key_pair.public_key().serialize_uncompressed()[1..]);
     let mut db = InMemoryDB::default();
     db.insert_account_info(
         &sender_address,
