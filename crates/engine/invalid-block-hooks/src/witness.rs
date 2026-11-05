@@ -2,7 +2,6 @@ use alloy_consensus::BlockHeader;
 use alloy_primitives::{Address, B256, U256};
 use alloy_rpc_types_debug::ExecutionWitness;
 use evm2::{bytecode::Bytecode, evm::AccountInfo};
-use pretty_assertions::Comparison;
 use reth_engine_primitives::InvalidBlockHook;
 use reth_evm::{database::StateProviderDatabase, ConfigureEvm, Executor};
 use reth_execution_types::BundleSource;
@@ -14,8 +13,15 @@ use reth_trie::{
     updates::TrieUpdates,
 };
 use serde::Serialize;
-use std::{collections::BTreeMap, fmt::Debug, fs::File, io::Write, path::PathBuf};
+use similar::TextDiff;
+use std::{collections::BTreeMap, fmt::Debug, fs::File, io::Write, path::PathBuf, time::Duration};
 use tracing::warn;
+
+/// Time budget for computing a diff before the remaining lines are reported as replaced.
+///
+/// The hook runs on the engine thread before the invalid payload status is returned, and the
+/// bundle state of a large block renders to hundreds of thousands of lines.
+const DIFF_TIMEOUT: Duration = Duration::from_secs(1);
 
 /// Serializable version of `BundleState` for deterministic comparison
 #[derive(Debug, PartialEq, Eq)]
@@ -310,16 +316,23 @@ where
         Ok(path)
     }
 
-    /// Compares two values and saves their diff to a file in the output directory
-    fn save_diff<T: PartialEq + Debug>(
+    /// Compares the debug output of two values and saves their unified line diff to a file in the
+    /// output directory.
+    ///
+    /// Myers' algorithm keeps memory linear in the input size, and [`DIFF_TIMEOUT`] bounds its
+    /// running time.
+    fn save_diff<T: Debug>(
         &self,
         filename: String,
         original: &T,
         new: &T,
     ) -> eyre::Result<PathBuf> {
         let path = self.output_directory.join(filename);
-        let diff = Comparison::new(original, new);
-        File::create(&path)?.write_all(diff.to_string().as_bytes())?;
+        let original = format!("{original:#?}\n");
+        let new = format!("{new:#?}\n");
+        let diff = TextDiff::configure().timeout(DIFF_TIMEOUT).diff_lines(&original, &new);
+        File::create(&path)?
+            .write_all(diff.unified_diff().header("original", "new").to_string().as_bytes())?;
 
         Ok(path)
     }
@@ -935,5 +948,65 @@ mod tests {
         let validation_result =
             hook.validate_bundle_state(&bundle_state, &bundle_state, "integration_component_test");
         assert!(validation_result.is_ok(), "Component validation should succeed");
+    }
+
+    #[test]
+    fn test_save_diff_writes_unified_diff() {
+        let (hook, _output_dir, _temp_dir) = create_test_hook();
+
+        let path = hook
+            .save_diff("unified_diff_test".to_string(), &B256::ZERO, &B256::repeat_byte(1))
+            .unwrap();
+
+        assert_eq!(
+            std::fs::read_to_string(path).unwrap(),
+            format!(
+                "--- original\n+++ new\n@@ -1 +1 @@\n-{:?}\n+{:?}\n",
+                B256::ZERO,
+                B256::repeat_byte(1)
+            )
+        );
+    }
+
+    #[test]
+    fn test_save_diff_large_bundle_state() {
+        const ACCOUNTS: usize = 3_000;
+        let (hook, _output_dir, _temp_dir) = create_test_hook();
+        let original = sort_bundle_state_for_comparison(&create_transfer_bundle_state(ACCOUNTS, 0));
+        let new =
+            sort_bundle_state_for_comparison(&create_transfer_bundle_state(ACCOUNTS, ACCOUNTS));
+
+        // Every account differs, so the changed region spans the whole state. A quadratic line
+        // diff of it would allocate tens of gigabytes.
+        let path = hook.save_diff("large_diff_test".to_string(), &original, &new).unwrap();
+
+        let diff = std::fs::read_to_string(path).unwrap();
+        let added: HashSet<_> =
+            diff.lines().filter_map(|line| line.strip_prefix('+')).map(str::trim).collect();
+        for balance in ACCOUNTS..2 * ACCOUNTS {
+            assert!(added.contains(format!("balance: {balance},").as_str()));
+        }
+    }
+
+    /// Creates a `BundleState` of `accounts` funded accounts, offsetting every balance by
+    /// `balance_offset`.
+    fn create_transfer_bundle_state(accounts: usize, balance_offset: usize) -> BundleState {
+        let mut bundle_state = BundleState::default();
+        for i in 0..accounts {
+            bundle_state.state.insert(
+                Address::from_word(B256::from(U256::from(i))),
+                BundleAccount {
+                    info: Some(AccountInfo {
+                        balance: U256::from(i + balance_offset),
+                        ..Default::default()
+                    }),
+                    original_info: None,
+                    storage: HashMap::default(),
+                    status: AccountStatus::Changed,
+                },
+            );
+        }
+        bundle_state.state_size = accounts;
+        bundle_state
     }
 }

@@ -9448,7 +9448,6 @@ dependencies = [
  "eyre",
  "futures",
  "jsonrpsee",
- "pretty_assertions",
  "reth-chainspec",
  "reth-engine-primitives",
  "reth-ethereum-primitives",
@@ -9462,6 +9461,7 @@ dependencies = [
  "reth-trie",
  "serde",
  "serde_json",
+ "similar",
  "tempfile",
  "tracing",
 ]

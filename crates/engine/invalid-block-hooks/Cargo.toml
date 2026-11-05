@@ -33,9 +33,9 @@ futures.workspace = true
 # misc
 eyre.workspace = true
 jsonrpsee.workspace = true
-pretty_assertions.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+similar = { workspace = true, features = ["text"] }
 tracing.workspace = true
 
 [dev-dependencies]
