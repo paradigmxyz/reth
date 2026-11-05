@@ -100,7 +100,7 @@ impl<T: EvmTypes> PrewarmResults<T> {
         Self {
             slots: (0..transaction_count).map(|_| Mutex::new(ResultSlot::Empty)).collect(),
             speculating: (0..transaction_count).map(|_| AtomicBool::new(false)).collect(),
-            predicted: Arc::default(),
+            predicted: Arc::new(PredictedState::new(transaction_count, None)),
             changed: Condvar::new(),
             changed_lock: Mutex::new(()),
             waiting: AtomicUsize::new(0),
@@ -161,8 +161,7 @@ impl<T: EvmTypes> PrewarmResults<T> {
     /// balances they do not observe anyway.
     pub(crate) fn with_unpredicted_account(transaction_count: usize, unpredicted: Address) -> Self {
         let mut results = Self::new(transaction_count);
-        results.predicted =
-            Arc::new(PredictedState { unpredicted: Some(unpredicted), ..Default::default() });
+        results.predicted = Arc::new(PredictedState::new(transaction_count, Some(unpredicted)));
         results
     }
 
@@ -182,12 +181,31 @@ impl<T: EvmTypes> PrewarmResults<T> {
         tx: SpeculativeTx,
     ) {
         match reads.finish(balances, tx) {
-            Ok(reads) => self.set(index, |predicted| {
-                predicted.publish(index, &result.pending_state);
-                ResultSlot::Ready(Box::new(PrewarmedTx { result, reads, credit: None }))
-            }),
+            Ok(reads) => {
+                self.predicted.register_reads(index, &reads);
+                self.set(index, |predicted| {
+                    predicted.publish(index, &result.pending_state);
+                    ResultSlot::Ready(Box::new(PrewarmedTx { result, reads, credit: None }))
+                });
+                self.flag_if_stale(index);
+            }
             Err(reads) => self.reject(index, reads),
         }
+    }
+
+    /// Flags the transaction at `index` as possibly stale if its stored reads already differ from
+    /// the predictions, which earlier transactions may have changed while it executed, before its
+    /// reads were registered.
+    fn flag_if_stale(&self, index: usize) {
+        if self.needs_refresh(index) {
+            self.predicted.flag(index);
+        }
+    }
+
+    /// Takes the first transaction in `range` that a changed prediction may have made stale,
+    /// clearing its flag.
+    pub(super) fn take_maybe_stale(&self, range: core::ops::Range<usize>) -> Option<usize> {
+        self.predicted.take_flagged(range)
     }
 
     /// Stores the result of the pool transaction with `hash` as the prewarm result of the
@@ -230,7 +248,9 @@ impl<T: EvmTypes> PrewarmResults<T> {
         for read in &mut reads.accounts {
             read.balance = BalanceDependency::Exact;
         }
+        self.predicted.register_reads(index, &reads);
         self.set(index, |_| ResultSlot::Unusable(reads));
+        self.flag_if_stale(index);
     }
 
     /// Replaces the predicted writes of the transaction at `index` with the writes of its actual
@@ -649,9 +669,76 @@ pub(super) struct PredictedState {
     generation: AtomicUsize,
     /// Account whose balance-only writes are not predicted.
     unpredicted: Option<Address>,
+    /// Transactions whose stored results read each account or one of its slots.
+    account_readers: DashMap<Address, Vec<usize>, DefaultHashBuilder>,
+    /// Transactions whose stored results read each storage slot.
+    storage_readers: DashMap<(Address, U256), Vec<usize>, DefaultHashBuilder>,
+    /// Whether a changed prediction may have made the result of the transaction at each index
+    /// stale since it was last checked.
+    maybe_stale: Box<[AtomicBool]>,
 }
 
 impl PredictedState {
+    fn new(transaction_count: usize, unpredicted: Option<Address>) -> Self {
+        Self {
+            unpredicted,
+            maybe_stale: (0..transaction_count).map(|_| AtomicBool::new(false)).collect(),
+            ..Default::default()
+        }
+    }
+
+    /// Registers the transaction at `index` as a reader of the keys in `reads`, so that changed
+    /// predictions of those keys flag it. Reads of the unpredicted account are not registered:
+    /// every transaction reads it, and its rare predicted writes flag all later transactions.
+    fn register_reads(&self, index: usize, reads: &ReadSet) {
+        let register = |readers: &mut Vec<usize>| {
+            if readers.last() != Some(&index) {
+                readers.push(index);
+            }
+        };
+        for read in &reads.accounts {
+            if self.unpredicted != Some(read.address) {
+                register(&mut self.account_readers.entry(read.address).or_default());
+            }
+        }
+        for read in &reads.storage {
+            register(&mut self.storage_readers.entry((read.address, read.slot)).or_default());
+            if self.unpredicted != Some(read.address) {
+                register(&mut self.account_readers.entry(read.address).or_default());
+            }
+        }
+    }
+
+    /// Flags the transaction at `index` as possibly stale.
+    fn flag(&self, index: usize) {
+        if let Some(flag) = self.maybe_stale.get(index) {
+            flag.store(true, Ordering::Release);
+        }
+    }
+
+    /// Flags the readers after `index` of the keys a changed prediction wrote.
+    fn flag_readers<K: Eq + core::hash::Hash>(
+        &self,
+        readers: &DashMap<K, Vec<usize>, DefaultHashBuilder>,
+        key: &K,
+        index: usize,
+    ) {
+        if let Some(readers) = readers.get(key) {
+            for &reader in readers.iter().filter(|&&reader| reader > index) {
+                self.flag(reader);
+            }
+        }
+    }
+
+    /// Takes the first flagged transaction in `range`, clearing its flag.
+    fn take_flagged(&self, range: core::ops::Range<usize>) -> Option<usize> {
+        let end = range.end.min(self.maybe_stale.len());
+        (range.start..end).find(|&index| {
+            self.maybe_stale[index].load(Ordering::Acquire) &&
+                self.maybe_stale[index].swap(false, Ordering::AcqRel)
+        })
+    }
+
     /// Returns the number of times a transaction was queued for speculation, a speculative result
     /// was stored, or block execution published actual or rebased writes.
     pub(super) fn generation(&self) -> usize {
@@ -697,6 +784,7 @@ impl PredictedState {
                 continue
             }
             if let Some(current) = account.current {
+                self.flag_readers(&self.account_readers, &account.address, index);
                 write(
                     &mut self.accounts.entry(account.address).or_default(),
                     index,
@@ -737,6 +825,13 @@ impl PredictedState {
             {
                 continue
             }
+            if self.unpredicted == Some(address) {
+                for reader in index + 1..self.maybe_stale.len() {
+                    self.flag(reader);
+                }
+            } else {
+                self.flag_readers(&self.account_readers, &address, index);
+            }
             write(
                 &mut self.accounts.entry(address).or_default(),
                 index,
@@ -749,6 +844,7 @@ impl PredictedState {
                 if (account.storage.wiped && !value.value.current.is_zero()) ||
                     (!account.storage.wiped && value.value.original != value.value.current)
                 {
+                    self.flag_readers(&self.storage_readers, &(address, slot), index);
                     write(
                         &mut self.storage.entry((address, slot)).or_default(),
                         index,

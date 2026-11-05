@@ -310,9 +310,6 @@ where
         Tx: ExecutableTxFor<Evm> + Clone + Send + Sync,
     {
         let mut idle = 0;
-        // Block execution's position and the prediction generation when the last refresh scan
-        // found nothing stale, so that idle workers scan again only after either changed.
-        let mut scanned = None;
         while !ctx.should_stop() {
             if let Some((index, (tx, seeded))) = queue.claim() {
                 if results.begin_speculation(index) {
@@ -331,29 +328,29 @@ where
             }
 
             // Block execution executes the transaction it is at itself if its result is stale.
-            let from = ctx.executed_tx_index.load(Ordering::Relaxed) + 1;
             let generation = results.predicted().generation();
-            let state = Some((from, generation));
-            if state == scanned {
-                backoff(results, generation, &mut idle);
-                continue
-            }
-            let refreshed = (from..results.len().min(from + REFRESH_WINDOW)).any(|index| {
-                let Some((tx, _)) = queue.get(index) else { return false };
+            let from = ctx.executed_tx_index.load(Ordering::Relaxed) + 1;
+            let mut refreshed = false;
+            while let Some(index) = results.take_maybe_stale(from..from + REFRESH_WINDOW) {
+                let Some((tx, _)) = queue.get(index) else { continue };
                 if !results.begin_speculation(index) {
-                    return false
+                    // The worker executing it checks it again when it stores its result.
+                    continue
                 }
-                let stale = results.needs_refresh(index);
-                if stale {
+                if index > ctx.executed_tx_index.load(Ordering::Relaxed) &&
+                    results.needs_refresh(index)
+                {
                     Self::transact_worker(ctx, pool, index, tx.clone(), None, None);
+                    refreshed = true;
                 }
                 results.end_speculation(index);
-                stale
-            });
+                if refreshed {
+                    break
+                }
+            }
             if refreshed {
                 idle = 0;
             } else {
-                scanned = state;
                 backoff(results, generation, &mut idle);
             }
         }
