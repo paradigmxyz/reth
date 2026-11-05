@@ -154,3 +154,28 @@ fn _deprioritize_background_threads() {
         tracing::debug!(tid, comm, "deprioritized background thread (SCHED_IDLE)");
     }
 }
+
+#[cfg(all(test, target_os = "linux"))]
+mod tests {
+    use super::*;
+
+    fn thread_nice() -> i32 {
+        // SAFETY: gettid has no preconditions, and getpriority is safe to call with a valid TID.
+        unsafe { libc::getpriority(libc::PRIO_PROCESS, libc::gettid() as libc::id_t) }
+    }
+
+    #[test]
+    fn decrease_thread_priority_lowers_only_the_current_thread() {
+        let spawner_nice = thread_nice();
+        let lowered = std::thread::spawn(|| {
+            let inherited = thread_nice();
+            decrease_thread_priority(3);
+            (inherited, thread_nice())
+        })
+        .join()
+        .unwrap();
+
+        assert_eq!(lowered, (spawner_nice, (spawner_nice + 3).min(19)));
+        assert_eq!(thread_nice(), spawner_nice);
+    }
+}
