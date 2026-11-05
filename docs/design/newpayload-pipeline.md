@@ -145,6 +145,14 @@ How the root is computed today (`state_root_strategy/sparse_trie.rs`, `trie/spar
   round trips after removals that collapse onto blinded siblings), then serially returns the
   storage tries, hashes the upper account trie and collects trie updates. Only subtrie hashing
   and large storage passes use rayon.
+- While updates keep arriving, `make_progress` applies no leaves after the first batch of 64
+  messages: it applies buffered updates, computes storage roots and promotes account updates only
+  when the update queue is empty and no proof results are pending. A producer that streams an
+  update per transaction without gaps therefore pushes nearly all trie work past the last
+  transaction. The faster the committer, the more continuous the stream, which is why Phase 1's
+  execution gain went into the root. In tempo's bench-e2e the builder's state-root wait is a fixed
+  ~28-30 ms p50 regardless of block size, and prefetch hints cut only ~3 ms of it
+  (tempoxyz/tempo#8979), so the deferral, not proof fetching, dominates.
 - No metric measures the time from the last update to the root; `state_root_duration` starts
   after post-execution validation.
 
@@ -153,12 +161,16 @@ milliseconds, long before block execution commits them. The plan:
 
 1. Measure the tail on derek: a histogram from `FinishedStateUpdates` to the root, and the number
    of proof rounds after it.
-2. Root ahead of commit: feed the sparse trie the predicted values of stored speculative results,
+2. Bounded trie work while updates arrive: apply buffered updates, storage roots and account
+   promotions every N updates or after a time slice even when more are queued, as zempo's
+   `root_ahead` applies a window of changes beside execution, so that the work after the last
+   transaction is only the last window.
+3. Root ahead of commit: feed the sparse trie the predicted values of stored speculative results,
    so that proofs are fetched and storage tries hashed while block execution is still running.
    When block execution commits a transaction, only leaves whose committed value differs from the
    applied prediction are rewritten. The sparse trie already tolerates rewriting a leaf many
    times per block, so this changes when leaves arrive, not what the root is.
-3. Parallel finish: hash addresses on the workers that produced the results instead of one
+4. Parallel finish: hash addresses on the workers that produced the results instead of one
    thread, and collect storage trie updates in parallel.
 
 The other critical-path items, once the root no longer hides execution:
@@ -168,6 +180,7 @@ The other critical-path items, once the root no longer hides execution:
 | Commit loop | 12% read-set validation, 17% `PredictedState::update`, 4% `BlockState::commit_account_changes` on the committer, in memory | Cheaper prediction storage (an arena per block instead of a `DashMap` of sorted vectors). Validating against predictions instead of the state was tried and is unsound: predictions omit some lifecycle changes, and an existing test caught it |
 | Dependency chains | 27 stale results per block, 2.4 ms of serial re-execution in memory | Merge the effects of common conflicts the way balances are rebased; a faster interpreter or JIT for chain links |
 | Execution cache inserts | Tempo profile: `ExecutionCache::insert_state` 5.2% of the engine thread | Move inserts off the engine thread, back the tables with huge pages |
+| Proof worker pools | A tempo node logs "Spawning proof worker pools" with 32 storage and 32 account workers for every block on 16 threads | Start the pools once and size them to the cores |
 | Keccak cache | Tempo profile: sparse-trie hashing thrashes the global keccak cache, so the EVM's mapping-slot hashes miss | Bypass the global cache for trie hashing |
 
 ## Safety
