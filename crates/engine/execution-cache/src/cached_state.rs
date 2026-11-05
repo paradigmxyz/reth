@@ -2,9 +2,10 @@
 use crate::TxPoolPrewarmCacheSnapshot;
 use alloy_primitives::{
     map::{DefaultHashBuilder, FbBuildHasher},
-    Address, StorageKey, StorageValue, B256,
+    Address, StorageKey, StorageValue, B256, U256,
 };
-use fixed_cache::{AnyRef, CacheConfig, Stats, StatsHandler};
+use crossbeam_utils::CachePadded;
+use fixed_cache::{AnyRef, CacheConfig, LockFreeReads, Stats, StatsHandler};
 use metrics::{Counter, Gauge, Histogram};
 use parking_lot::Once;
 use reth_errors::ProviderResult;
@@ -64,10 +65,10 @@ const CODE_CACHE_ENTRY_SIZE: usize =
 
 /// Size in bytes of a single storage cache entry.
 const STORAGE_CACHE_ENTRY_SIZE: usize =
-    fixed_cache_entry_size::<(Address, StorageKey), StorageValue>();
+    fixed_cache_entry_size::<(Address, StorageKey), PackedStorageValue>();
 
 /// Size in bytes of a single account cache entry.
-const ACCOUNT_CACHE_ENTRY_SIZE: usize = fixed_cache_entry_size::<Address, Option<Account>>();
+const ACCOUNT_CACHE_ENTRY_SIZE: usize = fixed_cache_entry_size::<Address, PackedAccount>();
 
 /// Cache configuration with epoch tracking enabled for O(1) cache invalidation.
 struct EpochCacheConfig;
@@ -75,8 +76,82 @@ impl CacheConfig for EpochCacheConfig {
     const EPOCHS: bool = true;
 }
 
+/// [`EpochCacheConfig`] with lock-free reads, for the account and storage caches.
+///
+/// Prewarm workers and block execution read the same hot entries concurrently. A locked read
+/// writes the bucket's cache line twice (lock and unlock), so readers on different LLC domains
+/// bounce it between them; lock-free reads only load it, which keeps hits flat across domains.
+struct LockFreeEpochCacheConfig;
+impl CacheConfig for LockFreeEpochCacheConfig {
+    const EPOCHS: bool = true;
+    // SAFETY: only used with byte-array keys and values (`Address`, `StorageKey`,
+    // [`PackedStorageValue`], [`PackedAccount`]): bitwise-copyable, with no padding or
+    // uninitialized bytes, and their `(K, V)` tuples have none either (asserted below).
+    const LOCK_FREE_READS: LockFreeReads = unsafe { LockFreeReads::enabled() };
+}
+
+// Lock-free reads copy `(K, V)` as raw bytes, so the tuples must not contain padding.
+const _: () = assert!(
+    size_of::<((Address, StorageKey), PackedStorageValue)>() ==
+        size_of::<Address>() + size_of::<StorageKey>() + size_of::<PackedStorageValue>()
+);
+const _: () =
+    assert!(size_of::<(Address, PackedAccount)>() == size_of::<Address>() + PackedAccount::LEN);
+
 /// Type alias for the fixed-cache used for accounts and storage.
-type FixedCache<K, V, H = DefaultHashBuilder> = fixed_cache::Cache<K, V, H, EpochCacheConfig>;
+type FixedCache<K, V, H = DefaultHashBuilder, C = EpochCacheConfig> =
+    fixed_cache::Cache<K, V, H, C>;
+
+/// A storage value as kept in the storage cache: its little-endian bytes.
+///
+/// `U256` is 8-byte aligned, which would pad `((Address, StorageKey), U256)` and rule out
+/// lock-free reads; on little-endian targets the conversion is a plain copy.
+type PackedStorageValue = [u8; 32];
+
+/// An `Option<Account>` as kept in the account cache, as bytes with no padding so the cache can
+/// read it lock-free.
+///
+/// Layout: a tag (0: `None`, 1: no bytecode hash, 2: bytecode hash), the nonce (8 bytes,
+/// little-endian), the balance (32 bytes, little-endian) and the bytecode hash (32 bytes).
+/// Accounts with chain-specific extension data are not representable and are never cached.
+#[derive(Clone, Copy, Debug)]
+struct PackedAccount([u8; Self::LEN]);
+
+impl PackedAccount {
+    /// Byte length of a packed account.
+    const LEN: usize = 1 + 8 + 32 + 32;
+
+    /// Packs `account`, or returns `None` when it carries extension data.
+    fn pack(account: Option<&Account>) -> Option<Self> {
+        let mut bytes = [0; Self::LEN];
+        if let Some(account) = account {
+            if account.has_extension() {
+                return None
+            }
+            bytes[0] = 1 + u8::from(account.bytecode_hash.is_some());
+            bytes[1..9].copy_from_slice(&account.nonce.to_le_bytes());
+            bytes[9..41].copy_from_slice(&account.balance.to_le_bytes::<32>());
+            bytes[41..].copy_from_slice(account.bytecode_hash.unwrap_or_default().as_slice());
+        }
+        Some(Self(bytes))
+    }
+
+    /// Unpacks the account.
+    fn unpack(self) -> Option<Account> {
+        let bytes = self.0;
+        (bytes[0] != 0).then(|| {
+            let mut nonce = [0; 8];
+            nonce.copy_from_slice(&bytes[1..9]);
+            let mut balance = [0; 32];
+            balance.copy_from_slice(&bytes[9..41]);
+            Account::new(
+                u64::from_le_bytes(nonce),
+                U256::from_le_bytes(balance),
+                (bytes[0] == 2).then(|| B256::from_slice(&bytes[41..])),
+            )
+        })
+    }
+}
 
 /// A wrapper of a state provider and a shared cache.
 ///
@@ -598,32 +673,35 @@ impl CachedStateMetrics {
 }
 
 /// Cache hit/miss statistics for detailed block logging.
+///
+/// Each counter sits on its own cache line: parallel execution workers on different LLC domains
+/// record different counters at once, and sharing a line would bounce it between domains.
 #[derive(Debug, Default)]
 pub struct CacheStats {
     /// Execution-cache account hits
-    account_hits: AtomicUsize,
+    account_hits: CachePadded<AtomicUsize>,
     /// Execution-cache account misses
-    account_misses: AtomicUsize,
+    account_misses: CachePadded<AtomicUsize>,
     /// Execution-cache storage hits
-    storage_hits: AtomicUsize,
+    storage_hits: CachePadded<AtomicUsize>,
     /// Execution-cache storage misses
-    storage_misses: AtomicUsize,
+    storage_misses: CachePadded<AtomicUsize>,
     /// Execution-cache code hits
-    code_hits: AtomicUsize,
+    code_hits: CachePadded<AtomicUsize>,
     /// Execution-cache code misses
-    code_misses: AtomicUsize,
+    code_misses: CachePadded<AtomicUsize>,
     /// Txpool-prewarm snapshot account hits
-    txpool_snapshot_account_hits: AtomicUsize,
+    txpool_snapshot_account_hits: CachePadded<AtomicUsize>,
     /// Txpool-prewarm snapshot account misses
-    txpool_snapshot_account_misses: AtomicUsize,
+    txpool_snapshot_account_misses: CachePadded<AtomicUsize>,
     /// Txpool-prewarm snapshot storage hits
-    txpool_snapshot_storage_hits: AtomicUsize,
+    txpool_snapshot_storage_hits: CachePadded<AtomicUsize>,
     /// Txpool-prewarm snapshot storage misses
-    txpool_snapshot_storage_misses: AtomicUsize,
+    txpool_snapshot_storage_misses: CachePadded<AtomicUsize>,
     /// Txpool-prewarm snapshot code hits
-    txpool_snapshot_code_hits: AtomicUsize,
+    txpool_snapshot_code_hits: CachePadded<AtomicUsize>,
     /// Txpool-prewarm snapshot code misses
-    txpool_snapshot_code_misses: AtomicUsize,
+    txpool_snapshot_code_misses: CachePadded<AtomicUsize>,
 }
 
 impl CacheStats {
@@ -764,15 +842,20 @@ impl CacheStats {
 /// Collisions (evicting a different key) don't change size since they replace an existing entry.
 #[derive(Debug)]
 pub struct CacheStatsHandler {
-    collisions: AtomicU64,
-    size: AtomicUsize,
+    /// Padded, like `size`: concurrent cache fills from different LLC domains update both.
+    collisions: CachePadded<AtomicU64>,
+    size: CachePadded<AtomicUsize>,
     capacity: usize,
 }
 
 impl CacheStatsHandler {
     /// Creates a new stats handler with all counters initialized to zero.
     pub const fn new(capacity: usize) -> Self {
-        Self { collisions: AtomicU64::new(0), size: AtomicUsize::new(0), capacity }
+        Self {
+            collisions: CachePadded::new(AtomicU64::new(0)),
+            size: CachePadded::new(AtomicUsize::new(0)),
+            capacity,
+        }
     }
 
     /// Returns the number of cache collisions.
@@ -867,7 +950,7 @@ impl<S: EvmStateProvider> EvmStateProvider for CachedStateProvider<S> {
             }
         } else if let Some(account) = self.caches.0.account_cache.get(address) {
             self.record_account_hit();
-            Ok(account)
+            Ok(account.unpack())
         } else {
             self.record_account_miss();
             self.state_provider.basic_account(address)
@@ -902,7 +985,7 @@ impl<S: EvmStateProvider> EvmStateProvider for CachedStateProvider<S> {
             }
         } else if let Some(value) = self.caches.0.storage_cache.get(&(account, storage_key)) {
             self.record_storage_hit();
-            Ok(nonzero_storage_value(value))
+            Ok(nonzero_storage_value(StorageValue::from_le_bytes(value)))
         } else {
             self.record_storage_miss();
             self.state_provider.storage(account, storage_key)
@@ -965,10 +1048,15 @@ struct ExecutionCacheInner {
     code_cache: FixedCache<B256, Option<Bytecode>, FbBuildHasher<32>>,
 
     /// Flat storage cache: maps `(Address, StorageKey)` to storage value.
-    storage_cache: FixedCache<(Address, StorageKey), StorageValue>,
+    storage_cache: FixedCache<
+        (Address, StorageKey),
+        PackedStorageValue,
+        DefaultHashBuilder,
+        LockFreeEpochCacheConfig,
+    >,
 
     /// Cache for basic account information (nonce, balance, code hash).
-    account_cache: FixedCache<Address, Option<Account>, FbBuildHasher<20>>,
+    account_cache: FixedCache<Address, PackedAccount, FbBuildHasher<20>, LockFreeEpochCacheConfig>,
 
     /// Stats handler for the code cache (shared with the cache via [`Stats`]).
     code_stats: Arc<CacheStatsHandler>,
@@ -1066,8 +1154,9 @@ impl ExecutionCache {
         let mut miss = false;
         let result = self.0.storage_cache.get_or_try_insert_with((address, key), |_| {
             miss = true;
-            f()
+            f().map(|value| value.to_le_bytes())
         })?;
+        let result = StorageValue::from_le_bytes(result);
 
         if miss {
             Ok(CachedStatus::NotCached(result))
@@ -1082,22 +1171,19 @@ impl ExecutionCache {
         address: Address,
         f: impl FnOnce() -> Result<Option<Account>, E>,
     ) -> Result<CachedStatus<Option<Account>>, E> {
-        let mut miss = false;
-        let result = self.0.account_cache.get_or_try_insert_with(address, |_| {
-            miss = true;
-            f()
-        })?;
-
-        if miss {
-            Ok(CachedStatus::NotCached(result))
-        } else {
-            Ok(CachedStatus::Cached(result))
+        if let Some(account) = self.0.account_cache.get(&address) {
+            return Ok(CachedStatus::Cached(account.unpack()))
         }
+        let account = f()?;
+        if let Some(packed) = PackedAccount::pack(account.as_ref()) {
+            self.0.account_cache.insert(address, packed);
+        }
+        Ok(CachedStatus::NotCached(account))
     }
 
     /// Insert storage value into cache.
     pub fn insert_storage(&self, address: Address, key: StorageKey, value: Option<StorageValue>) {
-        self.0.storage_cache.insert((address, key), value.unwrap_or_default());
+        self.0.storage_cache.insert((address, key), value.unwrap_or_default().to_le_bytes());
     }
 
     /// Insert code into cache.
@@ -1107,7 +1193,13 @@ impl ExecutionCache {
 
     /// Insert account into cache.
     pub fn insert_account(&self, address: Address, account: Option<Account>) {
-        self.0.account_cache.insert(address, account);
+        match PackedAccount::pack(account.as_ref()) {
+            Some(packed) => self.0.account_cache.insert(address, packed),
+            // Drop any older entry, which no longer matches the account.
+            None => {
+                self.0.account_cache.remove(&address);
+            }
+        }
     }
 
     /// Inserts the post-execution state changes into the cache.
@@ -1319,6 +1411,33 @@ mod tests {
     use reth_trie_common::bundle_state::{AccountStatus, BundleAccount, StorageSlot};
 
     #[test]
+    fn packed_account_roundtrip() {
+        let accounts = [
+            None,
+            Some(Account::default()),
+            Some(Account::new(7, U256::MAX, None)),
+            Some(Account::new(u64::MAX, U256::from(42), Some(B256::ZERO))),
+            Some(Account::new(1, U256::ZERO, Some(B256::repeat_byte(0xab)))),
+        ];
+        for account in accounts {
+            let packed = PackedAccount::pack(account.as_ref()).unwrap();
+            assert_eq!(packed.unpack(), account);
+        }
+    }
+
+    #[test]
+    fn storage_cache_roundtrip() {
+        let caches = ExecutionCache::new(1_000);
+        let (address, slot) = (Address::repeat_byte(1), StorageKey::repeat_byte(2));
+        let value = U256::from_be_bytes([0x5a; 32]);
+        caches.insert_storage(address, slot, Some(value));
+        assert_eq!(
+            caches.get_or_try_insert_storage_with(address, slot, || Err(())),
+            Ok(CachedStatus::Cached(value))
+        );
+    }
+
+    #[test]
     fn test_empty_storage_cached_state_provider() {
         let address = Address::random();
         let storage_key = StorageKey::random();
@@ -1527,7 +1646,10 @@ mod tests {
         let state_provider =
             CachedStateProvider::new_prewarm(provider.into_evm_state_provider(), caches.clone());
         assert_eq!(state_provider.storage(addr, key).unwrap(), None);
-        assert_eq!(caches.0.storage_cache.get(&(addr, key)), Some(U256::ZERO));
+        assert_eq!(
+            caches.0.storage_cache.get(&(addr, key)).map(U256::from_le_bytes),
+            Some(U256::ZERO)
+        );
         drop(state_provider);
         caches.insert_storage(other_addr, other_key, Some(U256::from(42)));
 
@@ -1554,10 +1676,17 @@ mod tests {
         };
 
         assert!(caches.insert_state(&bundle).is_ok());
-        assert_eq!(caches.0.storage_cache.get(&(addr, key)), Some(U256::from(7)));
-        let cached_account = caches.0.account_cache.get(&addr).flatten().unwrap();
+        assert_eq!(
+            caches.0.storage_cache.get(&(addr, key)).map(U256::from_le_bytes),
+            Some(U256::from(7))
+        );
+        let cached_account =
+            caches.0.account_cache.get(&addr).and_then(PackedAccount::unpack).unwrap();
         assert_eq!(cached_account.bytecode_hash, Some(current_info.code_hash));
-        assert_eq!(caches.0.storage_cache.get(&(other_addr, other_key)), Some(U256::from(42)));
+        assert_eq!(
+            caches.0.storage_cache.get(&(other_addr, other_key)).map(U256::from_le_bytes),
+            Some(U256::from(42))
+        );
     }
 
     #[test]

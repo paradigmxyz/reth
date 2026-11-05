@@ -41,7 +41,7 @@ use std::{
     cell::RefCell,
     rc::Rc,
     sync::{
-        atomic::{AtomicUsize, Ordering},
+        atomic::{AtomicBool, AtomicUsize, Ordering},
         Arc,
     },
 };
@@ -530,8 +530,14 @@ pub(super) struct PredictedState {
     storage: DashMap<(Address, U256), Writes<U256>, DefaultHashBuilder>,
     /// Transactions that cleared an account's storage by creating or destroying it.
     cleared: DashMap<Address, Writes<()>, DefaultHashBuilder>,
+    /// Whether `cleared` ever had a write published. Storage reads, which every speculative
+    /// execution makes from threads on several LLC domains, skip `cleared`'s shard lock while it
+    /// is empty, as it is for most blocks.
+    any_cleared: AtomicBool,
     /// Bytecode deployed by predicted writes.
     code: DashMap<B256, Bytecode, DefaultHashBuilder>,
+    /// Whether `code` is non-empty, so code reads skip its shard lock while it is empty.
+    any_code: AtomicBool,
     /// Number of actual execution or rebased account updates published by block execution.
     generation: AtomicUsize,
 }
@@ -551,7 +557,11 @@ impl PredictedState {
 
     /// Returns the latest storage value predicted before the transaction at `index`.
     fn storage(&self, address: Address, slot: U256, index: usize) -> Option<U256> {
-        let cleared = self.cleared.get(&address).and_then(|w| latest(&w, index).map(|(i, _)| *i));
+        let cleared = self
+            .any_cleared
+            .load(Ordering::Acquire)
+            .then(|| self.cleared.get(&address).and_then(|w| latest(&w, index).map(|(i, _)| *i)))
+            .flatten();
         let written = self.storage.get(&(address, slot)).and_then(|w| latest(&w, index).copied());
         match (written, cleared) {
             (Some((written, value)), Some(cleared)) if written >= cleared => Some(value),
@@ -562,6 +572,9 @@ impl PredictedState {
 
     /// Returns predicted bytecode by its hash.
     fn code(&self, code_hash: B256) -> Option<Bytecode> {
+        if !self.any_code.load(Ordering::Acquire) {
+            return None
+        }
         self.code.get(&code_hash).map(|code| code.clone())
     }
 
@@ -569,6 +582,7 @@ impl PredictedState {
     fn publish(&self, index: usize, state: &PendingState) {
         for account in state.account_changes() {
             if let Some((hash, code)) = account.code {
+                self.any_code.store(true, Ordering::Release);
                 self.code.insert(hash, code.clone());
             }
         }
@@ -598,6 +612,9 @@ impl PredictedState {
             }
             let address = account.address;
             if account.storage.wiped || account.created || account.current.is_none() {
+                if publish {
+                    self.any_cleared.store(true, Ordering::Release);
+                }
                 write(&mut self.cleared.entry(address).or_default(), index, publish.then_some(()));
             }
             write(

@@ -3,6 +3,7 @@
 use alloy_primitives::{Address, StorageKey};
 use reth_execution_cache::{CachedStateProvider, ExecutionCache, TxPoolPrewarmCacheSnapshot};
 use reth_provider::{EvmStateProvider, EvmStateProviderBox, ProviderResult};
+use reth_tasks::affinity::JobDomain;
 use std::{
     sync::{
         atomic::{AtomicUsize, Ordering},
@@ -32,6 +33,9 @@ enum PrewarmMsg {
         build: Arc<BuildProviderFn>,
         caches: ExecutionCache,
         txpool_snapshot: Option<TxPoolPrewarmCacheSnapshot>,
+        /// LLC domain of the submitting thread. Block execution reads what the worker warms, so
+        /// the worker moves next to it for the block.
+        domain: JobDomain,
     },
     /// Warm one target into the held provider's cache. Ignored if no provider is held.
     Warm(PrewarmTarget),
@@ -77,11 +81,13 @@ impl BalPrewarmPool {
         caches: ExecutionCache,
         txpool_snapshot: Option<TxPoolPrewarmCacheSnapshot>,
     ) {
+        let domain = JobDomain::capture();
         for worker in &self.workers {
             let _ = worker.send(PrewarmMsg::BeginBlock {
                 build: build.clone(),
                 caches: caches.clone(),
                 txpool_snapshot: txpool_snapshot.clone(),
+                domain,
             });
         }
     }
@@ -164,7 +170,10 @@ fn prewarm_loop(rx: crossbeam_channel::Receiver<PrewarmMsg>) {
     // Blocks when idle; the channel disconnects (and the loop ends) when the pool is dropped.
     while let Ok(msg) = rx.recv() {
         match msg {
-            PrewarmMsg::BeginBlock { build, caches, txpool_snapshot } => {
+            PrewarmMsg::BeginBlock { build, caches, txpool_snapshot, domain } => {
+                // Placed for the whole block without holding a slot: the pool has far more
+                // threads than a domain has CPUs, and the scheduler may still balance them away.
+                domain.place();
                 provider = match (build)() {
                     Ok(inner) => Some(
                         CachedStateProvider::new_prewarm(inner, caches)

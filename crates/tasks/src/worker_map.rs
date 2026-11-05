@@ -4,7 +4,7 @@
 //! This is a substitute for `spawn_blocking` that reuses the same OS thread for the same
 //! named task, like a 1-thread thread pool keyed by name.
 
-use crate::metrics::WorkerThreadMetrics;
+use crate::{affinity::JobDomain, metrics::WorkerThreadMetrics};
 use dashmap::DashMap;
 use std::{
     panic::AssertUnwindSafe,
@@ -64,6 +64,7 @@ impl WorkerThread {
         let pending = self.pending.clone();
         let metrics = self.metrics.clone();
         let queued_at = Instant::now();
+        let domain = JobDomain::capture();
 
         let task: BoxedTask = Box::new(move || {
             let started_at = Instant::now();
@@ -71,6 +72,9 @@ impl WorkerThread {
             let result = {
                 let _decrement_pending = DecrementPendingOnDrop(pending);
                 let _record_task_duration = RecordTaskDurationOnDrop::new(metrics, started_at);
+                // Named threads run long tasks, so they move next to the submitter without
+                // holding a slot.
+                domain.place();
                 f()
             };
             let _ = result_tx.send(result);
@@ -95,6 +99,7 @@ impl WorkerThread {
         let pending = self.pending.clone();
         let metrics = self.metrics.clone();
         let queued_at = Instant::now();
+        let domain = JobDomain::capture();
 
         let task: BoxedTask = Box::new(move || {
             let started_at = Instant::now();
@@ -102,6 +107,9 @@ impl WorkerThread {
             let result = {
                 let _decrement_pending = DecrementPendingOnDrop(pending);
                 let _record_task_duration = RecordTaskDurationOnDrop::new(metrics, started_at);
+                // Named threads run long tasks, so they move next to the submitter without
+                // holding a slot.
+                domain.place();
                 f()
             };
             let _ = result_tx.send(result);
