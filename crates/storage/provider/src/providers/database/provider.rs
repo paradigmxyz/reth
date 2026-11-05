@@ -3977,15 +3977,15 @@ impl<TX: DbTx + 'static, N: NodeTypes> PruneCheckpointReader for DatabaseProvide
             lowest_block.checked_sub(1)
         };
 
+        // The removed StaticFileReceipts pruner checkpointed moves into static files.
+        // Writers enforce continuity within each file, but migration can leave gaps between files.
+        // Reuse the verified coverage for both receipts and logs.
+        let mut last_tx = first_tx_range.end();
         for (segment, checkpoint) in &mut checkpoints {
             if matches!(segment, PruneSegment::Receipts | PruneSegment::ContractLogs) &&
                 let Some(tx) = checkpoint.tx_number &&
                 tx >= first_tx_range.start()
             {
-                // The removed StaticFileReceipts pruner checkpointed moves into static files.
-                // Writers enforce continuity within each file, but migration can leave gaps
-                // between files. Only report earlier availability when coverage is continuous.
-                let mut last_tx = first_tx_range.end();
                 while let Some(next_tx) = last_tx.checked_add(1) &&
                     next_tx <= tx &&
                     let Some(next_file) = self

@@ -228,46 +228,7 @@ mod tests {
     }
 
     #[test]
-    fn retained_receipts_preserve_other_resource_limits() {
-        let available = PruneCheckpoint {
-            block_number: None,
-            tx_number: None,
-            prune_mode: PruneMode::Before(81),
-        };
-        let checkpoints = [
-            (PruneSegment::Receipts, available),
-            (PruneSegment::ContractLogs, PruneCheckpoint::pruned_through(19)),
-            (PruneSegment::TransactionLookup, PruneCheckpoint::pruned_through(39)),
-            (PruneSegment::Bodies, PruneCheckpoint::pruned_through(29)),
-        ];
-
-        assert_eq!(
-            effective_resource(&checkpoints, &[PruneSegment::Receipts, PruneSegment::ContractLogs]),
-            EthCapabilitiesResource::available_from(20),
-        );
-        assert_eq!(
-            effective_resource(
-                &checkpoints,
-                &[PruneSegment::Receipts, PruneSegment::TransactionLookup, PruneSegment::Bodies],
-            ),
-            EthCapabilitiesResource::available_from(40),
-        );
-        assert_eq!(
-            effective_resource(&checkpoints, &[PruneSegment::Bodies]),
-            EthCapabilitiesResource::available_from(30),
-        );
-        assert_eq!(
-            effective_resource(&checkpoints, &[PruneSegment::AccountHistory]),
-            EthCapabilitiesResource::available_from(0),
-        );
-        assert_eq!(
-            effective_resource(&[(PruneSegment::Receipts, available)], &[PruneSegment::Receipts]),
-            EthCapabilitiesResource::available_from(0),
-        );
-    }
-
-    #[test]
-    fn retained_receipts_preserve_pruning_windows() {
+    fn retained_receipts_preserve_resource_limits() {
         let checkpoints = [
             (
                 PruneSegment::Receipts,
@@ -280,20 +241,27 @@ mod tests {
             (
                 PruneSegment::ContractLogs,
                 PruneCheckpoint {
-                    block_number: Some(19),
-                    tx_number: Some(39),
                     prune_mode: PruneMode::Distance(50),
+                    ..PruneCheckpoint::pruned_through(19)
                 },
             ),
+            (PruneSegment::TransactionLookup, PruneCheckpoint::pruned_through(39)),
+            (PruneSegment::Bodies, PruneCheckpoint::pruned_through(29)),
         ];
-
-        assert_eq!(
-            effective_resource(&checkpoints, &[PruneSegment::Receipts]),
-            EthCapabilitiesResource::window(0, 100),
-        );
-        assert_eq!(
-            effective_resource(&checkpoints, &[PruneSegment::Receipts, PruneSegment::ContractLogs]),
-            EthCapabilitiesResource::window(20, 50),
-        );
+        for (segments, expected) in [
+            (vec![PruneSegment::Receipts], EthCapabilitiesResource::window(0, 100)),
+            (
+                vec![PruneSegment::Receipts, PruneSegment::ContractLogs],
+                EthCapabilitiesResource::window(20, 50),
+            ),
+            (
+                vec![PruneSegment::Receipts, PruneSegment::TransactionLookup, PruneSegment::Bodies],
+                EthCapabilitiesResource::window(40, 100),
+            ),
+            (vec![PruneSegment::Bodies], EthCapabilitiesResource::available_from(30)),
+            (vec![PruneSegment::AccountHistory], EthCapabilitiesResource::available_from(0)),
+        ] {
+            assert_eq!(effective_resource(&checkpoints, &segments), expected, "{segments:?}");
+        }
     }
 }
