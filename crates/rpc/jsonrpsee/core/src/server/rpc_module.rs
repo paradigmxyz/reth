@@ -39,22 +39,19 @@ use crate::{
         helpers::MethodSink,
         subscription::{
             sub_message_to_json, BoundedSubscriptions, IntoSubscriptionCloseResponse,
-            PendingSubscriptionSink, Subscribers, Subscription, SubscriptionCloseResponse,
+            PendingSubscriptionSink, Subscribers, SubscriptionCloseResponse,
             SubscriptionKey, SubscriptionPermit, SubscriptionState,
         },
         MethodResponse, ResponsePayload, LOG_TARGET,
     },
-    traits::ToRpcParams,
 };
 use futures_util::{future::BoxFuture, FutureExt};
 use http::Extensions;
 use jsonrpsee_types::{
     error::{ErrorCode, ErrorObject},
-    ErrorObjectOwned, Id, Params, Request, Response, ResponseSuccess,
-    SubscriptionId as RpcSubscriptionId,
+    Id, Params, Request, SubscriptionId as RpcSubscriptionId,
 };
 use rustc_hash::FxHashMap;
-use serde::de::DeserializeOwned;
 use serde_json::value::RawValue;
 use tokio::sync::{mpsc, oneshot};
 
@@ -116,20 +113,6 @@ pub type MaxResponseSize = usize;
 ///   - Call result as a `String`,
 ///   - a [`mpsc::UnboundedReceiver<String>`] to receive future subscription results
 pub type RawRpcResponse = (Box<RawValue>, mpsc::Receiver<Box<RawValue>>);
-
-/// The error that can occur when [`Methods::call`] or [`Methods::subscribe`] is invoked.
-#[derive(thiserror::Error, Debug)]
-pub enum MethodsError {
-    /// Failed to parse the call as valid JSON-RPC.
-    #[error(transparent)]
-    Parse(#[from] serde_json::Error),
-    /// Specific JSON-RPC error.
-    #[error(transparent)]
-    JsonRpc(#[from] ErrorObjectOwned),
-    #[error("Invalid subscription ID: `{0}`")]
-    /// Invalid subscription ID.
-    InvalidSubscriptionId(String),
-}
 
 /// This represent a response to a RPC call
 /// and `Subscribe` calls are handled differently
@@ -298,47 +281,6 @@ impl Methods {
         self.callbacks.get_key_value(method_name).map(|(k, v)| (*k, v))
     }
 
-    /// Helper to call a method on the `RPC module` without having to spin up a server.
-    ///
-    /// The params must be serializable as JSON array, see [`ToRpcParams`] for further
-    /// documentation.
-    ///
-    /// Returns the decoded value of the `result field` in JSON-RPC response if successful.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// #[tokio::main]
-    /// async fn main() {
-    ///     use jsonrpsee::{core::RpcResult, IntoResponse, RpcModule};
-    ///
-    ///     let mut module = RpcModule::new(());
-    ///     module
-    ///         .register_method::<RpcResult<u64>, _>("echo_call", |params, _, _| {
-    ///             params.one::<u64>().map_err(Into::into)
-    ///         })
-    ///         .unwrap();
-    ///
-    ///     let echo: u64 = module.call("echo_call", [1_u64]).await.unwrap();
-    ///     assert_eq!(echo, 1);
-    /// }
-    /// ```
-    pub async fn call<Params: ToRpcParams, T: DeserializeOwned + Clone>(
-        &self,
-        method: &str,
-        params: Params,
-    ) -> Result<T, MethodsError> {
-        let params = params.to_rpc_params()?;
-        let req = Request::borrowed(method, params.as_ref().map(|p| p.as_ref()), Id::Number(0));
-        tracing::trace!(target: LOG_TARGET, "[Methods::call] Method: {:?}, params: {:?}", method, params);
-        let (rp, _) = self.inner_call(req, 1, mock_subscription_permit()).await;
-
-        let rp = serde_json::from_str::<Response<T>>(rp.get())?;
-        ResponseSuccess::try_from(rp)
-            .map(|s| s.result)
-            .map_err(|e| MethodsError::JsonRpc(e.into_owned()))
-    }
-
     /// Make a request (JSON-RPC method call or subscription) by using raw JSON.
     ///
     /// Returns the raw JSON response to the call and a stream to receive notifications if the call
@@ -443,68 +385,6 @@ impl Methods {
         (rp, rx)
     }
 
-    /// Helper to create a subscription on the `RPC module` without having to spin up a server.
-    ///
-    /// The params must be serializable as JSON array, see [`ToRpcParams`] for further
-    /// documentation.
-    ///
-    /// Returns [`Subscription`] on success which can used to get results from the subscription.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// #[tokio::main]
-    /// async fn main() {
-    ///     use jsonrpsee::{
-    ///         core::{to_json_raw_value, EmptyServerParams, RpcResult},
-    ///         RpcModule, SubscriptionMessage,
-    ///     };
-    ///
-    ///     let mut module = RpcModule::new(());
-    ///     module
-    ///         .register_subscription("hi", "hi", "goodbye", |_, pending, _, _| async move {
-    ///             let sink = pending.accept().await?;
-    ///             let msg = to_json_raw_value(&"one answer").unwrap();
-    ///             sink.send(msg).await?;
-    ///             Ok(())
-    ///         })
-    ///         .unwrap();
-    ///
-    ///     let mut sub = module.subscribe_unbounded("hi", EmptyServerParams::new()).await.unwrap();
-    ///     // In this case we ignore the subscription ID,
-    ///     let (sub_resp, _sub_id) = sub.next::<String>().await.unwrap().unwrap();
-    ///     assert_eq!(&sub_resp, "one answer");
-    /// }
-    /// ```
-    pub async fn subscribe_unbounded(
-        &self,
-        sub_method: &str,
-        params: impl ToRpcParams,
-    ) -> Result<Subscription, MethodsError> {
-        self.subscribe(sub_method, params, u32::MAX as usize).await
-    }
-
-    /// Similar to [`Methods::subscribe_unbounded`] but it's using a bounded channel and the buffer
-    /// capacity must be provided.
-    pub async fn subscribe(
-        &self,
-        sub_method: &str,
-        params: impl ToRpcParams,
-        buf_size: usize,
-    ) -> Result<Subscription, MethodsError> {
-        let params = params.to_rpc_params()?;
-        let req = Request::borrowed(sub_method, params.as_ref().map(|p| p.as_ref()), Id::Number(0));
-
-        tracing::trace!(target: LOG_TARGET, "[Methods::subscribe] Method: {}, params: {:?}", sub_method, params);
-
-        let (resp, rx) = self.inner_call(req, buf_size, mock_subscription_permit()).await;
-        let as_success: ResponseSuccess<&RawValue> =
-            serde_json::from_str::<Response<_>>(resp.get())?.try_into()?;
-        let sub_id: RpcSubscriptionId = serde_json::from_str(as_success.result.get())?;
-
-        Ok(Subscription { sub_id: sub_id.into_owned(), rx })
-    }
-
     /// Returns an `Iterator` with all the method names registered on this server.
     pub fn method_names(&self) -> impl Iterator<Item = &'static str> + '_ {
         self.callbacks.keys().copied()
@@ -520,30 +400,6 @@ impl Methods {
     ///
     /// This only affects direct calls to the methods and subscriptions
     /// and can be used for example to unit test the API without a server.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// #[tokio::main]
-    /// async fn main() {
-    ///     use jsonrpsee::{core::RpcResult, Extensions, IntoResponse, RpcModule};
-    ///
-    ///     let mut module = RpcModule::new(());
-    ///     module
-    ///         .register_method::<RpcResult<u64>, _>("magic_multiply", |params, _, ext| {
-    ///             let magic = ext.get::<u64>().copied().unwrap();
-    ///             let val = params.one::<u64>()?;
-    ///             Ok(val * magic)
-    ///         })
-    ///         .unwrap();
-    ///
-    ///     // inject arbitrary data into the extensions.
-    ///     module.extensions_mut().insert(33_u64);
-    ///
-    ///     let magic: u64 = module.call("magic_multiply", [1_u64]).await.unwrap();
-    ///     assert_eq!(magic, 33);
-    /// }
-    /// ```
     pub fn extensions_mut(&mut self) -> &mut Extensions {
         &mut self.extensions
     }
@@ -675,49 +531,6 @@ impl<Context: Send + Sync + 'static> RpcModule<Context> {
                 future.boxed()
             })),
         )
-    }
-
-    /// Register a new **blocking** synchronous RPC method, which computes the response with the
-    /// given callback. Unlike the regular [`register_method`](RpcModule::register_method), this
-    /// method can block its thread and perform expensive computations.
-    pub fn register_blocking_method<R, F>(
-        &mut self,
-        method_name: &'static str,
-        callback: F,
-    ) -> Result<&mut MethodCallback, RegisterMethodError>
-    where
-        Context: Send + Sync + 'static,
-        R: IntoResponse + 'static,
-        F: Fn(Params, Arc<Context>, Extensions) -> R + Clone + Send + Sync + 'static,
-    {
-        let ctx = self.ctx.clone();
-        let callback = self.methods.verify_and_insert(
-            method_name,
-            MethodCallback::Async(Arc::new(move |id, params, _, max_response_size, extensions| {
-                let ctx = ctx.clone();
-                let callback = callback.clone();
-
-                // NOTE: the extensions can't be mutated at this point so
-                // it's safe to clone it.
-                let extensions2 = extensions.clone();
-
-                tokio::task::spawn_blocking(move || {
-                    let rp = callback(params, ctx, extensions2.clone()).into_response();
-                    MethodResponse::response(id, rp, max_response_size).with_extensions(extensions2)
-                })
-                .map(|result| match result {
-                    Ok(r) => r,
-                    Err(err) => {
-                        tracing::error!(target: LOG_TARGET, "Join error for blocking RPC method: {:?}", err);
-                        MethodResponse::error(Id::Null, ErrorObject::from(ErrorCode::InternalError))
-                            .with_extensions(extensions)
-                    }
-                })
-                .boxed()
-            })),
-        )?;
-
-        Ok(callback)
     }
 
     /// Register a new publish/subscribe interface using JSON-RPC notifications.
