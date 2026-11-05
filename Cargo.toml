@@ -576,6 +576,7 @@ jsonrpsee = { path = "crates/rpc/jsonrpsee/jsonrpsee" }
 jsonrpsee-core = { path = "crates/rpc/jsonrpsee/core" }
 jsonrpsee-proc-macros = { path = "crates/rpc/jsonrpsee/proc-macros" }
 jsonrpsee-server = { path = "crates/rpc/jsonrpsee/server" }
+jsonrpsee-test-utils = { path = "crates/rpc/jsonrpsee/test-utils" }
 jsonrpsee-types = { path = "crates/rpc/jsonrpsee/types" }
 
 # http
