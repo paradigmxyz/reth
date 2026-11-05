@@ -25,7 +25,7 @@ use crate::tree::{
 use alloy_consensus::transaction::TxHashRef;
 use alloy_eip7928::bal::DecodedBal;
 use alloy_eips::eip4895::Withdrawal;
-use alloy_primitives::keccak256;
+use alloy_primitives::{keccak256, KECCAK256_EMPTY};
 use evm2::evm::Database;
 use metrics::{Counter, Gauge, Histogram};
 use rayon::prelude::*;
@@ -67,6 +67,12 @@ const REFRESH_WINDOW: usize = 64;
 /// need one or two; batch calls need dozens before their bulk of independent reads, and pure
 /// chains of dependent reads gain nothing from more.
 const MAX_PROBE_ROUNDS: usize = 64;
+
+/// Most keys a probe round loads on its own thread instead of in parallel on the read-set pool.
+///
+/// Rounds in a chain of dependent reads miss one or two keys, which the pool's queue would only
+/// delay.
+const INLINE_LOADS: usize = 8;
 
 /// Threads per block that probe transactions for cold reads, beside the speculation workers.
 ///
@@ -363,6 +369,14 @@ where
     {
         let mut state = ctx.evm_for_ctx();
         let Some((evm, misses)) = state.probe.as_mut() else { return };
+        // Loads the few misses of a round in a dependent chain without the pool's queue.
+        let loader = ctx.saved_cache.as_ref().and_then(|saved_cache| {
+            let provider = ctx.provider.database_provider_ro().ok()?;
+            Some(CachedStateProvider::new_prewarm(
+                Box::new(provider.into_evm_state_provider()) as EvmStateProviderBox,
+                saved_cache.cache().clone(),
+            ))
+        });
         let mut idle = 0;
         while !ctx.should_stop() && !queue.probed_all() {
             let generation = results.predicted().generation();
@@ -395,7 +409,25 @@ where
                 let mut code = missed.code;
                 code.sort_unstable();
                 code.dedup();
-                fetch.warm_all(accounts, &storage, code).wait();
+                match &loader {
+                    Some(loader) if accounts.len() + storage.len() + code.len() <= INLINE_LOADS => {
+                        for address in accounts {
+                            if let Ok(Some(account)) = loader.basic_account(&address) &&
+                                let Some(hash) = account.bytecode_hash &&
+                                hash != KECCAK256_EMPTY
+                            {
+                                let _ = loader.bytecode_by_hash(&hash);
+                            }
+                        }
+                        for (address, slot) in storage {
+                            let _ = loader.storage(address, slot);
+                        }
+                        for hash in code {
+                            let _ = loader.bytecode_by_hash(&hash);
+                        }
+                    }
+                    _ => fetch.warm_all(accounts, &storage, code).wait(),
+                }
             }
         }
     }
@@ -1215,14 +1247,14 @@ struct SpeculationQueue<Tx, T: evm2::EvmTypes> {
 }
 
 impl<Tx, T: evm2::EvmTypes> SpeculationQueue<Tx, T> {
-    /// Creates a queue whose first transaction is never claimed: block execution executes it
-    /// itself, on the parent state that speculation would see too, instead of waiting for a
-    /// worker that starts at about the same time.
+    /// Creates a queue whose first transaction is never claimed for speculation: block execution
+    /// executes it itself, on the parent state that speculation would see too, instead of waiting
+    /// for a worker that starts at about the same time. It is still probed.
     fn new(transaction_count: usize) -> Self {
         Self {
             txs: (0..transaction_count).map(|_| OnceLock::new()).collect(),
             next: AtomicUsize::new(1),
-            next_probe: AtomicUsize::new(1),
+            next_probe: AtomicUsize::new(0),
             closed: AtomicBool::new(false),
         }
     }

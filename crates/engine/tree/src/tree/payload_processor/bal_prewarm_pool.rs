@@ -1,6 +1,6 @@
 //! BAL read-set prewarming pool.
 
-use alloy_primitives::{Address, StorageKey, B256};
+use alloy_primitives::{Address, StorageKey, B256, KECCAK256_EMPTY};
 use reth_execution_cache::{CachedStateProvider, ExecutionCache, TxPoolPrewarmCacheSnapshot};
 use reth_provider::{EvmStateProvider, EvmStateProviderBox, ProviderResult};
 use std::{
@@ -258,7 +258,13 @@ fn prewarm_loop(rx: crossbeam_channel::Receiver<PrewarmMsg>) {
                 let Some(provider) = provider.as_ref() else { continue };
                 match target {
                     PrewarmTarget::Account(addr, slots) => {
-                        let _ = provider.basic_account(&addr);
+                        // The account's code is read next, and its hash is only known now.
+                        if let Ok(Some(account)) = provider.basic_account(&addr) &&
+                            let Some(hash) = account.bytecode_hash &&
+                            hash != KECCAK256_EMPTY
+                        {
+                            let _ = provider.bytecode_by_hash(&hash);
+                        }
                         for &slot in &slots {
                             let _ = provider.storage(addr, slot);
                         }
