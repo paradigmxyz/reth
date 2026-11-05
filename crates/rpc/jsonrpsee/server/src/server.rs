@@ -41,6 +41,7 @@ use crate::{
     transport::{http, ws, ws::BackgroundTaskParams},
     utils::{
         deserialize_with_ext, no_request_within, NotifyOnRequest, DEFAULT_FIRST_REQUEST_TIMEOUT,
+        DEFAULT_WS_WRITE_TIMEOUT,
     },
     Extensions, HttpBody, HttpRequest, HttpResponse, LOG_TARGET,
 };
@@ -225,6 +226,8 @@ pub struct ServerConfig {
     pub(crate) keep_alive_timeout: Duration,
     /// Timeout for receiving the first request of a connection.
     pub(crate) first_request_timeout: Option<Duration>,
+    /// Timeout for writing a single message to a WebSocket connection.
+    pub(crate) ws_write_timeout: Duration,
 }
 
 /// The builder to configure and create a JSON-RPC server configuration.
@@ -260,6 +263,8 @@ pub struct ServerConfigBuilder {
     keep_alive_timeout: std::time::Duration,
     /// Timeout for receiving the first request of a connection.
     first_request_timeout: Option<Duration>,
+    /// Timeout for writing a single message to a WebSocket connection.
+    ws_write_timeout: Duration,
 }
 
 /// Builder for [`TowerService`].
@@ -411,6 +416,7 @@ impl Default for ServerConfigBuilder {
             //same as `hyper` default
             keep_alive_timeout: Duration::from_secs(20),
             first_request_timeout: Some(DEFAULT_FIRST_REQUEST_TIMEOUT),
+            ws_write_timeout: DEFAULT_WS_WRITE_TIMEOUT,
         }
     }
 }
@@ -587,6 +593,19 @@ impl ServerConfigBuilder {
         self
     }
 
+    /// Configure how long writing a single message, ping or close frame to a WebSocket
+    /// connection may take before the connection is closed.
+    ///
+    /// A client that stops reading fills the socket's send buffer, which blocks the write. When
+    /// the timeout expires, the connection is dropped together with its queued messages,
+    /// subscriptions and pending calls.
+    ///
+    /// Default is 10 seconds.
+    pub fn set_ws_write_timeout(mut self, ws_write_timeout: Duration) -> Self {
+        self.ws_write_timeout = ws_write_timeout;
+        self
+    }
+
     /// Build the [`ServerConfig`].
     pub fn build(self) -> ServerConfig {
         ServerConfig {
@@ -605,6 +624,7 @@ impl ServerConfigBuilder {
             keep_alive: self.keep_alive,
             keep_alive_timeout: self.keep_alive_timeout,
             first_request_timeout: self.first_request_timeout,
+            ws_write_timeout: self.ws_write_timeout,
         }
     }
 }

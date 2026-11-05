@@ -1123,3 +1123,98 @@ async fn notification_id_classification_websocket_singles_and_mixed_batches() {
     handle.stop().unwrap();
     handle.stopped().with_default_timeout().await.unwrap();
 }
+
+#[tokio::test]
+async fn ws_write_timeout_closes_unread_connection() {
+    init_logger();
+
+    let (server_handle, addr, mut subscription_ended) = server_with_flooding_subscription().await;
+
+    let mut client = WebSocketTestClient::new(addr).with_default_timeout().await.unwrap().unwrap();
+    client.send(FLOOD_SUBSCRIBE).with_default_timeout().await.unwrap().unwrap();
+
+    // The client never reads, so the server's writes block once the socket buffers are full.
+    // The write timeout must then close the connection, which ends the subscription.
+    subscription_ended.recv().with_timeout(FLOOD_WRITE_TIMEOUT * 10).await.unwrap().unwrap();
+
+    // The connection task is done and released its permit, so the only connection slot is free.
+    async {
+        while WebSocketTestClient::new(addr).await.is_err() {
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+    }
+    .with_timeout(FLOOD_WRITE_TIMEOUT * 10)
+    .await
+    .unwrap();
+
+    // Draining what was buffered before the timeout ends at the closed connection.
+    async { while client.receive().await.is_ok() {} }
+        .with_timeout(FLOOD_WRITE_TIMEOUT * 10)
+        .await
+        .unwrap();
+
+    server_handle.stop().unwrap();
+    server_handle.stopped().with_default_timeout().await.unwrap();
+}
+
+#[tokio::test]
+async fn ws_write_timeout_keeps_reading_connection() {
+    init_logger();
+
+    let (server_handle, addr, mut subscription_ended) = server_with_flooding_subscription().await;
+
+    let mut client = WebSocketTestClient::new(addr).with_default_timeout().await.unwrap().unwrap();
+    client.send(FLOOD_SUBSCRIBE).with_default_timeout().await.unwrap().unwrap();
+
+    // A client that keeps reading must not be disconnected, even well past the write timeout.
+    let start = std::time::Instant::now();
+    while start.elapsed() < FLOOD_WRITE_TIMEOUT * 3 {
+        client.receive().with_timeout(FLOOD_WRITE_TIMEOUT).await.unwrap().unwrap();
+    }
+    assert!(subscription_ended.try_recv().is_err());
+
+    server_handle.stop().unwrap();
+    server_handle.stopped().with_default_timeout().await.unwrap();
+}
+
+const FLOOD_WRITE_TIMEOUT: Duration = Duration::from_secs(1);
+
+const FLOOD_SUBSCRIBE: &str = r#"{"jsonrpc":"2.0","method":"subscribe_flood","params":[],"id":1}"#;
+
+/// Starts a server that allows a single connection and whose `subscribe_flood` subscription sends
+/// 64 KiB notifications as fast as the connection accepts them. The returned receiver yields once
+/// a subscription ends.
+async fn server_with_flooding_subscription(
+) -> (crate::ServerHandle, std::net::SocketAddr, tokio::sync::mpsc::UnboundedReceiver<()>) {
+    let config = ServerConfig::builder()
+        .max_connections(1)
+        .set_message_buffer_capacity(4)
+        .set_ws_write_timeout(FLOOD_WRITE_TIMEOUT)
+        .build();
+    let server = ServerBuilder::with_config(config)
+        .build("127.0.0.1:0")
+        .with_default_timeout()
+        .await
+        .unwrap()
+        .unwrap();
+
+    let (ended_tx, ended_rx) = tokio::sync::mpsc::unbounded_channel();
+    let mut module = RpcModule::new(ended_tx);
+    module
+        .register_subscription(
+            "subscribe_flood",
+            "flood",
+            "unsubscribe_flood",
+            |_, pending, ended_tx, _| async move {
+                let sink = pending.accept().await?;
+                let notification = serde_json::value::to_raw_value(&"x".repeat(64 * 1024)).unwrap();
+                while sink.send(notification.clone()).await.is_ok() {}
+                let _ = ended_tx.send(());
+                Ok(())
+            },
+        )
+        .unwrap();
+
+    let addr = server.local_addr().unwrap();
+    (server.start(module), addr, ended_rx)
+}
