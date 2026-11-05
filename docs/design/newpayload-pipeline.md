@@ -36,6 +36,58 @@ Two conclusions:
    transaction, and fixed costs. Parallel execution also removes the state reads from the
    engine thread, because speculative workers do them.
 
+## Where the node spends its CPU
+
+A derek samply profile of `main` (500 mainnet blocks plus 125 warmup blocks, a 14-16 core box)
+accounts for 159 s of CPU in about 23 s, so about 7 cores on average, in bursts per block:
+
+| Threads | Count | CPU per block | What they do |
+|---|---|---|---|
+| `engine` | 1 | ~20 ms | Executes transactions serially: 92% of its samples; 27% of those are state reads through `CachedStateProvider` and the in-memory overlay, with page faults and TLB shootdown interrupts; 5% waits for the state root |
+| `proof-acct`, `proof-strg` | 56 + 56 | ~57 ms | Multiproofs for the sparse trie: 71% inside MDBX trie cursors, 20% `page_get`, 19% page faults |
+| `rayon` (global) | 14 | ~32 ms | Sparse trie storage passes and subtrie hashing |
+| `prewarm` | 13 | ~32 ms | Speculative execution that warms the caches |
+| `tokio-rt` | 20 | ~20 ms | Engine API, JSON decoding, history index writes |
+| `cpu`, `storage`, `persistence`, `mdbx-rs-txn-mgr` | 16 + 17 + 1 + 1 | ~40 ms | Conversion, receipts, persistence |
+
+Persistence interferes on top of that: derek runs from paradigmxyz/reth#27900 that keep all 500
+blocks in memory (`--engine.persistence-threshold 1000`) were 19% faster on mean latency
+(27.7 -> 22.4 ms) and 20% higher in Mgas/s. Writing blocks back through MDBX's writable map makes
+the kernel write-protect dirty pages, which interrupts every core running a thread of the process
+to flush its TLB, and the writer competes for cores and the page cache with the readers.
+
+So a 32 ms block costs about 250 ms of CPU on about 300 threads. The engine thread is the
+critical path, and most of the rest re-reads the state trie from MDBX for every block. When
+execution leaves the engine thread, the cores it needs are taken by that work: on the Phase 1
+branch, `prewarm-txs` took 24% longer and the engine thread's involuntary context switches rose
+4.5x with the state root enabled.
+
+## Rewrite: newPayload v2
+
+The v2 path replaces the per-block task graph instead of tuning it:
+
+1. **One scheduler.** A fixed pool of workers, one per physical core and pinned, parked on a futex
+   when idle, runs every task of the pipeline with priorities: the committer's work first, then
+   the state root, then speculation, then prefetching. It replaces the proof worker pools, the
+   prewarm pool and the global rayon pool on this path.
+2. **Resident hot state.** A flat open-addressed table of accounts, slots and code on huge pages,
+   owned by the engine at the canonical head. A read is one probe. Speculation's read sets drive
+   batched cold reads. Committed blocks update it in place; it replaces the evm2 overlay,
+   `CachedStateProvider`, the in-memory block overlay and MDBX on the read path.
+3. **Execution on the hot state.** Speculative parallel execution with the ordered committer from
+   Phase 1, writing the block's changes into a per-block delta of the hot state instead of
+   per-transaction transition maps and state update copies. The bundle state and reverts for
+   persistence are built once, off the critical path.
+4. **Resident state trie.** Trie nodes of the account trie and of hot storage tries stay in
+   memory across blocks with their hashes, so a block's root needs no proofs for resident paths.
+   The block's hashed diff is applied per subtrie in parallel as speculation predicts it, and only
+   leaves whose committed value differs are rewritten at the end.
+5. **Persistence off the critical path.** With reads served from the hot state and the resident
+   trie, the critical path touches MDBX only for cold misses, and persistence runs at a lower
+   priority than the pipeline.
+6. **Fallback.** Blocks the v2 path does not support (unknown parent, BAL blocks, reorgs past the
+   hot state) run on the existing path, which stays the reference for differential tests.
+
 ## Phase 1: speculative parallel execution with an ordered committer
 
 reth already speculates: prewarm workers execute every transaction against the parent state plus
