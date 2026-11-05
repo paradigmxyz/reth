@@ -1,5 +1,5 @@
 use super::AuthValidator;
-use jsonrpsee_http_client::{HttpRequest, HttpResponse};
+use jsonrpsee_server::{HttpRequest, HttpResponse};
 use pin_project::pin_project;
 use std::{
     future::Future,

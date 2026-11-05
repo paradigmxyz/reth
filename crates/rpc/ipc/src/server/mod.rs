@@ -819,22 +819,63 @@ pub fn dummy_name() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::client::IpcClientBuilder;
     use futures::future::select;
+    use interprocess::local_socket::tokio::{RecvHalf, SendHalf};
     use jsonrpsee::{
-        core::{
-            client::{self, ClientT, Error, Subscription, SubscriptionClientT},
-            middleware::{Batch, BatchEntry, Notification},
-            params::BatchRequestBuilder,
-        },
-        rpc_params,
+        core::middleware::{Batch, BatchEntry, Notification},
         types::{error::TOO_MANY_SUBSCRIPTIONS_CODE, ErrorCode, Request},
         PendingSubscriptionSink, RpcModule, SubscriptionMessage,
     };
     use reth_tracing::init_test_tracing;
+    use serde_json::{json, Value};
     use std::pin::pin;
     use tokio::sync::broadcast;
     use tokio_stream::wrappers::BroadcastStream;
+    use tokio_util::codec::FramedRead;
+
+    /// Raw JSON-RPC client that talks to the server over the IPC socket.
+    struct TestClient {
+        send: SendHalf,
+        recv: FramedRead<RecvHalf, StreamCodec>,
+        next_id: u64,
+    }
+
+    impl TestClient {
+        async fn connect(endpoint: &str) -> Self {
+            let name = endpoint.to_fs_name::<GenericFilePath>().unwrap();
+            let (recv, send) = LocalSocketStream::connect(name).await.unwrap().split();
+            Self { send, recv: FramedRead::new(recv, StreamCodec::stream_incoming()), next_id: 0 }
+        }
+
+        /// Sends a call and returns its response, or `None` if the server closed the
+        /// connection.
+        async fn call(&mut self, method: &str, params: Value) -> Option<Value> {
+            let request = self.request(method, params);
+            self.send(request).await.ok()?;
+            self.recv().await
+        }
+
+        /// Returns the request object for a call with a fresh id.
+        fn request(&mut self, method: &str, params: Value) -> Value {
+            self.next_id += 1;
+            json!({"jsonrpc": "2.0", "id": self.next_id, "method": method, "params": params})
+        }
+
+        async fn send(&mut self, msg: Value) -> io::Result<()> {
+            self.send.write_all(msg.to_string().as_bytes()).await
+        }
+
+        /// Returns the next message from the server, or `None` if the connection is closed.
+        async fn recv(&mut self) -> Option<Value> {
+            let msg = self.recv.next().await?.ok()?;
+            Some(serde_json::from_str(&msg).unwrap())
+        }
+    }
+
+    /// Returns the error code of a response, or `None` if it succeeded.
+    fn error_code(response: &Value) -> Option<i64> {
+        response.get("error").map(|err| err["code"].as_i64().unwrap())
+    }
 
     #[cfg(unix)]
     use std::{os::unix::net::UnixListener, path::Path, time::Duration};
@@ -926,9 +967,9 @@ mod tests {
         let handle = server.start(module).await.unwrap();
         tokio::spawn(handle.stopped());
 
-        let client = IpcClientBuilder::default().build(endpoint).await.unwrap();
-        let response: Result<String, Error> = client.request("anything", rpc_params![]).await;
-        assert!(response.unwrap_err().to_string().contains("Exceeded max limit of"));
+        let mut client = TestClient::connect(endpoint).await;
+        let response = client.call("anything", json!([])).await.unwrap();
+        assert!(response["error"]["data"].as_str().unwrap().contains("Exceeded max limit of"));
     }
 
     #[tokio::test]
@@ -941,21 +982,16 @@ mod tests {
         let handle = server.start(module).await.unwrap();
         tokio::spawn(handle.stopped());
 
-        let client = IpcClientBuilder::default().build(endpoint).await.unwrap();
-        let response: Result<String, Error> =
-            client.request("anything", rpc_params!["a".repeat(101)]).await;
-        assert!(response.is_err());
-        let mut batch_request_builder = BatchRequestBuilder::new();
-        let _ = batch_request_builder.insert("anything", rpc_params![]);
-        let _ = batch_request_builder.insert("anything", rpc_params![]);
-        let _ = batch_request_builder.insert("anything", rpc_params![]);
-        // the raw request string is:
-        //  [{"jsonrpc":"2.0","id":0,"method":"anything"},{"jsonrpc":"2.0","id":1, \
-        //    "method":"anything"},{"jsonrpc":"2.0","id":2,"method":"anything"}]"
-        // which is 136 bytes, more than 100 bytes.
-        let response: Result<client::BatchResponse<'_, String>, Error> =
-            client.batch_request(batch_request_builder).await;
-        assert!(response.is_err());
+        let mut client = TestClient::connect(endpoint).await;
+        let response = client.call("anything", json!(["a".repeat(101)])).await;
+        assert!(response.is_none_or(|response| error_code(&response).is_some()));
+
+        // The batch is more than 100 bytes.
+        let mut client = TestClient::connect(endpoint).await;
+        let batch = (0..3).map(|_| client.request("anything", json!([]))).collect();
+        client.send(Value::Array(batch)).await.unwrap();
+        let response = client.recv().await;
+        assert!(response.is_none_or(|response| error_code(&response).is_some()));
     }
 
     #[tokio::test]
@@ -969,27 +1005,22 @@ mod tests {
         let handle = server.start(module).await.unwrap();
         tokio::spawn(handle.stopped());
 
-        let client1 = IpcClientBuilder::default().build(endpoint).await.unwrap();
-        let client2 = IpcClientBuilder::default().build(endpoint).await.unwrap();
-        let client3 = IpcClientBuilder::default().build(endpoint).await.unwrap();
+        let mut client1 = TestClient::connect(endpoint).await;
+        let mut client2 = TestClient::connect(endpoint).await;
+        let mut client3 = TestClient::connect(endpoint).await;
 
-        let response1: Result<String, Error> = client1.request("anything", rpc_params![]).await;
-        let response2: Result<String, Error> = client2.request("anything", rpc_params![]).await;
-        let response3: Result<String, Error> = client3.request("anything", rpc_params![]).await;
-
-        assert!(response1.is_ok());
-        assert!(response2.is_ok());
+        assert_eq!(client1.call("anything", json!([])).await.unwrap()["result"], "succeed");
+        assert_eq!(client2.call("anything", json!([])).await.unwrap()["result"], "succeed");
         // Third connection is rejected
-        assert!(response3.is_err());
+        assert!(client3.call("anything", json!([])).await.is_none());
 
         // Decrement connection count
         drop(client2);
         tokio::time::sleep(std::time::Duration::from_millis(100)).await;
 
         // Can connect again
-        let client4 = IpcClientBuilder::default().build(endpoint).await.unwrap();
-        let response4: Result<String, Error> = client4.request("anything", rpc_params![]).await;
-        assert!(response4.is_ok());
+        let mut client4 = TestClient::connect(endpoint).await;
+        assert_eq!(client4.call("anything", json!([])).await.unwrap()["result"], "succeed");
     }
 
     #[tokio::test(flavor = "multi_thread")]
@@ -1013,9 +1044,9 @@ mod tests {
         let handle = server.start(module).await.unwrap();
         tokio::spawn(handle.stopped());
 
-        let client = IpcClientBuilder::default().build(endpoint).await.unwrap();
+        let mut client = TestClient::connect(endpoint).await;
         tokio::select! {
-            _ = client.request::<String, _>("hang", rpc_params![]) => panic!("call completed"),
+            _ = client.call("hang", json!([])) => panic!("call completed"),
             _ = started_rx => {}
         }
         drop(client);
@@ -1040,24 +1071,22 @@ mod tests {
         let handle = server.start(module).await.unwrap();
         tokio::spawn(handle.stopped());
 
-        let client = IpcClientBuilder::default().build(endpoint).await.unwrap();
-        let err = client.request::<String, _>("maybe_panic", rpc_params![true]).await.unwrap_err();
-        assert!(
-            matches!(&err, Error::Call(err) if err.code() == ErrorCode::InternalError.code()),
-            "{err:?}"
+        let mut client = TestClient::connect(endpoint).await;
+        let response = client.call("maybe_panic", json!([true])).await.unwrap();
+        assert_eq!(
+            error_code(&response),
+            Some(ErrorCode::InternalError.code().into()),
+            "{response}"
         );
 
-        let mut batch_request_builder = BatchRequestBuilder::new();
-        let _ = batch_request_builder.insert("maybe_panic", rpc_params![true]);
-        let _ = batch_request_builder.insert("maybe_panic", rpc_params![false]);
-        let responses = client
-            .batch_request::<String>(batch_request_builder)
-            .await
-            .unwrap()
-            .into_iter()
-            .collect::<Vec<_>>();
-        assert!(matches!(&responses[0], Err(err) if err.code() == ErrorCode::InternalError.code()));
-        assert_eq!(responses[1].as_deref(), Ok("ok"));
+        let batch = vec![
+            client.request("maybe_panic", json!([true])),
+            client.request("maybe_panic", json!([false])),
+        ];
+        client.send(Value::Array(batch)).await.unwrap();
+        let responses = client.recv().await.unwrap();
+        assert_eq!(error_code(&responses[0]), Some(ErrorCode::InternalError.code().into()));
+        assert_eq!(responses[1]["result"], "ok");
     }
 
     #[tokio::test]
@@ -1071,9 +1100,9 @@ mod tests {
         let handle = server.start(module).await.unwrap();
         tokio::spawn(handle.stopped());
 
-        let client = IpcClientBuilder::default().build(endpoint).await.unwrap();
-        let response: String = client.request("eth_chainId", rpc_params![]).await.unwrap();
-        assert_eq!(response, msg);
+        let mut client = TestClient::connect(endpoint).await;
+        let response = client.call("eth_chainId", json!([])).await.unwrap();
+        assert_eq!(response["result"], msg);
     }
 
     #[tokio::test]
@@ -1085,19 +1114,13 @@ mod tests {
         let handle = server.start(module).await.unwrap();
         tokio::spawn(handle.stopped());
 
-        let client = IpcClientBuilder::default().build(endpoint).await.unwrap();
-        let mut batch_request_builder = BatchRequestBuilder::new();
-        let _ = batch_request_builder.insert("anything", rpc_params![]);
-        let _ = batch_request_builder.insert("anything", rpc_params![]);
-        let _ = batch_request_builder.insert("anything", rpc_params![]);
-        let result = client
-            .batch_request(batch_request_builder)
-            .await
-            .unwrap()
-            .into_ok()
-            .unwrap()
-            .collect::<Vec<String>>();
-        assert_eq!(result, vec!["ok", "ok", "ok"]);
+        let mut client = TestClient::connect(endpoint).await;
+        let batch = (0..3).map(|_| client.request("anything", json!([]))).collect();
+        client.send(Value::Array(batch)).await.unwrap();
+        let responses = client.recv().await.unwrap();
+        let results =
+            responses.as_array().unwrap().iter().map(|r| &r["result"]).collect::<Vec<_>>();
+        assert_eq!(results, vec!["ok", "ok", "ok"]);
     }
 
     #[tokio::test]
@@ -1111,9 +1134,9 @@ mod tests {
         let handle = server.start(module).await.unwrap();
         tokio::spawn(handle.stopped());
 
-        let client = IpcClientBuilder::default().build(endpoint).await.unwrap();
-        let response: String = client.request("rpc_modules", rpc_params![]).await.unwrap();
-        assert_eq!(response, msg);
+        let mut client = TestClient::connect(endpoint).await;
+        let response = client.call("rpc_modules", json!([])).await.unwrap();
+        assert_eq!(response["result"], msg);
     }
 
     #[tokio::test(flavor = "multi_thread")]
@@ -1142,12 +1165,16 @@ mod tests {
         let handle = server.start(module).await.unwrap();
         tokio::spawn(handle.stopped());
 
-        let client = IpcClientBuilder::default().build(endpoint).await.unwrap();
-        let sub: Subscription<usize> =
-            client.subscribe("subscribe_hello", rpc_params![], "unsubscribe_hello").await.unwrap();
+        let mut client = TestClient::connect(endpoint).await;
+        let response = client.call("subscribe_hello", json!([])).await.unwrap();
+        let sub_id = response["result"].clone();
 
-        let items = sub.take(16).collect::<Vec<_>>().await;
-        assert_eq!(items.len(), 16);
+        for _ in 0..16 {
+            let notification = client.recv().await.unwrap();
+            assert_eq!(notification["method"], "s_hello");
+            assert_eq!(notification["params"]["subscription"], sub_id);
+            assert!(notification["params"]["result"].is_u64());
+        }
     }
 
     #[tokio::test(flavor = "multi_thread")]
@@ -1169,17 +1196,11 @@ mod tests {
         let handle = server.start(module).await.unwrap();
         tokio::spawn(handle.stopped());
 
-        let client = IpcClientBuilder::default().build(endpoint).await.unwrap();
-        let _sub: Subscription<usize> =
-            client.subscribe("subscribe_hello", rpc_params![], "unsubscribe_hello").await.unwrap();
-        let err = client
-            .subscribe::<usize, _>("subscribe_hello", rpc_params![], "unsubscribe_hello")
-            .await
-            .unwrap_err();
-        assert!(
-            matches!(&err, Error::Call(err) if err.code() == TOO_MANY_SUBSCRIPTIONS_CODE),
-            "{err}"
-        );
+        let mut client = TestClient::connect(endpoint).await;
+        let response = client.call("subscribe_hello", json!([])).await.unwrap();
+        assert_eq!(error_code(&response), None, "{response}");
+        let response = client.call("subscribe_hello", json!([])).await.unwrap();
+        assert_eq!(error_code(&response), Some(TOO_MANY_SUBSCRIPTIONS_CODE.into()), "{response}");
     }
 
     #[tokio::test]
@@ -1264,13 +1285,12 @@ mod tests {
         let handle = server.start(module).await.unwrap();
         tokio::spawn(handle.stopped());
 
-        let client = IpcClientBuilder::default().build(endpoint).await.unwrap();
-        let say_hello_response: String = client.request("say_hello", rpc_params![]).await.unwrap();
-        let say_goodbye_response: String =
-            client.request("say_goodbye", rpc_params![]).await.unwrap();
+        let mut client = TestClient::connect(endpoint).await;
+        let say_hello_response = client.call("say_hello", json!([])).await.unwrap();
+        let say_goodbye_response = client.call("say_goodbye", json!([])).await.unwrap();
 
-        assert_eq!(say_hello_response, goodbye_msg);
-        assert_eq!(say_goodbye_response, hello_msg);
+        assert_eq!(say_hello_response["result"], goodbye_msg);
+        assert_eq!(say_goodbye_response["result"], hello_msg);
     }
 
     #[tokio::test]

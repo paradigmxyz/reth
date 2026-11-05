@@ -55,12 +55,7 @@ cfg_server! {
     pub mod server;
 }
 
-cfg_client! {
-    pub mod client;
-    pub use client::Error as ClientError;
-}
-
-cfg_client_or_server! {
+cfg_server! {
     pub mod middleware;
 }
 
@@ -77,7 +72,7 @@ pub type EmptyServerParams = Vec<()>;
 mod proc_macros_support;
 
 /// Re-exports for proc-macro library to not require any additional
-/// dependencies to be explicitly added on the client side.
+/// dependencies to be explicitly added by users of the macro.
 #[doc(hidden)]
 pub mod __reexports {
     pub use async_trait::async_trait;
@@ -85,7 +80,7 @@ pub mod __reexports {
     pub use serde_json;
 
     // Needed for the params parsing in the proc macro API.
-    cfg_client_or_server! {
+    cfg_server! {
         pub use tokio;
     }
 

@@ -11,7 +11,6 @@ use alloy_rpc_types_engine::{
     },
     ClientVersionV1, ForkchoiceState, PayloadAttributes, PayloadStatusEnum,
 };
-use jsonrpsee_core::client::ClientT;
 use reth_chainspec::{EthChainSpec, EthereumHardfork};
 use reth_e2e_test_utils::{
     eth_payload_attributes, test_chain_spec, transaction::TransactionTestContext, E2ETestSetupExt,

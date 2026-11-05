@@ -29,10 +29,7 @@
 use std::borrow::Cow;
 
 use crate::{
-    attributes::{
-        optional, parse_param_kind, Aliases, Argument, AttributeMeta, MissingArgument, NameMapping,
-        ParamKind,
-    },
+    attributes::{optional, Aliases, Argument, AttributeMeta, MissingArgument, NameMapping},
     helpers::extract_doc_comments,
 };
 use proc_macro2::TokenStream as TokenStream2;
@@ -92,10 +89,7 @@ pub struct RpcMethod {
     pub name: String,
     pub blocking: bool,
     pub docs: TokenStream2,
-    pub deprecated: TokenStream2,
     pub params: Vec<RpcFnArg>,
-    pub param_kind: ParamKind,
-    pub returns: Option<syn::Type>,
     pub signature: syn::TraitItemFn,
     pub aliases: Vec<String>,
     pub with_extensions: bool,
@@ -103,20 +97,19 @@ pub struct RpcMethod {
 
 impl RpcMethod {
     pub fn from_item(attr: Attribute, mut method: syn::TraitItemFn) -> syn::Result<Self> {
-        let [aliases, blocking, name, param_kind, with_extensions] = AttributeMeta::parse(attr)?
-            .retain(["aliases", "blocking", "name", "param_kind", "with_extensions"])?;
+        let [aliases, blocking, name, with_extensions] = AttributeMeta::parse(attr)?.retain([
+            "aliases",
+            "blocking",
+            "name",
+            "with_extensions",
+        ])?;
 
         let aliases = parse_aliases(aliases)?;
         let blocking = optional(blocking, Argument::flag)?.is_some();
         let name = name?.string()?;
-        let param_kind = parse_param_kind(param_kind)?;
         let with_extensions = optional(with_extensions, Argument::flag)?.is_some();
 
         let docs = extract_doc_comments(&method.attrs);
-        let deprecated = match find_attr(&method.attrs, "deprecated") {
-            Some(attr) => quote!(#attr),
-            None => quote!(),
-        };
 
         if blocking && method.sig.asyncness.is_some() {
             return Err(syn::Error::new(method.sig.span(), "Blocking method must be synchronous"));
@@ -146,26 +139,10 @@ impl RpcMethod {
             })
             .collect::<Result<_, _>>()?;
 
-        let returns = match method.sig.output.clone() {
-            syn::ReturnType::Default => None,
-            syn::ReturnType::Type(_, output) => Some(*output),
-        };
-
         // We've analyzed attributes and don't need them anymore.
         method.attrs.clear();
 
-        Ok(Self {
-            aliases,
-            blocking,
-            name,
-            params,
-            param_kind,
-            returns,
-            signature: method,
-            docs,
-            deprecated,
-            with_extensions,
-        })
+        Ok(Self { aliases, blocking, name, params, signature: method, docs, with_extensions })
     }
 }
 
@@ -182,7 +159,6 @@ pub struct RpcSubscription {
     pub docs: TokenStream2,
     pub unsubscribe: String,
     pub params: Vec<RpcFnArg>,
-    pub param_kind: ParamKind,
     pub item: syn::Type,
     pub signature: syn::TraitItemFn,
     pub aliases: Vec<String>,
@@ -192,12 +168,11 @@ pub struct RpcSubscription {
 
 impl RpcSubscription {
     pub fn from_item(attr: syn::Attribute, mut sub: syn::TraitItemFn) -> syn::Result<Self> {
-        let [aliases, item, name, param_kind, unsubscribe, unsubscribe_aliases, with_extensions] =
+        let [aliases, item, name, unsubscribe, unsubscribe_aliases, with_extensions] =
             AttributeMeta::parse(attr)?.retain([
                 "aliases",
                 "item",
                 "name",
-                "param_kind",
                 "unsubscribe",
                 "unsubscribe_aliases",
                 "with_extensions",
@@ -208,7 +183,6 @@ impl RpcSubscription {
         let name = map.name;
         let notif_name_override = map.mapped;
         let item = item?.value()?;
-        let param_kind = parse_param_kind(param_kind)?;
         let unsubscribe_aliases = parse_aliases(unsubscribe_aliases)?;
         let with_extensions = optional(with_extensions, Argument::flag)?.is_some();
 
@@ -246,7 +220,6 @@ impl RpcSubscription {
             unsubscribe,
             unsubscribe_aliases,
             params,
-            param_kind,
             item,
             signature: sub,
             aliases,
@@ -258,18 +231,8 @@ impl RpcSubscription {
 
 #[derive(Debug)]
 pub struct RpcDescription {
-    /// Path to the `jsonrpsee` client types part.
-    pub(crate) jsonrpsee_client_path: Option<TokenStream2>,
     /// Path to the `jsonrpsee` server types part.
-    pub(crate) jsonrpsee_server_path: Option<TokenStream2>,
-    /// Switch denoting that server trait must be generated.
-    /// Assuming that trait to which attribute is applied is named `Foo`, the generated
-    /// server trait will have `FooServer` name.
-    pub(crate) needs_server: bool,
-    /// Switch denoting that client extension trait must be generated.
-    /// Assuming that trait to which attribute is applied is named `Foo`, the generated
-    /// client trait will have `FooClient` name.
-    pub(crate) needs_client: bool,
+    pub(crate) jsonrpsee_server_path: TokenStream2,
     /// Optional prefix for RPC namespace.
     pub(crate) namespace: Option<String>,
     /// Optional separator between namespace and method name. Defaults to `_`.
@@ -280,66 +243,38 @@ pub struct RpcDescription {
     pub(crate) methods: Vec<RpcMethod>,
     /// List of RPC subscriptions defined in the trait.
     pub(crate) subscriptions: Vec<RpcSubscription>,
-    /// Optional user defined trait bounds for the client implementation.
-    pub(crate) client_bounds: Option<Punctuated<syn::WherePredicate, Token![,]>>,
     /// Optional user defined trait bounds for the server implementation.
     pub(crate) server_bounds: Option<Punctuated<syn::WherePredicate, Token![,]>>,
 }
 
 impl RpcDescription {
     pub fn from_item(attr: Attribute, mut item: syn::ItemTrait) -> syn::Result<Self> {
-        let [client, server, namespace, namespace_separator, client_bounds, server_bounds] =
-            AttributeMeta::parse(attr)?.retain([
-                "client",
-                "server",
-                "namespace",
-                "namespace_separator",
-                "client_bounds",
-                "server_bounds",
-            ])?;
+        let [server, namespace, namespace_separator, server_bounds] = AttributeMeta::parse(attr)?
+            .retain([
+            "server",
+            "namespace",
+            "namespace_separator",
+            "server_bounds",
+        ])?;
 
-        let needs_server = optional(server, Argument::flag)?.is_some();
-        let needs_client = optional(client, Argument::flag)?.is_some();
+        // Only the server trait is generated, but the flag stays required so that the attribute
+        // spells out what it produces.
+        if optional(server, Argument::flag)?.is_none() {
+            return Err(syn::Error::new_spanned(
+                &item.ident,
+                "The 'server' attribute must be applied",
+            ));
+        }
         let namespace = optional(namespace, Argument::string)?;
         let namespace_separator = optional(namespace_separator, Argument::string)?;
-        let client_bounds = optional(client_bounds, Argument::group)?;
         let server_bounds = optional(server_bounds, Argument::group)?;
-        if !needs_server && !needs_client {
-            return Err(syn::Error::new_spanned(
-                &item.ident,
-                "Either 'server' or 'client' attribute must be applied",
-            ));
-        }
 
-        if client_bounds.is_some() && !needs_client {
-            return Err(syn::Error::new_spanned(
-                &item.ident,
-                "Attribute 'client' must be specified with 'client_bounds'",
-            ));
-        }
-
-        if server_bounds.is_some() && !needs_server {
-            return Err(syn::Error::new_spanned(
-                &item.ident,
-                "Attribute 'server' must be specified with 'server_bounds'",
-            ));
-        }
-
-        let jsonrpsee_client_path = crate::helpers::find_jsonrpsee_client_crate().ok();
-        let jsonrpsee_server_path = crate::helpers::find_jsonrpsee_server_crate().ok();
-
-        if needs_client && jsonrpsee_client_path.is_none() {
-            return Err(syn::Error::new_spanned(
-                &item.ident,
-                "Unable to locate 'jsonrpsee' client dependency",
-            ));
-        }
-        if needs_server && jsonrpsee_server_path.is_none() {
+        let Ok(jsonrpsee_server_path) = crate::helpers::find_jsonrpsee_server_crate() else {
             return Err(syn::Error::new_spanned(
                 &item.ident,
                 "Unable to locate 'jsonrpsee' server dependency",
             ));
-        }
+        };
 
         item.attrs.clear(); // Remove RPC attributes.
 
@@ -395,43 +330,24 @@ impl RpcDescription {
         }
 
         Ok(Self {
-            jsonrpsee_client_path,
             jsonrpsee_server_path,
-            needs_server,
-            needs_client,
             namespace,
             namespace_separator,
             trait_def: item,
             methods,
             subscriptions,
-            client_bounds,
             server_bounds,
         })
     }
 
     pub fn render(self) -> Result<TokenStream2, syn::Error> {
-        let server_impl =
-            if self.needs_server { self.render_server()? } else { TokenStream2::new() };
-        let client_impl =
-            if self.needs_client { self.render_client()? } else { TokenStream2::new() };
-
-        Ok(quote! {
-            #server_impl
-            #client_impl
-        })
-    }
-
-    /// Formats the identifier as a path relative to the resolved
-    /// `jsonrpsee` client path.
-    pub(crate) fn jrps_client_item(&self, item: impl quote::ToTokens) -> TokenStream2 {
-        let jsonrpsee = self.jsonrpsee_client_path.as_ref().unwrap();
-        quote! { #jsonrpsee::#item }
+        self.render_server()
     }
 
     /// Formats the identifier as a path relative to the resolved
     /// `jsonrpsee` server path.
     pub(crate) fn jrps_server_item(&self, item: impl quote::ToTokens) -> TokenStream2 {
-        let jsonrpsee = self.jsonrpsee_server_path.as_ref().unwrap();
+        let jsonrpsee = &self.jsonrpsee_server_path;
         quote! { #jsonrpsee::#item }
     }
 
