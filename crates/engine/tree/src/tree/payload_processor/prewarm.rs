@@ -1197,11 +1197,14 @@ struct SpeculationQueue<Tx, T: evm2::EvmTypes> {
 }
 
 impl<Tx, T: evm2::EvmTypes> SpeculationQueue<Tx, T> {
+    /// Creates a queue whose first transaction is never claimed: block execution executes it
+    /// itself, on the parent state that speculation would see too, instead of waiting for a
+    /// worker that starts at about the same time.
     fn new(transaction_count: usize) -> Self {
         Self {
             txs: (0..transaction_count).map(|_| OnceLock::new()).collect(),
-            next: AtomicUsize::new(0),
-            next_probe: AtomicUsize::new(0),
+            next: AtomicUsize::new(1),
+            next_probe: AtomicUsize::new(1),
             closed: AtomicBool::new(false),
         }
     }
@@ -1776,24 +1779,26 @@ mod tests {
 
     #[test]
     fn speculation_queue_claims_arrived_transactions_in_order() {
-        let queue = SpeculationQueue::<u8, BaseEvmTypes>::new(4);
+        let queue = SpeculationQueue::<u8, BaseEvmTypes>::new(5);
+        // Block execution executes the first transaction itself.
+        queue.push(0, 10, None);
         assert!(queue.claim().is_none());
 
         // A later transaction cannot be claimed before an earlier one arrived.
-        queue.push(1, 11, None);
+        queue.push(2, 12, None);
         assert!(queue.claim().is_none());
-        assert_eq!(queue.get(1).map(|(tx, _)| *tx), Some(11));
+        assert_eq!(queue.get(2).map(|(tx, _)| *tx), Some(12));
 
-        queue.push(0, 10, None);
-        assert_eq!(queue.claim().map(|(index, (tx, _))| (index, *tx)), Some((0, 10)));
+        queue.push(1, 11, None);
         assert_eq!(queue.claim().map(|(index, (tx, _))| (index, *tx)), Some((1, 11)));
+        assert_eq!(queue.claim().map(|(index, (tx, _))| (index, *tx)), Some((2, 12)));
         assert!(queue.claim().is_none());
 
         // Once closed, transactions that never arrived are skipped.
-        queue.push(3, 13, None);
+        queue.push(4, 14, None);
         queue.close();
-        assert_eq!(queue.claim().map(|(index, (tx, _))| (index, *tx)), Some((3, 13)));
+        assert_eq!(queue.claim().map(|(index, (tx, _))| (index, *tx)), Some((4, 14)));
         assert!(queue.claim().is_none());
-        assert!(queue.get(2).is_none());
+        assert!(queue.get(3).is_none());
     }
 }
