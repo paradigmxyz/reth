@@ -102,6 +102,17 @@ rand.workspace = true
 
 jsonrpsee = { workspace = true, features = ["client"] }
 
+# get_logs bench
+alloy-rpc-client = { workspace = true, features = ["reqwest"] }
+alloy-transport.workspace = true
+criterion.workspace = true
+flate2.workspace = true
+reth-db.workspace = true
+
+[[bench]]
+name = "get_logs"
+harness = false
+
 [features]
 js-tracer = [
     "dep:humantime",
