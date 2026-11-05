@@ -395,9 +395,9 @@ where
             ))
         });
 
-        // Speculation probes each transaction against the cache first and has the read-set pool
-        // load what it missed, so that a block's cold reads are loaded in parallel instead of one
-        // dependent read at a time inside speculative executions.
+        // Probe threads find each transaction's cold reads against the cache and have the read-set
+        // pool load them in parallel, so that a block's cold reads are not loaded one dependent
+        // read at a time inside speculative executions.
         let probe_cold_reads = prewarm_results.is_some() && saved_cache.is_some();
         let executed_tx_index = Arc::new(AtomicUsize::new(0));
         // configure prewarming
