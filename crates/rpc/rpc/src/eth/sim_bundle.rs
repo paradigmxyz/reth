@@ -475,7 +475,6 @@ where
     }
 }
 
-#[async_trait::async_trait]
 impl<Eth> MevSimApiServer for EthSimBundle<Eth>
 where
     Eth: EthTransactions + LoadBlock + Call,
