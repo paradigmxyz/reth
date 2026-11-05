@@ -31,7 +31,10 @@
 //! work to implement tower::Layer for
 //! external types such as future::Either.
 
-use crate::middleware::{Batch, Notification, RpcServiceT};
+use crate::{
+    middleware::{Batch, Notification, RpcServiceT},
+    server::MethodResponse,
+};
 use jsonrpsee_types::Request;
 
 /// [`tower::util::Either`] but
@@ -62,27 +65,20 @@ where
 impl<A, B> RpcServiceT for Either<A, B>
 where
     A: RpcServiceT + Send,
-    B: RpcServiceT<
-            MethodResponse = A::MethodResponse,
-            NotificationResponse = A::NotificationResponse,
-            BatchResponse = A::BatchResponse,
-        > + Send,
+    B: RpcServiceT + Send,
 {
-    type BatchResponse = A::BatchResponse;
-    type MethodResponse = A::MethodResponse;
-    type NotificationResponse = A::NotificationResponse;
 
     fn call<'a>(
         &self,
         request: Request<'a>,
-    ) -> impl Future<Output = Self::MethodResponse> + Send + 'a {
+    ) -> impl Future<Output = MethodResponse> + Send + 'a {
         match self {
             Either::Left(service) => futures_util::future::Either::Left(service.call(request)),
             Either::Right(service) => futures_util::future::Either::Right(service.call(request)),
         }
     }
 
-    fn batch<'a>(&self, batch: Batch<'a>) -> impl Future<Output = Self::BatchResponse> + Send + 'a {
+    fn batch<'a>(&self, batch: Batch<'a>) -> impl Future<Output = MethodResponse> + Send + 'a {
         match self {
             Either::Left(service) => futures_util::future::Either::Left(service.batch(batch)),
             Either::Right(service) => futures_util::future::Either::Right(service.batch(batch)),
@@ -92,7 +88,7 @@ where
     fn notification<'a>(
         &self,
         n: Notification<'a>,
-    ) -> impl Future<Output = Self::NotificationResponse> + Send + 'a {
+    ) -> impl Future<Output = MethodResponse> + Send + 'a {
         match self {
             Either::Left(service) => futures_util::future::Either::Left(service.notification(n)),
             Either::Right(service) => futures_util::future::Either::Right(service.notification(n)),

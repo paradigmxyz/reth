@@ -545,14 +545,7 @@ impl<HttpMiddleware, RpcMiddleware> Builder<HttpMiddleware, RpcMiddleware> {
     /// where
     ///     S: RpcServiceT + Clone + Send + Sync + 'static,
     /// {
-    ///     type MethodResponse = S::MethodResponse;
-    ///     type NotificationResponse = S::NotificationResponse;
-    ///     type BatchResponse = S::BatchResponse;
-    ///
-    ///     fn call<'a>(
-    ///         &self,
-    ///         req: Request<'a>,
-    ///     ) -> impl Future<Output = Self::MethodResponse> + Send + 'a {
+    ///     fn call<'a>(&self, req: Request<'a>) -> impl Future<Output = MethodResponse> + Send + 'a {
     ///         tracing::info!("MyMiddleware processed call {}", req.method);
     ///         let count = self.count.clone();
     ///         let service = self.service.clone();
@@ -565,17 +558,14 @@ impl<HttpMiddleware, RpcMiddleware> Builder<HttpMiddleware, RpcMiddleware> {
     ///         }
     ///     }
     ///
-    ///     fn batch<'a>(
-    ///         &self,
-    ///         batch: Batch<'a>,
-    ///     ) -> impl Future<Output = Self::BatchResponse> + Send + 'a {
+    ///     fn batch<'a>(&self, batch: Batch<'a>) -> impl Future<Output = MethodResponse> + Send + 'a {
     ///         self.service.batch(batch)
     ///     }
     ///
     ///     fn notification<'a>(
     ///         &self,
     ///         notif: Notification<'a>,
-    ///     ) -> impl Future<Output = Self::NotificationResponse> + Send + 'a {
+    ///     ) -> impl Future<Output = MethodResponse> + Send + 'a {
     ///         self.service.notification(notif)
     ///     }
     /// }
@@ -686,13 +676,7 @@ pub struct TowerServiceNoHttp<L> {
 impl<Body, RpcMiddleware> Service<HttpRequest<Body>> for TowerServiceNoHttp<RpcMiddleware>
 where
     RpcMiddleware: Layer<RpcService>,
-    <RpcMiddleware as Layer<RpcService>>::Service: RpcServiceT<
-            MethodResponse = MethodResponse,
-            BatchResponse = MethodResponse,
-            NotificationResponse = MethodResponse,
-        > + Send
-        + Sync
-        + 'static,
+    <RpcMiddleware as Layer<RpcService>>::Service: RpcServiceT + Send + Sync + 'static,
     Body: http_body::Body<Data = Bytes> + Send + 'static,
     <Body as http_body::Body>::Error: Into<BoxError>,
 {
@@ -959,11 +943,7 @@ pub async fn handle_rpc_call<S>(
     rpc_service: &S,
 ) -> MethodResponse
 where
-    S: RpcServiceT<
-            MethodResponse = MethodResponse,
-            BatchResponse = MethodResponse,
-            NotificationResponse = MethodResponse,
-        > + Send,
+    S: RpcServiceT + Send,
 {
     // Single request or notification
     if is_single {
