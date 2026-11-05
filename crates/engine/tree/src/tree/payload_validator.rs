@@ -2202,6 +2202,22 @@ fn log_timeline(
         })
         .collect::<Vec<_>>()
         .join(" ");
+    if std::env::var_os("RETH_NP_TIMELINE_FULL").is_some() {
+        let full = rows
+            .iter()
+            .map(|&(index, reached, waited, done, reused)| {
+                format!(
+                    "{index}:{}/{}-{}/{reached}/{waited}/{done}/{}",
+                    get(&timeline.arrived, index),
+                    get(&timeline.spec_start, index),
+                    get(&timeline.spec_end, index),
+                    u8::from(reused)
+                )
+            })
+            .collect::<Vec<_>>()
+            .join(" ");
+        info!(target: "engine::np_timeline_full", %full, "timeline rows");
+    }
     info!(
         target: "engine::np_timeline",
         txs = n,
