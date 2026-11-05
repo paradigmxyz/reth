@@ -94,6 +94,52 @@ off its fast dispatch loop), predicted-state lookups 11%, the cache and overlay 
 10%, precompiles 9%. Persistence interference is 19% on derek (all 500 blocks kept in memory) but
 4% locally; disabling MDBX's write map gains 2% locally.
 
+### Phase timestamps
+
+Per-phase timestamps of `newPayload` (`RETH_NP_PHASES` on the experiment branch
+`mattsse/np-phases`) and the committer timeline then showed where the rest went:
+
+| Finding | Evidence | Change | Effect (local mean) |
+|---|---|---|---|
+| A payload arrived while its parent's prewarm task still held the execution cache, so the lookup missed and allocated a new 4 GB cache | Two cache creations per run; one block per run stalled 3 s, its 81st transaction arriving at 3.16 s; mean 23 ms against a 13.5 ms p50 | Wait up to 50 ms for the parent's save; populate and unmap the tables in 64 MB chunks | 23 -> 14.4 ms |
+| Pools sized to logical CPUs on an SMT machine | 32 prewarm workers and 32 + 32 rayon threads on 16 cores; 9% of the node's CPU in rayon work stealing; `--cpu-cores 12` with 4 proof workers: 11.1 ms | Size the cpu, global rayon, prewarm and BAL pools by physical cores | 14.4 -> 11.6 ms |
+| Transactions converted in windows that each waited for their slowest transaction | The last transaction reached speculation 3 ms into a block | Converters claim transactions in block order and hand each to prewarming as soon as it is converted | last arrival 1.8 -> 1.2 ms |
+| Proof pools sized to the cores starve the root on derek | derek (16 cores, SMT off): state root after execution 1.27 -> 5.65 ms, proof workers no longer idle | Keep four proof workers per cpu pool thread | |
+
+Against main locally: 11.4-11.8 ms mean against 15.5-15.8 ms (-26%), 10.4-10.9 ms p50 against
+14.6-14.8 ms, +34% Mgas/s. On derek (6 run pairs, 1410b257d2): mean 29.35 -> 26.01 ms (-11.4%), p50
+-12.4%, p90 -6.7%, p99 -16.9%, Mgas/s +16.9%, end-to-end Mgas/s +6.1%. The state root after
+execution is 2.62 ms there against 1.32 ms on main, and the engine thread is preempted 18.6 times
+per block against 9.7: derek has no SMT, so the pools compete with it for the 16 CPUs.
+
+The root after the last transaction (local p50): the hashing task has seen every update after
+0.29 ms, most of which is the post-execution changes, the sparse trie after 0.46 ms, and the root
+is ready after 1.46 ms. So about 1 ms is trie work after the last update, not a backlog of
+updates.
+
+With pools sized, a block is 8.5 ms in the transaction loop (p50), 1.1 ms of state root after it
+and 0.8 ms of everything else. Of the committer's 9.3 ms in the loop, 6.3 ms is executing about 27
+transactions itself, nearly all in a handful of heavy ones:
+
+| Committer cost per block | Count | Time |
+|---|---|---|
+| Heavy transaction whose first speculation is still running when the committer reaches it (raced after 300 us) | 2.0 | 3.6 ms |
+| Heavy stale result | 6.6 | 3.0 ms |
+| Light stale result | 15.8 | 0.45 ms |
+| Waiting for and committing reused results | 265 | 2.5 ms |
+
+The stale results read a storage value an earlier speculation predicted and then wrote differently
+(9.5 per block, 1.9 ms), storage an earlier transaction wrote without predicting it (2.8, 0.9 ms),
+or are unusable (10.4, 0.5 ms). They are chains: the earlier transaction was stale itself. What did
+not help, locally:
+
+- A refresh window of 512 instead of 64 transactions: committer -3%, within run-to-run noise.
+- Racing after 3 ms instead of 300 us: the time moves from executing into waiting.
+- `--jit`: no change on the branch or on main.
+- Running the workers at a lower priority than the engine thread (`renice`): no change.
+- Probing for cold reads: no change. Speculation workers take 13 major faults per block; MDBX
+  reads, page faults included, are ~20% of their time.
+
 ## Rewrite: newPayload v2
 
 The v2 path replaces the per-block task graph instead of tuning it:
