@@ -144,14 +144,14 @@ impl RpcDescription {
 
                 if method.signature.sig.asyncness.is_some() {
                     self.handle_register_result(quote! {
-                        rpc.register_async_method(#rpc_method_name, |params, context, _| async move {
+                        rpc.register_async_method(#rpc_method_name, |params, context| async move {
                             #parsing
                             #into_response::into_response(context.as_ref().#rust_method_name(#params_seq).await)
                         })
                     })
                 } else {
                     self.handle_register_result(quote! {
-                        rpc.register_method(#rpc_method_name, |params, context, _| {
+                        rpc.register_method(#rpc_method_name, |params, context| {
                             #parsing
                             #into_response::into_response(context.#rust_method_name(#params_seq))
                         })
@@ -193,14 +193,14 @@ impl RpcDescription {
 
                 if sub.signature.sig.asyncness.is_some() {
                     self.handle_register_result(quote! {
-                        rpc.register_subscription(#rpc_sub_name, #rpc_notif_name, #rpc_unsub_name, |params, mut pending, context, _| async move {
+                        rpc.register_subscription(#rpc_sub_name, #rpc_notif_name, #rpc_unsub_name, |params, mut pending, context| async move {
                             #parsing
                             #into_sub_response::into_response(context.as_ref().#rust_method_name(pending, #params_seq).await)
                         })
                     })
                 } else {
                     self.handle_register_result(quote! {
-                        rpc.register_subscription_raw(#rpc_sub_name, #rpc_notif_name, #rpc_unsub_name, |params, mut pending, context, _| {
+                        rpc.register_subscription_raw(#rpc_sub_name, #rpc_notif_name, #rpc_unsub_name, |params, mut pending, context| {
                             #parsing
                             let _ = context.as_ref().#rust_method_name(pending, #params_seq);
                             #sub_err::None

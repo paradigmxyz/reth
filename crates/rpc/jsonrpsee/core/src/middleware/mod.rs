@@ -22,7 +22,7 @@ use tower::layer::{
 /// Re-export types from `jsonrpsee_types` crate for convenience.
 pub type Notification<'a> = jsonrpsee_types::Notification<'a, Option<Cow<'a, RawValue>>>;
 /// Re-export types from `jsonrpsee_types` crate for convenience.
-pub use jsonrpsee_types::{Extensions, Request};
+pub use jsonrpsee_types::Request;
 
 /// Error response that can used to indicate an error in JSON-RPC request batch request.
 /// This is used in the [`Batch`] type to indicate an error in the batch entry.
@@ -51,7 +51,6 @@ impl<'a> BatchEntryErr<'a> {
 #[derive(Debug, Default)]
 pub struct Batch<'a> {
     inner: Vec<Result<BatchEntry<'a>, BatchEntryErr<'a>>>,
-    extensions: Option<Extensions>,
 }
 
 impl std::fmt::Display for Batch<'_> {
@@ -73,30 +72,21 @@ impl<'a> IntoIterator for Batch<'a> {
 impl<'a> Batch<'a> {
     /// Create a new batch from a vector of batch entries.
     pub fn from(entries: Vec<Result<BatchEntry<'a>, BatchEntryErr<'a>>>) -> Self {
-        Self { inner: entries, extensions: None }
+        Self { inner: entries }
     }
 
     /// Create a new empty batch.
     pub fn new() -> Self {
-        Self { inner: Vec::new(), extensions: None }
+        Self { inner: Vec::new() }
     }
 
     /// Create a new empty batch with the at least capacity.
     pub fn with_capacity(capacity: usize) -> Self {
-        Self { inner: Vec::with_capacity(capacity), extensions: None }
+        Self { inner: Vec::with_capacity(capacity) }
     }
 
     /// Push a new batch entry to the batch.
     pub fn push(&mut self, req: Request<'a>) {
-        match self.extensions {
-            Some(ref mut ext) => {
-                ext.extend(req.extensions().clone());
-            }
-            None => {
-                self.extensions = Some(req.extensions().clone());
-            }
-        };
-
         self.inner.push(Ok(BatchEntry::Call(req)));
     }
 
@@ -120,40 +110,6 @@ impl<'a> Batch<'a> {
         &mut self,
     ) -> impl Iterator<Item = &mut Result<BatchEntry<'a>, BatchEntryErr<'a>>> {
         self.inner.iter_mut()
-    }
-
-    /// Consume the batch and and return the parts.
-    pub fn into_extensions(self) -> Extensions {
-        match self.extensions {
-            Some(ext) => ext,
-            None => self.extensions_from_iter(),
-        }
-    }
-
-    /// Get a reference to the extensions of the batch.
-    pub fn extensions(&mut self) -> &Extensions {
-        if self.extensions.is_none() {
-            self.extensions = Some(self.extensions_from_iter());
-        }
-
-        self.extensions.as_ref().expect("Extensions inserted above; qed")
-    }
-
-    /// Get a mutable reference to the extensions of the batch.
-    pub fn extensions_mut(&mut self) -> &mut Extensions {
-        if self.extensions.is_none() {
-            self.extensions = Some(self.extensions_from_iter());
-        }
-
-        self.extensions.as_mut().expect("Extensions inserted above; qed")
-    }
-
-    fn extensions_from_iter(&self) -> Extensions {
-        let mut ext = Extensions::new();
-        for entry in self.inner.iter().flatten() {
-            ext.extend(entry.extensions().clone());
-        }
-        ext
     }
 }
 
@@ -223,22 +179,6 @@ pub enum BatchEntry<'a> {
 }
 
 impl<'a> BatchEntry<'a> {
-    /// Get a reference to extensions of the batch entry.
-    pub fn extensions(&self) -> &Extensions {
-        match self {
-            BatchEntry::Call(req) => req.extensions(),
-            BatchEntry::Notification(n) => n.extensions(),
-        }
-    }
-
-    /// Get a mut reference to extensions of the batch entry.
-    pub fn extensions_mut(&mut self) -> &mut Extensions {
-        match self {
-            BatchEntry::Call(req) => req.extensions_mut(),
-            BatchEntry::Notification(n) => n.extensions_mut(),
-        }
-    }
-
     /// Get the method name of the batch entry.
     pub fn method_name(&self) -> &str {
         match self {
@@ -276,14 +216,6 @@ impl<'a> BatchEntry<'a> {
             BatchEntry::Notification(n) => {
                 n.params = params.map(Cow::Owned);
             }
-        }
-    }
-
-    /// Consume the batch entry and extract the extensions.
-    pub fn into_extensions(self) -> Extensions {
-        match self {
-            BatchEntry::Call(req) => req.extensions,
-            BatchEntry::Notification(n) => n.extensions,
         }
     }
 }

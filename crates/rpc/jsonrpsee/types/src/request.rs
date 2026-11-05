@@ -34,7 +34,6 @@ use crate::{
     params::{Id, TwoPointZero},
     Params,
 };
-use http::Extensions;
 use serde::{Deserialize, Serialize};
 use serde_json::value::RawValue;
 
@@ -53,9 +52,6 @@ pub struct Request<'a> {
     #[serde(borrow)]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub params: Option<Cow<'a, RawValue>>,
-    /// The request's extensions.
-    #[serde(skip)]
-    pub extensions: Extensions,
 }
 
 impl<'a> Request<'a> {
@@ -66,7 +62,6 @@ impl<'a> Request<'a> {
             id,
             method: Cow::Borrowed(method),
             params: params.map(Cow::Borrowed),
-            extensions: Extensions::new(),
         }
     }
 
@@ -77,7 +72,6 @@ impl<'a> Request<'a> {
             id,
             method: Cow::Owned(method),
             params: params.map(Cow::Owned),
-            extensions: Extensions::new(),
         }
     }
 
@@ -94,16 +88,6 @@ impl<'a> Request<'a> {
     /// Get the params of the request.
     pub fn params(&self) -> Params<'_> {
         Params::new(self.params.as_ref().map(|p| RawValue::get(p)))
-    }
-
-    /// Returns a reference to the associated extensions.
-    pub fn extensions(&self) -> &Extensions {
-        &self.extensions
-    }
-
-    /// Returns a reference to the associated extensions.
-    pub fn extensions_mut(&mut self) -> &mut Extensions {
-        &mut self.extensions
     }
 }
 
@@ -126,15 +110,12 @@ pub struct Notification<'a, T> {
     pub method: Cow<'a, str>,
     /// Parameter values of the request.
     pub params: T,
-    /// Extensions of the notification.
-    #[serde(skip)]
-    pub extensions: Extensions,
 }
 
 impl<'a, T> Notification<'a, T> {
     /// Create a new [`Notification`].
     pub fn new(method: Cow<'a, str>, params: T) -> Self {
-        Self { jsonrpc: TwoPointZero, method, params, extensions: Extensions::new() }
+        Self { jsonrpc: TwoPointZero, method, params }
     }
 
     /// Get the method name of the request.
@@ -142,19 +123,9 @@ impl<'a, T> Notification<'a, T> {
         &self.method
     }
 
-    /// Returns a reference to the associated extensions.
-    pub fn extensions(&self) -> &Extensions {
-        &self.extensions
-    }
-
     /// Get the params of the request.
     pub fn params(&self) -> &T {
         &self.params
-    }
-
-    /// Returns a reference to the associated extensions.
-    pub fn extensions_mut(&mut self) -> &mut Extensions {
-        &mut self.extensions
     }
 }
 

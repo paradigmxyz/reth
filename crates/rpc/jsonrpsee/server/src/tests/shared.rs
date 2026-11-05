@@ -61,7 +61,7 @@ async fn http_only_works() {
         .unwrap();
     let mut module = RpcModule::new(());
     module
-        .register_method("say_hello", |_, _, _| {
+        .register_method("say_hello", |_, _| {
             tracing::debug!("server respond to hello");
             "hello"
         })
@@ -93,7 +93,7 @@ async fn ws_only_works() {
         .unwrap();
     let mut module = RpcModule::new(());
     module
-        .register_method("say_hello", |_, _, _| {
+        .register_method("say_hello", |_, _| {
             tracing::debug!("server respond to hello");
             "hello"
         })
@@ -124,9 +124,9 @@ async fn server_with_first_request_timeout(first_request_timeout: Duration) -> S
         .unwrap()
         .unwrap();
     let mut module = RpcModule::new(());
-    module.register_method("say_hello", |_, _, _| "hello").unwrap();
+    module.register_method("say_hello", |_, _| "hello").unwrap();
     module
-        .register_async_method("slow_hello", move |_, _, _| async move {
+        .register_async_method("slow_hello", move |_, _| async move {
             tokio::time::sleep(first_request_timeout * 3).await;
             "hello"
         })
@@ -208,9 +208,9 @@ async fn first_request_timeout_counts_request_waiting_for_middleware() {
         .unwrap();
     let slow_started = Arc::new(Notify::new());
     let mut module = RpcModule::new(slow_started.clone());
-    module.register_method("say_hello", |_, _, _| "hello").unwrap();
+    module.register_method("say_hello", |_, _| "hello").unwrap();
     module
-        .register_async_method("slow_hello", |_, slow_started, _| async move {
+        .register_async_method("slow_hello", |_, slow_started| async move {
             slow_started.notify_one();
             tokio::time::sleep(Duration::from_millis(300)).await;
             "hello"

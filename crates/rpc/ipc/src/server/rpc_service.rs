@@ -56,7 +56,6 @@ impl RpcServiceT for RpcService {
         let params = req.params();
         let name = req.method_name();
         let id = req.id().clone();
-        let extensions = req.extensions.clone();
 
         match self.methods.method_with_name(name) {
             None => {
@@ -65,14 +64,14 @@ impl RpcServiceT for RpcService {
             }
             Some((_name, method)) => match method {
                 MethodCallback::Sync(callback) => {
-                    let rp = (callback)(id, params, max_response_body_size, extensions);
+                    let rp = (callback)(id, params, max_response_body_size);
                     ResponseFuture::ready(rp)
                 }
                 MethodCallback::Async(callback) => {
                     let params = params.into_owned();
                     let id = id.into_owned();
 
-                    let fut = (callback)(id, params, conn_id, max_response_body_size, extensions);
+                    let fut = (callback)(id, params, conn_id, max_response_body_size);
                     ResponseFuture::future(fut)
                 }
                 MethodCallback::Subscription(callback) => {
@@ -85,8 +84,7 @@ impl RpcServiceT for RpcService {
                             subscription_permit: p,
                         };
 
-                        let fut =
-                            callback(id.clone(), params, cfg.sink.clone(), conn_state, extensions);
+                        let fut = callback(id.clone(), params, cfg.sink.clone(), conn_state);
                         ResponseFuture::future(fut)
                     } else {
                         let max = cfg.bounded_subscriptions.max();
@@ -98,7 +96,7 @@ impl RpcServiceT for RpcService {
                     // Don't adhere to any resource or subscription limits; always let unsubscribing
                     // happen!
 
-                    let rp = callback(id, params, conn_id, max_response_body_size, extensions);
+                    let rp = callback(id, params, conn_id, max_response_body_size);
                     ResponseFuture::ready(rp)
                 }
             },

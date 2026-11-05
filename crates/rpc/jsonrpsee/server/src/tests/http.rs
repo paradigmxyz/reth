@@ -27,15 +27,9 @@
 use std::net::SocketAddr;
 
 use crate::{
-    types::Request, BatchRequestConfig, HttpBody, HttpRequest, HttpResponse, RegisterMethodError,
-    RpcModule, ServerBuilder, ServerConfig, ServerHandle,
+    BatchRequestConfig, RegisterMethodError, RpcModule, ServerBuilder, ServerConfig, ServerHandle,
 };
-use futures_util::future::{Future, FutureExt};
-use hyper::body::Bytes;
-use jsonrpsee_core::{
-    middleware::{Batch, Notification, RpcServiceBuilder, RpcServiceT},
-    BoxError, RpcResult,
-};
+use jsonrpsee_core::RpcResult;
 use jsonrpsee_test_utils::{
     helpers::*,
     mocks::{Id, StatusCode},
@@ -43,11 +37,6 @@ use jsonrpsee_test_utils::{
 };
 use jsonrpsee_types::ErrorObjectOwned;
 use serde_json::Value as JsonValue;
-use std::{
-    pin::Pin,
-    task::{Context, Poll},
-};
-use tower::Service;
 
 use super::helpers::{MyAppError, TestContext};
 
@@ -57,111 +46,24 @@ fn init_logger() {
         .try_init();
 }
 
-#[derive(Clone)]
-struct InjectExt<S> {
-    service: S,
-}
-
-impl<S> RpcServiceT for InjectExt<S>
-where
-    S: Send + Sync + RpcServiceT + Clone + 'static,
-{
-    type BatchResponse = S::BatchResponse;
-    type MethodResponse = S::MethodResponse;
-    type NotificationResponse = S::NotificationResponse;
-
-    fn call<'a>(
-        &self,
-        mut req: Request<'a>,
-    ) -> impl Future<Output = Self::MethodResponse> + Send + 'a {
-        if req.method_name().contains("err") {
-            req.extensions_mut().insert(StatusCode::IM_A_TEAPOT);
-        } else {
-            req.extensions_mut().insert(StatusCode::OK);
-        }
-
-        self.service.call(req)
-    }
-
-    fn batch<'a>(
-        &self,
-        mut batch: Batch<'a>,
-    ) -> impl Future<Output = Self::BatchResponse> + Send + 'a {
-        if let Some(Ok(last)) = batch.iter_mut().last() {
-            if last.method_name().contains("err") {
-                last.extensions_mut().insert(StatusCode::IM_A_TEAPOT);
-            } else {
-                last.extensions_mut().insert(StatusCode::OK);
-            }
-        }
-
-        self.service.batch(batch)
-    }
-
-    fn notification<'a>(
-        &self,
-        _: Notification<'a>,
-    ) -> impl Future<Output = Self::NotificationResponse> + Send + 'a {
-        async { panic!("Not used for tests") }
-    }
-}
-
-#[derive(Debug, Clone)]
-struct ModifyHttpStatus<S> {
-    service: S,
-}
-
-impl<S, B> Service<HttpRequest<B>> for ModifyHttpStatus<S>
-where
-    S: Service<HttpRequest<B>, Response = HttpResponse<HttpBody>>,
-    S::Response: 'static,
-    S::Error: Into<BoxError> + Send + 'static,
-    S::Future: Send + 'static,
-    B: http_body::Body<Data = Bytes> + Send + std::fmt::Debug + 'static,
-    B::Data: Send,
-    B::Error: Into<BoxError>,
-{
-    type Response = S::Response;
-    type Error = BoxError;
-    type Future =
-        Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send + 'static>>;
-
-    fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        self.service.poll_ready(cx).map_err(Into::into)
-    }
-
-    fn call(&mut self, request: HttpRequest<B>) -> Self::Future {
-        let fut = self.service.call(request);
-        async move {
-            let mut rp = fut.await.map_err(Into::into)?;
-            let status_code = rp.extensions().get::<StatusCode>().copied().unwrap();
-
-            *rp.status_mut() = status_code;
-
-            Ok(rp)
-        }
-        .boxed()
-    }
-}
-
 async fn server() -> (SocketAddr, ServerHandle) {
     let server = ServerBuilder::default().build("127.0.0.1:0").await.unwrap();
     let ctx = TestContext;
     let mut module = RpcModule::new(ctx);
     let addr = server.local_addr().unwrap();
-    module.register_method("say_hello", |_, _, _| "lo").unwrap();
+    module.register_method("say_hello", |_, _| "lo").unwrap();
     module
-        .register_async_method("say_hello_async", |_, _, _| async move { RpcResult::Ok("lo") })
+        .register_async_method("say_hello_async", |_, _| async move { RpcResult::Ok("lo") })
         .unwrap();
     module
-        .register_method("add", |params, _, _| {
+        .register_method("add", |params, _| {
             let params: Vec<u64> = params.parse()?;
             let sum: u64 = params.into_iter().sum();
             RpcResult::Ok(sum)
         })
         .unwrap();
     module
-        .register_method::<Result<String, ErrorObjectOwned>, _>("multiparam", |params, _, _| {
+        .register_method::<Result<String, ErrorObjectOwned>, _>("multiparam", |params, _| {
             let params: (String, String, Vec<u8>) = params.parse()?;
             let r = format!(
                 "string1={}, string2={}, vec={}",
@@ -172,22 +74,22 @@ async fn server() -> (SocketAddr, ServerHandle) {
             Ok(r)
         })
         .unwrap();
-    module.register_method("notif", |_, _, _| "").unwrap();
+    module.register_method("notif", |_, _| "").unwrap();
     module
-        .register_method("should_err", |_, ctx, _| {
+        .register_method("should_err", |_, ctx| {
             ctx.err()?;
             Ok::<_, MyAppError>("err")
         })
         .unwrap();
 
     module
-        .register_method("should_ok", |_, ctx, _| {
+        .register_method("should_ok", |_, ctx| {
             ctx.ok()?;
             Ok::<_, MyAppError>("ok")
         })
         .unwrap();
     module
-        .register_async_method("should_ok_async", |_p, ctx, _| async move {
+        .register_async_method("should_ok_async", |_p, ctx| async move {
             ctx.ok()?;
             Ok::<_, MyAppError>("ok")
         })
@@ -583,12 +485,12 @@ async fn can_register_modules() {
     let mut mod2 = RpcModule::new(cx2);
 
     assert_eq!(mod1.method_names().count(), 0);
-    mod1.register_method("bla", |_, cx, _| format!("Gave me {cx}")).unwrap();
-    mod1.register_method("bla2", |_, cx, _| format!("Gave me {cx}")).unwrap();
-    mod2.register_method("yada", |_, cx, _| format!("Gave me {cx:?}")).unwrap();
+    mod1.register_method("bla", |_, cx| format!("Gave me {cx}")).unwrap();
+    mod1.register_method("bla2", |_, cx| format!("Gave me {cx}")).unwrap();
+    mod2.register_method("yada", |_, cx| format!("Gave me {cx:?}")).unwrap();
 
     // Won't register, name clashes
-    mod2.register_method("bla", |_, cx, _| format!("Gave me {cx:?}")).unwrap();
+    mod2.register_method("bla", |_, cx| format!("Gave me {cx:?}")).unwrap();
 
     assert_eq!(mod1.method_names().count(), 2);
 
@@ -606,7 +508,7 @@ async fn can_set_the_max_request_body_size() {
     let config = ServerConfig::builder().max_request_body_size(100).build();
     let server = ServerBuilder::with_config(config).build(addr).await.unwrap();
     let mut module = RpcModule::new(());
-    module.register_method("anything", |_p, _cx, _| "a".repeat(100)).unwrap();
+    module.register_method("anything", |_p, _cx| "a".repeat(100)).unwrap();
     let addr = server.local_addr().unwrap();
     let uri = to_http_uri(addr);
     let handle = server.start(module);
@@ -634,7 +536,7 @@ async fn can_set_the_max_response_size() {
     let config = ServerConfig::builder().max_response_body_size(100).build();
     let server = ServerBuilder::with_config(config).build(addr).await.unwrap();
     let mut module = RpcModule::new(());
-    module.register_method("anything", |_p, _cx, _| "a".repeat(101)).unwrap();
+    module.register_method("anything", |_p, _cx| "a".repeat(101)).unwrap();
     let addr = server.local_addr().unwrap();
     let uri = to_http_uri(addr);
     let handle = server.start(module);
@@ -656,7 +558,7 @@ async fn can_set_the_max_response_size_to_batch() {
     let config = ServerConfig::builder().max_response_body_size(100).build();
     let server = ServerBuilder::with_config(config).build(addr).await.unwrap();
     let mut module = RpcModule::new(());
-    module.register_method("anything", |_p, _cx, _| "a".repeat(51)).unwrap();
+    module.register_method("anything", |_p, _cx| "a".repeat(51)).unwrap();
     let addr = server.local_addr().unwrap();
     let uri = to_http_uri(addr);
     let handle = server.start(module);
@@ -679,7 +581,7 @@ async fn disabled_batches() {
         ServerConfig::builder().set_batch_request_config(BatchRequestConfig::Disabled).build();
     let server = ServerBuilder::with_config(config).build(addr).await.unwrap();
     let mut module = RpcModule::new(());
-    module.register_method("should_ok", |_, _ctx, _| "ok").unwrap();
+    module.register_method("should_ok", |_, _ctx| "ok").unwrap();
     let addr = server.local_addr().unwrap();
     let uri = to_http_uri(addr);
     let handle = server.start(module);
@@ -705,7 +607,7 @@ async fn batch_limit_works() {
         ServerConfig::builder().set_batch_request_config(BatchRequestConfig::Limit(1)).build();
     let server = ServerBuilder::with_config(config).build(addr).await.unwrap();
     let mut module = RpcModule::new(());
-    module.register_method("should_ok", |_, _ctx, _| "ok").unwrap();
+    module.register_method("should_ok", |_, _ctx| "ok").unwrap();
     let addr = server.local_addr().unwrap();
     let uri = to_http_uri(addr);
     let handle = server.start(module);
@@ -734,72 +636,6 @@ async fn http2_method_call_works() {
     let response = http2_request(req.into(), uri).with_default_timeout().await.unwrap().unwrap();
     assert_eq!(response.status, StatusCode::OK);
     assert_eq!(response.body, ok_response(JsonValue::Number(3.into()), Id::Num(1)));
-}
-
-#[tokio::test]
-async fn http_extensions_from_rpc_response_propagated() {
-    init_logger();
-
-    let server = ServerBuilder::default()
-        .set_rpc_middleware(RpcServiceBuilder::new().layer_fn(|service| InjectExt { service }))
-        .set_http_middleware(
-            tower::ServiceBuilder::new().layer_fn(|service| ModifyHttpStatus { service }),
-        )
-        .build("127.0.0.1:0")
-        .await
-        .unwrap();
-    let mut module = RpcModule::new(());
-    module.register_method("err", |_, _ctx, _| "lo").unwrap();
-    let addr = server.local_addr().unwrap();
-    let uri = to_http_uri(addr);
-    let handle = server.start(module);
-
-    let req = r#"{"jsonrpc":"2.0","method":"err","id":1}"#;
-    let response = http_request(req.into(), uri).with_default_timeout().await.unwrap().unwrap();
-    assert_eq!(response.status, StatusCode::IM_A_TEAPOT);
-
-    handle.stop().unwrap();
-    handle.stopped().await;
-}
-
-#[tokio::test]
-async fn http_extensions_from_rpc_batch_response_overwrite() {
-    init_logger();
-
-    let server = ServerBuilder::default()
-        .set_rpc_middleware(RpcServiceBuilder::new().layer_fn(|service| InjectExt { service }))
-        .set_http_middleware(
-            tower::ServiceBuilder::new().layer_fn(|service| ModifyHttpStatus { service }),
-        )
-        .build("127.0.0.1:0")
-        .await
-        .unwrap();
-    let mut module = RpcModule::new(());
-    module.register_method("say_hello", |_, _ctx, _| "lo").unwrap();
-    module.register_method("err", |_, _ctx, _| "e").unwrap();
-    let addr = server.local_addr().unwrap();
-    let uri = to_http_uri(addr);
-    let handle = server.start(module);
-
-    // Send a batch which will overwrite the status code Teapot with OK.
-    let req = r#"[
-        {"jsonrpc":"2.0","method":"err", "params":[],"id":2},
-        {"jsonrpc":"2.0","method":"say_hello", "params":[],"id":3}
-    ]"#;
-    let response =
-        http_request(req.into(), uri.clone()).with_default_timeout().await.unwrap().unwrap();
-    assert_eq!(response.status, StatusCode::OK);
-
-    // Send a batch which will overwrite the status code OK with TEAPOT.
-    let req = r#"[
-            {"jsonrpc":"2.0","method":"say_hello", "params":[],"id":2},
-            {"jsonrpc":"2.0","method":"err", "params":[],"id":3}
-        ]"#;
-    let response = http_request(req.into(), uri).with_default_timeout().await.unwrap().unwrap();
-    assert_eq!(response.status, StatusCode::IM_A_TEAPOT);
-
-    handle.stop().unwrap();
-    handle.stopped().await;
 }
 
 #[tokio::test]
