@@ -34,6 +34,71 @@ pub fn increase_thread_priority() {
     }
 }
 
+/// Nice levels that [`lower_background_worker_priority`] lowers a thread by.
+const BACKGROUND_WORKER_NICE_OFFSET: i32 = 10;
+
+/// Lowers the current thread's priority by 10 nice levels, for threads of pools whose work is not
+/// on the critical path of block execution.
+///
+/// Block execution and its speculative workers are on the critical path of payload validation the
+/// whole time, while the state root's proof workers and sparse trie jobs are only waited for after
+/// the last transaction. With equal priorities, the many workers of those pools preempt the engine
+/// thread; lowered, they mostly run on the cores execution leaves idle, and take every core once
+/// execution finished. Elevating the engine thread instead does not help when the node already
+/// runs at the highest priority, as with `nice -n -20`.
+pub fn lower_background_worker_priority() {
+    decrease_thread_priority(BACKGROUND_WORKER_NICE_OFFSET);
+}
+
+/// Lowers the current thread's priority by `nice_levels` nice values, relative to the priority it
+/// inherited from the thread that spawned it.
+///
+/// Throughput work that runs beside latency-critical threads uses this to take the CPU time those
+/// threads leave idle instead of preempting them. Unlike [`increase_thread_priority`], this needs
+/// no privileges. Failures are logged at `debug` level.
+///
+/// No-op on non-Linux platforms.
+#[allow(clippy::missing_const_for_fn)]
+pub fn decrease_thread_priority(nice_levels: i32) {
+    #[cfg(target_os = "linux")]
+    _decrease_thread_priority(nice_levels);
+    #[cfg(not(target_os = "linux"))]
+    let _ = nice_levels;
+}
+
+#[cfg(target_os = "linux")]
+fn _decrease_thread_priority(nice_levels: i32) {
+    // On Linux, nice values are per thread, and `PRIO_PROCESS` with a thread ID targets only that
+    // thread.
+    // SAFETY: gettid has no preconditions.
+    let tid = unsafe { libc::gettid() } as libc::id_t;
+    // getpriority can return -1 as a valid nice value, so errors are detected through errno.
+    // SAFETY: __errno_location returns a valid pointer to the calling thread's errno.
+    unsafe { *libc::__errno_location() = 0 };
+    // SAFETY: getpriority is safe to call with a valid TID.
+    let current = unsafe { libc::getpriority(libc::PRIO_PROCESS, tid) };
+    if current == -1 && std::io::Error::last_os_error().raw_os_error() != Some(0) {
+        tracing::debug!(
+            tid,
+            err = std::io::Error::last_os_error().to_string(),
+            "failed to get thread priority"
+        );
+        return;
+    }
+
+    // 19 is the lowest priority a nice value expresses.
+    let target = current.saturating_add(nice_levels).min(19);
+    // SAFETY: setpriority is safe to call with a valid TID.
+    if unsafe { libc::setpriority(libc::PRIO_PROCESS, tid, target) } != 0 {
+        tracing::debug!(
+            tid,
+            target,
+            err = std::io::Error::last_os_error().to_string(),
+            "failed to lower thread priority"
+        );
+    }
+}
+
 /// Deprioritizes known background threads spawned by third-party libraries (`tracing-appender`,
 /// `reqwest`) by scanning `/proc/<pid>/task/` for matching thread names and setting `SCHED_IDLE`
 /// scheduling policy on them.
@@ -103,5 +168,30 @@ fn _deprioritize_background_threads() {
         }
 
         tracing::debug!(tid, comm, "deprioritized background thread (SCHED_IDLE)");
+    }
+}
+
+#[cfg(all(test, target_os = "linux"))]
+mod tests {
+    use super::*;
+
+    fn thread_nice() -> i32 {
+        // SAFETY: gettid has no preconditions, and getpriority is safe to call with a valid TID.
+        unsafe { libc::getpriority(libc::PRIO_PROCESS, libc::gettid() as libc::id_t) }
+    }
+
+    #[test]
+    fn decrease_thread_priority_lowers_only_the_current_thread() {
+        let spawner_nice = thread_nice();
+        let lowered = std::thread::spawn(|| {
+            let inherited = thread_nice();
+            decrease_thread_priority(3);
+            (inherited, thread_nice())
+        })
+        .join()
+        .unwrap();
+
+        assert_eq!(lowered, (spawner_nice, (spawner_nice + 3).min(19)));
+        assert_eq!(thread_nice(), spawner_nice);
     }
 }

@@ -183,6 +183,8 @@ pub struct WorkerPool {
     metrics: OnceLock<WorkerPoolMetrics>,
     num_threads: usize,
     thread_name_prefix: &'static str,
+    /// Runs on each thread of the pool when it starts.
+    thread_start: Option<fn()>,
 }
 
 impl WorkerPool {
@@ -191,19 +193,36 @@ impl WorkerPool {
     /// The underlying rayon pool is not created until the first method that requires it is called.
     /// Thread names follow the pattern `"{prefix}-{index:02}"`.
     pub const fn new(num_threads: usize, thread_name_prefix: &'static str) -> Self {
-        Self { pool: OnceLock::new(), metrics: OnceLock::new(), num_threads, thread_name_prefix }
+        Self {
+            pool: OnceLock::new(),
+            metrics: OnceLock::new(),
+            num_threads,
+            thread_name_prefix,
+            thread_start: None,
+        }
+    }
+
+    /// Runs `thread_start` on each thread of the pool when it starts, before it runs any work.
+    ///
+    /// Threads start when the pool is created on first access, and inherit the priority of the
+    /// thread that accessed it.
+    pub const fn with_thread_start(mut self, thread_start: fn()) -> Self {
+        self.thread_start = Some(thread_start);
+        self
     }
 
     /// Returns a reference to the underlying rayon pool, creating it on first access.
     fn pool(&self) -> &rayon::ThreadPool {
         self.pool.get_or_init(|| {
             let prefix = self.thread_name_prefix;
-            build_pool_with_panic_handler(
-                rayon::ThreadPoolBuilder::new()
-                    .num_threads(self.num_threads)
-                    .thread_name(move |i| format!("{prefix}-{i:02}")),
-            )
-            .unwrap_or_else(|err| panic!("failed to build {prefix} worker pool: {err}"))
+            let mut builder = rayon::ThreadPoolBuilder::new()
+                .num_threads(self.num_threads)
+                .thread_name(move |i| format!("{prefix}-{i:02}"));
+            if let Some(thread_start) = self.thread_start {
+                builder = builder.start_handler(move |_| thread_start());
+            }
+            build_pool_with_panic_handler(builder)
+                .unwrap_or_else(|err| panic!("failed to build {prefix} worker pool: {err}"))
         })
     }
 
@@ -846,6 +865,21 @@ mod tests {
         drop(state);
         assert_eq!(Arc::strong_count(&resource), 1);
         pool.broadcast(1, |worker| assert!(worker.state.is_none()));
+    }
+
+    #[test]
+    fn worker_pool_runs_thread_start_on_every_thread() {
+        static STARTED: AtomicUsize = AtomicUsize::new(0);
+        thread_local! {
+            static RAN_START: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+        }
+
+        let pool = WorkerPool::new(3, "thread-start").with_thread_start(|| {
+            STARTED.fetch_add(1, Ordering::Relaxed);
+            RAN_START.set(true);
+        });
+        pool.broadcast(3, |_| assert!(RAN_START.get()));
+        assert_eq!(STARTED.load(Ordering::Relaxed), 3);
     }
 
     fn stateful_pool() -> Arc<WorkerStatefulPool> {

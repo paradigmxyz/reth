@@ -1018,14 +1018,16 @@ impl RuntimeBuilder {
                 .proof_storage_worker_threads_override()
                 .unwrap_or(default_proof_worker_threads);
             let proof_storage_worker_pool =
-                WorkerPool::new(proof_storage_worker_threads, "proof-strg");
+                WorkerPool::new(proof_storage_worker_threads, "proof-strg")
+                    .with_thread_start(crate::utils::lower_background_worker_priority);
 
             let proof_account_worker_threads = config
                 .rayon
                 .proof_account_worker_threads_override()
                 .unwrap_or(default_proof_worker_threads);
             let proof_account_worker_pool =
-                WorkerPool::new(proof_account_worker_threads, "proof-acct");
+                WorkerPool::new(proof_account_worker_threads, "proof-acct")
+                    .with_thread_start(crate::utils::lower_background_worker_priority);
 
             let prewarming_threads = config.rayon.prewarming_threads.unwrap_or(default_threads);
             let prewarming_pool = Arc::new(WorkerPool::new(prewarming_threads, "prewarm"));
