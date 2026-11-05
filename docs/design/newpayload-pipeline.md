@@ -112,6 +112,32 @@ Against main locally: 11.4-11.8 ms mean against 15.5-15.8 ms (-26%), 10.4-10.9 m
 execution is 2.62 ms there against 1.32 ms on main, and the engine thread is preempted 18.6 times
 per block against 9.7: derek has no SMT, so the pools compete with it for the 16 CPUs.
 
+Then, on the data structures and threads around execution:
+
+- **Precompile cache.** On the committer, 78% of ecPairing and 49% of ecMul calls missed the
+  moka cache, mostly because it executed a raced transaction while the prewarm worker was still
+  computing the same calls, and moka lookups were 2.5% of the committer's own executions. The
+  cache is now a fixed-size table probed without locks, and a call whose input is being computed
+  waits for that output (single flight): committer misses of both halved.
+- **Prediction entries.** Prediction bookkeeping was ~10% of speculation, a third of it
+  registering readers in lists kept apart from the writes. Each key's writes, clears and readers
+  now share one entry, a transaction registers as a slot reader of a contract once, and slot
+  reads look at clears only after a predicted clear.
+- **Priorities.** Proof workers and the global rayon pool run 10 nice levels below execution
+  (from paradigmxyz/reth#28298): derek -2.5% mean, +3.5% Mgas/s on top of the branch, engine
+  preemptions -22%.
+
+derek, 6 run pairs, e0f179d60e against main:
+
+| | main | branch | Change |
+|---|---|---|---|
+| Mean | 29.00 ms | 25.37 ms | -12.5% |
+| P50 | 22.71 ms | 19.03 ms | -16.2% |
+| P90 | 48.29 ms | 45.02 ms | -6.8% |
+| Mgas/s | 1,212 | 1,463 | +20.7% |
+| End-to-end Mgas/s | 923 | 990 | +7.3% |
+| State root after execution | 1.25 ms | 2.70 ms | +115% |
+
 The root after the last transaction (local p50): the hashing task has seen every update after
 0.29 ms, most of which is the post-execution changes, the sparse trie after 0.46 ms, and the root
 is ready after 1.46 ms. So about 1 ms is trie work after the last update, not a backlog of
