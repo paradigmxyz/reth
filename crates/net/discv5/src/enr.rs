@@ -1,8 +1,7 @@
 //! Interface between node identification on protocol version 5 and 4. Specifically, between types
-//! [`discv5::enr::NodeId`] and [`PeerId`].
+//! [`enr::NodeId`] and [`PeerId`].
 
-use discv5::enr::{CombinedPublicKey, EnrPublicKey, NodeId};
-use enr::Enr;
+use enr::{CombinedPublicKey, Enr, EnrPublicKey, NodeId};
 use reth_network_peers::{id2pk, pk2id, PeerId};
 use secp256k1::{PublicKey, SecretKey};
 
@@ -19,18 +18,18 @@ pub fn enr_to_discv4_id(enr: &discv5::Enr) -> Option<PeerId> {
     Some(pk2id(&pk))
 }
 
-/// Converts a [`PeerId`] to a [`discv5::enr::NodeId`].
+/// Converts a [`PeerId`] to a [`enr::NodeId`].
 pub fn discv4_id_to_discv5_id(peer_id: PeerId) -> Result<NodeId, secp256k1::Error> {
     Ok(id2pk(peer_id)?.into())
 }
 
-/// Converts a [`PeerId`] to a [`discv5::libp2p_identity::PeerId`].
+/// Converts a [`PeerId`] to a [`libp2p_identity::PeerId`].
 pub fn discv4_id_to_multiaddr_id(
     peer_id: PeerId,
-) -> Result<discv5::libp2p_identity::PeerId, secp256k1::Error> {
+) -> Result<libp2p_identity::PeerId, secp256k1::Error> {
     let pk = id2pk(peer_id)?.encode();
-    let pk: discv5::libp2p_identity::PublicKey =
-        discv5::libp2p_identity::secp256k1::PublicKey::try_from_bytes(&pk).unwrap().into();
+    let pk: libp2p_identity::PublicKey =
+        libp2p_identity::secp256k1::PublicKey::try_from_bytes(&pk).unwrap().into();
 
     Ok(pk.to_peer_id())
 }
@@ -57,7 +56,7 @@ impl From<EnrCombinedKeyWrapper> for Enr<SecretKey> {
 mod tests {
     use super::*;
     use alloy_rlp::Encodable;
-    use discv5::enr::{CombinedKey, EnrKey};
+    use enr::{CombinedKey, EnrKey};
     use reth_chainspec::{EthereumHardfork, MAINNET};
     use reth_network_peers::NodeRecord;
 

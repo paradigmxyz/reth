@@ -14,7 +14,7 @@ impl From<PeerId> for NodeKey {
 impl From<NodeKey> for discv5::Key<NodeKey> {
     fn from(value: NodeKey) -> Self {
         let hash = keccak256(value.0.as_slice());
-        Self::new_raw(value, hash.0.into())
+        Self::new_raw(value, hash.0)
     }
 }
 

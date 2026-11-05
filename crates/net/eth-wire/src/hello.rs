@@ -46,9 +46,9 @@ impl HelloMessageWithProtocols {
     /// ```
     /// use reth_eth_wire::HelloMessageWithProtocols;
     /// use reth_network_peers::pk2id;
-    /// use secp256k1::{SecretKey, SECP256K1};
-    /// let secret_key = SecretKey::new(&mut rand_08::thread_rng());
-    /// let id = pk2id(&secret_key.public_key(SECP256K1));
+    /// use secp256k1::SecretKey;
+    /// let secret_key = SecretKey::new(&mut rand::rng());
+    /// let id = pk2id(&secret_key.public_key());
     /// let status = HelloMessageWithProtocols::builder(id).build();
     /// ```
     pub const fn builder(id: PeerId) -> HelloMessageBuilder {
@@ -156,9 +156,9 @@ impl HelloMessage {
     /// ```
     /// use reth_eth_wire::HelloMessage;
     /// use reth_network_peers::pk2id;
-    /// use secp256k1::{SecretKey, SECP256K1};
-    /// let secret_key = SecretKey::new(&mut rand_08::thread_rng());
-    /// let id = pk2id(&secret_key.public_key(SECP256K1));
+    /// use secp256k1::SecretKey;
+    /// let secret_key = SecretKey::new(&mut rand::rng());
+    /// let id = pk2id(&secret_key.public_key());
     /// let status = HelloMessage::builder(id).build();
     /// ```
     pub const fn builder(id: PeerId) -> HelloMessageBuilder {
@@ -248,12 +248,12 @@ mod tests {
     };
     use alloy_rlp::{Decodable, Encodable, Header, EMPTY_STRING_CODE};
     use reth_network_peers::pk2id;
-    use secp256k1::{SecretKey, SECP256K1};
+    use secp256k1::SecretKey;
 
     #[test]
     fn test_hello_encoding_round_trip() {
-        let secret_key = SecretKey::new(&mut rand_08::thread_rng());
-        let id = pk2id(&secret_key.public_key(SECP256K1));
+        let secret_key = SecretKey::new(&mut rand::rng());
+        let id = pk2id(&secret_key.public_key());
         let hello = P2PMessage::Hello(HelloMessage {
             protocol_version: ProtocolVersion::V5,
             client_version: "reth/0.1.0".to_string(),
@@ -272,8 +272,8 @@ mod tests {
 
     #[test]
     fn hello_encoding_length() {
-        let secret_key = SecretKey::new(&mut rand_08::thread_rng());
-        let id = pk2id(&secret_key.public_key(SECP256K1));
+        let secret_key = SecretKey::new(&mut rand::rng());
+        let id = pk2id(&secret_key.public_key());
         let hello = P2PMessage::Hello(HelloMessage {
             protocol_version: ProtocolVersion::V5,
             client_version: "reth/0.1.0".to_string(),
@@ -292,8 +292,8 @@ mod tests {
     #[test]
     fn test_default_protocols_still_include_eth69() {
         // ensure that older eth/69 remains advertised for compatibility
-        let secret_key = SecretKey::new(&mut rand_08::thread_rng());
-        let id = pk2id(&secret_key.public_key(SECP256K1));
+        let secret_key = SecretKey::new(&mut rand::rng());
+        let id = pk2id(&secret_key.public_key());
         let hello = HelloMessageWithProtocols::builder(id).build();
 
         let has_eth69 = hello
@@ -306,8 +306,8 @@ mod tests {
     #[test]
     fn hello_message_id_prefix() {
         // ensure that the hello message id is prefixed
-        let secret_key = SecretKey::new(&mut rand_08::thread_rng());
-        let id = pk2id(&secret_key.public_key(SECP256K1));
+        let secret_key = SecretKey::new(&mut rand::rng());
+        let id = pk2id(&secret_key.public_key());
         let hello = P2PMessage::Hello(HelloMessage {
             protocol_version: ProtocolVersion::V5,
             client_version: "reth/0.1.0".to_string(),
@@ -326,13 +326,13 @@ mod tests {
     #[test]
     fn hello_decode_ignores_extra_fields() {
         // EIP-8: additional list elements must be ignored
-        let secret_key = SecretKey::new(&mut rand_08::thread_rng());
+        let secret_key = SecretKey::new(&mut rand::rng());
         let hello = HelloMessage {
             protocol_version: ProtocolVersion::V5,
             client_version: "reth/0.1.0".to_string(),
             capabilities: vec![Capability::new_static("eth", EthVersion::Eth68 as usize)],
             port: 30303,
-            id: pk2id(&secret_key.public_key(SECP256K1)),
+            id: pk2id(&secret_key.public_key()),
         };
 
         let mut payload = Vec::new();

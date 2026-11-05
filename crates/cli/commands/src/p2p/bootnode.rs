@@ -542,7 +542,7 @@ mod tests {
         ]);
         let nat = command.resolved_nat().unwrap();
         let config = command.discv5_config(&nat, &command.seed_nodes(&nat).unwrap());
-        let sk = SecretKey::from_byte_array(&[1u8; 32]).unwrap();
+        let sk = SecretKey::from_secret_bytes([1u8; 32]).unwrap();
 
         let (enr, _, _, _) = build_local_enr(&sk, &config);
 
@@ -564,7 +564,7 @@ mod tests {
         ]);
         let nat = command.resolved_nat().unwrap();
         let config = command.discv5_config(&nat, &command.seed_nodes(&nat).unwrap());
-        let sk = SecretKey::from_byte_array(&[1u8; 32]).unwrap();
+        let sk = SecretKey::from_secret_bytes([1u8; 32]).unwrap();
 
         let (enr, _, _, _) = build_local_enr(&sk, &config);
 
@@ -586,7 +586,7 @@ mod tests {
         ]);
         let nat = command.resolved_nat().unwrap();
         let config = command.discv5_config(&nat, &command.seed_nodes(&nat).unwrap());
-        let sk = SecretKey::from_byte_array(&[1u8; 32]).unwrap();
+        let sk = SecretKey::from_secret_bytes([1u8; 32]).unwrap();
 
         let (enr, _, _, _) = build_local_enr(&sk, &config);
 
@@ -926,7 +926,7 @@ mod tests {
         ]);
         let nat = command.resolved_nat().unwrap();
         let config = command.discv5_config(&nat, &command.seed_nodes(&nat).unwrap());
-        let sk = SecretKey::from_byte_array(&[1u8; 32]).unwrap();
+        let sk = SecretKey::from_secret_bytes([1u8; 32]).unwrap();
 
         let (enr, _, _, _) = build_local_enr(&sk, &config);
 
