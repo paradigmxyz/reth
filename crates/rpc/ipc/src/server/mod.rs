@@ -92,7 +92,7 @@ where
     /// async fn run_server() -> Result<(), Box<dyn core::error::Error + Send + Sync>> {
     ///     let server = Builder::default().build("/tmp/my-uds".into());
     ///     let mut module = RpcModule::new(());
-    ///     module.register_method("say_hello", |_, _, _| "lo")?;
+    ///     module.register_method("say_hello", |_, _| "lo")?;
     ///     let handle = server.start(module).await?;
     ///
     ///     // In this example we don't care about doing shutdown so let's it run forever.
@@ -906,7 +906,7 @@ mod tests {
         let endpoint = &dummy_name();
         let server = Builder::default().max_response_body_size(100).build(endpoint.clone());
         let mut module = RpcModule::new(());
-        module.register_method("anything", |_, _, _| "a".repeat(101)).unwrap();
+        module.register_method("anything", |_, _| "a".repeat(101)).unwrap();
         let handle = server.start(module).await.unwrap();
         tokio::spawn(handle.stopped());
 
@@ -921,7 +921,7 @@ mod tests {
         let endpoint = &dummy_name();
         let server = Builder::default().max_request_body_size(100).build(endpoint.clone());
         let mut module = RpcModule::new(());
-        module.register_method("anything", |_, _, _| "succeed").unwrap();
+        module.register_method("anything", |_, _| "succeed").unwrap();
         let handle = server.start(module).await.unwrap();
         tokio::spawn(handle.stopped());
 
@@ -944,7 +944,7 @@ mod tests {
         let endpoint = &dummy_name();
         let server = Builder::default().max_connections(2).build(endpoint.clone());
         let mut module = RpcModule::new(());
-        module.register_method("anything", |_, _, _| "succeed").unwrap();
+        module.register_method("anything", |_, _| "succeed").unwrap();
         let handle = server.start(module).await.unwrap();
         tokio::spawn(handle.stopped());
 
@@ -976,7 +976,7 @@ mod tests {
         let (dropped_tx, dropped_rx) = oneshot::channel::<()>();
         let mut module = RpcModule::new(std::sync::Mutex::new(Some((started_tx, dropped_tx))));
         module
-            .register_async_method("hang", |_, ctx, _| async move {
+            .register_async_method("hang", |_, ctx| async move {
                 // `dropped_tx` is dropped together with the call
                 let (started_tx, _dropped_tx) = ctx.lock().unwrap().take().unwrap();
                 let _ = started_tx.send(());
@@ -1006,7 +1006,7 @@ mod tests {
         let server = Builder::default().build(endpoint.clone());
         let mut module = RpcModule::new(());
         module
-            .register_async_method("maybe_panic", |params, _, _| async move {
+            .register_async_method("maybe_panic", |params, _| async move {
                 assert!(!params.one::<bool>().unwrap(), "requested panic");
                 "ok"
             })
@@ -1039,7 +1039,7 @@ mod tests {
         let server = Builder::default().build(endpoint.clone());
         let mut module = RpcModule::new(());
         let msg = r#"{"jsonrpc":"2.0","id":83,"result":"0x7a69"}"#;
-        module.register_method("eth_chainId", move |_, _, _| msg).unwrap();
+        module.register_method("eth_chainId", move |_, _| msg).unwrap();
         let handle = server.start(module).await.unwrap();
         tokio::spawn(handle.stopped());
 
@@ -1053,7 +1053,7 @@ mod tests {
         let endpoint = &dummy_name();
         let server = Builder::default().build(endpoint.clone());
         let mut module = RpcModule::new(());
-        module.register_method("anything", |_, _, _| "ok").unwrap();
+        module.register_method("anything", |_, _| "ok").unwrap();
         let handle = server.start(module).await.unwrap();
         tokio::spawn(handle.stopped());
 
@@ -1073,7 +1073,7 @@ mod tests {
         let server = Builder::default().build(endpoint.clone());
         let mut module = RpcModule::new(());
         let msg = r#"{"admin":"1.0","debug":"1.0","engine":"1.0","eth":"1.0","ethash":"1.0","miner":"1.0","net":"1.0","rpc":"1.0","txpool":"1.0","web3":"1.0"}"#;
-        module.register_method("rpc_modules", move |_, _, _| msg).unwrap();
+        module.register_method("rpc_modules", move |_, _| msg).unwrap();
         let handle = server.start(module).await.unwrap();
         tokio::spawn(handle.stopped());
 
@@ -1096,7 +1096,7 @@ mod tests {
                 "subscribe_hello",
                 "s_hello",
                 "unsubscribe_hello",
-                |_, pending, tx, _| async move {
+                |_, pending, tx| async move {
                     let rx = tx.subscribe();
                     let stream = BroadcastStream::new(rx);
                     pipe_from_stream_with_bounded_buffer(pending, stream).await?;
@@ -1130,7 +1130,7 @@ mod tests {
                 "subscribe_hello",
                 "s_hello",
                 "unsubscribe_hello",
-                |_, pending, _, _| async move {
+                |_, pending, _| async move {
                     let Ok(sink) = pending.accept().await else { return };
                     sink.closed().await;
                 },
@@ -1223,8 +1223,8 @@ mod tests {
         let mut module = RpcModule::new(());
         let goodbye_msg = r#"{"jsonrpc":"2.0","id":1,"result":"goodbye"}"#;
         let hello_msg = r#"{"jsonrpc":"2.0","id":2,"result":"hello"}"#;
-        module.register_method("say_hello", move |_, _, _| hello_msg).unwrap();
-        module.register_method("say_goodbye", move |_, _, _| goodbye_msg).unwrap();
+        module.register_method("say_hello", move |_, _| hello_msg).unwrap();
+        module.register_method("say_goodbye", move |_, _| goodbye_msg).unwrap();
         let handle = server.start(module).await.unwrap();
         tokio::spawn(handle.stopped());
 

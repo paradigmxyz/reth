@@ -5740,7 +5740,6 @@ dependencies = [
 name = "jsonrpsee-types"
 version = "0.26.1"
 dependencies = [
- "http",
  "serde",
  "serde_json",
  "thiserror 2.0.21",

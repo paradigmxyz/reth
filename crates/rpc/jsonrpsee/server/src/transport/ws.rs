@@ -51,7 +51,6 @@ pub(crate) struct BackgroundTaskParams<S> {
     pub(crate) sink: MethodSink,
     pub(crate) rx: mpsc::Receiver<Box<RawValue>>,
     pub(crate) pending_calls_completed: mpsc::Receiver<()>,
-    pub(crate) extensions: http::Extensions,
 }
 
 pub(crate) async fn background_task<S>(params: BackgroundTaskParams<S>)
@@ -73,7 +72,6 @@ where
         sink,
         rx,
         pending_calls_completed,
-        extensions,
     } = params;
     let ServerConfig { batch_requests_config, max_request_body_size, ws_write_timeout, .. } =
         server_cfg;
@@ -155,7 +153,6 @@ where
 
         let rpc_service = rpc_service.clone();
         let sink = sink.clone();
-        let extensions = extensions.clone();
 
         tokio::spawn(async move {
             let first_non_whitespace =
@@ -174,14 +171,14 @@ where
             // instead of running them to completion without anyone to send the response to.
             let rp = tokio::select! {
                 _ = sink.closed() => return,
-                rp = handle_rpc_call(&data[idx..], is_single, batch_requests_config, &*rpc_service, extensions) => rp,
+                rp = handle_rpc_call(&data[idx..], is_single, batch_requests_config, &*rpc_service) => rp,
             };
 
             // Subscriptions are handled by the subscription callback and
             // "ordinary notifications" should not be sent back to the client.
             if rp.is_method_call() || rp.is_batch() {
                 let is_success = rp.is_success();
-                let (json, mut on_close, _) = rp.into_parts();
+                let (json, mut on_close) = rp.into_parts();
 
                 // The connection is closed, just quit.
                 if sink.send(json).await.is_err() {

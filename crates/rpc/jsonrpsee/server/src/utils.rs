@@ -25,6 +25,7 @@
 // DEALINGS IN THE SOFTWARE.
 
 use std::{
+    borrow::Cow,
     future::Future,
     io,
     pin::Pin,
@@ -38,7 +39,9 @@ use crate::{HttpBody, HttpRequest};
 use futures_util::future;
 use hyper_util::rt::{TokioExecutor, TokioIo};
 use jsonrpsee_core::BoxError;
+use jsonrpsee_types::{Notification, TwoPointZero};
 use pin_project::pin_project;
+use serde::{Deserialize, Deserializer};
 use tokio::sync::Notify;
 use tower::{util::Oneshot, ServiceExt};
 
@@ -216,117 +219,54 @@ where
     }
 }
 
-/// Deserialize calls, notifications and responses with HTTP extensions.
-pub mod deserialize_with_ext {
-    /// Method call.
-    pub mod call {
-        use jsonrpsee_types::Request;
+/// Deserializes a JSON-RPC notification, rejecting objects that contain an `id` member.
+pub(crate) fn deserialize_notification<'a, T>(
+    data: &'a [u8],
+) -> Result<Notification<'a, T>, serde_json::Error>
+where
+    T: Deserialize<'a>,
+{
+    let notif: NotificationWithoutId<'a, T> = serde_json::from_slice(data)?;
+    Ok(Notification::new(notif.method, notif.params))
+}
 
-        /// Wrapper over `serde_json::from_slice` that sets the extensions.
-        pub fn from_slice<'a>(
-            data: &'a [u8],
-            extensions: &'a http::Extensions,
-        ) -> Result<Request<'a>, serde_json::Error> {
-            let mut req: Request = serde_json::from_slice(data)?;
-            *req.extensions_mut() = extensions.clone();
-            Ok(req)
+#[derive(Deserialize)]
+struct NotificationWithoutId<'a, T> {
+    #[serde(rename = "jsonrpc")]
+    _jsonrpc: TwoPointZero,
+    #[serde(borrow)]
+    method: Cow<'a, str>,
+    params: T,
+    #[serde(default, rename = "id", deserialize_with = "reject_notification_id")]
+    _id: (),
+}
+
+fn reject_notification_id<'de, D: Deserializer<'de>>(_: D) -> Result<(), D::Error> {
+    Err(serde::de::Error::custom("notification must not contain an id"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::value::RawValue;
+
+    #[test]
+    fn notification_id_classification_notification_metadata() {
+        type Params<'a> = Option<Cow<'a, RawValue>>;
+        for (raw, expected) in [
+            (
+                r#"{"jsonrpc":"2.0","method":"example","params":[1],"extra":{"id":true}}"#,
+                Some("[1]"),
+            ),
+            (r#"{"jsonrpc":"2.0","method":"example"}"#, None),
+        ] {
+            let notification = deserialize_notification::<Params>(raw.as_bytes()).unwrap();
+            assert_eq!(notification.method_name(), "example");
+            assert_eq!(notification.params().as_ref().map(|p| p.get()), expected);
         }
-
-        /// Wrapper over `serde_json::from_str` that sets the extensions.
-        pub fn from_str<'a>(
-            data: &'a str,
-            extensions: &'a http::Extensions,
-        ) -> Result<Request<'a>, serde_json::Error> {
-            let mut req: Request = serde_json::from_str(data)?;
-            *req.extensions_mut() = extensions.clone();
-            Ok(req)
-        }
-    }
-
-    /// Notification.
-    pub mod notif {
-        use jsonrpsee_types::{Notification, TwoPointZero};
-
-        #[derive(serde::Deserialize)]
-        struct NotificationWithoutId<'a, T> {
-            #[serde(rename = "jsonrpc")]
-            _jsonrpc: TwoPointZero,
-            #[serde(borrow)]
-            method: std::borrow::Cow<'a, str>,
-            params: T,
-            #[serde(default, rename = "id", deserialize_with = "reject_notification_id")]
-            _id: (),
-        }
-
-        fn reject_notification_id<'de, D: serde::Deserializer<'de>>(_: D) -> Result<(), D::Error> {
-            Err(serde::de::Error::custom("notification must not contain an id"))
-        }
-
-        impl<'a, T> NotificationWithoutId<'a, T> {
-            fn into_notification(self, extensions: &http::Extensions) -> Notification<'a, T> {
-                let mut notification = Notification::new(self.method, self.params);
-                *notification.extensions_mut() = extensions.clone();
-                notification
-            }
-        }
-
-        /// Wrapper over `serde_json::from_slice` that sets the extensions.
-        pub fn from_slice<'a, T>(
-            data: &'a [u8],
-            extensions: &'a http::Extensions,
-        ) -> Result<Notification<'a, T>, serde_json::Error>
-        where
-            T: serde::Deserialize<'a>,
-        {
-            let notif: NotificationWithoutId<T> = serde_json::from_slice(data)?;
-            Ok(notif.into_notification(extensions))
-        }
-
-        /// Wrapper over `serde_json::from_str` that sets the extensions.
-        pub fn from_str<'a, T>(
-            data: &'a str,
-            extensions: &http::Extensions,
-        ) -> Result<Notification<'a, T>, serde_json::Error>
-        where
-            T: serde::Deserialize<'a>,
-        {
-            let notif: NotificationWithoutId<T> = serde_json::from_str(data)?;
-            Ok(notif.into_notification(extensions))
-        }
-
-        #[cfg(test)]
-        mod tests {
-            use super::*;
-            use serde_json::value::RawValue;
-            use std::borrow::Cow;
-
-            #[test]
-            fn notification_id_classification_notification_metadata() {
-                type Params<'a> = Option<Cow<'a, RawValue>>;
-                let mut extensions = http::Extensions::new();
-                extensions.insert(77u32);
-                for (raw, expected) in [
-                    (
-                        r#"{"jsonrpc":"2.0","method":"example","params":[1],"extra":{"id":true}}"#,
-                        Some("[1]"),
-                    ),
-                    (r#"{"jsonrpc":"2.0","method":"example"}"#, None),
-                ] {
-                    for notification in [
-                        from_slice::<Params>(raw.as_bytes(), &extensions).unwrap(),
-                        from_str::<Params>(raw, &extensions).unwrap(),
-                    ] {
-                        assert_eq!(notification.method_name(), "example");
-                        assert_eq!(notification.params().as_ref().map(|p| p.get()), expected);
-                        assert_eq!(notification.extensions().get::<u32>(), Some(&77));
-                    }
-                }
-                for id in ["true", "false", "{}", "[]", "null", "0", "\"valid\""] {
-                    let raw = format!(r#"{{"jsonrpc":"2.0","method":"example","id":{id}}}"#);
-                    assert!(from_slice::<Params>(raw.as_bytes(), &extensions).is_err());
-                    assert!(from_str::<Params>(&raw, &extensions).is_err());
-                }
-            }
+        for id in ["true", "false", "{}", "[]", "null", "0", "\"valid\""] {
+            let raw = format!(r#"{{"jsonrpc":"2.0","method":"example","id":{id}}}"#);
+            assert!(deserialize_notification::<Params>(raw.as_bytes()).is_err());
         }
     }
 }

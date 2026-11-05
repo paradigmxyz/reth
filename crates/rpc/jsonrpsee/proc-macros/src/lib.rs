@@ -197,7 +197,7 @@ pub(crate) mod visitor;
 ///
 /// // RPC is put into a separate module to clearly show names of generated entities.
 /// mod rpc_impl {
-///     use jsonrpsee::{proc_macros::rpc, Extensions};
+///     use jsonrpsee::proc_macros::rpc;
 ///     use jsonrpsee::server::{PendingSubscriptionSink, SubscriptionMessage, IntoSubscriptionCloseResponse, SubscriptionCloseResponse};
 ///     use jsonrpsee::core::{async_trait, RpcResult, SubscriptionResult, to_json_raw_value};
 ///

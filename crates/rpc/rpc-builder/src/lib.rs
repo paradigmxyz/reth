@@ -2541,7 +2541,7 @@ mod tests {
 
     fn create_test_module() -> RpcModule<()> {
         let mut module = RpcModule::new(());
-        module.register_method("anything", |_, _, _| "succeed").unwrap();
+        module.register_method("anything", |_, _| "succeed").unwrap();
         module
     }
 
@@ -2634,7 +2634,7 @@ mod tests {
 
         // Create another module
         let mut other_module = RpcModule::new(());
-        other_module.register_method("something", |_, _, _| "fails").unwrap();
+        other_module.register_method("something", |_, _| "fails").unwrap();
 
         // Rename the method
         modules.rename("anything", other_module).expect("rename failed");
@@ -2656,13 +2656,13 @@ mod tests {
             TransportRpcModules { http: Some(create_test_module()), ..Default::default() };
 
         let mut other_module = RpcModule::new(());
-        other_module.register_method("something", |_, _, _| "fails").unwrap();
+        other_module.register_method("something", |_, _| "fails").unwrap();
 
         assert!(modules.replace_http(other_module.clone()).unwrap());
 
         assert!(modules.http.as_ref().unwrap().method("something").is_some());
 
-        other_module.register_method("anything", |_, _, _| "fails").unwrap();
+        other_module.register_method("anything", |_, _| "fails").unwrap();
         assert!(modules.replace_http(other_module.clone()).unwrap());
 
         assert!(modules.http.as_ref().unwrap().method("anything").is_some());
@@ -2673,13 +2673,13 @@ mod tests {
             TransportRpcModules { ipc: Some(create_test_module()), ..Default::default() };
 
         let mut other_module = RpcModule::new(());
-        other_module.register_method("something", |_, _, _| "fails").unwrap();
+        other_module.register_method("something", |_, _| "fails").unwrap();
 
         assert!(modules.replace_ipc(other_module.clone()).unwrap());
 
         assert!(modules.ipc.as_ref().unwrap().method("something").is_some());
 
-        other_module.register_method("anything", |_, _, _| "fails").unwrap();
+        other_module.register_method("anything", |_, _| "fails").unwrap();
         assert!(modules.replace_ipc(other_module.clone()).unwrap());
 
         assert!(modules.ipc.as_ref().unwrap().method("anything").is_some());
@@ -2690,13 +2690,13 @@ mod tests {
             TransportRpcModules { ws: Some(create_test_module()), ..Default::default() };
 
         let mut other_module = RpcModule::new(());
-        other_module.register_method("something", |_, _, _| "fails").unwrap();
+        other_module.register_method("something", |_, _| "fails").unwrap();
 
         assert!(modules.replace_ws(other_module.clone()).unwrap());
 
         assert!(modules.ws.as_ref().unwrap().method("something").is_some());
 
-        other_module.register_method("anything", |_, _, _| "fails").unwrap();
+        other_module.register_method("anything", |_, _| "fails").unwrap();
         assert!(modules.replace_ws(other_module.clone()).unwrap());
 
         assert!(modules.ws.as_ref().unwrap().method("anything").is_some());
@@ -2711,7 +2711,7 @@ mod tests {
             ..Default::default()
         };
         let mut other_module = RpcModule::new(());
-        other_module.register_method("something", |_, _, _| "fails").unwrap();
+        other_module.register_method("something", |_, _| "fails").unwrap();
 
         assert!(modules.replace_configured(other_module).unwrap());
 
@@ -2734,11 +2734,11 @@ mod tests {
 
         // Create HTTP module with an existing method (to test "replace")
         let mut http_module = RpcModule::new(());
-        http_module.register_method("eth_existing", |_, _, _| "original").unwrap();
+        http_module.register_method("eth_existing", |_, _| "original").unwrap();
 
         // Create WS module with the same existing method
         let mut ws_module = RpcModule::new(());
-        ws_module.register_method("eth_existing", |_, _, _| "original").unwrap();
+        ws_module.register_method("eth_existing", |_, _| "original").unwrap();
 
         // Create IPC module (empty, to ensure no changes)
         let ipc_module = RpcModule::new(());
@@ -2753,8 +2753,8 @@ mod tests {
 
         // Create new methods: one to replace an existing method, one to add a new one
         let mut new_module = RpcModule::new(());
-        new_module.register_method("eth_existing", |_, _, _| "replaced").unwrap(); // Replace
-        new_module.register_method("eth_new", |_, _, _| "added").unwrap(); // Add
+        new_module.register_method("eth_existing", |_, _| "replaced").unwrap(); // Replace
+        new_module.register_method("eth_new", |_, _| "added").unwrap(); // Add
         let new_methods: Methods = new_module.into();
 
         // Call the function for RethRpcModule::Eth
@@ -2792,7 +2792,7 @@ mod tests {
         let result = modules.merge_if_module_configured_with(RethRpcModule::Eth, || {
             closure_called = true;
             let mut methods = RpcModule::new(());
-            methods.register_method("eth_test", |_, _, _| "test").unwrap();
+            methods.register_method("eth_test", |_, _| "test").unwrap();
             methods.into()
         });
 
