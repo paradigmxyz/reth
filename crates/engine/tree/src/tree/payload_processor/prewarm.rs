@@ -383,6 +383,9 @@ where
                 let _ = evm.transact_and_discard(&tx_env, |_| ());
                 let missed = misses.take();
                 if missed.is_empty() {
+                    if alloy_consensus::Transaction::gas_limit(tx.tx()) >= 5_000_000 {
+                        tracing::info!(target: "engine::np_probe", index, round, "probe done");
+                    }
                     break
                 }
                 let mut accounts = missed.accounts;
@@ -397,7 +400,9 @@ where
                 let (n_accounts, n_storage, n_code) = (accounts.len(), storage.len(), code.len());
                 let started = Instant::now();
                 fetch.warm_all(accounts, &storage, code).wait();
-                if n_storage + n_accounts >= 32 {
+                if n_storage + n_accounts >= 32 ||
+                    alloy_consensus::Transaction::gas_limit(tx.tx()) >= 5_000_000
+                {
                     tracing::info!(target: "engine::np_probe", index, round, n_accounts, n_storage, n_code, fetch_us = started.elapsed().as_micros() as u64, "probe round");
                 }
             }
