@@ -1258,6 +1258,7 @@ where
         let mut last_sent_len = 0usize;
         // Timeline rows: index, reached, done waiting, committed (us), reused.
         let mut timeline_rows = Vec::<(usize, u64, u64, u64, bool)>::new();
+        let mut stale_reasons = std::collections::BTreeMap::<String, (u64, u64)>::new();
         loop {
             // Measure time spent waiting for next transaction from iterator
             // (e.g., parallel signature recovery)
@@ -1300,11 +1301,31 @@ where
                         outcome = self.commit_prewarm_result(executor, results, index, tx.tx())?;
                     }
                     let waited = results.timeline.as_ref().map(|timeline| timeline.now());
+                    let stale_reason = (outcome == Err(ReuseMiss::Stale) &&
+                        std::env::var_os("RETH_NP_STALE").is_some())
+                    .then(|| {
+                        let reason = results.explain(index, executor.evm_mut().state_db_mut());
+                        let reason = reason.split(" 0x").next().unwrap_or_default().to_string();
+                        reason
+                    });
+                    let exec_start = Instant::now();
                     if outcome.is_err() {
                         // Later prewarm results are refreshed against the actual writes.
                         let result = executor.execute_transaction_without_commit(tx)?;
                         results.publish_executed(index, &result.result().pending_state);
                         executor.commit_transaction(result)?;
+                    }
+                    if let Some(reason) = stale_reason {
+                        let cost = exec_start.elapsed().as_micros() as u64;
+                        let entry = stale_reasons.entry(reason).or_insert((0u64, 0u64));
+                        entry.0 += 1;
+                        entry.1 += cost;
+                    } else if outcome == Err(ReuseMiss::Missing) &&
+                        std::env::var_os("RETH_NP_STALE").is_some()
+                    {
+                        let entry = stale_reasons.entry("missing".to_string()).or_insert((0, 0));
+                        entry.0 += 1;
+                        entry.1 += exec_start.elapsed().as_micros() as u64;
                     }
                     if let (Some(timeline), Some(reached), Some(waited)) =
                         (&results.timeline, reached, waited)
@@ -1342,6 +1363,14 @@ where
         }
 
         drop(exec_span);
+        if !stale_reasons.is_empty() {
+            let reasons = stale_reasons
+                .iter()
+                .map(|(reason, (count, cost))| format!("{reason}|{count}|{cost}"))
+                .collect::<Vec<_>>()
+                .join(";");
+            info!(target: "engine::np_stale", %reasons, "stale");
+        }
         if let Some(timeline) = prewarm_results.and_then(|results| results.timeline.as_ref()) {
             log_timeline(timeline, &timeline_rows);
         }

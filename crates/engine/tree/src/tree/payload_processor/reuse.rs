@@ -351,10 +351,9 @@ impl<T: EvmTypes> PrewarmResults<T> {
     }
 }
 
-#[cfg(test)]
 impl<T: EvmTypes> PrewarmResults<T> {
     /// Describes why the result at `index` would not be reused against `db`.
-    pub(super) fn explain<DB: DynDatabase + ?Sized>(&self, index: usize, db: &mut DB) -> String {
+    pub(crate) fn explain<DB: DynDatabase + ?Sized>(&self, index: usize, db: &mut DB) -> String {
         let slot = self.slots[index].lock();
         let tx = match &*slot {
             ResultSlot::Empty => return "empty".to_string(),
