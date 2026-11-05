@@ -1066,11 +1066,11 @@ struct ExecutionCacheInner {
     _account_buckets: Option<BucketMemory<(Address, Option<Account>)>>,
 }
 
+/// A cache table and the memory it was created on, if it maps its own.
+type Table<K, V, H> = (FixedCache<K, V, H>, Option<BucketMemory<(K, V)>>);
+
 /// Creates a cache table with `capacity` entries, on memory it maps itself where supported.
-fn new_table<K, V, H>(
-    capacity: usize,
-    hasher: H,
-) -> (FixedCache<K, V, H>, Option<BucketMemory<(K, V)>>)
+fn new_table<K, V, H>(capacity: usize, hasher: H) -> Table<K, V, H>
 where
     K: core::hash::Hash + Eq + 'static,
     V: Clone + 'static,
