@@ -374,7 +374,11 @@ where
                 continue
             }
             let (tx_env, _) = tx.clone().into_parts();
-            for round in 0..MAX_PROBE_ROUNDS {
+            let max_rounds = std::env::var("RETH_NP_PROBE_ROUNDS")
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(MAX_PROBE_ROUNDS);
+            for round in 0..max_rounds {
                 if ctx.should_stop() {
                     return
                 }
