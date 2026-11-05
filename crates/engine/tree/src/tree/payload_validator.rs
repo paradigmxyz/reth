@@ -172,6 +172,10 @@ use tracing::{debug, debug_span, error, info, instrument, trace, warn, Level, Sp
 
 pub use crate::tree::types::ValidationOutcome;
 
+/// How long block execution waits for an in-flight speculative execution of a transaction before
+/// executing the transaction itself.
+const SPECULATION_RACE_AFTER: Duration = Duration::from_micros(300);
+
 /// Multiplier over the parent's gas limit beyond which a payload must pass pre-execution
 /// validation.
 const MAX_EXPECTED_GAS_LIMIT_MULTIPLIER: u64 = 2;
@@ -1259,10 +1263,15 @@ where
                 Some(results) => {
                     let mut outcome =
                         self.commit_prewarm_result(executor, results, index, tx.tx())?;
-                    // A prewarm worker executing the transaction for the first time finishes it
-                    // sooner than block execution would, which also has to load its state.
+                    // A prewarm worker executing the transaction for the first time usually
+                    // finishes it sooner than block execution would, which also has to load its
+                    // state. A speculation that takes longer is raced: block execution executes
+                    // the transaction itself on its warmer state, reading what the worker loaded.
                     if outcome == Err(ReuseMiss::Missing) && results.is_speculating(index) {
-                        while results.is_speculating(index) {
+                        let wait_start = Instant::now();
+                        while results.is_speculating(index) &&
+                            wait_start.elapsed() < SPECULATION_RACE_AFTER
+                        {
                             std::hint::spin_loop();
                         }
                         outcome = self.commit_prewarm_result(executor, results, index, tx.tx())?;
