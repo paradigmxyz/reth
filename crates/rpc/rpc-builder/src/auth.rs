@@ -35,7 +35,7 @@ pub struct AuthServerConfig<RpcMiddleware = Identity, HttpMiddleware = Identity>
     /// Configs for JSON-RPC Http.
     pub(crate) server_config: ServerConfigBuilder,
     /// Configs for IPC server
-    pub(crate) ipc_server_config: Option<IpcServerBuilder<Identity, Identity>>,
+    pub(crate) ipc_server_config: Option<IpcServerBuilder<Identity>>,
     /// IPC endpoint
     pub(crate) ipc_endpoint: Option<String>,
     /// Configurable RPC middleware
@@ -199,7 +199,7 @@ pub struct AuthServerConfigBuilder<RpcMiddleware = Identity, HttpMiddleware = Id
     socket_addr: Option<SocketAddr>,
     secret: JwtSecret,
     server_config: Option<ServerConfigBuilder>,
-    ipc_server_config: Option<IpcServerBuilder<Identity, Identity>>,
+    ipc_server_config: Option<IpcServerBuilder<Identity>>,
     ipc_endpoint: Option<String>,
     rpc_middleware: RpcMiddleware,
     http_middleware: HttpMiddleware,
@@ -312,7 +312,7 @@ impl<RpcMiddleware, HttpMiddleware> AuthServerConfigBuilder<RpcMiddleware, HttpM
     /// Configures the IPC server
     ///
     /// Note: this always configures an [`EthSubscriptionIdProvider`]
-    pub fn with_ipc_config(mut self, config: IpcServerBuilder<Identity, Identity>) -> Self {
+    pub fn with_ipc_config(mut self, config: IpcServerBuilder<Identity>) -> Self {
         self.ipc_server_config = Some(config.set_id_provider(EthSubscriptionIdProvider::default()));
         self
     }

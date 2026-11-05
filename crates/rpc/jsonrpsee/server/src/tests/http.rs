@@ -718,3 +718,39 @@ async fn notification_id_classification_http_singles_and_mixed_batches() {
     handle.stop().unwrap();
     handle.stopped().with_default_timeout().await.unwrap();
 }
+
+#[tokio::test]
+async fn panicking_call_returns_internal_error() {
+    init_logger();
+
+    let server = ServerBuilder::default().build("127.0.0.1:0").await.unwrap();
+    let mut module = RpcModule::new(());
+    module
+        .register_async_method("maybe_panic", |params, _| async move {
+            assert!(!params.one::<bool>().unwrap(), "requested panic");
+            "ok"
+        })
+        .unwrap();
+    let uri = to_http_uri(server.local_addr().unwrap());
+    let handle = server.start(module);
+
+    let req = r#"{"jsonrpc":"2.0","method":"maybe_panic","params":[true],"id":1}"#;
+    let response =
+        http_request(req.into(), uri.clone()).with_default_timeout().await.unwrap().unwrap();
+    assert_eq!(response.status, StatusCode::OK);
+    assert_eq!(response.body, internal_error(Id::Num(1)));
+
+    let req = r#"[
+        {"jsonrpc":"2.0","method":"maybe_panic","params":[true],"id":1},
+        {"jsonrpc":"2.0","method":"maybe_panic","params":[false],"id":2}
+    ]"#;
+    let response = http_request(req.into(), uri).with_default_timeout().await.unwrap().unwrap();
+    assert_eq!(response.status, StatusCode::OK);
+    assert_eq!(
+        response.body,
+        format!("[{},{}]", internal_error(Id::Num(1)), ok_response("ok".into(), Id::Num(2)))
+    );
+
+    handle.stop().unwrap();
+    handle.stopped().await;
+}
