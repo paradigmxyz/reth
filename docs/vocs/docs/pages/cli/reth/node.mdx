@@ -1197,10 +1197,14 @@ Engine:
       --engine.disable-bal-batch-io
           Disable BAL (Block Access List) storage prefetch IO during prewarming. When set, BAL storage slots are not read into the execution cache
 
-      --engine.prewarm-reuse
-          Reuse transaction prewarming results during block execution instead of executing transactions again when their prewarm reads are still valid
+      --engine.prewarm-reuse [<PREWARM_REUSE>]
+          Reuse transaction prewarming results during block execution instead of executing transactions again when their prewarm reads are still valid.
+
+          Enabled by default, use `--engine.prewarm-reuse=false` to disable it.
 
           [env: RETH_ENGINE_PREWARM_REUSE=]
+          [default: true]
+          [possible values: true, false]
 
 ERA:
       --era.enable
