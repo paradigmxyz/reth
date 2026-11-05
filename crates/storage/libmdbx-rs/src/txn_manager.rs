@@ -352,10 +352,8 @@ mod read_transactions {
 
     #[cfg(test)]
     mod tests {
-        use crate::{
-            txn_manager::read_transactions::READ_TRANSACTIONS_CHECK_INTERVAL, Environment, Error,
-            MaxReadTransactionDuration,
-        };
+        use super::*;
+        use crate::{Environment, Error, MaxReadTransactionDuration};
         use std::{
             sync::mpsc,
             thread::{self, sleep},
@@ -385,10 +383,18 @@ mod read_transactions {
                     cfg!(all(debug_assertions, not(feature = "fuzz"))),
                 );
 
+                let snapshot = read_transactions.active.get(&tx_ptr).unwrap().0.clone();
+                assert!(read_transactions.is_active(tx_ptr, &snapshot));
                 tx.open_db(None).unwrap();
                 drop(tx);
 
-                assert!(!read_transactions.active.contains_key(&tx_ptr));
+                assert!(!read_transactions.is_active(tx_ptr, &snapshot));
+
+                // A collected entry must not match a later transaction reusing its pooled handle.
+                let tx = env.begin_ro_txn().unwrap();
+                assert_eq!(tx.txn() as usize, tx_ptr);
+                assert!(!read_transactions.is_active(tx_ptr, &snapshot));
+                tx.open_db(None).unwrap();
             }
 
             // Create a read-only transaction, successfully use it, close it by committing.
@@ -474,16 +480,17 @@ mod read_transactions {
                             MAX_DURATION - Duration::from_millis(3) +
                                 Duration::from_millis(i as u64 % 6),
                         );
-                        // The transaction might have been timed out already, so errors are
-                        // expected.
+                        // The transaction might have been timed out already.
                         if i % 2 == 0 {
-                            let _ = tx.commit();
+                            if let Err(err) = tx.commit() {
+                                assert_eq!(err, Error::ReadTransactionTimeout);
+                            }
                         } else {
                             drop(tx);
                         }
                         i += 1;
                     }
-                    let _ = done_tx.send(());
+                    done_tx.send(()).unwrap();
                 });
             }
             drop(done_tx);
