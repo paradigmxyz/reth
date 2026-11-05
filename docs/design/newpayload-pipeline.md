@@ -127,16 +127,21 @@ Then, on the data structures and threads around execution:
   (from paradigmxyz/reth#28298): derek -2.5% mean, +3.5% Mgas/s on top of the branch, engine
   preemptions -22%.
 
-derek, 6 run pairs, e0f179d60e against main:
+derek, 6 run pairs against main, with everything above and the cold read probe below
+(0bc00b7e02):
 
 | | main | branch | Change |
 |---|---|---|---|
-| Mean | 29.00 ms | 25.37 ms | -12.5% |
-| P50 | 22.71 ms | 19.03 ms | -16.2% |
-| P90 | 48.29 ms | 45.02 ms | -6.8% |
-| Mgas/s | 1,212 | 1,463 | +20.7% |
-| End-to-end Mgas/s | 923 | 990 | +7.3% |
-| State root after execution | 1.25 ms | 2.70 ms | +115% |
+| Mean | 27.77 ms | 22.85 ms | -17.7% |
+| P50 | 22.57 ms | 18.87 ms | -16.4% |
+| P90 | 45.79 ms | 37.96 ms | -17.1% |
+| P99 | 127.70 ms | 98.95 ms | -22.5% |
+| Mgas/s | 1,247 | 1,504 | +20.6% |
+| End-to-end Mgas/s | 951 | 1,034 | +8.8% |
+| Engine thread CPU per block | 14.20 ms | 7.44 ms | -47.6% |
+| State root after execution | 1.13 ms | 2.80 ms | +149% |
+| Engine thread preemptions per block | 9.8 | 22.1 | +126% |
+| Persistence wait | 0.85 ms | 3.26 ms | +282% |
 
 derek drops the page cache before every run (125 GB of memory), so its blocks wait on disk reads
 much more than the local replays, whose page cache stays warm: main takes 29 ms there against
