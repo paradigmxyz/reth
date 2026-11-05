@@ -14,7 +14,6 @@ workspace = true
 [dependencies]
 alloy-primitives.workspace = true
 fixed-cache = { workspace = true, features = ["stats"] }
-libc.workspace = true
 metrics.workspace = true
 parking_lot.workspace = true
 reth-errors.workspace = true
@@ -24,6 +23,9 @@ reth-primitives-traits = { workspace = true, features = ["std", "dashmap"] }
 reth-storage-api.workspace = true
 reth-trie-common.workspace = true
 tracing.workspace = true
+
+[target.'cfg(target_os = "linux")'.dependencies]
+libc.workspace = true
 
 [dev-dependencies]
 evm2.workspace = true
