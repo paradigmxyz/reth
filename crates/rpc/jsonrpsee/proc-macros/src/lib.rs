@@ -63,6 +63,9 @@ pub(crate) mod visitor;
 /// Note: you need to import the `jsonrpsee` façade crate in your code for the macro to work
 /// properly.
 ///
+/// Parameters are positional: they must be sent as a JSON array, like geth expects. Requests with
+/// object (named) parameters are answered with an invalid params error.
+///
 /// ## Prerequisites
 ///
 /// - Implementors of the server trait must be `Sync`, `Send`, `Sized` and `'static`. If you want to
@@ -89,14 +92,14 @@ pub(crate) mod visitor;
 /// Server code that will be generated:
 ///
 /// ```ignore
-/// #[async_trait]
 /// pub trait RpcServer {
-///     // RPC methods are normal methods and can be either sync or async.
-///     async fn async_method(&self, param_a: u8, param_b: String) -> u16;
+///     // RPC methods are normal methods and can be either sync or async. Async methods return a
+///     // `Send` future, implementations can use `async fn`.
+///     fn async_method(&self, param_a: u8, param_b: String) -> impl Future<Output = u16> + Send;
 ///     fn sync_method(&self) -> String;
 ///
 ///     // Note that `pending_subscription_sink` was added automatically.
-///     async fn sub(&self, pending: PendingSubscriptionSink) -> SubscriptionResult;
+///     fn sub(&self, pending: PendingSubscriptionSink) -> impl Future<Output = SubscriptionResult> + Send;
 ///
 ///     fn into_rpc(self) -> Result<Self, jsonrpsee::core::Error> {
 ///         // Actual implementation stripped, but inside we will create
@@ -179,15 +182,6 @@ pub(crate) mod visitor;
 ///
 /// - have input parameters or not.
 ///
-/// ### `argument` attribute
-///
-/// `argument` attribute is used to modify a function argument.
-///
-/// **Arguments:**
-///
-/// - `rename`: rename the generated JSON key.
-///
-///
 /// ## Full workflow example
 ///
 /// ```rust
@@ -201,9 +195,9 @@ pub(crate) mod visitor;
 /// mod rpc_impl {
 ///     use jsonrpsee::proc_macros::rpc;
 ///     use jsonrpsee::server::{PendingSubscriptionSink, SubscriptionMessage, IntoSubscriptionCloseResponse, SubscriptionCloseResponse};
-///     use jsonrpsee::core::{async_trait, RpcResult, SubscriptionResult, to_json_raw_value};
+///     use jsonrpsee::core::{RpcResult, SubscriptionResult, to_json_raw_value};
 ///
-///     enum CloseResponse {
+///     pub enum CloseResponse {
 ///         None,
 ///         Failed,
 ///     }
@@ -230,7 +224,6 @@ pub(crate) mod visitor;
 ///         async fn async_method(
 ///             &self,
 ///             param_a: u8,
-///             #[argument(rename = "param_c")]
 ///             param_b: String
 ///         ) -> RpcResult<u16>;
 ///
@@ -279,7 +272,6 @@ pub(crate) mod visitor;
 ///     pub struct RpcServerImpl;
 ///
 ///     // Note that the trait name we use is `MyRpcServer`, not `MyRpc`!
-///     #[async_trait]
 ///     impl MyRpcServer for RpcServerImpl {
 ///         async fn async_method(&self, _param_a: u8, _param_b: String) -> RpcResult<u16> {
 ///             Ok(42)

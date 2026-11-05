@@ -14,7 +14,6 @@ use alloy_rpc_types_trace::{
     parity::*,
     tracerequest::TraceCallRequest,
 };
-use async_trait::async_trait;
 use evm2_inspectors::{
     opcode::OpcodeGasInspector,
     storage::StorageInspector,
@@ -708,7 +707,6 @@ fn apply_trace_filter_pagination(
     None
 }
 
-#[async_trait]
 impl<Eth> TraceApiServer<RpcTxReq<Eth::NetworkTypes>> for TraceApi<Eth>
 where
     Eth: TraceExt,
@@ -727,7 +725,7 @@ where
         let _permit = self.acquire_trace_permit().await;
         let request =
             TraceCallRequest { call, trace_types, block_id, state_overrides, block_overrides };
-        Ok(Self::trace_call(self, request).await.map_err(Into::into)?)
+        Self::trace_call(self, request).await.map_err(Into::into)
     }
 
     /// Handler for `trace_callMany`
@@ -737,7 +735,7 @@ where
         block_id: Option<BlockId>,
     ) -> RpcResult<Vec<TraceResults>> {
         let _permit = self.acquire_trace_permit().await;
-        Ok(Self::trace_call_many(self, calls, block_id).await.map_err(Into::into)?)
+        Self::trace_call_many(self, calls, block_id).await.map_err(Into::into)
     }
 
     /// Handler for `trace_rawTransaction`
@@ -748,9 +746,7 @@ where
         block_id: Option<BlockId>,
     ) -> RpcResult<TraceResults> {
         let _permit = self.acquire_trace_permit().await;
-        Ok(Self::trace_raw_transaction(self, data, trace_types, block_id)
-            .await
-            .map_err(Into::into)?)
+        Self::trace_raw_transaction(self, data, trace_types, block_id).await.map_err(Into::into)
     }
 
     /// Handler for `trace_replayBlockTransactions`
@@ -760,9 +756,7 @@ where
         trace_types: HashSet<TraceType>,
     ) -> RpcResult<Option<Vec<TraceResultsWithTransactionHash>>> {
         let _permit = self.acquire_trace_permit().await;
-        Ok(Self::replay_block_transactions(self, block_id, trace_types)
-            .await
-            .map_err(Into::into)?)
+        Self::replay_block_transactions(self, block_id, trace_types).await.map_err(Into::into)
     }
 
     /// Handler for `trace_replayTransaction`
@@ -772,7 +766,7 @@ where
         trace_types: HashSet<TraceType>,
     ) -> RpcResult<Option<TraceResultsWithTransactionHash>> {
         let _permit = self.acquire_trace_permit().await;
-        Ok(Self::replay_transaction(self, transaction, trace_types).await.map_err(Into::into)?)
+        Self::replay_transaction(self, transaction, trace_types).await.map_err(Into::into)
     }
 
     /// Handler for `trace_block`
@@ -781,7 +775,7 @@ where
         block_id: BlockId,
     ) -> RpcResult<Option<Vec<LocalizedTransactionTrace>>> {
         let _permit = self.acquire_trace_permit().await;
-        Ok(Self::trace_block(self, block_id).await.map_err(Into::into)?)
+        Self::trace_block(self, block_id).await.map_err(Into::into)
     }
 
     /// Handler for `trace_filter`
@@ -791,7 +785,7 @@ where
     /// # Limitations
     /// This currently requires block filter fields, since reth does not have address indices yet.
     async fn trace_filter(&self, filter: TraceFilter) -> RpcResult<Vec<LocalizedTransactionTrace>> {
-        Ok(Self::trace_filter(self, filter).await.map_err(Into::into)?)
+        Self::trace_filter(self, filter).await.map_err(Into::into)
     }
 
     /// Returns transaction trace at given index.
@@ -802,9 +796,9 @@ where
         indices: Vec<Index>,
     ) -> RpcResult<Option<LocalizedTransactionTrace>> {
         let _permit = self.acquire_trace_permit().await;
-        Ok(Self::trace_get(self, hash, indices.into_iter().map(Into::into).collect())
+        Self::trace_get(self, hash, indices.into_iter().map(Into::into).collect())
             .await
-            .map_err(Into::into)?)
+            .map_err(Into::into)
     }
 
     /// Handler for `trace_transaction`
@@ -813,7 +807,7 @@ where
         hash: B256,
     ) -> RpcResult<Option<Vec<LocalizedTransactionTrace>>> {
         let _permit = self.acquire_trace_permit().await;
-        Ok(Self::trace_transaction(self, hash).await.map_err(Into::into)?)
+        Self::trace_transaction(self, hash).await.map_err(Into::into)
     }
 
     /// Handler for `trace_transactionOpcodeGas`
@@ -822,13 +816,13 @@ where
         tx_hash: B256,
     ) -> RpcResult<Option<TransactionOpcodeGas>> {
         let _permit = self.acquire_trace_permit().await;
-        Ok(Self::trace_transaction_opcode_gas(self, tx_hash).await.map_err(Into::into)?)
+        Self::trace_transaction_opcode_gas(self, tx_hash).await.map_err(Into::into)
     }
 
     /// Handler for `trace_blockOpcodeGas`
     async fn trace_block_opcode_gas(&self, block_id: BlockId) -> RpcResult<Option<BlockOpcodeGas>> {
         let _permit = self.acquire_trace_permit().await;
-        Ok(Self::trace_block_opcode_gas(self, block_id).await.map_err(Into::into)?)
+        Self::trace_block_opcode_gas(self, block_id).await.map_err(Into::into)
     }
 }
 
