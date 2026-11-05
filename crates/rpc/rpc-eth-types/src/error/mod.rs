@@ -374,9 +374,10 @@ impl From<EthApiError> for jsonrpsee_types::error::ErrorObject<'static> {
                 EthRpcErrorCode::ResourceNotFound.code(),
                 format!("{error}: start block: {start_id}, end block: {end_id}"),
             ),
-            err @ EthApiError::TransactionConfirmationTimeout { .. } => rpc_error_with_code(
+            err @ EthApiError::TransactionConfirmationTimeout { hash, .. } => rpc_err(
                 EthRpcErrorCode::TransactionConfirmationTimeout.code(),
                 err.to_string(),
+                Some(hash.as_slice()),
             ),
             EthApiError::Unsupported(msg) => internal_rpc_err(msg),
             EthApiError::InternalJsTracerError(msg) => internal_rpc_err(msg),
@@ -1284,5 +1285,22 @@ mod tests {
         assert_eq!(err.code(), 3);
         assert_eq!(err.message(), "execution reverted");
         assert_eq!(err.data().unwrap().get(), "\"0x\"");
+    }
+
+    #[test]
+    fn transaction_confirmation_timeout_err_has_hash_data() {
+        let hash = b256!("0x1a15e3c30cf094a99826869517b16d185d45831d3a494f01030b0001a9d3ebb9");
+        let err: jsonrpsee_types::error::ErrorObject<'static> =
+            EthApiError::TransactionConfirmationTimeout { hash, duration: Duration::from_secs(2) }
+                .into();
+        assert_eq!(err.code(), EthRpcErrorCode::TransactionConfirmationTimeout.code());
+        assert_eq!(
+            err.message(),
+            "Transaction 0x1a15e3c30cf094a99826869517b16d185d45831d3a494f01030b0001a9d3ebb9 was added to the mempool but wasn't confirmed within 2s."
+        );
+        assert_eq!(
+            err.data().unwrap().get(),
+            "\"0x1a15e3c30cf094a99826869517b16d185d45831d3a494f01030b0001a9d3ebb9\""
+        );
     }
 }
