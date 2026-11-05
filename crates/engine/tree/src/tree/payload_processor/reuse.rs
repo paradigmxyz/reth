@@ -41,7 +41,7 @@ use std::{
     cell::RefCell,
     rc::Rc,
     sync::{
-        atomic::{AtomicBool, AtomicUsize, Ordering},
+        atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering},
         Arc,
     },
     time::Duration,
@@ -78,6 +78,41 @@ pub(crate) struct PrewarmResults<T: EvmTypes> {
     changed_lock: Mutex<()>,
     /// Number of prewarm workers waiting on [`Self::changed`].
     waiting: AtomicUsize,
+    /// Timeline instrumentation, set by `RETH_NP_TIMELINE`.
+    pub(crate) timeline: Option<Timeline>,
+}
+
+/// Per-transaction timestamps in microseconds since the results were created, `u64::MAX` if
+/// unset.
+#[derive(Debug)]
+pub(crate) struct Timeline {
+    pub(crate) start: std::time::Instant,
+    pub(crate) arrived: Box<[AtomicU64]>,
+    pub(crate) spec_start: Box<[AtomicU64]>,
+    pub(crate) spec_end: Box<[AtomicU64]>,
+}
+
+impl Timeline {
+    fn new(transaction_count: usize) -> Self {
+        let unset = || (0..transaction_count).map(|_| AtomicU64::new(u64::MAX)).collect();
+        Self {
+            start: std::time::Instant::now(),
+            arrived: unset(),
+            spec_start: unset(),
+            spec_end: unset(),
+        }
+    }
+
+    pub(crate) fn now(&self) -> u64 {
+        self.start.elapsed().as_micros() as u64
+    }
+
+    pub(crate) fn mark(&self, times: &[AtomicU64], index: usize) {
+        if let Some(time) = times.get(index) {
+            let _ =
+                time.compare_exchange(u64::MAX, self.now(), Ordering::Relaxed, Ordering::Relaxed);
+        }
+    }
 }
 
 /// Prewarm state of a transaction in [`PrewarmResults`].
@@ -104,6 +139,8 @@ impl<T: EvmTypes> PrewarmResults<T> {
             changed: Condvar::new(),
             changed_lock: Mutex::new(()),
             waiting: AtomicUsize::new(0),
+            timeline: std::env::var_os("RETH_NP_TIMELINE")
+                .map(|_| Timeline::new(transaction_count)),
         }
     }
 
