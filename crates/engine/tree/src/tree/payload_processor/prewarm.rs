@@ -315,6 +315,9 @@ where
                     ctx.metrics.seeded_transactions.increment(1);
                 }
                 queue.push(index, tx, seeded);
+                if let Some(timeline) = &results.timeline {
+                    timeline.mark(&timeline.arrived, index);
+                }
                 results.wake(false);
             }
             queue.close();
@@ -398,6 +401,9 @@ where
             }
             if let Some((index, (tx, seeded))) = queue.claim() {
                 if results.begin_speculation(index) {
+                    if let Some(timeline) = &results.timeline {
+                        timeline.mark(&timeline.spec_start, index);
+                    }
                     Self::transact_worker(
                         ctx,
                         pool,
@@ -406,6 +412,9 @@ where
                         seeded.clone(),
                         state_root_hint_stream,
                     );
+                    if let Some(timeline) = &results.timeline {
+                        timeline.mark(&timeline.spec_end, index);
+                    }
                     results.end_speculation(index);
                 }
                 idle = 0;
