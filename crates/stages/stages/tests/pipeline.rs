@@ -21,7 +21,6 @@ use reth_network_p2p::{
     headers::downloader::{HeaderDownloader, SyncTarget},
 };
 use reth_primitives_traits::{
-    crypto::secp256k1::public_key_to_address,
     proofs::{calculate_receipt_root, calculate_transaction_root},
     RecoveredBlock, SealedBlock,
 };
@@ -237,7 +236,8 @@ async fn run_pipeline_forward_and_unwind(
     // Generate a keypair for signing transactions
     let mut rng = generators::rng();
     let key_pair = generate_key(&mut rng);
-    let signer_address = public_key_to_address(key_pair.public_key());
+    let signer_address =
+        Address::from_raw_public_key(&key_pair.public_key().serialize_uncompressed()[1..]);
 
     // Recipient address for ETH transfers
     let recipient_address = Address::repeat_byte(0x11);

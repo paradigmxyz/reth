@@ -125,7 +125,7 @@ where
     }
 
     fn local_enr(&self) -> Enr<SecretKey> {
-        let sk = SecretKey::from_slice(&[0xcd; 32]).unwrap();
+        let sk = SecretKey::from_secret_bytes([0xcd; 32]).unwrap();
         Enr::builder().build(&sk).unwrap()
     }
 }

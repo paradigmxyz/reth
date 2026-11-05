@@ -14,7 +14,7 @@ use reth_ethereum_forks::{EnrForkIdEntry, ForkId};
 use reth_network_peers::{pk2id, NodeRecord, PeerId};
 use secp256k1::{
     ecdsa::{RecoverableSignature, RecoveryId},
-    SecretKey, SECP256K1,
+    SecretKey,
 };
 use std::net::{IpAddr, Ipv4Addr};
 
@@ -114,15 +114,15 @@ impl Message {
         }
 
         // Sign the payload with the secret key using recoverable ECDSA
-        let signature: RecoverableSignature = SECP256K1.sign_ecdsa_recoverable(
-            &secp256k1::Message::from_digest(keccak256(&payload).0),
+        let signature = RecoverableSignature::sign_ecdsa_recoverable(
+            secp256k1::Message::from_digest(keccak256(&payload).0),
             secret_key,
         );
 
         // Serialize the signature and append it to the signature bytes
         let (rec, sig) = signature.serialize_compact();
         sig_bytes.extend_from_slice(&sig);
-        sig_bytes.put_u8(i32::from(rec) as u8);
+        sig_bytes.put_u8(rec.to_u8());
         sig_bytes.unsplit(payload);
 
         // Calculate the hash of the signature bytes and append it to the datagram
@@ -167,7 +167,7 @@ impl Message {
         // recover the public key
         let msg = secp256k1::Message::from_digest(keccak256(&packet[97..]).0);
 
-        let pk = SECP256K1.recover_ecdsa(&msg, &recoverable_sig)?;
+        let pk = recoverable_sig.recover_ecdsa(msg)?;
         let node_id = pk2id(&pk);
 
         let payload = &mut &packet[98..];
@@ -632,7 +632,7 @@ mod tests {
     use alloy_rlp::Decodable;
     use assert_matches::assert_matches;
     use enr::{secp256k1::SecretKey, EnrPublicKey};
-    use rand_08::{thread_rng as rng, Rng, RngCore};
+    use rand::{rng, Rng, RngCore};
     use reth_ethereum_forks::ForkHash;
     use std::net::Ipv4Addr;
 
@@ -644,8 +644,8 @@ mod tests {
             rng.fill_bytes(&mut ip);
             let msg = NodeEndpoint {
                 address: IpAddr::V4(ip.into()),
-                tcp_port: rng.r#gen(),
-                udp_port: rng.r#gen(),
+                tcp_port: rng.random(),
+                udp_port: rng.random(),
             };
 
             let decoded = NodeEndpoint::decode(&mut alloy_rlp::encode(msg).as_slice()).unwrap();
@@ -661,8 +661,8 @@ mod tests {
             rng.fill_bytes(&mut ip);
             let msg = NodeEndpoint {
                 address: IpAddr::V6(ip.into()),
-                tcp_port: rng.r#gen(),
-                udp_port: rng.r#gen(),
+                tcp_port: rng.random(),
+                udp_port: rng.random(),
             };
 
             let decoded = NodeEndpoint::decode(&mut alloy_rlp::encode(msg).as_slice()).unwrap();
@@ -702,7 +702,7 @@ mod tests {
                 from: rng_endpoint(&mut rng),
                 to: rng_endpoint(&mut rng),
                 expire: 0,
-                enr_sq: Some(rng.r#gen()),
+                enr_sq: Some(rng.random()),
             };
 
             let encoded = alloy_rlp::encode(&msg);
@@ -723,7 +723,7 @@ mod tests {
             let msg = Pong {
                 to: rng_endpoint(&mut rng),
                 echo: B256::random(),
-                expire: rng.r#gen(),
+                expire: rng.random(),
                 enr_sq: None,
             };
 
@@ -745,8 +745,8 @@ mod tests {
             let msg = Pong {
                 to: rng_endpoint(&mut rng),
                 echo: B256::random(),
-                expire: rng.r#gen(),
-                enr_sq: Some(rng.r#gen()),
+                expire: rng.random(),
+                enr_sq: Some(rng.random()),
             };
 
             let encoded = alloy_rlp::encode(&msg);
@@ -762,7 +762,7 @@ mod tests {
     fn test_hash_mismatch() {
         let mut rng = rng();
         let msg = rng_message(&mut rng);
-        let (secret_key, _) = SECP256K1.generate_keypair(&mut rng);
+        let (secret_key, _) = secp256k1::generate_keypair(&mut rng);
         let (buf, _) = msg.encode(&secret_key);
 
         let mut buf_vec = buf.to_vec();
@@ -780,9 +780,9 @@ mod tests {
         let mut rng = rng();
         let msg = Message::Neighbours(Neighbours {
             nodes: std::iter::repeat_with(|| rng_ipv4_record(&mut rng)).take(16).collect(),
-            expire: rng.r#gen(),
+            expire: rng.random(),
         });
-        let (secret_key, _) = SECP256K1.generate_keypair(&mut rng);
+        let (secret_key, _) = secp256k1::generate_keypair(&mut rng);
 
         let (encoded, _) = msg.encode(&secret_key);
         // Assert that 16 nodes never fit into one packet
@@ -797,9 +797,9 @@ mod tests {
                 nodes: std::iter::repeat_with(|| rng_ipv6_record(&mut rng))
                     .take(SAFE_MAX_DATAGRAM_NEIGHBOUR_RECORDS)
                     .collect(),
-                expire: rng.r#gen(),
+                expire: rng.random(),
             });
-            let (secret_key, _) = SECP256K1.generate_keypair(&mut rng);
+            let (secret_key, _) = secp256k1::generate_keypair(&mut rng);
 
             let (encoded, _) = msg.encode(&secret_key);
             assert!(encoded.len() <= MAX_PACKET_SIZE, "{} {msg:?}", encoded.len());
@@ -808,7 +808,7 @@ mod tests {
                 nodes: std::iter::repeat_with(|| rng_ipv6_record(&mut rng))
                     .take(SAFE_MAX_DATAGRAM_NEIGHBOUR_RECORDS - 1)
                     .collect(),
-                expire: rng.r#gen(),
+                expire: rng.random(),
             };
             neighbours.nodes.push(rng_ipv4_record(&mut rng));
             let msg = Message::Neighbours(neighbours);
@@ -822,7 +822,7 @@ mod tests {
         let mut rng = rng();
         for _ in 0..100 {
             let msg = rng_message(&mut rng);
-            let (secret_key, pk) = SECP256K1.generate_keypair(&mut rng);
+            let (secret_key, pk) = secp256k1::generate_keypair(&mut rng);
             let sender_id = pk2id(&pk);
 
             let (buf, _) = msg.encode(&secret_key);
@@ -849,7 +849,7 @@ mod tests {
 
     #[test]
     fn encode_decode_enr_msg() {
-        let mut rng = rand_08::rngs::OsRng;
+        let mut rng = rand::rng();
         let key = SecretKey::new(&mut rng);
         let ip = Ipv4Addr::new(127, 0, 0, 1);
         let tcp = 3000;
@@ -959,7 +959,7 @@ mod tests {
     // <https://github.com/sigp/enr/blob/e59dcb45ea07e423a7091d2a6ede4ad6d8ef2840/src/lib.rs#LL1206C35-L1206C35>
     #[test]
     fn encode_decode_enr_rlp() {
-        let key = SecretKey::new(&mut rand_08::rngs::OsRng);
+        let key = SecretKey::new(&mut rand::rng());
         let ip = Ipv4Addr::new(127, 0, 0, 1);
         let tcp = 3000;
 
@@ -980,10 +980,7 @@ mod tests {
         assert_eq!(decoded_enr.id(), Some("v4".into()));
         assert_eq!(decoded_enr.ip4(), Some(ip));
         assert_eq!(decoded_enr.tcp4(), Some(tcp));
-        assert_eq!(
-            decoded_enr.public_key().encode(),
-            key.public_key(secp256k1::SECP256K1).encode()
-        );
+        assert_eq!(decoded_enr.public_key().encode(), key.public_key().encode());
         assert!(decoded_enr.verify());
     }
 
@@ -1090,7 +1087,7 @@ mod tests {
         // when the record and the junk together exceed the ENR size limit.
         #[test]
         fn eip8_decode_enr_response() {
-            let key = SecretKey::new(&mut rand_08::rngs::OsRng);
+            let key = SecretKey::new(&mut rand::rng());
             let enr = Enr::builder().build(&key).unwrap();
             let request_hash = B256::random();
             let junk = Bytes::from(vec![0xab; 300]);
