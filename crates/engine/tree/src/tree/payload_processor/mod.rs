@@ -395,6 +395,10 @@ where
             ))
         });
 
+        // Speculation probes each transaction against the cache first and has the read-set pool
+        // load what it missed, so that a block's cold reads are loaded in parallel instead of one
+        // dependent read at a time inside speculative executions.
+        let probe_cold_reads = prewarm_results.is_some() && saved_cache.is_some();
         let executed_tx_index = Arc::new(AtomicUsize::new(0));
         // configure prewarming
         let prewarm_ctx = PrewarmContext {
@@ -402,7 +406,8 @@ where
             evm_config: self.evm_config.clone(),
             saved_cache: saved_cache.clone(),
             provider: state_provider_factory,
-            bal_prewarm_pool: parallel_bal_execution.then(|| self.bal_prewarm_pool()),
+            bal_prewarm_pool: (parallel_bal_execution || probe_cold_reads)
+                .then(|| self.bal_prewarm_pool()),
             metrics: PrewarmMetrics::default(),
             cache_metrics: self.cache_metrics.clone(),
             cache_state_metrics: self.cache_state_metrics.clone(),
@@ -413,6 +418,7 @@ where
             disable_bal_parallel_state_root: self.disable_bal_parallel_state_root,
             disable_bal_batch_io: self.disable_bal_batch_io,
             prewarm_results: prewarm_results.clone(),
+            probe_cold_reads,
         };
 
         let (prewarm_task, to_prewarm_task) =
