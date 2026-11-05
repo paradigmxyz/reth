@@ -12,7 +12,7 @@ use interprocess::local_socket::{
     GenericFilePath, ListenerOptions, ToFsName,
 };
 use jsonrpsee::{
-    core::{JsonRawValue, TEN_MB_SIZE_BYTES},
+    core::TEN_MB_SIZE_BYTES,
     server::{
         handle_rpc_call, middleware::rpc::RpcServiceT, stop_channel, BatchRequestConfig,
         ConnectionGuard, ConnectionPermit, IdProvider, RandomIntegerIdProvider, ServerHandle,
@@ -344,8 +344,7 @@ where
             };
             drop(conn);
 
-            (rp.is_method_call() || rp.is_batch())
-                .then(|| String::from(Box::<str>::from(rp.into_json())))
+            (rp.is_method_call() || rp.is_batch()).then(|| rp.into_json())
         }));
 
         Box::pin(async move {
@@ -395,7 +394,7 @@ where
         StreamCodec::stream_incoming().with_max_length(server_cfg.max_request_body_size as usize);
     let ipc = IpcConn(tokio_util::codec::Decoder::framed(codec, local_socket_stream));
 
-    let (tx, rx) = mpsc::channel::<Box<JsonRawValue>>(MESSAGE_BUFFER_CAPACITY);
+    let (tx, rx) = mpsc::channel::<String>(MESSAGE_BUFFER_CAPACITY);
     let method_sink = MethodSink::new_with_limit(tx, server_cfg.max_response_body_size);
     let service = TowerServiceNoHttp {
         inner: ServiceData {
@@ -422,7 +421,7 @@ async fn to_ipc_service<S, T>(
     ipc: IpcConn<JsonRpcStream<T>>,
     service: S,
     stop_handle: StopHandle,
-    rx: mpsc::Receiver<Box<JsonRawValue>>,
+    rx: mpsc::Receiver<String>,
 ) where
     S: Service<String, Response = Option<String>> + Send + 'static,
     S::Error: Into<Box<dyn core::error::Error + Send + Sync>>,
@@ -449,7 +448,7 @@ async fn to_ipc_service<S, T>(
             }
             item = rx_item.next() => {
                 let Some(item) = item else { break };
-                conn.push_back(String::from(Box::<str>::from(item)));
+                conn.push_back(item);
             }
             _ = &mut stopped => {
                 // shutdown

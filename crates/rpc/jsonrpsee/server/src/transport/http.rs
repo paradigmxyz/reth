@@ -136,7 +136,7 @@ pub mod response {
 
     /// Create a response from a method response.
     pub fn from_method_response(rp: MethodResponse) -> HttpResponse {
-        let body = String::from(Box::<str>::from(rp.into_json()));
+        let body = rp.into_json();
         from_template(hyper::StatusCode::OK, body, JSON)
     }
 

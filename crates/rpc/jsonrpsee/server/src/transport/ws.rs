@@ -17,7 +17,6 @@ use jsonrpsee_types::{
     error::{reject_too_big_request, ErrorCode},
     Id,
 };
-use serde_json::value::RawValue;
 use soketto::connection::Error as SokettoError;
 use tokio::{
     sync::{mpsc, oneshot},
@@ -33,9 +32,9 @@ pub use soketto::handshake::http::is_upgrade_request;
 
 pub(crate) async fn send_message(
     sender: &mut Sender,
-    response: Box<RawValue>,
+    response: String,
 ) -> Result<(), SokettoError> {
-    sender.send_text_owned(String::from(Box::<str>::from(response))).await?;
+    sender.send_text_owned(response).await?;
     sender.flush().await
 }
 
@@ -46,7 +45,7 @@ pub(crate) struct BackgroundTaskParams<S> {
     pub(crate) ws_receiver: Receiver,
     pub(crate) rpc_service: S,
     pub(crate) sink: MethodSink,
-    pub(crate) rx: mpsc::Receiver<Box<RawValue>>,
+    pub(crate) rx: mpsc::Receiver<String>,
     /// Held by every running call, so that a graceful shutdown can wait for them.
     pub(crate) pending_calls: mpsc::Sender<()>,
     pub(crate) pending_calls_completed: mpsc::Receiver<()>,
@@ -191,7 +190,7 @@ where
 
 /// A task that waits for new messages via the `rx channel` and sends them out on the `WebSocket`.
 async fn send_task(
-    mut rx: mpsc::Receiver<Box<RawValue>>,
+    mut rx: mpsc::Receiver<String>,
     mut ws_sender: Sender,
     write_timeout: Duration,
     mut stop: oneshot::Receiver<()>,
