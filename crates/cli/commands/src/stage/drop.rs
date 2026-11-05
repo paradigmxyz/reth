@@ -10,8 +10,8 @@ use reth_db_api::{
 };
 use reth_db_common::{
     init::{
-        insert_genesis_account_history, insert_genesis_header, insert_genesis_state,
-        insert_genesis_storage_history,
+        insert_genesis_account_history, insert_genesis_hashes, insert_genesis_header,
+        insert_genesis_state, insert_genesis_storage_history,
     },
     DbTool,
 };
@@ -63,6 +63,7 @@ impl<C: ChainSpecParser> Command<C> {
         // have deleted them, BUT before we have committed the checkpoints to the database, we'd
         // lose essential data.
         let static_file_provider = tool.provider_factory.static_file_provider();
+        let genesis_block = static_file_provider.genesis_block_number();
         for segment in static_file_segments {
             if let Some(highest_block) = static_file_provider.get_highest_static_file_block(segment)
             {
@@ -93,11 +94,12 @@ impl<C: ChainSpecParser> Command<C> {
                             .unwrap_or_default();
                         writer.prune_transaction_senders(to_delete, 0)?;
                     }
+                    // Changesets are pruned down to (and keep) the genesis block.
                     StaticFileSegment::AccountChangeSets => {
-                        writer.prune_account_changesets(highest_block)?;
+                        writer.prune_account_changesets(genesis_block)?;
                     }
                     StaticFileSegment::StorageChangeSets => {
-                        writer.prune_storage_changesets(highest_block)?;
+                        writer.prune_storage_changesets(genesis_block)?;
                     }
                 }
             }
@@ -133,7 +135,8 @@ impl<C: ChainSpecParser> Command<C> {
                 reset_stage_checkpoint(tx, StageId::SenderRecovery)?;
             }
             StageEnum::Execution => {
-                if provider_rw.cached_storage_settings().use_hashed_state() {
+                let use_hashed_state = provider_rw.cached_storage_settings().use_hashed_state();
+                if use_hashed_state {
                     tx.clear::<tables::HashedAccounts>()?;
                     tx.clear::<tables::HashedStorages>()?;
                     reset_stage_checkpoint(tx, StageId::AccountHashing)?;
@@ -144,7 +147,11 @@ impl<C: ChainSpecParser> Command<C> {
                 }
                 tx.clear::<tables::AccountChangeSets>()?;
                 tx.clear::<tables::StorageChangeSets>()?;
-                tx.clear::<tables::Bytecodes>()?;
+                // Bytecodes are content-addressed, keep them in v2 where genesis code is not
+                // rewritten.
+                if !use_hashed_state {
+                    tx.clear::<tables::Bytecodes>()?;
+                }
                 tx.clear::<tables::Receipts<ReceiptTy<N>>>()?;
 
                 reset_prune_checkpoint(tx, PruneSegment::Receipts)?;
@@ -152,7 +159,13 @@ impl<C: ChainSpecParser> Command<C> {
                 reset_stage_checkpoint(tx, StageId::Execution)?;
 
                 let alloc = &self.env.chain.genesis().alloc;
-                insert_genesis_state(&provider_rw, alloc.iter())?;
+                if use_hashed_state {
+                    // Genesis changesets and receipts stay in static files, so only the genesis
+                    // state is restored. Bytecodes are not written by the hashing helper.
+                    insert_genesis_hashes(&provider_rw, alloc.iter())?;
+                } else {
+                    insert_genesis_state(&provider_rw, alloc.iter())?;
+                }
             }
             StageEnum::AccountHashing => {
                 tx.clear::<tables::HashedAccounts>()?;
@@ -265,4 +278,49 @@ fn reset_stage_checkpoint(
     tx.put::<tables::StageCheckpoints>(stage_id.to_string(), Default::default())?;
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::common::AccessRights;
+    use clap::Parser;
+    use reth_db_api::database::Database;
+    use reth_ethereum_cli::chainspec::EthereumChainSpecParser;
+    use reth_node_ethereum::EthereumNode;
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn drop_execution_stage_restores_genesis_state() {
+        let datadir = tempfile::tempdir().unwrap();
+        let datadir = datadir.path().to_str().unwrap();
+        let cmd = Command::<EthereumChainSpecParser>::parse_from([
+            "reth",
+            "--datadir",
+            datadir,
+            "--chain",
+            "dev",
+            "execution",
+        ]);
+        let alloc_len = cmd.env.chain.genesis().alloc.len();
+        let env = Command::<EthereumChainSpecParser>::parse_from([
+            "reth",
+            "--datadir",
+            datadir,
+            "--chain",
+            "dev",
+            "execution",
+        ])
+        .env;
+
+        cmd.execute::<EthereumNode>(reth_tasks::Runtime::test()).await.unwrap();
+
+        let Environment { provider_factory, .. } =
+            env.init::<EthereumNode>(AccessRights::RO, reth_tasks::Runtime::test()).unwrap();
+        let accounts = provider_factory
+            .db_ref()
+            .view(|tx| tx.entries::<tables::HashedAccounts>())
+            .unwrap()
+            .unwrap();
+        assert_eq!(accounts, alloc_len);
+    }
 }
