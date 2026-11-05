@@ -70,13 +70,7 @@ impl<RpcMiddleware> IpcServer<RpcMiddleware> {
 impl<RpcMiddleware> IpcServer<RpcMiddleware>
 where
     RpcMiddleware: Layer<RpcService> + Clone + Send + 'static,
-    RpcMiddleware::Service: RpcServiceT<
-            MethodResponse = MethodResponse,
-            BatchResponse = MethodResponse,
-            NotificationResponse = MethodResponse,
-        > + Send
-        + Sync
-        + 'static,
+    RpcMiddleware::Service: RpcServiceT + Send + Sync + 'static,
 {
     /// Start responding to connections requests.
     ///
@@ -325,13 +319,7 @@ struct TowerServiceNoHttp<L> {
 impl<RpcMiddleware> Service<String> for TowerServiceNoHttp<RpcMiddleware>
 where
     RpcMiddleware: Layer<RpcService>,
-    RpcMiddleware::Service: RpcServiceT<
-            MethodResponse = MethodResponse,
-            BatchResponse = MethodResponse,
-            NotificationResponse = MethodResponse,
-        > + Send
-        + Sync
-        + 'static,
+    RpcMiddleware::Service: RpcServiceT + Send + Sync + 'static,
 {
     /// The response of a handled RPC call
     ///
@@ -423,13 +411,7 @@ struct ProcessConnection<RpcMiddleware> {
 fn process_connection<RpcMiddleware>(params: ProcessConnection<RpcMiddleware>)
 where
     RpcMiddleware: Layer<RpcService> + Send + 'static,
-    RpcMiddleware::Service: RpcServiceT<
-            MethodResponse = MethodResponse,
-            BatchResponse = MethodResponse,
-            NotificationResponse = MethodResponse,
-        > + Send
-        + Sync
-        + 'static,
+    RpcMiddleware::Service: RpcServiceT + Send + Sync + 'static,
 {
     let ProcessConnection {
         rpc_middleware,
@@ -1085,14 +1067,10 @@ mod tests {
         where
             S: Send + Sync + RpcServiceT,
         {
-            type MethodResponse = S::MethodResponse;
-            type NotificationResponse = S::NotificationResponse;
-            type BatchResponse = S::BatchResponse;
-
             fn call<'a>(
                 &self,
                 mut req: Request<'a>,
-            ) -> impl Future<Output = Self::MethodResponse> + Send + 'a {
+            ) -> impl Future<Output = MethodResponse> + Send + 'a {
                 // Re-direct all calls that isn't `say_hello` to `say_goodbye`
                 if req.method == "say_hello" {
                     req.method = "say_goodbye".into();
@@ -1106,7 +1084,7 @@ mod tests {
             fn batch<'a>(
                 &self,
                 mut batch: Batch<'a>,
-            ) -> impl Future<Output = Self::BatchResponse> + Send + 'a {
+            ) -> impl Future<Output = MethodResponse> + Send + 'a {
                 for call in batch.iter_mut() {
                     match call {
                         Ok(BatchEntry::Call(req)) => {
@@ -1134,7 +1112,7 @@ mod tests {
             fn notification<'a>(
                 &self,
                 mut n: Notification<'a>,
-            ) -> impl Future<Output = Self::NotificationResponse> + Send + 'a {
+            ) -> impl Future<Output = MethodResponse> + Send + 'a {
                 if n.method == "say_hello" {
                     n.method = "say_goodbye".into();
                 } else if n.method == "say_goodbye" {
