@@ -181,6 +181,9 @@ where
             .iter()
             .map(|block| block.recovered_block().num_hash())
             .collect::<Vec<_>>();
+        let _pacer = WritebackPacer::start(
+            &reth_db::Database::path(self.provider.db_ref()).join("mdbx.dat"),
+        );
         let provider_rw = self.provider.database_provider_rw()?;
         let last_state_trie_block = if let Some(block) = input.state_trie_blocks().last() {
             // Newly written static-file headers are not readable until commit finalizes their
@@ -863,5 +866,52 @@ mod tests {
             account_at_2.nonce, nonce_after_reorg_block2,
             "signer nonce at block 2 must reflect reorged execution"
         );
+    }
+}
+
+/// Starts writeback of the database file's dirty pages every [`WritebackPacer::INTERVAL`] while a
+/// save is written (experiment), so that its durable commit has less to flush at once.
+#[derive(Debug)]
+struct WritebackPacer {
+    stop: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    handle: Option<std::thread::JoinHandle<()>>,
+}
+
+impl WritebackPacer {
+    const INTERVAL: std::time::Duration = std::time::Duration::from_millis(20);
+
+    #[cfg(target_os = "linux")]
+    fn start(path: &std::path::Path) -> Option<Self> {
+        use std::os::fd::AsRawFd;
+        let file = std::fs::OpenOptions::new().read(true).write(true).open(path).ok()?;
+        let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let flag = std::sync::Arc::clone(&stop);
+        let handle = std::thread::Builder::new()
+            .name("writeback-pacer".to_string())
+            .spawn(move || {
+                while !flag.load(std::sync::atomic::Ordering::Relaxed) {
+                    // SAFETY: the descriptor is open for the lifetime of `file`.
+                    unsafe {
+                        libc::sync_file_range(file.as_raw_fd(), 0, 0, libc::SYNC_FILE_RANGE_WRITE)
+                    };
+                    std::thread::sleep(Self::INTERVAL);
+                }
+            })
+            .ok()?;
+        Some(Self { stop, handle: Some(handle) })
+    }
+
+    #[cfg(not(target_os = "linux"))]
+    fn start(_path: &std::path::Path) -> Option<Self> {
+        None
+    }
+}
+
+impl Drop for WritebackPacer {
+    fn drop(&mut self) {
+        self.stop.store(true, std::sync::atomic::Ordering::Relaxed);
+        if let Some(handle) = self.handle.take() {
+            let _ = handle.join();
+        }
     }
 }
