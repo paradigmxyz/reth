@@ -59,7 +59,14 @@ use tracing::{debug, debug_span, instrument, trace, trace_span, warn, Span};
 
 /// Number of transactions ahead of block execution whose stale results idle speculation workers
 /// execute again.
-const REFRESH_WINDOW: usize = 64;
+const REFRESH_WINDOW_DEFAULT: usize = 64;
+
+static REFRESH_WINDOW: std::sync::LazyLock<usize> = std::sync::LazyLock::new(|| {
+    std::env::var("RETH_NP_REFRESH_WINDOW")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(REFRESH_WINDOW_DEFAULT)
+});
 
 /// Number of idle rounds an idle speculation worker spins before it waits for new work, so that
 /// it does not take CPU time from the state root computation.
@@ -425,7 +432,7 @@ where
             let generation = results.predicted().generation();
             let from = ctx.executed_tx_index.load(Ordering::Relaxed) + 1;
             let mut refreshed = false;
-            while let Some(index) = results.take_maybe_stale(from..from + REFRESH_WINDOW) {
+            while let Some(index) = results.take_maybe_stale(from..from + *REFRESH_WINDOW) {
                 let Some((tx, _)) = queue.get(index) else { continue };
                 if !results.begin_speculation(index) {
                     // The worker executing it checks it again when it stores its result.

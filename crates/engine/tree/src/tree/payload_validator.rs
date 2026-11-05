@@ -174,7 +174,11 @@ pub use crate::tree::types::ValidationOutcome;
 
 /// How long block execution waits for an in-flight speculative execution of a transaction before
 /// executing the transaction itself.
-const SPECULATION_RACE_AFTER: Duration = Duration::from_micros(300);
+static SPECULATION_RACE_AFTER: std::sync::LazyLock<Duration> = std::sync::LazyLock::new(|| {
+    Duration::from_micros(
+        std::env::var("RETH_NP_RACE_US").ok().and_then(|v| v.parse().ok()).unwrap_or(300),
+    )
+});
 
 /// Multiplier over the parent's gas limit beyond which a payload must pass pre-execution
 /// validation.
@@ -1289,7 +1293,7 @@ where
                     if outcome == Err(ReuseMiss::Missing) && results.is_speculating(index) {
                         let wait_start = Instant::now();
                         while results.is_speculating(index) &&
-                            wait_start.elapsed() < SPECULATION_RACE_AFTER
+                            wait_start.elapsed() < *SPECULATION_RACE_AFTER
                         {
                             std::hint::spin_loop();
                         }
