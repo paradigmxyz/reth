@@ -129,44 +129,6 @@ impl Serialize for Batch<'_> {
     }
 }
 
-#[derive(Debug, Clone)]
-/// A marker type to indicate that the request is a subscription for the [`RpcServiceT::call`]
-/// method.
-pub struct IsSubscription {
-    sub_id: Id<'static>,
-    unsub_id: Id<'static>,
-    unsub_method: String,
-}
-
-impl IsSubscription {
-    /// Create a new [`IsSubscription`] instance.
-    pub fn new(sub_id: Id<'static>, unsub_id: Id<'static>, unsub_method: String) -> Self {
-        Self { sub_id, unsub_id, unsub_method }
-    }
-
-    /// Get the request id of the subscription calls.
-    pub fn sub_req_id(&self) -> Id<'static> {
-        self.sub_id.clone()
-    }
-
-    /// Get the request id of the unsubscription call.
-    pub fn unsub_req_id(&self) -> Id<'static> {
-        self.unsub_id.clone()
-    }
-
-    /// Get the unsubscription method name.
-    pub fn unsubscribe_method(&self) -> &str {
-        &self.unsub_method
-    }
-}
-
-/// An extension type for the [`RpcServiceT::batch`] for the expected id range of the batch entries.
-#[derive(Debug, Clone)]
-pub struct IsBatch {
-    /// The range of ids for the batch entries.
-    pub id_range: std::ops::Range<u64>,
-}
-
 /// A batch entry specific for the [`RpcServiceT::batch`] method to support both
 /// method calls and notifications.
 #[derive(Debug, Clone, Serialize)]
@@ -317,15 +279,6 @@ impl<L> RpcServiceBuilder<L> {
         RpcServiceBuilder(self.0.layer_fn(f))
     }
 
-    /// Add a logging layer to [`RpcServiceBuilder`]
-    ///
-    /// This logs each request and response for every call.
-    pub fn rpc_logger(
-        self,
-        max_log_len: u32,
-    ) -> RpcServiceBuilder<Stack<layer::RpcLoggerLayer, L>> {
-        RpcServiceBuilder(self.0.layer(layer::RpcLoggerLayer::new(max_log_len)))
-    }
 
     /// Wrap the service `S` with the middleware.
     pub fn service<S>(&self, service: S) -> L::Service
