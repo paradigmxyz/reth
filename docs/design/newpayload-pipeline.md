@@ -138,6 +138,19 @@ derek, 6 run pairs, e0f179d60e against main:
 | End-to-end Mgas/s | 923 | 990 | +7.3% |
 | State root after execution | 1.25 ms | 2.70 ms | +115% |
 
+derek drops the page cache before every run (125 GB of memory), so its blocks wait on disk reads
+much more than the local replays, whose page cache stays warm: main takes 29 ms there against
+15.5 ms locally. What did not help on derek, each 4 run pairs against the branch:
+
+| Experiment | Mean | Mgas/s |
+|---|---|---|
+| Sparse trie applies streamed updates every 16 messages (paradigmxyz/reth#28297) | +1.2% | -1.3% |
+| Global rayon pool halved | -0.2% | +1.5% |
+| Storage trie jobs on a pool that blocks instead of rayon's spinning workers | +0.1% | -1.0% |
+
+With the rayon and proof pools below execution priority, their spinning no longer costs
+execution time.
+
 The root after the last transaction (local p50): the hashing task has seen every update after
 0.29 ms, most of which is the post-execution changes, the sparse trie after 0.46 ms, and the root
 is ready after 1.46 ms. So about 1 ms is trie work after the last update, not a backlog of
