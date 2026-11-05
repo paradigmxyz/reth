@@ -45,6 +45,9 @@ use tower::{util::Oneshot, ServiceExt};
 /// Default for how long a connection may take to send its first request.
 pub(crate) const DEFAULT_FIRST_REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 
+/// Default timeout for writing a single message to a WebSocket connection, matching geth.
+pub(crate) const DEFAULT_WS_WRITE_TIMEOUT: Duration = Duration::from_secs(10);
+
 #[derive(Debug, Copy, Clone)]
 pub(crate) struct TowerToHyperService<S> {
     service: S,
