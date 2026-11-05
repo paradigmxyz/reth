@@ -7,6 +7,7 @@ use alloy_eips::{
     eip4788::{BEACON_ROOTS_ADDRESS, BEACON_ROOTS_CODE, SYSTEM_ADDRESS},
     eip4895::Withdrawal,
     eip7002::{WITHDRAWAL_REQUEST_PREDEPLOY_ADDRESS, WITHDRAWAL_REQUEST_PREDEPLOY_CODE},
+    eip7251::{CONSOLIDATION_REQUEST_PREDEPLOY_ADDRESS, CONSOLIDATION_REQUEST_PREDEPLOY_CODE},
     eip7685::EMPTY_REQUESTS_HASH,
 };
 use alloy_primitives::{
@@ -44,22 +45,26 @@ fn create_database_with_beacon_root_contract() -> InMemoryDB {
     db
 }
 
+/// Deploys the EIP-7002 and EIP-7251 request contracts, which Prague blocks call.
+fn insert_request_contracts(db: &mut InMemoryDB) {
+    for (address, code) in [
+        (WITHDRAWAL_REQUEST_PREDEPLOY_ADDRESS, WITHDRAWAL_REQUEST_PREDEPLOY_CODE.clone()),
+        (CONSOLIDATION_REQUEST_PREDEPLOY_ADDRESS, CONSOLIDATION_REQUEST_PREDEPLOY_CODE.clone()),
+    ] {
+        let account = AccountInfo {
+            nonce: 1,
+            balance: U256::ZERO,
+            code_hash: keccak256(&code),
+            code: Some(Bytecode::new_raw(code)),
+            ..AccountInfo::empty()
+        };
+        db.insert_account_info(&address, account);
+    }
+}
+
 fn create_database_with_withdrawal_requests_contract() -> InMemoryDB {
     let mut db = InMemoryDB::default();
-
-    let withdrawal_requests_contract_account = AccountInfo {
-        nonce: 1,
-        balance: U256::ZERO,
-        code_hash: keccak256(WITHDRAWAL_REQUEST_PREDEPLOY_CODE.clone()),
-        code: Some(Bytecode::new_raw(WITHDRAWAL_REQUEST_PREDEPLOY_CODE.clone())),
-        ..AccountInfo::empty()
-    };
-
-    db.insert_account_info(
-        &WITHDRAWAL_REQUEST_PREDEPLOY_ADDRESS,
-        withdrawal_requests_contract_account,
-    );
-
+    insert_request_contracts(&mut db);
     db
 }
 
@@ -226,6 +231,8 @@ fn eip_4788_genesis_call() {
         ChainSpecBuilder::from(&*MAINNET)
             .shanghai_activated()
             .with_fork(EthereumHardfork::Cancun, ForkCondition::Timestamp(0))
+            // The DAO drain would create its accounts at block 0.
+            .with_fork(EthereumHardfork::Dao, ForkCondition::Never)
             .build(),
     );
 
@@ -334,6 +341,7 @@ fn create_database_with_block_hashes(latest_block: u64) -> InMemoryDB {
     };
 
     db.insert_account_info(&HISTORY_STORAGE_ADDRESS, blockhashes_contract_account);
+    insert_request_contracts(&mut db);
 
     db
 }
@@ -704,7 +712,7 @@ fn test_balance_increment_not_duplicated() {
 
     let withdrawal_recipient = address!("0x1000000000000000000000000000000000000000");
 
-    let mut db = InMemoryDB::default();
+    let mut db = create_database_with_withdrawal_requests_contract();
     let initial_balance = 100;
     db.insert_account_info(
         &withdrawal_recipient,
