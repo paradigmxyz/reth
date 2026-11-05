@@ -570,9 +570,12 @@ pub struct RpcServerArgs {
     #[arg(long, default_value_t = DefaultRpcServerArgs::get_global().auth_ipc)]
     pub auth_ipc: bool,
 
-    /// Filename for auth IPC socket/pipe within the datadir
-    #[arg(long = "auth-ipc.path", default_value_t = DefaultRpcServerArgs::get_global().auth_ipc_path.clone())]
-    pub auth_ipc_path: String,
+    /// Path for the auth IPC socket/pipe. Explicit paths are used unchanged.
+    ///
+    /// If omitted, uses `/tmp/reth_engine_api.ipc`, with `-<instance>` appended when
+    /// `--instance` is set. Applications can override this default via `DefaultRpcServerArgs`.
+    #[arg(long = "auth-ipc.path")]
+    pub auth_ipc_path: Option<String>,
 
     /// Disable the auth/engine API server.
     ///
@@ -839,6 +842,8 @@ impl RpcServerArgs {
     /// * The `http_port` is scaled by a factor of `-instance`
     /// * The `ws_port` is scaled by a factor of `instance * 2`
     /// * The `ipcpath` is appended with the instance number: `/tmp/reth.ipc-<instance>`
+    /// * If `auth_ipc_path` is `None`, the default auth IPC path is appended with the instance
+    ///   number: `/tmp/reth_engine_api.ipc-<instance>`. Explicit paths are left unchanged.
     ///
     /// # Panics
     /// Warning: if `instance` is zero in debug mode, this will panic.
@@ -859,6 +864,9 @@ impl RpcServerArgs {
             self.ws_port += instance * 2 - 2;
             // append instance file to ipc path
             self.ipcpath = format!("{}-{}", self.ipcpath, instance);
+            if self.auth_ipc_path.is_none() {
+                self.auth_ipc_path = Some(format!("{}-{instance}", self.auth_ipc_path()));
+            }
         }
     }
 
@@ -933,6 +941,13 @@ impl RpcServerArgs {
         self.rpc_force_blob_sidecar_upcasting = true;
         self
     }
+
+    /// Returns the auth IPC endpoint to bind after instance adjustment.
+    ///
+    /// If no explicit or instance-adjusted path is set, returns the global default.
+    pub fn auth_ipc_path(&self) -> &str {
+        self.auth_ipc_path.as_deref().unwrap_or(&DefaultRpcServerArgs::get_global().auth_ipc_path)
+    }
 }
 
 impl Default for RpcServerArgs {
@@ -958,7 +973,7 @@ impl Default for RpcServerArgs {
             auth_port,
             auth_jwtsecret,
             auth_ipc,
-            auth_ipc_path,
+            auth_ipc_path: _,
             disable_auth_server,
             rpc_jwtsecret,
             rpc_disable_metrics,
@@ -1007,7 +1022,7 @@ impl Default for RpcServerArgs {
             auth_jwtsecret,
             auth_jwtsecret_hex: None,
             auth_ipc,
-            auth_ipc_path,
+            auth_ipc_path: None,
             disable_auth_server,
             rpc_jwtsecret,
             rpc_disable_metrics,
@@ -1315,7 +1330,7 @@ mod tests {
             auth_jwtsecret: Some(std::path::PathBuf::from("/tmp/jwt.hex")),
             auth_jwtsecret_hex: None,
             auth_ipc: false,
-            auth_ipc_path: "engine.ipc".to_string(),
+            auth_ipc_path: Some("engine.ipc".to_string()),
             disable_auth_server: false,
             rpc_jwtsecret: Some(
                 JwtSecret::from_hex(
@@ -1487,5 +1502,45 @@ mod tests {
         ]);
 
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_adjust_instance_ports_suffixes_ipc_paths() {
+        let paths: Vec<_> = (1..=3u16)
+            .map(|instance| {
+                let mut args = RpcServerArgs::default();
+                let ipcpath = args.ipcpath.clone();
+                let auth_ipc_path = args.auth_ipc_path().to_string();
+                args.adjust_instance_ports(Some(instance));
+                assert_eq!(args.ipcpath, format!("{ipcpath}-{instance}"));
+                assert_eq!(args.auth_ipc_path(), format!("{auth_ipc_path}-{instance}"));
+                args.auth_ipc_path().to_string()
+            })
+            .collect();
+
+        assert_eq!(
+            paths,
+            [
+                "/tmp/reth_engine_api.ipc-1",
+                "/tmp/reth_engine_api.ipc-2",
+                "/tmp/reth_engine_api.ipc-3"
+            ]
+        );
+
+        // Without an instance the paths are left untouched.
+        let mut args = RpcServerArgs::default();
+        let auth_ipc_path = args.auth_ipc_path().to_string();
+        args.adjust_instance_ports(None);
+        assert_eq!(args.auth_ipc_path(), auth_ipc_path);
+    }
+
+    #[test]
+    fn test_adjust_instance_ports_preserves_explicit_auth_ipc_path() {
+        for path in ["engine.ipc", constants::DEFAULT_ENGINE_API_IPC_ENDPOINT] {
+            let mut args =
+                CommandParser::<RpcServerArgs>::parse_from(["reth", "--auth-ipc.path", path]).args;
+            args.adjust_instance_ports(Some(2));
+            assert_eq!(args.auth_ipc_path(), path);
+        }
     }
 }

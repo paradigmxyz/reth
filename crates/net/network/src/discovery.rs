@@ -567,7 +567,6 @@ impl Discovery {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use secp256k1::SECP256K1;
     use std::{
         net::{Ipv4Addr, Ipv6Addr, SocketAddrV4},
         time::Duration,
@@ -575,7 +574,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn test_discovery_setup() {
-        let (secret_key, _) = SECP256K1.generate_keypair(&mut rand_08::thread_rng());
+        let (secret_key, _) = secp256k1::generate_keypair(&mut rand::rng());
         let discovery_addr = SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, 0));
         let _discovery = Discovery::new(
             discovery_addr,
@@ -595,7 +594,7 @@ mod tests {
     use tracing::trace;
 
     async fn start_discovery_node(udp_port_discv4: u16, udp_port_discv5: u16) -> Discovery {
-        let secret_key = SecretKey::new(&mut rand_08::thread_rng());
+        let secret_key = SecretKey::new(&mut rand::rng());
 
         let discv4_addr = format!("127.0.0.1:{udp_port_discv4}").parse().unwrap();
         let discv5_addr: SocketAddr = format!("127.0.0.1:{udp_port_discv5}").parse().unwrap();
@@ -622,7 +621,7 @@ mod tests {
     }
 
     async fn start_discv5_only(config: reth_discv5::Config, nat: Option<NatResolver>) -> Discovery {
-        let secret_key = SecretKey::new(&mut rand_08::thread_rng());
+        let secret_key = SecretKey::new(&mut rand::rng());
         Discovery::new(
             "127.0.0.1:30303".parse().unwrap(),
             "127.0.0.1:0".parse().unwrap(),
@@ -708,7 +707,7 @@ mod tests {
 
     #[test]
     fn discv5_enr_advertises_bound_rlpx_port() {
-        let secret_key = SecretKey::new(&mut rand_08::thread_rng());
+        let secret_key = SecretKey::new(&mut rand::rng());
 
         let bound_rlpx_port = 30307;
         let discv5_addr: SocketAddr = "127.0.0.1:0".parse().unwrap();
@@ -724,7 +723,7 @@ mod tests {
 
     #[test]
     fn discv5_enr_preserves_configured_rlpx_port() {
-        let secret_key = SecretKey::new(&mut rand_08::thread_rng());
+        let secret_key = SecretKey::new(&mut rand::rng());
 
         let advertised_addr: SocketAddr = "127.0.0.1:30308".parse().unwrap();
         let discv5_addr: SocketAddr = "127.0.0.1:0".parse().unwrap();
@@ -822,7 +821,7 @@ mod tests {
 
     /// Starts a discovery node with discv4 and discv5 sharing the same UDP port.
     async fn start_shared_port_node(port: u16) -> Discovery {
-        let secret_key = SecretKey::new(&mut rand_08::thread_rng());
+        let secret_key = SecretKey::new(&mut rand::rng());
         let disc_addr: SocketAddr = format!("127.0.0.1:{port}").parse().unwrap();
         // Use a non-zero TCP port so the node record isn't filtered out by
         // `on_node_record_update` (which drops peers with tcp port == 0).
@@ -968,7 +967,7 @@ mod tests {
         let port = probe.local_addr().unwrap().port();
         drop(probe);
 
-        let secret_key = SecretKey::new(&mut rand_08::thread_rng());
+        let secret_key = SecretKey::new(&mut rand::rng());
         let v4_addr: SocketAddr = format!("0.0.0.0:{port}").parse().unwrap();
         let tcp_addr: SocketAddr = "0.0.0.0:30303".parse().unwrap();
 
@@ -1027,8 +1026,8 @@ mod tests {
         let port = probe.local_addr().unwrap().port();
         drop(probe);
 
-        let secret_key = SecretKey::new(&mut rand_08::thread_rng());
-        let node_id = reth_network_peers::pk2id(&secret_key.public_key(SECP256K1));
+        let secret_key = SecretKey::new(&mut rand::rng());
+        let node_id = reth_network_peers::pk2id(&secret_key.public_key());
         let discovery_addr = SocketAddr::new(primary_ip, port);
         let tcp_addr = SocketAddr::new(tcp_ip, 30303);
 
@@ -1058,7 +1057,7 @@ mod tests {
         .expect("discovery should start with shared port + dual-stack");
 
         // Seed the discv4-only prober with the secondary endpoint.
-        let probe_sk = SecretKey::new(&mut rand_08::thread_rng());
+        let probe_sk = SecretKey::new(&mut rand::rng());
         let secondary_node =
             NodeRecord { address: secondary_ip, udp_port: port, tcp_port: port, id: node_id };
         let probe_config = Discv4ConfigBuilder::default()
@@ -1090,7 +1089,7 @@ mod tests {
         for peer_ip in [primary_ip, secondary_ip] {
             let node = NodeRecord { address: peer_ip, ..secondary_node };
             let socket = UdpSocket::bind((peer_ip, 0)).await.unwrap();
-            let secret_key = SecretKey::new(&mut rand_08::thread_rng());
+            let secret_key = SecretKey::new(&mut rand::rng());
             let record = NodeRecord::from_secret_key(socket.local_addr().unwrap(), &secret_key);
             let ping = reth_discv4::proto::Message::Ping(reth_discv4::proto::Ping {
                 from: record.into(),

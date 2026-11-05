@@ -7,9 +7,12 @@ use alloy_eips::{
     eip4788::{BEACON_ROOTS_ADDRESS, BEACON_ROOTS_CODE, SYSTEM_ADDRESS},
     eip4895::Withdrawal,
     eip7002::{WITHDRAWAL_REQUEST_PREDEPLOY_ADDRESS, WITHDRAWAL_REQUEST_PREDEPLOY_CODE},
+    eip7251::{CONSOLIDATION_REQUEST_PREDEPLOY_ADDRESS, CONSOLIDATION_REQUEST_PREDEPLOY_CODE},
     eip7685::EMPTY_REQUESTS_HASH,
 };
-use alloy_primitives::{address, b256, bytes, fixed_bytes, keccak256, Bytes, TxKind, B256, U256};
+use alloy_primitives::{
+    address, b256, bytes, fixed_bytes, keccak256, Address, Bytes, TxKind, B256, U256,
+};
 use evm2::{
     bytecode::Bytecode,
     evm::{AccountInfo, Database, InMemoryDB},
@@ -22,9 +25,7 @@ use reth_evm::{
 };
 use reth_evm_ethereum::EthEvmConfig;
 use reth_execution_types::{BlockExecutionResult, BundleSource, StateUpdate};
-use reth_primitives_traits::{
-    crypto::secp256k1::public_key_to_address, Block as _, RecoveredBlock,
-};
+use reth_primitives_traits::{Block as _, RecoveredBlock};
 use reth_testing_utils::generators::{self, sign_tx_with_key_pair};
 use std::sync::{mpsc, Arc};
 
@@ -44,22 +45,26 @@ fn create_database_with_beacon_root_contract() -> InMemoryDB {
     db
 }
 
+/// Deploys the EIP-7002 and EIP-7251 request contracts, which Prague blocks call.
+fn insert_request_contracts(db: &mut InMemoryDB) {
+    for (address, code) in [
+        (WITHDRAWAL_REQUEST_PREDEPLOY_ADDRESS, WITHDRAWAL_REQUEST_PREDEPLOY_CODE.clone()),
+        (CONSOLIDATION_REQUEST_PREDEPLOY_ADDRESS, CONSOLIDATION_REQUEST_PREDEPLOY_CODE.clone()),
+    ] {
+        let account = AccountInfo {
+            nonce: 1,
+            balance: U256::ZERO,
+            code_hash: keccak256(&code),
+            code: Some(Bytecode::new_raw(code)),
+            ..AccountInfo::empty()
+        };
+        db.insert_account_info(&address, account);
+    }
+}
+
 fn create_database_with_withdrawal_requests_contract() -> InMemoryDB {
     let mut db = InMemoryDB::default();
-
-    let withdrawal_requests_contract_account = AccountInfo {
-        nonce: 1,
-        balance: U256::ZERO,
-        code_hash: keccak256(WITHDRAWAL_REQUEST_PREDEPLOY_CODE.clone()),
-        code: Some(Bytecode::new_raw(WITHDRAWAL_REQUEST_PREDEPLOY_CODE.clone())),
-        ..AccountInfo::empty()
-    };
-
-    db.insert_account_info(
-        &WITHDRAWAL_REQUEST_PREDEPLOY_ADDRESS,
-        withdrawal_requests_contract_account,
-    );
-
+    insert_request_contracts(&mut db);
     db
 }
 
@@ -226,6 +231,8 @@ fn eip_4788_genesis_call() {
         ChainSpecBuilder::from(&*MAINNET)
             .shanghai_activated()
             .with_fork(EthereumHardfork::Cancun, ForkCondition::Timestamp(0))
+            // The DAO drain would create its accounts at block 0.
+            .with_fork(EthereumHardfork::Dao, ForkCondition::Never)
             .build(),
     );
 
@@ -334,6 +341,7 @@ fn create_database_with_block_hashes(latest_block: u64) -> InMemoryDB {
     };
 
     db.insert_account_info(&HISTORY_STORAGE_ADDRESS, blockhashes_contract_account);
+    insert_request_contracts(&mut db);
 
     db
 }
@@ -554,7 +562,8 @@ fn eip_7002() {
     let mut db = create_database_with_withdrawal_requests_contract();
 
     let sender_key_pair = generators::generate_key(&mut generators::rng());
-    let sender_address = public_key_to_address(sender_key_pair.public_key());
+    let sender_address =
+        Address::from_raw_public_key(&sender_key_pair.public_key().serialize_uncompressed()[1..]);
 
     db.insert_account_info(
         &sender_address,
@@ -627,7 +636,8 @@ fn block_gas_limit_error() {
     // Generate a new key pair for the sender
     let sender_key_pair = generators::generate_key(&mut generators::rng());
     // Get the sender's address from the public key
-    let sender_address = public_key_to_address(sender_key_pair.public_key());
+    let sender_address =
+        Address::from_raw_public_key(&sender_key_pair.public_key().serialize_uncompressed()[1..]);
 
     // Insert the sender account into the state with a nonce of 1 and a balance of 1 ETH in Wei
     db.insert_account_info(
@@ -702,7 +712,7 @@ fn test_balance_increment_not_duplicated() {
 
     let withdrawal_recipient = address!("0x1000000000000000000000000000000000000000");
 
-    let mut db = InMemoryDB::default();
+    let mut db = create_database_with_withdrawal_requests_contract();
     let initial_balance = 100;
     db.insert_account_info(
         &withdrawal_recipient,
@@ -765,7 +775,8 @@ fn prepared_block_access_list_keeps_legacy_ef01_code() {
     let chain_spec = Arc::new(ChainSpecBuilder::from(&*MAINNET).berlin_activated().build());
 
     let sender_key_pair = generators::generate_key(&mut generators::rng());
-    let sender_address = public_key_to_address(sender_key_pair.public_key());
+    let sender_address =
+        Address::from_raw_public_key(&sender_key_pair.public_key().serialize_uncompressed()[1..]);
     let mut db = InMemoryDB::default();
     db.insert_account_info(
         &sender_address,
@@ -827,7 +838,8 @@ fn inspect_transaction_without_commit_returns_inspector() {
     let chain_spec = Arc::new(ChainSpecBuilder::from(&*MAINNET).cancun_activated().build());
 
     let sender_key_pair = generators::generate_key(&mut generators::rng());
-    let sender_address = public_key_to_address(sender_key_pair.public_key());
+    let sender_address =
+        Address::from_raw_public_key(&sender_key_pair.public_key().serialize_uncompressed()[1..]);
     let mut db = InMemoryDB::default();
     db.insert_account_info(
         &sender_address,

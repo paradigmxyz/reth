@@ -6,8 +6,11 @@ use alloy_primitives::{Address, B256, U256};
 use alloy_provider::{ext::DebugApi, Provider};
 use alloy_rpc_types_engine::ExecutionData;
 use alloy_rpc_types_eth::TransactionReceipt;
-use alloy_rpc_types_trace::geth::{
-    DiffMode, GethDebugTracingOptions, GethTrace, PreStateConfig, PreStateFrame, TraceResult,
+use alloy_rpc_types_trace::{
+    geth::{
+        DiffMode, GethDebugTracingOptions, GethTrace, PreStateConfig, PreStateFrame, TraceResult,
+    },
+    parity::{Delta, TraceResultsWithTransactionHash},
 };
 use evm2::BaseEvmTypes;
 use jsonrpsee::core::client::ClientT;
@@ -16,9 +19,9 @@ use reth_e2e_test_utils::E2ETestSetupExt;
 use reth_ethereum_primitives::{Block, EthPrimitives, Receipt, TransactionSigned};
 use reth_evm::{
     precompile_cache::PrecompileCacheMap, BlockExecutionError, BlockExecutionOutput, BlockExecutor,
-    BlockExecutorFactory, BlockTransactionResult, BundleState, ConfigureEngineEvm, ConfigureEvm,
-    DynDatabase, EvmEnvFor, EvmFor, ExecutableTxIterator, ExecutionCtxFor, ExecutorTx, GasOutput,
-    NextBlockEnvAttributes, RecoveredTx, SpecFor, StateUpdate,
+    BlockExecutorFactory, BundleState, ConfigureEngineEvm, ConfigureEvm, DynDatabase, EvmEnvFor,
+    EvmFor, ExecutableTxIterator, ExecutionCtxFor, ExecutorTx, GasOutput, NextBlockEnvAttributes,
+    RecoveredTx, SpecFor, StateUpdate,
 };
 use reth_evm_ethereum::{
     EthBlockAssembler, EthBlockExecutionCtx, EthBlockExecutor, EthBlockExecutorFactory,
@@ -42,13 +45,20 @@ use std::sync::Arc;
 const SETTLEMENT: U256 = U256::from_limbs([1_000_000_000, 0, 0, 0]);
 
 /// Traces and intermediate roots of a block's transactions include the changes the block executor
-/// applies on top of the EVM result, so they agree with the committed state.
+/// applies on top of the EVM result, so they agree with the committed state, both when the replay
+/// executes the transactions before the target and when it positions the state with the block's
+/// BAL.
 #[tokio::test]
 async fn replays_include_block_executor_settlement() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
 
-    let (mut node, wallet) =
-        SettlingNode::test_setup_for(EthereumHardfork::Prague).build_single().await?;
+    let (mut node, wallet) = SettlingNode::test_setup_for(EthereumHardfork::Prague)
+        .with_node_config_modifier(|mut config| {
+            config.rpc.rpc_state_cache.cache_computed_bals = true;
+            config
+        })
+        .build_single()
+        .await?;
     let provider = node.rpc_provider();
     let client = node.rpc_client().expect("the HTTP RPC server is enabled");
     let mut account = wallet.account(0);
@@ -64,11 +74,11 @@ async fn replays_include_block_executor_settlement() -> eyre::Result<()> {
 
     // The executor's settlement is part of the committed state.
     let mut balance = provider.get_balance(sender).number(0).await?;
-    let mut expected_diffs = Vec::new();
+    let mut expected = Vec::new();
     for (receipt, value) in mined.receipts.iter().zip(values) {
         let pre = balance;
         balance = pre - value - fee(receipt) + SETTLEMENT;
-        expected_diffs.push((receipt.transaction_hash, pre, balance));
+        expected.push((receipt.transaction_hash, pre, balance));
     }
     assert_eq!(provider.get_balance(sender).number(1).await?, balance);
 
@@ -76,18 +86,26 @@ async fn replays_include_block_executor_settlement() -> eyre::Result<()> {
         diff_mode: Some(true),
         ..Default::default()
     });
-    let mut diffs = Vec::new();
-    for (tx_hash, pre, post) in expected_diffs {
-        let trace = provider.debug_trace_transaction(tx_hash, opts.clone()).await?;
-        let diff = prestate_diff(trace)?;
-        assert_eq!(diff.pre[&sender].balance, Some(pre));
-        assert_eq!(diff.post[&sender].balance, Some(post));
-        diffs.push(diff);
-    }
+    let trace_transactions = async || -> eyre::Result<Vec<DiffMode>> {
+        let mut diffs = Vec::new();
+        for &(tx_hash, pre, post) in &expected {
+            let diff =
+                prestate_diff(provider.debug_trace_transaction(tx_hash, opts.clone()).await?)?;
+            assert_eq!(diff.pre[&sender].balance, Some(pre));
+            assert_eq!(diff.post[&sender].balance, Some(post));
+            diffs.push(diff);
+        }
+        Ok(diffs)
+    };
 
-    let block_traces =
-        provider.debug_trace_block_by_number(BlockNumberOrTag::Number(1), opts).await?;
-    let block_diffs = block_traces
+    // Without a cached BAL, the transactions before the target are replayed.
+    let cache = node.rpc.inner.eth_api().cache();
+    assert!(cache.get_recovered_block_and_maybe_bal(block_hash).await?.unwrap().1.is_none());
+    let diffs = trace_transactions().await?;
+
+    let block_diffs = provider
+        .debug_trace_block_by_number(BlockNumberOrTag::Number(1), opts.clone())
+        .await?
         .into_iter()
         .map(|result| match result {
             TraceResult::Success { result, .. } => prestate_diff(result),
@@ -96,10 +114,25 @@ async fn replays_include_block_executor_settlement() -> eyre::Result<()> {
         .collect::<eyre::Result<Vec<_>>>()?;
     assert_eq!(block_diffs, diffs);
 
+    let replays: Vec<TraceResultsWithTransactionHash> = client
+        .request("trace_replayBlockTransactions", (BlockNumberOrTag::Number(1), ["stateDiff"]))
+        .await?;
+    assert_eq!(replays.len(), expected.len());
+    for (replay, &(tx_hash, pre, post)) in replays.iter().zip(&expected) {
+        assert_eq!(replay.transaction_hash, tx_hash);
+        let state_diff = replay.full_trace.state_diff.as_ref().expect("stateDiff was requested");
+        assert_eq!(state_diff.0[&sender].balance, Delta::changed(pre, post));
+    }
+
     let roots =
         client.request::<Vec<B256>, _>("debug_intermediateRoots", (block_hash, None::<()>)).await?;
     assert_eq!(roots.len(), 2);
     assert_eq!(roots.last(), Some(&state_root));
+
+    // With the block's BAL cached, only the target transaction is executed.
+    let _: serde_json::Value = client.request("eth_getBlockAccessList", (block_hash,)).await?;
+    assert!(cache.get_recovered_block_and_maybe_bal(block_hash).await?.unwrap().1.is_some());
+    assert_eq!(trace_transactions().await?, diffs);
 
     Ok(())
 }
@@ -376,7 +409,8 @@ impl<'a> BlockExecutor for SettlingExecutor<'a> {
         let tx_type = tx.tx().tx_type();
         let blob_gas_used = tx.tx().blob_gas_used().unwrap_or_default();
 
-        let mut result = self.inner.execute_transaction_without_commit((tx_env, tx))?.into_result();
+        let (mut result, ..) =
+            self.inner.execute_transaction_without_commit((tx_env, tx))?.into_parts();
         let account = result
             .pending_state
             .account_changes_for(&sender)

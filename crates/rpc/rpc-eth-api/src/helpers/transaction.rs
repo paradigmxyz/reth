@@ -163,8 +163,7 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
                             receipt,
                             this.converter(),
                         )
-                        .transpose()
-                        .map_err(Self::Error::from)?
+                        .transpose()?
                     {
                         return Ok(receipt);
                     }

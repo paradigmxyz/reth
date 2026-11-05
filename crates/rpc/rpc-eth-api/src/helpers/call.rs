@@ -762,7 +762,8 @@ pub trait Call:
                     let res = executor
                         .execute_transaction_without_commit(tx)
                         .map_err(Self::Error::from_evm_err)?
-                        .into_result();
+                        .result()
+                        .clone();
                     let cache = executor.evm_mut().take_state_cache();
                     drop(executor);
                     db.cache.merge(cache);
@@ -792,7 +793,8 @@ pub trait Call:
                 let res = executor
                     .execute_transaction_without_commit(tx)
                     .map_err(Self::Error::from_evm_err)?
-                    .into_result();
+                    .result()
+                    .clone();
                 let cache = executor.evm_mut().take_state_cache();
                 drop(executor);
                 db.cache.merge(cache);
