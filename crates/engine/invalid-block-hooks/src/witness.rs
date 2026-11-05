@@ -21,7 +21,11 @@ use std::{
     fs::File,
     io::{BufWriter, Write},
     path::{Path, PathBuf},
-    sync::mpsc::{sync_channel, SyncSender, TrySendError},
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        mpsc::{sync_channel, SyncSender},
+        Arc,
+    },
     time::SystemTime,
 };
 use tracing::{error, warn, Span};
@@ -122,9 +126,8 @@ fn sort_bundle_state_for_comparison(bundle_state: &BundleState) -> BundleStateSo
 /// for debugging and analysis of invalid block execution.
 ///
 /// Blocks are processed on a dedicated thread, so the invalid payload status is returned without
-/// waiting for the re-execution. One block is processed at a time and at most one more waits;
-/// further invalid blocks are skipped until the thread catches up. Only the output of the most
-/// recently processed blocks is kept.
+/// waiting for the re-execution. One block is processed at a time, and invalid blocks that arrive
+/// meanwhile are skipped. Only the output of the most recently processed blocks is kept.
 #[derive(Debug, Clone)]
 pub struct InvalidBlockWitnessHook<P, E> {
     /// The provider to read the historical state and do the EVM execution.
@@ -138,6 +141,8 @@ pub struct InvalidBlockWitnessHook<P, E> {
     healthy_node_client: Option<jsonrpsee::http_client::HttpClient>,
     /// Sends invalid blocks to the thread that processes them.
     jobs: SyncSender<Box<dyn FnOnce() + Send>>,
+    /// Whether an invalid block is queued or being processed.
+    busy: Arc<AtomicBool>,
 }
 
 impl<P, E> InvalidBlockWitnessHook<P, E> {
@@ -161,7 +166,14 @@ impl<P, E> InvalidBlockWitnessHook<P, E> {
                 job();
             }
         });
-        Self { provider, evm_config, output_directory, healthy_node_client, jobs }
+        Self {
+            provider,
+            evm_config,
+            output_directory,
+            healthy_node_client,
+            jobs,
+            busy: Arc::new(AtomicBool::new(false)),
+        }
     }
 }
 
@@ -370,11 +382,19 @@ where
         trie_updates: Option<(&TrieUpdates, B256)>,
     ) {
         let (block_number, block_hash) = (block.number(), block.hash());
+        // Blocks are skipped rather than queued behind a running one, so the database snapshot
+        // resolved below is only held while the job runs.
+        if self.busy.swap(true, Ordering::AcqRel) {
+            warn!(target: "engine::invalid_block_hooks::witness", block_number, %block_hash, "Skipping invalid block, hook is busy");
+            return
+        }
+
         // The parent state is resolved before queueing, since a reorg can remove the parent from
         // the canonical chain before the job runs.
         let state_provider = match self.provider.state_by_block_hash(parent_header.hash()) {
             Ok(state_provider) => state_provider,
             Err(err) => {
+                self.busy.store(false, Ordering::Release);
                 warn!(target: "engine::invalid_block_hooks::witness", %err, "Failed to invoke hook");
                 return
             }
@@ -392,19 +412,16 @@ where
             {
                 warn!(target: "engine::invalid_block_hooks::witness", %err, "Failed to invoke hook");
             }
+            drop(state_provider);
             if let Err(err) = prune_output(&hook.output_directory) {
                 warn!(target: "engine::invalid_block_hooks::witness", %err, "Failed to prune hook output");
             }
+            hook.busy.store(false, Ordering::Release);
         });
 
-        match self.jobs.try_send(job) {
-            Ok(()) => {}
-            Err(TrySendError::Full(_)) => {
-                warn!(target: "engine::invalid_block_hooks::witness", block_number, %block_hash, "Skipping invalid block, hook is busy");
-            }
-            Err(TrySendError::Disconnected(_)) => {
-                error!(target: "engine::invalid_block_hooks::witness", block_number, %block_hash, "Skipping invalid block, hook thread exited");
-            }
+        if let Err(err) = self.jobs.try_send(job) {
+            self.busy.store(false, Ordering::Release);
+            error!(target: "engine::invalid_block_hooks::witness", block_number, %block_hash, %err, "Failed to queue invalid block");
         }
     }
 }
@@ -1083,6 +1100,37 @@ mod tests {
 
         assert!(witness_path(&output_dir, &queued).exists());
         assert!(!witness_path(&output_dir, &skipped).exists());
+        assert!(!hook.busy.load(Ordering::Acquire));
+    }
+
+    #[test]
+    fn test_hook_clears_busy_when_queueing_fails() {
+        let (hook, output_dir, _temp_dir) = create_test_hook();
+        let (started_tx, started_rx) = mpsc::channel();
+        let (release_tx, release_rx) = mpsc::channel::<()>();
+        hook.jobs
+            .send(Box::new(move || {
+                started_tx.send(()).unwrap();
+                release_rx.recv().unwrap();
+            }))
+            .unwrap();
+        started_rx.recv().unwrap();
+        hook.jobs.send(Box::new(|| {})).unwrap();
+
+        // The channel is full, so the block is dropped and the next one can be accepted again.
+        let (parent_header, block) = create_test_block(2);
+        InvalidBlockHook::<EthPrimitives>::on_invalid_block(
+            &hook,
+            &parent_header,
+            &block,
+            &create_test_output(),
+            None,
+        );
+        assert!(!hook.busy.load(Ordering::Acquire));
+
+        release_tx.send(()).unwrap();
+        wait_for_hook_thread(&hook);
+        assert!(!witness_path(&output_dir, &block).exists());
     }
 
     #[test]
