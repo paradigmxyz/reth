@@ -42,7 +42,7 @@ impl AuthValidator for JwtAuthValidator {
 }
 
 /// This is an utility function that retrieves a bearer
-/// token from an authorization Http header.
+/// token from the Authorization header.
 fn get_bearer(headers: &HeaderMap) -> Option<&str> {
     headers.get(header::AUTHORIZATION)?.to_str().ok()?.strip_prefix("Bearer ")
 }
