@@ -122,7 +122,7 @@ impl IntoSubscriptionCloseResponse for SubscriptionCloseResponse {
 #[derive(Debug, Clone)]
 pub enum SubscriptionMessageInner {
     /// Complete JSON message.
-    Complete(Box<RawValue>),
+    Complete(String),
     /// Need subscription ID and method name.
     NeedsData(Box<RawValue>),
 }
@@ -147,14 +147,14 @@ impl SubscriptionMessage {
         subscription: SubscriptionId,
         result: &impl Serialize,
     ) -> Result<Self, serde_json::Error> {
-        let json = serde_json::value::to_raw_value(&SubscriptionResponse::new(
+        let json = serde_json::to_string(&SubscriptionResponse::new(
             method.into(),
             SubscriptionPayload { subscription, result },
         ))?;
         Ok(Self::from_complete_message(json))
     }
 
-    pub(crate) fn from_complete_message(msg: Box<RawValue>) -> Self {
+    pub(crate) fn from_complete_message(msg: String) -> Self {
         SubscriptionMessage(SubscriptionMessageInner::Complete(msg))
     }
 }
@@ -478,11 +478,11 @@ pub(crate) fn sub_message_to_json(
     msg: SubscriptionMessage,
     sub_id: &SubscriptionId,
     method: &str,
-) -> Box<RawValue> {
+) -> String {
     match msg.0 {
         SubscriptionMessageInner::Complete(msg) => msg,
         SubscriptionMessageInner::NeedsData(result) => {
-            serde_json::value::to_raw_value(&SubscriptionResponse::new(
+            serde_json::to_string(&SubscriptionResponse::new(
                 method.into(),
                 SubscriptionPayload { subscription: sub_id.clone(), result },
             ))
@@ -495,8 +495,8 @@ pub(crate) fn sub_err_to_json(
     error: SubscriptionError,
     sub_id: SubscriptionId,
     method: &str,
-) -> Box<RawValue> {
-    serde_json::value::to_raw_value(&jsonrpsee_types::response::SubscriptionError::new(
+) -> String {
+    serde_json::to_string(&jsonrpsee_types::response::SubscriptionError::new(
         method.into(),
         SubscriptionPayloadError { subscription: sub_id, error },
     ))

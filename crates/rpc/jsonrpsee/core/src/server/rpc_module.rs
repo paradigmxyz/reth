@@ -51,7 +51,6 @@ use jsonrpsee_types::{
     Id, Params, Request, SubscriptionId as RpcSubscriptionId,
 };
 use rustc_hash::FxHashMap;
-use serde_json::value::RawValue;
 use tokio::sync::{mpsc, oneshot};
 
 use super::{sub_err_to_json, IntoResponse};
@@ -217,11 +216,11 @@ impl Methods {
     ///     }).unwrap();
     ///     let (resp, mut stream) = module.raw_json_request(r#"{"jsonrpc":"2.0","method":"hi","id":0}"#, 1).await.unwrap();
     ///     // If the response is an error converting it to `Success` will fail.
-    ///     let resp: Success<u64> = serde_json::from_str::<Response<u64>>(resp.get()).unwrap().try_into().unwrap();
+    ///     let resp: Success<u64> = serde_json::from_str::<Response<u64>>(&resp).unwrap().try_into().unwrap();
     ///     let sub_resp = stream.recv().await.unwrap();
     ///     assert_eq!(
     ///         format!(r#"{{"jsonrpc":"2.0","method":"hi","params":{{"subscription":{},"result":"one answer"}}}}"#, resp.result),
-    ///         sub_resp.get()
+    ///         sub_resp
     ///     );
     /// }
     /// ```
@@ -229,7 +228,7 @@ impl Methods {
         &self,
         request: &str,
         buf_size: usize,
-    ) -> Result<(Box<RawValue>, mpsc::Receiver<Box<RawValue>>), serde_json::Error> {
+    ) -> Result<(String, mpsc::Receiver<String>), serde_json::Error> {
         tracing::trace!("[Methods::raw_json_request] Request: {:?}", request);
         let req: Request = serde_json::from_str(request)?;
         let (resp, rx) = self.inner_call(req, buf_size, mock_subscription_permit()).await;
@@ -243,7 +242,7 @@ impl Methods {
         req: Request<'_>,
         buf_size: usize,
         subscription_permit: SubscriptionPermit,
-    ) -> (Box<RawValue>, mpsc::Receiver<Box<RawValue>>) {
+    ) -> (String, mpsc::Receiver<String>) {
         let (tx, mut rx) = mpsc::channel(buf_size);
         let Request { id, method, params, .. } = req;
         let params = Params::new(params.as_ref().map(|params| params.as_ref().get()));
