@@ -28,18 +28,19 @@
 
 const LOG_TARGET: &str = "jsonrpsee-core";
 
-use std::{io, task::Poll};
+use std::io;
 
-use futures_util::{Future, FutureExt};
 use jsonrpsee_types::{
     error::{
         reject_too_big_batch_response, ErrorCode, ErrorObject, OVERSIZED_RESPONSE_CODE,
         OVERSIZED_RESPONSE_MSG,
     },
-    ErrorObjectOwned, Id, Response, ResponsePayload as InnerResponsePayload,
+    Id, Response,
 };
 use serde::Serialize;
 use serde_json::value::{to_raw_value, RawValue};
+
+pub use jsonrpsee_types::ResponsePayload;
 
 #[derive(Debug, Clone)]
 enum ResponseKind {
@@ -63,9 +64,6 @@ pub struct MethodResponse {
     success_or_error: MethodResponseResult,
     /// Indicates whether the call was a subscription response.
     kind: ResponseKind,
-    /// Optional callback that may be utilized to notif
-    /// that the method response has been processed
-    on_close: Option<MethodResponseNotifyTx>,
 }
 
 impl AsRef<str> for MethodResponse {
@@ -121,11 +119,6 @@ impl MethodResponse {
         self.json.clone()
     }
 
-    /// Consume the method response and extract the parts.
-    pub fn into_parts(self) -> (Box<RawValue>, Option<MethodResponseNotifyTx>) {
-        (self.json, self.on_close)
-    }
-
     /// Get the error code
     ///
     /// Returns `Some(error code)` if the call failed.
@@ -144,7 +137,6 @@ impl MethodResponse {
             json: batch.json,
             success_or_error: MethodResponseResult::Success,
             kind: ResponseKind::Batch,
-            on_close: None,
         }
     }
 
@@ -173,7 +165,7 @@ impl MethodResponse {
     {
         let mut writer = BoundedWriter::new(max_response_size);
 
-        let success_or_error = if let InnerResponsePayload::Error(ref e) = rp.inner {
+        let success_or_error = if let ResponsePayload::Error(e) = &rp {
             MethodResponseResult::Failed(e.code())
         } else {
             MethodResponseResult::Success
@@ -181,7 +173,7 @@ impl MethodResponse {
 
         let kind = ResponseKind::MethodCall;
 
-        match serde_json::to_writer(&mut writer, &Response::new(rp.inner, id.clone())) {
+        match serde_json::to_writer(&mut writer, &Response::new(rp, id.clone())) {
             Ok(_) => {
                 // Safety - serde_json does not emit invalid UTF-8.
                 let result = unsafe { String::from_utf8_unchecked(writer.into_bytes()) };
@@ -193,7 +185,6 @@ impl MethodResponse {
                     json,
                     success_or_error,
                     kind,
-                    on_close: rp.on_exit,
                 }
             }
             Err(err) => {
@@ -204,7 +195,7 @@ impl MethodResponse {
                         to_raw_value(&format!("Exceeded max limit of {max_response_size}")).ok();
                     let err_code = OVERSIZED_RESPONSE_CODE;
 
-                    let err = InnerResponsePayload::<()>::error_borrowed(ErrorObject::borrowed(
+                    let err = ResponsePayload::<()>::error_borrowed(ErrorObject::borrowed(
                         err_code,
                         OVERSIZED_RESPONSE_MSG,
                         data.as_deref(),
@@ -216,18 +207,16 @@ impl MethodResponse {
                         json,
                         success_or_error: MethodResponseResult::Failed(err_code),
                         kind,
-                        on_close: rp.on_exit,
                     }
                 } else {
                     let err = ErrorCode::InternalError;
-                    let payload = jsonrpsee_types::ResponsePayload::<()>::error(err);
+                    let payload = ResponsePayload::<()>::error(err);
                     let json = serde_json::value::to_raw_value(&Response::new(payload, id))
                         .expect("JSON serialization infallible; qed");
                     Self {
                         json,
                         success_or_error: MethodResponseResult::Failed(err.code()),
                         kind,
-                        on_close: rp.on_exit,
                     }
                 }
             }
@@ -246,14 +235,13 @@ impl MethodResponse {
     pub fn error<'a>(id: Id, err: impl Into<ErrorObject<'a>>) -> Self {
         let err: ErrorObject = err.into();
         let err_code = err.code();
-        let err = InnerResponsePayload::<()>::error_borrowed(err);
+        let err = ResponsePayload::<()>::error_borrowed(err);
         let json = serde_json::value::to_raw_value(&Response::new(err, id))
             .expect("JSON serialization infallible; qed");
         Self {
             json,
             success_or_error: MethodResponseResult::Failed(err_code),
             kind: ResponseKind::MethodCall,
-            on_close: None,
         }
     }
 
@@ -263,7 +251,6 @@ impl MethodResponse {
             json: RawValue::NULL.to_owned(),
             success_or_error: MethodResponseResult::Success,
             kind: ResponseKind::Notification,
-            on_close: None,
         }
     }
 
@@ -373,137 +360,9 @@ pub struct BatchResponse {
 
 /// Create a JSON-RPC error response.
 pub fn batch_response_error(id: Id, err: impl Into<ErrorObject<'static>>) -> Box<RawValue> {
-    let err = InnerResponsePayload::<()>::error_borrowed(err);
+    let err = ResponsePayload::<()>::error_borrowed(err);
     serde_json::value::to_raw_value(&Response::new(err, id))
         .expect("JSON serialization infallible; qed")
-}
-
-/// Similar to [`jsonrpsee_types::ResponsePayload`] but possible to with an async-like
-/// API to detect when a method response has been sent.
-#[derive(Debug)]
-pub struct ResponsePayload<'a, T>
-where
-    T: Clone,
-{
-    inner: InnerResponsePayload<'a, T>,
-    on_exit: Option<MethodResponseNotifyTx>,
-}
-
-impl<'a, T: Clone> From<InnerResponsePayload<'a, T>> for ResponsePayload<'a, T> {
-    fn from(inner: InnerResponsePayload<'a, T>) -> Self {
-        Self { inner, on_exit: None }
-    }
-}
-
-impl<'a, T> ResponsePayload<'a, T>
-where
-    T: Clone,
-{
-    /// Create a successful owned response payload.
-    pub fn success(t: T) -> Self {
-        InnerResponsePayload::success(t).into()
-    }
-
-    /// Create a successful borrowed response payload.
-    pub fn success_borrowed(t: &'a T) -> Self {
-        InnerResponsePayload::success_borrowed(t).into()
-    }
-
-    /// Create an error response payload.
-    pub fn error(e: impl Into<ErrorObjectOwned>) -> Self {
-        InnerResponsePayload::error(e.into()).into()
-    }
-
-    /// Create a borrowd error response payload.
-    pub fn error_borrowed(e: impl Into<ErrorObject<'a>>) -> Self {
-        InnerResponsePayload::error_borrowed(e.into()).into()
-    }
-
-    /// Consumes the [`ResponsePayload`] and produces new [`ResponsePayload`] and a future
-    /// [`MethodResponseFuture`] that will be resolved once the response has been processed.
-    ///
-    /// If this has been called more than once then this will overwrite
-    /// the old result the previous future(s) will be resolved with error.
-    pub fn notify_on_completion(mut self) -> (Self, MethodResponseFuture) {
-        let (tx, rx) = response_channel();
-        self.on_exit = Some(tx);
-        (self, rx)
-    }
-
-    /// Convert the response payload into owned.
-    pub fn into_owned(self) -> ResponsePayload<'static, T> {
-        ResponsePayload { inner: self.inner.into_owned(), on_exit: self.on_exit }
-    }
-}
-
-impl<T> From<ErrorCode> for ResponsePayload<'_, T>
-where
-    T: Clone,
-{
-    fn from(code: ErrorCode) -> Self {
-        let err: ErrorObject = code.into();
-        Self::error(err)
-    }
-}
-
-/// Create a channel to be used in combination with [`ResponsePayload`] to
-/// notify when a method call has been processed.
-fn response_channel() -> (MethodResponseNotifyTx, MethodResponseFuture) {
-    let (tx, rx) = tokio::sync::oneshot::channel();
-    (MethodResponseNotifyTx(tx), MethodResponseFuture(rx))
-}
-
-/// Sends a message once the method response has been processed.
-#[derive(Debug)]
-pub struct MethodResponseNotifyTx(tokio::sync::oneshot::Sender<NotifyMsg>);
-
-impl MethodResponseNotifyTx {
-    /// Send a notify message.
-    pub fn notify(self, is_success: bool) {
-        let msg = if is_success { NotifyMsg::Ok } else { NotifyMsg::Err };
-        _ = self.0.send(msg);
-    }
-}
-
-/// Future that resolves when the method response has been processed.
-#[derive(Debug)]
-pub struct MethodResponseFuture(tokio::sync::oneshot::Receiver<NotifyMsg>);
-
-/// A message that that tells whether notification
-/// was succesful or not.
-#[derive(Debug, Copy, Clone)]
-pub enum NotifyMsg {
-    /// The response was successfully processed.
-    Ok,
-    /// The response was the wrong kind
-    /// such an error response when
-    /// one expected a successful response.
-    Err,
-}
-
-/// Method response error.
-#[derive(Debug, Copy, Clone)]
-pub enum MethodResponseError {
-    /// The connection was closed.
-    Closed,
-    /// The response was a JSON-RPC error.
-    JsonRpcError,
-}
-
-impl Future for MethodResponseFuture {
-    type Output = Result<(), MethodResponseError>;
-
-    fn poll(
-        mut self: std::pin::Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
-    ) -> Poll<Self::Output> {
-        match self.0.poll_unpin(cx) {
-            Poll::Ready(Ok(NotifyMsg::Ok)) => Poll::Ready(Ok(())),
-            Poll::Ready(Ok(NotifyMsg::Err)) => Poll::Ready(Err(MethodResponseError::JsonRpcError)),
-            Poll::Ready(Err(_)) => Poll::Ready(Err(MethodResponseError::Closed)),
-            Poll::Pending => Poll::Pending,
-        }
-    }
 }
 
 /// Bounded writer that allows writing at most `max_len` bytes.
