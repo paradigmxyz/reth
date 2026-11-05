@@ -26,7 +26,7 @@
 
 use std::{
     collections::hash_map::Entry,
-    fmt::{self, Debug},
+    fmt::Debug,
     future::Future,
     ops::{Deref, DerefMut},
     sync::Arc,
@@ -104,43 +104,6 @@ impl From<usize> for ConnectionId {
 /// Max response size.
 pub type MaxResponseSize = usize;
 
-/// Raw response from an RPC
-/// A tuple containing:
-///   - Call result as a `String`,
-///   - a [`mpsc::UnboundedReceiver<String>`] to receive future subscription results
-pub type RawRpcResponse = (Box<RawValue>, mpsc::Receiver<Box<RawValue>>);
-
-/// This represent a response to a RPC call
-/// and `Subscribe` calls are handled differently
-/// because we want to prevent subscriptions to start
-/// before the actual subscription call has been answered.
-#[derive(Debug)]
-pub enum CallOrSubscription {
-    /// The subscription callback itself sends back the result
-    /// so it must not be sent back again.
-    Subscription(MethodResponse),
-    /// Treat it as ordinary call.
-    Call(MethodResponse),
-}
-
-impl CallOrSubscription {
-    /// Extract the JSON-RPC response.
-    pub fn as_response(&self) -> &MethodResponse {
-        match &self {
-            Self::Subscription(r) => r,
-            Self::Call(r) => r,
-        }
-    }
-
-    /// Extract the JSON-RPC response.
-    pub fn into_response(self) -> MethodResponse {
-        match self {
-            Self::Subscription(r) => r,
-            Self::Call(r) => r,
-        }
-    }
-}
-
 /// Callback wrapper that can be either sync or async.
 #[derive(Clone)]
 pub enum MethodCallback {
@@ -152,49 +115,6 @@ pub enum MethodCallback {
     Subscription(SubscriptionMethod<'static>),
     /// Unsubscription method handler.
     Unsubscription(UnsubscriptionMethod),
-}
-
-/// The kind of the JSON-RPC method call, it can be a subscription, method call or unknown.
-#[derive(Debug, Copy, Clone)]
-pub enum MethodKind {
-    /// Subscription Call.
-    Subscription,
-    /// Unsubscription Call.
-    Unsubscription,
-    /// Method call.
-    MethodCall,
-    /// The method was not found.
-    NotFound,
-}
-
-impl std::fmt::Display for MethodKind {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let s = match self {
-            Self::Subscription => "subscription",
-            Self::MethodCall => "method call",
-            Self::NotFound => "method not found",
-            Self::Unsubscription => "unsubscription",
-        };
-
-        write!(f, "{s}")
-    }
-}
-
-/// Result of a method, either direct value or a future of one.
-pub enum MethodResult<T> {
-    /// Result by value
-    Sync(T),
-    /// Future of a value
-    Async(BoxFuture<'static, T>),
-}
-
-impl<T: Debug> Debug for MethodResult<T> {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self {
-            MethodResult::Sync(result) => result.fmt(f),
-            MethodResult::Async(_) => f.write_str("<future>"),
-        }
-    }
 }
 
 impl Debug for MethodCallback {
@@ -270,12 +190,6 @@ impl Methods {
         self.callbacks.get(method_name)
     }
 
-    /// Returns the method callback along with its name. The returned name is same as the
-    /// `method_name`, but its lifetime bound is `'static`.
-    pub fn method_with_name(&self, method_name: &str) -> Option<(&'static str, &MethodCallback)> {
-        self.callbacks.get_key_value(method_name).map(|(k, v)| (*k, v))
-    }
-
     /// Make a request (JSON-RPC method call or subscription) by using raw JSON.
     ///
     /// Returns the raw JSON response to the call and a stream to receive notifications if the call
@@ -329,7 +243,7 @@ impl Methods {
         req: Request<'_>,
         buf_size: usize,
         subscription_permit: SubscriptionPermit,
-    ) -> RawRpcResponse {
+    ) -> (Box<RawValue>, mpsc::Receiver<Box<RawValue>>) {
         let (tx, mut rx) = mpsc::channel(buf_size);
         let Request { id, method, params, .. } = req;
         let params = Params::new(params.as_ref().map(|params| params.as_ref().get()));

@@ -224,14 +224,6 @@ pub fn read_header_value(
     }
 }
 
-/// Returns an iterator of all values for a given a header name
-pub fn read_header_values<'a>(
-    headers: &'a http::header::HeaderMap,
-    header_name: &str,
-) -> http::header::GetAll<'a, http::header::HeaderValue> {
-    headers.get_all(header_name)
-}
-
 #[cfg(test)]
 mod tests {
     use super::{read_body, read_header_content_length, HttpError};
