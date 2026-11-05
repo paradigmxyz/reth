@@ -84,10 +84,7 @@ pub trait TxpoolExtApi {
 
     /// Creates a subscription that returns the number of transactions in the pool every 10s.
     #[subscription(name = "subscribeTransactionCount", item = usize)]
-    fn subscribe_transaction_count(
-        &self,
-        #[argument(rename = "delay")] delay: Option<u64>,
-    ) -> SubscriptionResult;
+    fn subscribe_transaction_count(&self, delay: Option<u64>) -> SubscriptionResult;
 }
 
 /// The type that implements the `txpoolExt` rpc namespace trait

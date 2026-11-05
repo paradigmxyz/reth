@@ -42,45 +42,13 @@ use syn::{punctuated::Punctuated, spanned::Spanned, Attribute, Token};
 #[derive(Debug, Clone)]
 pub struct RpcFnArg {
     pub(crate) arg_pat: syn::PatIdent,
-    rename_to: Option<String>,
     pub(crate) ty: syn::Type,
 }
 
 impl RpcFnArg {
-    pub fn from_arg_attrs(
-        arg_pat: syn::PatIdent,
-        ty: syn::Type,
-        attrs: &mut Vec<syn::Attribute>,
-    ) -> syn::Result<Self> {
-        let mut rename_to = None;
-
-        if let Some(attr) = find_attr(attrs, "argument") {
-            let [rename] = AttributeMeta::parse(attr.clone())?.retain(["rename"])?;
-
-            let rename = optional(rename, Argument::string)?;
-
-            if let Some(rename) = rename {
-                rename_to = Some(rename);
-            }
-        }
-
-        // remove argument attribute after inspection
-        attrs.retain(|attr| !attr.meta.path().is_ident("argument"));
-
-        Ok(Self { arg_pat, rename_to, ty })
-    }
-
     /// Return the pattern identifier of the argument.
     pub fn arg_pat(&self) -> &syn::PatIdent {
         &self.arg_pat
-    }
-    /// Return the string representation of this argument when (de)seriaizing.
-    pub fn name(&self) -> String {
-        self.rename_to.clone().unwrap_or_else(|| self.arg_pat.ident.to_string())
-    }
-    /// Return the type of the argument.
-    pub fn ty(&self) -> &syn::Type {
-        &self.ty
     }
 }
 
@@ -112,15 +80,13 @@ impl RpcMethod {
         let params: Vec<_> = method
             .sig
             .inputs
-            .iter_mut()
+            .iter()
             .filter_map(|arg| match arg {
                 syn::FnArg::Receiver(_) => None,
                 syn::FnArg::Typed(arg) => match &*arg.pat {
-                    syn::Pat::Ident(name) => Some(RpcFnArg::from_arg_attrs(
-                        name.clone(),
-                        (*arg.ty).clone(),
-                        &mut arg.attrs,
-                    )),
+                    syn::Pat::Ident(name) => {
+                        Some(Ok(RpcFnArg { arg_pat: name.clone(), ty: (*arg.ty).clone() }))
+                    }
                     syn::Pat::Wild(wild) => Some(Err(syn::Error::new(
                         wild.underscore_token.span(),
                         "Method argument names must be valid Rust identifiers; got `_` instead",
@@ -188,19 +154,17 @@ impl RpcSubscription {
         let params: Vec<_> = sub
             .sig
             .inputs
-            .iter_mut()
+            .iter()
             .filter_map(|arg| match arg {
                 syn::FnArg::Receiver(_) => None,
                 syn::FnArg::Typed(arg) => match &*arg.pat {
-                    syn::Pat::Ident(name) => Some(RpcFnArg::from_arg_attrs(
-                        name.clone(),
-                        (*arg.ty).clone(),
-                        &mut arg.attrs,
-                    )),
+                    syn::Pat::Ident(name) => {
+                        Some(RpcFnArg { arg_pat: name.clone(), ty: (*arg.ty).clone() })
+                    }
                     _ => panic!("Identifier in signature must be an ident"),
                 },
             })
-            .collect::<Result<_, _>>()?;
+            .collect();
 
         // We've analyzed attributes and don't need them anymore.
         sub.attrs.clear();

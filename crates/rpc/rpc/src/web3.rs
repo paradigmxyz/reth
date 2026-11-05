@@ -1,5 +1,4 @@
 use alloy_primitives::{keccak256, Bytes, B256};
-use async_trait::async_trait;
 use jsonrpsee::core::RpcResult;
 use reth_network_api::NetworkInfo;
 use reth_rpc_api::Web3ApiServer;
@@ -20,7 +19,6 @@ impl<N> Web3Api<N> {
     }
 }
 
-#[async_trait]
 impl<N> Web3ApiServer for Web3Api<N>
 where
     N: NetworkInfo + 'static,

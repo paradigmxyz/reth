@@ -298,7 +298,6 @@ where
     }
 }
 
-#[async_trait::async_trait]
 impl<Eth> EthCallBundleApiServer for EthBundle<Eth>
 where
     Eth: EthTransactions + Call,
