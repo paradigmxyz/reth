@@ -5732,7 +5732,6 @@ dependencies = [
 name = "jsonrpsee-test-utils"
 version = "0.26.1"
 dependencies = [
- "futures-channel",
  "futures-util",
  "http-body-util",
  "hyper",
@@ -5742,7 +5741,6 @@ dependencies = [
  "soketto",
  "tokio",
  "tokio-util",
- "tracing",
 ]
 
 [[package]]
