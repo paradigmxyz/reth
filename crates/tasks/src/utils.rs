@@ -34,6 +34,22 @@ pub fn increase_thread_priority() {
     }
 }
 
+/// Nice levels that [`lower_background_worker_priority`] lowers a thread by.
+const BACKGROUND_WORKER_NICE_OFFSET: i32 = 10;
+
+/// Lowers the current thread's priority by 10 nice levels, for threads of pools whose work is not
+/// on the critical path of block execution.
+///
+/// Block execution and its speculative workers are on the critical path of payload validation the
+/// whole time, while the state root's proof workers and sparse trie jobs are only waited for after
+/// the last transaction. With equal priorities, the many workers of those pools preempt the engine
+/// thread; lowered, they mostly run on the cores execution leaves idle, and take every core once
+/// execution finished. Elevating the engine thread instead does not help when the node already
+/// runs at the highest priority, as with `nice -n -20`.
+pub fn lower_background_worker_priority() {
+    decrease_thread_priority(BACKGROUND_WORKER_NICE_OFFSET);
+}
+
 /// Lowers the current thread's priority by `nice_levels` nice values, relative to the priority it
 /// inherited from the thread that spawned it.
 ///
