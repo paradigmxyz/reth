@@ -159,7 +159,7 @@ impl<P, E> InvalidBlockWitnessHook<P, E> {
         let directory = output_directory.clone();
         spawn_os_thread("witness-hook", move || {
             // Output written before a restart counts towards the retention limit.
-            if let Err(err) = prune_output(&directory) {
+            if let Err(err) = prune_output(&directory, None) {
                 warn!(target: "engine::invalid_block_hooks::witness", %err, "Failed to prune hook output");
             }
             while let Ok(job) = rx.recv() {
@@ -328,7 +328,7 @@ where
         // TODO(alexey): unify with `DebugApi::debug_execution_witness`
         let (witness, bundle_state, hashed_state) = self.re_execute_block(state_provider, block)?;
 
-        let block_prefix = format!("{}_{}", block.number(), block.hash());
+        let block_prefix = block_prefix(block.number(), block.hash());
         self.handle_witness_operations(&witness, &block_prefix, block.number())?;
 
         self.validate_bundle_state(&bundle_state, &output.state, &block_prefix)?;
@@ -413,7 +413,8 @@ where
                 warn!(target: "engine::invalid_block_hooks::witness", %err, "Failed to invoke hook");
             }
             drop(state_provider);
-            if let Err(err) = prune_output(&hook.output_directory) {
+            let current_block = block_prefix(block.number(), block.hash());
+            if let Err(err) = prune_output(&hook.output_directory, Some(&current_block)) {
                 warn!(target: "engine::invalid_block_hooks::witness", %err, "Failed to prune hook output");
             }
             hook.busy.store(false, Ordering::Release);
@@ -428,13 +429,16 @@ where
 
 /// Removes the output files of all but the [`MAX_RETAINED_BLOCKS`] most recently written blocks.
 ///
-/// Only files named `{block_number}_{block_hash}.*` are considered, others are left alone.
-fn prune_output(output_directory: &Path) -> eyre::Result<()> {
+/// Only files named `{block_number}_{block_hash}.*` are considered, others are left alone. The
+/// output of `current_block` always counts as the most recent, so files with modification times
+/// in the future can't push it out.
+fn prune_output(output_directory: &Path, current_block: Option<&str>) -> eyre::Result<()> {
     let mut blocks = BTreeMap::<String, (SystemTime, Vec<PathBuf>)>::new();
     for entry in reth_fs_util::read_dir(output_directory)? {
         let entry = entry?;
         let file_name = entry.file_name();
         if let Some((prefix, _)) = file_name.to_str().and_then(|name| name.split_once('.')) &&
+            current_block != Some(prefix) &&
             let Some((number, hash)) = prefix.split_once('_') &&
             number.parse::<u64>().is_ok() &&
             hash.parse::<B256>().is_ok()
@@ -449,11 +453,17 @@ fn prune_output(output_directory: &Path) -> eyre::Result<()> {
 
     let mut blocks = blocks.into_values().collect::<Vec<_>>();
     blocks.sort_unstable_by(|(a, _), (b, _)| b.cmp(a));
-    for path in blocks.into_iter().skip(MAX_RETAINED_BLOCKS).flat_map(|(_, paths)| paths) {
+    let retained = MAX_RETAINED_BLOCKS - usize::from(current_block.is_some());
+    for path in blocks.into_iter().skip(retained).flat_map(|(_, paths)| paths) {
         reth_fs_util::remove_file(path)?;
     }
 
     Ok(())
+}
+
+/// Returns the prefix of the output files written for a block.
+fn block_prefix(block_number: u64, block_hash: B256) -> String {
+    format!("{block_number}_{block_hash}")
 }
 
 #[cfg(test)]
@@ -1139,7 +1149,7 @@ mod tests {
         let output_dir = temp_dir.path();
         let blocks = (0..MAX_RETAINED_BLOCKS as u64 + 2)
             .map(|number| {
-                let prefix = format!("{number}_{}", B256::with_last_byte(number as u8));
+                let prefix = block_prefix(number, B256::with_last_byte(number as u8));
                 let files = [
                     output_dir.join(format!("{prefix}.witness.re_executed.json")),
                     output_dir.join(format!("{prefix}.bundle_state.diff")),
@@ -1156,7 +1166,7 @@ mod tests {
         let unrelated = output_dir.join("notes.txt");
         File::create(&unrelated).unwrap();
 
-        prune_output(output_dir).unwrap();
+        prune_output(output_dir, None).unwrap();
 
         // The files of the two oldest blocks are removed.
         for (index, files) in blocks.iter().enumerate() {
@@ -1165,6 +1175,38 @@ mod tests {
             }
         }
         assert!(unrelated.exists());
+    }
+
+    #[test]
+    fn test_prune_output_keeps_current_block() {
+        let temp_dir = TempDir::new().unwrap();
+        let output_dir = temp_dir.path();
+        let create = |prefix: &str, modified: SystemTime| {
+            let path = output_dir.join(format!("{prefix}.witness.re_executed.json"));
+            File::create(&path).unwrap().set_modified(modified).unwrap();
+            path
+        };
+        // Older output with modification times after the current block's, e.g. after a clock
+        // change.
+        let future = SystemTime::now() + Duration::from_secs(3600);
+        let others = (0..MAX_RETAINED_BLOCKS as u64)
+            .map(|number| {
+                create(
+                    &block_prefix(number, B256::with_last_byte(number as u8)),
+                    future + Duration::from_secs(number),
+                )
+            })
+            .collect::<Vec<_>>();
+        let current_block = block_prefix(100, B256::repeat_byte(0xff));
+        let current = create(&current_block, SystemTime::now());
+
+        prune_output(output_dir, Some(&current_block)).unwrap();
+
+        // The current block and the newest of the others fill the retention limit.
+        assert!(current.exists());
+        for (index, path) in others.iter().enumerate() {
+            assert_eq!(path.exists(), index >= 1, "{}", path.display());
+        }
     }
 
     /// Creates an empty block on top of a random parent header.
@@ -1200,7 +1242,10 @@ mod tests {
 
     /// Returns the path of the re-executed witness the hook writes for `block`.
     fn witness_path(output_dir: &Path, block: &RecoveredBlock<Block>) -> PathBuf {
-        output_dir.join(format!("{}_{}.witness.re_executed.json", block.number(), block.hash()))
+        output_dir.join(format!(
+            "{}.witness.re_executed.json",
+            block_prefix(block.number(), block.hash())
+        ))
     }
 
     /// Blocks until the hook thread has finished every job queued before this call.
