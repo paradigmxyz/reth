@@ -26,13 +26,12 @@
 
 //! Subscription related types and traits for server implementations.
 
-use super::{helpers::MethodSink, MethodResponse, MethodsError, ResponsePayload};
+use super::{helpers::MethodSink, MethodResponse, ResponsePayload};
 use crate::{
     error::SubscriptionError,
     server::{
         error::{DisconnectError, PendingSubscriptionAcceptError, SendTimeoutError, TrySendError},
         rpc_module::ConnectionId,
-        LOG_TARGET,
     },
     traits::IdProvider,
 };
@@ -42,7 +41,7 @@ use jsonrpsee_types::{
 };
 use parking_lot::Mutex;
 use rustc_hash::FxHashMap;
-use serde::{de::DeserializeOwned, Serialize};
+use serde::Serialize;
 use serde_json::value::RawValue;
 use std::{sync::Arc, time::Duration};
 use tokio::sync::{mpsc, oneshot, OwnedSemaphorePermit, Semaphore};
@@ -434,56 +433,6 @@ impl Drop for SubscriptionSink {
                 subs.remove(&self.uniq_sub);
             }
         }
-    }
-}
-
-/// Wrapper struct that maintains a subscription "mainly" for testing.
-#[derive(Debug)]
-pub struct Subscription {
-    pub(crate) rx: mpsc::Receiver<Box<RawValue>>,
-    pub(crate) sub_id: SubscriptionId<'static>,
-}
-
-impl Subscription {
-    /// Close the subscription channel.
-    pub fn close(&mut self) {
-        tracing::trace!(target: LOG_TARGET, "[Subscription::close] Notifying");
-        self.rx.close();
-    }
-
-    /// Get the subscription ID
-    pub fn subscription_id(&self) -> &SubscriptionId<'static> {
-        &self.sub_id
-    }
-
-    /// Receives the next value on the subscription if the value could be decoded as T.
-    pub async fn next<T: DeserializeOwned>(
-        &mut self,
-    ) -> Option<Result<(T, SubscriptionId<'static>), MethodsError>> {
-        let raw = self.rx.recv().await?;
-
-        tracing::debug!(target: LOG_TARGET, "[Subscription::next]: rx {}", raw);
-
-        // clippy complains about this but it doesn't compile without the extra res binding.
-        #[allow(clippy::let_and_return)]
-        let res = match serde_json::from_str::<SubscriptionResponse<T>>(raw.get()) {
-            Ok(r) => Some(Ok((r.params.result, r.params.subscription.into_owned()))),
-            Err(e) => {
-                match serde_json::from_str::<jsonrpsee_types::response::SubscriptionError<&RawValue>>(
-                    raw.get(),
-                ) {
-                    Ok(_) => None,
-                    Err(_) => Some(Err(e.into())),
-                }
-            }
-        };
-        res
-    }
-}
-
-impl Drop for Subscription {
-    fn drop(&mut self) {
-        self.close();
     }
 }
 

@@ -87,33 +87,20 @@ impl RpcFnArg {
 #[derive(Debug, Clone)]
 pub struct RpcMethod {
     pub name: String,
-    pub blocking: bool,
     pub docs: TokenStream2,
     pub params: Vec<RpcFnArg>,
     pub signature: syn::TraitItemFn,
     pub aliases: Vec<String>,
-    pub with_extensions: bool,
 }
 
 impl RpcMethod {
     pub fn from_item(attr: Attribute, mut method: syn::TraitItemFn) -> syn::Result<Self> {
-        let [aliases, blocking, name, with_extensions] = AttributeMeta::parse(attr)?.retain([
-            "aliases",
-            "blocking",
-            "name",
-            "with_extensions",
-        ])?;
+        let [aliases, name] = AttributeMeta::parse(attr)?.retain(["aliases", "name"])?;
 
         let aliases = parse_aliases(aliases)?;
-        let blocking = optional(blocking, Argument::flag)?.is_some();
         let name = name?.string()?;
-        let with_extensions = optional(with_extensions, Argument::flag)?.is_some();
 
         let docs = extract_doc_comments(&method.attrs);
-
-        if blocking && method.sig.asyncness.is_some() {
-            return Err(syn::Error::new(method.sig.span(), "Blocking method must be synchronous"));
-        }
 
         let params: Vec<_> = method
             .sig
@@ -142,7 +129,7 @@ impl RpcMethod {
         // We've analyzed attributes and don't need them anymore.
         method.attrs.clear();
 
-        Ok(Self { aliases, blocking, name, params, signature: method, docs, with_extensions })
+        Ok(Self { aliases, name, params, signature: method, docs })
     }
 }
 
@@ -163,20 +150,18 @@ pub struct RpcSubscription {
     pub signature: syn::TraitItemFn,
     pub aliases: Vec<String>,
     pub unsubscribe_aliases: Vec<String>,
-    pub with_extensions: bool,
 }
 
 impl RpcSubscription {
     pub fn from_item(attr: syn::Attribute, mut sub: syn::TraitItemFn) -> syn::Result<Self> {
-        let [aliases, item, name, unsubscribe, unsubscribe_aliases, with_extensions] =
-            AttributeMeta::parse(attr)?.retain([
-                "aliases",
-                "item",
-                "name",
-                "unsubscribe",
-                "unsubscribe_aliases",
-                "with_extensions",
-            ])?;
+        let [aliases, item, name, unsubscribe, unsubscribe_aliases] = AttributeMeta::parse(attr)?
+            .retain([
+            "aliases",
+            "item",
+            "name",
+            "unsubscribe",
+            "unsubscribe_aliases",
+        ])?;
 
         let aliases = parse_aliases(aliases)?;
         let map = name?.value::<NameMapping>()?;
@@ -184,7 +169,6 @@ impl RpcSubscription {
         let notif_name_override = map.mapped;
         let item = item?.value()?;
         let unsubscribe_aliases = parse_aliases(unsubscribe_aliases)?;
-        let with_extensions = optional(with_extensions, Argument::flag)?.is_some();
 
         let docs = extract_doc_comments(&sub.attrs);
         let unsubscribe = match parse_subscribe(unsubscribe)? {
@@ -224,7 +208,6 @@ impl RpcSubscription {
             signature: sub,
             aliases,
             docs,
-            with_extensions,
         })
     }
 }
