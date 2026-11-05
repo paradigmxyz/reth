@@ -29,6 +29,18 @@ if [ "${BENCH_TRACY:-off}" != "off" ]; then
   EXTRA_FEATURES="tracy,tracy-client/ondemand"
 fi
 
+# Tune only the candidate binary; baseline flags remain unchanged.
+if [ "$MODE" = "feature" ] || [ "$MODE" = "branch" ]; then
+  case "${ALLOCATOR_BENCH_CONFIG:-default}" in
+    default) ;;
+    purge) EXTRA_FEATURES="${EXTRA_FEATURES:+$EXTRA_FEATURES,}mimalloc-purge" ;;
+    reserve) EXTRA_FEATURES="${EXTRA_FEATURES:+$EXTRA_FEATURES,}mimalloc-reserve" ;;
+    prefault) EXTRA_FEATURES="${EXTRA_FEATURES:+$EXTRA_FEATURES,}mimalloc-prefault" ;;
+    1mb|2mb|4mb) EXTRA_FEATURES="${EXTRA_FEATURES:+$EXTRA_FEATURES,}mimalloc-prefault,commonware-allocator/large-objects-$ALLOCATOR_BENCH_CONFIG" ;;
+    *) echo "Unknown allocator configuration" >&2; exit 1 ;;
+  esac
+fi
+
 build_node_binary() {
   local features_arg=""
   local workspace_arg=""
@@ -36,7 +48,9 @@ build_node_binary() {
   cd "$SOURCE_DIR"
   if [ -n "$EXTRA_FEATURES" ]; then
     features_arg="--features ${EXTRA_FEATURES}"
-    workspace_arg="--workspace"
+    if [ "${BENCH_TRACY:-off}" != "off" ]; then
+      workspace_arg="--workspace"
+    fi
   fi
 
   # shellcheck disable=SC2086

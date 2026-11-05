@@ -68,6 +68,7 @@ tracing.workspace = true
 # misc
 aquamarine.workspace = true
 clap = { workspace = true, features = ["derive", "env"] }
+commonware-allocator.workspace = true
 
 [dev-dependencies]
 alloy-node-bindings.workspace = true
@@ -87,7 +88,6 @@ zstd.workspace = true
 
 [features]
 default = [
-    "jemalloc",
     "otlp",
     "otlp-logs",
     "js-tracer",
@@ -202,6 +202,11 @@ min-trace-logs = [
 ]
 
 trie-debug = ["reth-node-builder/trie-debug", "reth-node-core/trie-debug"]
+
+# Allocator benchmark configurations; enable only on the node binary.
+mimalloc-purge = []
+mimalloc-reserve = ["mimalloc-purge"]
+mimalloc-prefault = ["mimalloc-reserve"]
 
 [[bin]]
 name = "reth"

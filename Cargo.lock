@@ -2530,6 +2530,37 @@ dependencies = [
 ]
 
 [[package]]
+name = "commonware-allocator"
+version = "2026.9.0"
+source = "git+https://github.com/commonwarexyz/monorepo?rev=15aa24343a190a42bcc823e3f60ad354966e64d7#15aa24343a190a42bcc823e3f60ad354966e64d7"
+dependencies = [
+ "cc",
+ "commonware-macros",
+ "libc",
+]
+
+[[package]]
+name = "commonware-macros"
+version = "2026.9.0"
+source = "git+https://github.com/commonwarexyz/monorepo?rev=15aa24343a190a42bcc823e3f60ad354966e64d7#15aa24343a190a42bcc823e3f60ad354966e64d7"
+dependencies = [
+ "commonware-macros-impl",
+ "tokio",
+]
+
+[[package]]
+name = "commonware-macros-impl"
+version = "2026.9.0"
+source = "git+https://github.com/commonwarexyz/monorepo?rev=15aa24343a190a42bcc823e3f60ad354966e64d7#15aa24343a190a42bcc823e3f60ad354966e64d7"
+dependencies = [
+ "proc-macro-crate",
+ "proc-macro2",
+ "quote",
+ "syn 2.0.119",
+ "toml 1.1.6+spec-1.1.0",
+]
+
+[[package]]
 name = "compact_str"
 version = "0.9.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -8060,6 +8091,7 @@ dependencies = [
  "backon",
  "blake3",
  "clap",
+ "commonware-allocator",
  "http-body-util",
  "hyper",
  "hyper-util",
@@ -8095,7 +8127,7 @@ dependencies = [
  "tar",
  "tempfile",
  "tokio",
- "toml",
+ "toml 0.9.12+spec-1.1.0",
  "tracing",
  "zstd",
 ]
@@ -8305,7 +8337,7 @@ dependencies = [
  "tempfile",
  "tokio",
  "tokio-stream",
- "toml",
+ "toml 0.9.12+spec-1.1.0",
  "tracing",
  "url",
  "zstd",
@@ -8385,7 +8417,7 @@ dependencies = [
  "reth-static-file-types",
  "serde",
  "tempfile",
- "toml",
+ "toml 0.9.12+spec-1.1.0",
  "url",
 ]
 
@@ -9862,7 +9894,7 @@ dependencies = [
  "strum 0.27.2",
  "thiserror 2.0.21",
  "tokio",
- "toml",
+ "toml 0.9.12+spec-1.1.0",
  "tracing",
  "url",
 ]
@@ -10245,7 +10277,7 @@ dependencies = [
  "serde_json",
  "strum 0.27.2",
  "thiserror 2.0.21",
- "toml",
+ "toml 0.9.12+spec-1.1.0",
  "tracing",
 ]
 
@@ -12826,6 +12858,21 @@ dependencies = [
  "toml_parser",
  "toml_writer",
  "winnow 0.7.15",
+]
+
+[[package]]
+name = "toml"
+version = "1.1.6+spec-1.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "920602543f0911ab71da12c50d59701da54c196d1a2bf5cb4b75667f137a406a"
+dependencies = [
+ "indexmap 2.14.2",
+ "serde_core",
+ "serde_spanned",
+ "toml_datetime 1.1.1+spec-1.1.0",
+ "toml_parser",
+ "toml_writer",
+ "winnow 1.0.4",
 ]
 
 [[package]]
