@@ -117,7 +117,8 @@ pub struct EthConfig {
     /// Transport response-size limit in bytes, used to bound log collection.
     ///
     /// Defaults to jsonrpsee's transport limit. Set this to the configured transport limit when
-    /// overriding it. `None` disables collection-time byte limiting.
+    /// overriding it. `None` disables this configured limit; RPC calls still use the transport
+    /// limit.
     #[serde(default = "default_max_response_size")]
     pub max_response_size: Option<usize>,
 }
@@ -297,9 +298,10 @@ pub struct EthFilterConfig {
     /// A filter is considered stale if it has not been successfully polled for longer than this
     /// duration and will be removed. Failed polls do not extend its lifetime.
     pub stale_filter_ttl: Duration,
-    /// Maximum serialized log result size in bytes. `None` disables byte limiting.
+    /// Maximum serialized log result size in bytes. `None` disables this configured limit.
     ///
-    /// Includes array brackets and separators; the transport enforces response envelope overhead.
+    /// Includes array brackets and separators. RPC handlers additionally reserve the actual
+    /// response envelope and request ID within the transport limit.
     pub max_response_size: Option<usize>,
     /// Maximum number of concurrent range scans, independent of blocking IO permits.
     ///

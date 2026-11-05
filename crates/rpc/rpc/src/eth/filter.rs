@@ -11,11 +11,18 @@ use async_trait::async_trait;
 use futures::{
     future::TryFutureExt,
     stream::{FuturesOrdered, StreamExt},
-    Future,
+    Future, FutureExt,
 };
 use itertools::Itertools;
-use jsonrpsee::{core::RpcResult, server::IdProvider};
-use jsonrpsee_types::error::{OVERSIZED_RESPONSE_CODE, OVERSIZED_RESPONSE_MSG};
+use jsonrpsee::{
+    core::{server::MethodCallback, RpcResult},
+    server::IdProvider,
+    MethodResponse, RpcModule,
+};
+use jsonrpsee_types::{
+    error::{OVERSIZED_RESPONSE_CODE, OVERSIZED_RESPONSE_MSG},
+    Id, Response, ResponsePayload,
+};
 use reth_errors::{ProviderError, RethError};
 use reth_primitives_traits::{NodePrimitives, SealedHeader};
 use reth_rpc_eth_api::{
@@ -307,7 +314,7 @@ where
                         *filter,
                         from_block_number,
                         to_block_number,
-                        self.inner.query_limits,
+                        self.inner.query_limits(),
                     )
                     .await?;
                 FilterChanges::Logs(logs)
@@ -335,7 +342,7 @@ where
         let FilterKind::Log(inner_filter) = &filter.kind else {
             return Err(EthFilterError::FilterNotFound(id))
         };
-        let logs = self.logs_for_filter(*inner_filter.clone(), self.inner.query_limits).await?;
+        let logs = self.logs_for_filter(*inner_filter.clone(), self.inner.query_limits()).await?;
         *filter.last_poll_timestamp.lock() = Instant::now();
         Ok(logs)
     }
@@ -347,6 +354,51 @@ where
         limits: QueryLimits,
     ) -> Result<Vec<RpcLog<Eth::NetworkTypes>>, EthFilterError> {
         self.inner.clone().logs_for_filter(filter, limits).await
+    }
+
+    /// Builds RPC handlers that reserve the actual JSON-RPC envelope and request ID before
+    /// collecting logs or advancing an installed log filter's cursor.
+    ///
+    /// The transport's limit is supplied per call, including calls within batches. Direct Rust
+    /// calls continue to use the configured result budget; Engine queries retain explicit limits.
+    /// This constructor adds transport accounting to the generated `EthFilterApiServer` handlers.
+    pub fn into_rpc(self) -> RpcModule<Self> {
+        let mut module = EthFilterApiServer::into_rpc(self);
+        for name in ["eth_getLogs", "eth_getFilterLogs", "eth_getFilterChanges"] {
+            let Some(MethodCallback::Async(callback)) = module.remove_method(name) else {
+                unreachable!("log methods are registered as async callbacks")
+            };
+            let callback = MethodCallback::Async(Arc::new(
+                move |id, params, conn_id, max_size, extensions| {
+                    // Serialize an empty success envelope with a borrowed ID, so escaped and long
+                    // string IDs are counted exactly without allocating another serialized copy.
+                    let borrowed_id = match &id {
+                        Id::Number(number) => Id::Number(*number),
+                        Id::Str(value) => Id::Str(value.as_ref().into()),
+                        Id::Null => Id::Null,
+                    };
+                    let mut budget = LogResponseBudget { remaining: Some(max_size) };
+                    let envelope = Response::new(ResponsePayload::success([(); 0]), borrowed_id);
+                    if serde_json::to_writer(&mut budget, &envelope).is_err() {
+                        return async move {
+                            MethodResponse::error(id, log_response_too_large())
+                                .with_extensions(extensions)
+                        }
+                        .boxed()
+                    }
+                    // The collector accounts for the empty result's two brackets itself.
+                    let result_limit = budget.remaining.map(|remaining| remaining + 2);
+                    LOG_RESPONSE_LIMIT
+                        .scope(result_limit, callback(id, params, conn_id, max_size, extensions))
+                        .boxed()
+                },
+            ));
+            assert!(
+                module.verify_and_insert(name, callback).is_ok(),
+                "removed method cannot conflict"
+            );
+        }
+        module
     }
 }
 
@@ -436,7 +488,7 @@ where
     /// Handler for `eth_getLogs`
     async fn logs(&self, filter: Filter) -> RpcResult<Vec<RpcLog<Eth::NetworkTypes>>> {
         trace!(target: "rpc::eth", "Serving eth_getLogs");
-        Ok(self.logs_for_filter(filter, self.inner.query_limits).await?)
+        Ok(self.logs_for_filter(filter, self.inner.query_limits()).await?)
     }
 }
 
@@ -875,6 +927,19 @@ where
             })
             .await
             .map_err(|_| EthFilterError::InternalError)?
+    }
+
+    /// Applies the transport's envelope-adjusted result budget when serving an RPC request.
+    fn query_limits(&self) -> QueryLimits {
+        let mut limits = self.query_limits;
+        if let Ok(Some(transport_limit)) = LOG_RESPONSE_LIMIT.try_with(|limit| *limit) {
+            limits.max_response_size = Some(
+                limits
+                    .max_response_size
+                    .map_or(transport_limit, |configured| configured.min(transport_limit)),
+            );
+        }
+        limits
     }
 }
 
@@ -1450,6 +1515,11 @@ impl<
     }
 }
 
+tokio::task_local! {
+    /// Per-call result budget after reserving the transport's actual JSON-RPC envelope.
+    static LOG_RESPONSE_LIMIT: Option<usize>;
+}
+
 /// Counts the JSON result bytes without allocating a serialized copy of the logs.
 struct LogResponseBudget {
     remaining: Option<usize>,
@@ -1460,7 +1530,7 @@ impl LogResponseBudget {
         let remaining = max_response_size
             .map(|size| size.checked_sub(2).ok_or_else(log_response_too_large))
             .transpose()?;
-        // Reserve the array brackets; the transport accounts for the request ID and envelope.
+        // Reserve array brackets after the RPC handler has accounted for the response envelope.
         Ok(Self { remaining })
     }
 
@@ -1509,6 +1579,8 @@ mod tests {
     use alloy_network::Ethereum;
     use alloy_primitives::{Address, Bloom, Bytes, FixedBytes, Log, LogData, Signature, B256};
     use futures::FutureExt;
+    use jsonrpsee::core::server::ConnectionId;
+    use jsonrpsee_types::Params;
     use rand::Rng;
     use reth_chain_state::ExecutedBlock;
     use reth_chainspec::{ChainSpec, ChainSpecProvider};
@@ -3025,5 +3097,63 @@ mod tests {
         .unwrap();
         drop(permits);
         assert_eq!(guard.available_permits(), capacity);
+    }
+
+    #[tokio::test]
+    async fn rpc_envelope_rejection_preserves_filter_cursor() {
+        let provider = MockEthProvider::default();
+        add_block_with_logs(&provider);
+        let eth_api = build_test_eth_api(provider);
+        let query = Filter::new().from_block(7u64).to_block(7u64);
+        let filter = EthFilter::new(eth_api.clone(), EthFilterConfig::default(), Runtime::test());
+        let expected =
+            filter.logs_for_filter(query.clone(), QueryLimits::no_limits()).await.unwrap();
+        let result_size = serde_json::to_vec(&expected).unwrap().len();
+        let filter = EthFilter::new(
+            eth_api,
+            EthFilterConfig::default().max_response_size(Some(result_size)),
+            Runtime::test(),
+        );
+        let module = filter.clone().into_rpc();
+        for id in [Id::Number(u64::MAX), Id::Null, Id::Str("\"\\\n".repeat(1024).into())] {
+            let expected_response = serde_json::to_string(&Response::new(
+                ResponsePayload::success_borrowed(&expected),
+                id.clone(),
+            ))
+            .unwrap();
+            let max_size = expected_response.len();
+            let filter_id = filter.new_filter(query.clone()).await.unwrap();
+            for name in ["eth_getLogs", "eth_getFilterLogs", "eth_getFilterChanges"] {
+                let params = if name == "eth_getLogs" {
+                    serde_json::to_string(&[&query]).unwrap()
+                } else {
+                    serde_json::to_string(&[&filter_id]).unwrap()
+                };
+                let params = Params::new(Some(&params)).into_owned();
+                let MethodCallback::Async(callback) = module.method(name).unwrap() else {
+                    panic!("async handler")
+                };
+                for rejected_size in [max_size - 1, max_size - 1, 0] {
+                    let response = callback(
+                        id.clone(),
+                        params.clone(),
+                        ConnectionId(0),
+                        rejected_size,
+                        Default::default(),
+                    )
+                    .await;
+                    assert_eq!(
+                        response.as_error_code(),
+                        Some(OVERSIZED_RESPONSE_CODE),
+                        "{name}: {response}"
+                    );
+                }
+                let response =
+                    callback(id.clone(), params, ConnectionId(0), max_size, Default::default())
+                        .await;
+                assert_eq!(response.as_ref(), expected_response, "{name}");
+            }
+            assert_eq!(filter.filter_changes(filter_id).await.unwrap(), FilterChanges::Empty);
+        }
     }
 }

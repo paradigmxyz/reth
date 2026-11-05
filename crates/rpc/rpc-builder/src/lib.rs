@@ -972,6 +972,7 @@ where
                         RethRpcModule::Eth => {
                             // merge all eth handlers
                             let mut module = eth_api.clone().into_rpc();
+                            // EthFilter's constructor reserves each request's JSON-RPC envelope.
                             module.merge(eth_filter.clone().into_rpc()).expect("No conflicts");
                             module.merge(eth_pubsub.clone().into_rpc()).expect("No conflicts");
                             module
