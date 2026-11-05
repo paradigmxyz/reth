@@ -24,7 +24,7 @@
 // IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 // DEALINGS IN THE SOFTWARE.
 
-use std::{collections::HashSet, str::FromStr};
+use std::collections::HashSet;
 
 use super::RpcDescription;
 use crate::{
@@ -33,7 +33,6 @@ use crate::{
 };
 use proc_macro2::{Span, TokenStream as TokenStream2};
 use quote::{quote, quote_spanned};
-use syn::Attribute;
 
 impl RpcDescription {
     pub(super) fn render_server(&self) -> Result<TokenStream2, syn::Error> {
@@ -43,14 +42,12 @@ impl RpcDescription {
 
         let method_impls = self.render_methods()?;
         let into_rpc_impl = self.render_into_rpc()?;
-        let async_trait = self.jrps_server_item(quote! { core::__reexports::async_trait });
 
         // Doc-comment to be associated with the server.
         let doc_comment =
             format!("Server trait implementation for the `{}` RPC API.", self.trait_def.ident);
 
         let trait_impl = quote! {
-            #[#async_trait]
             #[doc = #doc_comment]
             pub trait #trait_name #impl_generics: Sized + Send + Sync + 'static #where_clause {
                 #method_impls
@@ -64,7 +61,8 @@ impl RpcDescription {
     fn render_methods(&self) -> Result<TokenStream2, syn::Error> {
         let methods = self.methods.iter().map(|method| {
             let docs = &method.docs;
-            let method_sig = &method.signature;
+            let mut method_sig = method.signature.clone();
+            desugar_async(&mut method_sig.sig);
 
             quote! {
                 #docs
@@ -81,6 +79,7 @@ impl RpcDescription {
                 syn::parse_quote!(subscription_sink: #subscription_sink_ty);
             let mut sub_sig = sub.signature.clone();
             sub_sig.sig.inputs.insert(1, subscription_sink);
+            desugar_async(&mut sub_sig.sig);
 
             quote! {
                 #docs
@@ -352,72 +351,30 @@ impl RpcDescription {
             }
         };
 
-        // Code to decode sequence of parameters from a JSON object (aka map).
-        let decode_map = {
-            let generics = (0..params.len()).map(|n| quote::format_ident!("G{}", n));
-
-            let serde = self.jrps_server_item(quote! { core::__reexports::serde });
-            let serde_crate = serde.to_string();
-
-            let fields = params.iter().zip(generics.clone()).map(|(fn_arg, ty)| {
-                let arg_pat = fn_arg.arg_pat();
-                let name = fn_arg.name();
-
-                let mut alias_vals = String::new();
-                alias_vals.push_str(&format!(
-                    r#"alias = "{}""#,
-                    heck::ToSnakeCase::to_snake_case(name.as_str())
-                ));
-                alias_vals.push(',');
-                alias_vals.push_str(&format!(
-                    r#"alias = "{}""#,
-                    heck::ToLowerCamelCase::to_lower_camel_case(name.as_str())
-                ));
-
-                let serde_rename = quote!(#[serde(rename = #name)]);
-
-                let alias = TokenStream2::from_str(alias_vals.as_str()).unwrap();
-
-                let serde_alias: Attribute = syn::parse_quote! {
-                    #[serde(#alias)]
-                };
-
-                quote! {
-                    #serde_alias
-                    #serde_rename
-                    #arg_pat: #ty,
-                }
-            });
-            let destruct = params.iter().map(RpcFnArg::arg_pat).map(|a| quote!(parsed.#a));
-            let types = params.iter().map(RpcFnArg::ty);
-
-            quote! {
-                #[derive(#serde::Deserialize)]
-                #[serde(crate = #serde_crate)]
-                struct ParamsObject<#(#generics,)*> {
-                    #(#fields)*
-                }
-
-                let parsed: ParamsObject<#(#types,)*> = match params.parse() {
-                    Ok(p) => p,
-                    Err(e) => {
-                        #reexports::log_fail_parse_as_object(&e);
-                        #error_ret
-                    }
-                };
-
-                (#(#destruct),*)
-            }
-        };
-
+        // Parameters are positional, like geth: object (named) params fail to parse as an array.
         let parsing = quote! {
-            let (#params_fields) = if params.is_object() {
-                #decode_map
-            } else {
+            let (#params_fields) = {
                 #decode_array
             };
         };
 
         (parsing, params_fields)
     }
+}
+
+/// Turns `async fn f(..) -> R` into `fn f(..) -> impl Future<Output = R> + Send`.
+///
+/// The server trait stays usable from the `Send` futures that `RpcModule` registers, without boxing
+/// every call the way `async_trait` does. Implementations can still use `async fn`.
+fn desugar_async(sig: &mut syn::Signature) {
+    if sig.asyncness.take().is_none() {
+        return;
+    }
+    let output = match &sig.output {
+        syn::ReturnType::Default => quote! { () },
+        syn::ReturnType::Type(_, ty) => quote! { #ty },
+    };
+    sig.output = syn::parse_quote! {
+        -> impl ::core::future::Future<Output = #output> + ::core::marker::Send
+    };
 }

@@ -19,7 +19,6 @@ missing_copy_implementations = "warn"
 manual_async_fn = "allow"
 
 [dependencies]
-async-trait = { workspace = true }
 jsonrpsee-types = { workspace = true }
 thiserror = { workspace = true, features = ["std"] }
 serde = { workspace = true, features = ["derive", "alloc"] }

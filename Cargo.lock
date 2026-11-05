@@ -5677,7 +5677,6 @@ dependencies = [
 name = "jsonrpsee-core"
 version = "0.26.1"
 dependencies = [
- "async-trait",
  "bytes",
  "futures-util",
  "http",
@@ -5701,7 +5700,6 @@ dependencies = [
 name = "jsonrpsee-proc-macros"
 version = "0.26.1"
 dependencies = [
- "heck",
  "jsonrpsee",
  "proc-macro-crate",
  "proc-macro2",
@@ -10306,7 +10304,6 @@ dependencies = [
  "alloy-rlp",
  "alloy-rpc-types-engine",
  "assert_matches",
- "async-trait",
  "jsonrpsee-core",
  "jsonrpsee-types",
  "metrics",

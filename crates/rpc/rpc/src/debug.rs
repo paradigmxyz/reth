@@ -12,7 +12,6 @@ use alloy_rpc_types_trace::geth::{
     ChainBlockTraceResult, GethDebugTracingCallOptions, GethDebugTracingOptions, GethTrace,
     TraceResult,
 };
-use async_trait::async_trait;
 use evm2::evm::StateChangeSource;
 use evm2_inspectors::tracing::{DebugInspector, TransactionContext};
 use futures::Stream;
@@ -875,7 +874,6 @@ where
     }
 }
 
-#[async_trait]
 impl<Eth> DebugApiServer<RpcTxReq<Eth::NetworkTypes>> for DebugApi<Eth>
 where
     Eth: EthTransactions + TraceExt,
@@ -1291,9 +1289,11 @@ where
     /// * Contract bytecode associated with a code hash. The key format is: `<0x63><code_hash>`
     ///     * Prefix byte: 0x63 (required)
     ///     * Code hash: 32 bytes
+    ///
     ///   Must be provided as either:
     ///     * Hex string: "0x63..." (66 hex characters after 0x)
     ///     * Raw byte string: raw byte string (33 bytes)
+    ///
     ///   See Geth impl: <https://github.com/ethereum/go-ethereum/blob/737ffd1bf0cbee378d0111a5b17ae4724fb2216c/core/rawdb/schema.go#L120>
     async fn debug_db_get(&self, key: String) -> RpcResult<Option<Bytes>> {
         let key_bytes = if key.starts_with("0x") {
