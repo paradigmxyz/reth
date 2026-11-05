@@ -20,7 +20,7 @@ manual_async_fn = "allow"
 result_large_err = "allow"
 
 [dependencies]
-futures-util = { workspace = true, features = ["io", "async-await-macro"] }
+futures-util = { workspace = true, features = ["io", "async-await-macro", "std"] }
 http = { workspace = true }
 http-body = { version = "1" }
 hyper = { workspace = true, features = ["server", "http1", "http2"] }

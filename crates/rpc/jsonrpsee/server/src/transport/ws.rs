@@ -50,6 +50,8 @@ pub(crate) struct BackgroundTaskParams<S> {
     pub(crate) rpc_service: S,
     pub(crate) sink: MethodSink,
     pub(crate) rx: mpsc::Receiver<Box<RawValue>>,
+    /// Held by every running call, so that a graceful shutdown can wait for them.
+    pub(crate) pending_calls: mpsc::Sender<()>,
     pub(crate) pending_calls_completed: mpsc::Receiver<()>,
 }
 
@@ -71,6 +73,7 @@ where
         rpc_service,
         sink,
         rx,
+        pending_calls,
         pending_calls_completed,
     } = params;
     let ServerConfig { batch_requests_config, max_request_body_size, ws_write_timeout, .. } =
@@ -153,8 +156,10 @@ where
 
         let rpc_service = rpc_service.clone();
         let sink = sink.clone();
+        let pending_calls = pending_calls.clone();
 
         tokio::spawn(async move {
+            let _pending_calls = pending_calls;
             let first_non_whitespace =
                 data.iter().enumerate().take(128).find(|(_, byte)| !byte.is_ascii_whitespace());
 
@@ -198,6 +203,7 @@ where
     // **NOTE** Do not return early in this function. This `await` needs to run to guarantee
     // proper drop behaviour.
     drop(rpc_service);
+    drop(pending_calls);
     graceful_shutdown(result, pending_calls_completed, ws_stream, conn_tx, send_task_handle).await;
 
     drop(conn);
