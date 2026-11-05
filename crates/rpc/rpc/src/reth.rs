@@ -453,9 +453,10 @@ mod tests {
     use alloy_consensus::{Block, Header};
     use alloy_genesis::{Genesis, GenesisAccount};
     use alloy_primitives::Address;
+    use evm2::evm::AccountInfo;
     use reth_chainspec::ChainSpecBuilder;
     use reth_db_common::init::init_genesis;
-    use reth_primitives_traits::{Account, Block as _};
+    use reth_primitives_traits::Block as _;
     use reth_provider::{
         providers::BlockchainProvider, test_utils::create_test_provider_factory_with_chain_spec,
         BlockWriter,
@@ -476,12 +477,12 @@ mod tests {
         .map(|(id, before, after)| {
             (
                 Address::with_last_byte(id),
-                before.map(|balance| Account {
+                before.map(|balance| AccountInfo {
                     balance: U256::from(balance),
                     nonce: 1,
                     ..Default::default()
                 }),
-                after.map(|balance| Account {
+                after.map(|balance| AccountInfo {
                     balance: U256::from(balance),
                     nonce: 2,
                     ..Default::default()
@@ -511,16 +512,11 @@ mod tests {
         let outcome = ExecutionOutcome {
             bundle: BundleState::new(
                 transitions.iter().map(|(address, before, after)| {
-                    (
-                        *address,
-                        before.clone().map(Into::into),
-                        after.clone().map(Into::into),
-                        Default::default(),
-                    )
+                    (*address, before.clone(), after.clone(), Default::default())
                 }),
-                [transitions.iter().map(|(address, before, _)| {
-                    (*address, Some(before.clone().map(Into::into)), [])
-                })],
+                [transitions
+                    .iter()
+                    .map(|(address, before, _)| (*address, Some(before.clone()), []))],
                 [],
             ),
             first_block: 1,
