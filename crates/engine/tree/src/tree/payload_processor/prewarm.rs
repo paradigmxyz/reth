@@ -1222,7 +1222,7 @@ impl<Tx, T: evm2::EvmTypes> SpeculationQueue<Tx, T> {
         Self {
             txs: (0..transaction_count).map(|_| OnceLock::new()).collect(),
             next: AtomicUsize::new(1),
-            next_probe: AtomicUsize::new(1),
+            next_probe: AtomicUsize::new(0),
             closed: AtomicBool::new(false),
         }
     }
