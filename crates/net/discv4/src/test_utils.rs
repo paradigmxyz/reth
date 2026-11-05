@@ -6,10 +6,10 @@ use crate::{
     IngressReceiver, PeerId, SAFE_MAX_DATAGRAM_NEIGHBOUR_RECORDS,
 };
 use alloy_primitives::{hex, B256, B512};
-use rand_08::{thread_rng, Rng, RngCore};
+use rand::{rng, Rng, RngCore};
 use reth_ethereum_forks::{ForkHash, ForkId};
 use reth_network_peers::{pk2id, NodeRecord};
-use secp256k1::{SecretKey, SECP256K1};
+use secp256k1::SecretKey;
 use std::{
     collections::{HashMap, HashSet},
     io,
@@ -48,9 +48,9 @@ pub struct MockDiscovery {
 impl MockDiscovery {
     /// Creates a new instance and opens a socket
     pub async fn new() -> io::Result<(Self, mpsc::Sender<MockCommand>)> {
-        let mut rng = thread_rng();
+        let mut rng = rng();
         let socket = SocketAddr::from_str("127.0.0.1:0").unwrap();
-        let (secret_key, pk) = SECP256K1.generate_keypair(&mut rng);
+        let (secret_key, pk) = secp256k1::generate_keypair(&mut rng);
         let id = pk2id(&pk);
         let socket = Arc::new(UdpSocket::bind(socket).await?);
         let local_addr = socket.local_addr()?;
@@ -239,9 +239,9 @@ pub async fn create_discv4() -> (Discv4, Discv4Service) {
 
 /// Creates a new testing instance for [`Discv4`] and its service with the given config.
 pub async fn create_discv4_with_config(config: Discv4Config) -> (Discv4, Discv4Service) {
-    let mut rng = thread_rng();
+    let mut rng = rng();
     let socket = SocketAddr::from_str("127.0.0.1:0").unwrap();
-    let (secret_key, pk) = SECP256K1.generate_keypair(&mut rng);
+    let (secret_key, pk) = secp256k1::generate_keypair(&mut rng);
     let id = pk2id(&pk);
     let local_enr =
         NodeRecord { address: socket.ip(), tcp_port: socket.port(), udp_port: socket.port(), id };
@@ -250,7 +250,7 @@ pub async fn create_discv4_with_config(config: Discv4Config) -> (Discv4, Discv4S
 
 /// Generates a random [`NodeEndpoint`] using the provided random number generator.
 pub fn rng_endpoint(rng: &mut impl Rng) -> NodeEndpoint {
-    let address = if rng.r#gen() {
+    let address = if rng.random() {
         let mut ip = [0u8; 4];
         rng.fill_bytes(&mut ip);
         IpAddr::V4(ip.into())
@@ -259,7 +259,7 @@ pub fn rng_endpoint(rng: &mut impl Rng) -> NodeEndpoint {
         rng.fill_bytes(&mut ip);
         IpAddr::V6(ip.into())
     };
-    NodeEndpoint { address, tcp_port: rng.r#gen(), udp_port: rng.r#gen() }
+    NodeEndpoint { address, tcp_port: rng.random(), udp_port: rng.random() }
 }
 
 /// Generates a random [`NodeRecord`] using the provided random number generator.
@@ -277,7 +277,7 @@ pub fn rng_ipv6_record(rng: &mut impl RngCore) -> NodeRecord {
     let address = IpAddr::V6(ip.into());
     let mut id = B512::ZERO;
     rng.fill_bytes(&mut id[..]);
-    NodeRecord { address, tcp_port: rng.r#gen(), udp_port: rng.r#gen(), id }
+    NodeRecord { address, tcp_port: rng.random(), udp_port: rng.random(), id }
 }
 
 /// Generates a random IPv4 [`NodeRecord`] using the provided random number generator.
@@ -287,33 +287,33 @@ pub fn rng_ipv4_record(rng: &mut impl RngCore) -> NodeRecord {
     let address = IpAddr::V4(ip.into());
     let mut id = B512::ZERO;
     rng.fill_bytes(&mut id[..]);
-    NodeRecord { address, tcp_port: rng.r#gen(), udp_port: rng.r#gen(), id }
+    NodeRecord { address, tcp_port: rng.random(), udp_port: rng.random(), id }
 }
 
 /// Generates a random [`Message`] using the provided random number generator.
 pub fn rng_message(rng: &mut impl RngCore) -> Message {
-    match rng.gen_range(1..=4) {
+    match rng.random_range(1..=4) {
         1 => Message::Ping(Ping {
             from: rng_endpoint(rng),
             to: rng_endpoint(rng),
-            expire: rng.r#gen(),
+            expire: rng.random(),
             enr_sq: None,
         }),
         2 => {
             let mut echo = B256::ZERO;
             rng.fill_bytes(&mut echo[..]);
-            Message::Pong(Pong { to: rng_endpoint(rng), echo, expire: rng.r#gen(), enr_sq: None })
+            Message::Pong(Pong { to: rng_endpoint(rng), echo, expire: rng.random(), enr_sq: None })
         }
         3 => {
             let mut id = B512::ZERO;
             rng.fill_bytes(&mut id[..]);
-            Message::FindNode(FindNode { id, expire: rng.r#gen() })
+            Message::FindNode(FindNode { id, expire: rng.random() })
         }
         4 => {
-            let num: usize = rng.gen_range(1..=SAFE_MAX_DATAGRAM_NEIGHBOUR_RECORDS);
+            let num: usize = rng.random_range(1..=SAFE_MAX_DATAGRAM_NEIGHBOUR_RECORDS);
             Message::Neighbours(Neighbours {
                 nodes: std::iter::repeat_with(|| rng_record(rng)).take(num).collect(),
-                expire: rng.r#gen(),
+                expire: rng.random(),
             })
         }
         _ => unreachable!(),
@@ -332,7 +332,7 @@ mod tests {
     async fn can_mock_discovery() {
         reth_tracing::init_test_tracing();
 
-        let mut rng = thread_rng();
+        let mut rng = rng();
         let (_, mut service) = create_discv4().await;
         let (mut mockv4, _cmd) = MockDiscovery::new().await.unwrap();
 
