@@ -147,7 +147,7 @@ where
 
                     let (next_inspector, res) = evm
                         .transact_with_inspector(&tx_env, inspector)
-                        .map_err(Eth::Error::from_evm_err)?;
+                        .map_err(|err| Eth::Error::from_evm_err_at(index, err))?;
                     inspector = next_inspector;
                     let result = inspector
                         .get_result(
