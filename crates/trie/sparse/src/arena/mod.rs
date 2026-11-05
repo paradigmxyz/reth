@@ -12,7 +12,8 @@ use crate::{
     LeafLookup, LeafLookupError, LeafUpdate, SparseTrie, SparseTrieUpdates, TrieNodeEpoch,
 };
 use alloc::{borrow::Cow, boxed::Box, vec::Vec};
-use alloy_primitives::{keccak256, map::B256Map, B256};
+use alloy_primitives::{keccak256, keccak256_uncached, map::B256Map, B256};
+use alloy_rlp::Encodable;
 use alloy_trie::TrieMask;
 use core::{cmp::Reverse, mem};
 use reth_execution_errors::{SparseTrieErrorKind, SparseTrieResult};
@@ -24,6 +25,18 @@ use smallvec::SmallVec;
 use tracing::{instrument, trace};
 
 const TRACE_TARGET: &str = "trie::arena";
+
+/// Returns the [`RlpNode`] of an RLP-encoded trie node, hashing it without the global keccak
+/// cache.
+///
+/// Node preimages do not repeat, so caching their hashes only evicts entries other callers reuse.
+fn rlp_node_uncached(rlp: &[u8]) -> RlpNode {
+    if rlp.len() < 32 {
+        RlpNode::from_raw(rlp).expect("node shorter than a word fits an RlpNode")
+    } else {
+        RlpNode::word_rlp(&keccak256_uncached(rlp))
+    }
+}
 
 /// The maximum path length (in nibbles) for nodes that live in the upper trie. Nodes at this
 /// depth or deeper belong to lower subtries.
@@ -1107,13 +1120,15 @@ impl ArenaParallelSparseTrie {
             }
 
             rlp_buf.clear();
-            let rlp_node = BranchNodeRef::new(rlp_node_buf, state_mask).rlp(rlp_buf);
+            BranchNodeRef::new(rlp_node_buf, state_mask).encode(rlp_buf);
+            let rlp_node = rlp_node_uncached(rlp_buf);
 
             let rlp_node = if short_key.is_empty() {
                 rlp_node
             } else {
                 rlp_buf.clear();
-                ExtensionNodeRef::new(&short_key, &rlp_node).rlp(rlp_buf)
+                ExtensionNodeRef::new(&short_key, &rlp_node).encode(rlp_buf);
+                rlp_node_uncached(rlp_buf)
             };
 
             trace!(
@@ -1303,7 +1318,8 @@ impl ArenaParallelSparseTrie {
         };
 
         rlp_buf.clear();
-        let rlp_node = LeafNodeRef { key, value }.rlp(rlp_buf);
+        LeafNodeRef { key, value }.encode(rlp_buf);
+        let rlp_node = rlp_node_uncached(rlp_buf);
 
         *arena[idx].state_mut() =
             ArenaSparseNodeState::Cached { rlp_node: rlp_node.clone(), epoch };
