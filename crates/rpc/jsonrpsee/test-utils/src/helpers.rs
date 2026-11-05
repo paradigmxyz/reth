@@ -24,15 +24,11 @@
 // IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 // DEALINGS IN THE SOFTWARE.
 
-use std::{convert::Infallible, net::SocketAddr};
+use std::net::SocketAddr;
 
 use crate::mocks::{HttpResponse, Id, Uri};
 use http_body_util::BodyExt;
-use hyper::{service::service_fn, Response};
-use hyper_util::{
-    client::legacy::Client,
-    rt::{TokioExecutor, TokioIo},
-};
+use hyper_util::{client::legacy::Client, rt::TokioExecutor};
 use serde::Serialize;
 use serde_json::Value;
 
@@ -43,14 +39,6 @@ pub const INTERNAL_ERROR: &str = "Internal error";
 pub const INVALID_PARAMS: &str = "Invalid params";
 pub const INVALID_REQUEST: &str = "Invalid request";
 pub const METHOD_NOT_FOUND: &str = "Method not found";
-
-/// Converts a sockaddress to a WebSocket URI.
-pub fn to_ws_uri_string(addr: SocketAddr) -> String {
-    let mut s = String::new();
-    s.push_str("ws://");
-    s.push_str(&addr.to_string());
-    s
-}
 
 /// Converts a sockaddress to a HTTP URI.
 pub fn to_http_uri(sockaddr: SocketAddr) -> Uri {
@@ -165,45 +153,6 @@ pub fn internal_error(id: Id) -> String {
     )
 }
 
-pub fn server_error(id: Id) -> String {
-    format!(
-        r#"{{"jsonrpc":"2.0","id":{},"error":{{"code":-32000,"message":"Server error"}}}}"#,
-        serde_json::to_string(&id).unwrap()
-    )
-}
-
-/// Hardcoded server response when a client initiates a new subscription.
-///
-/// NOTE: works only for one subscription because the subscription ID is hardcoded.
-pub fn server_subscription_id_response(id: Id) -> String {
-    format!(
-        r#"{{"jsonrpc":"2.0","id":{},"result":"D3wwzU6vvoUUYehv4qoFzq42DZnLoAETeFzeyk8swH4o"}}"#,
-        serde_json::to_string(&id).unwrap()
-    )
-}
-
-/// Server response to a hardcoded pending subscription
-pub fn server_subscription_response(method: &str, result: Value) -> String {
-    format!(
-        r#"{{"jsonrpc":"2.0","method":"{method}","params":{{"subscription":"D3wwzU6vvoUUYehv4qoFzq42DZnLoAETeFzeyk8swH4o","result":{}}}}}"#,
-        serde_json::to_string(&result).unwrap()
-    )
-}
-
-/// Server originated notification
-pub fn server_notification(method: &str, params: Value) -> String {
-    format!(
-        r#"{{"jsonrpc":"2.0","method":"{}", "params":{} }}"#,
-        method,
-        serde_json::to_string(&params).unwrap()
-    )
-}
-
-/// Server originated notification without params.
-pub fn server_notification_without_params(method: &str) -> String {
-    format!(r#"{{"jsonrpc":"2.0","method":"{}"}}"#, method)
-}
-
 pub async fn http_request(body: Body, uri: Uri) -> Result<HttpResponse, String> {
     let client = hyper_util::client::legacy::Client::builder(TokioExecutor::new()).build_http();
     http_post(client, body, uri).await
@@ -240,41 +189,4 @@ where
         header: parts.headers,
         body: String::from_utf8(bytes.to_vec()).unwrap(),
     })
-}
-
-/// Spawn HTTP server that responds with a hardcoded response.
-//
-// NOTE: This must be spawned on tokio because hyper only works with tokio.
-pub async fn http_server_with_hardcoded_response(response: String) -> SocketAddr {
-    let (tx, rx) = futures_channel::oneshot::channel::<SocketAddr>();
-
-    tokio::spawn(async move {
-        let addr = SocketAddr::from(([127, 0, 0, 1], 0));
-        let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
-        tx.send(listener.local_addr().unwrap()).unwrap();
-
-        loop {
-            let Ok((sock, _addr)) = listener.accept().await else {
-                continue;
-            };
-
-            let response = response.clone();
-            tokio::spawn(async move {
-                let io = TokioIo::new(sock);
-                let builder = hyper_util::server::conn::auto::Builder::new(TokioExecutor::new());
-
-                let conn = builder.serve_connection_with_upgrades(
-                    io,
-                    service_fn(move |_| {
-                        let rp = Response::new(Body::from(response.clone()));
-                        async move { Ok::<_, Infallible>(rp) }
-                    }),
-                );
-
-                let _ = conn.await;
-            });
-        }
-    });
-
-    rx.await.unwrap()
 }
