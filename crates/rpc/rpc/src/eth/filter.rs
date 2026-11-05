@@ -196,7 +196,7 @@ where
         }
     }
 
-    /// Clears all filters that have not been polled for longer than the configured
+    /// Clears all filters that have not been successfully polled for longer than the configured
     /// `stale_filter_ttl` at the given instant.
     pub async fn clear_stale_filters(&self, now: Instant) {
         trace!(target: "rpc::eth", "clear stale filters");
@@ -231,7 +231,8 @@ where
     /// Returns all the filter changes for the given id, if any.
     ///
     /// Concurrent polls of the same filter are serialized. Collection errors or cancellation leave
-    /// its block cursor unchanged so a retry does not skip undelivered changes.
+    /// its block cursor unchanged so a retry does not skip undelivered changes. Only successful
+    /// polls refresh the expiry timeout, allowing persistently failing filters to be evicted.
     pub async fn filter_changes(
         &self,
         id: FilterId,
@@ -240,9 +241,9 @@ where
         EthFilterError,
     > {
         let (block, kind) = {
-            let mut filters = self.inner.active_filters.inner.lock().await;
-            let filter = filters.get_mut(&id).ok_or(EthFilterError::FilterNotFound(id))?;
-            filter.last_poll_timestamp = Instant::now();
+            let filters = self.inner.active_filters.inner.lock().await;
+            let filter =
+                filters.get(&id).ok_or_else(|| EthFilterError::FilterNotFound(id.clone()))?;
             (filter.block.clone(), filter.kind.clone())
         };
 
@@ -251,12 +252,9 @@ where
         let info = self.provider().chain_info()?;
         let best_number = info.best_number;
         let start_block = *block;
-        if start_block > best_number {
-            // No new blocks since the last successful poll.
-            return Ok(FilterChanges::Empty)
-        }
-
         let changes = match kind {
+            // No new blocks since the last successful poll.
+            _ if start_block > best_number => FilterChanges::Empty,
             FilterKind::PendingTransaction(filter) => match filter.drain().await {
                 FilterChanges::Empty => FilterChanges::Empty,
                 FilterChanges::Hashes(hashes) => FilterChanges::Hashes(hashes),
@@ -312,7 +310,8 @@ where
                 FilterChanges::Logs(logs)
             }
         };
-        *block = best_number + 1;
+        self.refresh_filter_ttl(&id).await;
+        *block = start_block.max(best_number + 1);
         Ok(changes)
     }
 
@@ -326,11 +325,10 @@ where
         id: FilterId,
     ) -> Result<Vec<RpcLog<Eth::NetworkTypes>>, EthFilterError> {
         let filter = {
-            let mut filters = self.inner.active_filters.inner.lock().await;
+            let filters = self.inner.active_filters.inner.lock().await;
             let filter =
-                filters.get_mut(&id).ok_or_else(|| EthFilterError::FilterNotFound(id.clone()))?;
-            if let FilterKind::Log(ref inner_filter) = filter.kind {
-                filter.last_poll_timestamp = Instant::now();
+                filters.get(&id).ok_or_else(|| EthFilterError::FilterNotFound(id.clone()))?;
+            if let FilterKind::Log(inner_filter) = &filter.kind {
                 *inner_filter.clone()
             } else {
                 // Not a log filter
@@ -338,7 +336,9 @@ where
             }
         };
 
-        self.logs_for_filter(filter, self.inner.query_limits).await
+        let logs = self.logs_for_filter(filter, self.inner.query_limits).await?;
+        self.refresh_filter_ttl(&id).await;
+        Ok(logs)
     }
 
     /// Returns logs matching given filter object.
@@ -348,6 +348,13 @@ where
         limits: QueryLimits,
     ) -> Result<Vec<RpcLog<Eth::NetworkTypes>>, EthFilterError> {
         self.inner.clone().logs_for_filter(filter, limits).await
+    }
+
+    /// Refreshes expiry after a successful poll without restoring an evicted filter.
+    async fn refresh_filter_ttl(&self, id: &FilterId) {
+        if let Some(filter) = self.inner.active_filters.inner.lock().await.get_mut(id) {
+            filter.last_poll_timestamp = Instant::now();
+        }
     }
 }
 
@@ -465,7 +472,7 @@ struct EthFilterInner<Eth: EthApiTypes> {
     max_headers_range: u64,
     /// The type that can spawn tasks.
     task_spawner: Runtime,
-    /// Duration since the last filter poll, after which the filter is considered stale
+    /// Duration since the last successful filter poll, after which the filter is considered stale.
     stale_filter_ttl: Duration,
 }
 
@@ -869,7 +876,7 @@ impl<T> ActiveFilters<T> {
 struct ActiveFilter<T> {
     /// Next block to poll, locked until collection finishes to serialize concurrent polls.
     block: Arc<Mutex<u64>>,
-    /// Last time this filter was polled.
+    /// Last time this filter was successfully polled, or installed if it has not been polled yet.
     last_poll_timestamp: Instant,
     /// What kind of filter it is.
     kind: FilterKind<T>,
@@ -2505,6 +2512,15 @@ mod tests {
 
             let id =
                 eth_filter.new_filter(Filter::new().from_block(1u64).to_block(1u64)).await.unwrap();
+            let expires_at = eth_filter
+                .active_filters()
+                .inner
+                .lock()
+                .await
+                .get(&id)
+                .unwrap()
+                .last_poll_timestamp +
+                eth_filter.inner.stale_filter_ttl;
             let logs = EthFilterApiServer::filter_logs(&eth_filter, id.clone()).await;
 
             // Cancel a poll while it waits for scan capacity; the next poll must still collect it.
@@ -2533,6 +2549,14 @@ mod tests {
                 assert_eq!(logs.len(), 2);
                 assert_eq!(changes.unwrap(), FilterChanges::Logs(logs));
                 assert_eq!(retry.unwrap(), FilterChanges::Empty);
+            }
+
+            eth_filter.clear_stale_filters(expires_at).await;
+            assert_eq!(eth_filter.active_filters().contains(&id).await, limit == 16 * 1024);
+            if limit == 3 * 1024 {
+                let err = EthFilterApiServer::filter_changes(&eth_filter, id).await.unwrap_err();
+                assert_eq!(err.message(), "filter not found");
+                assert_eq!(err.code(), jsonrpsee_types::error::CALL_EXECUTION_FAILED_CODE);
             }
         }
     }

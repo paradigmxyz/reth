@@ -291,10 +291,10 @@ pub struct EthFilterConfig {
     ///
     /// If `None` then no limit is enforced.
     pub max_logs_per_response: Option<usize>,
-    /// How long a filter remains valid after the last poll.
+    /// How long a filter remains valid after the last successful poll.
     ///
-    /// A filter is considered stale if it has not been polled for longer than this duration and
-    /// will be removed.
+    /// A filter is considered stale if it has not been successfully polled for longer than this
+    /// duration and will be removed. Failed polls do not extend its lifetime.
     pub stale_filter_ttl: Duration,
     /// Maximum serialized log result size in bytes. `None` disables byte limiting.
     ///
