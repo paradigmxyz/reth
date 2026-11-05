@@ -239,7 +239,7 @@ impl LaunchContext {
         // TODO: reserved_cpu_cores is currently ignored because subtracting from thread pool
         // sizes doesn't actually reserve CPU cores for other processes.
         let _ = reserved_cpu_cores;
-        let num_threads = self.task_executor.cpu_pool().current_num_threads();
+        let num_threads = (self.task_executor.cpu_pool().current_num_threads() / 2).max(2);
         if let Err(err) = ThreadPoolBuilder::new()
             .num_threads(num_threads)
             .thread_name(|i| format!("rayon-{i:02}"))
