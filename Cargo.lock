@@ -9310,6 +9310,7 @@ dependencies = [
  "alloy-primitives",
  "evm2",
  "fixed-cache",
+ "libc",
  "metrics",
  "parking_lot",
  "reth-errors",
