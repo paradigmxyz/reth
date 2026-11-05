@@ -34,6 +34,7 @@ use reth_evm::{
     Evm as EvmInstance, EvmEnv, EvmEnvFor, EvmFor, EvmTypesFor, ExecutableTxFor, RecoveredTx,
     SpecFor,
 };
+use reth_execution_cache::ProbeMisses;
 use reth_metrics::Metrics;
 use reth_primitives_traits::{FastInstant as Instant, NodePrimitives};
 use reth_provider::{
@@ -272,10 +273,36 @@ where
         Tx: ExecutableTxFor<Evm> + Clone + Send + Sync,
     {
         let queue = SpeculationQueue::new(results.len());
-        pool.in_place_scope(|s| {
+        let fetch = ctx
+            .bal_prewarm_pool
+            .as_deref()
+            .zip(ctx.saved_cache.as_ref())
+            .filter(|_| ctx.probe_cold_reads)
+            .map(|(fetch, saved_cache)| {
+                let state_provider_factory = ctx.provider.clone();
+                let build = Arc::new(move || {
+                    state_provider_factory.database_provider_ro().map(|provider| {
+                        Box::new(provider.into_evm_state_provider()) as EvmStateProviderBox
+                    })
+                });
+                fetch.begin_block(
+                    build,
+                    saved_cache.cache().clone(),
+                    ctx.env.txpool_snapshot.clone(),
+                );
+                fetch
+            });
+        let tx_count = pool.in_place_scope(|s| {
             for _ in 0..pool.current_num_threads() {
                 s.spawn(|_| {
-                    Self::speculation_worker(ctx, pool, results, &queue, state_root_hint_stream)
+                    Self::speculation_worker(
+                        ctx,
+                        pool,
+                        results,
+                        &queue,
+                        fetch,
+                        state_root_hint_stream,
+                    )
                 });
             }
 
@@ -304,7 +331,55 @@ where
             results.wake(true);
             Self::send_withdrawal_hints(ctx, state_root_hint_stream);
             tx_count
-        })
+        });
+        if let Some(fetch) = fetch {
+            fetch.end_block();
+        }
+        tx_count
+    }
+
+    /// Executes `tx` on the current pool thread's probing EVM, which reads only the cache, and
+    /// has `fetch` load the keys it missed, so that they are loaded in parallel while other
+    /// transactions are probed and speculated.
+    fn probe_worker<Tx>(
+        ctx: &PrewarmContext<N, P, Evm>,
+        pool: &WorkerStatefulPool,
+        fetch: &BalPrewarmPool,
+        tx: &Tx,
+    ) where
+        Tx: ExecutableTxFor<Evm> + Clone,
+    {
+        pool.get_or_init(
+            || ctx.evm_for_ctx(),
+            |state: &mut PrewarmEvmState<Evm>| {
+                let Some((evm, misses)) = state.probe.as_mut() else { return };
+                let (tx_env, _) = tx.clone().into_parts();
+                drop(evm.take_state_cache());
+                let _ = evm.transact_and_discard(&tx_env, |_| ());
+                let missed = misses.take();
+                if missed.is_empty() {
+                    return
+                }
+                let mut accounts = missed.accounts;
+                accounts.sort_unstable();
+                accounts.dedup();
+                for address in accounts {
+                    fetch.warm_account(address, []);
+                }
+                let mut storage = missed.storage;
+                storage.sort_unstable();
+                storage.dedup();
+                for chunk in storage.chunk_by(|a, b| a.0 == b.0) {
+                    fetch.warm_storage(chunk[0].0, chunk.iter().map(|(_, slot)| *slot));
+                }
+                let mut code = missed.code;
+                code.sort_unstable();
+                code.dedup();
+                for hash in code {
+                    fetch.warm_code(hash);
+                }
+            },
+        );
     }
 
     /// Runs on a pool thread until prewarming stops: executes the next queued transaction, or
@@ -315,12 +390,22 @@ where
         pool: &WorkerStatefulPool,
         results: &PrewarmResults<EvmTypesFor<Evm>>,
         queue: &SpeculationQueue<Tx, EvmTypesFor<Evm>>,
+        fetch: Option<&BalPrewarmPool>,
         state_root_hint_stream: Option<&StateRootHintStream>,
     ) where
         Tx: ExecutableTxFor<Evm> + Clone + Send + Sync,
     {
         let mut idle = 0;
         while !ctx.should_stop() {
+            if let Some(fetch) = fetch &&
+                let Some((index, (tx, _))) = queue.claim_probe()
+            {
+                if index >= ctx.executed_tx_index.load(Ordering::Relaxed) {
+                    Self::probe_worker(ctx, pool, fetch, tx);
+                }
+                idle = 0;
+                continue
+            }
             if let Some((index, (tx, seeded))) = queue.claim() {
                 if results.begin_speculation(index) {
                     if let Some(timeline) = &results.timeline {
@@ -813,6 +898,9 @@ where
     pub disable_bal_batch_io: bool,
     /// Results of transaction prewarming that block execution may reuse, `None` if disabled.
     pub(crate) prewarm_results: Option<Arc<PrewarmResults<EvmTypesFor<Evm>>>>,
+    /// Whether speculation workers probe each transaction against the cache first and load the
+    /// keys it misses in parallel on [`Self::bal_prewarm_pool`] before speculating it.
+    pub(crate) probe_cold_reads: bool,
 }
 
 /// Per-thread EVM state initialised by [`PrewarmContext::evm_for_ctx`] and stored in
@@ -821,6 +909,8 @@ struct PrewarmEvmState<Evm: ConfigureEvm> {
     /// The EVM, `None` if its state provider could not be created.
     evm: Option<EvmFor<'static, Evm>>,
     recording: RecordingHandle,
+    /// An EVM that reads only the cache, with the keys it missed, if cold reads are probed.
+    probe: Option<(EvmFor<'static, Evm>, Arc<ProbeMisses>)>,
 }
 
 impl<N, P, Evm> PrewarmContext<N, P, Evm>
@@ -848,7 +938,11 @@ where
                     %err,
                     "Failed to build state provider in prewarm thread"
                 );
-                return PrewarmEvmState { evm: None, recording: RecordingHandle::default() }
+                return PrewarmEvmState {
+                    evm: None,
+                    recording: RecordingHandle::default(),
+                    probe: None,
+                }
             }
         };
 
@@ -870,13 +964,27 @@ where
         } else {
             self.evm_config.clone()
         };
+        let probe =
+            self.saved_cache.as_ref().filter(|_| self.probe_cold_reads).and_then(|saved_cache| {
+                let provider = self.provider.database_provider_ro().ok()?;
+                let misses = Arc::new(ProbeMisses::default());
+                let provider = CachedStateProvider::new_probe(
+                    Box::new(provider.into_evm_state_provider()) as EvmStateProviderBox,
+                    saved_cache.cache().clone(),
+                    Arc::clone(&misses),
+                )
+                .with_txpool_snapshot(self.env.txpool_snapshot.clone());
+                let evm =
+                    self.create_evm(&config, StateProviderDatabase::new(provider), evm_env.clone());
+                Some((evm, misses))
+            });
         let db = StateProviderDatabase::new(state_provider);
         let evm = if self.prewarm_results.is_some() {
             self.create_evm(&config, RecordingDb::new(db, recording.clone()), evm_env)
         } else {
             self.create_evm(&config, db, evm_env)
         };
-        PrewarmEvmState { evm: Some(evm), recording }
+        PrewarmEvmState { evm: Some(evm), recording, probe }
     }
 
     /// Creates a prewarm EVM, caching precompile results unless the cache is disabled.
@@ -1098,6 +1206,8 @@ struct SpeculationQueue<Tx, T: evm2::EvmTypes> {
     txs: Box<[OnceLock<QueuedTx<Tx, T>>]>,
     /// Index of the next transaction to execute for the first time.
     next: AtomicUsize,
+    /// Index of the next transaction to probe.
+    next_probe: AtomicUsize,
     /// Whether all transactions that will arrive have arrived.
     closed: AtomicBool,
 }
@@ -1110,6 +1220,7 @@ impl<Tx, T: evm2::EvmTypes> SpeculationQueue<Tx, T> {
         Self {
             txs: (0..transaction_count).map(|_| OnceLock::new()).collect(),
             next: AtomicUsize::new(1),
+            next_probe: AtomicUsize::new(1),
             closed: AtomicBool::new(false),
         }
     }
@@ -1133,13 +1244,22 @@ impl<Tx, T: evm2::EvmTypes> SpeculationQueue<Tx, T> {
 
     /// Claims the next transaction to execute for the first time, unless it has not arrived yet.
     fn claim(&self) -> Option<(usize, &QueuedTx<Tx, T>)> {
+        self.claim_from(&self.next)
+    }
+
+    /// Claims the next transaction to probe, unless it has not arrived yet.
+    fn claim_probe(&self) -> Option<(usize, &QueuedTx<Tx, T>)> {
+        self.claim_from(&self.next_probe)
+    }
+
+    /// Claims the transaction at `cursor` and advances it, unless the transaction has not arrived.
+    fn claim_from(&self, cursor: &AtomicUsize) -> Option<(usize, &QueuedTx<Tx, T>)> {
         loop {
-            let next = self.next.load(Ordering::Acquire);
+            let next = cursor.load(Ordering::Acquire);
             let slot = self.txs.get(next)?;
             match slot.get() {
                 Some(tx) => {
-                    if self
-                        .next
+                    if cursor
                         .compare_exchange_weak(next, next + 1, Ordering::AcqRel, Ordering::Relaxed)
                         .is_ok()
                     {
@@ -1147,7 +1267,7 @@ impl<Tx, T: evm2::EvmTypes> SpeculationQueue<Tx, T> {
                     }
                 }
                 None if self.closed.load(Ordering::Acquire) => {
-                    let _ = self.next.compare_exchange(
+                    let _ = cursor.compare_exchange(
                         next,
                         next + 1,
                         Ordering::AcqRel,
@@ -1215,6 +1335,7 @@ mod tests {
             disable_bal_parallel_state_root: false,
             disable_bal_batch_io: false,
             prewarm_results: None,
+            probe_cold_reads: false,
         };
         let (task, actions_tx) =
             PrewarmCacheTask::new(Runtime::test(), PayloadExecutionCache::default(), ctx);
@@ -1278,6 +1399,7 @@ mod tests {
                 disable_bal_parallel_state_root: false,
                 disable_bal_batch_io: false,
                 prewarm_results: Some(Arc::clone(&results)),
+                probe_cold_reads: false,
             };
             let tx =
                 WithTxEnv { tx_env: ctx.evm_config.tx_env(tx.clone()), tx: Arc::new(tx.clone()) };
@@ -1370,6 +1492,7 @@ mod tests {
             disable_bal_parallel_state_root: false,
             disable_bal_batch_io: false,
             prewarm_results: None,
+            probe_cold_reads: false,
         }
     }
 
