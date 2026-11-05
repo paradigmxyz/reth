@@ -562,27 +562,28 @@ pub enum EthSimBundleError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_primitives::Bytes;
+    use crate::EthApiBuilder;
+    use alloy_consensus::{transaction::SignerRecoverable, TxEip1559};
+    use alloy_eips::eip2718::Encodable2718;
+    use alloy_genesis::{Genesis, GenesisAccount};
+    use alloy_primitives::{Address, Bytes, TxKind, B256};
+    use alloy_rpc_types_eth::BlockOverrides;
     use alloy_rpc_types_mev::{Inclusion, ProtocolVersion};
+    use reth_chainspec::{ChainSpecBuilder, ChainSpecProvider};
+    use reth_db_common::init::init_genesis;
+    use reth_evm_ethereum::EthEvmConfig;
+    use reth_network_api::noop::NoopNetwork;
+    use reth_provider::{
+        providers::BlockchainProvider, test_utils::create_test_provider_factory_with_chain_spec,
+    };
+    use reth_testing_utils::{
+        generators,
+        generators::{generate_key, sign_tx_with_key_pair},
+    };
+    use reth_transaction_pool::test_utils::testing_pool;
 
     #[tokio::test(flavor = "multi_thread")]
     async fn sim_bundle_uses_next_block_env_and_overrides() {
-        use crate::EthApiBuilder;
-        use alloy_consensus::{transaction::SignerRecoverable, TxEip1559};
-        use alloy_eips::eip2718::Encodable2718;
-        use alloy_genesis::{Genesis, GenesisAccount};
-        use alloy_primitives::{Address, TxKind, B256};
-        use alloy_rpc_types_eth::BlockOverrides;
-        use reth_chainspec::{ChainSpecBuilder, ChainSpecProvider};
-        use reth_db_common::init::init_genesis;
-        use reth_evm_ethereum::EthEvmConfig;
-        use reth_network_api::noop::NoopNetwork;
-        use reth_provider::{
-            providers::BlockchainProvider, test_utils::create_test_provider_factory_with_chain_spec,
-        };
-        use reth_testing_utils::generators::{self, generate_key, sign_tx_with_key_pair};
-        use reth_transaction_pool::test_utils::testing_pool;
-
         let contract = Address::repeat_byte(0xaa);
         let coinbase = Address::repeat_byte(0x11);
         let overridden_coinbase = Address::repeat_byte(0x22);

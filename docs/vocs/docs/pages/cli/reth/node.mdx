@@ -28,7 +28,7 @@ Options:
 
           Max number of instances is 200. It is chosen in a way so that it's not possible to have port numbers that conflict with each other.
 
-          Changes to the following port numbers: - `DISCOVERY_PORT`: default + `instance` - 1 - `AUTH_PORT`: default + `instance` * 100 - 100 - `HTTP_RPC_PORT`: default - `instance` + 1 - `WS_RPC_PORT`: default + `instance` * 2 - 2 - `IPC_PATH`: default + `-instance`
+          Changes to the following port numbers: - `DISCOVERY_PORT`: default + `instance` - 1 - `AUTH_PORT`: default + `instance` * 100 - 100 - `HTTP_RPC_PORT`: default - `instance` + 1 - `WS_RPC_PORT`: default + `instance` * 2 - 2 - `IPC_PATH`: default + `-instance` - `AUTH_IPC_PATH`: default + `-instance`, unless `--auth-ipc.path` is set
 
       --with-unused-ports
           Sets all ports to unused, allowing the OS to choose random unused ports when sockets are bound.
@@ -421,9 +421,9 @@ RPC:
           Enable auth engine API over IPC
 
       --auth-ipc.path <AUTH_IPC_PATH>
-          Filename for auth IPC socket/pipe within the datadir
+          Path for the auth IPC socket/pipe. Explicit paths are used unchanged.
 
-          [default: <CACHE_DIR>_engine_api.ipc]
+          If omitted, uses `/tmp/reth_engine_api.ipc`, with `-<instance>` appended when `--instance` is set. Applications can override this default via `DefaultRpcServerArgs`.
 
       --disable-auth-server
           Disable the auth/engine API server.

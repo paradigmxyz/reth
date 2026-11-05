@@ -24,6 +24,7 @@ use reth_trie::{updates::TrieUpdatesSorted, HashedPostStateSorted, TrieInputSort
 use reth_trie_common::bundle_state::BundleState;
 use reth_trie_db::DatabaseHashedPostState;
 use std::{
+    io::Error,
     ops::RangeInclusive,
     sync::Arc,
     time::{Duration, Instant},
@@ -265,8 +266,6 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
     where
         Provider: BlockNumReader + PruneCheckpointReader,
     {
-        use std::io::Error;
-
         let mut in_mem_chain = self
             .parent_state
             .iter()
@@ -441,7 +440,11 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
                     "Collecting trie reverts for overlay state provider"
                 );
 
-                let trie_reverts = if trie_changesets {
+                // Trie updates applied directly over the on-disk trie. With trie changesets these
+                // are exact reverts down to the anchor's trie; without them they are the in-memory
+                // nodes up to Finish (or nothing when the trie is already at Finish), and the
+                // prefix sets cover every key that differs from the anchor.
+                let base_trie_updates = if trie_changesets {
                     let _guard = debug_span!(target: "storage::overlay", "retrieving_trie_reverts")
                         .entered();
                     let start = Instant::now();
@@ -497,14 +500,20 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
                 let (overlay_trie, overlay_state) =
                     self.resolve_state_trie_overlays(anchor.hash)?;
 
-                let trie_updates = if trie_reverts.is_empty() {
+                // Without trie changesets the base trie updates describe Finish, while the overlay
+                // trie nodes are relative to the anchor's trie. Mixing them can leave Finish-only
+                // nodes beneath anchor-relative branches, so only the prefix sets may describe the
+                // in-memory blocks.
+                let trie_updates = if !trie_changesets {
+                    base_trie_updates
+                } else if base_trie_updates.is_empty() {
                     overlay_trie
                 } else if !overlay_trie.is_empty() {
-                    let mut trie_reverts = (*trie_reverts).clone();
-                    trie_reverts.extend_ref_and_sort(&overlay_trie);
-                    Arc::new(trie_reverts)
+                    let mut base_trie_updates = (*base_trie_updates).clone();
+                    base_trie_updates.extend_ref_and_sort(&overlay_trie);
+                    Arc::new(base_trie_updates)
                 } else {
-                    trie_reverts
+                    base_trie_updates
                 };
 
                 let hashed_state_updates = if hashed_state_reverts.is_empty() {
@@ -518,8 +527,7 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
 
                 // Without trie changesets the trie nodes still describe Finish, so every key whose
                 // value differs from Finish must be invalidated: both the reverted keys and the
-                // keys changed by the in-memory blocks replayed on top of the anchor. The overlay
-                // trie nodes are only valid relative to the anchor's trie, not Finish's.
+                // keys changed by the in-memory blocks replayed on top of the anchor.
                 let prefix_sets = if trie_changesets {
                     Default::default()
                 } else {
@@ -1172,6 +1180,9 @@ mod tests {
             .with_appended_block(fork)
             .build_state_trie_overlay(&provider, false)
             .unwrap();
+
+        // The fork's trie nodes are relative to the anchor, not to the Finish trie on disk.
+        assert!(account_node_paths(&overlay).is_empty());
 
         let mut prefix_sets = overlay.input().prefix_sets.clone().freeze();
         assert!(prefix_sets

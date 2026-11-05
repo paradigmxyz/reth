@@ -4,6 +4,7 @@ use super::{
 use eyre::{Result, WrapErr};
 use reqwest::Client;
 use reth_fs_util as fs;
+use serde::Deserialize;
 use std::path::{Path, PathBuf};
 use tracing::info;
 use url::Url;
@@ -71,7 +72,6 @@ fn deserialize_string_or_u64<'de, D>(deserializer: D) -> std::result::Result<u64
 where
     D: serde::Deserializer<'de>,
 {
-    use serde::Deserialize;
     let value = serde_json::Value::deserialize(deserializer)?;
     match &value {
         serde_json::Value::Number(n) => {
@@ -135,8 +135,15 @@ pub(crate) fn print_snapshot_listing(entries: &[SnapshotApiEntry], chain_id: u64
     );
 }
 
-/// Loads a manifest from an HTTP(S) URL, `file://` URL, or local path.
+/// Loads a manifest from an HTTP(S) URL, `file://` URL, or local path, and checks that its
+/// output file paths stay inside the datadir.
 pub(crate) async fn fetch_manifest_from_source(source: &str) -> Result<SnapshotManifest> {
+    let manifest = read_manifest_source(source).await?;
+    manifest.validate_output_paths()?;
+    Ok(manifest)
+}
+
+async fn read_manifest_source(source: &str) -> Result<SnapshotManifest> {
     if let Ok(parsed) = Url::parse(source) {
         return match parsed.scheme() {
             "http" | "https" => {

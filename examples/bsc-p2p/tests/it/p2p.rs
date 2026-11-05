@@ -24,7 +24,7 @@ async fn can_connect() {
     reth_tracing::init_test_tracing();
     let local_addr = SocketAddr::new(Ipv4Addr::UNSPECIFIED.into(), 30303);
 
-    let secret_key = SecretKey::new(&mut rand::thread_rng());
+    let secret_key = SecretKey::new(&mut rand::rng());
 
     let net_cfg = NetworkConfig::<_, EthNetworkPrimitives>::builder(secret_key, Runtime::test())
         .boot_nodes(boot_nodes())
