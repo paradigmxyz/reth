@@ -38,58 +38,64 @@ use jsonrpsee_types::Request;
 /// adjusted to satisfy the trait bound [`RpcServiceT].
 #[derive(Clone, Debug)]
 pub enum Either<A, B> {
-	/// One type of backing [`RpcServiceT`].
-	Left(A),
-	/// The other type of backing [`RpcServiceT`].
-	Right(B),
+    /// One type of backing [`RpcServiceT`].
+    Left(A),
+    /// The other type of backing [`RpcServiceT`].
+    Right(B),
 }
 
 impl<S, A, B> tower::Layer<S> for Either<A, B>
 where
-	A: tower::Layer<S>,
-	B: tower::Layer<S>,
+    A: tower::Layer<S>,
+    B: tower::Layer<S>,
 {
-	type Service = Either<A::Service, B::Service>;
+    type Service = Either<A::Service, B::Service>;
 
-	fn layer(&self, inner: S) -> Self::Service {
-		match self {
-			Either::Left(layer) => Either::Left(layer.layer(inner)),
-			Either::Right(layer) => Either::Right(layer.layer(inner)),
-		}
-	}
+    fn layer(&self, inner: S) -> Self::Service {
+        match self {
+            Either::Left(layer) => Either::Left(layer.layer(inner)),
+            Either::Right(layer) => Either::Right(layer.layer(inner)),
+        }
+    }
 }
 
 impl<A, B> RpcServiceT for Either<A, B>
 where
-	A: RpcServiceT + Send,
-	B: RpcServiceT<
-			MethodResponse = A::MethodResponse,
-			NotificationResponse = A::NotificationResponse,
-			BatchResponse = A::BatchResponse,
-		> + Send,
+    A: RpcServiceT + Send,
+    B: RpcServiceT<
+            MethodResponse = A::MethodResponse,
+            NotificationResponse = A::NotificationResponse,
+            BatchResponse = A::BatchResponse,
+        > + Send,
 {
-	type BatchResponse = A::BatchResponse;
-	type MethodResponse = A::MethodResponse;
-	type NotificationResponse = A::NotificationResponse;
+    type BatchResponse = A::BatchResponse;
+    type MethodResponse = A::MethodResponse;
+    type NotificationResponse = A::NotificationResponse;
 
-	fn call<'a>(&self, request: Request<'a>) -> impl Future<Output = Self::MethodResponse> + Send + 'a {
-		match self {
-			Either::Left(service) => futures_util::future::Either::Left(service.call(request)),
-			Either::Right(service) => futures_util::future::Either::Right(service.call(request)),
-		}
-	}
+    fn call<'a>(
+        &self,
+        request: Request<'a>,
+    ) -> impl Future<Output = Self::MethodResponse> + Send + 'a {
+        match self {
+            Either::Left(service) => futures_util::future::Either::Left(service.call(request)),
+            Either::Right(service) => futures_util::future::Either::Right(service.call(request)),
+        }
+    }
 
-	fn batch<'a>(&self, batch: Batch<'a>) -> impl Future<Output = Self::BatchResponse> + Send + 'a {
-		match self {
-			Either::Left(service) => futures_util::future::Either::Left(service.batch(batch)),
-			Either::Right(service) => futures_util::future::Either::Right(service.batch(batch)),
-		}
-	}
+    fn batch<'a>(&self, batch: Batch<'a>) -> impl Future<Output = Self::BatchResponse> + Send + 'a {
+        match self {
+            Either::Left(service) => futures_util::future::Either::Left(service.batch(batch)),
+            Either::Right(service) => futures_util::future::Either::Right(service.batch(batch)),
+        }
+    }
 
-	fn notification<'a>(&self, n: Notification<'a>) -> impl Future<Output = Self::NotificationResponse> + Send + 'a {
-		match self {
-			Either::Left(service) => futures_util::future::Either::Left(service.notification(n)),
-			Either::Right(service) => futures_util::future::Either::Right(service.notification(n)),
-		}
-	}
+    fn notification<'a>(
+        &self,
+        n: Notification<'a>,
+    ) -> impl Future<Output = Self::NotificationResponse> + Send + 'a {
+        match self {
+            Either::Left(service) => futures_util::future::Either::Left(service.notification(n)),
+            Either::Right(service) => futures_util::future::Either::Right(service.notification(n)),
+        }
+    }
 }
