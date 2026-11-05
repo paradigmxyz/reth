@@ -99,11 +99,6 @@ impl MethodResponse {
         matches!(self.kind, ResponseKind::MethodCall)
     }
 
-    /// Returns whether the response is a notification response.
-    pub fn is_notification(&self) -> bool {
-        matches!(self.kind, ResponseKind::Notification)
-    }
-
     /// Returns whether the response is a batch response.
     pub fn is_batch(&self) -> bool {
         matches!(self.kind, ResponseKind::Batch)
@@ -124,11 +119,6 @@ impl MethodResponse {
     /// Returns `Some(error code)` if the call failed.
     pub fn as_error_code(&self) -> Option<i32> {
         self.success_or_error.as_error_code()
-    }
-
-    /// Get a reference to the serialized JSON response.
-    pub fn as_json(&self) -> &RawValue {
-        &self.json
     }
 
     /// Create a method response from [`BatchResponse`].

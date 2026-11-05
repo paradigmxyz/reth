@@ -48,7 +48,7 @@ pub mod response;
 pub mod error;
 
 pub use error::{ErrorCode, ErrorObject, ErrorObjectOwned};
-pub use params::{Id, InvalidRequestId, Params, ParamsSequence, SubscriptionId, TwoPointZero};
+pub use params::{Id, Params, ParamsSequence, SubscriptionId, TwoPointZero};
 pub use request::{InvalidRequest, Notification, Request};
 pub use response::{
     Response, ResponsePayload, SubscriptionPayload, SubscriptionResponse,

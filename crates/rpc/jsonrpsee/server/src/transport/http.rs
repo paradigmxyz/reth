@@ -71,7 +71,7 @@ pub mod response {
     use jsonrpsee_core::server::MethodResponse;
     use jsonrpsee_types::{
         error::{reject_too_big_request, ErrorCode},
-        ErrorObject, ErrorObjectOwned, Id, Response, ResponsePayload,
+        ErrorObjectOwned, Id, Response, ResponsePayload,
     };
 
     use crate::{HttpBody, HttpResponse};
@@ -86,21 +86,6 @@ pub mod response {
         let error = serde_json::to_string(&rp).expect("built from known-good data; qed");
 
         from_template(hyper::StatusCode::INTERNAL_SERVER_ERROR, error, JSON)
-    }
-
-    /// Create a json response for general errors returned by the called method.
-    pub fn error_response(error: ErrorObject) -> HttpResponse {
-        let error = serde_json::to_string(&error).expect("JSON serialization infallible; qed");
-        from_template(hyper::StatusCode::INTERNAL_SERVER_ERROR, error, JSON)
-    }
-
-    /// Create a text/plain response for not allowed hosts.
-    pub fn host_not_allowed() -> HttpResponse {
-        from_template(
-            hyper::StatusCode::FORBIDDEN,
-            "Provided Host header is not whitelisted.\n",
-            TEXT,
-        )
     }
 
     /// Create a text/plain response for disallowed method used.
