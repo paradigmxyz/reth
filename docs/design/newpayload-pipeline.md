@@ -84,7 +84,9 @@ Fixing what the profiles showed, in order:
 | Cold reads inside a transaction are serial | 21% of accounts and 29% of slots per block were not read in the previous 400 blocks | Probe each transaction against the cache, fetch its misses on 128 I/O threads | spec 124 -> 107 us, not faster overall: probing costs worker time |
 
 Locally the branch now takes 12.5 ms mean, 11.5 ms p50 against 16.6-17.1 ms for main (-25%),
-with 8 workers. On derek, before racing, it is -3.5% mean, -7% p50, +10.6% Mgas/s.
+with 8 workers. On derek (6 run pairs, default workers) it is -5.8% mean, -13.0% p50 and +14.6%
+Mgas/s against main; the persistence wait rose from 0.05 to 1.3 ms, so end-to-end throughput is
+flat (+1.8%, within noise).
 
 What still costs: a speculation is 3-4x the in-memory time. Of the workers' time, the balance
 inspector's per-opcode `step` and per-frame `initialize_interp` are ~15% (and keep the interpreter
