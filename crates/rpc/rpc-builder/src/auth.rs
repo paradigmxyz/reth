@@ -2,12 +2,15 @@ use crate::{
     error::{RpcError, ServerKind},
     middleware::{RethAuthHttpMiddleware, RethRpcMiddleware},
 };
-use http::header::AUTHORIZATION;
+use alloy_provider::{IpcConnect, WsConnect};
+use alloy_rpc_client::{ClientBuilder, RpcClient};
+use alloy_transport::Authorization;
 use jsonrpsee::{
-    core::{client::SubscriptionClientT, RegisterMethodError},
-    http_client::HeaderMap,
-    server::{AlreadyStoppedError, RpcModule, ServerConfig, ServerConfigBuilder},
-    ws_client::RpcServiceBuilder,
+    core::RegisterMethodError,
+    server::{
+        middleware::rpc::RpcServiceBuilder, AlreadyStoppedError, RpcModule, ServerConfig,
+        ServerConfigBuilder,
+    },
     Methods,
 };
 use reth_rpc_api::servers::*;
@@ -486,45 +489,32 @@ impl AuthServerHandle {
     /// Returns a http client connected to the server.
     ///
     /// This client uses the JWT token to authenticate requests.
-    pub fn http_client(
-        &self,
-    ) -> impl SubscriptionClientT + use<> + Clone + Send + Sync + Unpin + 'static {
-        // Create a middleware that adds a new JWT token to every request.
-        let secret_layer = AuthClientLayer::new(self.secret);
-        let middleware = tower::ServiceBuilder::default().layer(secret_layer);
-        jsonrpsee::http_client::HttpClientBuilder::default()
-            .set_http_middleware(middleware)
-            .build(self.http_url())
-            .expect("Failed to create http client")
+    pub fn http_client(&self) -> RpcClient {
+        let url = self.http_url().parse().expect("valid http url");
+        ClientBuilder::default().layer(AuthClientLayer::new(self.secret)).http(url)
     }
 
     /// Returns a ws client connected to the server. Note that the connection can only be
     /// be established within 1 minute due to the JWT token expiration.
-    pub async fn ws_client(&self) -> jsonrpsee::ws_client::WsClient {
-        jsonrpsee::ws_client::WsClientBuilder::default()
-            .set_headers(HeaderMap::from_iter([(
-                AUTHORIZATION,
-                secret_to_bearer_header(&self.secret),
-            )]))
-            .build(self.ws_url())
+    pub async fn ws_client(&self) -> RpcClient {
+        let header = secret_to_bearer_header(&self.secret);
+        let auth = Authorization::raw(header.to_str().expect("bearer header is ascii"));
+        ClientBuilder::default()
+            .ws(WsConnect::new(self.ws_url()).with_auth(auth))
             .await
             .expect("Failed to create ws client")
     }
 
     /// Returns an ipc client connected to the server.
     #[cfg(unix)]
-    pub async fn ipc_client(&self) -> Option<jsonrpsee::async_client::Client> {
-        use reth_ipc::client::IpcClientBuilder;
-
-        if let Some(ipc_endpoint) = &self.ipc_endpoint {
-            return Some(
-                IpcClientBuilder::default()
-                    .build(ipc_endpoint)
-                    .await
-                    .expect("Failed to create ipc client"),
-            );
-        }
-        None
+    pub async fn ipc_client(&self) -> Option<RpcClient> {
+        let ipc_endpoint = self.ipc_endpoint.as_ref()?;
+        Some(
+            ClientBuilder::default()
+                .ipc(IpcConnect::new(ipc_endpoint.clone()))
+                .await
+                .expect("Failed to create ipc client"),
+        )
     }
 
     /// Returns an ipc handle

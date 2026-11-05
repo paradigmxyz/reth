@@ -62,6 +62,7 @@ reth-node-ethstats.workspace = true
 alloy-consensus.workspace = true
 alloy-network.workspace = true
 alloy-primitives.workspace = true
+alloy-rpc-client = { workspace = true, features = ["reqwest"] }
 alloy-rpc-types = { workspace = true, features = ["engine"] }
 alloy-eips = { workspace = true, features = ["kzg"] }
 alloy-rpc-types-engine.workspace = true

@@ -55,6 +55,8 @@ tokio-util = { workspace = true }
 tokio = { workspace = true, features = ["rt", "rt-multi-thread"] }
 alloy-provider = { workspace = true, features = ["ws", "ipc"] }
 alloy-network.workspace = true
+alloy-rpc-client = { workspace = true, features = ["reqwest", "ws", "ipc"] }
+alloy-transport.workspace = true
 
 [dev-dependencies]
 reth-ethereum-primitives.workspace = true
@@ -63,17 +65,20 @@ reth-evm-ethereum.workspace = true
 reth-ethereum-engine-primitives.workspace = true
 reth-payload-builder = { workspace = true, features = ["test-utils"] }
 reth-provider = { workspace = true, features = ["test-utils"] }
-reth-rpc-api = { workspace = true, features = ["client"] }
+reth-rpc-api.workspace = true
 reth-tracing.workspace = true
 reth-transaction-pool = { workspace = true, features = ["test-utils"] }
 reth-node-ethereum.workspace = true
 reth-tasks = { workspace = true, features = ["test-utils"] }
+reth-trie-common = { workspace = true, features = ["serde"] }
 
 alloy-primitives.workspace = true
 alloy-rpc-types-eth.workspace = true
 alloy-rpc-types-trace.workspace = true
 alloy-eips.workspace = true
 alloy-rpc-types-engine.workspace = true
+alloy-json-rpc.workspace = true
+alloy-rpc-types-mev.workspace = true
 
 serde_json.workspace = true
 clap = { workspace = true, features = ["derive"] }

@@ -21,10 +21,11 @@
 
 use crate::{auth::AuthRpcModule, error::WsHttpSamePortError, metrics::RpcRequestMetrics};
 use alloy_network::{Ethereum, IntoWallet};
-use alloy_provider::{fillers::RecommendedFillers, Provider, ProviderBuilder};
+use alloy_provider::{fillers::RecommendedFillers, Provider, ProviderBuilder, WsConnect};
+use alloy_rpc_client::{ClientBuilder, RpcClient};
+use alloy_transport::Authorization;
 use core::marker::PhantomData;
 use error::{ConflictingModules, RpcError, ServerKind};
-use http::{header::AUTHORIZATION, HeaderMap};
 use jsonrpsee::{
     core::RegisterMethodError,
     server::{middleware::rpc::RpcServiceBuilder, AlreadyStoppedError, IdProvider, ServerHandle},
@@ -51,7 +52,8 @@ use reth_rpc_eth_api::{
 };
 use reth_rpc_eth_types::{receipt::EthReceiptConverter, EthConfig, EthSubscriptionIdProvider};
 use reth_rpc_layer::{
-    AuthLayer, Claims, CompressionLayer, DecompressionLayer, JwtAuthValidator, JwtSecret,
+    AuthClientLayer, AuthLayer, Claims, CompressionLayer, DecompressionLayer, JwtAuthValidator,
+    JwtSecret,
 };
 pub use reth_rpc_server_types::RethRpcModule;
 use reth_storage_api::{
@@ -2270,31 +2272,25 @@ impl RpcServerHandle {
     }
 
     /// Returns a http client connected to the server.
-    pub fn http_client(&self) -> Option<jsonrpsee::http_client::HttpClient> {
-        let url = self.http_url()?;
-
-        let client = if let Some(token) = self.bearer_token() {
-            jsonrpsee::http_client::HttpClientBuilder::default()
-                .set_headers(HeaderMap::from_iter([(AUTHORIZATION, token.parse().unwrap())]))
-                .build(url)
-        } else {
-            jsonrpsee::http_client::HttpClientBuilder::default().build(url)
+    ///
+    /// The client authenticates every request with a fresh JWT if the server has a secret.
+    pub fn http_client(&self) -> Option<RpcClient> {
+        let url = self.http_url()?.parse().expect("valid http url");
+        let client = match self.jwt_secret {
+            Some(secret) => ClientBuilder::default().layer(AuthClientLayer::new(secret)).http(url),
+            None => ClientBuilder::default().http(url),
         };
-
-        client.expect("failed to create http client").into()
+        Some(client)
     }
 
     /// Returns a ws client connected to the server.
-    pub async fn ws_client(&self) -> Option<jsonrpsee::ws_client::WsClient> {
-        let url = self.ws_url()?;
-        let mut builder = jsonrpsee::ws_client::WsClientBuilder::default();
-
+    pub async fn ws_client(&self) -> Option<RpcClient> {
+        let mut connect = WsConnect::new(self.ws_url()?);
         if let Some(token) = self.bearer_token() {
-            let headers = HeaderMap::from_iter([(AUTHORIZATION, token.parse().unwrap())]);
-            builder = builder.set_headers(headers);
+            connect = connect.with_auth(Authorization::raw(token));
         }
-
-        let client = builder.build(url).await.expect("failed to create ws client");
+        let client =
+            ClientBuilder::default().ws(connect).await.expect("failed to create ws client");
         Some(client)
     }
 

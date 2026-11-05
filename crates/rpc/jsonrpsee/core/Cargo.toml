@@ -32,43 +32,28 @@ http = { workspace = true, optional = true }
 bytes = { workspace = true, features = ["std"], optional = true }
 http-body = { version = "1", optional = true }
 http-body-util = { workspace = true, optional = true }
-rustc-hash = { workspace = true, optional = true }
+rustc-hash = { workspace = true, features = ["std"], optional = true }
 rand = { workspace = true, optional = true }
 parking_lot = { workspace = true, optional = true }
 tokio = { workspace = true, optional = true }
 tower = { workspace = true, optional = true }
-futures-timer = { version = "3", optional = true }
-tokio-stream = { workspace = true, optional = true }
 pin-project = { workspace = true, optional = true }
-
-[target.'cfg(target_arch = "wasm32")'.dependencies]
-wasm-bindgen-futures = { version = "0.4.19", optional = true }
 
 [features]
 default = []
 http-helpers = ["bytes", "futures-util", "http-body", "http-body-util", "http"]
-server = ["futures-util", "rustc-hash/std", "parking_lot", "rand", "tokio/rt", "tokio/sync", "tokio/macros", "tokio/time", "tower", "http", "pin-project"]
-client = ["futures-util/sink", "tokio/sync", "tower", "pin-project", "http"]
-async-client = [
-	"client",
-	"futures-util",
-	"rustc-hash",
-	"tokio/macros",
-	"tokio/rt",
-	"tokio/time",
-	"futures-timer",
-	"tokio-stream",
-	"pin-project",
-]
-async-wasm-client = [
-	"client",
-	"futures-util",
-	"wasm-bindgen-futures",
-	"rustc-hash/std",
-	"futures-timer/wasm-bindgen",
-	"tokio/macros",
-	"tokio/time",
-	"pin-project",
+server = [
+    "futures-util",
+    "rustc-hash/std",
+    "parking_lot",
+    "rand",
+    "tokio/rt",
+    "tokio/sync",
+    "tokio/macros",
+    "tokio/time",
+    "tower",
+    "http",
+    "pin-project",
 ]
 
 [dev-dependencies]
@@ -76,10 +61,3 @@ serde_json = { workspace = true, features = ["raw_value"] }
 tokio = { workspace = true, features = ["macros", "rt"] }
 jsonrpsee = { path = "../jsonrpsee", features = ["server", "macros"] }
 http-body-util = { workspace = true }
-
-[package.metadata.docs.rs]
-all-features = true
-rustdoc-args = ["--cfg", "docsrs"]
-
-[package.metadata.playground]
-all-features = true

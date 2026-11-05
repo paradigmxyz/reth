@@ -2,7 +2,6 @@
 
 use alloy_primitives::{Bytes, B256};
 use alloy_rpc_types_eth::BlockNumberOrTag;
-use jsonrpsee_core::client::ClientT;
 use reth_chainspec::EthereumHardfork;
 use reth_e2e_test_utils::{eth_payload_attributes, test_chain_spec, E2ETestSetupExt};
 use reth_ethereum_engine_primitives::EthPayloadAttributes;
