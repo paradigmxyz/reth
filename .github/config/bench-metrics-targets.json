@@ -95,6 +95,19 @@
       "unit": "seconds"
     },
     {
+      "query": "reth_tree_root_sparse_trie_finish_to_root_duration_histogram",
+      "target": "decrease",
+      "floor_pct": 5.0,
+      "min_value_pct_total_latency": 0.0,
+      "unit": "seconds"
+    },
+    {
+      "query": "reth_tree_root_sparse_trie_proof_rounds_after_finish_histogram",
+      "target": "decrease",
+      "floor_pct": 5.0,
+      "min_value_pct_total_latency": 0.0
+    },
+    {
       "query": "reth_tree_root_hashing_task_idle_time_seconds",
       "target": "increase",
       "floor_pct": 5.0,
