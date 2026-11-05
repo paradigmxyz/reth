@@ -15,10 +15,9 @@ use reth_primitives_traits::{NodePrimitives, SealedBlock};
 /// the JSON or SSZ request, rejects a method version that does not match the fork of the payload
 /// or payload attributes timestamp, checks that the fields of that fork are present, and maps the
 /// errors of the engine to RPC error codes. None of this happens here, so tests of that behaviour
-/// must call the versioned RPC methods, e.g. with [`EngineApiClient`] on the client of
+/// must call the versioned `engine_*` RPC methods, e.g. with the client of
 /// [`NodeTestContext::auth_server_handle`].
 ///
-/// [`EngineApiClient`]: reth_rpc_api::EngineApiClient
 /// [`NodeTestContext::auth_server_handle`]: crate::node::NodeTestContext::auth_server_handle
 #[derive(Debug, Clone)]
 pub struct EngineTestContext<T: PayloadTypes> {

@@ -4,8 +4,7 @@ use alloy_rpc_types_txpool::{TxpoolContent, TxpoolContentFrom, TxpoolInspect, Tx
 use jsonrpsee::{core::RpcResult, proc_macros::rpc};
 
 /// Txpool rpc interface.
-#[cfg_attr(not(feature = "client"), rpc(server, namespace = "txpool"))]
-#[cfg_attr(feature = "client", rpc(server, client, namespace = "txpool"))]
+#[rpc(server, namespace = "txpool")]
 pub trait TxPoolApi<T: RpcObject> {
     /// Returns the number of transactions currently pending for inclusion in the next block(s), as
     /// well as the ones that are being scheduled for future execution only.

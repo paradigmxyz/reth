@@ -32,11 +32,6 @@ use proc_macro_crate::{crate_name, FoundCrate};
 use quote::quote;
 use syn::{parse_quote, punctuated::Punctuated, token::Comma, visit::Visit, Token, WherePredicate};
 
-/// Search for client-side `jsonrpsee` in `Cargo.toml`.
-pub(crate) fn find_jsonrpsee_client_crate() -> Result<proc_macro2::TokenStream, syn::Error> {
-    find_jsonrpsee_crate(&["jsonrpsee-http-client", "jsonrpsee-ws-client", "jsonrpsee-wasm-client"])
-}
-
 /// Search for server-side `jsonrpsee` in `Cargo.toml`.
 pub(crate) fn find_jsonrpsee_server_crate() -> Result<proc_macro2::TokenStream, syn::Error> {
     find_jsonrpsee_crate(&["jsonrpsee-server"])
@@ -90,7 +85,7 @@ fn find_jsonrpsee_crate(crate_names: &[&str]) -> Result<proc_macro2::TokenStream
 ///     proc_macros::rpc,
 /// };
 ///
-/// #[rpc(client, server)]
+/// #[rpc(server)]
 /// pub trait RpcTrait<A, B, C> {
 ///     #[method(name = "call")]
 ///     fn call(&self, a: A) -> RpcResult<B>;
@@ -107,7 +102,6 @@ fn find_jsonrpsee_crate(crate_names: &[&str]) -> Result<proc_macro2::TokenStream
 pub(crate) fn generate_where_clause(
     item_trait: &syn::ItemTrait,
     sub_tys: &[syn::Type],
-    is_client: bool,
     bounds: Option<&Punctuated<WherePredicate, Comma>>,
 ) -> Vec<syn::WherePredicate> {
     let visitor = visit_trait(item_trait, sub_tys);
@@ -131,25 +125,14 @@ pub(crate) fn generate_where_clause(
             let mut bounds: Punctuated<syn::TypeParamBound, Token![+]> =
                 parse_quote!(Send + Sync + 'static);
 
-            if is_client {
-                if visitor.input_params.contains(&ty.ident) {
-                    bounds.push(parse_quote!(jsonrpsee::core::Serialize))
-                }
-                if visitor.ret_params.contains(&ty.ident) || visitor.sub_params.contains(&ty.ident)
-                {
-                    bounds.push(parse_quote!(jsonrpsee::core::DeserializeOwned))
-                }
-            } else {
-                if visitor.input_params.contains(&ty.ident) {
-                    bounds.push(parse_quote!(jsonrpsee::core::DeserializeOwned))
-                }
-                if visitor.ret_params.contains(&ty.ident) {
-                    bounds.push(parse_quote!(std::clone::Clone))
-                }
-                if visitor.ret_params.contains(&ty.ident) || visitor.sub_params.contains(&ty.ident)
-                {
-                    bounds.push(parse_quote!(jsonrpsee::core::Serialize))
-                }
+            if visitor.input_params.contains(&ty.ident) {
+                bounds.push(parse_quote!(jsonrpsee::core::DeserializeOwned))
+            }
+            if visitor.ret_params.contains(&ty.ident) {
+                bounds.push(parse_quote!(std::clone::Clone))
+            }
+            if visitor.ret_params.contains(&ty.ident) || visitor.sub_params.contains(&ty.ident) {
+                bounds.push(parse_quote!(jsonrpsee::core::Serialize))
             }
 
             // Add the trait bounds specified in the trait.

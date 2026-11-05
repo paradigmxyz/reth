@@ -11,8 +11,7 @@ use jsonrpsee::{core::RpcResult, proc_macros::rpc};
 use reth_trie_common::{updates::TrieUpdates, ExecutionWitnessMode, HashedPostState};
 
 /// Debug rpc interface.
-#[cfg_attr(not(feature = "client"), rpc(server, namespace = "debug"))]
-#[cfg_attr(feature = "client", rpc(server, client, namespace = "debug"))]
+#[rpc(server, namespace = "debug")]
 pub trait DebugApi<TxReq: RpcObject> {
     /// Returns an RLP-encoded header.
     #[method(name = "getRawHeader")]

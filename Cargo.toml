@@ -81,16 +81,12 @@ members = [
     "crates/prune/prune",
     "crates/prune/types",
     "crates/rpc/ipc/",
-    "crates/rpc/jsonrpsee/client-transport/",
     "crates/rpc/jsonrpsee/core/",
-    "crates/rpc/jsonrpsee/http-client/",
     "crates/rpc/jsonrpsee/jsonrpsee/",
     "crates/rpc/jsonrpsee/proc-macros/",
     "crates/rpc/jsonrpsee/server/",
     "crates/rpc/jsonrpsee/test-utils/",
     "crates/rpc/jsonrpsee/types/",
-    "crates/rpc/jsonrpsee/wasm-client/",
-    "crates/rpc/jsonrpsee/ws-client/",
     "crates/rpc/rpc-api/",
     "crates/rpc/rpc-builder/",
     "crates/rpc/rpc-engine-api/",
@@ -577,14 +573,10 @@ multiaddr = { version = "0.19", default-features = false }
 
 # rpc
 jsonrpsee = { path = "crates/rpc/jsonrpsee/jsonrpsee" }
-jsonrpsee-client-transport = { path = "crates/rpc/jsonrpsee/client-transport" }
 jsonrpsee-core = { path = "crates/rpc/jsonrpsee/core" }
-jsonrpsee-http-client = { path = "crates/rpc/jsonrpsee/http-client" }
 jsonrpsee-proc-macros = { path = "crates/rpc/jsonrpsee/proc-macros" }
 jsonrpsee-server = { path = "crates/rpc/jsonrpsee/server" }
 jsonrpsee-types = { path = "crates/rpc/jsonrpsee/types" }
-jsonrpsee-wasm-client = { path = "crates/rpc/jsonrpsee/wasm-client" }
-jsonrpsee-ws-client = { path = "crates/rpc/jsonrpsee/ws-client" }
 
 # http
 http = "1.0"

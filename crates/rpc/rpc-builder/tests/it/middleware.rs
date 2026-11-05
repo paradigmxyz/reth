@@ -1,13 +1,11 @@
 use crate::utils::{test_address, test_rpc_builder};
-use alloy_rpc_types_eth::{Block, Header, Receipt, Transaction, TransactionRequest};
+use alloy_primitives::U64;
 use jsonrpsee::{
     core::middleware::{Batch, Notification},
     server::middleware::rpc::RpcServiceT,
     types::Request,
 };
-use reth_ethereum_primitives::TransactionSigned;
 use reth_rpc_builder::{RpcServerConfig, TransportRpcModuleConfig};
-use reth_rpc_eth_api::EthApiClient;
 use reth_rpc_server_types::RpcModuleSelection;
 use reth_tokio_util::EventSender;
 use std::{
@@ -90,11 +88,7 @@ async fn test_rpc_middleware() {
         .unwrap();
 
     let client = handle.http_client().unwrap();
-    EthApiClient::<TransactionRequest, Transaction, Block, Receipt, Header, TransactionSigned>::protocol_version(
-        &client,
-    )
-    .await
-    .unwrap();
+    client.request_noparams::<U64>("eth_protocolVersion").await.unwrap();
     let count = mylayer.count.load(Ordering::Relaxed);
     assert_eq!(count, 1);
 }
