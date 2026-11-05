@@ -103,6 +103,8 @@ alloy-trie.workspace = true
 
 # misc
 criterion.workspace = true
+metrics-exporter-prometheus.workspace = true
+metrics-util.workspace = true
 test-case.workspace = true
 url.workspace = true
 secp256k1 = { workspace = true, features = ["rand"] }

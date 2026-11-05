@@ -308,3 +308,32 @@ struct RpcServerCallMetrics {
     /// Response for a single call
     time_seconds: Histogram,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use metrics_exporter_prometheus::PrometheusBuilder;
+    use metrics_util::layers::{Layer, PrefixLayer};
+
+    /// Metric names referenced by production alerts. Renaming any of these silently breaks
+    /// alerting, so the exported Prometheus names and transport labels are pinned here.
+    #[test]
+    fn alerted_metric_names() {
+        let recorder = PrometheusBuilder::new().build_recorder();
+        let handle = recorder.handle();
+        metrics::with_local_recorder(&PrefixLayer::new("reth").layer(recorder), || {
+            RpcRequestMetrics::ws(&RpcModule::new(()));
+        });
+        let rendered = handle.render();
+
+        for sample in [
+            r#"reth_rpc_server_connections_connections_opened_total{transport="ws"}"#,
+            r#"reth_rpc_server_connections_connections_closed_total{transport="ws"}"#,
+        ] {
+            assert!(
+                rendered.lines().any(|line| line.split(' ').next() == Some(sample)),
+                "missing `{sample}` in:\n{rendered}"
+            );
+        }
+    }
+}
