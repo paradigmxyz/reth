@@ -10031,7 +10031,6 @@ name = "reth-node-metrics"
 version = "2.9.0"
 dependencies = [
  "bytes",
- "codspeed-criterion-compat",
  "crossbeam-epoch",
  "crossbeam-utils",
  "eyre",
@@ -10048,7 +10047,6 @@ dependencies = [
  "parking_lot",
  "pprof_util",
  "procfs",
- "proptest",
  "quanta 0.13.0",
  "reqwest",
  "reth-fs-util",

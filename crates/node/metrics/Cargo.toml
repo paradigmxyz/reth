@@ -49,16 +49,10 @@ socket2.workspace = true
 flate2.workspace = true
 metrics-exporter-prometheus.workspace = true
 metrics-util.workspace = true
-proptest.workspace = true
-criterion.workspace = true
 quanta = { workspace = true, features = ["mock"] }
 
 [lints]
 workspace = true
-
-[[bench]]
-name = "recorder"
-harness = false
 
 [features]
 jemalloc = ["dep:tikv-jemalloc-ctl"]

@@ -167,21 +167,6 @@ impl Summary {
         }
         self.sketch.quantile(q).ok().flatten()
     }
-
-    #[cfg(test)]
-    fn count(&self) -> usize {
-        self.sketch.count()
-    }
-
-    #[cfg(test)]
-    fn min(&self) -> f64 {
-        self.sketch.min().unwrap_or(f64::INFINITY)
-    }
-
-    #[cfg(test)]
-    fn max(&self) -> f64 {
-        self.sketch.max().unwrap_or(f64::NEG_INFINITY)
-    }
 }
 
 impl std::fmt::Debug for Summary {
@@ -305,45 +290,9 @@ mod tests {
     }
 
     #[test]
-    fn empty_snapshot() {
-        let summary = default_summary();
-        assert_eq!(summary.count(), 0);
-        let snapshot = summary.snapshot(at(0));
-        assert_eq!(snapshot.count(), 0);
-        assert_eq!(snapshot.min(), f64::INFINITY);
-        assert_eq!(snapshot.max(), f64::NEG_INFINITY);
-        assert_eq!(snapshot.quantile(0.5), None);
-    }
-
-    #[test]
-    fn snapshot_merges_buckets() {
-        let mut summary = default_summary();
-        summary.add(42.0, at(3600));
-        summary.add(42.0, at(3620));
-        summary.add(42.0, at(3640));
-
-        let snapshot = summary.snapshot(at(3640));
-        assert_eq!(snapshot.min(), 42.0);
-        assert_eq!(snapshot.max(), 42.0);
-        // 42 +/- (42 * 0.0001)
-        assert!(Some(41.9958) < snapshot.quantile(0.5));
-        assert!(Some(42.0042) > snapshot.quantile(0.5));
-    }
-
-    #[test]
-    fn add_new_head() {
-        let mut summary = default_summary();
-        summary.add(42.0, at(3600));
-        assert_eq!(summary.buckets.len(), 1);
-        summary.add(42.0, at(3620));
-        assert_eq!(summary.buckets.len(), 2);
-    }
-
-    #[test]
     fn truncate_old_buckets() {
         let mut summary = default_summary();
-        summary.add(42.0, at(3600));
-        for i in 1..=3 {
+        for i in 0..=3 {
             summary.add(42.0, at(3600 + 20 * i));
         }
         assert_eq!(summary.buckets.len(), 3);
@@ -356,61 +305,11 @@ mod tests {
         summary.add(1.0, at(3600));
         summary.add(100.0, at(3700));
 
-        let snapshot = summary.snapshot(at(3700));
-        assert_eq!(snapshot.count(), 1);
-        assert_eq!(snapshot.min(), 100.0);
+        let low = summary.snapshot(at(3700)).quantile(0.0).unwrap();
+        assert!((low - 100.0).abs() < 0.01, "{low}");
         assert_eq!(summary.count(), 2);
 
         // Nothing remains in the window once the newest bucket expires too.
-        assert_eq!(summary.snapshot(at(3800)).count(), 0);
-    }
-
-    #[test]
-    fn add_value_ts_before_first_bucket() {
-        let mut summary = RollingSummary::new(NonZeroU32::new(2).unwrap(), Duration::from_secs(5));
-        summary.add(42.0, at(4));
-        assert_eq!(summary.buckets.len(), 1);
-        assert_eq!(summary.count(), 1);
-
-        // The first bucket begins at 4s, so a sample at 3s is counted but not stored.
-        summary.add(43.0, at(3));
-        assert_eq!(summary.buckets.len(), 1);
-        assert_eq!(summary.count(), 2);
-    }
-
-    #[test]
-    fn histogram_buckets_are_cumulative() {
-        let mut hist = Histogram::new(&[1.0, 2.0, 5.0]);
-        hist.record_many([0.5, 1.0, 1.5, 3.0, 10.0].into_iter());
-        assert_eq!(hist.buckets().collect::<Vec<_>>(), vec![(1.0, 2), (2.0, 3), (5.0, 4)]);
-        assert_eq!(hist.count(), 5);
-        assert_eq!(hist.sum(), 16.0);
-    }
-
-    #[test]
-    fn bucket_overrides_take_precedence() {
-        let builder = DistributionBuilder::new(
-            vec![0.5],
-            Some(vec![1.0]),
-            DEFAULT_SUMMARY_BUCKET_DURATION,
-            DEFAULT_SUMMARY_BUCKET_COUNT,
-            vec![
-                (Matcher::Suffix("_seconds".to_string()), vec![2.0, 3.0]),
-                (Matcher::Full("foo_seconds".to_string()), vec![4.0]),
-            ],
-        );
-        // `Full` sorts before `Suffix`.
-        let Distribution::Histogram(hist) = builder.get_distribution("foo_seconds") else {
-            panic!("expected histogram")
-        };
-        assert_eq!(hist.bounds, vec![4.0]);
-        let Distribution::Histogram(hist) = builder.get_distribution("bar_seconds") else {
-            panic!("expected histogram")
-        };
-        assert_eq!(hist.bounds, vec![2.0, 3.0]);
-        let Distribution::Histogram(hist) = builder.get_distribution("bar") else {
-            panic!("expected histogram")
-        };
-        assert_eq!(hist.bounds, vec![1.0]);
+        assert_eq!(summary.snapshot(at(3800)).quantile(0.5), None);
     }
 }

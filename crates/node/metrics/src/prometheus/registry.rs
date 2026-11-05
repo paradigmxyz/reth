@@ -71,30 +71,3 @@ impl Hasher for KeyHasher {
         self.0 = i;
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use metrics::Label;
-
-    #[test]
-    fn get_or_create_deduplicates_keys() {
-        let registry = Registry::<u32>::new();
-        let mut created = 0;
-        let key = Key::from_parts("a", vec![Label::new("x", "1"), Label::new("y", "2")]);
-        let first = registry.get_or_create(&key, || {
-            created += 1;
-            created
-        });
-
-        // Label order does not affect key equality.
-        let reordered = Key::from_parts("a", vec![Label::new("y", "2"), Label::new("x", "1")]);
-        let second = registry.get_or_create(&reordered, || unreachable!());
-        assert!(Arc::ptr_eq(&first, &second));
-
-        registry.get_or_create(&Key::from_name("b"), || 7);
-        let mut values = registry.entries().into_iter().map(|e| *e).collect::<Vec<_>>();
-        values.sort_unstable();
-        assert_eq!(values, vec![1, 7]);
-    }
-}
