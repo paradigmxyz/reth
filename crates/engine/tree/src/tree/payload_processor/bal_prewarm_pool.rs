@@ -6,7 +6,7 @@ use reth_provider::{EvmStateProvider, EvmStateProviderBox, ProviderResult};
 use std::{
     sync::{
         atomic::{AtomicUsize, Ordering},
-        Arc,
+        Arc, Condvar, Mutex,
     },
     thread::JoinHandle,
 };
@@ -34,8 +34,9 @@ enum PrewarmMsg {
         caches: ExecutionCache,
         txpool_snapshot: Option<TxPoolPrewarmCacheSnapshot>,
     },
-    /// Warm one target into the held provider's cache. Ignored if no provider is held.
-    Warm(PrewarmTarget),
+    /// Warm one target into the held provider's cache, then count it done on the latch, if any.
+    /// Ignored if no provider is held.
+    Warm(PrewarmTarget, Option<Arc<WarmLatch>>),
     /// Drop the held provider (and its read txn).
     EndBlock(Arc<SendOnDrop>),
 }
@@ -123,6 +124,39 @@ impl BalPrewarmPool {
         self.send_warm(PrewarmTarget::Code(hash));
     }
 
+    /// Warms `accounts`, `storage` slots and `code` in parallel across the workers and returns a
+    /// latch that [`WarmLatch::wait`] blocks on until all of them are loaded.
+    pub fn warm_all(
+        &self,
+        accounts: impl IntoIterator<Item = Address>,
+        storage: &[(Address, StorageKey)],
+        code: impl IntoIterator<Item = B256>,
+    ) -> Arc<WarmLatch> {
+        let latch = Arc::new(WarmLatch::default());
+        let send = |target| {
+            latch.remaining.fetch_add(1, Ordering::AcqRel);
+            let i = self.next.fetch_add(1, Ordering::Relaxed) % self.workers.len();
+            if self.workers[i].send(PrewarmMsg::Warm(target, Some(Arc::clone(&latch)))).is_err() {
+                latch.done();
+            }
+        };
+        for address in accounts {
+            send(PrewarmTarget::Account(address, Box::default()));
+        }
+        for chunk in storage.chunk_by(|a, b| a.0 == b.0) {
+            for batch in chunk.chunks(WARM_BATCH_SIZE) {
+                send(PrewarmTarget::Storage(
+                    batch[0].0,
+                    batch.iter().map(|(_, slot)| *slot).collect(),
+                ));
+            }
+        }
+        for hash in code {
+            send(PrewarmTarget::Code(hash));
+        }
+        latch
+    }
+
     /// Ends the block: every worker drops its provider (and read txn) once it has drained the warm
     /// requests queued ahead of this message.
     ///
@@ -141,7 +175,32 @@ impl BalPrewarmPool {
 
     fn send_warm(&self, target: PrewarmTarget) {
         let i = self.next.fetch_add(1, Ordering::Relaxed) % self.workers.len();
-        let _ = self.workers[i].send(PrewarmMsg::Warm(target));
+        let _ = self.workers[i].send(PrewarmMsg::Warm(target, None));
+    }
+}
+
+/// Counts outstanding warm requests of one [`BalPrewarmPool::warm_all`] call.
+#[derive(Debug, Default)]
+pub struct WarmLatch {
+    remaining: AtomicUsize,
+    lock: Mutex<()>,
+    loaded: Condvar,
+}
+
+impl WarmLatch {
+    /// Blocks until every request of the call is loaded.
+    pub fn wait(&self) {
+        let mut guard = self.lock.lock().unwrap_or_else(|err| err.into_inner());
+        while self.remaining.load(Ordering::Acquire) > 0 {
+            guard = self.loaded.wait(guard).unwrap_or_else(|err| err.into_inner());
+        }
+    }
+
+    fn done(&self) {
+        if self.remaining.fetch_sub(1, Ordering::AcqRel) == 1 {
+            let _guard = self.lock.lock().unwrap_or_else(|err| err.into_inner());
+            self.loaded.notify_all();
+        }
     }
 }
 
@@ -194,7 +253,8 @@ fn prewarm_loop(rx: crossbeam_channel::Receiver<PrewarmMsg>) {
                     }
                 };
             }
-            PrewarmMsg::Warm(target) => {
+            PrewarmMsg::Warm(target, latch) => {
+                let _latch = LatchGuard(latch);
                 let Some(provider) = provider.as_ref() else { continue };
                 match target {
                     PrewarmTarget::Account(addr, slots) => {
@@ -217,6 +277,17 @@ fn prewarm_loop(rx: crossbeam_channel::Receiver<PrewarmMsg>) {
                 provider = None;
                 drop(end_tx);
             }
+        }
+    }
+}
+
+/// Counts a warm request done when dropped, whether or not it was loaded.
+struct LatchGuard(Option<Arc<WarmLatch>>);
+
+impl Drop for LatchGuard {
+    fn drop(&mut self) {
+        if let Some(latch) = &self.0 {
+            latch.done();
         }
     }
 }

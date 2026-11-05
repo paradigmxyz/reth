@@ -61,6 +61,9 @@ use tracing::{debug, debug_span, instrument, trace, trace_span, warn, Span};
 /// execute again.
 const REFRESH_WINDOW_DEFAULT: usize = 64;
 
+/// Most rounds a transaction is probed for cold reads before it is speculated.
+const MAX_PROBE_ROUNDS: usize = 8;
+
 static REFRESH_WINDOW: std::sync::LazyLock<usize> = std::sync::LazyLock::new(|| {
     std::env::var("RETH_NP_REFRESH_WINDOW")
         .ok()
@@ -354,29 +357,28 @@ where
             |state: &mut PrewarmEvmState<Evm>| {
                 let Some((evm, misses)) = state.probe.as_mut() else { return };
                 let (tx_env, _) = tx.clone().into_parts();
-                drop(evm.take_state_cache());
-                let _ = evm.transact_and_discard(&tx_env, |_| ());
-                let missed = misses.take();
-                if missed.is_empty() {
-                    return
-                }
-                let mut accounts = missed.accounts;
-                accounts.sort_unstable();
-                accounts.dedup();
-                for address in accounts {
-                    fetch.warm_account(address, []);
-                }
-                let mut storage = missed.storage;
-                storage.sort_unstable();
-                storage.dedup();
-                for chunk in storage.chunk_by(|a, b| a.0 == b.0) {
-                    fetch.warm_storage(chunk[0].0, chunk.iter().map(|(_, slot)| *slot));
-                }
-                let mut code = missed.code;
-                code.sort_unstable();
-                code.dedup();
-                for hash in code {
-                    fetch.warm_code(hash);
+                // Each round executes against what earlier rounds loaded, so it reaches reads
+                // that depend on loaded values. A round loads all of its misses in parallel.
+                for _ in 0..MAX_PROBE_ROUNDS {
+                    if ctx.should_stop() {
+                        return
+                    }
+                    drop(evm.take_state_cache());
+                    let _ = evm.transact_and_discard(&tx_env, |_| ());
+                    let missed = misses.take();
+                    if missed.is_empty() {
+                        return
+                    }
+                    let mut accounts = missed.accounts;
+                    accounts.sort_unstable();
+                    accounts.dedup();
+                    let mut storage = missed.storage;
+                    storage.sort_unstable();
+                    storage.dedup();
+                    let mut code = missed.code;
+                    code.sort_unstable();
+                    code.dedup();
+                    fetch.warm_all(accounts, &storage, code).wait();
                 }
             },
         );
