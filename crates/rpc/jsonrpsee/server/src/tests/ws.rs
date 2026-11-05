@@ -51,7 +51,7 @@ async fn can_set_the_max_request_body_size() {
     let config = ServerConfig::builder().max_request_body_size(100).build();
     let server = ServerBuilder::with_config(config).build(addr).await.unwrap();
     let mut module = RpcModule::new(());
-    module.register_method("anything", |_p, _cx, _| "a".repeat(100)).unwrap();
+    module.register_method("anything", |_p, _cx| "a".repeat(100)).unwrap();
     let addr = server.local_addr().unwrap();
     let handle = server.start(module);
 
@@ -80,7 +80,7 @@ async fn can_set_the_max_response_body_size() {
     let config = ServerConfig::builder().max_response_body_size(100).build();
     let server = ServerBuilder::with_config(config).build(addr).await.unwrap();
     let mut module = RpcModule::new(());
-    module.register_method("anything", |_, _, _| "a".repeat(101)).unwrap();
+    module.register_method("anything", |_, _| "a".repeat(101)).unwrap();
     let addr = server.local_addr().unwrap();
     let server_handle = server.start(module);
 
@@ -104,7 +104,7 @@ async fn can_set_the_max_response_size_to_batch() {
     let config = ServerConfig::builder().max_response_body_size(100).build();
     let server = ServerBuilder::with_config(config).build(addr).await.unwrap();
     let mut module = RpcModule::new(());
-    module.register_method("anything", |_p, _cx, _| "a".repeat(51)).unwrap();
+    module.register_method("anything", |_p, _cx| "a".repeat(51)).unwrap();
     let addr = server.local_addr().unwrap();
     let server_handle = server.start(module);
 
@@ -128,7 +128,7 @@ async fn can_set_max_connections() {
     let config = ServerConfig::builder().max_connections(2).build();
     let server = ServerBuilder::with_config(config).build(addr).await.unwrap();
     let mut module = RpcModule::new(());
-    module.register_method("anything", |_, _, _| ()).unwrap();
+    module.register_method("anything", |_, _| ()).unwrap();
     let addr = server.local_addr().unwrap();
 
     let server_handle = server.start(module);
@@ -203,7 +203,7 @@ async fn pending_method_call_is_dropped_when_connection_closes() {
     let (dropped_tx, dropped_rx) = tokio::sync::oneshot::channel::<()>();
     let mut module = RpcModule::new(std::sync::Mutex::new(Some((started_tx, dropped_tx))));
     module
-        .register_async_method("pending", |_, ctx, _| async move {
+        .register_async_method("pending", |_, ctx| async move {
             // `dropped_tx` is dropped together with the call.
             let (started_tx, _dropped_tx) = ctx.lock().unwrap().take().unwrap();
             let _ = started_tx.send(());
@@ -485,14 +485,14 @@ async fn unknown_field_is_ok() {
 #[tokio::test]
 async fn register_methods_works() {
     let mut module = RpcModule::new(());
-    assert!(module.register_method("say_hello", |_, _, _| "lo").is_ok());
-    assert!(module.register_method("say_hello", |_, _, _| "lo").is_err());
+    assert!(module.register_method("say_hello", |_, _| "lo").is_ok());
+    assert!(module.register_method("say_hello", |_, _| "lo").is_err());
     assert!(module
         .register_subscription(
             "subscribe_hello",
             "subscribe_hello",
             "unsubscribe_hello",
-            |_, _, _, _| async { Ok(()) }
+            |_, _, _| async { Ok(()) }
         )
         .is_ok());
     assert!(module
@@ -500,11 +500,11 @@ async fn register_methods_works() {
             "subscribe_hello_again",
             "subscribe_hello_again",
             "unsubscribe_hello",
-            |_, _, _, _| async { Ok(()) }
+            |_, _, _| async { Ok(()) }
         )
         .is_err());
     assert!(
-        module.register_method("subscribe_hello_again", |_, _, _| "lo").is_ok(),
+        module.register_method("subscribe_hello_again", |_, _| "lo").is_ok(),
         "Failed register_subscription should not have side-effects"
     );
 }
@@ -517,7 +517,7 @@ async fn register_same_subscribe_unsubscribe_is_err() {
             "subscribe_hello",
             "subscribe_hello",
             "subscribe_hello",
-            |_, _, _, _| async { Ok(()) }
+            |_, _, _| async { Ok(()) }
         ),
         Err(RegisterMethodError::SubscriptionNameConflict(_))
     ));
@@ -585,12 +585,12 @@ async fn can_register_modules() {
 
     assert_eq!(mod1.method_names().count(), 0);
     assert_eq!(mod2.method_names().count(), 0);
-    mod1.register_method("bla", |_, cx, _| format!("Gave me {cx}")).unwrap();
-    mod1.register_method("bla2", |_, cx, _| format!("Gave me {cx}")).unwrap();
-    mod2.register_method("yada", |_, cx, _| format!("Gave me {cx:?}")).unwrap();
+    mod1.register_method("bla", |_, cx| format!("Gave me {cx}")).unwrap();
+    mod1.register_method("bla2", |_, cx| format!("Gave me {cx}")).unwrap();
+    mod2.register_method("yada", |_, cx| format!("Gave me {cx:?}")).unwrap();
 
     // Won't register, name clashes
-    mod2.register_method("bla", |_, cx, _| format!("Gave me {cx:?}")).unwrap();
+    mod2.register_method("bla", |_, cx| format!("Gave me {cx:?}")).unwrap();
 
     assert_eq!(mod1.method_names().count(), 2);
     let err = mod1.merge(mod2).unwrap_err();
@@ -658,7 +658,7 @@ async fn custom_subscription_id_works() {
             "subscribe_hello",
             "subscribe_hello",
             "unsubscribe_hello",
-            |_, sink, _, _| async {
+            |_, sink, _| async {
                 assert!(
                     matches!(sink.subscription_id(), SubscriptionId::Str(id) if id == "0xdeadbeef")
                 );
@@ -701,7 +701,7 @@ async fn disabled_batches() {
         .unwrap();
 
     let mut module = RpcModule::new(());
-    module.register_method("should_ok", |_, _ctx, _| "ok").unwrap();
+    module.register_method("should_ok", |_, _ctx| "ok").unwrap();
     let addr = server.local_addr().unwrap();
 
     let server_handle = server.start(module);
@@ -732,7 +732,7 @@ async fn batch_limit_works() {
         .unwrap();
 
     let mut module = RpcModule::new(());
-    module.register_method("should_ok", |_, _ctx, _| "ok").unwrap();
+    module.register_method("should_ok", |_, _ctx| "ok").unwrap();
     let addr = server.local_addr().unwrap();
 
     let server_handle = server.start(module);
@@ -838,7 +838,7 @@ async fn ws_server_backpressure_works() {
             "subscribe_with_backpressure_aggregation",
             "n",
             "unsubscribe_with_backpressure_aggregation",
-            move |_, pending, mut backpressure_tx, _| async move {
+            move |_, pending, mut backpressure_tx| async move {
                 let sink = pending.accept().await?;
                 let n = serde_json::value::to_raw_value(&1).unwrap();
                 let bp = serde_json::value::to_raw_value(&2).unwrap();
@@ -1003,7 +1003,7 @@ async fn server_with_infinite_call(
     let mut module = RpcModule::new(tx);
 
     module
-        .register_async_method("infinite_call", |_, mut ctx, _| async move {
+        .register_async_method("infinite_call", |_, mut ctx| async move {
             let tx = std::sync::Arc::make_mut(&mut ctx);
             tx.send(()).unwrap();
             futures_util::future::pending::<()>().await;
@@ -1176,7 +1176,7 @@ async fn server_with_flooding_subscription(
             "subscribe_flood",
             "flood",
             "unsubscribe_flood",
-            |_, pending, ended_tx, _| async move {
+            |_, pending, ended_tx| async move {
                 let sink = pending.accept().await?;
                 let notification = serde_json::value::to_raw_value(&"x".repeat(64 * 1024)).unwrap();
                 while sink.send(notification.clone()).await.is_ok() {}

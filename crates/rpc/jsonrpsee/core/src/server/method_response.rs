@@ -33,7 +33,6 @@ use std::{io, task::Poll};
 use crate::traits::ToJson;
 
 use futures_util::{Future, FutureExt};
-use http::Extensions;
 use jsonrpsee_types::{
     error::{
         reject_too_big_batch_response, ErrorCode, ErrorObject, OVERSIZED_RESPONSE_CODE,
@@ -69,8 +68,6 @@ pub struct MethodResponse {
     /// Optional callback that may be utilized to notif
     /// that the method response has been processed
     on_close: Option<MethodResponseNotifyTx>,
-    /// The response's extensions.
-    extensions: Extensions,
 }
 
 impl AsRef<str> for MethodResponse {
@@ -133,8 +130,8 @@ impl MethodResponse {
     }
 
     /// Consume the method response and extract the parts.
-    pub fn into_parts(self) -> (Box<RawValue>, Option<MethodResponseNotifyTx>, Extensions) {
-        (self.json, self.on_close, self.extensions)
+    pub fn into_parts(self) -> (Box<RawValue>, Option<MethodResponseNotifyTx>) {
+        (self.json, self.on_close)
     }
 
     /// Get the error code
@@ -156,7 +153,6 @@ impl MethodResponse {
             success_or_error: MethodResponseResult::Success,
             kind: ResponseKind::Batch,
             on_close: None,
-            extensions: batch.extensions,
         }
     }
 
@@ -206,7 +202,6 @@ impl MethodResponse {
                     success_or_error,
                     kind,
                     on_close: rp.on_exit,
-                    extensions: Extensions::new(),
                 }
             }
             Err(err) => {
@@ -230,7 +225,6 @@ impl MethodResponse {
                         success_or_error: MethodResponseResult::Failed(err_code),
                         kind,
                         on_close: rp.on_exit,
-                        extensions: Extensions::new(),
                     }
                 } else {
                     let err = ErrorCode::InternalError;
@@ -242,7 +236,6 @@ impl MethodResponse {
                         success_or_error: MethodResponseResult::Failed(err.code()),
                         kind,
                         on_close: rp.on_exit,
-                        extensions: Extensions::new(),
                     }
                 }
             }
@@ -269,7 +262,6 @@ impl MethodResponse {
             success_or_error: MethodResponseResult::Failed(err_code),
             kind: ResponseKind::MethodCall,
             on_close: None,
-            extensions: Extensions::new(),
         }
     }
 
@@ -280,24 +272,9 @@ impl MethodResponse {
             success_or_error: MethodResponseResult::Success,
             kind: ResponseKind::Notification,
             on_close: None,
-            extensions: Extensions::new(),
         }
     }
 
-    /// Returns a reference to the associated extensions.
-    pub fn extensions(&self) -> &Extensions {
-        &self.extensions
-    }
-
-    /// Returns a mut reference to the associated extensions.
-    pub fn extensions_mut(&mut self) -> &mut Extensions {
-        &mut self.extensions
-    }
-
-    /// Consumes the method response and returns a new one with the given extensions.
-    pub fn with_extensions(self, extensions: Extensions) -> Self {
-        Self { extensions, ..self }
-    }
 }
 
 /// Represent the outcome of a method call success or failed.
@@ -338,8 +315,6 @@ pub struct BatchResponseBuilder {
     result: String,
     /// Max limit for the batch
     max_response_size: usize,
-    /// Extensions for the batch response.
-    extensions: Extensions,
 }
 
 impl BatchResponseBuilder {
@@ -348,7 +323,7 @@ impl BatchResponseBuilder {
         let mut initial = String::with_capacity(2048);
         initial.push('[');
 
-        Self { result: initial, max_response_size: limit, extensions: Extensions::new() }
+        Self { result: initial, max_response_size: limit }
     }
 
     /// Append a result from an individual method to the batch response.
@@ -359,7 +334,6 @@ impl BatchResponseBuilder {
         // `,` will occupy one extra byte for each entry
         // on the last item the `,` is replaced by `]`.
         let len = response.json.get().len() + self.result.len() + 1;
-        self.extensions.extend(response.extensions);
 
         if len > self.max_response_size {
             Err(MethodResponse::error(
@@ -385,7 +359,6 @@ impl BatchResponseBuilder {
         if self.is_empty() {
             BatchResponse {
                 json: batch_response_error(Id::Null, ErrorObject::from(ErrorCode::InvalidRequest)),
-                extensions: self.extensions,
             }
         } else {
             self.result.pop();
@@ -395,7 +368,7 @@ impl BatchResponseBuilder {
             // so the concatenation is a single well-formed JSON array without surrounding
             // whitespace.
             let json = unsafe { RawValue::from_string_unchecked(self.result) };
-            BatchResponse { json, extensions: self.extensions }
+            BatchResponse { json }
         }
     }
 }
@@ -404,7 +377,6 @@ impl BatchResponseBuilder {
 #[derive(Debug, Clone)]
 pub struct BatchResponse {
     json: Box<RawValue>,
-    extensions: Extensions,
 }
 
 /// Create a JSON-RPC error response.

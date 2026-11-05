@@ -52,7 +52,6 @@ server = [
     "tokio/macros",
     "tokio/time",
     "tower",
-    "http",
     "pin-project",
 ]
 
