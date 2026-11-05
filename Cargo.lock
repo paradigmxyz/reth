@@ -9256,7 +9256,6 @@ dependencies = [
  "fixed-cache",
  "futures-util",
  "metrics",
- "moka",
  "rayon",
  "reth-ethereum-primitives",
  "reth-execution-errors",
