@@ -107,17 +107,6 @@ where
     }
 }
 
-impl<T> IntoResponse for jsonrpsee_types::ResponsePayload<'static, T>
-where
-    T: serde::Serialize + Clone,
-{
-    type Output = T;
-
-    fn into_response(self) -> ResponsePayload<'static, Self::Output> {
-        self.into()
-    }
-}
-
 impl<T> IntoResponse for ResponsePayload<'static, T>
 where
     T: serde::Serialize + Clone,
