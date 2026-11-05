@@ -931,7 +931,7 @@ where
             let chunk = jobs.split_off(jobs.len().saturating_sub(chunk_len));
             let storage_done_tx = self.storage_done_tx.clone();
             let parent_span = parent_span.clone();
-            rayon::spawn(move || {
+            STORAGE_JOB_POOL.spawn(move || {
                 let _enter = debug_span!(
                     target: "engine::tree::payload_processor::sparse_trie",
                     parent: &parent_span,
@@ -1486,6 +1486,41 @@ fn merge_leaf_updates(queued: &mut B256Map<LeafUpdate>, updates: B256Map<LeafUpd
 /// staying small enough that one slow trie only delays the few behind it in its own chunk. Tries
 /// are still handed back one at a time, so a chunk does not delay promotion of the ones it
 /// already finished.
+/// Threads that run storage trie jobs, blocked on a channel while idle (experiment).
+///
+/// Rayon threads spin looking for work after every job, and the sparse trie hands them jobs for
+/// nearly every batch of streamed updates, so they rarely sleep.
+static STORAGE_JOB_POOL: std::sync::LazyLock<StorageJobPool> =
+    std::sync::LazyLock::new(StorageJobPool::new);
+
+/// A pool of threads that wait on a channel for jobs.
+struct StorageJobPool {
+    jobs: CrossbeamSender<Box<dyn FnOnce() + Send>>,
+}
+
+impl StorageJobPool {
+    fn new() -> Self {
+        let (jobs, queue) = crossbeam_channel::unbounded::<Box<dyn FnOnce() + Send>>();
+        for index in 0..rayon::current_num_threads().max(1) {
+            let queue = queue.clone();
+            std::thread::Builder::new()
+                .name(format!("strg-job-{index:02}"))
+                .spawn(move || {
+                    reth_tasks::utils::lower_background_worker_priority();
+                    while let Ok(job) = queue.recv() {
+                        job();
+                    }
+                })
+                .expect("failed to spawn a storage job thread");
+        }
+        Self { jobs }
+    }
+
+    fn spawn(&self, job: impl FnOnce() + Send + 'static) {
+        let _ = self.jobs.send(Box::new(job));
+    }
+}
+
 fn storage_job_chunk_len(tries: usize) -> usize {
     /// Upper bound on how many tries a single slow one can hold up.
     const MAX_CHUNK_LEN: usize = 32;
