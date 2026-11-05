@@ -34,7 +34,6 @@ use crate::{
     request::Notification,
     ErrorObject, ErrorObjectOwned,
 };
-use http::Extensions;
 use serde::{ser::SerializeStruct, Deserialize, Deserializer, Serialize, Serializer};
 
 /// JSON-RPC response object as defined in the [spec](https://www.jsonrpc.org/specification#response_object).
@@ -45,23 +44,12 @@ pub struct Response<'a, T: Clone> {
     pub payload: ResponsePayload<'a, T>,
     /// Request ID
     pub id: Id<'a>,
-    /// Extensions
-    pub extensions: Extensions,
 }
 
 impl<'a, T: Clone> Response<'a, T> {
     /// Create a new [`Response`].
     pub fn new(payload: ResponsePayload<'a, T>, id: Id<'a>) -> Response<'a, T> {
-        Response { jsonrpc: Some(TwoPointZero), payload, id, extensions: Extensions::new() }
-    }
-
-    /// Create a new [`Response`] with extensions
-    pub fn new_with_extensions(
-        payload: ResponsePayload<'a, T>,
-        id: Id<'a>,
-        ext: Extensions,
-    ) -> Response<'a, T> {
-        Response { jsonrpc: Some(TwoPointZero), payload, id, extensions: ext }
+        Response { jsonrpc: Some(TwoPointZero), payload, id }
     }
 
     /// Create an owned [`Response`].
@@ -70,18 +58,7 @@ impl<'a, T: Clone> Response<'a, T> {
             jsonrpc: self.jsonrpc,
             payload: self.payload.into_owned(),
             id: self.id.into_owned(),
-            extensions: self.extensions,
         }
-    }
-
-    /// Get the extensions of the response.
-    pub fn extensions(&self) -> &Extensions {
-        &self.extensions
-    }
-
-    /// Get the mutable ref to the extensions of the response.
-    pub fn extensions_mut(&mut self) -> &mut Extensions {
-        &mut self.extensions
     }
 }
 
@@ -325,30 +302,18 @@ where
                             "result and error are mutually exclusive",
                         ));
                     }
-                    (Some(jsonrpc), Some(result), None) => Response {
-                        jsonrpc,
-                        payload: ResponsePayload::Success(result),
-                        id,
-                        extensions: Extensions::new(),
-                    },
-                    (Some(jsonrpc), None, Some(err)) => Response {
-                        jsonrpc,
-                        payload: ResponsePayload::Error(err),
-                        id,
-                        extensions: Extensions::new(),
-                    },
-                    (None, Some(result), _) => Response {
-                        jsonrpc: None,
-                        payload: ResponsePayload::Success(result),
-                        id,
-                        extensions: Extensions::new(),
-                    },
-                    (None, _, Some(err)) => Response {
-                        jsonrpc: None,
-                        payload: ResponsePayload::Error(err),
-                        id,
-                        extensions: Extensions::new(),
-                    },
+                    (Some(jsonrpc), Some(result), None) => {
+                        Response { jsonrpc, payload: ResponsePayload::Success(result), id }
+                    }
+                    (Some(jsonrpc), None, Some(err)) => {
+                        Response { jsonrpc, payload: ResponsePayload::Error(err), id }
+                    }
+                    (None, Some(result), _) => {
+                        Response { jsonrpc: None, payload: ResponsePayload::Success(result), id }
+                    }
+                    (None, _, Some(err)) => {
+                        Response { jsonrpc: None, payload: ResponsePayload::Error(err), id }
+                    }
                     (_, None, None) => return Err(serde::de::Error::missing_field("result/error")),
                 };
 
@@ -388,7 +353,6 @@ where
 
 #[cfg(test)]
 mod tests {
-    use http::Extensions;
 
     use super::{Id, Response, TwoPointZero};
     use crate::{response::ResponsePayload, ErrorObjectOwned};
@@ -399,7 +363,6 @@ mod tests {
             jsonrpc: Some(TwoPointZero),
             payload: ResponsePayload::success("ok"),
             id: Id::Number(1),
-            extensions: Extensions::new(),
         })
         .unwrap();
         let exp = r#"{"jsonrpc":"2.0","id":1,"result":"ok"}"#;
@@ -412,7 +375,6 @@ mod tests {
             jsonrpc: Some(TwoPointZero),
             payload: ResponsePayload::<()>::error(ErrorObjectOwned::owned(1, "lo", None::<()>)),
             id: Id::Number(1),
-            extensions: Extensions::new(),
         })
         .unwrap();
         let exp = r#"{"jsonrpc":"2.0","id":1,"error":{"code":1,"message":"lo"}}"#;
@@ -425,7 +387,6 @@ mod tests {
             jsonrpc: None,
             payload: ResponsePayload::success("ok"),
             id: Id::Number(1),
-            extensions: Extensions::new(),
         })
         .unwrap();
         let exp = r#"{"id":1,"result":"ok"}"#;
@@ -438,7 +399,6 @@ mod tests {
             jsonrpc: Some(TwoPointZero),
             payload: ResponsePayload::success(99_u64),
             id: Id::Number(11),
-            extensions: Extensions::new(),
         };
         let dsr: Response<u64> =
             serde_json::from_str(r#"{"jsonrpc":"2.0", "result":99, "id":11}"#).unwrap();
@@ -453,7 +413,6 @@ mod tests {
             jsonrpc: Some(TwoPointZero),
             payload: ResponsePayload::error(ErrorObjectOwned::owned(1, "lo", None::<()>)),
             id: Id::Number(11),
-            extensions: Extensions::new(),
         };
         let dsr: Response<()> =
             serde_json::from_str(r#"{"jsonrpc":"2.0","error":{"code":1,"message":"lo"},"id":11}"#)
@@ -469,7 +428,6 @@ mod tests {
             jsonrpc: None,
             payload: ResponsePayload::success(99_u64),
             id: Id::Number(11),
-            extensions: Extensions::new(),
         };
         let dsr: Response<u64> =
             serde_json::from_str(r#"{"jsonrpc":null, "result":99, "id":11}"#).unwrap();
@@ -484,7 +442,6 @@ mod tests {
             jsonrpc: None,
             payload: ResponsePayload::success(99_u64),
             id: Id::Number(11),
-            extensions: Extensions::new(),
         };
         let dsr: Response<u64> =
             serde_json::from_str(r#"{"jsonrpc":null, "result":99, "id":11, "unknown":11}"#)

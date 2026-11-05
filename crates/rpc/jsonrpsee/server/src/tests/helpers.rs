@@ -25,7 +25,7 @@ pub(crate) async fn server_with_call_counter() -> (SocketAddr, ServerHandle, Arc
         .unwrap();
     let calls = Arc::new(AtomicUsize::new(0));
     let mut module = RpcModule::new(calls.clone());
-    module.register_method("tick", |_, calls, _| calls.fetch_add(1, Ordering::SeqCst)).unwrap();
+    module.register_method("tick", |_, calls| calls.fetch_add(1, Ordering::SeqCst)).unwrap();
     let addr = server.local_addr().unwrap();
     (addr, server.start(module), calls)
 }
@@ -59,20 +59,20 @@ pub(crate) async fn server_with_handles() -> (SocketAddr, ServerHandle) {
     let ctx = TestContext;
     let mut module = RpcModule::new(ctx);
     module
-        .register_method("say_hello", |_, _, _| {
+        .register_method("say_hello", |_, _| {
             tracing::debug!("server respond to hello");
             "hello"
         })
         .unwrap();
     module
-        .register_method::<Result<u64, ErrorObjectOwned>, _>("add", |params, _, _| {
+        .register_method::<Result<u64, ErrorObjectOwned>, _>("add", |params, _| {
             let params: Vec<u64> = params.parse()?;
             let sum: u64 = params.into_iter().sum();
             Ok(sum)
         })
         .unwrap();
     module
-        .register_method::<Result<String, ErrorObjectOwned>, _>("multiparam", |params, _, _| {
+        .register_method::<Result<String, ErrorObjectOwned>, _>("multiparam", |params, _| {
             let params: (String, String, Vec<u8>) = params.parse()?;
             let r = format!(
                 "string1={}, string2={}, vec={}",
@@ -84,7 +84,7 @@ pub(crate) async fn server_with_handles() -> (SocketAddr, ServerHandle) {
         })
         .unwrap();
     module
-        .register_async_method("say_hello_async", |_, _, _| {
+        .register_async_method("say_hello_async", |_, _| {
             async move {
                 tracing::debug!("server respond to hello");
                 // Call some async function inside.
@@ -96,19 +96,17 @@ pub(crate) async fn server_with_handles() -> (SocketAddr, ServerHandle) {
     module
         .register_async_method::<Result<u64, ErrorObjectOwned>, _, _>(
             "add_async",
-            |params, _, _| async move {
+            |params, _| async move {
                 let params: Vec<u64> = params.parse()?;
                 let sum: u64 = params.into_iter().sum();
                 Ok(sum)
             },
         )
         .unwrap();
+    module.register_method("invalid_params", |_params, _| Err::<(), _>(invalid_params())).unwrap();
+    module.register_method("call_fail", |_params, _| Err::<(), _>(MyAppError)).unwrap();
     module
-        .register_method("invalid_params", |_params, _, _| Err::<(), _>(invalid_params()))
-        .unwrap();
-    module.register_method("call_fail", |_params, _, _| Err::<(), _>(MyAppError)).unwrap();
-    module
-        .register_method::<Result<&str, ErrorObjectOwned>, _>("sleep_for", |params, _, _| {
+        .register_method::<Result<&str, ErrorObjectOwned>, _>("sleep_for", |params, _| {
             let sleep: Vec<u64> = params.parse()?;
             std::thread::sleep(std::time::Duration::from_millis(sleep[0]));
             Ok("Yawn!")
@@ -119,7 +117,7 @@ pub(crate) async fn server_with_handles() -> (SocketAddr, ServerHandle) {
             "subscribe_hello",
             "subscribe_hello",
             "unsubscribe_hello",
-            |_, pending, _, _| async move {
+            |_, pending, _| async move {
                 let sink = pending.accept().await?;
 
                 loop {
@@ -130,22 +128,22 @@ pub(crate) async fn server_with_handles() -> (SocketAddr, ServerHandle) {
         )
         .unwrap();
 
-    module.register_method("notif", |_, _, _| "").unwrap();
+    module.register_method("notif", |_, _| "").unwrap();
     module
-        .register_method("should_err", |_, ctx, _| {
+        .register_method("should_err", |_, ctx| {
             ctx.err()?;
             RpcResult::Ok("err")
         })
         .unwrap();
 
     module
-        .register_method("should_ok", |_, ctx, _| {
+        .register_method("should_ok", |_, ctx| {
             ctx.ok()?;
             RpcResult::Ok("ok")
         })
         .unwrap();
     module
-        .register_async_method("should_ok_async", |_p, ctx, _| async move {
+        .register_async_method("should_ok_async", |_p, ctx| async move {
             ctx.ok()?;
             Ok::<_, MyAppError>("ok")
         })
@@ -170,21 +168,21 @@ pub(crate) async fn server_with_context() -> SocketAddr {
     let mut rpc_module = RpcModule::new(ctx);
 
     rpc_module
-        .register_method("should_err", |_p, ctx, _| {
+        .register_method("should_err", |_p, ctx| {
             ctx.err()?;
             RpcResult::Ok("err")
         })
         .unwrap();
 
     rpc_module
-        .register_method("should_ok", |_p, ctx, _| {
+        .register_method("should_ok", |_p, ctx| {
             ctx.ok()?;
             RpcResult::Ok("ok")
         })
         .unwrap();
 
     rpc_module
-        .register_async_method("should_ok_async", |_p, ctx, _| async move {
+        .register_async_method("should_ok_async", |_p, ctx| async move {
             ctx.ok()?;
             // Call some async function inside.
             Result::<_, MyAppError>::Ok(futures_util::future::ready("ok!").await)
@@ -192,7 +190,7 @@ pub(crate) async fn server_with_context() -> SocketAddr {
         .unwrap();
 
     rpc_module
-        .register_async_method("err_async", |_p, ctx, _| async move {
+        .register_async_method("err_async", |_p, ctx| async move {
             ctx.ok()?;
             // Async work that returns an error
             futures_util::future::err::<(), _>(MyAppError).await

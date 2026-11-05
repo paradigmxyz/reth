@@ -59,9 +59,7 @@ where
                 }
             };
 
-            let rp =
-                handle_rpc_call(&body, is_single, batch_config, &rpc_service, parts.extensions)
-                    .await;
+            let rp = handle_rpc_call(&body, is_single, batch_config, &rpc_service).await;
 
             // If the response is empty it means that it was a notification or empty batch.
             // For HTTP these are just ACK:ed with a empty body.
@@ -157,14 +155,9 @@ pub mod response {
     }
 
     /// Create a response from a method response.
-    ///
-    /// This will include the body and extensions from the method response.
     pub fn from_method_response(rp: MethodResponse) -> HttpResponse {
-        let (body, _, extensions) = rp.into_parts();
-        let mut rp =
-            from_template(hyper::StatusCode::OK, String::from(Box::<str>::from(body)), JSON);
-        rp.extensions_mut().extend(extensions);
-        rp
+        let body = String::from(Box::<str>::from(rp.into_json()));
+        from_template(hyper::StatusCode::OK, body, JSON)
     }
 
     /// Create a response for unsupported content type.

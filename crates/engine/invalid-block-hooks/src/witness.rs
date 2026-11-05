@@ -872,7 +872,7 @@ mod tests {
             .http(format!("http://{}", server.local_addr().unwrap()).parse().unwrap());
         let mut module = RpcModule::new((requested.clone(), respond.clone()));
         module
-            .register_async_method("debug_executionWitness", |_, context, _| async move {
+            .register_async_method("debug_executionWitness", |_, context| async move {
                 context.0.notify_one();
                 context.1.notified().await;
                 RpcResult::Ok(ExecutionWitness {
