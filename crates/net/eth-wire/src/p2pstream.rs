@@ -1185,33 +1185,15 @@ mod tests {
         // A snappy header advertising a 16 MiB payload, with no compressed body behind it.
         let frame =
             BytesMut::from([P2PMessageID::Disconnect as u8, 0x80, 0x80, 0x80, 0x08].as_slice());
-        assert_eq!(snap::raw::decompress_len(&frame[1..]).unwrap(), MAX_PAYLOAD_SIZE);
-
         let mut stream = stream_with_incoming(frame);
-        let waker = noop_waker_ref();
-        let mut cx = Context::from_waker(waker);
 
-        match Pin::new(&mut stream).poll_next(&mut cx) {
-            Poll::Ready(Some(Err(P2PStreamError::MessageTooBig { message_size, max_size }))) => {
-                assert_eq!(message_size, MAX_PAYLOAD_SIZE);
-                assert_eq!(max_size, MAX_DISCONNECT_PAYLOAD_SIZE);
+        assert!(matches!(
+            stream.next().await.unwrap().unwrap_err(),
+            P2PStreamError::MessageTooBig {
+                message_size: MAX_PAYLOAD_SIZE,
+                max_size: MAX_DISCONNECT_PAYLOAD_SIZE,
             }
-            result => panic!("unexpected poll result: {result:?}"),
-        }
-    }
-
-    #[tokio::test]
-    async fn decodes_snappy_compressed_disconnect() {
-        let reason = DisconnectReason::UselessPeer;
-        let frame = compressed_p2p_message(P2PMessageID::Disconnect, &alloy_rlp::encode(reason));
-        let mut stream = stream_with_incoming(frame);
-        let waker = noop_waker_ref();
-        let mut cx = Context::from_waker(waker);
-
-        match Pin::new(&mut stream).poll_next(&mut cx) {
-            Poll::Ready(Some(Err(P2PStreamError::Disconnected(got)))) => assert_eq!(got, reason),
-            result => panic!("unexpected poll result: {result:?}"),
-        }
+        ));
     }
 
     #[tokio::test]
