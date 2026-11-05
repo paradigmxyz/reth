@@ -255,7 +255,7 @@ where
     /// corresponding [`PeerId`](reth_network_peers::PeerId).
     pub fn peer_id(&self) -> eyre::Result<reth_network_peers::PeerId> {
         let sk = self.p2p_secret_key()?;
-        Ok(reth_network_peers::pk2id(&sk.public_key(secp256k1::SECP256K1)))
+        Ok(reth_network_peers::pk2id(&sk.public_key()))
     }
 }
 
