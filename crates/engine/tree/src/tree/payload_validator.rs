@@ -1236,6 +1236,8 @@ where
         // In that case, invoking the callback on every transaction would resend the previous
         // receipt with the same index and can panic the ordered root builder.
         let mut last_sent_len = 0usize;
+        // Timeline rows: index, reached, done waiting, committed (us), reused.
+        let mut timeline_rows = Vec::<(usize, u64, u64, u64, bool)>::new();
         loop {
             // Measure time spent waiting for next transaction from iterator
             // (e.g., parallel signature recovery)
@@ -1261,6 +1263,7 @@ where
             let index = senders.len() - 1;
             match prewarm_results {
                 Some(results) => {
+                    let reached = results.timeline.as_ref().map(|timeline| timeline.now());
                     let mut outcome =
                         self.commit_prewarm_result(executor, results, index, tx.tx())?;
                     // A prewarm worker executing the transaction for the first time usually
@@ -1276,11 +1279,23 @@ where
                         }
                         outcome = self.commit_prewarm_result(executor, results, index, tx.tx())?;
                     }
+                    let waited = results.timeline.as_ref().map(|timeline| timeline.now());
                     if outcome.is_err() {
                         // Later prewarm results are refreshed against the actual writes.
                         let result = executor.execute_transaction_without_commit(tx)?;
                         results.publish_executed(index, &result.result().pending_state);
                         executor.commit_transaction(result)?;
+                    }
+                    if let (Some(timeline), Some(reached), Some(waited)) =
+                        (&results.timeline, reached, waited)
+                    {
+                        timeline_rows.push((
+                            index,
+                            reached,
+                            waited,
+                            timeline.now(),
+                            outcome.is_ok(),
+                        ));
                     }
                     reuse_stats.record(outcome);
                 }
@@ -1307,6 +1322,9 @@ where
         }
 
         drop(exec_span);
+        if let Some(timeline) = prewarm_results.and_then(|results| results.timeline.as_ref()) {
+            log_timeline(timeline, &timeline_rows);
+        }
         if prewarm_results.is_some() {
             self.metrics.prewarm_reuse.record(reuse_stats);
         }
@@ -2126,4 +2144,53 @@ struct ExecutedBal {
     alloy: BlockAccessList,
     /// evm2 form, shared with the executed block so consumers can reuse it.
     evm: Arc<EvmBal>,
+}
+
+/// Logs where block execution waited for speculation, from the timeline instrumentation.
+fn log_timeline(
+    timeline: &crate::tree::payload_processor::reuse::Timeline,
+    rows: &[(usize, u64, u64, u64, bool)],
+) {
+    let get =
+        |times: &[std::sync::atomic::AtomicU64], index: usize| times[index].load(Ordering::Relaxed);
+    let n = rows.len();
+    let total_wait: u64 = rows.iter().map(|&(_, reached, waited, ..)| waited - reached).sum();
+    let reused = rows.iter().filter(|row| row.4).count();
+    let last_arrival = (0..n).map(|i| get(&timeline.arrived, i)).filter(|&t| t != u64::MAX).max();
+    let last_spec_end = (0..n).map(|i| get(&timeline.spec_end, i)).filter(|&t| t != u64::MAX).max();
+    let spec_sum: u64 = (0..n)
+        .filter_map(|i| {
+            let (start, end) = (get(&timeline.spec_start, i), get(&timeline.spec_end, i));
+            (start != u64::MAX && end != u64::MAX).then(|| end - start)
+        })
+        .sum();
+    let committed = rows.last().map(|row| row.3);
+    let mut waits = rows.to_vec();
+    waits.sort_by_key(|&(_, reached, waited, ..)| std::cmp::Reverse(waited - reached));
+    let top = waits
+        .iter()
+        .take(4)
+        .map(|&(index, reached, waited, ..)| {
+            format!(
+                "{index}:wait={}us,reached={reached},arrived={},spec={}..{}",
+                waited - reached,
+                get(&timeline.arrived, index),
+                get(&timeline.spec_start, index),
+                get(&timeline.spec_end, index)
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(" ");
+    info!(
+        target: "engine::np_timeline",
+        txs = n,
+        reused,
+        total_wait_us = total_wait,
+        last_arrival_us = ?last_arrival,
+        last_spec_end_us = ?last_spec_end,
+        committed_us = ?committed,
+        spec_avg_us = spec_sum / n.max(1) as u64,
+        %top,
+        "timeline"
+    );
 }
