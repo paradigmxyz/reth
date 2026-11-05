@@ -8,7 +8,7 @@ use alloy_primitives::{map::AddressSet, Address, B256, U256};
 use alloy_rpc_types_beacon::relay::{
     BidTrace, BuilderBlockValidationRequest, BuilderBlockValidationRequestV2,
     BuilderBlockValidationRequestV3, BuilderBlockValidationRequestV4,
-    BuilderBlockValidationRequestV5, BuilderBlockValidationRequestV6, TransactionFilter,
+    BuilderBlockValidationRequestV5, BuilderBlockValidationRequestV6,
 };
 use alloy_rpc_types_engine::{
     BlobsBundleV1, BlobsBundleV2, CancunPayloadFields, ExecutionData, ExecutionPayload,
@@ -166,7 +166,7 @@ where
         block: RecoveredBlock<<E::Primitives as NodePrimitives>::Block>,
         message: BidTrace,
         registered_gas_limit: u64,
-        transaction_filter: TransactionFilter,
+        apply_blacklist: bool,
         decoded_bal: Option<DecodedBal>,
     ) -> Result<(), ValidationApiError> {
         self.validate_message_against_header(block.sealed_header(), &message)?;
@@ -174,8 +174,7 @@ where
         self.consensus.validate_header(block.sealed_header())?;
         self.consensus.validate_block_pre_execution(block.sealed_block())?;
 
-        let apply_disallow =
-            transaction_filter == TransactionFilter::Ofac && !self.disallow.is_empty();
+        let apply_disallow = apply_blacklist && !self.disallow.is_empty();
 
         if apply_disallow {
             if self.disallow.contains(&block.beneficiary()) {
@@ -466,7 +465,7 @@ where
             block,
             request.request.message,
             request.registered_gas_limit,
-            request.transaction_filter,
+            request.apply_blacklist,
             None,
         )
         .await
@@ -496,7 +495,7 @@ where
             block,
             request.request.message,
             request.registered_gas_limit,
-            request.transaction_filter,
+            request.apply_blacklist,
             None,
         )
         .await
@@ -542,7 +541,7 @@ where
             block,
             request.request.message,
             request.registered_gas_limit,
-            request.transaction_filter,
+            request.apply_blacklist,
             None,
         )
         .await
@@ -591,7 +590,7 @@ where
             block,
             request.request.message,
             request.registered_gas_limit,
-            request.transaction_filter,
+            request.apply_blacklist,
             Some(decoded_bal),
         )
         .await
@@ -884,7 +883,7 @@ pub(crate) struct ValidationMetrics {
 mod tests {
     use super::{
         hash_disallow_list, validate_message_against_payload, AddressSet, CachedReads,
-        TransactionFilter, ValidationApi, ValidationApiConfig, ValidationApiError,
+        ValidationApi, ValidationApiConfig, ValidationApiError,
     };
     use alloy_consensus::{BlockHeader, Header};
     use alloy_primitives::{Address, B256, U256};
@@ -1181,13 +1180,7 @@ mod tests {
         );
         message.block_hash = block.hash();
         let error = test_validation_api(provider)
-            .validate_message_against_block(
-                block,
-                message,
-                parent_block.gas_limit(),
-                TransactionFilter::default(),
-                None,
-            )
+            .validate_message_against_block(block, message, parent_block.gas_limit(), true, None)
             .await
             .unwrap_err();
         assert!(
@@ -1237,13 +1230,7 @@ mod tests {
         let registered_gas_limit = block.gas_limit();
 
         let err = test_validation_api(provider)
-            .validate_message_against_block(
-                block,
-                message,
-                registered_gas_limit,
-                TransactionFilter::default(),
-                None,
-            )
+            .validate_message_against_block(block, message, registered_gas_limit, true, None)
             .await
             .unwrap_err();
 
@@ -1257,13 +1244,7 @@ mod tests {
         message.value = U256::ZERO;
 
         test_validation_api(provider)
-            .validate_message_against_block(
-                block,
-                message,
-                registered_gas_limit,
-                TransactionFilter::default(),
-                None,
-            )
+            .validate_message_against_block(block, message, registered_gas_limit, true, None)
             .await
             .unwrap();
     }
@@ -1374,13 +1355,7 @@ mod tests {
         *api.cached_state.write().await = (parent.hash(), shared_cache);
 
         let err = api
-            .validate_message_against_block(
-                block,
-                message,
-                registered_gas_limit,
-                TransactionFilter::Ofac,
-                None,
-            )
+            .validate_message_against_block(block, message, registered_gas_limit, true, None)
             .await
             .unwrap_err();
 
@@ -1408,7 +1383,7 @@ mod tests {
             unfiltered_block,
             unfiltered_message,
             registered_gas_limit,
-            TransactionFilter::None,
+            false,
             None,
         )
         .await
@@ -1419,7 +1394,7 @@ mod tests {
             filtered_block,
             filtered_message,
             registered_gas_limit,
-            TransactionFilter::Ofac,
+            true,
             None,
         )
         .await
@@ -1427,7 +1402,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_transaction_filter_selects_whether_the_disallow_list_applies() {
+    async fn test_apply_blacklist_selects_whether_the_disallow_list_applies() {
         let blocked = Address::repeat_byte(0xbb);
         let (provider, parent, _) = balance_reader_parent(blocked);
         let (block, message) = submission_calling(&provider, &parent, &[blocked]);
@@ -1440,7 +1415,7 @@ mod tests {
                 block.clone(),
                 message.clone(),
                 registered_gas_limit,
-                TransactionFilter::Ofac,
+                true,
                 None,
             )
             .await
@@ -1450,15 +1425,9 @@ mod tests {
             "unexpected error: {err}"
         );
 
-        api.validate_message_against_block(
-            block,
-            message,
-            registered_gas_limit,
-            TransactionFilter::None,
-            None,
-        )
-        .await
-        .unwrap();
+        api.validate_message_against_block(block, message, registered_gas_limit, false, None)
+            .await
+            .unwrap();
     }
 
     /// Execution state for a block in which `address` ended up poorer than it started.

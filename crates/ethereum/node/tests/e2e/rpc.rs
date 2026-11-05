@@ -456,6 +456,7 @@ async fn test_flashbots_validate_v3() -> eyre::Result<()> {
         parent_beacon_block_root: payload.block().parent_beacon_block_root.unwrap(),
         apply_blacklist: true,
         registered_gas_limit: payload.block().gas_limit,
+        apply_blacklist: true,
     };
 
     assert!(provider
@@ -524,6 +525,7 @@ async fn test_flashbots_validate_v4() -> eyre::Result<()> {
         parent_beacon_block_root: payload.block().parent_beacon_block_root.unwrap(),
         apply_blacklist: true,
         registered_gas_limit: payload.block().gas_limit,
+        apply_blacklist: true,
     };
 
     provider
@@ -579,6 +581,7 @@ async fn test_flashbots_validate_v5() -> eyre::Result<()> {
         parent_beacon_block_root: payload.block().parent_beacon_block_root.unwrap(),
         apply_blacklist: true,
         registered_gas_limit: payload.block().gas_limit,
+        apply_blacklist: true,
     };
 
     provider
@@ -646,6 +649,7 @@ async fn test_flashbots_validate_v6() -> eyre::Result<()> {
         parent_beacon_block_root: payload.block().parent_beacon_block_root.unwrap(),
         apply_blacklist: true,
         registered_gas_limit: payload.block().gas_limit,
+        apply_blacklist: true,
     };
 
     provider
