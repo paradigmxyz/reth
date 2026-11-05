@@ -537,6 +537,7 @@ metrics-derive = "0.1.1"
 metrics-exporter-prometheus = { version = "0.18.3", default-features = false }
 metrics-process = "2.1.0"
 metrics-util = { default-features = false, version = "0.20.3" }
+sketches-ddsketch = { version = "0.3.1", default-features = false }
 
 # tokio
 tokio = { version = "1.52.3", default-features = false }
@@ -628,6 +629,7 @@ cipher = "0.4.3"
 comfy-table = "7.0"
 concat-kdf = "0.1.0"
 crossbeam-channel = "0.5.13"
+crossbeam-epoch = { version = "0.9.18", default-features = false, features = ["std"] }
 crossbeam-queue = "0.3"
 crossbeam-utils = "0.8"
 crossterm = "0.29.0"
