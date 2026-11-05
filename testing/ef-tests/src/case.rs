@@ -32,12 +32,24 @@ pub struct Cases<T> {
     pub test_cases: Vec<(PathBuf, T)>,
 }
 
+/// Stack size of the threads that run test cases.
+///
+/// Deeply recursive cases such as `Create2Recursive` need more than rayon's default 2 MiB stack.
+/// This matches the worker stack size of evm2's own EEST runner.
+const CASE_THREAD_STACK_SIZE: usize = 16 * 1024 * 1024;
+
 impl<T: Case> Cases<T> {
     /// Run the contained test cases.
     pub fn run(self) -> Vec<CaseResult> {
-        self.test_cases
-            .into_par_iter()
-            .map(|(path, case)| CaseResult::new(&path, case.description(), case.run()))
-            .collect()
+        rayon::ThreadPoolBuilder::new()
+            .stack_size(CASE_THREAD_STACK_SIZE)
+            .build()
+            .expect("failed to build the test case thread pool")
+            .install(|| {
+                self.test_cases
+                    .into_par_iter()
+                    .map(|(path, case)| CaseResult::new(&path, case.description(), case.run()))
+                    .collect()
+            })
     }
 }
