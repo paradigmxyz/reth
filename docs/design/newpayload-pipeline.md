@@ -164,7 +164,9 @@ milliseconds, long before block execution commits them. The plan:
 2. Bounded trie work while updates arrive: apply buffered updates, storage roots and account
    promotions every N updates or after a time slice even when more are queued, as zempo's
    `root_ahead` applies a window of changes beside execution, so that the work after the last
-   transaction is only the last window.
+   transaction is only the last window. Leaving gaps in the stream from the producer side does
+   not do it: tempo's builder sending updates in bursts of 32 (tempoxyz/tempo#8984) moved its
+   finish p50 only from 27.6 to 26.9 ms, so the task itself has to schedule the work.
 3. Root ahead of commit: feed the sparse trie the predicted values of stored speculative results,
    so that proofs are fetched and storage tries hashed while block execution is still running.
    When block execution commits a transaction, only leaves whose committed value differs from the
