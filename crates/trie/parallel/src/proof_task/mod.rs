@@ -40,7 +40,7 @@ use std::{
     },
     time::Duration,
 };
-use tracing::{debug, debug_span, error, instrument, trace};
+use tracing::{debug, debug_span, error, instrument, trace, trace_span};
 
 #[cfg(feature = "metrics")]
 use self::metrics::ProofWorkerIdleMetrics;
@@ -499,7 +499,8 @@ where
         let mut storage_proofs_processed = 0u64;
         let total_idle_time = self.process_jobs(worker_id, |job| {
             let StorageProofJob { hashed_address, targets, dispatched_at } = job;
-            let _span = debug_span!(
+            // One span per job: trace level, since a block runs thousands of them.
+            let _span = trace_span!(
                 target: "trie::proof_task",
                 "Storage proof calculation",
                 ?hashed_address,
@@ -559,7 +560,8 @@ where
         let mut account_proofs_processed = 0u64;
         let total_idle_time = self.process_jobs(worker_id, |job| {
             let AccountProofJob { targets, dispatched_at } = job;
-            let _span = debug_span!(
+            // One span per job: trace level, since a block runs many of them.
+            let _span = trace_span!(
                 target: "trie::proof_task",
                 "Account proof calculation",
                 targets = targets.len(),
