@@ -53,6 +53,15 @@ pub const DEFAULT_STATE_TRIE_OVERLAY_WORKER_THREADS: usize = 4;
 /// Default maximum number of concurrent blocking tasks (for RPC tracing guard).
 pub const DEFAULT_MAX_BLOCKING_TASKS: usize = 512;
 
+/// Nice levels the proof worker threads run below the thread that first accesses their pool.
+///
+/// Proofs are only needed for the state root after the last transaction, while block execution
+/// and its speculative workers are on the critical path the whole time. With equal priorities, the
+/// many proof workers preempt them; with this offset, the proof workers mostly run on the cores
+/// execution leaves idle, and take every core once execution finished.
+#[cfg(feature = "rayon")]
+const PROOF_WORKER_NICE_OFFSET: i32 = 10;
+
 /// Configuration for the tokio runtime.
 #[derive(Debug, Clone)]
 pub enum TokioConfig {
@@ -1018,14 +1027,16 @@ impl RuntimeBuilder {
                 .proof_storage_worker_threads_override()
                 .unwrap_or(default_proof_worker_threads);
             let proof_storage_worker_pool =
-                WorkerPool::new(proof_storage_worker_threads, "proof-strg");
+                WorkerPool::new(proof_storage_worker_threads, "proof-strg")
+                    .with_thread_start(lower_proof_worker_priority);
 
             let proof_account_worker_threads = config
                 .rayon
                 .proof_account_worker_threads_override()
                 .unwrap_or(default_proof_worker_threads);
             let proof_account_worker_pool =
-                WorkerPool::new(proof_account_worker_threads, "proof-acct");
+                WorkerPool::new(proof_account_worker_threads, "proof-acct")
+                    .with_thread_start(lower_proof_worker_priority);
 
             let prewarming_threads = config.rayon.prewarming_threads.unwrap_or(default_threads);
             let prewarming_pool = Arc::new(WorkerPool::new(prewarming_threads, "prewarm"));
@@ -1114,6 +1125,12 @@ impl RuntimeBuilder {
 
         Ok(Runtime(Arc::new(inner)))
     }
+}
+
+/// Lowers the priority of a proof worker thread by [`PROOF_WORKER_NICE_OFFSET`].
+#[cfg(feature = "rayon")]
+fn lower_proof_worker_priority() {
+    crate::utils::decrease_thread_priority(PROOF_WORKER_NICE_OFFSET);
 }
 
 #[cfg(test)]
