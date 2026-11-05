@@ -250,6 +250,7 @@ where
     /// polls refresh the expiry timeout, allowing persistently failing filters to be evicted.
     /// Batched log polls commit only when the entire batch response fits; overlapping polls can
     /// observe the same uncommitted window.
+    /// Future starts and completed ranges return no changes; future ends are capped at the head.
     pub async fn filter_changes(
         &self,
         id: FilterId,
@@ -267,6 +268,7 @@ where
         let info = self.provider().chain_info()?;
         let best_number = info.best_number;
         let start_block = filter.block.load(Ordering::Relaxed);
+        let mut next_block = start_block.max(best_number + 1);
         let changes = match filter.kind.clone() {
             // No new blocks since the last successful poll.
             _ if start_block > best_number => FilterChanges::Empty,
@@ -289,17 +291,20 @@ where
                 FilterChanges::Hashes(block_hashes)
             }
             FilterKind::Log(filter) => {
-                let (from_block_number, to_block_number) = match filter.block_option {
-                    FilterBlockOption::Range { from_block, to_block } => {
-                        let from = from_block
-                            .map(|num| self.provider().convert_block_number(num))
-                            .transpose()?
-                            .flatten();
+                let range = match filter.block_option {
+                    FilterBlockOption::Range { to_block, .. } => {
                         let to = to_block
                             .map(|num| self.provider().convert_block_number(num))
                             .transpose()?
-                            .flatten();
-                        logs_utils::get_filter_block_range(from, to, start_block, info)?
+                            .flatten()
+                            .unwrap_or(best_number)
+                            .min(best_number);
+                        // Bounds such as safe/finalized can lag the head. Advance only through
+                        // the blocks actually available to this filter.
+                        next_block = start_block.max(to.saturating_add(1));
+                        // The cursor starts at the installed fromBlock. Future and completed
+                        // ranges are successful empty polls, and future ends follow the head.
+                        (start_block <= to).then_some((start_block, to))
                     }
                     FilterBlockOption::AtBlockHash(block_hash) => {
                         // blockHash is equivalent to fromBlock = toBlock = the block number with
@@ -309,19 +314,22 @@ where
                             .provider()
                             .block_number(block_hash)?
                             .ok_or(ProviderError::HeaderNotFound(block_hash.into()))?;
-                        (block_number, block_number)
+                        Some((block_number, block_number))
                     }
                 };
-                let logs = self
-                    .inner
-                    .clone()
-                    .get_logs_in_block_range(
-                        *filter,
-                        from_block_number,
-                        to_block_number,
-                        self.inner.query_limits(),
-                    )
-                    .await?;
+                let logs = if let Some((from_block_number, to_block_number)) = range {
+                    self.inner
+                        .clone()
+                        .get_logs_in_block_range(
+                            *filter,
+                            from_block_number,
+                            to_block_number,
+                            self.inner.query_limits(),
+                        )
+                        .await?
+                } else {
+                    Vec::new()
+                };
                 FilterChanges::Logs(logs)
             }
         };
@@ -329,7 +337,7 @@ where
             let filter = filter.clone();
             move || {
                 // An older batch can finish after a newer poll, so never rewind its cursor.
-                filter.block.fetch_max(start_block.max(best_number + 1), Ordering::Relaxed);
+                filter.block.fetch_max(next_block, Ordering::Relaxed);
                 *filter.last_poll_timestamp.lock() = Instant::now();
             }
         };
@@ -347,6 +355,8 @@ where
     /// Returns an array of all logs matching filter with given id.
     ///
     /// Returns an error if no matching log filter exists.
+    /// Installed ranges return only currently available blocks, including an empty result while
+    /// waiting for a future start. Successful empty polls refresh the filter's expiry.
     ///
     /// Handler for `eth_getFilterLogs`
     pub async fn filter_logs(
@@ -360,7 +370,11 @@ where
         let FilterKind::Log(inner_filter) = &filter.kind else {
             return Err(EthFilterError::FilterNotFound(id))
         };
-        let logs = self.logs_for_filter(*inner_filter.clone(), self.inner.query_limits()).await?;
+        let logs = self
+            .inner
+            .clone()
+            .logs_for_filter(*inner_filter.clone(), self.inner.query_limits(), true)
+            .await?;
         commit_log_poll(move || *filter.last_poll_timestamp.lock() = Instant::now());
         Ok(logs)
     }
@@ -371,7 +385,7 @@ where
         filter: Filter,
         limits: QueryLimits,
     ) -> Result<Vec<RpcLog<Eth::NetworkTypes>>, EthFilterError> {
-        self.inner.clone().logs_for_filter(filter, limits).await
+        self.inner.clone().logs_for_filter(filter, limits, false).await
     }
 
     /// Builds RPC handlers that reserve the actual JSON-RPC envelope and request ID before
@@ -446,6 +460,10 @@ where
     /// Handler for `eth_newFilter`
     async fn new_filter(&self, filter: Filter) -> RpcResult<FilterId> {
         trace!(target: "rpc::eth", "Serving eth_newFilter");
+        filter
+            .block_option
+            .ensure_valid_block_range()
+            .map_err(|_| EthFilterError::InvalidBlockRangeParams)?;
         self.inner
             .install_filter(FilterKind::<RpcTransaction<Eth::NetworkTypes>>::Log(Box::new(filter)))
             .await
@@ -575,10 +593,12 @@ where
     }
 
     /// Returns logs matching given filter object.
+    /// Installed filters may wait for future blocks; stateless queries require an existing range.
     async fn logs_for_filter(
         self: Arc<Self>,
         filter: Filter,
         limits: QueryLimits,
+        installed: bool,
     ) -> Result<Vec<RpcLog<Eth::NetworkTypes>>, EthFilterError> {
         match filter.block_option {
             FilterBlockOption::AtBlockHash(block_hash) => {
@@ -691,7 +711,7 @@ where
                     }
                 }
 
-                let (from_block_number, to_block_number) = self
+                let range = self
                     .clone()
                     .run_blocking_io(move |this| {
                         let info = this.provider().chain_info()?;
@@ -703,11 +723,20 @@ where
                             .map(|num| this.provider().convert_block_number(num))
                             .transpose()?
                             .flatten();
-                        let to = to_block
+                        let mut to = to_block
                             .filter(|num| !num.is_pending())
                             .map(|num| this.provider().convert_block_number(num))
                             .transpose()?
                             .flatten();
+
+                        if installed {
+                            // An installed filter waits for future blocks and can be polled after
+                            // its range finishes. Stateless eth_getLogs remains strict.
+                            to = to.map(|to| to.min(info.best_number));
+                            if from.unwrap_or(start_block) > to.unwrap_or(info.best_number) {
+                                return Ok(None)
+                            }
+                        }
 
                         // Return error if toBlock exceeds current head
                         if let Some(t) = to &&
@@ -732,9 +761,13 @@ where
                             .into());
                         }
 
-                        Ok((from_block_number, to_block_number))
+                        Ok(Some((from_block_number, to_block_number)))
                     })
                     .await?;
+
+                let Some((from_block_number, to_block_number)) = range else {
+                    return Ok(Vec::new())
+                };
 
                 self.get_logs_in_block_range(filter, from_block_number, to_block_number, limits)
                     .await
@@ -747,7 +780,14 @@ where
         &self,
         kind: FilterKind<RpcTransaction<Eth::NetworkTypes>>,
     ) -> RpcResult<FilterId> {
-        let last_poll_block_number = self.provider().best_block_number().to_rpc_result()?;
+        let last_poll_block_number = if let FilterKind::Log(filter) = &kind &&
+            let Some(from) = filter.block_option.get_from_block() &&
+            let Some(from) = self.provider().convert_block_number(*from).to_rpc_result()?
+        {
+            from
+        } else {
+            self.provider().best_block_number().to_rpc_result()?
+        };
         let subscription_id = self.id_provider.next_id();
 
         let id = match subscription_id {
@@ -1722,7 +1762,8 @@ mod tests {
             super::EthFilter::new(eth_api, EthFilterConfig::default(), Runtime::test());
 
         let filter = Filter::new().from_block(100u64).to_block(BlockNumberOrTag::Latest);
-        let result = eth_filter.inner.clone().logs_for_filter(filter, QueryLimits::default()).await;
+        let result =
+            eth_filter.inner.clone().logs_for_filter(filter, QueryLimits::default(), false).await;
         assert!(matches!(result, Err(EthFilterError::InvalidBlockRangeParams)), "{result:?}");
     }
 
@@ -2513,7 +2554,7 @@ mod tests {
             let logs = eth_filter
                 .inner
                 .clone()
-                .logs_for_filter(filter, QueryLimits::default())
+                .logs_for_filter(filter, QueryLimits::default(), false)
                 .await
                 .unwrap();
             assert!(logs.is_empty());
@@ -2552,7 +2593,11 @@ mod tests {
         let err = eth_filter
             .inner
             .clone()
-            .logs_for_filter(Filter::new().from_block(0u64).to_block(2u64), QueryLimits::default())
+            .logs_for_filter(
+                Filter::new().from_block(0u64).to_block(2u64),
+                QueryLimits::default(),
+                false,
+            )
             .await
             .unwrap_err();
         assert!(matches!(err, EthFilterError::ReceiptsUnavailable(1)), "{err:?}");
@@ -2561,7 +2606,11 @@ mod tests {
         let logs = eth_filter
             .inner
             .clone()
-            .logs_for_filter(Filter::new().from_block(2u64).to_block(2u64), QueryLimits::default())
+            .logs_for_filter(
+                Filter::new().from_block(2u64).to_block(2u64),
+                QueryLimits::default(),
+                false,
+            )
             .await
             .unwrap();
         assert!(logs.is_empty());
@@ -3353,5 +3402,70 @@ mod tests {
                 );
             }
         });
+    }
+
+    #[tokio::test]
+    async fn future_bound_filters_remain_pollable() {
+        let provider = MockEthProvider::default();
+        let (header, receipts) = add_block_with_logs(&provider);
+        let mut block = provider.blocks.lock().get(&header.hash()).unwrap().clone();
+        let filter = EthFilter::new(
+            build_test_eth_api(provider.clone()),
+            EthFilterConfig::default(),
+            Runtime::test(),
+        );
+        let invalid =
+            filter.new_filter(Filter::new().from_block(9u64).to_block(8u64)).await.unwrap_err();
+        assert_eq!(
+            invalid,
+            jsonrpsee_types::ErrorObject::from(EthFilterError::InvalidBlockRangeParams)
+        );
+        let err = filter
+            .logs_for_filter(Filter::new().from_block(7u64).to_block(9u64), QueryLimits::default())
+            .await
+            .unwrap_err();
+        assert!(matches!(err, EthFilterError::BlockRangeExceedsHead { requested: 9, head: 7 }));
+        let mut installed = Vec::new();
+        for (from, to) in [(6u64, Some(9u64)), (8, Some(9)), (8, Some(8)), (8, None)] {
+            let mut query = Filter::new().from_block(from);
+            if let Some(to) = to {
+                query = query.to_block(to);
+            }
+            let id = filter.new_filter(query).await.unwrap();
+            let active = filter.inner.active_filters.inner.lock().await.get(&id).unwrap().clone();
+            installed.push((id, active, from, to));
+        }
+        for head in 7..=10 {
+            if head > 7 {
+                block.header.parent_hash = block.hash_slow();
+                block.header.number = head;
+                provider.add_block(block.hash_slow(), block.clone());
+                provider.add_receipts(head, receipts.clone());
+            }
+            for (id, active, from, to) in &installed {
+                for changes_only in [true, false] {
+                    *active.last_poll_timestamp.lock() =
+                        Instant::now() - filter.inner.stale_filter_ttl;
+                    let logs = if changes_only {
+                        match filter.filter_changes(id.clone()).await.unwrap() {
+                            FilterChanges::Logs(logs) => logs,
+                            FilterChanges::Empty => Vec::new(),
+                            changes => panic!("unexpected changes: {changes:?}"),
+                        }
+                    } else {
+                        filter.filter_logs(id.clone()).await.unwrap()
+                    };
+                    let start = if changes_only { head.max(*from) } else { 7.max(*from) };
+                    let end = to.unwrap_or(head).min(head);
+                    assert_eq!(
+                        logs.iter().map(|log| log.block_number.unwrap()).collect::<Vec<_>>(),
+                        (start..=end).flat_map(|number| [number; 5]).collect::<Vec<_>>()
+                    );
+                    assert_eq!(active.block.load(Ordering::Relaxed), (*from).max(end + 1));
+                    filter.clear_stale_filters(Instant::now()).await;
+                    assert!(filter.active_filters().contains(id).await);
+                }
+            }
+        }
     }
 }
