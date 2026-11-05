@@ -1401,9 +1401,12 @@ impl<
                 return Ok(Some(result));
             }
 
-            // Try to get a completed task result if there are pending tasks
-            if let Some(task_result) = self.pending_tasks.next().await {
+            // Drain this bounded group before returning receipts. Unpolled semaphore waiters can
+            // otherwise reserve every permit while log conversion waits to acquire one.
+            while let Some(task_result) = self.pending_tasks.next().await {
                 self.next.extend(task_result?);
+            }
+            if !self.next.is_empty() {
                 continue;
             }
 
@@ -3303,5 +3306,52 @@ mod tests {
             }
         }
         assert_eq!(filter.filter_changes(id).await.unwrap(), FilterChanges::Empty);
+    }
+
+    #[test]
+    fn parallel_receipt_fetches_release_waiting_permits() {
+        let runtime = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(1)
+            .max_blocking_threads(1)
+            .enable_all()
+            .build()
+            .unwrap();
+        runtime.block_on(async {
+            let provider = MockEthProvider::default();
+            let (header, receipts) = add_block_with_logs(&provider);
+            let mut block = provider.blocks.lock().get(&header.hash()).unwrap().clone();
+            let end = 7 + PARALLEL_PROCESSING_THRESHOLD as u64 - 1;
+            for number in 8..=end {
+                block.header.parent_hash = block.hash_slow();
+                block.header.number = number;
+                provider.add_block(block.hash_slow(), block.clone());
+                provider.add_receipts(number, receipts.clone());
+            }
+            for permits in 1..=DEFAULT_PARALLEL_CONCURRENCY {
+                let eth_api = EthApiBuilder::new(
+                    provider.clone(),
+                    testing_pool(),
+                    NoopNetwork::default(),
+                    EthEvmConfig::new(provider.chain_spec()),
+                )
+                .max_blocking_io_requests(permits)
+                .build();
+                let filter = EthFilter::new(eth_api, EthFilterConfig::default(), Runtime::test());
+                let logs = tokio::time::timeout(
+                    Duration::from_secs(5),
+                    filter.logs_for_filter(
+                        Filter::new().from_block(7u64).to_block(end),
+                        QueryLimits::default(),
+                    ),
+                )
+                .await
+                .expect("receipt fetches must not pin permits while conversion waits")
+                .unwrap();
+                assert_eq!(
+                    logs.iter().map(|log| log.block_number.unwrap()).collect::<Vec<_>>(),
+                    (7..=end).flat_map(|number| [number; 5]).collect::<Vec<_>>()
+                );
+            }
+        });
     }
 }
