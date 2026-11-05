@@ -398,7 +398,7 @@ where
         // Experiment: probe cold reads before speculating transactions.
         let probe_cold_reads = prewarm_results.is_some() &&
             saved_cache.is_some() &&
-            std::env::var_os("RETH_NP_PROBE").is_some();
+            std::env::var_os("RETH_NP_NO_PROBE").is_none();
         let executed_tx_index = Arc::new(AtomicUsize::new(0));
         // configure prewarming
         let prewarm_ctx = PrewarmContext {
