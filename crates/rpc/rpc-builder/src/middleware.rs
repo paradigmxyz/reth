@@ -1,6 +1,14 @@
-use jsonrpsee::server::{
-    middleware::rpc::RpcService, HttpRequest, HttpResponse, TowerServiceNoHttp,
+use jsonrpsee::{
+    core::middleware::{Batch, BatchEntry, Notification},
+    server::{
+        middleware::rpc::{RpcService, RpcServiceT},
+        HttpRequest, HttpResponse, TowerServiceNoHttp,
+    },
+    types::Request,
+    MethodResponse,
 };
+use reth_rpc_server_types::BatchResponseCommit;
+use std::future::Future;
 use tower::{
     layer::util::{Identity, Stack},
     Layer,
@@ -75,4 +83,56 @@ impl<T, RM> RethAuthHttpMiddleware<RM> for T where
         + Send
         + 'static
 {
+}
+
+/// Defers participating handlers' state updates until the complete batch response fits.
+#[derive(Clone, Debug)]
+pub(crate) struct RpcBatchResponseService<S> {
+    inner: S,
+}
+
+impl<S> RpcBatchResponseService<S> {
+    pub(crate) const fn new(inner: S) -> Self {
+        Self { inner }
+    }
+}
+
+impl<S> RpcServiceT for RpcBatchResponseService<S>
+where
+    S: RpcServiceT<BatchResponse = MethodResponse> + Send + Sync + Clone + 'static,
+{
+    type MethodResponse = S::MethodResponse;
+    type BatchResponse = MethodResponse;
+    type NotificationResponse = S::NotificationResponse;
+
+    fn call<'a>(&self, req: Request<'a>) -> impl Future<Output = Self::MethodResponse> + Send + 'a {
+        self.inner.call(req)
+    }
+
+    fn batch<'a>(
+        &self,
+        mut batch: Batch<'a>,
+    ) -> impl Future<Output = Self::BatchResponse> + Send + 'a {
+        let commit = BatchResponseCommit::default();
+        for entry in batch.iter_mut().flatten() {
+            if let BatchEntry::Call(request) = entry {
+                request.extensions_mut().insert(commit.clone());
+            }
+        }
+        let response = self.inner.batch(batch);
+        async move {
+            let response = response.await;
+            if response.is_batch() {
+                commit.commit();
+            }
+            response
+        }
+    }
+
+    fn notification<'a>(
+        &self,
+        notification: Notification<'a>,
+    ) -> impl Future<Output = Self::NotificationResponse> + Send + 'a {
+        self.inner.notification(notification)
+    }
 }

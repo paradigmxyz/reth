@@ -11,6 +11,7 @@ use jsonrpsee::{
     },
     BatchResponseBuilder, MethodResponse,
 };
+use reth_rpc_server_types::BatchResponseCommit;
 use std::{future::Future, panic::AssertUnwindSafe, sync::Arc};
 use tokio::sync::OwnedSemaphorePermit;
 use tokio_util::either::Either;
@@ -40,11 +41,13 @@ where
     if let Ok(batch) = serde_json::from_slice::<Vec<&JsonRawValue>>(&data) {
         let mut got_notif = false;
         let mut batch_response = BatchResponseBuilder::new_with_limit(max_response_body_size);
+        let commit = BatchResponseCommit::default();
 
         let mut pending_calls: FuturesOrdered<_> = batch
             .into_iter()
             .filter_map(|v| {
-                if let Ok(req) = serde_json::from_str::<Request<'_>>(v.get()) {
+                if let Ok(mut req) = serde_json::from_str::<Request<'_>>(v.get()) {
+                    req.extensions_mut().insert(commit.clone());
                     Some(Either::Right(catch_call_panic(req.id(), rpc_service.call(req))))
                 } else if let Ok(_notif) = serde_json::from_str::<Notif<'_>>(v.get()) {
                     // notifications should not be answered.
@@ -74,6 +77,7 @@ where
             None
         } else {
             let batch_resp = batch_response.finish();
+            commit.commit();
             Some(raw_response_into_string(MethodResponse::from_batch(batch_resp).into_json()))
         }
     } else {

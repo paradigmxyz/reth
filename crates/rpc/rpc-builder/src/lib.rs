@@ -19,7 +19,10 @@
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
-use crate::{auth::AuthRpcModule, error::WsHttpSamePortError, metrics::RpcRequestMetrics};
+use crate::{
+    auth::AuthRpcModule, error::WsHttpSamePortError, metrics::RpcRequestMetrics,
+    middleware::RpcBatchResponseService,
+};
 use alloy_network::{Ethereum, IntoWallet};
 use alloy_provider::{fillers::RecommendedFillers, Provider, ProviderBuilder};
 use core::marker::PhantomData;
@@ -1497,6 +1500,7 @@ impl<RpcMiddleware> RpcServerConfig<RpcMiddleware> {
                                     })
                                     .flatten(),
                             )
+                            .layer_fn(RpcBatchResponseService::new)
                             .layer(self.rpc_middleware.clone()),
                     )
                     .set_config(config.build())
@@ -1547,6 +1551,7 @@ impl<RpcMiddleware> RpcServerConfig<RpcMiddleware> {
                                 .then(|| modules.ws.as_ref().map(RpcRequestMetrics::ws))
                                 .flatten(),
                         )
+                        .layer_fn(RpcBatchResponseService::new)
                         .layer(self.rpc_middleware.clone()),
                 )
                 .build(ws_socket_addr)
@@ -1585,6 +1590,7 @@ impl<RpcMiddleware> RpcServerConfig<RpcMiddleware> {
                                 .then(|| modules.http.as_ref().map(RpcRequestMetrics::http))
                                 .flatten(),
                         )
+                        .layer_fn(RpcBatchResponseService::new)
                         .layer(self.rpc_middleware.clone()),
                 )
                 .build(http_socket_addr)

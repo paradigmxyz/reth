@@ -12,6 +12,8 @@ description = "IPC support for reth"
 workspace = true
 
 [dependencies]
+reth-rpc-server-types.workspace = true
+
 # async/net
 futures.workspace = true
 tokio = { workspace = true, features = ["net", "time", "rt-multi-thread"] }
