@@ -147,9 +147,16 @@ much more than the local replays, whose page cache stays warm: main takes 29 ms 
 | Sparse trie applies streamed updates every 16 messages (paradigmxyz/reth#28297) | +1.2% | -1.3% |
 | Global rayon pool halved | -0.2% | +1.5% |
 | Storage trie jobs on a pool that blocks instead of rayon's spinning workers | +0.1% | -1.0% |
+| Sparse trie never pruned (`--engine.disable-sparse-trie-cache-pruning`) | +0.0% | -0.7% |
 
 With the rayon and proof pools below execution priority, their spinning no longer costs
 execution time.
+
+What did help there is the probe of cold reads that made no difference locally: speculation
+workers execute each arriving transaction against the execution cache alone, record what it
+misses, and the read-set pool's I/O threads load those keys, so a block's cold reads are loaded in
+parallel instead of one dependent read at a time. Against the branch without it: mean -5.1%, p90
+-11.0%, p99 -13.0%, p50 unchanged. It is on with reuse.
 
 The root after the last transaction (local p50): the hashing task has seen every update after
 0.29 ms, most of which is the post-execution changes, the sparse trie after 0.46 ms, and the root
