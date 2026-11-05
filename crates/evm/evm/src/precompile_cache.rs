@@ -1,7 +1,7 @@
 //! Precompile cache for payload prewarming.
 
 use alloy_primitives::{
-    map::{AddressMap, AddressSet, DefaultHashBuilder, FbBuildHasher},
+    map::{AddressMap, AddressSet, DefaultHashBuilder, FbBuildHasher, HashMap},
     Address, Bytes,
 };
 use evm2::{
@@ -9,15 +9,18 @@ use evm2::{
     interpreter::{GasTracker, Message},
     Evm, EvmTypesHost, PrecompileError,
 };
-use moka::policy::EvictionPolicy;
 #[cfg(feature = "metrics")]
 use reth_metrics::Metrics;
 use reth_primitives_traits::dashmap::DashMap;
-use std::{fmt, hash::Hash, sync::Arc};
+use std::{
+    fmt,
+    hash::Hash,
+    sync::{Arc, Mutex, OnceLock},
+};
 use tracing::error;
 
-/// Default max cache size for [`PrecompileCache`].
-const MAX_CACHE_SIZE: u32 = 1024 * 1024;
+/// Number of entries of each precompile's [`PrecompileCache`].
+const CACHE_ENTRIES: usize = 1 << 13;
 
 /// Maximum input retained by a precompile cache.
 const MAX_PRECOMPILE_CACHE_INPUT_SIZE: usize = 2 * 1024;
@@ -58,10 +61,29 @@ where
 }
 
 /// Cache for one precompile's inputs and outputs.
+///
+/// Lookups are a probe of a fixed-size table, where a new entry replaces the one it collides
+/// with. An input whose output is being computed is in [`Self::in_flight`], so that a call with
+/// the same input waits for that output instead of computing it again: block execution often
+/// executes a transaction while a prewarm worker is still executing it, and the expensive
+/// precompile calls of both would otherwise overlap.
 struct PrecompileCache<S> {
-    cache: moka::sync::Cache<Bytes, CacheEntry<S>, DefaultHashBuilder>,
+    table: fixed_cache::Cache<Bytes, CacheEntry<S>, DefaultHashBuilder, PrecompileCacheConfig>,
+    /// Outputs being computed by input.
+    in_flight: Mutex<HashMap<Bytes, PendingOutput<S>>>,
     #[cfg(feature = "metrics")]
     metrics: std::sync::OnceLock<CachedPrecompileMetrics>,
+}
+
+/// The output of a computation calls with the same input wait for, `None` once the computation
+/// failed or was not cacheable.
+type PendingOutput<S> = Arc<OnceLock<Option<CacheEntry<S>>>>;
+
+/// Configuration of [`PrecompileCache::table`].
+struct PrecompileCacheConfig;
+
+impl fixed_cache::CacheConfig for PrecompileCacheConfig {
+    const STATS: bool = false;
 }
 
 impl<S> fmt::Debug for PrecompileCache<S> {
@@ -76,12 +98,8 @@ where
 {
     fn default() -> Self {
         Self {
-            cache: moka::sync::CacheBuilder::new(MAX_CACHE_SIZE as u64)
-                .eviction_policy(EvictionPolicy::lru())
-                .weigher(|key: &Bytes, value: &CacheEntry<S>| {
-                    (key.len() + value.output.bytes().len()) as u32
-                })
-                .build_with_hasher(Default::default()),
+            table: fixed_cache::Cache::new(CACHE_ENTRIES, Default::default()),
+            in_flight: Default::default(),
             #[cfg(feature = "metrics")]
             metrics: Default::default(),
         }
@@ -93,12 +111,69 @@ where
     S: Eq + Hash + std::fmt::Debug + Send + Sync + Clone + 'static,
 {
     fn get(&self, input: &[u8], spec: S) -> Option<CacheEntry<S>> {
-        self.cache.get(input).filter(|entry| entry.spec == spec)
+        self.table.get(input).filter(|entry| entry.spec == spec)
     }
 
-    fn insert(&self, input: Bytes, value: CacheEntry<S>) -> usize {
-        self.cache.insert(input, value);
-        self.cache.entry_count() as usize
+    /// Returns the cached output for `input`, waiting for it if another call is computing it, or
+    /// else a guard for this call to compute it.
+    fn get_or_claim(&self, input: &[u8], spec: S) -> Result<CacheEntry<S>, InFlight<'_, S>> {
+        if let Some(entry) = self.get(input, spec.clone()) {
+            return Ok(entry)
+        }
+        let mut in_flight = self.in_flight.lock().unwrap_or_else(|err| err.into_inner());
+        if let Some(output) = in_flight.get(input).cloned() {
+            drop(in_flight);
+            return match output.wait() {
+                Some(entry) if entry.spec == spec => Ok(entry.clone()),
+                _ => Err(InFlight { cache: self, claimed: None }),
+            }
+        }
+        // The output may have been inserted since the lookup above.
+        if let Some(entry) = self.get(input, spec) {
+            return Ok(entry)
+        }
+        let input = Bytes::copy_from_slice(input);
+        let output = Arc::new(OnceLock::new());
+        in_flight.insert(input.clone(), Arc::clone(&output));
+        Err(InFlight { cache: self, claimed: Some((input, output)) })
+    }
+}
+
+/// A precompile output this call computes, or computes for itself because another call failed.
+///
+/// Dropping it without [`Self::complete`] wakes the calls waiting for the output, which then
+/// compute it themselves.
+struct InFlight<'a, S> {
+    cache: &'a PrecompileCache<S>,
+    /// The claimed input and the output calls with the same input wait for.
+    claimed: Option<(Bytes, PendingOutput<S>)>,
+}
+
+impl<S> InFlight<'_, S> {
+    /// Caches `entry` as the output of the claimed input and hands it to the waiting calls.
+    fn complete(mut self, entry: CacheEntry<S>)
+    where
+        S: Clone,
+    {
+        if let Some((input, output)) = self.claimed.take() {
+            self.cache.table.insert(input.clone(), entry.clone());
+            let _ = output.set(Some(entry));
+            self.release(&input);
+        }
+    }
+
+    /// Removes the claimed input from the inputs being computed.
+    fn release(&self, input: &Bytes) {
+        self.cache.in_flight.lock().unwrap_or_else(|err| err.into_inner()).remove(input);
+    }
+}
+
+impl<S> Drop for InFlight<'_, S> {
+    fn drop(&mut self) {
+        if let Some((input, output)) = self.claimed.take() {
+            let _ = output.set(None);
+            self.release(&input);
+        }
     }
 }
 
@@ -225,35 +300,44 @@ where
         });
 
         let cacheable_input = message.input.len() <= MAX_PRECOMPILE_CACHE_INPUT_SIZE;
-        if cacheable_input &&
-            let Some(entry) = cache.get(evm.message_input(message), self.spec_id.clone())
-        {
-            return Some(match gas.spend(entry.regular_gas_used).map_err(PrecompileError::from) {
-                Ok(()) => {
-                    #[cfg(feature = "metrics")]
-                    if let Some(metrics) = metrics {
-                        metrics.precompile_cache_hits.increment(1);
-                    }
-                    Ok(entry.output)
-                }
-                Err(err) => {
-                    #[cfg(feature = "metrics")]
-                    if let Some(metrics) = metrics {
-                        metrics.precompile_errors.increment(1);
-                    }
-                    Err(err)
-                }
-            })
-        }
+        let claimed = if cacheable_input {
+            match cache.get_or_claim(evm.message_input(message), self.spec_id.clone()) {
+                Ok(entry) => Err(entry),
+                Err(in_flight) => Ok(Some(in_flight)),
+            }
+        } else {
+            Ok(None)
+        };
+        let in_flight = match claimed {
+            Ok(in_flight) => in_flight,
+            Err(entry) => {
+                return Some(
+                    match gas.spend(entry.regular_gas_used).map_err(PrecompileError::from) {
+                        Ok(()) => {
+                            #[cfg(feature = "metrics")]
+                            if let Some(metrics) = metrics {
+                                metrics.precompile_cache_hits.increment(1);
+                            }
+                            Ok(entry.output)
+                        }
+                        Err(err) => {
+                            #[cfg(feature = "metrics")]
+                            if let Some(metrics) = metrics {
+                                metrics.precompile_errors.increment(1);
+                            }
+                            Err(err)
+                        }
+                    },
+                )
+            }
+        };
 
-        // Copy the input before running the precompile: it may be a range of the caller's memory.
-        let input = cacheable_input.then(|| Bytes::copy_from_slice(evm.message_input(message)));
         let before = GasSnapshot::new(gas);
         let result = self.inner.execute(evm, message, gas)?;
         let after = GasSnapshot::new(gas);
 
         match &result {
-            Ok(output) if let Some(input) = input => {
+            Ok(output) if cacheable_input => {
                 if before.reservoir != after.reservoir {
                     error!(
                         target: "evm::precompile_cache",
@@ -273,17 +357,15 @@ where
                         "cacheable precompile changed refund gas, skipping cache insertion"
                     );
                 } else if let Some(regular_gas_used) = after.spent.checked_sub(before.spent) {
-                    let _size = cache.insert(
-                        input,
-                        CacheEntry {
+                    if let Some(in_flight) = in_flight {
+                        in_flight.complete(CacheEntry {
                             output: output.clone(),
                             regular_gas_used,
                             spec: self.spec_id.clone(),
-                        },
-                    );
+                        });
+                    }
                     #[cfg(feature = "metrics")]
                     if let Some(metrics) = metrics {
-                        metrics.precompile_cache_size.set(_size as f64);
                         metrics.precompile_cache_misses.increment(1);
                     }
                 } else {
@@ -363,9 +445,6 @@ pub struct CachedPrecompileMetrics {
     /// Precompile cache misses.
     pub precompile_cache_misses: metrics::Counter,
 
-    /// Precompile cache size. Uses the LRU cache length as the size metric.
-    pub precompile_cache_size: metrics::Gauge,
-
     /// Precompile execution errors.
     pub precompile_errors: metrics::Counter,
 }
@@ -389,6 +468,55 @@ mod tests {
         registry::TxRegistry,
         BaseEvmTypes, SpecId,
     };
+
+    fn entry(output: &'static [u8]) -> CacheEntry<SpecId> {
+        CacheEntry {
+            output: PrecompileOutput::new(Bytes::from_static(output)),
+            regular_gas_used: 1,
+            spec: SpecId::OSAKA,
+        }
+    }
+
+    #[test]
+    fn concurrent_calls_wait_for_the_output_being_computed() {
+        let cache = PrecompileCache::<SpecId>::default();
+        let Err(computing) = cache.get_or_claim(b"input", SpecId::OSAKA) else {
+            panic!("nothing is cached yet")
+        };
+        let output = Arc::clone(&computing.claimed.as_ref().unwrap().1);
+        std::thread::scope(|scope| {
+            let waiter = scope.spawn(|| cache.get_or_claim(b"input", SpecId::OSAKA).ok());
+            // The in-flight map, the computing call and the waiter hold the output.
+            while Arc::strong_count(&output) < 4 {
+                std::thread::yield_now();
+            }
+            computing.complete(entry(b"output"));
+            assert_eq!(waiter.join().unwrap().unwrap().output.bytes(), b"output");
+        });
+        assert!(cache.in_flight.lock().unwrap().is_empty());
+        assert_eq!(cache.get(b"input", SpecId::OSAKA).unwrap().output.bytes(), b"output");
+    }
+
+    #[test]
+    fn calls_compute_the_output_themselves_after_a_failed_computation() {
+        let cache = PrecompileCache::<SpecId>::default();
+        let Err(computing) = cache.get_or_claim(b"input", SpecId::OSAKA) else {
+            panic!("nothing is cached yet")
+        };
+        let output = Arc::clone(&computing.claimed.as_ref().unwrap().1);
+        std::thread::scope(|scope| {
+            let waiter = scope.spawn(|| cache.get_or_claim(b"input", SpecId::OSAKA).err());
+            while Arc::strong_count(&output) < 4 {
+                std::thread::yield_now();
+            }
+            drop(computing);
+            let retry = waiter.join().unwrap().expect("the failed computation cached nothing");
+            assert!(retry.claimed.is_none());
+        });
+        assert!(cache.in_flight.lock().unwrap().is_empty());
+        // The next call claims the input again.
+        assert!(cache.get_or_claim(b"input", SpecId::OSAKA).is_err_and(|c| c.claimed.is_some()));
+    }
 
     #[test]
     fn cached_precompile_metadata_matches_inner() {
@@ -450,7 +578,7 @@ mod tests {
         let destination = Address::with_last_byte(2);
         let input = Bytes::from_static(b"input");
         let shared = PrecompileCacheMap::default();
-        shared.cache_for_address(destination).insert(
+        shared.cache_for_address(destination).table.insert(
             input.clone(),
             CacheEntry {
                 output: PrecompileOutput::new(Bytes::from_static(b"old implementation")),
