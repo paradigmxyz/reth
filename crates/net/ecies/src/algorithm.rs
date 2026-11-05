@@ -15,11 +15,11 @@ use alloy_rlp::{Encodable, Rlp, RlpEncodable, RlpMaxEncodedLen};
 use byteorder::{BigEndian, ByteOrder, ReadBytesExt};
 use ctr::Ctr64BE;
 use digest::crypto_common::KeyIvInit;
-use rand_08::{thread_rng as rng, Rng};
+use rand::{rng, Rng};
 use reth_network_peers::{id2pk, pk2id};
 use secp256k1::{
     ecdsa::{RecoverableSignature, RecoveryId},
-    PublicKey, SecretKey, SECP256K1,
+    PublicKey, SecretKey,
 };
 use sha2::Sha256;
 
@@ -281,9 +281,9 @@ impl ECIES {
         nonce: B256,
         ephemeral_secret_key: SecretKey,
     ) -> Result<Self, ECIESError> {
-        let public_key = PublicKey::from_secret_key(SECP256K1, &secret_key);
+        let public_key = PublicKey::from_secret_key(&secret_key);
         let remote_public_key = id2pk(remote_id)?;
-        let ephemeral_public_key = PublicKey::from_secret_key(SECP256K1, &ephemeral_secret_key);
+        let ephemeral_public_key = PublicKey::from_secret_key(&ephemeral_secret_key);
 
         Ok(Self {
             secret_key,
@@ -324,8 +324,8 @@ impl ECIES {
         nonce: B256,
         ephemeral_secret_key: SecretKey,
     ) -> Result<Self, ECIESError> {
-        let public_key = PublicKey::from_secret_key(SECP256K1, &secret_key);
-        let ephemeral_public_key = PublicKey::from_secret_key(SECP256K1, &ephemeral_secret_key);
+        let public_key = PublicKey::from_secret_key(&secret_key);
+        let ephemeral_public_key = PublicKey::from_secret_key(&ephemeral_secret_key);
 
         Ok(Self {
             secret_key,
@@ -370,9 +370,7 @@ impl ECIES {
         out.reserve(secp256k1::constants::UNCOMPRESSED_PUBLIC_KEY_SIZE + 16 + data.len() + 32);
 
         let secret_key = SecretKey::new(&mut rng);
-        out.extend_from_slice(
-            &PublicKey::from_secret_key(SECP256K1, &secret_key).serialize_uncompressed(),
-        );
+        out.extend_from_slice(&PublicKey::from_secret_key(&secret_key).serialize_uncompressed());
 
         let x = ecdh_x(&self.remote_public_key.unwrap(), &secret_key);
         let mut key = [0u8; 32];
@@ -411,16 +409,15 @@ impl ECIES {
     fn create_auth_unencrypted(&self) -> BytesMut {
         let x = ecdh_x(&self.remote_public_key.unwrap(), &self.secret_key);
         let msg = x ^ self.nonce;
-        let (rec_id, sig) = SECP256K1
-            .sign_ecdsa_recoverable(
-                &secp256k1::Message::from_digest(msg.0),
-                &self.ephemeral_secret_key,
-            )
-            .serialize_compact();
+        let (rec_id, sig) = RecoverableSignature::sign_ecdsa_recoverable(
+            secp256k1::Message::from_digest(msg.0),
+            &self.ephemeral_secret_key,
+        )
+        .serialize_compact();
 
         let mut sig_bytes = [0u8; 65];
         sig_bytes[..64].copy_from_slice(&sig);
-        sig_bytes[64] = i32::from(rec_id) as u8;
+        sig_bytes[64] = rec_id.to_u8();
 
         let id = pk2id(&self.public_key);
 
@@ -441,7 +438,7 @@ impl ECIES {
         }
         .encode(&mut out);
 
-        out.resize(out.len() + rng().gen_range(100..=300), 0);
+        out.resize(out.len() + rng().random_range(100..=300), 0);
         out
     }
 
@@ -486,10 +483,10 @@ impl ECIES {
         self.remote_nonce = Some(data.get_next()?.ok_or(ECIESErrorImpl::InvalidAuthData)?);
 
         let x = ecdh_x(&self.remote_public_key.unwrap(), &self.secret_key);
-        self.remote_ephemeral_public_key = Some(SECP256K1.recover_ecdsa(
-            &secp256k1::Message::from_digest((x ^ self.remote_nonce.unwrap()).0),
-            &signature,
-        )?);
+        self.remote_ephemeral_public_key =
+            Some(signature.recover_ecdsa(secp256k1::Message::from_digest(
+                (x ^ self.remote_nonce.unwrap()).0,
+            ))?);
         self.ephemeral_shared_secret =
             Some(ecdh_x(&self.remote_ephemeral_public_key.unwrap(), &self.ephemeral_secret_key));
 
@@ -745,7 +742,7 @@ mod tests {
 
     #[test]
     fn ecdh() {
-        let our_secret_key = SecretKey::from_slice(&hex!(
+        let our_secret_key = SecretKey::from_secret_bytes(hex!(
             "202a36e24c3eb39513335ec99a7619bad0e7dc68d69401b016253c7d26dc92f8"
         ))
         .unwrap();
@@ -761,7 +758,7 @@ mod tests {
     fn communicate() {
         let mut rng = rng();
         let server_secret_key = SecretKey::new(&mut rng);
-        let server_public_key = PublicKey::from_secret_key(SECP256K1, &server_secret_key);
+        let server_public_key = PublicKey::from_secret_key(&server_secret_key);
         let client_secret_key = SecretKey::new(&mut rng);
 
         let mut server_ecies = ECIES::new_server(server_secret_key).unwrap();
@@ -830,19 +827,19 @@ mod tests {
     }
 
     fn eip8_test_server_key() -> SecretKey {
-        SecretKey::from_slice(&hex!(
+        SecretKey::from_secret_bytes(hex!(
             "b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291"
         ))
         .unwrap()
     }
 
     fn eip8_test_client() -> ECIES {
-        let client_static_key = SecretKey::from_slice(&hex!(
+        let client_static_key = SecretKey::from_secret_bytes(hex!(
             "49a7b37aa6f6645917e7b807e9d1c00d4fa71f18343b0d4122a4d2df64dd6fee"
         ))
         .unwrap();
 
-        let client_ephemeral_key = SecretKey::from_slice(&hex!(
+        let client_ephemeral_key = SecretKey::from_secret_bytes(hex!(
             "869d6ecf5211f1cc60418a13b9d870b22959d0c16f02bec714c960dd2298a32d"
         ))
         .unwrap();
@@ -850,14 +847,14 @@ mod tests {
         let client_nonce =
             b256!("0x7e968bba13b6c50e2c4cd7f241cc0d64d1ac25c7f5952df231ac6a2bda8ee5d6");
 
-        let server_id = pk2id(&PublicKey::from_secret_key(SECP256K1, &eip8_test_server_key()));
+        let server_id = pk2id(&PublicKey::from_secret_key(&eip8_test_server_key()));
 
         ECIES::new_static_client(client_static_key, server_id, client_nonce, client_ephemeral_key)
             .unwrap()
     }
 
     fn eip8_test_server() -> ECIES {
-        let server_ephemeral_key = SecretKey::from_slice(&hex!(
+        let server_ephemeral_key = SecretKey::from_secret_bytes(hex!(
             "e238eb8e04fee6511ab04c6dd3c89ce097b11f25d584863ac2b6d5b35b1847e4"
         ))
         .unwrap();

@@ -9,7 +9,7 @@ use alloy_transport::{RpcError, TransportErrorKind};
 pub use api::{AsEthApiError, FromEthApiError, FromEvmError, IntoEthApiError};
 use core::time::Duration;
 use evm2::{interpreter::InstrStop, registry::HandlerError};
-use evm2_inspectors::tracing::DebugInspectorError;
+use evm2_inspectors::tracing::{DebugInspectorError, MuxError};
 use reth_errors::{BlockExecutionError, BlockValidationError, ProviderError, RethError};
 use reth_primitives_traits::transaction::{error::InvalidTransactionError, signed::RecoveryError};
 use reth_rpc_convert::{CallFeesError, EthTxEnvError, TransactionConversionError};
@@ -490,6 +490,12 @@ impl From<evm2_inspectors::tracing::js::JsInspectorError> for EthApiError {
     }
 }
 
+impl From<MuxError> for EthApiError {
+    fn from(error: MuxError) -> Self {
+        Self::MuxTracerError(error.to_string())
+    }
+}
+
 impl From<DebugInspectorError> for EthApiError {
     fn from(error: DebugInspectorError) -> Self {
         match error {
@@ -498,7 +504,7 @@ impl From<DebugInspectorError> for EthApiError {
             DebugInspectorError::JsTracerNotEnabled => {
                 Self::Unsupported("JS Tracer is not enabled")
             }
-            DebugInspectorError::MuxInspector(err) => Self::MuxTracerError(err.to_string()),
+            DebugInspectorError::MuxInspector(err) => err.into(),
             DebugInspectorError::Database(err) => Self::Internal(RethError::other(err)),
             #[cfg(feature = "js-tracer")]
             DebugInspectorError::JsInspector(err) => err.into(),
@@ -541,11 +547,11 @@ impl From<BlockExecutionError> for EthApiError {
                         ))
                     }
                 }
-                BlockValidationError::Other(error) => match error.downcast::<HandlerError>() {
-                    Ok(error) => Self::InvalidTransaction((*error).into()),
-                    Err(error) => Self::Internal(RethError::Execution(
-                        BlockExecutionError::Validation(BlockValidationError::Other(error)),
-                    )),
+                BlockValidationError::Other(error) => match error.downcast_ref::<HandlerError>() {
+                    Some(error) => Self::InvalidTransaction(error.clone().into()),
+                    None => Self::Internal(RethError::Execution(BlockExecutionError::Validation(
+                        BlockValidationError::Other(error),
+                    ))),
                 },
                 _ => Self::Internal(RethError::Execution(BlockExecutionError::Validation(
                     validation_error,
@@ -1134,6 +1140,24 @@ mod tests {
     use reth_errors::ProviderError;
 
     #[test]
+    fn gas_limit_handler_errors_map_to_gas_errors() {
+        assert!(matches!(
+            RpcInvalidTransactionError::from(HandlerError::GasLimitBelowFloor {
+                required: 2,
+                got: 1
+            }),
+            RpcInvalidTransactionError::GasTooLow
+        ));
+        assert!(matches!(
+            RpcInvalidTransactionError::from(HandlerError::IntrinsicGasGreaterThanCap {
+                required: 2,
+                cap: 1
+            }),
+            RpcInvalidTransactionError::GasTooHigh
+        ));
+    }
+
+    #[test]
     fn timed_out_error() {
         let err = EthApiError::ExecutionTimedOut(Duration::from_secs(10));
         assert_eq!(err.to_string(), "execution aborted (timeout = 10s)");
@@ -1288,20 +1312,5 @@ mod tests {
         assert_eq!(err.code(), 3);
         assert_eq!(err.message(), "execution reverted");
         assert_eq!(err.data().unwrap().get(), "\"0x\"");
-    }
-
-    #[test]
-    fn handler_gas_errors_map_to_gas_too_low_or_high() {
-        // Gas estimation only retries with more gas on GasTooLow.
-        let err = HandlerError::GasLimitBelowFloor { required: 31_050, got: 21_000 };
-        assert!(matches!(
-            RpcInvalidTransactionError::from(err),
-            RpcInvalidTransactionError::GasTooLow
-        ));
-        let err = HandlerError::IntrinsicGasGreaterThanCap { required: 31_050, cap: 21_000 };
-        assert!(matches!(
-            RpcInvalidTransactionError::from(err),
-            RpcInvalidTransactionError::GasTooHigh
-        ));
     }
 }

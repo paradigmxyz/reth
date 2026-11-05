@@ -53,7 +53,9 @@ use tokio::sync::{AcquireError, OwnedSemaphorePermit};
 use tokio_stream::StreamExt;
 
 #[cfg(feature = "js-tracer")]
-use alloy_rpc_types_trace::geth::GethDebugTracerType;
+use alloy_rpc_types_trace::geth::{
+    GethDebugBuiltInTracerType, GethDebugTracerConfig, GethDebugTracerType,
+};
 #[cfg(feature = "js-tracer")]
 use evm2_inspectors::tracing::js::JsInspectorInterrupt;
 #[cfg(feature = "js-tracer")]
@@ -1509,6 +1511,22 @@ impl<B: BlockTrait> Default for BadBlockStore<B> {
 #[cfg(feature = "js-tracer")]
 const DEFAULT_JS_TRACER_TIMEOUT: Duration = Duration::from_secs(5);
 
+/// Returns whether `tracer` is a JS tracer or a mux tracer that holds one, at any depth.
+#[cfg(feature = "js-tracer")]
+fn runs_js_tracer(tracer: &GethDebugTracerType, config: &GethDebugTracerConfig) -> bool {
+    match tracer {
+        GethDebugTracerType::JsTracer(_) => true,
+        GethDebugTracerType::BuiltInTracer(GethDebugBuiltInTracerType::MuxTracer) => {
+            config.clone().into_mux_config().is_ok_and(|mux| {
+                mux.0.iter().any(|(tracer, config)| {
+                    runs_js_tracer(tracer, &config.clone().unwrap_or_default())
+                })
+            })
+        }
+        GethDebugTracerType::BuiltInTracer(_) => false,
+    }
+}
+
 /// Interrupts a JS tracer once its request is dropped or its timeout expires.
 ///
 /// Built-in tracers can't be interrupted, so for them this does nothing.
@@ -1526,7 +1544,9 @@ impl JsTraceInterrupt {
     )]
     fn new(opts: &GethDebugTracingOptions) -> Result<Self, EthApiError> {
         #[cfg(feature = "js-tracer")]
-        if let Some(GethDebugTracerType::JsTracer(_)) = &opts.tracer {
+        if let Some(tracer) = &opts.tracer &&
+            runs_js_tracer(tracer, &opts.tracer_config)
+        {
             let timeout = match &opts.timeout {
                 Some(timeout) => humantime::parse_duration(timeout).map_err(|err| {
                     EthApiError::InvalidParams(format!("invalid tracer timeout {timeout:?}: {err}"))
@@ -1538,20 +1558,15 @@ impl JsTraceInterrupt {
         Ok(Self::default())
     }
 
-    /// Lets this interrupt stop `inspector` if it's a JS tracer.
+    /// Lets this interrupt stop the JS tracers of `inspector`, including those in a mux tracer.
     #[cfg_attr(
         not(feature = "js-tracer"),
         expect(clippy::missing_const_for_fn, reason = "only JS tracers can be interrupted")
     )]
-    fn attach(&self, inspector: DebugInspector) -> DebugInspector {
+    fn attach(&self, mut inspector: DebugInspector) -> DebugInspector {
         #[cfg(feature = "js-tracer")]
         if let Some((interrupt, _)) = &self.js {
-            return match inspector {
-                DebugInspector::Js(js) => {
-                    DebugInspector::Js(Box::new(js.with_interrupt(interrupt.clone())))
-                }
-                inspector => inspector,
-            }
+            inspector.set_js_interrupt(interrupt);
         }
         inspector
     }
@@ -1679,6 +1694,28 @@ mod tests {
         );
         let err = Evm::transact_with_inspector(&mut evm, &tx, inspector).unwrap_err();
         assert_eq!(err.to_string(), "fatal error: JavaScript tracing interrupted");
+    }
+
+    #[cfg(feature = "js-tracer")]
+    #[test]
+    fn js_trace_interrupt_covers_mux_tracers_with_js_children() {
+        let mux = |config: serde_json::Value| GethDebugTracingOptions {
+            tracer: Some(GethDebugTracerType::BuiltInTracer(GethDebugBuiltInTracerType::MuxTracer)),
+            tracer_config: serde_json::from_value(config).unwrap(),
+            ..Default::default()
+        };
+        let js = "{ fault: function() {}, result: function() { return null; } }";
+        let nested = mux(serde_json::json!({ "muxTracer": { (js): {} } }));
+        let nested = serde_json::json!({ "muxTracer": nested.tracer_config });
+        for (config, interrupted) in [
+            (serde_json::json!({ (js): {} }), true),
+            (nested, true),
+            (serde_json::json!({ "callTracer": {} }), false),
+        ] {
+            let opts = mux(config);
+            let interrupt = JsTraceInterrupt::new(&opts).unwrap();
+            assert_eq!(interrupt.js.is_some(), interrupted);
+        }
     }
 
     #[cfg(feature = "js-tracer")]

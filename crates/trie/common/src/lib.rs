@@ -39,7 +39,7 @@ pub use constants::*;
 mod account;
 pub use account::TrieAccount;
 
-pub mod bundle_state;
+pub use evm2::block::bundle_state;
 
 /// V2 proof targets and chunking.
 pub mod target_v2;

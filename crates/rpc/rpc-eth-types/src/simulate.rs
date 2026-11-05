@@ -385,12 +385,17 @@ where
             tx_regular_gas_used = output.execution_gas_spent();
             results.push(output.clone())
         })?;
-        // The transfer inspector keeps the call's logs, including the transfer logs, out of the
-        // receipt, so they replace the call's logs without changing the block's receipts.
-        if let Some(inspector) = builder.evm_mut().inspector_mut_as::<TransferInspector>() &&
-            let Some(result) = results.last_mut()
+
+        // The transfer tracer keeps the transaction's logs, with the synthetic transfer logs
+        // among them, outside the EVM's own logs.
+        // SAFETY: `TransferInspector` has no lifetime parameters.
+        if let Some(logs) = unsafe {
+            builder
+                .evm_mut()
+                .with_inspector(|inspector: &mut TransferInspector| inspector.take_logs())
+        } && let Some(result) = results.last_mut()
         {
-            result.logs = inspector.take_logs();
+            result.logs = logs;
         }
 
         let gas_used = gas_output.tx_gas_used();

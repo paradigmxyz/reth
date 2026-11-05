@@ -1346,7 +1346,7 @@ mod tests {
     use reth_network_p2p::error::RequestResult;
     use reth_network_peers::pk2id;
     use reth_network_types::session::config::PROTOCOL_BREACH_REQUEST_TIMEOUT;
-    use secp256k1::{SecretKey, SECP256K1};
+    use secp256k1::SecretKey;
     use tokio::{
         net::{TcpListener, TcpStream},
         sync::mpsc,
@@ -1354,7 +1354,7 @@ mod tests {
 
     /// Returns a testing `HelloMessage` and new secretkey
     fn eth_hello(server_key: &SecretKey) -> HelloMessageWithProtocols {
-        HelloMessageWithProtocols::builder(pk2id(&server_key.public_key(SECP256K1))).build()
+        HelloMessageWithProtocols::builder(pk2id(&server_key.public_key())).build()
     }
 
     struct SessionBuilder<N: NetworkPrimitives = EthNetworkPrimitives> {
@@ -1391,8 +1391,8 @@ mod tests {
             let fork_filter = self.fork_filter.clone();
             let local_peer_id = self.local_peer_id;
             let mut hello = self.hello.clone();
-            let key = SecretKey::new(&mut rand_08::thread_rng());
-            hello.id = pk2id(&key.public_key(SECP256K1));
+            let key = SecretKey::new(&mut rand::rng());
+            hello.id = pk2id(&key.public_key());
             Box::pin(async move {
                 let outgoing = TcpStream::connect(local_addr).await.unwrap();
                 let sink = ECIESStream::connect(outgoing, key, local_peer_id).await.unwrap();
@@ -1500,7 +1500,7 @@ mod tests {
         fn default() -> Self {
             let (active_session_tx, active_session_rx) = mpsc::channel(100);
 
-            let (secret_key, pk) = SECP256K1.generate_keypair(&mut rand_08::thread_rng());
+            let (secret_key, pk) = secp256k1::generate_keypair(&mut rand::rng());
             let local_peer_id = pk2id(&pk);
 
             Self {

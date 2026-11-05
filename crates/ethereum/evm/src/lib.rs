@@ -248,6 +248,7 @@ pub use convert::ExecutableRecoveredTx;
 
 mod execution;
 
+#[cfg(test)]
 mod dao_fork;
 
 mod receipt;

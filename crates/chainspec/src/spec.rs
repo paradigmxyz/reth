@@ -2031,7 +2031,7 @@ Post-merge hard forks (timestamp based):
             &DEV,
             &[(
                 Head { number: 0, ..Default::default() },
-                ForkId { hash: ForkHash(hex!("0x0b1a4ef7")), next: 0 },
+                ForkId { hash: ForkHash(hex!("0xd2be4e0a")), next: 0 },
             )],
         )
     }

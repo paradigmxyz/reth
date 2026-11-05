@@ -187,7 +187,7 @@ mod tests {
         .unwrap();
         tx.send(Err(BalWorkerError::Transaction {
             tx_index: 1,
-            source: std::io::Error::other("sig fail").into(),
+            source: evm2::AnyError::new(std::io::Error::other("sig fail")),
         }))
         .unwrap();
         tx.send(Ok(output(0, 0))).unwrap();
