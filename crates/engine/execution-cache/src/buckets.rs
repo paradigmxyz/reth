@@ -45,6 +45,11 @@ mod imp {
     /// Huge page size the mapping is rounded up to.
     const HUGE_PAGE: usize = 2 << 20;
 
+    /// Bytes populated or unmapped per call. Both hold the process' memory map lock, which blocks
+    /// every other thread that maps or unmaps memory, including the allocator, so the mapping is
+    /// handled in chunks.
+    const CHUNK: usize = 64 << 20;
+
     /// An anonymous mapping holding `len` buckets.
     pub(super) struct Mapping<T> {
         buckets: NonNull<Bucket<T>>,
@@ -85,15 +90,17 @@ mod imp {
             let populate = std::thread::Builder::new()
                 .name("cache-populate".to_string())
                 .spawn(move || {
-                    // SAFETY: the mapping outlives this thread, which is joined before it is
-                    // unmapped.
-                    unsafe {
-                        libc::madvise(
-                            address as *mut libc::c_void,
-                            bytes,
-                            libc::MADV_POPULATE_WRITE,
-                        )
-                    };
+                    for offset in (0..bytes).step_by(CHUNK) {
+                        // SAFETY: the chunk lies in the mapping, which outlives this thread: the
+                        // thread is joined before the mapping is unmapped.
+                        unsafe {
+                            libc::madvise(
+                                (address + offset) as *mut libc::c_void,
+                                CHUNK.min(bytes - offset),
+                                libc::MADV_POPULATE_WRITE,
+                            )
+                        };
+                    }
                 })
                 .ok();
             // Zeroed memory is a valid array of empty buckets, as `Bucket::new` is all zeros.
@@ -119,7 +126,13 @@ mod imp {
                     self.buckets.as_ptr(),
                     self.len,
                 ));
-                libc::munmap(self.buckets.as_ptr().cast(), self.bytes);
+                let address = self.buckets.as_ptr() as usize;
+                for offset in (0..self.bytes).step_by(CHUNK) {
+                    libc::munmap(
+                        (address + offset) as *mut libc::c_void,
+                        CHUNK.min(self.bytes - offset),
+                    );
+                }
             }
         }
     }
