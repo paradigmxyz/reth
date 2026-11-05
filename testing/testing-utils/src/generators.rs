@@ -159,8 +159,8 @@ pub fn random_signed_tx<R: Rng>(rng: &mut R) -> TransactionSigned {
 }
 
 /// Signs the [Transaction] with a random key pair.
-pub fn sign_tx_with_random_key_pair<R: Rng>(rng: &mut R, tx: Transaction) -> TransactionSigned {
-    let key_pair = Keypair::new(rng);
+pub fn sign_tx_with_random_key_pair<R: Rng>(_rng: &mut R, tx: Transaction) -> TransactionSigned {
+    let key_pair = Keypair::new(&mut rand::rng());
     sign_tx_with_key_pair(key_pair, tx)
 }
 
@@ -174,13 +174,13 @@ pub fn sign_tx_with_key_pair(key_pair: Keypair, tx: Transaction) -> TransactionS
 }
 
 /// Generates a new random [Keypair].
-pub fn generate_key<R: Rng>(rng: &mut R) -> Keypair {
-    Keypair::new(rng)
+pub fn generate_key<R: Rng>(_rng: &mut R) -> Keypair {
+    Keypair::new(&mut rand::rng())
 }
 
 /// Generates a set of [Keypair]s based on the desired count.
-pub fn generate_keys<R: Rng>(rng: &mut R, count: usize) -> Vec<Keypair> {
-    (0..count).map(|_| Keypair::new(rng)).collect()
+pub fn generate_keys<R: Rng>(_rng: &mut R, count: usize) -> Vec<Keypair> {
+    (0..count).map(|_| Keypair::new(&mut rand::rng())).collect()
 }
 
 /// Generate a random block filled with signed transactions (generated using
