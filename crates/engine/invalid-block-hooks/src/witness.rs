@@ -1,6 +1,8 @@
 use crate::Runtime;
 use alloy_consensus::BlockHeader;
+use alloy_eips::BlockId;
 use alloy_primitives::{Address, B256, U256};
+use alloy_rpc_client::RpcClient;
 use alloy_rpc_types_debug::ExecutionWitness;
 use evm2::{bytecode::Bytecode, evm::AccountInfo};
 use reth_engine_primitives::InvalidBlockHook;
@@ -8,7 +10,6 @@ use reth_evm::{database::StateProviderDatabase, ConfigureEvm, Executor};
 use reth_execution_types::BundleSource;
 use reth_primitives_traits::{NodePrimitives, RecoveredBlock, SealedHeader};
 use reth_provider::{BlockExecutionOutput, StateProvider, StateProviderFactory};
-use reth_rpc_api::DebugApiClient;
 use reth_trie::{
     bundle_state::{AccountInfoRevert, AccountStatus, BundleState, RevertToSlot, StorageSlot},
     updates::TrieUpdates,
@@ -139,7 +140,7 @@ pub struct InvalidBlockWitnessHook<P, E> {
     /// directory in case of failed sanity checks.
     output_directory: PathBuf,
     /// The healthy node client to compare the witness against.
-    healthy_node_client: Option<jsonrpsee::http_client::HttpClient>,
+    healthy_node_client: Option<RpcClient>,
     /// Runtime for background diagnostics and shutdown-aware RPC requests.
     runtime: Runtime,
     /// Allows at most one diagnostic task, including across clones of the hook.
@@ -154,7 +155,7 @@ impl<P, E> InvalidBlockWitnessHook<P, E> {
         provider: P,
         evm_config: E,
         output_directory: PathBuf,
-        healthy_node_client: Option<jsonrpsee::http_client::HttpClient>,
+        healthy_node_client: Option<RpcClient>,
         runtime: Runtime,
     ) -> Self {
         Self {
@@ -208,12 +209,9 @@ where
         let re_executed_witness_path = self.save_file(filename, witness)?;
 
         if let Some(healthy_node_client) = &self.healthy_node_client {
-            let healthy_node_witness = DebugApiClient::<()>::debug_execution_witness(
-                healthy_node_client,
-                block_number.into(),
-                None,
-            )
-            .await?;
+            let healthy_node_witness: ExecutionWitness = healthy_node_client
+                .request("debug_executionWitness", (BlockId::from(block_number),))
+                .await?;
 
             let filename = format!("{}.witness.healthy.json", block_prefix);
             let healthy_path = self.save_file(filename, &healthy_node_witness)?;
@@ -446,10 +444,10 @@ mod tests {
     use super::*;
     use alloy_consensus::Header;
     use alloy_primitives::{map::HashMap, Bytes, B256, U256};
+    use alloy_rpc_client::ClientBuilder;
     use evm2::evm::{CacheDB, EmptyDB};
     use jsonrpsee::{
         core::RpcResult,
-        http_client::{HttpClient, HttpClientBuilder},
         server::{ServerBuilder, ServerHandle},
         RpcModule,
     };
@@ -866,13 +864,12 @@ mod tests {
         (parent, block)
     }
 
-    async fn healthy_node_server() -> (HttpClient, ServerHandle, Arc<Notify>, Arc<Notify>) {
+    async fn healthy_node_server() -> (RpcClient, ServerHandle, Arc<Notify>, Arc<Notify>) {
         let requested = Arc::new(Notify::new());
         let respond = Arc::new(Notify::new());
         let server = ServerBuilder::default().build("127.0.0.1:0").await.unwrap();
-        let client = HttpClientBuilder::default()
-            .build(format!("http://{}", server.local_addr().unwrap()))
-            .unwrap();
+        let client = ClientBuilder::default()
+            .http(format!("http://{}", server.local_addr().unwrap()).parse().unwrap());
         let mut module = RpcModule::new((requested.clone(), respond.clone()));
         module
             .register_async_method("debug_executionWitness", |_, context, _| async move {

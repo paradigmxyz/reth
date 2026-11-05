@@ -330,7 +330,7 @@ impl RpcDescription {
         let sub_tys: Vec<syn::Type> =
             self.subscriptions.clone().into_iter().map(|s| s.item).collect();
         let where_clause =
-            generate_where_clause(&self.trait_def, &sub_tys, false, self.server_bounds.as_ref());
+            generate_where_clause(&self.trait_def, &sub_tys, self.server_bounds.as_ref());
 
         // NOTE(niklasad1): empty where clause is valid rust syntax.
         Ok(quote! {
