@@ -1,5 +1,5 @@
 //! Execution cache implementation for block processing.
-use crate::TxPoolPrewarmCacheSnapshot;
+use crate::{buckets::BucketMemory, TxPoolPrewarmCacheSnapshot};
 use alloy_primitives::{
     map::{DefaultHashBuilder, FbBuildHasher},
     Address, StorageKey, StorageValue, B256,
@@ -981,6 +981,34 @@ struct ExecutionCacheInner {
 
     /// One-time notification when SELFDESTRUCT is encountered
     selfdestruct_encountered: Once,
+
+    // The tables' memory, if mapped by the cache, is declared after the caches that borrow it so
+    // that it is dropped after them.
+    /// Memory of [`Self::code_cache`].
+    _code_buckets: Option<BucketMemory<(B256, Option<Bytecode>)>>,
+
+    /// Memory of [`Self::storage_cache`].
+    _storage_buckets: Option<BucketMemory<((Address, StorageKey), StorageValue)>>,
+
+    /// Memory of [`Self::account_cache`].
+    _account_buckets: Option<BucketMemory<(Address, Option<Account>)>>,
+}
+
+/// Creates a cache table with `capacity` entries, on memory it maps itself where supported.
+fn new_table<K, V, H>(
+    capacity: usize,
+    hasher: H,
+) -> (FixedCache<K, V, H>, Option<BucketMemory<(K, V)>>)
+where
+    K: core::hash::Hash + Eq + 'static,
+    V: Clone + 'static,
+    H: core::hash::BuildHasher,
+{
+    match BucketMemory::new(capacity) {
+        // SAFETY: `ExecutionCacheInner` drops the cache before the memory.
+        Some(memory) => (FixedCache::new_static(unsafe { memory.buckets() }, hasher), Some(memory)),
+        None => (FixedCache::new(capacity, hasher), None),
+    }
 }
 
 impl ExecutionCache {
@@ -1018,17 +1046,23 @@ impl ExecutionCache {
         let storage_stats = Arc::new(CacheStatsHandler::new(storage_capacity));
         let account_stats = Arc::new(CacheStatsHandler::new(account_capacity));
 
+        let (code_cache, code_buckets) = new_table(code_capacity, FbBuildHasher::<32>::default());
+        let (storage_cache, storage_buckets) =
+            new_table(storage_capacity, DefaultHashBuilder::default());
+        let (account_cache, account_buckets) =
+            new_table(account_capacity, FbBuildHasher::<20>::default());
+
         Self(Arc::new(ExecutionCacheInner {
-            code_cache: FixedCache::new(code_capacity, FbBuildHasher::<32>::default())
-                .with_stats(Some(Stats::new(code_stats.clone()))),
-            storage_cache: FixedCache::new(storage_capacity, DefaultHashBuilder::default())
-                .with_stats(Some(Stats::new(storage_stats.clone()))),
-            account_cache: FixedCache::new(account_capacity, FbBuildHasher::<20>::default())
-                .with_stats(Some(Stats::new(account_stats.clone()))),
+            code_cache: code_cache.with_stats(Some(Stats::new(code_stats.clone()))),
+            storage_cache: storage_cache.with_stats(Some(Stats::new(storage_stats.clone()))),
+            account_cache: account_cache.with_stats(Some(Stats::new(account_stats.clone()))),
             code_stats,
             storage_stats,
             account_stats,
             selfdestruct_encountered: Once::new(),
+            _code_buckets: code_buckets,
+            _storage_buckets: storage_buckets,
+            _account_buckets: account_buckets,
         }))
     }
 
