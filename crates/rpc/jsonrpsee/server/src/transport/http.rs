@@ -4,7 +4,6 @@ use hyper::body::{Body, Bytes};
 use jsonrpsee_core::{
     http_helpers::{read_body, HttpError},
     middleware::RpcServiceT,
-    server::MethodResponse,
     BoxError,
 };
 
@@ -38,11 +37,7 @@ where
     B: http_body::Body<Data = Bytes> + Send + 'static,
     B::Data: Send,
     B::Error: Into<BoxError>,
-    S: RpcServiceT<
-            MethodResponse = MethodResponse,
-            BatchResponse = MethodResponse,
-            NotificationResponse = MethodResponse,
-        > + Send,
+    S: RpcServiceT + Send,
 {
     // Only the `POST` method is allowed.
     match *request.method() {

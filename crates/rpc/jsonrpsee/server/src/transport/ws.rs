@@ -12,10 +12,7 @@ use futures_util::{
 };
 use hyper::upgrade::Upgraded;
 use hyper_util::rt::TokioIo;
-use jsonrpsee_core::{
-    middleware::RpcServiceT,
-    server::{MethodResponse, MethodSink},
-};
+use jsonrpsee_core::{middleware::RpcServiceT, server::MethodSink};
 use jsonrpsee_types::{
     error::{reject_too_big_request, ErrorCode},
     Id,
@@ -57,13 +54,7 @@ pub(crate) struct BackgroundTaskParams<S> {
 
 pub(crate) async fn background_task<S>(params: BackgroundTaskParams<S>)
 where
-    S: RpcServiceT<
-            MethodResponse = MethodResponse,
-            BatchResponse = MethodResponse,
-            NotificationResponse = MethodResponse,
-        > + Send
-        + Sync
-        + 'static,
+    S: RpcServiceT + Send + Sync + 'static,
 {
     let BackgroundTaskParams {
         server_cfg,

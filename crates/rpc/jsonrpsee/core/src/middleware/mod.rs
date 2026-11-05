@@ -9,6 +9,7 @@ use std::{
     task::{Context, Poll},
 };
 
+use crate::server::MethodResponse;
 use futures_util::future::Either;
 use jsonrpsee_types::{ErrorObject, Id};
 use pin_project::pin_project;
@@ -185,29 +186,12 @@ impl<'a> BatchEntry<'a> {
 /// Represent a JSON-RPC service that can process JSON-RPC calls, notifications, and batch requests.
 ///
 /// This trait is similar to [`tower::Service`] but it's specialized for JSON-RPC operations.
-///
-/// The response type is a future that resolves to a `Result<R, E>` mainly because this trait is
-/// intended to by used by both client and server implementations.
-///
-/// In the server implementation, the error is infallible but in the client implementation, the
-/// error can occur due to I/O errors or JSON-RPC protocol errors.
-///
-/// Such that server implementations must use `std::convert::Infallible` as the error type because
-/// the underlying service requires that and otherwise one will get a compiler error that tries to
-/// explain that.
 pub trait RpcServiceT {
-    /// Response type for `RpcServiceT::call`.
-    type MethodResponse;
-    /// Response type for `RpcServiceT::notification`.
-    type NotificationResponse;
-    /// Response type for `RpcServiceT::batch`.
-    type BatchResponse;
-
     /// Processes a single JSON-RPC call, which may be a subscription or regular call.
     fn call<'a>(
         &self,
         request: Request<'a>,
-    ) -> impl Future<Output = Self::MethodResponse> + Send + 'a;
+    ) -> impl Future<Output = MethodResponse> + Send + 'a;
 
     /// Processes multiple JSON-RPC calls at once, similar to `RpcServiceT::call`.
     ///
@@ -221,13 +205,13 @@ pub trait RpcServiceT {
     fn batch<'a>(
         &self,
         requests: Batch<'a>,
-    ) -> impl Future<Output = Self::BatchResponse> + Send + 'a;
+    ) -> impl Future<Output = MethodResponse> + Send + 'a;
 
     /// Similar to `RpcServiceT::call` but processes a JSON-RPC notification.
     fn notification<'a>(
         &self,
         n: Notification<'a>,
-    ) -> impl Future<Output = Self::NotificationResponse> + Send + 'a;
+    ) -> impl Future<Output = MethodResponse> + Send + 'a;
 }
 
 /// Similar to [`tower::ServiceBuilder`] but doesn't
