@@ -315,10 +315,10 @@ where
                     ctx.metrics.seeded_transactions.increment(1);
                 }
                 queue.push(index, tx, seeded);
-                results.advance_generation();
+                results.wake(false);
             }
             queue.close();
-            results.advance_generation();
+            results.wake(true);
             Self::send_withdrawal_hints(ctx, state_root_hint_stream);
             tx_count
         });
