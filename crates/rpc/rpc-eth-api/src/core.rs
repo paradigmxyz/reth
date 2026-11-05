@@ -453,7 +453,6 @@ pub trait EthApi<
     async fn block_access_list_raw(&self, block: BlockId) -> RpcResult<Option<Bytes>>;
 }
 
-#[async_trait::async_trait]
 impl<T>
     EthApiServer<
         RpcTxReq<T::NetworkTypes>,
