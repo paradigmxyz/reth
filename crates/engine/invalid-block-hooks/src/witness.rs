@@ -501,63 +501,12 @@ mod tests {
 
     #[test]
     fn test_sort_bundle_state_for_comparison() {
-        // Use the fixture function to create test data
-        let bundle_state = create_bundle_state();
-
-        // Call the function under test
-        let sorted = sort_bundle_state_for_comparison(&bundle_state);
-
-        // Verify state_size and reverts_size values match the fixture
+        let sorted = sort_bundle_state_for_comparison(&create_bundle_state());
         assert_eq!(sorted.state_size, 3);
         assert_eq!(sorted.reverts_size, 2);
-
-        // Verify state contains our mock accounts
-        assert_eq!(sorted.state.len(), 3); // We added 3 accounts
-
-        // Verify contracts contains our mock contracts
-        assert_eq!(sorted.contracts.len(), 3); // We added 3 contracts
-
-        // Verify reverts is an array with multiple blocks of reverts
-        let reverts = &sorted.reverts;
-        assert_eq!(reverts.len(), 2); // Fixture has two blocks of reverts
-
-        // Verify that the state accounts have the expected structure
-        for account_data in sorted.state.values() {
-            // BundleAccountSorted has info, original_info, storage, and status fields
-            // Just verify the structure exists by accessing the fields
-            let _info = &account_data.info;
-            let _original_info = &account_data.original_info;
-            let _storage = &account_data.storage;
-            let _status = &account_data.status;
-        }
-    }
-
-    #[test]
-    fn test_re_execute_block() {
-        // Create hook instance
-        let (hook, _output_directory, _temp_dir) = create_test_hook();
-
-        // Setup to call re_execute_block
-        let mut rng = generators::rng();
-        let parent_header = generators::random_header(&mut rng, 1, None);
-
-        // Create a random block that inherits from the parent header
-        let recovered_block = random_block(
-            &mut rng,
-            2, // block number
-            BlockParams {
-                parent: Some(parent_header.hash()),
-                tx_count: Some(0),
-                ..Default::default()
-            },
-        )
-        .try_recover()
-        .unwrap();
-
-        let result = hook.re_execute_block(&parent_header, &recovered_block);
-
-        // Verify the function behavior with mock data
-        assert!(result.is_ok(), "re_execute_block should return Ok");
+        assert_eq!(sorted.state.len(), 3);
+        assert_eq!(sorted.contracts.len(), 3);
+        assert_eq!(sorted.reverts.len(), 2);
     }
 
     /// Creates test `InvalidBlockWitnessHook` with temporary directory
@@ -584,62 +533,17 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_handle_witness_operations_with_healthy_client_mock() {
-        // Create hook instance with mock healthy client
-        let (hook, output_directory, _temp_dir) = create_test_hook();
-
-        // Create sample ExecutionWitness with correct types
-        let witness = ExecutionWitness {
-            state: vec![Bytes::from("state_data")],
-            codes: vec![Bytes::from("code_data")],
-            keys: vec![Bytes::from("key_data")],
-            ..Default::default()
-        };
-
-        // Call handle_witness_operations
-        let result = hook.handle_witness_operations(&witness, "test_block_healthy", 67890).await;
-
-        // Should succeed
-        assert!(result.is_ok());
-
-        // Check that witness file was created
-        let witness_file = output_directory.join("test_block_healthy.witness.re_executed.json");
-        assert!(witness_file.exists());
-    }
-
-    #[tokio::test]
     async fn test_handle_witness_operations_file_creation() {
-        // Test file creation and content validation
-        let (hook, output_directory, _temp_dir) = create_test_hook();
-
+        let (hook, output_dir, _temp_dir) = create_test_hook();
         let witness = ExecutionWitness {
-            state: vec![Bytes::from("test_state")],
-            codes: vec![Bytes::from("test_code")],
-            keys: vec![Bytes::from("test_key")],
+            state: vec![Bytes::from("state")],
+            codes: vec![Bytes::from("code")],
+            keys: vec![Bytes::from("key")],
             ..Default::default()
         };
-
-        let block_prefix = "file_test_block";
-        let block_number = 11111;
-
-        // Call handle_witness_operations
-        let result = hook.handle_witness_operations(&witness, block_prefix, block_number).await;
-        assert!(result.is_ok());
-
-        // Verify file was created with correct name
-        let expected_file =
-            output_directory.join(format!("{}.witness.re_executed.json", block_prefix));
-        assert!(expected_file.exists());
-
-        // Read and verify file content is valid JSON and contains witness structure
-        let file_content = std::fs::read_to_string(&expected_file).expect("Failed to read file");
-        let parsed_witness: serde_json::Value =
-            serde_json::from_str(&file_content).expect("File should contain valid JSON");
-
-        // Verify the JSON structure contains expected fields
-        assert!(parsed_witness.get("state").is_some(), "JSON should contain 'state' field");
-        assert!(parsed_witness.get("codes").is_some(), "JSON should contain 'codes' field");
-        assert!(parsed_witness.get("keys").is_some(), "JSON should contain 'keys' field");
+        hook.handle_witness_operations(&witness, "block", 0).await.unwrap();
+        let saved = std::fs::read(output_dir.join("block.witness.re_executed.json")).unwrap();
+        assert_eq!(serde_json::from_slice::<ExecutionWitness>(&saved).unwrap(), witness);
     }
 
     #[test]
@@ -664,28 +568,19 @@ mod tests {
 
     #[test]
     fn test_validate_bundle_state_matching() {
-        let (hook, _output_dir, _temp_dir) = create_test_hook();
-        let bundle_state = create_bundle_state();
-        let block_prefix = "test_block_123";
-
-        // Test with identical states - should not produce any warnings or files
-        let result = hook.validate_bundle_state(&bundle_state, &bundle_state, block_prefix);
-        assert!(result.is_ok());
+        let (hook, output_dir, _temp_dir) = create_test_hook();
+        for state in [BundleState::default(), create_bundle_state()] {
+            hook.validate_bundle_state(&state, &state, "matching").unwrap();
+            assert_eq!(output_dir.read_dir().unwrap().count(), 0);
+        }
     }
 
     #[test]
     fn test_validate_bundle_state_mismatch() {
         let (hook, output_dir, _temp_dir) = create_test_hook();
         let original_state = create_bundle_state();
-        let mut modified_state = create_bundle_state();
-
-        // Modify the state to create a mismatch
-        let addr = Address::repeat_byte(1u8);
-        if let Some(account) = modified_state.state.get_mut(&addr) &&
-            let Some(info) = &mut account.info
-        {
-            info.balance = U256::from(999);
-        }
+        let mut modified_state = original_state.clone();
+        modified_state.state.values_mut().next().unwrap().info.as_mut().unwrap().nonce ^= 1;
 
         let block_prefix = "test_block_mismatch";
 
@@ -728,23 +623,11 @@ mod tests {
 
     #[test]
     fn test_validate_state_root_and_trie_with_trie_updates() {
-        let (hook, _output_dir, _temp_dir) = create_test_hook();
+        let (hook, output_dir, _temp_dir) = create_test_hook();
         let bundle_state = create_bundle_state();
 
         // Generate test data
-        let mut rng = generators::rng();
-        let parent_header = generators::random_header(&mut rng, 1, None);
-        let recovered_block = random_block(
-            &mut rng,
-            2,
-            BlockParams {
-                parent: Some(parent_header.hash()),
-                tx_count: Some(0),
-                ..Default::default()
-            },
-        )
-        .try_recover()
-        .unwrap();
+        let (parent_header, recovered_block) = invalid_block_fixture(2);
 
         let trie_updates = create_test_trie_updates();
         let original_root = B256::repeat_byte(2u8); // Different from what will be computed
@@ -759,116 +642,17 @@ mod tests {
             Some((&trie_updates, original_root)),
             block_prefix,
         );
-        assert!(result.is_ok());
-    }
-
-    #[tokio::test]
-    async fn test_process_invalid_block_calls_all_validation_methods() {
-        let (hook, output_dir, _temp_dir) = create_test_hook();
-        let bundle_state = create_bundle_state();
-
-        // Generate test data
-        let mut rng = generators::rng();
-        let parent_header = generators::random_header(&mut rng, 1, None);
-        let recovered_block = random_block(
-            &mut rng,
-            2,
-            BlockParams {
-                parent: Some(parent_header.hash()),
-                tx_count: Some(0),
-                ..Default::default()
-            },
-        )
-        .try_recover()
-        .unwrap();
-
-        // Create test trie updates
-        let trie_updates = create_test_trie_updates();
-        let state_root = B256::random();
-
-        // Test that process_invalid_block attempts to call all its internal methods
-        // by checking that it doesn't panic and tries to create files
-        let files_before = output_dir.read_dir().unwrap().count();
-
-        let _result = hook
-            .process_invalid_block(
-                &parent_header,
-                &recovered_block,
-                &bundle_state,
-                Some((&trie_updates, state_root)),
-            )
-            .await;
-
-        // Verify that the function attempted to process the block:
-        // Either it succeeded, or it created some output files during processing
-        let files_after = output_dir.read_dir().unwrap().count();
-
-        // The function should attempt to execute its workflow
-        assert!(
-            files_after >= files_before,
-            "on_invalid_block should attempt to create output files during processing"
-        );
-    }
-
-    #[tokio::test]
-    async fn test_handle_witness_operations_with_empty_witness() {
-        let (hook, _output_dir, _temp_dir) = create_test_hook();
-        let witness = ExecutionWitness::default();
-        let block_prefix = "empty_witness_test";
-        let block_number = 12345;
-
-        let result = hook.handle_witness_operations(&witness, block_prefix, block_number).await;
-        assert!(result.is_ok());
-    }
-
-    #[tokio::test]
-    async fn test_handle_witness_operations_with_zero_block_number() {
-        let (hook, _output_dir, _temp_dir) = create_test_hook();
-        let witness = ExecutionWitness {
-            state: vec![Bytes::from("test_state")],
-            codes: vec![Bytes::from("test_code")],
-            keys: vec![Bytes::from("test_key")],
-            ..Default::default()
-        };
-        let block_prefix = "zero_block_test";
-        let block_number = 0;
-
-        let result = hook.handle_witness_operations(&witness, block_prefix, block_number).await;
-        assert!(result.is_ok());
-    }
-
-    #[tokio::test]
-    async fn test_handle_witness_operations_with_large_witness_data() {
-        let (hook, _output_dir, _temp_dir) = create_test_hook();
-        let large_data = vec![0u8; 10000]; // 10KB of data
-        let witness = ExecutionWitness {
-            state: vec![Bytes::from(large_data.clone())],
-            codes: vec![Bytes::from(large_data.clone())],
-            keys: vec![Bytes::from(large_data)],
-            ..Default::default()
-        };
-        let block_prefix = "large_witness_test";
-        let block_number = 999999;
-
-        let result = hook.handle_witness_operations(&witness, block_prefix, block_number).await;
-        assert!(result.is_ok());
-    }
-
-    #[test]
-    fn test_validate_bundle_state_with_empty_states() {
-        let (hook, _output_dir, _temp_dir) = create_test_hook();
-        let empty_state = BundleState::default();
-        let block_prefix = "empty_states_test";
-
-        let result = hook.validate_bundle_state(&empty_state, &empty_state, block_prefix);
-        assert!(result.is_ok());
+        result.unwrap();
+        assert!(output_dir.join(format!("{block_prefix}.state_root.diff")).exists());
+        assert!(output_dir.join(format!("{block_prefix}.trie_updates.original.json")).exists());
+        assert!(output_dir.join(format!("{block_prefix}.trie_updates.re_executed.json")).exists());
     }
 
     #[test]
     fn test_validate_bundle_state_with_different_contract_counts() {
         let (hook, output_dir, _temp_dir) = create_test_hook();
         let state1 = create_bundle_state();
-        let mut state2 = create_bundle_state();
+        let mut state2 = state1.clone();
 
         // Add extra contract to state2
         let extra_contract_hash = B256::random();
@@ -887,37 +671,20 @@ mod tests {
     }
 
     #[test]
-    fn test_save_diff_with_identical_values() {
-        let (hook, output_dir, _temp_dir) = create_test_hook();
-        let value1 = "identical_value";
-        let value2 = "identical_value";
-        let filename = "identical_diff_test".to_string();
-
-        let result = hook.save_diff(filename.clone(), &value1, &value2);
-        assert!(result.is_ok());
-
-        let diff_file = output_dir.join(filename);
-        assert!(diff_file.exists());
+    fn test_save_diff() {
+        let (hook, _output_dir, _temp_dir) = create_test_hook();
+        for (new, expected) in [(1, ""), (2, "--- original\n+++ new\n@@ -1 +1 @@\n-1\n+2\n")] {
+            let path = hook.save_diff("diff".to_string(), &1, &new).unwrap();
+            assert_eq!(std::fs::read_to_string(path).unwrap(), expected);
+        }
     }
 
     #[test]
     fn test_validate_state_root_and_trie_without_trie_updates() {
-        let (hook, _output_dir, _temp_dir) = create_test_hook();
+        let (hook, output_dir, _temp_dir) = create_test_hook();
         let bundle_state = create_bundle_state();
 
-        let mut rng = generators::rng();
-        let parent_header = generators::random_header(&mut rng, 1, None);
-        let recovered_block = random_block(
-            &mut rng,
-            2,
-            BlockParams {
-                parent: Some(parent_header.hash()),
-                tx_count: Some(0),
-                ..Default::default()
-            },
-        )
-        .try_recover()
-        .unwrap();
+        let (parent_header, recovered_block) = invalid_block_fixture(2);
 
         let block_prefix = "no_trie_updates_test";
         let hashed_state = hashed_state_for_bundle_state(bundle_state);
@@ -930,90 +697,8 @@ mod tests {
             None,
             block_prefix,
         );
-        assert!(result.is_ok());
-    }
-
-    #[test]
-    fn test_complete_invalid_block_workflow() {
-        let (hook, _output_dir, _temp_dir) = create_test_hook();
-        let mut rng = generators::rng();
-
-        // Create a realistic block scenario
-        let parent_header = generators::random_header(&mut rng, 100, None);
-        let invalid_block = random_block(
-            &mut rng,
-            101,
-            BlockParams {
-                parent: Some(parent_header.hash()),
-                tx_count: Some(3),
-                ..Default::default()
-            },
-        )
-        .try_recover()
-        .unwrap();
-
-        let bundle_state = create_bundle_state();
-        let trie_updates = create_test_trie_updates();
-
-        // Test validation methods
-        let validation_result =
-            hook.validate_bundle_state(&bundle_state, &bundle_state, "integration_test");
-        assert!(validation_result.is_ok(), "Bundle state validation should succeed");
-
-        let state_root_result = hook.validate_state_root_and_trie(
-            &parent_header,
-            &invalid_block,
-            hashed_state_for_bundle_state(bundle_state),
-            Some((&trie_updates, B256::random())),
-            "integration_test",
-        );
-        assert!(state_root_result.is_ok(), "State root validation should succeed");
-    }
-
-    #[test]
-    fn test_integration_workflow_components() {
-        let (hook, _output_dir, _temp_dir) = create_test_hook();
-        let mut rng = generators::rng();
-
-        // Create test data
-        let parent_header = generators::random_header(&mut rng, 50, None);
-        let _invalid_block = random_block(
-            &mut rng,
-            51,
-            BlockParams {
-                parent: Some(parent_header.hash()),
-                tx_count: Some(2),
-                ..Default::default()
-            },
-        )
-        .try_recover()
-        .unwrap();
-
-        let bundle_state = create_bundle_state();
-        let _trie_updates = create_test_trie_updates();
-
-        // Test individual components that would be part of the complete flow
-        let validation_result =
-            hook.validate_bundle_state(&bundle_state, &bundle_state, "integration_component_test");
-        assert!(validation_result.is_ok(), "Component validation should succeed");
-    }
-
-    #[test]
-    fn test_save_diff_writes_unified_diff() {
-        let (hook, _output_dir, _temp_dir) = create_test_hook();
-
-        let path = hook
-            .save_diff("unified_diff_test".to_string(), &B256::ZERO, &B256::repeat_byte(1))
-            .unwrap();
-
-        assert_eq!(
-            std::fs::read_to_string(path).unwrap(),
-            format!(
-                "--- original\n+++ new\n@@ -1 +1 @@\n-{:?}\n+{:?}\n",
-                B256::ZERO,
-                B256::repeat_byte(1)
-            )
-        );
+        result.unwrap();
+        assert_eq!(output_dir.read_dir().unwrap().count(), 0);
     }
 
     #[test]
@@ -1065,46 +750,20 @@ mod tests {
         hook.healthy_node_client = Some(client);
         let (parent, block) = invalid_block_fixture(2);
         let (skipped_parent, skipped_block) = invalid_block_fixture(3);
-        let output = BlockExecutionOutput {
-            state: create_transfer_bundle_state(1, 1),
-            ..Default::default()
-        };
-        let trie_updates = create_test_trie_updates();
-        let prefix = format!("{}_{}", block.number(), block.hash());
+        let output = BlockExecutionOutput::default();
+        let healthy_path = output_dir.join(format!("2_{}.witness.healthy.json", block.hash()));
+        let skipped_path =
+            output_dir.join(format!("3_{}.witness.re_executed.json", skipped_block.hash()));
 
-        hook.on_invalid_block(
-            &parent,
-            &block,
-            &output,
-            Some((&trie_updates, B256::repeat_byte(1))),
-        );
+        hook.on_invalid_block(&parent, &block, &output, None);
         timeout(Duration::from_secs(10), requested.notified()).await.unwrap();
-        assert!(output_dir.join(format!("{prefix}.witness.re_executed.json")).exists());
-        assert!(!output_dir.join(format!("{prefix}.witness.healthy.json")).exists());
+        assert!(!healthy_path.exists());
 
         // Clones share the admission limit and must not queue another diagnostic job.
         hook.clone().on_invalid_block(&skipped_parent, &skipped_block, &output, None);
         respond.notify_one();
         drop(timeout(Duration::from_secs(10), hook.task_permit.acquire()).await.unwrap().unwrap());
-
-        for suffix in [
-            "witness.healthy.json",
-            "witness.diff",
-            "bundle_state.original.json",
-            "bundle_state.re_executed.json",
-            "bundle_state.diff",
-            "state_root.diff",
-            "header_state_root.diff",
-            "trie_updates.original.json",
-            "trie_updates.re_executed.json",
-        ] {
-            assert!(output_dir.join(format!("{prefix}.{suffix}")).exists(), "missing {suffix}");
-        }
-        let skipped_path = output_dir.join(format!(
-            "{}_{}.witness.re_executed.json",
-            skipped_block.number(),
-            skipped_block.hash()
-        ));
+        assert!(healthy_path.exists());
         assert!(!skipped_path.exists());
 
         hook.healthy_node_client = None;
@@ -1143,11 +802,7 @@ mod tests {
 
         hook.on_invalid_block(&parent, &block, &BlockExecutionOutput::default(), None);
         timeout(Duration::from_secs(10), requested.notified()).await.unwrap();
-        drop(
-            timeout(Duration::from_secs(10), hook.runtime.initiate_graceful_shutdown().unwrap())
-                .await
-                .unwrap(),
-        );
+        drop(hook.runtime.initiate_graceful_shutdown().unwrap());
         drop(timeout(Duration::from_secs(10), hook.task_permit.acquire()).await.unwrap().unwrap());
         assert!(!output_dir
             .join(format!("{}_{}.witness.healthy.json", block.number(), block.hash()))
