@@ -34,12 +34,6 @@ use serde_json::Value;
 
 pub type Body = http_body_util::Full<hyper::body::Bytes>;
 
-pub const PARSE_ERROR: &str = "Parse error";
-pub const INTERNAL_ERROR: &str = "Internal error";
-pub const INVALID_PARAMS: &str = "Invalid params";
-pub const INVALID_REQUEST: &str = "Invalid request";
-pub const METHOD_NOT_FOUND: &str = "Method not found";
-
 /// Converts a sockaddress to a HTTP URI.
 pub fn to_http_uri(sockaddr: SocketAddr) -> Uri {
     let s = sockaddr.to_string();
