@@ -3932,6 +3932,79 @@ impl<TX: DbTx + 'static, N: NodeTypes> PruneCheckpointReader for DatabaseProvide
             })
             .collect::<Result<_, _>>()?)
     }
+
+    fn get_prune_checkpoints_for_availability(
+        &self,
+    ) -> ProviderResult<Vec<(PruneSegment, PruneCheckpoint)>> {
+        let mut checkpoints = self.get_prune_checkpoints()?;
+        if !EitherWriter::receipts_destination(self).is_static_file() ||
+            !checkpoints.iter().any(|(segment, checkpoint)| {
+                matches!(segment, PruneSegment::Receipts | PruneSegment::ContractLogs) &&
+                    checkpoint.tx_number.is_some()
+            })
+        {
+            return Ok(checkpoints)
+        }
+
+        let Some(lowest_block) =
+            self.static_file_provider.get_lowest_range_start(StaticFileSegment::Receipts)
+        else {
+            return Ok(checkpoints)
+        };
+        let Some(first_tx_range) = self
+            .static_file_provider
+            .get_segment_provider_for_block(StaticFileSegment::Receipts, lowest_block, None)?
+            .user_header()
+            .tx_range()
+        else {
+            return Ok(checkpoints)
+        };
+
+        // Migration can pad the first file with blocks whose receipts were already pruned.
+        // TransactionBlocks::seek can also land after expired history, so verify the body range.
+        let pruned_tx = first_tx_range.start().checked_sub(1);
+        let pruned_block = if let Some(tx) = pruned_tx {
+            if let Some((_, block)) =
+                self.tx.cursor_read::<tables::TransactionBlocks>()?.seek(tx)? &&
+                let Some(indices) = self.tx.get::<tables::BlockBodyIndices>(block)? &&
+                indices.tx_num_range().contains(&tx)
+            {
+                Some(block).max(lowest_block.checked_sub(1))
+            } else {
+                return Ok(checkpoints)
+            }
+        } else {
+            lowest_block.checked_sub(1)
+        };
+
+        // The removed StaticFileReceipts pruner checkpointed moves into static files.
+        // Writers enforce continuity within each file, but migration can leave gaps between files.
+        // Reuse the verified coverage for both receipts and logs.
+        let mut last_tx = first_tx_range.end();
+        for (segment, checkpoint) in &mut checkpoints {
+            if matches!(segment, PruneSegment::Receipts | PruneSegment::ContractLogs) &&
+                let Some(tx) = checkpoint.tx_number &&
+                tx >= first_tx_range.start()
+            {
+                while let Some(next_tx) = last_tx.checked_add(1) &&
+                    next_tx <= tx &&
+                    let Some(next_file) = self
+                        .static_file_provider
+                        .get_maybe_segment_provider(StaticFileSegment::Receipts, next_tx)? &&
+                    let Some(next_range) = next_file.user_header().tx_range() &&
+                    next_range.start() == next_tx
+                {
+                    last_tx = next_range.end();
+                }
+                if tx <= last_tx {
+                    checkpoint.block_number = pruned_block;
+                    checkpoint.tx_number = pruned_tx;
+                }
+            }
+        }
+
+        Ok(checkpoints)
+    }
 }
 
 impl<TX: DbTxMut, N: NodeTypes> PruneCheckpointWriter for DatabaseProvider<TX, N> {
