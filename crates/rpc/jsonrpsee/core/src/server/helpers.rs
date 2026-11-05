@@ -36,19 +36,19 @@ use super::{DisconnectError, SendTimeoutError, TrySendError};
 #[derive(Clone, Debug)]
 pub struct MethodSink {
     /// Channel sender.
-    tx: mpsc::Sender<Box<RawValue>>,
+    tx: mpsc::Sender<String>,
     /// Max response size in bytes for a executed call.
     max_response_size: u32,
 }
 
 impl MethodSink {
     /// Create a new `MethodSink` with unlimited response size.
-    pub fn new(tx: mpsc::Sender<Box<RawValue>>) -> Self {
+    pub fn new(tx: mpsc::Sender<String>) -> Self {
         MethodSink { tx, max_response_size: u32::MAX }
     }
 
     /// Create a new `MethodSink` with a limited response size.
-    pub fn new_with_limit(tx: mpsc::Sender<Box<RawValue>>, max_response_size: u32) -> Self {
+    pub fn new_with_limit(tx: mpsc::Sender<String>, max_response_size: u32) -> Self {
         MethodSink { tx, max_response_size }
     }
 
@@ -75,13 +75,13 @@ impl MethodSink {
     /// connection has been closed or if the message buffer is full.
     ///
     /// Returns the message if the send fails such that either can be thrown away or re-sent later.
-    pub fn try_send(&mut self, msg: Box<RawValue>) -> Result<(), TrySendError> {
+    pub fn try_send(&mut self, msg: String) -> Result<(), TrySendError> {
         self.tx.try_send(msg).map_err(Into::into)
     }
 
     /// Async send which will wait until there is space in channel buffer or that the subscription
     /// is disconnected.
-    pub async fn send(&self, msg: Box<RawValue>) -> Result<(), DisconnectError> {
+    pub async fn send(&self, msg: String) -> Result<(), DisconnectError> {
         self.tx.send(msg).await.map_err(Into::into)
     }
 
@@ -93,7 +93,7 @@ impl MethodSink {
     ) -> Result<(), DisconnectError> {
         let payload = ResponsePayload::<()>::error_borrowed(err);
         let json =
-            serde_json::value::to_raw_value(&Response::new(payload, id)).expect("valid JSON; qed");
+            serde_json::to_string(&Response::new(payload, id)).expect("valid JSON; qed");
 
         self.send(json).await
     }
@@ -101,7 +101,7 @@ impl MethodSink {
     /// Similar to `MethodSink::send` but only waits for a limited time.
     pub async fn send_timeout(
         &self,
-        msg: Box<RawValue>,
+        msg: String,
         timeout: Duration,
     ) -> Result<(), SendTimeoutError> {
         self.tx.send_timeout(msg, timeout).await.map_err(Into::into)
