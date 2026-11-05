@@ -197,7 +197,9 @@ impl MethodResponse {
             Ok(_) => {
                 // Safety - serde_json does not emit invalid UTF-8.
                 let result = unsafe { String::from_utf8_unchecked(writer.into_bytes()) };
-                let json = RawValue::from_string(result).expect("Valid JSON String; qed");
+                // SAFETY: `result` is the complete output of `serde_json::to_writer` for a single
+                // `Response` value, and serde_json emits no leading or trailing whitespace.
+                let json = unsafe { RawValue::from_string_unchecked(result) };
 
                 Self {
                     json,
@@ -378,7 +380,9 @@ impl BatchResponseBuilder {
 
     /// Finish the batch response
     pub fn finish(mut self) -> BatchResponse {
-        if self.result.len() == 1 {
+        // `Self::default` leaves `result` empty, so anything that `is_empty` regards as
+        // empty must be rejected here to keep the invariant relied upon below.
+        if self.is_empty() {
             BatchResponse {
                 json: batch_response_error(Id::Null, ErrorObject::from(ErrorCode::InvalidRequest)),
                 extensions: self.extensions,
@@ -386,8 +390,11 @@ impl BatchResponseBuilder {
         } else {
             self.result.pop();
             self.result.push(']');
-            let json = RawValue::from_string(self.result)
-                .expect("BatchResponse builds a valid JSON String; qed");
+            // SAFETY: `result` is `[`, followed by the contents of one or more `RawValue`s
+            // separated by `,`, followed by `]`. Each element upholds the `RawValue` invariant,
+            // so the concatenation is a single well-formed JSON array without surrounding
+            // whitespace.
+            let json = unsafe { RawValue::from_string_unchecked(self.result) };
             BatchResponse { json, extensions: self.extensions }
         }
     }
