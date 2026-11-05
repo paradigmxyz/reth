@@ -725,6 +725,7 @@ where
             self.execute_block_bal(env, &input, &handle, &make_state_provider)
         } else {
             let state_provider = make_state_provider(false);
+            np_phase("state_provider");
             match state_provider {
                 Ok(state_provider) => self.execute_block(
                     state_provider,
@@ -1041,6 +1042,7 @@ where
 
         let transaction_count = input.transaction_count();
         let (receipt_tx, result_rx) = self.spawn_receipt_root_task(transaction_count);
+        np_phase("receipt_task");
         let executed_tx_index = Arc::clone(handle.executed_tx_index());
         // Reuse validation reads must not alter a block's access list.
         let prewarm_results = handle.prewarm_results().filter(|_| !input.has_block_access_list());
@@ -1063,6 +1065,7 @@ where
                 };
                 let mut executor =
                     evm_config.block_executor_factory().create_executor(evm, execution_ctx);
+                np_phase("executor");
                 if input.has_block_access_list() {
                     executor.enable_block_access_list_builder();
                 }
