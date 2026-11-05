@@ -10,12 +10,10 @@ repository.workspace = true
 publish = false
 
 [dependencies]
-futures-channel = { version = "0.3.14", default-features = false }
 futures-util = { workspace = true, features = ["default"] }
 hyper = { workspace = true }
-hyper-util = { workspace = true, features = ["server-auto", "tokio", "client-legacy"] }
+hyper-util = { workspace = true, features = ["tokio", "client-legacy"] }
 http-body-util = { workspace = true }
-tracing = { workspace = true, features = ["std"] }
 serde = { workspace = true, features = ["derive", "alloc"] }
 serde_json = { workspace = true, features = ["raw_value"] }
 soketto = { version = "0.8.1", features = ["http"] }
