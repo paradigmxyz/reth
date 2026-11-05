@@ -174,19 +174,18 @@ where
     /// Re-executes the block and collects execution data
     fn re_execute_block(
         &self,
-        parent_header: &SealedHeader<N::BlockHeader>,
+        state_provider: &dyn StateProvider,
         block: &RecoveredBlock<N::Block>,
     ) -> eyre::Result<(ExecutionWitness, BundleState, reth_trie::HashedPostState)> {
-        let state_provider = self.provider.state_by_block_hash(parent_header.hash())?;
         let mut database = evm2::evm::CacheDB::new(evm2::evm::Db::new(StateProviderDatabase::new(
-            state_provider.as_ref().into_evm_state_provider(),
+            state_provider.into_evm_state_provider(),
         )));
         let output = self.evm_config.executor(&mut database).execute(block)?;
         let hashed_state = state_provider.hashed_post_state(&output.state)?;
         database.commit_source(&BundleSource(&output.state));
         let witness = reth_evm::witness::ExecutionWitnessRecord::new(&database)
             .into_execution_witness_without_headers(
-                state_provider.as_ref(),
+                state_provider,
                 reth_trie::ExecutionWitnessMode::Legacy,
             )?;
         let bundle_state = output.state;
@@ -265,13 +264,12 @@ where
     /// Validates state root and trie updates after re-execution
     fn validate_state_root_and_trie(
         &self,
-        parent_header: &SealedHeader<N::BlockHeader>,
+        state_provider: &dyn StateProvider,
         block: &RecoveredBlock<N::Block>,
         hashed_state: reth_trie::HashedPostState,
         trie_updates: Option<(&TrieUpdates, B256)>,
         block_prefix: &str,
     ) -> eyre::Result<()> {
-        let state_provider = self.provider.state_by_block_hash(parent_header.hash())?;
         let (re_executed_root, trie_output) =
             state_provider.state_root_with_updates(hashed_state)?;
 
@@ -310,13 +308,13 @@ where
 
     fn on_invalid_block(
         &self,
-        parent_header: &SealedHeader<N::BlockHeader>,
+        state_provider: &dyn StateProvider,
         block: &RecoveredBlock<N::Block>,
         output: &BlockExecutionOutput<N::Receipt>,
         trie_updates: Option<(&TrieUpdates, B256)>,
     ) -> eyre::Result<()> {
         // TODO(alexey): unify with `DebugApi::debug_execution_witness`
-        let (witness, bundle_state, hashed_state) = self.re_execute_block(parent_header, block)?;
+        let (witness, bundle_state, hashed_state) = self.re_execute_block(state_provider, block)?;
 
         let block_prefix = format!("{}_{}", block.number(), block.hash());
         self.handle_witness_operations(&witness, &block_prefix, block.number())?;
@@ -324,7 +322,7 @@ where
         self.validate_bundle_state(&bundle_state, &output.state, &block_prefix)?;
 
         self.validate_state_root_and_trie(
-            parent_header,
+            state_provider,
             block,
             hashed_state,
             trie_updates,
@@ -372,16 +370,26 @@ where
         trie_updates: Option<(&TrieUpdates, B256)>,
     ) {
         let (block_number, block_hash) = (block.number(), block.hash());
+        // The parent state is resolved before queueing, since a reorg can remove the parent from
+        // the canonical chain before the job runs.
+        let state_provider = match self.provider.state_by_block_hash(parent_header.hash()) {
+            Ok(state_provider) => state_provider,
+            Err(err) => {
+                warn!(target: "engine::invalid_block_hooks::witness", %err, "Failed to invoke hook");
+                return
+            }
+        };
         let hook = self.clone();
         let span = Span::current();
-        let parent_header = parent_header.clone();
         let block = block.clone();
         let output = output.clone();
         let trie_updates = trie_updates.map(|(updates, root)| (updates.clone(), root));
         let job = Box::new(move || {
             let _enter = span.enter();
             let trie_updates = trie_updates.as_ref().map(|(updates, root)| (updates, *root));
-            if let Err(err) = hook.on_invalid_block(&parent_header, &block, &output, trie_updates) {
+            if let Err(err) =
+                hook.on_invalid_block(state_provider.as_ref(), &block, &output, trie_updates)
+            {
                 warn!(target: "engine::invalid_block_hooks::witness", %err, "Failed to invoke hook");
             }
             if let Err(err) = prune_output(&hook.output_directory) {
@@ -577,7 +585,10 @@ mod tests {
         .try_recover()
         .unwrap();
 
-        let result = hook.re_execute_block(&parent_header, &recovered_block);
+        let result = hook.re_execute_block(
+            hook.provider.state_by_block_hash(parent_header.hash()).unwrap().as_ref(),
+            &recovered_block,
+        );
 
         // Verify the function behavior with mock data
         assert!(result.is_ok(), "re_execute_block should return Ok");
@@ -771,7 +782,7 @@ mod tests {
 
         // Test with trie updates - this will likely produce warnings due to mock data
         let result = hook.validate_state_root_and_trie(
-            &parent_header,
+            hook.provider.state_by_block_hash(parent_header.hash()).unwrap().as_ref(),
             &recovered_block,
             hashed_state,
             Some((&trie_updates, original_root)),
@@ -820,7 +831,7 @@ mod tests {
         let files_before = output_dir.read_dir().unwrap().count();
 
         let _result = hook.on_invalid_block(
-            &parent_header,
+            hook.provider.state_by_block_hash(parent_header.hash()).unwrap().as_ref(),
             &recovered_block,
             &output,
             Some((&trie_updates, state_root)),
@@ -951,7 +962,7 @@ mod tests {
 
         // Test without trie updates (None case)
         let result = hook.validate_state_root_and_trie(
-            &parent_header,
+            hook.provider.state_by_block_hash(parent_header.hash()).unwrap().as_ref(),
             &recovered_block,
             hashed_state,
             None,
@@ -988,7 +999,7 @@ mod tests {
         assert!(validation_result.is_ok(), "Bundle state validation should succeed");
 
         let state_root_result = hook.validate_state_root_and_trie(
-            &parent_header,
+            hook.provider.state_by_block_hash(parent_header.hash()).unwrap().as_ref(),
             &invalid_block,
             hashed_state_for_bundle_state(bundle_state),
             Some((&trie_updates, B256::random())),
