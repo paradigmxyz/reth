@@ -1,0 +1,11 @@
+error: Attribute 'client' must be specified with 'client_bounds'
+ --> tests/ui/incorrect/rpc/rpc_bounds_without_impl.rs:8:11
+  |
+8 | pub trait ClientBoundsForbidden<Conf: Config> {
+  |           ^^^^^^^^^^^^^^^^^^^^^
+
+error: Attribute 'server' must be specified with 'server_bounds'
+  --> tests/ui/incorrect/rpc/rpc_bounds_without_impl.rs:14:11
+   |
+14 | pub trait ServerBoundsForbidden<Conf: Config> {
+   |           ^^^^^^^^^^^^^^^^^^^^^

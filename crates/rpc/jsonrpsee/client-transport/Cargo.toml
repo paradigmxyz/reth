@@ -1,0 +1,80 @@
+[package]
+name = "jsonrpsee-client-transport"
+description = "JSON-RPC client transports"
+version = "0.26.1"
+edition.workspace = true
+rust-version.workspace = true
+license = "MIT"
+homepage.workspace = true
+repository.workspace = true
+
+[lints.rust]
+rust_2024_compatibility = { level = "warn", priority = -1 }
+missing_docs = "warn"
+missing_debug_implementations = "warn"
+missing_copy_implementations = "warn"
+
+[lints.clippy]
+manual_async_fn = "allow"
+
+[dependencies]
+jsonrpsee-core = { workspace = true, features = ["client"] }
+
+# optional
+thiserror = { workspace = true, features = ["std"], optional = true }
+futures-util = { workspace = true, features = ["alloc"], optional = true }
+http = { workspace = true, optional = true }
+tracing = { workspace = true, features = ["std"], optional = true }
+tokio-util = { workspace = true, features = ["compat"], optional = true }
+tokio = { workspace = true, features = ["net", "time", "macros"], optional = true }
+pin-project = { workspace = true, optional = true }
+url = { workspace = true, features = ["std"], optional = true }
+base64 = { version = "0.22", default-features = false, features = ["alloc"], optional = true }
+
+# tls
+tokio-rustls = { version = "0.26", default-features = false, features = ["logging", "tls12", "ring"], optional = true }
+rustls-pki-types = { version = "1", optional = true }
+rustls-platform-verifier = { version = "0.5", optional = true }
+rustls = { version = "0.23", default-features = false, optional = true }
+
+# ws
+soketto = { version = "0.8.1", optional = true }
+
+# web-sys
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+gloo-net = { version = "0.6.0", default-features = false, features = ["json", "websocket"], optional = true }
+futures-channel = { version = "0.3.14", default-features = false, optional = true }
+
+[features]
+tls = ["rustls", "tokio-rustls", "rustls-pki-types"]
+tls-rustls-platform-verifier = ["tls", "rustls-platform-verifier"]
+
+ws = [
+    "base64",
+    "futures-util",
+    "http",
+    "tokio",
+    "tokio-util",
+    "soketto",
+    "pin-project",
+    "thiserror",
+    "tracing",
+    "url",
+]
+web = [
+    "gloo-net",
+    "futures-channel",
+    "futures-util",
+    "thiserror",
+]
+
+[dev-dependencies]
+# `rt` provides the `#[tokio::test]` runtime and the blocking pool `lookup_host` needs.
+tokio = { workspace = true, features = ["rt", "macros", "time"] }
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+
+[package.metadata.playground]
+all-features = true

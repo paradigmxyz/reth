@@ -1,0 +1,11 @@
+error: Only methods allowed in RPC traits
+ --> $DIR/rpc_assoc_items.rs:6:2
+  |
+6 |     const WOO: usize;
+  |     ^^^^^^^^^^^^^^^^^
+
+error: Only methods allowed in RPC traits
+  --> $DIR/rpc_assoc_items.rs:14:2
+   |
+14 |     type Woo;
+   |     ^^^^^^^^^
