@@ -62,6 +62,36 @@ execution leaves the engine thread, the cores it needs are taken by that work: o
 branch, `prewarm-txs` took 24% longer and the engine thread's involuntary context switches rose
 4.5x with the state root enabled.
 
+## What the node showed
+
+A local replay on the devbox (`ubuntu@dev-mattsse`, 16 cores with SMT, two CCDs) runs a mainnet
+node from a reth snapshot, extracts 500 recent blocks from it, unwinds, and replays them through
+the Engine API with `bench send-blocks`; stats exclude the first 100 blocks. main takes
+16.4-17.1 ms mean, 15.5-15.7 ms p50.
+
+A per-transaction timeline of the branch (`RETH_NP_TIMELINE` on an experiment branch) gave the
+committer's waits. In the first version the committer finished at 14 ms, 9 ms of it waiting, and a
+first speculative execution took 240 us on average, against 31 us for the same code in memory.
+Fixing what the profiles showed, in order:
+
+| Finding | Evidence | Change | Effect |
+|---|---|---|---|
+| Idle workers rescanned the refresh window on every stored result | 35% of worker time in `needs_refresh` (derek samply) | Readers register per key; changed predictions flag the later readers | derek +3.8% Mgas/s |
+| Every stored result woke all parked workers, then a wake per flagged reader under map and slot locks | 15% kernel scheduler time in workers; 74 ms mean with 32 workers | Wake only for queued transactions and flagged results, once per update | 32 workers: 74 -> 21 ms |
+| Too many speculation workers for the cores | 8-12 workers 14 ms vs 32 workers 16-17 ms locally; on derek the default 13 is best (6 and 8 are worse) | none yet: the best count follows physical cores | |
+| First inserts into the execution cache tables took copy-on-write faults from the zero page | 98% of the TLB shootdown IPIs sent by workers came from `wp_page_copy` in `CachedStateProvider`, 10% of worker time | Map the tables in the cache, huge pages, populate writable in the background | spec 150 -> 124 us |
+| A heavy transaction's speculation takes milliseconds while the committer waits | single waits of 2-6 ms in the timeline | Execute it on the committer after 300 us | locally -4% mean |
+| Cold reads inside a transaction are serial | 21% of accounts and 29% of slots per block were not read in the previous 400 blocks | Probe each transaction against the cache, fetch its misses on 128 I/O threads | spec 124 -> 107 us, not faster overall: probing costs worker time |
+
+Locally the branch now takes 12.5 ms mean, 11.5 ms p50 against 16.6-17.1 ms for main (-25%),
+with 8 workers. On derek, before racing, it is -3.5% mean, -7% p50, +10.6% Mgas/s.
+
+What still costs: a speculation is 3-4x the in-memory time. Of the workers' time, the balance
+inspector's per-opcode `step` and per-frame `initialize_interp` are ~15% (and keep the interpreter
+off its fast dispatch loop), predicted-state lookups 11%, the cache and overlay layers 12%, MDBX
+10%, precompiles 9%. Persistence interference is 19% on derek (all 500 blocks kept in memory) but
+4% locally; disabling MDBX's write map gains 2% locally.
+
 ## Rewrite: newPayload v2
 
 The v2 path replaces the per-block task graph instead of tuning it:
