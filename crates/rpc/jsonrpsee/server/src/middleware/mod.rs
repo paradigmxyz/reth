@@ -26,6 +26,4 @@
 
 //! jsonrpsee-server middleware
 
-/// HTTP related middleware.
-pub mod http;
 pub mod rpc;

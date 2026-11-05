@@ -1,14 +1,10 @@
-use crate::{
-    middleware::rpc::{RpcService, RpcServiceCfg},
-    server::{handle_rpc_call, ServerConfig},
-    BatchRequestConfig, ConnectionState, HttpRequest, HttpResponse, LOG_TARGET,
-};
+use crate::{server::handle_rpc_call, BatchRequestConfig, HttpRequest, HttpResponse, LOG_TARGET};
 use http::Method;
 use hyper::body::{Body, Bytes};
 use jsonrpsee_core::{
     http_helpers::{read_body, HttpError},
-    middleware::{RpcServiceBuilder, RpcServiceT},
-    server::{MethodResponse, Methods},
+    middleware::RpcServiceT,
+    server::MethodResponse,
     BoxError,
 };
 
@@ -27,46 +23,6 @@ pub fn is_json(content_type: Option<&hyper::header::HeaderValue>) -> bool {
             content.eq_ignore_ascii_case("application/json-rpc;charset=utf-8") ||
             content.eq_ignore_ascii_case("application/json-rpc; charset=utf-8")
     })
-}
-
-/// Make JSON-RPC HTTP call with a [`RpcServiceBuilder`]
-///
-/// Fails if the HTTP request was a malformed JSON-RPC request.
-pub async fn call_with_service_builder<L, B>(
-    request: HttpRequest<B>,
-    server_cfg: ServerConfig,
-    conn: ConnectionState,
-    methods: impl Into<Methods>,
-    rpc_service: RpcServiceBuilder<L>,
-) -> HttpResponse
-where
-    B: http_body::Body<Data = Bytes> + Send + 'static,
-    B::Data: Send,
-    B::Error: Into<BoxError>,
-    L: tower::Layer<RpcService>,
-    <L as tower::Layer<RpcService>>::Service: RpcServiceT<
-            MethodResponse = MethodResponse,
-            BatchResponse = MethodResponse,
-            NotificationResponse = MethodResponse,
-        > + Send,
-{
-    let ServerConfig {
-        max_response_body_size, batch_requests_config, max_request_body_size, ..
-    } = server_cfg;
-
-    let rpc_service = rpc_service.service(RpcService::new(
-        methods.into(),
-        max_response_body_size as usize,
-        conn.conn_id.into(),
-        RpcServiceCfg::OnlyCalls,
-    ));
-
-    let rp =
-        call_with_service(request, batch_requests_config, max_request_body_size, rpc_service).await;
-
-    drop(conn);
-
-    rp
 }
 
 /// Make JSON-RPC HTTP call with a service [`RpcServiceT`]
