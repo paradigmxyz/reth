@@ -149,6 +149,13 @@ impl RpcDescription {
                             #into_response::into_response(context.as_ref().#rust_method_name(#params_seq).await)
                         })
                     })
+                } else if method.blocking {
+                    self.handle_register_result(quote! {
+                        rpc.register_blocking_method(#rpc_method_name, |params, context| {
+                            #parsing
+                            #into_response::into_response(context.#rust_method_name(#params_seq))
+                        })
+                    })
                 } else {
                     self.handle_register_result(quote! {
                         rpc.register_method(#rpc_method_name, |params, context| {
