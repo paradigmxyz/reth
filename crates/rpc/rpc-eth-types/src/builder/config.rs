@@ -130,6 +130,7 @@ impl EthConfig {
             .max_logs_per_response(self.max_logs_per_response)
             .stale_filter_ttl(self.stale_filter_ttl)
             .max_response_size(self.max_response_size)
+            .max_concurrent_log_scans(self.max_blocking_io_requests)
     }
 }
 
@@ -300,6 +301,10 @@ pub struct EthFilterConfig {
     ///
     /// Includes array brackets and separators; the transport enforces response envelope overhead.
     pub max_response_size: Option<usize>,
+    /// Maximum number of concurrent range scans, independent of blocking IO permits.
+    ///
+    /// Scans wait asynchronously for admission. Zero prevents any range scan from starting.
+    pub max_concurrent_log_scans: usize,
 }
 
 impl EthFilterConfig {
@@ -327,6 +332,12 @@ impl EthFilterConfig {
         self.max_response_size = size;
         self
     }
+
+    /// Sets the maximum number of concurrent range scans. Zero disables scan admission.
+    pub const fn max_concurrent_log_scans(mut self, num: usize) -> Self {
+        self.max_concurrent_log_scans = num;
+        self
+    }
 }
 
 impl Default for EthFilterConfig {
@@ -337,6 +348,7 @@ impl Default for EthFilterConfig {
             // 5min
             stale_filter_ttl: DEFAULT_STALE_FILTER_TTL,
             max_response_size: default_max_response_size(),
+            max_concurrent_log_scans: DEFAULT_MAX_BLOCKING_IO_REQUEST,
         }
     }
 }

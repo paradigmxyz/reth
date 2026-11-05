@@ -510,6 +510,8 @@ mod tests {
             "200",
             "--rpc.max-response-size",
             "1",
+            "--rpc.max-blocking-io-requests",
+            "3",
         ])
         .args;
 
@@ -518,6 +520,7 @@ mod tests {
         assert_eq!(config.max_logs_per_response, Some(200));
         assert_eq!(config.max_response_size, Some(args.rpc_max_response_size_bytes() as usize));
         assert_eq!(config.max_response_size, Some(1024 * 1024));
+        assert_eq!(config.max_concurrent_log_scans, 3);
 
         let mut config = serde_json::to_value(args.eth_config()).unwrap();
         config.as_object_mut().unwrap().remove("max_response_size");
