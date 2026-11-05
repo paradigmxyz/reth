@@ -124,8 +124,11 @@ impl BalPrewarmPool {
         self.send_warm(PrewarmTarget::Code(hash));
     }
 
-    /// Warms `accounts`, `storage` slots and `code` in parallel across the workers and returns a
-    /// latch that [`WarmLatch::wait`] blocks on until all of them are loaded.
+    /// Warms `accounts`, `storage` slots and `code` in parallel across a share of the workers and
+    /// returns a latch that [`WarmLatch::wait`] blocks on until all of them are loaded.
+    ///
+    /// Only one in [`WARM_ALL_SHARE`] workers takes these loads, which bounds how many of them
+    /// queue on the disk ahead of block execution's own reads of a chain of dependent keys.
     pub fn warm_all(
         &self,
         accounts: impl IntoIterator<Item = Address>,
@@ -135,7 +138,8 @@ impl BalPrewarmPool {
         let latch = Arc::new(WarmLatch::default());
         let send = |target| {
             latch.remaining.fetch_add(1, Ordering::AcqRel);
-            let i = self.next.fetch_add(1, Ordering::Relaxed) % self.workers.len();
+            let workers = (self.workers.len() / WARM_ALL_SHARE).max(1);
+            let i = self.next.fetch_add(1, Ordering::Relaxed) % workers;
             if self.workers[i].send(PrewarmMsg::Warm(target, Some(Arc::clone(&latch)))).is_err() {
                 latch.done();
             }
@@ -225,6 +229,13 @@ impl WarmLatch {
 ///
 /// This should explain why this particular value is picked.
 pub const DEFAULT_BAL_PREWARM_THREADS: usize = 128;
+
+/// One in this many workers takes the loads of [`BalPrewarmPool::warm_all`].
+///
+/// On derek, which reads blocks from a cold page cache, loading probed keys on all 128 workers
+/// slowed blocks whose heaviest transaction walks a chain of dependent reads; a quarter of them cut
+/// p99 by 10%.
+const WARM_ALL_SHARE: usize = 4;
 
 /// Number of storage slots carried by one warm message.
 ///
