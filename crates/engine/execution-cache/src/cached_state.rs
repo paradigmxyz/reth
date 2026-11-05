@@ -124,7 +124,11 @@ pub struct CachedStateProvider<S> {
 /// Keys a probing [`CachedStateProvider`] did not find in the cache, which a probing execution
 /// read as missing instead of loading them.
 #[derive(Debug, Default)]
-pub struct ProbeMisses(Mutex<ProbeMissSet>);
+pub struct ProbeMisses(Mutex<ProbeMissSet>, core::sync::atomic::AtomicBool);
+
+/// Value missing storage slots read as in a probe that guesses large values, large enough to pass
+/// balance checks and small enough that adding to it does not overflow.
+pub const PROBE_STORAGE_GUESS: StorageValue = StorageValue::from_limbs([0, 0, 1, 0]);
 
 /// The keys recorded by [`ProbeMisses`], in the order they were read.
 #[derive(Debug, Default)]
@@ -148,6 +152,18 @@ impl ProbeMisses {
     /// Takes the keys recorded since the last call.
     pub fn take(&self) -> ProbeMissSet {
         core::mem::take(&mut *self.0.lock())
+    }
+
+    /// Sets whether missing storage slots read as [`PROBE_STORAGE_GUESS`] instead of zero.
+    ///
+    /// A large guess lets balance and allowance checks pass, so that a probe of a batch call
+    /// reaches the keys of every item instead of stopping at the first check.
+    pub fn guess_large(&self, large: bool) {
+        self.1.store(large, core::sync::atomic::Ordering::Relaxed);
+    }
+
+    fn storage_guess(&self) -> Option<StorageValue> {
+        self.1.load(core::sync::atomic::Ordering::Relaxed).then_some(PROBE_STORAGE_GUESS)
     }
 }
 
@@ -947,7 +963,7 @@ impl<S: EvmStateProvider> EvmStateProvider for CachedStateProvider<S> {
                 Some(value) => nonzero_storage_value(value),
                 None => {
                     misses.0.lock().storage.push((account, storage_key));
-                    None
+                    misses.storage_guess()
                 }
             })
         }
