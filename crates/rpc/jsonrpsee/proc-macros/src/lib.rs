@@ -140,6 +140,8 @@ pub(crate) mod visitor;
 ///   name.
 /// - `aliases`: list of name aliases for the RPC method as a comma separated string. Aliases are
 ///   processed ignoring the namespace, so add the complete name, including the namespace.
+/// - `blocking`: when set method execution will always spawn on a dedicated thread. Only usable
+///   with non-`async` methods.
 ///
 /// **Method requirements:**
 ///
