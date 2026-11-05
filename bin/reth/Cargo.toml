@@ -21,6 +21,7 @@ assets = [
     ["../../LICENSE-APACHE", "usr/share/doc/reth/", "644"],
     ["../../LICENSE-MIT", "usr/share/doc/reth/", "644"],
     ["../../LICENSES/*", "usr/share/doc/reth/LICENSES/", "644"],
+    ["../../crates/rpc/jsonrpsee/LICENSE", "usr/share/doc/reth/LICENSES/jsonrpsee-MIT.txt", "644"],
 ]
 systemd-units = { enable = false, start = false, unit-name = "reth", unit-scripts = "../../pkg/reth/debian" }
 

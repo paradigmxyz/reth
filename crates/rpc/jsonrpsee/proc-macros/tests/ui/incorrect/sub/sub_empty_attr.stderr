@@ -1,0 +1,5 @@
+error: Missing argument `name`
+ --> $DIR/sub_empty_attr.rs:6:4
+  |
+6 |     #[subscription()]
+  |       ^^^^^^^^^^^^

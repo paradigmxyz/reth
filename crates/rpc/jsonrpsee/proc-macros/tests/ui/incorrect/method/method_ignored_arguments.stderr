@@ -1,0 +1,5 @@
+error: Method argument names must be valid Rust identifiers; got `_` instead
+ --> $DIR/method_ignored_arguments.rs:6:20
+  |
+6 |     async fn a(&self, _: Vec<u8>);
+  |                       ^

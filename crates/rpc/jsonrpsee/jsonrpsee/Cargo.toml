@@ -1,0 +1,57 @@
+[package]
+name = "jsonrpsee"
+description = "JSON-RPC client/server framework"
+version = "0.26.1"
+authors = ["Parity Technologies <admin@parity.io>", "Pierre Krieger <pierre.krieger1708@gmail.com>"]
+edition.workspace = true
+rust-version.workspace = true
+license = "MIT"
+homepage.workspace = true
+repository.workspace = true
+
+[lints.rust]
+rust_2024_compatibility = { level = "warn", priority = -1 }
+missing_docs = "warn"
+missing_debug_implementations = "warn"
+missing_copy_implementations = "warn"
+
+[lints.clippy]
+manual_async_fn = "allow"
+
+[dependencies]
+# No support for namespaced features yet so workspace dependencies are prefixed with `jsonrpsee-`.
+# See https://github.com/rust-lang/cargo/issues/5565 for more details.
+jsonrpsee-http-client = { workspace = true, optional = true }
+jsonrpsee-ws-client = { workspace = true, optional = true }
+jsonrpsee-wasm-client = { workspace = true, optional = true }
+jsonrpsee-client-transport = { workspace = true, optional = true }
+jsonrpsee-server = { workspace = true, optional = true }
+jsonrpsee-proc-macros = { workspace = true, optional = true }
+jsonrpsee-core = { workspace = true, optional = true }
+jsonrpsee-types = { workspace = true, optional = true }
+tracing = { workspace = true, features = ["std"], optional = true }
+tokio = { workspace = true, optional = true }
+
+[features]
+client-ws-transport-tls = ["jsonrpsee-client-transport/ws", "jsonrpsee-client-transport/tls-rustls-platform-verifier"]
+client-ws-transport-no-tls = ["jsonrpsee-client-transport/ws"]
+client-web-transport = ["jsonrpsee-client-transport/web"]
+async-client = ["jsonrpsee-core/async-client"]
+async-wasm-client = ["jsonrpsee-core/async-wasm-client"]
+http-client = ["jsonrpsee-http-client", "jsonrpsee-types", "jsonrpsee-core/client"]
+wasm-client = ["jsonrpsee-wasm-client", "jsonrpsee-types", "jsonrpsee-core/client"]
+ws-client = ["jsonrpsee-ws-client", "jsonrpsee-types", "jsonrpsee-core/client"]
+macros = ["jsonrpsee-proc-macros", "jsonrpsee-types", "tracing"]
+
+client = ["http-client", "ws-client", "wasm-client", "client-ws-transport-tls", "client-web-transport", "async-client", "async-wasm-client", "client-core"]
+client-core = ["jsonrpsee-core/client"]
+server = ["jsonrpsee-server", "server-core", "jsonrpsee-types", "tokio"]
+server-core = ["jsonrpsee-core/server"]
+full = ["client", "server", "macros"]
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+
+[package.metadata.playground]
+all-features = true

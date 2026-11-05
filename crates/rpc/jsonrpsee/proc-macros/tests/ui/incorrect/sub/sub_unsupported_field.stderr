@@ -1,0 +1,5 @@
+error: Unknown argument `magic`, expected one of: `aliases`, `item`, `name`, `param_kind`, `unsubscribe`, `unsubscribe_aliases`, `with_extensions`
+ --> tests/ui/incorrect/sub/sub_unsupported_field.rs:6:65
+  |
+6 |     #[subscription(name = "sub", unsubscribe = "unsub", item = u8, magic = true)]
+  |                                                                    ^^^^^

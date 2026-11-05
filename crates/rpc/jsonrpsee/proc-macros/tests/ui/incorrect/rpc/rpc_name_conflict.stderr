@@ -1,0 +1,5 @@
+error: "foo" is already defined
+  --> $DIR/rpc_name_conflict.rs:10:11
+   |
+10 |     async fn bar(&self) -> RpcResult<u8>;
+   |              ^^^
