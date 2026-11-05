@@ -1,4 +1,7 @@
-use std::{sync::Arc, time::Instant};
+use std::{
+    sync::Arc,
+    time::{Duration, Instant},
+};
 
 use crate::{
     future::{IntervalStream, SessionClose},
@@ -26,7 +29,7 @@ use serde_json::value::RawValue;
 use soketto::{connection::Error as SokettoError, data::ByteSlice125};
 use tokio::{
     sync::{mpsc, oneshot},
-    time::{interval, interval_at},
+    time::{interval, interval_at, timeout},
 };
 use tokio_stream::wrappers::ReceiverStream;
 use tokio_util::compat::{Compat, TokioAsyncReadCompatExt};
@@ -95,12 +98,19 @@ where
         mut on_session_close,
         extensions,
     } = params;
-    let ServerConfig { ping_config, batch_requests_config, max_request_body_size, .. } = server_cfg;
+    let ServerConfig {
+        ping_config,
+        batch_requests_config,
+        max_request_body_size,
+        ws_write_timeout,
+        ..
+    } = server_cfg;
 
     let (conn_tx, conn_rx) = oneshot::channel();
 
     // Spawn another task that sends out the responses on the Websocket.
-    let send_task_handle = tokio::spawn(send_task(rx, ws_sender, ping_config, conn_rx));
+    let send_task_handle =
+        tokio::spawn(send_task(rx, ws_sender, ping_config, ws_write_timeout, conn_rx));
 
     let stopped = conn.stop_handle.clone().shutdown();
     let rpc_service = Arc::new(rpc_service);
@@ -124,7 +134,13 @@ where
     tokio::pin!(ws_stream);
 
     let result = loop {
-        let data = match try_recv(&mut ws_stream, stopped, ping_config, &mut missed_pings).await {
+        let receive = tokio::select! {
+            receive = try_recv(&mut ws_stream, stopped, ping_config, &mut missed_pings) => receive,
+            // The send task has terminated, e.g. because a write timed out, so nothing can be sent
+            // back to the client anymore.
+            _ = sink.closed() => break Ok(Shutdown::ConnectionClosed),
+        };
+        let data = match receive {
             Receive::ConnectionClosed => break Ok(Shutdown::ConnectionClosed),
             Receive::Stopped => break Ok(Shutdown::Stopped),
             Receive::Ok(data, stop) => {
@@ -225,6 +241,7 @@ async fn send_task(
     rx: mpsc::Receiver<Box<RawValue>>,
     mut ws_sender: Sender,
     ping_config: Option<PingConfig>,
+    write_timeout: Duration,
     stop: oneshot::Receiver<()>,
 ) {
     let ping_interval = match ping_config {
@@ -242,6 +259,7 @@ async fn send_task(
     let mut rx_item = rx.next();
     let next_ping = ping_interval.next();
     let mut futs = future::select(next_ping, stop);
+    let mut write_timed_out = false;
 
     loop {
         // Ensure select is cancel-safe by fetching and storing the `rx_item` that did not finish
@@ -251,9 +269,17 @@ async fn send_task(
             // Received message.
             Either::Left((Some(response), not_ready)) => {
                 // If websocket message send fail then terminate the connection.
-                if let Err(err) = send_message(&mut ws_sender, response).await {
-                    tracing::debug!(target: LOG_TARGET, "WS send error: {}", err);
-                    break;
+                match timeout(write_timeout, send_message(&mut ws_sender, response)).await {
+                    Ok(Ok(())) => {}
+                    Ok(Err(err)) => {
+                        tracing::debug!(target: LOG_TARGET, "WS send error: {}", err);
+                        break;
+                    }
+                    Err(_) => {
+                        tracing::debug!(target: LOG_TARGET, "WS send timed out after {write_timeout:?}");
+                        write_timed_out = true;
+                        break;
+                    }
                 }
 
                 rx_item = rx.next();
@@ -268,9 +294,17 @@ async fn send_task(
             // Handle timer intervals.
             Either::Right((Either::Left((_instant, _stopped)), next_rx)) => {
                 stop = _stopped;
-                if let Err(err) = send_ping(&mut ws_sender).await {
-                    tracing::debug!(target: LOG_TARGET, "WS send ping error: {}", err);
-                    break;
+                match timeout(write_timeout, send_ping(&mut ws_sender)).await {
+                    Ok(Ok(())) => {}
+                    Ok(Err(err)) => {
+                        tracing::debug!(target: LOG_TARGET, "WS send ping error: {}", err);
+                        break;
+                    }
+                    Err(_) => {
+                        tracing::debug!(target: LOG_TARGET, "WS send ping timed out after {write_timeout:?}");
+                        write_timed_out = true;
+                        break;
+                    }
                 }
 
                 rx_item = next_rx;
@@ -283,9 +317,16 @@ async fn send_task(
         }
     }
 
-    // Terminate connection and send close message.
-    let _ = ws_sender.close().await;
+    // Closing `rx` makes `MethodSink::closed` resolve, which stops the receive loop, pending calls
+    // and subscriptions of this connection. Messages still queued are dropped with this task.
     rx.close();
+
+    // Send the close message, unless a write already timed out: the client isn't reading, so the
+    // close frame would block on the same full socket. The receive half is dropped by the
+    // connection task, which closes the socket.
+    if !write_timed_out {
+        let _ = timeout(write_timeout, ws_sender.close()).await;
+    }
 }
 
 enum Receive<S> {
