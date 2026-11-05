@@ -183,6 +183,9 @@ pub(super) struct SparseTrieCacheTask<A = ArenaParallelSparseTrie, S = ArenaPara
     pending_targets: PendingTargets,
     /// Proof jobs queued on the workers whose results have not been received yet.
     in_flight_proof_jobs: usize,
+    /// Proof target batches dispatched after the finish marker. Each is a round trip the root
+    /// waits for unless it overlaps an earlier one.
+    proof_rounds_after_finish: u64,
     /// Everything the task knows about a storage trie touched by this block: the trie itself, its
     /// queued leaf updates, the proof nodes waiting to be revealed into it and its proof target
     /// cache. See [`StorageTrieState`].
@@ -267,6 +270,7 @@ where
             storage_cache_misses: 0,
             pending_targets: Default::default(),
             in_flight_proof_jobs: 0,
+            proof_rounds_after_finish: 0,
             storage: Default::default(),
             storage_to_drop: Default::default(),
             storage_in_flight: 0,
@@ -370,6 +374,7 @@ where
         let mut idle_start = Instant::now();
         let mut done = false;
         let mut finalized_hashed_state = None;
+        let mut finished_at = now;
 
         // Streaming phase: updates are still arriving. Ends when the finish marker is
         // processed. Only producers hold update senders, so the channel closing before the
@@ -389,6 +394,7 @@ where
                     ))?;
                     if let Some(hashed_state) = self.on_message(update) {
                         finalized_hashed_state = Some(hashed_state);
+                        finished_at = wake;
                     }
                     self.pending_updates += 1;
                 }
@@ -492,6 +498,12 @@ where
         let end = Instant::now();
         self.metrics.sparse_trie_final_update_duration_histogram.record(end.duration_since(start));
         self.metrics.sparse_trie_total_duration_histogram.record(end.duration_since(now));
+        self.metrics
+            .sparse_trie_finish_to_root_duration_histogram
+            .record(end.duration_since(finished_at));
+        self.metrics
+            .sparse_trie_proof_rounds_after_finish_histogram
+            .record(self.proof_rounds_after_finish as f64);
 
         self.metrics.sparse_trie_account_cache_hits.record(self.account_cache_hits as f64);
         self.metrics.sparse_trie_account_cache_misses.record(self.account_cache_misses as f64);
@@ -1118,6 +1130,9 @@ where
         }
 
         let _span = trace_span!("dispatch_pending_targets").entered();
+        if self.finished_state_updates {
+            self.proof_rounds_after_finish += 1;
+        }
         let (targets, chunking_length) = self.pending_targets.take();
         let mut dispatch_error = None;
         dispatch_with_chunking(
@@ -1511,6 +1526,11 @@ pub(super) struct SparseTrieTaskMetrics {
     pub(super) sparse_trie_final_update_duration_histogram: Histogram,
     /// Histogram of sparse trie total durations.
     pub(super) sparse_trie_total_duration_histogram: Histogram,
+    /// Histogram of durations from receiving the finish marker to the computed root: the part of
+    /// the state root that does not overlap block execution.
+    pub(super) sparse_trie_finish_to_root_duration_histogram: Histogram,
+    /// Histogram of proof target batches dispatched after the finish marker.
+    pub(super) sparse_trie_proof_rounds_after_finish_histogram: Histogram,
     /// Time spent preparing the sparse trie for reuse after state root computation.
     pub(super) into_trie_for_reuse_duration_histogram: Histogram,
     /// Time spent pruning the sparse trie by node epoch.
