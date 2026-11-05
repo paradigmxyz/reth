@@ -135,7 +135,9 @@ impl BalPrewarmPool {
         let latch = Arc::new(WarmLatch::default());
         let send = |target| {
             latch.remaining.fetch_add(1, Ordering::AcqRel);
-            let i = self.next.fetch_add(1, Ordering::Relaxed) % self.workers.len();
+            // Experiment: probe loads use at most a quarter of the workers, which bounds how many
+            // of them queue on the disk ahead of block execution's own reads.
+            let i = self.next.fetch_add(1, Ordering::Relaxed) % (self.workers.len() / 4).max(1);
             if self.workers[i].send(PrewarmMsg::Warm(target, Some(Arc::clone(&latch)))).is_err() {
                 latch.done();
             }
