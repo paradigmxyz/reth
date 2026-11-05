@@ -1358,10 +1358,28 @@ mod tests {
         /// Executes the transactions at the indices in `order`, then refreshes stale results
         /// among them in block order.
         fn new(txs: &'a [Recovered<TransactionSigned>], order: &[usize]) -> Self {
+            Self::with_beneficiary(txs, order, BENEFICIARY, false)
+        }
+
+        /// Like [`Self::new`], for blocks with `beneficiary`, whose balance-only writes are not
+        /// predicted if `unpredicted` is set.
+        fn with_beneficiary(
+            txs: &'a [Recovered<TransactionSigned>],
+            order: &[usize],
+            beneficiary: Address,
+            unpredicted: bool,
+        ) -> Self {
             let recording = RecordingHandle::default();
+            let mut env = evm_env(true);
+            env.block.beneficiary = beneficiary;
             let evm = EthEvmConfig::mainnet()
-                .evm_with_env(RecordingDb::new(parent_state(), recording.clone()), evm_env(true));
-            let mut prewarm = Self { txs, results: Results::new(txs.len()), evm, recording };
+                .evm_with_env(RecordingDb::new(parent_state(), recording.clone()), env);
+            let results = if unpredicted {
+                Results::with_unpredicted_account(txs.len(), beneficiary)
+            } else {
+                Results::new(txs.len())
+            };
+            let mut prewarm = Self { txs, results, evm, recording };
             for &index in order {
                 prewarm.run(index);
             }
@@ -1947,5 +1965,69 @@ mod tests {
         let mut balances = BalanceTracker { read_failed: true, ..Default::default() };
         let tx = tx(1, 0, NOOP, 0);
         assert!(reads.finish(&mut balances, SpeculativeTx::new(tx.signer(), tx.inner())).is_err());
+    }
+
+    /// Targets of the generated transactions, which depend on each other through balances,
+    /// nonces, storage, the beneficiary and destroyed accounts.
+    const FUZZ_TARGETS: [Address; 14] = [
+        NOOP,
+        COUNTER,
+        BENEFICIARY_BALANCE_READER,
+        SELF_BALANCE_READER,
+        FORWARDER,
+        SELFDESTRUCTER,
+        TIMESTAMP_READER,
+        BENEFICIARY_BALANCE_BY_ADDRESS,
+        EMPTY,
+        ZERO_BALANCE,
+        BENEFICIARY,
+        Address::repeat_byte(1),
+        Address::repeat_byte(2),
+        Address::repeat_byte(0x99),
+    ];
+
+    /// Beneficiaries of the generated blocks: funded, a sender, empty, absent and a contract.
+    const FUZZ_BENEFICIARIES: [Address; 5] =
+        [BENEFICIARY, Address::repeat_byte(2), EMPTY, Address::repeat_byte(0x99), COUNTER];
+
+    proptest::proptest! {
+        #![proptest_config(proptest::prelude::ProptestConfig::with_cases(512))]
+
+        /// Reusing results speculated in any order produces the output of sequential execution.
+        #[test]
+        fn fuzz_reuse_matches_sequential_execution(
+            calls in proptest::collection::vec(
+                (1u8..=4, 0..FUZZ_TARGETS.len(), 0u64..20, proptest::bool::ANY),
+                1..24,
+            ),
+            beneficiary in 0..FUZZ_BENEFICIARIES.len(),
+            order_seed in proptest::prelude::any::<u64>(),
+            publish in proptest::bool::ANY,
+            unpredicted in proptest::bool::ANY,
+        ) {
+            let mut nonces = [0u64; 5];
+            let txs = calls
+                .iter()
+                .map(|&(from, target, value, low_gas)| {
+                    let nonce = nonces[from as usize];
+                    nonces[from as usize] += 1;
+                    let gas_limit = if low_gas { 30_000 } else { 100_000 };
+                    tx_with_gas_limit(from, nonce, FUZZ_TARGETS[target], value, gas_limit)
+                })
+                .collect::<Vec<_>>();
+            let mut order = (0..txs.len()).collect::<Vec<_>>();
+            let mut rng = order_seed;
+            for i in (1..order.len()).rev() {
+                rng = rng.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+                order.swap(i, (rng >> 33) as usize % (i + 1));
+            }
+            let beneficiary = FUZZ_BENEFICIARIES[beneficiary];
+            let mut prewarm = Prewarm::with_beneficiary(&txs, &order, beneficiary, unpredicted);
+            let reused = execute(&txs, Some(&mut prewarm), publish, beneficiary);
+            let expected = execute(&txs, None, false, beneficiary);
+            proptest::prop_assert_eq!(reused.receipts, expected.receipts);
+            proptest::prop_assert_eq!(reused.bundle, expected.bundle);
+            proptest::prop_assert_eq!(reused.changes, expected.changes);
+        }
     }
 }
