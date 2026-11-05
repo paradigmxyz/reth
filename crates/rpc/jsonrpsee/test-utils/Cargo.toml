@@ -9,10 +9,13 @@ homepage.workspace = true
 repository.workspace = true
 publish = false
 
+[lints.rust]
+rust_2024_compatibility = { level = "warn", priority = -1 }
+
 [dependencies]
 futures-util = { workspace = true, features = ["default"] }
 hyper = { workspace = true }
-hyper-util = { workspace = true, features = ["tokio", "client-legacy"] }
+hyper-util = { workspace = true, features = ["tokio", "client-legacy", "http1", "http2"] }
 http-body-util = { workspace = true }
 serde = { workspace = true, features = ["derive", "alloc"] }
 serde_json = { workspace = true, features = ["raw_value"] }
