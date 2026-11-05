@@ -294,6 +294,10 @@ impl<T: evm2::EvmTypesHost, I: evm2::Inspector<T>> evm2::Inspector<T> for Traced
         self.0.initialize_interp(interp);
     }
 
+    fn inspector_config(&self) -> evm2::InspectorConfig {
+        self.0.inspector_config()
+    }
+
     fn step(&mut self, interp: &mut Interpreter<'_, '_, T>) {
         self.0.step(interp);
     }
@@ -1669,6 +1673,22 @@ mod tests {
     use super::*;
     use alloy_eips::eip2930::AccessListItem;
     use alloy_primitives::{Bytes, TxKind, U256};
+
+    #[test]
+    fn traced_inspector_forwards_inspector_config() {
+        struct NoSteps;
+        impl<T: evm2::EvmTypesHost> evm2::Inspector<T> for NoSteps {
+            fn inspector_config(&self) -> evm2::InspectorConfig {
+                evm2::InspectorConfig::without_steps()
+            }
+        }
+
+        // a tracer that skips step hooks must not run every opcode through the inspected table
+        assert_eq!(
+            evm2::Inspector::<evm2::BaseEvmTypes>::inspector_config(&TracedInspector(NoSteps)),
+            evm2::InspectorConfig::without_steps(),
+        );
+    }
 
     #[test]
     fn transaction_env_mut_upgrades_legacy_with_access_list() {
