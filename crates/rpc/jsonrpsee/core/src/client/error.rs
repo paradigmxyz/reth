@@ -26,55 +26,55 @@
 
 //! Error type for client(s).
 
-use crate::{BoxError, RegisterMethodError, params::EmptyBatchRequest};
+use crate::{params::EmptyBatchRequest, BoxError, RegisterMethodError};
 use jsonrpsee_types::{ErrorObjectOwned, InvalidRequestId};
 use std::sync::Arc;
 
 /// Error type.
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
-	/// JSON-RPC error which can occur when a JSON-RPC call fails.
-	#[error("{0}")]
-	Call(#[from] ErrorObjectOwned),
-	/// Networking error or error on the low-level protocol layer.
-	#[error(transparent)]
-	Transport(BoxError),
-	/// The background task has been terminated.
-	#[error("The background task closed {0}; restart required")]
-	RestartNeeded(Arc<Error>),
-	/// Failed to parse the data.
-	#[error("Parse error: {0}")]
-	ParseError(#[from] serde_json::Error),
-	/// Invalid subscription ID.
-	#[error("Invalid subscription ID")]
-	InvalidSubscriptionId,
-	/// Invalid request ID.
-	#[error(transparent)]
-	InvalidRequestId(#[from] InvalidRequestId),
-	/// Request timeout
-	#[error("Request timeout")]
-	RequestTimeout,
-	/// Custom error.
-	#[error("Custom error: {0}")]
-	Custom(String),
-	/// Not implemented for HTTP clients.
-	#[error("Not implemented")]
-	HttpNotImplemented,
-	/// Empty batch request.
-	#[error(transparent)]
-	EmptyBatchRequest(#[from] EmptyBatchRequest),
-	/// The error returned when registering a method or subscription failed.
-	#[error(transparent)]
-	RegisterMethod(#[from] RegisterMethodError),
-	/// An internal state when the underlying RpcService
-	/// got disconnected and the error must be fetched
-	/// from the backend.
-	//
-	// NOTE: This is a workaround where an error occurred in
-	// underlying RpcService implementation in the async client
-	// but we don't want to expose different error types for
-	// ergonomics when writing middleware.
-	#[error("RPC service disconnected")]
-	#[doc(hidden)]
-	ServiceDisconnect,
+    /// JSON-RPC error which can occur when a JSON-RPC call fails.
+    #[error("{0}")]
+    Call(#[from] ErrorObjectOwned),
+    /// Networking error or error on the low-level protocol layer.
+    #[error(transparent)]
+    Transport(BoxError),
+    /// The background task has been terminated.
+    #[error("The background task closed {0}; restart required")]
+    RestartNeeded(Arc<Error>),
+    /// Failed to parse the data.
+    #[error("Parse error: {0}")]
+    ParseError(#[from] serde_json::Error),
+    /// Invalid subscription ID.
+    #[error("Invalid subscription ID")]
+    InvalidSubscriptionId,
+    /// Invalid request ID.
+    #[error(transparent)]
+    InvalidRequestId(#[from] InvalidRequestId),
+    /// Request timeout
+    #[error("Request timeout")]
+    RequestTimeout,
+    /// Custom error.
+    #[error("Custom error: {0}")]
+    Custom(String),
+    /// Not implemented for HTTP clients.
+    #[error("Not implemented")]
+    HttpNotImplemented,
+    /// Empty batch request.
+    #[error(transparent)]
+    EmptyBatchRequest(#[from] EmptyBatchRequest),
+    /// The error returned when registering a method or subscription failed.
+    #[error(transparent)]
+    RegisterMethod(#[from] RegisterMethodError),
+    /// An internal state when the underlying RpcService
+    /// got disconnected and the error must be fetched
+    /// from the backend.
+    //
+    // NOTE: This is a workaround where an error occurred in
+    // underlying RpcService implementation in the async client
+    // but we don't want to expose different error types for
+    // ergonomics when writing middleware.
+    #[error("RPC service disconnected")]
+    #[doc(hidden)]
+    ServiceDisconnect,
 }

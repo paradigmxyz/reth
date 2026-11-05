@@ -36,30 +36,35 @@ use jsonrpsee_types::SubscriptionId;
 pub struct RandomIntegerIdProvider;
 
 impl IdProvider for RandomIntegerIdProvider {
-	fn next_id(&self) -> SubscriptionId<'static> {
-		const JS_NUM_MASK: u64 = !0 >> 11;
-		(rand::random::<u64>() & JS_NUM_MASK).into()
-	}
+    fn next_id(&self) -> SubscriptionId<'static> {
+        const JS_NUM_MASK: u64 = !0 >> 11;
+        (rand::random::<u64>() & JS_NUM_MASK).into()
+    }
 }
 
 /// Generates random strings of length `len` as subscription ID.
 #[derive(Debug, Copy, Clone)]
 pub struct RandomStringIdProvider {
-	len: usize,
+    len: usize,
 }
 
 impl RandomStringIdProvider {
-	/// Create a new random string provider.
-	pub fn new(len: usize) -> Self {
-		Self { len }
-	}
+    /// Create a new random string provider.
+    pub fn new(len: usize) -> Self {
+        Self { len }
+    }
 }
 
 impl IdProvider for RandomStringIdProvider {
-	fn next_id(&self) -> SubscriptionId<'static> {
-		let mut rng = rand::rng();
-		(&mut rng).sample_iter(Alphanumeric).take(self.len).map(char::from).collect::<String>().into()
-	}
+    fn next_id(&self) -> SubscriptionId<'static> {
+        let mut rng = rand::rng();
+        (&mut rng)
+            .sample_iter(Alphanumeric)
+            .take(self.len)
+            .map(char::from)
+            .collect::<String>()
+            .into()
+    }
 }
 
 /// No-op implementation to be used for servers that don't support subscriptions.
@@ -67,7 +72,7 @@ impl IdProvider for RandomStringIdProvider {
 pub struct NoopIdProvider;
 
 impl IdProvider for NoopIdProvider {
-	fn next_id(&self) -> SubscriptionId<'static> {
-		0.into()
-	}
+    fn next_id(&self) -> SubscriptionId<'static> {
+        0.into()
+    }
 }
