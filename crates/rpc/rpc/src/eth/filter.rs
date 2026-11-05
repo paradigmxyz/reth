@@ -34,7 +34,7 @@ use reth_rpc_eth_types::{
     logs_utils::{self, try_for_each_matching_block_log, ProviderOrBlock},
     EthApiError, EthFilterConfig, EthStateCache, EthSubscriptionIdProvider,
 };
-use reth_rpc_server_types::{result::rpc_error_with_code, BatchResponseCommit, ToRpcResult};
+use reth_rpc_server_types::{result::rpc_error_with_code, ToRpcResult};
 use reth_storage_api::{
     BlockHashReader, BlockIdReader, BlockNumReader, BlockReader, HeaderProvider, ProviderBlock,
     ProviderReceipt, ReceiptProvider,
@@ -49,10 +49,7 @@ use std::{
     iter::{Peekable, StepBy},
     ops::RangeInclusive,
     pin::Pin,
-    sync::{
-        atomic::{AtomicU64, Ordering},
-        Arc,
-    },
+    sync::Arc,
     time::{Duration, Instant},
 };
 use tokio::{
@@ -248,8 +245,6 @@ where
     /// Concurrent polls of the same filter are serialized. Collection errors or cancellation leave
     /// its block cursor unchanged so a retry does not skip undelivered changes. Only successful
     /// polls refresh the expiry timeout, allowing persistently failing filters to be evicted.
-    /// Batched log polls commit only when the entire batch response fits; overlapping polls can
-    /// observe the same uncommitted window.
     /// Future starts and completed ranges return no changes; future ends are capped at the head.
     pub async fn filter_changes(
         &self,
@@ -264,10 +259,10 @@ where
         };
 
         // Serialize collection for this filter without blocking other filters.
-        let _poll = filter.poll.lock().await;
+        let mut block = filter.block.lock().await;
         let info = self.provider().chain_info()?;
         let best_number = info.best_number;
-        let start_block = filter.block.load(Ordering::Relaxed);
+        let start_block = *block;
         let mut next_block = start_block.max(best_number + 1);
         let changes = match filter.kind.clone() {
             // No new blocks since the last successful poll.
@@ -333,22 +328,9 @@ where
                 FilterChanges::Logs(logs)
             }
         };
-        let update = {
-            let filter = filter.clone();
-            move || {
-                // An older batch can finish after a newer poll, so never rewind its cursor.
-                filter.block.fetch_max(next_block, Ordering::Relaxed);
-                *filter.last_poll_timestamp.lock() = Instant::now();
-            }
-        };
-        if matches!(&filter.kind, FilterKind::Log(_)) {
-            // A later response can overflow the batch. Leave this window available until the
-            // complete batch is accepted. Overlapping polls may therefore return the same logs.
-            commit_log_poll(update);
-        } else {
-            // Do not yield after destructively draining pending events.
-            update();
-        }
+        // Do not yield after destructively draining pending events.
+        *filter.last_poll_timestamp.lock() = Instant::now();
+        *block = next_block;
         Ok(changes)
     }
 
@@ -375,7 +357,7 @@ where
             .clone()
             .logs_for_filter(*inner_filter.clone(), self.inner.query_limits(), true)
             .await?;
-        commit_log_poll(move || *filter.last_poll_timestamp.lock() = Instant::now());
+        *filter.last_poll_timestamp.lock() = Instant::now();
         Ok(logs)
     }
 
@@ -394,8 +376,6 @@ where
     /// The transport's limit is supplied per call, including calls within batches. Direct Rust
     /// calls continue to use the configured result budget; Engine queries retain explicit limits.
     /// This constructor adds transport accounting to the generated `EthFilterApiServer` handlers.
-    /// Batch dispatchers supply [`BatchResponseCommit`] to defer log poll updates until the whole
-    /// batch response fits its limit.
     pub fn into_rpc(self) -> RpcModule<Self> {
         let mut module = EthFilterApiServer::into_rpc(self);
         for name in ["eth_getLogs", "eth_getFilterLogs", "eth_getFilterChanges"] {
@@ -422,24 +402,9 @@ where
                     }
                     // The collector accounts for the empty result's two brackets itself.
                     let result_limit = budget.remaining.map(|remaining| remaining + 2);
-                    let batch = extensions.get::<BatchResponseCommit>().cloned();
-                    let pending = batch.as_ref().map(|_| BatchResponseCommit::default());
-                    let context = LogResponseContext {
-                        max_response_size: result_limit,
-                        batch: pending.clone(),
-                    };
-                    let response = LOG_RESPONSE_CONTEXT
-                        .scope(context, callback(id, params, conn_id, max_size, extensions));
-                    async move {
-                        let response = response.await;
-                        if response.is_success() &&
-                            let (Some(batch), Some(pending)) = (batch, pending)
-                        {
-                            batch.defer(move || pending.commit());
-                        }
-                        response
-                    }
-                    .boxed()
+                    LOG_RESPONSE_LIMIT
+                        .scope(result_limit, callback(id, params, conn_id, max_size, extensions))
+                        .boxed()
                 },
             ));
             assert!(
@@ -798,8 +763,7 @@ where
         filters.insert(
             id.clone(),
             Arc::new(ActiveFilter {
-                block: AtomicU64::new(last_poll_block_number),
-                poll: Mutex::new(()),
+                block: Mutex::new(last_poll_block_number),
                 last_poll_timestamp: parking_lot::Mutex::new(Instant::now()),
                 kind,
             }),
@@ -1008,9 +972,7 @@ where
     /// Applies the transport's envelope-adjusted result budget when serving an RPC request.
     fn query_limits(&self) -> QueryLimits {
         let mut limits = self.query_limits;
-        if let Ok(Some(transport_limit)) =
-            LOG_RESPONSE_CONTEXT.try_with(|context| context.max_response_size)
-        {
+        if let Ok(Some(transport_limit)) = LOG_RESPONSE_LIMIT.try_with(|limit| *limit) {
             limits.max_response_size = Some(
                 limits
                     .max_response_size
@@ -1057,10 +1019,8 @@ impl<T> ActiveFilters<T> {
 /// An installed filter
 #[derive(Debug)]
 struct ActiveFilter<T> {
-    /// Next block to poll. Batch responses commit this only after the entire response fits.
-    block: AtomicU64,
-    /// Serializes collection without holding a lock until a batch finishes.
-    poll: Mutex<()>,
+    /// Next block to poll, locked until collection finishes to serialize concurrent polls.
+    block: Mutex<u64>,
     /// Last time this filter was successfully polled, or installed if it has not been polled yet.
     /// This lock is never held across an await.
     last_poll_timestamp: parking_lot::Mutex<Instant>,
@@ -1598,23 +1558,9 @@ impl<
     }
 }
 
-/// Transport accounting and optional batch completion for the current log request.
-struct LogResponseContext {
-    max_response_size: Option<usize>,
-    batch: Option<BatchResponseCommit>,
-}
-
 tokio::task_local! {
-    static LOG_RESPONSE_CONTEXT: LogResponseContext;
-}
-
-/// Defers a log poll's cursor or expiry update when its batch can still fail.
-fn commit_log_poll(update: impl FnOnce() + Send + 'static) {
-    if let Ok(Some(batch)) = LOG_RESPONSE_CONTEXT.try_with(|context| context.batch.clone()) {
-        batch.defer(update);
-    } else {
-        update();
-    }
+    /// Per-call result budget after reserving the transport's actual JSON-RPC envelope.
+    static LOG_RESPONSE_LIMIT: Option<usize>;
 }
 
 /// Counts the JSON result bytes without allocating a serialized copy of the logs.
@@ -1676,8 +1622,8 @@ mod tests {
     use alloy_network::Ethereum;
     use alloy_primitives::{Address, Bloom, Bytes, FixedBytes, Log, LogData, Signature, B256};
     use futures::FutureExt;
-    use jsonrpsee::{core::server::ConnectionId, BatchResponseBuilder};
-    use jsonrpsee_types::{error::TOO_BIG_BATCH_RESPONSE_CODE, Params};
+    use jsonrpsee::core::server::ConnectionId;
+    use jsonrpsee_types::Params;
     use rand::Rng;
     use reth_chain_state::ExecutedBlock;
     use reth_chainspec::{ChainSpec, ChainSpecProvider};
@@ -3263,100 +3209,6 @@ mod tests {
         }
     }
 
-    #[tokio::test]
-    async fn rejected_batch_preserves_log_filter_cursor() {
-        let provider = MockEthProvider::default();
-        let (header, receipts) = add_block_with_logs(&provider);
-        let filter = EthFilter::new(
-            build_test_eth_api(provider.clone()),
-            EthFilterConfig::default(),
-            Runtime::test(),
-        );
-        let query = Filter::new().from_block(7u64);
-        let expected =
-            filter.logs_for_filter(query.clone(), QueryLimits::no_limits()).await.unwrap();
-        let id = filter.new_filter(query).await.unwrap();
-        let installed = filter.inner.active_filters.inner.lock().await.get(&id).unwrap().clone();
-        let installed_at = *installed.last_poll_timestamp.lock();
-        let module = filter.clone().into_rpc();
-        let MethodCallback::Async(callback) = module.method("eth_getFilterChanges").unwrap() else {
-            panic!("async handler")
-        };
-        let MethodCallback::Async(logs_callback) = module.method("eth_getFilterLogs").unwrap()
-        else {
-            panic!("async handler")
-        };
-        let params = serde_json::to_string(&[&id]).unwrap();
-        let expected_response = serde_json::to_string(&Response::new(
-            ResponsePayload::success_borrowed(&expected),
-            Id::Number(1),
-        ))
-        .unwrap();
-        let max_size = expected_response.len() + 2;
-        // First overflow after another response, then cancel after collecting. Both retries must
-        // return the original window, and only the final accepted batch may consume it.
-        for attempt in 0..3 {
-            let commit = BatchResponseCommit::default();
-            let mut extensions = jsonrpsee_types::Extensions::new();
-            extensions.insert(commit.clone());
-            let response = callback(
-                Id::Number(1),
-                Params::new(Some(&params)).into_owned(),
-                ConnectionId(0),
-                max_size,
-                extensions.clone(),
-            )
-            .await;
-            assert_eq!(response.as_ref(), expected_response);
-            let mut batch = BatchResponseBuilder::new_with_limit(max_size);
-            batch.append(response).unwrap();
-            match attempt {
-                0 => {
-                    let response = logs_callback(
-                        Id::Number(2),
-                        Params::new(Some(&params)).into_owned(),
-                        ConnectionId(0),
-                        max_size,
-                        extensions,
-                    )
-                    .await;
-                    assert!(response.is_success());
-                    let error = batch.append(response).unwrap_err();
-                    assert_eq!(error.as_error_code(), Some(TOO_BIG_BATCH_RESPONSE_CODE));
-                }
-                1 => drop(batch),
-                _ => {
-                    let response = MethodResponse::from_batch(batch.finish());
-                    assert_eq!(response.as_ref(), format!("[{expected_response}]"));
-                    // A newer poll can finish while this batch is still being assembled.
-                    let transactions =
-                        provider.transactions_by_block(header.hash().into()).unwrap().unwrap();
-                    let header = alloy_consensus::Header {
-                        number: 8,
-                        parent_hash: header.hash(),
-                        ..header.clone_header()
-                    };
-                    provider.add_block(
-                        header.hash_slow(),
-                        Block { header, body: BlockBody { transactions, ..Default::default() } },
-                    );
-                    provider.add_receipts(8, receipts.clone());
-                    let FilterChanges::Logs(logs) =
-                        filter.filter_changes(id.clone()).await.unwrap()
-                    else {
-                        panic!("expected both uncommitted blocks")
-                    };
-                    assert_eq!(logs.len(), expected.len() * 2);
-                    commit.commit();
-                }
-            }
-            if attempt < 2 {
-                assert_eq!(*installed.last_poll_timestamp.lock(), installed_at);
-            }
-        }
-        assert_eq!(filter.filter_changes(id).await.unwrap(), FilterChanges::Empty);
-    }
-
     #[test]
     fn parallel_receipt_fetches_release_waiting_permits() {
         let runtime = tokio::runtime::Builder::new_multi_thread()
@@ -3461,7 +3313,7 @@ mod tests {
                         logs.iter().map(|log| log.block_number.unwrap()).collect::<Vec<_>>(),
                         (start..=end).flat_map(|number| [number; 5]).collect::<Vec<_>>()
                     );
-                    assert_eq!(active.block.load(Ordering::Relaxed), (*from).max(end + 1));
+                    assert_eq!(*active.block.lock().await, (*from).max(end + 1));
                     filter.clear_stale_filters(Instant::now()).await;
                     assert!(filter.active_filters().contains(id).await);
                 }

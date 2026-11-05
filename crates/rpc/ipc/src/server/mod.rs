@@ -780,33 +780,21 @@ pub fn dummy_name() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::client::{IpcClientBuilder, IpcTransportClientBuilder};
+    use crate::client::IpcClientBuilder;
     use futures::future::select;
     use jsonrpsee::{
         core::{
-            client::{
-                self, ClientT, Error, ReceivedMessage, Subscription, SubscriptionClientT,
-                TransportReceiverT, TransportSenderT,
-            },
+            client::{self, ClientT, Error, Subscription, SubscriptionClientT},
             middleware::{Batch, BatchEntry, Notification},
             params::BatchRequestBuilder,
         },
         rpc_params,
-        types::{
-            error::{TOO_BIG_BATCH_RESPONSE_CODE, TOO_MANY_SUBSCRIPTIONS_CODE},
-            ErrorCode, Request,
-        },
+        types::{error::TOO_MANY_SUBSCRIPTIONS_CODE, ErrorCode, Request},
         PendingSubscriptionSink, RpcModule, SubscriptionMessage,
     };
-    use reth_rpc_server_types::BatchResponseCommit;
     use reth_tracing::init_test_tracing;
-    use serde_json::{json, Value};
-    use std::{
-        pin::pin,
-        sync::atomic::{AtomicUsize, Ordering},
-        time::Duration,
-    };
-    use tokio::{sync::broadcast, time::timeout};
+    use std::pin::pin;
+    use tokio::sync::broadcast;
     use tokio_stream::wrappers::BroadcastStream;
 
     #[tokio::test]
@@ -1226,51 +1214,5 @@ mod tests {
 
         assert_eq!(say_hello_response, goodbye_msg);
         assert_eq!(say_goodbye_response, hello_msg);
-    }
-
-    #[tokio::test]
-    async fn batch_updates_require_complete_response() {
-        let endpoint = dummy_name();
-        let count = Arc::new(AtomicUsize::new(0));
-        let mut module = RpcModule::new(count.clone());
-        module
-            .register_method("poll", |_, count, extensions| {
-                let count = count.clone();
-                extensions.get::<BatchResponseCommit>().unwrap().defer(move || {
-                    count.fetch_add(1, Ordering::Relaxed);
-                });
-                "x".repeat(64)
-            })
-            .unwrap();
-        let handle = Builder::default()
-            .max_response_body_size(128)
-            .build(endpoint.clone())
-            .start(module)
-            .await
-            .unwrap();
-        let (mut sender, mut receiver) = IpcTransportClientBuilder.build(&endpoint).await.unwrap();
-        for requests in [2, 1] {
-            let request = (0..requests)
-                .map(|id| json!({"jsonrpc": "2.0", "id": id, "method": "poll"}))
-                .collect::<Vec<_>>();
-            sender.send(serde_json::to_string(&request).unwrap()).await.unwrap();
-            let ReceivedMessage::Text(response) =
-                timeout(Duration::from_secs(30), receiver.receive()).await.unwrap().unwrap()
-            else {
-                panic!("expected text response")
-            };
-            let response = serde_json::from_str::<Value>(&response).unwrap();
-            if requests == 2 {
-                assert_eq!(response["error"]["code"], TOO_BIG_BATCH_RESPONSE_CODE);
-                assert_eq!(count.load(Ordering::Relaxed), 0);
-            } else {
-                assert_eq!(
-                    response,
-                    json!([{"jsonrpc": "2.0", "id": 0, "result": "x".repeat(64)}])
-                );
-                assert_eq!(count.load(Ordering::Relaxed), 1);
-            }
-        }
-        handle.stop().unwrap();
     }
 }

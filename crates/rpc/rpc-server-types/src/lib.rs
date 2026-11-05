@@ -19,6 +19,3 @@ pub use module::{
 };
 
 pub use result::ToRpcResult;
-
-mod batch;
-pub use batch::BatchResponseCommit;

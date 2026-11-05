@@ -26,4 +26,3 @@ jsonrpsee-types.workspace = true
 # misc
 strum = { workspace = true, features = ["derive"] }
 serde = { workspace = true, features = ["derive"] }
-parking_lot.workspace = true

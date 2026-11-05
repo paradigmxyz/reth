@@ -13,7 +13,6 @@ use jsonrpsee::{
     BatchResponse, BatchResponseBuilder, BoundedSubscriptions, ConnectionId, MethodCallback,
     MethodResponse, MethodSink, Methods, SubscriptionState,
 };
-use reth_rpc_server_types::BatchResponseCommit;
 use std::{future::Future, sync::Arc};
 
 /// JSON-RPC service middleware.
@@ -109,15 +108,11 @@ impl RpcServiceT for RpcService {
     fn batch<'a>(&self, req: Batch<'a>) -> impl Future<Output = Self::BatchResponse> + Send + 'a {
         let entries: Vec<_> = req.into_iter().collect();
         let mut batch_response = BatchResponseBuilder::new_with_limit(self.max_response_body_size);
-        let commit = BatchResponseCommit::default();
 
         let mut pending_calls: FuturesOrdered<_> = entries
             .into_iter()
             .filter_map(|v| match v {
-                Ok(BatchEntry::Call(mut call)) => {
-                    call.extensions_mut().insert(commit.clone());
-                    Some(Either::Right(self.call(call)))
-                }
+                Ok(BatchEntry::Call(call)) => Some(Either::Right(self.call(call))),
                 Ok(BatchEntry::Notification(_n)) => None,
                 Err(_err) => Some(Either::Left(async {
                     MethodResponse::error(Id::Null, ErrorObject::from(ErrorCode::InvalidRequest))
@@ -133,9 +128,7 @@ impl RpcServiceT for RpcService {
                 }
             }
 
-            let response = batch_response.finish();
-            commit.commit();
-            response
+            batch_response.finish()
         }
     }
 
