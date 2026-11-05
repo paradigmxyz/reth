@@ -57,7 +57,7 @@ pub struct NodeCommand<C: ChainSpecParser, Ext: clap::Args + fmt::Debug = NoArgs
     /// - `HTTP_RPC_PORT`: default - `instance` + 1
     /// - `WS_RPC_PORT`: default + `instance` * 2 - 2
     /// - `IPC_PATH`: default + `-instance`
-    /// - `AUTH_IPC_PATH`: default + `-instance`
+    /// - `AUTH_IPC_PATH`: default + `-instance`, unless `--auth-ipc.path` is set
     #[arg(long, value_name = "INSTANCE", global = true, value_parser = value_parser!(u16).range(1..=200))]
     pub instance: Option<u16>,
 
