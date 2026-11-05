@@ -43,9 +43,6 @@ pub mod error;
 /// Traits
 pub mod traits;
 
-/// RPC Parameters.
-pub mod params;
-
 cfg_http_helpers! {
     pub mod http_helpers;
 }
@@ -64,9 +61,6 @@ pub use error::{RegisterMethodError, SubscriptionError};
 
 /// JSON-RPC result.
 pub type RpcResult<T> = std::result::Result<T, jsonrpsee_types::ErrorObjectOwned>;
-
-/// Empty server `RpcParams` type to use while registering modules.
-pub type EmptyServerParams = Vec<()>;
 
 #[doc(hidden)]
 mod proc_macros_support;

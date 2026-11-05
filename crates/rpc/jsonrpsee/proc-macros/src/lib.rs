@@ -140,8 +140,6 @@ pub(crate) mod visitor;
 ///   name.
 /// - `aliases`: list of name aliases for the RPC method as a comma separated string. Aliases are
 ///   processed ignoring the namespace, so add the complete name, including the namespace.
-/// - `blocking`: when set method execution will always spawn on a dedicated thread. Only usable
-///   with non-`async` methods.
 ///
 /// **Method requirements:**
 ///
@@ -237,9 +235,6 @@ pub(crate) mod visitor;
 ///         #[method(name = "bar")]
 ///         fn sync_method(&self) -> RpcResult<u16>;
 ///
-///         #[method(name = "baz", blocking)]
-///         fn blocking_method(&self) -> RpcResult<u16>;
-///
 ///         /// Override the `foo_sub` and use `foo_subNotif` for the notifications.
 ///         ///
 ///         /// The item field indicates which type goes into result field below.
@@ -290,13 +285,6 @@ pub(crate) mod visitor;
 ///
 ///         fn sync_method(&self) -> RpcResult<u16> {
 ///             Ok(10)
-///         }
-///
-///         fn blocking_method(&self) -> RpcResult<u16> {
-///             // This will block current thread for 1 second, which is fine since we marked
-///             // this method as `blocking` above.
-///             std::thread::sleep(std::time::Duration::from_millis(1000));
-///             Ok(11)
 ///         }
 ///
 ///         // The stream API can be used to pipe items from the underlying stream
@@ -358,8 +346,9 @@ pub(crate) mod visitor;
 /// async fn main() {
 ///     // The generated `RpcModule` can also be called directly without a transport.
 ///     let module = RpcServerImpl.into_rpc();
-///     let res: u16 = module.call("foo_bar", jsonrpsee::core::EmptyServerParams::new()).await.unwrap();
-///     assert_eq!(res, 10);
+///     let (res, _) =
+///         module.raw_json_request(r#"{"jsonrpc":"2.0","method":"foo_bar","id":1}"#, 1).await.unwrap();
+///     assert_eq!(res.get(), r#"{"jsonrpc":"2.0","id":1,"result":10}"#);
 ///
 ///     server().await;
 /// }

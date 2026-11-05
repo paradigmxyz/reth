@@ -64,14 +64,7 @@ impl RpcDescription {
     fn render_methods(&self) -> Result<TokenStream2, syn::Error> {
         let methods = self.methods.iter().map(|method| {
             let docs = &method.docs;
-            let mut method_sig = method.signature.clone();
-
-            if method.with_extensions {
-                let ext_ty = self.jrps_server_item(quote! { Extensions });
-                // Add `Extension` as the second parameter to the signature.
-                let ext: syn::FnArg = syn::parse_quote!(ext: &#ext_ty);
-                method_sig.sig.inputs.insert(1, ext);
-            }
+            let method_sig = &method.signature;
 
             quote! {
                 #docs
@@ -88,13 +81,6 @@ impl RpcDescription {
                 syn::parse_quote!(subscription_sink: #subscription_sink_ty);
             let mut sub_sig = sub.signature.clone();
             sub_sig.sig.inputs.insert(1, subscription_sink);
-
-            if sub.with_extensions {
-                let ext_ty = self.jrps_server_item(quote! { Extensions });
-                // Add `Extension` as the third parameter to the signature.
-                let ext: syn::FnArg = syn::parse_quote!(ext: &#ext_ty);
-                sub_sig.sig.inputs.insert(2, ext);
-            }
 
             quote! {
                 #docs
@@ -157,43 +143,19 @@ impl RpcDescription {
                 check_name(&rpc_method_name, rust_method_name.span());
 
                 if method.signature.sig.asyncness.is_some() {
-                    if method.with_extensions {
-                        self.handle_register_result(quote! {
-                            rpc.register_async_method(#rpc_method_name, |params, context, ext| async move {
-                                #parsing
-                                #into_response::into_response(context.as_ref().#rust_method_name(&ext, #params_seq).await)
-                            })
+                    self.handle_register_result(quote! {
+                        rpc.register_async_method(#rpc_method_name, |params, context, _| async move {
+                            #parsing
+                            #into_response::into_response(context.as_ref().#rust_method_name(#params_seq).await)
                         })
-                    } else {
-                        self.handle_register_result(quote! {
-                            rpc.register_async_method(#rpc_method_name, |params, context, _| async move {
-                                #parsing
-                                #into_response::into_response(context.as_ref().#rust_method_name(#params_seq).await)
-                            })
-                        })
-                    }
+                    })
                 } else {
-                    let register_kind = if method.blocking {
-                        quote!(register_blocking_method)
-                    } else {
-                        quote!(register_method)
-                    };
-
-                    if method.with_extensions {
-                        self.handle_register_result(quote! {
-                            rpc.#register_kind(#rpc_method_name, |params, context, ext| {
-                                #parsing
-                                #into_response::into_response(context.#rust_method_name(&ext, #params_seq))
-                            })
+                    self.handle_register_result(quote! {
+                        rpc.register_method(#rpc_method_name, |params, context, _| {
+                            #parsing
+                            #into_response::into_response(context.#rust_method_name(#params_seq))
                         })
-                    } else {
-                        self.handle_register_result(quote! {
-                            rpc.#register_kind(#rpc_method_name, |params, context, _| {
-                                #parsing
-                                #into_response::into_response(context.#rust_method_name(#params_seq))
-                            })
-                        })
-                    }
+                    })
                 }
             })
             .collect::<Vec<_>>();
@@ -230,27 +192,10 @@ impl RpcDescription {
                 };
 
                 if sub.signature.sig.asyncness.is_some() {
-                    if sub.with_extensions {
-                        self.handle_register_result(quote! {
-                            rpc.register_subscription(#rpc_sub_name, #rpc_notif_name, #rpc_unsub_name, |params, mut pending, context, ext| async move {
-                                #parsing
-                                #into_sub_response::into_response(context.as_ref().#rust_method_name(pending, &ext, #params_seq).await)
-                            })
-                        })
-                    } else {
-                        self.handle_register_result(quote! {
-                            rpc.register_subscription(#rpc_sub_name, #rpc_notif_name, #rpc_unsub_name, |params, mut pending, context, _| async move {
-                                #parsing
-                                #into_sub_response::into_response(context.as_ref().#rust_method_name(pending, #params_seq).await)
-                            })
-                        })
-                    }
-                } else if sub.with_extensions {
                     self.handle_register_result(quote! {
-                        rpc.register_subscription_raw(#rpc_sub_name, #rpc_notif_name, #rpc_unsub_name, |params, mut pending, context, ext| {
+                        rpc.register_subscription(#rpc_sub_name, #rpc_notif_name, #rpc_unsub_name, |params, mut pending, context, _| async move {
                             #parsing
-                            let _ = context.as_ref().#rust_method_name(pending, &ext, #params_seq);
-                            #sub_err::None
+                            #into_sub_response::into_response(context.as_ref().#rust_method_name(pending, #params_seq).await)
                         })
                     })
                 } else {
