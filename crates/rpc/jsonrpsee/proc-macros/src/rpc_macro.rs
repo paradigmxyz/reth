@@ -87,6 +87,7 @@ impl RpcFnArg {
 #[derive(Debug, Clone)]
 pub struct RpcMethod {
     pub name: String,
+    pub blocking: bool,
     pub docs: TokenStream2,
     pub params: Vec<RpcFnArg>,
     pub signature: syn::TraitItemFn,
@@ -95,12 +96,18 @@ pub struct RpcMethod {
 
 impl RpcMethod {
     pub fn from_item(attr: Attribute, mut method: syn::TraitItemFn) -> syn::Result<Self> {
-        let [aliases, name] = AttributeMeta::parse(attr)?.retain(["aliases", "name"])?;
+        let [aliases, blocking, name] =
+            AttributeMeta::parse(attr)?.retain(["aliases", "blocking", "name"])?;
 
         let aliases = parse_aliases(aliases)?;
+        let blocking = optional(blocking, Argument::flag)?.is_some();
         let name = name?.string()?;
 
         let docs = extract_doc_comments(&method.attrs);
+
+        if blocking && method.sig.asyncness.is_some() {
+            return Err(syn::Error::new(method.sig.span(), "Blocking method must be synchronous"));
+        }
 
         let params: Vec<_> = method
             .sig
@@ -129,7 +136,7 @@ impl RpcMethod {
         // We've analyzed attributes and don't need them anymore.
         method.attrs.clear();
 
-        Ok(Self { aliases, name, params, signature: method, docs })
+        Ok(Self { aliases, blocking, name, params, signature: method, docs })
     }
 }
 

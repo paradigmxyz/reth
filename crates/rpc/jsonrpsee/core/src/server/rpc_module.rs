@@ -419,6 +419,45 @@ impl<Context: Send + Sync + 'static> RpcModule<Context> {
         )
     }
 
+    /// Register a new **blocking** synchronous RPC method, which computes the response with the
+    /// given callback. Unlike the regular [`register_method`](RpcModule::register_method), this
+    /// method runs on tokio's blocking thread pool, so it can block its thread and perform
+    /// expensive computations.
+    pub fn register_blocking_method<R, F>(
+        &mut self,
+        method_name: &'static str,
+        callback: F,
+    ) -> Result<&mut MethodCallback, RegisterMethodError>
+    where
+        Context: Send + Sync + 'static,
+        R: IntoResponse + 'static,
+        F: Fn(Params<'static>, Arc<Context>) -> R + Clone + Send + Sync + 'static,
+    {
+        let ctx = self.ctx.clone();
+        let size_hint = Arc::new(ResponseSizeHint::new());
+        self.methods.verify_and_insert(
+            method_name,
+            MethodCallback::Async(Arc::new(move |id, params, _, max_response_size| {
+                let ctx = ctx.clone();
+                let callback = callback.clone();
+                let size_hint = size_hint.clone();
+                let error_id = id.clone();
+
+                tokio::task::spawn_blocking(move || {
+                    let rp = callback(params, ctx).into_response();
+                    MethodResponse::sized_response(id, rp, max_response_size, &size_hint)
+                })
+                .map(|result| {
+                    result.unwrap_or_else(|err| {
+                        tracing::error!(target: LOG_TARGET, "Join error for blocking RPC method: {:?}", err);
+                        MethodResponse::error(error_id, ErrorObject::from(ErrorCode::InternalError))
+                    })
+                })
+                .boxed()
+            })),
+        )
+    }
+
     /// Register a new publish/subscribe interface using JSON-RPC notifications.
     ///
     /// It implements the [ethereum pubsub specification](https://geth.ethereum.org/docs/rpc/pubsub)
