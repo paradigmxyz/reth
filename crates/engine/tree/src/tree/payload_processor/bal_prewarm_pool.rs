@@ -1,6 +1,6 @@
 //! BAL read-set prewarming pool.
 
-use alloy_primitives::{Address, StorageKey};
+use alloy_primitives::{Address, StorageKey, B256};
 use reth_execution_cache::{CachedStateProvider, ExecutionCache, TxPoolPrewarmCacheSnapshot};
 use reth_provider::{EvmStateProvider, EvmStateProviderBox, ProviderResult};
 use std::{
@@ -22,6 +22,7 @@ pub type BuildProviderFn = dyn Fn() -> ProviderResult<EvmStateProviderBox> + Sen
 enum PrewarmTarget {
     Account(Address, Box<[StorageKey]>),
     Storage(Address, Box<[StorageKey]>),
+    Code(B256),
 }
 
 /// A message in a worker's queue. The per-block lifecycle is explicit and ordered (the queue is
@@ -103,6 +104,23 @@ impl BalPrewarmPool {
             }
             self.send_warm(PrewarmTarget::Storage(addr, batch));
         }
+    }
+
+    /// Fire-and-forget: warm storage slots of an account without loading the account.
+    pub fn warm_storage(&self, addr: Address, slots: impl IntoIterator<Item = StorageKey>) {
+        let mut slots = slots.into_iter();
+        loop {
+            let batch: Box<[StorageKey]> = slots.by_ref().take(WARM_BATCH_SIZE).collect();
+            if batch.is_empty() {
+                break
+            }
+            self.send_warm(PrewarmTarget::Storage(addr, batch));
+        }
+    }
+
+    /// Fire-and-forget: warm the bytecode with `hash`.
+    pub fn warm_code(&self, hash: B256) {
+        self.send_warm(PrewarmTarget::Code(hash));
     }
 
     /// Ends the block: every worker drops its provider (and read txn) once it has drained the warm
@@ -189,6 +207,9 @@ fn prewarm_loop(rx: crossbeam_channel::Receiver<PrewarmMsg>) {
                         for &slot in &slots {
                             let _ = provider.storage(addr, slot);
                         }
+                    }
+                    PrewarmTarget::Code(hash) => {
+                        let _ = provider.bytecode_by_hash(&hash);
                     }
                 }
             }
