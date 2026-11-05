@@ -36,6 +36,7 @@ reth-trie-parallel.workspace = true
 reth-trie-sparse = { workspace = true, features = ["std", "metrics"] }
 reth-trie.workspace = true
 reth-trie-common.workspace = true
+reth-lru.workspace = true
 
 # alloy
 alloy-consensus.workspace = true
@@ -58,7 +59,6 @@ reth-metrics = { workspace = true, features = ["common"] }
 # misc
 dashmap.workspace = true
 indexmap.workspace = true
-schnellru.workspace = true
 rayon.workspace = true
 tracing.workspace = true
 derive_more.workspace = true
