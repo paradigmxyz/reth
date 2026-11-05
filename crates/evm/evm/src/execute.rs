@@ -368,15 +368,22 @@ pub trait BlockExecutor: Sized {
     /// post-execution block changes.
     fn into_state(self) -> BundleState;
 
-    /// Executes a transaction, invokes `f` with the borrowed execution result, and commits
-    /// changes when `f` returns [`CommitChanges::Yes`].
+    /// Executes a transaction, invokes `f` with the borrowed execution result and state changes,
+    /// and commits changes when `f` returns [`CommitChanges::Yes`].
+    ///
+    /// The state changes are borrowed before the transaction is committed or discarded, so `f`
+    /// can read what the transaction wrote (balances, storage slots) to decide whether to keep it.
     fn execute_transaction_with_commit_condition(
         &mut self,
         transaction: impl ExecutorTx<Self>,
-        f: impl FnOnce(&evm2::TxResult<<Self::Evm as Evm>::EvmTypes>) -> CommitChanges,
+        f: impl FnOnce(
+            &evm2::TxResult<<Self::Evm as Evm>::EvmTypes>,
+            evm2::TxStateChanges<'_>,
+        ) -> CommitChanges,
     ) -> Result<Option<GasOutput>, BlockExecutionError> {
         let output = self.execute_transaction_without_commit(transaction)?;
-        if f(&output.result().result).should_commit() {
+        let result = output.result();
+        if f(&result.result, result.pending_state.changes()).should_commit() {
             self.commit_transaction(output).map(Some)
         } else {
             Ok(None)
@@ -408,7 +415,7 @@ pub trait BlockExecutor: Sized {
         transaction: impl ExecutorTx<Self>,
         f: impl FnOnce(&evm2::TxResult<<Self::Evm as Evm>::EvmTypes>),
     ) -> Result<GasOutput, BlockExecutionError> {
-        self.execute_transaction_with_commit_condition(transaction, |result| {
+        self.execute_transaction_with_commit_condition(transaction, |result, _| {
             f(result);
             CommitChanges::Yes
         })
@@ -615,13 +622,14 @@ pub trait BlockBuilder: Sized {
     /// Applies pre-execution block changes.
     fn apply_pre_execution_changes(&mut self) -> Result<(), BlockExecutionError>;
 
-    /// Executes a transaction, exposes its borrowed execution result to `f`, and saves it
-    /// for block assembly only if committed.
+    /// Executes a transaction, exposes its borrowed execution result and state changes to `f`,
+    /// and saves it for block assembly only if committed.
     fn execute_transaction_with_commit_condition(
         &mut self,
         tx: impl ExecutorTx<Self::Executor>,
         f: impl FnOnce(
             &evm2::TxResult<<<Self::Executor as BlockExecutor>::Evm as Evm>::EvmTypes>,
+            evm2::TxStateChanges<'_>,
         ) -> CommitChanges,
     ) -> Result<Option<GasOutput>, BlockExecutionError>;
 
@@ -638,7 +646,7 @@ pub trait BlockBuilder: Sized {
         &mut self,
         tx: impl ExecutorTx<Self::Executor>,
     ) -> Result<GasOutput, BlockExecutionError> {
-        self.execute_transaction_with_commit_condition(tx, |_| CommitChanges::Yes)
+        self.execute_transaction_with_commit_condition(tx, |_, _| CommitChanges::Yes)
             .map(Option::unwrap_or_default)
     }
 
@@ -778,6 +786,7 @@ where
         tx: impl ExecutorTx<Self::Executor>,
         f: impl FnOnce(
             &evm2::TxResult<<<Self::Executor as BlockExecutor>::Evm as Evm>::EvmTypes>,
+            evm2::TxStateChanges<'_>,
         ) -> CommitChanges,
     ) -> Result<Option<GasOutput>, BlockExecutionError> {
         let (tx_env, tx) = tx.into_parts();

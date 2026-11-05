@@ -4,4 +4,4 @@
 name = "bench-reth-charts"
 version = "0.0.0"
 requires-python = ">=3.10"
-dependencies = ["matplotlib==3.10.8", "numpy", "pillow==12.3.0"]
+dependencies = ["matplotlib==3.10.9", "numpy", "pillow==12.3.0"]

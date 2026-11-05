@@ -350,10 +350,17 @@ impl AccountHistory {
 mod tests {
     use super::ACCOUNT_HISTORY_TABLES_TO_PRUNE;
     use crate::segments::{AccountHistory, PruneInput, PruneLimiter, Segment, SegmentOutput};
-    use alloy_primitives::{BlockNumber, B256};
+    use alloy_primitives::{Address, BlockNumber, B256, U256};
     use assert_matches::assert_matches;
-    use reth_db_api::{models::StorageSettings, tables, BlockNumberList};
-    use reth_provider::{DBProvider, DatabaseProviderFactory, PruneCheckpointReader};
+    use reth_db_api::{
+        models::{ShardedKey, StorageSettings},
+        tables, BlockNumberList,
+    };
+    use reth_primitives_traits::Account;
+    use reth_provider::{
+        DBProvider, DatabaseProviderFactory, PruneCheckpointReader, RocksDBProviderFactory,
+        StaticFileProviderFactory,
+    };
     use reth_prune_types::{
         PruneCheckpoint, PruneInterruptReason, PruneMode, PruneProgress, PruneSegment,
     };
@@ -361,6 +368,7 @@ mod tests {
     use reth_storage_api::StorageSettingsCache;
     use reth_testing_utils::generators::{
         self, random_block_range, random_changeset_range, random_eoa_accounts, BlockRangeParams,
+        ChangeSet,
     };
     use std::{collections::BTreeMap, ops::AddAssign};
 
@@ -526,9 +534,6 @@ mod tests {
 
     #[test]
     fn prune_rocksdb_path() {
-        use reth_db_api::models::ShardedKey;
-        use reth_provider::{RocksDBProviderFactory, StaticFileProviderFactory};
-
         let db = TestStageDB::default();
         let mut rng = generators::rng();
 
@@ -631,10 +636,6 @@ mod tests {
     #[test]
     #[allow(clippy::clone_on_copy)]
     fn prune_partial_progress_mid_block() {
-        use alloy_primitives::{Address, U256};
-        use reth_primitives_traits::Account;
-        use reth_testing_utils::generators::ChangeSet;
-
         let db = TestStageDB::default();
         let mut rng = generators::rng();
 
@@ -789,9 +790,6 @@ mod tests {
     /// every later run reread it and never advance.
     #[test]
     fn dense_block_advances_rocksdb_checkpoint() {
-        use reth_db_api::models::ShardedKey;
-        use reth_provider::RocksDBProviderFactory;
-
         let db = TestStageDB::default();
         let mut rng = generators::rng();
 

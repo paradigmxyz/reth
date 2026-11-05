@@ -397,10 +397,12 @@ struct FileList {
 /// `extensions` are tried in order; pass them longest-first so `.ere` never matches inside `.erae`.
 fn extract_era_filename<'a>(line: &'a str, extensions: &[&str]) -> Option<&'a str> {
     for ext in extensions {
+        // The separator can be multibyte, so the name starts after its full UTF-8 width.
         if let Some(j) = line.find(ext) &&
-            let Some(i) = line[..j].rfind(|c: char| !c.is_alphanumeric() && c != '-')
+            let Some((i, sep)) =
+                line[..j].char_indices().rfind(|&(_, c)| !c.is_alphanumeric() && c != '-')
         {
-            return Some(&line[i + 1..j + ext.len()]);
+            return Some(&line[i + sep.len_utf8()..j + ext.len()]);
         }
     }
     None
@@ -473,6 +475,10 @@ mod tests {
         Some("mainnet-00600-a81ae85f.era1"); "era1 anchor"
     )]
     #[test_case("<a href=\"checksums.txt\">", &[".erae", ".ere"], None; "no era file on line")]
+    #[test_case(
+        "<a href=\"\u{2026}mainnet-00000-a81ae85f.era1\">", &[".era1"],
+        Some("mainnet-00000-a81ae85f.era1"); "multibyte separator before name"
+    )]
     fn test_extract_era_filename(line: &str, exts: &[&str], expected: Option<&str>) {
         assert_eq!(extract_era_filename(line, exts), expected);
     }

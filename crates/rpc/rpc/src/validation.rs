@@ -36,7 +36,7 @@ use reth_metrics::{
     metrics::{gauge, Gauge},
     Metrics,
 };
-use reth_node_api::{NewPayloadError, PayloadTypes};
+use reth_payload_primitives::{NewPayloadError, PayloadTypes};
 use reth_primitives_traits::{
     block::error::SealedBlockRecoveryError, BlockBody, GotExpected, NodePrimitives, RecoveredBlock,
     SealedBlock, SealedHeaderFor,
@@ -977,7 +977,7 @@ mod tests {
     use reth_ethereum_primitives::{Block, EthPrimitives};
     use reth_evm_ethereum::EthEvmConfig;
     use reth_execution_types::BlockExecutionOutput;
-    use reth_node_api::NewPayloadError;
+    use reth_payload_primitives::NewPayloadError;
     use reth_primitives_traits::{RecoveredBlock, SealedBlock, SealedHeader};
     use reth_provider::{test_utils::MockEthProvider, InMemoryBalStore};
     use reth_rpc_eth_types::EthStateCacheConfig;

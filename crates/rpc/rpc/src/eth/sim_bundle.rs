@@ -415,8 +415,6 @@ where
                     if logs { Self::build_bundle_logs(&request, &flat_logs)? } else { vec![] };
 
                 // After processing all transactions, process refunds
-                // Store the original refundable value to calculate all payouts correctly
-                let original_refundable_value = refundable_value;
                 for item in &flattened_bundle {
                     if let Some(refund_percent) = item.refund_percent {
                         let refund_configs = item.refund_configs.clone().unwrap_or_else(|| {
@@ -431,11 +429,9 @@ where
                         // Add gas used for payout transactions
                         total_gas_used += SBUNDLE_PAYOUT_MAX_COST * refund_configs.len() as u64;
 
-                        // Calculate allocated refundable value (payout value) based on ORIGINAL
-                        // refundable value. This ensures all refund_percent values are
-                        // calculated from the same base.
-                        let payout_value = original_refundable_value * U256::from(refund_percent) /
-                            U256::from(100);
+                        // Calculate allocated refundable value (payout value)
+                        let payout_value =
+                            refundable_value * U256::from(refund_percent) / U256::from(100);
 
                         if payout_tx_fee > payout_value {
                             return Err(EthApiError::InvalidParams(
@@ -446,13 +442,6 @@ where
 
                         // Subtract payout value from total profit
                         total_profit = total_profit.checked_sub(payout_value).ok_or(
-                            EthApiError::InvalidParams(
-                                EthSimBundleError::NegativeProfit.to_string(),
-                            ),
-                        )?;
-
-                        // Adjust refundable value
-                        refundable_value = refundable_value.checked_sub(payout_value).ok_or(
                             EthApiError::InvalidParams(
                                 EthSimBundleError::NegativeProfit.to_string(),
                             ),
@@ -573,27 +562,28 @@ pub enum EthSimBundleError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_primitives::Bytes;
+    use crate::EthApiBuilder;
+    use alloy_consensus::{transaction::SignerRecoverable, TxEip1559};
+    use alloy_eips::eip2718::Encodable2718;
+    use alloy_genesis::{Genesis, GenesisAccount};
+    use alloy_primitives::{Address, Bytes, TxKind, B256};
+    use alloy_rpc_types_eth::BlockOverrides;
     use alloy_rpc_types_mev::{Inclusion, ProtocolVersion};
+    use reth_chainspec::{ChainSpecBuilder, ChainSpecProvider};
+    use reth_db_common::init::init_genesis;
+    use reth_evm_ethereum::EthEvmConfig;
+    use reth_network_api::noop::NoopNetwork;
+    use reth_provider::{
+        providers::BlockchainProvider, test_utils::create_test_provider_factory_with_chain_spec,
+    };
+    use reth_testing_utils::{
+        generators,
+        generators::{generate_key, sign_tx_with_key_pair},
+    };
+    use reth_transaction_pool::test_utils::testing_pool;
 
     #[tokio::test(flavor = "multi_thread")]
     async fn sim_bundle_uses_next_block_env_and_overrides() {
-        use crate::EthApiBuilder;
-        use alloy_consensus::{transaction::SignerRecoverable, TxEip1559};
-        use alloy_eips::eip2718::Encodable2718;
-        use alloy_genesis::{Genesis, GenesisAccount};
-        use alloy_primitives::{Address, TxKind, B256};
-        use alloy_rpc_types_eth::BlockOverrides;
-        use reth_chainspec::{ChainSpecBuilder, ChainSpecProvider};
-        use reth_db_common::init::init_genesis;
-        use reth_evm_ethereum::EthEvmConfig;
-        use reth_network_api::noop::NoopNetwork;
-        use reth_provider::{
-            providers::BlockchainProvider, test_utils::create_test_provider_factory_with_chain_spec,
-        };
-        use reth_testing_utils::generators::{self, generate_key, sign_tx_with_key_pair};
-        use reth_transaction_pool::test_utils::testing_pool;
-
         let contract = Address::repeat_byte(0xaa);
         let coinbase = Address::repeat_byte(0x11);
         let overridden_coinbase = Address::repeat_byte(0x22);

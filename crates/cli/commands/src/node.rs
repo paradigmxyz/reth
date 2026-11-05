@@ -57,6 +57,7 @@ pub struct NodeCommand<C: ChainSpecParser, Ext: clap::Args + fmt::Debug = NoArgs
     /// - `HTTP_RPC_PORT`: default - `instance` + 1
     /// - `WS_RPC_PORT`: default + `instance` * 2 - 2
     /// - `IPC_PATH`: default + `-instance`
+    /// - `AUTH_IPC_PATH`: default + `-instance`, unless `--auth-ipc.path` is set
     #[arg(long, value_name = "INSTANCE", global = true, value_parser = value_parser!(u16).range(1..=200))]
     pub instance: Option<u16>,
 
@@ -254,7 +255,7 @@ where
     /// corresponding [`PeerId`](reth_network_peers::PeerId).
     pub fn peer_id(&self) -> eyre::Result<reth_network_peers::PeerId> {
         let sk = self.p2p_secret_key()?;
-        Ok(reth_network_peers::pk2id(&sk.public_key(secp256k1::SECP256K1)))
+        Ok(reth_network_peers::pk2id(&sk.public_key()))
     }
 }
 

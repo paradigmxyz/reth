@@ -23,6 +23,8 @@ alloy-primitives.workspace = true
 alloy-rlp.workspace = true
 discv5 = { workspace = true, features = ["libp2p"] }
 enr.workspace = true
+libp2p-identity = { workspace = true, features = ["secp256k1"] }
+multiaddr.workspace = true
 secp256k1.workspace = true
 
 # async/futures
@@ -44,4 +46,3 @@ reth-tracing.workspace = true
 alloy-primitives = { workspace = true, features = ["rand"] }
 tokio = { workspace = true, features = ["rt-multi-thread"] }
 secp256k1 = { workspace = true, features = ["std", "rand"] }
-rand_08.workspace = true

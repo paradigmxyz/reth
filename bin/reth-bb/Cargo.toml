@@ -64,6 +64,12 @@ default = [
     "otlp-logs",
     "js-tracer",
     "portable",
+    "jit",
+]
+
+jit = [
+    "reth-ethereum-cli/jit",
+    "reth-node-ethereum/jit",
 ]
 
 otlp = [

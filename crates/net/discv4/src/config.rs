@@ -328,6 +328,8 @@ impl Discv4ConfigBuilder {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use reth_net_nat::NatResolver;
+    use std::net::{IpAddr, Ipv4Addr};
 
     #[test]
     fn test_config_builder() {
@@ -343,9 +345,6 @@ mod tests {
 
     #[tokio::test]
     async fn test_resolve_external_ip_interval_uses_interval_at() {
-        use reth_net_nat::NatResolver;
-        use std::net::{IpAddr, Ipv4Addr};
-
         let ip_addr = IpAddr::V4(Ipv4Addr::new(192, 168, 1, 1));
 
         // Create a config with external IP resolver

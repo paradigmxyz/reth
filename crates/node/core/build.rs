@@ -14,7 +14,15 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     emitter.add_instructions(&cargo_builder)?;
 
-    let git_builder = Gitcl::builder().describe(false, true, None).dirty(true).sha(false).build();
+    // Tracking the git HEAD reruns this script, and rebuilds everything above this crate, on every
+    // commit and checkout. Debug builds skip it and keep the SHA from the last run of this script.
+    // Release profiles keep tracking HEAD, so their version always matches the checkout.
+    let git_builder = Gitcl::builder()
+        .describe(false, true, None)
+        .dirty(true)
+        .sha(false)
+        .rerun_on_head_change(env::var("PROFILE")? != "debug")
+        .build();
 
     emitter.add_instructions(&git_builder)?;
 

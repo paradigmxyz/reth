@@ -40,6 +40,7 @@ use reth_ethereum_forks::{
 };
 use reth_network_peers::{holesky_nodes, hoodi_nodes, mainnet_nodes, sepolia_nodes, NodeRecord};
 use reth_primitives_traits::{sync::LazyLock, BlockHeader, SealedHeader};
+use NamedChain as C;
 
 /// Helper method building a [`Header`] given [`Genesis`] and [`ChainHardforks`].
 pub fn make_genesis_header(genesis: &Genesis, hardforks: &ChainHardforks) -> Header {
@@ -770,8 +771,6 @@ impl<H: BlockHeader> ChainSpec<H> {
 
     /// Returns the known bootnode records for the given chain.
     pub fn bootnodes(&self) -> Option<Vec<NodeRecord>> {
-        use NamedChain as C;
-
         match self.chain.try_into().ok()? {
             C::Mainnet => Some(mainnet_nodes()),
             C::Sepolia => Some(sepolia_nodes()),

@@ -883,6 +883,7 @@ mod tests {
         eip7594::{BlobCellMask, BlobTransactionSidecarVariant, Cell},
     };
     use alloy_primitives::{keccak256, Address, Log, LogData, TxHash, B128, U256};
+    use alloy_rlp::{Decodable, Encodable};
     use reth_eth_wire::{message::RequestPair, EthMessage, EthStreamInner, EthVersion};
     use reth_ethereum_primitives::Receipt;
     use reth_network_api::test_utils::PeersHandle;
@@ -1047,8 +1048,6 @@ mod tests {
     #[test_case(127)]
     #[tokio::test]
     async fn get_cells_request_uses_little_endian_wire_mask(index: u32) {
-        use alloy_rlp::{Decodable, Encodable};
-
         let (peers_tx, _) = mpsc::unbounded_channel();
         let (_incoming_tx, incoming_rx) = mpsc::channel(1);
         let numeric_mask = 1u128 << index;
