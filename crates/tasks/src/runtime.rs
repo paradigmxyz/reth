@@ -1020,7 +1020,7 @@ impl RuntimeBuilder {
             // `cpu_threads` may be zero, which rayon resolves to the automatic count when the
             // cpu pool is built; size the proof pools from that resolved count so a zero never
             // reaches the per-block worker budget.
-            let default_proof_worker_threads = cpu_pool.current_num_threads() * 4;
+            let default_proof_worker_threads = cpu_pool.current_num_threads() * 2;
 
             let proof_storage_worker_threads = config
                 .rayon
