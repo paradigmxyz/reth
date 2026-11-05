@@ -1,0 +1,5 @@
+error: "override" is already defined
+ --> $DIR/sub_dup_name_override.rs:9:11
+  |
+9 |     async fn two(&self);
+  |              ^^^

@@ -1,0 +1,5 @@
+error: Either 'server' or 'client' attribute must be applied
+ --> $DIR/rpc_no_impls.rs:5:11
+  |
+5 | pub trait NoImpls {
+  |           ^^^^^^^

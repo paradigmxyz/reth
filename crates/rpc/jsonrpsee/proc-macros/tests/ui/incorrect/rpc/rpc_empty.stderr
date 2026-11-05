@@ -1,0 +1,5 @@
+error: RPC cannot be empty
+ --> $DIR/rpc_empty.rs:5:1
+  |
+5 | pub trait Empty {}
+  | ^^^^^^^^^^^^^^^^^^
