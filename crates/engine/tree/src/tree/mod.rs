@@ -747,6 +747,8 @@ where
 
         // start timing for the new payload process
         let start = Instant::now();
+        payload_validator::np_phase("start");
+        let (np_number, np_gas) = (payload.block_number(), payload.gas_used());
 
         // Ensures that the given payload does not violate any consensus rules that concern the
         // block's layout, like:
@@ -807,6 +809,8 @@ where
 
         // record total newPayload duration
         self.metrics.block_validation.total_duration.record(start.elapsed().as_secs_f64());
+        payload_validator::np_phase("end");
+        payload_validator::np_phases_log(np_number, np_gas);
 
         Ok(outcome)
     }
@@ -3280,6 +3284,7 @@ where
 
         let is_pending = self.state.tree_state.canonical_block_hash() ==
             executed.recovered_block().parent_hash();
+        payload_validator::np_phase("returned");
         self.state.tree_state.insert_executed(executed.clone());
 
         if is_pending {

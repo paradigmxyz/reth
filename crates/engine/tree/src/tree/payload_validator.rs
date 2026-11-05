@@ -480,6 +480,7 @@ where
         V: PayloadValidator<T, Block = N::Block> + Clone,
         Evm: ConfigureEngineEvm<T::ExecutionData, Primitives = N>,
     {
+        np_phase("validate");
         let parent_hash = input.parent_hash();
         let _txpool_pause = self.txpool_prewarm.as_ref().map(txpool_prewarm::Handle::pause);
         let txpool_snapshot =
@@ -563,6 +564,7 @@ where
             .into())
         };
         drop(_enter);
+        np_phase("provider");
 
         let evm_env = debug_span!(target: "engine::tree::payload_validator", "evm_env")
             .in_scope(|| self.evm_env_for(&input))
@@ -617,6 +619,7 @@ where
                 ctx.state_mut(),
             )));
         let state_root_job_name = state_root_job.name();
+        np_phase("root_prepare");
 
         debug!(
             target: "engine::tree::payload_validator",
@@ -642,6 +645,7 @@ where
             parallel_bal_execution,
         ));
 
+        np_phase("spawned");
         // Create optional cache stats for detailed block logging
         let slow_block_enabled = self.config.slow_block_threshold().is_some();
         let cache_stats = slow_block_enabled.then(|| Arc::new(CacheStats::default()));
@@ -737,6 +741,7 @@ where
             metrics.record_totals(stats);
         }
         let (output, senders, receipt_root_rx, executed_bal) = ensure_ok!(execution_result);
+        np_phase("executed");
         let (built_bal, evm_bal) =
             executed_bal.map(|ExecutedBal { alloy, evm }| (alloy, evm)).unzip();
 
@@ -775,8 +780,10 @@ where
                 }
             });
 
+        np_phase("cache_terminated");
         let block = validated_block.try_into_inner().expect("sole handle")?;
         let block = block.with_senders(senders);
+        np_phase("converted");
 
         // Wait for the receipt root computation to complete.
         let receipt_root_bloom = {
@@ -796,6 +803,7 @@ where
                 })
                 .ok()
         };
+        np_phase("receipts");
 
         ensure_ok_post_block!(
             self.validate_post_execution(
@@ -826,12 +834,14 @@ where
             )
         });
 
+        np_phase("post_validated");
         let root_start = Instant::now();
         let root_outcome = ensure_ok_post_block!(
             state_root_job.finish(&block, output.clone(), &hashed_state),
             block
         );
         let root_elapsed = root_start.elapsed();
+        np_phase("root");
 
         info!(
             target: "engine::tree::payload_validator",
@@ -925,6 +935,7 @@ where
         let executed_block = self
             .spawn_deferred_trie_task(Arc::new(block), output, hashed_state, trie_output)
             .with_bal(bal);
+        np_phase("validated");
         Ok(ValidationOutput::new(executed_block, timing_stats))
     }
 
@@ -1067,6 +1078,7 @@ where
                     prewarm_results.as_deref(),
                 )?;
 
+                np_phase("txs");
                 let post_exec_start = Instant::now();
                 let (output, built_bal) = executor.finish_with_prepared_block_access_list()?;
                 self.metrics.record_post_execution(post_exec_start.elapsed());
@@ -1225,6 +1237,7 @@ where
         debug_span!(target: "engine::tree", "pre_execution")
             .in_scope(|| executor.apply_pre_execution_changes())?;
         self.metrics.record_pre_execution(pre_exec_start.elapsed());
+        np_phase("pre_exec");
 
         // Execute transactions
         let exec_span = debug_span!(target: "engine::tree", "execution").entered();
@@ -2193,4 +2206,34 @@ fn log_timeline(
         %top,
         "timeline"
     );
+}
+
+std::thread_local! {
+    static NP_PHASES: core::cell::RefCell<Vec<(&'static str, Instant)>> =
+        const { core::cell::RefCell::new(Vec::new()) };
+}
+
+static NP_PHASES_ENABLED: std::sync::LazyLock<bool> =
+    std::sync::LazyLock::new(|| std::env::var_os("RETH_NP_PHASES").is_some());
+
+/// Records a newPayload phase boundary on this thread (experiment only).
+pub(crate) fn np_phase(name: &'static str) {
+    if *NP_PHASES_ENABLED {
+        NP_PHASES.with(|phases| phases.borrow_mut().push((name, Instant::now())));
+    }
+}
+
+/// Logs and clears the recorded phases (experiment only).
+pub(crate) fn np_phases_log(number: u64, gas: u64) {
+    if !*NP_PHASES_ENABLED {
+        return
+    }
+    let phases = NP_PHASES.with(|phases| core::mem::take(&mut *phases.borrow_mut()));
+    let Some(&(_, start)) = phases.first() else { return };
+    let line = phases
+        .iter()
+        .map(|(name, at)| format!("{name}={}", at.duration_since(start).as_micros()))
+        .collect::<Vec<_>>()
+        .join(" ");
+    info!(target: "engine::np_phases", number, gas, %line, "phases");
 }
