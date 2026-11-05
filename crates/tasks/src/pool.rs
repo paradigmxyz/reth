@@ -222,7 +222,7 @@ impl WorkerPool {
                 builder = builder.start_handler(move |_| thread_start());
             }
             build_pool_with_panic_handler(builder)
-            .unwrap_or_else(|err| panic!("failed to build {prefix} worker pool: {err}"))
+                .unwrap_or_else(|err| panic!("failed to build {prefix} worker pool: {err}"))
         })
     }
 
