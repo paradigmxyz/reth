@@ -25,7 +25,6 @@
 // DEALINGS IN THE SOFTWARE.
 
 use crate::server::SubscriptionMessage;
-use serde_json::value::RawValue;
 use tokio::sync::mpsc;
 
 /// Error that may occur during [`crate::server::MethodSink::try_send`] or
@@ -64,14 +63,14 @@ pub enum SendTimeoutError {
 #[error("The remote peer closed the connection")]
 pub struct PendingSubscriptionAcceptError;
 
-impl From<mpsc::error::SendError<Box<RawValue>>> for DisconnectError {
-    fn from(e: mpsc::error::SendError<Box<RawValue>>) -> Self {
+impl From<mpsc::error::SendError<String>> for DisconnectError {
+    fn from(e: mpsc::error::SendError<String>) -> Self {
         DisconnectError(SubscriptionMessage::from_complete_message(e.0))
     }
 }
 
-impl From<mpsc::error::TrySendError<Box<RawValue>>> for TrySendError {
-    fn from(e: mpsc::error::TrySendError<Box<RawValue>>) -> Self {
+impl From<mpsc::error::TrySendError<String>> for TrySendError {
+    fn from(e: mpsc::error::TrySendError<String>) -> Self {
         match e {
             mpsc::error::TrySendError::Closed(m) => {
                 Self::Closed(SubscriptionMessage::from_complete_message(m))
@@ -83,8 +82,8 @@ impl From<mpsc::error::TrySendError<Box<RawValue>>> for TrySendError {
     }
 }
 
-impl From<mpsc::error::SendTimeoutError<Box<RawValue>>> for SendTimeoutError {
-    fn from(e: mpsc::error::SendTimeoutError<Box<RawValue>>) -> Self {
+impl From<mpsc::error::SendTimeoutError<String>> for SendTimeoutError {
+    fn from(e: mpsc::error::SendTimeoutError<String>) -> Self {
         match e {
             mpsc::error::SendTimeoutError::Closed(m) => {
                 Self::Closed(SubscriptionMessage::from_complete_message(m))

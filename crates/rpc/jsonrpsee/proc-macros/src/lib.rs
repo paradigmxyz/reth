@@ -348,7 +348,7 @@ pub(crate) mod visitor;
 ///     let module = RpcServerImpl.into_rpc();
 ///     let (res, _) =
 ///         module.raw_json_request(r#"{"jsonrpc":"2.0","method":"foo_bar","id":1}"#, 1).await.unwrap();
-///     assert_eq!(res.get(), r#"{"jsonrpc":"2.0","id":1,"result":10}"#);
+///     assert_eq!(res, r#"{"jsonrpc":"2.0","id":1,"result":10}"#);
 ///
 ///     server().await;
 /// }
