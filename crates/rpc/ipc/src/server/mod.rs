@@ -1,6 +1,9 @@
 //! JSON-RPC IPC server implementation
 
-use crate::server::connection::{IpcConn, JsonRpcStream};
+use crate::{
+    server::connection::{IpcConn, IpcConnDriver, JsonRpcStream},
+    stream_codec::StreamCodec,
+};
 use futures::StreamExt;
 use futures_util::future::Either;
 use interprocess::local_socket::{
@@ -9,14 +12,13 @@ use interprocess::local_socket::{
     GenericFilePath, ListenerOptions, ToFsName,
 };
 use jsonrpsee::{
-    core::{
-        middleware::layer::{Either as RpcEither, RpcLoggerLayer},
-        JsonRawValue, TEN_MB_SIZE_BYTES,
-    },
+    core::{JsonRawValue, TEN_MB_SIZE_BYTES},
     server::{
-        middleware::rpc::RpcServiceT, stop_channel, ConnectionGuard, ConnectionPermit, IdProvider,
-        RandomIntegerIdProvider, ServerHandle, StopHandle,
+        handle_rpc_call, middleware::rpc::RpcServiceT, stop_channel, BatchRequestConfig,
+        ConnectionGuard, ConnectionPermit, IdProvider, RandomIntegerIdProvider, ServerHandle,
+        StopHandle,
     },
+    types::{error::reject_too_big_request, Id},
     BoundedSubscriptions, MethodResponse, MethodSink, Methods,
 };
 use std::{
@@ -28,62 +30,52 @@ use std::{
 };
 use tokio::{
     io::{AsyncRead, AsyncWrite, AsyncWriteExt},
-    sync::oneshot,
+    sync::{mpsc, oneshot},
 };
-use tower::{layer::util::Identity, Layer, Service};
-use tracing::{instrument, trace, warn, Instrument};
-// re-export so can be used during builder setup
-use crate::{
-    server::{connection::IpcConnDriver, rpc_service::RpcServiceCfg},
-    stream_codec::StreamCodec,
-};
-use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 use tokio_util::task::AbortOnDropHandle;
-use tower::layer::{util::Stack, LayerFn};
+use tower::{layer::util::Identity, Layer, Service};
+use tracing::{instrument, trace, warn, Instrument};
 
 #[cfg(unix)]
 use interprocess::os::unix::local_socket::ListenerOptionsExt;
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
 
-mod connection;
-mod ipc;
-mod rpc_service;
+pub use jsonrpsee::server::middleware::rpc::{RpcService, RpcServiceBuilder};
 
-pub use rpc_service::RpcService;
+mod connection;
+
+/// Number of messages a connection buffers before backpressure kicks in.
+const MESSAGE_BUFFER_CAPACITY: usize = 1024;
 
 /// Ipc Server implementation
 ///
 /// This is an adapted `jsonrpsee` Server, but for `Ipc` connections.
-pub struct IpcServer<HttpMiddleware = Identity, RpcMiddleware = Identity> {
+pub struct IpcServer<RpcMiddleware = Identity> {
     /// The endpoint we listen for incoming transactions
     endpoint: String,
     id_provider: Arc<dyn IdProvider>,
     cfg: Settings,
     rpc_middleware: RpcServiceBuilder<RpcMiddleware>,
-    http_middleware: tower::ServiceBuilder<HttpMiddleware>,
 }
 
-impl<HttpMiddleware, RpcMiddleware> IpcServer<HttpMiddleware, RpcMiddleware> {
+impl<RpcMiddleware> IpcServer<RpcMiddleware> {
     /// Returns the configured endpoint
     pub fn endpoint(&self) -> String {
         self.endpoint.clone()
     }
 }
 
-impl<HttpMiddleware, RpcMiddleware> IpcServer<HttpMiddleware, RpcMiddleware>
+impl<RpcMiddleware> IpcServer<RpcMiddleware>
 where
-    RpcMiddleware: Layer<RpcService, Service: RpcServiceT> + Clone + Send + 'static,
-    HttpMiddleware: Layer<
-            TowerServiceNoHttp<RpcMiddleware>,
-            Service: Service<
-                String,
-                Response = Option<String>,
-                Error = Box<dyn core::error::Error + Send + Sync + 'static>,
-                Future: Send + Unpin,
-            > + Send,
+    RpcMiddleware: Layer<RpcService> + Clone + Send + 'static,
+    RpcMiddleware::Service: RpcServiceT<
+            MethodResponse = MethodResponse,
+            BatchResponse = MethodResponse,
+            NotificationResponse = MethodResponse,
         > + Send
+        + Sync
         + 'static,
 {
     /// Start responding to connections requests.
@@ -227,12 +219,9 @@ where
                     let curr_conns = max_conns - connection_guard.available_connections();
                     trace!("Accepting new connection {}/{}", curr_conns, max_conns);
 
-                    let conn_permit = Arc::new(conn_permit);
-
                     process_connection(ProcessConnection {
-                        http_middleware: &self.http_middleware,
                         rpc_middleware: self.rpc_middleware.clone(),
-                        conn_permit,
+                        conn_permit: Arc::new(conn_permit),
                         conn_id: id,
                         server_cfg: self.cfg.clone(),
                         stop_handle: stop_handle.clone(),
@@ -286,7 +275,7 @@ where
     }
 }
 
-impl<HttpMiddleware, RpcMiddleware> std::fmt::Debug for IpcServer<HttpMiddleware, RpcMiddleware> {
+impl<RpcMiddleware> std::fmt::Debug for IpcServer<RpcMiddleware> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("IpcServer")
             .field("endpoint", &self.endpoint)
@@ -307,99 +296,28 @@ pub struct IpcServerStartError {
 
 /// Data required by the server to handle requests received via an IPC connection
 #[derive(Debug, Clone)]
-#[allow(dead_code)]
-pub(crate) struct ServiceData {
+struct ServiceData {
     /// Registered server methods.
-    pub(crate) methods: Methods,
+    methods: Methods,
     /// Subscription ID provider.
-    pub(crate) id_provider: Arc<dyn IdProvider>,
-    /// Stop handle.
-    pub(crate) stop_handle: StopHandle,
+    id_provider: Arc<dyn IdProvider>,
     /// Connection ID
-    pub(crate) conn_id: u32,
+    conn_id: u32,
     /// Connection Permit.
-    pub(crate) conn_permit: Arc<ConnectionPermit>,
+    conn_permit: Arc<ConnectionPermit>,
     /// Limits the number of subscriptions for this connection
-    pub(crate) bounded_subscriptions: BoundedSubscriptions,
+    bounded_subscriptions: BoundedSubscriptions,
     /// Sink that is used to send back responses to the connection.
     ///
     /// This is used for subscriptions.
-    pub(crate) method_sink: MethodSink,
+    method_sink: MethodSink,
     /// `ServerConfig`
-    pub(crate) server_cfg: Settings,
+    server_cfg: Settings,
 }
 
-/// Similar to [`tower::ServiceBuilder`] but doesn't
-/// support any tower middleware implementations.
+/// Turns raw IPC messages into serialized JSON-RPC responses.
 #[derive(Debug, Clone)]
-pub struct RpcServiceBuilder<L>(tower::ServiceBuilder<L>);
-
-impl Default for RpcServiceBuilder<Identity> {
-    fn default() -> Self {
-        Self(tower::ServiceBuilder::new())
-    }
-}
-
-impl RpcServiceBuilder<Identity> {
-    /// Create a new [`RpcServiceBuilder`].
-    pub const fn new() -> Self {
-        Self(tower::ServiceBuilder::new())
-    }
-}
-
-impl<L> RpcServiceBuilder<L> {
-    /// Optionally add a new layer `T` to the [`RpcServiceBuilder`].
-    ///
-    /// See the documentation for [`tower::ServiceBuilder::option_layer`] for more details.
-    pub fn option_layer<T>(
-        self,
-        layer: Option<T>,
-    ) -> RpcServiceBuilder<Stack<RpcEither<T, Identity>, L>> {
-        let layer = if let Some(layer) = layer {
-            RpcEither::Left(layer)
-        } else {
-            RpcEither::Right(Identity::new())
-        };
-        self.layer(layer)
-    }
-
-    /// Add a new layer `T` to the [`RpcServiceBuilder`].
-    ///
-    /// See the documentation for [`tower::ServiceBuilder::layer`] for more details.
-    pub fn layer<T>(self, layer: T) -> RpcServiceBuilder<Stack<T, L>> {
-        RpcServiceBuilder(self.0.layer(layer))
-    }
-
-    /// Add a [`tower::Layer`] built from a function that accepts a service and returns another
-    /// service.
-    ///
-    /// See the documentation for [`tower::ServiceBuilder::layer_fn`] for more details.
-    pub fn layer_fn<F>(self, f: F) -> RpcServiceBuilder<Stack<LayerFn<F>, L>> {
-        RpcServiceBuilder(self.0.layer_fn(f))
-    }
-
-    /// Add a logging layer to [`RpcServiceBuilder`]
-    ///
-    /// This logs each request and response for every call.
-    pub fn rpc_logger(self, max_log_len: u32) -> RpcServiceBuilder<Stack<RpcLoggerLayer, L>> {
-        RpcServiceBuilder(self.0.layer(RpcLoggerLayer::new(max_log_len)))
-    }
-
-    /// Wrap the service `S` with the middleware.
-    pub(crate) fn service<S>(&self, service: S) -> L::Service
-    where
-        L: tower::Layer<S>,
-    {
-        self.0.service(service)
-    }
-}
-
-/// `JsonRPSee` service compatible with `tower`.
-///
-/// # Note
-/// This is similar to [`hyper::service::service_fn`](https://docs.rs/hyper/latest/hyper/service/fn.service_fn.html).
-#[derive(Debug, Clone)]
-pub struct TowerServiceNoHttp<L> {
+struct TowerServiceNoHttp<L> {
     inner: ServiceData,
     rpc_middleware: RpcServiceBuilder<L>,
 }
@@ -407,14 +325,19 @@ pub struct TowerServiceNoHttp<L> {
 impl<RpcMiddleware> Service<String> for TowerServiceNoHttp<RpcMiddleware>
 where
     RpcMiddleware: Layer<RpcService>,
-    <RpcMiddleware as Layer<RpcService>>::Service:
-        Send + Sync + 'static + RpcServiceT<MethodResponse = MethodResponse>,
+    RpcMiddleware::Service: RpcServiceT<
+            MethodResponse = MethodResponse,
+            BatchResponse = MethodResponse,
+            NotificationResponse = MethodResponse,
+        > + Send
+        + Sync
+        + 'static,
 {
     /// The response of a handled RPC call
     ///
     /// This is an `Option` because subscriptions and call responses are handled differently.
-    /// This will be `Some` for calls, and `None` for subscriptions, because the subscription
-    /// response will be emitted via the `method_sink`.
+    /// This will be `Some` for calls, and `None` for subscriptions and notifications, because the
+    /// subscription response will be emitted via the `method_sink`.
     type Response = Option<String>;
 
     type Error = Box<dyn core::error::Error + Send + Sync + 'static>;
@@ -429,20 +352,15 @@ where
     fn call(&mut self, request: String) -> Self::Future {
         trace!(request_bytes = request.len(), "Received IPC request");
 
-        let cfg = RpcServiceCfg {
-            bounded_subscriptions: self.inner.bounded_subscriptions.clone(),
-            id_provider: self.inner.id_provider.clone(),
-            sink: self.inner.method_sink.clone(),
-        };
-
-        let max_response_body_size = self.inner.server_cfg.max_response_body_size as usize;
-        let max_request_body_size = self.inner.server_cfg.max_request_body_size as usize;
+        let max_request_body_size = self.inner.server_cfg.max_request_body_size;
         let conn = self.inner.conn_permit.clone();
         let rpc_service = self.rpc_middleware.service(RpcService::new(
             self.inner.methods.clone(),
-            max_response_body_size,
+            self.inner.server_cfg.max_response_body_size as usize,
             self.inner.conn_id.into(),
-            cfg,
+            self.inner.bounded_subscriptions.clone(),
+            self.inner.method_sink.clone(),
+            self.inner.id_provider.clone(),
         ));
         // an ipc connection needs to handle read+write concurrently
         // even if the underlying rpc handler spawns the actual work or is does a lot of async any
@@ -454,14 +372,26 @@ where
         // The connection drops its pending calls when it closes, so the call must not outlive the
         // returned future, otherwise it keeps running without anyone waiting for the response.
         let f = AbortOnDropHandle::new(tokio::task::spawn(async move {
-            ipc::call_with_service(
-                request,
-                rpc_service,
-                max_response_body_size,
-                max_request_body_size,
-                conn,
-            )
-            .await
+            let rp = if request.len() > max_request_body_size as usize {
+                MethodResponse::error(Id::Null, reject_too_big_request(max_request_body_size))
+            } else {
+                let is_single = request.chars().find_map(|c| match c {
+                    '{' => Some(true),
+                    '[' => Some(false),
+                    _ => None,
+                });
+                handle_rpc_call(
+                    request.as_bytes(),
+                    is_single.unwrap_or(true),
+                    BatchRequestConfig::Unlimited,
+                    &rpc_service,
+                )
+                .await
+            };
+            drop(conn);
+
+            (rp.is_method_call() || rp.is_batch())
+                .then(|| String::from(Box::<str>::from(rp.into_json())))
         }));
 
         Box::pin(async move {
@@ -476,8 +406,7 @@ where
     }
 }
 
-struct ProcessConnection<'a, HttpMiddleware, RpcMiddleware> {
-    http_middleware: &'a tower::ServiceBuilder<HttpMiddleware>,
+struct ProcessConnection<RpcMiddleware> {
     rpc_middleware: RpcServiceBuilder<RpcMiddleware>,
     conn_permit: Arc<ConnectionPermit>,
     conn_id: u32,
@@ -491,23 +420,18 @@ struct ProcessConnection<'a, HttpMiddleware, RpcMiddleware> {
 
 /// Spawns the IPC connection onto a new task
 #[instrument(name = "connection", skip_all, fields(conn_id = %params.conn_id))]
-fn process_connection<RpcMiddleware, HttpMiddleware>(
-    params: ProcessConnection<'_, HttpMiddleware, RpcMiddleware>,
-) where
-    RpcMiddleware: Layer<RpcService> + Clone + Send + 'static,
-    for<'a> <RpcMiddleware as Layer<RpcService>>::Service: RpcServiceT,
-    HttpMiddleware: Layer<TowerServiceNoHttp<RpcMiddleware>> + Send + 'static,
-    <HttpMiddleware as Layer<TowerServiceNoHttp<RpcMiddleware>>>::Service: Send
-    + Service<
-        String,
-        Response = Option<String>,
-        Error = Box<dyn core::error::Error + Send + Sync + 'static>,
-    >,
-    <<HttpMiddleware as Layer<TowerServiceNoHttp<RpcMiddleware>>>::Service as Service<String>>::Future:
-    Send + Unpin,
+fn process_connection<RpcMiddleware>(params: ProcessConnection<RpcMiddleware>)
+where
+    RpcMiddleware: Layer<RpcService> + Send + 'static,
+    RpcMiddleware::Service: RpcServiceT<
+            MethodResponse = MethodResponse,
+            BatchResponse = MethodResponse,
+            NotificationResponse = MethodResponse,
+        > + Send
+        + Sync
+        + 'static,
 {
     let ProcessConnection {
-        http_middleware,
         rpc_middleware,
         conn_permit,
         conn_id,
@@ -523,25 +447,23 @@ fn process_connection<RpcMiddleware, HttpMiddleware>(
         StreamCodec::stream_incoming().with_max_length(server_cfg.max_request_body_size as usize);
     let ipc = IpcConn(tokio_util::codec::Decoder::framed(codec, local_socket_stream));
 
-    let (tx, rx) = mpsc::channel::<Box<JsonRawValue>>(server_cfg.message_buffer_capacity as usize);
+    let (tx, rx) = mpsc::channel::<Box<JsonRawValue>>(MESSAGE_BUFFER_CAPACITY);
     let method_sink = MethodSink::new_with_limit(tx, server_cfg.max_response_body_size);
-    let tower_service = TowerServiceNoHttp {
+    let service = TowerServiceNoHttp {
         inner: ServiceData {
             methods,
             id_provider,
-            stop_handle: stop_handle.clone(),
-            server_cfg: server_cfg.clone(),
             conn_id,
             conn_permit,
             bounded_subscriptions: BoundedSubscriptions::new(
                 server_cfg.max_subscriptions_per_connection,
             ),
             method_sink,
+            server_cfg,
         },
         rpc_middleware,
     };
 
-    let service = http_middleware.service(tower_service);
     tokio::spawn(async {
         to_ipc_service(ipc, service, stop_handle, rx).in_current_span().await;
         drop(drop_on_completion)
@@ -596,16 +518,10 @@ pub struct Settings {
     max_request_body_size: u32,
     /// Maximum size in bytes of a response.
     max_response_body_size: u32,
-    /// Max length for logging for requests and responses
-    ///
-    /// Logs bigger than this limit will be truncated.
-    max_log_length: u32,
     /// Maximum number of incoming connections allowed.
     max_connections: u32,
     /// Maximum number of subscriptions per connection.
     max_subscriptions_per_connection: u32,
-    /// Number of messages that server is allowed `buffer` until backpressure kicks in.
-    message_buffer_capacity: u32,
     /// Custom tokio runtime to run the server on.
     tokio_runtime: Option<tokio::runtime::Handle>,
     /// The permissions to create the IPC socket with.
@@ -617,10 +533,8 @@ impl Default for Settings {
         Self {
             max_request_body_size: TEN_MB_SIZE_BYTES,
             max_response_body_size: TEN_MB_SIZE_BYTES,
-            max_log_length: 4096,
             max_connections: 100,
             max_subscriptions_per_connection: 1024,
-            message_buffer_capacity: 1024,
             tokio_runtime: None,
             ipc_socket_permissions: None,
         }
@@ -629,26 +543,24 @@ impl Default for Settings {
 
 /// Builder to configure and create a JSON-RPC server
 #[derive(Debug)]
-pub struct Builder<HttpMiddleware, RpcMiddleware> {
+pub struct Builder<RpcMiddleware> {
     settings: Settings,
     /// Subscription ID provider.
     id_provider: Arc<dyn IdProvider>,
     rpc_middleware: RpcServiceBuilder<RpcMiddleware>,
-    http_middleware: tower::ServiceBuilder<HttpMiddleware>,
 }
 
-impl Default for Builder<Identity, Identity> {
+impl Default for Builder<Identity> {
     fn default() -> Self {
         Self {
             settings: Settings::default(),
             id_provider: Arc::new(RandomIntegerIdProvider),
             rpc_middleware: RpcServiceBuilder::new(),
-            http_middleware: tower::ServiceBuilder::new(),
         }
     }
 }
 
-impl<HttpMiddleware, RpcMiddleware> Builder<HttpMiddleware, RpcMiddleware> {
+impl<RpcMiddleware> Builder<RpcMiddleware> {
     /// Set the maximum size of a request body in bytes. Default is 10 MiB.
     pub const fn max_request_body_size(mut self, size: u32) -> Self {
         self.settings.max_request_body_size = size;
@@ -661,12 +573,6 @@ impl<HttpMiddleware, RpcMiddleware> Builder<HttpMiddleware, RpcMiddleware> {
         self
     }
 
-    /// Set the maximum size of a log
-    pub const fn max_log_length(mut self, size: u32) -> Self {
-        self.settings.max_log_length = size;
-        self
-    }
-
     /// Set the maximum number of connections allowed. Default is 100.
     pub const fn max_connections(mut self, max: u32) -> Self {
         self.settings.max_connections = max;
@@ -676,28 +582,6 @@ impl<HttpMiddleware, RpcMiddleware> Builder<HttpMiddleware, RpcMiddleware> {
     /// Set the maximum number of subscriptions per connection. Default is 1024.
     pub const fn max_subscriptions_per_connection(mut self, max: u32) -> Self {
         self.settings.max_subscriptions_per_connection = max;
-        self
-    }
-
-    /// The server enforces backpressure which means that
-    /// `n` messages can be buffered and if the client
-    /// can't keep up with the server.
-    ///
-    /// This `capacity` is applied per connection and
-    /// applies globally on the connection which implies
-    /// all JSON-RPC messages.
-    ///
-    /// For example if a subscription produces plenty of new items
-    /// and the client can't keep up then no new messages are handled.
-    ///
-    /// If this limit is exceeded then the server will "back-off"
-    /// and only accept new messages once the client reads pending messages.
-    ///
-    /// # Panics
-    ///
-    /// Panics if the buffer capacity is 0.
-    pub const fn set_message_buffer_capacity(mut self, c: u32) -> Self {
-        self.settings.message_buffer_capacity = c;
         self
     }
 
@@ -745,34 +629,6 @@ impl<HttpMiddleware, RpcMiddleware> Builder<HttpMiddleware, RpcMiddleware> {
         self
     }
 
-    /// Configure a custom [`tower::ServiceBuilder`] middleware for composing layers to be applied
-    /// to the RPC service.
-    ///
-    /// Default: No tower layers are applied to the RPC service.
-    ///
-    /// # Examples
-    ///
-    /// ```rust
-    /// #[tokio::main]
-    /// async fn main() {
-    ///     let builder = tower::ServiceBuilder::new();
-    ///     let server = reth_ipc::server::Builder::default()
-    ///         .set_http_middleware(builder)
-    ///         .build("/tmp/my-uds".into());
-    /// }
-    /// ```
-    pub fn set_http_middleware<T>(
-        self,
-        service_builder: tower::ServiceBuilder<T>,
-    ) -> Builder<T, RpcMiddleware> {
-        Builder {
-            settings: self.settings,
-            id_provider: self.id_provider,
-            http_middleware: service_builder,
-            rpc_middleware: self.rpc_middleware,
-        }
-    }
-
     /// Enable middleware that is invoked on every JSON-RPC call.
     ///
     /// The middleware itself is very similar to the `tower middleware` but
@@ -784,25 +640,16 @@ impl<HttpMiddleware, RpcMiddleware> Builder<HttpMiddleware, RpcMiddleware> {
     ///
     /// The builder itself exposes a similar API as the [`tower::ServiceBuilder`]
     /// where it is possible to compose layers to the middleware.
-    pub fn set_rpc_middleware<T>(
-        self,
-        rpc_middleware: RpcServiceBuilder<T>,
-    ) -> Builder<HttpMiddleware, T> {
-        Builder {
-            settings: self.settings,
-            id_provider: self.id_provider,
-            rpc_middleware,
-            http_middleware: self.http_middleware,
-        }
+    pub fn set_rpc_middleware<T>(self, rpc_middleware: RpcServiceBuilder<T>) -> Builder<T> {
+        Builder { settings: self.settings, id_provider: self.id_provider, rpc_middleware }
     }
 
     /// Finalize the configuration of the server. Consumes the [`Builder`].
-    pub fn build(self, endpoint: String) -> IpcServer<HttpMiddleware, RpcMiddleware> {
+    pub fn build(self, endpoint: String) -> IpcServer<RpcMiddleware> {
         IpcServer {
             endpoint,
             cfg: self.settings,
             id_provider: self.id_provider,
-            http_middleware: self.http_middleware,
             rpc_middleware: self.rpc_middleware,
         }
     }
@@ -1087,6 +934,32 @@ mod tests {
         let responses = client.recv().await.unwrap();
         assert_eq!(error_code(&responses[0]), Some(ErrorCode::InternalError.code().into()));
         assert_eq!(responses[1]["result"], "ok");
+    }
+
+    #[tokio::test]
+    async fn test_invalid_id_is_not_a_notification() {
+        let endpoint = &dummy_name();
+        let server = Builder::default().build(endpoint.clone());
+        let mut module = RpcModule::new(());
+        module.register_method("anything", |_, _| "ok").unwrap();
+        let handle = server.start(module).await.unwrap();
+        tokio::spawn(handle.stopped());
+
+        let mut client = TestClient::connect(endpoint).await;
+        client.send(json!({"jsonrpc": "2.0", "method": "anything", "id": {}})).await.unwrap();
+        // The message used to be treated as a notification and left unanswered.
+        let response = tokio::time::timeout(std::time::Duration::from_secs(5), client.recv())
+            .await
+            .expect("message with an invalid id was not answered")
+            .unwrap();
+        assert_eq!(
+            response,
+            json!({
+                "jsonrpc": "2.0",
+                "id": null,
+                "error": {"code": ErrorCode::InvalidRequest.code(), "message": "Invalid request"},
+            })
+        );
     }
 
     #[tokio::test]

@@ -28,7 +28,7 @@ use std::{future::Future, net::SocketAddr, pin::Pin, sync::Arc, task::Poll, time
 
 use crate::{
     future::{ConnectionGuard, ServerHandle, StopHandle},
-    middleware::rpc::{RpcService, RpcServiceCfg},
+    middleware::rpc::{catch_call_panic, RpcService},
     transport::{http, ws, ws::BackgroundTaskParams},
     utils::{
         deserialize_notification, no_request_within, NotifyOnRequest,
@@ -55,7 +55,7 @@ use jsonrpsee_types::{
         reject_too_big_batch_request, ErrorCode, BATCHES_NOT_SUPPORTED_CODE,
         BATCHES_NOT_SUPPORTED_MSG,
     },
-    ErrorObject, Id,
+    ErrorObject, Id, Request,
 };
 use soketto::handshake::http::is_upgrade_request;
 use tokio::{
@@ -745,20 +745,13 @@ where
                     // a graceful shutdown can occur.
                     let (pending_calls, pending_calls_completed) = mpsc::channel::<()>(1);
 
-                    let cfg = RpcServiceCfg::CallsAndSubscriptions {
-                        bounded_subscriptions: BoundedSubscriptions::new(
-                            this.server_cfg.max_subscriptions_per_connection,
-                        ),
-                        id_provider: this.server_cfg.id_provider.clone(),
-                        sink: sink.clone(),
-                        _pending_calls: pending_calls,
-                    };
-
                     let rpc_service = RpcService::new(
                         this.methods.clone(),
                         this.server_cfg.max_response_body_size as usize,
                         this.conn_id.into(),
-                        cfg,
+                        BoundedSubscriptions::new(this.server_cfg.max_subscriptions_per_connection),
+                        sink.clone(),
+                        this.server_cfg.id_provider.clone(),
                     );
 
                     let rpc_service = self.rpc_middleware.service(rpc_service);
@@ -788,6 +781,7 @@ where
                                 rpc_service,
                                 sink,
                                 rx,
+                                pending_calls,
                                 pending_calls_completed,
                             };
 
@@ -812,11 +806,10 @@ where
             let methods = this.methods.clone();
             let batch_config = this.server_cfg.batch_requests_config;
 
-            let rpc_service = self.rpc_middleware.service(RpcService::new(
+            let rpc_service = self.rpc_middleware.service(RpcService::without_subscriptions(
                 methods,
                 max_response_size as usize,
                 this.conn_id.into(),
-                RpcServiceCfg::OnlyCalls,
             ));
 
             Box::pin(async move {
@@ -953,7 +946,13 @@ where
     }
 }
 
-pub(crate) async fn handle_rpc_call<S>(
+/// Parses `body` as a single JSON-RPC message (`is_single`) or a batch, dispatches it to
+/// `rpc_service` and returns the serialized response.
+///
+/// A panicking call is answered with an internal error. The caller sends the response only if it
+/// [is a method call](MethodResponse::is_method_call) or [a batch](MethodResponse::is_batch):
+/// notifications are not answered and subscription calls answer through the subscription sink.
+pub async fn handle_rpc_call<S>(
     body: &[u8],
     is_single: bool,
     batch_config: BatchRequestConfig,
@@ -968,8 +967,8 @@ where
 {
     // Single request or notification
     if is_single {
-        if let Ok(req) = serde_json::from_slice(body) {
-            rpc_service.call(req).await
+        if let Ok(req) = serde_json::from_slice::<Request<'_>>(body) {
+            catch_call_panic(req.id(), rpc_service.call(req)).await
         } else if let Ok(notif) = deserialize_notification::<Notif>(body) {
             rpc_service.notification(notif).await
         } else {
