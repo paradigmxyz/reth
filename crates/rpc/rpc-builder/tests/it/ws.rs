@@ -71,7 +71,10 @@ async fn test_eth_subscribe_all_supported_kinds_accept() {
     reth_tracing::init_test_tracing();
 
     let handle = launch_ws_eth().await;
-    let provider = ws_provider(&handle).await;
+    // Raw requests, because alloy's tracked subscriptions unsubscribe without waiting for the
+    // response and could mix it up with the next subscribe call. Unsubscribing is covered by
+    // `test_eth_subscribe_syncing_releases_permit_on_unsubscribe`.
+    let client = handle.ws_client().await.unwrap();
 
     let cases: Vec<(&str, Vec<Value>)> = vec![
         ("newHeads", vec![]),
@@ -101,15 +104,11 @@ async fn test_eth_subscribe_all_supported_kinds_accept() {
     for (kind, params) in cases {
         let rpc_params = std::iter::once(Value::from(kind)).chain(params).collect::<Vec<_>>();
 
-        let sub = provider
-            .subscribe::<_, Value>(rpc_params)
+        let sub_id: Value = client
+            .request("eth_subscribe", rpc_params)
             .await
             .unwrap_or_else(|e| panic!("subscribe({kind}) should succeed: {e}"));
-
-        provider
-            .unsubscribe(*sub.local_id())
-            .await
-            .unwrap_or_else(|e| panic!("unsubscribe({kind}) should succeed: {e}"));
+        assert!(sub_id.is_string(), "subscribe({kind}) returned {sub_id}");
     }
 }
 
