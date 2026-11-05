@@ -191,6 +191,41 @@ not help, locally:
 - Probing for cold reads: no change. Speculation workers take 13 major faults per block; MDBX
   reads, page faults included, are ~20% of their time.
 
+### The p99 is a handful of cold batch transactions
+
+derek's per-block results show the p99 is set by the same few blocks in every run, not by
+random stalls. Replaying derek's exact 625 payloads on the devbox from the same snapshot, with
+the datadir dropped from the page cache before each run (`ab3.sh` with `COLD=1`), reproduces
+derek: main 26.2 ms mean, 102 ms p99, 24 blocks over 64 ms; the branch then 12.
+
+Each of those blocks has one transaction that takes 70-200 ms cold and 1-10 ms warm, in
+speculation and on the committer alike: batch calls with 7-14M gas limits and 4-19 KB of
+calldata (a Safe `execTransaction`, a bot contract seen in two of them), whose storage reads go
+to disk one at a time. Warm, the same 500 blocks have a 28 ms p99.
+
+The probe found few of their keys, for two reasons: a missing slot read as zero, so the batch
+reverted at its first balance check, and it ran once. Probe threads now probe every arriving
+transaction in up to 64 rounds. Each round loads everything the previous one missed in parallel
+on the read-set pool and waits for it, then executes again; missing slots read as 2^128 in every
+other round, so that balance and allowance checks pass. Speculation workers no longer probe, so
+the probes' waits do not delay speculation. Cold, over several runs each:
+
+| | Mean | P99 | Blocks over 64 ms |
+|---|---|---|---|
+| main | 26.44 ms | 105.7 ms | 21-24 |
+| branch, one probe round on the workers | 18.75 ms | 96.5 ms | 9-13 |
+| branch, 64 rounds on probe threads | 16.51 ms | 69.6 ms | 4-6 |
+
+Rounds load thousands of keys at once for some of these transactions (26342981: 2,871 and 2,539
+keys, 79 -> 47 ms). Two remain: 26342682 and 26342631 walk a chain of dependent reads, one or
+two keys per round, for 64 rounds and beyond (26342682 through a contract with 1.77M slots), which
+no prefetch can parallelize. Loading rounds of up to 8 keys on the probe thread instead of the
+pool, and code with every account, made it slower (p99 74.7 ms).
+
+On derek, durable commits of persistence batches cost the rest: running the same branch with
+`--db.sync-mode=safe-no-sync` gave mean -11.7%, p99 -23.2% and end-to-end Mgas/s +24.5%. Opening
+MDBX without its write map is not an option: the node reports the database as corrupted.
+
 ## Rewrite: newPayload v2
 
 The v2 path replaces the per-block task graph instead of tuning it:
