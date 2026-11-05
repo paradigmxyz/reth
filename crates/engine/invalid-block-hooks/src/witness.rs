@@ -123,8 +123,8 @@ fn sort_bundle_state_for_comparison(bundle_state: &BundleState) -> BundleStateSo
 ///
 /// Blocks are processed on a dedicated thread, so the invalid payload status is returned without
 /// waiting for the re-execution. One block is processed at a time and at most one more waits;
-/// further invalid blocks are skipped until the thread catches up. Only the output of the
-/// [`MAX_RETAINED_BLOCKS`] most recently processed blocks is kept.
+/// further invalid blocks are skipped until the thread catches up. Only the output of the most
+/// recently processed blocks is kept.
 #[derive(Debug, Clone)]
 pub struct InvalidBlockWitnessHook<P, E> {
     /// The provider to read the historical state and do the EVM execution.
