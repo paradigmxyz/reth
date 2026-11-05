@@ -15,7 +15,8 @@ use futures::{
 };
 use itertools::Itertools;
 use jsonrpsee::{core::RpcResult, server::IdProvider};
-use reth_errors::ProviderError;
+use jsonrpsee_types::error::{OVERSIZED_RESPONSE_CODE, OVERSIZED_RESPONSE_MSG};
+use reth_errors::{ProviderError, RethError};
 use reth_primitives_traits::{NodePrimitives, SealedHeader};
 use reth_rpc_eth_api::{
     helpers::{EthBlocks, LoadReceipt},
@@ -23,7 +24,7 @@ use reth_rpc_eth_api::{
     RpcLog, RpcNodeCoreExt, RpcTransaction,
 };
 use reth_rpc_eth_types::{
-    logs_utils::{self, append_matching_block_logs, ProviderOrBlock},
+    logs_utils::{self, try_for_each_matching_block_log, ProviderOrBlock},
     EthApiError, EthFilterConfig, EthStateCache, EthSubscriptionIdProvider,
 };
 use reth_rpc_server_types::{result::rpc_error_with_code, ToRpcResult};
@@ -33,9 +34,11 @@ use reth_storage_api::{
 };
 use reth_tasks::Runtime;
 use reth_transaction_pool::{NewSubpoolTransactionStream, PoolTransaction, TransactionPool};
+use serde::Serialize;
 use std::{
     collections::{HashMap, VecDeque},
     fmt,
+    io::{self, Write},
     iter::{Peekable, StepBy},
     ops::RangeInclusive,
     pin::Pin,
@@ -141,8 +144,12 @@ where
     /// let filter = EthFilter::new(eth_api, Default::default(), Runtime::test());
     /// ```
     pub fn new(eth_api: Eth, config: EthFilterConfig, task_spawner: Runtime) -> Self {
-        let EthFilterConfig { max_blocks_per_filter, max_logs_per_response, stale_filter_ttl } =
-            config;
+        let EthFilterConfig {
+            max_blocks_per_filter,
+            max_logs_per_response,
+            stale_filter_ttl,
+            max_response_size,
+        } = config;
         let inner = EthFilterInner {
             eth_api,
             active_filters: ActiveFilters::new(),
@@ -150,7 +157,11 @@ where
             max_headers_range: MAX_HEADERS_RANGE,
             task_spawner,
             stale_filter_ttl,
-            query_limits: QueryLimits { max_blocks_per_filter, max_logs_per_response },
+            query_limits: QueryLimits {
+                max_blocks_per_filter,
+                max_logs_per_response,
+                max_response_size,
+            },
         };
 
         let eth_filter = Self { inner: Arc::new(inner) };
@@ -532,8 +543,9 @@ where
                 }
 
                 let mut all_logs = Vec::new();
-                append_matching_block_logs(
-                    &mut all_logs,
+                let mut budget = LogResponseBudget::new(limits.max_response_size)?;
+                try_for_each_matching_block_log(
+                    |log| budget.push(&mut all_logs, log),
                     self.eth_api.converter(),
                     maybe_block
                         .map(ProviderOrBlock::Block)
@@ -566,9 +578,10 @@ where
                         if pending_block.block.number() > info.best_number {
                             // only consider the pending block if it is ahead of the chain
                             let mut all_logs = Vec::new();
+                            let mut budget = LogResponseBudget::new(limits.max_response_size)?;
                             let header = pending_block.block.clone_sealed_header();
-                            append_matching_block_logs(
-                                &mut all_logs,
+                            try_for_each_matching_block_log(
+                                |log| budget.push(&mut all_logs, log),
                                 self.eth_api.converter(),
                                 ProviderOrBlock::<Eth::Provider>::Block(pending_block.block),
                                 &filter,
@@ -719,13 +732,14 @@ where
         limits: QueryLimits,
     ) -> Result<Vec<RpcLog<Eth::NetworkTypes>>, EthFilterError> {
         let mut all_logs = Vec::new();
+        let mut budget = LogResponseBudget::new(limits.max_response_size)?;
 
         // get current chain tip to determine processing mode
         let chain_tip = self.provider().best_block_number()?;
 
         // Scan the range window by window so that receipts are fetched while headers are still
-        // being read: the log limit can end the query after the first window, memory is bounded by
-        // one window, and a cancelled query stops at the next window.
+        // being read: the count or byte limit can end the query after the first window, header
+        // reads stay bounded by one window, and a cancelled query stops at the next window.
         for (from, to) in
             BlockRangeInclusiveIter::new(from_block..=to_block, self.max_headers_range)
         {
@@ -774,8 +788,8 @@ where
                 range_mode.next().await?
             {
                 let num_hash = header.num_hash();
-                append_matching_block_logs(
-                    &mut all_logs,
+                try_for_each_matching_block_log(
+                    |log| budget.push(&mut all_logs, log),
                     self.eth_api.converter(),
                     recovered_block
                         .map(ProviderOrBlock::Block)
@@ -786,8 +800,7 @@ where
                     false,
                 )?;
 
-                // size check but only if range is multiple blocks, so we always return all
-                // logs of a single block
+                // Single-block queries are exempt from the count limit, but not the byte budget.
                 let is_multi_block_range = from_block != to_block;
                 if let Some(max_logs_per_response) = limits.max_logs_per_response &&
                     is_multi_block_range &&
@@ -1403,27 +1416,85 @@ impl<
     }
 }
 
+/// Counts the JSON result bytes without allocating a serialized copy of the logs.
+struct LogResponseBudget {
+    remaining: Option<usize>,
+}
+
+impl LogResponseBudget {
+    fn new(max_response_size: Option<usize>) -> Result<Self, EthApiError> {
+        let remaining = max_response_size
+            .map(|size| size.checked_sub(2).ok_or_else(log_response_too_large))
+            .transpose()?;
+        // Reserve the array brackets; the transport accounts for the request ID and envelope.
+        Ok(Self { remaining })
+    }
+
+    fn push<L: Serialize>(&mut self, logs: &mut Vec<L>, log: L) -> Result<(), EthApiError> {
+        if self.remaining.is_some() {
+            if !logs.is_empty() {
+                self.write_all(b",").map_err(|_| log_response_too_large())?;
+            }
+            // Serialize the converted RPC log so network-specific fields and hex expansion count.
+            serde_json::to_writer(&mut *self, &log).map_err(|err| {
+                if err.is_io() {
+                    log_response_too_large()
+                } else {
+                    EthApiError::Internal(RethError::other(err))
+                }
+            })?;
+        }
+        logs.push(log);
+        Ok(())
+    }
+}
+
+impl Write for LogResponseBudget {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        if let Some(remaining) = &mut self.remaining {
+            *remaining = remaining.checked_sub(buf.len()).ok_or(io::ErrorKind::OutOfMemory)?;
+        }
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        Ok(())
+    }
+}
+
+fn log_response_too_large() -> EthApiError {
+    EthApiError::other(rpc_error_with_code(OVERSIZED_RESPONSE_CODE, OVERSIZED_RESPONSE_MSG))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::{eth::EthApi, EthApiBuilder};
     use alloy_consensus::TxLegacy;
     use alloy_network::Ethereum;
-    use alloy_primitives::{Bloom, FixedBytes};
+    use alloy_primitives::{Address, Bloom, Bytes, FixedBytes, Log, LogData, Signature};
     use rand::Rng;
+    use reth_chain_state::ExecutedBlock;
     use reth_chainspec::{ChainSpec, ChainSpecProvider};
     use reth_db_api::models::StoredBlockBodyIndices;
-    use reth_ethereum_primitives::TxType;
+    use reth_ethereum_primitives::{Block, BlockBody, Receipt, TransactionSigned, TxType};
     use reth_evm_ethereum::EthEvmConfig;
     use reth_network_api::noop::NoopNetwork;
+    use reth_primitives_traits::Block as _;
     use reth_provider::test_utils::MockEthProvider;
     use reth_rpc_convert::RpcConverter;
-    use reth_rpc_eth_api::{helpers::SpawnBlocking, node::RpcNodeCoreAdapter};
-    use reth_rpc_eth_types::receipt::EthReceiptConverter;
+    use reth_rpc_eth_api::{
+        helpers::{LoadPendingBlock, SpawnBlocking},
+        node::RpcNodeCoreAdapter,
+    };
+    use reth_rpc_eth_types::{receipt::EthReceiptConverter, PendingBlock};
     use reth_tasks::Runtime;
     use reth_testing_utils::generators;
     use reth_transaction_pool::test_utils::{testing_pool, TestPool};
-    use std::{collections::VecDeque, sync::Arc};
+    use std::{
+        collections::{BTreeMap, VecDeque},
+        sync::Arc,
+    };
 
     #[test]
     fn receipts_unavailable_error_matches_geth() {
@@ -1986,7 +2057,7 @@ mod tests {
                 Filter::default(),
                 100,
                 102,
-                QueryLimits { max_blocks_per_filter: None, max_logs_per_response: Some(2) },
+                QueryLimits { max_logs_per_response: Some(2), ..Default::default() },
             )
             .await
             .expect_err("range should exceed max logs");
@@ -2135,9 +2206,6 @@ mod tests {
 
     #[tokio::test]
     async fn test_range_scan_across_windows() {
-        use alloy_primitives::{Address, Bloom, Bytes, Log, LogData, Signature};
-        use reth_ethereum_primitives::{Block, BlockBody, Receipt, TransactionSigned};
-
         let provider = MockEthProvider::default();
         let tx = TransactionSigned::new_unhashed(
             TxLegacy {
@@ -2154,7 +2222,7 @@ mod tests {
             cumulative_gas_used: 21_000,
             logs: vec![Log {
                 address: Address::ZERO,
-                data: LogData::new_unchecked(vec![], Bytes::new()),
+                data: LogData::new_unchecked(vec![], Bytes::from(vec![0xab; 128 * 1024])),
             }],
             success: true,
         };
@@ -2203,6 +2271,31 @@ mod tests {
         let blocks = logs.iter().map(|log| log.block_number.unwrap()).collect::<Vec<_>>();
         assert_eq!(blocks, matching_blocks);
 
+        let result_size = serde_json::to_vec(&logs).unwrap().len();
+        let limits = QueryLimits { max_response_size: Some(result_size), ..Default::default() };
+        let bounded = eth_filter
+            .inner
+            .clone()
+            .get_logs_in_block_range(Filter::default(), 0, 2_500, limits)
+            .await
+            .unwrap();
+        assert_eq!(bounded, logs);
+
+        let err = eth_filter
+            .inner
+            .clone()
+            .get_logs_in_block_range(
+                Filter::default(),
+                0,
+                2_500,
+                QueryLimits { max_response_size: Some(result_size - 1), ..limits },
+            )
+            .await
+            .unwrap_err();
+        let err = jsonrpsee_types::ErrorObject::from(err);
+        assert_eq!(err.code(), OVERSIZED_RESPONSE_CODE);
+        assert_eq!(err.message(), OVERSIZED_RESPONSE_MSG);
+
         // the log limit ends the scan in the window that exceeds it and names the last block that
         // fit as the range to retry with
         let err = eth_filter
@@ -2212,7 +2305,7 @@ mod tests {
                 Filter::default(),
                 0,
                 2_500,
-                QueryLimits { max_blocks_per_filter: None, max_logs_per_response: Some(1) },
+                QueryLimits { max_logs_per_response: Some(1), ..Default::default() },
             )
             .await
             .unwrap_err();
@@ -2303,5 +2396,126 @@ mod tests {
             .await
             .unwrap();
         assert!(logs.is_empty());
+    }
+
+    #[test]
+    fn log_response_budget_counts_custom_fields_before_retaining() {
+        let log = serde_json::json!({
+            "data": Bytes::from(vec![0xab; 128 * 1024]),
+            "networkField": "\"\n\\".repeat(100),
+        });
+        let expected = vec![log.clone(), log.clone()];
+        let size = serde_json::to_vec(&expected).unwrap().len();
+        for limit in [None, Some(size), Some(size - 1)] {
+            let mut budget = LogResponseBudget::new(limit).unwrap();
+            let mut logs = Vec::new();
+            budget.push(&mut logs, log.clone()).unwrap();
+            let result = budget.push(&mut logs, log.clone());
+            if limit == Some(size - 1) {
+                let err = jsonrpsee_types::ErrorObject::from(result.unwrap_err());
+                assert_eq!(err.code(), OVERSIZED_RESPONSE_CODE);
+                assert_eq!(err.message(), OVERSIZED_RESPONSE_MSG);
+                assert_eq!(logs, expected[..1]);
+            } else {
+                result.unwrap();
+                assert_eq!(logs, expected);
+            }
+        }
+
+        for size in [0, 1] {
+            let err = LogResponseBudget::new(Some(size)).err().unwrap();
+            assert_eq!(jsonrpsee_types::ErrorObject::from(err).code(), OVERSIZED_RESPONSE_CODE);
+        }
+        let mut budget = LogResponseBudget::new(Some(1024)).unwrap();
+        let mut logs = Vec::new();
+        let err = budget.push(&mut logs, BTreeMap::from([((1, 2), 3)])).unwrap_err();
+        let err = jsonrpsee_types::ErrorObject::from(err);
+        assert_eq!(err.code(), jsonrpsee_types::error::INTERNAL_ERROR_CODE);
+        assert_eq!(err.message(), "key must be a string");
+        assert!(logs.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_log_response_budget_entrypoints() {
+        let provider = MockEthProvider::default();
+        let receipt = Receipt {
+            tx_type: TxType::Legacy,
+            cumulative_gas_used: 100_000,
+            logs: vec![
+                Log {
+                    address: Address::ZERO,
+                    data: LogData::new_unchecked(vec![], Bytes::from(vec![0xab; 1024])),
+                };
+                2
+            ],
+            success: true,
+        };
+        let mut block = Block {
+            header: alloy_consensus::Header { number: 1, ..Default::default() },
+            body: BlockBody {
+                transactions: vec![TransactionSigned::new_unhashed(
+                    TxLegacy::default().into(),
+                    Signature::test_signature(),
+                )],
+                ..Default::default()
+            },
+        };
+        let hash = block.hash_slow();
+        provider.add_block(hash, block.clone());
+        provider.add_receipts(1, vec![receipt.clone()]);
+        provider.add_block_body_indices(1, StoredBlockBodyIndices { first_tx_num: 0, tx_count: 1 });
+        let eth_api = build_test_eth_api(provider);
+
+        block.header.number = 2;
+        block.header.parent_hash = hash;
+        let mut executed = ExecutedBlock {
+            recovered_block: Arc::new(block.try_into_recovered().unwrap()),
+            ..Default::default()
+        };
+        Arc::make_mut(&mut executed.execution_output).result.receipts = vec![receipt];
+        *eth_api.pending_block().lock().await = Some(PendingBlock::with_executed_block(
+            Instant::now() + Duration::from_secs(60),
+            executed,
+        ));
+
+        for limit in [3 * 1024, 16 * 1024] {
+            let eth_filter = EthFilter::new(
+                eth_api.clone(),
+                EthFilterConfig::default().max_logs_per_response(1).max_response_size(Some(limit)),
+                Runtime::test(),
+            );
+            for (filter, block_number) in [
+                (Filter::new().from_block(1u64).to_block(1u64), 1),
+                (Filter::new().at_block_hash(hash), 1),
+                (Filter::new().from_block(BlockNumberOrTag::Pending), 2),
+            ] {
+                // Engine calls explicitly opt out, including the configured count limit.
+                let expected =
+                    EngineEthFilter::logs(&eth_filter, filter.clone(), QueryLimits::no_limits())
+                        .await
+                        .unwrap();
+                assert_eq!(expected.len(), 2);
+                assert!(expected.iter().all(|log| log.block_number == Some(block_number)));
+                let result = EthFilterApiServer::logs(&eth_filter, filter.clone()).await;
+                if limit == 3 * 1024 {
+                    assert_eq!(result.unwrap_err().code(), OVERSIZED_RESPONSE_CODE);
+                } else {
+                    assert_eq!(result.unwrap(), expected);
+                }
+            }
+
+            let id =
+                eth_filter.new_filter(Filter::new().from_block(1u64).to_block(1u64)).await.unwrap();
+            let logs = EthFilterApiServer::filter_logs(&eth_filter, id.clone()).await;
+            let changes = EthFilterApiServer::filter_changes(&eth_filter, id).await;
+            if limit == 3 * 1024 {
+                assert_eq!(logs.unwrap_err().code(), OVERSIZED_RESPONSE_CODE);
+                assert_eq!(changes.unwrap_err().code(), OVERSIZED_RESPONSE_CODE);
+            } else {
+                let logs = logs.unwrap();
+                assert_eq!(logs.len(), 2);
+                assert_eq!(changes.unwrap(), FilterChanges::Logs(logs));
+            }
+        }
     }
 }

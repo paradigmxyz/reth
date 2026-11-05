@@ -93,6 +93,36 @@ where
     P: BlockReader<Transaction: SignedTransaction>,
     C: RpcConvert<Primitives: NodePrimitives<Block = ProviderBlock<P>, Receipt = P::Receipt>>,
 {
+    try_for_each_matching_block_log(
+        |log| {
+            all_logs.push(log);
+            Ok(())
+        },
+        converter,
+        provider_or_block,
+        filter,
+        header,
+        receipts,
+        removed,
+    )
+}
+
+/// Calls `on_log` for each matching, converted log in receipt order.
+///
+/// Stops immediately if conversion or `on_log` fails, without visiting subsequent logs.
+pub fn try_for_each_matching_block_log<P, C>(
+    mut on_log: impl FnMut(RpcLog<C::Network>) -> Result<(), EthApiError>,
+    converter: &C,
+    provider_or_block: ProviderOrBlock<'_, P>,
+    filter: &Filter,
+    header: &SealedHeaderFor<C::Primitives>,
+    receipts: &[P::Receipt],
+    removed: bool,
+) -> Result<(), EthApiError>
+where
+    P: BlockReader<Transaction: SignedTransaction>,
+    C: RpcConvert<Primitives: NodePrimitives<Block = ProviderBlock<P>, Receipt = P::Receipt>>,
+{
     let block_num_hash = header.num_hash();
     if !filter.matches_block(&block_num_hash) {
         return Ok(());
@@ -160,7 +190,7 @@ where
                 let log = converter
                     .convert_log(log, receipt, header)
                     .map_err(|err| EthApiError::other(Into::<ErrorObject<'static>>::into(err)))?;
-                all_logs.push(log);
+                on_log(log)?;
             }
             log_index += 1;
         }

@@ -48,6 +48,10 @@ pub struct QueryLimits {
     pub max_blocks_per_filter: Option<u64>,
     /// Maximum number of logs that can be returned in a response
     pub max_logs_per_response: Option<usize>,
+    /// Maximum serialized log result size in bytes, including array brackets and separators.
+    ///
+    /// `None` disables this limit. The transport still enforces the full response size.
+    pub max_response_size: Option<usize>,
 }
 
 impl QueryLimits {
