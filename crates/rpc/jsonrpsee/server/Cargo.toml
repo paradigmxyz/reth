@@ -17,6 +17,7 @@ missing_copy_implementations = "warn"
 
 [lints.clippy]
 manual_async_fn = "allow"
+result_large_err = "allow"
 
 [dependencies]
 futures-util = { workspace = true, features = ["io", "async-await-macro"] }

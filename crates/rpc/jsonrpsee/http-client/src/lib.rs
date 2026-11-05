@@ -48,7 +48,8 @@ pub use client::{HttpClient, HttpClientBuilder};
 pub use hyper::http::{HeaderMap, HeaderValue};
 pub use jsonrpsee_types as types;
 
-/// This is the default implementation of the [`jsonrpsee_core::middleware::RpcServiceT`] trait used in the [`HttpClient`].
+/// This is the default implementation of the [`jsonrpsee_core::middleware::RpcServiceT`] trait
+/// used in the [`HttpClient`].
 pub use rpc_service::RpcService;
 /// Default HTTP body for the client.
 pub type HttpBody = jsonrpsee_core::http_helpers::Body;
@@ -57,8 +58,10 @@ pub type HttpRequest<T = HttpBody> = jsonrpsee_core::http_helpers::Request<T>;
 /// HTTP response with default body.
 pub type HttpResponse<T = HttpBody> = jsonrpsee_core::http_helpers::Response<T>;
 
-pub use jsonrpsee_core::middleware::layer::{RpcLogger, RpcLoggerLayer};
-pub use jsonrpsee_core::middleware::{RpcServiceBuilder, RpcServiceT};
+pub use jsonrpsee_core::middleware::{
+    layer::{RpcLogger, RpcLoggerLayer},
+    RpcServiceBuilder, RpcServiceT,
+};
 pub use transport::{HttpBackend, HttpTransportClient};
 
 /// Custom TLS configuration.
@@ -70,6 +73,6 @@ pub type CustomCertStore = rustls::ClientConfig;
 #[allow(clippy::large_enum_variant)]
 #[derive(Clone, Debug)]
 pub(crate) enum CertificateStore {
-	Native,
-	Custom(CustomCertStore),
+    Native,
+    Custom(CustomCertStore),
 }

@@ -47,21 +47,21 @@ pub mod traits;
 pub mod params;
 
 cfg_http_helpers! {
-	pub mod http_helpers;
+    pub mod http_helpers;
 }
 
 cfg_server! {
-	pub mod id_providers;
-	pub mod server;
+    pub mod id_providers;
+    pub mod server;
 }
 
 cfg_client! {
-	pub mod client;
-	pub use client::Error as ClientError;
+    pub mod client;
+    pub use client::Error as ClientError;
 }
 
 cfg_client_or_server! {
-	pub mod middleware;
+    pub mod middleware;
 }
 
 pub use async_trait::async_trait;
@@ -80,22 +80,23 @@ mod proc_macros_support;
 /// dependencies to be explicitly added on the client side.
 #[doc(hidden)]
 pub mod __reexports {
-	pub use async_trait::async_trait;
-	pub use serde;
-	pub use serde_json;
+    pub use async_trait::async_trait;
+    pub use serde;
+    pub use serde_json;
 
-	// Needed for the params parsing in the proc macro API.
-	cfg_client_or_server! {
-		pub use tokio;
-	}
+    // Needed for the params parsing in the proc macro API.
+    cfg_client_or_server! {
+        pub use tokio;
+    }
 
-	pub use super::proc_macros_support::*;
+    pub use super::proc_macros_support::*;
 }
 
-pub use serde::{Serialize, de::DeserializeOwned};
+pub use serde::{de::DeserializeOwned, Serialize};
 pub use serde_json::{
-	Value as JsonValue, to_value as to_json_value, value::RawValue as JsonRawValue,
-	value::to_raw_value as to_json_raw_value,
+    to_value as to_json_value,
+    value::{to_raw_value as to_json_raw_value, RawValue as JsonRawValue},
+    Value as JsonValue,
 };
 pub use std::borrow::Cow;
 
