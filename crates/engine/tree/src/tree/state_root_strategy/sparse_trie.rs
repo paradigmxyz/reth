@@ -302,6 +302,9 @@ where
                     SparseTrieTaskMessage::HashedState(hashed)
                 }
                 StateRootMessage::FinishedStateUpdates => {
+                    crate::tree::payload_validator::np_mark(
+                        &crate::tree::payload_validator::NP_HASH_FIN,
+                    );
                     SparseTrieTaskMessage::FinishedStateUpdates
                 }
                 StateRootMessage::HashedStateUpdate(state) => {
@@ -598,6 +601,9 @@ where
                 None
             }
             SparseTrieTaskMessage::FinishedStateUpdates => {
+                crate::tree::payload_validator::np_mark(
+                    &crate::tree::payload_validator::NP_TRIE_FIN,
+                );
                 let hashed_state = Arc::new(core::mem::take(&mut self.final_hashed_state));
                 let _ = self.final_hashed_state_tx.take().unwrap().send(Arc::clone(&hashed_state));
                 self.finished_state_updates = true;

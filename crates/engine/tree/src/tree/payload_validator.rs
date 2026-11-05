@@ -2283,6 +2283,22 @@ pub(crate) fn np_phase(name: &'static str) {
     }
 }
 
+/// Process-wide origin of [`np_mark`] timestamps (experiment only).
+pub(crate) static NP_EPOCH: std::sync::LazyLock<Instant> = std::sync::LazyLock::new(Instant::now);
+/// When the hashing task saw the end of state updates, in ns since [`NP_EPOCH`].
+pub(crate) static NP_HASH_FIN: core::sync::atomic::AtomicU64 =
+    core::sync::atomic::AtomicU64::new(0);
+/// When the sparse trie task saw the end of state updates, in ns since [`NP_EPOCH`].
+pub(crate) static NP_TRIE_FIN: core::sync::atomic::AtomicU64 =
+    core::sync::atomic::AtomicU64::new(0);
+
+/// Records the current time in `at` (experiment only).
+pub(crate) fn np_mark(at: &core::sync::atomic::AtomicU64) {
+    if *NP_PHASES_ENABLED {
+        at.store(NP_EPOCH.elapsed().as_nanos() as u64, Ordering::Relaxed);
+    }
+}
+
 /// Logs and clears the recorded phases (experiment only).
 pub(crate) fn np_phases_log(number: u64, gas: u64) {
     if !*NP_PHASES_ENABLED {
@@ -2290,10 +2306,17 @@ pub(crate) fn np_phases_log(number: u64, gas: u64) {
     }
     let phases = NP_PHASES.with(|phases| core::mem::take(&mut *phases.borrow_mut()));
     let Some(&(_, start)) = phases.first() else { return };
-    let line = phases
+    let mut line = phases
         .iter()
         .map(|(name, at)| format!("{name}={}", at.duration_since(start).as_micros()))
         .collect::<Vec<_>>()
         .join(" ");
+    let start_ns = start.duration_since(*NP_EPOCH).as_nanos() as u64;
+    for (name, at) in [("hash_fin", &NP_HASH_FIN), ("trie_fin", &NP_TRIE_FIN)] {
+        let at = at.load(Ordering::Relaxed);
+        if at > start_ns {
+            line.push_str(&format!(" {name}={}", (at - start_ns) / 1000));
+        }
+    }
     info!(target: "engine::np_phases", number, gas, %line, "phases");
 }
