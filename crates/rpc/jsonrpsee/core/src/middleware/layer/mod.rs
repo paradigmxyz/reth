@@ -27,7 +27,5 @@
 //! Specific middleware layer implementation provided by jsonrpsee.
 
 mod either;
-mod logger;
 
 pub use either::*;
-pub use logger::*;

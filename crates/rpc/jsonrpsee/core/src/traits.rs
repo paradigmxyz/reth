@@ -25,7 +25,6 @@
 // DEALINGS IN THE SOFTWARE.
 
 use jsonrpsee_types::SubscriptionId;
-use serde_json::value::RawValue;
 
 /// Trait to generate subscription IDs.
 pub trait IdProvider: Send + Sync + std::fmt::Debug {
@@ -42,10 +41,4 @@ impl<T: IdProvider + ?Sized> IdProvider for Box<T> {
     fn next_id(&self) -> SubscriptionId<'static> {
         (**self).next_id()
     }
-}
-
-/// Interface for types that can be serialized into JSON.
-pub trait ToJson {
-    /// Convert the type into a JSON value.
-    fn to_json(&self) -> Result<Box<RawValue>, serde_json::Error>;
 }
