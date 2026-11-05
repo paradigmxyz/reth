@@ -2181,6 +2181,11 @@ fn log_timeline(
         })
         .sum();
     let committed = rows.last().map(|row| row.3);
+    let reuse_commit_us: u64 =
+        rows.iter().filter(|row| row.4).map(|&(_, _, waited, done, _)| done - waited).sum();
+    let self_exec_us: u64 =
+        rows.iter().filter(|row| !row.4).map(|&(_, _, waited, done, _)| done - waited).sum();
+    let first_reached = rows.first().map(|row| row.1);
     let mut waits = rows.to_vec();
     waits.sort_by_key(|&(_, reached, waited, ..)| std::cmp::Reverse(waited - reached));
     let top = waits
@@ -2206,6 +2211,9 @@ fn log_timeline(
         last_spec_end_us = ?last_spec_end,
         committed_us = ?committed,
         spec_avg_us = spec_sum / n.max(1) as u64,
+        reuse_commit_us,
+        self_exec_us,
+        first_reached_us = ?first_reached,
         %top,
         "timeline"
     );
