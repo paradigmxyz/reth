@@ -31,10 +31,10 @@ use crate::{
     middleware::rpc::{RpcService, RpcServiceCfg},
     transport::{http, ws, ws::BackgroundTaskParams},
     utils::{
-        deserialize_with_ext, no_request_within, NotifyOnRequest, DEFAULT_FIRST_REQUEST_TIMEOUT,
-        DEFAULT_WS_WRITE_TIMEOUT,
+        deserialize_notification, no_request_within, NotifyOnRequest,
+        DEFAULT_FIRST_REQUEST_TIMEOUT, DEFAULT_WS_WRITE_TIMEOUT,
     },
-    Extensions, HttpBody, HttpRequest, HttpResponse, LOG_TARGET,
+    HttpBody, HttpRequest, HttpResponse, LOG_TARGET,
 };
 
 use futures_util::{
@@ -46,10 +46,7 @@ use hyper_util::rt::{TokioExecutor, TokioIo};
 use jsonrpsee_core::{
     id_providers::RandomIntegerIdProvider,
     middleware::{Batch, BatchEntry, BatchEntryErr, RpcServiceBuilder, RpcServiceT},
-    server::{
-        helpers::prepare_error, BoundedSubscriptions, ConnectionId, MethodResponse, MethodSink,
-        Methods,
-    },
+    server::{helpers::prepare_error, BoundedSubscriptions, MethodResponse, MethodSink, Methods},
     traits::IdProvider,
     BoxError, JsonRawValue, TEN_MB_SIZE_BYTES,
 };
@@ -713,7 +710,7 @@ where
     }
 
     fn call(&mut self, request: HttpRequest<Body>) -> Self::Future {
-        let mut request = request.map(HttpBody::new);
+        let request = request.map(HttpBody::new);
 
         let conn_guard = &self.inner.conn_guard;
         let stop_handle = self.inner.stop_handle.clone();
@@ -730,10 +727,6 @@ where
         let max_conns = conn_guard.max_connections();
         let curr_conns = max_conns - conn_guard.available_connections();
         tracing::debug!(target: LOG_TARGET, "Accepting new connection {}/{}", curr_conns, max_conns);
-
-        let req_ext = request.extensions_mut();
-        req_ext.insert::<ConnectionGuard>(conn_guard.clone());
-        req_ext.insert::<ConnectionId>(conn.conn_id.into());
 
         let is_upgrade_request = is_upgrade_request(&request);
 
@@ -772,8 +765,6 @@ where
 
                     tokio::spawn(
                         async move {
-                            let extensions = request.extensions().clone();
-
                             let upgraded = match hyper::upgrade::on(request).await {
                                 Ok(u) => u,
                                 Err(e) => {
@@ -798,7 +789,6 @@ where
                                 sink,
                                 rx,
                                 pending_calls_completed,
-                                extensions,
                             };
 
                             ws::background_task(params).await;
@@ -968,7 +958,6 @@ pub(crate) async fn handle_rpc_call<S>(
     is_single: bool,
     batch_config: BatchRequestConfig,
     rpc_service: &S,
-    extensions: Extensions,
 ) -> MethodResponse
 where
     S: RpcServiceT<
@@ -979,11 +968,9 @@ where
 {
     // Single request or notification
     if is_single {
-        if let Ok(req) = deserialize_with_ext::call::from_slice(body, &extensions) {
+        if let Ok(req) = serde_json::from_slice(body) {
             rpc_service.call(req).await
-        } else if let Ok(notif) =
-            deserialize_with_ext::notif::from_slice::<Notif>(body, &extensions)
-        {
+        } else if let Ok(notif) = deserialize_notification::<Notif>(body) {
             rpc_service.notification(notif).await
         } else {
             let (id, code) = prepare_error(body);
@@ -1016,11 +1003,9 @@ where
             let mut batch = Vec::with_capacity(unchecked_batch.len());
 
             for call in unchecked_batch {
-                if let Ok(req) = deserialize_with_ext::call::from_str(call.get(), &extensions) {
+                if let Ok(req) = serde_json::from_str(call.get()) {
                     batch.push(Ok(BatchEntry::Call(req)));
-                } else if let Ok(notif) =
-                    deserialize_with_ext::notif::from_str::<Notif>(call.get(), &extensions)
-                {
+                } else if let Ok(notif) = deserialize_notification::<Notif>(call.get().as_bytes()) {
                     batch.push(Ok(BatchEntry::Notification(notif)));
                 } else {
                     let id =

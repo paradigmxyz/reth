@@ -87,27 +87,26 @@ impl RpcServiceT for RpcService {
         let conn_id = self.conn_id;
         let max_response_body_size = self.max_response_body_size;
 
-        let Request { id, method, params, extensions, .. } = req;
+        let Request { id, method, params, .. } = req;
         let params = jsonrpsee_types::Params::new(
             params.as_ref().map(|p| serde_json::value::RawValue::get(p)),
         );
 
         match self.methods.method_with_name(&method) {
             None => {
-                let rp = MethodResponse::error(id, ErrorObject::from(ErrorCode::MethodNotFound))
-                    .with_extensions(extensions);
+                let rp = MethodResponse::error(id, ErrorObject::from(ErrorCode::MethodNotFound));
                 ResponseFuture::ready(rp)
             }
             Some((_name, method)) => match method {
                 MethodCallback::Async(callback) => {
                     let params = params.into_owned();
                     let id = id.into_owned();
-                    let fut = (callback)(id, params, conn_id, max_response_body_size, extensions);
+                    let fut = (callback)(id, params, conn_id, max_response_body_size);
 
                     ResponseFuture::future(fut)
                 }
                 MethodCallback::Sync(callback) => {
-                    let rp = (callback)(id, params, max_response_body_size, extensions);
+                    let rp = (callback)(id, params, max_response_body_size);
                     ResponseFuture::ready(rp)
                 }
                 MethodCallback::Subscription(callback) => {
@@ -120,8 +119,7 @@ impl RpcServiceT for RpcService {
                     else {
                         tracing::warn!("Subscriptions not supported");
                         let rp =
-                            MethodResponse::error(id, ErrorObject::from(ErrorCode::InternalError))
-                                .with_extensions(extensions);
+                            MethodResponse::error(id, ErrorObject::from(ErrorCode::InternalError));
                         return ResponseFuture::ready(rp);
                     };
 
@@ -132,12 +130,11 @@ impl RpcServiceT for RpcService {
                             subscription_permit: p,
                         };
 
-                        let fut = (callback)(id.clone(), params, sink, conn_state, extensions);
+                        let fut = (callback)(id.clone(), params, sink, conn_state);
                         ResponseFuture::future(fut)
                     } else {
                         let max = bounded_subscriptions.max();
-                        let rp = MethodResponse::error(id, reject_too_many_subscriptions(max))
-                            .with_extensions(extensions);
+                        let rp = MethodResponse::error(id, reject_too_many_subscriptions(max));
                         ResponseFuture::ready(rp)
                     }
                 }
@@ -148,12 +145,11 @@ impl RpcServiceT for RpcService {
                     let RpcServiceCfg::CallsAndSubscriptions { .. } = self.cfg else {
                         tracing::warn!("Subscriptions not supported");
                         let rp =
-                            MethodResponse::error(id, ErrorObject::from(ErrorCode::InternalError))
-                                .with_extensions(extensions);
+                            MethodResponse::error(id, ErrorObject::from(ErrorCode::InternalError));
                         return ResponseFuture::ready(rp);
                     };
 
-                    let rp = callback(id, params, conn_id, max_response_body_size, extensions);
+                    let rp = callback(id, params, conn_id, max_response_body_size);
                     ResponseFuture::ready(rp)
                 }
             },
@@ -201,11 +197,9 @@ impl RpcServiceT for RpcService {
 
     fn notification<'a>(
         &self,
-        n: Notification<'a>,
+        _n: Notification<'a>,
     ) -> impl Future<Output = Self::BatchResponse> + Send + 'a {
-        // The notification should not be replied to with a response
-        // but we propogate the extensions to the response which can be useful
-        // for example HTTP transport to set the headers.
-        async move { MethodResponse::notification().with_extensions(n.extensions) }
+        // Notifications are not answered.
+        std::future::ready(MethodResponse::notification())
     }
 }

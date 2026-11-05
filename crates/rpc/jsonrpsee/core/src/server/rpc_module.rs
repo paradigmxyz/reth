@@ -46,7 +46,6 @@ use crate::{
     },
 };
 use futures_util::{future::BoxFuture, FutureExt};
-use http::Extensions;
 use jsonrpsee_types::{
     error::{ErrorCode, ErrorObject},
     Id, Params, Request, SubscriptionId as RpcSubscriptionId,
@@ -61,8 +60,7 @@ use super::{sub_err_to_json, IntoResponse};
 /// implemented as a function pointer to a `Fn` function taking four arguments:
 /// the `id`, `params`, a channel the function uses to communicate the result (or error)
 /// back to `jsonrpsee`, and the connection ID (useful for the websocket transport).
-pub type SyncMethod =
-    Arc<dyn Send + Sync + Fn(Id, Params, MaxResponseSize, Extensions) -> MethodResponse>;
+pub type SyncMethod = Arc<dyn Send + Sync + Fn(Id, Params, MaxResponseSize) -> MethodResponse>;
 /// Similar to [`SyncMethod`], but represents an asynchronous handler.
 pub type AsyncMethod<'a> = Arc<
     dyn Send
@@ -72,7 +70,6 @@ pub type AsyncMethod<'a> = Arc<
             Params<'a>,
             ConnectionId,
             MaxResponseSize,
-            Extensions,
         ) -> BoxFuture<'a, MethodResponse>,
 >;
 
@@ -80,12 +77,11 @@ pub type AsyncMethod<'a> = Arc<
 pub type SubscriptionMethod<'a> = Arc<
     dyn Send
         + Sync
-        + Fn(Id, Params, MethodSink, SubscriptionState, Extensions) -> BoxFuture<'a, MethodResponse>,
+        + Fn(Id, Params, MethodSink, SubscriptionState) -> BoxFuture<'a, MethodResponse>,
 >;
 // Method callback to unsubscribe.
-type UnsubscriptionMethod = Arc<
-    dyn Send + Sync + Fn(Id, Params, ConnectionId, MaxResponseSize, Extensions) -> MethodResponse,
->;
+type UnsubscriptionMethod =
+    Arc<dyn Send + Sync + Fn(Id, Params, ConnectionId, MaxResponseSize) -> MethodResponse>;
 
 /// Connection ID.
 #[derive(
@@ -216,7 +212,6 @@ impl Debug for MethodCallback {
 #[derive(Default, Debug, Clone)]
 pub struct Methods {
     callbacks: Arc<FxHashMap<&'static str, MethodCallback>>,
-    extensions: Extensions,
 }
 
 impl Methods {
@@ -297,7 +292,7 @@ impl Methods {
     ///     use futures_util::StreamExt;
     ///
     ///     let mut module = RpcModule::new(());
-    ///     module.register_subscription("hi", "hi", "goodbye", |_, pending, _, _| async {
+    ///     module.register_subscription("hi", "hi", "goodbye", |_, pending, _| async {
     ///         let sink = pending.accept().await?;
     ///
     ///         // see comment above.
@@ -336,20 +331,16 @@ impl Methods {
         subscription_permit: SubscriptionPermit,
     ) -> RawRpcResponse {
         let (tx, mut rx) = mpsc::channel(buf_size);
-        // The extensions is always empty when calling the method directly because decoding an
-        // JSON-RPC request doesn't have any extensions.
         let Request { id, method, params, .. } = req;
         let params = Params::new(params.as_ref().map(|params| params.as_ref().get()));
         let max_response_size = usize::MAX;
         let conn_id = ConnectionId(0);
-        let mut ext = self.extensions.clone();
-        ext.insert(conn_id);
 
         let response = match self.method(&method) {
             None => MethodResponse::error(id, ErrorObject::from(ErrorCode::MethodNotFound)),
-            Some(MethodCallback::Sync(cb)) => (cb)(id, params, max_response_size, ext),
+            Some(MethodCallback::Sync(cb)) => (cb)(id, params, max_response_size),
             Some(MethodCallback::Async(cb)) => {
-                (cb)(id.into_owned(), params.into_owned(), conn_id, max_response_size, ext).await
+                (cb)(id.into_owned(), params.into_owned(), conn_id, max_response_size).await
             }
             Some(MethodCallback::Subscription(cb)) => {
                 let conn_state = SubscriptionState {
@@ -357,7 +348,7 @@ impl Methods {
                     id_provider: &RandomIntegerIdProvider,
                     subscription_permit,
                 };
-                let res = (cb)(id, params, MethodSink::new(tx.clone()), conn_state, ext).await;
+                let res = (cb)(id, params, MethodSink::new(tx.clone()), conn_state).await;
 
                 // This message is not used because it's used for metrics so we discard in other to
                 // not read once this is used for subscriptions.
@@ -369,12 +360,12 @@ impl Methods {
                 res
             }
             Some(MethodCallback::Unsubscription(cb)) => {
-                (cb)(id, params, conn_id, max_response_size, ext)
+                (cb)(id, params, conn_id, max_response_size)
             }
         };
 
         let is_success = response.is_success();
-        let (rp, notif, _) = response.into_parts();
+        let (rp, notif) = response.into_parts();
 
         if let Some(n) = notif {
             n.notify(is_success);
@@ -390,19 +381,6 @@ impl Methods {
         self.callbacks.keys().copied()
     }
 
-    /// Similar to [`Methods::extensions_mut`] but it's immutable.
-    pub fn extensions(&mut self) -> &Extensions {
-        &self.extensions
-    }
-
-    /// Get a mutable reference to the extensions to add or remove data from
-    /// the extensions.
-    ///
-    /// This only affects direct calls to the methods and subscriptions
-    /// and can be used for example to unit test the API without a server.
-    pub fn extensions_mut(&mut self) -> &mut Extensions {
-        &mut self.extensions
-    }
 }
 
 impl<Context> Deref for RpcModule<Context> {
@@ -464,7 +442,7 @@ impl<Context: Send + Sync + 'static> RpcModule<Context> {
     /// use jsonrpsee_core::server::RpcModule;
     ///
     /// let mut module = RpcModule::new(());
-    /// module.register_method("say_hello", |_params, _ctx, _| "lo").unwrap();
+    /// module.register_method("say_hello", |_params, _ctx| "lo").unwrap();
     /// ```
     pub fn register_method<R, F>(
         &mut self,
@@ -474,14 +452,14 @@ impl<Context: Send + Sync + 'static> RpcModule<Context> {
     where
         Context: Send + Sync + 'static,
         R: IntoResponse + 'static,
-        F: Fn(Params, &Context, &Extensions) -> R + Send + Sync + 'static,
+        F: Fn(Params, &Context) -> R + Send + Sync + 'static,
     {
         let ctx = self.ctx.clone();
         self.methods.verify_and_insert(
             method_name,
-            MethodCallback::Sync(Arc::new(move |id, params, max_response_size, extensions| {
-                let rp = callback(params, &*ctx, &extensions).into_response();
-                MethodResponse::response(id, rp, max_response_size).with_extensions(extensions)
+            MethodCallback::Sync(Arc::new(move |id, params, max_response_size| {
+                let rp = callback(params, &*ctx).into_response();
+                MethodResponse::response(id, rp, max_response_size)
             })),
         )
     }
@@ -503,7 +481,7 @@ impl<Context: Send + Sync + 'static> RpcModule<Context> {
     /// use jsonrpsee_core::server::RpcModule;
     ///
     /// let mut module = RpcModule::new(());
-    /// module.register_async_method("say_hello", |_params, _ctx, _| async { "lo" }).unwrap();
+    /// module.register_async_method("say_hello", |_params, _ctx| async { "lo" }).unwrap();
     /// ```
     pub fn register_async_method<R, Fun, Fut>(
         &mut self,
@@ -513,20 +491,18 @@ impl<Context: Send + Sync + 'static> RpcModule<Context> {
     where
         R: IntoResponse + 'static,
         Fut: Future<Output = R> + Send,
-        Fun: (Fn(Params<'static>, Arc<Context>, Extensions) -> Fut) + Clone + Send + Sync + 'static,
+        Fun: (Fn(Params<'static>, Arc<Context>) -> Fut) + Clone + Send + Sync + 'static,
     {
         let ctx = self.ctx.clone();
         self.methods.verify_and_insert(
             method_name,
-            MethodCallback::Async(Arc::new(move |id, params, _, max_response_size, extensions| {
+            MethodCallback::Async(Arc::new(move |id, params, _, max_response_size| {
                 let ctx = ctx.clone();
                 let callback = callback.clone();
 
-                // NOTE: the extensions can't be mutated at this point so
-                // it's safe to clone it.
                 let future = async move {
-                    let rp = callback(params, ctx, extensions.clone()).await.into_response();
-                    MethodResponse::response(id, rp, max_response_size).with_extensions(extensions)
+                    let rp = callback(params, ctx).await.into_response();
+                    MethodResponse::response(id, rp, max_response_size)
                 };
                 future.boxed()
             })),
@@ -599,7 +575,7 @@ impl<Context: Send + Sync + 'static> RpcModule<Context> {
     /// use jsonrpsee_types::ErrorObjectOwned;
     ///
     /// let mut ctx = RpcModule::new(99_usize);
-    /// ctx.register_subscription("sub", "notif_name", "unsub", |params, pending, ctx, _| async move {
+    /// ctx.register_subscription("sub", "notif_name", "unsub", |params, pending, ctx| async move {
     ///     let x = match params.one::<usize>() {
     ///         Ok(x) => x,
     ///         Err(e) => {
@@ -639,7 +615,7 @@ impl<Context: Send + Sync + 'static> RpcModule<Context> {
     ) -> Result<&mut MethodCallback, RegisterMethodError>
     where
         Context: Send + Sync + 'static,
-        F: (Fn(Params<'static>, PendingSubscriptionSink, Arc<Context>, Extensions) -> Fut)
+        F: (Fn(Params<'static>, PendingSubscriptionSink, Arc<Context>) -> Fut)
             + Send
             + Sync
             + Clone
@@ -656,7 +632,7 @@ impl<Context: Send + Sync + 'static> RpcModule<Context> {
             self.methods.verify_and_insert(
                 subscribe_method_name,
                 MethodCallback::Subscription(Arc::new(
-                    move |id, params, method_sink, conn, extensions| {
+                    move |id, params, method_sink, conn| {
                         let uniq_sub = SubscriptionKey {
                             conn_id: conn.conn_id,
                             sub_id: conn.id_provider.next_id(),
@@ -684,11 +660,7 @@ impl<Context: Send + Sync + 'static> RpcModule<Context> {
                         // completed.
                         //
                         // This runs until the subscription callback has completed.
-                        //
-                        // NOTE: the extensions can't be mutated at this point so
-                        // it's safe to clone it.
-                        let sub_fut =
-                            callback(params.into_owned(), sink, ctx.clone(), extensions.clone());
+                        let sub_fut = callback(params.into_owned(), sink, ctx.clone());
 
                         tokio::spawn(async move {
                             // This will wait for the subscription future to be resolved
@@ -719,7 +691,7 @@ impl<Context: Send + Sync + 'static> RpcModule<Context> {
                         let id = id.clone().into_owned();
 
                         Box::pin(async move {
-                            let rp = match rx.await {
+                            match rx.await {
                                 Ok(rp) => {
                                     // If the subscription was accepted then send a message
                                     // to subscription task otherwise rely on the drop impl.
@@ -729,9 +701,7 @@ impl<Context: Send + Sync + 'static> RpcModule<Context> {
                                     rp
                                 }
                                 Err(_) => MethodResponse::error(id, ErrorCode::InternalError),
-                            };
-
-                            rp.with_extensions(extensions)
+                            }
                         })
                     },
                 )),
@@ -755,7 +725,7 @@ impl<Context: Send + Sync + 'static> RpcModule<Context> {
     /// use jsonrpsee_types::ErrorObjectOwned;
     ///
     /// let mut ctx = RpcModule::new(99_usize);
-    /// ctx.register_subscription_raw("sub", "notif_name", "unsub", |params, pending, ctx, _| {
+    /// ctx.register_subscription_raw("sub", "notif_name", "unsub", |params, pending, ctx| {
     ///     // The params are parsed outside the async block below to avoid cloning the bytes.
     ///     let val = match params.one::<usize>() {
     ///         Ok(val) => val,
@@ -792,7 +762,7 @@ impl<Context: Send + Sync + 'static> RpcModule<Context> {
     ) -> Result<&mut MethodCallback, RegisterMethodError>
     where
         Context: Send + Sync + 'static,
-        F: (Fn(Params, PendingSubscriptionSink, Arc<Context>, &Extensions) -> R)
+        F: (Fn(Params, PendingSubscriptionSink, Arc<Context>) -> R)
             + Send
             + Sync
             + Clone
@@ -808,7 +778,7 @@ impl<Context: Send + Sync + 'static> RpcModule<Context> {
             self.methods.verify_and_insert(
                 subscribe_method_name,
                 MethodCallback::Subscription(Arc::new(
-                    move |id, params, method_sink, conn, extensions| {
+                    move |id, params, method_sink, conn| {
                         let uniq_sub = SubscriptionKey {
                             conn_id: conn.conn_id,
                             sub_id: conn.id_provider.next_id(),
@@ -827,17 +797,15 @@ impl<Context: Send + Sync + 'static> RpcModule<Context> {
                             permit: conn.subscription_permit,
                         };
 
-                        callback(params, sink, ctx.clone(), &extensions);
+                        callback(params, sink, ctx.clone());
 
                         let id = id.clone().into_owned();
 
                         Box::pin(async move {
-                            let rp = match rx.await {
+                            match rx.await {
                                 Ok(rp) => rp,
                                 Err(_) => MethodResponse::error(id, ErrorCode::InternalError),
-                            };
-
-                            rp.with_extensions(extensions)
+                            }
                         })
                     },
                 )),
@@ -868,7 +836,7 @@ impl<Context: Send + Sync + 'static> RpcModule<Context> {
             let subscribers = subscribers.clone();
             self.methods.mut_callbacks().insert(
                 unsubscribe_method_name,
-                MethodCallback::Unsubscription(Arc::new(move |id, params, conn_id, max_response_size, extensions| {
+                MethodCallback::Unsubscription(Arc::new(move |id, params, conn_id, max_response_size| {
                     let sub_id = match params.one::<RpcSubscriptionId>() {
                         Ok(sub_id) => sub_id,
                         Err(_) => {
@@ -880,8 +848,7 @@ impl<Context: Send + Sync + 'static> RpcModule<Context> {
                                 id
                             );
 
-                            return MethodResponse::response(id, ResponsePayload::success(false), max_response_size)
-                                .with_extensions(extensions);
+                            return MethodResponse::response(id, ResponsePayload::success(false), max_response_size);
                         }
                     };
 

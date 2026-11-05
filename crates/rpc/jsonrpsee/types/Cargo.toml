@@ -19,7 +19,6 @@ missing_copy_implementations = "warn"
 manual_async_fn = "allow"
 
 [dependencies]
-http = { workspace = true }
 serde = { workspace = true, features = ["derive", "alloc"] }
 serde_json = { workspace = true, features = ["raw_value"] }
 thiserror = { workspace = true, features = ["std"] }
