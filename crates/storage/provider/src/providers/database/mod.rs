@@ -6,11 +6,10 @@ use crate::{
     to_range,
     traits::{BlockSource, ReceiptProvider},
     BalProvider, BalStoreHandle, BlockHashReader, BlockNumReader, BlockReader, ChainSpecProvider,
-    DatabaseProviderFactory, EitherWriter, EitherWriterDestination, HeaderProvider,
-    HeaderSyncGapProvider, InMemoryBalStore, MetadataProvider, ProviderError,
-    PruneCheckpointReader, PruneCheckpointWriter, RocksDBProviderFactory, StageCheckpointReader,
-    StateProviderBox, StaticFileProviderFactory, StaticFileWriter, TransactionVariant,
-    TransactionsProvider,
+    DatabaseProviderFactory, EitherWriterDestination, HeaderProvider, HeaderSyncGapProvider,
+    InMemoryBalStore, MetadataProvider, ProviderError, PruneCheckpointReader,
+    RocksDBProviderFactory, StageCheckpointReader, StateProviderBox, StaticFileProviderFactory,
+    StaticFileWriter, TransactionVariant, TransactionsProvider,
 };
 use alloy_consensus::transaction::TransactionMeta;
 use alloy_eips::BlockHashOrNumber;
@@ -527,9 +526,6 @@ impl<N: ProviderNodeTypes> ProviderFactory<N> {
         // Unwinds already set it to the target block.
         if rocksdb_unwind.is_none() && static_file_unwind.is_none() {
             self.heal_chain_state_block_numbers(&provider_ro)?;
-            // Step 5: Heal receipts prune checkpoints left by the removed static file receipts
-            // pruner.
-            self.heal_receipts_prune_checkpoints(&provider_ro)?;
         }
 
         Ok((rocksdb_unwind, static_file_unwind))
@@ -573,98 +569,6 @@ impl<N: ProviderNodeTypes> ProviderFactory<N> {
             provider_rw.save_safe_block_number(highest_header)?;
         }
 
-        provider_rw.commit()?;
-
-        Ok(())
-    }
-
-    /// Resets receipts prune checkpoints that cover receipts still present in static files.
-    ///
-    /// The static file receipts pruner, removed in <https://github.com/paradigmxyz/reth/pull/19265>,
-    /// moved receipts from the database to static files and saved that as a `Receipts` and
-    /// `ContractLogs` checkpoint. Only reset checkpoints covered by a continuous range of receipts:
-    /// migrating a pruned v1 database can leave gaps between older archive files and newer
-    /// receipts.
-    fn heal_receipts_prune_checkpoints(
-        &self,
-        provider_ro: &DatabaseProvider<<N::DB as Database>::TX, N>,
-    ) -> ProviderResult<()> {
-        if !EitherWriter::receipts_destination(provider_ro).is_static_file() {
-            return Ok(())
-        }
-
-        let static_file_provider = self.static_file_provider();
-        let Some(lowest_block) =
-            static_file_provider.get_lowest_range_start(StaticFileSegment::Receipts)
-        else {
-            return Ok(())
-        };
-        let Some(first_tx_range) = static_file_provider
-            .get_segment_provider_for_block(StaticFileSegment::Receipts, lowest_block, None)?
-            .user_header()
-            .tx_range()
-        else {
-            return Ok(())
-        };
-        let lowest_tx = first_tx_range.start();
-
-        let mut stale = Vec::new();
-        for segment in [PruneSegment::Receipts, PruneSegment::ContractLogs] {
-            if let Some(checkpoint) = provider_ro.get_prune_checkpoint(segment)? &&
-                let Some(tx) = checkpoint.tx_number &&
-                tx >= lowest_tx
-            {
-                // Writers enforce continuity within each file, but not across file boundaries.
-                let mut last_tx = first_tx_range.end();
-                while let Some(next_tx) = last_tx.checked_add(1) &&
-                    next_tx <= tx &&
-                    let Some(next_file) = static_file_provider
-                        .get_maybe_segment_provider(StaticFileSegment::Receipts, next_tx)? &&
-                    let Some(next_range) = next_file.user_header().tx_range() &&
-                    next_range.start() == next_tx
-                {
-                    last_tx = next_range.end();
-                }
-                if tx <= last_tx {
-                    stale.push((segment, checkpoint));
-                }
-            }
-        }
-
-        if stale.is_empty() {
-            return Ok(())
-        }
-
-        // Migration can pad the first file with blocks whose receipts were already pruned.
-        // Derive the last unavailable block from the transaction index, not the padded range.
-        let pruned_tx = lowest_tx.checked_sub(1);
-        let pruned_block = if let Some(tx) = pruned_tx {
-            if let Some(block) = provider_ro.block_by_transaction_id(tx)? &&
-                let Some(indices) = provider_ro.block_body_indices(block)? &&
-                indices.tx_num_range().contains(&tx)
-            {
-                Some(block).max(lowest_block.checked_sub(1))
-            } else {
-                // Expired body indices cannot establish a safe block boundary.
-                return Ok(())
-            }
-        } else {
-            lowest_block.checked_sub(1)
-        };
-
-        let provider_rw = self.provider_rw()?;
-        for (segment, mut checkpoint) in stale {
-            info!(
-                target: "providers::db",
-                %segment,
-                ?checkpoint,
-                ?pruned_block,
-                "Healing prune checkpoint covered by receipts in static files",
-            );
-            checkpoint.block_number = pruned_block;
-            checkpoint.tx_number = pruned_tx;
-            provider_rw.save_prune_checkpoint(segment, checkpoint)?;
-        }
         provider_rw.commit()?;
 
         Ok(())
@@ -1034,6 +938,12 @@ impl<N: ProviderNodeTypes> PruneCheckpointReader for ProviderFactory<N> {
     fn get_prune_checkpoints(&self) -> ProviderResult<Vec<(PruneSegment, PruneCheckpoint)>> {
         self.provider()?.get_prune_checkpoints()
     }
+
+    fn get_prune_checkpoints_for_availability(
+        &self,
+    ) -> ProviderResult<Vec<(PruneSegment, PruneCheckpoint)>> {
+        self.provider()?.get_prune_checkpoints_for_availability()
+    }
 }
 
 impl<N: ProviderNodeTypes> MetadataProvider for ProviderFactory<N> {
@@ -1112,7 +1022,7 @@ mod tests {
             create_test_provider_factory_with_genesis_block_number, MockNodeTypesWithDB,
         },
         BlockHashReader, BlockNumReader, BlockWriter, DBProvider, HeaderSyncGapProvider,
-        StageCheckpointWriter, TransactionsProvider,
+        PruneCheckpointWriter, StageCheckpointWriter, TransactionsProvider,
     };
     use alloy_eips::BlockNumHash;
     use alloy_primitives::{TxNumber, B256};
@@ -1517,7 +1427,7 @@ mod tests {
     }
 
     #[test]
-    fn heal_receipts_prune_checkpoints_below_receipts_in_static_files() {
+    fn receipt_availability_preserves_prune_checkpoints() {
         // Each block has two transactions, including blocks whose receipts were pruned.
         let write_receipts = |factory: &ProviderFactory<MockNodeTypesWithDB>,
                               blocks: RangeInclusive<u64>| {
@@ -1556,13 +1466,12 @@ mod tests {
             }
             provider.commit().unwrap();
         };
-        let heal_and_get_checkpoints = |factory: &ProviderFactory<MockNodeTypesWithDB>| {
-            factory
-                .heal_receipts_prune_checkpoints(&factory.database_provider_ro().unwrap())
-                .unwrap();
-            let provider = factory.provider().unwrap();
+        let availability_checkpoints = |factory: &ProviderFactory<MockNodeTypesWithDB>| {
+            let stored = factory.get_prune_checkpoints().unwrap();
+            let checkpoints = factory.get_prune_checkpoints_for_availability().unwrap();
+            assert_eq!(factory.get_prune_checkpoints().unwrap(), stored);
             [PruneSegment::Receipts, PruneSegment::ContractLogs]
-                .map(|segment| provider.get_prune_checkpoint(segment).unwrap().unwrap())
+                .map(|segment| checkpoints.iter().find(|(key, _)| *key == segment).unwrap().1)
         };
         // What the static file receipts pruner saved after moving receipts through block 7.
         let moved = PruneCheckpoint {
@@ -1573,11 +1482,13 @@ mod tests {
 
         let factory = create_test_provider_factory();
         factory.set_storage_settings_cache(StorageSettings::v2());
-        write_receipts(&factory, 0..=9);
+        assert_eq!(factory.get_prune_checkpoints_for_availability().unwrap(), Vec::new());
         save_checkpoints(&factory, moved);
-        let healed = PruneCheckpoint { block_number: None, tx_number: None, ..moved };
-        assert_eq!(heal_and_get_checkpoints(&factory), [healed; 2]);
-        assert_eq!(heal_and_get_checkpoints(&factory), [healed; 2]);
+        assert_eq!(availability_checkpoints(&factory), [moved; 2]);
+        write_receipts(&factory, 0..=9);
+        let available = PruneCheckpoint { block_number: None, tx_number: None, ..moved };
+        assert_eq!(availability_checkpoints(&factory), [available; 2]);
+        assert_eq!(availability_checkpoints(&factory), [available; 2]);
 
         // Receipts through block 4 were pruned before being written to static files.
         let factory = create_test_provider_factory();
@@ -1589,12 +1500,12 @@ mod tests {
             prune_mode: PruneMode::Before(5),
         };
         save_checkpoints(&factory, pruned);
-        assert_eq!(heal_and_get_checkpoints(&factory), [pruned; 2]);
+        assert_eq!(availability_checkpoints(&factory), [pruned; 2]);
 
         // The file starts at block 0, but its first receipts belong to block 5.
         save_checkpoints(&factory, moved);
         assert_eq!(
-            heal_and_get_checkpoints(&factory),
+            availability_checkpoints(&factory),
             [PruneCheckpoint { prune_mode: moved.prune_mode, ..pruned }; 2]
         );
 
@@ -1612,7 +1523,7 @@ mod tests {
             }
             provider.commit().unwrap();
             save_checkpoints(&factory, moved);
-            assert_eq!(heal_and_get_checkpoints(&factory), [moved; 2]);
+            assert_eq!(availability_checkpoints(&factory), [moved; 2]);
         }
 
         // Receipts pruning keeps new receipts in the database on storage v1.
@@ -1623,19 +1534,19 @@ mod tests {
         factory.set_storage_settings_cache(StorageSettings::v1());
         write_receipts(&factory, 0..=9);
         save_checkpoints(&factory, moved);
-        assert_eq!(heal_and_get_checkpoints(&factory), [moved; 2]);
+        assert_eq!(availability_checkpoints(&factory), [moved; 2]);
 
         // A checkpoint above the static file tip is not evidence that receipts were moved.
         let factory = create_test_provider_factory();
         factory.set_storage_settings_cache(StorageSettings::v2());
         write_receipts(&factory, 0..=4);
         save_checkpoints(&factory, moved);
-        assert_eq!(heal_and_get_checkpoints(&factory), [moved; 2]);
+        assert_eq!(availability_checkpoints(&factory), [moved; 2]);
 
         // Snap sync anchors have no transaction number and must remain unchanged.
         let anchor = PruneCheckpoint { tx_number: None, ..moved };
         save_checkpoints(&factory, anchor);
-        assert_eq!(heal_and_get_checkpoints(&factory), [anchor; 2]);
+        assert_eq!(availability_checkpoints(&factory), [anchor; 2]);
 
         // Migration can preserve archive files and resume after a pruned interval in a later
         // file. Check continuity across files, including empty ones left by ensure_at_block.
@@ -1651,13 +1562,13 @@ mod tests {
             write_receipts(&factory, resumed_block..=9);
             save_checkpoints(&factory, moved);
             assert_eq!(
-                heal_and_get_checkpoints(&factory),
-                [if resumed_block == 3 { healed } else { moved }; 2],
+                availability_checkpoints(&factory),
+                [if resumed_block == 3 { available } else { moved }; 2],
                 "receipts resume at block {resumed_block}",
             );
 
-            // A covered receipts checkpoint may be healed while the logs checkpoint still
-            // protects a gap. Decide independently for each segment.
+            // Receipt availability can extend before the logs checkpoint that protects a gap.
+            // Decide independently for each segment.
             save_checkpoints(&factory, moved);
             let provider = factory.provider_rw().unwrap();
             provider
@@ -1668,9 +1579,22 @@ mod tests {
                 .unwrap();
             provider.commit().unwrap();
             assert_eq!(
-                heal_and_get_checkpoints(&factory),
-                [healed, if resumed_block == 3 { healed } else { moved }],
+                availability_checkpoints(&factory),
+                [available, if resumed_block == 3 { available } else { moved }],
             );
         }
+
+        // An empty receipts file does not establish any transaction coverage.
+        let factory = create_test_provider_factory();
+        factory.set_storage_settings_cache(StorageSettings::v2());
+        save_checkpoints(&factory, moved);
+        {
+            let static_file_provider = factory.static_file_provider();
+            let mut writer =
+                static_file_provider.latest_writer(StaticFileSegment::Receipts).unwrap();
+            writer.increment_block(0).unwrap();
+            writer.commit().unwrap();
+        }
+        assert_eq!(availability_checkpoints(&factory), [moved; 2]);
     }
 }
