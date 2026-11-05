@@ -40,6 +40,7 @@ use std::{
         atomic::{AtomicBool, AtomicUsize},
         mpsc, Arc, OnceLock,
     },
+    time::Duration,
 };
 use tracing::{debug, debug_span, instrument, trace, trace_span, warn, Span};
 
@@ -52,6 +53,10 @@ pub(crate) mod reuse;
 /// Blocks with fewer transactions than this skip prewarming, since the fixed overhead of spawning
 /// prewarm workers exceeds the execution time saved.
 pub const SMALL_BLOCK_TX_THRESHOLD: usize = 5;
+
+/// How long a payload waits for its parent's prewarm task to save the execution cache before it
+/// allocates an empty one.
+const PARENT_CACHE_WAIT_TIMEOUT: Duration = Duration::from_millis(50);
 
 /// Type alias for [`PayloadHandle`] returned by payload processor spawn methods.
 type IteratorTx<Evm, I> = RecoveredTx<TxEnvFor<Evm>, <I as ExecutableTxIterator<Evm>>::Recovered>;
@@ -495,11 +500,14 @@ where
 
     /// Returns the cache for the given parent hash.
     ///
-    /// If the given hash is different then what is recently cached, then this will create a new
-    /// instance.
+    /// Waits up to [`PARENT_CACHE_WAIT_TIMEOUT`] while the cache is checked out, usually by the
+    /// parent's prewarm task before it saves it. If the cache is still unavailable, this creates
+    /// a new instance.
     #[instrument(level = "debug", target = "engine::caching", skip(self))]
     pub fn cache_for(&self, parent_hash: B256) -> SavedCache {
-        if let Some(cache) = self.execution_cache.get_cache_for(parent_hash) {
+        if let Some(cache) =
+            self.execution_cache.wait_for_cache(parent_hash, PARENT_CACHE_WAIT_TIMEOUT)
+        {
             debug!("reusing execution cache");
             cache
         } else {
