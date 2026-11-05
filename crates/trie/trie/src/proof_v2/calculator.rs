@@ -407,7 +407,7 @@ where
                         .expect("already checked for emptiness")
                         .short_key()
                         .is_empty());
-                    self.push_new_branch(path)
+                    self.push_new_branch(path)?
                 }
                 Some(state_mask) => {
                     // Find the number of nibbles shared by the current branch and the new child.
@@ -424,7 +424,7 @@ where
                     // child. Otherwise the new child can be inserted directly into this branch.
                     let nibble = path.get_unchecked(common_prefix_len);
                     if state_mask.is_bit_set(nibble) {
-                        self.push_new_branch(path)
+                        self.push_new_branch(path)?
                     } else {
                         (nibble, trim_nibbles_prefix(&path, common_prefix_len + 1))
                     }
@@ -457,7 +457,13 @@ where
     ///
     /// Returns the nibble of the branch's `state_mask` which should be set for the new child, and
     /// the short key that child should use.
-    fn push_new_branch(&mut self, new_child_path: Nibbles) -> (u8, Nibbles) {
+    ///
+    /// Returns [`StateProofError::TrieInconsistency`] if one child's key is a prefix of the
+    /// other's, which a stale stored branch can produce.
+    fn push_new_branch(
+        &mut self,
+        new_child_path: Nibbles,
+    ) -> Result<(u8, Nibbles), StateProofError> {
         // Get the full path to the root of the existing child. The trie root is used when there is
         // no parent branch.
         let first_child_path = self
@@ -472,11 +478,20 @@ where
             .last()
             .expect("push_new_branch can't be called with empty child_stack")
             .short_key();
-        debug_assert!(!first_child_short_key.is_empty());
 
         // Their shared prefix becomes the new branch's extension. The first differing nibble from
         // each key becomes that child's position in the branch.
         let common_prefix_len = first_child_short_key.common_prefix_length(&new_child_short_key);
+        if common_prefix_len >= first_child_short_key.len() ||
+            common_prefix_len >= new_child_short_key.len()
+        {
+            let msg = format!(
+                "push_new_branch: child keys do not diverge: first_child_path={first_child_path:?}, \
+                 first_child_short_key={first_child_short_key:?}, new_child_path={new_child_path:?}",
+            );
+            error!(target: TRACE_TARGET, "{msg}");
+            return Err(StateProofError::TrieInconsistency(msg));
+        }
         let first_child_nibble = first_child_short_key.get_unchecked(common_prefix_len);
         let new_child_nibble = new_child_short_key.get_unchecked(common_prefix_len);
 
@@ -512,7 +527,7 @@ where
             "Pushed new branch",
         );
 
-        (new_child_nibble, new_child_short_key)
+        Ok((new_child_nibble, new_child_short_key))
     }
 
     /// Pops the top branch off of the `branch_stack`, hashes its children on the `child_stack`, and
@@ -2117,6 +2132,37 @@ mod tests {
         let fresh_result = fresh_calculator.storage_proof(hashed_address, &mut targets).unwrap();
 
         pretty_assertions::assert_eq!(fresh_result, result);
+    }
+
+    #[test]
+    fn test_push_new_branch_non_diverging_keys_returns_trie_inconsistency() {
+        let harness = ProofTestHarness::new(BTreeMap::from([(
+            B256::right_padding_from(&[0x12, 0x34]),
+            U256::ONE,
+        )]));
+        let hashed_address = harness.hashed_address();
+        let trie_cursor =
+            harness.trie_cursor_factory().storage_trie_cursor(hashed_address).unwrap();
+        let hashed_cursor =
+            harness.hashed_cursor_factory().hashed_storage_cursor(hashed_address).unwrap();
+        let mut proof_calculator = StorageProofCalculator::new_storage(trie_cursor, hashed_cursor);
+
+        // A stale cached branch child at [1, 2] followed by a leaf beneath it: the existing
+        // child's key is a prefix of the new one, so there is no nibble to split them on.
+        proof_calculator.child_stack.push(ProofTrieBranchChild::RlpNode {
+            node: RlpNode::word_rlp(&B256::ZERO),
+            short_key: Nibbles::from_nibbles([0x1, 0x2]),
+            hash_mask_bit: true,
+            tree_mask_bit: false,
+        });
+
+        let err = proof_calculator
+            .push_new_branch(Nibbles::from_nibbles([0x1, 0x2, 0x3, 0x4]))
+            .unwrap_err();
+        assert!(
+            matches!(&err, StateProofError::TrieInconsistency(msg) if msg.starts_with("push_new_branch: child keys do not diverge")),
+            "unexpected error: {err:?}"
+        );
     }
 
     #[test]

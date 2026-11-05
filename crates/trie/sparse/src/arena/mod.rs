@@ -396,10 +396,11 @@ impl ArenaSparseSubtrie {
                     self.num_dirty_leaves =
                         (self.num_dirty_leaves as i64 + deltas.num_dirty_leaves_delta) as u64;
 
-                    if let RemoveLeafResult::NeedsProof { key, proof_key, parent } = result {
+                    // The removed leaf is already revealed, so only the blinded sibling needs a
+                    // proof. The caller retries the update once that sibling is revealed.
+                    if let RemoveLeafResult::NeedsProof { proof_key, parent, .. } = result {
                         self.required_proofs
                             .push((idx, ArenaRequiredProof { key: proof_key, parent }));
-                        self.required_proofs.push((idx, ArenaRequiredProof { key, parent }));
                     }
                 }
                 LeafUpdate::Touched => {}
@@ -3077,6 +3078,49 @@ mod tests {
             );
             assert_eq!(expected_root, actual_root, "storage root mismatch");
         }
+    }
+
+    #[test]
+    fn subtrie_removal_onto_blinded_sibling_requests_only_sibling_proof() {
+        // Branch [1] has children [1, 0] and [1, 2]; [1, 2] sits at the subtrie depth and holds
+        // a leaf at [1, 2, 0] and a branch at [1, 2, 3]. That branch has one revealed leaf at
+        // nibble 4 and a blinded child at nibble 5, so removing the leaf collapses it onto the
+        // blinded child inside a lower subtrie.
+        let key = |bytes: &[u8]| B256::right_padding_from(bytes);
+        let removed_key = key(&[0x12, 0x34]);
+        let subtrie_key = key(&[0x12, 0x01]);
+        let mut storage = BTreeMap::from([
+            (key(&[0x10]), U256::from(1)),
+            (subtrie_key, U256::from(2)),
+            (removed_key, U256::from(3)),
+        ]);
+        for i in 0u8..16 {
+            storage.insert(key(&[0x12, 0x35, i << 4]), U256::from(100 + i as u64));
+        }
+        let harness = ArenaTrieTestHarness::new(storage);
+
+        let root_node = harness.root_node();
+        let mut apst = ArenaParallelSparseTrie::default();
+        apst.set_root(root_node.node, root_node.masks, true).expect("set_root should succeed");
+        let mut targets = vec![ProofV2Target::new(removed_key), ProofV2Target::new(subtrie_key)];
+        let (mut proof_nodes, _) = harness.proof_v2(&mut targets);
+        apst.reveal_nodes(&mut proof_nodes).expect("reveal_nodes should succeed");
+
+        let changes = BTreeMap::from([(removed_key, U256::ZERO)]);
+        let mut leaf_updates: B256Map<LeafUpdate> =
+            BTreeMap::from([(removed_key, LeafUpdate::Changed(Vec::new()))]).into_iter().collect();
+        let mut requested = Vec::new();
+        apst.update_leaves(&mut leaf_updates, |key, parent| requested.push((key, parent)))
+            .expect("update_leaves should succeed");
+
+        let sibling_key =
+            ArenaParallelSparseTrie::nibbles_to_padded_b256(&Nibbles::from_nibbles([
+                0x1, 0x2, 0x3, 0x5,
+            ]));
+        assert_eq!(requested, vec![(sibling_key, ProofV2TargetParent::new(3))]);
+        assert!(leaf_updates.contains_key(&removed_key), "removal should wait for the sibling");
+
+        harness.assert_changes(&mut apst, changes);
     }
 
     use proptest::prelude::*;
