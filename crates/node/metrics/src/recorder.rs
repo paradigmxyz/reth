@@ -1,7 +1,7 @@
 //! Prometheus recorder
 
-use eyre::WrapErr;
 use crate::prometheus::{PrometheusBuilder, PrometheusHandle};
+use eyre::WrapErr;
 use std::sync::{atomic::AtomicBool, OnceLock};
 
 /// Installs the Prometheus recorder as the global recorder.

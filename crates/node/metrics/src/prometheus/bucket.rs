@@ -1,10 +1,18 @@
 //! Lock-free, append-only sample storage for histograms.
 //!
-//! Copied verbatim from `metrics-util` 0.20.4 (`src/storage/bucket.rs`), MIT licensed,
-//! Copyright (c) 2021 Metrics Contributors. Lints are relaxed instead of editing the code so it
-//! stays diffable against upstream.
+//! Copied from `metrics-util` 0.20.4 (`src/storage/bucket.rs`), MIT licensed,
+//! Copyright (c) 2021 Metrics Contributors. Only rustfmt touched it; lints are relaxed instead so
+//! it stays diffable against upstream.
 
-#![allow(unreachable_pub, dead_code, unsafe_code, missing_docs, clippy::all, clippy::nursery)]
+#![allow(
+    unreachable_pub,
+    dead_code,
+    unsafe_code,
+    missing_docs,
+    clippy::all,
+    clippy::nursery,
+    clippy::pedantic
+)]
 
 use crossbeam_epoch::{pin as epoch_pin, Atomic, Guard, Owned, Shared};
 use crossbeam_utils::Backoff;
@@ -126,8 +134,8 @@ impl<T> Block<T> {
         // SAFETY:
         // - We never index outside of our block size.
         // - Each slot is `MaybeUninit`, which itself can be safely zero initialized.
-        // - We're writing an initialized value into the slot before anyone is able to ever read
-        //   it, ensuring no uninitialized access.
+        // - We're writing an initialized value into the slot before anyone is able to ever read it,
+        //   ensuring no uninitialized access.
         unsafe {
             // Update the slot.
             self.slots.get_unchecked(index).assume_init_ref().get().write(value);
@@ -185,7 +193,8 @@ impl<T> std::fmt::Debug for Block<T> {
 /// forward progress without affecting the iteration of the previously written values.
 ///
 /// For example, in a scenario where an internal block can hold 4 elements, and the caller has
-/// written 10 elements to the bucket, you would expect to see the values in this order when iterating:
+/// written 10 elements to the bucket, you would expect to see the values in this order when
+/// iterating:
 ///
 /// ```text
 /// [6 7 8 9] [2 3 4 5] [0 1]
@@ -244,10 +253,12 @@ impl<T> AtomicBucket<T> {
             // We have a block now, so we need to try writing to it.
             let tail_block = unsafe { tail.deref() };
             match tail_block.push(original) {
-                // If the push was OK, then the block wasn't full.  It might _now_ be full, but we'll
-                // let future callers deal with installing a new block if necessary.
+                // If the push was OK, then the block wasn't full.  It might _now_ be full, but
+                // we'll let future callers deal with installing a new block if
+                // necessary.
                 Ok(_) => return,
-                // The block was full, so we've been given the value back and we need to install a new block.
+                // The block was full, so we've been given the value back and we need to install a
+                // new block.
                 Err(value) => {
                     match self.tail.compare_exchange(
                         tail,
@@ -284,8 +295,8 @@ impl<T> AtomicBucket<T> {
     /// Collects all of the elements written to the bucket.
     ///
     /// This operation can be slow as it involves allocating enough space to hold all of the
-    /// elements within the bucket.  Consider [`data_with`](AtomicBucket::data_with) to incrementally iterate
-    /// the internal blocks within the bucket.
+    /// elements within the bucket.  Consider [`data_with`](AtomicBucket::data_with) to
+    /// incrementally iterate the internal blocks within the bucket.
     ///
     /// Elements are in partial reverse order: blocks are iterated in reverse order, but the
     /// elements within them will appear in their original order.
@@ -367,9 +378,8 @@ impl<T> AtomicBucket<T> {
         // will see it as empty until another write proceeds.
         let guard = &epoch_pin();
         let mut block_ptr = self.tail.load(Ordering::Acquire, guard);
-        if !block_ptr.is_null()
-            && self
-                .tail
+        if !block_ptr.is_null() &&
+            self.tail
                 .compare_exchange(
                     block_ptr,
                     Shared::null(),
@@ -382,8 +392,8 @@ impl<T> AtomicBucket<T> {
             let backoff = Backoff::new();
             let mut freeable_blocks = Vec::new();
 
-            // While we have a valid block -- either `tail` or the next block as we keep reading -- we
-            // load the data from each block and process it by calling `f`.
+            // While we have a valid block -- either `tail` or the next block as we keep reading --
+            // we load the data from each block and process it by calling `f`.
             while !block_ptr.is_null() {
                 let block = unsafe { block_ptr.deref() };
 

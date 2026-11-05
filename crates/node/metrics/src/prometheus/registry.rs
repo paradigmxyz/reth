@@ -14,16 +14,15 @@ use std::{
 /// by the hash [`Key`] computes on construction, so the map never rehashes key contents.
 #[derive(Debug)]
 pub(super) struct Registry<T> {
-    shards: Box<[RwLock<HashMap<Key, Arc<T>, BuildHasherDefault<KeyHasher>>>]>,
+    shards: Box<[RwLock<Shard<T>>]>,
     shard_mask: usize,
 }
 
 impl<T> Registry<T> {
     /// Creates a registry with one shard per available core, rounded up to a power of two.
     pub(super) fn new() -> Self {
-        let shard_count = std::thread::available_parallelism()
-            .map_or(1, |n| n.get())
-            .next_power_of_two();
+        let shard_count =
+            std::thread::available_parallelism().map_or(1, |n| n.get()).next_power_of_two();
         Self {
             shards: (0..shard_count).map(|_| RwLock::default()).collect(),
             shard_mask: shard_count - 1,
@@ -50,9 +49,11 @@ impl<T> Registry<T> {
     }
 }
 
+type Shard<T> = HashMap<Key, Arc<T>, BuildHasherDefault<KeyHasher>>;
+
 /// Pass-through hasher for [`Key`], whose `Hash` impl only writes its precomputed hash.
 #[derive(Debug, Default)]
-pub(super) struct KeyHasher(u64);
+struct KeyHasher(u64);
 
 impl Hasher for KeyHasher {
     fn finish(&self) -> u64 {

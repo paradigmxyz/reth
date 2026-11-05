@@ -149,7 +149,10 @@ fn record(c: &mut Criterion) {
 /// Registers the dev node shape and returns the histogram handles.
 fn populate(recorder: &dyn Recorder) -> Vec<metrics::Histogram> {
     for i in 0..COUNTERS {
-        let key = Key::from_parts(format!("component{}.counter{i}", i % 40), vec![Label::new("kind", "a")]);
+        let key = Key::from_parts(
+            format!("component{}.counter{i}", i % 40),
+            vec![Label::new("kind", "a")],
+        );
         recorder.register_counter(&key, &METADATA).increment(i as u64);
         recorder.describe_counter(key.name().to_string().into(), None, "A counter".into());
     }

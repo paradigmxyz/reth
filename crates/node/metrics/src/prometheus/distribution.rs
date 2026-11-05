@@ -4,7 +4,8 @@
 //! 0.20.4 (`src/storage/{histogram,summary}.rs`), MIT licensed, Copyright (c) 2021 Metrics
 //! Contributors. Quantiles, windows and counts match upstream exactly.
 
-use super::{builder::Matcher, Timestamp};
+use super::builder::Matcher;
+use quanta::Instant;
 use sketches_ddsketch::{Config, DDSketch};
 use std::{num::NonZeroU32, sync::Arc, time::Duration};
 
@@ -25,7 +26,7 @@ pub(super) enum Distribution {
 
 impl Distribution {
     /// Records drained `(value, timestamp)` samples.
-    pub(super) fn record_samples(&mut self, samples: &[(f64, Timestamp)]) {
+    pub(super) fn record_samples(&mut self, samples: &[(f64, Instant)]) {
         match self {
             Self::Histogram(hist) => hist.record_many(samples.iter().map(|(sample, _)| *sample)),
             Self::Summary(summary, _, sum) => {
@@ -58,7 +59,13 @@ impl DistributionBuilder {
         mut bucket_overrides: Vec<(Matcher, Vec<f64>)>,
     ) -> Self {
         bucket_overrides.sort_by(|a, b| a.0.cmp(&b.0));
-        Self { quantiles: quantiles.into(), buckets, bucket_duration, bucket_count, bucket_overrides }
+        Self {
+            quantiles: quantiles.into(),
+            buckets,
+            bucket_duration,
+            bucket_count,
+            bucket_overrides,
+        }
     }
 
     /// Returns an empty distribution for the sanitized metric `name`.
@@ -129,7 +136,7 @@ impl Histogram {
     }
 }
 
-/// DDSketch backed quantile summary.
+/// `DDSketch` backed quantile summary.
 #[derive(Clone)]
 pub(super) struct Summary {
     sketch: DDSketch,
@@ -185,7 +192,7 @@ impl std::fmt::Debug for Summary {
 
 #[derive(Debug)]
 struct Bucket {
-    begin: Timestamp,
+    begin: Instant,
     summary: Summary,
 }
 
@@ -218,7 +225,7 @@ impl RollingSummary {
     }
 
     /// Adds a sample observed at `now`, expiring buckets that fell out of the window.
-    fn add(&mut self, value: f64, now: Timestamp) {
+    fn add(&mut self, value: f64, now: Instant) {
         // The count is incremented even if this value is too old to be saved in any bucket.
         self.count += 1;
 
@@ -254,8 +261,8 @@ impl RollingSummary {
             let mut begin = reftime + self.bucket_duration;
             let mut end = begin + self.bucket_duration;
             while now < begin || now >= end {
-                begin = begin + self.bucket_duration;
-                end = end + self.bucket_duration;
+                begin += self.bucket_duration;
+                end += self.bucket_duration;
             }
 
             self.buckets.truncate(self.max_buckets - 1);
@@ -266,7 +273,7 @@ impl RollingSummary {
     /// Returns a merged [`Summary`] of all buckets still valid at `now`.
     ///
     /// The returned summary only counts samples in the window; use [`Self::count`] for the total.
-    pub(super) fn snapshot(&self, now: Timestamp) -> Summary {
+    pub(super) fn snapshot(&self, now: Instant) -> Summary {
         let cutoff = now.checked_sub(self.max_bucket_duration);
         let mut acc = Summary::new();
         for bucket in &self.buckets {
@@ -287,8 +294,10 @@ impl RollingSummary {
 mod tests {
     use super::*;
 
-    const fn at(secs: u64) -> Timestamp {
-        Timestamp::from_nanos(secs * 1_000_000_000)
+    fn at(secs: u64) -> Instant {
+        let (clock, mock) = quanta::Clock::mock();
+        mock.increment(Duration::from_secs(secs));
+        clock.now()
     }
 
     fn default_summary() -> RollingSummary {

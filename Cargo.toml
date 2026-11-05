@@ -537,6 +537,7 @@ metrics-derive = "0.1.1"
 metrics-exporter-prometheus = { version = "0.18.3", default-features = false }
 metrics-process = "2.1.0"
 metrics-util = { default-features = false, version = "0.20.3" }
+quanta = { version = "0.13", default-features = false }
 sketches-ddsketch = { version = "0.3.1", default-features = false }
 
 # tokio

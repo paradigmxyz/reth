@@ -18,5 +18,5 @@ pub mod server;
 pub mod storage;
 pub mod version;
 
-pub use prometheus::{BuildError, Matcher, PrometheusBuilder, PrometheusHandle};
 pub use metrics_process::*;
+pub use prometheus::{BuildError, Matcher, PrometheusBuilder, PrometheusHandle};

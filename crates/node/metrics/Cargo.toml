@@ -13,6 +13,7 @@ reth-tasks.workspace = true
 
 metrics.workspace = true
 metrics-process.workspace = true
+quanta.workspace = true
 sketches-ddsketch.workspace = true
 crossbeam-epoch.workspace = true
 crossbeam-utils.workspace = true
@@ -50,6 +51,7 @@ metrics-exporter-prometheus.workspace = true
 metrics-util.workspace = true
 proptest.workspace = true
 criterion.workspace = true
+quanta = { workspace = true, features = ["mock"] }
 
 [lints]
 workspace = true

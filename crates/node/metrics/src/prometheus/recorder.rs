@@ -7,13 +7,13 @@ use super::{
         render_labels, sanitize_metric_name, write_help_line, write_metric_line, write_type_line,
     },
     registry::Registry,
-    Clock, Timestamp,
 };
 use metrics::{
     atomics::AtomicU64, Counter, CounterFn, Gauge, GaugeFn, Histogram, HistogramFn, Key, KeyName,
     Metadata, Recorder, SharedString, Unit,
 };
 use parking_lot::{Mutex, RwLock};
+use quanta::Instant;
 use std::{
     collections::HashMap,
     io,
@@ -47,7 +47,6 @@ impl PrometheusRecorder {
                 distribution_builder,
                 global_labels,
                 prefix,
-                clock: Clock::new(),
                 render_size_hint: AtomicUsize::new(0),
             }),
         }
@@ -96,7 +95,6 @@ impl Recorder for PrometheusRecorder {
             let series = self.inner.series(key);
             HistogramEntry {
                 samples: AtomicBucket::new(),
-                clock: self.inner.clock,
                 distribution: Mutex::new(
                     self.inner.distribution_builder.get_distribution(&series.name),
                 ),
@@ -148,7 +146,6 @@ struct Inner {
     global_labels: Vec<(String, String)>,
     /// Prepended as `<prefix>.` to every metric name before sanitization.
     prefix: Option<&'static str>,
-    clock: Clock,
     /// Length of the previous render, used to size the next output buffer.
     render_size_hint: AtomicUsize,
 }
@@ -219,7 +216,7 @@ impl Inner {
             out.push('\n');
         }
 
-        let now = self.clock.now();
+        let now = Instant::now();
         let mut histograms = self.histograms.entries();
         histograms.sort_unstable_by(|a, b| a.series.cmp(&b.series));
         for group in histograms.chunk_by(|a, b| a.series.name == b.series.name) {
@@ -304,8 +301,7 @@ struct HistogramEntry {
     ///
     /// A sample pushed into a block while a drain is already reading it can be dropped, as with
     /// upstream's `AtomicBucket`.
-    samples: AtomicBucket<(f64, Timestamp)>,
-    clock: Clock,
+    samples: AtomicBucket<(f64, Instant)>,
     /// Aggregated samples, only locked by upkeep and render.
     distribution: Mutex<Distribution>,
     series: Series,
@@ -319,7 +315,7 @@ impl HistogramEntry {
 
 impl HistogramFn for HistogramEntry {
     fn record(&self, value: f64) {
-        self.samples.push((value, self.clock.now()));
+        self.samples.push((value, Instant::now()));
     }
 }
 
@@ -331,7 +327,7 @@ fn write_distribution(
     name: &str,
     labels: &str,
     distribution: &Distribution,
-    now: Timestamp,
+    now: Instant,
 ) {
     let (sum, count) = match distribution {
         Distribution::Summary(summary, quantiles, sum) => {

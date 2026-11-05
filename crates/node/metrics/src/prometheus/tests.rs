@@ -4,7 +4,7 @@ use super::*;
 use metrics::{counter, describe_counter, describe_gauge, describe_histogram, gauge, histogram};
 use metrics_exporter_prometheus as upstream;
 use metrics_util::layers::{Layer, PrefixLayer};
-use std::{num::NonZeroU32, sync::Arc, thread};
+use std::{num::NonZeroU32, sync::Arc, thread, time::Duration};
 
 /// Records a workload covering every metric kind, label precedence, escaping and sanitization.
 fn workload() {
@@ -248,5 +248,3 @@ fn concurrent_record_and_render() {
         assert!(output.contains(&format!("per_thread{{thread=\"{thread}\"}} {ITERATIONS}\n")));
     }
 }
-
-
