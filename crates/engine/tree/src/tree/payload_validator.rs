@@ -1257,7 +1257,16 @@ where
             let index = senders.len() - 1;
             match prewarm_results {
                 Some(results) => {
-                    let outcome = self.commit_prewarm_result(executor, results, index, tx.tx())?;
+                    let mut outcome =
+                        self.commit_prewarm_result(executor, results, index, tx.tx())?;
+                    // A prewarm worker executing the transaction for the first time finishes it
+                    // sooner than block execution would, which also has to load its state.
+                    if outcome == Err(ReuseMiss::Missing) && results.is_speculating(index) {
+                        while results.is_speculating(index) {
+                            std::hint::spin_loop();
+                        }
+                        outcome = self.commit_prewarm_result(executor, results, index, tx.tx())?;
+                    }
                     if outcome.is_err() {
                         // Later prewarm results are refreshed against the actual writes.
                         let result = executor.execute_transaction_without_commit(tx)?;
