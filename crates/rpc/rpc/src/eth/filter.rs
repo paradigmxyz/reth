@@ -202,7 +202,7 @@ where
         trace!(target: "rpc::eth", "clear stale filters");
         let mut filters = self.active_filters().inner.lock().await;
         filters.retain(|id, filter| {
-            let is_valid = (now - filter.last_poll_timestamp) < self.inner.stale_filter_ttl;
+            let is_valid = (now - *filter.last_poll_timestamp.lock()) < self.inner.stale_filter_ttl;
 
             if !is_valid {
                 trace!(target: "rpc::eth", "evict filter with id: {:?}", id);
@@ -240,19 +240,17 @@ where
         FilterChanges<RpcTransaction<Eth::NetworkTypes>, RpcLog<Eth::NetworkTypes>>,
         EthFilterError,
     > {
-        let (block, kind) = {
+        let filter = {
             let filters = self.inner.active_filters.inner.lock().await;
-            let filter =
-                filters.get(&id).ok_or_else(|| EthFilterError::FilterNotFound(id.clone()))?;
-            (filter.block.clone(), filter.kind.clone())
+            filters.get(&id).cloned().ok_or(EthFilterError::FilterNotFound(id))?
         };
 
         // Hold only this filter's cursor while collecting, without blocking other filters.
-        let mut block = block.lock().await;
+        let mut block = filter.block.lock().await;
         let info = self.provider().chain_info()?;
         let best_number = info.best_number;
         let start_block = *block;
-        let changes = match kind {
+        let changes = match filter.kind.clone() {
             // No new blocks since the last successful poll.
             _ if start_block > best_number => FilterChanges::Empty,
             FilterKind::PendingTransaction(filter) => match filter.drain().await {
@@ -310,7 +308,8 @@ where
                 FilterChanges::Logs(logs)
             }
         };
-        self.refresh_filter_ttl(&id).await;
+        // Do not yield after destructively draining pending events.
+        *filter.last_poll_timestamp.lock() = Instant::now();
         *block = start_block.max(best_number + 1);
         Ok(changes)
     }
@@ -326,18 +325,13 @@ where
     ) -> Result<Vec<RpcLog<Eth::NetworkTypes>>, EthFilterError> {
         let filter = {
             let filters = self.inner.active_filters.inner.lock().await;
-            let filter =
-                filters.get(&id).ok_or_else(|| EthFilterError::FilterNotFound(id.clone()))?;
-            if let FilterKind::Log(inner_filter) = &filter.kind {
-                *inner_filter.clone()
-            } else {
-                // Not a log filter
-                return Err(EthFilterError::FilterNotFound(id))
-            }
+            filters.get(&id).cloned().ok_or_else(|| EthFilterError::FilterNotFound(id.clone()))?
         };
-
-        let logs = self.logs_for_filter(filter, self.inner.query_limits).await?;
-        self.refresh_filter_ttl(&id).await;
+        let FilterKind::Log(inner_filter) = &filter.kind else {
+            return Err(EthFilterError::FilterNotFound(id))
+        };
+        let logs = self.logs_for_filter(*inner_filter.clone(), self.inner.query_limits).await?;
+        *filter.last_poll_timestamp.lock() = Instant::now();
         Ok(logs)
     }
 
@@ -348,13 +342,6 @@ where
         limits: QueryLimits,
     ) -> Result<Vec<RpcLog<Eth::NetworkTypes>>, EthFilterError> {
         self.inner.clone().logs_for_filter(filter, limits).await
-    }
-
-    /// Refreshes expiry after a successful poll without restoring an evicted filter.
-    async fn refresh_filter_ttl(&self, id: &FilterId) {
-        if let Some(filter) = self.inner.active_filters.inner.lock().await.get_mut(id) {
-            filter.last_poll_timestamp = Instant::now();
-        }
     }
 }
 
@@ -658,11 +645,11 @@ where
         let mut filters = self.active_filters.inner.lock().await;
         filters.insert(
             id.clone(),
-            ActiveFilter {
-                block: Arc::new(Mutex::new(last_poll_block_number)),
-                last_poll_timestamp: Instant::now(),
+            Arc::new(ActiveFilter {
+                block: Mutex::new(last_poll_block_number),
+                last_poll_timestamp: parking_lot::Mutex::new(Instant::now()),
                 kind,
-            },
+            }),
         );
         Ok(id)
     }
@@ -841,7 +828,7 @@ where
 /// All active filters
 #[derive(Debug, Clone, Default)]
 pub struct ActiveFilters<T> {
-    inner: Arc<Mutex<HashMap<FilterId, ActiveFilter<T>>>>,
+    inner: Arc<Mutex<HashMap<FilterId, Arc<ActiveFilter<T>>>>>,
 }
 
 impl<T> ActiveFilters<T> {
@@ -875,9 +862,10 @@ impl<T> ActiveFilters<T> {
 #[derive(Debug)]
 struct ActiveFilter<T> {
     /// Next block to poll, locked until collection finishes to serialize concurrent polls.
-    block: Arc<Mutex<u64>>,
+    block: Mutex<u64>,
     /// Last time this filter was successfully polled, or installed if it has not been polled yet.
-    last_poll_timestamp: Instant,
+    /// This lock is never held across an await.
+    last_poll_timestamp: parking_lot::Mutex<Instant>,
     /// What kind of filter it is.
     kind: FilterKind<T>,
 }
@@ -1496,7 +1484,10 @@ mod tests {
     use reth_rpc_eth_types::{receipt::EthReceiptConverter, PendingBlock};
     use reth_tasks::Runtime;
     use reth_testing_utils::generators;
-    use reth_transaction_pool::test_utils::{testing_pool, TestPool};
+    use reth_transaction_pool::{
+        test_utils::{testing_pool, MockTransaction, TestPool},
+        TransactionOrigin,
+    };
     use std::{
         collections::{BTreeMap, VecDeque},
         sync::Arc,
@@ -2512,14 +2503,15 @@ mod tests {
 
             let id =
                 eth_filter.new_filter(Filter::new().from_block(1u64).to_block(1u64)).await.unwrap();
-            let expires_at = eth_filter
+            let expires_at = *eth_filter
                 .active_filters()
                 .inner
                 .lock()
                 .await
                 .get(&id)
                 .unwrap()
-                .last_poll_timestamp +
+                .last_poll_timestamp
+                .lock() +
                 eth_filter.inner.stale_filter_ttl;
             let logs = EthFilterApiServer::filter_logs(&eth_filter, id.clone()).await;
 
@@ -2558,6 +2550,60 @@ mod tests {
                 assert_eq!(err.message(), "filter not found");
                 assert_eq!(err.code(), jsonrpsee_types::error::CALL_EXECUTION_FAILED_CODE);
             }
+        }
+    }
+
+    #[tokio::test]
+    async fn pending_filter_drain_does_not_yield_before_returning() {
+        for full_transactions in [false, true] {
+            let provider = MockEthProvider::default();
+            let header = alloy_consensus::Header::default();
+            provider.add_header(header.hash_slow(), header);
+            let eth_api = build_test_eth_api(provider);
+            let eth_filter =
+                EthFilter::new(eth_api.clone(), EthFilterConfig::default(), Runtime::test());
+            let hashes =
+                PendingTransactionsReceiver::new(eth_api.pool().pending_transactions_listener());
+            let full = Arc::new(FullTransactionsReceiver::new(
+                eth_api.pool().new_pending_pool_transactions_listener(),
+                dyn_clone::clone(eth_api.converter()),
+            ));
+            let kind = if full_transactions {
+                PendingTransactionKind::FullTransaction(full.clone())
+            } else {
+                PendingTransactionKind::Hashes(hashes.clone())
+            };
+            let id = eth_filter
+                .inner
+                .install_filter(FilterKind::PendingTransaction(kind))
+                .await
+                .unwrap();
+            let tx = MockTransaction::legacy().with_gas_price(100);
+            let expected = if full_transactions {
+                FilterChanges::Transactions(vec![eth_api
+                    .converter()
+                    .fill_pending(tx.clone().into_consensus())
+                    .unwrap()])
+            } else {
+                FilterChanges::Hashes(vec![*tx.hash()])
+            };
+            eth_api.pool().add_transaction(TransactionOrigin::External, tx).await.unwrap();
+
+            // Suspend before draining, then hold the registry lock through response completion.
+            let hash_guard = hashes.txs_receiver.lock().await;
+            let full_guard = full.txs_stream.lock().await;
+            let poll = eth_filter.filter_changes(id.clone());
+            tokio::pin!(poll);
+            assert!(poll.as_mut().now_or_never().is_none());
+            let filters = eth_filter.active_filters().inner.lock().await;
+            drop(hash_guard);
+            drop(full_guard);
+
+            // There must be no cancellation point after destructively consuming pending events.
+            let changes = poll.as_mut().now_or_never().expect("draining must not yield").unwrap();
+            assert_eq!(changes, expected);
+            drop(filters);
+            assert_eq!(eth_filter.filter_changes(id).await.unwrap(), FilterChanges::Empty);
         }
     }
 }
