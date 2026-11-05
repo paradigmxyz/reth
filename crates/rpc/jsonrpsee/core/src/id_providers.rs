@@ -66,13 +66,3 @@ impl IdProvider for RandomStringIdProvider {
             .into()
     }
 }
-
-/// No-op implementation to be used for servers that don't support subscriptions.
-#[derive(Debug, Copy, Clone)]
-pub struct NoopIdProvider;
-
-impl IdProvider for NoopIdProvider {
-    fn next_id(&self) -> SubscriptionId<'static> {
-        0.into()
-    }
-}

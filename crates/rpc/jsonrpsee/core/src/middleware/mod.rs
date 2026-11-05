@@ -150,35 +150,11 @@ impl<'a> BatchEntry<'a> {
         }
     }
 
-    /// Set the method name of the batch entry.
-    pub fn set_method_name(&mut self, name: impl Into<Cow<'a, str>>) {
-        match self {
-            BatchEntry::Call(req) => {
-                req.method = name.into();
-            }
-            BatchEntry::Notification(n) => {
-                n.method = name.into();
-            }
-        }
-    }
-
     /// Get the params of the batch entry (may be empty).
     pub fn params(&self) -> Option<&Cow<'a, RawValue>> {
         match self {
             BatchEntry::Call(req) => req.params.as_ref(),
             BatchEntry::Notification(n) => n.params.as_ref(),
-        }
-    }
-
-    /// Set the params of the batch entry.
-    pub fn set_params(&mut self, params: Option<Box<RawValue>>) {
-        match self {
-            BatchEntry::Call(req) => {
-                req.params = params.map(Cow::Owned);
-            }
-            BatchEntry::Notification(n) => {
-                n.params = params.map(Cow::Owned);
-            }
         }
     }
 }
