@@ -1578,7 +1578,7 @@ const DEFAULT_MAX_TARGETS_FOR_CHUNKING: usize = 300;
 
 /// Update messages after which a continuous stream applies its buffered updates and promotes
 /// account updates, see [`SparseTrieCacheTask::window_due`].
-const UPDATE_WINDOW_LEN: usize = 64;
+const UPDATE_WINDOW_LEN: usize = 256;
 
 /// Time after which a continuous stream applies its buffered updates and promotes account updates,
 /// see [`SparseTrieCacheTask::window_due`].
