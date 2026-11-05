@@ -31,3 +31,7 @@ heck = { version = "0.5.0" }
 [dev-dependencies]
 jsonrpsee = { path = "../jsonrpsee", features = ["server", "macros"] }
 tokio = { workspace = true, features = ["rt", "macros"] }
+
+# Only used by doc tests, which cargo-udeps does not see.
+[package.metadata.cargo-udeps.ignore]
+development = ["jsonrpsee", "tokio"]
