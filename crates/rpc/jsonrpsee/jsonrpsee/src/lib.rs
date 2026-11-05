@@ -39,9 +39,11 @@
 //! - **`wasm-client`** - JSON-RPC client functionality over web-sys.
 //! - **`ws-client`** - JSON-RPC client functionality over WebSocket protocol.
 //! - **`macros`** - JSON-RPC API generation convenience by derive macros.
-//! - **`client-core`** - Enables minimal client features to generate the RPC API without transports.
+//! - **`client-core`** - Enables minimal client features to generate the RPC API without
+//!   transports.
 //! - **`client`** - Enables all client features including transports.
-//! - **`server-core`** - Enables minimal server features to generate the RPC API without transports.
+//! - **`server-core`** - Enables minimal server features to generate the RPC API without
+//!   transports.
 //! - **`server`** - Enables all server features including transports.
 //! - **`full`** - Enables all features.
 //! - **`async-client`** - Enables the async client without any transport.
@@ -61,47 +63,47 @@
 mod macros;
 
 cfg_http_client! {
-	pub use jsonrpsee_http_client as http_client;
+    pub use jsonrpsee_http_client as http_client;
 }
 
 cfg_ws_client! {
-	pub use jsonrpsee_ws_client as ws_client;
+    pub use jsonrpsee_ws_client as ws_client;
 }
 
 cfg_wasm_client! {
-	pub use jsonrpsee_wasm_client as wasm_client;
+    pub use jsonrpsee_wasm_client as wasm_client;
 }
 
 cfg_async_client! {
-	pub use jsonrpsee_core::client::async_client;
+    pub use jsonrpsee_core::client::async_client;
 }
 
 cfg_client_transport! {
-	pub use jsonrpsee_client_transport as client_transport;
+    pub use jsonrpsee_client_transport as client_transport;
 }
 
 cfg_server! {
-	pub use jsonrpsee_server as server;
-	pub use tokio;
+    pub use jsonrpsee_server as server;
+    pub use tokio;
 }
 
 cfg_server_core! {
-	pub use jsonrpsee_core::server::*;
+    pub use jsonrpsee_core::server::*;
 }
 
 cfg_proc_macros! {
-	pub use jsonrpsee_proc_macros as proc_macros;
-	pub use tracing;
+    pub use jsonrpsee_proc_macros as proc_macros;
+    pub use tracing;
 }
 
 cfg_types! {
-	pub use jsonrpsee_types as types;
+    pub use jsonrpsee_types as types;
 }
 
 cfg_client_or_server! {
-	pub use jsonrpsee_core as core;
+    pub use jsonrpsee_core as core;
 }
 
 cfg_client! {
-	pub use jsonrpsee_core::rpc_params;
+    pub use jsonrpsee_core::rpc_params;
 }
