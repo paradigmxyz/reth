@@ -30,8 +30,6 @@ const LOG_TARGET: &str = "jsonrpsee-core";
 
 use std::{io, task::Poll};
 
-use crate::traits::ToJson;
-
 use futures_util::{Future, FutureExt};
 use jsonrpsee_types::{
     error::{
@@ -73,12 +71,6 @@ pub struct MethodResponse {
 impl AsRef<str> for MethodResponse {
     fn as_ref(&self) -> &str {
         self.json.get()
-    }
-}
-
-impl ToJson for MethodResponse {
-    fn to_json(&self) -> Result<Box<RawValue>, serde_json::Error> {
-        Ok(self.json.clone())
     }
 }
 
