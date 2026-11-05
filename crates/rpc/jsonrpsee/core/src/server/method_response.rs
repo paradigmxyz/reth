@@ -28,7 +28,10 @@
 
 const LOG_TARGET: &str = "jsonrpsee-core";
 
-use std::io;
+use std::{
+    io,
+    sync::atomic::{AtomicUsize, Ordering},
+};
 
 use jsonrpsee_types::{
     error::{
@@ -153,7 +156,35 @@ impl MethodResponse {
     where
         T: Serialize + Clone,
     {
-        let mut writer = BoundedWriter::new(max_response_size);
+        Self::response_with_capacity(id, rp, max_response_size, 128)
+    }
+
+    /// Same as [`MethodResponse::response`], but sizes the serialization buffer from the method's
+    /// previous responses and records the size of this one.
+    pub(crate) fn sized_response<T>(
+        id: Id,
+        rp: ResponsePayload<T>,
+        max_response_size: usize,
+        size_hint: &ResponseSizeHint,
+    ) -> Self
+    where
+        T: Serialize + Clone,
+    {
+        let rp = Self::response_with_capacity(id, rp, max_response_size, size_hint.get());
+        size_hint.record(rp.json.len());
+        rp
+    }
+
+    fn response_with_capacity<T>(
+        id: Id,
+        rp: ResponsePayload<T>,
+        max_response_size: usize,
+        capacity: usize,
+    ) -> Self
+    where
+        T: Serialize + Clone,
+    {
+        let mut writer = BoundedWriter::new(max_response_size, capacity);
 
         let success_or_error = if let ResponsePayload::Error(e) = &rp {
             MethodResponseResult::Failed(e.code())
@@ -347,6 +378,27 @@ pub fn batch_response_error(id: Id, err: impl Into<ErrorObject<'static>>) -> Str
         .expect("JSON serialization infallible; qed")
 }
 
+/// Size of a method's last response.
+///
+/// Responses of the same method tend to have similar sizes, so serializing into a buffer of the
+/// previous size avoids growing (and copying) large responses step by step.
+#[derive(Debug)]
+pub(crate) struct ResponseSizeHint(AtomicUsize);
+
+impl ResponseSizeHint {
+    pub(crate) const fn new() -> Self {
+        Self(AtomicUsize::new(128))
+    }
+
+    fn get(&self) -> usize {
+        self.0.load(Ordering::Relaxed)
+    }
+
+    fn record(&self, len: usize) {
+        self.0.store(len, Ordering::Relaxed);
+    }
+}
+
 /// Bounded writer that allows writing at most `max_len` bytes.
 #[derive(Debug, Clone)]
 struct BoundedWriter {
@@ -355,9 +407,9 @@ struct BoundedWriter {
 }
 
 impl BoundedWriter {
-    /// Create a new bounded writer.
-    pub fn new(max_len: usize) -> Self {
-        Self { max_len, buf: Vec::with_capacity(128) }
+    /// Create a new bounded writer with room for `capacity` bytes.
+    pub fn new(max_len: usize, capacity: usize) -> Self {
+        Self { max_len, buf: Vec::with_capacity(capacity.min(max_len)) }
     }
 
     /// Consume the writer and extract the written bytes.
@@ -472,7 +524,7 @@ mod tests {
     fn bounded_serializer_work() {
         use jsonrpsee_types::{Response, ResponsePayload};
 
-        let mut writer = BoundedWriter::new(100);
+        let mut writer = BoundedWriter::new(100, 128);
         let result = ResponsePayload::success(&"success");
         let rp = &Response::new(result, Id::Number(1));
 
@@ -485,7 +537,7 @@ mod tests {
 
     #[test]
     fn bounded_serializer_cap_works() {
-        let mut writer = BoundedWriter::new(100);
+        let mut writer = BoundedWriter::new(100, 128);
         // NOTE: `"` is part of the serialization so 101 characters.
         assert!(serde_json::to_writer(&mut writer, &"x".repeat(99)).is_err());
     }

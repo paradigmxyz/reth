@@ -42,7 +42,7 @@ use crate::{
             PendingSubscriptionSink, Subscribers, SubscriptionCloseResponse,
             SubscriptionKey, SubscriptionPermit, SubscriptionState,
         },
-        MethodResponse, ResponsePayload, LOG_TARGET,
+        MethodResponse, ResponsePayload, ResponseSizeHint, LOG_TARGET,
     },
 };
 use futures_util::{future::BoxFuture, FutureExt};
@@ -362,11 +362,12 @@ impl<Context: Send + Sync + 'static> RpcModule<Context> {
         F: Fn(Params, &Context) -> R + Send + Sync + 'static,
     {
         let ctx = self.ctx.clone();
+        let size_hint = ResponseSizeHint::new();
         self.methods.verify_and_insert(
             method_name,
             MethodCallback::Sync(Arc::new(move |id, params, max_response_size| {
                 let rp = callback(params, &*ctx).into_response();
-                MethodResponse::response(id, rp, max_response_size)
+                MethodResponse::sized_response(id, rp, max_response_size, &size_hint)
             })),
         )
     }
@@ -401,15 +402,17 @@ impl<Context: Send + Sync + 'static> RpcModule<Context> {
         Fun: (Fn(Params<'static>, Arc<Context>) -> Fut) + Clone + Send + Sync + 'static,
     {
         let ctx = self.ctx.clone();
+        let size_hint = Arc::new(ResponseSizeHint::new());
         self.methods.verify_and_insert(
             method_name,
             MethodCallback::Async(Arc::new(move |id, params, _, max_response_size| {
                 let ctx = ctx.clone();
                 let callback = callback.clone();
+                let size_hint = size_hint.clone();
 
                 let future = async move {
                     let rp = callback(params, ctx).await.into_response();
-                    MethodResponse::response(id, rp, max_response_size)
+                    MethodResponse::sized_response(id, rp, max_response_size, &size_hint)
                 };
                 future.boxed()
             })),
