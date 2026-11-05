@@ -28,9 +28,10 @@
 
 pub use jsonrpsee_core::{middleware::*, server::MethodResponse};
 
-use std::sync::Arc;
+use std::{panic::AssertUnwindSafe, sync::Arc};
 
 use crate::ConnectionId;
+use futures_util::FutureExt;
 use jsonrpsee_core::{
     server::{
         BatchResponseBuilder, BoundedSubscriptions, MethodCallback, MethodSink, Methods,
@@ -40,7 +41,7 @@ use jsonrpsee_core::{
 };
 use jsonrpsee_types::{
     error::{reject_too_many_subscriptions, ErrorCode},
-    ErrorObject,
+    ErrorObject, Id,
 };
 
 /// JSON-RPC service middleware.
@@ -49,32 +50,50 @@ pub struct RpcService {
     conn_id: ConnectionId,
     methods: Methods,
     max_response_body_size: usize,
-    cfg: RpcServiceCfg,
+    /// `None` if the transport can't send subscription notifications.
+    subscriptions: Option<Subscriptions>,
 }
 
-/// Configuration of the RpcService.
+/// State required to serve subscriptions on a connection.
 #[derive(Clone, Debug)]
-pub(crate) enum RpcServiceCfg {
-    /// The server supports only calls.
-    OnlyCalls,
-    /// The server supports both method calls and subscriptions.
-    CallsAndSubscriptions {
-        bounded_subscriptions: BoundedSubscriptions,
-        sink: MethodSink,
-        id_provider: Arc<dyn IdProvider>,
-        _pending_calls: tokio::sync::mpsc::Sender<()>,
-    },
+struct Subscriptions {
+    bounded: BoundedSubscriptions,
+    sink: MethodSink,
+    id_provider: Arc<dyn IdProvider>,
 }
 
 impl RpcService {
-    /// Create a new service.
-    pub(crate) fn new(
+    /// Creates a service for a connection that supports subscriptions.
+    ///
+    /// Subscription notifications are sent to `sink`, and at most `bounded_subscriptions` of them
+    /// can be active at once.
+    pub fn new(
         methods: Methods,
         max_response_body_size: usize,
         conn_id: ConnectionId,
-        cfg: RpcServiceCfg,
+        bounded_subscriptions: BoundedSubscriptions,
+        sink: MethodSink,
+        id_provider: Arc<dyn IdProvider>,
     ) -> Self {
-        Self { methods, max_response_body_size, conn_id, cfg }
+        Self {
+            methods,
+            max_response_body_size,
+            conn_id,
+            subscriptions: Some(Subscriptions {
+                bounded: bounded_subscriptions,
+                sink,
+                id_provider,
+            }),
+        }
+    }
+
+    /// Creates a service that answers subscription calls with an internal error.
+    pub(crate) fn without_subscriptions(
+        methods: Methods,
+        max_response_body_size: usize,
+        conn_id: ConnectionId,
+    ) -> Self {
+        Self { methods, max_response_body_size, conn_id, subscriptions: None }
     }
 }
 
@@ -92,67 +111,65 @@ impl RpcServiceT for RpcService {
             params.as_ref().map(|p| serde_json::value::RawValue::get(p)),
         );
 
-        match self.methods.method_with_name(&method) {
-            None => {
-                let rp = MethodResponse::error(id, ErrorObject::from(ErrorCode::MethodNotFound));
-                ResponseFuture::ready(rp)
+        let Some(method) = self.methods.method(&method) else {
+            return ResponseFuture::ready(MethodResponse::error(
+                id,
+                ErrorObject::from(ErrorCode::MethodNotFound),
+            ));
+        };
+
+        match method {
+            MethodCallback::Async(callback) => ResponseFuture::future((callback)(
+                id.into_owned(),
+                params.into_owned(),
+                conn_id,
+                max_response_body_size,
+            )),
+            MethodCallback::Sync(callback) => {
+                ResponseFuture::ready((callback)(id, params, max_response_body_size))
             }
-            Some((_name, method)) => match method {
-                MethodCallback::Async(callback) => {
-                    let params = params.into_owned();
-                    let id = id.into_owned();
-                    let fut = (callback)(id, params, conn_id, max_response_body_size);
+            MethodCallback::Subscription(callback) => {
+                let Some(subscriptions) = &self.subscriptions else {
+                    tracing::warn!("Subscriptions not supported");
+                    return ResponseFuture::ready(MethodResponse::error(
+                        id,
+                        ErrorObject::from(ErrorCode::InternalError),
+                    ));
+                };
 
-                    ResponseFuture::future(fut)
+                let Some(subscription_permit) = subscriptions.bounded.acquire() else {
+                    let max = subscriptions.bounded.max();
+                    return ResponseFuture::ready(MethodResponse::error(
+                        id,
+                        reject_too_many_subscriptions(max),
+                    ));
+                };
+
+                let conn_state = SubscriptionState {
+                    conn_id,
+                    id_provider: &*subscriptions.id_provider,
+                    subscription_permit,
+                };
+                ResponseFuture::future((callback)(
+                    id,
+                    params,
+                    subscriptions.sink.clone(),
+                    conn_state,
+                ))
+            }
+            MethodCallback::Unsubscription(callback) => {
+                // Don't adhere to any resource or subscription limits; always let unsubscribing
+                // happen!
+                if self.subscriptions.is_none() {
+                    tracing::warn!("Subscriptions not supported");
+                    return ResponseFuture::ready(MethodResponse::error(
+                        id,
+                        ErrorObject::from(ErrorCode::InternalError),
+                    ));
                 }
-                MethodCallback::Sync(callback) => {
-                    let rp = (callback)(id, params, max_response_body_size);
-                    ResponseFuture::ready(rp)
-                }
-                MethodCallback::Subscription(callback) => {
-                    let RpcServiceCfg::CallsAndSubscriptions {
-                        bounded_subscriptions,
-                        sink,
-                        id_provider,
-                        _pending_calls,
-                    } = self.cfg.clone()
-                    else {
-                        tracing::warn!("Subscriptions not supported");
-                        let rp =
-                            MethodResponse::error(id, ErrorObject::from(ErrorCode::InternalError));
-                        return ResponseFuture::ready(rp);
-                    };
 
-                    if let Some(p) = bounded_subscriptions.acquire() {
-                        let conn_state = SubscriptionState {
-                            conn_id,
-                            id_provider: &*id_provider.clone(),
-                            subscription_permit: p,
-                        };
-
-                        let fut = (callback)(id.clone(), params, sink, conn_state);
-                        ResponseFuture::future(fut)
-                    } else {
-                        let max = bounded_subscriptions.max();
-                        let rp = MethodResponse::error(id, reject_too_many_subscriptions(max));
-                        ResponseFuture::ready(rp)
-                    }
-                }
-                MethodCallback::Unsubscription(callback) => {
-                    // Don't adhere to any resource or subscription limits; always let unsubscribing
-                    // happen!
-
-                    let RpcServiceCfg::CallsAndSubscriptions { .. } = self.cfg else {
-                        tracing::warn!("Subscriptions not supported");
-                        let rp =
-                            MethodResponse::error(id, ErrorObject::from(ErrorCode::InternalError));
-                        return ResponseFuture::ready(rp);
-                    };
-
-                    let rp = callback(id, params, conn_id, max_response_body_size);
-                    ResponseFuture::ready(rp)
-                }
-            },
+                ResponseFuture::ready(callback(id, params, conn_id, max_response_body_size))
+            }
         }
     }
 
@@ -162,10 +179,11 @@ impl RpcServiceT for RpcService {
         async move {
             let mut got_notification = false;
 
+            // Entries run one after another, so a batch occupies at most one call at a time.
             for batch_entry in batch.into_iter() {
                 match batch_entry {
                     Ok(BatchEntry::Call(req)) => {
-                        let rp = service.call(req).await;
+                        let rp = catch_call_panic(req.id(), service.call(req)).await;
                         if let Err(err) = batch_rp.append(rp) {
                             return err;
                         }
@@ -202,4 +220,16 @@ impl RpcServiceT for RpcService {
         // Notifications are not answered.
         std::future::ready(MethodResponse::notification())
     }
+}
+
+/// Answers a panicking call with an internal error, otherwise the panic would only surface as a
+/// failed connection or call task and the client would never receive a response for `id`.
+pub(crate) async fn catch_call_panic(
+    id: Id<'_>,
+    call: impl Future<Output = MethodResponse>,
+) -> MethodResponse {
+    AssertUnwindSafe(call)
+        .catch_unwind()
+        .await
+        .unwrap_or_else(|_| MethodResponse::error(id, ErrorObject::from(ErrorCode::InternalError)))
 }
