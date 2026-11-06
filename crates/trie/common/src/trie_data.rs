@@ -211,9 +211,11 @@ impl fmt::Debug for LazyTrieDataProducer {
 impl LazyTrieDataProducer {
     /// Computes sorted trie data, publishes it to waiters, and returns it to the task owner.
     pub fn compute_and_publish(self) -> SortedTrieData {
-        let Self { value, inputs } = self;
-        let computed = Self::sort(inputs.hashed_state, inputs.trie_updates);
-        let _ = value.set(computed.clone());
+        let computed = Self::sort(
+            Arc::clone(&self.inputs.hashed_state),
+            Arc::clone(&self.inputs.trie_updates),
+        );
+        let _ = self.value.set(computed.clone());
         computed
     }
 
@@ -247,6 +249,20 @@ impl LazyTrieDataProducer {
         );
 
         SortedTrieData::new(Arc::new(sorted_hashed_state), Arc::new(sorted_trie_updates))
+    }
+}
+
+impl Drop for LazyTrieDataProducer {
+    fn drop(&mut self) {
+        // Note: `Drop::drop` cannot consume self, so take a shaping clone of the inputs and
+        // publish through the shared OnceLock directly. `set` on an occupied lock is a no-op.
+        if self.value.get().is_none() {
+            let computed = Self::sort(
+                Arc::clone(&self.inputs.hashed_state),
+                Arc::clone(&self.inputs.trie_updates),
+            );
+            let _ = self.value.set(computed);
+        }
     }
 }
 
