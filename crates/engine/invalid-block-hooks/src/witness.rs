@@ -34,7 +34,7 @@ use tracing::{debug, error, warn};
 const DIFF_TIMEOUT: Duration = Duration::from_secs(1);
 
 /// Number of invalid blocks whose output files are kept in the output directory.
-const MAX_RETAINED_BLOCKS: usize = 10;
+const MAX_RETAINED_BLOCKS: usize = 100;
 
 /// Serializable version of `BundleState` for deterministic comparison
 #[derive(Debug, PartialEq, Eq)]
