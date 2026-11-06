@@ -393,6 +393,14 @@ updated key on arrival made more of them (the task fell behind, mean +16%). They
 under a known parent, requested when a value is applied, which points at leaves that only a
 change reaches, such as a removal collapsing a branch onto a blinded sibling.
 
+Counting the trie's proof requests after the finish marker by reason confirms it: a removal that
+leaves its branch with one blinded child, in 159 of 500 blocks (blinded writes in 51, hints in 33).
+Checking each removed slot on arrival, without applying it, and requesting the sibling its removal
+would need (a read-only `prefetch_removals` on the trie) did not reduce them (171 blocks), alone or
+with hints applied eagerly (204-209), and the extra passes made the cold replay 4-10% slower. At
+arrival the leaf's path is usually not revealed yet, and the structure that decides a collapse is
+the one after the whole last batch, in which several removals can empty a branch together.
+
 ## Rewrite: newPayload v2
 
 The v2 path replaces the per-block task graph instead of tuning it:
