@@ -1114,6 +1114,24 @@ async fn eth_call_caps_execution_gas_under_amsterdam() -> eyre::Result<()> {
 }
 
 #[tokio::test]
+async fn eth_call_without_gas_with_max_rpc_gas_cap() -> eyre::Result<()> {
+    let (node, _) = EthereumNode::test_setup_for(EthereumHardfork::Amsterdam)
+        .with_rpc_modifier(|mut rpc| {
+            rpc.rpc_gas_cap = u64::MAX;
+            rpc
+        })
+        .build_single()
+        .await?;
+
+    let result = node
+        .rpc_provider()
+        .call(TransactionRequest::default().to(Address::with_last_byte(0x42)))
+        .await?;
+    assert_eq!(result, Bytes::new());
+    Ok(())
+}
+
+#[tokio::test]
 async fn test_test_account_tx_builder() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
 

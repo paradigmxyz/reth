@@ -943,7 +943,9 @@ pub trait Call:
             }
         } else {
             // cap request's gas limit to call gas limit
-            tx_env.inner_mut().set_gas_limit(self.call_gas_limit());
+            tx_env
+                .inner_mut()
+                .set_gas_limit(self.call_gas_limit().min(evm_env.version().tx_gas_caps().0));
         }
 
         // lower the basefee to 0 to avoid breaking EVM invariants (basefee < gasprice): <https://github.com/ethereum/go-ethereum/blob/355228b011ef9a85ebc0f21e7196f892038d49f0/internal/ethapi/api.go#L700-L704>
