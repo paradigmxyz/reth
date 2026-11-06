@@ -2031,7 +2031,7 @@ mod tests {
         let tx = env.tx_mut().expect(ERROR_INIT_TX);
         let mut cursor = tx.cursor_write::<tables::HashedAccounts>().unwrap();
         for i in 0..200_000u64 {
-            let account = Account { nonce: i, balance: U256::from(i), bytecode_hash: None };
+            let account = Account { nonce: i, balance: U256::from(i), ..Default::default() };
             cursor.append(B256::from(U256::from(i)), &account).expect(ERROR_APPEND);
         }
         drop(cursor);
