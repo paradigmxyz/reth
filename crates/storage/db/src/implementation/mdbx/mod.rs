@@ -23,6 +23,7 @@ use reth_libmdbx::{
 use reth_storage_errors::db::LogLevel;
 use rustc_hash::FxHashMap;
 use std::{
+    fs::File,
     ops::{Deref, Range},
     path::{Path, PathBuf},
     sync::Arc,
@@ -64,6 +65,9 @@ const MAX_SAFE_READER_SPACE: usize = 10 * GIGABYTE;
 /// that static file pruning already deleted, which startup healing cannot repair. MDBX checks the
 /// period on each commit.
 const NON_DURABLE_SYNC_PERIOD: Duration = Duration::from_secs(60);
+
+/// Name of the MDBX data file in the database directory.
+const MDBX_DATA_FILE: &str = "mdbx.dat";
 
 /// Environment used when opening a MDBX environment. RO/RW.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -754,6 +758,227 @@ impl DatabaseEnv {
         self.disable_long_read_transaction_safety = true;
         self
     }
+
+    /// Reads the branch pages of `tables` into the page cache and returns how many pages it read.
+    ///
+    /// On a cold page cache a lookup then waits for its leaf page alone instead of also for the
+    /// branch pages above it. Walks each table's B-tree level by level from its root, reading each
+    /// level on `threads` threads. A duplicate-sort table keeps a large duplicate set in a tree of
+    /// its own, which only a leaf of the table's tree points to: for those tables it also reads the
+    /// leaves of the table's tree, which hold the small sets, and the branch pages of the nested
+    /// trees. Holds a read transaction meanwhile, so that none of the pages it reads is reused.
+    /// Tables that do not exist are skipped.
+    pub fn warm_branch_pages(
+        &self,
+        tables: &[&str],
+        threads: usize,
+    ) -> Result<usize, DatabaseError> {
+        let txn = self.inner.begin_ro_txn().map_err(|e| DatabaseError::InitTx(e.into()))?;
+        let main = txn.open_db(None).map_err(|e| DatabaseError::Open(e.into()))?;
+        let page_size = self.inner.stat().map_err(|e| DatabaseError::Stats(e.into()))?.page_size();
+        let pages = PageReader {
+            file: reth_fs_util::open(self.path.join(MDBX_DATA_FILE))
+                .map_err(|err| DatabaseError::Other(err.to_string()))?,
+            page_size: page_size as usize,
+            threads: threads.max(1),
+        };
+        let mut read = 0;
+        for table in tables {
+            let Some(tree) = txn
+                .get::<Vec<u8>>(main.dbi(), table.as_bytes())
+                .map_err(|e| DatabaseError::Read(e.into()))?
+                .and_then(|record| TreeRecord::parse(&record))
+            else {
+                continue
+            };
+            let leaves = pages.read_branches(&[tree], tree.dupsort, &mut read);
+            if !leaves.is_empty() {
+                read += leaves.len();
+                let nested = pages.read_nested_trees(&leaves);
+                pages.read_branches(&nested, false, &mut read);
+            }
+        }
+        Ok(read)
+    }
+}
+
+/// The root of an MDBX B-tree, from its `tree_t` record.
+#[derive(Clone, Copy, Debug)]
+struct TreeRecord {
+    /// Root page number.
+    root: u32,
+    /// Number of levels, the leaves included.
+    height: u16,
+    /// Whether the tree's values are duplicate sets.
+    dupsort: bool,
+}
+
+impl TreeRecord {
+    /// Size of a `tree_t` record.
+    const SIZE: usize = 48;
+
+    /// Parses a `tree_t` record: flags (u16), height (u16), key size (u32), root (u32), ....
+    fn parse(record: &[u8]) -> Option<Self> {
+        const DUPSORT: u16 = 0x04;
+        let record = record.get(..Self::SIZE)?;
+        Some(Self {
+            root: u32::from_le_bytes(record[8..12].try_into().ok()?),
+            height: u16::from_le_bytes([record[2], record[3]]),
+            dupsort: u16::from_le_bytes([record[0], record[1]]) & DUPSORT != 0,
+        })
+    }
+}
+
+/// Reads MDBX pages from the data file in parallel, parsing the page format of libmdbx 0.13.
+///
+/// A page whose header is not that of the expected page kind is skipped.
+#[derive(Debug)]
+struct PageReader {
+    file: File,
+    page_size: usize,
+    threads: usize,
+}
+
+impl PageReader {
+    /// Page header: txnid (u64), key size (u16), flags (u16), lower bound of the free space
+    /// (u16), upper bound (u16), page number (u32), followed by one u16 offset per node.
+    const HEADER: usize = 20;
+    /// Node header: child page number or value size (u32), flags (u8), extra (u8), key size
+    /// (u16), followed by the key and, in a leaf, the value.
+    const NODE_HEADER: usize = 8;
+    const BRANCH: u16 = 0x01;
+    const LEAF: u16 = 0x02;
+    /// Node flags of a duplicate set kept in a tree of its own.
+    const NESTED_TREE: u8 = 0x02 | 0x04;
+
+    /// Reads the branch pages of `trees` level by level, adding the number of pages read to
+    /// `read`, and returns the trees' leaf page numbers if `leaves` is set.
+    fn read_branches(&self, trees: &[TreeRecord], leaves: bool, read: &mut usize) -> Vec<u32> {
+        // Each page with the number of levels below it.
+        let mut level = Vec::new();
+        let mut found = Vec::new();
+        for tree in trees {
+            match tree.height {
+                0 => {}
+                1 => found.push(tree.root),
+                height => level.push((tree.root, height - 1)),
+            }
+        }
+        while !level.is_empty() {
+            *read += level.len();
+            let mut next = Vec::new();
+            for (child, below) in self.read(&level, |page, &(_, below), out| {
+                for node in Self::nodes(page, Self::BRANCH) {
+                    if let Some(child) = page.get(node..node + 4) {
+                        out.push((
+                            u32::from_le_bytes(child.try_into().unwrap_or_default()),
+                            below - 1,
+                        ));
+                    }
+                }
+            }) {
+                if below > 0 {
+                    next.push((child, below));
+                } else {
+                    found.push(child);
+                }
+            }
+            level = next;
+        }
+        if !leaves {
+            found.clear();
+        }
+        found
+    }
+
+    /// Reads the leaf pages `leaves` and returns the trees of the duplicate sets they point to.
+    fn read_nested_trees(&self, leaves: &[u32]) -> Vec<TreeRecord> {
+        let leaves = leaves.iter().map(|&pgno| (pgno, 0)).collect::<Vec<_>>();
+        self.read(&leaves, |page, _, out| {
+            for node in Self::nodes(page, Self::LEAF) {
+                let flags = page[node + 4];
+                let key = u16::from_le_bytes([page[node + 6], page[node + 7]]) as usize;
+                let value = node + Self::NODE_HEADER + key;
+                if flags & Self::NESTED_TREE == Self::NESTED_TREE &&
+                    let Some(tree) = page.get(value..).and_then(TreeRecord::parse)
+                {
+                    out.push(tree);
+                }
+            }
+        })
+    }
+
+    /// Reads `pages` on the reader's threads and returns what `parse` collects from each.
+    fn read<T, O>(
+        &self,
+        pages: &[(u32, T)],
+        parse: impl Fn(&[u8], &(u32, T), &mut Vec<O>) + Sync,
+    ) -> Vec<O>
+    where
+        T: Sync,
+        O: Send,
+    {
+        let read_chunk = |chunk: &[(u32, T)]| {
+            let mut page = vec![0; self.page_size];
+            let mut out = Vec::new();
+            for item in chunk {
+                let pgno = item.0;
+                let number =
+                    |page: &[u8]| u32::from_le_bytes([page[16], page[17], page[18], page[19]]);
+                if read_at(&self.file, &mut page, pgno as u64 * self.page_size as u64).is_ok() &&
+                    number(&page) == pgno
+                {
+                    parse(&page, item, &mut out);
+                }
+            }
+            out
+        };
+        std::thread::scope(|scope| {
+            pages
+                .chunks(pages.len().div_ceil(self.threads).max(1))
+                .map(|chunk| scope.spawn(|| read_chunk(chunk)))
+                .collect::<Vec<_>>()
+                .into_iter()
+                .flat_map(|handle| handle.join().unwrap_or_default())
+                .collect()
+        })
+    }
+
+    /// Returns the offsets of the nodes of `page`, or none if it is not of the page `kind`.
+    fn nodes(page: &[u8], kind: u16) -> impl Iterator<Item = usize> + '_ {
+        let field = |at: usize| u16::from_le_bytes([page[at], page[at + 1]]) as usize;
+        let count = if field(10) as u16 & kind == 0 {
+            0
+        } else {
+            (field(12) / 2).min((page.len() - Self::HEADER) / 2)
+        };
+        (0..count)
+            .map(move |i| Self::HEADER + field(Self::HEADER + 2 * i))
+            .filter(|&node| node + Self::NODE_HEADER <= page.len())
+    }
+}
+
+/// Reads `buf.len()` bytes of `file` at `offset`.
+#[cfg(unix)]
+fn read_at(file: &File, buf: &mut [u8], offset: u64) -> std::io::Result<()> {
+    std::os::unix::fs::FileExt::read_exact_at(file, buf, offset)
+}
+
+/// Reads `buf.len()` bytes of `file` at `offset`.
+#[cfg(windows)]
+fn read_at(file: &File, buf: &mut [u8], offset: u64) -> std::io::Result<()> {
+    let mut read = 0;
+    while read < buf.len() {
+        match std::os::windows::fs::FileExt::seek_read(
+            file,
+            &mut buf[read..],
+            offset + read as u64,
+        )? {
+            0 => return Err(std::io::ErrorKind::UnexpectedEof.into()),
+            n => read += n,
+        }
+    }
+    Ok(())
 }
 
 impl Deref for DatabaseEnv {
@@ -1798,6 +2023,50 @@ mod tests {
         let tx = env.tx().expect(ERROR_INIT_TX);
         assert_eq!(tx.get::<CustomTable>(1).expect(ERROR_GET), Some(2));
         assert_eq!(tx.get::<CustomTable>(3).expect(ERROR_GET), Some(4));
+    }
+
+    #[test]
+    fn warm_branch_pages_reads_every_branch_page() {
+        let (_tempdir, env) = create_test_db(DatabaseEnvKind::RW);
+        let tx = env.tx_mut().expect(ERROR_INIT_TX);
+        let mut cursor = tx.cursor_write::<tables::HashedAccounts>().unwrap();
+        for i in 0..200_000u64 {
+            let account = Account { nonce: i, balance: U256::from(i), bytecode_hash: None };
+            cursor.append(B256::from(U256::from(i)), &account).expect(ERROR_APPEND);
+        }
+        drop(cursor);
+        tx.commit().expect(ERROR_COMMIT);
+
+        let txn = env.begin_ro_txn().unwrap();
+        let db = txn.open_db(Some(tables::HashedAccounts::NAME)).unwrap();
+        let stat = txn.db_stat(db.dbi()).unwrap();
+        assert!(stat.depth() >= 3, "the table must have more than one branch level");
+
+        let tables = [tables::HashedAccounts::NAME, "Missing"];
+        assert_eq!(env.warm_branch_pages(&tables, 4).unwrap(), stat.branch_pages());
+    }
+
+    #[test]
+    fn warm_branch_pages_reads_nested_duplicate_trees() {
+        let (_tempdir, env) = create_test_db(DatabaseEnvKind::RW);
+        let tx = env.tx_mut().expect(ERROR_INIT_TX);
+        let mut cursor = tx.cursor_dup_write::<tables::HashedStorages>().unwrap();
+        // One large duplicate set, kept in a tree of its own with more than one branch level.
+        for slot in 0..300_000u64 {
+            let entry = StorageEntry { key: B256::from(U256::from(slot)), value: U256::from(1) };
+            cursor.append_dup(B256::ZERO, entry).expect(ERROR_APPEND);
+        }
+        drop(cursor);
+        tx.commit().expect(ERROR_COMMIT);
+
+        let txn = env.begin_ro_txn().unwrap();
+        let db = txn.open_db(Some(tables::HashedStorages::NAME)).unwrap();
+        let stat = txn.db_stat(db.dbi()).unwrap();
+        // The table's tree is a single leaf, and the nested tree has more than one branch level.
+        assert_eq!(stat.depth(), 1);
+        assert!(stat.branch_pages() > 1);
+        let read = env.warm_branch_pages(&[tables::HashedStorages::NAME], 4).unwrap();
+        assert_eq!(read, 1 + stat.branch_pages());
     }
 
     #[test]
