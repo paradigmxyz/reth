@@ -52,6 +52,7 @@ mod corpus;
 pub mod prewarm;
 pub mod receipt_root_task;
 pub(crate) mod reuse;
+mod storage_scan;
 
 /// Blocks with fewer transactions than this skip prewarming, since the fixed overhead of spawning
 /// prewarm workers exceeds the execution time saved.
