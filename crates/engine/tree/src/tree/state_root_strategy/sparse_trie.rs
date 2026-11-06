@@ -35,6 +35,14 @@ use reth_trie_sparse::{
 };
 use tracing::{debug, debug_span, error, instrument, trace_span};
 
+/// Tail counters (experiment only): finish->drained us, return us, root us, -, drain proof results,
+/// drain storage jobs, drain iterations, retained storage tries, proof results, storage jobs,
+/// in-flight proof jobs at finish.
+pub(crate) static NP_TRIE: [std::sync::atomic::AtomicU64; 11] =
+    [const { std::sync::atomic::AtomicU64::new(0) }; 11];
+static NP_FINISHED: std::sync::Mutex<Option<Instant>> = std::sync::Mutex::new(None);
+use std::sync::atomic::Ordering as AtomicOrdering;
+
 /// Computes a block's state root by applying streamed updates to an in-memory [`SparseStateTrie`].
 /// Updates that reach a blinded node stay pending while the task fetches the missing proof. The
 /// account trie stays on this task's thread; storage tries can be moved into independent rayon
@@ -433,11 +441,13 @@ where
             idle_start = Instant::now();
         }
 
+        let mut np_drain_iterations = 0u64;
         // Draining phase: the marker is the last message read from the updates channel, so
         // after it only proof results, storage-job returns, and cancellation can occur. The
         // update channel closing when producers drop their senders is not observed here, and late
         // hints are ignored: with all updates known, prefetching has nothing left to help.
         while !done {
+            np_drain_iterations += 1;
             let mut t = Instant::now();
             crossbeam_channel::select_biased! {
                 recv(self.proof_worker_handle.results()) -> message => {
@@ -472,6 +482,7 @@ where
             idle_start = Instant::now();
         }
 
+        NP_TRIE[6].store(np_drain_iterations, AtomicOrdering::Relaxed);
         debug_assert_eq!(
             self.storage_in_flight, 0,
             "completion must wait for every checked out storage trie"
@@ -481,9 +492,20 @@ where
         debug!(target: "engine::root", "All proofs processed, ending calculation");
 
         let start = Instant::now();
+        let finished_at = NP_FINISHED.lock().unwrap().take();
+        if let Some(finished_at) = finished_at {
+            NP_TRIE[0].store(
+                start.duration_since(finished_at).as_micros() as u64,
+                AtomicOrdering::Relaxed,
+            );
+        }
         self.return_storage_tries();
-        // Every storage trie changed this block passed through the task's storage map.
+        let returned = Instant::now();
+        NP_TRIE[1]
+            .store(returned.duration_since(start).as_micros() as u64, AtomicOrdering::Relaxed);
+        NP_TRIE[7].store(self.trie.retained_storage_tries_count() as u64, AtomicOrdering::Relaxed);
         let root = self.trie.root_with_updates_of(self.storage_to_drop.keys(), self.new_epoch);
+        NP_TRIE[2].store(returned.elapsed().as_micros() as u64, AtomicOrdering::Relaxed);
         let (state_root, trie_updates) = match root {
             Ok(result) => result,
             Err(err)
@@ -528,6 +550,10 @@ where
         result: ProofWorkerResult,
         t: &mut Instant,
     ) -> Result<(), StateRootTaskError> {
+        NP_TRIE[8].fetch_add(1, AtomicOrdering::Relaxed);
+        if self.finished_state_updates {
+            NP_TRIE[4].fetch_add(1, AtomicOrdering::Relaxed);
+        }
         let mut proofs = self.complete_proof_job(result)?;
         while let Ok(next) = self.proof_worker_handle.results().try_recv() {
             proofs.extend(self.complete_proof_job(next)?);
@@ -609,6 +635,8 @@ where
                 None
             }
             SparseTrieTaskMessage::FinishedStateUpdates => {
+                NP_TRIE[10].store(self.in_flight_proof_jobs as u64, AtomicOrdering::Relaxed);
+                *NP_FINISHED.lock().unwrap() = Some(Instant::now());
                 let hashed_state = Arc::new(core::mem::take(&mut self.final_hashed_state));
                 let _ = self.final_hashed_state_tx.take().unwrap().send(Arc::clone(&hashed_state));
                 self.finished_state_updates = true;
@@ -932,6 +960,10 @@ where
     fn spawn_storage_jobs(&self, mut jobs: Vec<StorageTrieJob<S>>) {
         if jobs.is_empty() {
             return;
+        }
+        NP_TRIE[9].fetch_add(jobs.len() as u64, AtomicOrdering::Relaxed);
+        if self.finished_state_updates {
+            NP_TRIE[5].fetch_add(jobs.len() as u64, AtomicOrdering::Relaxed);
         }
 
         let parent_span = debug_span!("spawn_storage_jobs", n = jobs.len());
