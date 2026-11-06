@@ -311,7 +311,29 @@ where
         let mut idle_start = Instant::now();
         np_event("h_start", updates.len() as u64, 0);
 
-        while let Ok(message) = updates.recv() {
+        static SPIN_US: std::sync::LazyLock<u64> = std::sync::LazyLock::new(|| {
+            std::env::var("RETH_NP_HASH_SPIN_US").ok().and_then(|v| v.parse().ok()).unwrap_or(0)
+        });
+        let recv = || {
+            if *SPIN_US > 0 {
+                let spin_start = Instant::now();
+                loop {
+                    match updates.try_recv() {
+                        Ok(message) => return Ok(message),
+                        Err(crossbeam_channel::TryRecvError::Disconnected) => {
+                            return Err(crossbeam_channel::RecvError)
+                        }
+                        Err(crossbeam_channel::TryRecvError::Empty) => {}
+                    }
+                    if spin_start.elapsed().as_micros() as u64 >= *SPIN_US {
+                        break
+                    }
+                    std::hint::spin_loop();
+                }
+            }
+            updates.recv()
+        };
+        while let Ok(message) = recv() {
             total_idle_time += idle_start.elapsed();
             let np_kind = match &message {
                 StateRootMessage::PrefetchProofs(_) => 0,
