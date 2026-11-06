@@ -1298,6 +1298,25 @@ where
                                 std::thread::yield_now();
                             }
                         }
+                        if results.is_speculating(index) {
+                            let probe = results.probe_state[index].load(Ordering::Acquire) as usize;
+                            NP_COMMIT[8 + probe].fetch_add(1, Ordering::Relaxed);
+                            match NP_RACE.as_str() {
+                                "never" => {
+                                    while results.is_speculating(index) {
+                                        std::thread::yield_now();
+                                    }
+                                }
+                                "probe" => {
+                                    while results.is_speculating(index) &&
+                                        results.probe_state[index].load(Ordering::Acquire) == 1
+                                    {
+                                        std::thread::yield_now();
+                                    }
+                                }
+                                _ => {}
+                            }
+                        }
                         NP_COMMIT[1]
                             .fetch_add(wait_start.elapsed().as_micros() as u64, Ordering::Relaxed);
                         outcome = self.commit_prewarm_result(executor, results, index, tx.tx())?;
@@ -2177,8 +2196,13 @@ static NP_PHASES_ENABLED: std::sync::LazyLock<bool> =
 
 /// Committer counters (experiment only): reused micros, race wait micros, raced count and micros,
 /// missing count and micros, stale count and micros.
-static NP_COMMIT: [std::sync::atomic::AtomicU64; 8] =
-    [const { std::sync::atomic::AtomicU64::new(0) }; 8];
+static NP_COMMIT: [std::sync::atomic::AtomicU64; 11] =
+    [const { std::sync::atomic::AtomicU64::new(0) }; 11];
+
+/// Race policy (experiment only): unset races after 300 us, `never` waits for the speculation,
+/// `probe` waits while the transaction's probe runs.
+static NP_RACE: std::sync::LazyLock<String> =
+    std::sync::LazyLock::new(|| std::env::var("RETH_NP_RACE").unwrap_or_default());
 
 /// Records a newPayload phase boundary on this thread (experiment only).
 pub(crate) fn np_phase(name: &'static str) {

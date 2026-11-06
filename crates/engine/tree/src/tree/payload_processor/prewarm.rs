@@ -387,6 +387,14 @@ where
             }
             let (tx_env, _) = tx.clone().into_parts();
             let probe_start = Instant::now();
+            results.probe_state[index].store(1, Ordering::Release);
+            struct ProbeDone<'a>(&'a std::sync::atomic::AtomicU8);
+            impl Drop for ProbeDone<'_> {
+                fn drop(&mut self) {
+                    self.0.store(2, Ordering::Release);
+                }
+            }
+            let _probe_done = ProbeDone(&results.probe_state[index]);
             for round in 0..MAX_PROBE_ROUNDS {
                 NP_PROBE[3].fetch_add(1, Ordering::Relaxed);
                 if ctx.should_stop() {

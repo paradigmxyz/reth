@@ -70,6 +70,8 @@ pub(crate) struct PrewarmResults<T: EvmTypes> {
     slots: Box<[Mutex<ResultSlot<T>>]>,
     /// Whether a prewarm worker is executing the transaction at each index.
     speculating: Box<[AtomicBool]>,
+    /// Probe state of each transaction (experiment only): 0 none, 1 probing, 2 done.
+    pub(crate) probe_state: Box<[std::sync::atomic::AtomicU8]>,
     /// Writes predicted by the stored results.
     predicted: Arc<PredictedState>,
 }
@@ -105,6 +107,9 @@ impl<T: EvmTypes> PrewarmResults<T> {
         Self {
             slots: (0..transaction_count).map(|_| Mutex::new(ResultSlot::Empty)).collect(),
             speculating: (0..transaction_count).map(|_| AtomicBool::new(false)).collect(),
+            probe_state: (0..transaction_count)
+                .map(|_| std::sync::atomic::AtomicU8::new(0))
+                .collect(),
             predicted: Arc::new(PredictedState::new(transaction_count, None)),
         }
     }
