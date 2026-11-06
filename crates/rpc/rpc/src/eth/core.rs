@@ -1958,4 +1958,136 @@ mod tests {
             );
         }
     }
+
+    #[tokio::test]
+    async fn legacy_gas_price_prices_blob_call() {
+        let sender = Address::repeat_byte(0x11);
+        let contract = Address::repeat_byte(0xaa);
+        let provider = MockEthProvider::default()
+            .with_chain_spec(ChainSpecBuilder::mainnet().cancun_activated().build());
+        provider.add_block(
+            B256::repeat_byte(0x42),
+            Block {
+                header: Header {
+                    number: 1,
+                    gas_limit: 30_000_000,
+                    base_fee_per_gas: Some(10),
+                    excess_blob_gas: Some(0),
+                    ..Default::default()
+                },
+                body: BlockBody::default(),
+            },
+        );
+        let api = build_test_eth_api(provider);
+        let state_override = StateOverride::from_iter([
+            (sender, AccountOverride { balance: Some(U256::MAX), ..Default::default() }),
+            (
+                contract,
+                AccountOverride {
+                    // Return GASPRICE.
+                    code: Some(Bytes::from_static(&[0x3a, 0x5f, 0x52, 0x60, 0x20, 0x5f, 0xf3])),
+                    ..Default::default()
+                },
+            ),
+        ]);
+
+        // A legacy gasPrice prices execution gas next to a blob fee cap, which alone prices none.
+        for (gas_price, expected) in [(Some(20), 20), (None, 0)] {
+            let request = TransactionRequest {
+                gas: Some(100_000),
+                gas_price,
+                max_fee_per_blob_gas: Some(5),
+                blob_versioned_hashes: Some(vec![B256::repeat_byte(1)]),
+                ..TransactionRequest::default().with_from(sender).with_to(contract)
+            };
+            let output = EthCall::call(
+                &api,
+                request,
+                Some(BlockId::latest()),
+                EvmOverrides::state(Some(state_override.clone())),
+            )
+            .await
+            .unwrap();
+            assert_eq!(U256::from_be_slice(&output), U256::from(expected));
+        }
+    }
+
+    #[tokio::test]
+    async fn blob_call_with_authorization_list_is_rejected() {
+        let sender = Address::repeat_byte(0x11);
+        let contract = Address::repeat_byte(0xaa);
+        let provider = MockEthProvider::default()
+            .with_chain_spec(ChainSpecBuilder::mainnet().prague_activated().build());
+        provider.add_block(
+            B256::repeat_byte(0x42),
+            Block {
+                header: Header {
+                    number: 1,
+                    gas_limit: 30_000_000,
+                    excess_blob_gas: Some(0),
+                    ..Default::default()
+                },
+                body: BlockBody::default(),
+            },
+        );
+        let api = build_test_eth_api(provider);
+        let state_override = StateOverride::from_iter([
+            (sender, AccountOverride { balance: Some(U256::MAX), ..Default::default() }),
+            (
+                contract,
+                AccountOverride {
+                    // Return BLOBHASH(0).
+                    code: Some(Bytes::from_static(&[
+                        0x5f, 0x49, 0x5f, 0x52, 0x60, 0x20, 0x5f, 0xf3,
+                    ])),
+                    ..Default::default()
+                },
+            ),
+        ]);
+        let authorization = Authorization {
+            chain_id: U256::from(1),
+            address: Address::repeat_byte(0xbb),
+            nonce: 0,
+        };
+        let signature =
+            sign_message(B256::repeat_byte(0x22), authorization.signature_hash()).unwrap();
+        let authorization = authorization.into_signed(signature);
+
+        // No transaction type carries both blobs and authorizations, so neither may be dropped.
+        for gas_price in [Some(20), None] {
+            let request = TransactionRequest {
+                gas: Some(100_000),
+                gas_price,
+                max_fee_per_blob_gas: Some(5),
+                blob_versioned_hashes: Some(vec![B256::repeat_byte(1)]),
+                ..TransactionRequest::default().with_from(sender).with_to(contract)
+            };
+            let call = |request| {
+                EthCall::call(
+                    &api,
+                    request,
+                    Some(BlockId::latest()),
+                    EvmOverrides::state(Some(state_override.clone())),
+                )
+            };
+            let output = call(request.clone()).await.unwrap();
+            assert_eq!(B256::from_slice(&output), B256::repeat_byte(1));
+
+            let err = call(TransactionRequest {
+                authorization_list: Some(vec![authorization.clone()]),
+                ..request
+            })
+            .await
+            .unwrap_err();
+            assert!(
+                matches!(
+                    err,
+                    EthApiError::InvalidTransaction(
+                        RpcInvalidTransactionError::AuthorizationListInvalidFields
+                    )
+                ),
+                "{err:?}"
+            );
+        }
+    }
 }
