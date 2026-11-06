@@ -2181,6 +2181,20 @@ pub(crate) fn np_phase(name: &'static str) {
     }
 }
 
+/// Per-block event trace (experiment only): time, event, two values.
+static NP_EVENTS: std::sync::Mutex<Vec<(Instant, &'static str, u64, u64)>> =
+    std::sync::Mutex::new(Vec::new());
+
+static NP_EVENTS_PATH: std::sync::LazyLock<Option<std::ffi::OsString>> =
+    std::sync::LazyLock::new(|| std::env::var_os("RETH_NP_EVENTS"));
+
+/// Records a trace event (experiment only).
+pub(crate) fn np_event(name: &'static str, a: u64, b: u64) {
+    if NP_EVENTS_PATH.is_some() {
+        NP_EVENTS.lock().unwrap().push((Instant::now(), name, a, b));
+    }
+}
+
 /// Records a newPayload phase boundary at a given instant (experiment only).
 pub(crate) fn np_phase_at(name: &'static str, at: Instant) {
     if *NP_PHASES_ENABLED {
@@ -2196,6 +2210,26 @@ pub(crate) fn np_phases_log(number: u64, gas: u64) {
     let mut phases = core::mem::take(&mut *NP_PHASES.lock().unwrap());
     phases.sort_by_key(|(_, at)| *at);
     let Some(&(_, start)) = phases.first() else { return };
+    if let Some(path) = &*NP_EVENTS_PATH {
+        use std::io::Write;
+        let events = core::mem::take(&mut *NP_EVENTS.lock().unwrap());
+        let mut out = format!("block {number} {gas}\n");
+        for (name, at) in &phases {
+            out.push_str(&format!(
+                "{} phase {name}\n",
+                at.saturating_duration_since(start).as_micros()
+            ));
+        }
+        for (at, name, a, b) in events {
+            out.push_str(&format!(
+                "{} {name} {a} {b}\n",
+                at.saturating_duration_since(start).as_micros()
+            ));
+        }
+        if let Ok(mut file) = std::fs::OpenOptions::new().create(true).append(true).open(path) {
+            let _ = file.write_all(out.as_bytes());
+        }
+    }
     let line = phases
         .iter()
         .map(|(name, at)| format!("{name}={}", at.duration_since(start).as_micros()))
