@@ -45,7 +45,7 @@ use std::{
     collections::BTreeMap,
     str::FromStr,
     sync::{
-        mpsc::{Receiver, Sender},
+        mpsc::{channel, Receiver, Sender},
         Arc,
     },
     time::Duration,
@@ -122,7 +122,6 @@ struct TestChannel<T> {
 impl<T: Send + 'static> TestChannel<T> {
     /// Creates a new test channel
     fn spawn_channel() -> (Sender<T>, Receiver<T>, TestChannelHandle) {
-        use std::sync::mpsc::channel;
         let (original_tx, original_rx) = channel();
         let (wrapped_tx, wrapped_rx) = channel();
         let (release_tx, release_rx) = channel();
@@ -186,7 +185,6 @@ impl TestHarness {
     }
 
     fn with_config(chain_spec: Arc<ChainSpec>, tree_config: TreeConfig) -> Self {
-        use std::sync::mpsc::channel;
         let (action_tx, action_rx) = channel();
         Self::with_persistence_channel_and_config(chain_spec, action_tx, action_rx, tree_config)
     }
@@ -2257,7 +2255,6 @@ fn test_validate_block_synchronous_strategy_during_persistence() {
     let mut test_harness = ValidatorTestHarness::new(MAINNET.clone());
 
     // Set up persistence action to force `Synchronous` strategy
-    use crate::tree::persistence_state::CurrentPersistenceAction;
     let persistence_action = CurrentPersistenceAction::SavingBlocks {
         highest: alloy_eips::NumHash::new(1, B256::random()),
     };

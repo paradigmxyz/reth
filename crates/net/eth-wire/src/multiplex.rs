@@ -972,7 +972,7 @@ impl ProtocolStream {
 
     /// Sends the message to the satellite stream.
     fn send_raw(&self, msg: BytesMut) -> Result<(), P2PStreamError> {
-        let msg = self.unmask_id(msg).map_err(P2PStreamError::from)?;
+        let msg = self.unmask_id(msg)?;
         self.to_satellite.try_send(msg)
     }
 }

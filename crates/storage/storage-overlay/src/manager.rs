@@ -308,7 +308,7 @@ impl<N: NodePrimitives> OverlayManager<N> {
         worker_pool.spawn(move || {
             let _span = tracing::trace_span!(
                 target: "storage::overlay::manager",
-                parent: parent_span,
+                parent: &parent_span,
                 "precompute_execution_overlay",
                 %tip_hash,
                 %anchor_hash,

@@ -1407,16 +1407,18 @@ impl<
 mod tests {
     use super::*;
     use crate::{eth::EthApi, EthApiBuilder};
+    use alloy_consensus::TxLegacy;
     use alloy_network::Ethereum;
     use alloy_primitives::{Bloom, FixedBytes};
     use rand::Rng;
     use reth_chainspec::{ChainSpec, ChainSpecProvider};
+    use reth_db_api::models::StoredBlockBodyIndices;
     use reth_ethereum_primitives::TxType;
     use reth_evm_ethereum::EthEvmConfig;
     use reth_network_api::noop::NoopNetwork;
     use reth_provider::test_utils::MockEthProvider;
     use reth_rpc_convert::RpcConverter;
-    use reth_rpc_eth_api::node::RpcNodeCoreAdapter;
+    use reth_rpc_eth_api::{helpers::SpawnBlocking, node::RpcNodeCoreAdapter};
     use reth_rpc_eth_types::receipt::EthReceiptConverter;
     use reth_tasks::Runtime;
     use reth_testing_utils::generators;
@@ -1923,8 +1925,6 @@ mod tests {
     async fn test_log_limit_retry_range_excludes_overflow_block() {
         let provider = MockEthProvider::default();
 
-        use alloy_consensus::TxLegacy;
-        use reth_db_api::models::StoredBlockBodyIndices;
         use reth_ethereum_primitives::{TransactionSigned, TxType};
 
         let tx_inner = TxLegacy {
@@ -2009,7 +2009,6 @@ mod tests {
         let mut prev_hash = alloy_primitives::B256::default();
 
         // Create a transaction for blocks that will have receipts
-        use alloy_consensus::TxLegacy;
         use reth_ethereum_primitives::{TransactionSigned, TxType};
 
         let tx_inner = TxLegacy {
@@ -2070,7 +2069,6 @@ mod tests {
         provider.add_receipts(103, vec![]);
 
         // Add block body indices for each block so receipts can be fetched
-        use reth_db_api::models::StoredBlockBodyIndices;
         provider
             .add_block_body_indices(100, StoredBlockBodyIndices { first_tx_num: 0, tx_count: 1 });
         provider
@@ -2107,8 +2105,6 @@ mod tests {
 
     #[tokio::test]
     async fn test_range_scan_waits_for_blocking_io_permit() {
-        use reth_rpc_eth_api::helpers::SpawnBlocking;
-
         let provider = MockEthProvider::default();
         let header = alloy_consensus::Header::default();
         provider.add_header(header.hash_slow(), header);
@@ -2139,9 +2135,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_range_scan_across_windows() {
-        use alloy_consensus::TxLegacy;
         use alloy_primitives::{Address, Bloom, Bytes, Log, LogData, Signature};
-        use reth_db_api::models::StoredBlockBodyIndices;
         use reth_ethereum_primitives::{Block, BlockBody, Receipt, TransactionSigned};
 
         let provider = MockEthProvider::default();

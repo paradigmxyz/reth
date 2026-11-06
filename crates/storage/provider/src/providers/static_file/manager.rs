@@ -3181,6 +3181,9 @@ mod tests {
 
     use super::StaticFileWriter;
     use crate::{providers::StaticFileProvider, BlockHashReader, StaticFileProviderBuilder};
+    use alloy_consensus::{SignableTransaction, TxLegacy};
+    use alloy_primitives::Signature;
+    use reth_db::{tables, transaction::DbTxMut};
 
     #[test]
     fn recovery_prunes_transaction_zero_at_empty_genesis() -> eyre::Result<()> {
@@ -3188,9 +3191,6 @@ mod tests {
             test_utils::create_test_provider_factory, StaticFileProviderFactory,
             TransactionsProvider,
         };
-        use alloy_consensus::{SignableTransaction, TxLegacy};
-        use alloy_primitives::Signature;
-        use reth_db::{tables, transaction::DbTxMut};
 
         let factory = create_test_provider_factory();
         let provider = factory.provider_rw()?;

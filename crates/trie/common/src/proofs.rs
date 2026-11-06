@@ -57,12 +57,10 @@ impl MultiProofTargets {
     /// i.e., the values that are in `self` but not in `other`.
     pub fn retain_difference(&mut self, other: &Self) {
         self.0.retain(|hashed_address, hashed_slots| {
-            if let Some(other_hashed_slots) = other.get(hashed_address) {
+            other.get(hashed_address).is_none_or(|other_hashed_slots| {
                 hashed_slots.retain(|hashed_slot| !other_hashed_slots.contains(hashed_slot));
                 !hashed_slots.is_empty()
-            } else {
-                true
-            }
+            })
         });
     }
 

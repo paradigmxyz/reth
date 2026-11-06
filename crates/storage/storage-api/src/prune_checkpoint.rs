@@ -13,6 +13,18 @@ pub trait PruneCheckpointReader: Send {
 
     /// Fetch all the prune checkpoints.
     fn get_prune_checkpoints(&self) -> ProviderResult<Vec<(PruneSegment, PruneCheckpoint)>>;
+
+    /// Fetch checkpoints for reporting data availability, accounting for data still retained in
+    /// other storage backends. This does not modify the stored checkpoints.
+    ///
+    /// The default returns the stored checkpoints. Implementations may lower their block and
+    /// transaction numbers when continuous coverage can be verified, preserving the prune mode.
+    /// Use [`Self::get_prune_checkpoints`] for pruning progress instead.
+    fn get_prune_checkpoints_for_availability(
+        &self,
+    ) -> ProviderResult<Vec<(PruneSegment, PruneCheckpoint)>> {
+        self.get_prune_checkpoints()
+    }
 }
 
 /// The trait for updating prune checkpoint related data.
