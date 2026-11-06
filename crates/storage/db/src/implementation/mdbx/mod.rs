@@ -783,7 +783,12 @@ impl DatabaseEnv {
             threads: threads.max(1),
         };
         let mut read = 0;
-        for table in tables {
+        // Experiment: tables whose leaves and overflow pages are read too.
+        let full = std::env::var("RETH_NP_WARM_TABLES").unwrap_or_default();
+        let full = full.split(',').filter(|t| !t.is_empty()).collect::<Vec<_>>();
+        for table in
+            tables.iter().copied().chain(full.iter().copied().filter(|t| !tables.contains(t)))
+        {
             let Some(tree) = txn
                 .get::<Vec<u8>>(main.dbi(), table.as_bytes())
                 .map_err(|e| DatabaseError::Read(e.into()))?
@@ -791,7 +796,15 @@ impl DatabaseEnv {
             else {
                 continue
             };
-            let leaves = pages.read_branches(&[tree], tree.dupsort, &mut read);
+            let whole = full.contains(&table);
+            let leaves = pages.read_branches(&[tree], tree.dupsort || whole, &mut read);
+            if whole {
+                let start = std::time::Instant::now();
+                let n = pages.read_leaves_and_overflow(&leaves);
+                read += n;
+                tracing::info!(target: "reth::cli", table, leaves = leaves.len(), pages = n, elapsed = ?start.elapsed(), "Read table leaves");
+                continue
+            }
             if !leaves.is_empty() {
                 read += leaves.len();
                 let nested = pages.read_nested_trees(&leaves);
@@ -889,6 +902,73 @@ impl PageReader {
             found.clear();
         }
         found
+    }
+
+    /// Reads the leaf pages `leaves` in runs of adjacent pages, and the overflow pages of their
+    /// large values, returning how many pages it read (experiment only).
+    fn read_leaves_and_overflow(&self, leaves: &[u32]) -> usize {
+        const RUN: u32 = 64;
+        const BIG: u8 = 0x01;
+        let mut sorted = leaves.to_vec();
+        sorted.sort_unstable();
+        let mut runs = Vec::new();
+        for &pgno in &sorted {
+            match runs.last_mut() {
+                Some((start, len)) if *start + *len == pgno && *len < RUN => *len += 1,
+                _ => runs.push((pgno, 1u32)),
+            }
+        }
+        let page_size = self.page_size;
+        let read_runs = |chunk: &[(u32, u32)]| {
+            let mut buf = vec![0; page_size * RUN as usize];
+            let mut overflow = Vec::new();
+            let mut pages = 0;
+            for &(start, len) in chunk {
+                let buf = &mut buf[..page_size * len as usize];
+                if read_at(&self.file, buf, start as u64 * page_size as u64).is_err() {
+                    continue
+                }
+                pages += len as usize;
+                for page in buf.chunks(page_size) {
+                    for node in Self::nodes(page, Self::LEAF) {
+                        let flags = page[node + 4];
+                        let key = u16::from_le_bytes([page[node + 6], page[node + 7]]) as usize;
+                        let value = node + Self::NODE_HEADER + key;
+                        if flags & BIG != 0 &&
+                            let Some(pgno) = page.get(value..value + 4)
+                        {
+                            overflow.push(u32::from_le_bytes([pgno[0], pgno[1], pgno[2], pgno[3]]));
+                        }
+                    }
+                }
+            }
+            // Overflow runs: the first page's header holds the run length.
+            let mut first = vec![0; page_size];
+            for pgno in overflow {
+                if read_at(&self.file, &mut first, pgno as u64 * page_size as u64).is_err() {
+                    continue
+                }
+                let count =
+                    u32::from_le_bytes([first[12], first[13], first[14], first[15]]).min(4096);
+                pages += 1;
+                if count > 1 {
+                    let mut rest = vec![0; page_size * (count as usize - 1)];
+                    if read_at(&self.file, &mut rest, (pgno as u64 + 1) * page_size as u64).is_ok()
+                    {
+                        pages += count as usize - 1;
+                    }
+                }
+            }
+            pages
+        };
+        std::thread::scope(|scope| {
+            runs.chunks(runs.len().div_ceil(self.threads).max(1))
+                .map(|chunk| scope.spawn(move || read_runs(chunk)))
+                .collect::<Vec<_>>()
+                .into_iter()
+                .map(|handle| handle.join().unwrap_or_default())
+                .sum()
+        })
     }
 
     /// Reads the leaf pages `leaves` and returns the trees of the duplicate sets they point to.
