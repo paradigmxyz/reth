@@ -8,7 +8,6 @@
 use alloy_primitives::{keccak256, Address, B256};
 use reth_db::{cursor::DbDupCursorRO, tables, transaction::DbTx};
 use reth_provider::{DBProvider, DatabaseProviderFactory, ProviderResult, StorageSettingsCache};
-use tracing::trace;
 
 /// Number of ranges of the hashed slot space scanned in parallel, each on its own thread and read
 /// transaction.
@@ -27,8 +26,9 @@ pub(crate) fn load_storage<F>(factory: &F, address: Address) -> usize
 where
     F: DatabaseProviderFactory<Provider: StorageSettingsCache> + Sync,
 {
+    let np_start = std::time::Instant::now();
     let slots = std::thread::scope(|scope| {
-        let ranges = (0..SCAN_RANGES)
+        let ranges = (0..np_ranges())
             .map(|range| {
                 std::thread::Builder::new()
                     .name(format!("storage-scan-{range:02}"))
@@ -41,7 +41,7 @@ where
             .map(|handle| handle.join().unwrap_or_default())
             .sum()
     });
-    trace!(target: "engine::tree::payload_processor::prewarm", %address, slots, "Loaded storage");
+    tracing::info!(target: "engine::np_scan", %address, slots, elapsed_us = np_start.elapsed().as_micros() as u64, "Loaded storage");
     slots
 }
 
@@ -50,8 +50,10 @@ fn scan_range<F>(factory: &F, address: Address, range: usize) -> ProviderResult<
 where
     F: DatabaseProviderFactory<Provider: StorageSettingsCache>,
 {
+    let n = np_ranges();
+    let max = np_max() / n;
     let (start, end) =
-        (range_start(range), (range + 1 < SCAN_RANGES).then(|| range_start(range + 1)));
+        (range_start_of(range, n), (range + 1 < n).then(|| range_start_of(range + 1, n)));
     let provider = factory.database_provider_ro()?;
     let tx = provider.tx_ref();
     let mut slots = 0;
@@ -60,7 +62,7 @@ where
         let mut entry = cursor.seek_by_key_subkey(keccak256(address), start)?;
         while let Some(slot) = entry &&
             end.is_none_or(|end| slot.key < end) &&
-            slots < MAX_RANGE_SLOTS
+            slots < max
         {
             slots += 1;
             entry = cursor.next_dup_val()?;
@@ -70,7 +72,7 @@ where
         let mut entry = cursor.seek_by_key_subkey(address, start)?;
         while let Some(slot) = entry &&
             end.is_none_or(|end| slot.key < end) &&
-            slots < MAX_RANGE_SLOTS
+            slots < max
         {
             slots += 1;
             entry = cursor.next_dup_val()?;
@@ -79,7 +81,24 @@ where
     Ok(slots)
 }
 
+fn np_ranges() -> usize {
+    std::env::var("RETH_NP_SCAN_RANGES").ok().and_then(|v| v.parse().ok()).unwrap_or(SCAN_RANGES)
+}
+fn np_max() -> usize {
+    std::env::var("RETH_NP_SCAN_MAX")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(SCAN_RANGES * MAX_RANGE_SLOTS)
+}
+fn range_start_of(range: usize, n: usize) -> B256 {
+    let mut start = B256::ZERO;
+    let prefix = (range * (usize::from(u16::MAX) + 1) / n) as u16;
+    start.0[..2].copy_from_slice(&prefix.to_be_bytes());
+    start
+}
+
 /// Returns the first slot of the `range`-th of [`SCAN_RANGES`] equal ranges of the slot space.
+#[allow(dead_code)]
 fn range_start(range: usize) -> B256 {
     let mut start = B256::ZERO;
     let prefix = (range * (usize::from(u16::MAX) + 1) / SCAN_RANGES) as u16;
