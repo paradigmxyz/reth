@@ -662,6 +662,17 @@ where
                 let np_t = Instant::now();
                 self.trie.calculate_subtries(self.new_epoch);
                 np_event(
+                    "t_subtries_split",
+                    reth_trie_sparse::NP_SUBTRIES[2].load(std::sync::atomic::Ordering::Relaxed) /
+                        1000 *
+                        1_000_000 +
+                        reth_trie_sparse::NP_SUBTRIES[3]
+                            .load(std::sync::atomic::Ordering::Relaxed) /
+                            1000,
+                    reth_trie_sparse::NP_SUBTRIES[4].load(std::sync::atomic::Ordering::Relaxed) /
+                        1000,
+                );
+                np_event(
                     "t_subtries",
                     np_us(np_t),
                     reth_trie_sparse::NP_SUBTRIES[0].load(std::sync::atomic::Ordering::Relaxed) *
