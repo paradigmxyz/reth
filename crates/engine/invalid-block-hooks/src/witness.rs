@@ -1,5 +1,7 @@
 use alloy_consensus::BlockHeader;
+use alloy_eips::BlockId;
 use alloy_primitives::{Address, B256, U256};
+use alloy_rpc_client::RpcClient;
 use alloy_rpc_types_debug::ExecutionWitness;
 use evm2::{bytecode::Bytecode, evm::AccountInfo};
 use pretty_assertions::Comparison;
@@ -8,7 +10,6 @@ use reth_evm::{database::StateProviderDatabase, ConfigureEvm, Executor};
 use reth_execution_types::BundleSource;
 use reth_primitives_traits::{NodePrimitives, RecoveredBlock, SealedHeader};
 use reth_provider::{BlockExecutionOutput, StateProvider, StateProviderFactory};
-use reth_rpc_api::DebugApiClient;
 use reth_trie::{
     bundle_state::{AccountInfoRevert, AccountStatus, BundleState, RevertToSlot, StorageSlot},
     updates::TrieUpdates,
@@ -118,7 +119,7 @@ pub struct InvalidBlockWitnessHook<P, E> {
     /// directory in case of failed sanity checks.
     output_directory: PathBuf,
     /// The healthy node client to compare the witness against.
-    healthy_node_client: Option<jsonrpsee::http_client::HttpClient>,
+    healthy_node_client: Option<RpcClient>,
 }
 
 impl<P, E> InvalidBlockWitnessHook<P, E> {
@@ -127,7 +128,7 @@ impl<P, E> InvalidBlockWitnessHook<P, E> {
         provider: P,
         evm_config: E,
         output_directory: PathBuf,
-        healthy_node_client: Option<jsonrpsee::http_client::HttpClient>,
+        healthy_node_client: Option<RpcClient>,
     ) -> Self {
         Self { provider, evm_config, output_directory, healthy_node_client }
     }
@@ -173,14 +174,10 @@ where
         let re_executed_witness_path = self.save_file(filename, witness)?;
 
         if let Some(healthy_node_client) = &self.healthy_node_client {
-            let healthy_node_witness = futures::executor::block_on(async move {
-                DebugApiClient::<()>::debug_execution_witness(
-                    healthy_node_client,
-                    block_number.into(),
-                    None,
-                )
-                .await
-            })?;
+            let healthy_node_witness: ExecutionWitness = futures::executor::block_on(
+                healthy_node_client
+                    .request("debug_executionWitness", (BlockId::from(block_number),)),
+            )?;
 
             let filename = format!("{}.witness.healthy.json", block_prefix);
             let healthy_path = self.save_file(filename, &healthy_node_witness)?;

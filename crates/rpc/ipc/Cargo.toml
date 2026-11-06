@@ -21,8 +21,7 @@ pin-project.workspace = true
 tower.workspace = true
 
 # misc
-jsonrpsee = { workspace = true, features = ["server", "client"] }
-serde_json.workspace = true
+jsonrpsee = { workspace = true, features = ["server"] }
 tracing.workspace = true
 bytes.workspace = true
 thiserror.workspace = true
@@ -34,3 +33,4 @@ tokio-stream = { workspace = true, features = ["sync"] }
 serde.workspace = true
 reth-tracing.workspace = true
 rand.workspace = true
+serde_json.workspace = true

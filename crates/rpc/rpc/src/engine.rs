@@ -38,7 +38,6 @@ impl<Eth, EthFilter> EngineEthApi<Eth, EthFilter> {
     }
 }
 
-#[async_trait::async_trait]
 impl<Eth, EthFilter>
     EngineEthApiServer<
         RpcTxReq<Eth::NetworkTypes>,

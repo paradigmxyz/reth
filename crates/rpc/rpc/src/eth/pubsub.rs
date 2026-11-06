@@ -218,7 +218,6 @@ where
     }
 }
 
-#[async_trait::async_trait]
 impl<Eth> EthPubSubApiServer<RpcTransaction<Eth::NetworkTypes>> for EthPubSub<Eth>
 where
     Eth: EthSubscriptions,

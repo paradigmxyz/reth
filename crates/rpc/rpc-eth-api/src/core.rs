@@ -51,8 +51,7 @@ impl<T> FullEthApiServer for T where
 }
 
 /// Eth rpc interface: <https://ethereum.github.io/execution-apis/api-documentation>
-#[cfg_attr(not(feature = "client"), rpc(server, namespace = "eth"))]
-#[cfg_attr(feature = "client", rpc(server, client, namespace = "eth"))]
+#[rpc(server, namespace = "eth")]
 pub trait EthApi<
     TxReq: RpcObject,
     T: RpcObject,
@@ -451,7 +450,6 @@ pub trait EthApi<
     async fn block_access_list_raw(&self, block: BlockId) -> RpcResult<Option<Bytes>>;
 }
 
-#[async_trait::async_trait]
 impl<T>
     EthApiServer<
         RpcTxReq<T::NetworkTypes>,

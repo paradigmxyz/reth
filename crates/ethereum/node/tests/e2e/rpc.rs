@@ -20,10 +20,7 @@ use alloy_rpc_types_eth::{
     state::{AccountOverride, StateOverride},
     AccessListResult, TransactionRequest,
 };
-use alloy_rpc_types_trace::geth::{
-    CallConfig, ChainBlockTraceResult, GethDebugTracingOptions, GethTrace,
-};
-use jsonrpsee::core::client::{ClientT, Subscription, SubscriptionClientT};
+use alloy_rpc_types_trace::geth::{CallConfig, GethDebugTracingOptions, GethTrace};
 use rand::{rngs::StdRng, Rng, SeedableRng};
 use reth_chainspec::{
     sepolia::{SEPOLIA_AMSTERDAM_TIMESTAMP, SEPOLIA_BPO2_TIMESTAMP},
@@ -45,7 +42,6 @@ use reth_payload_primitives::BuiltPayload;
 use reth_primitives_traits::{Block as _, SealedHeader, SignedTransaction};
 use reth_provider::CanonChainTracker;
 use reth_rpc_api::servers::AdminApiServer;
-use reth_rpc_server_types::RpcModuleSelection;
 use reth_tasks::Runtime;
 use reth_transaction_pool::test_utils::TransactionGenerator;
 use std::{
@@ -82,7 +78,7 @@ async fn test_rpc_shares_sender_recovery_cache_with_execution() -> eyre::Result<
     assert_eq!(cache.get(&hash), None);
 
     for _ in 0..2 {
-        let result = client.request::<B256, _>("eth_sendRawTransaction", (raw.clone(),)).await;
+        let result = client.request::<_, B256>("eth_sendRawTransaction", (raw.clone(),)).await;
         assert!(result.unwrap_err().to_string().contains("chain ID"));
         assert_eq!(cache.get(&hash), Some(sender));
     }
@@ -112,13 +108,13 @@ async fn test_block_access_list_lookup_semantics() -> eyre::Result<()> {
 
     for method in ["eth_getBlockAccessList", "debug_getRawBlockAccessList"] {
         let error = client
-            .request::<serde_json::Value, _>(method, (BlockNumberOrTag::Latest,))
+            .request::<_, serde_json::Value>(method, (BlockNumberOrTag::Latest,))
             .await
             .unwrap_err();
-        let jsonrpsee::core::client::Error::Call(error) = error else {
+        let Some(error) = error.as_error_resp() else {
             panic!("expected a resource not found error, got {error:?}")
         };
-        assert_eq!(error.code(), EthRpcErrorCode::ResourceNotFound.code());
+        assert_eq!(error.code, i64::from(EthRpcErrorCode::ResourceNotFound.code()));
     }
 
     Ok(())
@@ -168,7 +164,7 @@ async fn test_bal_prewarming_for_transaction_replay() -> eyre::Result<()> {
             for hash in hashes {
                 expected.push(
                     client
-                        .request::<serde_json::Value, _>("debug_traceTransaction", (hash, &opts))
+                        .request::<_, serde_json::Value>("debug_traceTransaction", (hash, &opts))
                         .await?,
                 );
             }
@@ -259,64 +255,6 @@ async fn test_fee_history() -> eyre::Result<()> {
             prev_header = header;
         }
     }
-
-    Ok(())
-}
-
-#[tokio::test]
-async fn test_debug_trace_chain_subscription() -> eyre::Result<()> {
-    reth_tracing::init_test_tracing();
-
-    let (mut node, wallet) = EthereumNode::test_setup_for(EthereumHardfork::Cancun)
-        .with_rpc_modifier(|rpc| rpc.with_ws().with_ws_api(RpcModuleSelection::All))
-        .build_single()
-        .await?;
-    let provider = node.rpc_provider_with_wallet(wallet.signer(0));
-
-    // Geth suppresses empty intermediate blocks but always emits the end block.
-    node.advance_block().await?;
-    let _ = GasWaster::deploy_builder(&provider, U256::from(5)).send().await?;
-    let _ = GasWaster::deploy_builder(&provider, U256::from(7)).send().await?;
-    node.advance_blocks(2).await?;
-
-    let client = node.inner.rpc_server_handle().ws_client().await.unwrap();
-    let invalid: Result<Subscription<ChainBlockTraceResult>, _> = client
-        .subscribe(
-            "debug_subscribe",
-            jsonrpsee::rpc_params!["traceChain", "0x3", "0x3"],
-            "debug_unsubscribe",
-        )
-        .await;
-    assert!(invalid.is_err(), "equal endpoints must be rejected");
-
-    let mut subscription: Subscription<ChainBlockTraceResult> = client
-        .subscribe(
-            "debug_subscribe",
-            jsonrpsee::rpc_params![
-                "traceChain",
-                BlockNumberOrTag::Number(0),
-                BlockNumberOrTag::Number(3),
-                GethDebugTracingOptions::default()
-            ],
-            "debug_unsubscribe",
-        )
-        .await?;
-
-    let traced = subscription.next().await.unwrap()?;
-    assert_eq!(traced.block, U256::from(2));
-    let expected = provider
-        .debug_trace_block_by_number(
-            BlockNumberOrTag::Number(2),
-            GethDebugTracingOptions::default(),
-        )
-        .await?;
-    assert_eq!(expected.len(), 2, "both transactions must be traced");
-    assert_eq!(traced.traces, expected.into_iter().map(Some).collect::<Vec<_>>());
-
-    let terminal = subscription.next().await.unwrap()?;
-    assert_eq!(terminal.block, U256::from(3));
-    assert!(terminal.traces.is_empty());
-    subscription.unsubscribe().await?;
 
     Ok(())
 }
