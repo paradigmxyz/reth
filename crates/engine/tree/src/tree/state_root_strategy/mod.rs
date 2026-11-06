@@ -670,8 +670,22 @@ impl DefaultStateRootStrategy {
                 );
                 let default_trie =
                     RevealableSparseTrie::blind_from(ArenaParallelSparseTrie::default());
+                let accounts_trie = match std::env::var("RETH_NP_MIN_DIRTY")
+                    .ok()
+                    .and_then(|value| value.parse::<u64>().ok())
+                {
+                    Some(min_dirty_leaves) => RevealableSparseTrie::blind_from(
+                        ArenaParallelSparseTrie::default().with_parallelism_thresholds(
+                            reth_trie_sparse::ArenaParallelismThresholds {
+                                min_dirty_leaves,
+                                ..Default::default()
+                            },
+                        ),
+                    ),
+                    None => default_trie.clone(),
+                };
                 SparseStateTrie::default()
-                    .with_accounts_trie(default_trie.clone())
+                    .with_accounts_trie(accounts_trie)
                     .with_default_storage_trie(default_trie)
                     .with_updates(true)
             };
