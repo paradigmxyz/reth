@@ -781,7 +781,7 @@ impl DefaultStateRootStrategy {
                 let changed = task.changed_storage_tries().copied().collect::<Vec<_>>();
                 let (mut trie, deferred) = task.into_trie_for_reuse();
                 trie.update_storage_roots(&mut storage_roots, &changed, new_epoch);
-                if let Some((prune_before, _)) = prune_target {
+                if let Some((prune_before, _)) = prune_target.filter(|_| false) {
                     let prune_start = Instant::now();
                     trie.prune(prune_before);
                     storage_roots.retain(|address, _| trie.storage_trie_ref(address).is_some());
