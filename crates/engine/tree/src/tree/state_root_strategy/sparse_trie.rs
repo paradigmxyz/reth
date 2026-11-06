@@ -41,6 +41,9 @@ use tracing::{debug, debug_span, error, instrument, trace_span};
 pub(crate) static NP_TRIE: [std::sync::atomic::AtomicU64; 14] =
     [const { std::sync::atomic::AtomicU64::new(0) }; 14];
 static NP_FINISHED: std::sync::Mutex<Option<Instant>> = std::sync::Mutex::new(None);
+static NP_EAGER_HINTS: std::sync::LazyLock<usize> = std::sync::LazyLock::new(|| {
+    std::env::var("RETH_NP_EAGER_HINTS").ok().and_then(|v| v.parse().ok()).unwrap_or(0)
+});
 static NP_APPLY_EVERY: std::sync::LazyLock<usize> = std::sync::LazyLock::new(|| {
     std::env::var("RETH_NP_APPLY_EVERY").ok().and_then(|v| v.parse().ok()).unwrap_or(0)
 });
@@ -160,6 +163,10 @@ pub(super) struct SparseTrieCacheTask<A = ArenaParallelSparseTrie, S = ArenaPara
     new_account_updates: B256Map<LeafUpdate>,
     /// Storage updates that are buffered but were not yet applied to the trie.
     new_storage_updates: B256Map<B256Map<LeafUpdate>>,
+    /// Prefetch hints buffered apart from updates (experiment only).
+    new_account_hints: B256Map<LeafUpdate>,
+    new_storage_hints: B256Map<B256Map<LeafUpdate>>,
+    hint_messages: usize,
     /// Account updates that are blocked by storage root calculation or account reveal.
     ///
     /// Those are being moved into `account_updates` once storage roots
@@ -270,6 +277,9 @@ where
             account_updates: Default::default(),
             new_account_updates: Default::default(),
             new_storage_updates: Default::default(),
+            new_account_hints: Default::default(),
+            new_storage_hints: Default::default(),
+            hint_messages: 0,
             pending_account_updates: Default::default(),
             fetched_account_targets: Default::default(),
             account_rlp_buf: Vec::with_capacity(TRIE_ACCOUNT_RLP_MAX_SIZE),
@@ -636,6 +646,10 @@ where
             self.process_new_updates()?;
             self.metrics.sparse_trie_process_updates_duration_histogram.record(t.elapsed());
             self.dispatch_pending_targets()?;
+        } else if *NP_EAGER_HINTS > 0 && self.hint_messages >= *NP_EAGER_HINTS {
+            self.apply_new_hints()?;
+            self.run_ready_storage_work()?;
+            self.dispatch_pending_targets()?;
         } else if *NP_APPLY_EVERY > 0 && self.pending_updates >= *NP_APPLY_EVERY {
             let t = Instant::now();
             self.process_new_updates()?;
@@ -677,6 +691,22 @@ where
         skip_all
     )]
     fn on_prewarm_targets(&mut self, targets: MultiProofTargetsV2) {
+        if *NP_EAGER_HINTS > 0 && !self.finished_state_updates {
+            for target in targets.account_targets {
+                self.new_account_hints.entry(target.key()).or_insert(LeafUpdate::Touched);
+            }
+            for (address, slots) in targets.storage_targets {
+                if !slots.is_empty() {
+                    let hints = self.new_storage_hints.entry(address).or_default();
+                    for slot in slots {
+                        hints.entry(slot.key()).or_insert(LeafUpdate::Touched);
+                    }
+                }
+                self.new_account_hints.entry(address).or_insert(LeafUpdate::Touched);
+            }
+            self.hint_messages += 1;
+            return
+        }
         for target in targets.account_targets {
             // Only touch accounts that are not yet present in the updates set.
             self.new_account_updates.entry(target.key()).or_insert(LeafUpdate::Touched);
@@ -815,6 +845,7 @@ where
 
     /// Applies new account updates and queues new storage updates on their address' entry.
     fn apply_new_updates(&mut self) -> SparseTrieResult<()> {
+        self.apply_new_hints()?;
         if self.pending_updates == 0 {
             return Ok(());
         }
@@ -859,6 +890,36 @@ where
             }
         }
 
+        Ok(())
+    }
+
+    /// Applies buffered prefetch hints (experiment only): touches go ahead of the updates.
+    fn apply_new_hints(&mut self) -> SparseTrieResult<()> {
+        self.hint_messages = 0;
+        if self.new_account_hints.is_empty() && self.new_storage_hints.is_empty() {
+            return Ok(())
+        }
+        let Self { storage, trie, new_storage_hints, .. } = self;
+        for (address, new) in new_storage_hints.drain() {
+            if new.is_empty() {
+                continue;
+            }
+            let state = storage.entry(address).or_insert_with(|| {
+                StorageTrieState::Idle(Box::new(StorageTrieWork::new(
+                    trie.take_or_create_storage_trie(&address),
+                )))
+            });
+            match state {
+                StorageTrieState::Idle(work) => work.queue_updates(new),
+                StorageTrieState::InFlight(in_flight) => {
+                    merge_leaf_updates(&mut in_flight.updates, new)
+                }
+            }
+        }
+        for (address, new) in self.new_account_hints.drain() {
+            self.account_updates.entry(address).or_insert(new);
+        }
+        self.process_account_leaf_updates(true)?;
         Ok(())
     }
 
