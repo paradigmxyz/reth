@@ -41,6 +41,8 @@ use tracing::{debug, debug_span, error, instrument, trace_span};
 pub(crate) static NP_TRIE: [std::sync::atomic::AtomicU64; 14] =
     [const { std::sync::atomic::AtomicU64::new(0) }; 14];
 static NP_FINISHED: std::sync::Mutex<Option<Instant>> = std::sync::Mutex::new(None);
+static NP_EAGER_REMOVALS: std::sync::LazyLock<bool> =
+    std::sync::LazyLock::new(|| std::env::var_os("RETH_NP_EAGER_REMOVALS").is_some());
 static NP_EAGER_HINTS: std::sync::LazyLock<usize> = std::sync::LazyLock::new(|| {
     std::env::var("RETH_NP_EAGER_HINTS").ok().and_then(|v| v.parse().ok()).unwrap_or(0)
 });
@@ -163,6 +165,8 @@ pub(super) struct SparseTrieCacheTask<A = ArenaParallelSparseTrie, S = ArenaPara
     new_account_updates: B256Map<LeafUpdate>,
     /// Storage updates that are buffered but were not yet applied to the trie.
     new_storage_updates: B256Map<B256Map<LeafUpdate>>,
+    /// Storage tries with a buffered removal (experiment only).
+    removed_storages: alloy_primitives::map::B256Set,
     /// Prefetch hints buffered apart from updates (experiment only).
     new_account_hints: B256Map<LeafUpdate>,
     new_storage_hints: B256Map<B256Map<LeafUpdate>>,
@@ -277,6 +281,7 @@ where
             account_updates: Default::default(),
             new_account_updates: Default::default(),
             new_storage_updates: Default::default(),
+            removed_storages: Default::default(),
             new_account_hints: Default::default(),
             new_storage_hints: Default::default(),
             hint_messages: 0,
@@ -647,6 +652,9 @@ where
             self.process_new_updates()?;
             self.metrics.sparse_trie_process_updates_duration_histogram.record(t.elapsed());
             self.dispatch_pending_targets()?;
+        } else if !self.removed_storages.is_empty() {
+            self.apply_removals()?;
+            self.dispatch_pending_targets()?;
         } else if *NP_EAGER_HINTS > 0 && self.hint_messages >= *NP_EAGER_HINTS {
             self.apply_new_hints()?;
             self.run_ready_storage_work()?;
@@ -789,7 +797,37 @@ where
             self.pending_account_updates.insert(address, Some(account.clone()));
         }
 
+        if *NP_EAGER_REMOVALS && !self.finished_state_updates {
+            for (&address, storage) in &hashed_state_update.storages {
+                if storage.storage.values().any(|value| value.is_zero()) {
+                    self.removed_storages.insert(address);
+                }
+            }
+        }
         self.final_hashed_state.extend(hashed_state_update);
+    }
+
+    /// Applies the buffered updates of storage tries that got a removal (experiment only).
+    fn apply_removals(&mut self) -> SparseTrieResult<()> {
+        if self.removed_storages.is_empty() {
+            return Ok(())
+        }
+        let Self { storage, trie, new_storage_updates, removed_storages, .. } = self;
+        for address in removed_storages.drain() {
+            let Some(new) = new_storage_updates.remove(&address) else { continue };
+            let state = storage.entry(address).or_insert_with(|| {
+                StorageTrieState::Idle(Box::new(StorageTrieWork::new(
+                    trie.take_or_create_storage_trie(&address),
+                )))
+            });
+            match state {
+                StorageTrieState::Idle(work) => work.queue_updates(new),
+                StorageTrieState::InFlight(in_flight) => {
+                    merge_leaf_updates(&mut in_flight.updates, new)
+                }
+            }
+        }
+        self.run_ready_storage_work()
     }
 
     fn on_proofs(&mut self, proofs: DecodedMultiProofV2) -> Result<(), StateRootTaskError> {
