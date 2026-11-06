@@ -352,6 +352,7 @@ where
                         ctx.metrics.seeded_transactions.increment(1);
                     }
                     queue.push(index, tx, seeded);
+                    crate::tree::payload_validator::np_event("s_push", index as u64, 0);
                     results.wake(false);
                 }
                 queue.close();
@@ -503,6 +504,7 @@ where
         while !ctx.should_stop() {
             if let Some((index, (tx, seeded))) = queue.claim() {
                 if let Some(_speculation) = results.begin_speculation(index) {
+                    crate::tree::payload_validator::np_event("s_start", index as u64, 0);
                     Self::transact_worker(
                         ctx,
                         pool,
@@ -511,6 +513,7 @@ where
                         seeded.clone(),
                         state_root_hint_stream,
                     );
+                    crate::tree::payload_validator::np_event("s_done", index as u64, 0);
                 }
                 idle = 0;
                 continue
@@ -529,7 +532,9 @@ where
                 if index > ctx.executed_tx_index.load(Ordering::Relaxed) &&
                     results.needs_refresh(index)
                 {
+                    crate::tree::payload_validator::np_event("s_rstart", index as u64, 0);
                     Self::transact_worker(ctx, pool, index, tx.clone(), None, None);
+                    crate::tree::payload_validator::np_event("s_rdone", index as u64, 0);
                     refreshed = true;
                 }
                 drop(speculation);

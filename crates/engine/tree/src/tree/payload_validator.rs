@@ -1283,6 +1283,7 @@ where
             match prewarm_results {
                 Some(results) => {
                     let np_start = Instant::now();
+                    np_event("c_at", index as u64, 0);
                     let mut outcome =
                         self.commit_prewarm_result(executor, results, index, tx.tx())?;
                     let mut np_raced = false;
@@ -1301,6 +1302,7 @@ where
                         }
                         NP_COMMIT[1]
                             .fetch_add(wait_start.elapsed().as_micros() as u64, Ordering::Relaxed);
+                        np_event("c_wait", index as u64, wait_start.elapsed().as_micros() as u64);
                         outcome = self.commit_prewarm_result(executor, results, index, tx.tx())?;
                         np_raced = outcome.is_err();
                     }
@@ -1318,6 +1320,7 @@ where
                         };
                         NP_COMMIT[slot].fetch_add(1, Ordering::Relaxed);
                         NP_COMMIT[slot + 1].fetch_add(us, Ordering::Relaxed);
+                        np_event("c_exec", index as u64, slot as u64 * 1_000_000 + us);
                     } else {
                         NP_COMMIT[0]
                             .fetch_add(np_start.elapsed().as_micros() as u64, Ordering::Relaxed);
