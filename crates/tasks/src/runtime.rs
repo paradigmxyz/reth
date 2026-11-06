@@ -1166,8 +1166,9 @@ fn physical_core_count() -> Option<usize> {
     // SAFETY: an all-zero `cpu_set_t` is a valid empty set.
     let mut allowed: libc::cpu_set_t = unsafe { core::mem::zeroed() };
     // SAFETY: `allowed` is a valid set of the size passed.
-    if unsafe { libc::sched_getaffinity(0, core::mem::size_of::<libc::cpu_set_t>(), &mut allowed) } !=
-        0
+    if unsafe {
+        libc::sched_getaffinity(0, core::mem::size_of::<libc::cpu_set_t>(), &raw mut allowed)
+    } != 0
     {
         return None
     }
