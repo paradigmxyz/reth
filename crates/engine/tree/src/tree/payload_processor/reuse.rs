@@ -87,6 +87,17 @@ pub(crate) struct PrewarmResults<T: EvmTypes> {
     predicted: Arc<PredictedState>,
 }
 
+/// Marks a transaction as no longer executed by a prewarm worker when dropped, also when the
+/// worker panics, so that block execution waiting for its result does not wait forever.
+#[derive(Debug)]
+pub(super) struct SpeculationGuard<'a>(&'a AtomicBool);
+
+impl Drop for SpeculationGuard<'_> {
+    fn drop(&mut self) {
+        self.0.store(false, Ordering::Release);
+    }
+}
+
 /// Prewarm state of a transaction in [`PrewarmResults`].
 #[derive_where(Debug)]
 enum ResultSlot<T: EvmTypes> {
@@ -128,17 +139,11 @@ impl<T: EvmTypes> PrewarmResults<T> {
         self.slots.len()
     }
 
-    /// Marks the transaction at `index` as being executed by a prewarm worker, returning `false`
-    /// if another worker already is.
-    pub(super) fn begin_speculation(&self, index: usize) -> bool {
-        self.speculating.get(index).is_some_and(|flag| !flag.swap(true, Ordering::AcqRel))
-    }
-
-    /// Marks the transaction at `index` as no longer being executed by a prewarm worker.
-    pub(super) fn end_speculation(&self, index: usize) {
-        if let Some(flag) = self.speculating.get(index) {
-            flag.store(false, Ordering::Release);
-        }
+    /// Marks the transaction at `index` as being executed by a prewarm worker until the returned
+    /// guard is dropped, or returns `None` if another worker already is.
+    pub(super) fn begin_speculation(&self, index: usize) -> Option<SpeculationGuard<'_>> {
+        let flag = self.speculating.get(index)?;
+        (!flag.swap(true, Ordering::AcqRel)).then_some(SpeculationGuard(flag))
     }
 
     /// Returns whether a prewarm worker is executing the transaction at `index`.
@@ -2068,6 +2073,25 @@ mod tests {
             sender(1),
         );
         assert_eq!(reusable(&[overflowing]), Err(ReuseMiss::Stale));
+    }
+
+    #[test]
+    fn speculation_ends_when_its_guard_drops() {
+        let results = Results::new(1);
+        let speculation = results.begin_speculation(0).unwrap();
+        assert!(results.is_speculating(0));
+        assert!(results.begin_speculation(0).is_none());
+        drop(speculation);
+        assert!(!results.is_speculating(0));
+
+        // A worker that panics ends its speculation, so block execution does not wait forever.
+        let panicked = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _speculation = results.begin_speculation(0).unwrap();
+            panic!("worker panicked");
+        }));
+        assert!(panicked.is_err());
+        assert!(!results.is_speculating(0));
+        assert!(results.begin_speculation(1).is_none());
     }
 
     #[test]
