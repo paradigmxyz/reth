@@ -772,9 +772,13 @@ impl DefaultStateRootStrategy {
                 let changed = task.changed_storage_tries().copied().collect::<Vec<_>>();
                 let (mut trie, deferred) = task.into_trie_for_reuse();
                 trie.update_storage_roots(&mut storage_roots, &changed, new_epoch);
+                // The next block's state root waits for this, and pruning the whole trie at once
+                // took 15-20 ms on mainnet, so every block prunes one part of it.
                 if let Some((prune_before, _)) = prune_target {
-                    let prune_start = Instant::now();
-                    trie.prune(prune_before);
+                    trie.schedule_prune(prune_before);
+                }
+                let prune_start = Instant::now();
+                if trie.prune_scheduled() {
                     storage_roots.retain(|address, _| trie.storage_trie_ref(address).is_some());
                     trie_metrics
                         .sparse_trie_prune_duration_histogram

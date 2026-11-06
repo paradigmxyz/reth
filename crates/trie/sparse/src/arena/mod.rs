@@ -2460,7 +2460,7 @@ impl SparseTrie for ArenaParallelSparseTrie {
         skip_all,
         fields(prune_before = prune_before.get()),
     )]
-    fn prune(&mut self, prune_before: TrieNodeEpoch) -> usize {
+    fn prune_under(&mut self, prune_before: TrieNodeEpoch, first_nibbles: TrieMask) -> usize {
         assert!(self.root_epoch().is_some(), "prune cannot run on a dirty trie");
 
         // Only descend if the root is a branch; otherwise there are no subtries.
@@ -2493,6 +2493,9 @@ impl SparseTrie for ArenaParallelSparseTrie {
             }
 
             let head_idx = cursor.head().expect("cursor is non-empty").index;
+            if cursor.head_path().first().is_some_and(|nibble| !first_nibbles.is_bit_set(nibble)) {
+                continue;
+            }
 
             match &self.upper_arena[head_idx] {
                 ArenaSparseNode::Branch(_) | ArenaSparseNode::Leaf { .. } => {

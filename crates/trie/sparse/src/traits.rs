@@ -7,7 +7,7 @@ use alloy_primitives::{
     map::{B256Map, HashMap, HashSet},
     B256,
 };
-use alloy_trie::BranchNodeCompact;
+use alloy_trie::{BranchNodeCompact, TrieMask};
 use reth_execution_errors::SparseTrieResult;
 use reth_trie_common::{
     BranchNodeMasks, Nibbles, ProofTrieNodeV2, ProofV2TargetParent, TrieNodeV2,
@@ -222,7 +222,13 @@ pub trait SparseTrie: Sized + Debug + Send + Sync {
     /// # Returns
     ///
     /// The number of nodes converted to hash stubs.
-    fn prune(&mut self, prune_before: TrieNodeEpoch) -> usize;
+    fn prune(&mut self, prune_before: TrieNodeEpoch) -> usize {
+        self.prune_under(prune_before, TrieMask::new(u16::MAX))
+    }
+
+    /// Like [`Self::prune`], but only collapses nodes whose path starts with a nibble set in
+    /// `first_nibbles`, leaving the rest of the trie as it is.
+    fn prune_under(&mut self, prune_before: TrieNodeEpoch, first_nibbles: TrieMask) -> usize;
 
     /// Applies leaf updates to the sparse trie.
     ///

@@ -4,6 +4,7 @@ use crate::{
 };
 use alloc::vec::Vec;
 use alloy_primitives::{map::B256Map, B256};
+use alloy_trie::TrieMask;
 use either::Either;
 #[cfg(feature = "std")]
 use rayon::iter::IntoParallelRefMutIterator;
@@ -44,6 +45,9 @@ pub struct SparseStateTrie<
     retain_updates: bool,
     /// Holds data that should be dropped after final state root is calculated.
     deferred_drops: DeferredDrops,
+    /// Prune scheduled by [`Self::schedule_prune`] that [`Self::prune_scheduled`] has not
+    /// finished yet.
+    scheduled_prune: Option<ScheduledPrune>,
     /// Metrics for the sparse state trie.
     #[cfg(feature = "metrics")]
     metrics: crate::metrics::SparseStateTrieMetrics,
@@ -60,6 +64,7 @@ where
             storage: Default::default(),
             retain_updates: false,
             deferred_drops: DeferredDrops::default(),
+            scheduled_prune: None,
             #[cfg(feature = "metrics")]
             metrics: Default::default(),
         }
@@ -537,6 +542,7 @@ where
     pub fn clear(&mut self) {
         self.state.clear();
         self.storage.clear();
+        self.scheduled_prune = None;
     }
 
     /// Returns the number of storage tries currently retained (active + cleared).
@@ -554,13 +560,55 @@ where
     /// `storage_root()` for their current state. Unmodified storage roots revealed only by
     /// prewarming are treated as epoch zero.
     #[cfg(feature = "std")]
+    pub fn prune(&mut self, prune_before: TrieNodeEpoch) {
+        self.prune_under(prune_before, TrieMask::new(u16::MAX));
+    }
+
+    /// Schedules pruning account and storage trie nodes last modified before `prune_before`,
+    /// replacing a scheduled prune that is not finished yet.
+    ///
+    /// [`Self::prune_scheduled`] carries it out a sixteenth of the trie per call, so that no single
+    /// call walks the whole trie. Until the last part has run, the rest of the trie keeps nodes
+    /// that [`Self::prune`] would already have removed.
+    pub fn schedule_prune(&mut self, prune_before: TrieNodeEpoch) {
+        // A replaced prune continues with the part after the last pruned one, so that a prune
+        // replaced every few calls still reaches every part.
+        let next_nibble = self.scheduled_prune.map_or(0, |scheduled| scheduled.next_nibble);
+        self.scheduled_prune =
+            Some(ScheduledPrune { prune_before, remaining: TrieMask::new(u16::MAX), next_nibble });
+    }
+
+    /// Prunes the next part of the prune scheduled by [`Self::schedule_prune`]: the account trie
+    /// paths and the hashed addresses of storage tries that start with the next nibble.
+    ///
+    /// Returns `false` if no prune is scheduled.
+    ///
+    /// # Preconditions
+    ///
+    /// The same as for [`Self::prune`].
+    #[cfg(feature = "std")]
+    pub fn prune_scheduled(&mut self) -> bool {
+        let Some(scheduled) = &mut self.scheduled_prune else { return false };
+        let (prune_before, nibble) = (scheduled.prune_before, scheduled.next_nibble);
+        scheduled.remaining.unset_bit(nibble);
+        scheduled.next_nibble = (nibble + 1) % 16;
+        if scheduled.remaining.is_empty() {
+            self.scheduled_prune = None;
+        }
+        self.prune_under(prune_before, TrieMask::from_nibble(nibble));
+        true
+    }
+
+    /// Prunes account trie nodes whose path, and storage tries whose hashed address, starts with
+    /// a nibble set in `first_nibbles`, see [`Self::prune`].
+    #[cfg(feature = "std")]
     #[instrument(
         level = "debug",
         name = "SparseStateTrie::prune",
         target = "trie::sparse",
         skip_all
     )]
-    pub fn prune(&mut self, prune_before: TrieNodeEpoch) {
+    fn prune_under(&mut self, prune_before: TrieNodeEpoch, first_nibbles: TrieMask) {
         let total_storage_tries_before = self.storage.tries.len();
 
         let parent_span = tracing::Span::current();
@@ -578,20 +626,35 @@ where
                 )
                 .entered();
 
-                self.state.as_revealed_mut().map(|trie| trie.prune(prune_before)).unwrap_or(0)
+                self.state
+                    .as_revealed_mut()
+                    .map(|trie| trie.prune_under(prune_before, first_nibbles))
+                    .unwrap_or(0)
             },
-            || self.storage.prune(prune_before, &parent_span),
+            || self.storage.prune(prune_before, first_nibbles, &parent_span),
         );
 
         debug!(
             target: "trie::sparse",
             prune_before = prune_before.get(),
+            ?first_nibbles,
             account_nodes_pruned,
             storage_tries_evicted,
             storage_tries_after = total_storage_tries_before - storage_tries_evicted,
             "SparseStateTrie::prune completed"
         );
     }
+}
+
+/// A prune scheduled by [`SparseStateTrie::schedule_prune`].
+#[derive(Debug, Clone, Copy)]
+struct ScheduledPrune {
+    /// Nodes last modified before this epoch are pruned.
+    prune_before: TrieNodeEpoch,
+    /// First nibbles of the parts not pruned with `prune_before` yet.
+    remaining: TrieMask,
+    /// First nibble of the part the next call prunes.
+    next_nibble: u8,
 }
 
 /// The fields of [`SparseStateTrie`] related to storage tries. This is kept separate from the rest
@@ -608,11 +671,18 @@ struct StorageTries<S = ArenaParallelSparseTrie> {
 
 #[cfg(feature = "std")]
 impl<S: SparseTrieTrait> StorageTries<S> {
-    /// Prunes storage tries by epoch, returning fully old tries to the reuse pool.
-    fn prune(&mut self, prune_before: TrieNodeEpoch, parent_span: &tracing::Span) -> usize {
+    /// Prunes the storage tries whose hashed address starts with a nibble set in
+    /// `first_nibbles` by epoch, returning fully old tries to the reuse pool.
+    fn prune(
+        &mut self,
+        prune_before: TrieNodeEpoch,
+        first_nibbles: TrieMask,
+        parent_span: &tracing::Span,
+    ) -> usize {
         let addresses_to_evict: Vec<B256> = self
             .tries
             .par_iter_mut()
+            .filter(|(address, _)| first_nibbles.is_bit_set(address[0] >> 4))
             .filter_map(|(address, trie)| {
                 let hashed_address = Some(*address);
                 let _span = tracing::trace_span!(
@@ -841,19 +911,21 @@ mod tests {
             .is_none());
     }
 
-    #[test]
-    fn prune_uses_epochs_for_account_and_storage_tries() {
+    const PRUNE_ACCOUNT: B256 = B256::ZERO;
+    const PRUNE_OLD_ACCOUNT: B256 =
+        b256!("0x1000000000000000000000000000000000000000000000000000000000000000");
+    const PRUNE_PREWARMED_ACCOUNT: B256 =
+        b256!("0x2000000000000000000000000000000000000000000000000000000000000000");
+
+    /// Returns a hashed trie whose account at path `0x0` and its storage were modified at epoch
+    /// 10, while the account at `0x1` and the storage tries of `0x1` and `0x2` are older.
+    fn trie_with_old_parts() -> SparseStateTrie<ArenaParallelSparseTrie> {
         let mut sparse = SparseStateTrie::<ArenaParallelSparseTrie>::default();
 
-        let account = B256::ZERO;
-        let old_account =
-            b256!("0x1000000000000000000000000000000000000000000000000000000000000000");
-        let prewarmed_account =
-            b256!("0x2000000000000000000000000000000000000000000000000000000000000000");
+        let account = PRUNE_ACCOUNT;
+        let old_account = PRUNE_OLD_ACCOUNT;
+        let prewarmed_account = PRUNE_PREWARMED_ACCOUNT;
         let slot = B256::ZERO;
-        let account_path = leaf_key([0x0], 64);
-        let old_account_path = leaf_key([0x1], 64);
-        let storage_path = leaf_key([0x0], 64);
 
         let leaf_value = alloy_rlp::encode(TrieAccount::default());
         let leaf_0 = alloy_rlp::encode(TrieNodeV2::Leaf(LeafNode::new(
@@ -940,6 +1012,19 @@ mod tests {
             account,
             LeafUpdate::Changed(alloy_rlp::encode(trie_account)),
         );
+        sparse.root(epoch(10)).unwrap();
+        sparse
+    }
+
+    #[test]
+    fn prune_uses_epochs_for_account_and_storage_tries() {
+        let mut sparse = trie_with_old_parts();
+        let (account, old_account, prewarmed_account) =
+            (PRUNE_ACCOUNT, PRUNE_OLD_ACCOUNT, PRUNE_PREWARMED_ACCOUNT);
+        let account_path = leaf_key([0x0], 64);
+        let old_account_path = leaf_key([0x1], 64);
+        let storage_path = leaf_key([0x0], 64);
+
         let root_before = sparse.root(epoch(10)).unwrap();
         sparse.prune(epoch(10));
 
@@ -964,6 +1049,45 @@ mod tests {
         sparse.prune(epoch(11));
         assert!(sparse.storage_trie_ref(&account).is_none());
         assert_eq!(sparse.root(epoch(11)).unwrap(), root_before);
+    }
+
+    #[test]
+    fn scheduled_prune_covers_one_first_nibble_per_call() {
+        let mut sparse = trie_with_old_parts();
+        let old_account_path = leaf_key([0x1], 64);
+        let root_before = sparse.root(epoch(10)).unwrap();
+        let old_account_revealed = |sparse: &SparseStateTrie| {
+            matches!(
+                sparse.state_trie_ref().unwrap().find_leaf(&old_account_path, None),
+                Ok(LeafLookup::Exists)
+            )
+        };
+
+        assert!(!sparse.prune_scheduled(), "nothing is scheduled");
+        sparse.schedule_prune(epoch(10));
+
+        // Nibble 0 holds only recent nodes, the older parts stay until their call.
+        assert!(sparse.prune_scheduled());
+        assert!(old_account_revealed(&sparse));
+        assert!(sparse.storage_trie_ref(&PRUNE_OLD_ACCOUNT).is_some());
+        assert!(sparse.storage_trie_ref(&PRUNE_PREWARMED_ACCOUNT).is_some());
+
+        assert!(sparse.prune_scheduled());
+        assert!(!old_account_revealed(&sparse));
+        assert!(sparse.storage_trie_ref(&PRUNE_OLD_ACCOUNT).is_none());
+        assert!(sparse.storage_trie_ref(&PRUNE_PREWARMED_ACCOUNT).is_some());
+
+        // A replacing prune continues with nibble 2 and runs once per nibble from there.
+        sparse.schedule_prune(epoch(10));
+        assert!(sparse.prune_scheduled());
+        assert!(sparse.storage_trie_ref(&PRUNE_PREWARMED_ACCOUNT).is_none());
+        for _ in 1..16 {
+            assert!(sparse.prune_scheduled());
+        }
+        assert!(!sparse.prune_scheduled(), "every nibble was pruned");
+
+        assert!(sparse.storage_trie_ref(&PRUNE_ACCOUNT).is_some());
+        assert_eq!(sparse.root(epoch(10)).unwrap(), root_before);
     }
 
     #[test]
