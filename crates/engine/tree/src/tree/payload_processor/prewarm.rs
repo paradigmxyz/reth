@@ -424,7 +424,30 @@ where
                 let mut code = missed.code;
                 code.sort_unstable();
                 code.dedup();
+                let (n_accounts, n_storage, n_code) = (accounts.len(), storage.len(), code.len());
+                let top = storage
+                    .chunk_by(|a, b| a.0 == b.0)
+                    .max_by_key(|chunk| chunk.len())
+                    .map(|chunk| (chunk[0].0, chunk.len()));
+                let n_addresses = storage.chunk_by(|a, b| a.0 == b.0).count();
+                let fetch_start = Instant::now();
                 fetch.warm_all(accounts, &storage, code).wait();
+                if round >= 4 {
+                    tracing::info!(
+                        target: "engine::np_probe",
+                        index,
+                        round,
+                        n_accounts,
+                        n_storage,
+                        n_code,
+                        n_addresses,
+                        top = ?top,
+                        fetch_us = fetch_start.elapsed().as_micros() as u64,
+                        since_us = probe_start.elapsed().as_micros() as u64,
+                        executed = ctx.executed_tx_index.load(Ordering::Relaxed),
+                        "probe round"
+                    );
+                }
             }
         }
     }
