@@ -427,7 +427,9 @@ where
         {
             let to_prewarm_task = to_prewarm_task.clone();
             self.executor.spawn_blocking_named("prewarm", move || {
+                crate::tree::payload_validator::np_event("pt_start", 0, 0);
                 prewarm_task.run(mode, to_prewarm_task);
+                crate::tree::payload_validator::np_event("pt_end", 0, 0);
             });
         }
 
