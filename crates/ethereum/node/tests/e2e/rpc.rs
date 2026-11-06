@@ -48,6 +48,7 @@ use reth_rpc_api::servers::AdminApiServer;
 use reth_rpc_server_types::RpcModuleSelection;
 use reth_tasks::Runtime;
 use reth_transaction_pool::test_utils::TransactionGenerator;
+use serde::{de::DeserializeOwned, Serialize};
 use std::{
     net::{IpAddr, Ipv4Addr},
     sync::Arc,
@@ -435,8 +436,8 @@ async fn test_flashbots_validate_v3() -> eyre::Result<()> {
     let _ = provider.send_transaction(TransactionRequest::default().to(Address::ZERO)).await?;
     let payload = node.new_payload().await?;
 
-    let mut request = BuilderBlockValidationRequestV3 {
-        request: SignedBidSubmissionV3 {
+    let mut request = validation_request::<BuilderBlockValidationRequestV3>(
+        SignedBidSubmissionV3 {
             message: BidTrace {
                 parent_hash: payload.block().parent_hash,
                 block_hash: payload.block().hash(),
@@ -451,9 +452,9 @@ async fn test_flashbots_validate_v3() -> eyre::Result<()> {
             blobs_bundle: BlobsBundleV1::new([]),
             signature: Default::default(),
         },
-        parent_beacon_block_root: payload.block().parent_beacon_block_root.unwrap(),
-        registered_gas_limit: payload.block().gas_limit,
-    };
+        payload.block().gas_limit,
+        payload.block().parent_beacon_block_root.unwrap(),
+    )?;
 
     assert!(provider
         .raw_request::<_, ()>("flashbots_validateBuilderSubmissionV3".into(), (&request,))
@@ -501,8 +502,8 @@ async fn test_flashbots_validate_v4() -> eyre::Result<()> {
     let _ = provider.send_transaction(TransactionRequest::default().to(Address::ZERO)).await?;
     let payload = node.new_payload().await?;
 
-    let mut request = BuilderBlockValidationRequestV4 {
-        request: SignedBidSubmissionV4 {
+    let mut request = validation_request::<BuilderBlockValidationRequestV4>(
+        SignedBidSubmissionV4 {
             message: BidTrace {
                 parent_hash: payload.block().parent_hash,
                 block_hash: payload.block().hash(),
@@ -518,9 +519,9 @@ async fn test_flashbots_validate_v4() -> eyre::Result<()> {
             execution_requests: payload.requests().unwrap().try_into().unwrap(),
             signature: Default::default(),
         },
-        parent_beacon_block_root: payload.block().parent_beacon_block_root.unwrap(),
-        registered_gas_limit: payload.block().gas_limit,
-    };
+        payload.block().gas_limit,
+        payload.block().parent_beacon_block_root.unwrap(),
+    )?;
 
     provider
         .raw_request::<_, ()>("flashbots_validateBuilderSubmissionV4".into(), (&request,))
@@ -558,8 +559,8 @@ async fn test_flashbots_validate_v5() -> eyre::Result<()> {
     let envelope = payload.clone().try_into_v5()?;
     assert!(!envelope.blobs_bundle.blobs.is_empty());
 
-    let request = BuilderBlockValidationRequestV5 {
-        request: SignedBidSubmissionV5 {
+    let request = validation_request::<BuilderBlockValidationRequestV5>(
+        SignedBidSubmissionV5 {
             message: BidTrace {
                 parent_hash: payload.block().parent_hash,
                 block_hash: payload.block().hash(),
@@ -572,9 +573,9 @@ async fn test_flashbots_validate_v5() -> eyre::Result<()> {
             execution_requests: envelope.execution_requests.try_into().unwrap(),
             signature: Default::default(),
         },
-        parent_beacon_block_root: payload.block().parent_beacon_block_root.unwrap(),
-        registered_gas_limit: payload.block().gas_limit,
-    };
+        payload.block().gas_limit,
+        payload.block().parent_beacon_block_root.unwrap(),
+    )?;
 
     provider
         .raw_request::<_, ()>("flashbots_validateBuilderSubmissionV5".into(), (&request,))
@@ -624,8 +625,8 @@ async fn test_flashbots_validate_v6() -> eyre::Result<()> {
 
     let envelope = payload.clone().try_into_v6()?;
     assert!(!envelope.blobs_bundle.blobs.is_empty());
-    let mut request = BuilderBlockValidationRequestV6 {
-        request: SignedBidSubmissionV6 {
+    let mut request = validation_request::<BuilderBlockValidationRequestV6>(
+        SignedBidSubmissionV6 {
             message: BidTrace {
                 parent_hash: payload.block().parent_hash,
                 block_hash: payload.block().hash(),
@@ -638,9 +639,9 @@ async fn test_flashbots_validate_v6() -> eyre::Result<()> {
             execution_requests: envelope.execution_requests.try_into().unwrap(),
             signature: Default::default(),
         },
-        parent_beacon_block_root: payload.block().parent_beacon_block_root.unwrap(),
-        registered_gas_limit: payload.block().gas_limit,
-    };
+        payload.block().gas_limit,
+        payload.block().parent_beacon_block_root.unwrap(),
+    )?;
 
     provider
         .raw_request::<_, ()>("flashbots_validateBuilderSubmissionV6".into(), (&request,))
@@ -799,6 +800,19 @@ fn update_block_hash_v6(request: &mut BuilderBlockValidationRequestV6) -> eyre::
         block_hash;
     request.request.message.block_hash = block_hash;
     Ok(())
+}
+
+/// Builds a builder validation request from its JSON form, so request fields that have a serde
+/// default don't need to be set here.
+fn validation_request<T: DeserializeOwned>(
+    bid: impl Serialize,
+    registered_gas_limit: u64,
+    parent_beacon_block_root: B256,
+) -> eyre::Result<T> {
+    let mut request = serde_json::to_value(bid)?;
+    request["registered_gas_limit"] = registered_gas_limit.to_string().into();
+    request["parent_beacon_block_root"] = serde_json::to_value(parent_beacon_block_root)?;
+    Ok(serde_json::from_value(request)?)
 }
 
 #[tokio::test]
