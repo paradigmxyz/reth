@@ -282,7 +282,8 @@ impl<N: NodePrimitives> TreeState<N> {
     /// If a finalized hash is provided, the only non-canonical blocks which will be removed are
     /// those which have a fork point at or below the finalized hash.
     ///
-    /// Canonical blocks below the upper bound will still be removed.
+    /// Canonical blocks below the upper bound will still be removed. Returns the removed blocks,
+    /// see [`OverlayManager::remove_blocks`].
     ///
     /// NOTE: if the finalized block is greater than the upper bound, the only blocks that will be
     /// removed are canonical blocks and sidechains that fork below the `upper_bound`. This is the
@@ -292,7 +293,7 @@ impl<N: NodePrimitives> TreeState<N> {
         upper_bound: BlockNumHash,
         last_persisted_hash: B256,
         finalized_num_hash: Option<BlockNumHash>,
-    ) {
+    ) -> Vec<ExecutedBlock<N>> {
         debug!(target: "engine::tree", ?upper_bound, ?finalized_num_hash, "Removing blocks from the tree");
 
         // If the finalized num is ahead of the upper bound, and exists, we need to instead ensure
@@ -321,9 +322,10 @@ impl<N: NodePrimitives> TreeState<N> {
             self.prune_finalized_sidechains(finalized_num_hash, &mut removed_hashes);
         }
 
-        if !removed_hashes.is_empty() {
-            self.overlay_manager.remove_blocks(removed_hashes);
+        if removed_hashes.is_empty() {
+            return Vec::new()
         }
+        self.overlay_manager.remove_blocks(removed_hashes)
     }
 
     /// Updates the canonical head to the given block.
