@@ -639,7 +639,14 @@ where
             if self.proof_worker_handle.results().is_empty() {
                 let np_t = Instant::now();
                 self.trie.calculate_subtries(self.new_epoch);
-                np_event("t_subtries", np_us(np_t), 0);
+                np_event(
+                    "t_subtries",
+                    np_us(np_t),
+                    reth_trie_sparse::NP_SUBTRIES[0].load(std::sync::atomic::Ordering::Relaxed) *
+                        1000 +
+                        reth_trie_sparse::NP_SUBTRIES[1]
+                            .load(std::sync::atomic::Ordering::Relaxed),
+                );
                 if self.finished_state_updates {
                     np_add(10, np_us(np_t));
                 } else {
