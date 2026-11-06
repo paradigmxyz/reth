@@ -380,9 +380,12 @@ where
         let mut state = ctx.evm_for_ctx();
         let Some((evm, misses)) = state.probe.as_mut() else { return };
         let mut idle = 0;
-        let mut fetched_accounts = alloy_primitives::map::HashSet::default();
-        let mut fetched_storage = alloy_primitives::map::HashSet::default();
-        let mut fetched_code = alloy_primitives::map::HashSet::default();
+        let mut fetched_accounts = alloy_primitives::map::AddressSet::default();
+        let mut fetched_storage = alloy_primitives::map::HashSet::<(
+            alloy_primitives::Address,
+            alloy_primitives::B256,
+        )>::default();
+        let mut fetched_code = alloy_primitives::map::B256Set::default();
         let dedupe = std::env::var_os("RETH_NP_DEDUPE").is_some();
         while !ctx.should_stop() && !queue.probed_all() {
             let generation = results.predicted().generation();
