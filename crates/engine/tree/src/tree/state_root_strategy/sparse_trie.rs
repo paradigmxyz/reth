@@ -284,6 +284,10 @@ where
 
     /// Runs the hashing task that drains updates from the channel and converts them to
     /// `HashedPostState` in parallel.
+    ///
+    /// Returns once it forwarded the finish marker, since the sparse trie task reads nothing after
+    /// it. Waiting for the channel to close instead would hold the `trie-hashing` thread, and with
+    /// it the next block's hashing task, for as long as prewarming keeps a hint sender alive.
     fn run_hashing_task(
         updates: CrossbeamReceiver<StateRootMessage>,
         hashed_state_tx: CrossbeamSender<SparseTrieTaskMessage>,
@@ -295,6 +299,7 @@ where
         while let Ok(message) = updates.recv() {
             total_idle_time += idle_start.elapsed();
 
+            let finished = matches!(message, StateRootMessage::FinishedStateUpdates);
             let msg = match message {
                 StateRootMessage::PrefetchProofs(targets) => {
                     SparseTrieTaskMessage::PrefetchProofs(targets)
@@ -311,7 +316,7 @@ where
                     SparseTrieTaskMessage::HashedState(state)
                 }
             };
-            if hashed_state_tx.send(msg).is_err() {
+            if hashed_state_tx.send(msg).is_err() || finished {
                 break;
             }
 
@@ -2481,7 +2486,7 @@ mod tests {
     }
 
     #[test]
-    fn run_ignores_hints_queued_after_updates_finish() {
+    fn hashing_task_returns_after_the_finish_marker() {
         let runtime = reth_tasks::Runtime::test();
         let provider_factory = create_test_provider_factory();
         let anchor_hash = init_genesis(&provider_factory).expect("failed to initialize genesis");
@@ -2521,14 +2526,15 @@ mod tests {
         updates_tx.send(StateRootMessage::FinishedStateUpdates).unwrap();
         updates_tx.send(StateRootMessage::PrefetchProofs(Default::default())).unwrap();
 
-        let wait_start = std::time::Instant::now();
-        while task.updates.len() < 2 {
-            assert!(
-                wait_start.elapsed() < std::time::Duration::from_secs(1),
-                "hashing task did not queue the test messages"
-            );
-            std::thread::yield_now();
-        }
+        // The next block's hashing task gets the thread while prewarming still holds a sender.
+        let (free_tx, free_rx) = std::sync::mpsc::channel();
+        runtime.spawn_blocking_named("trie-hashing", move || {
+            let _ = free_tx.send(());
+        });
+        free_rx
+            .recv_timeout(std::time::Duration::from_secs(5))
+            .expect("hashing task kept its thread after the finish marker");
+        assert_eq!(task.updates.len(), 1, "a hint after the finish marker was forwarded");
 
         let (result_tx, result_rx) = std::sync::mpsc::channel();
         let handle = std::thread::spawn(move || {
