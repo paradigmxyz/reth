@@ -1181,6 +1181,19 @@ where
 
         let _span = trace_span!("dispatch_pending_targets").entered();
         let (targets, chunking_length) = self.pending_targets.take();
+        if self.finished_state_updates {
+            let accounts = targets
+                .account_targets
+                .iter()
+                .map(|t| format!("{:?}", t.key()))
+                .collect::<Vec<_>>();
+            let storage = targets
+                .storage_targets
+                .iter()
+                .map(|(address, slots)| format!("{address}:{}", slots.len()))
+                .collect::<Vec<_>>();
+            tracing::info!(target: "engine::np_tail", ?accounts, ?storage, "late proof targets");
+        }
         let mut dispatch_error = None;
         dispatch_with_chunking(
             targets,
