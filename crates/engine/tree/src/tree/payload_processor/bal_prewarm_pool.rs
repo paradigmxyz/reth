@@ -127,7 +127,7 @@ impl BalPrewarmPool {
     /// Warms `accounts`, `storage` slots and `code` in parallel across a share of the workers and
     /// returns a latch that [`WarmLatch::wait`] blocks on until all of them are loaded.
     ///
-    /// Only one in [`WARM_ALL_SHARE`] workers takes these loads, which bounds how many of them
+    /// Only one in `WARM_ALL_SHARE` workers takes these loads, which bounds how many of them
     /// queue on the disk ahead of block execution's own reads of a chain of dependent keys.
     pub fn warm_all(
         &self,
