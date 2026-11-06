@@ -10221,7 +10221,6 @@ dependencies = [
  "reth-testing-utils",
  "reth-tokio-util",
  "reth-tracing",
- "rustc-hash",
  "thiserror 2.0.21",
  "tokio",
  "tracing",
