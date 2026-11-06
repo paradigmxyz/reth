@@ -372,7 +372,12 @@ derek, 4 run pairs against main:
 | Mgas/s | +27.3% | +43.7% | +44.8% |
 | End-to-end Mgas/s | +11.2% | +14.9% | +14.0% |
 
-main's own p99 ranges from 132 to 162 ms across these runs. Persistence does not keep up with the
+With the probe stop and freeing persisted blocks off the engine thread (6c83d74744): mean -26.2%
+(27.42 -> 20.25 ms), p90 -32.8%, p99 -32.7% (127.6 -> 85.8 ms), Mgas/s +30.9%; with
+`--db.warm-branch-pages` mean -36.7% (28.88 -> 18.29 ms), p90 -41.4%, p99 -56.8% (157.8 ->
+68.1 ms), Mgas/s +45.9%. Locally the probe stop was -3.8% warm and -6.9% cold.
+
+main's own p99 ranges from 128 to 162 ms across these runs. Persistence does not keep up with the
 faster blocks even without durable commits (persist wait 4.7-7.7 ms against 0.5-1.0 ms on main):
 each save of ~18 blocks holds its write transaction for ~370 ms.
 
