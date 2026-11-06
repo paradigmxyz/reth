@@ -736,6 +736,21 @@ where
     )]
     #[allow(clippy::clone_on_copy)]
     fn on_hashed_state_update(&mut self, hashed_state_update: HashedPostState) {
+        if *NP_EAGER_HINTS > 0 && std::env::var_os("RETH_NP_TOUCH_UPDATES").is_some() {
+            for (&address, storage) in &hashed_state_update.storages {
+                if !storage.storage.is_empty() {
+                    let hints = self.new_storage_hints.entry(address).or_default();
+                    for &slot in storage.storage.keys() {
+                        hints.entry(slot).or_insert(LeafUpdate::Touched);
+                    }
+                }
+                self.new_account_hints.entry(address).or_insert(LeafUpdate::Touched);
+            }
+            for &address in hashed_state_update.accounts.keys() {
+                self.new_account_hints.entry(address).or_insert(LeafUpdate::Touched);
+            }
+            self.hint_messages += 1;
+        }
         for (&address, storage) in &hashed_state_update.storages {
             if !storage.storage.is_empty() {
                 // Look up the outer map once per address instead of once per slot.
