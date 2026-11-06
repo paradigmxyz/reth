@@ -753,14 +753,6 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
     }
 }
 
-/// Rejects legacy gas prices combined with EIP-1559 fee fields before transaction construction.
-const fn ensure_no_conflicting_fee_fields(request: &TransactionRequest) -> EthResult<()> {
-    if request.gas_price.is_some() && request.has_eip1559_fields() {
-        return Err(EthApiError::ConflictingFeeFieldsInRequest)
-    }
-    Ok(())
-}
-
 /// Loads a transaction from database.
 ///
 /// Behaviour shared by several `eth_` RPC methods, not exclusive to `eth_` transactions RPC
@@ -942,4 +934,12 @@ pub trait LoadTransaction: SpawnBlocking + FullEthApiTypes + RpcNodeCoreExt {
             Ok(block_and_bal.map(|(block, bal)| (transaction, block, bal)))
         }
     }
+}
+
+/// Rejects legacy gas prices combined with EIP-1559 fee fields before transaction construction.
+const fn ensure_no_conflicting_fee_fields(request: &TransactionRequest) -> EthResult<()> {
+    if request.gas_price.is_some() && request.has_eip1559_fields() {
+        return Err(EthApiError::ConflictingFeeFieldsInRequest)
+    }
+    Ok(())
 }
