@@ -16,7 +16,7 @@
 use super::{
     bal_prewarm_pool::BalPrewarmPool,
     reuse::{BalanceTracker, PoolTx, PrewarmResults, RecordingDb, RecordingHandle, SpeculativeTx},
-    StateRootHintStream, StateRootUpdateStream,
+    storage_scan, StateRootHintStream, StateRootUpdateStream,
 };
 use crate::tree::{
     CachedStateCacheMetrics, CachedStateMetrics, CachedStateProvider, ExecutionEnv,
@@ -25,7 +25,7 @@ use crate::tree::{
 use alloy_consensus::transaction::TxHashRef;
 use alloy_eip7928::bal::DecodedBal;
 use alloy_eips::eip4895::Withdrawal;
-use alloy_primitives::keccak256;
+use alloy_primitives::{keccak256, Address, B256};
 use evm2::evm::Database;
 use metrics::{Counter, Gauge, Histogram};
 use rayon::prelude::*;
@@ -67,6 +67,13 @@ const REFRESH_WINDOW: usize = 64;
 /// need one or two; batch calls need dozens before their bulk of independent reads, and pure
 /// chains of dependent reads gain nothing from more.
 const MAX_PROBE_ROUNDS: usize = 64;
+
+/// Consecutive probe rounds through one contract after which its storage is bulk-loaded, see
+/// [`chain_contract`].
+const CHAIN_ROUNDS: usize = 4;
+
+/// Most storage misses a probe round may have to count as a step of a chain.
+const CHAIN_ROUND_KEYS: usize = 8;
 
 /// Threads per block that probe transactions for cold reads, beside the speculation workers.
 ///
@@ -378,6 +385,9 @@ where
                 continue
             }
             let (tx_env, _) = tx.clone().into_parts();
+            // The contract the latest rounds walked a chain of storage reads through, and for how
+            // many rounds in a row.
+            let mut chain: Option<(Address, usize)> = None;
             for round in 0..MAX_PROBE_ROUNDS {
                 if ctx.should_stop() {
                     return
@@ -403,6 +413,23 @@ where
                 let mut code = missed.code;
                 code.sort_unstable();
                 code.dedup();
+                // A few keys of one contract per round, round after round, is a walk the rounds
+                // cannot parallelize: load the contract's whole storage instead.
+                chain = chain_contract(&storage).map(|address| match chain {
+                    Some((chained, rounds)) if chained == address => (address, rounds + 1),
+                    _ => (address, 1),
+                });
+                if let Some((address, CHAIN_ROUNDS)) = chain &&
+                    fetch.claim_storage_load(address)
+                {
+                    let factory = ctx.provider.factory().clone();
+                    let spawned = std::thread::Builder::new()
+                        .name("storage-load".to_string())
+                        .spawn(move || storage_scan::load_storage(&factory, address));
+                    if let Err(err) = spawned {
+                        debug!(target: "engine::tree::payload_processor::prewarm", %err, "Failed to spawn storage load");
+                    }
+                }
                 fetch.warm_all(accounts, &storage, code).wait();
             }
         }
@@ -1294,6 +1321,16 @@ impl<Tx, T: evm2::EvmTypes> SpeculationQueue<Tx, T> {
     }
 }
 
+/// Returns the contract a probe round's sorted storage misses step through, if the round missed
+/// at most [`CHAIN_ROUND_KEYS`] slots and at least half of them in that contract.
+fn chain_contract(storage: &[(Address, B256)]) -> Option<Address> {
+    if storage.is_empty() || storage.len() > CHAIN_ROUND_KEYS {
+        return None
+    }
+    let top = storage.chunk_by(|a, b| a.0 == b.0).max_by_key(|slots| slots.len())?;
+    (top.len() * 2 >= storage.len()).then_some(top[0].0)
+}
+
 /// Spins for longer the more consecutive idle rounds `idle` counts, then waits for the prediction
 /// generation to change from `generation`.
 fn backoff<T: evm2::EvmTypes>(results: &PrewarmResults<T>, generation: usize, idle: &mut u32) {
@@ -1326,6 +1363,22 @@ mod tests {
     use reth_tasks::WorkerPool;
     use reth_trie_common::bundle_state::{AccountStatus, BundleAccount, BundleState};
     use std::time::Duration;
+
+    #[test]
+    fn chain_contract_detects_rounds_through_one_contract() {
+        let (a, b) = (Address::with_last_byte(1), Address::with_last_byte(2));
+        let slot = |i: u8| B256::with_last_byte(i);
+        assert_eq!(chain_contract(&[]), None);
+        assert_eq!(chain_contract(&[(a, slot(1))]), Some(a));
+        assert_eq!(chain_contract(&[(a, slot(1)), (a, slot(2)), (b, slot(1))]), Some(a));
+        // Spread over contracts, or too many keys for one step of a walk.
+        assert_eq!(
+            chain_contract(&[(a, slot(1)), (b, slot(1)), (b, slot(2)), (b, slot(3))]),
+            Some(b)
+        );
+        let wide = (0..9).map(|i| (a, slot(i))).collect::<Vec<_>>();
+        assert_eq!(chain_contract(&wide), None);
+    }
 
     #[test]
     fn terminate_event_stops_transaction_execution() {
