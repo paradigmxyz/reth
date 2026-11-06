@@ -41,6 +41,9 @@ use tracing::{debug, debug_span, error, instrument, trace_span};
 pub(crate) static NP_TRIE: [std::sync::atomic::AtomicU64; 14] =
     [const { std::sync::atomic::AtomicU64::new(0) }; 14];
 static NP_FINISHED: std::sync::Mutex<Option<Instant>> = std::sync::Mutex::new(None);
+static NP_APPLY_EVERY: std::sync::LazyLock<usize> = std::sync::LazyLock::new(|| {
+    std::env::var("RETH_NP_APPLY_EVERY").ok().and_then(|v| v.parse().ok()).unwrap_or(0)
+});
 use std::sync::atomic::Ordering as AtomicOrdering;
 
 /// Computes a block's state root by applying streamed updates to an in-memory [`SparseStateTrie`].
@@ -629,6 +632,11 @@ where
         {
             // Start proof fetching before a continuously arriving state stream drains. Later
             // batches retain the usual coalescing policy to avoid repeatedly sorting small maps.
+            let t = Instant::now();
+            self.process_new_updates()?;
+            self.metrics.sparse_trie_process_updates_duration_histogram.record(t.elapsed());
+            self.dispatch_pending_targets()?;
+        } else if *NP_APPLY_EVERY > 0 && self.pending_updates >= *NP_APPLY_EVERY {
             let t = Instant::now();
             self.process_new_updates()?;
             self.metrics.sparse_trie_process_updates_duration_histogram.record(t.elapsed());
