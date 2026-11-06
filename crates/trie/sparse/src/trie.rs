@@ -240,6 +240,18 @@ impl<T: SparseTrieTrait + Default> RevealableSparseTrie<T> {
             Self::Revealed(trie) => trie.update_leaves(updates, proof_required_fn),
         }
     }
+
+    /// Requests the proofs that removing the leaves of `keys` would need, see
+    /// [`SparseTrie::prefetch_removals`]. A blind trie keeps every key.
+    pub fn prefetch_removals(
+        &mut self,
+        keys: &mut Vec<B256>,
+        proof_required_fn: impl FnMut(B256, ProofV2TargetParent),
+    ) {
+        if let Self::Revealed(trie) = self {
+            trie.prefetch_removals(keys, proof_required_fn);
+        }
+    }
 }
 
 impl SparseTrieUpdates {

@@ -702,6 +702,57 @@ pub(super) fn test_update_leaves_removal_branch_collapse_blinded_sibling<T: Spar
     );
 }
 
+/// Prefetching a removal requests the blinded sibling its branch would collapse onto, without
+/// removing the leaf, so that the removal later applies without a proof.
+pub(super) fn test_prefetch_removals_requests_blinded_sibling<T: SparseTrie>(new_trie: fn() -> T) {
+    // Branch: nibble 0x1 = one revealed leaf, nibble 0x2 = 16 blinded keys (hash node).
+    let mut base_storage = BTreeMap::new();
+    let revealed_key = {
+        let mut key = B256::ZERO;
+        key.0[0] = 0x10;
+        key
+    };
+    base_storage.insert(revealed_key, U256::ONE);
+    let mut blinded_key = B256::ZERO;
+    for i in 0u8..16 {
+        let mut key = B256::ZERO;
+        key.0[0] = 0x20 | i;
+        base_storage.insert(key, U256::from(i as u64 + 100));
+        blinded_key = key;
+    }
+    let harness = SuiteTestHarness::new(base_storage.clone());
+    let mut trie: T = harness.init_trie_with_targets(&[revealed_key], false, new_trie);
+
+    // The removal would need the same target as applying it does.
+    let mut removal = SuiteTestHarness::leaf_updates(&BTreeMap::from([(revealed_key, U256::ZERO)]));
+    let mut expected = Vec::new();
+    trie.update_leaves(&mut removal, |key, parent| expected.push((key, parent)))
+        .expect("update_leaves should succeed");
+
+    let mut keys = vec![blinded_key, revealed_key];
+    let mut requested = Vec::new();
+    trie.prefetch_removals(&mut keys, |key, parent| requested.push((key, parent)));
+    assert_eq!(requested, expected);
+    // The blinded key is kept for a later check; the leaf is still there.
+    assert_eq!(keys, vec![blinded_key]);
+    assert!(trie.get_leaf_value(&Nibbles::unpack(revealed_key)).is_some());
+
+    // Once the sibling is revealed, the removal applies without another proof.
+    let mut targets = requested
+        .into_iter()
+        .map(|(key, parent)| ProofV2Target::new(key).with_parent(parent))
+        .collect::<Vec<_>>();
+    let (mut proof_nodes, _) = harness.proof_v2(&mut targets);
+    trie.reveal_nodes(&mut proof_nodes).expect("reveal_nodes should succeed");
+    trie.update_leaves(&mut removal, |key, _| panic!("unexpected proof request for {key}"))
+        .expect("update_leaves should succeed");
+    assert!(removal.is_empty(), "removal should apply once the sibling is revealed");
+
+    let mut expected_storage = base_storage;
+    expected_storage.remove(&revealed_key);
+    assert_eq!(trie.root(epoch(0)), SuiteTestHarness::new(expected_storage).original_root());
+}
+
 /// Subtrie collapse with blinded sibling triggers callback.
 ///
 /// When removals in a subtrie would empty it and collapse the parent branch onto

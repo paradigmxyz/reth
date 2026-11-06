@@ -247,6 +247,18 @@ pub trait SparseTrie: Sized + Debug + Send + Sync {
         updates: &mut B256Map<LeafUpdate>,
         proof_required_fn: impl FnMut(B256, ProofV2TargetParent),
     ) -> SparseTrieResult<()>;
+
+    /// Requests the proofs that removing the leaves of `keys` would need, without removing them.
+    ///
+    /// Calls `proof_required_fn` like [`Self::update_leaves`] for each revealed leaf whose removal
+    /// would collapse its parent branch onto a blinded sibling, and keeps in `keys` the keys whose
+    /// path is still blinded, to be checked again once it is revealed. Lets a caller that learns
+    /// of a removal before it applies it fetch the sibling ahead of time.
+    fn prefetch_removals(
+        &mut self,
+        keys: &mut Vec<B256>,
+        proof_required_fn: impl FnMut(B256, ProofV2TargetParent),
+    );
 }
 
 /// Tracks modifications to the sparse trie structure.

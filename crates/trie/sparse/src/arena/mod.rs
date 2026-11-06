@@ -469,6 +469,34 @@ impl ArenaSparseSubtrie {
         #[cfg(all(debug_assertions, not(feature = "fuzz")))]
         self.debug_assert_counters();
     }
+
+    /// Calls `proof_required_fn` with the blinded sibling that removing the leaf at `full_path`
+    /// would collapse its branch onto, and returns whether the path is still blinded.
+    ///
+    /// A leaf that is the subtrie's root collapses a branch above the subtrie, which this does
+    /// not check.
+    fn prefetch_removal(
+        &mut self,
+        full_path: &Nibbles,
+        proof_required_fn: &mut impl FnMut(B256, ProofV2TargetParent),
+    ) -> bool {
+        self.buffers.cursor.reset(&self.arena, self.root, self.path);
+        let blinded = match self.buffers.cursor.seek(&mut self.arena, full_path) {
+            SeekResult::Blinded => true,
+            SeekResult::RevealedLeaf => {
+                if let Some((key, parent)) = ArenaParallelSparseTrie::collapse_sibling_proof(
+                    &self.arena,
+                    &self.buffers.cursor,
+                ) {
+                    proof_required_fn(key, parent);
+                }
+                false
+            }
+            _ => false,
+        };
+        self.buffers.cursor.drain(&mut self.arena);
+        blinded
+    }
 }
 
 /// Tracks the net change in leaf counters caused by a trie mutation (upsert or removal).
@@ -1525,6 +1553,27 @@ impl ArenaParallelSparseTrie {
     ///
     /// The caller must handle [`SeekResult::Blinded`] and
     /// [`SeekResult::RevealedSubtrie`] before calling this function.
+    /// Returns the proof that removing the leaf at the cursor's head needs: the blinded sibling
+    /// its parent branch would collapse onto when the leaf is the branch's only other child.
+    fn collapse_sibling_proof(
+        arena: &NodeArena,
+        cursor: &ArenaCursor,
+    ) -> Option<(B256, ProofV2TargetParent)> {
+        let parent_entry = cursor.parent()?;
+        let child_nibble = cursor.head_last_nibble()?;
+        let parent_branch = arena[parent_entry.index].branch_ref();
+        if parent_branch.state_mask.count_bits() != 2 ||
+            !parent_branch.sibling_child(child_nibble).is_blinded()
+        {
+            return None
+        }
+        let sibling_nibble = parent_branch.state_mask.iter().find(|&n| n != child_nibble)?;
+        let mut sibling_path = cursor.parent_logical_branch_path(arena);
+        sibling_path.push_unchecked(sibling_nibble);
+        let parent = ProofV2TargetParent::new(sibling_path.len().checked_sub(1)?);
+        Some((Self::nibbles_to_padded_b256(&sibling_path), parent))
+    }
+
     fn remove_leaf(
         arena: &mut NodeArena,
         cursor: &mut ArenaCursor,
@@ -1555,36 +1604,12 @@ impl ArenaParallelSparseTrie {
 
                 // Before mutating, check if removing this leaf would leave the parent
                 // branch with a single blinded sibling (requiring a proof to collapse).
-                if let Some(parent_entry) = cursor.parent() {
-                    let parent_idx = parent_entry.index;
-                    let child_nibble = head_path.last().expect("non-root leaf");
-                    let parent_branch = arena[parent_idx].branch_ref();
-
-                    if parent_branch.state_mask.count_bits() == 2 &&
-                        parent_branch.sibling_child(child_nibble).is_blinded()
-                    {
-                        let sibling_nibble = parent_branch
-                            .state_mask
-                            .iter()
-                            .find(|&n| n != child_nibble)
-                            .expect("branch has two children");
-                        let mut sibling_path = cursor.parent_logical_branch_path(arena);
-                        sibling_path.push_unchecked(sibling_nibble);
-                        trace!(target: TRACE_TARGET, ?full_path, ?sibling_path, "Removal would collapse branch onto blinded sibling, requesting proof");
-                        return (
-                            RemoveLeafResult::NeedsProof {
-                                key,
-                                proof_key: Self::nibbles_to_padded_b256(&sibling_path),
-                                parent: ProofV2TargetParent::new(
-                                    sibling_path
-                                        .len()
-                                        .checked_sub(1)
-                                        .expect("sibling path has a child nibble"),
-                                ),
-                            },
-                            SubtrieCounterDeltas::default(),
-                        );
-                    }
+                if let Some((proof_key, parent)) = Self::collapse_sibling_proof(arena, cursor) {
+                    trace!(target: TRACE_TARGET, ?full_path, ?proof_key, "Removal would collapse branch onto blinded sibling, requesting proof");
+                    return (
+                        RemoveLeafResult::NeedsProof { key, proof_key, parent },
+                        SubtrieCounterDeltas::default(),
+                    );
                 }
 
                 // Check if the removed leaf was dirty before removing it.
@@ -2884,6 +2909,46 @@ impl SparseTrie for ArenaParallelSparseTrie {
         self.debug_assert_subtrie_structure();
 
         Ok(())
+    }
+
+    fn prefetch_removals(
+        &mut self,
+        keys: &mut Vec<B256>,
+        mut proof_required_fn: impl FnMut(B256, ProofV2TargetParent),
+    ) {
+        if keys.is_empty() {
+            return
+        }
+        keys.sort_unstable();
+        let mut cursor = mem::take(&mut self.buffers.cursor);
+        cursor.reset(&self.upper_arena, self.root, Nibbles::default());
+        let upper_arena = &mut self.upper_arena;
+        keys.retain(|key| {
+            let full_path = Nibbles::unpack(*key);
+            match cursor.seek(upper_arena, &full_path) {
+                SeekResult::Blinded => true,
+                SeekResult::RevealedLeaf => {
+                    if let Some((proof_key, parent)) =
+                        Self::collapse_sibling_proof(upper_arena, &cursor)
+                    {
+                        proof_required_fn(proof_key, parent);
+                    }
+                    false
+                }
+                SeekResult::RevealedSubtrie => {
+                    let child_idx = cursor.head().expect("cursor is non-empty").index;
+                    match &mut upper_arena[child_idx] {
+                        ArenaSparseNode::Subtrie(subtrie) => {
+                            subtrie.prefetch_removal(&full_path, &mut proof_required_fn)
+                        }
+                        _ => false,
+                    }
+                }
+                _ => false,
+            }
+        });
+        cursor.drain(upper_arena);
+        self.buffers.cursor = cursor;
     }
 }
 

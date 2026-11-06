@@ -217,6 +217,8 @@ pub(super) struct SparseTrieCacheTask<A = ArenaParallelSparseTrie, S = ArenaPara
     storage_to_drop: B256Map<StorageTrieState<S>>,
     /// Number of storage tries currently owned by a job running off this thread.
     storage_in_flight: usize,
+    /// Whether removals were queued since storage passes last ran.
+    removals_queued: bool,
     /// Runtime whose storage trie pool runs the storage jobs.
     runtime: Runtime,
     /// Sender handed to storage jobs. Kept alive by the task so the receiver never disconnects.
@@ -298,6 +300,7 @@ where
             storage: Default::default(),
             storage_to_drop: Default::default(),
             storage_in_flight: 0,
+            removals_queued: false,
             runtime: executor.clone(),
             storage_done_tx,
             storage_done_rx,
@@ -652,6 +655,11 @@ where
             self.process_new_updates()?;
             self.metrics.sparse_trie_process_updates_duration_histogram.record(t.elapsed());
             self.dispatch_pending_targets()?;
+        } else if self.removals_queued {
+            // Request the siblings of queued removals while the stream keeps the updates
+            // buffered.
+            self.run_ready_storage_work()?;
+            self.dispatch_pending_targets()?;
         } else if !self.removed_storages.is_empty() {
             self.apply_removals()?;
             self.dispatch_pending_targets()?;
@@ -762,6 +770,22 @@ where
             self.hint_messages += 1;
         }
         for (&address, storage) in &hashed_state_update.storages {
+            // Buffered updates are applied once the stream pauses, and a removal that collapses
+            // a branch onto a blinded sibling would only then request the sibling: at the end of
+            // the block, after the last update. The sibling is requested now instead.
+            if !self.finished_state_updates && storage.storage.values().any(|value| value.is_zero())
+            {
+                let removals = storage
+                    .storage
+                    .iter()
+                    .filter(|(_, value)| value.is_zero())
+                    .map(|(&slot, _)| slot);
+                match self.storage_trie_state_mut(address) {
+                    StorageTrieState::Idle(work) => work.queue_removals(removals),
+                    StorageTrieState::InFlight(in_flight) => in_flight.removals.extend(removals),
+                }
+                self.removals_queued = true;
+            }
             if !storage.storage.is_empty() {
                 // Look up the outer map once per address instead of once per slot.
                 let new_updates = self.new_storage_updates.entry(address).or_default();
@@ -991,6 +1015,7 @@ where
         skip_all
     )]
     fn run_ready_storage_work(&mut self) -> SparseTrieResult<()> {
+        self.removals_queued = false;
         let mut ready = Vec::new();
         let mut job_units = 0;
         for (address, state) in &self.storage {
@@ -1481,6 +1506,10 @@ struct StorageTrieWork<S> {
     /// Whether this address ever had storage leaf updates queued, which is what makes promotion
     /// of its account wait for a recomputed storage root.
     updated: bool,
+    /// Slots a received update removes, whose leaves' siblings are requested before the removal
+    /// is applied, see [`RevealableSparseTrie::prefetch_removals`]. Slots whose path is not
+    /// revealed yet stay until it is.
+    removals: Vec<B256>,
 }
 
 impl<S: SparseTrie + Default> StorageTrieWork<S> {
@@ -1492,13 +1521,14 @@ impl<S: SparseTrie + Default> StorageTrieWork<S> {
             fetched: Default::default(),
             dirty: false,
             updated: false,
+            removals: Vec::new(),
         }
     }
 
     /// Reveals the queued proof nodes, applies the leaf updates that are not blocked by a blinded
     /// node, and recomputes the root once nothing is left to apply.
     fn run(&mut self, new_epoch: TrieNodeEpoch, retain_updates: bool) -> StorageWorkOutput {
-        let Self { trie, pending, proofs, fetched, dirty, .. } = self;
+        let Self { trie, pending, proofs, fetched, dirty, removals, .. } = self;
         *dirty = false;
         let mut output = StorageWorkOutput::default();
 
@@ -1532,6 +1562,22 @@ impl<S: SparseTrie + Default> StorageTrieWork<S> {
             }
         }
 
+        if !removals.is_empty() {
+            let targets = &mut output.targets;
+            trie.prefetch_removals(removals, |path, parent| match fetched.entry(path) {
+                Entry::Occupied(mut entry) => {
+                    if parent < *entry.get() {
+                        entry.insert(parent);
+                        targets.push(ProofV2Target::new(path).with_parent(parent));
+                    }
+                }
+                Entry::Vacant(entry) => {
+                    entry.insert(parent);
+                    targets.push(ProofV2Target::new(path).with_parent(parent));
+                }
+            });
+        }
+
         if self.needs_root() {
             self.trie.root(new_epoch);
         }
@@ -1550,6 +1596,15 @@ impl<S: SparseTrie + Default> StorageTrieWork<S> {
         merge_leaf_updates(&mut self.pending, updates);
     }
 
+    /// Queues slots that a received update removes, for their siblings to be requested ahead.
+    fn queue_removals(&mut self, removals: impl IntoIterator<Item = B256>) {
+        let len = self.removals.len();
+        self.removals.extend(removals);
+        if self.removals.len() > len {
+            self.dirty = true;
+        }
+    }
+
     /// Queues proof nodes, draining them out of the batch they arrived in.
     fn queue_proofs(&mut self, nodes: &mut Vec<ProofTrieNodeV2>) {
         if nodes.is_empty() {
@@ -1562,9 +1617,10 @@ impl<S: SparseTrie + Default> StorageTrieWork<S> {
 
     /// Folds what arrived while a job owned this payload back into it.
     fn take_buffered(&mut self, buffered: InFlightStorage) {
-        let InFlightStorage { mut proofs, updates, .. } = buffered;
+        let InFlightStorage { mut proofs, updates, removals, .. } = buffered;
         self.queue_proofs(&mut proofs);
         self.queue_updates(updates);
+        self.queue_removals(removals);
     }
 
     /// Returns whether a pass would do anything.
@@ -1601,11 +1657,13 @@ struct InFlightStorage {
     proofs: Vec<ProofTrieNodeV2>,
     /// Leaf updates that were queued for this address while the payload was gone.
     updates: B256Map<LeafUpdate>,
+    /// Removed slots that arrived for this address while the payload was gone.
+    removals: Vec<B256>,
 }
 
 impl InFlightStorage {
     fn new(started: Instant) -> Self {
-        Self { started, proofs: Vec::new(), updates: Default::default() }
+        Self { started, proofs: Vec::new(), updates: Default::default(), removals: Vec::new() }
     }
 }
 

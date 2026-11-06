@@ -241,6 +241,7 @@ sparse_trie_tests! {
     test_update_leaves_retry_after_reveal,
     test_remove_leaf_blinded_sibling_requires_reveal,
     test_update_leaves_removal_branch_collapse_blinded_sibling,
+    test_prefetch_removals_requests_blinded_sibling,
     test_update_leaves_subtrie_collapse_requests_proof,
     test_update_leaves_multiple_keys_same_blinded_node,
     test_update_leaves_touched_fully_revealed,
