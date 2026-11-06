@@ -380,6 +380,10 @@ where
         let mut state = ctx.evm_for_ctx();
         let Some((evm, misses)) = state.probe.as_mut() else { return };
         let mut idle = 0;
+        let mut fetched_accounts = alloy_primitives::map::HashSet::default();
+        let mut fetched_storage = alloy_primitives::map::HashSet::default();
+        let mut fetched_code = alloy_primitives::map::HashSet::default();
+        let dedupe = std::env::var_os("RETH_NP_DEDUPE").is_some();
         while !ctx.should_stop() && !queue.probed_all() {
             let generation = results.predicted().generation();
             let Some((index, (tx, _))) = queue.claim_probe() else {
@@ -402,6 +406,9 @@ where
                 }
             }
             let _probe_done = ProbeDone(&results.probe_state[index]);
+            fetched_accounts.clear();
+            fetched_storage.clear();
+            fetched_code.clear();
             for round in 0..*NP_ROUNDS {
                 NP_PROBE[3].fetch_add(1, Ordering::Relaxed);
                 if ctx.should_stop() {
@@ -433,6 +440,15 @@ where
                 let mut code = missed.code;
                 code.sort_unstable();
                 code.dedup();
+                if dedupe {
+                    accounts.retain(|address| fetched_accounts.insert(*address));
+                    storage.retain(|key| fetched_storage.insert(*key));
+                    code.retain(|hash| fetched_code.insert(*hash));
+                    if accounts.is_empty() && storage.is_empty() && code.is_empty() {
+                        NP_PROBE[2].fetch_add(1, Ordering::Relaxed);
+                        break
+                    }
+                }
                 let (n_accounts, n_storage, n_code) = (accounts.len(), storage.len(), code.len());
                 let top = storage
                     .chunk_by(|a, b| a.0 == b.0)
