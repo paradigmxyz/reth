@@ -391,6 +391,11 @@ impl StateRootHintStream {
 
     /// Emits a best-effort access hint.
     pub fn on_access_hint(&self, hint: StateAccessHint) {
+        static NO_HINTS: std::sync::LazyLock<bool> =
+            std::sync::LazyLock::new(|| std::env::var_os("RETH_NP_NO_HINTS").is_some());
+        if *NO_HINTS {
+            return;
+        }
         self.inner.on_access_hint(hint);
     }
 }
