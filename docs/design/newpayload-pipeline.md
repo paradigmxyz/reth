@@ -487,7 +487,10 @@ trie for 418 us.
 The first two made the root come 23% sooner after the last transaction (p50 1.33 -> 1.03 ms, 4
 run pairs). On derek, with the hashing task change, against the head before them and
 `--db.warm-branch-pages` on both sides (e11befe730): mean -1.15% (18.45 -> 18.23 ms, noise
-±1.43%), p50 -0.4%, p90 +1.9%, p99 +5.3% (noise ±9.9%), none significant.
+±1.43%), p50 -0.4%, p90 +1.9%, p99 +5.3% (noise ±9.9%), none significant. With all four
+(d16ffadedb) against main, `--db.warm-branch-pages` on the branch: mean -32.4% (27.61 -> 18.67 ms),
+p50 -27.5%, p90 -34.4%, p99 -51.6% (125.4 -> 60.7 ms), Mgas/s +40.7%, end-to-end Mgas/s +8.6%;
+the branch's mean was 19.26 ms at 3bd132c98a, and main's p99 ranges from 125 to 166 ms across runs.
 
 ### What the state root costs
 
@@ -514,7 +517,10 @@ pool instead of 64 changed the transactions phase by less than 2% while the tail
 
 What is left after the last transaction is mostly outside the trie: the finish marker is sent when
 evm2's executor drops its state hook, after it built the bundle state, ~0.3 ms after the last
-transaction. Dropping the hook right after the post-execution changes is a change in evm2.
+transaction. Dropping the hook right after the post-execution changes is a change in evm2. In the
+trie, the walk that restores the hashed account subtries and merges their trie updates into the
+upper trie's is 35-40% of a large `calculate_subtries` (159 of 446 us with 128-255 dirty leaves),
+serial on the sparse-trie thread.
 
 ## Rewrite: newPayload v2
 
