@@ -1274,12 +1274,21 @@ where
             let index = senders.len() - 1;
             match prewarm_results {
                 Some(results) => {
+                    let np_start = Instant::now();
                     let mut outcome =
                         self.commit_prewarm_result(executor, results, index, tx.tx())?;
+<<<<<<< HEAD
                     // A prewarm worker executing the transaction for the first time is ahead of
                     // block execution, which would have to load the same state. Block execution
                     // waits for its result: executing the transaction beside it reads the same
                     // state again, one cold read at a time, and slows both.
+=======
+                    let mut np_raced = false;
+                    // A prewarm worker executing the transaction for the first time usually
+                    // finishes it sooner than block execution would, which also has to load its
+                    // state. A speculation that takes longer is raced: block execution executes
+                    // the transaction itself on its warmer state, reading what the worker loaded.
+>>>>>>> f5d01dc0eb (wip: committer breakdown counters (experiment only))
                     if outcome == Err(ReuseMiss::Missing) && results.is_speculating(index) {
                         let wait_start = Instant::now();
                         while results.is_speculating(index) {
@@ -1289,13 +1298,28 @@ where
                                 std::thread::yield_now();
                             }
                         }
+                        NP_COMMIT[1]
+                            .fetch_add(wait_start.elapsed().as_micros() as u64, Ordering::Relaxed);
                         outcome = self.commit_prewarm_result(executor, results, index, tx.tx())?;
+                        np_raced = outcome.is_err();
                     }
                     if outcome.is_err() {
+                        let exec_start = Instant::now();
                         // Later prewarm results are refreshed against the actual writes.
                         let result = executor.execute_transaction_without_commit(tx)?;
                         results.publish_executed(index, &result.result().pending_state);
                         executor.commit_transaction(result)?;
+                        let us = exec_start.elapsed().as_micros() as u64;
+                        let slot = match (np_raced, outcome) {
+                            (true, _) => 2,
+                            (false, Err(ReuseMiss::Missing)) => 4,
+                            _ => 6,
+                        };
+                        NP_COMMIT[slot].fetch_add(1, Ordering::Relaxed);
+                        NP_COMMIT[slot + 1].fetch_add(us, Ordering::Relaxed);
+                    } else {
+                        NP_COMMIT[0]
+                            .fetch_add(np_start.elapsed().as_micros() as u64, Ordering::Relaxed);
                     }
                     reuse_stats.record(outcome);
                 }
@@ -2151,6 +2175,11 @@ std::thread_local! {
 static NP_PHASES_ENABLED: std::sync::LazyLock<bool> =
     std::sync::LazyLock::new(|| std::env::var_os("RETH_NP_PHASES").is_some());
 
+/// Committer counters (experiment only): reused micros, race wait micros, raced count and micros,
+/// missing count and micros, stale count and micros.
+static NP_COMMIT: [std::sync::atomic::AtomicU64; 8] =
+    [const { std::sync::atomic::AtomicU64::new(0) }; 8];
+
 /// Records a newPayload phase boundary on this thread (experiment only).
 pub(crate) fn np_phase(name: &'static str) {
     if *NP_PHASES_ENABLED {
@@ -2170,10 +2199,15 @@ pub(crate) fn np_phases_log(number: u64, gas: u64) {
         .map(|(name, at)| format!("{name}={}", at.duration_since(start).as_micros()))
         .collect::<Vec<_>>()
         .join(" ");
+    let commit = NP_COMMIT
+        .iter()
+        .map(|counter| counter.swap(0, Ordering::Relaxed).to_string())
+        .collect::<Vec<_>>()
+        .join(",");
     let probe = crate::tree::payload_processor::prewarm::NP_PROBE
         .iter()
         .map(|counter| counter.swap(0, Ordering::Relaxed).to_string())
         .collect::<Vec<_>>()
         .join(",");
-    info!(target: "engine::np_phases", number, gas, %line, %probe, "phases");
+    info!(target: "engine::np_phases", number, gas, %line, %probe, %commit, "phases");
 }
