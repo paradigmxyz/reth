@@ -718,7 +718,9 @@ where
         // as transactions complete, allowing parallel computation during execution.
         let execute_block_start = Instant::now();
         let execution_result = if parallel_bal_execution {
-            self.execute_block_bal(env, &input, &handle, &make_state_provider)
+            let result = self.execute_block_bal(env, &input, &handle, &make_state_provider);
+            handle.stop_prewarming_execution();
+            result
         } else {
             let state_provider = make_state_provider(false);
             match state_provider {
@@ -739,9 +741,6 @@ where
         let (output, senders, receipt_root_rx, executed_bal) = ensure_ok!(execution_result);
         let (built_bal, evm_bal) =
             executed_bal.map(|ExecutedBal { alloy, evm }| (alloy, evm)).unzip();
-
-        // After executing the block we can stop prewarming transactions
-        handle.stop_prewarming_execution();
 
         // Create ExecutionOutcome early so we can terminate caching before validation and state
         // root computation. Using Arc allows sharing with both the caching task and the deferred
@@ -1066,6 +1065,10 @@ where
                     &executed_tx_index,
                     prewarm_results.as_deref(),
                 )?;
+                // Prewarming only helps transactions that are not executed yet. Stopping it here
+                // instead of after the post-execution changes leaves its cores to the state root,
+                // which still fetches the last proofs and hashes the last tries.
+                handle.stop_prewarming_execution();
 
                 let post_exec_start = Instant::now();
                 let (output, built_bal) = executor.finish_with_prepared_block_access_list()?;
