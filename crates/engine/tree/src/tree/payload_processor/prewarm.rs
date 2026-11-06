@@ -61,6 +61,11 @@ use tracing::{debug, debug_span, instrument, trace, trace_span, warn, Span};
 /// execute again.
 const REFRESH_WINDOW: usize = 64;
 
+/// Probe round cap (experiment only).
+static NP_ROUNDS: std::sync::LazyLock<usize> = std::sync::LazyLock::new(|| {
+    std::env::var("RETH_NP_ROUNDS").ok().and_then(|v| v.parse().ok()).unwrap_or(MAX_PROBE_ROUNDS)
+});
+
 /// Probe counters (experiment only): claimed, late at claim, completed, rounds, completed late,
 /// missed keys, completion micros.
 pub(crate) static NP_PROBE: [std::sync::atomic::AtomicU64; 7] =
@@ -395,7 +400,7 @@ where
                 }
             }
             let _probe_done = ProbeDone(&results.probe_state[index]);
-            for round in 0..MAX_PROBE_ROUNDS {
+            for round in 0..*NP_ROUNDS {
                 NP_PROBE[3].fetch_add(1, Ordering::Relaxed);
                 if ctx.should_stop() {
                     return

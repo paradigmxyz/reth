@@ -147,8 +147,14 @@ impl BalPrewarmPool {
         for address in accounts {
             send(PrewarmTarget::Account(address, Box::default()));
         }
+        let workers = (self.workers.len() / WARM_ALL_SHARE).max(1);
+        let batch_size = if *NP_BATCH1 {
+            storage.len().div_ceil(workers).clamp(1, WARM_BATCH_SIZE)
+        } else {
+            WARM_BATCH_SIZE
+        };
         for chunk in storage.chunk_by(|a, b| a.0 == b.0) {
-            for batch in chunk.chunks(WARM_BATCH_SIZE) {
+            for batch in chunk.chunks(batch_size) {
                 send(PrewarmTarget::Storage(
                     batch[0].0,
                     batch.iter().map(|(_, slot)| *slot).collect(),
@@ -244,6 +250,14 @@ const WARM_ALL_SHARE: usize = 4;
 /// the workers on blocks whose read-set is concentrated in a few accounts.
 const WARM_BATCH_SIZE: usize = 8;
 
+/// Spread small probe rounds over workers one slot each (experiment only).
+static NP_BATCH1: std::sync::LazyLock<bool> =
+    std::sync::LazyLock::new(|| std::env::var_os("RETH_NP_BATCH1").is_some());
+
+/// Load the code of every probed account (experiment only).
+static NP_CODE: std::sync::LazyLock<bool> =
+    std::sync::LazyLock::new(|| std::env::var_os("RETH_NP_CODE").is_some());
+
 fn prewarm_loop(rx: crossbeam_channel::Receiver<PrewarmMsg>) {
     // Warming only loads ahead of execution, which must not wait for it.
     reth_tasks::utils::lower_background_worker_priority();
@@ -271,7 +285,15 @@ fn prewarm_loop(rx: crossbeam_channel::Receiver<PrewarmMsg>) {
                 let Some(provider) = provider.as_ref() else { continue };
                 match target {
                     PrewarmTarget::Account(addr, slots) => {
-                        let _ = provider.basic_account(&addr);
+                        let account = provider.basic_account(&addr);
+                        if *NP_CODE &&
+                            _latch.0.is_some() &&
+                            let Ok(Some(account)) = account &&
+                            let Some(hash) = account.bytecode_hash &&
+                            hash != alloy_primitives::KECCAK256_EMPTY
+                        {
+                            let _ = provider.bytecode_by_hash(&hash);
+                        }
                         for &slot in &slots {
                             let _ = provider.storage(addr, slot);
                         }
