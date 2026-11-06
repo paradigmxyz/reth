@@ -522,6 +522,54 @@ trie, the walk that restores the hashed account subtries and merges their trie u
 upper trie's is 35-40% of a large `calculate_subtries` (159 of 446 us with 128-255 dirty leaves),
 serial on the sparse-trie thread.
 
+Patching evm2 locally to drop the hook right after the post-execution changes (experiment branch
+`mattsse/np-phases8`, behind an environment knob) moved the finish marker from 341 to 50 us after
+the last transaction (p50) and made the replay faster in all 3 run pairs: mean 15.85 -> 15.09 ms
+(-4.8%), p50 -5.4%, p99 -8%. The root itself came only 74 us sooner: with the marker early, the
+tail is the trie's own work on the last updates. It needs a change in evm2.
+
+### Proofs are reads from disk
+
+Timing every proof job (dispatch to start, and compute) shows the slowest tails are single proofs:
+in the worst blocks one job computes for 10-32 ms, warm as well as cold, and the root follows it.
+Storage proof jobs take 190 us p50, 0.9 ms p90 and 2.9 ms p99, account proof jobs 660 us p50 and
+4.6 ms p99, about 375 jobs per block. The devbox's page cache (46 GB for a 279 GB database) does not
+hold the trie tables' leaf pages, and the proof workers took 730k major faults over a "warm" replay,
+about 1,170 per block, against 240k minor ones. On the CPU, 42% of the proof workers' time is MDBX
+cursor searches, a third of it in the kernel under them, 13% computes storage roots for account
+leaves whose root the reused trie does not know (siblings included, each a random read of their
+storage trie) and 7% checks whether an account's storage is empty.
+
+- Full proof pools (64 + 64 workers instead of 32 + 32) and one target per job instead of 5 cut the
+  tail by 11% (p99 13.1 -> 11.2 ms) in 2 run pairs, within noise for the block.
+- Never pruning the sparse trie left 18% fewer proof jobs (235 against 286 per block) and the
+  tail's p99 at 5.0 ms instead of 14.3 ms; pruning only what was last changed more than 256 blocks
+  ago, 244 jobs and 9.2 ms: the rest are nodes that were revealed and not changed, which every prune
+  drops. Allocated memory grew from 1.9 to 2.2 GB (256 blocks) and 2.45 GB (never) over the 625
+  blocks. On derek, never pruning against the head (both with `--db.warm-branch-pages`, b4381d3397):
+  mean -0.8% (noise ±2.3%), p50 -2.7%, p99 +9.3% (noise ±11.4%), none significant, so the prune
+  stays.
+
+The root no longer sets derek's p99. The blocks there are slow in execution.
+
+### Where block execution waits
+
+Per-thread scheduler statistics (`/proc/<pid>/task/*/schedstat`) over a replay: the engine thread
+that commits uses 13.8 ms of CPU per block and waits 0.2 ms for a core, so it is not preempted; the
+machine is saturated (speculation workers 64 ms of CPU per block, proof workers 38 ms, the global
+rayon pool 20 ms, each pool below execution's priority waiting 8-23 ms per block for cores). The
+node's attempt to raise the engine and sparse-trie threads' priority fails without `CAP_SYS_NICE`
+(both run at nice 0 on the devbox); granting it raises the speculation workers too, which inherit
+the engine thread's priority.
+
+A per-transaction timeline of speculation and the committer splits the transactions phase: the
+committer waits 6.4 ms per block (p50 4.4 ms) for speculative first executions that are already
+running when it reaches them, 1.8 ms of it for executions that waited more than 0.2 ms for a free
+worker; it executes 25 stale results itself (2.8 ms) and 2.7 missing ones (1.5 ms); committing the
+reused results takes ~1.2 ms. No wait is for a refresh of a stale result or for a transaction that
+had not started. 3.7 ms of the wait falls on transactions after the 50th, 0.8 ms on the first five,
+and the longest are single heavy transactions (26342631 index 42 and 26343111 index 2, ~80 ms each).
+
 ## Rewrite: newPayload v2
 
 The v2 path replaces the per-block task graph instead of tuning it:
