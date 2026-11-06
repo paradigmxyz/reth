@@ -245,6 +245,8 @@ const WARM_ALL_SHARE: usize = 4;
 const WARM_BATCH_SIZE: usize = 8;
 
 fn prewarm_loop(rx: crossbeam_channel::Receiver<PrewarmMsg>) {
+    // Warming only loads ahead of execution, which must not wait for it.
+    reth_tasks::utils::lower_background_worker_priority();
     // The provider (and its MDBX read txn) held for the current block, between `BeginBlock` and
     // `EndBlock`. `None` while idle, so no read txn is pinned across the inter-block gap.
     let mut provider: Option<CachedStateProvider<EvmStateProviderBox>> = None;
