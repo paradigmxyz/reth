@@ -651,6 +651,7 @@ impl DefaultStateRootStrategy {
         let parent_span = Span::current();
         executor.clone().spawn_blocking_named("sparse-trie", move || {
             reth_tasks::once!(increase_thread_priority);
+            crate::tree::payload_validator::np_event("st_start", 0, 0);
 
             let parent_hash = parent_header.hash();
             let parent_state_root = parent_header.state_root();
@@ -748,6 +749,7 @@ impl DefaultStateRootStrategy {
                 chunk_size,
             );
 
+            crate::tree::payload_validator::np_event("st_run", 0, 0);
             let result = task.run();
             // Send the pending handle before the result so acceptance never waits for pruning.
             let trie_completer = if let Ok(outcome) = &result {
@@ -819,6 +821,7 @@ impl DefaultStateRootStrategy {
                 executor.spawn_drop(trie);
             }
             executor.spawn_drop(deferred);
+            crate::tree::payload_validator::np_event("st_end", 0, 0);
         });
     }
 }
