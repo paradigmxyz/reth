@@ -381,6 +381,25 @@ main's own p99 ranges from 128 to 162 ms across these runs. Persistence does not
 faster blocks even without durable commits (persist wait 4.7-7.7 ms against 0.5-1.0 ms on main):
 each save of ~18 blocks holds its write transaction for ~370 ms.
 
+### Chains through one contract's storage
+
+With the branch pages read at startup, the cold replay's p99 (75 ms locally, 68 ms on derek) is
+set by about ten blocks whose heaviest transaction walks a chain of dependent cold reads: through
+one contract's storage (26342682 through a contract with 1.77M slots, 26343111 and 26343120
+through one with a few hundred keys a block, 26342888, 26343115), through accounts and code of
+dozens of contracts (26342631, 26342690), or as the first transaction, which block execution
+executes without a probe (26343102). Probes cannot get ahead of a chain: every round re-executes
+the transaction up to its next miss (0.5-2.5 ms for the heaviest), slower than the speculation's
+own serial cold reads (~100 us), which already loaded most of what a round asks for.
+
+A probe that misses at most 8 slots, at least half in one contract, four rounds in a row now
+bulk-loads that contract's storage: 64 duplicate cursors walk the slot space in equal ranges on
+background threads, up to 2M slots, at most once a minute per contract. 148 loads in the 625
+blocks, 5-114 ms each. Cold, with the branch pages read (2 runs each): p99 74.4 -> 49.4 ms,
+26342682 117-152 -> 14 ms, 26343120 57 -> 33-47 ms, 26342742 69 -> 51 ms; mean 14.87 -> 15.06 ms
+and p90 22.2 -> 24.5 ms, from the loads' reads. A 512K-slot cap left the 1.77M-slot contract
+unloaded (26342682 back to 90-100 ms), and waiting for 8 rounds lost 26342742.
+
 ### The root after execution
 
 Warm, the root is ready 1.27 ms after post-execution validation (was 1.76 ms): ~0.6 ms of trie
