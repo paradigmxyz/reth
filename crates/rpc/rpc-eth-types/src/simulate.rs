@@ -28,6 +28,7 @@ use reth_primitives_traits::{
 use reth_rpc_convert::{RpcBlock, RpcConvert, RpcTxReq};
 use reth_rpc_server_types::result::rpc_err;
 use reth_storage_api::{noop::NoopProvider, HashedPostStateProvider, StateProvider};
+use reth_tasks::cancel::is_cancelled;
 use reth_trie_common::{HashedPostState, KeccakKeyHasher};
 use std::mem;
 
@@ -334,6 +335,9 @@ where
     let is_amsterdam = builder.evm_env().version().feature(EvmFeatures::EIP8037);
     let tx_gas_limit_cap = builder.evm_env().version().tx_gas_limit_cap;
     for mut call in calls {
+        if is_cancelled() {
+            return Err(EthApiError::InternalEthError)
+        }
         let block_gas_remaining = if is_amsterdam {
             let regular_available_gas = block_gas_limit.saturating_sub(block_regular_gas_used);
             let state_available_gas = block_gas_limit.saturating_sub(block_state_gas_used);
