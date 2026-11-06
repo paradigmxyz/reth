@@ -361,6 +361,8 @@ where
     ) where
         Tx: ExecutableTxFor<Evm> + Clone,
     {
+        // Probes only load ahead of execution, which must not wait for them.
+        reth_tasks::utils::lower_background_worker_priority();
         let mut state = ctx.evm_for_ctx();
         let Some((evm, misses)) = state.probe.as_mut() else { return };
         let mut idle = 0;
