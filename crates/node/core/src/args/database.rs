@@ -83,9 +83,10 @@ pub struct DatabaseArgs {
     /// Read the branch pages of the state and trie tables into the page cache at startup.
     ///
     /// After a restart the page cache is cold, and a state lookup then reads its tree's branch
-    /// pages from disk before its leaf. Reading them up front in the background, together with
-    /// the leaves that point to the trees of large storages (about 15 GB on mainnet), makes the
-    /// first blocks after a restart execute faster.
+    /// pages from disk before its leaf. Reading them up front, together with the leaves that
+    /// point to the trees of large storages (about 20 GB on mainnet), makes the first blocks
+    /// after a restart execute faster. Startup waits for it: about 10 seconds on an NVMe drive,
+    /// while reading them beside block execution would slow the first blocks down.
     #[arg(long = "db.warm-branch-pages")]
     pub warm_branch_pages: bool,
 }
