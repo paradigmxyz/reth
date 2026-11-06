@@ -268,10 +268,9 @@ pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> + Call {
             )?;
         }
 
-        // evm2's `BlockTransactionResult` only lends the result, so return a copy
         let (inspector, result) = executor
             .inspect_transaction_without_commit(target_tx, inspector)
-            .map(|(inspector, output)| (inspector, output.result().clone()))
+            .map(|(inspector, output)| (inspector, output.into_result()))
             .map_err(Self::Error::from_evm_err)?;
         let cache = executor.evm_mut().take_state_cache();
         drop(executor);
