@@ -239,10 +239,63 @@ Further changes and experiments on derek (4 run pairs against the branch unless 
 | Probe the first transaction too (local cold) | +8% | | no |
 
 So with durable commits, the remaining p99 is the persistence flush meeting a block's serial
-cold reads. Spreading the flush out slowed every block more than it helped the worst ones. A
-deferred durable sync (commit without syncing, sync every N batches) would recover most of the
-23%, at the cost of losing up to N batches on a crash; that is a durability decision, not made
-here.
+cold reads. Spreading the flush out slowed every block more than it helped the worst ones.
+
+`--db.sync-mode=safe-no-sync` already bounds what a crash loses: the first commit 60 s after the
+last flush flushes. `--db.sync-interval` sets that time. Flushing from a background thread
+instead of the commit is not possible with `mdbx_env_sync`: with `MDBX_NOSTICKYTHREADS` it takes a
+write transaction open on another thread as its caller's, skips the write lock, and the node
+aborted on an MDBX assertion during a commit. Writing the data file back with `fdatasync` from a
+thread does work, but made no difference locally (mean 17.05 ms durable, 17.46 ms with a 1 s
+interval, 17.95 ms with the thread): on the devbox's NVMe, commits take ~105 ms in every mode, so
+their cost there is not the flush. On derek, against main (4 run pairs each, with the change
+below):
+
+| | Mean | P99 | End-to-end Mgas/s | Persist wait |
+|---|---|---|---|---|
+| Durable | -22.7% | -41.3% (143 -> 84 ms) | +9.5% | 0.62 -> 4.47 ms |
+| `safe-no-sync`, `--db.sync-interval=12s` | -23.8% | -42.0% (133 -> 77 ms) | +30.6% | 0.76 -> 0.09 ms |
+
+With durable commits, persistence cannot keep up with the faster blocks: each save of ~18 blocks
+holds its write transaction for ~370 ms, and the benchmark waits for it.
+
+### Where block execution waits on a cold page cache
+
+Per-block counters of block execution (the committer) on the cold replay, 1,000 blocks:
+
+| Committer work per block | Count | Time |
+|---|---|---|
+| Executing transactions whose first speculation was still running after 300 us (raced) | 2.9 | 6.6 ms |
+| Spinning before racing | | 1.1 ms |
+| Re-executing stale results | 30.4 | 2.8 ms |
+| Executing transactions no worker had started | 3.0 | 1.4 ms |
+| Committing reused results | 270 | 1.7 ms |
+
+Almost every transaction is probed before block execution reaches it (303 of 306 per block, 1.2
+rounds each), so the probe keeps up. The slow blocks are one to four raced transactions each:
+26342682 240 ms on four, 26342631 175 ms on three, 26342742 83 ms on one, and 26343102 72 ms on
+its first transaction, which block execution executes itself. Racing executed the same chain of
+cold reads a second time beside the worker, and both waited on the disk. Waiting for the worker
+instead (local cold, 2 runs each):
+
+| Raced transactions | Mean | P90 | P99 | Root after execution |
+|---|---|---|---|---|
+| Executed by block execution after 300 us | 17.82 ms | 27.05 ms | 73.3 ms | 2.32 ms |
+| Waited for | 16.74 ms | 24.52 ms | 66.1 ms | 1.95 ms |
+| Waited for while their probe runs | 17.74 ms | 26.26 ms | 74.1 ms | 2.22 ms |
+
+Warm, waiting made no difference (11.35 vs 11.38 ms). Block execution now waits, and a guard
+clears the speculation flag so that a panicking worker cannot leave it waiting.
+
+The probes of the remaining slow transactions show three limits:
+
+- 64 rounds were not enough: 26342742's fifth transaction still found 38 keys a round when the cap
+  stopped it after 20 ms, and the worker then read the rest one at a time for another 50 ms.
+- A round re-executes the transaction from the start, ~0.85 ms for the heaviest ones, more than
+  a cold read: on pure chains (26343120's sixth transaction, 4 keys a round for 48 rounds) the
+  probe is no faster than the worker.
+- A probe whose miss cannot be loaded (code missing from the database) misses it again every
+  round until the cap.
 
 ## Rewrite: newPayload v2
 
