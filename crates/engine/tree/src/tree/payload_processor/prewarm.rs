@@ -374,7 +374,9 @@ where
         Tx: ExecutableTxFor<Evm> + Clone,
     {
         // Probes only load ahead of execution, which must not wait for them.
-        reth_tasks::utils::lower_background_worker_priority();
+        if std::env::var_os("RETH_NP_PROBE_NICE0").is_none() {
+            reth_tasks::utils::lower_background_worker_priority();
+        }
         let mut state = ctx.evm_for_ctx();
         let Some((evm, misses)) = state.probe.as_mut() else { return };
         let mut idle = 0;
@@ -1280,7 +1282,7 @@ impl<Tx, T: evm2::EvmTypes> SpeculationQueue<Tx, T> {
         Self {
             txs: (0..transaction_count).map(|_| OnceLock::new()).collect(),
             next: AtomicUsize::new(1),
-            next_probe: AtomicUsize::new(1),
+            next_probe: AtomicUsize::new(usize::from(std::env::var_os("RETH_NP_TX0").is_none())),
             closed: AtomicBool::new(false),
         }
     }
