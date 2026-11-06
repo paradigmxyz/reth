@@ -61,6 +61,11 @@ use tracing::{debug, debug_span, instrument, trace, trace_span, warn, Span};
 /// execute again.
 const REFRESH_WINDOW: usize = 64;
 
+/// Probe counters (experiment only): claimed, late at claim, completed, rounds, completed late,
+/// missed keys, completion micros.
+pub(crate) static NP_PROBE: [std::sync::atomic::AtomicU64; 7] =
+    [const { std::sync::atomic::AtomicU64::new(0) }; 7];
+
 /// Most rounds a transaction is probed for cold reads.
 ///
 /// Each round reaches the reads that depend on what the previous rounds loaded. Most transactions
@@ -268,6 +273,7 @@ where
     /// arrived transactions in block order as soon as they can, and otherwise execute again the
     /// stale results of the transactions block execution reaches next. With cold reads probed,
     /// [`PROBE_THREADS`] threads run [`Self::probe_loop`] beside them.
+    #[allow(clippy::too_many_lines)]
     fn speculate_txs<Tx>(
         ctx: &PrewarmContext<N, P, Evm>,
         pool: &WorkerStatefulPool,
@@ -354,6 +360,7 @@ where
     /// loaded values, until a round misses nothing or the transaction was executed. Missing slots
     /// read as a large value in every other round, so that batch calls pass their balance
     /// checks and reach every item.
+    #[allow(clippy::too_many_lines)]
     fn probe_loop<Tx>(
         ctx: &PrewarmContext<N, P, Evm>,
         results: &PrewarmResults<EvmTypesFor<Evm>>,
@@ -374,11 +381,15 @@ where
                 continue
             };
             idle = 0;
+            NP_PROBE[0].fetch_add(1, Ordering::Relaxed);
             if index < ctx.executed_tx_index.load(Ordering::Relaxed) {
+                NP_PROBE[1].fetch_add(1, Ordering::Relaxed);
                 continue
             }
             let (tx_env, _) = tx.clone().into_parts();
+            let probe_start = Instant::now();
             for round in 0..MAX_PROBE_ROUNDS {
+                NP_PROBE[3].fetch_add(1, Ordering::Relaxed);
                 if ctx.should_stop() {
                     return
                 }
@@ -392,8 +403,18 @@ where
                 let _ = evm.transact_and_discard(&tx_env, |_| ());
                 let missed = misses.take();
                 if missed.is_empty() {
+                    NP_PROBE[2].fetch_add(1, Ordering::Relaxed);
+                    if index < ctx.executed_tx_index.load(Ordering::Relaxed) {
+                        NP_PROBE[4].fetch_add(1, Ordering::Relaxed);
+                    }
+                    NP_PROBE[6]
+                        .fetch_add(probe_start.elapsed().as_micros() as u64, Ordering::Relaxed);
                     break
                 }
+                NP_PROBE[5].fetch_add(
+                    (missed.accounts.len() + missed.storage.len() + missed.code.len()) as u64,
+                    Ordering::Relaxed,
+                );
                 let mut accounts = missed.accounts;
                 accounts.sort_unstable();
                 accounts.dedup();

@@ -2170,5 +2170,10 @@ pub(crate) fn np_phases_log(number: u64, gas: u64) {
         .map(|(name, at)| format!("{name}={}", at.duration_since(start).as_micros()))
         .collect::<Vec<_>>()
         .join(" ");
-    info!(target: "engine::np_phases", number, gas, %line, "phases");
+    let probe = crate::tree::payload_processor::prewarm::NP_PROBE
+        .iter()
+        .map(|counter| counter.swap(0, Ordering::Relaxed).to_string())
+        .collect::<Vec<_>>()
+        .join(",");
+    info!(target: "engine::np_phases", number, gas, %line, %probe, "phases");
 }
