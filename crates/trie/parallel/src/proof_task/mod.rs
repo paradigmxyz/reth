@@ -31,7 +31,7 @@ use alloy_primitives::B256;
 use crossbeam_channel::{unbounded, Receiver as CrossbeamReceiver, Sender as CrossbeamSender};
 use reth_primitives_traits::FastInstant as Instant;
 use reth_provider::{DatabaseProviderROFactory, ProviderError, ProviderResult, StateProofProvider};
-use reth_tasks::{Runtime, WorkerPool};
+use reth_tasks::{BlockingWorkerPool, Runtime};
 use reth_trie::{DecodedMultiProofV2, MultiProofTargetsV2, ProofV2Target};
 use std::{
     sync::{
@@ -345,7 +345,7 @@ enum ProofWorkerKind {
 
 impl ProofWorkerKind {
     /// Returns the runtime pool the workers of this kind run on.
-    fn pool(self, runtime: &Runtime) -> &WorkerPool {
+    fn pool(self, runtime: &Runtime) -> &BlockingWorkerPool {
         match self {
             Self::Storage => runtime.proof_storage_worker_pool(),
             Self::Account => runtime.proof_account_worker_pool(),
@@ -398,7 +398,7 @@ fn spawn_workers<Factory, J>(
     let parent_span = tracing::Span::current();
     runtime.spawn_blocking_named(kind.task_name(), move || {
         let next_worker_id = AtomicUsize::new(0);
-        kind.pool(&rt).broadcast(worker_count, |_| {
+        kind.pool(&rt).broadcast(worker_count, move || {
             let worker_id = next_worker_id.fetch_add(1, Ordering::Relaxed);
             let _guard = kind.span(&parent_span, worker_id).entered();
 
