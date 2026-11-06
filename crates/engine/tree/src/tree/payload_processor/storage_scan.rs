@@ -27,6 +27,7 @@ pub(crate) fn load_storage<F>(factory: &F, address: Address) -> usize
 where
     F: DatabaseProviderFactory<Provider: StorageSettingsCache> + Sync,
 {
+    let np_start = std::time::Instant::now();
     let slots = std::thread::scope(|scope| {
         let ranges = (0..SCAN_RANGES)
             .map(|range| {
@@ -41,7 +42,7 @@ where
             .map(|handle| handle.join().unwrap_or_default())
             .sum()
     });
-    trace!(target: "engine::tree::payload_processor::prewarm", %address, slots, "Loaded storage");
+    tracing::info!(target: "engine::np_scan", %address, slots, elapsed_us = np_start.elapsed().as_micros() as u64, "Loaded storage");
     slots
 }
 
