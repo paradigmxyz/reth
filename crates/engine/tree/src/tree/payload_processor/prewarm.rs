@@ -61,6 +61,10 @@ use tracing::{debug, debug_span, instrument, trace, trace_span, warn, Span};
 /// execute again.
 const REFRESH_WINDOW: usize = 64;
 
+/// Send the proof targets of completed probes (experiment only).
+static NP_PROBE_HINTS: std::sync::LazyLock<bool> =
+    std::sync::LazyLock::new(|| std::env::var_os("RETH_NP_PROBE_HINTS").is_some());
+
 /// Probe round cap (experiment only).
 static NP_ROUNDS: std::sync::LazyLock<usize> = std::sync::LazyLock::new(|| {
     std::env::var("RETH_NP_ROUNDS").ok().and_then(|v| v.parse().ok()).unwrap_or(MAX_PROBE_ROUNDS)
@@ -315,7 +319,9 @@ where
                     let queue = &queue;
                     let spawned = std::thread::Builder::new()
                         .name(format!("prewarm-probe-{index}"))
-                        .spawn_scoped(probes, move || Self::probe_loop(ctx, results, queue, fetch));
+                        .spawn_scoped(probes, move || {
+                            Self::probe_loop(ctx, results, queue, fetch, state_root_hint_stream)
+                        });
                     if let Err(err) = spawned {
                         debug!(target: "engine::tree::payload_processor::prewarm", %err, "Failed to spawn probe thread");
                     }
@@ -370,6 +376,7 @@ where
         results: &PrewarmResults<EvmTypesFor<Evm>>,
         queue: &SpeculationQueue<Tx, EvmTypesFor<Evm>>,
         fetch: &BalPrewarmPool,
+        state_root_hint_stream: Option<&StateRootHintStream>,
     ) where
         Tx: ExecutableTxFor<Evm> + Clone,
     {
@@ -419,9 +426,19 @@ where
                 }
                 misses.guess_large(round % 2 == 0);
                 drop(evm.take_state_cache());
-                let _ = evm.transact_and_discard(&tx_env, |_| ());
+                let hints = state_root_hint_stream.filter(|_| *NP_PROBE_HINTS);
+                let targets = evm.transact_and_discard(&tx_env, |executed| {
+                    hints.map(|_| {
+                        MultiProofTargetsV2::from_account_changes(executed.account_changes())
+                    })
+                });
                 let missed = misses.take();
                 if missed.is_empty() {
+                    if let Some(stream) = hints &&
+                        let Ok(Some((targets, _))) = targets
+                    {
+                        stream.on_access_hint(targets.into());
+                    }
                     NP_PROBE[2].fetch_add(1, Ordering::Relaxed);
                     if index < ctx.executed_tx_index.load(Ordering::Relaxed) {
                         NP_PROBE[4].fetch_add(1, Ordering::Relaxed);
