@@ -77,6 +77,10 @@ const MAX_PROBE_ROUNDS: usize = 64;
 /// [`chain_contract`].
 const CHAIN_ROUNDS: usize = 4;
 
+static NP_CHAIN_ROUNDS: std::sync::LazyLock<usize> = std::sync::LazyLock::new(|| {
+    std::env::var("RETH_NP_CHAIN_ROUNDS").ok().and_then(|v| v.parse().ok()).unwrap_or(CHAIN_ROUNDS)
+});
+
 /// Most storage misses a probe round may have to count as a step of a chain.
 const CHAIN_ROUND_KEYS: usize = 8;
 
@@ -447,7 +451,8 @@ where
                     Some((chained, rounds)) if chained == address => (address, rounds + 1),
                     _ => (address, 1),
                 });
-                if let Some((address, CHAIN_ROUNDS)) = chain &&
+                if let Some((address, rounds)) = chain &&
+                    rounds == *NP_CHAIN_ROUNDS &&
                     fetch.claim_storage_load(address)
                 {
                     let factory = ctx.provider.factory().clone();
