@@ -4,6 +4,7 @@ use std::{
     any::Any,
     panic::{self, AssertUnwindSafe},
     sync::Arc,
+    time::Duration,
 };
 
 use super::{StateRootComputeOutcome, StateRootMessage};
@@ -183,6 +184,9 @@ pub(super) struct SparseTrieCacheTask<A = ArenaParallelSparseTrie, S = ArenaPara
     pending_targets: PendingTargets,
     /// Proof jobs queued on the workers whose results have not been received yet.
     in_flight_proof_jobs: usize,
+    /// Proof target batches dispatched after the finish marker. Each is a round trip the root
+    /// waits for unless it overlaps an earlier one.
+    proof_rounds_after_finish: u64,
     /// Everything the task knows about a storage trie touched by this block: the trie itself, its
     /// queued leaf updates, the proof nodes waiting to be revealed into it and its proof target
     /// cache. See [`StorageTrieState`].
@@ -202,8 +206,9 @@ pub(super) struct SparseTrieCacheTask<A = ArenaParallelSparseTrie, S = ArenaPara
     /// Number of pending execution/prewarming updates received but not yet passed to
     /// `update_leaves`.
     pending_updates: usize,
-    /// Whether the first buffered leaf batch has been applied.
-    initial_updates_applied: bool,
+    /// When buffered updates were last applied together with account promotion. Bounds how long
+    /// a continuous update stream can defer trie work, see [`Self::window_due`].
+    window_started: Instant,
     /// Combined final hashed state.
     ///
     /// Sparse trie task observes and hashes all state updates, allowing it to cheaply construct a
@@ -267,13 +272,14 @@ where
             storage_cache_misses: 0,
             pending_targets: Default::default(),
             in_flight_proof_jobs: 0,
+            proof_rounds_after_finish: 0,
             storage: Default::default(),
             storage_to_drop: Default::default(),
             storage_in_flight: 0,
             storage_done_tx,
             storage_done_rx,
             pending_updates: Default::default(),
-            initial_updates_applied: false,
+            window_started: Instant::now(),
             final_hashed_state: Default::default(),
             metrics,
         }
@@ -370,6 +376,7 @@ where
         let mut idle_start = Instant::now();
         let mut done = false;
         let mut finalized_hashed_state = None;
+        let mut finished_at = now;
 
         // Streaming phase: updates are still arriving. Ends when the finish marker is
         // processed. Only producers hold update senders, so the channel closing before the
@@ -389,6 +396,7 @@ where
                     ))?;
                     if let Some(hashed_state) = self.on_message(update) {
                         finalized_hashed_state = Some(hashed_state);
+                        finished_at = wake;
                     }
                     self.pending_updates += 1;
                 }
@@ -492,6 +500,12 @@ where
         let end = Instant::now();
         self.metrics.sparse_trie_final_update_duration_histogram.record(end.duration_since(start));
         self.metrics.sparse_trie_total_duration_histogram.record(end.duration_since(now));
+        self.metrics
+            .sparse_trie_finish_to_root_duration_histogram
+            .record(end.duration_since(finished_at));
+        self.metrics
+            .sparse_trie_proof_rounds_after_finish_histogram
+            .record(self.proof_rounds_after_finish as f64);
 
         self.metrics.sparse_trie_account_cache_hits.record(self.account_cache_hits as f64);
         self.metrics.sparse_trie_account_cache_misses.record(self.account_cache_misses as f64);
@@ -552,6 +566,7 @@ where
             self.process_new_updates()?;
             self.promote_pending_account_updates()?;
             self.metrics.sparse_trie_process_updates_duration_histogram.record(t.elapsed());
+            self.window_started = Instant::now();
 
             if self.finished_state_updates && !self.has_pending_sparse_trie_updates() {
                 return Ok(true);
@@ -565,16 +580,18 @@ where
             if self.proof_worker_handle.results().is_empty() {
                 self.trie.calculate_subtries(self.new_epoch);
             }
-        } else if !updates_queued {
-            // If we don't have any pending updates, apply them to the trie,
+        } else if self.window_due() {
+            // A producer that streams updates without gaps never leaves the queue empty, so
+            // without a window all trie work would wait for the finish marker.
             let t = Instant::now();
             self.process_new_updates()?;
+            self.dispatch_pending_targets()?;
+            self.promote_pending_account_updates()?;
             self.metrics.sparse_trie_process_updates_duration_histogram.record(t.elapsed());
             self.dispatch_pending_targets()?;
-        } else if !self.initial_updates_applied && self.pending_updates >= INITIAL_UPDATE_BATCH_SIZE
-        {
-            // Start proof fetching before a continuously arriving state stream drains. Later
-            // batches retain the usual coalescing policy to avoid repeatedly sorting small maps.
+            self.window_started = Instant::now();
+        } else if !updates_queued {
+            // If we don't have any pending updates, apply them to the trie,
             let t = Instant::now();
             self.process_new_updates()?;
             self.metrics.sparse_trie_process_updates_duration_histogram.record(t.elapsed());
@@ -584,6 +601,17 @@ where
             self.dispatch_pending_targets()?;
         }
         Ok(false)
+    }
+
+    /// Returns whether the streaming phase has deferred trie work for long enough that the next
+    /// [`Self::make_progress`] applies buffered updates and promotes account updates even though
+    /// more input is queued: after [`UPDATE_WINDOW_LEN`] update messages, or once
+    /// [`UPDATE_WINDOW_INTERVAL`] has passed since the last time it did. The trie work left after
+    /// the finish marker is then at most the last window's.
+    fn window_due(&self) -> bool {
+        !self.finished_state_updates &&
+            (self.pending_updates >= UPDATE_WINDOW_LEN ||
+                self.window_started.elapsed() >= UPDATE_WINDOW_INTERVAL)
     }
 
     /// Processes a [`SparseTrieTaskMessage`] from the hashing task.
@@ -756,7 +784,6 @@ where
 
         let _span = debug_span!("process_new_updates").entered();
         self.pending_updates = 0;
-        self.initial_updates_applied = true;
 
         // Queue the new storage updates on their entries; the jobs apply them to the tries.
         let Self { storage, trie, new_storage_updates, .. } = self;
@@ -1118,6 +1145,9 @@ where
         }
 
         let _span = trace_span!("dispatch_pending_targets").entered();
+        if self.finished_state_updates {
+            self.proof_rounds_after_finish += 1;
+        }
         let (targets, chunking_length) = self.pending_targets.take();
         let mut dispatch_error = None;
         dispatch_with_chunking(
@@ -1511,6 +1541,11 @@ pub(super) struct SparseTrieTaskMetrics {
     pub(super) sparse_trie_final_update_duration_histogram: Histogram,
     /// Histogram of sparse trie total durations.
     pub(super) sparse_trie_total_duration_histogram: Histogram,
+    /// Histogram of durations from receiving the finish marker to the computed root: the part of
+    /// the state root that does not overlap block execution.
+    pub(super) sparse_trie_finish_to_root_duration_histogram: Histogram,
+    /// Histogram of proof target batches dispatched after the finish marker.
+    pub(super) sparse_trie_proof_rounds_after_finish_histogram: Histogram,
     /// Time spent preparing the sparse trie for reuse after state root computation.
     pub(super) into_trie_for_reuse_duration_histogram: Histogram,
     /// Time spent pruning the sparse trie by node epoch.
@@ -1541,8 +1576,13 @@ pub(super) struct SparseTrieTaskMetrics {
 /// fetched by a single worker. If exceeded, chunking is forced regardless of worker availability.
 const DEFAULT_MAX_TARGETS_FOR_CHUNKING: usize = 300;
 
-/// Start proof fetching while the first state-update batch is still arriving.
-const INITIAL_UPDATE_BATCH_SIZE: usize = 64;
+/// Update messages after which a continuous stream applies its buffered updates and promotes
+/// account updates, see [`SparseTrieCacheTask::window_due`].
+const UPDATE_WINDOW_LEN: usize = 16;
+
+/// Time after which a continuous stream applies its buffered updates and promotes account updates,
+/// see [`SparseTrieCacheTask::window_due`].
+const UPDATE_WINDOW_INTERVAL: Duration = Duration::from_millis(1);
 
 /// A round of storage passes that would do at most this much work - proof nodes to reveal plus
 /// leaf updates to apply - runs on the sparse trie task itself, because handing the tries to
@@ -1651,7 +1691,9 @@ enum SparseTrieTaskMessage {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_primitives::{B256, U256};
+    use alloy_primitives::{keccak256, B256, U256};
+    use rand::{rngs::StdRng, Rng, SeedableRng};
+    use reth_chainspec::MAINNET;
     use reth_db_common::init::init_genesis;
     use reth_provider::test_utils::create_test_provider_factory;
     use reth_storage_overlay::{OverlayManager, OverlayStateProviderFactory};
@@ -1660,6 +1702,7 @@ mod tests {
     };
     use reth_trie_parallel::proof_task::{ProofTaskCtx, ProofWorkerCounts};
     use reth_trie_sparse::ArenaParallelSparseTrie;
+    use std::collections::BTreeMap;
 
     fn drain_sparse_trie_tasks(runtime: &Runtime) {
         for task_name in ["trie-hashing", "storage-workers", "account-workers"] {
@@ -2252,84 +2295,272 @@ mod tests {
     }
 
     #[test]
-    fn first_leaf_batch_starts_proofs_before_input_queue_drains() {
-        let runtime = reth_tasks::Runtime::test();
-        let provider_factory = create_test_provider_factory();
-        let anchor_hash = init_genesis(&provider_factory).expect("failed to initialize genesis");
-        let state_provider_factory = OverlayStateProviderFactory::new(
-            provider_factory,
-            OverlayManager::<reth_chain_state::EthPrimitives>::default()
-                .overlay_builder(anchor_hash),
-        );
-        let proof_worker_handle = ProofWorkerHandle::new(
-            &runtime,
-            ProofTaskCtx::new(state_provider_factory),
-            ProofWorkerCounts::full(&runtime),
-            Default::default(),
-        );
-
-        let default_trie = RevealableSparseTrie::blind_from(ArenaParallelSparseTrie::default());
+    fn streamed_updates_are_applied_in_windows_before_the_stream_drains() {
+        let runtime = Runtime::test();
         let trie = SparseStateTrie::default()
-            .with_accounts_trie(default_trie.clone())
-            .with_default_storage_trie(default_trie)
+            .with_accounts_trie(RevealableSparseTrie::<ArenaParallelSparseTrie>::revealed_empty())
+            .with_default_storage_trie(RevealableSparseTrie::revealed_empty())
             .with_updates(true);
+        let (mut task, updates_tx, _cancel_guard) = test_task(&runtime, trie);
 
-        let parent_state_root = B256::repeat_byte(0x55);
-        let (updates_tx, updates_rx) = crossbeam_channel::unbounded();
-        let (_cancel_guard, cancel_rx) = crossbeam_channel::bounded::<()>(0);
-        let mut task = SparseTrieCacheTask::new_with_trie(
-            &runtime,
-            updates_rx,
-            cancel_rx,
-            std::sync::mpsc::channel().0,
-            proof_worker_handle,
-            SparseTrieTaskMetrics::default(),
-            trie,
-            parent_state_root,
-            TrieNodeEpoch::UNMODIFIED,
-            1,
-        );
-
-        // Keep an input queued so progress cannot use its normal queue-empty flush.
+        // Keep an input queued so progress cannot use its queue-empty flush.
         updates_tx.send(StateRootMessage::PrefetchProofs(Default::default())).unwrap();
         let deadline = std::time::Instant::now();
         while task.updates.is_empty() {
             assert!(deadline.elapsed() < std::time::Duration::from_secs(1));
             std::thread::yield_now();
         }
-        for index in 0..INITIAL_UPDATE_BATCH_SIZE {
-            let mut state = HashedPostState::default();
-            state.accounts.insert(
-                B256::repeat_byte(index as u8),
-                Some(Account { nonce: 1, ..Default::default() }),
-            );
-            task.on_hashed_state_update(state);
-            task.pending_updates += 1;
-            assert!(!task.make_progress().unwrap());
-            if index + 1 < INITIAL_UPDATE_BATCH_SIZE {
-                assert_eq!(task.in_flight_proof_jobs, 0);
-            }
-        }
-        assert!(task.in_flight_proof_jobs > 0, "proof work must start before the queue drains");
-        assert_eq!(task.pending_updates, 0);
 
-        // A second batch remains buffered; the early flush must not become a permanent small
-        // batch policy that repeatedly scans and sorts pending leaves.
-        for index in INITIAL_UPDATE_BATCH_SIZE..INITIAL_UPDATE_BATCH_SIZE * 2 {
+        let address = |index: usize| B256::from(U256::from(index + 1));
+        let streamed = UPDATE_WINDOW_LEN * 3;
+        for index in 0..streamed {
             let mut state = HashedPostState::default();
-            state.accounts.insert(
-                B256::repeat_byte(index as u8),
-                Some(Account { nonce: 1, ..Default::default() }),
-            );
+            state.accounts.insert(address(index), Some(Account { nonce: 1, ..Default::default() }));
             task.on_hashed_state_update(state);
             task.pending_updates += 1;
             assert!(!task.make_progress().unwrap());
         }
-        assert_eq!(task.pending_updates, INITIAL_UPDATE_BATCH_SIZE);
-        assert_eq!(task.new_account_updates.len(), INITIAL_UPDATE_BATCH_SIZE);
+
+        // Only the updates since the last window are still buffered; every earlier account is
+        // already a leaf of the trie.
+        assert!(
+            task.pending_updates < UPDATE_WINDOW_LEN,
+            "{} updates deferred",
+            task.pending_updates
+        );
+        for index in 0..streamed - task.pending_updates {
+            assert!(task.trie.get_account_value(&address(index)).is_some(), "account {index}");
+        }
+
         drop(updates_tx);
         drop(task);
         drain_sparse_trie_tasks(&runtime);
+    }
+
+    /// How [`root_with_schedule`] feeds a block's messages to the task.
+    #[derive(Clone, Copy, Debug)]
+    enum Schedule {
+        /// All state updates merged into one message, so the trie sees each leaf once.
+        Merged,
+        /// Every message queued before the task runs, so the queue never runs empty and only
+        /// windows apply updates before the finish marker.
+        Continuous,
+        /// Every message followed by progress on an empty queue.
+        Gaps,
+    }
+
+    /// Generates a block of messages against the mainnet genesis state: a beneficiary paid by every
+    /// transaction, balance changes, deletions and recreations of genesis accounts, new contracts
+    /// whose slots are set, overwritten and cleared by later transactions, and prefetch hints.
+    /// Returns the messages and the root of the state they leave.
+    fn random_genesis_block(seed: u64, transactions: usize) -> (Vec<StateRootMessage>, B256) {
+        let mut rng = StdRng::seed_from_u64(seed);
+        let mut accounts = MAINNET
+            .genesis
+            .alloc
+            .iter()
+            .map(|(address, account)| {
+                let account = Account {
+                    nonce: account.nonce.unwrap_or_default(),
+                    balance: account.balance,
+                    bytecode_hash: None,
+                };
+                (keccak256(address), account)
+            })
+            .collect::<B256Map<_>>();
+        let mut genesis = accounts.keys().copied().collect::<Vec<_>>();
+        genesis.sort_unstable();
+        let beneficiary = genesis[0];
+        let mut contracts = Vec::<B256>::new();
+        // Ordered, so that picking an existing slot is the same on every call.
+        let mut storages = B256Map::<BTreeMap<B256, U256>>::default();
+
+        let set_account = |state: &mut HashedPostState,
+                           accounts: &mut B256Map<Account>,
+                           address: B256,
+                           account: Option<Account>| {
+            state.accounts.insert(address, account);
+            match account {
+                Some(account) => accounts.insert(address, account),
+                None => accounts.remove(&address),
+            };
+        };
+
+        let mut messages = Vec::new();
+        for _ in 0..transactions {
+            let mut state = HashedPostState::default();
+
+            let paid = accounts.get(&beneficiary).copied().unwrap_or_default();
+            set_account(
+                &mut state,
+                &mut accounts,
+                beneficiary,
+                Some(Account { balance: paid.balance + U256::ONE, ..paid }),
+            );
+
+            match rng.random_range(0..10) {
+                0..4 => {
+                    let address = genesis[rng.random_range(1..genesis.len())];
+                    let account = accounts
+                        .get(&address)
+                        .map(|account| Account {
+                            nonce: account.nonce + 1,
+                            balance: account.balance + U256::from(rng.random::<u64>()),
+                            ..*account
+                        })
+                        .unwrap_or_else(|| Account { nonce: 1, ..Default::default() });
+                    set_account(&mut state, &mut accounts, address, Some(account));
+                }
+                4..6 => {
+                    let address = B256::from(rng.random::<[u8; 32]>());
+                    set_account(
+                        &mut state,
+                        &mut accounts,
+                        address,
+                        Some(Account { nonce: 1, ..Default::default() }),
+                    );
+                    contracts.push(address);
+                    let slots = state.storages.entry(address).or_default();
+                    for _ in 0..rng.random_range(1..8) {
+                        let slot = B256::from(rng.random::<[u8; 32]>());
+                        let value = U256::from(rng.random::<u64>()) + U256::ONE;
+                        slots.storage.insert(slot, value);
+                        storages.entry(address).or_default().insert(slot, value);
+                    }
+                }
+                6..9 if !contracts.is_empty() => {
+                    let address = contracts[rng.random_range(0..contracts.len())];
+                    let current = storages.entry(address).or_default();
+                    let slots = state.storages.entry(address).or_default();
+                    for _ in 0..rng.random_range(1..4) {
+                        let existing = (!current.is_empty() && rng.random_bool(0.6)).then(|| {
+                            *current.keys().nth(rng.random_range(0..current.len())).unwrap()
+                        });
+                        match existing {
+                            Some(slot) if rng.random_bool(0.5) => {
+                                current.remove(&slot);
+                                slots.storage.insert(slot, U256::ZERO);
+                            }
+                            existing => {
+                                let slot = existing
+                                    .unwrap_or_else(|| B256::from(rng.random::<[u8; 32]>()));
+                                let value = U256::from(rng.random::<u64>()) + U256::ONE;
+                                current.insert(slot, value);
+                                slots.storage.insert(slot, value);
+                            }
+                        }
+                    }
+                }
+                6..9 => {}
+                _ => {
+                    let address = genesis[rng.random_range(1..genesis.len())];
+                    set_account(&mut state, &mut accounts, address, None);
+
+                    let mut hint = MultiProofTargetsV2::default();
+                    for _ in 0..4 {
+                        let target = genesis[rng.random_range(1..genesis.len())];
+                        hint.account_targets.push(ProofV2Target::new(target));
+                    }
+                    messages.push(StateRootMessage::PrefetchProofs(hint));
+                }
+            }
+            messages.push(StateRootMessage::HashedStateUpdate(state));
+        }
+
+        let root = reth_trie_common::root::state_root_unsorted(accounts.into_iter().map(
+            |(address, account)| {
+                let storage = storages.get(&address).into_iter().flatten();
+                let storage_root = reth_trie_common::root::storage_root_unsorted(
+                    storage.map(|(slot, value)| (*slot, *value)),
+                );
+                (address, account.into_trie_account(storage_root))
+            },
+        ));
+        (messages, root)
+    }
+
+    /// Runs the task over `messages` on a blind trie of the mainnet genesis state, fed according
+    /// to `schedule`, and returns its root and trie updates.
+    fn root_with_schedule(
+        messages: Vec<StateRootMessage>,
+        schedule: Schedule,
+    ) -> (B256, TrieUpdates) {
+        let runtime = Runtime::test();
+        let default_trie = RevealableSparseTrie::blind_from(ArenaParallelSparseTrie::default());
+        let trie = SparseStateTrie::default()
+            .with_accounts_trie(default_trie.clone())
+            .with_default_storage_trie(default_trie)
+            .with_updates(true);
+        let (mut task, updates_tx, _cancel_guard) = test_task(&runtime, trie);
+
+        let queued = match schedule {
+            Schedule::Merged => {
+                let mut merged = HashedPostState::default();
+                for message in messages {
+                    if let StateRootMessage::HashedStateUpdate(state) = message {
+                        merged.extend(state);
+                    }
+                }
+                updates_tx.send(StateRootMessage::HashedStateUpdate(merged)).unwrap();
+                1
+            }
+            Schedule::Continuous => {
+                let queued = messages.len();
+                for message in messages {
+                    updates_tx.send(message).unwrap();
+                }
+                queued
+            }
+            Schedule::Gaps => {
+                for message in messages {
+                    let message = match message {
+                        StateRootMessage::HashedStateUpdate(state) => {
+                            SparseTrieTaskMessage::HashedState(state)
+                        }
+                        StateRootMessage::PrefetchProofs(targets) => {
+                            SparseTrieTaskMessage::PrefetchProofs(targets)
+                        }
+                        _ => unreachable!("blocks are made of hashed updates and hints"),
+                    };
+                    task.on_message(message);
+                    task.pending_updates += 1;
+                    assert!(!task.make_progress().unwrap());
+                }
+                0
+            }
+        };
+        updates_tx.send(StateRootMessage::FinishedStateUpdates).unwrap();
+
+        // Start only once the hashing task forwarded everything, so a continuous stream is
+        // never seen with a gap.
+        let deadline = std::time::Instant::now();
+        while task.updates.len() < queued + 1 {
+            assert!(deadline.elapsed() < std::time::Duration::from_secs(10));
+            std::thread::yield_now();
+        }
+
+        let outcome = task.run().expect("state root computation should succeed");
+
+        drop(updates_tx);
+        drop(task);
+        drain_sparse_trie_tasks(&runtime);
+        (outcome.state_root, Arc::unwrap_or_clone(outcome.trie_updates))
+    }
+
+    #[test]
+    fn windowed_streams_produce_the_root_and_trie_updates_of_a_merged_update() {
+        for seed in 0..2 {
+            let (messages, expected_root) = random_genesis_block(seed, UPDATE_WINDOW_LEN * 20);
+            let (merged_root, merged_updates) = root_with_schedule(messages, Schedule::Merged);
+            assert_eq!(merged_root, expected_root, "seed {seed}");
+
+            for schedule in [Schedule::Continuous, Schedule::Gaps] {
+                let (messages, _) = random_genesis_block(seed, UPDATE_WINDOW_LEN * 20);
+                let (root, updates) = root_with_schedule(messages, schedule);
+                assert_eq!(root, expected_root, "seed {seed}, {schedule:?}");
+                assert_eq!(updates, merged_updates, "seed {seed}, {schedule:?}");
+            }
+        }
     }
 
     #[test]
