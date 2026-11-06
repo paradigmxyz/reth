@@ -85,7 +85,8 @@ pub use reth_trie_parallel::{
     },
 };
 use reth_trie_sparse::{
-    ArenaParallelSparseTrie, RevealableSparseTrie, SparseStateTrie, TrieNodeEpoch,
+    ArenaParallelSparseTrie, ArenaParallelismThresholds, RevealableSparseTrie, SparseStateTrie,
+    TrieNodeEpoch,
 };
 use std::{
     fmt,
@@ -669,8 +670,16 @@ impl DefaultStateRootStrategy {
                 );
                 let default_trie =
                     RevealableSparseTrie::blind_from(ArenaParallelSparseTrie::default());
+                let accounts_trie = RevealableSparseTrie::blind_from(
+                    ArenaParallelSparseTrie::default().with_parallelism_thresholds(
+                        ArenaParallelismThresholds {
+                            min_dirty_leaves: ACCOUNT_TRIE_PARALLEL_DIRTY_LEAVES,
+                            ..Default::default()
+                        },
+                    ),
+                );
                 SparseStateTrie::default()
-                    .with_accounts_trie(default_trie.clone())
+                    .with_accounts_trie(accounts_trie)
                     .with_default_storage_trie(default_trie)
                     .with_updates(true)
             };
@@ -876,6 +885,13 @@ pub struct StateRootTaskOptions<'a, N: NodePrimitives> {
     /// `None` disables pruning; an empty chain means the parent is durable.
     pub pending_sparse_trie_prune_blocks: Option<Vec<ExecutedBlock<N>>>,
 }
+
+/// Number of dirty leaves from which the account trie hashes its subtries in parallel.
+///
+/// A dirty account leaf takes about 10 us to hash, so a few of them already outweigh handing the
+/// subtries to the pool. Hashing them serially runs on the sparse trie thread, often after the last
+/// transaction.
+const ACCOUNT_TRIE_PARALLEL_DIRTY_LEAVES: u64 = 4;
 
 fn sparse_trie_prune_target<N: NodePrimitives>(
     current_anchor: B256,
