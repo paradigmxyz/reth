@@ -15,6 +15,7 @@
 //! per bucket, including proven discoveries retained outside a full routing bucket. Unproven
 //! records do not consume quota. Each bucket retains at most one bucket's worth of overflow
 //! peers until their endpoint proofs expire, without evicting entries to admit new identities.
+//! Peers rejected by subnet limits can still establish endpoint proofs and query the service.
 //!
 //! ## Feature Flags
 //!
@@ -1253,7 +1254,11 @@ impl Discv4Service {
         self.send_packet(pong, remote_addr);
 
         if !self.is_subnet_allowed(&record) {
-            trace!(target: "discv4", ?record, "ignoring ping sender, subnet limit reached");
+            trace!(target: "discv4", ?record, "rejecting routing admission, subnet limit reached");
+            // FindNode and ENRRequest require a bond even when the sender cannot enter the table.
+            if !self.has_bond(record.id, record.address) {
+                self.try_ping(record, PingReason::EstablishBond);
+            }
             return
         }
 
@@ -1462,7 +1467,7 @@ impl Discv4Service {
                 }
             }
             PingReason::EstablishBond => {
-                // no initial lookup needed here since the node was already in the table.
+                // Bonding does not start a lookup and may involve peers excluded from the table.
                 self.update_on_pong(node, pong.enr_sq);
             }
             PingReason::RePing => {
@@ -4200,7 +4205,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_subnet_rejected_ping_only_sends_pong() {
+    async fn test_subnet_rejected_ping_sends_pong_and_bond_ping() {
         let (_, mut service) = create_discv4().await;
         let (egress, mut packets) = mpsc::channel(16);
         service.egress = egress;
@@ -4230,8 +4235,15 @@ mod tests {
             panic!("expected pong");
         };
         assert_eq!(pong.echo, echo);
+        let (packet, to) = packets.try_recv().unwrap();
+        assert_eq!(to, addr);
+        assert_matches::assert_matches!(Message::decode(&packet).unwrap().msg, Message::Ping(_));
         assert_eq!(packets.try_recv(), Err(mpsc::error::TryRecvError::Empty));
-        assert!(service.pending_pings.is_empty());
+        assert_eq!(service.pending_pings.len(), 1);
+        assert_matches::assert_matches!(
+            &service.pending_pings[&record.id].reason,
+            PingReason::EstablishBond
+        );
         assert!(service.queued_pings.is_empty());
         assert!(service.pending_enr_requests.is_empty());
         assert_eq!(service.on_entry(record.id, |entry| entry.has_endpoint_proof), None);
@@ -4422,13 +4434,17 @@ mod tests {
                 updates.try_recv(),
                 Err(mpsc::error::TryRecvError::Empty)
             );
+            let echo = service.pending_pings[&record.id].echo_hash;
+            service.on_pong(make_pong(&service, echo), addr, record.id);
+            assert!(service.has_bond(record.id, addr.ip()));
             if i < filter::MAX_NODES_PER_SUBNET_BUCKET {
-                let echo = service.pending_pings[&record.id].echo_hash;
-                service.on_pong(make_pong(&service, echo), addr, record.id);
-                assert!(service.has_bond(record.id, addr.ip()));
                 assert_matches::assert_matches!(updates.try_recv(), Ok(DiscoveryUpdate::DiscoveredAtCapacity(added)) if added == record);
             } else {
-                assert!(!service.pending_pings.contains_key(&record.id));
+                assert!(service.node_at_capacity(record.id).is_none());
+                assert_matches::assert_matches!(
+                    updates.try_recv(),
+                    Err(mpsc::error::TryRecvError::Empty)
+                );
             }
             candidates.push(record);
         }
@@ -4874,6 +4890,133 @@ mod tests {
                 updates.try_recv(),
                 Err(mpsc::error::TryRecvError::Empty)
             );
+        }
+    }
+
+    #[tokio::test]
+    async fn test_subnet_rejected_peer_can_bond_and_query() {
+        check_subnet_rejected_peer_bonds(None).await;
+    }
+
+    #[tokio::test]
+    async fn test_subnet_rejected_secondary_ip_can_bond_and_query() {
+        check_subnet_rejected_peer_bonds(Some("[2001:db8:1::1]:30303".parse().unwrap())).await;
+    }
+
+    /// Checks that bucket and table quotas restrict admission without preventing endpoint proofs.
+    async fn check_subnet_rejected_peer_bonds(primary: Option<SocketAddr>) {
+        for table_limit in [false, true] {
+            let (_, mut service) = create_discv4().await;
+            let (egress, mut packets) = mpsc::channel(32);
+            service.egress = egress;
+            let last_bucket = service.kbuckets.buckets_iter().count() - 1;
+            let addr = "203.0.113.1:30303".parse().unwrap();
+            let limit = if table_limit {
+                filter::MAX_NODES_PER_SUBNET_TABLE
+            } else {
+                filter::MAX_NODES_PER_SUBNET_BUCKET
+            };
+            for i in 0..limit {
+                let record = record_in_bucket(
+                    &service,
+                    addr,
+                    last_bucket - i / filter::MAX_NODES_PER_SUBNET_BUCKET,
+                );
+                insert_proven_node(&mut service, record);
+            }
+            // Use an empty bucket to exercise the table quota independently of the bucket quota.
+            let bucket = if table_limit {
+                last_bucket - limit / filter::MAX_NODES_PER_SUBNET_BUCKET
+            } else {
+                last_bucket
+            };
+            let record = record_in_bucket(&service, addr, bucket);
+            let primary = primary.map(|addr| NodeRecord::new(addr, record.id));
+            if let Some(primary) = primary {
+                insert_proven_node(&mut service, primary);
+            }
+            let mut updates = service.update_stream().into_inner();
+            assert!(!service.is_subnet_allowed(&record));
+            let ping = Ping {
+                from: record.into(),
+                to: service.local_node_record.into(),
+                expire: service.ping_expiration(),
+                enr_sq: Some(1),
+            };
+            service.on_ping(ping.clone(), addr, record.id, B256::random());
+            let (packet, to) = packets.try_recv().unwrap();
+            assert_eq!(to, addr);
+            assert_matches::assert_matches!(
+                Message::decode(&packet).unwrap().msg,
+                Message::Pong(_)
+            );
+            let (packet, to) = packets.try_recv().unwrap();
+            assert_eq!(to, addr);
+            assert_matches::assert_matches!(
+                Message::decode(&packet).unwrap().msg,
+                Message::Ping(_)
+            );
+            assert_eq!(packets.try_recv(), Err(mpsc::error::TryRecvError::Empty));
+
+            // Queries remain gated on the reciprocal proof, even for an admitted identity.
+            let find_node =
+                FindNode { id: PeerId::random(), expire: service.find_node_expiration() };
+            let request_hash = B256::random();
+            service.on_find_node(find_node, addr, record.id);
+            service.on_enr_request(
+                EnrRequest { expire: service.enr_request_expiration() },
+                addr,
+                record.id,
+                request_hash,
+            );
+            assert_eq!(packets.try_recv(), Err(mpsc::error::TryRecvError::Empty));
+            let request = &service.pending_pings[&record.id];
+            assert_matches::assert_matches!(&request.reason, PingReason::EstablishBond);
+            let mut pong = make_pong(&service, request.echo_hash);
+            pong.enr_sq = Some(1);
+            service.on_pong(pong, addr, record.id);
+            assert!(service.has_bond(record.id, addr.ip()));
+            assert_eq!(service.on_entry(record.id, |entry| entry.record), primary);
+            assert_eq!(service.num_connected(), limit + usize::from(primary.is_some()));
+            assert!(service.at_capacity.iter().all(Vec::is_empty));
+            assert!(service.pending_pings.is_empty());
+            assert!(service.pending_enr_requests.is_empty());
+            assert_eq!(packets.try_recv(), Err(mpsc::error::TryRecvError::Empty));
+            assert_matches::assert_matches!(
+                updates.try_recv(),
+                Err(mpsc::error::TryRecvError::Empty)
+            );
+
+            service.on_find_node(find_node, addr, record.id);
+            let (packet, to) = packets.try_recv().unwrap();
+            assert_eq!(to, addr);
+            assert_matches::assert_matches!(
+                Message::decode(&packet).unwrap().msg,
+                Message::Neighbours(_)
+            );
+            assert_eq!(packets.try_recv(), Err(mpsc::error::TryRecvError::Empty));
+            service.on_enr_request(
+                EnrRequest { expire: service.enr_request_expiration() },
+                addr,
+                record.id,
+                request_hash,
+            );
+            let (packet, to) = packets.try_recv().unwrap();
+            assert_eq!(to, addr);
+            assert_matches::assert_matches!(Message::decode(&packet).unwrap().msg, Message::EnrResponse(response) if response.request_hash == request_hash && response.enr == service.local_eip_868_enr);
+
+            // A repeated ping reuses the bond without another ping or ENR request.
+            service.on_ping(ping, addr, record.id, B256::random());
+            let (packet, to) = packets.try_recv().unwrap();
+            assert_eq!(to, addr);
+            assert_matches::assert_matches!(
+                Message::decode(&packet).unwrap().msg,
+                Message::Pong(_)
+            );
+            assert_eq!(packets.try_recv(), Err(mpsc::error::TryRecvError::Empty));
+            assert!(service.pending_pings.is_empty());
+            assert!(service.queued_pings.is_empty());
+            assert!(service.pending_enr_requests.is_empty());
         }
     }
 }
