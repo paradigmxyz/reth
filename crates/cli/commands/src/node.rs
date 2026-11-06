@@ -215,21 +215,10 @@ where
         let database = init_db(db_path.clone(), self.db.database_args())?
             .with_metrics_if(self.db.metrics_enabled());
         if self.db.warm_branch_pages {
-            let database = database.clone();
-            std::thread::Builder::new().name("db-warm".to_string()).spawn(move || {
-                let start = std::time::Instant::now();
-                match database.warm_branch_pages(&WARM_TABLES, WARM_THREADS) {
-                    Ok(pages) => tracing::info!(
-                        target: "reth::cli",
-                        pages,
-                        elapsed = ?start.elapsed(),
-                        "Read database branch pages"
-                    ),
-                    Err(err) => {
-                        tracing::warn!(target: "reth::cli", %err, "Failed to read database branch pages")
-                    }
-                }
-            })?;
+            tracing::info!(target: "reth::cli", "Reading database branch pages");
+            let start = std::time::Instant::now();
+            let pages = database.warm_branch_pages(&WARM_TABLES, WARM_THREADS)?;
+            tracing::info!(target: "reth::cli", pages, elapsed = ?start.elapsed(), "Read database branch pages");
         }
 
         if with_unused_ports {
