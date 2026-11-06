@@ -223,8 +223,26 @@ no prefetch can parallelize. Loading rounds of up to 8 keys on the probe thread 
 pool, and code with every account, made it slower (p99 74.7 ms).
 
 On derek, durable commits of persistence batches cost the rest: running the same branch with
-`--db.sync-mode=safe-no-sync` gave mean -11.7%, p99 -23.2% and end-to-end Mgas/s +24.5%. Opening
+`--db.sync-mode=safe-no-sync` gave mean -11.7%, p99 -23.2% and end-to-end Mgas/s +24.5%. In that
+run the chain transactions' blocks are as fast as on main and stable across runs; with durable
+commits they take up to twice as long in the runs where a commit's flush lands on them. Opening
 MDBX without its write map is not an option: the node reports the database as corrupted.
+
+Further changes and experiments on derek (4 run pairs against the branch unless noted):
+
+| Change | Mean | P99 | Kept |
+|---|---|---|---|
+| Probe loads on a quarter of the read-set pool (32 workers), so fewer of them queue on the disk ahead of a chain's own reads | +0.0% | -10.4% | yes |
+| Flatten the overlay from the next anchor when a save starts, instead of rebuilding it from every in-memory block when it completes (5-9 ms, one block in twenty; local cold: mean -3%, p90 -6%) | | | yes |
+| Writeback of dirty pages every 20 ms during a save (`sync_file_range`) | +12.0% | +6.9% | no |
+| `--engine.persistence-threshold=128` | +5.3% | -2.7% | no |
+| Probe the first transaction too (local cold) | +8% | | no |
+
+So with durable commits, the remaining p99 is the persistence flush meeting a block's serial
+cold reads. Spreading the flush out slowed every block more than it helped the worst ones. A
+deferred durable sync (commit without syncing, sync every N batches) would recover most of the
+23%, at the cost of losing up to N batches on a crash; that is a durability decision, not made
+here.
 
 ## Rewrite: newPayload v2
 
