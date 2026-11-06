@@ -30,9 +30,10 @@ const TRACE_TARGET: &str = "trie::arena";
 /// depth or deeper belong to lower subtries.
 const UPPER_TRIE_MAX_DEPTH: usize = 2;
 
-/// Last `update_subtrie_hashes` call (experiment only): dirty leaves, dirty subtries.
-pub static NP_SUBTRIES: [core::sync::atomic::AtomicU64; 2] =
-    [const { core::sync::atomic::AtomicU64::new(0) }; 2];
+/// Last `update_subtrie_hashes` call (experiment only): dirty leaves, dirty subtries, ns to take
+/// the dirty subtries, ns to hash them, ns for the upper walk.
+pub static NP_SUBTRIES: [core::sync::atomic::AtomicU64; 5] =
+    [const { core::sync::atomic::AtomicU64::new(0) }; 5];
 
 /// Compacts an arena by BFS-copying all reachable nodes into a fresh arena, dropping
 /// unreachable (pruned) slots. Parents are stored before children for cache-friendly top-down
@@ -2337,6 +2338,7 @@ impl SparseTrie for ArenaParallelSparseTrie {
             return;
         }
 
+        let np_start = std::time::Instant::now();
         // Count total dirty leaves across all subtries to make one global parallelism decision.
         let mut total_dirty_leaves: u64 = 0;
         let mut taken: Vec<(Index, Box<ArenaSparseSubtrie>)> = Vec::new();
@@ -2356,6 +2358,9 @@ impl SparseTrie for ArenaParallelSparseTrie {
 
         NP_SUBTRIES[0].store(total_dirty_leaves, core::sync::atomic::Ordering::Relaxed);
         NP_SUBTRIES[1].store(taken.len() as u64, core::sync::atomic::Ordering::Relaxed);
+        NP_SUBTRIES[2]
+            .store(np_start.elapsed().as_nanos() as u64, core::sync::atomic::Ordering::Relaxed);
+        let np_hash = std::time::Instant::now();
         // Hash taken subtries in parallel if total dirty leaves meet the threshold.
         if !taken.is_empty() {
             if taken.len() == 1 || total_dirty_leaves < self.parallelism_thresholds.min_dirty_leaves
@@ -2376,6 +2381,10 @@ impl SparseTrie for ArenaParallelSparseTrie {
             }
         }
 
+        NP_SUBTRIES[3]
+            .store(np_hash.elapsed().as_nanos() as u64, core::sync::atomic::Ordering::Relaxed);
+        let np_walk = std::time::Instant::now();
+        NP_SUBTRIES[4].store(0, core::sync::atomic::Ordering::Relaxed);
         // If the root branch is already cached and nothing was taken for parallel
         // hashing, there are no dirty subtries to process.
         if taken.is_empty() && self.upper_arena[self.root].is_cached() {
@@ -2417,6 +2426,8 @@ impl SparseTrie for ArenaParallelSparseTrie {
 
             self.update_upper_subtrie(head_idx, new_epoch);
         }
+        NP_SUBTRIES[4]
+            .store(np_walk.elapsed().as_nanos() as u64, core::sync::atomic::Ordering::Relaxed);
     }
 
     fn get_leaf_value(&self, full_path: &Nibbles) -> Option<&Vec<u8>> {
