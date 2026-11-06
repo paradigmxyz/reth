@@ -400,6 +400,19 @@ blocks, 5-114 ms each. Cold, with the branch pages read (2 runs each): p99 74.4 
 and p90 22.2 -> 24.5 ms, from the loads' reads. A 512K-slot cap left the 1.77M-slot contract
 unloaded (26342682 back to 90-100 ms), and waiting for 8 rounds lost 26342742.
 
+Probing the first transaction too, so that its chains are loaded as well, made 26343102 slower
+(52-58 -> 70-88 ms). On derek, 4 run pairs against main, with `--db.warm-branch-pages`
+(3bd132c98a): mean -34.0% (29.19 -> 19.26 ms), p90 -35.9%, p99 -65.2% (165.9 -> 57.8 ms),
+Mgas/s +38.3%.
+
+What is left is the transactions' own chains of cold reads through accounts, code and storage,
+and their execution: warm, the slowest block (26342631, one transaction of ~25 ms) takes 25-40 ms
+and sets the warm p99 of ~30 ms, which is about 20% of main's cold p99. Reading the whole
+`HashedAccounts` (8.6M pages, 14 s) and `Bytecodes` (5.5M pages with overflow, 9 s) tables at
+startup as well (experiment branch `mattsse/np-warm-tables`, 73 GB with the branch pages; it does
+not fit the devbox's page cache): mean -37.4% (27.39 -> 17.14 ms), p90 -40.7%, p99 -66.0%
+(138.3 -> 47.1 ms), Mgas/s +45.8%, against a persist wait of 9.8 ms.
+
 ### The root after execution
 
 Warm, the root is ready 1.27 ms after post-execution validation (was 1.76 ms): ~0.6 ms of trie
