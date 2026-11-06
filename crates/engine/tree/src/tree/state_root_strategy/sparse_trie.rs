@@ -51,6 +51,8 @@ fn np_us(since: Instant) -> u64 {
 
 static NP_SUBTRIES_CPU: std::sync::LazyLock<bool> =
     std::sync::LazyLock::new(|| std::env::var_os("RETH_NP_SUBTRIES_CPU").is_some());
+static NP_HASH_BLOCKED: std::sync::LazyLock<bool> =
+    std::sync::LazyLock::new(|| std::env::var_os("RETH_NP_HASH_BLOCKED").is_some());
 static NP_INLINE_HASH: std::sync::LazyLock<bool> =
     std::sync::LazyLock::new(|| std::env::var_os("RETH_NP_INLINE_HASH").is_some());
 
@@ -1525,7 +1527,7 @@ impl<S: SparseTrie + Default> StorageTrieWork<S> {
     /// already carries is still correct.
     fn needs_root(&self) -> bool {
         self.updated &&
-            self.pending.is_empty() &&
+            (self.pending.is_empty() || *NP_HASH_BLOCKED) &&
             self.trie.is_revealed() &&
             !self.trie.is_root_cached()
     }
