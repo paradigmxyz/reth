@@ -1190,7 +1190,17 @@ where
             let storage = targets
                 .storage_targets
                 .iter()
-                .map(|(address, slots)| format!("{address}:{}", slots.len()))
+                .map(|(address, slots)| {
+                    format!(
+                        "{address}:{}:{}",
+                        slots.len(),
+                        slots
+                            .iter()
+                            .map(|t| format!("{}/{:?}", t.key_nibbles.len(), t.parent))
+                            .collect::<Vec<_>>()
+                            .join(";")
+                    )
+                })
                 .collect::<Vec<_>>();
             tracing::info!(target: "engine::np_tail", ?accounts, ?storage, "late proof targets");
         }
