@@ -421,6 +421,74 @@ where
         Ok((root, updates))
     }
 
+    /// Returns sparse trie root and trie updates, taking storage trie updates only from the storage
+    /// tries of `changed`.
+    ///
+    /// `changed` must contain every storage trie changed since updates were last taken: the
+    /// updates of the others are empty, and skipping them saves a pass over every retained storage
+    /// trie. Returns an error if the account trie is still blind.
+    pub fn root_with_updates_of<'a>(
+        &mut self,
+        changed: impl IntoIterator<Item = &'a B256>,
+        new_epoch: TrieNodeEpoch,
+    ) -> SparseStateTrieResult<(B256, TrieUpdates)> {
+        #[cfg(feature = "metrics")]
+        self.metrics.record();
+
+        let storage_tries = changed
+            .into_iter()
+            .filter_map(|address| {
+                let updates =
+                    self.storage.tries.get_mut(address)?.as_revealed_mut()?.take_updates();
+                let updates = StorageTrieUpdates {
+                    storage_nodes: updates.updated_nodes,
+                    removed_nodes: updates.removed_nodes,
+                };
+                (!updates.is_empty()).then_some((*address, updates))
+            })
+            .collect();
+        debug_assert!(
+            self.storage.tries.values().filter_map(|trie| trie.as_revealed_ref()).all(|trie| {
+                let updates = trie.updates_ref();
+                updates.updated_nodes.is_empty() && updates.removed_nodes.is_empty()
+            }),
+            "a storage trie left out of `changed` has updates"
+        );
+        let revealed = self.revealed_trie_mut()?;
+
+        let (root, updates) = (revealed.root(new_epoch), revealed.take_updates());
+        let updates = TrieUpdates {
+            account_nodes: updates.updated_nodes,
+            removed_nodes: updates.removed_nodes,
+            storage_tries,
+        };
+        Ok((root, updates))
+    }
+
+    /// Updates `roots`, the roots of the revealed storage tries before the storage tries of
+    /// `changed` changed, to their roots at `new_epoch`.
+    ///
+    /// The result equals [`Self::storage_roots`] if `changed` contains every storage trie revealed
+    /// or changed since `roots` were taken, in a pass over just those tries. Tries removed since
+    /// then, by pruning, keep their entries; their roots are unchanged.
+    pub fn update_storage_roots<'a>(
+        &mut self,
+        roots: &mut B256Map<B256>,
+        changed: impl IntoIterator<Item = &'a B256>,
+        new_epoch: TrieNodeEpoch,
+    ) {
+        for address in changed {
+            match self.storage.tries.get_mut(address).and_then(|trie| trie.root(new_epoch)) {
+                Some(root) => {
+                    roots.insert(*address, root);
+                }
+                None => {
+                    roots.remove(address);
+                }
+            }
+        }
+    }
+
     /// Returns storage trie updates for tries that have been revealed.
     ///
     /// Panics if any of the storage tries are not revealed.

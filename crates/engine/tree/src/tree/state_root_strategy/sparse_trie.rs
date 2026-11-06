@@ -321,6 +321,12 @@ where
     /// Returns the trie for reuse in the next payload built on top of this one.
     ///
     /// Should be called after the state root result has been sent.
+    /// Returns the hashed addresses of the storage tries the block changed or revealed, once
+    /// [`Self::run`] returned the root.
+    pub(super) fn changed_storage_tries(&self) -> impl Iterator<Item = &B256> {
+        self.storage_to_drop.keys()
+    }
+
     pub(super) fn into_trie_for_reuse(self) -> (SparseStateTrie<A, S>, DeferredDrops) {
         debug_assert!(
             self.storage.is_empty(),
@@ -473,7 +479,9 @@ where
 
         let start = Instant::now();
         self.return_storage_tries();
-        let (state_root, trie_updates) = match self.trie.root_with_updates(self.new_epoch) {
+        // Every storage trie changed this block passed through the task's storage map.
+        let root = self.trie.root_with_updates_of(self.storage_to_drop.keys(), self.new_epoch);
+        let (state_root, trie_updates) = match root {
             Ok(result) => result,
             Err(err)
                 if matches!(
