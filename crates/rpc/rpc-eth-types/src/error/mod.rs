@@ -499,7 +499,7 @@ impl From<MuxError> for EthApiError {
 impl From<DebugInspectorError> for EthApiError {
     fn from(error: DebugInspectorError) -> Self {
         match error {
-            DebugInspectorError::InvalidTracerConfig => Self::InvalidTracerConfig,
+            DebugInspectorError::InvalidTracerConfig(_) => Self::InvalidTracerConfig,
             DebugInspectorError::UnsupportedTracer => Self::Unsupported("unsupported tracer"),
             DebugInspectorError::JsTracerNotEnabled => {
                 Self::Unsupported("JS Tracer is not enabled")

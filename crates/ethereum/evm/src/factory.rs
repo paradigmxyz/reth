@@ -547,6 +547,8 @@ pub struct JitMetrics {
     pub compilations_succeeded: metrics::Gauge,
     /// Total number of failed compilations.
     pub compilations_failed: metrics::Gauge,
+    /// Total compilation results discarded because the resident cache was cleared while they ran.
+    pub compilations_discarded: metrics::Gauge,
     /// Total number of frames or hosts that fell back to the interpreter.
     pub interpreter_fallbacks: metrics::Gauge,
     /// Total number of JIT helper processes spawned.
@@ -610,6 +612,7 @@ impl JitMetrics {
             compilations_dispatched,
             compilations_succeeded,
             compilations_failed,
+            compilations_discarded,
             interpreter_fallbacks,
             jit_helper_spawns,
             jit_helper_spawn_failures,
@@ -637,6 +640,7 @@ impl JitMetrics {
         self.compilations_dispatched.set(compilations_dispatched as f64);
         self.compilations_succeeded.set(compilations_succeeded as f64);
         self.compilations_failed.set(compilations_failed as f64);
+        self.compilations_discarded.set(compilations_discarded as f64);
         self.interpreter_fallbacks.set(interpreter_fallbacks as f64);
         self.jit_helper_spawns.set(jit_helper_spawns as f64);
         self.jit_helper_spawn_failures.set(jit_helper_spawn_failures as f64);
