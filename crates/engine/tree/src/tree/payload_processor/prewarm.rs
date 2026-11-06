@@ -351,8 +351,9 @@ where
     ///
     /// Probes the next arrived transaction against the cache alone and has `fetch` load all keys
     /// it missed in parallel, then probes it again, which reaches the reads that depend on the
-    /// loaded values, until a round misses nothing. Missing slots read as a large value in every
-    /// other round, so that batch calls pass their balance checks and reach every item.
+    /// loaded values, until a round misses nothing or the transaction was executed. Missing slots
+    /// read as a large value in every other round, so that batch calls pass their balance
+    /// checks and reach every item.
     fn probe_loop<Tx>(
         ctx: &PrewarmContext<N, P, Evm>,
         results: &PrewarmResults<EvmTypesFor<Evm>>,
@@ -380,6 +381,11 @@ where
             for round in 0..MAX_PROBE_ROUNDS {
                 if ctx.should_stop() {
                     return
+                }
+                // A finished execution loaded everything the transaction reads, and most do
+                // finish before a probe: on a warm cache a probe would only execute it again.
+                if results.has_executed(index) {
+                    break
                 }
                 misses.guess_large(round % 2 == 0);
                 drop(evm.take_state_cache());
