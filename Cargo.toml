@@ -1,5 +1,5 @@
 [workspace.package]
-version = "2.10.0"
+version = "2.10.1"
 edition = "2024"
 rust-version = "1.96"
 license = "MIT OR Apache-2.0"
@@ -667,12 +667,11 @@ walkdir = "2.3.3"
 # networking
 ipnet = "2.11"
 
-# evm2 is patched through its pre-transfer URL, which redirects to alloy-rs/evm2, because Cargo
-# rejects a patch from the same source.
+# Cargo requires a distinct patch source URL; www.github.com redirects to the public repository.
 [patch."https://github.com/alloy-rs/evm2"]
-evm2 = { git = "https://github.com/DaniPopes/evm2", rev = "592bf18c4e22fff54ac9b4db606c4ee276e345cb" }
-evm2-inspectors = { git = "https://github.com/DaniPopes/evm2", rev = "592bf18c4e22fff54ac9b4db606c4ee276e345cb" }
-evm2-jit = { git = "https://github.com/DaniPopes/evm2", rev = "592bf18c4e22fff54ac9b4db606c4ee276e345cb" }
+evm2 = { git = "https://www.github.com/alloy-rs/evm2", rev = "01df8f6a396d0250da286cb763faa6ec292d65b5" }
+evm2-inspectors = { git = "https://www.github.com/alloy-rs/evm2", rev = "01df8f6a396d0250da286cb763faa6ec292d65b5" }
+evm2-jit = { git = "https://www.github.com/alloy-rs/evm2", rev = "01df8f6a396d0250da286cb763faa6ec292d65b5" }
 
 [patch.crates-io]
 # LLVM 23 support is not released yet.
