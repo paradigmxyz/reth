@@ -80,6 +80,13 @@ pub struct DatabaseArgs {
     /// Disable built-in database metrics.
     #[arg(long = "db.disable-metrics")]
     pub disable_metrics: bool,
+    /// Read the branch pages of the state and trie tables into the page cache at startup.
+    ///
+    /// After a restart the page cache is cold, and a state lookup then reads its tree's branch
+    /// pages from disk before its leaf. Reading them up front (several GB on mainnet) in the
+    /// background makes the first blocks after a restart execute faster.
+    #[arg(long = "db.warm-branch-pages")]
+    pub warm_branch_pages: bool,
 }
 
 impl DatabaseArgs {

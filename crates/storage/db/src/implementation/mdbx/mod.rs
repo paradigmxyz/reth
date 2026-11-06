@@ -23,6 +23,7 @@ use reth_libmdbx::{
 use reth_storage_errors::db::LogLevel;
 use rustc_hash::FxHashMap;
 use std::{
+    fs::File,
     ops::{Deref, Range},
     path::{Path, PathBuf},
     sync::Arc,
@@ -64,6 +65,9 @@ const MAX_SAFE_READER_SPACE: usize = 10 * GIGABYTE;
 /// that static file pruning already deleted, which startup healing cannot repair. MDBX checks the
 /// period on each commit.
 const NON_DURABLE_SYNC_PERIOD: Duration = Duration::from_secs(60);
+
+/// Name of the MDBX data file in the database directory.
+const MDBX_DATA_FILE: &str = "mdbx.dat";
 
 /// Environment used when opening a MDBX environment. RO/RW.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -754,6 +758,123 @@ impl DatabaseEnv {
         self.disable_long_read_transaction_safety = true;
         self
     }
+
+    /// Reads the branch pages of `tables` into the page cache and returns how many it read.
+    ///
+    /// On a cold page cache a lookup then waits for its leaf page alone instead of also for the
+    /// branch pages above it. Walks each table's B-tree level by level from its root, reading each
+    /// level on `threads` threads, and holds a read transaction meanwhile, so that none of the
+    /// pages it reads is reused. Leaf pages and the trees of large duplicate sets are not read.
+    /// Tables that do not exist are skipped.
+    pub fn warm_branch_pages(
+        &self,
+        tables: &[&str],
+        threads: usize,
+    ) -> Result<usize, DatabaseError> {
+        let txn = self.inner.begin_ro_txn().map_err(|e| DatabaseError::InitTx(e.into()))?;
+        let main = txn.open_db(None).map_err(|e| DatabaseError::Open(e.into()))?;
+        let page_size = self.inner.stat().map_err(|e| DatabaseError::Stats(e.into()))?.page_size();
+        let data_file = reth_fs_util::open(self.path.join(MDBX_DATA_FILE))
+            .map_err(|err| DatabaseError::Other(err.to_string()))?;
+        let mut read = 0;
+        for table in tables {
+            let Some(record) = txn
+                .get::<Vec<u8>>(main.dbi(), table.as_bytes())
+                .map_err(|e| DatabaseError::Read(e.into()))?
+            else {
+                continue
+            };
+            // The record is MDBX's `tree_t`: flags (u16), height (u16), key size (u32), root (u32).
+            let (Some(height), Some(root)) = (record.get(2..4), record.get(8..12)) else {
+                continue
+            };
+            let height = u16::from_le_bytes([height[0], height[1]]);
+            let mut level = vec![u32::from_le_bytes([root[0], root[1], root[2], root[3]])];
+            // Leaves are the last of `height` levels; the levels above them are branch pages.
+            for depth in 1..height {
+                read += level.len();
+                level = read_branch_level(
+                    &data_file,
+                    &level,
+                    page_size as usize,
+                    threads,
+                    depth + 1 < height,
+                );
+            }
+        }
+        Ok(read)
+    }
+}
+
+/// Reads the branch pages `pages` of one tree level on `threads` threads and returns their
+/// children if `children` is set.
+///
+/// A page whose header is not that of the expected branch page is skipped.
+fn read_branch_level(
+    data_file: &File,
+    pages: &[u32],
+    page_size: usize,
+    threads: usize,
+    children: bool,
+) -> Vec<u32> {
+    // MDBX page header: txnid (u64), key size (u16), flags (u16), lower (u16), upper (u16), page
+    // number (u32), followed by the node offsets. A branch node starts with its child's number.
+    const PAGE_HEADER: usize = 20;
+    const BRANCH: u16 = 0x01;
+    let read_chunk = |chunk: &[u32]| {
+        let mut page = vec![0; page_size];
+        let mut found = Vec::new();
+        for &pgno in chunk {
+            if read_at(data_file, &mut page, pgno as u64 * page_size as u64).is_err() || !children {
+                continue
+            }
+            let field = |at: usize| u16::from_le_bytes([page[at], page[at + 1]]) as usize;
+            let number = u32::from_le_bytes([page[16], page[17], page[18], page[19]]);
+            if field(10) as u16 & BRANCH == 0 || number != pgno {
+                continue
+            }
+            let nodes = (field(12) / 2).min((page_size - PAGE_HEADER) / 2);
+            for i in 0..nodes {
+                let node = PAGE_HEADER + field(PAGE_HEADER + 2 * i);
+                if let Some(child) = page.get(node..node + 4) {
+                    found.push(u32::from_le_bytes([child[0], child[1], child[2], child[3]]));
+                }
+            }
+        }
+        found
+    };
+    std::thread::scope(|scope| {
+        pages
+            .chunks(pages.len().div_ceil(threads.max(1)).max(1))
+            .map(|chunk| scope.spawn(move || read_chunk(chunk)))
+            .collect::<Vec<_>>()
+            .into_iter()
+            .flat_map(|handle| handle.join().unwrap_or_default())
+            .collect()
+    })
+}
+
+/// Reads `buf.len()` bytes of `file` at `offset`.
+#[cfg(unix)]
+fn read_at(file: &File, buf: &mut [u8], offset: u64) -> std::io::Result<()> {
+    std::os::unix::fs::FileExt::read_exact_at(file, buf, offset)
+}
+
+/// Reads `buf.len()` bytes of `file` at `offset`.
+#[cfg(windows)]
+fn read_at(file: &File, buf: &mut [u8], offset: u64) -> std::io::Result<()> {
+    let mut read = 0;
+    while read < buf.len() {
+        match std::os::windows::fs::FileExt::seek_read(
+            file,
+            &mut buf[read..],
+            offset + read as u64,
+        )? {
+            0 => return Err(std::io::ErrorKind::UnexpectedEof.into()),
+            n => read += n,
+        }
+    }
+    Ok(())
 }
 
 impl Deref for DatabaseEnv {
@@ -1798,6 +1919,27 @@ mod tests {
         let tx = env.tx().expect(ERROR_INIT_TX);
         assert_eq!(tx.get::<CustomTable>(1).expect(ERROR_GET), Some(2));
         assert_eq!(tx.get::<CustomTable>(3).expect(ERROR_GET), Some(4));
+    }
+
+    #[test]
+    fn warm_branch_pages_reads_every_branch_page() {
+        let (_tempdir, env) = create_test_db(DatabaseEnvKind::RW);
+        let tx = env.tx_mut().expect(ERROR_INIT_TX);
+        let mut cursor = tx.cursor_write::<tables::HashedAccounts>().unwrap();
+        for i in 0..200_000u64 {
+            let account = Account { nonce: i, balance: U256::from(i), bytecode_hash: None };
+            cursor.append(B256::from(U256::from(i)), &account).expect(ERROR_APPEND);
+        }
+        drop(cursor);
+        tx.commit().expect(ERROR_COMMIT);
+
+        let txn = env.begin_ro_txn().unwrap();
+        let db = txn.open_db(Some(tables::HashedAccounts::NAME)).unwrap();
+        let stat = txn.db_stat(db.dbi()).unwrap();
+        assert!(stat.depth() >= 3, "the table must have more than one branch level");
+
+        let tables = [tables::HashedAccounts::NAME, "Missing"];
+        assert_eq!(env.warm_branch_pages(&tables, 4).unwrap(), stat.branch_pages());
     }
 
     #[test]
