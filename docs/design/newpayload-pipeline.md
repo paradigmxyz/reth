@@ -438,6 +438,84 @@ with hints applied eagerly (204-209), and the extra passes made the cold replay 
 arrival the leaf's path is usually not revealed yet, and the structure that decides a collapse is
 the one after the whole last batch, in which several removals can empty a branch together.
 
+### What the next block's state root waits for
+
+A per-event trace of the sparse-trie and trie-hashing threads (experiment branch
+`mattsse/np-phases4`, written to a file so that journald drops nothing) shows the hashing thread
+reading a block's first update more than 0.5 ms late in 43 of 500 warm blocks, with the block's
+updates queued behind it, and those blocks' root tail at 4.7 ms against 2.1 ms. Both threads are
+named threads that run one task at a time, and in 17 of these blocks the task waited for the
+previous block's:
+
+- In 14 blocks the sparse-trie thread was still pruning the previous block's trie, which runs
+  after every persisted block, after the root is sent and before the trie is handed on. A prune
+  took 15-21 ms for the account trie (25-33k nodes pruned) and 8-10 ms beside it for the storage
+  tries (3,400-4,600 tries, 500-1,300 evicted), with about three threads busy on average. Running
+  it on the normal-priority cpu pool instead of the global rayon pool made no difference, so it
+  is the work, not starvation. Pruning a sixteenth of the trie per block instead
+  (one first nibble of the account paths and of the storage tries' hashed addresses) cost 1.3 ms
+  p50 and 7.6 ms p99 per part, 0.49 s per replay against 0.29 s, in 40% of the blocks, and the
+  mean got 6.6% worse over 4 run pairs. A late start costs the delayed block little because its
+  task catches up with the queued updates during execution, about 0.07 ms per block on average,
+  so the prune stays as it is.
+- In 3 blocks the hashing thread was still running the previous block's hashing task, which
+  waited for every update sender to drop and prewarming holds a hint sender until its workers
+  stop. It now returns once it has forwarded the finish marker (up to 0.7 ms).
+
+### The sparse-trie thread after the last transaction
+
+The same trace shows what the sparse-trie thread blocks on between the last transaction and the
+root, per block on average: hashing the account trie's dirty subtries (`calculate_subtries`) 479 us,
+storage passes run inline 313 us, promoting account updates 171 us, applying updates 47 us.
+Meanwhile prewarming kept its workers running until 0.89 ms after the last transaction. The
+finish marker and proof results queue behind these calls: in the median block (26343110) one
+`calculate_subtries` took 468 us while the marker waited, and one inline pass hashed a storage
+trie for 418 us.
+
+- A storage pass hashed its trie only once no leaf waited for a proof, so a trie with one blocked
+  leaf accumulated every leaf applied to it and hashed them all in the pass after the last proof,
+  often inline because the pass itself was small. Passes now hash what they applied either way:
+  inline passes after the last transaction 313 -> 88 us.
+- Prewarming now stops once block execution has executed the last transaction instead of after
+  the post-execution changes: its workers end 0.54 ms after it instead of 0.89 ms.
+- The account trie hashed its dirty subtries serially below 64 dirty leaves, at about 10 us per
+  leaf: 32-63 dirty leaves took 415 us p50 after the last transaction, more than 64-127 in parallel
+  (237 us). From four dirty leaves on they are hashed in parallel: 163 us for 32-63, 91 us instead
+  of 164 us for 8-31, and the root's tail p50 -8%. From 128 dirty leaves on a call still takes about
+  430 us: parallel hashing scales to about 4x.
+
+The first two made the root come 23% sooner after the last transaction (p50 1.33 -> 1.03 ms, 4
+run pairs). On derek, with the hashing task change, against the head before them and
+`--db.warm-branch-pages` on both sides (e11befe730): mean -1.15% (18.45 -> 18.23 ms, noise
+±1.43%), p50 -0.4%, p90 +1.9%, p99 +5.3% (noise ±9.9%), none significant.
+
+### What the state root costs
+
+Replays with `--debug.skip-state-root`, which runs no state root job and installs no state hook,
+bound what the state root can still win. 3 runs each, the phase timestamps written to a file
+(journald dropped up to two thirds of them under load, which made earlier comparisons of the
+execution phase misleading):
+
+| | Default | No prefetch hints | Skip state root |
+|---|---|---|---|
+| Transactions phase, mean | 11.86 ms | 12.34 ms | 11.28 ms |
+| Transactions phase, p50 | 9.99 ms | 10.39 ms | 9.32 ms |
+| Root after the last transaction, mean | 1.49 ms | 3.06 ms | 0.43 ms |
+| newPayload, mean | 13.73 ms | 15.83 ms | 12.53 ms |
+
+The state root costs 1.2 ms of a 13.7 ms block: about 1.1 ms after the last transaction and
+0.6 ms during execution. Committing reused results took 320 us longer per block with the state
+hook installed, which builds a `StateUpdate` for every transaction and sends it to the hashing
+thread on the committer. The send is 149 us of it, mostly waking the parked hashing thread;
+spinning that thread for 50 us before it parks cut the send to 64 us but made execution no faster,
+and building the updates is evm2's. Proof prefetching is not what slows execution: dropping the hints moves
+the proofs after the last transaction and slows execution slightly, and 16 or 32 workers per proof
+pool instead of 64 changed the transactions phase by less than 2% while the tail grew.
+
+What is left after the last transaction is mostly outside the trie: the finish marker is sent when
+evm2's executor drops its state hook, after it built the bundle state, ~0.3 ms after the last
+transaction. Dropping the hook right after the post-execution changes is a change in evm2.
+
 ## Rewrite: newPayload v2
 
 The v2 path replaces the per-block task graph instead of tuning it:
