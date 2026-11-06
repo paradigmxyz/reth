@@ -1066,7 +1066,12 @@ where
                     executor.enable_block_access_list_builder();
                 }
                 if let Some(mut state_hook) = state_hook {
-                    executor.set_state_hook(move |state| state_hook.on_state(state));
+                    executor.set_state_hook(move |state| {
+                        let np_start = Instant::now();
+                        state_hook.on_state(state);
+                        NP_COMMIT[8]
+                            .fetch_add(np_start.elapsed().as_nanos() as u64, Ordering::Relaxed);
+                    });
                 }
                 let senders = self.execute_transactions(
                     &mut executor,
@@ -2174,8 +2179,8 @@ static NP_PHASES_ENABLED: std::sync::LazyLock<bool> =
 
 /// Committer counters (experiment only): reused micros, race wait micros, raced count and micros,
 /// missing count and micros, stale count and micros.
-static NP_COMMIT: [std::sync::atomic::AtomicU64; 8] =
-    [const { std::sync::atomic::AtomicU64::new(0) }; 8];
+static NP_COMMIT: [std::sync::atomic::AtomicU64; 9] =
+    [const { std::sync::atomic::AtomicU64::new(0) }; 9];
 
 /// Records a newPayload phase boundary on this thread (experiment only).
 pub(crate) fn np_phase(name: &'static str) {
