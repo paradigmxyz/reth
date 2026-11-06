@@ -53,7 +53,7 @@
 //! `eth_getProof` and anything else that reads the stored trie will not work for new blocks.
 //! Sparse-trie cache pruning uses node epochs to retain the in-memory block range.
 
-mod sparse_trie;
+pub(crate) mod sparse_trie;
 
 use self::sparse_trie::{SparseTrieCacheTask, SparseTrieTaskMetrics};
 use crate::tree::{metrics::BlockValidationMetrics, EngineApiTreeState, ExecutionEnv, TreeConfig};
