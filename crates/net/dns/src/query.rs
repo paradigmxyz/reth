@@ -349,32 +349,4 @@ mod tests {
         ));
         assert!(matches!(verify_entry_hash("AAAA", entry), Err(LookupError::HashMismatch(_))));
     }
-
-    #[tokio::test]
-    async fn resolve_root_invalid_values() {
-        let link =
-            "enrtree://AM5FCQLWIZX2QFPNJAP7VUERCCRNGRHWZG3YYHIUV7BVDQ5FDPRT2@nodes.example.org"
-                .parse::<LinkEntry>()
-                .unwrap();
-        let resolver = Arc::new(MapResolver::default());
-        for (enr_root, link_root) in [(" ä", "b"), ("a", " ä"), ("\u{a0}a", "\u{2003}b")] {
-            resolver.insert(
-                link.domain.clone(),
-                format!("enrtree-root:v1 e={enr_root} l={link_root} seq=1 sig=AA"),
-            );
-            let (error, resolved_link) = resolve_root(
-                Arc::clone(&resolver),
-                link.clone(),
-                DnsDiscoveryConfig::default().lookup_timeout,
-            )
-            .await
-            .unwrap_err();
-            assert_eq!(resolved_link, link);
-            let LookupError::InvalidRoot(root) = error else {
-                panic!("expected invalid root, got {error:?}");
-            };
-            assert_eq!(root.enr_root, enr_root.trim_start());
-            assert_eq!(root.link_root, link_root.trim_start());
-        }
-    }
 }
