@@ -739,7 +739,7 @@ where
 }
 
 /// Returns the prefix of a peer message that is included in debug logs.
-fn log_prefix(bytes: &[u8]) -> &[u8] {
+pub(crate) fn log_prefix(bytes: &[u8]) -> &[u8] {
     &bytes[..bytes.len().min(MAX_LOGGED_PAYLOAD_SIZE)]
 }
 
