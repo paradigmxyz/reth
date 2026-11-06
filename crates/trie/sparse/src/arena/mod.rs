@@ -30,6 +30,10 @@ const TRACE_TARGET: &str = "trie::arena";
 /// depth or deeper belong to lower subtries.
 const UPPER_TRIE_MAX_DEPTH: usize = 2;
 
+/// Last `update_subtrie_hashes` call (experiment only): dirty leaves, dirty subtries.
+pub static NP_SUBTRIES: [core::sync::atomic::AtomicU64; 2] =
+    [const { core::sync::atomic::AtomicU64::new(0) }; 2];
+
 /// Compacts an arena by BFS-copying all reachable nodes into a fresh arena, dropping
 /// unreachable (pruned) slots. Parents are stored before children for cache-friendly top-down
 /// traversal.
@@ -2350,6 +2354,8 @@ impl SparseTrie for ArenaParallelSparseTrie {
             taken.push((idx, subtrie));
         }
 
+        NP_SUBTRIES[0].store(total_dirty_leaves, core::sync::atomic::Ordering::Relaxed);
+        NP_SUBTRIES[1].store(taken.len() as u64, core::sync::atomic::Ordering::Relaxed);
         // Hash taken subtries in parallel if total dirty leaves meet the threshold.
         if !taken.is_empty() {
             if taken.len() == 1 || total_dirty_leaves < self.parallelism_thresholds.min_dirty_leaves
