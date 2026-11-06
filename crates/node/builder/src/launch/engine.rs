@@ -360,16 +360,16 @@ impl<B> EngineNodeLauncher<B> {
             // advance the chain and await payloads built locally to add into the engine api
             // tree handler to prevent re-execution if that block is received as payload from
             // the CL
-            loop {
+            let shutdown_guard = loop {
                 tokio::select! {
                     event = orchestrator.next() => {
-                        let Some(event) = event else { break };
+                        let Some(event) = event else { break None };
                         debug!(target: "reth::cli", "Event: {event}");
                         match event {
                             ChainEvent::BackfillSyncFinished => {
                                 if terminate_after_backfill {
                                     debug!(target: "reth::cli", "Terminating after initial backfill");
-                                    break
+                                    break None
                                 }
                                 if startup_sync_state_idle {
                                     network_handle.update_sync_state(SyncState::Idle);
@@ -379,9 +379,14 @@ impl<B> EngineNodeLauncher<B> {
                                 network_handle.update_sync_state(SyncState::Syncing);
                             }
                             ChainEvent::FatalError => {
+                                // Shutdown can cancel backfill after the select polls its signal.
+                                if let Some(guard) = FutureExt::now_or_never(&mut on_graceful_shutdown) {
+                                    debug!(target: "reth::cli", "engine event received during shutdown");
+                                    break Some(guard)
+                                }
                                 error!(target: "reth::cli", "Fatal error in consensus engine");
                                 res = Err(eyre::eyre!("Fatal error in consensus engine"));
-                                break
+                                break None
                             }
                             ChainEvent::Handler(ev) => {
                                 if let Some(head) = ev.canonical_header() {
@@ -423,20 +428,24 @@ impl<B> EngineNodeLauncher<B> {
                             );
                         }
                     }
-                    _guard = &mut on_graceful_shutdown => {
+                    guard = &mut on_graceful_shutdown => {
                         // Shutdown signal received.
-                        // Send Terminate so the engine OS thread can exit cleanly before we
-                        // drop the orchestrator.
                         debug!(target: "reth::cli", "shutdown signal received, terminating engine");
-                        let (done_tx, done_rx) = oneshot::channel();
-                        orchestrator.handler_mut().handler_mut().on_event(
-                            FromOrchestrator::Terminate { tx: done_tx }.into()
-                        );
-                        let _ = done_rx.await;
-                        break;
+                        break Some(guard);
                     }
                 }
-            }
+            };
+
+            // A backfill task can be dropped before this task observes shutdown, causing a fatal
+            // event instead. Terminate the engine OS thread on every exit so retained engine
+            // handles cannot keep it and its database alive.
+            let (done_tx, done_rx) = oneshot::channel();
+            orchestrator
+                .handler_mut()
+                .handler_mut()
+                .on_event(FromOrchestrator::Terminate { tx: done_tx }.into());
+            let _ = done_rx.await;
+            drop(shutdown_guard);
 
             let _ = exit.send(res);
         };

@@ -103,7 +103,8 @@ where
                         }
                     }
                     BackfillEvent::TaskDropped(err) => {
-                        tracing::error!( %err, "backfill sync task dropped");
+                        // The launcher decides whether cancellation is fatal or part of shutdown.
+                        tracing::debug!( %err, "backfill sync task dropped");
                         return Poll::Ready(ChainEvent::FatalError);
                     }
                 },
