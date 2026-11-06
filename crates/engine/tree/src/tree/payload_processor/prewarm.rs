@@ -198,6 +198,7 @@ where
         let span = Span::current();
 
         self.executor.spawn_blocking_named("prewarm-txs", move || {
+            crate::tree::payload_validator::np_event("pw_start", 0, 0);
             let _enter = debug_span!(
                 target: "engine::tree::payload_processor::prewarm",
                 parent: &span,
@@ -258,6 +259,7 @@ where
 
             let _ = actions_tx
                 .send(PrewarmTaskEvent::FinishedTxExecution { executed_transactions: tx_count });
+            crate::tree::payload_validator::np_event("pw_end", tx_count as u64, 0);
         });
     }
 
@@ -353,6 +355,7 @@ where
                     results.wake(false);
                 }
                 queue.close();
+                crate::tree::payload_validator::np_event("pw_closed", tx_count as u64, 0);
                 results.wake(true);
                 Self::send_withdrawal_hints(ctx, state_root_hint_stream);
                 tx_count
