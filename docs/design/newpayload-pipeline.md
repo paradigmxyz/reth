@@ -297,6 +297,97 @@ The probes of the remaining slow transactions show three limits:
 - A probe whose miss cannot be loaded (code missing from the database) misses it again every
   round until the cap.
 
+Raising the cap to 256 rounds, spreading small rounds one slot per load request, loading code
+with every probed account, skipping keys a probe already loaded, probing the first transaction
+and running probes at normal priority were each within the ±5% noise of the cold replay over 4
+runs per arm.
+
+### Branch pages on a cold page cache
+
+Classifying the major faults of a cold replay by the MDBX page they hit (fault address, then the
+page header flags in `mdbx.dat`): 29-30% of execution's and 18-22% of the proof workers' faults
+are branch pages. Reading every page flagged as a branch page (4.55M, freelist included) before
+the replay: mean 17.17 -> 14.90 ms, p99 75 -> 63 ms, the chain blocks 150-180 -> ~110 ms.
+
+`--db.warm-branch-pages` reads them at startup by walking the B-trees from the table roots in
+the main table, level by level on 64 threads. The tables' own trees hold few of them (238K pages,
+0.6 s, no effect): a duplicate-sort table keeps a large set (a contract's storage, an account's
+storage trie) in a tree of its own that only a leaf points to. Reading the leaves of
+`HashedStorages`' and `StoragesTrie`'s trees (2.9M pages) and the nested trees' branch pages
+brings it to 5M pages (20 GB) in 9-11 s. Read beside block execution it slowed the first blocks
+(cold replay mean 17.0 -> 20.8 ms in the run it overlapped), so startup waits for it.
+
+This mainly helps a restarted node and a benchmark that drops the page cache: on a node that has
+run for a while, branch pages are touched far more often than leaves and stay cached.
+
+## The request path around execution
+
+Per-thread CPU over a warm replay (`threadcpu.py`, from `/proc/<pid>/task`), per block:
+
+| Threads | CPU before | After | Involuntary switches before | After |
+|---|---|---|---|---|
+| Speculation workers | 65 ms | 64 ms | 169 | 137 |
+| Global rayon pool | 35 ms | 12 ms | 2,731 | 252 |
+| Proof workers (storage + account) | 41 ms | 25 ms | 3,222 | 425 |
+| Storage trie pool | - | 11 ms | - | 20 |
+| Sparse-trie thread | 9.8 ms | 7.7 ms | 7 | 6 |
+| Total | 211 ms | 180 ms | | |
+
+The state root used more CPU than execution, and a third of it was idle threads looking for
+work: 73% of the global rayon pool's samples were in `wait_until_cold` (work stealing,
+crossbeam-epoch collection, `sched_yield`), and so were a third of the proof pools'. A block
+claims a quarter to all of the proof pool's 4 x cores threads, and rayon's unclaimed threads spun
+while the claimed ones blocked on their channels; ~450 storage trie passes per block were each a
+`rayon::spawn` that woke threads to spin. These ran at the priority of the trie work itself.
+
+- Proof workers run on `BlockingWorkerPool`, plain threads that wait on a queue.
+- Storage trie passes run on the runtime's storage trie pool of the same kind.
+- The root took updates from every retained storage trie (4,500) and preserving the trie
+  collected every retained trie's root into a new map, 12% of the sparse-trie thread and before
+  the next block's task can start. Both now visit the tries the block changed; the previous
+  block's root map is copied and updated, and a debug assertion compares it with a full pass.
+  `root_with_updates` 733 -> 251 us.
+- Removing persisted blocks dropped their execution output on the engine thread between
+  payloads (3% of it); they are now freed on the drop thread.
+
+Local replay, the first three changes against the commit before (2 run pairs each):
+
+| | Before | After | Change |
+|---|---|---|---|
+| Warm mean | 11.52 ms | 10.70 ms | -7.1% |
+| Cold mean | 18.06 ms | 15.81 ms | -12.5% |
+| Cold p90 | 27.5 ms | 23.6 ms | -14.4% |
+
+The storage trie pool on its own was within noise for latency (warm -2.4%) and saves 25 ms of CPU
+per block.
+
+derek, 4 run pairs against main:
+
+| | ebc6075b51 | ebc6075b51, `--db.warm-branch-pages` | 61e6963752, warm-up and `--db.sync-interval=12s` |
+|---|---|---|---|
+| Mean | -25.4% (27.68 -> 20.65 ms) | -35.3% (28.85 -> 18.66 ms) | -37.3% (29.02 -> 18.19 ms) |
+| P50 | -21.7% | -29.5% | -29.4% |
+| P90 | -28.4% | -42.7% | -44.9% |
+| P99 | -43.4% (145.6 -> 82.4 ms) | -52.3% (139.3 -> 66.4 ms) | -63.3% (162.0 -> 59.5 ms) |
+| Mgas/s | +27.3% | +43.7% | +44.8% |
+| End-to-end Mgas/s | +11.2% | +14.9% | +14.0% |
+
+main's own p99 ranges from 132 to 162 ms across these runs. Persistence does not keep up with the
+faster blocks even without durable commits (persist wait 4.7-7.7 ms against 0.5-1.0 ms on main):
+each save of ~18 blocks holds its write transaction for ~370 ms.
+
+### The root after execution
+
+Warm, the root is ready 1.27 ms after post-execution validation (was 1.76 ms): ~0.6 ms of trie
+work after the finish marker, 0.25 ms for the root and updates, and the rest the marker's way
+there (it is sent when evm2's executor drops its state hook, after building the bundle state,
+~0.25 ms on the engine thread). In 45% of blocks the trie requests proofs after the finish marker,
+almost all for one to three USDT or USDC slots under a blinded node, and those blocks' tail is
+1.57 ms against 0.67 ms. The task applies buffered updates, prefetch hints included, only when its
+queue runs empty, so in a continuous stream a hinted slot's proof is requested at the end.
+Applying all buffered updates every 4 messages halved those blocks but made the others' tail
+1.6 ms (the task fell behind), mean +5%; every 16 messages was neutral.
+
 ## Rewrite: newPayload v2
 
 The v2 path replaces the per-block task graph instead of tuning it:
