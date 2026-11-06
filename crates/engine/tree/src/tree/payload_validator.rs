@@ -2166,6 +2166,9 @@ struct ExecutedBal {
 static NP_PHASES: std::sync::Mutex<Vec<(&'static str, Instant)>> =
     std::sync::Mutex::new(Vec::new());
 
+static NP_PHASES_FILE: std::sync::LazyLock<Option<std::ffi::OsString>> =
+    std::sync::LazyLock::new(|| std::env::var_os("RETH_NP_PHASES_FILE"));
+
 static NP_PHASES_ENABLED: std::sync::LazyLock<bool> =
     std::sync::LazyLock::new(|| std::env::var_os("RETH_NP_PHASES").is_some());
 
@@ -2250,5 +2253,15 @@ pub(crate) fn np_phases_log(number: u64, gas: u64) {
         .map(|counter| counter.swap(0, Ordering::Relaxed).to_string())
         .collect::<Vec<_>>()
         .join(",");
-    info!(target: "engine::np_phases", number, gas, %line, %probe, %commit, %trie, "phases");
+    if let Some(path) = &*NP_PHASES_FILE {
+        use std::io::Write;
+        if let Ok(mut file) = std::fs::OpenOptions::new().create(true).append(true).open(path) {
+            let _ = writeln!(
+                file,
+                "engine::np_phases: phases number={number} gas={gas} line={line} probe={probe} commit={commit} trie={trie}"
+            );
+        }
+    } else {
+        info!(target: "engine::np_phases", number, gas, %line, %probe, %commit, %trie, "phases");
+    }
 }
