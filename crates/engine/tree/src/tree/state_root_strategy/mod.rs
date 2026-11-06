@@ -781,7 +781,11 @@ impl DefaultStateRootStrategy {
                 );
                 if let Some((prune_before, _)) = prune_target {
                     let prune_start = Instant::now();
-                    trie.prune(prune_before);
+                    if std::env::var_os("RETH_NP_PRUNE_CPU").is_some() {
+                        executor.cpu_pool().install(|| trie.prune(prune_before));
+                    } else {
+                        trie.prune(prune_before);
+                    }
                     let np = &reth_trie_sparse::NP_PRUNE;
                     crate::tree::payload_validator::np_event(
                         "prune_acct",
