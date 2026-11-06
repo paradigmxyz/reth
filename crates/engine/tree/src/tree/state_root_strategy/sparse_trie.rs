@@ -1137,6 +1137,7 @@ where
             unreachable!("a checked out address stays in flight until its job returns")
         };
         let started = in_flight.started;
+        np_event("t_strg_dur", started.elapsed().as_micros() as u64, output_units(&output));
         let StorageTrieState::Idle(work) = entry.into_mut() else { unreachable!("just inserted") };
         work.take_buffered(*in_flight);
         self.storage_in_flight -= 1;
@@ -1626,6 +1627,11 @@ impl Default for StorageWorkOutput {
     fn default() -> Self {
         Self { targets: Vec::new(), cache_hits: 0, cache_misses: 0, result: Ok(()) }
     }
+}
+
+/// Leaf updates a pass applied plus those left blocked (experiment only).
+const fn output_units(output: &StorageWorkOutput) -> u64 {
+    output.cache_hits + output.cache_misses
 }
 
 /// Merges leaf updates into a queue, letting a newly known value win over a queued one.

@@ -2220,7 +2220,13 @@ pub(crate) fn np_phases_log(number: u64, gas: u64) {
     let Some(&(_, start)) = phases.first() else { return };
     if let Some(path) = &*NP_EVENTS_PATH {
         use std::io::Write;
-        let events = core::mem::take(&mut *NP_EVENTS.lock().unwrap());
+        let mut events = core::mem::take(&mut *NP_EVENTS.lock().unwrap());
+        for (at, queued, compute, kind, _) in
+            core::mem::take(&mut *reth_trie_parallel::proof_task::NP_PROOF_TIMES.lock().unwrap())
+        {
+            events.push((at, if kind == 0 { "p_strg" } else { "p_acct" }, queued, compute));
+        }
+        events.sort_by_key(|(at, ..)| *at);
         let mut out = format!("block {number} {gas}\n");
         for (name, at) in &phases {
             out.push_str(&format!(

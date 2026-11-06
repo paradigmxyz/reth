@@ -45,6 +45,11 @@ use tracing::{debug, debug_span, error, instrument, trace};
 #[cfg(feature = "metrics")]
 use self::metrics::ProofWorkerIdleMetrics;
 
+/// Proof job timings (experiment only): completion time, queued us, compute us, kind (0 storage,
+/// 1 account), targets.
+pub static NP_PROOF_TIMES: std::sync::Mutex<Vec<(Instant, u64, u64, u8, u32)>> =
+    std::sync::Mutex::new(Vec::new());
+
 /// Tracks worker availability counts.
 ///
 /// It uses cacheline-aligned flags to avoid core-to-core chatter.
@@ -525,6 +530,13 @@ where
                 "Storage proof completed"
             );
 
+            NP_PROOF_TIMES.lock().unwrap().push((
+                Instant::now(),
+                proof_start.duration_since(dispatched_at).as_micros() as u64,
+                proof_start.elapsed().as_micros() as u64,
+                0,
+                0,
+            ));
             let result =
                 proof.map_err(|source| ProofJobError::Storage { hashed_address, source }.into());
             self.send_result(worker_id, result);
@@ -583,6 +595,13 @@ where
                 "Account proof completed"
             );
 
+            NP_PROOF_TIMES.lock().unwrap().push((
+                Instant::now(),
+                proof_start.duration_since(dispatched_at).as_micros() as u64,
+                proof_start.elapsed().as_micros() as u64,
+                1,
+                0,
+            ));
             let result = proof.map_err(|source| ProofJobError::Account { source }.into());
             self.send_result(worker_id, result);
             account_proofs_processed += 1;
