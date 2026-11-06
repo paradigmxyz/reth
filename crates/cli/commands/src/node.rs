@@ -5,7 +5,7 @@ use clap::{value_parser, Args, Parser};
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_cli::chainspec::ChainSpecParser;
 use reth_cli_runner::CliContext;
-use reth_db::init_db;
+use reth_db::{init_db, Tables};
 use reth_node_builder::NodeBuilder;
 use reth_node_core::{
     args::{
@@ -214,6 +214,23 @@ where
         tracing::info!(target: "reth::cli", path = ?db_path, "Opening database");
         let database = init_db(db_path.clone(), self.db.database_args())?
             .with_metrics_if(self.db.metrics_enabled());
+        if self.db.warm_branch_pages {
+            let database = database.clone();
+            std::thread::Builder::new().name("db-warm".to_string()).spawn(move || {
+                let start = std::time::Instant::now();
+                match database.warm_branch_pages(&WARM_TABLES, WARM_THREADS) {
+                    Ok(pages) => tracing::info!(
+                        target: "reth::cli",
+                        pages,
+                        elapsed = ?start.elapsed(),
+                        "Read database branch pages"
+                    ),
+                    Err(err) => {
+                        tracing::warn!(target: "reth::cli", %err, "Failed to read database branch pages")
+                    }
+                }
+            })?;
+        }
 
         if with_unused_ports {
             node_config = node_config.with_unused_ports();
@@ -258,6 +275,21 @@ where
         Ok(reth_network_peers::pk2id(&sk.public_key()))
     }
 }
+
+/// Tables whose branch pages `--db.warm-branch-pages` reads: the state execution reads and the
+/// trie tables proofs read.
+const WARM_TABLES: [&str; 7] = [
+    Tables::HashedAccounts.name(),
+    Tables::HashedStorages.name(),
+    Tables::PlainAccountState.name(),
+    Tables::PlainStorageState.name(),
+    Tables::Bytecodes.name(),
+    Tables::AccountsTrie.name(),
+    Tables::StoragesTrie.name(),
+];
+
+/// Threads that read branch pages, enough to keep an NVMe drive's queue full.
+const WARM_THREADS: usize = 64;
 
 /// No Additional arguments
 #[derive(Debug, Clone, Copy, Default, Args)]

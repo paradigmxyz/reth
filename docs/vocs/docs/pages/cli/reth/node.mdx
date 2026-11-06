@@ -920,6 +920,11 @@ Database:
       --db.disable-metrics
           Disable built-in database metrics
 
+      --db.warm-branch-pages
+          Read the branch pages of the state and trie tables into the page cache at startup.
+
+          After a restart the page cache is cold, and a state lookup then reads its tree's branch pages from disk before its leaf. Reading them up front in the background, together with the leaves that point to the trees of large storages (about 15 GB on mainnet), makes the first blocks after a restart execute faster.
+
 Dev testnet:
       --dev
           Start the node in dev mode
