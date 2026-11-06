@@ -774,9 +774,31 @@ impl DefaultStateRootStrategy {
                 let changed = task.changed_storage_tries().copied().collect::<Vec<_>>();
                 let (mut trie, deferred) = task.into_trie_for_reuse();
                 trie.update_storage_roots(&mut storage_roots, &changed, new_epoch);
+                crate::tree::payload_validator::np_event(
+                    "preserve_pre",
+                    start.elapsed().as_micros() as u64,
+                    changed.len() as u64,
+                );
                 if let Some((prune_before, _)) = prune_target {
                     let prune_start = Instant::now();
                     trie.prune(prune_before);
+                    let np = &reth_trie_sparse::NP_PRUNE;
+                    crate::tree::payload_validator::np_event(
+                        "prune_acct",
+                        np[0].load(std::sync::atomic::Ordering::Relaxed),
+                        np[1].load(std::sync::atomic::Ordering::Relaxed),
+                    );
+                    crate::tree::payload_validator::np_event(
+                        "prune_strg",
+                        np[2].load(std::sync::atomic::Ordering::Relaxed),
+                        np[3].load(std::sync::atomic::Ordering::Relaxed) * 100000 +
+                            np[4].load(std::sync::atomic::Ordering::Relaxed),
+                    );
+                    crate::tree::payload_validator::np_event(
+                        "prune_total",
+                        prune_start.elapsed().as_micros() as u64,
+                        0,
+                    );
                     storage_roots.retain(|address, _| trie.storage_trie_ref(address).is_some());
                     trie_metrics
                         .sparse_trie_prune_duration_histogram

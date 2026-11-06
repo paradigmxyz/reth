@@ -562,6 +562,7 @@ where
     )]
     pub fn prune(&mut self, prune_before: TrieNodeEpoch) {
         let total_storage_tries_before = self.storage.tries.len();
+        let np_start = std::time::Instant::now();
 
         let parent_span = tracing::Span::current();
         let account_parent_span = parent_span.clone();
@@ -578,10 +579,26 @@ where
                 )
                 .entered();
 
-                self.state.as_revealed_mut().map(|trie| trie.prune(prune_before)).unwrap_or(0)
+                let pruned =
+                    self.state.as_revealed_mut().map(|trie| trie.prune(prune_before)).unwrap_or(0);
+                NP_PRUNE[0].store(
+                    np_start.elapsed().as_micros() as u64,
+                    core::sync::atomic::Ordering::Relaxed,
+                );
+                NP_PRUNE[1].store(pruned as u64, core::sync::atomic::Ordering::Relaxed);
+                pruned
             },
-            || self.storage.prune(prune_before, &parent_span),
+            || {
+                let evicted = self.storage.prune(prune_before, &parent_span);
+                NP_PRUNE[2].store(
+                    np_start.elapsed().as_micros() as u64,
+                    core::sync::atomic::Ordering::Relaxed,
+                );
+                evicted
+            },
         );
+        NP_PRUNE[3].store(total_storage_tries_before as u64, core::sync::atomic::Ordering::Relaxed);
+        NP_PRUNE[4].store(storage_tries_evicted as u64, core::sync::atomic::Ordering::Relaxed);
 
         debug!(
             target: "trie::sparse",
@@ -593,6 +610,11 @@ where
         );
     }
 }
+
+/// Prune timings (experiment only): account us, account nodes pruned, storage us, storage tries
+/// before, storage tries evicted.
+pub static NP_PRUNE: [core::sync::atomic::AtomicU64; 5] =
+    [const { core::sync::atomic::AtomicU64::new(0) }; 5];
 
 /// The fields of [`SparseStateTrie`] related to storage tries. This is kept separate from the rest
 /// of [`SparseStateTrie`] to help enforce allocation re-use.
