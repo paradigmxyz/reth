@@ -1305,7 +1305,7 @@ impl<Tx, T: evm2::EvmTypes> SpeculationQueue<Tx, T> {
         Self {
             txs: (0..transaction_count).map(|_| OnceLock::new()).collect(),
             next: AtomicUsize::new(1),
-            next_probe: AtomicUsize::new(1),
+            next_probe: AtomicUsize::new(usize::from(std::env::var_os("RETH_NP_TX0").is_none())),
             closed: AtomicBool::new(false),
         }
     }
