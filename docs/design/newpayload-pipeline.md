@@ -386,7 +386,12 @@ almost all for one to three USDT or USDC slots under a blinded node, and those b
 1.57 ms against 0.67 ms. The task applies buffered updates, prefetch hints included, only when its
 queue runs empty, so in a continuous stream a hinted slot's proof is requested at the end.
 Applying all buffered updates every 4 messages halved those blocks but made the others' tail
-1.6 ms (the task fell behind), mean +5%; every 16 messages was neutral.
+1.6 ms (the task fell behind), mean +5%; every 16 messages was neutral. The late targets are not
+the hints waiting behind updates: buffering hints apart and applying only them on every message
+left as many blocks with late targets. Nor are they keys nobody hinted: also touching every
+updated key on arrival made more of them (the task fell behind, mean +16%). They are full keys
+under a known parent, requested when a value is applied, which points at leaves that only a
+change reaches, such as a removal collapsing a branch onto a blinded sibling.
 
 ## Rewrite: newPayload v2
 
