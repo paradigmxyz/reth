@@ -441,7 +441,7 @@ where
 
     /// Returns the cache for the given parent hash.
     ///
-    /// Waits up to [`PARENT_CACHE_WAIT_TIMEOUT`] while the cache is checked out, usually by the
+    /// Waits up to `PARENT_CACHE_WAIT_TIMEOUT` while the cache is checked out, usually by the
     /// parent's prewarm task before it saves it. If the cache is still unavailable, this creates
     /// a new instance.
     #[instrument(level = "debug", target = "engine::caching", skip(self))]
