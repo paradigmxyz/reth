@@ -218,7 +218,12 @@ where
             tracing::info!(target: "reth::cli", "Reading database branch pages");
             let start = std::time::Instant::now();
             let pages = database.warm_branch_pages(&WARM_TABLES, WARM_THREADS)?;
-            tracing::info!(target: "reth::cli", pages, elapsed = ?start.elapsed(), "Read database branch pages");
+            tracing::info!(
+                target: "reth::cli",
+                pages,
+                elapsed = ?start.elapsed(),
+                "Read database branch pages"
+            );
         }
 
         if with_unused_ports {
