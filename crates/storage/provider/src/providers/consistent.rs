@@ -1013,12 +1013,6 @@ impl<N: ProviderNodeTypes> PruneCheckpointReader for ConsistentProvider<N> {
     fn get_prune_checkpoints(&self) -> ProviderResult<Vec<(PruneSegment, PruneCheckpoint)>> {
         self.storage_provider.get_prune_checkpoints()
     }
-
-    fn get_prune_checkpoints_for_availability(
-        &self,
-    ) -> ProviderResult<Vec<(PruneSegment, PruneCheckpoint)>> {
-        self.storage_provider.get_prune_checkpoints_for_availability()
-    }
 }
 
 impl<N: ProviderNodeTypes> ChainSpecProvider for ConsistentProvider<N> {
@@ -1423,28 +1417,20 @@ mod tests {
         test_utils::create_test_provider_factory, BlockWriter,
     };
     use alloy_eips::BlockHashOrNumber;
-    use alloy_primitives::{B256, U256};
+    use alloy_primitives::B256;
     use itertools::Itertools;
     use rand::Rng;
     use reth_chain_state::{ExecutedBlock, NewCanonicalChain};
-    use reth_db_api::{
-        models::{AccountBeforeTx, StorageSettings},
-        tables,
-        transaction::DbTxMut,
-    };
+    use reth_db_api::models::AccountBeforeTx;
     use reth_ethereum_primitives::Block;
     use reth_execution_types::{BlockExecutionOutput, BlockExecutionResult, ExecutionOutcome};
-    use reth_primitives_traits::{RecoveredBlock, SealedBlock, StorageEntry};
-    use reth_storage_api::{
-        BlockReader, BlockSource, ChangeSetReader, StateReader, StorageChangeSetReader,
-        StorageSettingsCache,
-    };
+    use reth_primitives_traits::{RecoveredBlock, SealedBlock};
+    use reth_storage_api::{BlockReader, BlockSource, ChangeSetReader, StateReader};
     use reth_testing_utils::generators::{
         self, random_block_range, random_changeset_range, random_eoa_accounts, BlockRangeParams,
     };
     use reth_trie::bundle_state::BundleState;
     use std::{
-        collections::HashMap,
         ops::{Bound, Range, RangeBounds},
         sync::Arc,
     };
@@ -1829,6 +1815,12 @@ mod tests {
     }
     #[test]
     fn test_get_state_storage_value_plain_state() -> eyre::Result<()> {
+        use alloy_primitives::U256;
+        use reth_db_api::{models::StorageSettings, tables, transaction::DbTxMut};
+        use reth_primitives_traits::StorageEntry;
+        use reth_storage_api::StorageSettingsCache;
+        use std::collections::HashMap;
+
         let address = alloy_primitives::Address::with_last_byte(1);
         let account = reth_primitives_traits::Account {
             nonce: 1,
@@ -1905,6 +1897,11 @@ mod tests {
 
     #[test]
     fn test_storage_changeset_consistent_keys_plain_state() -> eyre::Result<()> {
+        use alloy_primitives::U256;
+        use reth_db_api::models::StorageSettings;
+        use reth_storage_api::{StorageChangeSetReader, StorageSettingsCache};
+        use std::collections::HashMap;
+
         let mut rng = generators::rng();
         let factory = create_test_provider_factory();
         factory.set_storage_settings_cache(StorageSettings::v1());
@@ -1999,6 +1996,11 @@ mod tests {
 
     #[test]
     fn test_storage_changesets_range_consistent_keys_plain_state() -> eyre::Result<()> {
+        use alloy_primitives::U256;
+        use reth_db_api::models::StorageSettings;
+        use reth_storage_api::{StorageChangeSetReader, StorageSettingsCache};
+        use std::collections::HashMap;
+
         let mut rng = generators::rng();
         let factory = create_test_provider_factory();
         factory.set_storage_settings_cache(StorageSettings::v1());

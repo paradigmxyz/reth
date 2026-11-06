@@ -26,6 +26,7 @@ use reth_storage_api::{
     StateRangeProviderFactory,
 };
 use reth_tasks::Runtime;
+use secp256k1::SECP256K1;
 use std::{collections::HashSet, net::SocketAddr, sync::Arc};
 
 // re-export for convenience
@@ -37,7 +38,7 @@ pub use secp256k1::SecretKey;
 
 /// Convenience function to create a new random [`SecretKey`]
 pub fn rng_secret_key() -> SecretKey {
-    SecretKey::new(&mut rand::rng())
+    SecretKey::new(&mut rand_08::thread_rng())
 }
 
 /// All network related initialization settings.
@@ -293,7 +294,7 @@ impl<N: NetworkPrimitives> NetworkConfigBuilder<N> {
 
     /// Returns the configured [`PeerId`]
     pub fn get_peer_id(&self) -> PeerId {
-        pk2id(&self.secret_key.public_key())
+        pk2id(&self.secret_key.public_key(SECP256K1))
     }
 
     /// Returns the configured [`SecretKey`], from which the node's identity is derived.
@@ -805,7 +806,7 @@ mod tests {
     use std::{net::Ipv4Addr, sync::Arc};
 
     fn builder() -> NetworkConfigBuilder {
-        let secret_key = SecretKey::new(&mut rand::rng());
+        let secret_key = SecretKey::new(&mut rand_08::thread_rng());
         NetworkConfigBuilder::new(secret_key, Runtime::test())
     }
 

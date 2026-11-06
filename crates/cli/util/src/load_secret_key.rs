@@ -8,7 +8,7 @@ use thiserror::Error;
 
 /// Convenience function to create a new random [`SecretKey`]
 pub fn rng_secret_key() -> SecretKey {
-    SecretKey::new(&mut rand::rng())
+    SecretKey::new(&mut rand_08::thread_rng())
 }
 
 /// Errors returned by loading a [`SecretKey`], including IO errors.
@@ -54,7 +54,7 @@ pub fn get_secret_key(secret_key_path: &Path) -> Result<SecretKey, SecretKeyErro
             }
 
             let secret = rng_secret_key();
-            let hex = alloy_primitives::hex::encode(secret.as_secret_bytes());
+            let hex = alloy_primitives::hex::encode(secret.as_ref());
             fs::write(secret_key_path, hex)?;
             Ok(secret)
         }
@@ -77,10 +77,7 @@ pub fn parse_secret_key_from_hex(hex_str: &str) -> Result<SecretKey, SecretKeyEr
         .map_err(|e| SecretKeyError::InvalidHexString(e.to_string()))?;
 
     // Parse into SecretKey
-    SecretKey::from_secret_bytes(
-        bytes.try_into().map_err(|_| SecretKeyBaseError::InvalidSecretKey)?,
-    )
-    .map_err(SecretKeyError::SecretKeyDecodeError)
+    SecretKey::from_slice(&bytes).map_err(SecretKeyError::SecretKeyDecodeError)
 }
 
 #[cfg(test)]
@@ -95,7 +92,7 @@ mod tests {
         assert!(result.is_ok());
 
         let secret_key = result.unwrap();
-        assert_eq!(alloy_primitives::hex::encode(secret_key.to_secret_bytes()), hex);
+        assert_eq!(alloy_primitives::hex::encode(secret_key.secret_bytes()), hex);
     }
 
     #[test]
@@ -107,7 +104,7 @@ mod tests {
 
         let secret_key = result.unwrap();
         let expected = "4c0883a69102937d6231471b5dbb6204fe512961708279f8c5c58b3b9c4e8b8f";
-        assert_eq!(alloy_primitives::hex::encode(secret_key.to_secret_bytes()), expected);
+        assert_eq!(alloy_primitives::hex::encode(secret_key.secret_bytes()), expected);
     }
 
     #[test]
@@ -115,10 +112,7 @@ mod tests {
         // Invalid length (not 32 bytes)
         let hex = "4c0883a69102937d";
         let result = parse_secret_key_from_hex(hex);
-        assert!(matches!(
-            result,
-            Err(SecretKeyError::SecretKeyDecodeError(SecretKeyBaseError::InvalidSecretKey))
-        ));
+        assert!(result.is_err());
     }
 
     #[test]
@@ -139,9 +133,6 @@ mod tests {
     fn test_parse_secret_key_from_hex_empty() {
         let hex = "";
         let result = parse_secret_key_from_hex(hex);
-        assert!(matches!(
-            result,
-            Err(SecretKeyError::SecretKeyDecodeError(SecretKeyBaseError::InvalidSecretKey))
-        ));
+        assert!(result.is_err());
     }
 }

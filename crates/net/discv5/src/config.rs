@@ -8,8 +8,10 @@ use std::{
 
 use alloy_primitives::Bytes;
 use derive_more::Display;
-use discv5::ListenConfig;
-use multiaddr::{Multiaddr, Protocol};
+use discv5::{
+    multiaddr::{Multiaddr, Protocol},
+    ListenConfig,
+};
 use reth_ethereum_forks::{EnrForkIdEntry, ForkId};
 use reth_network_peers::NodeRecord;
 use tracing::debug;
@@ -173,7 +175,7 @@ impl ConfigBuilder {
         self
     }
 
-    /// Set fork ID kv-pair to set in local [`Enr`](enr::Enr). This lets peers on discovery
+    /// Set fork ID kv-pair to set in local [`Enr`](discv5::enr::Enr). This lets peers on discovery
     /// network know which chain this node belongs to.
     pub const fn fork(mut self, fork_key: &'static [u8], fork_id: ForkId) -> Self {
         self.fork = Some((fork_key, fork_id));
@@ -188,7 +190,7 @@ impl ConfigBuilder {
         self
     }
 
-    /// Sets the tcp socket to advertise in the local [`Enr`](enr::Enr). The IP address of
+    /// Sets the tcp socket to advertise in the local [`Enr`](discv5::enr::Enr). The IP address of
     /// this socket will overwrite the discovery address of the same IP version, if one is
     /// configured.
     pub const fn tcp_socket(mut self, socket: SocketAddr) -> Self {
@@ -196,7 +198,7 @@ impl ConfigBuilder {
         self
     }
 
-    /// Sets the IP address to advertise in the local [`Enr`](enr::Enr), without changing
+    /// Sets the IP address to advertise in the local [`Enr`](discv5::enr::Enr), without changing
     /// the discv5 listen socket.
     ///
     /// Routed to the matching address family, so calling this once per family yields a dual-stack
@@ -209,7 +211,7 @@ impl ConfigBuilder {
         self
     }
 
-    /// Adds an additional kv-pair to include in the local [`Enr`](enr::Enr). Takes the key
+    /// Adds an additional kv-pair to include in the local [`Enr`](discv5::enr::Enr). Takes the key
     /// to use for the kv-pair and the rlp encoded value.
     pub fn add_enr_kv_pair(mut self, key: &'static [u8], value: Bytes) -> Self {
         self.other_enr_kv_pairs.push((key, value));
@@ -391,7 +393,7 @@ impl Config {
 
     /// Returns the discovery (UDP) socket contained in the [`discv5::Config`]. Returns the IPv6
     /// socket, if both IPv4 and v6 are configured. This socket will be advertised to peers in the
-    /// local [`Enr`](enr::Enr).
+    /// local [`Enr`](discv5::enr::Enr).
     pub fn discovery_socket(&self) -> SocketAddr {
         // Prefer v6 when both are configured (matches original `DualStack` behavior).
         ipv6(&self.discv5_config.listen_config)
@@ -401,7 +403,7 @@ impl Config {
     }
 
     /// Returns the `RLPx` (TCP) socket contained in the [`discv5::Config`]. This socket will be
-    /// advertised to peers in the local [`Enr`](enr::Enr).
+    /// advertised to peers in the local [`Enr`](discv5::enr::Enr).
     pub const fn rlpx_socket(&self) -> &SocketAddr {
         &self.tcp_socket
     }

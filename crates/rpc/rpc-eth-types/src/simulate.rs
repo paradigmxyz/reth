@@ -15,7 +15,6 @@ use alloy_rpc_types_eth::{
     BlockId, BlockOverrides, BlockTransactionsKind,
 };
 use evm2::{interpreter::InstrStop, precompiles::MovePrecompileError, EvmFeatures, TxResult};
-use evm2_inspectors::transfer::TransferInspector;
 use jsonrpsee_types::{error::INTERNAL_ERROR_CODE, ErrorObject};
 use reth_errors::ProviderResult;
 use reth_evm::{
@@ -386,18 +385,6 @@ where
             results.push(output.clone())
         })?;
 
-        // The transfer tracer keeps the transaction's logs, with the synthetic transfer logs
-        // among them, outside the EVM's own logs.
-        // SAFETY: `TransferInspector` has no lifetime parameters.
-        if let Some(logs) = unsafe {
-            builder
-                .evm_mut()
-                .with_inspector(|inspector: &mut TransferInspector| inspector.take_logs())
-        } && let Some(result) = results.last_mut()
-        {
-            result.logs = logs;
-        }
-
         let gas_used = gas_output.tx_gas_used();
         if let Some(remaining_call_gas_limit) = remaining_call_gas_limit.as_mut() {
             if gas_used > *remaining_call_gas_limit {
@@ -499,10 +486,12 @@ where
     // gas price.
     let tx_type = tx.as_ref().output_tx_type();
 
-    let from = tx.as_ref().from().unwrap_or_else(|| {
+    let from = if let Some(from) = tx.as_ref().from() {
+        from
+    } else {
         tx.as_mut().set_from(Address::ZERO);
         Address::ZERO
-    });
+    };
 
     let state_nonce = account(&from)?.map(|acc| acc.nonce).unwrap_or_default();
     if tx.as_ref().nonce().is_none() {

@@ -10,13 +10,13 @@ use alloy_eips::{
 };
 use alloy_primitives::{Address, BlockNumber, Bytes, TxKind, B256, B64, U256};
 pub use rand::Rng;
-use rand::{distr::uniform::SampleRange, prelude::IndexedRandom, rngs::StdRng, SeedableRng};
+use rand::{distr::uniform::SampleRange, rngs::StdRng, SeedableRng};
 use reth_ethereum_primitives::{Block, BlockBody, Receipt, Transaction, TransactionSigned};
 use reth_primitives_traits::{
     crypto::secp256k1::sign_message, proofs, Account, Block as _, Log, SealedBlock, SealedHeader,
     StorageEntry,
 };
-use secp256k1::Keypair;
+use secp256k1::{Keypair, Secp256k1};
 use std::{
     cmp::{max, min},
     collections::BTreeMap,
@@ -160,27 +160,31 @@ pub fn random_signed_tx<R: Rng>(rng: &mut R) -> TransactionSigned {
 
 /// Signs the [Transaction] with a random key pair.
 pub fn sign_tx_with_random_key_pair<R: Rng>(_rng: &mut R, tx: Transaction) -> TransactionSigned {
-    let key_pair = Keypair::new(&mut rand::rng());
+    let secp = Secp256k1::new();
+    // TODO: rand08
+    let key_pair = Keypair::new(&secp, &mut rand_08::thread_rng());
     sign_tx_with_key_pair(key_pair, tx)
 }
 
 /// Signs the [Transaction] with the given key pair.
 pub fn sign_tx_with_key_pair(key_pair: Keypair, tx: Transaction) -> TransactionSigned {
     let signature =
-        sign_message(B256::from_slice(&key_pair.to_secret_bytes()[..]), tx.signature_hash())
-            .unwrap();
+        sign_message(B256::from_slice(&key_pair.secret_bytes()[..]), tx.signature_hash()).unwrap();
 
     tx.into_signed(signature).into()
 }
 
 /// Generates a new random [Keypair].
 pub fn generate_key<R: Rng>(_rng: &mut R) -> Keypair {
-    Keypair::new(&mut rand::rng())
+    let secp = Secp256k1::new();
+    Keypair::new(&secp, &mut rand_08::thread_rng())
 }
 
 /// Generates a set of [Keypair]s based on the desired count.
 pub fn generate_keys<R: Rng>(_rng: &mut R, count: usize) -> Vec<Keypair> {
-    (0..count).map(|_| Keypair::new(&mut rand::rng())).collect()
+    let secp = Secp256k1::new();
+    // TODO: rand08
+    (0..count).map(|_| Keypair::new(&secp, &mut rand_08::thread_rng())).collect()
 }
 
 /// Generate a random block filled with signed transactions (generated using
@@ -380,6 +384,7 @@ pub fn random_account_change<R: Rng>(
     n_storage_changes: Range<u64>,
     key_range: Range<u64>,
 ) -> (Address, Address, U256, Vec<StorageEntry>) {
+    use rand::prelude::IndexedRandom;
     let mut addresses = valid_addresses.choose_multiple(rng, 2).copied();
 
     let addr_from = addresses.next().unwrap_or_else(Address::random);
@@ -483,11 +488,16 @@ mod tests {
     use alloy_consensus::TxEip1559;
     use alloy_eips::eip2930::AccessList;
     use alloy_primitives::{address, b256, bytes, hex, Signature};
-    use reth_primitives_traits::{crypto::secp256k1::sign_message, SignerRecoverable};
+    use reth_primitives_traits::{
+        crypto::secp256k1::{public_key_to_address, sign_message},
+        SignerRecoverable,
+    };
     use std::str::FromStr;
 
     #[test]
     fn test_sign_message() {
+        let secp = Secp256k1::new();
+
         let tx = Transaction::Eip1559(TxEip1559 {
             chain_id: 1,
             nonce: 0x42,
@@ -502,17 +512,16 @@ mod tests {
         let signature_hash = tx.signature_hash();
 
         for _ in 0..100 {
-            let key_pair = Keypair::new(&mut rand::rng());
+            let key_pair = Keypair::new(&secp, &mut rand_08::thread_rng());
 
             let signature =
-                sign_message(B256::from_slice(&key_pair.to_secret_bytes()[..]), signature_hash)
+                sign_message(B256::from_slice(&key_pair.secret_bytes()[..]), signature_hash)
                     .unwrap();
 
             let signed: TransactionSigned = tx.clone().into_signed(signature).into();
             let recovered = signed.recover_signer().unwrap();
 
-            let expected =
-                Address::from_raw_public_key(&key_pair.public_key().serialize_uncompressed()[1..]);
+            let expected = public_key_to_address(key_pair.public_key());
             assert_eq!(recovered, expected);
         }
     }

@@ -484,21 +484,15 @@ mod tests {
         BlockWriter, DatabaseProviderFactory, RocksDBProviderFactory, StageCheckpointWriter,
         TransactionsProvider,
     };
-    use alloy_primitives::{Address, B256, U256};
+    use alloy_primitives::{Address, B256};
     use reth_chainspec::MAINNET;
-    use reth_db::{
-        cursor::{DbCursorRO, DbCursorRW},
-        models::AccountBeforeTx,
-    };
+    use reth_db::cursor::{DbCursorRO, DbCursorRW};
     use reth_db_api::{
-        models::{
-            storage_sharded_key::StorageShardedKey, ShardedKey, StorageBeforeTx, StorageSettings,
-        },
+        models::{storage_sharded_key::StorageShardedKey, StorageSettings},
         tables::{self, BlockNumberList},
         transaction::DbTxMut,
     };
     use reth_stages_types::StageCheckpoint;
-    use reth_static_file_types::StaticFileSegment;
     use reth_testing_utils::generators::{self, BlockRangeParams};
     use tempfile::TempDir;
 
@@ -937,6 +931,8 @@ mod tests {
 
     #[test]
     fn test_check_consistency_accounts_history_sentinel_only_with_checkpoint_is_first_run() {
+        use reth_db_api::models::ShardedKey;
+
         let temp_dir = TempDir::new().unwrap();
         let rocksdb = RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
 
@@ -1143,6 +1139,10 @@ mod tests {
 
     #[test]
     fn test_check_consistency_accounts_history_sf_tip_equals_checkpoint_no_action() {
+        use reth_db::models::AccountBeforeTx;
+        use reth_db_api::models::ShardedKey;
+        use reth_static_file_types::StaticFileSegment;
+
         let temp_dir = TempDir::new().unwrap();
         let rocksdb = RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
 
@@ -1236,6 +1236,9 @@ mod tests {
     /// 7. Verify stale entries for blocks > 5000 are pruned and batching worked
     #[test]
     fn test_check_consistency_storages_history_heals_via_changesets_large_range() {
+        use alloy_primitives::U256;
+        use reth_db_api::models::StorageBeforeTx;
+
         const TOTAL_BLOCKS: u64 = 15_000;
         const CHECKPOINT_BLOCK: u64 = 5_000;
 
@@ -1350,6 +1353,9 @@ mod tests {
     /// This catches off-by-one bugs where checkpoint block data is incorrectly deleted.
     #[test]
     fn test_check_consistency_storages_history_preserves_checkpoint_block() {
+        use alloy_primitives::U256;
+        use reth_db_api::models::StorageBeforeTx;
+
         const CHECKPOINT_BLOCK: u64 = 100;
         const SF_TIP: u64 = 200;
 
@@ -1447,6 +1453,10 @@ mod tests {
     ///    - The batching worked (no OOM, completed successfully)
     #[test]
     fn test_check_consistency_accounts_history_heals_via_changesets_large_range() {
+        use reth_db::models::AccountBeforeTx;
+        use reth_db_api::models::ShardedKey;
+        use reth_static_file_types::StaticFileSegment;
+
         let temp_dir = TempDir::new().unwrap();
         let rocksdb = RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
 
@@ -1556,6 +1566,9 @@ mod tests {
     /// Tests that accounts history healing preserves entries at exactly the checkpoint block.
     #[test]
     fn test_check_consistency_accounts_history_preserves_checkpoint_block() {
+        use reth_db::models::AccountBeforeTx;
+        use reth_db_api::models::ShardedKey;
+
         const CHECKPOINT_BLOCK: u64 = 100;
         const SF_TIP: u64 = 200;
 
@@ -1625,6 +1638,10 @@ mod tests {
 
     #[test]
     fn test_check_consistency_storages_history_sf_tip_equals_checkpoint_no_action() {
+        use alloy_primitives::U256;
+        use reth_db::models::StorageBeforeTx;
+        use reth_static_file_types::StaticFileSegment;
+
         let temp_dir = TempDir::new().unwrap();
         let rocksdb = RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
 

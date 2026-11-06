@@ -393,11 +393,10 @@ impl<C: ChainSpecParser, Ext: clap::Args + fmt::Debug, SubCmd: Subcommand + fmt:
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{app::ExtendedCommand, chainspec::SUPPORTED_CHAINS};
+    use crate::chainspec::SUPPORTED_CHAINS;
     use clap::CommandFactory;
     use reth_chainspec::{EthChainSpec, SEPOLIA};
     use reth_node_core::args::ColorMode;
-    use std::sync::atomic::{AtomicBool, Ordering};
 
     #[test]
     fn parse_color_mode() {
@@ -672,8 +671,10 @@ mod tests {
 
     #[test]
     fn test_extensible_subcommands() {
+        use crate::app::ExtendedCommand;
         use reth_cli_runner::CliRunner;
         use reth_rpc_server_types::DefaultRpcModuleValidator;
+        use std::sync::atomic::{AtomicBool, Ordering};
 
         #[derive(Debug, Subcommand)]
         enum CustomCommands {

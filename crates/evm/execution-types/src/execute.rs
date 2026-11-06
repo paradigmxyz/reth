@@ -1,9 +1,32 @@
-use alloc::sync::Arc;
+use alloc::{sync::Arc, vec::Vec};
+use alloy_eips::eip7685::Requests;
 use alloy_primitives::{Address, B256, U256};
 use reth_primitives_traits::{Account, Block, Bytecode, RecoveredBlock};
 use reth_trie_common::bundle_state::{BundleAccount, BundleState};
 
-pub use evm2::block::BlockExecutionResult;
+/// The result of executing a block.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BlockExecutionResult<T> {
+    /// All the receipts of the transactions in the block.
+    pub receipts: Vec<T>,
+    /// All the EIP-7685 requests in the block.
+    pub requests: Requests,
+    /// The total gas used by the block.
+    pub gas_used: u64,
+    /// Blob gas used by the block.
+    pub blob_gas_used: u64,
+}
+
+impl<T> Default for BlockExecutionResult<T> {
+    fn default() -> Self {
+        Self {
+            receipts: Default::default(),
+            requests: Default::default(),
+            gas_used: 0,
+            blob_gas_used: 0,
+        }
+    }
+}
 
 /// [`BlockExecutionResult`] combined with state.
 #[derive(
@@ -25,12 +48,6 @@ pub struct BlockExecutionOutput<T> {
     pub result: BlockExecutionResult<T>,
     /// The changed state of the block after execution.
     pub state: BundleState,
-}
-
-impl<T> From<evm2::block::BlockExecutionOutput<T>> for BlockExecutionOutput<T> {
-    fn from(output: evm2::block::BlockExecutionOutput<T>) -> Self {
-        Self { result: output.result, state: output.state }
-    }
 }
 
 impl<T> BlockExecutionOutput<T> {

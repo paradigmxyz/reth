@@ -2420,12 +2420,14 @@ impl<'a> RocksDBBatch<'a> {
             // 3. Invalid (no more keys)
             // If the current key's prefix >= our target prefix, we may be able to skip the seek.
             let needs_seek = if iter.valid() {
-                // If current key's prefix < target prefix, we need to seek forward
-                // If current key's prefix > target prefix, this target has no shards (skip)
-                // If current key's prefix == target prefix, we're already positioned
-                iter.key().is_none_or(|current_key| {
+                if let Some(current_key) = iter.key() {
+                    // If current key's prefix < target prefix, we need to seek forward
+                    // If current key's prefix > target prefix, this target has no shards (skip)
+                    // If current key's prefix == target prefix, we're already positioned
                     current_key.get(..PREFIX_LEN).is_none_or(|p| p < target_prefix)
-                })
+                } else {
+                    true
+                }
             } else {
                 true
             };
@@ -2574,12 +2576,14 @@ impl<'a> RocksDBBatch<'a> {
             // 3. Invalid (no more keys)
             // If the current key's prefix >= our target prefix, we may be able to skip the seek.
             let needs_seek = if iter.valid() {
-                // If current key's prefix < target prefix, we need to seek forward
-                // If current key's prefix > target prefix, this target has no shards (skip)
-                // If current key's prefix == target prefix, we're already positioned
-                iter.key().is_none_or(|current_key| {
+                if let Some(current_key) = iter.key() {
+                    // If current key's prefix < target prefix, we need to seek forward
+                    // If current key's prefix > target prefix, this target has no shards (skip)
+                    // If current key's prefix == target prefix, we're already positioned
                     current_key.get(..PREFIX_LEN).is_none_or(|p| p < target_prefix)
-                })
+                } else {
+                    true
+                }
             } else {
                 true
             };
@@ -3181,10 +3185,7 @@ mod tests {
         table::Table,
         tables,
     };
-    use rocksdb::{
-        perf::{set_perf_stats, PerfContext, PerfMetric, PerfStatsLevel},
-        statistics::{Histogram, Ticker},
-    };
+    use rocksdb::perf::{set_perf_stats, PerfContext, PerfMetric, PerfStatsLevel};
     use tempfile::TempDir;
 
     /// Number of deleted keys `RocksDB` skipped on this thread while running `f`.
@@ -3517,6 +3518,8 @@ mod tests {
     /// levels the C API defines, so the variant name alone does not tell us what was selected.
     #[test]
     fn test_statistics_level_skips_timers() {
+        use rocksdb::statistics::{Histogram, Ticker};
+
         let temp_dir = TempDir::new().unwrap();
         let cache = Cache::new_lru_cache(1 << 20);
         let options = RocksDBBuilder::default_options(rocksdb::LogLevel::Info, &cache, true);

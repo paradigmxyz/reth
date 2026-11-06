@@ -213,11 +213,12 @@ impl Discv4 {
     /// ```
     /// use reth_discv4::{Discv4, Discv4Config};
     /// use reth_network_peers::{pk2id, NodeRecord, PeerId};
+    /// use secp256k1::SECP256K1;
     /// use std::{net::SocketAddr, str::FromStr};
     /// # async fn t() -> std:: io::Result<()> {
     ///
     /// // generate a (random) keypair
-    /// let (secret_key, pk) = secp256k1::generate_keypair(&mut rand::rng());
+    /// let (secret_key, pk) = SECP256K1.generate_keypair(&mut rand_08::thread_rng());
     /// let id = pk2id(&pk);
     ///
     /// let socket = SocketAddr::from_str("0.0.0.0:0").unwrap();
@@ -2702,22 +2703,23 @@ mod tests {
     use crate::test_utils::{create_discv4, create_discv4_with_config, rng_endpoint, rng_record};
     use alloy_primitives::hex;
     use alloy_rlp::{Decodable, Encodable};
-    use rand::Rng;
+    use rand_08::Rng;
     use reth_ethereum_forks::{EnrForkIdEntry, ForkHash};
     use reth_network_peers::mainnet_nodes;
+    use secp256k1::SECP256K1;
     use std::{future::poll_fn, net::Ipv6Addr};
 
     #[tokio::test]
     async fn test_duplicate_packet_rejected_without_decoding() {
-        let secret_key = SecretKey::new(&mut rand::rng());
-        let local_id = pk2id(&secret_key.public_key());
+        let secret_key = SecretKey::new(&mut rand_08::thread_rng());
+        let local_id = pk2id(&secret_key.public_key(SECP256K1));
         let (tx, mut rx) = mpsc::channel(16);
         let mut handler = IngressHandler::new(tx, local_id);
 
-        let remote_key = SecretKey::new(&mut rand::rng());
+        let remote_key = SecretKey::new(&mut rand_08::thread_rng());
         let msg = Message::Ping(Ping {
-            from: rng_endpoint(&mut rand::rng()),
-            to: rng_endpoint(&mut rand::rng()),
+            from: rng_endpoint(&mut rand_08::thread_rng()),
+            to: rng_endpoint(&mut rand_08::thread_rng()),
             expire: u64::MAX,
             enr_sq: None,
         });
@@ -2737,15 +2739,15 @@ mod tests {
 
     #[tokio::test]
     async fn test_undecodable_packet_does_not_poison_cache() {
-        let secret_key = SecretKey::new(&mut rand::rng());
-        let local_id = pk2id(&secret_key.public_key());
+        let secret_key = SecretKey::new(&mut rand_08::thread_rng());
+        let local_id = pk2id(&secret_key.public_key(SECP256K1));
         let (tx, mut rx) = mpsc::channel(16);
         let mut handler = IngressHandler::new(tx, local_id);
 
-        let remote_key = SecretKey::new(&mut rand::rng());
+        let remote_key = SecretKey::new(&mut rand_08::thread_rng());
         let msg = Message::Ping(Ping {
-            from: rng_endpoint(&mut rand::rng()),
-            to: rng_endpoint(&mut rand::rng()),
+            from: rng_endpoint(&mut rand_08::thread_rng()),
+            to: rng_endpoint(&mut rand_08::thread_rng()),
             expire: u64::MAX,
             enr_sq: None,
         });
@@ -2792,8 +2794,8 @@ mod tests {
             // no IPv6 loopback on this host
             return;
         };
-        let mut rng = rand::rng();
-        let (secret_key, pk) = secp256k1::generate_keypair(&mut rng);
+        let mut rng = rand_08::thread_rng();
+        let (secret_key, pk) = secp256k1::SECP256K1.generate_keypair(&mut rng);
         let local_enr = NodeRecord {
             address: Ipv4Addr::LOCALHOST.into(),
             tcp_port: 30303,
@@ -2841,9 +2843,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_external_ip_completes_unspecified_enr_endpoint() {
-        let mut rng = rand::rng();
+        let mut rng = rand_08::thread_rng();
         let socket: SocketAddr = "127.0.0.1:0".parse().unwrap();
-        let (secret_key, pk) = secp256k1::generate_keypair(&mut rng);
+        let (secret_key, pk) = secp256k1::SECP256K1.generate_keypair(&mut rng);
         let local_enr = NodeRecord {
             address: Ipv4Addr::UNSPECIFIED.into(),
             tcp_port: 30303,
@@ -2922,7 +2924,7 @@ mod tests {
     #[tokio::test]
     async fn test_request_enr_of_proven_node() {
         reth_tracing::init_test_tracing();
-        let mut rng = rand::rng();
+        let mut rng = rand_08::thread_rng();
         let (_discv4, mut service) = create_discv4().await;
 
         let id = PeerId::random();
@@ -2938,7 +2940,7 @@ mod tests {
             },
         );
         service.received_pongs.on_pong(id, addr.ip());
-        let ping = |service: &Discv4Service, rng: &mut rand::rngs::ThreadRng| Ping {
+        let ping = |service: &Discv4Service, rng: &mut rand_08::rngs::ThreadRng| Ping {
             from: rng_endpoint(rng),
             to: rng_endpoint(rng),
             expire: service.ping_expiration(),
@@ -3141,7 +3143,7 @@ mod tests {
     #[tokio::test]
     async fn test_mapped_ipv4() {
         reth_tracing::init_test_tracing();
-        let mut rng = rand::rng();
+        let mut rng = rand_08::thread_rng();
         let config = Discv4Config::builder().build();
         let (_discv4, mut service) = create_discv4_with_config(config).await;
 
@@ -3153,7 +3155,7 @@ mod tests {
             from: rng_endpoint(&mut rng),
             to: rng_endpoint(&mut rng),
             expire: service.ping_expiration(),
-            enr_sq: Some(rng.random()),
+            enr_sq: Some(rng.r#gen()),
         };
 
         let id = PeerId::random();
@@ -3173,7 +3175,7 @@ mod tests {
     #[tokio::test]
     async fn test_respect_ping_expiration() {
         reth_tracing::init_test_tracing();
-        let mut rng = rand::rng();
+        let mut rng = rand_08::thread_rng();
         let config = Discv4Config::builder().build();
         let (_discv4, mut service) = create_discv4_with_config(config).await;
 
@@ -3185,7 +3187,7 @@ mod tests {
             from: rng_endpoint(&mut rng),
             to: rng_endpoint(&mut rng),
             expire: SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs() - 1,
-            enr_sq: Some(rng.random()),
+            enr_sq: Some(rng.r#gen()),
         };
 
         let id = PeerId::random();
@@ -3580,7 +3582,7 @@ mod tests {
 
     #[test]
     fn test_insert() {
-        let local_node_record = rng_record(&mut rand::rng());
+        let local_node_record = rng_record(&mut rand_08::thread_rng());
         let mut kbuckets: KBucketsTable<NodeKey, NodeEntry> = KBucketsTable::new(
             NodeKey::from(&local_node_record).into(),
             Duration::from_secs(60),
@@ -3589,7 +3591,7 @@ mod tests {
             None,
         );
 
-        let new_record = rng_record(&mut rand::rng());
+        let new_record = rng_record(&mut rand_08::thread_rng());
         let key = kad_key(new_record.id);
         match kbuckets.entry(&key) {
             kbucket::Entry::Absent(entry) => {
@@ -3679,7 +3681,7 @@ mod tests {
 
     fn make_pong(service: &Discv4Service, echo_hash: B256) -> Pong {
         Pong {
-            to: rng_endpoint(&mut rand::rng()),
+            to: rng_endpoint(&mut rand_08::thread_rng()),
             echo: echo_hash,
             expire: service.ping_expiration(),
             enr_sq: None,
@@ -3920,7 +3922,7 @@ mod tests {
     #[tokio::test]
     async fn test_neighbours_wrong_ip_replay_does_not_poison_cache() {
         let (_discv4, mut service) = create_discv4().await;
-        let remote_key = SecretKey::new(&mut rand::rng());
+        let remote_key = SecretKey::new(&mut rand_08::thread_rng());
         let node_addr = SocketAddr::from(([10, 0, 0, 1], 30303));
         let record = NodeRecord::from_secret_key(node_addr, &remote_key);
         insert_proven_node(&mut service, record);

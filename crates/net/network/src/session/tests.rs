@@ -19,6 +19,7 @@ use reth_eth_wire::{
 use reth_eth_wire_types::message::MAX_MESSAGE_SIZE;
 use reth_ethereum_forks::EthereumHardfork;
 use reth_network_peers::pk2id;
+use secp256k1::SECP256K1;
 use std::{sync::Mutex, task::Waker};
 use tokio::{net::TcpListener, sync::Notify};
 
@@ -94,7 +95,7 @@ impl ConnectionHandler for ProtocolSpy {
 }
 
 fn new_peer() -> (SecretKey, PeerId) {
-    let (key, pk) = secp256k1::generate_keypair(&mut rand::rng());
+    let (key, pk) = SECP256K1.generate_keypair(&mut rand_08::thread_rng());
     (key, pk2id(&pk))
 }
 

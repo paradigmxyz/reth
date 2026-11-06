@@ -8,7 +8,7 @@
 use criterion::{criterion_group, criterion_main, Criterion};
 use reth_discv4::proto::{Message, Neighbours, NodeEndpoint, Ping};
 use reth_network_peers::NodeRecord;
-use secp256k1::SecretKey;
+use secp256k1::{SecretKey, SECP256K1};
 use std::{
     hint::black_box,
     net::{IpAddr, Ipv4Addr},
@@ -45,7 +45,8 @@ fn neighbours(len: usize) -> Message {
 }
 
 fn codec(c: &mut Criterion) {
-    let secret_key = SecretKey::new(&mut rand::rng());
+    let secret_key = SecretKey::new(&mut rand_08::thread_rng());
+    let _ = SECP256K1;
 
     let mut group = c.benchmark_group("discv4_codec");
 

@@ -1,4 +1,3 @@
-use alloy_consensus::Header;
 use alloy_eips::{
     eip2718::Encodable2718, eip7910::EthConfig, eip7928::BlockAccessList, BlockNumberOrTag,
 };
@@ -25,10 +24,7 @@ use alloy_rpc_types_trace::geth::{
 };
 use jsonrpsee::core::client::{ClientT, Subscription, SubscriptionClientT};
 use rand::{rngs::StdRng, Rng, SeedableRng};
-use reth_chainspec::{
-    sepolia::{SEPOLIA_AMSTERDAM_TIMESTAMP, SEPOLIA_BPO2_TIMESTAMP},
-    EthChainSpec, EthereumHardfork, SEPOLIA,
-};
+use reth_chainspec::{EthChainSpec, EthereumHardfork};
 use reth_e2e_test_utils::{
     receipt::PendingTransactionExt, test_chain_spec, test_chain_spec_builder,
     transaction::TransactionTestContext, wait::poll_until, wallet::Wallet, E2ETestSetupExt,
@@ -42,12 +38,10 @@ use reth_node_core::{
 };
 use reth_node_ethereum::EthereumNode;
 use reth_payload_primitives::BuiltPayload;
-use reth_primitives_traits::{Block as _, SealedHeader, SignedTransaction};
-use reth_provider::CanonChainTracker;
+use reth_primitives_traits::Block as _;
 use reth_rpc_api::servers::AdminApiServer;
 use reth_rpc_server_types::RpcModuleSelection;
 use reth_tasks::Runtime;
-use reth_transaction_pool::test_utils::TransactionGenerator;
 use std::{
     net::{IpAddr, Ipv4Addr},
     sync::Arc,
@@ -70,6 +64,9 @@ alloy_sol_types::sol! {
 
 #[tokio::test]
 async fn test_rpc_shares_sender_recovery_cache_with_execution() -> eyre::Result<()> {
+    use reth_primitives_traits::SignedTransaction;
+    use reth_transaction_pool::test_utils::TransactionGenerator;
+
     let chain_spec = test_chain_spec(EthereumHardfork::Cancun);
     let (node, _) = EthereumNode::test_setup(1, chain_spec).build_single().await?;
     let cache = node.inner.evm_config.sender_recovery_cache.as_ref().unwrap();
@@ -835,6 +832,14 @@ async fn test_eth_config() -> eyre::Result<()> {
 
 #[tokio::test]
 async fn test_sepolia_amsterdam_eth_config() -> eyre::Result<()> {
+    use alloy_consensus::Header;
+    use reth_chainspec::{
+        sepolia::{SEPOLIA_AMSTERDAM_TIMESTAMP, SEPOLIA_BPO2_TIMESTAMP},
+        SEPOLIA,
+    };
+    use reth_primitives_traits::SealedHeader;
+    use reth_provider::CanonChainTracker;
+
     let node_config = NodeConfig::test()
         .with_chain(SEPOLIA.clone())
         .with_unused_ports()

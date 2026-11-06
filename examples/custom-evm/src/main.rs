@@ -46,7 +46,7 @@ impl EvmFactory for MyEvmFactory {
 
     fn precompiles(&self, spec: SpecId) -> evm2::Precompiles<BaseEvmTypes> {
         let mut precompiles = evm2::Precompiles::base(spec);
-        if spec.enables(SpecId::PRAGUE) {
+        if spec == SpecId::PRAGUE {
             precompiles.as_map_mut().insert(Precompile::new(
                 address!("0x0000000000000000000000000000000000000999"),
                 PrecompileId::custom("custom"),

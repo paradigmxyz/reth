@@ -6,7 +6,6 @@ use core::{fmt, ops::RangeBounds};
 use derive_more::Deref;
 use reth_codecs::DecompressError;
 use roaring::RoaringTreemap;
-use serde::ser::SerializeSeq;
 
 /// A data structure that uses Roaring Bitmaps to efficiently store a list of integers.
 ///
@@ -99,6 +98,8 @@ impl serde::Serialize for IntegerList {
     where
         S: serde::Serializer,
     {
+        use serde::ser::SerializeSeq;
+
         let mut seq = serializer.serialize_seq(Some(self.len() as usize))?;
         for e in &self.0 {
             seq.serialize_element(&e)?;

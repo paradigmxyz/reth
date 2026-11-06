@@ -758,7 +758,7 @@ where
             self.runtime.spawn_blocking_named("hash-post-state", move || {
                 let _span = debug_span!(
                     target: "engine::tree::payload_validator",
-                    parent: &parent_span,
+                    parent: parent_span,
                     "hashed_post_state",
                 )
                 .entered();
@@ -943,7 +943,7 @@ where
         self.runtime.spawn_blocking_named("payload-convert", move || {
             let _span = debug_span!(
                 target: "engine::tree::payload_validator",
-                parent: &parent_span,
+                parent: parent_span,
                 "convert_and_validate",
             )
             .entered();

@@ -10,7 +10,6 @@ use either::Either;
 use reth_execution_types::BlockExecutionOutput;
 use reth_primitives_traits::{NodePrimitives, RecoveredBlock, SealedBlock, SealedHeader};
 use reth_trie_common::{updates::TrieUpdates, HashedPostState};
-use sha2::Digest;
 
 /// Represents an executed block for payload building purposes.
 ///
@@ -196,6 +195,7 @@ pub fn payload_id(
     parent: &B256,
     attributes: &alloy_rpc_types_engine::PayloadAttributes,
 ) -> PayloadId {
+    use sha2::Digest;
     let mut hasher = sha2::Sha256::new();
     hasher.update(parent.as_slice());
     hasher.update(&attributes.timestamp.to_be_bytes()[..]);

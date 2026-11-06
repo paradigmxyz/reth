@@ -96,7 +96,6 @@ use tokio::sync::{
 };
 
 use futures::{future::Either, stream, Stream, StreamExt};
-use reth_engine_primitives::ConsensusEngineEvent;
 use reth_node_ethstats::EthStatsService;
 use reth_node_events::{cl::ConsensusLayerHealthEvents, node::NodeEvent};
 
@@ -1316,6 +1315,7 @@ where
         let task_executor = self.task_executor().clone();
         task_executor.spawn_task(async move {
             while let Some(event) = engine_events.next().await {
+                use reth_engine_primitives::ConsensusEngineEvent;
                 match event {
                     ConsensusEngineEvent::ForkBlockAdded(executed, duration) |
                     ConsensusEngineEvent::CanonicalBlockAdded(executed, duration) => {

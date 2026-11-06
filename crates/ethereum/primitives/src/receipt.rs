@@ -206,6 +206,8 @@ mod tests {
     }
     #[test]
     fn check_receipt_root_optimism() {
+        use alloy_consensus::ReceiptWithBloom;
+
         let logs = vec![Log {
             address: Address::ZERO,
             data: LogData::new_unchecked(vec![], Default::default()),

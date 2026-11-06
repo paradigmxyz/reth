@@ -17,7 +17,6 @@ use serde_with::{DeserializeFromStr, SerializeDisplay};
 
 #[cfg(feature = "secp256k1")]
 use enr::Enr;
-use url::{Host, Url};
 
 /// Represents an ENR in discovery.
 ///
@@ -51,7 +50,7 @@ impl NodeRecord {
     /// Note: this will set both the TCP and UDP ports to the port of the addr.
     #[cfg(feature = "secp256k1")]
     pub fn from_secret_key(addr: SocketAddr, sk: &secp256k1::SecretKey) -> Self {
-        let pk = secp256k1::PublicKey::from_secret_key(sk);
+        let pk = secp256k1::PublicKey::from_secret_key(secp256k1::SECP256K1, sk);
         let id = PeerId::from_slice(&pk.serialize_uncompressed()[1..]);
         Self::new(addr, id)
     }
@@ -173,6 +172,8 @@ impl FromStr for NodeRecord {
     type Err = NodeRecordParseError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
+        use url::{Host, Url};
+
         let url = Url::parse(s).map_err(|e| NodeRecordParseError::InvalidUrl(e.to_string()))?;
 
         let address = match url.host() {
@@ -423,7 +424,7 @@ mod tests {
     #[cfg(feature = "secp256k1")]
     fn tcp_less_enr_converts_with_port_zero() {
         // A discovery-only ENR (no tcp key, e.g. a devp2p bootnode) must convert with tcp port 0.
-        let sk = secp256k1::SecretKey::from_secret_bytes([1u8; 32]).unwrap();
+        let sk = secp256k1::SecretKey::from_byte_array(&[1u8; 32]).unwrap();
         let enr = Enr::builder().ip4("1.2.3.4".parse().unwrap()).udp4(30301).build(&sk).unwrap();
 
         let record = NodeRecord::try_from(&enr).unwrap();
@@ -435,7 +436,7 @@ mod tests {
     #[test]
     #[cfg(feature = "secp256k1")]
     fn enr_endpoint_keeps_ip_and_ports_together() {
-        let sk = secp256k1::SecretKey::from_secret_bytes([1u8; 32]).unwrap();
+        let sk = secp256k1::SecretKey::from_byte_array(&[1u8; 32]).unwrap();
         let mut builder = Enr::builder();
         builder.ip4("10.0.0.1".parse().unwrap()).ip6("::1".parse().unwrap());
         builder.udp6(30401).tcp6(30403);

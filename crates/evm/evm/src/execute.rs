@@ -15,6 +15,7 @@ use alloy_eips::{
 };
 use alloy_primitives::{Address, B256};
 use core::fmt::Debug;
+use evm2::{registry::HandlerError, DatabaseError};
 use reth_execution_types::{BlockExecutionResult, StateUpdate};
 use reth_primitives_traits::{
     Block, HeaderTy, NodePrimitives, ReceiptTy, RecoveredBlock, SealedHeader, SignedTransaction,
@@ -30,14 +31,69 @@ use reth_execution_types::BundleSource;
 #[cfg(feature = "std")]
 use reth_primitives_traits::BlockTy;
 
-pub use evm2::block::{
-    map_database_error, map_handler_error, BlockTransactionResult, CommitChanges, GasOutput,
-    ReceiptBuilderCtx,
-};
 pub use reth_execution_errors::{
     BlockExecutionError, BlockValidationError, InternalBlockExecutionError, InvalidTxError,
 };
 pub use reth_execution_types::{BlockExecutionOutput, ExecutionOutcome};
+
+/// Gas used by a successfully executed transaction.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub struct GasOutput {
+    /// Gas used for receipt accounting.
+    tx_gas_used: u64,
+    /// Regular gas used for Amsterdam block-capacity accounting.
+    regular_gas_used: u64,
+    /// Gas used for state-capacity accounting.
+    state_gas_used: u64,
+}
+
+impl GasOutput {
+    /// Creates a new gas output.
+    pub const fn new(tx_gas_used: u64, state_gas_used: u64) -> Self {
+        Self { tx_gas_used, regular_gas_used: tx_gas_used, state_gas_used }
+    }
+
+    /// Creates a gas output with independent receipt, regular, and state gas accounting.
+    pub const fn new_with_regular(
+        tx_gas_used: u64,
+        regular_gas_used: u64,
+        state_gas_used: u64,
+    ) -> Self {
+        Self { tx_gas_used, regular_gas_used, state_gas_used }
+    }
+
+    /// Returns transaction gas used for receipt accounting.
+    pub const fn tx_gas_used(&self) -> u64 {
+        self.tx_gas_used
+    }
+
+    /// Returns regular gas used for Amsterdam block-capacity accounting.
+    pub const fn regular_gas_used(&self) -> u64 {
+        self.regular_gas_used
+    }
+
+    /// Returns state gas used for state-capacity accounting.
+    pub const fn state_gas_used(&self) -> u64 {
+        self.state_gas_used
+    }
+}
+
+impl From<u64> for GasOutput {
+    fn from(gas_used: u64) -> Self {
+        Self::new(gas_used, gas_used)
+    }
+}
+
+/// Context for building a transaction receipt from an execution result.
+#[derive(Debug, Clone)]
+pub struct ReceiptBuilderCtx<TxType, TransactionResult> {
+    /// Transaction type used by the receipt.
+    pub tx_type: TxType,
+    /// Raw transaction execution result.
+    pub result: TransactionResult,
+    /// Cumulative gas used by this transaction and all prior transactions in the block.
+    pub cumulative_gas_used: u64,
+}
 
 /// Builds chain-specific receipts from raw transaction execution results.
 #[auto_impl::auto_impl(&, Arc)]
@@ -55,6 +111,12 @@ pub trait ReceiptBuilder {
             evm2::TxResult<T>,
         >,
     ) -> Self::Receipt;
+}
+
+/// A detached block transaction output containing its raw execution result.
+pub trait BlockTransactionResult<T: evm2::EvmTypes> {
+    /// Returns the raw transaction execution result.
+    fn result(&self) -> &evm2::TxResultWithState<T>;
 }
 
 /// A configured EVM instance.
@@ -93,17 +155,6 @@ pub trait Evm {
 
     /// Sets the inspector used by subsequent transactions.
     fn set_inspector<I>(&mut self, inspector: I)
-    where
-        I: evm2::Inspector<Self::EvmTypes> + 'static;
-
-    /// Runs `f` on the inspector set by [`Self::set_inspector`] if it has type `I`.
-    ///
-    /// # Safety
-    ///
-    /// `I` must have no lifetime parameters. The type check cannot tell an inspector that borrows
-    /// data from an `I` that borrows `'static` data, so `f` could then keep a `'static` reference
-    /// to borrowed data.
-    unsafe fn with_inspector<I, R>(&mut self, f: impl FnOnce(&mut I) -> R) -> Option<R>
     where
         I: evm2::Inspector<Self::EvmTypes> + 'static;
 
@@ -190,19 +241,6 @@ impl<'a, T: evm2::EvmTypes<Tx: Typed2718>> Evm for evm2::Evm<'a, T> {
         evm2::Evm::set_inspector(self, inspector);
     }
 
-    unsafe fn with_inspector<I, R>(&mut self, f: impl FnOnce(&mut I) -> R) -> Option<R>
-    where
-        I: evm2::Inspector<T> + 'static,
-    {
-        let inspector: &mut (dyn evm2::evm::NonStaticAny + 'a) = &mut **self.inspector_mut()?;
-        if evm2::evm::NonStaticAny::type_id(inspector) != core::any::TypeId::of::<I>() {
-            return None
-        }
-        // SAFETY: the type ID check shows that the inspector is an `I`, and the caller guarantees
-        // that `I` has no lifetime parameters, so no lifetime is erased.
-        Some(f(unsafe { inspector.downcast_mut_unchecked::<I>() }))
-    }
-
     fn state_db_mut(&mut self) -> &mut dyn DynDatabase {
         self.overlay_db_mut()
     }
@@ -258,6 +296,27 @@ fn execute_result<T: evm2::EvmTypes<Tx: Typed2718>>(
     Ok(if commit { executed.commit() } else { executed.discard() })
 }
 
+/// Converts a handler error into a block error without transaction hash context.
+/// Validation errors retain the original handler error for downstream classification.
+pub fn map_handler_error(error: HandlerError) -> BlockExecutionError {
+    match error {
+        HandlerError::Database(error) => map_database_error(error),
+        HandlerError::Fatal(_) | HandlerError::WrongTransactionType { .. } => {
+            BlockExecutionError::other(error)
+        }
+        error => BlockValidationError::Other(Box::new(error)).into(),
+    }
+}
+
+/// Converts an owned database error using its internal-failure classification.
+pub fn map_database_error(error: DatabaseError) -> BlockExecutionError {
+    if error.is_fatal() {
+        BlockExecutionError::other(error)
+    } else {
+        BlockValidationError::Other(Box::new(error)).into()
+    }
+}
+
 /// A configured block executor.
 pub trait BlockExecutor: Sized {
     /// Consensus transaction type executed by this executor.
@@ -309,22 +368,15 @@ pub trait BlockExecutor: Sized {
     /// post-execution block changes.
     fn into_state(self) -> BundleState;
 
-    /// Executes a transaction, invokes `f` with the borrowed execution result and state changes,
-    /// and commits changes when `f` returns [`CommitChanges::Yes`].
-    ///
-    /// The state changes are borrowed before the transaction is committed or discarded, so `f`
-    /// can read what the transaction wrote (balances, storage slots) to decide whether to keep it.
+    /// Executes a transaction, invokes `f` with the borrowed execution result, and commits
+    /// changes when `f` returns [`CommitChanges::Yes`].
     fn execute_transaction_with_commit_condition(
         &mut self,
         transaction: impl ExecutorTx<Self>,
-        f: impl FnOnce(
-            &evm2::TxResult<<Self::Evm as Evm>::EvmTypes>,
-            evm2::TxStateChanges<'_>,
-        ) -> CommitChanges,
+        f: impl FnOnce(&evm2::TxResult<<Self::Evm as Evm>::EvmTypes>) -> CommitChanges,
     ) -> Result<Option<GasOutput>, BlockExecutionError> {
         let output = self.execute_transaction_without_commit(transaction)?;
-        let result = output.result();
-        if f(&result.result, result.pending_state.changes()).should_commit() {
+        if f(&output.result().result).should_commit() {
             self.commit_transaction(output).map(Some)
         } else {
             Ok(None)
@@ -356,7 +408,7 @@ pub trait BlockExecutor: Sized {
         transaction: impl ExecutorTx<Self>,
         f: impl FnOnce(&evm2::TxResult<<Self::Evm as Evm>::EvmTypes>),
     ) -> Result<GasOutput, BlockExecutionError> {
-        self.execute_transaction_with_commit_condition(transaction, |result, _| {
+        self.execute_transaction_with_commit_condition(transaction, |result| {
             f(result);
             CommitChanges::Yes
         })
@@ -563,14 +615,13 @@ pub trait BlockBuilder: Sized {
     /// Applies pre-execution block changes.
     fn apply_pre_execution_changes(&mut self) -> Result<(), BlockExecutionError>;
 
-    /// Executes a transaction, exposes its borrowed execution result and state changes to `f`,
-    /// and saves it for block assembly only if committed.
+    /// Executes a transaction, exposes its borrowed execution result to `f`, and saves it
+    /// for block assembly only if committed.
     fn execute_transaction_with_commit_condition(
         &mut self,
         tx: impl ExecutorTx<Self::Executor>,
         f: impl FnOnce(
             &evm2::TxResult<<<Self::Executor as BlockExecutor>::Evm as Evm>::EvmTypes>,
-            evm2::TxStateChanges<'_>,
         ) -> CommitChanges,
     ) -> Result<Option<GasOutput>, BlockExecutionError>;
 
@@ -587,7 +638,7 @@ pub trait BlockBuilder: Sized {
         &mut self,
         tx: impl ExecutorTx<Self::Executor>,
     ) -> Result<GasOutput, BlockExecutionError> {
-        self.execute_transaction_with_commit_condition(tx, |_, _| CommitChanges::Yes)
+        self.execute_transaction_with_commit_condition(tx, |_| CommitChanges::Yes)
             .map(Option::unwrap_or_default)
     }
 
@@ -727,7 +778,6 @@ where
         tx: impl ExecutorTx<Self::Executor>,
         f: impl FnOnce(
             &evm2::TxResult<<<Self::Executor as BlockExecutor>::Evm as Evm>::EvmTypes>,
-            evm2::TxStateChanges<'_>,
         ) -> CommitChanges,
     ) -> Result<Option<GasOutput>, BlockExecutionError> {
         let (tx_env, tx) = tx.into_parts();
@@ -1195,6 +1245,23 @@ where
 
     fn take_bal(&mut self) -> Option<BlockAccessList> {
         None
+    }
+}
+
+/// Marks whether transaction should be committed into block executor's state.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[must_use]
+pub enum CommitChanges {
+    /// Transaction should be committed into block executor's state.
+    Yes,
+    /// Transaction should not be committed.
+    No,
+}
+
+impl CommitChanges {
+    /// Returns `true` if transaction should be committed into block executor's state.
+    pub const fn should_commit(self) -> bool {
+        matches!(self, Self::Yes)
     }
 }
 

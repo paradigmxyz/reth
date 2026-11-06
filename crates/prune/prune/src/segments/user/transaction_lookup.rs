@@ -309,17 +309,12 @@ mod tests {
         FoldWhile::{Continue, Done},
         Itertools,
     };
-    use reth_db_api::{models::StorageSettings, tables};
-    use reth_provider::{
-        DBProvider, DatabaseProviderFactory, PruneCheckpointReader, RocksDBProviderFactory,
-        StaticFileProviderFactory, StaticFileWriter,
-    };
+    use reth_db_api::tables;
+    use reth_provider::{DBProvider, DatabaseProviderFactory, PruneCheckpointReader};
     use reth_prune_types::{
         PruneCheckpoint, PruneInterruptReason, PruneMode, PruneProgress, PruneSegment,
     };
     use reth_stages::test_utils::{StorageKind, TestStageDB};
-    use reth_static_file_types::{StaticFileSegment, DEFAULT_BLOCKS_PER_STATIC_FILE};
-    use reth_storage_api::StorageSettingsCache;
     use reth_testing_utils::generators::{self, random_block_range, BlockRangeParams};
     use std::ops::Sub;
 
@@ -368,6 +363,9 @@ mod tests {
 
     #[test]
     fn prune_transaction_zero_when_earlier_blocks_are_empty() {
+        use reth_provider::{StaticFileProviderFactory, StaticFileWriter};
+        use reth_static_file_types::{StaticFileSegment, DEFAULT_BLOCKS_PER_STATIC_FILE};
+
         let db = TestStageDB::default();
         let mut rng = generators::rng();
         let first_retained_block = DEFAULT_BLOCKS_PER_STATIC_FILE;
@@ -560,6 +558,10 @@ mod tests {
 
     #[test]
     fn prune_rocksdb() {
+        use reth_db_api::models::StorageSettings;
+        use reth_provider::RocksDBProviderFactory;
+        use reth_storage_api::StorageSettingsCache;
+
         let db = TestStageDB::default();
         let mut rng = generators::rng();
 
@@ -656,6 +658,10 @@ mod tests {
     /// 3. The checkpoint should NOT advance to the next start position
     #[test]
     fn prune_rocksdb_zero_deleted_checkpoint() {
+        use reth_db_api::models::StorageSettings;
+        use reth_provider::RocksDBProviderFactory;
+        use reth_storage_api::StorageSettingsCache;
+
         let db = TestStageDB::default();
         let mut rng = generators::rng();
 

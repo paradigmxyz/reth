@@ -73,6 +73,6 @@ pub fn secret_to_bearer_header(secret: &JwtSecret) -> HeaderValue {
             })
             .unwrap()
     )
-    .try_into()
+    .parse()
     .unwrap()
 }

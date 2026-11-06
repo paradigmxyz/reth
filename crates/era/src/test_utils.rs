@@ -6,8 +6,7 @@ use crate::{
         BlockTuple, CompressedBody, CompressedHeader, CompressedReceipts, TotalDifficulty,
     },
 };
-use alloy_consensus::{BlockBody, Header, ReceiptWithBloom};
-use alloy_eips::eip4895::Withdrawals;
+use alloy_consensus::{Header, ReceiptWithBloom};
 use alloy_primitives::{Address, BlockNumber, Bytes, Log, LogData, B256, B64, U256};
 use reth_ethereum_primitives::{Receipt, TxType};
 
@@ -114,6 +113,10 @@ pub(crate) fn create_sample_block(data_size: usize) -> BlockTuple {
 
 // Helper function to create a test block with compressed data
 pub(crate) fn create_test_block_with_compressed_data(number: BlockNumber) -> BlockTuple {
+    use alloy_consensus::{BlockBody, Header};
+    use alloy_eips::eip4895::Withdrawals;
+    use alloy_primitives::{Address, Bytes, B256, B64, U256};
+
     // Create test header
     let header = Header {
         parent_hash: B256::default(),

@@ -46,9 +46,11 @@ impl LogFormat {
     where
         F: Filter<Registry> + Send + Sync + 'static,
     {
-        let ansi = color.is_some_and(|color| {
+        let ansi = if let Some(color) = color {
             std::env::var("RUST_LOG_STYLE").map(|val| val != "never").unwrap_or(color != "never")
-        });
+        } else {
+            false
+        };
 
         let target = std::env::var("RUST_LOG_TARGET").map(|val| val != "0").unwrap_or(show_target);
 

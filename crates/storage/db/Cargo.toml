@@ -67,7 +67,7 @@ proptest.workspace = true
 assert_matches.workspace = true
 
 [features]
-fuzz = ["reth-libmdbx?/fuzz"]
+dst = ["reth-libmdbx?/dst"]
 default = ["mdbx"]
 mdbx = [
     "dep:reth-libmdbx",

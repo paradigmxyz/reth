@@ -70,5 +70,4 @@ pub mod test_utils;
 pub mod mock;
 
 /// Verification of existing stored trie nodes against state data.
-#[cfg(not(target_family = "wasm"))]
 pub mod verify;

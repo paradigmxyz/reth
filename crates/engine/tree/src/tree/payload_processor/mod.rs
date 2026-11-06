@@ -708,13 +708,15 @@ impl<R: Send + Sync + 'static, H: evm2::EvmTypes> CacheTaskHandle<R, H> {
         &mut self,
         execution_outcome: Option<Arc<BlockExecutionOutput<R>>>,
     ) -> Option<mpsc::Sender<()>> {
-        self.to_prewarm_task.take().map(|tx| {
+        if let Some(tx) = self.to_prewarm_task.take() {
             let (valid_block_tx, valid_block_rx) = mpsc::channel();
             let event = PrewarmTaskEvent::Terminate { execution_outcome, valid_block_rx };
             let _ = tx.send(event);
 
-            valid_block_tx
-        })
+            Some(valid_block_tx)
+        } else {
+            None
+        }
     }
 }
 
