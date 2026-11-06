@@ -309,6 +309,7 @@ where
     ) {
         let mut total_idle_time = std::time::Duration::ZERO;
         let mut idle_start = Instant::now();
+        np_event("h_start", updates.len() as u64, 0);
 
         while let Ok(message) = updates.recv() {
             total_idle_time += idle_start.elapsed();
@@ -347,6 +348,7 @@ where
         }
 
         metrics.hashing_task_idle_time_seconds.record(total_idle_time.as_secs_f64());
+        np_event("h_end", 0, 0);
     }
 
     /// Returns the trie for reuse in the next payload built on top of this one.
