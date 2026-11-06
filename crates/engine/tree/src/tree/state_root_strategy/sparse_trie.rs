@@ -49,6 +49,11 @@ fn np_us(since: Instant) -> u64 {
     since.elapsed().as_micros() as u64
 }
 
+static NP_SUBTRIES_CPU: std::sync::LazyLock<bool> =
+    std::sync::LazyLock::new(|| std::env::var_os("RETH_NP_SUBTRIES_CPU").is_some());
+static NP_INLINE_HASH: std::sync::LazyLock<bool> =
+    std::sync::LazyLock::new(|| std::env::var_os("RETH_NP_INLINE_HASH").is_some());
+
 /// Computes a block's state root by applying streamed updates to an in-memory [`SparseStateTrie`].
 /// Updates that reach a blinded node stay pending while the task fetches the missing proof. The
 /// account trie stays on this task's thread; storage tries can be moved into independent rayon
@@ -535,7 +540,13 @@ where
         np_add(11, np_us(start));
         let np_root = Instant::now();
         // Every storage trie changed this block passed through the task's storage map.
-        let root = self.trie.root_with_updates_of(self.storage_to_drop.keys(), self.new_epoch);
+        let root = if *NP_SUBTRIES_CPU {
+            let (trie, changed, new_epoch) =
+                (&mut self.trie, &self.storage_to_drop, self.new_epoch);
+            self.runtime.cpu_pool().install(|| trie.root_with_updates_of(changed.keys(), new_epoch))
+        } else {
+            self.trie.root_with_updates_of(self.storage_to_drop.keys(), self.new_epoch)
+        };
         np_add(12, np_us(np_root));
         np_event("t_root", np_us(np_root), 0);
         np_phase("trie_root");
@@ -638,7 +649,12 @@ where
             // trie upper hashes
             if self.proof_worker_handle.results().is_empty() {
                 let np_t = Instant::now();
-                self.trie.calculate_subtries(self.new_epoch);
+                if *NP_SUBTRIES_CPU {
+                    let (trie, new_epoch) = (&mut self.trie, self.new_epoch);
+                    self.runtime.cpu_pool().install(|| trie.calculate_subtries(new_epoch));
+                } else {
+                    self.trie.calculate_subtries(self.new_epoch);
+                }
                 np_event("t_subtries", np_us(np_t), 0);
                 if self.finished_state_updates {
                     np_add(10, np_us(np_t));
@@ -919,6 +935,9 @@ where
             }
             if !work.is_target_only() {
                 job_units += work.proofs.len() + work.pending.len();
+                if *NP_INLINE_HASH {
+                    job_units += work.unhashed;
+                }
             }
             ready.push(*address);
         }
@@ -1403,6 +1422,8 @@ struct StorageTrieWork<S> {
     /// Whether this address ever had storage leaf updates queued, which is what makes promotion
     /// of its account wait for a recomputed storage root.
     updated: bool,
+    /// Leaf updates applied since the root was last computed (experiment only).
+    unhashed: usize,
 }
 
 impl<S: SparseTrie + Default> StorageTrieWork<S> {
@@ -1414,6 +1435,7 @@ impl<S: SparseTrie + Default> StorageTrieWork<S> {
             fetched: Default::default(),
             dirty: false,
             updated: false,
+            unhashed: 0,
         }
     }
 
@@ -1448,6 +1470,7 @@ impl<S: SparseTrie + Default> StorageTrieWork<S> {
                 }
             });
             output.cache_hits = (updates_len_before - pending.len()) as u64;
+            self.unhashed += updates_len_before - pending.len();
             output.cache_misses = pending.len() as u64;
             if output.result.is_err() {
                 return output
@@ -1456,6 +1479,7 @@ impl<S: SparseTrie + Default> StorageTrieWork<S> {
 
         if self.needs_root() {
             self.trie.root(new_epoch);
+            self.unhashed = 0;
         }
 
         output

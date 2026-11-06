@@ -1079,6 +1079,9 @@ where
                 )?;
 
                 np_phase("txs");
+                if *NP_STOP_EARLY {
+                    handle.stop_prewarming_execution();
+                }
                 let post_exec_start = Instant::now();
                 let (output, built_bal) = executor.finish_with_prepared_block_access_list()?;
                 self.metrics.record_post_execution(post_exec_start.elapsed());
@@ -2162,6 +2165,9 @@ struct ExecutedBal {
 
 static NP_PHASES: std::sync::Mutex<Vec<(&'static str, Instant)>> =
     std::sync::Mutex::new(Vec::new());
+
+static NP_STOP_EARLY: std::sync::LazyLock<bool> =
+    std::sync::LazyLock::new(|| std::env::var_os("RETH_NP_STOP_EARLY").is_some());
 
 static NP_PHASES_ENABLED: std::sync::LazyLock<bool> =
     std::sync::LazyLock::new(|| std::env::var_os("RETH_NP_PHASES").is_some());
