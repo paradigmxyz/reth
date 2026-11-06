@@ -1415,11 +1415,13 @@ mod tests {
         assert_eq!(chain_contract(&[]), None);
         assert_eq!(chain_contract(&[(a, slot(1))]), Some(a));
         assert_eq!(chain_contract(&[(a, slot(1)), (a, slot(2)), (b, slot(1))]), Some(a));
-        // Spread over contracts, or too many keys for one step of a walk.
         assert_eq!(
             chain_contract(&[(a, slot(1)), (b, slot(1)), (b, slot(2)), (b, slot(3))]),
             Some(b)
         );
+        // Spread over contracts, or too many keys for one step of a walk.
+        let c = Address::with_last_byte(3);
+        assert_eq!(chain_contract(&[(a, slot(1)), (b, slot(1)), (c, slot(1))]), None);
         let wide = (0..9).map(|i| (a, slot(i))).collect::<Vec<_>>();
         assert_eq!(chain_contract(&wide), None);
     }
