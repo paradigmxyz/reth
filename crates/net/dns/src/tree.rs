@@ -354,6 +354,8 @@ where
     F: Fn(&str) -> ParseEntryResult<V>,
 {
     ensure_strip_key(input, key, err)?;
+    // Advance from the same trimmed input used to find the token.
+    *input = input.trim_start();
     let val = input.split_whitespace().next().ok_or(FieldNotFound(err))?;
     *input = &input[val.len()..];
 
@@ -371,6 +373,7 @@ fn ensure_strip_key(input: &mut &str, key: &str, err: &'static str) -> ParseEntr
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rand::{distr::StandardUniform, rngs::StdRng, Rng, SeedableRng};
 
     #[test]
     fn parse_root_entry() {
@@ -456,6 +459,57 @@ mod tests {
                 assert_eq!(entry.to_string(), s);
             }
             _ => unreachable!(),
+        }
+    }
+
+    #[test]
+    fn parse_root_entry_whitespace() {
+        let expected = "enrtree-root:v1 e=a l=b seq=1 sig=AA".parse::<TreeRootEntry>().unwrap();
+        for whitespace in [" ", "\t", "\n", "\u{a0}", "\u{2003}", " \u{a0}\t"] {
+            let input = format!(
+                "enrtree-root:v1 e={whitespace}a l={whitespace}b seq={whitespace}1 sig={whitespace}AA"
+            );
+            assert_eq!(input.parse::<TreeRootEntry>().unwrap(), expected);
+            let DnsEntry::Root(root) = input.parse::<DnsEntry<SecretKey>>().unwrap() else {
+                panic!("expected root entry");
+            };
+            assert_eq!(root, expected);
+        }
+    }
+
+    #[test]
+    fn parse_root_entry_invalid_values() {
+        for (input, expected) in [
+            ("enrtree-root:v1 e=a l=b seq= ä sig=AA", "Failed to parse sequence number ä"),
+            (
+                "enrtree-root:v1 e=a l=b seq=1 sig= ä",
+                "base64 decoding failed: signature error: invalid symbol at 0",
+            ),
+            ("enrtree-root:v1 e= \u{a0}", "field ENR Root not found"),
+        ] {
+            assert_eq!(input.parse::<TreeRootEntry>().unwrap_err().to_string(), expected);
+            assert_eq!(input.parse::<DnsEntry<SecretKey>>().unwrap_err().to_string(), expected);
+        }
+    }
+
+    #[test]
+    fn fuzz_parse_value_unicode() {
+        let mut rng = StdRng::seed_from_u64(0);
+        for _ in 0..1024 {
+            let len = rng.random_range(1..32);
+            let value = (&mut rng)
+                .sample_iter::<char, _>(StandardUniform)
+                .filter(|c| !c.is_whitespace())
+                .take(len)
+                .collect::<String>();
+            for whitespace in ["", " ", "\t", "\u{a0}", "\u{2003}", " \u{a0}\t"] {
+                let input = format!("e={whitespace}{value} l=next");
+                let mut remaining = input.as_str();
+                let parsed =
+                    parse_value(&mut remaining, "e=", "ENR Root", |s| Ok(s.to_string())).unwrap();
+                assert_eq!(parsed, value);
+                assert_eq!(remaining, " l=next");
+            }
         }
     }
 }
