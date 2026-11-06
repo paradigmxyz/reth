@@ -791,16 +791,14 @@ impl DatabaseEnv {
             let height = u16::from_le_bytes([height[0], height[1]]);
             let mut level = vec![u32::from_le_bytes([root[0], root[1], root[2], root[3]])];
             // Leaves are the last of `height` levels; the levels above them are branch pages.
+            let mut table_read = 0;
             for depth in 1..height {
                 read += level.len();
-                level = read_branch_level(
-                    &data_file,
-                    &level,
-                    page_size as usize,
-                    threads,
-                    depth + 1 < height,
-                );
+                table_read += level.len();
+                let _ = depth;
+                level = read_branch_level(&data_file, &level, page_size as usize, threads, true);
             }
+            tracing::info!(target: "reth::cli", table, height, table_read, leaves = level.len(), "warm count");
         }
         Ok(read)
     }
