@@ -132,6 +132,9 @@ pub struct DatabaseArguments {
     /// environments). Choose `SafeNoSync` if performance is more important and occasional data
     /// loss is acceptable (e.g., testing or ephemeral data).
     sync_mode: SyncMode,
+    /// With a non-durable [`SyncMode`], the time after which a commit flushes the data committed
+    /// since the last flush. If [None], [`NON_DURABLE_SYNC_PERIOD`] is used.
+    sync_interval: Option<Duration>,
 }
 
 impl Default for DatabaseArguments {
@@ -156,6 +159,7 @@ impl DatabaseArguments {
             exclusive: None,
             max_readers: None,
             sync_mode: SyncMode::Durable,
+            sync_interval: None,
         }
     }
 
@@ -200,6 +204,13 @@ impl DatabaseArguments {
             self.sync_mode = sync_mode;
         }
 
+        self
+    }
+
+    /// Sets the time after which a commit flushes the data committed since the last flush with a
+    /// non-durable sync mode.
+    pub const fn with_sync_interval(mut self, sync_interval: Option<Duration>) -> Self {
+        self.sync_interval = sync_interval;
         self
     }
 
@@ -471,7 +482,8 @@ impl DatabaseEnv {
                 // enable writemap mode in RW mode
                 inner_env.write_map();
                 if matches!(args.sync_mode, SyncMode::SafeNoSync | SyncMode::UtterlyNoSync) {
-                    inner_env.set_sync_period(NON_DURABLE_SYNC_PERIOD);
+                    inner_env
+                        .set_sync_period(args.sync_interval.unwrap_or(NON_DURABLE_SYNC_PERIOD));
                 }
                 Mode::ReadWrite { sync_mode: args.sync_mode }
             }
@@ -1790,12 +1802,14 @@ mod tests {
 
     #[test]
     fn non_durable_sync_period() {
-        let sync_period = |sync_mode| {
+        let sync_period = |sync_mode, sync_interval| {
             let tempdir = tempfile::TempDir::new().expect(ERROR_TEMPDIR);
             let env = DatabaseEnv::open(
                 tempdir.path(),
                 DatabaseEnvKind::RW,
-                DatabaseArguments::test().with_sync_mode(Some(sync_mode)),
+                DatabaseArguments::test()
+                    .with_sync_mode(Some(sync_mode))
+                    .with_sync_interval(sync_interval),
             )
             .expect(ERROR_DB_CREATION);
             let mut period = 0;
@@ -1808,8 +1822,11 @@ mod tests {
             Duration::from_secs_f64(period as f64 / 65536.0)
         };
 
-        assert_eq!(sync_period(SyncMode::Durable), Duration::ZERO);
-        assert_eq!(sync_period(SyncMode::SafeNoSync), NON_DURABLE_SYNC_PERIOD);
-        assert_eq!(sync_period(SyncMode::UtterlyNoSync), NON_DURABLE_SYNC_PERIOD);
+        let interval = Duration::from_secs(1);
+        assert_eq!(sync_period(SyncMode::Durable, None), Duration::ZERO);
+        assert_eq!(sync_period(SyncMode::Durable, Some(interval)), Duration::ZERO);
+        assert_eq!(sync_period(SyncMode::SafeNoSync, None), NON_DURABLE_SYNC_PERIOD);
+        assert_eq!(sync_period(SyncMode::SafeNoSync, Some(interval)), interval);
+        assert_eq!(sync_period(SyncMode::UtterlyNoSync, None), NON_DURABLE_SYNC_PERIOD);
     }
 }
