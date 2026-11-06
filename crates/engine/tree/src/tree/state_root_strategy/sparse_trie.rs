@@ -505,6 +505,7 @@ where
         debug!(target: "engine::root", "All proofs processed, ending calculation");
 
         let start = Instant::now();
+        reth_trie_sparse::arena::NP_REASON_ON.store(false, AtomicOrdering::Relaxed);
         let finished_at = NP_FINISHED.lock().unwrap().take();
         if let Some(finished_at) = finished_at {
             NP_TRIE[0].store(
@@ -676,6 +677,7 @@ where
             SparseTrieTaskMessage::FinishedStateUpdates => {
                 NP_TRIE[10].store(self.in_flight_proof_jobs as u64, AtomicOrdering::Relaxed);
                 *NP_FINISHED.lock().unwrap() = Some(Instant::now());
+                reth_trie_sparse::arena::NP_REASON_ON.store(true, AtomicOrdering::Relaxed);
                 NP_TRIE[13].store(self.pending_updates as u64, AtomicOrdering::Relaxed);
                 let hashed_state = Arc::new(core::mem::take(&mut self.final_hashed_state));
                 let _ = self.final_hashed_state_tx.take().unwrap().send(Arc::clone(&hashed_state));

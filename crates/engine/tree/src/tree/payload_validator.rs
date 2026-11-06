@@ -2194,6 +2194,11 @@ pub(crate) fn np_phases_log(number: u64, gas: u64) {
         .map(|(name, at)| format!("{name}={}", at.duration_since(start).as_micros()))
         .collect::<Vec<_>>()
         .join(" ");
+    let reason = reth_trie_sparse::arena::NP_REASON
+        .iter()
+        .map(|counter| counter.swap(0, Ordering::Relaxed).to_string())
+        .collect::<Vec<_>>()
+        .join(",");
     let trie = crate::tree::state_root_strategy::sparse_trie::NP_TRIE
         .iter()
         .map(|counter| counter.swap(0, Ordering::Relaxed).to_string())
@@ -2209,5 +2214,5 @@ pub(crate) fn np_phases_log(number: u64, gas: u64) {
         .map(|counter| counter.swap(0, Ordering::Relaxed).to_string())
         .collect::<Vec<_>>()
         .join(",");
-    info!(target: "engine::np_phases", number, gas, %line, %probe, %commit, %trie, "phases");
+    info!(target: "engine::np_phases", number, gas, %line, %probe, %commit, %trie, %reason, "phases");
 }

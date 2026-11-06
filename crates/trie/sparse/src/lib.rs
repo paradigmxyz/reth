@@ -19,7 +19,7 @@ mod traits;
 pub use traits::*;
 
 #[cfg(feature = "std")]
-mod arena;
+pub mod arena;
 #[cfg(feature = "std")]
 pub use arena::*;
 

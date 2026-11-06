@@ -359,6 +359,7 @@ impl ArenaSparseSubtrie {
 
             // If the path hits a blinded node, request a proof regardless of update type.
             if matches!(find_result, SeekResult::Blinded) {
+                np_reason(update_kind(update));
                 let logical_len = self.buffers.cursor.head_logical_branch_path_len(&self.arena);
                 self.required_proofs.push((
                     idx,
@@ -397,6 +398,7 @@ impl ArenaSparseSubtrie {
                         (self.num_dirty_leaves as i64 + deltas.num_dirty_leaves_delta) as u64;
 
                     if let RemoveLeafResult::NeedsProof { key, proof_key, parent } = result {
+                        np_reason(3);
                         self.required_proofs
                             .push((idx, ArenaRequiredProof { key: proof_key, parent }));
                         self.required_proofs.push((idx, ArenaRequiredProof { key, parent }));
@@ -2624,6 +2626,7 @@ impl SparseTrie for ArenaParallelSparseTrie {
             match find_result {
                 // Blinded — request a proof regardless of update type.
                 SeekResult::Blinded => {
+                    np_reason(update_kind(update));
                     let logical_len = cursor.head_logical_branch_path_len(&self.upper_arena);
                     let parent = ProofV2TargetParent::new(logical_len);
                     trace!(target: TRACE_TARGET, ?key, ?parent, "Update hit blinded node, requesting proof");
@@ -2652,6 +2655,7 @@ impl SparseTrie for ArenaParallelSparseTrie {
                         &cursor,
                         subtrie_updates,
                     ) {
+                        np_reason(4);
                         trace!(target: TRACE_TARGET, proof_key = ?proof.key, proof_parent = ?proof.parent, "Subtrie collapse would need blinded sibling, requesting proof");
                         proof_required_fn(proof.key, proof.parent);
                         for &(key, _, ref update) in subtrie_updates {
@@ -2764,6 +2768,7 @@ impl SparseTrie for ArenaParallelSparseTrie {
                         );
                         match result {
                             RemoveLeafResult::NeedsProof { key, proof_key, parent } => {
+                                np_reason(3);
                                 proof_required_fn(proof_key, parent);
                                 let update =
                                     mem::replace(&mut sorted[update_idx].2, LeafUpdate::Touched);
@@ -3167,5 +3172,27 @@ mod tests {
 
             harness.assert_changes(&mut apst, changeset2);
         }
+    }
+}
+
+/// Proof requests by reason after the finish marker (experiment only): blinded touched, blinded
+/// changed, blinded removed, removal needs sibling, subtrie collapse.
+pub static NP_REASON: [core::sync::atomic::AtomicU64; 5] =
+    [const { core::sync::atomic::AtomicU64::new(0) }; 5];
+/// Whether proof requests are counted (experiment only).
+pub static NP_REASON_ON: core::sync::atomic::AtomicBool =
+    core::sync::atomic::AtomicBool::new(false);
+
+fn np_reason(reason: usize) {
+    if NP_REASON_ON.load(core::sync::atomic::Ordering::Relaxed) {
+        NP_REASON[reason].fetch_add(1, core::sync::atomic::Ordering::Relaxed);
+    }
+}
+
+const fn update_kind(update: &LeafUpdate) -> usize {
+    match update {
+        LeafUpdate::Touched => 0,
+        LeafUpdate::Changed(value) if !value.is_empty() => 1,
+        LeafUpdate::Changed(_) => 2,
     }
 }
