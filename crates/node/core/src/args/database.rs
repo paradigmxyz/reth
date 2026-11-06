@@ -61,6 +61,12 @@ pub struct DatabaseArgs {
         value_parser = value_parser!(SyncMode),
     )]
     pub sync_mode: Option<SyncMode>,
+    /// Time after which a commit with `--db.sync-mode=safe-no-sync` flushes the data committed
+    /// since the last flush (e.g., 12s, 5m). Defaults to 60 seconds.
+    ///
+    /// A crash loses the data committed since the last flush, which the node syncs again.
+    #[arg(long = "db.sync-interval", value_parser = humantime::parse_duration)]
+    pub sync_interval: Option<Duration>,
     /// `RocksDB` block cache size (e.g., 512MB, 4GB).
     ///
     /// Controls the size of the in-memory LRU cache for decompressed `RocksDB` blocks.
@@ -103,6 +109,7 @@ impl DatabaseArgs {
             .with_growth_step(self.growth_step)
             .with_max_readers(self.max_readers)
             .with_sync_mode(self.sync_mode)
+            .with_sync_interval(self.sync_interval)
     }
 
     /// Returns whether built-in database metrics are enabled.
@@ -465,6 +472,14 @@ mod tests {
         let result =
             CommandParser::<DatabaseArgs>::try_parse_from(["reth", "--db.sync-mode", "ultra-fast"]);
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_command_parser_with_sync_interval() {
+        let cmd =
+            CommandParser::<DatabaseArgs>::try_parse_from(["reth", "--db.sync-interval", "500ms"])
+                .unwrap();
+        assert_eq!(cmd.args.sync_interval, Some(Duration::from_millis(500)));
     }
 
     #[test]
