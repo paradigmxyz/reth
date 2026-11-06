@@ -34,6 +34,7 @@ use reth_provider::{DatabaseProviderROFactory, ProviderError, ProviderResult, St
 use reth_tasks::{Runtime, WorkerPool};
 use reth_trie::{DecodedMultiProofV2, MultiProofTargetsV2, ProofV2Target};
 use std::{
+    panic::{catch_unwind, AssertUnwindSafe},
     sync::{
         atomic::{AtomicBool, AtomicUsize, Ordering},
         Arc,
@@ -438,9 +439,18 @@ struct ProofWorker<Factory, J> {
 }
 
 impl<Factory, J> ProofWorker<Factory, J> {
-    /// Runs `process` for every job until the handle is dropped, advertising the worker as busy
-    /// while a job runs. Returns the total time spent waiting for jobs.
-    fn process_jobs(&self, worker_id: usize, mut process: impl FnMut(J)) -> Duration {
+    /// Runs `process` for every job until the handle is dropped and sends each job's result,
+    /// advertising the worker as busy while a job runs. Returns the total time spent waiting for
+    /// jobs.
+    ///
+    /// A job that panics sends [`ProofJobError::Panicked`] instead of its result, so the job's
+    /// receiver fails instead of waiting for a result that never arrives, and the worker moves on
+    /// to the next job.
+    fn process_jobs(
+        &self,
+        worker_id: usize,
+        mut process: impl FnMut(J) -> ProofWorkerResult,
+    ) -> Duration {
         // Count this worker as available only after successful initialization.
         self.availability.mark_idle(worker_id);
 
@@ -464,7 +474,17 @@ impl<Factory, J> ProofWorker<Factory, J> {
                 std::thread::sleep(jitter);
             }
 
-            process(job);
+            let result = catch_unwind(AssertUnwindSafe(|| process(job))).unwrap_or_else(|panic| {
+                let message = panic
+                    .downcast_ref::<&str>()
+                    .copied()
+                    .or_else(|| panic.downcast_ref::<String>().map(String::as_str))
+                    .unwrap_or("unknown panic")
+                    .to_string();
+                error!(target: "trie::proof_task", worker_id, %message, "Proof job panicked");
+                Err(ProofJobError::Panicked { message }.into())
+            });
+            self.send_result(worker_id, result);
 
             self.availability.mark_idle(worker_id);
             idle_start = Instant::now();
@@ -525,10 +545,8 @@ where
                 "Storage proof completed"
             );
 
-            let result =
-                proof.map_err(|source| ProofJobError::Storage { hashed_address, source }.into());
-            self.send_result(worker_id, result);
             storage_proofs_processed += 1;
+            proof.map_err(|source| ProofJobError::Storage { hashed_address, source }.into())
         });
 
         trace!(
@@ -583,9 +601,8 @@ where
                 "Account proof completed"
             );
 
-            let result = proof.map_err(|source| ProofJobError::Account { source }.into());
-            self.send_result(worker_id, result);
             account_proofs_processed += 1;
+            proof.map_err(|source| ProofJobError::Account { source }.into())
         });
 
         trace!(
@@ -642,6 +659,8 @@ enum ProofJobError {
         #[source]
         source: ProviderError,
     },
+    #[error("proof job panicked: {message}")]
+    Panicked { message: String },
 }
 
 impl From<ProofJobError> for StateRootTaskError {
@@ -653,9 +672,14 @@ impl From<ProofJobError> for StateRootTaskError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloy_primitives::{Address, Bytes};
     use crossbeam_channel::RecvTimeoutError;
     use reth_chainspec::ChainSpec;
     use reth_provider::test_utils::create_test_provider_factory_with_chain_spec;
+    use reth_trie::{
+        AccountProof, ExecutionWitnessMode, HashedPostState, MultiProof, MultiProofTargets,
+        TrieInput,
+    };
     use std::sync::Arc;
 
     fn test_ctx<Factory>(factory: Factory) -> ProofTaskCtx<Factory> {
@@ -779,6 +803,86 @@ mod tests {
                 results.recv_timeout(Duration::from_secs(30)),
                 Err(crossbeam_channel::RecvTimeoutError::Disconnected)
             ));
+        }
+    }
+
+    /// Serves storage proofs and panics on the storage proof of [`PANICKING_ADDRESS`].
+    #[derive(Clone, Debug)]
+    struct PanickingProofFactory;
+
+    /// The account whose storage proof panics.
+    const PANICKING_ADDRESS: B256 = B256::with_last_byte(1);
+
+    impl DatabaseProviderROFactory for PanickingProofFactory {
+        type Provider = Self;
+
+        fn database_provider_ro(&self) -> ProviderResult<Self> {
+            Ok(Self)
+        }
+    }
+
+    impl StateProofProvider for PanickingProofFactory {
+        fn proof(
+            &self,
+            _input: TrieInput,
+            _address: Address,
+            _slots: &[B256],
+        ) -> ProviderResult<AccountProof> {
+            unimplemented!()
+        }
+
+        fn multiproof(
+            &self,
+            _input: TrieInput,
+            _targets: MultiProofTargets,
+        ) -> ProviderResult<MultiProof> {
+            unimplemented!()
+        }
+
+        fn multiproof_v2(
+            &self,
+            targets: MultiProofTargetsV2,
+            _requires_masks: bool,
+        ) -> ProviderResult<DecodedMultiProofV2> {
+            assert!(!targets.storage_targets.contains_key(&PANICKING_ADDRESS), "injected panic");
+            Ok(DecodedMultiProofV2::default())
+        }
+
+        fn witness(
+            &self,
+            _input: TrieInput,
+            _target: HashedPostState,
+            _mode: ExecutionWitnessMode,
+        ) -> ProviderResult<Vec<Bytes>> {
+            unimplemented!()
+        }
+    }
+
+    /// Ensures a panicking proof job sends an error and its worker keeps serving jobs.
+    #[test]
+    fn panicking_proof_job_sends_error() {
+        let runtime = reth_tasks::Runtime::test();
+        let proof_worker_handle = ProofWorkerHandle::new(
+            &runtime,
+            test_ctx(PanickingProofFactory),
+            ProofWorkerCounts::new(1, 1),
+            #[cfg(feature = "metrics")]
+            Default::default(),
+        );
+
+        for (address, panics) in [(PANICKING_ADDRESS, true), (B256::ZERO, false)] {
+            let targets = MultiProofTargetsV2 {
+                storage_targets: std::iter::once((address, Vec::new())).collect(),
+                ..Default::default()
+            };
+            assert_eq!(proof_worker_handle.dispatch(targets).unwrap(), 1);
+            let result =
+                proof_worker_handle.results().recv_timeout(Duration::from_secs(30)).unwrap();
+            if panics {
+                assert_eq!(result.unwrap_err().to_string(), "proof job panicked: injected panic");
+            } else {
+                assert_eq!(result.unwrap(), DecodedMultiProofV2::default());
+            }
         }
     }
 }
