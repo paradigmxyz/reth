@@ -35,6 +35,20 @@ use reth_trie_sparse::{
 };
 use tracing::{debug, debug_span, error, instrument, trace_span};
 
+/// Tail counters (experiment only), see the np-phases4 analysis script for the layout.
+pub(crate) static NP_TRIE: [std::sync::atomic::AtomicU64; 24] =
+    [const { std::sync::atomic::AtomicU64::new(0) }; 24];
+use crate::tree::payload_validator::{np_phase, np_phase_at};
+use std::sync::atomic::Ordering as AtomicOrdering;
+
+fn np_add(index: usize, value: u64) {
+    NP_TRIE[index].fetch_add(value, AtomicOrdering::Relaxed);
+}
+
+fn np_us(since: Instant) -> u64 {
+    since.elapsed().as_micros() as u64
+}
+
 /// Computes a block's state root by applying streamed updates to an in-memory [`SparseStateTrie`].
 /// Updates that reach a blinded node stay pending while the task fetches the missing proof. The
 /// account trie stays on this task's thread; storage tries can be moved into independent rayon
@@ -310,6 +324,7 @@ where
                     SparseTrieTaskMessage::HashedState(hashed)
                 }
                 StateRootMessage::FinishedStateUpdates => {
+                    np_phase("hash_fin");
                     SparseTrieTaskMessage::FinishedStateUpdates
                 }
                 StateRootMessage::HashedStateUpdate(state) => {
@@ -436,13 +451,17 @@ where
 
             done = self.make_progress()?;
             idle_start = Instant::now();
+            np_add(14, idle_start.duration_since(t).as_micros() as u64);
         }
 
         // Draining phase: the marker is the last message read from the updates channel, so
         // after it only proof results, storage-job returns, and cancellation can occur. The
         // update channel closing when producers drop their senders is not observed here, and late
         // hints are ignored: with all updates known, prefetching has nothing left to help.
+        let mut np_last_proof = None;
+        let mut np_last_strg = None;
         while !done {
+            np_add(2, 1);
             let mut t = Instant::now();
             crossbeam_channel::select_biased! {
                 recv(self.proof_worker_handle.results()) -> message => {
@@ -456,6 +475,8 @@ where
                     let Ok(result) = message else {
                         unreachable!("proof worker results never disconnect while the handle is alive")
                     };
+                    np_add(3, 1);
+                    np_last_proof = Some(wake);
                     self.on_proof_worker_result(result, &mut t)?;
                 },
                 recv(self.storage_done_rx) -> message => {
@@ -468,14 +489,27 @@ where
                     let Ok(returned) = message else {
                         unreachable!("we own the sender half")
                     };
+                    np_add(4, 1);
+                    np_last_strg = Some(wake);
                     self.on_storage_job_message(returned)?;
                 },
                 recv(self.cancel_rx) -> _ => return Err(StateRootTaskError::Canceled),
             }
 
+            let np_busy = idle_start;
             done = self.make_progress()?;
             idle_start = Instant::now();
+            let _ = np_busy;
+            np_add(7, np_us(t));
         }
+        np_phase("trie_drained");
+        if let Some(at) = np_last_proof {
+            np_phase_at("trie_last_proof", at);
+        }
+        if let Some(at) = np_last_strg {
+            np_phase_at("trie_last_strg", at);
+        }
+        np_add(21, self.storage.len() as u64);
 
         debug_assert_eq!(
             self.storage_in_flight, 0,
@@ -487,8 +521,12 @@ where
 
         let start = Instant::now();
         self.return_storage_tries();
+        np_add(11, np_us(start));
+        let np_root = Instant::now();
         // Every storage trie changed this block passed through the task's storage map.
         let root = self.trie.root_with_updates_of(self.storage_to_drop.keys(), self.new_epoch);
+        np_add(12, np_us(np_root));
+        np_phase("trie_root");
         let (state_root, trie_updates) = match root {
             Ok(result) => result,
             Err(err)
@@ -566,7 +604,12 @@ where
             self.dispatch_pending_targets()?;
             let t = Instant::now();
             self.process_new_updates()?;
+            let np_processed = Instant::now();
             self.promote_pending_account_updates()?;
+            if self.finished_state_updates {
+                np_add(8, np_processed.duration_since(t).as_micros() as u64);
+                np_add(9, np_us(np_processed));
+            }
             self.metrics.sparse_trie_process_updates_duration_histogram.record(t.elapsed());
 
             if self.finished_state_updates && !self.has_pending_sparse_trie_updates() {
@@ -579,7 +622,14 @@ where
             // If there's still no pending updates spend some time pre-computing the account
             // trie upper hashes
             if self.proof_worker_handle.results().is_empty() {
+                let np_t = Instant::now();
                 self.trie.calculate_subtries(self.new_epoch);
+                if self.finished_state_updates {
+                    np_add(10, np_us(np_t));
+                } else {
+                    np_add(15, 1);
+                    np_add(16, np_us(np_t));
+                }
             }
         } else if !updates_queued {
             // If we don't have any pending updates, apply them to the trie,
@@ -614,6 +664,21 @@ where
                 None
             }
             SparseTrieTaskMessage::FinishedStateUpdates => {
+                np_phase("trie_fin");
+                np_add(0, self.in_flight_proof_jobs as u64);
+                np_add(1, self.pending_updates as u64);
+                np_add(
+                    13,
+                    self.storage
+                        .values()
+                        .filter(|state| match state {
+                            StorageTrieState::Idle(work) => {
+                                work.updated && !work.trie.is_root_cached()
+                            }
+                            StorageTrieState::InFlight(_) => true,
+                        })
+                        .count() as u64,
+                );
                 let hashed_state = Arc::new(core::mem::take(&mut self.final_hashed_state));
                 let _ = self.final_hashed_state_tx.take().unwrap().send(Arc::clone(&hashed_state));
                 self.finished_state_updates = true;
@@ -854,7 +919,14 @@ where
             };
 
             if inline_round || work.is_target_only() {
+                let np_t = Instant::now();
                 let output = work.run(new_epoch, retain_updates);
+                if self.finished_state_updates {
+                    np_add(22, 1);
+                    np_add(23, np_us(np_t));
+                } else {
+                    np_add(19, 1);
+                }
                 self.apply_storage_output(address, output)?;
                 continue;
             }
@@ -939,6 +1011,7 @@ where
             return;
         }
 
+        np_add(if self.finished_state_updates { 6 } else { 18 }, jobs.len() as u64);
         let parent_span = debug_span!("spawn_storage_jobs", n = jobs.len());
         let pool = self.runtime.storage_trie_pool();
         let chunk_len = storage_job_chunk_len(jobs.len(), pool.num_threads());
@@ -1136,6 +1209,11 @@ where
 
         let _span = trace_span!("dispatch_pending_targets").entered();
         let (targets, chunking_length) = self.pending_targets.take();
+        if self.finished_state_updates {
+            np_add(5, chunking_length as u64);
+        } else {
+            np_add(17, 1);
+        }
         let mut dispatch_error = None;
         dispatch_with_chunking(
             targets,
@@ -1153,7 +1231,10 @@ where
                 // A chunk becomes several jobs, and an address whose slots span chunks gets one
                 // storage job per chunk. Every job returns its own result.
                 match self.proof_worker_handle.dispatch(proof_targets) {
-                    Ok(jobs) => self.in_flight_proof_jobs += jobs,
+                    Ok(jobs) => {
+                        np_add(20, jobs as u64);
+                        self.in_flight_proof_jobs += jobs
+                    }
                     Err(e) => {
                         error!("failed to dispatch proofs: {e}");
                         dispatch_error = Some(StateRootTaskError::Other(Box::new(e)));

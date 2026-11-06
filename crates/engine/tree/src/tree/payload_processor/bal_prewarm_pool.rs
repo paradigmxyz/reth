@@ -185,8 +185,9 @@ impl BalPrewarmPool {
         rx.blocking_recv().expect("BAL prewarm pool dropped without signaling completion");
     }
 
-    /// Claims a bulk load of the storage of `address`, returning `false` if another load claimed
-    /// it in the last `STORAGE_RELOAD_AFTER`: its pages are likely still cached.
+    /// Claims a bulk load of the storage of `address`, see
+    /// [`load_storage`](super::storage_scan::load_storage), returning `false` if another load
+    /// claimed it in the last [`STORAGE_RELOAD_AFTER`]: its pages are likely still cached.
     pub fn claim_storage_load(&self, address: Address) -> bool {
         let now = Instant::now();
         let mut loaded = self.loaded_storages.lock().unwrap_or_else(|err| err.into_inner());
