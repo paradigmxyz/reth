@@ -1277,18 +1277,11 @@ where
                     let np_start = Instant::now();
                     let mut outcome =
                         self.commit_prewarm_result(executor, results, index, tx.tx())?;
-<<<<<<< HEAD
+                    let mut np_raced = false;
                     // A prewarm worker executing the transaction for the first time is ahead of
                     // block execution, which would have to load the same state. Block execution
                     // waits for its result: executing the transaction beside it reads the same
                     // state again, one cold read at a time, and slows both.
-=======
-                    let mut np_raced = false;
-                    // A prewarm worker executing the transaction for the first time usually
-                    // finishes it sooner than block execution would, which also has to load its
-                    // state. A speculation that takes longer is raced: block execution executes
-                    // the transaction itself on its warmer state, reading what the worker loaded.
->>>>>>> f5d01dc0eb (wip: committer breakdown counters (experiment only))
                     if outcome == Err(ReuseMiss::Missing) && results.is_speculating(index) {
                         let wait_start = Instant::now();
                         while results.is_speculating(index) {
