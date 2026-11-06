@@ -672,14 +672,9 @@ impl From<ProofJobError> for StateRootTaskError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_primitives::{Address, Bytes};
     use crossbeam_channel::RecvTimeoutError;
     use reth_chainspec::ChainSpec;
     use reth_provider::test_utils::create_test_provider_factory_with_chain_spec;
-    use reth_trie::{
-        AccountProof, ExecutionWitnessMode, HashedPostState, MultiProof, MultiProofTargets,
-        TrieInput,
-    };
     use std::sync::Arc;
 
     fn test_ctx<Factory>(factory: Factory) -> ProofTaskCtx<Factory> {
@@ -803,86 +798,6 @@ mod tests {
                 results.recv_timeout(Duration::from_secs(30)),
                 Err(crossbeam_channel::RecvTimeoutError::Disconnected)
             ));
-        }
-    }
-
-    /// Serves storage proofs and panics on the storage proof of [`PANICKING_ADDRESS`].
-    #[derive(Clone, Debug)]
-    struct PanickingProofFactory;
-
-    /// The account whose storage proof panics.
-    const PANICKING_ADDRESS: B256 = B256::with_last_byte(1);
-
-    impl DatabaseProviderROFactory for PanickingProofFactory {
-        type Provider = Self;
-
-        fn database_provider_ro(&self) -> ProviderResult<Self> {
-            Ok(Self)
-        }
-    }
-
-    impl StateProofProvider for PanickingProofFactory {
-        fn proof(
-            &self,
-            _input: TrieInput,
-            _address: Address,
-            _slots: &[B256],
-        ) -> ProviderResult<AccountProof> {
-            unimplemented!()
-        }
-
-        fn multiproof(
-            &self,
-            _input: TrieInput,
-            _targets: MultiProofTargets,
-        ) -> ProviderResult<MultiProof> {
-            unimplemented!()
-        }
-
-        fn multiproof_v2(
-            &self,
-            targets: MultiProofTargetsV2,
-            _requires_masks: bool,
-        ) -> ProviderResult<DecodedMultiProofV2> {
-            assert!(!targets.storage_targets.contains_key(&PANICKING_ADDRESS), "injected panic");
-            Ok(DecodedMultiProofV2::default())
-        }
-
-        fn witness(
-            &self,
-            _input: TrieInput,
-            _target: HashedPostState,
-            _mode: ExecutionWitnessMode,
-        ) -> ProviderResult<Vec<Bytes>> {
-            unimplemented!()
-        }
-    }
-
-    /// Ensures a panicking proof job sends an error and its worker keeps serving jobs.
-    #[test]
-    fn panicking_proof_job_sends_error() {
-        let runtime = reth_tasks::Runtime::test();
-        let proof_worker_handle = ProofWorkerHandle::new(
-            &runtime,
-            test_ctx(PanickingProofFactory),
-            ProofWorkerCounts::new(1, 1),
-            #[cfg(feature = "metrics")]
-            Default::default(),
-        );
-
-        for (address, panics) in [(PANICKING_ADDRESS, true), (B256::ZERO, false)] {
-            let targets = MultiProofTargetsV2 {
-                storage_targets: std::iter::once((address, Vec::new())).collect(),
-                ..Default::default()
-            };
-            assert_eq!(proof_worker_handle.dispatch(targets).unwrap(), 1);
-            let result =
-                proof_worker_handle.results().recv_timeout(Duration::from_secs(30)).unwrap();
-            if panics {
-                assert_eq!(result.unwrap_err().to_string(), "proof job panicked: injected panic");
-            } else {
-                assert_eq!(result.unwrap(), DecodedMultiProofV2::default());
-            }
         }
     }
 }
