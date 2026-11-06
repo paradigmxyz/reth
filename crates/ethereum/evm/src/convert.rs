@@ -4,14 +4,21 @@ use alloy_consensus::{transaction::Recovered, BlockHeader};
 use alloy_eips::eip7840::BlobParams;
 use alloy_primitives::{Address, BlockNumber, BlockTimestamp, U256};
 use alloy_rpc_types_engine::ExecutionData;
+#[cfg(feature = "std")]
+use evm2::ethereum::LazyAuthorization;
 use evm2::{
     env::{BlockEnv, BlockEnvExt},
-    ethereum::RecoveredTxEnvelope,
+    ethereum::{LazyTxEip7702, RecoveredTxEnvelope, TxEnvelope},
     SpecId,
 };
+#[cfg(feature = "std")]
+use rayon::prelude::*;
 use reth_chainspec::EthereumHardforks;
 use reth_ethereum_primitives::TransactionSigned;
 use reth_evm::{ExecutableTxParts, RecoveredTx};
+
+#[cfg(feature = "std")]
+const PARALLEL_AUTHORIZATION_THRESHOLD: usize = 16;
 
 /// Map the latest active Ethereum hardfork at `timestamp` or `block_number` to a [`SpecId`].
 pub fn spec_id_by_timestamp_and_block_number<C>(
@@ -131,9 +138,29 @@ impl ExecutableRecoveredTx {
     pub fn new(tx: Recovered<TransactionSigned>) -> Self {
         // Cache the hash before cloning so neither envelope hashes on the execution thread.
         tx.inner().tx_hash();
-        let tx_env = tx.clone().convert();
+        let tx_env = tx.clone().map(|signed| match signed {
+            TransactionSigned::Eip7702(signed) => {
+                let body = signed.strip_signature();
+                TxEnvelope::Eip7702(recover_authorizations(body))
+            }
+            signed => signed.into(),
+        });
         Self { tx_env, tx }
     }
+}
+
+fn recover_authorizations(tx: alloy_consensus::TxEip7702) -> LazyTxEip7702 {
+    #[cfg(feature = "std")]
+    if tx.authorization_list.len() >= PARALLEL_AUTHORIZATION_THRESHOLD {
+        let authorities = tx
+            .authorization_list
+            .par_iter()
+            .map(|auth| LazyAuthorization::Signed(auth).authority())
+            .collect();
+        return LazyTxEip7702::from_cached_recovered_authorizations(tx, authorities);
+    }
+
+    LazyTxEip7702::from_recovered_authorizations(tx)
 }
 
 impl RecoveredTx<TransactionSigned> for ExecutableRecoveredTx {
@@ -158,6 +185,14 @@ impl ExecutableTxParts<RecoveredTxEnvelope, TransactionSigned> for ExecutableRec
 mod tests {
     use super::*;
     use alloy_consensus::Header;
+    #[cfg(feature = "std")]
+    use alloy_consensus::TxEip7702;
+    #[cfg(feature = "std")]
+    use alloy_eips::eip7702::{Authorization, SignedAuthorization};
+    #[cfg(feature = "std")]
+    use alloy_primitives::Signature;
+    #[cfg(feature = "std")]
+    use reth_ethereum_primitives::Transaction;
 
     #[test]
     fn block_env_uses_header_slot_number() {
@@ -166,5 +201,52 @@ mod tests {
         let env = block_env_with_blob_params(&header, None);
 
         assert_eq!(env.slot_num, U256::from(42));
+    }
+
+    #[cfg(feature = "std")]
+    fn test_authorization() -> SignedAuthorization {
+        SignedAuthorization::new_unchecked(
+            Authorization { chain_id: U256::ZERO, address: Address::ZERO, nonce: 0 },
+            0,
+            U256::from(1),
+            U256::from(1),
+        )
+    }
+
+    #[test]
+    #[cfg(feature = "std")]
+    fn parallel_authority_recovery_matches_serial() {
+        let mut authorizations = vec![test_authorization(); PARALLEL_AUTHORIZATION_THRESHOLD];
+        authorizations[1] = SignedAuthorization::new_unchecked(
+            Authorization { chain_id: U256::ZERO, address: Address::ZERO, nonce: 1 },
+            0,
+            U256::from(1),
+            U256::from(1),
+        );
+        authorizations[2] = SignedAuthorization::new_unchecked(
+            Authorization { chain_id: U256::ZERO, address: Address::ZERO, nonce: 2 },
+            0,
+            U256::ZERO,
+            U256::ZERO,
+        );
+        let tx = TxEip7702 { authorization_list: authorizations, ..Default::default() };
+        let serial: Vec<_> = LazyTxEip7702::from_recovered_authorizations(tx.clone())
+            .authorizations()
+            .map(|auth| auth.authority())
+            .collect();
+        let signed =
+            TransactionSigned::new_unhashed(Transaction::Eip7702(tx), Signature::test_signature());
+        let recovered = Recovered::new_unchecked(signed, Address::ZERO);
+        let executable = ExecutableRecoveredTx::new(recovered);
+        let TxEnvelope::Eip7702(parallel) = executable.tx_env.inner() else {
+            panic!("expected EIP-7702 transaction")
+        };
+        assert!(parallel
+            .authorizations()
+            .all(|auth| matches!(auth, LazyAuthorization::Recovered { .. })));
+        assert_eq!(
+            parallel.authorizations().map(|auth| auth.authority()).collect::<Vec<_>>(),
+            serial
+        );
     }
 }

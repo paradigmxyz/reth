@@ -9267,6 +9267,7 @@ dependencies = [
  "evm2",
  "evm2-jit",
  "metrics",
+ "rayon",
  "reth-chainspec",
  "reth-ethereum-forks",
  "reth-ethereum-primitives",
