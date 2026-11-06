@@ -570,6 +570,20 @@ reused results takes ~1.2 ms. No wait is for a refresh of a stale result or for 
 had not started. 3.7 ms of the wait falls on transactions after the 50th, 0.8 ms on the first five,
 and the longest are single heavy transactions (26342631 index 42 and 26343111 index 2, ~80 ms each).
 
+The waits are not scheduling gaps. A block's ~300 transactions reach speculation within 0.65 ms,
+heavily out of order (63% before an earlier one), and a first execution starts 2.1 ms (p50) after
+its transaction arrived even once every earlier one had arrived: the 17 workers are busy, many
+blocked on reads from disk (406k major faults per replay). 32 workers instead of 16 cut the
+committer's waits from 6.5 to 5.3 ms per block and its stale re-executions from 25 to 14, but the
+transactions phase took 13.9 ms instead of 13.4 ms and the block 1.6% longer; 48 workers made it
+15% slower. The machine is short of cores, not of workers.
+
+Of the stale results whose reads fail validation, 12.5 per block fail on a storage read and 0.6 on
+an account: token balances of USDC (3.4), USDT (3.2) and WETH (1.5) and Uniswap v4's pool manager
+(1.3). In 6.8 the slot's last predicted writer is the previous transaction, a dependency chain
+that refreshing cannot shorten; merging such results needs to know how the transaction used the
+value, which the read sets do not record.
+
 ## Rewrite: newPayload v2
 
 The v2 path replaces the per-block task graph instead of tuning it:
