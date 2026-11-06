@@ -38,8 +38,8 @@ use tracing::{debug, debug_span, error, instrument, trace_span};
 /// Tail counters (experiment only): finish->drained us, return us, root us, -, drain proof results,
 /// drain storage jobs, drain iterations, retained storage tries, proof results, storage jobs,
 /// in-flight proof jobs at finish.
-pub(crate) static NP_TRIE: [std::sync::atomic::AtomicU64; 11] =
-    [const { std::sync::atomic::AtomicU64::new(0) }; 11];
+pub(crate) static NP_TRIE: [std::sync::atomic::AtomicU64; 14] =
+    [const { std::sync::atomic::AtomicU64::new(0) }; 14];
 static NP_FINISHED: std::sync::Mutex<Option<Instant>> = std::sync::Mutex::new(None);
 use std::sync::atomic::Ordering as AtomicOrdering;
 
@@ -586,8 +586,25 @@ where
             // storage roots and promoting account updates.
             self.dispatch_pending_targets()?;
             let t = Instant::now();
+            if self.finished_state_updates {
+                NP_TRIE[3].fetch_add(
+                    (self.new_account_updates.len() +
+                        self.new_storage_updates.values().map(|s| s.len()).sum::<usize>())
+                        as u64,
+                    AtomicOrdering::Relaxed,
+                );
+            }
             self.process_new_updates()?;
+            let processed = Instant::now();
             self.promote_pending_account_updates()?;
+            if self.finished_state_updates {
+                NP_TRIE[11].fetch_add(
+                    processed.duration_since(t).as_micros() as u64,
+                    AtomicOrdering::Relaxed,
+                );
+                NP_TRIE[12]
+                    .fetch_add(processed.elapsed().as_micros() as u64, AtomicOrdering::Relaxed);
+            }
             self.metrics.sparse_trie_process_updates_duration_histogram.record(t.elapsed());
 
             if self.finished_state_updates && !self.has_pending_sparse_trie_updates() {
@@ -637,6 +654,7 @@ where
             SparseTrieTaskMessage::FinishedStateUpdates => {
                 NP_TRIE[10].store(self.in_flight_proof_jobs as u64, AtomicOrdering::Relaxed);
                 *NP_FINISHED.lock().unwrap() = Some(Instant::now());
+                NP_TRIE[13].store(self.pending_updates as u64, AtomicOrdering::Relaxed);
                 let hashed_state = Arc::new(core::mem::take(&mut self.final_hashed_state));
                 let _ = self.final_hashed_state_tx.take().unwrap().send(Arc::clone(&hashed_state));
                 self.finished_state_updates = true;
