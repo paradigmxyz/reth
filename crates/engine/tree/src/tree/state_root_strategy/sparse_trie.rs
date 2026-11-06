@@ -38,7 +38,7 @@ use tracing::{debug, debug_span, error, instrument, trace_span};
 /// Tail counters (experiment only), see the np-phases4 analysis script for the layout.
 pub(crate) static NP_TRIE: [std::sync::atomic::AtomicU64; 24] =
     [const { std::sync::atomic::AtomicU64::new(0) }; 24];
-use crate::tree::payload_validator::{np_phase, np_phase_at};
+use crate::tree::payload_validator::{np_event, np_phase, np_phase_at};
 use std::sync::atomic::Ordering as AtomicOrdering;
 
 fn np_add(index: usize, value: u64) {
@@ -312,6 +312,13 @@ where
 
         while let Ok(message) = updates.recv() {
             total_idle_time += idle_start.elapsed();
+            let np_kind = match &message {
+                StateRootMessage::PrefetchProofs(_) => 0,
+                StateRootMessage::StateUpdate(state) => 1000 + state.accounts.len() as u64,
+                StateRootMessage::FinishedStateUpdates => 2,
+                StateRootMessage::HashedStateUpdate(_) => 3,
+            };
+            np_event("h_recv", np_kind, updates.len() as u64);
 
             let finished = matches!(message, StateRootMessage::FinishedStateUpdates);
             let msg = match message {
@@ -334,6 +341,7 @@ where
             if hashed_state_tx.send(msg).is_err() || finished {
                 break;
             }
+            np_event("h_sent", np_kind, 0);
 
             idle_start = Instant::now();
         }
@@ -416,6 +424,7 @@ where
                     let update = message.map_err(|_| StateRootTaskError::Other(
                         "updates channel disconnected before state root calculation".into(),
                     ))?;
+                    np_event("t_msg", self.updates.len() as u64, self.pending_updates as u64);
                     if let Some(hashed_state) = self.on_message(update) {
                         finalized_hashed_state = Some(hashed_state);
                     }
@@ -526,6 +535,7 @@ where
         // Every storage trie changed this block passed through the task's storage map.
         let root = self.trie.root_with_updates_of(self.storage_to_drop.keys(), self.new_epoch);
         np_add(12, np_us(np_root));
+        np_event("t_root", np_us(np_root), 0);
         np_phase("trie_root");
         let (state_root, trie_updates) = match root {
             Ok(result) => result,
@@ -572,9 +582,12 @@ where
         t: &mut Instant,
     ) -> Result<(), StateRootTaskError> {
         let mut proofs = self.complete_proof_job(result)?;
+        let mut np_n = 1;
         while let Ok(next) = self.proof_worker_handle.results().try_recv() {
             proofs.extend(self.complete_proof_job(next)?);
+            np_n += 1;
         }
+        np_event("t_proofs", np_n, self.in_flight_proof_jobs as u64);
 
         let phase_end = Instant::now();
         self.metrics
@@ -624,6 +637,7 @@ where
             if self.proof_worker_handle.results().is_empty() {
                 let np_t = Instant::now();
                 self.trie.calculate_subtries(self.new_epoch);
+                np_event("t_subtries", np_us(np_t), 0);
                 if self.finished_state_updates {
                     np_add(10, np_us(np_t));
                 } else {
@@ -836,6 +850,8 @@ where
         }
 
         let _span = debug_span!("process_new_updates").entered();
+        let np_t = Instant::now();
+        let np_msgs = self.pending_updates as u64;
         self.pending_updates = 0;
         self.initial_updates_applied = true;
 
@@ -874,6 +890,7 @@ where
                 }
             }
         }
+        np_event("t_apply", np_us(np_t), np_msgs);
 
         Ok(())
     }
@@ -908,6 +925,8 @@ where
         }
 
         let inline_round = job_units <= INLINE_STORAGE_WORK_UNITS;
+        let np_t = Instant::now();
+        let np_ready = ready.len() as u64;
         let new_epoch = self.new_epoch;
         let retain_updates = self.trie.retains_updates();
         let started = Instant::now();
@@ -941,7 +960,9 @@ where
             jobs.push(StorageTrieJob { address, work });
         }
 
+        let np_jobs = jobs.len() as u64;
         self.spawn_storage_jobs(jobs);
+        np_event("t_passes", np_us(np_t), np_ready * 100000 + np_jobs);
 
         Ok(())
     }
@@ -1064,6 +1085,7 @@ where
     /// arrived for the address while it was gone.
     fn on_storage_trie_returned(&mut self, done: StorageTrieJobDone<S>) -> SparseTrieResult<()> {
         let StorageTrieJobDone { address, work, output } = done;
+        np_event("t_strg_ret", self.storage_in_flight as u64, 0);
 
         let Entry::Occupied(mut entry) = self.storage.entry(address) else {
             unreachable!("a returned payload was checked out of its entry")
@@ -1117,6 +1139,14 @@ where
         skip_all
     )]
     fn promote_pending_account_updates(&mut self) -> SparseTrieResult<()> {
+        let np_t = Instant::now();
+        let np_before = self.pending_account_updates.len() as u64;
+        let result = self.promote_pending_account_updates_inner();
+        np_event("t_promote", np_us(np_t), np_before - self.pending_account_updates.len() as u64);
+        result
+    }
+
+    fn promote_pending_account_updates_inner(&mut self) -> SparseTrieResult<()> {
         self.process_account_leaf_updates(false)?;
 
         if self.pending_account_updates.is_empty() {
@@ -1209,6 +1239,7 @@ where
 
         let _span = trace_span!("dispatch_pending_targets").entered();
         let (targets, chunking_length) = self.pending_targets.take();
+        np_event("t_dispatch", chunking_length as u64, self.in_flight_proof_jobs as u64);
         if self.finished_state_updates {
             np_add(5, chunking_length as u64);
         } else {
