@@ -600,12 +600,12 @@ impl Drop for WorkerStatefulPool {
     }
 }
 
-/// A pool of named threads that run broadcast closures and wait on a queue while idle.
+/// A pool of named threads that run queued closures and wait on the queue while idle.
 ///
 /// The threads of a [`WorkerPool`] look for work while any thread of the pool is busy, which
-/// costs CPU when the work is a few long-running loops that block on channels of their own, such
-/// as proof workers, and the rest of the pool has nothing to do. The threads of this pool sleep
-/// until a closure is queued.
+/// costs CPU when the pool runs a few long-running loops that block on channels of their own,
+/// such as proof workers, or a stream of small jobs, such as storage trie passes. The threads of
+/// this pool sleep until a closure is queued.
 #[derive(Debug)]
 pub struct BlockingWorkerPool {
     shared: OnceLock<Arc<BlockingWorkerQueue>>,
@@ -652,7 +652,10 @@ impl BlockingWorkerPool {
             done: parking_lot::Condvar::new(),
         });
         let queue = self.queue();
-        queue.jobs.lock().extend(std::iter::repeat_n(job.clone(), runs));
+        queue.jobs.lock().extend((0..runs).map(|_| {
+            let job = Arc::clone(&job);
+            Box::new(move || job.run_once()) as QueuedJob
+        }));
         queue.queued.notify_all();
 
         let mut state = job.state.lock();
@@ -662,6 +665,20 @@ impl BlockingWorkerPool {
         if let Some(payload) = state.1.take() {
             std::panic::resume_unwind(payload);
         }
+    }
+
+    /// Runs `f` on a thread of the pool.
+    ///
+    /// `f` handles its own panics: a panic is logged and the thread keeps serving the queue.
+    pub fn spawn(&self, f: impl FnOnce() + Send + 'static) {
+        let prefix = self.thread_name_prefix;
+        let queue = self.queue();
+        queue.jobs.lock().push_back(Box::new(move || {
+            if catch_unwind(AssertUnwindSafe(f)).is_err() {
+                tracing::error!(target: "tasks", pool = prefix, "Blocking worker pool job panicked");
+            }
+        }));
+        queue.queued.notify_one();
     }
 
     /// Returns the pool's queue, starting its threads on first use.
@@ -688,11 +705,20 @@ impl BlockingWorkerPool {
     }
 }
 
+/// A closure queued for a thread of a [`BlockingWorkerPool`].
+type QueuedJob = Box<dyn FnOnce() + Send>;
+
 /// The closures queued for the threads of a [`BlockingWorkerPool`].
-#[derive(Debug, Default)]
+#[derive(Default)]
 struct BlockingWorkerQueue {
-    jobs: parking_lot::Mutex<std::collections::VecDeque<Arc<BroadcastJob>>>,
+    jobs: parking_lot::Mutex<std::collections::VecDeque<QueuedJob>>,
     queued: parking_lot::Condvar,
+}
+
+impl std::fmt::Debug for BlockingWorkerQueue {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("BlockingWorkerQueue").finish_non_exhaustive()
+    }
 }
 
 impl BlockingWorkerQueue {
@@ -708,15 +734,7 @@ impl BlockingWorkerQueue {
                     self.queued.wait(&mut jobs);
                 }
             };
-            let result = catch_unwind(AssertUnwindSafe(|| (job.run)()));
-            let mut state = job.state.lock();
-            state.0 -= 1;
-            if let Err(payload) = result {
-                state.1.get_or_insert(payload);
-            }
-            if state.0 == 0 {
-                job.done.notify_all();
-            }
+            job();
         }
     }
 }
@@ -727,6 +745,21 @@ struct BroadcastJob {
     /// Runs that have not returned yet, and the first panic of a run.
     state: parking_lot::Mutex<(usize, Option<Box<dyn Any + Send>>)>,
     done: parking_lot::Condvar,
+}
+
+impl BroadcastJob {
+    /// Runs the closure once and counts the run as returned.
+    fn run_once(&self) {
+        let result = catch_unwind(AssertUnwindSafe(|| (self.run)()));
+        let mut state = self.state.lock();
+        state.0 -= 1;
+        if let Err(payload) = result {
+            state.1.get_or_insert(payload);
+        }
+        if state.0 == 0 {
+            self.done.notify_all();
+        }
+    }
 }
 
 impl std::fmt::Debug for BroadcastJob {
@@ -775,6 +808,20 @@ mod tests {
             counted.fetch_add(1, Ordering::Relaxed);
         });
         assert_eq!(runs.load(Ordering::Relaxed), 7);
+    }
+
+    #[test]
+    fn blocking_worker_pool_spawn() {
+        let pool = BlockingWorkerPool::new(2, "test-blocking-spawn");
+        let (tx, rx) = std::sync::mpsc::channel();
+        pool.spawn(|| panic!("boom"));
+        for i in 0..4 {
+            let tx = tx.clone();
+            pool.spawn(move || tx.send(i).unwrap());
+        }
+        let mut received = (0..4).map(|_| rx.recv().unwrap()).collect::<Vec<_>>();
+        received.sort_unstable();
+        assert_eq!(received, [0, 1, 2, 3]);
     }
 
     #[test]
