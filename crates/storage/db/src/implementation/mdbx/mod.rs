@@ -784,7 +784,8 @@ impl DatabaseEnv {
         };
         let mut read = 0;
         // Experiment: tables whose leaves and overflow pages are read too.
-        let full = std::env::var("RETH_NP_WARM_TABLES").unwrap_or_default();
+        let full = std::env::var("RETH_NP_WARM_TABLES")
+            .unwrap_or_else(|_| "HashedAccounts,Bytecodes".to_string());
         let full = full.split(',').filter(|t| !t.is_empty()).collect::<Vec<_>>();
         for table in
             tables.iter().copied().chain(full.iter().copied().filter(|t| !tables.contains(t)))
