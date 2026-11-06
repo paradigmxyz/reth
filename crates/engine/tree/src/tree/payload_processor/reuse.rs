@@ -312,6 +312,9 @@ impl<T: EvmTypes> PrewarmResults<T> {
         let rebased = match tx.validate(db) {
             Ok(Some(rebased)) => rebased,
             result => {
+                if matches!(result, Ok(None)) {
+                    np_classify_stale(&tx, db, &self.predicted, index);
+                }
                 *slot = ResultSlot::Ready(tx);
                 return result.map(|_| Err(ReuseMiss::Stale))
             }
@@ -356,6 +359,50 @@ impl<T: EvmTypes> PrewarmResults<T> {
         }
         "valid".to_string()
     }
+}
+
+/// Records why a ready result is stale (experiment only): event `c_stale` with the kind (1 storage
+/// read, 2 account read, 3 beneficiary credit) times 1e6 plus the distance to the transaction that
+/// last wrote the key before it (0 if no predicted writer), and the first 8 bytes of the address.
+fn np_classify_stale<T: EvmTypes, DB: DynDatabase + ?Sized>(
+    tx: &PrewarmedTx<T>,
+    db: &mut DB,
+    predicted: &PredictedState,
+    index: usize,
+) {
+    let address_key = |address: &Address| u64::from_be_bytes(address.0[..8].try_into().unwrap());
+    for read in &tx.reads.storage {
+        if db.get_storage(&read.address, &read.slot).ok() != Some(read.value) {
+            let gap = predicted
+                .storage
+                .get(&(read.address, read.slot))
+                .and_then(|entry| latest(&entry.writes, index).map(|(i, _)| index - i))
+                .unwrap_or(0);
+            crate::tree::payload_validator::np_event(
+                "c_stale",
+                1_000_000 + gap as u64,
+                address_key(&read.address),
+            );
+            return
+        }
+    }
+    for read in &tx.reads.accounts {
+        let current = db.get_account(&read.address).ok().flatten();
+        if read.compare(current.as_ref()) == AccountMatch::Differs {
+            let gap = predicted
+                .accounts
+                .get(&read.address)
+                .and_then(|entry| latest(&entry.writes, index).map(|(i, _)| index - i))
+                .unwrap_or(0);
+            crate::tree::payload_validator::np_event(
+                "c_stale",
+                2_000_000 + gap as u64,
+                address_key(&read.address),
+            );
+            return
+        }
+    }
+    crate::tree::payload_validator::np_event("c_stale", 3_000_000, 0);
 }
 
 /// Reason a prewarm result could not be reused.
