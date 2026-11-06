@@ -61,6 +61,11 @@ use tracing::{debug, debug_span, instrument, trace, trace_span, warn, Span};
 /// execute again.
 const REFRESH_WINDOW: usize = 64;
 
+/// Probe counters (experiment only): claimed, late at claim, completed, rounds, completed late,
+/// missed keys, completion micros.
+pub(crate) static NP_PROBE: [std::sync::atomic::AtomicU64; 7] =
+    [const { std::sync::atomic::AtomicU64::new(0) }; 7];
+
 /// Most rounds a transaction is probed for cold reads.
 ///
 /// Each round reaches the reads that depend on what the previous rounds loaded. Most transactions
@@ -71,6 +76,10 @@ const MAX_PROBE_ROUNDS: usize = 64;
 /// Consecutive probe rounds through one contract after which its storage is bulk-loaded, see
 /// [`chain_contract`].
 const CHAIN_ROUNDS: usize = 4;
+
+static NP_CHAIN_ROUNDS: std::sync::LazyLock<usize> = std::sync::LazyLock::new(|| {
+    std::env::var("RETH_NP_CHAIN_ROUNDS").ok().and_then(|v| v.parse().ok()).unwrap_or(CHAIN_ROUNDS)
+});
 
 /// Most storage misses a probe round may have to count as a step of a chain.
 const CHAIN_ROUND_KEYS: usize = 8;
@@ -275,6 +284,7 @@ where
     /// arrived transactions in block order as soon as they can, and otherwise execute again the
     /// stale results of the transactions block execution reaches next. With cold reads probed,
     /// [`PROBE_THREADS`] threads run [`Self::probe_loop`] beside them.
+    #[allow(clippy::too_many_lines)]
     fn speculate_txs<Tx>(
         ctx: &PrewarmContext<N, P, Evm>,
         pool: &WorkerStatefulPool,
@@ -361,6 +371,7 @@ where
     /// loaded values, until a round misses nothing or the transaction was executed. Missing slots
     /// read as a large value in every other round, so that batch calls pass their balance
     /// checks and reach every item.
+    #[allow(clippy::too_many_lines)]
     fn probe_loop<Tx>(
         ctx: &PrewarmContext<N, P, Evm>,
         results: &PrewarmResults<EvmTypesFor<Evm>>,
@@ -381,14 +392,18 @@ where
                 continue
             };
             idle = 0;
+            NP_PROBE[0].fetch_add(1, Ordering::Relaxed);
             if index < ctx.executed_tx_index.load(Ordering::Relaxed) {
+                NP_PROBE[1].fetch_add(1, Ordering::Relaxed);
                 continue
             }
             let (tx_env, _) = tx.clone().into_parts();
+            let probe_start = Instant::now();
             // The contract the latest rounds walked a chain of storage reads through, and for how
             // many rounds in a row.
             let mut chain: Option<(Address, usize)> = None;
             for round in 0..MAX_PROBE_ROUNDS {
+                NP_PROBE[3].fetch_add(1, Ordering::Relaxed);
                 if ctx.should_stop() {
                     return
                 }
@@ -402,8 +417,18 @@ where
                 let _ = evm.transact_and_discard(&tx_env, |_| ());
                 let missed = misses.take();
                 if missed.is_empty() {
+                    NP_PROBE[2].fetch_add(1, Ordering::Relaxed);
+                    if index < ctx.executed_tx_index.load(Ordering::Relaxed) {
+                        NP_PROBE[4].fetch_add(1, Ordering::Relaxed);
+                    }
+                    NP_PROBE[6]
+                        .fetch_add(probe_start.elapsed().as_micros() as u64, Ordering::Relaxed);
                     break
                 }
+                NP_PROBE[5].fetch_add(
+                    (missed.accounts.len() + missed.storage.len() + missed.code.len()) as u64,
+                    Ordering::Relaxed,
+                );
                 let mut accounts = missed.accounts;
                 accounts.sort_unstable();
                 accounts.dedup();
@@ -413,13 +438,21 @@ where
                 let mut code = missed.code;
                 code.sort_unstable();
                 code.dedup();
+                let (n_accounts, n_storage, n_code) = (accounts.len(), storage.len(), code.len());
+                let top = storage
+                    .chunk_by(|a, b| a.0 == b.0)
+                    .max_by_key(|chunk| chunk.len())
+                    .map(|chunk| (chunk[0].0, chunk.len()));
+                let n_addresses = storage.chunk_by(|a, b| a.0 == b.0).count();
+                let fetch_start = Instant::now();
                 // A few keys of one contract per round, round after round, is a walk the rounds
                 // cannot parallelize: load the contract's whole storage instead.
                 chain = chain_contract(&storage).map(|address| match chain {
                     Some((chained, rounds)) if chained == address => (address, rounds + 1),
                     _ => (address, 1),
                 });
-                if let Some((address, CHAIN_ROUNDS)) = chain &&
+                if let Some((address, rounds)) = chain &&
+                    rounds == *NP_CHAIN_ROUNDS &&
                     fetch.claim_storage_load(address)
                 {
                     let factory = ctx.provider.factory().clone();
@@ -431,6 +464,22 @@ where
                     }
                 }
                 fetch.warm_all(accounts, &storage, code).wait();
+                if round >= 4 {
+                    tracing::info!(
+                        target: "engine::np_probe",
+                        index,
+                        round,
+                        n_accounts,
+                        n_storage,
+                        n_code,
+                        n_addresses,
+                        top = ?top,
+                        fetch_us = fetch_start.elapsed().as_micros() as u64,
+                        since_us = probe_start.elapsed().as_micros() as u64,
+                        executed = ctx.executed_tx_index.load(Ordering::Relaxed),
+                        "probe round"
+                    );
+                }
             }
         }
     }
@@ -1256,7 +1305,7 @@ impl<Tx, T: evm2::EvmTypes> SpeculationQueue<Tx, T> {
         Self {
             txs: (0..transaction_count).map(|_| OnceLock::new()).collect(),
             next: AtomicUsize::new(1),
-            next_probe: AtomicUsize::new(1),
+            next_probe: AtomicUsize::new(usize::from(std::env::var_os("RETH_NP_TX0").is_none())),
             closed: AtomicBool::new(false),
         }
     }
