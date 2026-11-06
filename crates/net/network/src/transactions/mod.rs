@@ -1,6 +1,6 @@
 //! Transactions management for the p2p network.
 
-use alloy_consensus::{constants::EIP4844_TX_TYPE_ID, transaction::TxHashRef};
+use alloy_consensus::{constants::EIP4844_TX_TYPE_ID, transaction::TxHashRef, Transaction};
 use rayon::iter::{IntoParallelIterator, ParallelIterator};
 use smallvec::SmallVec;
 
@@ -1362,6 +1362,14 @@ where
             }
         }
 
+        // A peer can fit many EIP-7702 authorizations in one message. Each tuple requires a
+        // signature recovery during validation, and the whole message becomes one pool job.
+        // Bound that work before sender recovery and pool submission.
+        let skipped = retain_within_authorization_limit(&mut transactions);
+        if skipped > 0 {
+            trace!(target: "net::tx", ?peer_id, skipped, "skipped transactions exceeding authorization budget");
+        }
+
         if transactions.is_empty() {
             return
         }
@@ -2336,6 +2344,22 @@ impl<N: NetworkPrimitives> InMemorySize for NetworkTransactionEvent<N> {
     }
 }
 
+/// Retains transactions that fit the authorization recovery budget for one peer message.
+fn retain_within_authorization_limit<T: Transaction>(transactions: &mut Vec<T>) -> usize {
+    let mut remaining = MAX_AUTHORIZATIONS_PER_PEER_BATCH;
+    let original_len = transactions.len();
+    transactions.retain(|tx| {
+        let count = tx.authorization_list().map_or(0, |auths| auths.len());
+        if count > remaining {
+            false
+        } else {
+            remaining -= count;
+            true
+        }
+    });
+    original_len - transactions.len()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2347,8 +2371,12 @@ mod tests {
         transactions::config::RelaxedEthAnnouncementFilter,
         NetworkConfigBuilder, NetworkManager,
     };
-    use alloy_consensus::{Transaction as _, TxEip1559, TxLegacy};
-    use alloy_eips::{eip2718::Encodable2718, eip4844::BlobTransactionValidationError};
+    use alloy_consensus::{SignableTransaction, Transaction as _, TxEip1559, TxEip7702, TxLegacy};
+    use alloy_eips::{
+        eip2718::Encodable2718,
+        eip4844::BlobTransactionValidationError,
+        eip7702::{Authorization, SignedAuthorization},
+    };
     use alloy_primitives::{address, hex, Signature, TxKind, B256, U256};
     use alloy_rlp::Decodable;
     use futures::FutureExt;
@@ -3538,5 +3566,42 @@ mod tests {
         );
 
         network_service_handle.abort();
+    }
+
+    #[test]
+    fn peer_batch_authorization_limit() {
+        let authorization = SignedAuthorization::new_unchecked(
+            Authorization { chain_id: U256::ZERO, address: Default::default(), nonce: 0 },
+            0,
+            U256::from(1),
+            U256::from(1),
+        );
+        let authorizations = vec![authorization; 670];
+        let mut transactions = (0..164)
+            .map(|nonce| {
+                TransactionSigned::Eip7702(
+                    TxEip7702 {
+                        nonce,
+                        authorization_list: authorizations.clone(),
+                        ..Default::default()
+                    }
+                    .into_signed(Signature::test_signature()),
+                )
+            })
+            .collect::<Vec<_>>();
+        transactions.push(TransactionSigned::Eip1559(
+            TxEip1559::default().into_signed(Signature::test_signature()),
+        ));
+
+        assert_eq!(retain_within_authorization_limit(&mut transactions), 161);
+        assert_eq!(transactions.len(), 4);
+        assert_eq!(
+            transactions
+                .iter()
+                .map(|tx| tx.authorization_list().map_or(0, |auths| auths.len()))
+                .sum::<usize>(),
+            2010
+        );
+        assert!(matches!(transactions.last(), Some(TransactionSigned::Eip1559(_))));
     }
 }

@@ -31,6 +31,13 @@ pub const SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE: usize = 2 * 1024 * 
 pub mod tx_manager {
     use super::SOFT_LIMIT_COUNT_HASHES_IN_NEW_POOLED_TRANSACTIONS_BROADCAST_MESSAGE;
 
+    /// Maximum number of EIP-7702 authorization tuples imported from one peer batch.
+    ///
+    /// This bounds signature recovery work for a single txpool validation job independently of
+    /// the message byte limit. A single transaction may contain hundreds of tuples, so the cap
+    /// leaves room for more than one large transaction.
+    pub const MAX_AUTHORIZATIONS_PER_PEER_BATCH: usize = 2048;
+
     /// Default limit for number of transactions to keep track of for a single peer.
     ///
     /// Default is 320 transaction hashes.
