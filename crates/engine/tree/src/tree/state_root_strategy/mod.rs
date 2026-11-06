@@ -783,6 +783,16 @@ impl DefaultStateRootStrategy {
                 let changed = task.changed_storage_tries().copied().collect::<Vec<_>>();
                 let (mut trie, deferred) = task.into_trie_for_reuse();
                 trie.update_storage_roots(&mut storage_roots, &changed, new_epoch);
+                let retain = std::env::var("RETH_NP_RETAIN")
+                    .ok()
+                    .and_then(|value| value.parse::<u64>().ok());
+                let prune_target = prune_target.and_then(|(prune_before, anchor)| match retain {
+                    Some(retain) => {
+                        let cutoff = prune_before.get().min(new_epoch.get().saturating_sub(retain));
+                        (cutoff > 0).then(|| (TrieNodeEpoch::new(cutoff), anchor))
+                    }
+                    None => Some((prune_before, anchor)),
+                });
                 if let Some((prune_before, _)) = prune_target &&
                     std::env::var_os("RETH_NP_NO_PRUNE").is_none()
                 {
