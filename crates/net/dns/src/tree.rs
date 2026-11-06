@@ -354,6 +354,8 @@ where
     F: Fn(&str) -> ParseEntryResult<V>,
 {
     ensure_strip_key(input, key, err)?;
+    // Advance from the same trimmed input used to find the token.
+    *input = input.trim_start();
     let val = input.split_whitespace().next().ok_or(FieldNotFound(err))?;
     *input = &input[val.len()..];
 
@@ -456,6 +458,19 @@ mod tests {
                 assert_eq!(entry.to_string(), s);
             }
             _ => unreachable!(),
+        }
+    }
+
+    #[test]
+    fn parse_root_entry_whitespace() {
+        for (whitespace, value) in [(" ", "ä"), ("\u{a0}", "a")] {
+            let input = format!(
+                "enrtree-root:v1 e={whitespace}{value} l={whitespace}{value} seq={whitespace}1 sig={whitespace}AA"
+            );
+            assert_eq!(
+                input.parse::<TreeRootEntry>().unwrap().to_string(),
+                format!("enrtree-root:v1 e={value} l={value} seq=1 sig=AA")
+            );
         }
     }
 }
