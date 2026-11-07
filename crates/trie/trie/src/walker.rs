@@ -116,8 +116,9 @@ impl<C: TrieCursor, K: AsRef<AddedRemovedKeys>> TrieWalker<C, K> {
     /// Configures the walker to treat every child of a matching branch path as unskippable.
     ///
     /// When deletions are retained, also collects stored descendants hidden by a matching
-    /// branch's tree mask. These keys appear in the deletion set even if traversal never visits
-    /// them. Root calculations can replace these deletions with regenerated branch updates.
+    /// branch's tree mask or left beside an extension's child. These keys appear in the deletion
+    /// set even if traversal never visits them. Root calculations can replace these deletions with
+    /// regenerated branch updates.
     pub const fn with_walk_all_changed_branch_children(mut self, enabled: bool) -> Self {
         self.walk_all_changed_branch_children = enabled;
         self
@@ -322,10 +323,10 @@ impl<C: TrieCursor, K: AsRef<AddedRemovedKeys>> TrieWalker<C, K> {
             return Ok(())
         };
 
-        // Overwrite the root node's first nibble
-        // We need to sync the stack with the trie structure when consuming a new node. This is
-        // necessary for proper traversal and accurately representing the trie in the stack.
-        if !key.is_empty() && !self.stack.is_empty() {
+        // Only the top-level cursor follows the first nibble of a newly consumed branch.
+        // A deeper seek can leave its child interval when a cached tree bit is stale; changing
+        // an ancestor here would skip the subtree containing the seek result.
+        if !key.is_empty() && self.stack.len() == 1 {
             self.stack[0].set_nibble(key.get_unchecked(0));
         }
 
@@ -342,7 +343,11 @@ impl<C: TrieCursor, K: AsRef<AddedRemovedKeys>> TrieWalker<C, K> {
             return Ok(())
         }
 
-        self.remove_orphaned_descendants(key, node.tree_mask)?;
+        self.remove_orphaned_descendants(
+            self.stack.last().map_or(key, |node| *node.full_key()),
+            key,
+            node.tree_mask,
+        )?;
 
         // Create a new CursorSubNode and push it to the stack.
         let subnode = CursorSubNode::new(key, Some(node));
@@ -406,42 +411,68 @@ impl<C: TrieCursor, K: AsRef<AddedRemovedKeys>> TrieWalker<C, K> {
         Ok(())
     }
 
-    /// Removes cached descendants hidden by a changed branch's tree mask during recovery.
+    /// Removes stored nodes skipped by masks or extensions during recovery.
     ///
-    /// For example, a change under `0x3a` can leave stored `0x3c` and `0x3c4...` entries while
-    /// parent `0x3` has tree-mask bit `c` clear. The walker skips those entries and therefore never
-    /// records their keys for deletion.
+    /// When the first stored branch below a changed child is reached through an extension,
+    /// traversal will skip from that branch's subtree to the end of the logical child. Collect
+    /// any stale siblings in that gap before advancing, just as missing tree bits require
+    /// collecting hidden descendants. Bound each scan so live subtrees remain reusable.
     ///
-    /// Collect the hidden cache keys without using their hashes; regenerated branch updates take
-    /// precedence over these deletions. The cursor must be positioned on this parent; restore that
-    /// position afterwards so traversal continues unchanged.
+    /// Regenerated branch updates take precedence over these deletions. Restore the cursor to
+    /// the consumed node afterwards so traversal and checkpoint resumption remain unchanged.
     fn remove_orphaned_descendants(
         &mut self,
+        child_path: Nibbles,
         key: Nibbles,
         tree_mask: TrieMask,
     ) -> Result<(), DatabaseError> {
-        let missing_children = !tree_mask;
-        if self.walk_all_changed_branch_children &&
-            !missing_children.is_empty() &&
-            let Some(removed_keys) = &mut self.removed_keys &&
-            self.changes.contains(&key)
-        {
-            for nibble in missing_children.iter() {
-                let mut prefix = key;
-                prefix.push(nibble);
-                let mut entry = self.cursor.seek(prefix)?;
+        if self.walk_all_changed_branch_children && self.removed_keys.is_some() {
+            let mut cursor_moved = if key.len() > child_path.len() &&
+                self.changes.contains(&child_path) &&
+                let Some(start) = key.next_without_prefix()
+            {
+                self.remove_nodes_in_range(start, child_path.next_without_prefix())?;
+                true
+            } else {
+                false
+            };
+
+            let missing_children = !tree_mask;
+            if !missing_children.is_empty() && self.changes.contains(&key) {
+                for nibble in missing_children.iter() {
+                    let mut prefix = key;
+                    prefix.push(nibble);
+                    self.remove_nodes_in_range(prefix, prefix.next_without_prefix())?;
+                }
+                cursor_moved = true;
+            }
+
+            if cursor_moved {
+                self.cursor.seek_exact(key)?;
                 #[cfg(feature = "metrics")]
                 self.metrics.inc_branch_nodes_seeked();
-                while let Some((path, _)) = entry &&
-                    path.starts_with(&prefix)
-                {
-                    removed_keys.insert(path);
-                    entry = self.cursor.next()?;
-                }
             }
-            self.cursor.seek_exact(key)?;
+        }
+        Ok(())
+    }
+
+    /// Collects stored paths in `[start, end)` for deletion without trusting their hashes.
+    /// A missing end covers the remainder of the trie. Leaves the cursor at the range boundary.
+    fn remove_nodes_in_range(
+        &mut self,
+        start: Nibbles,
+        end: Option<Nibbles>,
+    ) -> Result<(), DatabaseError> {
+        if let Some(removed_keys) = &mut self.removed_keys {
+            let mut entry = self.cursor.seek(start)?;
             #[cfg(feature = "metrics")]
             self.metrics.inc_branch_nodes_seeked();
+            while let Some((path, _)) = entry &&
+                end.is_none_or(|end| path < end)
+            {
+                removed_keys.insert(path);
+                entry = self.cursor.next()?;
+            }
         }
         Ok(())
     }
@@ -451,15 +482,18 @@ impl<C: TrieCursor, K: AsRef<AddedRemovedKeys>> TrieWalker<C, K> {
 mod tests {
     use super::*;
     use crate::{
+        hashed_cursor::HashedCursorFactory,
         mock::KeyVisitType,
         prefix_set::PrefixSetMut,
         progress::StorageRootProgress,
+        proof_v2::StorageProofCalculator,
         test_utils::{storage_root_prehashed, TrieTestHarness},
         trie_cursor::{mock::MockTrieCursorFactory, TrieCursorFactory},
         updates::StorageTrieUpdates,
-        StorageRoot,
+        ProofV2Target, StorageRoot,
     };
     use alloy_primitives::{map::B256Map, B256, U256};
+    use proptest::prelude::*;
     use reth_storage_errors::db::DatabaseErrorInfo;
     use std::collections::BTreeMap;
 
@@ -692,7 +726,7 @@ mod tests {
                 .with_deletions_retained(true);
         walker.cursor.seek_exact(parent).unwrap();
         factory.visited_account_keys().clear();
-        walker.remove_orphaned_descendants(parent, tree_mask).unwrap();
+        walker.remove_orphaned_descendants(parent, parent, tree_mask).unwrap();
 
         assert_eq!(walker.take_removed_keys(), HashSet::from_iter(orphans));
         assert_eq!(walker.cursor.current().unwrap(), Some(parent));
@@ -751,6 +785,259 @@ mod tests {
 
         fn reset(&mut self) {
             unreachable!("initialization only seeks the root exactly")
+        }
+    }
+
+    /// A stale `tree_mask` bit on a changed branch (here `0xa`, bit `e`, with no `0xae` stored)
+    /// makes `consume_node` seek past the branch into the next first-nibble subtree. The root
+    /// nibble is overwritten with that subtree's nibble before the out-of-order check rejects the
+    /// node, so the walker never visits the stale branch at `0xb` and recovery leaves it in the
+    /// table. Later roots computed without a change under `0xb` then hash the stale node.
+    #[test]
+    fn dangling_tree_bit_does_not_skip_next_root_child() {
+        let key = |nibbles: &[u8]| B256::right_padding_from(&Nibbles::from_nibbles(nibbles).pack());
+        let storage = BTreeMap::from([
+            (key(&[0xa, 0x1, 0x0]), U256::from(1)),
+            (key(&[0xa, 0x1, 0x1]), U256::from(2)),
+            (key(&[0xa, 0xe]), U256::from(3)),
+            (key(&[0xb, 0x2]), U256::from(4)),
+            (key(&[0xb, 0x7]), U256::from(5)),
+            (key(&[0xc, 0x0]), U256::from(6)),
+        ]);
+        let mut harness = TrieTestHarness::new(storage.clone());
+        let expected_root = storage_root_prehashed(storage);
+        let expected_nodes = harness
+            .storage_trie_updates()
+            .storage_nodes
+            .iter()
+            .map(|(key, node)| (*key, node.clone()))
+            .collect::<BTreeMap<_, _>>();
+        let branch_a = Nibbles::from_nibbles([0xa]);
+        let branch_b = Nibbles::from_nibbles([0xb]);
+        assert!(expected_nodes.contains_key(&branch_a));
+        assert!(!expected_nodes.contains_key(&branch_b));
+
+        // What a masked write or an unwind inside the masking window can leave on disk: the
+        // parent still claims child `e` is stored, and a branch for `0xb` that no longer exists.
+        let mut stored_nodes = expected_nodes.clone();
+        stored_nodes.get_mut(&branch_a).unwrap().tree_mask |= TrieMask::from_nibble(0xe);
+        let mut stale_b = branch_node((1 << 0x2) | (1 << 0x7), 0, (1 << 0x2) | (1 << 0x7));
+        stale_b.hashes = vec![B256::repeat_byte(0xee); 2].into();
+        stored_nodes.insert(branch_b, stale_b);
+        harness.set_trie_nodes(stored_nodes.clone());
+
+        // Partial state trie recovery: both subtrees changed in the unwound range.
+        let changes = PrefixSetMut::from([
+            Nibbles::unpack(key(&[0xa, 0xe])),
+            Nibbles::unpack(key(&[0xb, 0x2])),
+        ])
+        .freeze();
+        let (root, updates) = storage_root_with_progress(&harness, changes, true, u64::MAX);
+        assert_eq!(root, expected_root);
+
+        let mut recovered_nodes = stored_nodes;
+        for (path, node) in updates.into_sorted().storage_nodes {
+            if let Some(node) = node {
+                recovered_nodes.insert(path, node);
+            } else {
+                recovered_nodes.remove(&path);
+            }
+        }
+        let stale_b_left = recovered_nodes.contains_key(&branch_b);
+
+        // The next root without changes reuses the table.
+        harness.set_trie_nodes(recovered_nodes.clone());
+        let (next_root, _) =
+            storage_root_with_progress(&harness, PrefixSet::default(), false, u64::MAX);
+
+        assert!(
+            !stale_b_left && next_root == expected_root,
+            "recovery left the stale branch at 0xb: {stale_b_left}; next root {next_root} vs \
+             expected {expected_root}"
+        );
+        assert_eq!(recovered_nodes, expected_nodes);
+    }
+
+    /// Masked partial persistence can leave a stale branch beside the live child under the same
+    /// child nibble: here `0x5a7` (pre-batch, re-touched by the masking suffix) next to `0x5a2`
+    /// (written by the batch), with no branch at `0x5a`. Recovery's `consume_node` takes the first
+    /// stored node under `0x5a` as that child (an extension), and the walker never looks for other
+    /// stored nodes under `0x5a`, so `0x5a7` is never removed. Proof V2 later adopts it as the next
+    /// cached branch under `0x5a` and splices its stale hashes into the proof.
+    #[test]
+    fn stale_sibling_beside_extension_child_is_removed() {
+        let key = |nibbles: &[u8]| B256::right_padding_from(&Nibbles::from_nibbles(nibbles).pack());
+        for regenerate_sibling in [false, true] {
+            let mut storage = BTreeMap::from([
+                (key(&[0x5, 0x3]), U256::from(1)),
+                (key(&[0x5, 0xa, 0x2, 0x1, 0x0]), U256::from(2)),
+                (key(&[0x5, 0xa, 0x2, 0x1, 0x1]), U256::from(3)),
+                (key(&[0x5, 0xa, 0x2, 0x2]), U256::from(4)),
+                (key(&[0xc, 0x0]), U256::from(5)),
+            ]);
+            if regenerate_sibling {
+                storage.extend([
+                    (key(&[0x5, 0xa, 0x7, 0x1, 0x0]), U256::from(6)),
+                    (key(&[0x5, 0xa, 0x7, 0x1, 0x1]), U256::from(7)),
+                    (key(&[0x5, 0xa, 0x7, 0x2]), U256::from(8)),
+                ]);
+            }
+            let mut harness = TrieTestHarness::new(storage.clone());
+            let expected_root = storage_root_prehashed(storage);
+            let expected_nodes = harness
+                .storage_trie_updates()
+                .storage_nodes
+                .iter()
+                .map(|(key, node)| (*key, node.clone()))
+                .collect::<BTreeMap<_, _>>();
+            let live = Nibbles::from_nibbles([0x5, 0xa, 0x2]);
+            let stale = Nibbles::from_nibbles([0x5, 0xa, 0x7]);
+            assert!(expected_nodes.contains_key(&Nibbles::from_nibbles([0x5])));
+            assert!(expected_nodes.contains_key(&live));
+            assert_eq!(
+                expected_nodes.contains_key(&Nibbles::from_nibbles([0x5, 0xa])),
+                regenerate_sibling,
+            );
+
+            let mut stored_nodes = expected_nodes.clone();
+            stored_nodes.remove(&Nibbles::from_nibbles([0x5, 0xa]));
+            let mut stale_node = branch_node((1 << 0x1) | (1 << 0x2), 0, 1 << 0x1);
+            stale_node.hashes = vec![B256::repeat_byte(0xee)].into();
+            stored_nodes.insert(stale, stale_node);
+            for threshold in [u64::MAX, 1] {
+                harness.set_trie_nodes(stored_nodes.clone());
+
+                // Partial state trie recovery: the masking suffix recreated keys under the stale
+                // branch.
+                let changes = PrefixSetMut::from([
+                    Nibbles::unpack(key(&[0x5, 0xa, 0x7, 0x1, 0x0])),
+                    Nibbles::unpack(key(&[0x5, 0xa, 0x7, 0x1, 0x1])),
+                    Nibbles::unpack(key(&[0x5, 0xa, 0x7, 0x2])),
+                ])
+                .freeze();
+                let (root, updates) =
+                    storage_root_with_progress(&harness, changes, true, threshold);
+                assert_eq!(root, expected_root);
+
+                let mut recovered_nodes = stored_nodes.clone();
+                for (path, node) in updates.into_sorted().storage_nodes {
+                    if let Some(node) = node {
+                        recovered_nodes.insert(path, node);
+                    } else {
+                        recovered_nodes.remove(&path);
+                    }
+                }
+
+                // Proof V2 over the recovered table, no prefix set, one target under the live
+                // child.
+                harness.set_trie_nodes(recovered_nodes.clone());
+                let tcf = harness.trie_cursor_factory();
+                let hcf = harness.hashed_cursor_factory();
+                let mut calc = StorageProofCalculator::new_storage(
+                    tcf.storage_trie_cursor(harness.hashed_address()).unwrap(),
+                    hcf.hashed_storage_cursor(harness.hashed_address()).unwrap(),
+                );
+                let mut targets = vec![ProofV2Target::new(key(&[0x5, 0xa, 0x2, 0x2]))];
+                let nodes = calc.storage_proof(harness.hashed_address(), &mut targets).unwrap();
+                let v2_root = calc.compute_root_hash(&nodes).unwrap();
+
+                assert_eq!(recovered_nodes.contains_key(&stale), regenerate_sibling);
+                assert_eq!(v2_root, Some(expected_root));
+                assert_eq!(recovered_nodes, expected_nodes);
+            }
+        }
+    }
+
+    #[test]
+    fn extension_cleanup_skips_live_subtrees() {
+        for child in [[0x5, 0xa], [0xf, 0xf]] {
+            let child = Nibbles::from_nibbles(child);
+            let mut live = child;
+            live.push(2);
+            let mut stale = child;
+            stale.push(7);
+            let mut descendant = stale;
+            descendant.push(1);
+            let mut nodes = BTreeMap::from([
+                (live, branch_node(0b11, 0, 0)),
+                (stale, branch_node(0b11, 0, 0)),
+                (descendant, branch_node(0b11, 0, 0)),
+            ]);
+            if let Some(next_child) = child.next_without_prefix() {
+                nodes.insert(next_child, branch_node(0b11, 0, 0));
+            }
+            for index in 0..128 {
+                let mut path = live;
+                path.push(index / 16);
+                path.push(index % 16);
+                nodes.insert(path, branch_node(0b11, 0, 0));
+            }
+            let factory = MockTrieCursorFactory::new(nodes, B256Map::default());
+            let changes = PrefixSetMut::from([stale]).freeze();
+            let mut walker =
+                TrieWalker::<_>::state_trie(factory.account_trie_cursor().unwrap(), changes)
+                    .unwrap()
+                    .with_walk_all_changed_branch_children(true)
+                    .with_deletions_retained(true);
+            walker.cursor.seek_exact(live).unwrap();
+            factory.visited_account_keys().clear();
+            walker.remove_orphaned_descendants(child, live, TrieMask::new(u16::MAX)).unwrap();
+
+            assert_eq!(walker.take_removed_keys(), HashSet::from_iter([stale, descendant]));
+            assert_eq!(walker.cursor.current().unwrap(), Some(live));
+            let next_count = factory
+                .visited_account_keys()
+                .iter()
+                .filter(|visit| matches!(visit.visit_type, KeyVisitType::Next))
+                .count();
+            assert_eq!(next_count, 2, "cleanup must not traverse live descendants");
+        }
+    }
+
+    proptest! {
+        #[test]
+        fn extension_cleanup_respects_bounds_and_recovery_mode(
+            prefix in prop::collection::vec(0u8..16, 1..16),
+            live_nibble in 0u8..15,
+            enabled in any::<bool>(),
+            retained in any::<bool>(),
+            changed in any::<bool>(),
+        ) {
+            let child = Nibbles::from_nibbles(&prefix);
+            let mut live = child;
+            live.push(live_nibble);
+            let mut stale = child;
+            stale.push(live_nibble + 1);
+            let mut live_descendant = live;
+            live_descendant.push(0);
+            let mut nodes = BTreeMap::from([
+                (live, branch_node(0b11, 0, 0)),
+                (live_descendant, branch_node(0b11, 0, 0)),
+                (stale, branch_node(0b11, 0, 0)),
+            ]);
+            if let Some(next_child) = child.next_without_prefix() {
+                nodes.insert(next_child, branch_node(0b11, 0, 0));
+            }
+            let factory = MockTrieCursorFactory::new(nodes, B256Map::default());
+            let changes = if changed {
+                PrefixSetMut::from([stale]).freeze()
+            } else {
+                PrefixSet::default()
+            };
+            let mut walker =
+                TrieWalker::<_>::state_trie(factory.account_trie_cursor().unwrap(), changes)
+                    .unwrap()
+                    .with_walk_all_changed_branch_children(enabled)
+                    .with_deletions_retained(retained);
+            walker.cursor.seek_exact(live).unwrap();
+            walker.remove_orphaned_descendants(child, live, TrieMask::new(u16::MAX)).unwrap();
+            let expected = if enabled && retained && changed {
+                HashSet::from_iter([stale])
+            } else {
+                HashSet::default()
+            };
+            prop_assert_eq!(walker.take_removed_keys(), expected);
+            prop_assert_eq!(walker.cursor.current().unwrap(), Some(live));
         }
     }
 }
