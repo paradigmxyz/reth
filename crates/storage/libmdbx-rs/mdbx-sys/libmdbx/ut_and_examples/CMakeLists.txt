@@ -7,15 +7,19 @@ if(NOT DEFINED MDBX_LIBRARY)
   set(MDBX_LIBRARY mdbx)
 endif()
 
-if(MDBX_BUILD_CXX AND CMAKE_CXX_COMPILER_LOADED AND NOT MDBX_CXX_STANDARD LESS 17)
+if(MDBX_BUILD_CXX
+   AND CMAKE_CXX_COMPILER_LOADED
+   AND NOT MDBX_CXX_STANDARD LESS 17)
   add_executable(mdbx_modern_example example-mdbx.c++)
   set_target_properties(mdbx_modern_example PROPERTIES CXX_STANDARD ${MDBX_CXX_STANDARD} CXX_STANDARD_REQUIRED ON)
   target_link_libraries(mdbx_modern_example ${MDBX_LIBRARY})
   if(DEFINED INTERPROCEDURAL_OPTIMIZATION)
-    set_target_properties(mdbx_modern_example PROPERTIES INTERPROCEDURAL_OPTIMIZATION $<BOOL:${INTERPROCEDURAL_OPTIMIZATION}>)
+    set_target_properties(mdbx_modern_example PROPERTIES INTERPROCEDURAL_OPTIMIZATION
+                                                         $<BOOL:${INTERPROCEDURAL_OPTIMIZATION}>)
   endif()
 else()
-  message(NOTICE "The C++ example will be skipped, since C++17 standard is unavailable or C++ API of libmdbx was disabled.")
+  message(NOTICE
+          "The C++ example will be skipped, since C++17 standard is unavailable or C++ API of libmdbx was disabled.")
   set(MDBX_BUILD_CXX FALSE)
 endif()
 

@@ -64,7 +64,7 @@ Dump all of the tables in the environment.
 Dump a specific table. If no database is specified, only the main table is dumped.
 .TP
 .BR \-r
-Rescure mode. Ignore some errors to dump corrupted DB.
+Rescue mode. Ignore some errors to dump corrupted DB.
 .TP
 .BR \-u
 Warms up the DB before dumping via notifying OS kernel of subsequent access to the database pages.
@@ -74,7 +74,7 @@ Warms up the DB before dumping, notifying the OS kernel of subsequent access to 
 then forcibly loads ones by sequential access and tries to lock database pages in memory.
 .TP
 .BR \-n
-Dump an MDBX database which does not use subdirectories.
+Open an MDBX database which does not use subdirectories.
 This is legacy option. For now MDBX handles this automatically.
 
 .SH DIAGNOSTICS

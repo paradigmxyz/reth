@@ -851,6 +851,9 @@ enum MDBX_constants {
  * \note Levels detailed than (great than) \ref MDBX_LOG_NOTICE
  * requires build libmdbx with \ref MDBX_DEBUG option. */
 typedef enum MDBX_log_level {
+  /** for \ref mdbx_setup_debug() only: Don't change current settings */
+  MDBX_LOG_DONTCHANGE = -1,
+
   /** Critical conditions, i.e. assertion failures.
    * \note libmdbx always produces such messages regardless
    * of \ref MDBX_DEBUG build option. */
@@ -894,12 +897,8 @@ typedef enum MDBX_log_level {
    * \note Requires build libmdbx with \ref MDBX_DEBUG option. */
   MDBX_LOG_EXTRA = 7,
 
-#ifdef ENABLE_UBSAN
-  MDBX_LOG_MAX = 7 /* avoid UBSAN false-positive trap by a tests */,
-#endif /* ENABLE_UBSAN */
-
-  /** for \ref mdbx_setup_debug() only: Don't change current settings */
-  MDBX_LOG_DONTCHANGE = -1
+  /** Avoids UBSAN false-positive issues/traps. */
+  MDBX_LOG_MAX = 7
 } MDBX_log_level_t;
 
 /** \brief Runtime debug flags
@@ -908,6 +907,9 @@ typedef enum MDBX_log_level {
  * effect, but `MDBX_DBG_ASSERT`, `MDBX_DBG_AUDIT` and `MDBX_DBG_JITTER` only if
  * libmdbx built with \ref MDBX_DEBUG. */
 typedef enum MDBX_debug_flags {
+  /** for mdbx_setup_debug() only: Don't change current settings */
+  MDBX_DBG_DONTCHANGE = -1,
+
   MDBX_DBG_NONE = 0,
 
   /** Enable assertion checks.
@@ -938,12 +940,8 @@ typedef enum MDBX_debug_flags {
    * the last signature regardless this flag */
   MDBX_DBG_DONT_UPGRADE = 64,
 
-#ifdef ENABLE_UBSAN
-  MDBX_DBG_MAX = ((unsigned)MDBX_LOG_MAX) << 16 | 127 /* avoid UBSAN false-positive trap by a tests */,
-#endif /* ENABLE_UBSAN */
-
-  /** for mdbx_setup_debug() only: Don't change current settings */
-  MDBX_DBG_DONTCHANGE = -1
+  /** Avoids UBSAN false-positive issues/traps. */
+  MDBX_DBG_MAX = ((unsigned)MDBX_LOG_MAX) << 16 | 127
 } MDBX_debug_flags_t;
 DEFINE_ENUM_FLAG_OPERATORS(MDBX_debug_flags)
 
@@ -1318,6 +1316,16 @@ typedef enum MDBX_env_flags {
    * but \ref MDBX_UTTERLY_NOSYNC is exactly match LMDB_NOSYNC. See details
    * below.
    *
+   * TWO CLASSES OF FAILURES:
+   *  - Application failure, only the process crashes. Database integrity is not affected in such cases.
+   *    When only the process crashes, data not yet written to storage remains in the OS kernel page cache.
+   *    Therefore database integrity is not affected regardless of the operating mode: the data remains
+   *    available to the kernel and survives the process crash.
+   *  - System-wide failure: OS kernel panic, power outage, etc.
+   *    In a system-wide failure or power loss the kernel page cache is lost together with all data not yet written to
+   *    storage. Therefore the database may be corrupted or lose the last transactions if an operating mode that does
+   *    not provide full durability (for example, async-write) is chosen.
+   *
    * THE SCENE:
    * - The DAT-file contains several MVCC-snapshots of B-tree at same time,
    *   each of those B-tree has its own root page.
@@ -1336,13 +1344,13 @@ typedef enum MDBX_env_flags {
    *   underlying hardware (e.g. disk) work correctly.
    *
    * TRADE-OFF:
-   * By skipping some stages described above, you can significantly benefit in
-   * speed, while partially or completely losing in the guarantee of data
-   * durability and/or consistency in the event of system or power failure.
-   * Moreover, if for any reason disk write order is not preserved, then at
-   * moment of a system crash, a meta-page with a pointer to the new B-tree may
-   * be written to disk, while the itself B-tree not yet. In that case, the
-   * database will be corrupted!
+   *  - By skipping some stages described above, you can significantly benefit in
+   *    speed, while partially or completely losing in the guarantee of data
+   *    durability and/or consistency in the event of system/kernel or power failure.
+   *  - Besides, if for any reason disk write order is not preserved, then at
+   *    moment of a system crash, a meta-page with a pointer to the new B-tree may
+   *    be written to disk, while the itself B-tree not yet. In that case, the
+   *    database will be corrupted!
    *
    * \see MDBX_SYNC_DURABLE \see MDBX_NOMETASYNC \see MDBX_SAFE_NOSYNC
    * \see MDBX_UTTERLY_NOSYNC
@@ -1701,7 +1709,7 @@ typedef enum MDBX_copy_flags {
   MDBX_CP_DISPOSE_TXN = 16u,
 
   /** Enable renew/restart read transaction in case it use outdated
-   * MVCC shapshot, otherwise the \ref MDBX_MVCC_RETARDED will be returned
+   * MVCC snapshot, otherwise the \ref MDBX_MVCC_RETARDED will be returned
    * \see mdbx_txn_copy2fd() \see mdbx_txn_copy2pathname() */
   MDBX_CP_RENEW_TXN = 32u
 
@@ -1975,7 +1983,7 @@ typedef enum MDBX_error {
   MDBX_BACKLOG_DEPLETED = -30414,
 
   /** Alternative/Duplicate LCK-file is exists and should be removed manually */
-  MDBX_DUPLICATED_CLK = -30413,
+  MDBX_DUPLICATED_LCK = -30413,
 
   /** Some cursors and/or other resources should be closed before table or
    *  corresponding DBI-handle could be (re)used and/or closed. */
@@ -2001,6 +2009,7 @@ typedef enum MDBX_error {
   MDBX_EIO = ERROR_WRITE_FAULT,
   MDBX_EPERM = ERROR_INVALID_FUNCTION,
   MDBX_EINTR = ERROR_CANCELLED,
+  MDBX_EEXIST = ERROR_FILE_EXISTS,
   MDBX_ENOFILE = ERROR_FILE_NOT_FOUND,
   MDBX_EREMOTE = ERROR_REMOTE_STORAGE_MEDIA_ERROR,
   MDBX_EDEADLK = ERROR_POSSIBLE_DEADLOCK
@@ -2018,6 +2027,7 @@ typedef enum MDBX_error {
   MDBX_EIO = EIO,
   MDBX_EPERM = EPERM,
   MDBX_EINTR = EINTR,
+  MDBX_EEXIST = EEXIST,
   MDBX_ENOFILE = ENOENT,
 #if defined(EREMOTEIO) || defined(DOXYGEN)
   /** Cannot use the database on a network file system or when exporting it via NFS. */
@@ -2172,9 +2182,9 @@ typedef enum MDBX_option {
    * On the other hand, too small threshold will lead to unreasonable database
    * growth, or/and to the inability of put long values.
    *
-   * The `MDBX_opt_rp_augment_limit` controls described limit for the current
-   * process. By default this limit adjusted dynamically to 1/3 of current
-   * quantity of DB pages, which is usually enough for most cases. */
+   * The `MDBX_opt_rp_augment_limit` controls described limit for the current process.
+   * By default, this limit is dynamically adjusted to 1/3 of the number of pages corresponding
+   * to the current size of a database, which is usually sufficient for most cases. */
   MDBX_opt_rp_augment_limit,
 
   /** \brief Controls the in-process limit to grow a cache of dirty
@@ -4797,7 +4807,7 @@ LIBMDBX_INLINE_API(int, mdbx_dbi_flags, (const MDBX_txn *txn, MDBX_dbi dbi, unsi
  * any transaction(s) running by other thread(s).
  * So the `mdbx_dbi_close()` MUST NOT be called in-parallel/concurrently
  * with any transactions using the closing dbi-handle, nor during other thread
- * commit/abort a write transacton(s). The "next" version of libmdbx (\ref
+ * commit/abort a write transaction(s). The "next" version of libmdbx (\ref
  * MithrilDB) will solve this issue.
  *
  * Handles should only be closed if no other threads are going to reference
@@ -5591,7 +5601,8 @@ typedef int(MDBX_predicate_func)(void *context, MDBX_val *key, MDBX_val *value, 
  * передачи значений через параметры предикативной функции.
  *
  * \see MDBX_predicate_func
- * \see mdbx_cursor_scan_from
+ * \see mdbx_cursor_scan_from()
+ * \see mdbx_cursor_get_batch()
  *
  * \returns Результат операции сканирования, либо код ошибки.
  *
@@ -5678,7 +5689,8 @@ LIBMDBX_API int mdbx_cursor_scan(MDBX_cursor *cursor, MDBX_predicate_func *predi
  * передачи значений через параметры предикативной функции.
  *
  * \see MDBX_predicate_func
- * \see mdbx_cursor_scan
+ * \see mdbx_cursor_scan()
+ * \see mdbx_cursor_get_batch()
  *
  * \returns Результат операции сканирования, либо код ошибки.
  *
@@ -5705,6 +5717,8 @@ LIBMDBX_API int mdbx_cursor_scan_from(MDBX_cursor *cursor, MDBX_predicate_func *
  * refers. The addresses and lengths of the keys and values are returned in the
  * array to which `pairs` refers.
  * \see mdbx_cursor_get()
+ * \see mdbx_cursor_scan()
+ * \see mdbx_cursor_scan_from()
  *
  * \note The memory pointed to by the returned values is owned by the
  * database. The caller MUST not dispose of the memory, and MUST not modify it

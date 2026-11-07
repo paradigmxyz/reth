@@ -11,12 +11,14 @@
 $(info // The GNU Make $(MAKE_VERSION))
 SHELL         := $(shell env bash -c 'echo $$BASH')
 MAKE_VERx3    := $(shell printf "%3s%3s%3s" $(subst ., ,$(MAKE_VERSION)))
+BASH_VERx2    := $(shell printf "%3s%3s" $$(echo $${BASH_VERSION} | cut -d . -f 1,2 | tr . ' '))
 make_lt_3_81  := $(shell expr "$(MAKE_VERx3)" "<" "  3 81")
 ifneq ($(make_lt_3_81),0)
 $(error Please use GNU Make 3.81 or above)
 endif
 make_ge_4_1   := $(shell expr "$(MAKE_VERx3)" ">=" "  4  1")
 make_ge_4_4   := $(shell expr "$(MAKE_VERx3)" ">=" "  4  4")
+bash_ge_4_3   := $(shell expr "$(BASH_VERx2)" ">=" "  4  3")
 SRC_PROBE_C   := $(shell [ -f mdbx.c ] && echo mdbx.c || echo src/osal.c)
 SRC_PROBE_CXX := $(shell [ -f mdbx.c++ ] && echo mdbx.c++ || echo src/mdbx.c++)
 UNAME         := $(shell uname -s 2>/dev/null || echo Unknown)
@@ -53,14 +55,19 @@ CXX     ?= g++
 CFLAGS_EXTRA ?=
 LD      ?= ld
 CMAKE	?= "$(shell which cmake 2>&-)"
-CMAKE_OPT ?=
+CMAKE_OPT ?= $(filter-out -UNDEBUG -DNDEBUG=1,$(MDBX_BUILD_OPTIONS))
 CTEST	?= ctest
 CTEST_OPT ?=
 # target directory for `make dist`
 DIST_DIR ?= dist
+# sanitizers
+ASAN_OPTIONS	?=log_path=asan.log:poison_history_size=42
+UBSAN_OPTIONS	?=log_path=ubsan.log:print_stacktrace=1
 
 # build options
-MDBX_BUILD_OPTIONS   ?=-DNDEBUG=1
+MDBX_DEBUG           ?=
+MDBX_FORCE_ASSERTIONS?=
+MDBX_BUILD_OPTIONS   ?=$(if $(MDBX_DEBUG),-DMDBX_DEBUG=$(MDBX_DEBUG) ,)$(if $(MDBX_FORCE_ASSERTIONS),-DMDBX_FORCE_ASSERTIONS=$(MDBX_FORCE_ASSERTIONS) $(call select_by,MDBX_FORCE_ASSERTIONS,-UNDEBUG,-DNDEBUG=1),-DNDEBUG=1 )
 MDBX_BUILD_TIMESTAMP ?=$(if $(SOURCE_DATE_EPOCH),$(SOURCE_DATE_EPOCH),$(shell date +%Y-%m-%dT%H:%M:%S%z))
 MDBX_BUILD_CXX       ?=YES
 MDBX_BUILD_METADATA  ?=
@@ -93,6 +100,12 @@ else
 WAIT         = .WAIT
 endif
 
+ifeq ($(bash_ge_4_3),1)
+STOCHASTIC   = ./test/stochastic.sh
+else
+STOCHASTIC   = echo "Skip running stochastic script since Bash < 4.3"
+endif
+
 ################################################################################
 
 define uname2sosuffix
@@ -116,7 +129,7 @@ define uname2ldflags
   esac
 endef
 
-# TIP: try add the'-Wl, --no-as-needed,-lrt' for ability to built with modern glibc, but then use with the old.
+# TIP: try adding '-Wl,--no-as-needed,-lrt' for the ability to build with modern glibc, and then use with the old.
 define uname2libs
   case "$(UNAME)" in
     CYGWIN*|MINGW*|MSYS*|Windows*)
@@ -129,7 +142,7 @@ define uname2libs
       echo '-lm';
       ;;
     *)
-      echo '-lm -lrt';
+      echo '-lm -lrt -latomic';
       ;;
   esac
 endef
@@ -250,7 +263,7 @@ strip: all
 clean:
 	@echo '  CLEANING...'
 	$(QUIET)rm -rf $(MDBX_TOOLS) mdbx_test @* *.[ao] *.[ls]o *.$(SO_SUFFIX) *.dSYM *~ tmp.db/* \
-		*.gcov *.log *.err src/*.o test/*.o mdbx_example dist @dist-check \
+		*.gcov *.log *.err src/*.o test/*.o mdbx_legacy_example mdbx_modern_example dist @dist-check \
 		config-gnumake.h src/config-gnumake.h *.tar* @buildflags.tag @dist-checked.tag \
 		mdbx_*.static mdbx_*.static-lto CMakeFiles
 
@@ -271,51 +284,59 @@ lib-shared libmdbx.$(SO_SUFFIX): mdbx-dylib.o $(call select_by,MDBX_BUILD_CXX,md
 	@echo '  LD $@'
 	$(QUIET)$(call select_by,MDBX_BUILD_CXX,$(CXX) $(CXXFLAGS),$(CC) $(CFLAGS)) $^ -pthread -shared $(LDFLAGS) $(call select_by,MDBX_BUILD_CXX,$(LIB_STDCXXFS)) $(LIBS) -o $@
 
-ninja-assertions: CMAKE_OPT += -DMDBX_FORCE_ASSERTIONS=ON $(MDBX_BUILD_OPTIONS)
+ninja-assertions: MDBX_FORCE_ASSERTIONS=1
 ninja-assertions: cmake-build
-ninja-debug: CMAKE_OPT += -DCMAKE_BUILD_TYPE=Debug $(MDBX_BUILD_OPTIONS)
+ninja-debug: CMAKE_OPT += -DCMAKE_BUILD_TYPE=Debug
 ninja-debug: cmake-build
 ninja: cmake-build
 cmake-build:
 	@echo "  RUN: cmake -G Ninja && cmake --build"
-	$(QUIET)mkdir -p @cmake-ninja-build && $(CMAKE) $(CMAKE_OPT) -G Ninja -S . -B @cmake-ninja-build && $(CMAKE) --build @cmake-ninja-build
+	$(QUIET)mkdir -p @cmake-ninja-build && ASAN_OPTIONS=$(ASAN_OPTIONS) UBSAN_OPTIONS=$(UBSAN_OPTIONS) $(CMAKE) $(CMAKE_OPT) -G Ninja -S . -B @cmake-ninja-build && $(CMAKE) --build @cmake-ninja-build
 
 ctest: cmake-build
 	@echo "  RUN: ctest .."
-	$(QUIET)$(CTEST) --test-dir @cmake-ninja-build --parallel `(nproc | sysctl -n hw.ncpu | echo 2) 2>/dev/null` --schedule-random $(CTEST_OPT)
+	$(QUIET)ASAN_OPTIONS=$(ASAN_OPTIONS) UBSAN_OPTIONS=$(UBSAN_OPTIONS) $(CTEST) --test-dir @cmake-ninja-build --parallel `(nproc | sysctl -n hw.ncpu | echo 2) 2>/dev/null` --schedule-random $(CTEST_OPT)
 
-run-ut: mdbx_example
-	$(QUIET)for UT in $^; do echo "  Running $$UT" && ./$${UT} || exit -1; done
+run-ut: mdbx_legacy_example $(call select_by,MDBX_BUILD_CXX,mdbx_modern_example,)
+	$(QUIET)for UT in $^; do echo "  Running $$UT" && ASAN_OPTIONS=$(ASAN_OPTIONS) UBSAN_OPTIONS=$(UBSAN_OPTIONS) ./$${UT} || exit -1; done
 
-TEST_TARGETS := mdbx_legacy_example $(call select_by,MDBX_BUILD_CXX,mdbx_modern_example,)
-TEST_BUILD_TARGETS := build-test
+TEST_TARGETS :=
+TEST_BUILD_TARGETS :=
 ifneq ($(CMAKE),"")
 TEST_TARGETS += ctest
 TEST_BUILD_TARGETS += cmake-build
 endif
+TEST_TARGETS += mdbx_legacy_example $(call select_by,MDBX_BUILD_CXX,mdbx_modern_example,)
 
 .PHONY: ninja-assertions ninja-debug ninja $(TEST_TARGETS) $(TEST_BUILD_TARGETS) test-ubsan test-asan test-memcheck test-leak test-assertion test build-test smoke check
 test: $(TEST_TARGETS)
-build-test: $(TEST_BUILD_TARGETS)
+build-test: show-options $(TEST_BUILD_TARGETS)
 
-test-assertion: MDBX_BUILD_OPTIONS += -DMDBX_FORCE_ASSERTIONS=1 -UNDEBUG -DMDBX_DEBUG=0
-test-assertion: CMAKE_OPT += -DMDBX_FORCE_ASSERTIONS=ON -DMDBX_DEBUG=0
-test-assertion: smoke
-
-test-valgrind: test-memcheck
-test-memcheck: CFLAGS_EXTRA += -Ofast -DENABLE_MEMCHECK
-test-memcheck: CMAKE_OPT += -DENABLE_MEMCHECK=ON
-test-memcheck: build-test build-stochastic
+smoke-valgrind: smoke-memcheck
+smoke-memcheck test-memcheck: CFLAGS_EXTRA += -Ofast -DENABLE_MEMCHECK
+smoke-memcheck test-memcheck: MDBX_FORCE_ASSERTIONS=1
+smoke-memcheck test-memcheck: CMAKE_OPT += -DENABLE_UBSAN:BOOL=OFF -DENABLE_ASAN:BOOL=OFF -DENABLE_MEMCHECK:BOOL=ON
+smoke-memcheck test-memcheck: CTEST_OPT += -T memcheck
+test-memcheck: build-test build-stochastic ctest
 	@echo '  RUNNING `test/stochastic.sh --with-valgrind --loops 2`...'
-	$(QUIET)test/stochastic.sh --with-valgrind --loops 2 --db-upto-mb 256 --skip-make >$(TEST_LOG) || (cat $(TEST_LOG) && false)
+	$(QUIET)$(STOCHASTIC) --with-valgrind --loops 2 --db-upto-mb 256 --skip-make >$(TEST_LOG) || (cat $(TEST_LOG) && false)
+smoke-memcheck: smoke
 
-test-ubsan:
-	@echo '  RE-TEST with `-fsanitize=undefined` option...'
-	$(QUIET)$(MAKE) IOARENA=false CXXSTD=$(CXXSTD) CMAKE_OPT="-DENABLE_UBSAN=ON" CFLAGS_EXTRA="-DENABLE_UBSAN -Ofast -fsanitize=undefined -fsanitize-undefined-trap-on-error" build-test test-stochastic
+smoke-assertion test-assertion: MDBX_FORCE_ASSERTIONS=1
+test-assertion: test
+smoke-assertion: smoke
 
-test-asan:
-	@echo '  RE-TEST with `-fsanitize=address` option...'
-	$(QUIET)$(MAKE) IOARENA=false CXXSTD=$(CXXSTD) CMAKE_OPT="-DENABLE_ASAN=ON" CFLAGS_EXTRA="-Os -fsanitize=address" build-test test-stochastic
+smoke-ubsan test-ubsan: CFLAGS_EXTRA += -DENABLE_UBSAN -Ofast -fsanitize=undefined -fsanitize-undefined-trap-on-error -fno-sanitize-recover=all
+smoke-ubsan test-ubsan: CMAKE_OPT += -DENABLE_UBSAN:BOOL=ON -DENABLE_ASAN:BOOL=OFF -DENABLE_MEMCHECK:BOOL=OFF
+smoke-ubsan test-ubsan: MDBX_FORCE_ASSERTIONS=1
+test-ubsan: test
+smoke-ubsan: smoke
+
+smoke-asan test-asan: CFLAGS_EXTRA += -Os -fsanitize=address
+smoke-asan test-asan: CMAKE_OPT += -DENABLE_UBSAN:BOOL=OFF -DENABLE_ASAN:BOOL=ON -DENABLE_MEMCHECK:BOOL=OFF
+smoke-asan test-asan: MDBX_FORCE_ASSERTIONS=1
+test-asan: test
+smoke-asan: smoke
 
 test-leak:
 	@echo '  RE-TEST with `-fsanitize=leak` option...'
@@ -412,7 +433,7 @@ IOARENA := $(shell \
   (test -x ../ioarena/@BUILD/src/ioarena && echo ../ioarena/@BUILD/src/ioarena) || \
   (test -x ../../@BUILD/src/ioarena && echo ../../@BUILD/src/ioarena) || \
   (test -x ../../src/ioarena && echo ../../src/ioarena) || which ioarena 2>&- || \
-  (echo false && echo '$(TIP) Clone and build the https://abf.io/erthink/ioarena.git within a neighbouring directory for availability of benchmarking.' >&2))
+  (echo false && echo '$(TIP) Clone and build the https://sourcecraft.dev/dqdkfa/ioarena within a neighbouring directory for availability of benchmarking.' >&2))
 endif
 NN	?= 25000000
 BENCH_CRUD_MODE ?= nosync
