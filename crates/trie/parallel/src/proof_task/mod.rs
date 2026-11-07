@@ -34,9 +34,10 @@ use reth_provider::{DatabaseProviderROFactory, ProviderError, ProviderResult, St
 use reth_tasks::{BlockingWorkerPool, Runtime};
 use reth_trie::{DecodedMultiProofV2, MultiProofTargetsV2, ProofV2Target};
 use std::{
+    collections::VecDeque,
     sync::{
         atomic::{AtomicBool, AtomicUsize, Ordering},
-        Arc,
+        Arc, Condvar, Mutex, PoisonError,
     },
     time::Duration,
 };
@@ -104,10 +105,10 @@ pub struct ProofWorkerHandle {
     _result_tx: CrossbeamSender<ProofWorkerResult>,
     /// Results sent by both worker pools.
     result_rx: CrossbeamReceiver<ProofWorkerResult>,
-    /// Direct sender to storage worker pool
-    storage_work_tx: CrossbeamSender<StorageProofJob>,
-    /// Direct sender to account worker pool
-    account_work_tx: CrossbeamSender<AccountProofJob>,
+    /// Jobs queued for the storage worker pool.
+    storage_jobs: Arc<JobQueue<StorageProofJob>>,
+    /// Jobs queued for the account worker pool.
+    account_jobs: Arc<JobQueue<AccountProofJob>>,
     /// Per-worker availability flags for storage workers. Used to determine whether to chunk
     /// multiproofs.
     storage_availability: Arc<AvailabilitySheet>,
@@ -150,8 +151,6 @@ impl ProofWorkerHandle {
             DatabaseProviderROFactory<Provider: StateProofProvider> + Clone + Send + Sync + 'static,
     {
         let (result_tx, result_rx) = unbounded();
-        let (storage_work_tx, storage_work_rx) = unbounded();
-        let (account_work_tx, account_work_rx) = unbounded();
 
         let storage_worker_count =
             worker_counts.storage.max(1).min(runtime.proof_storage_worker_pool().num_threads());
@@ -160,6 +159,8 @@ impl ProofWorkerHandle {
 
         let storage_availability = Arc::new(AvailabilitySheet::new(storage_worker_count));
         let account_availability = Arc::new(AvailabilitySheet::new(account_worker_count));
+        let storage_jobs = Arc::new(JobQueue::new(storage_worker_count));
+        let account_jobs = Arc::new(JobQueue::new(account_worker_count));
 
         debug!(
             target: "trie::proof_task",
@@ -174,7 +175,7 @@ impl ProofWorkerHandle {
             storage_worker_count,
             ProofWorker {
                 task_ctx: task_ctx.clone(),
-                work_rx: storage_work_rx,
+                jobs: Arc::clone(&storage_jobs),
                 result_tx: result_tx.clone(),
                 availability: storage_availability.clone(),
                 #[cfg(feature = "metrics")]
@@ -189,7 +190,7 @@ impl ProofWorkerHandle {
             account_worker_count,
             ProofWorker {
                 task_ctx,
-                work_rx: account_work_rx,
+                jobs: Arc::clone(&account_jobs),
                 result_tx: result_tx.clone(),
                 availability: account_availability.clone(),
                 #[cfg(feature = "metrics")]
@@ -201,8 +202,8 @@ impl ProofWorkerHandle {
         Self {
             _result_tx: result_tx,
             result_rx,
-            storage_work_tx,
-            account_work_tx,
+            storage_jobs,
+            account_jobs,
             storage_availability,
             account_availability,
             storage_worker_count,
@@ -254,17 +255,98 @@ impl ProofWorkerHandle {
 
         for (hashed_address, targets) in storage_targets {
             let job = StorageProofJob { hashed_address, targets, dispatched_at };
-            self.storage_work_tx.send(job).map_err(|_| ProofWorkersUnavailable)?;
+            self.storage_jobs.push(job)?;
             jobs += 1;
         }
 
         if !account_targets.is_empty() {
             let job = AccountProofJob { targets: account_targets, dispatched_at };
-            self.account_work_tx.send(job).map_err(|_| ProofWorkersUnavailable)?;
+            self.account_jobs.push(job)?;
             jobs += 1;
         }
 
         Ok(jobs)
+    }
+}
+
+impl Drop for ProofWorkerHandle {
+    fn drop(&mut self) {
+        self.storage_jobs.close();
+        self.account_jobs.close();
+    }
+}
+
+/// Jobs queued for the workers of one proof pool.
+///
+/// Idle workers park on it right away. The receivers of a crossbeam channel spin and yield before
+/// they park, which with dozens of workers going idle between jobs was 8% of the proof workers'
+/// CPU.
+#[derive(Debug)]
+struct JobQueue<J> {
+    state: Mutex<JobQueueState<J>>,
+    queued: Condvar,
+}
+
+#[derive(Debug)]
+struct JobQueueState<J> {
+    jobs: VecDeque<J>,
+    /// Workers that have not exited.
+    workers: usize,
+    /// Whether the handle was dropped: workers take the jobs left, then exit.
+    closed: bool,
+}
+
+impl<J> JobQueue<J> {
+    const fn new(workers: usize) -> Self {
+        Self {
+            state: Mutex::new(JobQueueState { jobs: VecDeque::new(), workers, closed: false }),
+            queued: Condvar::new(),
+        }
+    }
+
+    fn lock(&self) -> std::sync::MutexGuard<'_, JobQueueState<J>> {
+        self.state.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    /// Queues a job for a worker, failing once every worker exited.
+    fn push(&self, job: J) -> Result<(), ProofWorkersUnavailable> {
+        let mut state = self.lock();
+        if state.workers == 0 {
+            return Err(ProofWorkersUnavailable)
+        }
+        state.jobs.push_back(job);
+        drop(state);
+        self.queued.notify_one();
+        Ok(())
+    }
+
+    /// Takes the next job, waiting for one. Returns `None` once the queue is closed and empty.
+    fn pop(&self) -> Option<J> {
+        let mut state = self.lock();
+        loop {
+            if let Some(job) = state.jobs.pop_front() {
+                return Some(job)
+            }
+            if state.closed {
+                return None
+            }
+            state = self.queued.wait(state).unwrap_or_else(PoisonError::into_inner);
+        }
+    }
+
+    /// Lets the workers exit once they took the jobs left.
+    fn close(&self) {
+        self.lock().closed = true;
+        self.queued.notify_all();
+    }
+}
+
+/// Counts a worker as exited when dropped, also when it unwinds.
+struct WorkerExit<'a, J>(&'a JobQueue<J>);
+
+impl<J> Drop for WorkerExit<'_, J> {
+    fn drop(&mut self) {
+        self.0.lock().workers -= 1;
     }
 }
 
@@ -401,6 +483,7 @@ fn spawn_workers<Factory, J>(
         kind.pool(&rt).broadcast(worker_count, move || {
             let worker_id = next_worker_id.fetch_add(1, Ordering::Relaxed);
             let _guard = kind.span(&parent_span, worker_id).entered();
+            let _exit = WorkerExit(&worker.jobs);
 
             if let Err(error) = run(&worker, worker_id) {
                 error!(
@@ -426,8 +509,8 @@ fn spawn_workers<Factory, J>(
 struct ProofWorker<Factory, J> {
     /// Shared task context with database factory and prefix sets
     task_ctx: ProofTaskCtx<Factory>,
-    /// Channel for receiving jobs
-    work_rx: CrossbeamReceiver<J>,
+    /// Jobs for the workers of this pool.
+    jobs: Arc<JobQueue<J>>,
     /// Sender for job results and worker failures
     result_tx: CrossbeamSender<ProofWorkerResult>,
     /// Per-worker availability flags
@@ -447,7 +530,7 @@ impl<Factory, J> ProofWorker<Factory, J> {
         let mut total_idle_time = Duration::ZERO;
         let mut idle_start = Instant::now();
 
-        while let Ok(job) = self.work_rx.recv() {
+        while let Some(job) = self.jobs.pop() {
             total_idle_time += idle_start.elapsed();
             self.availability.mark_busy(worker_id);
 
@@ -699,6 +782,28 @@ mod tests {
     }
 
     /// Ensures a single pool serves quarter, half, and full-capacity worker counts.
+    #[test]
+    fn job_queue_wakes_drains_and_fails_without_workers() {
+        let queue = Arc::new(JobQueue::new(1));
+        let worker = {
+            let queue = Arc::clone(&queue);
+            std::thread::spawn(move || queue.pop())
+        };
+        // The parked worker takes the job pushed after it started waiting.
+        queue.push(1).unwrap();
+        assert_eq!(worker.join().unwrap(), Some(1));
+
+        queue.push(2).unwrap();
+        queue.push(3).unwrap();
+        queue.close();
+        assert_eq!(queue.pop(), Some(2));
+        assert_eq!(queue.pop(), Some(3));
+        assert_eq!(queue.pop(), None, "a closed and drained queue lets its workers exit");
+
+        drop(WorkerExit(&*queue));
+        assert!(queue.push(4).is_err(), "no worker is left to take the job");
+    }
+
     #[test]
     fn single_pool_serves_fractional_worker_counts() {
         let provider_factory =
