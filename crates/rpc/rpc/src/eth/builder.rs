@@ -349,7 +349,7 @@ where
         self
     }
 
-    /// Sets the blocking task pool.
+    /// Sets the blocking task pool. Defaults to the [`Runtime::rpc_pool`] of the task spawner.
     pub fn blocking_task_pool(mut self, blocking_task_pool: BlockingTaskPool) -> Self {
         self.blocking_task_pool = Some(blocking_task_pool);
         self
@@ -596,13 +596,9 @@ where
             eth_cache,
             gas_oracle,
             settings,
-            blocking_task_pool.unwrap_or_else(|| {
-                BlockingTaskPool::builder()
-                    .thread_name(|i| format!("blocking-{i:02}"))
-                    .build()
-                    .map(BlockingTaskPool::new)
-                    .expect("failed to build blocking task pool")
-            }),
+            // The runtime's RPC pool, rather than a second pool of the same size whose idle
+            // threads would add to every rayon thread's epoch and steal bookkeeping.
+            blocking_task_pool.unwrap_or_else(|| task_spawner.rpc_pool().clone()),
             fee_history_cache,
             task_spawner,
             rpc_converter,

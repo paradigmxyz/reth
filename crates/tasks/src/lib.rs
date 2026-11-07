@@ -34,6 +34,7 @@ use tracing::debug;
 pub mod cancel;
 pub mod lazy;
 pub mod metrics;
+pub mod parked_pool;
 pub mod runtime;
 pub mod shutdown;
 pub mod utils;
@@ -52,6 +53,7 @@ pub use for_each_ordered::ForEachOrdered;
 
 pub use cancel::{CancelOnDrop, ManualCancel};
 pub use lazy::LazyHandle;
+pub use parked_pool::ParkedThreadPool;
 #[cfg(feature = "rayon")]
 pub use runtime::RayonConfig;
 pub use runtime::{Runtime, RuntimeBuildError, RuntimeBuilder, RuntimeConfig, TokioConfig};

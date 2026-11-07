@@ -31,7 +31,7 @@ use alloy_primitives::B256;
 use crossbeam_channel::{unbounded, Receiver as CrossbeamReceiver, Sender as CrossbeamSender};
 use reth_primitives_traits::FastInstant as Instant;
 use reth_provider::{DatabaseProviderROFactory, ProviderError, ProviderResult, StateProofProvider};
-use reth_tasks::{Runtime, WorkerPool};
+use reth_tasks::{ParkedThreadPool, Runtime};
 use reth_trie::{DecodedMultiProofV2, MultiProofTargetsV2, ProofV2Target};
 use std::{
     panic::{catch_unwind, AssertUnwindSafe},
@@ -41,7 +41,7 @@ use std::{
     },
     time::Duration,
 };
-use tracing::{debug, debug_span, error, instrument, trace};
+use tracing::{debug, debug_span, error, instrument, trace, trace_span};
 
 #[cfg(feature = "metrics")]
 use self::metrics::ProofWorkerIdleMetrics;
@@ -346,7 +346,7 @@ enum ProofWorkerKind {
 
 impl ProofWorkerKind {
     /// Returns the runtime pool the workers of this kind run on.
-    fn pool(self, runtime: &Runtime) -> &WorkerPool {
+    fn pool(self, runtime: &Runtime) -> &ParkedThreadPool {
         match self {
             Self::Storage => runtime.proof_storage_worker_pool(),
             Self::Account => runtime.proof_account_worker_pool(),
@@ -400,7 +400,7 @@ fn spawn_workers<Factory, J>(
     let parent_span = tracing::Span::current();
     runtime.spawn_blocking_named(kind.task_name(), move || {
         let next_worker_id = AtomicUsize::new(0);
-        kind.pool(&rt).broadcast(worker_count, |_| {
+        kind.pool(&rt).broadcast(worker_count, || {
             let worker_id = next_worker_id.fetch_add(1, Ordering::Relaxed);
             let _guard = kind.span(&parent_span, worker_id).entered();
 
@@ -525,7 +525,8 @@ where
         let mut storage_proofs_processed = 0u64;
         let total_idle_time = self.process_jobs(worker_id, provider, |provider, job| {
             let StorageProofJob { hashed_address, targets, dispatched_at } = job;
-            let _span = debug_span!(
+            // One span per job: trace level, since a block runs thousands of them.
+            let _span = trace_span!(
                 target: "trie::proof_task",
                 "Storage proof calculation",
                 ?hashed_address,
@@ -583,7 +584,8 @@ where
         let mut account_proofs_processed = 0u64;
         let total_idle_time = self.process_jobs(worker_id, provider, |provider, job| {
             let AccountProofJob { targets, dispatched_at } = job;
-            let _span = debug_span!(
+            // One span per job: trace level, since a block runs many of them.
+            let _span = trace_span!(
                 target: "trie::proof_task",
                 "Account proof calculation",
                 targets = targets.len(),
