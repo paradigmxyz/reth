@@ -9,9 +9,12 @@ use alloy_eips::{
     eip7840::BlobParams,
     merge::EPOCH_SLOTS,
 };
-use alloy_primitives::{map::B256Set, TxHash, B256};
+use alloy_primitives::{
+    map::{B256Set, FbBuildHasher},
+    TxHash, B256,
+};
 use parking_lot::{Mutex, RwLock};
-use schnellru::{ByLength, LruMap};
+use reth_lru::LruMap;
 use std::{fmt, fs, io, path::PathBuf, sync::Arc};
 use tracing::{debug, trace};
 
@@ -454,7 +457,7 @@ impl BlobStore for DiskFileBlobStore {
 
 struct DiskFileBlobStoreInner {
     blob_dir: PathBuf,
-    blob_cache: Mutex<LruMap<TxHash, Arc<BlobTransactionSidecarVariant>, ByLength>>,
+    blob_cache: Mutex<LruMap<TxHash, Arc<BlobTransactionSidecarVariant>, FbBuildHasher<32>>>,
     size_tracker: BlobStoreSize,
     file_lock: RwLock<()>,
     txs_to_delete: RwLock<B256Set>,
@@ -462,7 +465,7 @@ struct DiskFileBlobStoreInner {
     ///
     /// Note: It is possible that one blob can appear in multiple transactions but this only tracks
     /// the most recent one.
-    versioned_hashes_to_txhash: Mutex<LruMap<B256, B256>>,
+    versioned_hashes_to_txhash: Mutex<LruMap<B256, B256, FbBuildHasher<32>>>,
 }
 
 impl DiskFileBlobStoreInner {
@@ -470,13 +473,14 @@ impl DiskFileBlobStoreInner {
     fn new(blob_dir: PathBuf, max_length: u32) -> Self {
         Self {
             blob_dir,
-            blob_cache: Mutex::new(LruMap::new(ByLength::new(max_length))),
+            blob_cache: Mutex::new(LruMap::with_hasher(max_length, Default::default())),
             size_tracker: Default::default(),
             file_lock: Default::default(),
             txs_to_delete: Default::default(),
-            versioned_hashes_to_txhash: Mutex::new(LruMap::new(ByLength::new(
+            versioned_hashes_to_txhash: Mutex::new(LruMap::with_hasher(
                 VERSIONED_HASH_TO_TX_HASH_CACHE_SIZE as u32,
-            ))),
+                Default::default(),
+            )),
         }
     }
 
