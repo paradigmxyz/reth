@@ -317,6 +317,16 @@ if [ ! -d "$DATADIR/db" ] || [ ! -d "$DATADIR/static_files" ]; then
   ls -la "$DATADIR" || true
   exit 1
 fi
+# reth runs as root and creates a missing JWT secret readable only by root
+# (0600), but the bench client runs as the runner user. Create the secret here,
+# owned by the runner user, so both can read it.
+JWT_SECRET="$DATADIR/jwt.hex"
+if ! sudo test -s "$JWT_SECRET"; then
+  od -An -N32 -tx1 /dev/urandom | tr -d ' \n' | sudo tee "$JWT_SECRET" >/dev/null
+fi
+sudo chown "$(id -un):$(id -gn)" "$JWT_SECRET"
+sudo chmod 0600 "$JWT_SECRET"
+
 sync
 sudo sh -c 'echo 3 > /proc/sys/vm/drop_caches'
 echo "=== Cache state after drop ==="
