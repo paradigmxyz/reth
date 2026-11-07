@@ -293,6 +293,10 @@ struct JobQueueState<J> {
     jobs: VecDeque<J>,
     /// Workers that have not exited.
     workers: usize,
+    /// Workers waiting for a job. A push wakes one only if there is one: std's
+    /// `Condvar::notify_one` makes a futex call even when nobody waits, on the sparse trie thread
+    /// that dispatches the jobs.
+    waiting: usize,
     /// Whether the handle was dropped: workers take the jobs left, then exit.
     closed: bool,
 }
@@ -300,7 +304,12 @@ struct JobQueueState<J> {
 impl<J> JobQueue<J> {
     const fn new(workers: usize) -> Self {
         Self {
-            state: Mutex::new(JobQueueState { jobs: VecDeque::new(), workers, closed: false }),
+            state: Mutex::new(JobQueueState {
+                jobs: VecDeque::new(),
+                workers,
+                waiting: 0,
+                closed: false,
+            }),
             queued: Condvar::new(),
         }
     }
@@ -316,8 +325,11 @@ impl<J> JobQueue<J> {
             return Err(ProofWorkersUnavailable)
         }
         state.jobs.push_back(job);
+        let wake = state.waiting > 0;
         drop(state);
-        self.queued.notify_one();
+        if wake {
+            self.queued.notify_one();
+        }
         Ok(())
     }
 
@@ -331,7 +343,9 @@ impl<J> JobQueue<J> {
             if state.closed {
                 return None
             }
+            state.waiting += 1;
             state = self.queued.wait(state).unwrap_or_else(PoisonError::into_inner);
+            state.waiting -= 1;
         }
     }
 
@@ -814,9 +828,13 @@ mod tests {
             let queue = Arc::clone(&queue);
             std::thread::spawn(move || queue.pop())
         };
+        while queue.lock().waiting == 0 {
+            std::thread::yield_now();
+        }
         // The parked worker takes the job pushed after it started waiting.
         queue.push(1).unwrap();
         assert_eq!(worker.join().unwrap(), Some(1));
+        assert_eq!(queue.lock().waiting, 0);
 
         queue.push(2).unwrap();
         queue.push(3).unwrap();
