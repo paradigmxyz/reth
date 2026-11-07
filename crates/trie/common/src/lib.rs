@@ -68,6 +68,9 @@ pub use trie::{BranchNodeMasks, BranchNodeMasksMap, ProofTrieNode};
 mod trie_node_v2;
 pub use trie_node_v2::*;
 
+mod rlp_node;
+pub use rlp_node::rlp_node_uncached;
+
 /// Merkle Patricia trie range-proof verification.
 pub mod range_proof;
 

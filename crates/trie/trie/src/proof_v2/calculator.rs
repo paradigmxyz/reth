@@ -13,13 +13,13 @@ use crate::{
     hashed_cursor::{HashedCursor, HashedStorageCursor},
     trie_cursor::{depth_first, TrieCursor, TrieStorageCursor},
 };
-use alloy_primitives::{keccak256, B256, U256};
+use alloy_primitives::{keccak256_uncached, B256, U256};
 use alloy_rlp::Encodable;
 use alloy_trie::{BranchNodeCompact, TrieMask};
 use reth_execution_errors::trie::StateProofError;
 use reth_trie_common::{
-    prefix_set::PrefixSet, BranchNodeMasks, BranchNodeRef, BranchNodeV2, Nibbles, ProofTrieNodeV2,
-    ProofV2Target, RlpNode, TrieNodeV2,
+    prefix_set::PrefixSet, rlp_node_uncached, BranchNodeMasks, BranchNodeRef, BranchNodeV2,
+    Nibbles, ProofTrieNodeV2, ProofV2Target, RlpNode, TrieNodeV2,
 };
 use std::{cmp::Ordering, sync::Arc};
 use tracing::{error, instrument, trace};
@@ -285,7 +285,7 @@ where
         proof_node.node.encode(&mut self.rlp_encode_buf);
 
         self.retained_proofs.push(proof_node);
-        Ok(RlpNode::from_rlp(&self.rlp_encode_buf))
+        Ok(rlp_node_uncached(&self.rlp_encode_buf))
     }
 
     /// Returns the path of the child of the currently under-construction branch at the given
@@ -592,7 +592,7 @@ where
         } else {
             self.rlp_encode_buf.clear();
             BranchNodeRef::new(&rlp_nodes_buf, branch.state_mask).encode(&mut self.rlp_encode_buf);
-            Some(RlpNode::from_rlp(&self.rlp_encode_buf))
+            Some(rlp_node_uncached(&self.rlp_encode_buf))
         };
 
         // Update the branch_path. If this branch is the only branch then only its extension needs
@@ -1508,7 +1508,7 @@ where
         // Compute the hash of the root node
         self.rlp_encode_buf.clear();
         root.node.encode(&mut self.rlp_encode_buf);
-        let root_hash = keccak256(&self.rlp_encode_buf);
+        let root_hash = keccak256_uncached(&self.rlp_encode_buf);
 
         Ok(Some(root_hash))
     }
@@ -1860,7 +1860,7 @@ mod tests {
             depth_first, noop::NoopStorageTrieCursor, InMemoryTrieCursor, TrieCursorFactory,
         },
     };
-    use alloy_primitives::map::B256Set;
+    use alloy_primitives::{keccak256, map::B256Set};
     use alloy_rlp::Decodable;
     use alloy_trie::proof::AddedRemovedKeys;
     use itertools::Itertools;

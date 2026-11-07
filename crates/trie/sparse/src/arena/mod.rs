@@ -13,13 +13,14 @@ use crate::{
 };
 use alloc::{borrow::Cow, boxed::Box, sync::Arc, vec::Vec};
 use alloy_primitives::{keccak256, map::B256Map, B256};
+use alloy_rlp::Encodable;
 use alloy_trie::TrieMask;
 use core::{cmp::Reverse, fmt, mem};
 use rayon::iter::{IntoParallelIterator, IntoParallelRefMutIterator, ParallelIterator};
 use reth_execution_errors::{SparseTrieErrorKind, SparseTrieResult};
 use reth_trie_common::{
-    BranchNodeMasks, BranchNodeRef, ExtensionNodeRef, LeafNodeRef, Nibbles, ProofTrieNodeV2,
-    ProofV2TargetParent, RlpNode, TrieNodeV2, EMPTY_ROOT_HASH,
+    rlp_node_uncached, BranchNodeMasks, BranchNodeRef, ExtensionNodeRef, LeafNodeRef, Nibbles,
+    ProofTrieNodeV2, ProofV2TargetParent, RlpNode, TrieNodeV2, EMPTY_ROOT_HASH,
 };
 use smallvec::SmallVec;
 use tracing::{instrument, trace};
@@ -1125,13 +1126,15 @@ impl ArenaParallelSparseTrie {
             }
 
             rlp_buf.clear();
-            let rlp_node = BranchNodeRef::new(rlp_node_buf, state_mask).rlp(rlp_buf);
+            BranchNodeRef::new(rlp_node_buf, state_mask).encode(rlp_buf);
+            let rlp_node = rlp_node_uncached(rlp_buf);
 
             let rlp_node = if short_key.is_empty() {
                 rlp_node
             } else {
                 rlp_buf.clear();
-                ExtensionNodeRef::new(&short_key, &rlp_node).rlp(rlp_buf)
+                ExtensionNodeRef::new(&short_key, &rlp_node).encode(rlp_buf);
+                rlp_node_uncached(rlp_buf)
             };
 
             trace!(
@@ -1321,7 +1324,8 @@ impl ArenaParallelSparseTrie {
         };
 
         rlp_buf.clear();
-        let rlp_node = LeafNodeRef { key, value }.rlp(rlp_buf);
+        LeafNodeRef { key, value }.encode(rlp_buf);
+        let rlp_node = rlp_node_uncached(rlp_buf);
 
         *arena[idx].state_mut() =
             ArenaSparseNodeState::Cached { rlp_node: rlp_node.clone(), epoch };
