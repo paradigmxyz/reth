@@ -757,6 +757,19 @@ impl PredictedState {
     /// Wakes idle workers for `flagged` newly flagged transactions.
     fn wake_for(&self, flagged: usize) {
         if flagged > 0 {
+            static WAKE_ONE: std::sync::LazyLock<bool> =
+                std::sync::LazyLock::new(|| std::env::var_os("RETH_NP_WAKE_ONE").is_some());
+            if *WAKE_ONE {
+                self.generation.fetch_add(1, Ordering::SeqCst);
+                let waiting = self.waiting.load(Ordering::SeqCst);
+                if waiting > 0 {
+                    let _guard = self.work_lock.lock();
+                    for _ in 0..flagged.min(waiting) {
+                        self.work.notify_one();
+                    }
+                }
+                return
+            }
             self.wake(flagged > 1);
         }
     }

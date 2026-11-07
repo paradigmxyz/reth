@@ -1339,7 +1339,13 @@ fn backoff<T: evm2::EvmTypes>(results: &PrewarmResults<T>, generation: usize, id
             std::hint::spin_loop();
         }
     } else {
-        results.wait_for_generation_change(generation, IDLE_WAIT_TIMEOUT);
+        static TIMEOUT: std::sync::LazyLock<Duration> = std::sync::LazyLock::new(|| {
+            std::env::var("RETH_NP_IDLE_US")
+                .ok()
+                .and_then(|value| value.parse::<u64>().ok())
+                .map_or(IDLE_WAIT_TIMEOUT, Duration::from_micros)
+        });
+        results.wait_for_generation_change(generation, *TIMEOUT);
     }
     *idle = idle.saturating_add(1);
 }
