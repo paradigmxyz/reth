@@ -2214,6 +2214,22 @@ pub(crate) fn np_phases_log(number: u64, gas: u64) {
         .map(|counter| counter.swap(0, Ordering::Relaxed).to_string())
         .collect::<Vec<_>>()
         .join(",");
+    static NP_SEEN: std::sync::LazyLock<std::sync::Mutex<alloy_primitives::map::B256Set>> =
+        std::sync::LazyLock::new(Default::default);
+    let computed = core::mem::take(&mut *reth_trie::proof_v2::NP_COMPUTED_ROOTS.lock().unwrap());
+    let (mut repeated, mut distinct) = (0u64, alloy_primitives::map::B256Set::default());
+    {
+        let seen = NP_SEEN.lock().unwrap();
+        for address in &computed {
+            if seen.contains(address) {
+                repeated += 1;
+            }
+            distinct.insert(*address);
+        }
+    }
+    let distinct_count = distinct.len();
+    NP_SEEN.lock().unwrap().extend(distinct);
+    let roots = format!("{},{distinct_count},{repeated}", computed.len());
     let hash = crate::tree::state_root_strategy::sparse_trie::NP_HASH
         .iter()
         .map(|counter| counter.swap(0, Ordering::Relaxed).to_string())
@@ -2229,7 +2245,7 @@ pub(crate) fn np_phases_log(number: u64, gas: u64) {
         if let Ok(mut file) = std::fs::OpenOptions::new().create(true).append(true).open(path) {
             let _ = writeln!(
                 file,
-                "engine::np_phases: phases number={number} gas={gas} line={line} probe={probe} commit={commit} trie={trie} hash={hash}"
+                "engine::np_phases: phases number={number} gas={gas} line={line} probe={probe} commit={commit} trie={trie} hash={hash} roots={roots}"
             );
         }
     } else {

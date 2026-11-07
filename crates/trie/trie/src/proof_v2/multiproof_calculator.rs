@@ -216,6 +216,9 @@ impl<TC: TrieStorageCursor, HC: HashedStorageCursor<Value = U256>>
     }
 }
 
+/// Hashed addresses whose storage root an account proof computed (experiment only).
+pub static NP_COMPUTED_ROOTS: std::sync::Mutex<Vec<B256>> = std::sync::Mutex::new(Vec::new());
+
 /// Account value encoder that reuses known storage roots or computes them on demand.
 struct AccountValueEncoder<TC, HC> {
     // Arc<Mutex<_>> keeps the calculator Send whenever its cursors are. The mutex never poisons,
@@ -238,6 +241,7 @@ impl<TC: TrieStorageCursor, HC: HashedStorageCursor<Value = U256>> LeafValueEnco
         if let Some(root) = self.known_storage_roots.get(&hashed_address) {
             AccountDeferredValueEncoder::Known { storage_root: *root, account }
         } else {
+            NP_COMPUTED_ROOTS.lock().unwrap().push(hashed_address);
             AccountDeferredValueEncoder::Calculate {
                 storage_calculator: self.storage_calculator.clone(),
                 hashed_address,
