@@ -93,6 +93,38 @@ where
     P: BlockReader<Transaction: SignedTransaction>,
     C: RpcConvert<Primitives: NodePrimitives<Block = ProviderBlock<P>, Receipt = P::Receipt>>,
 {
+    try_for_each_matching_block_log(
+        |log| {
+            all_logs.push(log);
+            Ok(())
+        },
+        converter,
+        provider_or_block,
+        filter,
+        header,
+        receipts,
+        removed,
+    )
+}
+
+/// Calls `on_log` for each matching, converted log in receipt order.
+///
+/// Stops immediately if conversion or `on_log` fails, without visiting subsequent logs.
+/// Provider-backed transaction reads use the header hash and fail if that block is unavailable,
+/// preventing a reorg from substituting transactions at the same block number.
+pub fn try_for_each_matching_block_log<P, C>(
+    mut on_log: impl FnMut(RpcLog<C::Network>) -> Result<(), EthApiError>,
+    converter: &C,
+    provider_or_block: ProviderOrBlock<'_, P>,
+    filter: &Filter,
+    header: &SealedHeaderFor<C::Primitives>,
+    receipts: &[P::Receipt],
+    removed: bool,
+) -> Result<(), EthApiError>
+where
+    P: BlockReader<Transaction: SignedTransaction>,
+    C: RpcConvert<Primitives: NodePrimitives<Block = ProviderBlock<P>, Receipt = P::Receipt>>,
+{
     let block_num_hash = header.num_hash();
     if !filter.matches_block(&block_num_hash) {
         return Ok(());
@@ -101,10 +133,9 @@ where
     // Tracks the index of a log in the entire block.
     let mut log_index: u64 = 0;
 
-    // Lazy loaded number of the first transaction in the block.
-    // This is useful for blocks with multiple matching logs because it
-    // prevents re-querying the block body indices.
-    let mut loaded_first_tx_num = None;
+    // Resolve all transactions in one hash-anchored read. Separate position-based reads could
+    // pair these receipts with another chain's transactions after a reorg.
+    let mut transactions = None;
 
     // Iterate over receipts and append matching logs.
     for (receipt_idx, receipt) in receipts.iter().enumerate() {
@@ -120,27 +151,19 @@ where
                             block.body().transactions().get(receipt_idx).map(|t| *t.tx_hash())
                         }
                         ProviderOrBlock::Provider(provider) => {
-                            let first_tx_num = match loaded_first_tx_num {
-                                Some(num) => num,
-                                None => {
-                                    let block_body_indices = provider
-                                        .block_body_indices(block_num_hash.number)?
-                                        .ok_or(ProviderError::BlockBodyIndicesNotFound(
-                                            block_num_hash.number,
-                                        ))?;
-                                    loaded_first_tx_num = Some(block_body_indices.first_tx_num);
-                                    block_body_indices.first_tx_num
-                                }
-                            };
-
-                            // This is safe because Transactions and Receipts have the same
-                            // keys.
-                            let transaction_id = first_tx_num + receipt_idx as u64;
+                            if transactions.is_none() {
+                                transactions = Some(
+                                    provider
+                                        .transactions_by_block(block_num_hash.hash.into())?
+                                        .ok_or(ProviderError::HeaderNotFound(
+                                            block_num_hash.hash.into(),
+                                        ))?,
+                                );
+                            }
                             let transaction =
-                                provider.transaction_by_id(transaction_id)?.ok_or_else(|| {
-                                    ProviderError::TransactionNotFound(transaction_id.into())
-                                })?;
-
+                                transactions.as_ref().and_then(|txs| txs.get(receipt_idx)).ok_or(
+                                    ProviderError::BlockBodyIndicesNotFound(block_num_hash.number),
+                                )?;
                             Some(*transaction.tx_hash())
                         }
                     };
@@ -160,7 +183,7 @@ where
                 let log = converter
                     .convert_log(log, receipt, header)
                     .map_err(|err| EthApiError::other(Into::<ErrorObject<'static>>::into(err)))?;
-                all_logs.push(log);
+                on_log(log)?;
             }
             log_index += 1;
         }

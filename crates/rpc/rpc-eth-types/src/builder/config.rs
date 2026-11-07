@@ -114,6 +114,13 @@ pub struct EthConfig {
     /// This is disabled by default, allowing blob transactions with EIP-4844 sidecars to be
     /// submitted without automatic conversion.
     pub force_blob_sidecar_upcasting: bool,
+    /// Transport response-size limit in bytes, used to bound log collection.
+    ///
+    /// Defaults to jsonrpsee's transport limit. Set this to the configured transport limit when
+    /// overriding it. `None` disables this configured limit; RPC calls still use the transport
+    /// limit.
+    #[serde(default = "default_max_response_size")]
+    pub max_response_size: Option<usize>,
 }
 
 impl EthConfig {
@@ -123,6 +130,8 @@ impl EthConfig {
             .max_blocks_per_filter(self.max_blocks_per_filter)
             .max_logs_per_response(self.max_logs_per_response)
             .stale_filter_ttl(self.stale_filter_ttl)
+            .max_response_size(self.max_response_size)
+            .max_concurrent_log_scans(self.max_blocking_io_requests)
     }
 }
 
@@ -149,6 +158,7 @@ impl Default for EthConfig {
             send_raw_transaction_sync_timeout: RPC_DEFAULT_SEND_RAW_TX_SYNC_TIMEOUT_SECS,
             rpc_evm_memory_limit: (1 << 32) - 1,
             force_blob_sidecar_upcasting: false,
+            max_response_size: default_max_response_size(),
         }
     }
 }
@@ -264,6 +274,12 @@ impl EthConfig {
         self.force_blob_sidecar_upcasting = force;
         self
     }
+
+    /// Sets the transport response-size limit in bytes used during log collection.
+    pub const fn max_response_size(mut self, size: usize) -> Self {
+        self.max_response_size = Some(size);
+        self
+    }
 }
 
 /// Config for the filter
@@ -277,11 +293,20 @@ pub struct EthFilterConfig {
     ///
     /// If `None` then no limit is enforced.
     pub max_logs_per_response: Option<usize>,
-    /// How long a filter remains valid after the last poll.
+    /// How long a filter remains valid after the last successful poll.
     ///
-    /// A filter is considered stale if it has not been polled for longer than this duration and
-    /// will be removed.
+    /// A filter is considered stale if it has not been successfully polled for longer than this
+    /// duration and will be removed. Failed polls do not extend its lifetime.
     pub stale_filter_ttl: Duration,
+    /// Maximum serialized log result size in bytes. `None` disables this configured limit.
+    ///
+    /// Includes array brackets and separators. RPC handlers additionally reserve the actual
+    /// response envelope and request ID within the transport limit.
+    pub max_response_size: Option<usize>,
+    /// Maximum number of concurrent range scans, independent of blocking IO permits.
+    ///
+    /// Scans wait asynchronously for admission. Zero prevents any range scan from starting.
+    pub max_concurrent_log_scans: usize,
 }
 
 impl EthFilterConfig {
@@ -303,6 +328,18 @@ impl EthFilterConfig {
         self.stale_filter_ttl = duration;
         self
     }
+
+    /// Sets the serialized log result budget in bytes, or disables it with `None`.
+    pub const fn max_response_size(mut self, size: Option<usize>) -> Self {
+        self.max_response_size = size;
+        self
+    }
+
+    /// Sets the maximum number of concurrent range scans. Zero disables scan admission.
+    pub const fn max_concurrent_log_scans(mut self, num: usize) -> Self {
+        self.max_concurrent_log_scans = num;
+        self
+    }
 }
 
 impl Default for EthFilterConfig {
@@ -312,6 +349,13 @@ impl Default for EthFilterConfig {
             max_logs_per_response: None,
             // 5min
             stale_filter_ttl: DEFAULT_STALE_FILTER_TTL,
+            max_response_size: default_max_response_size(),
+            max_concurrent_log_scans: DEFAULT_MAX_BLOCKING_IO_REQUEST,
         }
     }
+}
+
+/// Matches a default jsonrpsee transport when no RPC server arguments are supplied.
+const fn default_max_response_size() -> Option<usize> {
+    Some(jsonrpsee_core::TEN_MB_SIZE_BYTES as usize)
 }

@@ -112,6 +112,7 @@ impl RethRpcServerConfig for RpcServerArgs {
             .raw_tx_forwarder(self.rpc_forwarder.clone())
             .rpc_evm_memory_limit(self.rpc_evm_memory_limit)
             .force_blob_sidecar_upcasting(self.rpc_force_blob_sidecar_upcasting)
+            .max_response_size(self.rpc_max_response_size_bytes() as usize)
     }
 
     fn flashbots_config(&self) -> ValidationApiConfig {
@@ -281,6 +282,7 @@ impl RethRpcServerConfig for RpcServerArgs {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
     use clap::{Args, Parser};
     use reth_node_core::args::RpcServerArgs;
     use reth_rpc_eth_types::{EthStateCacheConfig, RPC_DEFAULT_GAS_CAP};
@@ -290,8 +292,6 @@ mod tests {
         net::{Ipv4Addr, SocketAddr, SocketAddrV4},
         time::Duration,
     };
-
-    use crate::config::RethRpcServerConfig;
 
     /// A helper type to parse Args more easily
     #[derive(Parser)]
@@ -508,12 +508,30 @@ mod tests {
             "100",
             "--rpc-max-logs-per-response",
             "200",
+            "--rpc.max-response-size",
+            "1",
+            "--rpc.max-blocking-io-requests",
+            "3",
         ])
         .args;
 
         let config = args.eth_config().filter_config();
         assert_eq!(config.max_blocks_per_filter, Some(100));
         assert_eq!(config.max_logs_per_response, Some(200));
+        assert_eq!(config.max_response_size, Some(args.rpc_max_response_size_bytes() as usize));
+        assert_eq!(config.max_response_size, Some(1024 * 1024));
+        assert_eq!(config.max_concurrent_log_scans, 3);
+
+        let mut config = serde_json::to_value(args.eth_config()).unwrap();
+        config.as_object_mut().unwrap().remove("max_response_size");
+        let config = serde_json::from_value::<EthConfig>(config).unwrap();
+        assert_eq!(config.max_response_size, EthConfig::default().max_response_size);
+        assert_eq!(config.max_response_size, Some(jsonrpsee::core::TEN_MB_SIZE_BYTES as usize));
+        let args = CommandParser::<RpcServerArgs>::parse_from(["reth"]).args;
+        assert_eq!(
+            args.eth_config().filter_config().max_response_size,
+            Some(args.rpc_max_response_size_bytes() as usize)
+        );
     }
 
     #[test]
