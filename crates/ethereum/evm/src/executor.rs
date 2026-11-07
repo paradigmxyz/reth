@@ -122,6 +122,15 @@ where
     pub const fn set_spec_id(&mut self, spec_id: evm2::SpecId) {
         self.inner.set_spec_id(spec_id);
     }
+
+    /// Drops the state hook, which tells its consumer that no state update follows.
+    ///
+    /// Called right after the post-execution changes, the block's last state updates, so that the
+    /// consumer (the state root task) finishes while the bundle state is built instead of after.
+    fn drop_state_hook(&mut self) {
+        // evm2 cannot remove a hook, so a no-op one replaces it.
+        self.inner.set_state_hook(|_| {});
+    }
 }
 
 impl<'a, T, R> BlockExecutor for EthBlockExecutor<'a, T, R>
@@ -222,10 +231,22 @@ where
     }
 
     fn finish_with_prepared_block_access_list(
-        self,
+        mut self,
     ) -> Result<(BlockExecutionOutput<Self::Receipt>, Option<Bal>), BlockExecutionError> {
-        let (output, bal) = self.inner.finish_with_block_access_list()?;
-        Ok((output.into(), bal))
+        let EthPostExecutionOutput { requests, gas_used, blob_gas_used } =
+            self.inner.apply_post_execution_changes(0)?;
+        self.drop_state_hook();
+        let block_access_list = self.inner.evm.state_mut().take_bal_builder();
+        let result = reth_execution_types::BlockExecutionResult {
+            receipts: self.inner.receipts,
+            requests,
+            gas_used,
+            blob_gas_used,
+        };
+        Ok((
+            BlockExecutionOutput::new(result, self.inner.block_state.into_bundle()),
+            block_access_list,
+        ))
     }
 }
 
@@ -645,6 +666,7 @@ where
         self.initialize()?;
         let segment = self.finish_segment()?;
         self.merge_segment(segment);
+        self.inner.drop_state_hook();
         let block_access_list = self.inner.inner.evm.state_mut().take_bal_builder();
         let result = reth_execution_types::BlockExecutionResult {
             receipts: core::mem::take(&mut self.inner.inner.receipts),
@@ -665,6 +687,7 @@ mod tests {
     use crate::dao_fork;
     use alloy_consensus::{SignableTransaction, TxEip4844, TxLegacy};
     use alloy_eip7928::BlockAccessIndex;
+    use alloy_eips::eip4895::Withdrawal;
     use alloy_primitives::{address, Address, Bytes, Signature, TxKind, B256, U256};
     use evm2::{
         block::ethereum::final_block_gas_used,
@@ -953,6 +976,71 @@ mod tests {
             U256::from(5 * alloy_consensus::constants::ETH_TO_WEI)
         );
         assert_eq!(output.account(&beneficiary).unwrap().unwrap().balance, U256::from(7));
+    }
+
+    #[test]
+    fn finish_drops_state_hook_after_post_execution_updates() {
+        enum Message {
+            Update(StateUpdate),
+            Dropped,
+        }
+
+        struct DropSignal(std::sync::mpsc::Sender<Message>);
+
+        impl Drop for DropSignal {
+            fn drop(&mut self) {
+                self.0.send(Message::Dropped).unwrap();
+            }
+        }
+
+        let recipient = address!("0000000000000000000000000000000000000042");
+        let withdrawals =
+            [Withdrawal { index: 0, validator_index: 0, address: recipient, amount: 3 }];
+        let chain_spec = ChainSpecBuilder::mainnet().shanghai_activated().build();
+        let factory = super::super::factory::EthBlockExecutorFactory::new(Arc::new(chain_spec));
+        let env = EthEvmEnv::new(
+            SpecId::SHANGHAI,
+            BlockEnv::<BaseEvmTypes> { number: U256::from(1), ..Default::default() },
+            1,
+        );
+        let evm = factory.evm_with_env(Db::new(TestDatabase::default()), env);
+        let mut executor = factory.create_executor(
+            evm,
+            EthBlockExecutionCtx {
+                tx_count_hint: Some(0),
+                parent_hash: B256::ZERO,
+                parent_beacon_block_root: None,
+                ommers: &[],
+                withdrawals: Some(Cow::Borrowed(&withdrawals)),
+                extra_data: Bytes::new(),
+                slot_number: None,
+            },
+        );
+        let (tx, rx) = std::sync::mpsc::channel();
+        let signal = DropSignal(tx.clone());
+        executor.set_state_hook(move |update| {
+            let _signal = &signal;
+            tx.send(Message::Update(update)).unwrap();
+        });
+        executor.apply_pre_execution_changes().unwrap();
+        let output = executor.finish_with_block_access_list().unwrap().0;
+
+        // The hook is dropped once, after it streamed the withdrawal.
+        let mut messages = rx.try_iter().collect::<Vec<_>>();
+        assert!(matches!(messages.pop(), Some(Message::Dropped)));
+        let mut streamed = reth_trie_common::HashedPostState::default();
+        for message in &messages {
+            let Message::Update(update) = message else { panic!("the hook was dropped twice") };
+            streamed.extend(reth_execution_types::state_update_to_hashed_post_state(update));
+        }
+        let bundled = reth_trie_common::HashedPostState::from_bundle_state::<
+            reth_trie_common::KeccakKeyHasher,
+        >(&output.state.state);
+        assert_eq!(streamed.into_sorted(), bundled.into_sorted());
+        assert_eq!(
+            output.account(&recipient).unwrap().unwrap().balance,
+            U256::from(3_000_000_000u64)
+        );
     }
 
     #[test]
