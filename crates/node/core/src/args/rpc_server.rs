@@ -531,7 +531,11 @@ pub struct RpcServerArgs {
 
     /// Set the permissions for the IPC socket file, in octal format.
     ///
-    /// If not specified, the permissions will be set by the system's umask.
+    /// Accepts modes up to `0o7777`, with an optional `0o` prefix. If not specified, the
+    /// permissions will be set by the system's umask.
+    ///
+    /// Startup fails if the mode is invalid or the platform cannot apply it before binding the
+    /// socket, which includes macOS.
     #[arg(long = "ipc.permissions", default_value = Resettable::from(DefaultRpcServerArgs::get_global().ipc_socket_permissions.as_ref().map(|v| v.to_string().into())))]
     pub ipc_socket_permissions: Option<String>,
 
