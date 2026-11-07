@@ -28,7 +28,9 @@
 //! Undelivered hashes after the last delivered hash keep the peer as a candidate only if it
 //! delivered at least half of the request, treating that tail as potentially truncated. This is
 //! a retry heuristic: transaction counts do not establish whether the response reached a byte
-//! limit. Requiring half the request limits repeated low-progress retries.
+//! limit. Requiring half the request limits repeated low-progress retries. A dropped peer's later
+//! announcements of the hash are ignored while it is tracked, so it cannot take retries from
+//! candidates that were not asked yet.
 //!
 //! Request timeouts are enforced by the peer's session, which resolves the request with
 //! [`RequestError::Timeout`], so the fetcher does not run any timers. A first timeout is retried
@@ -229,6 +231,9 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
                     if let Some(candidate) = entry.candidate_mut(key) {
                         // announced before by this peer, keep the latest size
                         candidate.set_size(size);
+                        continue
+                    }
+                    if entry.failed.contains(&key) {
                         continue
                     }
                     if tracked >= max_per_peer {
@@ -907,11 +912,13 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
             // only source arrives. Allow one retry; prefer another source whenever available.
             let retry_only_source = timed_out && entry.attempts == 1 && entry.candidates.len() == 1;
             let peers = &mut self.peers;
+            let failed = &mut entry.failed;
             entry.candidates.retain(|candidate| {
                 // disconnected peers are pruned as well
                 let Some(peer) = peers.get_mut(&candidate.peer) else { return false };
                 if idx < cutoff && candidate.peer == key && !retry_only_source {
                     peer.tracked = peer.tracked.saturating_sub(1);
+                    failed.push(key);
                     return false
                 }
                 true
@@ -1233,6 +1240,9 @@ struct TxEntry {
     fetching_by: Option<(PeerKey, u64)>,
     /// Sent requests for this entry, bounded independently of candidate replacement.
     attempts: usize,
+    /// Peers dropped as candidates after failing to deliver the hash, whose announcements of it
+    /// are ignored. Bounded by `attempts`, since each failed request adds at most one peer.
+    failed: SmallVec<[PeerKey; 2]>,
 }
 
 impl TxEntry {
@@ -1240,7 +1250,7 @@ impl TxEntry {
     fn new(peer: PeerKey, size: u32, generation: u64) -> Self {
         let mut candidates = SmallVec::new();
         candidates.push(Candidate::queued(peer, size));
-        Self { candidates, generation, fetching_by: None, attempts: 0 }
+        Self { candidates, generation, fetching_by: None, attempts: 0, failed: SmallVec::new() }
     }
 
     fn has_candidate(&self, key: PeerKey) -> bool {
@@ -1831,6 +1841,62 @@ mod tests {
         // no other peer announced the hashes, so they are dropped
         assert_eq!(rig.fetcher.num_hashes(), 0);
         assert_eq!(rig.dispatch(), 0);
+    }
+
+    #[test]
+    fn reannouncing_failed_peers_do_not_overtake_untried_candidates() {
+        let mut rig = Rig::new();
+        let (peer_a, peer_b, honest) = (peer(1), peer(2), peer(3));
+        let txs = pooled_txs(1);
+        let h = hashes_of(&txs)[0];
+        rig.add_peer(peer_a);
+        rig.add_peer(honest);
+        rig.add_peer(peer_b);
+
+        rig.announce(peer_a, &[h]);
+        rig.dispatch();
+        rig.announce(honest, &[h]);
+        rig.dispatch();
+        rig.announce(peer_b, &[h]);
+        rig.dispatch();
+
+        // the failing peers take turns re-announcing the hash and answering empty
+        let (mut failing, mut other) = (peer_a, peer_b);
+        for _ in 0..MAX_FETCH_ATTEMPTS_PER_HASH {
+            if rig.fetcher.fetching_peer(&h) == Some(honest) {
+                break
+            }
+            rig.respond(failing, vec![]);
+            rig.dispatch();
+            rig.announce(failing, &[h]);
+            rig.dispatch();
+            std::mem::swap(&mut failing, &mut other);
+        }
+
+        assert_eq!(rig.fetcher.fetching_peer(&h), Some(honest));
+        assert_eq!(rig.fetcher.candidate_peers(&h), vec![honest]);
+        let event = rig.respond(honest, txs);
+        assert!(
+            matches!(event, FetchEvent::TransactionsFetched { peer_id, .. } if peer_id == honest)
+        );
+        assert_eq!(rig.fetcher.num_hashes(), 0);
+    }
+
+    #[test]
+    fn untried_candidate_is_asked_after_a_single_empty_response() {
+        let mut rig = Rig::new();
+        let (peer_a, honest) = (peer(1), peer(2));
+        let h = hash(1);
+        rig.add_peer(peer_a);
+        rig.add_peer(honest);
+
+        rig.announce(peer_a, &[h]);
+        rig.dispatch();
+        rig.announce(honest, &[h]);
+        rig.dispatch();
+        rig.respond(peer_a, vec![]);
+        rig.dispatch();
+        assert_eq!(rig.fetcher.fetching_peer(&h), Some(honest));
     }
 
     #[test]
