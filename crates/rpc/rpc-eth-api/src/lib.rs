@@ -19,6 +19,7 @@ pub mod filter;
 pub mod helpers;
 pub mod node;
 pub mod pubsub;
+mod simulate;
 pub mod types;
 
 pub use bundle::{EthBundleApiServer, EthCallBundleApiServer};
@@ -32,6 +33,7 @@ pub use reth_rpc_convert::*;
 pub use reth_rpc_eth_types::error::{
     AsEthApiError, FromEthApiError, FromEvmError, IntoEthApiError,
 };
+pub use simulate::SimulateV1Request;
 pub use types::{EthApiTypes, FullEthApiTypes, RpcBlock, RpcHeader, RpcReceipt, RpcTransaction};
 
 #[cfg(feature = "client")]
