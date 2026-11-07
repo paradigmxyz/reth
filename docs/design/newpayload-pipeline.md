@@ -600,6 +600,9 @@ the storage trie pool 13.2 ms, the sparse-trie thread 9.1 ms, the trie-hashing t
 - Proof workers took their jobs from crossbeam channels, whose receivers spin and yield before they
   park: 8% of their CPU. They now wait on a queue under a mutex: 40.2 -> 37.0 ms per block for
   both proof pools, 15% fewer context switches, mean -2.7% over 3 run pairs (within noise).
+- Bigger proof jobs spend less CPU but finish later: `--engine.multiproof-chunk-size 20` instead
+  of 5 cut both proof pools from 37.7 to 35.0 ms per block and raised the mean from 15.8 to
+  16.7 ms over 2 runs each. The default stays.
 - Account proofs compute the storage root of every account leaf whose hash they need and whose
   root the reused trie does not know, siblings included: 2,045 per block, each a random read of the
   account's storage and storage trie, 13% of the proof workers' CPU plus 7% checking for empty
