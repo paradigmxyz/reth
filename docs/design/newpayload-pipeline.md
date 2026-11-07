@@ -603,6 +603,10 @@ the storage trie pool 13.2 ms, the sparse-trie thread 9.1 ms, the trie-hashing t
 - Bigger proof jobs spend less CPU but finish later: `--engine.multiproof-chunk-size 20` instead
   of 5 cut both proof pools from 37.7 to 35.0 ms per block and raised the mean from 15.8 to
   16.7 ms over 2 runs each. The default stays.
+
+derek, both changes against the commit before them, `--db.warm-branch-pages` on both sides, 4 run
+pairs: mean 18.21 -> 17.58 ms (-3.5%), p50 -4.7%, Mgas/s +4.9%, the state root after execution
+1.94 -> 1.29 ms (-34%), involuntary context switches of the engine thread -11%.
 - Account proofs compute the storage root of every account leaf whose hash they need and whose
   root the reused trie does not know, siblings included: 2,045 per block, each a random read of the
   account's storage and storage trie, 13% of the proof workers' CPU plus 7% checking for empty
