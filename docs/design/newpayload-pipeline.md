@@ -660,6 +660,14 @@ What is left of the workers' CPU: the interpreter 22%, their own database reads 
 about 25% (page faults included), storing and validating results and the predicted state about 25%,
 precompiles 7%.
 
+- Idle workers woke every 100 us to look for stale results that entered the refresh window as
+  block execution moved on, and a result flagging two or more readers woke all of them. Waking a
+  worker from block execution when the transaction entering the window is flagged, one per flagged
+  transaction, and otherwise only after 1 ms (`mattsse/np-wakes`) left 470 fewer sleeps per block
+  and cut the workers' CPU from 57.4 to 56.0 ms over 3 run pairs, but no latency: derek mean -0.2%
+  (noise ±2.7%), p50 -0.9%, so it is not in this branch. The rest of the bookkeeping is smaller:
+  registering a result's reads and validating them again on store is 3.5% and 1.3%.
+
 ## Rewrite: newPayload v2
 
 The v2 path replaces the per-block task graph instead of tuning it:
