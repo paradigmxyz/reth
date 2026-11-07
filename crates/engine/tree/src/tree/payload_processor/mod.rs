@@ -11,6 +11,7 @@ use crate::tree::{
 use alloy_eips::eip1898::BlockWithParent;
 use alloy_primitives::B256;
 use crossbeam_channel::{Receiver as CrossbeamReceiver, Sender as CrossbeamSender};
+use parking_lot::Mutex;
 use prewarm::PrewarmMetrics;
 use rayon::prelude::*;
 use reth_evm::{
@@ -37,21 +38,29 @@ pub use reth_trie_parallel::{
 use std::{
     ops::Not,
     sync::{
-        atomic::{AtomicBool, AtomicUsize},
+        atomic::{AtomicBool, AtomicUsize, Ordering},
         mpsc, Arc, OnceLock,
     },
+    time::Duration,
 };
 use tracing::{debug, debug_span, instrument, trace, trace_span, warn, Span};
 
 pub mod bal;
 pub mod bal_prewarm_pool;
+#[cfg(test)]
+mod corpus;
 pub mod prewarm;
 pub mod receipt_root_task;
 pub(crate) mod reuse;
+mod storage_scan;
 
 /// Blocks with fewer transactions than this skip prewarming, since the fixed overhead of spawning
 /// prewarm workers exceeds the execution time saved.
 pub const SMALL_BLOCK_TX_THRESHOLD: usize = 5;
+
+/// How long a payload waits for its parent's prewarm task to save the execution cache before it
+/// allocates an empty one.
+const PARENT_CACHE_WAIT_TIMEOUT: Duration = Duration::from_millis(50);
 
 /// Type alias for [`PayloadHandle`] returned by payload processor spawn methods.
 type IteratorTx<Evm, I> = RecoveredTx<TxEnvFor<Evm>, <I as ExecutableTxIterator<Evm>>::Recovered>;
@@ -236,18 +245,6 @@ where
     /// blocks.
     const SMALL_BLOCK_TX_THRESHOLD: usize = 30;
 
-    /// Number of leading transactions to convert sequentially before entering the rayon
-    /// parallel path.
-    ///
-    /// Rayon's work-stealing does not guarantee that index 0 is processed first, so the
-    /// ordered consumer can block for up to ~1ms waiting for the first slot. By converting
-    /// a small head sequentially and sending it immediately, execution can start without
-    /// waiting for rayon scheduling.
-    const PARALLEL_PREFETCH_COUNT: usize = 4;
-
-    /// Size of the first parallel tx batch in non-BAL path.
-    const FIRST_PARALLEL_TX_WINDOW_SIZE: usize = 64;
-
     /// Spawns a task advancing transaction env iterator and streaming updates through a channel.
     ///
     /// For blocks with fewer than [`Self::SMALL_BLOCK_TX_THRESHOLD`] transactions, uses
@@ -334,68 +331,7 @@ where
                             });
                     });
                 } else {
-                    // To avoid a ~1ms stall waiting for rayon to schedule index 0, the first
-                    // few transactions are recovered sequentially and sent immediately before
-                    // entering the parallel iterator for the remainder.
-                    let prefetch = Self::PARALLEL_PREFETCH_COUNT.min(transaction_count);
-                    let mut iter = transactions.into_iter();
-
-                    // Convert the first few transactions sequentially so execution can
-                    // start immediately without waiting for rayon work-stealing.
-                    if !convert_serial(
-                        iter.by_ref().take(prefetch),
-                        &convert,
-                        prewarm_tx.as_ref(),
-                        &execute_tx,
-                    ) {
-                        return
-                    }
-
-                    let mut iter = iter.enumerate();
-
-                    let mut batch_size = Self::FIRST_PARALLEL_TX_WINDOW_SIZE;
-
-                    // Without BALs, we need to preserve the initial order of transactions.
-                    // Process exponentially increasing windows to make sure that first transactions are prioritized.
-                    let parent_span = Span::current();
-                    executor.cpu_pool().install(move || {
-                        let _parent = parent_span.enter();
-                        let span = debug_span!(target: "engine::tree::payload_processor", "convert_transactions").or_current();
-                        let _entered = span.enter();
-                        loop {
-                            let chunk = iter
-                                .by_ref()
-                                .take(batch_size)
-                                .collect::<Vec<_>>();
-                            if chunk.is_empty() {
-                                break;
-                            }
-
-                            batch_size = batch_size.saturating_mul(2);
-
-                            let chunk = chunk
-                                .into_par_iter()
-                                .map(|(i, tx)| {
-                                    let idx = i + prefetch;
-                                    let _parent = span.enter();
-                                    let _span = trace_span!(target: "engine::tree::payload_processor", "convert_transaction", idx).entered();
-                                    let tx = convert.convert(tx).map(WithTxEnv::new);
-                                    (idx, tx)
-                                })
-                                .collect::<Vec<_>>();
-
-                            for (idx, tx) in chunk {
-                                let failed = tx.is_err();
-                                if let (Some(prewarm_tx), Ok(tx)) = (&prewarm_tx, &tx) {
-                                    let _ = prewarm_tx.send((idx, tx.clone()));
-                                }
-                                if execute_tx.send((idx, tx)).is_err() || failed {
-                                    return
-                                }
-                                trace!(target: "engine::tree::payload_processor", idx, "yielded transaction");
-                            }
-                        }
-                    });
+                    convert_claimed(executor.cpu_pool(), transactions, &convert, prewarm_tx, &execute_tx);
                 }
             });
         }
@@ -453,8 +389,17 @@ where
             env.decoded_bal.is_none() &&
             cfg_reuses_prewarm_results(env.evm_env.version()) &&
             self.evm_config.reuses_prewarm_results())
-        .then(|| Arc::new(PrewarmResults::new(env.transaction_count)));
+        .then(|| {
+            Arc::new(PrewarmResults::with_unpredicted_account(
+                env.transaction_count,
+                env.evm_env.block_env().beneficiary,
+            ))
+        });
 
+        // Probe threads find each transaction's cold reads against the cache and have the read-set
+        // pool load them in parallel, so that a block's cold reads are not loaded one dependent
+        // read at a time inside speculative executions.
+        let probe_cold_reads = prewarm_results.is_some() && saved_cache.is_some();
         let executed_tx_index = Arc::new(AtomicUsize::new(0));
         // configure prewarming
         let prewarm_ctx = PrewarmContext {
@@ -462,7 +407,8 @@ where
             evm_config: self.evm_config.clone(),
             saved_cache: saved_cache.clone(),
             provider: state_provider_factory,
-            bal_prewarm_pool: parallel_bal_execution.then(|| self.bal_prewarm_pool()),
+            bal_prewarm_pool: (parallel_bal_execution || probe_cold_reads)
+                .then(|| self.bal_prewarm_pool()),
             metrics: PrewarmMetrics::default(),
             cache_metrics: self.cache_metrics.clone(),
             cache_state_metrics: self.cache_state_metrics.clone(),
@@ -473,6 +419,7 @@ where
             disable_bal_parallel_state_root: self.disable_bal_parallel_state_root,
             disable_bal_batch_io: self.disable_bal_batch_io,
             prewarm_results: prewarm_results.clone(),
+            probe_cold_reads,
         };
 
         let (prewarm_task, to_prewarm_task) =
@@ -495,11 +442,14 @@ where
 
     /// Returns the cache for the given parent hash.
     ///
-    /// If the given hash is different then what is recently cached, then this will create a new
-    /// instance.
+    /// Waits up to `PARENT_CACHE_WAIT_TIMEOUT` while the cache is checked out, usually by the
+    /// parent's prewarm task before it saves it. If the cache is still unavailable, this creates
+    /// a new instance.
     #[instrument(level = "debug", target = "engine::caching", skip(self))]
     pub fn cache_for(&self, parent_hash: B256) -> SavedCache {
-        if let Some(cache) = self.execution_cache.get_cache_for(parent_hash) {
+        if let Some(cache) =
+            self.execution_cache.wait_for_cache(parent_hash, PARENT_CACHE_WAIT_TIMEOUT)
+        {
             debug!("reusing execution cache");
             cache
         } else {
@@ -597,6 +547,94 @@ where
         trace!(target: "engine::tree::payload_processor", idx, "yielded transaction");
     }
     true
+}
+
+/// Converts transactions on the cpu pool and this thread, and sends them to execution in block
+/// order.
+///
+/// Converters claim the next transaction in block order and send it to prewarming as soon as it
+/// is converted, so speculation starts on a transaction while later ones are still converted.
+/// Converting in windows instead holds every transaction of a window until its slowest one is
+/// done. This thread converts too whenever the next transaction for execution is not ready, so
+/// execution never waits for a busy pool.
+fn convert_claimed<RawTx, Tx, TxEnv, InnerTx, Recovered, Err, C>(
+    pool: &rayon::ThreadPool,
+    transactions: impl IntoIterator<Item = RawTx>,
+    convert: &C,
+    prewarm_tx: Option<mpsc::SyncSender<(usize, WithTxEnv<TxEnv, Recovered>)>>,
+    execute_tx: &ExecuteTxSender<TxEnv, Recovered, Err>,
+) where
+    RawTx: Send,
+    Tx: ExecutableTxParts<TxEnv, InnerTx, Recovered = Recovered>,
+    TxEnv: Clone + Send + Sync,
+    Recovered: Send + Sync,
+    Err: Send,
+    C: ConvertTx<RawTx, Tx = Tx, Error = Err>,
+{
+    let raw = transactions.into_iter().map(|tx| Mutex::new(Some(tx))).collect::<Box<[_]>>();
+    let span =
+        debug_span!(target: "engine::tree::payload_processor", "convert_transactions").or_current();
+    let next = AtomicUsize::new(0);
+    let stop = AtomicBool::new(false);
+    let claim = || {
+        if stop.load(Ordering::Relaxed) {
+            return None
+        }
+        let index = next.fetch_add(1, Ordering::Relaxed);
+        let raw_tx = raw.get(index)?.lock().take()?;
+        let _parent = span.enter();
+        let _span =
+            trace_span!(target: "engine::tree::payload_processor", "convert_transaction", index)
+                .entered();
+        let tx = convert.convert(raw_tx).map(WithTxEnv::new);
+        if let (Some(prewarm_tx), Ok(tx)) = (&prewarm_tx, &tx) {
+            let _ = prewarm_tx.send((index, tx.clone()));
+        }
+        Some((index, tx))
+    };
+    // Block execution starts with the first transaction, so it does not wait for a pool thread
+    // to wake up and claim it.
+    let Some((index, first)) = claim() else { return };
+    let failed = Result::is_err(&first);
+    if execute_tx.send((index, first)).is_err() || failed {
+        return
+    }
+    let (converted_tx, converted_rx) = crossbeam_channel::unbounded();
+    pool.in_place_scope(|scope| {
+        for _ in 0..pool.current_num_threads().min(raw.len()) {
+            let converted_tx = converted_tx.clone();
+            let claim = &claim;
+            scope.spawn(move |_| {
+                while let Some(converted) = claim() {
+                    if converted_tx.send(converted).is_err() {
+                        break
+                    }
+                }
+            });
+        }
+        drop(converted_tx);
+
+        let mut converted = (0..raw.len()).map(|_| None).collect::<Vec<_>>();
+        let mut sent = 1;
+        while sent < raw.len() {
+            if let Some(tx) = converted[sent].take() {
+                let failed = Result::is_err(&tx);
+                if execute_tx.send((sent, tx)).is_err() || failed {
+                    break
+                }
+                trace!(target: "engine::tree::payload_processor", idx = sent, "yielded transaction");
+                sent += 1;
+                continue
+            }
+            let Some((index, tx)) = converted_rx.try_recv().ok().or_else(claim).or_else(|| converted_rx.recv().ok())
+            else {
+                break
+            };
+            converted[index] = Some(tx);
+        }
+        // Execution stopped or failed; the converters drop the rest.
+        stop.store(true, Ordering::Relaxed);
+    });
 }
 
 /// Handle to all the spawned tasks.
@@ -1211,8 +1249,7 @@ mod tests {
             .unwrap();
         let processor = test_processor();
 
-        // Exercise both sides of the sequential cutoff and the first parallel window, as well
-        // as randomly sized blocks. BAL execution bypasses the sequential prefetch/windowing.
+        // Exercise both sides of the sequential cutoff, as well as randomly sized blocks.
         for count in [0, 1, 29, 30, 68, 69] {
             for bal in [false, true] {
                 assert_conversion_spans(&processor, count, bal, level);
@@ -1264,7 +1301,7 @@ mod tests {
         let observed = observed.lock().unwrap();
         assert_eq!(observed.len(), count);
         let mut transaction_ids = HashSet::new();
-        for (idx, span) in observed.iter() {
+        for (_, span) in observed.iter() {
             let scope = span
                 .with_subscriber(|(id, dispatch)| {
                     dispatch
@@ -1283,7 +1320,7 @@ mod tests {
             if level >= LevelFilter::DEBUG {
                 expected.push("spawn_tx_iterator");
                 expected.push("tx_iterator");
-                if count >= 30 && (bal || *idx >= 4) {
+                if count >= 30 {
                     expected.push("convert_transactions");
                 }
             }

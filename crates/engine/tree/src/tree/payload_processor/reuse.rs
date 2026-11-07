@@ -34,16 +34,17 @@ use evm2::{
     },
     interpreter::{op, InstrStop, Interpreter, Message, MessageKind, MessageResult},
     utils::WordExt,
-    EvmFeatures, EvmTypes, Inspector, TxResultWithState, Version,
+    EvmFeatures, EvmTypes, Inspector, InspectorConfig, OpcodeSet, TxResultWithState, Version,
 };
-use parking_lot::{Mutex, RwLock};
+use parking_lot::{Condvar, Mutex, RwLock};
 use std::{
     cell::RefCell,
     rc::Rc,
     sync::{
-        atomic::{AtomicUsize, Ordering},
+        atomic::{AtomicBool, AtomicUsize, Ordering},
         Arc,
     },
+    time::Duration,
 };
 
 /// Balances above this are compared exactly, so that applying balance changes cannot overflow.
@@ -57,6 +58,20 @@ pub(crate) const POOL_BENEFICIARY: Address = address!("0x00000000000000000000000
 /// Maximum estimated number of bytes held by [`PoolResults`].
 const MAX_POOL_RESULT_BYTES: usize = 64 << 20;
 
+/// Opcodes that [`BalanceTracker::step`] handles. The EVM runs every other opcode on its plain
+/// handler: stepping all of them took 10% of the speculation workers' CPU.
+const BALANCE_TRACKER_STEPS: OpcodeSet = {
+    let mut steps = OpcodeSet::EMPTY;
+    steps.insert(op::BALANCE);
+    steps.insert(op::SELFBALANCE);
+    steps.insert(op::SELFDESTRUCT);
+    steps.insert(op::COINBASE);
+    steps.insert(op::TIMESTAMP);
+    steps.insert(op::DIFFICULTY);
+    steps.insert(op::GASLIMIT);
+    steps
+};
+
 /// Returns whether blocks executed with `cfg_env` may reuse prewarm results, which excludes
 /// EIP-8037 multidimensional block gas.
 pub(crate) const fn cfg_reuses_prewarm_results(version: &Version) -> bool {
@@ -67,8 +82,21 @@ pub(crate) const fn cfg_reuses_prewarm_results(version: &Version) -> bool {
 #[derive_where(Debug)]
 pub(crate) struct PrewarmResults<T: EvmTypes> {
     slots: Box<[Mutex<ResultSlot<T>>]>,
+    /// Whether a prewarm worker is executing the transaction at each index.
+    speculating: Box<[AtomicBool]>,
     /// Writes predicted by the stored results.
     predicted: Arc<PredictedState>,
+}
+
+/// Marks a transaction as no longer executed by a prewarm worker when dropped, also when the
+/// worker panics, so that block execution waiting for its result does not wait forever.
+#[derive(Debug)]
+pub(super) struct SpeculationGuard<'a>(&'a AtomicBool);
+
+impl Drop for SpeculationGuard<'_> {
+    fn drop(&mut self) {
+        self.0.store(false, Ordering::Release);
+    }
 }
 
 /// Prewarm state of a transaction in [`PrewarmResults`].
@@ -90,8 +118,52 @@ impl<T: EvmTypes> PrewarmResults<T> {
     pub(crate) fn new(transaction_count: usize) -> Self {
         Self {
             slots: (0..transaction_count).map(|_| Mutex::new(ResultSlot::Empty)).collect(),
-            predicted: Arc::default(),
+            speculating: (0..transaction_count).map(|_| AtomicBool::new(false)).collect(),
+            predicted: Arc::new(PredictedState::new(transaction_count, None)),
         }
+    }
+
+    /// Wakes an idle prewarm worker, or all of them if `all` is set, after a transaction was
+    /// queued or the queue was closed.
+    pub(super) fn wake(&self, all: bool) {
+        self.predicted.wake(all);
+    }
+
+    /// Blocks an idle prewarm worker until new work arrived since the work generation was
+    /// `generation`, or for at most `timeout`.
+    pub(super) fn wait_for_generation_change(&self, generation: usize, timeout: Duration) {
+        self.predicted.wait_for_generation_change(generation, timeout);
+    }
+
+    /// Returns the number of transactions with result slots.
+    pub(super) const fn len(&self) -> usize {
+        self.slots.len()
+    }
+
+    /// Marks the transaction at `index` as being executed by a prewarm worker until the returned
+    /// guard is dropped, or returns `None` if another worker already is.
+    pub(super) fn begin_speculation(&self, index: usize) -> Option<SpeculationGuard<'_>> {
+        let flag = self.speculating.get(index)?;
+        (!flag.swap(true, Ordering::AcqRel)).then_some(SpeculationGuard(flag))
+    }
+
+    /// Returns whether a prewarm worker is executing the transaction at `index`.
+    ///
+    /// Block execution waits for such a transaction's first result instead of executing it.
+    pub(crate) fn is_speculating(&self, index: usize) -> bool {
+        self.speculating.get(index).is_some_and(|flag| flag.load(Ordering::Acquire))
+    }
+
+    /// Creates empty result slots like [`Self::new`], without predicting writes of `unpredicted`
+    /// that only change its balance.
+    ///
+    /// Nearly every transaction credits the block beneficiary, so predicting its balance makes
+    /// every speculative execution and reuse contend on one entry, while results rebase the
+    /// balances they do not observe anyway.
+    pub(crate) fn with_unpredicted_account(transaction_count: usize, unpredicted: Address) -> Self {
+        let mut results = Self::new(transaction_count);
+        results.predicted = Arc::new(PredictedState::new(transaction_count, Some(unpredicted)));
+        results
     }
 
     /// Returns the writes predicted by the stored results.
@@ -110,12 +182,31 @@ impl<T: EvmTypes> PrewarmResults<T> {
         tx: SpeculativeTx,
     ) {
         match reads.finish(balances, tx) {
-            Ok(reads) => self.set(index, |predicted| {
-                predicted.publish(index, &result.pending_state);
-                ResultSlot::Ready(Box::new(PrewarmedTx { result, reads, credit: None }))
-            }),
+            Ok(reads) => {
+                self.predicted.register_reads(index, &reads);
+                self.set(index, |predicted| {
+                    predicted.publish(index, &result.pending_state);
+                    ResultSlot::Ready(Box::new(PrewarmedTx { result, reads, credit: None }))
+                });
+                self.flag_if_stale(index);
+            }
             Err(reads) => self.reject(index, reads),
         }
+    }
+
+    /// Flags the transaction at `index` as possibly stale if its stored reads already differ from
+    /// the predictions, which earlier transactions may have changed while it executed, before its
+    /// reads were registered.
+    fn flag_if_stale(&self, index: usize) {
+        if self.needs_refresh(index) {
+            self.predicted.flag(index);
+        }
+    }
+
+    /// Takes the first transaction in `range` that a changed prediction may have made stale,
+    /// clearing its flag.
+    pub(super) fn take_maybe_stale(&self, range: core::ops::Range<usize>) -> Option<usize> {
+        self.predicted.take_flagged(range)
     }
 
     /// Stores the result of the pool transaction with `hash` as the prewarm result of the
@@ -158,7 +249,9 @@ impl<T: EvmTypes> PrewarmResults<T> {
         for read in &mut reads.accounts {
             read.balance = BalanceDependency::Exact;
         }
+        self.predicted.register_reads(index, &reads);
         self.set(index, |_| ResultSlot::Unusable(reads));
+        self.flag_if_stale(index);
     }
 
     /// Replaces the predicted writes of the transaction at `index` with the writes of its actual
@@ -170,7 +263,6 @@ impl<T: EvmTypes> PrewarmResults<T> {
             self.predicted.retract(index, &previous.result.pending_state);
         }
         self.predicted.publish(index, state);
-        self.predicted.generation.fetch_add(1, Ordering::Relaxed);
     }
 
     /// Replaces the slot of the transaction at `index`, retracting the writes of its previous
@@ -200,6 +292,12 @@ impl<T: EvmTypes> PrewarmResults<T> {
             ResultSlot::Executed => return false,
         };
         !reads.matches(&self.predicted, index)
+    }
+
+    /// Returns whether the transaction at `index` was executed, speculatively or by block
+    /// execution, so that its reads are loaded.
+    pub(super) fn has_executed(&self, index: usize) -> bool {
+        self.slots.get(index).is_some_and(|slot| !matches!(*slot.lock(), ResultSlot::Empty))
     }
 
     /// Takes the prewarm result of the transaction at `index` if it is ready and its reads match
@@ -233,12 +331,44 @@ impl<T: EvmTypes> PrewarmResults<T> {
             }
         };
         // The result stays published as the prediction of this transaction's writes.
-        if rebased {
+        if !rebased.is_empty() {
             // Later transactions read the rebased balances.
-            self.predicted.publish_accounts(index, &tx.result.pending_state);
-            self.predicted.generation.fetch_add(1, Ordering::Relaxed);
+            self.predicted.publish_rebased(index, &tx.result.pending_state, &rebased);
         }
         Ok(Ok(tx.result))
+    }
+}
+
+#[cfg(test)]
+impl<T: EvmTypes> PrewarmResults<T> {
+    /// Describes why the result at `index` would not be reused against `db`.
+    pub(super) fn explain<DB: DynDatabase + ?Sized>(&self, index: usize, db: &mut DB) -> String {
+        let slot = self.slots[index].lock();
+        let tx = match &*slot {
+            ResultSlot::Empty => return "empty".to_string(),
+            ResultSlot::Executed => return "executed".to_string(),
+            ResultSlot::Unusable(_) => return "unusable".to_string(),
+            ResultSlot::Ready(tx) => tx,
+        };
+        for read in &tx.reads.storage {
+            if db.get_storage(&read.address, &read.slot).unwrap() != read.value {
+                return format!("storage predicted={} {}", read.predicted, read.address)
+            }
+        }
+        for read in &tx.reads.accounts {
+            let current = db.get_account(&read.address).unwrap();
+            if read.compare(current.as_ref()) == AccountMatch::Differs {
+                return format!(
+                    "account predicted={} dependency={:?} {} speculative={:?} current={:?}",
+                    read.predicted,
+                    read.balance,
+                    read.address,
+                    read.info.as_ref().map(|i| (i.balance, i.nonce)),
+                    current.as_ref().map(|i| (i.balance, i.nonce)),
+                )
+            }
+        }
+        "valid".to_string()
     }
 }
 
@@ -269,7 +399,13 @@ struct BeneficiaryCredit {
 
 impl<T: EvmTypes> PrewarmedTx<T> {
     /// Validates recorded reads, then applies balance changes to the current state.
-    fn validate<DB: DynDatabase + ?Sized>(&mut self, db: &mut DB) -> DbResult<Option<bool>> {
+    ///
+    /// Returns the addresses of the accounts whose balances were rebased, or `None` if the result
+    /// cannot be reused.
+    fn validate<DB: DynDatabase + ?Sized>(
+        &mut self,
+        db: &mut DB,
+    ) -> DbResult<Option<Vec<Address>>> {
         for read in &self.reads.storage {
             if db.get_storage(&read.address, &read.slot)? != read.value {
                 return Ok(None)
@@ -327,11 +463,11 @@ impl<T: EvmTypes> PrewarmedTx<T> {
             rebased.push((POOL_BENEFICIARY, synthetic.clone(), synthetic));
             rebased.push((credit.beneficiary, Some(original), Some(current)));
         }
-        let changed = !rebased.is_empty();
+        let addresses = rebased.iter().map(|(address, ..)| *address).collect();
         for (address, original, current) in rebased {
             self.result.pending_state.insert_account(address, original, current);
         }
-        Ok(Some(changed))
+        Ok(Some(addresses))
     }
 }
 
@@ -519,40 +655,174 @@ pub(crate) struct SpeculativeTx {
 /// Writes of a key, sorted by the index of the transaction that made them.
 type Writes<T> = Vec<(usize, T)>;
 
+/// Predicted writes of an account and the transactions whose stored results read it.
+#[derive(Debug, Default)]
+struct AccountEntry {
+    /// Predicted writes, `None` if destroyed.
+    writes: Writes<Option<AccountInfo>>,
+    /// Transactions that cleared the account's storage by creating or destroying it.
+    cleared: Writes<()>,
+    /// Transactions whose stored results read the account.
+    readers: Vec<usize>,
+    /// Transactions whose stored results read one of the account's slots, which a predicted
+    /// clear changes.
+    slot_readers: Vec<usize>,
+}
+
+/// Predicted writes of a storage slot and the transactions whose stored results read it.
+#[derive(Debug, Default)]
+struct SlotEntry {
+    writes: Writes<U256>,
+    readers: Vec<usize>,
+}
+
 /// State writes predicted by speculative results, by transaction index.
 ///
 /// Speculative executions read the latest write predicted before their transaction, so that
-/// transactions depending on earlier ones in the block can still be reused.
+/// transactions depending on earlier ones in the block can still be reused. Each key's writes
+/// and readers share an entry, so that publishing a write and flagging its readers, or
+/// registering a reader, is one map operation.
 #[derive(Debug, Default)]
 pub(super) struct PredictedState {
-    /// Accounts, `None` if destroyed.
-    accounts: DashMap<Address, Writes<Option<AccountInfo>>, DefaultHashBuilder>,
-    storage: DashMap<(Address, U256), Writes<U256>, DefaultHashBuilder>,
-    /// Transactions that cleared an account's storage by creating or destroying it.
-    cleared: DashMap<Address, Writes<()>, DefaultHashBuilder>,
+    accounts: DashMap<Address, AccountEntry, DefaultHashBuilder>,
+    storage: DashMap<(Address, U256), SlotEntry, DefaultHashBuilder>,
+    /// Whether a predicted write cleared an account's storage, so that slot reads must check
+    /// [`AccountEntry::cleared`]. Most blocks have none.
+    any_cleared: AtomicBool,
     /// Bytecode deployed by predicted writes.
     code: DashMap<B256, Bytecode, DefaultHashBuilder>,
-    /// Number of actual execution or rebased account updates published by block execution.
+    /// Number of times new work arrived for idle prewarm workers: a queued transaction or a
+    /// possibly stale result.
     generation: AtomicUsize,
+    /// Account whose balance-only writes are not predicted.
+    unpredicted: Option<Address>,
+    /// Whether a changed prediction may have made the result of the transaction at each index
+    /// stale since it was last checked.
+    maybe_stale: Box<[AtomicBool]>,
+    /// Wakes idle prewarm workers when new work arrives.
+    work: Condvar,
+    /// Lock of [`Self::work`].
+    work_lock: Mutex<()>,
+    /// Number of prewarm workers waiting on [`Self::work`].
+    waiting: AtomicUsize,
 }
 
 impl PredictedState {
-    /// Returns the number of actual execution or rebased account updates published by block
-    /// execution.
+    fn new(transaction_count: usize, unpredicted: Option<Address>) -> Self {
+        Self {
+            unpredicted,
+            maybe_stale: (0..transaction_count).map(|_| AtomicBool::new(false)).collect(),
+            ..Default::default()
+        }
+    }
+
+    /// Registers the transaction at `index` as a reader of the keys in `reads`, so that changed
+    /// predictions of those keys flag it. Reads of the unpredicted account are not registered:
+    /// every transaction reads it, and its rare predicted writes flag all later transactions.
+    fn register_reads(&self, index: usize, reads: &ReadSet) {
+        let register = |readers: &mut Vec<usize>| {
+            if readers.last() != Some(&index) {
+                readers.push(index);
+            }
+        };
+        for read in &reads.accounts {
+            if self.unpredicted != Some(read.address) {
+                register(&mut self.accounts.entry(read.address).or_default().readers);
+            }
+        }
+        // Slots are mostly read a few per contract, so the contract is registered once.
+        let mut slot_accounts = Vec::new();
+        for read in &reads.storage {
+            register(&mut self.storage.entry((read.address, read.slot)).or_default().readers);
+            if self.unpredicted != Some(read.address) && !slot_accounts.contains(&read.address) {
+                slot_accounts.push(read.address);
+                register(&mut self.accounts.entry(read.address).or_default().slot_readers);
+            }
+        }
+    }
+
+    /// Flags the transaction at `index` as possibly stale, waking an idle worker to check it.
+    fn flag(&self, index: usize) {
+        if self.mark(index) {
+            self.wake(false);
+        }
+    }
+
+    /// Flags the transaction at `index` as possibly stale without waking a worker, returning
+    /// whether it was not flagged yet.
+    fn mark(&self, index: usize) -> bool {
+        self.maybe_stale.get(index).is_some_and(|flag| !flag.swap(true, Ordering::AcqRel))
+    }
+
+    /// Wakes idle workers for `flagged` newly flagged transactions.
+    fn wake_for(&self, flagged: usize) {
+        if flagged > 0 {
+            self.wake(flagged > 1);
+        }
+    }
+
+    /// Advances the work generation and wakes one idle prewarm worker, or all if `all` is set.
+    fn wake(&self, all: bool) {
+        self.generation.fetch_add(1, Ordering::SeqCst);
+        if self.waiting.load(Ordering::SeqCst) > 0 {
+            let _guard = self.work_lock.lock();
+            if all {
+                self.work.notify_all();
+            } else {
+                self.work.notify_one();
+            }
+        }
+    }
+
+    /// Blocks an idle prewarm worker until the work generation is no longer `generation`, or for
+    /// at most `timeout`.
+    fn wait_for_generation_change(&self, generation: usize, timeout: Duration) {
+        let mut guard = self.work_lock.lock();
+        self.waiting.fetch_add(1, Ordering::SeqCst);
+        if self.generation.load(Ordering::SeqCst) == generation {
+            self.work.wait_for(&mut guard, timeout);
+        }
+        self.waiting.fetch_sub(1, Ordering::SeqCst);
+    }
+
+    /// Flags the `readers` after `index` of a key a changed prediction wrote, without waking
+    /// workers, and returns how many were not flagged yet.
+    fn flag_readers(&self, readers: &[usize], index: usize) -> usize {
+        readers.iter().filter(|&&reader| reader > index && self.mark(reader)).count()
+    }
+
+    /// Takes the first flagged transaction in `range`, clearing its flag.
+    fn take_flagged(&self, range: core::ops::Range<usize>) -> Option<usize> {
+        let end = range.end.min(self.maybe_stale.len());
+        (range.start..end).find(|&index| {
+            self.maybe_stale[index].load(Ordering::Acquire) &&
+                self.maybe_stale[index].swap(false, Ordering::AcqRel)
+        })
+    }
+
+    /// Returns the number of times new work arrived for idle prewarm workers.
     pub(super) fn generation(&self) -> usize {
-        self.generation.load(Ordering::Relaxed)
+        self.generation.load(Ordering::SeqCst)
     }
 
     /// Returns the latest account write predicted before the transaction at `index`.
     fn account(&self, address: Address, index: usize) -> Option<Option<AccountInfo>> {
-        let writes = self.accounts.get(&address)?;
-        latest(&writes, index).map(|(_, account)| account.clone())
+        let entry = self.accounts.get(&address)?;
+        latest(&entry.writes, index).map(|(_, account)| account.clone())
     }
 
     /// Returns the latest storage value predicted before the transaction at `index`.
     fn storage(&self, address: Address, slot: U256, index: usize) -> Option<U256> {
-        let cleared = self.cleared.get(&address).and_then(|w| latest(&w, index).map(|(i, _)| *i));
-        let written = self.storage.get(&(address, slot)).and_then(|w| latest(&w, index).copied());
+        let cleared = self
+            .any_cleared
+            .load(Ordering::Acquire)
+            .then(|| self.accounts.get(&address))
+            .flatten()
+            .and_then(|entry| latest(&entry.cleared, index).map(|(i, _)| *i));
+        let written = self
+            .storage
+            .get(&(address, slot))
+            .and_then(|entry| latest(&entry.writes, index).copied());
         match (written, cleared) {
             (Some((written, value)), Some(cleared)) if written >= cleared => Some(value),
             (_, Some(_)) => Some(U256::ZERO),
@@ -575,9 +845,20 @@ impl PredictedState {
         self.update(index, state.account_changes(), true);
     }
 
-    /// Republishes rebased account balances.
-    fn publish_accounts(&self, index: usize, state: &PendingState) {
-        self.update(index, state.account_changes(), true);
+    /// Republishes the rebased balances of the accounts in `rebased`.
+    fn publish_rebased(&self, index: usize, state: &PendingState, rebased: &[Address]) {
+        let mut flagged = 0;
+        for account in state.account_changes() {
+            if self.unpredicted == Some(account.address) || !rebased.contains(&account.address) {
+                continue
+            }
+            if let Some(current) = account.current {
+                let mut entry = self.accounts.entry(account.address).or_default();
+                flagged += self.flag_readers(&entry.readers, index);
+                write(&mut entry.writes, index, Some(Some(without_code(current))));
+            }
+        }
+        self.wake_for(flagged);
     }
 
     /// Retracts the transaction's predicted writes.
@@ -592,19 +873,36 @@ impl PredictedState {
         state: impl IntoIterator<Item = AccountChanges<'a>>,
         publish: bool,
     ) {
+        let mut flagged = 0;
         for account in state {
             if !account.is_changed() {
                 continue
             }
             let address = account.address;
-            if account.storage.wiped || account.created || account.current.is_none() {
-                write(&mut self.cleared.entry(address).or_default(), index, publish.then_some(()));
+            let cleared = account.storage.wiped || account.created || account.current.is_none();
+            let mut entry = self.accounts.entry(address).or_default();
+            if cleared {
+                self.any_cleared.store(true, Ordering::Release);
+                flagged += self.flag_readers(&entry.slot_readers, index);
+                write(&mut entry.cleared, index, publish.then_some(()));
             }
-            write(
-                &mut self.accounts.entry(address).or_default(),
-                index,
-                publish.then(|| account.current.map(without_code)),
-            );
+            // Balance-only writes of the unpredicted account are rebased instead.
+            if !cleared &&
+                self.unpredicted == Some(address) &&
+                account.storage.slots.is_empty() &&
+                account.original.zip(account.current).is_some_and(|(original, current)| {
+                    original.nonce == current.nonce && original.code_hash == current.code_hash
+                })
+            {
+                continue
+            }
+            if self.unpredicted == Some(address) {
+                flagged += (index + 1..self.maybe_stale.len()).filter(|&i| self.mark(i)).count();
+            } else {
+                flagged += self.flag_readers(&entry.readers, index);
+            }
+            write(&mut entry.writes, index, publish.then(|| account.current.map(without_code)));
+            drop(entry);
             if account.current.is_none() {
                 continue
             }
@@ -612,14 +910,13 @@ impl PredictedState {
                 if (account.storage.wiped && !value.value.current.is_zero()) ||
                     (!account.storage.wiped && value.value.original != value.value.current)
                 {
-                    write(
-                        &mut self.storage.entry((address, slot)).or_default(),
-                        index,
-                        publish.then_some(value.value.current),
-                    );
+                    let mut entry = self.storage.entry((address, slot)).or_default();
+                    flagged += self.flag_readers(&entry.readers, index);
+                    write(&mut entry.writes, index, publish.then_some(value.value.current));
                 }
             }
         }
+        self.wake_for(flagged);
     }
 }
 
@@ -871,10 +1168,22 @@ impl<DB: Database> Database for RecordingDb<DB> {
         let predicted =
             state.predicted.as_ref().and_then(|(state, index)| state.account(*address, *index));
         let is_predicted = predicted.is_some();
-        let account = match predicted {
+        let mut account = match predicted {
             Some(account) => account,
             None => self.inner.get_account(address)?,
         };
+        // An unpredicted account is credited by earlier transactions, so it is speculated as
+        // non-empty: reuse rebases a result's balance change onto the actual balance, but not
+        // across an empty account, which execution treats differently.
+        if !is_predicted &&
+            state
+                .predicted
+                .as_ref()
+                .is_some_and(|(state, _)| state.unpredicted == Some(*address)) &&
+            account.as_ref().is_none_or(|info| info.balance.is_zero())
+        {
+            account.get_or_insert_with(AccountInfo::empty).balance = U256::from(1);
+        }
         if let Some(reads) = &mut state.reads {
             reads.accounts.push(AccountRead {
                 address: *address,
@@ -1007,6 +1316,10 @@ impl BalanceTracker {
 }
 
 impl<T: EvmTypes> Inspector<T> for BalanceTracker {
+    fn inspector_config(&self) -> InspectorConfig {
+        InspectorConfig::new().with_steps(BALANCE_TRACKER_STEPS)
+    }
+
     fn step(&mut self, interp: &mut Interpreter<'_, '_, T>) {
         let address = match interp.opcode() {
             op::BALANCE => {
@@ -1286,10 +1599,28 @@ mod tests {
         /// Executes the transactions at the indices in `order`, then refreshes stale results
         /// among them in block order.
         fn new(txs: &'a [Recovered<TransactionSigned>], order: &[usize]) -> Self {
+            Self::with_beneficiary(txs, order, BENEFICIARY, false)
+        }
+
+        /// Like [`Self::new`], for blocks with `beneficiary`, whose balance-only writes are not
+        /// predicted if `unpredicted` is set.
+        fn with_beneficiary(
+            txs: &'a [Recovered<TransactionSigned>],
+            order: &[usize],
+            beneficiary: Address,
+            unpredicted: bool,
+        ) -> Self {
             let recording = RecordingHandle::default();
+            let mut env = evm_env(true);
+            env.block.beneficiary = beneficiary;
             let evm = EthEvmConfig::mainnet()
-                .evm_with_env(RecordingDb::new(parent_state(), recording.clone()), evm_env(true));
-            let mut prewarm = Self { txs, results: Results::new(txs.len()), evm, recording };
+                .evm_with_env(RecordingDb::new(parent_state(), recording.clone()), env);
+            let results = if unpredicted {
+                Results::with_unpredicted_account(txs.len(), beneficiary)
+            } else {
+                Results::new(txs.len())
+            };
+            let mut prewarm = Self { txs, results, evm, recording };
             for &index in order {
                 prewarm.run(index);
             }
@@ -1752,6 +2083,25 @@ mod tests {
     }
 
     #[test]
+    fn speculation_ends_when_its_guard_drops() {
+        let results = Results::new(1);
+        let speculation = results.begin_speculation(0).unwrap();
+        assert!(results.is_speculating(0));
+        assert!(results.begin_speculation(0).is_none());
+        drop(speculation);
+        assert!(!results.is_speculating(0));
+
+        // A worker that panics ends its speculation, so block execution does not wait forever.
+        let panicked = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _speculation = results.begin_speculation(0).unwrap();
+            panic!("worker panicked");
+        }));
+        assert!(panicked.is_err());
+        assert!(!results.is_speculating(0));
+        assert!(results.begin_speculation(1).is_none());
+    }
+
+    #[test]
     fn keeps_stale_results_unchanged() {
         let txs = [tx(1, 0, NOOP, 0)];
         let prewarm = Prewarm::new(&txs, &[0]);
@@ -1875,5 +2225,69 @@ mod tests {
         let mut balances = BalanceTracker { read_failed: true, ..Default::default() };
         let tx = tx(1, 0, NOOP, 0);
         assert!(reads.finish(&mut balances, SpeculativeTx::new(tx.signer(), tx.inner())).is_err());
+    }
+
+    /// Targets of the generated transactions, which depend on each other through balances,
+    /// nonces, storage, the beneficiary and destroyed accounts.
+    const FUZZ_TARGETS: [Address; 14] = [
+        NOOP,
+        COUNTER,
+        BENEFICIARY_BALANCE_READER,
+        SELF_BALANCE_READER,
+        FORWARDER,
+        SELFDESTRUCTER,
+        TIMESTAMP_READER,
+        BENEFICIARY_BALANCE_BY_ADDRESS,
+        EMPTY,
+        ZERO_BALANCE,
+        BENEFICIARY,
+        Address::repeat_byte(1),
+        Address::repeat_byte(2),
+        Address::repeat_byte(0x99),
+    ];
+
+    /// Beneficiaries of the generated blocks: funded, a sender, empty, absent and a contract.
+    const FUZZ_BENEFICIARIES: [Address; 5] =
+        [BENEFICIARY, Address::repeat_byte(2), EMPTY, Address::repeat_byte(0x99), COUNTER];
+
+    proptest::proptest! {
+        #![proptest_config(proptest::prelude::ProptestConfig::with_cases(512))]
+
+        /// Reusing results speculated in any order produces the output of sequential execution.
+        #[test]
+        fn fuzz_reuse_matches_sequential_execution(
+            calls in proptest::collection::vec(
+                (1u8..=4, 0..FUZZ_TARGETS.len(), 0u64..20, proptest::bool::ANY),
+                1..24,
+            ),
+            beneficiary in 0..FUZZ_BENEFICIARIES.len(),
+            order_seed in proptest::prelude::any::<u64>(),
+            publish in proptest::bool::ANY,
+            unpredicted in proptest::bool::ANY,
+        ) {
+            let mut nonces = [0u64; 5];
+            let txs = calls
+                .iter()
+                .map(|&(from, target, value, low_gas)| {
+                    let nonce = nonces[from as usize];
+                    nonces[from as usize] += 1;
+                    let gas_limit = if low_gas { 30_000 } else { 100_000 };
+                    tx_with_gas_limit(from, nonce, FUZZ_TARGETS[target], value, gas_limit)
+                })
+                .collect::<Vec<_>>();
+            let mut order = (0..txs.len()).collect::<Vec<_>>();
+            let mut rng = order_seed;
+            for i in (1..order.len()).rev() {
+                rng = rng.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+                order.swap(i, (rng >> 33) as usize % (i + 1));
+            }
+            let beneficiary = FUZZ_BENEFICIARIES[beneficiary];
+            let mut prewarm = Prewarm::with_beneficiary(&txs, &order, beneficiary, unpredicted);
+            let reused = execute(&txs, Some(&mut prewarm), publish, beneficiary);
+            let expected = execute(&txs, None, false, beneficiary);
+            proptest::prop_assert_eq!(reused.receipts, expected.receipts);
+            proptest::prop_assert_eq!(reused.bundle, expected.bundle);
+            proptest::prop_assert_eq!(reused.changes, expected.changes);
+        }
     }
 }

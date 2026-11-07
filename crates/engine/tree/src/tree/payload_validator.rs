@@ -172,6 +172,10 @@ use tracing::{debug, debug_span, error, info, instrument, trace, warn, Level, Sp
 
 pub use crate::tree::types::ValidationOutcome;
 
+/// How long block execution spins on an in-flight speculative execution of a transaction before it
+/// yields its thread while waiting for the result.
+const SPECULATION_SPIN: Duration = Duration::from_micros(300);
+
 /// Multiplier over the parent's gas limit beyond which a payload must pass pre-execution
 /// validation.
 const MAX_EXPECTED_GAS_LIMIT_MULTIPLIER: u64 = 2;
@@ -714,7 +718,9 @@ where
         // as transactions complete, allowing parallel computation during execution.
         let execute_block_start = Instant::now();
         let execution_result = if parallel_bal_execution {
-            self.execute_block_bal(env, &input, &handle, &make_state_provider)
+            let result = self.execute_block_bal(env, &input, &handle, &make_state_provider);
+            handle.stop_prewarming_execution();
+            result
         } else {
             let state_provider = make_state_provider(false);
             match state_provider {
@@ -735,9 +741,6 @@ where
         let (output, senders, receipt_root_rx, executed_bal) = ensure_ok!(execution_result);
         let (built_bal, evm_bal) =
             executed_bal.map(|ExecutedBal { alloy, evm }| (alloy, evm)).unzip();
-
-        // After executing the block we can stop prewarming transactions
-        handle.stop_prewarming_execution();
 
         // Create ExecutionOutcome early so we can terminate caching before validation and state
         // root computation. Using Arc allows sharing with both the caching task and the deferred
@@ -1062,6 +1065,10 @@ where
                     &executed_tx_index,
                     prewarm_results.as_deref(),
                 )?;
+                // Prewarming only helps transactions that are not executed yet. Stopping it here
+                // instead of after the post-execution changes leaves its cores to the state root,
+                // which still fetches the last proofs and hashes the last tries.
+                handle.stop_prewarming_execution();
 
                 let post_exec_start = Instant::now();
                 let (output, built_bal) = executor.finish_with_prepared_block_access_list()?;
@@ -1257,7 +1264,23 @@ where
             let index = senders.len() - 1;
             match prewarm_results {
                 Some(results) => {
-                    let outcome = self.commit_prewarm_result(executor, results, index, tx.tx())?;
+                    let mut outcome =
+                        self.commit_prewarm_result(executor, results, index, tx.tx())?;
+                    // A prewarm worker executing the transaction for the first time is ahead of
+                    // block execution, which would have to load the same state. Block execution
+                    // waits for its result: executing the transaction beside it reads the same
+                    // state again, one cold read at a time, and slows both.
+                    if outcome == Err(ReuseMiss::Missing) && results.is_speculating(index) {
+                        let wait_start = Instant::now();
+                        while results.is_speculating(index) {
+                            if wait_start.elapsed() < SPECULATION_SPIN {
+                                std::hint::spin_loop();
+                            } else {
+                                std::thread::yield_now();
+                            }
+                        }
+                        outcome = self.commit_prewarm_result(executor, results, index, tx.tx())?;
+                    }
                     if outcome.is_err() {
                         // Later prewarm results are refreshed against the actual writes.
                         let result = executor.execute_transaction_without_commit(tx)?;

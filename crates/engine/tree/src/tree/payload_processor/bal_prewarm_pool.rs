@@ -1,14 +1,15 @@
 //! BAL read-set prewarming pool.
 
-use alloy_primitives::{Address, StorageKey};
+use alloy_primitives::{map::AddressMap, Address, StorageKey, B256};
 use reth_execution_cache::{CachedStateProvider, ExecutionCache, TxPoolPrewarmCacheSnapshot};
 use reth_provider::{EvmStateProvider, EvmStateProviderBox, ProviderResult};
 use std::{
     sync::{
         atomic::{AtomicUsize, Ordering},
-        Arc,
+        Arc, Condvar, Mutex,
     },
     thread::JoinHandle,
+    time::{Duration, Instant},
 };
 use tokio::sync::oneshot;
 use tracing::trace;
@@ -22,6 +23,7 @@ pub type BuildProviderFn = dyn Fn() -> ProviderResult<EvmStateProviderBox> + Sen
 enum PrewarmTarget {
     Account(Address, Box<[StorageKey]>),
     Storage(Address, Box<[StorageKey]>),
+    Code(B256),
 }
 
 /// A message in a worker's queue. The per-block lifecycle is explicit and ordered (the queue is
@@ -33,8 +35,9 @@ enum PrewarmMsg {
         caches: ExecutionCache,
         txpool_snapshot: Option<TxPoolPrewarmCacheSnapshot>,
     },
-    /// Warm one target into the held provider's cache. Ignored if no provider is held.
-    Warm(PrewarmTarget),
+    /// Warm one target into the held provider's cache, then count it done on the latch, if any.
+    /// Ignored if no provider is held.
+    Warm(PrewarmTarget, Option<Arc<WarmLatch>>),
     /// Drop the held provider (and its read txn).
     EndBlock(Arc<SendOnDrop>),
 }
@@ -46,6 +49,8 @@ pub struct BalPrewarmPool {
     workers: Vec<crossbeam_channel::Sender<PrewarmMsg>>,
     /// Round-robin cursor for distributing warm requests across workers.
     next: AtomicUsize,
+    /// Contracts whose storage a bulk load read recently, and when.
+    loaded_storages: Mutex<AddressMap<Instant>>,
     _handles: Vec<JoinHandle<()>>,
 }
 
@@ -66,7 +71,12 @@ impl BalPrewarmPool {
             );
         }
         trace!(target: "engine::tree::bal_prewarm_pool", num_threads, "BalPrewarmPool spawned");
-        Arc::new(Self { workers, next: AtomicUsize::new(0), _handles: handles })
+        Arc::new(Self {
+            workers,
+            next: AtomicUsize::new(0),
+            loaded_storages: Default::default(),
+            _handles: handles,
+        })
     }
 
     /// Begins a block: hands every worker the provider builder and shared cache so each opens its
@@ -105,6 +115,60 @@ impl BalPrewarmPool {
         }
     }
 
+    /// Fire-and-forget: warm storage slots of an account without loading the account.
+    pub fn warm_storage(&self, addr: Address, slots: impl IntoIterator<Item = StorageKey>) {
+        let mut slots = slots.into_iter();
+        loop {
+            let batch: Box<[StorageKey]> = slots.by_ref().take(WARM_BATCH_SIZE).collect();
+            if batch.is_empty() {
+                break
+            }
+            self.send_warm(PrewarmTarget::Storage(addr, batch));
+        }
+    }
+
+    /// Fire-and-forget: warm the bytecode with `hash`.
+    pub fn warm_code(&self, hash: B256) {
+        self.send_warm(PrewarmTarget::Code(hash));
+    }
+
+    /// Warms `accounts`, `storage` slots and `code` in parallel across a share of the workers and
+    /// returns a latch that [`WarmLatch::wait`] blocks on until all of them are loaded.
+    ///
+    /// Only one in `WARM_ALL_SHARE` workers takes these loads, which bounds how many of them
+    /// queue on the disk ahead of block execution's own reads of a chain of dependent keys.
+    pub fn warm_all(
+        &self,
+        accounts: impl IntoIterator<Item = Address>,
+        storage: &[(Address, StorageKey)],
+        code: impl IntoIterator<Item = B256>,
+    ) -> Arc<WarmLatch> {
+        let latch = Arc::new(WarmLatch::default());
+        let send = |target| {
+            latch.remaining.fetch_add(1, Ordering::AcqRel);
+            let workers = (self.workers.len() / WARM_ALL_SHARE).max(1);
+            let i = self.next.fetch_add(1, Ordering::Relaxed) % workers;
+            if self.workers[i].send(PrewarmMsg::Warm(target, Some(Arc::clone(&latch)))).is_err() {
+                latch.done();
+            }
+        };
+        for address in accounts {
+            send(PrewarmTarget::Account(address, Box::default()));
+        }
+        for chunk in storage.chunk_by(|a, b| a.0 == b.0) {
+            for batch in chunk.chunks(WARM_BATCH_SIZE) {
+                send(PrewarmTarget::Storage(
+                    batch[0].0,
+                    batch.iter().map(|(_, slot)| *slot).collect(),
+                ));
+            }
+        }
+        for hash in code {
+            send(PrewarmTarget::Code(hash));
+        }
+        latch
+    }
+
     /// Ends the block: every worker drops its provider (and read txn) once it has drained the warm
     /// requests queued ahead of this message.
     ///
@@ -121,9 +185,47 @@ impl BalPrewarmPool {
         rx.blocking_recv().expect("BAL prewarm pool dropped without signaling completion");
     }
 
+    /// Claims a bulk load of the storage of `address`, returning `false` if another load claimed
+    /// it in the last `STORAGE_RELOAD_AFTER`: its pages are likely still cached.
+    pub fn claim_storage_load(&self, address: Address) -> bool {
+        let now = Instant::now();
+        let mut loaded = self.loaded_storages.lock().unwrap_or_else(|err| err.into_inner());
+        if loaded.get(&address).is_some_and(|at| now.duration_since(*at) < STORAGE_RELOAD_AFTER) {
+            return false
+        }
+        loaded.retain(|_, at| now.duration_since(*at) < STORAGE_RELOAD_AFTER);
+        loaded.insert(address, now);
+        true
+    }
+
     fn send_warm(&self, target: PrewarmTarget) {
         let i = self.next.fetch_add(1, Ordering::Relaxed) % self.workers.len();
-        let _ = self.workers[i].send(PrewarmMsg::Warm(target));
+        let _ = self.workers[i].send(PrewarmMsg::Warm(target, None));
+    }
+}
+
+/// Counts outstanding warm requests of one [`BalPrewarmPool::warm_all`] call.
+#[derive(Debug, Default)]
+pub struct WarmLatch {
+    remaining: AtomicUsize,
+    lock: Mutex<()>,
+    loaded: Condvar,
+}
+
+impl WarmLatch {
+    /// Blocks until every request of the call is loaded.
+    pub fn wait(&self) {
+        let mut guard = self.lock.lock().unwrap_or_else(|err| err.into_inner());
+        while self.remaining.load(Ordering::Acquire) > 0 {
+            guard = self.loaded.wait(guard).unwrap_or_else(|err| err.into_inner());
+        }
+    }
+
+    fn done(&self) {
+        if self.remaining.fetch_sub(1, Ordering::AcqRel) == 1 {
+            let _guard = self.lock.lock().unwrap_or_else(|err| err.into_inner());
+            self.loaded.notify_all();
+        }
     }
 }
 
@@ -149,6 +251,16 @@ impl BalPrewarmPool {
 /// This should explain why this particular value is picked.
 pub const DEFAULT_BAL_PREWARM_THREADS: usize = 128;
 
+/// How long a contract's storage counts as loaded after a bulk load.
+const STORAGE_RELOAD_AFTER: Duration = Duration::from_secs(60);
+
+/// One in this many workers takes the loads of [`BalPrewarmPool::warm_all`].
+///
+/// On derek, which reads blocks from a cold page cache, loading probed keys on all 128 workers
+/// slowed blocks whose heaviest transaction walks a chain of dependent reads; a quarter of them cut
+/// p99 by 10%.
+const WARM_ALL_SHARE: usize = 4;
+
 /// Number of storage slots carried by one warm message.
 ///
 /// Batching amortizes the send over many slots and hands the worker a run of slots that live
@@ -157,6 +269,8 @@ pub const DEFAULT_BAL_PREWARM_THREADS: usize = 128;
 const WARM_BATCH_SIZE: usize = 8;
 
 fn prewarm_loop(rx: crossbeam_channel::Receiver<PrewarmMsg>) {
+    // Warming only loads ahead of execution, which must not wait for it.
+    reth_tasks::utils::lower_background_worker_priority();
     // The provider (and its MDBX read txn) held for the current block, between `BeginBlock` and
     // `EndBlock`. `None` while idle, so no read txn is pinned across the inter-block gap.
     let mut provider: Option<CachedStateProvider<EvmStateProviderBox>> = None;
@@ -176,7 +290,8 @@ fn prewarm_loop(rx: crossbeam_channel::Receiver<PrewarmMsg>) {
                     }
                 };
             }
-            PrewarmMsg::Warm(target) => {
+            PrewarmMsg::Warm(target, latch) => {
+                let _latch = LatchGuard(latch);
                 let Some(provider) = provider.as_ref() else { continue };
                 match target {
                     PrewarmTarget::Account(addr, slots) => {
@@ -190,12 +305,26 @@ fn prewarm_loop(rx: crossbeam_channel::Receiver<PrewarmMsg>) {
                             let _ = provider.storage(addr, slot);
                         }
                     }
+                    PrewarmTarget::Code(hash) => {
+                        let _ = provider.bytecode_by_hash(&hash);
+                    }
                 }
             }
             PrewarmMsg::EndBlock(end_tx) => {
                 provider = None;
                 drop(end_tx);
             }
+        }
+    }
+}
+
+/// Counts a warm request done when dropped, whether or not it was loaded.
+struct LatchGuard(Option<Arc<WarmLatch>>);
+
+impl Drop for LatchGuard {
+    fn drop(&mut self) {
+        if let Some(latch) = &self.0 {
+            latch.done();
         }
     }
 }
@@ -209,5 +338,38 @@ impl Drop for SendOnDrop {
         if let Some(sender) = self.sender.take() {
             let _ = sender.send(());
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use alloy_primitives::U256;
+
+    #[test]
+    fn warm_latch_waits_for_every_request() {
+        let latch = Arc::new(WarmLatch::default());
+        latch.remaining.store(3, Ordering::Release);
+        let workers = (0..3)
+            .map(|_| {
+                let latch = Arc::clone(&latch);
+                std::thread::spawn(move || drop(LatchGuard(Some(latch))))
+            })
+            .collect::<Vec<_>>();
+        latch.wait();
+        assert_eq!(latch.remaining.load(Ordering::Acquire), 0);
+        for worker in workers {
+            worker.join().unwrap();
+        }
+    }
+
+    #[test]
+    fn warm_all_returns_once_requests_are_dropped_without_a_provider() {
+        let pool = BalPrewarmPool::new(4);
+        let slots = (0..20u64)
+            .map(|i| (Address::ZERO, StorageKey::from(U256::from(i))))
+            .collect::<Vec<_>>();
+        // No block was begun, so the workers drop every request; the latch still completes.
+        pool.warm_all([Address::ZERO], &slots, [B256::ZERO]).wait();
     }
 }

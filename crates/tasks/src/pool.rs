@@ -183,6 +183,8 @@ pub struct WorkerPool {
     metrics: OnceLock<WorkerPoolMetrics>,
     num_threads: usize,
     thread_name_prefix: &'static str,
+    /// Runs on each thread of the pool when it starts.
+    thread_start: Option<fn()>,
 }
 
 impl WorkerPool {
@@ -191,19 +193,36 @@ impl WorkerPool {
     /// The underlying rayon pool is not created until the first method that requires it is called.
     /// Thread names follow the pattern `"{prefix}-{index:02}"`.
     pub const fn new(num_threads: usize, thread_name_prefix: &'static str) -> Self {
-        Self { pool: OnceLock::new(), metrics: OnceLock::new(), num_threads, thread_name_prefix }
+        Self {
+            pool: OnceLock::new(),
+            metrics: OnceLock::new(),
+            num_threads,
+            thread_name_prefix,
+            thread_start: None,
+        }
+    }
+
+    /// Runs `thread_start` on each thread of the pool when it starts, before it runs any work.
+    ///
+    /// Threads start when the pool is created on first access, and inherit the priority of the
+    /// thread that accessed it.
+    pub const fn with_thread_start(mut self, thread_start: fn()) -> Self {
+        self.thread_start = Some(thread_start);
+        self
     }
 
     /// Returns a reference to the underlying rayon pool, creating it on first access.
     fn pool(&self) -> &rayon::ThreadPool {
         self.pool.get_or_init(|| {
             let prefix = self.thread_name_prefix;
-            build_pool_with_panic_handler(
-                rayon::ThreadPoolBuilder::new()
-                    .num_threads(self.num_threads)
-                    .thread_name(move |i| format!("{prefix}-{i:02}")),
-            )
-            .unwrap_or_else(|err| panic!("failed to build {prefix} worker pool: {err}"))
+            let mut builder = rayon::ThreadPoolBuilder::new()
+                .num_threads(self.num_threads)
+                .thread_name(move |i| format!("{prefix}-{i:02}"));
+            if let Some(thread_start) = self.thread_start {
+                builder = builder.start_handler(move |_| thread_start());
+            }
+            build_pool_with_panic_handler(builder)
+                .unwrap_or_else(|err| panic!("failed to build {prefix} worker pool: {err}"))
         })
     }
 
@@ -581,6 +600,239 @@ impl Drop for WorkerStatefulPool {
     }
 }
 
+/// A pool of named threads that run queued closures and wait on the queue while idle.
+///
+/// The threads of a [`WorkerPool`] look for work while any thread of the pool is busy, which
+/// costs CPU when the pool runs a few long-running loops that block on channels of their own,
+/// such as proof workers, or a stream of small jobs, such as storage trie passes. The threads of
+/// this pool sleep until a closure is queued.
+#[derive(Debug)]
+pub struct BlockingWorkerPool {
+    shared: OnceLock<Arc<BlockingWorkerQueue>>,
+    num_threads: usize,
+    thread_name_prefix: &'static str,
+    /// Runs on each thread of the pool when it starts.
+    thread_start: Option<fn()>,
+}
+
+impl BlockingWorkerPool {
+    /// Creates a pool of `num_threads` threads named `"{prefix}-{index:02}"`, started on first use.
+    pub const fn new(num_threads: usize, thread_name_prefix: &'static str) -> Self {
+        Self { shared: OnceLock::new(), num_threads, thread_name_prefix, thread_start: None }
+    }
+
+    /// Runs `thread_start` on each thread of the pool when it starts, before it runs any work.
+    pub const fn with_thread_start(mut self, thread_start: fn()) -> Self {
+        self.thread_start = Some(thread_start);
+        self
+    }
+
+    /// Returns the number of threads the pool is configured with, without starting it.
+    pub const fn num_threads(&self) -> usize {
+        self.num_threads
+    }
+
+    /// Returns `true` if the pool's threads have been started.
+    pub fn is_initialized(&self) -> bool {
+        self.shared.get().is_some()
+    }
+
+    /// Runs `f` on `num_threads` threads of the pool, at most all of them, and returns once every
+    /// run returned.
+    ///
+    /// A panic in `f` is resumed on the calling thread after the other runs returned.
+    pub fn broadcast(&self, num_threads: usize, f: impl Fn() + Send + Sync + 'static) {
+        let runs = num_threads.min(self.num_threads);
+        if runs == 0 {
+            return
+        }
+        let job = Arc::new(BroadcastJob {
+            run: Box::new(f),
+            state: parking_lot::Mutex::new((runs, None)),
+            done: parking_lot::Condvar::new(),
+        });
+        let queue = self.queue();
+        queue.jobs.lock().extend((0..runs).map(|_| {
+            let job = Arc::clone(&job);
+            Box::new(move || job.run_once()) as QueuedJob
+        }));
+        queue.queued.notify_all();
+
+        let mut state = job.state.lock();
+        while state.0 > 0 {
+            job.done.wait(&mut state);
+        }
+        if let Some(payload) = state.1.take() {
+            std::panic::resume_unwind(payload);
+        }
+    }
+
+    /// Runs every job, on the calling thread and on threads of the pool, and returns once every
+    /// job returned.
+    ///
+    /// The calling thread takes jobs as well, so the jobs progress while every thread of the pool
+    /// is busy, and a thread of this pool may call this without waiting on itself. A panic in a
+    /// job is resumed on the calling thread after the other jobs returned.
+    pub fn run_all(&self, jobs: Vec<Box<dyn FnOnce() + Send>>) {
+        let helpers = jobs.len().saturating_sub(1).min(self.num_threads);
+        let shared = Arc::new(SharedJobs {
+            state: parking_lot::Mutex::new((jobs.len(), None)),
+            jobs: parking_lot::Mutex::new(jobs),
+            done: parking_lot::Condvar::new(),
+        });
+        if helpers > 0 {
+            let queue = self.queue();
+            queue.jobs.lock().extend((0..helpers).map(|_| {
+                let shared = Arc::clone(&shared);
+                Box::new(move || shared.run_until_empty()) as QueuedJob
+            }));
+            for _ in 0..helpers {
+                queue.queued.notify_one();
+            }
+        }
+        shared.run_until_empty();
+
+        let mut state = shared.state.lock();
+        while state.0 > 0 {
+            shared.done.wait(&mut state);
+        }
+        if let Some(payload) = state.1.take() {
+            std::panic::resume_unwind(payload);
+        }
+    }
+
+    /// Runs `f` on a thread of the pool.
+    ///
+    /// `f` handles its own panics: a panic is logged and the thread keeps serving the queue.
+    pub fn spawn(&self, f: impl FnOnce() + Send + 'static) {
+        let prefix = self.thread_name_prefix;
+        let queue = self.queue();
+        queue.jobs.lock().push_back(Box::new(move || {
+            if catch_unwind(AssertUnwindSafe(f)).is_err() {
+                tracing::error!(
+                    target: "tasks",
+                    pool = prefix,
+                    "Blocking worker pool job panicked"
+                );
+            }
+        }));
+        queue.queued.notify_one();
+    }
+
+    /// Returns the pool's queue, starting its threads on first use.
+    fn queue(&self) -> &BlockingWorkerQueue {
+        self.shared.get_or_init(|| {
+            let queue = Arc::new(BlockingWorkerQueue::default());
+            for index in 0..self.num_threads {
+                let queue = Arc::clone(&queue);
+                let thread_start = self.thread_start;
+                thread::Builder::new()
+                    .name(format!("{}-{index:02}", self.thread_name_prefix))
+                    .spawn(move || {
+                        if let Some(thread_start) = thread_start {
+                            thread_start();
+                        }
+                        queue.run();
+                    })
+                    .unwrap_or_else(|err| {
+                        panic!("failed to spawn {} worker thread: {err}", self.thread_name_prefix)
+                    });
+            }
+            queue
+        })
+    }
+}
+
+/// A closure queued for a thread of a [`BlockingWorkerPool`].
+type QueuedJob = Box<dyn FnOnce() + Send>;
+
+/// The closures queued for the threads of a [`BlockingWorkerPool`].
+#[derive(Default)]
+struct BlockingWorkerQueue {
+    jobs: parking_lot::Mutex<std::collections::VecDeque<QueuedJob>>,
+    queued: parking_lot::Condvar,
+}
+
+impl std::fmt::Debug for BlockingWorkerQueue {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("BlockingWorkerQueue").finish_non_exhaustive()
+    }
+}
+
+impl BlockingWorkerQueue {
+    /// Runs queued closures on the current thread, forever.
+    fn run(&self) {
+        loop {
+            let job = {
+                let mut jobs = self.jobs.lock();
+                loop {
+                    if let Some(job) = jobs.pop_front() {
+                        break job
+                    }
+                    self.queued.wait(&mut jobs);
+                }
+            };
+            job();
+        }
+    }
+}
+
+/// A closure broadcast to some threads of a [`BlockingWorkerPool`].
+struct BroadcastJob {
+    run: Box<dyn Fn() + Send + Sync>,
+    /// Runs that have not returned yet, and the first panic of a run.
+    state: parking_lot::Mutex<(usize, Option<Box<dyn Any + Send>>)>,
+    done: parking_lot::Condvar,
+}
+
+impl BroadcastJob {
+    /// Runs the closure once and counts the run as returned.
+    fn run_once(&self) {
+        let result = catch_unwind(AssertUnwindSafe(|| (self.run)()));
+        let mut state = self.state.lock();
+        state.0 -= 1;
+        if let Err(payload) = result {
+            state.1.get_or_insert(payload);
+        }
+        if state.0 == 0 {
+            self.done.notify_all();
+        }
+    }
+}
+
+/// Jobs handed to [`BlockingWorkerPool::run_all`], taken by the calling thread and the pool's
+/// threads until none are left.
+struct SharedJobs {
+    jobs: parking_lot::Mutex<Vec<QueuedJob>>,
+    /// Jobs that have not returned yet, and the first panic of a job.
+    state: parking_lot::Mutex<(usize, Option<Box<dyn Any + Send>>)>,
+    done: parking_lot::Condvar,
+}
+
+impl SharedJobs {
+    /// Runs jobs until none are left to take.
+    fn run_until_empty(&self) {
+        loop {
+            let Some(job) = self.jobs.lock().pop() else { return };
+            let result = catch_unwind(AssertUnwindSafe(job));
+            let mut state = self.state.lock();
+            state.0 -= 1;
+            if let Err(payload) = result {
+                state.1.get_or_insert(payload);
+            }
+            if state.0 == 0 {
+                self.done.notify_all();
+            }
+        }
+    }
+}
+
+impl std::fmt::Debug for BroadcastJob {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("BroadcastJob").finish_non_exhaustive()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -603,6 +855,108 @@ mod tests {
         });
         let res = res.await;
         assert!(res.is_err());
+    }
+
+    #[test]
+    fn blocking_worker_pool_broadcast() {
+        let pool = BlockingWorkerPool::new(4, "test-blocking");
+        let runs = Arc::new(AtomicUsize::new(0));
+        let counted = Arc::clone(&runs);
+        pool.broadcast(3, move || {
+            counted.fetch_add(1, Ordering::Relaxed);
+        });
+        assert_eq!(runs.load(Ordering::Relaxed), 3);
+
+        // More runs than threads are capped at the pool's size.
+        let counted = Arc::clone(&runs);
+        pool.broadcast(10, move || {
+            counted.fetch_add(1, Ordering::Relaxed);
+        });
+        assert_eq!(runs.load(Ordering::Relaxed), 7);
+    }
+
+    #[test]
+    fn blocking_worker_pool_spawn() {
+        let pool = BlockingWorkerPool::new(2, "test-blocking-spawn");
+        let (tx, rx) = std::sync::mpsc::channel();
+        pool.spawn(|| panic!("boom"));
+        for i in 0..4 {
+            let tx = tx.clone();
+            pool.spawn(move || tx.send(i).unwrap());
+        }
+        let mut received = (0..4).map(|_| rx.recv().unwrap()).collect::<Vec<_>>();
+        received.sort_unstable();
+        assert_eq!(received, [0, 1, 2, 3]);
+    }
+
+    #[test]
+    fn blocking_worker_pool_resumes_panics() {
+        let pool = BlockingWorkerPool::new(2, "test-blocking-panic");
+        let panicked = catch_unwind(AssertUnwindSafe(|| pool.broadcast(2, || panic!("boom"))));
+        assert!(panicked.is_err());
+        // The threads survive the panic.
+        let runs = Arc::new(AtomicUsize::new(0));
+        let counted = Arc::clone(&runs);
+        pool.broadcast(2, move || {
+            counted.fetch_add(1, Ordering::Relaxed);
+        });
+        assert_eq!(runs.load(Ordering::Relaxed), 2);
+    }
+
+    #[test]
+    fn blocking_worker_pool_run_all() {
+        let pool = BlockingWorkerPool::new(2, "test-blocking-run-all");
+        let sum = Arc::new(AtomicUsize::new(0));
+        let jobs = (1..=10)
+            .map(|i| {
+                let sum = Arc::clone(&sum);
+                Box::new(move || {
+                    sum.fetch_add(i, Ordering::Relaxed);
+                }) as Box<dyn FnOnce() + Send>
+            })
+            .collect();
+        pool.run_all(jobs);
+        assert_eq!(sum.load(Ordering::Relaxed), 55);
+    }
+
+    #[test]
+    fn blocking_worker_pool_run_all_on_its_own_thread() {
+        // The only thread of the pool runs the jobs it hands out itself.
+        let pool = Arc::new(BlockingWorkerPool::new(1, "test-blocking-run-all-nested"));
+        let (tx, rx) = std::sync::mpsc::channel();
+        let nested = Arc::clone(&pool);
+        pool.spawn(move || {
+            let runs = Arc::new(AtomicUsize::new(0));
+            let jobs = (0..4)
+                .map(|_| {
+                    let runs = Arc::clone(&runs);
+                    Box::new(move || {
+                        runs.fetch_add(1, Ordering::Relaxed);
+                    }) as Box<dyn FnOnce() + Send>
+                })
+                .collect();
+            nested.run_all(jobs);
+            tx.send(runs.load(Ordering::Relaxed)).unwrap();
+        });
+        assert_eq!(rx.recv_timeout(Duration::from_secs(5)), Ok(4));
+    }
+
+    #[test]
+    fn blocking_worker_pool_run_all_resumes_panics() {
+        let pool = BlockingWorkerPool::new(2, "test-blocking-run-all-panic");
+        let runs = Arc::new(AtomicUsize::new(0));
+        let mut jobs = (0..3)
+            .map(|_| {
+                let runs = Arc::clone(&runs);
+                Box::new(move || {
+                    runs.fetch_add(1, Ordering::Relaxed);
+                }) as Box<dyn FnOnce() + Send>
+            })
+            .collect::<Vec<_>>();
+        jobs.push(Box::new(|| panic!("boom")));
+        let panicked = catch_unwind(AssertUnwindSafe(|| pool.run_all(jobs)));
+        assert!(panicked.is_err());
+        assert_eq!(runs.load(Ordering::Relaxed), 3, "the other jobs still ran");
     }
 
     #[test]
@@ -846,6 +1200,21 @@ mod tests {
         drop(state);
         assert_eq!(Arc::strong_count(&resource), 1);
         pool.broadcast(1, |worker| assert!(worker.state.is_none()));
+    }
+
+    #[test]
+    fn worker_pool_runs_thread_start_on_every_thread() {
+        static STARTED: AtomicUsize = AtomicUsize::new(0);
+        thread_local! {
+            static RAN_START: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+        }
+
+        let pool = WorkerPool::new(3, "thread-start").with_thread_start(|| {
+            STARTED.fetch_add(1, Ordering::Relaxed);
+            RAN_START.set(true);
+        });
+        pool.broadcast(3, |_| assert!(RAN_START.get()));
+        assert_eq!(STARTED.load(Ordering::Relaxed), 3);
     }
 
     fn stateful_pool() -> Arc<WorkerStatefulPool> {

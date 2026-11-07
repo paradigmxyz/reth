@@ -1,12 +1,12 @@
 //! Execution cache implementation for block processing.
-use crate::TxPoolPrewarmCacheSnapshot;
+use crate::{buckets::BucketMemory, TxPoolPrewarmCacheSnapshot};
 use alloy_primitives::{
     map::{DefaultHashBuilder, FbBuildHasher},
     Address, StorageKey, StorageValue, B256,
 };
 use fixed_cache::{AnyRef, CacheConfig, Stats, StatsHandler};
 use metrics::{Counter, Gauge, Histogram};
-use parking_lot::Once;
+use parking_lot::{Mutex, Once};
 use reth_errors::ProviderResult;
 use reth_metrics::Metrics;
 use reth_primitives_traits::{Account, Bytecode};
@@ -16,7 +16,7 @@ use std::{
     cell::Cell,
     fmt,
     sync::{
-        atomic::{AtomicU64, AtomicUsize, Ordering},
+        atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering},
         Arc,
     },
     time::Duration,
@@ -115,6 +115,60 @@ pub struct CachedStateProvider<S> {
     /// Optional cache statistics for detailed block logging. Only tracked when slow block
     /// threshold is configured.
     cache_stats: Option<Arc<CacheStats>>,
+
+    /// Where a probing provider records the keys it did not find in the cache, `None` for
+    /// providers that read missing keys from the state provider.
+    probe: Option<Arc<ProbeMisses>>,
+}
+
+/// Keys a probing [`CachedStateProvider`] did not find in the cache, which a probing execution
+/// read as missing instead of loading them.
+#[derive(Debug, Default)]
+pub struct ProbeMisses {
+    missed: Mutex<ProbeMissSet>,
+    /// Whether missing storage slots read as [`PROBE_STORAGE_GUESS`] instead of zero.
+    guess_large: AtomicBool,
+}
+
+/// Value missing storage slots read as in a probe that guesses large values, large enough to pass
+/// balance checks and small enough that adding to it does not overflow.
+pub const PROBE_STORAGE_GUESS: StorageValue = StorageValue::from_limbs([0, 0, 1, 0]);
+
+/// The keys recorded by [`ProbeMisses`], in the order they were read.
+#[derive(Debug, Default)]
+pub struct ProbeMissSet {
+    /// Accounts that were not cached.
+    pub accounts: Vec<Address>,
+    /// Storage slots that were not cached.
+    pub storage: Vec<(Address, StorageKey)>,
+    /// Bytecode hashes that were not cached.
+    pub code: Vec<B256>,
+}
+
+impl ProbeMissSet {
+    /// Returns whether no key was missing.
+    pub const fn is_empty(&self) -> bool {
+        self.accounts.is_empty() && self.storage.is_empty() && self.code.is_empty()
+    }
+}
+
+impl ProbeMisses {
+    /// Takes the keys recorded since the last call.
+    pub fn take(&self) -> ProbeMissSet {
+        core::mem::take(&mut *self.missed.lock())
+    }
+
+    /// Sets whether missing storage slots read as [`PROBE_STORAGE_GUESS`] instead of zero.
+    ///
+    /// A large guess lets balance and allowance checks pass, so that a probe of a batch call
+    /// reaches the keys of every item instead of stopping at the first check.
+    pub fn guess_large(&self, large: bool) {
+        self.guess_large.store(large, Ordering::Relaxed);
+    }
+
+    fn storage_guess(&self) -> Option<StorageValue> {
+        self.guess_large.load(Ordering::Relaxed).then_some(PROBE_STORAGE_GUESS)
+    }
 }
 
 impl<S> CachedStateProvider<S> {
@@ -135,6 +189,19 @@ impl<S> CachedStateProvider<S> {
         Self::new_with_mode(state_provider, caches, CacheFillMode::FillOnMiss, None, None)
     }
 
+    /// Creates a probing [`CachedStateProvider`], which reads only the cache and records the keys
+    /// it misses in `misses` instead of reading them from `state_provider`, as if they were absent
+    /// or empty.
+    ///
+    /// Executing a transaction on it finds most of the cold keys the transaction reads without
+    /// waiting for them, so that they can be loaded in parallel before it executes.
+    pub fn new_probe(state_provider: S, caches: ExecutionCache, misses: Arc<ProbeMisses>) -> Self {
+        let mut provider =
+            Self::new_with_mode(state_provider, caches, CacheFillMode::LookupOnly, None, None);
+        provider.probe = Some(misses);
+        provider
+    }
+
     /// Creates a [`CachedStateProvider`] with explicit cache fill behavior and optional
     /// block-local cache stats.
     pub const fn new_with_mode(
@@ -153,6 +220,7 @@ impl<S> CachedStateProvider<S> {
             txpool_metric_counts: CacheMetricCounts::new(),
             fill_mode,
             cache_stats,
+            probe: None,
         }
     }
 
@@ -852,6 +920,13 @@ impl<S: EvmStateProvider> EvmStateProvider for CachedStateProvider<S> {
             self.record_txpool_account_miss();
         }
 
+        if let Some(misses) = &self.probe {
+            return Ok(self.caches.0.account_cache.get(address).unwrap_or_else(|| {
+                misses.missed.lock().accounts.push(*address);
+                None
+            }))
+        }
+
         if self.should_fill_on_miss() {
             match self.caches.get_or_try_insert_account_with(*address, || {
                 self.state_provider.basic_account(address)
@@ -887,6 +962,16 @@ impl<S: EvmStateProvider> EvmStateProvider for CachedStateProvider<S> {
             self.record_txpool_storage_miss();
         }
 
+        if let Some(misses) = &self.probe {
+            return Ok(match self.caches.0.storage_cache.get(&(account, storage_key)) {
+                Some(value) => nonzero_storage_value(value),
+                None => {
+                    misses.missed.lock().storage.push((account, storage_key));
+                    misses.storage_guess()
+                }
+            })
+        }
+
         if self.should_fill_on_miss() {
             match self.caches.get_or_try_insert_storage_with(account, storage_key, || {
                 self.state_provider.storage(account, storage_key).map(Option::unwrap_or_default)
@@ -916,6 +1001,13 @@ impl<S: EvmStateProvider> EvmStateProvider for CachedStateProvider<S> {
                 return Ok(code)
             }
             self.record_txpool_code_miss();
+        }
+
+        if let Some(misses) = &self.probe {
+            return Ok(self.caches.0.code_cache.get(code_hash).unwrap_or_else(|| {
+                misses.missed.lock().code.push(*code_hash);
+                None
+            }))
         }
 
         if self.should_fill_on_miss() {
@@ -981,6 +1073,34 @@ struct ExecutionCacheInner {
 
     /// One-time notification when SELFDESTRUCT is encountered
     selfdestruct_encountered: Once,
+
+    // The tables' memory, if mapped by the cache, is declared after the caches that borrow it so
+    // that it is dropped after them.
+    /// Memory of [`Self::code_cache`].
+    _code_buckets: Option<BucketMemory<(B256, Option<Bytecode>)>>,
+
+    /// Memory of [`Self::storage_cache`].
+    _storage_buckets: Option<BucketMemory<((Address, StorageKey), StorageValue)>>,
+
+    /// Memory of [`Self::account_cache`].
+    _account_buckets: Option<BucketMemory<(Address, Option<Account>)>>,
+}
+
+/// A cache table and the memory it was created on, if it maps its own.
+type Table<K, V, H> = (FixedCache<K, V, H>, Option<BucketMemory<(K, V)>>);
+
+/// Creates a cache table with `capacity` entries, on memory it maps itself where supported.
+fn new_table<K, V, H>(capacity: usize, hasher: H) -> Table<K, V, H>
+where
+    K: core::hash::Hash + Eq + 'static,
+    V: Clone + 'static,
+    H: core::hash::BuildHasher,
+{
+    match BucketMemory::new(capacity) {
+        // SAFETY: `ExecutionCacheInner` drops the cache before the memory.
+        Some(memory) => (FixedCache::new_static(unsafe { memory.buckets() }, hasher), Some(memory)),
+        None => (FixedCache::new(capacity, hasher), None),
+    }
 }
 
 impl ExecutionCache {
@@ -1018,17 +1138,23 @@ impl ExecutionCache {
         let storage_stats = Arc::new(CacheStatsHandler::new(storage_capacity));
         let account_stats = Arc::new(CacheStatsHandler::new(account_capacity));
 
+        let (code_cache, code_buckets) = new_table(code_capacity, FbBuildHasher::<32>::default());
+        let (storage_cache, storage_buckets) =
+            new_table(storage_capacity, DefaultHashBuilder::default());
+        let (account_cache, account_buckets) =
+            new_table(account_capacity, FbBuildHasher::<20>::default());
+
         Self(Arc::new(ExecutionCacheInner {
-            code_cache: FixedCache::new(code_capacity, FbBuildHasher::<32>::default())
-                .with_stats(Some(Stats::new(code_stats.clone()))),
-            storage_cache: FixedCache::new(storage_capacity, DefaultHashBuilder::default())
-                .with_stats(Some(Stats::new(storage_stats.clone()))),
-            account_cache: FixedCache::new(account_capacity, FbBuildHasher::<20>::default())
-                .with_stats(Some(Stats::new(account_stats.clone()))),
+            code_cache: code_cache.with_stats(Some(Stats::new(code_stats.clone()))),
+            storage_cache: storage_cache.with_stats(Some(Stats::new(storage_stats.clone()))),
+            account_cache: account_cache.with_stats(Some(Stats::new(account_stats.clone()))),
             code_stats,
             storage_stats,
             account_stats,
             selfdestruct_encountered: Once::new(),
+            _code_buckets: code_buckets,
+            _storage_buckets: storage_buckets,
+            _account_buckets: account_buckets,
         }))
     }
 
@@ -1360,6 +1486,34 @@ mod tests {
         let res = state_provider.storage(address, storage_key);
         assert!(res.is_ok());
         assert_eq!(res.unwrap(), Some(storage_value));
+    }
+
+    #[test]
+    fn probe_reads_only_the_cache_and_records_misses() {
+        let address = Address::random();
+        let (cached, missing) = (StorageKey::random(), StorageKey::random());
+        let provider = MockEthProvider::default();
+        provider.extend_accounts(vec![(
+            address,
+            ExtendedAccount::new(0, U256::ZERO)
+                .extend_storage(vec![(cached, U256::ONE), (missing, U256::from(2))]),
+        )]);
+        let caches = ExecutionCache::new(1000);
+        caches.insert_storage(address, cached, Some(U256::ONE));
+        let misses = Arc::new(ProbeMisses::default());
+        let probe = CachedStateProvider::new_probe(
+            provider.into_evm_state_provider(),
+            caches.clone(),
+            Arc::clone(&misses),
+        );
+
+        assert_eq!(probe.storage(address, cached).unwrap(), Some(U256::ONE));
+        assert_eq!(probe.storage(address, missing).unwrap(), None);
+        misses.guess_large(true);
+        assert_eq!(probe.storage(address, missing).unwrap(), Some(PROBE_STORAGE_GUESS));
+        assert_eq!(misses.take().storage, vec![(address, missing), (address, missing)]);
+        // The probe neither loaded the missing slot nor cached its guess.
+        assert_eq!(caches.0.storage_cache.get(&(address, missing)), None);
     }
 
     #[test]

@@ -490,7 +490,7 @@ pub struct EngineArgs {
     pub allow_unwind_canonical_header: bool,
 
     /// Configure the number of storage proof workers spawned for each block.
-    /// If not specified or zero, the count is derived from the block: 2x available parallelism,
+    /// If not specified or zero, the count is derived from the block: twice the physical cores,
     /// halved for blocks with few transactions and doubled for blocks at or above 100M gas.
     #[arg(long = "engine.storage-worker-count", default_value = Resettable::from(DefaultEngineValues::get_global().storage_worker_count.map(|v| v.to_string().into())))]
     pub storage_worker_count: Option<usize>,
@@ -502,7 +502,7 @@ pub struct EngineArgs {
     pub account_worker_count: Option<usize>,
 
     /// Configure the number of prewarming threads.
-    /// If not specified, defaults to available parallelism.
+    /// If not specified, defaults to the number of physical cores.
     #[arg(long = "engine.prewarming-threads", default_value = Resettable::from(DefaultEngineValues::get_global().prewarming_threads.map(|v| v.to_string().into())))]
     pub prewarming_threads: Option<usize>,
 
@@ -599,10 +599,14 @@ pub struct EngineArgs {
 
     /// Reuse transaction prewarming results during block execution instead of executing
     /// transactions again when their prewarm reads are still valid.
+    ///
+    /// Enabled by default, use `--engine.prewarm-reuse=false` to disable it.
     #[arg(
         long = "engine.prewarm-reuse",
         env = "RETH_ENGINE_PREWARM_REUSE",
-        default_value_t = false
+        default_value_t = true,
+        num_args = 0..=1,
+        default_missing_value = "true",
     )]
     pub prewarm_reuse: bool,
 
@@ -699,7 +703,7 @@ impl Default for EngineArgs {
             bal_parallel_execution_disabled,
             bal_parallel_state_root_disabled,
             disable_bal_batch_io: false,
-            prewarm_reuse: false,
+            prewarm_reuse: true,
             #[cfg(feature = "trie-debug")]
             proof_jitter: None,
         }

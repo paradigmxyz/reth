@@ -90,6 +90,11 @@ impl<F, N: NodePrimitives> OverlayStateProviderFactory<F, N> {
         }
     }
 
+    /// Returns the database provider factory the overlays are layered over.
+    pub const fn factory(&self) -> &F {
+        &self.factory
+    }
+
     /// Skips managed overlay construction when this factory is used by a task that reused a sparse
     /// trie covering both durable frontiers through the parent.
     ///

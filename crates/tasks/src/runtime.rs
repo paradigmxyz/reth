@@ -7,7 +7,10 @@
 //! - [`BlockingTaskGuard`] for rate-limiting expensive operations (with `rayon` feature)
 
 #[cfg(feature = "rayon")]
-use crate::pool::{build_pool_with_panic_handler, BlockingTaskGuard, BlockingTaskPool, WorkerPool};
+use crate::pool::{
+    build_pool_with_panic_handler, BlockingTaskGuard, BlockingTaskPool, BlockingWorkerPool,
+    WorkerPool,
+};
 use crate::{
     metrics::{IncCounterOnDrop, TaskExecutorMetrics},
     shutdown::{GracefulShutdown, GracefulShutdownGuard, Shutdown},
@@ -100,12 +103,13 @@ impl TokioConfig {
 #[cfg(feature = "rayon")]
 pub struct RayonConfig {
     /// Number of threads for the general CPU pool.
-    /// If `None`, derived from available parallelism minus reserved cores.
+    /// If `None`, the number of physical cores the process may run on, or the available
+    /// parallelism where the core topology is unknown.
     pub cpu_threads: Option<usize>,
     /// Number of CPU cores to reserve for OS and other processes.
     pub reserved_cpu_cores: usize,
     /// Number of threads for the RPC blocking pool (trace calls, `eth_getProof`, etc.).
-    /// If `None`, uses the same as `cpu_threads`.
+    /// If `None`, uses `cpu_threads` if set, or else the available parallelism.
     pub rpc_threads: Option<usize>,
     /// Number of threads for the storage I/O pool (static file, `RocksDB` writes in
     /// `save_blocks`). If `None`, uses [`DEFAULT_STORAGE_POOL_THREADS`].
@@ -119,10 +123,10 @@ pub struct RayonConfig {
     /// If `None` or zero, uses four times the resolved CPU pool thread count.
     pub proof_account_worker_threads: Option<usize>,
     /// Number of threads for the prewarming pool (execution prewarming workers).
-    /// If `None`, derived from available parallelism.
+    /// If `None`, uses the same as `cpu_threads`.
     pub prewarming_threads: Option<usize>,
     /// Number of threads for the BAL streaming pool (BAL hashed state streaming).
-    /// If `None`, derived from available parallelism.
+    /// If `None`, uses the same as `cpu_threads`.
     pub bal_streaming_threads: Option<usize>,
     /// Number of threads for the state trie overlay worker pool.
     /// If `None`, uses [`DEFAULT_STATE_TRIE_OVERLAY_WORKER_THREADS`].
@@ -212,12 +216,23 @@ impl RayonConfig {
         self
     }
 
-    /// Compute the default number of threads based on available parallelism.
+    /// Compute the default number of threads for the CPU-bound pools: the physical cores the
+    /// process may run on.
+    ///
+    /// Hyperthreads of a core share its execution units, so pools sized to logical CPUs
+    /// oversubscribe the cores: in mainnet `engine_newPayload` replays on a 16-core machine with
+    /// 32 hardware threads, sizing these pools to the 16 cores cut the mean latency by a fifth.
     fn default_thread_count(&self) -> usize {
         // TODO: reserved_cpu_cores is currently ignored because subtracting from thread pool
         // sizes doesn't actually reserve CPU cores for other processes.
         let _ = self.reserved_cpu_cores;
-        self.cpu_threads.unwrap_or_else(|| available_parallelism().map_or(1, NonZeroUsize::get))
+        self.cpu_threads.unwrap_or_else(|| physical_core_count().unwrap_or_else(logical_cpu_count))
+    }
+
+    /// Compute the default number of RPC blocking threads, which also benefit from
+    /// hyperthreads: the available parallelism.
+    fn default_rpc_thread_count(&self) -> usize {
+        self.rpc_threads.or(self.cpu_threads).unwrap_or_else(logical_cpu_count)
     }
 
     /// Returns the explicitly configured proof storage worker thread count, treating zero as
@@ -313,10 +328,10 @@ struct RuntimeInner {
     blocking_guard: BlockingTaskGuard,
     /// Proof storage worker pool (trie storage proof computation).
     #[cfg(feature = "rayon")]
-    proof_storage_worker_pool: WorkerPool,
+    proof_storage_worker_pool: BlockingWorkerPool,
     /// Proof account worker pool (trie account proof computation).
     #[cfg(feature = "rayon")]
-    proof_account_worker_pool: WorkerPool,
+    proof_account_worker_pool: BlockingWorkerPool,
     /// Proof storage worker thread count the operator configured explicitly, if any.
     #[cfg(feature = "rayon")]
     proof_storage_worker_threads_override: Option<usize>,
@@ -332,6 +347,9 @@ struct RuntimeInner {
     /// State trie overlay worker pool.
     #[cfg(feature = "rayon")]
     state_trie_overlay_worker_pool: Arc<WorkerPool>,
+    /// Storage trie pool (sparse storage trie passes of the state root task).
+    #[cfg(feature = "rayon")]
+    storage_trie_pool: BlockingWorkerPool,
     /// Named single-thread worker map. Each unique name gets a dedicated OS thread
     /// that is reused across all tasks submitted under that name.
     worker_map: WorkerMap,
@@ -413,13 +431,13 @@ impl Runtime {
 
     /// Get the proof storage worker pool.
     #[cfg(feature = "rayon")]
-    pub fn proof_storage_worker_pool(&self) -> &WorkerPool {
+    pub fn proof_storage_worker_pool(&self) -> &BlockingWorkerPool {
         &self.0.proof_storage_worker_pool
     }
 
     /// Get the proof account worker pool.
     #[cfg(feature = "rayon")]
-    pub fn proof_account_worker_pool(&self) -> &WorkerPool {
+    pub fn proof_account_worker_pool(&self) -> &BlockingWorkerPool {
         &self.0.proof_account_worker_pool
     }
 
@@ -457,6 +475,12 @@ impl Runtime {
     #[cfg(feature = "rayon")]
     pub fn state_trie_overlay_worker_pool(&self) -> Arc<WorkerPool> {
         Arc::clone(&self.0.state_trie_overlay_worker_pool)
+    }
+
+    /// Get the storage trie pool, which runs the state root task's storage trie passes.
+    #[cfg(feature = "rayon")]
+    pub fn storage_trie_pool(&self) -> &BlockingWorkerPool {
+        &self.0.storage_trie_pool
     }
 }
 
@@ -981,9 +1005,10 @@ impl RuntimeBuilder {
             prewarming_pool,
             bal_streaming_pool,
             state_trie_overlay_worker_pool,
+            storage_trie_pool,
         ) = {
             let default_threads = config.rayon.default_thread_count();
-            let rpc_threads = config.rayon.rpc_threads.unwrap_or(default_threads);
+            let rpc_threads = config.rayon.default_rpc_thread_count();
 
             let cpu_pool = build_pool_with_panic_handler(
                 rayon::ThreadPoolBuilder::new()
@@ -1010,7 +1035,8 @@ impl RuntimeBuilder {
 
             // `cpu_threads` may be zero, which rayon resolves to the automatic count when the
             // cpu pool is built; size the proof pools from that resolved count so a zero never
-            // reaches the per-block worker budget.
+            // reaches the per-block worker budget. Proof workers mostly wait for trie pages, so
+            // there are more of them than cores: with fewer, the state root waits for proofs.
             let default_proof_worker_threads = cpu_pool.current_num_threads() * 4;
 
             let proof_storage_worker_threads = config
@@ -1018,14 +1044,16 @@ impl RuntimeBuilder {
                 .proof_storage_worker_threads_override()
                 .unwrap_or(default_proof_worker_threads);
             let proof_storage_worker_pool =
-                WorkerPool::new(proof_storage_worker_threads, "proof-strg");
+                BlockingWorkerPool::new(proof_storage_worker_threads, "proof-strg")
+                    .with_thread_start(crate::utils::lower_background_worker_priority);
 
             let proof_account_worker_threads = config
                 .rayon
                 .proof_account_worker_threads_override()
                 .unwrap_or(default_proof_worker_threads);
             let proof_account_worker_pool =
-                WorkerPool::new(proof_account_worker_threads, "proof-acct");
+                BlockingWorkerPool::new(proof_account_worker_threads, "proof-acct")
+                    .with_thread_start(crate::utils::lower_background_worker_priority);
 
             let prewarming_threads = config.rayon.prewarming_threads.unwrap_or(default_threads);
             let prewarming_pool = Arc::new(WorkerPool::new(prewarming_threads, "prewarm"));
@@ -1040,6 +1068,12 @@ impl RuntimeBuilder {
                 .unwrap_or(DEFAULT_STATE_TRIE_OVERLAY_WORKER_THREADS);
             let state_trie_overlay_worker_pool =
                 Arc::new(WorkerPool::new(state_trie_overlay_worker_threads, "state-ovly"));
+
+            // Storage trie passes run beside execution, below its priority like the global rayon
+            // pool, on threads that sleep between passes instead of looking for work.
+            let storage_trie_pool =
+                BlockingWorkerPool::new(cpu_pool.current_num_threads(), "strg-trie")
+                    .with_thread_start(crate::utils::lower_background_worker_priority);
 
             debug!(
                 default_threads,
@@ -1064,6 +1098,7 @@ impl RuntimeBuilder {
                 prewarming_pool,
                 bal_streaming_pool,
                 state_trie_overlay_worker_pool,
+                storage_trie_pool,
             )
         };
 
@@ -1108,12 +1143,53 @@ impl RuntimeBuilder {
             bal_streaming_pool,
             #[cfg(feature = "rayon")]
             state_trie_overlay_worker_pool,
+            #[cfg(feature = "rayon")]
+            storage_trie_pool,
             worker_map: WorkerMap::new(),
             task_manager_handle: Mutex::new(Some(task_manager_handle)),
         };
 
         Ok(Runtime(Arc::new(inner)))
     }
+}
+
+/// Returns the number of logical CPUs the process may run on.
+#[cfg(feature = "rayon")]
+fn logical_cpu_count() -> usize {
+    available_parallelism().map_or(1, NonZeroUsize::get)
+}
+
+/// Returns the number of physical cores the process may run on, counting the hyperthreads of a
+/// core once, or `None` if the topology cannot be read.
+#[cfg(all(feature = "rayon", target_os = "linux"))]
+fn physical_core_count() -> Option<usize> {
+    // SAFETY: an all-zero `cpu_set_t` is a valid empty set.
+    let mut allowed: libc::cpu_set_t = unsafe { core::mem::zeroed() };
+    // SAFETY: `allowed` is a valid set of the size passed.
+    if unsafe {
+        libc::sched_getaffinity(0, core::mem::size_of::<libc::cpu_set_t>(), &raw mut allowed)
+    } != 0
+    {
+        return None
+    }
+    let mut cores = std::collections::HashSet::new();
+    for cpu in 0..libc::CPU_SETSIZE as usize {
+        // SAFETY: `cpu` is below `CPU_SETSIZE`.
+        if unsafe { libc::CPU_ISSET(cpu, &allowed) } {
+            let siblings = std::fs::read_to_string(format!(
+                "/sys/devices/system/cpu/cpu{cpu}/topology/thread_siblings_list"
+            ))
+            .ok()?;
+            cores.insert(siblings);
+        }
+    }
+    (!cores.is_empty()).then_some(cores.len())
+}
+
+/// The core topology is only read on Linux.
+#[cfg(all(feature = "rayon", not(target_os = "linux")))]
+const fn physical_core_count() -> Option<usize> {
+    None
 }
 
 #[cfg(test)]
@@ -1215,8 +1291,8 @@ mod tests {
 
         let resolved = runtime.cpu_pool().current_num_threads();
         assert!(resolved >= 1);
-        assert_eq!(runtime.proof_storage_worker_pool().current_num_threads(), resolved * 4);
-        assert_eq!(runtime.proof_account_worker_pool().current_num_threads(), resolved * 4);
+        assert_eq!(runtime.proof_storage_worker_pool().num_threads(), resolved * 4);
+        assert_eq!(runtime.proof_account_worker_pool().num_threads(), resolved * 4);
     }
 
     #[cfg(feature = "rayon")]
@@ -1229,8 +1305,8 @@ mod tests {
             config.rayon.proof_storage_worker_threads = Some(configured);
             config.rayon.proof_account_worker_threads = Some(configured);
             let runtime = RuntimeBuilder::new(config).build().unwrap();
-            assert_eq!(runtime.proof_storage_worker_pool().current_num_threads(), configured);
-            assert_eq!(runtime.proof_account_worker_pool().current_num_threads(), configured);
+            assert_eq!(runtime.proof_storage_worker_pool().num_threads(), configured);
+            assert_eq!(runtime.proof_account_worker_pool().num_threads(), configured);
             assert_eq!(runtime.proof_storage_worker_threads_override(), Some(configured));
             assert_eq!(runtime.proof_account_worker_threads_override(), Some(configured));
         }
@@ -1247,8 +1323,8 @@ mod tests {
         let runtime = RuntimeBuilder::new(config).build().unwrap();
 
         let default = runtime.cpu_pool().current_num_threads() * 4;
-        assert_eq!(runtime.proof_storage_worker_pool().current_num_threads(), default);
-        assert_eq!(runtime.proof_account_worker_pool().current_num_threads(), default);
+        assert_eq!(runtime.proof_storage_worker_pool().num_threads(), default);
+        assert_eq!(runtime.proof_account_worker_pool().num_threads(), default);
         assert_eq!(runtime.proof_storage_worker_threads_override(), None);
         assert_eq!(runtime.proof_account_worker_threads_override(), None);
     }
@@ -1362,8 +1438,8 @@ mod tests {
         assert_eq!(runtime.bal_streaming_pool().current_num_threads(), 2);
         assert!(runtime.0.bal_streaming_pool.is_initialized());
 
-        assert_eq!(runtime.proof_storage_worker_pool().current_num_threads(), 2);
-        assert_eq!(runtime.proof_account_worker_pool().current_num_threads(), 2);
+        assert_eq!(runtime.proof_storage_worker_pool().num_threads(), 2);
+        assert_eq!(runtime.proof_account_worker_pool().num_threads(), 2);
         assert_eq!(runtime.prewarming_pool().current_num_threads(), 2);
         assert_eq!(runtime.state_trie_overlay_worker_pool().current_num_threads(), 2);
     }
