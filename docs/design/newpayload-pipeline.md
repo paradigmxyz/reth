@@ -636,6 +636,30 @@ CPU moved by more than the runs' spread.
 - Hashing more often than needed is moderate: 270 storage trie hashes per block over 141 tries
   (8.8 ms), 585 account promotions over 520 accounts, 84 `calculate_subtries` calls (2.0 ms).
 
+### Speculation's CPU
+
+The speculation workers use 63 ms of CPU per block, five times what block execution spends on the
+same transactions (13 ms), and they wait for the disk: an off-CPU trace of the 17 workers over a
+replay has them blocked on page faults for 55 ms per block in total (storage 27 ms, accounts 18
+ms, code 4 ms, the mmap lock 6 ms), about 3.5 workers at any time, against 16 ms for the loaders
+that the probes feed.
+
+- Reading ahead harder made blocks slower. 16 or 32 probe threads instead of 4 got the probes
+  ahead of the workers, but the loaders' CPU doubled (7.6 -> 15 ms per block), every pool waited
+  longer for a core (the storage proof workers 8 -> 20 ms per block) and the mean went from 14.5
+  to 15.3 and 15.7 ms over 2 runs each. With the cores the limit, loads in parallel cost more than
+  the waits they hide.
+- 15% of the workers' CPU was the inspector that lets results be rebased, which left
+  `inspector_config` at its default and so was stepped on every instruction, on evm2's inspect
+  handlers. It now steps only the seven opcodes it handles (balance reads, `SELFDESTRUCT` and the
+  block environment fields), and evm2 runs the others on their plain handlers: 64 -> 57 ms of
+  CPU per block over 3 run pairs. derek against the head, `--db.warm-branch-pages` on both sides,
+  4 run pairs: mean 17.41 -> 17.02 ms (-2.2%, noise ±2.0%), p50 -4.7%, Mgas/s +2.5%.
+
+What is left of the workers' CPU: the interpreter 22%, their own database reads on cache misses
+about 25% (page faults included), storing and validating results and the predicted state about 25%,
+precompiles 7%.
+
 ## Rewrite: newPayload v2
 
 The v2 path replaces the per-block task graph instead of tuning it:
