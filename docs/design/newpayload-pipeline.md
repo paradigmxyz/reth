@@ -584,6 +584,30 @@ an account: token balances of USDC (3.4), USDT (3.2) and WETH (1.5) and Uniswap 
 that refreshing cannot shorten; merging such results needs to know how the transaction used the
 value, which the read sets do not record.
 
+### The trie's CPU
+
+With the cores the limit, CPU the trie does not spend goes to speculation. Per block, from the
+threads' scheduler statistics over a replay: proof workers 38 ms, the global rayon pool 20.9 ms,
+the storage trie pool 13.2 ms, the sparse-trie thread 9.1 ms, the trie-hashing thread 2.3 ms.
+
+- 60% of the rayon pool's CPU was its threads looking for work after the account trie's parallel
+  subtrie hashing (`wait_until_cold`: stealing, epoch collection, `sched_yield`), about 50 calls
+  per block from four dirty leaves on. The arena trie now takes an executor for that hashing and
+  the engine's tries hash on the storage trie pool, whose threads park when idle
+  (`BlockingWorkerPool::run_all`, the calling thread taking jobs too). Rayon 20.9 -> 3.0 ms, the
+  storage trie pool 13.2 -> 20.1 ms, the sparse-trie thread 9.1 -> 10.0 ms: 10 ms less per block,
+  mean -2.4% over 3 run pairs (within noise).
+- Proof workers took their jobs from crossbeam channels, whose receivers spin and yield before they
+  park: 8% of their CPU. They now wait on a queue under a mutex: 40.2 -> 37.0 ms per block for
+  both proof pools, 15% fewer context switches, mean -2.7% over 3 run pairs (within noise).
+- Account proofs compute the storage root of every account leaf whose hash they need and whose
+  root the reused trie does not know, siblings included: 2,045 per block, each a random read of the
+  account's storage and storage trie, 13% of the proof workers' CPU plus 7% checking for empty
+  storage. Only 21% of them were computed in an earlier block, so a cache across blocks would save
+  little; the database does not store the hashes of leaf children.
+- Hashing more often than needed is moderate: 270 storage trie hashes per block over 141 tries
+  (8.8 ms), 585 account promotions over 520 accounts, 84 `calculate_subtries` calls (2.0 ms).
+
 ## Rewrite: newPayload v2
 
 The v2 path replaces the per-block task graph instead of tuning it:
