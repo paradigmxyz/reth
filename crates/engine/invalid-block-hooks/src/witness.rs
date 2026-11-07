@@ -16,7 +16,12 @@ use reth_trie::{
 use serde::Serialize;
 use similar::TextDiff;
 use std::{
-    collections::BTreeMap, fmt::Debug, fs::File, io::Write, path::PathBuf, sync::Arc,
+    collections::BTreeMap,
+    fmt::Debug,
+    fs::File,
+    io::{BufWriter, Write},
+    path::{Path, PathBuf},
+    sync::Arc,
     time::Duration,
 };
 use tokio::sync::Semaphore;
@@ -27,6 +32,9 @@ use tracing::{debug, error, warn};
 /// The bundle state of a large block renders to hundreds of thousands of lines. Bound the
 /// diff search so that one block cannot monopolize the background worker.
 const DIFF_TIMEOUT: Duration = Duration::from_secs(1);
+
+/// Number of invalid blocks whose output files are kept in the output directory.
+const MAX_RETAINED_BLOCKS: usize = 100;
 
 /// Serializable version of `BundleState` for deterministic comparison
 #[derive(Debug, PartialEq, Eq)]
@@ -119,7 +127,8 @@ fn sort_bundle_state_for_comparison(bundle_state: &BundleState) -> BundleStateSo
 ///
 /// This hook captures the execution state and generates witness data that can be used
 /// for debugging and analysis of invalid block execution. Diagnostics run on a blocking task;
-/// additional invalid blocks are skipped while a task is running or queued.
+/// additional invalid blocks are skipped while a task is running or queued. Only the output of
+/// the highest invalid blocks is kept.
 #[derive(Clone, Debug)]
 pub struct InvalidBlockWitnessHook<P, E> {
     /// The provider to read the historical state and do the EVM execution.
@@ -308,6 +317,10 @@ where
         original_state: &BundleState,
         trie_updates: Option<(&TrieUpdates, B256)>,
     ) -> eyre::Result<()> {
+        if let Err(err) = prune_output(&self.output_directory) {
+            error!(target: "engine::invalid_block_hooks::witness", %err, "Failed to prune hook output");
+        }
+
         // TODO(alexey): unify with `DebugApi::debug_execution_witness`
         let (witness, bundle_state, hashed_state) = self.re_execute_block(parent_header, block)?;
 
@@ -330,7 +343,9 @@ where
     /// Serializes and saves a value to a JSON file in the output directory
     fn save_file<T: Serialize>(&self, filename: String, value: &T) -> eyre::Result<PathBuf> {
         let path = self.output_directory.join(filename);
-        File::create(&path)?.write_all(serde_json::to_string(value)?.as_bytes())?;
+        let mut writer = BufWriter::new(File::create(&path)?);
+        serde_json::to_writer(&mut writer, value)?;
+        writer.flush()?;
 
         Ok(path)
     }
@@ -399,6 +414,31 @@ where
             debug!(target: "engine::invalid_block_hooks::witness", block_hash = %block.hash(), "Finished witness diagnostics");
         });
     }
+}
+
+/// Removes the output files of all but the highest blocks, so that the output of
+/// [`MAX_RETAINED_BLOCKS`] blocks remains once the next block is written.
+///
+/// Only files named `{block_number}_{block_hash}.*` are considered, others are left alone.
+fn prune_output(output_directory: &Path) -> eyre::Result<()> {
+    let mut blocks = BTreeMap::<(u64, String), Vec<PathBuf>>::new();
+    for entry in reth_fs_util::read_dir(output_directory)? {
+        let entry = entry?;
+        let file_name = entry.file_name();
+        if let Some((prefix, _)) = file_name.to_str().and_then(|name| name.split_once('.')) &&
+            let Some((number, hash)) = prefix.split_once('_') &&
+            let Ok(number) = number.parse::<u64>() &&
+            hash.parse::<B256>().is_ok()
+        {
+            blocks.entry((number, prefix.to_string())).or_default().push(entry.path());
+        }
+    }
+
+    for path in blocks.into_values().rev().skip(MAX_RETAINED_BLOCKS - 1).flatten() {
+        reth_fs_util::remove_file(path)?;
+    }
+
+    Ok(())
 }
 
 #[cfg(test)]
@@ -845,5 +885,68 @@ mod tests {
             })
             .unwrap();
         (client, server.start(module), requested, respond)
+    }
+
+    #[test]
+    fn test_prune_output_keeps_highest_blocks() {
+        let temp_dir = TempDir::new().unwrap();
+        let output_dir = temp_dir.path();
+        let blocks = (0..MAX_RETAINED_BLOCKS as u64 + 2)
+            .map(|number| {
+                let prefix = format!("{number}_{}", B256::with_last_byte(number as u8));
+                let files = [
+                    output_dir.join(format!("{prefix}.witness.re_executed.json")),
+                    output_dir.join(format!("{prefix}.bundle_state.diff")),
+                ];
+                for path in &files {
+                    File::create(path).unwrap();
+                }
+                files
+            })
+            .collect::<Vec<_>>();
+        let unrelated = output_dir.join("notes.txt");
+        File::create(&unrelated).unwrap();
+
+        prune_output(output_dir).unwrap();
+
+        // Room is left for one more block, so the three lowest blocks are removed.
+        for (number, files) in blocks.iter().enumerate() {
+            for path in files {
+                assert_eq!(path.exists(), number >= 3, "{}", path.display());
+            }
+        }
+        assert!(unrelated.exists());
+    }
+
+    #[tokio::test]
+    async fn test_on_invalid_block_prunes_old_output() {
+        let (hook, output_dir, _temp_dir) = create_test_hook();
+        let old_blocks = (0..MAX_RETAINED_BLOCKS as u64)
+            .map(|number| {
+                let path = output_dir.join(format!(
+                    "{number}_{}.witness.re_executed.json",
+                    B256::with_last_byte(number as u8)
+                ));
+                File::create(&path).unwrap();
+                path
+            })
+            .collect::<Vec<_>>();
+
+        let (parent_header, block) = invalid_block_fixture(100);
+        let output = BlockExecutionOutput::default();
+        let permit = hook.task_permit.try_acquire().unwrap();
+
+        // Busy hooks must skip pruning as well as writing.
+        hook.on_invalid_block(&parent_header, &block, &output, None);
+        assert!(old_blocks[0].exists());
+        drop(permit);
+
+        hook.on_invalid_block(&parent_header, &block, &output, None);
+        drop(timeout(Duration::from_secs(10), hook.task_permit.acquire()).await.unwrap().unwrap());
+        assert!(!old_blocks[0].exists());
+        assert!(old_blocks[1..].iter().all(|path| path.exists()));
+        assert!(output_dir
+            .join(format!("{}_{}.witness.re_executed.json", block.number(), block.hash()))
+            .exists());
     }
 }
