@@ -307,7 +307,11 @@ where
             });
         let tx_count = std::thread::scope(|probes| {
             if let Some(fetch) = fetch {
-                for index in 0..PROBE_THREADS {
+                let probe_threads = std::env::var("RETH_NP_PROBE_THREADS")
+                    .ok()
+                    .and_then(|value| value.parse::<usize>().ok())
+                    .unwrap_or(PROBE_THREADS);
+                for index in 0..probe_threads {
                     let queue = &queue;
                     let spawned = std::thread::Builder::new()
                         .name(format!("prewarm-probe-{index}"))

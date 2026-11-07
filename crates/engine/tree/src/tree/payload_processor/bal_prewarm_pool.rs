@@ -146,7 +146,11 @@ impl BalPrewarmPool {
         let latch = Arc::new(WarmLatch::default());
         let send = |target| {
             latch.remaining.fetch_add(1, Ordering::AcqRel);
-            let workers = (self.workers.len() / WARM_ALL_SHARE).max(1);
+            let share = std::env::var("RETH_NP_WARM_SHARE")
+                .ok()
+                .and_then(|value| value.parse::<usize>().ok())
+                .unwrap_or(WARM_ALL_SHARE);
+            let workers = (self.workers.len() / share).max(1);
             let i = self.next.fetch_add(1, Ordering::Relaxed) % workers;
             if self.workers[i].send(PrewarmMsg::Warm(target, Some(Arc::clone(&latch)))).is_err() {
                 latch.done();
