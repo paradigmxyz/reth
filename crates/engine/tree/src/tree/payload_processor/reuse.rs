@@ -58,6 +58,10 @@ pub(crate) const POOL_BENEFICIARY: Address = address!("0x00000000000000000000000
 /// Maximum estimated number of bytes held by [`PoolResults`].
 const MAX_POOL_RESULT_BYTES: usize = 64 << 20;
 
+/// Number of transactions ahead of block execution whose stale results idle speculation workers
+/// execute again.
+pub(super) const REFRESH_WINDOW: usize = 64;
+
 /// Opcodes that [`BalanceTracker::step`] handles. The EVM runs every other opcode on its plain
 /// handler: stepping all of them took 10% of the speculation workers' CPU.
 const BALANCE_TRACKER_STEPS: OpcodeSet = {
@@ -124,9 +128,23 @@ impl<T: EvmTypes> PrewarmResults<T> {
     }
 
     /// Wakes an idle prewarm worker, or all of them if `all` is set, after a transaction was
-    /// queued or the queue was closed.
+    /// queued, the queue was closed or prewarming stopped.
     pub(super) fn wake(&self, all: bool) {
-        self.predicted.wake(all);
+        self.predicted.wake(if all { usize::MAX } else { 1 });
+    }
+
+    /// Wakes an idle prewarm worker if block execution reaching the transaction at `next` moved a
+    /// possibly stale result into the refresh window. Idle workers only look for stale results in
+    /// the window, so they would otherwise find it only when their wait times out.
+    pub(crate) fn execution_reached(&self, next: usize) {
+        if self
+            .predicted
+            .maybe_stale
+            .get(next + REFRESH_WINDOW)
+            .is_some_and(|flag| flag.load(Ordering::Acquire))
+        {
+            self.predicted.wake(1);
+        }
     }
 
     /// Blocks an idle prewarm worker until new work arrived since the work generation was
@@ -744,7 +762,7 @@ impl PredictedState {
     /// Flags the transaction at `index` as possibly stale, waking an idle worker to check it.
     fn flag(&self, index: usize) {
         if self.mark(index) {
-            self.wake(false);
+            self.wake(1);
         }
     }
 
@@ -754,22 +772,26 @@ impl PredictedState {
         self.maybe_stale.get(index).is_some_and(|flag| !flag.swap(true, Ordering::AcqRel))
     }
 
-    /// Wakes idle workers for `flagged` newly flagged transactions.
+    /// Wakes an idle worker for each of `flagged` newly flagged transactions. Waking all of them
+    /// for any two had most find nothing to do and wait again.
     fn wake_for(&self, flagged: usize) {
         if flagged > 0 {
-            self.wake(flagged > 1);
+            self.wake(flagged);
         }
     }
 
-    /// Advances the work generation and wakes one idle prewarm worker, or all if `all` is set.
-    fn wake(&self, all: bool) {
+    /// Advances the work generation and wakes up to `workers` idle prewarm workers.
+    fn wake(&self, workers: usize) {
         self.generation.fetch_add(1, Ordering::SeqCst);
-        if self.waiting.load(Ordering::SeqCst) > 0 {
+        let waiting = self.waiting.load(Ordering::SeqCst);
+        if waiting > 0 {
             let _guard = self.work_lock.lock();
-            if all {
+            if workers >= waiting {
                 self.work.notify_all();
             } else {
-                self.work.notify_one();
+                for _ in 0..workers {
+                    self.work.notify_one();
+                }
             }
         }
     }
@@ -2080,6 +2102,22 @@ mod tests {
             sender(1),
         );
         assert_eq!(reusable(&[overflowing]), Err(ReuseMiss::Stale));
+    }
+
+    #[test]
+    fn execution_reaching_a_stale_result_wakes_a_worker() {
+        let results = Results::new(100);
+        let generation = results.predicted.generation();
+        results.predicted.mark(70);
+
+        // Reaching 5 moves 69 into the window, which is not flagged.
+        results.execution_reached(5);
+        assert_eq!(results.predicted.generation(), generation);
+        results.execution_reached(6);
+        assert_eq!(results.predicted.generation(), generation + 1);
+        // Past the last transaction nothing enters the window.
+        results.execution_reached(100);
+        assert_eq!(results.predicted.generation(), generation + 1);
     }
 
     #[test]

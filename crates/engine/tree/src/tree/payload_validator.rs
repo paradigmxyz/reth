@@ -1297,6 +1297,9 @@ where
 
             // advance the shared counter so prewarm workers skip already-executed txs
             executed_tx_index.store(senders.len(), Ordering::Relaxed);
+            if let Some(results) = prewarm_results {
+                results.execution_reached(senders.len());
+            }
 
             let current_len = executor.receipts().len();
             if current_len > last_sent_len {

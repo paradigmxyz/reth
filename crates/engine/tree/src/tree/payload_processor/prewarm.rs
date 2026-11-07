@@ -15,7 +15,10 @@
 
 use super::{
     bal_prewarm_pool::BalPrewarmPool,
-    reuse::{BalanceTracker, PoolTx, PrewarmResults, RecordingDb, RecordingHandle, SpeculativeTx},
+    reuse::{
+        BalanceTracker, PoolTx, PrewarmResults, RecordingDb, RecordingHandle, SpeculativeTx,
+        REFRESH_WINDOW,
+    },
     storage_scan, StateRootHintStream, StateRootUpdateStream,
 };
 use crate::tree::{
@@ -57,10 +60,6 @@ use std::{
 use tokio::sync::oneshot;
 use tracing::{debug, debug_span, instrument, trace, trace_span, warn, Span};
 
-/// Number of transactions ahead of block execution whose stale results idle speculation workers
-/// execute again.
-const REFRESH_WINDOW: usize = 64;
-
 /// Most rounds a transaction is probed for cold reads.
 ///
 /// Each round reaches the reads that depend on what the previous rounds loaded. Most transactions
@@ -84,9 +83,11 @@ const PROBE_THREADS: usize = 4;
 /// it does not take CPU time from the state root computation.
 const IDLE_SPIN_ROUNDS: u32 = 6;
 
-/// Longest time an idle speculation worker waits for new work before checking again whether
-/// block execution moved on.
-const IDLE_WAIT_TIMEOUT: Duration = Duration::from_micros(100);
+/// Longest time an idle speculation worker waits for new work before looking again.
+///
+/// New work wakes it: a queued transaction, a flagged result, block execution reaching a flagged
+/// result, or prewarming stopping. Waking every 100 us to look took 5% of the workers' CPU.
+const IDLE_WAIT_TIMEOUT: Duration = Duration::from_millis(1);
 
 /// Determines the prewarming mode: transaction-based, BAL-based, or skipped.
 ///
@@ -1049,6 +1050,10 @@ where
     #[inline]
     pub fn stop(&self) {
         self.terminate_execution.store(true, Ordering::Relaxed);
+        // Idle workers see the flag once woken.
+        if let Some(results) = &self.prewarm_results {
+            results.wake(true);
+        }
     }
 
     /// Hashes and streams a single BAL account's state to the state-root job's hashed-update
