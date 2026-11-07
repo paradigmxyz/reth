@@ -14,6 +14,7 @@ use reth_node_metrics::{
 };
 use reth_provider::RocksDBProviderFactory;
 use reth_prune::PrunerBuilder;
+use reth_prune_types::{PruneInterruptReason, PruneProgress, PruneSegment, SegmentOutput};
 use reth_static_file::StaticFileProducer;
 use std::sync::Arc;
 use tracing::info;
@@ -89,6 +90,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> PruneComma
                 .build_with_provider_factory(provider_factory.clone());
 
             let mut total_pruned = 0usize;
+            let mut last_segments = Vec::new();
             loop {
                 if cancellation.is_cancelled() {
                     info!(target: "reth::cli", total_pruned, "Pruning interrupted by user");
@@ -99,17 +101,12 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> PruneComma
                 let batch_pruned: usize = output.segments.iter().map(|(_, seg)| seg.pruned).sum();
                 total_pruned = total_pruned.saturating_add(batch_pruned);
 
-                if output.progress.is_finished() {
+                if is_done(batch_pruned, &output.segments, &last_segments)? {
                     info!(target: "reth::cli", total_pruned, "Pruned data from database");
                     break;
                 }
 
-                if batch_pruned == 0 {
-                    return Err(eyre::eyre!(
-                        "pruner made no progress but reported more data remaining; \
-                         aborting to prevent infinite loop"
-                    ));
-                }
+                last_segments = output.segments;
 
                 info!(
                     target: "reth::cli",
@@ -135,5 +132,66 @@ impl<C: ChainSpecParser> PruneCommand<C> {
     /// Returns the underlying chain being used to run this command
     pub fn chain_spec(&self) -> Option<&Arc<C::ChainSpec>> {
         Some(&self.env.chain)
+    }
+}
+
+/// Returns whether `reth prune` is done after a batch, or an error if it is stuck.
+///
+/// A batch can advance a checkpoint without deleting anything, and bodies only prune up to the
+/// committed lookup checkpoint, so it is done only when a batch changes nothing. Segments that
+/// only wait on another segment cannot progress at this tip then, e.g. bodies waiting on a lookup
+/// `Distance` that reached its current target. Any other unfinished segment is an error.
+fn is_done(
+    batch_pruned: usize,
+    segments: &[(PruneSegment, SegmentOutput)],
+    last_segments: &[(PruneSegment, SegmentOutput)],
+) -> eyre::Result<bool> {
+    if batch_pruned != 0 || segments != last_segments {
+        return Ok(false);
+    }
+
+    eyre::ensure!(
+        segments.iter().all(|(_, output)| matches!(
+            output.progress,
+            PruneProgress::Finished |
+                PruneProgress::HasMoreData(PruneInterruptReason::WaitingOnSegment(_))
+        )),
+        "pruner made no progress but reported more data remaining; \
+         aborting to prevent infinite loop"
+    );
+
+    Ok(true)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use reth_prune_types::SegmentOutputCheckpoint;
+
+    fn output(progress: PruneProgress) -> (PruneSegment, SegmentOutput) {
+        (PruneSegment::Bodies, SegmentOutput { progress, pruned: 0, checkpoint: None })
+    }
+
+    #[test]
+    fn is_done_only_when_a_batch_changes_nothing() {
+        let finished = [output(PruneProgress::Finished)];
+        let waiting = [output(PruneProgress::HasMoreData(PruneInterruptReason::WaitingOnSegment(
+            PruneSegment::TransactionLookup,
+        )))];
+        let limited =
+            [output(PruneProgress::HasMoreData(PruneInterruptReason::DeletedEntriesLimitReached))];
+
+        // The first batch differs from the empty initial state, so run another.
+        assert!(!is_done(0, &finished, &[]).unwrap());
+        // Pruned entries or a changed checkpoint mean more work may be eligible.
+        assert!(!is_done(1, &finished, &finished).unwrap());
+        let mut advanced = finished;
+        advanced[0].1.checkpoint = Some(SegmentOutputCheckpoint::default());
+        assert!(!is_done(0, &advanced, &finished).unwrap());
+        // An unchanged batch is done, also when only waiting on another segment.
+        assert!(is_done(0, &finished, &finished).unwrap());
+        assert!(is_done(0, &waiting, &waiting).unwrap());
+        // Any other unfinished segment is stuck.
+        assert!(is_done(0, &limited, &limited).is_err());
     }
 }
