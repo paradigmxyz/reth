@@ -36,6 +36,7 @@ use reth_rpc_eth_types::{
     },
     error::{AsEthApiError, FromEthApiError},
     simulate::{self, EthSimulateError, SimulatedState},
+    utils::CallManyBudget,
     EthApiError, RpcInvalidTransactionError, StateCacheDb,
 };
 use reth_storage_api::{BlockIdReader, ProviderTx, StateProvider};
@@ -304,6 +305,7 @@ pub trait EthCall: EstimateCall + LoadBlock + FullEthApiTypes {
             if bundles.is_empty() {
                 return Err(EthApiError::InvalidParams(String::from("bundles are empty.")).into());
             }
+            let mut budget = CallManyBudget::for_bundles(&bundles, self.call_gas_limit())?;
 
             let permit = self
                 .acquire_owned_blocking_io()
@@ -384,7 +386,7 @@ pub trait EthCall: EstimateCall + LoadBlock + FullEthApiTypes {
                         let overrides =
                             EvmOverrides::new(state_override.take(), block_overrides.clone());
 
-                        let (current_evm_env, prepared_tx) = this
+                        let (current_evm_env, mut prepared_tx) = this
                             .prepare_call_env(evm_env.clone(), tx, &mut db, overrides)
                             .map_err(|err| {
                                 Self::Error::from_eth_err(EthApiError::call_many_error(
@@ -393,6 +395,7 @@ pub trait EthCall: EstimateCall + LoadBlock + FullEthApiTypes {
                                     err.into(),
                                 ))
                             })?;
+                        budget.admit(&mut prepared_tx)?;
                         let res = this.transact(&mut db, current_evm_env, prepared_tx).map_err(
                             |err| {
                                 Self::Error::from_eth_err(EthApiError::call_many_error(
@@ -402,6 +405,7 @@ pub trait EthCall: EstimateCall + LoadBlock + FullEthApiTypes {
                                 ))
                             },
                         )?;
+                        budget.charge(res.result.tx_gas_used())?;
 
                         match Self::Error::ensure_success::<EvmTypesFor<Self::Evm>>(res.result) {
                             Ok(output) => {

@@ -576,6 +576,7 @@ mod tests {
         EthApiServer,
     };
     use reth_rpc_eth_types::{receipt::EthReceiptConverter, EthConfig, RpcInvalidTransactionError};
+    use reth_rpc_server_types::constants::DEFAULT_MAX_CALL_MANY_CALLS;
     use reth_storage_api::{
         BalProvider, BlockReaderIdExt, NodePrimitivesProvider, StateProviderFactory,
     };
@@ -1051,6 +1052,67 @@ mod tests {
         assert!(
             message.contains("block not found"),
             "missing block hash should still map to block-not-found: {message}"
+        );
+    }
+
+    #[tokio::test]
+    async fn call_many_methods_limit_calls_and_share_gas_cap() {
+        let provider = MockEthProvider::default();
+        let header = Header { number: 1, gas_limit: 30_000_000, ..Default::default() };
+        provider.add_block(header.hash_slow(), Block { header, body: BlockBody::default() });
+        // A transfer to an empty account uses 21_000 gas, so a third one only gets 8_000.
+        let api = build_test_eth_api_with_gas_cap(provider, 50_000);
+        let trace_api =
+            crate::TraceApi::new(api.clone(), BlockingTaskGuard::new(1), EthConfig::default());
+        let debug_api = crate::DebugApi::new(
+            api.clone(),
+            BlockingTaskGuard::new(1),
+            &Runtime::test(),
+            futures::stream::empty(),
+        );
+        let call = TransactionRequest::default().to(Address::with_last_byte(0x42));
+        let bundles =
+            |calls| vec![Bundle { transactions: vec![call.clone(); calls], block_override: None }];
+        let trace_calls =
+            |calls| vec![(call.clone(), std::iter::once(TraceType::Trace).collect()); calls];
+
+        assert_eq!(EthCall::call_many(&api, bundles(2), None, None).await.unwrap()[0].len(), 2);
+        assert_eq!(trace_api.trace_call_many(trace_calls(2), None).await.unwrap().len(), 2);
+        assert_eq!(
+            debug_api.debug_trace_call_many(bundles(2), None, None).await.unwrap()[0].len(),
+            2
+        );
+
+        assert_eq!(
+            EthCall::call_many(&api, bundles(3), None, None).await.unwrap_err().to_string(),
+            "call_many error in bundle 0 and transaction 2: intrinsic gas too low"
+        );
+        assert_eq!(
+            trace_api.trace_call_many(trace_calls(3), None).await.unwrap_err().to_string(),
+            "intrinsic gas too low"
+        );
+        assert_eq!(
+            debug_api.debug_trace_call_many(bundles(3), None, None).await.unwrap_err().to_string(),
+            "intrinsic gas too low"
+        );
+
+        let too_many = DEFAULT_MAX_CALL_MANY_CALLS + 1;
+        let limit_err = "call count 1025 exceeds limit 1024";
+        assert_eq!(
+            EthCall::call_many(&api, bundles(too_many), None, None).await.unwrap_err().to_string(),
+            limit_err
+        );
+        assert_eq!(
+            trace_api.trace_call_many(trace_calls(too_many), None).await.unwrap_err().to_string(),
+            limit_err
+        );
+        assert_eq!(
+            debug_api
+                .debug_trace_call_many(bundles(too_many), None, None)
+                .await
+                .unwrap_err()
+                .to_string(),
+            limit_err
         );
     }
 
