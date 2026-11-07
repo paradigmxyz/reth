@@ -389,6 +389,17 @@ impl<K: TransactionKind> DbTx for Tx<K> {
         self.prefetch.store(enabled, Ordering::Relaxed);
         self
     }
+
+    #[cfg(target_os = "linux")]
+    fn prefetch_keys<T: Table>(&self, keys: &[<T::Key as Encode>::Encoded]) {
+        // Writable transactions can have uncommitted trees, which the walk can't read.
+        if K::IS_READ_ONLY {
+            // SAFETY: The transaction is live and read-only.
+            let _ = self.inner.txn_execute(|txn| unsafe {
+                super::value_prefetch::prefetch_keys(txn, T::NAME, keys)
+            });
+        }
+    }
 }
 
 #[derive(Clone, Copy)]
