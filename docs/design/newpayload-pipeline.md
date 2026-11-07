@@ -607,6 +607,26 @@ the storage trie pool 13.2 ms, the sparse-trie thread 9.1 ms, the trie-hashing t
 derek, both changes against the commit before them, `--db.warm-branch-pages` on both sides, 4 run
 pairs: mean 18.21 -> 17.58 ms (-3.5%), p50 -4.7%, Mgas/s +4.9%, the state root after execution
 1.94 -> 1.29 ms (-34%), involuntary context switches of the engine thread -11%.
+
+What is left is mostly the work itself. A profile of the trie threads after both changes, with
+perf's own sampling at each context switch left out (12-16% of the proof and rayon samples, which
+first read as futex time):
+
+| Threads | User | File page faults | Futex |
+|---|---|---|---|
+| Proof workers, storage | 72% | 11% | 8% |
+| Proof workers, account | 62% | 20% | 7% |
+| Storage trie pool | 86% | - | 8% |
+| Sparse-trie thread | 84% | - | 11% |
+
+The storage trie pool's user time is hashing (keccak 26%, encoding nodes 15%). Account proofs
+spend 30% on the storage roots of sibling accounts, 44% of that checking for empty storage, which
+a cache cannot avoid (see above). Two cuts made no measurable difference over 2 runs each, so they
+are not in this branch (`mattsse/np-kq`): waking a proof worker only when one waits, since std's
+`Condvar::notify_one` makes a futex call even without waiters, and hashing trie nodes without
+alloy's global keccak cache, which every trie node of up to 87 bytes otherwise enters, evicting the
+EVM's hashes. Mean 14.6 ms for the head against 14.5-14.8 ms and 14.0-15.1 ms; no thread group's
+CPU moved by more than the runs' spread.
 - Account proofs compute the storage root of every account leaf whose hash they need and whose
   root the reused trie does not know, siblings included: 2,045 per block, each a random read of the
   account's storage and storage trie, 13% of the proof workers' CPU plus 7% checking for empty
