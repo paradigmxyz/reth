@@ -85,8 +85,8 @@ pub use reth_trie_parallel::{
     },
 };
 use reth_trie_sparse::{
-    ArenaParallelSparseTrie, ArenaParallelismThresholds, RevealableSparseTrie, SparseStateTrie,
-    TrieNodeEpoch,
+    ArenaExecutor, ArenaParallelSparseTrie, ArenaParallelismThresholds, RevealableSparseTrie,
+    SparseStateTrie, TrieNodeEpoch,
 };
 use std::{
     fmt,
@@ -668,15 +668,17 @@ impl DefaultStateRootStrategy {
                     target: "engine::tree::payload_processor",
                     "Creating new sparse trie - no preserved trie available"
                 );
-                let default_trie =
-                    RevealableSparseTrie::blind_from(ArenaParallelSparseTrie::default());
+                let trie_executor = Arc::new(StorageTriePoolExecutor(executor.clone()));
+                let default_trie = RevealableSparseTrie::blind_from(
+                    ArenaParallelSparseTrie::default().with_executor(trie_executor.clone()),
+                );
                 let accounts_trie = RevealableSparseTrie::blind_from(
-                    ArenaParallelSparseTrie::default().with_parallelism_thresholds(
-                        ArenaParallelismThresholds {
+                    ArenaParallelSparseTrie::default()
+                        .with_parallelism_thresholds(ArenaParallelismThresholds {
                             min_dirty_leaves: ACCOUNT_TRIE_PARALLEL_DIRTY_LEAVES,
                             ..Default::default()
-                        },
-                    ),
+                        })
+                        .with_executor(trie_executor),
                 );
                 SparseStateTrie::default()
                     .with_accounts_trie(accounts_trie)
@@ -884,6 +886,18 @@ pub struct StateRootTaskOptions<'a, N: NodePrimitives> {
     ///
     /// `None` disables pruning; an empty chain means the parent is durable.
     pub pending_sparse_trie_prune_blocks: Option<Vec<ExecutedBlock<N>>>,
+}
+
+/// Hashes the sparse trie's subtries in parallel on the runtime's storage trie pool, whose threads
+/// park when idle, instead of the global rayon pool, whose threads keep looking for work after
+/// every parallel call: 60% of that pool's CPU while it hashed the account trie.
+#[derive(Debug)]
+struct StorageTriePoolExecutor(reth_tasks::Runtime);
+
+impl ArenaExecutor for StorageTriePoolExecutor {
+    fn run_all(&self, jobs: Vec<Box<dyn FnOnce() + Send>>) {
+        self.0.storage_trie_pool().run_all(jobs);
+    }
 }
 
 /// Number of dirty leaves from which the account trie hashes its subtries in parallel.

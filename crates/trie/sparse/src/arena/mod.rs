@@ -11,10 +11,10 @@ use nodes::{ArenaSparseNode, ArenaSparseNodeBranch, ArenaSparseNodeState};
 use crate::{
     LeafLookup, LeafLookupError, LeafUpdate, SparseTrie, SparseTrieUpdates, TrieNodeEpoch,
 };
-use alloc::{borrow::Cow, boxed::Box, vec::Vec};
+use alloc::{borrow::Cow, boxed::Box, sync::Arc, vec::Vec};
 use alloy_primitives::{keccak256, map::B256Map, B256};
 use alloy_trie::TrieMask;
-use core::{cmp::Reverse, mem};
+use core::{cmp::Reverse, fmt, mem};
 use rayon::iter::{IntoParallelIterator, IntoParallelRefMutIterator, ParallelIterator};
 use reth_execution_errors::{SparseTrieErrorKind, SparseTrieResult};
 use reth_trie_common::{
@@ -549,6 +549,14 @@ impl Default for ArenaParallelismThresholds {
     }
 }
 
+/// Runs independent jobs of an [`ArenaParallelSparseTrie`] in parallel, in place of the global
+/// rayon pool, see [`ArenaParallelSparseTrie::with_executor`].
+pub trait ArenaExecutor: Send + Sync + fmt::Debug {
+    /// Runs every job and returns once all of them returned. A panic in a job must be resumed on
+    /// the calling thread.
+    fn run_all(&self, jobs: Vec<Box<dyn FnOnce() + Send>>);
+}
+
 /// An arena-based sparse trie whose subtries can be mutated in parallel.
 ///
 /// ## Structure
@@ -615,6 +623,8 @@ pub struct ArenaParallelSparseTrie {
     buffers: ArenaTrieBuffers,
     /// Thresholds controlling when parallelism is enabled for different operations.
     parallelism_thresholds: ArenaParallelismThresholds,
+    /// Runs parallel subtrie hashing, on the global rayon pool if `None`.
+    executor: Option<Arc<dyn ArenaExecutor>>,
 }
 
 impl ArenaParallelSparseTrie {
@@ -624,6 +634,13 @@ impl ArenaParallelSparseTrie {
         thresholds: ArenaParallelismThresholds,
     ) -> Self {
         self.parallelism_thresholds = thresholds;
+        self
+    }
+
+    /// Hashes subtries in parallel on `executor` instead of the global rayon pool, whose idle
+    /// threads keep looking for work for a while after every parallel call.
+    pub fn with_executor(mut self, executor: Arc<dyn ArenaExecutor>) -> Self {
+        self.executor = Some(executor);
         self
     }
 
@@ -2079,6 +2096,7 @@ impl Default for ArenaParallelSparseTrie {
             root,
             buffers: ArenaTrieBuffers::default(),
             parallelism_thresholds: ArenaParallelismThresholds::default(),
+            executor: None,
         }
     }
 }
@@ -2358,6 +2376,25 @@ impl SparseTrie for ArenaParallelSparseTrie {
                 for (_, subtrie) in &mut taken {
                     subtrie.update_cached_rlp(new_epoch);
                 }
+            } else if let Some(executor) = &self.executor {
+                let hashed = Arc::new(std::sync::Mutex::new(Vec::with_capacity(taken.len())));
+                let parent_span = tracing::Span::current();
+                let jobs = taken
+                    .into_iter()
+                    .map(|(idx, mut subtrie)| {
+                        let (hashed, parent_span) = (Arc::clone(&hashed), parent_span.clone());
+                        Box::new(move || {
+                            let _guard = parent_span.enter();
+                            subtrie.update_cached_rlp(new_epoch);
+                            hashed
+                                .lock()
+                                .unwrap_or_else(|err| err.into_inner())
+                                .push((idx, subtrie));
+                        }) as Box<dyn FnOnce() + Send>
+                    })
+                    .collect();
+                executor.run_all(jobs);
+                taken = core::mem::take(&mut *hashed.lock().unwrap_or_else(|err| err.into_inner()));
             } else {
                 let parent_span = tracing::Span::current();
                 taken = taken
@@ -2900,6 +2937,45 @@ mod tests {
         TrieNodeEpoch::new(value)
     }
 
+    /// Runs every job on its own thread and counts its calls.
+    #[derive(Debug, Default)]
+    struct ThreadExecutor(core::sync::atomic::AtomicUsize);
+
+    impl ArenaExecutor for ThreadExecutor {
+        fn run_all(&self, jobs: Vec<Box<dyn FnOnce() + Send>>) {
+            self.0.fetch_add(1, core::sync::atomic::Ordering::Relaxed);
+            std::thread::scope(|scope| {
+                for job in jobs {
+                    scope.spawn(job);
+                }
+            });
+        }
+    }
+
+    #[test]
+    fn executor_hashes_dirty_subtries() {
+        let mut rng = rand::rngs::StdRng::seed_from_u64(7);
+        let initial = (0..512)
+            .map(|_| (B256::from(rng.random::<[u8; 32]>()), U256::from(rng.random::<u64>() | 1)))
+            .collect::<BTreeMap<_, _>>();
+        let changes = initial
+            .keys()
+            .step_by(2)
+            .map(|key| (*key, U256::from(rng.random::<u64>() | 1)))
+            .collect::<BTreeMap<_, _>>();
+        let harness = ArenaTrieTestHarness::new(initial);
+        let root_node = harness.root_node();
+        let executor = Arc::new(ThreadExecutor::default());
+        let mut apst = ArenaParallelSparseTrie::default().with_executor(executor.clone());
+        apst.set_root(root_node.node, root_node.masks, true).expect("set_root should succeed");
+
+        harness.assert_changes(&mut apst, changes);
+        assert!(
+            executor.0.load(core::sync::atomic::Ordering::Relaxed) > 0,
+            "256 dirty leaves are hashed on the executor"
+        );
+    }
+
     #[test]
     fn unsupported_root_preserves_update_retention_and_allows_valid_root() {
         let mut trie = ArenaParallelSparseTrie::default();
@@ -3122,6 +3198,7 @@ mod tests {
             overlap_pct in 0.0..=0.5f64,
             delete_pct in 0.0..=0.33f64, // percent of overlapping changeset which are deletes
             shuffle_seed in arb::<u64>(),
+            with_executor in proptest::bool::ANY,
         ) {
             reth_tracing::init_test_tracing();
             info!(target: TRACE_TARGET, ?shuffle_seed, "PROPTEST START");
@@ -3150,6 +3227,9 @@ mod tests {
                     min_leaves_for_prune: 3,
                 },
             );
+            if with_executor {
+                apst = apst.with_executor(Arc::new(ThreadExecutor::default()));
+            }
             apst.set_root(root_node.node, root_node.masks, true).expect("set_root should succeed");
 
             harness.assert_changes(&mut apst, changeset1.clone());
