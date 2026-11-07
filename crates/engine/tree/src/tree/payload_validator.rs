@@ -2214,6 +2214,11 @@ pub(crate) fn np_phases_log(number: u64, gas: u64) {
         .map(|counter| counter.swap(0, Ordering::Relaxed).to_string())
         .collect::<Vec<_>>()
         .join(",");
+    let hash = crate::tree::state_root_strategy::sparse_trie::NP_HASH
+        .iter()
+        .map(|counter| counter.swap(0, Ordering::Relaxed).to_string())
+        .collect::<Vec<_>>()
+        .join(",");
     let trie = crate::tree::state_root_strategy::sparse_trie::NP_TRIE
         .iter()
         .map(|counter| counter.swap(0, Ordering::Relaxed).to_string())
@@ -2224,7 +2229,7 @@ pub(crate) fn np_phases_log(number: u64, gas: u64) {
         if let Ok(mut file) = std::fs::OpenOptions::new().create(true).append(true).open(path) {
             let _ = writeln!(
                 file,
-                "engine::np_phases: phases number={number} gas={gas} line={line} probe={probe} commit={commit} trie={trie}"
+                "engine::np_phases: phases number={number} gas={gas} line={line} probe={probe} commit={commit} trie={trie} hash={hash}"
             );
         }
     } else {

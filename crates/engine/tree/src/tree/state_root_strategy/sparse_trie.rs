@@ -41,6 +41,16 @@ pub(crate) static NP_TRIE: [std::sync::atomic::AtomicU64; 24] =
 use crate::tree::payload_validator::{np_phase, np_phase_at};
 use std::sync::atomic::Ordering as AtomicOrdering;
 
+/// Hashing counters (experiment only): storage hashes, storage hash ns, distinct storage tries
+/// hashed, account hashing calls, account hashing ns, account promotions, distinct accounts
+/// promoted.
+pub(crate) static NP_HASH: [std::sync::atomic::AtomicU64; 7] =
+    [const { std::sync::atomic::AtomicU64::new(0) }; 7];
+
+fn np_hash(index: usize, value: u64) {
+    NP_HASH[index].fetch_add(value, AtomicOrdering::Relaxed);
+}
+
 fn np_add(index: usize, value: u64) {
     NP_TRIE[index].fetch_add(value, AtomicOrdering::Relaxed);
 }
@@ -229,6 +239,8 @@ pub(super) struct SparseTrieCacheTask<A = ArenaParallelSparseTrie, S = ArenaPara
 
     /// Metrics for the sparse trie.
     metrics: SparseTrieTaskMetrics,
+    /// Accounts promoted this block (experiment only).
+    np_promoted: alloy_primitives::map::B256Set,
 }
 
 impl<A, S> SparseTrieCacheTask<A, S>
@@ -293,6 +305,7 @@ where
             initial_updates_applied: false,
             final_hashed_state: Default::default(),
             metrics,
+            np_promoted: Default::default(),
         }
     }
 
@@ -624,6 +637,8 @@ where
             if self.proof_worker_handle.results().is_empty() {
                 let np_t = Instant::now();
                 self.trie.calculate_subtries(self.new_epoch);
+                np_hash(3, 1);
+                np_hash(4, np_t.elapsed().as_nanos() as u64);
                 if self.finished_state_updates {
                     np_add(10, np_us(np_t));
                 } else {
@@ -1096,6 +1111,14 @@ where
     /// storage tries through [`SparseStateTrie`], so no trie may remain in the task's storage map.
     fn return_storage_tries(&mut self) {
         let mut storage = core::mem::take(&mut self.storage);
+        np_hash(
+            2,
+            storage
+                .values()
+                .filter(|state| matches!(state, StorageTrieState::Idle(work) if work.np_hashes > 0))
+                .count() as u64,
+        );
+        np_hash(6, self.np_promoted.len() as u64);
         for (address, state) in &mut storage {
             let StorageTrieState::Idle(work) = state else {
                 unreachable!("completion must wait for every storage job")
@@ -1146,6 +1169,7 @@ where
                         let encoded = encode_account_leaf_value(account, storage_root, account_rlp_buf);
                         self.account_updates.insert(*addr, LeafUpdate::Changed(encoded));
                         num_promoted += 1;
+                        self.np_promoted.insert(*addr);
                         return false;
                     }
                 }
@@ -1184,10 +1208,12 @@ where
                 let encoded = encode_account_leaf_value(account, storage_root, account_rlp_buf);
                 self.account_updates.insert(*addr, LeafUpdate::Changed(encoded));
                 num_promoted += 1;
+                self.np_promoted.insert(*addr);
 
                 false
             });
             span.record("promoted", num_promoted);
+            np_hash(5, num_promoted as u64);
             drop(span);
 
             // Only exit when no new updates are processed.
@@ -1370,6 +1396,8 @@ struct StorageTrieWork<S> {
     /// Whether this address ever had storage leaf updates queued, which is what makes promotion
     /// of its account wait for a recomputed storage root.
     updated: bool,
+    /// Times this trie was hashed this block (experiment only).
+    np_hashes: u32,
 }
 
 impl<S: SparseTrie + Default> StorageTrieWork<S> {
@@ -1381,6 +1409,7 @@ impl<S: SparseTrie + Default> StorageTrieWork<S> {
             fetched: Default::default(),
             dirty: false,
             updated: false,
+            np_hashes: 0,
         }
     }
 
@@ -1422,7 +1451,11 @@ impl<S: SparseTrie + Default> StorageTrieWork<S> {
         }
 
         if self.needs_root() {
+            let np_t = Instant::now();
             self.trie.root(new_epoch);
+            np_hash(0, 1);
+            np_hash(1, np_t.elapsed().as_nanos() as u64);
+            self.np_hashes += 1;
         }
 
         output
