@@ -189,7 +189,7 @@ mod tests {
     use super::*;
     use alloy_primitives::map::B256Set;
     use futures::StreamExt;
-    use reth_eth_wire::NewPooledTransactionHashes68;
+    use reth_eth_wire::NewPooledTransactionHashes66;
     use reth_network_p2p::error::RequestError;
     use reth_transaction_pool::{test_utils::TransactionGenerator, TransactionPool};
 
@@ -221,12 +221,9 @@ mod tests {
             .collect()
     }
 
+    /// An announcement without metadata, so responses are not checked against it.
     fn announcement(hashes: &[TxHash]) -> NewPooledTransactionHashes {
-        NewPooledTransactionHashes::Eth68(NewPooledTransactionHashes68 {
-            types: vec![2; hashes.len()],
-            sizes: vec![512; hashes.len()],
-            hashes: hashes.to_vec(),
-        })
+        NewPooledTransactionHashes::Eth66(NewPooledTransactionHashes66(hashes.to_vec()))
     }
 
     #[tokio::test]

@@ -85,6 +85,10 @@ use tracing::trace;
 /// Maximum live entries inspected in a global fallback eviction search.
 const MAX_EVICTION_ATTEMPTS: usize = 8;
 
+/// Maximum difference in bytes between the announced and the delivered encoded size of a
+/// transaction, the same tolerance geth applies.
+const MAX_ANNOUNCED_SIZE_DIFF: usize = 8;
+
 /// Fetches transactions that peers announced but that are not in the pool yet.
 ///
 /// Announcements are recorded with [`Self::on_announcement`], requests are sent with
@@ -220,6 +224,7 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
 
         for AnnouncedTransaction { hash, metadata } in announcement {
             let size = announced_size(metadata);
+            let tx_type = metadata.map(|metadata| metadata.tx_type);
             let at_capacity = self.hashes.len() >= max_total;
 
             // whether the hash is queued for the peer right away
@@ -227,8 +232,8 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
                 Entry::Occupied(mut occupied) => {
                     let entry = occupied.get_mut();
                     if let Some(candidate) = entry.candidate_mut(key) {
-                        // announced before by this peer, keep the latest size
-                        candidate.set_size(size);
+                        // announced before by this peer, keep the latest metadata
+                        candidate.set_metadata(size, tx_type);
                         continue
                     }
                     if tracked >= max_per_peer {
@@ -255,9 +260,9 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
                         (entry.fetching_by.is_none() &&
                             !entry.candidates.iter().any(Candidate::is_queued));
                     let candidate = if eager {
-                        Candidate::queued(key, size)
+                        Candidate::queued(key, size, tx_type)
                     } else {
-                        Candidate::unqueued(key, size)
+                        Candidate::unqueued(key, size, tx_type)
                     };
                     entry.candidates.push(candidate);
                     (eager, entry.generation)
@@ -282,9 +287,9 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
                             dropped_at_capacity += 1;
                             continue
                         }
-                        self.hashes.insert(hash, TxEntry::new(key, size, generation));
+                        self.hashes.insert(hash, TxEntry::new(key, size, tx_type, generation));
                     } else {
-                        vacant.insert(TxEntry::new(key, size, generation));
+                        vacant.insert(TxEntry::new(key, size, tx_type, generation));
                     }
                     self.record_order(hash, generation);
                     (true, generation)
@@ -812,10 +817,16 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
                 let mut requested_set = std::mem::take(&mut self.scratch_requested);
                 requested_set.clear();
                 requested_set.extend(requested.iter().copied());
-                let unsolicited =
-                    verify_response(&mut transactions, &requested_set, &mut delivered);
+                let (unsolicited, mismatched) = verify_response(
+                    &mut transactions,
+                    &requested_set,
+                    &self.hashes,
+                    key,
+                    version,
+                    &mut delivered,
+                );
                 self.scratch_requested = requested_set;
-                Ok((transactions, unsolicited))
+                Ok((transactions, unsolicited, mismatched))
             }
             Err(error) => Err(error),
         };
@@ -826,7 +837,7 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
         self.mark_ready(key, QueuePosition::Back);
 
         match outcome {
-            Ok((transactions, unsolicited)) => {
+            Ok((transactions, unsolicited, mismatched)) => {
                 if unsolicited > 0 {
                     self.metrics.unsolicited_transactions.increment(unsolicited as u64);
                     trace!(target: "net::tx",
@@ -835,6 +846,14 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
                         "received transactions in `PooledTransactions` response that weren't requested"
                     );
                 }
+                if mismatched > 0 {
+                    trace!(target: "net::tx",
+                        peer_id=format!("{peer_id:#}"),
+                        mismatched,
+                        "received transactions in `PooledTransactions` response that don't match their announced type or size"
+                    );
+                }
+                let bad_response = unsolicited > 0 || mismatched > 0;
                 if !transactions.is_empty() {
                     self.metrics.fetched_transactions.increment(transactions.len() as u64);
                     FetchEvent::TransactionsFetched {
@@ -842,10 +861,11 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
                         version,
                         client_version,
                         transactions,
-                        report_peer: unsolicited > 0,
+                        report_peer: bad_response,
                     }
-                } else if unsolicited > 0 {
-                    // the peer only sent transactions we didn't ask for
+                } else if bad_response {
+                    // the peer only sent transactions we didn't ask for or that don't match their
+                    // announcement
                     FetchEvent::FetchError { peer_id, error: RequestError::BadResponse }
                 } else {
                     trace!(target: "net::tx",
@@ -1237,9 +1257,9 @@ struct TxEntry {
 
 impl TxEntry {
     /// A new entry for a hash that is queued for the announcing peer.
-    fn new(peer: PeerKey, size: u32, generation: u64) -> Self {
+    fn new(peer: PeerKey, size: u32, tx_type: Option<u8>, generation: u64) -> Self {
         let mut candidates = SmallVec::new();
-        candidates.push(Candidate::queued(peer, size));
+        candidates.push(Candidate::queued(peer, size, tx_type));
         Self { candidates, generation, fetching_by: None, attempts: 0 }
     }
 
@@ -1268,6 +1288,8 @@ struct Candidate {
     /// The size the peer announced for the transaction, 0 if unknown, with
     /// [`Self::QUEUED`] set while the hash is in the peer's queue.
     size_and_queued: u32,
+    /// The transaction type the peer announced, `None` if the announcement carried no metadata.
+    tx_type: Option<u8>,
 }
 
 impl Candidate {
@@ -1275,13 +1297,13 @@ impl Candidate {
     const QUEUED: u32 = 1 << 31;
 
     /// A candidate that has the hash queued.
-    const fn queued(peer: PeerKey, size: u32) -> Self {
-        Self { peer, size_and_queued: size | Self::QUEUED }
+    const fn queued(peer: PeerKey, size: u32, tx_type: Option<u8>) -> Self {
+        Self { peer, size_and_queued: size | Self::QUEUED, tx_type }
     }
 
     /// A candidate that doesn't have the hash queued.
-    const fn unqueued(peer: PeerKey, size: u32) -> Self {
-        Self { peer, size_and_queued: size }
+    const fn unqueued(peer: PeerKey, size: u32, tx_type: Option<u8>) -> Self {
+        Self { peer, size_and_queued: size, tx_type }
     }
 
     const fn is_queued(&self) -> bool {
@@ -1296,8 +1318,25 @@ impl Candidate {
         }
     }
 
-    const fn set_size(&mut self, size: u32) {
+    const fn set_metadata(&mut self, size: u32, tx_type: Option<u8>) {
         self.size_and_queued = (self.size_and_queued & Self::QUEUED) | size;
+        self.tx_type = tx_type;
+    }
+
+    /// Returns whether the transaction differs from the type or size the peer announced for it.
+    ///
+    /// Eth/72 responses elide blob payloads, so the size of blob transactions is not compared.
+    fn mismatches<T: SignedTransaction>(&self, tx: &T, version: EthVersion) -> bool {
+        let Some(tx_type) = self.tx_type else { return false };
+        if tx.ty() != tx_type {
+            return true
+        }
+        if version.is_eth72() && tx.is_eip4844() {
+            return false
+        }
+        // announced sizes are stored capped, see `announced_size`
+        let size = tx.encode_2718_len().min(SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE);
+        size.abs_diff((self.size_and_queued & !Self::QUEUED) as usize) > MAX_ANNOUNCED_SIZE_DIFF
     }
 
     /// Returns the size to account for when packing the hash into a request to this peer.
@@ -1412,33 +1451,57 @@ fn announced_size(metadata: Option<TransactionMetadata>) -> u32 {
     })
 }
 
-/// Filters a response down to the transactions that were requested, dropping duplicates.
+/// Filters a response down to the transactions that were requested and match the metadata the
+/// responding peer announced for them, dropping duplicates.
 ///
-/// Records the delivered hashes in `delivered` and returns the number of unsolicited transactions
-/// that were dropped.
+/// Records the delivered hashes in `delivered` and returns the number of unsolicited and of
+/// mismatching transactions that were dropped.
 fn verify_response<T: SignedTransaction>(
     transactions: &mut PooledTransactions<T>,
     requested: &B256Set,
+    hashes: &B256Map<TxEntry>,
+    key: PeerKey,
+    version: EthVersion,
     delivered: &mut B256Set,
-) -> usize {
+) -> (usize, usize) {
     let mut unsolicited = 0;
+    let mut mismatched = 0;
     transactions.0.retain(|tx| {
         let hash = *tx.tx_hash();
         if !requested.contains(&hash) {
             unsolicited += 1;
             return false
         }
+        // hashes received elsewhere in the meantime are not tracked anymore
+        if hashes.get(&hash).is_some_and(|entry| {
+            entry
+                .candidates
+                .iter()
+                .any(|candidate| candidate.peer == key && candidate.mismatches(tx, version))
+        }) {
+            mismatched += 1;
+            return false
+        }
         delivered.insert(hash)
     });
-    unsolicited
+    (unsolicited, mismatched)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::test_utils::transactions::new_mock_session_with_capacity;
-    use alloy_consensus::transaction::Recovered;
-    use alloy_primitives::B256;
+    use alloy_consensus::{
+        constants::EIP4844_TX_TYPE_ID,
+        transaction::{Recovered, TxEip4844WithSidecar},
+        SignableTransaction, TxEip4844,
+    };
+    use alloy_eips::{
+        eip2718::Encodable2718,
+        eip4844::BYTES_PER_BLOB,
+        eip7594::{BlobTransactionSidecarEip7594, BlobTransactionSidecarVariant},
+    };
+    use alloy_primitives::{Signature, B256};
     use futures::task::noop_waker_ref;
     use rand::{rngs::StdRng, seq::IndexedRandom, Rng, SeedableRng};
     use reth_eth_wire::EthVersion;
@@ -1516,10 +1579,6 @@ mod tests {
             self.sessions.insert(peer_id, rx);
         }
 
-        fn announce(&mut self, peer_id: PeerId, hashes: &[TxHash]) {
-            self.announce_with_sizes(peer_id, hashes.iter().map(|hash| (*hash, 512)));
-        }
-
         fn announce_with_sizes(
             &mut self,
             peer_id: PeerId,
@@ -1535,7 +1594,8 @@ mod tests {
             self.verify();
         }
 
-        fn announce_unsized(&mut self, peer_id: PeerId, hashes: &[TxHash]) {
+        /// Announces the hashes without metadata, so responses are not checked against it.
+        fn announce(&mut self, peer_id: PeerId, hashes: &[TxHash]) {
             self.fetcher.on_announcement(
                 peer_id,
                 hashes.iter().map(|&hash| AnnouncedTransaction { hash, metadata: None }),
@@ -1658,7 +1718,7 @@ mod tests {
         let hashes = hashes(0..300);
 
         // no size metadata, so the count limit is what bounds the request
-        rig.announce_unsized(peer_a, &hashes);
+        rig.announce(peer_a, &hashes);
         assert_eq!(rig.dispatch(), 1);
 
         let (requested, response) = rig.take_request(peer_a).unwrap();
@@ -1713,7 +1773,7 @@ mod tests {
         let hashes = hashes(0..2);
 
         // peer_a doesn't know the sizes, peer_b announces a huge first transaction
-        rig.announce_unsized(peer_a, &hashes);
+        rig.announce(peer_a, &hashes);
         rig.announce_with_sizes(peer_b, [(hashes[0], 1024 * KIB), (hashes[1], 100)]);
 
         // peer_a's request is packed with the size estimate
@@ -1961,6 +2021,137 @@ mod tests {
         };
         assert_eq!(transactions.len(), 1);
         assert!(!report_peer);
+    }
+
+    #[test]
+    fn transactions_mismatching_their_announcement_are_filtered_and_reported() {
+        let mut rig = Rig::new();
+        let peer_a = peer(1);
+        let peer_b = peer(2);
+        rig.add_peer(peer_a);
+        rig.add_peer(peer_b);
+        let txs = pooled_txs(3);
+        let hashes = hashes_of(&txs);
+        let metadata = |tx: &PooledTransactionVariant, size_diff: isize, tx_type: u8| {
+            Some(TransactionMetadata {
+                tx_type,
+                size: tx.encode_2718_len().checked_add_signed(size_diff).unwrap(),
+            })
+        };
+
+        // wrong size, wrong type, and a size within the tolerance
+        rig.fetcher.on_announcement(
+            peer_a,
+            [
+                AnnouncedTransaction { hash: hashes[0], metadata: metadata(&txs[0], 9, 2) },
+                AnnouncedTransaction { hash: hashes[1], metadata: metadata(&txs[1], 0, 0) },
+                AnnouncedTransaction { hash: hashes[2], metadata: metadata(&txs[2], -8, 2) },
+            ],
+        );
+        rig.fetcher.on_announcement(
+            peer_b,
+            txs.iter().map(|tx| AnnouncedTransaction {
+                hash: *tx.tx_hash(),
+                metadata: metadata(tx, 0, 2),
+            }),
+        );
+        rig.dispatch();
+
+        let FetchEvent::TransactionsFetched { transactions, report_peer, .. } =
+            rig.respond(peer_a, txs.clone())
+        else {
+            panic!("expected fetched transactions")
+        };
+        assert!(report_peer);
+        assert_eq!(transactions.0, txs[2..]);
+
+        // the mismatching transactions are fetched from the peer that announced them correctly
+        assert_eq!(rig.fetcher.candidate_peers(&hashes[0]), vec![peer_b]);
+        assert_eq!(rig.fetcher.candidate_peers(&hashes[1]), vec![peer_b]);
+        rig.dispatch();
+        let FetchEvent::TransactionsFetched { transactions, report_peer, .. } =
+            rig.respond(peer_b, txs[..2].to_vec())
+        else {
+            panic!("expected fetched transactions")
+        };
+        assert!(!report_peer);
+        assert_eq!(transactions.0, txs[..2]);
+    }
+
+    #[test]
+    fn response_with_only_mismatching_transactions_is_a_bad_response() {
+        let mut rig = Rig::new();
+        let peer_a = peer(1);
+        rig.add_peer(peer_a);
+        let txs = pooled_txs(1);
+
+        rig.announce_with_sizes(peer_a, [(*txs[0].tx_hash(), 1)]);
+        rig.dispatch();
+
+        let event = rig.respond(peer_a, txs);
+        assert!(matches!(
+            event,
+            FetchEvent::FetchError { peer_id, error: RequestError::BadResponse } if peer_id == peer_a
+        ));
+        assert_eq!(rig.fetcher.num_hashes(), 0);
+    }
+
+    #[test]
+    fn transactions_announced_without_metadata_are_not_verified() {
+        let mut rig = Rig::new();
+        let peer_a = peer(1);
+        rig.add_peer(peer_a);
+        let txs = pooled_txs(1);
+
+        rig.announce(peer_a, &hashes_of(&txs));
+        rig.dispatch();
+
+        let FetchEvent::TransactionsFetched { transactions, report_peer, .. } =
+            rig.respond(peer_a, txs.clone())
+        else {
+            panic!("expected fetched transactions")
+        };
+        assert!(!report_peer);
+        assert_eq!(transactions.0, txs);
+    }
+
+    #[test]
+    fn eth72_blob_transaction_size_is_not_verified() {
+        let mut rig = Rig::new();
+        let peer_a = peer(1);
+        let (session, rx) = new_mock_session_with_capacity(peer_a, EthVersion::Eth72, 8);
+        rig.peers.insert(peer_a, session);
+        rig.sessions.insert(peer_a, rx);
+
+        // eth/72 responses elide the blob payloads that the announced size accounts for
+        let sidecar = BlobTransactionSidecarVariant::Eip7594(BlobTransactionSidecarEip7594 {
+            blobs: vec![],
+            commitments: vec![Default::default()],
+            cell_proofs: vec![],
+        });
+        let tx = PooledTransactionVariant::Eip4844(
+            TxEip4844WithSidecar::from_tx_and_sidecar(TxEip4844::default(), sidecar)
+                .into_signed(Signature::test_signature()),
+        );
+        rig.fetcher.on_announcement(
+            peer_a,
+            [AnnouncedTransaction {
+                hash: *tx.tx_hash(),
+                metadata: Some(TransactionMetadata {
+                    tx_type: EIP4844_TX_TYPE_ID,
+                    size: tx.encode_2718_len() + BYTES_PER_BLOB,
+                }),
+            }],
+        );
+        rig.dispatch();
+
+        let FetchEvent::TransactionsFetched { transactions, report_peer, .. } =
+            rig.respond(peer_a, vec![tx.clone()])
+        else {
+            panic!("expected fetched transactions")
+        };
+        assert!(!report_peer);
+        assert_eq!(transactions.0, vec![tx]);
     }
 
     #[test]
@@ -2859,7 +3050,7 @@ mod tests {
         let peers = (1..=4).map(peer).collect::<Vec<_>>();
         for (i, peer_id) in peers.iter().enumerate() {
             rig.add_peer(*peer_id);
-            rig.announce_unsized(*peer_id, &hashes(i as u64 * 16..(i as u64 + 1) * 16));
+            rig.announce(*peer_id, &hashes(i as u64 * 16..(i as u64 + 1) * 16));
         }
 
         // 24 of the 64 announced hashes were evicted, spread over the peers so that every
