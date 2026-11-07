@@ -96,7 +96,8 @@ pub struct TransactionFetcher<N: NetworkPrimitives = EthNetworkPrimitives> {
     hashes: B256Map<TxEntry>,
     /// Tracked hashes in the order they were added, used to evict the oldest pending hash once
     /// the fetcher is at capacity and the peer tracking the most hashes has none pending. Entries
-    /// are removed lazily, so it may contain hashes that are not tracked anymore.
+    /// are removed lazily, so it may contain hashes that are not tracked anymore. Fetching hashes
+    /// skipped by an eviction search are moved to the back.
     order: VecDeque<(TxHash, u64)>,
     /// Fetch state of all peers that announced tracked hashes.
     peers: HashMap<PeerKey, PeerState>,
@@ -666,23 +667,21 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
     /// Evicts the oldest pending hash, including shared hashes, as a last resort.
     ///
     /// Shared hashes cannot be exempt from eviction: co-announcements could pin every slot.
-    /// Returns `false` if only fetching hashes were found within the search budget.
+    /// Returns `false` if only fetching hashes were found within the search budget. Fetching
+    /// hashes are moved to the back of the order, so the next search continues past them.
     fn evict_oldest_pending(&mut self) -> bool {
-        let mut index = 0;
         let mut attempts = 0;
         while attempts < MAX_EVICTION_ATTEMPTS {
-            let Some(&(hash, generation)) = self.order.get(index) else { break };
+            let Some((hash, generation)) = self.order.pop_front() else { break };
             let Some(entry) = self.hashes.get(&hash).filter(|entry| entry.generation == generation)
             else {
-                self.order.remove(index);
                 continue
             };
             attempts += 1;
             if entry.fetching_by.is_some() {
-                index += 1;
+                self.order.push_back((hash, generation));
                 continue
             }
-            self.order.remove(index);
             self.remove_hash(&hash);
             return true
         }
@@ -2395,6 +2394,37 @@ mod tests {
         rig.dispatch();
         assert_eq!(rig.fetcher.fetching_peer(&shared), Some(honest));
         assert_eq!(rig.take_request(flooder).unwrap().0, vec![hash(2), hash(3)]);
+    }
+
+    #[test]
+    fn capacity_fallback_moves_past_fetching_hashes() {
+        let mut rig = Rig::with_config(TransactionFetcherConfig {
+            max_capacity_cache_txns_pending_fetch: 24,
+            ..Default::default()
+        });
+        let [fetching, first, second, coannouncer, honest] = [1, 2, 3, 4, 5].map(peer);
+        for p in [fetching, first, second, coannouncer, honest] {
+            rig.add_peer(p);
+        }
+        // the oldest hashes are inflight and the busiest peer has no exclusive hashes
+        rig.announce(fetching, &hashes(0..8));
+        rig.dispatch();
+        rig.announce(first, &hashes(8..16));
+        rig.announce(second, &hashes(16..24));
+        rig.announce(coannouncer, &hashes(8..24));
+
+        // the first search only gets past the fetching hashes, later ones evict pending hashes
+        rig.announce(honest, &hashes(24..28));
+        assert!(rig.fetcher.candidate_peers(&hash(24)).is_empty());
+        for h in hashes(25..28) {
+            assert_eq!(rig.fetcher.candidate_peers(&h), vec![honest]);
+        }
+        for h in hashes(8..11) {
+            assert!(rig.fetcher.candidate_peers(&h).is_empty());
+        }
+        assert_eq!(rig.fetcher.num_fetching_hashes(), 8);
+        rig.dispatch();
+        assert_eq!(rig.take_request(honest).unwrap().0, hashes(25..28));
     }
 
     #[test]
