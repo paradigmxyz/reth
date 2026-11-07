@@ -649,7 +649,7 @@ that the probes feed.
   longer for a core (the storage proof workers 8 -> 20 ms per block) and the mean went from 14.5
   to 15.3 and 15.7 ms over 2 runs each. With the cores the limit, loads in parallel cost more than
   the waits they hide.
-- 15% of the workers' CPU was the inspector that lets results be rebased, which left
+- In a profile, 15% of the workers' CPU was the inspector that lets results be rebased, which left
   `inspector_config` at its default and so was stepped on every instruction, on evm2's inspect
   handlers. It now steps only the seven opcodes it handles (balance reads, `SELFDESTRUCT` and the
   block environment fields), and evm2 runs the others on their plain handlers: 64 -> 57 ms of
