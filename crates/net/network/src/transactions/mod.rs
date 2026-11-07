@@ -474,8 +474,9 @@ impl<Pool: TransactionPool, N: NetworkPrimitives> TransactionsManager<Pool, N> {
     /// Returns whether pending pool imports are below the soft limit.
     ///
     /// Fetch responses are admitted in full when capacity remains, so one response can exceed
-    /// the limit by at most 255 transactions (the 256-hash request cap minus one free slot).
-    /// Further responses and requests wait until imports fall below the limit again.
+    /// the limit by at most 255 transactions (the 256-hash request cap minus one free slot), or
+    /// the byte limit by one response message. Further responses and requests wait until imports
+    /// fall below both limits again.
     fn has_capacity_for_pending_pool_imports(&self) -> bool {
         self.remaining_pool_import_capacity() > 0
     }
@@ -483,11 +484,16 @@ impl<Pool: TransactionPool, N: NetworkPrimitives> TransactionsManager<Pool, N> {
     /// Returns the remaining capacity below the soft limit for pending pool imports.
     ///
     /// Outstanding requests do not reserve capacity. A fetched response is admitted in full
-    /// if any capacity remains; while imports exceed the limit, this returns zero.
+    /// if any capacity remains; while imports exceed the count or byte limit, this returns zero.
     fn remaining_pool_import_capacity(&self) -> usize {
-        self.pending_pool_imports_info.max_pending_pool_imports.saturating_sub(
-            self.pending_pool_imports_info.pending_pool_imports.load(Ordering::Relaxed),
-        )
+        let info = &self.pending_pool_imports_info;
+        if info.pending_pool_imports_bytes.load(Ordering::Relaxed) >=
+            info.max_pending_pool_imports_bytes
+        {
+            return 0
+        }
+        info.max_pending_pool_imports
+            .saturating_sub(info.pending_pool_imports.load(Ordering::Relaxed))
     }
 
     /// Returns import capacity available to broadcasts after reserving space for fetched hashes.
@@ -1482,6 +1488,13 @@ where
                 .fetch_add(new_txs.len(), Ordering::Relaxed);
             let tx_manager_info_pending_pool_imports =
                 self.pending_pool_imports_info.pending_pool_imports.clone();
+            // includes blob sidecars, which stay in memory until the import completes
+            let bytes = new_txs.iter().map(PoolTransaction::encoded_length).sum::<usize>();
+            self.pending_pool_imports_info
+                .pending_pool_imports_bytes
+                .fetch_add(bytes, Ordering::Relaxed);
+            let tx_manager_info_pending_pool_imports_bytes =
+                self.pending_pool_imports_info.pending_pool_imports_bytes.clone();
 
             trace!(target: "net::tx::propagation", new_txs_len=?new_txs.len(), "Importing new transactions");
             let import = Box::pin(async move {
@@ -1492,6 +1505,7 @@ where
                 metric_pending_pool_imports.decrement(added as f64);
                 // update self-monitoring info
                 tx_manager_info_pending_pool_imports.fetch_sub(added, Ordering::Relaxed);
+                tx_manager_info_pending_pool_imports_bytes.fetch_sub(bytes, Ordering::Relaxed);
 
                 res
             });
@@ -2283,12 +2297,21 @@ pub struct PendingPoolImportsInfo {
     pending_pool_imports: Arc<AtomicUsize>,
     /// Max number of transactions allowed to be imported concurrently.
     max_pending_pool_imports: usize,
+    /// Encoded byte size of the transactions about to be inserted into the pool.
+    pending_pool_imports_bytes: Arc<AtomicUsize>,
+    /// Max encoded byte size of transactions allowed to be imported concurrently.
+    max_pending_pool_imports_bytes: usize,
 }
 
 impl PendingPoolImportsInfo {
     /// Returns a new [`PendingPoolImportsInfo`].
     pub fn new(max_pending_pool_imports: usize) -> Self {
-        Self { pending_pool_imports: Arc::new(AtomicUsize::default()), max_pending_pool_imports }
+        Self {
+            pending_pool_imports: Arc::new(AtomicUsize::default()),
+            max_pending_pool_imports,
+            pending_pool_imports_bytes: Arc::new(AtomicUsize::default()),
+            max_pending_pool_imports_bytes: DEFAULT_MAX_BYTE_SIZE_PENDING_POOL_IMPORTS,
+        }
     }
 
     /// Returns `true` if the number of pool imports is under a given tolerated max.
