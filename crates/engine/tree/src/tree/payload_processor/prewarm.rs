@@ -66,6 +66,16 @@ const REFRESH_WINDOW: usize = 64;
 /// How often refreshing checks whether block execution published actual writes.
 const REFRESH_POLL_INTERVAL: Duration = Duration::from_micros(50);
 
+/// Upper bound on the number of consecutive transactions one prewarm worker executes in order.
+const MAX_PREWARM_CHUNK_LEN: usize = 16;
+
+/// Target number of transaction chunks per prewarm thread, so chunks still balance across threads.
+const PREWARM_CHUNKS_PER_THREAD: usize = 4;
+
+/// Number of leading transactions prewarmed one by one, because block execution starts on them
+/// right away and prewarming can only stay ahead of it by spreading them across all threads.
+const UNCHUNKED_PREWARM_TXS: usize = 64;
+
 /// Determines the prewarming mode: transaction-based, BAL-based, or skipped.
 ///
 /// Each variant carries the state-root capability its producers use, so the capability dies
@@ -183,6 +193,19 @@ where
             {
                 let pool = WorkerStatefulPool::new(pool);
                 let pool = &pool;
+                // Without reusable results, consecutive transactions are prewarmed in chunks that
+                // run in order on one worker, each on top of the writes of the previous ones. A
+                // transaction that depends on an earlier one (a backrun after its target, a
+                // sender's next transaction) then reads the slots block execution will read,
+                // instead of taking an early exit against the parent state.
+                let chunk_len = if ctx.prewarm_results.is_none() {
+                    (ctx.env.transaction_count /
+                        (pool.current_num_threads() * PREWARM_CHUNKS_PER_THREAD).max(1))
+                    .clamp(1, MAX_PREWARM_CHUNK_LEN)
+                } else {
+                    1
+                };
+                let mut chunk = Vec::new();
                 pool.in_place_scope(|s| {
                     while let Ok((index, tx)) = pending.recv() {
                         if ctx.should_stop() {
@@ -199,6 +222,21 @@ where
                         }
 
                         tx_count += 1;
+                        if chunk_len > 1 && index >= UNCHUNKED_PREWARM_TXS {
+                            chunk.push((index, tx));
+                            if chunk.len() == chunk_len {
+                                let chunk = std::mem::take(&mut chunk);
+                                s.spawn(move |_| {
+                                    Self::transact_chunk_worker(
+                                        ctx,
+                                        pool,
+                                        chunk,
+                                        state_root_hint_stream,
+                                    );
+                                });
+                            }
+                            continue;
+                        }
                         if ctx.prewarm_results.is_some() {
                             refresh_txs.push((index, tx.clone()));
                         }
@@ -230,6 +268,13 @@ where
                                 seeded,
                                 state_root_hint_stream,
                             );
+                        });
+                    }
+
+                    if !chunk.is_empty() {
+                        let chunk = std::mem::take(&mut chunk);
+                        s.spawn(move |_| {
+                            Self::transact_chunk_worker(ctx, pool, chunk, state_root_hint_stream);
                         });
                     }
 
@@ -445,6 +490,71 @@ where
                     results.store(index, res, reads, &mut balances, speculative);
                 }
                 ctx.metrics.total_runtime.record(start.elapsed());
+            },
+        );
+    }
+
+    /// Executes consecutive transactions in block order on the current pool thread's EVM, each on
+    /// top of the writes of the previous ones, then discards the chunk's writes.
+    ///
+    /// Only used without reusable prewarm results, see [`PrewarmContext::prewarm_results`].
+    fn transact_chunk_worker<Tx>(
+        ctx: &PrewarmContext<N, P, Evm>,
+        pool: &WorkerStatefulPool,
+        chunk: Vec<(usize, Tx)>,
+        state_root_hint_stream: Option<&StateRootHintStream>,
+    ) where
+        Tx: ExecutableTxFor<Evm>,
+    {
+        // Block execution already passed the whole chunk.
+        if chunk
+            .last()
+            .is_none_or(|(index, _)| *index < ctx.executed_tx_index.load(Ordering::Relaxed))
+        {
+            return;
+        }
+
+        pool.get_or_init(
+            || ctx.evm_for_ctx(),
+            |state| {
+                let Some(evm) = state.evm.as_mut() else { return };
+                for (index, tx) in chunk {
+                    if ctx.should_stop() {
+                        break
+                    }
+                    let start = Instant::now();
+                    let (tx_env, tx) = tx.into_parts();
+                    let res = match evm.transact(&tx_env) {
+                        Ok(res) => res,
+                        Err(err) => {
+                            trace!(
+                                target: "engine::tree::payload_processor::prewarm",
+                                %err,
+                                tx_hash=%tx.tx().tx_hash(),
+                                sender=%tx.signer(),
+                                "Error when executing prewarm transaction",
+                            );
+                            ctx.metrics.transaction_errors.increment(1);
+                            continue
+                        }
+                    };
+                    ctx.metrics.execution_duration.record(start.elapsed());
+                    if index > 0 &&
+                        let Some(stream) = state_root_hint_stream
+                    {
+                        let (targets, storage_targets) = MultiProofTargetsV2::from_account_changes(
+                            res.pending_state.account_changes(),
+                        );
+                        ctx.metrics.prefetch_storage_targets.record(storage_targets as f64);
+                        stream.on_access_hint(targets.into());
+                    }
+                    // Later transactions of the chunk execute on top of these writes.
+                    evm.commit_state(&res.pending_state);
+                    ctx.metrics.total_runtime.record(start.elapsed());
+                }
+                // The next chunk on this worker starts from the parent state again. Reads stay in
+                // the shared execution cache.
+                drop(evm.take_state_cache());
             },
         );
     }
