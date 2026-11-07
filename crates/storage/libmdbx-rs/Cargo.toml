@@ -24,12 +24,13 @@ thiserror.workspace = true
 tracing.workspace = true
 
 dashmap = { workspace = true, features = ["inline"], optional = true }
+rustc-hash = { workspace = true, optional = true }
 
 [features]
 fuzz = []
 default = []
 return-borrowed = []
-read-tx-timeouts = ["dep:dashmap"]
+read-tx-timeouts = ["dep:dashmap", "dep:rustc-hash"]
 
 [dev-dependencies]
 tempfile.workspace = true
