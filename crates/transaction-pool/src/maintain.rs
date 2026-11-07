@@ -464,14 +464,17 @@ pub async fn maintain_transaction_pool<N, Client, P, St>(
                 if depth > max_update_depth {
                     maintained_state = MaintainedPoolState::Drifted;
                     debug!(target: "txpool", ?depth, "skipping deep canonical update");
-                    let info = BlockInfo {
-                        block_gas_limit: tip.header().gas_limit(),
-                        last_seen_block_hash: tip.hash(),
-                        last_seen_block_number: tip.number(),
-                        pending_basefee: pending_block_base_fee,
-                        pending_blob_fee: pending_block_blob_fee,
+                    // move the pool and the validator to the new tip without updating accounts or
+                    // removing mined transactions
+                    let update = CanonicalStateUpdate {
+                        new_tip: tip.sealed_block(),
+                        pending_block_base_fee,
+                        pending_block_blob_fee,
+                        changed_accounts: Vec::new(),
+                        mined_transactions: Vec::new(),
+                        update_kind: PoolUpdateKind::Commit,
                     };
-                    pool.set_block_info(info);
+                    pool.on_canonical_state_change(update);
 
                     // keep track of mined blob transactions
                     blob_store_tracker.add_new_chain_blocks(&blocks);
@@ -855,14 +858,20 @@ pub async fn backup_local_transactions_task<P>(
 mod tests {
     use super::*;
     use crate::{
-        blobstore::InMemoryBlobStore, validate::EthTransactionValidatorBuilder,
+        blobstore::InMemoryBlobStore,
+        error::{InvalidPoolTransactionError, PoolErrorKind},
+        test_utils::TransactionBuilder,
+        validate::EthTransactionValidatorBuilder,
         CoinbaseTipOrdering, EthPooledTransaction, Pool, TransactionOrigin,
     };
+    use alloy_consensus::Header;
     use alloy_eips::{eip1559::ETHEREUM_BLOCK_GAS_LIMIT_30M, eip2718::Decodable2718};
-    use alloy_primitives::{address, hex, U256};
-    use reth_ethereum_primitives::PooledTransactionVariant;
+    use alloy_primitives::{address, hex, B256, U256};
+    use reth_ethereum_primitives::{Block, PooledTransactionVariant};
     use reth_evm_ethereum::EthEvmConfig;
+    use reth_execution_types::Chain;
     use reth_fs_util as fs;
+    use reth_primitives_traits::{RecoveredBlock, SealedBlock};
     use reth_provider::test_utils::{ExtendedAccount, MockEthProvider};
     use reth_tasks::Runtime;
 
@@ -923,6 +932,73 @@ mod tests {
         assert_eq!(txs.len(), 1);
 
         temp_dir.close().unwrap();
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn deep_commit_refreshes_validator_head() {
+        // mainnet genesis has a 5,000 gas limit, which the validator picks up from the latest
+        // header
+        let provider = MockEthProvider::default().with_genesis_block();
+        let transaction = EthPooledTransaction::try_from_consensus(
+            TransactionBuilder::default()
+                .gas_limit(21_000)
+                .max_fee_per_gas(1_000_000_000)
+                .to(Address::ZERO)
+                .into_eip1559()
+                .try_into_recovered()
+                .unwrap(),
+        )
+        .unwrap();
+        provider.add_account(transaction.sender(), ExtendedAccount::new(0, U256::MAX));
+        let blob_store = InMemoryBlobStore::default();
+        let validator =
+            EthTransactionValidatorBuilder::new(provider.clone(), EthEvmConfig::mainnet())
+                .build(blob_store.clone());
+        let txpool =
+            Pool::new(validator, CoinbaseTipOrdering::default(), blob_store, Default::default());
+
+        let err = txpool
+            .add_transaction(TransactionOrigin::External, transaction.clone())
+            .await
+            .unwrap_err();
+        assert!(matches!(
+            err.kind,
+            PoolErrorKind::InvalidTransaction(InvalidPoolTransactionError::ExceedsGasLimit(
+                21_000, 5_000
+            ))
+        ));
+
+        let config = MaintainPoolConfig::default();
+        let tip = RecoveredBlock::<Block>::new_sealed(
+            SealedBlock::from_sealed_parts(
+                SealedHeader::new(
+                    Header {
+                        number: config.max_update_depth + 1,
+                        gas_limit: ETHEREUM_BLOCK_GAS_LIMIT_30M,
+                        ..Default::default()
+                    },
+                    B256::random(),
+                ),
+                Default::default(),
+            ),
+            Default::default(),
+        );
+        let commit: CanonStateNotification = CanonStateNotification::Commit {
+            new: Arc::new(Chain::new(vec![tip], Default::default(), Default::default())),
+        };
+        let maintain = maintain_transaction_pool(
+            provider,
+            txpool.clone(),
+            futures::stream::iter([commit]),
+            Runtime::test(),
+            config,
+        );
+        time::timeout(Duration::from_secs(10), maintain).await.unwrap();
+        assert_eq!(txpool.block_info().last_seen_block_number, config.max_update_depth + 1);
+
+        let hash = *transaction.hash();
+        let added = txpool.add_transaction(TransactionOrigin::External, transaction).await.unwrap();
+        assert_eq!(added.hash, hash);
     }
 
     #[test]
