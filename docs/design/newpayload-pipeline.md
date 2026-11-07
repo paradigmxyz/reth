@@ -515,18 +515,19 @@ and building the updates is evm2's. Proof prefetching is not what slows executio
 the proofs after the last transaction and slows execution slightly, and 16 or 32 workers per proof
 pool instead of 64 changed the transactions phase by less than 2% while the tail grew.
 
-What is left after the last transaction is mostly outside the trie: the finish marker is sent when
-evm2's executor drops its state hook, after it built the bundle state, ~0.3 ms after the last
-transaction. Dropping the hook right after the post-execution changes is a change in evm2. In the
-trie, the walk that restores the hashed account subtries and merges their trie updates into the
-upper trie's is 35-40% of a large `calculate_subtries` (159 of 446 us with 128-255 dirty leaves),
-serial on the sparse-trie thread.
+After the last transaction, the finish marker is sent when evm2's executor drops its state hook,
+after it built the bundle state, ~0.3 ms later. In the trie, the walk that restores the hashed
+account subtries and merges their trie updates into the upper trie's is 35-40% of a large
+`calculate_subtries` (159 of 446 us with 128-255 dirty leaves), serial on the sparse-trie thread.
 
-Patching evm2 locally to drop the hook right after the post-execution changes (experiment branch
-`mattsse/np-phases8`, behind an environment knob) moved the finish marker from 341 to 50 us after
-the last transaction (p50) and made the replay faster in all 3 run pairs: mean 15.85 -> 15.09 ms
-(-4.8%), p50 -5.4%, p99 -8%. The root itself came only 74 us sooner: with the marker early, the
-tail is the trie's own work on the last updates. It needs a change in evm2.
+Dropping the hook right after the post-execution changes moves the finish marker from 341 to 50 us
+after the last transaction (p50, a locally patched evm2, experiment branch `mattsse/np-phases8`),
+but the root comes only 74 us sooner: with the marker early, the tail is the trie's own work on the
+last updates. A first replay of that patch was 4.8% faster, which did not hold up. reth's executor
+can do it without evm2 by applying the post-execution changes itself, dropping the hook and then
+building the bundle (`mattsse/np-hook-drop`). Against the head, 3 local run pairs: mean -1% (within
+the runs' spread); derek with `--db.warm-branch-pages`, 4 run pairs: mean +0.1% (noise ±0.85%), p50
+-0.4%, p90 -1.8%, none significant. So it is not in this branch.
 
 ### Proofs are reads from disk
 
