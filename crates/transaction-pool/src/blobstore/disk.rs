@@ -923,6 +923,24 @@ mod tests {
     }
 
     #[test]
+    fn disk_queued_deletions_count_until_cleanup() {
+        let (store, _dir) = tmp_store();
+        assert_eq!(store.blobs_len(), 0);
+
+        let blobs = rng_blobs(2);
+        let hashes = blobs.iter().map(|(tx, _)| *tx).collect::<Vec<_>>();
+        store.insert_all(wrapped_blobs(blobs)).unwrap();
+
+        // queued deletions keep the blobs counted, so the store isn't reported empty before
+        // cleanup ran
+        store.delete_all(hashes).unwrap();
+        assert_eq!(store.blobs_len(), 2);
+
+        store.cleanup();
+        assert_eq!(store.blobs_len(), 0);
+    }
+
+    #[test]
     fn disk_insert_and_retrieve() {
         let (store, _dir) = tmp_store();
 
