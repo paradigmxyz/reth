@@ -34,7 +34,7 @@ use evm2::{
     },
     interpreter::{op, InstrStop, Interpreter, Message, MessageKind, MessageResult},
     utils::WordExt,
-    EvmFeatures, EvmTypes, Inspector, TxResultWithState, Version,
+    EvmFeatures, EvmTypes, Inspector, InspectorConfig, OpcodeSet, TxResultWithState, Version,
 };
 use parking_lot::{Condvar, Mutex, RwLock};
 use std::{
@@ -57,6 +57,20 @@ pub(crate) const POOL_BENEFICIARY: Address = address!("0x00000000000000000000000
 
 /// Maximum estimated number of bytes held by [`PoolResults`].
 const MAX_POOL_RESULT_BYTES: usize = 64 << 20;
+
+/// Opcodes that [`BalanceTracker::step`] handles. The EVM runs every other opcode on its plain
+/// handler: stepping all of them took 10% of the speculation workers' CPU.
+const BALANCE_TRACKER_STEPS: OpcodeSet = {
+    let mut steps = OpcodeSet::EMPTY;
+    steps.insert(op::BALANCE);
+    steps.insert(op::SELFBALANCE);
+    steps.insert(op::SELFDESTRUCT);
+    steps.insert(op::COINBASE);
+    steps.insert(op::TIMESTAMP);
+    steps.insert(op::DIFFICULTY);
+    steps.insert(op::GASLIMIT);
+    steps
+};
 
 /// Returns whether blocks executed with `cfg_env` may reuse prewarm results, which excludes
 /// EIP-8037 multidimensional block gas.
@@ -1302,6 +1316,10 @@ impl BalanceTracker {
 }
 
 impl<T: EvmTypes> Inspector<T> for BalanceTracker {
+    fn inspector_config(&self) -> InspectorConfig {
+        InspectorConfig::new().with_steps(BALANCE_TRACKER_STEPS)
+    }
+
     fn step(&mut self, interp: &mut Interpreter<'_, '_, T>) {
         let address = match interp.opcode() {
             op::BALANCE => {
