@@ -13,7 +13,7 @@ use alloy_primitives::{keccak256, map::AddressMap, Address, Bytes, TxKind, U256}
 use alloy_rpc_types_eth::{
     simulate::{FrameCallResult, SimBlock, SimCallResult, SimulateError, SimulatedBlock},
     state::StateOverride,
-    BlockId, BlockOverrides, BlockTransactionsKind, TransactionRequest,
+    BlockId, BlockOverrides, BlockTransactionsKind,
 };
 use evm2::{
     ethereum::eip8141::FrameGas, interpreter::InstrStop, precompiles::MovePrecompileError,
