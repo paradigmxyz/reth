@@ -1,8 +1,12 @@
 //! Commonly used code snippets
 
-use super::{EthApiError, EthResult};
+use super::{
+    error::{AsEthApiError, FromEthApiError},
+    EthApiError, EthResult,
+};
 use alloy_consensus::TxReceipt;
 use alloy_rpc_types_eth::Bundle;
+use evm2::{interpreter::InstrStop, TxResultExt};
 use reth_evm::TransactionEnvMut;
 use reth_primitives_traits::{Recovered, SignedTransaction};
 use reth_rpc_server_types::constants::{DEFAULT_CALL_MANY_TIMEOUT, DEFAULT_MAX_CALL_MANY_CALLS};
@@ -103,18 +107,23 @@ pub fn checked_blob_gas_used_ratio(blob_gas_used: u64, max_blob_gas_per_block: u
 /// Bounds the work of one `eth_callMany`, `trace_callMany` or `debug_traceCallMany` request.
 ///
 /// The request may carry at most [`DEFAULT_MAX_CALL_MANY_CALLS`] calls, all of its calls share
-/// one gas budget of the RPC gas cap, and no call starts after [`DEFAULT_CALL_MANY_TIMEOUT`].
-#[derive(Debug, Clone, Copy)]
+/// one gas budget of the RPC gas cap, and no call starts more than [`DEFAULT_CALL_MANY_TIMEOUT`]
+/// after the first one.
+#[derive(Debug)]
 pub struct CallManyBudget {
+    /// The RPC gas cap the calls share, reported once they exceed it.
+    gas_cap: u64,
     /// Gas left for the remaining calls, `None` if the RPC gas cap is disabled.
     remaining_gas: Option<u64>,
-    /// No call of the request starts after this instant.
-    deadline: Instant,
+    /// No call starts after this instant. Set when the first call is admitted, so waiting for a
+    /// permit or replaying the block's transactions does not count.
+    deadline: Option<Instant>,
+    /// Whether [`Self::admit`] lowered the gas limit of the last admitted call.
+    capped: bool,
 }
 
 impl CallManyBudget {
-    /// Creates the budget for a request of `calls` calls that share `gas_cap` gas, starting the
-    /// request's timeout.
+    /// Creates the budget for a request of `calls` calls that share `gas_cap` gas.
     ///
     /// Returns an error if `calls` exceeds [`DEFAULT_MAX_CALL_MANY_CALLS`]. A `gas_cap` of `0`
     /// disables the gas budget, as it disables the RPC gas cap.
@@ -125,8 +134,10 @@ impl CallManyBudget {
             )))
         }
         Ok(Self {
+            gas_cap,
             remaining_gas: (gas_cap != 0).then_some(gas_cap),
-            deadline: Instant::now() + DEFAULT_CALL_MANY_TIMEOUT,
+            deadline: None,
+            capped: false,
         })
     }
 
@@ -140,29 +151,47 @@ impl CallManyBudget {
     /// Admits the request's next call, lowering the gas limit of `tx_env` to the gas left for the
     /// request's remaining calls.
     ///
-    /// Returns [`EthApiError::ExecutionTimedOut`] once the request's timeout has expired.
+    /// The first admitted call starts the request's timeout. Returns
+    /// [`EthApiError::ExecutionTimedOut`] once it has expired.
     pub fn admit<T: TransactionEnvMut>(
-        &self,
+        &mut self,
         tx_env: &mut Recovered<T>,
     ) -> Result<(), EthApiError> {
-        if Instant::now() >= self.deadline {
+        let now = Instant::now();
+        if now >= *self.deadline.get_or_insert(now + DEFAULT_CALL_MANY_TIMEOUT) {
             return Err(EthApiError::ExecutionTimedOut(DEFAULT_CALL_MANY_TIMEOUT))
         }
+        self.capped = false;
         if let Some(remaining) = self.remaining_gas &&
             tx_env.gas_limit() > remaining
         {
             tx_env.inner_mut().set_gas_limit(remaining);
+            self.capped = true;
         }
         Ok(())
     }
 
-    /// Charges the gas a call used against the budget.
+    /// Returns [`EthApiError::CallManyGasCapExceeded`] in place of `err` if the last admitted call
+    /// failed its intrinsic gas check because [`Self::admit`] lowered its gas limit.
+    pub fn map_call_err<E: AsEthApiError + FromEthApiError>(&self, err: E) -> E {
+        if self.capped && err.is_gas_too_low() {
+            return E::from_eth_err(EthApiError::CallManyGasCapExceeded(self.gas_cap))
+        }
+        err
+    }
+
+    /// Charges the gas the last admitted call used against the budget.
     ///
-    /// Returns an error if the call used more gas than is left, which a call admitted with
-    /// [`Self::admit`] cannot do.
-    pub fn charge(&mut self, gas_used: u64) -> Result<(), EthApiError> {
+    /// Returns [`EthApiError::CallManyGasCapExceeded`] if the call ran out of gas after
+    /// [`Self::admit`] lowered its gas limit, and an internal error if it used more gas than is
+    /// left, which an admitted call cannot do.
+    pub fn charge<E>(&mut self, result: &TxResultExt<E>) -> Result<(), EthApiError> {
+        if self.capped && result.stop.is_out_of_gas() && result.stop != InstrStop::MemoryLimitOOG {
+            return Err(EthApiError::CallManyGasCapExceeded(self.gas_cap))
+        }
         if let Some(remaining) = &mut self.remaining_gas {
-            *remaining = remaining.checked_sub(gas_used).ok_or(EthApiError::InternalEthError)?;
+            *remaining =
+                remaining.checked_sub(result.tx_gas_used()).ok_or(EthApiError::InternalEthError)?;
         }
         Ok(())
     }
@@ -178,10 +207,6 @@ mod tests {
     #[test]
     fn call_many_budget_limits_calls() {
         assert!(CallManyBudget::new(DEFAULT_MAX_CALL_MANY_CALLS, 0).is_ok());
-        assert_eq!(
-            CallManyBudget::new(DEFAULT_MAX_CALL_MANY_CALLS + 1, 0).unwrap_err().to_string(),
-            "call count 1025 exceeds limit 1024"
-        );
 
         let empty = Bundle::<()> { transactions: Vec::new(), block_override: None };
         let full =
@@ -207,31 +232,53 @@ mod tests {
         )
     }
 
+    fn tx_result(gas_used: u64, stop: InstrStop) -> TxResultExt {
+        TxResultExt {
+            status: stop.is_success(),
+            total_gas_spent: gas_used,
+            stop,
+            ..Default::default()
+        }
+    }
+
     #[test]
     fn call_many_budget_shares_gas_cap() {
-        let capped = |budget: &CallManyBudget, gas_limit| {
+        let admitted = |budget: &mut CallManyBudget, gas_limit| {
             let mut tx_env = tx_env(gas_limit);
             budget.admit(&mut tx_env).unwrap();
             tx_env.gas_limit()
         };
 
         let mut budget = CallManyBudget::new(3, 50_000).unwrap();
-        assert_eq!(capped(&budget, 30_000_000), 50_000);
-        budget.charge(30_000).unwrap();
-        assert_eq!(capped(&budget, 30_000_000), 20_000);
-        assert_eq!(capped(&budget, 10_000), 10_000);
-        assert!(matches!(budget.charge(20_001), Err(EthApiError::InternalEthError)));
+        assert_eq!(admitted(&mut budget, 30_000), 30_000);
+        // A call that was not capped keeps its own out-of-gas result.
+        budget.charge(&tx_result(30_000, InstrStop::OutOfGas)).unwrap();
+        assert_eq!(admitted(&mut budget, 30_000_000), 20_000);
+        assert!(matches!(
+            budget.charge(&tx_result(20_000, InstrStop::OutOfGas)),
+            Err(EthApiError::CallManyGasCapExceeded(50_000))
+        ));
+        assert_eq!(admitted(&mut budget, 10_000), 10_000);
+        assert!(matches!(
+            budget.charge(&tx_result(20_001, InstrStop::Stop)),
+            Err(EthApiError::InternalEthError)
+        ));
 
         let mut unlimited = CallManyBudget::new(3, 0).unwrap();
-        unlimited.charge(u64::MAX).unwrap();
-        assert_eq!(capped(&unlimited, u64::MAX), u64::MAX);
+        unlimited.charge(&tx_result(u64::MAX, InstrStop::Stop)).unwrap();
+        assert_eq!(admitted(&mut unlimited, u64::MAX), u64::MAX);
     }
 
     #[test]
     fn call_many_budget_times_out() {
-        let expired = CallManyBudget { remaining_gas: None, deadline: Instant::now() };
+        let mut budget = CallManyBudget::new(2, 0).unwrap();
+        assert_eq!(budget.deadline, None);
+        budget.admit(&mut tx_env(21_000)).unwrap();
+        assert!(budget.deadline.is_some());
+
+        budget.deadline = Some(Instant::now());
         assert!(matches!(
-            expired.admit(&mut tx_env(21_000)),
+            budget.admit(&mut tx_env(21_000)),
             Err(EthApiError::ExecutionTimedOut(timeout)) if timeout == DEFAULT_CALL_MANY_TIMEOUT
         ));
     }

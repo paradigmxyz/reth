@@ -580,9 +580,10 @@ where
                             eth_api.prepare_call_env(evm_env.clone(), tx, &mut db, overrides)?;
                         budget.admit(&mut tx_env)?;
 
-                        let (next_inspector, res) =
-                            eth_api.inspect(&mut db, evm_env.clone(), &tx_env, inspector)?;
-                        budget.charge(res.result.tx_gas_used())?;
+                        let (next_inspector, res) = eth_api
+                            .inspect(&mut db, evm_env.clone(), &tx_env, inspector)
+                            .map_err(|err| budget.map_call_err(err))?;
+                        budget.charge(&res.result)?;
                         inspector = next_inspector;
                         let trace = inspector
                             .get_result(None, &tx_env, evm_env.block_env(), &res, &mut db)

@@ -290,8 +290,10 @@ pub trait EthCall: EstimateCall + LoadBlock + FullEthApiTypes {
         }
     }
 
-    /// Simulate arbitrary number of transactions at an arbitrary blockchain index, with the
-    /// optionality of state overrides
+    /// Simulate transactions at an arbitrary blockchain index, with the optionality of state
+    /// overrides.
+    ///
+    /// The request is bounded by [`CallManyBudget`]: its calls share the RPC gas cap.
     fn call_many(
         &self,
         bundles: Vec<Bundle<RpcTxReq<<Self::RpcConvert as RpcConvert>::Network>>>,
@@ -402,11 +404,17 @@ pub trait EthCall: EstimateCall + LoadBlock + FullEthApiTypes {
                                 Self::Error::from_eth_err(EthApiError::call_many_error(
                                     bundle_index,
                                     tx_index,
-                                    err.into(),
+                                    budget.map_call_err(err).into(),
                                 ))
                             },
                         )?;
-                        budget.charge(res.result.tx_gas_used())?;
+                        budget.charge(&res.result).map_err(|err| {
+                            Self::Error::from_eth_err(EthApiError::call_many_error(
+                                bundle_index,
+                                tx_index,
+                                err.into(),
+                            ))
+                        })?;
 
                         match Self::Error::ensure_success::<EvmTypesFor<Self::Evm>>(res.result) {
                             Ok(output) => {
