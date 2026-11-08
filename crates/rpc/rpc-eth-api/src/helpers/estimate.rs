@@ -453,7 +453,7 @@ pub trait EstimateCall: Call {
                 }
                 let (env, tx) =
                     this.prepare_call_env(evm_env, request.clone(), &mut db, overrides)?;
-                request.as_mut().nonce.get_or_insert(tx.nonce());
+                request.as_mut().nonce.get_or_insert_with(|| tx.nonce());
                 let mut probes = 0;
                 let mut probe = |candidate, last_frame, probes: &mut usize| {
                     if is_cancelled() {
