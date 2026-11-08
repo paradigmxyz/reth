@@ -2054,7 +2054,7 @@ mod tests {
 
     #[test]
     fn eip8141_external_transactions_require_public_validation() {
-        let provider = MockEthProvider::default().with_genesis_block();
+        let provider = mock_provider();
         let validator = EthTransactionValidatorBuilder::new(provider, test_evm_config())
             .set_bogota(true)
             .build(InMemoryBlobStore::default());

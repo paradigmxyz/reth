@@ -355,7 +355,7 @@ mod tests {
         ethereum::{ethereum_tx_registry, TxEnvelope},
         evm::{Database, Db, InMemoryDB},
         interpreter::MessageKind,
-        registry::HandlerError,
+        registry::{FrameTransactionError, HandlerError},
         BaseEvmTypes, Precompiles, SpecId,
     };
 
@@ -606,7 +606,7 @@ mod tests {
             } else {
                 assert_eq!(
                     result.unwrap_err(),
-                    HandlerError::InvalidFrameTransaction("EIP-8141 VERIFY frame failed")
+                    HandlerError::InvalidFrameTransaction(FrameTransactionError::VerifyFrameFailed)
                 );
             }
             let inspector = evm.clear_inspector_as::<FrameValidationInspector>().unwrap();
