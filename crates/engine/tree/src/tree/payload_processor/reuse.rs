@@ -57,8 +57,7 @@ pub(crate) const POOL_BENEFICIARY: Address = address!("0x00000000000000000000000
 /// Maximum estimated number of bytes held by [`PoolResults`].
 const MAX_POOL_RESULT_BYTES: usize = 64 << 20;
 
-/// Opcodes that [`BalanceTracker::step`] handles. The EVM runs every other opcode on its plain
-/// handler: stepping all of them took 10% of the speculation workers' CPU.
+/// Opcodes [`BalanceTracker::step`] is called for. Must contain every opcode it matches on.
 const BALANCE_TRACKER_STEPS: OpcodeSet = {
     let mut steps = OpcodeSet::EMPTY;
     steps.insert(op::BALANCE);
