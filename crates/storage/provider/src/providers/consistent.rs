@@ -428,11 +428,19 @@ impl<N: ProviderNodeTypes> HeaderProvider for ConsistentProvider<N> {
     type Header = HeaderTy<N>;
 
     fn header(&self, block_hash: BlockHash) -> ProviderResult<Option<Self::Header>> {
-        self.get_in_memory_or_storage_by_block(
+        if let Some(header) = self.get_in_memory_or_storage_by_block(
             block_hash.into(),
             |db_provider| db_provider.header(block_hash),
             |block_state| Ok(Some(block_state.block_ref().recovered_block().clone_header())),
-        )
+        )? {
+            return Ok(Some(header))
+        }
+
+        if let Some(side_block) = self.canonical_in_memory_state.side_state_by_hash(block_hash) {
+            return Ok(Some(side_block.block_ref().recovered_block().clone_header()))
+        }
+
+        Ok(None)
     }
 
     fn header_by_number(&self, num: BlockNumber) -> ProviderResult<Option<Self::Header>> {
@@ -576,12 +584,20 @@ impl<N: ProviderNodeTypes> BlockReader for ConsistentProvider<N> {
             return Ok(Some(block))
         }
 
-        if source.is_pending() {
-            return Ok(self
+        if source.is_pending() &&
+            let Some(block) = self
                 .canonical_in_memory_state
                 .pending_block()
                 .filter(|b| b.hash() == hash)
-                .map(|b| b.into_block()))
+                .map(|b| b.into_block())
+        {
+            return Ok(Some(block))
+        }
+
+        if !matches!(source, BlockSource::Canonical) &&
+            let Some(side_block) = self.canonical_in_memory_state.side_state_by_hash(hash)
+        {
+            return Ok(Some(side_block.block_ref().recovered_block().clone_block()))
         }
 
         Ok(None)
@@ -617,15 +633,33 @@ impl<N: ProviderNodeTypes> BlockReader for ConsistentProvider<N> {
             }
         }
 
+        if !matches!(source, BlockSource::Canonical) &&
+            let Some(side_block) = self.canonical_in_memory_state.side_state_by_hash(hash)
+        {
+            return Ok(Some(SealedOrRecoveredBlock::recovered_arc(Arc::clone(
+                &side_block.block_ref().recovered_block,
+            ))))
+        }
+
         Ok(None)
     }
 
     fn block(&self, id: BlockHashOrNumber) -> ProviderResult<Option<Self::Block>> {
-        self.get_in_memory_or_storage_by_block(
+        if let Some(block) = self.get_in_memory_or_storage_by_block(
             id,
             |db_provider| db_provider.block(id),
             |block_state| Ok(Some(block_state.block_ref().recovered_block().clone_block())),
-        )
+        )? {
+            return Ok(Some(block))
+        }
+
+        if let BlockHashOrNumber::Hash(hash) = id &&
+            let Some(side_block) = self.canonical_in_memory_state.side_state_by_hash(hash)
+        {
+            return Ok(Some(side_block.block_ref().recovered_block().clone_block()))
+        }
+
+        Ok(None)
     }
 
     fn pending_block(&self) -> ProviderResult<Option<Arc<RecoveredBlock<Self::Block>>>> {
@@ -649,11 +683,21 @@ impl<N: ProviderNodeTypes> BlockReader for ConsistentProvider<N> {
         id: BlockHashOrNumber,
         transaction_kind: TransactionVariant,
     ) -> ProviderResult<Option<RecoveredBlock<Self::Block>>> {
-        self.get_in_memory_or_storage_by_block(
+        if let Some(block) = self.get_in_memory_or_storage_by_block(
             id,
             |db_provider| db_provider.recovered_block(id, transaction_kind),
             |block_state| Ok(Some(block_state.block().recovered_block().clone())),
-        )
+        )? {
+            return Ok(Some(block))
+        }
+
+        if let BlockHashOrNumber::Hash(hash) = id &&
+            let Some(side_block) = self.canonical_in_memory_state.side_state_by_hash(hash)
+        {
+            return Ok(Some(side_block.block().recovered_block().clone()))
+        }
+
+        Ok(None)
     }
 
     fn sealed_block_with_senders(
@@ -661,11 +705,21 @@ impl<N: ProviderNodeTypes> BlockReader for ConsistentProvider<N> {
         id: BlockHashOrNumber,
         transaction_kind: TransactionVariant,
     ) -> ProviderResult<Option<RecoveredBlock<Self::Block>>> {
-        self.get_in_memory_or_storage_by_block(
+        if let Some(block) = self.get_in_memory_or_storage_by_block(
             id,
             |db_provider| db_provider.sealed_block_with_senders(id, transaction_kind),
             |block_state| Ok(Some(block_state.block().recovered_block().clone())),
-        )
+        )? {
+            return Ok(Some(block))
+        }
+
+        if let BlockHashOrNumber::Hash(hash) = id &&
+            let Some(side_block) = self.canonical_in_memory_state.side_state_by_hash(hash)
+        {
+            return Ok(Some(side_block.block().recovered_block().clone()))
+        }
+
+        Ok(None)
     }
 
     fn block_range(&self, range: RangeInclusive<BlockNumber>) -> ProviderResult<Vec<Self::Block>> {
@@ -1436,8 +1490,8 @@ mod tests {
     use reth_execution_types::{BlockExecutionOutput, BlockExecutionResult, ExecutionOutcome};
     use reth_primitives_traits::{RecoveredBlock, SealedBlock, StorageEntry};
     use reth_storage_api::{
-        BlockReader, BlockSource, ChangeSetReader, StateReader, StorageChangeSetReader,
-        StorageSettingsCache,
+        BlockReader, BlockSource, ChangeSetReader, HeaderProvider, StateReader,
+        StorageChangeSetReader, StorageSettingsCache,
     };
     use reth_testing_utils::generators::{
         self, random_block_range, random_changeset_range, random_eoa_accounts, BlockRangeParams,
@@ -2091,6 +2145,120 @@ mod tests {
         assert_eq!(
             keys[0], slot_b256,
             "keys should be plain/unhashed when use_hashed_state is false"
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_sidechain_and_reorged_block_lookup_by_hash() -> eyre::Result<()> {
+        let mut rng = generators::rng();
+        let factory = create_test_provider_factory();
+
+        // Generate 3 blocks: parent, canonical head, sidechain block
+        let blocks = random_block_range(
+            &mut rng,
+            0..=2,
+            BlockRangeParams { parent: Some(B256::ZERO), tx_count: 0..1, ..Default::default() },
+        );
+
+        let parent_block = &blocks[0];
+        let canonical_block = &blocks[1];
+        let side_block = &blocks[2];
+
+        let provider_rw = factory.provider_rw()?;
+        provider_rw.insert_block(
+            &parent_block.clone().try_recover().expect("failed to seal block with senders"),
+        )?;
+        provider_rw.commit()?;
+
+        let provider = BlockchainProvider::new(factory)?;
+
+        // Commit canonical_block as canonical head
+        let canonical_senders = canonical_block.senders().expect("failed to recover senders");
+        let canonical_chain = NewCanonicalChain::Commit {
+            new: vec![ExecutedBlock {
+                recovered_block: Arc::new(RecoveredBlock::new_sealed(
+                    canonical_block.clone(),
+                    canonical_senders.clone(),
+                )),
+                ..Default::default()
+            }],
+        };
+        provider.canonical_in_memory_state.update_chain(canonical_chain);
+
+        // Insert side_block as a side-chain block (not on the canonical chain)
+        let side_senders = side_block.senders().expect("failed to recover senders");
+        let side_executed = ExecutedBlock {
+            recovered_block: Arc::new(RecoveredBlock::new_sealed(
+                side_block.clone(),
+                side_senders.clone(),
+            )),
+            ..Default::default()
+        };
+        provider.canonical_in_memory_state.insert_side_block(side_executed);
+
+        let consistent_provider = provider.consistent_provider()?;
+
+        // Verify side-chain block can be looked up by hash via find_block_by_hash
+        assert_eq!(
+            consistent_provider.find_block_by_hash(side_block.hash(), BlockSource::Any)?,
+            Some(side_block.clone().into_block())
+        );
+
+        // Verify side-chain block returns None for Canonical source
+        assert_eq!(
+            consistent_provider.find_block_by_hash(side_block.hash(), BlockSource::Canonical)?,
+            None
+        );
+
+        // Verify side-chain block can be found via block(BlockHashOrNumber::Hash)
+        assert_eq!(
+            consistent_provider.block(BlockHashOrNumber::Hash(side_block.hash()))?,
+            Some(side_block.clone().into_block())
+        );
+
+        // Verify side-chain block header can be retrieved by hash
+        assert_eq!(
+            consistent_provider.header(side_block.hash())?,
+            Some(side_block.header().clone())
+        );
+
+        // Verify side-chain block sealed header can be retrieved
+        let sealed_header = consistent_provider
+            .find_sealed_or_recovered_block(side_block.hash(), BlockSource::Any)?
+            .expect("side block should be found");
+        assert_eq!(sealed_header.sealed_block(), side_block);
+
+        // Now test reorg behavior: reorg canonical_block out in favor of side_block
+        let reorg_chain = NewCanonicalChain::Reorg {
+            old: vec![ExecutedBlock {
+                recovered_block: Arc::new(RecoveredBlock::new_sealed(
+                    canonical_block.clone(),
+                    canonical_senders,
+                )),
+                ..Default::default()
+            }],
+            new: vec![ExecutedBlock {
+                recovered_block: Arc::new(RecoveredBlock::new_sealed(
+                    side_block.clone(),
+                    side_senders,
+                )),
+                ..Default::default()
+            }],
+        };
+        provider.canonical_in_memory_state.update_chain(reorg_chain);
+        let consistent_provider = provider.consistent_provider()?;
+
+        // The old canonical_block should now be accessible as a side-chain block by hash
+        assert_eq!(
+            consistent_provider.find_block_by_hash(canonical_block.hash(), BlockSource::Any)?,
+            Some(canonical_block.clone().into_block())
+        );
+        // And it should not be returned for Canonical source
+        assert_eq!(
+            consistent_provider.find_block_by_hash(canonical_block.hash(), BlockSource::Canonical)?,
+            None
         );
 
         Ok(())

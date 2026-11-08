@@ -58,6 +58,9 @@ pub(crate) struct InMemoryState<N: NodePrimitives = EthPrimitives> {
     blocks: RwLock<B256Map<Arc<BlockState<N>>>>,
     /// Mapping of block numbers to block hashes.
     numbers: RwLock<BTreeMap<u64, B256>>,
+    /// All side-chain and reorged blocks that are not canonical, retained until pruned past
+    /// the finalized checkpoint.
+    pub(crate) side_blocks: RwLock<B256Map<Arc<BlockState<N>>>>,
     /// The pending block that has not yet been made canonical.
     pending: watch::Sender<Option<BlockState<N>>>,
     /// Metrics for the in-memory state.
@@ -74,6 +77,7 @@ impl<N: NodePrimitives> InMemoryState<N> {
         let this = Self {
             blocks: RwLock::new(blocks),
             numbers: RwLock::new(numbers),
+            side_blocks: Default::default(),
             pending,
             metrics: Default::default(),
         };
@@ -106,6 +110,11 @@ impl<N: NodePrimitives> InMemoryState<N> {
     /// Returns the state for a given block hash.
     pub(crate) fn state_by_hash(&self, hash: B256) -> Option<Arc<BlockState<N>>> {
         self.blocks.read().get(&hash).cloned()
+    }
+
+    /// Returns the side-chain or reorged block state for a given block hash if it exists.
+    pub(crate) fn side_state_by_hash(&self, hash: B256) -> Option<Arc<BlockState<N>>> {
+        self.side_blocks.read().get(&hash).cloned()
     }
 
     /// Returns the state for a given block number.
@@ -157,8 +166,10 @@ impl<N: NodePrimitives> CanonicalInMemoryStateInner<N> {
             // acquire locks, starting with the numbers lock
             let mut numbers = self.in_memory_state.numbers.write();
             let mut blocks = self.in_memory_state.blocks.write();
+            let mut side_blocks = self.in_memory_state.side_blocks.write();
             numbers.clear();
             blocks.clear();
+            side_blocks.clear();
             self.in_memory_state.pending.send_modify(|p| {
                 p.take();
             });
@@ -269,12 +280,18 @@ impl<N: NodePrimitives> CanonicalInMemoryState<N> {
             // acquire locks, starting with the numbers lock
             let mut numbers = self.inner.in_memory_state.numbers.write();
             let mut blocks = self.inner.in_memory_state.blocks.write();
+            let mut side_blocks = self.inner.in_memory_state.side_blocks.write();
 
-            // we first remove the blocks from the reorged chain
+            // we first remove the blocks from the reorged chain and preserve them in side_blocks
             for block in reorged {
                 let hash = block.recovered_block().hash();
                 let number = block.recovered_block().number();
-                blocks.remove(&hash);
+                if let Some(state) = blocks.remove(&hash) {
+                    side_blocks.insert(hash, state);
+                } else {
+                    let parent = blocks.get(&block.recovered_block().parent_hash()).cloned();
+                    side_blocks.insert(hash, Arc::new(BlockState::with_parent(block, parent)));
+                }
                 numbers.remove(&number);
             }
 
@@ -284,6 +301,8 @@ impl<N: NodePrimitives> CanonicalInMemoryState<N> {
                 let block_state = BlockState::with_parent(block, parent);
                 let hash = block_state.hash();
                 let number = block_state.number();
+
+                side_blocks.remove(&hash);
 
                 // append new blocks
                 blocks.insert(hash, Arc::new(block_state));
@@ -375,6 +394,9 @@ impl<N: NodePrimitives> CanonicalInMemoryState<N> {
                     p.parent = blocks.get(&p.block_ref().recovered_block().parent_hash()).cloned();
                 }
             });
+
+            let mut side_blocks = self.inner.in_memory_state.side_blocks.write();
+            side_blocks.retain(|_, b| b.number() > remove_until);
         }
         self.inner.in_memory_state.update_metrics();
     }
@@ -382,6 +404,21 @@ impl<N: NodePrimitives> CanonicalInMemoryState<N> {
     /// Returns in memory state corresponding the given hash.
     pub fn state_by_hash(&self, hash: B256) -> Option<Arc<BlockState<N>>> {
         self.inner.in_memory_state.state_by_hash(hash)
+    }
+
+    /// Returns in memory side-chain or reorged block state corresponding to the given hash.
+    pub fn side_state_by_hash(&self, hash: B256) -> Option<Arc<BlockState<N>>> {
+        self.inner.in_memory_state.side_state_by_hash(hash)
+    }
+
+    /// Inserts an executed side-chain block that is not part of the canonical chain.
+    pub fn insert_side_block(&self, block: ExecutedBlock<N>) {
+        let hash = block.recovered_block().hash();
+        let parent = self
+            .state_by_hash(block.recovered_block().parent_hash())
+            .or_else(|| self.side_state_by_hash(block.recovered_block().parent_hash()));
+        let block_state = BlockState::with_parent(block, parent);
+        self.inner.in_memory_state.side_blocks.write().insert(hash, Arc::new(block_state));
     }
 
     /// Returns in memory state corresponding the block number.
@@ -449,7 +486,10 @@ impl<N: NodePrimitives> CanonicalInMemoryState<N> {
 
     /// Finalized head setter.
     pub fn set_finalized(&self, header: SealedHeader<N::BlockHeader>) {
+        let finalized_num = header.number();
         self.inner.chain_info_tracker.set_finalized(header);
+        let mut side_blocks = self.inner.in_memory_state.side_blocks.write();
+        side_blocks.retain(|_, b| b.number() > finalized_num);
     }
 
     /// Persisted block setter.
