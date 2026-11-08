@@ -99,6 +99,10 @@ pub mod error;
 pub mod eth;
 pub use eth::EthHandlers;
 
+// Invalid-params response normalization.
+mod invalid_params;
+use invalid_params::NormalizeInvalidParamsLayer;
+
 // Rpc server metrics
 mod metrics;
 use crate::middleware::RethRpcMiddleware;
@@ -1431,7 +1435,7 @@ impl<RpcMiddleware> RpcServerConfig<RpcMiddleware> {
         if let Some(builder) = self.ipc_server_config {
             let ipc = builder
                 .set_rpc_middleware(
-                    IpcRpcServiceBuilder::new().option_layer(
+                    IpcRpcServiceBuilder::new().layer(NormalizeInvalidParamsLayer).option_layer(
                         rpc_metrics_enabled
                             .then(|| modules.ipc.as_ref().map(RpcRequestMetrics::ipc))
                             .flatten(),
@@ -1485,6 +1489,7 @@ impl<RpcMiddleware> RpcServerConfig<RpcMiddleware> {
                     )
                     .set_rpc_middleware(
                         RpcServiceBuilder::default()
+                            .layer(NormalizeInvalidParamsLayer)
                             .option_layer(
                                 rpc_metrics_enabled
                                     .then(|| {
@@ -1541,6 +1546,7 @@ impl<RpcMiddleware> RpcServerConfig<RpcMiddleware> {
                 )
                 .set_rpc_middleware(
                     RpcServiceBuilder::default()
+                        .layer(NormalizeInvalidParamsLayer)
                         .option_layer(
                             rpc_metrics_enabled
                                 .then(|| modules.ws.as_ref().map(RpcRequestMetrics::ws))
@@ -1579,6 +1585,7 @@ impl<RpcMiddleware> RpcServerConfig<RpcMiddleware> {
                 )
                 .set_rpc_middleware(
                     RpcServiceBuilder::default()
+                        .layer(NormalizeInvalidParamsLayer)
                         .option_layer(
                             rpc_metrics_enabled
                                 .then(|| modules.http.as_ref().map(RpcRequestMetrics::http))

@@ -49,6 +49,7 @@ metrics.workspace = true
 # misc
 dyn-clone.workspace = true
 serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
 tokio-util = { workspace = true }
@@ -75,6 +76,5 @@ alloy-rpc-types-trace.workspace = true
 alloy-eips.workspace = true
 alloy-rpc-types-engine.workspace = true
 
-serde_json.workspace = true
 clap = { workspace = true, features = ["derive"] }
 reqwest.workspace = true
