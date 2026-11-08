@@ -30,7 +30,6 @@ use rand::{distr::Uniform, prelude::Distribution};
 use reth_ethereum_primitives::{PooledTransactionVariant, Transaction, TransactionSigned};
 use reth_primitives_traits::{
     transaction::error::TryFromRecoveredTransactionError, InMemorySize, Recovered,
-    SignedTransaction,
 };
 
 use alloy_consensus::error::ValueError;
