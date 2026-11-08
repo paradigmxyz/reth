@@ -492,6 +492,7 @@ mod tests {
         test_utils::{MockOrdering, MockTransaction, MockTransactionFactory},
         BestTransactions, Priority,
     };
+    use alloy_primitives::U256;
 
     #[test]
     fn test_best_iter() {
@@ -846,7 +847,7 @@ mod tests {
         let pending_tx = PendingTransaction {
             submission_id: 10,
             transaction: Arc::new(valid_new_tx.clone()),
-            priority: Priority::Value(1000),
+            priority: Priority::Value(U256::from(1000)),
         };
         tx_sender.send(pending_tx.clone()).unwrap();
 
@@ -893,7 +894,7 @@ mod tests {
         let pending_tx1 = PendingTransaction {
             submission_id: 10,
             transaction: Arc::new(valid_new_tx1.clone()),
-            priority: Priority::Value(1000),
+            priority: Priority::Value(U256::from(1000)),
         };
         tx_sender.send(pending_tx1.clone()).unwrap();
 
@@ -916,7 +917,7 @@ mod tests {
         let pending_tx2 = PendingTransaction {
             submission_id: 11, // Different submission ID
             transaction: Arc::new(valid_new_tx2.clone()),
-            priority: Priority::Value(1000),
+            priority: Priority::Value(U256::from(1000)),
         };
         tx_sender.send(pending_tx2.clone()).unwrap();
 
@@ -1179,7 +1180,7 @@ mod tests {
         let pending_tx = PendingTransaction {
             submission_id: 10,
             transaction: Arc::new(valid_new_higher_fee_tx.clone()),
-            priority: Priority::Value(u128::MAX),
+            priority: Priority::Value(U256::from(u128::MAX)),
         };
         tx_sender.send(pending_tx).unwrap();
 

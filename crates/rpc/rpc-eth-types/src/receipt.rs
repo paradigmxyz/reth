@@ -7,6 +7,7 @@ use alloy_primitives::{Address, TxKind, U256};
 use alloy_rpc_types_eth::{Log, TransactionReceipt};
 use reth_chainspec::EthChainSpec;
 use reth_ethereum_primitives::Receipt;
+use reth_evm::execute::frame_transaction_tip;
 use reth_primitives_traits::{NodePrimitives, SealedHeaderFor, TransactionMeta};
 use reth_rpc_convert::transaction::{ConvertReceiptInput, ReceiptConverter};
 use std::sync::Arc;
@@ -38,24 +39,12 @@ where
             // Valid frames pay positive intrinsic gas; zero has no realized per-gas price.
             U256::ZERO
         } else {
-            let base_fee = U256::from(meta.base_fee.unwrap_or_default());
-            let maximum_gas = U256::from(tx.gas_limit());
-            let used_gas = U256::from(gas_used);
-            // Gas quantities are u64 and blob prices are u128, so these base costs fit U256.
-            let blob_fee = U256::from(blob_gas_used.unwrap_or_default()) *
+            let base_fee = meta.base_fee.unwrap_or_default();
+            let blob_charge = U256::from(blob_gas_used.unwrap_or_default()) *
                 U256::from(blob_gas_price.unwrap_or_default());
-            let required_fee = maximum_gas * base_fee + blob_fee;
-            let priority = frame.fees.max_priority_fee_per_gas;
-            // Saturating the requested tip before the budget cap preserves the full-width minimum.
-            let max_cost = required_fee +
-                priority
-                    .saturating_mul(maximum_gas)
-                    .min(frame.fees.max_fee.saturating_sub(required_fee));
-            let actual_base_fee = used_gas * base_fee + blob_fee;
-            let tip =
-                priority.saturating_mul(used_gas).min(max_cost.saturating_sub(actual_base_fee));
+            let tip = frame_transaction_tip(frame, gas_used, base_fee, blob_charge, None);
             // Blob fees have their own RPC fields; the execution price rounds down to whole wei.
-            base_fee + tip / used_gas
+            U256::from(base_fee) + tip / U256::from(gas_used)
         }
     } else {
         tx.effective_gas_price_u256(meta.base_fee)

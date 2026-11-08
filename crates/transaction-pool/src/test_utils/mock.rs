@@ -940,10 +940,9 @@ impl EthPoolTransaction for MockTransaction {
         sidecar: Arc<BlobTransactionSidecarVariant>,
     ) -> Option<Recovered<Self::Pooled>> {
         let (tx, signer) = self.into_consensus().into_parts();
-        tx.try_into_pooled_eip4844(Arc::unwrap_or_clone(sidecar))
-            .map(|tx| tx.with_signer(signer))
-            .map(|tx| tx.map(Into::into))
-            .ok()
+        let tx = tx.try_into_pooled_eip4844(Arc::unwrap_or_clone(sidecar)).ok()?;
+        let tx = PooledTransactionVariant::try_from(tx).ok()?;
+        Some(Recovered::new_unchecked(tx, signer))
     }
 
     fn try_from_eip4844(
@@ -951,11 +950,9 @@ impl EthPoolTransaction for MockTransaction {
         sidecar: BlobTransactionSidecarVariant,
     ) -> Option<Self> {
         let (tx, signer) = tx.into_parts();
-        tx.try_into_pooled_eip4844(sidecar)
-            .map(|tx| tx.with_signer(signer))
-            .ok()
-            .map(|tx| tx.map(Into::into))
-            .map(Self::from_pooled)
+        let tx = tx.try_into_pooled_eip4844(sidecar).ok()?;
+        let tx = PooledTransactionVariant::try_from(tx).ok()?;
+        Some(Self::from_pooled(Recovered::new_unchecked(tx, signer)))
     }
 
     fn validate_blob(
@@ -1227,7 +1224,7 @@ impl TryFrom<Recovered<TxEnvelope>> for MockTransaction {
 
 impl From<Recovered<PooledTransactionVariant>> for MockTransaction {
     fn from(tx: Recovered<PooledTransactionVariant>) -> Self {
-        tx.convert::<TransactionSigned>().try_into().expect(
+        crate::EthPooledTransaction::from_pooled(tx).into_consensus().try_into().expect(
             "Failed to convert from PooledTransactionsElementEcRecovered to MockTransaction",
         )
     }

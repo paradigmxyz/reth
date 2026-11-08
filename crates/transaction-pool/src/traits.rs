@@ -1831,11 +1831,22 @@ impl PoolTransaction for EthPooledTransaction {
                 }
                 pooled
             }
-            tx => {
-                // no blob sidecar
-                let tx = Recovered::new_unchecked(tx.into(), signer);
-                Self::new(tx, encoded_length)
-            }
+            PooledTransactionVariant::Legacy(tx) => Self::new(
+                Recovered::new_unchecked(TransactionSigned::Legacy(tx), signer),
+                encoded_length,
+            ),
+            PooledTransactionVariant::Eip2930(tx) => Self::new(
+                Recovered::new_unchecked(TransactionSigned::Eip2930(tx), signer),
+                encoded_length,
+            ),
+            PooledTransactionVariant::Eip1559(tx) => Self::new(
+                Recovered::new_unchecked(TransactionSigned::Eip1559(tx), signer),
+                encoded_length,
+            ),
+            PooledTransactionVariant::Eip7702(tx) => Self::new(
+                Recovered::new_unchecked(TransactionSigned::Eip7702(tx), signer),
+                encoded_length,
+            ),
         }
     }
 
@@ -2029,9 +2040,10 @@ impl EthPoolTransaction for EthPooledTransaction {
         self,
         sidecar: Arc<BlobTransactionSidecarVariant>,
     ) -> Option<Recovered<Self::Pooled>> {
-        self.into_consensus()
-            .try_map(|tx| tx.try_into_pooled_eip4844(Arc::unwrap_or_clone(sidecar)).map(Into::into))
-            .ok()
+        let (tx, signer) = self.into_consensus().into_parts();
+        let tx = tx.try_into_pooled_eip4844(Arc::unwrap_or_clone(sidecar)).ok()?;
+        let tx = PooledTransactionVariant::try_from(tx).ok()?;
+        Some(Recovered::new_unchecked(tx, signer))
     }
 
     fn try_into_pooled_blob(
@@ -2052,7 +2064,10 @@ impl EthPoolTransaction for EthPooledTransaction {
                     hash,
                 ))
             }
-            tx => tx.try_into_pooled_eip4844(Arc::unwrap_or_clone(sidecar)).ok()?.into(),
+            tx => PooledTransactionVariant::try_from(
+                tx.try_into_pooled_eip4844(Arc::unwrap_or_clone(sidecar)).ok()?,
+            )
+            .ok()?,
         };
 
         Some(Recovered::new_unchecked(pooled_transaction, signer))
@@ -2063,11 +2078,9 @@ impl EthPoolTransaction for EthPooledTransaction {
         sidecar: BlobTransactionSidecarVariant,
     ) -> Option<Self> {
         let (tx, signer) = tx.into_parts();
-        tx.try_into_pooled_eip4844(sidecar)
-            .ok()
-            .map(|tx| tx.with_signer(signer))
-            .map(|tx| tx.map(Into::into))
-            .map(Self::from_pooled)
+        let tx = tx.try_into_pooled_eip4844(sidecar).ok()?;
+        let tx = PooledTransactionVariant::try_from(tx).ok()?;
+        Some(Self::from_pooled(Recovered::new_unchecked(tx, signer)))
     }
 
     fn try_from_blob(
@@ -2087,9 +2100,11 @@ impl EthPoolTransaction for EthPooledTransaction {
                     signer,
                 )
             }
-            (tx, signer) => {
-                tx.try_into_pooled_eip4844(sidecar).ok()?.with_signer(signer).map(Into::into)
-            }
+            (tx, signer) => Recovered::new_unchecked(
+                PooledTransactionVariant::try_from(tx.try_into_pooled_eip4844(sidecar).ok()?)
+                    .ok()?,
+                signer,
+            ),
         };
         Some(Self::from_pooled(tx))
     }

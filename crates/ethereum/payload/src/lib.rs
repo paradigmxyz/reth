@@ -23,7 +23,8 @@ use reth_ethereum_primitives::{EthPrimitives, TransactionSigned};
 use reth_evm::{
     database::StateProviderDatabase,
     execute::{
-        BlockBuilder, BlockBuilderOutcome, BlockExecutionError, BlockExecutor, BlockValidationError,
+        frame_transaction_tip, BlockBuilder, BlockBuilderOutcome, BlockExecutionError,
+        BlockExecutor, BlockValidationError,
     },
     CommitChanges, ConfigureEvm, EvmEnv, NextBlockEnvAttributes, OnStateHook,
 };
@@ -537,14 +538,12 @@ fn transaction_tip(
 ) -> U256 {
     let used = U256::from(gas_used);
     if let Some(frame) = transaction.as_eip8141() {
-        // Native execution has validated the escrow against both base-fee charges.
-        let base_charge = used * U256::from(base_fee);
-        let blob_charge = U256::from(transaction.blob_gas_used().unwrap_or_default()) * blob_fee;
-        frame.fees.max_priority_fee_per_gas.saturating_mul(used).min(
-            frame_precharge
-                .unwrap_or_default()
-                .saturating_sub(base_charge)
-                .saturating_sub(blob_charge),
+        frame_transaction_tip(
+            frame,
+            gas_used,
+            base_fee,
+            U256::from(transaction.blob_gas_used().unwrap_or_default()) * blob_fee,
+            Some(frame_precharge.unwrap_or_default()),
         )
     } else {
         transaction.effective_tip_per_gas_u256(base_fee).unwrap_or_default().saturating_mul(used)

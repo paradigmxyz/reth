@@ -9,11 +9,6 @@ use std::{cmp::Ordering, fmt::Debug, marker::PhantomData};
 pub enum Priority<T: Ord + Clone> {
     /// The value of the priority of the transaction.
     Value(T),
-    /// A fee priority above `u128::MAX`, ranked above every ordinary value.
-    ///
-    /// Used by coinbase tip ordering without widening custom ordering priority types.
-    /// Boxed so ordinary `u128` priorities retain their size; only overflowing tips allocate.
-    Overflow(Box<U256>),
     /// Missing priority due to ordering internals.
     None,
 }
@@ -33,9 +28,8 @@ impl<T: Ord + Clone> PartialOrd for Priority<T> {
 impl<T: Ord + Clone> Ord for Priority<T> {
     fn cmp(&self, other: &Self) -> Ordering {
         match (self, other) {
-            (Self::Overflow(a), Self::Overflow(b)) => a.cmp(b),
-            (Self::Overflow(_), _) | (Self::Value(_), Self::None) => Ordering::Greater,
-            (_, Self::Overflow(_)) | (Self::None, Self::Value(_)) => Ordering::Less,
+            (Self::Value(_), Self::None) => Ordering::Greater,
+            (Self::None, Self::Value(_)) => Ordering::Less,
             (Self::Value(a), Self::Value(b)) => a.cmp(b),
             (Self::None, Self::None) => Ordering::Equal,
         }
@@ -76,7 +70,7 @@ impl<T> TransactionOrdering for CoinbaseTipOrdering<T>
 where
     T: PoolTransaction + 'static,
 {
-    type PriorityValue = u128;
+    type PriorityValue = U256;
     type Transaction = T;
 
     /// Source: <https://github.com/ethereum/go-ethereum/blob/7f756dc1185d7f1eeeacb1d12341606b7135f9ea/core/txpool/legacypool/list.go#L469-L482>.
@@ -87,16 +81,7 @@ where
         transaction: &Self::Transaction,
         base_fee: u64,
     ) -> Priority<Self::PriorityValue> {
-        if transaction.frame_transaction().is_some() {
-            return match transaction.effective_tip_per_gas_u256(base_fee) {
-                Some(tip) => match u128::try_from(tip) {
-                    Ok(tip) => Priority::Value(tip),
-                    Err(_) => Priority::Overflow(Box::new(tip)),
-                },
-                None => Priority::None,
-            }
-        }
-        transaction.effective_tip_per_gas(base_fee).into()
+        transaction.effective_tip_per_gas_u256(base_fee).into()
     }
 }
 
@@ -247,10 +232,13 @@ mod tests {
         let high = frame((boundary + U256::from(2)) * gas, U256::MAX);
         assert_eq!(alloy_consensus::Transaction::priority_fee_or_price_u256(&high), U256::MAX);
         assert!(ordering.priority(&high, 0) > ordering.priority(&low, 0));
-        assert!(ordering.priority(&low, 0) > Priority::Value(u128::MAX));
-        assert_eq!(ordering.priority(&low, 1), Priority::Value(u128::MAX));
-        assert_eq!(ordering.priority(&low, 2), Priority::Value(u128::MAX - 1));
-        assert_eq!(ordering.priority(&frame(boundary * gas, U256::from(7)), 1), Priority::Value(7));
+        assert!(ordering.priority(&low, 0) > Priority::Value(U256::from(u128::MAX)));
+        assert_eq!(ordering.priority(&low, 1), Priority::Value(U256::from(u128::MAX)));
+        assert_eq!(ordering.priority(&low, 2), Priority::Value(U256::from(u128::MAX - 1)));
+        assert_eq!(
+            ordering.priority(&frame(boundary * gas, U256::from(7)), 1),
+            Priority::Value(U256::from(7))
+        );
         assert_eq!(ordering.priority(&frame(U256::from(1), U256::from(1)), 2), Priority::None);
     }
 

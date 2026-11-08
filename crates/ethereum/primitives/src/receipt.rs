@@ -138,26 +138,6 @@ impl Receipt {
             ReceiptData::Frame(frame) => frame.logs(),
         }
     }
-
-    fn rlp_payload_length(&self, bloom: &Bloom) -> usize {
-        self.success().length() +
-            self.cumulative_gas_used().length() +
-            bloom.length() +
-            alloy_rlp::list_length(self.logs())
-    }
-
-    fn rlp_receipt_length(&self, bloom: &Bloom) -> usize {
-        let payload_length = self.rlp_payload_length(bloom);
-        Header { list: true, payload_length }.length() + payload_length
-    }
-
-    fn rlp_encode_receipt(&self, bloom: &Bloom, out: &mut dyn BufMut) {
-        Header { list: true, payload_length: self.rlp_payload_length(bloom) }.encode(out);
-        self.success().encode(out);
-        self.cumulative_gas_used().encode(out);
-        bloom.encode(out);
-        alloy_rlp::encode_list(self.logs(), out);
-    }
 }
 
 impl From<ReceiptEnvelope> for Receipt {
@@ -318,23 +298,19 @@ impl RlpDecodableReceipt for Receipt {
 
 impl Eip2718EncodableReceipt for Receipt {
     fn eip2718_encoded_length_with_bloom(&self, bloom: &Bloom) -> usize {
-        let type_len = usize::from(self.tx_type() != TxType::Legacy);
-        type_len +
-            if let Some(payload) = self.as_eip8141() {
-                payload.length()
-            } else {
-                self.rlp_receipt_length(bloom)
-            }
+        match &self.inner {
+            ReceiptData::Standard(receipt) => receipt.eip2718_encoded_length_with_bloom(bloom),
+            ReceiptData::Frame(frame) => 1 + frame.payload().length(),
+        }
     }
 
     fn eip2718_encode_with_bloom(&self, bloom: &Bloom, out: &mut dyn BufMut) {
-        if self.tx_type() != TxType::Legacy {
-            out.put_u8(self.ty());
-        }
-        if let Some(payload) = self.as_eip8141() {
-            payload.encode(out)
-        } else {
-            self.rlp_encode_receipt(bloom, out)
+        match &self.inner {
+            ReceiptData::Standard(receipt) => receipt.eip2718_encode_with_bloom(bloom, out),
+            ReceiptData::Frame(frame) => {
+                out.put_u8(TxType::Eip8141 as u8);
+                frame.payload().encode(out);
+            }
         }
     }
 }

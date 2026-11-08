@@ -4,16 +4,36 @@ use super::{
     FrameValidation, FrameValidationError, FrameValidationInspector, FrameValidationPolicy,
 };
 use crate::{error::Eip8141PoolTransactionError, EthPoolTransaction};
-use alloy_consensus::BlockHeader;
+use alloy_consensus::{transaction::Recovered, BlockHeader};
 use alloy_eips::eip8141::{nonce_slot, NONCE_MANAGER};
 use alloy_primitives::U256;
 use reth_evm::{
-    database::StateProviderDatabase, ConfigureEvm, Evm, EvmEnv, FromRecoveredTx, TxEnvFor,
+    database::StateProviderDatabase, BlockExecutionError, ConfigureEvm, Evm, EvmEnv,
+    FrameValidationResult, FromRecoveredTx, TxEnvFor,
 };
 use reth_primitives_traits::{HeaderTy, TxTy};
 use reth_storage_api::{AccountReader, BlockReaderIdExt, StateProvider, StateProviderFactory};
 use std::sync::Arc;
 use tracing::debug;
+
+/// Failure while executing or checking a public frame-validation prefix.
+#[derive(Debug, thiserror::Error)]
+pub enum FramePrefixValidationError {
+    /// State could not be read while inspecting the prefix.
+    #[error(transparent)]
+    Database(#[from] evm2::DatabaseError),
+    /// Native prefix execution failed before policy checks.
+    #[error(transparent)]
+    Execution(#[from] BlockExecutionError),
+    /// Executed prefix failed public-pool policy.
+    #[error("{reason}")]
+    Policy {
+        /// The public-pool policy violation.
+        reason: &'static str,
+        /// The escrow established by the executed prefix.
+        max_cost: U256,
+    },
+}
 
 fn policy(reason: &'static str) -> FrameValidationError {
     FrameValidationError::Invalid(Eip8141PoolTransactionError::PublicMempoolPolicy(reason).into())
@@ -100,88 +120,35 @@ where
         env.block_env_mut().slot_num = U256::from(current_slot);
     }
     let tx = TxEnvFor::<EvmConfig>::from_recovered_tx(transaction.clone_into_consensus());
-    let inspector = FrameValidationInspector::new(frame.sender, prefix.clone());
     let mut evm = evm_config
         .evm_with_env(StateProviderDatabase::new(state.as_ref().into_evm_state_provider()), env);
-    let (inspector, result) =
-        evm.validate_frame_prefix_with_inspector(&tx, prefix.prefix_end, inspector);
-    if let Some(error) = inspector.database_error() {
-        return Err(FrameValidationError::other(error.clone()))
-    }
-    let result = match result {
-        Ok(result) => result,
-        Err(error) => {
-            debug!(
-                target: "reth::eip8141::pool",
-                ?tx_hash,
-                sender = ?frame.sender,
-                nonce = frame.nonce,
-                prefix_end = prefix.prefix_end,
-                error = %error,
-                "EIP-8141 public-pool prefix execution failed"
-            );
-            return Err(if error.as_internal().is_some() {
+    let (inspector, result) = validate_frame_prefix(
+        &mut evm,
+        &tx,
+        prefix.clone(),
+        head.timestamp(),
+    )
+    .map_err(|error| {
+        debug!(
+            target: "reth::eip8141::pool",
+            ?tx_hash,
+            sender = ?frame.sender,
+            prefix_end = prefix.prefix_end,
+            error = %error,
+            "EIP-8141 public-pool prefix validation failed"
+        );
+        match error {
+            FramePrefixValidationError::Database(error) => FrameValidationError::other(error),
+            FramePrefixValidationError::Execution(error) if error.as_internal().is_some() => {
                 FrameValidationError::other(error)
-            } else {
+            }
+            FramePrefixValidationError::Execution(_) => {
                 policy("validation prefix execution failed")
-            })
+            }
+            FramePrefixValidationError::Policy { reason, .. } => policy(reason),
         }
-    };
-    if let Some(reason) = inspector.error() {
-        debug!(
-            target: "reth::eip8141::pool",
-            ?tx_hash,
-            sender = ?frame.sender,
-            nonce = frame.nonce,
-            reason,
-            "rejected EIP-8141 public-pool transaction after prefix inspection"
-        );
-        return Err(policy(reason))
-    }
-    if !result.sender_approved || result.prefix_end != prefix.prefix_end {
-        debug!(
-            target: "reth::eip8141::pool",
-            ?tx_hash,
-            sender = ?frame.sender,
-            nonce = frame.nonce,
-            sender_approved = result.sender_approved,
-            expected_prefix_end = prefix.prefix_end,
-            actual_prefix_end = result.prefix_end,
-            "rejected EIP-8141 public-pool transaction without required approvals"
-        );
-        return Err(policy("validation prefix did not grant required approvals"))
-    }
-    if result.execution_gas > prefix.declared_execution_gas {
-        debug!(
-            target: "reth::eip8141::pool",
-            ?tx_hash,
-            execution_gas = result.execution_gas,
-            declared_execution_gas = prefix.declared_execution_gas,
-            "rejected EIP-8141 public-pool transaction exceeding execution-gas budget"
-        );
-        return Err(policy("validation prefix exceeded its declared work budget"))
-    }
-    if result.state_gas > prefix.state_gas {
-        debug!(
-            target: "reth::eip8141::pool",
-            ?tx_hash,
-            state_gas = result.state_gas,
-            declared_state_gas = prefix.state_gas,
-            "rejected EIP-8141 public-pool transaction exceeding state-gas budget"
-        );
-        return Err(policy("validation prefix exceeded its declared work budget"))
-    }
+    })?;
     let expiry = inspector.expiry();
-    if expiry.is_some_and(|deadline| deadline < head.timestamp()) {
-        debug!(
-            target: "reth::eip8141::pool",
-            ?tx_hash,
-            expiry = ?expiry,
-            head_timestamp = head.timestamp(),
-            "rejected expired EIP-8141 public-pool transaction"
-        );
-        return Err(policy("frame transaction expired"))
-    }
     let mut dependencies = inspector.dependencies();
     dependencies.accounts.push(result.payer);
     dependencies.code.push(result.payer);
@@ -252,4 +219,28 @@ where
         recent_root_dependencies,
         exclusive_payer,
     }))
+}
+
+/// Executes a validation prefix and checks its approvals, work budgets, and expiry.
+///
+/// Prefix writes are discarded by the configured EVM. Canonical admission and RPC simulation
+/// share these checks while retaining their own block selection and error conversion.
+pub fn validate_frame_prefix<E: Evm>(
+    evm: &mut E,
+    transaction: &Recovered<E::Transaction>,
+    policy: FrameValidationPolicy,
+    timestamp: u64,
+) -> Result<(FrameValidationInspector, FrameValidationResult), FramePrefixValidationError> {
+    let prefix_end = policy.prefix_end;
+    let inspector = FrameValidationInspector::new(*transaction.signer_ref(), policy);
+    let (inspector, result) =
+        evm.validate_frame_prefix_with_inspector(transaction, prefix_end, inspector);
+    if let Some(error) = inspector.database_error() {
+        return Err(FramePrefixValidationError::Database(error.clone()));
+    }
+    let result = result?;
+    inspector.validate_result(&result, timestamp).map_err(|reason| {
+        FramePrefixValidationError::Policy { reason, max_cost: result.max_cost }
+    })?;
+    Ok((inspector, result))
 }

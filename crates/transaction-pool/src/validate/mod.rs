@@ -22,6 +22,7 @@ mod frame_state;
 mod task;
 
 pub use eth::*;
+pub use frame::{validate_frame_prefix, FramePrefixValidationError};
 pub use frame_inspector::FrameValidationInspector;
 pub use frame_policy::{
     FrameValidationPolicy, RecentRootDependency, RecentRootReference, RecentRootVerifier,

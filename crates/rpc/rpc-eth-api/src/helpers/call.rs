@@ -47,7 +47,9 @@ use reth_storage_api::{
     BlockIdReader, BlockReaderIdExt, HeaderProvider, ProviderTx, StateProvider,
 };
 use reth_tasks::{cancel::is_cancelled, CancelOnDrop};
-use reth_transaction_pool::validate::{FrameValidationInspector, FrameValidationPolicy};
+use reth_transaction_pool::validate::{
+    validate_frame_prefix, FramePrefixValidationError, FrameValidationPolicy,
+};
 use std::fmt;
 use tracing::{debug, trace};
 
@@ -391,53 +393,30 @@ pub trait EthCall: EstimateCall + LoadBlock + FullEthApiTypes {
                 }
                 let mut prefix_env = evm_env.clone();
                 prefix_env.version_mut().features.remove(evm2::EvmFeatures::NONCE_CHECK);
-                let inspector = FrameValidationInspector::new(sender, policy.clone());
                 let mut evm = this.evm_config().evm_with_env(&mut db, prefix_env);
-                let (inspector, prefix) =
-                    evm.validate_frame_prefix_with_inspector(&tx_env, policy.prefix_end, inspector);
+                let prefix = validate_frame_prefix(&mut evm, &tx_env, policy, timestamp);
                 drop(evm);
-                if let Some(error) = inspector.database_error() {
-                    return Err(Self::Error::from_eth_err(error.clone()));
-                }
                 let prefix = match prefix {
-                    Ok(result) => result,
-                    Err(error @ BlockExecutionError::Internal(_)) => {
-                        return Err(Self::Error::from_evm_err(error))
+                    Ok((_, prefix)) => prefix,
+                    Err(FramePrefixValidationError::Database(error)) => {
+                        return Err(Self::Error::from_eth_err(error));
+                    }
+                    Err(FramePrefixValidationError::Execution(
+                        error @ BlockExecutionError::Internal(_),
+                    )) => {
+                        return Err(Self::Error::from_evm_err(error));
+                    }
+                    Err(FramePrefixValidationError::Policy { reason, max_cost }) => {
+                        return Ok(FrameSimulationResult::invalid(max_cost, prefix_shape, reason));
                     }
                     Err(error) => {
                         return Ok(FrameSimulationResult::invalid(
                             max_cost,
                             prefix_shape,
                             error.to_string(),
-                        ))
+                        ));
                     }
                 };
-                if let Some(reason) = inspector.error() {
-                    return Ok(FrameSimulationResult::invalid(
-                        prefix.max_cost,
-                        prefix_shape,
-                        reason,
-                    ));
-                }
-                let violation = if !prefix.sender_approved || prefix.prefix_end != policy.prefix_end
-                {
-                    Some("validation prefix did not grant the required approvals")
-                } else if prefix.execution_gas > policy.declared_execution_gas {
-                    Some("validation prefix exceeded its declared execution-gas budget")
-                } else if prefix.state_gas > policy.state_gas {
-                    Some("validation prefix exceeded its declared state-gas budget")
-                } else if inspector.expiry().is_some_and(|deadline| deadline < timestamp) {
-                    Some("frame transaction expired")
-                } else {
-                    None
-                };
-                if let Some(reason) = violation {
-                    return Ok(FrameSimulationResult::invalid(
-                        prefix.max_cost,
-                        prefix_shape,
-                        reason,
-                    ));
-                }
                 if is_cancelled() {
                     return Err(EthApiError::InternalEthError.into());
                 }

@@ -1437,7 +1437,7 @@ fn verify_response<T: SignedTransaction>(
 mod tests {
     use super::*;
     use crate::test_utils::transactions::new_mock_session_with_capacity;
-    use alloy_consensus::transaction::Recovered;
+    use alloy_consensus::transaction::{Recovered, TxHashRef};
     use alloy_primitives::B256;
     use futures::task::noop_waker_ref;
     use rand::{rngs::StdRng, seq::IndexedRandom, Rng, SeedableRng};

@@ -11,6 +11,7 @@ use evm2::{
     interpreter::{op, opcode::OpCode, GasTracker, InstrStop, Interpreter, Message, MessageResult},
     DatabaseError, Evm, EvmTypes, Inspector,
 };
+use reth_evm::FrameValidationResult;
 use std::collections::BTreeSet;
 
 /// Enforces public validation-prefix policy independently of consensus execution.
@@ -71,6 +72,30 @@ impl FrameValidationInspector {
             mutable_code: self.mutable_code.iter().copied().collect(),
             storage: self.storage.iter().copied().collect(),
         }
+    }
+
+    /// Checks the executed prefix against approval, gas-budget, and expiry policy.
+    pub(super) fn validate_result(
+        &self,
+        result: &FrameValidationResult,
+        timestamp: u64,
+    ) -> Result<(), &'static str> {
+        if let Some(reason) = self.error() {
+            return Err(reason);
+        }
+        if !result.sender_approved || result.prefix_end != self.policy.prefix_end {
+            return Err("validation prefix did not grant the required approvals");
+        }
+        if result.execution_gas > self.policy.declared_execution_gas {
+            return Err("validation prefix exceeded its declared execution-gas budget");
+        }
+        if result.state_gas > self.policy.state_gas {
+            return Err("validation prefix exceeded its declared state-gas budget");
+        }
+        if self.expiry().is_some_and(|deadline| deadline < timestamp) {
+            return Err("frame transaction expired");
+        }
+        Ok(())
     }
 
     fn reject(&mut self, reason: &'static str) {
@@ -714,5 +739,42 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn prefix_results_share_approval_budget_and_expiry_checks() {
+        let mut inspector = FrameValidationInspector::new(Address::ZERO, policy());
+        let mut result = FrameValidationResult {
+            payer: Address::ZERO,
+            max_cost: U256::ONE,
+            prefix_end: 1,
+            sender_approved: true,
+            signature_gas: 0,
+            execution_gas: 10_000,
+            state_gas: 0,
+        };
+        assert_eq!(inspector.validate_result(&result, 10), Ok(()));
+        result.sender_approved = false;
+        assert_eq!(
+            inspector.validate_result(&result, 10),
+            Err("validation prefix did not grant the required approvals")
+        );
+        result.sender_approved = true;
+        result.execution_gas += 1;
+        assert_eq!(
+            inspector.validate_result(&result, 10),
+            Err("validation prefix exceeded its declared execution-gas budget")
+        );
+        result.execution_gas -= 1;
+        result.state_gas = 1;
+        assert_eq!(
+            inspector.validate_result(&result, 10),
+            Err("validation prefix exceeded its declared state-gas budget")
+        );
+        result.state_gas = 0;
+        inspector.expiry = Some(9);
+        assert_eq!(inspector.validate_result(&result, 10), Err("frame transaction expired"));
+        inspector.error = Some("validation opcode is forbidden");
+        assert_eq!(inspector.validate_result(&result, 10), Err("validation opcode is forbidden"));
     }
 }

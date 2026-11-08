@@ -187,6 +187,7 @@ impl Wake for WakeFlag {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloy_consensus::transaction::TxHashRef;
     use alloy_primitives::map::B256Set;
     use futures::StreamExt;
     use reth_eth_wire::NewPooledTransactionHashes68;

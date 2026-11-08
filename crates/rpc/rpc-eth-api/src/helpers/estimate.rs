@@ -2,21 +2,23 @@
 
 use super::{call::request_gas_price, Call, LoadPendingBlock};
 use crate::{AsEthApiError, FromEthApiError, FromEvmError, IntoEthApiError};
-use alloy_consensus::Transaction;
+use alloy_consensus::{Transaction, TxEip8141};
+use alloy_eips::eip8141::{FrameLimits, FrameReceipt, FrameStatus};
 use alloy_network::TransactionBuilder;
-use alloy_primitives::{TxKind, U256};
+use alloy_primitives::{Bytes, TxKind, U256};
 use alloy_rpc_types_eth::{state::EvmOverrides, BlockId};
 use evm2::{
     ethereum::eip8141::FrameGas,
     evm::{CacheDB, Db, DynDatabase},
     interpreter::InstrStop,
-    EvmFeatures, TxResult,
+    registry::{FrameTransactionError, HandlerError},
+    EvmFeatures, EvmTypes, Inspector, TxResult, Version,
 };
 use futures::Future;
 use reth_chainspec::MIN_TRANSACTION_GAS;
 use reth_evm::{
-    database::StateProviderDatabase, ConfigureEvm, Evm, EvmEnv, EvmEnvFor, EvmTypesFor,
-    TransactionEnvMut,
+    database::StateProviderDatabase, BlockValidationError, ConfigureEvm, Evm, EvmEnv, EvmEnvFor,
+    EvmTypesFor, TransactionEnvMut,
 };
 use reth_rpc_convert::{RpcConvert, RpcTxReq};
 use reth_rpc_eth_types::{
@@ -427,142 +429,208 @@ pub trait EstimateCall: Call {
                     )
                 })
                 .ok_or_else(|| invalid("signature gas overflows"))?;
-            let gas = FrameGas::calculate(
+            let limits = FrameLimits {
+                execution: evm_env.version().tx_gas_limit_cap.min(block_limit),
+                state: block_limit,
+            };
+            let frame_count = request.as_ref().frames.as_ref().map_or(0, Vec::len);
+            frame_gas_allowance(
                 tx_env.frame_transaction().ok_or_else(|| invalid("missing frame transaction"))?,
                 evm_env.version(),
+                limits,
+                combined_cap,
+                signature_gas,
             )
-            .map_err(reth_evm::execute::map_handler_error)
-            .map_err(Self::Error::from_evm_err)?;
-            let reserved = gas
-                .maximum
-                .checked_add(signature_gas)
-                .ok_or_else(|| invalid("frame gas overflows"))?;
-            let allowance = combined_cap
-                .checked_sub(reserved)
-                .ok_or_else(|| invalid("frame transaction exceeds the gas cap"))?;
-            let execution_reserved = gas
-                .execution
-                .checked_add(signature_gas)
-                .ok_or_else(|| invalid("frame gas overflows"))?;
-            let execution_allowance = evm_env
-                .version()
-                .tx_gas_limit_cap
-                .min(block_limit)
-                .checked_sub(execution_reserved)
-                .ok_or_else(|| invalid("frame transaction exceeds the execution gas cap"))?;
-            let state_allowance = block_limit
-                .checked_sub(gas.state)
-                .ok_or_else(|| invalid("frame transaction exceeds the state gas cap"))?;
-            let execution_count = missing.iter().filter(|(_, state)| !state).count() as u64;
-            let state_count = missing.len() as u64 - execution_count;
-            let initial = allowance / missing.len() as u64;
-            let execution_initial =
-                initial.min(execution_allowance.checked_div(execution_count).unwrap_or(0));
-            let state_initial = initial.min(state_allowance.checked_div(state_count).unwrap_or(0));
-            for &(index, state) in &missing {
-                let frame = request
-                    .as_mut()
-                    .frames
-                    .as_mut()
-                    .and_then(|frames| frames.get_mut(index))
-                    .ok_or(EthApiError::InternalEthError)?;
-                if state {
-                    frame.state_gas = Some(state_initial);
-                } else {
-                    frame.execution_gas = Some(execution_initial);
+            .map_err(Self::Error::from_eth_err)?;
+            let permit = self
+                .acquire_owned_blocking_io()
+                .await
+                .map_err(|_| EthApiError::InternalEthError)?;
+            self.spawn_with_state_at_block(at, move |this, mut db| {
+                let _permit = permit;
+                if derived_pending {
+                    this.apply_pending_block_state_changes(&mut db, &evm_env, at)?;
                 }
-            }
-            let probe = async |candidate| {
-                let permit = self
-                    .acquire_owned_blocking_io()
-                    .await
-                    .map_err(|_| EthApiError::InternalEthError)?;
-                let env = evm_env.clone();
-                let overrides = overrides.clone();
-                let result = self
-                    .spawn_with_state_at_block(at, move |this, mut db| {
-                        let _permit = permit;
-                        if derived_pending {
-                            this.apply_pending_block_state_changes(&mut db, &env, at)?;
+                let (env, tx) =
+                    this.prepare_call_env(evm_env, request.clone(), &mut db, overrides)?;
+                request.as_mut().nonce.get_or_insert(tx.nonce());
+                let mut probes = 0;
+                let mut probe = |candidate, last_frame, probes: &mut usize| {
+                    if is_cancelled() {
+                        return Err(EthApiError::InternalEthError.into());
+                    }
+                    if *probes >= MAX_FRAME_GAS_PROBES {
+                        return Err(invalid("frame gas estimation exceeded its probe limit"));
+                    }
+                    *probes += 1;
+                    let tx = this.converter().tx_env(candidate, &env)?;
+                    let mut inspector = FrameGasProbe::new(frame_count);
+                    let mut evm = this.evm_config().evm_with_env(&mut db, env.clone());
+                    let result = evm.transact_result_with_inspector(&tx, &mut inspector);
+                    let frame_error = match result {
+                        Ok(_) => None,
+                        Err(error)
+                            if matches!(
+                                    error.as_validation(),
+                                    Some(BlockValidationError::Other(error)) if matches!(
+                                        error.downcast_ref::<HandlerError>(),
+                                        Some(HandlerError::InvalidFrameTransaction(FrameTransactionError::VerifyFrameFailed))
+                                    )
+                                ) =>
+                        {
+                            Some(error)
                         }
-                        let (env, tx) =
-                            this.prepare_call_env(env, candidate, &mut db, overrides)?;
-                        this.transact(&mut db, env, tx)
-                    })
-                    .await?;
-                Ok::<_, Self::Error>(result.result.frame.as_ref().is_some_and(|frame| {
-                    frame
-                        .receipts
-                        .iter()
-                        .all(|receipt| receipt.status == alloy_eips::eip8141::FrameStatus::Success)
-                }))
-            };
-            if !probe(request.clone()).await? {
-                return Err(invalid("frame transaction does not succeed within the gas cap"));
-            }
-            let mut probes = 1;
-            for (index, state) in missing {
-                let mut low = 0;
-                let mut high = if state { state_initial } else { execution_initial };
-                while low < high && probes < 511 {
-                    let middle = low + (high - low) / 2;
-                    let mut candidate = request.clone();
-                    let frame = candidate
+                        Err(error) => return Err(Self::Error::from_evm_err(error)),
+                    };
+                    Ok((inspector.succeeded_through(last_frame), frame_error))
+                };
+                let frame_tx =
+                    tx.frame_transaction().ok_or_else(|| invalid("missing frame transaction"))?;
+                let gas = FrameGas::calculate(frame_tx, env.version())
+                    .map_err(reth_evm::execute::map_handler_error)
+                    .map_err(Self::Error::from_evm_err)?;
+                let allowance = frame_gas_allowance(
+                    frame_tx,
+                    env.version(),
+                    limits,
+                    combined_cap,
+                    signature_gas,
+                )
+                .map_err(Self::Error::from_eth_err)?;
+                let remaining = combined_cap
+                    .checked_sub(gas.maximum)
+                    .and_then(|gas| gas.checked_sub(signature_gas))
+                    .ok_or_else(|| invalid("frame transaction exceeds the gas cap"))?;
+                let execution_count = missing.iter().filter(|(_, state)| !state).count() as u64;
+                let state_count = missing.len() as u64 - execution_count;
+                let fair_share = remaining / missing.len() as u64;
+                let mut seed = request.clone();
+                for &(index, state) in &missing {
+                    let frame = seed
                         .as_mut()
                         .frames
                         .as_mut()
                         .and_then(|frames| frames.get_mut(index))
                         .ok_or(EthApiError::InternalEthError)?;
                     if state {
-                        frame.state_gas = Some(middle);
+                        frame.state_gas = Some(
+                            fair_share
+                                .min(allowance.state.checked_div(state_count).unwrap_or_default()),
+                        );
                     } else {
-                        frame.execution_gas = Some(middle);
+                        frame.execution_gas = Some(fair_share.min(
+                            allowance.execution.checked_div(execution_count).unwrap_or_default(),
+                        ));
                     }
-                    probes += 1;
-                    // VERIFY out-of-gas is a transaction error, so an unsuccessful probe keeps the
-                    // known-good bound.
-                    let succeeds = match probe(candidate).await {
-                        Ok(success) => success,
-                        Err(error)
-                            if error.is_gas_too_low() ||
-                                error.is_gas_too_high() ||
-                                matches!(
-                                    error.as_err(),
-                                    Some(EthApiError::InvalidTransaction(
-                                        RpcInvalidTransactionError::FrameTransaction(
-                                            evm2::registry::HandlerError::InvalidFrameTransaction(
-                                                evm2::registry::FrameTransactionError::VerifyFrameFailed
-                                            )
-                                        )
-                                    ))
-                                ) =>
-                        {
-                            false
+                }
+                let (feasible_seed, _) = probe(seed.clone(), frame_count - 1, &mut probes)?;
+                if feasible_seed {
+                    request = seed;
+                }
+                for index in 0..frame_count {
+                    let execution_missing = missing.contains(&(index, false));
+                    let state_missing = missing.contains(&(index, true));
+                    if !execution_missing && !state_missing {
+                        continue;
+                    }
+                    if !feasible_seed {
+                        let tx = this.converter().tx_env(request.clone(), &env)?;
+                        let allowance = frame_gas_allowance(
+                            tx.frame_transaction()
+                                .ok_or_else(|| invalid("missing frame transaction"))?,
+                            env.version(),
+                            limits,
+                            combined_cap,
+                            signature_gas,
+                        )
+                        .map_err(Self::Error::from_eth_err)?;
+                        let frame = request
+                            .as_mut()
+                            .frames
+                            .as_mut()
+                            .and_then(|frames| frames.get_mut(index))
+                            .ok_or(EthApiError::InternalEthError)?;
+                        if execution_missing {
+                            frame.execution_gas = Some(allowance.execution);
                         }
-                        Err(error) => return Err(error),
-                    };
-                    if succeeds {
-                        high = middle;
-                    } else {
-                        low = middle + 1;
+                        if state_missing {
+                            frame.state_gas = Some(allowance.state);
+                        }
+                        // Each dimension starts at its own bound. The final reservation must fit
+                        // the combined cap after both dimensions have been minimized.
+                        let (succeeds, error) = probe(request.clone(), index, &mut probes)?;
+                        if !succeeds {
+                            return Err(error.map_or_else(
+                                || invalid("frame transaction does not succeed within the gas cap"),
+                                Self::Error::from_evm_err,
+                            ));
+                        }
+                    }
+                    let last_frame = if feasible_seed { frame_count - 1 } else { index };
+                    for state in [false, true] {
+                        if !missing.contains(&(index, state)) {
+                            continue;
+                        }
+                        let frame = &request
+                            .as_ref()
+                            .frames
+                            .as_ref()
+                            .ok_or(EthApiError::InternalEthError)?[index];
+                        let mut high = if state { frame.state_gas } else { frame.execution_gas }
+                            .ok_or(EthApiError::InternalEthError)?;
+                        let mut low = 0;
+                        while low < high && probes < MAX_FRAME_GAS_PROBES {
+                            let middle = low + (high - low) / 2;
+                            let mut candidate = request.clone();
+                            let frame = candidate
+                                .as_mut()
+                                .frames
+                                .as_mut()
+                                .and_then(|frames| frames.get_mut(index))
+                                .ok_or(EthApiError::InternalEthError)?;
+                            if state {
+                                frame.state_gas = Some(middle);
+                            } else {
+                                frame.execution_gas = Some(middle);
+                            }
+                            if probe(candidate, last_frame, &mut probes)?.0 {
+                                high = middle;
+                            } else {
+                                low = middle + 1;
+                            }
+                        }
+                        let frame = request
+                            .as_mut()
+                            .frames
+                            .as_mut()
+                            .and_then(|frames| frames.get_mut(index))
+                            .ok_or(EthApiError::InternalEthError)?;
+                        if state {
+                            frame.state_gas = Some(high);
+                        } else {
+                            frame.execution_gas = Some(high);
+                        }
                     }
                 }
-                let frame = request
-                    .as_mut()
-                    .frames
-                    .as_mut()
-                    .and_then(|frames| frames.get_mut(index))
-                    .ok_or(EthApiError::InternalEthError)?;
-                if state {
-                    frame.state_gas = Some(high);
-                } else {
-                    frame.execution_gas = Some(high);
+                let tx = this.converter().tx_env(request.clone(), &env)?;
+                frame_gas_allowance(
+                    tx.frame_transaction().ok_or_else(|| invalid("missing frame transaction"))?,
+                    env.version(),
+                    limits,
+                    combined_cap,
+                    signature_gas,
+                )
+                .map_err(Self::Error::from_eth_err)?;
+                let mut evm = this.evm_config().evm_with_env(&mut db, env);
+                let result = evm.transact_result(&tx).map_err(Self::Error::from_evm_err)?;
+                if !result.frame.as_ref().is_some_and(|frame| {
+                    frame.receipts.iter().all(|receipt| receipt.status == FrameStatus::Success)
+                }) {
+                    return Err(invalid("filled frame gas limits failed validation"));
                 }
-            }
-            if !probe(request.clone()).await? {
-                return Err(invalid("filled frame gas limits failed validation"));
-            }
-            Ok(request)
+                Ok(request)
+            })
+            .await
         }
     }
 
@@ -654,4 +722,83 @@ pub fn update_estimated_gas_range<EvmTypes: evm2::EvmTypes>(
     }
 
     Ok(())
+}
+
+const MAX_FRAME_GAS_PROBES: usize = 512;
+
+/// Tracks executed frame outcomes even when a VERIFY failure rejects the transaction.
+#[derive(Debug)]
+struct FrameGasProbe {
+    frames: Vec<bool>,
+}
+
+impl FrameGasProbe {
+    fn new(frame_count: usize) -> Self {
+        Self { frames: vec![false; frame_count] }
+    }
+
+    fn succeeded_through(&self, last_frame: usize) -> bool {
+        self.frames.get(..=last_frame).is_some_and(|frames| frames.iter().all(|success| *success))
+    }
+}
+
+impl<T: EvmTypes> Inspector<T> for FrameGasProbe {
+    fn frame_end(
+        &mut self,
+        index: usize,
+        receipt: &FrameReceipt,
+        _: &Bytes,
+        stop: InstrStop,
+        _: &mut T::Host<'_>,
+    ) {
+        let success = receipt.status == FrameStatus::Success && stop.is_success();
+        if let Some(frame) = self.frames.get_mut(index) {
+            *frame = success;
+        }
+    }
+}
+
+/// Returns independent room for one omitted frame limit before enforcing the final combined cap.
+fn frame_gas_allowance(
+    tx: &TxEip8141,
+    version: &Version,
+    limits: FrameLimits,
+    combined_cap: u64,
+    signature_gas: u64,
+) -> Result<FrameLimits, EthApiError> {
+    let invalid = || EthApiError::InvalidParams("frame transaction exceeds the gas cap".into());
+    let gas = FrameGas::calculate(tx, version)
+        .map_err(reth_evm::execute::map_handler_error)
+        .map_err(EthApiError::from)?;
+    let execution = gas
+        .intrinsic
+        .checked_add(tx.total_frame_execution_gas_limit())
+        .and_then(|gas| gas.checked_add(signature_gas))
+        .ok_or_else(invalid)?;
+    let floored = gas.execution.checked_add(signature_gas).ok_or_else(invalid)?;
+    if floored.checked_add(gas.state).is_none_or(|maximum| maximum > combined_cap) {
+        return Err(invalid());
+    }
+    if floored > limits.execution {
+        return Err(EthApiError::InvalidParams(
+            "frame transaction exceeds the execution gas cap".into(),
+        ));
+    }
+    if gas.state > limits.state {
+        return Err(EthApiError::InvalidParams(
+            "frame transaction exceeds the state gas cap".into(),
+        ));
+    }
+    Ok(FrameLimits {
+        execution: limits
+            .execution
+            .min(combined_cap.checked_sub(gas.state).ok_or_else(invalid)?)
+            .checked_sub(execution)
+            .ok_or_else(invalid)?,
+        state: limits
+            .state
+            .min(combined_cap.checked_sub(floored).ok_or_else(invalid)?)
+            .checked_sub(gas.state)
+            .ok_or_else(invalid)?,
+    })
 }

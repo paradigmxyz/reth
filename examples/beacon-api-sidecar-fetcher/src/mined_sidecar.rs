@@ -1,5 +1,5 @@
 use crate::BeaconSidecarConfig;
-use alloy_consensus::{Signed, Transaction as _, TxEip4844WithSidecar};
+use alloy_consensus::{EthereumTxEnvelope, Signed, Transaction as _, TxEip4844WithSidecar};
 use alloy_eips::eip7594::BlobTransactionSidecarVariant;
 use alloy_primitives::B256;
 use alloy_rpc_types_beacon::sidecar::{BeaconBlobBundle, SidecarIterator};
@@ -10,7 +10,6 @@ use reth_ethereum::{
     pool::{BlobStoreError, TransactionPoolExt},
     primitives::RecoveredBlock,
     provider::CanonStateNotification,
-    PooledTransactionVariant,
 };
 use serde::{Deserialize, Serialize};
 use std::{
@@ -116,10 +115,8 @@ where
             Ok(blobs) => {
                 actions_to_queue.reserve_exact(txs.len());
                 for ((tx, _), sidecar) in txs.iter().zip(blobs) {
-                    if let Ok(PooledTransactionVariant::Eip4844(transaction)) = tx
-                        .clone()
-                        .try_into_pooled_eip4844(Arc::unwrap_or_clone(sidecar))
-                        .map(PooledTransactionVariant::from)
+                    if let Ok(EthereumTxEnvelope::Eip4844(transaction)) =
+                        tx.clone().try_into_pooled_eip4844(Arc::unwrap_or_clone(sidecar))
                     {
                         let block_metadata = BlockMetadata {
                             block_hash: block.hash(),
@@ -270,10 +267,9 @@ async fn fetch_blobs_for_block(
         .iter()
         .filter_map(|(tx, blob_len)| {
             sidecar_iterator.next_sidecar(*blob_len).and_then(|sidecar| {
-                if let Ok(PooledTransactionVariant::Eip4844(transaction)) = tx
+                if let Ok(EthereumTxEnvelope::Eip4844(transaction)) = tx
                     .clone()
                     .try_into_pooled_eip4844(BlobTransactionSidecarVariant::Eip4844(sidecar))
-                    .map(PooledTransactionVariant::from)
                 {
                     let block_metadata = BlockMetadata {
                         block_hash: block.hash(),

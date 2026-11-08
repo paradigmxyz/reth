@@ -3,7 +3,7 @@
 //! Benchmarks for the `TransactionFetcher`: recording announcements from many peers, packing
 //! `GetPooledTransactions` requests for idle peers and processing their responses.
 
-use alloy_consensus::transaction::Recovered;
+use alloy_consensus::transaction::{Recovered, TxHashRef};
 use alloy_primitives::{
     map::{B256Map, FbBuildHasher, HashMap},
     TxHash,

@@ -4,7 +4,7 @@ use crate::{ConfigureEvm, Database, DynDatabase, EvmEnv, TxEnvFor};
 use alloc::{boxed::Box, sync::Arc, vec::Vec};
 use alloy_consensus::{
     transaction::{Either, Recovered, TransactionEnvelope},
-    BlockHeader as _, Header, Transaction, TxEip2930, TxEip4844, TxLegacy,
+    BlockHeader as _, Header, Transaction, TxEip2930, TxEip4844, TxEip8141, TxLegacy,
 };
 use alloy_eip7928::{
     bal::DecodedBal, compute_block_access_list_hash_with_buf, BlockAccessIndex, BlockAccessList,
@@ -13,7 +13,7 @@ use alloy_eips::{
     eip2718::{Typed2718, WithEncoded},
     eip2930::AccessList,
 };
-use alloy_primitives::{Address, B256};
+use alloy_primitives::{Address, B256, U256};
 use core::fmt::Debug;
 use evm2::{
     interpreter::{Interpreter, Message, MessageResult},
@@ -97,6 +97,17 @@ pub trait Evm {
     ) -> Result<(I, evm2::TxResultWithState<Self::EvmTypes>), BlockExecutionError>
     where
         I: evm2::Inspector<Self::EvmTypes> + 'static;
+
+    /// Executes with a borrowed inspector, discarding writes without materializing detached state.
+    ///
+    /// The caller retains inspector observations on success and error.
+    fn transact_result_with_inspector<I>(
+        &mut self,
+        transaction: &Recovered<Self::Transaction>,
+        inspector: &mut I,
+    ) -> Result<evm2::TxResult<Self::EvmTypes>, BlockExecutionError>
+    where
+        I: evm2::Inspector<Self::EvmTypes>;
 
     /// Sets the inspector used by subsequent transactions.
     fn set_inspector<I>(&mut self, inspector: I)
@@ -210,6 +221,16 @@ impl<'a, T: evm2::EvmTypes<Tx: Typed2718>> Evm for evm2::Evm<'a, T> {
             .map(|executed| executed.detach())
             .map_err(map_handler_error);
         result.map(|result| (inspector, result))
+    }
+
+    fn transact_result_with_inspector<I: evm2::Inspector<T>>(
+        &mut self,
+        transaction: &Recovered<Self::Transaction>,
+        inspector: &mut I,
+    ) -> Result<evm2::TxResult<T>, BlockExecutionError> {
+        evm2::Evm::transact_with_inspector(self, transaction, inspector)
+            .map(|executed| executed.discard())
+            .map_err(map_handler_error)
     }
 
     fn set_inspector<I: evm2::Inspector<T> + 'a>(&mut self, inspector: I) {
@@ -1748,10 +1769,41 @@ impl<TxEnv, T: RecoveredTx<Tx>, Tx> ExecutableTxParts<TxEnv, Tx> for WithTxEnv<T
     }
 }
 
+/// Returns the execution tip for a frame transaction, excluding its blob charge.
+///
+/// `precharge` uses the escrow reported by native execution when present. Otherwise the escrow
+/// is reconstructed using Alloy's reserved gas limit and the selected block prices.
+pub fn frame_transaction_tip(
+    tx: &TxEip8141,
+    gas_used: u64,
+    base_fee: u64,
+    blob_charge: U256,
+    precharge: Option<U256>,
+) -> U256 {
+    let fees = &tx.fees;
+    let base_fee = U256::from(base_fee);
+    let used = U256::from(gas_used);
+    let precharge = precharge.unwrap_or_else(|| {
+        let maximum = U256::from(tx.calculate_gas_limit());
+        let required = (maximum * base_fee).saturating_add(blob_charge);
+        required.saturating_add(
+            fees.max_priority_fee_per_gas
+                .saturating_mul(maximum)
+                .min(fees.max_fee.saturating_sub(required)),
+        )
+    });
+    fees.max_priority_fee_per_gas
+        .saturating_mul(used)
+        .min(precharge.saturating_sub(used * base_fee).saturating_sub(blob_charge))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_eips::eip2930::AccessListItem;
+    use alloy_eips::{
+        eip2930::AccessListItem,
+        eip8141::{Frame, FrameLimits, FrameMode},
+    };
     use alloy_primitives::{Bytes, TxKind, U256};
 
     #[test]
@@ -1824,5 +1876,29 @@ mod tests {
         assert_parts(&Either::<_, Recovered<TxLegacy>>::Left(recovered.clone()));
         assert_parts(&Either::<Recovered<TxLegacy>, _>::Right(recovered.clone()));
         assert_parts(&WithTxEnv { tx_env: (), tx: Arc::new(recovered) });
+    }
+
+    #[test]
+    fn frame_tip_reconstructed_escrow_matches_native_escrow() {
+        let mut tx = TxEip8141 {
+            nonce_keys: Some(vec![]),
+            frames: vec![Frame {
+                mode: FrameMode::Verify,
+                flags: 3,
+                limits: FrameLimits { execution: 100_000, state: 0 },
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        tx.fees.max_fee = U256::from(1_000_000);
+        tx.fees.max_priority_fee_per_gas = U256::MAX;
+        let blob_charge = U256::from(200_000);
+        for precharge in [None, Some(tx.fees.max_fee)] {
+            assert_eq!(
+                frame_transaction_tip(&tx, 25_000, 3, blob_charge, precharge),
+                U256::from(725_000),
+            );
+            assert_eq!(frame_transaction_tip(&tx, 0, 3, blob_charge, precharge), U256::ZERO);
+        }
     }
 }

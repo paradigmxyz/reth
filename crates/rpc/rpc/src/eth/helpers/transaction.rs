@@ -732,6 +732,42 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn fill_frame_transaction_uses_execution_budget_without_reserving_unused_state() {
+        let sender = Address::random();
+        let target = Address::random();
+        let cap = 120_000;
+        let accounts = AddressMap::from_iter([
+            (
+                sender,
+                ExtendedAccount::new(0, U256::MAX)
+                    .with_bytecode(bytes!("610bb85b60019003806003575060035f5faa00")),
+            ),
+            (target, ExtendedAccount::new(0, U256::ZERO).with_bytecode(bytes!("00"))),
+        ]);
+        let api =
+            mock_eth_api_builder(accounts, ChainSpecBuilder::mainnet().bogota_activated().build())
+                .gas_cap(GasCap(cap))
+                .build();
+        let request = TransactionRequest {
+            from: Some(sender),
+            frames: Some(vec![
+                FrameRequest { mode: FrameMode::Verify, flags: 3, ..Default::default() },
+                FrameRequest {
+                    mode: FrameMode::Default,
+                    target: target.into(),
+                    ..Default::default()
+                },
+            ]),
+            ..Default::default()
+        };
+        let filled = api.fill_transaction(request).await.unwrap();
+        let tx = filled.tx.frame_transaction().unwrap();
+        assert!(tx.frames[0].limits.execution > cap / 2);
+        assert!(tx.frames.iter().all(|frame| frame.limits.state == 0));
+        assert!(tx.calculate_gas_limit() <= cap);
+    }
+
+    #[tokio::test]
     async fn fill_frame_transaction_preserves_state_between_frames() {
         let sender = Address::random();
         let target = Address::random();
