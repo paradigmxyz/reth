@@ -2007,27 +2007,9 @@ impl EthPoolTransaction for EthPooledTransaction {
         self,
         sidecar: Arc<BlobTransactionSidecarVariant>,
     ) -> Option<Recovered<Self::Pooled>> {
-        let (signed_transaction, signer) = self.into_consensus().into_parts();
-        let pooled_transaction = match signed_transaction {
-            TransactionSigned::Eip8141(tx) => {
-                let BlobTransactionSidecarVariant::Eip7594(sidecar) = Arc::unwrap_or_clone(sidecar)
-                else {
-                    return None
-                };
-                let (tx, hash) = tx.into_parts();
-                let tx = TxEip8141WithSidecar::new(tx, sidecar);
-                PooledTransactionVariant::Eip8141(alloy_primitives::Sealed::new_unchecked(
-                    tx.into(),
-                    hash,
-                ))
-            }
-            tx => PooledTransactionVariant::try_from(
-                tx.try_into_pooled_eip4844(Arc::unwrap_or_clone(sidecar)).ok()?,
-            )
-            .ok()?,
-        };
-
-        Some(Recovered::new_unchecked(pooled_transaction, signer))
+        let (tx, signer) = self.into_consensus().into_parts();
+        let tx = attach_blob_sidecar(tx, Arc::unwrap_or_clone(sidecar))?;
+        Some(Recovered::new_unchecked(tx, signer))
     }
 
     fn try_from_eip4844(
@@ -2044,26 +2026,9 @@ impl EthPoolTransaction for EthPooledTransaction {
         tx: Recovered<Self::Consensus>,
         sidecar: BlobTransactionSidecarVariant,
     ) -> Option<Self> {
-        let tx = match tx.into_parts() {
-            (TransactionSigned::Eip8141(tx), signer) => {
-                let BlobTransactionSidecarVariant::Eip7594(sidecar) = sidecar else { return None };
-                let (tx, hash) = tx.into_parts();
-                let tx = TxEip8141WithSidecar::new(tx, sidecar);
-                Recovered::new_unchecked(
-                    PooledTransactionVariant::Eip8141(alloy_primitives::Sealed::new_unchecked(
-                        tx.into(),
-                        hash,
-                    )),
-                    signer,
-                )
-            }
-            (tx, signer) => Recovered::new_unchecked(
-                PooledTransactionVariant::try_from(tx.try_into_pooled_eip4844(sidecar).ok()?)
-                    .ok()?,
-                signer,
-            ),
-        };
-        Some(Self::from_pooled(tx))
+        let (tx, signer) = tx.into_parts();
+        let tx = attach_blob_sidecar(tx, sidecar)?;
+        Some(Self::from_pooled(Recovered::new_unchecked(tx, signer)))
     }
 
     fn validate_blob(
@@ -2250,6 +2215,28 @@ impl<Tx: PoolTransaction> Stream for NewSubpoolTransactionStream<Tx> {
                 }
                 None => return Poll::Ready(None),
             }
+        }
+    }
+}
+
+/// Attaches a supported sidecar, returning `None` when its format cannot pool the transaction.
+fn attach_blob_sidecar(
+    tx: TransactionSigned,
+    sidecar: BlobTransactionSidecarVariant,
+) -> Option<PooledTransactionVariant> {
+    match tx {
+        TransactionSigned::Eip8141(tx) => {
+            let BlobTransactionSidecarVariant::Eip7594(sidecar) = sidecar else { return None };
+            let (tx, hash) = tx.into_parts();
+            let tx = TxEip8141WithSidecar::new(tx, sidecar);
+            Some(PooledTransactionVariant::Eip8141(alloy_primitives::Sealed::new_unchecked(
+                tx.into(),
+                hash,
+            )))
+        }
+        tx => {
+            let tx = tx.try_into_pooled_eip4844(sidecar).ok()?;
+            PooledTransactionVariant::try_from(tx).ok()
         }
     }
 }
@@ -2453,6 +2440,12 @@ mod tests {
             ));
             assert_eq!(pooled.blob_sidecar.maybe_sidecar(), Some(&sidecar));
             assert_eq!(pooled.into_consensus(), transaction);
+            let generic =
+                pooled_tx.clone().try_into_pooled_blob(Arc::new(sidecar.clone())).unwrap();
+            assert_eq!(generic.inner(), &envelope);
+            let attached =
+                EthPooledTransaction::try_from_blob(transaction.clone(), sidecar).unwrap();
+            assert_eq!(attached.into_consensus(), transaction);
             assert_eq!(EthPooledTransaction::pooled_into_consensus(envelope), *transaction.inner());
         }
     }
@@ -2553,6 +2546,22 @@ mod tests {
             pooled.blob_sidecar.maybe_sidecar(),
             Some(&BlobTransactionSidecarVariant::Eip7594(sidecar)),
         );
-        assert_eq!(pooled.into_consensus(), Recovered::new_unchecked(consensus, sender));
+        assert_eq!(
+            pooled.clone().into_consensus(),
+            Recovered::new_unchecked(consensus.clone(), sender)
+        );
+        let sidecar = pooled.blob_sidecar.maybe_sidecar().unwrap().clone();
+        let envelope = pooled.clone().try_into_pooled_blob(Arc::new(sidecar.clone())).unwrap();
+        assert_eq!(envelope.signer(), sender);
+        assert_eq!(EthPooledTransaction::pooled_into_consensus(envelope.into_inner()), consensus);
+        let attached = EthPooledTransaction::try_from_blob(
+            Recovered::new_unchecked(consensus.clone(), sender),
+            sidecar,
+        )
+        .unwrap();
+        assert_eq!(attached.into_consensus(), Recovered::new_unchecked(consensus, sender));
+        let wrong = BlobTransactionSidecarVariant::Eip4844(Default::default());
+        assert!(pooled.clone().try_into_pooled_blob(Arc::new(wrong.clone())).is_none());
+        assert!(EthPooledTransaction::try_from_blob(pooled.into_consensus(), wrong).is_none());
     }
 }

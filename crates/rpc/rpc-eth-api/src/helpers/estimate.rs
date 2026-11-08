@@ -24,6 +24,7 @@ use reth_rpc_convert::{RpcConvert, RpcTxReq};
 use reth_rpc_eth_types::{
     cache::db::{apply_block_overrides, apply_state_overrides},
     error::api::{FromEvmHalt, FromRevert},
+    transaction::{frame_signature_padding_gas, has_frame_signatures},
     EthApiError, RpcInvalidTransactionError,
 };
 use reth_rpc_server_types::constants::gas_oracle::{CALL_STIPEND_GAS, ESTIMATE_GAS_ERROR_RATIO};
@@ -335,14 +336,11 @@ pub trait EstimateCall: Call {
             let requested_block = at;
             let (evm_env, at) = self.evm_env_at(requested_block).await?;
             let derived_pending = requested_block.is_pending() && !at.is_pending();
+            let has_signatures = has_frame_signatures(request.as_ref());
             if Into::<evm2::SpecId>::into(evm_env.spec_id()).enables(evm2::SpecId::BOGOTA) &&
                 request.as_ref().nonce_keys.is_none()
             {
-                if request.as_ref().signatures.as_ref().is_some_and(|signatures| {
-                    signatures.iter().any(|signature| {
-                        u8::from(signature.scheme) != 0 && !signature.signature.is_empty()
-                    })
-                }) {
+                if has_signatures {
                     return Err(invalid("signed frame transactions must include nonceKeys"));
                 }
                 request.as_mut().nonce_keys = Some(vec![]);
@@ -364,11 +362,7 @@ pub trait EstimateCall: Call {
             if missing.is_empty() {
                 return Ok(request);
             }
-            if request.as_ref().signatures.as_ref().is_some_and(|signatures| {
-                signatures.iter().any(|signature| {
-                    u8::from(signature.scheme) != 0 && !signature.signature.is_empty()
-                })
-            }) {
+            if has_signatures {
                 return Err(invalid("signed frame transactions must include both frame gas limits"));
             }
 
@@ -408,27 +402,11 @@ pub trait EstimateCall: Call {
             }
             // Reserve transaction overhead and every explicit allocation before assigning defaults.
             let tx_env = self.converter().tx_env(request.clone(), &evm_env)?;
-            let gas_params = &evm_env.version().gas_params;
-            let signature_bytes = request
-                .as_ref()
-                .signatures
-                .as_deref()
-                .unwrap_or_default()
-                .iter()
-                .filter(|signature| signature.signature.is_empty())
-                .filter_map(|signature| signature.scheme.signature_length())
-                .try_fold(0u64, |sum, length| sum.checked_add(length as u64))
-                .ok_or_else(|| invalid("signature gas overflows"))?;
-            let signature_gas = signature_bytes
-                .checked_mul(gas_params.get(evm2::version::GasId::TxTokenNonZeroByteMultiplier))
-                .and_then(|tokens| {
-                    tokens.checked_mul(
-                        gas_params
-                            .get(evm2::version::GasId::TxTokenCost)
-                            .max(gas_params.get(evm2::version::GasId::TxFloorCostPerToken)),
-                    )
-                })
-                .ok_or_else(|| invalid("signature gas overflows"))?;
+            let signature_gas = frame_signature_padding_gas(
+                request.as_ref().signatures.as_deref().unwrap_or_default(),
+                evm_env.version(),
+            )
+            .map_err(Self::Error::from_eth_err)?;
             let limits = FrameLimits {
                 execution: evm_env.version().tx_gas_limit_cap.min(block_limit),
                 state: block_limit,
@@ -486,10 +464,7 @@ pub trait EstimateCall: Call {
                 };
                 let frame_tx =
                     tx.frame_transaction().ok_or_else(|| invalid("missing frame transaction"))?;
-                let gas = FrameGas::calculate(frame_tx, env.version())
-                    .map_err(reth_evm::execute::map_handler_error)
-                    .map_err(Self::Error::from_evm_err)?;
-                let allowance = frame_gas_allowance(
+                let (gas, allowance) = frame_gas_allowance(
                     frame_tx,
                     env.version(),
                     limits,
@@ -535,7 +510,7 @@ pub trait EstimateCall: Call {
                     }
                     if !feasible_seed {
                         let tx = this.converter().tx_env(request.clone(), &env)?;
-                        let allowance = frame_gas_allowance(
+                        let (_, allowance) = frame_gas_allowance(
                             tx.frame_transaction()
                                 .ok_or_else(|| invalid("missing frame transaction"))?,
                             env.version(),
@@ -758,14 +733,14 @@ impl<T: EvmTypes> Inspector<T> for FrameGasProbe {
     }
 }
 
-/// Returns independent room for one omitted frame limit before enforcing the final combined cap.
+/// Returns gas reservations and independent room for omitted limits under the final combined cap.
 fn frame_gas_allowance(
     tx: &TxEip8141,
     version: &Version,
     limits: FrameLimits,
     combined_cap: u64,
     signature_gas: u64,
-) -> Result<FrameLimits, EthApiError> {
+) -> Result<(FrameGas, FrameLimits), EthApiError> {
     let invalid = || EthApiError::InvalidParams("frame transaction exceeds the gas cap".into());
     let gas = FrameGas::calculate(tx, version)
         .map_err(reth_evm::execute::map_handler_error)
@@ -789,16 +764,19 @@ fn frame_gas_allowance(
             "frame transaction exceeds the state gas cap".into(),
         ));
     }
-    Ok(FrameLimits {
-        execution: limits
-            .execution
-            .min(combined_cap.checked_sub(gas.state).ok_or_else(invalid)?)
-            .checked_sub(execution)
-            .ok_or_else(invalid)?,
-        state: limits
-            .state
-            .min(combined_cap.checked_sub(floored).ok_or_else(invalid)?)
-            .checked_sub(gas.state)
-            .ok_or_else(invalid)?,
-    })
+    Ok((
+        gas,
+        FrameLimits {
+            execution: limits
+                .execution
+                .min(combined_cap.checked_sub(gas.state).ok_or_else(invalid)?)
+                .checked_sub(execution)
+                .ok_or_else(invalid)?,
+            state: limits
+                .state
+                .min(combined_cap.checked_sub(floored).ok_or_else(invalid)?)
+                .checked_sub(gas.state)
+                .ok_or_else(invalid)?,
+        },
+    ))
 }

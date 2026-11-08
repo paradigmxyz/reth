@@ -44,6 +44,7 @@ impl core::error::Error for MissingFrameReceipt {}
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloc::sync::Arc;
     use alloy_eips::eip8141::{FrameReceipt, FrameStatus};
     use alloy_primitives::Address;
     use evm2::{BaseEvmTypes, FrameTransactionResult};
@@ -92,5 +93,20 @@ mod tests {
             BlockExecutionError::Internal(InternalBlockExecutionError::Other(source))
                 if source.downcast_ref::<MissingFrameReceipt>().is_some()
         ));
+    }
+
+    #[test]
+    fn reth_receipt_builder_implements_native_trait_through_arc() {
+        let builder = Arc::new(RethReceiptBuilder);
+        let receipt = evm2::block::ReceiptBuilder::build_receipt::<BaseEvmTypes>(
+            &builder,
+            ReceiptBuilderCtx {
+                tx_type: TxType::Eip1559,
+                result: TxResult::<BaseEvmTypes> { status: true, ..Default::default() },
+                cumulative_gas_used: 42_000,
+            },
+        )
+        .unwrap();
+        assert_eq!(receipt, Receipt::standard(TxType::Eip1559, true, 42_000, vec![]));
     }
 }

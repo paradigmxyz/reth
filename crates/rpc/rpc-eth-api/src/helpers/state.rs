@@ -17,6 +17,7 @@ use reth_primitives_traits::{BlockTy, RecoveredBlock, SealedHeaderFor};
 use reth_rpc_convert::{RpcConvert, RpcTxReq};
 use reth_rpc_eth_types::{
     error::{FromEvmError, IntoEthApiError},
+    transaction::read_frame_nonce,
     EthApiError, PendingBlockEnv, RpcInvalidTransactionError, SignError,
 };
 use reth_rpc_server_types::constants::DEFAULT_MAX_STORAGE_VALUES_SLOTS;
@@ -89,21 +90,14 @@ pub trait EthState: LoadState + SpawnBlocking {
                 if !Into::<evm2::SpecId>::into(env.spec_id()).enables(evm2::SpecId::BOGOTA) {
                     return Err(EthApiError::KeyedNoncesNotActive.into());
                 }
-                let mut sequence = None;
-                for key in keys {
-                    let current = state
-                        .storage(
-                            alloy_eips::eip8141::NONCE_MANAGER,
-                            alloy_eips::eip8141::nonce_slot(address, key).into(),
-                        )
-                        .map_err(Self::Error::from_eth_err)?
-                        .unwrap_or_default();
-                    if sequence.is_some_and(|previous| previous != current) {
-                        return Err(EthApiError::NonceKeysNotSynchronized.into());
-                    }
-                    sequence = Some(current);
-                }
-                sequence.ok_or_else(|| EthApiError::InternalEthError.into())
+                read_frame_nonce(address, &keys, |address, slot| {
+                    state
+                        .storage(address, slot.into())
+                        .map(|value| value.unwrap_or_default())
+                        .map_err(EthApiError::from)
+                })
+                .map_err(Self::Error::from_eth_err)?
+                .ok_or_else(|| EthApiError::InternalEthError.into())
             })
             .await
         }
@@ -570,29 +564,26 @@ pub trait LoadState:
                     .map_err(|reason| EthApiError::InvalidParams(reason.into()))?;
                 if !keys.is_empty() {
                     let state = this.latest_state()?;
-                    let mut sequence = None;
-                    for key in keys {
+                    let sequence = read_frame_nonce(address, &keys, |address, slot| {
                         let current = state
-                            .storage(
-                                alloy_eips::eip8141::NONCE_MANAGER,
-                                alloy_eips::eip8141::nonce_slot(address, key).into(),
-                            )
-                            .map_err(Self::Error::from_eth_err)?
+                            .storage(address, slot.into())
+                            .map_err(EthApiError::from)?
                             .unwrap_or_default();
                         if current >= U256::from(u64::MAX) {
                             return Err(EthApiError::InvalidParams(
                                 "keyed nonce sequence exhausted".into(),
-                            )
-                            .into());
+                            ));
                         }
-                        if sequence.is_some_and(|previous| previous != current) {
-                            return Err(EthApiError::InvalidParams(
+                        Ok(current)
+                    })
+                    .map_err(|error| {
+                        Self::Error::from_eth_err(match error {
+                            EthApiError::NonceKeysNotSynchronized => EthApiError::InvalidParams(
                                 "nonce keys do not share one sequence".into(),
-                            )
-                            .into());
-                        }
-                        sequence = Some(current);
-                    }
+                            ),
+                            error => error,
+                        })
+                    })?;
                     return sequence
                         .map(|sequence| sequence.to::<u64>())
                         .ok_or_else(|| EthApiError::InternalEthError.into());

@@ -3,7 +3,7 @@
 use crate::{ConfigureEvm, Database, DynDatabase, EvmEnv, TxEnvFor};
 use alloc::{boxed::Box, sync::Arc, vec::Vec};
 use alloy_consensus::{
-    transaction::{Either, Recovered, TransactionEnvelope},
+    transaction::{Either, Recovered},
     BlockHeader as _, Header, Transaction, TxEip2930, TxEip4844, TxEip8141, TxLegacy,
 };
 use alloy_eip7928::{
@@ -12,17 +12,18 @@ use alloy_eip7928::{
 use alloy_eips::{
     eip2718::{Typed2718, WithEncoded},
     eip2930::AccessList,
+    eip8141::{Frame, FrameReceipt},
 };
-use alloy_primitives::{Address, B256, U256};
+use alloy_primitives::{Address, Bytes, B256, U256};
 use core::fmt::Debug;
 use evm2::{
-    interpreter::{Interpreter, Message, MessageResult},
+    ethereum::eip8141::FrameGas,
+    interpreter::{InstrStop, Interpreter, Message, MessageResult},
     registry::{FrameTransactionError, HandlerError},
 };
 use reth_execution_types::{BlockExecutionResult, StateUpdate};
 use reth_primitives_traits::{
-    Block, HeaderTy, NodePrimitives, ReceiptTy, RecoveredBlock, SealedHeader, SignedTransaction,
-    TxTy,
+    Block, HeaderTy, NodePrimitives, ReceiptTy, RecoveredBlock, SealedHeader, TxTy,
 };
 use reth_storage_api::StateProvider;
 use reth_trie_common::{bundle_state::BundleState, updates::TrieUpdates, HashedPostState};
@@ -37,7 +38,7 @@ use reth_primitives_traits::BlockTy;
 pub use evm2::{
     block::{
         map_database_error, map_handler_error, BlockTransactionResult, CommitChanges, GasOutput,
-        ReceiptBuilderCtx,
+        ReceiptBuilder, ReceiptBuilderCtx,
     },
     ethereum::eip8141::FrameValidationResult,
 };
@@ -45,24 +46,6 @@ pub use reth_execution_errors::{
     BlockExecutionError, BlockValidationError, InternalBlockExecutionError, InvalidTxError,
 };
 pub use reth_execution_types::{BlockExecutionOutput, ExecutionOutcome};
-
-/// Builds chain-specific receipts from raw transaction execution results.
-#[auto_impl::auto_impl(&, Arc)]
-pub trait ReceiptBuilder {
-    /// Consensus transaction type accepted by the executor.
-    type Transaction: SignedTransaction + TransactionEnvelope<TxType: Send + 'static>;
-    /// Receipt produced by this builder.
-    type Receipt: reth_primitives_traits::Receipt;
-
-    /// Builds a receipt, rejecting execution results missing required consensus receipt data.
-    fn build_receipt<T: evm2::EvmTypes>(
-        &self,
-        ctx: ReceiptBuilderCtx<
-            <Self::Transaction as TransactionEnvelope>::TxType,
-            evm2::TxResult<T>,
-        >,
-    ) -> Result<Self::Receipt, BlockExecutionError>;
-}
 
 /// A configured EVM instance.
 pub trait Evm {
@@ -414,6 +397,34 @@ impl<T: evm2::EvmTypesHost, I: evm2::Inspector<T>> evm2::Inspector<T> for Traced
         host: &mut T::Host<'_>,
     ) {
         self.0.selfdestruct(contract, target, value, host);
+    }
+
+    fn frame_transaction_start(
+        &mut self,
+        tx: &Arc<TxEip8141>,
+        gas: &FrameGas,
+        host: &mut T::Host<'_>,
+    ) {
+        self.0.frame_transaction_start(tx, gas, host);
+    }
+
+    fn frame_start(&mut self, index: usize, frame: &Frame, host: &mut T::Host<'_>) {
+        self.0.frame_start(index, frame, host);
+    }
+
+    fn frame_end(
+        &mut self,
+        index: usize,
+        receipt: &FrameReceipt,
+        output: &Bytes,
+        stop: InstrStop,
+        host: &mut T::Host<'_>,
+    ) {
+        self.0.frame_end(index, receipt, output, stop, host);
+    }
+
+    fn frame_transaction_end(&mut self, result: &evm2::TxResult<T>, host: &mut T::Host<'_>) {
+        self.0.frame_transaction_end(result, host);
     }
 }
 

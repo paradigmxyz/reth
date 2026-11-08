@@ -29,36 +29,24 @@ use reth_ethereum_forks::{EthereumHardfork, EthereumHardforks};
 use reth_ethereum_primitives::{Receipt, TransactionSigned};
 use reth_evm::{
     BlockExecutionError, BlockExecutionOutput, BlockExecutor, BlockValidationError, ExecutorTx,
-    GasOutput, ReceiptBuilder, ReceiptBuilderCtx, RecoveredTx,
+    GasOutput, ReceiptBuilder, RecoveredTx,
 };
+use reth_primitives_traits::SignedTransaction;
 
 pub use evm2::block::ethereum::EthTransactionResultWithState;
-
-/// Adapts a reth [`ReceiptBuilder`] to evm2's receipt builder.
-#[derive(Debug, Clone, Copy, Default)]
-pub struct ReceiptBuilderAdapter<R>(pub R);
-
-impl<R: ReceiptBuilder> evm2::block::ReceiptBuilder for ReceiptBuilderAdapter<R> {
-    type Transaction = R::Transaction;
-    type Receipt = R::Receipt;
-
-    fn build_receipt<T: EvmTypes>(
-        &self,
-        ctx: ReceiptBuilderCtx<<R::Transaction as TransactionEnvelope>::TxType, evm2::TxResult<T>>,
-    ) -> Result<R::Receipt, BlockExecutionError> {
-        self.0.build_receipt::<T>(ctx)
-    }
-}
 
 /// Configured Ethereum block executor backed by evm2.
 #[expect(missing_debug_implementations)]
 pub struct EthBlockExecutor<'a, T = BaseEvmTypes, R = RethReceiptBuilder>
 where
     T: EvmTypes<Tx: Typed2718, TxResultExt: Send + Sync>,
-    R: ReceiptBuilder,
+    R: ReceiptBuilder<
+        Transaction: SignedTransaction + TransactionEnvelope<TxType: Send + 'static>,
+        Receipt: reth_primitives_traits::Receipt,
+    >,
 {
     /// evm2 executor that runs the block.
-    pub inner: evm2_eth::EthBlockExecutor<'a, T, ReceiptBuilderAdapter<R>>,
+    pub inner: evm2_eth::EthBlockExecutor<'a, T, R>,
     ctx: EthBlockExecutionCtx<'a>,
     eip8253_accounts: &'a [Address],
     bogota_activation_timestamp: Option<u64>,
@@ -78,7 +66,10 @@ fn evm2_ctx<'a>(ctx: &EthBlockExecutionCtx<'a>) -> evm2_eth::EthBlockExecutionCt
 impl<'a, T, R> EthBlockExecutor<'a, T, R>
 where
     T: EvmTypes<Tx: Typed2718, TxResultExt: Send + Sync>,
-    R: ReceiptBuilder,
+    R: ReceiptBuilder<
+        Transaction: SignedTransaction + TransactionEnvelope<TxType: Send + 'static>,
+        Receipt: reth_primitives_traits::Receipt,
+    >,
 {
     /// Creates a configured Ethereum block executor.
     pub fn new<C>(
@@ -96,12 +87,7 @@ where
             block_number,
             chain_spec.deposit_contract().map(|contract| contract.address),
         );
-        let inner = evm2_eth::EthBlockExecutor::new(
-            evm,
-            evm2_ctx(&ctx),
-            rules,
-            ReceiptBuilderAdapter(receipt_builder),
-        );
+        let inner = evm2_eth::EthBlockExecutor::new(evm, evm2_ctx(&ctx), rules, receipt_builder);
         Self {
             inner,
             ctx,
@@ -137,7 +123,10 @@ where
 impl<'a, T, R> BlockExecutor for EthBlockExecutor<'a, T, R>
 where
     T: EvmTypes<Tx: Typed2718, TxResultExt: Send + Sync>,
-    R: ReceiptBuilder,
+    R: ReceiptBuilder<
+        Transaction: SignedTransaction + TransactionEnvelope<TxType: Send + 'static>,
+        Receipt: reth_primitives_traits::Receipt,
+    >,
 {
     type Transaction = R::Transaction;
     type Receipt = R::Receipt;
@@ -715,7 +704,7 @@ mod tests {
         Header, SignableTransaction, TxEip4844, TxEip8141, TxLegacy, TxReceipt, TxType,
     };
     use alloy_eip7928::BlockAccessIndex;
-    use alloy_eips::eip8141::{Frame, FrameLimits, FrameMode};
+    use alloy_eips::eip8141::{Frame, FrameLimits, FrameMode, FrameReceipt, FrameStatus};
     use alloy_primitives::{address, Address, Bytes, Sealable, Signature, TxKind, B256, U256};
     use evm2::{
         block::ethereum::{execution::map_transaction_error, final_block_gas_used},
@@ -1638,5 +1627,136 @@ mod tests {
         let changes = &bal.iter().find(|account| account.address == sender).unwrap().nonce_changes;
         assert_eq!(changes.len(), 1);
         assert_eq!((changes[0].block_access_index.get(), changes[0].new_nonce), (1, 3));
+    }
+
+    #[derive(Debug, Default)]
+    struct FrameHookRecorder {
+        payload: Option<Arc<TxEip8141>>,
+        gas: Option<FrameGas>,
+        starts: Vec<usize>,
+        ends: Vec<(usize, FrameReceipt, Bytes, InstrStop)>,
+        final_frame: Option<evm2::FrameTransactionResult>,
+    }
+
+    impl<T: evm2::EvmTypesHost> evm2::Inspector<T> for FrameHookRecorder {
+        fn frame_transaction_start(
+            &mut self,
+            tx: &Arc<TxEip8141>,
+            gas: &FrameGas,
+            _: &mut T::Host<'_>,
+        ) {
+            self.payload = Some(Arc::clone(tx));
+            self.gas = Some(*gas);
+        }
+
+        fn frame_start(&mut self, index: usize, _: &Frame, _: &mut T::Host<'_>) {
+            self.starts.push(index);
+        }
+
+        fn frame_end(
+            &mut self,
+            index: usize,
+            receipt: &FrameReceipt,
+            output: &Bytes,
+            stop: InstrStop,
+            _: &mut T::Host<'_>,
+        ) {
+            self.ends.push((index, receipt.clone(), output.clone(), stop));
+        }
+
+        fn frame_transaction_end(&mut self, result: &evm2::TxResult<T>, _: &mut T::Host<'_>) {
+            self.final_frame = result.frame.clone();
+        }
+    }
+
+    #[test]
+    fn block_tracing_retains_frame_hooks_outputs_and_assertion_rollback() {
+        for succeeds in [false, true] {
+            let sender = Address::repeat_byte(0xa0);
+            let body = Address::repeat_byte(0xb0);
+            let assertion = Address::repeat_byte(0xc0);
+            let mut db = InMemoryDB::default();
+            for (address, code) in [
+                (sender, Bytes::from_static(&alloy_primitives::hex!("60035f5faa00"))),
+                (body, Bytes::from_static(&alloy_primitives::hex!("60ab5f5360015ff3"))),
+                (
+                    assertion,
+                    if succeeds {
+                        Bytes::from_static(&[0])
+                    } else {
+                        Bytes::from_static(&alloy_primitives::hex!("5f5ffd"))
+                    },
+                ),
+            ] {
+                db.insert_account_info(
+                    &address,
+                    AccountInfo::default().with_code(Bytecode::new_legacy(code)),
+                );
+            }
+            let factory = EthBlockExecutorFactory::new(Arc::new(
+                ChainSpecBuilder::mainnet().bogota_activated().build(),
+            ));
+            let env = EthEvmEnv::new(
+                SpecId::BOGOTA,
+                BlockEnv::<BaseEvmTypes> { gas_limit: U256::from(1_000_000), ..Default::default() },
+                1,
+            );
+            let evm = factory.evm_with_env(db, env);
+            let mut executor = factory.create_executor(evm, segment(0, 1, B256::ZERO).ctx);
+            let payload = TxEip8141 {
+                chain_id: 1,
+                sender,
+                nonce_keys: Some(vec![]),
+                frames: [
+                    (FrameMode::Verify, sender, 3),
+                    (FrameMode::Sender, body, 0),
+                    (FrameMode::Assert, assertion, 0),
+                ]
+                .into_iter()
+                .map(|(mode, target, flags)| Frame {
+                    mode,
+                    target: target.into(),
+                    flags,
+                    limits: FrameLimits { execution: 50_000, state: 0 },
+                    ..Default::default()
+                })
+                .collect(),
+                ..Default::default()
+            };
+            let gas = FrameGas::calculate(&payload, executor.evm().version()).unwrap();
+            let transaction = Recovered::new_unchecked(
+                TransactionSigned::Eip8141(payload.clone().seal_slow()),
+                sender,
+            );
+            let (inspector, _) = executor
+                .inspect_transaction_without_commit(transaction, FrameHookRecorder::default())
+                .unwrap();
+            assert_eq!(inspector.payload.as_deref(), Some(&payload));
+            assert_eq!(inspector.gas, Some(gas));
+            assert_eq!(inspector.starts, vec![0, 1, 2]);
+            assert_eq!(inspector.ends.len(), 3);
+            assert_eq!(inspector.ends[1].0, 1);
+            assert_eq!(inspector.ends[1].1.status, FrameStatus::Success);
+            assert_eq!(inspector.ends[1].2, Bytes::from_static(&[0xab]));
+            assert_eq!(inspector.ends[1].3, InstrStop::Return);
+            assert_eq!(
+                inspector.ends[2].3,
+                if succeeds { InstrStop::Stop } else { InstrStop::Revert }
+            );
+            let final_frame = inspector.final_frame.unwrap();
+            assert_eq!(final_frame.receipts.len(), 3);
+            assert_eq!(final_frame.receipts[0].status, FrameStatus::Success);
+            assert_eq!(final_frame.receipts[1].status, FrameStatus::Success);
+            assert_eq!(
+                final_frame.receipts[2].status,
+                if succeeds { FrameStatus::Success } else { FrameStatus::Failure }
+            );
+            assert_eq!(final_frame.assertion_failure, (!succeeds).then_some(2));
+            assert_eq!(final_frame.rolled_back, vec![false, !succeeds, false]);
+            assert_eq!(
+                final_frame.outputs[1],
+                if succeeds { Bytes::from_static(&[0xab]) } else { Bytes::new() }
+            );
+        }
     }
 }

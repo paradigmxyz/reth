@@ -1,7 +1,7 @@
 #[cfg(feature = "jit")]
 use alloc::string::String;
 use alloc::sync::Arc;
-use alloy_consensus::Header;
+use alloy_consensus::{transaction::TransactionEnvelope, Header};
 use reth_chainspec::{ChainSpec, EthChainSpec, EthereumHardforks};
 #[cfg(feature = "std")]
 use reth_evm::precompile_cache::{
@@ -23,6 +23,7 @@ use crate::{
 };
 use reth_ethereum_primitives::{Receipt, TransactionSigned};
 use reth_evm::ReceiptBuilder;
+use reth_primitives_traits::SignedTransaction;
 
 /// Factory used to construct an evm2-backed EVM.
 ///
@@ -329,7 +330,10 @@ impl<R, C, F> reth_evm::BlockExecutorFactory for EthBlockExecutorFactory<R, C, F
 where
     C: EthChainSpec<Header = Header> + EthereumHardforks,
     F: EvmFactory,
-    R: ReceiptBuilder,
+    R: ReceiptBuilder<
+        Transaction: SignedTransaction + TransactionEnvelope<TxType: Send + 'static>,
+        Receipt: reth_primitives_traits::Receipt,
+    >,
 
     <F::Types as evm2::EvmTypesHost>::Tx: alloy_eips::eip2718::Typed2718,
 {

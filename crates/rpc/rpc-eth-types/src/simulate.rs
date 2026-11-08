@@ -2,6 +2,7 @@
 
 use crate::{
     error::{api::FromEthApiError, FromEvmError, ToRpcError},
+    transaction::resolve_frame_nonce,
     EthApiError,
 };
 use alloy_chains::Chain;
@@ -508,35 +509,6 @@ where
         |address| evm.account_info(address).map_err(Into::into),
         converter,
     )
-}
-
-fn resolve_frame_nonce(
-    request: &mut TransactionRequest,
-    mut storage: impl FnMut(Address, U256) -> Result<U256, EthApiError>,
-) -> Result<(), EthApiError> {
-    if !request.minimal_tx_type().is_eip8141() || request.nonce.is_some() {
-        return Ok(());
-    }
-    let Some(keys) = request.nonce_keys.as_ref() else { return Ok(()) };
-    alloy_eips::eip8141::validate_nonce_keys(keys)
-        .map_err(|reason| EthApiError::InvalidParams(reason.into()))?;
-    let mut sequence = None;
-    for key in keys {
-        let current = storage(
-            alloy_eips::eip8141::NONCE_MANAGER,
-            alloy_eips::eip8141::nonce_slot(request.from.unwrap_or_default(), *key),
-        )?;
-        if current >= U256::from(u64::MAX) || sequence.is_some_and(|previous| previous != current) {
-            return Err(EthApiError::InvalidParams(
-                "nonce keys require one non-exhausted sequence".into(),
-            ));
-        }
-        sequence = Some(current);
-    }
-    if let Some(sequence) = sequence {
-        request.nonce = Some(sequence.to::<u64>());
-    }
-    Ok(())
 }
 
 fn resolve_transaction_with_account<Tx, T, F>(

@@ -27,6 +27,7 @@ use reth_primitives_traits::{
 use reth_rpc_convert::{transaction::RpcConvert, RpcTxReq, TransactionConversionError};
 use reth_rpc_eth_types::{
     block::convert_transaction_receipt,
+    transaction::{frame_signature_padding_gas, has_frame_signatures},
     utils::{binary_search, decode_raw_transaction},
     EthApiError::{self, TransactionConfirmationTimeout},
     EthResult, FillTransaction, SignError, TransactionSource,
@@ -615,12 +616,7 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
                     .into())
                 }
 
-                let has_signatures =
-                    request.as_ref().signatures.as_ref().is_some_and(|signatures| {
-                        signatures.iter().any(|signature| {
-                            u8::from(signature.scheme) != 0 && !signature.signature.is_empty()
-                        })
-                    });
+                let has_signatures = has_frame_signatures(request.as_ref());
                 // Legacy completeness permits missing keys, but defaulting them
                 // here would change a signed frame transaction's payload.
                 if has_signatures && request.as_ref().nonce_keys.is_none() {
@@ -685,27 +681,11 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
                 if needs_budget {
                     let (evm_env, _) = self.evm_env_at(BlockId::pending()).await?;
                     let preview = self.converter().tx_env(request.clone(), &evm_env)?;
-                    let gas_params = &evm_env.version().gas_params;
-                    let missing_signature_bytes = request
-                        .as_ref()
-                        .signatures
-                        .as_deref()
-                        .unwrap_or_default()
-                        .iter()
-                        .filter(|signature| signature.signature.is_empty())
-                        .filter_map(|signature| signature.scheme.signature_length())
-                        .fold(0u64, |sum, length| sum.saturating_add(length as u64));
-                    let signature_byte_cost = gas_params
-                        .get(evm2::version::GasId::TxTokenCost)
-                        .max(gas_params.get(evm2::version::GasId::TxFloorCostPerToken))
-                        .saturating_mul(
-                            gas_params
-                                .get(evm2::version::GasId::TxTokenNonZeroByteMultiplier)
-                                .max(
-                                    gas_params.get(evm2::version::GasId::TxFloorZeroByteMultiplier),
-                                )
-                                .max(1),
-                        );
+                    let signature_gas = frame_signature_padding_gas(
+                        request.as_ref().signatures.as_deref().unwrap_or_default(),
+                        evm_env.version(),
+                    )
+                    .map_err(Self::Error::from_eth_err)?;
                     // Built-in witnesses are filled after this unsigned request is returned.
                     let max_gas = evm2::ethereum::eip8141::FrameGas::calculate(
                         preview.frame_transaction().ok_or_else(|| {
@@ -716,7 +696,8 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
                     .map_err(reth_evm::execute::map_handler_error)
                     .map_err(Self::Error::from_evm_err)?
                     .maximum
-                    .saturating_add(missing_signature_bytes.saturating_mul(signature_byte_cost));
+                    .checked_add(signature_gas)
+                    .ok_or_else(|| EthApiError::InvalidParams("signature gas overflows".into()))?;
                     let header =
                         self.provider().latest_header().map_err(Self::Error::from_eth_err)?;
                     let base_fee = header.and_then(|h| h.base_fee_per_gas()).unwrap_or_default();
