@@ -993,12 +993,11 @@ impl<N: NetworkPrimitives> Future for ActiveSession<N> {
             // Check if we should send a range update based on block height changes
             while interval.poll_tick(cx).is_ready() {
                 let current_latest = this.local_range_info.latest();
-                let should_send = if let Some(last_sent) = this.last_sent_latest_block {
-                    // Only send if block height has advanced by at least one epoch (32 blocks)
+                // The first update is always sent; after that, only send if block height has
+                // advanced by at least one epoch (32 blocks).
+                let should_send = this.last_sent_latest_block.is_none_or(|last_sent| {
                     current_latest.saturating_sub(last_sent) >= EPOCH_SLOTS
-                } else {
-                    true // First update, always send
-                };
+                });
 
                 if should_send {
                     this.queued_outgoing.push_back(
@@ -1325,7 +1324,7 @@ mod tests {
     use super::*;
     use crate::session::{handle::PendingSessionEvent, start_pending_incoming_session};
     use alloy_eips::eip2124::ForkFilter;
-    use alloy_primitives::B256;
+    use alloy_primitives::{B128, B256};
     use futures::task::noop_waker;
     use reth_chainspec::MAINNET;
     use reth_ecies::stream::ECIESStream;
@@ -1347,7 +1346,7 @@ mod tests {
     use reth_network_p2p::error::RequestResult;
     use reth_network_peers::pk2id;
     use reth_network_types::session::config::PROTOCOL_BREACH_REQUEST_TIMEOUT;
-    use secp256k1::{SecretKey, SECP256K1};
+    use secp256k1::SecretKey;
     use tokio::{
         net::{TcpListener, TcpStream},
         sync::mpsc,
@@ -1355,7 +1354,7 @@ mod tests {
 
     /// Returns a testing `HelloMessage` and new secretkey
     fn eth_hello(server_key: &SecretKey) -> HelloMessageWithProtocols {
-        HelloMessageWithProtocols::builder(pk2id(&server_key.public_key(SECP256K1))).build()
+        HelloMessageWithProtocols::builder(pk2id(&server_key.public_key())).build()
     }
 
     struct SessionBuilder<N: NetworkPrimitives = EthNetworkPrimitives> {
@@ -1392,8 +1391,8 @@ mod tests {
             let fork_filter = self.fork_filter.clone();
             let local_peer_id = self.local_peer_id;
             let mut hello = self.hello.clone();
-            let key = SecretKey::new(&mut rand_08::thread_rng());
-            hello.id = pk2id(&key.public_key(SECP256K1));
+            let key = SecretKey::new(&mut rand::rng());
+            hello.id = pk2id(&key.public_key());
             Box::pin(async move {
                 let outgoing = TcpStream::connect(local_addr).await.unwrap();
                 let sink = ECIESStream::connect(outgoing, key, local_peer_id).await.unwrap();
@@ -1501,7 +1500,7 @@ mod tests {
         fn default() -> Self {
             let (active_session_tx, active_session_rx) = mpsc::channel(100);
 
-            let (secret_key, pk) = SECP256K1.generate_keypair(&mut rand_08::thread_rng());
+            let (secret_key, pk) = secp256k1::generate_keypair(&mut rand::rng());
             let local_peer_id = pk2id(&pk);
 
             Self {
@@ -2035,8 +2034,6 @@ mod tests {
 
     #[test]
     fn eth72_coalescing_preserves_cell_masks() {
-        use alloy_primitives::B128;
-
         let masks =
             [None, Some(B128::repeat_byte(0xff)), Some(B128::from(1u128)), Some(B128::from(2u128))];
         for existing_mask in masks {

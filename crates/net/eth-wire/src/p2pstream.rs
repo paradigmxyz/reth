@@ -34,6 +34,14 @@ use serde::{Deserialize, Serialize};
 /// This is defined in [EIP-706](https://eips.ethereum.org/EIPS/eip-706).
 const MAX_PAYLOAD_SIZE: usize = 16 * 1024 * 1024;
 
+/// Maximum size of a decompressed `p2p` disconnect payload: [`DisconnectReason`] decodes at most
+/// two bytes, a reason code optionally wrapped in a one-item list.
+const MAX_DISCONNECT_PAYLOAD_SIZE: usize = 2;
+
+/// Maximum number of bytes of a malformed peer message included in debug logs, so a peer cannot
+/// turn one message into a multi-megabyte log record.
+const MAX_LOGGED_PAYLOAD_SIZE: usize = 64;
+
 /// [`MAX_RESERVED_MESSAGE_ID`] is the maximum message ID reserved for the `p2p` subprotocol. If
 /// there are any incoming messages with an ID greater than this, they are subprotocol messages.
 pub const MAX_RESERVED_MESSAGE_ID: u8 = 0x0f;
@@ -151,7 +159,12 @@ where
                 Err(P2PStreamError::HandshakeError(P2PHandshakeError::Disconnected(reason)))
             }
             Err(err) => {
-                debug!(%err, msg=%hex::encode(&first_message_bytes), "Failed to decode first message from peer");
+                debug!(
+                    %err,
+                    len = first_message_bytes.len(),
+                    msg = %hex::encode(log_prefix(&first_message_bytes)),
+                    "Failed to decode first message from peer"
+                );
                 Err(P2PStreamError::HandshakeError(err.into()))
             }
             Ok(msg) => {
@@ -628,6 +641,15 @@ where
                 })))
             }
 
+            if id == P2PMessageID::Disconnect as u8 &&
+                decompressed_len > MAX_DISCONNECT_PAYLOAD_SIZE
+            {
+                return Poll::Ready(Some(Err(P2PStreamError::MessageTooBig {
+                    message_size: decompressed_len,
+                    max_size: MAX_DISCONNECT_PAYLOAD_SIZE,
+                })))
+            }
+
             let frame_len = decompressed_len + 1;
             if let Some(limit) = this.inbound_protocol_limit(id) &&
                 frame_len > limit.max_frame_bytes
@@ -649,7 +671,8 @@ where
             this.decoder.decompress(&bytes[1..], &mut decompress_buf[1..]).map_err(|err| {
                 debug!(
                     %err,
-                    msg=%hex::encode(&bytes[1..]),
+                    len = bytes.len() - 1,
+                    msg = %hex::encode(log_prefix(&bytes[1..])),
                     "error decompressing p2p message"
                 );
                 err
@@ -713,6 +736,11 @@ where
 
         Poll::Pending
     }
+}
+
+/// Returns the prefix of a peer message that is included in debug logs.
+pub(crate) fn log_prefix(bytes: &[u8]) -> &[u8] {
+    &bytes[..bytes.len().min(MAX_LOGGED_PAYLOAD_SIZE)]
 }
 
 /// Validates a compressed Ping or Pong payload without allocating from its advertised size.
@@ -1150,6 +1178,22 @@ mod tests {
             }
             assert!(stream.outgoing_messages.is_empty());
         }
+    }
+
+    #[tokio::test]
+    async fn rejects_oversized_disconnect_before_decompression() {
+        // A snappy header advertising a 16 MiB payload, with no compressed body behind it.
+        let frame =
+            BytesMut::from([P2PMessageID::Disconnect as u8, 0x80, 0x80, 0x80, 0x08].as_slice());
+        let mut stream = stream_with_incoming(frame);
+
+        assert!(matches!(
+            stream.next().await.unwrap().unwrap_err(),
+            P2PStreamError::MessageTooBig {
+                message_size: MAX_PAYLOAD_SIZE,
+                max_size: MAX_DISCONNECT_PAYLOAD_SIZE,
+            }
+        ));
     }
 
     #[tokio::test]

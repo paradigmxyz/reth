@@ -1979,11 +1979,7 @@ impl TransportRpcModules {
     /// it's the caller responsibility to remove both `subscribe` and `unsubscribe` methods for
     /// subscriptions.
     pub fn remove_http_method(&mut self, method_name: &'static str) -> bool {
-        if let Some(http_module) = &mut self.http {
-            http_module.remove_method(method_name).is_some()
-        } else {
-            false
-        }
+        self.http.as_mut().is_some_and(|module| module.remove_method(method_name).is_some())
     }
 
     /// Removes the given methods from the configured http methods.
@@ -2001,11 +1997,7 @@ impl TransportRpcModules {
     /// it's the caller responsibility to remove both `subscribe` and `unsubscribe` methods for
     /// subscriptions.
     pub fn remove_ws_method(&mut self, method_name: &'static str) -> bool {
-        if let Some(ws_module) = &mut self.ws {
-            ws_module.remove_method(method_name).is_some()
-        } else {
-            false
-        }
+        self.ws.as_mut().is_some_and(|module| module.remove_method(method_name).is_some())
     }
 
     /// Removes the given methods from the configured ws methods.
@@ -2023,11 +2015,7 @@ impl TransportRpcModules {
     /// it's the caller responsibility to remove both `subscribe` and `unsubscribe` methods for
     /// subscriptions.
     pub fn remove_ipc_method(&mut self, method_name: &'static str) -> bool {
-        if let Some(ipc_module) = &mut self.ipc {
-            ipc_module.remove_method(method_name).is_some()
-        } else {
-            false
-        }
+        self.ipc.as_mut().is_some_and(|module| module.remove_method(method_name).is_some())
     }
 
     /// Removes the given methods from the configured ipc methods.
