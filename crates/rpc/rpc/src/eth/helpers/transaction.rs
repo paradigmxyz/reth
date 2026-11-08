@@ -1118,7 +1118,11 @@ mod tests {
         .await
         .unwrap();
         assert!(!result.valid);
-        assert_eq!(result.violation.as_deref(), Some("EIP-8141 VERIFY frame failed"));
+        // The factory frame reverts on the CREATE collision before VERIFY runs.
+        assert_eq!(
+            result.violation.as_deref(),
+            Some("EIP-8141 validation prefix contains an unsuccessful frame")
+        );
     }
 
     #[tokio::test]

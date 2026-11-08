@@ -1401,7 +1401,7 @@ mod tests {
             cap: 21_000,
         })
         .into_rpc_err();
-        assert_eq!(error.code(), EthRpcErrorCode::TransactionRejected.code());
-        assert_eq!(error.message(), "intrinsic gas exceeds cap: required 21001, cap 21000");
+        assert_eq!(error.code(), EthRpcErrorCode::InvalidInput.code());
+        assert_eq!(error.message(), "intrinsic gas too high");
     }
 }

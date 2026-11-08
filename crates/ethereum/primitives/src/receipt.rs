@@ -1108,7 +1108,7 @@ mod tests {
         );
         assert_eq!(receipt.encoded_2718(), consensus);
         assert_eq!(receipt.encode_2718_len(), consensus.len());
-        let with_bloom = receipt.clone().into_with_bloom();
+        let with_bloom = receipt.into_with_bloom();
         assert_eq!(alloy_rlp::encode(&with_bloom), eth68);
         assert_eq!(with_bloom.length(), eth68.len());
         assert_eq!(
