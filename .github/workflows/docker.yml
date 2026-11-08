@@ -112,6 +112,8 @@ jobs:
               echo "ethereum.args.RETH_ENGINE_TXPOOL_PREWARMING=true"
               echo "*.args.RETH_ENGINE_PREWARM_REUSE=true"
               echo "*.args.RETH_DB_SYNC_MODE=safe-no-sync"
+              # Nightly rustc enables evm2's tail-call interpreter dispatch.
+              echo "*.args.RUST_TOOLCHAIN=nightly-2026-11-07"
               echo "EOF"
             } >> "$GITHUB_OUTPUT"
 

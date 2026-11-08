@@ -20,6 +20,14 @@ ENV RUSTC_WRAPPER=sccache
 ENV SCCACHE_DIR=/sccache
 ENV SCCACHE_WEBDAV_ENDPOINT=https://cache.depot.dev
 
+# Toolchain to build with instead of the image's stable Rust, for example a pinned nightly. evm2
+# only uses its faster tail-call interpreter dispatch when built with a nightly compiler.
+ARG RUST_TOOLCHAIN=""
+RUN if [ -n "$RUST_TOOLCHAIN" ]; then \
+        rustup toolchain install "$RUST_TOOLCHAIN" --profile minimal && \
+        rustup default "$RUST_TOOLCHAIN"; \
+    fi
+
 # Binary to build
 ARG BINARY=reth
 
