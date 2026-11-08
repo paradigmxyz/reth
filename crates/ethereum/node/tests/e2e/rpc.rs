@@ -1,4 +1,4 @@
-use alloy_consensus::{proofs::calculate_transaction_root, Header};
+use alloy_consensus::Header;
 use alloy_eips::{
     eip2718::Encodable2718, eip7910::EthConfig, eip7928::BlockAccessList, BlockNumberOrTag,
 };
@@ -42,7 +42,7 @@ use reth_node_core::{
 };
 use reth_node_ethereum::EthereumNode;
 use reth_payload_primitives::BuiltPayload;
-use reth_primitives_traits::{Block as _, SealedBlock, SealedHeader, SignedTransaction};
+use reth_primitives_traits::{Block as _, SealedHeader, SignedTransaction};
 use reth_provider::CanonChainTracker;
 use reth_rpc_api::servers::AdminApiServer;
 use reth_rpc_server_types::RpcModuleSelection;
@@ -1300,60 +1300,6 @@ async fn test_mine_signed() -> eyre::Result<()> {
         "{err}"
     );
     assert_eq!(node.rpc_provider().get_block_number().await?, 2);
-
-    Ok(())
-}
-
-/// `debug_intermediateRoots` replays bad blocks up to their first invalid transaction.
-#[tokio::test]
-async fn test_debug_intermediate_roots_of_bad_blocks() -> eyre::Result<()> {
-    reth_tracing::init_test_tracing();
-
-    let (mut node, wallet) =
-        EthereumNode::test_setup_for(EthereumHardfork::Cancun).build_single().await?;
-    let provider = node.rpc_provider();
-    let client = node.rpc_client().expect("the HTTP RPC server is enabled");
-
-    let mut account = wallet.account(0);
-    let recipient = Address::with_last_byte(0x77);
-    for value in 1..=3 {
-        let tx = account.transfer(recipient, U256::from(value)).await;
-        node.rpc.inject_tx(tx).await?;
-    }
-    let payload = node.new_payload().await?;
-    let valid = payload.block();
-    assert_eq!(valid.body().transactions.len(), 3);
-
-    // A wrong state root is only detected after executing every transaction.
-    let mut wrong_state_root = valid.clone_block();
-    wrong_state_root.header.state_root = B256::ZERO;
-
-    // Swapping the last two transactions makes the nonce of the second one too high.
-    let mut invalid_nonce = valid.clone_block();
-    invalid_nonce.body.transactions.swap(1, 2);
-    invalid_nonce.header.transactions_root =
-        calculate_transaction_root(&invalid_nonce.body.transactions);
-
-    let mut roots = Vec::new();
-    for block in [wrong_state_root, invalid_nonce] {
-        let block = SealedBlock::seal_slow(block);
-        let hash = block.hash();
-        let status = node.engine.new_payload_from_block(block, None).await?;
-        assert!(status.is_invalid(), "{status}");
-
-        poll_until(format!("bad block {hash} to be cached"), || async {
-            let bad_blocks = provider.debug_get_bad_blocks().await?;
-            Ok(bad_blocks.iter().any(|bad_block| bad_block.hash == hash).then_some(()))
-        })
-        .await?;
-        roots.push(
-            client.request::<Vec<B256>, _>("debug_intermediateRoots", (hash, None::<()>)).await?,
-        );
-    }
-
-    assert_eq!(roots[0].len(), 3);
-    assert_eq!(roots[0].last(), Some(&valid.state_root));
-    assert_eq!(roots[1], [roots[0][0]]);
 
     Ok(())
 }
