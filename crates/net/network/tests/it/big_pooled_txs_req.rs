@@ -1,3 +1,4 @@
+use alloy_consensus::transaction::TxHashRef;
 use alloy_primitives::{Signature, B256};
 use reth_eth_wire::{GetPooledTransactions, PooledTransactions};
 use reth_ethereum_primitives::TransactionSigned;
@@ -56,6 +57,6 @@ async fn test_large_tx_req() {
 
     // check all txs have been received
     for tx in txs {
-        assert!(txs_hashes.contains(tx.hash()));
+        assert!(txs_hashes.contains(tx.tx_hash()));
     }
 }
