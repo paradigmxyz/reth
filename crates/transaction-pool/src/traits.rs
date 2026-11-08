@@ -1356,7 +1356,7 @@ pub trait PoolTransaction:
     type TryFromConsensusError: fmt::Display;
 
     /// Associated type representing the raw consensus variant of the transaction.
-    type Consensus: SignedTransaction + From<Self::Pooled>;
+    type Consensus: SignedTransaction;
 
     /// Associated type representing the recovered pooled variant of the transaction.
     type Pooled: TryFrom<Self::Consensus, Error = Self::TryFromConsensusError> + SignedTransaction;
@@ -1506,10 +1506,9 @@ pub trait PoolTransaction:
         self.clone_into_consensus().try_convert()
     }
 
-    /// Converts the `Pooled` type into the `Consensus` type.
-    fn pooled_into_consensus(tx: Self::Pooled) -> Self::Consensus {
-        tx.into()
-    }
+    /// Converts pooled network data into consensus data, discarding sidecars and retaining its
+    /// hash.
+    fn pooled_into_consensus(tx: Self::Pooled) -> Self::Consensus;
 
     /// Hash of the transaction.
     fn hash(&self) -> &TxHash;
@@ -1793,61 +1792,19 @@ impl PoolTransaction for EthPooledTransaction {
     fn from_pooled(tx: Recovered<Self::Pooled>) -> Self {
         let encoded_length = tx.encode_2718_len();
         let (tx, signer) = tx.into_parts();
-        match tx {
-            PooledTransactionVariant::Eip4844(tx) => {
-                // include the blob sidecar
-                let (tx, sig, hash) = tx.into_parts();
-                let (tx, blob) = tx.into_parts();
-                let tx = Signed::new_unchecked(tx, sig, hash);
-                let tx = TransactionSigned::from(tx);
-                let tx = Recovered::new_unchecked(tx, signer);
-                let mut pooled = Self::new(tx, encoded_length);
-                if let Some(availability) = pooled.blob_cell_availability.clone() {
-                    pooled.blob_sidecar = EthBlobTransactionSidecar::Present(
-                        PooledBlobSidecar::new(blob, availability),
-                    );
-                }
-                pooled
-            }
-            PooledTransactionVariant::Eip8141(tx) => {
-                let (tx, hash) = tx.into_parts();
-                let (tx, blob) = match tx.into_inner() {
-                    TxEip8141Variant::TxEip8141(tx) => (tx, None),
-                    TxEip8141Variant::TxEip8141WithSidecar(tx) => {
-                        let (tx, sidecar) = tx.into_parts();
-                        (tx, Some(sidecar))
-                    }
-                };
-                let tx =
-                    TransactionSigned::Eip8141(alloy_primitives::Sealed::new_unchecked(tx, hash));
-                let tx = Recovered::new_unchecked(tx, signer);
-                let mut pooled = Self::new(tx, encoded_length);
-                if let (Some(blob), Some(availability)) =
-                    (blob, pooled.blob_cell_availability.clone())
-                {
-                    pooled.blob_sidecar = EthBlobTransactionSidecar::Present(
-                        PooledBlobSidecar::new(blob.into(), availability),
-                    );
-                }
-                pooled
-            }
-            PooledTransactionVariant::Legacy(tx) => Self::new(
-                Recovered::new_unchecked(TransactionSigned::Legacy(tx), signer),
-                encoded_length,
-            ),
-            PooledTransactionVariant::Eip2930(tx) => Self::new(
-                Recovered::new_unchecked(TransactionSigned::Eip2930(tx), signer),
-                encoded_length,
-            ),
-            PooledTransactionVariant::Eip1559(tx) => Self::new(
-                Recovered::new_unchecked(TransactionSigned::Eip1559(tx), signer),
-                encoded_length,
-            ),
-            PooledTransactionVariant::Eip7702(tx) => Self::new(
-                Recovered::new_unchecked(TransactionSigned::Eip7702(tx), signer),
-                encoded_length,
-            ),
+        let (tx, sidecar) = split_pooled_transaction(tx);
+        let mut pooled = Self::new(Recovered::new_unchecked(tx, signer), encoded_length);
+        if let (Some(sidecar), Some(availability)) =
+            (sidecar, pooled.blob_cell_availability.clone())
+        {
+            pooled.blob_sidecar =
+                EthBlobTransactionSidecar::Present(PooledBlobSidecar::new(sidecar, availability));
         }
+        pooled
+    }
+
+    fn pooled_into_consensus(tx: Self::Pooled) -> Self::Consensus {
+        split_pooled_transaction(tx).0
     }
 
     /// Returns hash of the transaction.
@@ -2297,16 +2254,48 @@ impl<Tx: PoolTransaction> Stream for NewSubpoolTransactionStream<Tx> {
     }
 }
 
+/// Separates canonical transaction data from its network sidecar without changing its hash.
+fn split_pooled_transaction(
+    tx: PooledTransactionVariant,
+) -> (TransactionSigned, Option<BlobTransactionSidecarVariant>) {
+    match tx {
+        PooledTransactionVariant::Legacy(tx) => (tx.into(), None),
+        PooledTransactionVariant::Eip2930(tx) => (tx.into(), None),
+        PooledTransactionVariant::Eip1559(tx) => (tx.into(), None),
+        PooledTransactionVariant::Eip7702(tx) => (tx.into(), None),
+        PooledTransactionVariant::Eip4844(tx) => {
+            let (tx, signature, hash) = tx.into_parts();
+            let (tx, sidecar) = tx.into_parts();
+            (Signed::new_unchecked(tx, signature, hash).into(), Some(sidecar))
+        }
+        PooledTransactionVariant::Eip8141(tx) => {
+            let (tx, hash) = tx.into_parts();
+            let (tx, sidecar) = match tx.into_inner() {
+                TxEip8141Variant::TxEip8141(tx) => (tx, None),
+                TxEip8141Variant::TxEip8141WithSidecar(tx) => {
+                    let (tx, sidecar) = tx.into_parts();
+                    (tx, Some(sidecar.into()))
+                }
+            };
+            (TransactionSigned::Eip8141(alloy_primitives::Sealed::new_unchecked(tx, hash)), sidecar)
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::blobstore::BlobCellAvailability;
     use alloy_consensus::{
         EthereumTxEnvelope, SignableTransaction, TxEip1559, TxEip2930, TxEip4844, TxEip7702,
-        TxEnvelope, TxLegacy,
+        TxEip8141, TxEnvelope, TxLegacy,
     };
-    use alloy_eips::eip4844::DATA_GAS_PER_BLOB;
-    use alloy_primitives::Signature;
+    use alloy_eips::{
+        eip4844::{Blob, Bytes48, DATA_GAS_PER_BLOB},
+        eip7594::{BlobTransactionSidecarEip7594, CELLS_PER_EXT_BLOB},
+        eip8141::{Frame, FrameLimits, FrameMode},
+    };
+    use alloy_primitives::{Sealable, Signature};
 
     #[test]
     fn test_pool_size_invariants() {
@@ -2458,7 +2447,13 @@ mod tests {
             assert_eq!(signer, transaction.signer());
             assert_eq!(envelope.tx_hash(), transaction.tx_hash());
             assert_eq!(envelope.as_eip4844().unwrap().tx().sidecar(), &sidecar);
-            assert_eq!(TransactionSigned::from(envelope), *transaction.inner());
+            let pooled = EthPooledTransaction::from_pooled(Recovered::new_unchecked(
+                envelope.clone(),
+                signer,
+            ));
+            assert_eq!(pooled.blob_sidecar.maybe_sidecar(), Some(&sidecar));
+            assert_eq!(pooled.into_consensus(), transaction);
+            assert_eq!(EthPooledTransaction::pooled_into_consensus(envelope), *transaction.inner());
         }
     }
 
@@ -2507,5 +2502,57 @@ mod tests {
         // Test with size exceeding the limit
         // 3MB is above the 2MB limit, should return true
         assert!(size_limit_2mb.exceeds(3 * 1024 * 1024));
+    }
+
+    #[test]
+    fn pooled_consensus_conversion_preserves_transactions_and_sidecars() {
+        let sender = Address::repeat_byte(0x41);
+        let frame = TxEip8141 {
+            sender,
+            nonce: 7,
+            nonce_keys: Some(vec![U256::ONE]),
+            frames: vec![Frame {
+                mode: FrameMode::Verify,
+                flags: 3,
+                limits: FrameLimits { execution: 20_000, state: 0 },
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        for tx in [
+            TransactionSigned::Legacy(TxLegacy::default().into_signed(Signature::test_signature())),
+            TransactionSigned::Eip2930(
+                TxEip2930::default().into_signed(Signature::test_signature()),
+            ),
+            TransactionSigned::Eip1559(
+                TxEip1559::default().into_signed(Signature::test_signature()),
+            ),
+            TransactionSigned::Eip7702(
+                TxEip7702::default().into_signed(Signature::test_signature()),
+            ),
+            TransactionSigned::Eip8141(frame.clone().seal_slow()),
+        ] {
+            let pooled = PooledTransactionVariant::try_from(tx.clone()).unwrap();
+            assert_eq!(EthPooledTransaction::pooled_into_consensus(pooled.clone()), tx);
+            let pooled =
+                EthPooledTransaction::from_pooled(Recovered::new_unchecked(pooled, sender));
+            assert_eq!(pooled.into_consensus(), Recovered::new_unchecked(tx, sender));
+        }
+
+        let sidecar = BlobTransactionSidecarEip7594::new(
+            vec![Blob::default()],
+            vec![Bytes48::default()],
+            vec![Bytes48::default(); CELLS_PER_EXT_BLOB],
+        );
+        let tx = TxEip8141 { blob_versioned_hashes: sidecar.versioned_hashes().collect(), ..frame };
+        let consensus = TransactionSigned::Eip8141(tx.clone().seal_slow());
+        let pooled = PooledTransactionVariant::from(TxEip8141WithSidecar::new(tx, sidecar.clone()));
+        assert_eq!(EthPooledTransaction::pooled_into_consensus(pooled.clone()), consensus);
+        let pooled = EthPooledTransaction::from_pooled(Recovered::new_unchecked(pooled, sender));
+        assert_eq!(
+            pooled.blob_sidecar.maybe_sidecar(),
+            Some(&BlobTransactionSidecarVariant::Eip7594(sidecar)),
+        );
+        assert_eq!(pooled.into_consensus(), Recovered::new_unchecked(consensus, sender));
     }
 }

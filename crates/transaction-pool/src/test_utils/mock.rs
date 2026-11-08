@@ -731,6 +731,10 @@ impl PoolTransaction for MockTransaction {
         pooled.into()
     }
 
+    fn pooled_into_consensus(tx: Self::Pooled) -> Self::Consensus {
+        crate::EthPooledTransaction::pooled_into_consensus(tx)
+    }
+
     fn recover_raw_transaction(data: &[u8]) -> Result<Self, RawPoolTransactionError> {
         let mut transaction = Self::try_recover(Self::decode_raw_transaction(data)?)
             .map_err(|_| RawPoolTransactionError::InvalidTransactionSignature)?;
@@ -1224,7 +1228,7 @@ impl TryFrom<Recovered<TxEnvelope>> for MockTransaction {
 
 impl From<Recovered<PooledTransactionVariant>> for MockTransaction {
     fn from(tx: Recovered<PooledTransactionVariant>) -> Self {
-        crate::EthPooledTransaction::from_pooled(tx).into_consensus().try_into().expect(
+        tx.map(Self::pooled_into_consensus).try_into().expect(
             "Failed to convert from PooledTransactionsElementEcRecovered to MockTransaction",
         )
     }
