@@ -113,6 +113,7 @@ tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 
 [features]
 arbitrary = [
+    "secp256k1/arbitrary",
     "dep:proptest",
     "dep:arbitrary",
     "dep:proptest-arbitrary-interop",

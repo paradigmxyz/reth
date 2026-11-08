@@ -22,8 +22,9 @@ use reth_chainspec::{ChainSpecProvider, EthereumHardforks};
 use reth_engine_primitives::ConsensusEngineEvent;
 use reth_errors::RethError;
 use reth_evm::{
-    execute::Executor, witness::ExecutionWitnessRecord, ConfigureEvm, DynDatabase, Evm, EvmEnv,
-    EvmEnvFor,
+    execute::{BlockExecutor, BlockTransactionResult, Executor},
+    witness::ExecutionWitnessRecord,
+    ConfigureEvm, DynDatabase, Evm, EvmEnv, EvmEnvFor,
 };
 use reth_primitives_traits::{
     Block as BlockTrait, BlockBody, BlockTy, ReceiptWithBloom, RecoveredBlock,
@@ -53,7 +54,9 @@ use tokio::sync::{AcquireError, OwnedSemaphorePermit};
 use tokio_stream::StreamExt;
 
 #[cfg(feature = "js-tracer")]
-use alloy_rpc_types_trace::geth::GethDebugTracerType;
+use alloy_rpc_types_trace::geth::{
+    GethDebugBuiltInTracerType, GethDebugTracerConfig, GethDebugTracerType,
+};
 #[cfg(feature = "js-tracer")]
 use evm2_inspectors::tracing::js::JsInspectorInterrupt;
 #[cfg(feature = "js-tracer")]
@@ -121,7 +124,8 @@ where
         self.inner.blocking_task_guard.clone().acquire_owned().await
     }
 
-    /// Trace the entire block asynchronously
+    /// Traces every transaction of a block through the block executor, see
+    /// [`Call::block_executor`](reth_rpc_eth_api::helpers::Call::block_executor).
     async fn trace_block(
         &self,
         block: Arc<RecoveredBlock<ProviderBlock<Eth::Provider>>>,
@@ -138,37 +142,38 @@ where
 
                 let mut transactions = block.transactions_recovered().enumerate().peekable();
                 let mut inspector = DebugInspector::new(opts).map_err(Eth::Error::from_eth_err)?;
-                let mut evm = eth_api.evm_config().evm_with_env(&mut db, evm_env);
+                let mut executor = eth_api.block_executor(&block, &mut db, evm_env)?;
                 while let Some((index, tx)) = transactions.next() {
                     if is_cancelled() {
                         return Err(EthApiError::InternalEthError.into())
                     }
+                    let tx_hash = *tx.tx_hash();
                     let tx_env = eth_api.evm_config().tx_env(tx.cloned());
 
-                    let (next_inspector, res) = evm
-                        .transact_with_inspector(&tx_env, inspector)
+                    let (next_inspector, output) = executor
+                        .inspect_transaction_without_commit(tx, inspector)
                         .map_err(Eth::Error::from_evm_err)?;
                     inspector = next_inspector;
                     let result = inspector
                         .get_result(
                             Some(TransactionContext {
                                 block_hash: Some(block.hash()),
-                                tx_hash: Some(*tx.tx_hash()),
+                                tx_hash: Some(tx_hash),
                                 tx_index: Some(index),
                             }),
                             &tx_env,
                             &block_env,
-                            &res,
-                            evm.state_db_mut(),
+                            output.result(),
+                            executor.evm_mut().state_db_mut(),
                         )
                         .map_err(Eth::Error::from_eth_err)?;
 
-                    results.push(TraceResult::Success { result, tx_hash: Some(*tx.tx_hash()) });
+                    results.push(TraceResult::Success { result, tx_hash: Some(tx_hash) });
                     if transactions.peek().is_some() {
                         inspector.fuse().map_err(Eth::Error::from_eth_err)?;
                         // need to apply the state changes of this transaction before executing the
                         // next transaction
-                        evm.commit_state(&res.pending_state)
+                        executor.commit_transaction(output).map_err(Eth::Error::from_evm_err)?;
                     }
                 }
 
@@ -208,15 +213,15 @@ where
                         return Ok(results)
                     }
                 };
-                let mut evm = eth_api.evm_config().evm_with_env(&mut db, evm_env);
+                let mut executor = eth_api.block_executor(&block, &mut db, evm_env)?;
 
                 while let Some((index, tx)) = transactions.next() {
                     let tx_hash = *tx.tx_hash();
                     let tx_env = eth_api.evm_config().tx_env(tx.cloned());
-                    let res = match evm.transact_with_inspector(&tx_env, inspector) {
-                        Ok((next_inspector, res)) => {
+                    let output = match executor.inspect_transaction_without_commit(tx, inspector) {
+                        Ok((next_inspector, output)) => {
                             inspector = next_inspector;
-                            res
+                            output
                         }
                         Err(err) => {
                             results.push(Some(TraceResult::Error {
@@ -235,8 +240,8 @@ where
                         }),
                         &tx_env,
                         &block_env,
-                        &res,
-                        evm.state_db_mut(),
+                        output.result(),
+                        executor.evm_mut().state_db_mut(),
                     ) {
                         Ok(result) => result,
                         Err(err) => {
@@ -257,7 +262,13 @@ where
                             }));
                             break
                         }
-                        evm.commit_state(&res.pending_state);
+                        if let Err(err) = executor.commit_transaction(output) {
+                            results.push(Some(TraceResult::Error {
+                                error: err.to_string(),
+                                tx_hash: Some(*next_tx.tx_hash()),
+                            }));
+                            break
+                        }
                     }
                 }
 
@@ -357,7 +368,6 @@ where
                     &mut db,
                     inspector,
                     index,
-                    &tx_env,
                     bal.as_deref(),
                 )?;
                 let trace = inspector
@@ -824,20 +834,35 @@ where
 
         self.eth_api()
             .spawn_with_state_at_block(block.parent_hash(), move |eth_api, mut db| {
-                let mut roots = Vec::with_capacity(block.body().transactions().len());
+                let tx_count = block.body().transactions().len();
                 let mut state = eth_api.apply_pre_execution_changes(&block, &mut db)?;
+
+                // the executor borrows the database, so collect each transaction's changes first
+                // and compute the roots once it is dropped
+                let mut transaction_states = Vec::with_capacity(tx_count);
+                let mut executor = eth_api.block_executor(&block, &mut db, evm_env)?;
                 for tx in block.transactions_recovered() {
                     if is_cancelled() {
                         return Err(EthApiError::InternalEthError.into())
                     }
-                    let tx_env = eth_api.evm_config().tx_env(tx.cloned());
-                    let result = eth_api.transact(&mut db, evm_env.clone(), tx_env)?;
+                    let output = executor
+                        .execute_transaction_without_commit(tx)
+                        .map_err(Eth::Error::from_evm_err)?;
                     let mut changes = reth_execution_types::TransactionChanges::default();
-                    let Ok(()) = result.pending_state.visit(&mut changes);
+                    let Ok(()) = output.result().pending_state.visit(&mut changes);
                     let mut transaction_state = reth_execution_types::BlockState::default();
                     transaction_state.commit(&changes);
-                    state.extend(transaction_state.into_bundle());
-                    db.commit_source(&result.pending_state);
+                    transaction_states.push(transaction_state.into_bundle());
+                    executor.commit_transaction(output).map_err(Eth::Error::from_evm_err)?;
+                }
+                drop(executor);
+
+                let mut roots = Vec::with_capacity(tx_count);
+                for transaction_state in transaction_states {
+                    if is_cancelled() {
+                        return Err(EthApiError::InternalEthError.into())
+                    }
+                    state.extend(transaction_state);
                     let hashed_state = db
                         .db
                         .inner()
@@ -1513,6 +1538,22 @@ impl<B: BlockTrait> Default for BadBlockStore<B> {
 #[cfg(feature = "js-tracer")]
 const DEFAULT_JS_TRACER_TIMEOUT: Duration = Duration::from_secs(5);
 
+/// Returns whether `tracer` is a JS tracer or a mux tracer that holds one, at any depth.
+#[cfg(feature = "js-tracer")]
+fn runs_js_tracer(tracer: &GethDebugTracerType, config: &GethDebugTracerConfig) -> bool {
+    match tracer {
+        GethDebugTracerType::JsTracer(_) => true,
+        GethDebugTracerType::BuiltInTracer(GethDebugBuiltInTracerType::MuxTracer) => {
+            config.clone().into_mux_config().is_ok_and(|mux| {
+                mux.0.iter().any(|(tracer, config)| {
+                    runs_js_tracer(tracer, &config.clone().unwrap_or_default())
+                })
+            })
+        }
+        GethDebugTracerType::BuiltInTracer(_) => false,
+    }
+}
+
 /// Interrupts a JS tracer once its request is dropped or its timeout expires.
 ///
 /// Built-in tracers can't be interrupted, so for them this does nothing.
@@ -1530,7 +1571,9 @@ impl JsTraceInterrupt {
     )]
     fn new(opts: &GethDebugTracingOptions) -> Result<Self, EthApiError> {
         #[cfg(feature = "js-tracer")]
-        if let Some(GethDebugTracerType::JsTracer(_)) = &opts.tracer {
+        if let Some(tracer) = &opts.tracer &&
+            runs_js_tracer(tracer, &opts.tracer_config)
+        {
             let timeout = match &opts.timeout {
                 Some(timeout) => humantime::parse_duration(timeout).map_err(|err| {
                     EthApiError::InvalidParams(format!("invalid tracer timeout {timeout:?}: {err}"))
@@ -1542,20 +1585,15 @@ impl JsTraceInterrupt {
         Ok(Self::default())
     }
 
-    /// Lets this interrupt stop `inspector` if it's a JS tracer.
+    /// Lets this interrupt stop the JS tracers of `inspector`, including those in a mux tracer.
     #[cfg_attr(
         not(feature = "js-tracer"),
         expect(clippy::missing_const_for_fn, reason = "only JS tracers can be interrupted")
     )]
-    fn attach(&self, inspector: DebugInspector) -> DebugInspector {
+    fn attach(&self, mut inspector: DebugInspector) -> DebugInspector {
         #[cfg(feature = "js-tracer")]
         if let Some((interrupt, _)) = &self.js {
-            return match inspector {
-                DebugInspector::Js(js) => {
-                    DebugInspector::Js(Box::new(js.with_interrupt(interrupt.clone())))
-                }
-                inspector => inspector,
-            }
+            inspector.set_js_interrupt(interrupt);
         }
         inspector
     }
@@ -1683,6 +1721,28 @@ mod tests {
         );
         let err = Evm::transact_with_inspector(&mut evm, &tx, inspector).unwrap_err();
         assert_eq!(err.to_string(), "fatal error: JavaScript tracing interrupted");
+    }
+
+    #[cfg(feature = "js-tracer")]
+    #[test]
+    fn js_trace_interrupt_covers_mux_tracers_with_js_children() {
+        let mux = |config: serde_json::Value| GethDebugTracingOptions {
+            tracer: Some(GethDebugTracerType::BuiltInTracer(GethDebugBuiltInTracerType::MuxTracer)),
+            tracer_config: serde_json::from_value(config).unwrap(),
+            ..Default::default()
+        };
+        let js = "{ fault: function() {}, result: function() { return null; } }";
+        let nested = mux(serde_json::json!({ "muxTracer": { (js): {} } }));
+        let nested = serde_json::json!({ "muxTracer": nested.tracer_config });
+        for (config, interrupted) in [
+            (serde_json::json!({ (js): {} }), true),
+            (nested, true),
+            (serde_json::json!({ "callTracer": {} }), false),
+        ] {
+            let opts = mux(config);
+            let interrupt = JsTraceInterrupt::new(&opts).unwrap();
+            assert_eq!(interrupt.js.is_some(), interrupted);
+        }
     }
 
     #[cfg(feature = "js-tracer")]

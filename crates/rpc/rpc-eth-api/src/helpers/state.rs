@@ -86,7 +86,7 @@ pub trait EthState: LoadState + SpawnBlocking {
                     let (env, at) = this.evm_env_at(at).await?;
                     (env, this.state_at_block_id(at).await?)
                 };
-                if !env.version().feature(evm2::EvmFeatures::EIP8250) {
+                if !Into::<evm2::SpecId>::into(env.spec_id()).enables(evm2::SpecId::BOGOTA) {
                     return Err(EthApiError::KeyedNoncesNotActive.into());
                 }
                 let mut sequence = None;

@@ -254,6 +254,15 @@ add_wrapper_struct!((ClientVersion, CompactClientVersion));
 
 #[cfg(test)]
 mod tests {
+    use reth_codecs::{test_utils::UnusedBits, validate_bitflag_backwards_compat};
+    use reth_primitives_traits::Account;
+    use reth_prune_types::{PruneCheckpoint, PruneMode};
+    use reth_stages_types::{
+        AccountHashingCheckpoint, CheckpointBlockRange, EntitiesCheckpoint, ExecutionCheckpoint,
+        HeadersCheckpoint, IndexHistoryCheckpoint, StageCheckpoint, StageUnitCheckpoint,
+        StorageHashingCheckpoint,
+    };
+
     // each value in the database has an extra field named flags that encodes metadata about other
     // fields in the value, e.g. offset and length.
     //
@@ -262,14 +271,6 @@ mod tests {
     #[test]
     fn test_ensure_backwards_compatibility() {
         use super::*;
-        use reth_codecs::{test_utils::UnusedBits, validate_bitflag_backwards_compat};
-        use reth_primitives_traits::Account;
-        use reth_prune_types::{PruneCheckpoint, PruneMode, PruneSegment};
-        use reth_stages_types::{
-            AccountHashingCheckpoint, CheckpointBlockRange, EntitiesCheckpoint,
-            ExecutionCheckpoint, HeadersCheckpoint, IndexHistoryCheckpoint, StageCheckpoint,
-            StageUnitCheckpoint, StorageHashingCheckpoint,
-        };
         assert_eq!(Account::bitflag_encoded_bytes(), 2);
         assert_eq!(AccountHashingCheckpoint::bitflag_encoded_bytes(), 1);
         assert_eq!(CheckpointBlockRange::bitflag_encoded_bytes(), 1);

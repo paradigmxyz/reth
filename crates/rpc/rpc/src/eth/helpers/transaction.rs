@@ -920,7 +920,7 @@ mod tests {
             EthApiError::InvalidTransaction(
                 reth_rpc_eth_types::RpcInvalidTransactionError::FrameTransaction(
                     evm2::registry::HandlerError::InvalidFrameTransaction(
-                        "EIP-8141 VERIFY frame failed"
+                        evm2::registry::FrameTransactionError::VerifyFrameFailed
                     )
                 )
             )

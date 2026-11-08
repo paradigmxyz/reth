@@ -558,8 +558,8 @@ pub(super) mod serde_bincode_compat {
     use alloy_rlp::Decodable;
     use core::marker::PhantomData;
     use reth_ethereum_primitives::EthPrimitives;
-    use reth_primitives_traits::{NodePrimitives, SealedBlock};
-    use reth_trie_common::SortedTrieData;
+    use reth_primitives_traits::{NodePrimitives, RecoveredBlock, SealedBlock};
+    use reth_trie_common::{LazyTrieData, SortedTrieData};
     use serde::{Deserialize, Deserializer, Serialize, Serializer};
     use serde_with::{DeserializeAs, SerializeAs};
 
@@ -642,9 +642,6 @@ pub(super) mod serde_bincode_compat {
         N: NodePrimitives,
     {
         fn from(value: Chain<'a, N>) -> Self {
-            use reth_primitives_traits::RecoveredBlock;
-            use reth_trie_common::LazyTrieData;
-
             let hashed_state_map: BTreeMap<_, _> =
                 value.hashed_state.into_iter().map(|(k, v)| (k, Arc::new(v.into()))).collect();
 
@@ -706,6 +703,7 @@ pub(super) mod serde_bincode_compat {
     #[cfg(test)]
     mod tests {
         use super::super::{serde_bincode_compat, Chain};
+        use alloc::collections::BTreeMap;
         use arbitrary::Arbitrary;
         use rand::Rng;
         use reth_primitives_traits::RecoveredBlock;
@@ -714,8 +712,6 @@ pub(super) mod serde_bincode_compat {
 
         #[test]
         fn test_chain_bincode_roundtrip() {
-            use alloc::collections::BTreeMap;
-
             #[serde_as]
             #[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
             struct Data {

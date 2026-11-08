@@ -130,9 +130,9 @@ impl InsertBlockErrorKind {
             Self::Provider(err) => {
                 Err(InsertBlockProcessingError::Fatal(InsertBlockFatalError::Provider(err)))
             }
-            Self::Other(err) => Err(InsertBlockProcessingError::Fatal(
-                InternalBlockExecutionError::Other(err).into(),
-            )),
+            Self::Other(err) => {
+                Err(InsertBlockProcessingError::Fatal(InternalBlockExecutionError::msg(err).into()))
+            }
         }
     }
 }

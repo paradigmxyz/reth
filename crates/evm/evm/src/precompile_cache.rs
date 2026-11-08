@@ -8,8 +8,7 @@ use evm2::{
     evm::precompile::{PrecompileOutput, PrecompileProvider},
     interpreter::{GasTracker, Message},
     precompiles::PrecompileId,
-    version::EvmFeatures,
-    Evm, EvmTypesHost, PrecompileError,
+    Evm, EvmTypesHost, PrecompileError, SpecId,
 };
 use moka::policy::EvictionPolicy;
 #[cfg(feature = "metrics")]
@@ -217,7 +216,7 @@ where
     ) -> Option<Result<PrecompileOutput, PrecompileError>> {
         let address = message.call_target;
         if !self.policy.allows(&address) ||
-            (evm.version().feature(EvmFeatures::EIP8151) &&
+            (evm.spec_id().enables(SpecId::BOGOTA) &&
                 self.inner
                     .as_map()
                     .get_data(&address)
@@ -486,7 +485,7 @@ mod tests {
             destination,
             code_address: destination,
             call_target: destination,
-            input: input.clone(),
+            input: input.clone().into(),
             ..Default::default()
         };
         for _ in 0..2 {
@@ -535,7 +534,7 @@ mod tests {
             gas_limit: 30_000,
             destination: address,
             caller: Address::ZERO,
-            input: Bytes::copy_from_slice(b"cached-input"),
+            input: Bytes::copy_from_slice(b"cached-input").into(),
             value: U256::ZERO,
             code_address: address,
             call_target: address,
@@ -588,7 +587,7 @@ mod tests {
                 destination: address,
                 code_address: address,
                 call_target: address,
-                input: Bytes::from(vec![1; len]),
+                input: Bytes::from(vec![1; len]).into(),
                 ..Default::default()
             };
             let output = provider

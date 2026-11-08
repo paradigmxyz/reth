@@ -90,7 +90,7 @@ pub trait EthApi<
     ///
     /// See the `eth_capabilities` execution API proposal:
     /// <https://github.com/ethereum/execution-apis/pull/755>.
-    #[method(name = "capabilities")]
+    #[method(name = "capabilities", blocking)]
     fn capabilities(&self) -> RpcResult<EthCapabilities>;
 
     /// Returns information about a block by hash.

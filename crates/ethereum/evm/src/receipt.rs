@@ -90,7 +90,7 @@ mod tests {
         assert!(matches!(
             error,
             BlockExecutionError::Internal(InternalBlockExecutionError::Other(source))
-                if source.is::<MissingFrameReceipt>()
+                if source.downcast_ref::<MissingFrameReceipt>().is_some()
         ));
     }
 }

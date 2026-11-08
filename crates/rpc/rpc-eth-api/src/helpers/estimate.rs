@@ -333,7 +333,7 @@ pub trait EstimateCall: Call {
             let requested_block = at;
             let (evm_env, at) = self.evm_env_at(requested_block).await?;
             let derived_pending = requested_block.is_pending() && !at.is_pending();
-            if evm_env.version().feature(EvmFeatures::EIP8250) &&
+            if Into::<evm2::SpecId>::into(evm_env.spec_id()).enables(evm2::SpecId::BOGOTA) &&
                 request.as_ref().nonce_keys.is_none()
             {
                 if request.as_ref().signatures.as_ref().is_some_and(|signatures| {
@@ -531,7 +531,7 @@ pub trait EstimateCall: Call {
                                     Some(EthApiError::InvalidTransaction(
                                         RpcInvalidTransactionError::FrameTransaction(
                                             evm2::registry::HandlerError::InvalidFrameTransaction(
-                                                "EIP-8141 VERIFY frame failed"
+                                                evm2::registry::FrameTransactionError::VerifyFrameFailed
                                             )
                                         )
                                     ))

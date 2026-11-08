@@ -10,7 +10,7 @@ pub use api::{AsEthApiError, FromEthApiError, FromEvmError, IntoEthApiError};
 use core::time::Duration;
 use evm2::{interpreter::InstrStop, registry::HandlerError};
 use evm2_inspectors::tracing::{DebugInspectorError, MuxError};
-use reth_errors::{BlockExecutionError, BlockValidationError, RethError};
+use reth_errors::{BlockExecutionError, BlockValidationError, ProviderError, RethError};
 use reth_primitives_traits::transaction::{error::InvalidTransactionError, signed::RecoveryError};
 use reth_rpc_convert::{CallFeesError, EthTxEnvError, TransactionConversionError};
 use reth_rpc_server_types::result::{
@@ -393,7 +393,9 @@ impl From<EthApiError> for jsonrpsee_types::error::ErrorObject<'static> {
                 err.to_string(),
             ),
             EthApiError::Unsupported(msg) => internal_rpc_err(msg),
-            EthApiError::InternalJsTracerError(msg) => internal_rpc_err(msg),
+            EthApiError::InternalJsTracerError(msg) | EthApiError::MuxTracerError(msg) => {
+                internal_rpc_err(msg)
+            }
             EthApiError::InvalidParams(msg) => invalid_params_rpc_err(msg),
             err @ EthApiError::ExecutionTimedOut(_) => rpc_error_with_code(
                 jsonrpsee_types::error::CALL_EXECUTION_FAILED_CODE,
@@ -407,7 +409,6 @@ impl From<EthApiError> for jsonrpsee_types::error::ErrorObject<'static> {
                 rpc_error_with_code(EthRpcErrorCode::PrunedHistory.code(), error.to_string())
             }
             EthApiError::Other(err) => err.to_rpc_error(),
-            EthApiError::MuxTracerError(msg) => internal_rpc_err(msg),
             EthApiError::BatchTxRecvError(err) => internal_rpc_err(err.to_string()),
             EthApiError::BatchTxSendError => {
                 internal_rpc_err("Batch transaction sender channel closed".to_string())
@@ -563,11 +564,11 @@ impl From<BlockExecutionError> for EthApiError {
                         ))
                     }
                 }
-                BlockValidationError::Other(error) => match error.downcast::<HandlerError>() {
-                    Ok(error) => Self::InvalidTransaction((*error).into()),
-                    Err(error) => Self::Internal(RethError::Execution(
-                        BlockExecutionError::Validation(BlockValidationError::Other(error)),
-                    )),
+                BlockValidationError::Other(error) => match error.downcast_ref::<HandlerError>() {
+                    Some(error) => Self::InvalidTransaction(error.clone().into()),
+                    None => Self::Internal(RethError::Execution(BlockExecutionError::Validation(
+                        BlockValidationError::Other(error),
+                    ))),
                 },
                 _ => Self::Internal(RethError::Execution(BlockExecutionError::Validation(
                     validation_error,
@@ -591,7 +592,6 @@ impl From<evm2::DatabaseError> for EthApiError {
 
 impl From<reth_errors::ProviderError> for EthApiError {
     fn from(error: reth_errors::ProviderError) -> Self {
-        use reth_errors::ProviderError;
         match error {
             ProviderError::HeaderNotFound(hash) => Self::HeaderNotFound(hash.into()),
             ProviderError::BlockHashNotFound(hash) | ProviderError::UnknownBlockHash(hash) => {
@@ -863,7 +863,6 @@ impl From<RpcInvalidTransactionError> for jsonrpsee_types::error::ErrorObject<'s
 
 impl From<InvalidTransactionError> for RpcInvalidTransactionError {
     fn from(err: InvalidTransactionError) -> Self {
-        use InvalidTransactionError;
         // This conversion is used to convert any transaction errors that could occur inside the
         // txpool (e.g. `eth_sendRawTransaction`) to their corresponding RPC
         match err {
@@ -915,7 +914,8 @@ impl From<HandlerError> for RpcInvalidTransactionError {
             HandlerError::RejectCallerWithCode => Self::SenderNoEOA,
             HandlerError::NonceOverflow => Self::NonceMaxValue,
             HandlerError::GasLimitMoreThanBlock { .. } |
-            HandlerError::TxGasLimitGreaterThanCap { .. } => Self::GasTooHigh,
+            HandlerError::TxGasLimitGreaterThanCap { .. } |
+            HandlerError::IntrinsicGasGreaterThanCap { .. } => Self::GasTooHigh,
             HandlerError::CreateInitCodeSizeLimit { .. } => Self::MaxInitCodeSizeExceeded,
             HandlerError::UnsupportedTransactionType(_) |
             HandlerError::WrongTransactionType { .. } => Self::TxTypeNotSupported,
@@ -1164,6 +1164,25 @@ mod tests {
     use super::*;
     use alloy_primitives::b256;
     use alloy_sol_types::{Revert, SolError};
+    use reth_errors::ProviderError;
+
+    #[test]
+    fn gas_limit_handler_errors_map_to_gas_errors() {
+        assert!(matches!(
+            RpcInvalidTransactionError::from(HandlerError::GasLimitBelowFloor {
+                required: 2,
+                got: 1
+            }),
+            RpcInvalidTransactionError::GasTooLow
+        ));
+        assert!(matches!(
+            RpcInvalidTransactionError::from(HandlerError::IntrinsicGasGreaterThanCap {
+                required: 2,
+                cap: 1
+            }),
+            RpcInvalidTransactionError::GasTooHigh
+        ));
+    }
 
     #[cfg(feature = "js-tracer")]
     use evm2_inspectors::tracing::js::JsInspectorError;
@@ -1257,8 +1276,6 @@ mod tests {
 
     #[test]
     fn pruned_state_errors_use_history_unavailable_code() {
-        use reth_errors::ProviderError;
-
         let err = EthApiError::from(ProviderError::InsufficientChangesets {
             requested: 1,
             available: 43..=48,

@@ -349,13 +349,16 @@ mod tests {
     use alloy_primitives::{hex, keccak256, map::HashMap, Address, B256, U256};
     use evm2::evm::AccountInfo;
     use reth_db_api::{
-        models::{AccountBeforeTx, BlockNumberAddress},
+        models::{AccountBeforeTx, BlockNumberAddress, StorageBeforeTx, StorageSettings},
         tables,
         transaction::DbTxMut,
     };
     use reth_execution_errors::StateRootError;
     use reth_primitives_traits::{Account, StorageEntry};
-    use reth_provider::test_utils::create_test_provider_factory;
+    use reth_provider::{
+        test_utils::create_test_provider_factory, StaticFileProviderFactory, StaticFileSegment,
+        StaticFileWriter,
+    };
     use reth_storage_api::StorageSettingsCache;
     use reth_trie::{
         HashedPostState, HashedPostStateSorted, HashedStorage, KeccakKeyHasher, StateRoot,
@@ -536,9 +539,6 @@ mod tests {
 
     #[test]
     fn from_reverts_with_hashed_state() {
-        use reth_db_api::models::{StorageBeforeTx, StorageSettings};
-        use reth_provider::{StaticFileProviderFactory, StaticFileSegment, StaticFileWriter};
-
         let factory = create_test_provider_factory();
 
         factory.set_storage_settings_cache(StorageSettings::v2());

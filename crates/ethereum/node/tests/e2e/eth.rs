@@ -29,7 +29,10 @@ use reth_rpc_api::{TestingBuildBlockRequestV1, TestingBuildBlockResponseV1};
 use reth_rpc_server_types::{RethRpcModule, RpcModuleSelection};
 use reth_tasks::Runtime;
 use ssz::Encode;
-use std::sync::Arc;
+use std::sync::{
+    atomic::{AtomicUsize, Ordering},
+    Arc,
+};
 
 const ENGINE_PAYLOADS_ROUTE: &str = "/engine/v1/payloads";
 const ENGINE_FORKCHOICE_ROUTE: &str = "/engine/v1/forkchoice";
@@ -642,7 +645,6 @@ async fn test_engine_ssz_request_validation() -> eyre::Result<()> {
 
 #[tokio::test]
 async fn test_engine_ssz_custom_engine_and_middleware() -> eyre::Result<()> {
-    use std::sync::atomic::{AtomicUsize, Ordering};
     let requests = Arc::new(AtomicUsize::new(0));
     let observed = requests.clone();
     let middleware =
