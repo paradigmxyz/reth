@@ -125,7 +125,8 @@ jobs:
       - uses: rui314/setup-mold@339e96b4ff1f3bd865856ba4cbbe8818a7acb038 # v1
       - uses: tempoxyz/gh-actions/vendor/dtolnay/rust-toolchain@d5402286a7abdfb7232173b3228d56473feb8a66 # 2026-09-29T02-04-45Z-d5402286
         with:
-          toolchain: stable
+          # Nightly rustc enables evm2's tail-call interpreter dispatch. Keep in sync with docker.yml.
+          toolchain: nightly-2026-11-07
           target: ${{ matrix.configs.target }}
       - name: Install LLVM
         if: runner.os == 'Linux'

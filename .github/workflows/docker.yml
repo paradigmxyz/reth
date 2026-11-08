@@ -78,6 +78,8 @@ jobs:
         env:
           EVENT_NAME: ${{ github.event_name }}
           BUILD_TYPE: ${{ inputs.build_type }}
+          # Nightly rustc enables evm2's tail-call interpreter dispatch.
+          RUST_TOOLCHAIN: nightly-2026-11-07
         run: |
           REGISTRY="ghcr.io/${{ github.repository_owner }}"
 
@@ -92,12 +94,16 @@ jobs:
                 echo "ethereum_set<<EOF"
                 echo "ethereum.tags=${REGISTRY}/reth:${VERSION}"
                 echo "ethereum.tags=${REGISTRY}/reth:latest"
+                echo "*.args.RUST_TOOLCHAIN=${RUST_TOOLCHAIN}"
                 echo "EOF"
               } >> "$GITHUB_OUTPUT"
             else
               {
                 echo "ethereum_tags=${REGISTRY}/reth:${VERSION}"
-                echo "ethereum_set=ethereum.tags=${REGISTRY}/reth:${VERSION}"
+                echo "ethereum_set<<EOF"
+                echo "ethereum.tags=${REGISTRY}/reth:${VERSION}"
+                echo "*.args.RUST_TOOLCHAIN=${RUST_TOOLCHAIN}"
+                echo "EOF"
               } >> "$GITHUB_OUTPUT"
             fi
 
@@ -112,8 +118,7 @@ jobs:
               echo "ethereum.args.RETH_ENGINE_TXPOOL_PREWARMING=true"
               echo "*.args.RETH_ENGINE_PREWARM_REUSE=true"
               echo "*.args.RETH_DB_SYNC_MODE=safe-no-sync"
-              # Nightly rustc enables evm2's tail-call interpreter dispatch.
-              echo "*.args.RUST_TOOLCHAIN=nightly-2026-11-07"
+              echo "*.args.RUST_TOOLCHAIN=${RUST_TOOLCHAIN}"
               echo "EOF"
             } >> "$GITHUB_OUTPUT"
 
