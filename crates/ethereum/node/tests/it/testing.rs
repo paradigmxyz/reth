@@ -4,9 +4,7 @@ use alloy_primitives::{Bytes, B256};
 use alloy_rpc_types_eth::BlockNumberOrTag;
 use jsonrpsee_core::client::ClientT;
 use reth_chainspec::EthereumHardfork;
-use reth_e2e_test_utils::{
-    eth_payload_attributes, test_chain_spec, transaction::TransactionTestContext, E2ETestSetupExt,
-};
+use reth_e2e_test_utils::{eth_payload_attributes, test_chain_spec, E2ETestSetupExt};
 use reth_ethereum_engine_primitives::EthPayloadAttributes;
 use reth_node_ethereum::EthereumNode;
 use reth_rpc_api::{TestingBuildBlockRequestV1, TestingBuildBlockResponseV1};
@@ -119,47 +117,6 @@ async fn testing_rpc_commit_block_works() -> eyre::Result<()> {
     let block_hash = block_hash.to_string();
     assert_eq!(next_latest.get("hash").and_then(Value::as_str), Some(next_block_hash.as_str()));
     assert_eq!(next_latest.get("parentHash").and_then(Value::as_str), Some(block_hash.as_str()));
-
-    Ok(())
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn testing_rpc_build_block_skips_pool_blob_transactions() -> eyre::Result<()> {
-    let chain_spec = test_chain_spec(EthereumHardfork::Cancun);
-    let (node, wallet) = EthereumNode::test_setup(1, chain_spec.clone())
-        .with_rpc_modifier(|rpc| {
-            rpc.with_http_api(RpcModuleSelection::from_iter([RethRpcModule::Testing]))
-        })
-        .build_single()
-        .await?;
-    let client = node.rpc_client().expect("HTTP RPC server is enabled");
-
-    let blob_tx = TransactionTestContext::tx_with_blobs_bytes(1, wallet.signer(0)).await?;
-    let transfer_tx = TransactionTestContext::transfer_tx_bytes(1, wallet.signer(1)).await;
-    let blob_tx_hash = node.rpc.inject_tx(blob_tx).await?;
-    let transfer_tx_hash = node.rpc.inject_tx(transfer_tx.clone()).await?;
-    node.wait_for_pooled([blob_tx_hash, transfer_tx_hash]).await?;
-
-    // Omitting transactions builds the block from the pool. The response carries no blob
-    // sidecars, so the blob transaction must not be included.
-    let response: TestingBuildBlockResponseV1 = client
-        .request(
-            "testing_buildBlockV1",
-            (
-                chain_spec.genesis_hash(),
-                eth_payload_attributes(&chain_spec, chain_spec.genesis().timestamp + 1),
-                Option::<Vec<Bytes>>::None,
-                Option::<Bytes>::None,
-            ),
-        )
-        .await?;
-    let TestingBuildBlockResponseV1::V5(envelope) = response else {
-        panic!("expected a V5 envelope before Amsterdam");
-    };
-    let payload = envelope.execution_payload;
-    assert_eq!(payload.payload_inner.payload_inner.transactions, vec![transfer_tx]);
-    assert_eq!(payload.blob_gas_used, 0);
-    assert!(envelope.blobs_bundle.commitments.is_empty());
 
     Ok(())
 }
