@@ -660,6 +660,8 @@ pub struct RpcServerArgs {
     pub rpc_max_logs_per_response: ZeroAsNoneU64,
 
     /// Maximum gas limit for `eth_call`, `eth_estimateGas`, and call tracing RPC methods.
+    ///
+    /// The calls of an `eth_callMany`, `trace_callMany` or `debug_traceCallMany` request share it.
     #[arg(
         long = "rpc.gascap",
         alias = "rpc-gascap",
