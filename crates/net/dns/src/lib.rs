@@ -389,6 +389,8 @@ fn recheck_tick(recheck_interval: Duration) -> Interval {
     let mut tick = tokio::time::interval(recheck_interval);
     // a service that was starved must not then fire a burst of catch-up ticks
     tick.set_missed_tick_behavior(MissedTickBehavior::Delay);
+    // the first tick would otherwise complete immediately and retry failed root lookups right away.
+    tick.reset();
     tick
 }
 
