@@ -42,8 +42,14 @@ for test in report['testCases'].values():
             ignored_results['failed'].append(test_name)
         continue  # Skip this test - don't count it as unexpected
     
+    # Wirex runs Amsterdam fixtures with BALs both withheld and served. Match
+    # their shared expected failure while retaining the full name in diagnostics.
+    exclusion_name = test_name
+    if report['name'] == 'eels/consume-wirex' and test_name.endswith(('-bal_withheld', '-bal_served')):
+        exclusion_name = test_name.rsplit('-', 1)[0]
+
     # Check against expected failures
-    if test_name in exclusions:
+    if exclusion_name in exclusions:
         if test_pass:
             unexpected_passes.append(test_name)
     else:
