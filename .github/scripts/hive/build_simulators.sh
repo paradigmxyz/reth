@@ -3,6 +3,8 @@ set -eo pipefail
 
 # EELS release fixtures cover Osaka, BPO and Amsterdam.
 eels_tag="v21.0.2"
+# Pin the framework used by the mainnet Hive dashboard (636b5f1).
+enginex_tag="latest@sha256:67825aa3e2a5c148dd640c48066c4527e28130774de1a8cbd6b6ce122c507c26"
 # Wirex has no release tag yet. Pin its published image, which contains tests@v21.0.2.
 wirex_tag="latest@sha256:885470ec513e0d6ff955d4becbd36d308d280ea4dd91cda538504ef3c92659f4"
 
@@ -17,7 +19,7 @@ go build .
 # Run each hive command in the background for each simulator and wait
 echo "Building images"
 ./hive -client reth --sim "ethereum/eels/consume-enginex" \
-    --sim.buildarg tag="${eels_tag}" \
+    --sim.buildarg tag="${enginex_tag}" \
     --sim.timelimit 1s || true &
 ./hive -client reth --sim "ethereum/eels/consume-wirex" \
     --sim.buildarg tag="${wirex_tag}" \
