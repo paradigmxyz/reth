@@ -6,9 +6,12 @@ use crate::{
 };
 use alloy_consensus::{constants::KECCAK_EMPTY, BlockHeader, ReceiptWithBloom};
 use alloy_eips::BlockHashOrNumber;
-use alloy_primitives::{Bytes, B256};
+use alloy_primitives::{
+    map::{FbBuildHasher, HashSet},
+    Bytes, B256,
+};
 use alloy_rlp::{length_of_length, Encodable};
-use futures::StreamExt;
+use futures::{future::BoxFuture, stream::FuturesUnordered, StreamExt};
 use reth_eth_wire::{
     message::MAX_MESSAGE_SIZE,
     snap::{
@@ -41,6 +44,7 @@ use std::{
 };
 use tokio::sync::{mpsc::Receiver, oneshot};
 use tokio_stream::wrappers::ReceiverStream;
+use tracing::Span;
 
 // Limits: <https://github.com/ethereum/go-ethereum/blob/b0d44338bbcefee044f1f635a84487cbbd8f0538/eth/protocols/eth/handler.go#L34-L56>
 
@@ -81,6 +85,12 @@ pub const MAX_STORAGE_RANGE_ACCOUNTS_SERVE: usize = 1024;
 /// Maximum size of replies to data retrievals: 2MB
 pub const SOFT_RESPONSE_LIMIT: usize = 2 * 1024 * 1024;
 
+/// Maximum number of `snap/2` account and storage range requests served at once.
+///
+/// Serving an old root can rewind the trie block by block, so these requests run off the handler
+/// task and are capped to keep them from starving other blocking work.
+const MAX_CONCURRENT_SNAP_RANGE_REQUESTS: usize = 2;
+
 /// Upper bound on the headers reserved once the first requested header resolves.
 ///
 /// Header responses are bound by [`MAX_HEADERS_SERVE`] rather than by size, so a full batch reaches
@@ -113,6 +123,10 @@ pub struct EthRequestHandler<C, N: NetworkPrimitives = EthNetworkPrimitives> {
     incoming_requests: ReceiverStream<IncomingEthRequest<N>>,
     /// Metrics for the eth request handler.
     metrics: EthRequestHandlerMetrics,
+    /// `snap/2` range requests being served off the handler task, each resolving to its peer.
+    snap_range_tasks: FuturesUnordered<BoxFuture<'static, PeerId>>,
+    /// Peers with a request in `snap_range_tasks`, limited to one each.
+    snap_range_peers: HashSet<PeerId, FbBuildHasher<64>>,
 }
 
 // === impl EthRequestHandler ===
@@ -125,6 +139,8 @@ impl<C, N: NetworkPrimitives> EthRequestHandler<C, N> {
             peers,
             incoming_requests: ReceiverStream::new(incoming),
             metrics: Default::default(),
+            snap_range_tasks: Default::default(),
+            snap_range_peers: Default::default(),
         }
     }
 
@@ -485,18 +501,19 @@ where
 impl<C, N> EthRequestHandler<C, N>
 where
     N: NetworkPrimitives,
-    C: BalProvider + StateProviderFactory + StateRangeProviderFactory,
+    C: BalProvider + StateProviderFactory + StateRangeProviderFactory + Clone + 'static,
 {
     /// Handles `snap/2` (EIP-8189) requests.
     ///
     /// `GetAccountRange`/`GetStorageRanges` are hash-native throughout and served from retained
-    /// canonical roots via [`StateRangeProviderFactory`]. `GetByteCodes` is content-addressed and
+    /// canonical roots via [`StateRangeProviderFactory`], on blocking tasks so that rewinding an
+    /// old root doesn't stall other requests. `GetByteCodes` is content-addressed and
     /// independent of any particular state root, so it's served directly.
     /// `GetBlockAccessLists` is answered from the same [`BalProvider`] store eth71's
     /// `GetBlockAccessLists` uses, since both serve the same underlying data.
     fn on_snap_request(
-        &self,
-        _peer_id: PeerId,
+        &mut self,
+        peer_id: PeerId,
         request: SnapProtocolMessage,
         response: oneshot::Sender<RequestResult<SnapResponse>>,
     ) {
@@ -504,20 +521,24 @@ where
 
         let result = match request {
             SnapProtocolMessage::GetAccountRange(req) => {
-                let request_id = req.request_id;
-                let response = self.get_account_range_response(req).unwrap_or_else(|error| {
-                    tracing::debug!(target: "net::snap", %error, "failed to serve account range");
-                    AccountRangeMessage { request_id, accounts: Vec::new(), proof: Vec::new() }
+                let empty = SnapResponse::AccountRange(AccountRangeMessage {
+                    request_id: req.request_id,
+                    accounts: Vec::new(),
+                    proof: Vec::new(),
                 });
-                Ok(SnapResponse::AccountRange(response))
+                return self.spawn_snap_range_request(peer_id, response, empty, move |client| {
+                    get_account_range_response(client, req).map(SnapResponse::AccountRange)
+                })
             }
             SnapProtocolMessage::GetStorageRanges(req) => {
-                let request_id = req.request_id;
-                let response = self.get_storage_ranges_response(req).unwrap_or_else(|error| {
-                    tracing::debug!(target: "net::snap", %error, "failed to serve storage ranges");
-                    StorageRangesMessage { request_id, slots: Vec::new(), proof: Vec::new() }
+                let empty = SnapResponse::StorageRanges(StorageRangesMessage {
+                    request_id: req.request_id,
+                    slots: Vec::new(),
+                    proof: Vec::new(),
                 });
-                Ok(SnapResponse::StorageRanges(response))
+                return self.spawn_snap_range_request(peer_id, response, empty, move |client| {
+                    get_storage_ranges_response(client, req).map(SnapResponse::StorageRanges)
+                })
             }
             SnapProtocolMessage::GetByteCodes(req) => {
                 let codes = self
@@ -550,6 +571,49 @@ where
         let _ = response.send(result);
     }
 
+    /// Serves a `snap/2` range request on a blocking task, replying `empty` when the request can't
+    /// be served.
+    ///
+    /// A request is answered `empty` without being served when
+    /// [`MAX_CONCURRENT_SNAP_RANGE_REQUESTS`] are already running or the peer already has one
+    /// running, which snap clients treat as the root being unavailable. A request whose peer has
+    /// already gone is dropped.
+    fn spawn_snap_range_request(
+        &mut self,
+        peer_id: PeerId,
+        response: oneshot::Sender<RequestResult<SnapResponse>>,
+        empty: SnapResponse,
+        serve: impl FnOnce(&C) -> ProviderResult<SnapResponse> + Send + 'static,
+    ) {
+        if response.is_closed() {
+            return
+        }
+        if self.snap_range_tasks.len() >= MAX_CONCURRENT_SNAP_RANGE_REQUESTS ||
+            !self.snap_range_peers.insert(peer_id)
+        {
+            self.metrics.snap_range_requests_busy_total.increment(1);
+            let _ = response.send(Ok(empty));
+            return
+        }
+
+        let client = self.client.clone();
+        let span = Span::current();
+        let task = tokio::task::spawn_blocking(move || {
+            let _guard = span.enter();
+            let result = serve(&client).unwrap_or_else(|error| {
+                tracing::debug!(target: "net::snap", %error, "failed to serve snap range");
+                empty
+            });
+            let _ = response.send(Ok(result));
+        });
+        self.snap_range_tasks.push(Box::pin(async move {
+            if let Err(error) = task.await {
+                tracing::error!(target: "net::snap", %error, "snap range task failed");
+            }
+            peer_id
+        }));
+    }
+
     /// Returns the bytecode for each of `hashes`, skipping hashes with no known code, stopping
     /// once `response_bytes` (capped at [`SOFT_RESPONSE_LIMIT`]) is exceeded.
     fn get_byte_codes_response(
@@ -580,116 +644,104 @@ where
         }
         Ok(codes)
     }
+}
 
-    /// Serves a `GetAccountRange` request via [`StateRangeProviderFactory`].
-    ///
-    /// Fails the request if a storage root or proof becomes unavailable after the range lookup.
-    /// Proves the boundary between `starting_hash` and the last returned account, per snap/2's
-    /// boundary-proof requirement, unless the range is a zero-origin range that exhausted the
-    /// trie, in which case no proof is needed.
-    fn get_account_range_response(
-        &self,
-        req: GetAccountRangeMessage,
-    ) -> ProviderResult<AccountRangeMessage> {
-        let empty = AccountRangeMessage {
-            request_id: req.request_id,
-            accounts: Vec::new(),
-            proof: Vec::new(),
-        };
+/// Serves a `GetAccountRange` request via [`StateRangeProviderFactory`].
+///
+/// Fails the request if a storage root or proof becomes unavailable after the range lookup.
+/// Proves the boundary between `starting_hash` and the last returned account, per snap/2's
+/// boundary-proof requirement, unless the range is a zero-origin range that exhausted the
+/// trie, in which case no proof is needed.
+fn get_account_range_response(
+    client: &impl StateRangeProviderFactory,
+    req: GetAccountRangeMessage,
+) -> ProviderResult<AccountRangeMessage> {
+    let empty =
+        AccountRangeMessage { request_id: req.request_id, accounts: Vec::new(), proof: Vec::new() };
 
-        let response_bytes = (req.response_bytes as usize).min(SOFT_RESPONSE_LIMIT);
-        let Some(state) = self.client.state_range_provider(req.root_hash)? else {
-            return Ok(empty)
-        };
-        let RangeResponse { items: accounts, end } =
-            state.account_range(req.starting_hash, req.limit_hash, response_bytes)?;
+    let response_bytes = (req.response_bytes as usize).min(SOFT_RESPONSE_LIMIT);
+    let Some(state) = client.state_range_provider(req.root_hash)? else { return Ok(empty) };
+    let RangeResponse { items: accounts, end } =
+        state.account_range(req.starting_hash, req.limit_hash, response_bytes)?;
 
-        let proof = if req.starting_hash.is_zero() && end == RangeEnd::Exhausted {
-            Vec::new()
+    let proof = if req.starting_hash.is_zero() && end == RangeEnd::Exhausted {
+        Vec::new()
+    } else {
+        let boundary_keys = boundary_proof_keys(req.starting_hash, accounts.last());
+        state.account_range_proof(&boundary_keys)?
+    };
+
+    let mut account_data = Vec::with_capacity(accounts.len());
+    for (hash, account) in accounts {
+        let storage_root = state.storage_root_by_hash(hash)?;
+        account_data
+            .push(AccountData::from_trie_account(hash, &account.into_trie_account(storage_root)));
+    }
+
+    Ok(AccountRangeMessage { request_id: req.request_id, accounts: account_data, proof })
+}
+
+/// Serves a `GetStorageRanges` request via [`StateRangeProviderFactory`].
+///
+/// `starting_hash`/`limit_hash` apply only to the first account. An account unavailable at
+/// this root makes the whole response empty, rather than skipping it and shifting later
+/// accounts' positions. A proof stops the response at the first account that isn't a
+/// complete, zero-origin range.
+fn get_storage_ranges_response(
+    client: &impl StateRangeProviderFactory,
+    req: GetStorageRangesMessage,
+) -> ProviderResult<StorageRangesMessage> {
+    let empty =
+        StorageRangesMessage { request_id: req.request_id, slots: Vec::new(), proof: Vec::new() };
+    let Some(state) = client.state_range_provider(req.root_hash)? else { return Ok(empty) };
+    let mut slots: Vec<Vec<StorageData>> = Vec::new();
+    let mut proof = Vec::new();
+    let mut remaining_bytes = (req.response_bytes as usize).min(SOFT_RESPONSE_LIMIT);
+
+    for (i, &hashed_address) in
+        req.account_hashes.iter().take(MAX_STORAGE_RANGE_ACCOUNTS_SERVE).enumerate()
+    {
+        // Keeps traversing storage-empty accounts under a zero budget so a real slot still
+        // gets served; worst case is a lookup per account, bounded by the take() above.
+        if remaining_bytes == 0 && slots.iter().any(|range| !range.is_empty()) {
+            break
+        }
+        let (origin, limit) = if i == 0 {
+            (
+                req.starting_hash.unwrap_or(B256::ZERO),
+                req.limit_hash.unwrap_or(B256::repeat_byte(0xff)),
+            )
         } else {
-            let boundary_keys = boundary_proof_keys(req.starting_hash, accounts.last());
-            state.account_range_proof(&boundary_keys)?
+            (B256::ZERO, B256::repeat_byte(0xff))
         };
-
-        let mut account_data = Vec::with_capacity(accounts.len());
-        for (hash, account) in accounts {
-            let storage_root = state.storage_root_by_hash(hash)?;
-            account_data.push(AccountData::from_trie_account(
-                hash,
-                &account.into_trie_account(storage_root),
-            ));
-        }
-
-        Ok(AccountRangeMessage { request_id: req.request_id, accounts: account_data, proof })
-    }
-
-    /// Serves a `GetStorageRanges` request via [`StateRangeProviderFactory`].
-    ///
-    /// `starting_hash`/`limit_hash` apply only to the first account. An account unavailable at
-    /// this root makes the whole response empty, rather than skipping it and shifting later
-    /// accounts' positions. A proof stops the response at the first account that isn't a
-    /// complete, zero-origin range.
-    fn get_storage_ranges_response(
-        &self,
-        req: GetStorageRangesMessage,
-    ) -> ProviderResult<StorageRangesMessage> {
-        let empty = StorageRangesMessage {
-            request_id: req.request_id,
-            slots: Vec::new(),
-            proof: Vec::new(),
-        };
-        let Some(state) = self.client.state_range_provider(req.root_hash)? else {
+        let Some(RangeResponse { items: account_slots, end }) =
+            state.storage_range(hashed_address, origin, limit, remaining_bytes)?
+        else {
             return Ok(empty)
         };
-        let mut slots: Vec<Vec<StorageData>> = Vec::new();
-        let mut proof = Vec::new();
-        let mut remaining_bytes = (req.response_bytes as usize).min(SOFT_RESPONSE_LIMIT);
 
-        for (i, &hashed_address) in
-            req.account_hashes.iter().take(MAX_STORAGE_RANGE_ACCOUNTS_SERVE).enumerate()
-        {
-            // Keeps traversing storage-empty accounts under a zero budget so a real slot still
-            // gets served; worst case is a lookup per account, bounded by the take() above.
-            if remaining_bytes == 0 && slots.iter().any(|range| !range.is_empty()) {
-                break
-            }
-            let (origin, limit) = if i == 0 {
-                (
-                    req.starting_hash.unwrap_or(B256::ZERO),
-                    req.limit_hash.unwrap_or(B256::repeat_byte(0xff)),
-                )
-            } else {
-                (B256::ZERO, B256::repeat_byte(0xff))
+        remaining_bytes = remaining_bytes.saturating_sub(account_slots.len() * 64);
+        let last = account_slots.last().map(|(hash, _)| *hash);
+        let needs_proof = !origin.is_zero() || end != RangeEnd::Exhausted;
+        slots.push(
+            account_slots
+                .into_iter()
+                // snap clients verify proofs against RLP-encoded storage trie leaves.
+                .map(|(hash, value)| StorageData::from_value(hash, value))
+                .collect(),
+        );
+
+        if needs_proof {
+            let boundary_keys = match last {
+                Some(last) => vec![origin, last],
+                None => vec![origin],
             };
-            let Some(RangeResponse { items: account_slots, end }) =
-                state.storage_range(hashed_address, origin, limit, remaining_bytes)?
-            else {
-                return Ok(empty)
-            };
-
-            remaining_bytes = remaining_bytes.saturating_sub(account_slots.len() * 64);
-            let last = account_slots.last().map(|(hash, _)| *hash);
-            let needs_proof = !origin.is_zero() || end != RangeEnd::Exhausted;
-            slots.push(
-                account_slots
-                    .into_iter()
-                    // snap clients verify proofs against RLP-encoded storage trie leaves.
-                    .map(|(hash, value)| StorageData::from_value(hash, value))
-                    .collect(),
-            );
-
-            if needs_proof {
-                let boundary_keys = match last {
-                    Some(last) => vec![origin, last],
-                    None => vec![origin],
-                };
-                proof = state.storage_range_proof(hashed_address, &boundary_keys)?;
-                break
-            }
+            proof = state.storage_range_proof(hashed_address, &boundary_keys)?;
+            break
         }
-
-        Ok(StorageRangesMessage { request_id: req.request_id, slots, proof })
     }
+
+    Ok(StorageRangesMessage { request_id: req.request_id, slots, proof })
 }
 
 /// Boundary-proof keys for a range reply: `origin`, plus the last returned item's key if any.
@@ -711,7 +763,9 @@ where
         + StateRangeProviderFactory
         + BlockReader<Block = N::Block, Receipt = N::Receipt>
         + HeaderProvider<Header = N::BlockHeader>
-        + Unpin,
+        + Clone
+        + Unpin
+        + 'static,
 {
     type Output = ();
 
@@ -759,6 +813,11 @@ where
         );
 
         this.metrics.acc_duration_poll_eth_req_handler.set(acc.as_secs_f64());
+
+        // Polled after new requests are spawned so that each finished task frees its peer's slot.
+        while let Poll::Ready(Some(peer_id)) = this.snap_range_tasks.poll_next_unpin(cx) {
+            this.snap_range_peers.remove(&peer_id);
+        }
 
         // stream is fully drained and import futures pending
         if maybe_more_incoming_requests {
@@ -1149,7 +1208,7 @@ mod tests {
     ) {
         let provider = MockEthProvider::default();
         provider.set_snap_state_reads_fail(true);
-        let handler = snap_handler(provider);
+        let mut handler = snap_handler(provider);
         let (response, rx) = oneshot::channel();
 
         handler.on_snap_request(PeerId::default(), request, response);
@@ -1160,7 +1219,7 @@ mod tests {
     #[tokio::test]
     async fn unavailable_snap_state_returns_empty_response() {
         let provider = MockEthProvider::default();
-        let handler = snap_handler(provider.clone());
+        let mut handler = snap_handler(provider.clone());
         let (response, rx) = oneshot::channel();
         handler.on_snap_request(
             PeerId::default(),
@@ -1183,6 +1242,87 @@ mod tests {
             }))
         );
         assert_eq!(provider.snap_state_range_resolutions(), 1);
+    }
+
+    fn account_range_request() -> SnapProtocolMessage {
+        SnapProtocolMessage::GetAccountRange(GetAccountRangeMessage {
+            request_id: 1,
+            root_hash: B256::ZERO,
+            starting_hash: B256::ZERO,
+            limit_hash: B256::repeat_byte(0xff),
+            response_bytes: SOFT_RESPONSE_LIMIT as u64,
+        })
+    }
+
+    fn empty_account_range() -> SnapResponse {
+        SnapResponse::AccountRange(AccountRangeMessage {
+            request_id: 1,
+            accounts: Vec::new(),
+            proof: Vec::new(),
+        })
+    }
+
+    #[tokio::test]
+    async fn busy_snap_range_requests_return_empty_responses() {
+        // Every slot is taken by another peer.
+        let provider = MockEthProvider::default();
+        let mut handler = snap_handler(provider.clone());
+        for byte in 0..MAX_CONCURRENT_SNAP_RANGE_REQUESTS as u8 {
+            let peer_id = PeerId::repeat_byte(byte);
+            handler.snap_range_peers.insert(peer_id);
+            handler.snap_range_tasks.push(Box::pin(futures::future::pending()));
+        }
+        let (response, rx) = oneshot::channel();
+        handler.on_snap_request(PeerId::repeat_byte(0xff), account_range_request(), response);
+
+        assert_eq!(rx.await.unwrap(), Ok(empty_account_range()));
+        assert_eq!(provider.snap_state_range_resolutions(), 0);
+
+        // The peer already has a request running.
+        let provider = MockEthProvider::default();
+        let mut handler = snap_handler(provider.clone());
+        handler.snap_range_peers.insert(PeerId::default());
+        handler.snap_range_tasks.push(Box::pin(futures::future::pending()));
+        let (response, rx) = oneshot::channel();
+        handler.on_snap_request(PeerId::default(), account_range_request(), response);
+
+        assert_eq!(rx.await.unwrap(), Ok(empty_account_range()));
+        assert_eq!(provider.snap_state_range_resolutions(), 0);
+    }
+
+    #[tokio::test]
+    async fn snap_range_request_from_gone_peer_is_dropped() {
+        let mut handler = snap_handler(MockEthProvider::default());
+        let (response, rx) = oneshot::channel();
+        drop(rx);
+
+        handler.on_snap_request(PeerId::default(), account_range_request(), response);
+
+        assert!(handler.snap_range_tasks.is_empty());
+    }
+
+    #[tokio::test]
+    async fn finished_snap_range_request_frees_its_peer_slot() {
+        let mut handler = snap_handler(MockEthProvider::default());
+        let (response, rx) = oneshot::channel();
+
+        handler.on_snap_request(PeerId::default(), account_range_request(), response);
+
+        assert!(handler.snap_range_peers.contains(&PeerId::default()));
+        rx.await.unwrap().unwrap();
+        tokio::time::timeout(
+            Duration::from_secs(5),
+            std::future::poll_fn(|cx| {
+                let _ = Pin::new(&mut handler).poll(cx);
+                if handler.snap_range_peers.is_empty() {
+                    Poll::Ready(())
+                } else {
+                    Poll::Pending
+                }
+            }),
+        )
+        .await
+        .expect("finished snap range task must free its peer slot");
     }
 
     #[tokio::test]
@@ -1239,7 +1379,7 @@ mod tests {
         ];
 
         for (provider, request, expected) in cases {
-            let handler = snap_handler(provider.clone());
+            let mut handler = snap_handler(provider.clone());
             let (response, rx) = oneshot::channel();
             handler.on_snap_request(PeerId::default(), request, response);
             assert_eq!(rx.await.unwrap(), Ok(expected));
@@ -1283,7 +1423,7 @@ mod tests {
         full_body.extend_from_slice(code_hash.as_slice());
         let empty_body = Bytes::from_static(&[0xc4, 0x03, 0x04, 0x80, 0x80]);
 
-        let handler = snap_handler(provider.clone());
+        let mut handler = snap_handler(provider.clone());
         let (response, rx) = oneshot::channel();
         handler.on_snap_request(
             PeerId::default(),
@@ -1330,7 +1470,7 @@ mod tests {
         // this wrongly-included proof would surface in the response and fail the assertion below.
         provider.set_snap_account_proof(Some(vec![Bytes::from_static(&[0xaa])]));
 
-        let handler = snap_handler(provider.clone());
+        let mut handler = snap_handler(provider.clone());
         let (response, rx) = oneshot::channel();
         handler.on_snap_request(
             PeerId::default(),
@@ -1366,7 +1506,7 @@ mod tests {
         );
         provider.set_snap_storage_proof(Some(proof.clone()));
 
-        let handler = snap_handler(provider.clone());
+        let mut handler = snap_handler(provider.clone());
         let (response, rx) = oneshot::channel();
         handler.on_snap_request(
             PeerId::default(),
@@ -1406,7 +1546,7 @@ mod tests {
         let origin = B256::ZERO;
         let limit = B256::repeat_byte(0x22);
 
-        let handler = snap_handler(provider.clone());
+        let mut handler = snap_handler(provider.clone());
         let (response, rx) = oneshot::channel();
         handler.on_snap_request(
             PeerId::default(),
@@ -1455,7 +1595,7 @@ mod tests {
             ExtendedAccount::new(1, U256::ZERO).with_bytecode(later_code),
         );
 
-        let handler = snap_handler(provider);
+        let mut handler = snap_handler(provider);
         let (response, rx) = oneshot::channel();
         handler.on_snap_request(
             PeerId::default(),
@@ -1482,7 +1622,7 @@ mod tests {
         for _ in 0..=MAX_STORAGE_RANGE_ACCOUNTS_SERVE {
             provider.push_snap_storage_range(Vec::new(), RangeEnd::Exhausted);
         }
-        let handler = snap_handler(provider.clone());
+        let mut handler = snap_handler(provider.clone());
         let (response, rx) = oneshot::channel();
         handler.on_snap_request(
             PeerId::default(),
@@ -1519,7 +1659,7 @@ mod tests {
         provider.push_snap_storage_range(vec![(hash, U256::ONE)], RangeEnd::HashLimit);
         provider.set_snap_storage_proof(Some(proof.clone()));
 
-        let handler = snap_handler(provider.clone());
+        let mut handler = snap_handler(provider.clone());
         let (response, rx) = oneshot::channel();
         handler.on_snap_request(
             PeerId::default(),
@@ -1555,7 +1695,7 @@ mod tests {
         let missing_account = B256::repeat_byte(0x01);
         let valid_account = B256::repeat_byte(0x02);
 
-        let handler = snap_handler(provider.clone());
+        let mut handler = snap_handler(provider.clone());
         let (response, rx) = oneshot::channel();
         handler.on_snap_request(
             PeerId::default(),

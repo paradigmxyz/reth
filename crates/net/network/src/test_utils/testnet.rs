@@ -681,6 +681,7 @@ pub trait TestnetProvider:
     > + BalProvider
     + StateProviderFactory
     + StateRangeProviderFactory
+    + Clone
     + Unpin
     + 'static
 {
@@ -694,6 +695,7 @@ impl<T> TestnetProvider for T where
         > + BalProvider
         + StateProviderFactory
         + StateRangeProviderFactory
+        + Clone
         + Unpin
         + 'static
 {

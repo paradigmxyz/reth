@@ -563,6 +563,9 @@ pub struct EthRequestHandlerMetrics {
     /// Number of `snap/2` (EIP-8189) requests received
     pub(crate) snap_requests_received_total: Counter,
 
+    /// Number of `snap/2` range requests answered empty because no serving slot was free
+    pub(crate) snap_range_requests_busy_total: Counter,
+
     /// Duration in seconds of call to poll
     /// [`EthRequestHandler`](crate::eth_requests::EthRequestHandler).
     pub(crate) acc_duration_poll_eth_req_handler: Gauge,
