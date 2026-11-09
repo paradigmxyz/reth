@@ -67,6 +67,13 @@ pub const DEFAULT_CALL_MANY_TIMEOUT: Duration = Duration::from_secs(5);
 /// The default maximum number of total storage slots for `eth_getStorageValues`.
 pub const DEFAULT_MAX_STORAGE_VALUES_SLOTS: usize = 1024;
 
+/// The default maximum number of storage slots (and, for multi-proofs, targets) accepted by a
+/// single `eth_getProof` or multi-proof request.
+///
+/// Bounds the work a request holds a proof permit for, since proof node selection scales with
+/// the number of requested slots.
+pub const DEFAULT_MAX_PROOF_SLOTS: usize = 1024;
+
 /// The default eth historical proof window.
 pub const DEFAULT_ETH_PROOF_WINDOW: u64 = 0;
 
@@ -142,9 +149,6 @@ pub mod cache {
 
     /// Default cache size for the receipts cache: 500 blocks' receipts.
     pub const DEFAULT_RECEIPT_CACHE_MAX_LEN: u32 = 500;
-
-    /// Legacy default for the no-op RPC header cache option.
-    pub const DEFAULT_HEADER_CACHE_MAX_LEN: u32 = 1000;
 
     /// Default cache size for the EVM BAL cache: 1000 block access lists.
     pub const DEFAULT_BAL_CACHE_MAX_LEN: u32 = 1000;

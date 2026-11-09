@@ -255,6 +255,7 @@ sparse_trie_tests! {
     test_branch_collapse_multi_empty_subtries_blinded_remaining,
     test_subtrie_collapse_touched_with_blinded_sibling,
     test_subtrie_emptied_by_deletes_with_touched,
+    test_subtrie_removal_onto_blinded_sibling_requests_only_sibling_proof,
 
     // root
     test_root_empty_trie,
