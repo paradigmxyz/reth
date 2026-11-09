@@ -47,7 +47,7 @@ use crate::{
     transactions::config::{StrictEthAnnouncementFilter, TransactionPropagationKind},
     NetworkHandle, TxTypesCounter,
 };
-use alloy_eips::eip2718::Typed2718;
+use alloy_eips::eip2718::{Encodable2718, Typed2718};
 use alloy_primitives::{
     bytes::BufMut,
     map::{hash_map::Entry, B256Map, B256Set, FbBuildHasher, HashMap, HashSet},
@@ -57,8 +57,8 @@ use alloy_rlp::Encodable;
 use constants::SOFT_LIMIT_COUNT_HASHES_IN_NEW_POOLED_TRANSACTIONS_BROADCAST_MESSAGE;
 use futures::{stream::FuturesUnordered, Future, StreamExt};
 use reth_eth_wire::{
-    message::MAX_MESSAGE_SIZE, BroadcastPoolTransactions, Cells, EthNetworkPrimitives, EthVersion,
-    GetCells, GetPooledTransactions, LazyEncoded, LazyEncodedTransaction, NetworkPrimitives,
+    BroadcastPoolTransactions, Cells, EthNetworkPrimitives, EthVersion, GetCells,
+    GetPooledTransactions, LazyEncoded, LazyEncodedTransaction, NetworkPrimitives,
     NewPooledTransactionHashes, NewPooledTransactionHashes66, NewPooledTransactionHashes68,
     NewPooledTransactionHashes72, PooledTransactions, Transactions,
 };
@@ -496,28 +496,30 @@ impl<Pool: TransactionPool, N: NetworkPrimitives> TransactionsManager<Pool, N> {
             .saturating_sub(info.pending_pool_imports.load(Ordering::Relaxed))
     }
 
-    /// Returns import capacity available to broadcasts after reserving space for fetched hashes.
-    fn remaining_broadcast_import_capacity(&self) -> usize {
+    /// Returns the transaction count and encoded byte size available to broadcasts, after
+    /// reserving space for fetched hashes.
+    fn remaining_broadcast_import_capacity(&self) -> (usize, usize) {
         let capacity = self.remaining_pool_import_capacity();
+        let info = &self.pending_pool_imports_info;
+        let bytes = info
+            .max_pending_pool_imports_bytes
+            .saturating_sub(info.pending_pool_imports_bytes.load(Ordering::Relaxed));
         if self.transaction_fetcher.num_hashes() == 0 {
-            return capacity
+            return (capacity, bytes)
         }
         // Reserve one batch (or half a small import budget) for fetched transactions.
         // Broadcasts are processed first and must not consume every newly freed slot.
-        let info = &self.pending_pool_imports_info;
         let reserved = info
             .max_pending_pool_imports
             .div_ceil(2)
             .min(SOFT_LIMIT_COUNT_HASHES_IN_GET_POOLED_TRANSACTIONS_REQUEST);
-        // Likewise reserve one message worth of bytes, so an admitted broadcast can't push
-        // imports past the byte limit that pauses fetching.
-        let reserved_bytes = info.max_pending_pool_imports_bytes.div_ceil(2).min(MAX_MESSAGE_SIZE);
-        if info.pending_pool_imports_bytes.load(Ordering::Relaxed).saturating_add(reserved_bytes) >=
-            info.max_pending_pool_imports_bytes
-        {
-            return 0
-        }
-        capacity.saturating_sub(reserved)
+        // Likewise reserve one response worth of bytes, so broadcasts can't fill the byte limit
+        // that pauses fetching.
+        let reserved_bytes = info
+            .max_pending_pool_imports_bytes
+            .div_ceil(2)
+            .min(SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE);
+        (capacity.saturating_sub(reserved), bytes.saturating_sub(reserved_bytes))
     }
 
     fn report_peer_bad_transactions(&self, peer_id: PeerId) {
@@ -1367,12 +1369,21 @@ where
         // Fetched batches may exceed the soft limit: their request size is bounded, and the
         // caller stops consuming responses until capacity becomes available again.
         if is_broadcast {
-            let capacity = self.remaining_broadcast_import_capacity();
-            if transactions.len() > capacity {
+            let (capacity, byte_capacity) = self.remaining_broadcast_import_capacity();
+            let mut bytes = 0usize;
+            let admitted = transactions
+                .iter()
+                .take(capacity)
+                .take_while(|tx| {
+                    bytes = bytes.saturating_add(tx.encode_2718_len());
+                    bytes <= byte_capacity
+                })
+                .count();
+            if transactions.len() > admitted {
                 self.metrics
                     .skipped_transactions_pending_pool_imports_at_capacity
-                    .increment((transactions.len() - capacity) as u64);
-                transactions.truncate(capacity);
+                    .increment((transactions.len() - admitted) as u64);
+                transactions.truncate(admitted);
             }
         }
 

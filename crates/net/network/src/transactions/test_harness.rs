@@ -187,9 +187,11 @@ impl Wake for WakeFlag {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::transactions::SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE;
+    use alloy_eips::eip2718::Encodable2718;
     use alloy_primitives::map::B256Set;
     use futures::StreamExt;
-    use reth_eth_wire::{message::MAX_MESSAGE_SIZE, NewPooledTransactionHashes68};
+    use reth_eth_wire::NewPooledTransactionHashes68;
     use reth_network_p2p::error::RequestError;
     use reth_primitives_traits::SignedTransaction;
     use reth_transaction_pool::{
@@ -480,22 +482,27 @@ mod tests {
 
     #[tokio::test]
     async fn broadcasts_leave_import_bytes_for_fetched_transactions() {
-        let txs = pooled_txs(2);
+        let txs = pooled_txs(3);
         let hashes = txs.iter().map(|tx| *tx.tx_hash()).collect::<Vec<_>>();
         let mut harness = TxFetchHarness::new([PEER_A]).await;
-        harness.announce(PEER_A, announcement(&hashes[1..]));
+        harness.announce(PEER_A, announcement(&hashes[2..]));
+        // leaves room for one fetch response and the first broadcast transaction
         let info = &harness.manager.pending_pool_imports_info;
-        info.pending_pool_imports_bytes
-            .store(info.max_pending_pool_imports_bytes - MAX_MESSAGE_SIZE, Ordering::Relaxed);
+        info.pending_pool_imports_bytes.store(
+            info.max_pending_pool_imports_bytes -
+                SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE -
+                txs[0].encode_2718_len(),
+            Ordering::Relaxed,
+        );
 
-        // One more broadcast message could fill the byte limit, so broadcasts are dropped while
-        // fetched transactions are still admitted.
+        // broadcasts are truncated to the bytes left after the reservation
         harness.manager.import_transactions(
             PEER_A,
-            PooledTransactions(txs[..1].to_vec()),
+            PooledTransactions(txs[..2].to_vec()),
             crate::transactions::TransactionSource::Broadcast,
         );
-        assert!(!harness.manager.transactions_by_peers.contains_key(&hashes[0]));
+        assert!(harness.manager.transactions_by_peers.contains_key(&hashes[0]));
+        assert!(!harness.manager.transactions_by_peers.contains_key(&hashes[1]));
         assert!(harness.manager.has_capacity_for_pending_pool_imports());
     }
 }
