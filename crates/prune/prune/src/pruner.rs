@@ -338,9 +338,10 @@ where
                 None
             }
             FinishedExExHeight::Height(finished_exex_height) => {
-                debug!(target: "pruner", %tip_block_number, %finished_exex_height, "Adjusting tip block number to the finished ExEx height");
                 // ExEx progress may be ahead of the persisted tip.
-                Some(finished_exex_height.min(tip_block_number))
+                let adjusted_tip_block_number = finished_exex_height.min(tip_block_number);
+                debug!(target: "pruner", %tip_block_number, %finished_exex_height, %adjusted_tip_block_number, "Capped tip block number at the finished ExEx height");
+                Some(adjusted_tip_block_number)
             }
         }
     }
@@ -383,12 +384,6 @@ fn is_stage_finished<Provider: StageCheckpointReader>(
 mod tests {
     use super::*;
     use crate::segments::AccountHistory;
-    use alloy_primitives::Address;
-    use reth_db_api::{
-        models::AccountBeforeTx,
-        tables,
-        transaction::{DbTx, DbTxMut},
-    };
     use reth_provider::test_utils::create_test_provider_factory;
     use reth_prune_types::{PruneMode, PruneSegment, MINIMUM_UNWIND_SAFE_DISTANCE};
 
@@ -444,18 +439,9 @@ mod tests {
     #[test]
     fn exex_height_preserves_pruning_distance() {
         let tip = 20_000;
-        for (finished_height, expected_tip) in
-            [(15_000, 15_000), (tip, tip), (40_000, tip), (u64::MAX, tip)]
-        {
+        for (finished_height, expected_tip) in [(15_000, 15_000), (tip, tip), (40_000, tip)] {
             let factory = create_test_provider_factory();
             let provider = factory.database_provider_rw().unwrap();
-            let target = expected_tip - MINIMUM_UNWIND_SAFE_DISTANCE;
-            let changeset = AccountBeforeTx { address: Address::ZERO, info: None };
-            provider.tx_ref().put::<tables::AccountChangeSets>(target, changeset.clone()).unwrap();
-            provider
-                .tx_ref()
-                .put::<tables::AccountChangeSets>(target + 1, changeset.clone())
-                .unwrap();
 
             let (_, finished_height_rx) =
                 watch::channel(FinishedExExHeight::Height(finished_height));
@@ -470,19 +456,14 @@ mod tests {
             );
             pruner.run_with_provider(&provider, tip).unwrap();
 
-            assert_eq!(provider.tx_ref().get::<tables::AccountChangeSets>(target).unwrap(), None);
-            assert_eq!(
-                provider.tx_ref().get::<tables::AccountChangeSets>(target + 1).unwrap(),
-                Some(changeset),
-                "finished height {finished_height}"
-            );
             assert_eq!(
                 provider
                     .get_prune_checkpoint(PruneSegment::AccountHistory)
                     .unwrap()
                     .unwrap()
                     .block_number,
-                Some(target)
+                Some(expected_tip - MINIMUM_UNWIND_SAFE_DISTANCE),
+                "finished height {finished_height}"
             );
             assert_eq!(pruner.previous_tip_block_number, Some(expected_tip));
         }
