@@ -668,8 +668,9 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
             self.update_index()?;
         }
 
-        // Pruned rows are cut from the files only now: readers that still map them hold the cached
-        // jar `update_index` just replaced, and it waits for them.
+        // Pruned rows are cut from the files only now. Both the cached jar `update_index` just
+        // replaced and the one it installed may still map the uncut length: the replaced one waits
+        // for its readers, and the installed one never reads past its row count.
         self.apply_pending_truncation()?;
 
         Ok(())
