@@ -189,7 +189,7 @@ mod tests {
     use super::*;
     use alloy_primitives::map::B256Set;
     use futures::StreamExt;
-    use reth_eth_wire::NewPooledTransactionHashes68;
+    use reth_eth_wire::{message::MAX_MESSAGE_SIZE, NewPooledTransactionHashes68};
     use reth_network_p2p::error::RequestError;
     use reth_primitives_traits::SignedTransaction;
     use reth_transaction_pool::{
@@ -476,5 +476,26 @@ mod tests {
         );
         assert_eq!(harness.pool().get_all(hashes[..2].to_vec()).len(), 2);
         assert_eq!(harness.take_requests().pop().unwrap().request.0, hashes[2..]);
+    }
+
+    #[tokio::test]
+    async fn broadcasts_leave_import_bytes_for_fetched_transactions() {
+        let txs = pooled_txs(2);
+        let hashes = txs.iter().map(|tx| *tx.tx_hash()).collect::<Vec<_>>();
+        let mut harness = TxFetchHarness::new([PEER_A]).await;
+        harness.announce(PEER_A, announcement(&hashes[1..]));
+        let info = &harness.manager.pending_pool_imports_info;
+        info.pending_pool_imports_bytes
+            .store(info.max_pending_pool_imports_bytes - MAX_MESSAGE_SIZE, Ordering::Relaxed);
+
+        // One more broadcast message could fill the byte limit, so broadcasts are dropped while
+        // fetched transactions are still admitted.
+        harness.manager.import_transactions(
+            PEER_A,
+            PooledTransactions(txs[..1].to_vec()),
+            crate::transactions::TransactionSource::Broadcast,
+        );
+        assert!(!harness.manager.transactions_by_peers.contains_key(&hashes[0]));
+        assert!(harness.manager.has_capacity_for_pending_pool_imports());
     }
 }

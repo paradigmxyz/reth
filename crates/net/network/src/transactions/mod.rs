@@ -57,8 +57,8 @@ use alloy_rlp::Encodable;
 use constants::SOFT_LIMIT_COUNT_HASHES_IN_NEW_POOLED_TRANSACTIONS_BROADCAST_MESSAGE;
 use futures::{stream::FuturesUnordered, Future, StreamExt};
 use reth_eth_wire::{
-    BroadcastPoolTransactions, Cells, EthNetworkPrimitives, EthVersion, GetCells,
-    GetPooledTransactions, LazyEncoded, LazyEncodedTransaction, NetworkPrimitives,
+    message::MAX_MESSAGE_SIZE, BroadcastPoolTransactions, Cells, EthNetworkPrimitives, EthVersion,
+    GetCells, GetPooledTransactions, LazyEncoded, LazyEncodedTransaction, NetworkPrimitives,
     NewPooledTransactionHashes, NewPooledTransactionHashes66, NewPooledTransactionHashes68,
     NewPooledTransactionHashes72, PooledTransactions, Transactions,
 };
@@ -504,11 +504,19 @@ impl<Pool: TransactionPool, N: NetworkPrimitives> TransactionsManager<Pool, N> {
         }
         // Reserve one batch (or half a small import budget) for fetched transactions.
         // Broadcasts are processed first and must not consume every newly freed slot.
-        let reserved = self
-            .pending_pool_imports_info
+        let info = &self.pending_pool_imports_info;
+        let reserved = info
             .max_pending_pool_imports
             .div_ceil(2)
             .min(SOFT_LIMIT_COUNT_HASHES_IN_GET_POOLED_TRANSACTIONS_REQUEST);
+        // Likewise reserve one message worth of bytes, so an admitted broadcast can't push
+        // imports past the byte limit that pauses fetching.
+        let reserved_bytes = info.max_pending_pool_imports_bytes.div_ceil(2).min(MAX_MESSAGE_SIZE);
+        if info.pending_pool_imports_bytes.load(Ordering::Relaxed).saturating_add(reserved_bytes) >=
+            info.max_pending_pool_imports_bytes
+        {
+            return 0
+        }
         capacity.saturating_sub(reserved)
     }
 
