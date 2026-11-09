@@ -32,9 +32,9 @@
 //!   -d '{"hello":"world"}'
 //! ```
 
+use alloy_rpc_server::server::{HttpBody, HttpRequest, HttpResponse};
 use clap::Parser;
 use http::{header::CONTENT_TYPE, Response, StatusCode};
-use jsonrpsee::server::{HttpBody, HttpRequest, HttpResponse};
 use reth_ethereum::{
     cli::{chainspec::EthereumChainSpecParser, interface::Cli},
     node::{EthereumAddOns, EthereumNode},

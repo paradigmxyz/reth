@@ -21,12 +21,12 @@ use alloy_primitives::{
     Address, Bytes, B256, U256,
 };
 use alloy_rlp::Encodable;
+use alloy_rpc_server::RpcResult;
 use alloy_rpc_types_engine::{
     BlobsBundleV2, ExecutionData, ExecutionPayloadEnvelopeV5, ExecutionPayloadEnvelopeV6,
     ExecutionPayloadSidecar, ExecutionPayloadV3, ExecutionPayloadV4, ForkchoiceState,
     PayloadAttributes, PraguePayloadFields,
 };
-use jsonrpsee::core::RpcResult;
 use reth_chainspec::{ChainSpecProvider, EthereumHardforks};
 use reth_consensus_common::validation::MAX_RLP_BLOCK_SIZE;
 use reth_engine_primitives::ConsensusEngineHandle;

@@ -1,7 +1,6 @@
 use super::LaunchNode;
 use crate::{rpc::RethRpcAddOns, EngineNodeLauncher, Node, NodeHandle};
 use alloy_consensus::transaction::Either;
-use jsonrpsee::core::{DeserializeOwned, Serialize};
 use reth_chainspec::EthChainSpec;
 use reth_consensus_debug_client::{
     DebugConsensusClient, EtherscanBlockProvider, PayloadProvider, RpcBlockProvider,
@@ -12,6 +11,7 @@ use reth_node_api::{
     PayloadAttributesBuilder, PayloadTypes,
 };
 use reth_primitives_traits::SealedBlock;
+use serde::{de::DeserializeOwned, Serialize};
 use std::{
     future::{Future, IntoFuture},
     pin::Pin,

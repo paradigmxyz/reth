@@ -9,6 +9,7 @@ use alloy_eips::{
     eip7685::RequestsOrHash,
 };
 use alloy_primitives::{BlockHash, BlockNumber, Bytes, Sealable, B128, B256, U64};
+use alloy_rpc_server::{RpcModule, RpcResult};
 use alloy_rpc_types_engine::{
     BogotaPayloadFields, CancunPayloadFields, ClientVersionV1, ExecutionData,
     ExecutionPayloadBodiesV1, ExecutionPayloadBodiesV2, ExecutionPayloadBodyV1,
@@ -17,7 +18,6 @@ use alloy_rpc_types_engine::{
     ForkchoiceUpdatedResponseV2, PayloadId, PayloadStatus, PayloadStatusV2, PraguePayloadFields,
     MAX_BYTES_PER_INCLUSION_LIST,
 };
-use jsonrpsee_core::{server::RpcModule, RpcResult};
 use reth_chainspec::EthereumHardforks;
 use reth_engine_primitives::{ConsensusEngineHandle, EngineApiValidator, EngineTypes};
 use reth_network_api::{CellCustody, NetworkInfo};
@@ -56,7 +56,7 @@ const MAX_BLOB_LIMIT: usize = 128;
 ///
 /// ## Implementers
 ///
-/// Implementing support for an engine API jsonrpsee RPC handler is done by defining the engine API
+/// Implementing support for an engine API RPC handler is done by defining the engine API
 /// server trait and implementing it on a type that can either wrap this [`EngineApi`] type or
 /// use a custom [`EngineTypes`] implementation if it mirrors ethereum's versioned engine API
 /// endpoints (e.g. opstack).

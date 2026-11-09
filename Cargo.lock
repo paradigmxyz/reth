@@ -595,6 +595,41 @@ dependencies = [
 ]
 
 [[package]]
+name = "alloy-rpc-macros"
+version = "0.1.0"
+source = "git+https://github.com/lean-apple/alloy-rpsee?branch=fix%2Freth-integration#e401abe730d52cb0d11289c3c8864e1e647ab2fa"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.119",
+]
+
+[[package]]
+name = "alloy-rpc-server"
+version = "0.1.0"
+source = "git+https://github.com/lean-apple/alloy-rpsee?branch=fix%2Freth-integration#e401abe730d52cb0d11289c3c8864e1e647ab2fa"
+dependencies = [
+ "alloy-json-rpc",
+ "alloy-primitives",
+ "bytes",
+ "futures-util",
+ "http",
+ "http-body",
+ "http-body-util",
+ "hyper",
+ "hyper-util",
+ "rand 0.9.5",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
+ "tokio",
+ "tokio-tungstenite",
+ "tokio-util",
+ "tower",
+ "tracing",
+]
+
+[[package]]
 name = "alloy-rpc-types"
 version = "2.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1043,7 +1078,7 @@ version = "1.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "40c48f72fd53cd289104fc64099abca73db4166ad86ea0b4341abe65af83dadc"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -1054,7 +1089,7 @@ checksum = "291e6a250ff86cd4a820112fb8898808a366d8f9f58ce16d1f538353ad55747d"
 dependencies = [
  "anstyle",
  "once_cell_polyfill",
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -3617,7 +3652,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -3961,9 +3996,9 @@ dependencies = [
 name = "example-custom-auth-http-middleware"
 version = "0.0.0"
 dependencies = [
+ "alloy-rpc-server",
  "clap",
  "http",
- "jsonrpsee",
  "reth-ethereum",
  "serde_json",
  "tower",
@@ -4078,9 +4113,10 @@ dependencies = [
 name = "example-custom-rpc-middleware"
 version = "0.0.0"
 dependencies = [
+ "alloy-rpc-server",
  "clap",
- "jsonrpsee",
  "reth-ethereum",
+ "serde_json",
  "tower",
  "tracing",
 ]
@@ -4194,8 +4230,9 @@ dependencies = [
  "alloy-primitives",
  "alloy-provider",
  "alloy-rpc-client",
+ "alloy-rpc-macros",
+ "alloy-rpc-server",
  "clap",
- "jsonrpsee",
  "reth-ethereum",
  "serde_json",
  "tokio",
@@ -4226,9 +4263,10 @@ dependencies = [
 name = "example-rpc-db"
 version = "0.0.0"
 dependencies = [
+ "alloy-rpc-macros",
+ "alloy-rpc-server",
  "eyre",
  "futures",
- "jsonrpsee",
  "reth-ethereum",
  "tokio",
 ]
@@ -4251,9 +4289,10 @@ name = "exex-subscription"
 version = "2.10.1"
 dependencies = [
  "alloy-primitives",
+ "alloy-rpc-macros",
+ "alloy-rpc-server",
  "eyre",
  "futures",
- "jsonrpsee",
  "reth-ethereum",
  "serde",
  "serde_json",
@@ -5469,7 +5508,7 @@ checksum = "3640c1c38b8e4e43584d8df18be5fc6b0aa314ce6ebf51b53313d4306cca8e46"
 dependencies = [
  "hermit-abi",
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -5659,102 +5698,6 @@ dependencies = [
  "cfg-if",
  "futures-util",
  "wasm-bindgen",
-]
-
-[[package]]
-name = "jsonrpsee"
-version = "0.26.1"
-dependencies = [
- "jsonrpsee-core",
- "jsonrpsee-proc-macros",
- "jsonrpsee-server",
- "jsonrpsee-types",
- "tokio",
- "tracing",
-]
-
-[[package]]
-name = "jsonrpsee-core"
-version = "0.26.1"
-dependencies = [
- "bytes",
- "futures-util",
- "http",
- "http-body",
- "http-body-util",
- "jsonrpsee",
- "jsonrpsee-types",
- "parking_lot",
- "pin-project",
- "rand 0.9.5",
- "rustc-hash",
- "serde",
- "serde_json",
- "thiserror 2.0.21",
- "tokio",
- "tower",
- "tracing",
-]
-
-[[package]]
-name = "jsonrpsee-proc-macros"
-version = "0.26.1"
-dependencies = [
- "jsonrpsee",
- "proc-macro-crate",
- "proc-macro2",
- "quote",
- "syn 2.0.119",
- "tokio",
-]
-
-[[package]]
-name = "jsonrpsee-server"
-version = "0.26.1"
-dependencies = [
- "futures-util",
- "http",
- "http-body",
- "hyper",
- "hyper-util",
- "jsonrpsee-core",
- "jsonrpsee-test-utils",
- "jsonrpsee-types",
- "pin-project",
- "serde",
- "serde_json",
- "soketto",
- "thiserror 2.0.21",
- "tokio",
- "tokio-stream",
- "tokio-util",
- "tower",
- "tracing",
- "tracing-subscriber",
-]
-
-[[package]]
-name = "jsonrpsee-test-utils"
-version = "0.26.1"
-dependencies = [
- "futures-util",
- "http-body-util",
- "hyper",
- "hyper-util",
- "serde",
- "serde_json",
- "soketto",
- "tokio",
- "tokio-util",
-]
-
-[[package]]
-name = "jsonrpsee-types"
-version = "0.26.1"
-dependencies = [
- "serde",
- "serde_json",
- "thiserror 2.0.21",
 ]
 
 [[package]]
@@ -6461,7 +6404,7 @@ version = "0.50.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7957b9740744892f114936ab4a57b3f487491bbeafaf8083688b16841a4240e5"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -7507,7 +7450,7 @@ dependencies = [
  "once_cell",
  "socket2",
  "tracing",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -7972,11 +7915,12 @@ dependencies = [
  "alloy-consensus",
  "alloy-eips",
  "alloy-primitives",
+ "alloy-rpc-macros",
+ "alloy-rpc-server",
  "alloy-rpc-types",
  "clap",
  "evm2",
  "eyre",
- "jsonrpsee",
  "metrics",
  "metrics-util",
  "reth-chainspec",
@@ -9309,11 +9253,11 @@ dependencies = [
 name = "reth-ipc"
 version = "2.10.1"
 dependencies = [
+ "alloy-rpc-server",
  "bytes",
  "futures",
  "futures-util",
  "interprocess",
- "jsonrpsee",
  "pin-project",
  "rand 0.9.5",
  "reth-tracing",
@@ -9585,13 +9529,13 @@ dependencies = [
  "alloy-network",
  "alloy-primitives",
  "alloy-rpc-client",
+ "alloy-rpc-server",
  "alloy-rpc-types",
  "alloy-rpc-types-engine",
  "aquamarine",
  "eyre",
  "fdlimit",
  "futures",
- "jsonrpsee",
  "parking_lot",
  "rayon",
  "reth-basic-payload-builder",
@@ -9643,6 +9587,7 @@ dependencies = [
  "reth-tracing",
  "reth-transaction-pool",
  "secp256k1 0.33.1",
+ "serde",
  "serde_json",
  "tempfile",
  "tokio",
@@ -9717,6 +9662,7 @@ dependencies = [
  "alloy-primitives",
  "alloy-provider",
  "alloy-rlp",
+ "alloy-rpc-server",
  "alloy-rpc-types-beacon",
  "alloy-rpc-types-engine",
  "alloy-rpc-types-eth",
@@ -9730,7 +9676,6 @@ dependencies = [
  "eyre",
  "futures",
  "http-body-util",
- "jsonrpsee",
  "rand 0.9.5",
  "reqwest",
  "reth-chainspec",
@@ -9843,8 +9788,8 @@ dependencies = [
  "flate2",
  "http",
  "http-body-util",
+ "hyper-util",
  "jemalloc_pprof",
- "jsonrpsee-server",
  "mappings",
  "metrics",
  "metrics-exporter-prometheus",
@@ -10098,6 +10043,7 @@ dependencies = [
  "alloy-primitives",
  "alloy-rlp",
  "alloy-rpc-client",
+ "alloy-rpc-server",
  "alloy-rpc-types",
  "alloy-rpc-types-admin",
  "alloy-rpc-types-beacon",
@@ -10118,8 +10064,6 @@ dependencies = [
  "futures",
  "humantime",
  "itertools 0.14.0",
- "jsonrpsee",
- "jsonrpsee-types",
  "parking_lot",
  "pin-project",
  "rand 0.9.5",
@@ -10173,6 +10117,8 @@ dependencies = [
  "alloy-genesis",
  "alloy-json-rpc",
  "alloy-primitives",
+ "alloy-rpc-macros",
+ "alloy-rpc-server",
  "alloy-rpc-types",
  "alloy-rpc-types-admin",
  "alloy-rpc-types-anvil",
@@ -10184,7 +10130,6 @@ dependencies = [
  "alloy-rpc-types-trace",
  "alloy-rpc-types-txpool",
  "alloy-serde",
- "jsonrpsee",
  "reth-chain-state",
  "reth-engine-primitives",
  "reth-network-peers",
@@ -10204,6 +10149,7 @@ dependencies = [
  "alloy-primitives",
  "alloy-provider",
  "alloy-rpc-client",
+ "alloy-rpc-server",
  "alloy-rpc-types-engine",
  "alloy-rpc-types-eth",
  "alloy-rpc-types-mev",
@@ -10211,9 +10157,8 @@ dependencies = [
  "alloy-transport",
  "clap",
  "dyn-clone",
+ "futures",
  "http",
- "jsonrpsee",
- "jsonrpsee-test-utils",
  "metrics",
  "pin-project",
  "reqwest",
@@ -10252,6 +10197,7 @@ dependencies = [
  "serde_json",
  "thiserror 2.0.21",
  "tokio",
+ "tokio-tungstenite",
  "tokio-util",
  "tower",
  "tower-http",
@@ -10266,11 +10212,11 @@ dependencies = [
  "alloy-json-rpc",
  "alloy-network",
  "alloy-primitives",
+ "alloy-rpc-server",
  "alloy-rpc-types-eth",
  "auto_impl",
  "dyn-clone",
  "evm2",
- "jsonrpsee-types",
  "reth-evm",
  "reth-primitives-traits",
  "reth-rpc-traits",
@@ -10302,10 +10248,9 @@ dependencies = [
  "alloy-eips",
  "alloy-primitives",
  "alloy-rlp",
+ "alloy-rpc-server",
  "alloy-rpc-types-engine",
  "assert_matches",
- "jsonrpsee-core",
- "jsonrpsee-types",
  "metrics",
  "reth-chainspec",
  "reth-engine-primitives",
@@ -10320,6 +10265,7 @@ dependencies = [
  "reth-primitives-traits",
  "reth-provider",
  "reth-rpc-api",
+ "reth-rpc-server-types",
  "reth-storage-api",
  "reth-tasks",
  "reth-testing-utils",
@@ -10342,6 +10288,8 @@ dependencies = [
  "alloy-network",
  "alloy-primitives",
  "alloy-rlp",
+ "alloy-rpc-macros",
+ "alloy-rpc-server",
  "alloy-rpc-types-eth",
  "alloy-rpc-types-mev",
  "alloy-serde",
@@ -10351,8 +10299,6 @@ dependencies = [
  "evm2",
  "evm2-inspectors",
  "futures",
- "jsonrpsee",
- "jsonrpsee-types",
  "parking_lot",
  "reth-chain-state",
  "reth-chainspec",
@@ -10385,6 +10331,7 @@ dependencies = [
  "alloy-network",
  "alloy-primitives",
  "alloy-rpc-client",
+ "alloy-rpc-server",
  "alloy-rpc-types-eth",
  "alloy-serde",
  "alloy-sol-types",
@@ -10394,8 +10341,6 @@ dependencies = [
  "evm2-inspectors",
  "futures",
  "itertools 0.14.0",
- "jsonrpsee-core",
- "jsonrpsee-types",
  "metrics",
  "rand 0.9.5",
  "reqwest",
@@ -10429,6 +10374,7 @@ name = "reth-rpc-layer"
 version = "2.10.1"
 dependencies = [
  "alloy-json-rpc",
+ "alloy-rpc-server",
  "alloy-rpc-types-engine",
  "brotli",
  "bytes",
@@ -10436,8 +10382,6 @@ dependencies = [
  "http",
  "http-body",
  "http-body-util",
- "jsonrpsee",
- "jsonrpsee-server",
  "pin-project",
  "reqwest",
  "tokio",
@@ -10452,12 +10396,12 @@ name = "reth-rpc-server-types"
 version = "2.10.1"
 dependencies = [
  "alloy-primitives",
+ "alloy-rpc-server",
  "alloy-rpc-types-engine",
- "jsonrpsee-core",
- "jsonrpsee-types",
  "reth-errors",
  "reth-network-api",
  "serde",
+ "serde_json",
  "strum 0.27.2",
 ]
 
@@ -11267,7 +11211,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -11324,7 +11268,7 @@ dependencies = [
  "security-framework",
  "security-framework-sys",
  "webpki-root-certs",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -12011,23 +11955,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c3d1e2c7f27f8d4cb10542a02c49005dbd6e93095799d6f3be745fae9f8fedd4"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
-]
-
-[[package]]
-name = "soketto"
-version = "0.8.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2e859df029d160cb88608f5d7df7fb4753fd20fdfb4de5644f3d8b8440841721"
-dependencies = [
- "base64 0.22.1",
- "bytes",
- "futures",
- "http",
- "httparse",
- "log",
- "rand 0.8.8",
- "sha1",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -12297,7 +12225,7 @@ dependencies = [
  "getrandom 0.4.3",
  "once_cell",
  "rustix",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -12627,7 +12555,6 @@ checksum = "494815d09bf52b5548659851081238f0ca39ff638363907596da739561c62c52"
 dependencies = [
  "bytes",
  "futures-core",
- "futures-io",
  "futures-sink",
  "futures-util",
  "libc",
@@ -13463,7 +13390,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]

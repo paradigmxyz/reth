@@ -81,12 +81,6 @@ members = [
     "crates/prune/prune",
     "crates/prune/types",
     "crates/rpc/ipc/",
-    "crates/rpc/jsonrpsee/core/",
-    "crates/rpc/jsonrpsee/jsonrpsee/",
-    "crates/rpc/jsonrpsee/proc-macros/",
-    "crates/rpc/jsonrpsee/server/",
-    "crates/rpc/jsonrpsee/test-utils/",
-    "crates/rpc/jsonrpsee/types/",
     "crates/rpc/rpc-api/",
     "crates/rpc/rpc-builder/",
     "crates/rpc/rpc-engine-api/",
@@ -464,6 +458,8 @@ alloy-network = { version = "2.5.0", default-features = false }
 alloy-node-bindings = "2.5.0"
 alloy-provider = { version = "2.5.0", features = ["reqwest", "debug-api"], default-features = false }
 alloy-rpc-client = { version = "2.5.0", default-features = false }
+alloy-rpc-macros = { git = "https://github.com/lean-apple/alloy-rpsee", branch = "fix/reth-integration" }
+alloy-rpc-server = { git = "https://github.com/lean-apple/alloy-rpsee", branch = "fix/reth-integration" }
 alloy-rpc-types = { version = "2.5.0", features = ["eth"], default-features = false }
 alloy-rpc-types-admin = { version = "2.5.0", default-features = false }
 alloy-rpc-types-anvil = { version = "2.5.0", default-features = false }
@@ -572,12 +568,6 @@ libp2p-identity = { version = "0.3", default-features = false }
 multiaddr = { version = "0.19", default-features = false }
 
 # rpc
-jsonrpsee = { path = "crates/rpc/jsonrpsee/jsonrpsee" }
-jsonrpsee-core = { path = "crates/rpc/jsonrpsee/core" }
-jsonrpsee-proc-macros = { path = "crates/rpc/jsonrpsee/proc-macros" }
-jsonrpsee-server = { path = "crates/rpc/jsonrpsee/server" }
-jsonrpsee-test-utils = { path = "crates/rpc/jsonrpsee/test-utils" }
-jsonrpsee-types = { path = "crates/rpc/jsonrpsee/types" }
 
 # http
 http = "1.0"

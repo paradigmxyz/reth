@@ -3,6 +3,9 @@
 use std::sync::Arc;
 
 use alloy_primitives::TxHash;
+use alloy_rpc_server::{
+    ErrorPayload, PendingSubscriptionSink, SubscriptionMessage, SubscriptionSink,
+};
 use alloy_rpc_types_eth::{
     pubsub::{
         Params, PubSubSyncStatus, SubscriptionKind, SyncStatusMetadata, TransactionReceiptsParams,
@@ -10,9 +13,6 @@ use alloy_rpc_types_eth::{
     Filter,
 };
 use futures::StreamExt;
-use jsonrpsee::{
-    server::SubscriptionMessage, types::ErrorObject, PendingSubscriptionSink, SubscriptionSink,
-};
 use reth_chain_state::CanonStateSubscriptions;
 use reth_network_api::NetworkInfo;
 use reth_rpc_convert::RpcHeader;
@@ -87,7 +87,7 @@ where
         accepted_sink: SubscriptionSink,
         kind: SubscriptionKind,
         params: Option<Params>,
-    ) -> Result<(), ErrorObject<'static>> {
+    ) -> Result<(), ErrorPayload> {
         #[allow(unreachable_patterns)]
         match kind {
             SubscriptionKind::NewHeads => {
@@ -228,7 +228,7 @@ where
         pending: PendingSubscriptionSink,
         kind: SubscriptionKind,
         params: Option<Params>,
-    ) -> jsonrpsee::core::SubscriptionResult {
+    ) -> alloy_rpc_server::SubscriptionResult {
         let sink = pending.accept().await?;
         let pubsub = self.clone();
         self.inner.subscription_task_spawner.spawn_task(async move {
@@ -239,7 +239,7 @@ where
     }
 }
 
-/// Helper to convert a serde error into an [`ErrorObject`]
+/// Helper to convert a serde error into an [`ErrorPayload`]
 #[derive(Debug, thiserror::Error)]
 #[error("Failed to serialize subscription item: {0}")]
 pub struct SubscriptionSerializeError(#[from] serde_json::Error);
@@ -250,17 +250,14 @@ impl SubscriptionSerializeError {
     }
 }
 
-impl From<SubscriptionSerializeError> for ErrorObject<'static> {
+impl From<SubscriptionSerializeError> for ErrorPayload {
     fn from(value: SubscriptionSerializeError) -> Self {
         internal_rpc_err(value.to_string())
     }
 }
 
 /// Pipes all stream items to the subscription sink.
-async fn pipe_from_stream<T, St>(
-    sink: SubscriptionSink,
-    mut stream: St,
-) -> Result<(), ErrorObject<'static>>
+async fn pipe_from_stream<T, St>(sink: SubscriptionSink, mut stream: St) -> Result<(), ErrorPayload>
 where
     St: Stream<Item = T> + Unpin,
     T: Serialize,

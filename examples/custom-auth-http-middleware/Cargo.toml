@@ -10,7 +10,7 @@ reth-ethereum = { workspace = true, features = ["node", "rpc", "cli"] }
 
 clap = { workspace = true, features = ["derive"] }
 http = { workspace = true }
-jsonrpsee = { workspace = true, features = ["server"] }
+alloy-rpc-server.workspace = true
 serde_json.workspace = true
 tower.workspace = true
 tracing.workspace = true

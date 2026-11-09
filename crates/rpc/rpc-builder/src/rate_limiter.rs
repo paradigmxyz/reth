@@ -1,6 +1,6 @@
-//! [`jsonrpsee`] helper layer for rate limiting certain methods.
+//! RPC middleware for rate limiting certain methods.
 
-use jsonrpsee::{server::middleware::rpc::RpcServiceT, types::Request, MethodResponse};
+use alloy_rpc_server::{Batch, MethodResponse, Request, RpcServiceT};
 use std::{
     future::Future,
     pin::Pin,
@@ -66,7 +66,7 @@ where
     S: RpcServiceT + Send + Sync + Clone + 'static,
 {
     fn call<'a>(&self, req: Request<'a>) -> impl Future<Output = MethodResponse> + Send + 'a {
-        let method_name = req.method_name();
+        let method_name = req.method.as_ref();
         if method_name.starts_with("trace_") || method_name.starts_with("debug_") {
             RateLimitingRequestFuture {
                 fut: self.inner.call(req),
@@ -80,17 +80,11 @@ where
         }
     }
 
-    fn batch<'a>(
-        &self,
-        requests: jsonrpsee::core::middleware::Batch<'a>,
-    ) -> impl Future<Output = MethodResponse> + Send + 'a {
+    fn batch<'a>(&self, requests: Batch<'a>) -> impl Future<Output = MethodResponse> + Send + 'a {
         self.inner.batch(requests)
     }
 
-    fn notification<'a>(
-        &self,
-        n: jsonrpsee::core::middleware::Notification<'a>,
-    ) -> impl Future<Output = MethodResponse> + Send + 'a {
+    fn notification<'a>(&self, n: Request<'a>) -> impl Future<Output = MethodResponse> + Send + 'a {
         self.inner.notification(n)
     }
 }

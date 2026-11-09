@@ -21,7 +21,7 @@ pin-project.workspace = true
 tower.workspace = true
 
 # misc
-jsonrpsee = { workspace = true, features = ["server"] }
+alloy-rpc-server.workspace = true
 tracing.workspace = true
 bytes.workspace = true
 thiserror.workspace = true

@@ -10,6 +10,8 @@ use alloy_eips::{
 };
 use alloy_json_rpc::RpcObject;
 use alloy_primitives::{Address, BlockHash, Bytes, B128, B256, U256, U64};
+use alloy_rpc_macros::rpc;
+use alloy_rpc_server::{RpcModule, RpcResult};
 use alloy_rpc_types_engine::{
     ClientVersionV1, ExecutionPayloadBodiesV1, ExecutionPayloadBodiesV2, ExecutionPayloadInputV2,
     ExecutionPayloadV1, ExecutionPayloadV3, ExecutionPayloadV4, ForkchoiceState, ForkchoiceUpdated,
@@ -19,13 +21,12 @@ use alloy_rpc_types_eth::{
     state::StateOverride, BlockOverrides, EIP1186AccountProofResponse, Filter, Index, SyncStatus,
 };
 use alloy_serde::JsonStorageKey;
-use jsonrpsee::{core::RpcResult, proc_macros::rpc, RpcModule};
 use reth_engine_primitives::EngineTypes;
 use serde_json::Value;
 
 /// Helper trait for the engine api server.
 ///
-/// This type-erases the concrete [`jsonrpsee`] server implementation and only returns the
+/// This type-erases the concrete server implementation and only returns the
 /// [`RpcModule`] that contains all the endpoints of the server.
 pub trait IntoEngineApiRpcModule {
     /// Consumes the type and returns all the methods and subscriptions defined in the trait and
@@ -33,12 +34,12 @@ pub trait IntoEngineApiRpcModule {
     fn into_rpc_module(self) -> RpcModule<()>;
 }
 
-// NOTE: We can't use associated types in the `EngineApi` trait because of jsonrpsee, so we use a
-// generic here. It would be nice if the rpc macro would understand which types need to have serde.
-// By default, if the trait has a generic, the rpc macro will add e.g. `Engine: DeserializeOwned` to
-// the trait bounds, which is not what we want, because `Types` is not used directly in any of the
-// trait methods. Instead, we have to add the bounds manually. This would be disastrous if we had
-// more than one associated type used in the trait methods.
+// NOTE: We can't use associated types in the `EngineApi` trait because of the `rpc` macro, so we
+// use a generic here. It would be nice if the rpc macro would understand which types need to have
+// serde. By default, if the trait has a generic, the rpc macro will add e.g. `Engine:
+// DeserializeOwned` to the trait bounds, which is not what we want, because `Types` is not used
+// directly in any of the trait methods. Instead, we have to add the bounds manually. This would be
+// disastrous if we had more than one associated type used in the trait methods.
 
 #[rpc(server, namespace = "engine")]
 pub trait EngineApi<Engine: EngineTypes> {

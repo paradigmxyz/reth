@@ -1,5 +1,5 @@
+use alloy_rpc_server::server::{is_upgrade_request, HttpBody};
 use http::{header::ORIGIN, HeaderValue, Method, Request, Response, StatusCode};
-use jsonrpsee::server::{ws, HttpBody};
 use tower_http::{
     cors::{AllowOrigin, Any, CorsLayer},
     validate_request::ValidateRequest,
@@ -58,14 +58,14 @@ impl<B> ValidateRequest<B> for WsOriginValidator {
 
     fn validate(&mut self, request: &mut Request<B>) -> Result<(), Response<HttpBody>> {
         if let Some(allowed) = &self.origins &&
-            ws::is_upgrade_request(request)
+            is_upgrade_request(request.headers())
         {
             let mut origins = request.headers().get_all(ORIGIN).iter();
             // Originless clients are allowed; an explicit Origin must match exactly once.
             if let Some(origin) = origins.next() &&
                 (origins.next().is_some() || !allowed.contains(origin))
             {
-                let mut response = Response::new(HttpBody::empty());
+                let mut response = Response::new(HttpBody::default());
                 *response.status_mut() = StatusCode::FORBIDDEN;
                 return Err(response)
             }

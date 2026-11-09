@@ -1,6 +1,6 @@
 use crate::{AuthValidator, JwtError, JwtSecret};
+use alloy_rpc_server::server::{HttpBody, HttpResponse};
 use http::{header, HeaderMap, Response, StatusCode};
-use jsonrpsee_server::{HttpBody, HttpResponse};
 use tracing::error;
 
 /// Implements JWT validation logics and integrates
@@ -53,7 +53,7 @@ fn err_response(err: JwtError) -> HttpResponse {
     // Then we are safe to "expect" on the result.
     Response::builder()
         .status(StatusCode::UNAUTHORIZED)
-        .body(HttpBody::new(err.to_string()))
+        .body(HttpBody::from(err.to_string()))
         .expect("This should never happen")
 }
 

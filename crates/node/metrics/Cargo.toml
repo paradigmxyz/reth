@@ -16,11 +16,11 @@ metrics-exporter-prometheus.workspace = true
 metrics-process.workspace = true
 metrics-util.workspace = true
 
-tokio.workspace = true
+tokio = { workspace = true, features = ["macros", "net"] }
 
-jsonrpsee-server.workspace = true
 http.workspace = true
 http-body-util.workspace = true
+hyper-util = { workspace = true, features = ["server-auto", "service", "tokio"] }
 bytes.workspace = true
 tower.workspace = true
 tower-http = { workspace = true, features = ["compression-gzip"] }

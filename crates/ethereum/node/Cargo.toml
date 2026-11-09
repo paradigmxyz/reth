@@ -50,7 +50,7 @@ alloy-consensus.workspace = true
 alloy-eips.workspace = true
 alloy-rlp.workspace = true
 alloy-primitives.workspace = true
-jsonrpsee.workspace = true
+alloy-rpc-server.workspace = true
 alloy-network.workspace = true
 alloy-rpc-types-eth.workspace = true
 alloy-rpc-types-engine = { workspace = true, features = ["ssz"] }

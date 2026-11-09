@@ -1,14 +1,11 @@
 //! Builder support for rpc components.
 
-pub use jsonrpsee::{
-    core::middleware::layer::Either,
-    server::middleware::rpc::{RpcService, RpcServiceBuilder},
-};
+pub use alloy_rpc_server::{server::RpcServiceBuilder, RpcService};
 use reth_engine_tree::tree::WaitForCaches;
 pub use reth_engine_tree::tree::{BasicEngineValidator, EngineValidator};
 pub use reth_rpc_builder::{
     middleware::{RethAuthHttpMiddleware, RethRpcMiddleware},
-    Identity, Stack,
+    Either, Identity, Stack,
 };
 use reth_storage_overlay::OverlayManager;
 
@@ -19,10 +16,10 @@ use crate::{
 use alloy_consensus::BlockHeader;
 use alloy_eips::BlockId;
 use alloy_network::Ethereum;
+use alloy_rpc_server::RpcModule;
 use alloy_rpc_types::engine::ClientVersionV1;
 use alloy_rpc_types_engine::ExecutionData;
 use futures::{Stream, StreamExt};
-use jsonrpsee::RpcModule;
 use parking_lot::Mutex;
 use reth_chain_state::{CanonStateNotification, CanonStateSubscriptions};
 use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthereumHardforks, Hardforks};
@@ -1465,11 +1462,11 @@ where
 /// Builder for engine API RPC module.
 ///
 /// This builder type is responsible for providing an instance of [`IntoEngineApiRpcModule`], which
-/// is effectively a helper trait that provides the type erased [`jsonrpsee::RpcModule`] instance
+/// is effectively a helper trait that provides the type erased [`RpcModule`] instance
 /// that contains the method handlers for the engine API. See [`EngineApi`] for an implementation of
 /// [`IntoEngineApiRpcModule`].
 pub trait EngineApiBuilder<Node: FullNodeComponents>: Send + Sync {
-    /// The engine API RPC module. Only required to be convertible to an [`jsonrpsee::RpcModule`].
+    /// The engine API RPC module. Only required to be convertible to an [`RpcModule`].
     type EngineApi: IntoEngineApiRpcModule + Send + Sync;
 
     /// Builds the engine API instance given the provided [`AddOnsContext`].

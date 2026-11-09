@@ -2,13 +2,13 @@
 
 use alloy_consensus::{transaction::TxHashRef, BlockHeader};
 use alloy_primitives::U256;
+use alloy_rpc_server::RpcResult;
 use alloy_rpc_types_eth::{BlockId, Log};
 use alloy_rpc_types_mev::{
     BundleItem, Inclusion, MevSendBundle, Privacy, RefundConfig, SimBundleLogs, SimBundleOverrides,
     SimBundleResponse, Validity,
 };
 use evm2::evm::DynDatabase;
-use jsonrpsee::core::RpcResult;
 use reth_errors::RethError;
 use reth_evm::{ConfigureEvm, Evm, EvmEnv};
 use reth_primitives_traits::Recovered;
@@ -690,10 +690,10 @@ mod tests {
 
             // Nonzero inclusion bounds reach the simulation check instead of failing parsing.
             let err = api.sim_bundle(bundle(number + 1), overrides.clone()).await.unwrap_err();
-            assert!(err.message().contains("invalid inclusion"), "{err}");
+            assert!(err.message.contains("invalid inclusion"), "{err}");
             if number > 1 {
                 let err = api.sim_bundle(bundle(number - 1), overrides).await.unwrap_err();
-                assert!(err.message().contains("invalid inclusion"), "{err}");
+                assert!(err.message.contains("invalid inclusion"), "{err}");
             }
         }
     }

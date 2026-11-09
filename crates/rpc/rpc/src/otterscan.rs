@@ -3,6 +3,7 @@ use alloy_consensus::{BlockHeader, Typed2718};
 use alloy_eips::{eip1898::LenientBlockNumberOrTag, BlockId};
 use alloy_network::{primitives::HeaderResponse, ReceiptResponse, TransactionResponse};
 use alloy_primitives::{Address, Bytes, TxHash, B256, U256};
+use alloy_rpc_server::{ErrorPayload, RpcResult};
 use alloy_rpc_types_eth::{BlockTransactions, TransactionReceipt};
 use alloy_rpc_types_trace::{
     otterscan::{
@@ -19,7 +20,6 @@ use evm2_inspectors::{
         TracingInspectorConfig,
     },
 };
-use jsonrpsee::{core::RpcResult, types::ErrorObjectOwned};
 use reth_chainspec::ChainSpecProvider;
 use reth_primitives_traits::{BlockBody, TxTy};
 use reth_rpc_api::{EthApiServer, OtterscanServer};
@@ -79,7 +79,7 @@ where
                     self.eth
                         .recovered_block(block.header.hash().into())
                         .await
-                        .map_err(Into::<ErrorObjectOwned>::into)?
+                        .map_err(Into::<ErrorPayload>::into)?
                         .ok_or(EthApiError::HeaderNotFound(block.header.hash().into()))?,
                 )
             };
@@ -330,7 +330,7 @@ where
         }
 
         let permit = self.acquire_trace_permit().await?;
-        let num = binary_search::<_, _, ErrorObjectOwned>(
+        let num = binary_search::<_, _, ErrorPayload>(
             1,
             self.eth.block_number()?.saturating_to(),
             |mid| {
@@ -696,8 +696,8 @@ mod tests {
             .await
             .unwrap_err(),
         ] {
-            assert_eq!(error.code(), -32603);
-            assert_eq!(error.message(), "unimplemented");
+            assert_eq!(error.code, -32603);
+            assert_eq!(error.message, "unimplemented");
         }
     }
 

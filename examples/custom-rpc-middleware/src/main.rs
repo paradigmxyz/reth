@@ -20,14 +20,8 @@
 //! }' | jq
 //! ```
 
+use alloy_rpc_server::{Batch, ErrorPayload, Id, MethodResponse, Request, RpcServiceT};
 use clap::Parser;
-use jsonrpsee::{
-    core::{
-        middleware::{Batch, Notification, RpcServiceT},
-        server::MethodResponse,
-    },
-    types::{ErrorObjectOwned, Id, Request},
-};
 use reth_ethereum::{
     cli::{chainspec::EthereumChainSpecParser, interface::Cli},
     node::{EthereumAddOns, EthereumNode},
@@ -80,11 +74,11 @@ where
 
             //we can modify the response with our own custom error
             if resp.is_error() {
-                let err = ErrorObjectOwned::owned(
-                    -31404,
-                    "CustomError",
-                    Some("Our very own custom error message"),
-                );
+                let err = ErrorPayload {
+                    code: -31404,
+                    message: "CustomError".into(),
+                    data: serde_json::value::to_raw_value("Our very own custom error message").ok(),
+                };
                 return MethodResponse::error(Id::Number(1), err);
             }
 
@@ -97,10 +91,7 @@ where
         self.service.batch(req)
     }
 
-    fn notification<'a>(
-        &self,
-        n: Notification<'a>,
-    ) -> impl Future<Output = MethodResponse> + Send + 'a {
+    fn notification<'a>(&self, n: Request<'a>) -> impl Future<Output = MethodResponse> + Send + 'a {
         self.service.notification(n)
     }
 }

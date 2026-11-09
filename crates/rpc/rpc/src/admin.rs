@@ -1,11 +1,11 @@
 use std::sync::Arc;
 
 use alloy_primitives::keccak256;
+use alloy_rpc_server::RpcResult;
 use alloy_rpc_types_admin::{
     EthInfo, EthPeerInfo, EthProtocolInfo, NodeInfo, PeerInfo, PeerNetworkInfo, PeerProtocolInfo,
     Ports, ProtocolInfo,
 };
-use jsonrpsee::core::RpcResult;
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_network_api::{NetworkInfo, Peers};
 use reth_network_peers::{AnyNode, NodeRecord};
@@ -147,8 +147,8 @@ where
     /// Handler for `admin_peerEvents`
     async fn subscribe_peer_events(
         &self,
-        _pending: jsonrpsee::PendingSubscriptionSink,
-    ) -> jsonrpsee::core::SubscriptionResult {
+        _pending: alloy_rpc_server::PendingSubscriptionSink,
+    ) -> alloy_rpc_server::SubscriptionResult {
         Err("admin_peerEvents is not implemented yet".into())
     }
 

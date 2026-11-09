@@ -1,5 +1,6 @@
+use alloy_rpc_macros::rpc;
+use alloy_rpc_server::RpcResult;
 use alloy_rpc_types_admin::{NodeInfo, PeerInfo};
-use jsonrpsee::{core::RpcResult, proc_macros::rpc};
 use reth_network_peers::{AnyNode, NodeRecord};
 
 /// Admin namespace rpc interface that gives access to several non-standard RPC methods.
@@ -47,7 +48,7 @@ pub trait AdminApi {
         unsubscribe = "peerEvents_unsubscribe",
         item = String
     )]
-    async fn subscribe_peer_events(&self) -> jsonrpsee::core::SubscriptionResult;
+    async fn subscribe_peer_events(&self) -> alloy_rpc_server::SubscriptionResult;
 
     /// Returns the ENR of the node.
     #[method(name = "nodeInfo")]

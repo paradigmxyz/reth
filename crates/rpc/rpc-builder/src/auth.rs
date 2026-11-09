@@ -4,15 +4,12 @@ use crate::{
 };
 use alloy_provider::{IpcConnect, WsConnect};
 use alloy_rpc_client::{ClientBuilder, RpcClient};
-use alloy_transport::Authorization;
-use jsonrpsee::{
-    core::RegisterMethodError,
-    server::{
-        middleware::rpc::RpcServiceBuilder, AlreadyStoppedError, RpcModule, ServerConfig,
-        ServerConfigBuilder,
-    },
-    Methods,
+use alloy_rpc_server::{
+    error::AlreadyStoppedError,
+    server::{RpcServiceBuilder, ServerConfig, ServerConfigBuilder, ServerHandle},
+    Methods, RegisterMethodError, RpcModule,
 };
+use alloy_transport::Authorization;
 use reth_rpc_api::servers::*;
 use reth_rpc_eth_types::EthSubscriptionIdProvider;
 use reth_rpc_layer::{
@@ -22,7 +19,7 @@ use reth_rpc_server_types::constants;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use tower::layer::util::{Identity, Stack};
 
-pub use jsonrpsee::server::ServerBuilder;
+pub use alloy_rpc_server::server::ServerBuilder;
 pub use reth_ipc::server::Builder as IpcServerBuilder;
 
 /// Server configuration for the auth server.
@@ -266,7 +263,7 @@ impl<RpcMiddleware, HttpMiddleware> AuthServerConfigBuilder<RpcMiddleware, HttpM
     /// Configures the JSON-RPC server
     ///
     /// Note: this always configures an [`EthSubscriptionIdProvider`]
-    /// [`IdProvider`](jsonrpsee::server::IdProvider) for convenience.
+    /// [`IdProvider`](alloy_rpc_server::IdProvider) for convenience.
     pub fn with_server_config(mut self, config: ServerConfigBuilder) -> Self {
         self.server_config = Some(config.set_id_provider(EthSubscriptionIdProvider::default()));
         self
@@ -397,10 +394,10 @@ impl AuthRpcModule {
 #[must_use = "Server stops if dropped"]
 pub struct AuthServerHandle {
     local_addr: SocketAddr,
-    handle: Option<jsonrpsee::server::ServerHandle>,
+    handle: Option<ServerHandle>,
     secret: JwtSecret,
     ipc_endpoint: Option<String>,
-    ipc_handle: Option<jsonrpsee::server::ServerHandle>,
+    ipc_handle: Option<ServerHandle>,
 }
 
 // === impl AuthServerHandle ===
@@ -487,7 +484,7 @@ impl AuthServerHandle {
     }
 
     /// Returns an ipc handle
-    pub fn ipc_handle(&self) -> Option<jsonrpsee::server::ServerHandle> {
+    pub fn ipc_handle(&self) -> Option<ServerHandle> {
         self.ipc_handle.clone()
     }
 

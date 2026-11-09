@@ -9,7 +9,8 @@ license.workspace = true
 reth-ethereum = { workspace = true, features = ["node", "pool", "cli"] }
 
 clap = { workspace = true, features = ["derive"] }
-jsonrpsee = { workspace = true, features = ["server", "macros"] }
+alloy-rpc-server.workspace = true
+alloy-rpc-macros.workspace = true
 tokio.workspace = true
 serde_json.workspace = true
 

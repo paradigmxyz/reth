@@ -3,9 +3,9 @@
 use alloy_consensus::{transaction::TxHashRef, EnvKzgSettings, Transaction as _};
 use alloy_eips::eip7840::BlobParams;
 use alloy_primitives::{uint, Keccak256, U256};
+use alloy_rpc_server::RpcResult;
 use alloy_rpc_types_mev::{EthCallBundle, EthCallBundleResponse, EthCallBundleTransactionResult};
 use evm2::evm::DynDatabase;
-use jsonrpsee::core::RpcResult;
 use reth_chainspec::{ChainSpecProvider, EthChainSpec};
 use reth_evm::{ConfigureEvm, Evm, EvmEnv};
 use reth_rpc_eth_api::{

@@ -1,11 +1,6 @@
 use crate::utils::{test_address, test_rpc_builder};
 use alloy_primitives::U64;
-use jsonrpsee::{
-    core::middleware::{Batch, Notification},
-    server::middleware::rpc::RpcServiceT,
-    types::Request,
-    MethodResponse,
-};
+use alloy_rpc_server::{Batch, MethodResponse, Request, RpcServiceT};
 use reth_rpc_builder::{RpcServerConfig, TransportRpcModuleConfig};
 use reth_rpc_server_types::RpcModuleSelection;
 use reth_tokio_util::EventSender;
@@ -57,10 +52,7 @@ where
         self.service.batch(req)
     }
 
-    fn notification<'a>(
-        &self,
-        n: Notification<'a>,
-    ) -> impl Future<Output = MethodResponse> + Send + 'a {
+    fn notification<'a>(&self, n: Request<'a>) -> impl Future<Output = MethodResponse> + Send + 'a {
         self.service.notification(n)
     }
 }

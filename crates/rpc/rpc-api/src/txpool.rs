@@ -1,7 +1,8 @@
 use alloy_json_rpc::RpcObject;
 use alloy_primitives::Address;
+use alloy_rpc_macros::rpc;
+use alloy_rpc_server::RpcResult;
 use alloy_rpc_types_txpool::{TxpoolContent, TxpoolContentFrom, TxpoolInspect, TxpoolStatus};
-use jsonrpsee::{core::RpcResult, proc_macros::rpc};
 
 /// Txpool rpc interface.
 #[rpc(server, namespace = "txpool")]

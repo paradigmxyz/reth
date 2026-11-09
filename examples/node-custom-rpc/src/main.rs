@@ -14,12 +14,11 @@
 
 #![warn(unused_crate_dependencies)]
 
-use clap::Parser;
-use jsonrpsee::{
-    core::{RpcResult, SubscriptionResult},
-    proc_macros::rpc,
-    PendingSubscriptionSink, SubscriptionMessage,
+use alloy_rpc_macros::rpc;
+use alloy_rpc_server::{
+    PendingSubscriptionSink, RpcResult, SubscriptionMessage, SubscriptionResult,
 };
+use clap::Parser;
 use reth_ethereum::{
     cli::{chainspec::EthereumChainSpecParser, interface::Cli},
     node::EthereumNode,
@@ -84,7 +83,7 @@ pub trait TxpoolExtApi {
 
     /// Creates a subscription that returns the number of transactions in the pool every 10s.
     #[subscription(name = "subscribeTransactionCount", item = usize)]
-    fn subscribe_transaction_count(&self, delay: Option<u64>) -> SubscriptionResult;
+    async fn subscribe_transaction_count(&self, delay: Option<u64>) -> SubscriptionResult;
 }
 
 /// The type that implements the `txpoolExt` rpc namespace trait
@@ -107,7 +106,7 @@ where
         Ok(())
     }
 
-    fn subscribe_transaction_count(
+    async fn subscribe_transaction_count(
         &self,
         pending_subscription_sink: PendingSubscriptionSink,
         delay: Option<u64>,
@@ -149,7 +148,7 @@ mod tests {
     use alloy_primitives::B256;
     use alloy_provider::WsConnect;
     use alloy_rpc_client::ClientBuilder;
-    use jsonrpsee::server::ServerBuilder;
+    use alloy_rpc_server::server::ServerBuilder;
     use reth_ethereum::pool::noop::NoopTransactionPool;
 
     #[cfg(test)]
@@ -167,7 +166,7 @@ mod tests {
             Ok(())
         }
 
-        fn subscribe_transaction_count(
+        async fn subscribe_transaction_count(
             &self,
             pending: PendingSubscriptionSink,
             delay: Option<u64>,

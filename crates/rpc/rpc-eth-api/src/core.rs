@@ -1,5 +1,5 @@
-//! Implementation of the [`jsonrpsee`] generated [`EthApiServer`] trait. Handles RPC requests for
-//! the `eth_` namespace.
+//! Implementation of the [`rpc`](alloy_rpc_macros::rpc) generated [`EthApiServer`] trait. Handles
+//! RPC requests for the `eth_` namespace.
 use crate::{
     helpers::{EthApiSpec, EthBlocks, EthCall, EthFees, EthState, EthTransactions, FullEthApi},
     RpcBlock, RpcHeader, RpcReceipt, RpcTransaction,
@@ -8,6 +8,8 @@ use alloy_dyn_abi::TypedData;
 use alloy_eips::{eip2930::AccessListResult, BlockId, BlockNumberOrTag};
 use alloy_json_rpc::RpcObject;
 use alloy_primitives::{Address, Bytes, B256, B64, U256, U64};
+use alloy_rpc_macros::rpc;
+use alloy_rpc_server::RpcResult;
 use alloy_rpc_types_eth::{
     simulate::{SimulatePayload, SimulatedBlock},
     state::{EvmOverrides, StateOverride},
@@ -15,7 +17,6 @@ use alloy_rpc_types_eth::{
     StateContext, SyncStatus, Work,
 };
 use alloy_serde::JsonStorageKey;
-use jsonrpsee::{core::RpcResult, proc_macros::rpc};
 use reth_primitives_traits::TxTy;
 use reth_rpc_convert::RpcTxReq;
 use reth_rpc_eth_types::{EthApiError, EthCapabilities, FillTransaction};
@@ -461,7 +462,7 @@ impl<T>
     > for T
 where
     T: FullEthApi,
-    jsonrpsee_types::error::ErrorObject<'static>: From<T::Error>,
+    alloy_rpc_server::ErrorPayload: From<T::Error>,
 {
     /// Handler for: `eth_protocolVersion`
     async fn protocol_version(&self) -> RpcResult<U64> {

@@ -5,6 +5,7 @@ use alloy_consensus::{
 use alloy_eip7928::{bal::DecodedBal, compute_block_access_list_hash};
 use alloy_eips::eip7685::RequestsOrHash;
 use alloy_primitives::{map::AddressSet, Address, B256, U256};
+use alloy_rpc_server::{ErrorPayload, RpcResult};
 use alloy_rpc_types_beacon::relay::{
     BidTrace, BuilderBlockValidationRequest, BuilderBlockValidationRequestV2,
     BuilderBlockValidationRequestV3, BuilderBlockValidationRequestV4,
@@ -15,8 +16,6 @@ use alloy_rpc_types_engine::{
     ExecutionPayloadSidecar, PraguePayloadFields,
 };
 use core::fmt;
-use jsonrpsee::core::RpcResult;
-use jsonrpsee_types::error::ErrorObject;
 use reth_chainspec::{ChainSpecProvider, EthereumHardforks};
 use reth_consensus::FullConsensus;
 use reth_consensus_common::validation::MAX_RLP_BLOCK_SIZE;
@@ -137,7 +136,7 @@ where
             let result = tokio::select! {
                 biased;
                 _ = tx.closed() => return,
-                result = validation => result.map_err(ErrorObject::from),
+                result = validation => result.map_err(ErrorPayload::from),
             };
             let _ = tx.send(result);
         });
@@ -790,7 +789,7 @@ pub enum ValidationApiError {
     Payload(#[from] NewPayloadError),
 }
 
-impl From<ValidationApiError> for ErrorObject<'static> {
+impl From<ValidationApiError> for ErrorPayload {
     fn from(error: ValidationApiError) -> Self {
         match error {
             ValidationApiError::GasLimitMismatch(_) |
@@ -842,6 +841,7 @@ mod tests {
     };
     use alloy_consensus::{BlockHeader, Header};
     use alloy_primitives::{Address, B256, U256};
+    use alloy_rpc_server::{error::INVALID_PARAMS_CODE, ErrorPayload};
     use alloy_rpc_types_beacon::relay::BidTrace;
     use alloy_rpc_types_engine::{ExecutionData, ExecutionPayload, ExecutionPayloadV1};
     use evm2::evm::AccountInfo;
@@ -1137,8 +1137,8 @@ mod tests {
             ),
             "{error}"
         );
-        let error = jsonrpsee::types::ErrorObjectOwned::from(error);
-        assert_eq!(error.code(), jsonrpsee::types::error::INVALID_PARAMS_CODE);
+        let error = ErrorPayload::from(error);
+        assert_eq!(error.code, INVALID_PARAMS_CODE);
     }
 
     #[tokio::test]

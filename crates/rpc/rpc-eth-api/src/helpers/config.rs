@@ -6,8 +6,9 @@ use alloy_eips::{
     eip7910::{EthConfig, EthForkConfig, SystemContract},
 };
 use alloy_primitives::Address;
+use alloy_rpc_macros::rpc;
+use alloy_rpc_server::RpcResult;
 use evm2::evm::EmptyDB;
-use jsonrpsee::{core::RpcResult, proc_macros::rpc};
 use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthereumHardforks, Hardforks, Head};
 use reth_errors::{ProviderError, RethError};
 use reth_evm::{ConfigureEvm, Evm};

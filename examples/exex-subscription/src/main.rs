@@ -1,10 +1,9 @@
 //! An ExEx example that installs a new RPC subscription endpoint that emits storage changes for a
 //! requested address.
 use alloy_primitives::{map::AddressMap, Address, U256};
+use alloy_rpc_macros::rpc;
+use alloy_rpc_server::{PendingSubscriptionSink, SubscriptionMessage, SubscriptionResult};
 use futures::TryStreamExt;
-use jsonrpsee::{
-    core::SubscriptionResult, proc_macros::rpc, PendingSubscriptionSink, SubscriptionMessage,
-};
 use reth_ethereum::{
     exex::{ExExContext, ExExEvent, ExExNotification},
     node::{api::FullNodeComponents, builder::NodeHandleFor, EthereumNode},
@@ -39,7 +38,7 @@ pub trait StorageWatcherApi {
     /// Subscribes to storage changes for a given Ethereum address and streams `StorageDiff`
     /// updates.
     #[subscription(name = "subscribeStorageChanges", item = StorageDiff)]
-    fn subscribe_storage_changes(&self, address: Address) -> SubscriptionResult;
+    async fn subscribe_storage_changes(&self, address: Address) -> SubscriptionResult;
 }
 
 /// API implementation for the storage watcher.
@@ -57,7 +56,7 @@ impl StorageWatcherRpc {
 }
 
 impl StorageWatcherApiServer for StorageWatcherRpc {
-    fn subscribe_storage_changes(
+    async fn subscribe_storage_changes(
         &self,
         pending: PendingSubscriptionSink,
         address: Address,

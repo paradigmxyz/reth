@@ -630,7 +630,8 @@ where
     /// # Examples
     ///
     /// ```rust,ignore
-    /// use jsonrpsee::{core::RpcResult, proc_macros::rpc};
+    /// use alloy_rpc_macros::rpc;
+    /// use alloy_rpc_server::RpcResult;
     ///
     /// #[derive(Clone)]
     /// struct CustomApi<Pool> { pool: Pool }

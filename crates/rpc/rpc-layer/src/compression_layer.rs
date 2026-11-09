@@ -1,4 +1,4 @@
-use jsonrpsee_server::{HttpBody, HttpRequest, HttpResponse};
+use alloy_rpc_server::server::{HttpBody, HttpRequest, HttpResponse};
 use std::{
     future::Future,
     pin::Pin,
@@ -16,7 +16,7 @@ use tower_http::compression::{
 const MIN_COMPRESSION_SIZE: u16 = 1024;
 
 /// This layer is a wrapper around [`tower_http::compression::CompressionLayer`] that integrates
-/// with jsonrpsee's HTTP types. It automatically compresses responses based on the client's
+/// with the RPC server's HTTP types. It automatically compresses responses based on the client's
 /// `Accept-Encoding` header.
 #[expect(missing_debug_implementations)]
 #[derive(Clone)]
@@ -118,9 +118,9 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloy_rpc_server::server::{HttpRequest, HttpResponse};
     use http::header::{ACCEPT_ENCODING, CONTENT_ENCODING};
     use http_body_util::BodyExt;
-    use jsonrpsee_server::{HttpRequest, HttpResponse};
     use std::{convert::Infallible, future::ready};
 
     const TEST_DATA: &str = "compress test data ";
@@ -162,8 +162,10 @@ mod tests {
     #[tokio::test]
     async fn test_gzip_compression() {
         let mut service = setup_compression_service(TEST_DATA.repeat(REPEAT_COUNT));
-        let request =
-            HttpRequest::builder().header(ACCEPT_ENCODING, "gzip").body(HttpBody::empty()).unwrap();
+        let request = HttpRequest::builder()
+            .header(ACCEPT_ENCODING, "gzip")
+            .body(HttpBody::default())
+            .unwrap();
 
         let uncompressed_len = TEST_DATA.repeat(REPEAT_COUNT).len();
 
@@ -189,7 +191,7 @@ mod tests {
     async fn test_no_compression_when_not_requested() {
         // Create a service with compression
         let mut service = setup_compression_service(TEST_DATA.repeat(REPEAT_COUNT));
-        let request = HttpRequest::builder().body(HttpBody::empty()).unwrap();
+        let request = HttpRequest::builder().body(HttpBody::default()).unwrap();
 
         let response = service.call(request).await.unwrap();
         assert!(
@@ -212,7 +214,7 @@ mod tests {
         let body = "a".repeat(MIN_COMPRESSION_SIZE as usize - 1);
         let mut service = setup_compression_service(body.clone());
         let request =
-            HttpRequest::builder().header(ACCEPT_ENCODING, "br").body(HttpBody::empty()).unwrap();
+            HttpRequest::builder().header(ACCEPT_ENCODING, "br").body(HttpBody::default()).unwrap();
 
         let response = service.call(request).await.unwrap();
         assert!(response.headers().get(CONTENT_ENCODING).is_none());
