@@ -262,7 +262,7 @@ impl<H: NippyJarHeader> NippyJarWriter<H> {
 
     /// Truncates the files to the rows kept by [`Self::prune_rows_deferred`].
     pub fn apply_pending_truncation(&mut self) -> Result<(), NippyJarError> {
-        let Some((offsets_len, data_len)) = self.pending_truncation.take() else { return Ok(()) };
+        let Some((offsets_len, data_len)) = self.pending_truncation else { return Ok(()) };
 
         self.offsets_file.get_mut().set_len(offsets_len)?;
         self.data_file.get_mut().set_len(data_len)?;
@@ -272,6 +272,7 @@ impl<H: NippyJarHeader> NippyJarWriter<H> {
 
         self.offsets_file.seek(SeekFrom::End(0))?;
         self.data_file.seek(SeekFrom::End(0))?;
+        self.pending_truncation = None;
 
         Ok(())
     }

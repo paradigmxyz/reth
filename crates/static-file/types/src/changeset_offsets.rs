@@ -140,9 +140,9 @@ impl ChangesetOffsetWriter {
     /// The sync is required for crash safety - without it, a crash could
     /// resurrect the old file length.
     pub fn truncate(&mut self, len: u64) -> io::Result<()> {
-        self.pending_truncation = None;
         self.file.set_len(len * Self::RECORD_SIZE as u64)?;
         self.file.sync_all()?;
+        self.pending_truncation = None;
         self.records_written = len;
         Ok(())
     }
@@ -156,7 +156,7 @@ impl ChangesetOffsetWriter {
 
     /// Truncates the file to the records kept by [`Self::truncate_deferred`].
     pub fn apply_pending_truncation(&mut self) -> io::Result<()> {
-        if let Some(len) = self.pending_truncation.take() {
+        if let Some(len) = self.pending_truncation {
             self.truncate(len)?;
         }
         Ok(())
