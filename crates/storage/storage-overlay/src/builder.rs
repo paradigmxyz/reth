@@ -248,8 +248,12 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
     /// lags it, so overlays later built over `provider` don't depend on the manager still holding
     /// those blocks.
     ///
-    /// Returns the Finish block if its chain had to be pinned but the manager no longer holds it.
-    pub(crate) fn pin_finish_state<Provider>(&mut self, provider: &Provider) -> Option<BlockNumHash>
+    /// Returns the provider's `(state trie tip, Finish)` frontiers if the chain had to be pinned
+    /// but the manager no longer holds all of it.
+    pub(crate) fn pin_finish_state<Provider>(
+        &mut self,
+        provider: &Provider,
+    ) -> Option<(BlockNumHash, BlockNumHash)>
     where
         Provider: StageCheckpointReader + BlockNumReader,
     {
@@ -262,8 +266,17 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
         if state_trie_tip_block == finish_tip_block {
             return None
         }
-        self.finish_state = self.overlay_manager.block_state(finish_tip_block.hash).map(Arc::new);
-        self.finish_state.is_none().then_some(finish_tip_block)
+        // Persistence may prune the chain's oldest blocks while it is walked, leaving a chain
+        // that no longer reaches the state trie frontier the overlay is built against.
+        self.finish_state = self
+            .overlay_manager
+            .block_state(finish_tip_block.hash)
+            .filter(|state| {
+                state.anchor().hash == state_trie_tip_block.hash ||
+                    state.chain().any(|block| block.hash() == state_trie_tip_block.hash)
+            })
+            .map(Arc::new);
+        self.finish_state.is_none().then_some((state_trie_tip_block, finish_tip_block))
     }
 
     /// Appends an executed block to this builder's in-memory parent state.

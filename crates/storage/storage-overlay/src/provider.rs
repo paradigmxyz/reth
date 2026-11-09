@@ -150,12 +150,13 @@ where
         let mut overlay_builder = self.overlay_builder.clone();
         let mut missing_finish = overlay_builder.pin_finish_state(&provider);
         for _ in 0..MAX_FINISH_STATE_REOPENS {
-            let Some(finish) = missing_finish else { break };
+            let Some(frontiers) = missing_finish else { break };
             // The manager prunes the Finish chain only after persistence commits its state, so a
             // reopened provider reads newer frontiers unless the manager never held that chain.
             provider = open()?;
-            missing_finish =
-                overlay_builder.pin_finish_state(&provider).filter(|reopened| *reopened != finish);
+            missing_finish = overlay_builder
+                .pin_finish_state(&provider)
+                .filter(|reopened| *reopened != frontiers);
         }
 
         let is_v2 = provider.cached_storage_settings().is_v2();
@@ -1546,6 +1547,20 @@ mod tests {
                 blocks[3].recovered_block().hash(),
                 blocks[1].recovered_block().hash()
             )
+        );
+    }
+
+    #[test]
+    fn partial_finish_chain_is_not_pinned() {
+        let (factory, blocks) = setup_frontiers(1, 3);
+        let manager = OverlayManager::default();
+        // Persistence pruned block 2, so the chain from Finish no longer reaches the trie tip.
+        manager.insert_block(blocks[3].clone());
+        let mut builder = manager.overlay_builder(blocks[1].recovered_block().hash());
+
+        assert_eq!(
+            builder.pin_finish_state(&factory.provider().unwrap()),
+            Some((blocks[1].recovered_block().num_hash(), blocks[3].recovered_block().num_hash()))
         );
     }
 }
