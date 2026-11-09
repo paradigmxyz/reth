@@ -1,5 +1,5 @@
 [workspace.package]
-version = "2.9.0"
+version = "2.10.1"
 edition = "2024"
 rust-version = "1.96"
 license = "MIT OR Apache-2.0"
@@ -11,7 +11,6 @@ exclude = [".github/"]
 members = [
     "bin/reth-bb/",
     "bin/reth/",
-    "contrib/trie-dst/crates/reth-trie-dst/",
     "crates/storage/rpc-provider/",
     "crates/chain-state/",
     "crates/chainspec/",
@@ -300,11 +299,6 @@ inherits = "release"
 debug = "full"
 strip = "none"
 
-[profile.dst]
-inherits = "profiling"
-debug-assertions = true
-overflow-checks = true
-
 # Include debug info in benchmarks too.
 [profile.bench]
 inherits = "profiling"
@@ -438,9 +432,9 @@ reth-trie-sparse = { path = "crates/trie/sparse", default-features = false }
 reth-zstd-compressors = { version = "0.8.2", default-features = false }
 
 # evm2
-evm2 = { git = "https://github.com/alloy-rs/evm2", rev = "f93318f120f6300599b21170d6c7bef81ed63d87", default-features = false }
-evm2-inspectors = { git = "https://github.com/alloy-rs/evm2", rev = "f93318f120f6300599b21170d6c7bef81ed63d87", default-features = false }
-evm2-jit = { git = "https://github.com/alloy-rs/evm2", rev = "f93318f120f6300599b21170d6c7bef81ed63d87", default-features = false }
+evm2 = { git = "https://github.com/alloy-rs/evm2", rev = "37fb326b91a76dd07308c703b3f3c85152a6230b", default-features = false }
+evm2-inspectors = { git = "https://github.com/alloy-rs/evm2", rev = "37fb326b91a76dd07308c703b3f3c85152a6230b", default-features = false }
+evm2-jit = { git = "https://github.com/alloy-rs/evm2", rev = "37fb326b91a76dd07308c703b3f3c85152a6230b", default-features = false }
 
 # eth
 alloy-dyn-abi = "1.6.1"
@@ -451,7 +445,7 @@ alloy-chains = { version = "0.2.33", default-features = false }
 alloy-eip2124 = { version = "0.2.0", default-features = false }
 alloy-eip7928 = { version = "0.4.10", default-features = false, features = ["rlp"] }
 alloy-rlp = { version = "0.3.16", default-features = false, features = ["core-net"] }
-alloy-trie = { version = "0.9.8", default-features = false }
+alloy-trie = { version = "0.9.9", default-features = false }
 
 alloy-hardforks = "0.4.11"
 
@@ -566,8 +560,10 @@ tower = "0.5"
 tower-http = "0.6"
 
 # p2p
-discv5 = { git = "https://github.com/sigp/discv5", rev = "7663c00" }
+discv5 = { version = "0.12", default-features = false }
 if-addrs = "0.14"
+libp2p-identity = { version = "0.3", default-features = false }
+multiaddr = { version = "0.19", default-features = false }
 
 # rpc
 jsonrpsee = "0.26.0"
@@ -582,10 +578,8 @@ http-body-util = "0.1.2"
 proptest-arbitrary-interop = "0.1.0"
 
 # crypto
-enr = { version = "0.13", default-features = false }
-secp256k1 = { version = "0.30", default-features = false, features = ["global-context", "recovery"] }
-# rand 8 for secp256k1
-rand_08 = { package = "rand", version = "0.8" }
+enr = { version = "0.14", default-features = false }
+secp256k1 = { version = "0.33", default-features = false, features = ["global-context", "recovery"] }
 
 # config
 toml = "0.9"
@@ -597,6 +591,8 @@ rocksdb = { version = "0.24", default-features = false, features = ["lz4", "zstd
 opentelemetry_sdk = "0.32"
 opentelemetry = "0.32"
 opentelemetry-otlp = "0.32"
+opentelemetry-proto = { version = "0.32", default-features = false }
+prost = { version = "0.14", default-features = false }
 opentelemetry-semantic-conventions = "0.32"
 opentelemetry-appender-tracing = "0.32"
 tracing-opentelemetry = "0.33"
@@ -673,15 +669,12 @@ ipnet = "2.11"
 
 # evm2 is patched through its pre-transfer URL, which redirects to alloy-rs/evm2, because Cargo
 # rejects a patch from the same source.
-# [patch."https://github.com/alloy-rs/evm2"]
-# evm2 = { git = "https://github.com/DaniPopes/evm2", rev = "f93318f120f6300599b21170d6c7bef81ed63d87" }
-# evm2-inspectors = { git = "https://github.com/DaniPopes/evm2", rev = "f93318f120f6300599b21170d6c7bef81ed63d87" }
-# evm2-jit = { git = "https://github.com/DaniPopes/evm2", rev = "f93318f120f6300599b21170d6c7bef81ed63d87" }
+[patch."https://github.com/alloy-rs/evm2"]
+evm2 = { git = "https://github.com/DaniPopes/evm2", rev = "37fb326b91a76dd07308c703b3f3c85152a6230b" }
+evm2-inspectors = { git = "https://github.com/DaniPopes/evm2", rev = "37fb326b91a76dd07308c703b3f3c85152a6230b" }
+evm2-jit = { git = "https://github.com/DaniPopes/evm2", rev = "37fb326b91a76dd07308c703b3f3c85152a6230b" }
 
 [patch.crates-io]
-# LLVM 23 support is not released yet.
-inkwell = { git = "https://github.com/TheDan64/inkwell", rev = "c9d9734ae17dbaf1d9902dab3b8ee9d2041781ff" }
-
 # reth-core
 reth-codecs = { git = "https://github.com/paradigmxyz/reth-core", rev = "275ce4cf5befeb9f1e8acd935ff2882d2d25fc61" }
 reth-codecs-derive = { git = "https://github.com/paradigmxyz/reth-core", rev = "275ce4cf5befeb9f1e8acd935ff2882d2d25fc61" }
