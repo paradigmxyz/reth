@@ -176,6 +176,24 @@ impl<N: ProviderNodeTypes> BlockchainProvider<N> {
         ))
     }
 
+    /// Returns a historical state provider for `block_hash` over `provider`, reopening it if
+    /// persistence prunes the in-memory blocks its database snapshot still needs before they are
+    /// pinned.
+    fn history_state_provider(
+        &self,
+        provider: ConsistentProvider<N>,
+        block_hash: B256,
+    ) -> ProviderResult<StateProviderBox> {
+        let mut provider = Some(provider.into_database_provider());
+        Ok(Box::new(OverlayStateProvider::open(
+            self.database.overlay_manager().overlay_builder(block_hash),
+            || match provider.take() {
+                Some(provider) => Ok(provider),
+                None => Ok(self.consistent_provider()?.into_database_provider()),
+            },
+        )?))
+    }
+
     /// Returns a cursor-backed state view for a state root still in canonical in-memory blocks.
     fn block_state_range_provider(
         &self,
@@ -806,14 +824,14 @@ impl<N: ProviderNodeTypes> StateProviderFactory for BlockchainProvider<N> {
         let hash = provider
             .block_hash(block_number)?
             .ok_or_else(|| ProviderError::HeaderNotFound(block_number.into()))?;
-        Ok(self.state_provider_from_database(provider.into_database_provider(), hash))
+        self.history_state_provider(provider, hash)
     }
 
     fn history_by_block_hash(&self, block_hash: BlockHash) -> ProviderResult<StateProviderBox> {
         trace!(target: "providers::blockchain", ?block_hash, "Getting history by block hash");
         let provider = self.consistent_provider()?;
         provider.block_number(block_hash)?.ok_or(ProviderError::BlockHashNotFound(block_hash))?;
-        Ok(self.state_provider_from_database(provider.into_database_provider(), block_hash))
+        self.history_state_provider(provider, block_hash)
     }
 
     fn state_by_block_hash(&self, hash: BlockHash) -> ProviderResult<StateProviderBox> {

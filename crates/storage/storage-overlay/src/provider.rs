@@ -54,8 +54,8 @@ use std::{
 };
 use tracing::instrument;
 
-/// Most times [`OverlayStateProviderFactory::database_provider_ro`] reopens its database provider
-/// to pin a Finish chain that persistence pruned after the provider opened.
+/// Most times [`open_pinned`] reopens its database provider to pin a Finish chain that persistence
+/// pruned after the provider opened.
 const MAX_FINISH_STATE_REOPENS: usize = 2;
 
 /// Factory for creating overlay state providers with optional reverts and overlays.
@@ -146,18 +146,8 @@ where
             self.metrics.create_provider_duration.record(start.elapsed());
             ProviderResult::Ok(res)
         };
-        let mut provider = open()?;
         let mut overlay_builder = self.overlay_builder.clone();
-        let mut missing_finish = overlay_builder.pin_finish_state(&provider);
-        for _ in 0..MAX_FINISH_STATE_REOPENS {
-            let Some(frontiers) = missing_finish else { break };
-            // The manager prunes the Finish chain only after persistence commits its state, so a
-            // reopened provider reads newer frontiers unless the manager never held that chain.
-            provider = open()?;
-            missing_finish = overlay_builder
-                .pin_finish_state(&provider)
-                .filter(|reopened| *reopened != frontiers);
-        }
+        let provider = open_pinned(&mut overlay_builder, open)?;
 
         let is_v2 = provider.cached_storage_settings().is_v2();
         self.metrics.database_provider_ro_duration.record(overall_start.elapsed());
@@ -204,12 +194,35 @@ impl<Provider: DBProvider, N: NodePrimitives> OverlayStateProvider<OwnedProvider
     /// Creates an overlay state provider over an already-open database provider.
     ///
     /// The overlay builder pins the in-memory chain ending at the provider's Finish block now, so
-    /// open the provider right before calling this.
+    /// open the provider right before calling this. If persistence already pruned that chain, the
+    /// provider's overlays fail to build; use [`Self::open`] when the caller can reopen it.
     pub fn new(provider: Provider, mut overlay_builder: OverlayBuilder<N>) -> Self
     where
         Provider: StorageSettingsCache + StageCheckpointReader + BlockNumReader,
     {
         overlay_builder.pin_finish_state(&provider);
+        Self::with_pinned_builder(provider, overlay_builder)
+    }
+
+    /// Creates an overlay state provider over a database provider from `open`, reopening it when
+    /// persistence pruned the in-memory chain ending at its Finish block before it was pinned.
+    ///
+    /// `open` is called at least once and at most `MAX_FINISH_STATE_REOPENS + 1` times.
+    pub fn open(
+        mut overlay_builder: OverlayBuilder<N>,
+        open: impl FnMut() -> ProviderResult<Provider>,
+    ) -> ProviderResult<Self>
+    where
+        Provider: StorageSettingsCache + StageCheckpointReader + BlockNumReader,
+    {
+        let provider = open_pinned(&mut overlay_builder, open)?;
+        Ok(Self::with_pinned_builder(provider, overlay_builder))
+    }
+
+    fn with_pinned_builder(provider: Provider, overlay_builder: OverlayBuilder<N>) -> Self
+    where
+        Provider: StorageSettingsCache,
+    {
         let is_v2 = provider.cached_storage_settings().is_v2();
         let manager = overlay_builder.overlay_manager();
         let metrics = manager.provider_metrics().clone();
@@ -1150,6 +1163,29 @@ fn into_database_error(error: ProviderError) -> DatabaseError {
     }
 }
 
+/// Opens a database provider and pins the in-memory chain ending at its Finish block into
+/// `overlay_builder`, reopening while persistence pruned that chain first.
+fn open_pinned<Provider, N>(
+    overlay_builder: &mut OverlayBuilder<N>,
+    mut open: impl FnMut() -> ProviderResult<Provider>,
+) -> ProviderResult<Provider>
+where
+    Provider: StageCheckpointReader + BlockNumReader,
+    N: NodePrimitives,
+{
+    let mut provider = open()?;
+    let mut missing_finish = overlay_builder.pin_finish_state(&provider);
+    for _ in 0..MAX_FINISH_STATE_REOPENS {
+        let Some(frontiers) = missing_finish else { break };
+        // The manager prunes the Finish chain only after persistence commits its state, so a
+        // reopened provider reads newer frontiers unless the manager never held that chain.
+        provider = open()?;
+        missing_finish =
+            overlay_builder.pin_finish_state(&provider).filter(|reopened| *reopened != frontiers);
+    }
+    Ok(provider)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1562,5 +1598,25 @@ mod tests {
             builder.pin_finish_state(&factory.provider().unwrap()),
             Some((blocks[1].recovered_block().num_hash(), blocks[3].recovered_block().num_hash()))
         );
+    }
+
+    #[test]
+    fn open_reopens_provider_when_finish_chain_is_missing() {
+        let (factory, blocks) = setup_frontiers(1, 3);
+        let mut opens = 0;
+        // The manager no longer holds the masked blocks, as after persistence pruned them.
+        OverlayStateProvider::open(
+            OverlayManager::<EthPrimitives>::default()
+                .overlay_builder(blocks[1].recovered_block().hash()),
+            || {
+                opens += 1;
+                factory.provider()
+            },
+        )
+        .unwrap();
+
+        // The reopened provider reads the same frontiers, so the manager never held the chain and
+        // reopening stops.
+        assert_eq!(opens, 2);
     }
 }
