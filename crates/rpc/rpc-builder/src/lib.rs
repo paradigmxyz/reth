@@ -23,14 +23,14 @@ use crate::{auth::AuthRpcModule, error::WsHttpSamePortError, metrics::RpcRequest
 use alloy_network::{Ethereum, IntoWallet};
 use alloy_provider::{fillers::RecommendedFillers, Provider, ProviderBuilder, WsConnect};
 use alloy_rpc_client::{ClientBuilder, RpcClient};
+use alloy_rpc_server::{
+    error::AlreadyStoppedError,
+    server::{RpcServiceBuilder, ServerConfigBuilder, ServerHandle},
+    IdProvider, Methods, RegisterMethodError, RpcModule,
+};
 use alloy_transport::Authorization;
 use core::marker::PhantomData;
 use error::{ConflictingModules, RpcError, ServerKind};
-use jsonrpsee::{
-    core::RegisterMethodError,
-    server::{middleware::rpc::RpcServiceBuilder, AlreadyStoppedError, IdProvider, ServerHandle},
-    Methods, RpcModule,
-};
 use reth_chainspec::{ChainSpecProvider, EthereumHardforks};
 use reth_consensus::FullConsensus;
 use reth_engine_primitives::{ConsensusEngineEvent, ConsensusEngineHandle};
@@ -74,13 +74,15 @@ use tower_http::{cors::CorsLayer, validate_request::ValidateRequestHeaderLayer};
 pub use cors::CorsDomainError;
 
 // re-export for convenience
-pub use jsonrpsee::server::ServerBuilder;
-use jsonrpsee::server::ServerConfigBuilder;
+pub use alloy_rpc_server::server::ServerBuilder;
 pub use reth_ipc::server::{
     Builder as IpcServerBuilder, RpcServiceBuilder as IpcRpcServiceBuilder,
 };
 pub use reth_rpc_server_types::{constants, RpcModuleSelection};
-pub use tower::layer::util::{Identity, Stack};
+pub use tower::{
+    layer::util::{Identity, Stack},
+    util::Either,
+};
 
 /// Auth server utilities.
 pub mod auth;
@@ -1078,7 +1080,7 @@ where
 /// Http and WS share the same settings: [`ServerBuilder`].
 ///
 /// Once the [`RpcModule`] is built via [`RpcModuleBuilder`] the servers can be started, See also
-/// [`ServerBuilder::build`] and [`Server::start`](jsonrpsee::server::Server::start).
+/// [`ServerBuilder::build`] and [`Server::start`](alloy_rpc_server::server::Server::start).
 #[derive(Debug)]
 pub struct RpcServerConfig<RpcMiddleware = Identity> {
     /// Configs for JSON-RPC Http.
@@ -2201,7 +2203,7 @@ pub struct RpcServerHandle {
     http: Option<ServerHandle>,
     ws: Option<ServerHandle>,
     ipc_endpoint: Option<String>,
-    ipc: Option<jsonrpsee::server::ServerHandle>,
+    ipc: Option<ServerHandle>,
     jwt_secret: Option<JwtSecret>,
 }
 
@@ -2403,6 +2405,7 @@ impl RpcServerHandle {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloy_rpc_server::ErrorPayload;
 
     #[test]
     fn parse_eth_call_bundle_selection() {
@@ -2541,7 +2544,7 @@ mod tests {
 
     fn create_test_module() -> RpcModule<()> {
         let mut module = RpcModule::new(());
-        module.register_method("anything", |_, _| "succeed").unwrap();
+        module.register_method("anything", |(): (), _| Ok::<_, ErrorPayload>("succeed")).unwrap();
         module
     }
 
@@ -2634,7 +2637,9 @@ mod tests {
 
         // Create another module
         let mut other_module = RpcModule::new(());
-        other_module.register_method("something", |_, _| "fails").unwrap();
+        other_module
+            .register_method("something", |(): (), _| Ok::<_, ErrorPayload>("fails"))
+            .unwrap();
 
         // Rename the method
         modules.rename("anything", other_module).expect("rename failed");
@@ -2656,13 +2661,17 @@ mod tests {
             TransportRpcModules { http: Some(create_test_module()), ..Default::default() };
 
         let mut other_module = RpcModule::new(());
-        other_module.register_method("something", |_, _| "fails").unwrap();
+        other_module
+            .register_method("something", |(): (), _| Ok::<_, ErrorPayload>("fails"))
+            .unwrap();
 
         assert!(modules.replace_http(other_module.clone()).unwrap());
 
         assert!(modules.http.as_ref().unwrap().method("something").is_some());
 
-        other_module.register_method("anything", |_, _| "fails").unwrap();
+        other_module
+            .register_method("anything", |(): (), _| Ok::<_, ErrorPayload>("fails"))
+            .unwrap();
         assert!(modules.replace_http(other_module.clone()).unwrap());
 
         assert!(modules.http.as_ref().unwrap().method("anything").is_some());
@@ -2673,13 +2682,17 @@ mod tests {
             TransportRpcModules { ipc: Some(create_test_module()), ..Default::default() };
 
         let mut other_module = RpcModule::new(());
-        other_module.register_method("something", |_, _| "fails").unwrap();
+        other_module
+            .register_method("something", |(): (), _| Ok::<_, ErrorPayload>("fails"))
+            .unwrap();
 
         assert!(modules.replace_ipc(other_module.clone()).unwrap());
 
         assert!(modules.ipc.as_ref().unwrap().method("something").is_some());
 
-        other_module.register_method("anything", |_, _| "fails").unwrap();
+        other_module
+            .register_method("anything", |(): (), _| Ok::<_, ErrorPayload>("fails"))
+            .unwrap();
         assert!(modules.replace_ipc(other_module.clone()).unwrap());
 
         assert!(modules.ipc.as_ref().unwrap().method("anything").is_some());
@@ -2690,13 +2703,17 @@ mod tests {
             TransportRpcModules { ws: Some(create_test_module()), ..Default::default() };
 
         let mut other_module = RpcModule::new(());
-        other_module.register_method("something", |_, _| "fails").unwrap();
+        other_module
+            .register_method("something", |(): (), _| Ok::<_, ErrorPayload>("fails"))
+            .unwrap();
 
         assert!(modules.replace_ws(other_module.clone()).unwrap());
 
         assert!(modules.ws.as_ref().unwrap().method("something").is_some());
 
-        other_module.register_method("anything", |_, _| "fails").unwrap();
+        other_module
+            .register_method("anything", |(): (), _| Ok::<_, ErrorPayload>("fails"))
+            .unwrap();
         assert!(modules.replace_ws(other_module.clone()).unwrap());
 
         assert!(modules.ws.as_ref().unwrap().method("anything").is_some());
@@ -2711,7 +2728,9 @@ mod tests {
             ..Default::default()
         };
         let mut other_module = RpcModule::new(());
-        other_module.register_method("something", |_, _| "fails").unwrap();
+        other_module
+            .register_method("something", |(): (), _| Ok::<_, ErrorPayload>("fails"))
+            .unwrap();
 
         assert!(modules.replace_configured(other_module).unwrap());
 
@@ -2734,11 +2753,15 @@ mod tests {
 
         // Create HTTP module with an existing method (to test "replace")
         let mut http_module = RpcModule::new(());
-        http_module.register_method("eth_existing", |_, _| "original").unwrap();
+        http_module
+            .register_method("eth_existing", |(): (), _| Ok::<_, ErrorPayload>("original"))
+            .unwrap();
 
         // Create WS module with the same existing method
         let mut ws_module = RpcModule::new(());
-        ws_module.register_method("eth_existing", |_, _| "original").unwrap();
+        ws_module
+            .register_method("eth_existing", |(): (), _| Ok::<_, ErrorPayload>("original"))
+            .unwrap();
 
         // Create IPC module (empty, to ensure no changes)
         let ipc_module = RpcModule::new(());
@@ -2753,8 +2776,10 @@ mod tests {
 
         // Create new methods: one to replace an existing method, one to add a new one
         let mut new_module = RpcModule::new(());
-        new_module.register_method("eth_existing", |_, _| "replaced").unwrap(); // Replace
-        new_module.register_method("eth_new", |_, _| "added").unwrap(); // Add
+        new_module
+            .register_method("eth_existing", |(): (), _| Ok::<_, ErrorPayload>("replaced"))
+            .unwrap(); // Replace
+        new_module.register_method("eth_new", |(): (), _| Ok::<_, ErrorPayload>("added")).unwrap(); // Add
         let new_methods: Methods = new_module.into();
 
         // Call the function for RethRpcModule::Eth
@@ -2792,7 +2817,7 @@ mod tests {
         let result = modules.merge_if_module_configured_with(RethRpcModule::Eth, || {
             closure_called = true;
             let mut methods = RpcModule::new(());
-            methods.register_method("eth_test", |_, _| "test").unwrap();
+            methods.register_method("eth_test", |(): (), _| Ok::<_, ErrorPayload>("test")).unwrap();
             methods.into()
         });
 

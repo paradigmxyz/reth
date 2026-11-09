@@ -3,6 +3,7 @@ use alloy_eips::{eip2718::Encodable2718, BlockId, BlockNumberOrTag};
 use alloy_genesis::ChainConfig;
 use alloy_primitives::{hex::decode, uint, Address, Bytes, B256, U256, U64};
 use alloy_rlp::{Decodable, Encodable};
+use alloy_rpc_server::{PendingSubscriptionSink, RpcResult, SubscriptionMessage};
 use alloy_rpc_types::BlockTransactionsKind;
 use alloy_rpc_types_debug::ExecutionWitness;
 use alloy_rpc_types_eth::{
@@ -15,7 +16,6 @@ use alloy_rpc_types_trace::geth::{
 use evm2::evm::StateChangeSource;
 use evm2_inspectors::tracing::{DebugInspector, TransactionContext};
 use futures::Stream;
-use jsonrpsee::{core::RpcResult, PendingSubscriptionSink, SubscriptionMessage};
 use parking_lot::RwLock;
 use reth_chainspec::{ChainSpecProvider, EthereumHardforks};
 use reth_engine_primitives::ConsensusEngineEvent;
@@ -34,7 +34,7 @@ use reth_rpc_eth_api::{
     helpers::{EthTransactions, TraceExt},
     AsEthApiError, FromEthApiError, FromEvmError, RpcConvert, RpcNodeCore,
 };
-use reth_rpc_eth_types::{utils::CallManyBudget, EthApiError, StateCacheDb};
+use reth_rpc_eth_types::{utils::CallManyBudget, EthApiError, RpcErrorPayload, StateCacheDb};
 use reth_rpc_server_types::{result::internal_rpc_err, ToRpcResult};
 use reth_storage_api::{
     BlockIdReader, BlockReaderIdExt, HashedPostStateProvider, HeaderProvider, ProviderBlock,
@@ -996,7 +996,9 @@ where
 
             let bad_block =
                 serde_json::to_value(BadBlockSerde { block, hash, rlp, reason: entry.reason })
-                    .map_err(|err| EthApiError::other(internal_rpc_err(err.to_string())))?;
+                    .map_err(|err| {
+                        EthApiError::other(RpcErrorPayload(internal_rpc_err(err.to_string())))
+                    })?;
 
             bad_blocks.push(bad_block);
         }
@@ -1020,7 +1022,7 @@ where
         start_exclusive: BlockNumberOrTag,
         end_inclusive: BlockNumberOrTag,
         opts: Option<GethDebugTracingOptions>,
-    ) -> jsonrpsee::core::SubscriptionResult {
+    ) -> alloy_rpc_server::SubscriptionResult {
         if subscription != "traceChain" {
             pending
                 .reject(EthApiError::InvalidParams(format!(
@@ -1136,7 +1138,7 @@ where
                 }
             }
 
-            // Dropping jsonrpsee's final sink unregisters the subscription without notifying the
+            // Dropping the final sink unregisters the subscription without notifying the
             // client that this finite stream completed. Retain it so the subscription remains
             // explicitly unsubscribable until the client unsubscribes or disconnects.
             sink.closed().await;
@@ -1688,14 +1690,14 @@ mod tests {
             )
             .await
             .unwrap_err();
-            assert_eq!(err.code(), -32000);
-            assert!(err.message().contains("not found"));
+            assert_eq!(err.code, -32000);
+            assert!(err.message.contains("not found"));
         }
 
         let err = EthApiServer::call(&eth_api, Default::default(), Some(block_id), None, None)
             .await
             .unwrap_err();
-        assert_eq!(err.code(), -32001);
+        assert_eq!(err.code, -32001);
     }
 
     #[cfg(feature = "js-tracer")]

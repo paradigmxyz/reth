@@ -8,8 +8,8 @@
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
+use alloy_rpc_server::server::HttpResponse;
 use http::HeaderMap;
-use jsonrpsee_server::HttpResponse;
 
 mod auth_client_layer;
 mod auth_layer;

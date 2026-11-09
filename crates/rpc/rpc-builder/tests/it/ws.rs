@@ -3,8 +3,8 @@
 
 use crate::utils::{launch_ws, test_address, test_rpc_builder};
 use alloy_provider::{Provider, ProviderBuilder};
-use jsonrpsee::server::ServerConfigBuilder;
-use jsonrpsee_test_utils::mocks::WebSocketTestClient;
+use alloy_rpc_server::server::ServerConfigBuilder;
+use futures::{SinkExt, StreamExt};
 use reth_consensus::noop::NoopConsensus;
 use reth_evm_ethereum::EthEvmConfig;
 use reth_network_api::noop::NoopNetwork;
@@ -22,11 +22,15 @@ use reth_transaction_pool::{
 };
 use serde_json::Value;
 use std::time::Duration;
-use tokio::time::Instant;
+use tokio::{net::TcpStream, time::Instant};
+use tokio_tungstenite::{tungstenite::Message, MaybeTlsStream, WebSocketStream};
 
 use reth_rpc_builder::{
     RpcModuleBuilder, RpcServerConfig, RpcServerHandle, TransportRpcModuleConfig,
 };
+
+/// A raw `WebSocket` client connection.
+type WsClient = WebSocketStream<MaybeTlsStream<TcpStream>>;
 
 /// Helper to launch a WS server with the Eth module.
 async fn launch_ws_eth() -> RpcServerHandle {
@@ -238,7 +242,10 @@ async fn test_eth_subscribe_syncing_releases_permit_on_unsubscribe() {
     // A single permit means each subscription must release it before the next one is accepted.
     let handle = launch_ws_eth_with_canon_state(1).await;
     // A raw client, because alloy unsubscribes without waiting for the server's answer.
-    let mut client = WebSocketTestClient::new(handle.ws_local_addr().unwrap()).await.unwrap();
+    let (mut client, _) =
+        tokio_tungstenite::connect_async(format!("ws://{}", handle.ws_local_addr().unwrap()))
+            .await
+            .unwrap();
 
     for i in 0..3 {
         // The previous subscription task releases its permit asynchronously after unsubscribe.
@@ -255,10 +262,9 @@ async fn test_eth_subscribe_syncing_releases_permit_on_unsubscribe() {
             }
         };
 
-        let initial = tokio::time::timeout(Duration::from_secs(5), client.receive())
+        let initial = tokio::time::timeout(Duration::from_secs(5), ws_receive(&mut client))
             .await
-            .expect("timed out waiting for initial syncing status")
-            .unwrap();
+            .expect("timed out waiting for initial syncing status");
         let initial: Value = serde_json::from_str(&initial).unwrap();
         assert_eq!(initial["params"]["subscription"], sub_id);
         assert_eq!(initial["params"]["result"], Value::Bool(false));
@@ -269,11 +275,20 @@ async fn test_eth_subscribe_syncing_releases_permit_on_unsubscribe() {
 }
 
 /// Sends a call over a raw `WebSocket` connection and returns its response object.
-async fn ws_call(client: &mut WebSocketTestClient, method: &str, params: Value) -> Value {
+async fn ws_call(client: &mut WsClient, method: &str, params: Value) -> Value {
     let request =
         serde_json::json!({"jsonrpc": "2.0", "id": 1, "method": method, "params": params});
-    let response = client.send_request_text(request.to_string()).await.unwrap();
-    serde_json::from_str(&response).unwrap()
+    client.send(Message::text(request.to_string())).await.unwrap();
+    serde_json::from_str(&ws_receive(client).await).unwrap()
+}
+
+/// Returns the next text message received over a raw `WebSocket` connection.
+async fn ws_receive(client: &mut WsClient) -> String {
+    loop {
+        if let Message::Text(text) = client.next().await.unwrap().unwrap() {
+            return text.to_string()
+        }
+    }
 }
 
 #[tokio::test(flavor = "multi_thread")]

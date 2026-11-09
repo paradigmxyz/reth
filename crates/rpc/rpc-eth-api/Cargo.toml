@@ -45,8 +45,8 @@ alloy-rpc-types-mev.workspace = true
 alloy-consensus.workspace = true
 
 # rpc
-jsonrpsee = { workspace = true, features = ["server", "macros"] }
-jsonrpsee-types.workspace = true
+alloy-rpc-server.workspace = true
+alloy-rpc-macros.workspace = true
 
 # async
 async-trait.workspace = true

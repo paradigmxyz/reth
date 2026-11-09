@@ -6,10 +6,10 @@
 //! explicit operator flag.
 
 use alloy_primitives::{Bytes, B256};
+use alloy_rpc_macros::rpc;
 use alloy_rpc_types_engine::{
     ExecutionPayloadEnvelopeV5, ExecutionPayloadEnvelopeV6, PayloadAttributes,
 };
-use jsonrpsee::proc_macros::rpc;
 use serde::{Deserialize, Serialize};
 
 pub use alloy_rpc_types_engine::{TestingBuildBlockRequestV1, TESTING_BUILD_BLOCK_V1};
@@ -55,7 +55,7 @@ pub trait TestingApi {
         payload_attributes: PayloadAttributes,
         transactions: Option<Vec<Bytes>>,
         extra_data: Option<Bytes>,
-    ) -> jsonrpsee::core::RpcResult<TestingBuildBlockResponseV1>;
+    ) -> alloy_rpc_server::RpcResult<TestingBuildBlockResponseV1>;
 
     /// Builds a block on top of the current canonical head, inserts it, and makes it canonical.
     ///
@@ -66,5 +66,5 @@ pub trait TestingApi {
         payload_attributes: PayloadAttributes,
         transactions: Option<Vec<Bytes>>,
         extra_data: Option<Bytes>,
-    ) -> jsonrpsee::core::RpcResult<B256>;
+    ) -> alloy_rpc_server::RpcResult<B256>;
 }

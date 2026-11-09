@@ -1,5 +1,6 @@
+use alloy_rpc_macros::rpc;
+use alloy_rpc_server::RpcResult;
 use alloy_rpc_types::RpcModules;
-use jsonrpsee::{core::RpcResult, proc_macros::rpc};
 
 /// RPC namespace, used to find the versions of all rpc modules
 #[rpc(server, namespace = "rpc")]

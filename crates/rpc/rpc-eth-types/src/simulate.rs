@@ -1,7 +1,7 @@
 //! Utilities for serving `eth_simulateV1`
 
 use crate::{
-    error::{api::FromEthApiError, FromEvmError, ToRpcError},
+    error::{api::FromEthApiError, FromEvmError, RpcErrorPayload, ToRpcError},
     EthApiError,
 };
 use alloy_chains::Chain;
@@ -9,6 +9,7 @@ use alloy_consensus::{transaction::TxHashRef, BlockHeader, Transaction as _};
 use alloy_eips::eip2718::WithEncoded;
 use alloy_network::{NetworkTransactionBuilder, TransactionBuilder};
 use alloy_primitives::{keccak256, map::AddressMap, Address, Bytes, TxKind, U256};
+use alloy_rpc_server::{error::INTERNAL_ERROR_CODE, ErrorPayload};
 use alloy_rpc_types_eth::{
     simulate::{SimBlock, SimCallResult, SimulateError, SimulatedBlock},
     state::StateOverride,
@@ -16,7 +17,6 @@ use alloy_rpc_types_eth::{
 };
 use evm2::{interpreter::InstrStop, precompiles::MovePrecompileError, EvmFeatures, TxResult};
 use evm2_inspectors::transfer::TransferInspector;
-use jsonrpsee_types::{error::INTERNAL_ERROR_CODE, ErrorObject};
 use reth_errors::ProviderResult;
 use reth_evm::{
     execute::{BlockBuilder, BlockBuilderOutcome, BlockTransactionResult},
@@ -126,7 +126,7 @@ pub enum EthSimulateError {
 
 impl EthSimulateError {
     /// Returns the JSON-RPC error code for a `eth_simulateV1` error.
-    pub const fn error_code(&self) -> i32 {
+    pub const fn error_code(&self) -> i64 {
         match self {
             Self::NonceTooLow { .. } => -38010,
             Self::NonceTooHigh => -38011,
@@ -147,7 +147,7 @@ impl EthSimulateError {
 }
 
 impl ToRpcError for EthSimulateError {
-    fn to_rpc_error(&self) -> ErrorObject<'static> {
+    fn to_rpc_error(&self) -> ErrorPayload {
         rpc_err(self.error_code(), self.to_string(), None)
     }
 }
@@ -556,8 +556,9 @@ where
         }
     }
 
-    let tx =
-        converter.build_simulate_v1_transaction(tx).map_err(|e| EthApiError::other(e.into()))?;
+    let tx = converter
+        .build_simulate_v1_transaction(tx)
+        .map_err(|e| EthApiError::other(RpcErrorPayload(e.into())))?;
 
     Ok(Recovered::new_unchecked(tx, from))
 }
@@ -574,7 +575,7 @@ where
         + FromEthApiError
         + FromEvmError<T::Evm>
         + From<T::Error>
-        + Into<jsonrpsee_types::ErrorObject<'static>>,
+        + Into<ErrorPayload>,
     T: RpcConvert,
     EvmTypes: evm2::EvmTypes,
 {
@@ -799,16 +800,16 @@ mod tests {
     fn nonce_max_value_error_uses_internal_error_code() {
         let err = EthSimulateError::NonceMaxValue.to_rpc_error();
 
-        assert_eq!(err.code(), INTERNAL_ERROR_CODE);
-        assert_eq!(err.message(), "nonce has max value");
+        assert_eq!(err.code, INTERNAL_ERROR_CODE);
+        assert_eq!(err.message, "nonce has max value");
     }
 
     #[test]
     fn block_not_found_error_uses_simulate_code() {
         let err = EthSimulateError::BlockNotFound { block: 100000.into() }.to_rpc_error();
 
-        assert_eq!(err.code(), -32000);
-        assert_eq!(err.message(), "block not found: 0x186a0");
+        assert_eq!(err.code, -32000);
+        assert_eq!(err.message, "block not found: 0x186a0");
     }
 
     fn parent_at(number: u64, timestamp: u64) -> SealedHeader<Header> {

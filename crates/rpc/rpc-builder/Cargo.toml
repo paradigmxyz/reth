@@ -36,7 +36,7 @@ reth-chain-state.workspace = true
 reth-evm.workspace = true
 
 # rpc/net
-jsonrpsee = { workspace = true, features = ["server"] }
+alloy-rpc-server.workspace = true
 tower-http = { workspace = true, features = ["cors", "validate-request"] }
 tower.workspace = true
 http.workspace = true
@@ -72,8 +72,6 @@ reth-node-ethereum.workspace = true
 reth-tasks = { workspace = true, features = ["test-utils"] }
 reth-trie-common = { workspace = true, features = ["serde"] }
 
-jsonrpsee-test-utils.workspace = true
-
 alloy-primitives.workspace = true
 alloy-rpc-types-eth.workspace = true
 alloy-rpc-types-trace.workspace = true
@@ -84,4 +82,6 @@ alloy-rpc-types-mev.workspace = true
 
 serde_json.workspace = true
 clap = { workspace = true, features = ["derive"] }
+futures.workspace = true
+tokio-tungstenite = { workspace = true, features = ["connect"] }
 reqwest.workspace = true

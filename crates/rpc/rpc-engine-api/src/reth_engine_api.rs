@@ -1,7 +1,7 @@
 use crate::EngineApiError;
 use alloy_rlp::Decodable;
+use alloy_rpc_server::RpcResult;
 use alloy_rpc_types_engine::{ForkchoiceState, ForkchoiceUpdated};
-use jsonrpsee_core::RpcResult;
 use reth_engine_primitives::ConsensusEngineHandle;
 use reth_payload_primitives::PayloadTypes;
 use reth_primitives_traits::SealedBlock;

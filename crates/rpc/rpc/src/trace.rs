@@ -4,6 +4,7 @@ use alloy_primitives::{
     map::{HashMap, HashSet},
     Address, BlockHash, Bytes, B256, U256,
 };
+use alloy_rpc_server::RpcResult;
 use alloy_rpc_types_eth::{
     state::{EvmOverrides, StateOverride},
     BlockOverrides, Index,
@@ -20,7 +21,6 @@ use evm2_inspectors::{
     tracing::{TracingInspector, TracingInspectorConfig},
 };
 use futures::{FutureExt, StreamExt};
-use jsonrpsee::core::RpcResult;
 use reth_chainspec::{ChainSpecProvider, EthereumHardforks};
 use reth_evm::ConfigureEvm;
 use reth_primitives_traits::{BlockBody, BlockHeader};
@@ -961,7 +961,7 @@ mod tests {
         assert_eq!(U256::from_be_slice(&pending[0].output), U256::from(2));
 
         let module = api.into_rpc();
-        let (response, _) = module.raw_json_request(&request.to_string(), 1).await.unwrap();
+        let response = module.raw_json_request(&request.to_string()).await;
         let response: serde_json::Value = serde_json::from_str(&response).unwrap();
         assert_eq!(response["result"], serde_json::to_value(latest).unwrap());
     }
@@ -996,7 +996,7 @@ mod tests {
         let request = serde_json::json!({
             "jsonrpc": "2.0", "id": 1, "method": "trace_filter", "params": [{"toBlock": "0x1"}],
         });
-        let (response, _) = module.raw_json_request(&request.to_string(), 1).await.unwrap();
+        let response = module.raw_json_request(&request.to_string()).await;
         let response: serde_json::Value = serde_json::from_str(&response).unwrap();
         assert_eq!(
             response["error"],
@@ -1083,7 +1083,7 @@ mod tests {
             let request = serde_json::json!({
                 "jsonrpc": "2.0", "id": 1, "method": "trace_get", "params": [hash, indices],
             });
-            let (response, _) = module.raw_json_request(&request.to_string(), 1).await.unwrap();
+            let response = module.raw_json_request(&request.to_string()).await;
             let response: serde_json::Value = serde_json::from_str(&response).unwrap();
             assert!(response.get("error").is_none(), "{response}");
             assert_eq!(response["result"], serde_json::to_value(expected).unwrap());
@@ -1112,7 +1112,7 @@ mod tests {
                 "method": "trace_replayTransaction",
                 "params": [B256::with_last_byte(1), types],
             });
-            let (response, _) = module.raw_json_request(&request.to_string(), 1).await.unwrap();
+            let response = module.raw_json_request(&request.to_string()).await;
             let response: serde_json::Value = serde_json::from_str(&response).unwrap();
             assert_eq!(response, serde_json::json!({"jsonrpc": "2.0", "id": 1, "result": null}));
         }
@@ -1175,7 +1175,7 @@ mod tests {
                 "jsonrpc": "2.0", "id": 1, "method": "trace_replayTransaction",
                 "params": [hash, types],
             });
-            let (response, _) = module.raw_json_request(&request.to_string(), 1).await.unwrap();
+            let response = module.raw_json_request(&request.to_string()).await;
             let response: serde_json::Value = serde_json::from_str(&response).unwrap();
             assert!(response.get("error").is_none(), "{response}");
             assert_eq!(response["result"]["transactionHash"], serde_json::json!(hash));

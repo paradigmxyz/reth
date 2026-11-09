@@ -10,6 +10,11 @@ use bytes::Bytes;
 use eyre::WrapErr;
 use http::{header::CONTENT_TYPE, HeaderValue, Request, Response, StatusCode};
 use http_body_util::{BodyExt, Full};
+use hyper_util::{
+    rt::{TokioExecutor, TokioIo, TokioTimer},
+    server::conn::auto,
+    service::TowerToHyperService,
+};
 use metrics::describe_gauge;
 use metrics_process::Collector;
 use reqwest::Client;
@@ -157,6 +162,10 @@ impl MetricServer {
 
         let executor = task_executor.clone();
         let requests = Arc::new(Semaphore::new(MAX_CONCURRENT_METRICS_REQUESTS));
+        let mut builder = auto::Builder::new(TokioExecutor::new());
+        // A timer turns on hyper's header read timeout, which closes connections that send no
+        // request.
+        builder.http1().timer(TokioTimer::new());
         task_executor.spawn_with_graceful_shutdown_signal(async move |mut signal| loop {
             let io = tokio::select! {
                 _ = &mut signal => break,
@@ -232,11 +241,23 @@ impl MetricServer {
                 }
             });
 
+            let connection = builder
+                .serve_connection_with_upgrades(TokioIo::new(io), TowerToHyperService::new(service))
+                .into_owned();
             let mut shutdown = signal.clone().ignore_guard();
             tokio::task::spawn(async move {
-                let _ = jsonrpsee_server::serve_with_graceful_shutdown(io, service, &mut shutdown)
-                    .await
-                    .inspect_err(|error| tracing::debug!(%error, "failed to serve request"));
+                tokio::pin!(connection);
+                // On shutdown, in-flight requests finish before the connection closes.
+                let result = tokio::select! {
+                    result = &mut connection => result,
+                    _ = &mut shutdown => {
+                        connection.as_mut().graceful_shutdown();
+                        connection.await
+                    }
+                };
+                if let Err(error) = result {
+                    tracing::debug!(%error, "failed to serve request");
+                }
             });
         });
 

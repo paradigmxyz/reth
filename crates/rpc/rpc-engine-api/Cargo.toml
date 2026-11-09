@@ -24,6 +24,7 @@ reth-engine-primitives.workspace = true
 reth-transaction-pool.workspace = true
 reth-primitives-traits.workspace = true
 reth-network-api.workspace = true
+reth-rpc-server-types.workspace = true
 
 # ethereum
 alloy-eips.workspace = true
@@ -39,8 +40,7 @@ reth-metrics.workspace = true
 metrics.workspace = true
 
 # misc
-jsonrpsee-core.workspace = true
-jsonrpsee-types.workspace = true
+alloy-rpc-server.workspace = true
 serde.workspace = true
 thiserror.workspace = true
 tracing.workspace = true

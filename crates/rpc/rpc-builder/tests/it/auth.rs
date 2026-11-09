@@ -3,11 +3,11 @@
 use crate::utils::{launch_auth, launch_auth_with_config, test_address};
 use alloy_primitives::{BlockHash, U64};
 use alloy_rpc_client::RpcClient;
+use alloy_rpc_server::server::{HttpRequest, HttpResponse};
 use alloy_rpc_types_engine::{
     ExecutionPayloadInputV2, ExecutionPayloadV1, ForkchoiceState, PayloadAttributes, PayloadId,
 };
 use http::header::{AUTHORIZATION, CONTENT_TYPE};
-use jsonrpsee::server::{HttpRequest, HttpResponse};
 use reth_ethereum_primitives::{Block, TransactionSigned};
 use reth_primitives_traits::block::Block as _;
 use reth_rpc_builder::auth::AuthServerConfig;

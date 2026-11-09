@@ -1,10 +1,10 @@
 use alloy_eips::{BlockId, BlockNumberOrTag};
 use alloy_primitives::{Address, Bytes, B256, U256, U64};
+use alloy_rpc_server::RpcResult as Result;
 use alloy_rpc_types_eth::{
     state::StateOverride, BlockOverrides, EIP1186AccountProofResponse, Filter, Index, SyncStatus,
 };
 use alloy_serde::JsonStorageKey;
-use jsonrpsee::core::RpcResult as Result;
 use reth_primitives_traits::TxTy;
 use reth_rpc_api::{EngineEthApiServer, EthApiServer};
 use reth_rpc_convert::RpcTxReq;

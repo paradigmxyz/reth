@@ -647,7 +647,7 @@ async fn test_engine_ssz_custom_engine_and_middleware() -> eyre::Result<()> {
     let requests = Arc::new(AtomicUsize::new(0));
     let observed = requests.clone();
     let middleware =
-        tower::util::MapRequestLayer::new(move |request: jsonrpsee::server::HttpRequest| {
+        tower::util::MapRequestLayer::new(move |request: alloy_rpc_server::server::HttpRequest| {
             if request.uri().path().starts_with("/engine/") {
                 observed.fetch_add(1, Ordering::Relaxed);
             }

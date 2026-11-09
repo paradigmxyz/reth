@@ -1,5 +1,6 @@
 use alloy_primitives::U64;
-use jsonrpsee::{core::RpcResult, proc_macros::rpc};
+use alloy_rpc_macros::rpc;
+use alloy_rpc_server::RpcResult;
 
 /// Net rpc interface.
 #[rpc(server, namespace = "net")]

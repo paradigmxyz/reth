@@ -6,6 +6,7 @@ use alloy_eips::{eip1898::LenientBlockNumberOrTag, BlockId, BlockNumberOrTag};
 use alloy_json_rpc::RpcSend;
 use alloy_primitives::{bytes, Address, Bytes, TxHash, B256, B64, U256, U64};
 use alloy_rpc_client::RpcClient;
+use alloy_rpc_server::ErrorCode;
 use alloy_rpc_types_eth::{
     transaction::TransactionRequest, Account, Block, EIP1186AccountProofResponse, FeeHistory,
     Filter, FilterChanges, FilterId, Index, Log, PendingTransactionFilterKind, SyncStatus,
@@ -14,7 +15,6 @@ use alloy_rpc_types_eth::{
 use alloy_rpc_types_mev::EthCallBundle;
 use alloy_rpc_types_trace::{filter::TraceFilter, parity::TraceType};
 use alloy_transport::TransportError;
-use jsonrpsee::types::error::ErrorCode;
 use reth_network_peers::NodeRecord;
 use reth_rpc_server_types::RethRpcModule;
 use reth_trie_common::ExecutionWitnessMode;
@@ -31,14 +31,12 @@ macro_rules! rpc_params {
 
 fn is_unimplemented(err: TransportError) -> bool {
     err.as_error_resp().is_some_and(|payload| {
-        payload.code == i64::from(ErrorCode::InternalError.code()) &&
-            payload.message == "unimplemented"
+        payload.code == ErrorCode::InternalError.code() && payload.message == "unimplemented"
     })
 }
 
 fn is_invalid_params(err: &TransportError) -> bool {
-    err.as_error_resp()
-        .is_some_and(|payload| payload.code == i64::from(ErrorCode::InvalidParams.code()))
+    err.as_error_resp().is_some_and(|payload| payload.code == ErrorCode::InvalidParams.code())
 }
 
 async fn test_rpc_call_ok<R>(client: &RpcClient, method_name: &'static str, params: impl RpcSend)
@@ -1636,8 +1634,7 @@ async fn test_debug_db_get() {
 
     let match_error_msg = |err: TransportError, expected: &str| -> bool {
         err.as_error_resp().is_some_and(|payload| {
-            payload.code == i64::from(ErrorCode::InvalidParams.code()) &&
-                payload.message == expected
+            payload.code == ErrorCode::InvalidParams.code() && payload.message == expected
         })
     };
 

@@ -3,10 +3,10 @@ use std::collections::BTreeMap;
 
 use alloy_consensus::Transaction;
 use alloy_primitives::Address;
+use alloy_rpc_server::RpcResult;
 use alloy_rpc_types_txpool::{
     TxpoolContent, TxpoolContentFrom, TxpoolInspect, TxpoolInspectSummary, TxpoolStatus,
 };
-use jsonrpsee::core::RpcResult;
 use reth_primitives_traits::NodePrimitives;
 use reth_rpc_api::TxPoolApiServer;
 use reth_rpc_convert::RpcConvert;

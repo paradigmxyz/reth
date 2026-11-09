@@ -1,11 +1,12 @@
 use alloy_eips::{eip1898::LenientBlockNumberOrTag, BlockId};
 use alloy_json_rpc::RpcObject;
 use alloy_primitives::{Address, Bytes, TxHash, B256};
+use alloy_rpc_macros::rpc;
+use alloy_rpc_server::RpcResult;
 use alloy_rpc_types_trace::otterscan::{
     BlockDetails, ContractCreator, InternalOperation, OtsBlockTransactions, TraceEntry,
     TransactionsWithReceipts,
 };
-use jsonrpsee::{core::RpcResult, proc_macros::rpc};
 
 /// Otterscan RPC interface.
 ///

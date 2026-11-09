@@ -3,11 +3,11 @@
 //! See also <https://docs.flashbots.net/flashbots-auction/advanced/rpc-endpoint>
 
 use alloy_primitives::{Bytes, B256};
+use alloy_rpc_macros::rpc;
 use alloy_rpc_types_mev::{
     EthBundleHash, EthCallBundle, EthCallBundleResponse, EthCancelBundle,
     EthCancelPrivateTransaction, EthSendBundle, EthSendPrivateTransaction,
 };
-use jsonrpsee::proc_macros::rpc;
 
 /// A subset of the [`EthBundleApi`] API interface that only supports `eth_callBundle`.
 #[rpc(server, namespace = "eth")]
@@ -18,7 +18,7 @@ pub trait EthCallBundleApi {
     async fn call_bundle(
         &self,
         request: EthCallBundle,
-    ) -> jsonrpsee::core::RpcResult<EthCallBundleResponse>;
+    ) -> alloy_rpc_server::RpcResult<EthCallBundleResponse>;
 }
 
 /// The __full__ Eth bundle rpc interface.
@@ -28,8 +28,10 @@ pub trait EthCallBundleApi {
 pub trait EthBundleApi {
     /// `eth_sendBundle` can be used to send your bundles to the builder.
     #[method(name = "sendBundle")]
-    async fn send_bundle(&self, bundle: EthSendBundle)
-        -> jsonrpsee::core::RpcResult<EthBundleHash>;
+    async fn send_bundle(
+        &self,
+        bundle: EthSendBundle,
+    ) -> alloy_rpc_server::RpcResult<EthBundleHash>;
 
     /// `eth_callBundle` can be used to simulate a bundle against a specific block number,
     /// including simulating a bundle at the top of the next block.
@@ -37,25 +39,26 @@ pub trait EthBundleApi {
     async fn call_bundle(
         &self,
         request: EthCallBundle,
-    ) -> jsonrpsee::core::RpcResult<EthCallBundleResponse>;
+    ) -> alloy_rpc_server::RpcResult<EthCallBundleResponse>;
 
     /// `eth_cancelBundle` is used to prevent a submitted bundle from being included on-chain. See [bundle cancellations](https://docs.flashbots.net/flashbots-auction/advanced/bundle-cancellations) for more information.
     #[method(name = "cancelBundle")]
-    async fn cancel_bundle(&self, request: EthCancelBundle) -> jsonrpsee::core::RpcResult<()>;
+    async fn cancel_bundle(&self, request: EthCancelBundle) -> alloy_rpc_server::RpcResult<()>;
 
     /// `eth_sendPrivateTransaction` is used to send a single transaction to Flashbots. Flashbots will attempt to build a block including the transaction for the next 25 blocks. See [Private Transactions](https://docs.flashbots.net/flashbots-protect/additional-documentation/eth-sendPrivateTransaction) for more info.
     #[method(name = "sendPrivateTransaction")]
     async fn send_private_transaction(
         &self,
         request: EthSendPrivateTransaction,
-    ) -> jsonrpsee::core::RpcResult<B256>;
+    ) -> alloy_rpc_server::RpcResult<B256>;
 
     /// The `eth_sendPrivateRawTransaction` method can be used to send private transactions to
     /// the RPC endpoint. Private transactions are protected from frontrunning and kept
     /// private until included in a block. A request to this endpoint needs to follow
     /// the standard `eth_sendRawTransaction`
     #[method(name = "sendPrivateRawTransaction")]
-    async fn send_private_raw_transaction(&self, bytes: Bytes) -> jsonrpsee::core::RpcResult<B256>;
+    async fn send_private_raw_transaction(&self, bytes: Bytes)
+        -> alloy_rpc_server::RpcResult<B256>;
 
     /// The `eth_cancelPrivateTransaction` method stops private transactions from being
     /// submitted for future blocks.
@@ -66,5 +69,5 @@ pub trait EthBundleApi {
     async fn cancel_private_transaction(
         &self,
         request: EthCancelPrivateTransaction,
-    ) -> jsonrpsee::core::RpcResult<bool>;
+    ) -> alloy_rpc_server::RpcResult<bool>;
 }

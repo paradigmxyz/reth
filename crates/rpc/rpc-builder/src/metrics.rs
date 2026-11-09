@@ -1,9 +1,4 @@
-use jsonrpsee::{
-    core::middleware::{Batch, Notification},
-    server::middleware::rpc::RpcServiceT,
-    types::Request,
-    MethodResponse, RpcModule,
-};
+use alloy_rpc_server::{Batch, MethodResponse, Request, RpcModule, RpcServiceT};
 use reth_metrics::{
     metrics::{Counter, Histogram},
     Metrics,
@@ -52,7 +47,8 @@ impl RpcRequestMetrics {
 
     /// Creates a new instance of the metrics layer for same port.
     ///
-    /// Note: currently it's not possible to track transport specific metrics for a server that runs http and ws on the same port: <https://github.com/paritytech/jsonrpsee/issues/1345> until we have this feature we will use the http metrics for this case.
+    /// Note: the server doesn't tell middleware which transport a call arrived on, so a server
+    /// that runs http and ws on the same port records http metrics for both.
     pub(crate) fn same_port(module: &RpcModule<()>) -> Self {
         Self::http(module)
     }
@@ -139,10 +135,7 @@ where
         }
     }
 
-    fn notification<'a>(
-        &self,
-        n: Notification<'a>,
-    ) -> impl Future<Output = MethodResponse> + Send + 'a {
+    fn notification<'a>(&self, n: Request<'a>) -> impl Future<Output = MethodResponse> + Send + 'a {
         self.inner.notification(n)
     }
 }
@@ -297,7 +290,7 @@ struct RpcServerCallMetrics {
     failed_total: Counter,
     /// The number of calls received as batch entries.
     ///
-    /// jsonrpsee dispatches batch entries internally without invoking this middleware's `call`,
+    /// The server dispatches batch entries internally without invoking this middleware's `call`,
     /// so only their per-method volume can be tracked; batched calls are excluded from
     /// `started_total`, `successful_total`, `failed_total` and `time_seconds`.
     batched_total: Counter,

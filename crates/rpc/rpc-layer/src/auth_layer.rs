@@ -1,5 +1,5 @@
 use super::AuthValidator;
-use jsonrpsee_server::{HttpRequest, HttpResponse};
+use alloy_rpc_server::server::{HttpRequest, HttpResponse};
 use pin_project::pin_project;
 use std::{
     future::Future,
@@ -16,7 +16,7 @@ use tower::{Layer, Service};
 /// # How to integrate
 /// ```rust
 /// async fn build_layered_rpc_server() {
-///     use jsonrpsee::server::ServerBuilder;
+///     use alloy_rpc_server::server::ServerBuilder;
 ///     use reth_rpc_layer::{AuthLayer, JwtAuthValidator, JwtSecret};
 ///     use std::net::SocketAddr;
 ///
@@ -153,11 +153,11 @@ where
 mod tests {
     use super::*;
     use crate::JwtAuthValidator;
-    use alloy_rpc_types_engine::{Claims, JwtError, JwtSecret};
-    use jsonrpsee::{
-        server::{RandomStringIdProvider, ServerBuilder, ServerConfig, ServerHandle},
-        RpcModule,
+    use alloy_rpc_server::{
+        server::{ServerBuilder, ServerConfig, ServerHandle},
+        ErrorPayload, RandomStringIdProvider, RpcModule,
     };
+    use alloy_rpc_types_engine::{Claims, JwtError, JwtSecret};
     use reqwest::{header, StatusCode};
     use std::{
         net::SocketAddr,
@@ -270,7 +270,11 @@ mod tests {
 
         // Create a mock rpc module
         let mut module = RpcModule::new(());
-        module.register_method("greet_melkor", |_, _| "You are the dark lord").unwrap();
+        module
+            .register_method("greet_melkor", |(): (), _| {
+                Ok::<_, ErrorPayload>("You are the dark lord")
+            })
+            .unwrap();
 
         server.start(module)
     }

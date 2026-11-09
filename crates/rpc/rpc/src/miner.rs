@@ -1,5 +1,5 @@
 use alloy_primitives::{Bytes, U128};
-use jsonrpsee::core::RpcResult;
+use alloy_rpc_server::RpcResult;
 use reth_rpc_api::MinerApiServer;
 
 /// `miner` API implementation.

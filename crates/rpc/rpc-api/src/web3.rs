@@ -1,5 +1,6 @@
 use alloy_primitives::{Bytes, B256};
-use jsonrpsee::{core::RpcResult, proc_macros::rpc};
+use alloy_rpc_macros::rpc;
+use alloy_rpc_server::RpcResult;
 
 /// Web3 rpc interface.
 #[rpc(server, namespace = "web3")]

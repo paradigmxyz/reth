@@ -1,6 +1,6 @@
+use alloy_rpc_server::server::{HttpBody, HttpRequest, HttpResponse};
 use http::StatusCode;
 use http_body_util::{BodyExt, LengthLimitError, Limited};
-use jsonrpsee_server::{HttpBody, HttpRequest, HttpResponse};
 use std::{
     future::{poll_fn, Future},
     pin::Pin,
@@ -27,7 +27,7 @@ const MAX_CONCURRENT_DECOMPRESSIONS: usize = 8;
 const DECOMPRESSION_BODY_READ_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// This layer is a wrapper around [`tower_http::decompression::RequestDecompressionLayer`] that
-/// integrates with jsonrpsee's HTTP types.
+/// integrates with the RPC server's HTTP types.
 #[expect(missing_debug_implementations)]
 #[derive(Clone)]
 pub struct DecompressionLayer {
@@ -89,7 +89,7 @@ pub struct DecompressionService<S> {
     max_body_size: usize,
 }
 
-/// Inner service wrapper to handle type conversion between jsonrpsee and `tower_http`
+/// Inner service wrapper to handle type conversion between the RPC server and `tower_http`
 /// with body size limiting.
 #[derive(Clone)]
 struct InnerService<S> {
@@ -233,11 +233,11 @@ fn err_response(status: StatusCode, msg: &'static str) -> HttpResponse {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloy_rpc_server::server::{HttpRequest, HttpResponse};
     use bytes::Bytes;
     use http::header::CONTENT_ENCODING;
     use http_body::{Body, Frame};
     use http_body_util::BodyExt;
-    use jsonrpsee_server::{HttpRequest, HttpResponse};
     use std::{
         convert::Infallible,
         future::ready,

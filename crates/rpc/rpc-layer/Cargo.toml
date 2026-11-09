@@ -16,7 +16,7 @@ alloy-rpc-types-engine = { workspace = true, features = ["jwt-aws-lc-rs", "serde
 
 http.workspace = true
 http-body-util.workspace = true
-jsonrpsee-server.workspace = true
+alloy-rpc-server.workspace = true
 pin-project.workspace = true
 tokio = { workspace = true, features = ["sync", "time"] }
 tower.workspace = true
@@ -28,7 +28,6 @@ bytes.workspace = true
 http-body = "1"
 reqwest.workspace = true
 tokio = { workspace = true, features = ["macros", "test-util"] }
-jsonrpsee = { workspace = true, features = ["server"] }
 
 flate2.workspace = true
 brotli.workspace = true

@@ -1,16 +1,21 @@
 use alloy_primitives::B256;
+use alloy_rpc_server::{
+    error::{ErrorCode, INTERNAL_ERROR_CODE, INVALID_PARAMS_CODE},
+    ErrorPayload,
+};
 use alloy_rpc_types_engine::{
     ForkchoiceUpdateError, INVALID_FORK_CHOICE_STATE_ERROR, INVALID_FORK_CHOICE_STATE_ERROR_MSG,
     INVALID_PAYLOAD_ATTRIBUTES_ERROR, INVALID_PAYLOAD_ATTRIBUTES_ERROR_MSG, TOO_DEEP_REORG_ERROR,
     TOO_DEEP_REORG_ERROR_MSG,
 };
-use jsonrpsee_types::error::{
-    INTERNAL_ERROR_CODE, INVALID_PARAMS_CODE, INVALID_PARAMS_MSG, SERVER_ERROR_MSG,
-};
 use reth_engine_primitives::{BeaconForkChoiceUpdateError, BeaconOnNewPayloadError};
 use reth_payload_builder_primitives::PayloadBuilderError;
 use reth_payload_primitives::{EngineObjectValidationError, VersionSpecificValidationError};
+use reth_rpc_server_types::result::rpc_error_with_data;
 use thiserror::Error;
+
+/// The message of a server-side failure, as the Engine API reports it.
+const SERVER_ERROR_MSG: &str = "Server error";
 
 /// The Engine API result type
 pub type EngineApiResult<Ok> = Result<Ok, EngineApiError>;
@@ -86,12 +91,12 @@ pub enum EngineApiError {
     UnexpectedRequestsHash,
     /// Any other rpc error
     #[error("{0}")]
-    Other(jsonrpsee_types::ErrorObject<'static>),
+    Other(ErrorPayload),
 }
 
 impl EngineApiError {
     /// Crates a new [`EngineApiError::Other`] variant.
-    pub const fn other(err: jsonrpsee_types::ErrorObject<'static>) -> Self {
+    pub const fn other(err: ErrorPayload) -> Self {
         Self::Other(err)
     }
 }
@@ -110,7 +115,7 @@ impl ErrorData {
     }
 }
 
-impl From<EngineApiError> for jsonrpsee_types::error::ErrorObject<'static> {
+impl From<EngineApiError> for ErrorPayload {
     fn from(error: EngineApiError) -> Self {
         match error {
             // Per the Shanghai Engine API spec, FCU V2 must return -38003 when the wrong
@@ -133,7 +138,7 @@ impl From<EngineApiError> for jsonrpsee_types::error::ErrorObject<'static> {
             EngineApiError::UnexpectedRequestsHash => {
                 // Note: the data field is not required by the spec, but is also included by other
                 // clients
-                jsonrpsee_types::error::ErrorObject::owned(
+                rpc_error_with_data(
                     INVALID_PAYLOAD_ATTRIBUTES_ERROR,
                     INVALID_PAYLOAD_ATTRIBUTES_ERROR_MSG,
                     Some(ErrorData::new(error)),
@@ -144,70 +149,56 @@ impl From<EngineApiError> for jsonrpsee_types::error::ErrorObject<'static> {
             EngineApiError::EngineObjectValidationError(
                 EngineObjectValidationError::Payload(_) |
                 EngineObjectValidationError::InvalidParams(_),
-            ) => jsonrpsee_types::error::ErrorObject::owned(
+            ) => rpc_error_with_data(
                 INVALID_PARAMS_CODE,
-                INVALID_PARAMS_MSG,
+                ErrorCode::InvalidParams.message(),
                 Some(ErrorData::new(error)),
             ),
-            EngineApiError::UnknownPayload => jsonrpsee_types::error::ErrorObject::owned(
-                UNKNOWN_PAYLOAD_CODE,
-                error.to_string(),
-                None::<()>,
-            ),
-            EngineApiError::PayloadRequestTooLarge { .. } |
-            EngineApiError::BlobRequestTooLarge { .. } => {
-                jsonrpsee_types::error::ErrorObject::owned(
-                    REQUEST_TOO_LARGE_CODE,
-                    REQUEST_TOO_LARGE_MESSAGE,
-                    Some(ErrorData::new(error)),
-                )
+            EngineApiError::UnknownPayload => {
+                rpc_error_with_data(UNKNOWN_PAYLOAD_CODE, error.to_string(), None::<()>)
             }
+            EngineApiError::PayloadRequestTooLarge { .. } |
+            EngineApiError::BlobRequestTooLarge { .. } => rpc_error_with_data(
+                REQUEST_TOO_LARGE_CODE,
+                REQUEST_TOO_LARGE_MESSAGE,
+                Some(ErrorData::new(error)),
+            ),
             EngineApiError::EngineObjectValidationError(
                 EngineObjectValidationError::PayloadAttributes(
                     VersionSpecificValidationError::ParentBeaconBlockRootNotSupportedBeforeV3 |
                     VersionSpecificValidationError::NoParentBeaconBlockRootPostCancun,
                 ),
-            ) => jsonrpsee_types::error::ErrorObject::owned(
+            ) => rpc_error_with_data(
                 INVALID_PAYLOAD_ATTRIBUTES_ERROR,
                 INVALID_PAYLOAD_ATTRIBUTES_ERROR_MSG,
                 Some(ErrorData::new(error)),
             ),
             EngineApiError::EngineObjectValidationError(
                 EngineObjectValidationError::UnsupportedFork,
-            ) => jsonrpsee_types::error::ErrorObject::owned(
-                UNSUPPORTED_FORK_CODE,
-                error.to_string(),
-                None::<()>,
-            ),
+            ) => rpc_error_with_data(UNSUPPORTED_FORK_CODE, error.to_string(), None::<()>),
             // Error responses from the consensus engine
             EngineApiError::ForkChoiceUpdate(ref err) => match err {
                 BeaconForkChoiceUpdateError::ForkchoiceUpdateError(err) => match err {
-                    ForkchoiceUpdateError::UpdatedInvalidPayloadAttributes => {
-                        jsonrpsee_types::error::ErrorObject::owned(
-                            INVALID_PAYLOAD_ATTRIBUTES_ERROR,
-                            INVALID_PAYLOAD_ATTRIBUTES_ERROR_MSG,
-                            None::<()>,
-                        )
-                    }
+                    ForkchoiceUpdateError::UpdatedInvalidPayloadAttributes => rpc_error_with_data(
+                        INVALID_PAYLOAD_ATTRIBUTES_ERROR,
+                        INVALID_PAYLOAD_ATTRIBUTES_ERROR_MSG,
+                        None::<()>,
+                    ),
                     ForkchoiceUpdateError::InvalidState |
-                    ForkchoiceUpdateError::UnknownFinalBlock => {
-                        jsonrpsee_types::error::ErrorObject::owned(
-                            INVALID_FORK_CHOICE_STATE_ERROR,
-                            INVALID_FORK_CHOICE_STATE_ERROR_MSG,
-                            None::<()>,
-                        )
-                    }
-                    ForkchoiceUpdateError::TooDeepReorg => {
-                        jsonrpsee_types::error::ErrorObject::owned(
-                            TOO_DEEP_REORG_ERROR,
-                            TOO_DEEP_REORG_ERROR_MSG,
-                            None::<()>,
-                        )
-                    }
+                    ForkchoiceUpdateError::UnknownFinalBlock => rpc_error_with_data(
+                        INVALID_FORK_CHOICE_STATE_ERROR,
+                        INVALID_FORK_CHOICE_STATE_ERROR_MSG,
+                        None::<()>,
+                    ),
+                    ForkchoiceUpdateError::TooDeepReorg => rpc_error_with_data(
+                        TOO_DEEP_REORG_ERROR,
+                        TOO_DEEP_REORG_ERROR_MSG,
+                        None::<()>,
+                    ),
                     // Map future alloy forkchoice errors as internal until handled.
                     #[allow(unreachable_patterns, clippy::needless_return)]
                     _ => {
-                        return jsonrpsee_types::error::ErrorObject::owned(
+                        return rpc_error_with_data(
                             INTERNAL_ERROR_CODE,
                             SERVER_ERROR_MSG,
                             Some(ErrorData::new(error)),
@@ -219,26 +210,24 @@ impl From<EngineApiError> for jsonrpsee_types::error::ErrorObject<'static> {
                 // not be reported as invalid attributes, which the consensus client would discard.
                 BeaconForkChoiceUpdateError::PayloadJob(
                     PayloadBuilderError::InvalidAttributes(_),
-                ) => jsonrpsee_types::error::ErrorObject::owned(
+                ) => rpc_error_with_data(
                     INVALID_PAYLOAD_ATTRIBUTES_ERROR,
                     INVALID_PAYLOAD_ATTRIBUTES_ERROR_MSG,
                     Some(ErrorData::new(error)),
                 ),
                 BeaconForkChoiceUpdateError::EngineUnavailable |
                 BeaconForkChoiceUpdateError::PayloadJob(_) |
-                BeaconForkChoiceUpdateError::Internal(_) => {
-                    jsonrpsee_types::error::ErrorObject::owned(
-                        INTERNAL_ERROR_CODE,
-                        SERVER_ERROR_MSG,
-                        Some(ErrorData::new(error)),
-                    )
-                }
+                BeaconForkChoiceUpdateError::Internal(_) => rpc_error_with_data(
+                    INTERNAL_ERROR_CODE,
+                    SERVER_ERROR_MSG,
+                    Some(ErrorData::new(error)),
+                ),
             },
             // Any other server error
             EngineApiError::TerminalBlockHash { .. } |
             EngineApiError::NewPayload(_) |
             EngineApiError::Internal(_) |
-            EngineApiError::GetPayloadError(_) => jsonrpsee_types::error::ErrorObject::owned(
+            EngineApiError::GetPayloadError(_) => rpc_error_with_data(
                 INTERNAL_ERROR_CODE,
                 SERVER_ERROR_MSG,
                 Some(ErrorData::new(error)),
@@ -254,14 +243,10 @@ mod tests {
     use alloy_rpc_types_engine::ForkchoiceUpdateError;
     use reth_payload_primitives::InvalidPayloadAttributesError;
     #[track_caller]
-    fn ensure_engine_rpc_error(
-        code: i32,
-        message: &str,
-        err: impl Into<jsonrpsee_types::error::ErrorObject<'static>>,
-    ) {
+    fn ensure_engine_rpc_error(code: impl Into<i64>, message: &str, err: impl Into<ErrorPayload>) {
         let err = err.into();
-        assert_eq!(err.code(), code);
-        assert_eq!(err.message(), message);
+        assert_eq!(err.code, code.into());
+        assert_eq!(err.message, message);
     }
 
     // Tests that engine errors are formatted correctly according to the engine API spec
@@ -318,7 +303,7 @@ mod tests {
         // with an invalid params error instead of an `INVALID` payload status.
         ensure_engine_rpc_error(
             INVALID_PARAMS_CODE,
-            INVALID_PARAMS_MSG,
+            ErrorCode::InvalidParams.message(),
             EngineApiError::NewPayload(BeaconOnNewPayloadError::InvalidParams(
                 "malformed payload parameters".into(),
             )),
@@ -340,7 +325,7 @@ mod tests {
 
         ensure_engine_rpc_error(
             INVALID_PARAMS_CODE,
-            INVALID_PARAMS_MSG,
+            ErrorCode::InvalidParams.message(),
             EngineApiError::EngineObjectValidationError(EngineObjectValidationError::Payload(
                 VersionSpecificValidationError::NoWithdrawalsPostShanghai,
             )),
@@ -348,7 +333,7 @@ mod tests {
 
         ensure_engine_rpc_error(
             INVALID_PARAMS_CODE,
-            INVALID_PARAMS_MSG,
+            ErrorCode::InvalidParams.message(),
             EngineApiError::EngineObjectValidationError(EngineObjectValidationError::Payload(
                 VersionSpecificValidationError::HasWithdrawalsPreShanghai,
             )),
@@ -376,7 +361,7 @@ mod tests {
         );
     }
 
-    fn payload_job_error(err: PayloadBuilderError) -> jsonrpsee_types::error::ErrorObject<'static> {
+    fn payload_job_error(err: PayloadBuilderError) -> ErrorPayload {
         EngineApiError::ForkChoiceUpdate(BeaconForkChoiceUpdateError::PayloadJob(err)).into()
     }
 
@@ -386,10 +371,10 @@ mod tests {
             InvalidPayloadAttributesError::InvalidTimestamp,
         ));
 
-        assert_eq!(err.code(), INVALID_PAYLOAD_ATTRIBUTES_ERROR);
-        assert_eq!(err.message(), INVALID_PAYLOAD_ATTRIBUTES_ERROR_MSG);
+        assert_eq!(err.code, i64::from(INVALID_PAYLOAD_ATTRIBUTES_ERROR));
+        assert_eq!(err.message, INVALID_PAYLOAD_ATTRIBUTES_ERROR_MSG);
         assert_eq!(
-            err.data().unwrap().get(),
+            err.data.as_deref().unwrap().get(),
             r#"{"err":"failed to start payload job: invalid payload attributes: invalid timestamp"}"#
         );
     }
@@ -405,10 +390,10 @@ mod tests {
         for payload_job in node_local {
             let message = payload_job.to_string();
             let err = payload_job_error(payload_job);
-            assert_eq!(err.code(), INTERNAL_ERROR_CODE, "{message}");
-            assert_eq!(err.message(), SERVER_ERROR_MSG, "{message}");
+            assert_eq!(err.code, INTERNAL_ERROR_CODE, "{message}");
+            assert_eq!(err.message, SERVER_ERROR_MSG, "{message}");
             assert_eq!(
-                err.data().unwrap().get(),
+                err.data.as_deref().unwrap().get(),
                 format!(r#"{{"err":"failed to start payload job: {message}"}}"#)
             );
         }

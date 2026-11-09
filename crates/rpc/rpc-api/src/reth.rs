@@ -1,6 +1,7 @@
 use alloy_eips::BlockId;
 use alloy_primitives::{map::AddressMap, U256, U64};
-use jsonrpsee::{core::RpcResult, proc_macros::rpc};
+use alloy_rpc_macros::rpc;
+use alloy_rpc_server::RpcResult;
 use serde::{Deserialize, Serialize};
 
 // Required for the subscription attributes below
@@ -38,7 +39,7 @@ pub trait RethApi {
         unsubscribe = "unsubscribeChainNotifications",
         item = reth_chain_state::CanonStateNotification
     )]
-    async fn reth_subscribe_chain_notifications(&self) -> jsonrpsee::core::SubscriptionResult;
+    async fn reth_subscribe_chain_notifications(&self) -> alloy_rpc_server::SubscriptionResult;
 
     /// Subscribe to persisted block notifications.
     ///
@@ -48,7 +49,7 @@ pub trait RethApi {
         unsubscribe = "unsubscribePersistedBlock",
         item = alloy_eips::BlockNumHash
     )]
-    async fn reth_subscribe_persisted_block(&self) -> jsonrpsee::core::SubscriptionResult;
+    async fn reth_subscribe_persisted_block(&self) -> alloy_rpc_server::SubscriptionResult;
 
     /// Subscribe to finalized chain notifications.
     ///
@@ -61,7 +62,7 @@ pub trait RethApi {
     )]
     async fn reth_subscribe_finalized_chain_notifications(
         &self,
-    ) -> jsonrpsee::core::SubscriptionResult;
+    ) -> alloy_rpc_server::SubscriptionResult;
 }
 
 /// Supported `reth_jit` control actions.

@@ -1,4 +1,4 @@
-//! Implementation of the [`jsonrpsee`] generated [`EthApiServer`](crate::EthApi) trait
+//! Implementation of the `alloy_rpc_macros` generated [`EthApiServer`](crate::EthApi) trait
 //! Handles RPC requests for the `eth_` namespace.
 
 use std::{sync::Arc, time::Duration};
@@ -43,7 +43,7 @@ const DEFAULT_BROADCAST_CAPACITY: usize = 2000;
 /// [`EthApiSpec`](reth_rpc_eth_api::helpers::EthApiSpec) trait. Additionally, the required server
 /// implementations (e.g. [`EthApiServer`](reth_rpc_eth_api::EthApiServer)) are implemented
 /// separately in submodules. The rpc handler implementation can then delegate to the main impls.
-/// This way [`EthApi`] is not limited to [`jsonrpsee`] and can be used standalone or in other
+/// This way [`EthApi`] is not limited to the RPC server and can be used standalone or in other
 /// network handlers (for example ipc).
 ///
 /// ## Trait requirements
@@ -541,6 +541,7 @@ mod tests {
     use alloy_genesis::{Genesis, GenesisAccount};
     use alloy_network::TransactionBuilder;
     use alloy_primitives::{Address, Bytes, Signature, B256, U256, U64};
+    use alloy_rpc_server::{error::INVALID_PARAMS_CODE, ErrorPayload};
     use alloy_rpc_types::FeeHistory;
     use alloy_rpc_types_eth::{
         simulate::{SimBlock, SimulatePayload},
@@ -549,7 +550,6 @@ mod tests {
     };
     use alloy_rpc_types_trace::{parity::TraceType, tracerequest::TraceCallRequest};
     use evm2::{evm::CacheDB, AccountInfo};
-    use jsonrpsee_types::error::INVALID_PARAMS_CODE;
     use rand::Rng;
     use reth_chain_state::CanonStateSubscriptions;
     use reth_chainspec::{ChainSpec, ChainSpecBuilder, ChainSpecProvider, EthChainSpec};
@@ -959,7 +959,7 @@ mod tests {
         .await;
         assert!(response.is_err());
         let error_object = response.unwrap_err();
-        assert_eq!(error_object.code(), INVALID_PARAMS_CODE);
+        assert_eq!(error_object.code, INVALID_PARAMS_CODE);
     }
 
     #[tokio::test]
@@ -982,7 +982,7 @@ mod tests {
 
         assert!(response.is_err());
         let error_object = response.unwrap_err();
-        assert_eq!(error_object.code(), INVALID_PARAMS_CODE);
+        assert_eq!(error_object.code, INVALID_PARAMS_CODE);
     }
 
     #[tokio::test]
@@ -1005,7 +1005,7 @@ mod tests {
 
         assert!(response.is_err());
         let error_object = response.unwrap_err();
-        assert_eq!(error_object.code(), INVALID_PARAMS_CODE);
+        assert_eq!(error_object.code, INVALID_PARAMS_CODE);
     }
 
     #[tokio::test]
@@ -1022,7 +1022,7 @@ mod tests {
         .await;
 
         let err = response.expect_err("call_many should fail when latest block lookup errors");
-        let message = err.message().to_ascii_lowercase();
+        let message = err.message.to_ascii_lowercase();
         assert!(
             message.contains("block not found"),
             "best block lookup should map via EthApiError::from(ProviderError): {message}"
@@ -1048,7 +1048,7 @@ mod tests {
 
         let err =
             response.expect_err("call_many should fail when latest block hash is unavailable");
-        let message = err.message().to_ascii_lowercase();
+        let message = err.message.to_ascii_lowercase();
         assert!(
             message.contains("block not found"),
             "missing block hash should still map to block-not-found: {message}"
@@ -1449,16 +1449,16 @@ mod tests {
                 }
                 other => panic!("unexpected error: {other}"),
             }
-            let rpc: jsonrpsee::types::ErrorObjectOwned = err.into();
+            let rpc: ErrorPayload = err.into();
             if stop == evm2::interpreter::InstrStop::Revert {
-                assert_eq!(rpc.code(), 3);
+                assert_eq!(rpc.code, 3);
                 assert_eq!(
-                    serde_json::from_str::<Bytes>(rpc.data().unwrap().get()).unwrap(),
+                    serde_json::from_str::<Bytes>(rpc.data.as_deref().unwrap().get()).unwrap(),
                     output
                 );
             } else {
-                assert_eq!(rpc.code(), -32003);
-                assert!(rpc.data().is_none());
+                assert_eq!(rpc.code, -32003);
+                assert!(rpc.data.is_none());
             }
         }
     }

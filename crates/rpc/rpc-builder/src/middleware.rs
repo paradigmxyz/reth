@@ -1,5 +1,6 @@
-use jsonrpsee::server::{
-    middleware::rpc::RpcService, HttpRequest, HttpResponse, TowerServiceNoHttp,
+use alloy_rpc_server::{
+    server::{HttpRequest, HttpResponse, HttpService},
+    RpcService, RpcServiceT,
 };
 use tower::{
     layer::util::{Identity, Stack},
@@ -8,31 +9,20 @@ use tower::{
 
 /// A Helper alias trait for the RPC middleware supported by the server.
 pub trait RethRpcMiddleware:
-    Layer<
-        RpcService,
-        Service: jsonrpsee::server::middleware::rpc::RpcServiceT + Send + Sync + Clone + 'static,
-    > + Clone
-    + Send
-    + 'static
+    Layer<RpcService, Service: RpcServiceT + Send + Sync + Clone + 'static> + Clone + Send + 'static
 {
 }
 
 impl<T> RethRpcMiddleware for T where
-    T: Layer<
-            RpcService,
-            Service: jsonrpsee::server::middleware::rpc::RpcServiceT
-                         + Send
-                         + Sync
-                         + Clone
-                         + 'static,
-        > + Clone
+    T: Layer<RpcService, Service: RpcServiceT + Send + Sync + Clone + 'static>
+        + Clone
         + Send
         + 'static
 {
 }
 
 /// Inner HTTP transport service type for auth-server middleware.
-pub type AuthHttpService<RM> = TowerServiceNoHttp<Stack<RM, Identity>>;
+pub type AuthHttpService<RM> = HttpService<Stack<RM, Identity>>;
 
 /// Helper alias trait for auth-server HTTP transport middleware layers.
 pub trait RethAuthHttpMiddleware<RM>:

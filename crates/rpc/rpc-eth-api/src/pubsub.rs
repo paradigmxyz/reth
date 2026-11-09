@@ -1,8 +1,8 @@
 //! `eth_` RPC API for pubsub subscription.
 
 use alloy_json_rpc::RpcObject;
+use alloy_rpc_macros::rpc;
 use alloy_rpc_types_eth::pubsub::{Params, SubscriptionKind};
-use jsonrpsee::proc_macros::rpc;
 
 /// Ethereum pub-sub rpc interface.
 #[rpc(server, namespace = "eth")]
@@ -17,5 +17,5 @@ pub trait EthPubSubApi<T: RpcObject> {
         &self,
         kind: SubscriptionKind,
         params: Option<Params>,
-    ) -> jsonrpsee::core::SubscriptionResult;
+    ) -> alloy_rpc_server::SubscriptionResult;
 }

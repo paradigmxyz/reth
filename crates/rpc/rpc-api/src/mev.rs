@@ -1,5 +1,5 @@
+use alloy_rpc_macros::rpc;
 use alloy_rpc_types_mev::{EthBundleHash, MevSendBundle, SimBundleOverrides, SimBundleResponse};
-use jsonrpsee::proc_macros::rpc;
 
 /// Mev rpc interface.
 #[rpc(server, namespace = "mev")]
@@ -11,7 +11,7 @@ pub trait MevSimApi {
         &self,
         bundle: MevSendBundle,
         sim_overrides: SimBundleOverrides,
-    ) -> jsonrpsee::core::RpcResult<SimBundleResponse>;
+    ) -> alloy_rpc_server::RpcResult<SimBundleResponse>;
 }
 
 /// Mev rpc interface.
@@ -23,7 +23,7 @@ pub trait MevFullApi {
     async fn send_bundle(
         &self,
         request: MevSendBundle,
-    ) -> jsonrpsee::core::RpcResult<EthBundleHash>;
+    ) -> alloy_rpc_server::RpcResult<EthBundleHash>;
 
     /// Similar to `mev_sendBundle` but instead of submitting a bundle to the relay, it returns
     /// a simulation result. Only fully matched bundles can be simulated.
@@ -32,5 +32,5 @@ pub trait MevFullApi {
         &self,
         bundle: MevSendBundle,
         sim_overrides: SimBundleOverrides,
-    ) -> jsonrpsee::core::RpcResult<SimBundleResponse>;
+    ) -> alloy_rpc_server::RpcResult<SimBundleResponse>;
 }

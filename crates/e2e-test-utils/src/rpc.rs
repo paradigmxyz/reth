@@ -50,7 +50,8 @@ where
             .inner
             .debug_api()
             .raw_transaction(hash)
-            .await?
+            .await
+            .map_err(|err| eyre::eyre!("{err}"))?
             .ok_or_else(|| eyre::eyre!("transaction {hash} not found"))?;
         Ok(T::decode_2718_exact(&tx)?)
     }

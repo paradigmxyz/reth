@@ -10,6 +10,10 @@ use crate::engine_ssz_witness::{
 use alloy_consensus::{Transaction, TxEnvelope};
 use alloy_eips::eip7685::Requests;
 use alloy_primitives::{Bytes, B128, B256};
+use alloy_rpc_server::{
+    server::{HttpBody, HttpRequest, HttpResponse},
+    ErrorPayload,
+};
 use alloy_rpc_types_engine::{
     ssz_engine_types::{
         BlobsV1Request, BlobsV1Response, BlobsV2Response, BlobsV3Response, BlobsV4Request,
@@ -30,7 +34,6 @@ use alloy_rpc_types_engine::{
 };
 use futures::future::{BoxFuture, Either};
 use http_body_util::{BodyExt, LengthLimitError, Limited};
-use jsonrpsee::server::{HttpBody, HttpRequest, HttpResponse};
 use reth_chainspec::{EthereumHardfork, EthereumHardforks};
 use reth_engine_primitives::EngineApiValidator;
 use reth_ethereum_engine_primitives::EthEngineTypes;
@@ -828,8 +831,8 @@ where
 
 fn engine_error_response(err: EngineApiError) -> HttpResponse {
     let detail = err.to_string();
-    let error: jsonrpsee::types::ErrorObjectOwned = err.into();
-    let (status, problem_type) = match error.code() {
+    let error: ErrorPayload = err.into();
+    let (status, problem_type) = match error.code {
         -32700 => (STATUS_BAD_REQUEST, "parse-error"),
         -32600 => (STATUS_BAD_REQUEST, "invalid-request"),
         -32601 => (STATUS_NOT_FOUND, "method-not-found"),
@@ -1230,7 +1233,7 @@ fn json_response<T: serde::Serialize>(value: T) -> HttpResponse {
 }
 
 fn no_content_response() -> HttpResponse {
-    HttpResponse::builder().status(204).body(HttpBody::empty()).expect("valid response")
+    HttpResponse::builder().status(204).body(HttpBody::default()).expect("valid response")
 }
 
 fn problem_response(
@@ -1573,9 +1576,10 @@ mod tests {
                 }
             }
         }
-        let response = read_ssz_body(HttpRequest::new(HttpBody::empty()), MAX_BODIES_REQUEST_BYTES)
-            .await
-            .unwrap_err();
+        let response =
+            read_ssz_body(HttpRequest::new(HttpBody::default()), MAX_BODIES_REQUEST_BYTES)
+                .await
+                .unwrap_err();
         assert_eq!(response.status(), STATUS_UNSUPPORTED_MEDIA_TYPE);
     }
 
