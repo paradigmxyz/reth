@@ -16,7 +16,6 @@ evm2.workspace = true
 reth-chain-state.workspace = true
 reth-chainspec = { workspace = true, optional = true }
 reth-consensus.workspace = true
-reth-db.workspace = true
 reth-engine-primitives = { workspace = true, features = ["std"] }
 reth-execution-cache.workspace = true
 reth-errors.workspace = true
@@ -116,7 +115,6 @@ test-utils = [
     "reth-chain-state/test-utils",
     "reth-chainspec/test-utils",
     "reth-consensus/test-utils",
-    "reth-db/test-utils",
     "reth-evm/test-utils",
     "reth-network-p2p/test-utils",
     "reth-payload-builder/test-utils",

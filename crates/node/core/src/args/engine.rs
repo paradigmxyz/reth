@@ -38,7 +38,6 @@ pub struct DefaultEngineValues {
     sender_recovery_cache_enabled: bool,
     state_provider_metrics: bool,
     cross_block_cache_size: usize,
-    state_root_task_compare_updates: bool,
     accept_execution_requests_hash: bool,
     multiproof_chunk_size: usize,
     reserved_cpu_cores: usize,
@@ -140,12 +139,6 @@ impl DefaultEngineValues {
     /// Set the default cross-block cache size in MB
     pub const fn with_cross_block_cache_size(mut self, v: usize) -> Self {
         self.cross_block_cache_size = v;
-        self
-    }
-
-    /// Set whether to compare state root task updates by default
-    pub const fn with_state_root_task_compare_updates(mut self, v: bool) -> Self {
-        self.state_root_task_compare_updates = v;
         self
     }
 
@@ -282,7 +275,6 @@ impl Default for DefaultEngineValues {
             sender_recovery_cache_enabled: true,
             state_provider_metrics: false,
             cross_block_cache_size: DEFAULT_CROSS_BLOCK_CACHE_SIZE_MB,
-            state_root_task_compare_updates: false,
             accept_execution_requests_hash: false,
             multiproof_chunk_size: DEFAULT_MULTIPROOF_TASK_CHUNK_SIZE,
             reserved_cpu_cores: DEFAULT_RESERVED_CPU_CORES,
@@ -414,11 +406,6 @@ pub struct EngineArgs {
     /// Configure the size of cross-block cache in megabytes
     #[arg(long = "engine.cross-block-cache-size", default_value_t = DefaultEngineValues::get_global().cross_block_cache_size)]
     pub cross_block_cache_size: usize,
-
-    /// Enable comparing trie updates from the state root task to the trie updates from the regular
-    /// state root calculation.
-    #[arg(long = "engine.state-root-task-compare-updates", default_value_t = DefaultEngineValues::get_global().state_root_task_compare_updates)]
-    pub state_root_task_compare_updates: bool,
 
     /// Enables accepting requests hash instead of an array of requests in `engine_newPayloadV4`.
     #[arg(long = "engine.accept-execution-requests-hash", default_value_t = DefaultEngineValues::get_global().accept_execution_requests_hash)]
@@ -607,7 +594,6 @@ impl Default for EngineArgs {
             sender_recovery_cache_enabled,
             state_provider_metrics,
             cross_block_cache_size,
-            state_root_task_compare_updates,
             accept_execution_requests_hash,
             multiproof_chunk_size,
             reserved_cpu_cores,
@@ -635,7 +621,6 @@ impl Default for EngineArgs {
             memory_block_buffer_target: None,
             backfill_run_threshold,
             invalid_header_hit_eviction_threshold,
-            state_root_task_compare_updates,
             state_cache_disabled,
             prewarming_disabled,
             txpool_prewarming_enabled,
@@ -751,7 +736,6 @@ impl EngineArgs {
             .without_prewarming(self.prewarming_disabled)
             .with_txpool_prewarming(self.txpool_prewarming_enabled)
             .with_state_provider_metrics(self.state_provider_metrics)
-            .with_always_compare_trie_updates(self.state_root_task_compare_updates)
             .with_cross_block_cache_size(self.cross_block_cache_size * 1024 * 1024)
             .with_multiproof_chunk_size(self.multiproof_chunk_size)
             .with_reserved_cpu_cores(self.reserved_cpu_cores)
@@ -966,7 +950,6 @@ mod tests {
             sender_recovery_cache_enabled: true,
             state_provider_metrics: true,
             cross_block_cache_size: 256,
-            state_root_task_compare_updates: true,
             accept_execution_requests_hash: true,
             multiproof_chunk_size: 512,
             reserved_cpu_cores: 4,
@@ -1011,7 +994,6 @@ mod tests {
             "--engine.state-provider-metrics",
             "--engine.cross-block-cache-size",
             "256",
-            "--engine.state-root-task-compare-updates",
             "--engine.accept-execution-requests-hash",
             "--engine.multiproof-chunk-size",
             "512",
