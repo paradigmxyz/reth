@@ -183,7 +183,7 @@ jobs:
 
           IMPORTANT: Do NOT suppress warnings with #[allow(...)]. Migrate the code to the new APIs instead; \
           read the upstream evm2 source to see what replaced removed or deprecated items."
-          .github/scripts/evm2-fix-loop.sh "$CHECK" "$PROMPT"
+          bash .github/scripts/evm2-fix-loop.sh "$CHECK" "$PROMPT"
 
       - name: Fix test compilation errors
         id: test-loop
@@ -202,7 +202,7 @@ jobs:
 
           IMPORTANT: Do NOT suppress warnings with #[allow(...)]. Migrate the code to the new APIs instead; \
           read the upstream evm2 source to see what replaced removed or deprecated items."
-          .github/scripts/evm2-fix-loop.sh "$CHECK" "$PROMPT"
+          bash .github/scripts/evm2-fix-loop.sh "$CHECK" "$PROMPT"
 
       - name: Commit source fixes
         if: steps.update.outputs.bumped == 'true'
