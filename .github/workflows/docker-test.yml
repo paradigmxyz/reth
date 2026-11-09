@@ -93,6 +93,8 @@ jobs:
           VERGEN_GIT_SHA: ${{ steps.git.outputs.sha }}
           VERGEN_GIT_DESCRIBE: ${{ steps.git.outputs.describe }}
         with:
+          # Preserve .git for reth-node-core's build metadata.
+          source: .
           files: docker-bake.hcl
           targets: ${{ inputs.hive_target }}
           push: false
