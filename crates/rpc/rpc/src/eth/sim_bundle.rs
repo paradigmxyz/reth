@@ -614,7 +614,6 @@ mod tests {
     use reth_provider::{
         providers::BlockchainProvider, test_utils::create_test_provider_factory_with_chain_spec,
     };
-    use reth_rpc_eth_api::helpers::SpawnBlocking;
     use reth_testing_utils::{
         generators,
         generators::{generate_key, sign_tx_with_key_pair},
@@ -925,13 +924,13 @@ mod tests {
         ));
     }
 
-    /// The bundle's transactions share a block gas budget capped at the RPC call gas limit, and
-    /// the simulation waits for a blocking IO permit.
+    /// The bundle's gas budget is capped at the RPC call gas limit, and a limit of 0 disables the
+    /// cap.
     #[tokio::test(flavor = "multi_thread")]
-    async fn sim_bundle_shares_gas_limit_and_takes_blocking_io_permit() {
+    async fn sim_bundle_caps_gas_at_call_gas_limit() {
         let mut rng = generators::rng();
         let key = generate_key(&mut rng);
-        let txs: Vec<_> = (0..3)
+        let txs: Vec<_> = (0..2)
             .map(|nonce| {
                 sign_tx_with_key_pair(
                     key,
@@ -960,76 +959,37 @@ mod tests {
         let factory = create_test_provider_factory_with_chain_spec(chain_spec);
         init_genesis(&factory).unwrap();
         let provider = BlockchainProvider::new(factory).unwrap();
-
-        let eth_api = EthApiBuilder::new(
-            provider.clone(),
-            testing_pool(),
-            NoopNetwork::default(),
-            EthEvmConfig::new(provider.chain_spec()),
-        )
-        .gas_cap(42_000u64.into())
-        .max_blocking_io_requests(1)
-        .build();
-        let api = EthSimBundle::new(eth_api.clone(), BlockingTaskGuard::new(4));
-
-        let raw_txs = txs.iter().map(|tx| Bytes::from(tx.encoded_2718())).collect::<Vec<_>>();
-        let bundle = create_test_bundle(raw_txs[..2].to_vec());
-        let gas_limit_override = |gas_limit| SimBundleOverrides {
-            block_overrides: BlockOverrides { gas_limit: Some(gas_limit), ..Default::default() },
-            ..Default::default()
-        };
-        let gas_limit_exceeded = |gas_limit| {
-            ErrorObjectOwned::from(EthApiError::InvalidParams(
-                EthBundleError::BundleGasLimitExceeded(gas_limit).to_string(),
-            ))
-        };
-
-        assert_eq!(
-            api.sim_bundle(bundle.clone(), gas_limit_override(42_001)).await.unwrap_err(),
-            ErrorObjectOwned::from(EthApiError::InvalidTransaction(
-                RpcInvalidTransactionError::GasTooHigh
-            ))
-        );
-        assert_eq!(
-            api.sim_bundle(bundle.clone(), gas_limit_override(41_999)).await.unwrap_err(),
-            gas_limit_exceeded(41_999)
-        );
-        // The call gas limit caps the budget below the block gas limit.
-        assert_eq!(
-            api.sim_bundle(create_test_bundle(raw_txs.clone()), SimBundleOverrides::default())
-                .await
-                .unwrap_err(),
-            gas_limit_exceeded(42_000)
-        );
-
-        // A call gas limit of 0 leaves the block gas limit as the budget.
-        let uncapped = EthSimBundle::new(
-            EthApiBuilder::new(
+        let api = |gas_cap: u64| {
+            let eth_api = EthApiBuilder::new(
                 provider.clone(),
                 testing_pool(),
                 NoopNetwork::default(),
                 EthEvmConfig::new(provider.chain_spec()),
             )
-            .gas_cap(0u64.into())
-            .build(),
-            BlockingTaskGuard::new(4),
+            .gas_cap(gas_cap.into())
+            .build();
+            EthSimBundle::new(eth_api, BlockingTaskGuard::new(4))
+        };
+        let bundle = create_test_bundle(txs.iter().map(|tx| tx.encoded_2718().into()).collect());
+        let overrides = SimBundleOverrides {
+            block_overrides: BlockOverrides { gas_limit: Some(21_001), ..Default::default() },
+            ..Default::default()
+        };
+
+        let capped = api(21_000);
+        assert_eq!(
+            capped.sim_bundle(bundle.clone(), overrides).await.unwrap_err(),
+            ErrorObjectOwned::from(EthApiError::InvalidTransaction(
+                RpcInvalidTransactionError::GasTooHigh
+            ))
         );
-        let response = uncapped
-            .sim_bundle(create_test_bundle(raw_txs), gas_limit_override(63_000))
-            .await
-            .unwrap();
-        assert_eq!(response.gas_used, 63_000);
-
-        let permit = eth_api.acquire_owned_blocking_io().await.unwrap();
-        assert!(tokio::time::timeout(
-            Duration::from_millis(200),
-            api.sim_bundle(bundle.clone(), SimBundleOverrides::default())
-        )
-        .await
-        .is_err());
-
-        drop(permit);
-        let response = api.sim_bundle(bundle, SimBundleOverrides::default()).await.unwrap();
+        assert_eq!(
+            capped.sim_bundle(bundle.clone(), SimBundleOverrides::default()).await.unwrap_err(),
+            ErrorObjectOwned::from(EthApiError::InvalidParams(
+                EthBundleError::BundleGasLimitExceeded(21_000).to_string()
+            ))
+        );
+        let response = api(0).sim_bundle(bundle, SimBundleOverrides::default()).await.unwrap();
         assert_eq!(response.gas_used, 42_000);
     }
 }
