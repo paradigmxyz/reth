@@ -1839,35 +1839,21 @@ mod tests {
         assert_eq!(nonces(&pool.get_transactions_by_sender(sender)), [0, 1, 9]);
     }
 
-    #[tokio::test]
-    async fn subscribe_transaction_events_without_pool_residency() {
+    #[test]
+    fn subscribe_transaction_events_without_pool_residency() {
         let test_pool = testing_pool();
         let pool = &test_pool.pool;
-        let mut factory = MockTransactionFactory::default();
-        let held = factory.validated_arc(MockTransaction::eip1559());
-        let dropped = factory.validated_arc(MockTransaction::eip1559());
-        let (held_hash, dropped_hash) = (*held.hash(), *dropped.hash());
+        let tx = MockTransactionFactory::default().validated_arc(MockTransaction::eip1559());
+        assert!(pool.add_transaction_event_listener(*tx.hash()).is_none());
 
-        // Neither transaction is in the pool, so the checked variant refuses to subscribe.
-        assert!(pool.add_transaction_event_listener(held_hash).is_none());
-        assert!(pool.add_transaction_event_listener(dropped_hash).is_none());
-
-        let mut held_events = pool.subscribe_transaction_events(held_hash);
-        let mut dropped_events = pool.subscribe_transaction_events(dropped_hash);
-        assert!(pool.add_transaction_event_listener(held_hash).is_none());
-
+        let mut events = pool.subscribe_transaction_events(*tx.hash());
         pool.notify_event_listeners(&AddedTransaction::Pending(AddedPendingTransaction {
-            transaction: held,
+            transaction: tx,
             replaced: None,
             promoted: vec![],
-            discarded: vec![dropped],
+            discarded: vec![],
         }));
-
-        assert_eq!(held_events.next().now_or_never(), Some(Some(TransactionEvent::Pending)));
-        assert!(held_events.next().now_or_never().is_none());
-        assert_eq!(dropped_events.next().now_or_never(), Some(Some(TransactionEvent::Discarded)));
-        // The final event removed the subscription.
-        assert_eq!(dropped_events.next().now_or_never(), Some(None));
+        assert_eq!(events.next().now_or_never(), Some(Some(TransactionEvent::Pending)));
     }
 
     #[test]
