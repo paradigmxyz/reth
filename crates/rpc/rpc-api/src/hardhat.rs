@@ -4,7 +4,7 @@ use alloy_rpc_server::RpcResult;
 use alloy_rpc_types_anvil::{Forking, Metadata};
 
 /// Hardhat rpc interface.
-/// https://hardhat.org/hardhat-network/docs/reference#hardhat-network-methods
+/// <https://hardhat.org/hardhat-network/docs/reference#hardhat-network-methods>
 #[rpc(server, namespace = "hardhat")]
 pub trait HardhatApi {
     /// Removes the given transaction from the mempool, if it exists.

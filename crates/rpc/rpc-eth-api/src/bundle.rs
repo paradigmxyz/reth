@@ -9,7 +9,7 @@ use alloy_rpc_types_mev::{
     EthCancelPrivateTransaction, EthSendBundle, EthSendPrivateTransaction,
 };
 
-/// A subset of the [`EthBundleApi`] API interface that only supports `eth_callBundle`.
+/// A subset of the [`EthBundleApiServer`] API interface that only supports `eth_callBundle`.
 #[rpc(server, namespace = "eth")]
 pub trait EthCallBundleApi {
     /// `eth_callBundle` can be used to simulate a bundle against a specific block number,

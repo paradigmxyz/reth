@@ -6,7 +6,7 @@ use alloy_rpc_types_anvil::{Forking, Metadata, MineOptions, NodeInfo};
 use alloy_rpc_types_eth::Block;
 
 /// Anvil rpc interface.
-/// https://book.getfoundry.sh/reference/anvil/#custom-methods
+/// <https://book.getfoundry.sh/reference/anvil/#custom-methods>
 #[rpc(server, namespace = "anvil")]
 pub trait AnvilApi {
     /// Sends transactions impersonating specific account and contract addresses.

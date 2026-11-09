@@ -395,7 +395,7 @@ impl From<EthApiError> for ErrorPayload {
             EthApiError::BatchTxSendError => {
                 internal_rpc_err("Batch transaction sender channel closed".to_string())
             }
-            EthApiError::CallManyError { bundle_index, tx_index, error } => ErrorPayload {
+            EthApiError::CallManyError { bundle_index, tx_index, error } => Self {
                 message: format!(
                     "call_many error in bundle {bundle_index} and transaction {tx_index}: {}",
                     error.message

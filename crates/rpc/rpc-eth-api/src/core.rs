@@ -1,4 +1,4 @@
-//! Implementation of the [`rpc`](alloy_rpc_macros::rpc) generated [`EthApiServer`] trait. Handles
+//! Implementation of the [`rpc`] generated [`EthApiServer`] trait. Handles
 //! RPC requests for the `eth_` namespace.
 use crate::{
     helpers::{EthApiSpec, EthBlocks, EthCall, EthFees, EthState, EthTransactions, FullEthApi},
