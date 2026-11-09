@@ -43,7 +43,13 @@ pub struct NippyJarWriter<H: NippyJarHeader = ()> {
     column: usize,
     /// Whether the writer has changed data that needs to be committed.
     dirty: bool,
-    pending_truncation: Option<(u64, u64)>,
+    pending_truncation: Option<PendingTruncation>,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct PendingTruncation {
+    offsets_len: u64,
+    data_len: u64,
 }
 
 impl<H: NippyJarHeader> NippyJarWriter<H> {
@@ -262,7 +268,9 @@ impl<H: NippyJarHeader> NippyJarWriter<H> {
 
     /// Truncates the files to the rows kept by [`Self::prune_rows_deferred`].
     pub fn apply_pending_truncation(&mut self) -> Result<(), NippyJarError> {
-        let Some((offsets_len, data_len)) = self.pending_truncation else { return Ok(()) };
+        let Some(PendingTruncation { offsets_len, data_len }) = self.pending_truncation else {
+            return Ok(())
+        };
 
         self.offsets_file.get_mut().set_len(offsets_len)?;
         self.data_file.get_mut().set_len(data_len)?;
@@ -284,7 +292,7 @@ impl<H: NippyJarHeader> NippyJarWriter<H> {
         defer: bool,
     ) -> Result<(), NippyJarError> {
         if defer {
-            self.pending_truncation = Some((offsets_len, data_len));
+            self.pending_truncation = Some(PendingTruncation { offsets_len, data_len });
         } else {
             self.offsets_file.get_mut().set_len(offsets_len)?;
             self.data_file.get_mut().set_len(data_len)?;
