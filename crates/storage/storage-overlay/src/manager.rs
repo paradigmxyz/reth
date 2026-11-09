@@ -57,7 +57,9 @@ struct OverlayManagerInner<N: NodePrimitives> {
     worker_pool: Option<Arc<WorkerPool>>,
     metrics: StateTrieOverlayMetrics,
     execution_metrics: ExecutionOverlayMetrics,
-    builder_metrics: OverlayBuilderMetrics,
+    /// Created on first use rather than with the manager: the node builds the manager before it
+    /// installs the metrics recorder, and handles registered earlier stay no-ops.
+    builder_metrics: OnceLock<OverlayBuilderMetrics>,
 }
 
 impl<N: NodePrimitives> Default for OverlayManager<N> {
@@ -140,7 +142,7 @@ impl<N: NodePrimitives> OverlayManager<N> {
 
     /// Returns the metrics shared by the overlay builders this manager creates.
     pub(crate) fn builder_metrics(&self) -> &OverlayBuilderMetrics {
-        &self.inner.builder_metrics
+        self.inner.builder_metrics.get_or_init(OverlayBuilderMetrics::default)
     }
 
     /// Gets complete trie before-values for an inclusive block range, oldest values taking
