@@ -257,50 +257,14 @@ impl<H: NippyJarHeader> NippyJarWriter<H> {
 
     /// Prunes rows from data and offsets file and updates its configuration on disk
     pub fn prune_rows(&mut self, num_rows: usize) -> Result<(), NippyJarError> {
-        self.prune_rows_inner(num_rows, false)
+        self.prune_rows_deferred(num_rows)?;
+        self.apply_pending_truncation()?;
+        Ok(())
     }
 
     /// Prunes rows like [`Self::prune_rows`], but leaves the committed rows' bytes on disk until
     /// [`Self::apply_pending_truncation`].
     pub fn prune_rows_deferred(&mut self, num_rows: usize) -> Result<(), NippyJarError> {
-        self.prune_rows_inner(num_rows, true)
-    }
-
-    /// Truncates the files to the rows kept by [`Self::prune_rows_deferred`].
-    pub fn apply_pending_truncation(&mut self) -> Result<(), NippyJarError> {
-        let Some(PendingTruncation { offsets_len, data_len }) = self.pending_truncation else {
-            return Ok(())
-        };
-
-        self.offsets_file.get_mut().set_len(offsets_len)?;
-        self.data_file.get_mut().set_len(data_len)?;
-
-        self.offsets_file.get_ref().sync_all()?;
-        self.data_file.get_ref().sync_all()?;
-
-        self.offsets_file.seek(SeekFrom::End(0))?;
-        self.data_file.seek(SeekFrom::End(0))?;
-        self.pending_truncation = None;
-
-        Ok(())
-    }
-
-    fn truncate_files(
-        &mut self,
-        offsets_len: u64,
-        data_len: u64,
-        defer: bool,
-    ) -> Result<(), NippyJarError> {
-        if defer {
-            self.pending_truncation = Some(PendingTruncation { offsets_len, data_len });
-        } else {
-            self.offsets_file.get_mut().set_len(offsets_len)?;
-            self.data_file.get_mut().set_len(data_len)?;
-        }
-        Ok(())
-    }
-
-    fn prune_rows_inner(&mut self, num_rows: usize, defer: bool) -> Result<(), NippyJarError> {
         self.apply_pending_truncation()?;
         self.dirty = true;
 
@@ -351,7 +315,10 @@ impl<H: NippyJarHeader> NippyJarWriter<H> {
                     // file size = 0). This maintains the same structure as when
                     // a file is initially created.
                     // See `NippyJarWriter::create_or_open_files` for the initial file format.
-                    self.truncate_files(1 + OFFSET_SIZE_BYTES as u64, 0, defer)?;
+                    self.pending_truncation = Some(PendingTruncation {
+                        offsets_len: 1 + OFFSET_SIZE_BYTES as u64,
+                        data_len: 0,
+                    });
                 } else {
                     // Calculate the new length for the on-disk offset list
                     let new_len = 1 + new_num_offsets * OFFSET_SIZE_BYTES as u64;
@@ -364,7 +331,8 @@ impl<H: NippyJarHeader> NippyJarWriter<H> {
                     let last_offset = u64::from_le_bytes(last_offset);
 
                     // Update the lengths of both the offsets and data files
-                    self.truncate_files(new_len, last_offset, defer)?;
+                    self.pending_truncation =
+                        Some(PendingTruncation { offsets_len: new_len, data_len: last_offset });
                 }
             } else {
                 return Err(NippyJarError::InvalidPruning(0, remaining_to_prune as u64))
@@ -396,6 +364,27 @@ impl<H: NippyJarHeader> NippyJarWriter<H> {
         self.jar.freeze_config()?;
 
         Ok(())
+    }
+
+    /// Truncates the files to the rows kept by [`Self::prune_rows_deferred`].
+    ///
+    /// Returns `false` if no truncation was pending.
+    pub fn apply_pending_truncation(&mut self) -> Result<bool, NippyJarError> {
+        let Some(PendingTruncation { offsets_len, data_len }) = self.pending_truncation else {
+            return Ok(false)
+        };
+
+        self.offsets_file.get_mut().set_len(offsets_len)?;
+        self.data_file.get_mut().set_len(data_len)?;
+
+        self.offsets_file.get_ref().sync_all()?;
+        self.data_file.get_ref().sync_all()?;
+
+        self.offsets_file.seek(SeekFrom::End(0))?;
+        self.data_file.seek(SeekFrom::End(0))?;
+        self.pending_truncation = None;
+
+        Ok(true)
     }
 
     /// Updates [`NippyJar`] with the new row count and maximum uncompressed row size, while

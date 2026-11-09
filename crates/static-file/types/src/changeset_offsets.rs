@@ -156,11 +156,12 @@ impl ChangesetOffsetWriter {
     }
 
     /// Truncates the file to the records kept by [`Self::truncate_deferred`].
-    pub fn apply_pending_truncation(&mut self) -> io::Result<()> {
-        if let Some(len) = self.pending_truncation {
-            self.truncate(len)?;
-        }
-        Ok(())
+    ///
+    /// Returns `false` if no truncation was pending.
+    pub fn apply_pending_truncation(&mut self) -> io::Result<bool> {
+        let Some(len) = self.pending_truncation else { return Ok(false) };
+        self.truncate(len)?;
+        Ok(true)
     }
 
     /// Returns the number of records in the file.

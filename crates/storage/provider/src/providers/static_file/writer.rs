@@ -604,9 +604,7 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
         let start = Instant::now();
 
         // Truncates the data file if instructed to.
-        let prune_on_commit = self.prune_on_commit.take();
-        let pruned = prune_on_commit.is_some();
-        if let Some(strategy) = prune_on_commit {
+        if let Some(strategy) = self.prune_on_commit.take() {
             debug!(
                 target: "providers::static_file",
                 segment = ?self.writer.user_header().segment(),
@@ -674,20 +672,22 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
         // replaced and the one it installed may still map the uncut length: the replaced one waits
         // for its readers, and the installed one never reads past its row count. Indexing again
         // caches a jar that maps the cut length.
-        self.apply_pending_truncation()?;
-        if pruned {
+        if self.apply_pending_truncation()? {
             self.update_index()?;
         }
 
         Ok(())
     }
 
-    fn apply_pending_truncation(&mut self) -> ProviderResult<()> {
-        self.writer.apply_pending_truncation().map_err(ProviderError::other)?;
+    /// Applies the truncation deferred by pruning to the data and changeset offset files.
+    ///
+    /// Returns `false` if no truncation was pending.
+    fn apply_pending_truncation(&mut self) -> ProviderResult<bool> {
+        let mut truncated = self.writer.apply_pending_truncation().map_err(ProviderError::other)?;
         if let Some(writer) = &mut self.changeset_offsets {
-            writer.apply_pending_truncation().map_err(ProviderError::other)?;
+            truncated |= writer.apply_pending_truncation().map_err(ProviderError::other)?;
         }
-        Ok(())
+        Ok(truncated)
     }
 
     /// Commits configuration changes to disk and updates the reader index with the new changes.
