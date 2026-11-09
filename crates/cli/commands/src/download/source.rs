@@ -135,10 +135,11 @@ pub(crate) fn print_snapshot_listing(entries: &[SnapshotApiEntry], chain_id: u64
     );
 }
 
-/// Loads a manifest from an HTTP(S) URL, `file://` URL, or local path, and checks that its
-/// output file paths stay inside the datadir.
+/// Loads a manifest from an HTTP(S) URL, `file://` URL, or local path, rejecting zero
+/// `blocks_per_file` and output file paths outside the datadir.
 pub(crate) async fn fetch_manifest_from_source(source: &str) -> Result<SnapshotManifest> {
     let manifest = read_manifest_source(source).await?;
+    manifest.validate_blocks_per_file()?;
     manifest.validate_output_paths()?;
     Ok(manifest)
 }

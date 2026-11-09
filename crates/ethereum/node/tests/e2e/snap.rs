@@ -32,7 +32,7 @@ use reth_e2e_test_utils::{
     node::Finality,
     snap::SnapControl,
     trie::assert_trie_consistency,
-    wait::{assert_holds_for, poll_until, WAIT_TIMEOUT},
+    wait::{assert_holds_for, poll_until},
     E2ETestSetupBuilder, E2ETestSetupExt, NodeHelperType,
 };
 use reth_eth_wire_types::snap::SnapProtocolMessage;
@@ -303,13 +303,8 @@ async fn partial_storage_resumes_after_restart() -> eyre::Result<()> {
         assert_eq!(provider.storage_progress(write, origin)?.resume_at(account), Some(resume_at));
         (write, origin, account, resume_at)
     };
-    // Stop the engine before cancelling the paused backfill, whose dropped-task event can
-    // otherwise race the engine's shutdown signal and leave its database handles alive.
-    tokio::time::timeout(
-        WAIT_TIMEOUT,
-        client.inner.add_ons_handle.engine_shutdown.shutdown().expect("engine is running"),
-    )
-    .await??;
+    // The storage continuation is still paused.
+    client.shutdown_engine().await?;
     let stopped = client.stop().await?;
     let resumed = control.pause_on(move |request| {
         matches!(request,
@@ -565,6 +560,8 @@ async fn a_reorged_pivot_repairs_orphaned_storage() -> eyre::Result<()> {
     downloaded.reached().await?;
     let attempt = client.snap_attempt()?;
     assert_eq!(attempt.pivot().number, pivot);
+    // The account range after the contract is still paused.
+    client.shutdown_engine().await?;
     let stopped = client.stop().await?;
 
     // Both branches change slot 0, but only the orphan changes slot 1 and only the new fork
