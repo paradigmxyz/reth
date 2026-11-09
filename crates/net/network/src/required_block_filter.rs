@@ -4,7 +4,7 @@
 //! specific required blocks (primarily used for shadowfork testing).
 
 use alloy_eips::BlockNumHash;
-use futures::StreamExt;
+use futures::{FutureExt, StreamExt};
 use reth_eth_wire_types::{GetBlockHeaders, HeadersDirection};
 use reth_network_api::{
     NetworkEvent, NetworkEventListenerProvider, PeerRequest, Peers, ReputationChangeKind,
@@ -46,9 +46,7 @@ where
 
         info!(target: "net::filter", "Starting required block peer filter with {} block hashes", self.block_num_hashes.len());
 
-        tokio::spawn(async move {
-            self.run().await;
-        });
+        tokio::spawn(self.run().boxed());
     }
 
     /// Main loop for the required block peer filter.
@@ -65,7 +63,7 @@ where
                 let block_num_hashes = self.block_num_hashes.clone();
                 let peer_block_number = info.status.latest_block.unwrap_or(0);
 
-                tokio::spawn(async move {
+                tokio::spawn(
                     Self::check_peer_blocks(
                         network,
                         peer_id,
@@ -73,8 +71,8 @@ where
                         block_num_hashes,
                         peer_block_number,
                     )
-                    .await;
-                });
+                    .boxed(),
+                );
             }
         }
     }

@@ -53,7 +53,11 @@ impl Config {
     /// A new configuration file is created with default values if none
     /// exists.
     pub fn from_path(path: impl AsRef<Path>) -> eyre::Result<Self> {
-        let path = path.as_ref();
+        Self::from_path_inner(path.as_ref())
+    }
+
+    /// Non-generic body of [`Self::from_path`], so the TOML code compiles once in this crate.
+    fn from_path_inner(path: &Path) -> eyre::Result<Self> {
         match std::fs::read_to_string(path) {
             Ok(cfg_string) => {
                 toml::from_str(&cfg_string).map_err(|e| eyre::eyre!("Failed to parse TOML: {e}"))

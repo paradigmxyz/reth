@@ -493,7 +493,9 @@ mod tests {
     use reth_network_api::noop::NoopNetwork;
     use reth_primitives_traits::Recovered;
     use reth_provider::test_utils::MockEthProvider;
+    use reth_rpc_eth_api::helpers::SpawnBlocking;
     use reth_transaction_pool::test_utils::testing_pool;
+    use std::time::Duration;
 
     #[test]
     fn block_transaction_pages_match_frontend_index_navigation() {
@@ -703,9 +705,6 @@ mod tests {
 
     #[tokio::test]
     async fn trace_methods_wait_for_tracing_permit() {
-        use reth_rpc_eth_api::helpers::SpawnBlocking;
-        use std::time::Duration;
-
         let api = OtterscanApi::new(
             crate::eth::EthApiBuilder::new(
                 MockEthProvider::default(),
@@ -805,12 +804,12 @@ mod tests {
             }),
             Address::ZERO,
         );
-        let (inspector, result) = evm
-            .transact_with_inspector(
-                &tx,
-                TracingInspector::new(TracingInspectorConfig::default_parity()),
-            )
-            .unwrap();
+        let (inspector, result) = Evm::transact_with_inspector(
+            &mut evm,
+            &tx,
+            TracingInspector::new(TracingInspectorConfig::default_parity()),
+        )
+        .unwrap();
         (result.result, otterscan_traces(inspector.traces().nodes().to_vec()))
     }
 

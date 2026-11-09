@@ -302,6 +302,9 @@ impl<R, C, F: EvmFactory> EthBlockExecutorFactory<R, C, F> {
 
     /// Replaces the execution configuration, transaction registry, and precompiles at a segment
     /// boundary while preserving the EVM state and database.
+    ///
+    /// Within one spec the registry and precompiles are kept, so a precompile cache installed by
+    /// [`Self::build_evm_with_precompile_cache`] survives.
     pub(crate) fn reconfigure_evm<'a>(
         &'a self,
         evm: &mut evm2::Evm<'a, F::Types>,
@@ -309,6 +312,11 @@ impl<R, C, F: EvmFactory> EthBlockExecutorFactory<R, C, F> {
     ) {
         let spec = env.spec;
         let config = self.evm_factory.execution_config(spec, env.version);
+        if evm.config_spec_id() == spec {
+            evm.set_block_and_execution_config_within_spec(env.block, config);
+            return
+        }
+
         let registry = self.evm_factory.tx_registry(spec);
         let precompiles = self.evm_factory.precompiles(spec);
 
@@ -539,6 +547,10 @@ pub struct JitMetrics {
     pub compilations_succeeded: metrics::Gauge,
     /// Total number of failed compilations.
     pub compilations_failed: metrics::Gauge,
+    /// Total compilation results discarded because the resident cache was cleared while they ran.
+    pub compilations_discarded: metrics::Gauge,
+    /// Total number of frames or hosts that fell back to the interpreter.
+    pub interpreter_fallbacks: metrics::Gauge,
     /// Total number of JIT helper processes spawned.
     pub jit_helper_spawns: metrics::Gauge,
     /// Total number of JIT helper process spawn failures.
@@ -600,6 +612,8 @@ impl JitMetrics {
             compilations_dispatched,
             compilations_succeeded,
             compilations_failed,
+            compilations_discarded,
+            interpreter_fallbacks,
             jit_helper_spawns,
             jit_helper_spawn_failures,
             jit_helper_restarts,
@@ -626,6 +640,8 @@ impl JitMetrics {
         self.compilations_dispatched.set(compilations_dispatched as f64);
         self.compilations_succeeded.set(compilations_succeeded as f64);
         self.compilations_failed.set(compilations_failed as f64);
+        self.compilations_discarded.set(compilations_discarded as f64);
+        self.interpreter_fallbacks.set(interpreter_fallbacks as f64);
         self.jit_helper_spawns.set(jit_helper_spawns as f64);
         self.jit_helper_spawn_failures.set(jit_helper_spawn_failures as f64);
         self.jit_helper_restarts.set(jit_helper_restarts as f64);
@@ -648,5 +664,44 @@ impl JitMetrics {
         self.jit_translate_duration.record(event.timings.translate.as_secs_f64());
         self.jit_optimize_duration.record(event.timings.optimize.as_secs_f64());
         self.jit_codegen_duration.record(event.timings.codegen.as_secs_f64());
+    }
+}
+
+#[cfg(all(test, feature = "std"))]
+mod tests {
+    use super::*;
+    use alloy_primitives::U256;
+    use core::any::TypeId;
+    use evm2::{
+        evm::{EmptyDB, NonStaticAny},
+        BaseEvmTypes, SpecId,
+    };
+
+    #[test]
+    fn reconfigure_keeps_precompile_cache_within_spec() {
+        let factory = EthBlockExecutorFactory::new(Arc::new(ChainSpec::default()));
+        let has_cache = |evm: &evm2::Evm<'_, BaseEvmTypes>| {
+            let precompiles: &dyn NonStaticAny = &**evm.precompiles();
+            precompiles.type_id() == TypeId::of::<CachedPrecompileProvider<BaseEvmTypes, SpecId>>()
+        };
+        let env = |spec, number: u64| {
+            let mut env = EthEvmEnv::<BaseEvmTypes>::new(spec, Default::default(), 1);
+            env.block.number = U256::from(number);
+            env
+        };
+
+        let mut evm = factory.build_evm_with_precompile_cache(
+            EmptyDB::default(),
+            env(SpecId::OSAKA, 1),
+            PrecompileCacheMap::default(),
+            false,
+        );
+        factory.reconfigure_evm(&mut evm, &env(SpecId::OSAKA, 2));
+        assert!(has_cache(&evm));
+        assert_eq!(evm.block().number, U256::from(2));
+
+        factory.reconfigure_evm(&mut evm, &env(SpecId::AMSTERDAM, 3));
+        assert!(!has_cache(&evm));
+        assert_eq!(evm.config_spec_id(), SpecId::AMSTERDAM);
     }
 }

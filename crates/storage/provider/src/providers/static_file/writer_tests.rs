@@ -960,7 +960,10 @@ mod tests {
         }
         {
             let mut writer = provider.latest_writer(segment).unwrap();
-            assert!(writer.prune_account_changesets(9).is_err());
+            assert_eq!(
+                writer.prune_account_changesets(9).unwrap_err().to_string(),
+                "cannot unwind AccountChangeSets to block 9 below the pruned anchor at block 10"
+            );
         }
         drop(provider);
 
@@ -1054,7 +1057,10 @@ mod tests {
         }
         {
             let mut writer = provider.latest_writer(segment).unwrap();
-            assert!(writer.prune_account_changesets(499).is_err());
+            assert_eq!(
+                writer.prune_account_changesets(499).unwrap_err().to_string(),
+                "cannot unwind AccountChangeSets to block 499 below the pruned anchor at block 750"
+            );
         }
         drop(provider);
 
@@ -1081,7 +1087,10 @@ mod tests {
         }
         {
             let mut writer = provider.latest_writer(segment).unwrap();
-            assert!(writer.prune_receipts(1, 749).is_err());
+            assert_eq!(
+                writer.prune_receipts(1, 749).unwrap_err().to_string(),
+                "cannot unwind Receipts to block 749 below the pruned anchor at block 750"
+            );
         }
         drop(provider);
 
@@ -1114,7 +1123,13 @@ mod tests {
                 } else {
                     writer.prune_receipts(1, 499)
                 };
-                assert!(queued.is_err(), "{segment}, committed={committed}");
+                assert_eq!(
+                    queued.unwrap_err().to_string(),
+                    format!(
+                        "cannot unwind {segment} to block 499 below the pruned anchor at block 500"
+                    ),
+                    "committed={committed}"
+                );
                 // A rejected unwind must leave pending data available to commit.
                 writer.commit().unwrap();
             }

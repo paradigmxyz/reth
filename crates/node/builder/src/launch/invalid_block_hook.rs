@@ -5,7 +5,8 @@ use alloy_consensus::TxEnvelope;
 use alloy_rpc_types::{Block, Header, Receipt, Transaction, TransactionRequest};
 use eyre::OptionExt;
 use reth_chainspec::EthChainSpec;
-use reth_engine_primitives::InvalidBlockHook;
+use reth_engine_primitives::{InvalidBlockHook, InvalidBlockHooks, NoopInvalidBlockHook};
+use reth_invalid_block_hooks::InvalidBlockWitnessHook;
 use reth_node_api::{FullNodeComponents, NodeTypes};
 use reth_node_core::{
     args::InvalidBlockHookType,
@@ -75,9 +76,6 @@ where
     P: reth_provider::StateProviderFactory + reth_provider::ChainSpecProvider + Clone + 'static,
     E: reth_evm::ConfigureEvm<Primitives = N> + 'static,
 {
-    use reth_engine_primitives::{InvalidBlockHooks, NoopInvalidBlockHook};
-    use reth_invalid_block_hooks::InvalidBlockWitnessHook;
-
     let Some(ref hook) = config.debug.invalid_block_hook else {
         return Ok(Box::new(NoopInvalidBlockHook::default()))
     };

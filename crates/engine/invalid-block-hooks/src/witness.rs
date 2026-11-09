@@ -357,6 +357,7 @@ mod tests {
     use tempfile::TempDir;
 
     use reth_testing_utils::generators::{self, random_block, random_eoa_accounts, BlockParams};
+    use std::collections::HashSet;
 
     /// Creates a test `BundleState` with realistic accounts, contracts, and reverts
     fn create_bundle_state() -> BundleState {
@@ -637,7 +638,6 @@ mod tests {
     fn create_test_trie_updates() -> TrieUpdates {
         use alloy_primitives::map::HashMap;
         use reth_trie::{updates::TrieUpdates, BranchNodeCompact, Nibbles};
-        use std::collections::HashSet;
 
         let mut account_nodes = HashMap::default();
         let nibbles = Nibbles::from_nibbles_unchecked([0x1, 0x2, 0x3]);

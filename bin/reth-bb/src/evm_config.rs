@@ -92,6 +92,14 @@ where
         &self.block_assembler
     }
 
+    fn with_jit_support_enabled(self, enabled: bool) -> Self {
+        Self::new(self.inner.with_jit_support_enabled(enabled))
+    }
+
+    fn jit_backend(&self) -> Option<&dyn reth_evm::JitBackend> {
+        self.inner.jit_backend()
+    }
+
     fn evm_env(&self, header: &HeaderTy<Self::Primitives>) -> Result<EvmEnvFor<Self>, Self::Error> {
         self.inner.evm_env(header)
     }
@@ -329,5 +337,17 @@ mod tests {
                 value == &DebugValue::Counter(0) || value == &DebugValue::Gauge(0.0.into())
             }));
         });
+    }
+
+    #[cfg(feature = "jit")]
+    #[test]
+    fn jit_support_reaches_big_block_executor() {
+        let config = BbEvmConfig::new(EthEvmConfig::mainnet());
+        assert!(config.jit_backend().is_some());
+        assert!(!config.evm_factory().jit_support_enabled());
+
+        let config = config.with_jit_support();
+        assert!(config.evm_factory().jit_support_enabled());
+        assert!(!config.with_jit_support_enabled(false).evm_factory().jit_support_enabled());
     }
 }

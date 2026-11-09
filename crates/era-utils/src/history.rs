@@ -4,7 +4,7 @@ use alloy_consensus::{
 };
 use alloy_primitives::{BlockHash, BlockNumber, Bloom, U256};
 use alloy_rlp::Decodable;
-use futures_util::{Stream, StreamExt};
+use futures_util::{FutureExt, Stream, StreamExt};
 use reth_codecs::Compact;
 use reth_db_api::{
     cursor::{DbCursorRO, DbCursorRW},
@@ -268,12 +268,18 @@ where
     let (tx, rx) = mpsc::channel();
 
     // Handle IO-bound async download in a background tokio task
-    tokio::spawn(async move {
-        while let Some(file) = downloader.next().await {
-            tx.send(Some(file))?;
+    tokio::spawn(
+        async move {
+            while let Some(file) = downloader.next().await {
+                if tx.send(Some(file)).is_err() {
+                    return;
+                }
+            }
+            // A closed channel means the import stopped early.
+            tx.send(None).ok();
         }
-        tx.send(None)
-    });
+        .boxed(),
+    );
 
     let static_file_provider = provider_factory.static_file_provider();
 

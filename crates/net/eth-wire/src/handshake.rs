@@ -1,8 +1,10 @@
 use crate::{
     errors::{EthHandshakeError, EthStreamError, P2PStreamError},
     message::MAX_MESSAGE_SIZE,
+    p2pstream::log_prefix,
     CanDisconnect,
 };
+use alloy_primitives::hex;
 use bytes::{Bytes, BytesMut};
 use futures::{Sink, SinkExt, Stream};
 use reth_eth_wire_types::{
@@ -92,7 +94,7 @@ where
             EthMessage::Status(status),
         ))
         .into();
-        unauth.send(status_msg).await.map_err(EthStreamError::from)?;
+        unauth.send(status_msg).await?;
 
         // Receive peer's response
         let their_msg_res = unauth.next().await;
@@ -100,19 +102,13 @@ where
             Some(Ok(msg)) => msg,
             Some(Err(e)) => return Err(EthStreamError::from(e)),
             None => {
-                unauth
-                    .disconnect(DisconnectReason::DisconnectRequested)
-                    .await
-                    .map_err(EthStreamError::from)?;
+                unauth.disconnect(DisconnectReason::DisconnectRequested).await?;
                 return Err(EthStreamError::EthHandshakeError(EthHandshakeError::NoResponse));
             }
         };
 
         if their_msg.len() > MAX_MESSAGE_SIZE {
-            unauth
-                .disconnect(DisconnectReason::ProtocolBreach)
-                .await
-                .map_err(EthStreamError::from)?;
+            unauth.disconnect(DisconnectReason::ProtocolBreach).await?;
             return Err(EthStreamError::MessageTooBig(their_msg.len()));
         }
 
@@ -123,11 +119,13 @@ where
         ) {
             Ok(status) => status,
             Err(err) => {
-                debug!("decode error in eth handshake: msg={their_msg:x}");
-                unauth
-                    .disconnect(DisconnectReason::ProtocolBreach)
-                    .await
-                    .map_err(EthStreamError::from)?;
+                debug!(
+                    %err,
+                    len = their_msg.len(),
+                    msg = %hex::encode(log_prefix(&their_msg)),
+                    "decode error in eth handshake"
+                );
+                unauth.disconnect(DisconnectReason::ProtocolBreach).await?;
                 return Err(EthStreamError::InvalidMessage(err));
             }
         };
@@ -135,10 +133,7 @@ where
         trace!("Validating incoming ETH status from peer");
 
         if status.genesis() != their_status_message.genesis() {
-            unauth
-                .disconnect(DisconnectReason::ProtocolBreach)
-                .await
-                .map_err(EthStreamError::from)?;
+            unauth.disconnect(DisconnectReason::ProtocolBreach).await?;
             return Err(EthHandshakeError::MismatchedGenesis(
                 GotExpected { expected: status.genesis(), got: their_status_message.genesis() }
                     .into(),
@@ -147,10 +142,7 @@ where
         }
 
         if status.version() != their_status_message.version() {
-            unauth
-                .disconnect(DisconnectReason::ProtocolBreach)
-                .await
-                .map_err(EthStreamError::from)?;
+            unauth.disconnect(DisconnectReason::ProtocolBreach).await?;
             return Err(EthHandshakeError::MismatchedProtocolVersion(GotExpected {
                 got: their_status_message.version(),
                 expected: status.version(),
@@ -159,10 +151,7 @@ where
         }
 
         if *status.chain() != *their_status_message.chain() {
-            unauth
-                .disconnect(DisconnectReason::ProtocolBreach)
-                .await
-                .map_err(EthStreamError::from)?;
+            unauth.disconnect(DisconnectReason::ProtocolBreach).await?;
             return Err(EthHandshakeError::MismatchedChain(GotExpected {
                 got: *their_status_message.chain(),
                 expected: *status.chain(),
@@ -174,10 +163,7 @@ where
         if let StatusMessage::Legacy(s) = &their_status_message &&
             s.total_difficulty.bit_len() > 160
         {
-            unauth
-                .disconnect(DisconnectReason::ProtocolBreach)
-                .await
-                .map_err(EthStreamError::from)?;
+            unauth.disconnect(DisconnectReason::ProtocolBreach).await?;
             return Err(EthHandshakeError::TotalDifficultyBitLenTooLarge {
                 got: s.total_difficulty.bit_len(),
                 maximum: 160,
@@ -190,10 +176,7 @@ where
             .validate(their_status_message.forkid())
             .map_err(EthHandshakeError::InvalidFork)
         {
-            unauth
-                .disconnect(DisconnectReason::ProtocolBreach)
-                .await
-                .map_err(EthStreamError::from)?;
+            unauth.disconnect(DisconnectReason::ProtocolBreach).await?;
             return Err(err.into());
         }
 
