@@ -31,7 +31,7 @@ use reth_rpc_eth_api::{
     helpers::{LoadTransaction, Trace, TraceExt},
     FromEthApiError, RpcNodeCore,
 };
-use reth_rpc_eth_types::{error::EthApiError, EthConfig};
+use reth_rpc_eth_types::{error::EthApiError, utils::CallManyBudget, EthConfig};
 use reth_storage_api::{BlockNumReader, BlockReader};
 use reth_tasks::{cancel::is_cancelled, pool::BlockingTaskGuard};
 use reth_transaction_pool::{PoolPooledTx, PoolTransaction, TransactionPool};
@@ -161,6 +161,7 @@ where
         calls: Vec<(RpcTxReq<Eth::NetworkTypes>, HashSet<TraceType>)>,
         block_id: Option<BlockId>,
     ) -> Result<Vec<TraceResults>, Eth::Error> {
+        let mut budget = CallManyBudget::new(calls.len(), self.eth_api().call_gas_limit())?;
         let at = block_id.unwrap_or_default();
         let (evm_env, at) = self.eth_api().evm_env_at(at).await?;
 
@@ -174,19 +175,18 @@ where
                     if is_cancelled() {
                         return Err(EthApiError::InternalEthError.into())
                     }
-                    let (evm_env, tx_env) = eth_api.prepare_call_env(
+                    let (evm_env, mut tx_env) = eth_api.prepare_call_env(
                         evm_env.clone(),
                         call,
                         &mut db,
                         Default::default(),
                     )?;
+                    budget.admit(&mut tx_env)?;
                     let config = TracingInspectorConfig::from_parity_config(&trace_types);
-                    let (inspector, res) = eth_api.inspect(
-                        &mut db,
-                        evm_env,
-                        &tx_env,
-                        TracingInspector::new(config),
-                    )?;
+                    let (inspector, res) = eth_api
+                        .inspect(&mut db, evm_env, &tx_env, TracingInspector::new(config))
+                        .map_err(|err| budget.map_call_err(err))?;
+                    budget.charge(&res.result)?;
 
                     let trace_res = inspector
                         .into_parity_builder()

@@ -197,8 +197,6 @@ pub struct OverlayBuilder<N: NodePrimitives = EthPrimitives> {
     no_reverts: bool,
     /// Cache behavior for the overlays this builder resolves.
     overlay_cache_config: OverlayCacheConfig,
-    /// Metrics for overlay construction.
-    metrics: OverlayBuilderMetrics,
 }
 
 impl<N: NodePrimitives> OverlayBuilder<N> {
@@ -215,7 +213,6 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
             reused_sparse_trie_anchor_hash: None,
             no_reverts: false,
             overlay_cache_config: OverlayCacheConfig::default(),
-            metrics: OverlayBuilderMetrics::default(),
         }
     }
 
@@ -555,7 +552,7 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
                     state_trie_tip_block.hash,
                     finish_tip_block.hash,
                 ) {
-                    self.metrics.sparse_trie_overlay_skips.increment(1);
+                    self.overlay_manager.builder_metrics().sparse_trie_overlay_skips.increment(1);
 
                     return Ok(StateTrieOverlay::empty())
                 }
@@ -580,14 +577,13 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
             }
         };
 
-        self.metrics
-            .retrieve_trie_reverts_duration
-            .record(retrieve_trie_reverts_duration.as_secs_f64());
-        self.metrics
+        let metrics = self.overlay_manager.builder_metrics();
+        metrics.retrieve_trie_reverts_duration.record(retrieve_trie_reverts_duration.as_secs_f64());
+        metrics
             .retrieve_hashed_state_reverts_duration
             .record(retrieve_hashed_state_reverts_duration.as_secs_f64());
-        self.metrics.trie_updates_size.record(trie_updates_total_len as f64);
-        self.metrics.hashed_state_size.record(hashed_state_updates_total_len as f64);
+        metrics.trie_updates_size.record(trie_updates_total_len as f64);
+        metrics.hashed_state_size.record(hashed_state_updates_total_len as f64);
 
         Ok(StateTrieOverlay::new(TrieInputSorted::new(
             trie_updates,
@@ -765,9 +761,9 @@ where
 }
 
 /// Metrics for overlay construction.
-#[derive(Clone, Metrics)]
+#[derive(Metrics)]
 #[metrics(scope = "storage.overlay.builder")]
-struct OverlayBuilderMetrics {
+pub(crate) struct OverlayBuilderMetrics {
     /// Duration of retrieving trie updates from the database.
     retrieve_trie_reverts_duration: Histogram,
     /// Duration of retrieving hashed state from the database.

@@ -377,18 +377,6 @@ pub struct EngineArgs {
     #[arg(long = "engine.invalid-header-cache-hit-eviction-threshold", default_value_t = DefaultEngineValues::get_global().invalid_header_hit_eviction_threshold)]
     pub invalid_header_hit_eviction_threshold: u8,
 
-    /// CAUTION: This CLI flag has no effect anymore, use --engine.state-root-fallback if you
-    /// want to force synchronous state root computation
-    #[arg(long = "engine.legacy-state-root", default_value_t = false, hide = true)]
-    #[deprecated]
-    pub legacy_state_root_task_enabled: bool,
-
-    /// CAUTION: This CLI flag has no effect anymore, use --engine.disable-caching-and-prewarming
-    /// if you want to disable caching and prewarming
-    #[arg(long = "engine.caching-and-prewarming", default_value = "true", hide = true)]
-    #[deprecated]
-    pub caching_and_prewarming_enabled: bool,
-
     /// Disable state cache
     #[arg(long = "engine.disable-state-cache", default_value_t = DefaultEngineValues::get_global().state_cache_disabled)]
     pub state_cache_disabled: bool,
@@ -416,16 +404,6 @@ pub struct EngineArgs {
         default_missing_value = "true",
     )]
     pub sender_recovery_cache_enabled: bool,
-
-    /// CAUTION: This CLI flag has no effect anymore. The parallel sparse trie is always enabled.
-    #[deprecated]
-    #[arg(long = "engine.parallel-sparse-trie", default_value = "true", hide = true)]
-    pub parallel_sparse_trie_enabled: bool,
-
-    /// CAUTION: This CLI flag has no effect anymore. The parallel sparse trie is always enabled.
-    #[deprecated]
-    #[arg(long = "engine.disable-parallel-sparse-trie", default_value = "false", hide = true)]
-    pub parallel_sparse_trie_disabled: bool,
 
     /// Enable state provider latency metrics. This allows the engine to collect and report stats
     /// about how long state provider calls took during execution, but this does introduce slight
@@ -458,12 +436,6 @@ pub struct EngineArgs {
     /// Does not change CPU affinity. Explicit thread counts take precedence.
     #[arg(long = "cpu-cores", value_name = "COUNT")]
     pub cpu_cores: Option<NonZeroUsize>,
-
-    /// CAUTION: This CLI flag has no effect anymore, use --engine.disable-precompile-cache
-    /// if you want to disable precompile cache
-    #[arg(long = "engine.precompile-cache", default_value = "true", hide = true)]
-    #[deprecated]
-    pub precompile_cache_enabled: bool,
 
     /// Disable precompile cache
     #[arg(long = "engine.disable-precompile-cache", default_value_t = DefaultEngineValues::get_global().precompile_cache_disabled)]
@@ -620,7 +592,6 @@ pub struct EngineArgs {
     pub proof_jitter: Option<Duration>,
 }
 
-#[allow(deprecated)]
 impl Default for EngineArgs {
     fn default() -> Self {
         let DefaultEngineValues {
@@ -665,21 +636,16 @@ impl Default for EngineArgs {
             backfill_run_threshold,
             invalid_header_hit_eviction_threshold,
             state_root_task_compare_updates,
-            legacy_state_root_task_enabled: false,
-            caching_and_prewarming_enabled: true,
             state_cache_disabled,
             prewarming_disabled,
             txpool_prewarming_enabled,
             sender_recovery_cache_enabled,
-            parallel_sparse_trie_enabled: true,
-            parallel_sparse_trie_disabled: false,
             state_provider_metrics,
             cross_block_cache_size,
             accept_execution_requests_hash,
             multiproof_chunk_size,
             reserved_cpu_cores,
             cpu_cores: None,
-            precompile_cache_enabled: true,
             precompile_cache_disabled,
             state_root_fallback,
             always_process_payload_attributes_on_canonical_head,
@@ -772,10 +738,6 @@ impl EngineArgs {
 
     /// Creates a [`TreeConfig`] from the engine arguments.
     pub fn tree_config(&self) -> TreeConfig {
-        #[allow(deprecated)]
-        if self.legacy_state_root_task_enabled {
-            tracing::warn!(target: "reth::cli", "--engine.legacy-state-root has no effect anymore, use --engine.state-root-fallback to force synchronous state root computation");
-        }
         let config = TreeConfig::default()
             // Clear the default window before applying overrides that may be smaller than it.
             .with_persistence_threshold(0)
@@ -989,7 +951,6 @@ mod tests {
     }
 
     #[test]
-    #[allow(deprecated)]
     fn engine_args() {
         let args = EngineArgs {
             persistence_threshold: 100,
@@ -998,15 +959,11 @@ mod tests {
             memory_block_buffer_target: Some(50),
             backfill_run_threshold: 100,
             invalid_header_hit_eviction_threshold: 7,
-            legacy_state_root_task_enabled: true,
-            caching_and_prewarming_enabled: true,
             state_cache_disabled: true,
             prewarming_disabled: true,
             // conflicts with --engine.disable-state-cache, covered by its own test below
             txpool_prewarming_enabled: false,
             sender_recovery_cache_enabled: true,
-            parallel_sparse_trie_enabled: true,
-            parallel_sparse_trie_disabled: false,
             state_provider_metrics: true,
             cross_block_cache_size: 256,
             state_root_task_compare_updates: true,
@@ -1014,7 +971,6 @@ mod tests {
             multiproof_chunk_size: 512,
             reserved_cpu_cores: 4,
             cpu_cores: Some(NonZeroUsize::new(8).unwrap()),
-            precompile_cache_enabled: true,
             precompile_cache_disabled: true,
             state_root_fallback: true,
             always_process_payload_attributes_on_canonical_head: true,
@@ -1049,7 +1005,6 @@ mod tests {
             "100",
             "--engine.invalid-header-cache-hit-eviction-threshold",
             "7",
-            "--engine.legacy-state-root",
             "--engine.disable-state-cache",
             "--engine.disable-prewarming",
             "--engine.sender-recovery-cache",

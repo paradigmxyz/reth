@@ -35,7 +35,7 @@ use reth_rpc_eth_api::{
     helpers::{EthTransactions, TraceExt},
     AsEthApiError, FromEthApiError, FromEvmError, RpcConvert, RpcNodeCore,
 };
-use reth_rpc_eth_types::{EthApiError, StateCacheDb};
+use reth_rpc_eth_types::{utils::CallManyBudget, EthApiError, StateCacheDb};
 use reth_rpc_server_types::{result::internal_rpc_err, ToRpcResult};
 use reth_storage_api::{
     BlockIdReader, BlockReaderIdExt, HashedPostStateProvider, HeaderProvider, ProviderBlock,
@@ -518,6 +518,7 @@ where
         if bundles.is_empty() {
             return Err(EthApiError::InvalidParams(String::from("bundles are empty.")).into())
         }
+        let mut budget = CallManyBudget::for_bundles(&bundles, self.eth_api().call_gas_limit())?;
 
         let StateContext { transaction_index, block_number } = state_context.unwrap_or_default();
         let transaction_index = transaction_index.unwrap_or_default();
@@ -583,11 +584,14 @@ where
                         let state_overrides = state_overrides.take();
                         let overrides = EvmOverrides::new(state_overrides, block_overrides.clone());
 
-                        let (evm_env, tx_env) =
+                        let (evm_env, mut tx_env) =
                             eth_api.prepare_call_env(evm_env.clone(), tx, &mut db, overrides)?;
+                        budget.admit(&mut tx_env)?;
 
-                        let (next_inspector, res) =
-                            eth_api.inspect(&mut db, evm_env.clone(), &tx_env, inspector)?;
+                        let (next_inspector, res) = eth_api
+                            .inspect(&mut db, evm_env.clone(), &tx_env, inspector)
+                            .map_err(|err| budget.map_call_err(err))?;
+                        budget.charge(&res.result)?;
                         inspector = next_inspector;
                         let trace = inspector
                             .get_result(None, &tx_env, evm_env.block_env(), &res, &mut db)
