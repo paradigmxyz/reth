@@ -176,6 +176,23 @@ impl<N: ProviderNodeTypes> BlockchainProvider<N> {
         ))
     }
 
+    /// Returns a state provider for the post-state of `block_hash` over the snapshot of `provider`.
+    ///
+    /// Blocks in the in-memory chain captured by `provider` reuse that chain instead of rebuilding
+    /// an identical one from the overlay manager's block graph.
+    fn history_state_provider(
+        &self,
+        provider: ConsistentProvider<N>,
+        block_hash: B256,
+    ) -> StateProviderBox {
+        let overlay_manager = self.database.overlay_manager();
+        let overlay_builder = match provider.in_memory_state_by_hash(block_hash) {
+            Some(state) => overlay_manager.overlay_builder_for_state(state),
+            None => overlay_manager.overlay_builder(block_hash),
+        };
+        Box::new(OverlayStateProvider::new(provider.into_database_provider(), overlay_builder))
+    }
+
     /// Returns a cursor-backed state view for a state root still in canonical in-memory blocks.
     fn block_state_range_provider(
         &self,
@@ -806,14 +823,14 @@ impl<N: ProviderNodeTypes> StateProviderFactory for BlockchainProvider<N> {
         let hash = provider
             .block_hash(block_number)?
             .ok_or_else(|| ProviderError::HeaderNotFound(block_number.into()))?;
-        Ok(self.state_provider_from_database(provider.into_database_provider(), hash))
+        Ok(self.history_state_provider(provider, hash))
     }
 
     fn history_by_block_hash(&self, block_hash: BlockHash) -> ProviderResult<StateProviderBox> {
         trace!(target: "providers::blockchain", ?block_hash, "Getting history by block hash");
         let provider = self.consistent_provider()?;
         provider.block_number(block_hash)?.ok_or(ProviderError::BlockHashNotFound(block_hash))?;
-        Ok(self.state_provider_from_database(provider.into_database_provider(), block_hash))
+        Ok(self.history_state_provider(provider, block_hash))
     }
 
     fn state_by_block_hash(&self, hash: BlockHash) -> ProviderResult<StateProviderBox> {
