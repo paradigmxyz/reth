@@ -321,9 +321,11 @@ where
             .set_block_range(genesis_block_number, genesis_block_number);
     }
 
-    // `commit_unwind`` will first commit the DB and then the static file provider, which is
-    // necessary on `init_genesis`.
-    provider_rw.commit()?;
+    // Persist genesis state and stage checkpoints before publishing the static header. Otherwise,
+    // an interrupted commit can leave a genesis header with no Headers checkpoint on restart.
+    provider_rw.commit_pending_rocksdb_batches()?;
+    commit_mdbx_only(provider_rw)?;
+    static_file_provider.finalize()?;
 
     Ok(hash)
 }
