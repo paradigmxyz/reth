@@ -9501,7 +9501,7 @@ dependencies = [
 
 [[package]]
 name = "reth-lru"
-version = "2.9.0"
+version = "2.10.1"
 dependencies = [
  "alloy-primitives",
  "hashbrown 0.17.1",
