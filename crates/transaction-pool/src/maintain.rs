@@ -161,6 +161,9 @@ pub async fn maintain_transaction_pool<N, Client, P, St>(
     // keeps track of mined blob transaction so we can clean finalized transactions
     let mut blob_store_tracker = BlobStoreCanonTracker::default();
 
+    // handle to the pool's blob store, used to skip cleanup while it holds no blobs
+    let blob_store = pool.blob_store();
+
     // keeps track of the latest finalized block
     let mut last_finalized_block =
         FinalizedBlockTracker::new(client.finalized_block_number().ok().flatten());
@@ -232,19 +235,24 @@ pub async fn maintain_transaction_pool<N, Client, P, St>(
 
         // check if we have a new finalized block
         if let Some(finalized) =
-            last_finalized_block.update(client.finalized_block_number().ok().flatten()) &&
-            let BlobStoreUpdates::Finalized(blobs) =
-                blob_store_tracker.on_finalized_block(finalized)
+            last_finalized_block.update(client.finalized_block_number().ok().flatten())
         {
-            metrics.inc_deleted_tracked_blobs(blobs.len());
-            // remove all finalized blobs from the blob store
-            pool.delete_blobs(blobs);
-            // and also do periodic cleanup
-            let pool = pool.clone();
-            task_spawner.spawn_blocking_task(async move {
-                debug!(target: "txpool", finalized_block = %finalized, "cleaning up blob store");
-                pool.cleanup_blobs();
-            });
+            if let BlobStoreUpdates::Finalized(blobs) =
+                blob_store_tracker.on_finalized_block(finalized)
+            {
+                metrics.inc_deleted_tracked_blobs(blobs.len());
+                // remove all finalized blobs from the blob store
+                pool.delete_blobs(blobs);
+            }
+            // and also do periodic cleanup, deletions of replaced or evicted blobs are only queued
+            // in the blob store until this runs, and queued blobs still count towards its length
+            if blob_store.blobs_len() > 0 {
+                let pool = pool.clone();
+                task_spawner.spawn_blocking_task(async move {
+                    debug!(target: "txpool", finalized_block = %finalized, "cleaning up blob store");
+                    pool.cleanup_blobs();
+                });
+            }
         }
 
         // outcomes of the futures we are waiting on
