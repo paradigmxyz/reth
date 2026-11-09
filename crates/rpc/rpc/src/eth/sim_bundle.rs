@@ -1,6 +1,7 @@
 //! `Eth` Sim bundle implementation and helpers.
 
-use alloy_consensus::{transaction::TxHashRef, BlockHeader};
+use crate::eth::bundle::BundleBlockGas;
+use alloy_consensus::{transaction::TxHashRef, BlockHeader, Transaction as _};
 use alloy_primitives::U256;
 use alloy_rpc_types_eth::{BlockId, Log};
 use alloy_rpc_types_mev::{
@@ -19,7 +20,7 @@ use reth_rpc_eth_api::{
 };
 use reth_rpc_eth_types::{cache::db::apply_block_overrides, EthApiError};
 use reth_storage_api::ProviderTx;
-use reth_tasks::pool::BlockingTaskGuard;
+use reth_tasks::{cancel::is_cancelled, pool::BlockingTaskGuard};
 use reth_transaction_pool::{PoolPooledTx, PoolTransaction, TransactionPool};
 use std::{sync::Arc, time::Duration};
 use tracing::trace;
@@ -284,6 +285,16 @@ where
     ) -> Result<SimBundleResponse, Eth::Error> {
         let SimBundleOverrides { parent_block, block_overrides, .. } = overrides;
 
+        let call_gas_limit = self.eth_api().call_gas_limit();
+        if let Some(gas_limit) = block_overrides.gas_limit &&
+            gas_limit > call_gas_limit
+        {
+            return Err(EthApiError::InvalidParams(
+                EthSimBundleError::BlockGasLimitTooHigh(call_gas_limit).to_string(),
+            )
+            .into())
+        }
+
         // Parse and validate bundle
         // Also, flatten the bundle here so that its easier to process
         let flattened_bundle = self.parse_and_flatten_bundle(&request)?;
@@ -308,12 +319,19 @@ where
                 .map_err(EthApiError::from_eth_err)?
         };
 
+        let permit = self
+            .eth_api()
+            .acquire_owned_blocking_io()
+            .await
+            .map_err(|_| EthApiError::InternalEthError)?;
+
         let eth_api = self.inner.eth_api.clone();
 
         let sim_response = self
             .inner
             .eth_api
             .spawn_with_state_at_block(parent_block_id, move |_, mut db| {
+                let _permit = permit;
                 // apply overrides before reading the block values they may change
                 apply_block_overrides(block_overrides, &mut db, &mut evm_env);
 
@@ -330,9 +348,11 @@ where
                     .map(|acc| acc.balance)
                     .unwrap_or_default();
 
+                let block_gas_limit =
+                    evm_env.block_env().gas_limit.saturating_to::<u64>().min(call_gas_limit);
+                let mut block_gas = BundleBlockGas::new(block_gas_limit, evm_env.version());
                 let mut evm = eth_api.evm_config().evm_with_env(&mut db, evm_env);
                 let mut coinbase_balance_before_tx = initial_coinbase_balance;
-                let mut total_gas_used = 0;
                 let mut total_profit = U256::ZERO;
                 let mut refundable_value = U256::ZERO;
                 let mut flat_logs: Vec<Vec<Log>> = Vec::new();
@@ -340,6 +360,10 @@ where
                 let mut log_index = 0;
 
                 for (tx_index, item) in flattened_bundle.iter().enumerate() {
+                    if is_cancelled() {
+                        return Err(EthApiError::InternalEthError.into())
+                    }
+
                     // Check inclusion constraints
                     let block_number = item.inclusion.block_number();
                     let max_block_number =
@@ -354,6 +378,13 @@ where
                         .into());
                     }
 
+                    if !block_gas.admits(item.tx.gas_limit()) {
+                        return Err(EthApiError::InvalidParams(
+                            EthSimBundleError::BundleGasLimitExceeded(block_gas_limit).to_string(),
+                        )
+                        .into())
+                    }
+
                     let tx_env = eth_api.evm_config().tx_env(item.tx.clone());
                     let result = evm.transact_commit(&tx_env).map_err(Eth::Error::from_evm_err)?;
 
@@ -364,8 +395,7 @@ where
                         .into());
                     }
 
-                    let gas_used = result.tx_gas_used();
-                    total_gas_used += gas_used;
+                    block_gas.record(&result);
 
                     let coinbase_balance_after_tx = evm
                         .account_info(&coinbase)
@@ -413,6 +443,8 @@ where
 
                 let body_logs =
                     if logs { Self::build_bundle_logs(&request, &flat_logs)? } else { vec![] };
+
+                let mut total_gas_used = block_gas.gas_used();
 
                 // After processing all transactions, process refunds
                 for item in &flattened_bundle {
@@ -557,6 +589,12 @@ pub enum EthSimBundleError {
     /// Thrown when a bundle simulation returns negative profit
     #[error("bundle simulation returned negative profit")]
     NegativeProfit,
+    /// Thrown when the block gas limit override exceeds the RPC call gas limit.
+    #[error("block gas limit exceeds the call gas limit of {0}")]
+    BlockGasLimitTooHigh(u64),
+    /// Thrown when the gas limits of the bundle's transactions exceed the block gas limit.
+    #[error("bundle gas exceeds the block gas limit of {0}")]
+    BundleGasLimitExceeded(u64),
 }
 
 #[cfg(test)]
@@ -564,11 +602,12 @@ mod tests {
     use super::*;
     use crate::EthApiBuilder;
     use alloy_consensus::{transaction::SignerRecoverable, TxEip1559};
-    use alloy_eips::eip2718::Encodable2718;
+    use alloy_eips::{eip1559::INITIAL_BASE_FEE, eip2718::Encodable2718};
     use alloy_genesis::{Genesis, GenesisAccount};
     use alloy_primitives::{Address, Bytes, TxKind, B256};
     use alloy_rpc_types_eth::BlockOverrides;
     use alloy_rpc_types_mev::{Inclusion, ProtocolVersion};
+    use jsonrpsee::types::ErrorObjectOwned;
     use reth_chainspec::{ChainSpecBuilder, ChainSpecProvider};
     use reth_db_common::init::init_genesis;
     use reth_evm_ethereum::EthEvmConfig;
@@ -576,6 +615,7 @@ mod tests {
     use reth_provider::{
         providers::BlockchainProvider, test_utils::create_test_provider_factory_with_chain_spec,
     };
+    use reth_rpc_eth_api::helpers::SpawnBlocking;
     use reth_testing_utils::{
         generators,
         generators::{generate_key, sign_tx_with_key_pair},
@@ -884,5 +924,91 @@ mod tests {
             &bundle,
             &create_bundle_logs(&[1, 2]),
         ));
+    }
+
+    /// The bundle's transactions share a block gas budget capped at the RPC call gas limit, and
+    /// the simulation waits for a blocking IO permit.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn sim_bundle_shares_gas_limit_and_takes_blocking_io_permit() {
+        let mut rng = generators::rng();
+        let key = generate_key(&mut rng);
+        let txs: Vec<_> = (0..3)
+            .map(|nonce| {
+                sign_tx_with_key_pair(
+                    key,
+                    reth_ethereum_primitives::Transaction::Eip1559(TxEip1559 {
+                        chain_id: 1,
+                        nonce,
+                        gas_limit: 21_000,
+                        max_fee_per_gas: INITIAL_BASE_FEE as u128,
+                        to: TxKind::Call(Address::random()),
+                        ..Default::default()
+                    }),
+                )
+            })
+            .collect();
+        let sender = txs[0].recover_signer().unwrap();
+
+        let genesis = Genesis::default()
+            .with_gas_limit(30_000_000)
+            .with_base_fee(Some(INITIAL_BASE_FEE as u128))
+            .extend_accounts([(
+                sender,
+                GenesisAccount::default().with_balance(U256::from(10u128.pow(18))),
+            )]);
+        let chain_spec =
+            Arc::new(ChainSpecBuilder::mainnet().cancun_activated().genesis(genesis).build());
+        let factory = create_test_provider_factory_with_chain_spec(chain_spec);
+        init_genesis(&factory).unwrap();
+        let provider = BlockchainProvider::new(factory).unwrap();
+
+        let eth_api = EthApiBuilder::new(
+            provider.clone(),
+            testing_pool(),
+            NoopNetwork::default(),
+            EthEvmConfig::new(provider.chain_spec()),
+        )
+        .gas_cap(42_000u64.into())
+        .max_blocking_io_requests(1)
+        .build();
+        let api = EthSimBundle::new(eth_api.clone(), BlockingTaskGuard::new(4));
+
+        let raw_txs = txs.iter().map(|tx| Bytes::from(tx.encoded_2718())).collect::<Vec<_>>();
+        let bundle = create_test_bundle(raw_txs[..2].to_vec());
+        let gas_limit_override = |gas_limit| SimBundleOverrides {
+            block_overrides: BlockOverrides { gas_limit: Some(gas_limit), ..Default::default() },
+            ..Default::default()
+        };
+        let invalid_params = |error: EthSimBundleError| {
+            ErrorObjectOwned::from(EthApiError::InvalidParams(error.to_string()))
+        };
+
+        assert_eq!(
+            api.sim_bundle(bundle.clone(), gas_limit_override(42_001)).await.unwrap_err(),
+            invalid_params(EthSimBundleError::BlockGasLimitTooHigh(42_000))
+        );
+        assert_eq!(
+            api.sim_bundle(bundle.clone(), gas_limit_override(41_999)).await.unwrap_err(),
+            invalid_params(EthSimBundleError::BundleGasLimitExceeded(41_999))
+        );
+        // The call gas limit caps the budget below the block gas limit.
+        assert_eq!(
+            api.sim_bundle(create_test_bundle(raw_txs), SimBundleOverrides::default())
+                .await
+                .unwrap_err(),
+            invalid_params(EthSimBundleError::BundleGasLimitExceeded(42_000))
+        );
+
+        let permit = eth_api.acquire_owned_blocking_io().await.unwrap();
+        assert!(tokio::time::timeout(
+            Duration::from_millis(200),
+            api.sim_bundle(bundle.clone(), SimBundleOverrides::default())
+        )
+        .await
+        .is_err());
+
+        drop(permit);
+        let response = api.sim_bundle(bundle, SimBundleOverrides::default()).await.unwrap();
+        assert_eq!(response.gas_used, 42_000);
     }
 }
