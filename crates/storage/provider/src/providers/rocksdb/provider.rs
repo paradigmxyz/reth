@@ -27,9 +27,10 @@ use reth_storage_errors::{
 };
 use rocksdb::{
     statistics::StatsLevel, BlockBasedOptions, Cache, ColumnFamilyDescriptor, CompactionPri,
-    DBCompressionType, DBRawIteratorWithThreadMode, IteratorMode, OptimisticTransactionDB,
-    OptimisticTransactionOptions, Options, ReadOptions, SnapshotWithThreadMode, Transaction,
-    WriteBatchWithTransaction, WriteBufferManager, WriteOptions, DB, DEFAULT_COLUMN_FAMILY_NAME,
+    DBCompressionType, DBRawIteratorWithThreadMode, ErrorKind, IteratorMode,
+    OptimisticTransactionDB, OptimisticTransactionOptions, Options, ReadOptions,
+    SnapshotWithThreadMode, Transaction, WriteBatchWithTransaction, WriteBufferManager,
+    WriteOptions, DB, DEFAULT_COLUMN_FAMILY_NAME,
 };
 use std::{
     collections::BTreeMap,
@@ -147,6 +148,10 @@ const DEFAULT_WRITE_BUFFER_SIZE: usize = 128 << 20;
 /// This is a soft limit; with write stalls enabled, `RocksDB` waits for flushes once
 /// memtable arena usage exceeds the budget.
 const DEFAULT_WRITE_BUFFER_MANAGER_SIZE: usize = 4 * 1024 * 1024 * 1024;
+
+// Deleted or overwritten entries a history lookup may skip on an unbounded iterator before it is
+// retried on an iterator bounded to the queried key's shards.
+const HISTORY_ITER_MAX_SKIPPED_KEYS: u64 = 100;
 
 /// Default buffer capacity for compression in batches.
 /// 4 KiB matches common block/page sizes and comfortably holds typical history values,
@@ -1722,17 +1727,29 @@ impl<'db> RocksReadSnapshot<'db> {
     /// its lifetime is tied to the database and it can be cached in `self`. The snapshot is
     /// attached through [`ReadOptions`], giving the same point-in-time view as reading through the
     /// snapshot directly.
-    fn new_raw_iterator_cf(&self, cf: &rocksdb::ColumnFamily) -> RocksDBRawIterEnum<'db> {
+    fn new_raw_iterator_cf(
+        &self,
+        cf: &rocksdb::ColumnFamily,
+        bounds: Option<(&[u8], &[u8])>,
+    ) -> RocksDBRawIterEnum<'db> {
+        let mut readopts = ReadOptions::default();
+        match bounds {
+            Some((first, last)) => {
+                readopts.set_iterate_lower_bound(first);
+                // The smallest key greater than `last` is `last` followed by a zero byte.
+                readopts.set_iterate_upper_bound([last, &[0]].concat());
+            }
+            None => readopts.set_max_skippable_internal_keys(HISTORY_ITER_MAX_SKIPPED_KEYS),
+        }
         match &self.inner {
             RocksReadSnapshotInner::ReadWrite(snap) => {
-                let mut readopts = ReadOptions::default();
                 readopts.set_snapshot(snap);
                 RocksDBRawIterEnum::ReadWrite(
                     self.provider.db_rw().raw_iterator_cf_opt(cf, readopts),
                 )
             }
             RocksReadSnapshotInner::Secondary(db) => {
-                RocksDBRawIterEnum::ReadOnly((*db).raw_iterator_cf(cf))
+                RocksDBRawIterEnum::ReadOnly((*db).raw_iterator_cf_opt(cf, readopts))
             }
         }
     }
@@ -1770,15 +1787,12 @@ impl<'db> RocksReadSnapshot<'db> {
         self.history_info::<tables::AccountsHistory>(
             &self.accounts_history_iter,
             key.encode().as_ref(),
+            ShardedKey::new(address, 0).encode().as_ref(),
+            ShardedKey::new(address, u64::MAX).encode().as_ref(),
             block_number,
             lowest_available_block_number,
             visible_tip,
             |key_bytes| Ok(<ShardedKey<Address> as Decode>::decode(key_bytes)?.key == address),
-            |prev_bytes| {
-                <ShardedKey<Address> as Decode>::decode(prev_bytes)
-                    .map(|k| k.key == address)
-                    .unwrap_or(false)
-            },
         )
     }
 
@@ -1798,17 +1812,14 @@ impl<'db> RocksReadSnapshot<'db> {
         self.history_info::<tables::StoragesHistory>(
             &self.storages_history_iter,
             key.encode().as_ref(),
+            StorageShardedKey::new(address, storage_key, 0).encode().as_ref(),
+            StorageShardedKey::new(address, storage_key, u64::MAX).encode().as_ref(),
             block_number,
             lowest_available_block_number,
             visible_tip,
             |key_bytes| {
                 let k = <StorageShardedKey as Decode>::decode(key_bytes)?;
                 Ok(k.address == address && k.sharded_key.key == storage_key)
-            },
-            |prev_bytes| {
-                <StorageShardedKey as Decode>::decode(prev_bytes)
-                    .map(|k| k.address == address && k.sharded_key.key == storage_key)
-                    .unwrap_or(false)
             },
         )
     }
@@ -1828,11 +1839,12 @@ impl<'db> RocksReadSnapshot<'db> {
         &self,
         iter_cache: &Mutex<Option<RocksDBRawIterEnum<'db>>>,
         encoded_key: &[u8],
+        first_shard_key: &[u8],
+        last_shard_key: &[u8],
         block_number: BlockNumber,
         lowest_available_block_number: Option<BlockNumber>,
         visible_tip: BlockNumber,
-        key_matches: impl FnOnce(&[u8]) -> Result<bool, reth_db_api::DatabaseError>,
-        prev_key_matches: impl Fn(&[u8]) -> bool,
+        key_matches: impl Fn(&[u8]) -> Result<bool, reth_db_api::DatabaseError> + Copy,
     ) -> ProviderResult<HistoryInfo>
     where
         T: Table<Value = BlockNumberList>,
@@ -1852,14 +1864,30 @@ impl<'db> RocksReadSnapshot<'db> {
         let mut guard = iter_cache.try_lock();
         let mut private_iter;
         let iter = match guard.as_mut() {
-            Some(cached) => cached.get_or_insert_with(|| self.new_raw_iterator_cf(cf)),
+            Some(cached) => cached.get_or_insert_with(|| self.new_raw_iterator_cf(cf, None)),
             None => {
-                private_iter = self.new_raw_iterator_cf(cf);
+                private_iter = self.new_raw_iterator_cf(cf, None);
                 &mut private_iter
             }
         };
+        let retry_bounded = || {
+            let bounded = self.new_raw_iterator_cf(cf, Some((first_shard_key, last_shard_key)));
+            self.history_info::<T>(
+                &Mutex::new(Some(bounded)),
+                encoded_key,
+                first_shard_key,
+                last_shard_key,
+                block_number,
+                lowest_available_block_number,
+                visible_tip,
+                key_matches,
+            )
+        };
 
         iter.seek(encoded_key);
+        if iter.status().is_err_and(|e| e.kind() == ErrorKind::Incomplete) {
+            return retry_bounded()
+        }
         iter.status().map_err(|e| {
             ProviderError::Database(DatabaseError::Read(DatabaseErrorInfo {
                 message: e.to_string().into(),
@@ -1888,14 +1916,19 @@ impl<'db> RocksReadSnapshot<'db> {
         let found_block = found_block.filter(|block| *block <= visible_tip);
 
         let is_before_first_write = if needs_prev_shard_check(rank, found_block, block_number) {
-            iter.prev();
+            // Seeking to the key's first shard lands on its earliest live shard.
+            let found_key = key_bytes.to_vec();
+            iter.seek(first_shard_key);
+            if iter.status().is_err_and(|e| e.kind() == ErrorKind::Incomplete) {
+                return retry_bounded()
+            }
             iter.status().map_err(|e| {
                 ProviderError::Database(DatabaseError::Read(DatabaseErrorInfo {
                     message: e.to_string().into(),
                     code: -1,
                 }))
             })?;
-            let has_prev = iter.valid() && iter.key().is_some_and(&prev_key_matches);
+            let has_prev = iter.key().is_some_and(|key| key != found_key.as_slice());
 
             // If the current shard only contains history above `visible_tip`, there is no usable
             // later change. Without a previous shard for the same key, fall back to the existing
@@ -2957,14 +2990,6 @@ impl RocksDBRawIterEnum<'_> {
         match self {
             Self::ReadWrite(iter) => iter.next(),
             Self::ReadOnly(iter) => iter.next(),
-        }
-    }
-
-    /// Moves the iterator to the previous key.
-    fn prev(&mut self) {
-        match self {
-            Self::ReadWrite(iter) => iter.prev(),
-            Self::ReadOnly(iter) => iter.prev(),
         }
     }
 
