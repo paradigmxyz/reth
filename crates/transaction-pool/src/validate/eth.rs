@@ -557,12 +557,9 @@ where
             return Err(InvalidTransactionError::TipAboveFeeCap.into())
         }
 
-        // determine whether the transaction should be treated as local
-        let is_local = self.local_transactions_config.is_local(origin, transaction.sender_ref());
-
         // Ensure max possible transaction fee doesn't exceed configured transaction fee cap.
         // Only for transactions locally submitted for acceptance into the pool.
-        if is_local {
+        if origin.is_local() {
             match self.tx_fee_cap {
                 Some(0) | None => {} // Skip if cap is 0 or None
                 Some(tx_fee_cap_wei) => {
@@ -1989,6 +1986,39 @@ mod tests {
         ));
         let tx = pool.get(transaction.hash());
         assert!(tx.is_none());
+    }
+
+    #[tokio::test]
+    async fn invalid_on_fee_cap_exceeded_with_no_exemptions() {
+        let sender = Address::repeat_byte(1);
+        let tx = alloy_consensus::TxEip1559 {
+            chain_id: 1,
+            gas_limit: 21_000,
+            max_fee_per_gas: 1e15 as u128, // 21 ETH max fee
+            to: Address::repeat_byte(2).into(),
+            ..Default::default()
+        };
+        let transaction = pooled_eip1559_tx(tx, sender);
+        let provider = mock_provider();
+        provider.add_account(sender, ExtendedAccount::new(0, U256::MAX));
+
+        // default 1 ETH cap
+        let validator = EthTransactionValidatorBuilder::new(provider, test_evm_config())
+            .with_local_transactions_config(LocalTransactionConfig {
+                no_exemptions: true,
+                ..Default::default()
+            })
+            .build(InMemoryBlobStore::default());
+
+        let outcome = validator.validate_one(TransactionOrigin::Local, transaction);
+        let TransactionValidationOutcome::Invalid(_, err) = outcome else {
+            panic!("expected invalid outcome, got {outcome:?}")
+        };
+        assert!(matches!(
+            err,
+            InvalidPoolTransactionError::ExceedsFeeCap { max_tx_fee_wei, tx_fee_cap_wei }
+            if max_tx_fee_wei == 21_000 * 1e15 as u128 && tx_fee_cap_wei == 1e18 as u128
+        ));
     }
 
     #[tokio::test]
