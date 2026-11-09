@@ -179,7 +179,10 @@ impl<N: ProviderNodeTypes> BlockchainProvider<N> {
     /// Returns a state provider for the post-state of `block_hash` over the snapshot of `provider`.
     ///
     /// Blocks in the in-memory chain captured by `provider` reuse that chain instead of rebuilding
-    /// an identical one from the overlay manager's block graph.
+    /// an identical one from the overlay manager's block graph. Their state then no longer depends
+    /// on the manager, which the engine prunes once blocks are persisted. Other blocks were
+    /// persisted when `provider` captured its chain, so a block the manager has dropped resolves
+    /// from the database alone.
     fn history_state_provider(
         &self,
         provider: ConsistentProvider<N>,
@@ -2223,6 +2226,33 @@ mod tests {
                 .collect::<Vec<_>>()
         );
 
+        Ok(())
+    }
+
+    #[test]
+    fn history_state_ignores_overlay_manager_pruning() -> eyre::Result<()> {
+        let mut rng = generators::rng();
+        let (provider, database_blocks, in_memory_blocks, _) = provider_with_random_blocks(
+            &mut rng,
+            TEST_BLOCKS_COUNT,
+            TEST_BLOCKS_COUNT,
+            BlockRangeParams::default(),
+        )?;
+
+        // The engine can prune blocks from the overlay manager while a call holds a consistent
+        // view that still captured them.
+        let views = [provider.consistent_provider()?, provider.consistent_provider()?];
+        provider.database.overlay_manager().remove_blocks(
+            database_blocks.iter().chain(&in_memory_blocks).map(|block| block.hash()),
+        );
+
+        for (view, block) in views
+            .into_iter()
+            .zip([in_memory_blocks.last().unwrap(), database_blocks.last().unwrap()])
+        {
+            let state = provider.history_state_provider(view, block.hash());
+            assert_eq!(state.block_hash(block.number)?, Some(block.hash()));
+        }
         Ok(())
     }
 
