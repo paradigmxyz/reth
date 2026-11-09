@@ -41,14 +41,14 @@ jobs:
             echo "describe=$(git describe --always --tags)"
           } >> "$GITHUB_OUTPUT"
 
-      - name: Detect fork
+      - name: Detect non-upstream build
         id: fork
         env:
           EVENT_NAME: ${{ github.event_name }}
           HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
           REPO: ${{ github.repository }}
         run: |
-          if [ "$EVENT_NAME" = "pull_request" ] && [ "$HEAD_REPO" != "$REPO" ]; then
+          if [ "$REPO" != "paradigmxyz/reth" ] || { [ "$EVENT_NAME" = "pull_request" ] && [ "$HEAD_REPO" != "$REPO" ]; }; then
             echo "is_fork=true" >> "$GITHUB_OUTPUT"
           else
             echo "is_fork=false" >> "$GITHUB_OUTPUT"
@@ -96,8 +96,10 @@ jobs:
           files: docker-bake.hcl
           targets: ${{ inputs.hive_target }}
           push: false
+          # The standard Dockerfile does not use Depot's build secret.
           set: |
             *.dockerfile=Dockerfile
+            *.secret=
 
       - name: Upload reth image
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
