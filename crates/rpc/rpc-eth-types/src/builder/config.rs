@@ -10,7 +10,7 @@ use reqwest::Url;
 use reth_rpc_server_types::constants::{
     default_max_tracing_requests, DEFAULT_ETH_PROOF_WINDOW, DEFAULT_MAX_BLOCKING_IO_REQUEST,
     DEFAULT_MAX_BLOCKS_PER_FILTER, DEFAULT_MAX_LOGS_PER_RESPONSE, DEFAULT_MAX_SIMULATE_BLOCKS,
-    DEFAULT_MAX_TRACE_FILTER_BLOCKS, DEFAULT_PROOF_PERMITS,
+    DEFAULT_MAX_TRACE_FILTER_BLOCKS, DEFAULT_PROOF_PERMITS, DEFAULT_RPC_EVM_TIMEOUT,
     RPC_DEFAULT_SEND_RAW_TX_SYNC_TIMEOUT_SECS,
 };
 use serde::{Deserialize, Serialize};
@@ -109,6 +109,8 @@ pub struct EthConfig {
     pub send_raw_transaction_sync_timeout: Duration,
     /// Maximum memory the EVM can allocate per RPC request.
     pub rpc_evm_memory_limit: u64,
+    /// Maximum time an `eth_call` or `eth_estimateGas` request may execute, `None` for no limit.
+    pub rpc_evm_timeout: Option<Duration>,
     /// Whether to force upcasting EIP-4844 blob sidecars to EIP-7594 format when Osaka is active.
     ///
     /// This is disabled by default, allowing blob transactions with EIP-4844 sidecars to be
@@ -148,6 +150,7 @@ impl Default for EthConfig {
             raw_tx_forwarder: ForwardConfig::default(),
             send_raw_transaction_sync_timeout: RPC_DEFAULT_SEND_RAW_TX_SYNC_TIMEOUT_SECS,
             rpc_evm_memory_limit: (1 << 32) - 1,
+            rpc_evm_timeout: Some(DEFAULT_RPC_EVM_TIMEOUT),
             force_blob_sidecar_upcasting: false,
         }
     }
@@ -256,6 +259,13 @@ impl EthConfig {
     /// Configures the maximum memory the EVM can allocate per RPC request.
     pub const fn rpc_evm_memory_limit(mut self, memory_limit: u64) -> Self {
         self.rpc_evm_memory_limit = memory_limit;
+        self
+    }
+
+    /// Configures the maximum time an `eth_call` or `eth_estimateGas` request may execute, `None`
+    /// for no limit.
+    pub const fn rpc_evm_timeout(mut self, timeout: Option<Duration>) -> Self {
+        self.rpc_evm_timeout = timeout;
         self
     }
 

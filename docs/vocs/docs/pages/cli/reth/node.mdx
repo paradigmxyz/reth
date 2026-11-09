@@ -504,6 +504,13 @@ RPC:
 
           [default: 4294967295]
 
+      --rpc.evm-timeout <SECONDS>
+          Maximum time an `eth_call` or `eth_estimateGas` request may execute (0 = no timeout).
+
+          A request that runs longer stops at its next jump and fails.
+
+          [default: 5]
+
       --rpc.txfeecap <TX_FEE_CAP>
           Maximum eth transaction fee (in ether) that can be sent via the RPC APIs (0 = no cap)
 

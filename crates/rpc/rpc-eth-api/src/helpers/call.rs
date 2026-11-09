@@ -15,7 +15,11 @@ use alloy_rpc_types_eth::{
     state::{EvmOverrides, StateOverride},
     BlockId, Bundle, EthCallResponse, StateContext, TransactionInfo,
 };
-use evm2::evm::{CacheDB, DynDatabase};
+use evm2::{
+    evm::{CacheDB, DynDatabase},
+    interpreter::{op, Interpreter},
+    EvmTypesHost, ExecutionError, InspectorConfig, OpcodeSet,
+};
 use evm2_inspectors::{access_list::AccessListInspector, transfer::TransferInspector};
 use futures::Future;
 use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthereumHardforks};
@@ -41,7 +45,7 @@ use reth_rpc_eth_types::{
 };
 use reth_storage_api::{BlockIdReader, ProviderTx, StateProvider};
 use reth_tasks::{cancel::is_cancelled, CancelOnDrop};
-use std::fmt;
+use std::{fmt, time::Duration};
 use tracing::{debug, trace};
 
 /// Result type for `eth_simulateV1` RPC method.
@@ -547,6 +551,12 @@ pub trait Call:
         self.eth_api_settings().evm_memory_limit
     }
 
+    /// Returns the maximum time an `eth_call` or `eth_estimateGas` request may execute, `None` for
+    /// no limit.
+    fn evm_timeout(&self) -> Option<Duration> {
+        self.eth_api_settings().evm_timeout
+    }
+
     /// Returns the max gas limit that the caller can afford given a transaction environment.
     fn caller_gas_allowance(
         &self,
@@ -625,9 +635,12 @@ pub trait Call:
     /// Executes the call request at the given [`BlockId`].
     ///
     /// This spawns a new task that obtains the state for the given [`BlockId`] and then transacts
-    /// the call [`Self::transact`]. If the future is dropped before the (blocking) transact
-    /// call is invoked, then the task is cancelled early, (for example if the request is terminated
-    /// early client-side).
+    /// the call. If the future is dropped before the (blocking) transact call is invoked, then the
+    /// task is cancelled early, (for example if the request is terminated early client-side), and
+    /// a running call stops at its next jump.
+    ///
+    /// Fails with [`EthApiError::ExecutionTimedOut`] once [`Self::evm_timeout`] expires after the
+    /// blocking IO permit is acquired.
     fn transact_call_at(
         &self,
         request: RpcTxReq<<Self::RpcConvert as RpcConvert>::Network>,
@@ -646,16 +659,19 @@ pub trait Call:
             let cancel = guard.clone();
             let this = self.clone();
 
-            let res = self
-                .spawn_with_call_at(request, at, overrides, move |db, evm_env, tx_env| {
+            let res = with_evm_timeout(
+                self.evm_timeout(),
+                self.spawn_with_call_at(request, at, overrides, move |db, evm_env, tx_env| {
                     let _permit = permit;
                     if cancel.is_cancelled() {
                         // callsite dropped the guard
                         return Err(EthApiError::InternalEthError.into())
                     }
-                    this.transact(db, evm_env, tx_env)
-                })
-                .await;
+                    this.transact_with_inspector(db, evm_env, tx_env, CancelInspector)
+                        .map(|(_, res)| res)
+                }),
+            )
+            .await;
             drop(guard);
             res
         }
@@ -1003,6 +1019,46 @@ pub trait Call:
 
         Ok((evm_env, tx_env))
     }
+}
+
+/// Stops EVM execution at the next `JUMP` or `JUMPI` once the current request is cancelled, see
+/// [`is_cancelled`].
+///
+/// Like geth's interrupt check, it steps only jumps, so the EVM runs its plain instruction
+/// handlers for every other opcode. Every loop jumps, so a cancelled call stops within one
+/// iteration.
+#[derive(Debug)]
+pub(super) struct CancelInspector;
+
+impl<T: EvmTypesHost> evm2::Inspector<T> for CancelInspector {
+    fn inspector_config(&self) -> InspectorConfig {
+        let mut jumps = OpcodeSet::EMPTY;
+        jumps.insert(op::JUMP);
+        jumps.insert(op::JUMPI);
+        InspectorConfig::without_steps().with_steps(jumps)
+    }
+
+    fn step(&mut self, interp: &mut Interpreter<'_, '_, T>) {
+        if is_cancelled() {
+            // `fail` records the error, and a step hook must also set the stop it returns.
+            let stop = interp.fail(ExecutionError::Fatal("execution cancelled".into()));
+            interp.set_stop(stop);
+        }
+    }
+}
+
+/// Awaits `fut`, failing with [`EthApiError::ExecutionTimedOut`] once `timeout` expires.
+///
+/// Expiry drops `fut`, which cancels its blocking task, and [`CancelInspector`] then stops the
+/// EVM at its next jump. `None` waits without a limit.
+pub(super) async fn with_evm_timeout<R, E: FromEthApiError>(
+    timeout: Option<Duration>,
+    fut: impl Future<Output = Result<R, E>>,
+) -> Result<R, E> {
+    let Some(timeout) = timeout else { return fut.await };
+    tokio::time::timeout(timeout, fut)
+        .await
+        .map_err(|_| E::from_eth_err(EthApiError::ExecutionTimedOut(timeout)))?
 }
 
 pub(super) fn request_gas_price(

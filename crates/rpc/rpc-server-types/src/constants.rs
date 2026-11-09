@@ -64,6 +64,10 @@ pub const DEFAULT_MAX_CALL_MANY_CALLS: usize = 1024;
 /// starts after it expires.
 pub const DEFAULT_CALL_MANY_TIMEOUT: Duration = Duration::from_secs(5);
 
+/// The default timeout of an `eth_call` or `eth_estimateGas` request, matching geth's
+/// `--rpc.evmtimeout`.
+pub const DEFAULT_RPC_EVM_TIMEOUT: Duration = Duration::from_secs(5);
+
 /// The default maximum number of total storage slots for `eth_getStorageValues`.
 pub const DEFAULT_MAX_STORAGE_VALUES_SLOTS: usize = 1024;
 

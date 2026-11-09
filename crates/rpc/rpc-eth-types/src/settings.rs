@@ -4,7 +4,7 @@ use crate::{builder::config::PendingBlockKind, RPC_DEFAULT_GAS_CAP};
 use reth_evm::SenderRecoveryCache;
 use reth_rpc_server_types::constants::{
     DEFAULT_ETH_PROOF_WINDOW, DEFAULT_MAX_BLOCKING_IO_REQUEST, DEFAULT_MAX_SIMULATE_BLOCKS,
-    DEFAULT_PROOF_PERMITS, RPC_DEFAULT_SEND_RAW_TX_SYNC_TIMEOUT_SECS,
+    DEFAULT_PROOF_PERMITS, DEFAULT_RPC_EVM_TIMEOUT, RPC_DEFAULT_SEND_RAW_TX_SYNC_TIMEOUT_SECS,
 };
 use std::time::Duration;
 
@@ -39,6 +39,8 @@ pub struct EthApiSettings {
     pub send_raw_transaction_sync_timeout: Duration,
     /// Maximum memory the EVM can allocate per RPC request.
     pub evm_memory_limit: u64,
+    /// Maximum time an `eth_call` or `eth_estimateGas` request may execute, `None` for no limit.
+    pub evm_timeout: Option<Duration>,
     /// Whether to force upcasting EIP-4844 blob sidecars to EIP-7594 format when Osaka is active.
     pub force_blob_sidecar_upcasting: bool,
 }
@@ -58,6 +60,7 @@ impl Default for EthApiSettings {
             pending_block_kind: PendingBlockKind::default(),
             send_raw_transaction_sync_timeout: RPC_DEFAULT_SEND_RAW_TX_SYNC_TIMEOUT_SECS,
             evm_memory_limit: (1 << 32) - 1,
+            evm_timeout: Some(DEFAULT_RPC_EVM_TIMEOUT),
             force_blob_sidecar_upcasting: false,
         }
     }

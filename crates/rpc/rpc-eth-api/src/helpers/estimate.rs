@@ -1,6 +1,9 @@
 //! Estimate gas needed implementation
 
-use super::{call::request_gas_price, Call, LoadPendingBlock};
+use super::{
+    call::{request_gas_price, with_evm_timeout, CancelInspector},
+    Call, LoadPendingBlock,
+};
 use crate::{AsEthApiError, FromEthApiError, FromEvmError, IntoEthApiError};
 use alloy_network::TransactionBuilder;
 use alloy_primitives::{TxKind, U256};
@@ -132,6 +135,7 @@ pub trait EstimateCall: Call {
         trace!(target: "rpc::eth::estimate", ?tx_env, gas_limit = highest_gas_limit, is_basic_transfer, "Starting gas estimation");
 
         let mut evm = self.evm_config().evm_with_env(&mut db, evm_env);
+        evm.set_inspector(CancelInspector);
         let mut execute = move |gas_limit| {
             tx_env.inner_mut().set_gas_limit(gas_limit);
             evm.transact_result(&tx_env).map_err(Self::Error::from_evm_err)
@@ -274,6 +278,9 @@ pub trait EstimateCall: Call {
     }
 
     /// Estimate gas needed for execution of the `request` at the [`BlockId`].
+    ///
+    /// Fails with [`EthApiError::ExecutionTimedOut`] once [`Call::evm_timeout`] expires, and stops
+    /// a running execution at its next jump once the request is dropped.
     fn estimate_gas_at(
         &self,
         request: RpcTxReq<<Self::RpcConvert as RpcConvert>::Network>,
@@ -286,15 +293,18 @@ pub trait EstimateCall: Call {
         async move {
             let (evm_env, at) = self.evm_env_at(at).await?;
 
-            self.spawn_blocking_io_with_state(at, move |this, state| {
-                EstimateCall::estimate_gas_with(
-                    &this,
-                    evm_env,
-                    request,
-                    state.into_evm_state_provider(),
-                    overrides,
-                )
-            })
+            with_evm_timeout(
+                self.evm_timeout(),
+                self.spawn_blocking_io_with_state(at, move |this, state| {
+                    EstimateCall::estimate_gas_with(
+                        &this,
+                        evm_env,
+                        request,
+                        state.into_evm_state_provider(),
+                        overrides,
+                    )
+                }),
+            )
             .await
         }
     }

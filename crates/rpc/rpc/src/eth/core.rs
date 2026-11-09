@@ -571,14 +571,17 @@ mod tests {
     };
     use reth_rpc_convert::{EthTxEnvError, TryIntoTxEnv};
     use reth_rpc_eth_api::{
-        helpers::{Call, EthBlocks, EthCall, EthTransactions, LoadPendingBlock, SpawnBlocking},
+        helpers::{
+            estimate::EstimateCall, Call, EthBlocks, EthCall, EthTransactions, LoadPendingBlock,
+            LoadState, SpawnBlocking,
+        },
         node::RpcNodeCoreAdapter,
         EthApiServer,
     };
     use reth_rpc_eth_types::{receipt::EthReceiptConverter, EthConfig, RpcInvalidTransactionError};
     use reth_rpc_server_types::constants::DEFAULT_MAX_CALL_MANY_CALLS;
     use reth_storage_api::{
-        BalProvider, BlockReaderIdExt, NodePrimitivesProvider, StateProviderFactory,
+        BalProvider, BlockReaderIdExt, NodePrimitivesProvider, StateProvider, StateProviderFactory,
     };
     use reth_tasks::cancel::{is_cancelled, CancelOnDrop};
     use reth_testing_utils::generators;
@@ -627,6 +630,74 @@ mod tests {
         )
         .gas_cap(gas_cap.into())
         .build()
+    }
+
+    /// Returns an API with the given EVM timeout and one blocking IO permit, and a call to a
+    /// contract that loops until it runs out of its 2^40 gas.
+    fn looping_call_api(timeout: Duration) -> (FakeEthApi, TransactionRequest, EvmOverrides) {
+        const GAS: u64 = 1 << 40;
+        let provider = MockEthProvider::default();
+        let header = Header { number: 1, gas_limit: GAS, ..Default::default() };
+        provider.add_block(header.hash_slow(), Block { header, body: BlockBody::default() });
+        let api = EthApiBuilder::new(
+            provider.clone(),
+            testing_pool(),
+            NoopNetwork::default(),
+            EthEvmConfig::new(provider.chain_spec()),
+        )
+        .gas_cap(GAS.into())
+        .max_blocking_io_requests(1)
+        .evm_timeout(Some(timeout))
+        .build();
+        let contract = Address::repeat_byte(0xaa);
+        // JUMPDEST PUSH1 0 JUMP
+        let code = Bytes::from_static(&[0x5b, 0x60, 0x00, 0x56]);
+        let overrides = EvmOverrides::state(Some(StateOverride::from_iter([(
+            contract,
+            AccountOverride { code: Some(code), ..Default::default() },
+        )])));
+        (api, TransactionRequest::default().to(contract), overrides)
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn evm_timeout_stops_looping_call() {
+        let (api, request, overrides) = looping_call_api(Duration::from_millis(100));
+
+        let err = EthCall::call(&api, request, None, overrides).await.unwrap_err();
+        assert_eq!(err.to_string(), "execution aborted (timeout = 100ms)");
+
+        // The call holds the only blocking IO permit until its EVM stops.
+        let permit = tokio::time::timeout(Duration::from_secs(10), api.acquire_owned_blocking_io())
+            .await
+            .expect("looping call kept running after its timeout");
+        assert!(permit.is_ok());
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn evm_timeout_stops_looping_estimate() {
+        let (api, request, overrides) = looping_call_api(Duration::from_millis(100));
+
+        let err =
+            EthCall::estimate_gas_at(&api, request.clone(), BlockId::latest(), overrides.clone())
+                .await
+                .unwrap_err();
+        assert_eq!(err.to_string(), "execution aborted (timeout = 100ms)");
+
+        // Dropping the request stops the running estimation at its next jump.
+        let (evm_env, _) = api.evm_env_at(BlockId::latest()).await.unwrap();
+        let (done_tx, done_rx) = tokio::sync::oneshot::channel();
+        let estimate = api.spawn_blocking_io_with_state(BlockId::latest(), move |this, state| {
+            let state = state.into_evm_state_provider();
+            let res = EstimateCall::estimate_gas_with(&this, evm_env, request, state, overrides);
+            let _ = done_tx.send(res.map_err(|err| err.to_string()));
+            Ok(())
+        });
+        assert!(tokio::time::timeout(Duration::from_millis(100), estimate).await.is_err());
+        let res = tokio::time::timeout(Duration::from_secs(10), done_rx)
+            .await
+            .expect("looping estimation kept running after its request was dropped")
+            .unwrap();
+        assert_eq!(res.unwrap_err(), "fatal error: execution cancelled");
     }
 
     #[tokio::test(flavor = "multi_thread")]
@@ -774,6 +845,7 @@ mod tests {
                 expected.send_raw_transaction_sync_timeout
             );
             assert_eq!(actual.evm_memory_limit, expected.evm_memory_limit);
+            assert_eq!(actual.evm_timeout, expected.evm_timeout);
             assert_eq!(actual.force_blob_sidecar_upcasting, expected.force_blob_sidecar_upcasting);
             assert_eq!(
                 actual.sender_recovery_cache.is_some(),
@@ -797,6 +869,7 @@ mod tests {
             pending_block_kind: PendingBlockKind::Empty,
             send_raw_transaction_sync_timeout: Duration::from_secs(9),
             evm_memory_limit: 1 << 20,
+            evm_timeout: Some(Duration::from_millis(1500)),
             force_blob_sidecar_upcasting: true,
         };
         let api = EthApiBuilder::new(
@@ -820,6 +893,7 @@ mod tests {
         .pending_block_kind(expected.pending_block_kind)
         .send_raw_transaction_sync_timeout(expected.send_raw_transaction_sync_timeout)
         .evm_memory_limit(expected.evm_memory_limit)
+        .evm_timeout(expected.evm_timeout)
         .force_blob_sidecar_upcasting(expected.force_blob_sidecar_upcasting)
         .build();
 
@@ -835,6 +909,7 @@ mod tests {
             expected.compute_state_root_for_eth_simulate
         );
         assert_eq!(Call::evm_memory_limit(&api), expected.evm_memory_limit);
+        assert_eq!(Call::evm_timeout(&api), expected.evm_timeout);
         assert_eq!(EthState::max_proof_window(&api), expected.eth_proof_window);
         assert_eq!(LoadPendingBlock::pending_block_kind(&api), expected.pending_block_kind);
         assert_eq!(

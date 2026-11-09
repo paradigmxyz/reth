@@ -88,6 +88,7 @@ pub struct DefaultRpcServerArgs {
     rpc_max_logs_per_response: ZeroAsNoneU64,
     rpc_gas_cap: u64,
     rpc_evm_memory_limit: u64,
+    rpc_evm_timeout: Duration,
     rpc_tx_fee_cap: u128,
     rpc_max_simulate_blocks: u64,
     rpc_compute_state_root_for_eth_simulate: bool,
@@ -322,6 +323,12 @@ impl DefaultRpcServerArgs {
         self
     }
 
+    /// Set the default EVM timeout
+    pub const fn with_rpc_evm_timeout(mut self, v: Duration) -> Self {
+        self.rpc_evm_timeout = v;
+        self
+    }
+
     /// Set the default tx fee cap
     pub const fn with_rpc_tx_fee_cap(mut self, v: u128) -> Self {
         self.rpc_tx_fee_cap = v;
@@ -427,6 +434,7 @@ impl Default for DefaultRpcServerArgs {
             rpc_max_logs_per_response: (constants::DEFAULT_MAX_LOGS_PER_RESPONSE as u64).into(),
             rpc_gas_cap: constants::gas_oracle::RPC_DEFAULT_GAS_CAP,
             rpc_evm_memory_limit: (1 << 32) - 1,
+            rpc_evm_timeout: constants::DEFAULT_RPC_EVM_TIMEOUT,
             rpc_tx_fee_cap: constants::DEFAULT_TX_FEE_CAP_WEI,
             rpc_max_simulate_blocks: constants::DEFAULT_MAX_SIMULATE_BLOCKS,
             rpc_compute_state_root_for_eth_simulate: false,
@@ -680,6 +688,18 @@ pub struct RpcServerArgs {
         default_value_t = DefaultRpcServerArgs::get_global().rpc_evm_memory_limit
     )]
     pub rpc_evm_memory_limit: u64,
+
+    /// Maximum time an `eth_call` or `eth_estimateGas` request may execute (0 = no timeout).
+    ///
+    /// A request that runs longer stops at its next jump and fails.
+    #[arg(
+        long = "rpc.evm-timeout",
+        alias = "rpc-evm-timeout",
+        value_name = "SECONDS",
+        default_value = format_duration_as_secs_or_ms(DefaultRpcServerArgs::get_global().rpc_evm_timeout),
+        value_parser = parse_duration_from_secs_or_ms,
+    )]
+    pub rpc_evm_timeout: Duration,
 
     /// Maximum eth transaction fee (in ether) that can be sent via the RPC APIs (0 = no cap)
     #[arg(
@@ -995,6 +1015,7 @@ impl Default for RpcServerArgs {
             rpc_max_logs_per_response,
             rpc_gas_cap,
             rpc_evm_memory_limit,
+            rpc_evm_timeout,
             rpc_tx_fee_cap,
             rpc_max_simulate_blocks,
             rpc_compute_state_root_for_eth_simulate,
@@ -1044,6 +1065,7 @@ impl Default for RpcServerArgs {
             rpc_max_logs_per_response,
             rpc_gas_cap,
             rpc_evm_memory_limit,
+            rpc_evm_timeout,
             rpc_tx_fee_cap,
             rpc_max_simulate_blocks,
             rpc_compute_state_root_for_eth_simulate,
@@ -1357,6 +1379,7 @@ mod tests {
             rpc_max_logs_per_response: 10000u64.into(),
             rpc_gas_cap: 50_000_000,
             rpc_evm_memory_limit: 256,
+            rpc_evm_timeout: std::time::Duration::from_millis(1500),
             rpc_tx_fee_cap: 2_000_000_000_000_000_000u128,
             rpc_max_simulate_blocks: 256,
             rpc_compute_state_root_for_eth_simulate: false,
@@ -1445,6 +1468,8 @@ mod tests {
             "50000000",
             "--rpc.evm-memory-limit",
             "256",
+            "--rpc.evm-timeout",
+            "1500ms",
             "--rpc.txfeecap",
             "2.0",
             "--rpc.max-simulate-blocks",

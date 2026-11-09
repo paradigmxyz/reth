@@ -18,7 +18,7 @@ use reth_rpc_eth_types::{
 };
 use reth_rpc_server_types::constants::{
     DEFAULT_ETH_PROOF_WINDOW, DEFAULT_MAX_BLOCKING_IO_REQUEST, DEFAULT_MAX_SIMULATE_BLOCKS,
-    DEFAULT_PROOF_PERMITS,
+    DEFAULT_PROOF_PERMITS, DEFAULT_RPC_EVM_TIMEOUT,
 };
 use reth_tasks::{pool::BlockingTaskPool, Runtime};
 use std::{sync::Arc, time::Duration};
@@ -51,6 +51,7 @@ pub struct EthApiBuilder<N: RpcNodeCore, Rpc, NextEnv = ()> {
     sender_recovery_cache: Option<SenderRecoveryCache>,
     send_raw_transaction_sync_timeout: Duration,
     evm_memory_limit: u64,
+    evm_timeout: Option<Duration>,
     force_blob_sidecar_upcasting: bool,
 }
 
@@ -106,6 +107,7 @@ impl<N: RpcNodeCore, Rpc, NextEnv> EthApiBuilder<N, Rpc, NextEnv> {
             sender_recovery_cache,
             send_raw_transaction_sync_timeout,
             evm_memory_limit,
+            evm_timeout,
             force_blob_sidecar_upcasting,
         } = self;
         EthApiBuilder {
@@ -131,6 +133,7 @@ impl<N: RpcNodeCore, Rpc, NextEnv> EthApiBuilder<N, Rpc, NextEnv> {
             sender_recovery_cache,
             send_raw_transaction_sync_timeout,
             evm_memory_limit,
+            evm_timeout,
             force_blob_sidecar_upcasting,
         }
     }
@@ -167,6 +170,7 @@ where
             sender_recovery_cache: None,
             send_raw_transaction_sync_timeout: Duration::from_secs(30),
             evm_memory_limit: (1 << 32) - 1,
+            evm_timeout: Some(DEFAULT_RPC_EVM_TIMEOUT),
             force_blob_sidecar_upcasting: false,
         }
     }
@@ -210,6 +214,7 @@ where
             sender_recovery_cache,
             send_raw_transaction_sync_timeout,
             evm_memory_limit,
+            evm_timeout,
             force_blob_sidecar_upcasting,
         } = self;
         EthApiBuilder {
@@ -235,6 +240,7 @@ where
             sender_recovery_cache,
             send_raw_transaction_sync_timeout,
             evm_memory_limit,
+            evm_timeout,
             force_blob_sidecar_upcasting,
         }
     }
@@ -267,6 +273,7 @@ where
             sender_recovery_cache,
             send_raw_transaction_sync_timeout,
             evm_memory_limit,
+            evm_timeout,
             force_blob_sidecar_upcasting,
         } = self;
         EthApiBuilder {
@@ -292,6 +299,7 @@ where
             sender_recovery_cache,
             send_raw_transaction_sync_timeout,
             evm_memory_limit,
+            evm_timeout,
             force_blob_sidecar_upcasting,
         }
     }
@@ -547,6 +555,7 @@ where
             sender_recovery_cache,
             send_raw_transaction_sync_timeout,
             evm_memory_limit,
+            evm_timeout,
             force_blob_sidecar_upcasting,
         } = self;
 
@@ -588,6 +597,7 @@ where
             pending_block_kind,
             send_raw_transaction_sync_timeout,
             evm_memory_limit,
+            evm_timeout,
             force_blob_sidecar_upcasting,
         };
 
@@ -636,6 +646,13 @@ where
     /// Sets the maximum memory the EVM can allocate per RPC request.
     pub const fn evm_memory_limit(mut self, memory_limit: u64) -> Self {
         self.evm_memory_limit = memory_limit;
+        self
+    }
+
+    /// Sets the maximum time an `eth_call` or `eth_estimateGas` request may execute, `None` for
+    /// no limit.
+    pub const fn evm_timeout(mut self, timeout: Option<Duration>) -> Self {
+        self.evm_timeout = timeout;
         self
     }
 

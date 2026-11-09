@@ -111,6 +111,7 @@ impl RethRpcServerConfig for RpcServerArgs {
             .pending_block_kind(self.rpc_pending_block)
             .raw_tx_forwarder(self.rpc_forwarder.clone())
             .rpc_evm_memory_limit(self.rpc_evm_memory_limit)
+            .rpc_evm_timeout((!self.rpc_evm_timeout.is_zero()).then_some(self.rpc_evm_timeout))
             .force_blob_sidecar_upcasting(self.rpc_force_blob_sidecar_upcasting)
     }
 
@@ -355,6 +356,20 @@ mod tests {
 
         let args = CommandParser::<RpcServerArgs>::try_parse_from(["reth", "--rpc.gascap", "0"]);
         assert!(args.is_err());
+    }
+
+    #[test]
+    fn test_rpc_evm_timeout() {
+        let args = CommandParser::<RpcServerArgs>::parse_from(["reth"]).args;
+        assert_eq!(args.eth_config().rpc_evm_timeout, Some(constants::DEFAULT_RPC_EVM_TIMEOUT));
+
+        let args =
+            CommandParser::<RpcServerArgs>::parse_from(["reth", "--rpc.evm-timeout", "250ms"]).args;
+        assert_eq!(args.eth_config().rpc_evm_timeout, Some(Duration::from_millis(250)));
+
+        let args =
+            CommandParser::<RpcServerArgs>::parse_from(["reth", "--rpc.evm-timeout", "0"]).args;
+        assert_eq!(args.eth_config().rpc_evm_timeout, None);
     }
 
     #[test]
