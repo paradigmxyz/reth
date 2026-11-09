@@ -317,7 +317,7 @@ jobs:
       - run: cargo build --bin reth --workspace
         env:
           RUSTFLAGS: -D warnings
-      - run: ./docs/cli/update.sh target/debug/reth
+      - run: bash ./docs/cli/update.sh target/debug/reth
       - name: Check docs changes
         run: git diff --exit-code
 
