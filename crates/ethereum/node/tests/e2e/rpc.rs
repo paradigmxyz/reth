@@ -54,6 +54,11 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
+#[cfg(feature = "js-tracer")]
+use alloy_rpc_types_eth::{Bundle, StateContext};
+#[cfg(feature = "js-tracer")]
+use alloy_rpc_types_trace::geth::TraceResult;
+
 alloy_sol_types::sol! {
     #[sol(rpc, bytecode = "6080604052348015600f57600080fd5b5060405160db38038060db833981016040819052602a91607a565b60005b818110156074576040805143602082015290810182905260009060600160408051601f19818403018152919052805160209091012080555080606d816092565b915050602d565b505060b8565b600060208284031215608b57600080fd5b5051919050565b60006001820160b157634e487b7160e01b600052601160045260246000fd5b5060010190565b60168060c56000396000f3fe6080604052600080fdfea164736f6c6343000810000a")]
     contract GasWaster {
@@ -316,6 +321,86 @@ async fn test_debug_trace_chain_subscription() -> eyre::Result<()> {
     let terminal = subscription.next().await.unwrap()?;
     assert_eq!(terminal.block, U256::from(3));
     assert!(terminal.traces.is_empty());
+    subscription.unsubscribe().await?;
+
+    Ok(())
+}
+
+#[cfg(feature = "js-tracer")]
+#[tokio::test]
+async fn test_debug_trace_block_js_tracer_timeout() -> eyre::Result<()> {
+    reth_tracing::init_test_tracing();
+
+    let (mut node, wallet) = EthereumNode::test_setup_for(EthereumHardfork::Cancun)
+        .with_rpc_modifier(|rpc| rpc.with_ws().with_ws_api(RpcModuleSelection::All))
+        .build_single()
+        .await?;
+    let provider = node.rpc_provider_with_wallet(wallet.signer(0));
+
+    let deploy = GasWaster::deploy_builder(&provider, U256::from(5));
+    let tx = deploy.clone().into_transaction_request();
+    let first_hash = *deploy.send().await?.tx_hash();
+    let _ = GasWaster::deploy_builder(&provider, U256::from(7)).send().await?;
+    node.advance_block().await?;
+
+    // Every step is slow enough that each transaction outlasts the timeout.
+    let opts = serde_json::json!({
+        "tracer": "{ step: function() { for (var i = 0; i < 100000; i++) {} }, fault: function() {}, result: function() { return null; } }",
+        "timeout": "100ms",
+    });
+    let client = node.inner.rpc_server_handle().ws_client().await.unwrap();
+    let message = |err: jsonrpsee::core::ClientError| match err {
+        jsonrpsee::core::ClientError::Call(err) => err.message().to_owned(),
+        err => err.to_string(),
+    };
+
+    let err = client
+        .request::<serde_json::Value, _>(
+            "debug_traceBlockByNumber",
+            (BlockNumberOrTag::Number(1), &opts),
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(message(err), "execution aborted (timeout = 100ms)");
+
+    let err = client
+        .request::<serde_json::Value, _>(
+            "debug_traceCallMany",
+            (
+                vec![Bundle { transactions: vec![tx], block_override: None }],
+                StateContext::default(),
+                &opts,
+            ),
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(message(err), "execution aborted (timeout = 100ms)");
+
+    let mut subscription: Subscription<ChainBlockTraceResult> = client
+        .subscribe(
+            "debug_subscribe",
+            jsonrpsee::rpc_params![
+                "traceChain",
+                BlockNumberOrTag::Number(0),
+                BlockNumberOrTag::Number(1),
+                &opts
+            ],
+            "debug_unsubscribe",
+        )
+        .await?;
+    let traced = subscription.next().await.unwrap()?;
+    assert_eq!(traced.block, U256::from(1));
+    let [Some(TraceResult::Error { error, tx_hash: Some(tx_hash) }), None] = &traced.traces[..]
+    else {
+        panic!("expected the first transaction to time out, got {:?}", traced.traces);
+    };
+    assert_eq!(*tx_hash, first_hash);
+    assert_eq!(
+        error,
+        &format!(
+            "internal EVM error occurred when executing transaction {first_hash}: fatal error: JavaScript tracing interrupted"
+        )
+    );
     subscription.unsubscribe().await?;
 
     Ok(())

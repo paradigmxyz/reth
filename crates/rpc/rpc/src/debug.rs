@@ -60,7 +60,14 @@ use alloy_rpc_types_trace::geth::{
 #[cfg(feature = "js-tracer")]
 use evm2_inspectors::tracing::js::JsInspectorInterrupt;
 #[cfg(feature = "js-tracer")]
-use std::time::Duration;
+use parking_lot::Mutex;
+#[cfg(feature = "js-tracer")]
+use std::{
+    pin::{pin, Pin},
+    time::Duration,
+};
+#[cfg(feature = "js-tracer")]
+use tokio::time::Instant;
 
 /// `debug` API implementation.
 ///
@@ -132,8 +139,11 @@ where
         evm_env: EvmEnvFor<Eth::Evm>,
         opts: GethDebugTracingOptions,
     ) -> Result<Vec<TraceResult>, Eth::Error> {
-        self.eth_api()
-            .spawn_with_state_at_block(block.parent_hash(), move |eth_api, mut db| {
+        let interrupt = JsTraceInterrupt::new(&opts)?;
+        let tracer_interrupt = interrupt.clone();
+        let trace = self.eth_api().spawn_with_state_at_block(
+            block.parent_hash(),
+            move |eth_api, mut db| {
                 let mut results = Vec::with_capacity(block.body().transactions().len());
 
                 eth_api.apply_pre_execution_changes(&block, &mut db)?;
@@ -141,12 +151,14 @@ where
                 let block_env = *evm_env.block_env();
 
                 let mut transactions = block.transactions_recovered().enumerate().peekable();
-                let mut inspector = DebugInspector::new(opts).map_err(Eth::Error::from_eth_err)?;
+                let mut inspector = tracer_interrupt
+                    .attach(DebugInspector::new(opts).map_err(Eth::Error::from_eth_err)?);
                 let mut executor = eth_api.block_executor(&block, &mut db, evm_env)?;
                 while let Some((index, tx)) = transactions.next() {
                     if is_cancelled() {
                         return Err(EthApiError::InternalEthError.into())
                     }
+                    tracer_interrupt.restart_timeout();
                     let tx_hash = *tx.tx_hash();
                     let tx_env = eth_api.evm_config().tx_env(tx.cloned());
 
@@ -178,12 +190,13 @@ where
                 }
 
                 Ok(results)
-            })
-            .await
+            },
+        );
+        interrupt.run(trace).await
     }
 
-    /// Traces a block for `traceChain`, preserving transaction-level tracing failures in the
-    /// subscription result instead of failing the entire range.
+    /// Traces a block for `traceChain`, preserving transaction-level tracing failures, including
+    /// JS tracer timeouts, in the subscription result instead of failing the entire range.
     async fn trace_chain_block(
         &self,
         block: Arc<RecoveredBlock<ProviderBlock<Eth::Provider>>>,
@@ -191,8 +204,11 @@ where
     ) -> Result<Vec<Option<TraceResult>>, Eth::Error> {
         let evm_env = self.eth_api().evm_env_for_header(block.sealed_block().sealed_header())?;
 
-        self.eth_api()
-            .spawn_with_state_at_block(block.parent_hash(), move |eth_api, mut db| {
+        let interrupt = JsTraceInterrupt::new(&opts)?;
+        let tracer_interrupt = interrupt.clone();
+        let trace = self.eth_api().spawn_with_state_at_block(
+            block.parent_hash(),
+            move |eth_api, mut db| {
                 let tx_count = block.body().transactions().len();
                 let mut results = Vec::with_capacity(tx_count);
 
@@ -201,7 +217,7 @@ where
                 let block_env = *evm_env.block_env();
                 let mut transactions = block.transactions_recovered().enumerate().peekable();
                 let mut inspector = match DebugInspector::new(opts) {
-                    Ok(inspector) => inspector,
+                    Ok(inspector) => tracer_interrupt.attach(inspector),
                     Err(err) => {
                         if let Some((_, tx)) = transactions.peek() {
                             results.push(Some(TraceResult::Error {
@@ -216,6 +232,7 @@ where
                 let mut executor = eth_api.block_executor(&block, &mut db, evm_env)?;
 
                 while let Some((index, tx)) = transactions.next() {
+                    tracer_interrupt.restart_timeout();
                     let tx_hash = *tx.tx_hash();
                     let tx_env = eth_api.evm_config().tx_env(tx.cloned());
                     let output = match executor.inspect_transaction_without_commit(tx, inspector) {
@@ -274,8 +291,9 @@ where
 
                 results.resize(tx_count, None);
                 Ok(results)
-            })
-            .await
+            },
+        );
+        interrupt.run_to_completion(trace).await
     }
 
     /// Replays the given block and returns the trace of each transaction.
@@ -551,69 +569,72 @@ where
             replay_block_txs = false;
         }
 
-        self.eth_api()
-            .spawn_with_state_at_block(at, move |eth_api, mut db| {
-                // the outer vec for the bundles
-                let mut all_bundles = Vec::with_capacity(bundles.len());
+        let interrupt = JsTraceInterrupt::new(&tracing_options)?;
+        let tracer_interrupt = interrupt.clone();
+        let trace = self.eth_api().spawn_with_state_at_block(at, move |eth_api, mut db| {
+            // the outer vec for the bundles
+            let mut all_bundles = Vec::with_capacity(bundles.len());
 
-                if replay_block_txs {
-                    // only need to replay the transactions in the block if not all transactions are
-                    // to be replayed
-                    // Execute all transactions until index. No BAL positioning here: bundle
-                    // transactions commit state on top, and an attached BAL would take read
-                    // precedence over the committed changes
-                    eth_api.replay_block_until(&mut db, &block, num_txs, None)?;
-                }
+            if replay_block_txs {
+                // only need to replay the transactions in the block if not all transactions are
+                // to be replayed
+                // Execute all transactions until index. No BAL positioning here: bundle
+                // transactions commit state on top, and an attached BAL would take read
+                // precedence over the committed changes
+                eth_api.replay_block_until(&mut db, &block, num_txs, None)?;
+            }
 
-                // Trace all bundles
-                let mut bundles = bundles.into_iter().peekable();
-                let mut inspector = DebugInspector::new(tracing_options.clone())
-                    .map_err(Eth::Error::from_eth_err)?;
-                while let Some(bundle) = bundles.next() {
-                    let mut results = Vec::with_capacity(bundle.transactions.len());
-                    let Bundle { transactions, block_override } = bundle;
+            // Trace all bundles
+            let mut bundles = bundles.into_iter().peekable();
+            let mut inspector = tracer_interrupt.attach(
+                DebugInspector::new(tracing_options.clone()).map_err(Eth::Error::from_eth_err)?,
+            );
+            while let Some(bundle) = bundles.next() {
+                let mut results = Vec::with_capacity(bundle.transactions.len());
+                let Bundle { transactions, block_override } = bundle;
 
-                    let block_overrides = block_override.map(Box::new);
+                let block_overrides = block_override.map(Box::new);
 
-                    let mut transactions = transactions.into_iter().peekable();
-                    while let Some(tx) = transactions.next() {
-                        if is_cancelled() {
-                            return Err(EthApiError::InternalEthError.into())
-                        }
-                        // apply state overrides only once, before the first transaction
-                        let state_overrides = state_overrides.take();
-                        let overrides = EvmOverrides::new(state_overrides, block_overrides.clone());
-
-                        let (evm_env, mut tx_env) =
-                            eth_api.prepare_call_env(evm_env.clone(), tx, &mut db, overrides)?;
-                        budget.admit(&mut tx_env)?;
-
-                        let (next_inspector, res) = eth_api
-                            .inspect(&mut db, evm_env.clone(), &tx_env, inspector)
-                            .map_err(|err| budget.map_call_err(err))?;
-                        budget.charge(&res.result)?;
-                        inspector = next_inspector;
-                        let trace = inspector
-                            .get_result(None, &tx_env, evm_env.block_env(), &res, &mut db)
-                            .map_err(Eth::Error::from_eth_err)?;
-
-                        // If there is more transactions, commit the database
-                        // If there is no transactions, but more bundles, commit to the database too
-                        if transactions.peek().is_some() || bundles.peek().is_some() {
-                            inspector.fuse().map_err(Eth::Error::from_eth_err)?;
-                            db.commit_source(&res.pending_state);
-                        }
-                        results.push(trace);
+                let mut transactions = transactions.into_iter().peekable();
+                while let Some(tx) = transactions.next() {
+                    if is_cancelled() {
+                        return Err(EthApiError::InternalEthError.into())
                     }
-                    // Increment block_env number and timestamp for the next bundle
-                    evm_env.block_env_mut().number += uint!(1_U256);
-                    evm_env.block_env_mut().timestamp += uint!(12_U256);
+                    tracer_interrupt.restart_timeout();
+                    // apply state overrides only once, before the first transaction
+                    let state_overrides = state_overrides.take();
+                    let overrides = EvmOverrides::new(state_overrides, block_overrides.clone());
 
-                    all_bundles.push(results);
+                    let (evm_env, mut tx_env) =
+                        eth_api.prepare_call_env(evm_env.clone(), tx, &mut db, overrides)?;
+                    budget.admit(&mut tx_env)?;
+
+                    let (next_inspector, res) = eth_api
+                        .inspect(&mut db, evm_env.clone(), &tx_env, inspector)
+                        .map_err(|err| budget.map_call_err(err))?;
+                    budget.charge(&res.result)?;
+                    inspector = next_inspector;
+                    let trace = inspector
+                        .get_result(None, &tx_env, evm_env.block_env(), &res, &mut db)
+                        .map_err(Eth::Error::from_eth_err)?;
+
+                    // If there is more transactions, commit the database
+                    // If there is no transactions, but more bundles, commit to the database too
+                    if transactions.peek().is_some() || bundles.peek().is_some() {
+                        inspector.fuse().map_err(Eth::Error::from_eth_err)?;
+                        db.commit_source(&res.pending_state);
+                    }
+                    results.push(trace);
                 }
-                Ok(all_bundles)
-            })
-            .await
+                // Increment block_env number and timestamp for the next bundle
+                evm_env.block_env_mut().number += uint!(1_U256);
+                evm_env.block_env_mut().timestamp += uint!(12_U256);
+
+                all_bundles.push(results);
+            }
+            Ok(all_bundles)
+        });
+        interrupt.run(trace).await
     }
 
     /// Generates an execution witness for the given block hash. see
@@ -1068,12 +1089,17 @@ where
             return Ok(())
         }
 
+        let opts = opts.unwrap_or_default();
+        if let Err(err) = JsTraceInterrupt::new(&opts) {
+            pending.reject(err).await;
+            return Ok(())
+        }
+
         let sink = pending.accept().await?;
         let this = self.clone();
         let task_spawner = self.inner.task_spawner.clone();
         task_spawner.spawn_task(async move {
             let end_number = end.number();
-            let opts = opts.unwrap_or_default();
 
             for number in (start.number() + 1)..=end_number {
                 if sink.is_closed() {
@@ -1105,11 +1131,14 @@ where
                 if sink.is_closed() {
                     break
                 }
-                let traces = match this.trace_chain_block(block.clone(), opts.clone()).await {
-                    Ok(traces) => traces,
-                    Err(err) => {
-                        tracing::warn!(target: "rpc::debug", %number, %err, "Failed to trace chain block");
-                        break
+                let traces = tokio::select! {
+                    _ = sink.closed() => break,
+                    traces = this.trace_chain_block(block.clone(), opts.clone()) => match traces {
+                        Ok(traces) => traces,
+                        Err(err) => {
+                            tracing::warn!(target: "rpc::debug", %number, %err, "Failed to trace chain block");
+                            break
+                        }
                     }
                 };
                 drop(permit);
@@ -1565,17 +1594,22 @@ fn runs_js_tracer(tracer: &GethDebugTracerType, config: &GethDebugTracerConfig) 
     }
 }
 
-/// Interrupts a JS tracer once its request is dropped or its timeout expires.
+/// Interrupts a JS tracer once its request is dropped or a traced transaction times out.
+///
+/// As in geth, the timeout applies to each transaction: requests that trace several transactions
+/// restart it with [`Self::restart_timeout`] before each one.
 ///
 /// Built-in tracers can't be interrupted, so for them this does nothing.
 #[derive(Clone, Debug, Default)]
 struct JsTraceInterrupt {
     #[cfg(feature = "js-tracer")]
-    js: Option<(JsInspectorInterrupt, Duration)>,
+    js: Option<JsTraceTimeout>,
 }
 
 impl JsTraceInterrupt {
     /// Creates an interrupt if `opts` selects a JS tracer, using its `timeout` or geth's default.
+    ///
+    /// The timeout starts now.
     #[cfg_attr(
         not(feature = "js-tracer"),
         expect(unused_variables, reason = "only JS tracers can be interrupted")
@@ -1591,7 +1625,13 @@ impl JsTraceInterrupt {
                 })?,
                 None => DEFAULT_JS_TRACER_TIMEOUT,
             };
-            return Ok(Self { js: Some((JsInspectorInterrupt::new(), timeout)) })
+            return Ok(Self {
+                js: Some(JsTraceTimeout {
+                    interrupt: JsInspectorInterrupt::new(),
+                    timeout,
+                    started: Arc::new(Mutex::new(Instant::now())),
+                }),
+            })
         }
         Ok(Self::default())
     }
@@ -1603,14 +1643,26 @@ impl JsTraceInterrupt {
     )]
     fn attach(&self, mut inspector: DebugInspector) -> DebugInspector {
         #[cfg(feature = "js-tracer")]
-        if let Some((interrupt, _)) = &self.js {
-            inspector.set_js_interrupt(interrupt);
+        if let Some(js) = &self.js {
+            inspector.set_js_interrupt(&js.interrupt);
         }
         inspector
     }
 
-    /// Awaits `trace`, interrupting the tracer if the returned future is dropped or the timeout
-    /// expires.
+    /// Restarts the timeout, called before tracing each transaction of a request.
+    #[cfg_attr(
+        not(feature = "js-tracer"),
+        expect(clippy::missing_const_for_fn, reason = "only JS tracers can be interrupted")
+    )]
+    fn restart_timeout(&self) {
+        #[cfg(feature = "js-tracer")]
+        if let Some(js) = &self.js {
+            *js.started.lock() = Instant::now();
+        }
+    }
+
+    /// Awaits `trace`, interrupting the tracer if the returned future is dropped or a transaction
+    /// times out.
     ///
     /// The interrupt is armed before the future is first polled, so dropping it unpolled still
     /// stops a trace that is already running on a blocking task.
@@ -1627,15 +1679,68 @@ impl JsTraceInterrupt {
         trace: impl Future<Output = Result<T, E>>,
     ) -> impl Future<Output = Result<T, E>> {
         #[cfg(feature = "js-tracer")]
-        let js = self.js.as_ref().map(|(interrupt, timeout)| (interrupt.drop_guard(), *timeout));
+        let js = self.js.as_ref().map(|js| (js.interrupt.drop_guard(), js.clone()));
         async move {
             #[cfg(feature = "js-tracer")]
-            if let Some((_interrupt_on_drop, timeout)) = js {
-                return tokio::time::timeout(timeout, trace)
-                    .await
-                    .map_err(|_| E::from_eth_err(EthApiError::ExecutionTimedOut(timeout)))?
+            if let Some((_interrupt_on_drop, js)) = js {
+                return match js.until_timeout(pin!(trace)).await {
+                    Some(result) => result,
+                    None => Err(E::from_eth_err(EthApiError::ExecutionTimedOut(js.timeout))),
+                }
             }
             trace.await
+        }
+    }
+
+    /// Awaits `trace` like [`Self::run`], but once a transaction times out, interrupts the tracer
+    /// and keeps awaiting `trace` so it can report the interrupted transaction.
+    #[cfg_attr(
+        not(feature = "js-tracer"),
+        expect(
+            clippy::manual_async_fn,
+            clippy::redundant_async_block,
+            reason = "only JS tracers can be interrupted"
+        )
+    )]
+    fn run_to_completion<T>(&self, trace: impl Future<Output = T>) -> impl Future<Output = T> {
+        #[cfg(feature = "js-tracer")]
+        let js = self.js.as_ref().map(|js| (js.interrupt.drop_guard(), js.clone()));
+        async move {
+            #[cfg(feature = "js-tracer")]
+            if let Some((_interrupt_on_drop, js)) = js {
+                let mut trace = pin!(trace);
+                if let Some(output) = js.until_timeout(trace.as_mut()).await {
+                    return output
+                }
+                js.interrupt.interrupt();
+                return trace.await
+            }
+            trace.await
+        }
+    }
+}
+
+/// The interrupt and per-transaction timeout of a JS tracer.
+#[cfg(feature = "js-tracer")]
+#[derive(Clone, Debug)]
+struct JsTraceTimeout {
+    interrupt: JsInspectorInterrupt,
+    timeout: Duration,
+    /// When the timeout of the transaction being traced started.
+    started: Arc<Mutex<Instant>>,
+}
+
+#[cfg(feature = "js-tracer")]
+impl JsTraceTimeout {
+    /// Awaits `trace`, returning `None` once the timeout expires without being restarted.
+    async fn until_timeout<F: Future>(&self, mut trace: Pin<&mut F>) -> Option<F::Output> {
+        loop {
+            let remaining = self.timeout.saturating_sub(self.started.lock().elapsed());
+            match tokio::time::timeout(remaining, trace.as_mut()).await {
+                Ok(output) => return Some(output),
+                Err(_) if self.started.lock().elapsed() >= self.timeout => return None,
+                Err(_) => {}
+            }
         }
     }
 }
@@ -1715,7 +1820,7 @@ mod tests {
         let opts = js_tracer_opts(None);
         let interrupt = JsTraceInterrupt::new(&opts).unwrap();
         let inspector = interrupt.attach(DebugInspector::new(opts).unwrap());
-        interrupt.js.as_ref().unwrap().0.interrupt();
+        interrupt.js.as_ref().unwrap().interrupt.interrupt();
 
         let config = EthEvmConfig::mainnet();
         let mut evm = config.evm_with_env(
@@ -1765,18 +1870,58 @@ mod tests {
         assert!(
             matches!(err, EthApiError::ExecutionTimedOut(timeout) if timeout == Duration::from_millis(10))
         );
-        assert!(interrupt.js.unwrap().0.is_interrupted());
+        assert!(interrupt.js.unwrap().interrupt.is_interrupted());
     }
 
     #[cfg(feature = "js-tracer")]
     #[test]
     fn js_trace_interrupt_interrupts_tracer_when_dropped_unpolled() {
         let interrupt = JsTraceInterrupt::new(&js_tracer_opts(None)).unwrap();
-        let (tracer_interrupt, _) = interrupt.js.clone().unwrap();
+        let tracer_interrupt = interrupt.js.clone().unwrap().interrupt;
         let trace = interrupt.run(std::future::pending::<Result<(), EthApiError>>());
         assert!(!tracer_interrupt.is_interrupted());
         drop(trace);
         assert!(tracer_interrupt.is_interrupted());
+    }
+
+    #[cfg(feature = "js-tracer")]
+    #[tokio::test(start_paused = true)]
+    async fn js_trace_interrupt_restart_gives_each_transaction_the_full_timeout() {
+        let trace_transactions = |interrupt: JsTraceInterrupt, restart: bool| async move {
+            for _ in 0..3 {
+                if restart {
+                    interrupt.restart_timeout();
+                }
+                tokio::time::sleep(Duration::from_millis(8)).await;
+            }
+            Ok::<_, EthApiError>(())
+        };
+
+        let interrupt = JsTraceInterrupt::new(&js_tracer_opts(Some("10ms"))).unwrap();
+        interrupt.run(trace_transactions(interrupt.clone(), true)).await.unwrap();
+
+        let interrupt = JsTraceInterrupt::new(&js_tracer_opts(Some("10ms"))).unwrap();
+        let err = interrupt.run(trace_transactions(interrupt.clone(), false)).await.unwrap_err();
+        assert!(
+            matches!(err, EthApiError::ExecutionTimedOut(timeout) if timeout == Duration::from_millis(10))
+        );
+        assert!(interrupt.js.unwrap().interrupt.is_interrupted());
+    }
+
+    #[cfg(feature = "js-tracer")]
+    #[tokio::test(start_paused = true)]
+    async fn js_trace_interrupt_run_to_completion_interrupts_and_awaits_trace() {
+        let start = Instant::now();
+        let interrupt = JsTraceInterrupt::new(&js_tracer_opts(Some("10ms"))).unwrap();
+        let tracer_interrupt = interrupt.js.clone().unwrap().interrupt;
+        let trace = async {
+            while !tracer_interrupt.is_interrupted() {
+                tokio::time::sleep(Duration::from_millis(1)).await;
+            }
+            Instant::now()
+        };
+        let interrupted_at = interrupt.run_to_completion(trace).await;
+        assert!(interrupted_at - start >= Duration::from_millis(10));
     }
 
     #[test]
