@@ -110,9 +110,6 @@ impl_to_rpc_result!(reth_errors::RethError);
 impl_to_rpc_result!(reth_errors::ProviderError);
 impl_to_rpc_result!(reth_network_api::NetworkError);
 
-/// The code for a call that failed to execute, in the range JSON-RPC leaves to servers.
-pub const CALL_EXECUTION_FAILED_CODE: i32 = -32000;
-
 /// Constructs an invalid params JSON-RPC error.
 pub fn invalid_params_rpc_err(msg: impl Into<String>) -> ErrorPayload {
     rpc_err(INVALID_PARAMS_CODE, msg, None)

@@ -16,7 +16,6 @@ use reth_primitives_traits::transaction::{error::InvalidTransactionError, signed
 use reth_rpc_convert::{CallFeesError, EthTxEnvError, TransactionConversionError};
 use reth_rpc_server_types::result::{
     internal_rpc_err, invalid_params_rpc_err, rpc_err, rpc_error_with_code,
-    CALL_EXECUTION_FAILED_CODE,
 };
 use reth_transaction_pool::error::{
     Eip4844PoolTransactionError, Eip7702PoolTransactionError, InvalidPoolTransactionError,
@@ -341,14 +340,17 @@ impl From<EthApiError> for ErrorPayload {
                 rpc_error_with_code(EthRpcErrorCode::ResourceNotFound.code(), error.to_string())
             }
             EthApiError::TracingTransactionNotFound | EthApiError::GenesisNotTraceable => {
-                rpc_error_with_code(CALL_EXECUTION_FAILED_CODE, error.to_string())
+                rpc_error_with_code(EthRpcErrorCode::InvalidInput.code(), error.to_string())
             }
             EthApiError::TracingBlockNotFound(id) => {
                 let id = match id {
                     BlockId::Hash(hash) => hash.block_hash.to_string(),
                     BlockId::Number(number) => number.to_string(),
                 };
-                rpc_error_with_code(CALL_EXECUTION_FAILED_CODE, format!("block {id} not found"))
+                rpc_error_with_code(
+                    EthRpcErrorCode::InvalidInput.code(),
+                    format!("block {id} not found"),
+                )
             }
             EthApiError::HeaderNotFound(id) | EthApiError::ReceiptsNotFound(id) => {
                 rpc_error_with_code(
@@ -370,7 +372,7 @@ impl From<EthApiError> for ErrorPayload {
             }
             EthApiError::InvalidParams(msg) => invalid_params_rpc_err(msg),
             err @ EthApiError::ExecutionTimedOut(_) => {
-                rpc_error_with_code(CALL_EXECUTION_FAILED_CODE, err.to_string())
+                rpc_error_with_code(EthRpcErrorCode::InvalidInput.code(), err.to_string())
             }
             err @ (EthApiError::InternalBlockingTaskError | EthApiError::InternalEthError) => {
                 internal_rpc_err(err.to_string())

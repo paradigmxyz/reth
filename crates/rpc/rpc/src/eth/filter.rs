@@ -29,10 +29,7 @@ use reth_rpc_eth_types::{
     logs_utils::{self, append_matching_block_logs, ProviderOrBlock},
     EthApiError, EthFilterConfig, EthStateCache, EthSubscriptionIdProvider,
 };
-use reth_rpc_server_types::{
-    result::{rpc_error_with_code, CALL_EXECUTION_FAILED_CODE},
-    ToRpcResult,
-};
+use reth_rpc_server_types::{result::rpc_error_with_code, ToRpcResult};
 use reth_storage_api::{
     BlockHashReader, BlockIdReader, BlockNumReader, BlockReader, HeaderProvider, ProviderBlock,
     ProviderReceipt, ReceiptProvider,
@@ -1049,7 +1046,7 @@ impl From<EthFilterError> for ErrorPayload {
         match err {
             // geth and Nethermind answer -32000 for unknown filter ids
             EthFilterError::FilterNotFound(_) => {
-                rpc_error_with_code(CALL_EXECUTION_FAILED_CODE, "filter not found")
+                rpc_error_with_code(EthRpcErrorCode::InvalidInput.code(), "filter not found")
             }
             err @ EthFilterError::InternalError => {
                 rpc_error_with_code(INTERNAL_ERROR_CODE, err.to_string())
