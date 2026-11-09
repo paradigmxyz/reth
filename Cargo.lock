@@ -597,7 +597,7 @@ dependencies = [
 [[package]]
 name = "alloy-rpc-macros"
 version = "0.1.0"
-source = "git+https://github.com/lean-apple/alloy-rpsee?branch=fix%2Freth-integration#e401abe730d52cb0d11289c3c8864e1e647ab2fa"
+source = "git+https://github.com/lean-apple/alloy-rpsee?rev=5435413894ac085678fafa9ae585c6c7eda3abef#5435413894ac085678fafa9ae585c6c7eda3abef"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -607,7 +607,7 @@ dependencies = [
 [[package]]
 name = "alloy-rpc-server"
 version = "0.1.0"
-source = "git+https://github.com/lean-apple/alloy-rpsee?branch=fix%2Freth-integration#e401abe730d52cb0d11289c3c8864e1e647ab2fa"
+source = "git+https://github.com/lean-apple/alloy-rpsee?rev=5435413894ac085678fafa9ae585c6c7eda3abef#5435413894ac085678fafa9ae585c6c7eda3abef"
 dependencies = [
  "alloy-json-rpc",
  "alloy-primitives",

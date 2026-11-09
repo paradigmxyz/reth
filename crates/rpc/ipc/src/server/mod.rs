@@ -7,7 +7,7 @@ use crate::{
 use alloy_rpc_server::{
     error::ErrorCode,
     handle_rpc_call,
-    server::{stop_channel, ServerHandle, StopHandle, DEFAULT_SIZE_LIMIT},
+    server::{ServerHandle, DEFAULT_SIZE_LIMIT},
     BatchRequestConfig, Connection, ConnectionId, Id, IdProvider, MethodResponse, Methods,
     RandomIntegerIdProvider, RpcServiceT,
 };
@@ -30,7 +30,10 @@ use tokio::{
     sync::{mpsc, oneshot, OwnedSemaphorePermit, Semaphore},
 };
 use tokio_stream::wrappers::ReceiverStream;
-use tokio_util::task::AbortOnDropHandle;
+use tokio_util::{
+    sync::CancellationToken,
+    task::{AbortOnDropHandle, TaskTracker},
+};
 use tower::{layer::util::Identity, Layer, Service};
 use tracing::{instrument, trace, warn, Instrument};
 
@@ -99,14 +102,17 @@ where
     ) -> Result<ServerHandle, IpcServerStartError> {
         let methods = methods.into();
 
-        let (stop_handle, server_handle) = stop_channel();
+        let server_handle = ServerHandle::new();
+        let tasks = server_handle.tasks().clone();
 
         // use a signal channel to wait until we're ready to accept connections
         let (tx, rx) = oneshot::channel();
 
-        match self.cfg.tokio_runtime.take() {
-            Some(rt) => rt.spawn(self.start_inner(methods, stop_handle, tx)),
-            None => tokio::spawn(self.start_inner(methods, stop_handle, tx)),
+        let runtime = self.cfg.tokio_runtime.take();
+        let accept = self.start_inner(methods, server_handle.stop_token(), tasks.clone(), tx);
+        match runtime {
+            Some(rt) => tasks.spawn_on(accept, &rt),
+            None => tasks.spawn(accept),
         };
         rx.await.expect("channel is open")?;
 
@@ -116,7 +122,8 @@ where
     async fn start_inner(
         self,
         methods: Methods,
-        stop_handle: StopHandle,
+        stop_token: CancellationToken,
+        tasks: TaskTracker,
         on_ready: oneshot::Sender<Result<(), IpcServerStartError>>,
     ) {
         trace!(endpoint = ?self.endpoint, "starting ipc server");
@@ -189,7 +196,7 @@ where
         let max_connections = self.cfg.max_connections as usize;
         let connections = Arc::new(Semaphore::new(max_connections));
 
-        let stopped = stop_handle.clone().shutdown();
+        let stopped = stop_token.clone().cancelled_owned();
         let mut stopped = pin!(stopped);
 
         let (drop_on_completion, mut process_connection_awaiter) = mpsc::channel::<()>(1);
@@ -215,7 +222,8 @@ where
                         conn_permit: Arc::new(conn_permit),
                         conn_id: id,
                         server_cfg: self.cfg.clone(),
-                        stop_handle: stop_handle.clone(),
+                        stop: stop_token.clone(),
+                        tasks: tasks.clone(),
                         drop_on_completion: drop_on_completion.clone(),
                         methods: methods.clone(),
                         id_provider: self.id_provider.clone(),
@@ -388,7 +396,8 @@ struct ProcessConnection<RpcMiddleware> {
     conn_permit: Arc<OwnedSemaphorePermit>,
     conn_id: u32,
     server_cfg: Settings,
-    stop_handle: StopHandle,
+    stop: CancellationToken,
+    tasks: TaskTracker,
     drop_on_completion: mpsc::Sender<()>,
     methods: Methods,
     id_provider: Arc<dyn IdProvider>,
@@ -407,7 +416,8 @@ where
         conn_permit,
         conn_id,
         server_cfg,
-        stop_handle,
+        stop,
+        tasks,
         drop_on_completion,
         id_provider,
         methods,
@@ -430,8 +440,8 @@ where
         rpc_middleware,
     };
 
-    tokio::spawn(async {
-        to_ipc_service(ipc, service, stop_handle, rx).in_current_span().await;
+    tasks.spawn(async {
+        to_ipc_service(ipc, service, stop, rx).in_current_span().await;
         drop(drop_on_completion)
     });
 }
@@ -439,7 +449,7 @@ where
 async fn to_ipc_service<S, T>(
     ipc: IpcConn<JsonRpcStream<T>>,
     service: S,
-    stop_handle: StopHandle,
+    stop: CancellationToken,
     rx: mpsc::Receiver<String>,
 ) where
     S: Service<String, Response = Option<String>> + Send + 'static,
@@ -454,7 +464,7 @@ async fn to_ipc_service<S, T>(
         pending_calls: Default::default(),
         items: Default::default(),
     };
-    let stopped = stop_handle.shutdown();
+    let stopped = stop.cancelled_owned();
 
     let mut conn = pin!(conn);
     let mut rx_item = pin!(rx_item);
