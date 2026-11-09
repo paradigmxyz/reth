@@ -30,3 +30,28 @@ pub(crate) struct StageMetrics {
     /// The number of seconds spent executing the stage and committing the data.
     pub(crate) total_elapsed: Gauge,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use metrics_exporter_prometheus::PrometheusBuilder;
+    use metrics_util::layers::{Layer, PrefixLayer};
+
+    /// Metric names referenced by production alerts. Renaming any of these silently breaks
+    /// alerting, so the exported Prometheus names and stage labels are pinned here.
+    #[test]
+    fn alerted_metric_names() {
+        let recorder = PrometheusBuilder::new().build_recorder();
+        let handle = recorder.handle();
+        metrics::with_local_recorder(&PrefixLayer::new("reth").layer(recorder), || {
+            SyncMetrics::default().get_stage_metrics(StageId::Finish);
+        });
+        let rendered = handle.render();
+
+        let sample = r#"reth_sync_checkpoint{stage="Finish"}"#;
+        assert!(
+            rendered.lines().any(|line| line.split(' ').next() == Some(sample)),
+            "missing `{sample}` in:\n{rendered}"
+        );
+    }
+}
