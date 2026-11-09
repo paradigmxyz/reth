@@ -531,7 +531,11 @@ pub struct RpcServerArgs {
 
     /// Set the permissions for the IPC socket file, in octal format.
     ///
-    /// If not specified, the permissions will be set by the system's umask.
+    /// Accepts modes up to `0o7777`, with an optional `0o` prefix. If not specified, the
+    /// permissions will be set by the system's umask.
+    ///
+    /// Startup fails if the mode is invalid or the platform cannot apply it before binding the
+    /// socket, which includes macOS.
     #[arg(long = "ipc.permissions", default_value = Resettable::from(DefaultRpcServerArgs::get_global().ipc_socket_permissions.as_ref().map(|v| v.to_string().into())))]
     pub ipc_socket_permissions: Option<String>,
 
@@ -656,6 +660,8 @@ pub struct RpcServerArgs {
     pub rpc_max_logs_per_response: ZeroAsNoneU64,
 
     /// Maximum gas limit for `eth_call`, `eth_estimateGas`, and call tracing RPC methods.
+    ///
+    /// The calls of an `eth_callMany`, `trace_callMany` or `debug_traceCallMany` request share it.
     #[arg(
         long = "rpc.gascap",
         alias = "rpc-gascap",
@@ -926,14 +932,15 @@ impl RpcServerArgs {
 
     /// Returns `true` if the given RPC namespace is enabled on any transport.
     pub fn is_namespace_enabled(&self, ns: RethRpcModule) -> bool {
-        if self.http && self.http_api.as_ref().is_some_and(|api| api.contains(&ns)) {
+        if self.http &&
+            self.http_api.as_ref().unwrap_or(&RpcModuleSelection::Standard).contains(&ns)
+        {
             return true;
         }
-        if self.ws && self.ws_api.as_ref().is_some_and(|api| api.contains(&ns)) {
+        if self.ws && self.ws_api.as_ref().unwrap_or(&RpcModuleSelection::Standard).contains(&ns) {
             return true;
         }
-        // IPC exposes all modules when enabled
-        !self.ipcdisable
+        !self.ipcdisable && RpcModuleSelection::default_ipc_modules().contains(&ns)
     }
 
     /// Enables forced blob sidecar upcasting from EIP-4844 to EIP-7594 format.
@@ -1361,7 +1368,6 @@ mod tests {
             rpc_state_cache: RpcStateCacheArgs {
                 max_blocks: 5000,
                 max_receipts: 2000,
-                max_headers: 1000,
                 max_bals: 1000,
                 cache_computed_bals: true,
                 prewarm_bals: Some(0),
@@ -1454,8 +1460,6 @@ mod tests {
             "5000",
             "--rpc-cache.max-receipts",
             "2000",
-            "--rpc-cache.max-headers",
-            "1000",
             "--rpc-cache.max-bals",
             "1000",
             "--rpc-cache.cache-computed-bals",

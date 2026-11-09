@@ -393,7 +393,9 @@ RPC:
       --ipc.permissions <IPC_SOCKET_PERMISSIONS>
           Set the permissions for the IPC socket file, in octal format.
 
-          If not specified, the permissions will be set by the system's umask.
+          Accepts modes up to `0o7777`, with an optional `0o` prefix. If not specified, the permissions will be set by the system's umask.
+
+          Startup fails if the mode is invalid or the platform cannot apply it before binding the socket, which includes macOS.
 
       --authrpc.addr <AUTH_ADDR>
           Auth server address to listen on
@@ -491,7 +493,9 @@ RPC:
           [default: 20000]
 
       --rpc.gascap <GAS_CAP>
-          Maximum gas limit for `eth_call`, `eth_estimateGas`, and call tracing RPC methods
+          Maximum gas limit for `eth_call`, `eth_estimateGas`, and call tracing RPC methods.
+
+          The calls of an `eth_callMany`, `trace_callMany` or `debug_traceCallMany` request share it.
 
           [default: 50000000]
 

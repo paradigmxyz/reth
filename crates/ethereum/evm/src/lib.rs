@@ -244,10 +244,11 @@ pub use factory::{
 pub use factory::{EthBigBlockExecutorFactory, EthBlockExecutorFactory, EvmFactory};
 
 mod convert;
-pub use convert::ExecutableRecoveredTx;
+pub use convert::{recover_authorizations, ExecutableRecoveredTx};
 
 mod execution;
 
+#[cfg(test)]
 mod dao_fork;
 
 mod receipt;

@@ -3,9 +3,10 @@ import { readdir, readFile, writeFile } from 'fs/promises'
 import { join } from 'path'
 
 const ASSETS_DIR = './docs/dist/public/assets'
-const LINK_MARKER = 'c=Yd(!!i);if(Hd(e.to))'
-const RUSTDOCS_NAVIGATION_GUARD =
-  'c=Yd(!!i);if(t==="/docs"||t?.startsWith("/docs/"))return(0,v.jsx)(`a`,{...o,href:t});if(Hd(e.to))'
+// Vocs's Link component, minified: `c=<usePrefetch>(!!i);if(<isExternal>(e.to))return(0,<jsxRuntime>.jsx)`.
+// Minified names change between builds, so they are captured rather than hardcoded.
+const LINK_MARKER = /c=([\w$]+)\(!!i\);if\(([\w$]+)\(e\.to\)\)return\(0,([\w$]+)\.jsx\)/
+const RUSTDOCS_NAVIGATION_GUARD = 'if(t==="/docs"||t?.startsWith("/docs/"))return(0,'
 
 async function fixRustdocsNavigation() {
   const files = await readdir(ASSETS_DIR)
@@ -22,9 +23,16 @@ async function fixRustdocsNavigation() {
       continue
     }
 
-    if (!code.includes(LINK_MARKER)) continue
+    if (!LINK_MARKER.test(code)) continue
 
-    await writeFile(path, code.replace(LINK_MARKER, RUSTDOCS_NAVIGATION_GUARD))
+    await writeFile(
+      path,
+      code.replace(
+        LINK_MARKER,
+        (_, prefetch, isExternal, jsx) =>
+          `c=${prefetch}(!!i);${RUSTDOCS_NAVIGATION_GUARD}${jsx}.jsx)(\`a\`,{...o,href:t});if(${isExternal}(e.to))return(0,${jsx}.jsx)`,
+      ),
+    )
     patchedFiles++
     console.log(`Patched Rustdocs navigation in ${path}`)
   }

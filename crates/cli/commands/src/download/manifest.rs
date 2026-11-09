@@ -492,6 +492,19 @@ impl SnapshotManifest {
         }
         first_block / chunked.blocks_per_file
     }
+
+    /// Fails if any chunked component declares zero blocks per archive.
+    pub(crate) fn validate_blocks_per_file(&self) -> Result<()> {
+        for (key, component) in &self.components {
+            if let ComponentManifest::Chunked(chunked) = component {
+                eyre::ensure!(
+                    chunked.blocks_per_file > 0,
+                    "Invalid modular manifest: {key} blocks_per_file must be greater than zero"
+                );
+            }
+        }
+        Ok(())
+    }
 }
 
 impl ComponentManifest {
@@ -615,11 +628,12 @@ impl SingleArchive {
     }
 }
 
-/// Fetch a snapshot manifest from a URL.
+/// Fetches a snapshot manifest from a URL, rejecting zero blocks per archive.
 pub async fn fetch_manifest(manifest_url: &str) -> Result<SnapshotManifest> {
     let client = Client::new();
     let manifest: SnapshotManifest =
         client.get(manifest_url).send().await?.error_for_status()?.json().await?;
+    manifest.validate_blocks_per_file()?;
     Ok(manifest)
 }
 

@@ -30,4 +30,7 @@ pub enum Error {
     /// The [`ListenConfig`](discv5::ListenConfig) has been misconfigured.
     #[error("misconfigured listen config, RLPx TCP address must also be supported by discv5")]
     ListenConfigMisconfigured,
+    /// Node record can't be converted to a [`discv5::Enr`].
+    #[error("invalid enr, {0}")]
+    InvalidEnr(alloy_rlp::Error),
 }

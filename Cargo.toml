@@ -1,5 +1,5 @@
 [workspace.package]
-version = "2.9.0"
+version = "2.10.1"
 edition = "2024"
 rust-version = "1.96"
 license = "MIT OR Apache-2.0"
@@ -434,9 +434,9 @@ reth-trie-sparse = { path = "crates/trie/sparse", default-features = false }
 reth-zstd-compressors = { version = "0.8.2", default-features = false }
 
 # evm2
-evm2 = { git = "https://github.com/alloy-rs/evm2", rev = "592bf18c4e22fff54ac9b4db606c4ee276e345cb", default-features = false }
-evm2-inspectors = { git = "https://github.com/alloy-rs/evm2", rev = "592bf18c4e22fff54ac9b4db606c4ee276e345cb", default-features = false }
-evm2-jit = { git = "https://github.com/alloy-rs/evm2", rev = "592bf18c4e22fff54ac9b4db606c4ee276e345cb", default-features = false }
+evm2 = { git = "https://github.com/alloy-rs/evm2", rev = "37fb326b91a76dd07308c703b3f3c85152a6230b", default-features = false }
+evm2-inspectors = { git = "https://github.com/alloy-rs/evm2", rev = "37fb326b91a76dd07308c703b3f3c85152a6230b", default-features = false }
+evm2-jit = { git = "https://github.com/alloy-rs/evm2", rev = "37fb326b91a76dd07308c703b3f3c85152a6230b", default-features = false }
 
 # eth
 alloy-dyn-abi = "1.6.1"
@@ -672,14 +672,11 @@ ipnet = "2.11"
 # evm2 is patched through its pre-transfer URL, which redirects to alloy-rs/evm2, because Cargo
 # rejects a patch from the same source.
 [patch."https://github.com/alloy-rs/evm2"]
-evm2 = { git = "https://github.com/DaniPopes/evm2", rev = "592bf18c4e22fff54ac9b4db606c4ee276e345cb" }
-evm2-inspectors = { git = "https://github.com/DaniPopes/evm2", rev = "592bf18c4e22fff54ac9b4db606c4ee276e345cb" }
-evm2-jit = { git = "https://github.com/DaniPopes/evm2", rev = "592bf18c4e22fff54ac9b4db606c4ee276e345cb" }
+evm2 = { git = "https://github.com/DaniPopes/evm2", rev = "37fb326b91a76dd07308c703b3f3c85152a6230b" }
+evm2-inspectors = { git = "https://github.com/DaniPopes/evm2", rev = "37fb326b91a76dd07308c703b3f3c85152a6230b" }
+evm2-jit = { git = "https://github.com/DaniPopes/evm2", rev = "37fb326b91a76dd07308c703b3f3c85152a6230b" }
 
 [patch.crates-io]
-# LLVM 23 support is not released yet.
-inkwell = { git = "https://github.com/TheDan64/inkwell", rev = "c9d9734ae17dbaf1d9902dab3b8ee9d2041781ff" }
-
 # reth-core
 reth-codecs = { git = "https://github.com/paradigmxyz/reth-core", rev = "275ce4cf5befeb9f1e8acd935ff2882d2d25fc61" }
 reth-codecs-derive = { git = "https://github.com/paradigmxyz/reth-core", rev = "275ce4cf5befeb9f1e8acd935ff2882d2d25fc61" }
