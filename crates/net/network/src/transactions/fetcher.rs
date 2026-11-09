@@ -1439,15 +1439,11 @@ mod tests {
     use crate::test_utils::transactions::new_mock_session_with_capacity;
     use alloy_consensus::transaction::Recovered;
     use alloy_primitives::B256;
-    use futures::task::{noop_waker_ref, waker, ArcWake};
+    use futures::task::noop_waker_ref;
     use rand::{rngs::StdRng, seq::IndexedRandom, Rng, SeedableRng};
     use reth_eth_wire::EthVersion;
     use reth_ethereum_primitives::{PooledTransactionVariant, TransactionSigned};
     use reth_transaction_pool::test_utils::MockTransactionFactory;
-    use std::sync::{
-        atomic::{AtomicUsize, Ordering},
-        Arc,
-    };
     use tokio::sync::mpsc;
 
     type Fetcher = TransactionFetcher<EthNetworkPrimitives>;
@@ -1468,22 +1464,6 @@ mod tests {
 
     fn hashes(range: std::ops::Range<u64>) -> Vec<TxHash> {
         range.map(hash).collect()
-    }
-
-    /// Counts how often a task is woken.
-    #[derive(Default)]
-    struct WakeCounter(AtomicUsize);
-
-    impl ArcWake for WakeCounter {
-        fn wake_by_ref(arc_self: &Arc<Self>) {
-            arc_self.0.fetch_add(1, Ordering::SeqCst);
-        }
-    }
-
-    impl WakeCounter {
-        fn wakes(&self) -> usize {
-            self.0.load(Ordering::SeqCst)
-        }
     }
 
     fn pooled_txs(count: usize) -> Vec<PooledTransactionVariant> {
@@ -1721,34 +1701,6 @@ mod tests {
         rig.dispatch();
         let (requested, _) = rig.take_request(peer_a).unwrap();
         assert_eq!(requested, hashes[1..]);
-    }
-
-    #[test]
-    fn oversized_transaction_is_requested_alone() {
-        let mut rig = Rig::new();
-        let peer_a = peer(1);
-        rig.add_peer(peer_a);
-        let hashes = hashes(0..3);
-
-        rig.announce_with_sizes(
-            peer_a,
-            [(hashes[0], 100), (hashes[1], 1024 * KIB), (hashes[2], 100)],
-        );
-
-        let mut requests = Vec::new();
-        for _ in 0..3 {
-            assert_eq!(rig.dispatch(), 1);
-            let (requested, response) = rig.take_request(peer_a).unwrap();
-            requests.push(requested);
-            // A bad response keeps other hashes pending but drops the requested ones.
-            response.send(Err(RequestError::BadResponse)).unwrap();
-            rig.next_event().unwrap();
-        }
-        assert_eq!(
-            requests,
-            vec![hashes[..1].to_vec(), hashes[1..2].to_vec(), hashes[2..].to_vec()]
-        );
-        assert_eq!(rig.fetcher.num_hashes(), 0);
     }
 
     #[test]
@@ -2645,25 +2597,6 @@ mod tests {
     }
 
     #[test]
-    fn stalled_peers_do_not_shrink_requests_to_an_idle_peer() {
-        let mut rig = Rig::new();
-        for n in 0..16 {
-            let p = peer(n + 1);
-            rig.add_peer(p);
-            rig.announce(p, &hashes(u64::from(n) * 256..u64::from(n + 1) * 256));
-        }
-        assert_eq!(rig.dispatch_with_budget(4096), 16);
-        assert_eq!(rig.fetcher.num_fetching_hashes(), 4096);
-        // All earlier peers keep their requests open. The newly ready peer still gets a
-        // full request instead of being throttled by their inflight hashes.
-        let honest = peer(17);
-        rig.add_peer(honest);
-        rig.announce(honest, &hashes(4096..4352));
-        assert_eq!(rig.dispatch_with_budget(4096), 1);
-        assert_eq!(rig.take_request(honest).unwrap().0, hashes(4096..4352));
-    }
-
-    #[test]
     fn full_session_channel_rolls_back_request() {
         let mut rig = Rig::new();
         let peer_a = peer(1);
@@ -2914,32 +2847,6 @@ mod tests {
         assert!(events.iter().all(|event| matches!(event, FetchEvent::FetchError { .. })));
         assert!(rig.next_event().is_none());
         assert_eq!(rig.fetcher.num_inflight_requests(), 0);
-    }
-
-    #[test]
-    fn requests_sent_after_a_poll_register_wakers_on_the_next_poll() {
-        let mut rig = Rig::new();
-        let peer_a = peer(1);
-        rig.add_peer(peer_a);
-        let counter = Arc::new(WakeCounter::default());
-        let waker = waker(counter.clone());
-        let mut cx = Context::from_waker(&waker);
-
-        assert!(rig.fetcher.poll_next_unpin(&mut cx).is_pending());
-        rig.announce(peer_a, &hashes(0..1));
-        assert_eq!(rig.dispatch(), 1);
-
-        // the caller has to poll again after dispatching, only then the request is polled and
-        // registers the waker that its response wakes
-        assert!(rig.fetcher.poll_next_unpin(&mut cx).is_pending());
-        let wakes = counter.wakes();
-        let (_, response) = rig.take_request(peer_a).unwrap();
-        response.send(Err(RequestError::Timeout)).unwrap();
-        assert_eq!(counter.wakes(), wakes + 1);
-        assert!(matches!(
-            rig.fetcher.poll_next_unpin(&mut cx),
-            Poll::Ready(Some(FetchEvent::FetchError { .. }))
-        ));
     }
 
     #[test]

@@ -22,11 +22,11 @@ use std::marker::PhantomData;
 /// settings; [`crate::with_adapter!`] provides runtime dispatch between the adapter types.
 pub trait TrieKeyAdapter: Clone + Send + Sync + 'static {
     /// The key type for account trie lookups (e.g., `StoredNibbles` or `PackedStoredNibbles`).
-    type AccountKey: Key + From<Nibbles> + Clone;
+    type AccountKey: Key + From<Nibbles>;
 
     /// The subkey type for storage trie `DupSort` lookups
     /// (e.g., `StoredNibblesSubKey` or `PackedStoredNibblesSubKey`).
-    type StorageSubKey: Key + From<Nibbles> + Clone + PartialEq;
+    type StorageSubKey: Key + From<Nibbles>;
 
     /// The storage trie entry type that pairs a subkey with a `BranchNodeCompact`.
     type StorageValue: Value + StorageTrieEntryLike<SubKey = Self::StorageSubKey>;
@@ -369,6 +369,7 @@ mod tests {
     use alloy_primitives::hex_literal::hex;
     use reth_db_api::{cursor::DbCursorRW, transaction::DbTxMut};
     use reth_provider::test_utils::create_test_provider_factory;
+    use reth_storage_api::StorageSettingsCache;
 
     #[test]
     fn test_account_trie_order() {
@@ -413,7 +414,6 @@ mod tests {
     // tests that upsert and seek match on the storage trie cursor
     #[test]
     fn test_storage_cursor_abstraction() {
-        use reth_storage_api::StorageSettingsCache;
         use reth_trie::trie_cursor::{TrieCursor, TrieCursorFactory};
 
         let factory = create_test_provider_factory();

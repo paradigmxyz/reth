@@ -17,9 +17,9 @@ http.workspace = true
 http-body-util.workspace = true
 jsonrpsee-http-client.workspace = true
 pin-project.workspace = true
-tokio = { workspace = true, features = ["sync"] }
+tokio = { workspace = true, features = ["sync", "time"] }
 tower.workspace = true
-tower-http = { workspace = true, features = ["full"] }
+tower-http = { workspace = true, features = ["compression-br", "compression-deflate", "compression-gzip", "compression-zstd", "decompression-br", "decompression-deflate", "decompression-gzip", "decompression-zstd"] }
 tracing.workspace = true
 
 [dev-dependencies]

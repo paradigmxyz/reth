@@ -19,7 +19,7 @@ use reth_rpc_eth_types::{
     error::{FromEvmError, IntoEthApiError},
     EthApiError, PendingBlockEnv, RpcInvalidTransactionError, SignError,
 };
-use reth_rpc_server_types::constants::DEFAULT_MAX_STORAGE_VALUES_SLOTS;
+use reth_rpc_server_types::constants::{DEFAULT_MAX_PROOF_SLOTS, DEFAULT_MAX_STORAGE_VALUES_SLOTS};
 use reth_storage_api::{
     BlockIdReader, BlockReaderIdExt, StateProvider, StateProviderBox, StateProviderFactory,
 };
@@ -151,6 +151,9 @@ pub trait EthState: LoadState + SpawnBlocking {
     }
 
     /// Returns account and storage proofs using the V2 proof calculator at the given block.
+    ///
+    /// Enforces a cap of [`DEFAULT_MAX_PROOF_SLOTS`] on the number of requested keys, before a
+    /// proof permit is acquired.
     fn get_proof(
         &self,
         address: Address,
@@ -163,6 +166,13 @@ pub trait EthState: LoadState + SpawnBlocking {
     where
         Self: EthApiSpec,
     {
+        if keys.len() > DEFAULT_MAX_PROOF_SLOTS {
+            return Err(Self::Error::from_eth_err(EthApiError::InvalidParams(format!(
+                "storage key count {} exceeds limit {DEFAULT_MAX_PROOF_SLOTS}",
+                keys.len(),
+            ))));
+        }
+
         Ok(async move {
             let permit = self
                 .acquire_owned_tracing()
@@ -184,20 +194,22 @@ pub trait EthState: LoadState + SpawnBlocking {
                     storage_keys.iter().map(|slot| ProofV2Target::new(keccak256(slot))).collect(),
                 );
 
-                let multiproof = state
-                    .multiproof_v2(Default::default(), proof_targets)
-                    .map_err(Self::Error::from_eth_err)?;
+                let multiproof =
+                    state.multiproof_v2(proof_targets, false).map_err(Self::Error::from_eth_err)?;
                 let proof = multiproof
                     .account_proof(address, &storage_keys)
                     .map_err(RethError::other)
                     .map_err(Self::Error::from_eth_err)?;
-                Ok(proof.into_eip1186_response(keys))
+                Ok(proof.into_eip1186_response_with(keys, true))
             })
             .await
         })
     }
 
     /// Returns account and storage proofs for multiple targets at the given block number.
+    ///
+    /// Enforces a cap of [`DEFAULT_MAX_PROOF_SLOTS`] on both the number of targets and the total
+    /// slot count across all targets, before a proof permit is acquired.
     fn get_multi_proof(
         &self,
         targets: Vec<(Address, Vec<B256>)>,
@@ -209,6 +221,19 @@ pub trait EthState: LoadState + SpawnBlocking {
     where
         Self: EthApiSpec,
     {
+        if targets.len() > DEFAULT_MAX_PROOF_SLOTS {
+            return Err(Self::Error::from_eth_err(EthApiError::InvalidParams(format!(
+                "target count {} exceeds limit {DEFAULT_MAX_PROOF_SLOTS}",
+                targets.len(),
+            ))));
+        }
+        let total_slots: usize = targets.iter().map(|(_, slots)| slots.len()).sum();
+        if total_slots > DEFAULT_MAX_PROOF_SLOTS {
+            return Err(Self::Error::from_eth_err(EthApiError::InvalidParams(format!(
+                "total slot count {total_slots} exceeds limit {DEFAULT_MAX_PROOF_SLOTS}",
+            ))));
+        }
+
         Ok(async move {
             let permit = self
                 .acquire_owned_tracing()
@@ -227,16 +252,17 @@ pub trait EthState: LoadState + SpawnBlocking {
                 for (address, slots) in &targets {
                     let hashed_address = keccak256(address);
                     proof_targets.account_targets.push(ProofV2Target::new(hashed_address));
-                    proof_targets
-                        .storage_targets
-                        .entry(hashed_address)
-                        .or_default()
-                        .extend(slots.iter().map(|slot| ProofV2Target::new(keccak256(slot))));
+                    if !slots.is_empty() {
+                        proof_targets
+                            .storage_targets
+                            .entry(hashed_address)
+                            .or_default()
+                            .extend(slots.iter().map(|slot| ProofV2Target::new(keccak256(slot))));
+                    }
                 }
 
-                let multiproof = state
-                    .multiproof_v2(Default::default(), proof_targets)
-                    .map_err(Self::Error::from_eth_err)?;
+                let multiproof =
+                    state.multiproof_v2(proof_targets, false).map_err(Self::Error::from_eth_err)?;
 
                 targets
                     .into_iter()
@@ -247,7 +273,7 @@ pub trait EthState: LoadState + SpawnBlocking {
                             .map_err(Self::Error::from_eth_err)?;
                         let storage_keys =
                             slots.into_iter().map(JsonStorageKey::from).collect::<Vec<_>>();
-                        Ok(proof.into_eip1186_response(storage_keys))
+                        Ok(proof.into_eip1186_response_with(storage_keys, true))
                     })
                     .collect::<Result<Vec<_>, Self::Error>>()
             })
@@ -489,7 +515,7 @@ pub trait LoadState:
         >,
     > + Send
     where
-        Self: SpawnBlocking + LoadBlock,
+        Self: LoadBlock,
     {
         async move {
             if at.is_pending() {

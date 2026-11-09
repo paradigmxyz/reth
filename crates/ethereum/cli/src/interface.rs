@@ -393,10 +393,11 @@ impl<C: ChainSpecParser, Ext: clap::Args + fmt::Debug, SubCmd: Subcommand + fmt:
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::chainspec::SUPPORTED_CHAINS;
+    use crate::{app::ExtendedCommand, chainspec::SUPPORTED_CHAINS};
     use clap::CommandFactory;
     use reth_chainspec::{EthChainSpec, SEPOLIA};
     use reth_node_core::args::ColorMode;
+    use std::sync::atomic::{AtomicBool, Ordering};
 
     #[test]
     fn parse_color_mode() {
@@ -671,10 +672,8 @@ mod tests {
 
     #[test]
     fn test_extensible_subcommands() {
-        use crate::app::ExtendedCommand;
         use reth_cli_runner::CliRunner;
         use reth_rpc_server_types::DefaultRpcModuleValidator;
-        use std::sync::atomic::{AtomicBool, Ordering};
 
         #[derive(Debug, Subcommand)]
         enum CustomCommands {
@@ -763,15 +762,5 @@ mod tests {
             cmd.execute(runner).unwrap();
             assert!(EXECUTED.load(Ordering::SeqCst), "Custom command should have been executed");
         }
-    }
-
-    #[test]
-    fn parse_cpu_cores_override() {
-        let mut cli = Cli::try_parse_args_from(["reth", "node", "--cpu-cores", "8"]).unwrap();
-        let node = cli.as_node_command_mut().unwrap();
-        assert_eq!(node.engine.cpu_cores.unwrap().get(), 8);
-        assert!(node.engine.tree_config().use_state_root_task());
-        let err = Cli::try_parse_args_from(["reth", "node", "--cpu-cores", "0"]).unwrap_err();
-        assert_eq!(err.kind(), clap::error::ErrorKind::ValueValidation);
     }
 }

@@ -346,7 +346,7 @@ where
 
 impl<I> TestBuilder<I>
 where
-    I: EngineTypes + 'static,
+    I: EngineTypes,
 {
     /// Create a new test builder
     pub fn new() -> Self {

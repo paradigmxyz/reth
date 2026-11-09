@@ -128,10 +128,11 @@ mod tests {
 
     use super::*;
     use crate::eth::helpers::{signer::DevSigner, types::EthRpcConverter};
-    use alloy_consensus::{
-        BlobTransactionSidecar, Block, Header, SidecarBuilder, SimpleCoder, Transaction,
+    use alloy_consensus::{BlobTransactionSidecar, Block, Header, Transaction};
+    use alloy_eips::{
+        eip2718::Encodable2718,
+        eip4844::{Blob, Bytes48},
     };
-    use alloy_eips::eip2718::Encodable2718;
     use alloy_primitives::{bytes, map::AddressMap, Address, Bytes, Signature, U256};
     use alloy_rpc_types_eth::request::TransactionRequest;
     use reth_chainspec::{ChainSpec, ChainSpecBuilder};
@@ -147,9 +148,20 @@ mod tests {
     use reth_rpc_eth_api::node::RpcNodeCoreAdapter;
     use reth_transaction_pool::{
         test_utils::{testing_pool, TestPool, TransactionGenerator},
-        EthPooledTransaction, PoolPooledTx, TransactionOrigin, TransactionPool,
+        PoolPooledTx, TransactionOrigin, TransactionPool,
     };
 
+    /// A sidecar with one zero blob. Its commitment and proof are the point at infinity, so it is
+    /// valid without loading the KZG trusted setup.
+    fn zero_blob_sidecar() -> BlobTransactionSidecar {
+        let mut point_at_infinity = [0; 48];
+        point_at_infinity[0] = 0xc0;
+        BlobTransactionSidecar::new(
+            vec![Blob::default()],
+            vec![Bytes48::from(point_at_infinity)],
+            vec![Bytes48::from(point_at_infinity)],
+        )
+    }
     fn mock_eth_api(
         accounts: AddressMap<ExtendedAccount>,
     ) -> EthApi<
@@ -301,10 +313,7 @@ mod tests {
         )
         .sender_recovery_cache(Some(cache.clone()))
         .build();
-        let mut builder = SidecarBuilder::<SimpleCoder>::new();
-        builder.ingest(b"cached blob transaction");
-        let sidecar =
-            BlobTransactionSidecarVariant::from(builder.build::<BlobTransactionSidecar>().unwrap());
+        let sidecar = BlobTransactionSidecarVariant::from(zero_blob_sidecar());
         let transaction = TransactionSigned::new_unhashed(
             alloy_consensus::TxEip4844 {
                 blob_versioned_hashes: sidecar.versioned_hashes().collect(),
@@ -326,22 +335,6 @@ mod tests {
             };
             assert_eq!(actual.into_sidecar(), sidecar);
         }
-    }
-
-    #[tokio::test]
-    async fn send_raw_transaction_sync_populates_sender_cache() {
-        let cache = SenderRecoveryCache::new(16);
-        let eth_api = mock_eth_api_builder(Default::default())
-            .sender_recovery_cache(Some(cache.clone()))
-            .build();
-        let raw = raw_transfer_tx();
-        let transaction = EthPooledTransaction::decode_raw_transaction(&raw).unwrap();
-        let sender = transaction.try_recover().unwrap();
-
-        let err = eth_api.send_raw_transaction_sync(raw, Some(1)).await.unwrap_err();
-        assert!(matches!(err, EthApiError::TransactionConfirmationTimeout { .. }));
-        assert_eq!(cache.get(transaction.tx_hash()), Some(sender));
-        assert_eq!(eth_api.pool().len(), 1);
     }
 
     #[tokio::test]
@@ -660,16 +653,11 @@ mod tests {
 
         let eth_api = mock_eth_api(accounts);
 
-        let mut builder = SidecarBuilder::<SimpleCoder>::new();
-        builder.ingest(b"dummy blob");
-
         // EIP-4844 blob transaction with versioned hashes but no blob fee
         let tx_req = TransactionRequest {
             from: Some(address),
             to: Some(Address::random().into()),
-            sidecar: Some(BlobTransactionSidecarVariant::from(
-                builder.build::<BlobTransactionSidecar>().unwrap(),
-            )),
+            sidecar: Some(BlobTransactionSidecarVariant::from(zero_blob_sidecar())),
             ..Default::default()
         };
 
@@ -699,17 +687,12 @@ mod tests {
 
         let provided_blob_fee = 5000000u128;
 
-        let mut builder = SidecarBuilder::<SimpleCoder>::new();
-        builder.ingest(b"dummy blob");
-
         // EIP-4844 blob transaction with blob fee already set
         let tx_req = TransactionRequest {
             from: Some(address),
             to: Some(Address::random().into()),
             transaction_type: Some(3), // EIP-4844
-            sidecar: Some(BlobTransactionSidecarVariant::from(
-                builder.build::<BlobTransactionSidecar>().unwrap(),
-            )),
+            sidecar: Some(BlobTransactionSidecarVariant::from(zero_blob_sidecar())),
             max_fee_per_blob_gas: Some(provided_blob_fee), // Already set
             ..Default::default()
         };

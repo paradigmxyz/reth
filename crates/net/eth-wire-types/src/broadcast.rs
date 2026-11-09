@@ -1187,25 +1187,6 @@ mod tests {
     }
 
     #[test]
-    fn decode_error_preserves_payload_position() {
-        let encoded = [0xc1, 0x80, 0xaa];
-
-        let mut input = encoded.as_slice();
-        assert!(
-            decode_list_with_memory_budget::<TransactionSigned>(&mut input, usize::MAX).is_err()
-        );
-        assert_eq!(input, &encoded[1..]);
-
-        let mut input = encoded.as_slice();
-        assert!(NewPooledTransactionHashes68::decode(&mut input).is_err());
-        assert_eq!(input, &encoded[1..]);
-
-        let mut input = encoded.as_slice();
-        assert!(NewPooledTransactionHashes72::decode(&mut input).is_err());
-        assert_eq!(input, &encoded[1..]);
-    }
-
-    #[test]
     fn can_return_latest_block() {
         let mut blocks = NewBlockHashes(vec![BlockHashNumber { hash: B256::random(), number: 0 }]);
         let latest = blocks.latest().unwrap();

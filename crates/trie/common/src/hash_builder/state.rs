@@ -40,6 +40,7 @@ impl From<HashBuilderState> for HashBuilder {
             updated_branch_nodes: None,
             proof_retainer: None,
             rlp_buf: Vec::with_capacity(32),
+            all_branch_nodes: false,
         }
     }
 }

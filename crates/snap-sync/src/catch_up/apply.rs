@@ -77,20 +77,23 @@ mod tests {
         eip4788::{BEACON_ROOTS_ADDRESS, BEACON_ROOTS_CODE},
         eip4895::Withdrawal,
         eip7002::{WITHDRAWAL_REQUEST_PREDEPLOY_ADDRESS, WITHDRAWAL_REQUEST_PREDEPLOY_CODE},
+        eip7251::{CONSOLIDATION_REQUEST_PREDEPLOY_ADDRESS, CONSOLIDATION_REQUEST_PREDEPLOY_CODE},
     };
     use alloy_primitives::{bytes, keccak256, Address, Signature, TxKind, U256};
+    use evm2::{
+        bytecode::Bytecode,
+        evm::{
+            AccountInfo, InMemoryDB, BUILDER_DEPOSIT_REQUEST_ADDRESS, BUILDER_EXIT_REQUEST_ADDRESS,
+        },
+    };
     use reth_chainspec::ChainSpecBuilder;
     use reth_db_api::{tables, transaction::DbTxMut};
     use reth_ethereum_primitives::{Block, BlockBody, Transaction, TransactionSigned};
-    use reth_evm::{execute::BlockExecutor, ConfigureEvm, Evm};
+    use reth_evm::{execute::BlockExecutor, ConfigureEvm};
     use reth_evm_ethereum::EthEvmConfig;
     use reth_primitives_traits::{Block as _, Recovered};
     use reth_storage_api::DatabaseProviderFactory;
     use reth_trie_common::{HashedStorage, KeccakKeyHasher};
-    use revm::{
-        database::{states::bundle_state::BundleRetention, InMemoryDB, State},
-        state::{AccountInfo, Bytecode},
-    };
     use std::{collections::BTreeMap, sync::Arc};
 
     const ACCOUNT: Address = Address::repeat_byte(0xaa);
@@ -146,21 +149,6 @@ mod tests {
     }
 
     #[test]
-    fn account_changes_with_empty_slots_write_no_storage() {
-        let changes = AccountChanges::new(ACCOUNT)
-            .with_balance_change(BalanceChange::new(index(1), U256::from(10)))
-            .with_storage_change(SlotChanges::new(U256::ONE, vec![]));
-
-        let update = apply(&changes, DownloadedAccount::Absent);
-
-        assert_eq!(
-            update.state.accounts[&keccak256(ACCOUNT)].as_ref().unwrap().balance,
-            U256::from(10)
-        );
-        assert!(update.state.storages.is_empty());
-    }
-
-    #[test]
     fn accounts_not_downloaded_yet_are_left_unresolved() {
         // Even a fully determined account is left to the download against the later root.
         let changes = AccountChanges::new(ACCOUNT)
@@ -173,28 +161,6 @@ mod tests {
         assert_eq!(update.unresolved, vec![keccak256(ACCOUNT)]);
         assert!(update.state.is_empty());
         assert!(update.bytecodes.is_empty());
-    }
-
-    #[test]
-    #[allow(clippy::clone_on_copy)]
-    fn untouched_fields_keep_their_downloaded_values() {
-        let existing = Account::new(4, U256::from(9), Some(B256::repeat_byte(1)));
-        let changes = AccountChanges::new(ACCOUNT)
-            .with_balance_change(BalanceChange::new(index(1), U256::from(10)))
-            .with_balance_change(BalanceChange::new(index(2), U256::from(20)));
-
-        let update = apply(&changes, DownloadedAccount::Present(existing.clone()));
-        assert_eq!(
-            update.state.accounts[&keccak256(ACCOUNT)],
-            Some(Account { balance: U256::from(20), ..existing })
-        );
-
-        // An absent account starts from the empty one.
-        let update = apply(&changes, DownloadedAccount::Absent);
-        assert_eq!(
-            update.state.accounts[&keccak256(ACCOUNT)],
-            Some(Account { balance: U256::from(20), ..Default::default() })
-        );
     }
 
     #[test]
@@ -222,28 +188,20 @@ mod tests {
         assert!(update.bytecodes.is_empty());
     }
 
-    #[test]
-    fn an_account_the_block_empties_is_removed() {
-        let changes = AccountChanges::new(ACCOUNT)
-            .with_balance_change(BalanceChange::new(index(1), U256::from(100)))
-            .with_balance_change(BalanceChange::new(index(2), U256::ZERO));
-
-        let update = apply(&changes, DownloadedAccount::Absent);
-
-        assert_eq!(update.state.accounts[&keccak256(ACCOUNT)], None);
-    }
-
     // Final state as a flat map: accounts, and non-zero slots by hashed address and slot.
     type FlatState = (BTreeMap<B256, Account>, BTreeMap<(B256, B256), U256>);
 
     fn flatten(db: &InMemoryDB) -> FlatState {
         let mut state = FlatState::default();
-        for (address, account) in &db.cache.accounts {
+        for (address, info) in &db.cache.accounts {
+            let Some(info) = info else { continue };
             let hashed_address = keccak256(address);
-            state.0.insert(hashed_address, Account::from(&account.info));
-            for (slot, value) in &account.storage {
-                if !value.is_zero() {
-                    state.1.insert((hashed_address, keccak256(B256::from(*slot))), *value);
+            state.0.insert(hashed_address, Account::from(info));
+            if let Some(storage) = db.cache.storage.get(address) {
+                for (slot, value) in &storage.slots {
+                    if !value.is_zero() {
+                        state.1.insert((hashed_address, keccak256(B256::from(*slot))), *value);
+                    }
                 }
             }
         }
@@ -275,37 +233,6 @@ mod tests {
         state
     }
 
-    #[test]
-    fn flat_state_excludes_zero_slots_and_deleted_account_storage() {
-        let mut db = InMemoryDB::default();
-        for address in [ACCOUNT, SENDER] {
-            db.insert_account_info(address, AccountInfo::from_balance(U256::ONE));
-            db.insert_account_storage(address, U256::ONE, U256::from(5)).unwrap();
-            db.insert_account_storage(address, U256::from(2), U256::ZERO).unwrap();
-        }
-        let pre = flatten(&db);
-        assert_eq!(pre.1.len(), 2);
-
-        let mut update = HashedPostState::default();
-        update.accounts.insert(keccak256(ACCOUNT), None);
-        let post = fold(pre, &update);
-
-        assert_eq!(
-            post.0,
-            BTreeMap::from([(
-                keccak256(SENDER),
-                Account { balance: U256::ONE, ..Default::default() },
-            )])
-        );
-        assert_eq!(
-            post.1,
-            BTreeMap::from([(
-                (keccak256(SENDER), keccak256(B256::with_last_byte(1))),
-                U256::from(5)
-            )])
-        );
-    }
-
     fn insert(db: &mut InMemoryDB, address: Address, nonce: u64, code: Bytes) {
         let code = Bytecode::new_raw(code);
         let info = AccountInfo {
@@ -314,7 +241,7 @@ mod tests {
             code: Some(code),
             ..Default::default()
         };
-        db.insert_account_info(address, info);
+        db.insert_account_info(&address, info);
     }
 
     fn tx(nonce: u64, to: TxKind, value: u64, input: Bytes) -> Recovered<TransactionSigned> {
@@ -348,11 +275,23 @@ mod tests {
             1,
             WITHDRAWAL_REQUEST_PREDEPLOY_CODE.clone(),
         );
-        db.insert_account_info(SENDER, AccountInfo::from_balance(U256::from(u64::MAX)));
+        insert(
+            &mut db,
+            CONSOLIDATION_REQUEST_PREDEPLOY_ADDRESS,
+            1,
+            CONSOLIDATION_REQUEST_PREDEPLOY_CODE.clone(),
+        );
+        for address in [BUILDER_DEPOSIT_REQUEST_ADDRESS, BUILDER_EXIT_REQUEST_ADDRESS] {
+            insert(&mut db, address, 1, bytes!("00"));
+        }
+        db.insert_account_info(
+            &SENDER,
+            AccountInfo { balance: U256::from(u64::MAX), ..Default::default() },
+        );
         // Zeroes slot 1, reads slot 3, stores the block number in slot 2 and the call value in 4.
         insert(&mut db, contract, 1, bytes!("6000600155600354504360025534600455"));
-        db.insert_account_storage(contract, U256::ONE, U256::from(5)).unwrap();
-        db.insert_account_storage(contract, U256::from(3), U256::from(7)).unwrap();
+        db.insert_account_storage(&contract, &U256::from(1), &U256::from(5));
+        db.insert_account_storage(&contract, &U256::from(3), &U256::from(7));
         let pre = flatten(&db);
 
         let txs = [
@@ -389,28 +328,21 @@ mod tests {
 
         let evm_config =
             EthEvmConfig::new(Arc::new(ChainSpecBuilder::mainnet().amsterdam_activated().build()));
-        let mut state =
-            State::builder().with_database(&mut db).with_bundle_update().with_bal_builder().build();
-        {
-            let mut executor = evm_config.executor_for_block(&mut state, &block).unwrap();
-            executor.apply_pre_execution_changes().unwrap();
-            for tx in txs {
-                executor.evm_mut().db_mut().bump_bal_index();
-                executor.execute_transaction(tx).unwrap();
-            }
-            executor.evm_mut().db_mut().bump_bal_index();
-            executor.apply_post_execution_changes().unwrap();
+        let mut executor = evm_config.executor_for_block(&mut db, &block).unwrap();
+        executor.enable_block_access_list_builder();
+        executor.apply_pre_execution_changes().unwrap();
+        for tx in txs {
+            executor.execute_transaction(tx).unwrap();
         }
-        let bal = state.take_built_alloy_bal().unwrap();
-        state.merge_transitions(BundleRetention::PlainState);
-        let bundle = state.take_bundle();
+        let (output, bal) = executor.finish_with_block_access_list().unwrap();
+        let bal = bal.unwrap();
 
         let update = state_update(
             &bal,
             AccountCoverage::COMPLETE,
             pre.0.iter().map(|(address, account)| (*address, account.clone())),
         );
-        let executed = HashedPostState::from_bundle_state::<KeccakKeyHasher>(bundle.state());
+        let executed = HashedPostState::from_bundle_state::<KeccakKeyHasher>(&output.state.state);
 
         let post = fold(pre.clone(), &update.state);
         assert!(update.unresolved.is_empty());

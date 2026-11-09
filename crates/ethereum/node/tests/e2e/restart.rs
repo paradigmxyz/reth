@@ -6,7 +6,6 @@ use alloy_provider::Provider;
 use futures::TryStreamExt;
 use reth_chainspec::EthereumHardfork;
 use reth_e2e_test_utils::{
-    node::DATABASE_RELEASE_TIMEOUT,
     wait::{poll_until, WAIT_TIMEOUT},
     E2ETestSetupExt,
 };
@@ -15,9 +14,12 @@ use reth_network::PeersInfo;
 use reth_node_ethereum::EthereumNode;
 use reth_provider::{BlockIdReader, BlockNumReader, DatabaseProviderFactory, HeaderProvider};
 use reth_transaction_pool::TransactionPool;
-use std::sync::{
-    atomic::{AtomicUsize, Ordering},
-    Arc,
+use std::{
+    sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
+    },
+    time::Duration,
 };
 use tokio::sync::mpsc;
 
@@ -137,13 +139,15 @@ async fn stop_fails_while_provider_is_held() -> eyre::Result<()> {
         .await?;
 
     let provider = node.inner.provider.clone();
-    let err = node.stop().await.unwrap_err();
+    // The held provider never releases the database, so a short timeout fails the same way.
+    let release_timeout = Duration::from_millis(100);
+    let err = node.stop_with_release_timeout(release_timeout).await.unwrap_err();
     assert_eq!(
         err.to_string(),
         format!(
-            "the database of the stopped node is still in use {DATABASE_RELEASE_TIMEOUT:?} after \
-             the node shut down: drop all handles that hold a provider of the node, e.g. a clone \
-             of `inner.provider`, before stopping it"
+            "the database of the stopped node is still in use {release_timeout:?} after the node \
+             shut down: drop all handles that hold a provider of the node, e.g. a clone of \
+             `inner.provider`, before stopping it"
         )
     );
     assert_eq!(provider.best_block_number()?, 0);

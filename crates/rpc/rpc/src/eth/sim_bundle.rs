@@ -1,29 +1,26 @@
 //! `Eth` Sim bundle implementation and helpers.
 
 use alloy_consensus::{transaction::TxHashRef, BlockHeader};
-use alloy_evm::{env::BlockEnvironment, overrides::apply_block_overrides};
 use alloy_primitives::U256;
 use alloy_rpc_types_eth::{BlockId, Log};
 use alloy_rpc_types_mev::{
     BundleItem, Inclusion, MevSendBundle, Privacy, RefundConfig, SimBundleLogs, SimBundleOverrides,
     SimBundleResponse, Validity,
 };
+use evm2::evm::DynDatabase;
 use jsonrpsee::core::RpcResult;
 use reth_errors::RethError;
-use reth_evm::{ConfigureEvm, Evm};
+use reth_evm::{ConfigureEvm, Evm, EvmEnv};
 use reth_primitives_traits::Recovered;
 use reth_rpc_api::MevSimApiServer;
 use reth_rpc_eth_api::{
     helpers::{block::LoadBlock, Call, EthTransactions},
     FromEthApiError, FromEvmError,
 };
-use reth_rpc_eth_types::EthApiError;
+use reth_rpc_eth_types::{cache::db::apply_block_overrides, EthApiError};
 use reth_storage_api::ProviderTx;
 use reth_tasks::pool::BlockingTaskGuard;
 use reth_transaction_pool::{PoolPooledTx, PoolTransaction, TransactionPool};
-use revm::{
-    context::Block, context_interface::result::ResultAndState, DatabaseCommit, DatabaseRef,
-};
 use std::{sync::Arc, time::Duration};
 use tracing::trace;
 
@@ -142,7 +139,7 @@ impl<Eth> EthSimBundle<Eth> {
 
 impl<Eth> EthSimBundle<Eth>
 where
-    Eth: EthTransactions + LoadBlock + Call + 'static,
+    Eth: EthTransactions + LoadBlock + Call,
 {
     /// Flattens a potentially nested bundle into a list of individual transactions in a
     /// `FlattenedBundleItem` with their associated metadata. This handles recursive bundle
@@ -318,27 +315,28 @@ where
             .eth_api
             .spawn_with_state_at_block(parent_block_id, move |_, mut db| {
                 // apply overrides before reading the block values they may change
-                apply_block_overrides(block_overrides, &mut db, evm_env.block_env.inner_mut());
+                apply_block_overrides(block_overrides, &mut db, &mut evm_env);
 
                 let state_block = parent.number();
-                let simulated_block_number = evm_env.block_env.number().saturating_to::<u64>();
+                let simulated_block_number = evm_env.block_env().number.saturating_to::<u64>();
                 let simulated_block_timestamp =
-                    evm_env.block_env.timestamp().saturating_to::<u64>();
-                let coinbase = evm_env.block_env.beneficiary();
-                let basefee = evm_env.block_env.basefee();
+                    evm_env.block_env().timestamp.saturating_to::<u64>();
+                let coinbase = evm_env.block_env().beneficiary;
+                let basefee = evm_env.block_base_fee();
 
-                let initial_coinbase_balance = DatabaseRef::basic_ref(&db, coinbase)
-                    .map_err(EthApiError::from_eth_err)?
+                let initial_coinbase_balance = db
+                    .get_account(&coinbase)
+                    .map_err(Eth::Error::from_eth_err)?
                     .map(|acc| acc.balance)
                     .unwrap_or_default();
 
+                let mut evm = eth_api.evm_config().evm_with_env(&mut db, evm_env);
                 let mut coinbase_balance_before_tx = initial_coinbase_balance;
                 let mut total_gas_used = 0;
                 let mut total_profit = U256::ZERO;
                 let mut refundable_value = U256::ZERO;
                 let mut flat_logs: Vec<Vec<Log>> = Vec::new();
 
-                let mut evm = eth_api.evm_config().evm_with_env(db, evm_env);
                 let mut log_index = 0;
 
                 for (tx_index, item) in flattened_bundle.iter().enumerate() {
@@ -356,11 +354,10 @@ where
                         .into());
                     }
 
-                    let ResultAndState { result, state } = evm
-                        .transact(eth_api.evm_config().tx_env(&item.tx))
-                        .map_err(Eth::Error::from_evm_err)?;
+                    let tx_env = eth_api.evm_config().tx_env(item.tx.clone());
+                    let result = evm.transact_commit(&tx_env).map_err(Eth::Error::from_evm_err)?;
 
-                    if !result.is_success() && !item.can_revert {
+                    if !result.status && !item.can_revert {
                         return Err(EthApiError::InvalidParams(
                             EthSimBundleError::BundleTransactionFailed.to_string(),
                         )
@@ -370,9 +367,11 @@ where
                     let gas_used = result.tx_gas_used();
                     total_gas_used += gas_used;
 
-                    // coinbase is always present in the result state
-                    let coinbase_balance_after_tx =
-                        state.get(&coinbase).map(|acc| acc.info.balance).unwrap_or_default();
+                    let coinbase_balance_after_tx = evm
+                        .account_info(&coinbase)
+                        .map_err(Eth::Error::from_evm_err)?
+                        .map(|acc| acc.balance)
+                        .unwrap_or_default();
 
                     let coinbase_diff =
                         coinbase_balance_after_tx.saturating_sub(coinbase_balance_before_tx);
@@ -390,7 +389,7 @@ where
                     // tree in execution order after simulation.
                     if logs {
                         let tx_logs: Vec<Log> = result
-                            .into_logs()
+                            .logs
                             .into_iter()
                             .map(|inner| {
                                 let full_log = Log {
@@ -410,17 +409,12 @@ where
                             .collect();
                         flat_logs.push(tx_logs);
                     }
-
-                    // Apply state changes
-                    evm.db_mut().commit(state);
                 }
 
                 let body_logs =
                     if logs { Self::build_bundle_logs(&request, &flat_logs)? } else { vec![] };
 
                 // After processing all transactions, process refunds
-                // Store the original refundable value to calculate all payouts correctly
-                let original_refundable_value = refundable_value;
                 for item in &flattened_bundle {
                     if let Some(refund_percent) = item.refund_percent {
                         let refund_configs = item.refund_configs.clone().unwrap_or_else(|| {
@@ -435,11 +429,9 @@ where
                         // Add gas used for payout transactions
                         total_gas_used += SBUNDLE_PAYOUT_MAX_COST * refund_configs.len() as u64;
 
-                        // Calculate allocated refundable value (payout value) based on ORIGINAL
-                        // refundable value. This ensures all refund_percent values are
-                        // calculated from the same base.
-                        let payout_value = original_refundable_value * U256::from(refund_percent) /
-                            U256::from(100);
+                        // Calculate allocated refundable value (payout value)
+                        let payout_value =
+                            refundable_value * U256::from(refund_percent) / U256::from(100);
 
                         if payout_tx_fee > payout_value {
                             return Err(EthApiError::InvalidParams(
@@ -450,13 +442,6 @@ where
 
                         // Subtract payout value from total profit
                         total_profit = total_profit.checked_sub(payout_value).ok_or(
-                            EthApiError::InvalidParams(
-                                EthSimBundleError::NegativeProfit.to_string(),
-                            ),
-                        )?;
-
-                        // Adjust refundable value
-                        refundable_value = refundable_value.checked_sub(payout_value).ok_or(
                             EthApiError::InvalidParams(
                                 EthSimBundleError::NegativeProfit.to_string(),
                             ),
@@ -493,7 +478,7 @@ where
 #[async_trait::async_trait]
 impl<Eth> MevSimApiServer for EthSimBundle<Eth>
 where
-    Eth: EthTransactions + LoadBlock + Call + 'static,
+    Eth: EthTransactions + LoadBlock + Call,
 {
     async fn sim_bundle(
         &self,
@@ -577,27 +562,28 @@ pub enum EthSimBundleError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_primitives::Bytes;
+    use crate::EthApiBuilder;
+    use alloy_consensus::{transaction::SignerRecoverable, TxEip1559};
+    use alloy_eips::eip2718::Encodable2718;
+    use alloy_genesis::{Genesis, GenesisAccount};
+    use alloy_primitives::{Address, Bytes, TxKind, B256};
+    use alloy_rpc_types_eth::BlockOverrides;
     use alloy_rpc_types_mev::{Inclusion, ProtocolVersion};
+    use reth_chainspec::{ChainSpecBuilder, ChainSpecProvider};
+    use reth_db_common::init::init_genesis;
+    use reth_evm_ethereum::EthEvmConfig;
+    use reth_network_api::noop::NoopNetwork;
+    use reth_provider::{
+        providers::BlockchainProvider, test_utils::create_test_provider_factory_with_chain_spec,
+    };
+    use reth_testing_utils::{
+        generators,
+        generators::{generate_key, sign_tx_with_key_pair},
+    };
+    use reth_transaction_pool::test_utils::testing_pool;
 
     #[tokio::test(flavor = "multi_thread")]
     async fn sim_bundle_uses_next_block_env_and_overrides() {
-        use crate::EthApiBuilder;
-        use alloy_consensus::{transaction::SignerRecoverable, TxEip1559};
-        use alloy_eips::eip2718::Encodable2718;
-        use alloy_genesis::{Genesis, GenesisAccount};
-        use alloy_primitives::{Address, TxKind, B256};
-        use alloy_rpc_types_eth::BlockOverrides;
-        use reth_chainspec::{ChainSpecBuilder, ChainSpecProvider};
-        use reth_db_common::init::init_genesis;
-        use reth_evm_ethereum::EthEvmConfig;
-        use reth_network_api::noop::NoopNetwork;
-        use reth_provider::{
-            providers::BlockchainProvider, test_utils::create_test_provider_factory_with_chain_spec,
-        };
-        use reth_testing_utils::generators::{self, generate_key, sign_tx_with_key_pair};
-        use reth_transaction_pool::test_utils::testing_pool;
-
         let contract = Address::repeat_byte(0xaa);
         let coinbase = Address::repeat_byte(0x11);
         let overridden_coinbase = Address::repeat_byte(0x22);

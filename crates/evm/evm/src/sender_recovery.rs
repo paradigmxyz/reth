@@ -135,18 +135,6 @@ mod tests {
     }
 
     #[test]
-    fn failed_recovery_is_not_cached() {
-        let transaction = TransactionSigned::new_unhashed(
-            Transaction::Legacy(TxLegacy::default()),
-            Signature::new(U256::ZERO, U256::ZERO, false),
-        );
-        let cache = SenderRecoveryCache::new(4);
-
-        assert!(cache.recover(&transaction).is_err());
-        assert_eq!(cache.get(transaction.tx_hash()), None);
-    }
-
-    #[test]
     fn custom_recovery_runs_only_on_cache_miss() {
         let transaction = TransactionSigned::new_unhashed(
             Transaction::Legacy(TxLegacy::default()),

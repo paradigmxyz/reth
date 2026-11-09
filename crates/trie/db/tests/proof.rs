@@ -2,15 +2,12 @@
 
 use alloy_consensus::EMPTY_ROOT_HASH;
 use alloy_primitives::{address, b256, keccak256, Address, Bytes, B256, U256};
-use alloy_rlp::{Decodable, EMPTY_STRING_CODE};
+use alloy_rlp::EMPTY_STRING_CODE;
 use reth_chainspec::{Chain, ChainSpec, HOLESKY, MAINNET};
 use reth_primitives_traits::Account;
 use reth_provider::test_utils::{create_test_provider_factory, insert_genesis};
 use reth_storage_api::StorageSettingsCache;
-use reth_trie::{
-    proof::Proof, AccountProof, MultiProofTargetsV2, Nibbles, ProofV2Target, StorageProof,
-    TrieInput, TrieNode,
-};
+use reth_trie::{proof::Proof, AccountProof, Nibbles, StorageProof};
 use reth_trie_db::{DatabaseHashedCursorFactory, DatabaseProof, DatabaseTrieCursorFactory};
 use std::{
     str::FromStr,
@@ -133,47 +130,6 @@ fn testspec_empty_storage_proof() {
             );
             assert_eq!(proof.verify(account_proof.storage_root), Ok(()));
         }
-        assert_eq!(account_proof.verify(root), Ok(()));
-    });
-}
-
-#[test]
-fn multiproof_v2_includes_branch_after_terminal_extension() {
-    let factory = create_test_provider_factory();
-    let root = insert_genesis(&factory, TEST_SPEC.clone()).unwrap();
-    let target = Address::ZERO;
-    let provider = factory.provider().unwrap();
-
-    reth_trie_db::with_adapter!(provider, |A| {
-        let proof = <DbProof<'_, _, A> as DatabaseProof>::from_tx(provider.tx_ref());
-        let legacy = proof.account_proof(target, &[]).unwrap();
-        assert_eq!(legacy.proof.len(), 1);
-        assert!(matches!(
-            TrieNode::decode(&mut &legacy.proof[0][..]).unwrap(),
-            TrieNode::Extension(_)
-        ));
-
-        let proof = <DbProof<'_, _, A> as DatabaseProof>::from_tx(provider.tx_ref());
-        let multiproof = proof
-            .overlay_multiproof_v2(
-                TrieInput::default(),
-                MultiProofTargetsV2 {
-                    account_targets: vec![ProofV2Target::new(keccak256(target))],
-                    ..Default::default()
-                },
-            )
-            .unwrap();
-        let account_proof = multiproof.account_proof(target, &[]).unwrap();
-
-        assert_eq!(account_proof.proof.len(), 2);
-        assert!(matches!(
-            TrieNode::decode(&mut &account_proof.proof[0][..]).unwrap(),
-            TrieNode::Extension(_)
-        ));
-        assert!(matches!(
-            TrieNode::decode(&mut &account_proof.proof[1][..]).unwrap(),
-            TrieNode::Branch(_)
-        ));
         assert_eq!(account_proof.verify(root), Ok(()));
     });
 }
@@ -372,36 +328,15 @@ fn extension_only_genesis_account_proof() {
         assert!(!account.is_empty());
         assert_eq!(proof.verify(root), Ok(()));
 
-        let witness = proof.proof.iter().map(|node| (keccak256(node), node.clone())).collect();
-        let decoded = reth_trie::DecodedMultiProofV2::from_witness(root, &witness).unwrap();
-        let witness_proof = decoded.account_proof(target, &[]).unwrap();
-        assert_eq!(witness_proof.info, proof.info);
-        assert_eq!(witness_proof.verify(root), Ok(()));
+        let response = proof.clone().into_eip1186_response(Vec::new());
+        assert_eq!(response.account_proof, proof.proof);
+        let restored = AccountProof::from_eip1186_proof(response);
+        assert_eq!(restored.info.as_ref().unwrap().extension, extension);
+        assert_eq!(restored.verify(root), Ok(()));
 
-        let multiproof = <DbProof<'_, _, A> as DatabaseProof>::from_tx(provider.tx_ref())
-            .overlay_multiproof_v2(
-                TrieInput::default(),
-                MultiProofTargetsV2 {
-                    account_targets: vec![ProofV2Target::new(keccak256(target))],
-                    ..Default::default()
-                },
-            )
-            .unwrap();
-        let multiproof = multiproof.account_proof(target, &[]).unwrap();
-        assert_eq!(multiproof.info, proof.info);
-        assert_eq!(multiproof.verify(root), Ok(()));
-
-        for proof in [proof, multiproof] {
-            let response = proof.clone().into_eip1186_response(Vec::new());
-            assert_eq!(response.account_proof, proof.proof);
-            let restored = AccountProof::from_eip1186_proof(response);
-            assert_eq!(restored.info.as_ref().unwrap().extension, extension);
-            assert_eq!(restored.verify(root), Ok(()));
-
-            let mut tampered = proof.into_eip1186_response(Vec::new());
-            tampered.balance = U256::ONE;
-            assert!(AccountProof::from_eip1186_proof(tampered).verify(root).is_err());
-        }
+        let mut tampered = proof.into_eip1186_response(Vec::new());
+        tampered.balance = U256::ONE;
+        assert!(AccountProof::from_eip1186_proof(tampered).verify(root).is_err());
 
         let absent = Address::with_last_byte(2);
         let proof = <DbProof<'_, _, A> as DatabaseProof>::from_tx(provider.tx_ref())

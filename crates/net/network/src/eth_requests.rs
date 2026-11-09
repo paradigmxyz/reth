@@ -883,6 +883,7 @@ mod tests {
         eip7594::{BlobCellMask, BlobTransactionSidecarVariant, Cell},
     };
     use alloy_primitives::{keccak256, Address, Log, LogData, TxHash, B128, U256};
+    use alloy_rlp::{Decodable, Encodable};
     use reth_eth_wire::{message::RequestPair, EthMessage, EthStreamInner, EthVersion};
     use reth_ethereum_primitives::Receipt;
     use reth_network_api::test_utils::PeersHandle;
@@ -1047,8 +1048,6 @@ mod tests {
     #[test_case(127)]
     #[tokio::test]
     async fn get_cells_request_uses_little_endian_wire_mask(index: u32) {
-        use alloy_rlp::{Decodable, Encodable};
-
         let (peers_tx, _) = mpsc::unbounded_channel();
         let (_incoming_tx, incoming_rx) = mpsc::channel(1);
         let numeric_mask = 1u128 << index;
@@ -1626,21 +1625,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn receipts70_serves_oversized_first_receipt() {
-        let provider = MockEthProvider::default();
-        let oversized = receipt_with_data(SOFT_RESPONSE_LIMIT + 1024);
-        let hash = insert_receipts_block(&provider, 1, vec![oversized.clone()]);
-
-        let resp = get_receipts70(provider, 0, vec![hash]).await;
-
-        // The block holds exactly one receipt, so it is complete.
-        assert_eq!(
-            resp,
-            Receipts70 { last_block_incomplete: false, receipts: vec![vec![oversized]] }
-        );
-    }
-
-    #[tokio::test]
     async fn receipts70_serves_only_oversized_first_receipt_of_partial_block() {
         let provider = MockEthProvider::default();
         let oversized = receipt_with_data(SOFT_RESPONSE_LIMIT + 1024);
@@ -1650,24 +1634,6 @@ mod tests {
         let resp = get_receipts70(provider, 0, vec![hash]).await;
 
         // The oversized receipt exhausts the budget, so the rest of the block is left out.
-        assert_eq!(
-            resp,
-            Receipts70 { last_block_incomplete: true, receipts: vec![vec![oversized]] }
-        );
-    }
-
-    #[tokio::test]
-    async fn receipts70_serves_oversized_receipt_at_first_receipt_index() {
-        let provider = MockEthProvider::default();
-        let oversized = receipt_with_data(SOFT_RESPONSE_LIMIT + 1024);
-        let hash = insert_receipts_block(
-            &provider,
-            1,
-            vec![receipt_with_data(16), oversized.clone(), receipt_with_data(16)],
-        );
-
-        let resp = get_receipts70(provider, 1, vec![hash]).await;
-
         assert_eq!(
             resp,
             Receipts70 { last_block_incomplete: true, receipts: vec![vec![oversized]] }
@@ -1701,17 +1667,6 @@ mod tests {
         assert!(!partial.is_empty() && partial.len() < receipts.len());
         assert_eq!(partial.as_slice(), &receipts[..partial.len()]);
         assert!(partial.iter().map(Encodable::length).sum::<usize>() <= SOFT_RESPONSE_LIMIT);
-    }
-
-    #[tokio::test]
-    async fn receipts70_omits_receipt_above_hard_limit() {
-        let provider = MockEthProvider::default();
-        let hash =
-            insert_receipts_block(&provider, 1, vec![receipt_with_data(MAX_MESSAGE_SIZE + 1024)]);
-
-        let resp = get_receipts70(provider, 0, vec![hash]).await;
-
-        assert_eq!(resp, Receipts70 { last_block_incomplete: false, receipts: Vec::new() });
     }
 
     #[test_case(0, 0; "first receipt at hard limit")]

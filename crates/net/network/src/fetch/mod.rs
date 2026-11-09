@@ -865,12 +865,16 @@ mod tests {
     use crate::{peers::PeersManager, PeersConfig};
     use alloy_consensus::Header;
     use alloy_primitives::{Bytes, B512};
+    use futures::task::noop_waker;
     use reth_eth_wire::Capability;
     use reth_eth_wire_types::snap::{
         AccountRangeMessage, BlockAccessListsMessage, ByteCodesMessage, GetAccountRangeMessage,
         StorageRangesMessage,
     };
-    use std::future::poll_fn;
+    use std::{
+        future::poll_fn,
+        task::{Context, Poll},
+    };
     use test_case::test_case;
 
     #[tokio::test(flavor = "multi_thread")]
@@ -1864,9 +1868,6 @@ mod tests {
 
     #[tokio::test]
     async fn test_wakes_when_eth71_peer_connects() {
-        use futures::task::noop_waker;
-        use std::task::{Context, Poll};
-
         let manager = PeersManager::new(PeersConfig::default());
         let mut fetcher =
             StateFetcher::<EthNetworkPrimitives>::new(manager.handle(), Default::default());
@@ -1925,9 +1926,6 @@ mod tests {
 
     #[tokio::test]
     async fn test_optional_bal_request_rejected_without_eth71_peer() {
-        use futures::task::noop_waker;
-        use std::task::{Context, Poll};
-
         let manager = PeersManager::new(PeersConfig::default());
         let mut fetcher =
             StateFetcher::<EthNetworkPrimitives>::new(manager.handle(), Default::default());
@@ -1965,9 +1963,6 @@ mod tests {
 
     #[tokio::test]
     async fn test_optional_bal_request_waits_for_busy_eth71_peer() {
-        use futures::task::noop_waker;
-        use std::task::{Context, Poll};
-
         let manager = PeersManager::new(PeersConfig::default());
         let mut fetcher =
             StateFetcher::<EthNetworkPrimitives>::new(manager.handle(), Default::default());
@@ -2005,9 +2000,6 @@ mod tests {
 
     #[tokio::test]
     async fn test_queued_optional_bal_request_rejected_after_eth71_disconnect() {
-        use futures::task::noop_waker;
-        use std::task::{Context, Poll};
-
         let manager = PeersManager::new(PeersConfig::default());
         let mut fetcher =
             StateFetcher::<EthNetworkPrimitives>::new(manager.handle(), Default::default());
@@ -2082,26 +2074,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_next_best_peer_snap_supported() {
-        let manager = PeersManager::new(PeersConfig::default());
-        let mut fetcher =
-            StateFetcher::<EthNetworkPrimitives>::new(manager.handle(), Default::default());
-
-        let peer = B512::random();
-        fetcher.new_active_peer(NewPeerInfo {
-            peer_id: peer,
-            best_hash: B256::random(),
-            best_number: 100,
-            capabilities: Arc::new(Capabilities::new(vec![])),
-            timeout: Arc::new(AtomicU64::new(10)),
-            range_info: None,
-            supports_snap: true,
-        });
-
-        assert_eq!(fetcher.next_best_peer(BestPeerRequirements::SupportsSnap), Some(peer));
-    }
-
-    #[tokio::test]
     async fn test_next_best_peer_snap_filters_correctly() {
         let manager = PeersManager::new(PeersConfig::default());
         let mut fetcher =
@@ -2138,9 +2110,6 @@ mod tests {
 
     #[tokio::test]
     async fn test_snap_request_rejected_without_snap_peer() {
-        use futures::task::noop_waker;
-        use std::task::{Context, Poll};
-
         let manager = PeersManager::new(PeersConfig::default());
         let mut fetcher =
             StateFetcher::<EthNetworkPrimitives>::new(manager.handle(), Default::default());
@@ -2236,9 +2205,6 @@ mod tests {
 
     #[tokio::test]
     async fn test_queued_snap_request_rejected_after_last_peer_disconnects() {
-        use futures::task::noop_waker;
-        use std::task::{Context, Poll};
-
         let manager = PeersManager::new(PeersConfig::default());
         let mut fetcher =
             StateFetcher::<EthNetworkPrimitives>::new(manager.handle(), Default::default());

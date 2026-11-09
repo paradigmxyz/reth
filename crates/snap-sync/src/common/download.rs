@@ -6,7 +6,6 @@
 use crate::SnapSyncError;
 use alloy_primitives::B256;
 use reth_storage_api::{DBProvider, DatabaseProviderFactory};
-use reth_storage_errors::provider::ProviderError;
 use reth_tasks::Runtime;
 use std::fmt;
 
@@ -73,7 +72,7 @@ where
         self.runtime
             .spawn_blocking(move || read(&factory.database_provider_ro()?))
             .await
-            .map_err(|error| SnapSyncError::Provider(ProviderError::other(error)))?
+            .map_err(SnapSyncError::blocking_task)?
     }
 
     /// Runs `write` in one transaction on the blocking pool, committing only if it succeeds.
@@ -90,7 +89,7 @@ where
                 Ok(output)
             })
             .await
-            .map_err(|error| SnapSyncError::Provider(ProviderError::other(error)))?
+            .map_err(SnapSyncError::blocking_task)?
     }
 }
 

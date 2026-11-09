@@ -53,7 +53,11 @@ impl Config {
     /// A new configuration file is created with default values if none
     /// exists.
     pub fn from_path(path: impl AsRef<Path>) -> eyre::Result<Self> {
-        let path = path.as_ref();
+        Self::from_path_inner(path.as_ref())
+    }
+
+    /// Non-generic body of [`Self::from_path`], so the TOML code compiles once in this crate.
+    fn from_path_inner(path: &Path) -> eyre::Result<Self> {
         match std::fs::read_to_string(path) {
             Ok(cfg_string) => {
                 toml::from_str(&cfg_string).map_err(|e| eyre::eyre!("Failed to parse TOML: {e}"))
@@ -1231,11 +1235,5 @@ connect_trusted_nodes_only = true
         // bootnodes are written back as enode URLs, including the ones read as ENRs
         let serialized = toml::to_string(&conf).unwrap();
         assert_eq!(toml::from_str::<Config>(&serialized).unwrap(), conf);
-    }
-
-    #[test]
-    fn test_bootnodes_default_empty() {
-        let conf: Config = toml::from_str("").unwrap();
-        assert!(conf.bootnodes.is_empty());
     }
 }

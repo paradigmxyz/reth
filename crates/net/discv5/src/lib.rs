@@ -16,7 +16,6 @@ use std::{
     time::Duration,
 };
 
-use ::enr::Enr;
 use alloy_primitives::bytes::Bytes;
 use enr::{discv4_id_to_discv5_id, EnrCombinedKeyWrapper};
 use futures::future::join_all;
@@ -35,7 +34,9 @@ pub mod filter;
 pub mod metrics;
 pub mod network_stack_id;
 
+pub use ::enr::{CombinedKey, Enr, EnrKey, NodeId};
 pub use discv5::{self, IpMode};
+pub use libp2p_identity;
 
 pub use config::{
     BootNode, Config, ConfigBuilder, DEFAULT_COUNT_BOOTSTRAP_LOOKUPS, DEFAULT_DISCOVERY_V5_ADDR,
@@ -51,7 +52,7 @@ use metrics::{DiscoveredPeersMetrics, Discv5Metrics};
 
 /// Max kbucket index is 255.
 ///
-/// This is the max log2distance for 32 byte [`NodeId`](discv5::enr::NodeId) - 1. See <https://github.com/sigp/discv5/blob/e9e0d4f93ec35591832a9a8d937b4161127da87b/src/kbucket.rs#L586-L587>.
+/// This is the max log2distance for 32 byte [`NodeId`] - 1. See <https://github.com/sigp/discv5/blob/e9e0d4f93ec35591832a9a8d937b4161127da87b/src/kbucket.rs#L586-L587>.
 pub const MAX_KBUCKET_INDEX: usize = 255;
 
 /// Default lowest kbucket index to attempt filling, in periodic look up query to populate kbuckets.
@@ -88,7 +89,7 @@ impl Discv5 {
 
     /// Adds the node to the table, if it is not already present.
     pub fn add_node(&self, node_record: Enr<SecretKey>) -> Result<(), Error> {
-        let EnrCombinedKeyWrapper(enr) = node_record.into();
+        let EnrCombinedKeyWrapper(enr) = node_record.try_into().map_err(Error::InvalidEnr)?;
         self.discv5.add_enr(enr).map_err(Error::AddNodeFailed)
     }
 
@@ -160,7 +161,7 @@ impl Discv5 {
     }
 
     /// Returns the local [`Enr`] of the service.
-    pub fn local_enr(&self) -> Enr<discv5::enr::CombinedKey> {
+    pub fn local_enr(&self) -> Enr<CombinedKey> {
         self.discv5.local_enr()
     }
 
@@ -196,8 +197,8 @@ impl Discv5 {
             ..
         } = discv5_config;
 
-        let EnrCombinedKeyWrapper(enr) = enr.into();
-        let sk = discv5::enr::CombinedKey::secp256k1_from_bytes(&mut sk.secret_bytes()).unwrap();
+        let EnrCombinedKeyWrapper(enr) = enr.try_into().map_err(Error::InvalidEnr)?;
+        let sk = CombinedKey::secp256k1_from_bytes(&mut sk.to_secret_bytes()).unwrap();
         let mut discv5 = match discv5::Discv5::new(enr, sk, discv5_config) {
             Ok(discv5) => discv5,
             Err(err) => return Err(Error::InitFailure(err)),
@@ -363,19 +364,23 @@ impl Discv5 {
         enr: &discv5::Enr,
         socket: SocketAddr,
     ) -> Result<NodeRecord, Error> {
-        // ignore UDP socket advertised in ENR, use sender socket instead
+        // Use the sender's address as received so discovery IP bans match source sockets.
         let address = socket.ip();
         let udp_port = socket.port();
 
         let id = enr_to_discv4_id(enr).ok_or(Error::IncompatibleKeyType)?;
 
-        let tcp_port = (match self.rlpx_ip_mode {
-            IpMode::Ip4 => enr.tcp4(),
-            IpMode::Ip6 => enr.tcp6(),
-            IpMode::DualStack => unimplemented!("dual-stack support not implemented for rlpx"),
+        // The port must pair with the session socket's address, so select the
+        // ENR field by the socket's address family, not by the local node's
+        // RLPx listen family: an IPv4 session dials the `tcp` port, an IPv6
+        // session the `tcp6` port (falling back to `tcp`).
+        // Mapped IPv4 sessions use `tcp`, while the record retains the original socket address.
+        let tcp_port = (match address.to_canonical() {
+            IpAddr::V4(_) => enr.tcp4(),
+            IpAddr::V6(_) => enr.tcp6().or_else(|| enr.tcp4()),
         })
         .unwrap_or(
-            // tcp socket is missing from ENR, or is wrong IP version.
+            // tcp socket is missing from ENR for the session's address family.
             //
             // by default geth runs discv5 and discv4 behind the same udp port (the discv4 default
             // port 30303), so rlpx has a chance of successfully dialing the peer on its discv5
@@ -394,10 +399,7 @@ impl Discv5 {
 
     /// Returns the [`ForkId`] of the given [`Enr`](discv5::Enr) w.r.t. the local node's network
     /// stack, if field is set.
-    pub fn get_fork_id<K: discv5::enr::EnrKey>(
-        &self,
-        enr: &discv5::enr::Enr<K>,
-    ) -> Result<ForkId, Error> {
+    pub fn get_fork_id<K: EnrKey>(&self, enr: &Enr<K>) -> Result<ForkId, Error> {
         let Some(key) = self.fork_key else { return Err(Error::NetworkStackIdNotConfigured) };
         let fork_id = enr
             .get_decodable::<EnrForkIdEntry>(key)
@@ -469,7 +471,7 @@ pub fn build_local_enr(
     sk: &SecretKey,
     config: &Config,
 ) -> (Enr<SecretKey>, NodeRecord, Option<&'static [u8]>, IpMode) {
-    let mut builder = discv5::enr::Enr::builder();
+    let mut builder = Enr::builder();
 
     let Config {
         discv5_config,
@@ -609,7 +611,7 @@ pub fn spawn_populate_kbuckets_bg(
         // make many fast lookup queries at bootstrap, trying to fill kbuckets at furthest
         // log2distance from local node
         for i in (0..bootstrap_lookup_countdown).rev() {
-            let target = discv5::enr::NodeId::random();
+            let target = NodeId::random();
 
             trace!(target: "net::discv5",
                 %target,
@@ -661,10 +663,7 @@ pub fn spawn_populate_kbuckets_bg(
 }
 
 /// Gets the next lookup target, based on which bucket is currently being targeted.
-pub fn get_lookup_target(
-    kbucket_index: usize,
-    local_node_id: discv5::enr::NodeId,
-) -> discv5::enr::NodeId {
+pub fn get_lookup_target(kbucket_index: usize, local_node_id: NodeId) -> NodeId {
     // init target
     let mut target = local_node_id.raw();
 
@@ -692,12 +691,8 @@ pub fn get_lookup_target(
 }
 
 /// Runs a [`discv5::Discv5`] lookup query.
-pub async fn lookup(
-    target: discv5::enr::NodeId,
-    discv5: &discv5::Discv5,
-    metrics: &DiscoveredPeersMetrics,
-) {
-    metrics.set_total_sessions(discv5.metrics().active_sessions);
+pub async fn lookup(target: NodeId, discv5: &discv5::Discv5, metrics: &DiscoveredPeersMetrics) {
+    metrics.set_total_sessions(discv5::Discv5::metrics().active_sessions);
     metrics.set_total_kbucket_peers(
         discv5.with_kbuckets(|kbuckets| kbuckets.read().iter_ref().count()),
     );
@@ -732,7 +727,7 @@ mod test {
     use super::*;
     use ::enr::{CombinedKey, EnrKey};
     use discv5::ListenConfig;
-    use rand_08::thread_rng;
+    use rand::rng;
     use reth_chainspec::MAINNET;
     use std::{
         net::UdpSocket,
@@ -763,7 +758,7 @@ mod test {
     }
 
     async fn start_discovery_node(udp_port_discv5: u16) -> (Discv5, mpsc::Receiver<discv5::Event>) {
-        let secret_key = SecretKey::new(&mut thread_rng());
+        let secret_key = SecretKey::new(&mut rng());
 
         let discv5_addr: SocketAddr = format!("127.0.0.1:{udp_port_discv5}").parse().unwrap();
         let rlpx_addr: SocketAddr = "127.0.0.1:30303".parse().unwrap();
@@ -817,7 +812,7 @@ mod test {
     async fn discv5_releases_port_on_drop() {
         reth_tracing::init_test_tracing();
 
-        let secret_key = SecretKey::new(&mut thread_rng());
+        let secret_key = SecretKey::new(&mut rng());
         let port = unused_udp_port();
 
         let (node, updates) =
@@ -908,16 +903,101 @@ mod test {
         )
     }
 
+    #[test]
+    fn reachable_tcp_port_follows_session_address_family() {
+        // Regression test for https://github.com/paradigmxyz/reth/issues/27734:
+        // the TCP port paired with the session socket's IP must come from the
+        // ENR field of the *session's* address family, not the local node's
+        // RLPx listen family.
+        const TCP4_PORT: u16 = 30304;
+        const TCP6_PORT: u16 = 30306;
+        let remote_key = CombinedKey::generate_secp256k1();
+        let remote_enr = Enr::builder().tcp4(TCP4_PORT).tcp6(TCP6_PORT).build(&remote_key).unwrap();
+
+        let v4_socket: SocketAddr = "127.0.0.1:30305".parse().unwrap();
+        let v6_socket: SocketAddr = "[::1]:30307".parse().unwrap();
+
+        for local_mode in [IpMode::Ip4, IpMode::Ip6] {
+            let mut discv5 = discv5_noop();
+            discv5.rlpx_ip_mode = local_mode;
+
+            let record = discv5.try_into_reachable(&remote_enr, v4_socket).unwrap();
+            assert_eq!(
+                record.tcp_port, TCP4_PORT,
+                "v4 session with local mode {local_mode:?} must dial the tcp4 port"
+            );
+            assert_eq!(record.address, v4_socket.ip());
+            assert_eq!(record.udp_port, v4_socket.port());
+
+            let record = discv5.try_into_reachable(&remote_enr, v6_socket).unwrap();
+            assert_eq!(
+                record.tcp_port, TCP6_PORT,
+                "v6 session with local mode {local_mode:?} must dial the tcp6 port"
+            );
+            assert_eq!(record.address, v6_socket.ip());
+            assert_eq!(record.udp_port, v6_socket.port());
+        }
+    }
+
+    #[test]
+    fn reachable_ipv4_mapped_session_uses_tcp4() {
+        const TCP4_PORT: u16 = 30304;
+        const TCP6_PORT: u16 = 30306;
+        let remote_key = CombinedKey::generate_secp256k1();
+        let remote_enr = Enr::builder().tcp4(TCP4_PORT).tcp6(TCP6_PORT).build(&remote_key).unwrap();
+        let mapped_socket: SocketAddr = "[::ffff:104.28.44.25]:9000".parse().unwrap();
+
+        for local_mode in [IpMode::Ip4, IpMode::Ip6] {
+            let mut discv5 = discv5_noop();
+            discv5.rlpx_ip_mode = local_mode;
+
+            let record = discv5.try_into_reachable(&remote_enr, mapped_socket).unwrap();
+            assert_eq!(record.tcp_port, TCP4_PORT);
+            assert_eq!(record.address, mapped_socket.ip());
+            assert_eq!(record.udp_port, mapped_socket.port());
+
+            let peer = discv5.on_discovered_peer(&remote_enr, mapped_socket).unwrap();
+            assert_eq!(peer.node_record, record);
+        }
+    }
+
+    #[test]
+    fn reachable_tcp_port_v6_session_falls_back_to_tcp4() {
+        // A v6 session whose ENR carries only a `tcp` (v4) port uses that port
+        // rather than the session's UDP port.
+        const TCP4_PORT: u16 = 30304;
+        let remote_key = CombinedKey::generate_secp256k1();
+        let remote_enr = Enr::builder().tcp4(TCP4_PORT).build(&remote_key).unwrap();
+
+        let v6_socket: SocketAddr = "[::1]:30307".parse().unwrap();
+
+        let mut discv5 = discv5_noop();
+        discv5.rlpx_ip_mode = IpMode::Ip6;
+        let record = discv5.try_into_reachable(&remote_enr, v6_socket).unwrap();
+        assert_eq!(record.tcp_port, TCP4_PORT);
+    }
+
+    #[test]
+    fn reachable_tcp_port_missing_falls_back_to_udp_port() {
+        // No TCP port in the ENR at all: keep the long-standing fallback to
+        // the session's UDP port, for either session family.
+        let remote_key = CombinedKey::generate_secp256k1();
+        let remote_enr = Enr::builder().build(&remote_key).unwrap();
+
+        let discv5 = discv5_noop();
+        let v4_socket: SocketAddr = "127.0.0.1:30305".parse().unwrap();
+        assert_eq!(discv5.try_into_reachable(&remote_enr, v4_socket).unwrap().tcp_port, 30305);
+        let v6_socket: SocketAddr = "[::1]:30307".parse().unwrap();
+        assert_eq!(discv5.try_into_reachable(&remote_enr, v6_socket).unwrap().tcp_port, 30307);
+    }
+
     // Copied from sigp/discv5 with slight modification (U256 type)
     // <https://github.com/sigp/discv5/blob/master/src/kbucket/key.rs#L89-L101>
     #[expect(unreachable_pub)]
     #[expect(unused)]
     mod sigp {
         use alloy_primitives::U256;
-        use enr::{
-            k256::sha2::digest::generic_array::{typenum::U32, GenericArray},
-            NodeId,
-        };
+        use enr::NodeId;
 
         /// A `Key` is a cryptographic hash, identifying both the nodes participating in
         /// the Kademlia DHT, as well as records stored in the DHT.
@@ -931,7 +1011,7 @@ mod test {
         #[derive(Clone, Debug)]
         pub struct Key<T> {
             preimage: T,
-            hash: GenericArray<u8, U32>,
+            hash: [u8; 32],
         }
 
         impl<T> PartialEq for Key<T> {
@@ -950,7 +1030,7 @@ mod test {
 
         impl<T> Key<T> {
             /// Construct a new `Key` by providing the raw 32 byte hash.
-            pub const fn new_raw(preimage: T, hash: GenericArray<u8, U32>) -> Self {
+            pub const fn new_raw(preimage: T, hash: [u8; 32]) -> Self {
                 Self { preimage, hash }
             }
 
@@ -983,7 +1063,7 @@ mod test {
 
         impl From<NodeId> for Key<NodeId> {
             fn from(node_id: NodeId) -> Self {
-                Self { preimage: node_id, hash: *GenericArray::from_slice(&node_id.raw()) }
+                Self { preimage: node_id, hash: node_id.raw() }
             }
         }
 
@@ -996,7 +1076,7 @@ mod test {
     fn select_lookup_target() {
         for bucket_index in 0..=MAX_KBUCKET_INDEX {
             let sk = CombinedKey::generate_secp256k1();
-            let local_node_id = discv5::enr::NodeId::from(sk.public());
+            let local_node_id = NodeId::from(sk.public());
             let target = get_lookup_target(bucket_index, local_node_id);
 
             let local_node_id = sigp::Key::from(local_node_id);
@@ -1015,7 +1095,7 @@ mod test {
             .fork(NetworkStackId::ETH, fork_id)
             .build();
 
-        let sk = SecretKey::new(&mut thread_rng());
+        let sk = SecretKey::new(&mut rng());
         let (enr, _, _, _) = build_local_enr(&sk, &config);
 
         let decoded_fork_id = enr
@@ -1031,7 +1111,7 @@ mod test {
     #[test]
     fn get_fork_id_with_different_network_stack_ids() {
         let fork_id = MAINNET.latest_fork_id();
-        let sk = SecretKey::new(&mut thread_rng());
+        let sk = SecretKey::new(&mut rng());
 
         // Test 1: ENR with OPEL fork ID, Discv5 configured for OPEL
         let enr_with_opel = Enr::builder()

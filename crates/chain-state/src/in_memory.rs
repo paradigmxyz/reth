@@ -10,7 +10,7 @@ use parking_lot::RwLock;
 use reth_chainspec::ChainInfo;
 use reth_ethereum_primitives::EthPrimitives;
 use reth_execution_types::{
-    BlockExecutionOutput, BlockExecutionResult, Chain, DecodedRevmBal, ExecutionOutcome,
+    BlockExecutionOutput, BlockExecutionResult, Chain, DecodedEvmBal, ExecutionOutcome,
     RecoveredBlockAndExecutionOutput,
 };
 use reth_metrics::{metrics::Gauge, Metrics};
@@ -722,6 +722,21 @@ impl<N: NodePrimitives> BlockState<N> {
     }
 }
 
+// The derived drop recurses once per ancestor released here, which can overflow the stack on deep
+// in-memory chains, so detach parents in a loop instead.
+impl<N: NodePrimitives> Drop for BlockState<N> {
+    fn drop(&mut self) {
+        let mut parent = self.parent.take();
+        while let Some(state) = parent {
+            // A shared parent is left to its last owner, which continues the drain. Unlike
+            // `try_unwrap`, `into_inner` hands it to exactly one of several concurrent releasers.
+            let Some(mut state) = Arc::into_inner(state) else { break };
+            // Detach the next parent so dropping `state` here doesn't recurse.
+            parent = state.parent.take();
+        }
+    }
+}
+
 /// Represents an executed block stored in-memory.
 #[derive(Clone, Debug)]
 pub struct ExecutedBlock<N: NodePrimitives = EthPrimitives> {
@@ -742,10 +757,10 @@ pub struct ExecutedBlock<N: NodePrimitives = EthPrimitives> {
     /// validation (payload builder, persistence, tests) and downloaded blocks without a BAL
     /// sidecar leave it unset; the BAL store is the source of truth in that case.
     ///
-    /// When present, this carries the raw RLP (for the BAL store) together with the revm
+    /// When present, this carries the raw RLP (for the BAL store) together with the evm2
     /// representation (for consumers like the RPC state cache), so that neither has to be
     /// re-derived after validation.
-    pub bal: Option<Arc<DecodedRevmBal>>,
+    pub bal: Option<Arc<DecodedEvmBal>>,
 }
 
 impl<N: NodePrimitives> Default for ExecutedBlock<N> {
@@ -816,7 +831,7 @@ impl<N: NodePrimitives> ExecutedBlock<N> {
     }
 
     /// Attaches the prepared block access list of the block, or clears it with `None`.
-    pub fn with_bal(mut self, bal: Option<Arc<DecodedRevmBal>>) -> Self {
+    pub fn with_bal(mut self, bal: Option<Arc<DecodedEvmBal>>) -> Self {
         self.bal = bal;
         self
     }
@@ -825,7 +840,7 @@ impl<N: NodePrimitives> ExecutedBlock<N> {
     ///
     /// `None` only means no BAL was attached to this block; see the `bal` field for details.
     #[inline]
-    pub const fn bal(&self) -> Option<&Arc<DecodedRevmBal>> {
+    pub const fn bal(&self) -> Option<&Arc<DecodedEvmBal>> {
         self.bal.as_ref()
     }
 
@@ -1469,8 +1484,8 @@ mod tests {
         let block0 = test_block_builder.get_executed_block_with_number(0, B256::random());
         let block1 = test_block_builder
             .get_executed_block_with_number(1, block0.recovered_block.hash())
-            .with_bal(Some(Arc::new(DecodedRevmBal::new(
-                Arc::new(revm::state::bal::Bal::default()),
+            .with_bal(Some(Arc::new(DecodedEvmBal::new(
+                Arc::default(),
                 Bytes::from_static(&[0xc0]),
             ))));
 
@@ -1488,5 +1503,39 @@ mod tests {
         assert_eq!(block.hash(), block1.recovered_block.hash());
         assert_eq!(Some(bal), block1.bal());
         assert!(blocks_and_bals.next().is_none());
+    }
+
+    fn block_state_chain(depth: usize, mut parent: Option<Arc<BlockState>>) -> Arc<BlockState> {
+        let block = ExecutedBlock::default();
+        for _ in 0..depth {
+            parent = Some(Arc::new(BlockState::with_parent(block.clone(), parent)));
+        }
+        parent.expect("nonempty chain")
+    }
+
+    #[test]
+    fn deep_chain_drop_preserves_shared_tail() {
+        const DEPTH: usize = 100_000;
+
+        // A recursive drop of either chain would overflow this stack.
+        std::thread::Builder::new()
+            .stack_size(64 * 1024)
+            .spawn(|| {
+                let tail = block_state_chain(DEPTH, None);
+                let tail_payload = Arc::downgrade(&tail.block_ref().execution_output);
+                let head = block_state_chain(DEPTH, Some(tail.clone()));
+                let head_payload = Arc::downgrade(&head.block_ref().execution_output);
+
+                drop(head);
+                assert_eq!(head_payload.strong_count(), 0);
+                assert_eq!(Arc::strong_count(&tail), 1);
+                assert_eq!(tail_payload.strong_count(), DEPTH);
+
+                drop(tail);
+                assert_eq!(tail_payload.strong_count(), 0);
+            })
+            .unwrap()
+            .join()
+            .unwrap();
     }
 }

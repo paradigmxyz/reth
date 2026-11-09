@@ -35,7 +35,11 @@ impl StateRepairs {
 
     /// Schedules the fields and slots `changes` writes for the account at `hashed_address`.
     pub fn insert_changes(&mut self, hashed_address: B256, changes: &AccountChanges) {
-        self.accounts.entry(hashed_address).or_default().insert_changes(changes);
+        let stale = self.accounts.entry(hashed_address).or_default();
+        stale.insert_changes(changes);
+        if stale.is_resolved() {
+            self.accounts.remove(&hashed_address);
+        }
     }
 
     /// Returns whether nothing is scheduled.

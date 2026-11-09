@@ -7,8 +7,8 @@ use reth_trie::{
     proof::{Proof, StorageProof},
     trie_cursor::InMemoryTrieCursorFactory,
     updates::TrieUpdatesSorted,
-    AccountProof, DecodedMultiProofV2, HashedPostStateSorted, HashedStorage, MultiProof,
-    MultiProofTargets, MultiProofTargetsV2, StorageMultiProof, TrieInput, TrieInputSorted,
+    AccountProof, HashedPostStateSorted, HashedStorage, MultiProof, MultiProofTargets,
+    StorageMultiProof, TrieInput, TrieInputSorted,
 };
 
 /// Extends [`Proof`] with operations specific for working with a database transaction.
@@ -33,13 +33,6 @@ pub trait DatabaseProof<'a> {
         input: TrieInput,
         targets: MultiProofTargets,
     ) -> Result<MultiProof, StateProofError>;
-
-    /// Generates a V2 decoded state multiproof for target hashed accounts and storage keys.
-    fn overlay_multiproof_v2(
-        &self,
-        input: TrieInput,
-        targets: MultiProofTargetsV2,
-    ) -> Result<DecodedMultiProofV2, StateProofError>;
 }
 
 impl<'a, TX: DbTx, A: TrieTableAdapter> DatabaseProof<'a>
@@ -66,14 +59,6 @@ impl<'a, TX: DbTx, A: TrieTableAdapter> DatabaseProof<'a>
     ) -> Result<MultiProof, StateProofError> {
         with_overlay(self, input, |proof| proof.multiproof(targets))
     }
-
-    fn overlay_multiproof_v2(
-        &self,
-        input: TrieInput,
-        targets: MultiProofTargetsV2,
-    ) -> Result<DecodedMultiProofV2, StateProofError> {
-        with_overlay(self, input, |proof| proof.multiproof_v2(targets))
-    }
 }
 
 /// Extends [`StorageProof`] with operations specific for working with a database transaction.
@@ -99,11 +84,7 @@ pub trait DatabaseStorageProof<'a, TX> {
 }
 
 impl<'a, TX: DbTx, A: TrieTableAdapter> DatabaseStorageProof<'a, TX>
-    for StorageProof<
-        'static,
-        DatabaseTrieCursorFactory<&'a TX, A>,
-        DatabaseHashedCursorFactory<&'a TX>,
-    >
+    for StorageProof<DatabaseTrieCursorFactory<&'a TX, A>, DatabaseHashedCursorFactory<&'a TX>>
 {
     fn from_tx(tx: &'a TX, address: Address) -> Self {
         Self::new(

@@ -9,7 +9,10 @@ use alloy_primitives::{
     Address, B256, U256,
 };
 use alloy_rlp::Encodable;
-use proptest::{prelude::ProptestConfig, proptest};
+use proptest::{
+    prelude::{any, ProptestConfig},
+    proptest,
+};
 use proptest_arbitrary_interop::arb;
 use reth_db::{tables, test_utils::TempDatabase, DatabaseEnv};
 use reth_db_api::{
@@ -828,14 +831,14 @@ fn account_trie_around_extension_node_with_dbtrie() {
     assert_trie_updates(&account_updates);
 }
 
-proptest! {
-    #![proptest_config(ProptestConfig {
-        cases: 128, ..ProptestConfig::default()
-    })]
-
-    #[test]
-    fn fuzz_state_root_incremental(account_changes: [BTreeMap<B256, U256>; 5]) {
-        let factory = create_test_provider_factory();
+#[test]
+fn fuzz_state_root_incremental() {
+    // The cases share one factory: each drops its provider without committing, so the next case
+    // starts from an empty database.
+    let factory = create_test_provider_factory();
+    proptest!(ProptestConfig::with_cases(128), |(
+        account_changes in any::<[BTreeMap<B256, U256>; 5]>(),
+    )| {
         let tx = factory.provider_rw().unwrap();
         let mut hashed_account_cursor = tx.tx_ref().cursor_write::<tables::HashedAccounts>().unwrap();
 
@@ -864,7 +867,7 @@ proptest! {
             assert_eq!(expected_root, state_root);
             tx.write_trie_updates(trie_updates).unwrap();
         }
-    }
+    });
 }
 
 #[test]

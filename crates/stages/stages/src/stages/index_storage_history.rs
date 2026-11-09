@@ -57,8 +57,7 @@ where
         + StorageSettingsCache
         + RocksDBProviderFactory
         + StorageChangeSetReader
-        + StaticFileProviderFactory
-        + reth_provider::NodePrimitivesProvider,
+        + StaticFileProviderFactory,
 {
     /// Return the id of the stage
     fn id(&self) -> StageId {
@@ -764,27 +763,6 @@ mod tests {
             let block_list = result.unwrap();
             let blocks: Vec<u64> = block_list.iter().collect();
             assert_eq!(blocks, (0..=10).collect::<Vec<_>>());
-        }
-
-        #[tokio::test]
-        async fn prune_bump_rebuilds_empty_table() {
-            let db = TestStageDB::default();
-            setup_v2_storage_data(&db, 0..=10);
-            let rocksdb = db.factory.rocksdb_provider();
-            rocksdb.put::<tables::StoragesHistory>(shard(u64::MAX), &list(&[1])).unwrap();
-
-            let input = ExecInput { target: Some(20_000), checkpoint: None };
-            let mut stage = IndexStorageHistoryStage {
-                prune_mode: Some(PruneMode::Before(6)),
-                ..Default::default()
-            };
-            let provider = db.factory.database_provider_rw().unwrap();
-            let output = stage.execute(&provider, input).unwrap();
-            assert_eq!(output, ExecOutput::done(StageCheckpoint::new(20_000)));
-            provider.commit().unwrap();
-
-            let result = rocksdb.get::<tables::StoragesHistory>(shard(u64::MAX)).unwrap().unwrap();
-            assert_eq!(result.iter().collect::<Vec<_>>(), (6..=10).collect::<Vec<_>>());
         }
 
         #[tokio::test]

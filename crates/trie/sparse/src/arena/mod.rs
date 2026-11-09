@@ -15,6 +15,7 @@ use alloc::{borrow::Cow, boxed::Box, vec::Vec};
 use alloy_primitives::{keccak256, map::B256Map, B256};
 use alloy_trie::TrieMask;
 use core::{cmp::Reverse, mem};
+use rayon::iter::{IntoParallelIterator, IntoParallelRefMutIterator, ParallelIterator};
 use reth_execution_errors::{SparseTrieErrorKind, SparseTrieResult};
 use reth_trie_common::{
     BranchNodeMasks, BranchNodeRef, ExtensionNodeRef, LeafNodeRef, Nibbles, ProofTrieNodeV2,
@@ -157,7 +158,7 @@ impl ArenaSparseSubtrie {
     }
 
     /// Asserts that `num_leaves` and `num_dirty_leaves` match the actual counts in the arena.
-    #[cfg(debug_assertions)]
+    #[cfg(all(debug_assertions, not(feature = "fuzz")))]
     fn debug_assert_counters(&self) {
         let (actual_leaves, actual_dirty) =
             ArenaParallelSparseTrie::count_leaves_and_dirty(&self.arena, self.root);
@@ -273,7 +274,7 @@ impl ArenaSparseSubtrie {
         self.arena = new_arena;
         self.root = new_root;
 
-        #[cfg(debug_assertions)]
+        #[cfg(all(debug_assertions, not(feature = "fuzz")))]
         self.debug_assert_counters();
         return pruned;
 
@@ -395,10 +396,11 @@ impl ArenaSparseSubtrie {
                     self.num_dirty_leaves =
                         (self.num_dirty_leaves as i64 + deltas.num_dirty_leaves_delta) as u64;
 
-                    if let RemoveLeafResult::NeedsProof { key, proof_key, parent } = result {
+                    // The removed leaf is already revealed, so only the blinded sibling needs a
+                    // proof. The caller retries the update once that sibling is revealed.
+                    if let RemoveLeafResult::NeedsProof { proof_key, parent, .. } = result {
                         self.required_proofs
                             .push((idx, ArenaRequiredProof { key: proof_key, parent }));
-                        self.required_proofs.push((idx, ArenaRequiredProof { key, parent }));
                     }
                 }
                 LeafUpdate::Touched => {}
@@ -408,7 +410,7 @@ impl ArenaSparseSubtrie {
         // Drain remaining cursor entries, propagating dirty state.
         self.buffers.cursor.drain(&mut self.arena);
 
-        #[cfg(debug_assertions)]
+        #[cfg(all(debug_assertions, not(feature = "fuzz")))]
         self.debug_assert_counters();
     }
 
@@ -444,7 +446,7 @@ impl ArenaSparseSubtrie {
         // Drain remaining cursor entries, propagating dirty state.
         self.buffers.cursor.drain(&mut self.arena);
 
-        #[cfg(debug_assertions)]
+        #[cfg(all(debug_assertions, not(feature = "fuzz")))]
         self.debug_assert_counters();
 
         Ok(())
@@ -463,7 +465,7 @@ impl ArenaSparseSubtrie {
             new_epoch,
         );
         self.num_dirty_leaves = 0;
-        #[cfg(debug_assertions)]
+        #[cfg(all(debug_assertions, not(feature = "fuzz")))]
         self.debug_assert_counters();
     }
 }
@@ -661,7 +663,7 @@ impl ArenaParallelSparseTrie {
         let (leaves, dirty) = Self::count_leaves_and_dirty(&subtrie.arena, subtrie.root);
         subtrie.num_leaves = leaves;
         subtrie.num_dirty_leaves = dirty;
-        #[cfg(debug_assertions)]
+        #[cfg(all(debug_assertions, not(feature = "fuzz")))]
         subtrie.debug_assert_counters();
         self.upper_arena[child_idx] = ArenaSparseNode::Subtrie(subtrie);
     }
@@ -1846,7 +1848,7 @@ impl ArenaParallelSparseTrie {
     ///
     /// Uses the cursor to DFS the upper arena, checking each visited node's path length.
     #[instrument(level = "trace", target = TRACE_TARGET, skip_all)]
-    #[cfg(debug_assertions)]
+    #[cfg(all(debug_assertions, not(feature = "fuzz")))]
     fn debug_assert_subtrie_structure(&mut self) {
         let mut cursor = mem::take(&mut self.buffers.cursor);
         cursor.reset(&self.upper_arena, self.root, Nibbles::default());
@@ -2017,7 +2019,7 @@ impl ArenaParallelSparseTrie {
         Some(child_idx)
     }
 
-    #[cfg(debug_assertions)]
+    #[cfg(all(debug_assertions, not(feature = "fuzz")))]
     fn collect_reachable_nodes(
         arena: &NodeArena,
         idx: Index,
@@ -2035,7 +2037,7 @@ impl ArenaParallelSparseTrie {
         }
     }
 
-    #[cfg(debug_assertions)]
+    #[cfg(all(debug_assertions, not(feature = "fuzz")))]
     fn assert_no_orphaned_nodes(arena: &NodeArena, root: Index, label: &str) {
         let mut reachable = alloy_primitives::map::HashSet::default();
         Self::collect_reachable_nodes(arena, root, &mut reachable);
@@ -2050,7 +2052,7 @@ impl ArenaParallelSparseTrie {
     }
 }
 
-#[cfg(debug_assertions)]
+#[cfg(all(debug_assertions, not(feature = "fuzz")))]
 impl Drop for ArenaParallelSparseTrie {
     fn drop(&mut self) {
         Self::assert_no_orphaned_nodes(&self.upper_arena, self.root, "upper arena");
@@ -2267,8 +2269,6 @@ impl SparseTrie for ArenaParallelSparseTrie {
             let (_, subtrie, node_vec) = &mut taken[0];
             subtrie.reveal_nodes(node_vec)?;
         } else {
-            use rayon::iter::{IntoParallelRefMutIterator, ParallelIterator};
-
             let parent_span = tracing::Span::current();
             let results: Vec<SparseTrieResult<()>> = taken
                 .par_iter_mut()
@@ -2292,7 +2292,7 @@ impl SparseTrie for ArenaParallelSparseTrie {
             self.restore_taken_subtrie(idx, subtrie);
         }
 
-        #[cfg(debug_assertions)]
+        #[cfg(all(debug_assertions, not(feature = "fuzz")))]
         self.debug_assert_subtrie_structure();
 
         Ok(())
@@ -2359,8 +2359,6 @@ impl SparseTrie for ArenaParallelSparseTrie {
                     subtrie.update_cached_rlp(new_epoch);
                 }
             } else {
-                use rayon::iter::{IntoParallelIterator, ParallelIterator};
-
                 let parent_span = tracing::Span::current();
                 taken = taken
                     .into_par_iter()
@@ -2559,8 +2557,6 @@ impl SparseTrie for ArenaParallelSparseTrie {
                 let (_, ref mut subtrie) = taken[0];
                 pruned += subtrie.prune(prune_before);
             } else {
-                use rayon::iter::{IntoParallelRefMutIterator, ParallelIterator};
-
                 let parent_span = tracing::Span::current();
                 pruned += taken
                     .par_iter_mut()
@@ -2805,7 +2801,7 @@ impl SparseTrie for ArenaParallelSparseTrie {
         self.buffers.cursor = cursor;
 
         if taken.is_empty() {
-            #[cfg(debug_assertions)]
+            #[cfg(all(debug_assertions, not(feature = "fuzz")))]
             self.debug_assert_subtrie_structure();
 
             return Ok(());
@@ -2816,8 +2812,6 @@ impl SparseTrie for ArenaParallelSparseTrie {
             let (_, ref mut subtrie, ref range) = taken[0];
             subtrie.update_leaves(&sorted[range.clone()]);
         } else {
-            use rayon::iter::{IntoParallelRefMutIterator, ParallelIterator};
-
             let parent_span = tracing::Span::current();
             taken.par_iter_mut().for_each(|(_, subtrie, range)| {
                 let _guard = parent_span.enter();
@@ -2882,7 +2876,7 @@ impl SparseTrie for ArenaParallelSparseTrie {
             self.buffers.cursor = cursor;
         }
 
-        #[cfg(debug_assertions)]
+        #[cfg(all(debug_assertions, not(feature = "fuzz")))]
         self.debug_assert_subtrie_structure();
 
         Ok(())

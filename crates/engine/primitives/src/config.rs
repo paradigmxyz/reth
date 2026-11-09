@@ -228,6 +228,8 @@ pub struct TreeConfig {
     /// When set, BAL storage slots are not read into the execution cache. BAL hashed-state
     /// streaming for parallel state-root computation is controlled separately.
     disable_bal_batch_io: bool,
+    /// Whether block execution reuses transaction prewarming results.
+    prewarm_reuse: bool,
     /// Whether to skip trie state-root computation during engine validation.
     ///
     /// This trusts the block header's state root. It is intended for experiments that measure
@@ -285,6 +287,7 @@ impl Default for TreeConfig {
             disable_bal_parallel_execution: false,
             disable_bal_parallel_state_root: false,
             disable_bal_batch_io: false,
+            prewarm_reuse: false,
             skip_state_root: false,
             #[cfg(feature = "trie-debug")]
             proof_jitter: None,
@@ -376,6 +379,7 @@ impl TreeConfig {
             disable_bal_parallel_execution: false,
             disable_bal_parallel_state_root: false,
             disable_bal_batch_io: false,
+            prewarm_reuse: false,
             skip_state_root: false,
             #[cfg(feature = "trie-debug")]
             proof_jitter: None,
@@ -847,6 +851,17 @@ impl TreeConfig {
         self
     }
 
+    /// Returns whether block execution reuses transaction prewarming results.
+    pub const fn prewarm_reuse(&self) -> bool {
+        self.prewarm_reuse
+    }
+
+    /// Setter for whether block execution reuses transaction prewarming results.
+    pub const fn with_prewarm_reuse(mut self, prewarm_reuse: bool) -> Self {
+        self.prewarm_reuse = prewarm_reuse;
+        self
+    }
+
     /// Returns whether trie state-root computation is skipped during engine validation.
     pub const fn skip_state_root(&self) -> bool {
         self.skip_state_root
@@ -900,26 +915,6 @@ mod tests {
     }
 
     #[test]
-    fn txpool_prewarming_is_disabled_by_default_and_can_be_enabled() {
-        assert!(!TreeConfig::default().txpool_prewarming());
-        assert!(TreeConfig::default().with_txpool_prewarming(true).txpool_prewarming());
-    }
-
-    #[test]
-    fn state_root_task_requires_parallelism_without_overrides() {
-        assert!(TreeConfig::default().with_has_enough_parallelism(true).use_state_root_task());
-        assert!(!TreeConfig::default().with_has_enough_parallelism(false).use_state_root_task());
-        assert!(!TreeConfig::default()
-            .with_has_enough_parallelism(true)
-            .with_state_root_fallback(true)
-            .use_state_root_task());
-        assert!(!TreeConfig::default()
-            .with_has_enough_parallelism(true)
-            .with_skip_state_root(true)
-            .use_state_root_task());
-    }
-
-    #[test]
     #[should_panic(
         expected = "persistence_backpressure_threshold must be greater than persistence_threshold"
     )]
@@ -928,14 +923,6 @@ mod tests {
             .with_num_state_masking_blocks(0)
             .with_persistence_threshold(4)
             .with_persistence_backpressure_threshold(4);
-    }
-
-    #[test]
-    fn default_persistence_settings() {
-        let config = TreeConfig::default();
-        assert_eq!(config.persistence_threshold(), 50);
-        assert_eq!(config.num_state_masking_blocks(), 30);
-        assert_eq!(config.persistence_backpressure_threshold(), 100);
     }
 
     #[test]

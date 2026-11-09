@@ -690,7 +690,7 @@ impl NetworkArgs {
     ) -> Result<SecretKey, SecretKeyError> {
         if let Some(b256) = &self.p2p_secret_key_hex {
             // Use the B256 value directly (already validated as 32 bytes)
-            SecretKey::from_slice(b256.as_slice()).map_err(SecretKeyError::SecretKeyDecodeError)
+            SecretKey::from_secret_bytes(b256.0).map_err(SecretKeyError::SecretKeyDecodeError)
         } else {
             // Load from file (either provided path or default)
             let secret_key_path = self.p2p_secret_key.clone().unwrap_or(default_secret_key_path);
@@ -1240,15 +1240,6 @@ mod tests {
     }
 
     #[test]
-    fn parse_enr_bootnode_args() {
-        let enr = "enr:-IS4QHCYrYZbAKWCBRlAy5zzaDZXJBGkcnh4MHcBFZntXNFrdvJjX04jRzjzCBOonrkTfj499SZuOh8R33Ls8RRcy5wBgmlkgnY0gmlwhH8AAAGJc2VjcDI1NmsxoQPKY0yuDUmstAHYpMa2_oxVtw0RW_QAdpzBQA8yWM0xOIN1ZHCCdl8";
-        let args = CommandParser::<NetworkArgs>::parse_from(["reth", "--bootnodes", enr]).args;
-        let trusted =
-            CommandParser::<NetworkArgs>::parse_from(["reth", "--trusted-peers", enr]).args;
-        assert_eq!(args.bootnodes, Some(trusted.trusted_peers));
-    }
-
-    #[test]
     fn parse_retry_strategy_args() {
         let tests = vec![0, 10];
 
@@ -1542,7 +1533,7 @@ mod tests {
         let secret_key = args.secret_key(default_path).unwrap();
 
         // Verify the secret key matches the hex input
-        assert_eq!(alloy_primitives::hex::encode(secret_key.secret_bytes()), hex);
+        assert_eq!(alloy_primitives::hex::encode(secret_key.to_secret_bytes()), hex);
     }
 
     #[test]
@@ -1618,7 +1609,7 @@ mod tests {
                 .network_config::<EthNetworkPrimitives>(
                     &Config::default(),
                     MAINNET.clone(),
-                    SecretKey::from_byte_array(&[1u8; 32]).unwrap(),
+                    SecretKey::from_secret_bytes([1u8; 32]).unwrap(),
                     PathBuf::new(),
                     Runtime::test(),
                 )
@@ -1650,7 +1641,7 @@ mod tests {
         };
 
         // Build the network config using a deterministic secret key
-        let secret_key = SecretKey::from_byte_array(&[1u8; 32]).unwrap();
+        let secret_key = SecretKey::from_secret_bytes([1u8; 32]).unwrap();
         let builder = args.network_config::<EthNetworkPrimitives>(
             &Config::default(),
             MAINNET.clone(),
@@ -1674,7 +1665,7 @@ mod tests {
         let enr = "enr:-IS4QHCYrYZbAKWCBRlAy5zzaDZXJBGkcnh4MHcBFZntXNFrdvJjX04jRzjzCBOonrkTfj499SZuOh8R33Ls8RRcy5wBgmlkgnY0gmlwhH8AAAGJc2VjcDI1NmsxoQPKY0yuDUmstAHYpMa2_oxVtw0RW_QAdpzBQA8yWM0xOIN1ZHCCdl8";
         let enode = "enode://6f8a80d14311c39f35f516fa664deaaaa13e85b2f7493f37f6144d86991ec012937307647bd3b9a82abe2974e1407241d54947bbb39763a4cac9f77166ad92a0@10.3.58.6:30303";
         let config = Config { bootnodes: vec![enr.parse().unwrap()], ..Default::default() };
-        let secret_key = SecretKey::from_byte_array(&[1u8; 32]).unwrap();
+        let secret_key = SecretKey::from_secret_bytes([1u8; 32]).unwrap();
 
         let boot_nodes = |args: &NetworkArgs| {
             args.network_config::<EthNetworkPrimitives>(

@@ -20,6 +20,7 @@ use std::{
     borrow::Borrow,
     cmp::Ordering,
     fmt::Debug,
+    fs::OpenOptions,
     path::{Path, PathBuf},
     sync::{Arc, Weak},
 };
@@ -455,7 +456,6 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
 
             // Truncate sidecar file if it has invalid blocks
             if actual_sidecar_blocks > correct_blocks {
-                use std::fs::OpenOptions;
                 let file = OpenOptions::new()
                     .write(true)
                     .open(&csoff_path)
@@ -1125,10 +1125,13 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
         let current = header
             .block_start()
             .filter(|start| lowest.is_none() || *start > header.expected_block_start());
-        if current.into_iter().chain(lowest).any(|start| last_block < start) {
-            return Err(ProviderError::other(StaticFileWriterError::new(
-                "cannot unwind below the pruned anchor",
-            )))
+        if let Some(anchor) = current.into_iter().chain(lowest).find(|start| last_block < *start) {
+            return Err(StaticFileWriterError::UnwindBelowPrunedAnchor {
+                segment: header.segment(),
+                target: last_block,
+                anchor,
+            }
+            .into())
         }
         Ok(())
     }

@@ -57,12 +57,10 @@ impl MultiProofTargets {
     /// i.e., the values that are in `self` but not in `other`.
     pub fn retain_difference(&mut self, other: &Self) {
         self.0.retain(|hashed_address, hashed_slots| {
-            if let Some(other_hashed_slots) = other.get(hashed_address) {
+            other.get(hashed_address).is_none_or(|other_hashed_slots| {
                 hashed_slots.retain(|hashed_slot| !other_hashed_slots.contains(hashed_slot));
                 !hashed_slots.is_empty()
-            } else {
-                true
-            }
+            })
         });
     }
 
@@ -884,10 +882,8 @@ impl AccountProof {
             storage_proof: self
                 .storage_proofs
                 .into_iter()
-                .filter_map(|proof| {
-                    let input_slot = slots.iter().find(|s| s.as_b256() == proof.key)?;
-                    Some(proof.into_eip1186_proof(*input_slot))
-                })
+                .zip(slots)
+                .map(|(proof, slot)| proof.into_eip1186_proof(slot))
                 .collect(),
         }
     }
@@ -1851,5 +1847,21 @@ mod tests {
 
         assert_eq!(resp.account_proof, multi);
         assert_eq!(resp.storage_proof[0].proof, single_non_sentinel);
+    }
+
+    #[cfg(feature = "eip1186")]
+    #[test]
+    fn eip1186_response_keeps_key_of_each_requested_slot() {
+        let slot = B256::with_last_byte(1);
+        let keys = vec![
+            alloy_serde::JsonStorageKey::Number(U256::from(1)),
+            alloy_serde::JsonStorageKey::Hash(slot),
+        ];
+        let mut account = AccountProof::new(Address::ZERO);
+        account.storage_proofs = vec![StorageProof::new(slot); 2];
+
+        let resp = account.into_eip1186_response(keys.clone());
+
+        assert_eq!(resp.storage_proof.iter().map(|p| p.key).collect::<Vec<_>>(), keys);
     }
 }

@@ -50,11 +50,7 @@ use tracing::{debug, error, trace};
 
 impl<Eth> EngineEthFilter<RpcLog<Eth::NetworkTypes>> for EthFilter<Eth>
 where
-    Eth: FullEthApiTypes
-        + RpcNodeCoreExt<Provider: BlockIdReader>
-        + LoadReceipt
-        + EthBlocks
-        + 'static,
+    Eth: FullEthApiTypes + RpcNodeCoreExt<Provider: BlockIdReader> + LoadReceipt + EthBlocks,
 {
     /// Returns logs matching given filter object, no query limits
     fn logs(
@@ -209,11 +205,7 @@ where
 
 impl<Eth> EthFilter<Eth>
 where
-    Eth: FullEthApiTypes<Provider: BlockReader + BlockIdReader>
-        + RpcNodeCoreExt
-        + LoadReceipt
-        + EthBlocks
-        + 'static,
+    Eth: FullEthApiTypes<Provider: BlockReader + BlockIdReader> + LoadReceipt + EthBlocks,
 {
     /// Access the underlying provider.
     fn provider(&self) -> &Eth::Provider {
@@ -354,7 +346,7 @@ where
 impl<Eth> EthFilterApiServer<RpcTransaction<Eth::NetworkTypes>, RpcLog<Eth::NetworkTypes>>
     for EthFilter<Eth>
 where
-    Eth: FullEthApiTypes + RpcNodeCoreExt + LoadReceipt + EthBlocks + 'static,
+    Eth: FullEthApiTypes + LoadReceipt + EthBlocks,
 {
     /// Handler for `eth_newFilter`
     async fn new_filter(&self, filter: Filter) -> RpcResult<FilterId> {
@@ -473,8 +465,7 @@ where
     Eth: RpcNodeCoreExt<Provider: BlockIdReader, Pool: TransactionPool>
         + EthApiTypes<NetworkTypes: reth_rpc_eth_api::types::RpcTypes>
         + LoadReceipt
-        + EthBlocks
-        + 'static,
+        + EthBlocks,
 {
     /// Access the underlying provider.
     fn provider(&self) -> &Eth::Provider {
@@ -946,7 +937,7 @@ impl<T, TxCompat> FullTransactionsFilter<RpcTransaction<TxCompat::Network>>
     for FullTransactionsReceiver<T, TxCompat>
 where
     T: PoolTransaction + 'static,
-    TxCompat: RpcConvert<Primitives: NodePrimitives<SignedTx = T::Consensus>> + 'static,
+    TxCompat: RpcConvert<Primitives: NodePrimitives<SignedTx = T::Consensus>>,
 {
     async fn drain(&self) -> FilterChanges<RpcTransaction<TxCompat::Network>> {
         Self::drain(self).await
@@ -1094,7 +1085,7 @@ impl From<logs_utils::FilterBlockRangeError> for EthFilterError {
 /// a match for the filter.
 struct ReceiptBlockResult<P>
 where
-    P: ReceiptProvider + BlockReader,
+    P: BlockReader,
 {
     /// We always need the entire receipts for the matching block.
     receipts: Arc<Vec<ProviderReceipt<P>>>,
@@ -1106,11 +1097,7 @@ where
 
 /// Represents different modes for processing block ranges when filtering logs
 enum RangeMode<
-    Eth: RpcNodeCoreExt<Provider: BlockIdReader, Pool: TransactionPool>
-        + EthApiTypes
-        + LoadReceipt
-        + EthBlocks
-        + 'static,
+    Eth: RpcNodeCoreExt<Provider: BlockIdReader, Pool: TransactionPool> + LoadReceipt + EthBlocks,
 > {
     /// Use cache-based processing for recent blocks
     Cached(CachedMode<Eth>),
@@ -1119,11 +1106,7 @@ enum RangeMode<
 }
 
 impl<
-        Eth: RpcNodeCoreExt<Provider: BlockIdReader, Pool: TransactionPool>
-            + EthApiTypes
-            + LoadReceipt
-            + EthBlocks
-            + 'static,
+        Eth: RpcNodeCoreExt<Provider: BlockIdReader, Pool: TransactionPool> + LoadReceipt + EthBlocks,
     > RangeMode<Eth>
 {
     /// Creates a new `RangeMode`.
@@ -1200,22 +1183,14 @@ impl<
 
 /// Mode for processing blocks using cache optimization for recent blocks
 struct CachedMode<
-    Eth: RpcNodeCoreExt<Provider: BlockIdReader, Pool: TransactionPool>
-        + EthApiTypes
-        + LoadReceipt
-        + EthBlocks
-        + 'static,
+    Eth: RpcNodeCoreExt<Provider: BlockIdReader, Pool: TransactionPool> + LoadReceipt + EthBlocks,
 > {
     filter_inner: Arc<EthFilterInner<Eth>>,
     headers_iter: std::vec::IntoIter<SealedHeader<<Eth::Provider as HeaderProvider>::Header>>,
 }
 
 impl<
-        Eth: RpcNodeCoreExt<Provider: BlockIdReader, Pool: TransactionPool>
-            + EthApiTypes
-            + LoadReceipt
-            + EthBlocks
-            + 'static,
+        Eth: RpcNodeCoreExt<Provider: BlockIdReader, Pool: TransactionPool> + LoadReceipt + EthBlocks,
     > CachedMode<Eth>
 {
     async fn next(&mut self) -> Result<Option<ReceiptBlockResult<Eth::Provider>>, EthFilterError> {
@@ -1238,11 +1213,7 @@ type ReceiptFetchFuture<P> =
 
 /// Mode for processing blocks using range queries for older blocks
 struct RangeBlockMode<
-    Eth: RpcNodeCoreExt<Provider: BlockIdReader, Pool: TransactionPool>
-        + EthApiTypes
-        + LoadReceipt
-        + EthBlocks
-        + 'static,
+    Eth: RpcNodeCoreExt<Provider: BlockIdReader, Pool: TransactionPool> + LoadReceipt + EthBlocks,
 > {
     filter_inner: Arc<EthFilterInner<Eth>>,
     iter: Peekable<std::vec::IntoIter<SealedHeader<<Eth::Provider as HeaderProvider>::Header>>>,
@@ -1256,11 +1227,7 @@ struct RangeBlockMode<
 }
 
 impl<
-        Eth: RpcNodeCoreExt<Provider: BlockIdReader, Pool: TransactionPool>
-            + EthApiTypes
-            + LoadReceipt
-            + EthBlocks
-            + 'static,
+        Eth: RpcNodeCoreExt<Provider: BlockIdReader, Pool: TransactionPool> + LoadReceipt + EthBlocks,
     > RangeBlockMode<Eth>
 {
     async fn next(&mut self) -> Result<Option<ReceiptBlockResult<Eth::Provider>>, EthFilterError> {
@@ -1391,7 +1358,7 @@ impl<
                 .try_acquire_owned()
             {
                 Ok(permit) => Box::pin(async move {
-                    let chunk_task = tokio::task::spawn_blocking(move || {
+                    let chunk_task = reth_tasks::spawn_blocking(move || {
                         let _permit = permit;
                         fetch()
                     });
@@ -1440,16 +1407,18 @@ impl<
 mod tests {
     use super::*;
     use crate::{eth::EthApi, EthApiBuilder};
+    use alloy_consensus::TxLegacy;
     use alloy_network::Ethereum;
     use alloy_primitives::{Bloom, FixedBytes};
     use rand::Rng;
     use reth_chainspec::{ChainSpec, ChainSpecProvider};
+    use reth_db_api::models::StoredBlockBodyIndices;
     use reth_ethereum_primitives::TxType;
     use reth_evm_ethereum::EthEvmConfig;
     use reth_network_api::noop::NoopNetwork;
     use reth_provider::test_utils::MockEthProvider;
     use reth_rpc_convert::RpcConverter;
-    use reth_rpc_eth_api::node::RpcNodeCoreAdapter;
+    use reth_rpc_eth_api::{helpers::SpawnBlocking, node::RpcNodeCoreAdapter};
     use reth_rpc_eth_types::receipt::EthReceiptConverter;
     use reth_tasks::Runtime;
     use reth_testing_utils::generators;
@@ -1956,8 +1925,6 @@ mod tests {
     async fn test_log_limit_retry_range_excludes_overflow_block() {
         let provider = MockEthProvider::default();
 
-        use alloy_consensus::TxLegacy;
-        use reth_db_api::models::StoredBlockBodyIndices;
         use reth_ethereum_primitives::{TransactionSigned, TxType};
 
         let tx_inner = TxLegacy {
@@ -2042,7 +2009,6 @@ mod tests {
         let mut prev_hash = alloy_primitives::B256::default();
 
         // Create a transaction for blocks that will have receipts
-        use alloy_consensus::TxLegacy;
         use reth_ethereum_primitives::{TransactionSigned, TxType};
 
         let tx_inner = TxLegacy {
@@ -2103,7 +2069,6 @@ mod tests {
         provider.add_receipts(103, vec![]);
 
         // Add block body indices for each block so receipts can be fetched
-        use reth_db_api::models::StoredBlockBodyIndices;
         provider
             .add_block_body_indices(100, StoredBlockBodyIndices { first_tx_num: 0, tx_count: 1 });
         provider
@@ -2140,8 +2105,6 @@ mod tests {
 
     #[tokio::test]
     async fn test_range_scan_waits_for_blocking_io_permit() {
-        use reth_rpc_eth_api::helpers::SpawnBlocking;
-
         let provider = MockEthProvider::default();
         let header = alloy_consensus::Header::default();
         provider.add_header(header.hash_slow(), header);
@@ -2172,9 +2135,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_range_scan_across_windows() {
-        use alloy_consensus::TxLegacy;
         use alloy_primitives::{Address, Bloom, Bytes, Log, LogData, Signature};
-        use reth_db_api::models::StoredBlockBodyIndices;
         use reth_ethereum_primitives::{Block, BlockBody, Receipt, TransactionSigned};
 
         let provider = MockEthProvider::default();

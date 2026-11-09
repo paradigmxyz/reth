@@ -27,6 +27,9 @@ impl<'a> StaticFileCursor<'a> {
     }
 
     /// Gets a row of values.
+    ///
+    /// Returns `None` if the requested row is absent. Read and decompression failures are returned
+    /// as errors.
     pub fn get(
         &mut self,
         key_or_num: KeyOrNumber<'_>,
@@ -36,7 +39,7 @@ impl<'a> StaticFileCursor<'a> {
             return Ok(None)
         }
 
-        let row = match key_or_num {
+        match key_or_num {
             KeyOrNumber::Key(_) => unimplemented!(),
             KeyOrNumber::Number(n) => match self.jar().user_header().start() {
                 Some(offset) => {
@@ -48,9 +51,7 @@ impl<'a> StaticFileCursor<'a> {
                 None => Ok(None),
             },
         }
-        .unwrap_or(None);
-
-        Ok(row)
+        .map_err(ProviderError::other)
     }
 
     /// Gets one column value from a row.

@@ -13,7 +13,6 @@ workspace = true
 [dependencies]
 # reth
 reth-node-api.workspace = true
-reth-tracing.workspace = true
 
 # ethereum
 alloy-consensus.workspace = true
@@ -32,5 +31,6 @@ reqwest = { workspace = true, features = ["query"] }
 serde = { workspace = true, features = ["derive"] }
 tokio = { workspace = true, features = ["time"] }
 serde_json.workspace = true
+tracing.workspace = true
 
 ringbuffer.workspace = true

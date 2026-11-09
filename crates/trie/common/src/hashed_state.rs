@@ -1,4 +1,5 @@
 use crate::{
+    bundle_state::BundleAccount,
     prefix_set::{PrefixSetMut, TriePrefixSetsMut},
     utils::{extend_sorted_vec, kway_merge_disjoint_sorted, kway_merge_sorted},
     KeyHasher, MultiProofTargets, Nibbles,
@@ -14,8 +15,6 @@ use reth_primitives_traits::Account;
 
 #[cfg(feature = "rayon")]
 use rayon::prelude::{FromParallelIterator, IntoParallelIterator, ParallelIterator};
-
-use revm::database::BundleAccount;
 
 /// In-memory hashed state that stores account and storage changes with keccak256-hashed keys in
 /// hash maps.
@@ -828,12 +827,12 @@ impl Iterator for ChunkedHashedPostState {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::KeccakKeyHasher;
-    use alloy_primitives::Bytes;
-    use revm::{
-        database::{states::StorageSlot, AccountStatus, StorageWithOriginalValues},
-        state::{AccountInfo, Bytecode},
+    use crate::{
+        bundle_state::{AccountStatus, StorageSlot, StorageWithOriginalValues},
+        KeccakKeyHasher,
     };
+    use alloy_primitives::Bytes;
+    use evm2::{bytecode::Bytecode, evm::AccountInfo};
 
     fn bundle_hashed_storage(account: &BundleAccount) -> Option<HashedStorage> {
         let address = Address::ZERO;
@@ -885,7 +884,7 @@ mod tests {
         // Validate the account info.
         assert_eq!(
             *hashed_state.accounts.get(&keccak256(address)).unwrap(),
-            Some(account_info.into())
+            Some(Account::from(&account_info))
         );
     }
 
@@ -965,7 +964,7 @@ mod tests {
         };
 
         // Create hashed accounts with addresses.
-        let account_1 = (keccak256(address_1), Some(account_info_1.into()));
+        let account_1 = (keccak256(address_1), Some(Account::from(&account_info_1)));
         let account_2 = (keccak256(address_2), None);
 
         // Add accounts to the hashed post state.

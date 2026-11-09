@@ -116,6 +116,9 @@ pub struct DnsDiscoveryService<R: Resolver = DnsResolver> {
     recheck_tick: Interval,
     /// Links to the DNS networks to bootstrap.
     bootstrap_dns_networks: HashSet<LinkEntry>,
+    /// Links whose initial root lookup failed, retried on every recheck tick until a tree exists
+    /// for them.
+    failed_root_lookups: HashSet<LinkEntry>,
 }
 
 // === impl DnsDiscoveryService ===
@@ -154,6 +157,7 @@ impl<R: Resolver> DnsDiscoveryService<R> {
             recheck_interval,
             recheck_tick: recheck_tick(recheck_interval),
             bootstrap_dns_networks: bootstrap_dns_networks.unwrap_or_default(),
+            failed_root_lookups: Default::default(),
         }
     }
 
@@ -161,13 +165,14 @@ impl<R: Resolver> DnsDiscoveryService<R> {
     ///
     /// Note: requires a running runtime
     pub fn spawn(mut self) -> JoinHandle<()> {
-        tokio::task::spawn(async move {
+        let task = Box::pin(async move {
             self.bootstrap();
 
             while let Some(event) = self.next().await {
                 trace!(target: "disc::dns", ?event, "processed");
             }
-        })
+        });
+        tokio::task::spawn(task as Pin<Box<dyn Future<Output = ()> + Send>>)
     }
 
     /// Starts discovery with all configured bootstrap links
@@ -239,6 +244,7 @@ impl<R: Resolver> DnsDiscoveryService<R> {
                     entry.get_mut().update_root(root);
                 }
                 Entry::Vacant(entry) => {
+                    self.failed_root_lookups.remove(&link);
                     entry.insert(SyncTree::new(root, link));
                 }
             },
@@ -248,6 +254,8 @@ impl<R: Resolver> DnsDiscoveryService<R> {
                 // be released even though the lookup failed
                 if let Some(tree) = self.trees.get_mut(&link) {
                     tree.root_update_failed();
+                } else {
+                    self.failed_root_lookups.insert(link);
                 }
             }
         }
@@ -360,9 +368,14 @@ impl<R: Resolver> DnsDiscoveryService<R> {
             }
 
             // Register the wake-up for the next recheck. Polled to `Pending` so the waker is
-            // always armed; a ready tick needs no extra work because the trees were already polled
-            // with a current timestamp above.
-            while self.recheck_tick.poll_tick(cx).is_ready() {}
+            // always armed; the trees were already polled with a current timestamp above, so a
+            // ready tick only retries the links whose initial root lookup failed.
+            while self.recheck_tick.poll_tick(cx).is_ready() {
+                for link in self.failed_root_lookups.drain() {
+                    progress = true;
+                    self.queries.resolve_root(link);
+                }
+            }
 
             if !progress && self.queued_events.is_empty() {
                 return Poll::Pending
@@ -376,6 +389,8 @@ fn recheck_tick(recheck_interval: Duration) -> Interval {
     let mut tick = tokio::time::interval(recheck_interval);
     // a service that was starved must not then fire a burst of catch-up ticks
     tick.set_missed_tick_behavior(MissedTickBehavior::Delay);
+    // the first tick would otherwise complete immediately and retry failed root lookups right away.
+    tick.reset();
     tick
 }
 
@@ -435,7 +450,7 @@ mod tests {
     use enr::EnrKey;
     use reth_chainspec::MAINNET;
     use reth_ethereum_forks::{EthereumHardfork, ForkHash};
-    use secp256k1::rand::thread_rng;
+    use secp256k1::rand::rng;
     use std::{
         future::poll_fn,
         net::{IpAddr, Ipv4Addr},
@@ -449,7 +464,7 @@ mod tests {
     #[test]
     fn test_convert_enr_node_record() {
         // rig
-        let secret_key = SecretKey::new(&mut secp256k1::rand::thread_rng());
+        let secret_key = SecretKey::new(&mut secp256k1::rand::rng());
         let enr = Enr::builder()
             .ip("127.0.0.1".parse().unwrap())
             .udp4(9000)
@@ -472,7 +487,7 @@ mod tests {
     fn test_decode_and_convert_enr_node_record() {
         // rig
 
-        let secret_key = SecretKey::new(&mut secp256k1::rand::thread_rng());
+        let secret_key = SecretKey::new(&mut secp256k1::rand::rng());
         let enr = Enr::builder()
             .ip("127.0.0.1".parse().unwrap())
             .udp4(9000)
@@ -501,7 +516,7 @@ mod tests {
     async fn test_start_root_sync() {
         reth_tracing::init_test_tracing();
 
-        let secret_key = SecretKey::new(&mut thread_rng());
+        let secret_key = SecretKey::new(&mut rng());
         let resolver = MapResolver::default();
         let s = "enrtree-root:v1 e=QFT4PBCRX4XQCV3VUYJ6BTCEPU l=JGUFMSAGI7KZYB3P7IZW4S5Y3A seq=3 sig=3FmXuVwpa8Y7OstZTx9PIb1mt8FrW7VpDOFv4AaGCsZ2EIHmhraWhe4NxYhQDlw5MjeFXYMbJjsPeKlHzmJREQE";
         let mut root: TreeRootEntry = s.parse().unwrap();
@@ -529,7 +544,7 @@ mod tests {
     async fn test_get_node() {
         reth_tracing::init_test_tracing();
 
-        let secret_key = SecretKey::new(&mut thread_rng());
+        let secret_key = SecretKey::new(&mut rng());
         let resolver = MapResolver::default();
         let s = "enrtree-root:v1 e=QFT4PBCRX4XQCV3VUYJ6BTCEPU l=JGUFMSAGI7KZYB3P7IZW4S5Y3A seq=3 sig=3FmXuVwpa8Y7OstZTx9PIb1mt8FrW7VpDOFv4AaGCsZ2EIHmhraWhe4NxYhQDlw5MjeFXYMbJjsPeKlHzmJREQE";
         let mut root: TreeRootEntry = s.parse().unwrap();
@@ -590,7 +605,7 @@ mod tests {
             ..Default::default()
         };
 
-        let secret_key = SecretKey::new(&mut thread_rng());
+        let secret_key = SecretKey::new(&mut rng());
         let resolver = Arc::new(MapResolver::default());
         let s = "enrtree-root:v1 e=QFT4PBCRX4XQCV3VUYJ6BTCEPU l=JGUFMSAGI7KZYB3P7IZW4S5Y3A seq=3 sig=3FmXuVwpa8Y7OstZTx9PIb1mt8FrW7VpDOFv4AaGCsZ2EIHmhraWhe4NxYhQDlw5MjeFXYMbJjsPeKlHzmJREQE";
         let mut root: TreeRootEntry = s.parse().unwrap();
@@ -648,7 +663,7 @@ mod tests {
             ..Default::default()
         };
 
-        let secret_key = SecretKey::new(&mut thread_rng());
+        let secret_key = SecretKey::new(&mut rng());
         let resolver = Arc::new(MapResolver::default());
         let s = "enrtree-root:v1 e=QFT4PBCRX4XQCV3VUYJ6BTCEPU l=JGUFMSAGI7KZYB3P7IZW4S5Y3A seq=3 sig=3FmXuVwpa8Y7OstZTx9PIb1mt8FrW7VpDOFv4AaGCsZ2EIHmhraWhe4NxYhQDlw5MjeFXYMbJjsPeKlHzmJREQE";
         let mut root: TreeRootEntry = s.parse().unwrap();
@@ -695,17 +710,16 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_recheck_tree_survives_unchanged_root() {
+    async fn test_retry_failed_initial_root_lookup() {
         reth_tracing::init_test_tracing();
 
         let config = DnsDiscoveryConfig {
             recheck_interval: Duration::from_millis(100),
-            // the default 3/s would leave the recheck lookup queued behind the initial tree walk
             max_requests_per_sec: NonZeroUsize::new(50).unwrap(),
             ..Default::default()
         };
 
-        let secret_key = SecretKey::new(&mut thread_rng());
+        let secret_key = SecretKey::new(&mut rng());
         let resolver = Arc::new(MapResolver::default());
         let s = "enrtree-root:v1 e=QFT4PBCRX4XQCV3VUYJ6BTCEPU l=JGUFMSAGI7KZYB3P7IZW4S5Y3A seq=3 sig=3FmXuVwpa8Y7OstZTx9PIb1mt8FrW7VpDOFv4AaGCsZ2EIHmhraWhe4NxYhQDlw5MjeFXYMbJjsPeKlHzmJREQE";
         let mut root: TreeRootEntry = s.parse().unwrap();
@@ -713,43 +727,34 @@ mod tests {
 
         let link =
             LinkEntry { domain: "nodes.example.org".to_string(), pubkey: secret_key.public() };
-        resolver.insert(link.domain.clone(), root.to_string());
 
         let mut service = DnsDiscoveryService::new(Arc::clone(&resolver), config.clone());
+
+        // the root is not published yet, so the initial lookup fails.
         service.sync_tree_with_link(link.clone());
+        poll_fn(|cx| {
+            assert!(service.poll(cx).is_pending());
+            Poll::Ready(())
+        })
+        .await;
+        assert!(service.trees.is_empty());
 
-        // first recheck sees the very same root, which must not take the tree out of rotation
-        for _ in 0..10 {
-            poll_fn(|cx| {
-                let _ = service.poll(cx);
-                Poll::Ready(())
-            })
-            .await;
-            tokio::time::sleep(config.recheck_interval / 2).await;
-        }
+        resolver.insert(link.domain.clone(), root.to_string());
+        tokio::time::sleep(config.recheck_interval).await;
 
-        // now publish a change and expect the tree to still pick it up
-        let mut new_root = root.clone();
-        new_root.sequence_number = new_root.sequence_number.saturating_add(1);
-        let enr = Enr::empty(&secret_key).unwrap();
-        let enr_txt = enr.to_base64();
-        new_root.enr_root = entry_hash(&enr_txt);
-        new_root.sign(&secret_key).unwrap();
-        resolver.insert(link.domain.clone(), new_root.to_string());
-        resolver.insert(format!("{}.{}", new_root.enr_root.clone(), link.domain), enr_txt);
+        poll_fn(|cx| {
+            let _ = service.poll(cx);
+            Poll::Ready(())
+        })
+        .await;
 
-        let event = tokio::time::timeout(Duration::from_secs(10), poll_fn(|cx| service.poll(cx)))
-            .await
-            .expect("tree stopped rechecking after an unchanged root");
-
-        match event {
-            DnsDiscoveryEvent::Enr(discovered) => assert_eq!(discovered, enr),
-        }
+        let tree = service.trees.get(&link).unwrap();
+        assert_eq!(tree.root().clone(), root);
     }
 
     #[tokio::test]
     async fn test_hash_mismatch_is_not_cached_and_does_not_poison_same_hash() {
-        let secret_key = SecretKey::new(&mut thread_rng());
+        let secret_key = SecretKey::new(&mut rng());
         let resolver = MapResolver::default();
 
         let invalid_entry = "enrtree-branch:AAAAAAAAAAAAAAAAAAAA".to_string();

@@ -11,6 +11,7 @@ use reth_storage_errors::provider::{ProviderError, ProviderResult};
 use reth_trie::{
     hashed_cursor::{zero_destroyed_account_storage, HashedPostStateCursorFactory},
     proof::{Proof, StorageProof},
+    proof_v2::MultiProofCalculator,
     trie_cursor::InMemoryTrieCursorFactory,
     updates::TrieUpdates,
     witness::TrieWitness,
@@ -29,7 +30,6 @@ type DbStorageRoot<'a, TX, A> = StorageRoot<
     reth_trie_db::DatabaseHashedCursorFactory<&'a TX>,
 >;
 type DbStorageProof<'a, TX, A> = StorageProof<
-    'static,
     reth_trie_db::DatabaseTrieCursorFactory<&'a TX, A>,
     reth_trie_db::DatabaseHashedCursorFactory<&'a TX>,
 >;
@@ -230,12 +230,20 @@ impl<Provider: DBProvider + StorageSettingsCache> StateProofProvider
 
     fn multiproof_v2(
         &self,
-        input: TrieInput,
         targets: MultiProofTargetsV2,
+        _requires_masks: bool,
     ) -> ProviderResult<DecodedMultiProofV2> {
+        // The latest database trie is consistent with its hashed state, so masks are always exact
+        // and `requires_masks` needs no special handling.
         reth_trie_db::with_adapter!(self.0, |A| {
-            let proof = <DbProof<'_, _, A> as DatabaseProof>::from_tx(self.tx());
-            proof.overlay_multiproof_v2(input, targets).map_err(ProviderError::from)
+            MultiProofCalculator::new(
+                reth_trie_db::DatabaseTrieCursorFactory::<_, A>::new(self.tx()),
+                reth_trie_db::DatabaseHashedCursorFactory::new(self.tx()),
+                Default::default(),
+                Default::default(),
+            )
+            .multiproof(targets)
+            .map_err(ProviderError::from)
         })
     }
 
@@ -274,7 +282,7 @@ impl<Provider: DBProvider + StorageSettingsCache> StateProofProvider
 impl<Provider: DBProvider> HashedPostStateProvider for LatestStateProviderRef<'_, Provider> {
     fn hashed_post_state(
         &self,
-        bundle_state: &revm::database::BundleState,
+        bundle_state: &reth_trie::bundle_state::BundleState,
     ) -> ProviderResult<HashedPostState> {
         let mut hashed_state =
             HashedPostState::from_bundle_state::<KeccakKeyHasher>(bundle_state.state());
@@ -318,7 +326,10 @@ impl<Provider: DBProvider + BlockHashReader> BytecodeReader
 {
     /// Get account code by its hash
     fn bytecode_by_hash(&self, code_hash: &B256) -> ProviderResult<Option<Bytecode>> {
-        self.tx().get_by_encoded_key::<tables::Bytecodes>(code_hash).map_err(Into::into)
+        self.tx()
+            .prefetch(true)
+            .get_by_encoded_key::<tables::Bytecodes>(code_hash)
+            .map_err(Into::into)
     }
 }
 

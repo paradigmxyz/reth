@@ -1,3 +1,4 @@
+use alloy_consensus::Header;
 use alloy_eips::{
     eip2718::Encodable2718, eip7910::EthConfig, eip7928::BlockAccessList, BlockNumberOrTag,
 };
@@ -24,7 +25,10 @@ use alloy_rpc_types_trace::geth::{
 };
 use jsonrpsee::core::client::{ClientT, Subscription, SubscriptionClientT};
 use rand::{rngs::StdRng, Rng, SeedableRng};
-use reth_chainspec::{EthChainSpec, EthereumHardfork};
+use reth_chainspec::{
+    sepolia::{SEPOLIA_AMSTERDAM_TIMESTAMP, SEPOLIA_BPO2_TIMESTAMP},
+    EthChainSpec, EthereumHardfork, SEPOLIA,
+};
 use reth_e2e_test_utils::{
     receipt::PendingTransactionExt, test_chain_spec, test_chain_spec_builder,
     transaction::TransactionTestContext, wait::poll_until, wallet::Wallet, E2ETestSetupExt,
@@ -38,10 +42,12 @@ use reth_node_core::{
 };
 use reth_node_ethereum::EthereumNode;
 use reth_payload_primitives::BuiltPayload;
-use reth_primitives_traits::Block as _;
+use reth_primitives_traits::{Block as _, SealedHeader, SignedTransaction};
+use reth_provider::CanonChainTracker;
 use reth_rpc_api::servers::AdminApiServer;
 use reth_rpc_server_types::RpcModuleSelection;
 use reth_tasks::Runtime;
+use reth_transaction_pool::test_utils::TransactionGenerator;
 use std::{
     net::{IpAddr, Ipv4Addr},
     sync::Arc,
@@ -64,9 +70,6 @@ alloy_sol_types::sol! {
 
 #[tokio::test]
 async fn test_rpc_shares_sender_recovery_cache_with_execution() -> eyre::Result<()> {
-    use reth_primitives_traits::SignedTransaction;
-    use reth_transaction_pool::test_utils::TransactionGenerator;
-
     let chain_spec = test_chain_spec(EthereumHardfork::Cancun);
     let (node, _) = EthereumNode::test_setup(1, chain_spec).build_single().await?;
     let cache = node.inner.evm_config.sender_recovery_cache.as_ref().unwrap();
@@ -473,56 +476,6 @@ async fn test_flashbots_validate_v3() -> eyre::Result<()> {
 }
 
 #[tokio::test]
-async fn test_flashbots_validate_uses_shared_sender_recovery_cache() -> eyre::Result<()> {
-    reth_tracing::init_test_tracing();
-
-    let (mut node, wallet) =
-        EthereumNode::test_setup_for(EthereumHardfork::Cancun).build_single().await?;
-    let cache = node.inner.evm_config.sender_recovery_cache.clone().expect("cache is enabled");
-
-    let signer = wallet.signer(0);
-    let sender = signer.address();
-    let provider = node.rpc_provider_with_wallet(signer);
-
-    let tx_hash = *provider
-        .send_transaction(TransactionRequest::default().to(Address::ZERO))
-        .await?
-        .tx_hash();
-    // Transaction ingress has already recovered the sender through the shared cache.
-    let payload = node.new_payload().await?;
-    assert!(payload.block().body().transactions.iter().any(|tx| *tx.tx_hash() == tx_hash));
-    assert_eq!(cache.get(&tx_hash), Some(sender));
-
-    let request = BuilderBlockValidationRequestV3 {
-        request: SignedBidSubmissionV3 {
-            message: BidTrace {
-                parent_hash: payload.block().parent_hash,
-                block_hash: payload.block().hash(),
-                gas_used: payload.block().gas_used,
-                gas_limit: payload.block().gas_limit,
-                ..Default::default()
-            },
-            execution_payload: ExecutionPayloadV3::from_block_unchecked(
-                payload.block().hash(),
-                &payload.block().clone().into_block(),
-            ),
-            blobs_bundle: BlobsBundleV1::new([]),
-            signature: Default::default(),
-        },
-        parent_beacon_block_root: payload.block().parent_beacon_block_root.unwrap(),
-        registered_gas_limit: payload.block().gas_limit,
-    };
-
-    provider
-        .raw_request::<_, ()>("flashbots_validateBuilderSubmissionV3".into(), (&request,))
-        .await?;
-    // Validation accepts the submission while reusing the sender cached by transaction ingress.
-    assert_eq!(cache.get(&tx_hash), Some(sender));
-
-    Ok(())
-}
-
-#[tokio::test]
 async fn test_flashbots_validate_v4() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
 
@@ -882,14 +835,6 @@ async fn test_eth_config() -> eyre::Result<()> {
 
 #[tokio::test]
 async fn test_sepolia_amsterdam_eth_config() -> eyre::Result<()> {
-    use alloy_consensus::Header;
-    use reth_chainspec::{
-        sepolia::{SEPOLIA_AMSTERDAM_TIMESTAMP, SEPOLIA_BPO2_TIMESTAMP},
-        SEPOLIA,
-    };
-    use reth_primitives_traits::SealedHeader;
-    use reth_provider::CanonChainTracker;
-
     let node_config = NodeConfig::test()
         .with_chain(SEPOLIA.clone())
         .with_unused_ports()
@@ -960,6 +905,33 @@ async fn test_admin_external_ip() -> eyre::Result<()> {
     let info = api.node_info().await.unwrap();
 
     assert_eq!(info.ip, external_ip);
+
+    Ok(())
+}
+
+// <https://github.com/paradigmxyz/reth/issues/27867>
+#[tokio::test]
+async fn test_disable_auth_server_skips_jwt_secret() -> eyre::Result<()> {
+    reth_tracing::init_test_tracing();
+
+    let missing_dir = tempfile::tempdir()?;
+    let missing = missing_dir.path().join("missing-jwt.hex");
+    for auth_jwtsecret in [None, Some(missing.clone())] {
+        let mut rpc = RpcServerArgs::default().with_unused_ports();
+        rpc.disable_auth_server = true;
+        rpc.auth_jwtsecret = auth_jwtsecret;
+        let node_config = NodeConfig::test()
+            .with_chain(Arc::new(test_chain_spec_builder().build()))
+            .with_unused_ports()
+            .with_rpc(rpc);
+        let NodeHandle { node, node_exit_future: _ } = NodeBuilder::new(node_config)
+            .testing_node(Runtime::test())
+            .node(EthereumNode::default())
+            .launch()
+            .await?;
+        assert!(!node.data_dir.jwt().exists());
+    }
+    assert!(!missing.exists());
 
     Ok(())
 }
@@ -1138,6 +1110,24 @@ async fn eth_call_caps_execution_gas_under_amsterdam() -> eyre::Result<()> {
         }
     }
 
+    Ok(())
+}
+
+#[tokio::test]
+async fn eth_call_without_gas_with_max_rpc_gas_cap() -> eyre::Result<()> {
+    let (node, _) = EthereumNode::test_setup_for(EthereumHardfork::Amsterdam)
+        .with_rpc_modifier(|mut rpc| {
+            rpc.rpc_gas_cap = u64::MAX;
+            rpc
+        })
+        .build_single()
+        .await?;
+
+    let result = node
+        .rpc_provider()
+        .call(TransactionRequest::default().to(Address::with_last_byte(0x42)))
+        .await?;
+    assert_eq!(result, Bytes::new());
     Ok(())
 }
 

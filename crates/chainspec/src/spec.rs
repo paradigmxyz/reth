@@ -1,5 +1,4 @@
 pub use alloy_eips::eip1559::BaseFeeParams;
-use alloy_evm::eth::spec::EthExecutorSpec;
 
 use crate::{
     constants::{MAINNET_DEPOSIT_CONTRACT, MAINNET_PRUNE_DELETE_LIMIT},
@@ -41,6 +40,7 @@ use reth_ethereum_forks::{
 };
 use reth_network_peers::{holesky_nodes, hoodi_nodes, mainnet_nodes, sepolia_nodes, NodeRecord};
 use reth_primitives_traits::{sync::LazyLock, BlockHeader, SealedHeader};
+use NamedChain as C;
 
 /// Helper method building a [`Header`] given [`Genesis`] and [`ChainHardforks`].
 pub fn make_genesis_header(genesis: &Genesis, hardforks: &ChainHardforks) -> Header {
@@ -771,8 +771,6 @@ impl<H: BlockHeader> ChainSpec<H> {
 
     /// Returns the known bootnode records for the given chain.
     pub fn bootnodes(&self) -> Option<Vec<NodeRecord>> {
-        use NamedChain as C;
-
         match self.chain.try_into().ok()? {
             C::Mainnet => Some(mainnet_nodes()),
             C::Sepolia => Some(sepolia_nodes()),
@@ -1262,12 +1260,6 @@ impl From<&Arc<ChainSpec>> for ChainSpecBuilder {
     }
 }
 
-impl<H: BlockHeader> EthExecutorSpec for ChainSpec<H> {
-    fn deposit_contract_address(&self) -> Option<Address> {
-        self.deposit_contract.map(|deposit_contract| deposit_contract.address)
-    }
-}
-
 /// `PoS` deposit contract details.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct DepositContract {
@@ -1304,9 +1296,7 @@ mod tests {
 
     use super::*;
     use alloy_chains::Chain;
-    use alloy_consensus::constants::ETH_TO_WEI;
     use alloy_eips::{eip4844::BLOB_TX_MIN_BLOB_GASPRICE, eip7840::BlobParams};
-    use alloy_evm::block::calc::{base_block_reward, block_reward};
     use alloy_genesis::{ChainConfig, GenesisAccount};
     use alloy_primitives::{b256, hex};
     use alloy_trie::{TrieAccount, EMPTY_ROOT_HASH};
@@ -1828,6 +1818,27 @@ Post-merge hard forks (timestamp based):
                         next: hoodi::HOODI_BPO1_TIMESTAMP,
                     },
                 ),
+                // First BPO1 block.
+                (
+                    Head {
+                        number: 0,
+                        timestamp: hoodi::HOODI_BPO1_TIMESTAMP,
+                        ..Default::default()
+                    },
+                    ForkId {
+                        hash: ForkHash(hex!("0x3893353e")),
+                        next: hoodi::HOODI_BPO2_TIMESTAMP,
+                    },
+                ),
+                // First BPO2 block.
+                (
+                    Head {
+                        number: 0,
+                        timestamp: hoodi::HOODI_BPO2_TIMESTAMP,
+                        ..Default::default()
+                    },
+                    ForkId { hash: ForkHash(hex!("0x23aa1351")), next: 0 },
+                ),
             ],
         )
     }
@@ -2020,7 +2031,7 @@ Post-merge hard forks (timestamp based):
             &DEV,
             &[(
                 Head { number: 0, ..Default::default() },
-                ForkId { hash: ForkHash(hex!("0x0b1a4ef7")), next: 0 },
+                ForkId { hash: ForkHash(hex!("0xd2be4e0a")), next: 0 },
             )],
         )
     }
@@ -2920,42 +2931,6 @@ Post-merge hard forks (timestamp based):
             .zip(hardforks.iter())
             .all(|(expected, actual)| &**expected == *actual));
         assert_eq!(expected_hardforks.len(), hardforks.len());
-    }
-
-    #[test]
-    fn test_calc_base_block_reward() {
-        // ((block number, td), reward)
-        let cases = [
-            // Pre-byzantium
-            ((0, U256::ZERO), Some(ETH_TO_WEI * 5)),
-            // Byzantium
-            ((4370000, U256::ZERO), Some(ETH_TO_WEI * 3)),
-            // Petersburg
-            ((7280000, U256::ZERO), Some(ETH_TO_WEI * 2)),
-            // Merge
-            ((15537394, U256::from(58_750_000_000_000_000_000_000_u128)), None),
-        ];
-
-        for ((block_number, _td), expected_reward) in cases {
-            assert_eq!(base_block_reward(&*MAINNET, block_number), expected_reward);
-        }
-    }
-
-    #[test]
-    fn test_calc_full_block_reward() {
-        let base_reward = ETH_TO_WEI;
-        let one_thirty_twoth_reward = base_reward >> 5;
-
-        // (num_ommers, reward)
-        let cases = [
-            (0, base_reward),
-            (1, base_reward + one_thirty_twoth_reward),
-            (2, base_reward + one_thirty_twoth_reward * 2),
-        ];
-
-        for (num_ommers, expected_reward) in cases {
-            assert_eq!(block_reward(base_reward, num_ommers), expected_reward);
-        }
     }
 
     #[test]

@@ -100,18 +100,20 @@ where
 mod tests {
     use super::*;
     use crate::snap::tests::pipeline_on;
-    use alloy_eips::BlockNumHash;
     use alloy_primitives::B256;
     use reth_chainspec::{ChainSpec, ChainSpecBuilder};
     use reth_network_p2p::NoopFullBlockClient;
     use reth_node_core::args::NetworkArgs;
+    use reth_primitives_traits::{Header, SealedHeader};
     use reth_provider::{
-        test_utils::{create_test_provider_factory_with_chain_spec, MockNodeTypesWithDB},
-        ChainSpecProvider, DBProvider, MetadataWriter, ProviderError, StageCheckpointWriter,
-        StorageSettings, StorageSettingsCache,
+        test_utils::{
+            create_test_provider_factory_with_chain_spec, insert_headers, MockNodeTypesWithDB,
+        },
+        ChainSpecProvider, DBProvider, MetadataWriter, ProviderError, StorageSettings,
+        StorageSettingsCache,
     };
     use reth_snap_sync::{SnapAttemptStore, SnapGeneration};
-    use reth_stages::{StageCheckpoint, StageId, StageSetBuilder};
+    use reth_stages::StageSetBuilder;
     use reth_tasks::Runtime;
     use std::sync::Arc;
 
@@ -177,13 +179,10 @@ mod tests {
     }
 
     #[test]
-    fn building_refuses_snap_into_a_legacy_layout_stored_at_genesis() {
+    fn building_refuses_snap_into_a_legacy_layout() {
         let factory = factory(amsterdam());
-        // Genesis stores the settings and sets every checkpoint to its block.
-        let provider = factory.database_provider_rw().unwrap();
-        provider.write_storage_settings(StorageSettings::v1()).unwrap();
-        provider.save_stage_checkpoint(StageId::Execution, StageCheckpoint::new(0)).unwrap();
-        provider.commit().unwrap();
+        // Genesis caches the stored layout before the backfill is built.
+        factory.set_storage_settings_cache(StorageSettings::v1());
 
         // Recovery runs before genesis stores the settings, so only the build can refuse it.
         let error = build(true, factory).unwrap_err();
@@ -199,8 +198,13 @@ mod tests {
         factory.set_storage_settings_cache(StorageSettings::v2());
         let provider = factory.database_provider_rw().unwrap();
         provider.write_storage_settings(StorageSettings::v2()).unwrap();
-        let pivot = BlockNumHash::new(10, B256::repeat_byte(1));
-        provider.start_snap_attempt(SnapGeneration::new(pivot, B256::repeat_byte(2))).unwrap();
+        provider.commit().unwrap();
+        let genesis = SealedHeader::seal_slow(Header::default());
+        insert_headers(&factory, std::slice::from_ref(&genesis));
+        let provider = factory.database_provider_rw().unwrap();
+        provider
+            .start_snap_attempt(SnapGeneration::new(genesis.num_hash(), genesis.state_root))
+            .unwrap();
         provider.commit().unwrap();
 
         let error = recover(false, &factory).unwrap_err();

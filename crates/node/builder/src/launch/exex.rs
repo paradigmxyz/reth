@@ -28,7 +28,7 @@ pub struct ExExLauncher<Node: FullNodeComponents> {
     capacity: usize,
 }
 
-impl<Node: FullNodeComponents + Clone> ExExLauncher<Node> {
+impl<Node: FullNodeComponents> ExExLauncher<Node> {
     /// Create a new `ExExLauncher` with the given extensions.
     pub const fn new(
         head: Head,

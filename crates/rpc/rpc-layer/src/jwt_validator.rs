@@ -23,7 +23,7 @@ impl JwtAuthValidator {
 impl AuthValidator for JwtAuthValidator {
     fn validate(&self, headers: &HeaderMap) -> Result<(), HttpResponse> {
         match get_bearer(headers) {
-            Some(jwt) => match self.secret.validate(&jwt) {
+            Some(jwt) => match self.secret.validate(jwt) {
                 Ok(_) => Ok(()),
                 Err(e) => {
                     error!(target: "engine::jwt-validator", "Invalid JWT: {e}");
@@ -42,18 +42,9 @@ impl AuthValidator for JwtAuthValidator {
 }
 
 /// This is an utility function that retrieves a bearer
-/// token from an authorization Http header.
-fn get_bearer(headers: &HeaderMap) -> Option<String> {
-    let header = headers.get(header::AUTHORIZATION)?;
-    let auth: &str = header.to_str().ok()?;
-    let prefix = "Bearer ";
-
-    if !auth.starts_with(prefix) {
-        return None;
-    }
-
-    let token: &str = &auth[prefix.len()..];
-    Some(token.into())
+/// token from the Authorization header.
+fn get_bearer(headers: &HeaderMap) -> Option<&str> {
+    headers.get(header::AUTHORIZATION)?.to_str().ok()?.strip_prefix("Bearer ")
 }
 
 fn err_response(err: JwtError) -> HttpResponse {
@@ -79,6 +70,10 @@ mod tests {
         headers.insert(header::AUTHORIZATION, bearer.parse().unwrap());
         let token = get_bearer(&headers).unwrap();
         assert_eq!(token, jwt);
+        assert_eq!(
+            token.as_ptr(),
+            headers[header::AUTHORIZATION].as_bytes()[bearer.len() - jwt.len()..].as_ptr()
+        );
     }
 
     #[test]
