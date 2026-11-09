@@ -243,6 +243,7 @@ impl BlobStore for DiskFileBlobStore {
         let txs_to_delete = std::mem::take(&mut *self.inner.txs_to_delete.write());
         let mut stat = BlobStoreCleanupStat::default();
         let mut subsize = 0;
+        let mut removed = 0;
         debug!(target:"txpool::blob", num_blobs=%txs_to_delete.len(), "Removing blobs from disk");
         for tx in txs_to_delete {
             let path = self.inner.blob_disk_file(tx);
@@ -251,9 +252,10 @@ impl BlobStore for DiskFileBlobStore {
                 Ok(_) => {
                     stat.delete_succeed += 1;
                     subsize += filesize;
+                    removed += 1;
                 }
                 Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-                    // Already deleted by a concurrent cleanup task
+                    // Already deleted, and uncounted, by an earlier or concurrent cleanup
                     stat.delete_succeed += 1;
                 }
                 Err(e) => {
@@ -264,7 +266,7 @@ impl BlobStore for DiskFileBlobStore {
             };
         }
         self.inner.size_tracker.sub_size(subsize as usize);
-        self.inner.size_tracker.sub_len(stat.delete_succeed);
+        self.inner.size_tracker.sub_len(removed);
         stat
     }
 
@@ -933,11 +935,16 @@ mod tests {
 
         // queued deletions keep the blobs counted, so the store isn't reported empty before
         // cleanup ran
-        store.delete_all(hashes).unwrap();
+        store.delete_all(vec![hashes[0]]).unwrap();
         assert_eq!(store.blobs_len(), 2);
 
         store.cleanup();
-        assert_eq!(store.blobs_len(), 0);
+        assert_eq!(store.blobs_len(), 1);
+
+        // the removed blob is still cached, so it can be queued again
+        store.delete(hashes[0]).unwrap();
+        store.cleanup();
+        assert_eq!(store.blobs_len(), 1);
     }
 
     #[test]
