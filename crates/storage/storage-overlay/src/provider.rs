@@ -54,6 +54,10 @@ use std::{
 };
 use tracing::instrument;
 
+/// Most times [`OverlayStateProviderFactory::database_provider_ro`] reopens its database provider
+/// to pin a Finish chain that persistence pruned after the provider opened.
+const MAX_FINISH_STATE_REOPENS: usize = 2;
+
 /// Factory for creating overlay state providers with optional reverts and overlays.
 ///
 /// This factory allows building an `OverlayStateProvider` whose DB state has been reverted to a
@@ -136,19 +140,29 @@ where
     ) -> ProviderResult<OverlayStateProvider<OwnedProvider<F::Provider>, N>> {
         let overall_start = Instant::now();
 
-        // Get a read-only provider
-        let provider = {
+        let open = || {
             let start = Instant::now();
             let res = self.factory.database_provider_ro()?;
             self.metrics.create_provider_duration.record(start.elapsed());
-            res
+            ProviderResult::Ok(res)
         };
+        let mut provider = open()?;
+        let mut overlay_builder = self.overlay_builder.clone();
+        let mut missing_finish = overlay_builder.pin_finish_state(&provider);
+        for _ in 0..MAX_FINISH_STATE_REOPENS {
+            let Some(finish) = missing_finish else { break };
+            // The manager prunes the Finish chain only after persistence commits its state, so a
+            // reopened provider reads newer frontiers unless the manager never held that chain.
+            provider = open()?;
+            missing_finish =
+                overlay_builder.pin_finish_state(&provider).filter(|reopened| *reopened != finish);
+        }
 
         let is_v2 = provider.cached_storage_settings().is_v2();
         self.metrics.database_provider_ro_duration.record(overall_start.elapsed());
         Ok(OverlayStateProvider::from_parts(
             OwnedProvider(provider),
-            Some(self.overlay_builder.clone()),
+            Some(overlay_builder),
             Some(Arc::clone(&self.state_trie_overlay_cache)),
             self.metrics.clone(),
             self.proof_cursor_metrics.clone(),
@@ -187,10 +201,14 @@ where
 
 impl<Provider: DBProvider, N: NodePrimitives> OverlayStateProvider<OwnedProvider<Provider>, N> {
     /// Creates an overlay state provider over an already-open database provider.
-    pub fn new(provider: Provider, overlay_builder: OverlayBuilder<N>) -> Self
+    ///
+    /// The overlay builder pins the in-memory chain ending at the provider's Finish block now, so
+    /// open the provider right before calling this.
+    pub fn new(provider: Provider, mut overlay_builder: OverlayBuilder<N>) -> Self
     where
-        Provider: StorageSettingsCache,
+        Provider: StorageSettingsCache + StageCheckpointReader + BlockNumReader,
     {
+        overlay_builder.pin_finish_state(&provider);
         let is_v2 = provider.cached_storage_settings().is_v2();
         let manager = overlay_builder.overlay_manager();
         let metrics = manager.provider_metrics().clone();
@@ -1471,5 +1489,63 @@ mod tests {
 
         assert_eq!(provider.basic_account(&address).unwrap(), Some(account));
         assert_eq!(provider.storage(address, storage_key).unwrap(), Some(storage));
+    }
+
+    #[test]
+    fn provider_pins_finish_chain_before_it_is_pruned() {
+        let (factory, blocks) = setup_frontiers(1, 3);
+        let manager = OverlayManager::default();
+        for block in &blocks[2..=3] {
+            manager.insert_block(block.clone());
+        }
+        let state_provider_factory = OverlayStateProviderFactory::new(
+            factory.clone(),
+            manager.overlay_builder(blocks[1].recovered_block().hash()),
+        );
+        // A separate factory, so the provider under test can't reuse this overlay from the cache.
+        let expected = account_keys(
+            OverlayStateProviderFactory::new(
+                factory.clone(),
+                manager.overlay_builder(blocks[1].recovered_block().hash()),
+            )
+            .database_provider_ro()
+            .unwrap()
+            .state_trie_overlay(false)
+            .unwrap(),
+        );
+        let from_factory = state_provider_factory.database_provider_ro().unwrap();
+        let direct = OverlayStateProvider::new(
+            factory.provider().unwrap(),
+            manager.overlay_builder(blocks[1].recovered_block().hash()),
+        );
+
+        // Persistence commits the masked blocks' state and prunes them while both providers still
+        // read the frontiers they opened at.
+        manager.remove_blocks(blocks[2..=3].iter().map(|block| block.recovered_block().hash()));
+
+        assert_eq!(account_keys(from_factory.state_trie_overlay(false).unwrap()), expected);
+        assert_eq!(account_keys(direct.state_trie_overlay(false).unwrap()), expected);
+    }
+
+    #[test]
+    fn provider_opens_without_managed_finish_chain() {
+        let (factory, blocks) = setup_frontiers(1, 3);
+        let state_provider_factory = OverlayStateProviderFactory::new(
+            factory,
+            OverlayManager::<EthPrimitives>::default()
+                .overlay_builder(blocks[1].recovered_block().hash()),
+        );
+
+        let provider = state_provider_factory.database_provider_ro().unwrap();
+
+        let error = provider.state_trie_overlay(false).unwrap_err();
+        assert_eq!(
+            error.to_string(),
+            format!(
+                "state trie overlay for tip {} cannot be anchored to {} with current blocks",
+                blocks[3].recovered_block().hash(),
+                blocks[1].recovered_block().hash()
+            )
+        );
     }
 }

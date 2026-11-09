@@ -197,6 +197,12 @@ pub struct OverlayBuilder<N: NodePrimitives = EthPrimitives> {
     no_reverts: bool,
     /// Cache behavior for the overlays this builder resolves.
     overlay_cache_config: OverlayCacheConfig,
+    /// Snapshot of the in-memory chain ending at the Finish block, pinned by
+    /// [`Self::pin_finish_state`] while the state trie frontier lags Finish.
+    ///
+    /// Persistence prunes these blocks from the manager once it writes their state, while a
+    /// provider opened before that commit still reads the older frontiers and needs them.
+    finish_state: Option<Arc<BlockState<N>>>,
 }
 
 impl<N: NodePrimitives> OverlayBuilder<N> {
@@ -213,6 +219,7 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
             reused_sparse_trie_anchor_hash: None,
             no_reverts: false,
             overlay_cache_config: OverlayCacheConfig::default(),
+            finish_state: None,
         }
     }
 
@@ -235,6 +242,28 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
     /// Returns the manager this builder resolves overlays from.
     pub(crate) const fn overlay_manager(&self) -> &OverlayManager<N> {
         &self.overlay_manager
+    }
+
+    /// Pins the in-memory chain ending at `provider`'s Finish block while the state trie frontier
+    /// lags it, so overlays later built over `provider` don't depend on the manager still holding
+    /// those blocks.
+    ///
+    /// Returns the Finish block if its chain had to be pinned but the manager no longer holds it.
+    pub(crate) fn pin_finish_state<Provider>(&mut self, provider: &Provider) -> Option<BlockNumHash>
+    where
+        Provider: StageCheckpointReader + BlockNumReader,
+    {
+        // Building an overlay reads the same frontiers and returns this error, so there is
+        // nothing to pin here.
+        let Ok((state_trie_tip_block, finish_tip_block)) = database_state_frontiers(provider)
+        else {
+            return None
+        };
+        if state_trie_tip_block == finish_tip_block {
+            return None
+        }
+        self.finish_state = self.overlay_manager.block_state(finish_tip_block.hash).map(Arc::new);
+        self.finish_state.is_none().then_some(finish_tip_block)
     }
 
     /// Appends an executed block to this builder's in-memory parent state.
@@ -466,15 +495,19 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
                     // Revert prefixes describe changes since the anchor, not stale hashes in
                     // masked DB rows. Complete the trie at Finish before applying those prefixes.
                     let start = Instant::now();
-                    let finish_state = self
-                        .overlay_manager
-                        .block_state(finish_tip_block.hash)
-                        .ok_or_else(|| {
-                            ProviderError::other(StateTrieOverlayError {
-                                tip_hash: finish_tip_block.hash,
-                                anchor_hash: state_trie_tip_block.hash,
-                            })
-                        })?;
+                    let finish_state = match &self.finish_state {
+                        Some(state) if state.hash() == finish_tip_block.hash => Arc::clone(state),
+                        _ => self
+                            .overlay_manager
+                            .block_state(finish_tip_block.hash)
+                            .map(Arc::new)
+                            .ok_or_else(|| {
+                                ProviderError::other(StateTrieOverlayError {
+                                    tip_hash: finish_tip_block.hash,
+                                    anchor_hash: state_trie_tip_block.hash,
+                                })
+                            })?,
+                    };
                     let (nodes, _) = self
                         .overlay_manager
                         .overlay_for_parent(
