@@ -791,18 +791,12 @@ struct OverlayCacheKey {
 }
 
 struct OverlayCache<T> {
-    entries: Arc<DashMap<OverlayCacheKey, OverlayCacheEntry<T>>>,
+    entries: DashMap<OverlayCacheKey, OverlayCacheEntry<T>>,
 }
 
 impl<T> Default for OverlayCache<T> {
     fn default() -> Self {
         Self { entries: Default::default() }
-    }
-}
-
-impl<T> Clone for OverlayCache<T> {
-    fn clone(&self) -> Self {
-        Self { entries: Arc::clone(&self.entries) }
     }
 }
 

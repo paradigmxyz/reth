@@ -577,22 +577,13 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
             }
         };
 
-        self.overlay_manager
-            .builder_metrics()
-            .retrieve_trie_reverts_duration
-            .record(retrieve_trie_reverts_duration.as_secs_f64());
-        self.overlay_manager
-            .builder_metrics()
+        let metrics = self.overlay_manager.builder_metrics();
+        metrics.retrieve_trie_reverts_duration.record(retrieve_trie_reverts_duration.as_secs_f64());
+        metrics
             .retrieve_hashed_state_reverts_duration
             .record(retrieve_hashed_state_reverts_duration.as_secs_f64());
-        self.overlay_manager
-            .builder_metrics()
-            .trie_updates_size
-            .record(trie_updates_total_len as f64);
-        self.overlay_manager
-            .builder_metrics()
-            .hashed_state_size
-            .record(hashed_state_updates_total_len as f64);
+        metrics.trie_updates_size.record(trie_updates_total_len as f64);
+        metrics.hashed_state_size.record(hashed_state_updates_total_len as f64);
 
         Ok(StateTrieOverlay::new(TrieInputSorted::new(
             trie_updates,
@@ -770,7 +761,7 @@ where
 }
 
 /// Metrics for overlay construction.
-#[derive(Clone, Metrics)]
+#[derive(Metrics)]
 #[metrics(scope = "storage.overlay.builder")]
 pub(crate) struct OverlayBuilderMetrics {
     /// Duration of retrieving trie updates from the database.
