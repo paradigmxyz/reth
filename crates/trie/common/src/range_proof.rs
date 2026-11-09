@@ -642,6 +642,25 @@ mod tests {
         ));
     }
 
+    // Decoding precedes the path checks, so oversized compact keys must fail as RLP errors.
+    #[test]
+    fn oversized_compact_keys_are_rejected() {
+        // Extension and leaf flags: 33 bytes after an even flag or 32 after an odd one exceed a
+        // hashed key. The second item is a child hash or a leaf value.
+        for (flag, len) in [(0x00, 33), (0x1a, 32), (0x20, 33), (0x3a, 32)] {
+            let compact_key = [&[flag][..], &[0xab; 33][..len]].concat();
+            let mut node = Vec::new();
+            alloy_rlp::encode_list::<_, [u8]>(&[&compact_key[..], &[0xaa; 32]], &mut node);
+            let node = Bytes::from(node);
+
+            assert_eq!(
+                verify_range_proof(keccak256(&node), key(1), no_leaves(), &[node]),
+                Err(RangeProofErrorKind::Rlp(alloy_rlp::Error::Custom("trie node key too long"))),
+                "flag {flag:#04x}"
+            );
+        }
+    }
+
     // Empty extensions could recurse indefinitely without increasing the path depth.
     #[test]
     fn empty_extension_keys_are_rejected() {

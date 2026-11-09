@@ -354,6 +354,23 @@ impl<St> MultiplexInner<St> {
     ) -> (InboundSender, InboundReceiver) {
         inbound_channel(capability, limits, Arc::clone(&self.inbound_budget))
     }
+
+    /// Hands buffered messages to the connection without flushing it.
+    ///
+    /// Returns `Ready` once the buffer is empty and the connection can accept another message.
+    fn poll_send_buffered(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), P2PStreamError>>
+    where
+        St: Sink<Bytes, Error = io::Error> + Unpin,
+    {
+        loop {
+            if let Err(err) = ready!(self.conn.poll_ready_unpin(cx)) {
+                self.conn.start_disconnect(DisconnectReason::DisconnectRequested)?;
+                return Poll::Ready(Err(err))
+            }
+            let Some(msg) = self.out_buffer.pop_front() else { return Poll::Ready(Ok(())) };
+            self.conn.start_send_unpin(msg)?;
+        }
+    }
 }
 
 /// Represents a protocol in the multiplexer that is used as the primary protocol.
@@ -779,6 +796,25 @@ impl<St, Primary> RlpxSatelliteStream<St, Primary> {
 
         Ok(ProducerPoll::Pending)
     }
+
+    /// Moves messages the primary protocol already accepted into the connection.
+    ///
+    /// [`ProtocolProxy`] accepts outgoing messages into an unbounded channel, so the sink must not
+    /// report readiness before that channel is drained. Otherwise a caller that sends while the
+    /// sink is ready queues messages without limit when the remote reads slowly.
+    fn poll_drain_primary(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), P2PStreamError>>
+    where
+        St: Sink<Bytes, Error = io::Error> + Unpin,
+    {
+        loop {
+            ready!(self.inner.poll_send_buffered(cx))?;
+            // Both errors, empty and disconnected, mean no accepted message is left.
+            let Ok(msg) = self.primary.from_primary.as_mut().try_recv() else {
+                return Poll::Ready(Ok(()))
+            };
+            self.inner.out_buffer.push_back(msg);
+        }
+    }
 }
 
 impl<St, Primary, PrimaryErr> Stream for RlpxSatelliteStream<St, Primary>
@@ -799,32 +835,11 @@ where
                 return Poll::Ready(Some(msg))
             }
 
-            let mut conn_ready = true;
-            loop {
-                match this.inner.conn.poll_ready_unpin(cx) {
-                    Poll::Ready(Ok(())) => {
-                        if let Some(msg) = this.inner.out_buffer.pop_front() {
-                            if let Err(err) = this.inner.conn.start_send_unpin(msg) {
-                                return Poll::Ready(Some(Err(err.into())))
-                            }
-                        } else {
-                            break
-                        }
-                    }
-                    Poll::Ready(Err(err)) => {
-                        if let Err(disconnect_err) =
-                            this.inner.conn.start_disconnect(DisconnectReason::DisconnectRequested)
-                        {
-                            return Poll::Ready(Some(Err(disconnect_err.into())))
-                        }
-                        return Poll::Ready(Some(Err(err.into())))
-                    }
-                    Poll::Pending => {
-                        conn_ready = false;
-                        break
-                    }
-                }
-            }
+            let mut conn_ready = match this.inner.poll_send_buffered(cx) {
+                Poll::Ready(Ok(())) => true,
+                Poll::Ready(Err(err)) => return Poll::Ready(Some(Err(err.into()))),
+                Poll::Pending => false,
+            };
             // The connection only buffers frames on `start_send`; `poll_flush` performs the
             // actual writes and flushes the transport once for the batch handed to it above.
             // This also resumes a flush that returned pending on an earlier pass; a no-op if
@@ -913,7 +928,7 @@ where
 
     fn poll_ready(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         let this = self.get_mut();
-        if let Err(err) = ready!(this.inner.conn.poll_ready_unpin(cx)) {
+        if let Err(err) = ready!(this.poll_drain_primary(cx)) {
             return Poll::Ready(Err(err.into()))
         }
         if let Err(err) = ready!(this.primary.st.poll_ready_unpin(cx)) {
@@ -927,7 +942,11 @@ where
     }
 
     fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        self.get_mut().inner.conn.poll_flush_unpin(cx).map_err(Into::into)
+        let this = self.get_mut();
+        if let Err(err) = ready!(this.poll_drain_primary(cx)) {
+            return Poll::Ready(Err(err.into()))
+        }
+        this.inner.conn.poll_flush_unpin(cx).map_err(Into::into)
     }
 
     fn poll_close(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
@@ -1688,5 +1707,43 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[tokio::test]
+    async fn satellite_sink_drains_accepted_primary_messages() {
+        let (mux, eth, _) = test_multiplexer(0);
+        let mut stream = mux
+            .into_satellite_stream(eth.capability().as_ref(), |proxy| UnauthProxy { inner: proxy })
+            .unwrap();
+        stream.inner.conn.inner().writable.store(false, Ordering::Relaxed);
+        let mut cx = Context::from_waker(noop_waker_ref());
+
+        // Mirrors the session, which hands over queued messages while the sink reports readiness.
+        let mut sent = 0;
+        while sent < 64 &&
+            matches!(
+                Sink::<Bytes>::poll_ready(Pin::new(&mut stream), &mut cx),
+                Poll::Ready(Ok(()))
+            )
+        {
+            Pin::new(&mut stream).start_send(Bytes::from_static(&[0, 0])).unwrap();
+            sent += 1;
+        }
+        // A stalled transport only admits the two messages the lower p2p sink buffers.
+        assert_eq!(sent, 2);
+        assert!(stream.primary.from_primary.as_ref().is_empty());
+        assert!(stream.inner.out_buffer.is_empty());
+
+        stream.inner.conn.inner().writable.store(true, Ordering::Relaxed);
+        assert!(matches!(
+            Sink::<Bytes>::poll_ready(Pin::new(&mut stream), &mut cx),
+            Poll::Ready(Ok(()))
+        ));
+        Pin::new(&mut stream).start_send(Bytes::from_static(&[0, 0])).unwrap();
+        assert!(matches!(
+            Sink::<Bytes>::poll_flush(Pin::new(&mut stream), &mut cx),
+            Poll::Ready(Ok(()))
+        ));
+        assert!(stream.primary.from_primary.as_ref().is_empty());
     }
 }

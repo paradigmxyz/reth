@@ -1368,7 +1368,6 @@ mod tests {
             rpc_state_cache: RpcStateCacheArgs {
                 max_blocks: 5000,
                 max_receipts: 2000,
-                max_headers: 1000,
                 max_bals: 1000,
                 cache_computed_bals: true,
                 prewarm_bals: Some(0),
@@ -1461,8 +1460,6 @@ mod tests {
             "5000",
             "--rpc-cache.max-receipts",
             "2000",
-            "--rpc-cache.max-headers",
-            "1000",
             "--rpc-cache.max-bals",
             "1000",
             "--rpc-cache.cache-computed-bals",
