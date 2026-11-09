@@ -232,6 +232,11 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
         self
     }
 
+    /// Returns the manager this builder resolves overlays from.
+    pub(crate) const fn overlay_manager(&self) -> &OverlayManager<N> {
+        &self.overlay_manager
+    }
+
     /// Appends an executed block to this builder's in-memory parent state.
     pub fn with_appended_block(mut self, block: ExecutedBlock<N>) -> Self {
         debug_assert_eq!(block.recovered_block().parent_hash(), self.parent_hash);
