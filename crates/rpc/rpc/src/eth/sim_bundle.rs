@@ -1,6 +1,6 @@
 //! `Eth` Sim bundle implementation and helpers.
 
-use crate::eth::bundle::BundleBlockGas;
+use crate::eth::bundle::{BundleBlockGas, EthBundleError};
 use alloy_consensus::{transaction::TxHashRef, BlockHeader, Transaction as _};
 use alloy_primitives::U256;
 use alloy_rpc_types_eth::{BlockId, Log};
@@ -18,7 +18,9 @@ use reth_rpc_eth_api::{
     helpers::{block::LoadBlock, Call, EthTransactions},
     FromEthApiError, FromEvmError,
 };
-use reth_rpc_eth_types::{cache::db::apply_block_overrides, EthApiError};
+use reth_rpc_eth_types::{
+    cache::db::apply_block_overrides, EthApiError, RpcInvalidTransactionError,
+};
 use reth_storage_api::ProviderTx;
 use reth_tasks::{cancel::is_cancelled, pool::BlockingTaskGuard};
 use reth_transaction_pool::{PoolPooledTx, PoolTransaction, TransactionPool};
@@ -285,14 +287,15 @@ where
     ) -> Result<SimBundleResponse, Eth::Error> {
         let SimBundleOverrides { parent_block, block_overrides, .. } = overrides;
 
+        // A call gas limit of 0 disables the cap.
         let call_gas_limit = self.eth_api().call_gas_limit();
         if let Some(gas_limit) = block_overrides.gas_limit &&
+            call_gas_limit != 0 &&
             gas_limit > call_gas_limit
         {
-            return Err(EthApiError::InvalidParams(
-                EthSimBundleError::BlockGasLimitTooHigh(call_gas_limit).to_string(),
+            return Err(
+                EthApiError::InvalidTransaction(RpcInvalidTransactionError::GasTooHigh).into()
             )
-            .into())
         }
 
         // Parse and validate bundle
@@ -348,8 +351,10 @@ where
                     .map(|acc| acc.balance)
                     .unwrap_or_default();
 
-                let block_gas_limit =
-                    evm_env.block_env().gas_limit.saturating_to::<u64>().min(call_gas_limit);
+                let mut block_gas_limit = evm_env.block_env().gas_limit.saturating_to::<u64>();
+                if call_gas_limit != 0 {
+                    block_gas_limit = block_gas_limit.min(call_gas_limit);
+                }
                 let mut block_gas = BundleBlockGas::new(block_gas_limit, evm_env.version());
                 let mut evm = eth_api.evm_config().evm_with_env(&mut db, evm_env);
                 let mut coinbase_balance_before_tx = initial_coinbase_balance;
@@ -380,7 +385,7 @@ where
 
                     if !block_gas.admits(item.tx.gas_limit()) {
                         return Err(EthApiError::InvalidParams(
-                            EthSimBundleError::BundleGasLimitExceeded(block_gas_limit).to_string(),
+                            EthBundleError::BundleGasLimitExceeded(block_gas_limit).to_string(),
                         )
                         .into())
                     }
@@ -589,12 +594,6 @@ pub enum EthSimBundleError {
     /// Thrown when a bundle simulation returns negative profit
     #[error("bundle simulation returned negative profit")]
     NegativeProfit,
-    /// Thrown when the block gas limit override exceeds the RPC call gas limit.
-    #[error("block gas limit exceeds the call gas limit of {0}")]
-    BlockGasLimitTooHigh(u64),
-    /// Thrown when the gas limits of the bundle's transactions exceed the block gas limit.
-    #[error("bundle gas exceeds the block gas limit of {0}")]
-    BundleGasLimitExceeded(u64),
 }
 
 #[cfg(test)]
@@ -979,25 +978,47 @@ mod tests {
             block_overrides: BlockOverrides { gas_limit: Some(gas_limit), ..Default::default() },
             ..Default::default()
         };
-        let invalid_params = |error: EthSimBundleError| {
-            ErrorObjectOwned::from(EthApiError::InvalidParams(error.to_string()))
+        let gas_limit_exceeded = |gas_limit| {
+            ErrorObjectOwned::from(EthApiError::InvalidParams(
+                EthBundleError::BundleGasLimitExceeded(gas_limit).to_string(),
+            ))
         };
 
         assert_eq!(
             api.sim_bundle(bundle.clone(), gas_limit_override(42_001)).await.unwrap_err(),
-            invalid_params(EthSimBundleError::BlockGasLimitTooHigh(42_000))
+            ErrorObjectOwned::from(EthApiError::InvalidTransaction(
+                RpcInvalidTransactionError::GasTooHigh
+            ))
         );
         assert_eq!(
             api.sim_bundle(bundle.clone(), gas_limit_override(41_999)).await.unwrap_err(),
-            invalid_params(EthSimBundleError::BundleGasLimitExceeded(41_999))
+            gas_limit_exceeded(41_999)
         );
         // The call gas limit caps the budget below the block gas limit.
         assert_eq!(
-            api.sim_bundle(create_test_bundle(raw_txs), SimBundleOverrides::default())
+            api.sim_bundle(create_test_bundle(raw_txs.clone()), SimBundleOverrides::default())
                 .await
                 .unwrap_err(),
-            invalid_params(EthSimBundleError::BundleGasLimitExceeded(42_000))
+            gas_limit_exceeded(42_000)
         );
+
+        // A call gas limit of 0 leaves the block gas limit as the budget.
+        let uncapped = EthSimBundle::new(
+            EthApiBuilder::new(
+                provider.clone(),
+                testing_pool(),
+                NoopNetwork::default(),
+                EthEvmConfig::new(provider.chain_spec()),
+            )
+            .gas_cap(0u64.into())
+            .build(),
+            BlockingTaskGuard::new(4),
+        );
+        let response = uncapped
+            .sim_bundle(create_test_bundle(raw_txs), gas_limit_override(63_000))
+            .await
+            .unwrap();
+        assert_eq!(response.gas_used, 63_000);
 
         let permit = eth_api.acquire_owned_blocking_io().await.unwrap();
         assert!(tokio::time::timeout(
