@@ -31,7 +31,7 @@ nybbles = { workspace = true, features = ["rlp"] }
 thiserror.workspace = true
 
 # evm
-evm2.workspace = true
+evm2 = { workspace = true, features = ["block"] }
 
 # `serde` feature
 serde = { workspace = true, optional = true }
@@ -100,6 +100,7 @@ account-ext = [
 eip1186 = ["alloy-rpc-types-eth/serde", "dep:alloy-serde"]
 serde = [
     "dep:serde",
+    "evm2/serde",
     "arrayvec?/serde",
     "bytes?/serde",
     "nybbles/serde",

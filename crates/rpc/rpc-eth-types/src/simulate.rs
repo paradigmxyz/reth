@@ -15,6 +15,7 @@ use alloy_rpc_types_eth::{
     BlockId, BlockOverrides, BlockTransactionsKind,
 };
 use evm2::{interpreter::InstrStop, precompiles::MovePrecompileError, EvmFeatures, TxResult};
+use evm2_inspectors::transfer::TransferInspector;
 use jsonrpsee_types::{error::INTERNAL_ERROR_CODE, ErrorObject};
 use reth_errors::ProviderResult;
 use reth_evm::{
@@ -27,6 +28,7 @@ use reth_primitives_traits::{
 use reth_rpc_convert::{RpcBlock, RpcConvert, RpcTxReq};
 use reth_rpc_server_types::result::rpc_err;
 use reth_storage_api::{noop::NoopProvider, HashedPostStateProvider, StateProvider};
+use reth_tasks::cancel::is_cancelled;
 use reth_trie_common::{HashedPostState, KeccakKeyHasher};
 use std::mem;
 
@@ -333,6 +335,9 @@ where
     let is_amsterdam = builder.evm_env().version().feature(EvmFeatures::EIP8037);
     let tx_gas_limit_cap = builder.evm_env().version().tx_gas_limit_cap;
     for mut call in calls {
+        if is_cancelled() {
+            return Err(EthApiError::InternalEthError)
+        }
         let block_gas_remaining = if is_amsterdam {
             let regular_available_gas = block_gas_limit.saturating_sub(block_regular_gas_used);
             let state_available_gas = block_gas_limit.saturating_sub(block_state_gas_used);
@@ -384,6 +389,18 @@ where
             tx_regular_gas_used = output.execution_gas_spent();
             results.push(output.clone())
         })?;
+
+        // The transfer tracer keeps the transaction's logs, with the synthetic transfer logs
+        // among them, outside the EVM's own logs.
+        // SAFETY: `TransferInspector` has no lifetime parameters.
+        if let Some(logs) = unsafe {
+            builder
+                .evm_mut()
+                .with_inspector(|inspector: &mut TransferInspector| inspector.take_logs())
+        } && let Some(result) = results.last_mut()
+        {
+            result.logs = logs;
+        }
 
         let gas_used = gas_output.tx_gas_used();
         if let Some(remaining_call_gas_limit) = remaining_call_gas_limit.as_mut() {

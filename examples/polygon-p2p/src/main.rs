@@ -37,7 +37,7 @@ pub mod chain_cfg;
 #[tokio::main]
 async fn main() {
     // The ECDSA private key used to create our enode identifier.
-    let secret_key = SecretKey::new(&mut rand::thread_rng());
+    let secret_key = SecretKey::new(&mut rand::rng());
 
     let _ = RethTracer::new()
         .with_stdout(LayerInfo::new(

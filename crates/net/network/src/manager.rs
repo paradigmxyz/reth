@@ -1236,7 +1236,7 @@ mod tests {
                     ..Default::default()
                 };
                 let config = NetworkConfigBuilder::<EthNetworkPrimitives>::new(
-                    SecretKey::new(&mut rand_08::thread_rng()),
+                    SecretKey::new(&mut rand::rng()),
                     Runtime::test(),
                 )
                 .disable_discovery()
@@ -1290,7 +1290,7 @@ mod tests {
     async fn inbound_replacement_refreshes_pending_connection_metrics() {
         let config = || {
             NetworkConfigBuilder::<EthNetworkPrimitives>::new(
-                SecretKey::new(&mut rand_08::thread_rng()),
+                SecretKey::new(&mut rand::rng()),
                 Runtime::test(),
             )
             .disable_discovery()
@@ -1341,7 +1341,7 @@ mod tests {
     #[tokio::test]
     async fn incoming_handshake_failure_refreshes_pending_connection_metrics() {
         let config = NetworkConfigBuilder::<EthNetworkPrimitives>::new(
-            SecretKey::new(&mut rand_08::thread_rng()),
+            SecretKey::new(&mut rand::rng()),
             Runtime::test(),
         )
         .disable_discovery()

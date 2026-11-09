@@ -237,9 +237,12 @@ mod tests {
         eip2935::{HISTORY_STORAGE_ADDRESS, HISTORY_STORAGE_CODE},
         eip4788::{BEACON_ROOTS_ADDRESS, BEACON_ROOTS_CODE},
         eip7002::{WITHDRAWAL_REQUEST_PREDEPLOY_ADDRESS, WITHDRAWAL_REQUEST_PREDEPLOY_CODE},
+        eip7251::{CONSOLIDATION_REQUEST_PREDEPLOY_ADDRESS, CONSOLIDATION_REQUEST_PREDEPLOY_CODE},
     };
     use alloy_primitives::{Bytes, B256, U256};
-    use evm2::evm::{CacheDB, EmptyDB};
+    use evm2::evm::{
+        CacheDB, EmptyDB, BUILDER_DEPOSIT_REQUEST_ADDRESS, BUILDER_EXIT_REQUEST_ADDRESS,
+    };
     use reth_chainspec::{ChainSpecBuilder, MAINNET};
     use reth_engine_primitives::{InsertBlockErrorKind, InsertBlockValidationError};
     use reth_ethereum_primitives::{Block, BlockBody, Receipt, Transaction, TransactionSigned};
@@ -248,9 +251,7 @@ mod tests {
         BlockExecutionOutput, BlockValidationError,
     };
     use reth_evm_ethereum::EthEvmConfig;
-    use reth_primitives_traits::{
-        crypto::secp256k1::public_key_to_address, Block as _, Recovered, SealedBlock,
-    };
+    use reth_primitives_traits::{Block as _, Recovered, SealedBlock};
     use reth_testing_utils::generators::{generate_key, rng, sign_tx_with_key_pair};
     use std::{
         convert::Infallible,
@@ -272,9 +273,10 @@ mod tests {
         Arc::new(DecodedBal::new(alloy_bal, raw))
     }
 
-    /// Builds an in-memory canonical DB pre-populated with the post-Cancun system contracts
-    /// that `apply_pre_execution_changes` calls: beacon roots (EIP-4788), withdrawal requests
-    /// (EIP-7002), and historical block hashes (EIP-2935).
+    /// Builds an in-memory canonical DB pre-populated with the system contracts that block
+    /// execution calls: beacon roots (EIP-4788), historical block hashes (EIP-2935), the
+    /// withdrawal (EIP-7002) and consolidation (EIP-7251) request contracts, and no-op builder
+    /// request contracts (EIP-8282).
     fn system_contracts_db() -> CacheDB<EmptyDB> {
         let mut db = CacheDB::<EmptyDB>::default();
         db.insert_account_info(
@@ -289,6 +291,20 @@ mod tests {
                 .with_nonce(1)
                 .with_code(Bytecode::new_raw(WITHDRAWAL_REQUEST_PREDEPLOY_CODE.clone())),
         );
+        db.insert_account_info(
+            &CONSOLIDATION_REQUEST_PREDEPLOY_ADDRESS,
+            AccountInfo::default()
+                .with_nonce(1)
+                .with_code(Bytecode::new_raw(CONSOLIDATION_REQUEST_PREDEPLOY_CODE.clone())),
+        );
+        for address in [BUILDER_DEPOSIT_REQUEST_ADDRESS, BUILDER_EXIT_REQUEST_ADDRESS] {
+            db.insert_account_info(
+                &address,
+                AccountInfo::default()
+                    .with_nonce(1)
+                    .with_code(Bytecode::new_legacy(Bytes::from_static(&[0x00]))),
+            );
+        }
         db.insert_account_info(
             &HISTORY_STORAGE_ADDRESS,
             AccountInfo::default()
@@ -563,9 +579,10 @@ mod tests {
 
         // Generate keypairs + derive sender addresses.
         let alice_kp = generate_key(&mut rng());
-        let alice = public_key_to_address(alice_kp.public_key());
+        let alice =
+            Address::from_raw_public_key(&alice_kp.public_key().serialize_uncompressed()[1..]);
         let bob_kp = generate_key(&mut rng());
-        let bob = public_key_to_address(bob_kp.public_key());
+        let bob = Address::from_raw_public_key(&bob_kp.public_key().serialize_uncompressed()[1..]);
 
         // Sign txs.
         let txs = vec![
@@ -620,9 +637,10 @@ mod tests {
         let carol = Address::repeat_byte(0xca);
         let sender_balance = U256::from(alloy_consensus::constants::ETH_TO_WEI);
         let alice_kp = generate_key(&mut rng());
-        let alice = public_key_to_address(alice_kp.public_key());
+        let alice =
+            Address::from_raw_public_key(&alice_kp.public_key().serialize_uncompressed()[1..]);
         let bob_kp = generate_key(&mut rng());
-        let bob = public_key_to_address(bob_kp.public_key());
+        let bob = Address::from_raw_public_key(&bob_kp.public_key().serialize_uncompressed()[1..]);
         let mut db = system_contracts_db();
         insert_funded(&mut db, alice, sender_balance);
         insert_funded(&mut db, bob, sender_balance);
@@ -642,9 +660,10 @@ mod tests {
         let carol = Address::repeat_byte(0xca);
         let sender_balance = U256::from(alloy_consensus::constants::ETH_TO_WEI);
         let alice_kp = generate_key(&mut rng());
-        let alice = public_key_to_address(alice_kp.public_key());
+        let alice =
+            Address::from_raw_public_key(&alice_kp.public_key().serialize_uncompressed()[1..]);
         let bob_kp = generate_key(&mut rng());
-        let bob = public_key_to_address(bob_kp.public_key());
+        let bob = Address::from_raw_public_key(&bob_kp.public_key().serialize_uncompressed()[1..]);
         let txs = vec![
             signed_transfer!(alice_kp, alice, carol, 100, 0, 990_000),
             signed_transfer!(bob_kp, bob, carol, 200, 0, 990_000),
@@ -693,7 +712,7 @@ mod tests {
         let evm_config = test_evm_config();
         let contract = Address::repeat_byte(0xde);
         let key = generate_key(&mut rng());
-        let signer = public_key_to_address(key.public_key());
+        let signer = Address::from_raw_public_key(&key.public_key().serialize_uncompressed()[1..]);
         let mut db = system_contracts_db();
         insert_funded(&mut db, signer, U256::from(alloy_consensus::constants::ETH_TO_WEI));
         db.insert_account_info(
@@ -716,7 +735,7 @@ mod tests {
         let evm_config = test_evm_config();
         let contract = Address::repeat_byte(0x55);
         let key = generate_key(&mut rng());
-        let signer = public_key_to_address(key.public_key());
+        let signer = Address::from_raw_public_key(&key.public_key().serialize_uncompressed()[1..]);
         let mut db = system_contracts_db();
         insert_funded(&mut db, signer, U256::from(alloy_consensus::constants::ETH_TO_WEI));
         db.insert_account_info(
@@ -826,9 +845,10 @@ mod tests {
         let recipient = Address::repeat_byte(0xca);
         let balance = U256::from(alloy_consensus::constants::ETH_TO_WEI);
         let alice_key = generate_key(&mut rng());
-        let alice = public_key_to_address(alice_key.public_key());
+        let alice =
+            Address::from_raw_public_key(&alice_key.public_key().serialize_uncompressed()[1..]);
         let bob_key = generate_key(&mut rng());
-        let bob = public_key_to_address(bob_key.public_key());
+        let bob = Address::from_raw_public_key(&bob_key.public_key().serialize_uncompressed()[1..]);
         let txs = vec![
             signed_transfer!(alice_key, alice, recipient, 1, 0, 21_000),
             signed_transfer!(bob_key, bob, recipient, 1, 0, 980_000),
@@ -868,7 +888,7 @@ mod tests {
         let loop_contract = Address::repeat_byte(0x44);
         let recipient = Address::repeat_byte(0xca);
         let key = generate_key(&mut rng());
-        let signer = public_key_to_address(key.public_key());
+        let signer = Address::from_raw_public_key(&key.public_key().serialize_uncompressed()[1..]);
         let mut db = system_contracts_db();
         insert_funded(&mut db, signer, U256::from(alloy_consensus::constants::ETH_TO_WEI));
         db.insert_account_info(
@@ -909,9 +929,10 @@ mod tests {
         let balance = U256::from(alloy_consensus::constants::ETH_TO_WEI);
 
         let alice_kp = generate_key(&mut rng());
-        let alice = public_key_to_address(alice_kp.public_key());
+        let alice =
+            Address::from_raw_public_key(&alice_kp.public_key().serialize_uncompressed()[1..]);
         let bob_kp = generate_key(&mut rng());
-        let bob = public_key_to_address(bob_kp.public_key());
+        let bob = Address::from_raw_public_key(&bob_kp.public_key().serialize_uncompressed()[1..]);
 
         let mut pre_block_db = system_contracts_db();
         insert_funded(&mut pre_block_db, alice, balance);
