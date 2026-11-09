@@ -604,7 +604,9 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
         let start = Instant::now();
 
         // Truncates the data file if instructed to.
-        if let Some(strategy) = self.prune_on_commit.take() {
+        let prune_on_commit = self.prune_on_commit.take();
+        let pruned = prune_on_commit.is_some();
+        if let Some(strategy) = prune_on_commit {
             debug!(
                 target: "providers::static_file",
                 segment = ?self.writer.user_header().segment(),
@@ -670,8 +672,12 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
 
         // Pruned rows are cut from the files only now. Both the cached jar `update_index` just
         // replaced and the one it installed may still map the uncut length: the replaced one waits
-        // for its readers, and the installed one never reads past its row count.
+        // for its readers, and the installed one never reads past its row count. Indexing again
+        // caches a jar that maps the cut length.
         self.apply_pending_truncation()?;
+        if pruned {
+            self.update_index()?;
+        }
 
         Ok(())
     }
