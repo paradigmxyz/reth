@@ -17,6 +17,7 @@ pub struct ChangesetOffsetWriter {
     file: File,
     /// Number of records written.
     records_written: u64,
+    /// Records to keep once the deferred truncation is applied, or `None` if none is pending.
     pending_truncation: Option<u64>,
 }
 
