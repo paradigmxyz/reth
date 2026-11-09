@@ -43,6 +43,7 @@ pub struct NippyJarWriter<H: NippyJarHeader = ()> {
     column: usize,
     /// Whether the writer has changed data that needs to be committed.
     dirty: bool,
+    pending_truncation: Option<(u64, u64)>,
 }
 
 impl<H: NippyJarHeader> NippyJarWriter<H> {
@@ -79,6 +80,7 @@ impl<H: NippyJarHeader> NippyJarWriter<H> {
             offsets: Vec::with_capacity(1_000_000),
             column: 0,
             dirty: false,
+            pending_truncation: None,
         };
 
         if !is_created {
@@ -197,6 +199,7 @@ impl<H: NippyJarHeader> NippyJarWriter<H> {
         &mut self,
         column: Option<ColumnResult<impl AsRef<[u8]>>>,
     ) -> Result<(), NippyJarError> {
+        self.apply_pending_truncation()?;
         self.dirty = true;
 
         match column {
@@ -248,6 +251,48 @@ impl<H: NippyJarHeader> NippyJarWriter<H> {
 
     /// Prunes rows from data and offsets file and updates its configuration on disk
     pub fn prune_rows(&mut self, num_rows: usize) -> Result<(), NippyJarError> {
+        self.prune_rows_inner(num_rows, false)
+    }
+
+    /// Prunes rows like [`Self::prune_rows`], but leaves the committed rows' bytes on disk until
+    /// [`Self::apply_pending_truncation`].
+    pub fn prune_rows_deferred(&mut self, num_rows: usize) -> Result<(), NippyJarError> {
+        self.prune_rows_inner(num_rows, true)
+    }
+
+    /// Truncates the files to the rows kept by [`Self::prune_rows_deferred`].
+    pub fn apply_pending_truncation(&mut self) -> Result<(), NippyJarError> {
+        let Some((offsets_len, data_len)) = self.pending_truncation.take() else { return Ok(()) };
+
+        self.offsets_file.get_mut().set_len(offsets_len)?;
+        self.data_file.get_mut().set_len(data_len)?;
+
+        self.offsets_file.get_ref().sync_all()?;
+        self.data_file.get_ref().sync_all()?;
+
+        self.offsets_file.seek(SeekFrom::End(0))?;
+        self.data_file.seek(SeekFrom::End(0))?;
+
+        Ok(())
+    }
+
+    fn truncate_files(
+        &mut self,
+        offsets_len: u64,
+        data_len: u64,
+        defer: bool,
+    ) -> Result<(), NippyJarError> {
+        if defer {
+            self.pending_truncation = Some((offsets_len, data_len));
+        } else {
+            self.offsets_file.get_mut().set_len(offsets_len)?;
+            self.data_file.get_mut().set_len(data_len)?;
+        }
+        Ok(())
+    }
+
+    fn prune_rows_inner(&mut self, num_rows: usize, defer: bool) -> Result<(), NippyJarError> {
+        self.apply_pending_truncation()?;
         self.dirty = true;
 
         self.offsets_file.flush()?;
@@ -297,8 +342,7 @@ impl<H: NippyJarHeader> NippyJarWriter<H> {
                     // file size = 0). This maintains the same structure as when
                     // a file is initially created.
                     // See `NippyJarWriter::create_or_open_files` for the initial file format.
-                    self.offsets_file.get_mut().set_len(1 + OFFSET_SIZE_BYTES as u64)?;
-                    self.data_file.get_mut().set_len(0)?;
+                    self.truncate_files(1 + OFFSET_SIZE_BYTES as u64, 0, defer)?;
                 } else {
                     // Calculate the new length for the on-disk offset list
                     let new_len = 1 + new_num_offsets * OFFSET_SIZE_BYTES as u64;
@@ -311,8 +355,7 @@ impl<H: NippyJarHeader> NippyJarWriter<H> {
                     let last_offset = u64::from_le_bytes(last_offset);
 
                     // Update the lengths of both the offsets and data files
-                    self.offsets_file.get_mut().set_len(new_len)?;
-                    self.data_file.get_mut().set_len(last_offset)?;
+                    self.truncate_files(new_len, last_offset, defer)?;
                 }
             } else {
                 return Err(NippyJarError::InvalidPruning(0, remaining_to_prune as u64))
