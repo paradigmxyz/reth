@@ -169,8 +169,8 @@ where
 /// Write the genesis block if it has not already been written with [`StorageSettings`],
 /// optionally validating the DB-resident genesis hash against the chainspec hash.
 ///
-/// Retries interrupted genesis initialization when the database is empty and the static files
-/// contain only the matching genesis block.
+/// Retries interrupted genesis initialization when the Headers checkpoint is absent and the
+/// static files contain only the matching genesis block.
 pub fn init_genesis_with_settings_and_validate<PF>(
     factory: &PF,
     genesis_storage_settings: StorageSettings,
@@ -227,11 +227,10 @@ where
                 }
 
                 // A static-first genesis commit can be interrupted before its MDBX transaction
-                // commits. Only retry against an empty database and genesis-only static files;
-                // deleting MDBX from an already-synced node must still be rejected.
+                // commits. The genesis MDBX writes are atomic, so an absent Headers checkpoint
+                // permits replay when static files contain only genesis. Reject static files
+                // from an already-synced node whose MDBX database was deleted.
                 let static_files = factory.static_file_provider();
-                let provider = factory.database_provider_ro()?;
-                let tx = provider.tx_ref();
                 let has_non_genesis_static_files = StaticFileSegment::iter().any(|segment| {
                     static_files
                         .get_highest_static_file_block(segment)
@@ -242,23 +241,10 @@ where
                         (segment.is_tx_based() &&
                             static_files.get_highest_static_file_tx(segment).is_some())
                 });
-                if has_non_genesis_static_files ||
-                    tx.entries::<tables::StageCheckpoints>()? != 0 ||
-                    tx.entries::<tables::HeaderNumbers>()? != 0 ||
-                    tx.entries::<tables::BlockBodyIndices>()? != 0 ||
-                    tx.entries::<tables::AccountsTrie>()? != 0 ||
-                    tx.entries::<tables::StoragesTrie>()? != 0 ||
-                    tx.entries::<tables::AccountsHistory>()? != 0 ||
-                    tx.entries::<tables::StoragesHistory>()? != 0 ||
-                    !snapshot_state_tables_empty(tx)? ||
-                    factory
-                        .storage_settings()?
-                        .is_some_and(|stored| stored != genesis_storage_settings)
-                {
+                if has_non_genesis_static_files {
                     error!(target: "reth::storage", "Genesis header found on static files, but database is uninitialized.");
                     return Err(InitStorageError::UninitializedDatabase)
                 }
-                drop(provider);
 
                 // Genesis changesets may already have been published. Remove them before replay
                 // so storage v2 does not append the same genesis block twice after a restart.
