@@ -6,7 +6,7 @@ use alloy_primitives::{Address, Bytes, B256, U256};
 use alloy_rpc_server::ErrorPayload;
 use alloy_rpc_types_eth::{error::EthRpcErrorCode, request::TransactionInputError, BlockError};
 use alloy_sol_types::RevertReason;
-use alloy_transport::{RpcError, TransportErrorKind};
+use alloy_transport::{RpcError, TransportError, TransportErrorKind};
 pub use api::{AsEthApiError, FromEthApiError, FromEvmError, IntoEthApiError};
 use core::time::Duration;
 use evm2::{interpreter::InstrStop, registry::HandlerError};
@@ -29,17 +29,6 @@ use tokio::sync::oneshot::error::RecvError;
 pub trait ToRpcError: core::error::Error + Send + Sync + 'static {
     /// Converts the error to a JSON-RPC error object.
     fn to_rpc_error(&self) -> ErrorPayload;
-}
-
-/// An [`ErrorPayload`] as an error, so it can be carried by [`EthApiError::Other`].
-#[derive(Debug, Clone, thiserror::Error)]
-#[error("{0}")]
-pub struct RpcErrorPayload(pub ErrorPayload);
-
-impl ToRpcError for RpcErrorPayload {
-    fn to_rpc_error(&self) -> ErrorPayload {
-        self.0.clone()
-    }
 }
 
 impl ToRpcError for RpcError<TransportErrorKind> {
@@ -534,7 +523,7 @@ impl From<BlockExecutionError> for EthApiError {
                         Self::InvalidTransaction(handler_error.clone().into())
                     } else {
                         Self::InvalidTransaction(RpcInvalidTransactionError::other(
-                            RpcErrorPayload(rpc_error_with_code(
+                            TransportError::err_resp(rpc_error_with_code(
                                 EthRpcErrorCode::TransactionRejected.code(),
                                 error.to_string(),
                             )),
@@ -898,7 +887,7 @@ impl From<HandlerError> for RpcInvalidTransactionError {
             HandlerError::TooManyBlobs { have, .. } => Self::TooManyBlobs { have },
             HandlerError::BlobVersionNotSupported => Self::BlobHashVersionMismatch,
             HandlerError::PriorityFeeGreaterThanMaxFee => Self::TipAboveFeeCap,
-            err => Self::other(RpcErrorPayload(rpc_error_with_code(
+            err => Self::other(TransportError::err_resp(rpc_error_with_code(
                 EthRpcErrorCode::TransactionRejected.code(),
                 err.to_string(),
             ))),

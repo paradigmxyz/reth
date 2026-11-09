@@ -1,7 +1,7 @@
 //! Utilities for serving `eth_simulateV1`
 
 use crate::{
-    error::{api::FromEthApiError, FromEvmError, RpcErrorPayload, ToRpcError},
+    error::{api::FromEthApiError, FromEvmError, ToRpcError},
     EthApiError,
 };
 use alloy_chains::Chain;
@@ -15,6 +15,7 @@ use alloy_rpc_types_eth::{
     state::StateOverride,
     BlockId, BlockOverrides, BlockTransactionsKind,
 };
+use alloy_transport::TransportError;
 use evm2::{interpreter::InstrStop, precompiles::MovePrecompileError, EvmFeatures, TxResult};
 use evm2_inspectors::transfer::TransferInspector;
 use reth_errors::ProviderResult;
@@ -558,7 +559,7 @@ where
 
     let tx = converter
         .build_simulate_v1_transaction(tx)
-        .map_err(|e| EthApiError::other(RpcErrorPayload(e.into())))?;
+        .map_err(|e| EthApiError::other(TransportError::err_resp(e.into())))?;
 
     Ok(Recovered::new_unchecked(tx, from))
 }

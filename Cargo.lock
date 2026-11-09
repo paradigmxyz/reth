@@ -10056,6 +10056,7 @@ dependencies = [
  "alloy-serde",
  "alloy-signer",
  "alloy-signer-local",
+ "alloy-transport",
  "async-trait",
  "derive_more",
  "dyn-clone",

@@ -13,6 +13,7 @@ use alloy_rpc_types_trace::geth::{
     ChainBlockTraceResult, GethDebugTracingCallOptions, GethDebugTracingOptions, GethTrace,
     TraceResult,
 };
+use alloy_transport::TransportError;
 use evm2::evm::StateChangeSource;
 use evm2_inspectors::tracing::{DebugInspector, TransactionContext};
 use futures::Stream;
@@ -34,7 +35,7 @@ use reth_rpc_eth_api::{
     helpers::{EthTransactions, TraceExt},
     AsEthApiError, FromEthApiError, FromEvmError, RpcConvert, RpcNodeCore,
 };
-use reth_rpc_eth_types::{EthApiError, RpcErrorPayload, StateCacheDb};
+use reth_rpc_eth_types::{EthApiError, StateCacheDb};
 use reth_rpc_server_types::{result::internal_rpc_err, ToRpcResult};
 use reth_storage_api::{
     BlockIdReader, BlockReaderIdExt, HashedPostStateProvider, HeaderProvider, ProviderBlock,
@@ -982,7 +983,9 @@ where
             let bad_block =
                 serde_json::to_value(BadBlockSerde { block, hash, rlp, reason: entry.reason })
                     .map_err(|err| {
-                        EthApiError::other(RpcErrorPayload(internal_rpc_err(err.to_string())))
+                        EthApiError::other(TransportError::err_resp(internal_rpc_err(
+                            err.to_string(),
+                        )))
                     })?;
 
             bad_blocks.push(bad_block);

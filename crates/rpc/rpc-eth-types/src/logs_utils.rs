@@ -2,10 +2,11 @@
 //!
 //! Log parsing for building filter.
 
-use crate::{error::RpcErrorPayload, EthApiError};
+use crate::EthApiError;
 use alloy_consensus::{transaction::TxHashRef, BlockHeader, TxReceipt};
 use alloy_primitives::TxHash;
 use alloy_rpc_types_eth::{Filter, Log};
+use alloy_transport::TransportError;
 
 use reth_chainspec::ChainInfo;
 use reth_errors::ProviderError;
@@ -159,7 +160,7 @@ where
                 };
                 let log = converter
                     .convert_log(log, receipt, header)
-                    .map_err(|err| EthApiError::other(RpcErrorPayload(err.into())))?;
+                    .map_err(|err| EthApiError::other(TransportError::err_resp(err.into())))?;
                 all_logs.push(log);
             }
             log_index += 1;

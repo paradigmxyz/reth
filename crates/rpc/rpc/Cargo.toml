@@ -64,6 +64,7 @@ alloy-rpc-types-txpool.workspace = true
 alloy-rpc-types-admin.workspace = true
 alloy-rpc-types-engine = { workspace = true, features = ["kzg"] }
 alloy-serde.workspace = true
+alloy-transport.workspace = true
 
 # rpc
 alloy-rpc-server.workspace = true
