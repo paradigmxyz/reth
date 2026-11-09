@@ -41,35 +41,17 @@ jobs:
             echo "describe=$(git describe --always --tags)"
           } >> "$GITHUB_OUTPUT"
 
-      - name: Detect non-upstream build
-        id: fork
-        env:
-          EVENT_NAME: ${{ github.event_name }}
-          HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
-          REPO: ${{ github.repository }}
-        run: |
-          if [ "$REPO" != "paradigmxyz/reth" ] || { [ "$EVENT_NAME" = "pull_request" ] && [ "$HEAD_REPO" != "$REPO" ]; }; then
-            echo "is_fork=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "is_fork=false" >> "$GITHUB_OUTPUT"
-          fi
-
       - uses: tempoxyz/gh-actions/vendor/dtolnay/rust-toolchain@d5402286a7abdfb7232173b3228d56473feb8a66 # 2026-09-29T02-04-45Z-d5402286
-        if: steps.fork.outputs.is_fork == 'false'
         with:
           toolchain: "1.95.0"
 
       - name: Check Reth dependencies through Aegis
-        if: steps.fork.outputs.is_fork == 'false'
         run: cargo fetch --locked --manifest-path Cargo.toml
 
-      # Depot build (upstream only)
       - name: Set up Depot CLI
-        if: steps.fork.outputs.is_fork == 'false'
         uses: depot/setup-action@91bc8495a33ebfc504ffc89e5674379ccf23c29c # v1.7.2
 
       - name: Build reth image (Depot)
-        if: steps.fork.outputs.is_fork == 'false'
         uses: depot/bake-action@1d58c2668346981089b088b7ef36755b206b20e9 # v1.13.0
         env:
           DEPOT_TOKEN: ${{ secrets.DEPOT_TOKEN }}
@@ -80,28 +62,6 @@ jobs:
           files: docker-bake.hcl
           targets: ${{ inputs.hive_target }}
           push: false
-
-      # Docker build (forks)
-      - name: Set up Docker Buildx
-        if: steps.fork.outputs.is_fork == 'true'
-        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
-
-      - name: Build reth image (Docker)
-        if: steps.fork.outputs.is_fork == 'true'
-        uses: docker/bake-action@59cb1203cd42bcefd40a1b6d73b589e48c86040e # v7.5.0
-        env:
-          VERGEN_GIT_SHA: ${{ steps.git.outputs.sha }}
-          VERGEN_GIT_DESCRIBE: ${{ steps.git.outputs.describe }}
-        with:
-          # Preserve .git for reth-node-core's build metadata.
-          source: .
-          files: docker-bake.hcl
-          targets: ${{ inputs.hive_target }}
-          push: false
-          # The standard Dockerfile does not use Depot's build secret.
-          set: |
-            *.dockerfile=Dockerfile
-            *.secret=
 
       - name: Upload reth image
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
