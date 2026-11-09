@@ -67,7 +67,9 @@ use alloy_primitives::{
     TxHash,
 };
 use futures::{stream::FuturesUnordered, Future, FutureExt, Stream, StreamExt};
-use reth_eth_wire::{EthVersion, GetPooledTransactions, PooledTransactions};
+use reth_eth_wire::{
+    message::MAX_MESSAGE_SIZE, EthVersion, GetPooledTransactions, PooledTransactions,
+};
 use reth_eth_wire_types::{EthNetworkPrimitives, NetworkPrimitives};
 use reth_network_api::PeerRequest;
 use reth_network_p2p::error::{RequestError, RequestResult};
@@ -1348,18 +1350,19 @@ impl Candidate {
         if version.is_eth72() && tx.is_eip4844() {
             return false
         }
-        // announced sizes are stored capped, see `announced_size`
-        let size = tx.encode_2718_len().min(SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE);
-        size.abs_diff((self.size_and_queued & !Self::QUEUED) as usize) > MAX_ANNOUNCED_SIZE_DIFF
+        // a delivered transaction fits a message, so the stored announced size is exact for it
+        tx.encode_2718_len().abs_diff((self.size_and_queued & !Self::QUEUED) as usize) >
+            MAX_ANNOUNCED_SIZE_DIFF
     }
 
-    /// Returns the size to account for when packing the hash into a request to this peer.
-    const fn request_size(&self) -> usize {
+    /// Returns the size to account for when packing the hash into a request to this peer, capped
+    /// at the response soft limit.
+    fn request_size(&self) -> usize {
         let size = self.size_and_queued & !Self::QUEUED;
         if size == 0 {
             AVERAGE_BYTE_SIZE_TX_ENCODED
         } else {
-            size as usize
+            (size as usize).min(SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE)
         }
     }
 }
@@ -1457,12 +1460,10 @@ struct ResolvedRequest<T> {
     result: RequestResult<PooledTransactions<T>>,
 }
 
-/// Returns the announced transaction size used for request packing, capped at the response soft
-/// limit, or 0 if the announcement carried no size.
+/// Returns the announced transaction size, capped at the maximum message size, or 0 if the
+/// announcement carried no size.
 fn announced_size(metadata: Option<TransactionMetadata>) -> u32 {
-    metadata.map_or(0, |metadata| {
-        metadata.size.min(SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE) as u32
-    })
+    metadata.map_or(0, |metadata| metadata.size.min(MAX_MESSAGE_SIZE) as u32)
 }
 
 /// Filters a response down to the transactions that were requested and match the metadata the
@@ -1508,7 +1509,7 @@ mod tests {
     use alloy_consensus::{
         constants::EIP4844_TX_TYPE_ID,
         transaction::{Recovered, TxEip4844WithSidecar},
-        SignableTransaction, TxEip4844,
+        SignableTransaction, TxEip1559, TxEip4844,
     };
     use alloy_eips::{
         eip2718::Encodable2718,
@@ -2145,6 +2146,30 @@ mod tests {
             FetchEvent::FetchError { peer_id, error: RequestError::BadResponse } if peer_id == peer_a
         ));
         assert_eq!(rig.fetcher.num_hashes(), 0);
+    }
+
+    #[test]
+    fn sizes_above_the_response_soft_limit_are_compared_exactly() {
+        let mut rig = Rig::new();
+        let peer_a = peer(1);
+        rig.add_peer(peer_a);
+        let tx = PooledTransactionVariant::Eip1559(
+            TxEip1559 { input: vec![0; 3 * 1024 * KIB].into(), ..Default::default() }
+                .into_signed(Signature::test_signature()),
+        );
+
+        // the announced and delivered sizes are both at or above the soft limit, but differ
+        rig.announce_with_sizes(
+            peer_a,
+            [(*tx.tx_hash(), SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE)],
+        );
+        rig.dispatch();
+
+        let event = rig.respond(peer_a, vec![tx]);
+        assert!(matches!(
+            event,
+            FetchEvent::FetchError { peer_id, error: RequestError::BadResponse } if peer_id == peer_a
+        ));
     }
 
     #[test]
