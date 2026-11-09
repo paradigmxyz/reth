@@ -67,9 +67,7 @@ use alloy_primitives::{
     TxHash,
 };
 use futures::{stream::FuturesUnordered, Future, FutureExt, Stream, StreamExt};
-use reth_eth_wire::{
-    message::MAX_MESSAGE_SIZE, EthVersion, GetPooledTransactions, PooledTransactions,
-};
+use reth_eth_wire::{EthVersion, GetPooledTransactions, PooledTransactions};
 use reth_eth_wire_types::{EthNetworkPrimitives, NetworkPrimitives};
 use reth_network_api::PeerRequest;
 use reth_network_p2p::error::{RequestError, RequestResult};
@@ -1309,7 +1307,7 @@ struct Candidate {
 }
 
 impl Candidate {
-    /// Marks the hash as queued for the peer. Announced sizes are capped well below this bit.
+    /// Marks the hash as queued for the peer. Announced sizes are capped below this bit.
     const QUEUED: u32 = 1 << 31;
 
     /// A candidate that has the hash queued.
@@ -1350,7 +1348,7 @@ impl Candidate {
         if version.is_eth72() && tx.is_eip4844() {
             return false
         }
-        // a delivered transaction fits a message, so the stored announced size is exact for it
+        // announced sizes are stored exactly below the queued bit, far above any message size
         tx.encode_2718_len().abs_diff((self.size_and_queued & !Self::QUEUED) as usize) >
             MAX_ANNOUNCED_SIZE_DIFF
     }
@@ -1460,10 +1458,10 @@ struct ResolvedRequest<T> {
     result: RequestResult<PooledTransactions<T>>,
 }
 
-/// Returns the announced transaction size, capped at the maximum message size, or 0 if the
+/// Returns the announced transaction size, capped below [`Candidate::QUEUED`], or 0 if the
 /// announcement carried no size.
 fn announced_size(metadata: Option<TransactionMetadata>) -> u32 {
-    metadata.map_or(0, |metadata| metadata.size.min(MAX_MESSAGE_SIZE) as u32)
+    metadata.map_or(0, |metadata| metadata.size.min((Candidate::QUEUED - 1) as usize) as u32)
 }
 
 /// Filters a response down to the transactions that were requested and match the metadata the
