@@ -237,9 +237,13 @@ impl<N: NetworkPrimitives> ActiveSession<N> {
     /// poll.
     ///
     /// Returns `true` if at least one message was handed to the connection.
+    ///
+    /// A readiness error closes the session: a satellite connection reports messages it already
+    /// accepted but the wire rejected through its readiness.
     fn poll_send_queued(&mut self, cx: &mut Context<'_>) -> Result<bool, EthStreamError> {
         let mut progress = false;
-        while self.conn.poll_ready_unpin(cx).is_ready() {
+        while let Poll::Ready(ready) = self.conn.poll_ready_unpin(cx) {
+            ready?;
             let Some(msg) = self.queued_outgoing.pop_front() else { break };
             progress = true;
             let res = match msg {
