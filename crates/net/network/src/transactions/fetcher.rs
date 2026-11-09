@@ -23,8 +23,9 @@
 //! When a request resolves, delivered hashes are dropped from tracking. Undelivered hashes go back
 //! to pending and are queued for their remaining candidates, most recent announcers first, or are
 //! dropped if none remain. The responding peer is dropped as a candidate for every undelivered
-//! hash that precedes the last delivered hash of the request, treating it as skipped, and for
-//! all requested hashes if the response was empty or the request failed.
+//! hash that precedes the last delivered hash of the request, treating it as skipped, for every
+//! hash it answered with a transaction that doesn't match its announcement, and for all requested
+//! hashes if the response was empty or the request failed.
 //! Undelivered hashes after the last delivered hash keep the peer as a candidate only if it
 //! delivered at least half of the request, treating that tail as potentially truncated. This is
 //! a retry heuristic: transaction counts do not establish whether the response reached a byte
@@ -123,6 +124,8 @@ pub struct TransactionFetcher<N: NetworkPrimitives = EthNetworkPrimitives> {
     scratch_requested: B256Set,
     /// Reused when verifying responses, so no sets are allocated per response.
     scratch_delivered: B256Set,
+    /// Reused when verifying responses, so no sets are allocated per response.
+    scratch_mismatched: B256Set,
     /// Reused when processing announcements, so no vector is allocated per announcement.
     scratch_queue: Vec<(TxHash, u64)>,
     /// Configured limits.
@@ -149,6 +152,7 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
             num_fetching: 0,
             scratch_requested: Default::default(),
             scratch_delivered: Default::default(),
+            scratch_mismatched: Default::default(),
             scratch_queue: Default::default(),
             config,
             metrics,
@@ -811,29 +815,33 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
 
         let mut delivered = std::mem::take(&mut self.scratch_delivered);
         delivered.clear();
+        let mut mismatched_hashes = std::mem::take(&mut self.scratch_mismatched);
+        mismatched_hashes.clear();
 
         let outcome = match result {
             Ok(mut transactions) => {
                 let mut requested_set = std::mem::take(&mut self.scratch_requested);
                 requested_set.clear();
                 requested_set.extend(requested.iter().copied());
-                let (unsolicited, mismatched) = verify_response(
+                let unsolicited = verify_response(
                     &mut transactions,
                     &requested_set,
                     &self.hashes,
                     key,
                     version,
                     &mut delivered,
+                    &mut mismatched_hashes,
                 );
                 self.scratch_requested = requested_set;
-                Ok((transactions, unsolicited, mismatched))
+                Ok((transactions, unsolicited, mismatched_hashes.len()))
             }
             Err(error) => Err(error),
         };
 
         let timed_out = matches!(&outcome, Err(RequestError::Timeout));
-        self.on_delivery(key, request_id, &requested, &delivered, timed_out);
+        self.on_delivery(key, request_id, &requested, &delivered, &mismatched_hashes, timed_out);
         self.scratch_delivered = delivered;
+        self.scratch_mismatched = mismatched_hashes;
         self.mark_ready(key, QueuePosition::Back);
 
         match outcome {
@@ -881,13 +889,16 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
     }
 
     /// Settles the requested hashes of a resolved request: delivered hashes are dropped and
-    /// undelivered hashes are rescheduled for their remaining candidates.
+    /// undelivered hashes are rescheduled for their remaining candidates. The responder is
+    /// dropped as a candidate for `mismatched` hashes, which it answered with transactions that
+    /// don't match its announcement.
     fn on_delivery(
         &mut self,
         key: PeerKey,
         request_id: u64,
         requested: &[TxHash],
         delivered: &B256Set,
+        mismatched: &B256Set,
         timed_out: bool,
     ) {
         // Position right after the last delivered hash. Drop the responder as a candidate for
@@ -930,7 +941,10 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
             entry.candidates.retain(|candidate| {
                 // disconnected peers are pruned as well
                 let Some(peer) = peers.get_mut(&candidate.peer) else { return false };
-                if idx < cutoff && candidate.peer == key && !retry_only_source {
+                if (idx < cutoff || mismatched.contains(hash)) &&
+                    candidate.peer == key &&
+                    !retry_only_source
+                {
                     peer.tracked = peer.tracked.saturating_sub(1);
                     return false
                 }
@@ -1454,8 +1468,8 @@ fn announced_size(metadata: Option<TransactionMetadata>) -> u32 {
 /// Filters a response down to the transactions that were requested and match the metadata the
 /// responding peer announced for them, dropping duplicates.
 ///
-/// Records the delivered hashes in `delivered` and returns the number of unsolicited and of
-/// mismatching transactions that were dropped.
+/// Records the delivered hashes in `delivered` and the hashes of mismatching transactions in
+/// `mismatched`, and returns the number of unsolicited transactions that were dropped.
 fn verify_response<T: SignedTransaction>(
     transactions: &mut PooledTransactions<T>,
     requested: &B256Set,
@@ -1463,9 +1477,9 @@ fn verify_response<T: SignedTransaction>(
     key: PeerKey,
     version: EthVersion,
     delivered: &mut B256Set,
-) -> (usize, usize) {
+    mismatched: &mut B256Set,
+) -> usize {
     let mut unsolicited = 0;
-    let mut mismatched = 0;
     transactions.0.retain(|tx| {
         let hash = *tx.tx_hash();
         if !requested.contains(&hash) {
@@ -1479,12 +1493,12 @@ fn verify_response<T: SignedTransaction>(
                 .iter()
                 .any(|candidate| candidate.peer == key && candidate.mismatches(tx, version))
         }) {
-            mismatched += 1;
+            mismatched.insert(hash);
             return false
         }
         delivered.insert(hash)
     });
-    (unsolicited, mismatched)
+    unsolicited
 }
 
 #[cfg(test)]
@@ -2076,6 +2090,43 @@ mod tests {
         };
         assert!(!report_peer);
         assert_eq!(transactions.0, txs[..2]);
+    }
+
+    #[test]
+    fn mismatching_tail_transaction_drops_the_responder() {
+        let mut rig = Rig::new();
+        let peer_a = peer(1);
+        let peer_b = peer(2);
+        rig.add_peer(peer_a);
+        rig.add_peer(peer_b);
+        let txs = pooled_txs(4);
+        let hashes = hashes_of(&txs);
+        let metadata = |tx: &PooledTransactionVariant, size_diff: isize| {
+            Some(TransactionMetadata {
+                tx_type: 2,
+                size: tx.encode_2718_len().checked_add_signed(size_diff).unwrap(),
+            })
+        };
+
+        // peer_a announces the last transaction with a wrong size
+        rig.fetcher.on_announcement(
+            peer_a,
+            txs.iter().enumerate().map(|(idx, tx)| AnnouncedTransaction {
+                hash: *tx.tx_hash(),
+                metadata: metadata(tx, if idx == 3 { 9 } else { 0 }),
+            }),
+        );
+        rig.fetcher.on_announcement(
+            peer_b,
+            [AnnouncedTransaction { hash: hashes[3], metadata: metadata(&txs[3], 0) }],
+        );
+        rig.dispatch();
+
+        // the mismatching transaction follows the last delivered one, but isn't treated as a
+        // truncated tail
+        rig.respond(peer_a, txs.clone());
+        assert_eq!(rig.fetcher.candidate_peers(&hashes[3]), vec![peer_b]);
+        assert!(rig.fetcher.queued_hashes(&peer_a).is_empty());
     }
 
     #[test]
