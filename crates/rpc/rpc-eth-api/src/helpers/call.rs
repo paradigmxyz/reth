@@ -42,6 +42,7 @@ use reth_rpc_eth_types::{
         FrameSimulationResult, SimulatedState,
     },
     transaction::{has_frame_signatures, resolve_frame_nonce},
+    utils::CallManyBudget,
     EthApiError, RpcInvalidTransactionError, StateCacheDb,
 };
 use reth_storage_api::{
@@ -480,8 +481,10 @@ pub trait EthCall: EstimateCall + LoadBlock + FullEthApiTypes {
         }
     }
 
-    /// Simulate arbitrary number of transactions at an arbitrary blockchain index, with the
-    /// optionality of state overrides
+    /// Simulate transactions at an arbitrary blockchain index, with the optionality of state
+    /// overrides.
+    ///
+    /// The request is bounded by [`CallManyBudget`]: its calls share the RPC gas cap.
     fn call_many(
         &self,
         bundles: Vec<Bundle<RpcTxReq<<Self::RpcConvert as RpcConvert>::Network>>>,
@@ -496,6 +499,7 @@ pub trait EthCall: EstimateCall + LoadBlock + FullEthApiTypes {
             if bundles.is_empty() {
                 return Err(EthApiError::InvalidParams(String::from("bundles are empty.")).into());
             }
+            let mut budget = CallManyBudget::for_bundles(&bundles, self.call_gas_limit())?;
 
             let permit = self
                 .acquire_owned_blocking_io()
@@ -576,7 +580,7 @@ pub trait EthCall: EstimateCall + LoadBlock + FullEthApiTypes {
                         let overrides =
                             EvmOverrides::new(state_override.take(), block_overrides.clone());
 
-                        let (current_evm_env, prepared_tx) = this
+                        let (current_evm_env, mut prepared_tx) = this
                             .prepare_call_env(evm_env.clone(), tx, &mut db, overrides)
                             .map_err(|err| {
                                 Self::Error::from_eth_err(EthApiError::call_many_error(
@@ -585,15 +589,23 @@ pub trait EthCall: EstimateCall + LoadBlock + FullEthApiTypes {
                                     err.into(),
                                 ))
                             })?;
+                        budget.admit(&mut prepared_tx)?;
                         let res = this.transact(&mut db, current_evm_env, prepared_tx).map_err(
                             |err| {
                                 Self::Error::from_eth_err(EthApiError::call_many_error(
                                     bundle_index,
                                     tx_index,
-                                    err.into(),
+                                    budget.map_call_err(err).into(),
                                 ))
                             },
                         )?;
+                        budget.charge(&res.result).map_err(|err| {
+                            Self::Error::from_eth_err(EthApiError::call_many_error(
+                                bundle_index,
+                                tx_index,
+                                err.into(),
+                            ))
+                        })?;
 
                         match Self::Error::ensure_success::<EvmTypesFor<Self::Evm>>(res.result) {
                             Ok(output) => {
