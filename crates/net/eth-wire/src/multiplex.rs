@@ -356,6 +356,41 @@ impl<St> MultiplexInner<St> {
     }
 }
 
+impl<St> MultiplexInner<St>
+where
+    St: Sink<Bytes, Error = io::Error> + Unpin,
+{
+    /// Drains buffered messages and flushes the transport, including any pending control messages.
+    fn poll_flush_outbound(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), P2PStreamError>> {
+        let mut conn_ready = true;
+        loop {
+            match self.conn.poll_ready_unpin(cx) {
+                Poll::Ready(Ok(())) => {
+                    let Some(msg) = self.out_buffer.pop_front() else { break };
+                    self.conn.start_send_unpin(msg)?;
+                }
+                Poll::Ready(Err(err)) => {
+                    self.conn.start_disconnect(DisconnectReason::DisconnectRequested)?;
+                    return Poll::Ready(Err(err))
+                }
+                Poll::Pending => {
+                    conn_ready = false;
+                    break
+                }
+            }
+        }
+        // The connection only buffers frames on `start_send`; `poll_flush` performs the
+        // actual writes and flushes the transport once for the batch handed to it above.
+        // This also resumes a flush that returned pending on an earlier pass; a no-op if
+        // nothing is buffered.
+        if self.conn.poll_flush_unpin(cx)?.is_pending() || !conn_ready {
+            Poll::Pending
+        } else {
+            Poll::Ready(Ok(()))
+        }
+    }
+}
+
 /// Represents a protocol in the multiplexer that is used as the primary protocol.
 #[derive(Debug)]
 struct PrimaryProtocol<Primary> {
@@ -799,45 +834,13 @@ where
                 return Poll::Ready(Some(msg))
             }
 
-            let mut conn_ready = true;
-            loop {
-                match this.inner.conn.poll_ready_unpin(cx) {
-                    Poll::Ready(Ok(())) => {
-                        if let Some(msg) = this.inner.out_buffer.pop_front() {
-                            if let Err(err) = this.inner.conn.start_send_unpin(msg) {
-                                return Poll::Ready(Some(Err(err.into())))
-                            }
-                        } else {
-                            break
-                        }
-                    }
-                    Poll::Ready(Err(err)) => {
-                        if let Err(disconnect_err) =
-                            this.inner.conn.start_disconnect(DisconnectReason::DisconnectRequested)
-                        {
-                            return Poll::Ready(Some(Err(disconnect_err.into())))
-                        }
-                        return Poll::Ready(Some(Err(err.into())))
-                    }
-                    Poll::Pending => {
-                        conn_ready = false;
-                        break
-                    }
-                }
-            }
-            // The connection only buffers frames on `start_send`; `poll_flush` performs the
-            // actual writes and flushes the transport once for the batch handed to it above.
-            // This also resumes a flush that returned pending on an earlier pass; a no-op if
-            // nothing is buffered.
-            match this.inner.conn.poll_flush_unpin(cx) {
-                Poll::Ready(Ok(())) => {}
+            let conn_ready = match this.inner.poll_flush_outbound(cx) {
+                Poll::Ready(Ok(())) => true,
                 Poll::Ready(Err(err)) => return Poll::Ready(Some(Err(err.into()))),
-                Poll::Pending => {
-                    conn_ready = false;
-                }
-            }
+                Poll::Pending => false,
+            };
 
-            match this.poll_outbound_producers(cx) {
+            let producers_pending = match this.poll_outbound_producers(cx) {
                 Ok(ProducerPoll::Full)
                     if this.producer_polls_since_inbound < this.inner.protocols.len() + 1 =>
                 {
@@ -848,10 +851,11 @@ where
                     }
                     return Poll::Pending
                 }
-                Ok(ProducerPoll::Pending | ProducerPoll::Full) => {}
+                Ok(ProducerPoll::Pending) => true,
+                Ok(ProducerPoll::Full) => false,
                 Ok(ProducerPoll::Closed) => return Poll::Ready(None),
                 Err(err) => return Poll::Ready(Some(Err(P2PStreamError::Io(err).into()))),
-            }
+            };
 
             let mut delegated = false;
             // Pull one message before returning to the top of the loop, where every protocol gets
@@ -897,6 +901,15 @@ where
             }
 
             if !conn_ready || (!delegated && this.inner.out_buffer.is_empty()) {
+                return Poll::Pending
+            }
+
+            if !delegated && producers_pending {
+                // Only newly buffered output remains. Producers and ingress already registered
+                // their wakers, so flushing does not require polling them again.
+                if let Poll::Ready(Err(err)) = this.inner.poll_flush_outbound(cx) {
+                    return Poll::Ready(Some(Err(err.into())))
+                }
                 return Poll::Pending
             }
         }
@@ -1127,7 +1140,11 @@ mod tests {
     };
     use futures::{stream, task::noop_waker_ref};
     use reth_eth_wire_types::EthNetworkPrimitives;
-    use std::{sync::atomic::AtomicBool, task::Poll};
+    use std::{
+        cell::{Cell, RefCell},
+        sync::atomic::AtomicBool,
+        task::{Poll, Waker},
+    };
     use tokio::{net::TcpListener, sync::oneshot};
     use tokio_util::codec::Decoder;
 
@@ -1688,5 +1705,183 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[derive(Debug, Default)]
+    struct OutboundTransport {
+        sent: Vec<Bytes>,
+        read_polls: usize,
+        flush_polls: usize,
+        writable: Cell<bool>,
+        flush_ready: Cell<bool>,
+        flush_error: Cell<Option<io::ErrorKind>>,
+        pending_waker: RefCell<Option<Waker>>,
+    }
+
+    impl Stream for OutboundTransport {
+        type Item = io::Result<BytesMut>;
+
+        fn poll_next(mut self: Pin<&mut Self>, _: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+            self.read_polls += 1;
+            Poll::Pending
+        }
+    }
+
+    impl Sink<Bytes> for OutboundTransport {
+        type Error = io::Error;
+
+        fn poll_ready(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+            if self.writable.get() {
+                Poll::Ready(Ok(()))
+            } else {
+                *self.pending_waker.borrow_mut() = Some(cx.waker().clone());
+                Poll::Pending
+            }
+        }
+
+        fn start_send(mut self: Pin<&mut Self>, item: Bytes) -> Result<(), Self::Error> {
+            self.sent.push(item);
+            Ok(())
+        }
+
+        fn poll_flush(
+            mut self: Pin<&mut Self>,
+            cx: &mut Context<'_>,
+        ) -> Poll<Result<(), Self::Error>> {
+            self.flush_polls += 1;
+            if let Some(err) = self.flush_error.take() {
+                return Poll::Ready(Err(err.into()))
+            }
+            if self.flush_ready.get() {
+                Poll::Ready(Ok(()))
+            } else {
+                *self.pending_waker.borrow_mut() = Some(cx.waker().clone());
+                Poll::Pending
+            }
+        }
+
+        fn poll_close(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+            self.poll_flush(cx)
+        }
+    }
+
+    fn outbound_multiplexer(
+    ) -> (RlpxProtocolMultiplexer<OutboundTransport>, SharedCapability, SharedCapability) {
+        let (hello, _) = test_hello();
+        let capabilities =
+            SharedCapabilities::try_new(hello.protocols.clone(), hello.message().capabilities)
+                .unwrap();
+        let eth = capabilities.eth().unwrap().clone();
+        let test = capabilities.find(&TestProtoMessage::capability()).unwrap().clone();
+        let transport = OutboundTransport {
+            writable: Cell::new(true),
+            flush_ready: Cell::new(true),
+            ..Default::default()
+        };
+        (RlpxProtocolMultiplexer::new(P2PStream::new(transport, capabilities)), eth, test)
+    }
+
+    #[tokio::test]
+    async fn outbound_batch_flushes_without_repolling_streams() {
+        let (mut mux, eth, test) = outbound_multiplexer();
+        let primary_polls = Arc::new(AtomicUsize::new(0));
+        let satellite_polls = Arc::new(AtomicUsize::new(0));
+        let polls = Arc::clone(&satellite_polls);
+        mux.install_protocol(&TestProtoMessage::capability(), move |conn| {
+            let mut messages =
+                [BytesMut::from(&[0, 1][..]), BytesMut::from(&[0, 2][..])].into_iter();
+            stream::poll_fn(move |_| {
+                let _ = &conn;
+                polls.fetch_add(1, Ordering::Relaxed);
+                messages.next().map_or(Poll::Pending, |msg| Poll::Ready(Some(msg)))
+            })
+        })
+        .unwrap();
+        let polls = Arc::clone(&primary_polls);
+        let mut st = mux
+            .into_satellite_stream(eth.capability().as_ref(), move |proxy| {
+                proxy.try_send(Bytes::from_static(&[0, 0])).unwrap();
+                stream::poll_fn(move |_| {
+                    let _ = &proxy;
+                    polls.fetch_add(1, Ordering::Relaxed);
+                    Poll::<Option<Result<(), P2PStreamError>>>::Pending
+                })
+            })
+            .unwrap();
+
+        let mut cx = Context::from_waker(noop_waker_ref());
+        assert!(st.poll_next_unpin(&mut cx).is_pending());
+        assert_eq!(primary_polls.load(Ordering::Relaxed), 1);
+        assert_eq!(satellite_polls.load(Ordering::Relaxed), 3);
+        let transport = st.inner.conn.inner();
+        assert_eq!(transport.read_polls, 1);
+        assert_eq!(transport.flush_polls, 1);
+        assert_eq!(
+            transport.sent,
+            [
+                compressed_frame(eth.message_id_offset(), &[0]).freeze(),
+                compressed_frame(test.message_id_offset(), &[1]).freeze(),
+                compressed_frame(test.message_id_offset(), &[2]).freeze(),
+            ]
+        );
+        assert!(st.inner.out_buffer.is_empty());
+    }
+
+    #[tokio::test]
+    async fn outbound_batch_resumes_after_backpressure() {
+        for (writable, flush_ready) in [(false, true), (true, false)] {
+            let (mut mux, eth, _) = outbound_multiplexer();
+            mux.inner.conn.inner().writable.set(writable);
+            mux.inner.conn.inner().flush_ready.set(flush_ready);
+            mux.install_protocol(&TestProtoMessage::capability(), |_| {
+                stream::iter((0..3).map(|_| BytesMut::from(&[0, 0][..]))).chain(stream::pending())
+            })
+            .unwrap();
+            let mut st = mux
+                .into_satellite_stream(eth.capability().as_ref(), |proxy| PendingPrimary {
+                    _proxy: proxy,
+                })
+                .unwrap();
+            let mut cx = Context::from_waker(noop_waker_ref());
+
+            assert!(st.poll_next_unpin(&mut cx).is_pending());
+            assert_eq!(st.inner.out_buffer.messages.len(), usize::from(!writable));
+            let transport = st.inner.conn.inner();
+            assert_eq!(transport.read_polls, 1);
+            assert_eq!(transport.sent.len(), if writable { 3 } else { 0 });
+            transport.writable.set(true);
+            transport.flush_ready.set(true);
+            let waker = transport.pending_waker.borrow_mut().take().unwrap();
+            assert!(waker.will_wake(cx.waker()));
+            waker.wake();
+
+            assert!(st.poll_next_unpin(&mut cx).is_pending());
+            assert!(st.inner.out_buffer.is_empty());
+            let transport = st.inner.conn.inner();
+            assert_eq!(transport.sent.len(), 3);
+            assert_eq!(transport.read_polls, 2);
+            assert_eq!(transport.flush_polls, if writable { 2 } else { 1 });
+        }
+    }
+
+    #[tokio::test]
+    async fn outbound_batch_propagates_flush_error() {
+        let (mut mux, eth, _) = outbound_multiplexer();
+        mux.inner.conn.inner().flush_error.set(Some(io::ErrorKind::ConnectionReset));
+        mux.install_protocol(&TestProtoMessage::capability(), |_| {
+            stream::once(std::future::ready(BytesMut::from(&[0, 0][..]))).chain(stream::pending())
+        })
+        .unwrap();
+        let mut st = mux
+            .into_satellite_stream(eth.capability().as_ref(), |proxy| PendingPrimary {
+                _proxy: proxy,
+            })
+            .unwrap();
+
+        assert!(matches!(
+            st.poll_next_unpin(&mut Context::from_waker(noop_waker_ref())),
+            Poll::Ready(Some(Err(P2PStreamError::Io(err)))) if err.kind() == io::ErrorKind::ConnectionReset
+        ));
+        assert_eq!(st.inner.conn.inner().read_polls, 1);
     }
 }
