@@ -14,7 +14,15 @@ use alloy_rpc_types_eth::{
     state::StateOverride,
     BlockId, BlockOverrides, BlockTransactionsKind,
 };
-use evm2::{interpreter::InstrStop, precompiles::MovePrecompileError, EvmFeatures, TxResult};
+use evm2::{
+    evm::{
+        BEACON_ROOTS_ADDRESS, BUILDER_DEPOSIT_REQUEST_ADDRESS, BUILDER_EXIT_REQUEST_ADDRESS,
+        CONSOLIDATION_REQUEST_ADDRESS, HISTORY_STORAGE_ADDRESS, WITHDRAWAL_REQUEST_ADDRESS,
+    },
+    interpreter::InstrStop,
+    precompiles::MovePrecompileError,
+    EvmFeatures, TxResult,
+};
 use evm2_inspectors::transfer::TransferInspector;
 use jsonrpsee_types::{error::INTERNAL_ERROR_CODE, ErrorObject};
 use reth_errors::ProviderResult;
@@ -122,6 +130,9 @@ pub enum EthSimulateError {
     /// Attempted to move a precompile to its own address.
     #[error("cannot move precompile {0} to itself")]
     MovePrecompileToSelf(Address),
+    /// Attempted to override the code of a system contract.
+    #[error("cannot override code of system contract {0}")]
+    SystemContractCodeOverride(Address),
 }
 
 impl EthSimulateError {
@@ -141,7 +152,9 @@ impl EthSimulateError {
             Self::MaxInitCodeSizeExceeded => -38025,
             Self::TooManyBlocks | Self::GasLimitReached => -38026,
             Self::MovePrecompileToSelf(_) => -38022,
-            Self::BlockNotFound { .. } | Self::NotAPrecompile(_) => -32000,
+            Self::BlockNotFound { .. } |
+            Self::NotAPrecompile(_) |
+            Self::SystemContractCodeOverride(_) => -32000,
         }
     }
 }
@@ -299,6 +312,28 @@ pub fn apply_precompile_overrides(
     Ok(())
 }
 
+/// Rejects state overrides that replace the code of a system contract.
+///
+/// Block system calls run with their own fixed gas limit outside the request's gas budget, so
+/// their cost is only bounded by the real contract code.
+pub fn reject_system_contract_code_overrides(
+    state_overrides: &StateOverride,
+) -> Result<(), EthSimulateError> {
+    for address in [
+        BEACON_ROOTS_ADDRESS,
+        HISTORY_STORAGE_ADDRESS,
+        WITHDRAWAL_REQUEST_ADDRESS,
+        CONSOLIDATION_REQUEST_ADDRESS,
+        BUILDER_DEPOSIT_REQUEST_ADDRESS,
+        BUILDER_EXIT_REQUEST_ADDRESS,
+    ] {
+        if state_overrides.get(&address).is_some_and(|account| account.code.is_some()) {
+            return Err(EthSimulateError::SystemContractCodeOverride(address))
+        }
+    }
+    Ok(())
+}
+
 /// Converts all [`TransactionRequest`]s into [`Recovered`] transactions and applies them to the
 /// given [`BlockBuilder`].
 ///
@@ -325,6 +360,9 @@ where
     T: RpcConvert<Primitives = S::Primitives>,
     EvmTypes: evm2::EvmTypes,
 {
+    if is_cancelled() {
+        return Err(EthApiError::InternalEthError)
+    }
     builder.apply_pre_execution_changes()?;
 
     let mut results = Vec::with_capacity(calls.len());

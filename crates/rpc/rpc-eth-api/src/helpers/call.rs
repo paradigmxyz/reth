@@ -185,6 +185,8 @@ pub trait EthCall: EstimateCall + LoadBlock + FullEthApiTypes {
                         apply_block_overrides(block_overrides, &mut db, &mut evm_env);
                     }
                     if let Some(ref state_overrides) = state_overrides {
+                        simulate::reject_system_contract_code_overrides(state_overrides)
+                            .map_err(|e| Self::Error::from_eth_err(EthApiError::other(e)))?;
                         let mut changes = simulation_state.as_ref().map(|_| BundleState::default());
                         apply_state_overrides_with_state(
                             state_overrides.clone(),

@@ -548,7 +548,10 @@ mod tests {
         BlockOverrides, Bundle, TransactionRequest,
     };
     use alloy_rpc_types_trace::{parity::TraceType, tracerequest::TraceCallRequest};
-    use evm2::{evm::CacheDB, AccountInfo};
+    use evm2::{
+        evm::{CacheDB, BEACON_ROOTS_ADDRESS},
+        AccountInfo,
+    };
     use jsonrpsee_types::error::INVALID_PARAMS_CODE;
     use rand::Rng;
     use reth_chain_state::CanonStateSubscriptions;
@@ -2061,5 +2064,45 @@ mod tests {
                 "{err}"
             );
         }
+    }
+
+    #[tokio::test]
+    async fn simulate_rejects_system_contract_code_overrides() {
+        let chain_spec = Arc::new(
+            ChainSpecBuilder::mainnet()
+                .cancun_activated()
+                .genesis(Genesis::default().with_gas_limit(30_000_000))
+                .build(),
+        );
+        let factory = create_test_provider_factory_with_chain_spec(chain_spec);
+        init_genesis(&factory).unwrap();
+        let api = build_test_eth_api(BlockchainProvider::new(factory).unwrap());
+        let payload = |account| {
+            let block = SimBlock::default()
+                .with_state_overrides(StateOverride::from_iter([(BEACON_ROOTS_ADDRESS, account)]));
+            SimulatePayload::default().extend(block)
+        };
+
+        let err = EthCall::simulate_v1(
+            &api,
+            payload(AccountOverride::default().with_code(Bytes::from_static(&[0x00]))),
+            None,
+        )
+        .await
+        .unwrap_err();
+        let rpc: jsonrpsee::types::ErrorObjectOwned = err.into();
+        assert_eq!(rpc.code(), -32000);
+        assert_eq!(
+            rpc.message(),
+            format!("cannot override code of system contract {BEACON_ROOTS_ADDRESS}")
+        );
+
+        EthCall::simulate_v1(
+            &api,
+            payload(AccountOverride::default().with_balance(U256::from(1))),
+            None,
+        )
+        .await
+        .unwrap();
     }
 }
