@@ -324,7 +324,9 @@ jobs:
           git push --force-with-lease="refs/heads/$BRANCH:$LEASE" origin "$BRANCH:refs/heads/$BRANCH"
 
           TITLE="deps: update evm2 to ${NEW_REV:0:7} ($(date -u +%Y-%m-%d))"
-          PR=$(gh pr list --head "$BRANCH" --base main --state open --json number --jq '.[0].number // empty')
+          # --head matches fork PRs with the same branch name too; only take this repository's own.
+          PR=$(gh pr list --head "$BRANCH" --base main --state open --json number,isCrossRepository \
+            --jq '[.[] | select(.isCrossRepository | not)][0].number // empty')
           if [ -n "$PR" ]; then
             gh pr edit "$PR" --title "$TITLE" --body-file "$ARTIFACT/pr-body.md"
           else
@@ -368,7 +370,8 @@ jobs:
           if [ "$CLIPPY_PASSED" = "false" ]; then DETAILS+=$'\n'"• ⚠️ Clippy: unresolved errors"; fi
           if [ "$TEST_PASSED" = "false" ]; then DETAILS+=$'\n'"• ⚠️ Tests: unresolved compilation errors"; fi
           PR_INFO=$(gh pr list --repo "$GITHUB_REPOSITORY" --head evm2-auto-bump --base main --state open \
-            --json number,url --jq '.[0] | select(.) | [.number, .url] | @tsv' 2>/dev/null || true)
+            --json number,url,isCrossRepository \
+            --jq '[.[] | select(.isCrossRepository | not)][0] | select(.) | [.number, .url] | @tsv' 2>/dev/null || true)
           if [ -n "$PR_INFO" ]; then
             IFS=$'\t' read -r PR_NUMBER PR_URL <<< "$PR_INFO"
             DETAILS+=$'\n'"• <${PR_URL}|PR #${PR_NUMBER}>"
