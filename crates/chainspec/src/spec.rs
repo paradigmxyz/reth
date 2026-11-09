@@ -1298,7 +1298,7 @@ mod tests {
     use alloy_eips::{
         eip4844::BLOB_TX_MIN_BLOB_GASPRICE,
         eip7840::BlobParams,
-        eip8141::{NONCE_MANAGER, NONCE_MANAGER_CODE},
+        eip8250::{NONCE_MANAGER, NONCE_MANAGER_CODE},
     };
     use alloy_genesis::{ChainConfig, GenesisAccount};
     use alloy_primitives::{b256, hex};
@@ -3147,12 +3147,12 @@ Post-merge hard forks (timestamp based):
     }
 
     #[test]
-    fn eip8253_hive_config_preserves_target_accounts() {
+    fn eip8253_config_preserves_target_accounts() {
         let address = Address::with_last_byte(1);
         let genesis: Genesis = serde_json::from_value(serde_json::json!({
             "config": {
                 "bogotaTime": 15_000,
-                "zeroNonceStorageAccounts": [address]
+                "eip8253Accounts": [address]
             },
             "alloc": {}
         }))

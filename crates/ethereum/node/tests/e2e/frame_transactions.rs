@@ -3,10 +3,10 @@
 use alloy_consensus::{Transaction, TxEip8141};
 use alloy_eips::{
     eip8141::{
-        nonce_slot, Frame, FrameAddress, FrameLimits, FrameMode, FrameSignature, SignatureScheme,
+        Frame, FrameAddress, FrameLimits, FrameMode, FrameSignature, SignatureScheme,
         TransactionFees, ATOMIC_BATCH_FLAG, EXPIRY_VERIFIER, EXPIRY_VERIFIER_RUNTIME,
-        NONCE_MANAGER, NONCE_MANAGER_CODE,
     },
+    eip8250::{nonce_slot, NONCE_MANAGER, NONCE_MANAGER_CODE},
     Decodable2718,
 };
 use alloy_primitives::{Address, Bytes, U256};

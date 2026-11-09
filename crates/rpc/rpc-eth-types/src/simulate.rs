@@ -972,7 +972,7 @@ mod tests {
             ..Default::default()
         };
         resolve_frame_nonce(&mut request, |address, _| {
-            assert_eq!(address, alloy_eips::eip8141::NONCE_MANAGER);
+            assert_eq!(address, alloy_eips::eip8250::NONCE_MANAGER);
             Ok(U256::from(9))
         })
         .unwrap();

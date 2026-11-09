@@ -4,7 +4,10 @@
 
 use crate::EthApiError;
 use alloy_consensus::transaction::TxHashRef;
-use alloy_eips::eip8141::{nonce_slot, FrameSignature, NONCE_MANAGER};
+use alloy_eips::{
+    eip8141::FrameSignature,
+    eip8250::{nonce_slot, NONCE_MANAGER},
+};
 use alloy_primitives::{Address, B256, U256};
 use alloy_rpc_types_eth::{TransactionInfo, TransactionRequest};
 use evm2::{version::GasId, Version};
@@ -185,7 +188,7 @@ pub fn resolve_frame_nonce(
         return Ok(());
     }
     let Some(keys) = request.nonce_keys.as_ref() else { return Ok(()) };
-    alloy_eips::eip8141::validate_nonce_keys(keys)
+    alloy_eips::eip8250::validate_nonce_keys(keys)
         .map_err(|reason| EthApiError::InvalidParams(reason.into()))?;
     let invalid =
         || EthApiError::InvalidParams("nonce keys require one non-exhausted sequence".into());

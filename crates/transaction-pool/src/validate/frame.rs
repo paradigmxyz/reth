@@ -5,7 +5,7 @@ use super::{
 };
 use crate::{error::Eip8141PoolTransactionError, EthPoolTransaction};
 use alloy_consensus::{transaction::Recovered, BlockHeader};
-use alloy_eips::eip8141::{nonce_slot, NONCE_MANAGER};
+use alloy_eips::eip8250::{nonce_slot, NONCE_MANAGER};
 use alloy_primitives::U256;
 use reth_evm::{
     database::StateProviderDatabase, BlockExecutionError, ConfigureEvm, Evm, EvmEnv,

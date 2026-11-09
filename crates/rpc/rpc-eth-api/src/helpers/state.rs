@@ -67,7 +67,7 @@ pub trait EthState: LoadState + SpawnBlocking {
             let Some(keys) = nonce_keys else {
                 return LoadState::transaction_count(self, address, block_id).await;
             };
-            alloy_eips::eip8141::validate_nonce_keys(&keys)
+            alloy_eips::eip8250::validate_nonce_keys(&keys)
                 .map_err(|reason| EthApiError::InvalidParams(reason.into()))?;
             if keys.is_empty() {
                 return LoadState::transaction_count(self, address, block_id).await;
@@ -560,7 +560,7 @@ pub trait LoadState:
             };
 
             if let Some(keys) = nonce_keys {
-                alloy_eips::eip8141::validate_nonce_keys(&keys)
+                alloy_eips::eip8250::validate_nonce_keys(&keys)
                     .map_err(|reason| EthApiError::InvalidParams(reason.into()))?;
                 if !keys.is_empty() {
                     let state = this.latest_state()?;

@@ -14,8 +14,9 @@ pub type EthRpcConverter<ChainSpec> =
 mod tests {
     use super::*;
     use alloy_consensus::{Transaction, TxEip8141, TxType};
-    use alloy_eips::eip8141::{
-        nonce_slot, Frame, FrameLimits, FrameMode, TransactionFees, NONCE_MANAGER,
+    use alloy_eips::{
+        eip8141::{Frame, FrameLimits, FrameMode, TransactionFees},
+        eip8250::{nonce_slot, NONCE_MANAGER},
     };
     use alloy_primitives::{Address, B256, U256};
     use alloy_rpc_types_eth::TransactionRequest;
