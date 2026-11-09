@@ -1125,7 +1125,7 @@ mod tests {
     const COUNTER: Address = Address::repeat_byte(0xc1);
     /// Stores the beneficiary balance in slot 0.
     const BENEFICIARY_BALANCE_READER: Address = Address::repeat_byte(0xc2);
-    /// Stores its own balance in slot 0.
+    /// Logs its own balance.
     const SELF_BALANCE_READER: Address = Address::repeat_byte(0xc3);
     /// Sends 5 wei to [`NOOP`].
     const FORWARDER: Address = Address::repeat_byte(0xc4);
@@ -1262,7 +1262,7 @@ mod tests {
             (SELFDESTRUCTER, bytes!("73c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0ff")),
             (COUNTER, bytes!("5f546001015f5500")),
             (BENEFICIARY_BALANCE_READER, bytes!("41315f5500")),
-            (SELF_BALANCE_READER, bytes!("475f5500")),
+            (SELF_BALANCE_READER, bytes!("475f5260205fa000")),
             (FORWARDER, bytes!("5f5f5f5f600573c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c05af100")),
             (TIMESTAMP_READER, bytes!("425f5500")),
             (GAS_LIMIT_READER, bytes!("455f5500")),
