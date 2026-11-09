@@ -252,9 +252,15 @@ impl RethRpcServerConfig for RpcServerArgs {
 
         let mut builder = AuthServerConfig::builder(jwt_secret).socket_addr(address);
         if self.auth_ipc {
-            builder = builder
-                .ipc_endpoint(self.auth_ipc_path().to_string())
-                .with_ipc_config(self.ipc_server_builder());
+            let mut ipc_config = self.ipc_server_builder();
+            // The auth IPC socket has no JWT auth, so its file mode is the only access control.
+            // Limited to Linux because platforms that cannot set the mode before binding, such as
+            // macOS, fail to start.
+            if cfg!(target_os = "linux") && self.ipc_socket_permissions.is_none() {
+                ipc_config = ipc_config.set_ipc_socket_permissions(Some("600".to_string()));
+            }
+            builder =
+                builder.ipc_endpoint(self.auth_ipc_path().to_string()).with_ipc_config(ipc_config);
         }
         Ok(builder.build())
     }

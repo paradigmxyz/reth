@@ -531,8 +531,9 @@ pub struct RpcServerArgs {
 
     /// Set the permissions for the IPC socket file, in octal format.
     ///
-    /// Accepts modes up to `0o7777`, with an optional `0o` prefix. If not specified, the
-    /// permissions will be set by the system's umask.
+    /// Accepts modes up to `0o7777`, with an optional `0o` prefix. Also applies to the auth IPC
+    /// socket (`--auth-ipc`). If not specified, the permissions will be set by the system's umask,
+    /// except that the auth IPC socket defaults to `600` (owner-only) on Linux.
     ///
     /// Startup fails if the mode is invalid or the platform cannot apply it before binding the
     /// socket, which includes macOS.
