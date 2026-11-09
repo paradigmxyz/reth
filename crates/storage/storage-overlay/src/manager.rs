@@ -55,10 +55,11 @@ struct OverlayManagerInner<N: NodePrimitives> {
     preserved_sparse_trie: Mutex<Option<PreservedSparseTrie>>,
     #[cfg(feature = "rayon")]
     worker_pool: Option<Arc<WorkerPool>>,
-    metrics: StateTrieOverlayMetrics,
-    execution_metrics: ExecutionOverlayMetrics,
-    /// Created on first use rather than with the manager: the node builds the manager before it
-    /// installs the metrics recorder, and handles registered earlier stay no-ops.
+    // Metrics are created on first use rather than with the manager: the node builds the manager
+    // before it installs the metrics recorder, and metrics registered earlier stay no-ops (the
+    // derived `Default` caches its first instance for the whole process).
+    metrics: OnceLock<StateTrieOverlayMetrics>,
+    execution_metrics: OnceLock<ExecutionOverlayMetrics>,
     builder_metrics: OnceLock<OverlayBuilderMetrics>,
 }
 
@@ -138,6 +139,14 @@ impl<N: NodePrimitives> OverlayManager<N> {
 
     pub(crate) fn changeset_cache(&self) -> &ChangesetCache {
         &self.inner.changeset_cache
+    }
+
+    fn metrics(&self) -> &StateTrieOverlayMetrics {
+        self.inner.metrics.get_or_init(StateTrieOverlayMetrics::default)
+    }
+
+    fn execution_metrics(&self) -> &ExecutionOverlayMetrics {
+        self.inner.execution_metrics.get_or_init(ExecutionOverlayMetrics::default)
     }
 
     /// Returns the metrics shared by the overlay builders this manager creates.
@@ -426,7 +435,7 @@ impl<N: NodePrimitives> OverlayManager<N> {
         let input = self
             .get_or_compute_overlay(
                 &self.inner.state_trie_overlays,
-                &self.inner.metrics,
+                self.metrics(),
                 anchor_hash,
                 parent_state,
                 cache_config,
@@ -491,7 +500,7 @@ impl<N: NodePrimitives> OverlayManager<N> {
 
         self.get_or_compute_overlay(
             &self.inner.execution_overlays,
-            &self.inner.execution_metrics,
+            self.execution_metrics(),
             anchor_hash,
             parent_state,
             cache_config,
@@ -701,14 +710,14 @@ impl<N: NodePrimitives> OverlayManager<N> {
         write_to_cache: bool,
     ) -> TrieInputSorted {
         if !write_to_cache {
-            return compute_overlay(compute_input, anchor_hash, &self.inner.metrics)
+            return compute_overlay(compute_input, anchor_hash, self.metrics())
         }
 
         #[cfg(feature = "rayon")]
         {
             if let Some(worker_pool) = &self.inner.worker_pool {
                 let compute_span = _span;
-                let metrics = self.inner.metrics.clone();
+                let metrics = self.metrics().clone();
                 return worker_pool.spawn_and_wait(move || {
                     let _guard = compute_span.enter();
                     compute_overlay(compute_input, anchor_hash, &metrics)
@@ -716,7 +725,7 @@ impl<N: NodePrimitives> OverlayManager<N> {
             }
         }
 
-        compute_overlay(compute_input, anchor_hash, &self.inner.metrics)
+        compute_overlay(compute_input, anchor_hash, self.metrics())
     }
 
     fn compute_execution_overlay(
@@ -730,7 +739,7 @@ impl<N: NodePrimitives> OverlayManager<N> {
             return compute_execution_overlay_inner(
                 compute_input,
                 anchor_hash,
-                &self.inner.execution_metrics,
+                self.execution_metrics(),
             )
         }
 
@@ -738,7 +747,7 @@ impl<N: NodePrimitives> OverlayManager<N> {
         {
             if let Some(worker_pool) = &self.inner.worker_pool {
                 let compute_span = _span;
-                let metrics = self.inner.execution_metrics.clone();
+                let metrics = self.execution_metrics().clone();
                 return worker_pool.spawn_and_wait(move || {
                     let _guard = compute_span.enter();
                     compute_execution_overlay_inner(compute_input, anchor_hash, &metrics)
@@ -746,7 +755,7 @@ impl<N: NodePrimitives> OverlayManager<N> {
             }
         }
 
-        compute_execution_overlay_inner(compute_input, anchor_hash, &self.inner.execution_metrics)
+        compute_execution_overlay_inner(compute_input, anchor_hash, self.execution_metrics())
     }
 }
 
