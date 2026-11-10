@@ -31,13 +31,13 @@ use alloy_eip7928::{
     compute_block_access_list_hash, BlockAccessList,
 };
 use alloy_primitives::Address;
-use crossbeam_channel::{Receiver, Sender};
 use evm2::evm::Bal as EvmBal;
 use reth_engine_primitives::BlockAccessListDecodeError;
 use reth_evm::{
     BlockExecutionOutput, BlockExecutor, BlockExecutorFactory, BlockExecutorFor, ConfigureEvm,
     Database, EvmEnvFor, ExecutableTxFor, ExecutionCtxFor,
 };
+use reth_executor::channel::{Receiver, Sender};
 use reth_primitives_traits::ReceiptTy;
 use reth_tasks::Runtime;
 use std::sync::Arc;
@@ -91,7 +91,7 @@ where
 
 #[expect(clippy::too_many_arguments, clippy::type_complexity)]
 fn execute_block_inner<'scope, Evm, Tx, Err, DB, MakeDb>(
-    scope: &rayon::Scope<'scope>,
+    scope: &reth_executor::rayon::Scope<'scope>,
     evm_config: &'scope Evm,
     make_db: &'scope MakeDb,
     input_bal: Arc<DecodedBal>,
@@ -130,7 +130,7 @@ where
         )
         .map_err(BlockAccessListDecodeError::new)?,
     );
-    let (result_tx, result_rx) = crossbeam_channel::unbounded();
+    let (result_tx, result_rx) = reth_executor::channel::unbounded();
     let (abort_guard, abort_rx) = AbortGuard::new();
 
     for _ in 0..worker_count {
@@ -220,7 +220,7 @@ struct AbortGuard {
 
 impl AbortGuard {
     fn new() -> (Self, Receiver<()>) {
-        let (tx, rx) = crossbeam_channel::bounded(0);
+        let (tx, rx) = reth_executor::channel::bounded(0);
         (Self { _tx: tx }, rx)
     }
 }
@@ -354,7 +354,7 @@ mod tests {
     }
 
     fn tx_stream<Tx>(txs: Vec<Tx>) -> Receiver<(usize, Result<Tx, Infallible>)> {
-        let (tx, rx) = crossbeam_channel::unbounded();
+        let (tx, rx) = reth_executor::channel::unbounded();
         for (index, transaction) in txs.into_iter().enumerate() {
             tx.send((index, Ok(transaction))).unwrap();
         }
@@ -392,7 +392,7 @@ mod tests {
         MakeDb: Fn(bool) -> Result<DB, BalExecutionError> + Sync,
     {
         let transaction_count = txs.len();
-        let (receipt_tx, _receipt_rx) = crossbeam_channel::unbounded();
+        let (receipt_tx, _receipt_rx) = reth_executor::channel::unbounded();
         let evm_env = evm_config.evm_env(block.header()).unwrap();
         let execution_ctx = evm_config.context_for_block(block).unwrap();
         execute_block(
@@ -810,13 +810,13 @@ mod tests {
         // Infallible and cannot inject errors.
         let evm_config = test_evm_config();
         let block = empty_amsterdam_block(B256::ZERO);
-        let (tx_tx, tx_rx) = crossbeam_channel::unbounded::<(
+        let (tx_tx, tx_rx) = reth_executor::channel::unbounded::<(
             usize,
             Result<Recovered<TransactionSigned>, std::io::Error>,
         )>();
         tx_tx.send((0, Err(std::io::Error::other("sig fail")))).unwrap();
         drop(tx_tx);
-        let (receipt_tx, _receipt_rx) = crossbeam_channel::unbounded();
+        let (receipt_tx, _receipt_rx) = reth_executor::channel::unbounded();
         let evm_env = evm_config.evm_env(block.header()).unwrap();
         let execution_ctx = evm_config.context_for_block(&block).unwrap();
 
@@ -1101,7 +1101,7 @@ mod tests {
             }
             Ok(pre_block_db.clone())
         };
-        let (tx_tx, tx_rx) = crossbeam_channel::unbounded();
+        let (tx_tx, tx_rx) = reth_executor::channel::unbounded();
         // Recovery can finish out of order. A single worker must continue after both kinds
         // of error to execute slot 0, without reusing the failed slot 1 executor.
         tx_tx.send((2, Err(std::io::Error::other("sig fail")))).unwrap();
@@ -1109,7 +1109,7 @@ mod tests {
         tx_tx.send((0, Ok(tx1.clone()))).unwrap();
         drop(tx_tx);
         let (_abort_guard, abort_rx) = AbortGuard::new();
-        let (result_tx, result_rx) = crossbeam_channel::unbounded();
+        let (result_tx, result_rx) = reth_executor::channel::unbounded();
         let runtime = Runtime::test();
         runtime.bal_streaming_pool().in_place_scope(|scope| {
             worker::spawn_worker(
@@ -1191,7 +1191,7 @@ mod tests {
             serial.execute_transaction(tx1.clone()).unwrap();
             let serial_result = serial.execute_transaction(tx2.clone());
 
-            let (receipt_tx, _receipt_rx) = crossbeam_channel::unbounded();
+            let (receipt_tx, _receipt_rx) = reth_executor::channel::unbounded();
             let parallel_result = execute_block(
                 &Runtime::test(),
                 &evm_config,

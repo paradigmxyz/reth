@@ -28,8 +28,10 @@ pub mod metrics;
 
 use crate::error::StateRootTaskError;
 use alloy_primitives::B256;
-use crossbeam_channel::{unbounded, Receiver as CrossbeamReceiver, Sender as CrossbeamSender};
-use reth_primitives_traits::FastInstant as Instant;
+use reth_executor::{
+    channel::{unbounded, Receiver as CrossbeamReceiver, Sender as CrossbeamSender},
+    time::Instant,
+};
 use reth_provider::{DatabaseProviderROFactory, ProviderError, ProviderResult, StateProofProvider};
 use reth_tasks::{Runtime, WorkerPool};
 use reth_trie::{DecodedMultiProofV2, MultiProofTargetsV2, ProofV2Target};
@@ -474,7 +476,7 @@ impl<Factory: DatabaseProviderROFactory, J> ProofWorker<Factory, J> {
                     jitter_us = jitter.as_micros(),
                     "Proof worker applying proof jitter"
                 );
-                std::thread::sleep(jitter);
+                reth_executor::thread::sleep(jitter);
             }
 
             match catch_unwind(AssertUnwindSafe(|| process(&provider, job))) {
@@ -678,8 +680,8 @@ impl From<ProofJobError> for StateRootTaskError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crossbeam_channel::RecvTimeoutError;
     use reth_chainspec::ChainSpec;
+    use reth_executor::channel::RecvTimeoutError;
     use reth_provider::test_utils::create_test_provider_factory_with_chain_spec;
     use std::sync::Arc;
 
@@ -802,7 +804,7 @@ mod tests {
             // initialization error is a message here, rather than a successful shutdown.
             assert!(matches!(
                 results.recv_timeout(Duration::from_secs(30)),
-                Err(crossbeam_channel::RecvTimeoutError::Disconnected)
+                Err(reth_executor::channel::RecvTimeoutError::Disconnected)
             ));
         }
     }

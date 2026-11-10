@@ -2,8 +2,9 @@
 use alloy_primitives::{Address, StorageKey, StorageValue, B256};
 use metrics::{Gauge, Histogram};
 use reth_errors::ProviderResult;
+use reth_executor::time::Instant;
 use reth_metrics::Metrics;
-use reth_primitives_traits::{Account, Bytecode, FastInstant as Instant};
+use reth_primitives_traits::{Account, Bytecode};
 use reth_provider::EvmStateProvider;
 use std::{
     sync::{

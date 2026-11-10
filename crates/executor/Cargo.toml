@@ -1,0 +1,23 @@
+[package]
+name = "reth-executor"
+description = "Feature-selected blocking execution, channels, and virtual time"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[features]
+default = []
+fuzz = ["dep:shuttle"]
+
+[dependencies]
+crossbeam-channel.workspace = true
+either.workspace = true
+rayon.workspace = true
+parking_lot.workspace = true
+shuttle = { workspace = true, optional = true }

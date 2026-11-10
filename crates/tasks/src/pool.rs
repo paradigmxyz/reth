@@ -1,6 +1,6 @@
 //! Additional helpers for executing tracing calls
 
-use crate::metrics::WorkerPoolMetrics;
+use crate::{channel, metrics::WorkerPoolMetrics, rayon, thread, time::Instant};
 use std::{
     any::Any,
     cell::RefCell,
@@ -13,8 +13,6 @@ use std::{
         Arc, OnceLock, Weak,
     },
     task::{ready, Context, Poll},
-    thread,
-    time::Instant,
 };
 use tokio::sync::{oneshot, AcquireError, OwnedSemaphorePermit, Semaphore};
 
@@ -159,8 +157,49 @@ impl<T> Future for BlockingTaskHandle<T> {
 #[non_exhaustive]
 pub struct TokioBlockingTaskError;
 
-thread_local! {
+reth_executor::thread_local! {
     static WORKER: RefCell<Worker> = const { RefCell::new(Worker::new()) };
+}
+
+#[cfg(feature = "fuzz")]
+std::thread_local! {
+    // Shuttle tasks share one runner thread, but jobs retain their logical pool worker's state.
+    static WORKERS: RefCell<std::collections::BTreeMap<(usize, usize), std::rc::Rc<WorkerSlot>>> =
+        const { RefCell::new(std::collections::BTreeMap::new()) };
+}
+
+#[cfg(feature = "fuzz")]
+#[derive(Default)]
+struct WorkerSlot {
+    state: RefCell<Worker>,
+    access: reth_executor::sync::Mutex<()>,
+    owner: std::cell::Cell<Option<thread::ThreadId>>,
+}
+
+fn with_current_worker<R>(f: impl FnOnce(&RefCell<Worker>) -> R) -> R {
+    #[cfg(feature = "fuzz")]
+    if let Some(pool) = rayon::current_pool_id() {
+        let index = rayon::current_thread_index().expect("pool context has a worker index");
+        let worker =
+            WORKERS.with(|workers| workers.borrow_mut().entry((pool, index)).or_default().clone());
+        // Reentrant calls keep native RefCell semantics instead of locking this task against
+        // itself.
+        let current = thread::current().id();
+        if worker.owner.get() == Some(current) {
+            return f(&worker.state);
+        }
+        // Distinct simulated jobs can share a logical slot while one is suspended on I/O.
+        let access = worker.access.lock().expect("worker access is not poisoned");
+        worker.owner.set(Some(current));
+        let result = catch_unwind(AssertUnwindSafe(|| f(&worker.state)));
+        worker.owner.set(None);
+        drop(access);
+        return match result {
+            Ok(value) => value,
+            Err(panic) => std::panic::resume_unwind(panic),
+        };
+    }
+    WORKER.with(f)
 }
 
 /// A rayon thread pool with per-thread [`Worker`] state.
@@ -169,9 +208,13 @@ thread_local! {
 /// [`WorkerStatefulPool::init`]. Access state through its owner from jobs executing on the pool,
 /// for example inside [`install_fn`](Self::install_fn).
 ///
-/// Worker access is backed by a thread-local [`RefCell`]. Keep [`with_worker`](Self::with_worker)
-/// and [`with_worker_mut`](Self::with_worker_mut) closures short and non-yielding: if Rayon runs
-/// another job on the same thread while a borrow is active, re-entrant worker access can panic.
+/// Worker access is backed by a thread-local [`RefCell`] (logical-worker-local under `fuzz`).
+/// State is created, accessed, and dropped on its worker, including non-`Send` values.
+/// Under `fuzz`, different simulated jobs sharing a logical slot serialize worker access even
+/// across blocking executor waits; recursive access retains the native borrow checks. Keep
+/// [`with_worker`](Self::with_worker) and [`with_worker_mut`](Self::with_worker_mut) closures short
+/// and non-yielding: if Rayon runs another job on the same thread while a borrow is active,
+/// re-entrant worker access can panic.
 ///
 /// Independent [`WorkerStatefulPool`] owners can reuse the same threads with different state
 /// configurations; each owner clears its state when dropped.
@@ -236,7 +279,7 @@ impl WorkerPool {
         if num_threads >= self.pool().current_num_threads() {
             // Fast path: run on every thread, no atomic coordination needed.
             self.pool().broadcast(|_| {
-                WORKER.with_borrow_mut(|worker| f(worker));
+                with_current_worker(|worker| f(&mut worker.borrow_mut()));
             });
         } else {
             let remaining = AtomicUsize::new(num_threads);
@@ -257,7 +300,7 @@ impl WorkerPool {
                         Err(actual) => current = actual,
                     }
                 }
-                WORKER.with_borrow_mut(|worker| f(worker));
+                with_current_worker(|worker| f(&mut worker.borrow_mut()));
             });
         }
     }
@@ -276,7 +319,7 @@ impl WorkerPool {
             let started_at = Instant::now();
             metrics.record_job_queue_wait(started_at.saturating_duration_since(queued_at));
             let _record_job_duration = RecordWorkerPoolJobDurationOnDrop::new(metrics, started_at);
-            WORKER.with_borrow(|worker| f(worker))
+            with_current_worker(|worker| f(&worker.borrow()))
         })
     }
 
@@ -308,7 +351,7 @@ impl WorkerPool {
             return f()
         }
 
-        let (tx, rx) = std::sync::mpsc::sync_channel(1);
+        let (tx, rx) = channel::bounded(1);
         self.spawn(move || {
             let _ = tx.send(catch_unwind(AssertUnwindSafe(f)));
         });
@@ -359,7 +402,7 @@ impl WorkerPool {
     /// Panics if the current thread's worker is already mutably borrowed, including by a
     /// re-entrant [`with_worker_mut`](Self::with_worker_mut) call.
     pub fn with_worker<R>(f: impl FnOnce(&Worker) -> R) -> R {
-        WORKER.with_borrow(|worker| f(worker))
+        with_current_worker(|worker| f(&worker.borrow()))
     }
 
     /// Mutably accesses the current thread's [`Worker`] from within a pool closure.
@@ -381,7 +424,17 @@ impl WorkerPool {
     /// Panics if the current thread's worker is already borrowed, including by a re-entrant
     /// `with_worker` or `with_worker_mut` call.
     pub fn with_worker_mut<R>(f: impl FnOnce(&mut Worker) -> R) -> R {
-        WORKER.with_borrow_mut(|worker| f(worker))
+        with_current_worker(|worker| f(&mut worker.borrow_mut()))
+    }
+}
+
+#[cfg(feature = "fuzz")]
+impl Drop for WorkerPool {
+    fn drop(&mut self) {
+        if let Some(pool) = self.pool.get() {
+            let id = pool.id();
+            WORKERS.with(|workers| workers.borrow_mut().retain(|(pool, _), _| *pool != id));
+        }
     }
 }
 
@@ -575,7 +628,7 @@ impl Drop for WorkerStatefulPool {
     fn drop(&mut self) {
         if let Some(pool) = self.pool.pool.get() {
             pool.broadcast(|_| {
-                WORKER.with_borrow_mut(|worker| worker.clear(&self.owner));
+                with_current_worker(|worker| worker.borrow_mut().clear(&self.owner));
             });
         }
     }

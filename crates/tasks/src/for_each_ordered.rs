@@ -1,10 +1,7 @@
+use crate::rayon;
 use crossbeam_utils::CachePadded;
-use parking_lot::{Condvar, Mutex};
 use rayon::iter::{IndexedParallelIterator, ParallelIterator};
-use std::{
-    panic::{catch_unwind, AssertUnwindSafe},
-    sync::atomic::{AtomicBool, Ordering},
-};
+use std::panic::{catch_unwind, AssertUnwindSafe};
 
 /// Extension trait for [`IndexedParallelIterator`]
 /// that streams results to a sequential consumer in index order.
@@ -20,10 +17,10 @@ pub trait ForEachOrdered: IndexedParallelIterator {
     ///
     /// # Blocking
     ///
-    /// The calling thread blocks (via [`Condvar`]) while waiting for the next item to become
-    /// ready. It does **not** participate in rayon's work-stealing while blocked. Callers
-    /// should invoke this from a dedicated blocking thread (e.g. via
-    /// [`tokio::task::spawn_blocking`]) rather than from within the rayon thread pool.
+    /// The calling thread blocks (via a condvar, or a scheduled channel under `fuzz`)
+    /// while waiting for the next item to become ready. It does **not** participate in rayon's
+    /// work-stealing while blocked. Callers should invoke this from a dedicated blocking thread
+    /// (e.g. via [`tokio::task::spawn_blocking`]) rather than from within the rayon thread pool.
     fn for_each_ordered<F>(self, f: F)
     where
         Self::Item: Send,
@@ -55,59 +52,89 @@ impl<I: IndexedParallelIterator> ForEachOrdered for I {
     }
 }
 
-/// A slot holding an optional value and a condvar for notification.
+/// A slot with a native condvar or scheduler-aware channel for notification.
 struct Slot<T> {
-    value: Mutex<Option<T>>,
-    notify: Condvar,
+    #[cfg(not(feature = "fuzz"))]
+    value: parking_lot::Mutex<Option<T>>,
+    #[cfg(not(feature = "fuzz"))]
+    notify: parking_lot::Condvar,
+    #[cfg(feature = "fuzz")]
+    tx: crate::channel::Sender<Result<T, ()>>,
+    #[cfg(feature = "fuzz")]
+    rx: crate::channel::Receiver<Result<T, ()>>,
 }
 
 impl<T> Slot<T> {
-    const fn new() -> Self {
-        Self { value: Mutex::new(None), notify: Condvar::new() }
+    fn new() -> Self {
+        #[cfg(not(feature = "fuzz"))]
+        {
+            Self { value: parking_lot::Mutex::new(None), notify: parking_lot::Condvar::new() }
+        }
+        #[cfg(feature = "fuzz")]
+        {
+            let (tx, rx) = crate::channel::unbounded();
+            Self { tx, rx }
+        }
     }
 }
 
 struct Shared<T> {
     slots: Box<[CachePadded<Slot<T>>]>,
-    panicked: AtomicBool,
+    #[cfg(not(feature = "fuzz"))]
+    panicked: std::sync::atomic::AtomicBool,
 }
 
 impl<T> Shared<T> {
     fn new(n: usize) -> Self {
         let slots =
             (0..n).map(|_| CachePadded::new(Slot::new())).collect::<Vec<_>>().into_boxed_slice();
-        Self { slots, panicked: AtomicBool::new(false) }
+        Self {
+            slots,
+            #[cfg(not(feature = "fuzz"))]
+            panicked: std::sync::atomic::AtomicBool::new(false),
+        }
     }
 
     /// Writes a value into slot `i`. Must only be called once per index.
     #[inline]
     fn write(&self, i: usize, val: T) {
         let slot = &self.slots[i];
-        *slot.value.lock() = Some(val);
-        slot.notify.notify_one();
+        #[cfg(not(feature = "fuzz"))]
+        {
+            *slot.value.lock() = Some(val);
+            slot.notify.notify_one();
+        }
+        #[cfg(feature = "fuzz")]
+        slot.tx.send(Ok(val)).unwrap_or_else(|_| unreachable!("slot retains its receiver"));
     }
 
     /// Blocks until slot `i` is ready and takes the value.
     /// Returns `None` if the producer panicked.
     fn take(&self, i: usize) -> Option<T> {
         let slot = &self.slots[i];
-        let mut guard = slot.value.lock();
-        loop {
-            if let Some(val) = guard.take() {
-                return Some(val);
+        #[cfg(feature = "fuzz")]
+        {
+            slot.rx.recv().expect("slot retains its sender").ok()
+        }
+        #[cfg(not(feature = "fuzz"))]
+        {
+            let mut guard = slot.value.lock();
+            loop {
+                if let Some(val) = guard.take() {
+                    return Some(val);
+                }
+                if self.panicked.load(std::sync::atomic::Ordering::Acquire) {
+                    return None;
+                }
+                slot.notify.wait(&mut guard);
             }
-            if self.panicked.load(Ordering::Acquire) {
-                return None;
-            }
-            slot.notify.wait(&mut guard);
         }
     }
 }
 
 /// Executes a parallel iterator and delivers results to a sequential callback in index order.
 ///
-/// Each slot has its own [`Condvar`], so the consumer blocks precisely on the slot it needs
-/// with zero spurious wakeups.
+/// Each slot has its own notification, so the consumer blocks on the slot it needs.
 fn ordered_impl<I, F>(iter: I, pool: Option<&rayon::ThreadPool>, mut f: F)
 where
     I: IndexedParallelIterator,
@@ -130,12 +157,20 @@ where
                 });
             }));
             if let Err(payload) = res {
-                shared.panicked.store(true, Ordering::Release);
+                #[cfg(not(feature = "fuzz"))]
+                shared.panicked.store(true, std::sync::atomic::Ordering::Release);
                 // Wake all slots so the consumer doesn't hang. Lock each slot's mutex
                 // first to serialize with the consumer's panicked check → wait sequence.
                 for slot in &*shared.slots {
-                    let _guard = slot.value.lock();
-                    slot.notify.notify_one();
+                    #[cfg(not(feature = "fuzz"))]
+                    {
+                        let _guard = slot.value.lock();
+                        slot.notify.notify_one();
+                    }
+                    #[cfg(feature = "fuzz")]
+                    slot.tx
+                        .send(Err(()))
+                        .unwrap_or_else(|_| unreachable!("slot retains its receiver"));
                 }
                 std::panic::resume_unwind(payload);
             }

@@ -12,8 +12,8 @@ description = "Parallel implementation of merkle root algorithm"
 workspace = true
 
 [dependencies]
+reth-executor.workspace = true
 # reth
-reth-primitives-traits = { workspace = true, features = ["std"] }
 reth-execution-errors.workspace = true
 reth-execution-types.workspace = true
 reth-provider.workspace = true
@@ -28,7 +28,6 @@ tracing.workspace = true
 
 # misc
 thiserror.workspace = true
-crossbeam-channel.workspace = true
 crossbeam-utils.workspace = true
 
 # `metrics` feature
@@ -52,6 +51,7 @@ reth-trie = { workspace = true, features = ["test-utils"] }
 rand.workspace = true
 
 [features]
+fuzz = ["reth-trie/fuzz", "reth-executor/fuzz", "reth-tasks/fuzz", "reth-provider/fuzz"]
 default = ["metrics"]
 metrics = ["reth-metrics", "dep:metrics"]
 trie-debug = [

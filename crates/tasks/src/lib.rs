@@ -3,6 +3,7 @@
 //! # Feature Flags
 //!
 //! - `rayon`: Enable rayon thread pool for blocking tasks.
+//! - `fuzz`: Use deterministic executor threads, channels, pools, and time.
 
 #![doc(
     html_logo_url = "https://raw.githubusercontent.com/paradigmxyz/reth/main/assets/reth-docs.png",
@@ -22,7 +23,6 @@ use std::{
         Arc,
     },
     task::{ready, Context, Poll},
-    thread,
 };
 use tokio::{
     runtime::Handle,
@@ -30,6 +30,11 @@ use tokio::{
     task::JoinHandle,
 };
 use tracing::debug;
+
+/// Executor primitives shared by task, engine, and trie workers.
+pub use reth_executor as executor;
+/// Selected channel, compute, thread, and clock backends.
+pub use reth_executor::{channel, rayon, thread, time};
 
 pub mod cancel;
 pub mod lazy;
@@ -83,7 +88,7 @@ where
 
 /// Spawns a scoped OS thread with the current tokio runtime context propagated.
 ///
-/// This is the scoped thread version of [`spawn_os_thread`], for use with [`std::thread::scope`].
+/// This is the scoped thread version of [`spawn_os_thread`], for use with [`thread::scope`].
 #[track_caller]
 pub fn spawn_scoped_os_thread<'scope, 'env, F, T>(
     scope: &'scope thread::Scope<'scope, 'env>,
@@ -170,23 +175,31 @@ impl TaskManager {
     /// Fires the shutdown signal and awaits until all tasks are shutdown.
     ///
     /// Returns true if all tasks were shutdown before the timeout elapsed.
-    pub fn graceful_shutdown_with_timeout(self, timeout: std::time::Duration) -> bool {
+    pub fn graceful_shutdown_with_timeout(self, timeout: time::Duration) -> bool {
         self.do_graceful_shutdown(Some(timeout))
     }
 
-    fn do_graceful_shutdown(self, timeout: Option<std::time::Duration>) -> bool {
+    fn do_graceful_shutdown(self, timeout: Option<time::Duration>) -> bool {
         drop(self.signal);
-        let deadline = timeout.map(|t| std::time::Instant::now() + t);
+        let deadline = timeout.map(|t| time::Instant::now() + t);
         while self.graceful_tasks.load(Ordering::SeqCst) > 0 {
-            if deadline.is_some_and(|d| std::time::Instant::now() > d) {
+            if deadline.is_some_and(|d| time::Instant::now() > d) {
                 debug!("graceful shutdown timed out");
                 return false;
             }
-            thread::yield_now();
+            wait_for_shutdown_progress();
         }
         debug!("gracefully shut down");
         true
     }
+}
+
+fn wait_for_shutdown_progress() {
+    #[cfg(not(feature = "fuzz"))]
+    thread::yield_now();
+    // A runnable yield loop prevents the virtual clock from reaching the shutdown deadline.
+    #[cfg(feature = "fuzz")]
+    time::sleep(time::Duration::from_millis(1));
 }
 
 /// An endless future that resolves if a critical task panicked.

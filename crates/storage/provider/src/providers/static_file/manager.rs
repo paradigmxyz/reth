@@ -34,6 +34,7 @@ use reth_db_api::{
 };
 use reth_ethereum_primitives::{Receipt, TransactionSigned};
 use reth_execution_types::RecoveredBlockAndExecutionOutput;
+use reth_executor::channel::mpsc;
 use reth_nippy_jar::{NippyJar, NippyJarChecker};
 use reth_node_types::NodePrimitives;
 use reth_primitives_traits::{
@@ -58,7 +59,7 @@ use std::{
     path::{Path, PathBuf},
     sync::{
         atomic::{AtomicU64, Ordering},
-        mpsc, Arc,
+        Arc,
     },
 };
 use tracing::{debug, info, info_span, instrument, trace, warn};
@@ -2870,7 +2871,7 @@ impl<N: NodePrimitives<SignedTx: Value, Receipt: Value, BlockHeader: Value>> Tra
 
             // Spawn the task onto the global rayon pool
             // This task will send the cached transaction hash through the channel.
-            rayon::spawn(move || {
+            reth_executor::rayon::spawn(move || {
                 let _ = manager.fetch_range_with_predicate(
                     StaticFileSegment::Transactions,
                     chunk_range,

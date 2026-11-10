@@ -8,7 +8,6 @@ use alloy_primitives::{
 use itertools::Itertools;
 use metrics::Label;
 use parking_lot::Mutex;
-use rayon::prelude::*;
 use reth_chain_state::ExecutedBlock;
 use reth_db_api::{
     database_metrics::DatabaseMetrics,
@@ -19,6 +18,7 @@ use reth_db_api::{
     table::{Compress, Decode, Decompress, Encode, Table},
     tables, BlockNumberList, DatabaseError,
 };
+use reth_executor::rayon::prelude::*;
 use reth_primitives_traits::{BlockBody as _, FastInstant as Instant};
 use reth_prune_types::PruneMode;
 use reth_storage_errors::{

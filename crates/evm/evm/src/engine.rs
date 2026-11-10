@@ -3,7 +3,7 @@ use crate::{
     ConfigureEvm, EvmEnvFor, ExecutionCtxFor, TxEnvFor,
 };
 use alloy_consensus::transaction::Either;
-use rayon::prelude::*;
+use reth_executor::rayon::prelude::*;
 use reth_primitives_traits::TxTy;
 
 /// [`ConfigureEvm`] extension providing methods for executing payloads.
@@ -153,8 +153,8 @@ where
 {
     type Item = Either<L::Item, R::Item>;
     type Iter = Either<
-        rayon::iter::Map<L::Iter, fn(L::Item) -> Either<L::Item, R::Item>>,
-        rayon::iter::Map<R::Iter, fn(R::Item) -> Either<L::Item, R::Item>>,
+        reth_executor::rayon::iter::Map<L::Iter, fn(L::Item) -> Either<L::Item, R::Item>>,
+        reth_executor::rayon::iter::Map<R::Iter, fn(R::Item) -> Either<L::Item, R::Item>>,
     >;
 
     fn into_par_iter(self) -> Self::Iter {

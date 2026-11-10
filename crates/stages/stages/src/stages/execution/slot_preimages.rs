@@ -1,11 +1,11 @@
 use alloy_primitives::{keccak256, map::HashSet, B256};
 use eyre::Context;
-use rayon::slice::ParallelSliceMut;
 use reth_db::tables;
 use reth_db_api::{
     cursor::{DbCursorRO, DbDupCursorRO},
     transaction::DbTx,
 };
+use reth_executor::rayon::prelude::ParallelSliceMut;
 use reth_libmdbx::{
     DatabaseFlags, Environment, EnvironmentFlags, Geometry, Mode, SyncMode, WriteFlags, RO,
 };

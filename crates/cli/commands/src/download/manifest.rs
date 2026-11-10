@@ -1,8 +1,8 @@
 use blake3::Hasher;
 use eyre::{Result, WrapErr};
-use rayon::prelude::*;
 use reqwest::Client;
 use reth_db::static_file::iter_static_files;
+use reth_executor::rayon::prelude::*;
 use reth_static_file_types::StaticFileSegment;
 use serde::{Deserialize, Serialize};
 use std::{

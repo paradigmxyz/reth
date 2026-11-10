@@ -9,6 +9,7 @@ use reth_db_api::{
     transaction::{DbTx, DbTxMut},
 };
 use reth_etl::Collector;
+use reth_executor::channel::mpsc::{self, Receiver};
 use reth_primitives_traits::StorageEntry;
 use reth_provider::{DBProvider, HashingWriter, StatsReader, StorageReader};
 use reth_stages_api::{
@@ -20,7 +21,6 @@ use reth_storage_errors::provider::ProviderResult;
 use std::{
     collections::{BTreeMap, BTreeSet},
     fmt::Debug,
-    sync::mpsc::{self, Receiver},
 };
 use tracing::*;
 
@@ -124,7 +124,7 @@ where
                 let (tx, rx) = mpsc::sync_channel(chunk.len());
                 channels.push(rx);
                 // Spawn the hashing task onto the global rayon pool
-                rayon::spawn(move || {
+                reth_executor::rayon::spawn(move || {
                     // Cache hashed address since PlainStorageState is sorted by address
                     let (mut last_addr, mut hashed_addr) = (Address::ZERO, HASHED_ZERO_ADDRESS);
                     for (address, slot) in chunk {

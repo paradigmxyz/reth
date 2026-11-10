@@ -6,13 +6,13 @@ use crate::{
 use alloy_consensus::{transaction::TransactionMeta, BlockHeader};
 use alloy_eips::{BlockHashOrNumber, BlockNumHash};
 use alloy_primitives::{map::B256Map, BlockNumber, TxHash, B256};
-use parking_lot::RwLock;
 use reth_chainspec::ChainInfo;
 use reth_ethereum_primitives::EthPrimitives;
 use reth_execution_types::{
     BlockExecutionOutput, BlockExecutionResult, Chain, DecodedEvmBal, ExecutionOutcome,
     RecoveredBlockAndExecutionOutput,
 };
+use reth_executor::sync::parking_lot::RwLock;
 use reth_metrics::{metrics::Gauge, Metrics};
 use reth_primitives_traits::{
     BlockBody as _, IndexedTx, NodePrimitives, RecoveredBlock, SealedBlock, SealedHeader,

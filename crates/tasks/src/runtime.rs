@@ -11,6 +11,8 @@ use crate::pool::{build_pool_with_panic_handler, BlockingTaskGuard, BlockingTask
 use crate::{
     metrics::{IncCounterOnDrop, TaskExecutorMetrics},
     shutdown::{GracefulShutdown, GracefulShutdownGuard, Shutdown},
+    thread,
+    time::{Duration, Instant},
     worker_map::WorkerMap,
     PanickedTaskError, TaskEvent, TaskManager,
 };
@@ -25,8 +27,6 @@ use std::{
         atomic::{AtomicUsize, Ordering},
         Arc, Mutex,
     },
-    thread,
-    time::{Duration, Instant},
 };
 use tokio::{runtime::Handle, sync::mpsc::UnboundedSender, task::JoinHandle};
 use tracing::{debug, error};
@@ -35,7 +35,7 @@ use tracing_futures::Instrument;
 use tokio::runtime::Runtime as TokioRuntime;
 
 #[cfg(feature = "rayon")]
-use std::thread::available_parallelism;
+use crate::thread::available_parallelism;
 
 /// Default thread keep-alive duration for the tokio runtime.
 pub const DEFAULT_THREAD_KEEP_ALIVE: Duration = Duration::from_secs(15);
@@ -281,7 +281,7 @@ pub enum RuntimeBuildError {
     /// Failed to build a rayon thread pool.
     #[cfg(feature = "rayon")]
     #[error("Failed to build rayon thread pool: {0}")]
-    RayonBuild(#[from] rayon::ThreadPoolBuildError),
+    RayonBuild(#[from] crate::rayon::ThreadPoolBuildError),
 }
 
 // ── RuntimeInner ──────────────────────────────────────────────────────
@@ -301,13 +301,13 @@ struct RuntimeInner {
     graceful_tasks: Arc<AtomicUsize>,
     /// General-purpose rayon CPU pool.
     #[cfg(feature = "rayon")]
-    cpu_pool: rayon::ThreadPool,
+    cpu_pool: crate::rayon::ThreadPool,
     /// RPC blocking pool.
     #[cfg(feature = "rayon")]
     rpc_pool: BlockingTaskPool,
     /// Storage I/O pool.
     #[cfg(feature = "rayon")]
-    storage_pool: rayon::ThreadPool,
+    storage_pool: crate::rayon::ThreadPool,
     /// Rate limiter for expensive RPC operations.
     #[cfg(feature = "rayon")]
     blocking_guard: BlockingTaskGuard,
@@ -389,7 +389,7 @@ impl Runtime {
 
     /// Get the general-purpose rayon CPU thread pool.
     #[cfg(feature = "rayon")]
-    pub fn cpu_pool(&self) -> &rayon::ThreadPool {
+    pub fn cpu_pool(&self) -> &crate::rayon::ThreadPool {
         &self.0.cpu_pool
     }
 
@@ -401,7 +401,7 @@ impl Runtime {
 
     /// Get the storage I/O pool.
     #[cfg(feature = "rayon")]
-    pub fn storage_pool(&self) -> &rayon::ThreadPool {
+    pub fn storage_pool(&self) -> &crate::rayon::ThreadPool {
         &self.0.storage_pool
     }
 
@@ -917,7 +917,7 @@ impl Runtime {
                 debug!("graceful shutdown timed out");
                 return false;
             }
-            std::thread::yield_now();
+            crate::wait_for_shutdown_progress();
         }
         debug!("gracefully shut down");
         true
@@ -986,13 +986,13 @@ impl RuntimeBuilder {
             let rpc_threads = config.rayon.rpc_threads.unwrap_or(default_threads);
 
             let cpu_pool = build_pool_with_panic_handler(
-                rayon::ThreadPoolBuilder::new()
+                crate::rayon::ThreadPoolBuilder::new()
                     .num_threads(default_threads)
                     .thread_name(|i| format!("cpu-{i:02}")),
             )?;
 
             let rpc_raw = build_pool_with_panic_handler(
-                rayon::ThreadPoolBuilder::new()
+                crate::rayon::ThreadPoolBuilder::new()
                     .num_threads(rpc_threads)
                     .thread_name(|i| format!("rpc-{i:02}")),
             )?;
@@ -1001,7 +1001,7 @@ impl RuntimeBuilder {
             let storage_threads =
                 config.rayon.storage_threads.unwrap_or(DEFAULT_STORAGE_POOL_THREADS);
             let storage_pool = build_pool_with_panic_handler(
-                rayon::ThreadPoolBuilder::new()
+                crate::rayon::ThreadPoolBuilder::new()
                     .num_threads(storage_threads)
                     .thread_name(|i| format!("storage-{i:02}")),
             )?;
@@ -1162,7 +1162,7 @@ mod tests {
         assert_eq!(
             runtime
                 .handle()
-                .block_on(runtime.rpc_pool().spawn(rayon::current_num_threads))
+                .block_on(runtime.rpc_pool().spawn(crate::rayon::current_num_threads))
                 .unwrap(),
             5
         );

@@ -64,7 +64,7 @@ reth-ethereum-engine-primitives = { workspace = true, optional = true }
 evm2 = { workspace = true, optional = true }
 
 # parallel utils
-rayon.workspace = true
+reth-executor.workspace = true
 
 rocksdb.workspace = true
 
@@ -88,6 +88,13 @@ rand.workspace = true
 tokio = { workspace = true, features = ["sync", "macros", "rt-multi-thread"] }
 
 [features]
+fuzz = [
+    "reth-trie/fuzz",
+    "reth-chain-state/fuzz",
+    "reth-executor/fuzz",
+    "reth-storage-overlay/fuzz",
+    "reth-tasks/fuzz",
+]
 test-utils = [
     "dep:evm2",
     "reth-db/test-utils",

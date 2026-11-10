@@ -80,7 +80,7 @@ eyre.workspace = true
 parking_lot.workspace = true
 jsonrpsee.workspace = true
 fdlimit.workspace = true
-rayon.workspace = true
+reth-executor.workspace = true
 serde_json.workspace = true
 
 # tracing
@@ -95,6 +95,19 @@ reth-provider = { workspace = true, features = ["test-utils"] }
 reth-evm-ethereum = { workspace = true, features = ["test-utils"] }
 
 [features]
+fuzz = [
+    "reth-chain-state/fuzz",
+    "reth-executor/fuzz",
+    "reth-downloaders/fuzz",
+    "reth-engine-tree/fuzz",
+    "reth-evm/fuzz",
+    "reth-network/fuzz",
+    "reth-provider/fuzz",
+    "reth-stages/fuzz",
+    "reth-static-file/fuzz",
+    "reth-storage-overlay/fuzz",
+    "reth-tasks/fuzz",
+]
 default = []
 js-tracer = [
     "reth-rpc/js-tracer",

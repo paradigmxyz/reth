@@ -12,6 +12,9 @@ description = "Task management"
 workspace = true
 
 [dependencies]
+# executor
+reth-executor.workspace = true
+
 # async
 tokio = { workspace = true, features = ["sync", "rt", "rt-multi-thread"] }
 tracing-futures.workspace = true
@@ -29,7 +32,6 @@ tracing.workspace = true
 thiserror.workspace = true
 
 # feature `rayon`
-rayon = { workspace = true, optional = true }
 crossbeam-utils = { workspace = true, optional = true }
 pin-project = { workspace = true, optional = true }
 
@@ -40,5 +42,10 @@ libc.workspace = true
 tokio = { workspace = true, features = ["sync", "rt", "rt-multi-thread", "time", "macros"] }
 
 [features]
-rayon = ["dep:rayon", "dep:crossbeam-utils", "pin-project"]
+rayon = ["dep:crossbeam-utils", "pin-project"]
 test-utils = []
+fuzz = ["reth-executor/fuzz"]
+
+[[example]]
+name = "executor"
+required-features = ["rayon"]

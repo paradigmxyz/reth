@@ -1,7 +1,9 @@
 use crate::tree::TxPoolPrewarmCacheSnapshot as Snapshot;
 use alloy_primitives::B256;
-use crossbeam_channel::{unbounded, Receiver, Sender};
-use parking_lot::RwLock;
+use reth_executor::{
+    channel::{unbounded, Receiver, Sender},
+    sync::parking_lot::RwLock,
+};
 use std::{
     fmt::Debug,
     sync::{Arc, Weak},

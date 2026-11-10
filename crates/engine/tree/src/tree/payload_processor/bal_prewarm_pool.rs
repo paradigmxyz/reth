@@ -2,15 +2,13 @@
 
 use alloy_primitives::{Address, StorageKey};
 use reth_execution_cache::{CachedStateProvider, ExecutionCache, TxPoolPrewarmCacheSnapshot};
+use reth_executor::thread::JoinHandle;
 use reth_provider::{EvmStateProvider, EvmStateProviderBox, ProviderResult};
-use std::{
-    sync::{
-        atomic::{AtomicUsize, Ordering},
-        Arc,
-    },
-    thread::JoinHandle,
+use std::sync::{
+    atomic::{AtomicUsize, Ordering},
+    Arc,
 };
-use tokio::sync::oneshot;
+
 use tracing::trace;
 
 /// Builds a fresh EVM provider over the block's parent state. Type-erased so the pool is not
@@ -43,7 +41,7 @@ enum PrewarmMsg {
 #[derive(Debug)]
 pub struct BalPrewarmPool {
     /// One queue per worker. `BeginBlock`/`EndBlock` are broadcast to all; `Warm`s round-robin.
-    workers: Vec<crossbeam_channel::Sender<PrewarmMsg>>,
+    workers: Vec<reth_executor::channel::Sender<PrewarmMsg>>,
     /// Round-robin cursor for distributing warm requests across workers.
     next: AtomicUsize,
     _handles: Vec<JoinHandle<()>>,
@@ -56,10 +54,10 @@ impl BalPrewarmPool {
         let mut workers = Vec::with_capacity(num_threads);
         let mut handles = Vec::with_capacity(num_threads);
         for i in 0..num_threads {
-            let (tx, rx) = crossbeam_channel::unbounded::<PrewarmMsg>();
+            let (tx, rx) = reth_executor::channel::unbounded::<PrewarmMsg>();
             workers.push(tx);
             handles.push(
-                std::thread::Builder::new()
+                reth_executor::thread::Builder::new()
                     .name(format!("bal-prewarm-{i:03}"))
                     .spawn(move || prewarm_loop(rx))
                     .expect("spawn bal-prewarm thread"),
@@ -110,7 +108,7 @@ impl BalPrewarmPool {
     ///
     /// Blocks until all workers processed the end block message.
     pub fn end_block(&self) {
-        let (tx, rx) = oneshot::channel();
+        let (tx, rx) = reth_executor::channel::bounded(1);
         let tx = Arc::new(SendOnDrop { sender: Some(tx) });
 
         for worker in &self.workers {
@@ -118,7 +116,7 @@ impl BalPrewarmPool {
         }
 
         drop(tx);
-        rx.blocking_recv().expect("BAL prewarm pool dropped without signaling completion");
+        rx.recv().expect("BAL prewarm pool dropped without signaling completion");
     }
 
     fn send_warm(&self, target: PrewarmTarget) {
@@ -156,7 +154,7 @@ pub const DEFAULT_BAL_PREWARM_THREADS: usize = 128;
 /// the workers on blocks whose read-set is concentrated in a few accounts.
 const WARM_BATCH_SIZE: usize = 8;
 
-fn prewarm_loop(rx: crossbeam_channel::Receiver<PrewarmMsg>) {
+fn prewarm_loop(rx: reth_executor::channel::Receiver<PrewarmMsg>) {
     // The provider (and its MDBX read txn) held for the current block, between `BeginBlock` and
     // `EndBlock`. `None` while idle, so no read txn is pinned across the inter-block gap.
     let mut provider: Option<CachedStateProvider<EvmStateProviderBox>> = None;
@@ -201,7 +199,7 @@ fn prewarm_loop(rx: crossbeam_channel::Receiver<PrewarmMsg>) {
 }
 
 struct SendOnDrop {
-    sender: Option<oneshot::Sender<()>>,
+    sender: Option<reth_executor::channel::Sender<()>>,
 }
 
 impl Drop for SendOnDrop {

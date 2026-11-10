@@ -14,10 +14,16 @@ use crate::{
 };
 use alloy_eips::BlockNumHash;
 use alloy_primitives::{BlockNumber, B256};
+#[cfg(not(feature = "fuzz"))]
 use parking_lot::Mutex;
 use reth_chain_state::{BlockState, ExecutedBlock, PreservedSparseTrie};
 use reth_errors::ProviderResult;
 use reth_ethereum_primitives::EthPrimitives;
+#[cfg(feature = "fuzz")]
+use reth_executor::{
+    sync::{parking_lot::Mutex, OnceLock},
+    time::Instant,
+};
 use reth_primitives_traits::{
     dashmap::{mapref::entry::Entry, DashMap},
     AlloyBlockHeader, FastInstant, NodePrimitives,
@@ -32,12 +38,9 @@ use reth_trie::{
     proof_v2::ProofCursorMetrics, updates::TrieUpdatesSorted, HashedPostStateSorted,
     TrieInputSorted,
 };
-use std::{
-    fmt,
-    ops::RangeInclusive,
-    sync::{Arc, OnceLock},
-    time::Instant,
-};
+use std::{fmt, ops::RangeInclusive, sync::Arc};
+#[cfg(not(feature = "fuzz"))]
+use std::{sync::OnceLock, time::Instant};
 use tracing::{debug, trace};
 
 /// Manages state trie and execution overlays for in-memory blocks.
@@ -956,7 +959,7 @@ fn merge_blocks<N: NodePrimitives>(blocks: Vec<ExecutedBlock<N>>) -> TrieInputSo
     let trie_data = blocks.iter().map(ExecutedBlock::trie_data).collect::<Vec<_>>();
 
     #[cfg(feature = "rayon")]
-    let (nodes, state) = rayon::join(
+    let (nodes, state) = reth_executor::rayon::join(
         || {
             TrieUpdatesSorted::merge_batch(
                 trie_data.iter().map(|data| Arc::clone(&data.trie_updates)),
@@ -987,7 +990,7 @@ fn extend_overlay(
 ) {
     #[cfg(feature = "rayon")]
     {
-        rayon::join(
+        reth_executor::rayon::join(
             || {
                 if !hashed_state.is_empty() {
                     Arc::make_mut(&mut overlay.state).extend_ref_and_sort(hashed_state);

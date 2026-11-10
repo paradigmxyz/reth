@@ -167,3 +167,11 @@ test-utils = [
     "reth-engine-tree/test-utils",
     "reth-stages-api/test-utils",
 ]
+
+fuzz = [
+    "reth-engine-tree/fuzz",
+    "reth-evm/fuzz",
+    "reth-evm-ethereum/fuzz",
+    "reth-node-builder/fuzz",
+    "reth-tasks/fuzz",
+]

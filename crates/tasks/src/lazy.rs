@@ -1,8 +1,8 @@
 //! A lazily-resolved handle to a value computed on a background thread.
 
+use crate::channel;
 use parking_lot::Mutex;
 use std::sync::{Arc, OnceLock};
-use tokio::sync::oneshot;
 
 /// Handle to a value computed on a background thread.
 ///
@@ -20,22 +20,35 @@ pub struct LazyHandle<T> {
 
 struct LazyHandleInner<T> {
     /// Pending receiver, taken on first access.
-    rx: Mutex<Option<oneshot::Receiver<T>>>,
+    rx: Mutex<Option<channel::Receiver<T>>>,
     /// Cached result after the first successful receive.
     value: OnceLock<T>,
+    /// Serializes first access without blocking the scheduler on `OnceLock`.
+    #[cfg(feature = "fuzz")]
+    resolve: reth_executor::sync::Mutex<()>,
 }
 
 impl<T: Send + 'static> LazyHandle<T> {
     /// Creates a new handle from a background task receiver.
-    pub(crate) fn new(rx: oneshot::Receiver<T>) -> Self {
+    pub(crate) fn new(rx: channel::Receiver<T>) -> Self {
         Self {
-            inner: Arc::new(LazyHandleInner { rx: Mutex::new(Some(rx)), value: OnceLock::new() }),
+            inner: Arc::new(LazyHandleInner {
+                rx: Mutex::new(Some(rx)),
+                value: OnceLock::new(),
+                #[cfg(feature = "fuzz")]
+                resolve: reth_executor::sync::Mutex::new(()),
+            }),
         }
     }
 
     /// Creates a handle that is already resolved with the given value.
     pub fn ready(value: T) -> Self {
-        let inner = LazyHandleInner { rx: Mutex::new(None), value: OnceLock::from(value) };
+        let inner = LazyHandleInner {
+            rx: Mutex::new(None),
+            value: OnceLock::from(value),
+            #[cfg(feature = "fuzz")]
+            resolve: reth_executor::sync::Mutex::new(()),
+        };
         Self { inner: Arc::new(inner) }
     }
 
@@ -48,6 +61,11 @@ impl<T: Send + 'static> LazyHandle<T> {
     ///
     /// Panics if the background task was dropped without producing a value.
     pub fn get(&self) -> &T {
+        if let Some(value) = self.inner.value.get() {
+            return value;
+        }
+        #[cfg(feature = "fuzz")]
+        let _resolve = self.inner.resolve.lock().expect("lazy result resolution is not poisoned");
         self.inner.value.get_or_init(|| {
             let rx = self
                 .inner
@@ -55,7 +73,7 @@ impl<T: Send + 'static> LazyHandle<T> {
                 .lock()
                 .take()
                 .expect("LazyHandle receiver already taken without value being set");
-            rx.blocking_recv().expect("LazyHandle task dropped without producing a value")
+            rx.recv().expect("LazyHandle task dropped without producing a value")
         })
     }
 
@@ -92,7 +110,7 @@ mod tests {
 
     #[test]
     fn test_lazy_handle_resolves() {
-        let (tx, rx) = oneshot::channel();
+        let (tx, rx) = channel::bounded(1);
         let handle = LazyHandle::new(rx);
         tx.send(42u64).unwrap();
         assert_eq!(*handle.get(), 42);
@@ -102,7 +120,7 @@ mod tests {
 
     #[test]
     fn test_lazy_handle_clone_shares_value() {
-        let (tx, rx) = oneshot::channel();
+        let (tx, rx) = channel::bounded(1);
         let handle = LazyHandle::new(rx);
         let handle2 = handle.clone();
         tx.send(99u64).unwrap();
@@ -112,7 +130,7 @@ mod tests {
 
     #[test]
     fn test_lazy_handle_try_into_inner() {
-        let (tx, rx) = oneshot::channel();
+        let (tx, rx) = channel::bounded(1);
         let handle = LazyHandle::new(rx);
         tx.send(String::from("hello")).unwrap();
         assert_eq!(handle.try_into_inner().unwrap(), "hello");
@@ -120,7 +138,7 @@ mod tests {
 
     #[test]
     fn test_lazy_handle_try_into_inner_returns_self_with_clone() {
-        let (tx, rx) = oneshot::channel();
+        let (tx, rx) = channel::bounded(1);
         let handle = LazyHandle::new(rx);
         let _clone = handle.clone();
         tx.send(String::from("hello")).unwrap();
@@ -131,7 +149,7 @@ mod tests {
     #[test]
     #[should_panic(expected = "LazyHandle task dropped without producing a value")]
     fn test_lazy_handle_panics_on_dropped_sender() {
-        let (_tx, rx) = oneshot::channel::<u64>();
+        let (_tx, rx) = channel::bounded::<u64>(1);
         let handle = LazyHandle::new(rx);
         drop(_tx);
         handle.get();

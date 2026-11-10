@@ -24,12 +24,14 @@ use reth_engine_primitives::{
 };
 use reth_errors::{ConsensusError, ProviderResult};
 use reth_evm::{debug_unreachable, ConfigureEvm};
+use reth_executor::{
+    channel::{Receiver, Sender},
+    time::Instant,
+};
 use reth_network_p2p::full_block::SealedBlockWithAccessList;
 use reth_payload_builder::{BuildNewPayload, PayloadBuilderHandle, PayloadBuilderLease};
 use reth_payload_primitives::{BuiltPayload, NewPayloadError, PayloadAttributes, PayloadTypes};
-use reth_primitives_traits::{
-    FastInstant as Instant, NodePrimitives, RecoveredBlock, SealedBlock, SealedHeader,
-};
+use reth_primitives_traits::{NodePrimitives, RecoveredBlock, SealedBlock, SealedHeader};
 use reth_provider::{
     BalProvider, BlockExecutionOutput, BlockExecutionResult, BlockReader, ChangeSetReader,
     DatabaseProviderFactory, ProviderError, PruneCheckpointReader, SaveBlocksInput,
@@ -51,7 +53,6 @@ use std::{
     time::Duration,
 };
 
-use crossbeam_channel::{Receiver, Sender};
 use tokio::sync::{
     mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender},
     oneshot,
@@ -386,7 +387,7 @@ where
         evm_config: C,
         runtime: reth_tasks::Runtime,
     ) -> Self {
-        let (incoming_tx, incoming) = crossbeam_channel::unbounded();
+        let (incoming_tx, incoming) = reth_executor::channel::unbounded();
 
         let (payload_builds, payload_build_finished) = PayloadBuildTracker::new();
 
@@ -638,7 +639,7 @@ where
         if let Some((persistence_rx, start_time, action)) = maybe_persistence {
             // Biased select prioritizes persistence completion to update in memory state and
             // unblock further writes
-            crossbeam_channel::select_biased! {
+            reth_executor::channel::select_biased! {
                 recv(persistence_rx) -> result => {
                     // Don't put it back - consumed (oneshot-like behavior)
                     match result {
@@ -668,7 +669,7 @@ where
             }
         } else {
             // No persistence in progress - wait on an incoming message or payload job completion.
-            crossbeam_channel::select_biased! {
+            reth_executor::channel::select_biased! {
                 recv(self.payload_build_finished) -> result => match result {
                     Ok(()) => LoopEvent::PayloadBuildFinished,
                     Err(_) => LoopEvent::Disconnected,
@@ -1427,7 +1428,7 @@ where
         if new_tip_num < self.persistence_state.last_persisted_block.number {
             debug!(target: "engine::tree", ?new_tip_num, "Starting remove blocks job");
             self.state.set_pending_sparse_trie_prune(false);
-            let (tx, rx) = crossbeam_channel::bounded(1);
+            let (tx, rx) = reth_executor::channel::bounded(1);
             let _ = self.persistence.remove_blocks_above(new_tip_num, tx);
             self.persistence_state.start_remove(new_tip_num, rx);
         }
@@ -1439,7 +1440,7 @@ where
         let highest_num_hash = input.last_block();
         debug!(target: "engine::tree", count=input.persist_rest_blocks().len(), blocks = ?input.persist_rest_blocks().iter().map(|block| block.recovered_block().num_hash()).collect::<Vec<_>>(), "Persisting blocks");
 
-        let (tx, rx) = crossbeam_channel::bounded(1);
+        let (tx, rx) = reth_executor::channel::bounded(1);
         let _ = self.persistence.save_blocks(input, tx);
 
         self.persistence_state.start_save(highest_num_hash, rx);
@@ -1515,12 +1516,12 @@ where
                 self.on_persistence_complete(result, start_time)?;
                 Ok(true)
             }
-            Err(crossbeam_channel::TryRecvError::Empty) => {
+            Err(reth_executor::channel::TryRecvError::Empty) => {
                 // Not ready yet, put it back
                 self.persistence_state.rx = Some((rx, start_time, action));
                 Ok(false)
             }
-            Err(crossbeam_channel::TryRecvError::Disconnected) => {
+            Err(reth_executor::channel::TryRecvError::Disconnected) => {
                 Err(AdvancePersistenceError::ChannelClosed)
             }
         }
@@ -1746,7 +1747,7 @@ where
                                     let pending_persistence = self.persistence_state.rx.take();
                                     if let Some((rx, start_time, _action)) = pending_persistence {
                                         let (persistence_tx, persistence_rx) =
-                                            std::sync::mpsc::channel();
+                                            reth_executor::channel::mpsc::channel();
                                         self.runtime.spawn_blocking_named(
                                             "wait-persist",
                                             move || {
@@ -3691,7 +3692,7 @@ struct PayloadBuildTracker {
 impl PayloadBuildTracker {
     /// Creates a tracker and a receiver notified when its active count reaches zero.
     fn new() -> (Self, Receiver<()>) {
-        let (finished_tx, finished_rx) = crossbeam_channel::bounded(1);
+        let (finished_tx, finished_rx) = reth_executor::channel::bounded(1);
         (Self { active: Arc::new(AtomicUsize::new(0)), finished_tx }, finished_rx)
     }
 

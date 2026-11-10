@@ -1,8 +1,8 @@
 use alloy_consensus::BlockHeader;
 use alloy_eips::BlockNumHash;
 use alloy_primitives::BlockNumber;
-use parking_lot::RwLock;
 use reth_chainspec::ChainInfo;
+use reth_executor::sync::parking_lot::RwLock;
 use reth_primitives_traits::{NodePrimitives, SealedHeader};
 use std::{
     sync::{

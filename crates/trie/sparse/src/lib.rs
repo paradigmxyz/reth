@@ -5,6 +5,10 @@
 
 extern crate alloc;
 
+// Retained upstream dependency; iteration uses the selected executor facade.
+#[cfg(feature = "std")]
+use reth_primitives_traits as _;
+
 #[cfg(feature = "std")]
 mod state;
 #[cfg(feature = "std")]

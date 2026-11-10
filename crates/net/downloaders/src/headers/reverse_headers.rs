@@ -7,9 +7,9 @@ use alloy_eips::BlockHashOrNumber;
 use alloy_primitives::{BlockNumber, Sealable, B256};
 use futures::{stream::Stream, FutureExt};
 use futures_util::{stream::FuturesUnordered, StreamExt};
-use rayon::prelude::*;
 use reth_config::config::HeadersConfig;
 use reth_consensus::HeaderValidator;
+use reth_executor::rayon::prelude::*;
 use reth_network_p2p::{
     error::{DownloadError, DownloadResult, PeerRequestResult},
     headers::{

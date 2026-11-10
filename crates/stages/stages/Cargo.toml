@@ -59,7 +59,7 @@ tracing.workspace = true
 # misc
 thiserror.workspace = true
 itertools.workspace = true
-rayon.workspace = true
+reth-executor.workspace = true
 page_size.workspace = true
 num-traits.workspace = true
 tempfile = { workspace = true, optional = true }
@@ -97,6 +97,14 @@ paste.workspace = true
 tempfile.workspace = true
 
 [features]
+fuzz = [
+    "reth-trie/fuzz",
+    "reth-executor/fuzz",
+    "reth-etl/fuzz",
+    "reth-evm/fuzz",
+    "reth-provider/fuzz",
+    "reth-tasks/fuzz",
+]
 test-utils = [
     "reth-network-p2p/test-utils",
     "reth-db/test-utils",

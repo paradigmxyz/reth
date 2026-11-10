@@ -117,6 +117,7 @@ use alloy_eip7928::{
 };
 use alloy_eips::{eip1898::BlockWithParent, eip4895::Withdrawal, NumHash};
 use alloy_primitives::{map::B256Set, B256};
+use reth_executor::time::Instant;
 use reth_tasks::LazyHandle;
 
 use crate::tree::{
@@ -149,8 +150,8 @@ use reth_payload_primitives::{
     PayloadTypes,
 };
 use reth_primitives_traits::{
-    AlloyBlockHeader, BlockBody, BlockTy, FastInstant as Instant, GotExpected, NodePrimitives,
-    RecoveredBlock, SealedBlock, SealedHeader, SignerRecoverable, TxTy,
+    AlloyBlockHeader, BlockBody, BlockTy, GotExpected, NodePrimitives, RecoveredBlock, SealedBlock,
+    SealedHeader, SignerRecoverable, TxTy,
 };
 use reth_provider::{
     BlockExecutionOutput, BlockReader, ChangeSetReader, DatabaseProviderFactory,
@@ -180,8 +181,8 @@ const MAX_EXPECTED_GAS_LIMIT_MULTIPLIER: u64 = 2;
 const DEFERRED_TRIE_WORKER_NAME: &str = "deferred-trie";
 
 type ReceiptRootSender<N> =
-    crossbeam_channel::Sender<IndexedReceipt<<N as NodePrimitives>::Receipt>>;
-type ReceiptRootReceiver = tokio::sync::oneshot::Receiver<(B256, alloy_primitives::Bloom)>;
+    reth_executor::channel::Sender<IndexedReceipt<<N as NodePrimitives>::Receipt>>;
+type ReceiptRootReceiver = reth_executor::channel::Receiver<(B256, alloy_primitives::Bloom)>;
 
 /// Context providing access to tree state during validation.
 ///
@@ -783,7 +784,7 @@ where
             .entered();
 
             receipt_root_rx
-                .blocking_recv()
+                .recv()
                 .inspect_err(|_| {
                     tracing::error!(
                         target: "engine::tree::payload_validator",
@@ -1188,8 +1189,8 @@ where
         receipts_len: usize,
     ) -> (ReceiptRootSender<N>, ReceiptRootReceiver) {
         // Unbounded channel is used since tx count bounds capacity anyway.
-        let (receipt_tx, receipt_rx) = crossbeam_channel::unbounded();
-        let (result_tx, result_rx) = tokio::sync::oneshot::channel();
+        let (receipt_tx, receipt_rx) = reth_executor::channel::unbounded();
+        let (result_tx, result_rx) = reth_executor::channel::bounded(1);
         let task_handle = ReceiptRootTaskHandle::new(receipt_rx, result_tx);
         self.runtime.spawn_blocking_named("receipt-root", move || task_handle.run(receipts_len));
 
@@ -1954,8 +1955,8 @@ where
 
         let execution_cache = self.payload_processor.execution_cache();
         let overlay_manager = self.overlay_manager.clone();
-        let (execution_tx, execution_rx) = std::sync::mpsc::channel();
-        let (sparse_trie_tx, sparse_trie_rx) = std::sync::mpsc::channel();
+        let (execution_tx, execution_rx) = reth_executor::channel::mpsc::channel();
+        let (sparse_trie_tx, sparse_trie_rx) = reth_executor::channel::mpsc::channel();
 
         self.runtime.spawn_blocking_named("wait-exec-cache", move || {
             let _ = execution_tx.send(execution_cache.wait_for_availability());

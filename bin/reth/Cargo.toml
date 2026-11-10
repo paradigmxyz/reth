@@ -203,6 +203,13 @@ min-trace-logs = [
 
 trie-debug = ["reth-node-builder/trie-debug", "reth-node-core/trie-debug"]
 
+fuzz = [
+    "reth-ethereum-cli/fuzz",
+    "reth-node-builder/fuzz",
+    "reth-node-ethereum/fuzz",
+    "reth-tasks/fuzz",
+]
+
 [[bin]]
 name = "reth"
 path = "src/main.rs"

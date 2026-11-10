@@ -91,3 +91,10 @@ min-trace-logs = [
     "tracing/release_max_level_trace",
     "reth-node-core/min-trace-logs",
 ]
+
+fuzz = [
+    "reth-cli-commands/fuzz",
+    "reth-node-builder/fuzz",
+    "reth-node-ethereum/fuzz",
+    "reth-tasks/fuzz",
+]

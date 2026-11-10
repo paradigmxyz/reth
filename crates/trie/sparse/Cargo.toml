@@ -24,7 +24,7 @@ alloy-primitives.workspace = true
 
 # misc
 either = { workspace = true, optional = true }
-rayon = { workspace = true, optional = true }
+reth-executor = { workspace = true, optional = true }
 smallvec = { workspace = true, optional = true }
 strum = { workspace = true, features = ["derive"] }
 
@@ -46,11 +46,11 @@ proptest.workspace = true
 rand.workspace = true
 
 [features]
-fuzz = []
+fuzz = ["reth-executor?/fuzz", "reth-trie-common/fuzz"]
 default = ["std", "metrics"]
 std = [
     "dep:either",
-    "dep:rayon",
+    "dep:reth-executor",
     "dep:reth-primitives-traits",
     "dep:smallvec",
     "dep:tracing",
