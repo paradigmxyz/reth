@@ -245,7 +245,8 @@ struct HistoricalStateRangeView<N: ProviderNodeTypes> {
 impl<N: ProviderNodeTypes> StateRangeProviderFactory for BlockchainProvider<N> {
     /// Resolves a retained canonical state root into a pinned range view, preferring a still
     /// in-memory block over the persisted-history fallback. Resolves nothing while a snap attempt
-    /// is unverified, since no root describes its partially downloaded state.
+    /// is unverified, since no root describes its partially downloaded state, or while the
+    /// `Execution` checkpoint is ahead of `Finish`.
     fn state_range_provider(&self, state_root: B256) -> ProviderResult<Option<StateRangeView>> {
         // Persisted blocks leave memory only after their commit, so a canonical root missed here is
         // already visible to a snapshot opened afterwards.
