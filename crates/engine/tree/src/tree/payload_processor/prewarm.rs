@@ -61,18 +61,6 @@ use tracing::{debug, debug_span, instrument, trace, trace_span, warn, Span};
 /// execute again.
 const REFRESH_WINDOW: usize = 64;
 
-/// Most rounds a transaction is probed for cold reads.
-///
-/// Each round reaches the reads that depend on what the previous rounds loaded. Most transactions
-/// need one or two; batch calls need dozens before their bulk of independent reads, and pure
-/// chains of dependent reads gain nothing from more.
-const MAX_PROBE_ROUNDS: usize = 64;
-
-/// Threads per block that probe transactions for cold reads, beside the speculation workers.
-///
-/// Probing mostly waits for loads, so the threads take little CPU time from speculation.
-const PROBE_THREADS: usize = 4;
-
 /// Number of idle rounds an idle speculation worker spins before it waits for new work, so that
 /// it does not take CPU time from the state root computation.
 const IDLE_SPIN_ROUNDS: u32 = 6;
@@ -266,8 +254,7 @@ where
     /// as they arrive. Block execution waits for the results workers are executing instead of
     /// executing those transactions itself, so the workers must keep ahead of it: they execute
     /// arrived transactions in block order as soon as they can, and otherwise execute again the
-    /// stale results of the transactions block execution reaches next. With cold reads probed,
-    /// [`PROBE_THREADS`] threads run [`Self::probe_loop`] beside them.
+    /// stale results of the transactions block execution reaches next.
     fn speculate_txs<Tx>(
         ctx: &PrewarmContext<N, P, Evm>,
         pool: &WorkerStatefulPool,
@@ -298,48 +285,42 @@ where
                 );
                 fetch
             });
-        let tx_count = std::thread::scope(|probes| {
-            if let Some(fetch) = fetch {
-                for index in 0..PROBE_THREADS {
-                    let queue = &queue;
-                    let spawned = std::thread::Builder::new()
-                        .name(format!("prewarm-probe-{index}"))
-                        .spawn_scoped(probes, move || Self::probe_loop(ctx, results, queue, fetch));
-                    if let Err(err) = spawned {
-                        debug!(target: "engine::tree::payload_processor::prewarm", %err, "Failed to spawn probe thread");
-                    }
-                }
+        let tx_count = pool.in_place_scope(|s| {
+            for _ in 0..pool.current_num_threads() {
+                s.spawn(|_| {
+                    Self::speculation_worker(
+                        ctx,
+                        pool,
+                        results,
+                        &queue,
+                        fetch,
+                        state_root_hint_stream,
+                    )
+                });
             }
-            pool.in_place_scope(|s| {
-                for _ in 0..pool.current_num_threads() {
-                    s.spawn(|_| {
-                        Self::speculation_worker(ctx, pool, results, &queue, state_root_hint_stream)
-                    });
-                }
 
-                let mut tx_count = 0;
-                while let Ok((index, tx)) = pending.recv() {
-                    if ctx.should_stop() {
-                        break
-                    }
-                    tx_count += 1;
-                    // Seed results before queueing, so that they are ready as soon as possible.
-                    let seeded = ctx
-                        .env
-                        .pool_seeds
-                        .as_ref()
-                        .and_then(|seeds| results.seed(index, tx.tx().tx_hash(), seeds));
-                    if seeded.is_some() {
-                        ctx.metrics.seeded_transactions.increment(1);
-                    }
-                    queue.push(index, tx, seeded);
-                    results.wake(false);
+            let mut tx_count = 0;
+            while let Ok((index, tx)) = pending.recv() {
+                if ctx.should_stop() {
+                    break
                 }
-                queue.close();
-                results.wake(true);
-                Self::send_withdrawal_hints(ctx, state_root_hint_stream);
-                tx_count
-            })
+                tx_count += 1;
+                // Seed results before queueing, so that they are ready as soon as possible.
+                let seeded = ctx
+                    .env
+                    .pool_seeds
+                    .as_ref()
+                    .and_then(|seeds| results.seed(index, tx.tx().tx_hash(), seeds));
+                if seeded.is_some() {
+                    ctx.metrics.seeded_transactions.increment(1);
+                }
+                queue.push(index, tx, seeded);
+                results.wake(false);
+            }
+            queue.close();
+            results.wake(true);
+            Self::send_withdrawal_hints(ctx, state_root_hint_stream);
+            tx_count
         });
         if let Some(fetch) = fetch {
             fetch.end_block();
@@ -347,57 +328,48 @@ where
         tx_count
     }
 
-    /// Runs on a probe thread until prewarming stops or every transaction was claimed for probing.
-    ///
-    /// Probes the next arrived transaction against the cache alone and has `fetch` load all keys
-    /// it missed in parallel, then probes it again, which reaches the reads that depend on the
-    /// loaded values, until a round misses nothing. Missing slots read as a large value in every
-    /// other round, so that batch calls pass their balance checks and reach every item.
-    fn probe_loop<Tx>(
+    /// Executes `tx` on the current pool thread's probing EVM, which reads only the cache, and
+    /// has `fetch` load the keys it missed, so that they are loaded in parallel while other
+    /// transactions are probed and speculated.
+    fn probe_worker<Tx>(
         ctx: &PrewarmContext<N, P, Evm>,
-        results: &PrewarmResults<EvmTypesFor<Evm>>,
-        queue: &SpeculationQueue<Tx, EvmTypesFor<Evm>>,
+        pool: &WorkerStatefulPool,
         fetch: &BalPrewarmPool,
+        tx: &Tx,
     ) where
         Tx: ExecutableTxFor<Evm> + Clone,
     {
-        let mut state = ctx.evm_for_ctx();
-        let Some((evm, misses)) = state.probe.as_mut() else { return };
-        let mut idle = 0;
-        while !ctx.should_stop() && !queue.probed_all() {
-            let generation = results.predicted().generation();
-            let Some((index, (tx, _))) = queue.claim_probe() else {
-                backoff(results, generation, &mut idle);
-                continue
-            };
-            idle = 0;
-            if index < ctx.executed_tx_index.load(Ordering::Relaxed) {
-                continue
-            }
-            let (tx_env, _) = tx.clone().into_parts();
-            for round in 0..MAX_PROBE_ROUNDS {
-                if ctx.should_stop() {
-                    return
-                }
-                misses.guess_large(round % 2 == 0);
+        pool.get_or_init(
+            || ctx.evm_for_ctx(),
+            |state: &mut PrewarmEvmState<Evm>| {
+                let Some((evm, misses)) = state.probe.as_mut() else { return };
+                let (tx_env, _) = tx.clone().into_parts();
                 drop(evm.take_state_cache());
                 let _ = evm.transact_and_discard(&tx_env, |_| ());
                 let missed = misses.take();
                 if missed.is_empty() {
-                    break
+                    return
                 }
                 let mut accounts = missed.accounts;
                 accounts.sort_unstable();
                 accounts.dedup();
+                for address in accounts {
+                    fetch.warm_account(address, []);
+                }
                 let mut storage = missed.storage;
                 storage.sort_unstable();
                 storage.dedup();
+                for chunk in storage.chunk_by(|a, b| a.0 == b.0) {
+                    fetch.warm_storage(chunk[0].0, chunk.iter().map(|(_, slot)| *slot));
+                }
                 let mut code = missed.code;
                 code.sort_unstable();
                 code.dedup();
-                fetch.warm_all(accounts, &storage, code).wait();
-            }
-        }
+                for hash in code {
+                    fetch.warm_code(hash);
+                }
+            },
+        );
     }
 
     /// Runs on a pool thread until prewarming stops: executes the next queued transaction, or
@@ -408,12 +380,22 @@ where
         pool: &WorkerStatefulPool,
         results: &PrewarmResults<EvmTypesFor<Evm>>,
         queue: &SpeculationQueue<Tx, EvmTypesFor<Evm>>,
+        fetch: Option<&BalPrewarmPool>,
         state_root_hint_stream: Option<&StateRootHintStream>,
     ) where
         Tx: ExecutableTxFor<Evm> + Clone + Send + Sync,
     {
         let mut idle = 0;
         while !ctx.should_stop() {
+            if let Some(fetch) = fetch &&
+                let Some((index, (tx, _))) = queue.claim_probe()
+            {
+                if index >= ctx.executed_tx_index.load(Ordering::Relaxed) {
+                    Self::probe_worker(ctx, pool, fetch, tx);
+                }
+                idle = 0;
+                continue
+            }
             if let Some((index, (tx, seeded))) = queue.claim() {
                 if results.begin_speculation(index) {
                     Self::transact_worker(
@@ -900,8 +882,8 @@ where
     pub disable_bal_batch_io: bool,
     /// Results of transaction prewarming that block execution may reuse, `None` if disabled.
     pub(crate) prewarm_results: Option<Arc<PrewarmResults<EvmTypesFor<Evm>>>>,
-    /// Whether probe threads load each transaction's cold reads in parallel on
-    /// [`Self::bal_prewarm_pool`] while speculation workers execute it.
+    /// Whether speculation workers probe each transaction against the cache first and load the
+    /// keys it misses in parallel on [`Self::bal_prewarm_pool`] before speculating it.
     pub(crate) probe_cold_reads: bool,
 }
 
@@ -1247,11 +1229,6 @@ impl<Tx, T: evm2::EvmTypes> SpeculationQueue<Tx, T> {
     /// Claims the next transaction to execute for the first time, unless it has not arrived yet.
     fn claim(&self) -> Option<(usize, &QueuedTx<Tx, T>)> {
         self.claim_from(&self.next)
-    }
-
-    /// Returns whether every transaction that will arrive was claimed for probing.
-    fn probed_all(&self) -> bool {
-        self.next_probe.load(Ordering::Acquire) >= self.txs.len()
     }
 
     /// Claims the next transaction to probe, unless it has not arrived yet.
