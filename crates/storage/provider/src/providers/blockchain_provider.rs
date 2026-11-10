@@ -183,6 +183,10 @@ impl<N: ProviderNodeTypes> BlockchainProvider<N> {
     /// on the manager, which the engine prunes once blocks are persisted. Other blocks were
     /// persisted when `provider` captured its chain, so a block the manager has dropped resolves
     /// from the database alone.
+    ///
+    /// The builder also keeps the whole captured chain: while the snapshot's state trie tip lags
+    /// its Finish block, reverting to a persisted block needs the blocks between them, which the
+    /// manager may have pruned after a later persistence.
     fn history_state_provider(
         &self,
         provider: ConsistentProvider<N>,
@@ -192,7 +196,8 @@ impl<N: ProviderNodeTypes> BlockchainProvider<N> {
         let overlay_builder = match provider.in_memory_state_by_hash(block_hash) {
             Some(state) => overlay_manager.overlay_builder_for_state(state),
             None => overlay_manager.overlay_builder(block_hash),
-        };
+        }
+        .with_in_memory_chain(provider.head_block());
         Box::new(OverlayStateProvider::new(provider.into_database_provider(), overlay_builder))
     }
 

@@ -80,6 +80,11 @@ impl<N: ProviderNodeTypes> ConsistentProvider<N> {
         self.storage_provider
     }
 
+    /// Returns the head of the in-memory chain captured by this view.
+    pub(crate) fn head_block(&self) -> Option<Arc<BlockState<N::Primitives>>> {
+        self.head_block.clone()
+    }
+
     /// Returns the in-memory state of the block with `hash`, if it is part of the in-memory chain
     /// captured by this view.
     pub(crate) fn in_memory_state_by_hash(
