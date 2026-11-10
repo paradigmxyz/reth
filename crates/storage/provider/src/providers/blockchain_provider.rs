@@ -3241,14 +3241,17 @@ mod tests {
         assert!(provider.state_range_provider(expired_root)?.is_none());
 
         // An unverified snap attempt owns the state tables, so no root resolves.
+        let mut attempt = SnapAttempt::start(None, BlockNumHash::default(), B256::ZERO);
         let provider_rw = factory.provider_rw()?;
-        provider_rw.write_snap_attempt(&SnapAttempt::start(
-            None,
-            BlockNumHash::default(),
-            B256::ZERO,
-        ))?;
+        provider_rw.write_snap_attempt(&attempt)?;
         provider_rw.commit()?;
         assert!(provider.state_range_provider(recent_root)?.is_none());
+
+        attempt.verify();
+        let provider_rw = factory.provider_rw()?;
+        provider_rw.write_snap_attempt(&attempt)?;
+        provider_rw.commit()?;
+        assert!(provider.state_range_provider(recent_root)?.is_some());
 
         Ok(())
     }
