@@ -1437,16 +1437,6 @@ where
     /// the current persistence action while we're saving blocks.
     fn persist_blocks(&mut self, input: SaveBlocksInput<N>) {
         let highest_num_hash = input.last_block();
-        // The saved state/trie frontier becomes the overlay anchor once the save completes. The
-        // overlay from there to the canonical tip is flattened now and extended in the background
-        // as blocks are inserted, so the first payload after the save does not rebuild it from
-        // every remaining in-memory block.
-        if let Some(anchor) = input.state_trie_blocks().last() {
-            self.state.tree_state.overlay_manager.precompute_execution_overlay(
-                self.state.tree_state.canonical_block_hash(),
-                anchor.recovered_block().hash(),
-            );
-        }
         debug!(target: "engine::tree", count=input.persist_rest_blocks().len(), blocks = ?input.persist_rest_blocks().iter().map(|block| block.recovered_block().num_hash()).collect::<Vec<_>>(), "Persisting blocks");
 
         let (tx, rx) = crossbeam_channel::bounded(1);
