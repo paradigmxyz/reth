@@ -2192,9 +2192,18 @@ mod tests {
         }
         let encoded = encode_receipts70_response(resp);
         assert!(encoded.len() <= MAX_MESSAGE_SIZE);
-        EthStreamInner::<EthNetworkPrimitives>::new(EthVersion::Eth70)
-            .decode_message(encoded.as_ref().into())
+        // The requesting side only decodes responses to requests it sent.
+        let mut requester = EthStreamInner::<EthNetworkPrimitives>::new(EthVersion::Eth70);
+        requester
+            .encode_message(EthMessage::GetReceipts70(RequestPair {
+                request_id: u64::MAX,
+                message: GetReceipts70 {
+                    first_block_receipt_index: first_receipt_index,
+                    block_hashes: vec![hash],
+                },
+            }))
             .unwrap();
+        requester.decode_message(encoded.as_ref().into()).unwrap();
     }
 
     /// Encodes a receipts response with the largest possible request ID.
