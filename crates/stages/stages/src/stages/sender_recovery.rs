@@ -2,20 +2,13 @@ use alloy_primitives::{Address, BlockNumber, TxNumber};
 use reth_config::config::SenderRecoveryConfig;
 use reth_consensus::ConsensusError;
 use reth_db::static_file::TransactionMask;
-use reth_db_api::{
-    cursor::DbCursorRW,
-    table::Value,
-    tables,
-    transaction::{DbTx, DbTxMut},
-    RawValue,
-};
+use reth_db_api::{cursor::DbCursorRW, table::Value, tables, transaction::DbTxMut, RawValue};
 use reth_primitives_traits::{
     FastInstant as Instant, GotExpected, NodePrimitives, SignedTransaction,
 };
 use reth_provider::{
     BlockReader, DBProvider, EitherWriter, HeaderProvider, ProviderError, PruneCheckpointReader,
     PruneCheckpointWriter, StaticFileProviderFactory, StatsReader, StorageSettingsCache,
-    TransactionsProvider,
 };
 use reth_prune_types::{PruneCheckpoint, PruneMode, PrunePurpose, PruneSegment};
 use reth_stages_api::{
@@ -226,7 +219,7 @@ fn recover_range<Provider, CURSOR>(
     writer: &mut EitherWriter<'_, CURSOR, Provider::Primitives>,
 ) -> Result<(), StageError>
 where
-    Provider: DBProvider + HeaderProvider + TransactionsProvider + StaticFileProviderFactory,
+    Provider: DBProvider + BlockReader + StaticFileProviderFactory,
     CURSOR: DbCursorRW<tables::TransactionSenders>,
 {
     debug_assert_eq!(
@@ -266,8 +259,7 @@ where
                         SenderRecoveryStageError::FailedRecovery(err) => {
                             // get the block number for the bad transaction
                             let block_number = provider
-                                .tx_ref()
-                                .get::<tables::TransactionBlocks>(err.tx)?
+                                .block_by_transaction_id(err.tx)?
                                 .ok_or(ProviderError::BlockNumberForTransactionIndexNotFound)?;
 
                             // fetch the sealed header so we can use it in the sender recovery
@@ -462,11 +454,12 @@ mod tests {
         stage_test_suite_ext, ExecuteStageTestRunner, StageTestRunner, StorageKind,
         TestRunnerError, TestStageDB, UnwindStageTestRunner,
     };
-    use alloy_primitives::{BlockNumber, B256};
+    use alloy_consensus::SignableTransaction;
+    use alloy_primitives::{BlockNumber, Signature, B256, U256};
     use assert_matches::assert_matches;
-    use reth_db_api::{cursor::DbCursorRO, models::StorageSettings};
+    use reth_db_api::{cursor::DbCursorRO, models::StorageSettings, transaction::DbTx};
     use reth_ethereum_primitives::{Block, TransactionSigned};
-    use reth_primitives_traits::{SealedBlock, SignerRecoverable};
+    use reth_primitives_traits::{Block as _, SealedBlock, SignerRecoverable};
     use reth_provider::{
         providers::StaticFileWriter, BlockBodyIndicesProvider, DatabaseProviderFactory,
         PruneCheckpointWriter, StaticFileProviderFactory, TransactionsProvider,
@@ -475,7 +468,7 @@ mod tests {
     use reth_stages_api::StageUnitCheckpoint;
     use reth_static_file_types::StaticFileSegment;
     use reth_testing_utils::generators::{
-        self, random_block, random_block_range, BlockParams, BlockRangeParams,
+        self, random_block, random_block_range, random_tx, BlockParams, BlockRangeParams,
     };
 
     stage_test_suite_ext!(SenderRecoveryTestRunner, sender_recovery);
@@ -529,6 +522,42 @@ mod tests {
 
         // Validate the stage execution
         assert!(runner.validate_execution(input, result.ok()).is_ok(), "execution validation");
+    }
+
+    /// A transaction with an unrecoverable signature that is not the last one in its block must
+    /// unwind the block instead of failing with a database integrity error.
+    #[tokio::test]
+    async fn execute_unrecoverable_sender_before_last_transaction() {
+        let (stage_progress, target) = (0, 1);
+        let mut rng = generators::rng();
+
+        let runner = SenderRecoveryTestRunner::default();
+        let input = ExecInput {
+            target: Some(target),
+            checkpoint: Some(StageCheckpoint::new(stage_progress)),
+        };
+
+        let genesis =
+            random_block(&mut rng, 0, BlockParams { tx_count: Some(0), ..Default::default() });
+        let mut bad_block =
+            random_block(&mut rng, target, BlockParams { tx_count: Some(2), ..Default::default() })
+                .into_block();
+        bad_block.body.transactions[0] =
+            random_tx(&mut rng).into_signed(Signature::new(U256::ZERO, U256::ZERO, false)).into();
+        let bad_block = bad_block.seal_slow();
+        runner
+            .db
+            .insert_blocks([&genesis, &bad_block].into_iter(), StorageKind::Static)
+            .expect("failed to insert blocks");
+
+        let result = runner.execute(input).await.unwrap();
+        assert_matches!(
+            result,
+            Err(StageError::Block {
+                block,
+                error: BlockErrorKind::Validation(ConsensusError::TransactionSignerRecoveryError),
+            }) if block.block.number == target
+        );
     }
 
     /// Ensure the static file header advances to trailing empty blocks.
