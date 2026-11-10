@@ -65,16 +65,15 @@ struct Slot<T> {
 }
 
 impl<T> Slot<T> {
+    #[cfg(not(feature = "fuzz"))]
+    const fn new() -> Self {
+        Self { value: parking_lot::Mutex::new(None), notify: parking_lot::Condvar::new() }
+    }
+
+    #[cfg(feature = "fuzz")]
     fn new() -> Self {
-        #[cfg(not(feature = "fuzz"))]
-        {
-            Self { value: parking_lot::Mutex::new(None), notify: parking_lot::Condvar::new() }
-        }
-        #[cfg(feature = "fuzz")]
-        {
-            let (tx, rx) = crate::channel::unbounded();
-            Self { tx, rx }
-        }
+        let (tx, rx) = crate::channel::unbounded();
+        Self { tx, rx }
     }
 }
 

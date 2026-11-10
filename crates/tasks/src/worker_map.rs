@@ -170,6 +170,7 @@ impl WorkerMap {
         let candidate = Arc::new(WorkerThread::new(name));
         let worker =
             Arc::clone(self.workers.entry(name).or_insert_with(|| Arc::clone(&candidate)).value());
+        drop(candidate);
         worker
     }
 
