@@ -32,8 +32,9 @@ use std::{
 };
 use tracing::{Instrument, Span};
 
+/// PBT-aware staged backfill, retaining the MPT through activation.
 #[derive(Debug)]
-pub(super) struct PbtBackfill {
+pub struct PbtBackfill {
     strategy: Arc<PbtStateRootStrategy>,
     limits: CatchupLimits,
 }

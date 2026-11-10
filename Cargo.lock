@@ -4183,27 +4183,11 @@ dependencies = [
 name = "example-pbt-node"
 version = "0.0.0"
 dependencies = [
- "alloy-eip7928",
- "alloy-primitives",
- "alloy-rlp",
- "alloy-rpc-types-engine",
  "eyre",
- "jsonrpsee",
- "reth-e2e-test-utils",
- "reth-engine-tree",
  "reth-ethereum",
- "reth-fs-util",
- "reth-payload-primitives",
- "reth-stages",
- "reth-storage-overlay",
- "reth-tracing",
- "reth-trie-pbt",
- "serde",
- "serde_json",
+ "reth-node-pbt",
  "tempfile",
- "thiserror 2.0.21",
  "tokio",
- "tracing",
 ]
 
 [[package]]
@@ -8085,10 +8069,12 @@ dependencies = [
  "backon",
  "blake3",
  "clap",
+ "eyre",
  "http-body-util",
  "hyper",
  "hyper-util",
  "reth-chainspec",
+ "reth-cli",
  "reth-cli-runner",
  "reth-cli-util",
  "reth-consensus",
@@ -8104,6 +8090,7 @@ dependencies = [
  "reth-node-core",
  "reth-node-ethereum",
  "reth-node-metrics",
+ "reth-node-pbt",
  "reth-payload-builder",
  "reth-payload-primitives",
  "reth-primitives-traits",
@@ -10052,6 +10039,33 @@ dependencies = [
  "tokio",
  "tower",
  "tower-http",
+ "tracing",
+]
+
+[[package]]
+name = "reth-node-pbt"
+version = "2.8.1"
+dependencies = [
+ "alloy-eip7928",
+ "alloy-primitives",
+ "alloy-rlp",
+ "alloy-rpc-types-engine",
+ "eyre",
+ "jsonrpsee",
+ "reth-e2e-test-utils",
+ "reth-engine-tree",
+ "reth-ethereum",
+ "reth-fs-util",
+ "reth-payload-primitives",
+ "reth-stages",
+ "reth-storage-overlay",
+ "reth-tracing",
+ "reth-trie-pbt",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.21",
+ "tokio",
  "tracing",
 ]
 

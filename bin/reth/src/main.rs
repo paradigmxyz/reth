@@ -12,10 +12,13 @@ use reth_cli_util::allocator::tikv_jemalloc_sys as _;
 static MALLOC_CONF: &[u8] = b"prof:true,prof_active:true,lg_prof_sample:19\0";
 
 use clap::Parser;
+use pbt::{PbtArgs, PbtChainSpecParser};
 use reth::cli::Cli;
-use reth_ethereum_cli::chainspec::EthereumChainSpecParser;
 use reth_node_ethereum::{snap::EthereumBackfill, EthereumNode};
+use reth_node_pbt::PbtNode;
 use tracing::info;
+
+mod pbt;
 
 fn main() {
     // Ethereum does not use account extensions, so refuse to run a binary that was built with
@@ -44,16 +47,41 @@ fn main() {
         unsafe { std::env::set_var("RUST_BACKTRACE", "1") };
     }
 
-    if let Err(err) = Cli::<EthereumChainSpecParser>::parse().run(async move |builder, _| {
-        info!(target: "reth::cli", "Launching node");
-        let backfill = EthereumBackfill::new(builder.config());
-        let handle = builder
-            .node(EthereumNode::default())
-            .launch_with_debug_capabilities_and_backfill(backfill)
-            .await?;
+    if let Err(err) =
+        Cli::<PbtChainSpecParser, PbtArgs>::parse().run(async move |mut builder, args| {
+            info!(target: "reth::cli", "Launching node");
+            if let Some(activation) = args.activation(&builder.config().chain)? {
+                let pbt = PbtNode::new(
+                    builder.config().chain.clone(),
+                    builder.config().datadir().data_dir(),
+                    activation,
+                )?;
+                builder.config_mut().chain = pbt.chain_spec();
+                let backfill = pbt.backfill();
+                let methods = pbt.rpc_module()?;
+                let handle = builder
+                    .with_types::<EthereumNode>()
+                    .with_components(EthereumNode::components())
+                    .with_add_ons(pbt.add_ons())
+                    .extend_rpc_modules(move |ctx| {
+                        ctx.modules.remove_method_from_configured("eth_getProof");
+                        ctx.auth_module.remove_auth_method("eth_getProof");
+                        ctx.auth_module.merge_auth_methods(methods)?;
+                        Ok(())
+                    })
+                    .launch_with_debug_capabilities_and_backfill(backfill)
+                    .await?;
+                return handle.wait_for_node_exit().await;
+            }
+            let backfill = EthereumBackfill::new(builder.config());
+            let handle = builder
+                .node(EthereumNode::default())
+                .launch_with_debug_capabilities_and_backfill(backfill)
+                .await?;
 
-        handle.wait_for_node_exit().await
-    }) {
+            handle.wait_for_node_exit().await
+        })
+    {
         eprintln!("Error: {err:?}");
         std::process::exit(1);
     }

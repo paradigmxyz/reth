@@ -52,7 +52,7 @@ artifacts reject empty accounts under the EIP-7523 anchor invariant required by 
 cargo +nightly test -p reth-trie-pbt --all-features
 cargo +nightly clippy -p reth-trie-pbt --all-targets --all-features -- -D warnings
 cargo +nightly run -p example-pbt-node
-cargo +nightly nextest run -p example-pbt-node
+cargo +nightly nextest run -p reth-node-pbt
 ```
 
 Use a Rust toolchain satisfying the workspace MSRV in a supported Unix

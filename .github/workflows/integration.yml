@@ -78,7 +78,7 @@ jobs:
             --no-fail-fast \
             --locked --features "asm-keccak,reth-trie-pbt/execution,reth-trie-pbt/persistence,reth-trie-pbt/bal" \
             --workspace --exclude ef-tests \
-            -E "(kind(test) and not binary(e2e_testsuite)) or package(example-pbt-node)"
+            -E "(kind(test) and not binary(e2e_testsuite)) or package(reth-node-pbt)"
 
   integration-success:
     name: integration success

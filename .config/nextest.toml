@@ -30,5 +30,5 @@ slow-timeout = { period = "1m", terminate-after = 5 }
 
 # Each test starts a complete node with its own state caches.
 [[profile.default.overrides]]
-filter = "package(example-pbt-node)"
+filter = "package(reth-node-pbt)"
 test-group = "pbt-node"

@@ -1,0 +1,39 @@
+[package]
+name = "reth-node-pbt"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+homepage.workspace = true
+repository.workspace = true
+description = "Opt-in PBT execution node integration"
+license.workspace = true
+
+[dependencies]
+reth-ethereum = { workspace = true, features = ["node"] }
+reth-engine-tree = { workspace = true, features = ["pbt"] }
+reth-trie-pbt = { workspace = true, features = ["execution", "persistence", "bal", "conversion"] }
+reth-storage-overlay.workspace = true
+reth-stages.workspace = true
+reth-fs-util.workspace = true
+alloy-primitives.workspace = true
+alloy-rpc-types-engine.workspace = true
+alloy-eip7928.workspace = true
+eyre.workspace = true
+jsonrpsee = { workspace = true, features = ["server"] }
+serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true
+tokio = { workspace = true, features = ["signal"] }
+tracing.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+reth-ethereum = { workspace = true, features = ["test-utils"] }
+alloy-rlp.workspace = true
+jsonrpsee = { workspace = true, features = ["http-client"] }
+reth-e2e-test-utils.workspace = true
+reth-tracing.workspace = true
+reth-payload-primitives.workspace = true
+
+[lints]
+workspace = true

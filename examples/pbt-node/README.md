@@ -101,7 +101,7 @@ parameter budget of 263168 bytes. Four blocking proof jobs may run at once;
 additional requests fail immediately with error `-32005`. Invalid parameters
 return `-32602`, and unavailable/corrupt checkpoints return `-32603`.
 
-The tests cover transfers, contract deployment and overflow storage, competing
+The shared `reth-node-pbt` tests cover transfers, contract deployment and overflow storage, competing
 branches, reorgs, timestamp activation, BAL replay, early empty payloads,
 missing-checkpoint failures, anchor onboarding, durable restart, finalized
 pruning and proof responses. Staged backfill uses the normal download/execution
