@@ -454,9 +454,15 @@ impl RocksDBBuilder {
 
         if self.read_only {
             // Open as secondary instance for catch-up capability.
-            // Secondary needs max_open_files = -1 to keep all FDs open.
+            // Always use a finite max_open_files. KEEP_ALL_FILES_OPEN (-1) tries to
+            // hold every SST handle and fails with EMFILE on large storage-v2
+            // databases even when the process nofile limit is raised into the
+            // millions (`reth db prune-checkpoints get`, #28172). The primary /
+            // read-write path already falls back to LIMITED_MAX_OPEN_FILES when the
+            // FD limit is low; secondary opens need the same bound unconditionally
+            // because a one-shot CLI reader does not raise the soft limit first.
             let mut options = options;
-            options.set_max_open_files(KEEP_ALL_FILES_OPEN);
+            options.set_max_open_files(LIMITED_MAX_OPEN_FILES);
 
             let secondary_path = self
                 .path
