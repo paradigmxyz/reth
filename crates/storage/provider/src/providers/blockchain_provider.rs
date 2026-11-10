@@ -198,11 +198,23 @@ impl<N: ProviderNodeTypes> BlockchainProvider<N> {
             return Ok(None)
         }
 
+        // A pipeline run commits executed state before it moves `Finish`, so until then the state
+        // tables are ahead of every retained block.
+        let Some(finish) = provider.get_stage_checkpoint(StageId::Finish)? else { return Ok(None) };
+        if provider
+            .get_stage_checkpoint(StageId::Execution)?
+            .is_some_and(|execution| execution.block_number > finish.block_number)
+        {
+            return Ok(None)
+        }
+
         let overlay_manager = self.database.overlay_manager();
         let overlay_builder = match block_state {
             Some(state) => overlay_manager.overlay_builder_for_state(state),
             None => {
-                let Some(block_hash) = retained_block_hash::<N>(&provider, state_root)? else {
+                let Some(block_hash) =
+                    retained_block_hash::<N>(&provider, finish.block_number, state_root)?
+                else {
                     return Ok(None)
                 };
                 overlay_manager.overlay_builder(block_hash)
@@ -353,15 +365,16 @@ impl<N: ProviderNodeTypes> StateRangeProvider for HistoricalStateRangeView<N> {
     }
 }
 
-/// Returns the hash of the retained canonical block with `state_root`, as seen by `provider`.
+/// Returns the hash of the canonical block with `state_root` among those retained up to `finish`,
+/// as seen by `provider`.
 fn retained_block_hash<N: ProviderNodeTypes>(
     provider: &StateRangeDbProvider<N>,
+    finish: BlockNumber,
     state_root: B256,
 ) -> ProviderResult<Option<B256>> {
-    let Some(finish) = provider.get_stage_checkpoint(StageId::Finish)? else { return Ok(None) };
-    let oldest = finish.block_number.saturating_sub(SNAPSHOT_STATE_RETENTION - 1);
+    let oldest = finish.saturating_sub(SNAPSHOT_STATE_RETENTION - 1);
 
-    for number in (oldest..=finish.block_number).rev() {
+    for number in (oldest..=finish).rev() {
         let Some(header) = provider.sealed_header(number)? else { continue };
         if header.state_root() == state_root {
             return Ok(Some(header.hash()))
@@ -3285,6 +3298,15 @@ mod tests {
         provider_rw.write_snap_attempt(&attempt)?;
         provider_rw.commit()?;
         assert!(provider.state_range_provider(recent_root)?.is_some());
+
+        // State executed past `Finish` matches no retained root.
+        let provider_rw = factory.provider_rw()?;
+        provider_rw.save_stage_checkpoint(
+            StageId::Execution,
+            StageCheckpoint::new(SNAPSHOT_STATE_RETENTION + 1),
+        )?;
+        provider_rw.commit()?;
+        assert!(provider.state_range_provider(recent_root)?.is_none());
 
         Ok(())
     }
