@@ -643,40 +643,17 @@ pub(crate) struct SpeculativeTx {
 /// Writes of a key, sorted by the index of the transaction that made them.
 type Writes<T> = Vec<(usize, T)>;
 
-/// Predicted writes of an account and the transactions whose stored results read it.
-#[derive(Debug, Default)]
-struct AccountEntry {
-    /// Predicted writes, `None` if destroyed.
-    writes: Writes<Option<AccountInfo>>,
-    /// Transactions that cleared the account's storage by creating or destroying it.
-    cleared: Writes<()>,
-    /// Transactions whose stored results read the account.
-    readers: Vec<usize>,
-    /// Transactions whose stored results read one of the account's slots, which a predicted
-    /// clear changes.
-    slot_readers: Vec<usize>,
-}
-
-/// Predicted writes of a storage slot and the transactions whose stored results read it.
-#[derive(Debug, Default)]
-struct SlotEntry {
-    writes: Writes<U256>,
-    readers: Vec<usize>,
-}
-
 /// State writes predicted by speculative results, by transaction index.
 ///
 /// Speculative executions read the latest write predicted before their transaction, so that
-/// transactions depending on earlier ones in the block can still be reused. Each key's writes
-/// and readers share an entry, so that publishing a write and flagging its readers, or
-/// registering a reader, is one map operation.
+/// transactions depending on earlier ones in the block can still be reused.
 #[derive(Debug, Default)]
 pub(super) struct PredictedState {
-    accounts: DashMap<Address, AccountEntry, DefaultHashBuilder>,
-    storage: DashMap<(Address, U256), SlotEntry, DefaultHashBuilder>,
-    /// Whether a predicted write cleared an account's storage, so that slot reads must check
-    /// [`AccountEntry::cleared`]. Most blocks have none.
-    any_cleared: AtomicBool,
+    /// Accounts, `None` if destroyed.
+    accounts: DashMap<Address, Writes<Option<AccountInfo>>, DefaultHashBuilder>,
+    storage: DashMap<(Address, U256), Writes<U256>, DefaultHashBuilder>,
+    /// Transactions that cleared an account's storage by creating or destroying it.
+    cleared: DashMap<Address, Writes<()>, DefaultHashBuilder>,
     /// Bytecode deployed by predicted writes.
     code: DashMap<B256, Bytecode, DefaultHashBuilder>,
     /// Number of times new work arrived for idle prewarm workers: a queued transaction or a
@@ -684,6 +661,10 @@ pub(super) struct PredictedState {
     generation: AtomicUsize,
     /// Account whose balance-only writes are not predicted.
     unpredicted: Option<Address>,
+    /// Transactions whose stored results read each account or one of its slots.
+    account_readers: DashMap<Address, Vec<usize>, DefaultHashBuilder>,
+    /// Transactions whose stored results read each storage slot.
+    storage_readers: DashMap<(Address, U256), Vec<usize>, DefaultHashBuilder>,
     /// Whether a changed prediction may have made the result of the transaction at each index
     /// stale since it was last checked.
     maybe_stale: Box<[AtomicBool]>,
@@ -715,16 +696,13 @@ impl PredictedState {
         };
         for read in &reads.accounts {
             if self.unpredicted != Some(read.address) {
-                register(&mut self.accounts.entry(read.address).or_default().readers);
+                register(&mut self.account_readers.entry(read.address).or_default());
             }
         }
-        // Slots are mostly read a few per contract, so the contract is registered once.
-        let mut slot_accounts = Vec::new();
         for read in &reads.storage {
-            register(&mut self.storage.entry((read.address, read.slot)).or_default().readers);
-            if self.unpredicted != Some(read.address) && !slot_accounts.contains(&read.address) {
-                slot_accounts.push(read.address);
-                register(&mut self.accounts.entry(read.address).or_default().slot_readers);
+            register(&mut self.storage_readers.entry((read.address, read.slot)).or_default());
+            if self.unpredicted != Some(read.address) {
+                register(&mut self.account_readers.entry(read.address).or_default());
             }
         }
     }
@@ -773,10 +751,17 @@ impl PredictedState {
         self.waiting.fetch_sub(1, Ordering::SeqCst);
     }
 
-    /// Flags the `readers` after `index` of a key a changed prediction wrote, without waking
+    /// Flags the readers after `index` of the keys a changed prediction wrote, without waking
     /// workers, and returns how many were not flagged yet.
-    fn flag_readers(&self, readers: &[usize], index: usize) -> usize {
-        readers.iter().filter(|&&reader| reader > index && self.mark(reader)).count()
+    fn flag_readers<K: Eq + core::hash::Hash>(
+        &self,
+        readers: &DashMap<K, Vec<usize>, DefaultHashBuilder>,
+        key: &K,
+        index: usize,
+    ) -> usize {
+        readers.get(key).map_or(0, |readers| {
+            readers.iter().filter(|&&reader| reader > index && self.mark(reader)).count()
+        })
     }
 
     /// Takes the first flagged transaction in `range`, clearing its flag.
@@ -795,22 +780,14 @@ impl PredictedState {
 
     /// Returns the latest account write predicted before the transaction at `index`.
     fn account(&self, address: Address, index: usize) -> Option<Option<AccountInfo>> {
-        let entry = self.accounts.get(&address)?;
-        latest(&entry.writes, index).map(|(_, account)| account.clone())
+        let writes = self.accounts.get(&address)?;
+        latest(&writes, index).map(|(_, account)| account.clone())
     }
 
     /// Returns the latest storage value predicted before the transaction at `index`.
     fn storage(&self, address: Address, slot: U256, index: usize) -> Option<U256> {
-        let cleared = self
-            .any_cleared
-            .load(Ordering::Acquire)
-            .then(|| self.accounts.get(&address))
-            .flatten()
-            .and_then(|entry| latest(&entry.cleared, index).map(|(i, _)| *i));
-        let written = self
-            .storage
-            .get(&(address, slot))
-            .and_then(|entry| latest(&entry.writes, index).copied());
+        let cleared = self.cleared.get(&address).and_then(|w| latest(&w, index).map(|(i, _)| *i));
+        let written = self.storage.get(&(address, slot)).and_then(|w| latest(&w, index).copied());
         match (written, cleared) {
             (Some((written, value)), Some(cleared)) if written >= cleared => Some(value),
             (_, Some(_)) => Some(U256::ZERO),
@@ -841,9 +818,12 @@ impl PredictedState {
                 continue
             }
             if let Some(current) = account.current {
-                let mut entry = self.accounts.entry(account.address).or_default();
-                flagged += self.flag_readers(&entry.readers, index);
-                write(&mut entry.writes, index, Some(Some(without_code(current))));
+                flagged += self.flag_readers(&self.account_readers, &account.address, index);
+                write(
+                    &mut self.accounts.entry(account.address).or_default(),
+                    index,
+                    Some(Some(without_code(current))),
+                );
             }
         }
         self.wake_for(flagged);
@@ -868,11 +848,8 @@ impl PredictedState {
             }
             let address = account.address;
             let cleared = account.storage.wiped || account.created || account.current.is_none();
-            let mut entry = self.accounts.entry(address).or_default();
             if cleared {
-                self.any_cleared.store(true, Ordering::Release);
-                flagged += self.flag_readers(&entry.slot_readers, index);
-                write(&mut entry.cleared, index, publish.then_some(()));
+                write(&mut self.cleared.entry(address).or_default(), index, publish.then_some(()));
             }
             // Balance-only writes of the unpredicted account are rebased instead.
             if !cleared &&
@@ -887,10 +864,13 @@ impl PredictedState {
             if self.unpredicted == Some(address) {
                 flagged += (index + 1..self.maybe_stale.len()).filter(|&i| self.mark(i)).count();
             } else {
-                flagged += self.flag_readers(&entry.readers, index);
+                flagged += self.flag_readers(&self.account_readers, &address, index);
             }
-            write(&mut entry.writes, index, publish.then(|| account.current.map(without_code)));
-            drop(entry);
+            write(
+                &mut self.accounts.entry(address).or_default(),
+                index,
+                publish.then(|| account.current.map(without_code)),
+            );
             if account.current.is_none() {
                 continue
             }
@@ -898,9 +878,12 @@ impl PredictedState {
                 if (account.storage.wiped && !value.value.current.is_zero()) ||
                     (!account.storage.wiped && value.value.original != value.value.current)
                 {
-                    let mut entry = self.storage.entry((address, slot)).or_default();
-                    flagged += self.flag_readers(&entry.readers, index);
-                    write(&mut entry.writes, index, publish.then_some(value.value.current));
+                    flagged += self.flag_readers(&self.storage_readers, &(address, slot), index);
+                    write(
+                        &mut self.storage.entry((address, slot)).or_default(),
+                        index,
+                        publish.then_some(value.value.current),
+                    );
                 }
             }
         }
