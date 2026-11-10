@@ -9,6 +9,7 @@ use crate::{
     changeset_cache::compute_block_trie_updates,
     database_state_frontiers,
     manager_metrics::{ExecutionOverlayMetrics, OverlayCacheMetrics, StateTrieOverlayMetrics},
+    provider::OverlayStateProviderFactoryMetrics,
     ChangesetCache, ExecutionOverlay, OverlayBuilder,
 };
 use alloy_eips::BlockNumHash;
@@ -27,7 +28,10 @@ use reth_storage_api::{
 };
 #[cfg(feature = "rayon")]
 use reth_tasks::WorkerPool;
-use reth_trie::{updates::TrieUpdatesSorted, HashedPostStateSorted, TrieInputSorted};
+use reth_trie::{
+    proof_v2::ProofCursorMetrics, updates::TrieUpdatesSorted, HashedPostStateSorted,
+    TrieInputSorted,
+};
 use std::{
     fmt,
     ops::RangeInclusive,
@@ -58,6 +62,8 @@ struct OverlayManagerInner<N: NodePrimitives> {
     metrics: StateTrieOverlayMetrics,
     execution_metrics: ExecutionOverlayMetrics,
     builder_metrics: OverlayBuilderMetrics,
+    provider_metrics: OverlayStateProviderFactoryMetrics,
+    proof_cursor_metrics: ProofCursorMetrics,
 }
 
 impl<N: NodePrimitives> Default for OverlayManager<N> {
@@ -74,6 +80,8 @@ impl<N: NodePrimitives> Default for OverlayManager<N> {
                 metrics: Default::default(),
                 execution_metrics: Default::default(),
                 builder_metrics: Default::default(),
+                provider_metrics: Default::default(),
+                proof_cursor_metrics: Default::default(),
             }),
         }
     }
@@ -104,6 +112,8 @@ impl<N: NodePrimitives> OverlayManager<N> {
                 metrics: Default::default(),
                 execution_metrics: Default::default(),
                 builder_metrics: Default::default(),
+                provider_metrics: Default::default(),
+                proof_cursor_metrics: Default::default(),
             }),
         }
     }
@@ -141,6 +151,17 @@ impl<N: NodePrimitives> OverlayManager<N> {
     /// Returns the metrics shared by the overlay builders this manager creates.
     pub(crate) fn builder_metrics(&self) -> &OverlayBuilderMetrics {
         &self.inner.builder_metrics
+    }
+
+    /// Returns the metrics shared by the overlay state providers built from this manager.
+    pub(crate) fn provider_metrics(&self) -> &OverlayStateProviderFactoryMetrics {
+        &self.inner.provider_metrics
+    }
+
+    /// Returns the cursor metric handles shared by the overlay state providers built from this
+    /// manager.
+    pub(crate) fn proof_cursor_metrics(&self) -> &ProofCursorMetrics {
+        &self.inner.proof_cursor_metrics
     }
 
     /// Gets complete trie before-values for an inclusive block range, oldest values taking
