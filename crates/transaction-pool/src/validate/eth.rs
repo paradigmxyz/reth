@@ -710,7 +710,12 @@ where
             return TransactionValidationOutcome::Invalid(transaction, err)
         }
 
-        let authorities = self.recover_authorities(&transaction);
+        let authorities = match self.recover_authorities(&transaction, &state) {
+            Ok(authorities) => authorities,
+            Err(err) => {
+                return TransactionValidationOutcome::Error(*transaction.hash(), Box::new(err))
+            }
+        };
         // Return the valid transaction
         TransactionValidationOutcome::Valid {
             balance: account.balance,
@@ -879,15 +884,28 @@ where
     }
 
     /// Returns recovered authorities from authorizations for this chain or all chains.
-    fn recover_authorities(&self, transaction: &Tx) -> std::option::Option<Vec<Address>> {
-        transaction.authorization_list().map(|auths| {
-            let chain_id = U256::from(self.chain_id());
-            auths
-                .iter()
-                .filter(|auth| auth.chain_id().is_zero() || auth.chain_id() == &chain_id)
-                .flat_map(|auth| auth.recover_authority())
-                .collect()
-        })
+    ///
+    /// Authorizations with a nonce below the authority's current nonce are skipped: they can never
+    /// apply and would otherwise mark the authority as having a pending delegation.
+    fn recover_authorities<P: AccountInfoReader>(
+        &self,
+        transaction: &Tx,
+        state: &P,
+    ) -> Result<Option<Vec<Address>>, ProviderError> {
+        let Some(auths) = transaction.authorization_list() else { return Ok(None) };
+        let chain_id = U256::from(self.chain_id());
+        let mut authorities = Vec::with_capacity(auths.len());
+        for auth in auths {
+            if !auth.chain_id().is_zero() && auth.chain_id() != &chain_id {
+                continue
+            }
+            let Ok(authority) = auth.recover_authority() else { continue };
+            if state.basic_account(&authority)?.is_none_or(|account| account.nonce <= auth.nonce())
+            {
+                authorities.push(authority);
+            }
+        }
+        Ok(Some(authorities))
     }
 
     /// Validates all given transactions.
@@ -1913,7 +1931,50 @@ mod tests {
             200,
         );
 
-        assert_eq!(validator.recover_authorities(&transaction), Some(expected));
+        assert_eq!(
+            validator.recover_authorities(&transaction, &mock_provider()).unwrap(),
+            Some(expected)
+        );
+    }
+
+    #[test]
+    fn skips_stale_authorities() {
+        let validator = EthTransactionValidatorBuilder::new(mock_provider(), test_evm_config())
+            .build(InMemoryBlobStore::default());
+        let auth = |nonce| {
+            Authorization {
+                chain_id: U256::from(validator.chain_id()),
+                address: Address::repeat_byte(1),
+                nonce,
+            }
+            .into_signed(Signature::test_signature())
+        };
+        let auths = vec![auth(1), auth(2), auth(3)];
+        let authorities =
+            auths.iter().map(|auth| auth.recover_authority().unwrap()).collect::<Vec<_>>();
+        let tx = alloy_consensus::TxEip7702 {
+            chain_id: validator.chain_id(),
+            authorization_list: auths,
+            ..Default::default()
+        };
+        let signed = reth_ethereum_primitives::TransactionSigned::new_unhashed(
+            tx.into(),
+            Signature::test_signature(),
+        );
+        let transaction = EthPooledTransaction::new(
+            alloy_consensus::transaction::Recovered::new_unchecked(signed, Address::ZERO),
+            200,
+        );
+
+        let provider = mock_provider();
+        for authority in &authorities {
+            provider.add_account(*authority, ExtendedAccount::new(2, U256::ZERO));
+        }
+
+        assert_eq!(
+            validator.recover_authorities(&transaction, &provider).unwrap(),
+            Some(vec![authorities[1], authorities[2]])
+        );
     }
 
     // <https://github.com/paradigmxyz/reth/issues/8550>
