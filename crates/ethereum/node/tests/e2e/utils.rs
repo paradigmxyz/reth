@@ -9,7 +9,7 @@ use alloy_provider::{
 use alloy_rpc_types_eth::TransactionRequest;
 use alloy_signer::SignerSync;
 use eyre::{ensure, eyre};
-use rand::{seq::IndexedRandom, Rng};
+use rand::{seq::IndexedRandom, RngExt};
 use reqwest::{header, RequestBuilder, Response, StatusCode};
 use reth_e2e_test_utils::{node::Finality, wallet::Wallet, NodeHelperType};
 use reth_ethereum_primitives::TxType;
@@ -25,7 +25,7 @@ use ssz::{Decode, Encode};
 pub(crate) async fn advance_with_random_transactions(
     node: &mut NodeHelperType<EthereumNode>,
     num_blocks: usize,
-    rng: &mut impl Rng,
+    rng: &mut impl RngExt,
     finalize: bool,
 ) -> eyre::Result<()> {
     node.set_finality(if finalize { Finality::Head } else { Finality::Keep });
@@ -72,7 +72,9 @@ pub(crate) async fn advance_with_random_transactions(
                 tx = tx.with_access_list(
                     vec![AccessListItem {
                         address: *call_destinations.choose(rng).unwrap(),
-                        storage_keys: (0..rng.random_range(0..100)).map(|_| rng.random()).collect(),
+                        storage_keys: (0..rng.random_range(0..100))
+                            .map(|_| alloy_primitives::B256::from(rng.random::<[u8; 32]>()))
+                            .collect(),
                     }]
                     .into(),
                 );

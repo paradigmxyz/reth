@@ -8,7 +8,11 @@ use thiserror::Error;
 
 /// Convenience function to create a new random [`SecretKey`]
 pub fn rng_secret_key() -> SecretKey {
-    SecretKey::new(&mut rand::rng())
+    loop {
+        if let Ok(key) = SecretKey::from_secret_bytes(rand::random()) {
+            return key
+        }
+    }
 }
 
 /// Errors returned by loading a [`SecretKey`], including IO errors.

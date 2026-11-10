@@ -45,7 +45,7 @@ fn neighbours(len: usize) -> Message {
 }
 
 fn codec(c: &mut Criterion) {
-    let secret_key = SecretKey::new(&mut rand::rng());
+    let secret_key = SecretKey::from_secret_bytes(rand::random()).unwrap();
 
     let mut group = c.benchmark_group("discv4_codec");
 

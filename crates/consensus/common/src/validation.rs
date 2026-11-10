@@ -461,7 +461,7 @@ mod tests {
     use alloy_consensus::{BlockBody, Header, TxEip4844};
     use alloy_eips::{eip4844::DATA_GAS_PER_BLOB, eip4895::Withdrawals};
     use alloy_primitives::{Address, Bytes, Signature, U256};
-    use rand::Rng;
+    use rand::RngExt;
     use reth_chainspec::ChainSpecBuilder;
     use reth_ethereum_primitives::{Transaction, TransactionSigned};
     use reth_primitives_traits::proofs;
@@ -479,7 +479,7 @@ mod tests {
             value: U256::from(3_u64),
             input: Bytes::from(vec![1, 2]),
             access_list: Default::default(),
-            blob_versioned_hashes: std::iter::repeat_with(|| rng.random())
+            blob_versioned_hashes: std::iter::repeat_with(|| B256::from(rng.random::<[u8; 32]>()))
                 .take(num_blobs)
                 .collect(),
         });

@@ -16,8 +16,9 @@ use chain_cfg::{boot_nodes, head, polygon_chain_spec};
 use reth_discv4::Discv4ConfigBuilder;
 use reth_ethereum::{
     network::{
-        api::events::SessionInfo, config::NetworkMode, NetworkConfig, NetworkEvent,
-        NetworkEventListenerProvider, NetworkManager,
+        api::events::SessionInfo,
+        config::{rng_secret_key, NetworkMode},
+        NetworkConfig, NetworkEvent, NetworkEventListenerProvider, NetworkManager,
     },
     tasks::Runtime,
 };
@@ -25,7 +26,6 @@ use reth_tracing::{
     tracing::info, tracing_subscriber::filter::LevelFilter, LayerInfo, LogFormat, RethTracer,
     Tracer,
 };
-use secp256k1::{rand, SecretKey};
 use std::{
     net::{Ipv4Addr, SocketAddr},
     time::Duration,
@@ -37,7 +37,7 @@ pub mod chain_cfg;
 #[tokio::main]
 async fn main() {
     // The ECDSA private key used to create our enode identifier.
-    let secret_key = SecretKey::new(&mut rand::rng());
+    let secret_key = rng_secret_key();
 
     let _ = RethTracer::new()
         .with_stdout(LayerInfo::new(

@@ -2890,7 +2890,7 @@ mod tests {
         ArenaParallelSparseTrie, ArenaParallelismThresholds, LeafUpdate, SparseTrie, TrieNodeEpoch,
     };
     use alloy_primitives::{map::B256Map, B256, U256};
-    use rand::{seq::SliceRandom, Rng, SeedableRng};
+    use rand::{seq::SliceRandom, RngExt, SeedableRng};
     use reth_trie::test_utils::TrieTestHarness;
     use reth_trie_common::ProofV2Target;
     use std::collections::BTreeMap;

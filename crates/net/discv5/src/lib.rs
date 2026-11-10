@@ -20,7 +20,7 @@ use alloy_primitives::bytes::Bytes;
 use enr::{discv4_id_to_discv5_id, EnrCombinedKeyWrapper};
 use futures::future::join_all;
 use itertools::Itertools;
-use rand::{Rng, RngCore};
+use rand::{Rng, RngExt};
 use reth_ethereum_forks::{EnrForkIdEntry, ForkId};
 use reth_network_peers::{NodeRecord, PeerId};
 use secp256k1::SecretKey;
@@ -727,7 +727,6 @@ mod test {
     use super::*;
     use ::enr::{CombinedKey, EnrKey};
     use discv5::ListenConfig;
-    use rand::rng;
     use reth_chainspec::MAINNET;
     use std::{
         net::UdpSocket,
@@ -758,7 +757,7 @@ mod test {
     }
 
     async fn start_discovery_node(udp_port_discv5: u16) -> (Discv5, mpsc::Receiver<discv5::Event>) {
-        let secret_key = SecretKey::new(&mut rng());
+        let secret_key = SecretKey::from_secret_bytes(rand::random()).unwrap();
 
         let discv5_addr: SocketAddr = format!("127.0.0.1:{udp_port_discv5}").parse().unwrap();
         let rlpx_addr: SocketAddr = "127.0.0.1:30303".parse().unwrap();
@@ -812,7 +811,7 @@ mod test {
     async fn discv5_releases_port_on_drop() {
         reth_tracing::init_test_tracing();
 
-        let secret_key = SecretKey::new(&mut rng());
+        let secret_key = SecretKey::from_secret_bytes(rand::random()).unwrap();
         let port = unused_udp_port();
 
         let (node, updates) =
@@ -1095,7 +1094,7 @@ mod test {
             .fork(NetworkStackId::ETH, fork_id)
             .build();
 
-        let sk = SecretKey::new(&mut rng());
+        let sk = SecretKey::from_secret_bytes(rand::random()).unwrap();
         let (enr, _, _, _) = build_local_enr(&sk, &config);
 
         let decoded_fork_id = enr
@@ -1111,7 +1110,7 @@ mod test {
     #[test]
     fn get_fork_id_with_different_network_stack_ids() {
         let fork_id = MAINNET.latest_fork_id();
-        let sk = SecretKey::new(&mut rng());
+        let sk = SecretKey::from_secret_bytes(rand::random()).unwrap();
 
         // Test 1: ENR with OPEL fork ID, Discv5 configured for OPEL
         let enr_with_opel = Enr::builder()

@@ -14,8 +14,8 @@ use chainspec::{boot_nodes, bsc_chain_spec, head};
 use handshake::BscHandshake;
 use reth_discv4::Discv4ConfigBuilder;
 use reth_network::{
-    EthNetworkPrimitives, NetworkConfig, NetworkEvent, NetworkEventListenerProvider,
-    NetworkManager, PeersInfo,
+    config::rng_secret_key, EthNetworkPrimitives, NetworkConfig, NetworkEvent,
+    NetworkEventListenerProvider, NetworkManager, PeersInfo,
 };
 use reth_network_api::events::{PeerEvent, SessionInfo};
 use reth_provider::noop::NoopProvider;
@@ -23,7 +23,6 @@ use reth_tasks::Runtime;
 use reth_tracing::{
     tracing_subscriber::filter::LevelFilter, LayerInfo, LogFormat, RethTracer, Tracer,
 };
-use secp256k1::{rand, SecretKey};
 use std::{
     net::{Ipv4Addr, SocketAddr},
     sync::Arc,
@@ -50,7 +49,7 @@ async fn main() {
 
     let local_addr = SocketAddr::new(Ipv4Addr::UNSPECIFIED.into(), 30303);
 
-    let secret_key = SecretKey::new(&mut rand::rng());
+    let secret_key = rng_secret_key();
 
     let bsc_boot_nodes = boot_nodes();
 

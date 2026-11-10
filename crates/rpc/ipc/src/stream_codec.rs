@@ -256,7 +256,7 @@ impl tokio_util::codec::Encoder<String> for StreamCodec {
 mod tests {
     use super::*;
     use bytes::BufMut;
-    use rand::{rngs::StdRng, RngCore, SeedableRng};
+    use rand::{rngs::StdRng, Rng, SeedableRng};
     use tokio_util::codec::Decoder;
 
     #[test]

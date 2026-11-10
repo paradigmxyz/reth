@@ -1449,7 +1449,7 @@ mod tests {
     use alloy_consensus::transaction::Recovered;
     use alloy_primitives::B256;
     use futures::task::noop_waker_ref;
-    use rand::{rngs::StdRng, seq::IndexedRandom, Rng, SeedableRng};
+    use rand::{rngs::StdRng, seq::IndexedRandom, RngExt, SeedableRng};
     use reth_eth_wire::EthVersion;
     use reth_ethereum_primitives::{PooledTransactionVariant, TransactionSigned};
     use reth_transaction_pool::test_utils::MockTransactionFactory;
@@ -2826,7 +2826,7 @@ mod tests {
                     let Some(&peer_id) = connected.choose(&mut rng) else { continue };
                     let count = rng.random_range(1..=30);
                     let entries = all_hashes
-                        .choose_multiple(&mut rng, count)
+                        .sample(&mut rng, count)
                         .map(|hash| {
                             let size = match rng.random_range(0..10) {
                                 0 => 0,
@@ -2890,8 +2890,7 @@ mod tests {
                 }
                 85..=89 => {
                     let count = rng.random_range(1..=10);
-                    let received =
-                        all_hashes.choose_multiple(&mut rng, count).copied().collect::<Vec<_>>();
+                    let received = all_hashes.sample(&mut rng, count).copied().collect::<Vec<_>>();
                     rig.fetcher.on_transactions_received(&received);
                     rig.fetcher.assert_invariants();
                 }

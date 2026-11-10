@@ -10,7 +10,7 @@ use crate::{
 use alloy_primitives::map::{hash_map::Entry, FbBuildHasher, HashMap, HashSet};
 use futures::StreamExt;
 
-use rand::Rng;
+use rand::RngExt;
 use reth_eth_wire::{
     errors::{EthStreamError, P2PHandshakeError, P2PStreamError},
     DisconnectReason,

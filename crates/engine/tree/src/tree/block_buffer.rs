@@ -204,11 +204,11 @@ mod tests {
     use alloy_eip7928::bal::RawBal;
     use alloy_eips::BlockNumHash;
     use alloy_primitives::{BlockHash, Bytes};
-    use reth_testing_utils::generators::{self, random_block, BlockParams, Rng};
+    use reth_testing_utils::generators::{self, random_block, BlockParams, RngExt};
     use std::collections::HashMap;
 
     /// Create random block with specified number and parent hash.
-    fn create_block<R: Rng>(
+    fn create_block<R: RngExt>(
         rng: &mut R,
         number: u64,
         parent: BlockHash,
@@ -251,7 +251,7 @@ mod tests {
     #[test]
     fn simple_insertion() {
         let mut rng = generators::rng();
-        let parent = rng.random();
+        let parent = alloy_primitives::B256::from(rng.random::<[u8; 32]>());
         let block1 = create_block(&mut rng, 10, parent);
         let mut buffer = BlockBuffer::new(3);
 
@@ -270,7 +270,7 @@ mod tests {
         let mut rng = generators::rng();
 
         let access_list = raw_bal();
-        let parent = rng.random();
+        let parent = alloy_primitives::B256::from(rng.random::<[u8; 32]>());
         let block = create_block(&mut rng, 10, parent);
 
         let mut buffer = BlockBuffer::new(1);
@@ -288,7 +288,7 @@ mod tests {
         let mut rng = generators::rng();
 
         let access_list = raw_bal();
-        let parent = rng.random();
+        let parent = alloy_primitives::B256::from(rng.random::<[u8; 32]>());
         let block = create_block(&mut rng, 10, parent);
 
         let mut buffer = BlockBuffer::new(1);
@@ -306,11 +306,11 @@ mod tests {
     fn take_entire_chain_of_children() {
         let mut rng = generators::rng();
 
-        let main_parent_hash = rng.random();
+        let main_parent_hash = alloy_primitives::B256::from(rng.random::<[u8; 32]>());
         let block1 = create_block(&mut rng, 10, main_parent_hash);
         let block2 = create_block(&mut rng, 11, block1.hash());
         let block3 = create_block(&mut rng, 12, block2.hash());
-        let parent4 = rng.random();
+        let parent4 = alloy_primitives::B256::from(rng.random::<[u8; 32]>());
         let block4 = create_block(&mut rng, 14, parent4);
 
         let mut buffer = BlockBuffer::new(5);
@@ -343,7 +343,7 @@ mod tests {
     fn take_all_multi_level_children() {
         let mut rng = generators::rng();
 
-        let main_parent_hash = rng.random();
+        let main_parent_hash = alloy_primitives::B256::from(rng.random::<[u8; 32]>());
         let block1 = create_block(&mut rng, 10, main_parent_hash);
         let block2 = create_block(&mut rng, 11, block1.hash());
         let block3 = create_block(&mut rng, 11, block1.hash());
@@ -377,7 +377,8 @@ mod tests {
     fn take_block_with_children() {
         let mut rng = generators::rng();
 
-        let main_parent = BlockNumHash::new(9, rng.random());
+        let main_parent =
+            BlockNumHash::new(9, alloy_primitives::B256::from(rng.random::<[u8; 32]>()));
         let block1 = create_block(&mut rng, 10, main_parent.hash);
         let block2 = create_block(&mut rng, 11, block1.hash());
         let block3 = create_block(&mut rng, 11, block1.hash());
@@ -411,11 +412,12 @@ mod tests {
     fn remove_chain_of_children() {
         let mut rng = generators::rng();
 
-        let main_parent = BlockNumHash::new(9, rng.random());
+        let main_parent =
+            BlockNumHash::new(9, alloy_primitives::B256::from(rng.random::<[u8; 32]>()));
         let block1 = create_block(&mut rng, 10, main_parent.hash);
         let block2 = create_block(&mut rng, 11, block1.hash());
         let block3 = create_block(&mut rng, 12, block2.hash());
-        let parent4 = rng.random();
+        let parent4 = alloy_primitives::B256::from(rng.random::<[u8; 32]>());
         let block4 = create_block(&mut rng, 14, parent4);
 
         let mut buffer = BlockBuffer::new(5);
@@ -434,7 +436,8 @@ mod tests {
     fn remove_all_multi_level_children() {
         let mut rng = generators::rng();
 
-        let main_parent = BlockNumHash::new(9, rng.random());
+        let main_parent =
+            BlockNumHash::new(9, alloy_primitives::B256::from(rng.random::<[u8; 32]>()));
         let block1 = create_block(&mut rng, 10, main_parent.hash);
         let block2 = create_block(&mut rng, 11, block1.hash());
         let block3 = create_block(&mut rng, 11, block1.hash());
@@ -456,16 +459,17 @@ mod tests {
     fn remove_multi_chains() {
         let mut rng = generators::rng();
 
-        let main_parent = BlockNumHash::new(9, rng.random());
+        let main_parent =
+            BlockNumHash::new(9, alloy_primitives::B256::from(rng.random::<[u8; 32]>()));
         let block1 = create_block(&mut rng, 10, main_parent.hash);
         let block1a = create_block(&mut rng, 10, main_parent.hash);
         let block2 = create_block(&mut rng, 11, block1.hash());
         let block2a = create_block(&mut rng, 11, block1.hash());
-        let random_parent1 = rng.random();
+        let random_parent1 = alloy_primitives::B256::from(rng.random::<[u8; 32]>());
         let random_block1 = create_block(&mut rng, 10, random_parent1);
-        let random_parent2 = rng.random();
+        let random_parent2 = alloy_primitives::B256::from(rng.random::<[u8; 32]>());
         let random_block2 = create_block(&mut rng, 11, random_parent2);
-        let random_parent3 = rng.random();
+        let random_parent3 = alloy_primitives::B256::from(rng.random::<[u8; 32]>());
         let random_block3 = create_block(&mut rng, 12, random_parent3);
 
         let mut buffer = BlockBuffer::new(10);
@@ -500,11 +504,12 @@ mod tests {
     fn evict_with_gap() {
         let mut rng = generators::rng();
 
-        let main_parent = BlockNumHash::new(9, rng.random());
+        let main_parent =
+            BlockNumHash::new(9, alloy_primitives::B256::from(rng.random::<[u8; 32]>()));
         let block1 = create_block(&mut rng, 10, main_parent.hash);
         let block2 = create_block(&mut rng, 11, block1.hash());
         let block3 = create_block(&mut rng, 12, block2.hash());
-        let parent4 = rng.random();
+        let parent4 = alloy_primitives::B256::from(rng.random::<[u8; 32]>());
         let block4 = create_block(&mut rng, 13, parent4);
 
         let mut buffer = BlockBuffer::new(3);
@@ -537,11 +542,12 @@ mod tests {
     fn simple_eviction() {
         let mut rng = generators::rng();
 
-        let main_parent = BlockNumHash::new(9, rng.random());
+        let main_parent =
+            BlockNumHash::new(9, alloy_primitives::B256::from(rng.random::<[u8; 32]>()));
         let block1 = create_block(&mut rng, 10, main_parent.hash);
         let block2 = create_block(&mut rng, 11, block1.hash());
         let block3 = create_block(&mut rng, 12, block2.hash());
-        let parent4 = rng.random();
+        let parent4 = alloy_primitives::B256::from(rng.random::<[u8; 32]>());
         let block4 = create_block(&mut rng, 13, parent4);
 
         let mut buffer = BlockBuffer::new(3);
@@ -561,11 +567,12 @@ mod tests {
     fn eviction_parent_child_cleanup() {
         let mut rng = generators::rng();
 
-        let main_parent = BlockNumHash::new(9, rng.random());
+        let main_parent =
+            BlockNumHash::new(9, alloy_primitives::B256::from(rng.random::<[u8; 32]>()));
         let block1 = create_block(&mut rng, 10, main_parent.hash);
         let block2 = create_block(&mut rng, 11, block1.hash());
         // Unrelated block to trigger eviction
-        let unrelated_parent = rng.random();
+        let unrelated_parent = alloy_primitives::B256::from(rng.random::<[u8; 32]>());
         let unrelated_block = create_block(&mut rng, 12, unrelated_parent);
 
         // Capacity 2 so third insert evicts the oldest (block1)

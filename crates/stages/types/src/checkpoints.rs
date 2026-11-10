@@ -654,7 +654,7 @@ mod tests {
     use alloy_primitives::b256;
     use bytes::Buf;
     use proptest::{collection::vec, option, prelude::*};
-    use rand::Rng;
+    use rand::RngExt;
     use reth_codecs::Compact;
     use reth_trie_common::{RlpNode, TrieMask};
 
@@ -663,9 +663,9 @@ mod tests {
         let mut rng = rand::rng();
         let checkpoint = MerkleCheckpoint {
             target_block: rng.random(),
-            last_account_key: rng.random(),
+            last_account_key: B256::from(rng.random::<[u8; 32]>()),
             walker_stack: vec![StoredSubNode {
-                key: B256::random_with(&mut rng).to_vec(),
+                key: B256::from(rng.random::<[u8; 32]>()).to_vec(),
                 nibble: Some(rng.random()),
                 node: None,
             }],
@@ -683,9 +683,9 @@ mod tests {
     fn storage_root_merkle_checkpoint_roundtrip() {
         let mut rng = rand::rng();
         let checkpoint = StorageRootMerkleCheckpoint {
-            last_storage_key: rng.random(),
+            last_storage_key: B256::from(rng.random::<[u8; 32]>()),
             walker_stack: vec![StoredSubNode {
-                key: B256::random_with(&mut rng).to_vec(),
+                key: B256::from(rng.random::<[u8; 32]>()).to_vec(),
                 nibble: Some(rng.random()),
                 node: None,
             }],
@@ -728,9 +728,9 @@ mod tests {
 
         // Create a storage root checkpoint
         let storage_checkpoint = StorageRootMerkleCheckpoint {
-            last_storage_key: rng.random(),
+            last_storage_key: B256::from(rng.random::<[u8; 32]>()),
             walker_stack: vec![StoredSubNode {
-                key: B256::random_with(&mut rng).to_vec(),
+                key: B256::from(rng.random::<[u8; 32]>()).to_vec(),
                 nibble: Some(rng.random()),
                 node: None,
             }],
@@ -747,9 +747,9 @@ mod tests {
         // Create a merkle checkpoint with the storage root checkpoint
         let checkpoint = MerkleCheckpoint {
             target_block: rng.random(),
-            last_account_key: rng.random(),
+            last_account_key: B256::from(rng.random::<[u8; 32]>()),
             walker_stack: vec![StoredSubNode {
-                key: B256::random_with(&mut rng).to_vec(),
+                key: B256::from(rng.random::<[u8; 32]>()).to_vec(),
                 nibble: Some(rng.random()),
                 node: None,
             }],

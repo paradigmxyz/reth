@@ -740,7 +740,7 @@ mod tests {
     async fn can_write_and_read_ecies() {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let local_addr = listener.local_addr().unwrap();
-        let server_key = SecretKey::new(&mut rand::rng());
+        let server_key = SecretKey::from_secret_bytes(rand::random()).unwrap();
         let test_msg = EthMessage::<EthNetworkPrimitives>::NewBlockHashes(
             vec![
                 BlockHashNumber { hash: B256::random(), number: 5 },
@@ -764,7 +764,7 @@ mod tests {
         // create the server pubkey
         let server_id = pk2id(&server_key.public_key());
 
-        let client_key = SecretKey::new(&mut rand::rng());
+        let client_key = SecretKey::from_secret_bytes(rand::random()).unwrap();
 
         let outgoing = TcpStream::connect(local_addr).await.unwrap();
         let outgoing = ECIESStream::connect(outgoing, client_key, server_id).await.unwrap();
@@ -782,7 +782,7 @@ mod tests {
         // create tcpstream
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let local_addr = listener.local_addr().unwrap();
-        let server_key = SecretKey::new(&mut rand::rng());
+        let server_key = SecretKey::from_secret_bytes(rand::random()).unwrap();
         let test_msg = EthMessage::<EthNetworkPrimitives>::NewBlockHashes(
             vec![
                 BlockHashNumber { hash: B256::random(), number: 5 },
@@ -836,7 +836,7 @@ mod tests {
         // create the server pubkey
         let server_id = pk2id(&server_key.public_key());
 
-        let client_key = SecretKey::new(&mut rand::rng());
+        let client_key = SecretKey::from_secret_bytes(rand::random()).unwrap();
 
         let outgoing = TcpStream::connect(local_addr).await.unwrap();
         let sink = ECIESStream::connect(outgoing, client_key, server_id).await.unwrap();

@@ -15,7 +15,7 @@ use alloy_rlp::{Encodable, Rlp, RlpEncodable, RlpMaxEncodedLen};
 use byteorder::{BigEndian, ByteOrder, ReadBytesExt};
 use ctr::Ctr64BE;
 use digest::crypto_common::KeyIvInit;
-use rand::{rng, Rng};
+use rand::{rng, RngExt};
 use reth_network_peers::{id2pk, pk2id};
 use secp256k1::{
     ecdsa::{RecoverableSignature, RecoveryId},
@@ -47,6 +47,15 @@ fn ecdh_x(public_key: &PublicKey, secret_key: &SecretKey) -> B256 {
 ///   cannot have a len greater than 32 * 2^32 - 1.
 fn kdf(secret: B256, s1: &[u8], dest: &mut [u8]) {
     concat_kdf::derive_key_into::<Sha256>(secret.as_slice(), s1, dest).unwrap();
+}
+
+/// Generates a random [`SecretKey`] from the given rng, retrying on invalid scalars.
+fn random_secret_key(rng: &mut impl RngExt) -> SecretKey {
+    loop {
+        if let Ok(key) = SecretKey::from_secret_bytes(rng.random()) {
+            return key
+        }
+    }
 }
 
 pub struct ECIES {
@@ -313,7 +322,7 @@ impl ECIES {
     pub fn new_client(secret_key: SecretKey, remote_id: PeerId) -> Result<Self, ECIESError> {
         let mut rng = rng();
         let nonce = B256::random();
-        let ephemeral_secret_key = SecretKey::new(&mut rng);
+        let ephemeral_secret_key = random_secret_key(&mut rng);
         Self::new_static_client(secret_key, remote_id, nonce, ephemeral_secret_key)
     }
 
@@ -355,7 +364,7 @@ impl ECIES {
     pub fn new_server(secret_key: SecretKey) -> Result<Self, ECIESError> {
         let mut rng = rng();
         let nonce = B256::random();
-        let ephemeral_secret_key = SecretKey::new(&mut rng);
+        let ephemeral_secret_key = random_secret_key(&mut rng);
         Self::new_static_server(secret_key, nonce, ephemeral_secret_key)
     }
 
@@ -369,7 +378,7 @@ impl ECIES {
 
         out.reserve(secp256k1::constants::UNCOMPRESSED_PUBLIC_KEY_SIZE + 16 + data.len() + 32);
 
-        let secret_key = SecretKey::new(&mut rng);
+        let secret_key = random_secret_key(&mut rng);
         out.extend_from_slice(&PublicKey::from_secret_key(&secret_key).serialize_uncompressed());
 
         let x = ecdh_x(&self.remote_public_key.unwrap(), &secret_key);
@@ -757,9 +766,9 @@ mod tests {
     #[test]
     fn communicate() {
         let mut rng = rng();
-        let server_secret_key = SecretKey::new(&mut rng);
+        let server_secret_key = SecretKey::from_secret_bytes(rng.random()).unwrap();
         let server_public_key = PublicKey::from_secret_key(&server_secret_key);
-        let client_secret_key = SecretKey::new(&mut rng);
+        let client_secret_key = SecretKey::from_secret_bytes(rng.random()).unwrap();
 
         let mut server_ecies = ECIES::new_server(server_secret_key).unwrap();
         let mut client_ecies =

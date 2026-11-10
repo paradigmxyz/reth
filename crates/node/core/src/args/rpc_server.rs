@@ -11,7 +11,7 @@ use clap::{
     parser::ValueSource,
     Arg, Args, Command,
 };
-use rand::Rng;
+use rand::RngExt;
 use reth_cli_util::{
     parse_duration_from_secs_or_ms, parse_ether_value, parsers::format_duration_as_secs_or_ms,
 };

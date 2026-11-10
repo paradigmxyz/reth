@@ -20,7 +20,7 @@ alloy-eips.workspace = true
 
 # misc
 eyre.workspace = true
-secp256k1 = { workspace = true, features = ["rand"] }
+secp256k1.workspace = true
 rand.workspace = true
 thiserror.workspace = true
 serde.workspace = true

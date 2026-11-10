@@ -1395,7 +1395,7 @@ mod tests {
             let fork_filter = self.fork_filter.clone();
             let local_peer_id = self.local_peer_id;
             let mut hello = self.hello.clone();
-            let key = SecretKey::new(&mut rand::rng());
+            let key = SecretKey::from_secret_bytes(rand::random()).unwrap();
             hello.id = pk2id(&key.public_key());
             Box::pin(async move {
                 let outgoing = TcpStream::connect(local_addr).await.unwrap();
@@ -1504,7 +1504,9 @@ mod tests {
         fn default() -> Self {
             let (active_session_tx, active_session_rx) = mpsc::channel(100);
 
-            let (secret_key, pk) = secp256k1::generate_keypair(&mut rand::rng());
+            let secret_key = secp256k1::SecretKey::from_secret_bytes(rand::random()).unwrap();
+
+            let pk = secret_key.public_key();
             let local_peer_id = pk2id(&pk);
 
             Self {

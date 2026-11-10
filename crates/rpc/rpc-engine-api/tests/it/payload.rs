@@ -11,7 +11,7 @@ use assert_matches::assert_matches;
 use reth_ethereum_primitives::{Block, TransactionSigned};
 use reth_primitives_traits::{proofs, SealedBlock};
 use reth_testing_utils::generators::{
-    self, random_block, random_block_range, BlockParams, BlockRangeParams, Rng,
+    self, random_block, random_block_range, BlockParams, BlockRangeParams, RngExt,
 };
 
 fn transform_block<F: FnOnce(Block) -> Block>(src: SealedBlock<Block>, f: F) -> ExecutionPayload {
@@ -52,7 +52,7 @@ fn payload_body_roundtrip() {
 #[test]
 fn payload_validation_conversion() {
     let mut rng = generators::rng();
-    let parent = rng.random();
+    let parent = alloy_primitives::B256::from(rng.random::<[u8; 32]>());
     let block = random_block(
         &mut rng,
         100,

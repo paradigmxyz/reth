@@ -145,7 +145,7 @@ impl_fixed_arbitrary!((BlockNumberAddress, 28), (AddressStorageKey, 52));
 mod tests {
     use super::*;
     use alloy_primitives::address;
-    use rand::{rng, Rng};
+    use rand::{rng, RngExt};
 
     #[test]
     fn test_block_number_address() {

@@ -29,7 +29,7 @@ tokio = { workspace = true, optional = true }
 [dev-dependencies]
 alloy-primitives = { workspace = true, features = ["rand"] }
 rand.workspace = true
-secp256k1 = { workspace = true, features = ["rand"] }
+secp256k1.workspace = true
 serde_json.workspace = true
 enr.workspace = true
 tokio = { workspace = true, features = ["net", "macros", "rt"] }

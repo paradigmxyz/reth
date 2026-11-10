@@ -512,7 +512,7 @@ nybbles = { version = "0.4.8", default-features = false }
 once_cell = { version = "1.19", default-features = false, features = ["critical-section"] }
 parking_lot = "0.12"
 paste = "1.0"
-rand = "0.9"
+rand = "0.10"
 rayon = "1.7"
 thread-priority = "3.0.0"
 rustc-hash = { version = "2.0", default-features = false }
@@ -679,8 +679,8 @@ evm2-jit = { git = "https://github.com/DaniPopes/evm2", rev = "66687c18b34d3bdbb
 
 [patch.crates-io]
 # reth-core
-reth-codecs = { git = "https://github.com/paradigmxyz/reth-core", rev = "275ce4cf5befeb9f1e8acd935ff2882d2d25fc61" }
-reth-codecs-derive = { git = "https://github.com/paradigmxyz/reth-core", rev = "275ce4cf5befeb9f1e8acd935ff2882d2d25fc61" }
-reth-primitives-traits = { git = "https://github.com/paradigmxyz/reth-core", rev = "275ce4cf5befeb9f1e8acd935ff2882d2d25fc61" }
-reth-rpc-traits = { git = "https://github.com/paradigmxyz/reth-core", rev = "275ce4cf5befeb9f1e8acd935ff2882d2d25fc61" }
-reth-zstd-compressors = { git = "https://github.com/paradigmxyz/reth-core", rev = "275ce4cf5befeb9f1e8acd935ff2882d2d25fc61" }
+reth-codecs = { git = "https://github.com/paradigmxyz/reth-core", rev = "5a0f687949d8befda3b46c8d7581e9921ad071aa" }
+reth-codecs-derive = { git = "https://github.com/paradigmxyz/reth-core", rev = "5a0f687949d8befda3b46c8d7581e9921ad071aa" }
+reth-primitives-traits = { git = "https://github.com/paradigmxyz/reth-core", rev = "5a0f687949d8befda3b46c8d7581e9921ad071aa" }
+reth-rpc-traits = { git = "https://github.com/paradigmxyz/reth-core", rev = "5a0f687949d8befda3b46c8d7581e9921ad071aa" }
+reth-zstd-compressors = { git = "https://github.com/paradigmxyz/reth-core", rev = "5a0f687949d8befda3b46c8d7581e9921ad071aa" }

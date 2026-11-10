@@ -4,7 +4,7 @@
 use alloy_consensus::{Header, Sealed};
 use alloy_eips::NumHash;
 use alloy_primitives::{BlockHash, BlockNumber, Bytes, B256};
-use rand::Rng;
+use rand::RngExt;
 use reth_eth_wire::{BlockAccessLists, EthVersion, GetBlockAccessLists, GetReceipts};
 use reth_ethereum_primitives::{Block, Receipt};
 use reth_network::{
@@ -98,12 +98,12 @@ async fn test_get_header(version: Option<EthVersion>) {
     let mut rng = rand::rng();
 
     let start: u64 = rng.random();
-    let mut hash = rng.random();
+    let mut hash = B256::from(rng.random::<[u8; 32]>());
     // request some headers
     for idx in 0..100 {
         // Set a new random header to the mock storage and request it via the network
         let header = Header { number: start + idx, parent_hash: hash, ..Default::default() };
-        hash = rng.random();
+        hash = B256::from(rng.random::<[u8; 32]>());
 
         provider.add_header(hash, header.clone());
 
@@ -374,11 +374,11 @@ fn bal_provider(bal_store: impl BalStore) -> MockEthProvider {
 fn add_header_chain(provider: &MockEthProvider) -> (u64, Vec<Sealed<Header>>) {
     let mut rng = rand::rng();
     let start: u64 = rng.random();
-    let mut hash = rng.random();
+    let mut hash = B256::from(rng.random::<[u8; 32]>());
     let headers = (0..100)
         .map(|idx| {
             let header = Header { number: start + idx, parent_hash: hash, ..Default::default() };
-            hash = rng.random();
+            hash = B256::from(rng.random::<[u8; 32]>());
             provider.add_header(hash, header.clone());
             header.seal(hash)
         })

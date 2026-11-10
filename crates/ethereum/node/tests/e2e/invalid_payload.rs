@@ -7,7 +7,7 @@ use alloy_consensus::proofs::calculate_transaction_root;
 use alloy_eips::{eip2718::Decodable2718, eip7685::RequestsOrHash};
 use alloy_primitives::{bytes, keccak256, Bytes, B256};
 use alloy_rpc_types_engine::{ExecutionPayloadV1, ExecutionPayloadV3, PayloadStatusEnum};
-use rand::{rngs::StdRng, Rng, SeedableRng};
+use rand::{rngs::StdRng, RngExt, SeedableRng};
 use reth_chainspec::EthereumHardfork;
 use reth_e2e_test_utils::{transaction::TransactionTestContext, E2ETestSetupExt};
 use reth_ethereum_engine_primitives::EthBuiltPayload;
@@ -56,7 +56,7 @@ async fn can_handle_invalid_payload_then_valid() -> eyre::Result<()> {
         &valid_block.clone().into_block(),
     );
     let original_state_root = invalid_payload.payload_inner.payload_inner.state_root;
-    invalid_payload.payload_inner.payload_inner.state_root = B256::random_with(&mut rng);
+    invalid_payload.payload_inner.payload_inner.state_root = B256::from(rng.random::<[u8; 32]>());
 
     // Send the invalid payload to the receiver - should be rejected
     let invalid_result = EngineApiClient::<reth_node_ethereum::EthEngineTypes>::new_payload_v3(
@@ -159,7 +159,8 @@ async fn can_handle_multiple_invalid_payloads() -> eyre::Result<()> {
             valid_block.hash(),
             &valid_block.clone().into_block(),
         );
-        invalid_payload.payload_inner.payload_inner.state_root = B256::random_with(&mut rng);
+        invalid_payload.payload_inner.payload_inner.state_root =
+            B256::from(rng.random::<[u8; 32]>());
 
         let result = EngineApiClient::<reth_node_ethereum::EthEngineTypes>::new_payload_v3(
             &receiver_engine,
@@ -251,7 +252,7 @@ async fn can_handle_invalid_payload_with_transactions() -> eyre::Result<()> {
         &valid_block.clone().into_block(),
     );
     let original_state_root = invalid_payload.payload_inner.payload_inner.state_root;
-    invalid_payload.payload_inner.payload_inner.state_root = B256::random_with(&mut rng);
+    invalid_payload.payload_inner.payload_inner.state_root = B256::from(rng.random::<[u8; 32]>());
 
     // Send invalid payload - should be rejected
     let invalid_result = EngineApiClient::<reth_node_ethereum::EthEngineTypes>::new_payload_v3(

@@ -1410,7 +1410,7 @@ mod tests {
     use alloy_consensus::TxLegacy;
     use alloy_network::Ethereum;
     use alloy_primitives::{Bloom, FixedBytes};
-    use rand::Rng;
+    use rand::RngExt;
     use reth_chainspec::{ChainSpec, ChainSpecProvider};
     use reth_db_api::models::StoredBlockBodyIndices;
     use reth_ethereum_primitives::TxType;

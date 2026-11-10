@@ -5,11 +5,11 @@ use example_bsc_p2p::{
 use reth_chainspec::NamedChain;
 use reth_discv4::Discv4ConfigBuilder;
 use reth_network::{
-    EthNetworkPrimitives, NetworkConfig, NetworkEvent, NetworkEventListenerProvider, NetworkManager,
+    config::rng_secret_key, EthNetworkPrimitives, NetworkConfig, NetworkEvent,
+    NetworkEventListenerProvider, NetworkManager,
 };
 use reth_provider::noop::NoopProvider;
 use reth_tasks::Runtime;
-use secp256k1::{rand, SecretKey};
 use std::{
     net::{Ipv4Addr, SocketAddr},
     sync::Arc,
@@ -24,7 +24,7 @@ async fn can_connect() {
     reth_tracing::init_test_tracing();
     let local_addr = SocketAddr::new(Ipv4Addr::UNSPECIFIED.into(), 30303);
 
-    let secret_key = SecretKey::new(&mut rand::rng());
+    let secret_key = rng_secret_key();
 
     let net_cfg = NetworkConfig::<_, EthNetworkPrimitives>::builder(secret_key, Runtime::test())
         .boot_nodes(boot_nodes())

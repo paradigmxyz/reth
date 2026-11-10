@@ -1,15 +1,14 @@
 //! Helps create a custom genesis alloc by making it easy to add funded accounts with known
 //! signers to the genesis block.
 
+use crate::generators::random_keypair;
 use alloy_genesis::GenesisAccount;
 use alloy_primitives::{
     map::{AddressMap, Entry},
     Address, Bytes, B256, U256,
 };
-use secp256k1::{
-    rand::{rng, RngCore},
-    Keypair,
-};
+use rand::{rng, Rng};
+use secp256k1::Keypair;
 use std::{collections::BTreeMap, fmt};
 
 /// This helps create a custom genesis alloc by making it easy to add funded accounts with known
@@ -44,14 +43,14 @@ pub struct GenesisAllocator<'a> {
     /// The genesis alloc to be built.
     alloc: AddressMap<GenesisAccount>,
     /// The rng to use for generating key pairs.
-    rng: Box<dyn RngCore + 'a>,
+    rng: Box<dyn Rng + 'a>,
 }
 
 impl<'a> GenesisAllocator<'a> {
     /// Initialize a new alloc builder with the provided rng.
     pub fn new_with_rng<R>(rng: &'a mut R) -> Self
     where
-        R: RngCore,
+        R: Rng,
     {
         Self { alloc: AddressMap::default(), rng: Box::new(rng) }
     }
@@ -59,7 +58,7 @@ impl<'a> GenesisAllocator<'a> {
     /// Use the provided rng for generating key pairs.
     pub fn with_rng<R>(mut self, rng: &'a mut R) -> Self
     where
-        R: RngCore + std::fmt::Debug,
+        R: Rng + std::fmt::Debug,
     {
         self.rng = Box::new(rng);
         self
@@ -69,7 +68,7 @@ impl<'a> GenesisAllocator<'a> {
     ///
     /// Returns the key pair for the account and the account's address.
     pub fn new_funded_account(&mut self, balance: U256) -> (Keypair, Address) {
-        let pair = Keypair::new(&mut self.rng);
+        let pair = random_keypair(&mut *self.rng);
         let address =
             Address::from_raw_public_key(&pair.public_key().serialize_uncompressed()[1..]);
 
@@ -86,7 +85,7 @@ impl<'a> GenesisAllocator<'a> {
         balance: U256,
         code: Bytes,
     ) -> (Keypair, Address) {
-        let pair = Keypair::new(&mut self.rng);
+        let pair = random_keypair(&mut *self.rng);
         let address =
             Address::from_raw_public_key(&pair.public_key().serialize_uncompressed()[1..]);
 
@@ -104,7 +103,7 @@ impl<'a> GenesisAllocator<'a> {
         balance: U256,
         storage: BTreeMap<B256, B256>,
     ) -> (Keypair, Address) {
-        let pair = Keypair::new(&mut self.rng);
+        let pair = random_keypair(&mut *self.rng);
         let address =
             Address::from_raw_public_key(&pair.public_key().serialize_uncompressed()[1..]);
 
@@ -124,7 +123,7 @@ impl<'a> GenesisAllocator<'a> {
         code: Bytes,
         storage: BTreeMap<B256, B256>,
     ) -> (Keypair, Address) {
-        let pair = Keypair::new(&mut self.rng);
+        let pair = random_keypair(&mut *self.rng);
         let address =
             Address::from_raw_public_key(&pair.public_key().serialize_uncompressed()[1..]);
 
@@ -140,7 +139,7 @@ impl<'a> GenesisAllocator<'a> {
     ///
     /// Returns the key pair for the account and the account's address.
     pub fn new_account_with_code(&mut self, code: Bytes) -> (Keypair, Address) {
-        let pair = Keypair::new(&mut self.rng);
+        let pair = random_keypair(&mut *self.rng);
         let address =
             Address::from_raw_public_key(&pair.public_key().serialize_uncompressed()[1..]);
 
@@ -161,7 +160,7 @@ impl<'a> GenesisAllocator<'a> {
     ///
     /// Returns the key pair for the account and the account's address.
     pub fn add_account(&mut self, account: GenesisAccount) -> Address {
-        let pair = Keypair::new(&mut self.rng);
+        let pair = random_keypair(&mut *self.rng);
         let address =
             Address::from_raw_public_key(&pair.public_key().serialize_uncompressed()[1..]);
 

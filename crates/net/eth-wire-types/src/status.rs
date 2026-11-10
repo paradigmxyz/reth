@@ -469,7 +469,7 @@ mod tests {
     use alloy_hardforks::{EthereumHardfork, ForkHash, ForkId, Head};
     use alloy_primitives::{b256, hex, U256};
     use alloy_rlp::{Decodable, Encodable};
-    use rand::Rng;
+    use rand::RngExt;
     use reth_chainspec::{Chain, ChainSpec, ForkCondition};
     use std::str::FromStr;
 
@@ -716,7 +716,7 @@ mod tests {
     #[test]
     fn init_custom_status_fields() {
         let mut rng = rand::rng();
-        let head_hash = rng.random();
+        let head_hash = alloy_primitives::B256::from(rng.random::<[u8; 32]>());
         let total_difficulty = U256::from(rng.random::<u64>());
 
         // create a genesis that has a random part, so we can check that the hash is preserved
