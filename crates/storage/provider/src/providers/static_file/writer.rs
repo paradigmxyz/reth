@@ -735,9 +735,9 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
         //
         // However if there's no block range (because there's no data), we try to calculate it by
         // subtracting 1 from the expected block start, resulting on the last block of the
-        // previous file — but only if that file actually exists. If the previous file doesn't
-        // exist (e.g. first-ever file for a segment starting past range boundary), there's
-        // nothing to index.
+        // previous file — but only if that file exists and has its config, i.e. it was fully
+        // initialized. If the previous file doesn't exist (e.g. first-ever file for a segment
+        // starting past range boundary) or its creation was interrupted, there's nothing to index.
         let segment_max_block = self
             .writer
             .user_header()
