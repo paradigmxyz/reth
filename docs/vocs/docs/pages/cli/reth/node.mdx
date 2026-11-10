@@ -731,6 +731,11 @@ TxPool:
 
           [default: 1]
 
+      --txpool.max-verify-gas <MAX_VERIFY_GAS>
+          Max execution gas of an EIP-8141 validation prefix in the public pool. Values below the spec cap are raised to it
+
+          [default: 100000]
+
 Builder:
       --builder.extradata <EXTRA_DATA>
           Block extra data set by the payload builder.
