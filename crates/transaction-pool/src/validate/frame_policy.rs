@@ -336,7 +336,7 @@ mod tests {
         )
         .is_ok());
         let mut t = tx(vec![frame(FrameMode::Verify, 3, s)]);
-        t.frames[0].limits.execution = 99_999;
+        t.frames[0].limits.execution = MAX_VERIFY_GAS - 1;
         assert!(FrameValidationPolicy::new(&t, 2).is_err());
         t.frames[0].limits.execution = u64::MAX;
         assert!(FrameValidationPolicy::new(&t, 0).is_err());
