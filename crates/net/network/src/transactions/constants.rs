@@ -46,8 +46,8 @@ pub mod tx_manager {
     /// Default maximum encoded byte size of pending pool imports to tolerate, including blob
     /// sidecars.
     ///
-    /// Default is 64 MiB, which holds about 80 transactions carrying six blobs each.
-    pub const DEFAULT_MAX_BYTE_SIZE_PENDING_POOL_IMPORTS: usize = 64 * 1024 * 1024;
+    /// Default is 256 MiB, which holds about 320 transactions carrying six blobs each.
+    pub const DEFAULT_MAX_BYTE_SIZE_PENDING_POOL_IMPORTS: usize = 256 * 1024 * 1024;
 
     /// Default limit for number of bad imports to keep track of.
     ///
