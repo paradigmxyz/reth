@@ -159,7 +159,7 @@ impl<N: ProviderNodeTypes> BlockchainProvider<N> {
     ) -> ProviderResult<StateProviderBox> {
         let state_provider_factory = OverlayStateProviderFactory::new(
             self.database.clone(),
-            self.database.overlay_manager().overlay_builder_for_state(state),
+            self.database.overlay_manager().view().overlay_builder_for_state(state),
         );
         Ok(Box::new(state_provider_factory.database_provider_ro()?))
     }
@@ -170,7 +170,7 @@ impl<N: ProviderNodeTypes> BlockchainProvider<N> {
         provider: StateRangeDbProvider<N>,
         block_hash: B256,
     ) -> StateProviderBox {
-        let overlay_builder = provider.overlay_manager().overlay_builder(block_hash);
+        let overlay_builder = provider.overlay_view().overlay_builder(block_hash);
         Box::new(OverlayStateProvider::new(provider, overlay_builder))
     }
 
@@ -206,16 +206,16 @@ impl<N: ProviderNodeTypes> BlockchainProvider<N> {
             return Ok(None)
         }
 
-        let overlay_manager = self.database.overlay_manager();
+        let overlay_view = provider.overlay_view().clone();
         let overlay_builder = match block_state {
-            Some(state) => overlay_manager.overlay_builder_for_state(state),
+            Some(state) => overlay_view.overlay_builder_for_state(state),
             None => {
                 let Some(block_hash) =
                     retained_block_hash::<N>(&provider, finish.block_number, state_root)?
                 else {
                     return Ok(None)
                 };
-                overlay_manager.overlay_builder(block_hash)
+                overlay_view.overlay_builder(block_hash)
             }
         };
 
@@ -780,7 +780,11 @@ impl<N: ProviderNodeTypes> StateProviderFactory for BlockchainProvider<N> {
     ) -> ProviderResult<StateProviderBox> {
         let state_provider_factory = OverlayStateProviderFactory::new(
             self.database.clone(),
-            self.database.overlay_manager().overlay_builder(parent_hash).with_appended_block(block),
+            self.database
+                .overlay_manager()
+                .view()
+                .overlay_builder(parent_hash)
+                .with_appended_block(block),
         );
         Ok(Box::new(state_provider_factory.database_provider_ro()?))
     }
@@ -1056,7 +1060,7 @@ impl<N: ProviderNodeTypes> StateReader for BlockchainProvider<N> {
         let Some(block_hash) = provider.block_hash(block)? else { return Ok(None) };
         let state_provider = OverlayStateProvider::<&_, N::Primitives>::new_ref(
             &provider,
-            provider.overlay_manager().overlay_builder(block_hash),
+            provider.overlay_view().overlay_builder(block_hash),
         );
         let (state, reverts) = provider.populate_bundle_state(
             account_changeset,
@@ -3531,7 +3535,7 @@ mod tests {
         // the same in-memory account and storage values.
         let rebuilt_from_hash = OverlayStateProviderFactory::new(
             provider.database.clone(),
-            provider.database.overlay_manager().overlay_builder(block_hash),
+            provider.database.overlay_manager().view().overlay_builder(block_hash),
         )
         .database_provider_ro()?;
 

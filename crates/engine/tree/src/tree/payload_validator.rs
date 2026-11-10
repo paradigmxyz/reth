@@ -1445,7 +1445,7 @@ where
 
         Ok(Some(OverlayStateProviderFactory::new(
             self.provider.clone(),
-            state.tree_state.overlay_manager.overlay_builder(hash),
+            state.tree_state.overlay_manager.view().overlay_builder(hash),
         )))
     }
 

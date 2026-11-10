@@ -1062,7 +1062,7 @@ mod tests {
             saved_cache: None,
             provider: OverlayStateProviderFactory::new(
                 MockEthProvider::default(),
-                OverlayManager::default().overlay_builder(B256::ZERO),
+                OverlayManager::default().view().overlay_builder(B256::ZERO),
             ),
             bal_prewarm_pool: None,
             metrics: PrewarmMetrics::default(),
@@ -1125,7 +1125,7 @@ mod tests {
                 saved_cache: None,
                 provider: OverlayStateProviderFactory::new(
                     provider.clone(),
-                    OverlayManager::default().overlay_builder(B256::ZERO),
+                    OverlayManager::default().view().overlay_builder(B256::ZERO),
                 ),
                 bal_prewarm_pool: None,
                 metrics: PrewarmMetrics::default(),
@@ -1167,7 +1167,7 @@ mod tests {
         provider.add_stage_checkpoint(StageId::Finish, StageCheckpoint::new(0));
         ctx.provider = OverlayStateProviderFactory::new(
             provider,
-            OverlayManager::default().overlay_builder(B256::ZERO),
+            OverlayManager::default().view().overlay_builder(B256::ZERO),
         );
         assert!(ctx.evm_for_ctx().evm.is_some());
         let tx = Recovered::new_unchecked(
@@ -1214,7 +1214,7 @@ mod tests {
             saved_cache: Some(saved_cache),
             provider: OverlayStateProviderFactory::new(
                 MockEthProvider::default(),
-                OverlayManager::default().overlay_builder(B256::ZERO),
+                OverlayManager::default().view().overlay_builder(B256::ZERO),
             ),
             bal_prewarm_pool: None,
             metrics: PrewarmMetrics {

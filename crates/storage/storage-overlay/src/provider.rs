@@ -80,7 +80,7 @@ pub struct OverlayStateProviderFactory<F, N: NodePrimitives = EthPrimitives> {
 impl<F, N: NodePrimitives> OverlayStateProviderFactory<F, N> {
     /// Create a new overlay state provider factory.
     pub fn new(factory: F, overlay_builder: OverlayBuilder<N>) -> Self {
-        let manager = overlay_builder.overlay_manager();
+        let manager = overlay_builder.overlay_view().manager();
         Self {
             factory,
             metrics: manager.provider_metrics().clone(),
@@ -136,9 +136,9 @@ where
     ) -> ProviderResult<OverlayStateProvider<OwnedProvider<F::Provider>, N>> {
         let overall_start = Instant::now();
 
-        // The builder outlives this provider, so snapshot its block graph before the transaction
-        // opens. See [`OverlayManager::snapshot`](crate::OverlayManager::snapshot).
-        let overlay_builder = self.overlay_builder.with_manager_snapshot();
+        // The builder outlives this provider, so refresh its view of the block graph before the
+        // transaction opens. See [`OverlayManager::view`](crate::OverlayManager::view).
+        let overlay_builder = self.overlay_builder.with_refreshed_view();
 
         // Get a read-only provider
         let provider = {
@@ -196,7 +196,7 @@ impl<Provider: DBProvider, N: NodePrimitives> OverlayStateProvider<OwnedProvider
         Provider: StorageSettingsCache,
     {
         let is_v2 = provider.cached_storage_settings().is_v2();
-        let manager = overlay_builder.overlay_manager();
+        let manager = overlay_builder.overlay_view().manager();
         let metrics = manager.provider_metrics().clone();
         let proof_cursor_metrics = manager.proof_cursor_metrics().clone();
         Self::from_parts(
@@ -240,7 +240,7 @@ impl<'a, Provider: DBProvider, N: NodePrimitives> OverlayStateProvider<&'a Provi
         Provider: StorageSettingsCache,
     {
         let is_v2 = provider.cached_storage_settings().is_v2();
-        let manager = overlay_builder.overlay_manager();
+        let manager = overlay_builder.overlay_view().manager();
         let metrics = manager.provider_metrics().clone();
         let proof_cursor_metrics = manager.proof_cursor_metrics().clone();
         Self::from_parts(
@@ -1240,7 +1240,7 @@ mod tests {
         }
         let state_provider_factory = OverlayStateProviderFactory::new(
             factory.clone(),
-            manager.overlay_builder(blocks[3].recovered_block().hash()),
+            manager.view().overlay_builder(blocks[3].recovered_block().hash()),
         );
 
         let provider = state_provider_factory.database_provider_ro().unwrap();
@@ -1275,7 +1275,7 @@ mod tests {
         }
         let state_provider_factory = OverlayStateProviderFactory::new(
             factory,
-            manager.overlay_builder(blocks[3].recovered_block().hash()),
+            manager.view().overlay_builder(blocks[3].recovered_block().hash()),
         );
 
         let provider = state_provider_factory.database_provider_ro().unwrap();
@@ -1302,7 +1302,7 @@ mod tests {
         }
         let state_provider_factory = OverlayStateProviderFactory::new(
             factory,
-            manager.overlay_builder(blocks[3].recovered_block().hash()),
+            manager.view().overlay_builder(blocks[3].recovered_block().hash()),
         );
         let provider = state_provider_factory.database_provider_ro().unwrap();
 
@@ -1335,7 +1335,7 @@ mod tests {
         }
         let state_provider_factory = OverlayStateProviderFactory::new(
             factory,
-            manager.overlay_builder(blocks[3].recovered_block().hash()),
+            manager.view().overlay_builder(blocks[3].recovered_block().hash()),
         );
         let provider = state_provider_factory.database_provider_ro().unwrap();
 
@@ -1362,10 +1362,12 @@ mod tests {
             manager.insert_block(block.clone());
         }
         let parent_hash = blocks[1].recovered_block().hash();
-        let provider =
-            OverlayStateProviderFactory::new(factory.clone(), manager.overlay_builder(parent_hash))
-                .database_provider_ro()
-                .unwrap();
+        let provider = OverlayStateProviderFactory::new(
+            factory.clone(),
+            manager.view().overlay_builder(parent_hash),
+        )
+        .database_provider_ro()
+        .unwrap();
 
         // Persistence commits and the engine removes the chain while the provider is open.
         manager.remove_blocks(blocks[2..=3].iter().map(|block| block.recovered_block().hash()));
@@ -1373,12 +1375,31 @@ mod tests {
         provider.state_trie_overlay(false).unwrap();
 
         // A provider opened after the removal no longer finds the chain.
-        let err = OverlayStateProviderFactory::new(factory, manager.overlay_builder(parent_hash))
-            .database_provider_ro()
-            .unwrap()
-            .state_trie_overlay(false)
-            .unwrap_err();
+        let err =
+            OverlayStateProviderFactory::new(factory, manager.view().overlay_builder(parent_hash))
+                .database_provider_ro()
+                .unwrap()
+                .state_trie_overlay(false)
+                .unwrap_err();
         assert!(err.to_string().contains("cannot be anchored"), "unexpected error: {err}");
+    }
+
+    #[test]
+    fn factory_refreshes_view_for_each_provider() {
+        // The factory's builder is taken before the engine inserts the chain from Finish down to
+        // the state trie tip, which a provider opened afterwards needs.
+        let (factory, blocks) = setup_frontiers(1, 3);
+        let manager = OverlayManager::default();
+        let state_provider_factory = OverlayStateProviderFactory::new(
+            factory,
+            manager.view().overlay_builder(blocks[1].recovered_block().hash()),
+        );
+        for block in &blocks[2..=3] {
+            manager.insert_block(block.clone());
+        }
+
+        let provider = state_provider_factory.database_provider_ro().unwrap();
+        provider.state_trie_overlay(false).unwrap();
     }
 
     #[test]
@@ -1389,6 +1410,7 @@ mod tests {
         let state_provider_factory = OverlayStateProviderFactory::new(
             factory,
             manager
+                .view()
                 .overlay_builder(blocks[4].recovered_block().hash())
                 .with_skip_overlay_for_reused_sparse_trie(blocks[3].recovered_block().hash()),
         );
@@ -1498,7 +1520,7 @@ mod tests {
 
         let state_provider_factory = OverlayStateProviderFactory::<_, EthPrimitives>::new(
             factory,
-            OverlayManager::default().overlay_builder(blocks[1].recovered_block().hash()),
+            OverlayManager::default().view().overlay_builder(blocks[1].recovered_block().hash()),
         );
         let provider = state_provider_factory.database_provider_ro().unwrap();
 

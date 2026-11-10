@@ -1676,6 +1676,7 @@ mod tests {
         let state_provider_factory = OverlayStateProviderFactory::new(
             provider_factory,
             OverlayManager::<reth_chain_state::EthPrimitives>::default()
+                .view()
                 .overlay_builder(anchor_hash),
         );
         let proof_worker_handle = ProofWorkerHandle::new(
@@ -2259,6 +2260,7 @@ mod tests {
         let state_provider_factory = OverlayStateProviderFactory::new(
             provider_factory,
             OverlayManager::<reth_chain_state::EthPrimitives>::default()
+                .view()
                 .overlay_builder(anchor_hash),
         );
         let proof_worker_handle = ProofWorkerHandle::new(
@@ -2340,6 +2342,7 @@ mod tests {
         let state_provider_factory = OverlayStateProviderFactory::new(
             provider_factory,
             OverlayManager::<reth_chain_state::EthPrimitives>::default()
+                .view()
                 .overlay_builder(anchor_hash),
         );
         let proof_worker_handle = ProofWorkerHandle::new(
@@ -2392,6 +2395,7 @@ mod tests {
         let state_provider_factory = OverlayStateProviderFactory::new(
             provider_factory,
             OverlayManager::<reth_chain_state::EthPrimitives>::default()
+                .view()
                 .overlay_builder(anchor_hash),
         );
         let proof_worker_handle = ProofWorkerHandle::new(
@@ -2476,6 +2480,7 @@ mod tests {
         let state_provider_factory = OverlayStateProviderFactory::new(
             provider_factory,
             OverlayManager::<reth_chain_state::EthPrimitives>::default()
+                .view()
                 .overlay_builder(anchor_hash),
         );
         let proof_worker_handle = ProofWorkerHandle::new(

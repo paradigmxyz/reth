@@ -428,7 +428,9 @@ mod tests {
                 evm_env,
                 state_provider_factory: OverlayStateProviderFactory::new(
                     provider,
-                    reth_storage_overlay::OverlayManager::default().overlay_builder(parent_hash),
+                    reth_storage_overlay::OverlayManager::default()
+                        .view()
+                        .overlay_builder(parent_hash),
                 ),
                 results,
             };

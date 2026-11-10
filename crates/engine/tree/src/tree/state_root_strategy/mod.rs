@@ -1373,7 +1373,7 @@ mod tests {
                     ),
                     state_provider_factory: OverlayStateProviderFactory::new(
                         provider.clone(),
-                        overlay_manager.overlay_builder(genesis_hash),
+                        overlay_manager.view().overlay_builder(genesis_hash),
                     ),
                     executor: runtime.clone(),
                     timeout,
@@ -1417,7 +1417,9 @@ mod tests {
                     &runtime,
                     OverlayStateProviderFactory::new(
                         factory,
-                        OverlayManager::<EthPrimitives>::default().overlay_builder(genesis_hash),
+                        OverlayManager::<EthPrimitives>::default()
+                            .view()
+                            .overlay_builder(genesis_hash),
                     ),
                     StateRootTaskOptions::<EthPrimitives> {
                         parent_header: SealedHeader::new(Default::default(), genesis_hash),
@@ -1464,7 +1466,7 @@ mod tests {
             &runtime,
             OverlayStateProviderFactory::new(
                 factory,
-                OverlayManager::<EthPrimitives>::default().overlay_builder(genesis_hash),
+                OverlayManager::<EthPrimitives>::default().view().overlay_builder(genesis_hash),
             ),
             StateRootTaskOptions::<EthPrimitives> {
                 parent_header: SealedHeader::new(Default::default(), genesis_hash),
@@ -1703,7 +1705,7 @@ mod tests {
                     &mut state,
                     OverlayStateProviderFactory::new(
                         provider_factory.clone(),
-                        overlay_manager.overlay_builder(genesis_hash),
+                        overlay_manager.view().overlay_builder(genesis_hash),
                     ),
                     &config,
                 ),

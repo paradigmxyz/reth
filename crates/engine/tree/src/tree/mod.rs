@@ -2415,6 +2415,7 @@ where
             .state
             .tree_state
             .overlay_manager
+            .view()
             .compute_block_trie_updates(&db_provider, block.number())?;
 
         let sorted_hashed_state = Arc::new(hashed_state.into_sorted());

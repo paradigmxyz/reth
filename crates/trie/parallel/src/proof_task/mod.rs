@@ -698,7 +698,7 @@ mod tests {
             reth_storage_overlay::OverlayManager::<
                 reth_ethereum_primitives::EthPrimitives,
             >::default()
-            .overlay_builder(anchor_hash),
+            .view().overlay_builder(anchor_hash),
         );
         let ctx = test_ctx(factory.clone());
 
@@ -732,7 +732,7 @@ mod tests {
         let factory = reth_storage_overlay::OverlayStateProviderFactory::new(
             provider_factory,
             reth_storage_overlay::OverlayManager::<reth_ethereum_primitives::EthPrimitives>::default()
-                .overlay_builder(anchor_hash),
+                .view().overlay_builder(anchor_hash),
         );
         let ctx = test_ctx(factory);
 

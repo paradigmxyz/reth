@@ -264,7 +264,7 @@ mod tests {
     fn start(handle: &TestHandle, parent: &SealedHeader) {
         let state_provider_factory = OverlayStateProviderFactory::new(
             MockEthProvider::default(),
-            OverlayManager::default().overlay_builder(parent.hash()),
+            OverlayManager::default().view().overlay_builder(parent.hash()),
         );
         handle.start(parent, Default::default(), state_provider_factory);
     }
