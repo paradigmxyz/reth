@@ -85,6 +85,12 @@ pub(crate) struct PrewarmResults<T: EvmTypes> {
     speculating: Box<[AtomicBool]>,
     /// Writes predicted by the stored results.
     predicted: Arc<PredictedState>,
+    /// Wakes idle prewarm workers when the prediction generation changes.
+    changed: Condvar,
+    /// Lock of [`Self::changed`].
+    changed_lock: Mutex<()>,
+    /// Number of prewarm workers waiting on [`Self::changed`].
+    waiting: AtomicUsize,
 }
 
 /// Prewarm state of a transaction in [`PrewarmResults`].
@@ -108,19 +114,31 @@ impl<T: EvmTypes> PrewarmResults<T> {
             slots: (0..transaction_count).map(|_| Mutex::new(ResultSlot::Empty)).collect(),
             speculating: (0..transaction_count).map(|_| AtomicBool::new(false)).collect(),
             predicted: Arc::new(PredictedState::new(transaction_count, None)),
+            changed: Condvar::new(),
+            changed_lock: Mutex::new(()),
+            waiting: AtomicUsize::new(0),
         }
     }
 
-    /// Wakes an idle prewarm worker, or all of them if `all` is set, after a transaction was
-    /// queued or the queue was closed.
-    pub(super) fn wake(&self, all: bool) {
-        self.predicted.wake(all);
+    /// Advances the prediction generation and wakes idle prewarm workers, after anything changed
+    /// that may give them work: a queued transaction, a stored result or published writes.
+    pub(super) fn advance_generation(&self) {
+        self.predicted.generation.fetch_add(1, Ordering::SeqCst);
+        if self.waiting.load(Ordering::SeqCst) > 0 {
+            let _guard = self.changed_lock.lock();
+            self.changed.notify_all();
+        }
     }
 
-    /// Blocks an idle prewarm worker until new work arrived since the work generation was
-    /// `generation`, or for at most `timeout`.
+    /// Blocks an idle prewarm worker until the prediction generation is no longer `generation`,
+    /// or for at most `timeout`.
     pub(super) fn wait_for_generation_change(&self, generation: usize, timeout: Duration) {
-        self.predicted.wait_for_generation_change(generation, timeout);
+        let mut guard = self.changed_lock.lock();
+        self.waiting.fetch_add(1, Ordering::SeqCst);
+        if self.predicted.generation.load(Ordering::SeqCst) == generation {
+            self.changed.wait_for(&mut guard, timeout);
+        }
+        self.waiting.fetch_sub(1, Ordering::SeqCst);
     }
 
     /// Returns the number of transactions with result slots.
@@ -257,6 +275,7 @@ impl<T: EvmTypes> PrewarmResults<T> {
             self.predicted.retract(index, &previous.result.pending_state);
         }
         self.predicted.publish(index, state);
+        self.advance_generation();
     }
 
     /// Replaces the slot of the transaction at `index`, retracting the writes of its previous
@@ -272,6 +291,7 @@ impl<T: EvmTypes> PrewarmResults<T> {
             ResultSlot::Empty | ResultSlot::Unusable(_) => {}
         }
         *slot = f(&self.predicted);
+        self.advance_generation();
     }
 
     /// Returns whether the transaction at `index` should be executed again, because prewarming
@@ -322,6 +342,7 @@ impl<T: EvmTypes> PrewarmResults<T> {
         if !rebased.is_empty() {
             // Later transactions read the rebased balances.
             self.predicted.publish_rebased(index, &tx.result.pending_state, &rebased);
+            self.advance_generation();
         }
         Ok(Ok(tx.result))
     }
@@ -656,8 +677,8 @@ pub(super) struct PredictedState {
     cleared: DashMap<Address, Writes<()>, DefaultHashBuilder>,
     /// Bytecode deployed by predicted writes.
     code: DashMap<B256, Bytecode, DefaultHashBuilder>,
-    /// Number of times new work arrived for idle prewarm workers: a queued transaction or a
-    /// possibly stale result.
+    /// Number of times a transaction was queued for speculation, a speculative result was stored,
+    /// or block execution published actual or rebased writes.
     generation: AtomicUsize,
     /// Account whose balance-only writes are not predicted.
     unpredicted: Option<Address>,
@@ -668,12 +689,6 @@ pub(super) struct PredictedState {
     /// Whether a changed prediction may have made the result of the transaction at each index
     /// stale since it was last checked.
     maybe_stale: Box<[AtomicBool]>,
-    /// Wakes idle prewarm workers when new work arrives.
-    work: Condvar,
-    /// Lock of [`Self::work`].
-    work_lock: Mutex<()>,
-    /// Number of prewarm workers waiting on [`Self::work`].
-    waiting: AtomicUsize,
 }
 
 impl PredictedState {
@@ -707,37 +722,11 @@ impl PredictedState {
         }
     }
 
-    /// Flags the transaction at `index` as possibly stale, waking an idle worker to check it.
+    /// Flags the transaction at `index` as possibly stale.
     fn flag(&self, index: usize) {
-        if let Some(flag) = self.maybe_stale.get(index) &&
-            !flag.swap(true, Ordering::AcqRel)
-        {
-            self.wake(false);
+        if let Some(flag) = self.maybe_stale.get(index) {
+            flag.store(true, Ordering::Release);
         }
-    }
-
-    /// Advances the work generation and wakes one idle prewarm worker, or all if `all` is set.
-    fn wake(&self, all: bool) {
-        self.generation.fetch_add(1, Ordering::SeqCst);
-        if self.waiting.load(Ordering::SeqCst) > 0 {
-            let _guard = self.work_lock.lock();
-            if all {
-                self.work.notify_all();
-            } else {
-                self.work.notify_one();
-            }
-        }
-    }
-
-    /// Blocks an idle prewarm worker until the work generation is no longer `generation`, or for
-    /// at most `timeout`.
-    fn wait_for_generation_change(&self, generation: usize, timeout: Duration) {
-        let mut guard = self.work_lock.lock();
-        self.waiting.fetch_add(1, Ordering::SeqCst);
-        if self.generation.load(Ordering::SeqCst) == generation {
-            self.work.wait_for(&mut guard, timeout);
-        }
-        self.waiting.fetch_sub(1, Ordering::SeqCst);
     }
 
     /// Flags the readers after `index` of the keys a changed prediction wrote.
@@ -763,7 +752,8 @@ impl PredictedState {
         })
     }
 
-    /// Returns the number of times new work arrived for idle prewarm workers.
+    /// Returns the number of times a transaction was queued for speculation, a speculative result
+    /// was stored, or block execution published actual or rebased writes.
     pub(super) fn generation(&self) -> usize {
         self.generation.load(Ordering::SeqCst)
     }

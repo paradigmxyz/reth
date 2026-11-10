@@ -288,10 +288,10 @@ where
                     ctx.metrics.seeded_transactions.increment(1);
                 }
                 queue.push(index, tx, seeded);
-                results.wake(false);
+                results.advance_generation();
             }
             queue.close();
-            results.wake(true);
+            results.advance_generation();
             Self::send_withdrawal_hints(ctx, state_root_hint_stream);
             tx_count
         })
