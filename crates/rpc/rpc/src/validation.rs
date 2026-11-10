@@ -321,7 +321,7 @@ where
     /// to checking the latest block transaction.
     fn ensure_payment(
         &self,
-        block: &SealedBlock<<E::Primitives as NodePrimitives>::Block>,
+        block: &RecoveredBlock<<E::Primitives as NodePrimitives>::Block>,
         output: &BlockExecutionOutput<<E::Primitives as NodePrimitives>::Receipt>,
         message: &BidTrace,
     ) -> Result<(), ValidationApiError> {
@@ -355,13 +355,19 @@ where
             return Ok(())
         }
 
-        let (receipt, tx) = output
+        let ((receipt, tx), sender) = output
             .receipts
             .last()
             .zip(block.body().transactions().last())
+            .zip(block.senders().last())
             .ok_or(ValidationApiError::ProposerPayment)?;
 
         if !receipt.status() {
+            return Err(ValidationApiError::ProposerPayment)
+        }
+
+        // A transfer from the fee recipient to itself moves no value.
+        if *sender == message.proposer_fee_recipient {
             return Err(ValidationApiError::ProposerPayment)
         }
 
@@ -842,17 +848,17 @@ mod tests {
         hash_disallow_list, validate_message_against_payload, AddressSet, ValidationApi,
         ValidationApiConfig, ValidationApiError,
     };
-    use alloy_consensus::{BlockHeader, Header};
-    use alloy_primitives::{Address, B256, U256};
+    use alloy_consensus::{BlockHeader, Header, TxLegacy};
+    use alloy_primitives::{Address, Signature, TxKind, B256, U256};
     use alloy_rpc_types_beacon::relay::BidTrace;
     use alloy_rpc_types_engine::{ExecutionData, ExecutionPayload, ExecutionPayloadV1};
     use evm2::evm::AccountInfo;
     use reth_consensus::noop::NoopConsensus;
     use reth_engine_primitives::PayloadValidator;
     use reth_ethereum_engine_primitives::EthPayloadTypes;
-    use reth_ethereum_primitives::Block;
+    use reth_ethereum_primitives::{Block, Receipt, Transaction, TransactionSigned};
     use reth_evm_ethereum::EthEvmConfig;
-    use reth_execution_types::BlockExecutionOutput;
+    use reth_execution_types::{BlockExecutionOutput, BlockExecutionResult};
     use reth_payload_primitives::NewPayloadError;
     use reth_primitives_traits::{RecoveredBlock, SealedBlock, SealedHeader};
     use reth_provider::test_utils::MockEthProvider;
@@ -1182,9 +1188,60 @@ mod tests {
             state: fee_recipient_spent(message.proposer_fee_recipient),
         };
 
-        test_validation_api(provider)
-            .ensure_payment(block.sealed_block(), &output, &message)
-            .unwrap();
+        test_validation_api(provider).ensure_payment(&block, &output, &message).unwrap();
+    }
+
+    /// A block whose only transaction sends `message.value` from `sender` to the fee recipient,
+    /// with a successful receipt and no balance change recorded for the fee recipient.
+    fn last_transaction_payment(
+        sender: Address,
+    ) -> (MockEthProvider, RecoveredBlock<Block>, BidTrace, BlockExecutionOutput<Receipt>) {
+        let (provider, parent_block, message) = payment_free_submission();
+        let transaction = TransactionSigned::new_unhashed(
+            Transaction::Legacy(TxLegacy {
+                gas_limit: 21_000,
+                to: TxKind::Call(message.proposer_fee_recipient),
+                value: message.value,
+                ..Default::default()
+            }),
+            Signature::test_signature(),
+        );
+        let block = RecoveredBlock::new_unhashed(
+            Block {
+                header: parent_block.clone_header(),
+                body: alloy_consensus::BlockBody {
+                    transactions: vec![transaction],
+                    ..Default::default()
+                },
+            },
+            vec![sender],
+        );
+        let output = BlockExecutionOutput {
+            result: BlockExecutionResult {
+                receipts: vec![Receipt { success: true, ..Default::default() }],
+                ..Default::default()
+            },
+            state: Default::default(),
+        };
+        (provider, block, message, output)
+    }
+
+    #[test]
+    fn test_last_transaction_payment_from_another_sender_is_accepted() {
+        let (provider, block, message, output) = last_transaction_payment(Address::repeat_byte(1));
+
+        test_validation_api(provider).ensure_payment(&block, &output, &message).unwrap();
+    }
+
+    #[test]
+    fn test_last_transaction_payment_from_the_fee_recipient_is_rejected() {
+        let (provider, block, message, output) =
+            last_transaction_payment(Address::repeat_byte(0x42));
+
+        let err =
+            test_validation_api(provider).ensure_payment(&block, &output, &message).unwrap_err();
+
+        assert!(matches!(err, ValidationApiError::ProposerPayment), "unexpected error: {err}");
     }
 
     /// Execution state for a block in which `address` ended up poorer than it started.
