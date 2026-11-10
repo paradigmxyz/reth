@@ -173,8 +173,9 @@ where
     pub fn commit(self) -> Result<CommitLatency> {
         match self.txn_execute(|txn| {
             if K::IS_READ_ONLY {
+                // A timed out transaction fails in `txn_execute` before reaching this closure.
                 #[cfg(feature = "read-tx-timeouts")]
-                self.env().txn_manager().remove_active_read_transaction(txn);
+                self.env().txn_manager().remove_active_read_transaction(txn, false);
 
                 let mut latency = CommitLatency::new();
                 mdbx_result(unsafe { ffi::mdbx_txn_commit_ex(txn, latency.mdbx_commit_latency()) })
@@ -266,7 +267,7 @@ where
     #[cfg(feature = "read-tx-timeouts")]
     pub fn disable_timeout(&self) {
         if K::IS_READ_ONLY {
-            self.env().txn_manager().remove_active_read_transaction(self.inner.txn.txn);
+            self.env().txn_manager().remove_active_read_transaction(self.inner.txn.txn, true);
         }
     }
 }
@@ -348,7 +349,9 @@ where
             if !self.has_committed() {
                 if K::IS_READ_ONLY {
                     #[cfg(feature = "read-tx-timeouts")]
-                    self.env.txn_manager().remove_active_read_transaction(txn);
+                    self.env
+                        .txn_manager()
+                        .remove_active_read_transaction(txn, self.txn.is_timed_out());
 
                     // Reset and return the handle to the pool for lock-free reuse.
                     // pool.put() calls mdbx_txn_reset internally and falls back to
