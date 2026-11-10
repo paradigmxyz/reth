@@ -1075,14 +1075,10 @@ pub struct PrewarmMetrics {
     pub(crate) bal_slot_iteration_duration: Histogram,
 }
 
-/// A transaction queued for speculative execution, with the seeded result of its pool
-/// transaction.
-type QueuedTx<Tx, T> = (Tx, Option<Arc<PoolTx<T>>>);
-
 /// Transactions queued for speculative execution, in block order.
 struct SpeculationQueue<Tx, T: evm2::EvmTypes> {
-    /// Each transaction, set once it arrives.
-    txs: Box<[OnceLock<QueuedTx<Tx, T>>]>,
+    /// Each transaction with the seeded result of its pool transaction, set once it arrives.
+    txs: Box<[OnceLock<(Tx, Option<Arc<PoolTx<T>>>)>]>,
     /// Index of the next transaction to execute for the first time.
     next: AtomicUsize,
     /// Whether all transactions that will arrive have arrived.
@@ -1111,12 +1107,12 @@ impl<Tx, T: evm2::EvmTypes> SpeculationQueue<Tx, T> {
     }
 
     /// Returns the transaction at `index` if it arrived.
-    fn get(&self, index: usize) -> Option<&QueuedTx<Tx, T>> {
+    fn get(&self, index: usize) -> Option<&(Tx, Option<Arc<PoolTx<T>>>)> {
         self.txs.get(index)?.get()
     }
 
     /// Claims the next transaction to execute for the first time, unless it has not arrived yet.
-    fn claim(&self) -> Option<(usize, &QueuedTx<Tx, T>)> {
+    fn claim(&self) -> Option<(usize, &(Tx, Option<Arc<PoolTx<T>>>))> {
         loop {
             let next = self.next.load(Ordering::Acquire);
             let slot = self.txs.get(next)?;
