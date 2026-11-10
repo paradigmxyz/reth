@@ -228,7 +228,7 @@ fn recover_range<Provider, CURSOR>(
     writer: &mut EitherWriter<'_, CURSOR, Provider::Primitives>,
 ) -> Result<(), StageError>
 where
-    Provider: DBProvider + BlockReader + StaticFileProviderFactory,
+    Provider: HeaderProvider + StaticFileProviderFactory,
     CURSOR: DbCursorRW<tables::TransactionSenders>,
 {
     debug_assert_eq!(
@@ -266,21 +266,23 @@ where
                 Err(error) => {
                     return match *error {
                         SenderRecoveryStageError::FailedRecovery(err) => {
+                            debug_assert_eq!(err.tx, tx_range.start + processed_transactions);
+
                             // The stage checkpoint does not move on failure, so the pipeline unwind
                             // skips this stage, while the shared static file writer would persist
-                            // the rows appended so far on the unwind's commit. Senders are
-                            // appended in transaction order, so exactly the transactions before the
-                            // failed one were appended by this execution.
+                            // the rows appended so far on the unwind's commit.
                             if let EitherWriter::StaticFile(writer) = writer {
                                 writer.prune_transaction_senders(
-                                    err.tx - range_output.tx_range.start,
+                                    tx_range.start + processed_transactions -
+                                        range_output.tx_range.start,
                                     range_output.block_range.start() - 1,
                                 )?;
                             }
 
-                            // get the block number for the bad transaction
-                            let block_number = provider
-                                .block_by_transaction_id(err.tx)?
+                            // Senders are appended in transaction order, so the next block number
+                            // belongs to the bad transaction.
+                            let block_number = block_numbers
+                                .next()
                                 .ok_or(ProviderError::BlockNumberForTransactionIndexNotFound)?;
 
                             // fetch the sealed header so we can use it in the sender recovery
