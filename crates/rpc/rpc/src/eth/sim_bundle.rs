@@ -5,8 +5,7 @@ use alloy_consensus::{transaction::TxHashRef, BlockHeader, Transaction as _};
 use alloy_primitives::U256;
 use alloy_rpc_types_eth::{BlockId, Log};
 use alloy_rpc_types_mev::{
-    BundleItem, Inclusion, MevSendBundle, Privacy, RefundConfig, SimBundleLogs, SimBundleOverrides,
-    SimBundleResponse, Validity,
+    BundleItem, Inclusion, MevSendBundle, SimBundleLogs, SimBundleOverrides, SimBundleResponse,
 };
 use evm2::evm::DynDatabase;
 use jsonrpsee::core::RpcResult;
@@ -51,14 +50,12 @@ pub struct FlattenedBundleItem<T> {
     pub can_revert: bool,
     /// Item-level inclusion constraints
     pub inclusion: Inclusion,
-    /// Optional validity constraints for the bundle item
-    pub validity: Option<Validity>,
-    /// Optional privacy settings for the bundle item
-    pub privacy: Option<Privacy>,
     /// Optional refund percent for the bundle item
     pub refund_percent: Option<u64>,
-    /// Optional refund configs for the bundle item
-    pub refund_configs: Option<Vec<RefundConfig>>,
+    /// Number of refund payouts for the bundle item, used when `refund_percent` is set.
+    ///
+    /// Without refund configs the refund is a single payout to the transaction signer.
+    pub refund_payouts: usize,
 }
 
 /// `Eth` sim bundle implementation.
@@ -147,7 +144,7 @@ where
     /// Flattens a potentially nested bundle into a list of individual transactions in a
     /// `FlattenedBundleItem` with their associated metadata. This handles recursive bundle
     /// processing up to `MAX_NESTED_BUNDLE_DEPTH` and `MAX_BUNDLE_BODY_SIZE`, preserving
-    /// inclusion, validity and privacy settings from parent bundles.
+    /// inclusion and refund settings from parent bundles.
     fn parse_and_flatten_bundle(
         &self,
         request: &MevSendBundle,
@@ -166,10 +163,9 @@ where
                 return Err(EthApiError::InvalidParams(EthSimBundleError::MaxDepth.to_string()));
             }
 
-            // Determine inclusion, validity, and privacy
+            // Determine inclusion and validity
             let inclusion = &current_bundle.inclusion;
             let validity = &current_bundle.validity;
-            let privacy = &current_bundle.privacy;
 
             // Validate inclusion parameters
             let block_number = inclusion.block_number();
@@ -241,18 +237,18 @@ where
                                     (refund.body_idx as usize == idx).then_some(refund.percent)
                                 })
                             });
-                        let refund_configs =
-                            validity.as_ref().and_then(|v| v.refund_config.clone());
+                        let refund_payouts = validity
+                            .as_ref()
+                            .and_then(|v| v.refund_config.as_ref())
+                            .map_or(1, Vec::len);
 
-                        // Create FlattenedBundleItem with current inclusion, validity, and privacy
+                        // Create FlattenedBundleItem with current inclusion and refund settings
                         let flattened_item = FlattenedBundleItem {
                             tx,
                             can_revert: *can_revert,
                             inclusion: inclusion.clone(),
-                            validity: validity.clone(),
-                            privacy: privacy.clone(),
                             refund_percent,
-                            refund_configs,
+                            refund_payouts,
                         };
 
                         items.push(flattened_item);
@@ -454,17 +450,13 @@ where
                 // After processing all transactions, process refunds
                 for item in &flattened_bundle {
                     if let Some(refund_percent) = item.refund_percent {
-                        let refund_configs = item.refund_configs.clone().unwrap_or_else(|| {
-                            vec![RefundConfig { address: item.tx.signer(), percent: 100 }]
-                        });
-
                         // Calculate payout transaction fee
                         let payout_tx_fee = U256::from(basefee) *
                             U256::from(SBUNDLE_PAYOUT_MAX_COST) *
-                            U256::from(refund_configs.len() as u64);
+                            U256::from(item.refund_payouts);
 
                         // Add gas used for payout transactions
-                        total_gas_used += SBUNDLE_PAYOUT_MAX_COST * refund_configs.len() as u64;
+                        total_gas_used += SBUNDLE_PAYOUT_MAX_COST * item.refund_payouts as u64;
 
                         // Calculate allocated refundable value (payout value)
                         let payout_value =
@@ -605,7 +597,9 @@ mod tests {
     use alloy_genesis::{Genesis, GenesisAccount};
     use alloy_primitives::{Address, Bytes, TxKind, B256};
     use alloy_rpc_types_eth::BlockOverrides;
-    use alloy_rpc_types_mev::{Inclusion, ProtocolVersion};
+    use alloy_rpc_types_mev::{
+        Inclusion, Privacy, ProtocolVersion, Refund, RefundConfig, Validity,
+    };
     use jsonrpsee::types::ErrorObjectOwned;
     use reth_chainspec::{ChainSpecBuilder, ChainSpecProvider};
     use reth_db_common::init::init_genesis;
@@ -991,5 +985,77 @@ mod tests {
         );
         let response = api(0).sim_bundle(bundle, SimBundleOverrides::default()).await.unwrap();
         assert_eq!(response.gas_used, 42_000);
+    }
+    /// Refunds charge one payout per refund config, or a single payout to the signer without one.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn sim_bundle_charges_payout_per_refund_config() {
+        let coinbase = Address::repeat_byte(0x11);
+        let mut rng = generators::rng();
+        let key = generate_key(&mut rng);
+        let txs: Vec<_> =
+            [(0, coinbase, U256::from(10u128.pow(17))), (1, Address::random(), U256::ZERO)]
+                .into_iter()
+                .map(|(nonce, to, value)| {
+                    sign_tx_with_key_pair(
+                        key,
+                        reth_ethereum_primitives::Transaction::Eip1559(TxEip1559 {
+                            chain_id: 1,
+                            nonce,
+                            gas_limit: 21_000,
+                            max_fee_per_gas: INITIAL_BASE_FEE as u128,
+                            to: TxKind::Call(to),
+                            value,
+                            ..Default::default()
+                        }),
+                    )
+                })
+                .collect();
+        let sender = txs[0].recover_signer().unwrap();
+
+        let genesis = Genesis::default()
+            .with_gas_limit(30_000_000)
+            .with_base_fee(Some(INITIAL_BASE_FEE as u128))
+            .with_coinbase(coinbase)
+            .extend_accounts([(
+                sender,
+                GenesisAccount::default().with_balance(U256::from(10u128.pow(18))),
+            )]);
+        let chain_spec =
+            Arc::new(ChainSpecBuilder::mainnet().cancun_activated().genesis(genesis).build());
+        let factory = create_test_provider_factory_with_chain_spec(chain_spec);
+        init_genesis(&factory).unwrap();
+        let provider = BlockchainProvider::new(factory).unwrap();
+        let eth_api = EthApiBuilder::new(
+            provider.clone(),
+            testing_pool(),
+            NoopNetwork::default(),
+            EthEvmConfig::new(provider.chain_spec()),
+        )
+        .build();
+        let api = EthSimBundle::new(eth_api, BlockingTaskGuard::new(4));
+
+        for (refund_config, payouts) in [
+            (None, 1),
+            (
+                Some(vec![
+                    RefundConfig { address: Address::random(), percent: 50 },
+                    RefundConfig { address: Address::random(), percent: 50 },
+                ]),
+                2,
+            ),
+        ] {
+            let mut bundle =
+                create_test_bundle(txs.iter().map(|tx| tx.encoded_2718().into()).collect());
+            bundle.validity = Some(Validity {
+                refund: Some(vec![Refund { body_idx: 1, percent: 50 }]),
+                refund_config,
+            });
+            bundle.privacy =
+                Some(Privacy { hints: None, builders: Some(vec!["builder".to_string(); 3]) });
+
+            let response = api.sim_bundle(bundle, SimBundleOverrides::default()).await.unwrap();
+            assert_eq!(response.gas_used, 42_000 + SBUNDLE_PAYOUT_MAX_COST * payouts);
+            assert_eq!(response.refundable_value, U256::from(10u128.pow(17)));
+        }
     }
 }
