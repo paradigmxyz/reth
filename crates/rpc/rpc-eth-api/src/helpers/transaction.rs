@@ -515,9 +515,14 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
                 None => return Err(SignError::NoAccount.into_eth_err()),
             };
 
-            if self.find_signer(&from).is_err() {
-                return Err(SignError::NoAccount.into_eth_err())
-            }
+            let signer = self.find_signer(&from)?;
+
+            // Held until the pool insert below, so a concurrent request from this account reads
+            // the pool only after this transaction is in it.
+            let _nonce_guard = match signer.nonce_lock() {
+                Some(lock) if request.as_ref().nonce().is_none() => Some(lock.lock_owned().await),
+                _ => None,
+            };
 
             // set nonce if not already set before
             if request.as_ref().nonce().is_none() {
