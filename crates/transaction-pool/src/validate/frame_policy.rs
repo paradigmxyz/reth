@@ -101,6 +101,16 @@ impl FrameValidationPolicy {
     /// This is deliberately structural: approval success and receipt semantics are checked by
     /// execution later, and are not inferred from frame flags here.
     pub fn new(tx: &TxEip8141, signature_validation_gas: u64) -> Result<Self, &'static str> {
+        Self::with_max_verify_gas(tx, signature_validation_gas, MAX_VERIFY_GAS)
+    }
+
+    /// Recognizes a public prefix using a node cap no lower than [`MAX_VERIFY_GAS`].
+    pub fn with_max_verify_gas(
+        tx: &TxEip8141,
+        signature_validation_gas: u64,
+        max_verify_gas: u64,
+    ) -> Result<Self, &'static str> {
+        let max_verify_gas = max_verify_gas.max(MAX_VERIFY_GAS);
         let mut start = 0;
         let expiry_index = if tx.frames.first().is_some_and(Frame::is_expiry_verifier) {
             let frame = &tx.frames[0];
@@ -159,7 +169,7 @@ impl FrameValidationPolicy {
         if declared_execution_gas
             .checked_add(signature_validation_gas)
             .ok_or("verification gas overflows u64")? >
-            MAX_VERIFY_GAS
+            max_verify_gas
         {
             return Err("verification gas budget exceeded");
         }
@@ -333,13 +343,36 @@ mod tests {
         )
         .is_ok());
         let mut t = tx(vec![frame(FrameMode::Verify, 3, s)]);
-        t.frames[0].limits.execution = 99_999;
+        t.frames[0].limits.execution = MAX_VERIFY_GAS - 1;
         assert!(FrameValidationPolicy::new(&t, 2).is_err());
         t.frames[0].limits.execution = u64::MAX;
         assert!(FrameValidationPolicy::new(&t, 0).is_err());
         t.frames[0].limits.execution = 10;
         t.frames[0].limits.state = MAX_VERIFY_STATE_GAS + 1;
         assert!(FrameValidationPolicy::new(&t, 0).is_err());
+    }
+
+    #[test]
+    fn configured_max_verify_gas_is_never_below_the_spec_cap() {
+        let mut t = tx(vec![frame(FrameMode::Verify, 3, sender())]);
+        t.frames[0].limits.execution = MAX_VERIFY_GAS;
+        for configured in [0, MAX_VERIFY_GAS - 1, MAX_VERIFY_GAS] {
+            assert!(FrameValidationPolicy::with_max_verify_gas(&t, 0, configured).is_ok());
+            assert_eq!(
+                FrameValidationPolicy::with_max_verify_gas(&t, 1, configured),
+                Err("verification gas budget exceeded")
+            );
+        }
+        let raised = FrameValidationPolicy::with_max_verify_gas(&t, 1, MAX_VERIFY_GAS + 1).unwrap();
+        assert_eq!(raised.declared_execution_gas, MAX_VERIFY_GAS);
+        assert_eq!(
+            FrameValidationPolicy::with_max_verify_gas(&t, 2, MAX_VERIFY_GAS + 1),
+            Err("verification gas budget exceeded")
+        );
+        assert_eq!(
+            FrameValidationPolicy::with_max_verify_gas(&t, u64::MAX, u64::MAX),
+            Err("verification gas overflows u64")
+        );
     }
 
     #[test]

@@ -1,7 +1,10 @@
 //! Transaction pool arguments
 
 use crate::cli::config::RethTransactionPoolConfig;
-use alloy_eips::eip1559::{ETHEREUM_BLOCK_GAS_LIMIT_30M, MIN_PROTOCOL_BASE_FEE};
+use alloy_eips::{
+    eip1559::{ETHEREUM_BLOCK_GAS_LIMIT_30M, MIN_PROTOCOL_BASE_FEE},
+    eip8141::MAX_VERIFY_GAS,
+};
 use alloy_primitives::Address;
 use clap::{
     builder::{RangedU64ValueParser, Resettable},
@@ -415,6 +418,11 @@ pub struct TxPoolArgs {
     /// Max batch size for transaction pool insertions
     #[arg(long = "txpool.max-batch-size", value_parser = RangedU64ValueParser::<usize>::new().range(1..), default_value_t = DefaultTxPoolValues::get_global().max_batch_size)]
     pub max_batch_size: usize,
+
+    /// Max execution gas of an EIP-8141 public-pool validation prefix, including signature
+    /// verification. Values below the spec cap are raised to it.
+    #[arg(long = "txpool.max-verify-gas", default_value_t = MAX_VERIFY_GAS)]
+    pub max_verify_gas: u64,
 }
 
 impl TxPoolArgs {
@@ -500,6 +508,7 @@ impl Default for TxPoolArgs {
             transactions_backup_path,
             disable_transactions_backup,
             max_batch_size,
+            max_verify_gas: MAX_VERIFY_GAS,
         }
     }
 }
@@ -638,6 +647,7 @@ mod tests {
             transactions_backup_path: Some(PathBuf::from("/tmp/txpool-backup")),
             disable_transactions_backup: false,
             max_batch_size: 10,
+            max_verify_gas: 1_000_000,
         };
 
         let parsed_args = CommandParser::<TxPoolArgs>::parse_from([
@@ -698,6 +708,8 @@ mod tests {
             "/tmp/txpool-backup",
             "--txpool.max-batch-size",
             "10",
+            "--txpool.max-verify-gas",
+            "1000000",
         ])
         .args;
 

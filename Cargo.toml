@@ -692,6 +692,7 @@ alloy-consensus = { git = "https://github.com/alloy-rs/alloy", rev = "681b0e3ee2
 alloy-consensus-any = { git = "https://github.com/alloy-rs/alloy", rev = "681b0e3ee2995fcbb5b733db7b2b4a1d89cc5824" }
 alloy-contract = { git = "https://github.com/alloy-rs/alloy", rev = "681b0e3ee2995fcbb5b733db7b2b4a1d89cc5824" }
 alloy-eip7928 = { git = "https://github.com/Rimeeeeee/eips", rev = "eb1b963d6386c618bdb10b4216c801466f22b4eb" }
+alloy-eip8141 = { git = "https://github.com/alloy-rs/eips", rev = "9cee5414571033f1d677fd39ab057954fd954120" }
 alloy-eips = { git = "https://github.com/alloy-rs/alloy", rev = "681b0e3ee2995fcbb5b733db7b2b4a1d89cc5824" }
 alloy-genesis = { git = "https://github.com/alloy-rs/alloy", rev = "681b0e3ee2995fcbb5b733db7b2b4a1d89cc5824" }
 alloy-json-rpc = { git = "https://github.com/alloy-rs/alloy", rev = "681b0e3ee2995fcbb5b733db7b2b4a1d89cc5824" }

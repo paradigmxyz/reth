@@ -710,7 +710,7 @@ where
                 .with_max_tx_gas_limit(ctx.config().txpool.max_tx_gas_limit)
                 .with_minimum_priority_fee(ctx.config().txpool.minimum_priority_fee)
                 .build(blob_store.clone())
-                .with_frame_validation();
+                .with_frame_validation_max_verify_gas(ctx.config().txpool.max_verify_gas);
         let validator = TransactionValidationTaskExecutor::spawn(
             validator,
             ctx.task_executor(),

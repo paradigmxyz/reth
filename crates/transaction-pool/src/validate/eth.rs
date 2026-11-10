@@ -23,7 +23,7 @@ use alloy_consensus::{
 };
 use alloy_eips::{
     eip2718::EIP8141_TX_TYPE_ID, eip4844::env_settings::EnvKzgSettings, eip7840::BlobParams,
-    merge::SLOT_DURATION_SECS, BlockId,
+    eip8141::MAX_VERIFY_GAS, merge::SLOT_DURATION_SECS, BlockId,
 };
 use alloy_primitives::U256;
 use alloy_rlp::Encodable;
@@ -204,7 +204,20 @@ impl<Client, Tx, Evm> EthTransactionValidator<Client, Tx, Evm> {
     }
 
     /// Enables public frame validation using this pool's provider and configured EVM.
-    pub fn with_frame_validation(mut self) -> Self
+    pub fn with_frame_validation(self) -> Self
+    where
+        Client: StateProviderFactory
+            + BlockReaderIdExt<Header = HeaderTy<Evm::Primitives>>
+            + Clone
+            + 'static,
+        Tx: EthPoolTransaction<Consensus = TxTy<Evm::Primitives>>,
+        Evm: ConfigureEvm + 'static,
+    {
+        self.with_frame_validation_max_verify_gas(MAX_VERIFY_GAS)
+    }
+
+    /// Enables public frame validation with a cap no lower than [`MAX_VERIFY_GAS`].
+    pub fn with_frame_validation_max_verify_gas(mut self, max_verify_gas: u64) -> Self
     where
         Client: StateProviderFactory
             + BlockReaderIdExt<Header = HeaderTy<Evm::Primitives>>
@@ -216,7 +229,7 @@ impl<Client, Tx, Evm> EthTransactionValidator<Client, Tx, Evm> {
         let client = self.client.clone();
         let evm_config = self.evm_config.clone();
         self.set_frame_validation(Arc::new(move |tx| {
-            super::frame::validate(&client, &evm_config, tx)
+            super::frame::validate(&client, &evm_config, tx, max_verify_gas)
         }));
         self
     }
@@ -2094,44 +2107,69 @@ mod tests {
             sender,
             ExtendedAccount::new(0, balance).with_bytecode(hex!("60035f5faa00").into()),
         );
-        let validator = EthTransactionValidatorBuilder::new(provider.clone(), evm_config)
-            .build(InMemoryBlobStore::default())
-            .with_frame_validation();
-        let frame = TxEip8141 {
-            chain_id: validator.chain_id(),
-            sender,
-            nonce_keys: Some(vec![]),
-            frames: vec![Frame {
-                mode: FrameMode::Verify,
-                flags: 3,
-                limits: FrameLimits { execution: 20_000, state: 0 },
-                ..Default::default()
-            }],
-            fees: TransactionFees { max_fee: balance, ..Default::default() },
-            ..Default::default()
-        };
-        let maximum_cost = U256::from(frame.gas_limit());
-        let encoded_length = frame.eip2718_encoded_length();
-        let transaction = EthPooledTransaction::new(
-            alloy_consensus::transaction::Recovered::new_unchecked(
-                reth_ethereum_primitives::TransactionSigned::Eip8141(frame.seal_slow()),
+        for (configured, execution, valid) in [
+            (None, MAX_VERIFY_GAS, true),
+            (None, MAX_VERIFY_GAS + 1, false),
+            (Some(MAX_VERIFY_GAS + 1), MAX_VERIFY_GAS + 1, true),
+            (Some(0), MAX_VERIFY_GAS, true),
+        ] {
+            let validator =
+                EthTransactionValidatorBuilder::new(provider.clone(), evm_config.clone())
+                    .build(InMemoryBlobStore::default());
+            let validator = match configured {
+                Some(limit) => validator.with_frame_validation_max_verify_gas(limit),
+                None => validator.with_frame_validation(),
+            };
+            let frame = TxEip8141 {
+                chain_id: validator.chain_id(),
                 sender,
-            ),
-            encoded_length,
-        );
-        let outcome = validator.validate_one(TransactionOrigin::External, transaction);
-        let TransactionValidationOutcome::Valid { transaction, propagate, .. } = outcome else {
-            panic!("public frame validation failed: {outcome:?}")
-        };
-        let metadata = transaction.transaction().frame_validation().unwrap();
-        assert!(propagate);
-        assert_eq!(metadata.head_hash, head_hash);
-        assert_eq!(metadata.sender, sender);
-        assert_eq!(metadata.payer, sender);
-        assert_eq!(metadata.max_cost, maximum_cost);
-        assert_eq!(metadata.payer_balance, balance);
-        assert_eq!(metadata.nonce_keys, Some(vec![]));
-        assert_eq!(provider.basic_account(&sender).unwrap().unwrap().balance, balance);
+                nonce_keys: Some(vec![]),
+                frames: vec![Frame {
+                    mode: FrameMode::Verify,
+                    flags: 3,
+                    limits: FrameLimits { execution, state: 0 },
+                    ..Default::default()
+                }],
+                fees: TransactionFees { max_fee: balance, ..Default::default() },
+                ..Default::default()
+            };
+            let maximum_cost = U256::from(frame.gas_limit());
+            let encoded_length = frame.eip2718_encoded_length();
+            let transaction = EthPooledTransaction::new(
+                alloy_consensus::transaction::Recovered::new_unchecked(
+                    reth_ethereum_primitives::TransactionSigned::Eip8141(frame.seal_slow()),
+                    sender,
+                ),
+                encoded_length,
+            );
+            let outcome = validator.validate_one(TransactionOrigin::External, transaction);
+            if !valid {
+                assert!(matches!(
+                    outcome,
+                    TransactionValidationOutcome::Invalid(
+                        _,
+                        InvalidPoolTransactionError::Eip8141(
+                            Eip8141PoolTransactionError::PublicMempoolPolicy(
+                                "verification gas budget exceeded"
+                            )
+                        )
+                    )
+                ));
+                continue;
+            }
+            let TransactionValidationOutcome::Valid { transaction, propagate, .. } = outcome else {
+                panic!("public frame validation failed: {outcome:?}")
+            };
+            let metadata = transaction.transaction().frame_validation().unwrap();
+            assert!(propagate);
+            assert_eq!(metadata.head_hash, head_hash);
+            assert_eq!(metadata.sender, sender);
+            assert_eq!(metadata.payer, sender);
+            assert_eq!(metadata.max_cost, maximum_cost);
+            assert_eq!(metadata.payer_balance, balance);
+            assert_eq!(metadata.nonce_keys, Some(vec![]));
+            assert_eq!(provider.basic_account(&sender).unwrap().unwrap().balance, balance);
+        }
     }
 
     #[test]
