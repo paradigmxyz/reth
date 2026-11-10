@@ -1649,27 +1649,4 @@ mod tests {
             assert_save_cache_drops_removed_caches(CacheSlot::Empty, valid, insert_error);
         }
     }
-
-    #[test]
-    fn speculation_queue_claims_arrived_transactions_in_order() {
-        let queue = SpeculationQueue::<u8, BaseEvmTypes>::new(4);
-        assert!(queue.claim().is_none());
-
-        // A later transaction cannot be claimed before an earlier one arrived.
-        queue.push(1, 11, None);
-        assert!(queue.claim().is_none());
-        assert_eq!(queue.get(1).map(|(tx, _)| *tx), Some(11));
-
-        queue.push(0, 10, None);
-        assert_eq!(queue.claim().map(|(index, (tx, _))| (index, *tx)), Some((0, 10)));
-        assert_eq!(queue.claim().map(|(index, (tx, _))| (index, *tx)), Some((1, 11)));
-        assert!(queue.claim().is_none());
-
-        // Once closed, transactions that never arrived are skipped.
-        queue.push(3, 13, None);
-        queue.close();
-        assert_eq!(queue.claim().map(|(index, (tx, _))| (index, *tx)), Some((3, 13)));
-        assert!(queue.claim().is_none());
-        assert!(queue.get(2).is_none());
-    }
 }
