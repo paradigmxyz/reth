@@ -728,6 +728,7 @@ where
 
         let frame_evm = evm_config.clone();
         let frame_provider = ctx.provider().clone();
+        let max_verify_gas = ctx.config().txpool.max_verify_gas;
         let mut validator =
             TransactionValidationTaskExecutor::eth_builder(ctx.provider().clone(), evm_config)
                 .set_eip4844(!blobs_disabled)
@@ -739,7 +740,12 @@ where
                 .with_minimum_priority_fee(ctx.config().txpool.minimum_priority_fee)
                 .build(blob_store.clone());
         validator.set_frame_validation(Arc::new(move |tx| {
-            crate::frame_validation::validate::<Node, Evm>(&frame_provider, &frame_evm, tx)
+            crate::frame_validation::validate::<Node, Evm>(
+                &frame_provider,
+                &frame_evm,
+                tx,
+                max_verify_gas,
+            )
         }));
         let validator = TransactionValidationTaskExecutor::spawn(
             validator,

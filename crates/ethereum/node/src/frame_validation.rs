@@ -25,6 +25,7 @@ pub(super) fn validate<Node, EvmConfig>(
     client: &Node::Provider,
     evm_config: &EvmConfig,
     transaction: &EthPooledTransaction,
+    max_verify_gas: u64,
 ) -> Result<Arc<FrameValidation>, InvalidPoolTransactionError>
 where
     Node: FullNodeTypes<Types: NodeTypes<Primitives: NodePrimitives<SignedTx = TransactionSigned>>>,
@@ -43,7 +44,11 @@ where
         "validating EIP-8141 public-pool transaction"
     );
     // Bound the entire simulation before opening state or performing signature verification.
-    let prefix = match FrameValidationPolicy::new(frame, frame.signature_verification_gas()) {
+    let prefix = match FrameValidationPolicy::with_max_verify_gas(
+        frame,
+        frame.signature_verification_gas(),
+        max_verify_gas,
+    ) {
         Ok(prefix) => prefix,
         Err(reason) => {
             info!(
