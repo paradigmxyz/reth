@@ -25,7 +25,7 @@ impl<T: 'static> BucketMemory<T> {
     /// # Safety
     ///
     /// The returned slice must not be used after `self` is dropped.
-    pub(crate) const unsafe fn buckets(&self) -> &'static [Bucket<T>] {
+    pub(crate) unsafe fn buckets(&self) -> &'static [Bucket<T>] {
         // SAFETY: the caller does not use the slice after `self` is dropped.
         unsafe { self.inner.buckets() }
     }
@@ -107,7 +107,7 @@ mod imp {
             Some(Self { buckets: NonNull::new(ptr.cast())?, len, bytes, populate })
         }
 
-        pub(super) const unsafe fn buckets(&self) -> &'static [Bucket<T>] {
+        pub(super) unsafe fn buckets(&self) -> &'static [Bucket<T>] {
             // SAFETY: the mapping holds `len` initialized buckets and the caller does not use the
             // slice after `self` is dropped.
             unsafe { core::slice::from_raw_parts(self.buckets.as_ptr(), self.len) }
@@ -150,7 +150,7 @@ mod imp {
             None
         }
 
-        pub(super) const unsafe fn buckets(&self) -> &'static [Bucket<T>] {
+        pub(super) unsafe fn buckets(&self) -> &'static [Bucket<T>] {
             &[]
         }
     }
