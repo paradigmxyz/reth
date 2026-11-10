@@ -21,3 +21,7 @@ either.workspace = true
 rayon.workspace = true
 parking_lot.workspace = true
 shuttle = { workspace = true, optional = true }
+
+# The all-features udeps job selects fuzz, which replaces these native-only backends.
+[package.metadata.cargo-udeps.ignore]
+normal = ["parking_lot", "rayon"]
