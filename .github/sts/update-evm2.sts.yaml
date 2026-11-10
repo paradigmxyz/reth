@@ -10,6 +10,3 @@ claim_pattern:
 permissions:
   contents: write
   pull_requests: write
-  # The branch is rebased onto main before each push, so a push carries the workflow changes
-  # main made since, which needs workflows: write.
-  workflows: write

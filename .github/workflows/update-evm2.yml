@@ -321,6 +321,14 @@ jobs:
             exit 0
           fi
 
+          # The bump must never change CI: refuse to publish if it touches anything under .github/.
+          CHANGED=$(git diff --name-only "origin/main...$BRANCH" -- .github/)
+          if [ -n "$CHANGED" ]; then
+            echo "::error::Refusing to publish: the bump changes files under .github/:"
+            echo "$CHANGED"
+            exit 1
+          fi
+
           # Push only if the branch is where the update job found it (absent when LEASE is empty).
           gh auth setup-git
           git push --force-with-lease="refs/heads/$BRANCH:$LEASE" origin "$BRANCH:refs/heads/$BRANCH"
