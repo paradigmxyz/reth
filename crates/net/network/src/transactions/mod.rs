@@ -549,7 +549,6 @@ impl<Pool: TransactionPool, N: NetworkPrimitives> TransactionsManager<Pool, N> {
     /// - exceeds gas limit
     /// - gas uint overflow
     /// - exceeds max init code size
-    /// - oversized data
     /// - signer account has bytecode
     /// - chain id mismatch
     /// - old legacy chain id
