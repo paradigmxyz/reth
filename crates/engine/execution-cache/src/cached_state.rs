@@ -16,7 +16,7 @@ use std::{
     cell::Cell,
     fmt,
     sync::{
-        atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering},
+        atomic::{AtomicU64, AtomicUsize, Ordering},
         Arc,
     },
     time::Duration,
@@ -124,15 +124,7 @@ pub struct CachedStateProvider<S> {
 /// Keys a probing [`CachedStateProvider`] did not find in the cache, which a probing execution
 /// read as missing instead of loading them.
 #[derive(Debug, Default)]
-pub struct ProbeMisses {
-    missed: Mutex<ProbeMissSet>,
-    /// Whether missing storage slots read as [`PROBE_STORAGE_GUESS`] instead of zero.
-    guess_large: AtomicBool,
-}
-
-/// Value missing storage slots read as in a probe that guesses large values, large enough to pass
-/// balance checks and small enough that adding to it does not overflow.
-pub const PROBE_STORAGE_GUESS: StorageValue = StorageValue::from_limbs([0, 0, 1, 0]);
+pub struct ProbeMisses(Mutex<ProbeMissSet>);
 
 /// The keys recorded by [`ProbeMisses`], in the order they were read.
 #[derive(Debug, Default)]
@@ -155,19 +147,7 @@ impl ProbeMissSet {
 impl ProbeMisses {
     /// Takes the keys recorded since the last call.
     pub fn take(&self) -> ProbeMissSet {
-        core::mem::take(&mut *self.missed.lock())
-    }
-
-    /// Sets whether missing storage slots read as [`PROBE_STORAGE_GUESS`] instead of zero.
-    ///
-    /// A large guess lets balance and allowance checks pass, so that a probe of a batch call
-    /// reaches the keys of every item instead of stopping at the first check.
-    pub fn guess_large(&self, large: bool) {
-        self.guess_large.store(large, Ordering::Relaxed);
-    }
-
-    fn storage_guess(&self) -> Option<StorageValue> {
-        self.guess_large.load(Ordering::Relaxed).then_some(PROBE_STORAGE_GUESS)
+        core::mem::take(&mut *self.0.lock())
     }
 }
 
@@ -922,7 +902,7 @@ impl<S: EvmStateProvider> EvmStateProvider for CachedStateProvider<S> {
 
         if let Some(misses) = &self.probe {
             return Ok(self.caches.0.account_cache.get(address).unwrap_or_else(|| {
-                misses.missed.lock().accounts.push(*address);
+                misses.0.lock().accounts.push(*address);
                 None
             }))
         }
@@ -966,8 +946,8 @@ impl<S: EvmStateProvider> EvmStateProvider for CachedStateProvider<S> {
             return Ok(match self.caches.0.storage_cache.get(&(account, storage_key)) {
                 Some(value) => nonzero_storage_value(value),
                 None => {
-                    misses.missed.lock().storage.push((account, storage_key));
-                    misses.storage_guess()
+                    misses.0.lock().storage.push((account, storage_key));
+                    None
                 }
             })
         }
@@ -1005,7 +985,7 @@ impl<S: EvmStateProvider> EvmStateProvider for CachedStateProvider<S> {
 
         if let Some(misses) = &self.probe {
             return Ok(self.caches.0.code_cache.get(code_hash).unwrap_or_else(|| {
-                misses.missed.lock().code.push(*code_hash);
+                misses.0.lock().code.push(*code_hash);
                 None
             }))
         }
@@ -1486,34 +1466,6 @@ mod tests {
         let res = state_provider.storage(address, storage_key);
         assert!(res.is_ok());
         assert_eq!(res.unwrap(), Some(storage_value));
-    }
-
-    #[test]
-    fn probe_reads_only_the_cache_and_records_misses() {
-        let address = Address::random();
-        let (cached, missing) = (StorageKey::random(), StorageKey::random());
-        let provider = MockEthProvider::default();
-        provider.extend_accounts(vec![(
-            address,
-            ExtendedAccount::new(0, U256::ZERO)
-                .extend_storage(vec![(cached, U256::ONE), (missing, U256::from(2))]),
-        )]);
-        let caches = ExecutionCache::new(1000);
-        caches.insert_storage(address, cached, Some(U256::ONE));
-        let misses = Arc::new(ProbeMisses::default());
-        let probe = CachedStateProvider::new_probe(
-            provider.into_evm_state_provider(),
-            caches.clone(),
-            Arc::clone(&misses),
-        );
-
-        assert_eq!(probe.storage(address, cached).unwrap(), Some(U256::ONE));
-        assert_eq!(probe.storage(address, missing).unwrap(), None);
-        misses.guess_large(true);
-        assert_eq!(probe.storage(address, missing).unwrap(), Some(PROBE_STORAGE_GUESS));
-        assert_eq!(misses.take().storage, vec![(address, missing), (address, missing)]);
-        // The probe neither loaded the missing slot nor cached its guess.
-        assert_eq!(caches.0.storage_cache.get(&(address, missing)), None);
     }
 
     #[test]
