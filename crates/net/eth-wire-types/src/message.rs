@@ -46,6 +46,12 @@ pub const TX_MEMORY_BUDGET_MULTIPLIER: usize = 2;
 /// decoding. Truncating is not an option, because a body or receipt list cut short fails
 /// validation anyway. Valid transactions and receipts take at most about five times their
 /// encoding, an eth/69 receipt without logs being the densest.
+///
+/// The budget covers the lists of the message layout, each at the capacity its `Vec` grows to while
+/// decoding: block bodies with their transactions, ommers and withdrawals, and receipt lists with
+/// their receipts. Lists inside a transaction or receipt, such as access lists, authorizations and
+/// logs, are encoded by the transaction and receipt types and are not counted. Decoding those
+/// takes a small multiple of their encoding, as in every message that carries them.
 pub const RESPONSE_MEMORY_BUDGET_MULTIPLIER: usize = 6;
 
 /// Error when sending/receiving a message
@@ -911,36 +917,40 @@ where
     }
 }
 
-/// Rejects the RLP list at the front of `buf` if decoding its entries as `E`s, and the items
-/// nested in them as `T`s, would take more than `memory_budget` bytes, without decoding either.
+/// Rejects the RLP list at the front of `buf` if decoding it into a `Vec<E>`, together with the
+/// lists nested in its entries, would take more than `memory_budget` bytes, without decoding
+/// either.
 ///
-/// `nested_items` returns the number of `T`s in the entry at the front of its buffer and advances
-/// past the entry. Only RLP headers are read, and `buf` is not advanced.
-pub(crate) fn ensure_list_within_memory_budget<E, T>(
+/// `nested_size` returns the bytes that decoding the lists nested in the entry at the front of its
+/// buffer takes, usually through [`decoded_list_size`], and advances past the entry. Only RLP
+/// headers are read, and `buf` is not advanced.
+pub(crate) fn ensure_list_within_memory_budget<E>(
     mut buf: &[u8],
     memory_budget: usize,
-    mut nested_items: impl FnMut(&mut &[u8]) -> alloy_rlp::Result<usize>,
+    mut nested_size: impl FnMut(&mut &[u8]) -> alloy_rlp::Result<usize>,
 ) -> alloy_rlp::Result<()> {
     let mut entries = Header::decode_bytes(&mut buf, true)?;
     let mut entry_count = 0usize;
-    let mut item_count = 0usize;
+    let mut size = 0usize;
     while !entries.is_empty() {
         entry_count += 1;
-        item_count += nested_items(&mut entries)?;
+        size = size.saturating_add(nested_size(&mut entries)?);
     }
 
-    let size = entry_count
-        .saturating_mul(core::mem::size_of::<E>())
-        .saturating_add(item_count.saturating_mul(core::mem::size_of::<T>()));
+    let size = size
+        .saturating_add(decoded_capacity(entry_count).saturating_mul(core::mem::size_of::<E>()));
     if size > memory_budget {
         return Err(alloy_rlp::Error::Custom("decoded list exceeds memory budget"))
     }
     Ok(())
 }
 
-/// Returns the number of items in the RLP list at the front of `buf` without decoding them, and
-/// advances `buf` past the list.
-pub(crate) fn rlp_list_len(buf: &mut &[u8]) -> alloy_rlp::Result<usize> {
+/// Returns the bytes that decoding the RLP list at the front of `buf` into a `Vec<T>` takes,
+/// without decoding its items, and advances `buf` past the list.
+///
+/// RLP decoding pushes the items into the `Vec` one at a time, so the list is counted at the
+/// capacity it grows to, see [`decoded_capacity`]. Memory the items point to is not counted.
+pub(crate) fn decoded_list_size<T>(buf: &mut &[u8]) -> alloy_rlp::Result<usize> {
     let mut items = Header::decode_bytes(buf, true)?;
     let mut len = 0;
     while !items.is_empty() {
@@ -949,7 +959,21 @@ pub(crate) fn rlp_list_len(buf: &mut &[u8]) -> alloy_rlp::Result<usize> {
         items = &items[header.payload_length..];
         len += 1;
     }
-    Ok(len)
+    Ok(decoded_capacity(len).saturating_mul(core::mem::size_of::<T>()))
+}
+
+/// Returns the capacity of a `Vec` that `len` items were pushed into one at a time.
+///
+/// The first push allocates room for four items, the minimum `Vec` uses for items of up to
+/// 1 KiB, and every later growth doubles the capacity.
+pub(crate) const fn decoded_capacity(len: usize) -> usize {
+    if len == 0 {
+        0
+    } else if len <= 4 {
+        4
+    } else {
+        len.next_power_of_two()
+    }
 }
 
 #[cfg(test)]

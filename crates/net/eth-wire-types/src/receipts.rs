@@ -1,6 +1,6 @@
 //! Implements the `GetReceipts` and `Receipts` message types.
 
-use crate::message::{ensure_list_within_memory_budget, rlp_list_len};
+use crate::message::{decoded_list_size, ensure_list_within_memory_budget};
 use alloc::vec::Vec;
 use alloy_consensus::{ReceiptWithBloom, RlpDecodableReceipt, RlpEncodableReceipt, TxReceipt};
 use alloy_primitives::B256;
@@ -101,10 +101,10 @@ impl<T: RlpDecodableReceipt> Receipts<T> {
         buf: &mut &[u8],
         memory_budget: usize,
     ) -> alloy_rlp::Result<Self> {
-        ensure_list_within_memory_budget::<Vec<ReceiptWithBloom<T>>, ReceiptWithBloom<T>>(
+        ensure_list_within_memory_budget::<Vec<ReceiptWithBloom<T>>>(
             buf,
             memory_budget,
-            rlp_list_len,
+            decoded_list_size::<ReceiptWithBloom<T>>,
         )?;
         Self::decode(buf)
     }
@@ -153,7 +153,7 @@ impl<T: Decodable> Receipts69<T> {
         buf: &mut &[u8],
         memory_budget: usize,
     ) -> alloy_rlp::Result<Self> {
-        ensure_list_within_memory_budget::<Vec<T>, T>(buf, memory_budget, rlp_list_len)?;
+        ensure_list_within_memory_budget::<Vec<T>>(buf, memory_budget, decoded_list_size::<T>)?;
         Self::decode(buf)
     }
 }
@@ -230,7 +230,11 @@ impl<T: Decodable> Receipts70<T> {
     ) -> alloy_rlp::Result<Self> {
         let mut receipts = *buf;
         bool::decode(&mut receipts)?;
-        ensure_list_within_memory_budget::<Vec<T>, T>(receipts, memory_budget, rlp_list_len)?;
+        ensure_list_within_memory_budget::<Vec<T>>(
+            receipts,
+            memory_budget,
+            decoded_list_size::<T>,
+        )?;
         Self::decode(buf)
     }
 }
@@ -454,8 +458,9 @@ mod tests {
 
     #[test]
     fn receipts_memory_budget() {
-        let receipts = vec![vec![Receipt::default(); 3], vec![Receipt::default(); 2]];
-        let size = 2 * core::mem::size_of::<Vec<Receipt>>() + 5 * core::mem::size_of::<Receipt>();
+        let receipts = vec![vec![Receipt::default(); 5], vec![Receipt::default(); 1]];
+        // Decoding grows the outer list to 4 lists and the receipt lists to 8 and 4.
+        let size = 4 * core::mem::size_of::<Vec<Receipt>>() + 12 * core::mem::size_of::<Receipt>();
         let exceeded = alloy_rlp::Error::Custom("decoded list exceeds memory budget");
 
         let receipts69 = Receipts69::<Receipt>(receipts.clone());
@@ -481,8 +486,8 @@ mod tests {
         );
 
         let receipts = Receipts69(receipts).into_with_bloom();
-        let size = 2 * core::mem::size_of::<Vec<ReceiptWithBloom<Receipt>>>() +
-            5 * core::mem::size_of::<ReceiptWithBloom<Receipt>>();
+        let size = 4 * core::mem::size_of::<Vec<ReceiptWithBloom<Receipt>>>() +
+            12 * core::mem::size_of::<ReceiptWithBloom<Receipt>>();
         let encoded = alloy_rlp::encode(&receipts);
         let mut buf = encoded.as_slice();
         assert_eq!(Receipts::decode_with_memory_budget(&mut buf, size), Ok(receipts));

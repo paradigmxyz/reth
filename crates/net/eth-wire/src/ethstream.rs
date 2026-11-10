@@ -850,9 +850,12 @@ mod tests {
             EthVersion::Eth68,
             max_message_size,
         );
-        let max_txs = (max_message_size * RESPONSE_MEMORY_BUDGET_MULTIPLIER -
-            core::mem::size_of::<Body>()) /
-            core::mem::size_of::<Tx>();
+        // Decoding grows the body list to 4 bodies and the transaction list to a power of two.
+        let max_txs = 1 <<
+            ((max_message_size * RESPONSE_MEMORY_BUDGET_MULTIPLIER -
+                4 * core::mem::size_of::<Body>()) /
+                core::mem::size_of::<Tx>())
+            .ilog2();
         let tx = Tx::from(Signed::new_unhashed(
             TxLegacy::default(),
             Signature::new(U256::ZERO, U256::ZERO, false),
