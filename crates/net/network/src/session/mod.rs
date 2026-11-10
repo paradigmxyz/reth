@@ -507,19 +507,15 @@ impl<N: NetworkPrimitives> SessionManager<N> {
     ///
     /// Active sessions are prioritized, but after [`DEFAULT_BUDGET_PRIORITIZED_EVENTS`] active
     /// session events in a row pending sessions are polled first once, so a steady stream of active
-    /// session messages can't hold back new sessions. Established incoming sessions are
-    /// disconnected with the reason returned by `inbound_session_rejection` instead of being
-    /// activated.
+    /// session messages can't hold back new sessions.
     pub(crate) fn poll(
         &mut self,
         cx: &mut Context<'_>,
-        inbound_session_rejection: impl Fn(PeerId) -> Option<DisconnectReason>,
+        has_inbound_capacity: impl Fn(PeerId) -> bool,
     ) -> Poll<SessionEvent<N>> {
         if self.active_events_in_row >= DEFAULT_BUDGET_PRIORITIZED_EVENTS {
             self.active_events_in_row = 0;
-            if let Poll::Ready(event) =
-                self.poll_pending_session_event(cx, &inbound_session_rejection)
-            {
+            if let Poll::Ready(event) = self.poll_pending_session_event(cx, &has_inbound_capacity) {
                 return Poll::Ready(event)
             }
         }
@@ -530,7 +526,7 @@ impl<N: NetworkPrimitives> SessionManager<N> {
         }
 
         self.active_events_in_row = 0;
-        self.poll_pending_session_event(cx, inbound_session_rejection)
+        self.poll_pending_session_event(cx, has_inbound_capacity)
     }
 
     /// Polls the next event from the active sessions.
@@ -583,7 +579,7 @@ impl<N: NetworkPrimitives> SessionManager<N> {
     fn poll_pending_session_event(
         &mut self,
         cx: &mut Context<'_>,
-        inbound_session_rejection: impl Fn(PeerId) -> Option<DisconnectReason>,
+        has_inbound_capacity: impl Fn(PeerId) -> bool,
     ) -> Poll<SessionEvent<N>> {
         let event = loop {
             let event = match self.pending_session_rx.poll_next_unpin(cx) {
@@ -639,8 +635,8 @@ impl<N: NetworkPrimitives> SessionManager<N> {
                 }
 
                 if direction.is_incoming() {
-                    if let Some(reason) = inbound_session_rejection(peer_id) {
-                        self.disconnect_pending_connection(conn, reason);
+                    if !has_inbound_capacity(peer_id) {
+                        self.disconnect_pending_connection(conn, DisconnectReason::TooManyPeers);
                         return Poll::Ready(SessionEvent::IncomingPendingSessionClosed {
                             remote_addr,
                             error: None,

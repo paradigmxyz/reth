@@ -965,6 +965,7 @@ where
                 state_provider_factory,
                 executor: executor.clone(),
                 timeout: config.state_root_task_timeout(),
+                compare_trie_updates: config.always_compare_trie_updates(),
                 metrics: BlockValidationMetrics::default(),
             }),
             hashed_state_rx,
@@ -1078,6 +1079,7 @@ struct SparseTrieStateRootJob<N: NodePrimitives, P> {
     state_provider_factory: OverlayStateProviderFactory<P, N>,
     executor: reth_tasks::Runtime,
     timeout: Option<Duration>,
+    compare_trie_updates: bool,
     metrics: BlockValidationMetrics,
 }
 
@@ -1139,7 +1141,7 @@ where
         output: &BlockExecutionOutput<N::Receipt>,
         outcome: StateRootComputeOutcome,
     ) -> ProviderResult<StateRootJobOutcome> {
-        let outcome = StateRootJobOutcome::new(outcome.state_root, outcome.trie_updates);
+        let outcome = self.sparse_outcome(output, outcome);
         if outcome.state_root == block.header().state_root() {
             publish_sparse_trie(
                 &self.pending_trie_rx,
@@ -1156,6 +1158,25 @@ where
             "State root task returned incorrect state root, recomputing serially"
         );
         self.compute_serial(output)
+    }
+
+    fn sparse_outcome(
+        &self,
+        output: &BlockExecutionOutput<N::Receipt>,
+        outcome: StateRootComputeOutcome,
+    ) -> StateRootJobOutcome {
+        let StateRootComputeOutcome { state_root, trie_updates, hashed_state: _hashed_state } =
+            outcome;
+
+        if self.compare_trie_updates {
+            compare_trie_updates_with_serial(
+                self.state_provider_factory.clone(),
+                output,
+                trie_updates.as_ref().clone(),
+            );
+        }
+
+        StateRootJobOutcome::new(state_root, trie_updates)
     }
 }
 
@@ -1197,22 +1218,22 @@ where
             Ok(Ok(outcome)) => return self.verified_sparse_outcome(block, &output, outcome),
             Ok(Err(err)) => {
                 debug!(target: "engine::tree::state_root_strategy", %err, "State root task failed, falling back to serial root");
-                self.serial_fallback(output)?
+                self.serial_fallback(output.clone())?
             }
             Err(RecvTimeoutError::Timeout) => {
                 warn!(target: "engine::tree::state_root_strategy", ?timeout, "State root task timed out, racing serial fallback");
                 self.metrics.state_root_task_timeout_total.increment(1);
-                self.serial_fallback(output)?
+                self.serial_fallback(output.clone())?
             }
             Err(RecvTimeoutError::Disconnected) => {
                 debug!(target: "engine::tree::state_root_strategy", "State root task dropped, falling back to serial root");
-                self.serial_fallback(output)?
+                self.serial_fallback(output.clone())?
             }
         };
 
         loop {
             if let Ok(Ok(outcome)) = task_rx.try_recv() {
-                let outcome = StateRootJobOutcome::new(outcome.state_root, outcome.trie_updates);
+                let outcome = self.sparse_outcome(&output, outcome);
                 if outcome.state_root == block.header().state_root() {
                     publish_sparse_trie(
                         &self.pending_trie_rx,
@@ -1249,6 +1270,71 @@ where
             std::thread::sleep(Duration::from_millis(1));
         }
     }
+}
+
+fn compare_trie_updates_with_serial<N, P>(
+    state_provider_factory: OverlayStateProviderFactory<P, N>,
+    output: &BlockExecutionOutput<N::Receipt>,
+    task_trie_updates: TrieUpdates,
+) -> bool
+where
+    N: NodePrimitives,
+    P: DatabaseProviderFactory,
+    P::Provider: BlockNumReader
+        + PruneCheckpointReader
+        + StageCheckpointReader
+        + ChangeSetReader
+        + StorageChangeSetReader
+        + StorageSettingsCache
+        + 'static,
+{
+    debug!(target: "engine::tree::state_root_strategy", "Comparing trie updates with serial computation");
+
+    match state_provider_factory.database_provider_ro().and_then(|provider| {
+        let hashed_state = provider.hashed_post_state(&output.state)?;
+        provider.state_root_with_updates(hashed_state)
+    }) {
+        Ok((serial_root, serial_trie_updates)) => {
+            debug!(
+                target: "engine::tree::state_root_strategy",
+                ?serial_root,
+                "Serial state root computation finished for comparison"
+            );
+
+            match state_provider_factory.database_provider_ro() {
+                Ok(provider) => match super::trie_updates::compare_trie_updates(
+                    &provider,
+                    task_trie_updates,
+                    serial_trie_updates,
+                ) {
+                    Ok(has_diff) => return has_diff,
+                    Err(err) => {
+                        warn!(
+                            target: "engine::tree::state_root_strategy",
+                            %err,
+                            "Error comparing trie updates"
+                        );
+                        return true;
+                    }
+                },
+                Err(err) => {
+                    warn!(
+                        target: "engine::tree::state_root_strategy",
+                        %err,
+                        "Failed to get database provider for trie update comparison"
+                    );
+                }
+            }
+        }
+        Err(err) => {
+            warn!(
+                target: "engine::tree::state_root_strategy",
+                %err,
+                "Failed to compute serial state root for comparison"
+            );
+        }
+    }
+    false
 }
 
 #[cfg(test)]
@@ -1377,6 +1463,7 @@ mod tests {
                     ),
                     executor: runtime.clone(),
                     timeout,
+                    compare_trie_updates: false,
                     metrics: Default::default(),
                 };
                 assert!(overlay_manager.take_sparse_trie().is_none());

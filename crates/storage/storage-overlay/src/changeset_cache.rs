@@ -163,10 +163,11 @@ where
 
 /// Thread-safe changeset cache.
 ///
+/// This type wraps a shared, mutable reference to the cache inner.
 /// The `RwLock` enables concurrent reads while ensuring exclusive access for writes.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(crate) struct ChangesetCache {
-    inner: RwLock<ChangesetCacheInner>,
+    inner: Arc<RwLock<ChangesetCacheInner>>,
 }
 
 impl Default for ChangesetCache {
@@ -181,7 +182,7 @@ impl ChangesetCache {
     /// The cache has no capacity limit and relies on explicit eviction
     /// via the `evict()` method to manage memory usage.
     pub(crate) fn new() -> Self {
-        Self { inner: RwLock::new(ChangesetCacheInner::new()) }
+        Self { inner: Arc::new(RwLock::new(ChangesetCacheInner::new())) }
     }
 
     /// Evicts changesets for blocks below the given block number.

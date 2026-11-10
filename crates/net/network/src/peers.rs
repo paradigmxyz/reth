@@ -518,18 +518,6 @@ impl PeersManager {
             self.peers.get(&peer_id).is_some_and(|peer| peer.is_trusted())
     }
 
-    /// Returns the reason to reject an incoming session before it is activated, or `None` if the
-    /// session may become active.
-    pub(crate) fn inbound_session_rejection(&self, peer_id: PeerId) -> Option<DisconnectReason> {
-        if self.ban_list.is_banned_peer(&peer_id) ||
-            self.peers.get(&peer_id).is_some_and(|peer| peer.is_banned()) ||
-            (self.trusted_nodes_only && !self.trusted_peer_ids.contains(&peer_id))
-        {
-            return Some(DisconnectReason::DisconnectRequested)
-        }
-        (!self.has_inbound_capacity(peer_id)).then_some(DisconnectReason::TooManyPeers)
-    }
-
     /// Bans the peer temporarily with the configured ban timeout
     fn ban_peer(&mut self, peer_id: PeerId) {
         let ban_duration = if let Some(peer) = self.peers.get(&peer_id) &&
@@ -2820,10 +2808,6 @@ mod tests {
         assert!(peer_manager.on_incoming_pending_session(socket_addr.ip()).is_ok());
         // non-trusted nodes should also increase pending_in
         assert_eq!(peer_manager.connection_info.num_pending_in, 1);
-        assert_eq!(
-            peer_manager.inbound_session_rejection(given_peer_id),
-            Some(DisconnectReason::DisconnectRequested)
-        );
         peer_manager.on_incoming_session_established(given_peer_id, socket_addr);
         // after the connection is established, the peer should be removed, the num_pending_in
         // should be decreased, and the num_inbound should not be increased
@@ -3020,11 +3004,6 @@ mod tests {
         assert!(peers.on_incoming_pending_session(basic_sock.ip()).is_ok());
         // non-trusted nodes should also increase pending_in
         assert_eq!(peers.connection_info.num_pending_in, 1);
-        assert_eq!(
-            peers.inbound_session_rejection(basic_peer),
-            Some(DisconnectReason::DisconnectRequested)
-        );
-        assert_eq!(peers.inbound_session_rejection(trusted_peer), None);
         peers.on_incoming_session_established(basic_peer, basic_sock);
         // after the connection is established, the peer should be removed, the num_pending_in
         // should be decreased, and the num_inbound mut not be increased

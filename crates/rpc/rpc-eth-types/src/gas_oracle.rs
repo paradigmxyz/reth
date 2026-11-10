@@ -4,11 +4,10 @@
 use super::{EthApiError, EthResult, EthStateCache, RpcInvalidTransactionError};
 use alloy_consensus::{constants::GWEI_TO_WEI, BlockHeader, Transaction, TxReceipt};
 use alloy_eips::BlockNumberOrTag;
-use alloy_primitives::{map::FbBuildHasher, B256, U256};
+use alloy_primitives::{B256, U256};
 use alloy_rpc_types_eth::BlockId;
 use derive_more::{Deref, DerefMut, From, Into};
 use itertools::Itertools;
-use reth_lru::LruMap;
 use reth_rpc_server_types::{
     constants,
     constants::gas_oracle::{
@@ -17,6 +16,7 @@ use reth_rpc_server_types::{
     },
 };
 use reth_storage_api::{BlockReaderIdExt, NodePrimitivesProvider};
+use schnellru::{ByLength, LruMap};
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Debug, Formatter};
 use tokio::sync::Mutex;
@@ -118,10 +118,9 @@ where
                     .default_suggested_fee
                     .unwrap_or_else(|| GasPriceOracleResult::default().price),
             },
-            lowest_effective_tip_cache: EffectiveTipLruCache(LruMap::with_hasher(
+            lowest_effective_tip_cache: EffectiveTipLruCache(LruMap::new(ByLength::new(
                 cached_values,
-                Default::default(),
-            )),
+            ))),
         });
 
         Self { provider, oracle_config, cache, ignore_price, inner }
@@ -393,7 +392,7 @@ struct GasPriceOracleInner {
 
 /// Wrapper struct for `LruMap`
 #[derive(Deref, DerefMut)]
-pub struct EffectiveTipLruCache(LruMap<B256, (B256, Vec<U256>), FbBuildHasher<32>>);
+pub struct EffectiveTipLruCache(LruMap<B256, (B256, Vec<U256>), ByLength>);
 
 impl Debug for EffectiveTipLruCache {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {

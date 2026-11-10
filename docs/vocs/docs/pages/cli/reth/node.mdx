@@ -493,9 +493,7 @@ RPC:
           [default: 20000]
 
       --rpc.gascap <GAS_CAP>
-          Maximum gas limit for `eth_call`, `eth_estimateGas`, and call tracing RPC methods.
-
-          The calls of an `eth_callMany`, `trace_callMany` or `debug_traceCallMany` request share it.
+          Maximum gas limit for `eth_call`, `eth_estimateGas`, and call tracing RPC methods
 
           [default: 50000000]
 
@@ -1104,6 +1102,9 @@ Engine:
           Configure the size of cross-block cache in megabytes
 
           [default: 4096]
+
+      --engine.state-root-task-compare-updates
+          Enable comparing trie updates from the state root task to the trie updates from the regular state root calculation
 
       --engine.accept-execution-requests-hash
           Enables accepting requests hash instead of an array of requests in `engine_newPayloadV4`

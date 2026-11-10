@@ -1996,12 +1996,8 @@ impl<T: PoolTransaction> AllTransactions<T> {
                 self.tx_counter.get(&transaction.sender_id()).copied().unwrap_or_default();
 
             // Reject transactions if sender's capacity is exceeded.
-            // If transaction's nonce matches on-chain nonce always let it through.
-            // Replacements of an existing transaction don't increase the sender's count.
-            if current_txs >= self.max_account_slots &&
-                transaction.nonce() > on_chain_nonce &&
-                !self.txs.contains_key(&transaction.transaction_id)
-            {
+            // If transaction's nonce matches on-chain nonce always let it through
+            if current_txs >= self.max_account_slots && transaction.nonce() > on_chain_nonce {
                 return Err(InsertErr::ExceededSenderTransactionsCapacity {
                     transaction: Arc::new(transaction),
                 })
@@ -3498,42 +3494,6 @@ mod tests {
         assert!(pool
             .insert_tx(f.validated(unblocked_tx), on_chain_balance, on_chain_nonce)
             .is_ok());
-    }
-
-    #[test]
-    fn replace_at_sender_capacity() {
-        let on_chain_balance = U256::from(1_000);
-        let on_chain_nonce = 0;
-        let mut f = MockTransactionFactory::default();
-        let mut pool = AllTransactions::default();
-
-        let mut tx = MockTransaction::eip1559().with_nonce(on_chain_nonce);
-        pool.insert_tx(f.validated(tx.clone()), on_chain_balance, on_chain_nonce).unwrap();
-        for _ in 1..pool.max_account_slots {
-            tx = tx.next();
-            pool.insert_tx(f.validated(tx.clone()), on_chain_balance, on_chain_nonce).unwrap();
-        }
-        let sender = f.ids.sender_id(tx.get_sender()).unwrap();
-        assert_eq!(pool.tx_count(sender), pool.max_account_slots);
-
-        // a fee-bumped replacement of the highest nonce does not change the sender's count
-        let replacement = f.validated(tx.clone().rng_hash().inc_price_by(tx.get_gas_price()));
-        let InsertOk { replaced_tx, .. } =
-            pool.insert_tx(replacement.clone(), on_chain_balance, on_chain_nonce).unwrap();
-        assert_eq!(replaced_tx.unwrap().0.hash(), tx.hash());
-        assert!(!pool.contains(tx.hash()));
-        assert!(pool.contains(replacement.hash()));
-        assert_eq!(pool.tx_count(sender), pool.max_account_slots);
-
-        // an underpriced replacement is still rejected as such
-        let underpriced = f.validated(tx.clone().rng_hash());
-        let err = pool.insert_tx(underpriced, on_chain_balance, on_chain_nonce).unwrap_err();
-        assert!(matches!(err, InsertErr::Underpriced { .. }));
-
-        // a new nonce is still over capacity
-        let err =
-            pool.insert_tx(f.validated(tx.next()), on_chain_balance, on_chain_nonce).unwrap_err();
-        assert!(matches!(err, InsertErr::ExceededSenderTransactionsCapacity { .. }));
     }
 
     #[test]

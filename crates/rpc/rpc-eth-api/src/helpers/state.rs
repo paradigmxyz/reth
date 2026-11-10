@@ -19,7 +19,7 @@ use reth_rpc_eth_types::{
     error::{FromEvmError, IntoEthApiError},
     EthApiError, PendingBlockEnv, RpcInvalidTransactionError, SignError,
 };
-use reth_rpc_server_types::constants::{DEFAULT_MAX_PROOF_SLOTS, DEFAULT_MAX_STORAGE_VALUES_SLOTS};
+use reth_rpc_server_types::constants::DEFAULT_MAX_STORAGE_VALUES_SLOTS;
 use reth_storage_api::{
     BlockIdReader, BlockReaderIdExt, StateProvider, StateProviderBox, StateProviderFactory,
 };
@@ -151,9 +151,6 @@ pub trait EthState: LoadState + SpawnBlocking {
     }
 
     /// Returns values stored of given account, with Merkle-proof, at given blocknumber.
-    ///
-    /// Enforces a cap of [`DEFAULT_MAX_PROOF_SLOTS`] on the number of requested keys, before a
-    /// proof permit is acquired.
     fn get_proof(
         &self,
         address: Address,
@@ -166,13 +163,6 @@ pub trait EthState: LoadState + SpawnBlocking {
     where
         Self: EthApiSpec,
     {
-        if keys.len() > DEFAULT_MAX_PROOF_SLOTS {
-            return Err(Self::Error::from_eth_err(EthApiError::InvalidParams(format!(
-                "storage key count {} exceeds limit {DEFAULT_MAX_PROOF_SLOTS}",
-                keys.len(),
-            ))));
-        }
-
         Ok(async move {
             let permit = self
                 .acquire_owned_tracing()
@@ -196,9 +186,6 @@ pub trait EthState: LoadState + SpawnBlocking {
     }
 
     /// Returns account and storage proofs for multiple targets at the given block number.
-    ///
-    /// Enforces a cap of [`DEFAULT_MAX_PROOF_SLOTS`] on both the number of targets and the total
-    /// slot count across all targets, before a proof permit is acquired.
     fn get_multi_proof(
         &self,
         targets: Vec<(Address, Vec<B256>)>,
@@ -210,19 +197,6 @@ pub trait EthState: LoadState + SpawnBlocking {
     where
         Self: EthApiSpec,
     {
-        if targets.len() > DEFAULT_MAX_PROOF_SLOTS {
-            return Err(Self::Error::from_eth_err(EthApiError::InvalidParams(format!(
-                "target count {} exceeds limit {DEFAULT_MAX_PROOF_SLOTS}",
-                targets.len(),
-            ))));
-        }
-        let total_slots: usize = targets.iter().map(|(_, slots)| slots.len()).sum();
-        if total_slots > DEFAULT_MAX_PROOF_SLOTS {
-            return Err(Self::Error::from_eth_err(EthApiError::InvalidParams(format!(
-                "total slot count {total_slots} exceeds limit {DEFAULT_MAX_PROOF_SLOTS}",
-            ))));
-        }
-
         Ok(async move {
             let permit = self
                 .acquire_owned_tracing()

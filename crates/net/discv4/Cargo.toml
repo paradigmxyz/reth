@@ -17,7 +17,6 @@ reth-net-banlist.workspace = true
 reth-ethereum-forks.workspace = true
 reth-net-nat.workspace = true
 reth-network-peers = { workspace = true, features = ["secp256k1"] }
-reth-lru.workspace = true
 
 # ethereum
 alloy-primitives = { workspace = true, features = ["rand"] }
@@ -31,6 +30,7 @@ tokio = { workspace = true, features = ["io-util", "net", "time"] }
 tokio-stream.workspace = true
 
 # misc
+schnellru.workspace = true
 tracing.workspace = true
 thiserror.workspace = true
 parking_lot.workspace = true

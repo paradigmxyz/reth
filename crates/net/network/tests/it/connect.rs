@@ -241,13 +241,8 @@ async fn test_trusted_peer_only() {
     // only receive connections from trusted peers.
     peer1.add_peer(peer);
 
-    // peer1 is untrusted, so its incoming session is never activated.
-    assert!(tokio::time::timeout(
-        Duration::from_millis(500),
-        event_stream.next_session_established()
-    )
-    .await
-    .is_err());
+    // wait 500ms, the number of connections is still 1, because peer1 is untrusted.
+    tokio::time::sleep(Duration::from_millis(500)).await;
     assert_eq!(peer.network().num_connected_peers(), 1);
 
     // remove peer from peer1's peer list to prevent a competing outgoing connection attempt

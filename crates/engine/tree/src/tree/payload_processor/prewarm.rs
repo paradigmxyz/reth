@@ -884,10 +884,12 @@ where
         // changes to start processing them before potentially hitting the db in the next step.
         if account_changes.has_storage_changes() {
             let hashed_address = *hashed_address.get_or_insert_with(|| keccak256(address));
+            let (slots, values): (Vec<[u8; 32]>, Vec<_>) = account_changes
+                .storage_post_states()
+                .map(|(slot, value)| (slot.to_be_bytes::<32>(), value))
+                .unzip();
             let storage_map = reth_trie::HashedStorage::from_iter(
-                account_changes
-                    .storage_post_states()
-                    .map(|(slot, value)| (keccak256(slot.to_be_bytes::<32>()), value)),
+                reth_trie::keccak256_batch(&slots).into_iter().zip(values),
             );
 
             let mut hashed_state = reth_trie::HashedPostState::default();

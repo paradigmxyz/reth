@@ -38,14 +38,10 @@ pub fn discv4_id_to_multiaddr_id(
 #[derive(Debug, Clone)]
 pub struct EnrCombinedKeyWrapper(pub discv5::Enr);
 
-impl TryFrom<Enr<SecretKey>> for EnrCombinedKeyWrapper {
-    type Error = alloy_rlp::Error;
-
-    fn try_from(value: Enr<SecretKey>) -> Result<Self, Self::Error> {
-        // The k256 backend of `discv5::Enr` rejects some public key encodings that libsecp256k1
-        // accepts.
+impl From<Enr<SecretKey>> for EnrCombinedKeyWrapper {
+    fn from(value: Enr<SecretKey>) -> Self {
         let encoded_enr = alloy_rlp::encode(&value);
-        alloy_rlp::Decodable::decode(&mut &encoded_enr[..]).map(Self)
+        Self(alloy_rlp::Decodable::decode(&mut &encoded_enr[..]).unwrap())
     }
 }
 
@@ -59,8 +55,7 @@ impl From<EnrCombinedKeyWrapper> for Enr<SecretKey> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_primitives::keccak256;
-    use alloy_rlp::{Encodable, Header};
+    use alloy_rlp::Encodable;
     use enr::{CombinedKey, EnrKey};
     use reth_chainspec::{EthereumHardfork, MAINNET};
     use reth_network_peers::NodeRecord;
@@ -110,35 +105,5 @@ mod tests {
             },
             node_record
         )
-    }
-
-    #[test]
-    fn enr_conversion_rejects_hybrid_encoded_key() {
-        let sk = SecretKey::from_secret_bytes([1; 32]).unwrap();
-        // Hybrid encoding: an uncompressed point with the y parity in the prefix byte.
-        let mut pk = sk.public_key().serialize_uncompressed();
-        pk[0] = 0x06 | (pk[64] & 1);
-
-        let rlp_list = |payload: &[u8]| {
-            let mut out = Vec::new();
-            Header { list: true, payload_length: payload.len() }.encode(&mut out);
-            out.extend_from_slice(payload);
-            out
-        };
-        let mut content = Vec::new();
-        1u64.encode(&mut content);
-        for item in [&b"id"[..], b"v4", b"secp256k1", &pk] {
-            item.encode(&mut content);
-        }
-        let msg = secp256k1::Message::from_digest(keccak256(rlp_list(&content)).0);
-        let mut payload = Vec::new();
-        secp256k1::ecdsa::sign(msg, &sk).serialize_compact().as_slice().encode(&mut payload);
-        payload.extend_from_slice(&content);
-
-        let enr = alloy_rlp::decode_exact::<Enr<SecretKey>>(rlp_list(&payload)).unwrap();
-        assert_eq!(
-            EnrCombinedKeyWrapper::try_from(enr).unwrap_err(),
-            alloy_rlp::Error::Custom("Unknown signature")
-        );
     }
 }

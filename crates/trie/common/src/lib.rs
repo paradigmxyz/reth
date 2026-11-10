@@ -50,6 +50,9 @@ pub use target_v2::{
 mod key;
 pub use key::{KeccakKeyHasher, KeyHasher};
 
+mod keccak_batch;
+pub use keccak_batch::{keccak256_batch, keccak256_batch_into, KECCAK256_BATCH_MAX_INPUT};
+
 mod nibbles;
 pub use nibbles::{
     depth_first_cmp, Nibbles, PackedStoredNibbles, PackedStoredNibblesSubKey, StoredNibbles,

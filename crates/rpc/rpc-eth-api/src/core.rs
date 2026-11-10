@@ -263,11 +263,8 @@ pub trait EthApi<
     #[method(name = "fillTransaction")]
     async fn fill_transaction(&self, request: TxReq) -> RpcResult<FillTransaction<RawTx>>;
 
-    /// Simulate transactions at an arbitrary blockchain index, with the optionality of state
-    /// overrides.
-    ///
-    /// The request is bounded by [`CallManyBudget`](reth_rpc_eth_types::utils::CallManyBudget):
-    /// its calls share the RPC gas cap.
+    /// Simulate arbitrary number of transactions at an arbitrary blockchain index, with the
+    /// optionality of state overrides
     #[method(name = "callMany")]
     async fn call_many(
         &self,

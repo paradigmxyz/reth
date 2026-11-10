@@ -168,9 +168,6 @@ where
 
 /// Write the genesis block if it has not already been written with [`StorageSettings`],
 /// optionally validating the DB-resident genesis hash against the chainspec hash.
-///
-/// Retries interrupted genesis initialization when the Headers checkpoint is absent and the
-/// static files contain only the matching genesis block.
 pub fn init_genesis_with_settings_and_validate<PF>(
     factory: &PF,
     genesis_storage_settings: StorageSettings,
@@ -211,50 +208,29 @@ where
         Ok(None) | Err(ProviderError::MissingStaticFileBlock(StaticFileSegment::Headers, _)) => {}
         Ok(Some(block_hash)) => {
             if block_hash == hash {
-                if factory.get_stage_checkpoint(StageId::Headers)?.is_some() {
-                    let stored = factory.storage_settings()?.unwrap_or_else(StorageSettings::v1);
-                    if stored != genesis_storage_settings {
-                        warn!(
-                            target: "reth::storage",
-                            ?stored,
-                            requested = ?genesis_storage_settings,
-                            "Storage settings mismatch detected. Using the stored settings from the existing database."
-                        );
-                    }
-
-                    debug!("Genesis already written, skipping.");
-                    return Ok(hash)
-                }
-
-                // A static-first genesis commit can be interrupted before its MDBX transaction
-                // commits. The genesis MDBX writes are atomic, so an absent Headers checkpoint
-                // permits replay when static files contain only genesis. Reject static files
-                // from an already-synced node whose MDBX database was deleted.
-                let static_files = factory.static_file_provider();
-                let has_non_genesis_static_files = StaticFileSegment::iter().any(|segment| {
-                    static_files
-                        .get_highest_static_file_block(segment)
-                        .is_some_and(|block| block != genesis_block_number) ||
-                        static_files
-                            .get_lowest_range_start(segment)
-                            .is_some_and(|block| block != genesis_block_number) ||
-                        (segment.is_tx_based() &&
-                            static_files.get_highest_static_file_tx(segment).is_some())
-                });
-                if has_non_genesis_static_files {
+                // Some users will at times attempt to re-sync from scratch by just deleting the
+                // database. Since `factory.block_hash` will only query the static files, we need to
+                // make sure that our database has been written to, and throw error if it's empty.
+                if factory.get_stage_checkpoint(StageId::Headers)?.is_none() {
                     error!(target: "reth::storage", "Genesis header found on static files, but database is uninitialized.");
                     return Err(InitStorageError::UninitializedDatabase)
                 }
 
-                // Genesis changesets may already have been published. Remove them before replay
-                // so storage v2 does not append the same genesis block twice after a restart.
-                for segment in
-                    [StaticFileSegment::AccountChangeSets, StaticFileSegment::StorageChangeSets]
-                {
-                    static_files.delete_segment(segment)?;
+                let stored = factory.storage_settings()?.unwrap_or_else(StorageSettings::v1);
+                if stored != genesis_storage_settings {
+                    warn!(
+                        target: "reth::storage",
+                        ?stored,
+                        requested = ?genesis_storage_settings,
+                        "Storage settings mismatch detected. Using the stored settings from the existing database."
+                    );
                 }
-                warn!(target: "reth::storage", "Resuming interrupted genesis initialization.");
-            } else if !validate_genesis_hash {
+
+                debug!("Genesis already written, skipping.");
+                return Ok(hash)
+            }
+
+            if !validate_genesis_hash {
                 warn!(
                     target: "reth::storage",
                     chainspec_hash = %hash,
@@ -262,12 +238,11 @@ where
                     "Genesis hash mismatch with chainspec; trusting DB per --debug.skip-genesis-validation"
                 );
                 return Ok(block_hash)
-            } else {
-                return Err(InitStorageError::GenesisHashMismatch {
-                    chainspec_hash: hash,
-                    storage_hash: block_hash,
-                })
             }
+            return Err(InitStorageError::GenesisHashMismatch {
+                chainspec_hash: hash,
+                storage_hash: block_hash,
+            })
         }
         Err(e) => {
             debug!(?e);
@@ -346,6 +321,8 @@ where
             .set_block_range(genesis_block_number, genesis_block_number);
     }
 
+    // `commit_unwind`` will first commit the DB and then the static file provider, which is
+    // necessary on `init_genesis`.
     provider_rw.commit()?;
 
     Ok(hash)

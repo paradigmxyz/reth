@@ -23,8 +23,8 @@ pub use config::DnsDiscoveryConfig;
 use enr::Enr;
 pub use error::ParseDnsEntryError;
 use reth_ethereum_forks::{EnrForkIdEntry, ForkId};
-use reth_lru::LruMap;
 use reth_network_peers::NodeRecord;
+use schnellru::{ByLength, LruMap};
 use secp256k1::SecretKey;
 use std::{
     collections::{hash_map::Entry, HashMap, HashSet, VecDeque},
@@ -116,9 +116,6 @@ pub struct DnsDiscoveryService<R: Resolver = DnsResolver> {
     recheck_tick: Interval,
     /// Links to the DNS networks to bootstrap.
     bootstrap_dns_networks: HashSet<LinkEntry>,
-    /// Links whose initial root lookup failed, retried on every recheck tick until a tree exists
-    /// for them.
-    failed_root_lookups: HashSet<LinkEntry>,
 }
 
 // === impl DnsDiscoveryService ===
@@ -152,12 +149,11 @@ impl<R: Resolver> DnsDiscoveryService<R> {
             node_record_listeners: Default::default(),
             trees: Default::default(),
             queries,
-            dns_record_cache: LruMap::new(dns_record_cache_limit.get()),
+            dns_record_cache: LruMap::new(ByLength::new(dns_record_cache_limit.get())),
             queued_events: Default::default(),
             recheck_interval,
             recheck_tick: recheck_tick(recheck_interval),
             bootstrap_dns_networks: bootstrap_dns_networks.unwrap_or_default(),
-            failed_root_lookups: Default::default(),
         }
     }
 
@@ -244,7 +240,6 @@ impl<R: Resolver> DnsDiscoveryService<R> {
                     entry.get_mut().update_root(root);
                 }
                 Entry::Vacant(entry) => {
-                    self.failed_root_lookups.remove(&link);
                     entry.insert(SyncTree::new(root, link));
                 }
             },
@@ -254,8 +249,6 @@ impl<R: Resolver> DnsDiscoveryService<R> {
                 // be released even though the lookup failed
                 if let Some(tree) = self.trees.get_mut(&link) {
                     tree.root_update_failed();
-                } else {
-                    self.failed_root_lookups.insert(link);
                 }
             }
         }
@@ -368,14 +361,9 @@ impl<R: Resolver> DnsDiscoveryService<R> {
             }
 
             // Register the wake-up for the next recheck. Polled to `Pending` so the waker is
-            // always armed; the trees were already polled with a current timestamp above, so a
-            // ready tick only retries the links whose initial root lookup failed.
-            while self.recheck_tick.poll_tick(cx).is_ready() {
-                for link in self.failed_root_lookups.drain() {
-                    progress = true;
-                    self.queries.resolve_root(link);
-                }
-            }
+            // always armed; a ready tick needs no extra work because the trees were already polled
+            // with a current timestamp above.
+            while self.recheck_tick.poll_tick(cx).is_ready() {}
 
             if !progress && self.queued_events.is_empty() {
                 return Poll::Pending
@@ -389,8 +377,6 @@ fn recheck_tick(recheck_interval: Duration) -> Interval {
     let mut tick = tokio::time::interval(recheck_interval);
     // a service that was starved must not then fire a burst of catch-up ticks
     tick.set_missed_tick_behavior(MissedTickBehavior::Delay);
-    // the first tick would otherwise complete immediately and retry failed root lookups right away.
-    tick.reset();
     tick
 }
 
@@ -707,49 +693,6 @@ mod tests {
         assert_eq!(update.enr, enr);
 
         handle.abort();
-    }
-
-    #[tokio::test]
-    async fn test_retry_failed_initial_root_lookup() {
-        reth_tracing::init_test_tracing();
-
-        let config = DnsDiscoveryConfig {
-            recheck_interval: Duration::from_millis(100),
-            max_requests_per_sec: NonZeroUsize::new(50).unwrap(),
-            ..Default::default()
-        };
-
-        let secret_key = SecretKey::new(&mut rng());
-        let resolver = Arc::new(MapResolver::default());
-        let s = "enrtree-root:v1 e=QFT4PBCRX4XQCV3VUYJ6BTCEPU l=JGUFMSAGI7KZYB3P7IZW4S5Y3A seq=3 sig=3FmXuVwpa8Y7OstZTx9PIb1mt8FrW7VpDOFv4AaGCsZ2EIHmhraWhe4NxYhQDlw5MjeFXYMbJjsPeKlHzmJREQE";
-        let mut root: TreeRootEntry = s.parse().unwrap();
-        root.sign(&secret_key).unwrap();
-
-        let link =
-            LinkEntry { domain: "nodes.example.org".to_string(), pubkey: secret_key.public() };
-
-        let mut service = DnsDiscoveryService::new(Arc::clone(&resolver), config.clone());
-
-        // the root is not published yet, so the initial lookup fails.
-        service.sync_tree_with_link(link.clone());
-        poll_fn(|cx| {
-            assert!(service.poll(cx).is_pending());
-            Poll::Ready(())
-        })
-        .await;
-        assert!(service.trees.is_empty());
-
-        resolver.insert(link.domain.clone(), root.to_string());
-        tokio::time::sleep(config.recheck_interval).await;
-
-        poll_fn(|cx| {
-            let _ = service.poll(cx);
-            Poll::Ready(())
-        })
-        .await;
-
-        let tree = service.trees.get(&link).unwrap();
-        assert_eq!(tree.root().clone(), root);
     }
 
     #[tokio::test]

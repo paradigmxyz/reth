@@ -70,6 +70,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5a15f179cd60c4584b8a8c596927aadc462e27f2ca70c04e0071964a73ba7a75"
 dependencies = [
  "cfg-if",
+ "getrandom 0.3.4",
  "once_cell",
  "version_check",
  "zerocopy",
@@ -960,9 +961,9 @@ dependencies = [
 
 [[package]]
 name = "alloy-trie"
-version = "0.9.9"
+version = "0.9.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "70c7c04b6e5a7a2325f53d38c319a47d01c3609b44845ac2801bac9643fe26b9"
+checksum = "b94e3e0a88f8db47250ac8a95fb825d020719f833eb1dc661bd3609c3bbece7d"
 dependencies = [
  "alloy-primitives",
  "alloy-rlp",
@@ -3699,7 +3700,7 @@ dependencies = [
 [[package]]
 name = "evm2"
 version = "0.1.0"
-source = "git+https://github.com/DaniPopes/evm2?rev=0b448ca75d9f9a86ef27b700921f1c45d933e5ea#0b448ca75d9f9a86ef27b700921f1c45d933e5ea"
+source = "git+https://github.com/DaniPopes/evm2?rev=37fb326b91a76dd07308c703b3f3c85152a6230b#37fb326b91a76dd07308c703b3f3c85152a6230b"
 dependencies = [
  "alloy-consensus",
  "alloy-eip7928",
@@ -3740,7 +3741,7 @@ dependencies = [
 [[package]]
 name = "evm2-inspectors"
 version = "0.1.0"
-source = "git+https://github.com/DaniPopes/evm2?rev=0b448ca75d9f9a86ef27b700921f1c45d933e5ea#0b448ca75d9f9a86ef27b700921f1c45d933e5ea"
+source = "git+https://github.com/DaniPopes/evm2?rev=37fb326b91a76dd07308c703b3f3c85152a6230b#37fb326b91a76dd07308c703b3f3c85152a6230b"
 dependencies = [
  "alloy-consensus",
  "alloy-eip2930",
@@ -3763,7 +3764,7 @@ dependencies = [
 [[package]]
 name = "evm2-jit"
 version = "0.1.0"
-source = "git+https://github.com/DaniPopes/evm2?rev=0b448ca75d9f9a86ef27b700921f1c45d933e5ea#0b448ca75d9f9a86ef27b700921f1c45d933e5ea"
+source = "git+https://github.com/DaniPopes/evm2?rev=37fb326b91a76dd07308c703b3f3c85152a6230b#37fb326b91a76dd07308c703b3f3c85152a6230b"
 dependencies = [
  "evm2",
  "evm2-jit-backend",
@@ -3778,7 +3779,7 @@ dependencies = [
 [[package]]
 name = "evm2-jit-backend"
 version = "0.1.0"
-source = "git+https://github.com/DaniPopes/evm2?rev=0b448ca75d9f9a86ef27b700921f1c45d933e5ea#0b448ca75d9f9a86ef27b700921f1c45d933e5ea"
+source = "git+https://github.com/DaniPopes/evm2?rev=37fb326b91a76dd07308c703b3f3c85152a6230b#37fb326b91a76dd07308c703b3f3c85152a6230b"
 dependencies = [
  "eyre",
  "ruint",
@@ -3787,12 +3788,12 @@ dependencies = [
 [[package]]
 name = "evm2-jit-build"
 version = "0.1.0"
-source = "git+https://github.com/DaniPopes/evm2?rev=0b448ca75d9f9a86ef27b700921f1c45d933e5ea#0b448ca75d9f9a86ef27b700921f1c45d933e5ea"
+source = "git+https://github.com/DaniPopes/evm2?rev=37fb326b91a76dd07308c703b3f3c85152a6230b#37fb326b91a76dd07308c703b3f3c85152a6230b"
 
 [[package]]
 name = "evm2-jit-builtins"
 version = "0.1.0"
-source = "git+https://github.com/DaniPopes/evm2?rev=0b448ca75d9f9a86ef27b700921f1c45d933e5ea#0b448ca75d9f9a86ef27b700921f1c45d933e5ea"
+source = "git+https://github.com/DaniPopes/evm2?rev=37fb326b91a76dd07308c703b3f3c85152a6230b#37fb326b91a76dd07308c703b3f3c85152a6230b"
 dependencies = [
  "alloy-primitives",
  "evm2",
@@ -3805,7 +3806,7 @@ dependencies = [
 [[package]]
 name = "evm2-jit-codegen"
 version = "0.1.0"
-source = "git+https://github.com/DaniPopes/evm2?rev=0b448ca75d9f9a86ef27b700921f1c45d933e5ea#0b448ca75d9f9a86ef27b700921f1c45d933e5ea"
+source = "git+https://github.com/DaniPopes/evm2?rev=37fb326b91a76dd07308c703b3f3c85152a6230b#37fb326b91a76dd07308c703b3f3c85152a6230b"
 dependencies = [
  "alloy-primitives",
  "bitflags 2.13.2",
@@ -3828,7 +3829,7 @@ dependencies = [
 [[package]]
 name = "evm2-jit-context"
 version = "0.1.0"
-source = "git+https://github.com/DaniPopes/evm2?rev=0b448ca75d9f9a86ef27b700921f1c45d933e5ea#0b448ca75d9f9a86ef27b700921f1c45d933e5ea"
+source = "git+https://github.com/DaniPopes/evm2?rev=37fb326b91a76dd07308c703b3f3c85152a6230b#37fb326b91a76dd07308c703b3f3c85152a6230b"
 dependencies = [
  "alloy-primitives",
  "evm2",
@@ -3838,7 +3839,7 @@ dependencies = [
 [[package]]
 name = "evm2-jit-llvm"
 version = "0.1.0"
-source = "git+https://github.com/DaniPopes/evm2?rev=0b448ca75d9f9a86ef27b700921f1c45d933e5ea#0b448ca75d9f9a86ef27b700921f1c45d933e5ea"
+source = "git+https://github.com/DaniPopes/evm2?rev=37fb326b91a76dd07308c703b3f3c85152a6230b#37fb326b91a76dd07308c703b3f3c85152a6230b"
 dependencies = [
  "alloy-primitives",
  "cc",
@@ -3851,7 +3852,7 @@ dependencies = [
 [[package]]
 name = "evm2-jit-runtime"
 version = "0.1.0"
-source = "git+https://github.com/DaniPopes/evm2?rev=0b448ca75d9f9a86ef27b700921f1c45d933e5ea#0b448ca75d9f9a86ef27b700921f1c45d933e5ea"
+source = "git+https://github.com/DaniPopes/evm2?rev=37fb326b91a76dd07308c703b3f3c85152a6230b#37fb326b91a76dd07308c703b3f3c85152a6230b"
 dependencies = [
  "alloy-primitives",
  "crossbeam-channel",
@@ -3877,7 +3878,7 @@ dependencies = [
 [[package]]
 name = "evm2-macros"
 version = "0.1.0"
-source = "git+https://github.com/DaniPopes/evm2?rev=0b448ca75d9f9a86ef27b700921f1c45d933e5ea#0b448ca75d9f9a86ef27b700921f1c45d933e5ea"
+source = "git+https://github.com/DaniPopes/evm2?rev=37fb326b91a76dd07308c703b3f3c85152a6230b#37fb326b91a76dd07308c703b3f3c85152a6230b"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -4819,6 +4820,12 @@ name = "hashbrown"
 version = "0.12.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8a9ee70c43aaf417c914396645a0fa852624801b24ebb7ae78fe8272889ac888"
+
+[[package]]
+name = "hashbrown"
+version = "0.13.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "43a3c133739dddd0d2990f9a4bdf8eb4b21ef50e4851ca85ab661199821d510e"
 
 [[package]]
 name = "hashbrown"
@@ -8556,11 +8563,11 @@ dependencies = [
  "parking_lot",
  "rand 0.9.5",
  "reth-ethereum-forks",
- "reth-lru",
  "reth-net-banlist",
  "reth-net-nat",
  "reth-network-peers",
  "reth-tracing",
+ "schnellru",
  "secp256k1 0.33.1",
  "serde",
  "thiserror 2.0.21",
@@ -8610,10 +8617,10 @@ dependencies = [
  "rand 0.9.5",
  "reth-chainspec",
  "reth-ethereum-forks",
- "reth-lru",
  "reth-network-peers",
  "reth-tokio-util",
  "reth-tracing",
+ "schnellru",
  "secp256k1 0.33.1",
  "serde",
  "serde_with",
@@ -8851,7 +8858,6 @@ dependencies = [
  "reth-execution-cache",
  "reth-execution-types",
  "reth-exex-types",
- "reth-lru",
  "reth-metrics",
  "reth-network-p2p",
  "reth-node-ethereum",
@@ -8872,6 +8878,7 @@ dependencies = [
  "reth-trie-common",
  "reth-trie-parallel",
  "reth-trie-sparse",
+ "schnellru",
  "thiserror 2.0.21",
  "tokio",
  "tracing",
@@ -9434,31 +9441,29 @@ name = "reth-invalid-block-hooks"
 version = "2.10.1"
 dependencies = [
  "alloy-consensus",
+ "alloy-eips",
  "alloy-primitives",
  "alloy-rlp",
  "alloy-rpc-types-debug",
  "evm2",
  "eyre",
+ "futures",
  "jsonrpsee",
- "metrics",
+ "pretty_assertions",
  "reth-chainspec",
  "reth-engine-primitives",
  "reth-ethereum-primitives",
  "reth-evm",
  "reth-evm-ethereum",
  "reth-execution-types",
- "reth-fs-util",
  "reth-primitives-traits",
  "reth-provider",
  "reth-rpc-api",
- "reth-tasks",
  "reth-testing-utils",
  "reth-trie",
  "serde",
  "serde_json",
- "similar",
  "tempfile",
- "tokio",
  "tracing",
 ]
 
@@ -9499,14 +9504,6 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.21",
  "tracing",
-]
-
-[[package]]
-name = "reth-lru"
-version = "2.10.1"
-dependencies = [
- "alloy-primitives",
- "hashbrown 0.17.1",
 ]
 
 [[package]]
@@ -9589,7 +9586,6 @@ dependencies = [
  "reth-evm",
  "reth-evm-ethereum",
  "reth-fs-util",
- "reth-lru",
  "reth-metrics",
  "reth-net-banlist",
  "reth-net-nat",
@@ -9609,6 +9605,7 @@ dependencies = [
  "reth-transaction-pool",
  "reth-trie",
  "rustc-hash",
+ "schnellru",
  "secp256k1 0.33.1",
  "serde",
  "smallvec",
@@ -10567,7 +10564,6 @@ dependencies = [
  "reth-ethereum-primitives",
  "reth-evm",
  "reth-execution-types",
- "reth-lru",
  "reth-metrics",
  "reth-primitives-traits",
  "reth-rpc-convert",
@@ -10576,6 +10572,7 @@ dependencies = [
  "reth-tasks",
  "reth-transaction-pool",
  "reth-trie-common",
+ "schnellru",
  "serde",
  "serde_json",
  "thiserror 2.0.21",
@@ -11046,7 +11043,6 @@ dependencies = [
  "reth-evm-ethereum",
  "reth-execution-types",
  "reth-fs-util",
- "reth-lru",
  "reth-metrics",
  "reth-primitives-traits",
  "reth-provider",
@@ -11055,6 +11051,7 @@ dependencies = [
  "reth-tracing",
  "reth-transaction-pool",
  "rustc-hash",
+ "schnellru",
  "serde",
  "serde_json",
  "smallvec",
@@ -11619,6 +11616,17 @@ dependencies = [
  "ref-cast",
  "serde",
  "serde_json",
+]
+
+[[package]]
+name = "schnellru"
+version = "0.2.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "356285bbf17bea63d9e52e96bd18f039672ac92b55b8cb997d6162a2a37d1649"
+dependencies = [
+ "ahash",
+ "cfg-if",
+ "hashbrown 0.13.2",
 ]
 
 [[package]]

@@ -267,10 +267,7 @@ impl Command {
                 AnyNode::Enr(enr) => {
                     let record = self.enr_endpoint(enr, nat)?;
                     seeds.enr_records.push(record);
-                    let EnrCombinedKeyWrapper(enr) = enr.clone().try_into().map_err(|err| {
-                        eyre::eyre!("--bootnodes entry has an invalid ENR ({err}): {node}")
-                    })?;
-                    seeds.enrs.push(enr);
+                    seeds.enrs.push(EnrCombinedKeyWrapper::from(enr.clone()).0);
                     record
                 }
                 node => eyre::bail!(
@@ -903,7 +900,7 @@ mod tests {
 
         let canonical =
             Enr::builder().ip6("2001:db8::9".parse().unwrap()).udp6(30303).build(&sk).unwrap();
-        let canonical = EnrCombinedKeyWrapper::try_from(canonical).unwrap().0;
+        let canonical = EnrCombinedKeyWrapper::from(canonical).0;
         assert!(discv5_contactable(&canonical, false, true));
     }
 

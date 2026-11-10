@@ -6,7 +6,6 @@ use crate::{
 };
 use alloc::{borrow::Cow, vec::Vec};
 use alloy_primitives::{
-    keccak256,
     map::{hash_map, B256Map, HashMap, HashSet},
     Address, B256, U256,
 };
@@ -43,16 +42,28 @@ impl HashedPostState {
     pub fn from_bundle_state<'a, KH: KeyHasher>(
         state: impl IntoIterator<Item = (&'a Address, &'a BundleAccount)>,
     ) -> Self {
-        state
+        // Hash every address and every storage slot in two batches rather than one by one.
+        let accounts: Vec<(&Address, &BundleAccount)> = state.into_iter().collect();
+        let addresses: Vec<&Address> = accounts.iter().map(|(address, _)| *address).collect();
+        let hashed_addresses = KH::hash_keys(&addresses);
+        let slots: Vec<B256> = accounts
+            .iter()
+            .flat_map(|(_, account)| account.storage.keys().map(|slot| B256::from(*slot)))
+            .collect();
+        let hashed_slots = crate::keccak256_batch(&slots);
+
+        let mut hashed_slots = hashed_slots.into_iter();
+        accounts
             .into_iter()
-            .map(|(address, account)| {
-                let hashed_address = KH::hash_key(address);
+            .zip(hashed_addresses)
+            .map(|((_, account), hashed_address)| {
                 let hashed_account = account.info.as_ref().map(Into::into);
                 let hashed_storage = HashedStorage::from_iter(
                     account
                         .storage
-                        .iter()
-                        .map(|(slot, value)| (keccak256(B256::from(*slot)), value.present_value)),
+                        .values()
+                        .zip(hashed_slots.by_ref())
+                        .map(|(value, hashed_slot)| (hashed_slot, value.present_value)),
                 );
 
                 (
@@ -371,9 +382,9 @@ impl HashedStorage {
 
     /// Create new hashed storage from plain storage.
     pub fn from_plain_storage<'a>(storage: impl IntoIterator<Item = (&'a U256, &'a U256)>) -> Self {
-        Self::from_iter(
-            storage.into_iter().map(|(key, value)| (keccak256(B256::from(*key)), *value)),
-        )
+        let (keys, values): (Vec<B256>, Vec<U256>) =
+            storage.into_iter().map(|(key, value)| (B256::from(*key), *value)).unzip();
+        Self::from_iter(crate::keccak256_batch(&keys).into_iter().zip(values))
     }
 
     /// Construct [`PrefixSetMut`] from hashed storage.
@@ -831,7 +842,7 @@ mod tests {
         bundle_state::{AccountStatus, StorageSlot, StorageWithOriginalValues},
         KeccakKeyHasher,
     };
-    use alloy_primitives::Bytes;
+    use alloy_primitives::{keccak256, Bytes};
     use evm2::{bytecode::Bytecode, evm::AccountInfo};
 
     fn bundle_hashed_storage(account: &BundleAccount) -> Option<HashedStorage> {

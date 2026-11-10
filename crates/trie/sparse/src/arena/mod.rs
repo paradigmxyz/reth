@@ -13,14 +13,20 @@ use crate::{
 };
 use alloc::{borrow::Cow, boxed::Box, vec::Vec};
 use alloy_primitives::{keccak256, map::B256Map, B256};
+use alloy_rlp::Encodable;
 use alloy_trie::TrieMask;
 use core::{cmp::Reverse, mem};
 use rayon::iter::{IntoParallelIterator, IntoParallelRefMutIterator, ParallelIterator};
 use reth_execution_errors::{SparseTrieErrorKind, SparseTrieResult};
 use reth_trie_common::{
-    BranchNodeMasks, BranchNodeRef, ExtensionNodeRef, LeafNodeRef, Nibbles, ProofTrieNodeV2,
-    ProofV2TargetParent, RlpNode, TrieNodeV2, EMPTY_ROOT_HASH,
+    keccak256_batch, BranchNodeMasks, BranchNodeRef, ExtensionNodeRef, LeafNodeRef, Nibbles,
+    ProofTrieNodeV2, ProofV2TargetParent, RlpNode, TrieNodeV2, EMPTY_ROOT_HASH,
 };
+
+/// Fewest uncached leaves below a subtrie's dirty branches for which
+/// [`ArenaParallelSparseTrie::hash_uncached_leaves`] hashes them as one batch. Fewer are hashed
+/// one by one during the walk.
+const MIN_BATCHED_LEAVES: usize = 3;
 use smallvec::SmallVec;
 use tracing::{instrument, trace};
 
@@ -396,11 +402,10 @@ impl ArenaSparseSubtrie {
                     self.num_dirty_leaves =
                         (self.num_dirty_leaves as i64 + deltas.num_dirty_leaves_delta) as u64;
 
-                    // The removed leaf is already revealed, so only the blinded sibling needs a
-                    // proof. The caller retries the update once that sibling is revealed.
-                    if let RemoveLeafResult::NeedsProof { proof_key, parent, .. } = result {
+                    if let RemoveLeafResult::NeedsProof { key, proof_key, parent } = result {
                         self.required_proofs
                             .push((idx, ArenaRequiredProof { key: proof_key, parent }));
+                        self.required_proofs.push((idx, ArenaRequiredProof { key, parent }));
                     }
                 }
                 LeafUpdate::Touched => {}
@@ -1002,6 +1007,9 @@ impl ArenaParallelSparseTrie {
             }
         }
 
+        // Hash the leaves that the walk would otherwise hash one by one, all together.
+        Self::hash_uncached_leaves(arena, root, rlp_buf, new_epoch);
+
         cursor.reset(arena, root, base_path);
 
         // Step 2: Walk dirty branches depth-first using `cursor.next`. Only dirty branches
@@ -1283,6 +1291,91 @@ impl ArenaParallelSparseTrie {
     /// Encodes a leaf node's RLP and pushes it onto `rlp_node_buf`.
     ///
     /// If the leaf is already cached, its existing `RlpNode` is reused.
+    /// Encodes every leaf that [`Self::update_cached_rlp`] would encode below `root` and hashes
+    /// the encodings together with [`keccak256_batch`], caching each leaf's [`RlpNode`].
+    ///
+    /// Leaves don't depend on each other, so hashing them together gives the same `RlpNode`s
+    /// as hashing them one by one during the walk, which then finds them cached.
+    fn hash_uncached_leaves(
+        arena: &mut NodeArena,
+        root: Index,
+        encoded: &mut Vec<u8>,
+        new_epoch: TrieNodeEpoch,
+    ) {
+        // Find the leaves the walk in `update_cached_rlp` encodes: uncached leaf children of
+        // dirty branches reachable from `root` through dirty branches. Subtries are hashed on
+        // their own.
+        let mut leaves: Vec<Index> = Vec::new();
+        let mut stack: Vec<Index> = alloc::vec![root];
+        while let Some(idx) = stack.pop() {
+            let ArenaSparseNode::Branch(branch) = &arena[idx] else { continue };
+            for child in &branch.children {
+                let Some(child_idx) = child.revealed_index() else { continue };
+                match &arena[child_idx] {
+                    ArenaSparseNode::Leaf { state, .. }
+                        if !matches!(state, ArenaSparseNodeState::Cached { .. }) =>
+                    {
+                        leaves.push(child_idx)
+                    }
+                    ArenaSparseNode::Branch(child_branch)
+                        if matches!(child_branch.state, ArenaSparseNodeState::Dirty) =>
+                    {
+                        stack.push(child_idx)
+                    }
+                    _ => {}
+                }
+            }
+        }
+        if leaves.len() < MIN_BATCHED_LEAVES {
+            return
+        }
+
+        // Encode every leaf into one buffer, then hash the encodings of 32 bytes or more, as
+        // `RlpNode::from_rlp` would, in one batch.
+        encoded.clear();
+        let mut ends = Vec::with_capacity(leaves.len());
+        for &idx in &leaves {
+            let ArenaSparseNode::Leaf { key, value, .. } = &arena[idx] else {
+                unreachable!("collected only leaves")
+            };
+            LeafNodeRef { key, value }.encode(encoded);
+            ends.push(encoded.len());
+        }
+        let mut start = 0;
+        let slices: Vec<&[u8]> = ends
+            .iter()
+            .map(|&end| {
+                let slice = &encoded[start..end];
+                start = end;
+                slice
+            })
+            .collect();
+        let long: Vec<&[u8]> = slices.iter().copied().filter(|rlp| rlp.len() >= 32).collect();
+        let mut hashes = keccak256_batch(&long).into_iter();
+        let rlp_nodes: Vec<RlpNode> = slices
+            .iter()
+            .map(|rlp| {
+                if rlp.len() < 32 {
+                    RlpNode::from_raw(rlp).expect("shorter than an RLP node's capacity")
+                } else {
+                    RlpNode::word_rlp(&hashes.next().expect("one hash per long encoding"))
+                }
+            })
+            .collect();
+
+        for (idx, rlp_node) in leaves.into_iter().zip(rlp_nodes) {
+            let state = arena[idx].state_mut();
+            let epoch = match state {
+                ArenaSparseNodeState::Revealed => TrieNodeEpoch::UNMODIFIED,
+                ArenaSparseNodeState::Dirty => new_epoch,
+                ArenaSparseNodeState::Cached { .. } => {
+                    unreachable!("collected only uncached leaves")
+                }
+            };
+            *state = ArenaSparseNodeState::Cached { rlp_node, epoch };
+        }
+    }
+
     fn encode_leaf(
         arena: &mut NodeArena,
         idx: Index,
