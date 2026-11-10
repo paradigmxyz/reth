@@ -40,7 +40,7 @@ impl fmt::Debug for TxnManagerMessage {
 pub(crate) struct TxnManager {
     sender: SyncSender<TxnManagerMessage>,
     #[cfg(feature = "read-tx-timeouts")]
-    read_transactions: Option<std::sync::Arc<read_transactions::ReadTransactions>>,
+    read_transactions: Option<read_transactions::ReadTransactionMonitor>,
 }
 
 impl TxnManager {
@@ -128,7 +128,12 @@ mod read_transactions {
     use dashmap::{DashMap, DashSet};
     use std::{
         backtrace::Backtrace,
-        sync::{mpsc::sync_channel, Arc},
+        ops::Deref,
+        sync::{
+            mpsc::{channel, sync_channel, RecvTimeoutError, Sender},
+            Arc,
+        },
+        thread::JoinHandle,
         time::{Duration, Instant},
     };
     use tracing::{error, trace, warn};
@@ -143,7 +148,7 @@ mod read_transactions {
             duration: Duration,
         ) -> Self {
             let read_transactions = Arc::new(ReadTransactions::new(duration));
-            read_transactions.clone().start_monitor();
+            let read_transactions = read_transactions.start_monitor();
 
             let (tx, rx) = sync_channel(0);
 
@@ -152,6 +157,11 @@ mod read_transactions {
             txn_manager.start_message_listener(env, rx);
 
             txn_manager
+        }
+
+        /// Stops and joins the read transaction monitor before the environment is closed.
+        pub(crate) fn stop_read_transaction_monitor(&mut self) {
+            drop(self.read_transactions.take());
         }
 
         /// Adds a new transaction to the list of active read transactions.
@@ -177,6 +187,34 @@ mod read_transactions {
             self.read_transactions
                 .as_ref()
                 .map(|read_transactions| read_transactions.timed_out_not_aborted())
+        }
+    }
+
+    /// Owns the monitor thread and joins it when the environment is closed.
+    #[derive(Debug)]
+    pub(super) struct ReadTransactionMonitor {
+        transactions: Arc<ReadTransactions>,
+        shutdown: Option<Sender<()>>,
+        handle: Option<JoinHandle<()>>,
+    }
+
+    impl Deref for ReadTransactionMonitor {
+        type Target = ReadTransactions;
+
+        fn deref(&self) -> &Self::Target {
+            &self.transactions
+        }
+    }
+
+    impl Drop for ReadTransactionMonitor {
+        fn drop(&mut self) {
+            // Disconnecting wakes the monitor even if it has not started waiting yet.
+            drop(self.shutdown.take());
+            if let Some(handle) = self.handle.take() &&
+                handle.join().is_err()
+            {
+                error!(target: "libmdbx", "Read transaction monitor panicked during shutdown");
+            }
         }
     }
 
@@ -229,7 +267,9 @@ mod read_transactions {
 
         /// Spawns a new [`std::thread`] that monitors the list of active read transactions and
         /// timeouts those that are open for longer than `ReadTransactions.max_duration`.
-        pub(super) fn start_monitor(self: Arc<Self>) {
+        pub(super) fn start_monitor(self: Arc<Self>) -> ReadTransactionMonitor {
+            let transactions = self.clone();
+            let (shutdown, receiver) = channel();
             let task = move || {
                 let mut timed_out_active = Vec::new();
 
@@ -326,18 +366,24 @@ mod read_transactions {
                         self.max_duration - max_active_transaction_duration.unwrap_or_default(),
                     );
                     trace!(target: "libmdbx", ?sleep_duration, elapsed = ?now.elapsed(), "Putting transaction monitor to sleep");
-                    std::thread::sleep(sleep_duration);
+                    match receiver.recv_timeout(sleep_duration) {
+                        Err(RecvTimeoutError::Timeout) => {}
+                        Ok(()) | Err(RecvTimeoutError::Disconnected) => break,
+                    }
                 }
             };
-            std::thread::Builder::new()
+            let handle = std::thread::Builder::new()
                 .name("mdbx-rs-read-tx-timeouts".to_string())
                 .spawn(task)
                 .unwrap();
+
+            ReadTransactionMonitor { transactions, shutdown: Some(shutdown), handle: Some(handle) }
         }
     }
 
     #[cfg(test)]
     mod tests {
+        use super::*;
         use crate::{
             txn_manager::read_transactions::READ_TRANSACTIONS_CHECK_INTERVAL, Environment, Error,
             MaxReadTransactionDuration,
@@ -442,6 +488,37 @@ mod read_transactions {
 
             let tx = env.begin_ro_txn().unwrap();
             assert!(tx.commit().is_ok())
+        }
+
+        #[test]
+        fn read_transaction_monitor_stops_on_last_environment_drop() {
+            let dir = tempdir().unwrap();
+            let env = Environment::builder()
+                .set_max_read_transaction_duration(MaxReadTransactionDuration::Set(
+                    Duration::from_secs(60),
+                ))
+                .open(dir.path())
+                .unwrap();
+            let transactions =
+                Arc::downgrade(&env.txn_manager().read_transactions.as_ref().unwrap().transactions);
+            let clone = env.clone();
+            drop(env);
+            assert!(transactions.upgrade().is_some());
+
+            drop(clone);
+            assert!(transactions.upgrade().is_none(), "monitor retained transaction state");
+        }
+
+        #[test]
+        fn read_transaction_monitor_shutdown_wakes_waiter() {
+            let transactions = Arc::new(ReadTransactions::new(Duration::from_secs(60)));
+            let monitor = transactions.start_monitor();
+            // Retaining the state proves shutdown does not depend on its reference count.
+            let transactions = monitor.transactions.clone();
+            let started = Instant::now();
+            drop(monitor);
+            assert!(started.elapsed() < READ_TRANSACTIONS_CHECK_INTERVAL);
+            assert_eq!(Arc::strong_count(&transactions), 1);
         }
     }
 }
