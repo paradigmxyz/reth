@@ -114,10 +114,10 @@ pub struct RayonConfig {
     /// Maximum number of concurrent blocking tasks for the RPC guard semaphore.
     pub max_blocking_tasks: usize,
     /// Number of threads for the proof storage worker pool (trie storage proof workers).
-    /// If `None` or zero, uses four times the resolved CPU pool thread count.
+    /// If `None` or zero, uses the resolved CPU pool thread count.
     pub proof_storage_worker_threads: Option<usize>,
     /// Number of threads for the proof account worker pool (trie account proof workers).
-    /// If `None` or zero, uses four times the resolved CPU pool thread count.
+    /// If `None` or zero, uses the resolved CPU pool thread count.
     pub proof_account_worker_threads: Option<usize>,
     /// Number of threads for the prewarming pool (execution prewarming workers).
     /// If `None`, uses the same as `cpu_threads`.
@@ -1022,9 +1022,9 @@ impl RuntimeBuilder {
 
             // `cpu_threads` may be zero, which rayon resolves to the automatic count when the
             // cpu pool is built; size the proof pools from that resolved count so a zero never
-            // reaches the per-block worker budget. Proof workers mostly wait for trie pages, so
-            // there are more of them than cores: with fewer, the state root waits for proofs.
-            let default_proof_worker_threads = cpu_pool.current_num_threads() * 4;
+            // reaches the per-block worker budget. A block uses at most this many proof workers
+            // of each kind, next to the prewarm workers and the global rayon pool.
+            let default_proof_worker_threads = cpu_pool.current_num_threads();
 
             let proof_storage_worker_threads = config
                 .rayon
@@ -1222,8 +1222,8 @@ mod tests {
         );
         assert_eq!(runtime.prewarming_pool().current_num_threads(), 5);
         assert_eq!(runtime.bal_streaming_pool().current_num_threads(), 5);
-        assert_eq!(runtime.proof_storage_worker_pool().num_threads(), 20);
-        assert_eq!(runtime.proof_account_worker_pool().num_threads(), 20);
+        assert_eq!(runtime.proof_storage_worker_pool().num_threads(), 5);
+        assert_eq!(runtime.proof_account_worker_pool().num_threads(), 5);
         assert_eq!(runtime.storage_pool().current_num_threads(), DEFAULT_STORAGE_POOL_THREADS);
         assert_eq!(
             runtime.state_trie_overlay_worker_pool().num_threads(),
@@ -1269,8 +1269,8 @@ mod tests {
 
         let resolved = runtime.cpu_pool().current_num_threads();
         assert!(resolved >= 1);
-        assert_eq!(runtime.proof_storage_worker_pool().current_num_threads(), resolved * 4);
-        assert_eq!(runtime.proof_account_worker_pool().current_num_threads(), resolved * 4);
+        assert_eq!(runtime.proof_storage_worker_pool().current_num_threads(), resolved);
+        assert_eq!(runtime.proof_account_worker_pool().current_num_threads(), resolved);
     }
 
     #[cfg(feature = "rayon")]
@@ -1300,7 +1300,7 @@ mod tests {
         config.rayon.proof_account_worker_threads = Some(0);
         let runtime = RuntimeBuilder::new(config).build().unwrap();
 
-        let default = runtime.cpu_pool().current_num_threads() * 4;
+        let default = runtime.cpu_pool().current_num_threads();
         assert_eq!(runtime.proof_storage_worker_pool().current_num_threads(), default);
         assert_eq!(runtime.proof_account_worker_pool().current_num_threads(), default);
         assert_eq!(runtime.proof_storage_worker_threads_override(), None);
