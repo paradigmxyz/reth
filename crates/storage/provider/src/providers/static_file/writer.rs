@@ -8,7 +8,7 @@ use parking_lot::{lock_api::RwLockWriteGuard, RawRwLock, RwLock};
 use reth_codecs::Compact;
 use reth_db::models::{AccountBeforeTx, StorageBeforeTx};
 use reth_db_api::models::CompactU256;
-use reth_nippy_jar::{NippyJar, NippyJarError, NippyJarWriter};
+use reth_nippy_jar::{NippyJar, NippyJarError, NippyJarWriter, CONFIG_FILE_EXTENSION};
 use reth_node_types::NodePrimitives;
 use reth_primitives_traits::FastInstant as Instant;
 use reth_static_file_types::{
@@ -734,7 +734,7 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
                 let prev_block = expected_start - 1;
                 let prev_range = self.reader().find_fixed_range(segment, prev_block);
                 let prev_path = self.reader().directory().join(segment.filename(&prev_range));
-                prev_path.exists().then_some(prev_block)
+                prev_path.with_extension(CONFIG_FILE_EXTENSION).exists().then_some(prev_block)
             });
 
         self.reader().update_index(segment, segment_max_block)
