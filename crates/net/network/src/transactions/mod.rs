@@ -430,12 +430,17 @@ impl<Pool: TransactionPool, N: NetworkPrimitives> TransactionsManager<Pool, N> {
         // install a listener for new __pending__ transactions that are allowed to be propagated
         // over the network
         let pending = pool.pending_transactions_listener();
-        let pending_pool_imports_info =
-            PendingPoolImportsInfo::new(transactions_manager_config.max_pending_pool_imports);
+        let pending_pool_imports_info = PendingPoolImportsInfo::new(
+            transactions_manager_config.max_pending_pool_imports,
+            transactions_manager_config.max_pending_pool_imports_bytes,
+        );
         let metrics = TransactionsManagerMetrics::default();
         metrics
             .capacity_pending_pool_imports
             .increment(pending_pool_imports_info.max_pending_pool_imports as u64);
+        metrics
+            .capacity_pending_pool_imports_bytes
+            .increment(pending_pool_imports_info.max_pending_pool_imports_bytes as u64);
 
         Self {
             pool,
@@ -1500,6 +1505,10 @@ where
             // update metrics
             let metric_pending_pool_imports = self.metrics.pending_pool_imports.clone();
             metric_pending_pool_imports.increment(new_txs.len() as f64);
+            // includes blob sidecars, which stay in memory until the import completes
+            let bytes = new_txs.iter().map(PoolTransaction::encoded_length).sum::<usize>();
+            let metric_pending_pool_imports_bytes = self.metrics.pending_pool_imports_bytes.clone();
+            metric_pending_pool_imports_bytes.increment(bytes as f64);
 
             // update self-monitoring info
             self.pending_pool_imports_info
@@ -1507,8 +1516,6 @@ where
                 .fetch_add(new_txs.len(), Ordering::Relaxed);
             let tx_manager_info_pending_pool_imports =
                 self.pending_pool_imports_info.pending_pool_imports.clone();
-            // includes blob sidecars, which stay in memory until the import completes
-            let bytes = new_txs.iter().map(PoolTransaction::encoded_length).sum::<usize>();
             self.pending_pool_imports_info
                 .pending_pool_imports_bytes
                 .fetch_add(bytes, Ordering::Relaxed);
@@ -1522,6 +1529,7 @@ where
 
                 // update metrics
                 metric_pending_pool_imports.decrement(added as f64);
+                metric_pending_pool_imports_bytes.decrement(bytes as f64);
                 // update self-monitoring info
                 tx_manager_info_pending_pool_imports.fetch_sub(added, Ordering::Relaxed);
                 tx_manager_info_pending_pool_imports_bytes.fetch_sub(bytes, Ordering::Relaxed);
@@ -2324,24 +2332,30 @@ pub struct PendingPoolImportsInfo {
 
 impl PendingPoolImportsInfo {
     /// Returns a new [`PendingPoolImportsInfo`].
-    pub fn new(max_pending_pool_imports: usize) -> Self {
+    pub fn new(max_pending_pool_imports: usize, max_pending_pool_imports_bytes: usize) -> Self {
         Self {
             pending_pool_imports: Arc::new(AtomicUsize::default()),
             max_pending_pool_imports,
             pending_pool_imports_bytes: Arc::new(AtomicUsize::default()),
-            max_pending_pool_imports_bytes: DEFAULT_MAX_BYTE_SIZE_PENDING_POOL_IMPORTS,
+            max_pending_pool_imports_bytes,
         }
     }
 
-    /// Returns `true` if the number of pool imports is under a given tolerated max.
+    /// Returns `true` if the number of pool imports is under a given tolerated max and their
+    /// encoded byte size is under the configured max.
     pub fn has_capacity(&self, max_pending_pool_imports: usize) -> bool {
-        self.pending_pool_imports.load(Ordering::Relaxed) < max_pending_pool_imports
+        self.pending_pool_imports.load(Ordering::Relaxed) < max_pending_pool_imports &&
+            self.pending_pool_imports_bytes.load(Ordering::Relaxed) <
+                self.max_pending_pool_imports_bytes
     }
 }
 
 impl Default for PendingPoolImportsInfo {
     fn default() -> Self {
-        Self::new(DEFAULT_MAX_COUNT_PENDING_POOL_IMPORTS)
+        Self::new(
+            DEFAULT_MAX_COUNT_PENDING_POOL_IMPORTS,
+            DEFAULT_MAX_BYTE_SIZE_PENDING_POOL_IMPORTS,
+        )
     }
 }
 

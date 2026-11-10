@@ -444,8 +444,11 @@ mod tests {
                 MockTransaction::from(tx.clone().try_into_recovered().unwrap()).encoded_length()
             })
             .sum::<usize>();
-        let mut harness = TxFetchHarness::new([PEER_A]).await;
-        harness.manager.pending_pool_imports_info.max_pending_pool_imports_bytes = bytes;
+        let config = TransactionsManagerConfig {
+            max_pending_pool_imports_bytes: bytes,
+            ..Default::default()
+        };
+        let mut harness = TxFetchHarness::with_config(config, [PEER_A]).await;
 
         harness.manager.import_transactions(
             PEER_A,
