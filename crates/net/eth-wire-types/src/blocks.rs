@@ -2,11 +2,20 @@
 //! types.
 
 use crate::{
-    message::{decoded_capacity, decoded_list_size, ensure_list_within_memory_budget},
+    message::{
+        decode_envelope_fields, decoded_list_size, decoded_list_size_with,
+        ensure_list_within_memory_budget, skip_rlp_item,
+    },
     HeadersDirection,
 };
 use alloc::vec::Vec;
-use alloy_eips::{eip4895::Withdrawal, BlockHashOrNumber};
+use alloy_eips::{
+    eip2718::{EIP1559_TX_TYPE_ID, EIP2930_TX_TYPE_ID, EIP4844_TX_TYPE_ID, EIP7702_TX_TYPE_ID},
+    eip2930::AccessListItem,
+    eip4895::Withdrawal,
+    eip7702::SignedAuthorization,
+    BlockHashOrNumber,
+};
 use alloy_primitives::B256;
 use alloy_rlp::{
     Decodable, Header, RlpDecodable, RlpDecodableWrapper, RlpEncodable, RlpEncodableWrapper,
@@ -131,7 +140,8 @@ impl<B: BlockBody> BlockBodies<B> {
     /// transactions, ommers and withdrawals would take more than `memory_budget` bytes in memory.
     ///
     /// Each list is counted at the size of its items' type, for the capacity that the decoded
-    /// `Vec` grows to.
+    /// `Vec` grows to. The access lists, blob versioned hashes and authorizations of Ethereum's
+    /// typed transactions count as well.
     pub fn decode_with_memory_budget(
         buf: &mut &[u8],
         memory_budget: usize,
@@ -154,29 +164,49 @@ impl<B: BlockBody> BlockBodies<B> {
 }
 
 /// Returns the bytes that decoding the RLP list of transactions at the front of `buf` into a
-/// `Vec<T>` takes, without decoding them, and advances `buf` past the list.
+/// `Vec<T>` takes, together with the lists inside the transactions, and advances `buf` past the
+/// list.
 ///
-/// Transactions are counted the way the EIP-2718 network decoder reads them: a legacy transaction
-/// is an RLP list, and a typed transaction is its type byte followed by the RLP list of its fields.
-/// The decoder does not hold a typed transaction to the length of the RLP string around it, so it
-/// reads bytes left in that string as further transactions, and so does this count.
+/// Transactions are read as [`decode_envelope_fields`] reads them, see
+/// [`typed_transaction_lists_size`] for the lists that are counted.
 fn decoded_transaction_list_size<T>(buf: &mut &[u8]) -> alloy_rlp::Result<usize> {
-    let mut txs = Header::decode_bytes(buf, true)?;
-    let mut len = 0usize;
-    while !txs.is_empty() {
-        let header = Header::decode(&mut txs)?;
-        if header.list {
-            // `Header::decode` checked that the payload is in bounds.
-            txs = &txs[header.payload_length..];
-        } else {
-            // `Header::decode` steps over a string header but not over a bare type byte, so the
-            // type byte is next either way.
-            txs = txs.get(1..).ok_or(alloy_rlp::Error::InputTooShort)?;
-            Header::decode_bytes(&mut txs, true)?;
-        }
-        len += 1;
+    decoded_list_size_with::<T>(buf, |tx| {
+        let (ty, mut fields) = decode_envelope_fields(tx)?;
+        ty.map_or(Ok(0), |ty| typed_transaction_lists_size(ty, &mut fields))
+    })
+}
+
+/// Returns the bytes that decoding the lists among the RLP `fields` of a typed transaction takes,
+/// for Ethereum's transaction types: the access list, the blob versioned hashes and the
+/// authorization list. Lists of other transaction types are not counted.
+fn typed_transaction_lists_size(ty: u8, fields: &mut &[u8]) -> alloy_rlp::Result<usize> {
+    // The access list is the eighth field of EIP-2930 transactions and the ninth of later types.
+    let access_list_index = match ty {
+        EIP2930_TX_TYPE_ID => 7,
+        EIP1559_TX_TYPE_ID | EIP4844_TX_TYPE_ID | EIP7702_TX_TYPE_ID => 8,
+        _ => return Ok(0),
+    };
+    for _ in 0..access_list_index {
+        skip_rlp_item(fields)?;
     }
-    Ok(decoded_capacity(len).saturating_mul(core::mem::size_of::<T>()))
+    // An access list item is encoded as `[address, storage keys]`.
+    let mut size = decoded_list_size_with::<AccessListItem>(fields, |item| {
+        let mut item = Header::decode_bytes(item, true)?;
+        skip_rlp_item(&mut item)?;
+        decoded_list_size::<B256>(&mut item)
+    })?;
+    match ty {
+        // The blob versioned hashes follow the max fee per blob gas.
+        EIP4844_TX_TYPE_ID => {
+            skip_rlp_item(fields)?;
+            size = size.saturating_add(decoded_list_size::<B256>(fields)?);
+        }
+        EIP7702_TX_TYPE_ID => {
+            size = size.saturating_add(decoded_list_size::<SignedAuthorization>(fields)?);
+        }
+        _ => {}
+    }
+    Ok(size)
 }
 
 #[cfg(test)]
@@ -185,8 +215,14 @@ mod tests {
         message::RequestPair, BlockBodies, BlockHeaders, GetBlockBodies, GetBlockHeaders,
         HeadersDirection,
     };
-    use alloy_consensus::{Header, TxEip1559, TxLegacy};
-    use alloy_eips::{eip2718::Encodable2718, eip4895::Withdrawal, BlockHashOrNumber};
+    use alloy_consensus::{Header, TxEip1559, TxEip2930, TxEip4844, TxEip7702, TxLegacy};
+    use alloy_eips::{
+        eip2718::Encodable2718,
+        eip2930::{AccessList, AccessListItem},
+        eip4895::Withdrawal,
+        eip7702::{Authorization, SignedAuthorization},
+        BlockHashOrNumber,
+    };
     use alloy_primitives::{b256, hex, Address, Bloom, Signature, TxKind, B256, U256};
     use alloy_rlp::{Decodable, Encodable};
     use reth_ethereum_primitives::{BlockBody, Transaction, TransactionSigned};
@@ -625,6 +661,55 @@ mod tests {
         let decoded = BlockBodies::<BlockBody>::decode_with_memory_budget(&mut buf, size).unwrap();
         assert_eq!(decoded, bodies);
         assert!(buf.is_empty());
+
+        assert_eq!(
+            BlockBodies::<BlockBody>::decode_with_memory_budget(&mut encoded.as_slice(), size - 1),
+            Err(alloy_rlp::Error::Custom("decoded list exceeds memory budget"))
+        );
+    }
+
+    #[test]
+    fn block_bodies_memory_budget_counts_typed_transaction_lists() {
+        let signed = |tx| TransactionSigned::new_unhashed(tx, Signature::test_signature());
+        let access_list = AccessList(vec![AccessListItem {
+            address: Address::ZERO,
+            storage_keys: vec![B256::ZERO; 5],
+        }]);
+        let authorization =
+            Authorization { chain_id: U256::ZERO, address: Address::ZERO, nonce: 0 }
+                .into_signed(Signature::test_signature());
+        let bodies = BlockBodies(vec![BlockBody {
+            transactions: vec![
+                signed(Transaction::Eip2930(TxEip2930 {
+                    access_list: access_list.clone(),
+                    ..Default::default()
+                })),
+                signed(Transaction::Eip1559(TxEip1559 { access_list, ..Default::default() })),
+                signed(Transaction::Eip4844(TxEip4844 {
+                    blob_versioned_hashes: vec![B256::ZERO; 5],
+                    ..Default::default()
+                })),
+                signed(Transaction::Eip7702(TxEip7702 {
+                    authorization_list: vec![authorization],
+                    ..Default::default()
+                })),
+            ],
+            ..Default::default()
+        }]);
+        let encoded = alloy_rlp::encode(&bodies);
+        // Decoding grows the body and transaction lists to 4 items, both access lists to 4 items
+        // with 8 storage keys, the blob versioned hashes to 8 and the authorizations to 4.
+        let size = 4 * core::mem::size_of::<BlockBody>() +
+            4 * core::mem::size_of::<TransactionSigned>() +
+            8 * core::mem::size_of::<AccessListItem>() +
+            16 * core::mem::size_of::<B256>() +
+            8 * core::mem::size_of::<B256>() +
+            4 * core::mem::size_of::<SignedAuthorization>();
+
+        let decoded =
+            BlockBodies::<BlockBody>::decode_with_memory_budget(&mut encoded.as_slice(), size)
+                .unwrap();
+        assert_eq!(decoded, bodies);
 
         assert_eq!(
             BlockBodies::<BlockBody>::decode_with_memory_budget(&mut encoded.as_slice(), size - 1),

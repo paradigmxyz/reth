@@ -179,8 +179,8 @@ where
         let msg = match ProtocolMessage::decode_message_with_memory_budget(
             self.version,
             &mut bytes.as_ref(),
-            self.max_message_size * TX_MEMORY_BUDGET_MULTIPLIER,
-            self.max_message_size * RESPONSE_MEMORY_BUDGET_MULTIPLIER,
+            self.max_message_size.saturating_mul(TX_MEMORY_BUDGET_MULTIPLIER),
+            self.max_message_size.saturating_mul(RESPONSE_MEMORY_BUDGET_MULTIPLIER),
         ) {
             Ok(m) => m,
             Err(err) => {
@@ -1219,5 +1219,24 @@ mod tests {
                 "decoded list exceeds memory budget"
             ))))
         ));
+    }
+
+    #[test]
+    fn memory_budget_saturates_for_large_message_size() {
+        let mut eth = EthStreamInner::<EthNetworkPrimitives>::with_max_message_size(
+            EthVersion::Eth68,
+            usize::MAX / RESPONSE_MEMORY_BUDGET_MULTIPLIER + 1,
+        );
+        eth.encode_message(EthMessage::GetBlockBodies(RequestPair {
+            request_id: 1,
+            message: GetBlockBodies(vec![B256::ZERO]),
+        }))
+        .unwrap();
+
+        let response = EthMessage::BlockBodies(RequestPair {
+            request_id: 1,
+            message: BlockBodies(vec![Default::default()]),
+        });
+        assert_eq!(eth.decode_message(encode(response.clone())).unwrap(), response);
     }
 }

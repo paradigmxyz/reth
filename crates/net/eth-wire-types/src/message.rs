@@ -47,11 +47,12 @@ pub const TX_MEMORY_BUDGET_MULTIPLIER: usize = 2;
 /// validation anyway. Valid transactions and receipts take at most about five times their
 /// encoding, an eth/69 receipt without logs being the densest.
 ///
-/// The budget covers the lists of the message layout, each at the capacity its `Vec` grows to while
-/// decoding: block bodies with their transactions, ommers and withdrawals, and receipt lists with
-/// their receipts. Lists inside a transaction or receipt, such as access lists, authorizations and
-/// logs, are encoded by the transaction and receipt types and are not counted. Decoding those
-/// takes a small multiple of their encoding, as in every message that carries them.
+/// The budget covers every list a message decodes into, each at the capacity its `Vec` grows to
+/// while decoding: block bodies with their transactions, ommers and withdrawals, the access lists,
+/// blob versioned hashes and authorizations of Ethereum's typed transactions, and receipt lists
+/// with their receipts, logs and topics. Lists inside transactions of other types are not counted,
+/// and neither are byte strings such as calldata and log data, which take about their encoded
+/// size.
 pub const RESPONSE_MEMORY_BUDGET_MULTIPLIER: usize = 6;
 
 /// Error when sending/receiving a message
@@ -123,7 +124,9 @@ impl<N: NetworkPrimitives> ProtocolMessage<N> {
     /// are silently dropped.
     ///
     /// Rejects `BlockBodies` and `Receipts` messages before decoding them if their lists would
-    /// take more than `response_memory_budget` bytes in memory.
+    /// take more than `response_memory_budget` bytes in memory. The check reads the eth protocol's
+    /// layouts described on [`NetworkPrimitives::BlockBody`] and [`NetworkPrimitives::Receipt`],
+    /// and a budget of `usize::MAX` skips it.
     ///
     /// Use [`TX_MEMORY_BUDGET_MULTIPLIER`] and [`RESPONSE_MEMORY_BUDGET_MULTIPLIER`] to derive
     /// reasonable defaults.
@@ -921,25 +924,18 @@ where
 /// lists nested in its entries, would take more than `memory_budget` bytes, without decoding
 /// either.
 ///
-/// `nested_size` returns the bytes that decoding the lists nested in the entry at the front of its
-/// buffer takes, usually through [`decoded_list_size`], and advances past the entry. Only RLP
-/// headers are read, and `buf` is not advanced.
+/// `nested_size` is called for every entry as in [`decoded_list_size_with`]. `buf` is not
+/// advanced. A budget of `usize::MAX` is unbounded, and the list is not read at all, so decoding
+/// stays open to layouts that `nested_size` does not know.
 pub(crate) fn ensure_list_within_memory_budget<E>(
     mut buf: &[u8],
     memory_budget: usize,
-    mut nested_size: impl FnMut(&mut &[u8]) -> alloy_rlp::Result<usize>,
+    nested_size: impl FnMut(&mut &[u8]) -> alloy_rlp::Result<usize>,
 ) -> alloy_rlp::Result<()> {
-    let mut entries = Header::decode_bytes(&mut buf, true)?;
-    let mut entry_count = 0usize;
-    let mut size = 0usize;
-    while !entries.is_empty() {
-        entry_count += 1;
-        size = size.saturating_add(nested_size(&mut entries)?);
+    if memory_budget == usize::MAX {
+        return Ok(())
     }
-
-    let size = size
-        .saturating_add(decoded_capacity(entry_count).saturating_mul(core::mem::size_of::<E>()));
-    if size > memory_budget {
+    if decoded_list_size_with::<E>(&mut buf, nested_size)? > memory_budget {
         return Err(alloy_rlp::Error::Custom("decoded list exceeds memory budget"))
     }
     Ok(())
@@ -951,15 +947,59 @@ pub(crate) fn ensure_list_within_memory_budget<E>(
 /// RLP decoding pushes the items into the `Vec` one at a time, so the list is counted at the
 /// capacity it grows to, see [`decoded_capacity`]. Memory the items point to is not counted.
 pub(crate) fn decoded_list_size<T>(buf: &mut &[u8]) -> alloy_rlp::Result<usize> {
+    decoded_list_size_with::<T>(buf, |item| skip_rlp_item(item).map(|()| 0))
+}
+
+/// Like [`decoded_list_size`], but also counts the lists nested in the items.
+///
+/// `nested_size` returns the bytes that decoding the lists nested in the item at the front of its
+/// buffer takes, reading only RLP headers, and advances past the item.
+pub(crate) fn decoded_list_size_with<T>(
+    buf: &mut &[u8],
+    mut nested_size: impl FnMut(&mut &[u8]) -> alloy_rlp::Result<usize>,
+) -> alloy_rlp::Result<usize> {
     let mut items = Header::decode_bytes(buf, true)?;
     let mut len = 0;
+    let mut size = 0usize;
     while !items.is_empty() {
-        let header = Header::decode(&mut items)?;
-        // `Header::decode` checked that the payload is in bounds.
-        items = &items[header.payload_length..];
+        size = size.saturating_add(nested_size(&mut items)?);
         len += 1;
     }
-    Ok(decoded_capacity(len).saturating_mul(core::mem::size_of::<T>()))
+    Ok(size.saturating_add(decoded_capacity(len).saturating_mul(core::mem::size_of::<T>())))
+}
+
+/// Advances `buf` past the EIP-2718 envelope at its front the way the network decoder reads it,
+/// and returns the envelope's type byte, `None` for a legacy envelope, and the payload of the RLP
+/// list of its fields.
+///
+/// A legacy envelope is an RLP list, and a typed envelope is its type byte followed by the RLP
+/// list of its fields, usually inside an RLP string. The network decoder does not hold a typed
+/// envelope to the length of that string, so bytes left in it are read as the next envelopes, here
+/// as well.
+pub(crate) fn decode_envelope_fields<'a>(
+    buf: &mut &'a [u8],
+) -> alloy_rlp::Result<(Option<u8>, &'a [u8])> {
+    let header = Header::decode(buf)?;
+    if header.list {
+        // `Header::decode` checked that the payload is in bounds.
+        let (fields, rest) = buf.split_at(header.payload_length);
+        *buf = rest;
+        return Ok((None, fields))
+    }
+
+    // `Header::decode` steps over a string header but not over a bare type byte, so the type byte
+    // is next either way.
+    let (&ty, rest) = buf.split_first().ok_or(alloy_rlp::Error::InputTooShort)?;
+    *buf = rest;
+    Ok((Some(ty), Header::decode_bytes(buf, true)?))
+}
+
+/// Advances `buf` past the RLP item at its front without decoding it.
+pub(crate) fn skip_rlp_item(buf: &mut &[u8]) -> alloy_rlp::Result<()> {
+    let header = Header::decode(buf)?;
+    // `Header::decode` checked that the payload is in bounds.
+    *buf = &buf[header.payload_length..];
+    Ok(())
 }
 
 /// Returns the capacity of a `Vec` that `len` items were pushed into one at a time.
@@ -978,7 +1018,7 @@ pub(crate) const fn decoded_capacity(len: usize) -> usize {
 
 #[cfg(test)]
 mod tests {
-    use super::MessageError;
+    use super::{ensure_list_within_memory_budget, MessageError};
     use crate::{
         message::RequestPair, BlockAccessLists, BlockBodies, EthMessage, EthMessageID,
         EthNetworkPrimitives, EthVersion, GetBlockAccessLists, GetNodeData, NodeData,
@@ -1254,6 +1294,16 @@ mod tests {
             result,
             Err(MessageError::ExpectedStatusMessage(EthMessageID::GetBlockBodies))
         ));
+    }
+
+    #[test]
+    fn unbounded_memory_budget_skips_list_walk() {
+        // Not an RLP list, so only reading it could fail.
+        assert_eq!(ensure_list_within_memory_budget::<u8>(&[0x80], usize::MAX, |_| Ok(0)), Ok(()));
+        assert_eq!(
+            ensure_list_within_memory_budget::<u8>(&[0x80], usize::MAX - 1, |_| Ok(0)),
+            Err(Error::UnexpectedString)
+        );
     }
 
     #[test]
