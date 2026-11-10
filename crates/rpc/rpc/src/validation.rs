@@ -36,7 +36,7 @@ use reth_metrics::{
 use reth_payload_primitives::{NewPayloadError, PayloadTypes};
 use reth_primitives_traits::{
     block::error::SealedBlockRecoveryError, BlockBody, GotExpected, NodePrimitives, RecoveredBlock,
-    SealedBlock, SealedHeaderFor,
+    SealedHeaderFor,
 };
 use reth_rpc_api::BlockSubmissionValidationApiServer;
 use reth_rpc_server_types::result::{internal_rpc_err, invalid_params_rpc_err};
