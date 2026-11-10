@@ -716,9 +716,9 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
         //
         // However if there's no block range (because there's no data), we try to calculate it by
         // subtracting 1 from the expected block start, resulting on the last block of the
-        // previous file — but only if that file actually exists. If the previous file doesn't
-        // exist (e.g. first-ever file for a segment starting past range boundary), there's
-        // nothing to index.
+        // previous file — but only if that file exists and has its config, i.e. it was fully
+        // initialized. If the previous file doesn't exist (e.g. first-ever file for a segment
+        // starting past range boundary) or its creation was interrupted, there's nothing to index.
         let segment_max_block = self
             .writer
             .user_header()
@@ -734,7 +734,8 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
                 let prev_block = expected_start - 1;
                 let prev_range = self.reader().find_fixed_range(segment, prev_block);
                 let prev_path = self.reader().directory().join(segment.filename(&prev_range));
-                prev_path.with_extension(CONFIG_FILE_EXTENSION).exists().then_some(prev_block)
+                (prev_path.exists() && prev_path.with_extension(CONFIG_FILE_EXTENSION).exists())
+                    .then_some(prev_block)
             });
 
         self.reader().update_index(segment, segment_max_block)
