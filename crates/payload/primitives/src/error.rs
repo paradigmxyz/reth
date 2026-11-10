@@ -131,12 +131,11 @@ pub enum VersionSpecificValidationError {
     /// Thrown if `engine_forkchoiceUpdatedV1` or `engine_newPayloadV1` contains withdrawals
     #[error("withdrawals not supported in V1")]
     WithdrawalsNotSupportedInV1,
-    /// Thrown if `engine_forkchoiceUpdated` or `engine_newPayload` contains no withdrawals after
-    /// Shanghai
+    /// Thrown if an engine method requires withdrawals but none are provided.
     #[error("no withdrawals post-Shanghai")]
     NoWithdrawalsPostShanghai,
-    /// Thrown if `engine_forkchoiceUpdated` or `engine_newPayload` contains withdrawals before
-    /// Shanghai
+    /// Thrown if V2 `PayloadAttributes` or `ExecutionPayload` contains withdrawals before
+    /// Shanghai.
     #[error("withdrawals pre-Shanghai")]
     HasWithdrawalsPreShanghai,
     /// Thrown if the `PayloadAttributes` or `ExecutionPayload` contains no parent beacon block

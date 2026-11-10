@@ -365,9 +365,11 @@ pub fn validate_slot_number_presence(
     Ok(())
 }
 
-/// Validates the presence of the `withdrawals` field according to the payload timestamp.
-/// After Shanghai, withdrawals field must be [Some].
-/// Before Shanghai, withdrawals field must be [None];
+/// Validates the presence of `withdrawals` for the engine method version.
+///
+/// V1 forbids withdrawals. V2 supports both Paris and Shanghai payloads, so withdrawals must be
+/// present exactly when Shanghai is active. V3 and later require withdrawals regardless of the
+/// timestamp, allowing complete requests outside the method's fork to reach the timeframe check.
 pub fn validate_withdrawals_presence<T: EthereumHardforks>(
     chain_spec: &T,
     version: EngineApiMessageVersion,
@@ -375,8 +377,6 @@ pub fn validate_withdrawals_presence<T: EthereumHardforks>(
     timestamp: u64,
     has_withdrawals: bool,
 ) -> Result<(), EngineObjectValidationError> {
-    let is_shanghai_active = chain_spec.is_shanghai_active_at_timestamp(timestamp);
-
     match version {
         EngineApiMessageVersion::V1 => {
             if has_withdrawals {
@@ -384,11 +384,8 @@ pub fn validate_withdrawals_presence<T: EthereumHardforks>(
                     .to_error(VersionSpecificValidationError::WithdrawalsNotSupportedInV1))
             }
         }
-        EngineApiMessageVersion::V2 |
-        EngineApiMessageVersion::V3 |
-        EngineApiMessageVersion::V4 |
-        EngineApiMessageVersion::V5 |
-        EngineApiMessageVersion::V6 => {
+        EngineApiMessageVersion::V2 => {
+            let is_shanghai_active = chain_spec.is_shanghai_active_at_timestamp(timestamp);
             if is_shanghai_active && !has_withdrawals {
                 return Err(message_validation_kind
                     .to_error(VersionSpecificValidationError::NoWithdrawalsPostShanghai))
@@ -396,6 +393,15 @@ pub fn validate_withdrawals_presence<T: EthereumHardforks>(
             if !is_shanghai_active && has_withdrawals {
                 return Err(message_validation_kind
                     .to_error(VersionSpecificValidationError::HasWithdrawalsPreShanghai))
+            }
+        }
+        EngineApiMessageVersion::V3 |
+        EngineApiMessageVersion::V4 |
+        EngineApiMessageVersion::V5 |
+        EngineApiMessageVersion::V6 => {
+            if !has_withdrawals {
+                return Err(message_validation_kind
+                    .to_error(VersionSpecificValidationError::NoWithdrawalsPostShanghai))
             }
         }
     };
@@ -1106,5 +1112,86 @@ mod tests {
             validate_execution_requests(&duplicate_request_types),
             Err(EngineObjectValidationError::InvalidParams(_))
         );
+    }
+
+    #[test]
+    fn validate_v2_withdrawals_follow_timestamp() {
+        let chain_spec = ChainSpecBuilder::mainnet()
+            .with_fork(EthereumHardfork::Shanghai, ForkCondition::Timestamp(100))
+            .build();
+        for (timestamp, has_withdrawals) in [(99, false), (100, true)] {
+            assert_matches!(
+                validate_withdrawals_presence(
+                    &chain_spec,
+                    EngineApiMessageVersion::V2,
+                    MessageValidationKind::Payload,
+                    timestamp,
+                    has_withdrawals,
+                ),
+                Ok(())
+            );
+        }
+        assert_matches!(
+            validate_withdrawals_presence(
+                &chain_spec,
+                EngineApiMessageVersion::V2,
+                MessageValidationKind::Payload,
+                99,
+                true,
+            ),
+            Err(EngineObjectValidationError::Payload(
+                VersionSpecificValidationError::HasWithdrawalsPreShanghai
+            ))
+        );
+        assert_matches!(
+            validate_withdrawals_presence(
+                &chain_spec,
+                EngineApiMessageVersion::V2,
+                MessageValidationKind::Payload,
+                100,
+                false,
+            ),
+            Err(EngineObjectValidationError::Payload(
+                VersionSpecificValidationError::NoWithdrawalsPostShanghai
+            ))
+        );
+    }
+
+    #[test]
+    fn validate_v3_and_later_withdrawals_are_structural() {
+        let chain_spec = ChainSpecBuilder::mainnet()
+            .with_fork(EthereumHardfork::Shanghai, ForkCondition::Timestamp(100))
+            .build();
+        for version in [
+            EngineApiMessageVersion::V3,
+            EngineApiMessageVersion::V4,
+            EngineApiMessageVersion::V5,
+            EngineApiMessageVersion::V6,
+        ] {
+            for timestamp in [99, 100] {
+                assert_matches!(
+                    validate_withdrawals_presence(
+                        &chain_spec,
+                        version,
+                        MessageValidationKind::Payload,
+                        timestamp,
+                        true,
+                    ),
+                    Ok(())
+                );
+                assert_matches!(
+                    validate_withdrawals_presence(
+                        &chain_spec,
+                        version,
+                        MessageValidationKind::Payload,
+                        timestamp,
+                        false,
+                    ),
+                    Err(EngineObjectValidationError::Payload(
+                        VersionSpecificValidationError::NoWithdrawalsPostShanghai
+                    ))
+                );
+            }
+        }
     }
 }

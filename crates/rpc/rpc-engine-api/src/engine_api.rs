@@ -1856,7 +1856,8 @@ mod tests {
         test_utils::{OkValidator, TransactionBuilder},
         CoinbaseTipOrdering, EthPooledTransaction, Pool, PoolTransaction, TransactionOrigin,
     };
-    use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver};
+    use std::time::Duration;
+    use tokio::sync::mpsc::{error::TryRecvError, unbounded_channel, UnboundedReceiver};
 
     type EthTestPool = Pool<
         OkValidator<EthPooledTransaction>,
@@ -2968,6 +2969,86 @@ mod tests {
             let hashes = blocks.iter().map(|b| b.hash()).collect();
             let res = api.get_payload_bodies_by_hash_v1(hashes).await.unwrap();
             assert_eq!(res, expected);
+        }
+    }
+
+    #[tokio::test]
+    async fn new_payload_rejects_pre_shanghai_timestamps() {
+        let (mut handle, api) = setup_engine_api();
+        assert!(!handle.chain_spec.is_shanghai_active_at_timestamp(0));
+
+        let errors = tokio::time::timeout(Duration::from_secs(1), async {
+            [
+                api.new_payload_v5(complete_amsterdam_execution_data()).await.unwrap_err(),
+                api.new_payload_v6(complete_amsterdam_execution_data()).await.unwrap_err(),
+            ]
+        })
+        .await
+        .expect("payload validation must complete without reaching the engine");
+
+        for error in errors {
+            assert_matches!(
+                error,
+                EngineApiError::EngineObjectValidationError(
+                    EngineObjectValidationError::UnsupportedFork
+                )
+            );
+            assert_eq!(ErrorObject::from(error).code(), UNSUPPORTED_FORK_CODE);
+        }
+        assert_matches!(handle.from_api.try_recv(), Err(TryRecvError::Empty));
+    }
+
+    #[tokio::test]
+    async fn fcu_rejects_pre_shanghai_timestamps() {
+        for version in [EngineApiMessageVersion::V4, EngineApiMessageVersion::V5] {
+            let (mut handle, api) = setup_engine_api();
+            assert!(!handle.chain_spec.is_shanghai_active_at_timestamp(1));
+            let state = ForkchoiceState::same_hash(B256::repeat_byte(0x55));
+            let attributes = PayloadAttributes {
+                timestamp: 1,
+                withdrawals: Some(vec![]),
+                parent_beacon_block_root: Some(B256::ZERO),
+                slot_number: Some(1),
+                target_gas_limit: Some(30_000_000),
+                ..Default::default()
+            };
+            let api_task = tokio::spawn(async move {
+                match version {
+                    EngineApiMessageVersion::V4 => {
+                        api.fork_choice_updated_v4(state, Some(attributes), None).await.map(|_| ())
+                    }
+                    EngineApiMessageVersion::V5 => {
+                        api.fork_choice_updated_v5(state, Some(attributes), None).await.map(|_| ())
+                    }
+                    _ => unreachable!(),
+                }
+            });
+
+            let request = tokio::time::timeout(Duration::from_secs(1), handle.from_api.recv())
+                .await
+                .expect("timed out waiting for forkchoiceUpdated request")
+                .expect("expected forkchoiceUpdated request");
+            let BeaconEngineMessage::ForkchoiceUpdated { payload_attrs, tx, .. } = request else {
+                panic!("unexpected engine message: {request:?}");
+            };
+            assert!(payload_attrs.is_none());
+            tx.send(Ok(OnForkChoiceUpdated::valid(PayloadStatus::from_status(
+                PayloadStatusEnum::Valid,
+            ))))
+            .expect("send valid response");
+
+            let error = tokio::time::timeout(Duration::from_secs(1), api_task)
+                .await
+                .expect("forkchoiceUpdated must complete after the engine response")
+                .expect("api task should not panic")
+                .unwrap_err();
+            assert_matches!(
+                error,
+                EngineApiError::EngineObjectValidationError(
+                    EngineObjectValidationError::UnsupportedFork
+                )
+            );
+            assert_eq!(ErrorObject::from(error).code(), UNSUPPORTED_FORK_CODE);
         }
     }
 }
