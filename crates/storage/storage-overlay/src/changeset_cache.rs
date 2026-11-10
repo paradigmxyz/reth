@@ -247,15 +247,15 @@ impl ChangesetCache {
     ///
     /// If any block is missing from cache, this falls back to one aggregate database computation
     /// for the whole range. The aggregate result restores the trie to the state before the range
-    /// and is inserted into the range cache when `write_to_cache` is set.
+    /// and is inserted into the range cache when `write_reverts_to_cache` is set.
     ///
     /// # Arguments
     ///
     /// * `provider` - Database provider for DB access and block lookups
     /// * `range` - Block range to accumulate reverts for (inclusive)
-    /// * `write_to_cache` - Whether to retain the accumulated reverts. Callers serving ranges an
-    ///   untrusted peer chooses pass `false`, since entries stay until their start block is
-    ///   evicted.
+    /// * `write_reverts_to_cache` - Whether to retain the accumulated reverts. Callers serving
+    ///   ranges an untrusted peer chooses pass `false`, since entries stay until their start block
+    ///   is evicted.
     ///
     /// # Returns
     ///
@@ -275,7 +275,7 @@ impl ChangesetCache {
         range: RangeInclusive<BlockNumber>,
         partial_state_trie: BlockNumHash,
         finish: BlockNumHash,
-        write_to_cache: bool,
+        write_reverts_to_cache: bool,
     ) -> ProviderResult<Arc<TrieUpdatesSorted>>
     where
         N: NodePrimitives,
@@ -394,7 +394,7 @@ impl ChangesetCache {
                 "Finished accumulating cached trie reverts for block range"
             );
 
-            if write_to_cache {
+            if write_reverts_to_cache {
                 self.inner.write().insert(range_key, Arc::clone(&accumulated_reverts));
             }
             return Ok(accumulated_reverts)
@@ -452,7 +452,7 @@ impl ChangesetCache {
             "Finished accumulating trie reverts for block range"
         );
 
-        if write_to_cache {
+        if write_reverts_to_cache {
             self.inner.write().insert(range_key, Arc::clone(&accumulated_reverts));
         }
 

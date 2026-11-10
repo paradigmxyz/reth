@@ -197,8 +197,8 @@ pub struct OverlayBuilder<N: NodePrimitives = EthPrimitives> {
     no_reverts: bool,
     /// Cache behavior for the overlays this builder resolves.
     overlay_cache_config: OverlayCacheConfig,
-    /// Whether trie reverts accumulated for this builder are retained in the changeset cache.
-    cache_trie_reverts: bool,
+    /// Whether the trie reverts this builder accumulates are written to the changeset cache.
+    write_reverts_to_cache: bool,
 }
 
 impl<N: NodePrimitives> OverlayBuilder<N> {
@@ -215,7 +215,7 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
             reused_sparse_trie_anchor_hash: None,
             no_reverts: false,
             overlay_cache_config: OverlayCacheConfig::default(),
-            cache_trie_reverts: true,
+            write_reverts_to_cache: true,
         }
     }
 
@@ -241,7 +241,7 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
     /// stay until their start block is evicted, so they would otherwise pile up in the cache the
     /// engine shares.
     pub const fn without_trie_revert_caching(mut self) -> Self {
-        self.cache_trie_reverts = false;
+        self.write_reverts_to_cache = false;
         self
     }
 
@@ -469,7 +469,7 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
                             revert_blocks.clone(),
                             state_trie_tip_block,
                             finish_tip_block,
-                            self.cache_trie_reverts,
+                            self.write_reverts_to_cache,
                         )?;
                     retrieve_trie_reverts_duration = start.elapsed();
                     accumulated_reverts
