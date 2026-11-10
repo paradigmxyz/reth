@@ -753,7 +753,8 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
                 let prev_block = expected_start - 1;
                 let prev_range = self.reader().find_fixed_range(segment, prev_block);
                 let prev_path = self.reader().directory().join(segment.filename(&prev_range));
-                prev_path.with_extension(CONFIG_FILE_EXTENSION).exists().then_some(prev_block)
+                (prev_path.exists() && prev_path.with_extension(CONFIG_FILE_EXTENSION).exists())
+                    .then_some(prev_block)
             });
 
         self.reader().update_index(segment, segment_max_block)

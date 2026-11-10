@@ -55,7 +55,8 @@ struct PendingTruncation {
 impl<H: NippyJarHeader> NippyJarWriter<H> {
     /// Creates a [`NippyJarWriter`] from [`NippyJar`].
     ///
-    /// It will **always** attempt to heal any inconsistent state when called.
+    /// It will **always** attempt to heal any inconsistent state when called. A jar without a
+    /// config file is treated as never initialized, and its data and offsets files are truncated.
     pub fn new(jar: NippyJar<H>) -> Result<Self, NippyJarError> {
         let (data_file, offsets_file, is_created) =
             Self::create_or_open_files(jar.data_path(), &jar.offsets_path(), &jar.config_path())?;
