@@ -89,6 +89,9 @@ pub fn apply_state_overrides_with_state<DB: DynDatabase>(
     for (address, account_override) in overrides {
         let original = db.get_account(&address).map_err(StateOverrideError::Database)?;
         let mut account = original.clone().unwrap_or_default();
+        let sets_field = account_override.nonce.is_some() ||
+            account_override.code.is_some() ||
+            account_override.balance.is_some();
 
         if let Some(nonce) = account_override.nonce {
             account.nonce = nonce;
@@ -114,11 +117,12 @@ pub fn apply_state_overrides_with_state<DB: DynDatabase>(
             (None, None) => None,
         };
 
-        // Account existence affects authorization refunds and new-account gas charges. The
-        // override touches the account, so under EIP-161 an empty result is removed regardless of
-        // whether the account existed before, unless storage materializes it. A full storage
-        // replacement always materializes the account, even with no slots.
-        if !account.is_empty() ||
+        // Account existence affects authorization refunds and new-account gas charges. As in geth,
+        // overrides skip EIP-161 cleanup: an existing account keeps existing with its storage even
+        // when left empty, and an absent one is created by any field override, a full storage
+        // replacement, or a storage diff with at least one slot.
+        if original.is_some() ||
+            sets_field ||
             replaces_storage ||
             storage.as_ref().is_some_and(|state| !state.is_empty())
         {
@@ -132,19 +136,6 @@ pub fn apply_state_overrides_with_state<DB: DynDatabase>(
                 });
             }
             db.insert_account_info(&address, account);
-        } else if original.is_some() {
-            if let Some(changes) = changes.as_mut() {
-                let Ok(()) = changes.storage_wipe(address);
-                let Ok(()) = changes.account(AccountChangeRef {
-                    address,
-                    original: original.as_ref(),
-                    current: None,
-                    created: false,
-                    selfdestructed: true,
-                });
-            }
-            db.cache.accounts.insert(address, None);
-            db.cache.storage.entry(address).or_default().wipe();
         }
         if let Some(storage) = storage {
             for (key, value) in storage {
@@ -201,10 +192,12 @@ mod tests {
     use evm2::evm::{AccountBal, AccountInfo, Bal, BalChanges, InMemoryDB};
 
     #[test]
-    fn state_overrides_remove_accounts_left_empty() {
+    fn state_overrides_keep_accounts_left_empty() {
         let emptied = Address::with_last_byte(1);
         let absent = Address::with_last_byte(2);
-        let replaced = Address::with_last_byte(3);
+        let created = Address::with_last_byte(3);
+        let empty_diff = Address::with_last_byte(4);
+        let replaced = Address::with_last_byte(5);
         let slot = U256::ONE;
 
         let mut db = InMemoryDB::default();
@@ -220,6 +213,8 @@ mod tests {
         let overrides = StateOverride::from_iter([
             (emptied, AccountOverride::default().with_balance(U256::ZERO)),
             (absent, AccountOverride::default()),
+            (created, AccountOverride::default().with_balance(U256::ZERO)),
+            (empty_diff, AccountOverride::default().with_state_diff(std::iter::empty())),
             (
                 replaced,
                 AccountOverride::default()
@@ -230,15 +225,26 @@ mod tests {
         let mut bundle = BundleState::default();
         apply_state_overrides_with_state(overrides, &mut state, Some(&mut bundle)).unwrap();
 
-        // An existing account touched into emptiness is removed under EIP-161, with its storage.
-        assert_eq!(state.get_account(&emptied).unwrap(), None);
-        assert_eq!(state.get_storage(&emptied, &slot).unwrap(), U256::ZERO);
-        let removed = bundle.account(&emptied).unwrap();
-        assert_eq!(removed.info, None);
-        assert!(removed.was_destroyed());
-        assert_eq!(state.get_account(&absent).unwrap(), None);
-        assert!(bundle.account(&absent).is_none());
-        // A full storage replacement materializes the account even when it is left empty.
+        // An existing account left empty keeps existing with its storage.
+        assert_eq!(state.get_account(&emptied).unwrap(), Some(AccountInfo::default()));
+        assert_eq!(state.get_storage(&emptied, &slot).unwrap(), U256::from(9));
+        let emptied_bundle = bundle.account(&emptied).unwrap();
+        assert!(emptied_bundle.info.as_ref().is_some_and(|info| info.is_empty()));
+        assert!(!emptied_bundle.was_destroyed());
+        // An absent account without overridden fields or storage slots stays absent.
+        for address in [absent, empty_diff] {
+            assert_eq!(state.get_account(&address).unwrap(), None);
+            assert!(bundle.account(&address).is_none());
+        }
+        // Any overridden field creates the account, even when it is left empty.
+        assert_eq!(state.get_account(&created).unwrap(), Some(AccountInfo::default()));
+        assert!(bundle
+            .account(&created)
+            .unwrap()
+            .info
+            .as_ref()
+            .is_some_and(|info| info.is_empty()));
+        // A full storage replacement drops the old slots.
         assert_eq!(state.get_account(&replaced).unwrap(), Some(AccountInfo::default()));
         assert_eq!(state.get_storage(&replaced, &slot).unwrap(), U256::ZERO);
         assert!(bundle
