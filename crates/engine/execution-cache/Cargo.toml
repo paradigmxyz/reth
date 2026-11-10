@@ -14,7 +14,6 @@ workspace = true
 [dependencies]
 alloy-primitives.workspace = true
 fixed-cache = { workspace = true, features = ["stats"] }
-libc.workspace = true
 metrics.workspace = true
 parking_lot.workspace = true
 reth-errors.workspace = true
