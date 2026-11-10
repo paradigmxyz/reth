@@ -1,5 +1,6 @@
 //! Account data of the snap/2 protocol and its slim trie account encoding.
 
+use alloc::borrow::ToOwned;
 use alloy_primitives::{B256, KECCAK256_EMPTY, U256};
 use alloy_rlp::{BufMut, Decodable, Encodable, Header, RlpDecodable, RlpEncodable};
 use alloy_trie::{TrieAccount, EMPTY_ROOT_HASH};
@@ -25,15 +26,13 @@ impl AccountData {
     /// Returns the account the trie leaf commits to.
     ///
     /// Default storage roots and code hashes are restored when decoding the slim body.
-    #[allow(clippy::clone_on_copy)]
-    pub fn trie_account(&self) -> TrieAccount {
-        self.body.0.clone()
+    pub const fn trie_account(&self) -> &TrieAccount {
+        &self.body.0
     }
 
     /// Consumes the wire value and returns its hashed key with the decoded trie account.
-    #[allow(clippy::missing_const_for_fn)]
     pub fn into_trie_entry(self) -> (B256, TrieAccount) {
-        (self.hash, self.body.0)
+        (self.hash, self.body.into())
     }
 }
 
@@ -61,9 +60,14 @@ impl SlimAccountBody {
 }
 
 impl From<&TrieAccount> for SlimAccountBody {
-    #[allow(clippy::clone_on_copy)]
     fn from(account: &TrieAccount) -> Self {
-        Self(account.clone())
+        Self(account.to_owned())
+    }
+}
+
+impl From<SlimAccountBody> for TrieAccount {
+    fn from(body: SlimAccountBody) -> Self {
+        body.0
     }
 }
 
@@ -197,20 +201,21 @@ mod tests {
         let body = alloy_rlp::encode(&encoded.body);
         assert_eq!(body, alloy_primitives::hex!("c4072a8080"));
         assert_eq!(alloy_rlp::decode_exact::<SlimAccountBody>(&body).unwrap(), encoded.body);
-        assert_eq!(encoded.trie_account(), account);
+        assert_eq!(encoded.trie_account(), &account);
         assert_eq!(encoded.into_trie_entry(), (hash, account));
     }
 
     #[test]
-    #[allow(clippy::clone_on_copy)]
     fn slim_body_keeps_non_default_storage_and_code() {
         let account = trie_account(B256::repeat_byte(2), B256::repeat_byte(3));
         let encoded = AccountData::from_trie_account(B256::repeat_byte(1), &account);
 
         let body = alloy_rlp::encode(&encoded.body);
-        assert_eq!(body, alloy_rlp::encode(account.clone()));
+        let mut expected = Vec::new();
+        account.encode(&mut expected);
+        assert_eq!(body, expected);
         assert_eq!(alloy_rlp::decode_exact::<SlimAccountBody>(&body).unwrap(), encoded.body);
-        assert_eq!(encoded.trie_account(), account);
+        assert_eq!(encoded.trie_account(), &account);
     }
 
     #[test_case(1)]
