@@ -13,7 +13,6 @@ mod invalid_payload;
 mod p2p;
 mod pool;
 mod prestate;
-mod prewarm_reuse;
 mod reorg;
 mod restart;
 mod rpc;

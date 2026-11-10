@@ -41,7 +41,7 @@ use std::{
     cell::RefCell,
     rc::Rc,
     sync::{
-        atomic::{AtomicBool, AtomicUsize, Ordering},
+        atomic::{AtomicUsize, Ordering},
         Arc,
     },
 };
@@ -80,8 +80,6 @@ pub(crate) const fn cfg_reuses_prewarm_results(version: &Version) -> bool {
 #[derive_where(Debug)]
 pub(crate) struct PrewarmResults<T: EvmTypes> {
     slots: Box<[Mutex<ResultSlot<T>>]>,
-    /// Whether a prewarm worker is executing the transaction at each index.
-    speculating: Box<[AtomicBool]>,
     /// Writes predicted by the stored results.
     predicted: Arc<PredictedState>,
 }
@@ -105,34 +103,8 @@ impl<T: EvmTypes> PrewarmResults<T> {
     pub(crate) fn new(transaction_count: usize) -> Self {
         Self {
             slots: (0..transaction_count).map(|_| Mutex::new(ResultSlot::Empty)).collect(),
-            speculating: (0..transaction_count).map(|_| AtomicBool::new(false)).collect(),
             predicted: Arc::default(),
         }
-    }
-
-    /// Returns the number of transactions with result slots.
-    pub(super) const fn len(&self) -> usize {
-        self.slots.len()
-    }
-
-    /// Marks the transaction at `index` as being executed by a prewarm worker, returning `false`
-    /// if another worker already is.
-    pub(super) fn begin_speculation(&self, index: usize) -> bool {
-        self.speculating.get(index).is_some_and(|flag| !flag.swap(true, Ordering::AcqRel))
-    }
-
-    /// Marks the transaction at `index` as no longer being executed by a prewarm worker.
-    pub(super) fn end_speculation(&self, index: usize) {
-        if let Some(flag) = self.speculating.get(index) {
-            flag.store(false, Ordering::Release);
-        }
-    }
-
-    /// Returns whether a prewarm worker is executing the transaction at `index`.
-    ///
-    /// Block execution waits for such a transaction's first result instead of executing it.
-    pub(crate) fn is_speculating(&self, index: usize) -> bool {
-        self.speculating.get(index).is_some_and(|flag| flag.load(Ordering::Acquire))
     }
 
     /// Creates empty result slots like [`Self::new`], without predicting writes of `unpredicted`
@@ -240,7 +212,6 @@ impl<T: EvmTypes> PrewarmResults<T> {
             ResultSlot::Empty | ResultSlot::Unusable(_) => {}
         }
         *slot = f(&self.predicted);
-        self.predicted.generation.fetch_add(1, Ordering::Relaxed);
     }
 
     /// Returns whether the transaction at `index` should be executed again, because prewarming
@@ -626,16 +597,15 @@ pub(super) struct PredictedState {
     cleared: DashMap<Address, Writes<()>, DefaultHashBuilder>,
     /// Bytecode deployed by predicted writes.
     code: DashMap<B256, Bytecode, DefaultHashBuilder>,
-    /// Number of times speculative results were stored or block execution published actual or
-    /// rebased writes, which is when results may become stale.
+    /// Number of actual execution or rebased account updates published by block execution.
     generation: AtomicUsize,
     /// Account whose balance-only writes are not predicted.
     unpredicted: Option<Address>,
 }
 
 impl PredictedState {
-    /// Returns the number of times speculative results were stored or block execution published
-    /// actual or rebased writes.
+    /// Returns the number of actual execution or rebased account updates published by block
+    /// execution.
     pub(super) fn generation(&self) -> usize {
         self.generation.load(Ordering::Relaxed)
     }
