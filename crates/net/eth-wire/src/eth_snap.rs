@@ -177,6 +177,9 @@ where
     }
 
     /// Sends a raw capability message over the connection.
+    ///
+    /// Raw messages are not recorded as requests, so the response to an `eth` or `snap/2` request
+    /// sent this way is rejected as unsolicited. Send requests as [`EthSnapMessage`]s instead.
     pub fn start_send_raw(&mut self, msg: RawCapabilityMessage) -> Result<(), EthStreamError> {
         self.conn.start_send_unpin(msg.encoded()).map_err(Into::into)
     }

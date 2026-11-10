@@ -342,6 +342,9 @@ where
     }
 
     /// Sends a raw capability message directly over the stream
+    ///
+    /// Raw messages are not recorded as requests, so the response to an `eth` request sent this
+    /// way is rejected as unsolicited. Send requests as [`EthMessage`]s instead.
     pub fn start_send_raw(&mut self, msg: RawCapabilityMessage) -> Result<(), EthStreamError> {
         self.inner.start_send_unpin(msg.encoded())?;
         Ok(())
