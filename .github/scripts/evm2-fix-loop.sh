@@ -10,7 +10,8 @@ set -uo pipefail
 CHECK="${1:?check command is required}"
 PROMPT="${2:?prompt is required}"
 MAX_ATTEMPTS=10
-DEADLINE=$((SECONDS + 3600))
+# Two loops run per job; 45 minutes each keeps both, plus the builds, inside its 150-minute timeout.
+DEADLINE=$((SECONDS + 2700))
 
 run_check() {
   echo "::group::$CHECK"

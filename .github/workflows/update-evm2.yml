@@ -133,7 +133,9 @@ jobs:
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         if: steps.update.outputs.bumped == 'true'
         with:
-          cache-on-failure: true
+          # Restore only: this job builds unreviewed evm2 code and Amp edits, so it must not write
+          # the main-branch cache that CI restores.
+          save-if: false
       - uses: tempoxyz/gh-actions/vendor/taiki-e/install-action@d5402286a7abdfb7232173b3228d56473feb8a66 # 2026-09-29T02-04-45Z-d5402286
         if: steps.update.outputs.bumped == 'true'
         with:
