@@ -1,6 +1,6 @@
 //! BAL read-set prewarming pool.
 
-use alloy_primitives::{map::AddressMap, Address, StorageKey, B256};
+use alloy_primitives::{Address, StorageKey, B256};
 use reth_execution_cache::{CachedStateProvider, ExecutionCache, TxPoolPrewarmCacheSnapshot};
 use reth_provider::{EvmStateProvider, EvmStateProviderBox, ProviderResult};
 use std::{
@@ -9,7 +9,6 @@ use std::{
         Arc, Condvar, Mutex,
     },
     thread::JoinHandle,
-    time::{Duration, Instant},
 };
 use tokio::sync::oneshot;
 use tracing::trace;
@@ -49,8 +48,6 @@ pub struct BalPrewarmPool {
     workers: Vec<crossbeam_channel::Sender<PrewarmMsg>>,
     /// Round-robin cursor for distributing warm requests across workers.
     next: AtomicUsize,
-    /// Contracts whose storage a bulk load read recently, and when.
-    loaded_storages: Mutex<AddressMap<Instant>>,
     _handles: Vec<JoinHandle<()>>,
 }
 
@@ -71,12 +68,7 @@ impl BalPrewarmPool {
             );
         }
         trace!(target: "engine::tree::bal_prewarm_pool", num_threads, "BalPrewarmPool spawned");
-        Arc::new(Self {
-            workers,
-            next: AtomicUsize::new(0),
-            loaded_storages: Default::default(),
-            _handles: handles,
-        })
+        Arc::new(Self { workers, next: AtomicUsize::new(0), _handles: handles })
     }
 
     /// Begins a block: hands every worker the provider builder and shared cache so each opens its
@@ -185,19 +177,6 @@ impl BalPrewarmPool {
         rx.blocking_recv().expect("BAL prewarm pool dropped without signaling completion");
     }
 
-    /// Claims a bulk load of the storage of `address`, returning `false` if another load claimed
-    /// it in the last `STORAGE_RELOAD_AFTER`: its pages are likely still cached.
-    pub fn claim_storage_load(&self, address: Address) -> bool {
-        let now = Instant::now();
-        let mut loaded = self.loaded_storages.lock().unwrap_or_else(|err| err.into_inner());
-        if loaded.get(&address).is_some_and(|at| now.duration_since(*at) < STORAGE_RELOAD_AFTER) {
-            return false
-        }
-        loaded.retain(|_, at| now.duration_since(*at) < STORAGE_RELOAD_AFTER);
-        loaded.insert(address, now);
-        true
-    }
-
     fn send_warm(&self, target: PrewarmTarget) {
         let i = self.next.fetch_add(1, Ordering::Relaxed) % self.workers.len();
         let _ = self.workers[i].send(PrewarmMsg::Warm(target, None));
@@ -250,9 +229,6 @@ impl WarmLatch {
 ///
 /// This should explain why this particular value is picked.
 pub const DEFAULT_BAL_PREWARM_THREADS: usize = 128;
-
-/// How long a contract's storage counts as loaded after a bulk load.
-const STORAGE_RELOAD_AFTER: Duration = Duration::from_secs(60);
 
 /// One in this many workers takes the loads of [`BalPrewarmPool::warm_all`].
 ///
