@@ -144,6 +144,12 @@ where
         self.reject_block_announcements = reject;
     }
 
+    /// Returns the maximum allowed message size.
+    #[inline]
+    pub const fn max_message_size(&self) -> usize {
+        self.max_message_size
+    }
+
     /// Decodes incoming bytes into an [`EthMessage`].
     pub fn decode_message(&self, bytes: BytesMut) -> Result<EthMessage<N>, EthStreamError> {
         if bytes.len() > self.max_message_size {

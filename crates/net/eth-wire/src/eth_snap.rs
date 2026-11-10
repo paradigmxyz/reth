@@ -16,7 +16,7 @@ use crate::{
 use alloy_primitives::bytes::{Bytes, BytesMut};
 use futures::{Sink, SinkExt, Stream, StreamExt};
 use reth_eth_wire_types::{
-    snap::{SnapProtocolMessage, SnapVersion},
+    snap::{SnapProtocolMessage, SnapVersion, SNAP_MEMORY_BUDGET_MULTIPLIER},
     RawCapabilityMessage,
 };
 use reth_ethereum_forks::ForkFilter;
@@ -159,11 +159,21 @@ where
         let Some(snap_id) = id.checked_sub(this.snap_offset) else {
             return Poll::Ready(Some(this.eth.decode_message(bytes).map(EthSnapMessage::Eth)))
         };
+        // `snap/2` frames share the `eth` size limit, and their decoded lists a budget derived
+        // from it, so a frame of tiny items can't expand into many times its size in memory.
+        let max_message_size = this.eth.max_message_size();
+        if bytes.len() > max_message_size {
+            return Poll::Ready(Some(Err(EthStreamError::MessageTooBig(bytes.len()))))
+        }
         bytes[0] = snap_id;
         Poll::Ready(Some(
-            SnapProtocolMessage::decode_versioned(SnapVersion::V2, &bytes)
-                .map(EthSnapMessage::Snap)
-                .map_err(Into::into),
+            SnapProtocolMessage::decode_versioned_with_memory_budget(
+                SnapVersion::V2,
+                &bytes,
+                max_message_size.saturating_mul(SNAP_MEMORY_BUDGET_MULTIPLIER),
+            )
+            .map(EthSnapMessage::Snap)
+            .map_err(Into::into),
         ))
     }
 }
@@ -247,7 +257,10 @@ mod tests {
         UnauthedP2PStream,
     };
     use reth_eth_wire_types::{
-        snap::{BlockAccessListsMessage, GetBlockAccessListsMessage},
+        snap::{
+            BlockAccessListsMessage, ByteCodesMessage, GetBlockAccessListsMessage,
+            SnapProtocolError,
+        },
         EthVersion,
     };
     use tokio::net::TcpListener;
@@ -455,5 +468,68 @@ mod tests {
                 "unexpected error for removed snap id {removed_snap_id:#x}: {error}"
             );
         }
+    }
+
+    /// End-to-end: a `snap/2` frame over the size limit, or one whose items expand past the
+    /// memory budget derived from it, is rejected instead of decoded.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn snap_frames_past_size_or_memory_limits_are_rejected_over_the_wire() {
+        reth_tracing::init_test_tracing();
+        let max_message_size = 1024;
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let local_addr = listener.local_addr().unwrap();
+        let (status, fork_filter) = eth_handshake();
+        let server_status = status;
+        let server_fork_filter = fork_filter.clone();
+
+        // Server: send a frame of empty codes that fits the size limit, then one that doesn't.
+        let server = tokio::spawn(async move {
+            let (incoming, _) = listener.accept().await.unwrap();
+            let stream = crate::PassthroughCodec::default().framed(incoming);
+            let (conn, _) =
+                UnauthedP2PStream::new(stream).handshake(eth_snap_hello()).await.unwrap();
+            let (mut stream, _) = EthSnapStream::<_, EthNetworkPrimitives>::handshake(
+                conn,
+                server_status,
+                server_fork_filter,
+                Arc::new(EthHandshake::default()),
+                MAX_MESSAGE_SIZE,
+            )
+            .await
+            .unwrap();
+
+            for codes in [max_message_size / 2, max_message_size * 2] {
+                let response = SnapProtocolMessage::ByteCodes(ByteCodesMessage {
+                    request_id: 1,
+                    codes: vec![Default::default(); codes],
+                });
+                stream.send(EthSnapMessage::Snap(response)).await.unwrap();
+            }
+            std::future::pending::<()>().await
+        });
+
+        let conn = connect_passthrough(local_addr, eth_snap_hello()).await;
+        let (mut stream, _) = EthSnapStream::<_, EthNetworkPrimitives>::handshake(
+            conn,
+            status,
+            fork_filter,
+            Arc::new(EthHandshake::default()),
+            max_message_size,
+        )
+        .await
+        .unwrap();
+
+        assert!(matches!(
+            stream.next().await.unwrap(),
+            Err(EthStreamError::InvalidSnapMessage(SnapProtocolError::Rlp(
+                alloy_rlp::Error::Custom(_)
+            )))
+        ));
+        assert!(matches!(
+            stream.next().await.unwrap(),
+            Err(EthStreamError::MessageTooBig(size)) if size > max_message_size
+        ));
+
+        server.abort();
     }
 }

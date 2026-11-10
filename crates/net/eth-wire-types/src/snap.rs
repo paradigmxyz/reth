@@ -10,7 +10,13 @@ use alloc::vec::Vec;
 use alloy_primitives::{Bytes, B256, KECCAK256_EMPTY, U256};
 use alloy_rlp::{BufMut, Decodable, Encodable, Header, RlpDecodable, RlpEncodable};
 use alloy_trie::{TrieAccount, EMPTY_ROOT_HASH};
+use derive_more::TryFrom;
 use reth_codecs_derive::add_arbitrary_tests;
+
+/// Multiplier applied to the maximum message size to derive the in-memory budget for decoding a
+/// snap response, whose items can take far more memory than their encoding: an empty byte string
+/// is one byte on the wire and a 32-byte handle once decoded.
+pub const SNAP_MEMORY_BUDGET_MULTIPLIER: usize = 6;
 
 /// Supported SNAP protocol versions.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Hash)]
@@ -48,7 +54,9 @@ impl SnapVersion {
 }
 
 /// Message IDs for the snap sync protocol
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, TryFrom)]
+#[try_from(repr)]
+#[repr(u8)]
 pub enum SnapMessageId {
     /// Requests of an unknown number of accounts from a given account trie.
     GetAccountRange = 0x00,
@@ -147,6 +155,21 @@ pub struct AccountRangeMessage {
     pub accounts: Vec<AccountData>,
     /// List of trie nodes proving the account range
     pub proof: Vec<Bytes>,
+}
+
+impl AccountRangeMessage {
+    /// Decodes the message, rejecting it before decoding if its accounts and proof nodes would
+    /// take more than `memory_budget` bytes in memory.
+    pub fn decode_with_memory_budget(
+        buf: &mut &[u8],
+        memory_budget: usize,
+    ) -> alloy_rlp::Result<Self> {
+        ResponseSize::new(buf)?
+            .list::<AccountData>()?
+            .list::<Bytes>()?
+            .ensure_within(memory_budget)?;
+        Self::decode(buf)
+    }
 }
 
 /// Request for the storage slots of multiple accounts' storage tries.
@@ -260,6 +283,21 @@ pub struct StorageRangesMessage {
     pub proof: Vec<Bytes>,
 }
 
+impl StorageRangesMessage {
+    /// Decodes the message, rejecting it before decoding if its slots and proof nodes would take
+    /// more than `memory_budget` bytes in memory.
+    pub fn decode_with_memory_budget(
+        buf: &mut &[u8],
+        memory_budget: usize,
+    ) -> alloy_rlp::Result<Self> {
+        ResponseSize::new(buf)?
+            .lists::<StorageData>()?
+            .list::<Bytes>()?
+            .ensure_within(memory_budget)?;
+        Self::decode(buf)
+    }
+}
+
 /// Request to get a number of requested contract codes.
 // https://github.com/ethereum/devp2p/blob/master/caps/snap.md#getbytecodes-0x04
 #[derive(Debug, Clone, PartialEq, Eq, RlpEncodable, RlpDecodable)]
@@ -286,6 +324,18 @@ pub struct ByteCodesMessage {
     pub codes: Vec<Bytes>,
 }
 
+impl ByteCodesMessage {
+    /// Decodes the message, rejecting it before decoding if its codes would take more than
+    /// `memory_budget` bytes in memory.
+    pub fn decode_with_memory_budget(
+        buf: &mut &[u8],
+        memory_budget: usize,
+    ) -> alloy_rlp::Result<Self> {
+        ResponseSize::new(buf)?.list::<Bytes>()?.ensure_within(memory_budget)?;
+        Self::decode(buf)
+    }
+}
+
 /// Request BALs for the given block hashes.
 #[derive(Debug, Clone, PartialEq, Eq, RlpEncodable, RlpDecodable)]
 #[cfg_attr(any(test, feature = "arbitrary"), derive(arbitrary::Arbitrary))]
@@ -308,6 +358,18 @@ pub struct BlockAccessListsMessage {
     pub request_id: u64,
     /// Raw BAL payloads in request order.
     pub block_access_lists: BlockAccessLists,
+}
+
+impl BlockAccessListsMessage {
+    /// Decodes the message, rejecting it before decoding if its entries would take more than
+    /// `memory_budget` bytes in memory.
+    pub fn decode_with_memory_budget(
+        buf: &mut &[u8],
+        memory_budget: usize,
+    ) -> alloy_rlp::Result<Self> {
+        ResponseSize::new(buf)?.list::<Option<Bytes>>()?.ensure_within(memory_budget)?;
+        Self::decode(buf)
+    }
 }
 
 /// Represents all types of messages in the snap sync protocol.
@@ -426,74 +488,42 @@ impl SnapProtocolMessage {
 
     /// Decodes a SNAP protocol message from its message ID and RLP-encoded body.
     pub fn decode(message_id: u8, buf: &mut &[u8]) -> Result<Self, alloy_rlp::Error> {
-        // Decoding protocol message variants based on message ID
-        macro_rules! decode_snap_message_variant {
-            ($message_id:expr, $buf:expr, $id:expr, $variant:ident, $msg_type:ty) => {
-                if $message_id == $id as u8 {
-                    return Ok(Self::$variant(<$msg_type>::decode($buf)?));
-                }
-            };
-        }
+        Self::decode_with_memory_budget(message_id, buf, usize::MAX)
+    }
 
-        // Try to decode each message type based on the message ID
-        decode_snap_message_variant!(
-            message_id,
-            buf,
-            SnapMessageId::GetAccountRange,
-            GetAccountRange,
-            GetAccountRangeMessage
-        );
-        decode_snap_message_variant!(
-            message_id,
-            buf,
-            SnapMessageId::AccountRange,
-            AccountRange,
-            AccountRangeMessage
-        );
-        decode_snap_message_variant!(
-            message_id,
-            buf,
-            SnapMessageId::GetStorageRanges,
-            GetStorageRanges,
-            GetStorageRangesMessage
-        );
-        decode_snap_message_variant!(
-            message_id,
-            buf,
-            SnapMessageId::StorageRanges,
-            StorageRanges,
-            StorageRangesMessage
-        );
-        decode_snap_message_variant!(
-            message_id,
-            buf,
-            SnapMessageId::GetByteCodes,
-            GetByteCodes,
-            GetByteCodesMessage
-        );
-        decode_snap_message_variant!(
-            message_id,
-            buf,
-            SnapMessageId::ByteCodes,
-            ByteCodes,
-            ByteCodesMessage
-        );
-        decode_snap_message_variant!(
-            message_id,
-            buf,
-            SnapMessageId::GetBlockAccessLists,
-            GetBlockAccessLists,
-            GetBlockAccessListsMessage
-        );
-        decode_snap_message_variant!(
-            message_id,
-            buf,
-            SnapMessageId::BlockAccessLists,
-            BlockAccessLists,
-            BlockAccessListsMessage
-        );
-
-        Err(alloy_rlp::Error::Custom("Unknown message ID"))
+    /// Decodes a SNAP protocol message like [`Self::decode`], rejecting a response before decoding
+    /// it if its lists would take more than `memory_budget` bytes in memory.
+    ///
+    /// Requests are not charged: their lists hold hashes, which take no more memory than their
+    /// encoding. Use [`SNAP_MEMORY_BUDGET_MULTIPLIER`] to derive a reasonable budget.
+    pub fn decode_with_memory_budget(
+        message_id: u8,
+        buf: &mut &[u8],
+        memory_budget: usize,
+    ) -> Result<Self, alloy_rlp::Error> {
+        let Ok(message_id) = SnapMessageId::try_from(message_id) else {
+            return Err(alloy_rlp::Error::Custom("Unknown message ID"))
+        };
+        Ok(match message_id {
+            SnapMessageId::GetAccountRange => Self::GetAccountRange(Decodable::decode(buf)?),
+            SnapMessageId::AccountRange => Self::AccountRange(
+                AccountRangeMessage::decode_with_memory_budget(buf, memory_budget)?,
+            ),
+            SnapMessageId::GetStorageRanges => Self::GetStorageRanges(Decodable::decode(buf)?),
+            SnapMessageId::StorageRanges => Self::StorageRanges(
+                StorageRangesMessage::decode_with_memory_budget(buf, memory_budget)?,
+            ),
+            SnapMessageId::GetByteCodes => Self::GetByteCodes(Decodable::decode(buf)?),
+            SnapMessageId::ByteCodes => {
+                Self::ByteCodes(ByteCodesMessage::decode_with_memory_budget(buf, memory_budget)?)
+            }
+            SnapMessageId::GetBlockAccessLists => {
+                Self::GetBlockAccessLists(Decodable::decode(buf)?)
+            }
+            SnapMessageId::BlockAccessLists => Self::BlockAccessLists(
+                BlockAccessListsMessage::decode_with_memory_budget(buf, memory_budget)?,
+            ),
+        })
     }
 
     /// Decodes a framed snap message (`[id, body..]`), validating the id against `version`.
@@ -501,11 +531,21 @@ impl SnapProtocolMessage {
     /// Empty payload, invalid id, and malformed body are reported as distinct
     /// [`SnapProtocolError`] variants.
     pub fn decode_versioned(version: SnapVersion, bytes: &[u8]) -> Result<Self, SnapProtocolError> {
+        Self::decode_versioned_with_memory_budget(version, bytes, usize::MAX)
+    }
+
+    /// Decodes a framed snap message like [`Self::decode_versioned`], rejecting a response before
+    /// decoding it if its lists would take more than `memory_budget` bytes in memory.
+    pub fn decode_versioned_with_memory_budget(
+        version: SnapVersion,
+        bytes: &[u8],
+        memory_budget: usize,
+    ) -> Result<Self, SnapProtocolError> {
         let (&id, mut body) = bytes.split_first().ok_or(SnapProtocolError::Empty)?;
         if !version.supports_message_id(id) {
             return Err(SnapProtocolError::UnsupportedMessageId(id, version));
         }
-        let msg = Self::decode(id, &mut body)?;
+        let msg = Self::decode_with_memory_budget(id, &mut body, memory_budget)?;
         if !body.is_empty() {
             return Err(SnapProtocolError::Rlp(alloy_rlp::Error::UnexpectedLength));
         }
@@ -598,6 +638,65 @@ impl<'a> SlimAccountBodyRef<'a> {
         } else {
             value.as_slice()
         }
+    }
+}
+
+/// Sizes the lists of a snap response from their RLP headers, without decoding them.
+///
+/// Items are counted at the size of their type, which is what the decoded lists hold at least.
+/// The bytes they own beyond that are bounded by the size of the message.
+struct ResponseSize<'a> {
+    /// Fields of the response that are not sized yet.
+    fields: &'a [u8],
+    /// Bytes the lists sized so far take in memory.
+    size: usize,
+}
+
+impl<'a> ResponseSize<'a> {
+    /// Starts at the lists that follow the request id of the response at the front of `buf`.
+    fn new(mut buf: &'a [u8]) -> alloy_rlp::Result<Self> {
+        let mut fields = Header::decode_bytes(&mut buf, true)?;
+        u64::decode(&mut fields)?;
+        Ok(Self { fields, size: 0 })
+    }
+
+    /// Sizes the next field as a list of `T`.
+    fn list<T>(mut self) -> alloy_rlp::Result<Self> {
+        let items = Header::decode_bytes(&mut self.fields, true)?;
+        self.add::<T>(items)?;
+        Ok(self)
+    }
+
+    /// Sizes the next field as a list of lists of `T`.
+    fn lists<T>(mut self) -> alloy_rlp::Result<Self> {
+        let mut lists = Header::decode_bytes(&mut self.fields, true)?;
+        while !lists.is_empty() {
+            self.size = self.size.saturating_add(size_of::<Vec<T>>());
+            let items = Header::decode_bytes(&mut lists, true)?;
+            self.add::<T>(items)?;
+        }
+        Ok(self)
+    }
+
+    /// Fails if the sized lists would take more than `memory_budget` bytes.
+    const fn ensure_within(self, memory_budget: usize) -> alloy_rlp::Result<()> {
+        if self.size > memory_budget {
+            return Err(alloy_rlp::Error::Custom("snap response exceeds its memory budget"))
+        }
+        Ok(())
+    }
+
+    // Adds the items of the list payload `items`, read as `T`s.
+    fn add<T>(&mut self, mut items: &[u8]) -> alloy_rlp::Result<()> {
+        let mut count = 0usize;
+        while !items.is_empty() {
+            let header = Header::decode(&mut items)?;
+            // `Header::decode` checked that the payload is in bounds.
+            items = &items[header.payload_length..];
+            count += 1;
+        }
+        self.size = self.size.saturating_add(count.saturating_mul(size_of::<T>()));
+        Ok(())
     }
 }
 
@@ -1031,5 +1130,72 @@ mod tests {
         slot.data = [slot.data.as_ref(), &[0x00]].concat().into();
 
         assert!(slot.value().is_err());
+    }
+
+    // Every item is a single byte on the wire, so the response takes many times its encoded size
+    // once decoded.
+    #[test_case(SnapProtocolMessage::AccountRange(AccountRangeMessage {
+        request_id: 1,
+        accounts: Vec::new(),
+        proof: vec![Bytes::new(); 10_000],
+    }); "account range proof")]
+    #[test_case(SnapProtocolMessage::StorageRanges(StorageRangesMessage {
+        request_id: 1,
+        slots: vec![Vec::new(); 10_000],
+        proof: Vec::new(),
+    }); "storage range accounts")]
+    #[test_case(SnapProtocolMessage::StorageRanges(StorageRangesMessage {
+        request_id: 1,
+        slots: Vec::new(),
+        proof: vec![Bytes::new(); 10_000],
+    }); "storage range proof")]
+    #[test_case(SnapProtocolMessage::ByteCodes(ByteCodesMessage {
+        request_id: 1,
+        codes: vec![Bytes::new(); 10_000],
+    }); "byte codes")]
+    #[test_case(SnapProtocolMessage::BlockAccessLists(BlockAccessListsMessage {
+        request_id: 1,
+        block_access_lists: BlockAccessLists(vec![None; 10_000]),
+    }); "block access lists")]
+    fn response_of_tiny_items_exceeds_memory_budget(message: SnapProtocolMessage) {
+        let encoded = message.encode();
+        let memory_budget = encoded.len() * SNAP_MEMORY_BUDGET_MULTIPLIER;
+
+        assert!(matches!(
+            SnapProtocolMessage::decode_versioned_with_memory_budget(
+                SnapVersion::V2,
+                &encoded,
+                memory_budget
+            ),
+            Err(SnapProtocolError::Rlp(alloy_rlp::Error::Custom(_)))
+        ));
+        assert_eq!(
+            SnapProtocolMessage::decode_versioned(SnapVersion::V2, &encoded).unwrap(),
+            message
+        );
+    }
+
+    #[test]
+    fn full_account_range_fits_memory_budget() {
+        // The smallest accounts expand the most, so this is the worst well-formed response of
+        // the soft response size servers stop at.
+        let account = AccountData::from_trie_account(B256::repeat_byte(1), &TrieAccount::default());
+        let soft_response_limit = 2 * 1024 * 1024;
+        let message = SnapProtocolMessage::AccountRange(AccountRangeMessage {
+            request_id: 1,
+            accounts: vec![account.clone(); soft_response_limit / account.length()],
+            proof: Vec::new(),
+        });
+        let max_message_size = 10 * 1024 * 1024;
+
+        assert_eq!(
+            SnapProtocolMessage::decode_versioned_with_memory_budget(
+                SnapVersion::V2,
+                &message.encode(),
+                max_message_size * SNAP_MEMORY_BUDGET_MULTIPLIER,
+            )
+            .unwrap(),
+            message
+        );
     }
 }
