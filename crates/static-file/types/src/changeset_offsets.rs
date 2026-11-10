@@ -17,6 +17,8 @@ pub struct ChangesetOffsetWriter {
     file: File,
     /// Number of records written.
     records_written: u64,
+    /// Records to keep once the deferred truncation is applied, or `None` if none is pending.
+    pending_truncation: Option<u64>,
 }
 
 impl ChangesetOffsetWriter {
@@ -106,11 +108,12 @@ impl ChangesetOffsetWriter {
         let records_written = committed_len;
         let file = OpenOptions::new().create(true).append(true).open(path)?;
 
-        Ok(Self { file, records_written })
+        Ok(Self { file, records_written, pending_truncation: None })
     }
 
     /// Appends a single changeset offset record.
     pub fn append(&mut self, offset: &ChangesetOffset) -> io::Result<()> {
+        self.apply_pending_truncation()?;
         let mut buf = [0u8; Self::RECORD_SIZE];
         buf[..8].copy_from_slice(&offset.offset().to_le_bytes());
         buf[8..].copy_from_slice(&offset.num_changes().to_le_bytes());
@@ -140,8 +143,25 @@ impl ChangesetOffsetWriter {
     pub fn truncate(&mut self, len: u64) -> io::Result<()> {
         self.file.set_len(len * Self::RECORD_SIZE as u64)?;
         self.file.sync_all()?;
+        self.pending_truncation = None;
         self.records_written = len;
         Ok(())
+    }
+
+    /// Drops records like [`Self::truncate`], but leaves them on disk until
+    /// [`Self::apply_pending_truncation`].
+    pub const fn truncate_deferred(&mut self, len: u64) {
+        self.records_written = len;
+        self.pending_truncation = Some(len);
+    }
+
+    /// Truncates the file to the records kept by [`Self::truncate_deferred`].
+    ///
+    /// Returns `false` if no truncation was pending.
+    pub fn apply_pending_truncation(&mut self) -> io::Result<bool> {
+        let Some(len) = self.pending_truncation else { return Ok(false) };
+        self.truncate(len)?;
+        Ok(true)
     }
 
     /// Returns the number of records in the file.

@@ -69,7 +69,6 @@ mod persistence_state;
 pub mod state_root_strategy;
 #[cfg(test)]
 mod tests;
-mod trie_updates;
 mod txpool_prewarm;
 pub mod types;
 

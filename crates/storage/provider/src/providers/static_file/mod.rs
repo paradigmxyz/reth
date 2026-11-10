@@ -119,6 +119,17 @@ mod tests {
         Ok(())
     }
 
+    fn assert_cached_size_matches_disk(
+        sf_rw: &StaticFileProvider<EthPrimitives>,
+        segment: StaticFileSegment,
+        block: u64,
+    ) -> eyre::Result<()> {
+        let jar_provider = sf_rw.get_segment_provider_for_block(segment, block, None)?;
+        let disk_size = fs::metadata(jar_provider.data_path())?.len() +
+            fs::metadata(jar_provider.offsets_path())?.len();
+        assert_eyre(jar_provider.size() as u64, disk_size, "cached size mismatch")
+    }
+
     #[test]
     fn test_static_files() {
         // Ranges
@@ -241,6 +252,7 @@ mod tests {
                     expected_tip,
                     "header mismatch",
                 )?;
+                assert_cached_size_matches_disk(sf_rw, StaticFileSegment::Headers, id)?;
             }
 
             // Validate the number of files remaining in the directory
@@ -494,6 +506,7 @@ mod tests {
                 "block mismatch",
             )?;
             assert_eyre(sf_rw.get_highest_static_file_tx(segment), expected_tx_tip, "tx mismatch")?;
+            assert_cached_size_matches_disk(sf_rw, segment, last_block)?;
 
             // Verify that transactions and receipts are returned correctly. Uses
             // cumulative_gas_used & nonce as ids.

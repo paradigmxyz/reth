@@ -36,6 +36,7 @@ reth-tokio-util.workspace = true
 reth-consensus.workspace = true
 reth-network-peers = { workspace = true, features = ["net"] }
 reth-network-types = { workspace = true, features = ["serde"] }
+reth-lru.workspace = true
 
 # ethereum
 alloy-consensus.workspace = true
@@ -74,7 +75,6 @@ rayon.workspace = true
 rand.workspace = true
 secp256k1 = { workspace = true, features = ["global-context", "std", "recovery"] }
 derive_more.workspace = true
-schnellru.workspace = true
 itertools.workspace = true
 smallvec.workspace = true
 
