@@ -1,13 +1,19 @@
 //! Implements the `GetBlockHeaders`, `GetBlockBodies`, `BlockHeaders`, and `BlockBodies` message
 //! types.
 
-use crate::HeadersDirection;
+use crate::{
+    message::{ensure_list_within_memory_budget, rlp_list_len},
+    HeadersDirection,
+};
 use alloc::vec::Vec;
 use alloy_eips::BlockHashOrNumber;
 use alloy_primitives::B256;
-use alloy_rlp::{RlpDecodable, RlpDecodableWrapper, RlpEncodable, RlpEncodableWrapper};
+use alloy_rlp::{
+    Decodable, Header, RlpDecodable, RlpDecodableWrapper, RlpEncodable, RlpEncodableWrapper,
+};
 use derive_more::{Deref, IntoIterator};
 use reth_codecs_derive::{add_arbitrary_tests, generate_tests};
+use reth_primitives_traits::BlockBody;
 
 /// A request for a peer to return block headers starting at the requested block.
 /// The peer must return at most [`limit`](#structfield.limit) headers.
@@ -117,6 +123,25 @@ generate_tests!(#[rlp, 16] BlockBodies<reth_ethereum_primitives::BlockBody>, Eth
 impl<B> From<Vec<B>> for BlockBodies<B> {
     fn from(bodies: Vec<B>) -> Self {
         Self(bodies)
+    }
+}
+
+impl<B: BlockBody> BlockBodies<B> {
+    /// Decodes the RLP list of block bodies, rejecting it before decoding if the bodies and their
+    /// transactions would take more than `memory_budget` bytes in memory.
+    ///
+    /// Bodies and transactions are counted at the size of their types, which is what the decoded
+    /// lists hold at least.
+    pub fn decode_with_memory_budget(
+        buf: &mut &[u8],
+        memory_budget: usize,
+    ) -> alloy_rlp::Result<Self> {
+        ensure_list_within_memory_budget::<B, B::Transaction>(buf, memory_budget, |buf| {
+            // A block body is encoded as `[transactions, ommers, ...]`.
+            let mut body = Header::decode_bytes(buf, true)?;
+            rlp_list_len(&mut body)
+        })?;
+        Self::decode(buf)
     }
 }
 
@@ -538,5 +563,30 @@ mod tests {
         body.encode(&mut buf);
         let decoded = BlockBodies::<BlockBody>::decode(&mut buf.as_slice()).unwrap();
         assert_eq!(body, decoded);
+    }
+
+    #[test]
+    fn block_bodies_memory_budget() {
+        let tx = TransactionSigned::new_unhashed(
+            Transaction::Legacy(TxLegacy::default()),
+            Signature::test_signature(),
+        );
+        let bodies = BlockBodies(vec![
+            BlockBody { transactions: vec![tx.clone(); 3], ..Default::default() },
+            BlockBody { transactions: vec![tx; 2], ..Default::default() },
+        ]);
+        let encoded = alloy_rlp::encode(&bodies);
+        let size =
+            2 * core::mem::size_of::<BlockBody>() + 5 * core::mem::size_of::<TransactionSigned>();
+
+        let mut buf = encoded.as_slice();
+        let decoded = BlockBodies::<BlockBody>::decode_with_memory_budget(&mut buf, size).unwrap();
+        assert_eq!(decoded, bodies);
+        assert!(buf.is_empty());
+
+        assert_eq!(
+            BlockBodies::<BlockBody>::decode_with_memory_budget(&mut encoded.as_slice(), size - 1),
+            Err(alloy_rlp::Error::Custom("decoded list exceeds memory budget"))
+        );
     }
 }

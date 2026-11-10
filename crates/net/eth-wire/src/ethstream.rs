@@ -7,7 +7,10 @@
 use crate::{
     errors::{EthHandshakeError, EthStreamError},
     handshake::EthereumEthHandshake,
-    message::{EthBroadcastMessage, MAX_MESSAGE_SIZE, TX_MEMORY_BUDGET_MULTIPLIER},
+    message::{
+        EthBroadcastMessage, MAX_MESSAGE_SIZE, RESPONSE_MEMORY_BUDGET_MULTIPLIER,
+        TX_MEMORY_BUDGET_MULTIPLIER,
+    },
     p2pstream::HANDSHAKE_TIMEOUT,
     CanDisconnect, DisconnectReason, EthMessage, EthNetworkPrimitives, EthVersion, ProtocolMessage,
     UnifiedStatus,
@@ -157,10 +160,11 @@ where
             return Err(EthStreamError::UnsupportedMessage { message_id: id });
         }
 
-        let msg = match ProtocolMessage::decode_message_with_tx_memory_budget(
+        let msg = match ProtocolMessage::decode_message_with_memory_budget(
             self.version,
             &mut bytes.as_ref(),
             self.max_message_size * TX_MEMORY_BUDGET_MULTIPLIER,
+            self.max_message_size * RESPONSE_MEMORY_BUDGET_MULTIPLIER,
         ) {
             Ok(m) => m,
             Err(err) => {
@@ -355,24 +359,30 @@ where
 
 #[cfg(test)]
 mod tests {
-    use super::UnauthedEthStream;
+    use super::{EthStreamInner, UnauthedEthStream};
     use crate::{
         broadcast::BlockHashNumber,
         errors::{EthHandshakeError, EthStreamError},
         ethstream::RawCapabilityMessage,
         hello::DEFAULT_TCP_PORT,
+        message::{MessageError, RequestPair, RESPONSE_MEMORY_BUDGET_MULTIPLIER},
         p2pstream::UnauthedP2PStream,
-        EthMessage, EthStream, EthVersion, HelloMessageWithProtocols, PassthroughCodec,
-        ProtocolVersion, Status, StatusMessage,
+        BlockBodies, EthMessage, EthStream, EthVersion, HelloMessageWithProtocols,
+        PassthroughCodec, ProtocolMessage, ProtocolVersion, Status, StatusMessage,
     };
     use alloy_chains::NamedChain;
-    use alloy_primitives::{bytes::Bytes, B256, U256};
+    use alloy_consensus::{Signed, TxLegacy};
+    use alloy_primitives::{
+        bytes::{Bytes, BytesMut},
+        Signature, B256, U256,
+    };
     use alloy_rlp::Decodable;
     use futures::{SinkExt, StreamExt};
     use reth_ecies::stream::ECIESStream;
-    use reth_eth_wire_types::{EthNetworkPrimitives, UnifiedStatus};
+    use reth_eth_wire_types::{EthNetworkPrimitives, NetworkPrimitives, UnifiedStatus};
     use reth_ethereum_forks::{ForkFilter, Head};
     use reth_network_peers::pk2id;
+    use reth_primitives_traits::BlockBody;
     use secp256k1::SecretKey;
     use std::time::Duration;
     use tokio::net::{TcpListener, TcpStream};
@@ -828,5 +838,42 @@ mod tests {
         client_stream.send(test_msg).await.unwrap();
 
         handle.await.unwrap();
+    }
+
+    #[test]
+    fn rejects_block_bodies_over_memory_budget() {
+        type Body = <EthNetworkPrimitives as NetworkPrimitives>::BlockBody;
+        type Tx = <Body as BlockBody>::Transaction;
+
+        let max_message_size = 1024;
+        let eth = EthStreamInner::<EthNetworkPrimitives>::with_max_message_size(
+            EthVersion::Eth68,
+            max_message_size,
+        );
+        let max_txs = (max_message_size * RESPONSE_MEMORY_BUDGET_MULTIPLIER -
+            core::mem::size_of::<Body>()) /
+            core::mem::size_of::<Tx>();
+        let tx = Tx::from(Signed::new_unhashed(
+            TxLegacy::default(),
+            Signature::new(U256::ZERO, U256::ZERO, false),
+        ));
+        let bodies = |txs| {
+            EthMessage::<EthNetworkPrimitives>::BlockBodies(RequestPair {
+                request_id: 1,
+                message: BlockBodies(vec![Body {
+                    transactions: vec![tx.clone(); txs],
+                    ..Default::default()
+                }]),
+            })
+        };
+        let encode = |msg| BytesMut::from(alloy_rlp::encode(ProtocolMessage::from(msg)).as_slice());
+
+        assert_eq!(eth.decode_message(encode(bodies(max_txs))).unwrap(), bodies(max_txs));
+        assert!(matches!(
+            eth.decode_message(encode(bodies(max_txs + 1))),
+            Err(EthStreamError::InvalidMessage(MessageError::RlpError(alloy_rlp::Error::Custom(
+                "decoded list exceeds memory budget"
+            ))))
+        ));
     }
 }
