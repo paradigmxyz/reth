@@ -589,31 +589,40 @@ mod tests {
         assert_eq!(shared_eth.name(), "eth");
     }
 
-    #[test]
-    fn shared_capability_offsets_reject_message_id_overflow() {
-        // 0x10 + 120 + 136 + 5 exceeds the single-byte message id space
-        let local_protocols = vec![
-            Protocol::new(Capability::new_static("aaa", 1), 120),
-            Protocol::new(Capability::new_static("bbb", 1), 136),
-            Protocol::new(Capability::new_static("ccc", 1), 5),
-        ];
+    /// Negotiates `(name, messages)` protocols with a peer that shares all of them.
+    fn negotiate_all(
+        protocols: &[(&'static str, u8)],
+    ) -> Result<Vec<SharedCapability>, P2PStreamError> {
+        let local_protocols: Vec<_> = protocols
+            .iter()
+            .map(|&(name, messages)| Protocol::new(Capability::new_static(name, 1), messages))
+            .collect();
         let peer_capabilities = local_protocols.iter().map(|p| p.cap.clone()).collect();
+        shared_capability_offsets(local_protocols, peer_capabilities)
+    }
 
+    #[test]
+    fn shared_capability_offsets_reject_last_capability_past_message_id_space() {
+        // 0x10 + 120 + 121 ends one message id past 0xff.
         assert!(matches!(
-            shared_capability_offsets(local_protocols, peer_capabilities),
+            negotiate_all(&[("aaa", 120), ("bbb", 121)]),
+            Err(P2PStreamError::ParseSharedCapability(SharedCapabilityError::MessageIdOverflow))
+        ));
+    }
+
+    #[test]
+    fn shared_capability_offsets_reject_capability_after_full_message_id_space() {
+        // 0x10 + 120 + 120 uses every message id, so ccc would start at 0x100.
+        assert!(matches!(
+            negotiate_all(&[("aaa", 120), ("bbb", 120), ("ccc", 1)]),
             Err(P2PStreamError::ParseSharedCapability(SharedCapabilityError::MessageIdOverflow))
         ));
     }
 
     #[test]
     fn shared_capability_offsets_fill_message_id_space() {
-        // 0x10 + 120 + 120 uses every message id up to and including 0xff
-        let aaa = Capability::new_static("aaa", 1);
-        let bbb = Capability::new_static("bbb", 1);
-        let local_protocols =
-            vec![Protocol::new(aaa.clone(), 120), Protocol::new(bbb.clone(), 120)];
-
-        let shared = SharedCapabilities::try_new(local_protocols, vec![aaa, bbb]).unwrap();
+        // 0x10 + 120 + 120 uses every message id up to and including 0xff.
+        let shared = SharedCapabilities(negotiate_all(&[("aaa", 120), ("bbb", 120)]).unwrap());
 
         assert_eq!(shared[1].message_id_offset(), MAX_RESERVED_MESSAGE_ID + 1 + 120);
         assert_eq!(shared.find_by_offset(u8::MAX).unwrap().name(), "bbb");
