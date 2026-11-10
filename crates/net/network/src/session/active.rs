@@ -1627,6 +1627,41 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
+    async fn test_unsolicited_response_disconnects_with_protocol_breach() {
+        let mut builder = SessionBuilder::default();
+
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let local_addr = listener.local_addr().unwrap();
+
+        let fut = builder.with_client_stream(local_addr, async move |mut client_stream| {
+            assert_eq!(client_stream.version(), EthVersion::Eth71);
+            client_stream
+                .send(EthMessage::BlockAccessLists(RequestPair {
+                    request_id: 7,
+                    message: BlockAccessLists(vec![None; 1024]),
+                }))
+                .await
+                .unwrap();
+
+            let msg = client_stream.next().await.unwrap().unwrap_err();
+            assert_eq!(msg.as_disconnected(), Some(DisconnectReason::ProtocolBreach));
+        });
+
+        let (tx, rx) = oneshot::channel();
+
+        tokio::task::spawn(async move {
+            let (incoming, _) = listener.accept().await.unwrap();
+            let session = builder.connect_incoming(incoming).await;
+            session.await;
+
+            tx.send(()).unwrap();
+        });
+
+        fut.await;
+        rx.await.unwrap();
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
     async fn handle_dropped_stream() {
         let mut builder = SessionBuilder::default();
 
