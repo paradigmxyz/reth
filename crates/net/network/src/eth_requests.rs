@@ -43,9 +43,10 @@ use std::{
 use tokio::{
     sync::{mpsc::Receiver, oneshot},
     task::JoinHandle,
+    time::{sleep_until, Sleep},
 };
 use tokio_stream::wrappers::ReceiverStream;
-use tracing::Span;
+use tracing::{debug, Span};
 
 // Limits: <https://github.com/ethereum/go-ethereum/blob/b0d44338bbcefee044f1f635a84487cbbd8f0538/eth/protocols/eth/handler.go#L34-L56>
 
@@ -94,13 +95,15 @@ const MAX_CONCURRENT_STATE_RANGE_REQUESTS: usize = 2;
 
 /// Maximum number of `snap/2` range requests waiting for a serving slot, one per peer.
 ///
-/// They wait because snap clients read an empty response as the root being unavailable.
+/// They wait because snap clients read an empty response as the root being unavailable, and then
+/// leave the peer alone until they retry.
 const MAX_QUEUED_STATE_RANGE_REQUESTS: usize = 16;
 
 /// How long a `snap/2` range request may wait for a serving slot before it is answered empty.
 ///
-/// Kept well under the requester's timeout, so a slot isn't spent on a response nobody awaits.
-const STATE_RANGE_REQUEST_QUEUE_TIMEOUT: Duration = Duration::from_secs(10);
+/// A requester's timeout adapts down to two seconds and also covers transit and serving, so the
+/// wait takes only a fraction of it. A slot is otherwise spent on a response nobody awaits.
+const STATE_RANGE_REQUEST_QUEUE_TIMEOUT: Duration = Duration::from_millis(500);
 
 /// Upper bound on the headers reserved once the first requested header resolves.
 ///
@@ -621,104 +624,6 @@ where
     }
 }
 
-/// Serves a `GetAccountRange` request via [`StateRangeProviderFactory`].
-///
-/// Fails the request if a storage root or proof becomes unavailable after the range lookup.
-/// Proves the boundary between `starting_hash` and the last returned account, per snap/2's
-/// boundary-proof requirement, unless the range is a zero-origin range that exhausted the
-/// trie, in which case no proof is needed.
-fn get_account_range_response(
-    client: &impl StateRangeProviderFactory,
-    req: GetAccountRangeMessage,
-) -> ProviderResult<AccountRangeMessage> {
-    let empty =
-        AccountRangeMessage { request_id: req.request_id, accounts: Vec::new(), proof: Vec::new() };
-
-    let response_bytes = (req.response_bytes as usize).min(SOFT_RESPONSE_LIMIT);
-    let Some(state) = client.state_range_provider(req.root_hash)? else { return Ok(empty) };
-    let RangeResponse { items: accounts, end } =
-        state.account_range(req.starting_hash, req.limit_hash, response_bytes)?;
-
-    let proof = if req.starting_hash.is_zero() && end == RangeEnd::Exhausted {
-        Vec::new()
-    } else {
-        let boundary_keys = boundary_proof_keys(req.starting_hash, accounts.last());
-        state.account_range_proof(&boundary_keys)?
-    };
-
-    let mut account_data = Vec::with_capacity(accounts.len());
-    for (hash, account) in accounts {
-        let storage_root = state.storage_root_by_hash(hash)?;
-        account_data
-            .push(AccountData::from_trie_account(hash, &account.into_trie_account(storage_root)));
-    }
-
-    Ok(AccountRangeMessage { request_id: req.request_id, accounts: account_data, proof })
-}
-
-/// Serves a `GetStorageRanges` request via [`StateRangeProviderFactory`].
-///
-/// `starting_hash`/`limit_hash` apply only to the first account. An account unavailable at
-/// this root makes the whole response empty, rather than skipping it and shifting later
-/// accounts' positions. A proof stops the response at the first account that isn't a
-/// complete, zero-origin range.
-fn get_storage_ranges_response(
-    client: &impl StateRangeProviderFactory,
-    req: GetStorageRangesMessage,
-) -> ProviderResult<StorageRangesMessage> {
-    let empty =
-        StorageRangesMessage { request_id: req.request_id, slots: Vec::new(), proof: Vec::new() };
-    let Some(state) = client.state_range_provider(req.root_hash)? else { return Ok(empty) };
-    let mut slots: Vec<Vec<StorageData>> = Vec::new();
-    let mut proof = Vec::new();
-    let mut remaining_bytes = (req.response_bytes as usize).min(SOFT_RESPONSE_LIMIT);
-
-    for (i, &hashed_address) in
-        req.account_hashes.iter().take(MAX_STORAGE_RANGE_ACCOUNTS_SERVE).enumerate()
-    {
-        // Keeps traversing storage-empty accounts under a zero budget so a real slot still
-        // gets served; worst case is a lookup per account, bounded by the take() above.
-        if remaining_bytes == 0 && slots.iter().any(|range| !range.is_empty()) {
-            break
-        }
-        let (origin, limit) = if i == 0 {
-            (
-                req.starting_hash.unwrap_or(B256::ZERO),
-                req.limit_hash.unwrap_or(B256::repeat_byte(0xff)),
-            )
-        } else {
-            (B256::ZERO, B256::repeat_byte(0xff))
-        };
-        let Some(RangeResponse { items: account_slots, end }) =
-            state.storage_range(hashed_address, origin, limit, remaining_bytes)?
-        else {
-            return Ok(empty)
-        };
-
-        remaining_bytes = remaining_bytes.saturating_sub(account_slots.len() * 64);
-        let last = account_slots.last().map(|(hash, _)| *hash);
-        let needs_proof = !origin.is_zero() || end != RangeEnd::Exhausted;
-        slots.push(
-            account_slots
-                .into_iter()
-                // snap clients verify proofs against RLP-encoded storage trie leaves.
-                .map(|(hash, value)| StorageData::from_value(hash, value))
-                .collect(),
-        );
-
-        if needs_proof {
-            let boundary_keys = match last {
-                Some(last) => vec![origin, last],
-                None => vec![origin],
-            };
-            proof = state.storage_range_proof(hashed_address, &boundary_keys)?;
-            break
-        }
-    }
-
-    Ok(StorageRangesMessage { request_id: req.request_id, slots, proof })
-}
-
 /// Boundary-proof keys for a range reply: `origin`, plus the last returned item's key if any.
 fn boundary_proof_keys<T>(origin: B256, last: Option<&(B256, T)>) -> Vec<B256> {
     match last {
@@ -746,6 +651,10 @@ where
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let this = self.get_mut();
+
+        // Frees the slots of finished state range tasks first, so the requests admitted below see
+        // them and queued requests keep their turn.
+        this.state_range_requests.poll(cx, &this.client, &this.metrics);
 
         let mut acc = Duration::ZERO;
         let maybe_more_incoming_requests = metered_poll_nested_stream_with_budget!(
@@ -789,7 +698,8 @@ where
 
         this.metrics.acc_duration_poll_eth_req_handler.set(acc.as_secs_f64());
 
-        // Polled after new requests are admitted so that each finished task frees its slot.
+        // Polled again so that the tasks and the queue timeout of requests admitted above wake this
+        // handler.
         this.state_range_requests.poll(cx, &this.client, &this.metrics);
 
         // stream is fully drained and import futures pending
@@ -816,6 +726,8 @@ struct StateRangeRequests {
     tasks: Vec<(PeerId, JoinHandle<()>)>,
     /// Requests waiting for a slot in `tasks`, oldest first.
     queue: VecDeque<IncomingStateRangeRequest>,
+    /// Wakes the handler when the oldest queued request times out.
+    queue_timeout: Option<Pin<Box<Sleep>>>,
 }
 
 impl StateRangeRequests {
@@ -842,6 +754,12 @@ impl StateRangeRequests {
         if self.queue.len() >= MAX_QUEUED_STATE_RANGE_REQUESTS ||
             self.queue.iter().any(|queued| queued.peer_id == incoming.peer_id)
         {
+            debug!(
+                target: "net::snap",
+                peer_id=?incoming.peer_id,
+                queued=self.queue.len(),
+                "no room to queue state range request"
+            );
             return incoming.reply_empty(metrics)
         }
         self.queue.push_back(incoming);
@@ -865,7 +783,7 @@ impl StateRangeRequests {
             let _guard = span.enter();
             let empty = request.empty_response();
             let result = request.serve(&client).unwrap_or_else(|error| {
-                tracing::debug!(target: "net::snap", %error, "failed to serve snap range");
+                tracing::debug!(target: "net::snap", %error, "failed to serve state range");
                 empty
             });
             let _ = response.send(Ok(result));
@@ -884,25 +802,32 @@ impl StateRangeRequests {
             } else if queued.received.elapsed() < STATE_RANGE_REQUEST_QUEUE_TIMEOUT {
                 index += 1;
             } else if let Some(incoming) = self.queue.remove(index) {
+                debug!(
+                    target: "net::snap",
+                    peer_id=?incoming.peer_id,
+                    "state range request timed out in queue"
+                );
                 incoming.reply_empty(metrics);
             }
         }
     }
 
     /// Frees the slots of finished tasks and starts queued requests, oldest first, in their place.
+    ///
+    /// Registers `cx` to be woken when a task finishes or the oldest queued request times out.
     fn poll<C>(&mut self, cx: &mut Context<'_>, client: &C, metrics: &EthRequestHandlerMetrics)
     where
         C: StateRangeProviderFactory + Clone + Send + 'static,
     {
-        self.remove_stale(metrics);
-
-        // Runs again after starting queued requests so that their tasks wake this context.
+        // Runs again after starting queued requests so that their tasks wake this context, and
+        // after the queue timeout fires so that it is armed for the next request.
         loop {
+            self.remove_stale(metrics);
             self.tasks.retain_mut(|(_, task)| match Pin::new(task).poll(cx) {
                 Poll::Pending => true,
                 Poll::Ready(result) => {
                     if let Err(error) = result {
-                        tracing::error!(target: "net::snap", %error, "snap range task failed");
+                        tracing::error!(target: "net::snap", %error, "state range task failed");
                     }
                     false
                 }
@@ -920,10 +845,22 @@ impl StateRangeRequests {
                     spawned = true;
                 }
             }
-            if !spawned {
+            if !spawned && !self.poll_queue_timeout(cx) {
                 break
             }
         }
+    }
+
+    /// Arms the timeout of the oldest queued request, returning whether it already fired.
+    fn poll_queue_timeout(&mut self, cx: &mut Context<'_>) -> bool {
+        let Some(oldest) = self.queue.front() else {
+            self.queue_timeout = None;
+            return false
+        };
+        let deadline = (oldest.received + STATE_RANGE_REQUEST_QUEUE_TIMEOUT).into();
+        let timeout = self.queue_timeout.get_or_insert_with(|| Box::pin(sleep_until(deadline)));
+        timeout.as_mut().reset(deadline);
+        timeout.as_mut().poll(cx).is_ready()
     }
 }
 
@@ -943,7 +880,7 @@ struct IncomingStateRangeRequest {
 impl IncomingStateRangeRequest {
     /// Answers the request empty without serving it.
     fn reply_empty(self, metrics: &EthRequestHandlerMetrics) {
-        metrics.snap_range_requests_busy_total.increment(1);
+        metrics.snap_state_range_requests_unserved_total.increment(1);
         let _ = self.response.send(Ok(self.request.empty_response()));
     }
 }
@@ -979,12 +916,118 @@ impl StateRangeRequest {
     fn serve(self, client: &impl StateRangeProviderFactory) -> ProviderResult<SnapResponse> {
         match self {
             Self::Account(req) => {
-                get_account_range_response(client, req).map(SnapResponse::AccountRange)
+                Self::serve_account_range(client, req).map(SnapResponse::AccountRange)
             }
             Self::Storage(req) => {
-                get_storage_ranges_response(client, req).map(SnapResponse::StorageRanges)
+                Self::serve_storage_ranges(client, req).map(SnapResponse::StorageRanges)
             }
         }
+    }
+
+    /// Serves a `GetAccountRange` request via [`StateRangeProviderFactory`].
+    ///
+    /// Fails the request if a storage root or proof becomes unavailable after the range lookup.
+    /// Proves the boundary between `starting_hash` and the last returned account, per snap/2's
+    /// boundary-proof requirement, unless the range is a zero-origin range that exhausted the
+    /// trie, in which case no proof is needed.
+    fn serve_account_range(
+        client: &impl StateRangeProviderFactory,
+        req: GetAccountRangeMessage,
+    ) -> ProviderResult<AccountRangeMessage> {
+        let empty = AccountRangeMessage {
+            request_id: req.request_id,
+            accounts: Vec::new(),
+            proof: Vec::new(),
+        };
+
+        let response_bytes = (req.response_bytes as usize).min(SOFT_RESPONSE_LIMIT);
+        let Some(state) = client.state_range_provider(req.root_hash)? else { return Ok(empty) };
+        let RangeResponse { items: accounts, end } =
+            state.account_range(req.starting_hash, req.limit_hash, response_bytes)?;
+
+        let proof = if req.starting_hash.is_zero() && end == RangeEnd::Exhausted {
+            Vec::new()
+        } else {
+            let boundary_keys = boundary_proof_keys(req.starting_hash, accounts.last());
+            state.account_range_proof(&boundary_keys)?
+        };
+
+        let mut account_data = Vec::with_capacity(accounts.len());
+        for (hash, account) in accounts {
+            let storage_root = state.storage_root_by_hash(hash)?;
+            account_data.push(AccountData::from_trie_account(
+                hash,
+                &account.into_trie_account(storage_root),
+            ));
+        }
+
+        Ok(AccountRangeMessage { request_id: req.request_id, accounts: account_data, proof })
+    }
+
+    /// Serves a `GetStorageRanges` request via [`StateRangeProviderFactory`].
+    ///
+    /// `starting_hash`/`limit_hash` apply only to the first account. An account unavailable at
+    /// this root makes the whole response empty, rather than skipping it and shifting later
+    /// accounts' positions. A proof stops the response at the first account that isn't a
+    /// complete, zero-origin range.
+    fn serve_storage_ranges(
+        client: &impl StateRangeProviderFactory,
+        req: GetStorageRangesMessage,
+    ) -> ProviderResult<StorageRangesMessage> {
+        let empty = StorageRangesMessage {
+            request_id: req.request_id,
+            slots: Vec::new(),
+            proof: Vec::new(),
+        };
+        let Some(state) = client.state_range_provider(req.root_hash)? else { return Ok(empty) };
+        let mut slots: Vec<Vec<StorageData>> = Vec::new();
+        let mut proof = Vec::new();
+        let mut remaining_bytes = (req.response_bytes as usize).min(SOFT_RESPONSE_LIMIT);
+
+        for (i, &hashed_address) in
+            req.account_hashes.iter().take(MAX_STORAGE_RANGE_ACCOUNTS_SERVE).enumerate()
+        {
+            // Keeps traversing storage-empty accounts under a zero budget so a real slot still
+            // gets served; worst case is a lookup per account, bounded by the take() above.
+            if remaining_bytes == 0 && slots.iter().any(|range| !range.is_empty()) {
+                break
+            }
+            let (origin, limit) = if i == 0 {
+                (
+                    req.starting_hash.unwrap_or(B256::ZERO),
+                    req.limit_hash.unwrap_or(B256::repeat_byte(0xff)),
+                )
+            } else {
+                (B256::ZERO, B256::repeat_byte(0xff))
+            };
+            let Some(RangeResponse { items: account_slots, end }) =
+                state.storage_range(hashed_address, origin, limit, remaining_bytes)?
+            else {
+                return Ok(empty)
+            };
+
+            remaining_bytes = remaining_bytes.saturating_sub(account_slots.len() * 64);
+            let last = account_slots.last().map(|(hash, _)| *hash);
+            let needs_proof = !origin.is_zero() || end != RangeEnd::Exhausted;
+            slots.push(
+                account_slots
+                    .into_iter()
+                    // snap clients verify proofs against RLP-encoded storage trie leaves.
+                    .map(|(hash, value)| StorageData::from_value(hash, value))
+                    .collect(),
+            );
+
+            if needs_proof {
+                let boundary_keys = match last {
+                    Some(last) => vec![origin, last],
+                    None => vec![origin],
+                };
+                proof = state.storage_range_proof(hashed_address, &boundary_keys)?;
+                break
+            }
+        }
+
+        Ok(StorageRangesMessage { request_id: req.request_id, slots, proof })
     }
 }
 
@@ -1434,15 +1477,19 @@ mod tests {
                 let _ = released.await;
             }),
         ));
-        for byte in 1..MAX_CONCURRENT_STATE_RANGE_REQUESTS as u8 {
+        let busy_peer = PeerId::repeat_byte(1);
+        for peer in std::iter::once(busy_peer).chain((2..).map(PeerId::repeat_byte)) {
+            if handler.state_range_requests.tasks.len() == MAX_CONCURRENT_STATE_RANGE_REQUESTS {
+                break
+            }
             handler
                 .state_range_requests
                 .tasks
-                .push((PeerId::repeat_byte(byte), tokio::spawn(futures::future::pending())));
+                .push((peer, tokio::spawn(futures::future::pending())));
         }
         // A peer whose request keeps running is queued first, and must be passed over.
         let (response, mut passed_over) = oneshot::channel();
-        handler.on_snap_request(PeerId::repeat_byte(1), account_range_request(), response);
+        handler.on_snap_request(busy_peer, account_range_request(), response);
         let (response, mut rx) = oneshot::channel();
         handler.on_snap_request(peer_id, account_range_request(), response);
 
@@ -1450,17 +1497,33 @@ mod tests {
         assert_eq!(provider.snap_state_range_resolutions(), 0);
 
         release.send(()).unwrap();
-        let served = tokio::time::timeout(
-            Duration::from_secs(5),
+        // Only the queue is polled, so the request it starts is served and its slot freed only if
+        // that task wakes this one.
+        let EthRequestHandler { state_range_requests, client, metrics, .. } = &mut handler;
+        let wait = Duration::from_secs(5);
+        let started = Instant::now();
+        let mut served = None;
+        tokio::time::timeout(
+            wait,
             std::future::poll_fn(|cx| {
-                let _ = Pin::new(&mut handler).poll(cx);
-                Pin::new(&mut rx).poll(cx)
+                state_range_requests.poll(cx, client, metrics);
+                if served.is_none() {
+                    served = rx.try_recv().ok();
+                }
+                if served.is_some() &&
+                    state_range_requests.tasks.len() < MAX_CONCURRENT_STATE_RANGE_REQUESTS
+                {
+                    Poll::Ready(())
+                } else {
+                    Poll::Pending
+                }
             }),
         )
         .await
-        .expect("queued snap range request must be served once a slot frees");
+        .expect("queued state range request must be served once a slot frees");
 
-        assert_eq!(served.unwrap(), Ok(empty_account_range()));
+        assert!(started.elapsed() < wait, "task started from the queue must wake the poller");
+        assert_eq!(served, Some(Ok(empty_account_range())));
         assert_eq!(provider.snap_state_range_resolutions(), 1);
         assert_eq!(handler.state_range_requests.queue.len(), 1);
         assert_eq!(passed_over.try_recv(), Err(oneshot::error::TryRecvError::Empty));
@@ -1480,29 +1543,91 @@ mod tests {
         let (response, gone) = oneshot::channel();
         handler.on_snap_request(PeerId::repeat_byte(0x80), account_range_request(), response);
         drop(gone);
-        // Another request has waited past the timeout.
+        // Another request is about to time out, with nothing else left to wake the handler.
         let SnapProtocolMessage::GetAccountRange(request) = account_range_request() else {
             unreachable!("fixture is an account range request")
         };
-        let (response, expired) = oneshot::channel();
+        let (response, mut expired) = oneshot::channel();
         handler.state_range_requests.queue.push_back(IncomingStateRangeRequest {
             peer_id: PeerId::repeat_byte(0x81),
             request: StateRangeRequest::Account(request),
             response,
-            received: Instant::now()
-                .checked_sub(STATE_RANGE_REQUEST_QUEUE_TIMEOUT)
-                .expect("clock is past the timeout"),
+            received: Instant::now() + Duration::from_millis(50) -
+                STATE_RANGE_REQUEST_QUEUE_TIMEOUT,
         });
 
-        std::future::poll_fn(|cx| {
-            let _ = Pin::new(&mut handler).poll(cx);
-            Poll::Ready(())
-        })
-        .await;
+        // Only the queue is polled, so nothing but its timeout can wake this task before the wait
+        // below gives up.
+        let EthRequestHandler { state_range_requests, client, metrics, .. } = &mut handler;
+        let wait = Duration::from_secs(5);
+        let started = Instant::now();
+        let answer = tokio::time::timeout(
+            wait,
+            std::future::poll_fn(|cx| {
+                state_range_requests.poll(cx, client, metrics);
+                Pin::new(&mut expired).poll(cx)
+            }),
+        )
+        .await
+        .expect("queued state range request must be answered when it times out");
 
+        assert!(started.elapsed() < wait, "queue timeout must wake the poller");
+        assert_eq!(answer.unwrap(), Ok(empty_account_range()));
         assert!(handler.state_range_requests.queue.is_empty());
-        assert_eq!(expired.await.unwrap(), Ok(empty_account_range()));
         assert_eq!(provider.snap_state_range_resolutions(), 0);
+    }
+
+    #[tokio::test]
+    async fn incoming_state_range_request_sees_slots_freed_since_the_last_poll() {
+        let provider = MockEthProvider::default();
+        let (peers_tx, _) = mpsc::unbounded_channel();
+        let (incoming_tx, incoming_rx) = mpsc::channel(1);
+        let mut handler = EthRequestHandler::<_, EthNetworkPrimitives>::new(
+            provider.clone(),
+            PeersHandle::new(peers_tx),
+            incoming_rx,
+        );
+        // The peer's task finished after the last poll, and it has another request queued.
+        let peer_id = PeerId::default();
+        let finished = tokio::spawn(async {});
+        while !finished.is_finished() {
+            tokio::task::yield_now().await;
+        }
+        handler.state_range_requests.tasks.push((peer_id, finished));
+        for byte in 1..MAX_CONCURRENT_STATE_RANGE_REQUESTS as u8 {
+            handler
+                .state_range_requests
+                .tasks
+                .push((PeerId::repeat_byte(byte), tokio::spawn(futures::future::pending())));
+        }
+        let (response, _queued) = oneshot::channel();
+        handler.on_snap_request(peer_id, account_range_request(), response);
+        assert_eq!(handler.state_range_requests.queue.len(), 1);
+
+        // Its next request arrives before the handler has noticed the finished task.
+        let (response, mut rx) = oneshot::channel();
+        incoming_tx
+            .send(IncomingEthRequest::GetSnap {
+                peer_id,
+                request: account_range_request(),
+                response,
+            })
+            .await
+            .unwrap();
+        tokio::time::timeout(
+            Duration::from_secs(5),
+            std::future::poll_fn(|cx| {
+                let _ = Pin::new(&mut handler).poll(cx);
+                Pin::new(&mut rx).poll(cx)
+            }),
+        )
+        .await
+        .expect("incoming state range request must be answered")
+        .unwrap()
+        .unwrap();
+
+        // Both requests were served in turn, neither was turned away.
+        assert_eq!(provider.snap_state_range_resolutions(), 2);
     }
 
     #[tokio::test]
@@ -1574,7 +1699,7 @@ mod tests {
             }),
         )
         .await
-        .expect("finished snap range task must free its peer slot");
+        .expect("finished state range task must free its peer slot");
     }
 
     #[tokio::test]
