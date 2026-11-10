@@ -45,13 +45,10 @@ use reth_provider::{
 use reth_storage_overlay::OverlayStateProviderFactory;
 use reth_tasks::{Runtime, WorkerStatefulPool};
 use reth_trie_common::MultiProofTargetsV2;
-use std::{
-    sync::{
-        atomic::{AtomicBool, AtomicUsize, Ordering},
-        mpsc::{self, channel, Receiver, Sender},
-        Arc, OnceLock,
-    },
-    time::Duration,
+use std::sync::{
+    atomic::{AtomicBool, AtomicUsize, Ordering},
+    mpsc::{self, channel, Receiver, Sender},
+    Arc, OnceLock,
 };
 use tokio::sync::oneshot;
 use tracing::{debug, debug_span, instrument, trace, trace_span, warn, Span};
@@ -60,13 +57,8 @@ use tracing::{debug, debug_span, instrument, trace, trace_span, warn, Span};
 /// execute again.
 const REFRESH_WINDOW: usize = 64;
 
-/// Number of idle rounds an idle speculation worker spins before it waits for new work, so that
-/// it does not take CPU time from the state root computation.
+/// Number of idle rounds an idle speculation worker spins before it yields its thread.
 const IDLE_SPIN_ROUNDS: u32 = 6;
-
-/// Longest time an idle speculation worker waits for new work before checking again whether
-/// block execution moved on.
-const IDLE_WAIT_TIMEOUT: Duration = Duration::from_micros(100);
 
 /// Determines the prewarming mode: transaction-based, BAL-based, or skipped.
 ///
@@ -288,10 +280,8 @@ where
                     ctx.metrics.seeded_transactions.increment(1);
                 }
                 queue.push(index, tx, seeded);
-                results.advance_generation();
             }
             queue.close();
-            results.advance_generation();
             Self::send_withdrawal_hints(ctx, state_root_hint_stream);
             tx_count
         })
@@ -332,10 +322,9 @@ where
 
             // Block execution executes the transaction it is at itself if its result is stale.
             let from = ctx.executed_tx_index.load(Ordering::Relaxed) + 1;
-            let generation = results.predicted().generation();
-            let state = Some((from, generation));
+            let state = Some((from, results.predicted().generation()));
             if state == scanned {
-                backoff(results, generation, &mut idle);
+                backoff(&mut idle);
                 continue
             }
             let refreshed = (from..results.len().min(from + REFRESH_WINDOW)).any(|index| {
@@ -354,7 +343,7 @@ where
                 idle = 0;
             } else {
                 scanned = state;
-                backoff(results, generation, &mut idle);
+                backoff(&mut idle);
             }
         }
     }
@@ -1140,15 +1129,14 @@ impl<Tx, T: evm2::EvmTypes> SpeculationQueue<Tx, T> {
     }
 }
 
-/// Spins for longer the more consecutive idle rounds `idle` counts, then waits for the prediction
-/// generation to change from `generation`.
-fn backoff<T: evm2::EvmTypes>(results: &PrewarmResults<T>, generation: usize, idle: &mut u32) {
+/// Spins, then yields the thread, for longer the more consecutive idle rounds `idle` counts.
+fn backoff(idle: &mut u32) {
     if *idle < IDLE_SPIN_ROUNDS {
         for _ in 0..1 << *idle {
             std::hint::spin_loop();
         }
     } else {
-        results.wait_for_generation_change(generation, IDLE_WAIT_TIMEOUT);
+        std::thread::yield_now();
     }
     *idle = idle.saturating_add(1);
 }

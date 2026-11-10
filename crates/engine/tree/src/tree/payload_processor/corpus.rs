@@ -345,8 +345,6 @@ struct ParallelStats {
     speculations: usize,
     /// Time the committer spent waiting for in-flight speculative results.
     waiting: Duration,
-    /// Time the committer spent executing transactions itself.
-    executing: Duration,
     /// Time from the start of speculation to the finished output.
     wall: Duration,
 }
@@ -481,8 +479,6 @@ fn execute_parallel(
                     Err(miss) => {
                         // Only first speculations are waited for: a refresh may chase predictions
                         // that keep changing, so the committer executes stale results itself.
-                        // Only first speculations are waited for: a refresh may chase predictions
-                        // that keep changing, so the committer executes stale results itself.
                         let in_flight = miss == ReuseMiss::Missing &&
                             (speculating[index].load(Ordering::Acquire) ||
                                 index < next.load(Ordering::Relaxed));
@@ -491,12 +487,10 @@ fn execute_parallel(
                             std::hint::spin_loop();
                             continue
                         }
-                        let execute_start = Instant::now();
                         let result =
                             executor.execute_transaction_without_commit(tx.clone()).unwrap();
                         results.publish_executed(index, &result.result().pending_state);
                         executor.commit_transaction(result).unwrap();
-                        stats.executing += execute_start.elapsed();
                         match miss {
                             ReuseMiss::Missing => stats.unclaimed += 1,
                             ReuseMiss::Stale => stats.stale += 1,
@@ -585,12 +579,11 @@ fn corpus_parallel() {
         totals.stale += stats.stale;
         totals.speculations += stats.speculations;
         totals.waiting += stats.waiting;
-        totals.executing += stats.executing;
         totals.wall += stats.wall;
     });
     latencies.sort_by(f64::total_cmp);
     println!(
-        "workers={workers} blocks={blocks} txs={txs} reused={:.1}% unclaimed={} stale={} speculations/tx={:.2} seq_mean={:.3}ms par_mean={:.3}ms par_p50={:.3}ms par_p99={:.3}ms wait_mean={:.3}ms self_exec_mean={:.3}ms seq_ggas/s={:.3} par_ggas/s={:.3}",
+        "workers={workers} blocks={blocks} txs={txs} reused={:.1}% unclaimed={} stale={} speculations/tx={:.2} seq_mean={:.3}ms par_mean={:.3}ms par_p50={:.3}ms par_p99={:.3}ms wait_mean={:.3}ms seq_ggas/s={:.3} par_ggas/s={:.3}",
         totals.reused as f64 * 100.0 / txs as f64,
         totals.unclaimed,
         totals.stale,
@@ -600,7 +593,6 @@ fn corpus_parallel() {
         latencies[latencies.len() / 2],
         latencies[(latencies.len() - 1) * 99 / 100],
         totals.waiting.as_secs_f64() * 1e3 / blocks as f64,
-        totals.executing.as_secs_f64() * 1e3 / blocks as f64,
         gas as f64 / sequential.as_secs_f64() / 1e9,
         gas as f64 / totals.wall.as_secs_f64() / 1e9,
     );
