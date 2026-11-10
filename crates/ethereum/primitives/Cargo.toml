@@ -29,7 +29,6 @@ alloy-primitives.workspace = true
 arbitrary.workspace = true
 proptest.workspace = true
 proptest-arbitrary-interop.workspace = true
-rand.workspace = true
 alloy-rlp.workspace = true
 reth-codecs = { workspace = true, features = ["test-utils"] }
 reth-zstd-compressors.workspace = true
@@ -79,7 +78,6 @@ serde = [
     "reth-codecs?/serde",
     "reth-primitives-traits/serde",
     "alloy-rpc-types-eth?/serde",
-    "rand/serde",
 ]
 rpc = [
     "dep:alloy-rpc-types-eth",

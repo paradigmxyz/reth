@@ -9196,7 +9196,6 @@ dependencies = [
  "arbitrary",
  "proptest",
  "proptest-arbitrary-interop",
- "rand 0.10.3",
  "reth-codecs",
  "reth-primitives-traits",
  "reth-zstd-compressors",
