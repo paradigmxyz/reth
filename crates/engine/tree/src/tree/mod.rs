@@ -1894,12 +1894,11 @@ where
             self.state.set_pending_sparse_trie_prune(false);
             self.state.tree_state.reset(backfill_num_hash)
         } else {
-            let removed = self.state.tree_state.remove_until(
+            self.state.tree_state.remove_until(
                 backfill_num_hash,
                 self.persistence_state.last_persisted_block.hash,
                 Some(backfill_num_hash),
             );
-            self.runtime.spawn_drop(removed);
         }
 
         self.metrics.engine.executed_blocks.set(self.state.tree_state.block_count() as f64);
@@ -3660,14 +3659,11 @@ where
             None
         };
 
-        // Persisted blocks can hold the last references to their execution output and trie data,
-        // whose drop would delay the next payload.
-        let removed = self.state.tree_state.remove_until(
+        self.state.tree_state.remove_until(
             upper_bound,
             self.persistence_state.last_persisted_block.hash,
             num,
         );
-        self.runtime.spawn_drop(removed);
         self.metrics.engine.executed_blocks.set(self.state.tree_state.block_count() as f64);
         Ok(())
     }
