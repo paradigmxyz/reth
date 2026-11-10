@@ -172,9 +172,9 @@ use tracing::{debug, debug_span, error, info, instrument, trace, warn, Level, Sp
 
 pub use crate::tree::types::ValidationOutcome;
 
-/// How long block execution spins on an in-flight speculative execution of a transaction before it
-/// yields its thread while waiting for the result.
-const SPECULATION_SPIN: Duration = Duration::from_micros(300);
+/// How long block execution waits for an in-flight speculative execution of a transaction before
+/// executing the transaction itself.
+const SPECULATION_RACE_AFTER: Duration = Duration::from_micros(300);
 
 /// Multiplier over the parent's gas limit beyond which a payload must pass pre-execution
 /// validation.
@@ -1266,18 +1266,16 @@ where
                 Some(results) => {
                     let mut outcome =
                         self.commit_prewarm_result(executor, results, index, tx.tx())?;
-                    // A prewarm worker executing the transaction for the first time is ahead of
-                    // block execution, which would have to load the same state. Block execution
-                    // waits for its result: executing the transaction beside it reads the same
-                    // state again, one cold read at a time, and slows both.
+                    // A prewarm worker executing the transaction for the first time usually
+                    // finishes it sooner than block execution would, which also has to load its
+                    // state. A speculation that takes longer is raced: block execution executes
+                    // the transaction itself on its warmer state, reading what the worker loaded.
                     if outcome == Err(ReuseMiss::Missing) && results.is_speculating(index) {
                         let wait_start = Instant::now();
-                        while results.is_speculating(index) {
-                            if wait_start.elapsed() < SPECULATION_SPIN {
-                                std::hint::spin_loop();
-                            } else {
-                                std::thread::yield_now();
-                            }
+                        while results.is_speculating(index) &&
+                            wait_start.elapsed() < SPECULATION_RACE_AFTER
+                        {
+                            std::hint::spin_loop();
                         }
                         outcome = self.commit_prewarm_result(executor, results, index, tx.tx())?;
                     }

@@ -417,7 +417,7 @@ where
         let mut idle = 0;
         while !ctx.should_stop() {
             if let Some((index, (tx, seeded))) = queue.claim() {
-                if let Some(_speculation) = results.begin_speculation(index) {
+                if results.begin_speculation(index) {
                     Self::transact_worker(
                         ctx,
                         pool,
@@ -426,6 +426,7 @@ where
                         seeded.clone(),
                         state_root_hint_stream,
                     );
+                    results.end_speculation(index);
                 }
                 idle = 0;
                 continue
@@ -437,17 +438,17 @@ where
             let mut refreshed = false;
             while let Some(index) = results.take_maybe_stale(from..from + REFRESH_WINDOW) {
                 let Some((tx, _)) = queue.get(index) else { continue };
-                let Some(speculation) = results.begin_speculation(index) else {
+                if !results.begin_speculation(index) {
                     // The worker executing it checks it again when it stores its result.
                     continue
-                };
+                }
                 if index > ctx.executed_tx_index.load(Ordering::Relaxed) &&
                     results.needs_refresh(index)
                 {
                     Self::transact_worker(ctx, pool, index, tx.clone(), None, None);
                     refreshed = true;
                 }
-                drop(speculation);
+                results.end_speculation(index);
                 if refreshed {
                     break
                 }
