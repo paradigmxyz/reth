@@ -85,8 +85,7 @@ pub use reth_trie_parallel::{
     },
 };
 use reth_trie_sparse::{
-    ArenaExecutor, ArenaParallelSparseTrie, ArenaParallelismThresholds, RevealableSparseTrie,
-    SparseStateTrie, TrieNodeEpoch,
+    ArenaExecutor, ArenaParallelSparseTrie, RevealableSparseTrie, SparseStateTrie, TrieNodeEpoch,
 };
 use std::{
     fmt,
@@ -670,18 +669,10 @@ impl DefaultStateRootStrategy {
                 );
                 let trie_executor = Arc::new(StorageTriePoolExecutor(executor.clone()));
                 let default_trie = RevealableSparseTrie::blind_from(
-                    ArenaParallelSparseTrie::default().with_executor(trie_executor.clone()),
-                );
-                let accounts_trie = RevealableSparseTrie::blind_from(
-                    ArenaParallelSparseTrie::default()
-                        .with_parallelism_thresholds(ArenaParallelismThresholds {
-                            min_dirty_leaves: ACCOUNT_TRIE_PARALLEL_DIRTY_LEAVES,
-                            ..Default::default()
-                        })
-                        .with_executor(trie_executor),
+                    ArenaParallelSparseTrie::default().with_executor(trie_executor),
                 );
                 SparseStateTrie::default()
-                    .with_accounts_trie(accounts_trie)
+                    .with_accounts_trie(default_trie.clone())
                     .with_default_storage_trie(default_trie)
                     .with_updates(true)
             };
@@ -899,13 +890,6 @@ impl ArenaExecutor for StorageTriePoolExecutor {
         self.0.storage_trie_pool().run_all(jobs);
     }
 }
-
-/// Number of dirty leaves from which the account trie hashes its subtries in parallel.
-///
-/// A dirty account leaf takes about 10 us to hash, so under the default of 64 a block changing 32
-/// to 63 accounts since the last hashing pass spent ~0.4 ms on the sparse trie thread, often after
-/// the last transaction. In parallel it takes ~0.16 ms.
-const ACCOUNT_TRIE_PARALLEL_DIRTY_LEAVES: u64 = 4;
 
 fn sparse_trie_prune_target<N: NodePrimitives>(
     current_anchor: B256,
