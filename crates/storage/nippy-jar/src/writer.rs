@@ -55,15 +55,64 @@ struct PendingTruncation {
 impl<H: NippyJarHeader> NippyJarWriter<H> {
     /// Creates a [`NippyJarWriter`] from [`NippyJar`].
     ///
-    /// It will **always** attempt to heal any inconsistent state when called.
-    pub fn new(jar: NippyJar<H>) -> Result<Self, NippyJarError> {
-        let (data_file, offsets_file, is_created) =
+    /// Uses the persisted configuration when present and attempts to heal inconsistent files.
+    /// Missing files are recreated only for empty jars with an initial offsets prefix.
+    pub fn new(mut jar: NippyJar<H>) -> Result<Self, NippyJarError> {
+        let config_exists = jar.config_path().try_exists()?;
+        // Disk configuration is authoritative, including zero-row user headers.
+        if config_exists {
+            jar = NippyJar::load(jar.data_path())?;
+        }
+        let data_exists = jar.data_path().try_exists()?;
+        let offsets_exist = jar.offsets_path().try_exists()?;
+        if !config_exists &&
+            (offsets_exist ||
+                (data_exists && reth_fs_util::metadata(jar.data_path())?.len() != 0))
+        {
+            return Err(NippyJarError::MissingFile(jar.config_path()))
+        }
+        let is_created = !data_exists ||
+            !offsets_exist ||
+            (jar.rows() == 0 &&
+                reth_fs_util::metadata(jar.offsets_path())?.len() <
+                    1 + u64::from(OFFSET_SIZE_BYTES));
+
+        if is_created {
+            if jar.rows() != 0 ||
+                (data_exists && reth_fs_util::metadata(jar.data_path())?.len() != 0)
+            {
+                return Err(NippyJarError::InconsistentState)
+            }
+            if offsets_exist {
+                if reth_fs_util::metadata(jar.offsets_path())?.len() >
+                    1 + u64::from(OFFSET_SIZE_BYTES)
+                {
+                    return Err(NippyJarError::InconsistentState)
+                }
+                let offsets = reth_fs_util::read(jar.offsets_path())?;
+                let mut initial_offset = [0; 1 + OFFSET_SIZE_BYTES as usize];
+                initial_offset[0] = OFFSET_SIZE_BYTES;
+                if !initial_offset.starts_with(&offsets) {
+                    return Err(NippyJarError::InconsistentState)
+                }
+            }
+
+            // Publish and sync the configuration before exposing a data file to discovery.
+            // Normal commits still publish the configuration last.
+            jar.freeze_config()?;
+        }
+
+        let (data_file, offsets_file) =
             Self::create_or_open_files(jar.data_path(), &jar.offsets_path())?;
 
         let (jar, data_file, offsets_file) = if is_created {
-            // Makes sure we don't have dangling data and offset files when we just created the file
-            jar.freeze_config()?;
-
+            // Rewrite an interrupted initial offset, including a partially written one.
+            let mut offsets_file = offsets_file;
+            offsets_file.set_len(0)?;
+            offsets_file.seek(SeekFrom::Start(0))?;
+            offsets_file.write_all(&[OFFSET_SIZE_BYTES])?;
+            offsets_file.write_all(&[0; OFFSET_SIZE_BYTES as usize])?;
+            offsets_file.sync_all()?;
             (jar, BufWriter::new(data_file), BufWriter::new(offsets_file))
         } else {
             // If we are opening a previously created jar, we need to check its consistency, and
@@ -131,12 +180,7 @@ impl<H: NippyJarHeader> NippyJarWriter<H> {
         self.jar
     }
 
-    fn create_or_open_files(
-        data: &Path,
-        offsets: &Path,
-    ) -> Result<(File, File, bool), NippyJarError> {
-        let is_created = !data.exists() || !offsets.exists();
-
+    fn create_or_open_files(data: &Path, offsets: &Path) -> Result<(File, File), NippyJarError> {
         if !data.exists() {
             // File::create is write-only (no reading possible)
             File::create(data)?;
@@ -150,22 +194,8 @@ impl<H: NippyJarHeader> NippyJarWriter<H> {
             File::create(offsets)?;
         }
 
-        let mut offsets_file = OpenOptions::new().read(true).write(true).open(offsets)?;
-        if is_created {
-            let mut buf = Vec::with_capacity(1 + OFFSET_SIZE_BYTES as usize);
-
-            // First byte of the offset file is the size of one offset in bytes
-            buf.write_all(&[OFFSET_SIZE_BYTES])?;
-
-            // The last offset should always represent the data file len, which is 0 on
-            // creation.
-            buf.write_all(&[0; OFFSET_SIZE_BYTES as usize])?;
-
-            offsets_file.write_all(&buf)?;
-            offsets_file.seek(SeekFrom::End(0))?;
-        }
-
-        Ok((data_file, offsets_file, is_created))
+        let offsets_file = OpenOptions::new().read(true).write(true).open(offsets)?;
+        Ok((data_file, offsets_file))
     }
 
     /// Appends rows to data file.  `fn commit()` should be called to flush offsets and config to
@@ -314,7 +344,7 @@ impl<H: NippyJarHeader> NippyJarWriter<H> {
                     // When no rows remain, keep the offset size byte and the final offset (data
                     // file size = 0). This maintains the same structure as when
                     // a file is initially created.
-                    // See `NippyJarWriter::create_or_open_files` for the initial file format.
+                    // See `NippyJarWriter::new` for the initial file format.
                     self.pending_truncation = Some(PendingTruncation {
                         offsets_len: 1 + OFFSET_SIZE_BYTES as u64,
                         data_len: 0,
@@ -536,5 +566,158 @@ impl<H: NippyJarHeader> NippyJarWriter<H> {
     #[cfg(any(test, feature = "test-utils"))]
     pub const fn jar(&self) -> &NippyJar<H> {
         &self.jar
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+
+    #[test]
+    fn initialization_config_failure_does_not_create_data_files() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("jar");
+        fs::create_dir(path.with_extension("tmp")).unwrap();
+        let jar = NippyJar::new_without_header(1, &path);
+        assert!(matches!(NippyJarWriter::new(jar), Err(NippyJarError::FileSystem(_))));
+        assert!(!path.exists());
+        assert!(!path.with_extension("off").exists());
+        assert!(!path.with_extension("conf").exists());
+    }
+
+    #[test]
+    fn resumes_every_initialization_prefix() {
+        // Config publication precedes data creation, then offsets creation and its initial write.
+        for data_exists in [false, true] {
+            for offsets_len in 0..=2 + usize::from(OFFSET_SIZE_BYTES) {
+                let dir = tempfile::tempdir().unwrap();
+                let path = dir.path().join("jar");
+                let jar = NippyJar::new(1, &path, 42u64);
+                jar.freeze_config().unwrap();
+                if data_exists {
+                    fs::write(&path, []).unwrap();
+                }
+                if offsets_len > 0 {
+                    let mut offsets = vec![0; offsets_len - 1];
+                    if !offsets.is_empty() {
+                        offsets[0] = OFFSET_SIZE_BYTES;
+                    }
+                    fs::write(jar.offsets_path(), offsets).unwrap();
+                }
+                let mut writer = NippyJarWriter::new(NippyJar::new(1, &path, 99u64)).unwrap();
+                assert_eq!(*writer.user_header(), 42);
+                writer
+                    .append_column(Some(Ok::<_, Box<dyn std::error::Error + Send + Sync>>(
+                        b"payload".as_slice(),
+                    )))
+                    .unwrap();
+                writer.commit().unwrap();
+                drop(writer);
+                let jar = NippyJar::<u64>::load(&path).unwrap();
+                assert_eq!(jar.rows(), 1);
+                assert_eq!(*jar.user_header(), 42);
+                NippyJarChecker::new(jar).check_consistency().unwrap();
+                assert_eq!(fs::read(&path).unwrap(), b"payload");
+            }
+        }
+    }
+
+    #[test]
+    fn incomplete_nonempty_jar_is_preserved() {
+        for missing_data in [false, true] {
+            let dir = tempfile::tempdir().unwrap();
+            let path = dir.path().join("jar");
+            let mut writer = NippyJarWriter::new(NippyJar::new_without_header(1, &path)).unwrap();
+            writer
+                .append_column(Some(Ok::<_, Box<dyn std::error::Error + Send + Sync>>(
+                    b"payload".as_slice(),
+                )))
+                .unwrap();
+            writer.commit().unwrap();
+            drop(writer);
+            let missing = if missing_data { path.clone() } else { path.with_extension("off") };
+            fs::remove_file(&missing).unwrap();
+            let config = fs::read(path.with_extension("conf")).unwrap();
+            let jar = NippyJar::load_without_header(&path).unwrap();
+            assert!(matches!(NippyJarWriter::new(jar), Err(NippyJarError::InconsistentState)));
+            assert_eq!(fs::read(path.with_extension("conf")).unwrap(), config);
+            assert!(!missing.exists());
+            if !missing_data {
+                assert_eq!(fs::read(&path).unwrap(), b"payload");
+            }
+        }
+    }
+
+    #[test]
+    fn missing_config_does_not_reset_existing_files() {
+        for (data, offsets) in [
+            (Some(b"payload".as_slice()), None),
+            (None, Some([8; 9])),
+            (Some(b"".as_slice()), Some([8; 9])),
+        ] {
+            let dir = tempfile::tempdir().unwrap();
+            let path = dir.path().join("jar");
+            if let Some(data) = data {
+                fs::write(&path, data).unwrap();
+            }
+            if let Some(offsets) = offsets {
+                fs::write(path.with_extension("off"), offsets).unwrap();
+            }
+            assert!(matches!(
+                NippyJarWriter::new(NippyJar::new_without_header(1, &path)),
+                Err(NippyJarError::MissingFile(missing)) if missing == path.with_extension("conf")
+            ));
+            assert!(!path.with_extension("conf").exists());
+            if let Some(data) = data {
+                assert_eq!(fs::read(&path).unwrap(), data);
+            } else {
+                assert!(!path.exists());
+            }
+            if let Some(offsets) = offsets {
+                assert_eq!(fs::read(path.with_extension("off")).unwrap(), offsets);
+            } else {
+                assert!(!path.with_extension("off").exists());
+            }
+        }
+    }
+
+    #[test]
+    fn reopening_uses_committed_rows_and_header() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("jar");
+        let mut writer = NippyJarWriter::new(NippyJar::new(1, &path, 42u64)).unwrap();
+        writer
+            .append_column(Some(Ok::<_, Box<dyn std::error::Error + Send + Sync>>(
+                b"payload".as_slice(),
+            )))
+            .unwrap();
+        writer.commit().unwrap();
+        drop(writer);
+        let config = fs::read(path.with_extension("conf")).unwrap();
+        let writer = NippyJarWriter::new(NippyJar::new(1, &path, 99u64)).unwrap();
+        assert_eq!(writer.rows(), 1);
+        assert_eq!(*writer.user_header(), 42);
+        assert_eq!(fs::read(&path).unwrap(), b"payload");
+        assert_eq!(fs::read(path.with_extension("conf")).unwrap(), config);
+    }
+
+    #[test]
+    fn invalid_initial_offset_is_preserved() {
+        for offsets in [vec![0], vec![OFFSET_SIZE_BYTES, 1], vec![0; 10]] {
+            let dir = tempfile::tempdir().unwrap();
+            let path = dir.path().join("jar");
+            let jar = NippyJar::new_without_header(1, &path);
+            jar.freeze_config().unwrap();
+            let config = fs::read(jar.config_path()).unwrap();
+            fs::write(path.with_extension("off"), &offsets).unwrap();
+            assert!(matches!(
+                NippyJarWriter::new(NippyJar::new_without_header(1, &path)),
+                Err(NippyJarError::InconsistentState)
+            ));
+            assert_eq!(fs::read(path.with_extension("off")).unwrap(), offsets);
+            assert!(!path.exists());
+            assert_eq!(fs::read(path.with_extension("conf")).unwrap(), config);
+        }
     }
 }
