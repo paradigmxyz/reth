@@ -232,6 +232,12 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
         self
     }
 
+    /// Returns this builder resolving overlays from a snapshot of the manager's block graph taken
+    /// now. Take it before opening the database transaction the builder will read.
+    pub(crate) fn with_manager_snapshot(&self) -> Self {
+        Self { overlay_manager: self.overlay_manager.snapshot(), ..self.clone() }
+    }
+
     /// Returns the manager this builder resolves overlays from.
     pub(crate) const fn overlay_manager(&self) -> &OverlayManager<N> {
         &self.overlay_manager

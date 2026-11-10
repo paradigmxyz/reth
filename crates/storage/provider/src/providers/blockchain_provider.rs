@@ -170,10 +170,8 @@ impl<N: ProviderNodeTypes> BlockchainProvider<N> {
         provider: StateRangeDbProvider<N>,
         block_hash: B256,
     ) -> StateProviderBox {
-        Box::new(OverlayStateProvider::new(
-            provider,
-            self.database.overlay_manager().overlay_builder(block_hash),
-        ))
+        let overlay_builder = provider.overlay_manager().overlay_builder(block_hash);
+        Box::new(OverlayStateProvider::new(provider, overlay_builder))
     }
 
     /// Returns the canonical in-memory block with `state_root`.
@@ -1058,7 +1056,7 @@ impl<N: ProviderNodeTypes> StateReader for BlockchainProvider<N> {
         let Some(block_hash) = provider.block_hash(block)? else { return Ok(None) };
         let state_provider = OverlayStateProvider::<&_, N::Primitives>::new_ref(
             &provider,
-            self.database.overlay_manager().overlay_builder(block_hash),
+            provider.overlay_manager().overlay_builder(block_hash),
         );
         let (state, reverts) = provider.populate_bundle_state(
             account_changeset,
@@ -2228,6 +2226,31 @@ mod tests {
                 .collect::<Vec<_>>()
         );
 
+        Ok(())
+    }
+
+    #[test]
+    fn history_state_survives_overlay_manager_pruning() -> eyre::Result<()> {
+        let mut rng = generators::rng();
+        let (provider, _, in_memory_blocks, _) = provider_with_random_blocks(
+            &mut rng,
+            TEST_BLOCKS_COUNT,
+            TEST_BLOCKS_COUNT,
+            BlockRangeParams::default(),
+        )?;
+        let block = in_memory_blocks.last().unwrap();
+
+        // The engine can remove blocks from the overlay manager while a call holds a consistent
+        // view that still has them.
+        let view = provider.consistent_provider()?;
+        provider
+            .database
+            .overlay_manager()
+            .remove_blocks(in_memory_blocks.iter().map(|block| block.hash()));
+
+        let state =
+            provider.state_provider_from_database(view.into_database_provider(), block.hash());
+        assert_eq!(state.block_hash(block.number)?, Some(block.hash()));
         Ok(())
     }
 

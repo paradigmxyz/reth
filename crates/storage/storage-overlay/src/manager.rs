@@ -13,8 +13,8 @@ use crate::{
     ChangesetCache, ExecutionOverlay, OverlayBuilder,
 };
 use alloy_eips::BlockNumHash;
-use alloy_primitives::{BlockNumber, B256};
-use parking_lot::Mutex;
+use alloy_primitives::{map::B256Map, BlockNumber, B256};
+use parking_lot::{Mutex, RwLock};
 use reth_chain_state::{BlockState, ExecutedBlock, PreservedSparseTrie};
 use reth_errors::ProviderResult;
 use reth_ethereum_primitives::EthPrimitives;
@@ -45,14 +45,23 @@ use tracing::{debug, trace};
 /// The manager owns the in-memory block graph, changeset cache, and caches keyed by
 /// `(anchor_hash, tip_hash)`. Clones share all of it, and every state provider clones the manager,
 /// so cloning is a single reference count increment.
+///
+/// A manager returned by [`Self::snapshot`] reads a frozen copy of the block graph instead of the
+/// live one, while still sharing the caches.
 #[derive(Clone)]
 pub struct OverlayManager<N: NodePrimitives = EthPrimitives> {
     inner: Arc<OverlayManagerInner<N>>,
+    /// The block graph as of [`Self::snapshot`], or `None` to read the live graph.
+    snapshot: Option<Arc<B256Map<ExecutedBlock<N>>>>,
 }
 
 /// State shared by all clones of an [`OverlayManager`].
 struct OverlayManagerInner<N: NodePrimitives> {
-    blocks: DashMap<B256, ExecutedBlock<N>>,
+    /// The live block graph.
+    ///
+    /// Writers change it through [`Arc::make_mut`], so a snapshot is a reference count increment
+    /// and the map is only copied while a snapshot of it is still held.
+    blocks: RwLock<Arc<B256Map<ExecutedBlock<N>>>>,
     state_trie_overlays: OverlayCache<TrieInputSorted>,
     execution_overlays: OverlayCache<ExecutionOverlay>,
     changeset_cache: ChangesetCache,
@@ -83,6 +92,7 @@ impl<N: NodePrimitives> Default for OverlayManager<N> {
                 provider_metrics: Default::default(),
                 proof_cursor_metrics: Default::default(),
             }),
+            snapshot: None,
         }
     }
 }
@@ -90,7 +100,7 @@ impl<N: NodePrimitives> Default for OverlayManager<N> {
 impl<N: NodePrimitives> std::fmt::Debug for OverlayManager<N> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("OverlayManager")
-            .field("blocks", &self.inner.blocks.len())
+            .field("blocks", &self.blocks().len())
             .field("state_trie_overlays", &self.inner.state_trie_overlays.len())
             .field("execution_overlays", &self.inner.execution_overlays.len())
             .finish()
@@ -115,7 +125,22 @@ impl<N: NodePrimitives> OverlayManager<N> {
                 provider_metrics: Default::default(),
                 proof_cursor_metrics: Default::default(),
             }),
+            snapshot: None,
         }
+    }
+
+    /// Returns a manager that reads the block graph as it is now, sharing this manager's caches.
+    ///
+    /// The engine removes blocks from the graph only after persistence has committed them. A
+    /// snapshot taken before a database transaction opens therefore holds every in-memory block
+    /// that transaction's durable frontiers need, whatever the engine removes afterwards.
+    pub fn snapshot(&self) -> Self {
+        Self { inner: Arc::clone(&self.inner), snapshot: Some(self.inner.blocks.read().clone()) }
+    }
+
+    /// Returns the block graph this manager reads: its snapshot, or the live graph.
+    fn blocks(&self) -> Arc<B256Map<ExecutedBlock<N>>> {
+        self.snapshot.clone().unwrap_or_else(|| self.inner.blocks.read().clone())
     }
 
     /// Creates an overlay builder for `parent_hash`.
@@ -287,8 +312,9 @@ impl<N: NodePrimitives> OverlayManager<N> {
         let span = tracing::Span::current();
 
         // First add the block to the live graph; duplicate inserts do not need cache work.
-        match self.inner.blocks.entry(hash) {
-            Entry::Occupied(_) => {
+        {
+            let mut blocks = self.inner.blocks.write();
+            if blocks.contains_key(&hash) {
                 span.record("duplicate", true);
                 debug!(
                     target: "storage::overlay::manager",
@@ -298,9 +324,7 @@ impl<N: NodePrimitives> OverlayManager<N> {
                 );
                 return
             }
-            Entry::Vacant(entry) => {
-                entry.insert(block);
-            }
+            Arc::make_mut(&mut blocks).insert(hash, block);
         }
 
         // Snapshot matching parent overlays before spawning so DashMap iteration guards are
@@ -386,10 +410,17 @@ impl<N: NodePrimitives> OverlayManager<N> {
         let mut block_count = 0usize;
         let mut removed_blocks = 0usize;
         let mut pruned_overlays = 0usize;
-        for hash in hashes {
-            block_count += 1;
-            removed_blocks += self.inner.blocks.remove(&hash).is_some() as usize;
-        }
+        let blocks = {
+            let mut live = self.inner.blocks.write();
+            for hash in hashes {
+                block_count += 1;
+                if live.contains_key(&hash) {
+                    Arc::make_mut(&mut live).remove(&hash);
+                    removed_blocks += 1;
+                }
+            }
+            Arc::clone(&live)
+        };
         span.record("block_count", block_count);
         span.record("removed_blocks", removed_blocks);
 
@@ -397,10 +428,10 @@ impl<N: NodePrimitives> OverlayManager<N> {
             let overlays_before =
                 self.inner.state_trie_overlays.len() + self.inner.execution_overlays.len();
             self.inner.state_trie_overlays.retain(|key, _| {
-                self.contains_hash(key.tip_hash, key.anchor_hash, key.anchor_hash)
+                contains_hash(&blocks, key.tip_hash, key.anchor_hash, key.anchor_hash)
             });
             self.inner.execution_overlays.retain(|key, _| {
-                self.contains_hash(key.tip_hash, key.anchor_hash, key.anchor_hash)
+                contains_hash(&blocks, key.tip_hash, key.anchor_hash, key.anchor_hash)
             });
             pruned_overlays = overlays_before.saturating_sub(
                 self.inner.state_trie_overlays.len() + self.inner.execution_overlays.len(),
@@ -591,11 +622,11 @@ impl<N: NodePrimitives> OverlayManager<N> {
         }
 
         let parent_hash = parent_state.block_ref().recovered_block().parent_hash();
+        let graph = self.blocks();
         cache.retain(|sibling_key, entry| {
             sibling_key.tip_hash == tip_hash ||
                 !matches!(entry, OverlayCacheEntry::Ready(_)) ||
-                self.inner
-                    .blocks
+                graph
                     .get(&sibling_key.tip_hash)
                     .is_none_or(|block| block.recovered_block().parent_hash() != parent_hash)
         });
@@ -686,30 +717,13 @@ impl<N: NodePrimitives> OverlayManager<N> {
         &self,
         parent_hash: B256,
     ) -> impl Iterator<Item = ExecutedBlock<N>> + '_ {
+        let blocks = self.blocks();
         let mut hash = parent_hash;
         std::iter::from_fn(move || {
-            let block = self.inner.blocks.get(&hash)?;
+            let block = blocks.get(&hash)?;
             hash = block.recovered_block().parent_hash();
             Some(block.clone())
         })
-    }
-
-    /// Returns true if `hash` is in the parent chain segment from `anchor_hash` inclusive to
-    /// `parent_hash` inclusive.
-    fn contains_hash(&self, parent_hash: B256, anchor_hash: B256, hash: B256) -> bool {
-        let mut current_hash = parent_hash;
-
-        loop {
-            if current_hash == hash {
-                return true
-            }
-            if current_hash == anchor_hash {
-                return false
-            }
-
-            let Some(block) = self.inner.blocks.get(&current_hash) else { return false };
-            current_hash = block.recovered_block().parent_hash();
-        }
     }
 
     fn compute_state_trie_overlay(
@@ -1054,6 +1068,29 @@ fn compute_execution_overlay_inner<N: NodePrimitives>(
     );
 
     overlay
+}
+
+/// Returns true if `hash` is in the parent chain segment of `blocks` from `anchor_hash` inclusive
+/// to `parent_hash` inclusive.
+fn contains_hash<N: NodePrimitives>(
+    blocks: &B256Map<ExecutedBlock<N>>,
+    parent_hash: B256,
+    anchor_hash: B256,
+    hash: B256,
+) -> bool {
+    let mut current_hash = parent_hash;
+
+    loop {
+        if current_hash == hash {
+            return true
+        }
+        if current_hash == anchor_hash {
+            return false
+        }
+
+        let Some(block) = blocks.get(&current_hash) else { return false };
+        current_hash = block.recovered_block().parent_hash();
+    }
 }
 
 #[cfg(test)]
@@ -1492,15 +1529,16 @@ mod tests {
         let anchor_hash = blocks[0].recovered_block().parent_hash();
         let parent_hash = blocks[2].recovered_block().hash();
 
-        assert!(manager.contains_hash(parent_hash, anchor_hash, anchor_hash));
+        assert!(contains_hash(&manager.blocks(), parent_hash, anchor_hash, anchor_hash));
         for block in &blocks {
-            assert!(manager.contains_hash(
+            assert!(contains_hash(
+                &manager.blocks(),
                 parent_hash,
                 anchor_hash,
                 block.recovered_block().hash()
             ));
         }
-        assert!(!manager.contains_hash(parent_hash, anchor_hash, B256::random()));
+        assert!(!contains_hash(&manager.blocks(), parent_hash, anchor_hash, B256::random()));
     }
 
     #[test]
@@ -1515,9 +1553,9 @@ mod tests {
         let anchor_hash = blocks[1].recovered_block().hash();
         let before_anchor_hash = blocks[0].recovered_block().hash();
 
-        assert!(manager.contains_hash(parent_hash, anchor_hash, parent_hash));
-        assert!(manager.contains_hash(parent_hash, anchor_hash, anchor_hash));
-        assert!(!manager.contains_hash(parent_hash, anchor_hash, before_anchor_hash));
+        assert!(contains_hash(&manager.blocks(), parent_hash, anchor_hash, parent_hash));
+        assert!(contains_hash(&manager.blocks(), parent_hash, anchor_hash, anchor_hash));
+        assert!(!contains_hash(&manager.blocks(), parent_hash, anchor_hash, before_anchor_hash));
     }
 
     #[test]
@@ -1531,7 +1569,7 @@ mod tests {
         let parent_hash = blocks[2].recovered_block().hash();
         let anchor_hash = B256::random();
 
-        assert!(!manager.contains_hash(parent_hash, anchor_hash, anchor_hash));
+        assert!(!contains_hash(&manager.blocks(), parent_hash, anchor_hash, anchor_hash));
     }
 
     #[test]

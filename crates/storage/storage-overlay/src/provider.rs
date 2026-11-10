@@ -136,6 +136,10 @@ where
     ) -> ProviderResult<OverlayStateProvider<OwnedProvider<F::Provider>, N>> {
         let overall_start = Instant::now();
 
+        // The builder outlives this provider, so snapshot its block graph before the transaction
+        // opens. See [`OverlayManager::snapshot`](crate::OverlayManager::snapshot).
+        let overlay_builder = self.overlay_builder.with_manager_snapshot();
+
         // Get a read-only provider
         let provider = {
             let start = Instant::now();
@@ -148,7 +152,7 @@ where
         self.metrics.database_provider_ro_duration.record(overall_start.elapsed());
         Ok(OverlayStateProvider::from_parts(
             OwnedProvider(provider),
-            Some(self.overlay_builder.clone()),
+            Some(overlay_builder),
             Some(Arc::clone(&self.state_trie_overlay_cache)),
             self.metrics.clone(),
             self.proof_cursor_metrics.clone(),
@@ -1346,6 +1350,35 @@ mod tests {
             account_keys(provider.state_trie_overlay(false).unwrap()),
             vec![B256::with_last_byte(3), B256::with_last_byte(4)]
         );
+    }
+
+    #[test]
+    fn provider_keeps_finish_chain_removed_after_it_opened() {
+        // The state trie tip lags Finish and the parent is persisted below Finish, so the overlay
+        // without trie changesets needs the in-memory chain from Finish down to the state trie tip.
+        let (factory, blocks) = setup_frontiers(1, 3);
+        let manager = OverlayManager::default();
+        for block in &blocks[2..=3] {
+            manager.insert_block(block.clone());
+        }
+        let parent_hash = blocks[1].recovered_block().hash();
+        let provider =
+            OverlayStateProviderFactory::new(factory.clone(), manager.overlay_builder(parent_hash))
+                .database_provider_ro()
+                .unwrap();
+
+        // Persistence commits and the engine removes the chain while the provider is open.
+        manager.remove_blocks(blocks[2..=3].iter().map(|block| block.recovered_block().hash()));
+
+        provider.state_trie_overlay(false).unwrap();
+
+        // A provider opened after the removal no longer finds the chain.
+        let err = OverlayStateProviderFactory::new(factory, manager.overlay_builder(parent_hash))
+            .database_provider_ro()
+            .unwrap()
+            .state_trie_overlay(false)
+            .unwrap_err();
+        assert!(err.to_string().contains("cannot be anchored"), "unexpected error: {err}");
     }
 
     #[test]

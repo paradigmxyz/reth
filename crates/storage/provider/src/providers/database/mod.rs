@@ -380,6 +380,10 @@ impl<N: ProviderNodeTypes> ProviderFactory<N> {
     /// data.
     #[track_caller]
     pub fn provider(&self) -> ProviderResult<DatabaseProviderRO<N::DB, N>> {
+        // Snapshot the overlay block graph before opening the transaction, so the snapshot holds
+        // every in-memory block the transaction's durable frontiers need. See
+        // [`OverlayManager::snapshot`].
+        let overlay_manager = self.overlay_manager.snapshot();
         let db_tx = self.db.tx()?;
 
         // Sync providers after opening the database transaction to make
@@ -397,7 +401,7 @@ impl<N: ProviderNodeTypes> ProviderFactory<N> {
             self.storage.clone(),
             self.storage_settings.clone(),
             self.rocksdb_provider.clone(),
-            self.overlay_manager.clone(),
+            overlay_manager,
             self.runtime.clone(),
             self.db.path(),
             self.database_provider_metrics.clone(),

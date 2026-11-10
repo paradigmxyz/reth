@@ -1055,6 +1055,14 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> DatabaseProvider<TX, N> {
         &mut self.tx
     }
 
+    /// Returns the overlay manager of this provider.
+    ///
+    /// A read-only provider's manager reads a snapshot of the block graph taken before its
+    /// transaction opened, so overlays built from it stay consistent with the transaction.
+    pub const fn overlay_manager(&self) -> &OverlayManager<N::Primitives> {
+        &self.overlay_manager
+    }
+
     /// Pass `DbTx` or `DbTxMut` immutable reference.
     pub const fn tx_ref(&self) -> &TX {
         &self.tx
