@@ -6,7 +6,7 @@ use alloy_primitives::{
 };
 use fixed_cache::{AnyRef, CacheConfig, Stats, StatsHandler};
 use metrics::{Counter, Gauge, Histogram};
-use parking_lot::{Mutex, Once};
+use parking_lot::Once;
 use reth_errors::ProviderResult;
 use reth_metrics::Metrics;
 use reth_primitives_traits::{Account, Bytecode};
@@ -115,40 +115,6 @@ pub struct CachedStateProvider<S> {
     /// Optional cache statistics for detailed block logging. Only tracked when slow block
     /// threshold is configured.
     cache_stats: Option<Arc<CacheStats>>,
-
-    /// Where a probing provider records the keys it did not find in the cache, `None` for
-    /// providers that read missing keys from the state provider.
-    probe: Option<Arc<ProbeMisses>>,
-}
-
-/// Keys a probing [`CachedStateProvider`] did not find in the cache, which a probing execution
-/// read as missing instead of loading them.
-#[derive(Debug, Default)]
-pub struct ProbeMisses(Mutex<ProbeMissSet>);
-
-/// The keys recorded by [`ProbeMisses`], in the order they were read.
-#[derive(Debug, Default)]
-pub struct ProbeMissSet {
-    /// Accounts that were not cached.
-    pub accounts: Vec<Address>,
-    /// Storage slots that were not cached.
-    pub storage: Vec<(Address, StorageKey)>,
-    /// Bytecode hashes that were not cached.
-    pub code: Vec<B256>,
-}
-
-impl ProbeMissSet {
-    /// Returns whether no key was missing.
-    pub const fn is_empty(&self) -> bool {
-        self.accounts.is_empty() && self.storage.is_empty() && self.code.is_empty()
-    }
-}
-
-impl ProbeMisses {
-    /// Takes the keys recorded since the last call.
-    pub fn take(&self) -> ProbeMissSet {
-        core::mem::take(&mut *self.0.lock())
-    }
 }
 
 impl<S> CachedStateProvider<S> {
@@ -169,19 +135,6 @@ impl<S> CachedStateProvider<S> {
         Self::new_with_mode(state_provider, caches, CacheFillMode::FillOnMiss, None, None)
     }
 
-    /// Creates a probing [`CachedStateProvider`], which reads only the cache and records the keys
-    /// it misses in `misses` instead of reading them from `state_provider`, as if they were absent
-    /// or empty.
-    ///
-    /// Executing a transaction on it finds most of the cold keys the transaction reads without
-    /// waiting for them, so that they can be loaded in parallel before it executes.
-    pub fn new_probe(state_provider: S, caches: ExecutionCache, misses: Arc<ProbeMisses>) -> Self {
-        let mut provider =
-            Self::new_with_mode(state_provider, caches, CacheFillMode::LookupOnly, None, None);
-        provider.probe = Some(misses);
-        provider
-    }
-
     /// Creates a [`CachedStateProvider`] with explicit cache fill behavior and optional
     /// block-local cache stats.
     pub const fn new_with_mode(
@@ -200,7 +153,6 @@ impl<S> CachedStateProvider<S> {
             txpool_metric_counts: CacheMetricCounts::new(),
             fill_mode,
             cache_stats,
-            probe: None,
         }
     }
 
@@ -900,13 +852,6 @@ impl<S: EvmStateProvider> EvmStateProvider for CachedStateProvider<S> {
             self.record_txpool_account_miss();
         }
 
-        if let Some(misses) = &self.probe {
-            return Ok(self.caches.0.account_cache.get(address).unwrap_or_else(|| {
-                misses.0.lock().accounts.push(*address);
-                None
-            }))
-        }
-
         if self.should_fill_on_miss() {
             match self.caches.get_or_try_insert_account_with(*address, || {
                 self.state_provider.basic_account(address)
@@ -942,16 +887,6 @@ impl<S: EvmStateProvider> EvmStateProvider for CachedStateProvider<S> {
             self.record_txpool_storage_miss();
         }
 
-        if let Some(misses) = &self.probe {
-            return Ok(match self.caches.0.storage_cache.get(&(account, storage_key)) {
-                Some(value) => nonzero_storage_value(value),
-                None => {
-                    misses.0.lock().storage.push((account, storage_key));
-                    None
-                }
-            })
-        }
-
         if self.should_fill_on_miss() {
             match self.caches.get_or_try_insert_storage_with(account, storage_key, || {
                 self.state_provider.storage(account, storage_key).map(Option::unwrap_or_default)
@@ -981,13 +916,6 @@ impl<S: EvmStateProvider> EvmStateProvider for CachedStateProvider<S> {
                 return Ok(code)
             }
             self.record_txpool_code_miss();
-        }
-
-        if let Some(misses) = &self.probe {
-            return Ok(self.caches.0.code_cache.get(code_hash).unwrap_or_else(|| {
-                misses.0.lock().code.push(*code_hash);
-                None
-            }))
         }
 
         if self.should_fill_on_miss() {
