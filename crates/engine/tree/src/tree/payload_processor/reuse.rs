@@ -293,12 +293,6 @@ impl<T: EvmTypes> PrewarmResults<T> {
         !reads.matches(&self.predicted, index)
     }
 
-    /// Returns whether the transaction at `index` was executed, speculatively or by block
-    /// execution, so that its reads are loaded.
-    pub(super) fn has_executed(&self, index: usize) -> bool {
-        self.slots.get(index).is_some_and(|slot| !matches!(*slot.lock(), ResultSlot::Empty))
-    }
-
     /// Takes the prewarm result of the transaction at `index` if it is ready and its reads match
     /// `db`.
     ///
