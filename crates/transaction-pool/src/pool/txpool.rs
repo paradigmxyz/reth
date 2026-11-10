@@ -42,7 +42,7 @@ use smallvec::SmallVec;
 use std::collections::{HashMap, HashSet};
 use std::{
     cmp::Ordering,
-    collections::{btree_map::Entry, hash_map, BTreeMap},
+    collections::{btree_map::Entry, hash_map, BTreeMap, BTreeSet},
     fmt,
     ops::Bound::{Excluded, Unbounded},
     sync::Arc,
@@ -795,6 +795,10 @@ impl<T: TransactionOrdering> TxPool<T> {
             return Err(PoolError::new(*tx.hash(), PoolErrorKind::AlreadyImported))
         }
 
+        // The code hash was read together with this nonce, so pooled authorizations are checked
+        // against it even if the nonce is rebased below.
+        let snapshot_nonce = on_chain_nonce;
+
         // Validation reads state outside the pool lock, so its snapshot can predate the last
         // canonical update. Opt-in because it assumes nonces only move forward, which a reorg
         // breaks. Transactions exempt from the nonce check keep the validator's verdict.
@@ -821,7 +825,7 @@ impl<T: TransactionOrdering> TxPool<T> {
             on_chain_balance = info.balance;
         }
 
-        self.validate_auth(&tx, on_chain_nonce, on_chain_code_hash)?;
+        self.validate_auth(&tx, on_chain_nonce, snapshot_nonce, on_chain_code_hash)?;
 
         // Update sender info with balance and nonce
         self.all_transactions
@@ -934,20 +938,22 @@ impl<T: TransactionOrdering> TxPool<T> {
     }
 
     /// Determines if the tx sender is delegated or has a pending delegation (a pooled
-    /// authorization whose nonce is not below `on_chain_nonce`), and if so, ensures
-    /// they have at most one configured amount of in-flight **executable** transactions (default at
-    /// most one), e.g. disallow stacked and nonce-gapped transactions from the account.
+    /// authorization whose nonce is not below `snapshot_nonce`, the nonce read together with
+    /// `on_chain_code_hash`), and if so, ensures they have at most one configured amount of
+    /// in-flight **executable** transactions (default at most one), e.g. disallow stacked and
+    /// nonce-gapped transactions from the account.
     fn check_delegation_limit(
         &self,
         transaction: &ValidPoolTransaction<T::Transaction>,
         on_chain_nonce: u64,
+        snapshot_nonce: u64,
         on_chain_code_hash: Option<B256>,
     ) -> Result<(), PoolError> {
         // An authorization below the sender's nonce can never apply, so it is not a pending
         // delegation.
         let has_pending_delegation =
             self.all_transactions.auths.get(&transaction.sender_id()).is_some_and(|carriers| {
-                carriers.values().any(|auth_nonce| *auth_nonce >= on_chain_nonce)
+                carriers.last().is_some_and(|(auth_nonce, _)| *auth_nonce >= snapshot_nonce)
             });
         // Short circuit if the sender has neither delegation nor pending delegation.
         if (on_chain_code_hash.is_none() || on_chain_code_hash == Some(KECCAK_EMPTY)) &&
@@ -1011,10 +1017,16 @@ impl<T: TransactionOrdering> TxPool<T> {
         &self,
         transaction: &ValidPoolTransaction<T::Transaction>,
         on_chain_nonce: u64,
+        snapshot_nonce: u64,
         on_chain_code_hash: Option<B256>,
     ) -> Result<(), PoolError> {
         // Ensure in-flight limit for delegated accounts or those with a pending authorization.
-        self.check_delegation_limit(transaction, on_chain_nonce, on_chain_code_hash)?;
+        self.check_delegation_limit(
+            transaction,
+            on_chain_nonce,
+            snapshot_nonce,
+            on_chain_code_hash,
+        )?;
 
         if let Some(authority_list) = &transaction.authority_ids {
             for authority in authority_list {
@@ -1487,9 +1499,9 @@ pub(crate) struct AllTransactions<T: PoolTransaction> {
     price_bumps: PriceBumpConfig,
     /// How to handle [`TransactionOrigin::Local`](crate::TransactionOrigin) transactions.
     local_transactions_config: LocalTransactionConfig,
-    /// All accounts with a pooled authorization, mapping each carrier transaction hash to the
-    /// highest authorization nonce that transaction carries for the account.
-    auths: FxHashMap<SenderId, B256Map<u64>>,
+    /// All accounts with a pooled authorization, as `(authorization nonce, carrier hash)` pairs
+    /// ordered so the highest nonce is last.
+    auths: FxHashMap<SenderId, BTreeSet<(u64, TxHash)>>,
     /// Number of transactions in the pool by transaction type, tracked incrementally so metrics
     /// updates don't require iterating the entire pool.
     tx_type_counts: TxTypeCounts,
@@ -1966,7 +1978,7 @@ impl<T: PoolTransaction> AllTransactions<T> {
         let tx_hash = tx.transaction.hash();
         for auth in auths {
             if let Some(list) = self.auths.get_mut(&auth.id) {
-                list.remove(tx_hash);
+                list.remove(&(auth.nonce, *tx_hash));
                 if list.is_empty() {
                     self.auths.remove(&auth.id);
                 }
@@ -2231,14 +2243,7 @@ impl<T: PoolTransaction> AllTransactions<T> {
         if let Some(auths) = &transaction.authority_ids {
             let tx_hash = transaction.hash();
             for auth in auths {
-                // Only the highest nonce matters: the delegation is pending while any of the
-                // authority's authorizations is at or above its nonce.
-                self.auths
-                    .entry(auth.id)
-                    .or_default()
-                    .entry(*tx_hash)
-                    .and_modify(|nonce| *nonce = (*nonce).max(auth.nonce))
-                    .or_insert(auth.nonce);
+                self.auths.entry(auth.id).or_default().insert((auth.nonce, *tx_hash));
             }
         }
 
@@ -5640,5 +5645,36 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn stale_validation_keeps_consumed_authorization_pending() {
+        let mut f = MockTransactionFactory::default();
+        let mut pool = stale_validation_pool();
+
+        let victim = Address::random();
+        let victim_id = f.ids.sender_id_or_create(victim);
+        let mut carrier = f.validated(MockTransaction::eip1559());
+        carrier.authority_ids = Some(vec![Authority { id: victim_id, nonce: 2 }]);
+        pool.add_transaction(carrier, U256::MAX, 0, None).unwrap();
+
+        // The authorization was applied in a block the validator's snapshot predates, so the
+        // snapshot's code hash misses the delegation.
+        pool.update_accounts(FxHashMap::from_iter([(
+            victim_id,
+            SenderInfo { state_nonce: 3, balance: U256::MAX },
+        )]));
+
+        let tx = MockTransaction::eip1559().with_sender(victim).with_nonce(3);
+        pool.add_transaction(f.validated(tx), U256::MAX, 2, None).unwrap();
+
+        let tx = MockTransaction::eip1559().with_sender(victim).with_nonce(4);
+        let err = pool.add_transaction(f.validated(tx), U256::MAX, 2, None).unwrap_err();
+        assert!(matches!(
+            err.kind,
+            PoolErrorKind::InvalidTransaction(InvalidPoolTransactionError::Eip7702(
+                Eip7702PoolTransactionError::InflightTxLimitReached
+            ))
+        ));
     }
 }
