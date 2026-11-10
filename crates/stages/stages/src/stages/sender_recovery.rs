@@ -13,7 +13,7 @@ use reth_provider::{
 use reth_prune_types::{PruneCheckpoint, PruneMode, PrunePurpose, PruneSegment};
 use reth_stages_api::{
     BlockErrorKind, EntitiesCheckpoint, ExecInput, ExecOutput, Stage, StageCheckpoint, StageError,
-    StageId, UnwindInput, UnwindOutput,
+    StageId, TransactionRangeOutput, UnwindInput, UnwindOutput,
 };
 use reth_static_file_types::StaticFileSegment;
 use std::{fmt::Debug, ops::Range, sync::mpsc};
@@ -158,7 +158,8 @@ where
         let block_body_indices =
             provider.block_body_indices_range(range_output.block_range.clone())?;
         let block_body_indices_elapsed = start.elapsed();
-        let mut blocks_with_indices = range_output.block_range.zip(block_body_indices).peekable();
+        let mut blocks_with_indices =
+            range_output.block_range.clone().zip(block_body_indices).peekable();
 
         for range in batch {
             // Pair each transaction number with its block number
@@ -175,7 +176,14 @@ where
             });
             let fold_elapsed = start.elapsed();
             debug!(target: "sync::stages::sender_recovery", ?block_body_indices_elapsed, ?fold_elapsed, len = block_numbers.len(), "Calculated block numbers");
-            recover_range(range, block_numbers, provider, tx_batch_sender.clone(), &mut writer)?;
+            recover_range(
+                range,
+                block_numbers,
+                &range_output,
+                provider,
+                tx_batch_sender.clone(),
+                &mut writer,
+            )?;
         }
 
         // Advance the static file header to the end of this range to account for empty blocks.
@@ -214,6 +222,7 @@ where
 fn recover_range<Provider, CURSOR>(
     tx_range: Range<TxNumber>,
     block_numbers: Vec<BlockNumber>,
+    range_output: &TransactionRangeOutput,
     provider: &Provider,
     tx_batch_sender: mpsc::Sender<Vec<(Range<u64>, RecoveryResultSender)>>,
     writer: &mut EitherWriter<'_, CURSOR, Provider::Primitives>,
@@ -257,6 +266,18 @@ where
                 Err(error) => {
                     return match *error {
                         SenderRecoveryStageError::FailedRecovery(err) => {
+                            // The stage checkpoint does not move on failure, so the pipeline unwind
+                            // skips this stage, while the shared static file writer would persist
+                            // the rows appended so far on the unwind's commit. Senders are
+                            // appended in transaction order, so exactly the transactions before the
+                            // failed one were appended by this execution.
+                            if let EitherWriter::StaticFile(writer) = writer {
+                                writer.prune_transaction_senders(
+                                    err.tx - range_output.tx_range.start,
+                                    range_output.block_range.start() - 1,
+                                )?;
+                            }
+
                             // get the block number for the bad transaction
                             let block_number = provider
                                 .block_by_transaction_id(err.tx)?
@@ -525,13 +546,15 @@ mod tests {
     }
 
     /// A transaction with an unrecoverable signature that is not the last one in its block must
-    /// unwind the block instead of failing with a database integrity error.
+    /// unwind the block instead of failing with a database integrity error, and must not leave
+    /// the senders appended before it in the shared static file writer.
     #[tokio::test]
     async fn execute_unrecoverable_sender_before_last_transaction() {
-        let (stage_progress, target) = (0, 1);
+        let (stage_progress, target) = (0, 2);
         let mut rng = generators::rng();
 
         let runner = SenderRecoveryTestRunner::default();
+        runner.db.factory.set_storage_settings_cache(StorageSettings::v2());
         let input = ExecInput {
             target: Some(target),
             checkpoint: Some(StageCheckpoint::new(stage_progress)),
@@ -539,6 +562,8 @@ mod tests {
 
         let genesis =
             random_block(&mut rng, 0, BlockParams { tx_count: Some(0), ..Default::default() });
+        let valid_block =
+            random_block(&mut rng, 1, BlockParams { tx_count: Some(2), ..Default::default() });
         let mut bad_block =
             random_block(&mut rng, target, BlockParams { tx_count: Some(2), ..Default::default() })
                 .into_block();
@@ -547,17 +572,37 @@ mod tests {
         let bad_block = bad_block.seal_slow();
         runner
             .db
-            .insert_blocks([&genesis, &bad_block].into_iter(), StorageKind::Static)
+            .insert_blocks([&genesis, &valid_block, &bad_block].into_iter(), StorageKind::Static)
             .expect("failed to insert blocks");
 
-        let result = runner.execute(input).await.unwrap();
-        assert_matches!(
-            result,
-            Err(StageError::Block {
-                block,
-                error: BlockErrorKind::Validation(ConsensusError::TransactionSignerRecoveryError),
-            }) if block.block.number == target
-        );
+        let static_files = runner.db.factory.static_file_provider();
+        for _ in 0..2 {
+            // The pipeline drops the provider on a stage error, then commits a new one to unwind.
+            let provider_rw = runner.db.factory.database_provider_rw().unwrap();
+            let result = runner.stage().execute(&provider_rw, input);
+            drop(provider_rw);
+            assert_matches!(
+                result,
+                Err(StageError::Block {
+                    block,
+                    error: BlockErrorKind::Validation(
+                        ConsensusError::TransactionSignerRecoveryError
+                    ),
+                }) if block.block.number == target
+            );
+
+            runner.db.factory.database_provider_rw().unwrap().commit().unwrap();
+
+            // The stale senders are gone and the segment is back at the stage checkpoint.
+            assert_eq!(
+                static_files.get_highest_static_file_tx(StaticFileSegment::TransactionSenders),
+                None
+            );
+            assert_eq!(
+                static_files.get_highest_static_file_block(StaticFileSegment::TransactionSenders),
+                Some(stage_progress)
+            );
+        }
     }
 
     /// Ensure the static file header advances to trailing empty blocks.
