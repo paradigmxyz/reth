@@ -8,8 +8,8 @@ use crate::{
     },
     metrics::TxPoolValidationMetrics,
     traits::TransactionOrigin,
-    validate::ValidTransaction,
-    Address, EthBlobTransactionSidecar, EthPoolTransaction, LocalTransactionConfig,
+    validate::{Authority, ValidTransaction},
+    EthBlobTransactionSidecar, EthPoolTransaction, LocalTransactionConfig,
     TransactionValidationOutcome, TransactionValidationTaskExecutor, TransactionValidator,
 };
 
@@ -879,13 +879,15 @@ where
     }
 
     /// Returns recovered authorities from authorizations for this chain or all chains.
-    fn recover_authorities(&self, transaction: &Tx) -> std::option::Option<Vec<Address>> {
+    fn recover_authorities(&self, transaction: &Tx) -> std::option::Option<Vec<Authority>> {
         transaction.authorization_list().map(|auths| {
             let chain_id = U256::from(self.chain_id());
             auths
                 .iter()
                 .filter(|auth| auth.chain_id().is_zero() || auth.chain_id() == &chain_id)
-                .flat_map(|auth| auth.recover_authority())
+                .flat_map(|auth| {
+                    auth.recover_authority().map(|id| Authority { id, nonce: auth.nonce() })
+                })
                 .collect()
         })
     }
@@ -1897,8 +1899,10 @@ mod tests {
         let local = auth(U256::from(validator.chain_id()), Address::repeat_byte(2));
         let foreign = auth(U256::from(validator.chain_id() + 1), Address::repeat_byte(3));
         let oversized = auth(U256::from(u64::MAX) + U256::from(1), Address::repeat_byte(4));
-        let expected =
-            vec![universal.recover_authority().unwrap(), local.recover_authority().unwrap()];
+        let expected = vec![
+            Authority { id: universal.recover_authority().unwrap(), nonce: 0 },
+            Authority { id: local.recover_authority().unwrap(), nonce: 0 },
+        ];
         let tx = alloy_consensus::TxEip7702 {
             chain_id: validator.chain_id(),
             authorization_list: vec![universal, foreign, local, oversized],

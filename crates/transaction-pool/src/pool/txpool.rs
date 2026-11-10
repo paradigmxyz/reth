@@ -32,7 +32,7 @@ use alloy_eips::{
 #[cfg(test)]
 use alloy_primitives::Address;
 use alloy_primitives::{
-    map::{AddressSet, B256Map, B256Set},
+    map::{AddressSet, B256Map},
     TxHash, B256,
 };
 use reth_primitives_traits::transaction::error::InvalidTransactionError;
@@ -933,7 +933,8 @@ impl<T: TransactionOrdering> TxPool<T> {
         }
     }
 
-    /// Determines if the tx sender is delegated or has a  pending delegation, and if so, ensures
+    /// Determines if the tx sender is delegated or has a pending delegation (a pooled
+    /// authorization whose nonce is not below `on_chain_nonce`), and if so, ensures
     /// they have at most one configured amount of in-flight **executable** transactions (default at
     /// most one), e.g. disallow stacked and nonce-gapped transactions from the account.
     fn check_delegation_limit(
@@ -942,9 +943,15 @@ impl<T: TransactionOrdering> TxPool<T> {
         on_chain_nonce: u64,
         on_chain_code_hash: Option<B256>,
     ) -> Result<(), PoolError> {
+        // An authorization below the sender's nonce can never apply, so it is not a pending
+        // delegation.
+        let has_pending_delegation =
+            self.all_transactions.auths.get(&transaction.sender_id()).is_some_and(|carriers| {
+                carriers.values().any(|auth_nonce| *auth_nonce >= on_chain_nonce)
+            });
         // Short circuit if the sender has neither delegation nor pending delegation.
         if (on_chain_code_hash.is_none() || on_chain_code_hash == Some(KECCAK_EMPTY)) &&
-            !self.all_transactions.auths.contains_key(&transaction.sender_id())
+            !has_pending_delegation
         {
             return Ok(())
         }
@@ -994,9 +1001,9 @@ impl<T: TransactionOrdering> TxPool<T> {
     /// This verifies that the transaction complies with code authorization
     /// restrictions brought by EIP-7702 transaction type:
     /// 1. Any account with a deployed delegation or an in-flight authorization to deploy a
-    ///    delegation will only be allowed a certain amount of transaction slots (default 1) instead
-    ///    of the standard limit. This is due to the possibility of the account being sweeped by an
-    ///    unrelated account.
+    ///    delegation (one whose nonce is not below the account's nonce) will only be allowed a
+    ///    certain amount of transaction slots (default 1) instead of the standard limit. This is
+    ///    due to the possibility of the account being sweeped by an unrelated account.
     /// 2. In case the pool is tracking a pending / queued transaction from a specific account, at
     ///    most the configured inflight delegation slot limit of in-flight transactions is allowed;
     ///    any additional delegated transactions from that account will be rejected.
@@ -1010,11 +1017,11 @@ impl<T: TransactionOrdering> TxPool<T> {
         self.check_delegation_limit(transaction, on_chain_nonce, on_chain_code_hash)?;
 
         if let Some(authority_list) = &transaction.authority_ids {
-            for sender_id in authority_list {
+            for authority in authority_list {
                 // Ensure authority does not exceed the configured inflight delegation slot limit.
                 if self
                     .all_transactions
-                    .txs_iter(*sender_id)
+                    .txs_iter(authority.id)
                     .nth(self.config.max_inflight_delegated_slot_limit)
                     .is_some()
                 {
@@ -1480,8 +1487,9 @@ pub(crate) struct AllTransactions<T: PoolTransaction> {
     price_bumps: PriceBumpConfig,
     /// How to handle [`TransactionOrigin::Local`](crate::TransactionOrigin) transactions.
     local_transactions_config: LocalTransactionConfig,
-    /// All accounts with a pooled authorization
-    auths: FxHashMap<SenderId, B256Set>,
+    /// All accounts with a pooled authorization, mapping each carrier transaction hash to the
+    /// highest authorization nonce that transaction carries for the account.
+    auths: FxHashMap<SenderId, B256Map<u64>>,
     /// Number of transactions in the pool by transaction type, tracked incrementally so metrics
     /// updates don't require iterating the entire pool.
     tx_type_counts: TxTypeCounts,
@@ -1957,10 +1965,10 @@ impl<T: PoolTransaction> AllTransactions<T> {
 
         let tx_hash = tx.transaction.hash();
         for auth in auths {
-            if let Some(list) = self.auths.get_mut(auth) {
+            if let Some(list) = self.auths.get_mut(&auth.id) {
                 list.remove(tx_hash);
                 if list.is_empty() {
-                    self.auths.remove(auth);
+                    self.auths.remove(&auth.id);
                 }
             }
         }
@@ -2223,7 +2231,14 @@ impl<T: PoolTransaction> AllTransactions<T> {
         if let Some(auths) = &transaction.authority_ids {
             let tx_hash = transaction.hash();
             for auth in auths {
-                self.auths.entry(*auth).or_default().insert(*tx_hash);
+                // Only the highest nonce matters: the delegation is pending while any of the
+                // authority's authorizations is at or above its nonce.
+                self.auths
+                    .entry(auth.id)
+                    .or_default()
+                    .entry(*tx_hash)
+                    .and_modify(|nonce| *nonce = (*nonce).max(auth.nonce))
+                    .or_insert(auth.nonce);
             }
         }
 
@@ -2514,6 +2529,7 @@ mod tests {
     use crate::{
         test_utils::{MockOrdering, MockTransaction, MockTransactionFactory, MockTransactionSet},
         traits::TransactionOrigin,
+        validate::Authority,
         SubPoolLimit,
     };
     use alloy_consensus::{Transaction, TxType};
@@ -5591,5 +5607,38 @@ mod tests {
         assert_eq!(t1.id().nonce, 1, "expected nonce 1, got {}", t1.id().nonce);
         assert_eq!(t2.id().nonce, 2, "expected nonce 2, got {}", t2.id().nonce);
         assert_eq!(t3.id().nonce, 3, "expected nonce 3, got {}", t3.id().nonce);
+    }
+
+    #[test]
+    fn pending_delegation_requires_applicable_authorization_nonce() {
+        let on_chain_nonce = 2;
+        // (nonces the carrier authorizes the victim with, whether the victim is limited)
+        for (auth_nonces, limited) in [(&[1][..], false), (&[2, 1][..], true)] {
+            let mut f = MockTransactionFactory::default();
+            let mut pool = TxPool::new(MockOrdering::default(), Default::default());
+
+            let victim = Address::random();
+            let victim_id = f.ids.sender_id_or_create(victim);
+            let mut carrier = f.validated(MockTransaction::eip1559());
+            carrier.authority_ids =
+                Some(auth_nonces.iter().map(|&nonce| Authority { id: victim_id, nonce }).collect());
+            pool.add_transaction(carrier, U256::MAX, 0, None).unwrap();
+
+            for nonce in [2, 3] {
+                let tx = MockTransaction::eip1559().with_sender(victim).with_nonce(nonce);
+                let res = pool.add_transaction(f.validated(tx), U256::MAX, on_chain_nonce, None);
+                if limited && nonce == 3 {
+                    let err = res.unwrap_err();
+                    assert!(matches!(
+                        err.kind,
+                        PoolErrorKind::InvalidTransaction(InvalidPoolTransactionError::Eip7702(
+                            Eip7702PoolTransactionError::InflightTxLimitReached
+                        ))
+                    ));
+                } else {
+                    res.unwrap();
+                }
+            }
+        }
     }
 }
