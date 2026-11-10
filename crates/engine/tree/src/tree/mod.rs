@@ -1450,24 +1450,26 @@ where
     /// This checks if we need to remove blocks (disk reorg) or save new blocks to disk.
     /// Persistence completion is handled separately via the `wait_for_event` method.
     fn advance_persistence(&mut self) -> Result<(), AdvancePersistenceError> {
-        if !self.persistence_state.in_progress() {
-            let payload_build_active = self.payload_builds.is_active();
-            if let Some(new_tip_num) = self.find_disk_reorg()? {
-                self.remove_blocks(new_tip_num)
-            } else if self.backfill_sync_state.is_pending_revalidation() &&
-                !payload_build_active &&
-                self.persistence_state.last_state_trie_persisted_block !=
-                    self.persistence_state.last_persisted_block
-            {
-                let Some(input) = self.get_save_blocks_input(PersistTarget::Persisted) else {
-                    return Err(AdvancePersistenceError::StateTrieCatchupUnavailable)
-                };
-                self.persist_blocks(input);
-            } else if self.backfill_sync_state.is_pending_revalidation() && !payload_build_active {
-                self.revalidate_pending_backfill()?;
-            } else if let Some(input) = self.get_save_blocks_input(PersistTarget::Threshold) {
-                self.persist_blocks(input);
-            }
+        if self.persistence_state.in_progress() {
+            return Ok(())
+        }
+
+        let payload_build_active = self.payload_builds.is_active();
+        if let Some(new_tip_num) = self.find_disk_reorg()? {
+            self.remove_blocks(new_tip_num)
+        } else if self.backfill_sync_state.is_pending_revalidation() &&
+            !payload_build_active &&
+            self.persistence_state.last_state_trie_persisted_block !=
+                self.persistence_state.last_persisted_block
+        {
+            let Some(input) = self.get_save_blocks_input(PersistTarget::Persisted) else {
+                return Err(AdvancePersistenceError::StateTrieCatchupUnavailable)
+            };
+            self.persist_blocks(input);
+        } else if self.backfill_sync_state.is_pending_revalidation() && !payload_build_active {
+            self.revalidate_pending_backfill()?;
+        } else if let Some(input) = self.get_save_blocks_input(PersistTarget::Threshold) {
+            self.persist_blocks(input);
         }
 
         Ok(())
