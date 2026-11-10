@@ -585,13 +585,6 @@ fn convert_claimed<RawTx, Tx, TxEnv, InnerTx, Recovered, Err, C>(
         }
         Some((index, tx))
     };
-    // Block execution starts with the first transaction, so it does not wait for a pool thread
-    // to wake up and claim it.
-    let Some((index, first)) = claim() else { return };
-    let failed = Result::is_err(&first);
-    if execute_tx.send((index, first)).is_err() || failed {
-        return
-    }
     let (converted_tx, converted_rx) = crossbeam_channel::unbounded();
     pool.in_place_scope(|scope| {
         for _ in 0..pool.current_num_threads().min(raw.len()) {
@@ -608,7 +601,7 @@ fn convert_claimed<RawTx, Tx, TxEnv, InnerTx, Recovered, Err, C>(
         drop(converted_tx);
 
         let mut converted = (0..raw.len()).map(|_| None).collect::<Vec<_>>();
-        let mut sent = 1;
+        let mut sent = 0;
         while sent < raw.len() {
             if let Some(tx) = converted[sent].take() {
                 let failed = Result::is_err(&tx);
