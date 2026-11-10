@@ -169,4 +169,5 @@ test-utils = [
     "reth-consensus/test-utils",
     "reth-engine-tree/test-utils",
     "reth-stages-api/test-utils",
+    "reth-payload-builder/test-utils",
 ]
