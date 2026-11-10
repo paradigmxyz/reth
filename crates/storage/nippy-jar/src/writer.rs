@@ -96,10 +96,6 @@ impl<H: NippyJarHeader> NippyJarWriter<H> {
                     return Err(NippyJarError::InconsistentState)
                 }
             }
-
-            // Publish and sync the configuration before exposing a data file to discovery.
-            // Normal commits still publish the configuration last.
-            jar.freeze_config()?;
         }
 
         let (data_file, offsets_file) =
@@ -112,7 +108,8 @@ impl<H: NippyJarHeader> NippyJarWriter<H> {
             offsets_file.seek(SeekFrom::Start(0))?;
             offsets_file.write_all(&[OFFSET_SIZE_BYTES])?;
             offsets_file.write_all(&[0; OFFSET_SIZE_BYTES as usize])?;
-            offsets_file.sync_all()?;
+            // Preserve the existing initialization order: data and offsets before configuration.
+            jar.freeze_config()?;
             (jar, BufWriter::new(data_file), BufWriter::new(offsets_file))
         } else {
             // If we are opening a previously created jar, we need to check its consistency, and
@@ -575,20 +572,22 @@ mod tests {
     use std::fs;
 
     #[test]
-    fn initialization_config_failure_does_not_create_data_files() {
+    fn resumes_empty_bare_data_file() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("jar");
-        fs::create_dir(path.with_extension("tmp")).unwrap();
-        let jar = NippyJar::new_without_header(1, &path);
-        assert!(matches!(NippyJarWriter::new(jar), Err(NippyJarError::FileSystem(_))));
-        assert!(!path.exists());
-        assert!(!path.with_extension("off").exists());
-        assert!(!path.with_extension("conf").exists());
+        fs::write(&path, []).unwrap();
+        let writer = NippyJarWriter::new(NippyJar::new(1, &path, 42u64)).unwrap();
+        assert_eq!(writer.rows(), 0);
+        assert_eq!(*writer.user_header(), 42);
+        drop(writer);
+        let jar = NippyJar::<u64>::load(&path).unwrap();
+        NippyJarChecker::new(jar).check_consistency().unwrap();
+        assert!(fs::read(&path).unwrap().is_empty());
     }
 
     #[test]
     fn resumes_every_initialization_prefix() {
-        // Config publication precedes data creation, then offsets creation and its initial write.
+        // Recover empty jars with persisted configuration and missing or partial initial files.
         for data_exists in [false, true] {
             for offsets_len in 0..=2 + usize::from(OFFSET_SIZE_BYTES) {
                 let dir = tempfile::tempdir().unwrap();
