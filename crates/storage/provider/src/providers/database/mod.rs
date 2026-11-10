@@ -382,7 +382,7 @@ impl<N: ProviderNodeTypes> ProviderFactory<N> {
     pub fn provider(&self) -> ProviderResult<DatabaseProviderRO<N::DB, N>> {
         // Take the overlay view before opening the transaction, so it holds every in-memory block
         // the transaction's durable frontiers need. See [`OverlayManager::view`].
-        let overlay_view = self.overlay_manager.view();
+        let overlay_manager_view = self.overlay_manager.view();
         let db_tx = self.db.tx()?;
 
         // Sync providers after opening the database transaction to make
@@ -400,7 +400,7 @@ impl<N: ProviderNodeTypes> ProviderFactory<N> {
             self.storage.clone(),
             self.storage_settings.clone(),
             self.rocksdb_provider.clone(),
-            overlay_view,
+            overlay_manager_view,
             self.runtime.clone(),
             self.db.path(),
             self.database_provider_metrics.clone(),
@@ -414,7 +414,7 @@ impl<N: ProviderNodeTypes> ProviderFactory<N> {
     /// open.
     #[track_caller]
     pub fn provider_rw(&self) -> ProviderResult<DatabaseProviderRW<N::DB, N>> {
-        let overlay_view = self.overlay_manager.view();
+        let overlay_manager_view = self.overlay_manager.view();
         Ok(DatabaseProviderRW(
             DatabaseProvider::new_rw(
                 self.db.tx_mut()?,
@@ -424,7 +424,7 @@ impl<N: ProviderNodeTypes> ProviderFactory<N> {
                 self.storage.clone(),
                 self.storage_settings.clone(),
                 self.rocksdb_provider.clone(),
-                overlay_view,
+                overlay_manager_view,
                 self.runtime.clone(),
                 self.db.path(),
                 self.database_provider_metrics.clone(),
@@ -444,7 +444,7 @@ impl<N: ProviderNodeTypes> ProviderFactory<N> {
     pub fn unwind_provider_rw(
         &self,
     ) -> ProviderResult<DatabaseProvider<<N::DB as Database>::TXMut, N>> {
-        let overlay_view = self.overlay_manager.view();
+        let overlay_manager_view = self.overlay_manager.view();
         Ok(DatabaseProvider::new_unwind_rw(
             self.db.tx_mut()?,
             self.chain_spec.clone(),
@@ -453,7 +453,7 @@ impl<N: ProviderNodeTypes> ProviderFactory<N> {
             self.storage.clone(),
             self.storage_settings.clone(),
             self.rocksdb_provider.clone(),
-            overlay_view,
+            overlay_manager_view,
             self.runtime.clone(),
             self.db.path(),
             self.database_provider_metrics.clone(),

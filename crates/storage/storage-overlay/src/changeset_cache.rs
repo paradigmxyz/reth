@@ -7,7 +7,7 @@
 //! - **Reorg support**: Quickly access changesets to revert blocks during chain reorganizations
 //! - **Memory efficiency**: Explicit eviction releases persisted changesets
 
-use crate::{database_state_frontiers, OverlayStateProvider, OverlayView};
+use crate::{database_state_frontiers, OverlayManagerView, OverlayStateProvider};
 use alloy_eips::BlockNumHash;
 use alloy_primitives::{map::B256Map, BlockNumber, B256};
 use parking_lot::RwLock;
@@ -65,7 +65,7 @@ use reth_trie_db::{DatabaseHashedCursorFactory, DatabaseHashedPostState, Databas
 /// - Database access fails
 /// - Cache retrieval fails
 pub(crate) fn compute_block_trie_updates<N, Provider>(
-    overlay_view: &OverlayView<N>,
+    overlay_manager_view: &OverlayManagerView<N>,
     provider: &Provider,
     block_number: BlockNumber,
 ) -> ProviderResult<TrieUpdatesSorted>
@@ -80,12 +80,12 @@ where
         + StorageSettingsCache,
 {
     reth_trie_db::with_adapter!(provider, |A| {
-        compute_block_trie_updates_inner::<_, _, A>(overlay_view, provider, block_number)
+        compute_block_trie_updates_inner::<_, _, A>(overlay_manager_view, provider, block_number)
     })
 }
 
 fn compute_block_trie_updates_inner<N, Provider, A>(
-    overlay_view: &OverlayView<N>,
+    overlay_manager_view: &OverlayManagerView<N>,
     provider: &Provider,
     block_number: BlockNumber,
 ) -> ProviderResult<TrieUpdatesSorted>
@@ -101,16 +101,21 @@ where
     A: TrieTableAdapter,
 {
     let tx = provider.tx_ref();
-    let cache = overlay_view.manager().changeset_cache();
+    let cache = overlay_manager_view.manager().changeset_cache();
     let (partial_state_trie, finish) = database_state_frontiers(provider)?;
 
     // Step 1: Get the trie changesets for the target block from cache
-    let changesets =
-        cache.get_or_compute(overlay_view, provider, block_number, partial_state_trie, finish)?;
+    let changesets = cache.get_or_compute(
+        overlay_manager_view,
+        provider,
+        block_number,
+        partial_state_trie,
+        finish,
+    )?;
 
     // Step 2: Get the trie reverts for the state after the target block using the cache
     let reverts = cache.get_or_compute_range(
-        overlay_view,
+        overlay_manager_view,
         provider,
         (block_number + 1)..=finish.number,
         partial_state_trie,
@@ -207,7 +212,7 @@ impl ChangesetCache {
     /// Changesets for the block, either from cache or computed on-the-fly.
     pub(crate) fn get_or_compute<N, P>(
         &self,
-        overlay_view: &OverlayView<N>,
+        overlay_manager_view: &OverlayManagerView<N>,
         provider: &P,
         block_number: BlockNumber,
         partial_state_trie: BlockNumHash,
@@ -224,7 +229,7 @@ impl ChangesetCache {
             + StorageSettingsCache,
     {
         self.get_or_compute_range(
-            overlay_view,
+            overlay_manager_view,
             provider,
             block_number..=block_number,
             partial_state_trie,
@@ -260,7 +265,7 @@ impl ChangesetCache {
     /// - Changeset computation fails
     pub(crate) fn get_or_compute_range<N, P>(
         &self,
-        overlay_view: &OverlayView<N>,
+        overlay_manager_view: &OverlayManagerView<N>,
         provider: &P,
         range: RangeInclusive<BlockNumber>,
         partial_state_trie: BlockNumHash,
@@ -394,14 +399,14 @@ impl ChangesetCache {
             "Changeset cache MISS in range, falling back to aggregate DB-based computation"
         );
 
-        let overlay = overlay_view
+        let overlay = overlay_manager_view
             .overlay_builder(finish.hash)
             .with_no_reverts()
             .build_state_trie_overlay_at_frontiers(provider, partial_state_trie, finish, true)?;
 
         // Forward updates are a best-effort optimization to speed up compute_range_trie_changesets,
         // missing blocks do not affect correctness.
-        let mut forward_updates = overlay_view
+        let mut forward_updates = overlay_manager_view
             .parent_chain(finish.hash)
             .take_while(|block| block.recovered_block().number() >= start_block)
             .map(|block| (block.recovered_block().number(), block.trie_updates()))

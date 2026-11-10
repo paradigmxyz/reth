@@ -170,7 +170,7 @@ impl<N: ProviderNodeTypes> BlockchainProvider<N> {
         provider: StateRangeDbProvider<N>,
         block_hash: B256,
     ) -> StateProviderBox {
-        let overlay_builder = provider.overlay_view().overlay_builder(block_hash);
+        let overlay_builder = provider.overlay_manager_view().overlay_builder(block_hash);
         Box::new(OverlayStateProvider::new(provider, overlay_builder))
     }
 
@@ -206,16 +206,16 @@ impl<N: ProviderNodeTypes> BlockchainProvider<N> {
             return Ok(None)
         }
 
-        let overlay_view = provider.overlay_view().clone();
+        let overlay_manager_view = provider.overlay_manager_view().clone();
         let overlay_builder = match block_state {
-            Some(state) => overlay_view.overlay_builder_for_state(state),
+            Some(state) => overlay_manager_view.overlay_builder_for_state(state),
             None => {
                 let Some(block_hash) =
                     retained_block_hash::<N>(&provider, finish.block_number, state_root)?
                 else {
                     return Ok(None)
                 };
-                overlay_view.overlay_builder(block_hash)
+                overlay_manager_view.overlay_builder(block_hash)
             }
         };
 
@@ -1060,7 +1060,7 @@ impl<N: ProviderNodeTypes> StateReader for BlockchainProvider<N> {
         let Some(block_hash) = provider.block_hash(block)? else { return Ok(None) };
         let state_provider = OverlayStateProvider::<&_, N::Primitives>::new_ref(
             &provider,
-            provider.overlay_view().overlay_builder(block_hash),
+            provider.overlay_manager_view().overlay_builder(block_hash),
         );
         let (state, reverts) = provider.populate_bundle_state(
             account_changeset,

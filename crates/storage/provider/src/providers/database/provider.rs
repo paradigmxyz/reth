@@ -72,7 +72,7 @@ use reth_storage_api::{
     StorageChangeSetReader, StoragePath, StorageSettingsCache, WriteStateInput,
 };
 use reth_storage_errors::provider::{ProviderResult, StaticFileWriterError};
-use reth_storage_overlay::OverlayView;
+use reth_storage_overlay::OverlayManagerView;
 use reth_trie::{
     bundle_state::{PlainStateReverts, PlainStorageChangeset, PlainStorageRevert, StateChangeset},
     updates::{StorageTrieUpdatesSorted, TrieUpdatesSorted},
@@ -212,7 +212,7 @@ pub struct DatabaseProvider<TX, N: NodeTypes> {
     /// [`Self::history_rocksdb_snapshot`].
     rocksdb_history_snapshot: OnceLock<Option<OwnedRocksReadSnapshot>>,
     /// View of the overlay manager's block graph, for state trie overlays and cached changesets.
-    overlay_view: OverlayView<N::Primitives>,
+    overlay_manager_view: OverlayManagerView<N::Primitives>,
     /// Task runtime for spawning parallel I/O work.
     runtime: reth_tasks::Runtime,
     /// Path to the database directory.
@@ -239,7 +239,7 @@ impl<TX: Debug, N: NodeTypes> Debug for DatabaseProvider<TX, N> {
             .field("storage", &self.storage)
             .field("storage_settings", &self.storage_settings)
             .field("rocksdb_provider", &self.rocksdb_provider)
-            .field("overlay_view", &self.overlay_view)
+            .field("overlay_manager_view", &self.overlay_manager_view)
             .field("runtime", &self.runtime)
             .field("pending_rocksdb_batches", &"<pending batches>")
             .field("commit_order", &self.commit_order)
@@ -374,7 +374,7 @@ impl<TX: DbTxMut, N: NodeTypes> DatabaseProvider<TX, N> {
         storage: Arc<N::Storage>,
         storage_settings: Arc<RwLock<StorageSettings>>,
         rocksdb_provider: RocksDBProvider,
-        overlay_view: OverlayView<N::Primitives>,
+        overlay_manager_view: OverlayManagerView<N::Primitives>,
         runtime: reth_tasks::Runtime,
         db_path: PathBuf,
         commit_order: CommitOrder,
@@ -388,7 +388,7 @@ impl<TX: DbTxMut, N: NodeTypes> DatabaseProvider<TX, N> {
             storage,
             storage_settings,
             rocksdb_provider,
-            overlay_view,
+            overlay_manager_view,
             runtime,
             db_path,
             rocksdb_history_snapshot: OnceLock::new(),
@@ -410,7 +410,7 @@ impl<TX: DbTxMut, N: NodeTypes> DatabaseProvider<TX, N> {
         storage: Arc<N::Storage>,
         storage_settings: Arc<RwLock<StorageSettings>>,
         rocksdb_provider: RocksDBProvider,
-        overlay_view: OverlayView<N::Primitives>,
+        overlay_manager_view: OverlayManagerView<N::Primitives>,
         runtime: reth_tasks::Runtime,
         db_path: PathBuf,
         metrics: Arc<DatabaseProviderMetrics>,
@@ -423,7 +423,7 @@ impl<TX: DbTxMut, N: NodeTypes> DatabaseProvider<TX, N> {
             storage,
             storage_settings,
             rocksdb_provider,
-            overlay_view,
+            overlay_manager_view,
             runtime,
             db_path,
             CommitOrder::Normal,
@@ -441,7 +441,7 @@ impl<TX: DbTxMut, N: NodeTypes> DatabaseProvider<TX, N> {
         storage: Arc<N::Storage>,
         storage_settings: Arc<RwLock<StorageSettings>>,
         rocksdb_provider: RocksDBProvider,
-        overlay_view: OverlayView<N::Primitives>,
+        overlay_manager_view: OverlayManagerView<N::Primitives>,
         runtime: reth_tasks::Runtime,
         db_path: PathBuf,
         metrics: Arc<DatabaseProviderMetrics>,
@@ -454,7 +454,7 @@ impl<TX: DbTxMut, N: NodeTypes> DatabaseProvider<TX, N> {
             storage,
             storage_settings,
             rocksdb_provider,
-            overlay_view,
+            overlay_manager_view,
             runtime,
             db_path,
             CommitOrder::Unwind,
@@ -884,7 +884,7 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
 
         // Calculate changesets before modifying hashed state used to reconstruct historical tries.
         let trie_revert = self
-            .overlay_view
+            .overlay_manager_view
             .get_or_compute_cached_changesets_range(self, from..=finish.block_number)?;
 
         let changed_accounts = self.account_changesets_range(from..)?;
@@ -1020,7 +1020,7 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> DatabaseProvider<TX, N> {
         storage: Arc<N::Storage>,
         storage_settings: Arc<RwLock<StorageSettings>>,
         rocksdb_provider: RocksDBProvider,
-        overlay_view: OverlayView<N::Primitives>,
+        overlay_manager_view: OverlayManagerView<N::Primitives>,
         runtime: reth_tasks::Runtime,
         db_path: PathBuf,
         metrics: Arc<DatabaseProviderMetrics>,
@@ -1033,7 +1033,7 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> DatabaseProvider<TX, N> {
             storage,
             storage_settings,
             rocksdb_provider,
-            overlay_view,
+            overlay_manager_view,
             runtime,
             db_path,
             rocksdb_history_snapshot: OnceLock::new(),
@@ -1059,8 +1059,8 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> DatabaseProvider<TX, N> {
     ///
     /// The view was taken before the provider's transaction opened, so overlays built from it stay
     /// consistent with the transaction.
-    pub const fn overlay_view(&self) -> &OverlayView<N::Primitives> {
-        &self.overlay_view
+    pub const fn overlay_manager_view(&self) -> &OverlayManagerView<N::Primitives> {
+        &self.overlay_manager_view
     }
 
     /// Pass `DbTx` or `DbTxMut` immutable reference.

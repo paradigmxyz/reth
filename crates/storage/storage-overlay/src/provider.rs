@@ -80,7 +80,7 @@ pub struct OverlayStateProviderFactory<F, N: NodePrimitives = EthPrimitives> {
 impl<F, N: NodePrimitives> OverlayStateProviderFactory<F, N> {
     /// Create a new overlay state provider factory.
     pub fn new(factory: F, overlay_builder: OverlayBuilder<N>) -> Self {
-        let manager = overlay_builder.overlay_view().manager();
+        let manager = overlay_builder.overlay_manager_view().manager();
         Self {
             factory,
             metrics: manager.provider_metrics().clone(),
@@ -196,7 +196,7 @@ impl<Provider: DBProvider, N: NodePrimitives> OverlayStateProvider<OwnedProvider
         Provider: StorageSettingsCache,
     {
         let is_v2 = provider.cached_storage_settings().is_v2();
-        let manager = overlay_builder.overlay_view().manager();
+        let manager = overlay_builder.overlay_manager_view().manager();
         let metrics = manager.provider_metrics().clone();
         let proof_cursor_metrics = manager.proof_cursor_metrics().clone();
         Self::from_parts(
@@ -240,7 +240,7 @@ impl<'a, Provider: DBProvider, N: NodePrimitives> OverlayStateProvider<&'a Provi
         Provider: StorageSettingsCache,
     {
         let is_v2 = provider.cached_storage_settings().is_v2();
-        let manager = overlay_builder.overlay_view().manager();
+        let manager = overlay_builder.overlay_manager_view().manager();
         let metrics = manager.provider_metrics().clone();
         let proof_cursor_metrics = manager.proof_cursor_metrics().clone();
         Self::from_parts(

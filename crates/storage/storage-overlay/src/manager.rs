@@ -46,7 +46,7 @@ use tracing::{debug, trace};
 /// cache, and caches keyed by `(anchor_hash, tip_hash)`. Clones share all of it, so cloning is a
 /// single reference count increment.
 ///
-/// Overlays are built from an [`OverlayView`] of the block graph, taken with [`Self::view`].
+/// Overlays are built from an [`OverlayManagerView`] of the block graph, taken with [`Self::view`].
 #[derive(Clone)]
 pub struct OverlayManager<N: NodePrimitives = EthPrimitives> {
     inner: Arc<OverlayManagerInner<N>>,
@@ -57,7 +57,7 @@ pub struct OverlayManager<N: NodePrimitives = EthPrimitives> {
 /// Overlays built from a view keep reading the blocks it was taken with, whatever the engine
 /// removes from the manager afterwards. Taking or cloning a view is a reference count increment.
 #[derive(Clone)]
-pub struct OverlayView<N: NodePrimitives = EthPrimitives> {
+pub struct OverlayManagerView<N: NodePrimitives = EthPrimitives> {
     manager: OverlayManager<N>,
     blocks: Arc<B256Map<ExecutedBlock<N>>>,
 }
@@ -113,9 +113,9 @@ impl<N: NodePrimitives> std::fmt::Debug for OverlayManager<N> {
     }
 }
 
-impl<N: NodePrimitives> std::fmt::Debug for OverlayView<N> {
+impl<N: NodePrimitives> std::fmt::Debug for OverlayManagerView<N> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("OverlayView").field("blocks", &self.blocks.len()).finish()
+        f.debug_struct("OverlayManagerView").field("blocks", &self.blocks.len()).finish()
     }
 }
 
@@ -145,8 +145,8 @@ impl<N: NodePrimitives> OverlayManager<N> {
     /// The engine removes blocks from the graph only after persistence has committed them. A view
     /// taken before a database transaction opens therefore holds every in-memory block that
     /// transaction's durable frontiers need, whatever the engine removes afterwards.
-    pub fn view(&self) -> OverlayView<N> {
-        OverlayView { manager: self.clone(), blocks: self.inner.blocks.read().clone() }
+    pub fn view(&self) -> OverlayManagerView<N> {
+        OverlayManagerView { manager: self.clone(), blocks: self.inner.blocks.read().clone() }
     }
 
     pub(crate) fn changeset_cache(&self) -> &ChangesetCache {
@@ -416,7 +416,7 @@ impl<N: NodePrimitives> OverlayManager<N> {
     }
 }
 
-impl<N: NodePrimitives> OverlayView<N> {
+impl<N: NodePrimitives> OverlayManagerView<N> {
     /// Returns the manager this view was taken from.
     pub const fn manager(&self) -> &OverlayManager<N> {
         &self.manager
@@ -1171,7 +1171,7 @@ mod tests {
             .collect()
     }
 
-    impl OverlayView {
+    impl OverlayManagerView {
         fn execution_overlay_for_parent(
             &self,
             parent_hash: B256,

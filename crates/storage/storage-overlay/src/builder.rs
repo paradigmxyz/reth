@@ -1,6 +1,6 @@
 use crate::{
     manager::{OverlayCacheConfig, StateTrieOverlayError},
-    OverlayView,
+    OverlayManagerView,
 };
 use alloy_eips::BlockNumHash;
 use alloy_primitives::{
@@ -185,7 +185,7 @@ pub struct OverlayBuilder<N: NodePrimitives = EthPrimitives> {
     /// Parent hash requested by the caller.
     parent_hash: B256,
     /// View of the manager's block graph, used for cached changesets and overlays.
-    overlay_view: OverlayView<N>,
+    overlay_manager_view: OverlayManagerView<N>,
     /// Snapshot of the in-memory chain ending at the requested parent.
     ///
     /// This is shared with the caller so that a chain that is already maintained elsewhere (for
@@ -204,11 +204,11 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
     pub(crate) fn new(
         parent_hash: B256,
         parent_state: Option<Arc<BlockState<N>>>,
-        overlay_view: OverlayView<N>,
+        overlay_manager_view: OverlayManagerView<N>,
     ) -> Self {
         Self {
             parent_hash,
-            overlay_view,
+            overlay_manager_view,
             parent_state,
             reused_sparse_trie_anchor_hash: None,
             no_reverts: false,
@@ -235,12 +235,12 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
     /// Returns this builder resolving overlays from a view of the manager's block graph taken
     /// now. Take it before opening the database transaction the builder will read.
     pub(crate) fn with_refreshed_view(&self) -> Self {
-        Self { overlay_view: self.overlay_view.refresh(), ..self.clone() }
+        Self { overlay_manager_view: self.overlay_manager_view.refresh(), ..self.clone() }
     }
 
     /// Returns the view this builder resolves overlays from.
-    pub(crate) const fn overlay_view(&self) -> &OverlayView<N> {
-        &self.overlay_view
+    pub(crate) const fn overlay_manager_view(&self) -> &OverlayManagerView<N> {
+        &self.overlay_manager_view
     }
 
     /// Appends an executed block to this builder's in-memory parent state.
@@ -456,8 +456,9 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
                     let _guard = debug_span!(target: "storage::overlay", "retrieving_trie_reverts")
                         .entered();
                     let start = Instant::now();
-                    let accumulated_reverts =
-                        self.overlay_view.get_or_compute_cached_changesets_range_at_frontiers(
+                    let accumulated_reverts = self
+                        .overlay_manager_view
+                        .get_or_compute_cached_changesets_range_at_frontiers(
                             provider,
                             revert_blocks.clone(),
                             state_trie_tip_block,
@@ -472,15 +473,17 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
                     // Revert prefixes describe changes since the anchor, not stale hashes in
                     // masked DB rows. Complete the trie at Finish before applying those prefixes.
                     let start = Instant::now();
-                    let finish_state =
-                        self.overlay_view.block_state(finish_tip_block.hash).ok_or_else(|| {
+                    let finish_state = self
+                        .overlay_manager_view
+                        .block_state(finish_tip_block.hash)
+                        .ok_or_else(|| {
                             ProviderError::other(StateTrieOverlayError {
                                 tip_hash: finish_tip_block.hash,
                                 anchor_hash: state_trie_tip_block.hash,
                             })
                         })?;
                     let (nodes, _) = self
-                        .overlay_view
+                        .overlay_manager_view
                         .overlay_for_parent(
                             &finish_state,
                             state_trie_tip_block.hash,
@@ -561,7 +564,7 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
                     state_trie_tip_block.hash,
                     finish_tip_block.hash,
                 ) {
-                    self.overlay_view
+                    self.overlay_manager_view
                         .manager()
                         .builder_metrics()
                         .sparse_trie_overlay_skips
@@ -590,7 +593,7 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
             }
         };
 
-        let metrics = self.overlay_view.manager().builder_metrics();
+        let metrics = self.overlay_manager_view.manager().builder_metrics();
         metrics.retrieve_trie_reverts_duration.record(retrieve_trie_reverts_duration.as_secs_f64());
         metrics
             .retrieve_hashed_state_reverts_duration
@@ -668,7 +671,7 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
                     "state trie overlay cannot be anchored without in-memory parent state",
                 ))
             })?;
-            self.overlay_view
+            self.overlay_manager_view
                 .overlay_for_parent(parent_state, anchor_hash, self.overlay_cache_config)
                 .map_err(ProviderError::other)
         }
@@ -685,7 +688,7 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
             let parent_state = self.parent_state.as_deref().ok_or_else(|| {
                 ProviderError::other(std::io::Error::other("missing in-memory parent state"))
             })?;
-            self.overlay_view
+            self.overlay_manager_view
                 .execution_overlay_for_block_state(
                     parent_state,
                     anchor_hash,
