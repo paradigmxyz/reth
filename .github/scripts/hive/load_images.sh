@@ -10,8 +10,6 @@ IMAGES=(
     "/tmp/smoke_genesis.tar"
     "/tmp/smoke_network.tar"
     "/tmp/ethereum_sync.tar"
-    "/tmp/eels_engine.tar"
-    "/tmp/eels_rlp.tar"
     "/tmp/eels_enginex.tar"
     "/tmp/eels_wirex.tar"
     "/tmp/eels_blobs.tar"
