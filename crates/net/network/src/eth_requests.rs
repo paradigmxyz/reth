@@ -6,12 +6,9 @@ use crate::{
 };
 use alloy_consensus::{constants::KECCAK_EMPTY, BlockHeader, ReceiptWithBloom};
 use alloy_eips::BlockHashOrNumber;
-use alloy_primitives::{
-    map::{FbBuildHasher, HashSet},
-    Bytes, B256,
-};
+use alloy_primitives::{Bytes, B256};
 use alloy_rlp::{length_of_length, Encodable};
-use futures::{future::BoxFuture, stream::FuturesUnordered, StreamExt};
+use futures::StreamExt;
 use reth_eth_wire::{
     message::MAX_MESSAGE_SIZE,
     snap::{
@@ -37,12 +34,16 @@ use reth_storage_api::{
 };
 use reth_transaction_pool::{blobstore::NoopBlobStore, BlobStore};
 use std::{
+    collections::VecDeque,
     future::Future,
     pin::Pin,
     task::{Context, Poll},
-    time::Duration,
+    time::{Duration, Instant},
 };
-use tokio::sync::{mpsc::Receiver, oneshot};
+use tokio::{
+    sync::{mpsc::Receiver, oneshot},
+    task::JoinHandle,
+};
 use tokio_stream::wrappers::ReceiverStream;
 use tracing::Span;
 
@@ -89,7 +90,17 @@ pub const SOFT_RESPONSE_LIMIT: usize = 2 * 1024 * 1024;
 ///
 /// Serving an old root can rewind the trie block by block, so these requests run off the handler
 /// task and are capped to keep them from starving other blocking work.
-const MAX_CONCURRENT_SNAP_RANGE_REQUESTS: usize = 2;
+const MAX_CONCURRENT_STATE_RANGE_REQUESTS: usize = 2;
+
+/// Maximum number of `snap/2` range requests waiting for a serving slot, one per peer.
+///
+/// They wait because snap clients read an empty response as the root being unavailable.
+const MAX_QUEUED_STATE_RANGE_REQUESTS: usize = 16;
+
+/// How long a `snap/2` range request may wait for a serving slot before it is answered empty.
+///
+/// Kept well under the requester's timeout, so a slot isn't spent on a response nobody awaits.
+const STATE_RANGE_REQUEST_QUEUE_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// Upper bound on the headers reserved once the first requested header resolves.
 ///
@@ -123,10 +134,8 @@ pub struct EthRequestHandler<C, N: NetworkPrimitives = EthNetworkPrimitives> {
     incoming_requests: ReceiverStream<IncomingEthRequest<N>>,
     /// Metrics for the eth request handler.
     metrics: EthRequestHandlerMetrics,
-    /// `snap/2` range requests being served off the handler task, each resolving to its peer.
-    snap_range_tasks: FuturesUnordered<BoxFuture<'static, PeerId>>,
-    /// Peers with a request in `snap_range_tasks`, limited to one each.
-    snap_range_peers: HashSet<PeerId, FbBuildHasher<64>>,
+    /// `snap/2` range requests running or waiting off the handler task.
+    state_range_requests: StateRangeRequests,
 }
 
 // === impl EthRequestHandler ===
@@ -139,8 +148,7 @@ impl<C, N: NetworkPrimitives> EthRequestHandler<C, N> {
             peers,
             incoming_requests: ReceiverStream::new(incoming),
             metrics: Default::default(),
-            snap_range_tasks: Default::default(),
-            snap_range_peers: Default::default(),
+            state_range_requests: Default::default(),
         }
     }
 
@@ -521,24 +529,22 @@ where
 
         let result = match request {
             SnapProtocolMessage::GetAccountRange(req) => {
-                let empty = SnapResponse::AccountRange(AccountRangeMessage {
-                    request_id: req.request_id,
-                    accounts: Vec::new(),
-                    proof: Vec::new(),
-                });
-                return self.spawn_snap_range_request(peer_id, response, empty, move |client| {
-                    get_account_range_response(client, req).map(SnapResponse::AccountRange)
-                })
+                return self.on_state_range_request(
+                    peer_id,
+                    StateRangeRequest::Account(req),
+                    response,
+                )
             }
-            SnapProtocolMessage::GetStorageRanges(req) => {
-                let empty = SnapResponse::StorageRanges(StorageRangesMessage {
-                    request_id: req.request_id,
-                    slots: Vec::new(),
-                    proof: Vec::new(),
-                });
-                return self.spawn_snap_range_request(peer_id, response, empty, move |client| {
-                    get_storage_ranges_response(client, req).map(SnapResponse::StorageRanges)
-                })
+            SnapProtocolMessage::GetStorageRanges(mut req) => {
+                // Accounts past the serving limit are never read, so a queued request releases
+                // them along with the allocation the peer sized.
+                req.account_hashes.truncate(MAX_STORAGE_RANGE_ACCOUNTS_SERVE);
+                req.account_hashes.shrink_to_fit();
+                return self.on_state_range_request(
+                    peer_id,
+                    StateRangeRequest::Storage(req),
+                    response,
+                )
             }
             SnapProtocolMessage::GetByteCodes(req) => {
                 let codes = self
@@ -571,47 +577,16 @@ where
         let _ = response.send(result);
     }
 
-    /// Serves a `snap/2` range request on a blocking task, replying `empty` when the request can't
-    /// be served.
-    ///
-    /// A request is answered `empty` without being served when
-    /// [`MAX_CONCURRENT_SNAP_RANGE_REQUESTS`] are already running or the peer already has one
-    /// running, which snap clients treat as the root being unavailable. A request whose peer has
-    /// already gone is dropped.
-    fn spawn_snap_range_request(
+    /// Hands a `snap/2` range request to [`StateRangeRequests`].
+    fn on_state_range_request(
         &mut self,
         peer_id: PeerId,
+        request: StateRangeRequest,
         response: oneshot::Sender<RequestResult<SnapResponse>>,
-        empty: SnapResponse,
-        serve: impl FnOnce(&C) -> ProviderResult<SnapResponse> + Send + 'static,
     ) {
-        if response.is_closed() {
-            return
-        }
-        if self.snap_range_tasks.len() >= MAX_CONCURRENT_SNAP_RANGE_REQUESTS ||
-            !self.snap_range_peers.insert(peer_id)
-        {
-            self.metrics.snap_range_requests_busy_total.increment(1);
-            let _ = response.send(Ok(empty));
-            return
-        }
-
-        let client = self.client.clone();
-        let span = Span::current();
-        let task = tokio::task::spawn_blocking(move || {
-            let _guard = span.enter();
-            let result = serve(&client).unwrap_or_else(|error| {
-                tracing::debug!(target: "net::snap", %error, "failed to serve snap range");
-                empty
-            });
-            let _ = response.send(Ok(result));
-        });
-        self.snap_range_tasks.push(Box::pin(async move {
-            if let Err(error) = task.await {
-                tracing::error!(target: "net::snap", %error, "snap range task failed");
-            }
-            peer_id
-        }));
+        let incoming =
+            IncomingStateRangeRequest { peer_id, request, response, received: Instant::now() };
+        self.state_range_requests.admit(incoming, &self.client, &self.metrics);
     }
 
     /// Returns the bytecode for each of `hashes`, skipping hashes with no known code, stopping
@@ -814,10 +789,8 @@ where
 
         this.metrics.acc_duration_poll_eth_req_handler.set(acc.as_secs_f64());
 
-        // Polled after new requests are spawned so that each finished task frees its peer's slot.
-        while let Poll::Ready(Some(peer_id)) = this.snap_range_tasks.poll_next_unpin(cx) {
-            this.snap_range_peers.remove(&peer_id);
-        }
+        // Polled after new requests are admitted so that each finished task frees its slot.
+        this.state_range_requests.poll(cx, &this.client, &this.metrics);
 
         // stream is fully drained and import futures pending
         if maybe_more_incoming_requests {
@@ -826,6 +799,192 @@ where
         }
 
         Poll::Pending
+    }
+}
+
+/// `snap/2` state range requests served off the handler task.
+///
+/// Unlike other requests, serving a range for an old root rewinds the state to that block, which
+/// can take seconds and would stall every peer if it ran on the handler task.
+///
+/// At most [`MAX_CONCURRENT_STATE_RANGE_REQUESTS`] run at once, one per peer. A request that can't
+/// start waits in a queue of at most [`MAX_QUEUED_STATE_RANGE_REQUESTS`], one place per peer, for
+/// at most [`STATE_RANGE_REQUEST_QUEUE_TIMEOUT`].
+#[derive(Debug, Default)]
+struct StateRangeRequests {
+    /// Requests being served on blocking tasks, with the peer each belongs to.
+    tasks: Vec<(PeerId, JoinHandle<()>)>,
+    /// Requests waiting for a slot in `tasks`, oldest first.
+    queue: VecDeque<IncomingStateRangeRequest>,
+}
+
+impl StateRangeRequests {
+    /// Starts `incoming` or queues it until a slot is free.
+    ///
+    /// A request whose peer has already gone is dropped. One that finds the queue full, or its
+    /// peer already holding a place in it, is answered empty.
+    fn admit<C>(
+        &mut self,
+        incoming: IncomingStateRangeRequest,
+        client: &C,
+        metrics: &EthRequestHandlerMetrics,
+    ) where
+        C: StateRangeProviderFactory + Clone + Send + 'static,
+    {
+        if incoming.response.is_closed() {
+            return
+        }
+        if self.can_start(incoming.peer_id) {
+            return self.spawn(incoming, client)
+        }
+
+        self.remove_stale(metrics);
+        if self.queue.len() >= MAX_QUEUED_STATE_RANGE_REQUESTS ||
+            self.queue.iter().any(|queued| queued.peer_id == incoming.peer_id)
+        {
+            return incoming.reply_empty(metrics)
+        }
+        self.queue.push_back(incoming);
+    }
+
+    /// Returns whether a request from `peer_id` can start now.
+    fn can_start(&self, peer_id: PeerId) -> bool {
+        self.tasks.len() < MAX_CONCURRENT_STATE_RANGE_REQUESTS &&
+            self.tasks.iter().all(|(running, _)| *running != peer_id)
+    }
+
+    /// Serves `incoming` on a blocking task, which holds its peer's slot until it finishes.
+    fn spawn<C>(&mut self, incoming: IncomingStateRangeRequest, client: &C)
+    where
+        C: StateRangeProviderFactory + Clone + Send + 'static,
+    {
+        let IncomingStateRangeRequest { peer_id, request, response, .. } = incoming;
+        let client = client.clone();
+        let span = Span::current();
+        let task = tokio::task::spawn_blocking(move || {
+            let _guard = span.enter();
+            let empty = request.empty_response();
+            let result = request.serve(&client).unwrap_or_else(|error| {
+                tracing::debug!(target: "net::snap", %error, "failed to serve snap range");
+                empty
+            });
+            let _ = response.send(Ok(result));
+        });
+        self.tasks.push((peer_id, task));
+    }
+
+    /// Drops queued requests whose peer has gone, and answers empty those that waited longer than
+    /// [`STATE_RANGE_REQUEST_QUEUE_TIMEOUT`].
+    fn remove_stale(&mut self, metrics: &EthRequestHandlerMetrics) {
+        let mut index = 0;
+        while index < self.queue.len() {
+            let queued = &self.queue[index];
+            if queued.response.is_closed() {
+                self.queue.remove(index);
+            } else if queued.received.elapsed() < STATE_RANGE_REQUEST_QUEUE_TIMEOUT {
+                index += 1;
+            } else if let Some(incoming) = self.queue.remove(index) {
+                incoming.reply_empty(metrics);
+            }
+        }
+    }
+
+    /// Frees the slots of finished tasks and starts queued requests, oldest first, in their place.
+    fn poll<C>(&mut self, cx: &mut Context<'_>, client: &C, metrics: &EthRequestHandlerMetrics)
+    where
+        C: StateRangeProviderFactory + Clone + Send + 'static,
+    {
+        self.remove_stale(metrics);
+
+        // Runs again after starting queued requests so that their tasks wake this context.
+        loop {
+            self.tasks.retain_mut(|(_, task)| match Pin::new(task).poll(cx) {
+                Poll::Pending => true,
+                Poll::Ready(result) => {
+                    if let Err(error) = result {
+                        tracing::error!(target: "net::snap", %error, "snap range task failed");
+                    }
+                    false
+                }
+            });
+
+            let mut spawned = false;
+            let mut index = 0;
+            while index < self.queue.len() && self.tasks.len() < MAX_CONCURRENT_STATE_RANGE_REQUESTS
+            {
+                // A peer with a request still running keeps its place and is passed over.
+                if !self.can_start(self.queue[index].peer_id) {
+                    index += 1;
+                } else if let Some(incoming) = self.queue.remove(index) {
+                    self.spawn(incoming, client);
+                    spawned = true;
+                }
+            }
+            if !spawned {
+                break
+            }
+        }
+    }
+}
+
+/// A `snap/2` range request waiting for, or holding, a serving slot.
+#[derive(Debug)]
+struct IncomingStateRangeRequest {
+    /// Peer that sent the request.
+    peer_id: PeerId,
+    /// The range request the peer sent.
+    request: StateRangeRequest,
+    /// Channel the response is sent on.
+    response: oneshot::Sender<RequestResult<SnapResponse>>,
+    /// When the request arrived, which bounds how long it may wait in the queue.
+    received: Instant,
+}
+
+impl IncomingStateRangeRequest {
+    /// Answers the request empty without serving it.
+    fn reply_empty(self, metrics: &EthRequestHandlerMetrics) {
+        metrics.snap_range_requests_busy_total.increment(1);
+        let _ = self.response.send(Ok(self.request.empty_response()));
+    }
+}
+
+/// A `snap/2` request for a range of state at a given root.
+#[derive(Debug)]
+enum StateRangeRequest {
+    /// A `GetAccountRange` request.
+    Account(GetAccountRangeMessage),
+    /// A `GetStorageRanges` request.
+    Storage(GetStorageRangesMessage),
+}
+
+impl StateRangeRequest {
+    /// Returns the response for a request that isn't served, which snap clients read as the root
+    /// being unavailable.
+    const fn empty_response(&self) -> SnapResponse {
+        match self {
+            Self::Account(req) => SnapResponse::AccountRange(AccountRangeMessage {
+                request_id: req.request_id,
+                accounts: Vec::new(),
+                proof: Vec::new(),
+            }),
+            Self::Storage(req) => SnapResponse::StorageRanges(StorageRangesMessage {
+                request_id: req.request_id,
+                slots: Vec::new(),
+                proof: Vec::new(),
+            }),
+        }
+    }
+
+    /// Serves the range from `client`.
+    fn serve(self, client: &impl StateRangeProviderFactory) -> ProviderResult<SnapResponse> {
+        match self {
+            Self::Account(req) => {
+                get_account_range_response(client, req).map(SnapResponse::AccountRange)
+            }
+            Self::Storage(req) => {
+                get_storage_ranges_response(client, req).map(SnapResponse::StorageRanges)
+            }
+        }
     }
 }
 
@@ -1263,58 +1422,151 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn busy_snap_range_requests_return_empty_responses() {
-        // Every slot is taken by another peer.
+    async fn busy_state_range_request_waits_for_a_slot() {
         let provider = MockEthProvider::default();
         let mut handler = snap_handler(provider.clone());
-        for byte in 0..MAX_CONCURRENT_SNAP_RANGE_REQUESTS as u8 {
-            let peer_id = PeerId::repeat_byte(byte);
-            handler.snap_range_peers.insert(peer_id);
-            handler.snap_range_tasks.push(Box::pin(futures::future::pending()));
+        // Every slot is taken, and the requesting peer holds the one that finishes on `release`.
+        let peer_id = PeerId::default();
+        let (release, released) = oneshot::channel::<()>();
+        handler.state_range_requests.tasks.push((
+            peer_id,
+            tokio::spawn(async move {
+                let _ = released.await;
+            }),
+        ));
+        for byte in 1..MAX_CONCURRENT_STATE_RANGE_REQUESTS as u8 {
+            handler
+                .state_range_requests
+                .tasks
+                .push((PeerId::repeat_byte(byte), tokio::spawn(futures::future::pending())));
         }
-        let (response, rx) = oneshot::channel();
-        handler.on_snap_request(PeerId::repeat_byte(0xff), account_range_request(), response);
+        // A peer whose request keeps running is queued first, and must be passed over.
+        let (response, mut passed_over) = oneshot::channel();
+        handler.on_snap_request(PeerId::repeat_byte(1), account_range_request(), response);
+        let (response, mut rx) = oneshot::channel();
+        handler.on_snap_request(peer_id, account_range_request(), response);
 
-        assert_eq!(rx.await.unwrap(), Ok(empty_account_range()));
+        assert_eq!(handler.state_range_requests.queue.len(), 2);
         assert_eq!(provider.snap_state_range_resolutions(), 0);
 
-        // The peer already has a request running.
+        release.send(()).unwrap();
+        let served = tokio::time::timeout(
+            Duration::from_secs(5),
+            std::future::poll_fn(|cx| {
+                let _ = Pin::new(&mut handler).poll(cx);
+                Pin::new(&mut rx).poll(cx)
+            }),
+        )
+        .await
+        .expect("queued snap range request must be served once a slot frees");
+
+        assert_eq!(served.unwrap(), Ok(empty_account_range()));
+        assert_eq!(provider.snap_state_range_resolutions(), 1);
+        assert_eq!(handler.state_range_requests.queue.len(), 1);
+        assert_eq!(passed_over.try_recv(), Err(oneshot::error::TryRecvError::Empty));
+    }
+
+    #[tokio::test]
+    async fn stale_queued_state_range_requests_are_not_served() {
         let provider = MockEthProvider::default();
         let mut handler = snap_handler(provider.clone());
-        handler.snap_range_peers.insert(PeerId::default());
-        handler.snap_range_tasks.push(Box::pin(futures::future::pending()));
-        let (response, rx) = oneshot::channel();
-        handler.on_snap_request(PeerId::default(), account_range_request(), response);
+        for byte in 0..MAX_CONCURRENT_STATE_RANGE_REQUESTS as u8 {
+            handler
+                .state_range_requests
+                .tasks
+                .push((PeerId::repeat_byte(byte), tokio::spawn(futures::future::pending())));
+        }
+        // One peer goes away while its request is queued.
+        let (response, gone) = oneshot::channel();
+        handler.on_snap_request(PeerId::repeat_byte(0x80), account_range_request(), response);
+        drop(gone);
+        // Another request has waited past the timeout.
+        let SnapProtocolMessage::GetAccountRange(request) = account_range_request() else {
+            unreachable!("fixture is an account range request")
+        };
+        let (response, expired) = oneshot::channel();
+        handler.state_range_requests.queue.push_back(IncomingStateRangeRequest {
+            peer_id: PeerId::repeat_byte(0x81),
+            request: StateRangeRequest::Account(request),
+            response,
+            received: Instant::now()
+                .checked_sub(STATE_RANGE_REQUEST_QUEUE_TIMEOUT)
+                .expect("clock is past the timeout"),
+        });
 
-        assert_eq!(rx.await.unwrap(), Ok(empty_account_range()));
+        std::future::poll_fn(|cx| {
+            let _ = Pin::new(&mut handler).poll(cx);
+            Poll::Ready(())
+        })
+        .await;
+
+        assert!(handler.state_range_requests.queue.is_empty());
+        assert_eq!(expired.await.unwrap(), Ok(empty_account_range()));
         assert_eq!(provider.snap_state_range_resolutions(), 0);
     }
 
     #[tokio::test]
-    async fn snap_range_request_from_gone_peer_is_dropped() {
+    async fn overflowing_state_range_requests_return_empty_responses() {
+        let provider = MockEthProvider::default();
+        let mut handler = snap_handler(provider.clone());
+        for byte in 0..MAX_CONCURRENT_STATE_RANGE_REQUESTS as u8 {
+            handler
+                .state_range_requests
+                .tasks
+                .push((PeerId::repeat_byte(byte), tokio::spawn(futures::future::pending())));
+        }
+        let queued_peer = |index: usize| PeerId::repeat_byte(0x80 + index as u8);
+        let (response, queued) = oneshot::channel();
+        handler.on_snap_request(queued_peer(0), account_range_request(), response);
+
+        // The peer already holds a place in the queue.
+        let (response, rx) = oneshot::channel();
+        handler.on_snap_request(queued_peer(0), account_range_request(), response);
+        assert_eq!(rx.await.unwrap(), Ok(empty_account_range()));
+
+        // The queue is full.
+        let mut waiting = vec![queued];
+        for index in 1..MAX_QUEUED_STATE_RANGE_REQUESTS {
+            let (response, rx) = oneshot::channel();
+            handler.on_snap_request(queued_peer(index), account_range_request(), response);
+            waiting.push(rx);
+        }
+        let (response, rx) = oneshot::channel();
+        handler.on_snap_request(PeerId::repeat_byte(0xff), account_range_request(), response);
+        assert_eq!(rx.await.unwrap(), Ok(empty_account_range()));
+
+        // Queued requests stay unanswered until a slot frees.
+        assert!(waiting
+            .iter_mut()
+            .all(|rx| rx.try_recv() == Err(oneshot::error::TryRecvError::Empty)));
+        assert_eq!(provider.snap_state_range_resolutions(), 0);
+    }
+
+    #[tokio::test]
+    async fn state_range_request_from_gone_peer_is_dropped() {
         let mut handler = snap_handler(MockEthProvider::default());
         let (response, rx) = oneshot::channel();
         drop(rx);
 
         handler.on_snap_request(PeerId::default(), account_range_request(), response);
 
-        assert!(handler.snap_range_tasks.is_empty());
+        assert!(handler.state_range_requests.tasks.is_empty());
     }
 
     #[tokio::test]
-    async fn finished_snap_range_request_frees_its_peer_slot() {
+    async fn finished_state_range_request_frees_its_peer_slot() {
         let mut handler = snap_handler(MockEthProvider::default());
         let (response, rx) = oneshot::channel();
 
         handler.on_snap_request(PeerId::default(), account_range_request(), response);
 
-        assert!(handler.snap_range_peers.contains(&PeerId::default()));
+        assert_eq!(handler.state_range_requests.tasks.len(), 1);
         rx.await.unwrap().unwrap();
         tokio::time::timeout(
             Duration::from_secs(5),
             std::future::poll_fn(|cx| {
                 let _ = Pin::new(&mut handler).poll(cx);
-                if handler.snap_range_peers.is_empty() {
+                if handler.state_range_requests.tasks.is_empty() {
                     Poll::Ready(())
                 } else {
                     Poll::Pending
