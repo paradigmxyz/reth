@@ -183,14 +183,10 @@ where
                     .map_err(Eth::Error::from_eth_err)?
                     .map(|acc| acc.balance)
                     .unwrap_or_default();
-                let separate_block_gas = evm_env.version().feature(evm2::EvmFeatures::EIP8037);
-                let tx_gas_limit_cap = evm_env.version().tx_gas_limit_cap;
+                let mut block_gas = BundleBlockGas::new(block_gas_limit, evm_env.version());
                 let mut evm = eth_api.evm_config().evm_with_env(&mut db, evm_env);
                 let mut coinbase_balance_before_tx = initial_coinbase;
                 let mut coinbase_balance_after_tx = initial_coinbase;
-                let mut total_gas_used = 0u64;
-                let mut regular_gas_used = 0u64;
-                let mut state_gas_used = 0u64;
                 let mut total_gas_fees = U256::ZERO;
                 let mut hasher = Keccak256::new();
 
@@ -200,16 +196,7 @@ where
                         return Err(EthApiError::InternalEthError.into())
                     }
 
-                    // Admit each transaction against the gas left in the block, like the block
-                    // executor does: EIP-8037 keeps separate regular and state gas pools.
-                    let regular_limit = tx.gas_limit().min(tx_gas_limit_cap);
-                    let exceeds_block_gas = if separate_block_gas {
-                        regular_limit > block_gas_limit.saturating_sub(regular_gas_used) ||
-                            tx.gas_limit() > block_gas_limit.saturating_sub(state_gas_used)
-                    } else {
-                        regular_limit > block_gas_limit.saturating_sub(total_gas_used)
-                    };
-                    if exceeds_block_gas {
+                    if !block_gas.admits(tx.gas_limit()) {
                         return Err(EthApiError::InvalidParams(
                             EthBundleError::BundleGasLimitExceeded(block_gas_limit).to_string(),
                         )
@@ -246,9 +233,7 @@ where
                     let result = evm.transact_commit(&tx_env).map_err(Eth::Error::from_evm_err)?;
 
                     let gas_used = result.tx_gas_used();
-                    total_gas_used += gas_used;
-                    regular_gas_used += result.execution_gas_spent();
-                    state_gas_used += result.state_gas_spent();
+                    block_gas.record(&result);
 
                     let gas_fees = U256::from(gas_used) * U256::from(gas_price);
                     total_gas_fees += gas_fees;
@@ -291,6 +276,7 @@ where
 
                 // populate the response
 
+                let total_gas_used = block_gas.gas_used();
                 let coinbase_diff = coinbase_balance_after_tx.saturating_sub(initial_coinbase);
                 let eth_sent_to_coinbase = coinbase_diff.saturating_sub(total_gas_fees);
                 let bundle_gas_price =
@@ -359,6 +345,57 @@ pub enum EthBundleError {
     /// Thrown when the gas limits of the bundle's transactions exceed the block gas limit.
     #[error("bundle gas exceeds the block gas limit of {0}")]
     BundleGasLimitExceeded(u64),
+}
+
+/// Gas a simulated bundle uses from the block it is simulated in.
+///
+/// Transactions are admitted against the gas left in the block, like the block executor does:
+/// EIP-8037 keeps separate regular and state gas pools.
+#[derive(Debug)]
+pub(crate) struct BundleBlockGas {
+    limit: u64,
+    tx_gas_limit_cap: u64,
+    separate_pools: bool,
+    gas_used: u64,
+    regular_gas_used: u64,
+    state_gas_used: u64,
+}
+
+impl BundleBlockGas {
+    /// Creates an unused budget of `limit` gas for a block executed with `version`.
+    pub(crate) const fn new(limit: u64, version: &evm2::Version) -> Self {
+        Self {
+            limit,
+            tx_gas_limit_cap: version.tx_gas_limit_cap,
+            separate_pools: version.feature(evm2::EvmFeatures::EIP8037),
+            gas_used: 0,
+            regular_gas_used: 0,
+            state_gas_used: 0,
+        }
+    }
+
+    /// Returns the receipt gas used by the recorded transactions.
+    pub(crate) const fn gas_used(&self) -> u64 {
+        self.gas_used
+    }
+
+    /// Returns whether a transaction with `gas_limit` fits in the gas left in the block.
+    pub(crate) fn admits(&self, gas_limit: u64) -> bool {
+        let regular_limit = gas_limit.min(self.tx_gas_limit_cap);
+        if self.separate_pools {
+            regular_limit <= self.limit.saturating_sub(self.regular_gas_used) &&
+                gas_limit <= self.limit.saturating_sub(self.state_gas_used)
+        } else {
+            regular_limit <= self.limit.saturating_sub(self.gas_used)
+        }
+    }
+
+    /// Records the gas spent by an executed transaction.
+    pub(crate) const fn record<E>(&mut self, result: &evm2::TxResultExt<E>) {
+        self.gas_used += result.tx_gas_used();
+        self.regular_gas_used += result.execution_gas_spent();
+        self.state_gas_used += result.state_gas_spent();
+    }
 }
 
 #[cfg(test)]
