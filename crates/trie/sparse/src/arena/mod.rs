@@ -15,6 +15,7 @@ use alloc::{borrow::Cow, boxed::Box, vec::Vec};
 use alloy_primitives::{keccak256, map::B256Map, B256};
 use alloy_trie::TrieMask;
 use core::{cmp::Reverse, mem};
+use rayon::iter::{IntoParallelIterator, IntoParallelRefMutIterator, ParallelIterator};
 use reth_execution_errors::{SparseTrieErrorKind, SparseTrieResult};
 use reth_trie_common::{
     BranchNodeMasks, BranchNodeRef, ExtensionNodeRef, LeafNodeRef, Nibbles, ProofTrieNodeV2,
@@ -395,10 +396,11 @@ impl ArenaSparseSubtrie {
                     self.num_dirty_leaves =
                         (self.num_dirty_leaves as i64 + deltas.num_dirty_leaves_delta) as u64;
 
-                    if let RemoveLeafResult::NeedsProof { key, proof_key, parent } = result {
+                    // The removed leaf is already revealed, so only the blinded sibling needs a
+                    // proof. The caller retries the update once that sibling is revealed.
+                    if let RemoveLeafResult::NeedsProof { proof_key, parent, .. } = result {
                         self.required_proofs
                             .push((idx, ArenaRequiredProof { key: proof_key, parent }));
-                        self.required_proofs.push((idx, ArenaRequiredProof { key, parent }));
                     }
                 }
                 LeafUpdate::Touched => {}
@@ -2267,8 +2269,6 @@ impl SparseTrie for ArenaParallelSparseTrie {
             let (_, subtrie, node_vec) = &mut taken[0];
             subtrie.reveal_nodes(node_vec)?;
         } else {
-            use rayon::iter::{IntoParallelRefMutIterator, ParallelIterator};
-
             let parent_span = tracing::Span::current();
             let results: Vec<SparseTrieResult<()>> = taken
                 .par_iter_mut()
@@ -2359,8 +2359,6 @@ impl SparseTrie for ArenaParallelSparseTrie {
                     subtrie.update_cached_rlp(new_epoch);
                 }
             } else {
-                use rayon::iter::{IntoParallelIterator, ParallelIterator};
-
                 let parent_span = tracing::Span::current();
                 taken = taken
                     .into_par_iter()
@@ -2559,8 +2557,6 @@ impl SparseTrie for ArenaParallelSparseTrie {
                 let (_, ref mut subtrie) = taken[0];
                 pruned += subtrie.prune(prune_before);
             } else {
-                use rayon::iter::{IntoParallelRefMutIterator, ParallelIterator};
-
                 let parent_span = tracing::Span::current();
                 pruned += taken
                     .par_iter_mut()
@@ -2816,8 +2812,6 @@ impl SparseTrie for ArenaParallelSparseTrie {
             let (_, ref mut subtrie, ref range) = taken[0];
             subtrie.update_leaves(&sorted[range.clone()]);
         } else {
-            use rayon::iter::{IntoParallelRefMutIterator, ParallelIterator};
-
             let parent_span = tracing::Span::current();
             taken.par_iter_mut().for_each(|(_, subtrie, range)| {
                 let _guard = parent_span.enter();

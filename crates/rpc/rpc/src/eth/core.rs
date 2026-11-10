@@ -547,6 +547,7 @@ mod tests {
         state::{AccountOverride, EvmOverrides, StateOverride},
         BlockOverrides, Bundle, TransactionRequest,
     };
+    use alloy_rpc_types_trace::{parity::TraceType, tracerequest::TraceCallRequest};
     use evm2::{evm::CacheDB, AccountInfo};
     use jsonrpsee_types::error::INVALID_PARAMS_CODE;
     use rand::Rng;
@@ -557,7 +558,9 @@ mod tests {
     use reth_evm::{ConfigureEvm, EvmEnvFor, TxEnvFor};
     use reth_evm_ethereum::EthEvmConfig;
     use reth_network_api::noop::NoopNetwork;
-    use reth_primitives_traits::{crypto::secp256k1::sign_message, SealedHeader};
+    use reth_primitives_traits::{
+        crypto::secp256k1::sign_message, SealedHeader, SignerRecoverable,
+    };
     use reth_provider::{
         providers::BlockchainProvider,
         test_utils::{
@@ -568,11 +571,12 @@ mod tests {
     };
     use reth_rpc_convert::{EthTxEnvError, TryIntoTxEnv};
     use reth_rpc_eth_api::{
-        helpers::{Call, EthBlocks, EthCall, LoadPendingBlock, SpawnBlocking},
+        helpers::{Call, EthBlocks, EthCall, EthTransactions, LoadPendingBlock, SpawnBlocking},
         node::RpcNodeCoreAdapter,
         EthApiServer,
     };
-    use reth_rpc_eth_types::{receipt::EthReceiptConverter, RpcInvalidTransactionError};
+    use reth_rpc_eth_types::{receipt::EthReceiptConverter, EthConfig, RpcInvalidTransactionError};
+    use reth_rpc_server_types::constants::DEFAULT_MAX_CALL_MANY_CALLS;
     use reth_storage_api::{
         BalProvider, BlockReaderIdExt, NodePrimitivesProvider, StateProviderFactory,
     };
@@ -671,8 +675,6 @@ mod tests {
 
     #[tokio::test]
     async fn test_transaction_by_sender_and_nonce_without_sender_transaction_returns_none() {
-        use reth_rpc_eth_api::helpers::EthTransactions;
-
         let provider = MockEthProvider::default();
         let sender = Address::random();
         provider.add_account(sender, ExtendedAccount::new(1, U256::ZERO));
@@ -697,7 +699,6 @@ mod tests {
 
     #[tokio::test]
     async fn test_transaction_by_sender_and_nonce_missing_block_returns_error() {
-        use reth_rpc_eth_api::helpers::EthTransactions;
         use reth_rpc_eth_types::EthApiError;
 
         let provider = MockEthProvider::default();
@@ -715,9 +716,6 @@ mod tests {
 
     #[tokio::test]
     async fn test_transaction_by_sender_and_nonce_returns_matching_transaction() {
-        use reth_primitives_traits::SignerRecoverable;
-        use reth_rpc_eth_api::helpers::EthTransactions;
-
         let provider = MockEthProvider::default();
         let tx = TransactionSigned::new_unhashed(
             reth_ethereum_primitives::Transaction::Legacy(Default::default()),
@@ -1058,6 +1056,109 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn call_many_methods_limit_calls_and_share_gas_cap() {
+        let provider = MockEthProvider::default();
+        let header = Header { number: 1, gas_limit: 30_000_000, ..Default::default() };
+        provider.add_block(header.hash_slow(), Block { header, body: BlockBody::default() });
+        // Loops until it runs out of gas.
+        let looping = Address::with_last_byte(0x43);
+        provider.add_account(
+            looping,
+            ExtendedAccount::new(0, U256::ZERO).with_bytecode(alloy_primitives::bytes!("5b600056")),
+        );
+        // A transfer to an empty account uses 21_000 gas, so a third one only gets 8_000 and a
+        // loop after one transfer runs out of the 29_000 left.
+        let api = build_test_eth_api_with_gas_cap(provider, 50_000);
+        let trace_api =
+            crate::TraceApi::new(api.clone(), BlockingTaskGuard::new(1), EthConfig::default());
+        let debug_api = crate::DebugApi::new(
+            api.clone(),
+            BlockingTaskGuard::new(1),
+            &Runtime::test(),
+            futures::stream::empty(),
+        );
+        let transfer = TransactionRequest::default().to(Address::with_last_byte(0x42));
+        let transfers = |calls| vec![transfer.clone(); calls];
+        let transfer_and_loop = vec![transfer.clone(), TransactionRequest::default().to(looping)];
+        let bundles = |calls: Vec<TransactionRequest>| {
+            vec![Bundle { transactions: calls, block_override: None }]
+        };
+        let trace_calls = |calls: Vec<TransactionRequest>| {
+            calls
+                .into_iter()
+                .map(|call| (call, std::iter::once(TraceType::Trace).collect()))
+                .collect::<Vec<_>>()
+        };
+
+        assert_eq!(
+            EthCall::call_many(&api, bundles(transfers(2)), None, None).await.unwrap()[0].len(),
+            2
+        );
+        assert_eq!(
+            trace_api.trace_call_many(trace_calls(transfers(2)), None).await.unwrap().len(),
+            2
+        );
+        assert_eq!(
+            debug_api.debug_trace_call_many(bundles(transfers(2)), None, None).await.unwrap()[0]
+                .len(),
+            2
+        );
+
+        let gas_cap_err = "the request's calls exceed the RPC gas cap of 50000";
+        for (calls, tx_index) in [(transfers(3), 2), (transfer_and_loop, 1)] {
+            assert_eq!(
+                EthCall::call_many(&api, bundles(calls.clone()), None, None)
+                    .await
+                    .unwrap_err()
+                    .to_string(),
+                format!("call_many error in bundle 0 and transaction {tx_index}: {gas_cap_err}")
+            );
+            assert_eq!(
+                trace_api
+                    .trace_call_many(trace_calls(calls.clone()), None)
+                    .await
+                    .unwrap_err()
+                    .to_string(),
+                gas_cap_err
+            );
+            assert_eq!(
+                debug_api
+                    .debug_trace_call_many(bundles(calls), None, None)
+                    .await
+                    .unwrap_err()
+                    .to_string(),
+                gas_cap_err
+            );
+        }
+
+        let too_many = transfers(DEFAULT_MAX_CALL_MANY_CALLS + 1);
+        let limit_err = "call count 1025 exceeds limit 1024";
+        assert_eq!(
+            EthCall::call_many(&api, bundles(too_many.clone()), None, None)
+                .await
+                .unwrap_err()
+                .to_string(),
+            limit_err
+        );
+        assert_eq!(
+            trace_api
+                .trace_call_many(trace_calls(too_many.clone()), None)
+                .await
+                .unwrap_err()
+                .to_string(),
+            limit_err
+        );
+        assert_eq!(
+            debug_api
+                .debug_trace_call_many(bundles(too_many), None, None)
+                .await
+                .unwrap_err()
+                .to_string(),
+            limit_err
+        );
+    }
+
+    #[tokio::test]
     /// Requesting no block should result in a default response
     async fn test_fee_history_no_block_requested() {
         let block_count = 10;
@@ -1155,8 +1256,6 @@ mod tests {
 
     #[tokio::test]
     async fn call_allowance_respects_rpc_gas_cap() {
-        use alloy_rpc_types_trace::{parity::TraceType, tracerequest::TraceCallRequest};
-        use reth_rpc_eth_types::EthConfig;
         use reth_tasks::pool::BlockingTaskGuard;
 
         let sender = Address::repeat_byte(0x11);

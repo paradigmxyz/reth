@@ -258,9 +258,7 @@ mod tests {
     use reth_db_common::init::init_genesis;
     use reth_ethereum_primitives::{Block, BlockBody, Transaction};
     use reth_evm_ethereum::EthEvmConfig;
-    use reth_primitives_traits::{
-        crypto::secp256k1::public_key_to_address, Block as _, NodePrimitives,
-    };
+    use reth_primitives_traits::{Block as _, NodePrimitives};
     use reth_provider::{
         providers::{BlockchainProvider, ProviderNodeTypes},
         test_utils::create_test_provider_factory_with_chain_spec,
@@ -277,7 +275,8 @@ mod tests {
 
         // Create a key pair for the sender
         let key_pair = generators::generate_key(&mut generators::rng());
-        let address = public_key_to_address(key_pair.public_key());
+        let address =
+            Address::from_raw_public_key(&key_pair.public_key().serialize_uncompressed()[1..]);
 
         let chain_spec = chain_spec(address);
 
@@ -313,7 +312,8 @@ mod tests {
 
         // Create a key pair for the sender
         let key_pair = generators::generate_key(&mut generators::rng());
-        let address = public_key_to_address(key_pair.public_key());
+        let address =
+            Address::from_raw_public_key(&key_pair.public_key().serialize_uncompressed()[1..]);
 
         let chain_spec = chain_spec(address);
 
@@ -415,7 +415,8 @@ mod tests {
 
         // Create a key pair for the sender
         let key_pair = generators::generate_key(&mut generators::rng());
-        let address = public_key_to_address(key_pair.public_key());
+        let address =
+            Address::from_raw_public_key(&key_pair.public_key().serialize_uncompressed()[1..]);
 
         let chain_spec = chain_spec(address);
 

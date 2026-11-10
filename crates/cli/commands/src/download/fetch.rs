@@ -15,6 +15,7 @@ use std::{
     collections::VecDeque,
     fs::OpenOptions,
     io::{self, BufWriter, Read, Write},
+    os::unix::fs::FileExt,
     path::{Path, PathBuf},
     sync::{
         atomic::{AtomicBool, AtomicU64, Ordering},
@@ -770,8 +771,6 @@ impl SegmentedDownload {
         piece_progress_bytes: &AtomicU64,
         cancel_token: &CancellationToken,
     ) -> std::result::Result<(), PieceAttemptFailure> {
-        use std::os::unix::fs::FileExt;
-
         let expected_len = piece.end - piece.start + 1;
 
         let response = match client

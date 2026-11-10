@@ -531,7 +531,11 @@ pub struct RpcServerArgs {
 
     /// Set the permissions for the IPC socket file, in octal format.
     ///
-    /// If not specified, the permissions will be set by the system's umask.
+    /// Accepts modes up to `0o7777`, with an optional `0o` prefix. If not specified, the
+    /// permissions will be set by the system's umask.
+    ///
+    /// Startup fails if the mode is invalid or the platform cannot apply it before binding the
+    /// socket, which includes macOS.
     #[arg(long = "ipc.permissions", default_value = Resettable::from(DefaultRpcServerArgs::get_global().ipc_socket_permissions.as_ref().map(|v| v.to_string().into())))]
     pub ipc_socket_permissions: Option<String>,
 
@@ -570,9 +574,12 @@ pub struct RpcServerArgs {
     #[arg(long, default_value_t = DefaultRpcServerArgs::get_global().auth_ipc)]
     pub auth_ipc: bool,
 
-    /// Filename for auth IPC socket/pipe within the datadir
-    #[arg(long = "auth-ipc.path", default_value_t = DefaultRpcServerArgs::get_global().auth_ipc_path.clone())]
-    pub auth_ipc_path: String,
+    /// Path for the auth IPC socket/pipe. Explicit paths are used unchanged.
+    ///
+    /// If omitted, uses `/tmp/reth_engine_api.ipc`, with `-<instance>` appended when
+    /// `--instance` is set. Applications can override this default via `DefaultRpcServerArgs`.
+    #[arg(long = "auth-ipc.path")]
+    pub auth_ipc_path: Option<String>,
 
     /// Disable the auth/engine API server.
     ///
@@ -653,6 +660,8 @@ pub struct RpcServerArgs {
     pub rpc_max_logs_per_response: ZeroAsNoneU64,
 
     /// Maximum gas limit for `eth_call`, `eth_estimateGas`, and call tracing RPC methods.
+    ///
+    /// The calls of an `eth_callMany`, `trace_callMany` or `debug_traceCallMany` request share it.
     #[arg(
         long = "rpc.gascap",
         alias = "rpc-gascap",
@@ -839,6 +848,8 @@ impl RpcServerArgs {
     /// * The `http_port` is scaled by a factor of `-instance`
     /// * The `ws_port` is scaled by a factor of `instance * 2`
     /// * The `ipcpath` is appended with the instance number: `/tmp/reth.ipc-<instance>`
+    /// * If `auth_ipc_path` is `None`, the default auth IPC path is appended with the instance
+    ///   number: `/tmp/reth_engine_api.ipc-<instance>`. Explicit paths are left unchanged.
     ///
     /// # Panics
     /// Warning: if `instance` is zero in debug mode, this will panic.
@@ -859,6 +870,9 @@ impl RpcServerArgs {
             self.ws_port += instance * 2 - 2;
             // append instance file to ipc path
             self.ipcpath = format!("{}-{}", self.ipcpath, instance);
+            if self.auth_ipc_path.is_none() {
+                self.auth_ipc_path = Some(format!("{}-{instance}", self.auth_ipc_path()));
+            }
         }
     }
 
@@ -918,20 +932,28 @@ impl RpcServerArgs {
 
     /// Returns `true` if the given RPC namespace is enabled on any transport.
     pub fn is_namespace_enabled(&self, ns: RethRpcModule) -> bool {
-        if self.http && self.http_api.as_ref().is_some_and(|api| api.contains(&ns)) {
+        if self.http &&
+            self.http_api.as_ref().unwrap_or(&RpcModuleSelection::Standard).contains(&ns)
+        {
             return true;
         }
-        if self.ws && self.ws_api.as_ref().is_some_and(|api| api.contains(&ns)) {
+        if self.ws && self.ws_api.as_ref().unwrap_or(&RpcModuleSelection::Standard).contains(&ns) {
             return true;
         }
-        // IPC exposes all modules when enabled
-        !self.ipcdisable
+        !self.ipcdisable && RpcModuleSelection::default_ipc_modules().contains(&ns)
     }
 
     /// Enables forced blob sidecar upcasting from EIP-4844 to EIP-7594 format.
     pub const fn with_force_blob_sidecar_upcasting(mut self) -> Self {
         self.rpc_force_blob_sidecar_upcasting = true;
         self
+    }
+
+    /// Returns the auth IPC endpoint to bind after instance adjustment.
+    ///
+    /// If no explicit or instance-adjusted path is set, returns the global default.
+    pub fn auth_ipc_path(&self) -> &str {
+        self.auth_ipc_path.as_deref().unwrap_or(&DefaultRpcServerArgs::get_global().auth_ipc_path)
     }
 }
 
@@ -958,7 +980,7 @@ impl Default for RpcServerArgs {
             auth_port,
             auth_jwtsecret,
             auth_ipc,
-            auth_ipc_path,
+            auth_ipc_path: _,
             disable_auth_server,
             rpc_jwtsecret,
             rpc_disable_metrics,
@@ -1007,7 +1029,7 @@ impl Default for RpcServerArgs {
             auth_jwtsecret,
             auth_jwtsecret_hex: None,
             auth_ipc,
-            auth_ipc_path,
+            auth_ipc_path: None,
             disable_auth_server,
             rpc_jwtsecret,
             rpc_disable_metrics,
@@ -1315,7 +1337,7 @@ mod tests {
             auth_jwtsecret: Some(std::path::PathBuf::from("/tmp/jwt.hex")),
             auth_jwtsecret_hex: None,
             auth_ipc: false,
-            auth_ipc_path: "engine.ipc".to_string(),
+            auth_ipc_path: Some("engine.ipc".to_string()),
             disable_auth_server: false,
             rpc_jwtsecret: Some(
                 JwtSecret::from_hex(
@@ -1346,7 +1368,6 @@ mod tests {
             rpc_state_cache: RpcStateCacheArgs {
                 max_blocks: 5000,
                 max_receipts: 2000,
-                max_headers: 1000,
                 max_bals: 1000,
                 cache_computed_bals: true,
                 prewarm_bals: Some(0),
@@ -1439,8 +1460,6 @@ mod tests {
             "5000",
             "--rpc-cache.max-receipts",
             "2000",
-            "--rpc-cache.max-headers",
-            "1000",
             "--rpc-cache.max-bals",
             "1000",
             "--rpc-cache.cache-computed-bals",
@@ -1487,5 +1506,45 @@ mod tests {
         ]);
 
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_adjust_instance_ports_suffixes_ipc_paths() {
+        let paths: Vec<_> = (1..=3u16)
+            .map(|instance| {
+                let mut args = RpcServerArgs::default();
+                let ipcpath = args.ipcpath.clone();
+                let auth_ipc_path = args.auth_ipc_path().to_string();
+                args.adjust_instance_ports(Some(instance));
+                assert_eq!(args.ipcpath, format!("{ipcpath}-{instance}"));
+                assert_eq!(args.auth_ipc_path(), format!("{auth_ipc_path}-{instance}"));
+                args.auth_ipc_path().to_string()
+            })
+            .collect();
+
+        assert_eq!(
+            paths,
+            [
+                "/tmp/reth_engine_api.ipc-1",
+                "/tmp/reth_engine_api.ipc-2",
+                "/tmp/reth_engine_api.ipc-3"
+            ]
+        );
+
+        // Without an instance the paths are left untouched.
+        let mut args = RpcServerArgs::default();
+        let auth_ipc_path = args.auth_ipc_path().to_string();
+        args.adjust_instance_ports(None);
+        assert_eq!(args.auth_ipc_path(), auth_ipc_path);
+    }
+
+    #[test]
+    fn test_adjust_instance_ports_preserves_explicit_auth_ipc_path() {
+        for path in ["engine.ipc", constants::DEFAULT_ENGINE_API_IPC_ENDPOINT] {
+            let mut args =
+                CommandParser::<RpcServerArgs>::parse_from(["reth", "--auth-ipc.path", path]).args;
+            args.adjust_instance_ports(Some(2));
+            assert_eq!(args.auth_ipc_path(), path);
+        }
     }
 }

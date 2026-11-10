@@ -191,6 +191,9 @@ where
                         ),
                     );
                     best_txs.no_updates();
+                    // Blob sidecars aren't attached to the response, so including blob
+                    // transactions would return a payload whose blobs bundle lacks their data.
+                    best_txs.skip_blobs();
                     best_txs.map(|tx| tx.to_consensus()).collect()
                 } else {
                     // Decode and recover all transactions in parallel
