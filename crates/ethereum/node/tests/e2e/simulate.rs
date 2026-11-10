@@ -521,3 +521,37 @@ async fn test_simulate_v1_sender_at_max_nonce_errors() -> eyre::Result<()> {
 
     Ok(())
 }
+
+#[tokio::test]
+async fn test_simulate_v1_block_time_override_selects_fork() -> eyre::Result<()> {
+    let chain_spec =
+        Arc::new(test_chain_spec_builder().prague_activated().with_osaka_at(1000).build());
+    let (node, _) = EthereumNode::test_setup(1, chain_spec).build_single().await?;
+    let provider = node.rpc_provider();
+
+    let from = Address::with_last_byte(0x41);
+    let contract = Address::with_last_byte(0x42);
+    // Returns `CLZ(0)`, an opcode introduced in Osaka.
+    let state_overrides = StateOverride::from_iter([(
+        contract,
+        AccountOverride::default().with_code(bytes!("0x5f1e5f5260205ff3")),
+    )]);
+    let call_block = |time| {
+        SimBlock::default()
+            .with_block_overrides(BlockOverrides { time: Some(time), ..Default::default() })
+            .with_state_overrides(state_overrides.clone())
+            .call(TransactionRequest::default().from(from).to(contract))
+    };
+    // The second block starts Osaka more than 12 seconds after its parent.
+    let payload = SimulatePayload::default().extend(call_block(500)).extend(call_block(1000));
+
+    let result: Vec<SimulatedBlock> =
+        provider.raw_request("eth_simulateV1".into(), (&payload, "latest")).await?;
+
+    assert_eq!(result.len(), 2);
+    assert!(!result[0].calls[0].status);
+    assert!(result[1].calls[0].status);
+    assert_eq!(U256::from_be_slice(&result[1].calls[0].return_data), U256::from(256));
+
+    Ok(())
+}
