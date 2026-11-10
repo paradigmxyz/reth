@@ -321,6 +321,96 @@ async fn test_debug_trace_chain_subscription() -> eyre::Result<()> {
     Ok(())
 }
 
+#[cfg(feature = "js-tracer")]
+#[tokio::test]
+async fn test_debug_trace_js_tracer_timeout() -> eyre::Result<()> {
+    reth_tracing::init_test_tracing();
+
+    let (mut node, wallet) = EthereumNode::test_setup_for(EthereumHardfork::Cancun)
+        .with_rpc_modifier(|rpc| rpc.with_ws().with_ws_api(RpcModuleSelection::All))
+        .build_single()
+        .await?;
+    let provider = node.rpc_provider_with_wallet(wallet.signer(0));
+
+    let deploy = GasWaster::deploy_builder(&provider, U256::from(5));
+    let call = deploy.clone().into_transaction_request();
+    let first = *deploy.send().await?.tx_hash();
+    let _ = GasWaster::deploy_builder(&provider, U256::from(7)).send().await?;
+    node.advance_block().await?;
+
+    // Tracing either transaction with this tracer takes far longer than the timeout.
+    let tracer = "{ step: function() { for (var i = 0; i < 100000; i++) {} }, fault: function() {}, result: function() { return null; } }";
+    let opts = serde_json::json!({ "tracer": tracer, "timeout": "100ms" });
+    let timed_out = "execution aborted (timeout = 100ms)";
+    let client = node.inner.rpc_server_handle().ws_client().await.unwrap();
+    for (method, params) in [
+        ("debug_traceBlockByNumber", jsonrpsee::rpc_params![BlockNumberOrTag::Number(1), &opts]),
+        ("debug_traceTransaction", jsonrpsee::rpc_params![first, &opts]),
+        ("debug_traceCall", jsonrpsee::rpc_params![&call, BlockNumberOrTag::Number(1), &opts]),
+        (
+            "debug_traceCallMany",
+            jsonrpsee::rpc_params![
+                [alloy_rpc_types_eth::Bundle {
+                    transactions: vec![call.clone()],
+                    block_override: None
+                }],
+                alloy_rpc_types_eth::StateContext::default(),
+                &opts
+            ],
+        ),
+    ] {
+        let err = client.request::<serde_json::Value, _>(method, params).await.unwrap_err();
+        let jsonrpsee::core::ClientError::Call(err) = err else { panic!("{method}: {err}") };
+        assert_eq!(err.message(), timed_out, "{method}");
+    }
+
+    let invalid = client
+        .subscribe::<ChainBlockTraceResult, _>(
+            "debug_subscribe",
+            jsonrpsee::rpc_params![
+                "traceChain",
+                BlockNumberOrTag::Number(0),
+                BlockNumberOrTag::Number(1),
+                serde_json::json!({ "tracer": tracer, "timeout": "soon" })
+            ],
+            "debug_unsubscribe",
+        )
+        .await;
+    let Err(jsonrpsee::core::ClientError::Call(err)) = invalid else {
+        panic!("an invalid timeout must be rejected")
+    };
+    assert_eq!(err.message(), "invalid tracer timeout \"soon\": expected number at 0");
+
+    // `traceChain` reports the timed out transaction and skips the rest of its block.
+    let mut subscription: Subscription<ChainBlockTraceResult> = client
+        .subscribe(
+            "debug_subscribe",
+            jsonrpsee::rpc_params![
+                "traceChain",
+                BlockNumberOrTag::Number(0),
+                BlockNumberOrTag::Number(1),
+                &opts
+            ],
+            "debug_unsubscribe",
+        )
+        .await?;
+    let traced = subscription.next().await.unwrap()?;
+    assert_eq!(traced.block, U256::from(1));
+    assert_eq!(
+        traced.traces,
+        [
+            Some(alloy_rpc_types_trace::geth::TraceResult::Error {
+                error: timed_out.into(),
+                tx_hash: Some(first)
+            }),
+            None
+        ]
+    );
+    subscription.unsubscribe().await?;
+
+    Ok(())
+}
+
 #[tokio::test]
 async fn test_debug_trace_eip8037_gas() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
