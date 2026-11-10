@@ -5,6 +5,7 @@ use alloy_consensus::BlockHeader;
 use alloy_primitives::{map::B256Set, B256};
 use futures::FutureExt;
 use reth_consensus::Consensus;
+use reth_engine_primitives::MAX_BACKFILL_RUN_THRESHOLD;
 use reth_network_p2p::{
     full_block::{
         FetchFullBlockFuture, FetchFullBlockRangeFuture, FetchFullBlockRangeWithBalFuture,
@@ -124,7 +125,9 @@ where
 
     /// Processes a block range download request.
     fn download_block_range(&mut self, hash: B256, count: u64, access_lists: bool) {
-        if count == 1 {
+        // A range above the peer response limit can never complete, so fetch only the start block
+        // and let the tree derive the remaining gap from its header.
+        if count == 1 || count > MAX_BACKFILL_RUN_THRESHOLD {
             self.download_full_block(hash, access_lists);
         } else {
             if self.inflight_block_range_requests.iter().any(|request| {
@@ -513,6 +516,32 @@ mod tests {
         block_downloader.on_action(DownloadAction::Download(DownloadRequest::block_range(hash, 3)));
         block_downloader.on_action(DownloadAction::Download(request().with_access_lists(true)));
         assert_eq!(block_downloader.inflight_block_range_requests.len(), 3);
+    }
+
+    #[tokio::test]
+    async fn block_downloader_oversized_range_fetches_start_block() {
+        const TOTAL_BLOCKS: usize = 3;
+        let TestHarness { mut block_downloader, client } = TestHarness::new(TOTAL_BLOCKS);
+        let tip = client.highest_block().expect("there should be blocks here");
+
+        block_downloader.on_action(DownloadAction::Download(DownloadRequest::block_range(
+            tip.hash(),
+            MAX_BACKFILL_RUN_THRESHOLD + 1,
+        )));
+
+        assert!(block_downloader.inflight_block_range_requests.is_empty());
+        assert_eq!(block_downloader.inflight_full_block_requests.len(), 1);
+
+        let next_ready = poll_fn(|cx| block_downloader.poll(cx)).await;
+        assert_matches!(next_ready, DownloadOutcome::NewDownloadStarted { remaining_blocks, .. } => {
+            assert_eq!(remaining_blocks, 1);
+        });
+
+        let next_ready = poll_fn(|cx| block_downloader.poll(cx)).await;
+        assert_matches!(next_ready, DownloadOutcome::Blocks(blocks) => {
+            assert_eq!(blocks.len(), 1);
+            assert_eq!(blocks[0].hash(), tip.hash());
+        });
     }
 
     #[tokio::test]
