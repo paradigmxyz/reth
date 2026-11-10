@@ -675,11 +675,7 @@ impl BlockingWorkerPool {
         let queue = self.queue();
         queue.jobs.lock().push_back(Box::new(move || {
             if catch_unwind(AssertUnwindSafe(f)).is_err() {
-                tracing::error!(
-                    target: "tasks",
-                    pool = prefix,
-                    "Blocking worker pool job panicked"
-                );
+                tracing::error!(target: "tasks", pool = prefix, "Blocking worker pool job panicked");
             }
         }));
         queue.queued.notify_one();
