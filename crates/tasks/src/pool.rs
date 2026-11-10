@@ -667,40 +667,6 @@ impl BlockingWorkerPool {
         }
     }
 
-    /// Runs every job, on the calling thread and on threads of the pool, and returns once every
-    /// job returned.
-    ///
-    /// The calling thread takes jobs as well, so the jobs progress while every thread of the pool
-    /// is busy, and a thread of this pool may call this without waiting on itself. A panic in a
-    /// job is resumed on the calling thread after the other jobs returned.
-    pub fn run_all(&self, jobs: Vec<Box<dyn FnOnce() + Send>>) {
-        let helpers = jobs.len().saturating_sub(1).min(self.num_threads);
-        let shared = Arc::new(SharedJobs {
-            state: parking_lot::Mutex::new((jobs.len(), None)),
-            jobs: parking_lot::Mutex::new(jobs),
-            done: parking_lot::Condvar::new(),
-        });
-        if helpers > 0 {
-            let queue = self.queue();
-            queue.jobs.lock().extend((0..helpers).map(|_| {
-                let shared = Arc::clone(&shared);
-                Box::new(move || shared.run_until_empty()) as QueuedJob
-            }));
-            for _ in 0..helpers {
-                queue.queued.notify_one();
-            }
-        }
-        shared.run_until_empty();
-
-        let mut state = shared.state.lock();
-        while state.0 > 0 {
-            shared.done.wait(&mut state);
-        }
-        if let Some(payload) = state.1.take() {
-            std::panic::resume_unwind(payload);
-        }
-    }
-
     /// Runs `f` on a thread of the pool.
     ///
     /// `f` handles its own panics: a panic is logged and the thread keeps serving the queue.
@@ -800,33 +766,6 @@ impl BroadcastJob {
     }
 }
 
-/// Jobs handed to [`BlockingWorkerPool::run_all`], taken by the calling thread and the pool's
-/// threads until none are left.
-struct SharedJobs {
-    jobs: parking_lot::Mutex<Vec<QueuedJob>>,
-    /// Jobs that have not returned yet, and the first panic of a job.
-    state: parking_lot::Mutex<(usize, Option<Box<dyn Any + Send>>)>,
-    done: parking_lot::Condvar,
-}
-
-impl SharedJobs {
-    /// Runs jobs until none are left to take.
-    fn run_until_empty(&self) {
-        loop {
-            let Some(job) = self.jobs.lock().pop() else { return };
-            let result = catch_unwind(AssertUnwindSafe(job));
-            let mut state = self.state.lock();
-            state.0 -= 1;
-            if let Err(payload) = result {
-                state.1.get_or_insert(payload);
-            }
-            if state.0 == 0 {
-                self.done.notify_all();
-            }
-        }
-    }
-}
-
 impl std::fmt::Debug for BroadcastJob {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("BroadcastJob").finish_non_exhaustive()
@@ -901,62 +840,6 @@ mod tests {
             counted.fetch_add(1, Ordering::Relaxed);
         });
         assert_eq!(runs.load(Ordering::Relaxed), 2);
-    }
-
-    #[test]
-    fn blocking_worker_pool_run_all() {
-        let pool = BlockingWorkerPool::new(2, "test-blocking-run-all");
-        let sum = Arc::new(AtomicUsize::new(0));
-        let jobs = (1..=10)
-            .map(|i| {
-                let sum = Arc::clone(&sum);
-                Box::new(move || {
-                    sum.fetch_add(i, Ordering::Relaxed);
-                }) as Box<dyn FnOnce() + Send>
-            })
-            .collect();
-        pool.run_all(jobs);
-        assert_eq!(sum.load(Ordering::Relaxed), 55);
-    }
-
-    #[test]
-    fn blocking_worker_pool_run_all_on_its_own_thread() {
-        // The only thread of the pool runs the jobs it hands out itself.
-        let pool = Arc::new(BlockingWorkerPool::new(1, "test-blocking-run-all-nested"));
-        let (tx, rx) = std::sync::mpsc::channel();
-        let nested = Arc::clone(&pool);
-        pool.spawn(move || {
-            let runs = Arc::new(AtomicUsize::new(0));
-            let jobs = (0..4)
-                .map(|_| {
-                    let runs = Arc::clone(&runs);
-                    Box::new(move || {
-                        runs.fetch_add(1, Ordering::Relaxed);
-                    }) as Box<dyn FnOnce() + Send>
-                })
-                .collect();
-            nested.run_all(jobs);
-            tx.send(runs.load(Ordering::Relaxed)).unwrap();
-        });
-        assert_eq!(rx.recv_timeout(Duration::from_secs(5)), Ok(4));
-    }
-
-    #[test]
-    fn blocking_worker_pool_run_all_resumes_panics() {
-        let pool = BlockingWorkerPool::new(2, "test-blocking-run-all-panic");
-        let runs = Arc::new(AtomicUsize::new(0));
-        let mut jobs = (0..3)
-            .map(|_| {
-                let runs = Arc::clone(&runs);
-                Box::new(move || {
-                    runs.fetch_add(1, Ordering::Relaxed);
-                }) as Box<dyn FnOnce() + Send>
-            })
-            .collect::<Vec<_>>();
-        jobs.push(Box::new(|| panic!("boom")));
-        let panicked = catch_unwind(AssertUnwindSafe(|| pool.run_all(jobs)));
-        assert!(panicked.is_err());
-        assert_eq!(runs.load(Ordering::Relaxed), 3, "the other jobs still ran");
     }
 
     #[test]
