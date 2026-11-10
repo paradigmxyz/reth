@@ -313,10 +313,20 @@ where
         if !self.get_pool_data().contains(&tx_hash) {
             return None
         }
-        let mut listener = self.event_listener.write();
-        let events = listener.subscribe(tx_hash);
+        Some(self.subscribe_transaction_events(tx_hash))
+    }
+
+    /// Adds a listener for events of the given transaction without checking that this pool
+    /// holds it.
+    ///
+    /// For [`TransactionPool`](crate::TransactionPool) implementations that keep some
+    /// transactions outside this pool and report their events through
+    /// [`Self::notify_event_listeners`]. Only subscribe to transactions the caller holds: a
+    /// subscription is removed once its hash gets a final event.
+    pub fn subscribe_transaction_events(&self, tx_hash: TxHash) -> TransactionEvents {
+        let events = self.event_listener.write().subscribe(tx_hash);
         self.mark_event_listener_installed();
-        Some(events)
+        events
     }
 
     /// Adds a listener for all transaction events.
@@ -1731,12 +1741,15 @@ impl<T: PoolTransaction> OnNewCanonicalStateOutcome<T> {
 
 #[cfg(test)]
 mod tests {
+    use super::{AddedPendingTransaction, AddedTransaction};
     use crate::{
         blobstore::{BlobStore, InMemoryBlobStore, PooledBlobSidecar},
         identifier::SenderId,
-        test_utils::{testing_pool, MockTransaction, TestPool, TestPoolBuilder},
+        test_utils::{
+            testing_pool, MockTransaction, MockTransactionFactory, TestPool, TestPoolBuilder,
+        },
         validate::ValidTransaction,
-        BlockInfo, FullTransactionEvent, PoolConfig, SubPool, SubPoolLimit,
+        BlockInfo, FullTransactionEvent, PoolConfig, SubPool, SubPoolLimit, TransactionEvent,
         TransactionListenerKind, TransactionOrigin, TransactionPool, TransactionPoolExt,
         TransactionValidationOutcome, ValidPoolTransaction, U256,
     };
@@ -1824,6 +1837,23 @@ mod tests {
         assert!(txs.pending.is_empty());
         assert_eq!(nonces(&txs.queued), [0, 1, 9]);
         assert_eq!(nonces(&pool.get_transactions_by_sender(sender)), [0, 1, 9]);
+    }
+
+    #[test]
+    fn subscribe_transaction_events_without_pool_residency() {
+        let test_pool = testing_pool();
+        let pool = &test_pool.pool;
+        let tx = MockTransactionFactory::default().validated_arc(MockTransaction::eip1559());
+        assert!(pool.add_transaction_event_listener(*tx.hash()).is_none());
+
+        let mut events = pool.subscribe_transaction_events(*tx.hash());
+        pool.notify_event_listeners(&AddedTransaction::Pending(AddedPendingTransaction {
+            transaction: tx,
+            replaced: None,
+            promoted: vec![],
+            discarded: vec![],
+        }));
+        assert_eq!(events.next().now_or_never(), Some(Some(TransactionEvent::Pending)));
     }
 
     #[test]

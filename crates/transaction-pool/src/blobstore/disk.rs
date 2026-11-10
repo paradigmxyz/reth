@@ -9,9 +9,12 @@ use alloy_eips::{
     eip7840::BlobParams,
     merge::EPOCH_SLOTS,
 };
-use alloy_primitives::{map::B256Set, TxHash, B256};
+use alloy_primitives::{
+    map::{B256Set, FbBuildHasher},
+    TxHash, B256,
+};
 use parking_lot::{Mutex, RwLock};
-use schnellru::{ByLength, LruMap};
+use reth_lru::LruMap;
 use std::{fmt, fs, io, path::PathBuf, sync::Arc};
 use tracing::{debug, trace};
 
@@ -243,6 +246,7 @@ impl BlobStore for DiskFileBlobStore {
         let txs_to_delete = std::mem::take(&mut *self.inner.txs_to_delete.write());
         let mut stat = BlobStoreCleanupStat::default();
         let mut subsize = 0;
+        let mut removed = 0;
         debug!(target:"txpool::blob", num_blobs=%txs_to_delete.len(), "Removing blobs from disk");
         for tx in txs_to_delete {
             let path = self.inner.blob_disk_file(tx);
@@ -251,9 +255,10 @@ impl BlobStore for DiskFileBlobStore {
                 Ok(_) => {
                     stat.delete_succeed += 1;
                     subsize += filesize;
+                    removed += 1;
                 }
                 Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-                    // Already deleted by a concurrent cleanup task
+                    // Already deleted, and uncounted, by an earlier or concurrent cleanup
                     stat.delete_succeed += 1;
                 }
                 Err(e) => {
@@ -264,7 +269,7 @@ impl BlobStore for DiskFileBlobStore {
             };
         }
         self.inner.size_tracker.sub_size(subsize as usize);
-        self.inner.size_tracker.sub_len(stat.delete_succeed);
+        self.inner.size_tracker.sub_len(removed);
         stat
     }
 
@@ -454,7 +459,7 @@ impl BlobStore for DiskFileBlobStore {
 
 struct DiskFileBlobStoreInner {
     blob_dir: PathBuf,
-    blob_cache: Mutex<LruMap<TxHash, Arc<BlobTransactionSidecarVariant>, ByLength>>,
+    blob_cache: Mutex<LruMap<TxHash, Arc<BlobTransactionSidecarVariant>, FbBuildHasher<32>>>,
     size_tracker: BlobStoreSize,
     file_lock: RwLock<()>,
     txs_to_delete: RwLock<B256Set>,
@@ -462,7 +467,7 @@ struct DiskFileBlobStoreInner {
     ///
     /// Note: It is possible that one blob can appear in multiple transactions but this only tracks
     /// the most recent one.
-    versioned_hashes_to_txhash: Mutex<LruMap<B256, B256>>,
+    versioned_hashes_to_txhash: Mutex<LruMap<B256, B256, FbBuildHasher<32>>>,
 }
 
 impl DiskFileBlobStoreInner {
@@ -470,13 +475,14 @@ impl DiskFileBlobStoreInner {
     fn new(blob_dir: PathBuf, max_length: u32) -> Self {
         Self {
             blob_dir,
-            blob_cache: Mutex::new(LruMap::new(ByLength::new(max_length))),
+            blob_cache: Mutex::new(LruMap::with_hasher(max_length, Default::default())),
             size_tracker: Default::default(),
             file_lock: Default::default(),
             txs_to_delete: Default::default(),
-            versioned_hashes_to_txhash: Mutex::new(LruMap::new(ByLength::new(
+            versioned_hashes_to_txhash: Mutex::new(LruMap::with_hasher(
                 VERSIONED_HASH_TO_TX_HASH_CACHE_SIZE as u32,
-            ))),
+                Default::default(),
+            )),
         }
     }
 
@@ -920,6 +926,29 @@ mod tests {
 
         assert_eq!(store.data_size_hint(), Some(0));
         assert_eq!(store.inner.size_tracker.num_blobs.load(Ordering::Relaxed), 0);
+    }
+
+    #[test]
+    fn disk_queued_deletions_count_until_cleanup() {
+        let (store, _dir) = tmp_store();
+        assert_eq!(store.blobs_len(), 0);
+
+        let blobs = rng_blobs(2);
+        let hashes = blobs.iter().map(|(tx, _)| *tx).collect::<Vec<_>>();
+        store.insert_all(wrapped_blobs(blobs)).unwrap();
+
+        // queued deletions keep the blobs counted, so the store isn't reported empty before
+        // cleanup ran
+        store.delete_all(vec![hashes[0]]).unwrap();
+        assert_eq!(store.blobs_len(), 2);
+
+        store.cleanup();
+        assert_eq!(store.blobs_len(), 1);
+
+        // the removed blob is still cached, so it can be queued again
+        store.delete(hashes[0]).unwrap();
+        store.cleanup();
+        assert_eq!(store.blobs_len(), 1);
     }
 
     #[test]
