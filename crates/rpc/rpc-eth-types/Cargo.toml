@@ -61,6 +61,7 @@ serde = { workspace = true, features = ["derive"] }
 url = { workspace = true, features = ["serde"] }
 thiserror.workspace = true
 derive_more.workspace = true
+fixed-cache.workspace = true
 rand.workspace = true
 tracing.workspace = true
 itertools.workspace = true
