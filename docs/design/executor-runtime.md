@@ -37,8 +37,11 @@ The supported surface follows Rayon's explicit-pool API: detached jobs, `install
 operations. Pure compute iterators execute serially with `fuzz`. Channels support
 cloned senders and receivers, bounded/unbounded queues, zero-capacity rendezvous,
 blocking/nonblocking operations, receive timeouts, and disconnection. Receive
-selection prioritizes branches in their written order under `fuzz`; `reth_executor::channel::select!` and `select_biased!` support receive branches and an immediate default, not send branches or
-timed defaults.
+selection prioritizes branches in their written order under `fuzz`;
+`reth_executor::channel::select!` and `select_biased!` support one to eight receive
+branches and an optional immediate default, not send branches or timed defaults.
+Native `select_biased!` also prioritizes written order; native `select!` randomizes
+among ready branches.
 
 Use the selected `thread`, `sync`, and `time` modules for blocking coordination.
 Sleeps and receive deadlines suspend logical tasks rather than blocking the host
@@ -59,7 +62,10 @@ input, filesystem/database internals, resource metrics, external caches, and sig
 `reth-primitives-traits` crate are outside this scheduler. This is not whole-node deterministic replay. Repeatability
 requires identical workload inputs and waits on this crate's primitives inside one `Runtime::run`. Enabling `fuzz` does not create that entry point: with `fuzz`, these primitives
 used from Tokio/OS workers outside `Runtime::run` panic rather than silently falling back to
-native execution.
+native execution. Tokio blocking workers do not inherit a simulation: when entering
+from Tokio, create the primitives and run the entire synchronous workload inside
+one `Runtime::run` closure on that worker. Do not move simulated handles to other
+Tokio workers.
 
 ## Executable checks
 

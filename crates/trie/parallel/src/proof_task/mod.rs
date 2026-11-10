@@ -29,7 +29,7 @@ pub mod metrics;
 use crate::error::StateRootTaskError;
 use alloy_primitives::B256;
 use reth_executor::{
-    channel::{unbounded, Receiver as CrossbeamReceiver, Sender as CrossbeamSender},
+    channel::{unbounded, Receiver, Sender},
     time::Instant,
 };
 use reth_provider::{DatabaseProviderROFactory, ProviderError, ProviderResult, StateProofProvider};
@@ -104,13 +104,13 @@ impl AvailabilitySheet {
 pub struct ProofWorkerHandle {
     /// Sender shared with the workers, kept so that [`Self::results`] never disconnects while the
     /// handle is alive.
-    _result_tx: CrossbeamSender<ProofWorkerResult>,
+    _result_tx: Sender<ProofWorkerResult>,
     /// Results sent by both worker pools.
-    result_rx: CrossbeamReceiver<ProofWorkerResult>,
+    result_rx: Receiver<ProofWorkerResult>,
     /// Direct sender to storage worker pool
-    storage_work_tx: CrossbeamSender<StorageProofJob>,
+    storage_work_tx: Sender<StorageProofJob>,
     /// Direct sender to account worker pool
-    account_work_tx: CrossbeamSender<AccountProofJob>,
+    account_work_tx: Sender<AccountProofJob>,
     /// Per-worker availability flags for storage workers. Used to determine whether to chunk
     /// multiproofs.
     storage_availability: Arc<AvailabilitySheet>,
@@ -237,7 +237,7 @@ impl ProofWorkerHandle {
     ///
     /// Results arrive in completion order. The receiver never disconnects while the handle is
     /// alive.
-    pub const fn results(&self) -> &CrossbeamReceiver<ProofWorkerResult> {
+    pub const fn results(&self) -> &Receiver<ProofWorkerResult> {
         &self.result_rx
     }
 
@@ -431,9 +431,9 @@ struct ProofWorker<Factory, J> {
     /// Shared task context with database factory and prefix sets
     task_ctx: ProofTaskCtx<Factory>,
     /// Channel for receiving jobs
-    work_rx: CrossbeamReceiver<J>,
+    work_rx: Receiver<J>,
     /// Sender for job results and worker failures
-    result_tx: CrossbeamSender<ProofWorkerResult>,
+    result_tx: Sender<ProofWorkerResult>,
     /// Per-worker availability flags
     availability: Arc<AvailabilitySheet>,
     /// Metrics shared by all workers of the handle.

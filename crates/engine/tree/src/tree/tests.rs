@@ -40,7 +40,7 @@ use reth_primitives_traits::Block as _;
 use reth_provider::{
     test_utils::MockEthProvider, BalStoreHandle, HeaderProvider, InMemoryBalStore, RawBal,
 };
-use reth_tasks::spawn_os_thread;
+use reth_tasks::spawn_thread;
 use reth_trie_common::SortedTrieData;
 use std::{collections::BTreeMap, str::FromStr, sync::Arc, time::Duration};
 use tokio::sync::oneshot;
@@ -618,7 +618,7 @@ async fn test_tree_persist_blocks() {
         .get_executed_blocks(1..tree_config.persistence_threshold() + 2)
         .collect();
     let test_harness = TestHarness::new(chain_spec).with_blocks(blocks.clone());
-    spawn_os_thread("engine", || test_harness.tree.run());
+    spawn_thread("engine", || test_harness.tree.run());
 
     // send a message to the tree to enter the main loop.
     test_harness.to_tree_tx.send(FromEngine::DownloadedBlocks(vec![])).unwrap();
@@ -2873,7 +2873,7 @@ mod forkchoice_updated_tests {
         let action_rx = test_harness.action_rx;
 
         // Spawn tree in background thread
-        spawn_os_thread("engine", || test_harness.tree.run());
+        spawn_thread("engine", || test_harness.tree.run());
 
         // Send terminate request
         to_tree_tx
@@ -2920,7 +2920,7 @@ mod forkchoice_updated_tests {
         let (terminate_tx, terminate_rx) = oneshot::channel();
         let to_tree_tx = test_harness.to_tree_tx.clone();
         let action_rx = test_harness.action_rx;
-        spawn_os_thread("engine", || test_harness.tree.run());
+        spawn_thread("engine", || test_harness.tree.run());
 
         to_tree_tx
             .send(FromEngine::Event(FromOrchestrator::Terminate { tx: terminate_tx }))

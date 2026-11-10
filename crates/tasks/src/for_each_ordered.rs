@@ -19,8 +19,10 @@ pub trait ForEachOrdered: IndexedParallelIterator {
     ///
     /// The calling thread blocks (via a condvar, or a scheduled channel under `fuzz`)
     /// while waiting for the next item to become ready. It does **not** participate in rayon's
-    /// work-stealing while blocked. Callers should invoke this from a dedicated blocking thread
-    /// (e.g. via [`tokio::task::spawn_blocking`]) rather than from within the rayon thread pool.
+    /// work-stealing while blocked. With the native backend, invoke this from a dedicated blocking
+    /// thread (e.g. via [`tokio::task::spawn_blocking`]) rather than the rayon thread pool.
+    /// With `fuzz`, invoke this inside [`reth_executor::Runtime::run`] or one of its selected
+    /// threads, not directly from a Tokio blocking worker.
     fn for_each_ordered<F>(self, f: F)
     where
         Self::Item: Send,

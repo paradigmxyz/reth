@@ -2,7 +2,8 @@
 
 use crate::channel;
 use parking_lot::Mutex;
-use std::sync::{Arc, OnceLock};
+use reth_executor::sync::OnceLock;
+use std::sync::Arc;
 
 /// Handle to a value computed on a background thread.
 ///
@@ -23,32 +24,19 @@ struct LazyHandleInner<T> {
     rx: Mutex<Option<channel::Receiver<T>>>,
     /// Cached result after the first successful receive.
     value: OnceLock<T>,
-    /// Serializes first access without blocking the scheduler on `OnceLock`.
-    #[cfg(feature = "fuzz")]
-    resolve: reth_executor::sync::Mutex<()>,
 }
 
 impl<T: Send + 'static> LazyHandle<T> {
     /// Creates a new handle from a background task receiver.
     pub(crate) fn new(rx: channel::Receiver<T>) -> Self {
         Self {
-            inner: Arc::new(LazyHandleInner {
-                rx: Mutex::new(Some(rx)),
-                value: OnceLock::new(),
-                #[cfg(feature = "fuzz")]
-                resolve: reth_executor::sync::Mutex::new(()),
-            }),
+            inner: Arc::new(LazyHandleInner { rx: Mutex::new(Some(rx)), value: OnceLock::new() }),
         }
     }
 
     /// Creates a handle that is already resolved with the given value.
     pub fn ready(value: T) -> Self {
-        let inner = LazyHandleInner {
-            rx: Mutex::new(None),
-            value: OnceLock::from(value),
-            #[cfg(feature = "fuzz")]
-            resolve: reth_executor::sync::Mutex::new(()),
-        };
+        let inner = LazyHandleInner { rx: Mutex::new(None), value: OnceLock::from(value) };
         Self { inner: Arc::new(inner) }
     }
 
@@ -61,11 +49,6 @@ impl<T: Send + 'static> LazyHandle<T> {
     ///
     /// Panics if the background task was dropped without producing a value.
     pub fn get(&self) -> &T {
-        if let Some(value) = self.inner.value.get() {
-            return value;
-        }
-        #[cfg(feature = "fuzz")]
-        let _resolve = self.inner.resolve.lock().expect("lazy result resolution is not poisoned");
         self.inner.value.get_or_init(|| {
             let rx = self
                 .inner

@@ -17,7 +17,7 @@ use reth_provider::{
     StaticFileProviderFactory,
 };
 use reth_storage_api::{BlockNumReader, StateProvider, StateProviderFactory, StorageSettingsCache};
-use reth_tasks::spawn_scoped_os_thread;
+use reth_tasks::spawn_scoped_thread;
 use std::collections::BTreeSet;
 use tracing::info;
 
@@ -307,7 +307,7 @@ impl Command {
         thread::scope(|s| {
             let handles: Vec<_> = (0..num_threads)
                 .map(|thread_id| {
-                    spawn_scoped_os_thread(s, "db-state-worker", move || {
+                    spawn_scoped_thread(s, "db-state-worker", move || {
                         loop {
                             // Get next chunk to process
                             let chunk_idx = {

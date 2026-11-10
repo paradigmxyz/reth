@@ -1,4 +1,4 @@
-//! Wall-clock time natively and a monotonic virtual clock in simulation.
+//! Monotonic time using the native clock or a virtual clock in simulation.
 
 pub use std::time::Duration;
 #[cfg(not(feature = "fuzz"))]
@@ -24,11 +24,6 @@ impl Instant {
     /// Returns the elapsed duration, saturating at zero.
     pub const fn duration_since(&self, earlier: Self) -> Duration {
         self.0.saturating_sub(earlier.0)
-    }
-
-    /// Returns the elapsed duration if `earlier` does not follow this instant.
-    pub const fn checked_duration_since(&self, earlier: Self) -> Option<Duration> {
-        self.0.checked_sub(earlier.0)
     }
 
     /// Returns the elapsed duration, saturating at zero.

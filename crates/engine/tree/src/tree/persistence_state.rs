@@ -22,7 +22,7 @@
 
 use crate::persistence::PersistenceResult;
 use alloy_eips::BlockNumHash;
-use reth_executor::{channel::Receiver as CrossbeamReceiver, time::Instant};
+use reth_executor::{channel::Receiver, time::Instant};
 use tracing::trace;
 
 /// The state of the persistence task.
@@ -37,8 +37,7 @@ pub struct PersistenceState {
     pub(crate) last_state_trie_persisted_block: BlockNumHash,
     /// Receiver end of channel where the result of the persistence task will be
     /// sent when done. A None value means there's no persistence task in progress.
-    pub(crate) rx:
-        Option<(CrossbeamReceiver<PersistenceResult>, Instant, CurrentPersistenceAction)>,
+    pub(crate) rx: Option<(Receiver<PersistenceResult>, Instant, CurrentPersistenceAction)>,
 }
 
 impl PersistenceState {
@@ -49,21 +48,13 @@ impl PersistenceState {
     }
 
     /// Sets the state for a block removal operation.
-    pub(crate) fn start_remove(
-        &mut self,
-        new_tip_num: u64,
-        rx: CrossbeamReceiver<PersistenceResult>,
-    ) {
+    pub(crate) fn start_remove(&mut self, new_tip_num: u64, rx: Receiver<PersistenceResult>) {
         self.rx =
             Some((rx, Instant::now(), CurrentPersistenceAction::RemovingBlocks { new_tip_num }));
     }
 
     /// Sets the state for a block save operation.
-    pub(crate) fn start_save(
-        &mut self,
-        highest: BlockNumHash,
-        rx: CrossbeamReceiver<PersistenceResult>,
-    ) {
+    pub(crate) fn start_save(&mut self, highest: BlockNumHash, rx: Receiver<PersistenceResult>) {
         self.rx = Some((rx, Instant::now(), CurrentPersistenceAction::SavingBlocks { highest }));
     }
 

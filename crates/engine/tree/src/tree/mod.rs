@@ -40,7 +40,7 @@ use reth_provider::{
 };
 use reth_stages_api::ControlFlow;
 use reth_storage_overlay::OverlayManager;
-use reth_tasks::{spawn_os_thread, utils::increase_thread_priority};
+use reth_tasks::{spawn_thread, utils::increase_thread_priority};
 use reth_trie::{HashedPostState, KeccakKeyHasher, SortedTrieData};
 use state::TreeState;
 use std::{
@@ -470,7 +470,7 @@ where
             runtime,
         );
         let incoming = task.incoming_tx.clone();
-        spawn_os_thread("engine", || {
+        spawn_thread("engine", || {
             increase_thread_priority();
             task.run()
         });

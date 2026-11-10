@@ -11,7 +11,6 @@ pub use rayon::slice::ParallelSliceMut;
 mod deterministic {
     use std::{
         collections::{BTreeMap, BTreeSet, HashMap, HashSet},
-        hash::{BuildHasher, Hash},
         iter::{Chain, Enumerate, Filter, FilterMap, OnceWith, Skip, Take, Zip},
     };
 
@@ -135,37 +134,25 @@ mod deterministic {
         /// Collects all results in deterministic iterator order.
         fn from_par_iter<T: IntoParallelIterator<Item = TItem>>(iter: T) -> Self;
     }
-    impl<TItem: Send> FromParallelIterator<TItem> for Vec<TItem> {
-        fn from_par_iter<T: IntoParallelIterator<Item = TItem>>(iter: T) -> Self {
-            iter.into_par_iter().into_serial().collect()
-        }
+    macro_rules! from_parallel {
+        ([$($generics:tt)*] $item:ty => $collection:ty) => {
+            impl<$($generics)*> FromParallelIterator<$item> for $collection
+            where
+                Self: FromIterator<$item>,
+                $item: Send,
+            {
+                fn from_par_iter<T: IntoParallelIterator<Item = $item>>(iter: T) -> Self {
+                    iter.into_par_iter().into_serial().collect()
+                }
+            }
+        };
     }
-    impl<TItem: Send + Ord> FromParallelIterator<TItem> for BTreeSet<TItem> {
-        fn from_par_iter<T: IntoParallelIterator<Item = TItem>>(iter: T) -> Self {
-            iter.into_par_iter().into_serial().collect()
-        }
-    }
-    impl<TKey: Send + Ord, TValue: Send> FromParallelIterator<(TKey, TValue)>
-        for BTreeMap<TKey, TValue>
-    {
-        fn from_par_iter<T: IntoParallelIterator<Item = (TKey, TValue)>>(iter: T) -> Self {
-            iter.into_par_iter().into_serial().collect()
-        }
-    }
-    impl<TItem: Send + Eq + Hash, THasher: BuildHasher + Default> FromParallelIterator<TItem>
-        for HashSet<TItem, THasher>
-    {
-        fn from_par_iter<T: IntoParallelIterator<Item = TItem>>(iter: T) -> Self {
-            iter.into_par_iter().into_serial().collect()
-        }
-    }
-    impl<TKey: Send + Eq + Hash, TValue: Send, THasher: BuildHasher + Default>
-        FromParallelIterator<(TKey, TValue)> for HashMap<TKey, TValue, THasher>
-    {
-        fn from_par_iter<T: IntoParallelIterator<Item = (TKey, TValue)>>(iter: T) -> Self {
-            iter.into_par_iter().into_serial().collect()
-        }
-    }
+    from_parallel!([TItem] TItem => Vec<TItem>);
+    from_parallel!([TItem] TItem => BTreeSet<TItem>);
+    from_parallel!([TKey, TValue] (TKey, TValue) => BTreeMap<TKey, TValue>);
+    from_parallel!([TItem, THasher] TItem => HashSet<TItem, THasher>);
+    from_parallel!([TKey, TValue, THasher] (TKey, TValue) => HashMap<TKey, TValue, THasher>);
+
     impl<TItem: Send, TError: Send, TCollection: FromParallelIterator<TItem>>
         FromParallelIterator<Result<TItem, TError>> for Result<TCollection, TError>
     {

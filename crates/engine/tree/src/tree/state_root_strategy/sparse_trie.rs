@@ -14,7 +14,7 @@ use alloy_primitives::{
 };
 use alloy_rlp::{Decodable, Encodable};
 use metrics::{Gauge, Histogram};
-use reth_executor::channel::{Receiver as CrossbeamReceiver, Sender as CrossbeamSender};
+use reth_executor::channel::{Receiver, Sender};
 use reth_metrics::Metrics;
 use reth_primitives_traits::Account;
 use reth_tasks::Runtime;
@@ -119,11 +119,11 @@ use tracing::{debug, debug_span, error, instrument, trace_span};
 /// produce [`StateRootTaskError::Stalled`].
 pub(super) struct SparseTrieCacheTask<A = ArenaParallelSparseTrie, S = ArenaParallelSparseTrie> {
     /// Receives updates from execution and prewarming.
-    updates: CrossbeamReceiver<SparseTrieTaskMessage>,
+    updates: Receiver<SparseTrieTaskMessage>,
     /// Fires (by disconnecting) when the consumer drops its cancel guard, meaning nobody is
     /// waiting for the result anymore. This is the teardown path for a task whose pending
     /// work never drains, since the updates channel closing is a normal end of stream.
-    cancel_rx: CrossbeamReceiver<()>,
+    cancel_rx: Receiver<()>,
     /// Sender half for the channel to send final hashed state to.
     final_hashed_state_tx: Option<reth_executor::channel::mpsc::Sender<Arc<HashedPostState>>>,
     /// `SparseStateTrie` used for computing the state root.
@@ -197,9 +197,9 @@ pub(super) struct SparseTrieCacheTask<A = ArenaParallelSparseTrie, S = ArenaPara
     /// Number of storage tries currently owned by a job running off this thread.
     storage_in_flight: usize,
     /// Sender handed to storage jobs. Kept alive by the task so the receiver never disconnects.
-    storage_done_tx: CrossbeamSender<StorageJobMessage<S>>,
+    storage_done_tx: Sender<StorageJobMessage<S>>,
     /// Receives storage tries coming back from jobs spawned by this task.
-    storage_done_rx: CrossbeamReceiver<StorageJobMessage<S>>,
+    storage_done_rx: Receiver<StorageJobMessage<S>>,
     /// Number of pending execution/prewarming updates received but not yet passed to
     /// `update_leaves`.
     pending_updates: usize,
@@ -225,8 +225,8 @@ where
     #[expect(clippy::too_many_arguments)]
     pub(super) fn new_with_trie(
         executor: &Runtime,
-        updates: CrossbeamReceiver<StateRootMessage>,
-        cancel_rx: CrossbeamReceiver<()>,
+        updates: Receiver<StateRootMessage>,
+        cancel_rx: Receiver<()>,
         final_hashed_state_tx: reth_executor::channel::mpsc::Sender<Arc<HashedPostState>>,
         proof_worker_handle: ProofWorkerHandle,
         metrics: SparseTrieTaskMetrics,
@@ -283,8 +283,8 @@ where
     /// Runs the hashing task that drains updates from the channel and converts them to
     /// `HashedPostState` in parallel.
     fn run_hashing_task(
-        updates: CrossbeamReceiver<StateRootMessage>,
-        hashed_state_tx: CrossbeamSender<SparseTrieTaskMessage>,
+        updates: Receiver<StateRootMessage>,
+        hashed_state_tx: Sender<SparseTrieTaskMessage>,
         metrics: SparseTrieTaskMetrics,
     ) {
         let mut total_idle_time = std::time::Duration::ZERO;
@@ -1671,7 +1671,7 @@ mod tests {
     fn test_task(
         runtime: &Runtime,
         trie: SparseStateTrie,
-    ) -> (SparseTrieCacheTask, CrossbeamSender<StateRootMessage>, CrossbeamSender<()>) {
+    ) -> (SparseTrieCacheTask, Sender<StateRootMessage>, Sender<()>) {
         let provider_factory = create_test_provider_factory();
         let anchor_hash = init_genesis(&provider_factory).expect("failed to initialize genesis");
         let state_provider_factory = OverlayStateProviderFactory::new(

@@ -17,7 +17,7 @@ use reth_evm::{
     WithTxEnv,
 };
 use reth_executor::{
-    channel::{mpsc, Receiver as CrossbeamReceiver, Sender as CrossbeamSender},
+    channel::{mpsc, Receiver, Sender},
     rayon::prelude::*,
     sync::OnceLock,
     time::Instant,
@@ -78,8 +78,8 @@ type IteratorExecuteTxReceiver<Evm, I> = ExecuteTxReceiver<
 
 type RecoveredTx<TxEnv, Recovered> = WithTxEnv<TxEnv, Recovered>;
 type IndexedTxResult<Tx, Err> = (usize, Result<Tx, Err>);
-type IndexedTxReceiver<Tx, Err> = CrossbeamReceiver<IndexedTxResult<Tx, Err>>;
-type IndexedTxSender<Tx, Err> = CrossbeamSender<IndexedTxResult<Tx, Err>>;
+type IndexedTxReceiver<Tx, Err> = Receiver<IndexedTxResult<Tx, Err>>;
+type IndexedTxSender<Tx, Err> = Sender<IndexedTxResult<Tx, Err>>;
 type PrewarmTxReceiver<TxEnv, Recovered> = mpsc::Receiver<(usize, RecoveredTx<TxEnv, Recovered>)>;
 type ExecuteTxReceiver<TxEnv, Recovered, Err> =
     IndexedTxReceiver<RecoveredTx<TxEnv, Recovered>, Err>;

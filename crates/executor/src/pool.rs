@@ -16,7 +16,7 @@ mod deterministic {
         fmt,
         panic::{catch_unwind, resume_unwind, AssertUnwindSafe},
         sync::{
-            atomic::{AtomicBool, AtomicUsize, Ordering},
+            atomic::{AtomicUsize, Ordering},
             Arc, Mutex, OnceLock,
         },
     };
@@ -30,8 +30,6 @@ mod deterministic {
 
     type Panic = Box<dyn Any + Send + 'static>;
     type PanicHandler = Arc<dyn Fn(Panic) + Send + Sync>;
-    type StartHandler = Arc<dyn Fn(usize) + Send + Sync>;
-    type ThreadName = Box<dyn FnMut(usize) -> String + Send>;
     type Job<'env> = Box<dyn FnOnce(&Scope<'env>) + Send + 'env>;
 
     /// A compute pool whose jobs are managed by Shuttle's scheduler.
@@ -39,10 +37,8 @@ mod deterministic {
     pub struct ThreadPool {
         id: usize,
         names: Arc<Vec<Option<String>>>,
-        started: Arc<Vec<AtomicBool>>,
         slots: Arc<Mutex<Slots>>,
         panic_handler: Option<PanicHandler>,
-        start_handler: Option<StartHandler>,
     }
 
     impl ThreadPool {
@@ -139,21 +135,10 @@ mod deterministic {
             self.id
         }
 
-        fn start_worker(&self, index: usize) {
-            if !self.started[index].swap(true, Ordering::Relaxed) &&
-                let Some(start) = &self.start_handler
-            {
-                start(index);
-            }
-        }
-
         fn execute<T>(&self, index: Option<usize>, f: impl FnOnce() -> T) -> T {
             let index = self.acquire(index);
             let _lease = Lease { pool: self.clone(), index };
-            with_context(WorkerContext { pool: self.clone(), index, owns_slot: true }, || {
-                self.start_worker(index);
-                f()
-            })
+            with_context(WorkerContext { pool: self.clone(), index, owns_slot: true }, f)
         }
 
         fn acquire(&self, index: Option<usize>) -> usize {
@@ -200,9 +185,8 @@ mod deterministic {
     #[derive(Default)]
     pub struct ThreadPoolBuilder {
         num_threads: usize,
-        thread_name: Option<ThreadName>,
+        thread_name: Option<Box<dyn FnMut(usize) -> String + Send>>,
         panic_handler: Option<PanicHandler>,
-        start_handler: Option<StartHandler>,
     }
 
     impl ThreadPoolBuilder {
@@ -225,11 +209,6 @@ mod deterministic {
             self.panic_handler = Some(Arc::new(handler));
             self
         }
-        /// Sets a callback run once, when each logical worker first starts a job.
-        pub fn start_handler(mut self, handler: impl Fn(usize) + Send + Sync + 'static) -> Self {
-            self.start_handler = Some(Arc::new(handler));
-            self
-        }
         /// Configures the process-wide logical pool, returning an error if it is already
         /// configured.
         pub fn build_global(self) -> Result<(), ThreadPoolBuildError> {
@@ -245,15 +224,11 @@ mod deterministic {
             Ok(ThreadPool {
                 id: NEXT_POOL.fetch_add(1, Ordering::Relaxed),
                 names: Arc::new(names),
-                started: Arc::new(
-                    (0..self.num_threads.max(1)).map(|_| AtomicBool::new(false)).collect(),
-                ),
                 slots: Arc::new(Mutex::new(Slots {
                     occupied: vec![false; self.num_threads.max(1)],
                     waiters: Vec::new(),
                 })),
                 panic_handler: self.panic_handler,
-                start_handler: self.start_handler,
             })
         }
     }
@@ -451,11 +426,11 @@ mod deterministic {
         }
     }
 
-    /// Runs a scope, waiting for all descendant jobs before returning.
+    /// Runs the callback on the current or global pool and waits for all descendants.
     pub fn scope<'env, T: Send>(f: impl FnOnce(&Scope<'env>) -> T + Send) -> T {
-        in_place_scope(f)
+        current_pool().unwrap_or_else(global_pool).scope(f)
     }
-    /// Returns this managed job's logical pool size, or one outside a pool.
+    /// Returns the current pool size, or the configured global pool size outside a pool.
     pub fn current_num_threads() -> usize {
         current_pool().unwrap_or_else(global_pool).current_num_threads()
     }

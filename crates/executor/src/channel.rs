@@ -260,7 +260,12 @@ mod simulated {
             }
         }
 
-        /// Receives until the selected clock reaches `timeout`.
+        /// Receives a value, waiting at most `timeout` from the current virtual time.
+        ///
+        /// Available values are returned before checking disconnection or the deadline.
+        /// Returns [`RecvTimeoutError::Disconnected`] when the queue is empty and all senders
+        /// are gone, or [`RecvTimeoutError::Timeout`] when an empty connected channel reaches
+        /// the deadline.
         pub fn recv_timeout(&self, timeout: Duration) -> Result<T, RecvTimeoutError> {
             let deadline = Instant::now() + timeout;
             let timer = crate::deterministic::Timer::new(deadline);
@@ -445,8 +450,9 @@ mod simulated {
 
 /// Selects a ready receive operation in declaration order in simulation.
 ///
-/// The simulation deliberately uses a fixed priority rather than randomized
-/// native selection. Receive operations and immediate default branches are supported.
+/// Like the native counterpart, this prioritizes earlier ready branches. Simulation supports
+/// one to eight receive branches and an optional immediate default, not send branches or timed
+/// defaults.
 #[cfg(feature = "fuzz")]
 #[macro_export]
 macro_rules! select_biased {
@@ -461,6 +467,9 @@ macro_rules! select_biased {
 }
 
 /// Selects a receive operation; simulation uses fixed declaration-order priority.
+///
+/// Unlike native selection, simulation does not randomize ready branches. Its supported syntax
+/// and eight-receive-branch limit are the same as [`select_biased!`].
 #[cfg(feature = "fuzz")]
 #[macro_export]
 macro_rules! select { ($($tokens:tt)*) => { $crate::select_biased! { $($tokens)* } }; }
@@ -490,6 +499,7 @@ macro_rules! __select_recv {
             })*
             $crate::__select_recv!(@wait listeners; [$($default)?]);
         };
+        drop($receivers);
         match selected {
             $(Some($index) => {
                 let $binding = results.$index.take().expect("selected receive has a result");

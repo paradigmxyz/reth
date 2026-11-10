@@ -3,10 +3,7 @@ use alloy_eips::BlockNumHash;
 use reth_errors::ProviderError;
 use reth_ethereum_primitives::EthPrimitives;
 use reth_executor::{
-    channel::{
-        mpsc::{Receiver, SendError, Sender},
-        Sender as CrossbeamSender,
-    },
+    channel::{mpsc, Sender},
     thread::JoinHandle,
     time::Instant,
 };
@@ -17,7 +14,7 @@ use reth_provider::{
 };
 use reth_prune::{PrunerError, PrunerWithFactory};
 use reth_stages_api::{MetricEvent, MetricEventsSender};
-use reth_tasks::spawn_os_thread;
+use reth_tasks::spawn_thread;
 use std::{sync::Arc, time::Duration};
 use thiserror::Error;
 use tracing::{debug, error, instrument, warn};
@@ -48,7 +45,7 @@ where
     /// The provider factory to use
     provider: ProviderFactory<N>,
     /// Incoming requests
-    incoming: Receiver<PersistenceAction<N::Primitives>>,
+    incoming: mpsc::Receiver<PersistenceAction<N::Primitives>>,
     /// The pruner
     pruner: PrunerWithFactory<ProviderFactory<N>>,
     /// metrics
@@ -70,7 +67,7 @@ where
     /// Create a new persistence service
     pub fn new(
         provider: ProviderFactory<N>,
-        incoming: Receiver<PersistenceAction<N::Primitives>>,
+        incoming: mpsc::Receiver<PersistenceAction<N::Primitives>>,
         pruner: PrunerWithFactory<ProviderFactory<N>>,
         sync_metrics_tx: MetricEventsSender,
     ) -> Self {
@@ -265,13 +262,13 @@ pub enum PersistenceError {
 #[derive(Debug)]
 pub enum PersistenceAction<N: NodePrimitives = EthPrimitives> {
     /// Advances the block-data and state/trie persistence frontiers described by the input.
-    SaveBlocks(SaveBlocksInput<N>, CrossbeamSender<PersistenceResult>),
+    SaveBlocks(SaveBlocksInput<N>, Sender<PersistenceResult>),
 
     /// Removes block data above the given block number from the database.
     ///
     /// This will first update checkpoints from the database, then remove actual block data from
     /// static files.
-    RemoveBlocksAbove(u64, CrossbeamSender<PersistenceResult>),
+    RemoveBlocksAbove(u64, Sender<PersistenceResult>),
 
     /// Update the persisted finalized block on disk
     SaveFinalizedBlock(u64),
@@ -284,18 +281,18 @@ pub enum PersistenceAction<N: NodePrimitives = EthPrimitives> {
 #[derive(Debug, Clone)]
 pub struct PersistenceHandle<N: NodePrimitives = EthPrimitives> {
     /// The channel used to communicate with the persistence service
-    sender: Sender<PersistenceAction<N>>,
+    sender: mpsc::Sender<PersistenceAction<N>>,
     /// Guard that joins the service thread when all handles are dropped.
     /// Uses `Arc` so the handle remains `Clone`.
     _service_guard: Arc<ServiceGuard>,
 }
 
 impl<T: NodePrimitives> PersistenceHandle<T> {
-    /// Create a new [`PersistenceHandle`] from a [`Sender<PersistenceAction>`].
+    /// Create a new [`PersistenceHandle`] from a [`mpsc::Sender<PersistenceAction>`].
     ///
     /// This is intended for testing purposes where you want to mock the persistence service.
     /// For production use, prefer [`spawn_service`](Self::spawn_service).
-    pub fn new(sender: Sender<PersistenceAction<T>>) -> Self {
+    pub fn new(sender: mpsc::Sender<PersistenceAction<T>>) -> Self {
         Self { sender, _service_guard: Arc::new(ServiceGuard(None)) }
     }
 
@@ -318,7 +315,7 @@ impl<T: NodePrimitives> PersistenceHandle<T> {
         // spawn the persistence service
         let db_service =
             PersistenceService::new(provider_factory, db_service_rx, pruner, sync_metrics_tx);
-        let join_handle = spawn_os_thread("persistence", || {
+        let join_handle = spawn_thread("persistence", || {
             if let Err(err) = db_service.run() {
                 error!(target: "engine::persistence", ?err, "Persistence service failed");
             }
@@ -335,7 +332,7 @@ impl<T: NodePrimitives> PersistenceHandle<T> {
     pub fn send_action(
         &self,
         action: PersistenceAction<T>,
-    ) -> Result<(), SendError<PersistenceAction<T>>> {
+    ) -> Result<(), mpsc::SendError<PersistenceAction<T>>> {
         self.sender.send(action)
     }
 
@@ -347,8 +344,8 @@ impl<T: NodePrimitives> PersistenceHandle<T> {
     pub fn save_blocks(
         &self,
         input: SaveBlocksInput<T>,
-        tx: CrossbeamSender<PersistenceResult>,
-    ) -> Result<(), SendError<PersistenceAction<T>>> {
+        tx: Sender<PersistenceResult>,
+    ) -> Result<(), mpsc::SendError<PersistenceAction<T>>> {
         self.send_action(PersistenceAction::SaveBlocks(input, tx))
     }
 
@@ -359,7 +356,7 @@ impl<T: NodePrimitives> PersistenceHandle<T> {
     pub fn save_finalized_block_number(
         &self,
         finalized_block: u64,
-    ) -> Result<(), SendError<PersistenceAction<T>>> {
+    ) -> Result<(), mpsc::SendError<PersistenceAction<T>>> {
         self.send_action(PersistenceAction::SaveFinalizedBlock(finalized_block))
     }
 
@@ -370,7 +367,7 @@ impl<T: NodePrimitives> PersistenceHandle<T> {
     pub fn save_safe_block_number(
         &self,
         safe_block: u64,
-    ) -> Result<(), SendError<PersistenceAction<T>>> {
+    ) -> Result<(), mpsc::SendError<PersistenceAction<T>>> {
         self.send_action(PersistenceAction::SaveSafeBlock(safe_block))
     }
 
@@ -382,8 +379,8 @@ impl<T: NodePrimitives> PersistenceHandle<T> {
     pub fn remove_blocks_above(
         &self,
         block_num: u64,
-        tx: CrossbeamSender<PersistenceResult>,
-    ) -> Result<(), SendError<PersistenceAction<T>>> {
+        tx: Sender<PersistenceResult>,
+    ) -> Result<(), mpsc::SendError<PersistenceAction<T>>> {
         self.send_action(PersistenceAction::RemoveBlocksAbove(block_num, tx))
     }
 }

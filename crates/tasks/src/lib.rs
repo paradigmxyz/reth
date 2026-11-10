@@ -64,33 +64,38 @@ pub use runtime::{Runtime, RuntimeBuildError, RuntimeBuilder, RuntimeConfig, Tok
 /// A [`TaskExecutor`] is now an alias for [`Runtime`].
 pub type TaskExecutor = Runtime;
 
-/// Spawns an OS thread with the current tokio runtime context propagated.
+/// Spawns a thread on the selected blocking backend.
 ///
-/// This function captures the current tokio runtime handle (if available) and enters it
-/// in the newly spawned thread. This ensures that code running in the spawned thread can
-/// use [`Handle::current()`], [`Handle::spawn_blocking()`], and other tokio utilities that
-/// require a runtime context.
+/// Natively, this captures the current Tokio handle, if available, and enters it on the new
+/// OS thread so the workload can use [`Handle::current()`] and [`Handle::spawn_blocking()`].
+/// Under `fuzz`, logical threads share the calling OS thread's Tokio context. If the workload
+/// needs Tokio, enter the desired [`Handle`] around the entire [`executor::Runtime::run`] call,
+/// not inside individual logical threads: native context guards cannot span logical task switches.
 #[track_caller]
-pub fn spawn_os_thread<F, T>(name: &str, f: F) -> thread::JoinHandle<T>
+pub fn spawn_thread<F, T>(name: &str, f: F) -> thread::JoinHandle<T>
 where
     F: FnOnce() -> T + Send + 'static,
     T: Send + 'static,
 {
+    #[cfg(not(feature = "fuzz"))]
     let handle = Handle::try_current().ok();
     thread::Builder::new()
         .name(name.to_string())
         .spawn(move || {
+            #[cfg(not(feature = "fuzz"))]
             let _guard = handle.as_ref().map(Handle::enter);
             f()
         })
         .unwrap_or_else(|e| panic!("failed to spawn thread {name:?}: {e}"))
 }
 
-/// Spawns a scoped OS thread with the current tokio runtime context propagated.
+/// Spawns a scoped thread on the selected blocking backend.
 ///
-/// This is the scoped thread version of [`spawn_os_thread`], for use with [`thread::scope`].
+/// This is the scoped version of [`spawn_thread`], for use with [`thread::scope`], with the same
+/// Tokio context rules: native OS threads enter the captured handle, while `fuzz` logical threads
+/// share the context entered around the entire [`executor::Runtime::run`] call.
 #[track_caller]
-pub fn spawn_scoped_os_thread<'scope, 'env, F, T>(
+pub fn spawn_scoped_thread<'scope, 'env, F, T>(
     scope: &'scope thread::Scope<'scope, 'env>,
     name: &str,
     f: F,
@@ -99,10 +104,12 @@ where
     F: FnOnce() -> T + Send + 'scope,
     T: Send + 'scope,
 {
+    #[cfg(not(feature = "fuzz"))]
     let handle = Handle::try_current().ok();
     thread::Builder::new()
         .name(name.to_string())
         .spawn_scoped(scope, move || {
+            #[cfg(not(feature = "fuzz"))]
             let _guard = handle.as_ref().map(Handle::enter);
             f()
         })

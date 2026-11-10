@@ -59,8 +59,10 @@ impl<R: Receipt> ReceiptRootTaskHandle<R> {
     /// and builds the trie incrementally. When all receipts have been received
     /// (channel closed), it sends the result through the completion channel.
     ///
-    /// This is designed to be called inside a blocking task (e.g., via
-    /// `executor.spawn_blocking(move || handle.run(receipts_len))`).
+    /// With the native backend, run this inside a blocking task, for example via
+    /// `executor.spawn_blocking(move || handle.run(receipts_len))`. With `fuzz`, create the
+    /// channels and run this computation in the same [`reth_executor::Runtime::run`] execution,
+    /// using its selected threads or pools rather than Tokio blocking tasks.
     ///
     /// # Arguments
     ///

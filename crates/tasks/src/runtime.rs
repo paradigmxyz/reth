@@ -11,7 +11,6 @@ use crate::pool::{build_pool_with_panic_handler, BlockingTaskGuard, BlockingTask
 use crate::{
     metrics::{IncCounterOnDrop, TaskExecutorMetrics},
     shutdown::{GracefulShutdown, GracefulShutdownGuard, Shutdown},
-    thread,
     time::{Duration, Instant},
     worker_map::WorkerMap,
     PanickedTaskError, TaskEvent, TaskManager,
@@ -596,11 +595,12 @@ impl Runtime {
         self.spawn_blocking_named("drop", move || drop(value));
     }
 
-    /// Spawns a blocking closure on a dedicated, named OS thread.
+    /// Spawns a blocking closure on a dedicated, named selected-backend thread.
     ///
     /// Unlike [`spawn_blocking`](Self::spawn_blocking) which uses tokio's blocking thread pool,
-    /// this reuses the same OS thread for all tasks submitted under the same `name`. The thread
-    /// is created lazily on first use and its OS thread name is set to `name`.
+    /// this reuses the same worker for all tasks submitted under the same `name`. The worker
+    /// is created lazily on first use and its name is set to `name`. It is an OS thread natively
+    /// and a logical thread under `fuzz`.
     ///
     /// This is useful for tasks that benefit from running on a stable thread, e.g. for
     /// thread-local state reuse or to avoid thread creation overhead on hot paths.
@@ -615,7 +615,7 @@ impl Runtime {
         crate::LazyHandle::new(self.0.worker_map.spawn_on(name, func))
     }
 
-    /// Attempts to spawn a blocking closure on a dedicated, named OS thread.
+    /// Attempts to spawn a blocking closure on a dedicated, named selected-backend thread.
     ///
     /// Returns `None` if the named worker already has a task running or queued, allowing the caller
     /// to fall back to another executor instead of serializing behind the named worker.
@@ -631,8 +631,8 @@ impl Runtime {
         self.0.worker_map.try_spawn_on(name, func).map(crate::LazyHandle::new)
     }
 
-    /// Spawns a blocking closure on a named OS thread if it is idle, otherwise falls back to
-    /// tokio's unnamed blocking thread pool.
+    /// Spawns a blocking closure on a named selected-backend thread if idle, otherwise falls back
+    /// to tokio's unnamed blocking thread pool.
     ///
     /// Returns `true` if the closure was spawned on the named thread.
     pub fn spawn_blocking_named_or_tokio<F>(&self, name: &'static str, func: F) -> bool
@@ -726,16 +726,17 @@ impl Runtime {
         self.spawn_critical_as(name, fut.boxed(), TaskKind::Blocking)
     }
 
-    /// This spawns a critical task onto a dedicated named OS thread.
+    /// Spawns a critical task on a dedicated named OS thread.
     /// The given future resolves as soon as the [`Shutdown`] signal is received.
     ///
-    /// If this task panics, the [`TaskManager`] is notified.
+    /// If this task panics, the [`TaskManager`] is notified. This Tokio-backed API always uses
+    /// a native OS thread, including under `fuzz`; its future is outside synchronous simulation.
     pub fn spawn_critical_os_thread<F>(
         &self,
         thread_name: &'static str,
         task_name: &'static str,
         fut: F,
-    ) -> thread::JoinHandle<()>
+    ) -> std::thread::JoinHandle<()>
     where
         F: Future<Output = ()> + Send + 'static,
     {
@@ -747,7 +748,7 @@ impl Runtime {
         thread_name: &'static str,
         task_name: &'static str,
         fut: BoxFuture<'static, ()>,
-    ) -> thread::JoinHandle<()> {
+    ) -> std::thread::JoinHandle<()> {
         self.0.metrics.inc_critical_tasks();
         let handle = self.0.handle.clone();
         let panicked_tasks_tx = self.0.task_events_tx.clone();
@@ -770,7 +771,7 @@ impl Runtime {
             let _ = select(on_shutdown, task).await;
         };
 
-        thread::Builder::new()
+        std::thread::Builder::new()
             .name(thread_name.to_string())
             .spawn(move || {
                 let _guard = handle.enter();
@@ -1119,6 +1120,7 @@ impl RuntimeBuilder {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::thread;
 
     #[test]
     fn test_runtime_config_default() {

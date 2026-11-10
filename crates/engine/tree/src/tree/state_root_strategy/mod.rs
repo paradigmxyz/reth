@@ -64,7 +64,7 @@ use reth_evm::ConfigureEvm;
 use reth_executor::{
     channel::{
         mpsc::{self, RecvTimeoutError},
-        Receiver as CrossbeamReceiver,
+        Receiver,
     },
     time::Instant,
 };
@@ -616,8 +616,8 @@ impl DefaultStateRootStrategy {
         multiproof_provider_factory: OverlayStateProviderFactory<F, N>,
         state_root_tx: mpsc::Sender<Result<StateRootComputeOutcome, StateRootTaskError>>,
         hashed_state_tx: mpsc::Sender<Arc<HashedPostState>>,
-        from_multi_proof: CrossbeamReceiver<StateRootMessage>,
-        cancel_rx: CrossbeamReceiver<()>,
+        from_multi_proof: Receiver<StateRootMessage>,
+        cancel_rx: Receiver<()>,
         options: SparseTrieTaskOptions<N>,
     ) where
         N: NodePrimitives,

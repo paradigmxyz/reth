@@ -9,6 +9,7 @@ pub mod channel;
 pub mod iter;
 pub mod pool;
 pub mod runtime;
+pub mod sync;
 pub mod thread;
 pub mod time;
 
@@ -17,23 +18,7 @@ mod deterministic;
 
 pub use pool::{ThreadPool, ThreadPoolBuilder};
 
-/// Compute pool for blocking jobs.
-pub type Pool = ThreadPool;
-/// Builder for a compute pool.
-pub type PoolBuilder = ThreadPoolBuilder;
 pub use runtime::Runtime;
-
-/// Synchronization primitives belonging to the selected backend.
-pub mod sync {
-    #[cfg(feature = "fuzz")]
-    pub use crate::deterministic::{parking_lot, Condvar, OnceLock, WaitTimeoutResult};
-    #[cfg(not(feature = "fuzz"))]
-    pub use parking_lot;
-    #[cfg(feature = "fuzz")]
-    pub use shuttle::sync::*;
-    #[cfg(not(feature = "fuzz"))]
-    pub use std::sync::*;
-}
 
 /// Rayon-compatible compute operations selected with the executor backend.
 pub mod rayon {
