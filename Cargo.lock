@@ -10886,6 +10886,7 @@ dependencies = [
  "reth-db-api",
  "reth-errors",
  "reth-ethereum-primitives",
+ "reth-lru",
  "reth-metrics",
  "reth-primitives-traits",
  "reth-provider",

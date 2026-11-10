@@ -10,7 +10,8 @@
 use crate::{database_state_frontiers, OverlayManager, OverlayStateProvider};
 use alloy_eips::BlockNumHash;
 use alloy_primitives::{map::B256Map, BlockNumber, B256};
-use parking_lot::RwLock;
+use parking_lot::{Mutex, RwLock};
+use reth_lru::LruMap;
 use reth_metrics::{
     metrics::{Counter, Gauge},
     Metrics,
@@ -162,12 +163,21 @@ where
     Ok(TrieUpdatesSorted::new(account_nodes, storage_tries))
 }
 
+/// Maximum number of range reverts retained for anchors that untrusted peers choose.
+///
+/// A syncing peer sends many requests against one root, so a few entries cover the roots being
+/// served and the `Finish` block they were last rebuilt for.
+const MAX_BOUNDED_RANGES: u32 = 4;
+
 /// Thread-safe changeset cache.
 ///
 /// The `RwLock` enables concurrent reads while ensuring exclusive access for writes.
 #[derive(Debug)]
 pub(crate) struct ChangesetCache {
     inner: RwLock<ChangesetCacheInner>,
+    /// Reverts of the ranges untrusted peers chose most recently, kept apart from `inner`, which
+    /// only evicts by block number.
+    bounded_ranges: Mutex<LruMap<ChangesetRangeKey, Arc<TrieUpdatesSorted>>>,
 }
 
 impl Default for ChangesetCache {
@@ -182,7 +192,10 @@ impl ChangesetCache {
     /// The cache has no capacity limit and relies on explicit eviction
     /// via the `evict()` method to manage memory usage.
     pub(crate) fn new() -> Self {
-        Self { inner: RwLock::new(ChangesetCacheInner::new()) }
+        Self {
+            inner: RwLock::new(ChangesetCacheInner::new()),
+            bounded_ranges: Mutex::new(LruMap::new(MAX_BOUNDED_RANGES)),
+        }
     }
 
     /// Evicts changesets for blocks below the given block number.
@@ -247,15 +260,16 @@ impl ChangesetCache {
     ///
     /// If any block is missing from cache, this falls back to one aggregate database computation
     /// for the whole range. The aggregate result restores the trie to the state before the range
-    /// and is inserted into the range cache when `write_reverts_to_cache` is set.
+    /// and is inserted into the range cache when `write_reverts_to_cache` is set, or into the
+    /// bounded ranges otherwise.
     ///
     /// # Arguments
     ///
     /// * `provider` - Database provider for DB access and block lookups
     /// * `range` - Block range to accumulate reverts for (inclusive)
-    /// * `write_reverts_to_cache` - Whether to retain the accumulated reverts. Callers serving
-    ///   ranges an untrusted peer chooses pass `false`, since entries stay until their start block
-    ///   is evicted.
+    /// * `write_reverts_to_cache` - Whether to retain the accumulated reverts in the range cache.
+    ///   Callers serving ranges an untrusted peer chooses pass `false`, since entries there stay
+    ///   until their start block is evicted. Their reverts are retained in a bounded set instead.
     ///
     /// # Returns
     ///
@@ -340,6 +354,11 @@ impl ChangesetCache {
 
             return Ok(accumulated_reverts)
         }
+        if !write_reverts_to_cache &&
+            let Some(accumulated_reverts) = self.bounded_ranges.lock().get(&range_key)
+        {
+            return Ok(Arc::clone(accumulated_reverts))
+        }
 
         let mut cached_reverts =
             Vec::with_capacity(end_block.saturating_sub(start_block).saturating_add(1) as usize);
@@ -396,6 +415,8 @@ impl ChangesetCache {
 
             if write_reverts_to_cache {
                 self.inner.write().insert(range_key, Arc::clone(&accumulated_reverts));
+            } else {
+                self.bounded_ranges.lock().insert(range_key, Arc::clone(&accumulated_reverts));
             }
             return Ok(accumulated_reverts)
         }
@@ -454,6 +475,8 @@ impl ChangesetCache {
 
         if write_reverts_to_cache {
             self.inner.write().insert(range_key, Arc::clone(&accumulated_reverts));
+        } else {
+            self.bounded_ranges.lock().insert(range_key, Arc::clone(&accumulated_reverts));
         }
 
         Ok(accumulated_reverts)
@@ -863,8 +886,8 @@ mod tests {
         assert_eq!(overlay.input().nodes, block4);
         assert_eq!(manager.compute_block_trie_updates(&*provider, 4).unwrap(), *block4);
 
-        // With only per-block entries left, the reverts are merged again on every build, and a
-        // builder that opted out keeps the merged range out of the cache.
+        // With only per-block entries left, the reverts are merged again, and a builder for an
+        // untrusted anchor keeps the merged range in the bounded set, out of the cache.
         manager.evict_cached_changesets(11);
         for number in 5..=10 {
             insert_test_changesets(
@@ -878,7 +901,7 @@ mod tests {
         let builder = manager.overlay_builder(blocks[4].recovered_block().hash());
         builder
             .clone()
-            .without_trie_revert_caching()
+            .with_bounded_trie_revert_cache()
             .build_state_trie_overlay_at_frontiers(&*provider, frontier, finish, true)
             .unwrap();
         assert_eq!(cached(), 6);
@@ -1272,6 +1295,20 @@ mod tests {
             )
             .unwrap();
         assert_eq!(*uncached, actual);
+        assert!(cache.inner.read().entries.is_empty());
+
+        // The range is rebuilt once and then served from the bounded set.
+        let reused = cache
+            .get_or_compute_range(
+                &overlay_manager,
+                &*provider,
+                1..=3,
+                partial_state_trie,
+                finish,
+                false,
+            )
+            .unwrap();
+        assert!(Arc::ptr_eq(&uncached, &reused));
         assert!(cache.inner.read().entries.is_empty());
 
         let from_cache_api = cache

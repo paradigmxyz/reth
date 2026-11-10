@@ -197,7 +197,8 @@ pub struct OverlayBuilder<N: NodePrimitives = EthPrimitives> {
     no_reverts: bool,
     /// Cache behavior for the overlays this builder resolves.
     overlay_cache_config: OverlayCacheConfig,
-    /// Whether the trie reverts this builder accumulates are written to the changeset cache.
+    /// Whether the trie reverts this builder accumulates are written to the changeset cache, or
+    /// to its bounded set of ranges otherwise.
     write_reverts_to_cache: bool,
 }
 
@@ -235,12 +236,13 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
         self
     }
 
-    /// Stops this builder from retaining the trie reverts it accumulates in the changeset cache.
+    /// Retains the trie reverts this builder accumulates in a small bounded set instead of the
+    /// changeset cache.
     ///
-    /// Use it for anchors an untrusted peer chooses: cached reverts are keyed by the anchor and
-    /// stay until their start block is evicted, so they would otherwise pile up in the cache the
-    /// engine shares.
-    pub const fn without_trie_revert_caching(mut self) -> Self {
+    /// Use it for anchors an untrusted peer chooses: reverts in the changeset cache are keyed by
+    /// the anchor and stay until their start block is evicted, so they would otherwise pile up in
+    /// the cache the engine shares.
+    pub const fn with_bounded_trie_revert_cache(mut self) -> Self {
         self.write_reverts_to_cache = false;
         self
     }
