@@ -1306,9 +1306,9 @@ mod tests {
         let file_path = tempfile::NamedTempFile::new().unwrap();
         let path = file_path.path();
 
-        // Crash after creating the data file and a partial offsets file, before the config.
+        // Crash after creating the data and offsets files, before writing the offsets header.
         std::fs::write(path, b"junk").unwrap();
-        std::fs::write(path.with_extension(OFFSETS_FILE_EXTENSION), [8]).unwrap();
+        std::fs::write(path.with_extension(OFFSETS_FILE_EXTENSION), b"").unwrap();
         assert!(!path.with_extension(CONFIG_FILE_EXTENSION).exists());
 
         let mut writer = NippyJarWriter::new(NippyJar::new_without_header(1, path)).unwrap();

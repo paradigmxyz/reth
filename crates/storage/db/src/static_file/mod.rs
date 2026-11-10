@@ -5,6 +5,7 @@ use reth_static_file_types::{
     SegmentHeader, SegmentRangeInclusive, StaticFileMap, StaticFileSegment,
 };
 use std::path::Path;
+use tracing::warn;
 
 mod cursor;
 pub use cursor::StaticFileCursor;
@@ -33,12 +34,20 @@ pub fn iter_static_files(path: &Path) -> Result<SortedStaticFiles, NippyJarError
     for entry in entries {
         if entry.metadata().is_ok_and(|metadata| metadata.is_file()) &&
             let Some((segment, _)) =
-                StaticFileSegment::parse_filename(&entry.file_name().to_string_lossy()) &&
+                StaticFileSegment::parse_filename(&entry.file_name().to_string_lossy())
+        {
+            let data_path = entry.path();
             // The config is written last on creation; without it the jar was never initialized
             // and the writer recreates it.
-            entry.path().with_extension(CONFIG_FILE_EXTENSION).exists()
-        {
-            let jar = NippyJar::<SegmentHeader>::load(&entry.path())?;
+            if !data_path.with_extension(CONFIG_FILE_EXTENSION).exists() {
+                warn!(
+                    target: "reth::static_file",
+                    path = ?data_path,
+                    "Skipping uninitialized static file"
+                );
+                continue
+            }
+            let jar = NippyJar::<SegmentHeader>::load(&data_path)?;
 
             if let Some(block_range) = jar.user_header().block_range() {
                 static_files
@@ -55,4 +64,19 @@ pub fn iter_static_files(path: &Path) -> Result<SortedStaticFiles, NippyJarError
     }
 
     Ok(static_files)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn skips_static_file_without_config() {
+        let dir = tempfile::tempdir().unwrap();
+        let segment = StaticFileSegment::Headers;
+        let path = dir.path().join(segment.filename(&SegmentRangeInclusive::new(0, 499_999)));
+        std::fs::write(&path, b"").unwrap();
+
+        assert!(iter_static_files(dir.path()).unwrap().is_empty());
+    }
 }
