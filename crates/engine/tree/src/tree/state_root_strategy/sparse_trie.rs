@@ -195,8 +195,6 @@ pub(super) struct SparseTrieCacheTask<A = ArenaParallelSparseTrie, S = ArenaPara
     storage_to_drop: B256Map<StorageTrieState<S>>,
     /// Number of storage tries currently owned by a job running off this thread.
     storage_in_flight: usize,
-    /// Runtime whose storage trie pool runs the storage jobs.
-    runtime: Runtime,
     /// Sender handed to storage jobs. Kept alive by the task so the receiver never disconnects.
     storage_done_tx: CrossbeamSender<StorageJobMessage<S>>,
     /// Receives storage tries coming back from jobs spawned by this task.
@@ -272,7 +270,6 @@ where
             storage: Default::default(),
             storage_to_drop: Default::default(),
             storage_in_flight: 0,
-            runtime: executor.clone(),
             storage_done_tx,
             storage_done_rx,
             pending_updates: Default::default(),
@@ -817,9 +814,9 @@ where
     /// leaf updates that were not tried against the current state of the trie yet.
     ///
     /// Each pass owns its address' payload for its whole duration, so the passes are independent
-    /// of each other and of this thread. Most of them are handed to the storage trie pool; the ones
-    /// that would cost more in handoff than in work stay here, see
-    /// [`StorageTrieWork::is_target_only`] and [`INLINE_STORAGE_WORK_UNITS`].
+    /// of each other and of this thread. Most of them are handed to the rayon pool; the ones that
+    /// would cost more in handoff than in work stay here, see [`StorageTrieWork::is_target_only`]
+    /// and [`INLINE_STORAGE_WORK_UNITS`].
     #[instrument(
         level = "trace",
         target = "engine::tree::payload_processor::sparse_trie",
@@ -930,7 +927,7 @@ where
         Ok(updates_len_after < updates_len_before)
     }
 
-    /// Hands checked out storage tries to the runtime's storage trie pool in chunks.
+    /// Hands checked out storage tries to the rayon pool in chunks.
     ///
     /// Chunking amortizes the spawn cost over a batch, while each trie is still sent back on its
     /// own so promotion does not wait for the rest of the chunk.
@@ -940,15 +937,14 @@ where
         }
 
         let parent_span = debug_span!("spawn_storage_jobs", n = jobs.len());
-        let pool = self.runtime.storage_trie_pool();
-        let chunk_len = storage_job_chunk_len(jobs.len(), pool.num_threads());
+        let chunk_len = storage_job_chunk_len(jobs.len());
         let new_epoch = self.new_epoch;
         let retain_updates = self.trie.retains_updates();
         while !jobs.is_empty() {
             let chunk = jobs.split_off(jobs.len().saturating_sub(chunk_len));
             let storage_done_tx = self.storage_done_tx.clone();
             let parent_span = parent_span.clone();
-            pool.spawn(move || {
+            rayon::spawn(move || {
                 let _enter = debug_span!(
                     target: "engine::tree::payload_processor::sparse_trie",
                     parent: &parent_span,
@@ -1435,9 +1431,9 @@ impl<S: SparseTrie + Default> StorageTrieJob<S> {
 enum StorageJobMessage<S> {
     /// The job finished and hands its payload back.
     Done(StorageTrieJobDone<S>),
-    /// The job panicked and its trie is lost. A panic escaping a spawned job would only be logged
-    /// by the pool; it is caught and resumed on the task thread instead, where it fails the state
-    /// root calculation like an inline panic.
+    /// The job panicked and its trie is lost. The global rayon pool has no panic handler, so a
+    /// panic escaping a spawned job would abort the process; it is caught and resumed on the task
+    /// thread instead, where it fails the state root calculation like an inline panic.
     Panicked {
         /// Hashed address of the payload the job owned.
         address: B256,
@@ -1498,15 +1494,15 @@ fn merge_leaf_updates(queued: &mut B256Map<LeafUpdate>, updates: B256Map<LeafUpd
 
 /// Number of storage tries handed to a single spawned job.
 ///
-/// Chunking keeps a block with thousands of tiny tries from paying a spawn per trie, while
+/// Chunking keeps a block with thousands of tiny tries from paying a rayon spawn per trie, while
 /// staying small enough that one slow trie only delays the few behind it in its own chunk. Tries
 /// are still handed back one at a time, so a chunk does not delay promotion of the ones it
 /// already finished.
-fn storage_job_chunk_len(tries: usize, threads: usize) -> usize {
+fn storage_job_chunk_len(tries: usize) -> usize {
     /// Upper bound on how many tries a single slow one can hold up.
     const MAX_CHUNK_LEN: usize = 32;
 
-    tries.div_ceil(threads.max(1) * 4).clamp(1, MAX_CHUNK_LEN)
+    tries.div_ceil(rayon::current_num_threads().max(1) * 4).clamp(1, MAX_CHUNK_LEN)
 }
 
 /// Metrics recorded by sparse trie and hashing tasks.

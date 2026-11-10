@@ -347,9 +347,6 @@ struct RuntimeInner {
     /// State trie overlay worker pool.
     #[cfg(feature = "rayon")]
     state_trie_overlay_worker_pool: Arc<WorkerPool>,
-    /// Storage trie pool (sparse storage trie passes of the state root task).
-    #[cfg(feature = "rayon")]
-    storage_trie_pool: BlockingWorkerPool,
     /// Named single-thread worker map. Each unique name gets a dedicated OS thread
     /// that is reused across all tasks submitted under that name.
     worker_map: WorkerMap,
@@ -475,12 +472,6 @@ impl Runtime {
     #[cfg(feature = "rayon")]
     pub fn state_trie_overlay_worker_pool(&self) -> Arc<WorkerPool> {
         Arc::clone(&self.0.state_trie_overlay_worker_pool)
-    }
-
-    /// Get the storage trie pool, which runs the state root task's storage trie passes.
-    #[cfg(feature = "rayon")]
-    pub fn storage_trie_pool(&self) -> &BlockingWorkerPool {
-        &self.0.storage_trie_pool
     }
 }
 
@@ -1005,7 +996,6 @@ impl RuntimeBuilder {
             prewarming_pool,
             bal_streaming_pool,
             state_trie_overlay_worker_pool,
-            storage_trie_pool,
         ) = {
             let default_threads = config.rayon.default_thread_count();
             let rpc_threads = config.rayon.default_rpc_thread_count();
@@ -1069,12 +1059,6 @@ impl RuntimeBuilder {
             let state_trie_overlay_worker_pool =
                 Arc::new(WorkerPool::new(state_trie_overlay_worker_threads, "state-ovly"));
 
-            // Storage trie passes run beside execution, below its priority like the global rayon
-            // pool, on threads that sleep between passes instead of looking for work.
-            let storage_trie_pool =
-                BlockingWorkerPool::new(cpu_pool.current_num_threads(), "strg-trie")
-                    .with_thread_start(crate::utils::lower_background_worker_priority);
-
             debug!(
                 default_threads,
                 rpc_threads,
@@ -1098,7 +1082,6 @@ impl RuntimeBuilder {
                 prewarming_pool,
                 bal_streaming_pool,
                 state_trie_overlay_worker_pool,
-                storage_trie_pool,
             )
         };
 
@@ -1143,8 +1126,6 @@ impl RuntimeBuilder {
             bal_streaming_pool,
             #[cfg(feature = "rayon")]
             state_trie_overlay_worker_pool,
-            #[cfg(feature = "rayon")]
-            storage_trie_pool,
             worker_map: WorkerMap::new(),
             task_manager_handle: Mutex::new(Some(task_manager_handle)),
         };
