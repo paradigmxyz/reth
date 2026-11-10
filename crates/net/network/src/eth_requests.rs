@@ -20,7 +20,6 @@ use reth_eth_wire::{
     GetBlockBodies, GetBlockHeaders, GetCells, GetNodeData, GetReceipts, GetReceipts70,
     HeadersDirection, NetworkPrimitives, NodeData, Receipts, Receipts69, Receipts70,
 };
-use reth_network_api::test_utils::PeersHandle;
 use reth_network_p2p::{
     error::{RequestError, RequestResult},
     snap::client::SnapResponse,
@@ -105,10 +104,6 @@ pub struct EthRequestHandler<C, N: NetworkPrimitives = EthNetworkPrimitives> {
     client: C,
     /// Blob store used for serving blob cell requests.
     blob_store: Box<dyn BlobStore>,
-    /// Used for reporting peers.
-    // TODO use to report spammers
-    #[expect(dead_code)]
-    peers: PeersHandle,
     /// Incoming request from the [`NetworkManager`](crate::NetworkManager).
     incoming_requests: ReceiverStream<IncomingEthRequest<N>>,
     /// Metrics for the eth request handler.
@@ -118,11 +113,10 @@ pub struct EthRequestHandler<C, N: NetworkPrimitives = EthNetworkPrimitives> {
 // === impl EthRequestHandler ===
 impl<C, N: NetworkPrimitives> EthRequestHandler<C, N> {
     /// Create a new instance
-    pub fn new(client: C, peers: PeersHandle, incoming: Receiver<IncomingEthRequest<N>>) -> Self {
+    pub fn new(client: C, incoming: Receiver<IncomingEthRequest<N>>) -> Self {
         Self {
             client,
             blob_store: Box::<NoopBlobStore>::default(),
-            peers,
             incoming_requests: ReceiverStream::new(incoming),
             metrics: Default::default(),
         }
@@ -886,7 +880,6 @@ mod tests {
     use alloy_rlp::{Decodable, Encodable};
     use reth_eth_wire::{message::RequestPair, EthMessage, EthStreamInner, EthVersion};
     use reth_ethereum_primitives::Receipt;
-    use reth_network_api::test_utils::PeersHandle;
     use reth_primitives_traits::Account;
     use reth_provider::test_utils::{ExtendedAccount, MockEthProvider};
     use reth_storage_api::noop::NoopProvider;
@@ -1016,19 +1009,14 @@ mod tests {
 
     #[tokio::test]
     async fn get_cells_request_limits_blob_store_lookups() {
-        let (peers_tx, _) = mpsc::unbounded_channel();
         let (_incoming_tx, incoming_rx) = mpsc::channel(1);
         let get_cells_calls = Arc::new(AtomicUsize::new(0));
         let blob_store = CountingBlobStore {
             get_cells_calls: Arc::clone(&get_cells_calls),
             ..Default::default()
         };
-        let handler = EthRequestHandler::<NoopProvider>::new(
-            NoopProvider::default(),
-            PeersHandle::new(peers_tx),
-            incoming_rx,
-        )
-        .with_blob_store(Box::new(blob_store));
+        let handler = EthRequestHandler::<NoopProvider>::new(NoopProvider::default(), incoming_rx)
+            .with_blob_store(Box::new(blob_store));
         let (response, rx) = oneshot::channel();
         let request =
             GetCells { hashes: vec![B256::ZERO; MAX_CELLS_SERVE + 1], cell_mask: B128::default() };
@@ -1048,19 +1036,14 @@ mod tests {
     #[test_case(127)]
     #[tokio::test]
     async fn get_cells_request_uses_little_endian_wire_mask(index: u32) {
-        let (peers_tx, _) = mpsc::unbounded_channel();
         let (_incoming_tx, incoming_rx) = mpsc::channel(1);
         let numeric_mask = 1u128 << index;
         let blob_store = CountingBlobStore {
             expected_cell_mask: Some(BlobCellMask::from_bits(numeric_mask)),
             ..Default::default()
         };
-        let handler = EthRequestHandler::<NoopProvider>::new(
-            NoopProvider::default(),
-            PeersHandle::new(peers_tx),
-            incoming_rx,
-        )
-        .with_blob_store(Box::new(blob_store));
+        let handler = EthRequestHandler::<NoopProvider>::new(NoopProvider::default(), incoming_rx)
+            .with_blob_store(Box::new(blob_store));
         let wire_mask = B128::from(numeric_mask.to_le_bytes());
         let request = GetCells { hashes: vec![B256::ZERO], cell_mask: wire_mask };
         let mut encoded = Vec::new();
@@ -1081,13 +1064,8 @@ mod tests {
 
     #[tokio::test]
     async fn get_node_data_responds_with_empty_payload() {
-        let (peers_tx, _) = mpsc::unbounded_channel();
         let (_incoming_tx, incoming_rx) = mpsc::channel(1);
-        let handler = EthRequestHandler::<NoopProvider>::new(
-            NoopProvider::default(),
-            PeersHandle::new(peers_tx),
-            incoming_rx,
-        );
+        let handler = EthRequestHandler::<NoopProvider>::new(NoopProvider::default(), incoming_rx);
         let (response, rx) = oneshot::channel();
 
         handler.on_node_data_request(PeerId::default(), GetNodeData(vec![B256::ZERO]), response);
@@ -1100,9 +1078,8 @@ mod tests {
     fn snap_handler(
         provider: MockEthProvider,
     ) -> EthRequestHandler<MockEthProvider, EthNetworkPrimitives> {
-        let (peers_tx, _) = mpsc::unbounded_channel();
         let (_incoming_tx, incoming_rx) = mpsc::channel(1);
-        EthRequestHandler::new(provider, PeersHandle::new(peers_tx), incoming_rx)
+        EthRequestHandler::new(provider, incoming_rx)
     }
 
     #[test_case(
