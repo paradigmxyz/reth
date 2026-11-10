@@ -325,6 +325,10 @@ mod tests {
                 &DebugValue::Counter(1)
             );
             assert_eq!(counter(ecadd, "sync.caching.precompile_errors"), &DebugValue::Counter(1));
+            assert!(matches!(
+                counter(identity, "sync.caching.precompile_cache_size"),
+                DebugValue::Gauge(_)
+            ));
 
             // An EVM created after the cache was filled is still uncached unless wrapped.
             assert!(call(None, identity, warm_input));
