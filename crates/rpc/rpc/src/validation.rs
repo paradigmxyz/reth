@@ -115,7 +115,18 @@ where
     }
 
     /// Updates the cached state for the given head hash.
+    ///
+    /// The update is dropped if the given reads hold more than [`MAX_CACHED_READS`] entries.
     async fn update_cached_reads(&self, head: B256, cached_state: CachedReads) {
+        // Each request starts from a clone of the cache for its head, so dropping oversized
+        // updates also keeps the cache for that head near the limit.
+        let entries = cached_state.accounts.len() +
+            cached_state.accounts.values().map(|account| account.storage.len()).sum::<usize>() +
+            cached_state.contracts.len();
+        if entries > MAX_CACHED_READS {
+            return
+        }
+
         let mut cache = self.inner.cached_state.write().await;
         if cache.0 == head {
             cache.1.extend(cached_state);
@@ -681,6 +692,9 @@ pub struct ValidationApiInner<Provider, E: ConfigureEvm, T: PayloadTypes> {
     metrics: ValidationMetrics,
 }
 
+/// The maximum number of cached accounts, storage slots and contracts kept for one head.
+const MAX_CACHED_READS: usize = 500_000;
+
 /// Ensures that the raw execution payload fields match the corresponding [`BidTrace`] fields.
 fn validate_message_against_payload(
     message: &BidTrace,
@@ -839,8 +853,8 @@ pub(crate) struct ValidationMetrics {
 #[cfg(test)]
 mod tests {
     use super::{
-        hash_disallow_list, validate_message_against_payload, AddressSet, ValidationApi,
-        ValidationApiConfig, ValidationApiError,
+        hash_disallow_list, validate_message_against_payload, AddressSet, CachedReads,
+        ValidationApi, ValidationApiConfig, ValidationApiError, MAX_CACHED_READS,
     };
     use alloy_consensus::{BlockHeader, Header};
     use alloy_primitives::{Address, B256, U256};
@@ -1203,5 +1217,26 @@ mod tests {
             },
         );
         state
+    }
+
+    #[tokio::test]
+    async fn test_oversized_cached_reads_are_not_kept() {
+        let api = test_validation_api(MockEthProvider::default());
+        let head = B256::repeat_byte(0x01);
+        let address = Address::repeat_byte(0x02);
+
+        let mut reads = CachedReads::default();
+        reads.insert_account(
+            address,
+            AccountInfo::default(),
+            (0..MAX_CACHED_READS).map(|slot| (U256::from(slot), U256::ZERO)).collect(),
+        );
+        api.update_cached_reads(head, reads).await;
+        assert!(api.cached_reads(head).await.accounts.is_empty());
+
+        let mut reads = CachedReads::default();
+        reads.insert_account(address, AccountInfo::default(), Default::default());
+        api.update_cached_reads(head, reads).await;
+        assert!(api.cached_reads(head).await.accounts.contains_key(&address));
     }
 }
