@@ -221,8 +221,12 @@ impl<N: ProviderNodeTypes> BlockchainProvider<N> {
             }
         };
 
+        // Peers choose the root, so its reverts stay out of the cache the engine shares.
         Ok(Some(Box::new(HistoricalStateRangeView {
-            provider: OverlayStateProvider::new(provider, overlay_builder),
+            provider: OverlayStateProvider::new(
+                provider,
+                overlay_builder.without_trie_revert_caching(),
+            ),
         })))
     }
 }
