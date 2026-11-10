@@ -12325,7 +12325,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "description": "Attempts abandoned and started over, and downloader responses rejected by verification.",
+          "description": "Snap requests received, and state range requests answered empty because the serving queue was full, the peer already held a place in it, or the request waited too long.",
           "fieldConfig": {
             "defaults": {
               "color": {

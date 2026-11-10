@@ -38,15 +38,15 @@ use std::{
     future::Future,
     pin::Pin,
     task::{Context, Poll},
-    time::{Duration, Instant},
+    time::Duration,
 };
 use tokio::{
     sync::{mpsc::Receiver, oneshot},
     task::JoinHandle,
-    time::{sleep_until, Sleep},
+    time::{sleep_until, Instant, Sleep},
 };
 use tokio_stream::wrappers::ReceiverStream;
-use tracing::{debug, Span};
+use tracing::{debug, error, Span};
 
 // Limits: <https://github.com/ethereum/go-ethereum/blob/b0d44338bbcefee044f1f635a84487cbbd8f0538/eth/protocols/eth/handler.go#L34-L56>
 
@@ -783,7 +783,7 @@ impl StateRangeRequests {
             let _guard = span.enter();
             let empty = request.empty_response();
             let result = request.serve(&client).unwrap_or_else(|error| {
-                tracing::debug!(target: "net::snap", %error, "failed to serve state range");
+                debug!(target: "net::snap", %error, "failed to serve state range");
                 empty
             });
             let _ = response.send(Ok(result));
@@ -827,7 +827,7 @@ impl StateRangeRequests {
                 Poll::Pending => true,
                 Poll::Ready(result) => {
                     if let Err(error) = result {
-                        tracing::error!(target: "net::snap", %error, "state range task failed");
+                        error!(target: "net::snap", %error, "state range task failed");
                     }
                     false
                 }
@@ -857,7 +857,7 @@ impl StateRangeRequests {
             self.queue_timeout = None;
             return false
         };
-        let deadline = (oldest.received + STATE_RANGE_REQUEST_QUEUE_TIMEOUT).into();
+        let deadline = oldest.received + STATE_RANGE_REQUEST_QUEUE_TIMEOUT;
         let timeout = self.queue_timeout.get_or_insert_with(|| Box::pin(sleep_until(deadline)));
         timeout.as_mut().reset(deadline);
         timeout.as_mut().poll(cx).is_ready()
@@ -1580,13 +1580,9 @@ mod tests {
     #[tokio::test]
     async fn incoming_state_range_request_sees_slots_freed_since_the_last_poll() {
         let provider = MockEthProvider::default();
-        let (peers_tx, _) = mpsc::unbounded_channel();
         let (incoming_tx, incoming_rx) = mpsc::channel(1);
-        let mut handler = EthRequestHandler::<_, EthNetworkPrimitives>::new(
-            provider.clone(),
-            PeersHandle::new(peers_tx),
-            incoming_rx,
-        );
+        let mut handler = snap_handler(provider.clone());
+        handler.incoming_requests = ReceiverStream::new(incoming_rx);
         // The peer's task finished after the last poll, and it has another request queued.
         let peer_id = PeerId::default();
         let finished = tokio::spawn(async {});
