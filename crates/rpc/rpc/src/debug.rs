@@ -142,6 +142,7 @@ where
                     if is_cancelled() {
                         return Err(EthApiError::InternalEthError.into())
                     }
+                    tracer_interrupt.start_tx();
                     let tx_hash = *tx.tx_hash();
                     let tx_env = eth_api.evm_config().tx_env(tx.cloned());
 
@@ -214,6 +215,7 @@ where
                 let mut executor = eth_api.block_executor(&block, &mut db, evm_env)?;
 
                 while let Some((index, tx)) = transactions.next() {
+                    tracer_interrupt.start_tx();
                     let tx_hash = *tx.tx_hash();
                     let tx_env = eth_api.evm_config().tx_env(tx.cloned());
                     let output = match executor.inspect_transaction_without_commit(tx, inspector) {
@@ -589,6 +591,7 @@ where
                         if is_cancelled() {
                             return Err(EthApiError::InternalEthError.into())
                         }
+                        tracer_interrupt.start_tx();
                         // apply state overrides only once, before the first transaction
                         let state_overrides = state_overrides.take();
                         let overrides = EvmOverrides::new(state_overrides, block_overrides.clone());
@@ -1582,13 +1585,21 @@ fn runs_js_tracer(
     }
 }
 
-/// Interrupts a JS tracer once its request is dropped or its timeout expires.
+/// Interrupts a JS tracer once its request is dropped or a traced transaction exceeds its timeout.
+///
+/// As in geth, the timeout applies to each transaction: requests that trace several transactions
+/// call [`Self::start_tx`] before each one.
 ///
 /// Built-in tracers can't be interrupted, so for them this does nothing.
 #[derive(Clone, Debug, Default)]
 struct JsTraceInterrupt {
+    /// The interrupt, the timeout and when the transaction being traced started.
     #[cfg(feature = "js-tracer")]
-    js: Option<(evm2_inspectors::tracing::js::JsInspectorInterrupt, std::time::Duration)>,
+    js: Option<(
+        evm2_inspectors::tracing::js::JsInspectorInterrupt,
+        std::time::Duration,
+        Arc<parking_lot::Mutex<tokio::time::Instant>>,
+    )>,
 }
 
 impl JsTraceInterrupt {
@@ -1609,7 +1620,11 @@ impl JsTraceInterrupt {
                 None => DEFAULT_JS_TRACER_TIMEOUT,
             };
             return Ok(Self {
-                js: Some((evm2_inspectors::tracing::js::JsInspectorInterrupt::new(), timeout)),
+                js: Some((
+                    evm2_inspectors::tracing::js::JsInspectorInterrupt::new(),
+                    timeout,
+                    Arc::new(parking_lot::Mutex::new(tokio::time::Instant::now())),
+                )),
             })
         }
         Ok(Self::default())
@@ -1622,18 +1637,31 @@ impl JsTraceInterrupt {
     )]
     fn attach(&self, mut inspector: DebugInspector) -> DebugInspector {
         #[cfg(feature = "js-tracer")]
-        if let Some((interrupt, _)) = &self.js {
+        if let Some((interrupt, ..)) = &self.js {
             inspector.set_js_interrupt(interrupt);
         }
         inspector
     }
 
-    /// Awaits `trace`, interrupting the tracer if the returned future is dropped or the timeout
-    /// expires.
+    /// Restarts the timeout for the next traced transaction.
+    #[cfg_attr(
+        not(feature = "js-tracer"),
+        expect(clippy::missing_const_for_fn, reason = "only JS tracers can be interrupted")
+    )]
+    fn start_tx(&self) {
+        #[cfg(feature = "js-tracer")]
+        if let Some((_, _, tx_start)) = &self.js {
+            *tx_start.lock() = tokio::time::Instant::now();
+        }
+    }
+
+    /// Awaits `trace`, interrupting the tracer if the returned future is dropped or a transaction
+    /// exceeds the timeout.
     ///
     /// The interrupt is armed before the future is first polled, so dropping it unpolled still
-    /// stops a trace that is already running on a blocking task. Once the timeout expires, this
-    /// waits for the interrupted trace to stop, so the request holds its tracing permit until then.
+    /// stops a trace that is already running on a blocking task. Once a transaction times out,
+    /// this waits for the interrupted trace to stop, so the request holds its tracing permit until
+    /// then.
     #[cfg_attr(
         not(feature = "js-tracer"),
         expect(
@@ -1647,21 +1675,24 @@ impl JsTraceInterrupt {
         trace: impl Future<Output = Result<T, E>>,
     ) -> impl Future<Output = Result<T, E>> {
         #[cfg(feature = "js-tracer")]
-        let js = self
-            .js
-            .as_ref()
-            .map(|(interrupt, timeout)| (interrupt.drop_guard(), interrupt.clone(), *timeout));
+        let interrupt_on_drop = self.js.as_ref().map(|(interrupt, ..)| interrupt.drop_guard());
         async move {
             #[cfg(feature = "js-tracer")]
-            if let Some((_interrupt_on_drop, interrupt, timeout)) = js {
+            if let Some((interrupt, timeout, tx_start)) = &self.js {
+                let _interrupt_on_drop = interrupt_on_drop;
                 let mut trace = std::pin::pin!(trace);
-                return match tokio::time::timeout(timeout, &mut trace).await {
-                    Ok(res) => res,
-                    Err(_) => {
-                        interrupt.interrupt();
-                        trace
-                            .await
-                            .map_err(|_| E::from_eth_err(EthApiError::ExecutionTimedOut(timeout)))
+                loop {
+                    let deadline = *tx_start.lock() + *timeout;
+                    match tokio::time::timeout_at(deadline, &mut trace).await {
+                        Ok(res) => return res,
+                        // A later transaction started, so wait for its deadline instead.
+                        Err(_) if *tx_start.lock() + *timeout > deadline => {}
+                        Err(_) => {
+                            interrupt.interrupt();
+                            return trace.await.map_err(|_| {
+                                E::from_eth_err(EthApiError::ExecutionTimedOut(*timeout))
+                            })
+                        }
                     }
                 }
             }
@@ -1671,14 +1702,14 @@ impl JsTraceInterrupt {
 
     /// Returns [`EthApiError::ExecutionTimedOut`] if the tracer was interrupted.
     ///
-    /// Until the request is dropped, only the timeout interrupts the tracer.
+    /// Until the request is dropped, only a timed out transaction interrupts the tracer.
     #[cfg_attr(
         not(feature = "js-tracer"),
         expect(clippy::missing_const_for_fn, reason = "only JS tracers can be interrupted")
     )]
     fn timed_out(&self) -> Option<EthApiError> {
         #[cfg(feature = "js-tracer")]
-        if let Some((interrupt, timeout)) = &self.js &&
+        if let Some((interrupt, timeout, _)) = &self.js &&
             interrupt.is_interrupted()
         {
             return Some(EthApiError::ExecutionTimedOut(*timeout))
@@ -1809,7 +1840,7 @@ mod tests {
     #[tokio::test]
     async fn js_trace_interrupt_times_out_and_interrupts_tracer() {
         let interrupt = JsTraceInterrupt::new(&js_tracer_opts(Some("10ms"))).unwrap();
-        let (tracer_interrupt, _) = interrupt.js.clone().unwrap();
+        let (tracer_interrupt, ..) = interrupt.js.clone().unwrap();
         // Like a JS tracer, the trace fails once it observes the interrupt.
         let trace = async {
             while !tracer_interrupt.is_interrupted() {
@@ -1822,10 +1853,29 @@ mod tests {
     }
 
     #[cfg(feature = "js-tracer")]
+    #[tokio::test]
+    async fn js_trace_interrupt_times_out_each_transaction() {
+        let interrupt = JsTraceInterrupt::new(&js_tracer_opts(Some("200ms"))).unwrap();
+        let (tracer_interrupt, ..) = interrupt.js.clone().unwrap();
+        // Together the transactions take longer than the timeout, each one far less.
+        let trace = async {
+            for _ in 0..5 {
+                interrupt.start_tx();
+                tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+            }
+            if tracer_interrupt.is_interrupted() {
+                return Err(EthApiError::InternalEthError)
+            }
+            Ok(())
+        };
+        interrupt.run(trace).await.unwrap();
+    }
+
+    #[cfg(feature = "js-tracer")]
     #[test]
     fn js_trace_interrupt_interrupts_tracer_when_dropped_unpolled() {
         let interrupt = JsTraceInterrupt::new(&js_tracer_opts(None)).unwrap();
-        let (tracer_interrupt, _) = interrupt.js.clone().unwrap();
+        let (tracer_interrupt, ..) = interrupt.js.clone().unwrap();
         let trace = interrupt.run(std::future::pending::<Result<(), EthApiError>>());
         assert!(!tracer_interrupt.is_interrupted());
         drop(trace);
