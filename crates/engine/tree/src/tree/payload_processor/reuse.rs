@@ -107,6 +107,19 @@ impl<T: EvmTypes> PrewarmResults<T> {
         }
     }
 
+    /// Creates empty result slots like [`Self::new`], without predicting writes of `unpredicted`
+    /// that only change its balance.
+    ///
+    /// Nearly every transaction credits the block beneficiary, so predicting its balance makes
+    /// every speculative execution and reuse contend on one entry, while results rebase the
+    /// balances they do not observe anyway.
+    pub(crate) fn with_unpredicted_account(transaction_count: usize, unpredicted: Address) -> Self {
+        let mut results = Self::new(transaction_count);
+        results.predicted =
+            Arc::new(PredictedState { unpredicted: Some(unpredicted), ..Default::default() });
+        results
+    }
+
     /// Returns the writes predicted by the stored results.
     pub(super) const fn predicted(&self) -> &Arc<PredictedState> {
         &self.predicted
@@ -246,9 +259,9 @@ impl<T: EvmTypes> PrewarmResults<T> {
             }
         };
         // The result stays published as the prediction of this transaction's writes.
-        if rebased {
+        if !rebased.is_empty() {
             // Later transactions read the rebased balances.
-            self.predicted.publish_accounts(index, &tx.result.pending_state);
+            self.predicted.publish_rebased(index, &tx.result.pending_state, &rebased);
             self.predicted.generation.fetch_add(1, Ordering::Relaxed);
         }
         Ok(Ok(tx.result))
@@ -282,7 +295,13 @@ struct BeneficiaryCredit {
 
 impl<T: EvmTypes> PrewarmedTx<T> {
     /// Validates recorded reads, then applies balance changes to the current state.
-    fn validate<DB: DynDatabase + ?Sized>(&mut self, db: &mut DB) -> DbResult<Option<bool>> {
+    ///
+    /// Returns the addresses of the accounts whose balances were rebased, or `None` if the result
+    /// cannot be reused.
+    fn validate<DB: DynDatabase + ?Sized>(
+        &mut self,
+        db: &mut DB,
+    ) -> DbResult<Option<Vec<Address>>> {
         for read in &self.reads.storage {
             if db.get_storage(&read.address, &read.slot)? != read.value {
                 return Ok(None)
@@ -340,11 +359,11 @@ impl<T: EvmTypes> PrewarmedTx<T> {
             rebased.push((POOL_BENEFICIARY, synthetic.clone(), synthetic));
             rebased.push((credit.beneficiary, Some(original), Some(current)));
         }
-        let changed = !rebased.is_empty();
+        let addresses = rebased.iter().map(|(address, ..)| *address).collect();
         for (address, original, current) in rebased {
             self.result.pending_state.insert_account(address, original, current);
         }
-        Ok(Some(changed))
+        Ok(Some(addresses))
     }
 }
 
@@ -547,6 +566,8 @@ pub(super) struct PredictedState {
     code: DashMap<B256, Bytecode, DefaultHashBuilder>,
     /// Number of actual execution or rebased account updates published by block execution.
     generation: AtomicUsize,
+    /// Account whose balance-only writes are not predicted.
+    unpredicted: Option<Address>,
 }
 
 impl PredictedState {
@@ -588,9 +609,20 @@ impl PredictedState {
         self.update(index, state.account_changes(), true);
     }
 
-    /// Republishes rebased account balances.
-    fn publish_accounts(&self, index: usize, state: &PendingState) {
-        self.update(index, state.account_changes(), true);
+    /// Republishes the rebased balances of the accounts in `rebased`.
+    fn publish_rebased(&self, index: usize, state: &PendingState, rebased: &[Address]) {
+        for account in state.account_changes() {
+            if self.unpredicted == Some(account.address) || !rebased.contains(&account.address) {
+                continue
+            }
+            if let Some(current) = account.current {
+                write(
+                    &mut self.accounts.entry(account.address).or_default(),
+                    index,
+                    Some(Some(without_code(current))),
+                );
+            }
+        }
     }
 
     /// Retracts the transaction's predicted writes.
@@ -610,8 +642,19 @@ impl PredictedState {
                 continue
             }
             let address = account.address;
-            if account.storage.wiped || account.created || account.current.is_none() {
+            let cleared = account.storage.wiped || account.created || account.current.is_none();
+            if cleared {
                 write(&mut self.cleared.entry(address).or_default(), index, publish.then_some(()));
+            }
+            // Balance-only writes of the unpredicted account are rebased instead.
+            if !cleared &&
+                self.unpredicted == Some(address) &&
+                account.storage.slots.is_empty() &&
+                account.original.zip(account.current).is_some_and(|(original, current)| {
+                    original.nonce == current.nonce && original.code_hash == current.code_hash
+                })
+            {
+                continue
             }
             write(
                 &mut self.accounts.entry(address).or_default(),
@@ -884,10 +927,22 @@ impl<DB: Database> Database for RecordingDb<DB> {
         let predicted =
             state.predicted.as_ref().and_then(|(state, index)| state.account(*address, *index));
         let is_predicted = predicted.is_some();
-        let account = match predicted {
+        let mut account = match predicted {
             Some(account) => account,
             None => self.inner.get_account(address)?,
         };
+        // An unpredicted account is credited by earlier transactions, so it is speculated as
+        // non-empty: reuse rebases a result's balance change onto the actual balance, but not
+        // across an empty account, which execution treats differently.
+        if !is_predicted &&
+            state
+                .predicted
+                .as_ref()
+                .is_some_and(|(state, _)| state.unpredicted == Some(*address)) &&
+            account.as_ref().is_none_or(|info| info.balance.is_zero())
+        {
+            account.get_or_insert_with(AccountInfo::empty).balance = U256::from(1);
+        }
         if let Some(reads) = &mut state.reads {
             reads.accounts.push(AccountRead {
                 address: *address,
