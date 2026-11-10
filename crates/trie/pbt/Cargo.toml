@@ -19,15 +19,23 @@ thiserror = { workspace = true, features = ["std"] }
 reth-trie-common = { workspace = true, features = ["std"], optional = true }
 alloy-eip7928 = { workspace = true, optional = true }
 reth-fs-util = { workspace = true, optional = true }
+reth-trie = { workspace = true, optional = true }
+reth-storage-api = { workspace = true, optional = true, features = ["std"] }
+reth-storage-errors = { workspace = true, optional = true, features = ["std"] }
+imbl.workspace = true
+rocksdb = { workspace = true, optional = true }
 
 [dev-dependencies]
 proptest.workspace = true
 serde_json.workspace = true
 tempfile.workspace = true
+reth-trie = { workspace = true, features = ["test-utils"] }
+reth-primitives-traits.workspace = true
 
 [features]
 default = []
 migration = ["dep:alloy-trie"]
 execution = ["dep:reth-trie-common"]
 bal = ["dep:alloy-eip7928"]
-persistence = ["migration", "dep:reth-fs-util"]
+persistence = ["migration", "dep:reth-fs-util", "dep:rocksdb"]
+conversion = ["migration", "dep:reth-trie", "dep:reth-storage-api", "dep:reth-storage-errors"]

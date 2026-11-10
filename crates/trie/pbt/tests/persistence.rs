@@ -16,6 +16,7 @@ fn checkpoints_survive_reopening_and_keep_competing_branches() {
         SnapshotStore::<Blake3Hasher>::open(directory.path(), DecodeLimits::default()).unwrap();
     let a = B256::repeat_byte(1);
     let b = B256::repeat_byte(2);
+    assert!(!store.contains_block(a).unwrap());
     let mut state = StateTree::<Blake3Hasher>::new();
     state
         .set_account(
@@ -24,6 +25,7 @@ fn checkpoints_survive_reopening_and_keep_competing_branches() {
         )
         .unwrap();
     let a_root = store.save_block(a, &state).unwrap();
+    assert!(store.contains_block(a).unwrap());
     state.set_storage(Address::ZERO, U256::from(64), B256::repeat_byte(3)).unwrap();
     let b_root = store.save_block(b, &state).unwrap();
     drop(store);
@@ -282,4 +284,40 @@ fn account_state(balance: u64) -> StateTree {
         )
         .unwrap();
     state
+}
+
+#[test]
+fn legacy_checkpoints_upgrade_and_interrupted_markers_recover() {
+    let directory = tempfile::tempdir().unwrap();
+    let state = account_state(1);
+    let root = state.root();
+    let artifacts = Artifacts::from_state(&state).unwrap();
+    let store =
+        SnapshotStore::<Blake3Hasher>::open(directory.path(), DecodeLimits::default()).unwrap();
+    assert!(store.is_empty().unwrap());
+    let path = directory.path().join("states").join(root.to_string());
+    let legacy = [
+        u64::try_from(artifacts.preimages.len()).unwrap().to_be_bytes().as_slice(),
+        &artifacts.preimages,
+        &artifacts.snapshot,
+    ]
+    .concat();
+    reth_fs_util::write(&path, &legacy).unwrap();
+    assert!(!store.is_empty().unwrap());
+    assert_eq!(store.load(root).unwrap().root(), root);
+    assert_eq!(reth_fs_util::metadata(&path).unwrap().len(), 12);
+    drop(store);
+    // The native root has reached the WAL, but the legacy file replacement was interrupted.
+    reth_fs_util::write(&path, &legacy).unwrap();
+    let store =
+        SnapshotStore::<Blake3Hasher>::open(directory.path(), DecodeLimits::default()).unwrap();
+    assert_eq!(store.load(root).unwrap().root(), root);
+    assert_eq!(reth_fs_util::metadata(&path).unwrap().len(), 12);
+    drop(store);
+    reth_fs_util::remove_file(&path).unwrap();
+    let store =
+        SnapshotStore::<Blake3Hasher>::open(directory.path(), DecodeLimits::default()).unwrap();
+    assert!(!store.is_empty().unwrap());
+    assert_eq!(store.load(root).unwrap().root(), root);
+    assert_eq!(reth_fs_util::metadata(&path).unwrap().len(), 12);
 }

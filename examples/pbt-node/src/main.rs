@@ -1,29 +1,31 @@
 //! A PBT-from-genesis dev node using EIP-8297's BLAKE3 reference configuration.
 //!
 //! Run with `cargo run -p example-pbt-node`. Set `PBT_DATADIR` to retain the node and checkpoints.
-//! This example exercises live engine processing, not staged or snap synchronization.
+//! Live and staged execution maintain PBT checkpoints; onboarding uses an explicit finalized
+//! anchor.
 
+mod backfill;
+mod conversion;
+mod download;
 mod rpc;
 
 use alloy_eip7928::bal::DecodedBal;
-use alloy_primitives::{B256, U256};
+use alloy_primitives::{Bytes, B256, U256};
+use backfill::PbtBackfill;
 use eyre::WrapErr;
-use reth_engine_tree::{
-    backfill::{BackfillAction, BackfillEvent, BackfillSync},
-    tree::{
-        state_root_strategy::{pbt::PbtStateRootStrategy, StateRootStrategy},
-        BasicEngineValidator, TreeConfig,
-    },
+use reth_engine_tree::tree::{
+    state_root_strategy::{pbt::PbtStateRootStrategy, StateRootStrategy},
+    BasicEngineValidator, TreeConfig,
 };
 use reth_ethereum::{
     chainspec::ChainSpec,
+    network::api::BlockDownloaderProvider,
     node::{
         builder::{
             rpc::{
                 BasicEngineApiBuilder, BasicEngineValidatorBuilder, EngineValidatorBuilder,
                 EthApiBuilder, Identity, RpcAddOns,
             },
-            sync::{BackfillContext, BackfillSyncBuilder},
             FullNodeComponents, NodeBuilder, NodeTypes,
         },
         core::{
@@ -34,8 +36,7 @@ use reth_ethereum::{
     },
     primitives::{AlloyBlockHeader, SealedHeader},
     provider::{
-        providers::ProviderNodeTypes, BalProvider, BlockIdReader, BlockNumReader, HeaderProvider,
-        ProviderError, RawBal,
+        BalProvider, BlockIdReader, BlockNumReader, HeaderProvider, RawBal, StageCheckpointReader,
     },
     tasks::Runtime,
     EthPrimitives,
@@ -53,10 +54,13 @@ use std::{
     fs::{File, OpenOptions, TryLockError},
     num::NonZeroUsize,
     path::{Path, PathBuf},
-    sync::Arc,
-    task::{Context, Poll},
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    },
     time::Duration,
 };
+use tracing::Span;
 
 #[derive(Clone, Debug)]
 struct PbtValidatorBuilder {
@@ -88,8 +92,49 @@ where
     ) -> eyre::Result<Self::EngineValidator> {
         let strategy = self.strategy.clone();
         let provider = ctx.node.provider().clone();
-        tokio::task::spawn_blocking(move || self.startup.initialize(&strategy, &provider))
-            .await??;
+        let network = ctx.node.network().clone();
+        let runtime = tokio::runtime::Handle::current();
+        let shutdown = ctx.node.task_executor().on_shutdown_signal().clone();
+        let stop = Arc::new(AtomicBool::new(false));
+        let conversion_stop = stop.clone();
+        let span = Span::current();
+        let download_shutdown = shutdown.clone();
+        let mut startup = tokio::task::spawn_blocking(move || {
+            let _entered = span.enter();
+            self.startup.initialize_with_sources(
+                &strategy,
+                &provider,
+                |hash, commitment, budget| {
+                    runtime.block_on(async {
+                        tokio::select! {
+                            _ = download_shutdown.clone() => eyre::bail!("PBT catch-up interrupted by shutdown"),
+                            result = async {
+                                let client = tokio::time::timeout(
+                                    download::REQUEST_TIMEOUT,
+                                    network.fetch_client(),
+                                ).await??;
+                                download::download_bal(&client, hash, commitment, budget).await
+                            } => result,
+                        }
+                    })
+                },
+                |anchor, preimages| conversion::convert_anchor(
+                    strategy.store(),
+                    &provider,
+                    anchor,
+                    preimages,
+                    self.startup.catchup.max_blocks.get(),
+                    || conversion_stop.load(Ordering::Relaxed),
+                ),
+            )
+        });
+        tokio::select! {
+            result = &mut startup => result??,
+            _ = shutdown => {
+                stop.store(true, Ordering::Relaxed);
+                eyre::bail!("PBT onboarding interrupted by shutdown");
+            }
+        }
         let validator = BasicEngineValidatorBuilder::<EthereumEngineValidatorBuilder>::default()
             .build_tree_validator(ctx, tree_config, overlay_manager)
             .await?;
@@ -177,12 +222,10 @@ fn prepare_chain(
             "PBT checkpoint directory belongs to a different genesis or activation timestamp"
         );
     } else {
-        for name in ["states", "blocks"] {
-            eyre::ensure!(
-                reth_fs_util::read_dir(store.path().join(name))?.next().transpose()?.is_none(),
-                "PBT checkpoint directory is populated but chain-config is missing"
-            );
-        }
+        eyre::ensure!(
+            store.is_empty()?,
+            "PBT checkpoint directory is populated but chain-config is missing"
+        );
         store.save_block(chain.genesis_hash(), &state)?;
         reth_fs_util::atomic_write_file(&path, |file| {
             std::io::Write::write_all(file, &configuration)
@@ -225,6 +268,7 @@ async fn main() -> eyre::Result<()> {
     let startup = Startup::new(
         std::env::var_os("PBT_MIGRATION_SNAPSHOT"),
         std::env::var_os("PBT_MIGRATION_PREIMAGES"),
+        std::env::var_os("PBT_MIGRATION_ANCHOR"),
         std::env::var_os("PBT_PRUNE_BLOCKS"),
         CatchupLimits::new(
             std::env::var_os("PBT_CATCHUP_MAX_BLOCKS"),
@@ -247,15 +291,14 @@ async fn main() -> eyre::Result<()> {
     let runtime = Runtime::test();
     let mut interrupt = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::interrupt())?;
     let mut terminate = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())?;
+    let strategy = Arc::new(PbtStateRootStrategy::new(store.clone(), activation));
+    let backfill = PbtBackfill::new(strategy.clone(), startup.catchup);
     let mut handle = NodeBuilder::new(config)
         .with_database(database)
         .with_launch_context(runtime.clone())
         .with_types::<EthereumNode>()
         .with_components(EthereumNode::components())
-        .with_add_ons(addons(
-            Arc::new(PbtStateRootStrategy::new(store.clone(), activation)),
-            startup,
-        ))
+        .with_add_ons(addons(strategy, startup))
         .extend_rpc_modules(move |ctx| {
             // MPT proof responses cannot authenticate against a PBT header commitment.
             ctx.modules.remove_method_from_configured("eth_getProof");
@@ -263,7 +306,7 @@ async fn main() -> eyre::Result<()> {
             ctx.auth_module.merge_auth_methods(rpc::ProofRpc::new(store).into_rpc()?)?;
             Ok(())
         })
-        .launch_with_debug_capabilities_and_backfill(PbtBackfill::default())
+        .launch_with_debug_capabilities_and_backfill(backfill)
         .await?;
     println!(
         "PBT dev node running; HTTP RPC: {:?}; authenticated RPC: {}",
@@ -299,16 +342,25 @@ impl Startup {
     fn new(
         snapshot: Option<OsString>,
         preimages: Option<OsString>,
+        anchor: Option<OsString>,
         obsolete: Option<OsString>,
         catchup: CatchupLimits,
     ) -> eyre::Result<Self> {
-        let migration = match (snapshot, preimages) {
-            (Some(snapshot), Some(preimages)) => {
-                Some(MigrationFiles { snapshot: snapshot.into(), preimages: preimages.into() })
+        let migration = match (snapshot, preimages, anchor) {
+            (snapshot, Some(preimages), Some(anchor)) => {
+                let anchor = anchor
+                    .into_string()
+                    .map_err(|_| eyre::eyre!("PBT_MIGRATION_ANCHOR must contain a UTF-8 block hash"))?
+                    .parse()?;
+                Some(MigrationFiles {
+                    source: snapshot.map_or(MigrationSource::Mpt, |path| MigrationSource::Snapshot(path.into())),
+                    preimages: preimages.into(),
+                    anchor,
+                })
             }
-            (None, None) => None,
+            (None, None, None) => None,
             _ => eyre::bail!(
-                "PBT_MIGRATION_SNAPSHOT and PBT_MIGRATION_PREIMAGES must be set together"
+                "PBT_MIGRATION_PREIMAGES and PBT_MIGRATION_ANCHOR are required together; PBT_MIGRATION_SNAPSHOT is optional for self-conversion"
             ),
         };
         let obsolete_checkpoints = obsolete
@@ -326,9 +378,40 @@ impl Startup {
         Ok(Self { migration, obsolete_checkpoints, catchup })
     }
 
+    #[cfg(test)]
     fn initialize<P>(&self, strategy: &PbtStateRootStrategy, provider: &P) -> eyre::Result<()>
     where
-        P: BalProvider + BlockIdReader + BlockNumReader + HeaderProvider,
+        P: BalProvider + BlockIdReader + BlockNumReader + HeaderProvider + StageCheckpointReader,
+    {
+        self.initialize_with_bal_fetch(strategy, provider, |_, _, _| {
+            eyre::bail!("PBT catch-up BAL is unavailable")
+        })
+    }
+
+    #[cfg(test)]
+    fn initialize_with_bal_fetch<P>(
+        &self,
+        strategy: &PbtStateRootStrategy,
+        provider: &P,
+        fetch: impl FnMut(B256, B256, usize) -> eyre::Result<Bytes>,
+    ) -> eyre::Result<()>
+    where
+        P: BalProvider + BlockIdReader + BlockNumReader + HeaderProvider + StageCheckpointReader,
+    {
+        self.initialize_with_sources(strategy, provider, fetch, |_, _| {
+            eyre::bail!("MPT self-conversion is unavailable without a retained-state provider")
+        })
+    }
+
+    fn initialize_with_sources<P>(
+        &self,
+        strategy: &PbtStateRootStrategy,
+        provider: &P,
+        fetch: impl FnMut(B256, B256, usize) -> eyre::Result<Bytes>,
+        mut convert: impl FnMut(&SealedHeader<P::Header>, &Path) -> eyre::Result<B256>,
+    ) -> eyre::Result<()>
+    where
+        P: BalProvider + BlockIdReader + BlockNumReader + HeaderProvider + StageCheckpointReader,
     {
         let finalized = if self.migration.is_some() || !self.obsolete_checkpoints.is_empty() {
             let hash = provider.finalized_block_hash()?.ok_or_else(|| {
@@ -342,24 +425,48 @@ impl Startup {
         } else {
             None
         };
-        let number = provider.last_block_number()?;
+        // Headers can be ahead of verified state after an interrupted staged sync.
+        let number = match provider.get_stage_checkpoint(reth_stages::StageId::Finish)? {
+            Some(checkpoint) => checkpoint.block_number,
+            None => provider.last_block_number()?,
+        };
         let tip = provider
             .sealed_header(number)?
             .ok_or_else(|| eyre::eyre!("missing persisted tip header"))?;
         if let Some(migration) = &self.migration {
-            let header =
+            let finalized =
                 finalized.as_ref().ok_or_else(|| eyre::eyre!("missing local finalized header"))?;
+            let header = migration.anchor_header(provider, finalized)?;
             eyre::ensure!(
                 header.timestamp() < strategy.activation_timestamp(),
                 "PBT migration anchor must precede activation"
             );
-            strategy.store().import_anchor(
-                header.hash(),
-                header.state_root(),
-                &migration.snapshot,
-                &migration.preimages,
-            )?;
-            self.catch_up(strategy, provider, header, &tip)?;
+            // A completed migration must remain restartable after source history is pruned.
+            // The persisted tip is authenticated below, even when its reference already exists.
+            if !strategy.store().contains_block(tip.hash())? {
+                if strategy.store().contains_block(header.hash())? {
+                    strategy.restore_parent(
+                        header.hash(),
+                        header.state_root(),
+                        header.timestamp(),
+                    )?;
+                } else {
+                    match &migration.source {
+                        MigrationSource::Snapshot(snapshot) => {
+                            strategy.store().import_anchor(
+                                header.hash(),
+                                header.state_root(),
+                                snapshot,
+                                &migration.preimages,
+                            )?;
+                        }
+                        MigrationSource::Mpt => {
+                            convert(&header, &migration.preimages)?;
+                        }
+                    }
+                }
+                self.catch_up_with_bal_fetch(strategy, provider, &header, &tip, fetch)?;
+            }
         }
         strategy
             .restore_parent(tip.hash(), tip.state_root(), tip.timestamp())
@@ -402,12 +509,29 @@ impl Startup {
         Ok(())
     }
 
+    #[cfg(test)]
     fn catch_up<P>(
         &self,
         strategy: &PbtStateRootStrategy,
         provider: &P,
         anchor: &SealedHeader<P::Header>,
         tip: &SealedHeader<P::Header>,
+    ) -> eyre::Result<()>
+    where
+        P: BalProvider + HeaderProvider,
+    {
+        self.catch_up_with_bal_fetch(strategy, provider, anchor, tip, |_, _, _| {
+            eyre::bail!("PBT catch-up BAL is unavailable")
+        })
+    }
+
+    fn catch_up_with_bal_fetch<P>(
+        &self,
+        strategy: &PbtStateRootStrategy,
+        provider: &P,
+        anchor: &SealedHeader<P::Header>,
+        tip: &SealedHeader<P::Header>,
+        mut fetch: impl FnMut(B256, B256, usize) -> eyre::Result<Bytes>,
     ) -> eyre::Result<()>
     where
         P: BalProvider + HeaderProvider,
@@ -441,26 +565,43 @@ impl Startup {
             let commitment = header
                 .block_access_list_hash()
                 .ok_or_else(|| eyre::eyre!("PBT catch-up header has no BAL commitment"))?;
-            let bytes = provider
-                .bal_store()
-                .get_by_hash(header.hash())?
-                .ok_or_else(|| eyre::eyre!("PBT catch-up BAL is unavailable"))?;
+            let local = provider.bal_store().get_by_hash(header.hash())?;
+            let fetched = local.is_none();
+            let bytes = match local {
+                Some(bytes) => bytes,
+                None => fetch(header.hash(), commitment, remaining_bytes)?,
+            };
             remaining_bytes = remaining_bytes
                 .checked_sub(bytes.len())
                 .ok_or_else(|| eyre::eyre!("PBT catch-up BAL byte budget exceeded"))?;
             let raw = RawBal::new(bytes);
             raw.ensure_hash(commitment)?;
-            let bal = DecodedBal::from_raw_bal(raw)?;
+            let bal = DecodedBal::from_raw_bal(raw.clone())?;
             let next = replay(&state, bal.as_bal().as_slice(), commitment)?;
             let root = if header.timestamp() >= strategy.activation_timestamp() {
                 next.root()
             } else {
                 mpt_root(&next)
             };
-            eyre::ensure!(
-                root == header.state_root(),
-                "PBT catch-up state root does not match its header"
-            );
+            if root != header.state_root() {
+                return Err(reth_stages::StageError::Block {
+                    block: Box::new(header.block_with_parent()),
+                    error: reth_stages::BlockErrorKind::Validation(
+                        reth_ethereum::consensus::ConsensusError::BodyStateRootDiff(
+                            reth_ethereum::primitives::GotExpected {
+                                got: root,
+                                expected: header.state_root(),
+                            }
+                            .into(),
+                        ),
+                    ),
+                }
+                .into());
+            }
+            if fetched {
+                provider.bal_store().insert(header.num_hash(), raw)?;
+                provider.bal_store().flush(&[header.num_hash()])?;
+            }
             strategy.store().save_block(header.hash(), &next)?;
             state = next;
         }
@@ -505,41 +646,48 @@ const DEFAULT_CATCHUP_BAL_BYTES: NonZeroUsize =
 
 #[derive(Clone, Debug)]
 struct MigrationFiles {
-    snapshot: PathBuf,
+    source: MigrationSource,
     preimages: PathBuf,
+    anchor: B256,
 }
 
-/// Refuses sync paths that still validate MPT roots outside the installed live strategy.
-#[derive(Debug, Default)]
-struct PbtBackfill {
-    requested: bool,
-}
-
-impl<N: ProviderNodeTypes, C> BackfillSyncBuilder<N, C> for PbtBackfill {
-    type Backfill = Self;
-
-    fn build(self, _ctx: BackfillContext<N, C>) -> eyre::Result<Self::Backfill> {
-        Ok(self)
-    }
-}
-
-impl BackfillSync for PbtBackfill {
-    fn on_action(&mut self, action: BackfillAction) {
-        if matches!(action, BackfillAction::Start(_)) {
-            self.requested = true;
+impl MigrationFiles {
+    fn anchor_header<P: HeaderProvider>(
+        &self,
+        provider: &P,
+        finalized: &SealedHeader<P::Header>,
+    ) -> eyre::Result<SealedHeader<P::Header>> {
+        let anchor = provider
+            .sealed_header_by_hash(self.anchor)?
+            .ok_or_else(|| eyre::eyre!("PBT migration anchor header is unavailable"))?;
+        eyre::ensure!(
+            anchor.number() <= finalized.number(),
+            "PBT migration anchor is not finalized"
+        );
+        let mut ancestor = finalized.clone();
+        while ancestor.number() > anchor.number() {
+            let parent = provider
+                .sealed_header_by_hash(ancestor.parent_hash())?
+                .ok_or_else(|| eyre::eyre!("PBT migration finalized ancestry is unavailable"))?;
+            eyre::ensure!(
+                parent.number().checked_add(1) == Some(ancestor.number()) &&
+                    parent.timestamp() < ancestor.timestamp(),
+                "inconsistent PBT migration finalized ancestry"
+            );
+            ancestor = parent;
         }
+        eyre::ensure!(
+            ancestor.hash() == anchor.hash(),
+            "PBT migration anchor is not an ancestor of the finalized block"
+        );
+        Ok(anchor)
     }
+}
 
-    fn poll(&mut self, _cx: &mut Context<'_>) -> Poll<BackfillEvent> {
-        if !std::mem::take(&mut self.requested) {
-            return Poll::Pending
-        }
-        Poll::Ready(BackfillEvent::Finished(Err(ProviderError::other(std::io::Error::new(
-            std::io::ErrorKind::Unsupported,
-            "PBT dev node does not support staged/backfill sync",
-        ))
-        .into())))
-    }
+#[derive(Clone, Debug)]
+enum MigrationSource {
+    Snapshot(PathBuf),
+    Mpt,
 }
 
 #[cfg(test)]
@@ -551,7 +699,7 @@ mod tests {
     use reth_e2e_test_utils::{
         eth_payload_attributes,
         node::{Finality, NodeTestContext},
-        test_chain_spec,
+        test_chain_spec, test_node_config,
         wallet::Wallet,
         Adapter, E2ETestSetupBuilder,
     };
@@ -589,7 +737,7 @@ mod tests {
         let directory = tempfile::tempdir()?;
         let store = Arc::new(SnapshotStore::open(directory.path(), DecodeLimits::default())?);
         let chain = prepare_chain((*test_chain_spec(fork)).clone(), activation, &store)?;
-        let node = launch_test_node(chain, store.clone(), activation).await?;
+        let node = launch_test_node(chain, store.clone(), activation, 64).await?;
         Ok((node, store, directory))
     }
 
@@ -597,25 +745,25 @@ mod tests {
         chain: Arc<ChainSpec>,
         store: Arc<SnapshotStore>,
         activation: u64,
+        backfill_threshold: u64,
     ) -> eyre::Result<TestNode> {
-        let config = NodeConfig::test()
-            .with_chain(chain.clone())
+        let mut config = test_node_config(chain.clone())
             .with_rpc(RpcServerArgs::default().with_unused_ports().with_http());
+        config.engine.backfill_run_threshold = backfill_threshold;
+        let strategy = Arc::new(PbtStateRootStrategy::new(store.clone(), activation));
+        let backfill = PbtBackfill::new(strategy.clone(), CatchupLimits::default());
         let NodeHandle { node, node_exit_future: _ } = NodeBuilder::new(config)
             .testing_node(Runtime::test())
             .with_types::<EthereumNode>()
             .with_components(EthereumNode::components())
-            .with_add_ons(addons(
-                Arc::new(PbtStateRootStrategy::new(store.clone(), activation)),
-                Startup::default(),
-            ))
+            .with_add_ons(addons(strategy, Startup::default()))
             .extend_rpc_modules(move |ctx| {
                 ctx.modules.remove_method_from_configured("eth_getProof");
                 ctx.auth_module.remove_auth_method("eth_getProof");
                 ctx.auth_module.merge_auth_methods(rpc::ProofRpc::new(store).into_rpc()?)?;
                 Ok(())
             })
-            .launch_with_debug_capabilities_and_backfill(PbtBackfill::default())
+            .launch_with_debug_capabilities_and_backfill(backfill)
             .await?;
         let node =
             NodeTestContext::new(node, move |timestamp| eth_payload_attributes(&*chain, timestamp))
@@ -744,29 +892,12 @@ mod tests {
             directory.path().join("missing"),
             DecodeLimits::default(),
         )?);
-        let error = match launch_test_node(chain, missing, 0).await {
+        let error = match launch_test_node(chain, missing, 0, 64).await {
             Ok(_) => eyre::bail!("startup accepted a missing PBT checkpoint"),
             Err(error) => error,
         };
         assert_eq!(error.to_string(), "PBT persisted tip checkpoint is missing or inconsistent");
         Ok(())
-    }
-
-    #[test]
-    fn unsupported_backfill_fails_before_running_pipeline() {
-        let mut backfill = PbtBackfill::default();
-        let mut cx = Context::from_waker(std::task::Waker::noop());
-        assert!(backfill.poll(&mut cx).is_pending());
-        backfill.on_action(BackfillAction::UpdateFinalized(B256::repeat_byte(1)));
-        backfill.on_action(BackfillAction::UpdateTarget(B256::repeat_byte(2)));
-        assert!(backfill.poll(&mut cx).is_pending());
-
-        backfill.on_action(BackfillAction::Start(B256::repeat_byte(3).into()));
-        let Poll::Ready(BackfillEvent::Finished(Err(error))) = backfill.poll(&mut cx) else {
-            panic!("unsupported backfill must fail immediately");
-        };
-        assert_eq!(error.to_string(), "PBT dev node does not support staged/backfill sync");
-        assert!(backfill.poll(&mut cx).is_pending());
     }
 
     #[derive(Clone, Debug, Default)]
@@ -811,6 +942,57 @@ mod tests {
     #[tokio::test]
     async fn finalized_anchor_onboarding_survives_restart_and_activation_reorg() -> eyre::Result<()>
     {
+        anchor_onboarding(false).await
+    }
+
+    #[tokio::test]
+    async fn mpt_self_conversion_survives_restart_and_activation_reorg() -> eyre::Result<()> {
+        anchor_onboarding(true).await
+    }
+
+    #[tokio::test]
+    async fn staged_peer_sync_crosses_activation() -> eyre::Result<()> {
+        reth_tracing::init_test_tracing();
+        let activation = 1_710_338_138;
+        let (mut source, _, _source_directory) =
+            setup_for(activation, EthereumHardfork::Amsterdam).await?;
+        let directory = tempfile::tempdir()?;
+        let store = Arc::new(SnapshotStore::open(directory.path(), DecodeLimits::default())?);
+        let chain = prepare_chain(
+            (*test_chain_spec(EthereumHardfork::Amsterdam)).clone(),
+            activation,
+            &store,
+        )?;
+        let mut follower = launch_test_node(chain, store.clone(), activation, 1).await?;
+        let recipient = Address::repeat_byte(0x79);
+        let mut sender = Wallet::new(1).account(0);
+        let transaction = sender.transfer(recipient, U256::from(13)).await;
+        source.mine([transaction]).await?.ensure_success()?;
+        let blocks = source.advance_blocks(6).await?;
+        let tip = blocks.last().unwrap().block();
+        assert!(tip.timestamp >= activation);
+        tokio::time::timeout(Duration::from_secs(30), source.connect(&mut follower)).await?;
+        follower.sync_to(tip.hash()).await?;
+        let checkpoint = reth_ethereum::provider::StageCheckpointReader::get_stage_checkpoint(
+            &follower.inner.provider,
+            reth_stages::StageId::MerkleExecute,
+        )?
+        .unwrap();
+        assert!(checkpoint.block_number > 1, "staged verification must have run");
+        assert!(
+            checkpoint.entities_stage_checkpoint().is_some(),
+            "staged Merkle verification must have run"
+        );
+        let state = store.load_block(tip.hash())?;
+        assert_eq!(state.root(), tip.state_root);
+        assert_eq!(state.account(recipient).unwrap().balance, U256::from(13));
+        follower.set_next_payload_timestamp(tip.timestamp + 1)?;
+        let next = follower.advance_block().await?;
+        assert_eq!(store.load_block(next.block().hash())?.root(), next.block().state_root);
+        Ok(())
+    }
+
+    async fn anchor_onboarding(self_convert: bool) -> eyre::Result<()> {
         reth_tracing::init_test_tracing();
         let activation = 1_710_338_138;
         let directory = tempfile::tempdir()?;
@@ -824,6 +1006,7 @@ mod tests {
         let startup = Arc::new(Mutex::new(Startup::default()));
         let node_checkpoints = checkpoints.clone();
         let node_startup = startup.clone();
+        let backfill_checkpoints = checkpoints.clone();
         let (mut node, _) = E2ETestSetupBuilder::<RestartNode>::new(1, chain)
             .with_node(move |_| RestartNode {
                 checkpoints: node_checkpoints.clone(),
@@ -831,7 +1014,18 @@ mod tests {
                 startup: node_startup.lock().unwrap().clone(),
             })
             .with_restartable_nodes()
-            .with_backfill(|_| PbtBackfill::default())
+            .with_backfill(move |_| {
+                PbtBackfill::new(
+                    Arc::new(PbtStateRootStrategy::new(
+                        Arc::new(
+                            SnapshotStore::open(&backfill_checkpoints, DecodeLimits::default())
+                                .unwrap(),
+                        ),
+                        activation,
+                    )),
+                    CatchupLimits::default(),
+                )
+            })
             .with_node_builder_modifier(|builder| {
                 builder.extend_rpc_modules(|ctx| {
                     ctx.modules.remove_method_from_configured("eth_getProof");
@@ -855,11 +1049,17 @@ mod tests {
         let stopped = node.stop().await?;
         let state = store.load_block(anchor_hash)?;
         let artifacts = Artifacts::from_state(&state)?;
+        let snapshot = directory.path().join("snapshot");
+        reth_fs_util::write(&snapshot, &artifacts.snapshot)?;
         let files = MigrationFiles {
-            snapshot: directory.path().join("snapshot"),
+            source: if self_convert {
+                MigrationSource::Mpt
+            } else {
+                MigrationSource::Snapshot(snapshot)
+            },
             preimages: directory.path().join("preimages"),
+            anchor: anchor_hash,
         };
-        reth_fs_util::write(&files.snapshot, &artifacts.snapshot)?;
         reth_fs_util::write(&files.preimages, &artifacts.preimages)?;
         drop(store);
         // Remove the old shadow checkpoints: onboarding must reconstruct from the artifacts.
@@ -889,9 +1089,25 @@ mod tests {
         node.reorg_to(canonical.block().hash()).await?;
         node.reorg_to(fork[1].block().hash()).await?;
         let tip = fork[1].block().hash();
+        assert!(fork[1].block().timestamp >= activation);
+        // The same artifacts must remain usable after finality crosses activation.
+        let response = node
+            .engine
+            .forkchoice_updated(ForkchoiceState {
+                head_block_hash: tip,
+                safe_block_hash: tip,
+                finalized_block_hash: tip,
+            })
+            .await?;
+        assert!(response.payload_status.is_valid());
         let stopped = node.stop().await?;
-        startup.lock().unwrap().migration = None;
         drop(reopened);
+        let files = startup.lock().unwrap().migration.clone().unwrap();
+        reth_fs_util::remove_file(files.preimages)?;
+        if let MigrationSource::Snapshot(snapshot) = files.source {
+            reth_fs_util::remove_file(snapshot)?;
+        }
+        startup.lock().unwrap().catchup.max_blocks = NonZeroUsize::new(1).unwrap();
         let mut node = stopped.start().await?;
         assert_eq!(node.current_forkchoice_state()?.head_block_hash, tip);
         let next = node.advance_block().await?;
@@ -906,30 +1122,40 @@ mod tests {
     }
 
     #[test]
-    fn startup_requires_paired_migration_files() {
-        for (snapshot, preimages) in
-            [(Some(OsString::from("snapshot")), None), (None, Some(OsString::from("preimages")))]
-        {
+    fn startup_requires_complete_migration_configuration() {
+        let snapshot = Some(OsString::from("snapshot"));
+        let preimages = Some(OsString::from("preimages"));
+        let anchor = Some(OsString::from(B256::ZERO.to_string()));
+        for (snapshot, preimages, anchor) in [
+            (snapshot.clone(), None, None),
+            (None, preimages.clone(), None),
+            (None, None, anchor.clone()),
+            (snapshot.clone(), preimages.clone(), None),
+            (snapshot.clone(), None, anchor.clone()),
+        ] {
             assert_eq!(
-                Startup::new(snapshot, preimages, None, CatchupLimits::default())
+                Startup::new(snapshot, preimages, anchor, None, CatchupLimits::default())
                     .unwrap_err()
                     .to_string(),
-                "PBT_MIGRATION_SNAPSHOT and PBT_MIGRATION_PREIMAGES must be set together"
+                "PBT_MIGRATION_PREIMAGES and PBT_MIGRATION_ANCHOR are required together; PBT_MIGRATION_SNAPSHOT is optional for self-conversion"
             );
         }
-        assert!(Startup::new(None, None, None, CatchupLimits::default())
+        assert!(Startup::new(None, None, None, None, CatchupLimits::default())
             .unwrap()
             .migration
             .is_none());
-        assert!(Startup::new(
-            Some("snapshot".into()),
-            Some("preimages".into()),
-            None,
-            CatchupLimits::default()
-        )
-        .unwrap()
-        .migration
-        .is_some());
+        assert!(matches!(
+            Startup::new(None, preimages.clone(), anchor.clone(), None, CatchupLimits::default())
+                .unwrap()
+                .migration
+                .unwrap()
+                .source,
+            MigrationSource::Mpt
+        ));
+        assert!(Startup::new(snapshot, preimages, anchor, None, CatchupLimits::default())
+            .unwrap()
+            .migration
+            .is_some());
     }
 
     #[test]
@@ -983,8 +1209,9 @@ mod tests {
         let strategy = PbtStateRootStrategy::new(store.clone(), 0);
         let active_anchor = Startup {
             migration: Some(MigrationFiles {
-                snapshot: "snapshot".into(),
+                source: MigrationSource::Snapshot("snapshot".into()),
                 preimages: "preimages".into(),
+                anchor: finalized_hash,
             }),
             ..Default::default()
         };
@@ -1037,8 +1264,9 @@ mod tests {
         for startup in [
             Startup {
                 migration: Some(MigrationFiles {
-                    snapshot: "snapshot".into(),
+                    source: MigrationSource::Snapshot("snapshot".into()),
                     preimages: "preimages".into(),
+                    anchor: B256::ZERO,
                 }),
                 ..Default::default()
             },
@@ -1200,10 +1428,21 @@ mod tests {
         bad_root.state_root = B256::repeat_byte(0xff);
         let bad_root = SealedHeader::seal_slow(bad_root);
         let invalid = catchup_provider(&anchor, &bad_root, Some(bytes.clone()))?;
-        assert_eq!(
-            startup.catch_up(&strategy, &invalid, &anchor, &bad_root).unwrap_err().to_string(),
-            "PBT catch-up state root does not match its header"
-        );
+        let error = startup.catch_up(&strategy, &invalid, &anchor, &bad_root).unwrap_err();
+        let reth_stages::StageError::Block { block, error } =
+            error.downcast_ref::<reth_stages::StageError>().unwrap()
+        else {
+            panic!("expected block validation error")
+        };
+        assert_eq!(block.block.hash, bad_root.hash());
+        let reth_stages::BlockErrorKind::Validation(
+            reth_ethereum::consensus::ConsensusError::BodyStateRootDiff(roots),
+        ) = error
+        else {
+            panic!("expected state root mismatch")
+        };
+        assert_eq!(roots.got, tip.state_root());
+        assert_eq!(roots.expected, bad_root.state_root());
         assert!(!store.path().join("blocks").join(bad_root.hash().to_string()).try_exists()?);
         let mut no_commitment = tip.clone().into_header();
         no_commitment.block_access_list_hash = None;
@@ -1252,5 +1491,149 @@ mod tests {
                 &std::num::IntErrorKind::Zero
             );
         }
+    }
+
+    #[test]
+    fn migration_anchor_requires_finalized_ancestry() -> eyre::Result<()> {
+        let chain = test_chain_spec(EthereumHardfork::Amsterdam);
+        let anchor = SealedHeader::seal_slow(chain.genesis_header().clone());
+        let mut child = anchor.clone().into_header();
+        child.parent_hash = anchor.hash();
+        child.number += 1;
+        child.timestamp += 1;
+        let child = SealedHeader::seal_slow(child);
+        let mut sibling = anchor.clone().into_header();
+        sibling.extra_data = Bytes::from_static(b"sibling");
+        let sibling = SealedHeader::seal_slow(sibling);
+        let files = MigrationFiles {
+            source: MigrationSource::Snapshot("snapshot".into()),
+            preimages: "preimages".into(),
+            anchor: anchor.hash(),
+        };
+        let provider = catchup_provider(&anchor, &child, None)?;
+        assert_eq!(files.anchor_header(&provider, &anchor)?.hash(), anchor.hash());
+        assert_eq!(files.anchor_header(&provider, &child)?.hash(), anchor.hash());
+        assert_eq!(
+            MigrationFiles { anchor: child.hash(), ..files.clone() }
+                .anchor_header(&provider, &anchor)
+                .unwrap_err()
+                .to_string(),
+            "PBT migration anchor is not finalized"
+        );
+        assert_eq!(
+            MigrationFiles { anchor: B256::repeat_byte(1), ..files.clone() }
+                .anchor_header(&provider, &child)
+                .unwrap_err()
+                .to_string(),
+            "PBT migration anchor header is unavailable"
+        );
+        provider.add_header(sibling.hash(), sibling.clone().into_header());
+        assert_eq!(
+            MigrationFiles { anchor: sibling.hash(), ..files.clone() }
+                .anchor_header(&provider, &child)
+                .unwrap_err()
+                .to_string(),
+            "PBT migration anchor is not an ancestor of the finalized block"
+        );
+        let mut grandchild = child.clone().into_header();
+        grandchild.parent_hash = child.hash();
+        grandchild.number += 1;
+        grandchild.timestamp += 1;
+        let grandchild = SealedHeader::seal_slow(grandchild);
+        assert!(provider.headers.lock().remove(&child.hash()).is_some());
+        assert_eq!(
+            files.anchor_header(&provider, &grandchild).unwrap_err().to_string(),
+            "PBT migration finalized ancestry is unavailable"
+        );
+        let mut invalid = child.into_header();
+        invalid.number += 1;
+        let invalid = SealedHeader::seal_slow(invalid);
+        assert_eq!(
+            files.anchor_header(&provider, &invalid).unwrap_err().to_string(),
+            "inconsistent PBT migration finalized ancestry"
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn missing_bals_are_authenticated_before_retention() -> eyre::Result<()> {
+        let (mut source, source_store, _source_directory) =
+            setup_for(0, EthereumHardfork::Amsterdam).await?;
+        let anchor = source.inner.provider.sealed_header(0)?.unwrap();
+        let mut sender = Wallet::new(1).account(0);
+        let transaction = sender.transfer(Address::repeat_byte(0x77), U256::from(9)).await;
+        let first = source.mine([transaction]).await?.ensure_success()?;
+        let tip = source.inner.provider.sealed_header_by_hash(first.block().hash())?.unwrap();
+        let bytes = first.payload.block_access_list().unwrap().clone();
+        let provider = catchup_provider(&anchor, &tip, None)?;
+        let directory = tempfile::tempdir()?;
+        let store = Arc::new(SnapshotStore::open(directory.path(), DecodeLimits::default())?);
+        store.save_block(anchor.hash(), &source_store.load_block(anchor.hash())?)?;
+        let strategy = PbtStateRootStrategy::new(store.clone(), 0);
+        let startup = Startup::default();
+        let error = startup
+            .catch_up_with_bal_fetch(&strategy, &provider, &anchor, &tip, |_, _, _| {
+                eyre::bail!("peer unavailable")
+            })
+            .unwrap_err();
+        assert_eq!(error.to_string(), "peer unavailable");
+        assert!(provider.bal_store().get_by_hash(tip.hash())?.is_none());
+        assert!(!store.path().join("blocks").join(tip.hash().to_string()).try_exists()?);
+        let error = startup
+            .catch_up_with_bal_fetch(&strategy, &provider, &anchor, &tip, |_, _, _| {
+                Ok(Bytes::from_static(&[0xc0]))
+            })
+            .unwrap_err();
+        let mismatch = error.downcast_ref::<alloy_eip7928::BlockAccessListHashMismatch>().unwrap();
+        assert_eq!(mismatch.expected, tip.block_access_list_hash().unwrap());
+        assert_eq!(mismatch.computed, alloy_primitives::keccak256([0xc0]));
+        assert!(provider.bal_store().get_by_hash(tip.hash())?.is_none());
+        assert!(!store.path().join("blocks").join(tip.hash().to_string()).try_exists()?);
+        startup.catch_up_with_bal_fetch(
+            &strategy,
+            &provider,
+            &anchor,
+            &tip,
+            |hash, commitment, budget| {
+                assert_eq!(hash, tip.hash());
+                assert_eq!(commitment, tip.block_access_list_hash().unwrap());
+                assert_eq!(budget, startup.catchup.max_bal_bytes.get());
+                Ok(bytes.clone())
+            },
+        )?;
+        assert_eq!(provider.bal_store().get_by_hash(tip.hash())?, Some(bytes));
+        assert_eq!(store.load_block(tip.hash())?.root(), tip.state_root());
+        startup.catch_up_with_bal_fetch(&strategy, &provider, &anchor, &tip, |_, _, _| {
+            panic!("locally retained BAL must not be downloaded twice")
+        })?;
+        Ok(())
+    }
+
+    #[test]
+    fn startup_checks_completed_state_when_headers_are_ahead() -> eyre::Result<()> {
+        let directory = tempfile::tempdir()?;
+        let store = Arc::new(SnapshotStore::open(directory.path(), DecodeLimits::default())?);
+        let mut state = StateTree::new();
+        state.set_account(Address::ZERO, AccountData { nonce: 1, ..Default::default() })?;
+        let chain = test_chain_spec(EthereumHardfork::Amsterdam);
+        let mut header = chain.genesis_header().clone();
+        header.state_root = state.root();
+        let header = SealedHeader::seal_slow(header);
+        store.save_block(header.hash(), &state)?;
+        let mut next = header.clone().into_header();
+        next.parent_hash = header.hash();
+        next.number += 1;
+        next.timestamp += 1;
+        next.state_root = B256::repeat_byte(0xff);
+        let next = SealedHeader::seal_slow(next);
+        let provider = MockEthProvider::default();
+        provider.add_header(header.hash(), header.into_header());
+        provider.add_header(next.hash(), next.into_header());
+        provider.add_stage_checkpoint(
+            reth_stages::StageId::Finish,
+            reth_stages::StageCheckpoint::new(0),
+        );
+        Startup::default().initialize(&PbtStateRootStrategy::new(store, 0), &provider)?;
+        Ok(())
     }
 }

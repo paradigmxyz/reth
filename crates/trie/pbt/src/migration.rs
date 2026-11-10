@@ -43,10 +43,11 @@ impl Artifacts {
                 2 => snapshot.extend_from_slice(&account.code[3..]),
                 _ => {}
             }
-            let inline: Vec<_> = state
+            let mut inline: Vec<_> = state
                 .storage_entries(*address)
                 .filter(|(slot, _)| *slot < U256::from(64))
                 .collect();
+            inline.sort_unstable_by_key(|(slot, _)| *slot);
             snapshot.push(inline.len() as u8);
             for (slot, value) in inline {
                 snapshot.push(slot.to::<u8>());
@@ -139,96 +140,101 @@ impl Artifacts {
 
     fn decode<H: TreeHasher>(&self, limits: DecodeLimits) -> Result<StateTree<H>, ArtifactError> {
         let (headers, leaves, claimed_root) = parse_snapshot(&self.snapshot, limits)?;
-        let mut preimages = Reader(&self.preimages);
-        let mut state = StateTree::<H>::new();
-        let mut previous_account = None;
-        let mut codes: BTreeMap<B256, Bytes> = BTreeMap::new();
-        let mut total_code_size = 0usize;
-        let mut accounts = 0;
-        while !preimages.0.is_empty() {
-            accounts += 1;
-            if accounts > limits.max_accounts {
-                return Err(ArtifactError::ResourceLimit);
-            }
-            let address = Address::from_slice(preimages.take(20)?);
-            check_order(&mut previous_account, keccak256(address))?;
-            let header = headers
-                .get(&key::account_hash::<H>(address))
-                .ok_or(ArtifactError::Invalid("surplus account preimage"))?;
-            let count = u32::from_be_bytes(preimages.take(4)?.try_into().unwrap()) as usize;
-            if count > limits.max_leaves || count > preimages.0.len() / 32 {
-                return Err(ArtifactError::ResourceLimit);
-            }
-            let code = match &header.code {
-                CodeRef::Empty => Bytes::new(),
-                CodeRef::Delegation(target) => [vec![0xef, 1, 0], target.to_vec()].concat().into(),
-                CodeRef::Contract(hash, size) => {
-                    if let Some(code) = codes.get(hash) {
-                        if code.len() != *size {
-                            return Err(ArtifactError::Invalid("inconsistent shared code size"));
-                        }
-                        code.clone()
-                    } else {
-                        total_code_size = total_code_size
-                            .checked_add(*size)
-                            .ok_or(ArtifactError::ResourceLimit)?;
-                        if total_code_size > limits.max_total_code_size {
-                            return Err(ArtifactError::ResourceLimit);
-                        }
-                        let mut code = Vec::with_capacity(*size);
-                        for index in 0..size.div_ceil(31) {
-                            let chunk = leaves
-                                .get(key::code_key::<H>(*hash, index as u64).as_slice())
-                                .copied()
-                                .unwrap_or_default();
-                            let remaining = (*size - code.len()).min(31);
-                            code.extend_from_slice(&chunk[1..1 + remaining]);
-                        }
-                        if keccak256(&code) != *hash {
-                            return Err(ArtifactError::Invalid("code hash mismatch"));
-                        }
-                        let code: Bytes = code.into();
-                        codes.insert(*hash, code.clone());
-                        code
-                    }
-                }
-            };
-            state.set_account(
-                address,
-                AccountData { nonce: header.nonce, balance: header.balance, code },
-            )?;
-            let mut previous_slot = None;
-            for _ in 0..count {
-                let slot = B256::from_slice(preimages.take(32)?);
-                check_order(&mut previous_slot, keccak256(slot))?;
-                let slot = U256::from_be_slice(slot.as_slice());
-                let value = leaves
-                    .get(&key::storage_key::<H>(address, slot))
-                    .copied()
-                    .ok_or(ArtifactError::Invalid("surplus slot preimage"))?;
-                state.set_storage(address, slot, value)?;
-            }
-        }
-        // Equality of the exact leaf sets authenticates metadata and prevents surplus code,
-        // storage in the wrong zone, noncanonical PUSH bytes, and unreferenced groups.
-        if accounts != headers.len() ||
-            !state
-                .tree()
-                .entries()
-                .eq(leaves.iter().map(|(key, value)| (key.as_slice(), *value)))
-        {
-            return Err(ArtifactError::Invalid(
-                "snapshot and preimages do not describe the same state",
-            ));
-        }
-        if state.root() != claimed_root {
-            return Err(ArtifactError::PbtRootMismatch);
-        }
+        let state = decode_state::<H>(&headers, &leaves, &self.preimages, claimed_root, limits)?;
         if Self::from_state(&state)? != *self {
             return Err(ArtifactError::Invalid("noncanonical artifact encoding"));
         }
         Ok(state)
     }
+}
+
+fn decode_state<H: TreeHasher>(
+    headers: &BTreeMap<B256, Header>,
+    leaves: &Leaves,
+    preimages: &[u8],
+    claimed_root: B256,
+    limits: DecodeLimits,
+) -> Result<StateTree<H>, ArtifactError> {
+    let mut preimages = Reader(preimages);
+    let mut state = StateTree::<H>::new();
+    let mut previous_account = None;
+    let mut codes: BTreeMap<B256, Bytes> = BTreeMap::new();
+    let mut total_code_size = 0usize;
+    let mut accounts = 0;
+    while !preimages.0.is_empty() {
+        accounts += 1;
+        if accounts > limits.max_accounts {
+            return Err(ArtifactError::ResourceLimit);
+        }
+        let address = Address::from_slice(preimages.take(20)?);
+        check_order(&mut previous_account, keccak256(address))?;
+        let header = headers
+            .get(&key::account_hash::<H>(address))
+            .ok_or(ArtifactError::Invalid("surplus account preimage"))?;
+        let count = u32::from_be_bytes(preimages.take(4)?.try_into().unwrap()) as usize;
+        if count > limits.max_leaves || count > preimages.0.len() / 32 {
+            return Err(ArtifactError::ResourceLimit);
+        }
+        let code = match &header.code {
+            CodeRef::Empty => Bytes::new(),
+            CodeRef::Delegation(target) => [vec![0xef, 1, 0], target.to_vec()].concat().into(),
+            CodeRef::Contract(hash, size) => {
+                if let Some(code) = codes.get(hash) {
+                    if code.len() != *size {
+                        return Err(ArtifactError::Invalid("inconsistent shared code size"));
+                    }
+                    code.clone()
+                } else {
+                    total_code_size =
+                        total_code_size.checked_add(*size).ok_or(ArtifactError::ResourceLimit)?;
+                    if total_code_size > limits.max_total_code_size {
+                        return Err(ArtifactError::ResourceLimit);
+                    }
+                    let mut code = Vec::with_capacity(*size);
+                    for index in 0..size.div_ceil(31) {
+                        let chunk = leaves
+                            .get(key::code_key::<H>(*hash, index as u64).as_slice())
+                            .copied()
+                            .unwrap_or_default();
+                        let remaining = (*size - code.len()).min(31);
+                        code.extend_from_slice(&chunk[1..1 + remaining]);
+                    }
+                    if keccak256(&code) != *hash {
+                        return Err(ArtifactError::Invalid("code hash mismatch"));
+                    }
+                    let code: Bytes = code.into();
+                    codes.insert(*hash, code.clone());
+                    code
+                }
+            }
+        };
+        state.set_account(
+            address,
+            AccountData { nonce: header.nonce, balance: header.balance, code },
+        )?;
+        let mut previous_slot = None;
+        for _ in 0..count {
+            let slot = B256::from_slice(preimages.take(32)?);
+            check_order(&mut previous_slot, keccak256(slot))?;
+            let slot = U256::from_be_slice(slot.as_slice());
+            let value = leaves
+                .get(&key::storage_key::<H>(address, slot))
+                .copied()
+                .ok_or(ArtifactError::Invalid("surplus slot preimage"))?;
+            state.set_storage(address, slot, value)?;
+        }
+    }
+    // Equality of the exact leaf sets authenticates metadata and prevents surplus code,
+    // storage in the wrong zone, noncanonical PUSH bytes, and unreferenced groups.
+    if accounts != headers.len() ||
+        !state.tree().entries().eq(leaves.iter().map(|(key, value)| (key.as_slice(), *value)))
+    {
+        return Err(ArtifactError::Invalid("snapshot and preimages do not describe the same state"));
+    }
+    if state.root() != claimed_root {
+        return Err(ArtifactError::PbtRootMismatch);
+    }
+    Ok(state)
 }
 
 /// Consumer-controlled bounds for untrusted snapshot decoding.
@@ -432,7 +438,7 @@ fn add_leaf(
     Ok(())
 }
 
-fn check_order(previous: &mut Option<B256>, value: B256) -> Result<(), ArtifactError> {
+pub(crate) fn check_order(previous: &mut Option<B256>, value: B256) -> Result<(), ArtifactError> {
     if previous.is_some_and(|previous| previous >= value) {
         return Err(ArtifactError::Invalid("preimage keys not strictly ordered"));
     }
@@ -446,10 +452,10 @@ fn put_integer(output: &mut Vec<u8>, bytes: &[u8]) {
     output.extend_from_slice(&bytes[first..]);
 }
 
-struct Reader<'a>(&'a [u8]);
+pub(crate) struct Reader<'a>(pub(crate) &'a [u8]);
 
 impl<'a> Reader<'a> {
-    const fn take(&mut self, count: usize) -> Result<&'a [u8], ArtifactError> {
+    pub(crate) const fn take(&mut self, count: usize) -> Result<&'a [u8], ArtifactError> {
         if count > self.0.len() {
             return Err(ArtifactError::Truncated);
         }
@@ -471,4 +477,87 @@ impl<'a> Reader<'a> {
         }
         Ok(U256::from_be_slice(bytes))
     }
+
+    #[cfg(any(feature = "conversion", feature = "persistence"))]
+    pub(crate) fn array<const N: usize>(&mut self) -> Result<[u8; N], ArtifactError> {
+        self.take(N)?.try_into().map_err(|_| ArtifactError::Truncated)
+    }
+}
+
+#[cfg(feature = "persistence")]
+pub(crate) fn restore_leaves<H: TreeHasher>(
+    leaves: Leaves,
+    addresses: BTreeMap<B256, Address>,
+    slots: BTreeMap<Vec<u8>, U256>,
+    root: B256,
+    limits: DecodeLimits,
+) -> Result<StateTree<H>, ArtifactError> {
+    let mut headers = BTreeMap::new();
+    let mut plain_slots: BTreeMap<Address, Vec<B256>> = BTreeMap::new();
+    for (hash, address) in &addresses {
+        if key::account_hash::<H>(*address) != *hash {
+            return Err(ArtifactError::Invalid("invalid account preimage"));
+        }
+        let basic = leaves
+            .get(key::header_key::<H>(*address, key::BASIC_DATA_LEAF_KEY).as_slice())
+            .copied()
+            .unwrap_or_default();
+        let mut metadata = Reader(&basic[4..16]);
+        let size = u32::from_be_bytes(metadata.array()?) as usize;
+        let nonce = u64::from_be_bytes(metadata.array()?);
+        let balance = U256::from_be_slice(&basic[16..]);
+        let code_hash =
+            leaves.get(key::header_key::<H>(*address, key::CODE_HASH_LEAF_KEY).as_slice());
+        let delegation =
+            leaves.get(key::header_key::<H>(*address, key::DELEGATION_LEAF_KEY).as_slice());
+        let code = match (code_hash, delegation) {
+            (Some(hash), None) if size == 0 && *hash == keccak256([]) => CodeRef::Empty,
+            (Some(hash), None) if size > 0 => {
+                if size > limits.max_code_size {
+                    return Err(ArtifactError::ResourceLimit);
+                }
+                CodeRef::Contract(*hash, size)
+            }
+            (None, Some(value))
+                if size == 23 &&
+                    value[..3] == [0xef, 1, 0] &&
+                    value[23..].iter().all(|byte| *byte == 0) =>
+            {
+                CodeRef::Delegation(Address::from_slice(&value[3..23]))
+            }
+            _ => return Err(ArtifactError::Invalid("invalid account code leaves")),
+        };
+        if matches!(code, CodeRef::Empty) && nonce == 0 && balance.is_zero() {
+            return Err(ArtifactError::Invalid("empty anchor account"));
+        }
+        headers.insert(*hash, Header { nonce, balance, code });
+        for slot in 0..key::HEADER_STORAGE_SLOTS {
+            if leaves.contains_key(key::storage_key::<H>(*address, U256::from(slot)).as_slice()) {
+                plain_slots.entry(*address).or_default().push(B256::from(U256::from(slot)));
+            }
+        }
+    }
+    for (key, slot) in slots {
+        let hash = B256::from_slice(&key[1..33]);
+        let address =
+            *addresses.get(&hash).ok_or(ArtifactError::Invalid("storage without header"))?;
+        if crate::key::storage_key::<H>(address, slot) != key {
+            return Err(ArtifactError::Invalid("invalid storage preimage"));
+        }
+        plain_slots.entry(address).or_default().push(B256::from(slot));
+    }
+    let mut accounts: Vec<_> = addresses.values().copied().collect();
+    accounts.sort_unstable_by_key(|address| keccak256(address));
+    let mut preimages = Vec::new();
+    for address in accounts {
+        preimages.extend_from_slice(address.as_slice());
+        let mut slots = plain_slots.remove(&address).unwrap_or_default();
+        slots.sort_unstable_by_key(|slot| keccak256(slot));
+        let count = u32::try_from(slots.len()).map_err(|_| ArtifactError::ResourceLimit)?;
+        preimages.extend_from_slice(&count.to_be_bytes());
+        for slot in slots {
+            preimages.extend_from_slice(slot.as_slice());
+        }
+    }
+    decode_state::<H>(&headers, &leaves, &preimages, root, limits)
 }

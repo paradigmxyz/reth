@@ -34,6 +34,10 @@ pub mod execution;
 #[cfg(feature = "bal")]
 pub mod replay;
 
-/// Atomic, content-addressed devnet checkpoints.
+/// Incremental, content-addressed durable trie checkpoints.
 #[cfg(feature = "persistence")]
 pub mod persistence;
+
+/// Conversion of retained MPT state using exact account and storage preimages.
+#[cfg(feature = "conversion")]
+pub mod conversion;

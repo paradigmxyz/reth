@@ -128,6 +128,24 @@ impl<N: ProviderNodeTypes> Pipeline<N> {
     ) -> &mut dyn Stage<<ProviderFactory<N> as DatabaseProviderFactory>::ProviderRW> {
         &mut self.stages[idx]
     }
+
+    /// Replaces the stage with the same ID, preserving its position and persisted checkpoint.
+    ///
+    /// Configure replacements before running or recovering the pipeline. Returns
+    /// [`PipelineError::MissingStage`] without changing the pipeline if that ID is absent.
+    pub fn replace_stage<S>(&mut self, stage: S) -> Result<(), PipelineError>
+    where
+        S: Stage<<ProviderFactory<N> as DatabaseProviderFactory>::ProviderRW> + 'static,
+    {
+        let id = stage.id();
+        let existing = self
+            .stages
+            .iter_mut()
+            .find(|existing| existing.id() == id)
+            .ok_or(PipelineError::MissingStage(id))?;
+        *existing = Box::new(stage);
+        Ok(())
+    }
 }
 
 impl<N: ProviderNodeTypes> Pipeline<N> {
@@ -1523,5 +1541,38 @@ mod tests {
         for id in [StageId::Other("A"), StageId::Other("B")] {
             assert_eq!(provider.get_stage_checkpoint(id).unwrap(), Some(StageCheckpoint::new(10)));
         }
+    }
+
+    #[test]
+    fn stage_replacement_preserves_order_and_checkpoint() {
+        let factory = create_test_provider_factory();
+        let provider = factory.provider_rw().unwrap();
+        let id = StageId::Other("B");
+        provider.save_stage_checkpoint(id, StageCheckpoint::new(10)).unwrap();
+        provider.commit().unwrap();
+        let mut pipeline = Pipeline::<MockNodeTypesWithDB>::builder()
+            .add_stage(TestStage::new(StageId::Other("A")))
+            .add_stage(TestStage::new(id).add_exec(Err(StageError::MissingDownloadBuffer)))
+            .build(
+                factory.clone(),
+                StaticFileProducer::new(factory.clone(), PruneModes::default()),
+            );
+        pipeline
+            .replace_stage(
+                TestStage::new(id).add_exec(Ok(ExecOutput::done(StageCheckpoint::new(11)))),
+            )
+            .unwrap();
+        assert_eq!(pipeline.stage(0).id(), StageId::Other("A"));
+        let provider = factory.provider_rw().unwrap();
+        assert_eq!(
+            pipeline.stage(1).execute(&provider, ExecInput::default()).unwrap(),
+            ExecOutput::done(StageCheckpoint::new(11))
+        );
+        assert_eq!(provider.get_stage_checkpoint(id).unwrap(), Some(StageCheckpoint::new(10)));
+        assert_matches!(
+            pipeline.replace_stage(TestStage::new(StageId::Other("C"))),
+            Err(PipelineError::MissingStage(StageId::Other("C")))
+        );
+        assert_eq!(pipeline.stages.len(), 2);
     }
 }

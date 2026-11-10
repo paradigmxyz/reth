@@ -1,18 +1,21 @@
-//! Atomic devnet checkpoints. Each state is addressed by its PBT root; block references are
-//! published only after the corresponding state file has been synced and renamed into place.
+//! Incremental, content-addressed checkpoints. Block references are published only after
+//! the corresponding trie nodes and root record have been durably synced.
 
 use crate::{
     migration::{ArtifactError, Artifacts, DecodeLimits},
     Blake3Hasher, StateTree, TreeHasher,
 };
 use alloy_primitives::B256;
+use nodes::{NodeDatabase, STORE_VERSION};
 use std::{
     collections::{BTreeMap, BTreeSet},
     fs::File,
     io::{Read, Write},
     path::{Path, PathBuf},
-    sync::Mutex,
+    sync::{Arc, Mutex},
 };
+
+mod nodes;
 
 const HASH_BYTES: usize = 32;
 const CHECKPOINT_LENGTH_BYTES: usize = 8;
@@ -21,25 +24,27 @@ const SNAPSHOT_ACCOUNT_MAX_BYTES: usize = 130;
 const SNAPSHOT_LEAF_MAX_BYTES: usize = 68;
 const SNAPSHOT_TRAILER_BYTES: usize = 1 + HASH_BYTES;
 
-/// A durable state-snapshot store for experimental nodes and migration replay.
+/// A durable, incremental trie store for migration replay and fork checkpoints.
 ///
-/// This writes full canonical artifacts, not incremental database pages. Checkpoints remain
-/// until the caller explicitly prunes blocks proven obsolete by finality. It is not a mainnet
-/// persistence backend.
+/// Unchanged subtrees are shared on disk. Checkpoints remain until the caller explicitly
+/// prunes blocks proven obsolete by finality. Cold loads reconstruct an in-memory state;
+/// this does not replace Reth's historical-state providers.
 #[derive(Debug)]
 pub struct SnapshotStore<H = Blake3Hasher> {
     path: PathBuf,
+    database: Arc<NodeDatabase>,
     cache: Mutex<BTreeMap<B256, StateTree<H>>>,
     limits: DecodeLimits,
 }
 
 impl<H: TreeHasher> SnapshotStore<H> {
-    /// Opens a checkpoint directory. Use one shared store per node directory.
+    /// Opens a checkpoint directory. Handles in this process share the native database lock.
     pub fn open(path: impl Into<PathBuf>, limits: DecodeLimits) -> Result<Self, StoreError> {
         let path = path.into();
         reth_fs_util::create_dir_all(path.join("states"))?;
         reth_fs_util::create_dir_all(path.join("blocks"))?;
-        Ok(Self { path, cache: Mutex::default(), limits })
+        let database = NodeDatabase::open(&path)?;
+        Ok(Self { path, database, cache: Mutex::default(), limits })
     }
 
     /// Returns the checkpoint directory.
@@ -49,6 +54,7 @@ impl<H: TreeHasher> SnapshotStore<H> {
 
     /// Loads and verifies state using its trusted PBT root.
     pub fn load(&self, root: B256) -> Result<StateTree<H>, StoreError> {
+        let _writer = self.database.mutation.lock().map_err(|_| StoreError::Poisoned)?;
         let mut cache = self.cache.lock().map_err(|_| StoreError::Poisoned)?;
         if let Some(state) = cache.get(&root) {
             return Ok(state.clone());
@@ -60,6 +66,7 @@ impl<H: TreeHasher> SnapshotStore<H> {
 
     /// Persists a state before returning its root. No block reference is implied.
     pub fn save(&self, state: &StateTree<H>) -> Result<B256, StoreError> {
+        let _writer = self.database.mutation.lock().map_err(|_| StoreError::Poisoned)?;
         let mut cache = self.cache.lock().map_err(|_| StoreError::Poisoned)?;
         self.save_state(state, &mut cache)
     }
@@ -68,6 +75,7 @@ impl<H: TreeHasher> SnapshotStore<H> {
     ///
     /// This also supports pre-activation blocks whose header commits to the MPT instead.
     pub fn save_block(&self, block: B256, state: &StateTree<H>) -> Result<B256, StoreError> {
+        let _writer = self.database.mutation.lock().map_err(|_| StoreError::Poisoned)?;
         let mut cache = self.cache.lock().map_err(|_| StoreError::Poisoned)?;
         let root = self.save_state(state, &mut cache)?;
         reth_fs_util::atomic_write_file(
@@ -101,6 +109,33 @@ impl<H: TreeHasher> SnapshotStore<H> {
         self.save_block(block, &state)
     }
 
+    /// Converts retained MPT state and publishes it only after authenticating the anchor root.
+    ///
+    /// `source` must be pinned to the caller's finalized anchor. The preimage file is bounded
+    /// before reading, then matched exactly to source leaves. Cancellation never publishes a
+    /// checkpoint. Retained code-store entries not referenced by the source are ignored.
+    #[cfg(feature = "conversion")]
+    pub fn convert_anchor(
+        &self,
+        block: B256,
+        anchor_mpt_root: B256,
+        source: &impl crate::conversion::HashedCursorFactory,
+        code_store: &impl crate::conversion::BytecodeReader,
+        preimages_path: &Path,
+        should_stop: impl FnMut() -> bool,
+    ) -> Result<B256, StoreError> {
+        let preimages = read_bounded(preimages_path, preimage_byte_limit(self.limits)?)?;
+        let state = crate::conversion::convert_mpt::<H>(
+            source,
+            code_store,
+            &preimages,
+            anchor_mpt_root,
+            self.limits,
+            should_stop,
+        )?;
+        self.save_block(block, &state)
+    }
+
     /// Deletes explicitly obsolete block references and their otherwise unreferenced states.
     ///
     /// The caller must authenticate the finalized checkpoint against its validated header and prove
@@ -117,6 +152,7 @@ impl<H: TreeHasher> SnapshotStore<H> {
         finalized: B256,
         obsolete_blocks: &[B256],
     ) -> Result<PruneOutcome, StoreError> {
+        let _writer = self.database.mutation.lock().map_err(|_| StoreError::Poisoned)?;
         let mut cache = self.cache.lock().map_err(|_| StoreError::Poisoned)?;
         let obsolete: BTreeSet<_> = obsolete_blocks.iter().copied().collect();
         if obsolete.contains(&finalized) {
@@ -176,6 +212,7 @@ impl<H: TreeHasher> SnapshotStore<H> {
             .map_err(|error| reth_fs_util::FsPathError::fsync(error, &blocks_path))?;
         for root in candidate_roots.difference(&retained_roots) {
             reth_fs_util::remove_file(self.state_path(*root))?;
+            self.database.remove_root(*root)?;
             cache.remove(root);
             outcome.state_files += 1;
         }
@@ -183,7 +220,39 @@ impl<H: TreeHasher> SnapshotStore<H> {
         reth_fs_util::open(&states_path)?
             .sync_all()
             .map_err(|error| reth_fs_util::FsPathError::fsync(error, &states_path))?;
+        self.database.collect::<H>()?;
         Ok(outcome)
+    }
+
+    /// Returns whether the store has no registered roots, legacy checkpoints, or block references.
+    ///
+    /// Includes durable native roots whose file publication was interrupted. Filesystem or database
+    /// errors are returned rather than treating an unreadable directory as empty.
+    pub fn is_empty(&self) -> Result<bool, StoreError> {
+        let _writer = self.database.mutation.lock().map_err(|_| StoreError::Poisoned)?;
+        if self.database.has_roots()? {
+            return Ok(false);
+        }
+        for name in ["states", "blocks"] {
+            let path = self.path.join(name);
+            if reth_fs_util::read_dir(&path)?
+                .next()
+                .transpose()
+                .map_err(|error| reth_fs_util::FsPathError::read_dir(error, &path))?
+                .is_some()
+            {
+                return Ok(false);
+            }
+        }
+        Ok(true)
+    }
+
+    /// Reports whether a block reference exists, without authenticating its state.
+    ///
+    /// Call [`Self::load_block`] to verify it. A corrupt reference is not treated as missing.
+    pub fn contains_block(&self, block: B256) -> Result<bool, StoreError> {
+        let path = self.path.join("blocks").join(block.to_string());
+        path.try_exists().map_err(|error| reth_fs_util::FsPathError::metadata(error, path).into())
     }
 
     fn state_path(&self, root: B256) -> PathBuf {
@@ -195,36 +264,9 @@ impl<H: TreeHasher> SnapshotStore<H> {
         state: &StateTree<H>,
         cache: &mut BTreeMap<B256, StateTree<H>>,
     ) -> Result<B256, StoreError> {
-        if state.accounts().count() > self.limits.max_accounts ||
-            state.tree().len() > self.limits.max_leaves
-        {
-            return Err(ArtifactError::ResourceLimit.into());
-        }
-        let mut codes = BTreeSet::new();
-        let mut total_code_size = 0usize;
-        for (_, account) in state
-            .accounts()
-            .filter(|(_, account)| !account.code.is_empty() && !account.is_delegation())
-        {
-            if account.code.len() > self.limits.max_code_size {
-                return Err(ArtifactError::ResourceLimit.into());
-            }
-            if codes.insert(alloy_primitives::keccak256(&account.code)) {
-                total_code_size = total_code_size
-                    .checked_add(account.code.len())
-                    .ok_or(ArtifactError::ResourceLimit)?;
-                if total_code_size > self.limits.max_total_code_size {
-                    return Err(ArtifactError::ResourceLimit.into());
-                }
-            }
-        }
+        self.database.save(state, self.limits)?;
         let root = state.root();
-        let artifacts = Artifacts::from_state(state)?;
-        reth_fs_util::atomic_write_file(&self.state_path(root), |file| -> std::io::Result<()> {
-            file.write_all(&(artifacts.preimages.len() as u64).to_be_bytes())?;
-            file.write_all(&artifacts.preimages)?;
-            file.write_all(&artifacts.snapshot)
-        })?;
+        self.write_marker(root, state.tree().len())?;
         cache_state(cache, root, state.clone());
         Ok(root)
     }
@@ -237,7 +279,55 @@ impl<H: TreeHasher> SnapshotStore<H> {
         Ok(B256::from_slice(&bytes))
     }
 
+    fn write_marker(&self, root: B256, count: usize) -> Result<(), StoreError> {
+        let count = u64::try_from(count).map_err(|_| ArtifactError::ResourceLimit)?;
+        reth_fs_util::atomic_write_file(&self.state_path(root), |file| -> std::io::Result<()> {
+            file.write_all(&count.to_be_bytes())?;
+            file.write_all(&STORE_VERSION.to_be_bytes())
+        })?;
+        Ok(())
+    }
+
     fn load_state(&self, root: B256) -> Result<StateTree<H>, StoreError> {
+        let Some(count) = self.database.leaf_count(root)? else {
+            // Legacy full-artifact checkpoints are verified before upgrading them in place.
+            let state = self.load_legacy_state(root)?;
+            self.database.save(&state, self.limits)?;
+            self.write_marker(root, state.tree().len())?;
+            return Ok(state);
+        };
+        let path = self.state_path(root);
+        if path.try_exists().map_err(|error| reth_fs_util::FsPathError::metadata(error, &path))? {
+            if reth_fs_util::metadata(&path)?.len() > (CHECKPOINT_LENGTH_BYTES + 4) as u64 {
+                // Resume an upgrade interrupted after syncing nodes but before replacing the file.
+                let state = self.load_legacy_state(root)?;
+                self.write_marker(root, state.tree().len())?;
+                return Ok(state);
+            }
+            let (mut file, _) = open_bounded(&path, CHECKPOINT_LENGTH_BYTES + 4)?;
+            let mut bytes = [0; CHECKPOINT_LENGTH_BYTES];
+            read_exact(&mut file, &mut bytes, &path)?;
+            let stored = usize::try_from(u64::from_be_bytes(bytes))
+                .map_err(|_| ArtifactError::ResourceLimit)?;
+            if stored > self.limits.max_leaves {
+                return Err(ArtifactError::ResourceLimit.into());
+            }
+            let mut version = [0; 4];
+            read_exact(&mut file, &mut version, &path)?;
+            check_eof(&mut file, &path)?;
+            if stored != count || version != STORE_VERSION.to_be_bytes() {
+                return Err(ArtifactError::Invalid("invalid PBT checkpoint marker").into());
+            }
+        } else {
+            // A crash may sync the root record before publishing its small checkpoint marker.
+            let state = self.database.load::<H>(root, count, self.limits)?;
+            self.write_marker(root, count)?;
+            return Ok(state);
+        }
+        self.database.load::<H>(root, count, self.limits)
+    }
+
+    fn load_legacy_state(&self, root: B256) -> Result<StateTree<H>, StoreError> {
         let path = self.state_path(root);
         let preimage_limit = preimage_byte_limit(self.limits)?;
         let snapshot_limit = snapshot_byte_limit(self.limits)?;
@@ -281,6 +371,13 @@ pub struct PruneOutcome {
 /// Checkpoint read/write or verification failure.
 #[derive(Debug, thiserror::Error)]
 pub enum StoreError {
+    /// Native trie database operation failed.
+    #[error(transparent)]
+    Database(#[from] rocksdb::Error),
+    /// Source MPT conversion or preimage matching failed.
+    #[cfg(feature = "conversion")]
+    #[error(transparent)]
+    Conversion(#[from] crate::conversion::ConversionError),
     /// Filesystem operation failed, including its path.
     #[error(transparent)]
     Io(#[from] reth_fs_util::FsPathError),

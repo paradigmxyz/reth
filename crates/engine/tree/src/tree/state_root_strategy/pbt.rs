@@ -1,5 +1,5 @@
-//! Experimental PBT strategy. Both commitments are maintained, using full-state checkpoints
-//! for PBT and Reth's normal trie updates for MPT. The checkpoint backend is devnet-only.
+//! Experimental PBT strategy. Both commitments are maintained, using incremental durable
+//! PBT checkpoints and Reth's normal trie updates for MPT. Execution state remains in memory.
 
 use super::*;
 use reth_evm::EvmEnv as _;

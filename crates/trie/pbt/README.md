@@ -27,14 +27,19 @@ are drafts. BLAKE3 is the reference/devnet configuration, not a final hash decis
   `with_limit` selects another operator budget. Reaching the limit rejects new
   layers without evicting viable branches. Finalization releases capacity. This
   bounds layer count rather than total memory.
-- The `persistence` feature atomically checkpoints complete canonical artifacts
-  and publishes block-to-PBT-root references after the state is saved. Reopening
-  verifies the checkpoint against its root. Reads are bounded before allocation.
+- The `conversion` feature merges retained hashed MPT state with exact, hash-ordered
+  address/slot preimages, resolves and checks bytecode, and authenticates the anchor
+  MPT root before publishing its PBT checkpoint. Conversion observes cancellation.
+- The `persistence` feature stores content-addressed trie nodes in RocksDB. Unchanged
+  subtrees are shared across blocks and forks; only new paths are written in bounded,
+  synced batches before publishing a block reference. Reopening verifies node hashes,
+  preimages, code and the final root. Legacy artifact checkpoints upgrade after
+  verification. Reads are bounded before allocation.
   `import_anchor` dual-verifies bounded local artifacts against a caller-trusted
   finalized MPT root before publishing them. `prune_finalized` deletes only
   explicitly obsolete references and candidate states unused by retained blocks;
   the caller must prove finality and ancestry. Shared roots and retained branches
-  survive pruning.
+  survive pruning. Mark/sweep reclaims nodes unreachable from all remaining checkpoints.
 
 `BinaryTree` can store a zero value. `StateTree` maps zero writes to deletion.
 `set_account` exposes the standalone embedding, including explicitly supplied
@@ -77,22 +82,30 @@ RPC only; see its [wire format and lifecycle configuration](../../../examples/pb
 
 ## Current operational boundary
 
-This is a devnet/reference backend. Account indexes, artifact conversion, and
-verification are in memory; checkpoints rewrite the full state. It is not a
-mainnet-scale incremental database implementation. The cache holds at most 64
-states and eviction does not remove durable checkpoints. Disk usage grows until
-the operator explicitly prunes checkpoints proven obsolete under finality.
+The native store writes incremental trie nodes and shares unchanged subtrees across
+checkpoints. Its cache holds at most 64 states; eviction does not delete durable
+checkpoints. Disk usage grows until the operator explicitly prunes checkpoints
+proven obsolete under finality. Pruning retains shared nodes and root-only checkpoints.
 
 The engine strategy covers live validation, payload construction, shadow roots,
-and fork selection. Staged/backfill sync and snap protocol paths still use MPT.
-The dev-node example explicitly refuses staged/backfill sync before the MPT
-pipeline can run; it must stay within live engine processing.
-External users must integrate or disable those paths before running a PBT network
-that enters backfill. The example supports durable restart, verified local anchor
-import, bounded local BAL catch-up, and explicit finalized-ancestor pruning.
-Automatic anchor discovery, remote snapshot distribution, missing BAL-range
-retrieval, automatic branch pruning, and a standardized public proof RPC remain
-unimplemented. The replay API expects hashes from an already validated header
-chain; it does not establish consensus finality or validate execution itself.
+and fork selection. The example also installs PBT-aware staged Merkle verification
+and unwind checks. External users of the strategy must install equivalent staged
+verification before entering backfill. PBT-native snap protocol support remains absent.
+
+The example supports durable restart, verified snapshot import or retained-MPT
+self-conversion, peer BAL catch-up, and explicit finalized-ancestor pruning. Its
+converter uses Reth's existing changeset overlay to reconstruct the selected
+anchor, then requires exact preimages and a matching anchor MPT root. Both anchor
+and preimages remain operator inputs, matching the inspected geth workflow.
+
+Automatic anchor discovery, remote snapshot distribution, automatic branch pruning,
+and a standardized public proof RPC remain unimplemented. The replay API expects
+hashes from an already validated header chain; it does not establish consensus
+finality or validate execution itself.
+
+Cold loads and conversion still reconstruct a complete in-memory state, and MPT
+checks over it walk the state. This does not yet provide geth's lazy database-backed
+state access or external-memory conversion. Mainnet-scale memory, throughput and
+crash-recovery testing remain necessary.
 
 No mainnet activation timestamp or gas schedule is selected by this crate.

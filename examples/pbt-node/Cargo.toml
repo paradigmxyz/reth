@@ -8,8 +8,9 @@ license.workspace = true
 [dependencies]
 reth-ethereum = { workspace = true, features = ["node", "test-utils"] }
 reth-engine-tree = { workspace = true, features = ["pbt"] }
-reth-trie-pbt = { workspace = true, features = ["execution", "persistence", "bal"] }
+reth-trie-pbt = { workspace = true, features = ["execution", "persistence", "bal", "conversion"] }
 reth-storage-overlay.workspace = true
+reth-stages.workspace = true
 reth-fs-util.workspace = true
 alloy-primitives.workspace = true
 alloy-rpc-types-engine.workspace = true
@@ -19,6 +20,8 @@ jsonrpsee = { workspace = true, features = ["server"] }
 serde = { workspace = true, features = ["derive"] }
 tokio = { workspace = true, features = ["signal"] }
 tempfile.workspace = true
+tracing.workspace = true
+thiserror.workspace = true
 
 [dev-dependencies]
 alloy-rlp.workspace = true
