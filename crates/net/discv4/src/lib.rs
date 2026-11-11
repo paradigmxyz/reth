@@ -1712,7 +1712,7 @@ impl Discv4Service {
         let mut failed_pings = Vec::new();
         self.pending_pings.retain(|node_id, ping_request| {
             if now.duration_since(ping_request.sent_at) > self.config.ping_expiration {
-                failed_pings.push(*node_id);
+                failed_pings.push((*node_id, ping_request.node.address));
                 return false
             }
             true
@@ -1721,8 +1721,12 @@ impl Discv4Service {
         if !failed_pings.is_empty() {
             // remove nodes that failed to pong
             trace!(target: "discv4", num=%failed_pings.len(), "evicting nodes due to failed pong");
-            for node_id in failed_pings {
-                self.remove_node(node_id);
+            for (node_id, address) in failed_pings {
+                // a failed bond ping to a different address than the stored endpoint must not
+                // evict the node
+                if self.on_entry(node_id, |entry| entry.record.address == address).unwrap_or(true) {
+                    self.remove_node(node_id);
+                }
             }
         }
 
