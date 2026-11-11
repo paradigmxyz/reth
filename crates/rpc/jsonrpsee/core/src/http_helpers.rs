@@ -35,6 +35,12 @@ use std::{
     task::{Context, Poll},
 };
 
+/// Upper bound for the buffer reserved from a request's declared `Content-Length`.
+///
+/// Requests up to this size are read into a single allocation. The bound keeps a client that
+/// declares a large body without sending it from pinning that much memory per connection.
+const MAX_BODY_PREALLOCATION: usize = 1024 * 1024;
+
 /// HTTP request type.
 pub type Request<T = Body> = http::Request<T>;
 /// HTTP response type.
@@ -146,8 +152,8 @@ where
 
     futures_util::pin_mut!(body);
 
-    // Allocate up to 16KB initially.
-    let mut received_data = Vec::with_capacity(std::cmp::min(body_size as usize, 16 * 1024));
+    let mut received_data =
+        Vec::with_capacity(std::cmp::min(body_size as usize, MAX_BODY_PREALLOCATION));
     let mut limited_body = Limited::new(body, max_body_size as usize);
 
     let mut is_single = None;
