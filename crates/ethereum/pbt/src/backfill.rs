@@ -1,4 +1,4 @@
-//! Staged execution retains MPT nodes while BAL replay authenticates PBT commitments.
+//! Staged execution authenticates PBT commitments and retires MPT work after finality.
 
 use crate::{download, CatchupLimits, Startup};
 use alloy_primitives::{map::B256Map, B256};
@@ -19,8 +19,8 @@ use reth_ethereum::{
     EthPrimitives,
 };
 use reth_stages::{
-    stages::MerkleStage, BlockErrorKind, ExecInput, ExecOutput, Stage, StageError, StageId,
-    UnwindInput, UnwindOutput,
+    stages::MerkleStage, BlockErrorKind, ExecInput, ExecOutput, Stage, StageCheckpoint, StageError,
+    StageId, UnwindInput, UnwindOutput,
 };
 use reth_trie_pbt::migration::mpt_root;
 use std::{
@@ -152,6 +152,18 @@ where
         if input.target_reached() {
             return Ok(ExecOutput::done(input.checkpoint()));
         }
+        if !matches!(self.merkle, MerkleStage::Unwind { .. }) &&
+            let Some(retired) = provider.mpt_retired_at()?
+        {
+            // Execution has authenticated the BAL against its output. Preparation replayed
+            // that BAL and checked PBT roots; no auxiliary MPT root remains after disposal.
+            let header = provider
+                .sealed_header(input.target())?
+                .ok_or_else(|| ProviderError::HeaderNotFound(input.target().into()))?;
+            self.strategy.validate_retired_parent(header.header(), Some(retired))?;
+            self.strategy.restore_parent(header.hash(), header.state_root(), header.timestamp())?;
+            return Ok(ExecOutput::done(StageCheckpoint::new(input.target())))
+        }
         let strategy = &self.strategy;
         self.merkle.execute_with_root_validator(provider, input, |mpt, header, _| {
             verify(strategy, mpt, header)
@@ -165,6 +177,10 @@ where
     ) -> Result<UnwindOutput, StageError> {
         self.pending = None;
         self.prepared = None;
+        if provider.mpt_retired_at()?.is_some() {
+            self.validate_unwind(provider, input)?;
+            return Ok(UnwindOutput { checkpoint: StageCheckpoint::new(input.unwind_to) })
+        }
         let strategy = &self.strategy;
         self.merkle.unwind_with_root_validator(provider, input, |mpt, header, _| {
             verify(strategy, mpt, header)
@@ -179,6 +195,7 @@ where
         let header = provider
             .sealed_header(input.unwind_to)?
             .ok_or_else(|| ProviderError::HeaderNotFound(input.unwind_to.into()))?;
+        self.strategy.validate_retired_parent(header.header(), provider.mpt_retired_at()?)?;
         self.strategy.restore_parent(header.hash(), header.state_root(), header.timestamp())?;
         Ok(())
     }
@@ -278,4 +295,106 @@ fn verify<H: BlockHeader>(
         });
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::retirement;
+    use alloy_primitives::Address;
+    use reth_ethereum::{
+        network::p2p::NoopFullBlockClient,
+        provider::{
+            db::{tables, transaction::DbTx},
+            test_utils::{create_test_provider_factory, insert_headers},
+        },
+        Block,
+    };
+    use reth_trie_pbt::{
+        migration::DecodeLimits, persistence::SnapshotStore, AccountData, StateTree,
+    };
+
+    #[test]
+    fn retired_backfill_skips_mpt_and_rejects_deep_unwind() -> eyre::Result<()> {
+        let directory = tempfile::tempdir()?;
+        let store = Arc::new(SnapshotStore::open(directory.path(), DecodeLimits::default())?);
+        let factory = create_test_provider_factory();
+        let mut headers = Vec::new();
+        let mut state = StateTree::new();
+        for number in 0..=3 {
+            state.set_account(
+                Address::ZERO,
+                AccountData { nonce: number + 1, ..Default::default() },
+            )?;
+            let mut header = Block::default().header;
+            header.number = number;
+            header.timestamp = number;
+            header.state_root = state.root();
+            let header = SealedHeader::seal_slow(header);
+            if number < 3 {
+                store.save_block(header.hash(), &state)?;
+            }
+            headers.push(header);
+        }
+        insert_headers(&factory, &headers);
+        let provider = factory.provider_rw()?;
+        provider.tx_ref().clear::<tables::AccountsTrie>()?;
+        provider.tx_ref().clear::<tables::StoragesTrie>()?;
+        provider
+            .tx_ref()
+            .put::<tables::ChainState>(tables::ChainStateKey::PbtMptRetiredBlock, 1)?;
+        let mut stage = PbtMerkleStage::<_, NoopFullBlockClient> {
+            merkle: MerkleStage::default_unwind(),
+            strategy: Arc::new(PbtStateRootStrategy::new(store, 1)),
+            limits: CatchupLimits::default(),
+            factory: factory.clone(),
+            client: NoopFullBlockClient::default(),
+            pending: None,
+            prepared: None,
+        };
+        // The unwind-only stage runs before execution/replay has verified target state.
+        assert_eq!(
+            stage.execute(
+                &*provider,
+                ExecInput { target: Some(3), checkpoint: Some(StageCheckpoint::new(1)) }
+            )?,
+            ExecOutput::done(StageCheckpoint::new(3))
+        );
+        stage.merkle = MerkleStage::default_execution();
+        let output = stage.execute(
+            &*provider,
+            ExecInput { target: Some(2), checkpoint: Some(StageCheckpoint::new(1)) },
+        )?;
+        assert_eq!(output, ExecOutput::done(StageCheckpoint::new(2)));
+        let unwind = UnwindInput { checkpoint: output.checkpoint, unwind_to: 1, bad_block: None };
+        assert_eq!(stage.unwind(&*provider, unwind)?.checkpoint.block_number, 1);
+        assert_eq!(stage.validate_unwind(&*provider, UnwindInput { unwind_to: 0, ..unwind })
+            .unwrap_err().to_string(),
+            "database integrity error occurred: cannot unwind past MPT retirement; re-anchor or resync");
+        assert_eq!(provider.tx_ref().entries::<tables::AccountsTrie>()?, 0);
+        assert_eq!(provider.tx_ref().entries::<tables::StoragesTrie>()?, 0);
+        provider
+            .tx_ref()
+            .put::<tables::ChainState>(tables::ChainStateKey::LastFinalizedBlock, 0)?;
+        provider.commit()?;
+        assert_eq!(
+            retirement::validate_startup(&stage.strategy, &factory).unwrap_err().to_string(),
+            "persisted finality is below MPT retirement; re-anchor or resync"
+        );
+        let provider = factory.provider_rw()?;
+        provider
+            .tx_ref()
+            .put::<tables::ChainState>(tables::ChainStateKey::LastFinalizedBlock, 1)?;
+        provider.save_stage_checkpoint(StageId::Finish, StageCheckpoint::new(0))?;
+        provider.commit()?;
+        assert_eq!(
+            retirement::validate_startup(&stage.strategy, &factory).unwrap_err().to_string(),
+            "persisted state is below MPT retirement; re-anchor or resync"
+        );
+        let provider = factory.provider_rw()?;
+        provider.save_stage_checkpoint(StageId::Finish, StageCheckpoint::new(2))?;
+        provider.commit()?;
+        retirement::validate_startup(&stage.strategy, &factory)?;
+        Ok(())
+    }
 }

@@ -18,7 +18,20 @@ The binary parses the PBT genesis commitment for `init` and `node` consistently,
 and includes `binaryTrieTime` in its EIP-2124 fork schedule. The runtime flag
 installs PBT validation, payload building, durable checkpoints, and staged backfill.
 Checkpoints live in the chain data directory's `pbt` subdirectory. Both commitment
-domains remain available across activation and restart.
+domains remain available across activation until a post-activation block is finalized.
+
+After finality, the node waits for flat execution state to be persisted through that
+block, re-verifies the durable PBT checkpoints of the finalized block and persisted
+state tip, then atomically clears the account/storage MPT node tables and records
+retirement in MDBX. In-flight MPT writes are discarded. Validation, payload building,
+staged sync, and unwind then use PBT without maintaining MPT nodes. Retirement
+survives restart; rollback below its finalized boundary requires re-anchoring or
+resync. Flat account/storage state and history remain available to execution.
+
+Set `PBT_KEEP_MPT=true` before launch to retain MPT maintenance and node storage
+for archive use. It cannot restore an already retired MPT. Elapsed time or a fixed
+block count alone never permits disposal: activation must be finalized, as required
+by [EIP-8347](https://eips.ethereum.org/EIPS/eip-8347#transition-window).
 
 `eth_getProof` is removed while PBT is enabled. Experimental `pbt_getProof` is
 available only on authenticated RPC. Optional `PBT_MIGRATION_*`, `PBT_PRUNE_BLOCKS`,

@@ -54,6 +54,7 @@ pub use backfill::PbtBackfill;
 
 mod conversion;
 mod download;
+mod retirement;
 mod rpc;
 
 /// Shared PBT configuration for a full Ethereum node.
@@ -79,7 +80,7 @@ impl PbtNode {
         let directory_lock = lock_directory(directory)?;
         let store = Arc::new(SnapshotStore::open(directory.join("pbt"), DecodeLimits::default())?);
         let chain = prepare_chain((*chain).clone(), activation, &store)?;
-        let startup = Startup::new(
+        let mut startup = Startup::new(
             std::env::var_os("PBT_MIGRATION_SNAPSHOT"),
             std::env::var_os("PBT_MIGRATION_PREIMAGES"),
             std::env::var_os("PBT_MIGRATION_ANCHOR"),
@@ -89,6 +90,11 @@ impl PbtNode {
                 std::env::var_os("PBT_CATCHUP_MAX_BAL_BYTES"),
             )?,
         )?;
+        startup.keep_mpt = match std::env::var("PBT_KEEP_MPT") {
+            Ok(value) => value.parse().wrap_err("PBT_KEEP_MPT must be true or false")?,
+            Err(std::env::VarError::NotPresent) => false,
+            Err(error) => return Err(error.into()),
+        };
         let strategy = Arc::new(PbtStateRootStrategy::new(store.clone(), activation));
         Ok(Self { chain, store, strategy, startup, _directory_lock: directory_lock })
     }
@@ -194,6 +200,7 @@ where
         overlay_manager: OverlayManager<EthPrimitives>,
     ) -> eyre::Result<Self::EngineValidator> {
         let strategy = self.strategy.clone();
+        let keep_mpt = self.startup.keep_mpt;
         let provider = ctx.node.provider().clone();
         let network = ctx.node.network().clone();
         let runtime = tokio::runtime::Handle::current();
@@ -204,6 +211,7 @@ where
         let download_shutdown = shutdown.clone();
         let mut startup = tokio::task::spawn_blocking(move || {
             let _entered = span.enter();
+            retirement::validate_startup(&strategy, &provider)?;
             self.startup.initialize_with_sources(
                 &strategy,
                 &provider,
@@ -241,6 +249,42 @@ where
         let validator = BasicEngineValidatorBuilder::<EthereumEngineValidatorBuilder>::default()
             .build_tree_validator(ctx, tree_config, overlay_manager)
             .await?;
+        if !keep_mpt {
+            let strategy = self.strategy.clone();
+            let provider = ctx.node.provider().clone();
+            ctx.node.task_executor().spawn_critical_with_graceful_shutdown_signal(
+                "pbt-mpt-retirement",
+                move |shutdown| async move {
+                    let mut interval = tokio::time::interval(std::time::Duration::from_secs(1));
+                    interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+                    tokio::pin!(shutdown);
+                    loop {
+                        tokio::select! {
+                            _ = &mut shutdown => return,
+                            _ = interval.tick() => {}
+                        }
+                        let strategy = strategy.clone();
+                        let provider = provider.clone();
+                        let span = Span::current();
+                        // Retry when persistence catches up, even if finality does not change.
+                        // Await the transaction before releasing the graceful shutdown guard.
+                        let result = tokio::task::spawn_blocking(move || {
+                            let _entered = span.enter();
+                            retirement::try_retire(&strategy, &provider)
+                        }).await;
+                        match result {
+                            Ok(Ok(true)) => return,
+                            Ok(Ok(false)) => {}
+                            Ok(Err(error)) => tracing::error!(target: "pbt::retirement", %error, "MPT retirement deferred"),
+                            Err(error) => {
+                                tracing::error!(target: "pbt::retirement", %error, "MPT retirement task failed");
+                                return
+                            }
+                        }
+                    }
+                },
+            );
+        }
         let strategy: Arc<dyn StateRootStrategy<EthPrimitives, N::Provider, N::Evm>> =
             self.strategy;
         Ok(validator.with_state_root_strategy(strategy))
@@ -361,6 +405,7 @@ struct Startup {
     migration: Option<MigrationFiles>,
     obsolete_checkpoints: Vec<B256>,
     catchup: CatchupLimits,
+    keep_mpt: bool,
 }
 
 impl Startup {
@@ -400,7 +445,7 @@ impl Startup {
             })
             .transpose()?
             .unwrap_or_default();
-        Ok(Self { migration, obsolete_checkpoints, catchup })
+        Ok(Self { migration, obsolete_checkpoints, catchup, keep_mpt: false })
     }
 
     #[cfg(test)]
@@ -740,13 +785,20 @@ mod tests {
             EthereumPayloadBuilder, EthereumPoolBuilder,
         },
         provider::{
+            db::{tables, transaction::DbTx},
             test_utils::{MockEthProvider, NoopProvider},
-            BalStoreHandle, InMemoryBalStore,
+            BalStoreHandle, DBProvider, DatabaseProviderFactory, InMemoryBalStore,
+            StageCheckpointWriter, StateProviderFactory,
         },
         tasks::Runtime,
     };
     use reth_payload_primitives::BuiltPayload;
-    use reth_trie_pbt::{key, migration::Artifacts, Blake3Hasher};
+    use reth_trie_pbt::{
+        key,
+        migration::{ArtifactError, Artifacts},
+        persistence::StoreError,
+        Blake3Hasher,
+    };
     use std::{sync::Mutex, time::Duration};
 
     type TestNode = NodeTestContext<Adapter<EthereumNode>, PbtAddOns<Adapter<EthereumNode>>>;
@@ -1769,6 +1821,166 @@ mod tests {
             let state = pbt.store.load_block(tip.hash())?;
             assert_eq!(state.root(), tip.state_root);
             assert_eq!(state.account(recipient).unwrap().balance, U256::from(17));
+        }
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn mpt_retirement_preserves_finality_reorgs_and_restart() -> eyre::Result<()> {
+        reth_tracing::init_test_tracing();
+        for keep_mpt in [true, false] {
+            let directory = tempfile::tempdir()?;
+            let checkpoints = directory.path().join("pbt");
+            let store = Arc::new(SnapshotStore::open(&checkpoints, DecodeLimits::default())?);
+            let activation = 1_710_338_138;
+            let chain = prepare_chain(
+                (*test_chain_spec(EthereumHardfork::Amsterdam)).clone(),
+                activation,
+                &store,
+            )?;
+            let node_checkpoints = checkpoints.clone();
+            let backfill_checkpoints = checkpoints.clone();
+            let (mut node, _) = E2ETestSetupBuilder::<RestartNode>::new(1, chain)
+                .with_node(move |_| RestartNode {
+                    checkpoints: node_checkpoints.clone(),
+                    activation,
+                    startup: Startup { keep_mpt, ..Default::default() },
+                })
+                .with_restartable_nodes()
+                .with_tree_config_modifier(|config| {
+                    config.with_persistence_threshold(0).with_memory_block_buffer_target(0)
+                })
+                .with_backfill(move |_| {
+                    PbtBackfill::new(
+                        Arc::new(PbtStateRootStrategy::new(
+                            Arc::new(
+                                SnapshotStore::open(&backfill_checkpoints, DecodeLimits::default())
+                                    .unwrap(),
+                            ),
+                            activation,
+                        )),
+                        CatchupLimits::default(),
+                    )
+                })
+                .build_single()
+                .await?;
+            node.set_finality(Finality::Keep);
+            node.set_next_payload_timestamp(activation - 2)?;
+            let mut sender = Wallet::new(1).account(0);
+            let recipient = Address::repeat_byte(0x59);
+            let transaction = sender.transfer(recipient, U256::from(9)).await;
+            let before = node.mine([transaction]).await?.ensure_success()?;
+            assert!(before.block().timestamp < activation);
+            let blocks = node.advance_blocks(3).await?;
+            let boundary = blocks.last().unwrap().block();
+            let finalized = blocks[1].block();
+            assert!(boundary.timestamp >= activation);
+            node.wait_for_persisted_block(boundary.number).await?;
+            let strategy = PbtStateRootStrategy::new(store.clone(), activation);
+            assert!(!retirement::try_retire(&strategy, &node.inner.provider)?);
+            assert_eq!(node.inner.provider.database_provider_ro()?.mpt_retired_at()?, None);
+            assert!(
+                node.inner
+                    .provider
+                    .database_provider_ro()?
+                    .tx_ref()
+                    .entries::<tables::AccountsTrie>()? >
+                    0
+            );
+            let status = node
+                .engine
+                .forkchoice_updated(ForkchoiceState {
+                    head_block_hash: boundary.hash(),
+                    safe_block_hash: boundary.hash(),
+                    finalized_block_hash: finalized.hash(),
+                })
+                .await?;
+            assert!(status.payload_status.is_valid());
+            if keep_mpt {
+                reth_e2e_test_utils::wait::assert_holds_for(
+                    Duration::from_millis(1200),
+                    "retained MPT for archive use",
+                    || async {
+                        Ok(node.inner.provider.database_provider_ro()?.mpt_retired_at()?.is_none())
+                    },
+                )
+                .await?;
+                let marker = checkpoints.join("states").join(boundary.state_root.to_string());
+                let original = reth_fs_util::read(&marker)?;
+                let mut corrupt = original.clone();
+                corrupt[11] ^= 1;
+                reth_fs_util::write(&marker, corrupt)?;
+                let error = retirement::try_retire(&strategy, &node.inner.provider).unwrap_err();
+                assert!(matches!(
+                    error.downcast_ref::<StoreError>(),
+                    Some(StoreError::Artifact(ArtifactError::Invalid(
+                        "invalid PBT checkpoint marker"
+                    )))
+                ));
+                assert_eq!(node.inner.provider.database_provider_ro()?.mpt_retired_at()?, None);
+                reth_fs_util::write(&marker, original)?;
+                let provider = node.inner.provider.database_provider_rw()?;
+                let original =
+                    provider.get_stage_checkpoint(reth_stages::StageId::Finish)?.unwrap();
+                provider.save_stage_checkpoint(
+                    reth_stages::StageId::Finish,
+                    reth_stages::StageCheckpoint::new(original.block_number)
+                        .with_finish_stage_checkpoint(reth_stages::FinishCheckpoint {
+                            partial_state_trie: Some(finalized.number - 1),
+                        }),
+                )?;
+                provider.commit()?;
+                assert!(!retirement::try_retire(&strategy, &node.inner.provider)?);
+                let provider = node.inner.provider.database_provider_rw()?;
+                provider.save_stage_checkpoint(reth_stages::StageId::Finish, original)?;
+                provider.commit()?;
+            } else {
+                reth_e2e_test_utils::wait::poll_until(
+                    "MPT retirement after finalized PBT activation",
+                    || async { Ok(node.inner.provider.database_provider_ro()?.mpt_retired_at()?) },
+                )
+                .await?;
+            }
+            let provider = node.inner.provider.database_provider_ro()?;
+            if keep_mpt {
+                assert!(provider.tx_ref().entries::<tables::AccountsTrie>()? > 0);
+            } else {
+                assert_eq!(provider.mpt_retired_at()?, Some(finalized.number));
+                assert_eq!(provider.tx_ref().entries::<tables::AccountsTrie>()?, 0);
+                assert_eq!(provider.tx_ref().entries::<tables::StoragesTrie>()?, 0);
+                assert!(provider.tx_ref().entries::<tables::HashedAccounts>()? > 0);
+                assert_eq!(
+                    strategy
+                        .validate_retired_parent(before.block().header(), Some(finalized.number),)
+                        .unwrap_err()
+                        .to_string(),
+                    "cannot unwind past MPT retirement; re-anchor or resync"
+                );
+            }
+            drop(provider);
+            let transaction = sender.transfer(recipient, U256::from(5)).await;
+            let canonical = node.mine([transaction]).await?.ensure_success()?;
+            assert_eq!(
+                store.load_block(canonical.block().hash())?.account(recipient).unwrap().balance,
+                U256::from(14)
+            );
+            let fork = node.advance_fork(boundary.hash(), 2).await?;
+            node.reorg_to(canonical.block().hash()).await?;
+            node.reorg_to(fork[1].block().hash()).await?;
+            let mut node = node.restart().await?;
+            node.set_finality(Finality::Keep);
+            assert_eq!(
+                node.inner.provider.latest()?.basic_account(&recipient)?.unwrap().balance,
+                store.load_block(fork[1].block().hash())?.account(recipient).unwrap().balance,
+            );
+            let next = node.advance_block().await?;
+            assert_eq!(store.verify_block(next.block().hash())?, next.block().state_root);
+            let provider = node.inner.provider.database_provider_ro()?;
+            assert_eq!(provider.mpt_retired_at()?.is_some(), !keep_mpt);
+            if !keep_mpt {
+                assert_eq!(provider.tx_ref().entries::<tables::AccountsTrie>()?, 0);
+                assert_eq!(provider.tx_ref().entries::<tables::StoragesTrie>()?, 0);
+            }
         }
         Ok(())
     }

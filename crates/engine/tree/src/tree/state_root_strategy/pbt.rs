@@ -1,5 +1,4 @@
-//! Experimental PBT strategy. Both commitments are maintained, using incremental durable
-//! PBT checkpoints and Reth's normal trie updates for MPT. Execution state remains in memory.
+//! PBT commitments with MPT maintenance until finalized activation retires its node storage.
 
 use super::*;
 use reth_evm::EvmEnv as _;
@@ -12,8 +11,9 @@ use reth_trie_pbt::{
 ///
 /// Install a verified anchor in the shared [`SnapshotStore`] before launching the node. The
 /// anchor can be genesis for a PBT-from-genesis chain or a finalized MPT migration anchor.
-/// Both trees are kept throughout operation, including activation-straddling reorgs. This
-/// strategy does not configure staged/backfill sync, RPC proof formats, or snapshot discovery.
+/// Both trees are kept through the transition window, including activation-straddling reorgs.
+/// After the node retires MPT storage, validation and payload building compute only PBT roots.
+/// Install the node's matching staged/backfill and retirement integration as well.
 #[derive(Debug)]
 pub struct PbtStateRootStrategy<H = Blake3Hasher> {
     store: Arc<SnapshotStore<H>>,
@@ -58,6 +58,25 @@ impl<H: TreeHasher> PbtStateRootStrategy<H> {
     pub const fn activation_timestamp(&self) -> u64 {
         self.activation_timestamp
     }
+
+    /// Rejects a parent below the permanent retirement boundary or before PBT activation.
+    ///
+    /// Pass the marker from the same database view used for state-root work. `None` leaves
+    /// activation-straddling reorgs available throughout the transition window.
+    pub fn validate_retired_parent(
+        &self,
+        parent: &impl AlloyBlockHeader,
+        retired_at: Option<u64>,
+    ) -> ProviderResult<()> {
+        if retired_at.is_some_and(|number| {
+            parent.number() < number || parent.timestamp() < self.activation_timestamp
+        }) {
+            return Err(ProviderError::other(std::io::Error::other(
+                "cannot unwind past MPT retirement; re-anchor or resync",
+            )))
+        }
+        Ok(())
+    }
 }
 
 impl<N, P, Evm, H> StateRootStrategy<N, P, Evm> for PbtStateRootStrategy<H>
@@ -79,12 +98,14 @@ where
         ctx: StateRootJobContext<'_, N, P, Evm>,
     ) -> ProviderResult<PreparedStateRootJob<N>> {
         let parent = ctx.parent_header();
+        let retired = ctx.state_provider_factory.database_provider_ro()?.mpt_retired_at()?;
+        self.validate_retired_parent(parent.header(), retired)?;
         let state = self.restore_parent(parent.hash(), parent.state_root(), parent.timestamp())?;
         let active = ctx.env().evm_env.block_env().timestamp.saturating_to::<u64>() >=
             self.activation_timestamp;
         Ok(PreparedStateRootJob::new(
             Box::new(PbtStateRootJob {
-                mpt: SynchronousStateRootJob { state_provider_factory: ctx.state_provider_factory },
+                state_provider_factory: ctx.state_provider_factory,
                 parent: state,
                 store: self.store.clone(),
                 active,
@@ -97,17 +118,25 @@ where
         &self,
         ctx: PayloadStateRootJobContext<'_, N, P>,
     ) -> ProviderResult<Option<PayloadStateRootHandle>> {
-        if ctx.timestamp() < self.activation_timestamp {
+        let retired = ctx
+            .state_provider_factory
+            .database_provider_ro()
+            .and_then(|provider| provider.mpt_retired_at());
+        if ctx.timestamp() < self.activation_timestamp && matches!(&retired, Ok(None)) {
             return <DefaultStateRootStrategy as StateRootStrategy<N, P, Evm>>::prepare_payload_builder(&self.default, ctx);
         }
         // Preparation errors are treated as an optional optimization failure by the engine.
         // Retain a failing output backend so a missing checkpoint cannot select an MPT root.
-        let parent = self
-            .restore_parent(
-                ctx.parent_hash(),
-                ctx.parent_state_root(),
-                ctx.parent_header().timestamp(),
-            )
+        let parent_number = ctx.parent_header().number();
+        let parent = retired
+            .and_then(|retired| {
+                self.validate_retired_parent(ctx.parent_header(), retired)?;
+                self.restore_parent(
+                    ctx.parent_hash(),
+                    ctx.parent_state_root(),
+                    ctx.parent_header().timestamp(),
+                )
+            })
             .map_err(|error| error.to_string());
         let store = self.store.clone();
         let factory = ctx.state_provider_factory;
@@ -118,8 +147,19 @@ where
             let state = apply_bundle(parent, bundle)
                 .map_err(|err| StateRootTaskError::Other(err.into()))?;
             let provider = factory.database_provider_ro()?;
+            let retired = provider.mpt_retired_at()?;
+            if retired.is_some_and(|number| parent_number < number) {
+                return Err(StateRootTaskError::Other(
+                    std::io::Error::other("cannot unwind past MPT retirement; re-anchor or resync")
+                        .into(),
+                ))
+            }
             let hashed_state = provider.hashed_post_state(bundle)?;
-            let (_, trie_updates) = provider.state_root_with_updates(hashed_state.clone())?;
+            let trie_updates = if retired.is_none() {
+                provider.state_root_with_updates(hashed_state.clone())?.1
+            } else {
+                TrieUpdates::default()
+            };
             store.save(&state).map_err(|err| StateRootTaskError::Other(err.into()))?;
             Ok(StateRootComputeOutcome {
                 state_root: state.root(),
@@ -132,7 +172,7 @@ where
 
 #[derive(Debug)]
 struct PbtStateRootJob<N: NodePrimitives, P, H> {
-    mpt: SynchronousStateRootJob<N, P>,
+    state_provider_factory: OverlayStateProviderFactory<P, N>,
     parent: StateTree<H>,
     store: Arc<SnapshotStore<H>>,
     active: bool,
@@ -162,15 +202,29 @@ where
         hashed_state: &LazyHashedPostState,
     ) -> ProviderResult<StateRootJobOutcome> {
         let state = apply_bundle(&self.parent, &output.state).map_err(ProviderError::other)?;
-        let mut outcome = self.mpt.finish(block, output, hashed_state)?;
-        let mpt_root = outcome.state_root;
+        // Read the marker and compute MPT from one MVCC snapshot, so disposal cannot
+        // leave an in-flight job observing a partially retired commitment store.
+        let provider = self.state_provider_factory.database_provider_ro()?;
+        let retired = provider.mpt_retired_at()?;
+        if retired.is_some_and(|number| block.number() <= number || !self.active) {
+            return Err(ProviderError::other(std::io::Error::other(
+                "cannot unwind past MPT retirement; re-anchor or resync",
+            )))
+        }
+        let mut outcome = if retired.is_none() {
+            let (root, updates) =
+                provider.state_root_with_updates(hashed_state.get().as_ref().clone())?;
+            StateRootJobOutcome::new(root, Arc::new(updates))
+        } else {
+            StateRootJobOutcome::new(state.root(), Arc::new(TrieUpdates::default()))
+        };
         if self.active {
             outcome.state_root = state.root();
         }
         if outcome.state_root == block.header().state_root() {
             self.store.save_block(block.hash(), &state).map_err(ProviderError::other)?;
         }
-        debug!(target: "engine::pbt", block_hash = ?block.hash(), pbt_root = ?state.root(), ?mpt_root, active = self.active, "Computed state commitments");
+        debug!(target: "engine::pbt", block_hash = ?block.hash(), pbt_root = ?state.root(), maintain_mpt = retired.is_none(), active = self.active, "Computed state commitments");
         Ok(outcome)
     }
 }

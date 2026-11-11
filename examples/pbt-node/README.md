@@ -6,8 +6,9 @@ cargo +nightly run -p example-pbt-node
 
 Launches a temporary Ethereum dev node with a PBT genesis root and the BLAKE3
 reference configuration. The normal EVM, transaction pool, state tables, and
-Engine API are retained. PBT handles state commitment; MPT updates are also
-maintained. The node prints its RPC addresses. By default its database and
+Engine API are retained. PBT handles state commitment; MPT updates are maintained
+until post-activation finality permits retirement. `PBT_KEEP_MPT=true` retains
+MPT for archive use. The node prints its RPC addresses. By default its database and
 checkpoints are temporary. Set `PBT_DATADIR` to retain both across restarts.
 
 `eth_getProof` is disabled because MPT proofs cannot authenticate the PBT root.
@@ -107,6 +108,8 @@ missing-checkpoint failures, anchor onboarding, durable restart, finalized
 pruning and proof responses. Staged backfill uses the normal download/execution
 pipeline with PBT-aware Merkle verification and unwind checks. BALs are fetched and
 replayed in ranges bounded by the catch-up limits; the limits reset for each range.
-The final replayed state must also match execution's computed MPT root. The node
+Until MPT retirement, the final replayed state must also match execution's computed
+MPT root. Afterwards, execution still authenticates the BAL and PBT replay verifies
+the canonical PBT header root. The node
 does not support PBT-native snap sync. See the [PBT crate](../../crates/trie/pbt/README.md) for the
 implemented surfaces and remaining production integration work.

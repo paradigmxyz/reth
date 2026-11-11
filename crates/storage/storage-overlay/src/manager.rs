@@ -174,6 +174,8 @@ impl<N: NodePrimitives> OverlayManager<N> {
     }
 
     /// Computes the trie updates produced by `block_number`.
+    ///
+    /// Returns empty updates after MPT retirement without reconstructing historical MPT nodes.
     pub fn compute_block_trie_updates<P>(
         &self,
         provider: &P,
@@ -188,6 +190,9 @@ impl<N: NodePrimitives> OverlayManager<N> {
             + BlockNumReader
             + StorageSettingsCache,
     {
+        if provider.mpt_retired_at()?.is_some() {
+            return Ok(TrieUpdatesSorted::default())
+        }
         compute_block_trie_updates(self, provider, block_number)
     }
 

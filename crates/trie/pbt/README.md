@@ -35,5 +35,5 @@ Core conformance tests run in that repository with
 This extraction preserves the existing operational boundary: BLAKE3 is a draft
 reference choice, conversion and cold loading still materialize complete state,
 and native PBT snap sync, automatic artifact/re-anchor discovery, signed shadow
-publication and finality-driven MPT disposal remain absent. No mainnet schedule
-or gas schedule is selected here.
+publication remain absent. Finality-driven MPT retirement is handled by the node
+integration. No mainnet schedule or gas schedule is selected here.

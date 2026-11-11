@@ -321,3 +321,23 @@ fn legacy_checkpoints_upgrade_and_interrupted_markers_recover() {
     assert_eq!(store.load(root).unwrap().root(), root);
     assert_eq!(reth_fs_util::metadata(&path).unwrap().len(), 12);
 }
+
+#[test]
+fn retirement_verification_bypasses_cached_state() {
+    let directory = tempfile::tempdir().unwrap();
+    let store =
+        SnapshotStore::<Blake3Hasher>::open(directory.path(), DecodeLimits::default()).unwrap();
+    let mut state = StateTree::new();
+    state.set_account(Address::ZERO, AccountData { nonce: 1, ..Default::default() }).unwrap();
+    let root = store.save_block(B256::ZERO, &state).unwrap();
+    assert_eq!(store.verify_block(B256::ZERO).unwrap(), root);
+    let marker = directory.path().join("states").join(root.to_string());
+    let mut bytes = reth_fs_util::read(&marker).unwrap();
+    bytes[11] ^= 1;
+    reth_fs_util::write(&marker, bytes).unwrap();
+    assert_eq!(store.load_block(B256::ZERO).unwrap().root(), root);
+    assert!(matches!(
+        store.verify_block(B256::ZERO),
+        Err(StoreError::Artifact(ArtifactError::Invalid("invalid PBT checkpoint marker")))
+    ));
+}

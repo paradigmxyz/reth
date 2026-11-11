@@ -88,6 +88,16 @@ impl<H: TreeHasher> SnapshotStore<H> {
         self.load(self.block_root(block)?)
     }
 
+    /// Re-verifies an accepted block's durable checkpoint without using the state cache.
+    ///
+    /// Call before deleting a fallback commitment store. Missing or corrupt block references
+    /// or native state are errors. Recoverable checkpoint markers are repaired only after
+    /// verifying native state. Returns the authenticated PBT root.
+    pub fn verify_block(&self, block: B256) -> Result<B256, StoreError> {
+        let _writer = self.database.mutation.lock().map_err(|_| StoreError::Poisoned)?;
+        Ok(self.load_state(self.block_root(block)?)?.root())
+    }
+
     /// Imports bounded artifacts against a trusted finalized MPT header and checkpoints them.
     ///
     /// The caller must obtain `block` and `anchor_mpt_root` from its validated, finalized header
