@@ -83,10 +83,13 @@ type UnsubscriptionMethod =
 )]
 pub struct ConnectionId(pub usize);
 
-impl From<u32> for ConnectionId {
-    fn from(id: u32) -> Self {
-        Self(id as usize)
-    }
+impl ConnectionId {
+    /// Owner of subscriptions created by in-process calls such as
+    /// [`Methods::raw_json_request`].
+    ///
+    /// Servers count connections upwards from zero and never reach this value, so no transport
+    /// connection can unsubscribe an in-process subscription.
+    pub const IN_PROCESS: Self = Self(usize::MAX);
 }
 
 impl From<usize> for ConnectionId {
@@ -242,7 +245,7 @@ impl Methods {
         let Request { id, method, params, .. } = req;
         let params = Params::new(params.as_ref().map(|params| params.as_ref().get()));
         let max_response_size = usize::MAX;
-        let conn_id = ConnectionId(0);
+        let conn_id = ConnectionId::IN_PROCESS;
 
         let response = match self.method(&method) {
             None => MethodResponse::error(id, ErrorObject::from(ErrorCode::MethodNotFound)),
@@ -775,12 +778,12 @@ impl<Context: Send + Sync + 'static> RpcModule<Context> {
                     let sub_id = match params.one::<RpcSubscriptionId>() {
                         Ok(sub_id) => sub_id,
                         Err(_) => {
-                            tracing::warn!(
+                            // The params and request id are client input, so only their size is logged.
+                            tracing::debug!(
                                 target: LOG_TARGET,
-                                "Unsubscribe call `{}` failed: couldn't parse subscription id={:?} request id={:?}",
+                                "Unsubscribe call `{}` failed: couldn't parse subscription id from {} bytes of params",
                                 unsubscribe_method_name,
-                                params,
-                                id
+                                params.len_bytes(),
                             );
 
                             return MethodResponse::response(id, ResponsePayload::success(false), max_response_size);
@@ -788,7 +791,13 @@ impl<Context: Send + Sync + 'static> RpcModule<Context> {
                     };
 
                     let key = SubscriptionKey { conn_id, sub_id: sub_id.into_owned() };
-                    let result = subscribers.lock().remove(&key).is_some();
+                    let mut subs = subscribers.lock();
+                    let removed = subs.remove(&key);
+                    let result = removed.is_some();
+                    // Dropping the entry's receiver marks the sink inactive, which
+                    // `SubscriptionSink::drop` checks under the lock, so drop it before unlocking.
+                    drop(removed);
+                    drop(subs);
 
                     if !result {
                         tracing::debug!(

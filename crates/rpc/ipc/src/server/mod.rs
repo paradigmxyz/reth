@@ -13,9 +13,9 @@ use interprocess::local_socket::{
 use jsonrpsee::{
     core::TEN_MB_SIZE_BYTES,
     server::{
-        handle_rpc_call, middleware::rpc::RpcServiceT, stop_channel, BatchRequestConfig,
-        ConnectionGuard, ConnectionPermit, IdProvider, RandomIntegerIdProvider, ServerHandle,
-        StopHandle,
+        accept_error_backoff, handle_rpc_call, middleware::rpc::RpcServiceT, stop_channel,
+        BatchRequestConfig, ConnectionGuard, ConnectionPermit, IdProvider, RandomIntegerIdProvider,
+        ServerHandle, StopHandle,
     },
     types::{error::reject_too_big_request, Id},
     BoundedSubscriptions, MethodResponse, MethodSink, Methods,
@@ -186,7 +186,8 @@ where
         // signal that we're ready to accept connections
         on_ready.send(Ok(())).ok();
 
-        let mut id: u32 = 0;
+        // A `usize` counter cannot wrap in practice on 64-bit targets, so ids are never reused.
+        let mut id: usize = 0;
         let connection_guard = ConnectionGuard::new(self.cfg.max_connections as usize);
 
         let stopped = stop_handle.clone().shutdown();
@@ -223,7 +224,7 @@ where
                         local_socket_stream,
                     });
 
-                    id = id.wrapping_add(1);
+                    id += 1;
                     stopped = stop;
                 }
                 AcceptConnection::Shutdown => {
@@ -231,6 +232,7 @@ where
                 }
                 AcceptConnection::Err((err, stop)) => {
                     tracing::error!(%err, "Failed accepting a new IPC connection");
+                    let Some(stop) = accept_error_backoff(&err, stop).await else { break };
                     stopped = stop;
                 }
             }
@@ -294,7 +296,7 @@ struct ServiceData {
     /// Subscription ID provider.
     id_provider: Arc<dyn IdProvider>,
     /// Connection ID
-    conn_id: u32,
+    conn_id: usize,
     /// Connection Permit.
     conn_permit: Arc<ConnectionPermit>,
     /// Limits the number of subscriptions for this connection
@@ -394,7 +396,7 @@ where
 struct ProcessConnection<RpcMiddleware> {
     rpc_middleware: RpcServiceBuilder<RpcMiddleware>,
     conn_permit: Arc<ConnectionPermit>,
-    conn_id: u32,
+    conn_id: usize,
     server_cfg: Settings,
     stop_handle: StopHandle,
     drop_on_completion: mpsc::Sender<()>,

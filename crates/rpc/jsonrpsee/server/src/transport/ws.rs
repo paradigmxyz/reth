@@ -65,7 +65,7 @@ where
     let ServerConfig {
         batch_requests_config,
         max_request_body_size,
-        ws_write_timeout,
+        write_timeout,
         message_buffer_capacity,
         ..
     } = server_cfg;
@@ -73,7 +73,7 @@ where
     let (conn_tx, conn_rx) = oneshot::channel();
 
     // Spawn another task that sends out the responses on the Websocket.
-    let send_task_handle = tokio::spawn(send_task(rx, ws_sender, ws_write_timeout, conn_rx));
+    let send_task_handle = tokio::spawn(send_task(rx, ws_sender, write_timeout, conn_rx));
 
     let stopped = conn.stop_handle.clone().shutdown();
     let rpc_service = Arc::new(rpc_service);
@@ -167,8 +167,12 @@ where
         tokio::spawn(async move {
             let _pending_calls = pending_calls;
             let _permit = permit;
-            let first_non_whitespace =
-                data.iter().enumerate().take(128).find(|(_, byte)| !byte.is_ascii_whitespace());
+            // Only the four JSON whitespace characters are skipped, not for example form feed.
+            let first_non_whitespace = data
+                .iter()
+                .enumerate()
+                .take(128)
+                .find(|(_, byte)| !matches!(byte, b' ' | b'\t' | b'\n' | b'\r'));
 
             let (idx, is_single) = match first_non_whitespace {
                 Some((start, b'{')) => (start, true),

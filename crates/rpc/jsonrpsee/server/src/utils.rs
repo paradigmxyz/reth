@@ -28,28 +28,40 @@ use std::{
     borrow::Cow,
     future::Future,
     io,
-    pin::Pin,
+    pin::{pin, Pin},
     sync::Arc,
     task::{Context, Poll},
     time::Duration,
 };
 
-use crate::{HttpBody, HttpRequest};
+use crate::{ConnectionState, HttpBody, HttpRequest};
 
-use futures_util::future;
+use futures_util::{future, ready};
+use hyper::body::{Bytes, Frame};
 use hyper_util::rt::{TokioExecutor, TokioIo};
 use jsonrpsee_core::BoxError;
 use jsonrpsee_types::{Notification, TwoPointZero};
 use pin_project::pin_project;
 use serde::{Deserialize, Deserializer};
-use tokio::sync::Notify;
+use tokio::{
+    io::{AsyncRead, AsyncWrite, ReadBuf},
+    sync::Notify,
+    time::Sleep,
+};
 use tower::{util::Oneshot, ServiceExt};
+
+/// Largest data frame [`PermitBody`] yields.
+const BODY_CHUNK_SIZE: usize = 64 * 1024;
 
 /// Default for how long a connection may take to send its first request.
 pub(crate) const DEFAULT_FIRST_REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 
-/// Default timeout for writing a single message to a WebSocket connection, matching geth.
-pub(crate) const DEFAULT_WS_WRITE_TIMEOUT: Duration = Duration::from_secs(10);
+/// How long an accept loop pauses after `accept` fails for a reason that outlasts the attempt.
+const ACCEPT_ERROR_BACKOFF: Duration = Duration::from_secs(1);
+
+/// Default timeout for writing a single WebSocket message and for a stalled HTTP response write,
+/// matching geth.
+pub(crate) const DEFAULT_WRITE_TIMEOUT: Duration = Duration::from_secs(10);
 
 #[derive(Debug, Copy, Clone)]
 pub(crate) struct TowerToHyperService<S> {
@@ -210,10 +222,185 @@ fn reject_notification_id<'de, D: Deserializer<'de>>(_: D) -> Result<(), D::Erro
     Err(serde::de::Error::custom("notification must not contain an id"))
 }
 
+/// Pauses an accept loop after `accept` failed with `err`.
+///
+/// Errors that concern only the connection being accepted (refused, aborted or reset) return at
+/// once. Any other error, such as running out of file descriptors, persists and would make the
+/// loop spin, so it is followed by a [`ACCEPT_ERROR_BACKOFF`] sleep.
+///
+/// Returns the `stopped` future to keep polling, or `None` if it resolved during the sleep and
+/// the loop must exit.
+pub async fn accept_error_backoff<S>(err: &io::Error, stopped: S) -> Option<S>
+where
+    S: Future + Unpin,
+{
+    if matches!(
+        err.kind(),
+        io::ErrorKind::ConnectionRefused |
+            io::ErrorKind::ConnectionAborted |
+            io::ErrorKind::ConnectionReset
+    ) {
+        return Some(stopped);
+    }
+
+    match future::select(pin!(tokio::time::sleep(ACCEPT_ERROR_BACKOFF)), stopped).await {
+        future::Either::Left((_, stopped)) => Some(stopped),
+        future::Either::Right(_) => None,
+    }
+}
+
+/// HTTP response body that holds the connection permit until the body is written or dropped.
+///
+/// hyper writes the body after the service has returned the response, so a permit dropped by the
+/// service would no longer limit the connections that are still sending a response.
+///
+/// hyper drops the body as soon as it has taken the last frame, even if it still has to write
+/// that frame to the socket. A response is therefore yielded in frames of at most
+/// [`BODY_CHUNK_SIZE`] bytes: hyper only takes the next frame while its write buffer has room, so
+/// the permit is held until all but the last few frames have been written.
+#[pin_project]
+pub(crate) struct PermitBody {
+    #[pin]
+    inner: HttpBody,
+    /// Rest of the data frame that is being yielded in chunks.
+    pending: Bytes,
+    _conn: ConnectionState,
+}
+
+impl PermitBody {
+    pub(crate) fn new(inner: HttpBody, conn: ConnectionState) -> Self {
+        Self { inner, pending: Bytes::new(), _conn: conn }
+    }
+}
+
+impl http_body::Body for PermitBody {
+    type Data = Bytes;
+    type Error = BoxError;
+
+    fn poll_frame(
+        self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+    ) -> Poll<Option<Result<Frame<Self::Data>, Self::Error>>> {
+        let this = self.project();
+
+        if this.pending.is_empty() {
+            match ready!(this.inner.poll_frame(cx)) {
+                Some(Ok(frame)) => match frame.into_data() {
+                    Ok(data) => *this.pending = data,
+                    Err(frame) => return Poll::Ready(Some(Ok(frame))),
+                },
+                end_or_error => return Poll::Ready(end_or_error),
+            }
+        }
+
+        let chunk = this.pending.split_to(this.pending.len().min(BODY_CHUNK_SIZE));
+        Poll::Ready(Some(Ok(Frame::data(chunk))))
+    }
+
+    fn is_end_stream(&self) -> bool {
+        self.pending.is_empty() && self.inner.is_end_stream()
+    }
+
+    fn size_hint(&self) -> http_body::SizeHint {
+        let pending = self.pending.len() as u64;
+        let mut hint = self.inner.size_hint();
+        hint.set_lower(hint.lower() + pending);
+        if let Some(upper) = hint.upper() {
+            hint.set_upper(upper + pending);
+        }
+        hint
+    }
+}
+
+/// IO that fails a write with [`io::ErrorKind::TimedOut`] once the peer has accepted no bytes for
+/// the configured duration.
+///
+/// A peer that stops reading leaves hyper's buffered response, and the permit held by its body,
+/// pending forever otherwise.
+#[pin_project]
+pub(crate) struct WriteTimeoutIo<T> {
+    #[pin]
+    inner: T,
+    timeout: Duration,
+    /// Armed when a write returns `Pending` and cleared when a write makes progress.
+    stalled: Option<Pin<Box<Sleep>>>,
+}
+
+impl<T> WriteTimeoutIo<T> {
+    pub(crate) fn new(inner: T, timeout: Duration) -> Self {
+        Self { inner, timeout, stalled: None }
+    }
+}
+
+impl<T: AsyncRead> AsyncRead for WriteTimeoutIo<T> {
+    fn poll_read(
+        self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &mut ReadBuf<'_>,
+    ) -> Poll<io::Result<()>> {
+        self.project().inner.poll_read(cx, buf)
+    }
+}
+
+impl<T: AsyncWrite> AsyncWrite for WriteTimeoutIo<T> {
+    fn poll_write(
+        self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &[u8],
+    ) -> Poll<io::Result<usize>> {
+        let this = self.project();
+        let poll = this.inner.poll_write(cx, buf);
+        poll_write_timeout(this.stalled, *this.timeout, cx, poll)
+    }
+
+    fn poll_write_vectored(
+        self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        bufs: &[io::IoSlice<'_>],
+    ) -> Poll<io::Result<usize>> {
+        let this = self.project();
+        let poll = this.inner.poll_write_vectored(cx, bufs);
+        poll_write_timeout(this.stalled, *this.timeout, cx, poll)
+    }
+
+    fn is_write_vectored(&self) -> bool {
+        self.inner.is_write_vectored()
+    }
+
+    fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
+        self.project().inner.poll_flush(cx)
+    }
+
+    fn poll_shutdown(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
+        self.project().inner.poll_shutdown(cx)
+    }
+}
+
+/// Arms the stall timer when a write is `Pending`, so the task is woken when it fires, and clears
+/// it when the write makes progress.
+fn poll_write_timeout(
+    stalled: &mut Option<Pin<Box<Sleep>>>,
+    timeout: Duration,
+    cx: &mut Context<'_>,
+    poll: Poll<io::Result<usize>>,
+) -> Poll<io::Result<usize>> {
+    if poll.is_ready() {
+        *stalled = None;
+        return poll;
+    }
+
+    let stalled = stalled.get_or_insert_with(|| Box::pin(tokio::time::sleep(timeout)));
+    match stalled.as_mut().poll(cx) {
+        Poll::Ready(()) => Poll::Ready(Err(io::ErrorKind::TimedOut.into())),
+        Poll::Pending => Poll::Pending,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use serde_json::value::RawValue;
+    use tokio::time::Instant;
 
     #[test]
     fn notification_id_classification_notification_metadata() {
@@ -233,5 +420,36 @@ mod tests {
             let raw = format!(r#"{{"jsonrpc":"2.0","method":"example","id":{id}}}"#);
             assert!(deserialize_notification::<Params>(raw.as_bytes()).is_err());
         }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn accept_error_backoff_skips_connection_errors() {
+        for kind in [
+            io::ErrorKind::ConnectionRefused,
+            io::ErrorKind::ConnectionAborted,
+            io::ErrorKind::ConnectionReset,
+        ] {
+            let start = Instant::now();
+            let stopped =
+                accept_error_backoff(&io::Error::from(kind), future::pending::<()>()).await;
+            assert!(stopped.is_some());
+            assert_eq!(start.elapsed(), Duration::ZERO);
+        }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn accept_error_backoff_sleeps_on_persistent_errors() {
+        let start = Instant::now();
+        let err = io::Error::other("too many open files");
+        assert!(accept_error_backoff(&err, future::pending::<()>()).await.is_some());
+        assert_eq!(start.elapsed(), ACCEPT_ERROR_BACKOFF);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn accept_error_backoff_observes_stop() {
+        let start = Instant::now();
+        let err = io::Error::other("out of descriptors");
+        assert!(accept_error_backoff(&err, future::ready(())).await.is_none());
+        assert_eq!(start.elapsed(), Duration::ZERO);
     }
 }

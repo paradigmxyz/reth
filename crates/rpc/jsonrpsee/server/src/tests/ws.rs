@@ -1178,7 +1178,7 @@ async fn server_with_flooding_subscription(
     let config = ServerConfig::builder()
         .max_connections(1)
         .set_message_buffer_capacity(4)
-        .set_ws_write_timeout(FLOOD_WRITE_TIMEOUT)
+        .set_write_timeout(FLOOD_WRITE_TIMEOUT)
         .build();
     let server = ServerBuilder::with_config(config)
         .build("127.0.0.1:0")
@@ -1321,6 +1321,158 @@ async fn ws_waiting_for_call_permit_observes_server_stop() {
         handle.stop().unwrap();
     }
 
+    handle.stopped().with_default_timeout().await.unwrap();
+}
+
+#[tokio::test]
+async fn ws_connection_cannot_unsubscribe_in_process_subscription() {
+    init_logger();
+
+    let mut module = RpcModule::new(());
+    module
+        .register_subscription::<(), _, _>("sub", "notif", "unsub", |_, pending, _| async move {
+            let sink = pending.accept().await.unwrap();
+            sink.closed().await;
+        })
+        .unwrap();
+
+    let server = ServerBuilder::default()
+        .build("127.0.0.1:0")
+        .with_default_timeout()
+        .await
+        .unwrap()
+        .unwrap();
+    let addr = server.local_addr().unwrap();
+    let _handle = server.start(module.clone());
+
+    let (resp, _rx) = module
+        .raw_json_request(r#"{"jsonrpc":"2.0","method":"sub","id":1}"#, 4)
+        .with_default_timeout()
+        .await
+        .unwrap()
+        .unwrap();
+    let sub_id: u64 = deser_call(resp);
+
+    // The first accepted connection is the one the server numbers 0.
+    let mut client = WebSocketTestClient::new(addr).with_default_timeout().await.unwrap().unwrap();
+    let unsub = client
+        .send_request_text(call("unsub", vec![sub_id], Id::Num(1)))
+        .with_default_timeout()
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(&unsub, r#"{"jsonrpc":"2.0","id":1,"result":false}"#);
+
+    // The subscription is still alive, so its owner can still end it.
+    let (resp, _) = module
+        .raw_json_request(
+            &format!(r#"{{"jsonrpc":"2.0","method":"unsub","params":[{sub_id}],"id":2}}"#),
+            4,
+        )
+        .with_default_timeout()
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(resp, r#"{"jsonrpc":"2.0","id":2,"result":true}"#);
+}
+
+#[tokio::test]
+async fn batch_array_entries_are_invalid_requests() {
+    init_logger();
+
+    let (addr, handle, calls) = super::helpers::server_with_call_counter().await;
+    let mut client = WebSocketTestClient::new(addr).with_default_timeout().await.unwrap().unwrap();
+    let mixed_response = r#"[{"jsonrpc":"2.0","id":1,"result":0},{"jsonrpc":"2.0","id":null,"error":{"code":-32600,"message":"Invalid request"}}]"#;
+
+    for (request, expected) in [
+        (r#"[["2.0",1,"tick",[]]]"#, invalid_batch(vec![Id::Null])),
+        (r#"[[7]]"#, invalid_batch(vec![Id::Null])),
+        (
+            r#"[{"jsonrpc":"2.0","method":"tick","id":1},["2.0",2,"tick",[]]]"#,
+            mixed_response.to_string(),
+        ),
+    ] {
+        let response =
+            client.send_request_text(request).with_default_timeout().await.unwrap().unwrap();
+        assert_eq!(response, expected, "{request}");
+    }
+
+    // Only the object entry of the mixed batch ran.
+    assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 1);
+
+    handle.stop().unwrap();
+    handle.stopped().with_default_timeout().await.unwrap();
+}
+
+#[tokio::test]
+async fn batch_limit_applies_while_reading() {
+    init_logger();
+
+    let config =
+        ServerConfig::builder().set_batch_request_config(BatchRequestConfig::Limit(2)).build();
+    let server = ServerBuilder::with_config(config)
+        .build("127.0.0.1:0")
+        .with_default_timeout()
+        .await
+        .unwrap()
+        .unwrap();
+    let mut module = RpcModule::new(());
+    module.register_method("should_ok", |_, _ctx| "ok").unwrap();
+    let addr = server.local_addr().unwrap();
+    let handle = server.start(module);
+
+    let mut client = WebSocketTestClient::new(addr).with_default_timeout().await.unwrap().unwrap();
+    let call = r#"{"jsonrpc":"2.0","method":"should_ok","params":[],"id":1}"#;
+    let ok = r#"{"jsonrpc":"2.0","id":1,"result":"ok"}"#;
+    for (request, expected) in [
+        (format!("[{call},{call}]"), format!("[{ok},{ok}]")),
+        (format!("[{call},{call},{call}]"), batches_too_large(2)),
+        // The entries after the limit are never parsed.
+        (format!(r#"[{call},{call},{call},{{"jsonrpc""#), batches_too_large(2)),
+        // Within the limit, invalid JSON is still a parse error.
+        (format!(r#"[{call},{{"jsonrpc""#), parse_error(Id::Null)),
+    ] {
+        let response = client
+            .send_request_text(request.clone())
+            .with_default_timeout()
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(response, expected, "{request}");
+    }
+
+    handle.stop().unwrap();
+    handle.stopped().await;
+}
+
+#[tokio::test]
+async fn only_json_whitespace_is_skipped_before_request() {
+    init_logger();
+
+    let (addr, handle, calls) = super::helpers::server_with_call_counter().await;
+    let mut client = WebSocketTestClient::new(addr).with_default_timeout().await.unwrap().unwrap();
+    let request = r#"{"jsonrpc":"2.0","method":"tick","id":1}"#;
+
+    // Form feed is not JSON whitespace.
+    let response = client
+        .send_request_text(format!("\x0c{request}"))
+        .with_default_timeout()
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(response, parse_error(Id::Null));
+    assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 0);
+
+    let response = client
+        .send_request_text(format!(" \t\r\n{request}"))
+        .with_default_timeout()
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(response, r#"{"jsonrpc":"2.0","id":1,"result":0}"#);
+    assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 1);
+
+    handle.stop().unwrap();
     handle.stopped().with_default_timeout().await.unwrap();
 }
 

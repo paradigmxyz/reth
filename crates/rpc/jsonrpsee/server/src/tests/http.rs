@@ -24,7 +24,7 @@
 // IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 // DEALINGS IN THE SOFTWARE.
 
-use std::net::SocketAddr;
+use std::{net::SocketAddr, sync::Arc, time::Duration};
 
 use crate::{
     BatchRequestConfig, RegisterMethodError, RpcModule, ServerBuilder, ServerConfig, ServerHandle,
@@ -37,6 +37,11 @@ use jsonrpsee_test_utils::{
 };
 use jsonrpsee_types::ErrorObjectOwned;
 use serde_json::Value as JsonValue;
+use tokio::{
+    io::{AsyncReadExt, AsyncWriteExt},
+    net::TcpStream,
+    sync::Notify,
+};
 
 use super::helpers::{MyAppError, TestContext};
 
@@ -764,4 +769,208 @@ async fn panicking_call_returns_internal_error() {
 
     handle.stop().unwrap();
     handle.stopped().await;
+}
+
+#[tokio::test]
+async fn batch_array_entries_are_invalid_requests() {
+    init_logger();
+
+    let (addr, handle, calls) = super::helpers::server_with_call_counter().await;
+    let uri = to_http_uri(addr);
+    let mixed_response = r#"[{"jsonrpc":"2.0","id":1,"result":0},{"jsonrpc":"2.0","id":null,"error":{"code":-32600,"message":"Invalid request"}}]"#;
+
+    for (request, expected) in [
+        (r#"[["2.0",1,"tick",[]]]"#, invalid_batch(vec![Id::Null])),
+        (r#"[[7]]"#, invalid_batch(vec![Id::Null])),
+        (
+            r#"[{"jsonrpc":"2.0","method":"tick","id":1},["2.0",2,"tick",[]]]"#,
+            mixed_response.to_string(),
+        ),
+    ] {
+        let response = http_request(request.into(), uri.clone())
+            .with_default_timeout()
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(response.status, StatusCode::OK);
+        assert_eq!(response.body, expected, "{request}");
+    }
+
+    // Only the object entry of the mixed batch ran.
+    assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 1);
+
+    handle.stop().unwrap();
+    handle.stopped().with_default_timeout().await.unwrap();
+}
+
+#[tokio::test]
+async fn batch_limit_applies_while_reading() {
+    init_logger();
+
+    let config =
+        ServerConfig::builder().set_batch_request_config(BatchRequestConfig::Limit(2)).build();
+    let server = ServerBuilder::with_config(config).build("127.0.0.1:0").await.unwrap();
+    let mut module = RpcModule::new(());
+    module.register_method("should_ok", |_, _ctx| "ok").unwrap();
+    let uri = to_http_uri(server.local_addr().unwrap());
+    let handle = server.start(module);
+
+    let call = r#"{"jsonrpc":"2.0","method":"should_ok","params":[],"id":1}"#;
+    let ok = r#"{"jsonrpc":"2.0","id":1,"result":"ok"}"#;
+    for (request, expected) in [
+        (format!("[{call},{call}]"), format!("[{ok},{ok}]")),
+        (format!("[{call},{call},{call}]"), batches_too_large(2)),
+        // The entries after the limit are never parsed.
+        (format!(r#"[{call},{call},{call},{{"jsonrpc""#), batches_too_large(2)),
+        // Within the limit, invalid JSON is still a parse error.
+        (format!(r#"[{call},{{"jsonrpc""#), parse_error(Id::Null)),
+    ] {
+        let response = http_request(request.clone().into(), uri.clone())
+            .with_default_timeout()
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(response.status, StatusCode::OK);
+        assert_eq!(response.body, expected, "{request}");
+    }
+
+    handle.stop().unwrap();
+    handle.stopped().await;
+}
+
+const BIG_RESPONSE_LEN: usize = 32 * 1024 * 1024;
+
+const WRITE_TIMEOUT: Duration = Duration::from_secs(1);
+
+const BIG_REQUEST: &str = r#"{"jsonrpc":"2.0","method":"big","id":1}"#;
+
+/// Starts a server that allows a single connection. Its `big` method returns a response too large
+/// for the socket buffers and notifies the returned `Notify` when it is called.
+async fn server_with_big_response() -> (SocketAddr, ServerHandle, Arc<Notify>) {
+    let config = ServerConfig::builder()
+        .max_connections(1)
+        .max_response_body_size(BIG_RESPONSE_LEN as u32 + 1024)
+        .set_write_timeout(WRITE_TIMEOUT)
+        .build();
+    let server = ServerBuilder::with_config(config).build("127.0.0.1:0").await.unwrap();
+    let called = Arc::new(Notify::new());
+    let mut module = RpcModule::new(called.clone());
+    module
+        .register_method("big", |_, called| {
+            called.notify_one();
+            "x".repeat(BIG_RESPONSE_LEN)
+        })
+        .unwrap();
+    module.register_method("say_hello", |_, _| "lo").unwrap();
+    let addr = server.local_addr().unwrap();
+    (addr, server.start(module), called)
+}
+
+/// Sends the `big` request on a new connection, without reading the response.
+async fn send_big_request(addr: SocketAddr) -> TcpStream {
+    let mut client = TcpStream::connect(addr).with_default_timeout().await.unwrap().unwrap();
+    let request = format!(
+        "POST / HTTP/1.1\r\nhost: localhost\r\ncontent-type: application/json\r\n\
+         connection: close\r\ncontent-length: {}\r\n\r\n{BIG_REQUEST}",
+        BIG_REQUEST.len()
+    );
+    client.write_all(request.as_bytes()).with_default_timeout().await.unwrap().unwrap();
+    client
+}
+
+#[tokio::test]
+async fn http_permit_is_held_until_response_is_written() {
+    init_logger();
+
+    let (addr, handle, called) = server_with_big_response().await;
+    let uri = to_http_uri(addr);
+    let hello = r#"{"jsonrpc":"2.0","method":"say_hello","id":2}"#;
+
+    // The client never reads, so the response stays buffered on the server.
+    let _stalled = send_big_request(addr).await;
+    called.notified().with_default_timeout().await.unwrap();
+
+    let response =
+        http_request(hello.into(), uri.clone()).with_default_timeout().await.unwrap().unwrap();
+    assert_eq!(response.status, StatusCode::TOO_MANY_REQUESTS);
+
+    // The write timeout closes the stalled connection, which releases its permit.
+    let response = async {
+        loop {
+            let response = http_request(hello.into(), uri.clone()).await.unwrap();
+            if response.status == StatusCode::OK {
+                break response;
+            }
+            assert_eq!(response.status, StatusCode::TOO_MANY_REQUESTS);
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+    }
+    .with_timeout(WRITE_TIMEOUT * 10)
+    .await
+    .unwrap();
+    assert_eq!(response.body, ok_response("lo".to_string().into(), Id::Num(2)));
+
+    handle.stop().unwrap();
+    handle.stopped().with_default_timeout().await.unwrap();
+}
+
+#[tokio::test]
+async fn http_response_is_delivered_to_slow_reader() {
+    init_logger();
+
+    let (addr, handle, _called) = server_with_big_response().await;
+    let mut client = send_big_request(addr).await;
+
+    // Reading pauses for much less than the write timeout, but reading the whole response takes
+    // longer than it.
+    let mut response = Vec::new();
+    let mut chunk = vec![0; 256 * 1024];
+    loop {
+        let read = client.read(&mut chunk).with_default_timeout().await.unwrap().unwrap();
+        if read == 0 {
+            break;
+        }
+        response.extend_from_slice(&chunk[..read]);
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+
+    let body_start = response.windows(4).position(|window| window == b"\r\n\r\n").unwrap() + 4;
+    assert!(response.starts_with(b"HTTP/1.1 200 OK\r\n"));
+    let expected =
+        format!(r#"{{"jsonrpc":"2.0","id":1,"result":"{}"}}"#, "x".repeat(BIG_RESPONSE_LEN));
+    assert!(response[body_start..] == *expected.as_bytes(), "response body differs");
+
+    handle.stop().unwrap();
+    handle.stopped().with_default_timeout().await.unwrap();
+}
+
+#[tokio::test]
+async fn only_json_whitespace_is_skipped_before_request() {
+    init_logger();
+
+    let (addr, handle, calls) = super::helpers::server_with_call_counter().await;
+    let uri = to_http_uri(addr);
+    let request = r#"{"jsonrpc":"2.0","method":"tick","id":1}"#;
+
+    // Form feed is not JSON whitespace.
+    let response = http_request(format!("\x0c{request}").into(), uri.clone())
+        .with_default_timeout()
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(response.status, StatusCode::BAD_REQUEST);
+    assert_eq!(response.body, parse_error(Id::Null));
+    assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 0);
+
+    let response = http_request(format!(" \t\r\n{request}").into(), uri)
+        .with_default_timeout()
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(response.status, StatusCode::OK);
+    assert_eq!(response.body, r#"{"jsonrpc":"2.0","id":1,"result":0}"#);
+    assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 1);
+
+    handle.stop().unwrap();
+    handle.stopped().with_default_timeout().await.unwrap();
 }

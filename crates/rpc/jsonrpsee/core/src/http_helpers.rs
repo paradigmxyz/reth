@@ -165,14 +165,14 @@ where
         };
 
         // If it's the first chunk, trim the whitespaces to determine whether it's valid JSON-RPC
-        // call.
+        // call. Only the four JSON whitespace characters count, not for example form feed.
         if received_data.is_empty() {
             let first_non_whitespace = data
                 .chunk()
                 .iter()
                 .enumerate()
                 .take(128)
-                .find(|(_, byte)| !byte.is_ascii_whitespace());
+                .find(|(_, byte)| !matches!(byte, b' ' | b'\t' | b'\n' | b'\r'));
 
             let skip = match first_non_whitespace {
                 Some((idx, b'{')) => {

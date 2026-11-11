@@ -126,7 +126,7 @@ impl RpcServiceT for RpcService {
             }
             MethodCallback::Subscription(callback) => {
                 let Some(subscriptions) = &self.subscriptions else {
-                    tracing::warn!("Subscriptions not supported");
+                    tracing::debug!("Subscriptions not supported");
                     return ResponseFuture::ready(MethodResponse::error(
                         id,
                         ErrorObject::from(ErrorCode::InternalError),
@@ -157,7 +157,7 @@ impl RpcServiceT for RpcService {
                 // Don't adhere to any resource or subscription limits; always let unsubscribing
                 // happen!
                 if self.subscriptions.is_none() {
-                    tracing::warn!("Subscriptions not supported");
+                    tracing::debug!("Subscriptions not supported");
                     return ResponseFuture::ready(MethodResponse::error(
                         id,
                         ErrorObject::from(ErrorCode::InternalError),
@@ -178,6 +178,12 @@ impl RpcServiceT for RpcService {
 
             // Entries run one after another, so a batch occupies at most one call at a time.
             for batch_entry in batch.into_iter() {
+                // Entries that complete without ever returning `Pending` (sync methods, unknown
+                // methods, invalid entries) would otherwise run the whole batch in one poll.
+                // This yields only once the task's budget is used up, so a long batch can't hold
+                // a worker or ignore cancellation.
+                tokio::task::coop::consume_budget().await;
+
                 match batch_entry {
                     Ok(BatchEntry::Call(req)) => {
                         let rp = catch_call_panic(req.id(), || service.call(req)).await;
@@ -238,4 +244,44 @@ where
         .catch_unwind()
         .await
         .unwrap_or_else(|_| MethodResponse::error(id, ErrorObject::from(ErrorCode::InternalError)))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::RpcModule;
+    use jsonrpsee_types::Request;
+    use std::{
+        pin::pin,
+        sync::atomic::{AtomicUsize, Ordering},
+        task::Poll,
+    };
+
+    #[tokio::test]
+    async fn batch_of_ready_entries_yields() {
+        const ENTRIES: usize = 4096;
+
+        let calls = Arc::new(AtomicUsize::new(0));
+        let mut module = RpcModule::new(calls.clone());
+        module.register_method("tick", |_, calls| calls.fetch_add(1, Ordering::SeqCst)).unwrap();
+        let service =
+            RpcService::without_subscriptions(module.into(), usize::MAX, ConnectionId::default());
+
+        let batch = (0..ENTRIES as u64)
+            .map(|id| Ok(BatchEntry::Call(Request::borrowed("tick", None, Id::Number(id)))))
+            .collect::<Vec<_>>();
+        let mut response = pin!(service.batch(Batch::from(batch)));
+
+        // Every entry is ready, so only the task budget can make the batch yield.
+        let first_poll = std::future::poll_fn(|cx| Poll::Ready(response.as_mut().poll(cx))).await;
+        assert!(first_poll.is_pending());
+        assert!(calls.load(Ordering::SeqCst) < ENTRIES);
+
+        let expected = (0..ENTRIES)
+            .map(|i| format!(r#"{{"jsonrpc":"2.0","id":{i},"result":{i}}}"#))
+            .collect::<Vec<_>>()
+            .join(",");
+        assert_eq!(response.await.into_json(), format!("[{expected}]"));
+        assert_eq!(calls.load(Ordering::SeqCst), ENTRIES);
+    }
 }
