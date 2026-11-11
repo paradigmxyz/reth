@@ -367,6 +367,57 @@ mod tests {
     }
 
     #[test]
+    fn rocksdb_archive_set_reuses_each_verified_sst() {
+        let dir = tempdir().unwrap();
+        let rocksdb_dir = dir.path().join("rocksdb");
+        std::fs::create_dir_all(&rocksdb_dir).unwrap();
+        std::fs::write(rocksdb_dir.join("000007.sst"), b"sst-7").unwrap();
+
+        let sst_archive = |number: u32, contents: &[u8]| {
+            let hash = blake3::hash(contents).to_hex().to_string();
+            SingleArchive {
+                file: format!("rocksdb/{number:06}-{hash}.tar.zst"),
+                size: 10,
+                decompressed_size: contents.len() as u64,
+                blake3: None,
+                output_files: vec![OutputFileChecksum {
+                    path: format!("rocksdb/{number:06}.sst"),
+                    size: contents.len() as u64,
+                    blake3: hash,
+                }],
+            }
+        };
+        let manifest = SnapshotManifest {
+            block: 1,
+            chain_id: 1,
+            storage_version: 2,
+            timestamp: 0,
+            base_url: Some("https://example.com".to_string()),
+            reth_version: None,
+            components: BTreeMap::from([(
+                SnapshotComponentType::RocksdbIndices.key().to_string(),
+                ComponentManifest::Files(ArchiveSet {
+                    archives: vec![sst_archive(7, b"sst-7"), sst_archive(9, b"sst-9")],
+                }),
+            )]),
+            extensions: Default::default(),
+        };
+
+        let selections =
+            BTreeMap::from([(SnapshotComponentType::RocksdbIndices, ComponentSelection::All)]);
+        let planned = collect_planned_archives(&manifest, &selections).unwrap();
+        assert_eq!(planned.total_download_size, 20);
+        assert_eq!(planned.total_output_size, 10);
+
+        let downloads = planned.partition_reusable(dir.path(), None).unwrap();
+        let names = |archives: &[PlannedArchive]| {
+            archives.iter().map(|planned| planned.archive.file_name.clone()).collect::<Vec<_>>()
+        };
+        assert_eq!(names(&downloads.reused), [sst_archive(7, b"sst-7").file]);
+        assert_eq!(names(&downloads.pending), [sst_archive(9, b"sst-9").file]);
+    }
+
+    #[test]
     fn archive_priority_prefers_state_then_rocksdb() {
         let mut planned = [
             PlannedArchive {
