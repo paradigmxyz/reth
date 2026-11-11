@@ -15,11 +15,12 @@ extern crate alloc;
 use crate::execute::{BasicBlockBuilder, BasicBlockExecutor};
 use alloc::{string::String, vec::Vec};
 use alloy_eips::{eip2930::AccessList, eip4895::Withdrawals};
-use alloy_primitives::{Address, Bytes, B256};
+use alloy_primitives::{keccak256, Address, Bytes, B256};
 use core::{error::Error, fmt::Debug};
 use reth_primitives_traits::{
     BlockTy, HeaderTy, NodePrimitives, ReceiptTy, SealedBlock, SealedHeader, TxTy,
 };
+use reth_trie_common::{MultiProofTargetsV2, ProofV2Target};
 
 pub use evm2::{
     debug_unreachable,
@@ -125,6 +126,50 @@ pub struct TxStateAccess {
     pub account_writes: Vec<Address>,
     /// Storage slots the transaction writes, by account.
     pub storage_writes: AccessList,
+}
+
+impl TxStateAccess {
+    /// Loads every account and storage slot of this access through `db`.
+    pub fn load(&self, db: &mut (impl DynDatabase + ?Sized)) -> Result<(), evm2::DatabaseError> {
+        for address in &self.account_writes {
+            db.get_account(address)?;
+        }
+        for item in self.reads.iter().chain(self.storage_writes.iter()) {
+            db.get_account(&item.address)?;
+            for slot in &item.storage_keys {
+                db.get_storage(&item.address, &(*slot).into())?;
+            }
+        }
+        Ok(())
+    }
+
+    /// Returns the proof targets of the writes, and the number of storage targets.
+    ///
+    /// Like [`MultiProofTargetsV2::from_account_changes`], an account whose storage alone is
+    /// written gets only storage targets.
+    pub fn write_proof_targets(&self) -> (MultiProofTargetsV2, usize) {
+        let mut targets = MultiProofTargetsV2 {
+            account_targets: self
+                .account_writes
+                .iter()
+                .map(|address| keccak256(address).into())
+                .collect(),
+            ..Default::default()
+        };
+        let mut storage_target_count = 0;
+        for item in self.storage_writes.iter() {
+            if item.storage_keys.is_empty() {
+                continue
+            }
+            storage_target_count += item.storage_keys.len();
+            targets
+                .storage_targets
+                .entry(keccak256(item.address))
+                .or_default()
+                .extend(item.storage_keys.iter().map(|slot| ProofV2Target::new(keccak256(slot))));
+        }
+        (targets, storage_target_count)
+    }
 }
 
 /// Resolved EVM environment data needed by the EVM execution path.
@@ -738,11 +783,12 @@ pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
     /// Returns the state `tx` is expected to access in `evm_env`, derived from the transaction
     /// alone without executing it.
     ///
-    /// Engine prewarming loads the returned state into the execution cache and sends the
-    /// returned writes to the state root task as proof targets, instead of executing `tx`. The
-    /// result only steers prewarming: block execution still loads state it misses, and state it
-    /// adds is loaded for nothing. Not called when block execution may reuse prewarm results,
-    /// see [`Self::reuses_prewarm_results`], since those need the transaction executed.
+    /// Prewarming, in engine validation and in payload builders that use it, loads the returned
+    /// state into the execution cache and sends the returned writes to the state root task as
+    /// proof targets, instead of executing `tx`. The result only steers prewarming: block execution
+    /// still loads state it misses, and state it adds is loaded for nothing. Engine validation does
+    /// not call it when block execution may reuse prewarm results, see
+    /// [`Self::reuses_prewarm_results`], since those need the transaction executed.
     ///
     /// Returns `None`, the default, if the access cannot be derived; prewarming then executes
     /// the transaction.

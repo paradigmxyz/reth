@@ -33,8 +33,8 @@ use metrics::{Counter, Gauge, Histogram};
 use rayon::prelude::*;
 use reth_evm::{
     database::StateProviderDatabase, precompile_cache::PrecompileCacheMap, ConfigureEvm,
-    DynDatabase, Evm as EvmInstance, EvmEnv, EvmEnvFor, EvmFor, EvmTypesFor, ExecutableTxFor,
-    RecoveredTx, SpecFor, TxStateAccess,
+    Evm as EvmInstance, EvmEnv, EvmEnvFor, EvmFor, EvmTypesFor, ExecutableTxFor, RecoveredTx,
+    SpecFor,
 };
 use reth_metrics::Metrics;
 use reth_primitives_traits::{FastInstant as Instant, NodePrimitives};
@@ -46,7 +46,7 @@ use reth_provider::{
 };
 use reth_storage_overlay::OverlayStateProviderFactory;
 use reth_tasks::{Runtime, WorkerStatefulPool};
-use reth_trie_common::{MultiProofTargetsV2, ProofV2Target};
+use reth_trie_common::MultiProofTargetsV2;
 use std::{
     sync::{
         atomic::{AtomicBool, AtomicUsize, Ordering},
@@ -374,7 +374,7 @@ where
                 if ctx.prewarm_results.is_none() &&
                     let Some(access) = ctx.evm_config.tx_state_access(&ctx.env.evm_env, &tx_env)
                 {
-                    if let Err(err) = load_state_access(evm.state_db_mut(), &access) {
+                    if let Err(err) = access.load(evm.state_db_mut()) {
                         trace!(
                             target: "engine::tree::payload_processor::prewarm",
                             %err,
@@ -385,8 +385,7 @@ where
                     if index > 0 &&
                         let Some(state_root_hint_stream) = state_root_hint_stream
                     {
-                        let (targets, storage_targets) =
-                            multiproof_targets_from_state_access(&access);
+                        let (targets, storage_targets) = access.write_proof_targets();
                         ctx.metrics.prefetch_storage_targets.record(storage_targets as f64);
                         state_root_hint_stream.on_access_hint(targets.into());
                     }
@@ -995,52 +994,6 @@ fn multiproof_targets_from_withdrawals(withdrawals: &[Withdrawal]) -> MultiProof
     }
 }
 
-/// Loads the accounts and storage slots of a [`TxStateAccess`] through `db`.
-fn load_state_access(
-    db: &mut (impl DynDatabase + ?Sized),
-    access: &TxStateAccess,
-) -> Result<(), evm2::DatabaseError> {
-    for address in &access.account_writes {
-        db.get_account(address)?;
-    }
-    for item in access.reads.iter().chain(access.storage_writes.iter()) {
-        db.get_account(&item.address)?;
-        for slot in &item.storage_keys {
-            db.get_storage(&item.address, &(*slot).into())?;
-        }
-    }
-    Ok(())
-}
-
-/// Returns [`MultiProofTargetsV2`] for the writes of a [`TxStateAccess`], and the number of storage
-/// targets.
-///
-/// Like [`MultiProofTargetsV2::from_account_changes`], an account whose storage alone is written
-/// gets only storage targets.
-fn multiproof_targets_from_state_access(access: &TxStateAccess) -> (MultiProofTargetsV2, usize) {
-    let mut targets = MultiProofTargetsV2 {
-        account_targets: access
-            .account_writes
-            .iter()
-            .map(|address| keccak256(address).into())
-            .collect(),
-        ..Default::default()
-    };
-    let mut storage_target_count = 0;
-    for item in access.storage_writes.iter() {
-        if item.storage_keys.is_empty() {
-            continue
-        }
-        storage_target_count += item.storage_keys.len();
-        targets
-            .storage_targets
-            .entry(keccak256(item.address))
-            .or_default()
-            .extend(item.storage_keys.iter().map(|slot| ProofV2Target::new(keccak256(slot))));
-    }
-    (targets, storage_target_count)
-}
-
 /// The events the pre-warm task can handle.
 ///
 /// Generic over `R` (receipt type) to allow sharing `Arc<ExecutionOutcome<R>>` with the main
@@ -1123,14 +1076,19 @@ mod tests {
     use evm2::{evm::EmptyDB, BaseEvmTypes};
     use reth_chainspec::ChainSpec;
     use reth_ethereum_primitives::{Block, EthPrimitives, TransactionSigned};
-    use reth_evm::{execute::WithTxEnv, ExecutionCtxFor, NextBlockEnvAttributes, TxEnvFor};
+    use reth_evm::{
+        execute::WithTxEnv, ExecutionCtxFor, NextBlockEnvAttributes, TxEnvFor, TxStateAccess,
+    };
     use reth_evm_ethereum::EthEvmConfig;
     use reth_primitives_traits::{Account, SealedBlock, SealedHeader};
     use reth_provider::test_utils::MockEthProvider;
     use reth_stages_api::{StageCheckpoint, StageId};
     use reth_storage_overlay::OverlayManager;
     use reth_tasks::WorkerPool;
-    use reth_trie_common::bundle_state::{AccountStatus, BundleAccount, BundleState};
+    use reth_trie_common::{
+        bundle_state::{AccountStatus, BundleAccount, BundleState},
+        ProofV2Target,
+    };
     use std::time::Duration;
 
     #[test]
