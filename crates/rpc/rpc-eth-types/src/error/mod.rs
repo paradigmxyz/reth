@@ -949,6 +949,10 @@ impl std::fmt::Display for RevertError {
         if !self.output.is_empty() &&
             let Some(reason) = RevertReason::decode(&self.output)
         {
+            // Match geth's panic messages, such as `assert(false)` for panic code 0x01.
+            if let Some(panic) = reason.as_contract_error().and_then(|err| err.as_panic()) {
+                return write!(f, ": {}", panic.as_geth_str())
+            }
             let error = reason.to_string();
             let mut error = error.as_str();
             if reason.is_revert() {
@@ -1142,7 +1146,7 @@ pub enum SignError {
 mod tests {
     use super::*;
     use alloy_primitives::b256;
-    use alloy_sol_types::{Revert, SolError};
+    use alloy_sol_types::{Panic, Revert, SolError};
     use reth_errors::ProviderError;
 
     #[test]
@@ -1318,5 +1322,18 @@ mod tests {
         assert_eq!(err.code(), 3);
         assert_eq!(err.message(), "execution reverted");
         assert_eq!(err.data().unwrap().get(), "\"0x\"");
+    }
+
+    #[test]
+    fn revert_err_display_panic_matches_geth() {
+        for (code, message) in [
+            (0x01, "execution reverted: assert(false)"),
+            (0x11, "execution reverted: arithmetic underflow or overflow"),
+            (0x99, "execution reverted: unknown panic code: 0x99"),
+        ] {
+            let panic = Panic { code: U256::from(code) };
+            let err = RevertError::new(panic.abi_encode().into());
+            assert_eq!(err.to_string(), message);
+        }
     }
 }
