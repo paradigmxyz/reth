@@ -1055,10 +1055,7 @@ mod tests {
         where
             S: Send + Sync + RpcServiceT,
         {
-            fn call<'a>(
-                &self,
-                mut req: Request<'a>,
-            ) -> impl Future<Output = MethodResponse> + Send + 'a {
+            fn call(&self, mut req: Request<'_>) -> impl Future<Output = MethodResponse> + Send {
                 // Re-direct all calls that isn't `say_hello` to `say_goodbye`
                 if req.method == "say_hello" {
                     req.method = "say_goodbye".into();
@@ -1069,10 +1066,7 @@ mod tests {
                 self.0.call(req)
             }
 
-            fn batch<'a>(
-                &self,
-                mut batch: Batch<'a>,
-            ) -> impl Future<Output = MethodResponse> + Send + 'a {
+            fn batch(&self, mut batch: Batch<'_>) -> impl Future<Output = MethodResponse> + Send {
                 for call in batch.iter_mut() {
                     match call {
                         Ok(BatchEntry::Call(req)) => {
@@ -1097,10 +1091,10 @@ mod tests {
                 self.0.batch(batch)
             }
 
-            fn notification<'a>(
+            fn notification(
                 &self,
-                mut n: Request<'a>,
-            ) -> impl Future<Output = MethodResponse> + Send + 'a {
+                mut n: Request<'_>,
+            ) -> impl Future<Output = MethodResponse> + Send {
                 if n.method == "say_hello" {
                     n.method = "say_goodbye".into();
                 } else if n.method == "say_goodbye" {

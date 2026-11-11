@@ -66,7 +66,7 @@ impl<S> RpcServiceT for ResponseMutationService<S>
 where
     S: RpcServiceT + Send + Sync + Clone + 'static,
 {
-    fn call<'a>(&self, req: Request<'a>) -> impl Future<Output = MethodResponse> + Send + 'a {
+    fn call(&self, req: Request<'_>) -> impl Future<Output = MethodResponse> + Send {
         tracing::info!("processed call {:?}", req);
         let service = self.service.clone();
         async move {
@@ -87,11 +87,11 @@ where
         }
     }
 
-    fn batch<'a>(&self, req: Batch<'a>) -> impl Future<Output = MethodResponse> + Send + 'a {
+    fn batch(&self, req: Batch<'_>) -> impl Future<Output = MethodResponse> + Send {
         self.service.batch(req)
     }
 
-    fn notification<'a>(&self, n: Request<'a>) -> impl Future<Output = MethodResponse> + Send + 'a {
+    fn notification(&self, n: Request<'_>) -> impl Future<Output = MethodResponse> + Send {
         self.service.notification(n)
     }
 }

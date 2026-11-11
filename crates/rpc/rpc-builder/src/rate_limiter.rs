@@ -65,7 +65,7 @@ impl<S> RpcServiceT for RpcRequestRateLimitingService<S>
 where
     S: RpcServiceT + Send + Sync + Clone + 'static,
 {
-    fn call<'a>(&self, req: Request<'a>) -> impl Future<Output = MethodResponse> + Send + 'a {
+    fn call(&self, req: Request<'_>) -> impl Future<Output = MethodResponse> + Send {
         let method_name = req.method.as_ref();
         if method_name.starts_with("trace_") || method_name.starts_with("debug_") {
             RateLimitingRequestFuture {
@@ -80,11 +80,11 @@ where
         }
     }
 
-    fn batch<'a>(&self, requests: Batch<'a>) -> impl Future<Output = MethodResponse> + Send + 'a {
+    fn batch(&self, requests: Batch<'_>) -> impl Future<Output = MethodResponse> + Send {
         self.inner.batch(requests)
     }
 
-    fn notification<'a>(&self, n: Request<'a>) -> impl Future<Output = MethodResponse> + Send + 'a {
+    fn notification(&self, n: Request<'_>) -> impl Future<Output = MethodResponse> + Send {
         self.inner.notification(n)
     }
 }

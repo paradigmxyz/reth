@@ -104,7 +104,7 @@ impl<S> RpcServiceT for RpcRequestMetricsService<S>
 where
     S: RpcServiceT + Send + Sync + Clone + 'static,
 {
-    fn call<'a>(&self, req: Request<'a>) -> impl Future<Output = MethodResponse> + Send + 'a {
+    fn call(&self, req: Request<'_>) -> impl Future<Output = MethodResponse> + Send {
         self.metrics.inner.connection_metrics.requests_started_total.increment(1);
         let call_metrics = self.metrics.inner.call_metrics.get_key_value(req.method.as_ref());
         if let Some((_, call_metrics)) = &call_metrics {
@@ -118,7 +118,7 @@ where
         }
     }
 
-    fn batch<'a>(&self, req: Batch<'a>) -> impl Future<Output = MethodResponse> + Send + 'a {
+    fn batch(&self, req: Batch<'_>) -> impl Future<Output = MethodResponse> + Send {
         self.metrics.inner.connection_metrics.batches_started_total.increment(1);
 
         for batch_entry in req.iter().flatten() {
@@ -135,7 +135,7 @@ where
         }
     }
 
-    fn notification<'a>(&self, n: Request<'a>) -> impl Future<Output = MethodResponse> + Send + 'a {
+    fn notification(&self, n: Request<'_>) -> impl Future<Output = MethodResponse> + Send {
         self.inner.notification(n)
     }
 }
