@@ -592,7 +592,8 @@ impl NetworkArgs {
             .with_max_inbound_opt(self.resolved_max_inbound_peers())
             .with_max_outbound_opt(self.resolved_max_outbound_peers())
             .with_ip_filter(ip_filter)
-            .with_enforce_enr_fork_id(self.enforce_enr_fork_id);
+            // the flag defaults to false, so it can only enable what the config file sets
+            .with_enforce_enr_fork_id(self.enforce_enr_fork_id || config.peers.enforce_enr_fork_id);
 
         // Configure basic network stack
         NetworkConfigBuilder::<N>::new(secret_key, executor)
@@ -1685,5 +1686,34 @@ mod tests {
 
         let args = NetworkArgs { bootnodes: Some(vec![enode.parse().unwrap()]), ..args };
         assert_eq!(boot_nodes(&args), vec![enode.parse::<TrustedPeer>().unwrap()]);
+    }
+
+    #[test]
+    fn network_config_enforce_enr_fork_id_from_config_or_cli() {
+        let secret_key = SecretKey::from_secret_bytes([1u8; 32]).unwrap();
+
+        let enforced = |args: &NetworkArgs, config: &Config| {
+            args.network_config::<EthNetworkPrimitives>(
+                config,
+                MAINNET.clone(),
+                secret_key,
+                PathBuf::from("peers.json"),
+                Runtime::test(),
+            )
+            .build_with_noop_provider(MAINNET.clone())
+            .peers_config
+            .enforce_enr_fork_id
+        };
+
+        let args = NetworkArgs { no_persist_peers: true, ..Default::default() };
+        let mut config = Config::default();
+        assert!(!enforced(&args, &config));
+
+        config.peers.enforce_enr_fork_id = true;
+        assert!(enforced(&args, &config));
+
+        config.peers.enforce_enr_fork_id = false;
+        let args = NetworkArgs { enforce_enr_fork_id: true, ..args };
+        assert!(enforced(&args, &config));
     }
 }
