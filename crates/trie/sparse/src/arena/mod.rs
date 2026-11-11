@@ -1093,6 +1093,12 @@ impl ArenaParallelSparseTrie {
             };
 
             let head_idx = cursor.head().expect("cursor is non-empty").index;
+            // Extensions are visited even when their backing branch is already cached.
+            // Preserve its epoch, which may include changes to children that were removed.
+            if matches!(node_state_ref(arena, head_idx), Some(ArenaSparseNodeState::Cached { .. }))
+            {
+                continue;
+            }
             let head_path = cursor.head_path();
 
             // The branch at `head_idx` is exhausted. All its dirty child branches
@@ -2636,8 +2642,8 @@ impl SparseTrie for ArenaParallelSparseTrie {
     fn prune(&mut self, prune_before: TrieNodeEpoch) -> usize {
         assert!(self.root_epoch().is_some(), "prune cannot run on a dirty trie");
 
-        // Only descend if the root is a branch; otherwise there are no subtries.
-        if !matches!(&self.upper_arena[self.root], ArenaSparseNode::Branch(_)) {
+        // Only branches and extensions can have pruneable children.
+        if branch_idx(&self.upper_arena, self.root).is_none() {
             return 0;
         }
 
@@ -2656,6 +2662,7 @@ impl SparseTrie for ArenaParallelSparseTrie {
                 matches!(
                     child,
                     ArenaSparseNode::Branch(_) |
+                        ArenaSparseNode::Extension { .. } |
                         ArenaSparseNode::Subtrie(_) |
                         ArenaSparseNode::Leaf { .. }
                 )
@@ -2668,22 +2675,23 @@ impl SparseTrie for ArenaParallelSparseTrie {
             let head_idx = cursor.head().expect("cursor is non-empty").index;
 
             match &self.upper_arena[head_idx] {
-                ArenaSparseNode::Branch(_) | ArenaSparseNode::Leaf { .. } => {
+                ArenaSparseNode::Branch(_) |
+                ArenaSparseNode::Extension { .. } |
+                ArenaSparseNode::Leaf { .. } => {
                     // Don't prune the root.
                     if cursor.depth() == 0 {
                         continue;
                     }
 
-                    let node_epoch = self.upper_arena[head_idx]
-                        .state_ref()
+                    let node_epoch = node_state_ref(&self.upper_arena, head_idx)
                         .and_then(ArenaSparseNodeState::cached_epoch)
                         .expect("prune must run after hashing");
                     if !node_epoch.should_prune(prune_before) {
                         continue;
                     }
 
-                    Self::remove_pruned_node(&mut self.upper_arena, &mut cursor);
-                    pruned += 1;
+                    let removed = Self::remove_pruned_node(&mut self.upper_arena, &mut cursor);
+                    pruned += 1 + usize::from(removed.extension_child().is_some());
                 }
                 ArenaSparseNode::Subtrie(_) => {
                     let root_epoch = self.upper_arena[head_idx]
@@ -2717,7 +2725,7 @@ impl SparseTrie for ArenaParallelSparseTrie {
                         pruned += subtrie.prune(prune_before);
                     }
                 }
-                _ => unreachable!("NonBranch in prune walk must be Subtrie, Leaf, or Branch"),
+                _ => unreachable!("prune walk must visit a subtrie, leaf, branch, or extension"),
             }
         }
 
@@ -3339,5 +3347,104 @@ mod tests {
 
             harness.assert_changes(&mut apst, changeset2);
         }
+    }
+
+    #[test]
+    fn pruning_extension_roots_and_upper_children() {
+        for extension_root in [true, false] {
+            for retain_extension in [true, false] {
+                let mut trie = ArenaParallelSparseTrie::default();
+                let first = B256::with_last_byte(1);
+                let second = B256::with_last_byte(2);
+                let mut updates = B256Map::default();
+                updates.insert(first, LeafUpdate::Changed(vec![1; 32]));
+                updates.insert(second, LeafUpdate::Changed(vec![2; 32]));
+                if !extension_root {
+                    updates.insert(B256::repeat_byte(0x10), LeafUpdate::Changed(vec![3; 32]));
+                }
+                trie.update_leaves(&mut updates, |_, _| panic!("no proof required")).unwrap();
+                trie.root(epoch(0));
+
+                if retain_extension {
+                    updates.insert(first, LeafUpdate::Changed(vec![4; 32]));
+                    trie.update_leaves(&mut updates, |_, _| panic!("no proof required")).unwrap();
+                    trie.root(epoch(2));
+                }
+                let root = trie.root(epoch(2));
+                assert_eq!(
+                    matches!(trie.upper_arena[trie.root], ArenaSparseNode::Extension { .. }),
+                    extension_root,
+                );
+                if !extension_root {
+                    assert!(trie
+                        .upper_arena
+                        .iter()
+                        .any(|(_, node)| { matches!(node, ArenaSparseNode::Extension { .. }) }));
+                }
+
+                let expected_pruned = match (extension_root, retain_extension) {
+                    (true, true) => 1,
+                    (true, false) | (false, true) => 2,
+                    (false, false) => 5,
+                };
+                assert_eq!(trie.prune(epoch(1)), expected_pruned);
+                assert_eq!(trie.root(epoch(2)), root);
+                let extension_count = trie
+                    .upper_arena
+                    .iter()
+                    .filter(|(_, node)| matches!(node, ArenaSparseNode::Extension { .. }))
+                    .count();
+                assert_eq!(extension_count, usize::from(extension_root || retain_extension));
+                assert_eq!(trie.prune(epoch(1)), 0);
+            }
+        }
+    }
+
+    #[test]
+    fn rehash_preserves_cached_extension_epoch() {
+        let mut trie = ArenaParallelSparseTrie::default();
+        let first = B256::with_last_byte(1);
+        let second = B256::with_last_byte(2);
+        let third = B256::with_last_byte(3);
+        let sibling = B256::repeat_byte(0x10);
+        let mut updates = [first, second, third, sibling]
+            .into_iter()
+            .map(|key| (key, LeafUpdate::Changed(vec![1; 32])))
+            .collect();
+        trie.update_leaves(&mut updates, |_, _| panic!("no proof required")).unwrap();
+        trie.root(epoch(0));
+
+        updates.insert(third, LeafUpdate::Changed(Vec::new()));
+        trie.update_leaves(&mut updates, |_, _| panic!("no proof required")).unwrap();
+        trie.root(epoch(2));
+        let extension = trie
+            .upper_arena
+            .iter()
+            .find_map(|(idx, node)| {
+                matches!(node, ArenaSparseNode::Extension { .. }).then_some(idx)
+            })
+            .unwrap();
+        assert_eq!(
+            node_state_ref(&trie.upper_arena, extension)
+                .and_then(ArenaSparseNodeState::cached_epoch),
+            Some(epoch(2))
+        );
+
+        updates.insert(sibling, LeafUpdate::Changed(vec![2; 32]));
+        trie.update_leaves(&mut updates, |_, _| panic!("no proof required")).unwrap();
+        trie.root(epoch(3));
+        assert_eq!(
+            node_state_ref(&trie.upper_arena, extension)
+                .and_then(ArenaSparseNodeState::cached_epoch),
+            Some(epoch(2))
+        );
+        assert_eq!(trie.prune(epoch(2)), 2);
+        assert_eq!(
+            trie.upper_arena
+                .iter()
+                .filter(|(_, node)| { matches!(node, ArenaSparseNode::Extension { .. }) })
+                .count(),
+            1
+        );
     }
 }
