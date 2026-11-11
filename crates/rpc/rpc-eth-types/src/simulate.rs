@@ -326,6 +326,9 @@ where
     T: RpcConvert<Primitives = S::Primitives>,
     EvmTypes: evm2::EvmTypes,
 {
+    if is_cancelled() {
+        return Err(EthApiError::InternalEthError)
+    }
     builder.apply_pre_execution_changes()?;
 
     let mut results = Vec::with_capacity(calls.len());

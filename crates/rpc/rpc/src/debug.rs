@@ -24,7 +24,7 @@ use reth_errors::RethError;
 use reth_evm::{
     execute::{BlockExecutor, BlockTransactionResult, Executor},
     witness::ExecutionWitnessRecord,
-    ConfigureEvm, DynDatabase, Evm, EvmEnv, EvmEnvFor,
+    BlockExecutionError, ConfigureEvm, DynDatabase, Evm, EvmEnv, EvmEnvFor,
 };
 use reth_primitives_traits::{
     Block as BlockTrait, BlockBody, BlockTy, ReceiptWithBloom, RecoveredBlock,
@@ -35,7 +35,7 @@ use reth_rpc_eth_api::{
     helpers::{EthTransactions, TraceExt},
     AsEthApiError, FromEthApiError, FromEvmError, RpcConvert, RpcNodeCore,
 };
-use reth_rpc_eth_types::{EthApiError, StateCacheDb};
+use reth_rpc_eth_types::{utils::CallManyBudget, EthApiError, StateCacheDb};
 use reth_rpc_server_types::{result::internal_rpc_err, ToRpcResult};
 use reth_storage_api::{
     BlockIdReader, BlockReaderIdExt, HashedPostStateProvider, HeaderProvider, ProviderBlock,
@@ -518,6 +518,7 @@ where
         if bundles.is_empty() {
             return Err(EthApiError::InvalidParams(String::from("bundles are empty.")).into())
         }
+        let mut budget = CallManyBudget::for_bundles(&bundles, self.eth_api().call_gas_limit())?;
 
         let StateContext { transaction_index, block_number } = state_context.unwrap_or_default();
         let transaction_index = transaction_index.unwrap_or_default();
@@ -583,11 +584,14 @@ where
                         let state_overrides = state_overrides.take();
                         let overrides = EvmOverrides::new(state_overrides, block_overrides.clone());
 
-                        let (evm_env, tx_env) =
+                        let (evm_env, mut tx_env) =
                             eth_api.prepare_call_env(evm_env.clone(), tx, &mut db, overrides)?;
+                        budget.admit(&mut tx_env)?;
 
-                        let (next_inspector, res) =
-                            eth_api.inspect(&mut db, evm_env.clone(), &tx_env, inspector)?;
+                        let (next_inspector, res) = eth_api
+                            .inspect(&mut db, evm_env.clone(), &tx_env, inspector)
+                            .map_err(|err| budget.map_call_err(err))?;
+                        budget.charge(&res.result)?;
                         inspector = next_inspector;
                         let trace = inspector
                             .get_result(None, &tx_env, evm_env.block_env(), &res, &mut db)
@@ -820,12 +824,21 @@ where
     }
 
     /// Executes a block and returns the state root after each transaction.
+    ///
+    /// The block is either canonical or a bad block the engine rejected. Execution stops at the
+    /// first transaction that is invalid on top of its predecessors, so the result for a bad block
+    /// holds the roots before that transaction.
     pub async fn intermediate_roots(&self, block_hash: B256) -> Result<Vec<B256>, Eth::Error> {
-        let block = self
-            .eth_api()
-            .recovered_block(block_hash.into())
-            .await?
-            .ok_or(EthApiError::HeaderNotFound(block_hash.into()))?;
+        let block = match self.eth_api().recovered_block(block_hash.into()).await? {
+            Some(block) => block,
+            None => {
+                self.inner
+                    .bad_block_store
+                    .get(block_hash)
+                    .ok_or(EthApiError::HeaderNotFound(block_hash.into()))?
+                    .block
+            }
+        };
         let evm_env = self.eth_api().evm_env_for_header(block.sealed_block().sealed_header())?;
 
         self.eth_api()
@@ -841,9 +854,11 @@ where
                     if is_cancelled() {
                         return Err(EthApiError::InternalEthError.into())
                     }
-                    let output = executor
-                        .execute_transaction_without_commit(tx)
-                        .map_err(Eth::Error::from_evm_err)?;
+                    let output = match executor.execute_transaction_without_commit(tx) {
+                        Ok(output) => output,
+                        Err(BlockExecutionError::Validation(_)) => break,
+                        Err(err) => return Err(Eth::Error::from_evm_err(err)),
+                    };
                     let mut changes = reth_execution_types::TransactionChanges::default();
                     let Ok(()) = output.result().pending_state.visit(&mut changes);
                     let mut transaction_state = reth_execution_types::BlockState::default();

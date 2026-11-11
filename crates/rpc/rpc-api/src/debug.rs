@@ -292,8 +292,8 @@ pub trait DebugApi<TxReq: RpcObject> {
         end_number: u64,
     ) -> RpcResult<()>;
 
-    /// Executes a block (bad- or canon- or side-), and returns a list of intermediate roots: the
-    /// stateroot after each transaction.
+    /// Executes a canonical or bad block, and returns a list of intermediate roots: the stateroot
+    /// after each transaction up to the first invalid one.
     #[method(name = "intermediateRoots")]
     async fn debug_intermediate_roots(
         &self,
