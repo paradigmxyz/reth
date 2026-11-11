@@ -1,8 +1,10 @@
 use crate::{
     errors::{EthHandshakeError, EthStreamError, P2PStreamError},
     message::MAX_MESSAGE_SIZE,
+    p2pstream::log_prefix,
     CanDisconnect,
 };
+use alloy_primitives::hex;
 use bytes::{Bytes, BytesMut};
 use futures::{Sink, SinkExt, Stream};
 use reth_eth_wire_types::{
@@ -117,7 +119,12 @@ where
         ) {
             Ok(status) => status,
             Err(err) => {
-                debug!("decode error in eth handshake: msg={their_msg:x}");
+                debug!(
+                    %err,
+                    len = their_msg.len(),
+                    msg = %hex::encode(log_prefix(&their_msg)),
+                    "decode error in eth handshake"
+                );
                 unauth.disconnect(DisconnectReason::ProtocolBreach).await?;
                 return Err(EthStreamError::InvalidMessage(err));
             }

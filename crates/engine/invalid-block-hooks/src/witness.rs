@@ -1,8 +1,8 @@
+use crate::Runtime;
 use alloy_consensus::BlockHeader;
 use alloy_primitives::{Address, B256, U256};
 use alloy_rpc_types_debug::ExecutionWitness;
 use evm2::{bytecode::Bytecode, evm::AccountInfo};
-use pretty_assertions::Comparison;
 use reth_engine_primitives::InvalidBlockHook;
 use reth_evm::{database::StateProviderDatabase, ConfigureEvm, Executor};
 use reth_execution_types::BundleSource;
@@ -14,8 +14,27 @@ use reth_trie::{
     updates::TrieUpdates,
 };
 use serde::Serialize;
-use std::{collections::BTreeMap, fmt::Debug, fs::File, io::Write, path::PathBuf};
-use tracing::warn;
+use similar::TextDiff;
+use std::{
+    collections::BTreeMap,
+    fmt::Debug,
+    fs::File,
+    io::{BufWriter, Write},
+    path::{Path, PathBuf},
+    sync::Arc,
+    time::Duration,
+};
+use tokio::sync::Semaphore;
+use tracing::{debug, error, warn};
+
+/// Time budget for computing a diff before the remaining lines are reported as replaced.
+///
+/// The bundle state of a large block renders to hundreds of thousands of lines. Bound the
+/// diff search so that one block cannot monopolize the background worker.
+const DIFF_TIMEOUT: Duration = Duration::from_secs(1);
+
+/// Number of invalid blocks whose output files are kept in the output directory.
+const MAX_RETAINED_BLOCKS: usize = 100;
 
 /// Serializable version of `BundleState` for deterministic comparison
 #[derive(Debug, PartialEq, Eq)]
@@ -107,8 +126,10 @@ fn sort_bundle_state_for_comparison(bundle_state: &BundleState) -> BundleStateSo
 /// Hook for generating execution witnesses when invalid blocks are detected.
 ///
 /// This hook captures the execution state and generates witness data that can be used
-/// for debugging and analysis of invalid block execution.
-#[derive(Debug)]
+/// for debugging and analysis of invalid block execution. Diagnostics run on a blocking task;
+/// additional invalid blocks are skipped while a task is running or queued. Only the output of
+/// the highest invalid blocks is kept.
+#[derive(Clone, Debug)]
 pub struct InvalidBlockWitnessHook<P, E> {
     /// The provider to read the historical state and do the EVM execution.
     provider: P,
@@ -119,17 +140,31 @@ pub struct InvalidBlockWitnessHook<P, E> {
     output_directory: PathBuf,
     /// The healthy node client to compare the witness against.
     healthy_node_client: Option<jsonrpsee::http_client::HttpClient>,
+    /// Runtime for background diagnostics and shutdown-aware RPC requests.
+    runtime: Runtime,
+    /// Allows at most one diagnostic task, including across clones of the hook.
+    task_permit: Arc<Semaphore>,
 }
 
 impl<P, E> InvalidBlockWitnessHook<P, E> {
-    /// Creates a new witness hook.
-    pub const fn new(
+    /// Creates a witness hook that runs diagnostics on the given runtime.
+    ///
+    /// If `healthy_node_client` is `None`, no remote witness comparison is performed.
+    pub fn new(
         provider: P,
         evm_config: E,
         output_directory: PathBuf,
         healthy_node_client: Option<jsonrpsee::http_client::HttpClient>,
+        runtime: Runtime,
     ) -> Self {
-        Self { provider, evm_config, output_directory, healthy_node_client }
+        Self {
+            provider,
+            evm_config,
+            output_directory,
+            healthy_node_client,
+            runtime,
+            task_permit: Arc::new(Semaphore::new(1)),
+        }
     }
 }
 
@@ -163,7 +198,7 @@ where
     }
 
     /// Handles witness generation, saving, and comparison with healthy node
-    fn handle_witness_operations(
+    async fn handle_witness_operations(
         &self,
         witness: &ExecutionWitness,
         block_prefix: &str,
@@ -173,14 +208,12 @@ where
         let re_executed_witness_path = self.save_file(filename, witness)?;
 
         if let Some(healthy_node_client) = &self.healthy_node_client {
-            let healthy_node_witness = futures::executor::block_on(async move {
-                DebugApiClient::<()>::debug_execution_witness(
-                    healthy_node_client,
-                    block_number.into(),
-                    None,
-                )
-                .await
-            })?;
+            let healthy_node_witness = DebugApiClient::<()>::debug_execution_witness(
+                healthy_node_client,
+                block_number.into(),
+                None,
+            )
+            .await?;
 
             let filename = format!("{}.witness.healthy.json", block_prefix);
             let healthy_path = self.save_file(filename, &healthy_node_witness)?;
@@ -276,20 +309,25 @@ where
         Ok(())
     }
 
-    fn on_invalid_block(
+    /// Runs diagnostics on a blocking executor, yielding during the healthy-node RPC request.
+    async fn process_invalid_block(
         &self,
         parent_header: &SealedHeader<N::BlockHeader>,
         block: &RecoveredBlock<N::Block>,
-        output: &BlockExecutionOutput<N::Receipt>,
+        original_state: &BundleState,
         trie_updates: Option<(&TrieUpdates, B256)>,
     ) -> eyre::Result<()> {
+        if let Err(err) = prune_output(&self.output_directory) {
+            error!(target: "engine::invalid_block_hooks::witness", %err, "Failed to prune hook output");
+        }
+
         // TODO(alexey): unify with `DebugApi::debug_execution_witness`
         let (witness, bundle_state, hashed_state) = self.re_execute_block(parent_header, block)?;
 
         let block_prefix = format!("{}_{}", block.number(), block.hash());
-        self.handle_witness_operations(&witness, &block_prefix, block.number())?;
+        self.handle_witness_operations(&witness, &block_prefix, block.number()).await?;
 
-        self.validate_bundle_state(&bundle_state, &output.state, &block_prefix)?;
+        self.validate_bundle_state(&bundle_state, original_state, &block_prefix)?;
 
         self.validate_state_root_and_trie(
             parent_header,
@@ -305,21 +343,30 @@ where
     /// Serializes and saves a value to a JSON file in the output directory
     fn save_file<T: Serialize>(&self, filename: String, value: &T) -> eyre::Result<PathBuf> {
         let path = self.output_directory.join(filename);
-        File::create(&path)?.write_all(serde_json::to_string(value)?.as_bytes())?;
+        let mut writer = BufWriter::new(File::create(&path)?);
+        serde_json::to_writer(&mut writer, value)?;
+        writer.flush()?;
 
         Ok(path)
     }
 
-    /// Compares two values and saves their diff to a file in the output directory
-    fn save_diff<T: PartialEq + Debug>(
+    /// Compares the debug output of two values and saves their unified line diff to a file in the
+    /// output directory.
+    ///
+    /// Myers' algorithm keeps memory linear in the input size, and [`DIFF_TIMEOUT`] bounds its
+    /// running time.
+    fn save_diff<T: Debug>(
         &self,
         filename: String,
         original: &T,
         new: &T,
     ) -> eyre::Result<PathBuf> {
         let path = self.output_directory.join(filename);
-        let diff = Comparison::new(original, new);
-        File::create(&path)?.write_all(diff.to_string().as_bytes())?;
+        let original = format!("{original:#?}\n");
+        let new = format!("{new:#?}\n");
+        let diff = TextDiff::configure().timeout(DIFF_TIMEOUT).diff_lines(&original, &new);
+        File::create(&path)?
+            .write_all(diff.unified_diff().header("original", "new").to_string().as_bytes())?;
 
         Ok(path)
     }
@@ -327,7 +374,7 @@ where
 
 impl<P, E, N: NodePrimitives> InvalidBlockHook<N> for InvalidBlockWitnessHook<P, E>
 where
-    P: StateProviderFactory + 'static,
+    P: StateProviderFactory + Clone + 'static,
     E: ConfigureEvm<Primitives = N> + 'static,
 {
     fn on_invalid_block(
@@ -337,24 +384,82 @@ where
         output: &BlockExecutionOutput<N::Receipt>,
         trie_updates: Option<(&TrieUpdates, B256)>,
     ) {
-        if let Err(err) = self.on_invalid_block(parent_header, block, output, trie_updates) {
-            warn!(target: "engine::invalid_block_hooks::witness", %err, "Failed to invoke hook");
+        // Reserve capacity before cloning potentially large diagnostic inputs.
+        let Ok(permit) = self.task_permit.clone().try_acquire_owned() else {
+            metrics::counter!("engine.invalid_block_hooks.witness.skipped_blocks_total")
+                .increment(1);
+            debug!(target: "engine::invalid_block_hooks::witness", block_hash = %block.hash(), "Skipping diagnostics while witness hook is busy");
+            return
+        };
+
+        let hook = self.clone();
+        let parent_header = parent_header.clone();
+        let block = block.clone();
+        let original_state = output.state.clone();
+        let trie_updates = trie_updates.map(|(updates, root)| (updates.clone(), root));
+        self.runtime.spawn_blocking_task(async move {
+            let _permit = permit;
+            debug!(target: "engine::invalid_block_hooks::witness", block_hash = %block.hash(), "Starting witness diagnostics");
+            if let Err(err) = hook
+                .process_invalid_block(
+                    &parent_header,
+                    &block,
+                    &original_state,
+                    trie_updates.as_ref().map(|(updates, root)| (updates, *root)),
+                )
+                .await
+            {
+                error!(target: "engine::invalid_block_hooks::witness", block_hash = %block.hash(), %err, "Failed to invoke hook");
+            }
+            debug!(target: "engine::invalid_block_hooks::witness", block_hash = %block.hash(), "Finished witness diagnostics");
+        });
+    }
+}
+
+/// Removes the output files of all but the highest blocks, so that the output of
+/// [`MAX_RETAINED_BLOCKS`] blocks remains once the next block is written.
+///
+/// Only files named `{block_number}_{block_hash}.*` are considered, others are left alone.
+fn prune_output(output_directory: &Path) -> eyre::Result<()> {
+    let mut blocks = BTreeMap::<(u64, String), Vec<PathBuf>>::new();
+    for entry in reth_fs_util::read_dir(output_directory)? {
+        let entry = entry?;
+        let file_name = entry.file_name();
+        if let Some((prefix, _)) = file_name.to_str().and_then(|name| name.split_once('.')) &&
+            let Some((number, hash)) = prefix.split_once('_') &&
+            let Ok(number) = number.parse::<u64>() &&
+            hash.parse::<B256>().is_ok()
+        {
+            blocks.entry((number, prefix.to_string())).or_default().push(entry.path());
         }
     }
+
+    for path in blocks.into_values().rev().skip(MAX_RETAINED_BLOCKS - 1).flatten() {
+        reth_fs_util::remove_file(path)?;
+    }
+
+    Ok(())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_eips::eip7685::Requests;
+    use alloy_consensus::Header;
     use alloy_primitives::{map::HashMap, Bytes, B256, U256};
     use evm2::evm::{CacheDB, EmptyDB};
+    use jsonrpsee::{
+        core::RpcResult,
+        http_client::{HttpClient, HttpClientBuilder},
+        server::{ServerBuilder, ServerHandle},
+        RpcModule,
+    };
     use reth_chainspec::ChainSpec;
-    use reth_ethereum_primitives::EthPrimitives;
+    use reth_ethereum_primitives::{Block, EthPrimitives};
     use reth_evm_ethereum::EthEvmConfig;
     use reth_provider::test_utils::MockEthProvider;
     use reth_trie::bundle_state::{AccountRevert, BundleAccount};
     use tempfile::TempDir;
+    use tokio::{sync::Notify, time::timeout};
 
     use reth_testing_utils::generators::{self, random_block, random_eoa_accounts, BlockParams};
     use std::collections::HashSet;
@@ -436,63 +541,12 @@ mod tests {
 
     #[test]
     fn test_sort_bundle_state_for_comparison() {
-        // Use the fixture function to create test data
-        let bundle_state = create_bundle_state();
-
-        // Call the function under test
-        let sorted = sort_bundle_state_for_comparison(&bundle_state);
-
-        // Verify state_size and reverts_size values match the fixture
+        let sorted = sort_bundle_state_for_comparison(&create_bundle_state());
         assert_eq!(sorted.state_size, 3);
         assert_eq!(sorted.reverts_size, 2);
-
-        // Verify state contains our mock accounts
-        assert_eq!(sorted.state.len(), 3); // We added 3 accounts
-
-        // Verify contracts contains our mock contracts
-        assert_eq!(sorted.contracts.len(), 3); // We added 3 contracts
-
-        // Verify reverts is an array with multiple blocks of reverts
-        let reverts = &sorted.reverts;
-        assert_eq!(reverts.len(), 2); // Fixture has two blocks of reverts
-
-        // Verify that the state accounts have the expected structure
-        for account_data in sorted.state.values() {
-            // BundleAccountSorted has info, original_info, storage, and status fields
-            // Just verify the structure exists by accessing the fields
-            let _info = &account_data.info;
-            let _original_info = &account_data.original_info;
-            let _storage = &account_data.storage;
-            let _status = &account_data.status;
-        }
-    }
-
-    #[test]
-    fn test_re_execute_block() {
-        // Create hook instance
-        let (hook, _output_directory, _temp_dir) = create_test_hook();
-
-        // Setup to call re_execute_block
-        let mut rng = generators::rng();
-        let parent_header = generators::random_header(&mut rng, 1, None);
-
-        // Create a random block that inherits from the parent header
-        let recovered_block = random_block(
-            &mut rng,
-            2, // block number
-            BlockParams {
-                parent: Some(parent_header.hash()),
-                tx_count: Some(0),
-                ..Default::default()
-            },
-        )
-        .try_recover()
-        .unwrap();
-
-        let result = hook.re_execute_block(&parent_header, &recovered_block);
-
-        // Verify the function behavior with mock data
-        assert!(result.is_ok(), "re_execute_block should return Ok");
+        assert_eq!(sorted.state.len(), 3);
+        assert_eq!(sorted.contracts.len(), 3);
+        assert_eq!(sorted.reverts.len(), 2);
     }
 
     /// Creates test `InvalidBlockWitnessHook` with temporary directory
@@ -507,69 +561,29 @@ mod tests {
         let provider = MockEthProvider::<EthPrimitives, ChainSpec>::default();
         let evm_config = EthEvmConfig::mainnet();
 
-        let hook =
-            InvalidBlockWitnessHook::new(provider, evm_config, output_directory.clone(), None);
+        let hook = InvalidBlockWitnessHook::new(
+            provider,
+            evm_config,
+            output_directory.clone(),
+            None,
+            Runtime::test(),
+        );
 
         (hook, output_directory, temp_dir)
     }
 
-    #[test]
-    fn test_handle_witness_operations_with_healthy_client_mock() {
-        // Create hook instance with mock healthy client
-        let (hook, output_directory, _temp_dir) = create_test_hook();
-
-        // Create sample ExecutionWitness with correct types
+    #[tokio::test]
+    async fn test_handle_witness_operations_file_creation() {
+        let (hook, output_dir, _temp_dir) = create_test_hook();
         let witness = ExecutionWitness {
-            state: vec![Bytes::from("state_data")],
-            codes: vec![Bytes::from("code_data")],
-            keys: vec![Bytes::from("key_data")],
+            state: vec![Bytes::from("state")],
+            codes: vec![Bytes::from("code")],
+            keys: vec![Bytes::from("key")],
             ..Default::default()
         };
-
-        // Call handle_witness_operations
-        let result = hook.handle_witness_operations(&witness, "test_block_healthy", 67890);
-
-        // Should succeed
-        assert!(result.is_ok());
-
-        // Check that witness file was created
-        let witness_file = output_directory.join("test_block_healthy.witness.re_executed.json");
-        assert!(witness_file.exists());
-    }
-
-    #[test]
-    fn test_handle_witness_operations_file_creation() {
-        // Test file creation and content validation
-        let (hook, output_directory, _temp_dir) = create_test_hook();
-
-        let witness = ExecutionWitness {
-            state: vec![Bytes::from("test_state")],
-            codes: vec![Bytes::from("test_code")],
-            keys: vec![Bytes::from("test_key")],
-            ..Default::default()
-        };
-
-        let block_prefix = "file_test_block";
-        let block_number = 11111;
-
-        // Call handle_witness_operations
-        let result = hook.handle_witness_operations(&witness, block_prefix, block_number);
-        assert!(result.is_ok());
-
-        // Verify file was created with correct name
-        let expected_file =
-            output_directory.join(format!("{}.witness.re_executed.json", block_prefix));
-        assert!(expected_file.exists());
-
-        // Read and verify file content is valid JSON and contains witness structure
-        let file_content = std::fs::read_to_string(&expected_file).expect("Failed to read file");
-        let parsed_witness: serde_json::Value =
-            serde_json::from_str(&file_content).expect("File should contain valid JSON");
-
-        // Verify the JSON structure contains expected fields
-        assert!(parsed_witness.get("state").is_some(), "JSON should contain 'state' field");
-        assert!(parsed_witness.get("codes").is_some(), "JSON should contain 'codes' field");
-        assert!(parsed_witness.get("keys").is_some(), "JSON should contain 'keys' field");
+        hook.handle_witness_operations(&witness, "block", 0).await.unwrap();
+        let saved = std::fs::read(output_dir.join("block.witness.re_executed.json")).unwrap();
+        assert_eq!(serde_json::from_slice::<ExecutionWitness>(&saved).unwrap(), witness);
     }
 
     #[test]
@@ -594,28 +608,19 @@ mod tests {
 
     #[test]
     fn test_validate_bundle_state_matching() {
-        let (hook, _output_dir, _temp_dir) = create_test_hook();
-        let bundle_state = create_bundle_state();
-        let block_prefix = "test_block_123";
-
-        // Test with identical states - should not produce any warnings or files
-        let result = hook.validate_bundle_state(&bundle_state, &bundle_state, block_prefix);
-        assert!(result.is_ok());
+        let (hook, output_dir, _temp_dir) = create_test_hook();
+        for state in [BundleState::default(), create_bundle_state()] {
+            hook.validate_bundle_state(&state, &state, "matching").unwrap();
+            assert_eq!(output_dir.read_dir().unwrap().count(), 0);
+        }
     }
 
     #[test]
     fn test_validate_bundle_state_mismatch() {
         let (hook, output_dir, _temp_dir) = create_test_hook();
         let original_state = create_bundle_state();
-        let mut modified_state = create_bundle_state();
-
-        // Modify the state to create a mismatch
-        let addr = Address::repeat_byte(1u8);
-        if let Some(account) = modified_state.state.get_mut(&addr) &&
-            let Some(info) = &mut account.info
-        {
-            info.balance = U256::from(999);
-        }
+        let mut modified_state = original_state.clone();
+        modified_state.state.values_mut().next().unwrap().info.as_mut().unwrap().nonce ^= 1;
 
         let block_prefix = "test_block_mismatch";
 
@@ -658,23 +663,11 @@ mod tests {
 
     #[test]
     fn test_validate_state_root_and_trie_with_trie_updates() {
-        let (hook, _output_dir, _temp_dir) = create_test_hook();
+        let (hook, output_dir, _temp_dir) = create_test_hook();
         let bundle_state = create_bundle_state();
 
         // Generate test data
-        let mut rng = generators::rng();
-        let parent_header = generators::random_header(&mut rng, 1, None);
-        let recovered_block = random_block(
-            &mut rng,
-            2,
-            BlockParams {
-                parent: Some(parent_header.hash()),
-                tx_count: Some(0),
-                ..Default::default()
-            },
-        )
-        .try_recover()
-        .unwrap();
+        let (parent_header, recovered_block) = invalid_block_fixture(2);
 
         let trie_updates = create_test_trie_updates();
         let original_root = B256::repeat_byte(2u8); // Different from what will be computed
@@ -689,125 +682,17 @@ mod tests {
             Some((&trie_updates, original_root)),
             block_prefix,
         );
-        assert!(result.is_ok());
-    }
-
-    #[test]
-    fn test_on_invalid_block_calls_all_validation_methods() {
-        let (hook, output_dir, _temp_dir) = create_test_hook();
-        let bundle_state = create_bundle_state();
-
-        // Generate test data
-        let mut rng = generators::rng();
-        let parent_header = generators::random_header(&mut rng, 1, None);
-        let recovered_block = random_block(
-            &mut rng,
-            2,
-            BlockParams {
-                parent: Some(parent_header.hash()),
-                tx_count: Some(0),
-                ..Default::default()
-            },
-        )
-        .try_recover()
-        .unwrap();
-
-        // Create mock BlockExecutionOutput
-        let output = BlockExecutionOutput::new(
-            reth_provider::BlockExecutionResult {
-                receipts: vec![],
-                requests: Requests::default(),
-                gas_used: 0,
-                blob_gas_used: 0,
-            },
-            bundle_state,
-        );
-
-        // Create test trie updates
-        let trie_updates = create_test_trie_updates();
-        let state_root = B256::random();
-
-        // Test that on_invalid_block attempts to call all its internal methods
-        // by checking that it doesn't panic and tries to create files
-        let files_before = output_dir.read_dir().unwrap().count();
-
-        let _result = hook.on_invalid_block(
-            &parent_header,
-            &recovered_block,
-            &output,
-            Some((&trie_updates, state_root)),
-        );
-
-        // Verify that the function attempted to process the block:
-        // Either it succeeded, or it created some output files during processing
-        let files_after = output_dir.read_dir().unwrap().count();
-
-        // The function should attempt to execute its workflow
-        assert!(
-            files_after >= files_before,
-            "on_invalid_block should attempt to create output files during processing"
-        );
-    }
-
-    #[test]
-    fn test_handle_witness_operations_with_empty_witness() {
-        let (hook, _output_dir, _temp_dir) = create_test_hook();
-        let witness = ExecutionWitness::default();
-        let block_prefix = "empty_witness_test";
-        let block_number = 12345;
-
-        let result = hook.handle_witness_operations(&witness, block_prefix, block_number);
-        assert!(result.is_ok());
-    }
-
-    #[test]
-    fn test_handle_witness_operations_with_zero_block_number() {
-        let (hook, _output_dir, _temp_dir) = create_test_hook();
-        let witness = ExecutionWitness {
-            state: vec![Bytes::from("test_state")],
-            codes: vec![Bytes::from("test_code")],
-            keys: vec![Bytes::from("test_key")],
-            ..Default::default()
-        };
-        let block_prefix = "zero_block_test";
-        let block_number = 0;
-
-        let result = hook.handle_witness_operations(&witness, block_prefix, block_number);
-        assert!(result.is_ok());
-    }
-
-    #[test]
-    fn test_handle_witness_operations_with_large_witness_data() {
-        let (hook, _output_dir, _temp_dir) = create_test_hook();
-        let large_data = vec![0u8; 10000]; // 10KB of data
-        let witness = ExecutionWitness {
-            state: vec![Bytes::from(large_data.clone())],
-            codes: vec![Bytes::from(large_data.clone())],
-            keys: vec![Bytes::from(large_data)],
-            ..Default::default()
-        };
-        let block_prefix = "large_witness_test";
-        let block_number = 999999;
-
-        let result = hook.handle_witness_operations(&witness, block_prefix, block_number);
-        assert!(result.is_ok());
-    }
-
-    #[test]
-    fn test_validate_bundle_state_with_empty_states() {
-        let (hook, _output_dir, _temp_dir) = create_test_hook();
-        let empty_state = BundleState::default();
-        let block_prefix = "empty_states_test";
-
-        let result = hook.validate_bundle_state(&empty_state, &empty_state, block_prefix);
-        assert!(result.is_ok());
+        result.unwrap();
+        assert!(output_dir.join(format!("{block_prefix}.state_root.diff")).exists());
+        assert!(output_dir.join(format!("{block_prefix}.trie_updates.original.json")).exists());
+        assert!(output_dir.join(format!("{block_prefix}.trie_updates.re_executed.json")).exists());
     }
 
     #[test]
     fn test_validate_bundle_state_with_different_contract_counts() {
         let (hook, output_dir, _temp_dir) = create_test_hook();
         let state1 = create_bundle_state();
-        let mut state2 = create_bundle_state();
+        let mut state2 = state1.clone();
 
         // Add extra contract to state2
         let extra_contract_hash = B256::random();
@@ -826,37 +711,20 @@ mod tests {
     }
 
     #[test]
-    fn test_save_diff_with_identical_values() {
-        let (hook, output_dir, _temp_dir) = create_test_hook();
-        let value1 = "identical_value";
-        let value2 = "identical_value";
-        let filename = "identical_diff_test".to_string();
-
-        let result = hook.save_diff(filename.clone(), &value1, &value2);
-        assert!(result.is_ok());
-
-        let diff_file = output_dir.join(filename);
-        assert!(diff_file.exists());
+    fn test_save_diff() {
+        let (hook, _output_dir, _temp_dir) = create_test_hook();
+        for (new, expected) in [(1, ""), (2, "--- original\n+++ new\n@@ -1 +1 @@\n-1\n+2\n")] {
+            let path = hook.save_diff("diff".to_string(), &1, &new).unwrap();
+            assert_eq!(std::fs::read_to_string(path).unwrap(), expected);
+        }
     }
 
     #[test]
     fn test_validate_state_root_and_trie_without_trie_updates() {
-        let (hook, _output_dir, _temp_dir) = create_test_hook();
+        let (hook, output_dir, _temp_dir) = create_test_hook();
         let bundle_state = create_bundle_state();
 
-        let mut rng = generators::rng();
-        let parent_header = generators::random_header(&mut rng, 1, None);
-        let recovered_block = random_block(
-            &mut rng,
-            2,
-            BlockParams {
-                parent: Some(parent_header.hash()),
-                tx_count: Some(0),
-                ..Default::default()
-            },
-        )
-        .try_recover()
-        .unwrap();
+        let (parent_header, recovered_block) = invalid_block_fixture(2);
 
         let block_prefix = "no_trie_updates_test";
         let hashed_state = hashed_state_for_bundle_state(bundle_state);
@@ -869,71 +737,216 @@ mod tests {
             None,
             block_prefix,
         );
-        assert!(result.is_ok());
+        result.unwrap();
+        assert_eq!(output_dir.read_dir().unwrap().count(), 0);
     }
 
     #[test]
-    fn test_complete_invalid_block_workflow() {
+    fn test_save_diff_large_bundle_state() {
+        const ACCOUNTS: usize = 3_000;
         let (hook, _output_dir, _temp_dir) = create_test_hook();
-        let mut rng = generators::rng();
+        let original = sort_bundle_state_for_comparison(&create_transfer_bundle_state(ACCOUNTS, 0));
+        let new =
+            sort_bundle_state_for_comparison(&create_transfer_bundle_state(ACCOUNTS, ACCOUNTS));
 
-        // Create a realistic block scenario
-        let parent_header = generators::random_header(&mut rng, 100, None);
-        let invalid_block = random_block(
+        // Every account differs, so the changed region spans the whole state. A quadratic line
+        // diff of it would allocate tens of gigabytes.
+        let path = hook.save_diff("large_diff_test".to_string(), &original, &new).unwrap();
+
+        let diff = std::fs::read_to_string(path).unwrap();
+        let added: HashSet<_> =
+            diff.lines().filter_map(|line| line.strip_prefix('+')).map(str::trim).collect();
+        for balance in ACCOUNTS..2 * ACCOUNTS {
+            assert!(added.contains(format!("balance: {balance},").as_str()));
+        }
+    }
+
+    /// Creates a `BundleState` of `accounts` funded accounts, offsetting every balance by
+    /// `balance_offset`.
+    fn create_transfer_bundle_state(accounts: usize, balance_offset: usize) -> BundleState {
+        let mut bundle_state = BundleState::default();
+        for i in 0..accounts {
+            bundle_state.state.insert(
+                Address::from_word(B256::from(U256::from(i))),
+                BundleAccount {
+                    info: Some(AccountInfo {
+                        balance: U256::from(i + balance_offset),
+                        ..Default::default()
+                    }),
+                    original_info: None,
+                    storage: HashMap::default(),
+                    status: AccountStatus::Changed,
+                },
+            );
+        }
+        bundle_state.state_size = accounts;
+        bundle_state
+    }
+
+    #[tokio::test]
+    async fn test_on_invalid_block_runs_in_background_and_skips_while_busy() {
+        let (mut hook, output_dir, _temp_dir) = create_test_hook();
+        let (client, server, requested, respond) = healthy_node_server().await;
+        hook.healthy_node_client = Some(client);
+        let (parent, block) = invalid_block_fixture(2);
+        let (skipped_parent, skipped_block) = invalid_block_fixture(3);
+        let output = BlockExecutionOutput::default();
+        let healthy_path = output_dir.join(format!("2_{}.witness.healthy.json", block.hash()));
+        let skipped_path =
+            output_dir.join(format!("3_{}.witness.re_executed.json", skipped_block.hash()));
+
+        hook.on_invalid_block(&parent, &block, &output, None);
+        timeout(Duration::from_secs(10), requested.notified()).await.unwrap();
+        assert!(!healthy_path.exists());
+
+        // Clones share the admission limit and must not queue another diagnostic job.
+        hook.clone().on_invalid_block(&skipped_parent, &skipped_block, &output, None);
+        respond.notify_one();
+        drop(timeout(Duration::from_secs(10), hook.task_permit.acquire()).await.unwrap().unwrap());
+        assert!(healthy_path.exists());
+        assert!(!skipped_path.exists());
+
+        hook.healthy_node_client = None;
+        hook.on_invalid_block(&skipped_parent, &skipped_block, &output, None);
+        drop(timeout(Duration::from_secs(10), hook.task_permit.acquire()).await.unwrap().unwrap());
+        assert!(skipped_path.exists());
+        server.stop().unwrap();
+        timeout(Duration::from_secs(10), server.stopped()).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_on_invalid_block_releases_capacity_after_error() {
+        let (mut hook, output_dir, _temp_dir) = create_test_hook();
+        let (parent, block) = invalid_block_fixture(2);
+        let output = BlockExecutionOutput::default();
+        hook.output_directory = output_dir.join("missing");
+
+        hook.on_invalid_block(&parent, &block, &output, None);
+        drop(timeout(Duration::from_secs(10), hook.task_permit.acquire()).await.unwrap().unwrap());
+        assert!(!hook.output_directory.exists());
+
+        hook.output_directory = output_dir.clone();
+        hook.on_invalid_block(&parent, &block, &output, None);
+        drop(timeout(Duration::from_secs(10), hook.task_permit.acquire()).await.unwrap().unwrap());
+        assert!(output_dir
+            .join(format!("{}_{}.witness.re_executed.json", block.number(), block.hash()))
+            .exists());
+    }
+
+    #[tokio::test]
+    async fn test_on_invalid_block_cancels_rpc_on_shutdown() {
+        let (mut hook, output_dir, _temp_dir) = create_test_hook();
+        let (client, server, requested, respond) = healthy_node_server().await;
+        hook.healthy_node_client = Some(client);
+        let (parent, block) = invalid_block_fixture(2);
+
+        hook.on_invalid_block(&parent, &block, &BlockExecutionOutput::default(), None);
+        timeout(Duration::from_secs(10), requested.notified()).await.unwrap();
+        drop(hook.runtime.initiate_graceful_shutdown().unwrap());
+        drop(timeout(Duration::from_secs(10), hook.task_permit.acquire()).await.unwrap().unwrap());
+        assert!(!output_dir
+            .join(format!("{}_{}.witness.healthy.json", block.number(), block.hash()))
+            .exists());
+
+        respond.notify_one();
+        server.stop().unwrap();
+        timeout(Duration::from_secs(10), server.stopped()).await.unwrap();
+    }
+
+    fn invalid_block_fixture(number: u64) -> (SealedHeader<Header>, RecoveredBlock<Block>) {
+        let mut rng = generators::rng();
+        let parent = generators::random_header(&mut rng, number - 1, None);
+        let block = random_block(
             &mut rng,
-            101,
-            BlockParams {
-                parent: Some(parent_header.hash()),
-                tx_count: Some(3),
-                ..Default::default()
-            },
+            number,
+            BlockParams { parent: Some(parent.hash()), tx_count: Some(0), ..Default::default() },
         )
         .try_recover()
         .unwrap();
+        (parent, block)
+    }
 
-        let bundle_state = create_bundle_state();
-        let trie_updates = create_test_trie_updates();
-
-        // Test validation methods
-        let validation_result =
-            hook.validate_bundle_state(&bundle_state, &bundle_state, "integration_test");
-        assert!(validation_result.is_ok(), "Bundle state validation should succeed");
-
-        let state_root_result = hook.validate_state_root_and_trie(
-            &parent_header,
-            &invalid_block,
-            hashed_state_for_bundle_state(bundle_state),
-            Some((&trie_updates, B256::random())),
-            "integration_test",
-        );
-        assert!(state_root_result.is_ok(), "State root validation should succeed");
+    async fn healthy_node_server() -> (HttpClient, ServerHandle, Arc<Notify>, Arc<Notify>) {
+        let requested = Arc::new(Notify::new());
+        let respond = Arc::new(Notify::new());
+        let server = ServerBuilder::default().build("127.0.0.1:0").await.unwrap();
+        let client = HttpClientBuilder::default()
+            .build(format!("http://{}", server.local_addr().unwrap()))
+            .unwrap();
+        let mut module = RpcModule::new((requested.clone(), respond.clone()));
+        module
+            .register_async_method("debug_executionWitness", |_, context, _| async move {
+                context.0.notify_one();
+                context.1.notified().await;
+                RpcResult::Ok(ExecutionWitness {
+                    codes: vec![Bytes::from_static(b"healthy node code")],
+                    ..Default::default()
+                })
+            })
+            .unwrap();
+        (client, server.start(module), requested, respond)
     }
 
     #[test]
-    fn test_integration_workflow_components() {
-        let (hook, _output_dir, _temp_dir) = create_test_hook();
-        let mut rng = generators::rng();
+    fn test_prune_output_keeps_highest_blocks() {
+        let temp_dir = TempDir::new().unwrap();
+        let output_dir = temp_dir.path();
+        let blocks = (0..MAX_RETAINED_BLOCKS as u64 + 2)
+            .map(|number| {
+                let prefix = format!("{number}_{}", B256::with_last_byte(number as u8));
+                let files = [
+                    output_dir.join(format!("{prefix}.witness.re_executed.json")),
+                    output_dir.join(format!("{prefix}.bundle_state.diff")),
+                ];
+                for path in &files {
+                    File::create(path).unwrap();
+                }
+                files
+            })
+            .collect::<Vec<_>>();
+        let unrelated = output_dir.join("notes.txt");
+        File::create(&unrelated).unwrap();
 
-        // Create test data
-        let parent_header = generators::random_header(&mut rng, 50, None);
-        let _invalid_block = random_block(
-            &mut rng,
-            51,
-            BlockParams {
-                parent: Some(parent_header.hash()),
-                tx_count: Some(2),
-                ..Default::default()
-            },
-        )
-        .try_recover()
-        .unwrap();
+        prune_output(output_dir).unwrap();
 
-        let bundle_state = create_bundle_state();
-        let _trie_updates = create_test_trie_updates();
+        // Room is left for one more block, so the three lowest blocks are removed.
+        for (number, files) in blocks.iter().enumerate() {
+            for path in files {
+                assert_eq!(path.exists(), number >= 3, "{}", path.display());
+            }
+        }
+        assert!(unrelated.exists());
+    }
 
-        // Test individual components that would be part of the complete flow
-        let validation_result =
-            hook.validate_bundle_state(&bundle_state, &bundle_state, "integration_component_test");
-        assert!(validation_result.is_ok(), "Component validation should succeed");
+    #[tokio::test]
+    async fn test_on_invalid_block_prunes_old_output() {
+        let (hook, output_dir, _temp_dir) = create_test_hook();
+        let old_blocks = (0..MAX_RETAINED_BLOCKS as u64)
+            .map(|number| {
+                let path = output_dir.join(format!(
+                    "{number}_{}.witness.re_executed.json",
+                    B256::with_last_byte(number as u8)
+                ));
+                File::create(&path).unwrap();
+                path
+            })
+            .collect::<Vec<_>>();
+
+        let (parent_header, block) = invalid_block_fixture(100);
+        let output = BlockExecutionOutput::default();
+        let permit = hook.task_permit.try_acquire().unwrap();
+
+        // Busy hooks must skip pruning as well as writing.
+        hook.on_invalid_block(&parent_header, &block, &output, None);
+        assert!(old_blocks[0].exists());
+        drop(permit);
+
+        hook.on_invalid_block(&parent_header, &block, &output, None);
+        drop(timeout(Duration::from_secs(10), hook.task_permit.acquire()).await.unwrap().unwrap());
+        assert!(!old_blocks[0].exists());
+        assert!(old_blocks[1..].iter().all(|path| path.exists()));
+        assert!(output_dir
+            .join(format!("{}_{}.witness.re_executed.json", block.number(), block.hash()))
+            .exists());
     }
 }

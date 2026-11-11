@@ -13,6 +13,9 @@ use reth_chainspec::EthereumHardforks;
 use reth_ethereum_primitives::TransactionSigned;
 use reth_evm::{ExecutableTxParts, RecoveredTx};
 
+#[cfg(feature = "std")]
+const PARALLEL_AUTHORIZATION_THRESHOLD: usize = 16;
+
 /// Map the latest active Ethereum hardfork at `timestamp` or `block_number` to a [`SpecId`].
 pub fn spec_id_by_timestamp_and_block_number<C>(
     chain_spec: &C,
@@ -131,9 +134,32 @@ impl ExecutableRecoveredTx {
     pub fn new(tx: Recovered<TransactionSigned>) -> Self {
         // Cache the hash before cloning so neither envelope hashes on the execution thread.
         tx.inner().tx_hash();
-        let tx_env = tx.clone().convert();
+        let tx_env = tx.clone().map(|signed| match signed {
+            TransactionSigned::Eip7702(signed) => {
+                let body = signed.strip_signature();
+                evm2::ethereum::TxEnvelope::Eip7702(recover_authorizations(body))
+            }
+            signed => signed.into(),
+        });
         Self { tx_env, tx }
     }
+}
+
+/// Recovers EIP-7702 authorizations, using parallel recovery for large lists.
+pub fn recover_authorizations(tx: alloy_consensus::TxEip7702) -> evm2::ethereum::LazyTxEip7702 {
+    #[cfg(feature = "std")]
+    if tx.authorization_list.len() >= PARALLEL_AUTHORIZATION_THRESHOLD {
+        use rayon::prelude::*;
+
+        let authorities = tx
+            .authorization_list
+            .par_iter()
+            .map(|auth| evm2::ethereum::LazyAuthorization::Signed(auth).authority())
+            .collect();
+        return evm2::ethereum::LazyTxEip7702::from_cached_recovered_authorizations(tx, authorities);
+    }
+
+    evm2::ethereum::LazyTxEip7702::from_recovered_authorizations(tx)
 }
 
 impl RecoveredTx<TransactionSigned> for ExecutableRecoveredTx {
