@@ -1,5 +1,6 @@
 //! `Eth` bundle implementation and helpers.
 
+use crate::eth::sim_bundle::{DEFAULT_SIM_TIMEOUT, MAX_SIM_TIMEOUT};
 use alloy_consensus::{transaction::TxHashRef, EnvKzgSettings, Transaction as _};
 use alloy_eips::eip7840::BlobParams;
 use alloy_primitives::{uint, Keccak256, U256};
@@ -20,7 +21,10 @@ use reth_tasks::{cancel::is_cancelled, pool::BlockingTaskGuard};
 use reth_transaction_pool::{
     EthBlobTransactionSidecar, EthPoolTransaction, PoolPooledTx, PoolTransaction, TransactionPool,
 };
-use std::sync::Arc;
+use std::{
+    sync::Arc,
+    time::{Duration, Instant},
+};
 
 /// `Eth` bundle implementation.
 pub struct EthBundle<Eth> {
@@ -48,6 +52,10 @@ where
     /// another (or the same) block. This can be used to simulate future blocks with the current
     /// state, or it can be used to simulate a past block. The sender is responsible for signing the
     /// transactions and using the correct nonce and ensuring validity
+    ///
+    /// The simulation is bounded by the request's `timeout` in milliseconds, capped at 30
+    /// seconds, or by 5 seconds if it is missing or zero. No transaction starts after it expires,
+    /// the request then fails with [`EthApiError::ExecutionTimedOut`].
     pub async fn call_bundle(
         &self,
         bundle: EthCallBundle,
@@ -57,7 +65,7 @@ where
             block_number,
             coinbase,
             state_block_number,
-            timeout: _,
+            timeout,
             timestamp,
             gas_limit,
             difficulty,
@@ -86,6 +94,12 @@ where
                 EthApiError::InvalidTransaction(RpcInvalidTransactionError::GasTooHigh).into()
             )
         }
+
+        // A zero timeout selects the default instead of expiring immediately.
+        let timeout = timeout
+            .filter(|timeout| *timeout > 0)
+            .map(Duration::from_millis)
+            .map_or(DEFAULT_SIM_TIMEOUT, |timeout| timeout.min(MAX_SIM_TIMEOUT));
 
         let transactions =
             self.eth_api().recover_raw_transactions::<PoolPooledTx<Eth::Pool>>(txs)?;
@@ -191,9 +205,15 @@ where
                 let mut hasher = Keccak256::new();
 
                 let mut results = Vec::with_capacity(transactions.len());
+                // Starts here, so waiting for the permit does not count.
+                let deadline = Instant::now() + timeout;
                 for tx in transactions {
                     if is_cancelled() {
                         return Err(EthApiError::InternalEthError.into())
+                    }
+
+                    if Instant::now() >= deadline {
+                        return Err(EthApiError::ExecutionTimedOut(timeout).into())
                     }
 
                     if !block_gas.admits(tx.gas_limit()) {
@@ -799,6 +819,88 @@ mod tests {
 
         assert_eq!(response.results[0].revert, None);
         assert_eq!(response.results[1].coinbase_diff, response.results[1].gas_fees);
+    }
+
+    /// No transaction starts once the bundle's timeout has expired, and a zero timeout selects
+    /// the default instead of expiring immediately.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn call_bundle_times_out() {
+        let mut rng = generators::rng();
+        let key = generate_key(&mut rng);
+        let looping = Address::random();
+        let tx = |nonce, to, gas_limit| {
+            sign_tx_with_key_pair(
+                key,
+                reth_ethereum_primitives::Transaction::Eip1559(TxEip1559 {
+                    chain_id: 1,
+                    nonce,
+                    gas_limit,
+                    max_fee_per_gas: INITIAL_BASE_FEE as u128,
+                    to: TxKind::Call(to),
+                    ..Default::default()
+                }),
+            )
+        };
+        // Burns its whole gas limit, which takes longer than 1ms.
+        let slow = tx(0, looping, 10_000_000);
+        let transfer = |nonce| tx(nonce, Address::random(), 21_000);
+        let sender = slow.recover_signer().unwrap();
+
+        // `JUMPDEST PUSH0 JUMP`
+        let looping_code = [0x5b, 0x5f, 0x56];
+        let genesis = Genesis::default()
+            .with_gas_limit(30_000_000)
+            .with_base_fee(Some(INITIAL_BASE_FEE as u128))
+            .extend_accounts([
+                (sender, GenesisAccount::default().with_balance(U256::from(10u128.pow(18)))),
+                (looping, GenesisAccount::default().with_code(Some(looping_code.into()))),
+            ]);
+        let chain_spec =
+            Arc::new(ChainSpecBuilder::mainnet().cancun_activated().genesis(genesis).build());
+        let factory = create_test_provider_factory_with_chain_spec(chain_spec);
+        init_genesis(&factory).unwrap();
+        let provider = BlockchainProvider::new(factory).unwrap();
+
+        let eth_api = EthApiBuilder::new(
+            provider.clone(),
+            testing_pool(),
+            NoopNetwork::default(),
+            EthEvmConfig::new(provider.chain_spec()),
+        )
+        .build();
+        let api = EthBundle::new(eth_api, BlockingTaskGuard::new(4));
+
+        let bundle = EthCallBundle {
+            block_number: 1,
+            state_block_number: BlockNumberOrTag::Number(0),
+            ..Default::default()
+        };
+
+        let error = api
+            .call_bundle(EthCallBundle {
+                txs: vec![slow.encoded_2718().into(), transfer(1).encoded_2718().into()],
+                timeout: Some(1),
+                ..bundle.clone()
+            })
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(
+                error,
+                EthApiError::ExecutionTimedOut(timeout) if timeout == Duration::from_millis(1)
+            ),
+            "{error:?}"
+        );
+
+        let response = api
+            .call_bundle(EthCallBundle {
+                txs: vec![transfer(0).encoded_2718().into()],
+                timeout: Some(0),
+                ..bundle
+            })
+            .await
+            .unwrap();
+        assert_eq!(response.results.len(), 1);
     }
 
     fn assert_bundle_fees(response: &EthCallBundleResponse, expected_tip: u128) {
