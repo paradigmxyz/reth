@@ -812,12 +812,7 @@ impl<N: ProviderNodeTypes> StateProviderFactory for BlockchainProvider<N> {
                 self.history_by_block_number(self.earliest_block_number()?)
             }
             BlockNumberOrTag::Pending => self.pending(),
-            BlockNumberOrTag::Number(num) => {
-                let hash = self
-                    .block_hash(num)?
-                    .ok_or_else(|| ProviderError::HeaderNotFound(num.into()))?;
-                self.state_by_block_hash(hash)
-            }
+            BlockNumberOrTag::Number(num) => self.history_by_block_number(num),
         }
     }
 
@@ -826,6 +821,10 @@ impl<N: ProviderNodeTypes> StateProviderFactory for BlockchainProvider<N> {
         block_number: BlockNumber,
     ) -> ProviderResult<StateProviderBox> {
         trace!(target: "providers::blockchain", ?block_number, "Getting history by block number");
+        // Same shortcut as in `history_by_block_hash`.
+        if let Some(state) = self.canonical_in_memory_state.state_by_number(block_number) {
+            return self.state_provider_for_state(state)
+        }
         let provider = self.consistent_provider()?;
         let hash = provider
             .block_hash(block_number)?
@@ -2366,6 +2365,17 @@ mod tests {
                 .unwrap()
         );
         assert_eq!(
+            first_db_block.hash(),
+            only_database_provider
+                .state_by_block_number_or_tag(BlockNumberOrTag::Number(first_db_block.number))?
+                .block_hash(first_db_block.number)?
+                .unwrap()
+        );
+        assert!(matches!(
+            only_database_provider.state_by_block_number_or_tag(BlockNumberOrTag::Number(u64::MAX)),
+            Err(ProviderError::HeaderNotFound(BlockHashOrNumber::Number(u64::MAX)))
+        ));
+        assert_eq!(
             first_in_memory_block.hash(),
             in_memory_provider
                 .state_by_block_number_or_tag(BlockNumberOrTag::Latest)?
@@ -3525,6 +3535,7 @@ mod tests {
             provider.latest()?,
             provider.state_by_block_hash(block_hash)?,
             provider.history_by_block_hash(block_hash)?,
+            provider.history_by_block_number(genesis.number + 1)?,
         ] {
             assert_eq!(state.basic_account(&address)?, Some(account.clone()));
             assert_eq!(state.storage(address, slot_key)?, Some(value));
