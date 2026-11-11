@@ -24,7 +24,7 @@
 // IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 // DEALINGS IN THE SOFTWARE.
 
-use std::{future::Future, net::SocketAddr, pin::Pin, sync::Arc, task::Poll, time::Duration};
+use std::{fmt, future::Future, net::SocketAddr, pin::Pin, sync::Arc, task::Poll, time::Duration};
 
 use crate::{
     future::{ConnectionGuard, ServerHandle, StopHandle},
@@ -57,6 +57,7 @@ use jsonrpsee_types::{
     },
     ErrorObject, Id, Request,
 };
+use serde::de::{DeserializeSeed, Deserializer, Error as _, SeqAccess, Visitor};
 use soketto::handshake::http::is_upgrade_request;
 use tokio::{
     net::{TcpListener, TcpStream, ToSocketAddrs},
@@ -942,20 +943,20 @@ where
             BatchRequestConfig::Unlimited => usize::MAX,
         };
 
-        if let Ok(unchecked_batch) = serde_json::from_slice::<Vec<&JsonRawValue>>(body) {
-            if unchecked_batch.len() > max_len {
-                return MethodResponse::error(Id::Null, reject_too_big_batch_request(max_len));
+        let mut too_big = false;
+        let mut deserializer = serde_json::Deserializer::from_slice(body);
+        let batch = BatchSeed { max_len, too_big: &mut too_big }
+            .deserialize(&mut deserializer)
+            .and_then(|batch| deserializer.end().map(|()| batch));
+
+        match batch {
+            Ok(batch) => rpc_service.batch(Batch::from(batch)).await,
+            // The seed stops reading as soon as the batch exceeds the limit, which surfaces as a
+            // deserialization error.
+            Err(_) if too_big => {
+                MethodResponse::error(Id::Null, reject_too_big_batch_request(max_len))
             }
-
-            let mut batch = Vec::with_capacity(unchecked_batch.len());
-
-            for call in unchecked_batch {
-                batch.push(parse_batch_entry(call));
-            }
-
-            rpc_service.batch(Batch::from(batch)).await
-        } else {
-            MethodResponse::error(Id::Null, ErrorObject::from(ErrorCode::ParseError))
+            Err(_) => MethodResponse::error(Id::Null, ErrorObject::from(ErrorCode::ParseError)),
         }
     }
 }
@@ -979,5 +980,46 @@ fn parse_batch_entry(call: &JsonRawValue) -> Result<BatchEntry<'_>, BatchEntryEr
         };
 
         Err(BatchEntryErr::new(id, ErrorCode::InvalidRequest.into()))
+    }
+}
+
+/// Reads a JSON array of batch entries, classifying each entry as it is read.
+///
+/// Stops with an error as soon as an entry beyond `max_len` is read and sets `too_big`, so an
+/// oversized batch is never collected.
+struct BatchSeed<'a> {
+    max_len: usize,
+    too_big: &'a mut bool,
+}
+
+impl<'de> DeserializeSeed<'de> for BatchSeed<'_> {
+    type Value = Vec<Result<BatchEntry<'de>, BatchEntryErr<'de>>>;
+
+    fn deserialize<D: Deserializer<'de>>(self, deserializer: D) -> Result<Self::Value, D::Error> {
+        deserializer.deserialize_seq(self)
+    }
+}
+
+impl<'de> Visitor<'de> for BatchSeed<'_> {
+    type Value = Vec<Result<BatchEntry<'de>, BatchEntryErr<'de>>>;
+
+    fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("a batch of JSON-RPC requests")
+    }
+
+    fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> Result<Self::Value, A::Error> {
+        // Not preallocated from the size hint, which the input controls.
+        let mut batch = Vec::new();
+
+        while let Some(call) = seq.next_element::<&'de JsonRawValue>()? {
+            if batch.len() == self.max_len {
+                *self.too_big = true;
+                return Err(A::Error::custom("batch too big"));
+            }
+
+            batch.push(parse_batch_entry(call));
+        }
+
+        Ok(batch)
     }
 }

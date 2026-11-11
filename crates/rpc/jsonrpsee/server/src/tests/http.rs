@@ -797,3 +797,38 @@ async fn batch_array_entries_are_invalid_requests() {
     handle.stop().unwrap();
     handle.stopped().with_default_timeout().await.unwrap();
 }
+
+#[tokio::test]
+async fn batch_limit_applies_while_reading() {
+    init_logger();
+
+    let config =
+        ServerConfig::builder().set_batch_request_config(BatchRequestConfig::Limit(2)).build();
+    let server = ServerBuilder::with_config(config).build("127.0.0.1:0").await.unwrap();
+    let mut module = RpcModule::new(());
+    module.register_method("should_ok", |_, _ctx| "ok").unwrap();
+    let uri = to_http_uri(server.local_addr().unwrap());
+    let handle = server.start(module);
+
+    let call = r#"{"jsonrpc":"2.0","method":"should_ok","params":[],"id":1}"#;
+    let ok = r#"{"jsonrpc":"2.0","id":1,"result":"ok"}"#;
+    for (request, expected) in [
+        (format!("[{call},{call}]"), format!("[{ok},{ok}]")),
+        (format!("[{call},{call},{call}]"), batches_too_large(2)),
+        // The entries after the limit are never parsed.
+        (format!(r#"[{call},{call},{call},{{"jsonrpc""#), batches_too_large(2)),
+        // Within the limit, invalid JSON is still a parse error.
+        (format!(r#"[{call},{{"jsonrpc""#), parse_error(Id::Null)),
+    ] {
+        let response = http_request(request.clone().into(), uri.clone())
+            .with_default_timeout()
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(response.status, StatusCode::OK);
+        assert_eq!(response.body, expected, "{request}");
+    }
+
+    handle.stop().unwrap();
+    handle.stopped().await;
+}
