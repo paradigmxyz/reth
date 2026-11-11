@@ -203,6 +203,7 @@ where
                 (*rebuild_threshold, *incremental_threshold)
             }
         };
+        let incremental_threshold = incremental_threshold.max(1);
 
         let range = input.next_block_range();
         let (from_block, to_block) = range.clone().into_inner();
