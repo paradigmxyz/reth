@@ -13,6 +13,7 @@ use alloy_serde::JsonStorageKey;
 use futures::Future;
 use reth_errors::RethError;
 use reth_evm::{ConfigureEvm, EvmEnvFor};
+use reth_network_api::NetworkInfo;
 use reth_primitives_traits::{BlockTy, RecoveredBlock, SealedHeaderFor};
 use reth_rpc_convert::{RpcConvert, RpcTxReq};
 use reth_rpc_eth_types::{
@@ -183,8 +184,9 @@ pub trait EthState: LoadState + SpawnBlocking {
             let block_id = block_id.unwrap_or_default();
             self.ensure_within_proof_window(block_id)?;
 
-            self.spawn_blocking_io_with_state(block_id, move |_, state| {
+            self.spawn_blocking_io_with_state(block_id, move |this, state| {
                 let _permit = permit;
+                this.ensure_not_syncing()?;
                 let storage_keys = keys.iter().map(|key| key.as_b256()).collect::<Vec<_>>();
                 let proof = state
                     .proof(Default::default(), address, &storage_keys)
@@ -233,8 +235,9 @@ pub trait EthState: LoadState + SpawnBlocking {
             let block_id = block_id.unwrap_or_default();
             self.ensure_within_proof_window(block_id)?;
 
-            self.spawn_blocking_io_with_state(block_id, move |_, state| {
+            self.spawn_blocking_io_with_state(block_id, move |this, state| {
                 let _permit = permit;
+                this.ensure_not_syncing()?;
                 let mut proof_targets = MultiProofTargetsV2::default();
                 proof_targets.account_targets.reserve(targets.len());
                 proof_targets.storage_targets.reserve(targets.len());
@@ -646,5 +649,17 @@ pub trait LoadState:
                 .unwrap_or_default()
                 .original_bytes())
         })
+    }
+
+    /// Returns [`EthApiError::NodeSyncing`] if the node is syncing.
+    ///
+    /// A pipeline run commits executed state before it advances the node's head, so until it
+    /// finishes, proofs and witnesses don't match the block they are requested for. Call this
+    /// after the state was opened, because the node can start syncing before that.
+    fn ensure_not_syncing(&self) -> Result<(), Self::Error> {
+        if self.network().is_syncing() {
+            return Err(EthApiError::NodeSyncing.into())
+        }
+        Ok(())
     }
 }

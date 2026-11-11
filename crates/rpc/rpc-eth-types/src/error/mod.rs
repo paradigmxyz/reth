@@ -221,6 +221,9 @@ pub enum EthApiError {
     /// request need more gas than the RPC gas cap they share.
     #[error("the request's calls exceed the RPC gas cap of {0}")]
     CallManyGasCapExceeded(u64),
+    /// Thrown when a request is refused because the node is syncing.
+    #[error("node is syncing")]
+    NodeSyncing,
     /// Any other error
     #[error("{0}")]
     Other(Box<dyn ToRpcError>),
@@ -393,9 +396,9 @@ impl From<EthApiError> for jsonrpsee_types::error::ErrorObject<'static> {
                     err.to_string(),
                 )
             }
-            err @ (EthApiError::InternalBlockingTaskError | EthApiError::InternalEthError) => {
-                internal_rpc_err(err.to_string())
-            }
+            err @ (EthApiError::InternalBlockingTaskError |
+            EthApiError::InternalEthError |
+            EthApiError::NodeSyncing) => internal_rpc_err(err.to_string()),
             err @ EthApiError::TransactionInputError(_) => invalid_params_rpc_err(err.to_string()),
             EthApiError::PrunedHistoryUnavailable { .. } | EthApiError::ExceedsMaxProofWindow => {
                 rpc_error_with_code(EthRpcErrorCode::PrunedHistory.code(), error.to_string())

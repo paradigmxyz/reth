@@ -23,7 +23,14 @@ use alloy_rpc_types_eth::{
 use alloy_rpc_types_trace::geth::{
     CallConfig, ChainBlockTraceResult, GethDebugTracingOptions, GethTrace,
 };
-use jsonrpsee::core::client::{ClientT, Subscription, SubscriptionClientT};
+use jsonrpsee::{
+    core::{
+        client::{ClientT, Subscription, SubscriptionClientT},
+        params::ArrayParams,
+    },
+    rpc_params,
+    types::error::INTERNAL_ERROR_CODE,
+};
 use rand::{rngs::StdRng, Rng, SeedableRng};
 use reth_chainspec::{
     sepolia::{SEPOLIA_AMSTERDAM_TIMESTAMP, SEPOLIA_BPO2_TIMESTAMP},
@@ -34,7 +41,7 @@ use reth_e2e_test_utils::{
     transaction::TransactionTestContext, wait::poll_until, wallet::Wallet, E2ETestSetupExt,
     NodeHelperType,
 };
-use reth_network::{types::NatResolver, PeersInfo};
+use reth_network::{types::NatResolver, NetworkInfo, NetworkSyncUpdater, PeersInfo, SyncState};
 use reth_node_builder::{NodeBuilder, NodeHandle};
 use reth_node_core::{
     args::{NetworkArgs, RpcServerArgs},
@@ -45,6 +52,7 @@ use reth_payload_primitives::BuiltPayload;
 use reth_primitives_traits::{Block as _, SealedHeader, SignedTransaction};
 use reth_provider::CanonChainTracker;
 use reth_rpc_api::servers::AdminApiServer;
+use reth_rpc_eth_types::EthApiError;
 use reth_rpc_server_types::RpcModuleSelection;
 use reth_tasks::Runtime;
 use reth_transaction_pool::test_utils::TransactionGenerator;
@@ -1300,6 +1308,65 @@ async fn test_mine_signed() -> eyre::Result<()> {
         "{err}"
     );
     assert_eq!(node.rpc_provider().get_block_number().await?, 2);
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_proofs_and_witnesses_are_refused_while_syncing() -> eyre::Result<()> {
+    reth_tracing::init_test_tracing();
+
+    let (mut node, _) =
+        EthereumNode::test_setup_for(EthereumHardfork::Cancun).build_single().await?;
+    let network = node.inner.network.clone();
+
+    // A canonical block moves the node out of the syncing state. Wait for that, so it can't undo
+    // the updates below.
+    network.update_sync_state(SyncState::Syncing);
+    let block_hash = node.advance_block().await?.block().hash();
+    poll_until("node to leave the syncing state", || async {
+        Ok((!network.is_syncing()).then_some(()))
+    })
+    .await?;
+
+    let client = node.rpc_client().unwrap();
+    let address = Address::ZERO;
+    for (method, params) in [
+        ("eth_getProof", rpc_params![address, Vec::<B256>::new(), BlockNumberOrTag::Latest]),
+        ("debug_executionWitness", rpc_params![BlockNumberOrTag::Latest]),
+        ("debug_executionWitnessByBlockHash", rpc_params![block_hash]),
+    ] {
+        assert_refused_while_syncing(&network, &client, method, params).await?;
+    }
+    assert_refused_while_syncing(
+        &network,
+        &node.auth_server_handle().http_client(),
+        "eth_getMultiProof",
+        rpc_params![vec![(address, Vec::<B256>::new())], BlockNumberOrTag::Latest],
+    )
+    .await?;
+
+    Ok(())
+}
+
+/// Asserts that `method` fails with [`EthApiError::NodeSyncing`] while `network` is syncing and
+/// succeeds once it is idle.
+async fn assert_refused_while_syncing(
+    network: &impl NetworkSyncUpdater,
+    client: &impl ClientT,
+    method: &str,
+    params: ArrayParams,
+) -> eyre::Result<()> {
+    network.update_sync_state(SyncState::Syncing);
+    let error = client.request::<serde_json::Value, _>(method, params.clone()).await.unwrap_err();
+    let jsonrpsee::core::client::Error::Call(error) = error else {
+        panic!("expected {method} to be refused, got {error:?}")
+    };
+    assert_eq!(error.code(), INTERNAL_ERROR_CODE, "{method}");
+    assert_eq!(error.message(), EthApiError::NodeSyncing.to_string(), "{method}");
+
+    network.update_sync_state(SyncState::Idle);
+    client.request::<serde_json::Value, _>(method, params).await?;
 
     Ok(())
 }
