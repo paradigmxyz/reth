@@ -24,6 +24,7 @@ reth-storage-errors = { workspace = true, optional = true, features = ["std"] }
 
 # persistence
 reth-fs-util = { workspace = true, optional = true }
+reth-lru = { workspace = true, optional = true }
 rocksdb = { workspace = true, optional = true }
 
 # execution, conversion, persistence
@@ -45,6 +46,7 @@ persistence = [
     "migration",
     "pbt/persistence",
     "dep:reth-fs-util",
+    "dep:reth-lru",
     "dep:rocksdb",
     "dep:alloy-primitives",
     "dep:thiserror",

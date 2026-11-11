@@ -11246,6 +11246,7 @@ dependencies = [
  "alloy-primitives",
  "pbt",
  "reth-fs-util",
+ "reth-lru",
  "reth-primitives-traits",
  "reth-storage-api",
  "reth-storage-errors",

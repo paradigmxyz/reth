@@ -7,6 +7,7 @@ use crate::{
 };
 use alloy_primitives::B256;
 use pbt::persistence::{NodeDatabase, NodeError, STORE_VERSION};
+use reth_lru::LruMap;
 use std::{
     collections::{BTreeMap, BTreeSet},
     fs::File,
@@ -22,6 +23,8 @@ const PREIMAGE_ACCOUNT_BYTES: usize = 24;
 const SNAPSHOT_ACCOUNT_MAX_BYTES: usize = 130;
 const SNAPSHOT_LEAF_MAX_BYTES: usize = 68;
 const SNAPSHOT_TRAILER_BYTES: usize = 1 + HASH_BYTES;
+// Cold reconstructions retain independent full trees; keep only recent parents and payloads.
+const STATE_CACHE_CAPACITY: u32 = 8;
 
 /// A durable, incremental trie store for migration replay and fork checkpoints.
 ///
@@ -32,7 +35,7 @@ const SNAPSHOT_TRAILER_BYTES: usize = 1 + HASH_BYTES;
 pub struct SnapshotStore<H = Blake3Hasher> {
     path: PathBuf,
     database: Arc<NodeDatabase>,
-    cache: Mutex<BTreeMap<B256, StateTree<H>>>,
+    cache: Mutex<LruMap<B256, StateTree<H>>>,
     limits: DecodeLimits,
 }
 
@@ -43,7 +46,7 @@ impl<H: TreeHasher> SnapshotStore<H> {
         reth_fs_util::create_dir_all(path.join("states"))?;
         reth_fs_util::create_dir_all(path.join("blocks"))?;
         let database = NodeDatabase::open(&path)?;
-        Ok(Self { path, database, cache: Mutex::default(), limits })
+        Ok(Self { path, database, cache: Mutex::new(LruMap::new(STATE_CACHE_CAPACITY)), limits })
     }
 
     /// Returns the checkpoint directory.
@@ -53,12 +56,20 @@ impl<H: TreeHasher> SnapshotStore<H> {
 
     /// Loads and verifies state using its trusted PBT root.
     pub fn load(&self, root: B256) -> Result<StateTree<H>, StoreError> {
-        let _writer = self.database.mutation.lock().map_err(|_| StoreError::Poisoned)?;
-        let mut cache = self.cache.lock().map_err(|_| StoreError::Poisoned)?;
-        if let Some(state) = cache.get(&root) {
+        if self.database.mutation.is_poisoned() {
+            return Err(StoreError::Poisoned);
+        }
+        if let Some(state) = self.cache.lock().map_err(|_| StoreError::Poisoned)?.get(&root) {
             return Ok(state.clone());
         }
+        let _writer = self.database.mutation.lock().map_err(|_| StoreError::Poisoned)?;
+        // A concurrent writer or cold reader may have populated the cache while we waited.
+        if let Some(state) = self.cache.lock().map_err(|_| StoreError::Poisoned)?.get(&root) {
+            return Ok(state.clone());
+        }
+        // Authentication can materialize the entire tree; cached readers must stay independent.
         let state = self.load_state(root)?;
+        let mut cache = self.cache.lock().map_err(|_| StoreError::Poisoned)?;
         cache_state(&mut cache, root, state.clone());
         Ok(state)
     }
@@ -271,7 +282,7 @@ impl<H: TreeHasher> SnapshotStore<H> {
     fn save_state(
         &self,
         state: &StateTree<H>,
-        cache: &mut BTreeMap<B256, StateTree<H>>,
+        cache: &mut LruMap<B256, StateTree<H>>,
     ) -> Result<B256, StoreError> {
         self.database.save(state, self.limits)?;
         let root = state.root();
@@ -428,11 +439,8 @@ impl From<NodeError> for StoreError {
     }
 }
 
-fn cache_state<H>(cache: &mut BTreeMap<B256, StateTree<H>>, root: B256, state: StateTree<H>) {
+fn cache_state<H>(cache: &mut LruMap<B256, StateTree<H>>, root: B256, state: StateTree<H>) {
     // Cache eviction never removes the durable checkpoint needed by a fork.
-    if cache.len() >= 64 {
-        cache.pop_first();
-    }
     cache.insert(root, state);
 }
 
@@ -494,4 +502,159 @@ fn check_eof(file: &mut File, path: &Path) -> Result<(), StoreError> {
         return Err(ArtifactError::Invalid("checkpoint file changed while reading").into());
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::AccountData;
+    use alloy_primitives::{Address, U256};
+    use std::{cell::RefCell, sync::mpsc, thread, time::Duration};
+
+    const WAIT_TIMEOUT: Duration = Duration::from_secs(5);
+
+    thread_local! {
+        static HASH_PAUSE: RefCell<Option<Box<dyn FnOnce()>>> = const { RefCell::new(None) };
+    }
+
+    #[derive(Clone, Debug)]
+    struct PausingHasher;
+
+    impl TreeHasher for PausingHasher {
+        fn hash(parts: &[&[u8]]) -> B256 {
+            if let Some(pause) = HASH_PAUSE.with(|pause| pause.borrow_mut().take()) {
+                pause();
+            }
+            Blake3Hasher::hash(parts)
+        }
+    }
+
+    #[test]
+    fn recently_loaded_parent_survives_checkpoint_eviction() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = SnapshotStore::open(directory.path(), DecodeLimits::default()).unwrap();
+        let states = sorted_states();
+        let (newest, retained) = states.split_last().unwrap();
+        for state in retained {
+            store.save(state).unwrap();
+        }
+        let parent = retained[0].root();
+        assert_eq!(store.load(parent).unwrap().root(), parent);
+        store.save(newest).unwrap();
+        assert_eq!(
+            store.cache.lock().unwrap().len(),
+            usize::try_from(STATE_CACHE_CAPACITY).unwrap()
+        );
+        // A cache miss must read this marker; a recently used parent remains authenticated in
+        // memory.
+        reth_fs_util::write(store.state_path(parent), [0; 7]).unwrap();
+        assert_eq!(store.load(parent).unwrap().root(), parent);
+        assert_eq!(store.load(retained[1].root()).unwrap().root(), retained[1].root());
+        assert_eq!(
+            store.cache.lock().unwrap().len(),
+            usize::try_from(STATE_CACHE_CAPACITY).unwrap()
+        );
+    }
+
+    #[test]
+    fn refreshing_checkpoint_does_not_evict_another_state() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = SnapshotStore::open(directory.path(), DecodeLimits::default()).unwrap();
+        let states = sorted_states();
+        let retained = &states[..usize::try_from(STATE_CACHE_CAPACITY).unwrap()];
+        for state in retained {
+            store.save(state).unwrap();
+        }
+        store.save(retained.last().unwrap()).unwrap();
+        for state in retained {
+            reth_fs_util::write(store.state_path(state.root()), [0; 7]).unwrap();
+        }
+        for state in retained {
+            assert_eq!(store.load(state.root()).unwrap().root(), state.root());
+        }
+    }
+
+    #[test]
+    fn cached_parent_load_does_not_wait_for_database_mutation() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = SnapshotStore::open(directory.path(), DecodeLimits::default()).unwrap();
+        let state = account_state::<Blake3Hasher>(1);
+        let root = store.save(&state).unwrap();
+        thread::scope(|scope| {
+            let writer = store.database.mutation.lock().unwrap();
+            let (sender, receiver) = mpsc::channel();
+            let store = &store;
+            let reader =
+                scope.spawn(move || sender.send(store.load(root).map(|state| state.root())));
+            let result = receiver.recv_timeout(WAIT_TIMEOUT);
+            drop(writer);
+            reader.join().unwrap().unwrap();
+            assert_eq!(result.unwrap().unwrap(), root);
+        });
+    }
+
+    #[test]
+    fn cached_parent_load_rejects_a_poisoned_database_mutation_lock() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = SnapshotStore::open(directory.path(), DecodeLimits::default()).unwrap();
+        let root = store.save(&account_state::<Blake3Hasher>(1)).unwrap();
+        thread::scope(|scope| {
+            let writer = scope.spawn(|| {
+                let _writer = store.database.mutation.lock().unwrap();
+                panic!("interrupted checkpoint mutation");
+            });
+            assert!(writer.join().is_err());
+        });
+        assert!(matches!(store.load(root), Err(StoreError::Poisoned)));
+    }
+
+    #[test]
+    fn cached_parent_load_does_not_wait_for_cold_reconstruction() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = SnapshotStore::open(directory.path(), DecodeLimits::default()).unwrap();
+        let cold = store.save(&account_state::<PausingHasher>(1)).unwrap();
+        let hot = store.save(&account_state::<PausingHasher>(2)).unwrap();
+        store.cache.lock().unwrap().remove(&cold);
+        thread::scope(|scope| {
+            let (started_sender, started_receiver) = mpsc::channel();
+            let (resume_sender, resume_receiver) = mpsc::channel();
+            let cold_store = &store;
+            let cold_reader = scope.spawn(move || {
+                HASH_PAUSE.with(|pause| {
+                    *pause.borrow_mut() = Some(Box::new(move || {
+                        started_sender.send(()).unwrap();
+                        resume_receiver.recv_timeout(WAIT_TIMEOUT * 2).unwrap();
+                    }));
+                });
+                cold_store.load(cold).unwrap().root()
+            });
+            started_receiver.recv_timeout(WAIT_TIMEOUT).unwrap();
+            let (sender, receiver) = mpsc::channel();
+            let hot_store = &store;
+            let hot_reader =
+                scope.spawn(move || sender.send(hot_store.load(hot).map(|state| state.root())));
+            let result = receiver.recv_timeout(WAIT_TIMEOUT);
+            resume_sender.send(()).unwrap();
+            assert_eq!(cold_reader.join().unwrap(), cold);
+            hot_reader.join().unwrap().unwrap();
+            assert_eq!(result.unwrap().unwrap(), hot);
+        });
+    }
+
+    fn sorted_states() -> Vec<StateTree> {
+        let mut states: Vec<_> = (0..=STATE_CACHE_CAPACITY).map(account_state).collect();
+        states.sort_unstable_by_key(StateTree::root);
+        states
+    }
+
+    fn account_state<H: TreeHasher>(balance: u32) -> StateTree<H> {
+        let mut state = StateTree::new();
+        state
+            .set_account(
+                Address::ZERO,
+                AccountData { nonce: 1, balance: U256::from(balance), code: Default::default() },
+            )
+            .unwrap();
+        state
+    }
 }
