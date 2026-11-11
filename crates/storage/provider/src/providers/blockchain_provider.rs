@@ -837,6 +837,12 @@ impl<N: ProviderNodeTypes> StateProviderFactory for BlockchainProvider<N> {
 
     fn history_by_block_hash(&self, block_hash: BlockHash) -> ProviderResult<StateProviderBox> {
         trace!(target: "providers::blockchain", ?block_hash, "Getting history by block hash");
+        // Use the in-memory chain held by the caller instead of having the overlay manager rebuild
+        // it from its block graph.
+        if let Some(state) = self.canonical_in_memory_state.state_by_hash(block_hash) {
+            return self.state_provider_for_state(state)
+        }
+
         let provider = self.consistent_provider()?;
         provider.block_number(block_hash)?.ok_or(ProviderError::BlockHashNotFound(block_hash))?;
         Ok(self.state_provider_from_database(provider.into_database_provider(), block_hash))
@@ -2293,6 +2299,13 @@ mod tests {
                 .block_hash(first_in_memory_block.number)?
                 .unwrap()
         );
+        assert_eq!(
+            first_db_block.hash(),
+            only_database_provider
+                .history_by_block_hash(first_db_block.hash())?
+                .block_hash(first_db_block.number)?
+                .unwrap()
+        );
         assert!(only_database_provider.history_by_block_hash(B256::random()).is_err());
 
         // test state by block hash
@@ -3521,6 +3534,8 @@ mod tests {
             Box::new(rebuilt_from_hash) as StateProviderBox,
             provider.latest()?,
             provider.state_by_block_hash(block_hash)?,
+            provider.history_by_block_hash(block_hash)?,
+            provider.state_by_block_id(block_hash.into())?,
         ] {
             assert_eq!(state.basic_account(&address)?, Some(account.clone()));
             assert_eq!(state.storage(address, slot_key)?, Some(value));
