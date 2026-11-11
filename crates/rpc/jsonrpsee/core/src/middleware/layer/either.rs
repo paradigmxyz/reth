@@ -67,11 +67,7 @@ where
     A: RpcServiceT + Send,
     B: RpcServiceT + Send,
 {
-
-    fn call<'a>(
-        &self,
-        request: Request<'a>,
-    ) -> impl Future<Output = MethodResponse> + Send + 'a {
+    fn call<'a>(&self, request: Request<'a>) -> impl Future<Output = MethodResponse> + Send + 'a {
         match self {
             Either::Left(service) => futures_util::future::Either::Left(service.call(request)),
             Either::Right(service) => futures_util::future::Either::Right(service.call(request)),

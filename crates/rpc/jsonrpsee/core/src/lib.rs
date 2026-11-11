@@ -33,28 +33,23 @@
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
-// Macros useful internally within this crate, but not to be exposed outside of it.
-#[macro_use]
-mod macros;
-
 /// Error type.
 pub mod error;
 
 /// Traits
 pub mod traits;
 
-cfg_http_helpers! {
-    pub mod http_helpers;
-}
+#[cfg(feature = "http-helpers")]
+pub mod http_helpers;
 
-cfg_server! {
-    pub mod id_providers;
-    pub mod server;
-}
+#[cfg(feature = "server")]
+pub mod id_providers;
 
-cfg_server! {
-    pub mod middleware;
-}
+#[cfg(feature = "server")]
+pub mod middleware;
+
+#[cfg(feature = "server")]
+pub mod server;
 
 pub use error::{RegisterMethodError, SubscriptionError};
 
@@ -72,9 +67,8 @@ pub mod __reexports {
     pub use serde_json;
 
     // Needed for the params parsing in the proc macro API.
-    cfg_server! {
-        pub use tokio;
-    }
+    #[cfg(feature = "server")]
+    pub use tokio;
 
     pub use super::proc_macros_support::*;
 }

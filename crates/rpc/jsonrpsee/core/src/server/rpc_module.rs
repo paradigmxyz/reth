@@ -39,8 +39,8 @@ use crate::{
         helpers::MethodSink,
         subscription::{
             sub_message_to_json, BoundedSubscriptions, IntoSubscriptionCloseResponse,
-            PendingSubscriptionSink, Subscribers, SubscriptionCloseResponse,
-            SubscriptionKey, SubscriptionPermit, SubscriptionState,
+            PendingSubscriptionSink, Subscribers, SubscriptionCloseResponse, SubscriptionKey,
+            SubscriptionPermit, SubscriptionState,
         },
         MethodResponse, ResponsePayload, ResponseSizeHint, LOG_TARGET,
     },
@@ -64,12 +64,7 @@ pub type SyncMethod = Arc<dyn Send + Sync + Fn(Id, Params, MaxResponseSize) -> M
 pub type AsyncMethod<'a> = Arc<
     dyn Send
         + Sync
-        + Fn(
-            Id<'a>,
-            Params<'a>,
-            ConnectionId,
-            MaxResponseSize,
-        ) -> BoxFuture<'a, MethodResponse>,
+        + Fn(Id<'a>, Params<'a>, ConnectionId, MaxResponseSize) -> BoxFuture<'a, MethodResponse>,
 >;
 
 /// Method callback for subscriptions.
@@ -287,7 +282,6 @@ impl Methods {
     pub fn method_names(&self) -> impl Iterator<Item = &'static str> + '_ {
         self.callbacks.keys().copied()
     }
-
 }
 
 impl<Context> Deref for RpcModule<Context> {
@@ -580,80 +574,78 @@ impl<Context: Send + Sync + 'static> RpcModule<Context> {
         let callback = {
             self.methods.verify_and_insert(
                 subscribe_method_name,
-                MethodCallback::Subscription(Arc::new(
-                    move |id, params, method_sink, conn| {
-                        let uniq_sub = SubscriptionKey {
-                            conn_id: conn.conn_id,
-                            sub_id: conn.id_provider.next_id(),
+                MethodCallback::Subscription(Arc::new(move |id, params, method_sink, conn| {
+                    let uniq_sub = SubscriptionKey {
+                        conn_id: conn.conn_id,
+                        sub_id: conn.id_provider.next_id(),
+                    };
+
+                    // response to the subscription call.
+                    let (tx, rx) = oneshot::channel();
+                    let (accepted_tx, accepted_rx) = oneshot::channel();
+
+                    let sub_id = uniq_sub.sub_id.clone();
+                    let method = notif_method_name;
+
+                    let sink = PendingSubscriptionSink {
+                        inner: method_sink.clone(),
+                        method: notif_method_name,
+                        subscribers: subscribers.clone(),
+                        uniq_sub,
+                        id: id.clone().into_owned(),
+                        subscribe: tx,
+                        permit: conn.subscription_permit,
+                    };
+
+                    // The subscription callback is a future from the subscription
+                    // definition and not the as same when the subscription call has been
+                    // completed.
+                    //
+                    // This runs until the subscription callback has completed.
+                    let sub_fut = callback(params.into_owned(), sink, ctx.clone());
+
+                    tokio::spawn(async move {
+                        // This will wait for the subscription future to be resolved
+                        let response = match futures_util::future::try_join(
+                            sub_fut.map(|f| Ok(f)),
+                            accepted_rx,
+                        )
+                        .await
+                        {
+                            Ok((r, _)) => r.into_response(),
+                            // The accept call failed i.e, the subscription was not accepted.
+                            Err(_) => return,
                         };
 
-                        // response to the subscription call.
-                        let (tx, rx) = oneshot::channel();
-                        let (accepted_tx, accepted_rx) = oneshot::channel();
-
-                        let sub_id = uniq_sub.sub_id.clone();
-                        let method = notif_method_name;
-
-                        let sink = PendingSubscriptionSink {
-                            inner: method_sink.clone(),
-                            method: notif_method_name,
-                            subscribers: subscribers.clone(),
-                            uniq_sub,
-                            id: id.clone().into_owned(),
-                            subscribe: tx,
-                            permit: conn.subscription_permit,
-                        };
-
-                        // The subscription callback is a future from the subscription
-                        // definition and not the as same when the subscription call has been
-                        // completed.
-                        //
-                        // This runs until the subscription callback has completed.
-                        let sub_fut = callback(params.into_owned(), sink, ctx.clone());
-
-                        tokio::spawn(async move {
-                            // This will wait for the subscription future to be resolved
-                            let response = match futures_util::future::try_join(
-                                sub_fut.map(|f| Ok(f)),
-                                accepted_rx,
-                            )
-                            .await
-                            {
-                                Ok((r, _)) => r.into_response(),
-                                // The accept call failed i.e, the subscription was not accepted.
-                                Err(_) => return,
-                            };
-
-                            match response {
-                                SubscriptionCloseResponse::Notif(msg) => {
-                                    let json = sub_message_to_json(msg, &sub_id, method);
-                                    let _ = method_sink.send(json).await;
-                                }
-                                SubscriptionCloseResponse::NotifErr(err) => {
-                                    let json = sub_err_to_json(err, sub_id, method);
-                                    let _ = method_sink.send(json).await;
-                                }
-                                SubscriptionCloseResponse::None => (),
+                        match response {
+                            SubscriptionCloseResponse::Notif(msg) => {
+                                let json = sub_message_to_json(msg, &sub_id, method);
+                                let _ = method_sink.send(json).await;
                             }
-                        });
-
-                        let id = id.clone().into_owned();
-
-                        Box::pin(async move {
-                            match rx.await {
-                                Ok(rp) => {
-                                    // If the subscription was accepted then send a message
-                                    // to subscription task otherwise rely on the drop impl.
-                                    if rp.is_success() {
-                                        let _ = accepted_tx.send(());
-                                    }
-                                    rp
-                                }
-                                Err(_) => MethodResponse::error(id, ErrorCode::InternalError),
+                            SubscriptionCloseResponse::NotifErr(err) => {
+                                let json = sub_err_to_json(err, sub_id, method);
+                                let _ = method_sink.send(json).await;
                             }
-                        })
-                    },
-                )),
+                            SubscriptionCloseResponse::None => (),
+                        }
+                    });
+
+                    let id = id.clone().into_owned();
+
+                    Box::pin(async move {
+                        match rx.await {
+                            Ok(rp) => {
+                                // If the subscription was accepted then send a message
+                                // to subscription task otherwise rely on the drop impl.
+                                if rp.is_success() {
+                                    let _ = accepted_tx.send(());
+                                }
+                                rp
+                            }
+                            Err(_) => MethodResponse::error(id, ErrorCode::InternalError),
+                        }
+                    })
+                })),
             )?
         };
 
@@ -711,11 +703,7 @@ impl<Context: Send + Sync + 'static> RpcModule<Context> {
     ) -> Result<&mut MethodCallback, RegisterMethodError>
     where
         Context: Send + Sync + 'static,
-        F: (Fn(Params, PendingSubscriptionSink, Arc<Context>) -> R)
-            + Send
-            + Sync
-            + Clone
-            + 'static,
+        F: (Fn(Params, PendingSubscriptionSink, Arc<Context>) -> R) + Send + Sync + Clone + 'static,
         R: IntoSubscriptionCloseResponse,
     {
         let subscribers =
@@ -726,38 +714,36 @@ impl<Context: Send + Sync + 'static> RpcModule<Context> {
         let callback = {
             self.methods.verify_and_insert(
                 subscribe_method_name,
-                MethodCallback::Subscription(Arc::new(
-                    move |id, params, method_sink, conn| {
-                        let uniq_sub = SubscriptionKey {
-                            conn_id: conn.conn_id,
-                            sub_id: conn.id_provider.next_id(),
-                        };
+                MethodCallback::Subscription(Arc::new(move |id, params, method_sink, conn| {
+                    let uniq_sub = SubscriptionKey {
+                        conn_id: conn.conn_id,
+                        sub_id: conn.id_provider.next_id(),
+                    };
 
-                        // response to the subscription call.
-                        let (tx, rx) = oneshot::channel();
+                    // response to the subscription call.
+                    let (tx, rx) = oneshot::channel();
 
-                        let sink = PendingSubscriptionSink {
-                            inner: method_sink.clone(),
-                            method: notif_method_name,
-                            subscribers: subscribers.clone(),
-                            uniq_sub,
-                            id: id.clone().into_owned(),
-                            subscribe: tx,
-                            permit: conn.subscription_permit,
-                        };
+                    let sink = PendingSubscriptionSink {
+                        inner: method_sink.clone(),
+                        method: notif_method_name,
+                        subscribers: subscribers.clone(),
+                        uniq_sub,
+                        id: id.clone().into_owned(),
+                        subscribe: tx,
+                        permit: conn.subscription_permit,
+                    };
 
-                        callback(params, sink, ctx.clone());
+                    callback(params, sink, ctx.clone());
 
-                        let id = id.clone().into_owned();
+                    let id = id.clone().into_owned();
 
-                        Box::pin(async move {
-                            match rx.await {
-                                Ok(rp) => rp,
-                                Err(_) => MethodResponse::error(id, ErrorCode::InternalError),
-                            }
-                        })
-                    },
-                )),
+                    Box::pin(async move {
+                        match rx.await {
+                            Ok(rp) => rp,
+                            Err(_) => MethodResponse::error(id, ErrorCode::InternalError),
+                        }
+                    })
+                })),
             )?
         };
 

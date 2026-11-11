@@ -48,28 +48,21 @@
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
-// Macros useful below, but not to be exposed outside of the crate.
-#[macro_use]
-mod macros;
+#[cfg(feature = "server")]
+pub use jsonrpsee_server as server;
+#[cfg(feature = "server")]
+pub use tokio;
 
-cfg_server! {
-    pub use jsonrpsee_server as server;
-    pub use tokio;
-}
+#[cfg(feature = "server-core")]
+pub use jsonrpsee_core::server::*;
 
-cfg_server_core! {
-    pub use jsonrpsee_core::server::*;
-}
+#[cfg(feature = "jsonrpsee-proc-macros")]
+pub use jsonrpsee_proc_macros as proc_macros;
+#[cfg(feature = "jsonrpsee-proc-macros")]
+pub use tracing;
 
-cfg_proc_macros! {
-    pub use jsonrpsee_proc_macros as proc_macros;
-    pub use tracing;
-}
+#[cfg(feature = "jsonrpsee-types")]
+pub use jsonrpsee_types as types;
 
-cfg_types! {
-    pub use jsonrpsee_types as types;
-}
-
-cfg_server_core! {
-    pub use jsonrpsee_core as core;
-}
+#[cfg(feature = "server-core")]
+pub use jsonrpsee_core as core;

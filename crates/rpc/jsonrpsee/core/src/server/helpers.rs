@@ -92,8 +92,7 @@ impl MethodSink {
         err: ErrorObject<'a>,
     ) -> Result<(), DisconnectError> {
         let payload = ResponsePayload::<()>::error_borrowed(err);
-        let json =
-            serde_json::to_string(&Response::new(payload, id)).expect("valid JSON; qed");
+        let json = serde_json::to_string(&Response::new(payload, id)).expect("valid JSON; qed");
 
         self.send(json).await
     }

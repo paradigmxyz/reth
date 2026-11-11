@@ -204,11 +204,7 @@ impl MethodResponse {
                 // SAFETY: serde_json does not emit invalid UTF-8.
                 let json = unsafe { String::from_utf8_unchecked(writer.into_bytes()) };
 
-                Self {
-                    json,
-                    success_or_error,
-                    kind,
-                }
+                Self { json, success_or_error, kind }
             }
             Err(err) => {
                 tracing::error!(target: LOG_TARGET, "Error serializing response: {:?}", err);
@@ -226,21 +222,13 @@ impl MethodResponse {
                     let json = serde_json::to_string(&Response::new(err, id))
                         .expect("JSON serialization infallible; qed");
 
-                    Self {
-                        json,
-                        success_or_error: MethodResponseResult::Failed(err_code),
-                        kind,
-                    }
+                    Self { json, success_or_error: MethodResponseResult::Failed(err_code), kind }
                 } else {
                     let err = ErrorCode::InternalError;
                     let payload = ResponsePayload::<()>::error(err);
                     let json = serde_json::to_string(&Response::new(payload, id))
                         .expect("JSON serialization infallible; qed");
-                    Self {
-                        json,
-                        success_or_error: MethodResponseResult::Failed(err.code()),
-                        kind,
-                    }
+                    Self { json, success_or_error: MethodResponseResult::Failed(err.code()), kind }
                 }
             }
         }
@@ -276,7 +264,6 @@ impl MethodResponse {
             kind: ResponseKind::Notification,
         }
     }
-
 }
 
 /// Represent the outcome of a method call success or failed.
@@ -379,8 +366,7 @@ pub struct BatchResponse {
 /// Create a JSON-RPC error response.
 pub fn batch_response_error(id: Id, err: impl Into<ErrorObject<'static>>) -> String {
     let err = ResponsePayload::<()>::error_borrowed(err);
-    serde_json::to_string(&Response::new(err, id))
-        .expect("JSON serialization infallible; qed")
+    serde_json::to_string(&Response::new(err, id)).expect("JSON serialization infallible; qed")
 }
 
 /// Size of a method's last response.

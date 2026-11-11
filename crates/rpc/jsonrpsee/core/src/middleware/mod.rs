@@ -164,10 +164,7 @@ impl<'a> BatchEntry<'a> {
 /// This trait is similar to [`tower::Service`] but it's specialized for JSON-RPC operations.
 pub trait RpcServiceT {
     /// Processes a single JSON-RPC call, which may be a subscription or regular call.
-    fn call<'a>(
-        &self,
-        request: Request<'a>,
-    ) -> impl Future<Output = MethodResponse> + Send + 'a;
+    fn call<'a>(&self, request: Request<'a>) -> impl Future<Output = MethodResponse> + Send + 'a;
 
     /// Processes multiple JSON-RPC calls at once, similar to `RpcServiceT::call`.
     ///
@@ -178,10 +175,7 @@ pub trait RpcServiceT {
     /// As a result, if you have custom logic for individual calls or notifications,
     /// you must duplicate that implementation in this method or no middleware will be applied
     /// for calls inside the batch.
-    fn batch<'a>(
-        &self,
-        requests: Batch<'a>,
-    ) -> impl Future<Output = MethodResponse> + Send + 'a;
+    fn batch<'a>(&self, requests: Batch<'a>) -> impl Future<Output = MethodResponse> + Send + 'a;
 
     /// Similar to `RpcServiceT::call` but processes a JSON-RPC notification.
     fn notification<'a>(
@@ -238,7 +232,6 @@ impl<L> RpcServiceBuilder<L> {
     pub fn layer_fn<F>(self, f: F) -> RpcServiceBuilder<Stack<LayerFn<F>, L>> {
         RpcServiceBuilder(self.0.layer_fn(f))
     }
-
 
     /// Wrap the service `S` with the middleware.
     pub fn service<S>(&self, service: S) -> L::Service
