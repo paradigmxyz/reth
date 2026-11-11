@@ -595,7 +595,8 @@ impl PeersManager {
             // update reputation via seconds connected, but keep the target _around_ the default
             // reputation.
             if peer.1.reputation < DEFAULT_REPUTATION {
-                peer.1.reputation += secs_since_last_tick;
+                peer.1.reputation =
+                    peer.1.reputation.saturating_add(secs_since_last_tick).min(DEFAULT_REPUTATION);
             }
         }
     }
