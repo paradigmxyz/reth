@@ -16,7 +16,7 @@ use reth_network_p2p::{
     bodies::client::BodiesClient,
     error::RequestError,
     headers::client::{HeadersClient, HeadersRequest},
-    BlockAccessListsClient,
+    BlockAccessListsClient, ReceiptsClient,
 };
 use reth_provider::{
     test_utils::MockEthProvider, BalStore, BalStoreHandle, InMemoryBalStore, ProviderError,
@@ -207,6 +207,23 @@ async fn test_eth69_get_receipts() {
         assert_eq!(receipts.0[0][0].cumulative_gas_used, 21000);
         assert_eq!(receipts.0[0][1].cumulative_gas_used, 42000);
     }
+}
+
+// Ensures the fetch client picks the eth/70 receipts request for a peer that only advertises
+// eth/71.
+#[tokio::test(flavor = "multi_thread")]
+async fn test_eth71_fetch_client_get_receipts() {
+    let (provider, net) = spawn_testnet(MockEthProvider::default(), Some(EthVersion::Eth71)).await;
+    let hash = add_receipts(&provider, 1);
+
+    let fetch = net.peers()[0].network().fetch_client().await.unwrap();
+    let response = fetch.get_receipts(vec![hash]).await.unwrap().into_data();
+
+    assert!(!response.last_block_incomplete);
+    assert_eq!(response.receipts.len(), 1);
+    assert_eq!(response.receipts[0].len(), 2);
+    assert_eq!(response.receipts[0][0].cumulative_gas_used, 21000);
+    assert_eq!(response.receipts[0][1].cumulative_gas_used, 42000);
 }
 
 #[tokio::test(flavor = "multi_thread")]
