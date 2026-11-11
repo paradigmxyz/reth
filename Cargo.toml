@@ -460,8 +460,8 @@ alloy-network = { version = "2.5.0", default-features = false }
 alloy-node-bindings = "2.5.0"
 alloy-provider = { version = "2.5.0", features = ["reqwest", "debug-api"], default-features = false }
 alloy-rpc-client = { version = "2.5.0", default-features = false }
-alloy-rpc-macros = { git = "https://github.com/lean-apple/alloy-rpsee", rev = "6cf05762bc20c5f839d564903f711e98ed9a23b8" }
-alloy-rpc-server = { git = "https://github.com/lean-apple/alloy-rpsee", rev = "6cf05762bc20c5f839d564903f711e98ed9a23b8" }
+alloy-rpc-macros = { git = "https://github.com/lean-apple/alloy-rpsee", rev = "5f546c00e1773ed18f443f9aa20a0fa0146570b3" }
+alloy-rpc-server = { git = "https://github.com/lean-apple/alloy-rpsee", rev = "5f546c00e1773ed18f443f9aa20a0fa0146570b3" }
 alloy-rpc-types = { version = "2.5.0", features = ["eth"], default-features = false }
 alloy-rpc-types-admin = { version = "2.5.0", default-features = false }
 alloy-rpc-types-anvil = { version = "2.5.0", default-features = false }

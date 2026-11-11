@@ -376,7 +376,7 @@ where
             drop(conn);
 
             // Notifications get no answer, and a subscription already sent its own.
-            (!rp.is_notification() && !rp.is_subscription()).then(|| rp.into_json())
+            rp.into_message()
         }));
 
         Box::pin(async move {
