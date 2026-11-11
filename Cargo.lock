@@ -7097,7 +7097,7 @@ dependencies = [
 [[package]]
 name = "pbt"
 version = "0.1.0"
-source = "git+https://github.com/Rimeeeeee/pbtree?rev=35ed3a11ed13942d232ccb22cbd73473022a7cf5#35ed3a11ed13942d232ccb22cbd73473022a7cf5"
+source = "git+https://github.com/Rimeeeeee/pbtree?rev=79efc09b1eb1ba69825995de29ee3e3d864efae3#79efc09b1eb1ba69825995de29ee3e3d864efae3"
 dependencies = [
  "alloy-eip7928",
  "alloy-primitives",
@@ -10063,7 +10063,7 @@ dependencies = [
 
 [[package]]
 name = "reth-node-pbt"
-version = "2.8.1"
+version = "2.10.1"
 dependencies = [
  "alloy-eip7928",
  "alloy-primitives",
@@ -11241,7 +11241,7 @@ dependencies = [
 
 [[package]]
 name = "reth-trie-pbt"
-version = "2.8.1"
+version = "2.10.1"
 dependencies = [
  "alloy-primitives",
  "pbt",

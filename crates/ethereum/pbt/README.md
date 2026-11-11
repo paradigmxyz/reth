@@ -9,8 +9,7 @@ reth node --chain /path/to/genesis.json --datadir /path/to/data --pbt
 
 Add `--pbt.parallel` to hash dense execution and BAL update batches in parallel.
 It requires `--pbt`; sparse updates stay incremental and produce the same commitments.
-The arena backend is not enabled. Parallel hashing uses Reth's existing Rayon
-thread pool.
+Parallel hashing uses Reth's existing Rayon thread pool.
 
 PBT runs emit structured `engine::pbt` INFO events for parent restoration, BAL
 replay, payload building, and block validation. Payload and validation events include `phase`,

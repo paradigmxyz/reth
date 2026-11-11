@@ -1,8 +1,8 @@
 # PBT adapters for Reth
 
 The PBT implementation is an external dependency:
-[`pbt`](https://github.com/Rimeeeeee/pbtree/tree/35ed3a11ed13942d232ccb22cbd73473022a7cf5),
-pinned to `35ed3a11ed13942d232ccb22cbd73473022a7cf5` in the workspace `Cargo.toml`.
+[`pbt`](https://github.com/Rimeeeeee/pbtree/tree/79efc09b1eb1ba69825995de29ee3e3d864efae3),
+pinned to `79efc09b1eb1ba69825995de29ee3e3d864efae3` in the workspace `Cargo.toml`.
 It is a standalone root-level PBT crate, with source, tests and tooling arranged
 like [alloy-rs/trie](https://github.com/alloy-rs/trie).
 

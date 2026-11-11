@@ -538,7 +538,7 @@ fixed-cache = { version = "0.1.10", default-features = false, features = ["alloc
 moka = "0.12"
 chrono = "0.4.41"
 
-pbt = { git = "https://github.com/Rimeeeeee/pbtree", rev = "35ed3a11ed13942d232ccb22cbd73473022a7cf5", default-features = false }
+pbt = { git = "https://github.com/Rimeeeeee/pbtree", rev = "79efc09b1eb1ba69825995de29ee3e3d864efae3", default-features = false }
 
 # metrics
 metrics = "0.24.0"
