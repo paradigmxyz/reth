@@ -818,6 +818,23 @@ async fn batch_notif_without_params_works() {
 }
 
 #[tokio::test]
+async fn batch_subscription_is_answered_once() {
+    init_logger();
+
+    let addr = server().with_default_timeout().await.unwrap();
+    let mut client = WebSocketTestClient::new(addr).with_default_timeout().await.unwrap().unwrap();
+    let req = r#"[
+            {"jsonrpc": "2.0", "method": "subscribe_hello", "id": 0},
+            {"jsonrpc": "2.0", "method": "add", "params": [1,2], "id": 1}
+        ]"#;
+    let sub_response = client.send_request_text(req).with_default_timeout().await.unwrap().unwrap();
+    let _sub_id: u64 = deser_call(sub_response);
+
+    let response = client.receive().with_default_timeout().await.unwrap().unwrap();
+    assert_eq!(response, r#"[{"jsonrpc":"2.0","id":1,"result":3}]"#);
+}
+
+#[tokio::test]
 async fn ws_server_backpressure_works() {
     init_logger();
 

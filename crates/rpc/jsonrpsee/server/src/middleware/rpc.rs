@@ -173,19 +173,26 @@ impl RpcServiceT for RpcService {
         let mut batch_rp = BatchResponseBuilder::new_with_limit(self.max_response_body_size);
         let service = self.clone();
         async move {
-            let mut got_notification = false;
+            // Notifications and subscription calls get no entry in the batch response.
+            let mut omitted_entry = false;
 
             // Entries run one after another, so a batch occupies at most one call at a time.
             for batch_entry in batch.into_iter() {
                 match batch_entry {
                     Ok(BatchEntry::Call(req)) => {
                         let rp = catch_call_panic(req.id(), || service.call(req)).await;
+                        // Accepting or rejecting a subscription already sent its response through
+                        // the subscription sink.
+                        if rp.is_subscription() {
+                            omitted_entry = true;
+                            continue;
+                        }
                         if let Err(err) = batch_rp.append(rp) {
                             return err;
                         }
                     }
                     Ok(BatchEntry::Notification(n)) => {
-                        got_notification = true;
+                        omitted_entry = true;
                         service.notification(n).await;
                     }
                     Err(err) => {
@@ -198,8 +205,8 @@ impl RpcServiceT for RpcService {
                 }
             }
 
-            // If the batch is empty and we got a notification, we return an empty response.
-            if batch_rp.is_empty() && got_notification {
+            // If every entry was omitted, there is nothing to send back.
+            if batch_rp.is_empty() && omitted_entry {
                 MethodResponse::notification()
             }
             // An empty batch is regarded as an invalid request here.
