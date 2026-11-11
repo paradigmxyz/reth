@@ -170,7 +170,12 @@ impl MethodResponse {
     where
         T: Serialize + Clone,
     {
-        let rp = Self::response_with_capacity(id, rp, max_response_size, size_hint.get());
+        let mut rp = Self::response_with_capacity(id, rp, max_response_size, size_hint.get());
+        // Responses are never shrunk later, so a response much smaller than the previous one
+        // would otherwise keep the unused capacity until it is sent.
+        if rp.json.capacity() / 2 > rp.json.len() {
+            rp.json.shrink_to_fit();
+        }
         size_hint.record(rp.json.len());
         rp
     }
@@ -395,9 +400,13 @@ impl ResponseSizeHint {
     }
 
     fn record(&self, len: usize) {
-        self.0.store(len, Ordering::Relaxed);
+        self.0.store(len.min(MAX_RESPONSE_SIZE_HINT), Ordering::Relaxed);
     }
 }
+
+/// Largest [`ResponseSizeHint`], so one huge response doesn't make every later call of the method,
+/// from any connection, reserve as much.
+const MAX_RESPONSE_SIZE_HINT: usize = 8 * 1024 * 1024;
 
 /// Bounded writer that allows writing at most `max_len` bytes.
 #[derive(Debug, Clone)]
@@ -449,7 +458,10 @@ fn limit_exceeded() -> io::Error {
 
 #[cfg(test)]
 mod tests {
-    use super::{BatchResponseBuilder, BoundedWriter, Id, MethodResponse, ResponsePayload};
+    use super::{
+        BatchResponseBuilder, BoundedWriter, Id, MethodResponse, ResponsePayload, ResponseSizeHint,
+        MAX_RESPONSE_SIZE_HINT,
+    };
 
     #[test]
     fn batch_with_single_works() {
@@ -540,5 +552,29 @@ mod tests {
         let mut writer = BoundedWriter::new(100, 128);
         // NOTE: `"` is part of the serialization so 101 characters.
         assert!(serde_json::to_writer(&mut writer, &"x".repeat(99)).is_err());
+    }
+
+    #[test]
+    fn size_hint_is_capped_and_small_responses_shrink() {
+        let hint = ResponseSizeHint::new();
+        let big = "x".repeat(MAX_RESPONSE_SIZE_HINT);
+        let rp = MethodResponse::sized_response(
+            Id::Number(1),
+            ResponsePayload::success_borrowed(&big),
+            usize::MAX,
+            &hint,
+        );
+        assert!(rp.json.len() > MAX_RESPONSE_SIZE_HINT);
+        assert_eq!(hint.get(), MAX_RESPONSE_SIZE_HINT);
+
+        let rp = MethodResponse::sized_response(
+            Id::Number(1),
+            ResponsePayload::success_borrowed(&"a"),
+            usize::MAX,
+            &hint,
+        );
+        assert_eq!(rp.json, r#"{"jsonrpc":"2.0","id":1,"result":"a"}"#);
+        assert!(rp.json.capacity() < 2 * rp.json.len());
+        assert_eq!(hint.get(), rp.json.len());
     }
 }
