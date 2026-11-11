@@ -948,7 +948,7 @@ where
     // Single request or notification
     if is_single {
         if let Ok(req) = serde_json::from_slice::<Request<'_>>(body) {
-            catch_call_panic(req.id(), rpc_service.call(req)).await
+            catch_call_panic(req.id(), || rpc_service.call(req)).await
         } else if let Ok(notif) = deserialize_notification::<Notif>(body) {
             rpc_service.notification(notif).await
         } else {

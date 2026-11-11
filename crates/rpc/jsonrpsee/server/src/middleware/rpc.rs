@@ -179,7 +179,7 @@ impl RpcServiceT for RpcService {
             for batch_entry in batch.into_iter() {
                 match batch_entry {
                     Ok(BatchEntry::Call(req)) => {
-                        let rp = catch_call_panic(req.id(), service.call(req)).await;
+                        let rp = catch_call_panic(req.id(), || service.call(req)).await;
                         if let Err(err) = batch_rp.append(rp) {
                             return err;
                         }
@@ -220,11 +220,14 @@ impl RpcServiceT for RpcService {
 
 /// Answers a panicking call with an internal error, otherwise the panic would only surface as a
 /// failed connection or call task and the client would never receive a response for `id`.
-pub(crate) async fn catch_call_panic(
-    id: Id<'_>,
-    call: impl Future<Output = MethodResponse>,
-) -> MethodResponse {
-    AssertUnwindSafe(call)
+///
+/// `call` builds the call's future inside the guard, because sync methods run while
+/// [`RpcServiceT::call`] builds it, not when it is polled.
+pub(crate) async fn catch_call_panic<F>(id: Id<'_>, call: impl FnOnce() -> F) -> MethodResponse
+where
+    F: Future<Output = MethodResponse>,
+{
+    AssertUnwindSafe(async move { call().await })
         .catch_unwind()
         .await
         .unwrap_or_else(|_| MethodResponse::error(id, ErrorObject::from(ErrorCode::InternalError)))
