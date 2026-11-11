@@ -83,10 +83,13 @@ type UnsubscriptionMethod =
 )]
 pub struct ConnectionId(pub usize);
 
-impl From<u32> for ConnectionId {
-    fn from(id: u32) -> Self {
-        Self(id as usize)
-    }
+impl ConnectionId {
+    /// Owner of subscriptions created by in-process calls such as
+    /// [`Methods::raw_json_request`].
+    ///
+    /// Servers count connections upwards from zero and never reach this value, so no transport
+    /// connection can unsubscribe an in-process subscription.
+    pub const IN_PROCESS: Self = Self(usize::MAX);
 }
 
 impl From<usize> for ConnectionId {
@@ -242,7 +245,7 @@ impl Methods {
         let Request { id, method, params, .. } = req;
         let params = Params::new(params.as_ref().map(|params| params.as_ref().get()));
         let max_response_size = usize::MAX;
-        let conn_id = ConnectionId(0);
+        let conn_id = ConnectionId::IN_PROCESS;
 
         let response = match self.method(&method) {
             None => MethodResponse::error(id, ErrorObject::from(ErrorCode::MethodNotFound)),

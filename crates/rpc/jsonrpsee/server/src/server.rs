@@ -134,7 +134,8 @@ where
     }
 
     async fn start_inner(self, methods: Methods, stop_handle: StopHandle) {
-        let mut id: u32 = 0;
+        // A `usize` counter cannot wrap in practice on 64-bit targets, so ids are never reused.
+        let mut id: usize = 0;
         let connection_guard = ConnectionGuard::new(self.server_cfg.max_connections as usize);
         let listener = self.listener;
 
@@ -158,7 +159,7 @@ where
                         socket,
                         drop_on_completion: drop_on_completion.clone(),
                     });
-                    id = id.wrapping_add(1);
+                    id += 1;
                     stopped = stop;
                 }
                 AcceptConnection::Err((e, stop)) => {
@@ -233,7 +234,7 @@ pub struct ConnectionState {
     /// Stop handle.
     pub(crate) stop_handle: StopHandle,
     /// Connection ID
-    pub(crate) conn_id: u32,
+    pub(crate) conn_id: usize,
     /// Connection guard.
     pub(crate) _conn_permit: Arc<OwnedSemaphorePermit>,
 }
@@ -242,7 +243,7 @@ impl ConnectionState {
     /// Create a new connection state.
     pub fn new(
         stop_handle: StopHandle,
-        conn_id: u32,
+        conn_id: usize,
         conn_permit: OwnedSemaphorePermit,
     ) -> ConnectionState {
         Self { stop_handle, conn_id, _conn_permit: Arc::new(conn_permit) }
@@ -622,7 +623,7 @@ struct ServiceData {
     /// Stop handle.
     stop_handle: StopHandle,
     /// Connection ID
-    conn_id: u32,
+    conn_id: usize,
     /// Connection guard.
     conn_guard: ConnectionGuard,
     /// ServerConfig
@@ -783,7 +784,7 @@ struct ProcessConnection<'a, HttpMiddleware, RpcMiddleware> {
     http_middleware: &'a tower::ServiceBuilder<HttpMiddleware>,
     rpc_middleware: RpcServiceBuilder<RpcMiddleware>,
     conn_guard: &'a ConnectionGuard,
-    conn_id: u32,
+    conn_id: usize,
     server_cfg: ServerConfig,
     stop_handle: StopHandle,
     socket: TcpStream,

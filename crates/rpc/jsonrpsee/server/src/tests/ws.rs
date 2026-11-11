@@ -1323,3 +1323,55 @@ async fn ws_waiting_for_call_permit_observes_server_stop() {
 
     handle.stopped().with_default_timeout().await.unwrap();
 }
+
+#[tokio::test]
+async fn ws_connection_cannot_unsubscribe_in_process_subscription() {
+    init_logger();
+
+    let mut module = RpcModule::new(());
+    module
+        .register_subscription::<(), _, _>("sub", "notif", "unsub", |_, pending, _| async move {
+            let sink = pending.accept().await.unwrap();
+            sink.closed().await;
+        })
+        .unwrap();
+
+    let server = ServerBuilder::default()
+        .build("127.0.0.1:0")
+        .with_default_timeout()
+        .await
+        .unwrap()
+        .unwrap();
+    let addr = server.local_addr().unwrap();
+    let _handle = server.start(module.clone());
+
+    let (resp, _rx) = module
+        .raw_json_request(r#"{"jsonrpc":"2.0","method":"sub","id":1}"#, 4)
+        .with_default_timeout()
+        .await
+        .unwrap()
+        .unwrap();
+    let sub_id: u64 = deser_call(resp);
+
+    // The first accepted connection is the one the server numbers 0.
+    let mut client = WebSocketTestClient::new(addr).with_default_timeout().await.unwrap().unwrap();
+    let unsub = client
+        .send_request_text(call("unsub", vec![sub_id], Id::Num(1)))
+        .with_default_timeout()
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(&unsub, r#"{"jsonrpc":"2.0","id":1,"result":false}"#);
+
+    // The subscription is still alive, so its owner can still end it.
+    let (resp, _) = module
+        .raw_json_request(
+            &format!(r#"{{"jsonrpc":"2.0","method":"unsub","params":[{sub_id}],"id":2}}"#),
+            4,
+        )
+        .with_default_timeout()
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(resp, r#"{"jsonrpc":"2.0","id":2,"result":true}"#);
+}
