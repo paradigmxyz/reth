@@ -53,10 +53,9 @@ where
     /// state, or it can be used to simulate a past block. The sender is responsible for signing the
     /// transactions and using the correct nonce and ensuring validity
     ///
-    /// The simulation is bounded by the request's `timeout` in milliseconds, capped at
-    /// [`MAX_SIM_TIMEOUT`], or by [`DEFAULT_SIM_TIMEOUT`] if it is missing or zero. No
-    /// transaction starts after it expires, the request then fails with
-    /// [`EthApiError::ExecutionTimedOut`].
+    /// The simulation is bounded by the request's `timeout` in milliseconds, capped at 30
+    /// seconds, or by 5 seconds if it is missing or zero. No transaction starts after it expires,
+    /// the request then fails with [`EthApiError::ExecutionTimedOut`].
     pub async fn call_bundle(
         &self,
         bundle: EthCallBundle,
