@@ -950,6 +950,18 @@ where
         namespaces
             .iter()
             .map(|namespace| {
+                // `rpc` lists the namespaces of the transport it is built for, so it can't be
+                // cached in `self.modules`
+                if matches!(namespace, RethRpcModule::Rpc) {
+                    return RPCApi::new(
+                        namespaces
+                            .iter()
+                            .map(|module| (module.to_string(), "1.0".to_string()))
+                            .collect(),
+                    )
+                    .into_rpc();
+                }
+
                 self.modules
                     .entry(namespace.clone())
                     .or_insert_with(|| match namespace.clone() {
@@ -998,13 +1010,6 @@ where
                             dyn_clone::clone(self.eth.api.converter()),
                         )
                         .into_rpc(),
-                        RethRpcModule::Rpc => RPCApi::new(
-                            namespaces
-                                .iter()
-                                .map(|module| (module.to_string(), "1.0".to_string()))
-                                .collect(),
-                        )
-                        .into_rpc(),
                         RethRpcModule::Ots => OtterscanApi::new(eth_api.clone()).into_rpc(),
                         RethRpcModule::Reth => RethApi::new(
                             self.provider.clone(),
@@ -1018,9 +1023,10 @@ where
                             EthSimBundle::new(eth_api.clone(), self.blocking_pool_guard.clone())
                                 .into_rpc()
                         }
-                        // these are implementation specific and need to be handled during
-                        // initialization and should be registered via extend_rpc_modules in the
-                        // nodebuilder rpc addon stack
+                        // `rpc` is built above, the others are implementation specific and need
+                        // to be handled during initialization and should be registered via
+                        // extend_rpc_modules in the nodebuilder rpc addon stack
+                        RethRpcModule::Rpc |
                         RethRpcModule::Flashbots |
                         RethRpcModule::Testing |
                         RethRpcModule::Other(_) => Default::default(),
@@ -1965,11 +1971,7 @@ impl TransportRpcModules {
     /// it's the caller responsibility to remove both `subscribe` and `unsubscribe` methods for
     /// subscriptions.
     pub fn remove_http_method(&mut self, method_name: &'static str) -> bool {
-        if let Some(http_module) = &mut self.http {
-            http_module.remove_method(method_name)
-        } else {
-            false
-        }
+        self.http.as_mut().is_some_and(|module| module.remove_method(method_name))
     }
 
     /// Removes the given methods from the configured http methods.
@@ -1987,11 +1989,7 @@ impl TransportRpcModules {
     /// it's the caller responsibility to remove both `subscribe` and `unsubscribe` methods for
     /// subscriptions.
     pub fn remove_ws_method(&mut self, method_name: &'static str) -> bool {
-        if let Some(ws_module) = &mut self.ws {
-            ws_module.remove_method(method_name)
-        } else {
-            false
-        }
+        self.ws.as_mut().is_some_and(|module| module.remove_method(method_name))
     }
 
     /// Removes the given methods from the configured ws methods.
@@ -2009,11 +2007,7 @@ impl TransportRpcModules {
     /// it's the caller responsibility to remove both `subscribe` and `unsubscribe` methods for
     /// subscriptions.
     pub fn remove_ipc_method(&mut self, method_name: &'static str) -> bool {
-        if let Some(ipc_module) = &mut self.ipc {
-            ipc_module.remove_method(method_name)
-        } else {
-            false
-        }
+        self.ipc.as_mut().is_some_and(|module| module.remove_method(method_name))
     }
 
     /// Removes the given methods from the configured ipc methods.

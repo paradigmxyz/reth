@@ -3,10 +3,12 @@
 use alloy_rpc_types_engine::Claims;
 use reth_rpc_layer::JwtSecret;
 use std::{
+    collections::{HashMap, HashSet},
     io,
     time::{SystemTime, UNIX_EPOCH},
 };
 
+use reth_json_rpc::RpcModule;
 use reth_rpc_builder::{
     error::{RpcError, ServerKind, WsHttpSamePortError},
     RpcServerConfig, TransportRpcModuleConfig,
@@ -25,6 +27,27 @@ fn is_addr_in_use_kind(err: &RpcError, kind: ServerKind) -> bool {
         }
         _ => false,
     }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_rpc_modules_per_transport() {
+    let builder = test_rpc_builder();
+    let eth_api = builder.bootstrap_eth_api();
+    let modules = builder.build(
+        TransportRpcModuleConfig::set_http(vec![RethRpcModule::Rpc, RethRpcModule::Eth])
+            .with_ws(vec![RethRpcModule::Rpc, RethRpcModule::Net]),
+        eth_api,
+        EventSender::new(1),
+    );
+
+    let namespaces = |methods: RpcModule| async move {
+        let modules: HashMap<String, String> = methods.call("rpc_modules", [(); 0]).await.unwrap();
+        modules.into_keys().collect::<HashSet<_>>()
+    };
+    let expected = |names: [&str; 2]| names.into_iter().map(String::from).collect::<HashSet<_>>();
+
+    assert_eq!(namespaces(modules.http_methods(|_| true).unwrap()).await, expected(["eth", "rpc"]));
+    assert_eq!(namespaces(modules.ws_methods(|_| true).unwrap()).await, expected(["net", "rpc"]));
 }
 
 #[tokio::test(flavor = "multi_thread")]

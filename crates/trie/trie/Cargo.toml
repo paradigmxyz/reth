@@ -42,6 +42,10 @@ metrics = { workspace = true, optional = true }
 # `test-utils` feature
 triehash = { workspace = true, optional = true }
 
+[target.'cfg(not(target_family = "wasm"))'.dependencies]
+reth-tasks = { workspace = true, features = ["rayon"] }
+crossbeam-channel.workspace = true
+
 [dev-dependencies]
 # reth
 reth-primitives-traits = { workspace = true, features = ["test-utils"] }
@@ -60,7 +64,7 @@ proptest.workspace = true
 rand.workspace = true
 
 [features]
-dst = ["reth-trie-sparse/dst"]
+fuzz = ["reth-trie-sparse/fuzz"]
 metrics = ["reth-metrics", "dep:metrics"]
 serde = [
     "alloy-primitives/serde",
@@ -75,6 +79,7 @@ serde = [
 ]
 test-utils = [
     "triehash",
+    "reth-tasks/test-utils",
     "reth-primitives-traits/test-utils",
     "reth-trie-common/test-utils",
     "reth-trie-sparse/test-utils",

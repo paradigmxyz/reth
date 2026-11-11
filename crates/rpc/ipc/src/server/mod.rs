@@ -18,8 +18,10 @@ use tokio::{
 };
 use tokio_util::codec::{FramedRead, FramedWrite};
 use tower::{layer::util::Identity, Layer};
-use tracing::{debug, trace};
+use tracing::trace;
 
+#[cfg(unix)]
+use interprocess::os::unix::local_socket::ListenerOptionsExt;
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
 
@@ -48,6 +50,9 @@ where
     ///
     /// This will run on the tokio runtime until the server is stopped or the `ServerHandle` is
     /// dropped.
+    ///
+    /// Returns an error if the endpoint cannot be opened or the requested Unix socket permissions
+    /// cannot be parsed or applied before serving requests.
     ///
     /// ```
     /// use reth_ipc::server::Builder;
@@ -88,26 +93,57 @@ where
     fn bind(&self) -> Result<LocalSocketListener, IpcServerStartError> {
         trace!(endpoint = ?self.endpoint, "starting ipc server");
 
-        // ensure the file does not exist
-        if cfg!(unix) && std::fs::remove_file(&self.endpoint).is_ok() {
-            debug!(endpoint = ?self.endpoint, "removed existing IPC endpoint file");
-        }
-
-        let listener = self
-            .endpoint
+        self.endpoint
             .as_str()
             .to_fs_name::<GenericFilePath>()
-            .and_then(|name| ListenerOptions::new().name(name).create_tokio())
-            .map_err(|source| IpcServerStartError { endpoint: self.endpoint.clone(), source })?;
+            .and_then(|name| {
+                // Unlinks an existing endpoint only after binding to it fails, so earlier errors
+                // such as an unsupported mode leave it in place.
+                let options = ListenerOptions::new().name(name).try_overwrite(true);
 
-        #[cfg(unix)]
-        if let Some(perms) = &self.socket_permissions &&
-            let Ok(mode) = u32::from_str_radix(&perms.replace("0o", ""), 8)
-        {
-            let _ = std::fs::set_permissions(&self.endpoint, std::fs::Permissions::from_mode(mode));
-        }
+                #[cfg(unix)]
+                let mode = self
+                    .socket_permissions
+                    .as_deref()
+                    .map(|permissions| {
+                        let mode = u32::from_str_radix(
+                            permissions.strip_prefix("0o").unwrap_or(permissions),
+                            8,
+                        )
+                        .map_err(|err| io::Error::new(io::ErrorKind::InvalidInput, err))?;
+                        if mode > 0o7777 {
+                            return Err(io::Error::new(
+                                io::ErrorKind::InvalidInput,
+                                format!("IPC socket permissions `{permissions}` exceed 0o7777"),
+                            ));
+                        }
+                        Ok(mode)
+                    })
+                    .transpose()?;
 
-        Ok(listener)
+                #[cfg(unix)]
+                let options = if let Some(mode) = mode {
+                    // Set the mode before bind/listen so connections cannot bypass it during
+                    // startup. The range check keeps the cast lossless where `mode_t` is `u16`.
+                    options.mode(mode as _)
+                } else {
+                    options
+                };
+
+                let listener = options.create_tokio()?;
+
+                #[cfg(unix)]
+                if let Some(mode) = mode {
+                    // Binding can further restrict the requested mode through the process umask.
+                    std::fs::set_permissions(
+                        &self.endpoint,
+                        std::fs::Permissions::from_mode(mode),
+                    )?;
+                }
+
+                Ok(listener)
+            })
+            .map_err(|source| IpcServerStartError { endpoint: self.endpoint.clone(), source })
     }
 
     async fn run(self, listener: LocalSocketListener, methods: RpcModule, stop: StopHandle) {
@@ -241,6 +277,11 @@ impl<RpcMiddleware> Builder<RpcMiddleware> {
     }
 
     /// Sets the permissions for the IPC socket file.
+    ///
+    /// On Unix, accepts an octal mode up to `0o7777` with an optional `0o` prefix. Invalid modes or
+    /// failures to apply them cause [`IpcServer::start`] to return an error. This includes
+    /// platforms that do not support setting socket permissions before binding. `None` uses the
+    /// system's umask. Ignored on non-Unix platforms.
     pub fn set_ipc_socket_permissions(mut self, permissions: Option<String>) -> Self {
         self.socket_permissions = permissions;
         self
@@ -316,22 +357,40 @@ mod tests {
     use tokio::sync::broadcast;
     use tokio_stream::wrappers::BroadcastStream;
 
+    #[cfg(unix)]
+    use std::{os::unix::net::UnixListener, path::Path, time::Duration};
+
     #[tokio::test]
     #[cfg(unix)]
     async fn test_ipc_socket_permissions() {
-        use std::os::unix::fs::PermissionsExt;
-        let endpoint = &dummy_name();
-        let perms = "0777";
-        let server = Builder::default()
-            .set_ipc_socket_permissions(Some(perms.to_string()))
-            .build(endpoint.clone());
-        let module = RpcModule::new();
-        let handle = server.start(module).await.unwrap();
-        tokio::spawn(handle.stopped());
-
-        let meta = std::fs::metadata(endpoint).unwrap();
-        let perms = meta.permissions();
-        assert_eq!(perms.mode() & 0o777, 0o777);
+        for (permissions, mode) in
+            [("0777", 0o777), ("600", 0o600), ("0600", 0o600), ("0o600", 0o600)]
+        {
+            let endpoint = dummy_name();
+            let server = Builder::default()
+                .set_ipc_socket_permissions(Some(permissions.to_string()))
+                .build(endpoint.clone());
+            match server.start(RpcModule::new()).await {
+                Ok(handle) if !cfg!(target_os = "macos") => {
+                    let actual = std::fs::metadata(&endpoint).unwrap().permissions().mode();
+                    assert_eq!(actual & 0o777, mode);
+                    handle.stop().unwrap();
+                    tokio::time::timeout(Duration::from_secs(5), handle.stopped()).await.unwrap();
+                }
+                Err(error)
+                    if !cfg!(any(
+                        target_os = "linux",
+                        target_os = "android",
+                        target_os = "openbsd"
+                    )) =>
+                {
+                    assert_eq!(error.source.kind(), io::ErrorKind::Unsupported, "{mode:o}");
+                    assert_eq!(error.endpoint, endpoint);
+                    assert!(!Path::new(&endpoint).exists());
+                }
+                result => panic!("Unexpected IPC startup result: {result:?}"),
+            }
+        }
     }
 
     async fn pipe_from_stream_with_bounded_buffer(
@@ -722,5 +781,60 @@ mod tests {
                 r#"{"jsonrpc":"2.0","id":null,"error":{"code":-32700,"message":"Parse error"}}"#,
             ]
         );
+    }
+
+    #[tokio::test]
+    #[cfg(unix)]
+    async fn invalid_ipc_socket_permissions() {
+        for permissions in
+            ["not-octal", "", "0o", "888", "0o0o600", "60o00", "100000000000", "10000"]
+        {
+            let endpoint = dummy_name();
+            let server = Builder::default()
+                .set_ipc_socket_permissions(Some(permissions.to_string()))
+                .build(endpoint.clone());
+
+            let error = server.start(RpcModule::new()).await.unwrap_err();
+            assert_eq!(error.source.kind(), io::ErrorKind::InvalidInput, "{permissions}");
+            assert_eq!(error.endpoint, endpoint);
+            assert!(!Path::new(&endpoint).exists());
+        }
+    }
+
+    #[tokio::test]
+    #[cfg(unix)]
+    async fn invalid_ipc_permissions_preserve_existing_endpoint() {
+        for (permissions, kind) in [
+            ("not-octal", io::ErrorKind::InvalidInput),
+            #[cfg(target_os = "macos")]
+            ("0600", io::ErrorKind::Unsupported),
+        ] {
+            let endpoint = dummy_name();
+            let _listener = ListenerOptions::new()
+                .name(endpoint.as_str().to_fs_name::<GenericFilePath>().unwrap())
+                .create_tokio()
+                .unwrap();
+            let server = Builder::default()
+                .set_ipc_socket_permissions(Some(permissions.to_string()))
+                .build(endpoint.clone());
+
+            let error = server.start(RpcModule::new()).await.unwrap_err();
+            assert_eq!(error.source.kind(), kind, "{permissions}");
+            assert_eq!(error.endpoint, endpoint);
+            assert!(Path::new(&endpoint).exists());
+        }
+    }
+
+    #[tokio::test]
+    #[cfg(unix)]
+    async fn replaces_stale_ipc_endpoint() {
+        let endpoint = dummy_name();
+        drop(UnixListener::bind(&endpoint).unwrap());
+        assert!(Path::new(&endpoint).exists());
+
+        let handle =
+            Builder::default().build(endpoint.clone()).start(RpcModule::new()).await.unwrap();
+        handle.stop().unwrap();
+        tokio::time::timeout(Duration::from_secs(5), handle.stopped()).await.unwrap();
     }
 }

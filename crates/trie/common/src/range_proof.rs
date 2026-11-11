@@ -12,6 +12,10 @@ use alloy_rlp::Decodable;
 
 const KEY_NIBBLES: usize = B256::len_bytes() * 2;
 
+// Each of the two boundary paths holds at most one hashed node per key nibble plus its leaf,
+// since inline nodes are never separate proof entries.
+const MAX_PROOF_NODES: usize = 2 * (KEY_NIBBLES + 1);
+
 // Coordinates proof traversal and root reconstruction through one shared frontier.
 struct RangeProofVerifier<'a> {
     // Determines which trie paths belong to the response and which remain proof-owned.
@@ -26,13 +30,18 @@ struct RangeProofVerifier<'a> {
 
 impl<'a> RangeProofVerifier<'a> {
     // Creates a verifier with fixed bounds so traversal cannot drift from the supplied leaf range.
-    fn new(left: B256, right: B256, proof: &'a [Bytes], frontier: ProofFrontier) -> Self {
-        Self {
+    fn new(
+        left: B256,
+        right: B256,
+        proof: &'a [Bytes],
+        frontier: ProofFrontier,
+    ) -> Result<Self, RangeProofErrorKind> {
+        Ok(Self {
             range: ProofRange::new(left, right),
-            nodes: ProofNodes::new(proof),
+            nodes: ProofNodes::new(proof)?,
             frontier,
             next: None,
-        }
+        })
     }
 
     // Verifies the range by rebuilding its root, making omitted or altered leaves change the
@@ -223,9 +232,13 @@ enum KeyRelation {
 struct ProofNodes<'a>(B256Map<&'a [u8]>);
 
 impl<'a> ProofNodes<'a> {
-    // Builds the proof index once to avoid rescanning it for every boundary reference.
-    fn new(proof: &'a [Bytes]) -> Self {
-        Self(proof.iter().map(|node| (keccak256(node), node.as_ref())).collect())
+    // Builds the proof index once to avoid rescanning it for every boundary reference, rejecting
+    // peer-chosen node counts before they size the index or its hashing work.
+    fn new(proof: &'a [Bytes]) -> Result<Self, RangeProofErrorKind> {
+        if proof.len() > MAX_PROOF_NODES {
+            return Err(RangeProofErrorKind::TooManyProofNodes { count: proof.len() })
+        }
+        Ok(Self(proof.iter().map(|node| (keccak256(node), node.as_ref())).collect()))
     }
 
     // Resolves inline references directly and requires proof backing for hashed references.
@@ -359,6 +372,12 @@ enum RangeProofErrorKind {
         /// Trie path the missing node was referenced from.
         path: Nibbles,
     },
+    /// The proof holds more nodes than two boundary paths can reference.
+    #[error("range proof has {count} nodes, more than two boundary paths can reference")]
+    TooManyProofNodes {
+        /// Number of nodes in the proof.
+        count: usize,
+    },
     /// An extension node consumes no nibble, so a crafted chain could recurse without descending.
     #[error("extension node at path {path:?} has an empty key")]
     EmptyExtensionKey {
@@ -404,6 +423,8 @@ enum RangeProofErrorKind {
 ///
 /// When `leaves` is empty, `limit` supplies the right boundary of the authenticated empty interval.
 ///
+/// Proofs with more nodes than the two boundary paths can reference are rejected.
+///
 /// Returns a lower bound for the next key, or `None` if the range exhausts the trie.
 pub fn verify_range_proof<I, V>(
     root: B256,
@@ -427,7 +448,7 @@ where
         return Ok(None)
     }
 
-    RangeProofVerifier::new(origin, last_key.unwrap_or(limit), proof, frontier)
+    RangeProofVerifier::new(origin, last_key.unwrap_or(limit), proof, frontier)?
         .verify(root)
         .map_err(Into::into)
 }
@@ -606,6 +627,26 @@ mod tests {
         );
     }
 
+    #[test]
+    fn proof_node_count_is_bounded() {
+        let leaves =
+            vec![(key(1), value(1)), (key(2), value(2)), (key(3), value(3)), (key(4), value(4))];
+        let (root, mut proof) = build_proof(&leaves, &[key(2), key(3)]);
+        proof.resize(MAX_PROOF_NODES, Bytes::from_static(&[alloy_rlp::EMPTY_STRING_CODE]));
+
+        assert_eq!(
+            verify_range_proof(root, key(2), leaves[1..3].to_vec(), &proof),
+            Ok(Some(key(4)))
+        );
+
+        proof.push(Bytes::from_static(&[alloy_rlp::EMPTY_STRING_CODE]));
+
+        assert_eq!(
+            verify_range_proof(root, key(2), leaves[1..3].to_vec(), &proof),
+            Err(RangeProofErrorKind::TooManyProofNodes { count: MAX_PROOF_NODES + 1 })
+        );
+    }
+
     // Reject paths before they exceed the fixed hashed-key length.
     #[test]
     fn node_paths_are_bounded_before_they_overflow_a_key() {
@@ -640,6 +681,25 @@ mod tests {
             verify_range_proof(keccak256(&reach), key(1), no_leaves(), &proof),
             Err(RangeProofErrorKind::PathTooLong { .. })
         ));
+    }
+
+    // Decoding precedes the path checks, so oversized compact keys must fail as RLP errors.
+    #[test]
+    fn oversized_compact_keys_are_rejected() {
+        // Extension and leaf flags: 33 bytes after an even flag or 32 after an odd one exceed a
+        // hashed key. The second item is a child hash or a leaf value.
+        for (flag, len) in [(0x00, 33), (0x1a, 32), (0x20, 33), (0x3a, 32)] {
+            let compact_key = [&[flag][..], &[0xab; 33][..len]].concat();
+            let mut node = Vec::new();
+            alloy_rlp::encode_list::<_, [u8]>(&[&compact_key[..], &[0xaa; 32]], &mut node);
+            let node = Bytes::from(node);
+
+            assert_eq!(
+                verify_range_proof(keccak256(&node), key(1), no_leaves(), &[node]),
+                Err(RangeProofErrorKind::Rlp(alloy_rlp::Error::Custom("trie node key too long"))),
+                "flag {flag:#04x}"
+            );
+        }
     }
 
     // Empty extensions could recurse indefinitely without increasing the path depth.

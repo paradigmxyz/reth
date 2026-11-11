@@ -77,11 +77,14 @@ mod tests {
         eip4788::{BEACON_ROOTS_ADDRESS, BEACON_ROOTS_CODE},
         eip4895::Withdrawal,
         eip7002::{WITHDRAWAL_REQUEST_PREDEPLOY_ADDRESS, WITHDRAWAL_REQUEST_PREDEPLOY_CODE},
+        eip7251::{CONSOLIDATION_REQUEST_PREDEPLOY_ADDRESS, CONSOLIDATION_REQUEST_PREDEPLOY_CODE},
     };
     use alloy_primitives::{bytes, keccak256, Address, Signature, TxKind, U256};
     use evm2::{
         bytecode::Bytecode,
-        evm::{AccountInfo, InMemoryDB},
+        evm::{
+            AccountInfo, InMemoryDB, BUILDER_DEPOSIT_REQUEST_ADDRESS, BUILDER_EXIT_REQUEST_ADDRESS,
+        },
     };
     use reth_chainspec::ChainSpecBuilder;
     use reth_db_api::{tables, transaction::DbTxMut};
@@ -272,6 +275,15 @@ mod tests {
             1,
             WITHDRAWAL_REQUEST_PREDEPLOY_CODE.clone(),
         );
+        insert(
+            &mut db,
+            CONSOLIDATION_REQUEST_PREDEPLOY_ADDRESS,
+            1,
+            CONSOLIDATION_REQUEST_PREDEPLOY_CODE.clone(),
+        );
+        for address in [BUILDER_DEPOSIT_REQUEST_ADDRESS, BUILDER_EXIT_REQUEST_ADDRESS] {
+            insert(&mut db, address, 1, bytes!("00"));
+        }
         db.insert_account_info(
             &SENDER,
             AccountInfo { balance: U256::from(u64::MAX), ..Default::default() },

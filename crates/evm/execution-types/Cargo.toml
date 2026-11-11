@@ -15,7 +15,7 @@ reth-ethereum-primitives.workspace = true
 reth-primitives-traits.workspace = true
 reth-trie-common.workspace = true
 
-evm2.workspace = true
+evm2 = { workspace = true, features = ["block"] }
 
 # alloy
 alloy-consensus.workspace = true

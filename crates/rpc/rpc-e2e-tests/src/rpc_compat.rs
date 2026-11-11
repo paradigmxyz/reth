@@ -6,7 +6,7 @@ use reth_e2e_test_utils::testsuite::{
     actions::{expect_fcu_valid, Action},
     BlockInfo, Environment,
 };
-use reth_json_rpc::client::ClientT;
+use reth_json_rpc::client::{ArrayParams, ClientT};
 use reth_node_api::EngineTypes;
 use serde_json::Value;
 use std::path::Path;
@@ -172,7 +172,6 @@ impl RunRpcCompatTests {
 
         // Make the RPC request
         // We need to handle the case where the RPC might return an error
-        use reth_json_rpc::client::ArrayParams;
 
         let response_result: Result<Value, reth_json_rpc::client::Error> = match params {
             Value::Array(ref arr) => {

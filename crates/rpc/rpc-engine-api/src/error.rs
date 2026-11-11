@@ -123,9 +123,7 @@ impl From<EngineApiError> for reth_json_rpc::ErrorObject {
                     VersionSpecificValidationError::NoWithdrawalsPostShanghai |
                     VersionSpecificValidationError::HasWithdrawalsPreShanghai |
                     VersionSpecificValidationError::BlockAccessListNotSupported |
-                    VersionSpecificValidationError::HasBlockAccessListPreAmsterdam |
                     VersionSpecificValidationError::NoBlockAccessListPostAmsterdam |
-                    VersionSpecificValidationError::HasSlotNumberPreAmsterdam |
                     VersionSpecificValidationError::NoSlotNumberPostAmsterdam |
                     VersionSpecificValidationError::SlotNumberNotSupported,
                 ),

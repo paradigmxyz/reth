@@ -1,36 +1,54 @@
 //! EVM-backed Ethereum executor.
+//!
+//! [`EthBlockExecutor`] wraps evm2's [`evm2::block::ethereum::EthBlockExecutor`], which implements
+//! Ethereum block execution, and adapts it to reth's [`BlockExecutor`] trait.
+
 use reth_execution_types::{BlockState, StateUpdate};
 
 use crate::{
-    execution::{
-        base_block_reward, block_requests_from_receipts, commit_detached_transaction,
-        commit_pending_state, execute_transaction_without_commit, map_transaction_error,
-        post_block_balance_state_changes, post_execution_system_call_state_changes,
-        pre_execution_system_call_state_changes, BlockExecutionContext, BlockSystemCalls,
-    },
     factory::{EthBlockExecutorFactory, EvmFactory},
     EthBlockExecutionCtx, EthEvmEnv, RethReceiptBuilder,
 };
-use alloc::{boxed::Box, sync::Arc, vec::Vec};
-use alloy_consensus::{
-    transaction::{TransactionEnvelope, TxHashRef},
-    Header, Transaction, TxType as EthTxType,
-};
+use alloc::{borrow::Cow, sync::Arc, vec::Vec};
+use alloy_consensus::transaction::TransactionEnvelope;
 use alloy_eip7928::{BlockAccessIndex, BlockAccessList};
-use alloy_eips::{eip2718::Typed2718, eip4895::Withdrawal, eip7685::Requests};
-use alloy_primitives::{Address, B256};
+use alloy_eips::{eip2718::Typed2718, eip7685::Requests};
+use alloy_primitives::B256;
 use evm2::{
-    ethereum::TxEnvelope, evm::Bal, interpreter::Host, BaseEvmTypes, Evm, EvmTypes,
-    TxResultWithState,
+    block::{
+        ethereum::{self as evm2_eth, EthBlockRules, EthPostExecutionOutput},
+        BlockExecutor as _,
+    },
+    ethereum::TxEnvelope,
+    evm::Bal,
+    interpreter::Host,
+    BaseEvmTypes, Evm, EvmTypes,
 };
 use reth_chainspec::EthChainSpec;
-use reth_ethereum_forks::{EthereumHardfork, EthereumHardforks};
+use reth_ethereum_forks::EthereumHardforks;
 use reth_ethereum_primitives::{Receipt, TransactionSigned};
 use reth_evm::{
-    BlockExecutionError, BlockExecutionOutput, BlockExecutor, BlockTransactionResult,
-    BlockValidationError, ExecutorTx, GasOutput, ReceiptBuilder, ReceiptBuilderCtx, RecoveredTx,
+    BlockExecutionError, BlockExecutionOutput, BlockExecutor, ExecutorTx, GasOutput,
+    ReceiptBuilder, ReceiptBuilderCtx, RecoveredTx,
 };
-use reth_execution_types::BlockExecutionResult;
+
+pub use evm2::block::ethereum::EthTransactionResultWithState;
+
+/// Adapts a reth [`ReceiptBuilder`] to evm2's receipt builder.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct ReceiptBuilderAdapter<R>(pub R);
+
+impl<R: ReceiptBuilder> evm2::block::ReceiptBuilder for ReceiptBuilderAdapter<R> {
+    type Transaction = R::Transaction;
+    type Receipt = R::Receipt;
+
+    fn build_receipt<T: EvmTypes>(
+        &self,
+        ctx: ReceiptBuilderCtx<<R::Transaction as TransactionEnvelope>::TxType, evm2::TxResult<T>>,
+    ) -> R::Receipt {
+        self.0.build_receipt::<T>(ctx)
+    }
+}
 
 /// Configured Ethereum block executor backed by evm2.
 #[expect(missing_debug_implementations)]
@@ -39,59 +57,21 @@ where
     T: EvmTypes<Tx: Typed2718, TxResultExt: Send + Sync>,
     R: ReceiptBuilder,
 {
-    /// EVM containing the execution overlay and optional block access list builder.
-    pub evm: Evm<'a, T>,
+    /// evm2 executor that runs the block.
+    pub inner: evm2_eth::EthBlockExecutor<'a, T, ReceiptBuilderAdapter<R>>,
     ctx: EthBlockExecutionCtx<'a>,
-    receipt_builder: R,
-    spec_id: evm2::SpecId,
-    base_block_reward: Option<u128>,
-    dao_fork_transition: bool,
-    deposit_contract_address: Option<Address>,
-    /// Accumulated state changes, including state committed through the executor's hooks.
-    pub block_state: BlockState,
-    state_update_hook: StateUpdateHook,
-    /// Transaction receipts in execution order.
-    pub receipts: Vec<R::Receipt>,
-    /// Total receipt gas used.
-    pub cumulative_gas_used: u64,
-    block_regular_gas_used: u64,
-    block_state_gas_used: u64,
-    separate_block_gas: bool,
-    /// Total blob gas used.
-    pub blob_gas_used: u64,
-    bal_index_offset: u64,
 }
 
-/// Detached Ethereum transaction result with the metadata needed for canonical receipt commit.
-#[derive(Debug)]
-pub struct EthTransactionResultWithState<T = BaseEvmTypes, TxType = EthTxType>
-where
-    T: EvmTypes,
-{
-    result: TxResultWithState<T>,
-    tx_type: TxType,
-    blob_gas_used: u64,
-}
-
-impl<T: EvmTypes, TxType> BlockTransactionResult<T> for EthTransactionResultWithState<T, TxType> {
-    fn result(&self) -> &TxResultWithState<T> {
-        &self.result
+/// Converts reth's execution context into evm2's.
+fn evm2_ctx<'a>(ctx: &EthBlockExecutionCtx<'a>) -> evm2_eth::EthBlockExecutionCtx<'a> {
+    evm2_eth::EthBlockExecutionCtx {
+        tx_count_hint: ctx.tx_count_hint,
+        parent_hash: ctx.parent_hash,
+        parent_beacon_block_root: ctx.parent_beacon_block_root,
+        ommers: Cow::Borrowed(ctx.ommers),
+        withdrawals: ctx.withdrawals.clone(),
     }
 }
-
-impl<T: EvmTypes, TxType> EthTransactionResultWithState<T, TxType> {
-    /// Creates a detached transaction result with its receipt metadata.
-    pub const fn new(result: TxResultWithState<T>, tx_type: TxType, blob_gas_used: u64) -> Self {
-        Self { result, tx_type, blob_gas_used }
-    }
-
-    /// Returns the detached EVM transaction result.
-    pub const fn result(&self) -> &TxResultWithState<T> {
-        &self.result
-    }
-}
-
-type StateUpdateHook = Option<Box<dyn FnMut(StateUpdate) + Send>>;
 
 impl<'a, T, R> EthBlockExecutor<'a, T, R>
 where
@@ -108,56 +88,19 @@ where
     where
         C: EthChainSpec + EthereumHardforks + ?Sized,
     {
-        // The executor stores evm2's base spec ID, while custom type families may expose a
-        // richer host spec ID that converts into it.
-        #[allow(clippy::useless_conversion)]
-        let spec_id = evm.spec_id().into();
         let block_number = evm.block_env().number.to::<u64>();
-        let separate_block_gas = evm.version().feature(evm2::EvmFeatures::EIP8037);
-        let dao_fork_transition = chain_spec
-            .ethereum_fork_activation(EthereumHardfork::Dao)
-            .transitions_at_block(block_number);
-        let receipts = Vec::with_capacity(ctx.tx_count_hint.unwrap_or_default());
-
-        Self {
+        let rules = EthBlockRules::new(
+            chain_spec,
+            block_number,
+            chain_spec.deposit_contract().map(|contract| contract.address),
+        );
+        let inner = evm2_eth::EthBlockExecutor::new(
             evm,
-            ctx,
-            receipt_builder,
-            spec_id,
-            base_block_reward: base_block_reward(chain_spec, block_number),
-            dao_fork_transition,
-            deposit_contract_address: chain_spec
-                .deposit_contract()
-                .map(|contract| contract.address),
-            block_state: BlockState::new(),
-            state_update_hook: None,
-            receipts,
-            cumulative_gas_used: 0,
-            block_regular_gas_used: 0,
-            block_state_gas_used: 0,
-            separate_block_gas,
-            blob_gas_used: 0,
-            bal_index_offset: 0,
-        }
-    }
-
-    const fn block_context<'ctx>(
-        deposit_contract_address: Option<Address>,
-        parent_hash: B256,
-        parent_beacon_block_root: Option<B256>,
-        ommers: &'ctx [Header],
-        withdrawals: Option<&'ctx [Withdrawal]>,
-    ) -> BlockExecutionContext<'ctx> {
-        BlockExecutionContext {
-            system_calls: Some(BlockSystemCalls { parent_hash, parent_beacon_block_root }),
-            ommers: Some(ommers),
-            withdrawals,
-            deposit_contract_address,
-        }
-    }
-
-    const fn block_access_list_builder_enabled(&self) -> bool {
-        self.evm.state().bal_builder().is_some()
+            evm2_ctx(&ctx),
+            rules,
+            ReceiptBuilderAdapter(receipt_builder),
+        );
+        Self { inner, ctx }
     }
 
     /// Returns the block execution context.
@@ -167,32 +110,17 @@ where
 
     /// Returns the accumulated block state.
     pub const fn block_state(&self) -> &BlockState {
-        &self.block_state
+        self.inner.block_state()
     }
 
     /// Commits detached state without recording a transaction receipt or gas usage.
     pub fn commit_pending_state(&mut self, state: &evm2::evm::PendingState) {
-        let stream_state = self.state_update_hook.is_some();
-        commit_pending_state(
-            &mut self.evm,
-            &mut self.block_state,
-            stream_state,
-            &mut |state| emit_state(&mut self.state_update_hook, state),
-            state,
-        );
+        self.inner.commit_pending_state(state);
     }
 
     /// Sets the Ethereum fork used for block system calls and deposit request processing.
     pub const fn set_spec_id(&mut self, spec_id: evm2::SpecId) {
-        self.spec_id = spec_id;
-    }
-
-    #[inline]
-    const fn set_transaction_block_access_index(&mut self) {
-        if self.block_access_list_builder_enabled() {
-            let index = self.receipts.len() as u64 + 1 + self.bal_index_offset;
-            self.evm.state_mut().set_bal_index(BlockAccessIndex::new(index));
-        }
+        self.inner.set_spec_id(spec_id);
     }
 }
 
@@ -209,16 +137,15 @@ where
     type BlockAccessList = Bal;
 
     fn evm(&self) -> &Self::Evm {
-        &self.evm
+        &self.inner.evm
     }
 
     fn evm_mut(&mut self) -> &mut Self::Evm {
-        &mut self.evm
+        &mut self.inner.evm
     }
 
     fn set_state_hook(&mut self, hook: impl FnMut(StateUpdate) + Send + 'static) -> bool {
-        self.state_update_hook = Some(Box::new(hook));
-        true
+        self.inner.set_state_hook(hook)
     }
 
     fn convert_block_access_list(
@@ -227,80 +154,35 @@ where
         Bal::try_from(block_access_list.as_slice()).map_err(BlockExecutionError::other)
     }
 
-    fn set_block_access_list(
-        &mut self,
-        block_access_list: alloc::sync::Arc<Self::BlockAccessList>,
-    ) {
-        self.evm.state_mut().set_bal(block_access_list);
+    fn set_block_access_list(&mut self, block_access_list: Arc<Self::BlockAccessList>) {
+        self.inner.set_block_access_list(block_access_list);
     }
 
     fn set_block_access_index(&mut self, index: BlockAccessIndex) {
-        self.evm.state_mut().set_bal_index(index);
+        self.inner.set_block_access_index(index);
     }
 
     fn enable_block_access_list_builder(&mut self) {
-        self.evm.state_mut().enable_bal_builder();
-        self.evm.state_mut().reset_bal_index();
+        self.inner.enable_block_access_list_builder();
     }
 
     fn take_block_access_list(&mut self) -> Option<BlockAccessList> {
-        self.evm.state_mut().take_bal_builder().map(Into::into)
+        self.inner.take_block_access_list().map(Into::into)
     }
 
     fn apply_pre_execution_changes(&mut self) -> Result<(), BlockExecutionError> {
-        let context = Self::block_context(
-            self.deposit_contract_address,
-            self.ctx.parent_hash,
-            self.ctx.parent_beacon_block_root,
-            self.ctx.ommers,
-            None,
-        );
-        let block_number = self.evm.block_env().number.to::<u64>();
-        let stream_state = self.state_update_hook.is_some();
-        pre_execution_system_call_state_changes(
-            &mut self.evm,
-            &mut self.block_state,
-            stream_state,
-            &mut |state| emit_state(&mut self.state_update_hook, state),
-            self.spec_id,
-            block_number,
-            context,
-        )
+        self.inner.apply_pre_execution_changes()
     }
 
     fn into_state(self) -> reth_evm::BundleState {
-        self.block_state.into_bundle()
+        self.inner.into_state()
     }
 
     fn validate_transaction_gas_limit(
         &mut self,
         transaction_gas_limit: u64,
     ) -> Result<(), BlockExecutionError> {
-        let block_gas_limit = self.evm.block_env().gas_limit.to::<u64>();
-        let unavailable = if self.separate_block_gas {
-            let regular_available = block_gas_limit.saturating_sub(self.block_regular_gas_used);
-            let state_available = block_gas_limit.saturating_sub(self.block_state_gas_used);
-            let regular_limit = transaction_gas_limit.min(self.evm.version().tx_gas_limit_cap);
-            if regular_limit > regular_available {
-                Some((transaction_gas_limit, regular_available))
-            } else if transaction_gas_limit > state_available {
-                Some((transaction_gas_limit, state_available))
-            } else {
-                None
-            }
-        } else {
-            let available = block_gas_limit.saturating_sub(self.cumulative_gas_used);
-            let regular_limit = transaction_gas_limit.min(self.evm.version().tx_gas_limit_cap);
-            (regular_limit > available).then_some((transaction_gas_limit, available))
-        };
-        if let Some((transaction_gas_limit, block_available_gas)) = unavailable {
-            return Err(BlockValidationError::TransactionGasLimitMoreThanAvailableBlockGas {
-                transaction_gas_limit,
-                block_available_gas,
-            }
-            .into())
-        }
-        Ok(())
+        self.inner.validate_transaction_gas_limit(transaction_gas_limit)
     }
 
     fn execute_transaction_with_commit_condition(
@@ -309,35 +191,7 @@ where
         commit: impl FnOnce(&evm2::TxResult<T>, evm2::TxStateChanges<'_>) -> reth_evm::CommitChanges,
     ) -> Result<Option<GasOutput>, BlockExecutionError> {
         let (transaction, tx) = transaction.into_parts();
-        self.set_transaction_block_access_index();
-        self.validate_transaction_gas_limit(tx.tx().gas_limit())?;
-        let blob_gas_used = tx.tx().blob_gas_used().unwrap_or_default();
-        let tx_type = tx.tx().tx_type();
-        let Some(outcome) = crate::execution::execute_transaction_with_condition(
-            &mut self.evm,
-            &mut self.block_state,
-            self.state_update_hook.is_some(),
-            &mut |state| emit_state(&mut self.state_update_hook, state),
-            &transaction,
-            commit,
-        )
-        .map_err(|error| map_transaction_error(error, *tx.tx().tx_hash()))?
-        else {
-            return Ok(None);
-        };
-        let tx_gas_used = outcome.tx_gas_used();
-        let regular_gas_used = outcome.execution_gas_spent();
-        let state_gas_used = outcome.state_gas_spent();
-        self.block_regular_gas_used = self.block_regular_gas_used.saturating_add(regular_gas_used);
-        self.block_state_gas_used = self.block_state_gas_used.saturating_add(state_gas_used);
-        self.cumulative_gas_used += tx_gas_used;
-        self.blob_gas_used += blob_gas_used;
-        self.receipts.push(self.receipt_builder.build_receipt::<T>(ReceiptBuilderCtx {
-            tx_type,
-            result: outcome,
-            cumulative_gas_used: self.cumulative_gas_used,
-        }));
-        Ok(Some(GasOutput::new_with_regular(tx_gas_used, regular_gas_used, state_gas_used)))
+        self.inner.execute_transaction_with_commit_condition((transaction, tx.tx()), commit)
     }
 
     fn execute_transaction_without_commit(
@@ -345,47 +199,18 @@ where
         transaction: impl ExecutorTx<Self>,
     ) -> Result<Self::TransactionResultWithState, BlockExecutionError> {
         let (transaction, tx) = transaction.into_parts();
-        self.set_transaction_block_access_index();
-        let transaction_gas_limit = tx.tx().gas_limit();
-        self.validate_transaction_gas_limit(transaction_gas_limit)?;
-        let blob_gas_used = tx.tx().blob_gas_used().unwrap_or_default();
-        let tx_type = tx.tx().tx_type();
-        let result = execute_transaction_without_commit(&mut self.evm, &transaction)
-            .map_err(|err| map_transaction_error(err, *tx.tx().tx_hash()))?;
-        Ok(EthTransactionResultWithState::new(result, tx_type, blob_gas_used))
+        self.inner.execute_transaction_without_commit((transaction, tx.tx()))
     }
 
     fn commit_transaction(
         &mut self,
         output: Self::TransactionResultWithState,
     ) -> Result<GasOutput, BlockExecutionError> {
-        let EthTransactionResultWithState { result, tx_type, blob_gas_used } = output;
-        self.set_transaction_block_access_index();
-        let stream_state = self.state_update_hook.is_some();
-        let outcome = commit_detached_transaction(
-            &mut self.evm,
-            &mut self.block_state,
-            stream_state,
-            &mut |state| emit_state(&mut self.state_update_hook, state),
-            result,
-        );
-        let tx_gas_used = outcome.tx_gas_used();
-        let regular_gas_used = outcome.execution_gas_spent();
-        let state_gas_used = outcome.state_gas_spent();
-        self.block_regular_gas_used = self.block_regular_gas_used.saturating_add(regular_gas_used);
-        self.block_state_gas_used = self.block_state_gas_used.saturating_add(state_gas_used);
-        self.cumulative_gas_used += tx_gas_used;
-        self.blob_gas_used += blob_gas_used;
-        self.receipts.push(self.receipt_builder.build_receipt::<T>(ReceiptBuilderCtx {
-            tx_type,
-            result: outcome,
-            cumulative_gas_used: self.cumulative_gas_used,
-        }));
-        Ok(GasOutput::new_with_regular(tx_gas_used, regular_gas_used, state_gas_used))
+        self.inner.commit_transaction(output)
     }
 
     fn receipts(&self) -> &[Self::Receipt] {
-        &self.receipts
+        &self.inner.receipts
     }
 
     fn finish_with_block_access_list(
@@ -397,70 +222,10 @@ where
     }
 
     fn finish_with_prepared_block_access_list(
-        mut self,
+        self,
     ) -> Result<(BlockExecutionOutput<Self::Receipt>, Option<Bal>), BlockExecutionError> {
-        self.set_transaction_block_access_index();
-        let context = Self::block_context(
-            self.deposit_contract_address,
-            self.ctx.parent_hash,
-            self.ctx.parent_beacon_block_root,
-            self.ctx.ommers,
-            None,
-        );
-        let mut requests = block_requests_from_receipts(self.spec_id, context, &self.receipts)?;
-        let stream_state = self.state_update_hook.is_some();
-        post_execution_system_call_state_changes(
-            &mut self.evm,
-            &mut self.block_state,
-            stream_state,
-            &mut |state| emit_state(&mut self.state_update_hook, state),
-            self.spec_id,
-            context,
-            &mut requests,
-        )?;
-
-        let withdrawals =
-            self.ctx.withdrawals.clone().filter(|_| self.spec_id.enables(evm2::SpecId::SHANGHAI));
-        let context = Self::block_context(
-            self.deposit_contract_address,
-            self.ctx.parent_hash,
-            self.ctx.parent_beacon_block_root,
-            self.ctx.ommers,
-            withdrawals.as_deref(),
-        );
-        let block_number = self.evm.block_env().number.to::<u64>();
-        let block_beneficiary = self.evm.block_env().beneficiary;
-        post_block_balance_state_changes(
-            &mut self.evm,
-            &mut self.block_state,
-            stream_state,
-            &mut |state| emit_state(&mut self.state_update_hook, state),
-            self.base_block_reward,
-            self.dao_fork_transition,
-            block_number,
-            block_beneficiary,
-            context.ommers,
-            context.withdrawals,
-        )?;
-
-        let block_access_list = self.evm.state_mut().take_bal_builder();
-        let block_gas_used = final_block_gas_used(
-            self.separate_block_gas,
-            self.cumulative_gas_used,
-            self.block_regular_gas_used,
-            self.block_state_gas_used,
-        );
-        let output = BlockExecutionOutput::new(
-            BlockExecutionResult {
-                receipts: self.receipts,
-                requests,
-                gas_used: block_gas_used,
-                blob_gas_used: self.blob_gas_used,
-            },
-            self.block_state.into_bundle(),
-        );
-
-        Ok((output, block_access_list))
+        let (output, bal) = self.inner.finish_with_block_access_list()?;
+        Ok((output.into(), bal))
     }
 }
 
@@ -645,28 +410,22 @@ where
         let env = &segment.evm_env;
         // The version carries more than the spec and features (blob cap, gas caps, code limits), so
         // install the whole segment config.
-        self.factory.reconfigure_evm(&mut self.inner.evm, env);
+        self.factory.reconfigure_evm(&mut self.inner.inner.evm, env);
 
         let block_number = env.block.number.to::<u64>();
-        self.inner.spec_id = env.spec.into();
-        self.inner.base_block_reward = base_block_reward(self.chain_spec.as_ref(), block_number);
-        self.inner.dao_fork_transition = self
-            .chain_spec
-            .ethereum_fork_activation(EthereumHardfork::Dao)
-            .transitions_at_block(block_number);
+        let rules = EthBlockRules::new(
+            self.chain_spec.as_ref(),
+            block_number,
+            self.inner.inner.rules().deposit_contract_address,
+        );
         self.inner.ctx = segment.ctx.clone();
-        self.inner.separate_block_gas = env.version.feature(evm2::EvmFeatures::EIP8037);
-        self.inner.bal_index_offset = segment_idx as u64 * 2;
-        self.inner.cumulative_gas_used = 0;
-        self.inner.block_regular_gas_used = 0;
-        self.inner.block_state_gas_used = 0;
-        self.inner.blob_gas_used = 0;
+        self.inner.inner.start_block(evm2_ctx(&segment.ctx), rules, segment_idx as u64 * 2);
     }
 
     fn reseed_block_hashes(&mut self, block_number: u64) {
         for (number, hash) in self.plan.hashes_for_block(block_number) {
             let number = evm2::interpreter::Word::from(number);
-            self.inner.evm.overlay_db_mut().insert_block_hash(&number, &hash);
+            self.inner.inner.evm.overlay_db_mut().insert_block_hash(&number, &hash);
         }
     }
 
@@ -675,7 +434,7 @@ where
             return Ok(())
         }
 
-        let raw_index = self.inner.evm.state().bal_index().get();
+        let raw_index = self.inner.inner.evm.state().bal_index().get();
         let segment_idx = if raw_index == 0 {
             0
         } else {
@@ -686,6 +445,7 @@ where
             let segment_idx = self.plan.segment_index_for_tx(tx_index);
             self.worker_segment = Some(segment_idx);
             self.inner
+                .inner
                 .evm
                 .state_mut()
                 .set_bal_index(BlockAccessIndex::new(raw_index + segment_idx as u64 * 2));
@@ -700,80 +460,21 @@ where
     }
 
     fn finish_segment(&mut self) -> Result<FinishedBigBlockSegment, BlockExecutionError> {
-        self.inner.set_transaction_block_access_index();
-        let context = EthBlockExecutor::<F::Types>::block_context(
-            self.inner.deposit_contract_address,
-            self.inner.ctx.parent_hash,
-            self.inner.ctx.parent_beacon_block_root,
-            self.inner.ctx.ommers,
-            None,
-        );
-        let receipts = &self.inner.receipts[self.segment_receipt_start..];
-        let mut requests = block_requests_from_receipts(self.inner.spec_id, context, receipts)?;
-        let stream_state = self.inner.state_update_hook.is_some();
-        post_execution_system_call_state_changes(
-            &mut self.inner.evm,
-            &mut self.inner.block_state,
-            stream_state,
-            &mut |state| emit_state(&mut self.inner.state_update_hook, state),
-            self.inner.spec_id,
-            context,
-            &mut requests,
-        )?;
-
-        let withdrawals = self
-            .inner
-            .ctx
-            .withdrawals
-            .clone()
-            .filter(|_| self.inner.spec_id.enables(evm2::SpecId::SHANGHAI));
-        let context = EthBlockExecutor::<F::Types>::block_context(
-            self.inner.deposit_contract_address,
-            self.inner.ctx.parent_hash,
-            self.inner.ctx.parent_beacon_block_root,
-            self.inner.ctx.ommers,
-            withdrawals.as_deref(),
-        );
-        let block_number = self.inner.evm.block_env().number.to::<u64>();
-        let block_beneficiary = self.inner.evm.block_env().beneficiary;
-        post_block_balance_state_changes(
-            &mut self.inner.evm,
-            &mut self.inner.block_state,
-            stream_state,
-            &mut |state| emit_state(&mut self.inner.state_update_hook, state),
-            self.inner.base_block_reward,
-            self.inner.dao_fork_transition,
-            block_number,
-            block_beneficiary,
-            context.ommers,
-            context.withdrawals,
-        )?;
-
-        Ok(FinishedBigBlockSegment {
-            requests,
-            gas_used: final_block_gas_used(
-                self.inner.separate_block_gas,
-                self.inner.cumulative_gas_used,
-                self.inner.block_regular_gas_used,
-                self.inner.block_state_gas_used,
-            ),
-            blob_gas_used: self.inner.blob_gas_used,
-        })
+        let EthPostExecutionOutput { requests, gas_used, blob_gas_used } =
+            self.inner.inner.apply_post_execution_changes(self.segment_receipt_start)?;
+        Ok(FinishedBigBlockSegment { requests, gas_used, blob_gas_used })
     }
 
     fn merge_segment(&mut self, segment: FinishedBigBlockSegment) {
         self.requests.extend(segment.requests);
         self.gas_used_offset += segment.gas_used;
-        self.receipt_gas_used_offset += self.inner.cumulative_gas_used;
+        self.receipt_gas_used_offset += self.inner.inner.cumulative_gas_used;
         self.blob_gas_used_offset += segment.blob_gas_used;
-        self.inner.cumulative_gas_used = 0;
-        self.inner.block_regular_gas_used = 0;
-        self.inner.block_state_gas_used = 0;
-        self.inner.blob_gas_used = 0;
+        self.inner.inner.reset_gas_used();
     }
 
     fn after_committed_transaction(&mut self) -> Result<(), BlockExecutionError> {
-        if let Some(receipt) = self.inner.receipts.last_mut() {
+        if let Some(receipt) = self.inner.inner.receipts.last_mut() {
             receipt.cumulative_gas_used += self.receipt_gas_used_offset;
         }
         self.tx_counter += 1;
@@ -789,11 +490,11 @@ where
     fn apply_segment_boundary(&mut self) -> Result<(), BlockExecutionError> {
         let segment = self.finish_segment()?;
         self.merge_segment(segment);
-        self.inner.evm.state_mut().bump_bal_index();
+        self.inner.inner.evm.state_mut().bump_bal_index();
 
         let segment_idx = self.next_segment;
         self.next_segment += 1;
-        self.segment_receipt_start = self.inner.receipts.len();
+        self.segment_receipt_start = self.inner.inner.receipts.len();
         self.configure_segment(segment_idx);
         self.reseed_block_hashes(self.plan.segments[segment_idx].evm_env.block.number.to::<u64>());
         self.inner.apply_pre_execution_changes()
@@ -928,7 +629,7 @@ where
     }
 
     fn receipts(&self) -> &[Receipt] {
-        self.inner.receipts()
+        self.inner.inner.receipts()
     }
 
     fn finish_with_block_access_list(
@@ -944,40 +645,17 @@ where
         self.initialize()?;
         let segment = self.finish_segment()?;
         self.merge_segment(segment);
-        let block_access_list = self.inner.evm.state_mut().take_bal_builder();
+        let block_access_list = self.inner.inner.evm.state_mut().take_bal_builder();
         let result = reth_execution_types::BlockExecutionResult {
-            receipts: core::mem::take(&mut self.inner.receipts),
+            receipts: core::mem::take(&mut self.inner.inner.receipts),
             requests: self.requests,
             gas_used: self.gas_used_offset,
             blob_gas_used: self.blob_gas_used_offset,
         };
         Ok((
-            BlockExecutionOutput::new(result, self.inner.block_state.into_bundle()),
+            BlockExecutionOutput::new(result, self.inner.inner.block_state.into_bundle()),
             block_access_list,
         ))
-    }
-}
-
-const fn final_block_gas_used(
-    separate_block_gas: bool,
-    cumulative_gas_used: u64,
-    block_regular_gas_used: u64,
-    block_state_gas_used: u64,
-) -> u64 {
-    if separate_block_gas {
-        if block_regular_gas_used > block_state_gas_used {
-            block_regular_gas_used
-        } else {
-            block_state_gas_used
-        }
-    } else {
-        cumulative_gas_used
-    }
-}
-
-fn emit_state(hook: &mut StateUpdateHook, state: StateUpdate) {
-    if let Some(hook) = hook.as_mut() {
-        hook(state);
     }
 }
 
@@ -989,9 +667,14 @@ mod tests {
     use alloy_eip7928::BlockAccessIndex;
     use alloy_primitives::{address, Address, Bytes, Signature, TxKind, B256, U256};
     use evm2::{
+        block::ethereum::final_block_gas_used,
         bytecode::Bytecode,
         env::BlockEnv,
-        evm::{AccountInfo, Database, Db},
+        evm::{
+            AccountInfo, Database, Db, BUILDER_DEPOSIT_REQUEST_ADDRESS,
+            BUILDER_EXIT_REQUEST_ADDRESS, CONSOLIDATION_REQUEST_ADDRESS,
+            WITHDRAWAL_REQUEST_ADDRESS,
+        },
         interpreter::Word,
         BaseEvmTypes, SpecId,
     };
@@ -1067,6 +750,19 @@ mod tests {
 
         fn get_block_hash(&mut self, _number: &Word) -> Result<B256, Self::Error> {
             Ok(B256::ZERO)
+        }
+    }
+
+    /// Deploys no-op request contracts, which blocks from Prague on call.
+    fn insert_request_contracts(database: &mut TestDatabase) {
+        let code = Bytecode::new_legacy(Bytes::from_static(&[0x00]));
+        for address in [
+            WITHDRAWAL_REQUEST_ADDRESS,
+            CONSOLIDATION_REQUEST_ADDRESS,
+            BUILDER_DEPOSIT_REQUEST_ADDRESS,
+            BUILDER_EXIT_REQUEST_ADDRESS,
+        ] {
+            database.accounts.insert(address, AccountInfo::default().with_code(code.clone()));
         }
     }
 
@@ -1169,8 +865,8 @@ mod tests {
             env.version.tx_gas_limit_cap = cap;
             let evm = factory.evm_with_env(Db::new(TestDatabase::default()), env);
             let mut executor = factory.create_executor(evm, ctx.clone());
-            executor.block_state_gas_used = 600_000;
-            executor.block_regular_gas_used = 0;
+            executor.inner.block_state_gas_used = 600_000;
+            executor.inner.block_regular_gas_used = 0;
             assert!(executor.validate_transaction_gas_limit(500_000).is_err());
             assert!(executor.validate_transaction_gas_limit(400_000).is_ok());
         }
@@ -1260,7 +956,7 @@ mod tests {
     }
 
     #[test]
-    fn dao_fork_drain_removes_empty_accounts() {
+    fn dao_fork_drain_keeps_empty_accounts() {
         let [absent, empty, empty_with_balance, nonce_only, ..] = dao_fork::DAO_HARDFORK_ACCOUNTS;
         let beneficiary = dao_fork::DAO_HARDFORK_BENEFICIARY;
 
@@ -1283,28 +979,38 @@ mod tests {
             );
             let evm = factory.evm_with_env(Db::new(database), env);
             let mut executor = factory.create_executor(evm, segment(0, 1, B256::ZERO).ctx);
+            let (tx, rx) = std::sync::mpsc::channel();
+            executor.set_state_hook(move |update| tx.send(update).unwrap());
             executor.apply_pre_execution_changes().unwrap();
-            executor.finish_with_block_access_list().unwrap().0
+            let output = executor.finish_with_block_access_list().unwrap().0;
+            // The streamed updates hash to the same state as the finished bundle.
+            let mut streamed = reth_trie_common::HashedPostState::default();
+            for update in rx.try_iter() {
+                streamed.extend(reth_execution_types::state_update_to_hashed_post_state(&update));
+            }
+            let bundled = reth_trie_common::HashedPostState::from_bundle_state::<
+                reth_trie_common::KeccakKeyHasher,
+            >(&output.state.state);
+            assert_eq!(streamed.into_sorted(), bundled.into_sorted());
+            output
         };
 
-        // Absent accounts stay absent, and accounts that are empty after the drain are removed,
-        // even before EIP-161.
+        // The fork predates EIP-161, so drained accounts stay, absent and empty ones included.
         let output = execute(&[
             (empty, AccountInfo::default()),
             (empty_with_balance, AccountInfo::default().with_balance(U256::from(7))),
             (nonce_only, AccountInfo { nonce: 1, balance: U256::from(3), ..Default::default() }),
         ]);
-        assert_eq!(output.account(&absent), None);
-        assert_eq!(output.account(&empty), Some(None));
-        assert_eq!(output.account(&empty_with_balance), Some(None));
+        assert_eq!(output.account(&absent).unwrap().unwrap().balance, U256::ZERO);
+        assert_eq!(output.account(&empty), None);
+        assert_eq!(output.account(&empty_with_balance).unwrap().unwrap().balance, U256::ZERO);
         let nonce_only_account = output.account(&nonce_only).unwrap().unwrap();
         assert_eq!((nonce_only_account.nonce, nonce_only_account.balance), (1, U256::ZERO));
         assert_eq!(output.account(&beneficiary).unwrap().unwrap().balance, U256::from(10));
 
-        // Nothing is drained, but the zero increment is still applied to the beneficiary, which
-        // removes it because it is empty.
+        // Nothing is drained, and the empty beneficiary stays unchanged.
         let output = execute(&[(beneficiary, AccountInfo::default())]);
-        assert_eq!(output.account(&beneficiary), Some(None));
+        assert_eq!(output.account(&beneficiary), None);
     }
 
     #[test]
@@ -1357,6 +1063,7 @@ mod tests {
             sender,
             AccountInfo::default().with_balance(U256::from(1_000_000_000_000_000_000u64)),
         );
+        insert_request_contracts(&mut database);
         let segments = (0..2)
             .map(|index| {
                 let mut segment = segment(index, index as u64 + 1, B256::ZERO);
@@ -1419,6 +1126,7 @@ mod tests {
             sender,
             AccountInfo::default().with_balance(U256::from(1_000_000_000_000_000_000u64)),
         );
+        insert_request_contracts(&mut database);
         let segments = [9, 6]
             .into_iter()
             .enumerate()

@@ -7,17 +7,19 @@
 use crate::{
     errors::{EthHandshakeError, EthStreamError},
     handshake::EthereumEthHandshake,
-    message::{EthBroadcastMessage, MAX_MESSAGE_SIZE, TX_MEMORY_BUDGET_MULTIPLIER},
+    message::{EthBroadcastMessage, MessageError, MAX_MESSAGE_SIZE, TX_MEMORY_BUDGET_MULTIPLIER},
     p2pstream::HANDSHAKE_TIMEOUT,
     CanDisconnect, DisconnectReason, EthMessage, EthNetworkPrimitives, EthVersion, ProtocolMessage,
     UnifiedStatus,
 };
 use alloy_primitives::bytes::{Bytes, BytesMut};
+use alloy_rlp::{Decodable, Header};
 use futures::{ready, Sink, SinkExt};
 use pin_project::pin_project;
 use reth_eth_wire_types::{EthMessageID, NetworkPrimitives, RawCapabilityMessage};
 use reth_ethereum_forks::ForkFilter;
 use std::{
+    collections::BTreeMap,
     future::Future,
     pin::Pin,
     task::{Context, Poll},
@@ -110,6 +112,13 @@ pub struct EthStreamInner<N> {
     /// When true, `NewBlock` (0x07) and `NewBlockHashes` (0x01) messages are rejected before RLP
     /// decoding to avoid any memory impact for non-PoW networks.
     reject_block_announcements: bool,
+    /// Responses the remote owes for requests encoded by [`Self::encode_message`], keyed by
+    /// request id.
+    ///
+    /// [`Self::decode_message`] only decodes a response that answers one of these requests, and
+    /// removes the entry when it does. The map is therefore bounded by the requests the owner
+    /// keeps in flight.
+    pending_responses: BTreeMap<u64, PendingResponse>,
     _pd: std::marker::PhantomData<N>,
 }
 
@@ -128,6 +137,7 @@ where
             version,
             max_message_size,
             reject_block_announcements: false,
+            pending_responses: BTreeMap::new(),
             _pd: std::marker::PhantomData,
         }
     }
@@ -145,7 +155,11 @@ where
     }
 
     /// Decodes incoming bytes into an [`EthMessage`].
-    pub fn decode_message(&self, bytes: BytesMut) -> Result<EthMessage<N>, EthStreamError> {
+    ///
+    /// A response is only decoded if it answers a request sent through [`Self::encode_message`]
+    /// and carries at most as many items as that request asked for, see
+    /// [`EthStreamError::UnsolicitedResponse`] and [`EthStreamError::ResponseExceedsRequest`].
+    pub fn decode_message(&mut self, bytes: BytesMut) -> Result<EthMessage<N>, EthStreamError> {
         if bytes.len() > self.max_message_size {
             return Err(EthStreamError::MessageTooBig(bytes.len()));
         }
@@ -156,6 +170,8 @@ where
         {
             return Err(EthStreamError::UnsupportedMessage { message_id: id });
         }
+
+        self.take_pending_response(&bytes)?;
 
         let msg = match ProtocolMessage::decode_message_with_tx_memory_budget(
             self.version,
@@ -188,12 +204,65 @@ where
     /// Encodes an [`EthMessage`] to bytes.
     ///
     /// Validates that Status messages are not sent after handshake, enforcing protocol rules.
-    pub fn encode_message(&self, item: EthMessage<N>) -> Result<Bytes, EthStreamError> {
+    /// Requests are recorded so that [`Self::decode_message`] accepts their responses.
+    pub fn encode_message(&mut self, item: EthMessage<N>) -> Result<Bytes, EthStreamError> {
         if matches!(item, EthMessage::Status(_)) {
             return Err(EthStreamError::EthHandshakeError(EthHandshakeError::StatusNotInHandshake));
         }
 
+        if let Some((request_id, response)) = PendingResponse::for_request(&item) {
+            self.pending_responses.insert(request_id, response);
+        }
+
         Ok(Bytes::from(alloy_rlp::encode(ProtocolMessage::from(item))))
+    }
+
+    /// Consumes the pending request an encoded response answers, without decoding the response's
+    /// items.
+    ///
+    /// Decoding allocates per item, and an item can be a single RLP byte, so a few hundred KiB of
+    /// compressed frame can decode into hundreds of MiB. Responses nobody asked for, and responses
+    /// with more items than requested, are rejected before any of that happens. Messages that are
+    /// not responses pass through.
+    fn take_pending_response(&mut self, bytes: &[u8]) -> Result<(), EthStreamError> {
+        let mut buf = bytes;
+        let message_id = EthMessageID::decode(&mut buf).map_err(MessageError::from)?;
+        if !matches!(
+            message_id,
+            EthMessageID::BlockHeaders |
+                EthMessageID::BlockBodies |
+                EthMessageID::PooledTransactions |
+                EthMessageID::NodeData |
+                EthMessageID::Receipts |
+                EthMessageID::BlockAccessLists |
+                EthMessageID::Cells
+        ) {
+            return Ok(())
+        }
+
+        // Every response is a list that starts with the request id.
+        let mut payload = Header::decode_bytes(&mut buf, true).map_err(MessageError::from)?;
+        let request_id = u64::decode(&mut payload).map_err(MessageError::from)?;
+
+        let Some(pending) = self
+            .pending_responses
+            .remove(&request_id)
+            .filter(|pending| pending.message_id == message_id)
+        else {
+            return Err(EthStreamError::UnsolicitedResponse { message_id, request_id })
+        };
+
+        if response_exceeds_items(self.version, message_id, payload, pending.max_items)
+            .map_err(MessageError::from)?
+        {
+            return Err(EthStreamError::ResponseExceedsRequest {
+                message_id,
+                request_id,
+                max_items: pending.max_items,
+            })
+        }
+
+        Ok(())
     }
 }
 
@@ -273,6 +342,9 @@ where
     }
 
     /// Sends a raw capability message directly over the stream
+    ///
+    /// Raw messages are not recorded as requests, so the response to an `eth` request sent this
+    /// way is rejected as unsolicited. Send requests as [`EthMessage`]s instead.
     pub fn start_send_raw(&mut self, msg: RawCapabilityMessage) -> Result<(), EthStreamError> {
         self.inner.start_send_unpin(msg.encoded())?;
         Ok(())
@@ -323,9 +395,9 @@ where
             return Err(EthStreamError::EthHandshakeError(EthHandshakeError::StatusNotInHandshake))
         }
 
-        self.project()
-            .inner
-            .start_send(Bytes::from(alloy_rlp::encode(ProtocolMessage::from(item))))?;
+        let this = self.project();
+        let bytes = this.eth.encode_message(item)?;
+        this.inner.start_send(bytes)?;
 
         Ok(())
     }
@@ -353,27 +425,121 @@ where
     }
 }
 
+/// The response the remote owes for a request sent on an [`EthStreamInner`].
+#[derive(Clone, Copy, Debug)]
+struct PendingResponse {
+    /// Message id the response must carry.
+    message_id: EthMessageID,
+    /// Number of items the request asked for, which the response must not exceed.
+    max_items: usize,
+}
+
+impl PendingResponse {
+    /// Returns the request id and the response owed for `msg`, or `None` if it is not a request.
+    fn for_request<N: NetworkPrimitives>(msg: &EthMessage<N>) -> Option<(u64, Self)> {
+        let (request_id, message_id, max_items) = match msg {
+            EthMessage::GetBlockHeaders(req) => (
+                req.request_id,
+                EthMessageID::BlockHeaders,
+                usize::try_from(req.message.limit).unwrap_or(usize::MAX),
+            ),
+            EthMessage::GetBlockBodies(req) => {
+                (req.request_id, EthMessageID::BlockBodies, req.message.0.len())
+            }
+            EthMessage::GetPooledTransactions(req) => {
+                (req.request_id, EthMessageID::PooledTransactions, req.message.0.len())
+            }
+            EthMessage::GetNodeData(req) => {
+                (req.request_id, EthMessageID::NodeData, req.message.0.len())
+            }
+            EthMessage::GetReceipts(req) => {
+                (req.request_id, EthMessageID::Receipts, req.message.0.len())
+            }
+            EthMessage::GetReceipts70(req) => {
+                (req.request_id, EthMessageID::Receipts, req.message.block_hashes.len())
+            }
+            EthMessage::GetBlockAccessLists(req) => {
+                (req.request_id, EthMessageID::BlockAccessLists, req.message.0.len())
+            }
+            EthMessage::GetCells(req) => {
+                (req.request_id, EthMessageID::Cells, req.message.hashes.len())
+            }
+            _ => return None,
+        };
+        Some((request_id, Self { message_id, max_items }))
+    }
+}
+
+/// Returns whether the response payload following the request id holds more than `max_items`
+/// items.
+fn response_exceeds_items(
+    version: EthVersion,
+    message_id: EthMessageID,
+    mut payload: &[u8],
+    max_items: usize,
+) -> alloy_rlp::Result<bool> {
+    match message_id {
+        // eth/70 receipts carry the `lastBlockIncomplete` flag before the receipt lists.
+        EthMessageID::Receipts if version >= EthVersion::Eth70 => {
+            bool::decode(&mut payload)?;
+        }
+        // Cells wraps the per-transaction hashes and cell lists in a struct.
+        EthMessageID::Cells => {
+            let mut cells = Header::decode_bytes(&mut payload, true)?;
+            return Ok(list_exceeds_items(&mut cells, max_items)? ||
+                list_exceeds_items(&mut cells, max_items)?)
+        }
+        _ => {}
+    }
+    list_exceeds_items(&mut payload, max_items)
+}
+
+/// Decodes the header of the RLP list at the front of `buf` and returns whether the list holds
+/// more than `max_items` items, without decoding them.
+///
+/// Advances `buf` past the list.
+pub(crate) fn list_exceeds_items(buf: &mut &[u8], max_items: usize) -> alloy_rlp::Result<bool> {
+    let mut items = Header::decode_bytes(buf, true)?;
+    let mut count = 0;
+    while !items.is_empty() {
+        if count == max_items {
+            return Ok(true)
+        }
+        let header = Header::decode(&mut items)?;
+        // `Header::decode` checked that the payload is in bounds.
+        items = &items[header.payload_length..];
+        count += 1;
+    }
+    Ok(false)
+}
+
 #[cfg(test)]
 mod tests {
-    use super::UnauthedEthStream;
+    use super::{EthStreamInner, UnauthedEthStream};
     use crate::{
         broadcast::BlockHashNumber,
         errors::{EthHandshakeError, EthStreamError},
         ethstream::RawCapabilityMessage,
         hello::DEFAULT_TCP_PORT,
+        message::RequestPair,
         p2pstream::UnauthedP2PStream,
-        EthMessage, EthStream, EthVersion, HelloMessageWithProtocols, PassthroughCodec,
-        ProtocolVersion, Status, StatusMessage,
+        BlockAccessLists, BlockBodies, BlockHeaders, Cells, EthMessage, EthMessageID, EthStream,
+        EthVersion, GetBlockAccessLists, GetBlockBodies, GetCells, GetReceipts70,
+        HelloMessageWithProtocols, PassthroughCodec, ProtocolMessage, ProtocolVersion, Receipts70,
+        Status, StatusMessage,
     };
     use alloy_chains::NamedChain;
-    use alloy_primitives::{bytes::Bytes, B256, U256};
+    use alloy_primitives::{
+        bytes::{Bytes, BytesMut},
+        B128, B256, U256,
+    };
     use alloy_rlp::Decodable;
     use futures::{SinkExt, StreamExt};
     use reth_ecies::stream::ECIESStream;
     use reth_eth_wire_types::{EthNetworkPrimitives, UnifiedStatus};
     use reth_ethereum_forks::{ForkFilter, Head};
     use reth_network_peers::pk2id;
-    use secp256k1::{SecretKey, SECP256K1};
+    use secp256k1::SecretKey;
     use std::time::Duration;
     use tokio::net::{TcpListener, TcpStream};
     use tokio_util::codec::Decoder;
@@ -574,7 +740,7 @@ mod tests {
     async fn can_write_and_read_ecies() {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let local_addr = listener.local_addr().unwrap();
-        let server_key = SecretKey::new(&mut rand_08::thread_rng());
+        let server_key = SecretKey::new(&mut rand::rng());
         let test_msg = EthMessage::<EthNetworkPrimitives>::NewBlockHashes(
             vec![
                 BlockHashNumber { hash: B256::random(), number: 5 },
@@ -596,9 +762,9 @@ mod tests {
         });
 
         // create the server pubkey
-        let server_id = pk2id(&server_key.public_key(SECP256K1));
+        let server_id = pk2id(&server_key.public_key());
 
-        let client_key = SecretKey::new(&mut rand_08::thread_rng());
+        let client_key = SecretKey::new(&mut rand::rng());
 
         let outgoing = TcpStream::connect(local_addr).await.unwrap();
         let outgoing = ECIESStream::connect(outgoing, client_key, server_id).await.unwrap();
@@ -616,7 +782,7 @@ mod tests {
         // create tcpstream
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let local_addr = listener.local_addr().unwrap();
-        let server_key = SecretKey::new(&mut rand_08::thread_rng());
+        let server_key = SecretKey::new(&mut rand::rng());
         let test_msg = EthMessage::<EthNetworkPrimitives>::NewBlockHashes(
             vec![
                 BlockHashNumber { hash: B256::random(), number: 5 },
@@ -652,7 +818,7 @@ mod tests {
                 client_version: "bitcoind/1.0.0".to_string(),
                 protocols: vec![EthVersion::Eth67.into()],
                 port: DEFAULT_TCP_PORT,
-                id: pk2id(&server_key.public_key(SECP256K1)),
+                id: pk2id(&server_key.public_key()),
             };
 
             let unauthed_stream = UnauthedP2PStream::new(stream);
@@ -668,9 +834,9 @@ mod tests {
         });
 
         // create the server pubkey
-        let server_id = pk2id(&server_key.public_key(SECP256K1));
+        let server_id = pk2id(&server_key.public_key());
 
-        let client_key = SecretKey::new(&mut rand_08::thread_rng());
+        let client_key = SecretKey::new(&mut rand::rng());
 
         let outgoing = TcpStream::connect(local_addr).await.unwrap();
         let sink = ECIESStream::connect(outgoing, client_key, server_id).await.unwrap();
@@ -680,7 +846,7 @@ mod tests {
             client_version: "bitcoind/1.0.0".to_string(),
             protocols: vec![EthVersion::Eth67.into()],
             port: DEFAULT_TCP_PORT,
-            id: pk2id(&client_key.public_key(SECP256K1)),
+            id: pk2id(&client_key.public_key()),
         };
 
         let unauthed_stream = UnauthedP2PStream::new(sink);
@@ -828,5 +994,176 @@ mod tests {
         client_stream.send(test_msg).await.unwrap();
 
         handle.await.unwrap();
+    }
+
+    /// Encodes `msg` with its message id, as [`EthStreamInner::decode_message`] receives it.
+    fn encode(msg: EthMessage<EthNetworkPrimitives>) -> BytesMut {
+        alloy_rlp::encode(ProtocolMessage::from(msg)).as_slice().into()
+    }
+
+    fn get_block_access_lists(request_id: u64, hashes: usize) -> EthMessage<EthNetworkPrimitives> {
+        EthMessage::GetBlockAccessLists(RequestPair {
+            request_id,
+            message: GetBlockAccessLists(vec![B256::ZERO; hashes]),
+        })
+    }
+
+    fn block_access_lists(request_id: u64, entries: usize) -> EthMessage<EthNetworkPrimitives> {
+        EthMessage::BlockAccessLists(RequestPair {
+            request_id,
+            message: BlockAccessLists(vec![None; entries]),
+        })
+    }
+
+    #[test]
+    fn unsolicited_response_is_rejected() {
+        let mut eth = EthStreamInner::<EthNetworkPrimitives>::new(EthVersion::Eth71);
+
+        let err = eth.decode_message(encode(block_access_lists(7, 1))).unwrap_err();
+        assert!(matches!(
+            err,
+            EthStreamError::UnsolicitedResponse {
+                message_id: EthMessageID::BlockAccessLists,
+                request_id: 7
+            }
+        ));
+        assert!(err.is_protocol_breach());
+    }
+
+    #[test]
+    fn response_to_sent_request_is_decoded_once() {
+        let mut eth = EthStreamInner::<EthNetworkPrimitives>::new(EthVersion::Eth71);
+        eth.encode_message(get_block_access_lists(7, 2)).unwrap();
+
+        let response = block_access_lists(7, 2);
+        assert_eq!(eth.decode_message(encode(response.clone())).unwrap(), response);
+        assert!(matches!(
+            eth.decode_message(encode(response)).unwrap_err(),
+            EthStreamError::UnsolicitedResponse {
+                message_id: EthMessageID::BlockAccessLists,
+                request_id: 7
+            }
+        ));
+    }
+
+    #[test]
+    fn response_with_more_items_than_requested_is_rejected() {
+        let mut eth = EthStreamInner::<EthNetworkPrimitives>::new(EthVersion::Eth71);
+        eth.encode_message(get_block_access_lists(7, 2)).unwrap();
+
+        let err = eth.decode_message(encode(block_access_lists(7, 3))).unwrap_err();
+        assert!(matches!(
+            err,
+            EthStreamError::ResponseExceedsRequest {
+                message_id: EthMessageID::BlockAccessLists,
+                request_id: 7,
+                max_items: 2
+            }
+        ));
+        assert!(err.is_protocol_breach());
+    }
+
+    #[test]
+    fn response_of_other_type_is_rejected() {
+        let mut eth = EthStreamInner::<EthNetworkPrimitives>::new(EthVersion::Eth71);
+        eth.encode_message(EthMessage::GetBlockBodies(RequestPair {
+            request_id: 7,
+            message: GetBlockBodies(vec![B256::ZERO]),
+        }))
+        .unwrap();
+
+        let response = EthMessage::BlockHeaders(RequestPair {
+            request_id: 7,
+            message: BlockHeaders(Vec::new()),
+        });
+        assert!(matches!(
+            eth.decode_message(encode(response)).unwrap_err(),
+            EthStreamError::UnsolicitedResponse {
+                message_id: EthMessageID::BlockHeaders,
+                request_id: 7
+            }
+        ));
+
+        // The request was consumed, so its proper response is now unsolicited as well.
+        let response = EthMessage::BlockBodies(RequestPair {
+            request_id: 7,
+            message: BlockBodies(Vec::new()),
+        });
+        assert!(matches!(
+            eth.decode_message(encode(response)).unwrap_err(),
+            EthStreamError::UnsolicitedResponse { message_id: EthMessageID::BlockBodies, .. }
+        ));
+    }
+
+    #[test]
+    fn receipts70_response_items_are_receipt_lists() {
+        let mut eth = EthStreamInner::<EthNetworkPrimitives>::new(EthVersion::Eth70);
+        let request = |request_id| {
+            EthMessage::GetReceipts70(RequestPair {
+                request_id,
+                message: GetReceipts70 {
+                    first_block_receipt_index: 0,
+                    block_hashes: vec![B256::ZERO],
+                },
+            })
+        };
+        let response = |request_id, lists| {
+            EthMessage::Receipts70(RequestPair {
+                request_id,
+                message: Receipts70 {
+                    last_block_incomplete: true,
+                    receipts: vec![Vec::new(); lists],
+                },
+            })
+        };
+
+        eth.encode_message(request(1)).unwrap();
+        assert_eq!(eth.decode_message(encode(response(1, 1))).unwrap(), response(1, 1));
+
+        eth.encode_message(request(2)).unwrap();
+        assert!(matches!(
+            eth.decode_message(encode(response(2, 2))).unwrap_err(),
+            EthStreamError::ResponseExceedsRequest {
+                message_id: EthMessageID::Receipts,
+                request_id: 2,
+                max_items: 1
+            }
+        ));
+    }
+
+    #[test]
+    fn cells_response_bounds_hashes_and_cells() {
+        let mut eth = EthStreamInner::<EthNetworkPrimitives>::new(EthVersion::Eth72);
+        let request = |request_id| {
+            EthMessage::GetCells(RequestPair {
+                request_id,
+                message: GetCells { hashes: vec![B256::ZERO], cell_mask: B128::ZERO },
+            })
+        };
+        let response = |request_id, hashes, cells| {
+            EthMessage::Cells(RequestPair {
+                request_id,
+                message: Cells {
+                    hashes: vec![B256::ZERO; hashes],
+                    cells: vec![Vec::new(); cells],
+                    cell_mask: B128::ZERO,
+                },
+            })
+        };
+
+        eth.encode_message(request(1)).unwrap();
+        assert_eq!(eth.decode_message(encode(response(1, 1, 1))).unwrap(), response(1, 1, 1));
+
+        for (request_id, hashes, cells) in [(2, 2, 1), (3, 1, 2)] {
+            eth.encode_message(request(request_id)).unwrap();
+            assert!(matches!(
+                eth.decode_message(encode(response(request_id, hashes, cells))).unwrap_err(),
+                EthStreamError::ResponseExceedsRequest {
+                    message_id: EthMessageID::Cells,
+                    max_items: 1,
+                    ..
+                }
+            ));
+        }
     }
 }

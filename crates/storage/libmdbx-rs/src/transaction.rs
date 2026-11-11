@@ -574,12 +574,19 @@ impl TransactionPtr {
         self.timed_out.store(true, std::sync::atomic::Ordering::SeqCst);
     }
 
+    /// Returns `true` if both pointers refer to the same transaction handle.
+    ///
+    /// Unlike comparing the raw pointers, this tells apart a transaction from a later one that
+    /// reuses the same MDBX handle.
+    #[cfg(feature = "read-tx-timeouts")]
+    pub(crate) fn is_same(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.lock, &other.lock)
+    }
+
     /// Acquires the inner transaction lock to guarantee exclusive access to the transaction
     /// pointer.
     fn lock(&self) -> MutexGuard<'_, ()> {
-        if let Some(lock) = self.lock.try_lock() {
-            lock
-        } else {
+        self.lock.try_lock().unwrap_or_else(|| {
             tracing::trace!(
                 target: "libmdbx",
                 txn = %self.txn as usize,
@@ -588,7 +595,7 @@ impl TransactionPtr {
                 To display the full backtrace, run with `RUST_BACKTRACE=full` env variable."
             );
             self.lock.lock()
-        }
+        })
     }
 
     /// Executes the given closure once the lock on the transaction is acquired.

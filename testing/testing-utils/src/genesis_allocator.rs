@@ -6,10 +6,9 @@ use alloy_primitives::{
     map::{AddressMap, Entry},
     Address, Bytes, B256, U256,
 };
-use reth_primitives_traits::crypto::secp256k1::public_key_to_address;
 use secp256k1::{
-    rand::{thread_rng, RngCore},
-    Keypair, Secp256k1,
+    rand::{rng, RngCore},
+    Keypair,
 };
 use std::{collections::BTreeMap, fmt};
 
@@ -70,9 +69,9 @@ impl<'a> GenesisAllocator<'a> {
     ///
     /// Returns the key pair for the account and the account's address.
     pub fn new_funded_account(&mut self, balance: U256) -> (Keypair, Address) {
-        let secp = Secp256k1::new();
-        let pair = Keypair::new(&secp, &mut self.rng);
-        let address = public_key_to_address(pair.public_key());
+        let pair = Keypair::new(&mut self.rng);
+        let address =
+            Address::from_raw_public_key(&pair.public_key().serialize_uncompressed()[1..]);
 
         self.alloc.insert(address, GenesisAccount::default().with_balance(balance));
 
@@ -87,9 +86,9 @@ impl<'a> GenesisAllocator<'a> {
         balance: U256,
         code: Bytes,
     ) -> (Keypair, Address) {
-        let secp = Secp256k1::new();
-        let pair = Keypair::new(&secp, &mut self.rng);
-        let address = public_key_to_address(pair.public_key());
+        let pair = Keypair::new(&mut self.rng);
+        let address =
+            Address::from_raw_public_key(&pair.public_key().serialize_uncompressed()[1..]);
 
         self.alloc
             .insert(address, GenesisAccount::default().with_balance(balance).with_code(Some(code)));
@@ -105,9 +104,9 @@ impl<'a> GenesisAllocator<'a> {
         balance: U256,
         storage: BTreeMap<B256, B256>,
     ) -> (Keypair, Address) {
-        let secp = Secp256k1::new();
-        let pair = Keypair::new(&secp, &mut self.rng);
-        let address = public_key_to_address(pair.public_key());
+        let pair = Keypair::new(&mut self.rng);
+        let address =
+            Address::from_raw_public_key(&pair.public_key().serialize_uncompressed()[1..]);
 
         self.alloc.insert(
             address,
@@ -125,9 +124,9 @@ impl<'a> GenesisAllocator<'a> {
         code: Bytes,
         storage: BTreeMap<B256, B256>,
     ) -> (Keypair, Address) {
-        let secp = Secp256k1::new();
-        let pair = Keypair::new(&secp, &mut self.rng);
-        let address = public_key_to_address(pair.public_key());
+        let pair = Keypair::new(&mut self.rng);
+        let address =
+            Address::from_raw_public_key(&pair.public_key().serialize_uncompressed()[1..]);
 
         self.alloc.insert(
             address,
@@ -141,9 +140,9 @@ impl<'a> GenesisAllocator<'a> {
     ///
     /// Returns the key pair for the account and the account's address.
     pub fn new_account_with_code(&mut self, code: Bytes) -> (Keypair, Address) {
-        let secp = Secp256k1::new();
-        let pair = Keypair::new(&secp, &mut self.rng);
-        let address = public_key_to_address(pair.public_key());
+        let pair = Keypair::new(&mut self.rng);
+        let address =
+            Address::from_raw_public_key(&pair.public_key().serialize_uncompressed()[1..]);
 
         self.alloc.insert(address, GenesisAccount::default().with_code(Some(code)));
 
@@ -162,9 +161,9 @@ impl<'a> GenesisAllocator<'a> {
     ///
     /// Returns the key pair for the account and the account's address.
     pub fn add_account(&mut self, account: GenesisAccount) -> Address {
-        let secp = Secp256k1::new();
-        let pair = Keypair::new(&secp, &mut self.rng);
-        let address = public_key_to_address(pair.public_key());
+        let pair = Keypair::new(&mut self.rng);
+        let address =
+            Address::from_raw_public_key(&pair.public_key().serialize_uncompressed()[1..]);
 
         self.alloc.insert(address, account);
 
@@ -196,7 +195,7 @@ impl<'a> GenesisAllocator<'a> {
 
 impl Default for GenesisAllocator<'_> {
     fn default() -> Self {
-        Self { alloc: AddressMap::default(), rng: Box::new(thread_rng()) }
+        Self { alloc: AddressMap::default(), rng: Box::new(rng()) }
     }
 }
 

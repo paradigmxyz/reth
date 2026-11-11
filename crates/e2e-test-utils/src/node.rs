@@ -1424,6 +1424,29 @@ where
         eyre::Ok(res)
     }
 
+    /// Terminates the consensus engine after it persisted its canonical chain, and waits for it.
+    ///
+    /// Call this before [`Self::stop`] while a backfill is in flight, e.g. paused at a snap gate.
+    /// Stopping cancels the backfill, and its dropped task can end the engine loop with a fatal
+    /// error before the loop sees the shutdown signal, leaving the engine thread and its database
+    /// handles alive. The engine loop also reports a fatal error once the terminated engine
+    /// exits, so the future of [`Self::take_exit_future`] resolves with an error.
+    ///
+    /// Returns an error if shutdown was already requested or the engine does not terminate within
+    /// [`WAIT_TIMEOUT`].
+    pub async fn shutdown_engine(&self) -> eyre::Result<()> {
+        let done = self
+            .inner
+            .add_ons_handle
+            .engine_shutdown
+            .shutdown()
+            .ok_or_eyre("engine shutdown was already requested")?;
+        tokio::time::timeout(WAIT_TIMEOUT, done)
+            .await
+            .map_err(|_| eyre!("the engine did not shut down within {WAIT_TIMEOUT:?}"))??;
+        Ok(())
+    }
+
     /// Stops the node and closes its database, keeping its datadir to launch the node again with
     /// [`StoppedNode::start`].
     ///

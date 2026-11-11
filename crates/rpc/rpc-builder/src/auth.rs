@@ -12,7 +12,7 @@ use reth_rpc_eth_types::EthSubscriptionIdProvider;
 use reth_rpc_layer::{secret_to_bearer_header, AuthLayer, JwtAuthValidator, JwtSecret};
 use reth_rpc_server_types::constants;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
-use tower::layer::util::Identity;
+use tower::layer::util::{Identity, Stack};
 
 pub use reth_ipc::server::Builder as IpcServerBuilder;
 pub use reth_json_rpc::server::ServerBuilder;
@@ -119,8 +119,8 @@ impl<RpcMiddleware, HttpMiddleware> AuthServerConfig<RpcMiddleware, HttpMiddlewa
 
         // Create auth middleware with JWT authentication in front of the user-provided
         // transport middleware.
-        let middleware =
-            tower::ServiceBuilder::new().layer(AuthHttpLayer::new(secret, http_middleware));
+        let middleware = tower::ServiceBuilder::new()
+            .layer(Stack::new(http_middleware, AuthLayer::new(JwtAuthValidator::new(secret))));
 
         let rpc_middleware = RpcServiceBuilder::default().layer(rpc_middleware);
 
@@ -151,37 +151,6 @@ impl<RpcMiddleware, HttpMiddleware> AuthServerConfig<RpcMiddleware, HttpMiddlewa
         };
 
         Ok(AuthServerHandle { handle: Some(handle), local_addr, secret, ipc_endpoint, ipc_handle })
-    }
-}
-
-/// A combined tower layer that applies JWT authentication before custom HTTP middleware.
-///
-/// This composes `AuthLayer<JwtAuthValidator>` around a user-provided `HttpMiddleware` into a
-/// single `tower::Layer`. Requests first pass through JWT validation and only authenticated
-/// requests are forwarded into the custom middleware.
-struct AuthHttpLayer<HttpMiddleware> {
-    auth_layer: AuthLayer<JwtAuthValidator>,
-    http_middleware: HttpMiddleware,
-}
-
-impl<HttpMiddleware> AuthHttpLayer<HttpMiddleware> {
-    const fn new(secret: JwtSecret, http_middleware: HttpMiddleware) -> Self {
-        Self { auth_layer: AuthLayer::new(JwtAuthValidator::new(secret)), http_middleware }
-    }
-}
-
-impl<S, HttpMiddleware> tower::Layer<S> for AuthHttpLayer<HttpMiddleware>
-where
-    HttpMiddleware: tower::Layer<S> + Clone,
-    AuthLayer<JwtAuthValidator>: tower::Layer<<HttpMiddleware as tower::Layer<S>>::Service>,
-{
-    type Service = <AuthLayer<JwtAuthValidator> as tower::Layer<
-        <HttpMiddleware as tower::Layer<S>>::Service,
-    >>::Service;
-
-    fn layer(&self, inner: S) -> Self::Service {
-        let http_service = self.http_middleware.layer(inner);
-        self.auth_layer.layer(http_service)
     }
 }
 

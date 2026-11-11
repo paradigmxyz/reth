@@ -155,4 +155,16 @@ mod tests {
         let val = rpc_res.unwrap();
         assert_eq!(val, 100);
     }
+
+    #[test]
+    fn rpc_error_data_is_a_hex_string() {
+        for (data, expected) in [
+            (None, None),
+            (Some(&[][..]), Some(r#""0x""#)),
+            (Some(&[0, 1, 255][..]), Some(r#""0x0001ff""#)),
+        ] {
+            let err = rpc_err(reth_json_rpc::INTERNAL_ERROR_CODE, "test error", data);
+            assert_eq!(err.data().map(|data| data.get()), expected);
+        }
+    }
 }

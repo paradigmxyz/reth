@@ -147,9 +147,6 @@ pub struct TreeConfig {
     /// This is used as a cutoff to prevent long-running sequential block execution when we receive
     /// a batch of downloaded blocks.
     max_execute_block_batch_size: usize,
-    /// Whether to always compare trie updates from the state root task to the trie updates from
-    /// the regular state root calculation.
-    always_compare_trie_updates: bool,
     /// Whether to disable state cache.
     disable_state_cache: bool,
     /// Whether to disable parallel prewarming.
@@ -263,7 +260,6 @@ impl Default for TreeConfig {
             max_invalid_header_cache_length: DEFAULT_MAX_INVALID_HEADER_CACHE_LENGTH,
             invalid_header_hit_eviction_threshold: DEFAULT_INVALID_HEADER_HIT_EVICTION_THRESHOLD,
             max_execute_block_batch_size: DEFAULT_MAX_EXECUTE_BLOCK_BATCH_SIZE,
-            always_compare_trie_updates: false,
             disable_state_cache: false,
             disable_prewarming: false,
             txpool_prewarming: false,
@@ -314,7 +310,6 @@ impl TreeConfig {
         max_invalid_header_cache_length: u32,
         invalid_header_hit_eviction_threshold: u8,
         max_execute_block_batch_size: usize,
-        always_compare_trie_updates: bool,
         disable_state_cache: bool,
         disable_prewarming: bool,
         state_provider_metrics: bool,
@@ -355,7 +350,6 @@ impl TreeConfig {
             max_invalid_header_cache_length,
             invalid_header_hit_eviction_threshold,
             max_execute_block_batch_size,
-            always_compare_trie_updates,
             disable_state_cache,
             disable_prewarming,
             txpool_prewarming: false,
@@ -467,12 +461,6 @@ impl TreeConfig {
     /// Returns whether txpool prewarming is enabled.
     pub const fn txpool_prewarming(&self) -> bool {
         self.txpool_prewarming
-    }
-
-    /// Returns whether to always compare trie updates from the state root task to the trie updates
-    /// from the regular state root calculation.
-    pub const fn always_compare_trie_updates(&self) -> bool {
-        self.always_compare_trie_updates
     }
 
     /// Returns the cross-block cache size.
@@ -631,16 +619,6 @@ impl TreeConfig {
     /// Enables or disables txpool transaction prewarming.
     pub const fn with_txpool_prewarming(mut self, enabled: bool) -> Self {
         self.txpool_prewarming = enabled;
-        self
-    }
-
-    /// Setter for whether to always compare trie updates from the state root task to the trie
-    /// updates from the regular state root calculation.
-    pub const fn with_always_compare_trie_updates(
-        mut self,
-        always_compare_trie_updates: bool,
-    ) -> Self {
-        self.always_compare_trie_updates = always_compare_trie_updates;
         self
     }
 
