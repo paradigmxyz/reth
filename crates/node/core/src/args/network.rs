@@ -592,7 +592,8 @@ impl NetworkArgs {
             .with_max_inbound_opt(self.resolved_max_inbound_peers())
             .with_max_outbound_opt(self.resolved_max_outbound_peers())
             .with_ip_filter(ip_filter)
-            // the flag defaults to false, so it can only enable what the config file sets
+            // The flag can only enable enforcement, so the reth.toml value applies when it is not
+            // passed.
             .with_enforce_enr_fork_id(self.enforce_enr_fork_id || config.peers.enforce_enr_fork_id);
 
         // Configure basic network stack
