@@ -6,13 +6,15 @@ use crate::{
     tree::{error::InsertPayloadError, payload_validator::TreeCtx},
 };
 use alloy_consensus::BlockHeader;
+use alloy_eip7928::bal::DecodedBal;
 use alloy_eips::{eip1898::BlockWithParent, BlockNumHash, NumHash};
 use alloy_primitives::{map::B256Map, B256};
 use alloy_rpc_types_engine::{
     ForkchoiceState, PayloadStatus, PayloadStatusEnum, PayloadValidationError,
 };
 use error::{
-    InsertBlockError, InsertBlockFatalError, InsertBlockProcessingError, InsertBlockValidationError,
+    BlockAccessListDecodeError, InsertBlockError, InsertBlockFatalError,
+    InsertBlockProcessingError, InsertBlockValidationError,
 };
 use reth_chain_state::{
     CanonicalInMemoryState, ExecutedBlock, ExecutionTimingStats, NewCanonicalChain,
@@ -3135,6 +3137,13 @@ where
             payload,
             |validator, payload, ctx| validator.validate_payload(payload, ctx),
             |this, payload| Ok(this.payload_validator.convert_payload_to_block(payload)?.into()),
+            |payload| {
+                payload
+                    .block_access_list()
+                    .map(|bal| DecodedBal::from_rlp_bytes(bal.clone()))
+                    .transpose()
+                    .map(|_| ())
+            },
         )
     }
 
@@ -3147,6 +3156,7 @@ where
             block,
             |validator, block, ctx| validator.validate_block(block, ctx),
             |_, block| Ok(block),
+            |_| Ok(()),
         )
     }
 
@@ -3176,6 +3186,7 @@ where
             &mut Self,
             Input,
         ) -> Result<SealedBlockWithAccessList<N::Block>, Err>,
+        decode_block_access_list: impl FnOnce(&Input) -> Result<(), alloy_rlp::Error>,
     ) -> Result<InsertPayloadOk, Err>
     where
         Err: From<InsertBlockError<N::Block>>,
@@ -3217,7 +3228,17 @@ where
             };
 
             if !parent_exists {
+                let bal_decode_result = decode_block_access_list(&input);
                 let block = convert_to_block(self, input)?;
+                // Undecodable block access list bytes invalidate the payload even though it
+                // can't be executed yet.
+                if let Err(err) = bal_decode_result {
+                    return Err(InsertBlockError::new(
+                        block.split().0,
+                        BlockAccessListDecodeError::new(err).into(),
+                    )
+                    .into())
+                }
                 // we don't have the state required to execute this block, buffering it and find the
                 // missing parent block
                 let missing_ancestor = self

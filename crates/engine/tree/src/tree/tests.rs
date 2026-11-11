@@ -1202,6 +1202,7 @@ fn test_validated_payload_bal_is_inserted_into_store() {
                 ))
             },
             |_, executed| Ok(executed.recovered_block().clone_sealed_block().into()),
+            |_| Ok(()),
         )
         .unwrap();
 
