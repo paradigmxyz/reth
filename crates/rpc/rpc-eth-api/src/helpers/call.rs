@@ -10,7 +10,7 @@ use alloy_eips::{
     eip1559::calc_effective_gas_price, eip2718::Typed2718, eip2930::AccessListResult,
 };
 use alloy_network::TransactionBuilder;
-use alloy_primitives::{Bytes, B256, U256};
+use alloy_primitives::{Address, Bytes, B256, U256};
 use alloy_rpc_types_eth::{
     simulate::{SimBlock, SimulatePayload, SimulatedBlock},
     state::{EvmOverrides, StateOverride},
@@ -33,7 +33,7 @@ use reth_rpc_convert::{RpcConvert, RpcTxReq};
 use reth_rpc_eth_types::{
     cache::db::{
         apply_block_overrides, apply_state_overrides, apply_state_overrides_with_state,
-        attach_bal_before_tx,
+        attach_bal_before_tx, code_override_addresses,
     },
     error::{AsEthApiError, FromEthApiError},
     simulate::{self, EthSimulateError, SimulatedState},
@@ -363,6 +363,9 @@ pub trait EthCall: EstimateCall + LoadBlock + FullEthApiTypes {
                     this.replay_block_until(&mut db, &block, num_txs, None)?;
                 }
 
+                let code_overrides =
+                    state_override.as_ref().map(code_override_addresses).unwrap_or_default();
+
                 // transact all bundles
                 for (bundle_index, bundle) in bundles.into_iter().enumerate() {
                     let Bundle { transactions, block_override } = bundle;
@@ -385,7 +388,7 @@ pub trait EthCall: EstimateCall + LoadBlock + FullEthApiTypes {
                         let overrides =
                             EvmOverrides::new(state_override.take(), block_overrides.clone());
 
-                        let (current_evm_env, prepared_tx) = this
+                        let (current_evm_env, prepared_tx, _) = this
                             .prepare_call_env(evm_env.clone(), tx, &mut db, overrides)
                             .map_err(|err| {
                                 Self::Error::from_eth_err(EthApiError::call_many_error(
@@ -394,15 +397,20 @@ pub trait EthCall: EstimateCall + LoadBlock + FullEthApiTypes {
                                     err.into(),
                                 ))
                             })?;
-                        let res = this.transact(&mut db, current_evm_env, prepared_tx).map_err(
-                            |err| {
+                        let res = this
+                            .transact_with_code_overrides(
+                                &mut db,
+                                current_evm_env,
+                                prepared_tx,
+                                code_overrides.iter().copied(),
+                            )
+                            .map_err(|err| {
                                 Self::Error::from_eth_err(EthApiError::call_many_error(
                                     bundle_index,
                                     tx_index,
                                     err.into(),
                                 ))
-                            },
-                        )?;
+                            })?;
 
                         match Self::Error::ensure_success::<EvmTypesFor<Self::Evm>>(res.result) {
                             Ok(output) => {
@@ -464,7 +472,7 @@ pub trait EthCall: EstimateCall + LoadBlock + FullEthApiTypes {
     {
         self.spawn_with_state_at_block(at, |this, mut db| {
             let initial = request.as_ref().access_list().cloned().unwrap_or_default();
-            let (evm_env, mut tx_env) = this.prepare_call_env(
+            let (evm_env, mut tx_env, code_overrides) = this.prepare_call_env(
                 evm_env,
                 request,
                 &mut db,
@@ -473,6 +481,7 @@ pub trait EthCall: EstimateCall + LoadBlock + FullEthApiTypes {
             let chain_id = evm_env.chain_id();
 
             let mut evm = this.evm_config().evm_with_env(&mut db, evm_env);
+            evm.disable_precompiles(code_overrides);
 
             // EIP-7702 authorities are warmed during authorization processing, so listing them
             // would only add access list cost.
@@ -585,7 +594,22 @@ pub trait Call:
     where
         DB: Database + fmt::Debug,
     {
+        self.transact_with_code_overrides(db, evm_env, tx_env, [])
+    }
+
+    /// Executes a call with native dispatch disabled at explicit code override addresses.
+    fn transact_with_code_overrides<DB>(
+        &self,
+        db: DB,
+        evm_env: EvmEnvFor<Self::Evm>,
+        tx_env: TxEnvFor<Self::Evm>,
+        code_overrides: impl IntoIterator<Item = Address>,
+    ) -> Result<TxResultWithStateFor<Self::Evm>, Self::Error>
+    where
+        DB: Database + fmt::Debug,
+    {
         let mut evm = self.evm_config().evm_with_env(db, evm_env);
+        evm.disable_precompiles(code_overrides);
         let res = evm.transact(&tx_env).map_err(Self::Error::from_evm_err)?;
 
         Ok(res)
@@ -636,14 +660,19 @@ pub trait Call:
             let this = self.clone();
 
             let res = self
-                .spawn_with_call_at(request, at, overrides, move |db, evm_env, tx_env| {
-                    let _permit = permit;
-                    if cancel.is_cancelled() {
-                        // callsite dropped the guard
-                        return Err(EthApiError::InternalEthError.into())
-                    }
-                    this.transact(db, evm_env, tx_env)
-                })
+                .spawn_with_call_at(
+                    request,
+                    at,
+                    overrides,
+                    move |db, evm_env, tx_env, code_overrides| {
+                        let _permit = permit;
+                        if cancel.is_cancelled() {
+                            // callsite dropped the guard
+                            return Err(EthApiError::InternalEthError.into());
+                        }
+                        this.transact_with_code_overrides(db, evm_env, tx_env, code_overrides)
+                    },
+                )
                 .await;
             drop(guard);
             res
@@ -696,6 +725,7 @@ pub trait Call:
                 &mut StateCacheDb,
                 EvmEnvFor<Self::Evm>,
                 TxEnvFor<Self::Evm>,
+                Vec<Address>,
             ) -> Result<R, Self::Error>
             + Send
             + 'static,
@@ -704,10 +734,10 @@ pub trait Call:
         async move {
             let (evm_env, at) = self.evm_env_at(at).await?;
             self.spawn_with_state_at_block(at, move |this, mut db| {
-                let (evm_env, tx_env) =
+                let (evm_env, tx_env, code_overrides) =
                     this.prepare_call_env(evm_env, request, &mut db, overrides)?;
 
-                f(&mut db, evm_env, tx_env)
+                f(&mut db, evm_env, tx_env, code_overrides)
             })
             .await
         }
@@ -868,6 +898,8 @@ pub trait Call:
     ///  - `nonce` is set to `None`
     ///
     /// In addition, this changes the block's gas limit to the configured [`Self::call_gas_limit`].
+    /// The returned code override addresses must disable native dispatch on every EVM built from
+    /// this prepared state, including subsequent calls that reuse the database.
     #[expect(clippy::type_complexity)]
     fn prepare_call_env<DB>(
         &self,
@@ -875,7 +907,7 @@ pub trait Call:
         mut request: RpcTxReq<<Self::RpcConvert as RpcConvert>::Network>,
         db: &mut CacheDB<DB>,
         overrides: EvmOverrides,
-    ) -> Result<(EvmEnvFor<Self::Evm>, TxEnvFor<Self::Evm>), Self::Error>
+    ) -> Result<(EvmEnvFor<Self::Evm>, TxEnvFor<Self::Evm>, Vec<Address>), Self::Error>
     where
         DB: DynDatabase,
     {
@@ -922,6 +954,8 @@ pub trait Call:
         if let Some(block_overrides) = overrides.block {
             apply_block_overrides(*block_overrides, db, &mut evm_env);
         }
+        let code_overrides =
+            overrides.state.as_ref().map(code_override_addresses).unwrap_or_default();
         if let Some(state_overrides) = overrides.state {
             apply_state_overrides(state_overrides, db)
                 .map_err(EthApiError::from_state_overrides_err)?;
@@ -968,7 +1002,7 @@ pub trait Call:
             }
         }
 
-        Ok((evm_env, tx_env))
+        Ok((evm_env, tx_env, code_overrides))
     }
 }
 

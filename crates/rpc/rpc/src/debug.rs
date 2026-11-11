@@ -416,18 +416,27 @@ where
         let interrupt = JsTraceInterrupt::new(&tracing_options)?;
         let tracer_interrupt = interrupt.clone();
         let this = self.clone();
-        let trace =
-            self.eth_api().spawn_with_call_at(call, at, overrides, move |db, evm_env, tx_env| {
+        let trace = self.eth_api().spawn_with_call_at(
+            call,
+            at,
+            overrides,
+            move |db, evm_env, tx_env, code_overrides| {
                 let inspector = tracer_interrupt.attach(
                     DebugInspector::new(tracing_options).map_err(Eth::Error::from_eth_err)?,
                 );
-                let (mut inspector, res) =
-                    this.eth_api().inspect(&mut *db, evm_env.clone(), &tx_env, inspector)?;
+                let (mut inspector, res) = this.eth_api().inspect_with_code_overrides(
+                    &mut *db,
+                    evm_env.clone(),
+                    &tx_env,
+                    inspector,
+                    code_overrides,
+                )?;
                 let trace = inspector
                     .get_result(None, &tx_env, evm_env.block_env(), &res, db)
                     .map_err(Eth::Error::from_eth_err)?;
                 Ok(trace)
-            });
+            },
+        );
         interrupt.run(trace).await.map_err(|err| match err.as_err() {
             Some(EthApiError::HeaderNotFound(id)) if *id == at => {
                 // Unknown blocks use -32000: https://github.com/ethereum/execution-apis/pull/855
@@ -480,14 +489,19 @@ where
                 eth_api.replay_block_until(&mut db, &block, tx_index, bal.as_deref())?;
 
                 // 2. now execute the trace call on this state
-                let (evm_env, tx_env) =
+                let (evm_env, tx_env, code_overrides) =
                     eth_api.prepare_call_env(evm_env, call, &mut db, overrides)?;
 
                 let inspector = tracer_interrupt.attach(
                     DebugInspector::new(tracing_options).map_err(Eth::Error::from_eth_err)?,
                 );
-                let (mut inspector, res) =
-                    eth_api.inspect(&mut db, evm_env.clone(), &tx_env, inspector)?;
+                let (mut inspector, res) = eth_api.inspect_with_code_overrides(
+                    &mut db,
+                    evm_env.clone(),
+                    &tx_env,
+                    inspector,
+                    code_overrides,
+                )?;
                 let trace = inspector
                     .get_result(None, &tx_env, evm_env.block_env(), &res, &mut db)
                     .map_err(Eth::Error::from_eth_err)?;
@@ -525,6 +539,10 @@ where
 
         let opts = opts.unwrap_or_default();
         let GethDebugTracingCallOptions { tracing_options, mut state_overrides, .. } = opts;
+        let code_overrides = state_overrides
+            .as_ref()
+            .map(reth_rpc_eth_types::cache::db::code_override_addresses)
+            .unwrap_or_default();
 
         // we're essentially replaying the transactions in the block here, hence we need the state
         // that points to the beginning of the block, which is the state at the parent block
@@ -575,11 +593,16 @@ where
                         let state_overrides = state_overrides.take();
                         let overrides = EvmOverrides::new(state_overrides, block_overrides.clone());
 
-                        let (evm_env, tx_env) =
+                        let (evm_env, tx_env, _) =
                             eth_api.prepare_call_env(evm_env.clone(), tx, &mut db, overrides)?;
 
-                        let (next_inspector, res) =
-                            eth_api.inspect(&mut db, evm_env.clone(), &tx_env, inspector)?;
+                        let (next_inspector, res) = eth_api.inspect_with_code_overrides(
+                            &mut db,
+                            evm_env.clone(),
+                            &tx_env,
+                            inspector,
+                            code_overrides.iter().copied(),
+                        )?;
                         inspector = next_inspector;
                         let trace = inspector
                             .get_result(None, &tx_env, evm_env.block_env(), &res, &mut db)
