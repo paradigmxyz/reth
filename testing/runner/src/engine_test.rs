@@ -10,7 +10,7 @@
 use alloy_primitives::B256;
 use alloy_rpc_types_engine::{ClientCode, ClientVersionV1};
 use ef_tests::{
-    case::load_json,
+    case::{load_json, spawn_worker},
     models::{EngineNewPayload, EngineTest},
     result::{FixtureResult, Rejection},
     Error,
@@ -91,7 +91,7 @@ pub(crate) fn run_fixtures(
     let next_file = || files.lock().unwrap().next();
     std::thread::scope(|scope| {
         for _ in 0..workers.max(1) {
-            scope.spawn(|| {
+            spawn_worker(scope, || {
                 let mut cleanup = Cleanup::default();
                 while let Some(path) = next_file() {
                     let tests = match load_json::<BTreeMap<String, EngineTest>>(&path) {

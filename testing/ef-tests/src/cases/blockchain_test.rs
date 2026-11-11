@@ -1,7 +1,7 @@
 //! Test runners for `BlockchainTests` in <https://github.com/ethereum/tests>
 
 use crate::{
-    case::load_json,
+    case::{load_json, spawn_worker},
     models::{BlockchainTest, ForkSpec},
     result::{FixtureResult, Rejection},
     Case, Error, Suite,
@@ -84,7 +84,7 @@ impl BlockchainTests {
         let next_file = || files.lock().unwrap().next();
         std::thread::scope(|scope| {
             for _ in 0..workers.max(1) {
-                scope.spawn(|| {
+                spawn_worker(scope, || {
                     while let Some(path) = next_file() {
                         Self::run_file(&path, options, on_result);
                     }
