@@ -9,9 +9,9 @@ use alloy_rpc_types_mev::{
     SimBundleResponse, Validity,
 };
 use evm2::evm::DynDatabase;
-use jsonrpsee::core::RpcResult;
 use reth_errors::RethError;
 use reth_evm::{ConfigureEvm, Evm, EvmEnv};
+use reth_json_rpc::RpcResult;
 use reth_primitives_traits::Recovered;
 use reth_rpc_api::MevSimApiServer;
 use reth_rpc_eth_api::{
@@ -512,7 +512,6 @@ where
     }
 }
 
-#[async_trait::async_trait]
 impl<Eth> MevSimApiServer for EthSimBundle<Eth>
 where
     Eth: EthTransactions + LoadBlock + Call,
@@ -606,10 +605,10 @@ mod tests {
     use alloy_primitives::{Address, Bytes, TxKind, B256};
     use alloy_rpc_types_eth::BlockOverrides;
     use alloy_rpc_types_mev::{Inclusion, ProtocolVersion};
-    use jsonrpsee::types::ErrorObjectOwned;
     use reth_chainspec::{ChainSpecBuilder, ChainSpecProvider};
     use reth_db_common::init::init_genesis;
     use reth_evm_ethereum::EthEvmConfig;
+    use reth_json_rpc::ErrorObject;
     use reth_network_api::noop::NoopNetwork;
     use reth_provider::{
         providers::BlockchainProvider, test_utils::create_test_provider_factory_with_chain_spec,
@@ -979,13 +978,13 @@ mod tests {
         let capped = api(21_000);
         assert_eq!(
             capped.sim_bundle(bundle.clone(), overrides).await.unwrap_err(),
-            ErrorObjectOwned::from(EthApiError::InvalidTransaction(
+            ErrorObject::from(EthApiError::InvalidTransaction(
                 RpcInvalidTransactionError::GasTooHigh
             ))
         );
         assert_eq!(
             capped.sim_bundle(bundle.clone(), SimBundleOverrides::default()).await.unwrap_err(),
-            ErrorObjectOwned::from(EthApiError::InvalidParams(
+            ErrorObject::from(EthApiError::InvalidParams(
                 EthBundleError::BundleGasLimitExceeded(21_000).to_string()
             ))
         );

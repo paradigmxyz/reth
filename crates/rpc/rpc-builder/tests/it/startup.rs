@@ -8,7 +8,7 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
-use jsonrpsee::{rpc_params, Methods};
+use reth_json_rpc::RpcModule;
 use reth_rpc_builder::{
     error::{RpcError, ServerKind, WsHttpSamePortError},
     RpcServerConfig, TransportRpcModuleConfig,
@@ -40,9 +40,8 @@ async fn test_rpc_modules_per_transport() {
         EventSender::new(1),
     );
 
-    let namespaces = |methods: Methods| async move {
-        let modules: HashMap<String, String> =
-            methods.call("rpc_modules", rpc_params![]).await.unwrap();
+    let namespaces = |methods: RpcModule| async move {
+        let modules: HashMap<String, String> = methods.call("rpc_modules", [(); 0]).await.unwrap();
         modules.into_keys().collect::<HashSet<_>>()
     };
     let expected = |names: [&str; 2]| names.into_iter().map(String::from).collect::<HashSet<_>>();

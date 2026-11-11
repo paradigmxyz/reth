@@ -16,12 +16,12 @@ use alloy_rpc_types_eth::{
 };
 use evm2::{interpreter::InstrStop, precompiles::MovePrecompileError, EvmFeatures, TxResult};
 use evm2_inspectors::transfer::TransferInspector;
-use jsonrpsee_types::{error::INTERNAL_ERROR_CODE, ErrorObject};
 use reth_errors::ProviderResult;
 use reth_evm::{
     execute::{BlockBuilder, BlockBuilderOutcome, BlockTransactionResult},
     BlockExecutionError, BundleState, Database, Evm as RethEvm, EvmEnv,
 };
+use reth_json_rpc::{ErrorObject, INTERNAL_ERROR_CODE};
 use reth_primitives_traits::{
     BlockBody as _, BlockTy, NodePrimitives, Recovered, RecoveredBlock, SealedHeader,
 };
@@ -147,7 +147,7 @@ impl EthSimulateError {
 }
 
 impl ToRpcError for EthSimulateError {
-    fn to_rpc_error(&self) -> ErrorObject<'static> {
+    fn to_rpc_error(&self) -> ErrorObject {
         rpc_err(self.error_code(), self.to_string(), None)
     }
 }
@@ -577,7 +577,7 @@ where
         + FromEthApiError
         + FromEvmError<T::Evm>
         + From<T::Error>
-        + Into<jsonrpsee_types::ErrorObject<'static>>,
+        + Into<reth_json_rpc::ErrorObject>,
     T: RpcConvert,
     EvmTypes: evm2::EvmTypes,
 {

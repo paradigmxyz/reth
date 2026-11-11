@@ -1,5 +1,5 @@
 use http::{header::ORIGIN, HeaderValue, Method, Request, Response, StatusCode};
-use jsonrpsee::server::{ws, HttpBody};
+use reth_json_rpc::server::{is_upgrade_request, HttpBody};
 use tower_http::{
     cors::{AllowOrigin, Any, CorsLayer},
     validate_request::ValidateRequest,
@@ -58,7 +58,7 @@ impl<B> ValidateRequest<B> for WsOriginValidator {
 
     fn validate(&mut self, request: &mut Request<B>) -> Result<(), Response<HttpBody>> {
         if let Some(allowed) = &self.origins &&
-            ws::is_upgrade_request(request)
+            is_upgrade_request(request)
         {
             let mut origins = request.headers().get_all(ORIGIN).iter();
             // Originless clients are allowed; an explicit Origin must match exactly once.

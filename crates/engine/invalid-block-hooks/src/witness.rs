@@ -139,7 +139,7 @@ pub struct InvalidBlockWitnessHook<P, E> {
     /// directory in case of failed sanity checks.
     output_directory: PathBuf,
     /// The healthy node client to compare the witness against.
-    healthy_node_client: Option<jsonrpsee::http_client::HttpClient>,
+    healthy_node_client: Option<reth_json_rpc::client::HttpClient>,
     /// Runtime for background diagnostics and shutdown-aware RPC requests.
     runtime: Runtime,
     /// Allows at most one diagnostic task, including across clones of the hook.
@@ -154,7 +154,7 @@ impl<P, E> InvalidBlockWitnessHook<P, E> {
         provider: P,
         evm_config: E,
         output_directory: PathBuf,
-        healthy_node_client: Option<jsonrpsee::http_client::HttpClient>,
+        healthy_node_client: Option<reth_json_rpc::client::HttpClient>,
         runtime: Runtime,
     ) -> Self {
         Self {
@@ -447,15 +447,14 @@ mod tests {
     use alloy_consensus::Header;
     use alloy_primitives::{map::HashMap, Bytes, B256, U256};
     use evm2::evm::{CacheDB, EmptyDB};
-    use jsonrpsee::{
-        core::RpcResult,
-        http_client::{HttpClient, HttpClientBuilder},
-        server::{ServerBuilder, ServerHandle},
-        RpcModule,
-    };
     use reth_chainspec::ChainSpec;
     use reth_ethereum_primitives::{Block, EthPrimitives};
     use reth_evm_ethereum::EthEvmConfig;
+    use reth_json_rpc::{
+        client::{HttpClient, HttpClientBuilder},
+        server::ServerBuilder,
+        RpcModule, RpcResult, ServerHandle,
+    };
     use reth_provider::test_utils::MockEthProvider;
     use reth_trie::bundle_state::{AccountRevert, BundleAccount};
     use tempfile::TempDir;
@@ -873,15 +872,19 @@ mod tests {
         let client = HttpClientBuilder::default()
             .build(format!("http://{}", server.local_addr().unwrap()))
             .unwrap();
-        let mut module = RpcModule::new((requested.clone(), respond.clone()));
+        let mut module = RpcModule::new();
+        let context = (requested.clone(), respond.clone());
         module
-            .register_async_method("debug_executionWitness", |_, context, _| async move {
-                context.0.notify_one();
-                context.1.notified().await;
-                RpcResult::Ok(ExecutionWitness {
-                    codes: vec![Bytes::from_static(b"healthy node code")],
-                    ..Default::default()
-                })
+            .register_async_method("debug_executionWitness", move |_, _| {
+                let (requested, respond) = context.clone();
+                async move {
+                    requested.notify_one();
+                    respond.notified().await;
+                    RpcResult::Ok(ExecutionWitness {
+                        codes: vec![Bytes::from_static(b"healthy node code")],
+                        ..Default::default()
+                    })
+                }
             })
             .unwrap();
         (client, server.start(module), requested, respond)

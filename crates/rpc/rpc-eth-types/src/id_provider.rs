@@ -4,17 +4,17 @@
 
 use std::fmt::Write;
 
-use jsonrpsee_types::SubscriptionId;
+use reth_json_rpc::SubscriptionId;
 
-/// An [`IdProvider`](jsonrpsee_core::traits::IdProvider) for ethereum subscription ids.
+/// An [`IdProvider`](reth_json_rpc::IdProvider) for ethereum subscription ids.
 ///
 /// Returns new hex-string [QUANTITY](https://ethereum.org/en/developers/docs/apis/json-rpc/#quantities-encoding) ids
 #[derive(Debug, Clone, Copy, Default)]
 #[non_exhaustive]
 pub struct EthSubscriptionIdProvider;
 
-impl jsonrpsee_core::traits::IdProvider for EthSubscriptionIdProvider {
-    fn next_id(&self) -> SubscriptionId<'static> {
+impl reth_json_rpc::IdProvider for EthSubscriptionIdProvider {
+    fn next_id(&self) -> SubscriptionId {
         to_quantity(rand::random::<u128>())
     }
 }
@@ -23,7 +23,7 @@ impl jsonrpsee_core::traits::IdProvider for EthSubscriptionIdProvider {
 ///
 /// Strips all leading zeros, `0` is returned as `0x0`
 #[inline(always)]
-fn to_quantity(val: u128) -> SubscriptionId<'static> {
+fn to_quantity(val: u128) -> SubscriptionId {
     let bytes = val.to_be_bytes();
     let b = bytes.as_slice();
     let non_zero = b.iter().take_while(|b| **b == 0).count();

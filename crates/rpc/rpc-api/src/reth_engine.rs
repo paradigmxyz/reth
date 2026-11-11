@@ -2,7 +2,7 @@
 
 use alloy_primitives::Bytes;
 use alloy_rpc_types_engine::{ForkchoiceState, ForkchoiceUpdated, PayloadStatus};
-use jsonrpsee::{core::RpcResult, proc_macros::rpc};
+use reth_json_rpc::{rpc, RpcResult};
 use serde::{ser::SerializeStruct, Deserialize, Deserializer, Serialize, Serializer};
 
 /// Reth-specific payload status that includes server-measured execution latency.

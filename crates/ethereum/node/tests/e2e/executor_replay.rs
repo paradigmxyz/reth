@@ -13,7 +13,6 @@ use alloy_rpc_types_trace::{
     parity::{Delta, TraceResultsWithTransactionHash},
 };
 use evm2::BaseEvmTypes;
-use jsonrpsee::core::client::ClientT;
 use reth_chainspec::{ChainSpec, EthereumHardfork};
 use reth_e2e_test_utils::E2ETestSetupExt;
 use reth_ethereum_primitives::{Block, EthPrimitives, Receipt, TransactionSigned};
@@ -27,6 +26,7 @@ use reth_evm_ethereum::{
     EthBlockAssembler, EthBlockExecutionCtx, EthBlockExecutor, EthBlockExecutorFactory,
     EthEvmConfig, EthEvmEnv, EthTransactionResultWithState, RethEvmFactory, RethReceiptBuilder,
 };
+use reth_json_rpc::client::ClientT;
 use reth_node_builder::{
     components::{BasicPayloadServiceBuilder, ComponentsBuilder, ExecutorBuilder},
     node::{FullNodeTypes, NodeTypes},
