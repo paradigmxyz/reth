@@ -81,7 +81,7 @@ pub trait EthState: LoadState + SpawnBlocking {
         address: Address,
         block_id: Option<BlockId>,
     ) -> impl Future<Output = Result<U256, Self::Error>> + Send {
-        self.spawn_blocking_io_with_state(block_id.unwrap_or_default(), move |_, state| {
+        self.spawn_point_read_with_state(block_id.unwrap_or_default(), move |_, state| {
             Ok(state
                 .account_balance(&address)
                 .map_err(Self::Error::from_eth_err)?
@@ -96,7 +96,7 @@ pub trait EthState: LoadState + SpawnBlocking {
         index: JsonStorageKey,
         block_id: Option<BlockId>,
     ) -> impl Future<Output = Result<B256, Self::Error>> + Send {
-        self.spawn_blocking_io_with_state(block_id.unwrap_or_default(), move |_, state| {
+        self.spawn_point_read_with_state(block_id.unwrap_or_default(), move |_, state| {
             Ok(B256::from(
                 state
                     .storage(address, index.as_b256())
@@ -444,6 +444,37 @@ pub trait LoadState:
         }
     }
 
+    /// Executes `f` with the state at the given [`BlockId`], on the calling task if possible.
+    ///
+    /// For reads at the latest block, `f` runs directly on the calling task while a permit from
+    /// [`SpawnBlocking::try_acquire_inline_io`] is held. This skips the round trip through the
+    /// blocking pool, which costs more than a short read. When no permit is available, or for any
+    /// other block, this falls back to [`Self::spawn_blocking_io_with_state`].
+    ///
+    /// Only use this for reads that do a small, bounded number of state lookups: inline reads run
+    /// on an async worker thread and block it for their whole duration.
+    fn spawn_point_read_with_state<F, R>(
+        &self,
+        at: BlockId,
+        f: F,
+    ) -> impl Future<Output = Result<R, Self::Error>> + Send
+    where
+        Self: SpawnBlocking,
+        F: FnOnce(Self, StateProviderBox) -> Result<R, Self::Error> + Send + 'static,
+        R: Send + 'static,
+    {
+        async move {
+            if at.is_latest() &&
+                let Some(_permit) = self.try_acquire_inline_io()
+            {
+                let state = self.latest_state()?;
+                return f(self.clone(), state)
+            }
+
+            self.spawn_blocking_io_with_state(at, f).await
+        }
+    }
+
     /// Returns the EVM environment for the given sealed header.
     fn evm_env_for_header(
         &self,
@@ -583,7 +614,7 @@ pub trait LoadState:
         Self: SpawnBlocking,
     {
         let at = block_id.unwrap_or_default();
-        self.spawn_blocking_io_with_state(at, move |this, state| {
+        self.spawn_point_read_with_state(at, move |this, state| {
             // first fetch the on chain nonce of the account
             let on_chain_account_nonce = state
                 .account_nonce(&address)
@@ -627,7 +658,7 @@ pub trait LoadState:
     where
         Self: SpawnBlocking,
     {
-        self.spawn_blocking_io_with_state(block_id.unwrap_or_default(), move |_, state| {
+        self.spawn_point_read_with_state(block_id.unwrap_or_default(), move |_, state| {
             Ok(state
                 .account_code(&address)
                 .map_err(Self::Error::from_eth_err)?

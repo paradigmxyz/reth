@@ -57,7 +57,7 @@ mod tests {
         Runtime,
     };
     use reth_transaction_pool::test_utils::{testing_pool, TestPool};
-    use std::{future::Future, sync::Arc, time::Duration};
+    use std::{future::Future, sync::Arc, thread, time::Duration};
     use tokio::sync::{Mutex, Semaphore};
 
     fn noop_eth_api() -> EthApi<
@@ -348,5 +348,36 @@ mod tests {
             U256::from(42)
         );
         assert_eq!(eth_api.balance(address, None).await.unwrap(), U256::from(1337));
+    }
+
+    /// Returns the id of the thread that `f` of a point read at `at` runs on.
+    async fn point_read_thread(eth_api: &MockEthApi, at: BlockId) -> thread::ThreadId {
+        eth_api.spawn_point_read_with_state(at, |_, _| Ok(thread::current().id())).await.unwrap()
+    }
+
+    #[tokio::test]
+    async fn point_read_at_latest_runs_inline() {
+        let eth_api = mock_eth_api(AddressMap::default());
+
+        assert_eq!(point_read_thread(&eth_api, BlockId::latest()).await, thread::current().id());
+        // The permit is released after the read.
+        assert!(eth_api.inline_io_request_semaphore().available_permits() > 0);
+    }
+
+    #[tokio::test]
+    async fn point_read_without_inline_permit_uses_blocking_pool() {
+        let eth_api = mock_eth_api(AddressMap::default());
+        let permits =
+            u32::try_from(eth_api.inline_io_request_semaphore().available_permits()).unwrap();
+        let _permits = eth_api.inline_io_request_semaphore().try_acquire_many(permits).unwrap();
+
+        assert_ne!(point_read_thread(&eth_api, BlockId::latest()).await, thread::current().id());
+    }
+
+    #[tokio::test]
+    async fn point_read_at_historical_block_uses_blocking_pool() {
+        let eth_api = mock_eth_api(AddressMap::default());
+
+        assert_ne!(point_read_thread(&eth_api, BlockId::earliest()).await, thread::current().id());
     }
 }
