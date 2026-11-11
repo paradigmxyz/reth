@@ -524,7 +524,7 @@ impl<N: NetworkPrimitives> ActiveSession<N> {
         let request_id = self.next_id();
         trace!(?request, peer_id=?self.remote_peer_id, ?request_id, "sending request to peer");
         let msg = match request.create_request_message(request_id) {
-            RequestMessage::Eth(msg) => msg.map_versioned(version).into(),
+            RequestMessage::Eth(msg) => msg.into(),
             RequestMessage::Snap(msg) => OutgoingMessage::Snap(msg),
         };
 

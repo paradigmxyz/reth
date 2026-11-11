@@ -341,6 +341,22 @@ async fn test_eth70_fetch_client_rejects_default_block_access_lists_request() {
     assert_eq!(err, RequestError::UnsupportedCapability);
 }
 
+// Ensures a receipts request is rejected locally when its variant doesn't match the negotiated eth
+// version.
+#[tokio::test(flavor = "multi_thread")]
+async fn test_eth70_rejects_eth69_get_receipts_request() {
+    let (_, net) = spawn_testnet(MockEthProvider::default(), Some(EthVersion::Eth70)).await;
+    let [peer0, peer1] = net.peers_array();
+
+    let request = GetReceipts(vec![B256::random()]);
+    let err = peer0
+        .request(*peer1.peer_id(), |response| PeerRequest::GetReceipts69 { request, response })
+        .await
+        .unwrap_err();
+
+    assert_eq!(err, RequestError::UnsupportedCapability);
+}
+
 /// Spawns two connected peers that serve requests from `provider`, speaking only `version` if set.
 async fn spawn_testnet(
     provider: MockEthProvider,
