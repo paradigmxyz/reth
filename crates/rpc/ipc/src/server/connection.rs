@@ -106,8 +106,12 @@ where
 
             // Only take messages while the send queue has room, so a client that stops reading
             // backs up its subscriptions instead of growing the queue.
+            let mut messages_pending = false;
             while this.items.len() < MESSAGE_BUFFER_CAPACITY {
-                let Poll::Ready(Some(item)) = this.messages.poll_recv(cx) else { break };
+                let Poll::Ready(Some(item)) = this.messages.poll_recv(cx) else {
+                    messages_pending = true;
+                    break
+                };
                 this.items.push_back(item);
             }
 
@@ -121,6 +125,12 @@ where
                 } else {
                     break
                 }
+            }
+
+            // A full queue left `messages` unpolled, so it won't wake this task for the messages
+            // that are still waiting. Take them now that the writes made room.
+            if !messages_pending && this.items.len() < MESSAGE_BUFFER_CAPACITY {
+                continue 'outer
             }
 
             'inner: loop {
@@ -182,5 +192,139 @@ where
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::{
+        pin::pin,
+        sync::{
+            atomic::{AtomicBool, Ordering},
+            Arc, Mutex,
+        },
+        task::{Wake, Waker},
+    };
+    use tokio::io::ReadBuf;
+    use tokio_util::codec::Decoder;
+
+    /// Transport of a client that sends nothing and accepts every write unless `blocked`.
+    #[derive(Clone, Default)]
+    struct MockIo(Arc<Mutex<MockState>>);
+
+    #[derive(Default)]
+    struct MockState {
+        blocked: bool,
+        written: Vec<u8>,
+    }
+
+    impl AsyncRead for MockIo {
+        fn poll_read(
+            self: Pin<&mut Self>,
+            _: &mut Context<'_>,
+            _: &mut ReadBuf<'_>,
+        ) -> Poll<io::Result<()>> {
+            Poll::Pending
+        }
+    }
+
+    impl AsyncWrite for MockIo {
+        fn poll_write(
+            self: Pin<&mut Self>,
+            _: &mut Context<'_>,
+            buf: &[u8],
+        ) -> Poll<io::Result<usize>> {
+            let mut state = self.0.lock().unwrap();
+            if state.blocked {
+                return Poll::Pending
+            }
+            state.written.extend_from_slice(buf);
+            Poll::Ready(Ok(buf.len()))
+        }
+
+        fn poll_flush(self: Pin<&mut Self>, _: &mut Context<'_>) -> Poll<io::Result<()>> {
+            Poll::Ready(Ok(()))
+        }
+
+        fn poll_shutdown(self: Pin<&mut Self>, _: &mut Context<'_>) -> Poll<io::Result<()>> {
+            Poll::Ready(Ok(()))
+        }
+    }
+
+    /// Service of a connection that receives no requests.
+    struct NoCalls;
+
+    impl Service<String> for NoCalls {
+        type Response = Option<String>;
+        type Error = io::Error;
+        type Future = std::future::Ready<Result<Self::Response, Self::Error>>;
+
+        fn poll_ready(&mut self, _: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+            Poll::Ready(Ok(()))
+        }
+
+        fn call(&mut self, _: String) -> Self::Future {
+            std::future::ready(Ok(None))
+        }
+    }
+
+    /// Records whether the driver woke itself.
+    #[derive(Default)]
+    struct Woken(AtomicBool);
+
+    impl Wake for Woken {
+        fn wake(self: Arc<Self>) {
+            self.0.store(true, Ordering::Relaxed);
+        }
+    }
+
+    /// Polls the driver until it is pending without having woken itself.
+    fn poll_until_parked(mut driver: Pin<&mut impl Future<Output = ()>>) {
+        let woken = Arc::new(Woken::default());
+        let waker = Waker::from(woken.clone());
+        let mut cx = Context::from_waker(&waker);
+        loop {
+            woken.0.store(false, Ordering::Relaxed);
+            assert!(driver.as_mut().poll(&mut cx).is_pending());
+            if !woken.0.load(Ordering::Relaxed) {
+                return
+            }
+        }
+    }
+
+    #[test]
+    fn takes_waiting_messages_after_draining_full_queue() {
+        let io = MockIo::default();
+        io.0.lock().unwrap().blocked = true;
+        let (tx, rx) = mpsc::channel(MESSAGE_BUFFER_CAPACITY);
+        let mut driver = pin!(IpcConnDriver {
+            conn: IpcConn(StreamCodec::stream_incoming().framed(io.clone())),
+            service: NoCalls,
+            pending_calls: Default::default(),
+            items: Default::default(),
+            messages: rx,
+        });
+
+        // The client doesn't read, so the send queue fills up and messages wait in the channel.
+        let mut sent = 0;
+        loop {
+            while tx.try_send(format!("<{sent}>")).is_ok() {
+                sent += 1;
+            }
+            poll_until_parked(driver.as_mut());
+            if tx.capacity() == 0 {
+                break
+            }
+        }
+        assert!(io.0.lock().unwrap().written.is_empty());
+
+        // The client reads again, fast enough that the whole queue is written at once. The
+        // messages that waited in the channel must follow without anything else waking the driver.
+        io.0.lock().unwrap().blocked = false;
+        poll_until_parked(driver.as_mut());
+
+        let written = String::from_utf8(io.0.lock().unwrap().written.clone()).unwrap();
+        assert_eq!(written.matches('<').count(), sent);
     }
 }
