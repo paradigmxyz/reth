@@ -1294,4 +1294,29 @@ mod tests {
         ]);
         assert_eq!(execute_state_overrides(destination, overrides), Bytes::new());
     }
+
+    #[test]
+    fn code_override_nested_staticcall_preserves_warm_access_gas() {
+        let target = Address::repeat_byte(0xbb);
+        let identity = Address::with_last_byte(4);
+        // Return GAS before and after a STATICCALL with empty input and output.
+        let probe = Bytes::from_static(&[
+            0x5a, 0x5f, 0x52, 0x5f, 0x5f, 0x5f, 0x5f, 0x60, 4, 0x5a, 0xfa, 0x50, 0x5a, 0x60, 0x20,
+            0x52, 0x60, 0x40, 0x5f, 0xf3,
+        ]);
+        let gas_used = |code: Option<Bytes>| {
+            let output = execute_state_overrides(
+                target,
+                StateOverride::from_iter([
+                    (target, AccountOverride { code: Some(probe.clone()), ..Default::default() }),
+                    (identity, AccountOverride { code, ..Default::default() }),
+                ]),
+            );
+            U256::from_be_slice(&output[..32]) - U256::from_be_slice(&output[32..])
+        };
+        // Identity costs 15 gas for empty input; empty account code and STOP cost zero.
+        assert_eq!(gas_used(None), U256::from(140));
+        assert_eq!(gas_used(Some(Bytes::new())), U256::from(125));
+        assert_eq!(gas_used(Some(Bytes::from_static(&[0x00]))), U256::from(125));
+    }
 }

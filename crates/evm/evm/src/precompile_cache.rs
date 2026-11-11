@@ -438,11 +438,14 @@ mod tests {
         assert!(evm.precompiles().addresses().contains(&custom));
         let mut warm = evm2::evm::PrewarmSet::new();
         evm.precompiles().warm_addresses(&mut warm);
-        assert!(!warm.is_warm(&hidden));
+        assert!(warm.is_warm(&hidden));
         assert!(warm.is_warm(&custom));
         let mut filtered = evm.take_precompiles();
-        let mut message =
-            Message::<BaseEvmTypes> { call_target: hidden, input, ..Default::default() };
+        let mut message = Message::<BaseEvmTypes> {
+            call_target: hidden,
+            input: input.into(),
+            ..Default::default()
+        };
         assert!(filtered.execute(&mut evm, &message, &mut GasTracker::new(30_000)).is_none());
         message.call_target = custom;
         for _ in 0..2 {

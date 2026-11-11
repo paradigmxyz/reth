@@ -1763,6 +1763,58 @@ mod tests {
         assert_parts(&Either::<Recovered<TxLegacy>, _>::Right(recovered.clone()));
         assert_parts(&WithTxEnv { tx_env: (), tx: Arc::new(recovered) });
     }
+
+    #[test]
+    fn code_filter_preserves_provider_warm_set() {
+        struct CustomWarmSet;
+
+        impl PrecompileProvider<evm2::BaseEvmTypes> for CustomWarmSet {
+            fn addresses(&self) -> Vec<Address> {
+                vec![Address::with_last_byte(4)]
+            }
+
+            fn warm_addresses(&self, warm: &mut evm2::evm::PrewarmSet) {
+                warm.warm(&Address::with_last_byte(4));
+                warm.warm(&Address::repeat_byte(0x40));
+            }
+
+            fn precompile_ids(&self) -> Vec<(Address, PrecompileId)> {
+                Vec::new()
+            }
+
+            fn contains(&self, address: &Address) -> bool {
+                *address == Address::with_last_byte(4)
+            }
+
+            fn move_precompiles(
+                &mut self,
+                _moves: &[(Address, Address)],
+            ) -> Result<(), MovePrecompileError> {
+                unreachable!("this test does not move precompiles")
+            }
+
+            fn execute(
+                &mut self,
+                _evm: &mut evm2::Evm<'_, evm2::BaseEvmTypes>,
+                _message: &Message<evm2::BaseEvmTypes>,
+                _gas: &mut GasTracker,
+            ) -> Option<Result<PrecompileOutput, PrecompileError>> {
+                unreachable!("this test only checks provider metadata")
+            }
+        }
+
+        let filtered = FilteredPrecompiles {
+            inner: Box::new(CustomWarmSet),
+            disabled: AddressSet::from_iter([Address::with_last_byte(4)]),
+        };
+        let mut expected = evm2::evm::PrewarmSet::new();
+        CustomWarmSet.warm_addresses(&mut expected);
+        let mut actual = evm2::evm::PrewarmSet::new();
+        filtered.warm_addresses(&mut actual);
+        assert_eq!(actual, expected);
+        assert!(filtered.addresses().is_empty());
+        assert!(!filtered.contains(&Address::with_last_byte(4)));
+    }
 }
 
 /// Request-local native dispatch filter that preserves custom providers and their caches.
@@ -1778,6 +1830,11 @@ impl<T: EvmTypesHost> PrecompileProvider<T> for FilteredPrecompiles<'_, T> {
             .into_iter()
             .filter(|address| !self.disabled.contains(address))
             .collect()
+    }
+
+    fn warm_addresses(&self, warm: &mut evm2::evm::PrewarmSet) {
+        // Code overrides change native dispatch, but preserve the provider's warm set.
+        self.inner.warm_addresses(warm);
     }
 
     fn precompile_ids(&self) -> Vec<(Address, PrecompileId)> {
