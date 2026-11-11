@@ -157,11 +157,10 @@ impl<N: ProviderNodeTypes> BlockchainProvider<N> {
         &self,
         state: Arc<BlockState<N::Primitives>>,
     ) -> ProviderResult<StateProviderBox> {
-        let state_provider_factory = OverlayStateProviderFactory::new(
-            self.database.clone(),
+        Ok(Box::new(OverlayStateProvider::new(
+            self.database.provider()?,
             self.database.overlay_manager().overlay_builder_for_state(state),
-        );
-        Ok(Box::new(state_provider_factory.database_provider_ro()?))
+        )))
     }
 
     /// Returns a historical state provider using an existing database snapshot.
