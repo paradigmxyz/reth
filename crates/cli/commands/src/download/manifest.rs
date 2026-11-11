@@ -654,6 +654,7 @@ pub fn generate_manifest(
             "Previous manifest has no base_url to locate its archives"
         );
     }
+
     std::fs::create_dir_all(output_dir)?;
 
     let mut components = BTreeMap::new();
@@ -718,6 +719,7 @@ pub fn generate_manifest(
                     let ComponentManifest::Chunked(chunked) = previous.component(*ty)? else {
                         return None;
                     };
+
                     let complete = chunked.blocks_per_file == blocks_per_file &&
                         chunked.chunk_sizes.len() as u64 == chunked.num_chunks() &&
                         chunked.chunk_output_files.len() as u64 == chunked.num_chunks();
@@ -781,6 +783,7 @@ pub fn generate_manifest(
                     })
                     .collect()
             };
+
             let chunk_sizes = packaged_chunks.iter().map(|chunk| chunk.size).collect::<Vec<_>>();
             let chunk_output_files =
                 packaged_chunks.into_iter().map(|chunk| chunk.output_files).collect::<Vec<_>>();
@@ -1927,6 +1930,7 @@ mod tests {
         else {
             panic!("headers should be chunked");
         };
+
         let ComponentManifest::Chunked(headers) =
             manifest.component(SnapshotComponentType::Headers).unwrap()
         else {
@@ -1975,6 +1979,7 @@ mod tests {
         else {
             panic!("headers should be chunked");
         };
+
         headers.chunk_output_files[0][0].blake3 = "00".repeat(32);
 
         let err = generate_manifest(
