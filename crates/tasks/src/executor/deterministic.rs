@@ -3,7 +3,7 @@
 use crate::executor::time::{Duration, Instant};
 use shuttle::{
     scheduler::{RoundRobinScheduler, Schedule, Scheduler, Task, TaskId},
-    thread, Config, Runner,
+    thread, Config, MaxSteps, Runner,
 };
 use std::{
     cell::RefCell,
@@ -11,6 +11,9 @@ use std::{
     sync::{Arc, Mutex},
     thread_local,
 };
+
+// Provider and EVM workloads need more than Shuttle's 60 KiB default coroutine stack.
+const DEFAULT_STACK_SIZE: usize = 8 * 1024 * 1024;
 
 thread_local! {
     static CLOCK: RefCell<Option<Rc<RefCell<Clock>>>> = const { RefCell::new(None) };
@@ -132,7 +135,11 @@ where
     let result = Arc::new(Mutex::new(None));
     let output = result.clone();
     let scheduler = ClockScheduler { scheduler: RoundRobinScheduler::new(1), clock };
-    Runner::new(scheduler, Config::default()).run(move || {
+    let mut config = Config::default();
+    config.stack_size = DEFAULT_STACK_SIZE;
+    // Runtime workloads are not bounded-size Shuttle tests.
+    config.max_steps = MaxSteps::None;
+    Runner::new(scheduler, config).run(move || {
         let driver = thread::spawn(drive_clock);
         let work = work
             .lock()
