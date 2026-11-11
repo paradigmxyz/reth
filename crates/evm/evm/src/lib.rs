@@ -13,8 +13,8 @@ extern crate alloc;
 
 #[cfg(feature = "std")]
 use crate::execute::{BasicBlockBuilder, BasicBlockExecutor};
-use alloc::string::String;
-use alloy_eips::eip4895::Withdrawals;
+use alloc::{string::String, vec::Vec};
+use alloy_eips::{eip2930::AccessList, eip4895::Withdrawals};
 use alloy_primitives::{Address, Bytes, B256};
 use core::{error::Error, fmt::Debug};
 use reth_primitives_traits::{
@@ -112,6 +112,19 @@ impl EvmTransactionValidationGasRules {
         }
         EvmTransactionValidationGas { intrinsic_gas, floor_gas }
     }
+}
+
+/// State a transaction is expected to access, derived from the transaction alone.
+///
+/// See [`ConfigureEvm::tx_state_access`].
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct TxStateAccess {
+    /// Accounts and storage slots the transaction reads without writing them.
+    pub reads: AccessList,
+    /// Accounts whose nonce, balance or code the transaction writes.
+    pub account_writes: Vec<Address>,
+    /// Storage slots the transaction writes, by account.
+    pub storage_writes: AccessList,
 }
 
 /// Resolved EVM environment data needed by the EVM execution path.
@@ -719,6 +732,26 @@ pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
         beneficiary: Address,
     ) -> Option<EvmEnvFor<Self>> {
         let _ = (parent, beneficiary);
+        None
+    }
+
+    /// Returns the state `tx` is expected to access in `evm_env`, derived from the transaction
+    /// alone without executing it.
+    ///
+    /// Engine prewarming loads the returned state into the execution cache and sends the
+    /// returned writes to the state root task as proof targets, instead of executing `tx`. The
+    /// result only steers prewarming: block execution still loads state it misses, and state it
+    /// adds is loaded for nothing. Not called when block execution may reuse prewarm results,
+    /// see [`Self::reuses_prewarm_results`], since those need the transaction executed.
+    ///
+    /// Returns `None`, the default, if the access cannot be derived; prewarming then executes
+    /// the transaction.
+    fn tx_state_access(
+        &self,
+        evm_env: &EvmEnvFor<Self>,
+        tx: &TxEnvFor<Self>,
+    ) -> Option<TxStateAccess> {
+        let _ = (evm_env, tx);
         None
     }
 }

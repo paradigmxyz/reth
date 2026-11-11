@@ -8,7 +8,9 @@
 //!
 //! 1. Incoming transactions are split into two streams: one for prewarming (executed in parallel)
 //!    and one for actual execution (executed sequentially)
-//! 2. Prewarming tasks execute transactions in parallel using shared caches
+//! 2. Prewarming tasks execute transactions in parallel using shared caches. A transaction whose
+//!    state access the EVM configuration derives (see [`ConfigureEvm::tx_state_access`]) is not
+//!    executed: its state is loaded into the caches and its writes are sent as proof targets.
 //! 3. When actual block execution happens, it benefits from the warmed cache
 //! 4. Block execution commits prewarm results whose reads are still valid instead of executing the
 //!    transactions again
@@ -31,8 +33,8 @@ use metrics::{Counter, Gauge, Histogram};
 use rayon::prelude::*;
 use reth_evm::{
     database::StateProviderDatabase, precompile_cache::PrecompileCacheMap, ConfigureEvm,
-    Evm as EvmInstance, EvmEnv, EvmEnvFor, EvmFor, EvmTypesFor, ExecutableTxFor, RecoveredTx,
-    SpecFor,
+    DynDatabase, Evm as EvmInstance, EvmEnv, EvmEnvFor, EvmFor, EvmTypesFor, ExecutableTxFor,
+    RecoveredTx, SpecFor, TxStateAccess,
 };
 use reth_metrics::Metrics;
 use reth_primitives_traits::{FastInstant as Instant, NodePrimitives};
@@ -44,7 +46,7 @@ use reth_provider::{
 };
 use reth_storage_overlay::OverlayStateProviderFactory;
 use reth_tasks::{Runtime, WorkerStatefulPool};
-use reth_trie_common::MultiProofTargetsV2;
+use reth_trie_common::{MultiProofTargetsV2, ProofV2Target};
 use std::{
     sync::{
         atomic::{AtomicBool, AtomicUsize, Ordering},
@@ -366,6 +368,30 @@ where
                         );
                     }
                     send_hints(seeded.state());
+                    return;
+                }
+
+                if ctx.prewarm_results.is_none() &&
+                    let Some(access) = ctx.evm_config.tx_state_access(&ctx.env.evm_env, &tx_env)
+                {
+                    if let Err(err) = load_state_access(evm.state_db_mut(), &access) {
+                        trace!(
+                            target: "engine::tree::payload_processor::prewarm",
+                            %err,
+                            tx_hash=%tx.tx().tx_hash(),
+                            "Failed to load derived state access of transaction",
+                        );
+                    }
+                    if index > 0 &&
+                        let Some(state_root_hint_stream) = state_root_hint_stream
+                    {
+                        let (targets, storage_targets) =
+                            multiproof_targets_from_state_access(&access);
+                        ctx.metrics.prefetch_storage_targets.record(storage_targets as f64);
+                        state_root_hint_stream.on_access_hint(targets.into());
+                    }
+                    ctx.metrics.derived_access_transactions.increment(1);
+                    ctx.metrics.total_runtime.record(start.elapsed());
                     return;
                 }
 
@@ -969,6 +995,52 @@ fn multiproof_targets_from_withdrawals(withdrawals: &[Withdrawal]) -> MultiProof
     }
 }
 
+/// Loads the accounts and storage slots of a [`TxStateAccess`] through `db`.
+fn load_state_access(
+    db: &mut (impl DynDatabase + ?Sized),
+    access: &TxStateAccess,
+) -> Result<(), evm2::DatabaseError> {
+    for address in &access.account_writes {
+        db.get_account(address)?;
+    }
+    for item in access.reads.iter().chain(access.storage_writes.iter()) {
+        db.get_account(&item.address)?;
+        for slot in &item.storage_keys {
+            db.get_storage(&item.address, &(*slot).into())?;
+        }
+    }
+    Ok(())
+}
+
+/// Returns [`MultiProofTargetsV2`] for the writes of a [`TxStateAccess`], and the number of storage
+/// targets.
+///
+/// Like [`MultiProofTargetsV2::from_account_changes`], an account whose storage alone is written
+/// gets only storage targets.
+fn multiproof_targets_from_state_access(access: &TxStateAccess) -> (MultiProofTargetsV2, usize) {
+    let mut targets = MultiProofTargetsV2 {
+        account_targets: access
+            .account_writes
+            .iter()
+            .map(|address| keccak256(address).into())
+            .collect(),
+        ..Default::default()
+    };
+    let mut storage_target_count = 0;
+    for item in access.storage_writes.iter() {
+        if item.storage_keys.is_empty() {
+            continue
+        }
+        storage_target_count += item.storage_keys.len();
+        targets
+            .storage_targets
+            .entry(keccak256(item.address))
+            .or_default()
+            .extend(item.storage_keys.iter().map(|slot| ProofV2Target::new(keccak256(slot))));
+    }
+    (targets, storage_target_count)
+}
+
 /// The events the pre-warm task can handle.
 ///
 /// Generic over `R` (receipt type) to allow sharing `Arc<ExecutionOutcome<R>>` with the main
@@ -1031,21 +1103,29 @@ pub struct PrewarmMetrics {
     pub(crate) seeded_transactions: Counter,
     /// A histogram of BAL slot iteration duration during prefetching
     pub(crate) bal_slot_iteration_duration: Histogram,
+    /// Counter for transactions whose derived state access was loaded instead of executing them.
+    pub(crate) derived_access_transactions: Counter,
 }
 
 #[cfg(test)]
 mod tests {
 
     use super::*;
-    use crate::tree::payload_processor::{CacheTaskHandle, PayloadHandle};
-    use alloy_consensus::{transaction::Recovered, TxLegacy};
-    use alloy_eips::eip7702::constants::EIP7702_CLEARED_DELEGATION;
+    use crate::tree::payload_processor::{
+        CacheTaskHandle, PayloadHandle, StateRootHandle, StateRootMessage, StateRootTaskCancelGuard,
+    };
+    use alloy_consensus::{transaction::Recovered, Header, TxLegacy};
+    use alloy_eips::{
+        eip2930::{AccessList, AccessListItem},
+        eip7702::constants::EIP7702_CLEARED_DELEGATION,
+    };
     use alloy_primitives::{Address, Signature, TxKind, B256, U256};
     use evm2::{evm::EmptyDB, BaseEvmTypes};
     use reth_chainspec::ChainSpec;
-    use reth_ethereum_primitives::{EthPrimitives, TransactionSigned};
-    use reth_evm::{execute::WithTxEnv, TxEnvFor};
+    use reth_ethereum_primitives::{Block, EthPrimitives, TransactionSigned};
+    use reth_evm::{execute::WithTxEnv, ExecutionCtxFor, NextBlockEnvAttributes, TxEnvFor};
     use reth_evm_ethereum::EthEvmConfig;
+    use reth_primitives_traits::{Account, SealedBlock, SealedHeader};
     use reth_provider::test_utils::MockEthProvider;
     use reth_stages_api::{StageCheckpoint, StageId};
     use reth_storage_overlay::OverlayManager;
@@ -1202,6 +1282,159 @@ mod tests {
             std::thread::yield_now();
         }
         assert!(task.ctx.saved_cache.is_some());
+    }
+
+    /// EVM configuration that derives the same state access for every transaction.
+    #[derive(Debug, Clone)]
+    struct DerivedAccessEvmConfig {
+        inner: EthEvmConfig,
+        access: TxStateAccess,
+    }
+
+    impl ConfigureEvm for DerivedAccessEvmConfig {
+        type Primitives = EthPrimitives;
+        type Error = <EthEvmConfig as ConfigureEvm>::Error;
+        type NextBlockEnvCtx = NextBlockEnvAttributes;
+        type BlockExecutorFactory = <EthEvmConfig as ConfigureEvm>::BlockExecutorFactory;
+        type BlockAssembler = <EthEvmConfig as ConfigureEvm>::BlockAssembler;
+
+        fn block_executor_factory(&self) -> &Self::BlockExecutorFactory {
+            self.inner.block_executor_factory()
+        }
+
+        fn block_assembler(&self) -> &Self::BlockAssembler {
+            self.inner.block_assembler()
+        }
+
+        fn evm_env(&self, header: &Header) -> Result<EvmEnvFor<Self>, Self::Error> {
+            self.inner.evm_env(header)
+        }
+
+        fn next_evm_env(
+            &self,
+            parent: &Header,
+            attributes: &NextBlockEnvAttributes,
+        ) -> Result<EvmEnvFor<Self>, Self::Error> {
+            self.inner.next_evm_env(parent, attributes)
+        }
+
+        fn context_for_block<'a>(
+            &self,
+            block: &'a SealedBlock<Block>,
+        ) -> Result<ExecutionCtxFor<'a, Self>, Self::Error>
+        where
+            Self: 'a,
+        {
+            self.inner.context_for_block(block)
+        }
+
+        fn context_for_next_block(
+            &self,
+            parent: &SealedHeader,
+            attributes: Self::NextBlockEnvCtx,
+        ) -> Result<ExecutionCtxFor<'_, Self>, Self::Error> {
+            self.inner.context_for_next_block(parent, attributes)
+        }
+
+        fn tx_state_access(
+            &self,
+            _evm_env: &EvmEnvFor<Self>,
+            _tx: &TxEnvFor<Self>,
+        ) -> Option<TxStateAccess> {
+            Some(self.access.clone())
+        }
+    }
+
+    #[test]
+    fn derived_state_access_replaces_transaction_execution() {
+        let reader = Address::repeat_byte(1);
+        let token = Address::repeat_byte(2);
+        let slot = B256::with_last_byte(3);
+        let provider = MockEthProvider::default();
+        provider.enable_database_provider();
+        provider.add_header(B256::ZERO, Default::default());
+        provider.add_stage_checkpoint(StageId::Finish, StageCheckpoint::new(0));
+        let saved = SavedCache::new(B256::ZERO, crate::tree::ExecutionCache::new(1_000_000));
+        // The EVM loads storage only of accounts that exist.
+        saved.cache().insert_account(token, Some(Account::default()));
+        let ctx = PrewarmContext {
+            env: ExecutionEnv::test_default(),
+            evm_config: DerivedAccessEvmConfig {
+                inner: EthEvmConfig::new(Arc::new(ChainSpec::default())),
+                access: TxStateAccess {
+                    reads: AccessList(vec![AccessListItem {
+                        address: reader,
+                        storage_keys: Vec::new(),
+                    }]),
+                    account_writes: Vec::new(),
+                    storage_writes: AccessList(vec![AccessListItem {
+                        address: token,
+                        storage_keys: vec![slot],
+                    }]),
+                },
+            },
+            saved_cache: Some(saved.clone()),
+            provider: OverlayStateProviderFactory::new(
+                provider,
+                OverlayManager::default().overlay_builder(B256::ZERO),
+            ),
+            bal_prewarm_pool: None,
+            metrics: PrewarmMetrics::default(),
+            cache_metrics: None,
+            cache_state_metrics: None,
+            terminate_execution: Arc::new(AtomicBool::new(false)),
+            executed_tx_index: Arc::new(AtomicUsize::new(0)),
+            precompile_cache_disabled: false,
+            precompile_cache_map: PrecompileCacheMap::default(),
+            disable_bal_parallel_state_root: false,
+            disable_bal_batch_io: false,
+            prewarm_results: None,
+        };
+        // Executing this transaction would change the caller's nonce.
+        let tx = Recovered::new_unchecked(
+            TransactionSigned::new_unhashed(
+                TxLegacy { gas_limit: 21_000, to: TxKind::Call(token), ..Default::default() }
+                    .into(),
+                Signature::test_signature(),
+            ),
+            reader,
+        );
+        let tx = WithTxEnv { tx_env: ctx.evm_config.tx_env(tx.clone()), tx: Arc::new(tx) };
+        let (updates_tx, updates_rx) = crossbeam_channel::unbounded();
+        let mut handle = StateRootHandle::new(
+            B256::ZERO,
+            updates_tx,
+            StateRootTaskCancelGuard::channel().0,
+            mpsc::channel().1,
+            mpsc::channel().1,
+        );
+        let hints = handle.take_hint_stream();
+        let pool = WorkerStatefulPool::new(Arc::new(WorkerPool::new(1, "prewarm-test")));
+        pool.install_fn(|| {
+            PrewarmCacheTask::transact_worker(&ctx, &pool, 1, tx, None, Some(&hints))
+        });
+
+        assert_eq!(
+            saved.cache().get_or_try_insert_account_with(reader, || Err(())),
+            Ok(reth_execution_cache::CachedStatus::Cached(None)),
+        );
+        assert_eq!(
+            saved.cache().get_or_try_insert_storage_with(token, slot, || Err(())),
+            Ok(reth_execution_cache::CachedStatus::Cached(U256::ZERO)),
+        );
+        let Ok(StateRootMessage::PrefetchProofs(targets)) = updates_rx.try_recv() else {
+            panic!("expected proof targets of the derived writes")
+        };
+        assert!(targets.account_targets.is_empty());
+        assert_eq!(
+            targets.storage_targets[&keccak256(token)]
+                .iter()
+                .map(ProofV2Target::key)
+                .collect::<Vec<_>>(),
+            vec![keccak256(slot)]
+        );
+        assert_eq!(targets.storage_targets.len(), 1);
+        assert!(updates_rx.try_recv().is_err());
     }
 
     fn test_prewarm_context(
