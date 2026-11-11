@@ -62,7 +62,7 @@ impl RpcDescription {
         let methods = self.methods.iter().map(|method| {
             let docs = &method.docs;
             let mut method_sig = method.signature.clone();
-            desugar_async(&mut method_sig.sig);
+            desugar_async(&mut method_sig);
 
             quote! {
                 #docs
@@ -79,7 +79,7 @@ impl RpcDescription {
                 syn::parse_quote!(subscription_sink: #subscription_sink_ty);
             let mut sub_sig = sub.signature.clone();
             sub_sig.sig.inputs.insert(1, subscription_sink);
-            desugar_async(&mut sub_sig.sig);
+            desugar_async(&mut sub_sig);
 
             quote! {
                 #docs
@@ -366,7 +366,8 @@ impl RpcDescription {
 ///
 /// The server trait stays usable from the `Send` futures that `RpcModule` registers, without boxing
 /// every call the way `async_trait` does. Implementations can still use `async fn`.
-fn desugar_async(sig: &mut syn::Signature) {
+fn desugar_async(method: &mut syn::TraitItemFn) {
+    let sig = &mut method.sig;
     if sig.asyncness.take().is_none() {
         return;
     }
@@ -377,4 +378,8 @@ fn desugar_async(sig: &mut syn::Signature) {
     sig.output = syn::parse_quote! {
         -> impl ::core::future::Future<Output = #output> + ::core::marker::Send
     };
+    // A default body becomes the body of the returned future.
+    if let Some(body) = &mut method.default {
+        *body = syn::parse_quote!({ async move #body });
+    }
 }

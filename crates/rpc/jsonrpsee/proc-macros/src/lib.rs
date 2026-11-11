@@ -230,6 +230,12 @@ pub(crate) mod visitor;
 ///         #[method(name = "bar")]
 ///         fn sync_method(&self) -> RpcResult<u16>;
 ///
+///         /// Methods can have default implementations, which implementors may leave out.
+///         #[method(name = "baz")]
+///         async fn default_method(&self, param: u16) -> RpcResult<u16> {
+///             Ok(param + self.sync_method()?)
+///         }
+///
 ///         /// Override the `foo_sub` and use `foo_subNotif` for the notifications.
 ///         ///
 ///         /// The item field indicates which type goes into result field below.
