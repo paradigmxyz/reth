@@ -95,6 +95,10 @@ pub enum ProviderError {
     /// Thrown when we were unable to find a state for a block number.
     #[error("no state found for block number {_0}")]
     StateForNumberNotFound(u64),
+    /// The block with the given hash is executed and tracked in memory, but no state is served
+    /// for it because it is neither a canonical block nor the pending block.
+    #[error("no state served for block {_0}: the block is executed but not canonical")]
+    StateForHashNotCanonical(B256),
     /// Unable to find the block number for a given transaction index.
     #[error("unable to find the block number for a given transaction index")]
     BlockNumberForTransactionIndexNotFound,

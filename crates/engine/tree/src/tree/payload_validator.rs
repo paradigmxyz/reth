@@ -129,7 +129,7 @@ use crate::tree::{
     },
 };
 use alloy_primitives::Address;
-use reth_chain_state::{CanonicalInMemoryState, ExecutedBlock, ExecutionTimingStats};
+use reth_chain_state::{ExecutedBlock, ExecutionTimingStats};
 use reth_consensus::{ConsensusError, FullConsensus, ReceiptRootBloom};
 use reth_engine_primitives::{
     ConfigureEngineEvm, ExecutableTxIterator, ExecutionPayload, InvalidBlockHook, PayloadValidator,
@@ -194,26 +194,18 @@ type ReceiptRootReceiver = tokio::sync::oneshot::Receiver<(B256, alloy_primitive
 pub struct TreeCtx<'a, N: NodePrimitives> {
     /// The engine API tree state
     state: &'a mut EngineApiTreeState<N>,
-    /// Reference to the canonical in-memory state
-    canonical_in_memory_state: &'a CanonicalInMemoryState<N>,
 }
 
 impl<'a, N: NodePrimitives> std::fmt::Debug for TreeCtx<'a, N> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("TreeCtx")
-            .field("state", &"EngineApiTreeState")
-            .field("canonical_in_memory_state", &self.canonical_in_memory_state)
-            .finish()
+        f.debug_struct("TreeCtx").field("state", &"EngineApiTreeState").finish()
     }
 }
 
 impl<'a, N: NodePrimitives> TreeCtx<'a, N> {
-    /// Creates a new tree context
-    pub const fn new(
-        state: &'a mut EngineApiTreeState<N>,
-        canonical_in_memory_state: &'a CanonicalInMemoryState<N>,
-    ) -> Self {
-        Self { state, canonical_in_memory_state }
+    /// Creates a new tree context.
+    pub const fn new(state: &'a mut EngineApiTreeState<N>) -> Self {
+        Self { state }
     }
 }
 
@@ -226,11 +218,6 @@ impl<'a, N: NodePrimitives> TreeCtx<'a, N> {
     /// Returns a mutable reference to the engine tree state
     pub const fn state_mut(&mut self) -> &mut EngineApiTreeState<N> {
         self.state
-    }
-
-    /// Returns a reference to the canonical in-memory state
-    pub const fn canonical_in_memory_state(&self) -> &'a CanonicalInMemoryState<N> {
-        self.canonical_in_memory_state
     }
 }
 
@@ -1453,7 +1440,7 @@ where
 
         Ok(Some(OverlayStateProviderFactory::new(
             self.provider.clone(),
-            state.tree_state.overlay_manager.overlay_builder(hash),
+            state.tree_state.overlay_manager().overlay_builder(hash),
         )))
     }
 

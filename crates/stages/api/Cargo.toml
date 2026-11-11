@@ -44,10 +44,12 @@ auto_impl.workspace = true
 
 [dev-dependencies]
 assert_matches.workspace = true
+reth-chain-state.workspace = true
 reth-chainspec.workspace = true
 reth-db = { workspace = true, features = ["test-utils"] }
 reth-db-api.workspace = true
 reth-provider = { workspace = true, features = ["test-utils"] }
+reth-storage-overlay.workspace = true
 reth-tasks.workspace = true
 tokio = { workspace = true, features = ["sync", "rt-multi-thread"] }
 tokio-stream.workspace = true
@@ -65,4 +67,5 @@ test-utils = [
     "reth-stages-types/test-utils",
     "reth-tasks/test-utils",
     "reth-codecs/test-utils",
+    "reth-chain-state/test-utils",
 ]

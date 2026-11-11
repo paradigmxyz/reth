@@ -1,6 +1,7 @@
 use super::setup;
 use alloy_primitives::BlockNumber;
 use eyre::Result;
+use reth_chain_state::InMemoryState;
 use reth_db::DatabaseEnv;
 use reth_db_api::{database::Database, table::TableImporter, tables};
 use reth_db_common::DbTool;
@@ -10,6 +11,7 @@ use reth_provider::{
     DatabaseProviderFactory, ProviderFactory,
 };
 use reth_stages::{stages::AccountHashingStage, Stage, StageCheckpoint, UnwindInput};
+use reth_storage_overlay::OverlayManager;
 use tracing::info;
 
 pub(crate) async fn dump_hashing_account_stage<N: ProviderNodeTypes<DB = DatabaseEnv>>(
@@ -40,6 +42,7 @@ pub(crate) async fn dump_hashing_account_stage<N: ProviderNodeTypes<DB = Databas
                 db_tool.chain(),
                 StaticFileProvider::read_write(output_datadir.static_files())?,
                 RocksDBProvider::builder(output_datadir.rocksdb()).build()?,
+                OverlayManager::new(InMemoryState::read_only()),
                 runtime,
             )?,
             to,

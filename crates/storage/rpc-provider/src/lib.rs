@@ -30,7 +30,6 @@ use alloy_network::{primitives::HeaderResponse, BlockResponse};
 use alloy_primitives::{Address, BlockHash, BlockNumber, StorageKey, TxHash, TxNumber, B256, U256};
 use alloy_provider::{ext::DebugApi, network::Network, Provider};
 use alloy_rpc_types::BlockId;
-use alloy_rpc_types_engine::ForkchoiceState;
 use alloy_rpc_types_eth::AccountInfo;
 use dashmap::DashMap;
 use reth_chain_state::ExecutedBlock;
@@ -855,25 +854,8 @@ where
     N: Network,
     Node: NodeTypes,
 {
-    type Header = alloy_consensus::Header;
-    fn on_forkchoice_update_received(&self, _update: &ForkchoiceState) {
-        // No-op for RPC provider
-    }
-
     fn last_received_update_timestamp(&self) -> Option<std::time::Instant> {
         None
-    }
-
-    fn set_canonical_head(&self, _header: SealedHeader<Self::Header>) {
-        // No-op for RPC provider
-    }
-
-    fn set_safe(&self, _header: SealedHeader<Self::Header>) {
-        // No-op for RPC provider
-    }
-
-    fn set_finalized(&self, _header: SealedHeader<Self::Header>) {
-        // No-op for RPC provider
     }
 }
 

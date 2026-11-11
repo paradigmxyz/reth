@@ -4,6 +4,7 @@ pub use reth_primitives_traits::header::HeaderMut;
 
 use alloy_primitives::B256;
 use clap::Parser;
+use reth_chain_state::InMemoryState;
 use reth_chainspec::EthChainSpec;
 use reth_cli::chainspec::ChainSpecParser;
 use reth_config::{config::EtlConfig, Config};
@@ -31,6 +32,7 @@ use reth_provider::{
 };
 use reth_stages::{sets::DefaultStages, Pipeline, PipelineTarget};
 use reth_static_file::StaticFileProducer;
+use reth_storage_overlay::OverlayManager;
 use std::{path::PathBuf, sync::Arc};
 use tokio::sync::watch;
 use tracing::{debug, info, warn};
@@ -208,6 +210,7 @@ impl<C: ChainSpecParser> EnvironmentArgs<C> {
             self.chain.clone(),
             static_file_provider,
             rocksdb_provider,
+            OverlayManager::new(InMemoryState::read_only()),
             runtime,
         )?
         .with_prune_modes(config.prune.segments.clone())

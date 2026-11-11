@@ -323,6 +323,7 @@ impl<Provider, S: Stage<Provider> + ?Sized> StageExt<Provider> for S {}
 
 #[cfg(test)]
 mod tests {
+    use reth_chain_state::InMemoryState;
     use reth_chainspec::MAINNET;
     use reth_db::test_utils::{
         create_test_rocksdb_dir, create_test_rw_db, create_test_static_files_dir,
@@ -333,6 +334,7 @@ mod tests {
         StaticFileProviderBuilder, StaticFileProviderFactory, StaticFileSegment,
     };
     use reth_stages_types::StageCheckpoint;
+    use reth_storage_overlay::OverlayManager;
     use reth_testing_utils::generators::{self, random_signed_tx};
 
     use crate::ExecInput;
@@ -348,6 +350,7 @@ mod tests {
                 .build()
                 .unwrap(),
             RocksDBProvider::builder(create_test_rocksdb_dir().0.keep()).build().unwrap(),
+            OverlayManager::new(InMemoryState::read_only()),
             reth_tasks::Runtime::test(),
         )
         .unwrap();

@@ -46,7 +46,6 @@ rand = { workspace = true, optional = true }
 [dev-dependencies]
 # reth
 reth-chainspec.workspace = true
-reth-ethereum-primitives.workspace = true
 reth-primitives-traits.workspace = true
 reth-provider = { workspace = true, features = ["test-utils"] }
 reth-storage-overlay.workspace = true
@@ -68,5 +67,4 @@ test-utils = [
     "reth-trie/test-utils",
     "reth-tasks/test-utils",
     "reth-chainspec/test-utils",
-    "reth-ethereum-primitives/test-utils",
 ]

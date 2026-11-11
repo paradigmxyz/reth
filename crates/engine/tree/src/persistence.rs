@@ -723,8 +723,10 @@ mod tests {
         provider_rw.save_blocks(&input).unwrap();
         provider_rw.commit().unwrap();
 
-        let primary = BlockchainProvider::new(provider_factory.clone()).unwrap();
-        let secondary_blockchain = BlockchainProvider::new(secondary.clone()).unwrap();
+        let chain_info_headers = provider_factory.chain_info_headers().unwrap();
+        let primary = BlockchainProvider::new(provider_factory.clone(), chain_info_headers);
+        let chain_info_headers = secondary.chain_info_headers().unwrap();
+        let secondary_blockchain = BlockchainProvider::new(secondary.clone(), chain_info_headers);
 
         // Secondary catches up and sees all 3 blocks.
         // Hold this provider (and its MDBX RO tx) across the reorg to test snapshot isolation.
@@ -840,7 +842,8 @@ mod tests {
         );
 
         // Verify historical state at block 1 is still accessible after the reorg.
-        let secondary_blockchain = BlockchainProvider::new(secondary).unwrap();
+        let chain_info_headers = secondary.chain_info_headers().unwrap();
+        let secondary_blockchain = BlockchainProvider::new(secondary, chain_info_headers);
         let state_at_1 = secondary_blockchain.history_by_block_number(1).unwrap();
         let account_at_1 = state_at_1.basic_account(&signer).unwrap();
         assert!(account_at_1.is_some(), "signer account must exist at block 1 after reorg");

@@ -536,11 +536,11 @@ where
             self.chain_spec(),
             static_file_provider,
             rocksdb_provider,
+            overlay_manager,
             self.task_executor().clone(),
         )?
         .with_prune_modes(prune_config.segments)
         .with_minimum_pruning_distance(prune_config.minimum_pruning_distance)
-        .with_overlay_manager(overlay_manager)
         .with_bal_store(bal_store);
 
         // Check consistency between the database and static files, returning

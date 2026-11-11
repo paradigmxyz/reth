@@ -272,7 +272,8 @@ mod tests {
         let executor = EthEvmConfig::ethereum(chain_spec.clone());
         let provider_factory = create_test_provider_factory_with_chain_spec(chain_spec.clone());
         init_genesis(&provider_factory)?;
-        let blockchain_db = BlockchainProvider::new(provider_factory.clone())?;
+        let chain_info_headers = provider_factory.chain_info_headers()?;
+        let blockchain_db = BlockchainProvider::new(provider_factory.clone(), chain_info_headers);
 
         let blocks_and_execution_outputs =
             blocks_and_execution_outputs(provider_factory, chain_spec, key_pair)?;
@@ -309,7 +310,8 @@ mod tests {
         let executor = EthEvmConfig::ethereum(chain_spec.clone());
         let provider_factory = create_test_provider_factory_with_chain_spec(chain_spec.clone());
         init_genesis(&provider_factory)?;
-        let blockchain_db = BlockchainProvider::new(provider_factory.clone())?;
+        let chain_info_headers = provider_factory.chain_info_headers()?;
+        let blockchain_db = BlockchainProvider::new(provider_factory.clone(), chain_info_headers);
 
         let blocks_and_execution_outcomes =
             blocks_and_execution_outputs(provider_factory, chain_spec, key_pair)?;
@@ -359,7 +361,8 @@ mod tests {
         let executor = EthEvmConfig::ethereum(chain_spec.clone());
         let provider_factory = create_test_provider_factory_with_chain_spec(chain_spec.clone());
         init_genesis(&provider_factory)?;
-        let blockchain_db = BlockchainProvider::new(provider_factory.clone())?;
+        let chain_info_headers = provider_factory.chain_info_headers()?;
+        let blockchain_db = BlockchainProvider::new(provider_factory.clone(), chain_info_headers);
 
         // Execute blocks via LatestStateProvider (pipeline-style) and commit to DB.
         // This mirrors what the pipeline's ExecutionStage does.
@@ -423,7 +426,8 @@ mod tests {
         let executor = EthEvmConfig::ethereum(chain_spec.clone());
         let provider_factory = create_test_provider_factory_with_chain_spec(chain_spec.clone());
         init_genesis(&provider_factory)?;
-        let blockchain_db = BlockchainProvider::new(provider_factory.clone())?;
+        let chain_info_headers = provider_factory.chain_info_headers()?;
+        let blockchain_db = BlockchainProvider::new(provider_factory.clone(), chain_info_headers);
 
         let pipeline_results =
             blocks_and_execution_outputs(provider_factory, chain_spec, key_pair)?;
@@ -470,7 +474,8 @@ mod tests {
         let executor = EthEvmConfig::ethereum(chain_spec.clone());
         let provider_factory = create_test_provider_factory_with_chain_spec(chain_spec.clone());
         init_genesis(&provider_factory)?;
-        let blockchain_db = BlockchainProvider::new(provider_factory.clone())?;
+        let chain_info_headers = provider_factory.chain_info_headers()?;
+        let blockchain_db = BlockchainProvider::new(provider_factory.clone(), chain_info_headers);
 
         let blocks_and_execution_outputs =
             blocks_and_execution_outputs(provider_factory, chain_spec, key_pair)?;

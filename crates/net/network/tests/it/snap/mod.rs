@@ -190,7 +190,8 @@ async fn account_range_roundtrip_carries_slim_encoding_and_proof() {
 
     let state_root = persist_fixture_state_root(&factory);
 
-    let provider = BlockchainProvider::with_database_head(factory).unwrap();
+    let chain_info_headers = factory.chain_info_headers().unwrap();
+    let provider = BlockchainProvider::new(factory, chain_info_headers);
     let net = spawn_snap_testnet(provider).await;
     let fetch = net.peers()[0].network().fetch_client().await.unwrap();
 
@@ -264,7 +265,8 @@ async fn account_range_bounded_by_response_bytes_excludes_trailing_account() {
 
     let state_root = persist_fixture_state_root(&factory);
 
-    let provider = BlockchainProvider::with_database_head(factory).unwrap();
+    let chain_info_headers = factory.chain_info_headers().unwrap();
+    let provider = BlockchainProvider::new(factory, chain_info_headers);
     let net = spawn_snap_testnet(provider).await;
     let fetch = net.peers()[0].network().fetch_client().await.unwrap();
 
@@ -326,7 +328,8 @@ async fn storage_range_roundtrip_carries_rlp_values_and_proof() {
 
     let state_root = persist_fixture_state_root(&factory);
 
-    let provider = BlockchainProvider::with_database_head(factory).unwrap();
+    let chain_info_headers = factory.chain_info_headers().unwrap();
+    let provider = BlockchainProvider::new(factory, chain_info_headers);
     let storage_root =
         provider.latest().unwrap().storage_root(address, HashedStorage::default()).unwrap();
 
@@ -396,7 +399,8 @@ async fn storage_range_empty_window_returns_boundary_slot() {
 
     let state_root = persist_fixture_state_root(&factory);
 
-    let provider = BlockchainProvider::with_database_head(factory).unwrap();
+    let chain_info_headers = factory.chain_info_headers().unwrap();
+    let provider = BlockchainProvider::new(factory, chain_info_headers);
     let storage_root =
         provider.latest().unwrap().storage_root(address, HashedStorage::default()).unwrap();
 
@@ -473,7 +477,8 @@ async fn storage_ranges_multi_account_bounds_only_first_account() {
 
     let state_root = persist_fixture_state_root(&factory);
 
-    let provider = BlockchainProvider::with_database_head(factory).unwrap();
+    let chain_info_headers = factory.chain_info_headers().unwrap();
+    let provider = BlockchainProvider::new(factory, chain_info_headers);
     let storage_root_a =
         provider.latest().unwrap().storage_root(address_a, HashedStorage::default()).unwrap();
     let storage_root_b =
@@ -606,7 +611,8 @@ async fn retained_and_expired_account_range_requests_resolve_without_hanging() {
         .unwrap();
     provider_rw.commit().unwrap();
 
-    let provider = BlockchainProvider::with_database_head(factory).unwrap();
+    let chain_info_headers = factory.chain_info_headers().unwrap();
+    let provider = BlockchainProvider::new(factory, chain_info_headers);
     let net = spawn_snap_testnet(provider).await;
     let fetch = net.peers()[0].network().fetch_client().await.unwrap();
 

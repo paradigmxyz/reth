@@ -3,6 +3,7 @@ use std::sync::Arc;
 use super::setup;
 use alloy_primitives::{Address, BlockNumber};
 use eyre::Result;
+use reth_chain_state::InMemoryState;
 use reth_config::config::EtlConfig;
 use reth_consensus::FullConsensus;
 use reth_db::DatabaseEnv;
@@ -23,6 +24,7 @@ use reth_stages::{
     },
     ExecutionStageThresholds, Stage, StageCheckpoint, UnwindInput,
 };
+use reth_storage_overlay::OverlayManager;
 use tracing::info;
 
 #[expect(clippy::too_many_arguments)]
@@ -66,6 +68,7 @@ where
                 db_tool.chain(),
                 StaticFileProvider::read_write(output_datadir.static_files())?,
                 RocksDBProvider::builder(output_datadir.rocksdb()).build()?,
+                OverlayManager::new(InMemoryState::read_only()),
                 runtime,
             )?,
             to,

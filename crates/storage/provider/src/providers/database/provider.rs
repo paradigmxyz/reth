@@ -4028,7 +4028,10 @@ impl<TX: Send, N: NodeTypes> StoragePath for DatabaseProvider<TX, N> {
 mod tests {
     use super::*;
     use crate::{
-        test_utils::{blocks::BlockchainTestData, create_test_provider_factory},
+        test_utils::{
+            blocks::BlockchainTestData, create_test_provider_factory,
+            create_test_provider_factory_with_in_memory_state_writer,
+        },
         BlockWriter,
     };
     use alloy_consensus::Header;
@@ -4037,6 +4040,7 @@ mod tests {
         U256,
     };
     use reth_chain_state::{test_utils::TestBlockBuilder, ExecutedBlock};
+    use reth_chainspec::MAINNET;
     use reth_db_api::models::StorageSettings;
     use reth_ethereum_primitives::Receipt;
     use reth_execution_types::{AccountRevertInit, BlockExecutionOutput, BlockExecutionResult};
@@ -4942,7 +4946,8 @@ mod tests {
 
     #[test]
     fn remove_block_and_execution_above_returns_persistence_frontiers() {
-        let factory = create_test_provider_factory();
+        let (factory, mut in_memory_state_writer) =
+            create_test_provider_factory_with_in_memory_state_writer(MAINNET.clone());
         let mut test_block_builder = TestBlockBuilder::eth().with_state();
 
         let genesis = test_block_builder.get_executed_blocks(0..1).next().unwrap();
@@ -4953,7 +4958,7 @@ mod tests {
         provider_rw.commit().unwrap();
 
         for block in &blocks[2..] {
-            factory.overlay_manager().in_memory_state().writer().insert_executed(block.clone());
+            in_memory_state_writer.insert_executed(block.clone());
         }
 
         let provider_rw = factory.provider_rw().unwrap();

@@ -5,7 +5,8 @@
 //! The components in this crate are involved in:
 //! * Handling and reacting to incoming consensus events ([`EngineHandler`](engine::EngineHandler))
 //! * Advancing the chain ([`ChainOrchestrator`](chain::ChainOrchestrator))
-//! * Keeping track of the chain structure in-memory ([`TreeState`](tree::state::TreeState))
+//! * Tracking the executed in-memory blocks and the canonical chain
+//!   ([`TreeState`](tree::state::TreeState))
 //! * Performing backfill sync and handling its progress ([`BackfillSync`](backfill::BackfillSync))
 //! * Downloading blocks ([`BlockDownloader`](download::BlockDownloader)), and
 //! * Persisting blocks and performing pruning
@@ -58,10 +59,13 @@
 //!
 //! ## Chain representation
 //!
-//! The chain is represented by the [`TreeState`](tree::state::TreeState) data structure, which
-//! keeps tracks of blocks by hash and number, as well as keeping track of parent-child
-//! relationships between blocks. The hash and number of the current head of the canonical chain is
-//! also tracked in the [`TreeState`](tree::state::TreeState).
+//! The executed blocks that are not persisted yet are tracked by an
+//! [`InMemoryState`](reth_chain_state::InMemoryState), which splits them into the canonical chain
+//! and the blocks that are not canonical, and links every block to its tracked parent. The
+//! canonical head, the safe block and the finalized block are tracked by a
+//! [`CanonicalInMemoryState`](reth_chain_state::CanonicalInMemoryState). The
+//! [`TreeState`](tree::state::TreeState) holds the write access to both: every change to the
+//! tracked blocks and to the canonical chain goes through it.
 //!
 //! ## Persistence model
 //!

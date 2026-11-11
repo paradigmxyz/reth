@@ -1279,6 +1279,7 @@ mod tests {
         HOLESKY_GENESIS_HASH, MAINNET_GENESIS_HASH, SEPOLIA_GENESIS_HASH,
     };
     use alloy_genesis::Genesis;
+    use reth_chain_state::InMemoryState;
     use reth_chainspec::{Chain, ChainSpec, HOLESKY, MAINNET, SEPOLIA};
     use reth_db::DatabaseEnv;
     use reth_db_api::{
@@ -1292,6 +1293,7 @@ mod tests {
         test_utils::{create_test_provider_factory_with_chain_spec, MockNodeTypesWithDB},
         ProviderFactory, RocksDBProviderFactory,
     };
+    use reth_storage_overlay::OverlayManager;
     use std::{collections::BTreeMap, sync::Arc};
 
     fn collect_table_entries<DB, T>(
@@ -1532,6 +1534,7 @@ mod tests {
                 MAINNET.clone(),
                 static_file_provider,
                 rocksdb_provider,
+                OverlayManager::new(InMemoryState::read_only()),
                 reth_tasks::Runtime::test(),
             )
             .unwrap(),
@@ -1559,6 +1562,7 @@ mod tests {
                 MAINNET.clone(),
                 static_file_provider,
                 rocksdb_provider,
+                OverlayManager::new(InMemoryState::read_only()),
                 reth_tasks::Runtime::test(),
             )
             .unwrap(),

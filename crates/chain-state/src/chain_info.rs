@@ -24,13 +24,9 @@ where
     N: NodePrimitives,
     N::BlockHeader: BlockHeader,
 {
-    /// Create a new chain info container for the given canonical head and finalized header if it
-    /// exists.
-    pub fn new(
-        head: SealedHeader<N::BlockHeader>,
-        finalized: Option<SealedHeader<N::BlockHeader>>,
-        safe: Option<SealedHeader<N::BlockHeader>>,
-    ) -> Self {
+    /// Creates a tracker that starts from `chain_info_headers`.
+    pub fn new(chain_info_headers: ChainInfoHeaders<N::BlockHeader>) -> Self {
+        let ChainInfoHeaders { canonical_head, safe, finalized } = chain_info_headers;
         let (finalized_block, _) = watch::channel(finalized);
         let (safe_block, _) = watch::channel(safe);
         let (persisted_block, _) = watch::channel(None);
@@ -39,8 +35,8 @@ where
             inner: Arc::new(ChainInfoInner {
                 last_forkchoice_update: RwLock::new(None),
 
-                canonical_head_number: AtomicU64::new(head.number()),
-                canonical_head: RwLock::new(head),
+                canonical_head_number: AtomicU64::new(canonical_head.number()),
+                canonical_head: RwLock::new(canonical_head),
                 safe_block,
                 finalized_block,
                 persisted_block,
@@ -167,6 +163,18 @@ where
     }
 }
 
+/// The headers a [`ChainInfoTracker`] starts from: the canonical head and, if known, the safe and
+/// finalized blocks.
+#[derive(Debug, Clone)]
+pub struct ChainInfoHeaders<H> {
+    /// The canonical head.
+    pub canonical_head: SealedHeader<H>,
+    /// The safe block, if one is known.
+    pub safe: Option<SealedHeader<H>>,
+    /// The finalized block, if one is known.
+    pub finalized: Option<SealedHeader<H>>,
+}
+
 /// Container type for all chain info fields
 #[derive(Debug)]
 struct ChainInfoInner<N: NodePrimitives = reth_ethereum_primitives::EthPrimitives> {
@@ -201,8 +209,11 @@ mod tests {
         let header = random_header(&mut rng, 10, None);
 
         // Create a new chain info tracker with the header
-        let tracker: ChainInfoTracker<EthPrimitives> =
-            ChainInfoTracker::new(header.clone(), None, None);
+        let tracker = ChainInfoTracker::<EthPrimitives>::new(ChainInfoHeaders {
+            canonical_head: header.clone(),
+            safe: None,
+            finalized: None,
+        });
 
         // Fetch the chain information from the tracker
         let chain_info = tracker.chain_info();
@@ -219,7 +230,11 @@ mod tests {
         let header = random_header(&mut rng, 10, None);
 
         // Create a new chain info tracker with the header
-        let tracker: ChainInfoTracker<EthPrimitives> = ChainInfoTracker::new(header, None, None);
+        let tracker = ChainInfoTracker::<EthPrimitives>::new(ChainInfoHeaders {
+            canonical_head: header,
+            safe: None,
+            finalized: None,
+        });
 
         // Assert that there has been no forkchoice update yet (the timestamp is None)
         assert!(tracker.last_forkchoice_update_received_at().is_none());
@@ -240,7 +255,11 @@ mod tests {
         let header2 = random_header(&mut rng, 20, None);
 
         // Create a new chain info tracker with the first header
-        let tracker: ChainInfoTracker<EthPrimitives> = ChainInfoTracker::new(header1, None, None);
+        let tracker = ChainInfoTracker::<EthPrimitives>::new(ChainInfoHeaders {
+            canonical_head: header1,
+            safe: None,
+            finalized: None,
+        });
 
         // Set the second header as the canonical head of the tracker
         tracker.set_canonical_head(header2.clone());
@@ -261,7 +280,11 @@ mod tests {
         let header2 = random_header(&mut rng, 20, None);
 
         // Create a new chain info tracker with the first header (header1)
-        let tracker: ChainInfoTracker<EthPrimitives> = ChainInfoTracker::new(header1, None, None);
+        let tracker = ChainInfoTracker::<EthPrimitives>::new(ChainInfoHeaders {
+            canonical_head: header1,
+            safe: None,
+            finalized: None,
+        });
 
         // Call the set_safe method with the second header (header2)
         tracker.set_safe(header2.clone());
@@ -307,7 +330,11 @@ mod tests {
         let header3 = random_header(&mut rng, 30, None);
 
         // Create a new chain info tracker with the first header
-        let tracker: ChainInfoTracker<EthPrimitives> = ChainInfoTracker::new(header1, None, None);
+        let tracker = ChainInfoTracker::<EthPrimitives>::new(ChainInfoHeaders {
+            canonical_head: header1,
+            safe: None,
+            finalized: None,
+        });
 
         // Initial state: finalize header should be None
         assert!(tracker.get_finalized_header().is_none());
@@ -344,8 +371,11 @@ mod tests {
         let finalized_header = random_header(&mut rng, 10, None);
 
         // Create a new chain info tracker with the finalized header
-        let tracker: ChainInfoTracker<EthPrimitives> =
-            ChainInfoTracker::new(finalized_header.clone(), Some(finalized_header.clone()), None);
+        let tracker = ChainInfoTracker::<EthPrimitives>::new(ChainInfoHeaders {
+            canonical_head: finalized_header.clone(),
+            safe: None,
+            finalized: Some(finalized_header.clone()),
+        });
 
         // Assert that the BlockNumHash returned matches the finalized header
         assert_eq!(tracker.get_finalized_num_hash(), Some(finalized_header.num_hash()));
@@ -358,8 +388,11 @@ mod tests {
         let safe_header = random_header(&mut rng, 10, None);
 
         // Create a new chain info tracker with the safe header
-        let tracker: ChainInfoTracker<EthPrimitives> =
-            ChainInfoTracker::new(safe_header.clone(), None, None);
+        let tracker = ChainInfoTracker::<EthPrimitives>::new(ChainInfoHeaders {
+            canonical_head: safe_header.clone(),
+            safe: None,
+            finalized: None,
+        });
         tracker.set_safe(safe_header.clone());
 
         // Assert that the BlockNumHash returned matches the safe header
@@ -370,7 +403,11 @@ mod tests {
     fn test_set_persisted() {
         let mut rng = generators::rng();
         let header = random_header(&mut rng, 10, None);
-        let tracker: ChainInfoTracker<EthPrimitives> = ChainInfoTracker::new(header, None, None);
+        let tracker = ChainInfoTracker::<EthPrimitives>::new(ChainInfoHeaders {
+            canonical_head: header,
+            safe: None,
+            finalized: None,
+        });
 
         // Initial state: persisted block should be None
         assert!(tracker.get_persisted_num_hash().is_none());

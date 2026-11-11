@@ -624,6 +624,7 @@ mod tests {
         map::{B256Map, HashMap},
         Address, U256,
     };
+    use reth_chain_state::InMemoryState;
     use reth_db::{
         models::{AccountBeforeTx, BlockNumberAddress},
         tables,
@@ -828,7 +829,9 @@ mod tests {
             );
         }
 
-        let overlay_manager = OverlayManager::<reth_ethereum_primitives::EthPrimitives>::default();
+        let overlay_manager = OverlayManager::<reth_ethereum_primitives::EthPrimitives>::new(
+            InMemoryState::read_only(),
+        );
         let (partial_state_trie, finish) = database_state_frontiers(&*provider).unwrap();
         let accumulated = cache
             .get_or_compute_range(&overlay_manager, &*provider, 1..=2, partial_state_trie, finish)
@@ -918,7 +921,9 @@ mod tests {
         assert!(actual.storage_tries_ref().get(&hashed_address).is_none());
 
         let cache = ChangesetCache::new();
-        let overlay_manager = OverlayManager::<reth_ethereum_primitives::EthPrimitives>::default();
+        let overlay_manager = OverlayManager::<reth_ethereum_primitives::EthPrimitives>::new(
+            InMemoryState::read_only(),
+        );
         let (partial_state_trie, finish) = database_state_frontiers(&*provider).unwrap();
         let from_cache_api = cache
             .get_or_compute_range(&overlay_manager, &*provider, 1..=3, partial_state_trie, finish)
