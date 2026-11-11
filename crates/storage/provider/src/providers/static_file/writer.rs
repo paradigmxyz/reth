@@ -1077,14 +1077,12 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
         if let Some(last_block) = last_block {
             let mut expected_block_start = self.writer.user_header().expected_block_start();
 
-            if num_rows == 0 {
-                // Edge case for when we are unwinding a chain of empty blocks that goes across
-                // files, and therefore, the only reference point to know which file
-                // we are supposed to be at is `last_block`.
-                while last_block < expected_block_start {
-                    self.delete_current_and_open_previous()?;
-                    expected_block_start = self.writer.user_header().expected_block_start();
-                }
+            // Row deletion can stop on a file above `last_block`, e.g. when the unwound range ends
+            // in empty blocks that span files, so `last_block` is the only reference point to know
+            // which file we are supposed to be at.
+            while last_block < expected_block_start {
+                self.delete_current_and_open_previous()?;
+                expected_block_start = self.writer.user_header().expected_block_start();
             }
             // Preserve the anchor; the fixed file range may start before any retained history.
             let block_start =
