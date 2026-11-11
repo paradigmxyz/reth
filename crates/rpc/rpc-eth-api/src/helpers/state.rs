@@ -451,8 +451,12 @@ pub trait LoadState:
     /// blocking pool, which costs more than a short read. When no permit is available, or for any
     /// other block, this falls back to [`Self::spawn_blocking_io_with_state`].
     ///
-    /// Only use this for reads that do a small, bounded number of state lookups: inline reads run
-    /// on an async worker thread and block it for their whole duration.
+    /// Inline reads run on an async worker thread and block it for their whole duration. That
+    /// covers more than the lookups in `f`: opening the latest state can wait for another thread,
+    /// for example while the overlay of the in-memory blocks is rebuilt after a new block, and a
+    /// lookup that the in-memory blocks do not cover reads the database, which can wait for disk.
+    /// The permit only bounds how many workers are blocked at once, so only use this for reads
+    /// that do a small, bounded number of state lookups.
     fn spawn_point_read_with_state<F, R>(
         &self,
         at: BlockId,

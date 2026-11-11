@@ -39,14 +39,21 @@ where
         Self: SpawnBlocking,
     {
         let at = block_id.unwrap_or_default();
-        self.spawn_blocking_io(move |this| {
-            let state = if at.is_latest() {
-                this.latest_state()?
+        async move {
+            if at.is_pending() {
+                self.spawn_blocking_io(move |this| {
+                    let state =
+                        this.provider().state_by_block_id(at).map_err(Self::Error::from_eth_err)?;
+                    this.transaction_count_with_state(address, at, &state)
+                })
+                .await
             } else {
-                this.provider().state_by_block_id(at).map_err(Self::Error::from_eth_err)?
-            };
-            this.transaction_count_with_state(address, at, &state)
-        })
+                self.spawn_point_read_with_state(at, move |this, state| {
+                    this.transaction_count_with_state(address, at, &state)
+                })
+                .await
+            }
+        }
     }
 }
 
@@ -415,22 +422,28 @@ mod tests {
         eth_api.spawn_point_read_with_state(at, |_, _| Ok(thread::current().id())).await.unwrap()
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn point_read_at_latest_runs_inline() {
         let eth_api = mock_eth_api(AddressMap::default());
 
         assert_eq!(point_read_thread(&eth_api, BlockId::latest()).await, thread::current().id());
-        // The permit is released after the read.
-        assert!(eth_api.inline_io_request_semaphore().available_permits() > 0);
+        // Half of the two workers may read inline, and the permit is released after the read.
+        assert_eq!(eth_api.inline_io_request_semaphore().available_permits(), 1);
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn point_read_without_inline_permit_uses_blocking_pool() {
+        let eth_api = mock_eth_api(AddressMap::default());
+        let _permit = eth_api.inline_io_request_semaphore().try_acquire().unwrap();
+
+        assert_ne!(point_read_thread(&eth_api, BlockId::latest()).await, thread::current().id());
     }
 
     #[tokio::test]
-    async fn point_read_without_inline_permit_uses_blocking_pool() {
+    async fn point_read_on_single_worker_runtime_uses_blocking_pool() {
         let eth_api = mock_eth_api(AddressMap::default());
-        let permits =
-            u32::try_from(eth_api.inline_io_request_semaphore().available_permits()).unwrap();
-        let _permits = eth_api.inline_io_request_semaphore().try_acquire_many(permits).unwrap();
 
+        assert_eq!(eth_api.inline_io_request_semaphore().available_permits(), 0);
         assert_ne!(point_read_thread(&eth_api, BlockId::latest()).await, thread::current().id());
     }
 

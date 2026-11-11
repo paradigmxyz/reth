@@ -38,6 +38,9 @@ const DEFAULT_BROADCAST_CAPACITY: usize = 2000;
 
 /// Divisor applied to the runtime's worker thread count to size the semaphore for inline state
 /// reads, so that at most this fraction of the workers can be inside such a read at once.
+///
+/// The division rounds down: a runtime with a single worker gets no permit and never reads inline,
+/// because a read that blocks would stall the whole runtime.
 const INLINE_IO_WORKER_DIVISOR: usize = 2;
 
 /// `Eth` API implementation.
@@ -311,7 +314,7 @@ where
         task_spawner.spawn_critical_task("tx-batcher", processor);
 
         let inline_io_permits =
-            (task_spawner.handle().metrics().num_workers() / INLINE_IO_WORKER_DIVISOR).max(1);
+            task_spawner.handle().metrics().num_workers() / INLINE_IO_WORKER_DIVISOR;
 
         Self {
             components,
