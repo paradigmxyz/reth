@@ -4,7 +4,6 @@ use crate::{
     server::connection::{IpcConn, IpcConnDriver, JsonRpcStream},
     stream_codec::StreamCodec,
 };
-use futures::StreamExt;
 use futures_util::future::Either;
 use interprocess::local_socket::{
     tokio::prelude::{LocalSocketListener, LocalSocketStream},
@@ -32,7 +31,6 @@ use tokio::{
     io::{AsyncRead, AsyncWrite, AsyncWriteExt},
     sync::{mpsc, oneshot},
 };
-use tokio_stream::wrappers::ReceiverStream;
 use tokio_util::task::AbortOnDropHandle;
 use tower::{layer::util::Identity, Layer, Service};
 use tracing::{instrument, trace, warn, Instrument};
@@ -462,33 +460,18 @@ async fn to_ipc_service<S, T>(
     S::Future: Send + Unpin,
     T: AsyncRead + AsyncWrite + Unpin + Send + 'static,
 {
-    let rx_item = ReceiverStream::new(rx);
     let conn = IpcConnDriver {
         conn: ipc,
         service,
         pending_calls: Default::default(),
         items: Default::default(),
+        messages: rx,
     };
     let stopped = stop_handle.shutdown();
 
-    let mut conn = pin!(conn);
-    let mut rx_item = pin!(rx_item);
-    let mut stopped = pin!(stopped);
-
-    loop {
-        tokio::select! {
-            _ = &mut conn => {
-               break
-            }
-            item = rx_item.next() => {
-                let Some(item) = item else { break };
-                conn.push_back(item);
-            }
-            _ = &mut stopped => {
-                // shutdown
-                break
-            }
-        }
+    tokio::select! {
+        _ = conn => {}
+        _ = stopped => {}
     }
 }
 
@@ -647,7 +630,7 @@ pub fn dummy_name() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use futures::future::select;
+    use futures::{future::select, StreamExt};
     use interprocess::local_socket::tokio::{RecvHalf, SendHalf};
     use jsonrpsee::{
         core::middleware::{Batch, BatchEntry, Notification},
@@ -656,7 +639,11 @@ mod tests {
     };
     use reth_tracing::init_test_tracing;
     use serde_json::{json, Value};
-    use std::pin::pin;
+    use std::{
+        pin::pin,
+        sync::atomic::{AtomicUsize, Ordering},
+        time::Duration,
+    };
     use tokio::sync::broadcast;
     use tokio_stream::wrappers::BroadcastStream;
     use tokio_util::codec::FramedRead;
@@ -706,7 +693,7 @@ mod tests {
     }
 
     #[cfg(unix)]
-    use std::{os::unix::net::UnixListener, path::Path, time::Duration};
+    use std::{os::unix::net::UnixListener, path::Path};
 
     #[tokio::test]
     #[cfg(unix)]
@@ -1029,6 +1016,50 @@ mod tests {
             assert_eq!(notification["params"]["subscription"], sub_id);
             assert!(notification["params"]["result"].is_u64());
         }
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_unread_subscription_is_bounded() {
+        let endpoint = &dummy_name();
+        let server = Builder::default().build(endpoint.clone());
+        let sent = Arc::new(AtomicUsize::new(0));
+        let mut module = RpcModule::new(sent.clone());
+        module
+            .register_subscription(
+                "subscribe_flood",
+                "s_flood",
+                "unsubscribe_flood",
+                |_, pending, sent| async move {
+                    let sink = pending.accept().await?;
+                    let msg = serde_json::value::to_raw_value(&"x".repeat(1024)).unwrap();
+                    while sink.send(msg.clone()).await.is_ok() {
+                        sent.fetch_add(1, Ordering::Relaxed);
+                    }
+                    Ok(())
+                },
+            )
+            .unwrap();
+        let handle = server.start(module).await.unwrap();
+        tokio::spawn(handle.stopped());
+
+        let mut client = TestClient::connect(endpoint).await;
+        client.call("subscribe_flood", json!([])).await.unwrap();
+
+        // The client doesn't read, so the connection's queues fill up and the subscription stalls.
+        tokio::time::sleep(Duration::from_millis(500)).await;
+        let stalled = sent.load(Ordering::Relaxed);
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        assert_eq!(sent.load(Ordering::Relaxed), stalled);
+        assert!(stalled < 3 * MESSAGE_BUFFER_CAPACITY, "{stalled} messages queued");
+
+        // Reading again lets the subscription continue.
+        tokio::time::timeout(Duration::from_secs(10), async {
+            while sent.load(Ordering::Relaxed) == stalled {
+                assert_eq!(client.recv().await.unwrap()["method"], "s_flood");
+            }
+        })
+        .await
+        .unwrap();
     }
 
     #[tokio::test(flavor = "multi_thread")]

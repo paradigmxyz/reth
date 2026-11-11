@@ -1,5 +1,6 @@
 //! An IPC connection.
 
+use super::MESSAGE_BUFFER_CAPACITY;
 use crate::stream_codec::StreamCodec;
 use futures::{stream::FuturesUnordered, FutureExt, Sink, Stream};
 use std::{
@@ -9,7 +10,10 @@ use std::{
     pin::Pin,
     task::{Context, Poll},
 };
-use tokio::io::{AsyncRead, AsyncWrite};
+use tokio::{
+    io::{AsyncRead, AsyncWrite},
+    sync::mpsc,
+};
 use tokio_util::codec::Framed;
 use tower::Service;
 
@@ -70,13 +74,8 @@ pub(crate) struct IpcConnDriver<T, S, Fut> {
     #[pin]
     pub(crate) pending_calls: FuturesUnordered<Fut>,
     pub(crate) items: VecDeque<String>,
-}
-
-impl<T, S, Fut> IpcConnDriver<T, S, Fut> {
-    /// Add a new item to the send queue.
-    pub(crate) fn push_back(&mut self, item: String) {
-        self.items.push_back(item);
-    }
+    /// Messages sent outside of calls, such as subscription notifications.
+    pub(crate) messages: mpsc::Receiver<String>,
 }
 
 impl<T, S> Future for IpcConnDriver<T, S, S::Future>
@@ -103,6 +102,13 @@ where
                 // make sure we're woken up again
                 cx.waker().wake_by_ref();
                 return Poll::Pending
+            }
+
+            // Only take messages while the send queue has room, so a client that stops reading
+            // backs up its subscriptions instead of growing the queue.
+            while this.items.len() < MESSAGE_BUFFER_CAPACITY {
+                let Poll::Ready(Some(item)) = this.messages.poll_recv(cx) else { break };
+                this.items.push_back(item);
             }
 
             // write all responses to the sink
@@ -133,6 +139,12 @@ where
                     }
                     true
                 };
+
+                // The queue is only full if the socket isn't writable, which wakes this task once
+                // it is. Until then, new requests stay unread.
+                if this.items.len() >= MESSAGE_BUFFER_CAPACITY {
+                    return Poll::Pending
+                }
 
                 // read from the stream
                 match this.conn.as_mut().poll_next(cx) {
