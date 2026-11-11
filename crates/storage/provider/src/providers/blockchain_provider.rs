@@ -835,6 +835,11 @@ impl<N: ProviderNodeTypes> StateProviderFactory for BlockchainProvider<N> {
 
     fn history_by_block_hash(&self, block_hash: BlockHash) -> ProviderResult<StateProviderBox> {
         trace!(target: "providers::blockchain", ?block_hash, "Getting history by block hash");
+        // A canonical in-memory block already holds its chain, which the hash lookup below would
+        // rebuild from the overlay manager's block graph.
+        if let Some(state) = self.canonical_in_memory_state.state_by_hash(block_hash) {
+            return self.state_provider_for_state(state)
+        }
         let provider = self.consistent_provider()?;
         provider.block_number(block_hash)?.ok_or(ProviderError::BlockHashNotFound(block_hash))?;
         Ok(self.state_provider_from_database(provider.into_database_provider(), block_hash))
@@ -3506,9 +3511,9 @@ mod tests {
             .canonical_in_memory_state
             .update_chain(NewCanonicalChain::Commit { new: vec![executed] });
 
-        // `latest` reuses the canonical `Arc<BlockState>` chain, while the hash-based lookup
-        // rebuilds an equivalent chain from the overlay manager's block graph. Both must observe
-        // the same in-memory account and storage values.
+        // The provider's own lookups reuse the canonical `Arc<BlockState>` chain, while
+        // `overlay_builder` rebuilds an equivalent chain from the overlay manager's block graph.
+        // All of them must observe the same in-memory account and storage values.
         let rebuilt_from_hash = OverlayStateProviderFactory::new(
             provider.database.clone(),
             provider.database.overlay_manager().overlay_builder(block_hash),
@@ -3519,6 +3524,7 @@ mod tests {
             Box::new(rebuilt_from_hash) as StateProviderBox,
             provider.latest()?,
             provider.state_by_block_hash(block_hash)?,
+            provider.history_by_block_hash(block_hash)?,
         ] {
             assert_eq!(state.basic_account(&address)?, Some(account.clone()));
             assert_eq!(state.storage(address, slot_key)?, Some(value));
