@@ -6,7 +6,7 @@ use futures::Future;
 use reth_chainspec::ChainInfo;
 use reth_errors::{RethError, RethResult};
 use reth_network_api::NetworkInfo;
-use reth_prune_types::{PruneMode, PruneSegment};
+use reth_prune_types::{PruneCheckpoint, PruneMode, PruneSegment};
 use reth_rpc_convert::RpcTxReq;
 use reth_rpc_eth_types::{EthCapabilities, EthCapabilitiesHead, EthCapabilitiesResource};
 use reth_storage_api::{
@@ -53,21 +53,23 @@ pub trait EthApiSpec: RpcNodeCore + EthApiTypes {
         Self: EthState,
     {
         let chain_info = self.chain_info()?;
-        let provider = self.provider();
+        let checkpoints = self.provider().get_prune_checkpoints_for_availability()?;
 
         let state = effective_resource(
-            provider,
+            &checkpoints,
             &[PruneSegment::AccountHistory, PruneSegment::StorageHistory],
-        )?;
-        let tx =
-            effective_resource(provider, &[PruneSegment::TransactionLookup, PruneSegment::Bodies])?;
+        );
+        let tx = effective_resource(
+            &checkpoints,
+            &[PruneSegment::TransactionLookup, PruneSegment::Bodies],
+        );
         let logs =
-            effective_resource(provider, &[PruneSegment::Receipts, PruneSegment::ContractLogs])?;
+            effective_resource(&checkpoints, &[PruneSegment::Receipts, PruneSegment::ContractLogs]);
         let receipts = effective_resource(
-            provider,
+            &checkpoints,
             &[PruneSegment::Receipts, PruneSegment::TransactionLookup, PruneSegment::Bodies],
-        )?;
-        let blocks = effective_resource(provider, &[PruneSegment::Bodies])?;
+        );
+        let blocks = effective_resource(&checkpoints, &[PruneSegment::Bodies]);
 
         let proof_window = self.max_proof_window();
         let proof_oldest = chain_info
@@ -125,8 +127,8 @@ pub trait EthApiSpec: RpcNodeCore + EthApiTypes {
     }
 }
 
-/// Derives the effective block availability for a capability resource from the prune checkpoints of
-/// all storage segments needed to serve it.
+/// Derives effective block availability from checkpoints adjusted for retained data by
+/// [`PruneCheckpointReader::get_prune_checkpoints_for_availability`].
 ///
 /// A resource is only available where every required segment is available, so the oldest available
 /// block is the maximum pruned checkpoint across the segments. If any segment is configured with a
@@ -136,15 +138,15 @@ pub trait EthApiSpec: RpcNodeCore + EthApiTypes {
 ///
 /// See also: <https://github.com/ethereum/execution-apis/pull/755>
 fn effective_resource(
-    provider: &impl PruneCheckpointReader,
+    checkpoints: &[(PruneSegment, PruneCheckpoint)],
     segments: &[PruneSegment],
-) -> RethResult<EthCapabilitiesResource> {
+) -> EthCapabilitiesResource {
     let mut oldest_block = 0;
     let mut retention_blocks = None::<u64>;
     let mut disabled = false;
 
     for segment in segments {
-        let Some(checkpoint) = provider.get_prune_checkpoint(*segment)? else {
+        let Some((_, checkpoint)) = checkpoints.iter().find(|(key, _)| key == segment) else {
             continue;
         };
 
@@ -171,13 +173,13 @@ fn effective_resource(
         }
     }
 
-    Ok(if disabled {
+    if disabled {
         EthCapabilitiesResource::disabled()
     } else if let Some(retention_blocks) = retention_blocks {
         EthCapabilitiesResource::window(oldest_block, retention_blocks)
     } else {
         EthCapabilitiesResource::available_from(oldest_block)
-    })
+    }
 }
 
 /// A handle to [`EthSigner`]s with its generics set from [`TransactionsProvider`] and
@@ -189,70 +191,77 @@ pub type SignersForRpc<Provider, Rpc> = parking_lot::RwLock<
 #[cfg(test)]
 mod tests {
     use super::*;
-    use reth_prune_types::PruneCheckpoint;
-    use reth_storage_api::errors::provider::ProviderResult;
-    use std::collections::HashMap;
-
-    #[derive(Default)]
-    struct TestPruneCheckpointReader {
-        checkpoints: HashMap<PruneSegment, PruneCheckpoint>,
-    }
-
-    impl TestPruneCheckpointReader {
-        fn with_checkpoint(segment: PruneSegment, checkpoint: PruneCheckpoint) -> Self {
-            Self { checkpoints: HashMap::from([(segment, checkpoint)]) }
-        }
-    }
-
-    impl PruneCheckpointReader for TestPruneCheckpointReader {
-        fn get_prune_checkpoint(
-            &self,
-            segment: PruneSegment,
-        ) -> ProviderResult<Option<PruneCheckpoint>> {
-            Ok(self.checkpoints.get(&segment).copied())
-        }
-
-        fn get_prune_checkpoints(&self) -> ProviderResult<Vec<(PruneSegment, PruneCheckpoint)>> {
-            Ok(self
-                .checkpoints
-                .iter()
-                .map(|(segment, checkpoint)| (*segment, *checkpoint))
-                .collect())
-        }
-    }
 
     #[test]
     fn full_prune_segment_without_retention_disables_resource() {
-        let provider = TestPruneCheckpointReader::with_checkpoint(
+        let checkpoints = [(
             PruneSegment::TransactionLookup,
             PruneCheckpoint {
                 block_number: Some(10),
                 tx_number: None,
                 prune_mode: PruneMode::Full,
             },
-        );
+        )];
 
-        let resource = effective_resource(&provider, &[PruneSegment::TransactionLookup]).unwrap();
+        let resource = effective_resource(&checkpoints, &[PruneSegment::TransactionLookup]);
 
         assert_eq!(resource, EthCapabilitiesResource::disabled());
     }
 
     #[test]
     fn full_prune_segment_with_minimum_retention_uses_window() {
-        let provider = TestPruneCheckpointReader::with_checkpoint(
+        let checkpoints = [(
             PruneSegment::Bodies,
             PruneCheckpoint {
                 block_number: Some(10),
                 tx_number: None,
                 prune_mode: PruneMode::Full,
             },
-        );
+        )];
 
-        let resource = effective_resource(&provider, &[PruneSegment::Bodies]).unwrap();
+        let resource = effective_resource(&checkpoints, &[PruneSegment::Bodies]);
 
         assert_eq!(
             resource,
             EthCapabilitiesResource::window(11, PruneSegment::Bodies.min_blocks())
         );
+    }
+
+    #[test]
+    fn retained_receipts_preserve_resource_limits() {
+        let checkpoints = [
+            (
+                PruneSegment::Receipts,
+                PruneCheckpoint {
+                    block_number: None,
+                    tx_number: None,
+                    prune_mode: PruneMode::Distance(100),
+                },
+            ),
+            (
+                PruneSegment::ContractLogs,
+                PruneCheckpoint {
+                    prune_mode: PruneMode::Distance(50),
+                    ..PruneCheckpoint::pruned_through(19)
+                },
+            ),
+            (PruneSegment::TransactionLookup, PruneCheckpoint::pruned_through(39)),
+            (PruneSegment::Bodies, PruneCheckpoint::pruned_through(29)),
+        ];
+        for (segments, expected) in [
+            (vec![PruneSegment::Receipts], EthCapabilitiesResource::window(0, 100)),
+            (
+                vec![PruneSegment::Receipts, PruneSegment::ContractLogs],
+                EthCapabilitiesResource::window(20, 50),
+            ),
+            (
+                vec![PruneSegment::Receipts, PruneSegment::TransactionLookup, PruneSegment::Bodies],
+                EthCapabilitiesResource::window(40, 100),
+            ),
+            (vec![PruneSegment::Bodies], EthCapabilitiesResource::available_from(30)),
+            (vec![PruneSegment::AccountHistory], EthCapabilitiesResource::available_from(0)),
+        ] {
+            assert_eq!(effective_resource(&checkpoints, &segments), expected, "{segments:?}");
+        }
     }
 }

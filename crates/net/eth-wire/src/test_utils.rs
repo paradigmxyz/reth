@@ -10,7 +10,7 @@ use alloy_chains::Chain;
 use alloy_primitives::{B256, U256};
 use reth_ethereum_forks::{ForkFilter, Head};
 use reth_network_peers::pk2id;
-use secp256k1::{SecretKey, SECP256K1};
+use secp256k1::SecretKey;
 use std::net::SocketAddr;
 use tokio::net::TcpStream;
 use tokio_util::codec::{Decoder, Framed, LengthDelimitedCodec};
@@ -19,14 +19,14 @@ pub type P2pPassthroughTcpStream = P2PStream<Framed<TcpStream, LengthDelimitedCo
 
 /// Returns a new testing `HelloMessage` and new secretkey
 pub fn eth_hello() -> (HelloMessageWithProtocols, SecretKey) {
-    let server_key = SecretKey::new(&mut rand_08::thread_rng());
+    let server_key = SecretKey::new(&mut rand::rng());
     let protocols = vec![EthVersion::Eth67.into()];
     let hello = HelloMessageWithProtocols {
         protocol_version: ProtocolVersion::V5,
         client_version: "eth/1.0.0".to_string(),
         protocols,
         port: DEFAULT_TCP_PORT,
-        id: pk2id(&server_key.public_key(SECP256K1)),
+        id: pk2id(&server_key.public_key()),
     };
     (hello, server_key)
 }

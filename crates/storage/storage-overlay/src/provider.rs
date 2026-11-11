@@ -80,12 +80,13 @@ pub struct OverlayStateProviderFactory<F, N: NodePrimitives = EthPrimitives> {
 impl<F, N: NodePrimitives> OverlayStateProviderFactory<F, N> {
     /// Create a new overlay state provider factory.
     pub fn new(factory: F, overlay_builder: OverlayBuilder<N>) -> Self {
+        let manager = overlay_builder.overlay_manager();
         Self {
             factory,
+            metrics: manager.provider_metrics().clone(),
+            proof_cursor_metrics: manager.proof_cursor_metrics().clone(),
             overlay_builder,
             state_trie_overlay_cache: Default::default(),
-            metrics: Default::default(),
-            proof_cursor_metrics: Default::default(),
             known_storage_roots: Default::default(),
         }
     }
@@ -148,7 +149,7 @@ where
         Ok(OverlayStateProvider::from_parts(
             OwnedProvider(provider),
             Some(self.overlay_builder.clone()),
-            Arc::clone(&self.state_trie_overlay_cache),
+            Some(Arc::clone(&self.state_trie_overlay_cache)),
             self.metrics.clone(),
             self.proof_cursor_metrics.clone(),
             self.known_storage_roots.clone(),
@@ -172,7 +173,8 @@ where
     /// The `!Unpin` pointee preserves cached transaction borrows when the owning box moves.
     provider: Pin<Box<(Provider, PhantomPinned)>>,
     overlay_builder: Option<OverlayBuilder<N>>,
-    state_trie_overlay_cache: StateTrieOverlayCache,
+    /// Overlay cache shared with the factory that created this provider, if any.
+    state_trie_overlay_cache: Option<StateTrieOverlayCache>,
     metrics: OverlayStateProviderFactoryMetrics,
     proof_cursor_metrics: ProofCursorMetrics,
     /// Revealed storage roots from the reused sparse trie, shared across proof workers.
@@ -190,12 +192,15 @@ impl<Provider: DBProvider, N: NodePrimitives> OverlayStateProvider<OwnedProvider
         Provider: StorageSettingsCache,
     {
         let is_v2 = provider.cached_storage_settings().is_v2();
+        let manager = overlay_builder.overlay_manager();
+        let metrics = manager.provider_metrics().clone();
+        let proof_cursor_metrics = manager.proof_cursor_metrics().clone();
         Self::from_parts(
             OwnedProvider(provider),
             Some(overlay_builder),
-            Default::default(),
-            Default::default(),
-            Default::default(),
+            None,
+            metrics,
+            proof_cursor_metrics,
             Default::default(),
             is_v2,
         )
@@ -210,7 +215,7 @@ impl<Provider: DBProvider, N: NodePrimitives> OverlayStateProvider<OwnedProvider
         let mut provider = Self::from_parts(
             OwnedProvider(provider),
             None,
-            Default::default(),
+            None,
             Default::default(),
             Default::default(),
             Default::default(),
@@ -231,12 +236,15 @@ impl<'a, Provider: DBProvider, N: NodePrimitives> OverlayStateProvider<&'a Provi
         Provider: StorageSettingsCache,
     {
         let is_v2 = provider.cached_storage_settings().is_v2();
+        let manager = overlay_builder.overlay_manager();
+        let metrics = manager.provider_metrics().clone();
+        let proof_cursor_metrics = manager.proof_cursor_metrics().clone();
         Self::from_parts(
             provider,
             Some(overlay_builder),
-            Default::default(),
-            Default::default(),
-            Default::default(),
+            None,
+            metrics,
+            proof_cursor_metrics,
             Default::default(),
             is_v2,
         )
@@ -250,7 +258,7 @@ impl<'a, Provider: DBProvider, N: NodePrimitives> OverlayStateProvider<&'a Provi
         let mut provider = Self::from_parts(
             provider,
             None,
-            Default::default(),
+            None,
             Default::default(),
             Default::default(),
             Default::default(),
@@ -272,7 +280,7 @@ where
     fn from_parts(
         provider: Provider,
         overlay_builder: Option<OverlayBuilder<N>>,
-        state_trie_overlay_cache: StateTrieOverlayCache,
+        state_trie_overlay_cache: Option<StateTrieOverlayCache>,
         metrics: OverlayStateProviderFactoryMetrics,
         proof_cursor_metrics: ProofCursorMetrics,
         known_storage_roots: Arc<B256Map<B256>>,
@@ -313,29 +321,34 @@ where
         }
 
         let (state_trie_tip_block, finish_tip_block) = database_state_frontiers(self.provider())?;
-        let overlay = match self.state_trie_overlay_cache.entry((
-            state_trie_tip_block.hash,
-            finish_tip_block.hash,
-            trie_changesets,
-        )) {
-            dashmap::Entry::Occupied(entry) => entry.get().clone(),
-            dashmap::Entry::Vacant(entry) => {
-                self.metrics.state_trie_overlay_cache_misses.increment(1);
-                let overlay = self
-                    .overlay_builder
-                    .as_ref()
-                    .expect("state trie overlay must be initialized or lazily resolvable")
-                    .build_state_trie_overlay_at_frontiers(
-                        self.provider(),
-                        state_trie_tip_block,
-                        finish_tip_block,
-                        trie_changesets,
-                    )?;
-                if !overlay.skipped_for_reused_sparse_trie() {
-                    entry.insert(overlay.clone());
+        let build = || {
+            self.overlay_builder
+                .as_ref()
+                .expect("state trie overlay must be initialized or lazily resolvable")
+                .build_state_trie_overlay_at_frontiers(
+                    self.provider(),
+                    state_trie_tip_block,
+                    finish_tip_block,
+                    trie_changesets,
+                )
+        };
+        let overlay = match &self.state_trie_overlay_cache {
+            Some(cache) => match cache.entry((
+                state_trie_tip_block.hash,
+                finish_tip_block.hash,
+                trie_changesets,
+            )) {
+                dashmap::Entry::Occupied(entry) => entry.get().clone(),
+                dashmap::Entry::Vacant(entry) => {
+                    self.metrics.state_trie_overlay_cache_misses.increment(1);
+                    let overlay = build()?;
+                    if !overlay.skipped_for_reused_sparse_trie() {
+                        entry.insert(overlay.clone());
+                    }
+                    overlay
                 }
-                overlay
-            }
+            },
+            None => build()?,
         };
         let _ = state_trie_overlay.set(overlay);
         Ok(state_trie_overlay.get().expect("state trie overlay was just initialized"))

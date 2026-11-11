@@ -13,6 +13,13 @@ pub const DEFAULT_BUDGET_TRY_DRAIN_DOWNLOADERS: u32 = 2;
 /// Default is 10 [`SwarmEvent`](crate::swarm::SwarmEvent)s.
 pub const DEFAULT_BUDGET_TRY_DRAIN_SWARM: u32 = 10;
 
+/// Default budget of consecutive events taken from a prioritized source before a lower priority
+/// source is polled first once, e.g. active sessions over pending sessions and sessions over new
+/// incoming connections.
+///
+/// Default is 16 events.
+pub const DEFAULT_BUDGET_PRIORITIZED_EVENTS: u32 = 16;
+
 /// Default budget to try and drain pending messages from [`NetworkHandle`](crate::NetworkHandle)
 /// channel. Polling the [`TransactionsManager`](crate::transactions::TransactionsManager) future
 /// sends these types of messages.

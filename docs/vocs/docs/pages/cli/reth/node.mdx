@@ -28,7 +28,7 @@ Options:
 
           Max number of instances is 200. It is chosen in a way so that it's not possible to have port numbers that conflict with each other.
 
-          Changes to the following port numbers: - `DISCOVERY_PORT`: default + `instance` - 1 - `AUTH_PORT`: default + `instance` * 100 - 100 - `HTTP_RPC_PORT`: default - `instance` + 1 - `WS_RPC_PORT`: default + `instance` * 2 - 2 - `IPC_PATH`: default + `-instance`
+          Changes to the following port numbers: - `DISCOVERY_PORT`: default + `instance` - 1 - `AUTH_PORT`: default + `instance` * 100 - 100 - `HTTP_RPC_PORT`: default - `instance` + 1 - `WS_RPC_PORT`: default + `instance` * 2 - 2 - `IPC_PATH`: default + `-instance` - `AUTH_IPC_PATH`: default + `-instance`, unless `--auth-ipc.path` is set
 
       --with-unused-ports
           Sets all ports to unused, allowing the OS to choose random unused ports when sockets are bound.
@@ -393,7 +393,9 @@ RPC:
       --ipc.permissions <IPC_SOCKET_PERMISSIONS>
           Set the permissions for the IPC socket file, in octal format.
 
-          If not specified, the permissions will be set by the system's umask.
+          Accepts modes up to `0o7777`, with an optional `0o` prefix. If not specified, the permissions will be set by the system's umask.
+
+          Startup fails if the mode is invalid or the platform cannot apply it before binding the socket, which includes macOS.
 
       --authrpc.addr <AUTH_ADDR>
           Auth server address to listen on
@@ -421,9 +423,9 @@ RPC:
           Enable auth engine API over IPC
 
       --auth-ipc.path <AUTH_IPC_PATH>
-          Filename for auth IPC socket/pipe within the datadir
+          Path for the auth IPC socket/pipe. Explicit paths are used unchanged.
 
-          [default: <CACHE_DIR>_engine_api.ipc]
+          If omitted, uses `/tmp/reth_engine_api.ipc`, with `-<instance>` appended when `--instance` is set. Applications can override this default via `DefaultRpcServerArgs`.
 
       --disable-auth-server
           Disable the auth/engine API server.
@@ -491,7 +493,9 @@ RPC:
           [default: 20000]
 
       --rpc.gascap <GAS_CAP>
-          Maximum gas limit for `eth_call`, `eth_estimateGas`, and call tracing RPC methods
+          Maximum gas limit for `eth_call`, `eth_estimateGas`, and call tracing RPC methods.
+
+          The calls of an `eth_callMany`, `trace_callMany` or `debug_traceCallMany` request share it.
 
           [default: 50000000]
 
@@ -1101,9 +1105,6 @@ Engine:
 
           [default: 4096]
 
-      --engine.state-root-task-compare-updates
-          Enable comparing trie updates from the state root task to the trie updates from the regular state root calculation
-
       --engine.accept-execution-requests-hash
           Enables accepting requests hash instead of an array of requests in `engine_newPayloadV4`
 
@@ -1396,9 +1397,11 @@ Display:
 
 Tracing:
       --tracing-otlp[=<URL>]
-          Enable `Opentelemetry` tracing export to an OTLP endpoint.
+          Enable `Opentelemetry` tracing export to an OTLP endpoint or local file.
 
           If no value provided, defaults based on protocol: - HTTP: `http://localhost:4318/v1/traces` - gRPC: `http://localhost:4317`
+
+          A `file:///absolute/path` endpoint appends length-delimited OTLP protobuf batches without a collector. Use a separate file per process. The network protocol is ignored for files.
 
           Example: --tracing-otlp=http://collector:4318/v1/traces
 

@@ -1264,4 +1264,40 @@ mod tests {
         }
         assert!(cursor.row_by_number(rows).unwrap().is_none());
     }
+
+    #[test]
+    fn test_zstd_013_compatibility() {
+        // These jars and the dictionary-compressed block were written with zstd 0.13.3.
+        let col1 = (0..100u8).map(|i| vec![i; 32]).collect::<Vec<_>>();
+        let col2 = (0..100u8)
+            .map(|i| (0..32u8).map(|j| i.wrapping_add(j)).collect::<Vec<_>>())
+            .collect::<Vec<_>>();
+        let fixtures = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/zstd-0.13");
+        let directory = tempfile::tempdir().unwrap();
+        for name in ["dictionary", "plain"] {
+            let path = directory.path().join(name);
+            for extension in ["", CONFIG_FILE_EXTENSION, OFFSETS_FILE_EXTENSION] {
+                reth_fs_util::write(
+                    path.with_extension(extension),
+                    reth_fs_util::read(fixtures.join(name).with_extension(extension)).unwrap(),
+                )
+                .unwrap();
+            }
+            assert_jar_rows(&path, &col1, &col2, 100);
+        }
+
+        let jar = NippyJar::load_without_header(&directory.path().join("dictionary")).unwrap();
+        let Some(Compressors::Zstd(zstd)) = jar.compressor() else {
+            panic!("Expected Zstd compressor")
+        };
+        let encoded = include_bytes!("../tests/fixtures/zstd-0.13/dictionary.block");
+        let mut output = Vec::with_capacity(32);
+        compression::Zstd::decompress_with_dictionary(
+            encoded,
+            &mut output,
+            &mut zstd.decompressors().unwrap()[0],
+        )
+        .unwrap();
+        assert_eq!(output, col1[5]);
+    }
 }

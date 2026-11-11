@@ -14,7 +14,6 @@ use crate::{
 };
 use reth_eth_wire::{EthNetworkPrimitives, NetworkPrimitives};
 use reth_metrics::common::mpsc::memory_bounded_channel;
-use reth_network_api::test_utils::PeersHandleProvider;
 use reth_storage_api::BalProvider;
 use reth_transaction_pool::{BlobStore, TransactionPool};
 use tokio::sync::mpsc;
@@ -82,8 +81,7 @@ impl<Tx, Eth, N: NetworkPrimitives> NetworkBuilder<Tx, Eth, N> {
         let Self { mut network, transactions, .. } = self;
         let (tx, rx) = mpsc::channel(ETH_REQUEST_CHANNEL_CAPACITY);
         network.set_eth_request_handler(tx);
-        let peers = network.handle().peers_handle().clone();
-        let request_handler = EthRequestHandler::new(client, peers, rx);
+        let request_handler = EthRequestHandler::new(client, rx);
         NetworkBuilder { network, request_handler, transactions }
     }
 

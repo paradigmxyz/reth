@@ -477,7 +477,7 @@ mod tests {
             destination,
             code_address: destination,
             call_target: destination,
-            input: input.clone(),
+            input: input.clone().into(),
             ..Default::default()
         };
         for _ in 0..2 {
@@ -526,7 +526,7 @@ mod tests {
             gas_limit: 30_000,
             destination: address,
             caller: Address::ZERO,
-            input: Bytes::copy_from_slice(b"cached-input"),
+            input: Bytes::copy_from_slice(b"cached-input").into(),
             value: U256::ZERO,
             code_address: address,
             call_target: address,
@@ -579,7 +579,7 @@ mod tests {
                 destination: address,
                 code_address: address,
                 call_target: address,
-                input: Bytes::from(vec![1; len]),
+                input: Bytes::from(vec![1; len]).into(),
                 ..Default::default()
             };
             let output = provider
