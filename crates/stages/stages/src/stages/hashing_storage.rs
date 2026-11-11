@@ -17,7 +17,10 @@ use reth_stages_api::{
 };
 use reth_storage_api::StorageSettingsCache;
 use reth_storage_errors::provider::ProviderResult;
-use reth_tasks::executor::channel::mpsc::{self, Receiver};
+use reth_tasks::executor::{
+    channel::mpsc::{self, Receiver},
+    rayon,
+};
 use std::{
     collections::{BTreeMap, BTreeSet},
     fmt::Debug,
@@ -124,7 +127,7 @@ where
                 let (tx, rx) = mpsc::sync_channel(chunk.len());
                 channels.push(rx);
                 // Spawn the hashing task onto the global rayon pool
-                reth_tasks::executor::rayon::spawn(move || {
+                rayon::spawn(move || {
                     // Cache hashed address since PlainStorageState is sorted by address
                     let (mut last_addr, mut hashed_addr) = (Address::ZERO, HASHED_ZERO_ADDRESS);
                     for (address, slot) in chunk {

@@ -131,6 +131,7 @@ mod tests {
     use super::*;
     use crate::tree::payload_processor::bal::BalExecutionError;
     use alloy_primitives::Address;
+    use reth_tasks::executor::channel;
 
     fn output(index: usize, result: u64) -> BalWorkerOutput<u64> {
         BalWorkerOutput { index, signer: Address::ZERO, tx_gas_limit: 21_000, result }
@@ -148,7 +149,7 @@ mod tests {
 
     #[test]
     fn yields_outputs_in_transaction_order() {
-        let (tx, rx) = reth_tasks::executor::channel::unbounded();
+        let (tx, rx) = channel::unbounded();
         tx.send(Ok(output(2, 20))).unwrap();
         tx.send(Ok(output(0, 0))).unwrap();
         tx.send(Ok(output(1, 10))).unwrap();
@@ -163,7 +164,7 @@ mod tests {
 
     #[test]
     fn forwards_worker_errors_and_then_stops() {
-        let (tx, rx) = reth_tasks::executor::channel::unbounded();
+        let (tx, rx) = channel::unbounded();
         tx.send(Err(BalWorkerError::Setup(BalExecutionError::Execution(
             reth_evm::BlockExecutionError::msg("worker failed"),
         ))))
@@ -178,7 +179,7 @@ mod tests {
 
     #[test]
     fn orders_recovery_and_execution_errors_by_transaction_index() {
-        let (tx, rx) = reth_tasks::executor::channel::unbounded();
+        let (tx, rx) = channel::unbounded();
         tx.send(Err(BalWorkerError::Execution {
             tx_index: 2,
             tx_gas_limit: 42,
@@ -202,7 +203,7 @@ mod tests {
 
     #[test]
     fn rejects_closed_channel_before_all_outputs_arrive() {
-        let (tx, rx) = reth_tasks::executor::channel::unbounded();
+        let (tx, rx) = channel::unbounded();
         drop(tx);
 
         let mut outputs = ordered_worker_outputs::<u64>(&rx, 1);
@@ -214,7 +215,7 @@ mod tests {
     #[test]
     #[should_panic(expected = "out-of-bounds transaction index")]
     fn panics_on_out_of_bounds_index() {
-        let (tx, rx) = reth_tasks::executor::channel::unbounded();
+        let (tx, rx) = channel::unbounded();
         tx.send(Ok(output(1, 10))).unwrap();
         drop(tx);
 
@@ -225,7 +226,7 @@ mod tests {
     #[test]
     #[should_panic(expected = "duplicate transaction index")]
     fn panics_on_duplicate_pending_index() {
-        let (tx, rx) = reth_tasks::executor::channel::unbounded();
+        let (tx, rx) = channel::unbounded();
         tx.send(Ok(output(1, 10))).unwrap();
         tx.send(Ok(output(1, 11))).unwrap();
         drop(tx);
@@ -237,7 +238,7 @@ mod tests {
     #[test]
     #[should_panic(expected = "duplicate transaction index")]
     fn panics_on_duplicate_already_yielded_index() {
-        let (tx, rx) = reth_tasks::executor::channel::unbounded();
+        let (tx, rx) = channel::unbounded();
         tx.send(Ok(output(0, 0))).unwrap();
         tx.send(Ok(output(0, 1))).unwrap();
         drop(tx);

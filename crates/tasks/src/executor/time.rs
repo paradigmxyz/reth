@@ -1,5 +1,12 @@
 //! Monotonic time using the native clock or a virtual clock in simulation.
 
+#[cfg(feature = "fuzz")]
+use crate::executor::deterministic::{self, Timer};
+#[cfg(feature = "fuzz")]
+use shuttle::thread;
+#[cfg(feature = "fuzz")]
+use std::ops::{Add, AddAssign, Sub, SubAssign};
+
 pub use std::time::Duration;
 #[cfg(not(feature = "fuzz"))]
 pub use std::time::Instant;
@@ -13,7 +20,7 @@ pub struct Instant(pub(crate) Duration);
 impl Instant {
     /// Returns the current virtual time.
     pub fn now() -> Self {
-        Self(crate::executor::deterministic::now())
+        Self(deterministic::now())
     }
 
     /// Returns the time elapsed since this instant, saturating at zero.
@@ -43,7 +50,7 @@ impl Instant {
 }
 
 #[cfg(feature = "fuzz")]
-impl std::ops::Add<Duration> for Instant {
+impl Add<Duration> for Instant {
     type Output = Self;
     fn add(self, rhs: Duration) -> Self {
         Self(self.0 + rhs)
@@ -51,7 +58,7 @@ impl std::ops::Add<Duration> for Instant {
 }
 
 #[cfg(feature = "fuzz")]
-impl std::ops::Sub<Duration> for Instant {
+impl Sub<Duration> for Instant {
     type Output = Self;
     fn sub(self, rhs: Duration) -> Self {
         Self(self.0 - rhs)
@@ -59,10 +66,23 @@ impl std::ops::Sub<Duration> for Instant {
 }
 
 #[cfg(feature = "fuzz")]
-impl std::ops::Sub for Instant {
+impl Sub for Instant {
     type Output = Duration;
     fn sub(self, rhs: Self) -> Duration {
         self.duration_since(rhs)
+    }
+}
+
+#[cfg(feature = "fuzz")]
+impl AddAssign<Duration> for Instant {
+    fn add_assign(&mut self, rhs: Duration) {
+        self.0 += rhs;
+    }
+}
+#[cfg(feature = "fuzz")]
+impl SubAssign<Duration> for Instant {
+    fn sub_assign(&mut self, rhs: Duration) {
+        self.0 -= rhs;
     }
 }
 
@@ -76,23 +96,10 @@ pub fn sleep(duration: Duration) {
     #[cfg(feature = "fuzz")]
     {
         let deadline = Instant::now() + duration;
-        let timer = crate::executor::deterministic::Timer::new(deadline);
+        let timer = Timer::new(deadline);
         while Instant::now() < deadline {
-            shuttle::thread::park();
+            thread::park();
         }
         drop(timer);
-    }
-}
-
-#[cfg(feature = "fuzz")]
-impl std::ops::AddAssign<Duration> for Instant {
-    fn add_assign(&mut self, rhs: Duration) {
-        self.0 += rhs;
-    }
-}
-#[cfg(feature = "fuzz")]
-impl std::ops::SubAssign<Duration> for Instant {
-    fn sub_assign(&mut self, rhs: Duration) {
-        self.0 -= rhs;
     }
 }

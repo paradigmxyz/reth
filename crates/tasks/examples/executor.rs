@@ -1,6 +1,7 @@
 //! Run with `cargo run -p reth-tasks --example executor
 //! --features rayon`. Add `fuzz` to run the same blocking workload with deterministic scheduling
 //! and virtual time.
+#![forbid(unsafe_code)]
 
 use reth_tasks::{
     executor::{
@@ -8,8 +9,10 @@ use reth_tasks::{
         time::{self, Duration, Instant},
         Runtime,
     },
+    runtime::{DEFAULT_MAX_BLOCKING_TASKS, DEFAULT_RESERVED_CPU_CORES},
     RayonConfig, RuntimeBuilder, RuntimeConfig, TaskExecutor, TokioConfig, WorkerStatefulPool,
 };
+use tokio::{runtime::Builder, task};
 
 use std::{
     cell::Cell,
@@ -18,7 +21,7 @@ use std::{
         atomic::{AtomicUsize, Ordering},
         Arc,
     },
-    thread::ThreadId,
+    thread::{current, ThreadId},
 };
 
 const WAIT: Duration = Duration::from_secs(1);
@@ -27,18 +30,21 @@ struct WorkerState {
     value: Rc<Cell<usize>>,
     creator: ThreadId,
     drops: Arc<AtomicUsize>,
+    wrong_thread_drops: Arc<AtomicUsize>,
 }
 
 impl Drop for WorkerState {
     fn drop(&mut self) {
-        assert_eq!(self.creator, std::thread::current().id());
+        if self.creator != current().id() {
+            self.wrong_thread_drops.fetch_add(1, Ordering::SeqCst);
+        }
         self.drops.fetch_add(1, Ordering::SeqCst);
     }
 }
 
 fn main() {
     // Tokio remains native: only blocking work belongs to the selected executor runtime.
-    let tokio = tokio::runtime::Builder::new_multi_thread()
+    let tokio = Builder::new_multi_thread()
         .worker_threads(1)
         .enable_all()
         .build()
@@ -56,14 +62,15 @@ fn main() {
                     prewarming_threads: Some(2),
                     bal_streaming_threads: Some(2),
                     state_trie_overlay_worker_threads: Some(2),
-                    ..Default::default()
+                    reserved_cpu_cores: DEFAULT_RESERVED_CPU_CORES,
+                    max_blocking_tasks: DEFAULT_MAX_BLOCKING_TASKS,
                 },
             ),
         )
         .build()
         .expect("Reth runtime attaches to native Tokio");
         let asynchronous = tasks.handle().spawn(async {
-            tokio::task::yield_now().await;
+            task::yield_now().await;
             42
         });
         println!("runtime: native Tokio attached; blocking executor entered");
@@ -143,30 +150,33 @@ fn main() {
         // Rc<Cell<_>> proves initialization, access, replacement, and drop accept non-Send state.
         let stateful = WorkerStatefulPool::new(tasks.state_trie_overlay_worker_pool());
         let drops = Arc::new(AtomicUsize::new(0));
+        let wrong_thread_drops = Arc::new(AtomicUsize::new(0));
         stateful.init::<WorkerState>(|previous| {
             assert!(previous.is_none());
             WorkerState {
                 value: Rc::new(Cell::new(40 + pool::current_thread_index().expect("pool worker"))),
-                creator: std::thread::current().id(),
+                creator: current().id(),
                 drops: Arc::clone(&drops),
+                wrong_thread_drops: Arc::clone(&wrong_thread_drops),
             }
         });
         stateful.init::<WorkerState>(|previous| {
             let index = pool::current_thread_index().expect("initialization runs on a pool worker");
             let previous = previous.expect("worker state survives successive broadcasts");
-            assert_eq!(previous.creator, std::thread::current().id());
+            assert_eq!(previous.creator, current().id());
             assert_eq!(previous.value.get(), 40 + index);
             previous.value.set(previous.value.get() + 2);
             WorkerState {
                 value: Rc::clone(&previous.value),
-                creator: std::thread::current().id(),
+                creator: current().id(),
                 drops: Arc::clone(&drops),
+                wrong_thread_drops: Arc::clone(&wrong_thread_drops),
             }
         });
         assert_eq!(drops.load(Ordering::SeqCst), 2);
         let value = stateful.install_fn(|| {
             stateful.get::<WorkerState, _>(|state| {
-                assert_eq!(state.creator, std::thread::current().id());
+                assert_eq!(state.creator, current().id());
                 assert_eq!(
                     state.value.get(),
                     42 + pool::current_thread_index().expect("pool worker")
@@ -194,6 +204,7 @@ fn main() {
         println!("scope: borrowed pool and thread work joined; squares=[1, 4, 9, 16]; sum=30");
         drop(stateful);
         assert_eq!(drops.load(Ordering::SeqCst), 4);
+        assert_eq!(wrong_thread_drops.load(Ordering::SeqCst), 0);
         println!("pool: four non-Send states dropped on their creating physical threads");
         drop(tasks);
         asynchronous

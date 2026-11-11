@@ -89,51 +89,62 @@ impl<T: Send + std::fmt::Debug + 'static> std::fmt::Debug for LazyHandle<T> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_utils;
 
     #[test]
     fn test_lazy_handle_resolves() {
-        let (tx, rx) = channel::bounded(1);
-        let handle = LazyHandle::new(rx);
-        tx.send(42u64).unwrap();
-        assert_eq!(*handle.get(), 42);
-        // subsequent calls return cached value
-        assert_eq!(*handle.get(), 42);
+        test_utils::run(|| {
+            let (tx, rx) = channel::bounded(1);
+            let handle = LazyHandle::new(rx);
+            tx.send(42u64).unwrap();
+            assert_eq!(*handle.get(), 42);
+            // subsequent calls return cached value
+            assert_eq!(*handle.get(), 42);
+        });
     }
 
     #[test]
     fn test_lazy_handle_clone_shares_value() {
-        let (tx, rx) = channel::bounded(1);
-        let handle = LazyHandle::new(rx);
-        let handle2 = handle.clone();
-        tx.send(99u64).unwrap();
-        assert_eq!(*handle.get(), 99);
-        assert_eq!(*handle2.get(), 99);
+        test_utils::run(|| {
+            let (tx, rx) = channel::bounded(1);
+            let handle = LazyHandle::new(rx);
+            let handle2 = handle.clone();
+            tx.send(99u64).unwrap();
+            assert_eq!(*handle.get(), 99);
+            assert_eq!(*handle2.get(), 99);
+        });
     }
 
     #[test]
     fn test_lazy_handle_try_into_inner() {
-        let (tx, rx) = channel::bounded(1);
-        let handle = LazyHandle::new(rx);
-        tx.send(String::from("hello")).unwrap();
-        assert_eq!(handle.try_into_inner().unwrap(), "hello");
+        test_utils::run(|| {
+            let (tx, rx) = channel::bounded(1);
+            let handle = LazyHandle::new(rx);
+            tx.send(String::from("hello")).unwrap();
+            assert_eq!(handle.try_into_inner().unwrap(), "hello");
+        });
     }
 
     #[test]
     fn test_lazy_handle_try_into_inner_returns_self_with_clone() {
-        let (tx, rx) = channel::bounded(1);
-        let handle = LazyHandle::new(rx);
-        let _clone = handle.clone();
-        tx.send(String::from("hello")).unwrap();
-        let handle = handle.try_into_inner().unwrap_err();
-        assert_eq!(*handle.get(), "hello");
+        test_utils::run(|| {
+            let (tx, rx) = channel::bounded(1);
+            let handle = LazyHandle::new(rx);
+            let _clone = handle.clone();
+            tx.send(String::from("hello")).unwrap();
+            let handle = handle.try_into_inner().unwrap_err();
+            assert_eq!(*handle.get(), "hello");
+        });
     }
 
     #[test]
     #[should_panic(expected = "LazyHandle task dropped without producing a value")]
     fn test_lazy_handle_panics_on_dropped_sender() {
-        let (_tx, rx) = channel::bounded::<u64>(1);
-        let handle = LazyHandle::new(rx);
-        drop(_tx);
-        handle.get();
+        test_utils::run(|| {
+            let (_tx, rx) = channel::bounded::<u64>(1);
+            let handle = LazyHandle::new(rx);
+            drop(_tx);
+            handle.get();
+        });
     }
 }

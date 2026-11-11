@@ -16,7 +16,7 @@ use reth_stages_api::{
     StageId, TransactionRangeOutput, UnwindInput, UnwindOutput,
 };
 use reth_static_file_types::StaticFileSegment;
-use reth_tasks::executor::channel::mpsc;
+use reth_tasks::executor::{channel::mpsc, rayon};
 use std::{fmt::Debug, ops::Range};
 use thiserror::Error;
 use tracing::*;
@@ -384,7 +384,7 @@ where
                 // Spawn the task onto the global rayon pool
                 // This task will send the results through the channel after it has read the
                 // transaction and calculated the sender.
-                reth_tasks::executor::rayon::spawn(move || {
+                rayon::spawn(move || {
                     let mut rlp_buf = Vec::with_capacity(128);
                     for (number, tx) in chunk {
                         let res = tx

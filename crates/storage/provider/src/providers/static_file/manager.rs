@@ -51,7 +51,7 @@ use reth_storage_api::{
     StorageChangeSetReader, StorageSettingsCache,
 };
 use reth_storage_errors::provider::{ProviderError, ProviderResult, StaticFileWriterError};
-use reth_tasks::executor::channel::mpsc;
+use reth_tasks::executor::{channel::mpsc, rayon};
 use std::{
     collections::BTreeMap,
     fmt::Debug,
@@ -2871,7 +2871,7 @@ impl<N: NodePrimitives<SignedTx: Value, Receipt: Value, BlockHeader: Value>> Tra
 
             // Spawn the task onto the global rayon pool
             // This task will send the cached transaction hash through the channel.
-            reth_tasks::executor::rayon::spawn(move || {
+            rayon::spawn(move || {
                 let _ = manager.fetch_range_with_predicate(
                     StaticFileSegment::Transactions,
                     chunk_range,

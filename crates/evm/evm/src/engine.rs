@@ -4,7 +4,7 @@ use crate::{
 };
 use alloy_consensus::transaction::Either;
 use reth_primitives_traits::TxTy;
-use reth_tasks::executor::rayon::prelude::*;
+use reth_tasks::executor::rayon::{iter::Map, prelude::*};
 
 /// [`ConfigureEvm`] extension providing methods for executing payloads.
 pub trait ConfigureEngineEvm<ExecutionData>: ConfigureEvm {
@@ -153,8 +153,8 @@ where
 {
     type Item = Either<L::Item, R::Item>;
     type Iter = Either<
-        reth_tasks::executor::rayon::iter::Map<L::Iter, fn(L::Item) -> Either<L::Item, R::Item>>,
-        reth_tasks::executor::rayon::iter::Map<R::Iter, fn(R::Item) -> Either<L::Item, R::Item>>,
+        Map<L::Iter, fn(L::Item) -> Either<L::Item, R::Item>>,
+        Map<R::Iter, fn(R::Item) -> Either<L::Item, R::Item>>,
     >;
 
     fn into_par_iter(self) -> Self::Iter {

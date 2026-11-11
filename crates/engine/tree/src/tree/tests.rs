@@ -40,7 +40,7 @@ use reth_primitives_traits::Block as _;
 use reth_provider::{
     test_utils::MockEthProvider, BalStoreHandle, HeaderProvider, InMemoryBalStore, RawBal,
 };
-use reth_tasks::spawn_thread;
+use reth_tasks::{executor::thread, spawn_thread};
 use reth_trie_common::SortedTrieData;
 use std::{collections::BTreeMap, str::FromStr, sync::Arc, time::Duration};
 use tokio::sync::oneshot;
@@ -121,7 +121,7 @@ impl<T: Send + 'static> TestChannel<T> {
         let handle = TestChannelHandle::new(release_tx);
         let test_channel = Self { release: release_rx, tx: wrapped_tx, rx: original_rx };
         // spawn the task that listens and releases stuff
-        reth_tasks::executor::thread::spawn(move || test_channel.intercept_loop());
+        thread::spawn(move || test_channel.intercept_loop());
         (original_tx, wrapped_rx, handle)
     }
 
@@ -161,9 +161,7 @@ struct TestHarness {
         BasicEngineValidator<MockEthProvider, MockEvmConfig, MockEngineValidator>,
         MockEvmConfig,
     >,
-    to_tree_tx: reth_tasks::executor::channel::Sender<
-        FromEngine<EngineApiRequest<EthEngineTypes, EthPrimitives>, Block>,
-    >,
+    to_tree_tx: channel::Sender<FromEngine<EngineApiRequest<EthEngineTypes, EthPrimitives>, Block>>,
     from_tree_rx: UnboundedReceiver<EngineApiEvent>,
     payload_command_rx: UnboundedReceiver<PayloadServiceCommand<EthEngineTypes>>,
     blocks: Vec<ExecutedBlock>,
@@ -476,11 +474,11 @@ impl ValidatorTestHarness {
     fn start_persistence_operation(&mut self, action: CurrentPersistenceAction) {
         match action {
             CurrentPersistenceAction::SavingBlocks { highest } => {
-                let (_tx, rx) = reth_tasks::executor::channel::bounded(1);
+                let (_tx, rx) = channel::bounded(1);
                 self.harness.tree.persistence_state.start_save(highest, rx);
             }
             CurrentPersistenceAction::RemovingBlocks { new_tip_num } => {
-                let (_tx, rx) = reth_tasks::executor::channel::bounded(1);
+                let (_tx, rx) = channel::bounded(1);
                 self.harness.tree.persistence_state.start_remove(new_tip_num, rx);
             }
         }
@@ -927,7 +925,7 @@ fn backfill_request_is_preserved_while_persistence_is_in_flight() {
     let (mut test_harness, blocks, action) = deferred_backfill_harness();
     let state_trie_tip = blocks[2].recovered_block().num_hash();
     let database_tip = blocks[4].recovered_block().num_hash();
-    let (persistence_tx, persistence_rx) = reth_tasks::executor::channel::bounded(1);
+    let (persistence_tx, persistence_rx) = channel::bounded(1);
     test_harness.tree.persistence_state.start_save(database_tip, persistence_rx);
 
     test_harness.tree.emit_event(EngineApiEvent::BackfillAction(action.clone()));
@@ -1246,7 +1244,7 @@ fn test_backpressure_waits_for_persistence_before_reading_incoming() {
         .with_memory_block_buffer_target(0)
         .with_persistence_backpressure_threshold(1);
 
-    let (persist_tx, persist_rx) = reth_tasks::executor::channel::bounded(1);
+    let (persist_tx, persist_rx) = channel::bounded(1);
     let persisted = blocks.last().unwrap().recovered_block().num_hash();
     test_harness.tree.persistence_state.start_save(persisted, persist_rx);
     assert!(test_harness.tree.should_backpressure());
@@ -1271,8 +1269,8 @@ fn test_backpressure_waits_for_persistence_before_reading_incoming() {
     test_harness.to_tree_tx.send(FromEngine::DownloadedBlocks(vec![])).unwrap();
     assert_eq!(test_harness.tree.incoming.len(), 2);
 
-    reth_tasks::executor::thread::spawn(move || {
-        reth_tasks::executor::thread::sleep(Duration::from_millis(10));
+    thread::spawn(move || {
+        thread::sleep(Duration::from_millis(10));
         persist_tx
             .send(PersistenceResult {
                 last_block: persisted,
@@ -1319,7 +1317,7 @@ fn test_backpressure_excludes_in_memory_buffer() {
             .with_memory_block_buffer_target(5)
             .with_persistence_backpressure_threshold(10);
 
-        let (_persist_tx, persist_rx) = reth_tasks::executor::channel::bounded(1);
+        let (_persist_tx, persist_rx) = channel::bounded(1);
         let persisted = blocks.last().unwrap().recovered_block().num_hash();
         test_harness.tree.persistence_state.start_save(persisted, persist_rx);
 
@@ -3634,7 +3632,7 @@ proptest::proptest! {
             }
             let messages = (0..requests.len()).map(|_| rx.try_recv().unwrap()).collect::<Vec<_>>();
             let expected = requests.iter().map(|&(caller, _)| callers[caller].id()).collect::<Vec<_>>();
-            reth_tasks::executor::thread::scope(|scope| {
+            thread::scope(|scope| {
                 scope.spawn(|| {
                     tracing::dispatcher::with_default(&dispatch, || {
                         let mut harness = TestHarness::new(MAINNET.clone());

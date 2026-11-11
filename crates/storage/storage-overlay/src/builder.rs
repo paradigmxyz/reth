@@ -31,6 +31,9 @@ use std::{
 };
 use tracing::{debug, debug_span, instrument};
 
+#[cfg(feature = "rayon")]
+use reth_tasks::executor::rayon;
+
 /// Contains the trie and hashed-state data required to initialize an overlay state provider.
 #[derive(Debug, Clone)]
 pub struct StateTrieOverlay {
@@ -166,7 +169,7 @@ impl ExecutionOverlay {
         };
 
         #[cfg(feature = "rayon")]
-        reth_tasks::executor::rayon::join(extend_accounts_and_storage, extend_code_hashes);
+        rayon::join(extend_accounts_and_storage, extend_code_hashes);
 
         #[cfg(not(feature = "rayon"))]
         {

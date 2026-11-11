@@ -25,171 +25,21 @@ pub fn send_or_cancel<T>(
 #[cfg(feature = "fuzz")]
 mod simulated {
     use crate::executor::{
+        deterministic::Timer,
         sync::{Arc, Mutex},
         thread,
         time::{Duration, Instant},
     };
-    use std::{collections::VecDeque, fmt};
+    use std::{collections::VecDeque, fmt, mem};
 
     pub use crate::{select, select_biased};
     pub use crossbeam_channel::{
         RecvError, RecvTimeoutError, SendError, TryRecvError, TrySendError,
     };
 
-    struct State<T> {
-        queue: VecDeque<(u64, T)>,
-        capacity: Option<usize>,
-        next_ticket: u64,
-        senders: usize,
-        receivers: usize,
-        send_waiters: Vec<thread::Thread>,
-        recv_waiters: Vec<thread::Thread>,
-        direct_receivers: Vec<thread::ThreadId>,
-    }
-
     /// The sending half of a simulated MPMC channel.
     pub struct Sender<T> {
         state: Arc<Mutex<State<T>>>,
-    }
-    /// The receiving half of a simulated MPMC channel.
-    pub struct Receiver<T> {
-        state: Arc<Mutex<State<T>>>,
-    }
-
-    impl<T> fmt::Debug for Sender<T> {
-        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-            f.debug_struct("Sender").finish_non_exhaustive()
-        }
-    }
-    impl<T> fmt::Debug for Receiver<T> {
-        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-            f.debug_struct("Receiver").finish_non_exhaustive()
-        }
-    }
-
-    /// Creates a channel with capacity `capacity`; zero requires a rendezvous.
-    pub fn bounded<T>(capacity: usize) -> (Sender<T>, Receiver<T>) {
-        make(Some(capacity))
-    }
-    /// Creates a receiver that never becomes ready or disconnected.
-    pub fn never<T>() -> Receiver<T> {
-        let (sender, receiver) = make(None);
-        drop(sender);
-        receiver.with_permanent_sender()
-    }
-    /// Creates a channel without a capacity limit.
-    pub fn unbounded<T>() -> (Sender<T>, Receiver<T>) {
-        make(None)
-    }
-
-    fn make<T>(capacity: Option<usize>) -> (Sender<T>, Receiver<T>) {
-        let state = Arc::new(Mutex::new(State {
-            queue: VecDeque::new(),
-            capacity,
-            next_ticket: 0,
-            senders: 1,
-            receivers: 1,
-            send_waiters: Vec::new(),
-            recv_waiters: Vec::new(),
-            direct_receivers: Vec::new(),
-        }));
-        (Sender { state: state.clone() }, Receiver { state })
-    }
-
-    fn wake(waiters: Vec<thread::Thread>) {
-        for waiter in waiters {
-            waiter.unpark();
-        }
-    }
-    fn register(waiters: &mut Vec<thread::Thread>) {
-        let current = thread::current();
-        if !waiters.iter().any(|waiter| waiter.id() == current.id()) {
-            waiters.push(current);
-        }
-    }
-
-    /// Sends a value unless `cancel` receives a message or disconnects first.
-    ///
-    /// Cancellation retracts an unconsumed rendezvous value and returns it.
-    /// A value already accepted by a receiver is committed even if cancellation
-    /// is observed before this function resumes.
-    pub fn send_or_cancel<T>(
-        sender: &Sender<T>,
-        value: T,
-        cancel: &Receiver<()>,
-    ) -> Result<(), SendError<T>> {
-        send_blocking(sender, value, Some(cancel))
-    }
-
-    fn send_blocking<T>(
-        sender: &Sender<T>,
-        value: T,
-        cancel: Option<&Receiver<()>>,
-    ) -> Result<(), SendError<T>> {
-        let _registration = SendListener { sender, id: thread::current().id() };
-        let mut value = Some(value);
-        let mut ticket = None;
-        loop {
-            let cancellation = cancel.map(Receiver::listen);
-            let cancelled = matches!(
-                cancel.map(Receiver::try_recv),
-                Some(Ok(()) | Err(TryRecvError::Disconnected))
-            );
-            let mut state = sender.state.lock().expect("channel state is not poisoned");
-            if let Some(sent) = ticket {
-                let Some(position) = state.queue.iter().position(|(id, _)| *id == sent) else {
-                    return Ok(());
-                };
-                if cancelled || state.receivers == 0 {
-                    let value = state.queue.remove(position).expect("pending rendezvous value").1;
-                    let waiters = std::mem::take(&mut state.send_waiters);
-                    drop(state);
-                    wake(waiters);
-                    return Err(SendError(value));
-                }
-            } else {
-                if cancelled || state.receivers == 0 {
-                    return Err(SendError(value.take().expect("unsent value")));
-                }
-                if state.capacity.is_none_or(|cap| state.queue.len() < cap.max(1)) {
-                    let id = state.next_ticket;
-                    state.next_ticket += 1;
-                    state.queue.push_back((id, value.take().expect("unsent value")));
-                    let waiters = std::mem::take(&mut state.recv_waiters);
-                    if state.capacity != Some(0) {
-                        drop(state);
-                        wake(waiters);
-                        return Ok(());
-                    }
-                    ticket = Some(id);
-                    register(&mut state.send_waiters);
-                    drop(state);
-                    wake(waiters);
-                    thread::park();
-                    drop(cancellation);
-                    continue;
-                }
-            }
-            register(&mut state.send_waiters);
-            drop(state);
-            thread::park();
-            drop(cancellation);
-        }
-    }
-
-    struct SendListener<'a, T> {
-        sender: &'a Sender<T>,
-        id: thread::ThreadId,
-    }
-    impl<T> Drop for SendListener<'_, T> {
-        fn drop(&mut self) {
-            self.sender
-                .state
-                .lock()
-                .expect("channel state is not poisoned")
-                .send_waiters
-                .retain(|thread| thread.id() != self.id);
-        }
     }
 
     impl<T> Sender<T> {
@@ -216,7 +66,7 @@ mod simulated {
             let id = state.next_ticket;
             state.next_ticket += 1;
             state.queue.push_back((id, value));
-            let waiters = std::mem::take(&mut state.recv_waiters);
+            let waiters = mem::take(&mut state.recv_waiters);
             drop(state);
             wake(waiters);
             Ok(())
@@ -239,6 +89,35 @@ mod simulated {
         pub fn capacity(&self) -> Option<usize> {
             self.state.lock().expect("channel state is not poisoned").capacity
         }
+    }
+
+    impl<T> fmt::Debug for Sender<T> {
+        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            f.debug_struct("Sender").finish_non_exhaustive()
+        }
+    }
+
+    impl<T> Clone for Sender<T> {
+        fn clone(&self) -> Self {
+            self.state.lock().expect("channel state is not poisoned").senders += 1;
+            Self { state: self.state.clone() }
+        }
+    }
+
+    impl<T> Drop for Sender<T> {
+        fn drop(&mut self) {
+            let mut state = self.state.lock().unwrap_or_else(|error| error.into_inner());
+            state.senders -= 1;
+            let waiters =
+                if state.senders == 0 { mem::take(&mut state.recv_waiters) } else { Vec::new() };
+            drop(state);
+            wake(waiters);
+        }
+    }
+
+    /// The receiving half of a simulated MPMC channel.
+    pub struct Receiver<T> {
+        state: Arc<Mutex<State<T>>>,
     }
 
     impl<T> Receiver<T> {
@@ -268,7 +147,7 @@ mod simulated {
         /// the deadline.
         pub fn recv_timeout(&self, timeout: Duration) -> Result<T, RecvTimeoutError> {
             let deadline = Instant::now() + timeout;
-            let timer = crate::executor::deterministic::Timer::new(deadline);
+            let timer = Timer::new(deadline);
             let result = loop {
                 let listener = self.listen_receive();
                 match self.try_recv() {
@@ -289,7 +168,7 @@ mod simulated {
         pub fn try_recv(&self) -> Result<T, TryRecvError> {
             let mut state = self.state.lock().expect("channel state is not poisoned");
             if let Some((_, value)) = state.queue.pop_front() {
-                let waiters = std::mem::take(&mut state.send_waiters);
+                let waiters = mem::take(&mut state.send_waiters);
                 drop(state);
                 wake(waiters);
                 Ok(value)
@@ -351,6 +230,45 @@ mod simulated {
         }
     }
 
+    impl<T> fmt::Debug for Receiver<T> {
+        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            f.debug_struct("Receiver").finish_non_exhaustive()
+        }
+    }
+
+    impl<T> Clone for Receiver<T> {
+        fn clone(&self) -> Self {
+            self.state.lock().expect("channel state is not poisoned").receivers += 1;
+            Self { state: self.state.clone() }
+        }
+    }
+
+    impl<T> Drop for Receiver<T> {
+        fn drop(&mut self) {
+            let mut state = self.state.lock().unwrap_or_else(|error| error.into_inner());
+            state.receivers -= 1;
+            let waiters =
+                if state.receivers == 0 { mem::take(&mut state.send_waiters) } else { Vec::new() };
+            drop(state);
+            wake(waiters);
+        }
+    }
+
+    impl<T> IntoIterator for Receiver<T> {
+        type Item = T;
+        type IntoIter = IntoIter<T>;
+        fn into_iter(self) -> Self::IntoIter {
+            IntoIter(self)
+        }
+    }
+    impl<'a, T> IntoIterator for &'a Receiver<T> {
+        type Item = T;
+        type IntoIter = Iter<'a, T>;
+        fn into_iter(self) -> Self::IntoIter {
+            self.iter()
+        }
+    }
+
     /// A receive-readiness registration removed when dropped.
     #[doc(hidden)]
     #[derive(Debug)]
@@ -360,48 +278,9 @@ mod simulated {
     }
     impl<T> Drop for Listener<'_, T> {
         fn drop(&mut self) {
-            let mut state = self.receiver.state.lock().expect("channel state is not poisoned");
+            let mut state = self.receiver.state.lock().unwrap_or_else(|error| error.into_inner());
             state.recv_waiters.retain(|thread| thread.id() != self.id);
             state.direct_receivers.retain(|id| *id != self.id);
-        }
-    }
-
-    impl<T> Clone for Sender<T> {
-        fn clone(&self) -> Self {
-            self.state.lock().expect("channel state is not poisoned").senders += 1;
-            Self { state: self.state.clone() }
-        }
-    }
-    impl<T> Clone for Receiver<T> {
-        fn clone(&self) -> Self {
-            self.state.lock().expect("channel state is not poisoned").receivers += 1;
-            Self { state: self.state.clone() }
-        }
-    }
-    impl<T> Drop for Sender<T> {
-        fn drop(&mut self) {
-            let mut state = self.state.lock().expect("channel state is not poisoned");
-            state.senders -= 1;
-            let waiters = if state.senders == 0 {
-                std::mem::take(&mut state.recv_waiters)
-            } else {
-                Vec::new()
-            };
-            drop(state);
-            wake(waiters);
-        }
-    }
-    impl<T> Drop for Receiver<T> {
-        fn drop(&mut self) {
-            let mut state = self.state.lock().expect("channel state is not poisoned");
-            state.receivers -= 1;
-            let waiters = if state.receivers == 0 {
-                std::mem::take(&mut state.send_waiters)
-            } else {
-                Vec::new()
-            };
-            drop(state);
-            wake(waiters);
         }
     }
 
@@ -432,18 +311,140 @@ mod simulated {
             self.0.recv().ok()
         }
     }
-    impl<T> IntoIterator for Receiver<T> {
-        type Item = T;
-        type IntoIter = IntoIter<T>;
-        fn into_iter(self) -> Self::IntoIter {
-            IntoIter(self)
+
+    struct State<T> {
+        queue: VecDeque<(u64, T)>,
+        capacity: Option<usize>,
+        next_ticket: u64,
+        senders: usize,
+        receivers: usize,
+        send_waiters: Vec<thread::Thread>,
+        recv_waiters: Vec<thread::Thread>,
+        direct_receivers: Vec<thread::ThreadId>,
+    }
+
+    struct SendListener<'a, T> {
+        sender: &'a Sender<T>,
+        id: thread::ThreadId,
+    }
+    impl<T> Drop for SendListener<'_, T> {
+        fn drop(&mut self) {
+            self.sender
+                .state
+                .lock()
+                .unwrap_or_else(|error| error.into_inner())
+                .send_waiters
+                .retain(|thread| thread.id() != self.id);
         }
     }
-    impl<'a, T> IntoIterator for &'a Receiver<T> {
-        type Item = T;
-        type IntoIter = Iter<'a, T>;
-        fn into_iter(self) -> Self::IntoIter {
-            self.iter()
+
+    /// Creates a channel with capacity `capacity`; zero requires a rendezvous.
+    pub fn bounded<T>(capacity: usize) -> (Sender<T>, Receiver<T>) {
+        make(Some(capacity))
+    }
+    /// Creates a receiver that never becomes ready or disconnected.
+    pub fn never<T>() -> Receiver<T> {
+        let (sender, receiver) = make(None);
+        drop(sender);
+        receiver.with_permanent_sender()
+    }
+    /// Creates a channel without a capacity limit.
+    pub fn unbounded<T>() -> (Sender<T>, Receiver<T>) {
+        make(None)
+    }
+
+    /// Sends a value unless `cancel` receives a message or disconnects first.
+    ///
+    /// Cancellation retracts an unconsumed rendezvous value and returns it.
+    /// A value already accepted by a receiver is committed even if cancellation
+    /// is observed before this function resumes.
+    pub fn send_or_cancel<T>(
+        sender: &Sender<T>,
+        value: T,
+        cancel: &Receiver<()>,
+    ) -> Result<(), SendError<T>> {
+        send_blocking(sender, value, Some(cancel))
+    }
+
+    fn make<T>(capacity: Option<usize>) -> (Sender<T>, Receiver<T>) {
+        let state = Arc::new(Mutex::new(State {
+            queue: VecDeque::new(),
+            capacity,
+            next_ticket: 0,
+            senders: 1,
+            receivers: 1,
+            send_waiters: Vec::new(),
+            recv_waiters: Vec::new(),
+            direct_receivers: Vec::new(),
+        }));
+        (Sender { state: state.clone() }, Receiver { state })
+    }
+
+    fn wake(waiters: Vec<thread::Thread>) {
+        for waiter in waiters {
+            waiter.unpark();
+        }
+    }
+    fn register(waiters: &mut Vec<thread::Thread>) {
+        let current = thread::current();
+        if !waiters.iter().any(|waiter| waiter.id() == current.id()) {
+            waiters.push(current);
+        }
+    }
+
+    fn send_blocking<T>(
+        sender: &Sender<T>,
+        value: T,
+        cancel: Option<&Receiver<()>>,
+    ) -> Result<(), SendError<T>> {
+        let _registration = SendListener { sender, id: thread::current().id() };
+        let mut value = Some(value);
+        let mut ticket = None;
+        loop {
+            let cancellation = cancel.map(Receiver::listen);
+            let cancelled = matches!(
+                cancel.map(Receiver::try_recv),
+                Some(Ok(()) | Err(TryRecvError::Disconnected))
+            );
+            let mut state = sender.state.lock().expect("channel state is not poisoned");
+            if let Some(sent) = ticket {
+                let Some(position) = state.queue.iter().position(|(id, _)| *id == sent) else {
+                    return Ok(());
+                };
+                if cancelled || state.receivers == 0 {
+                    let value = state.queue.remove(position).expect("pending rendezvous value").1;
+                    let waiters = mem::take(&mut state.send_waiters);
+                    drop(state);
+                    wake(waiters);
+                    return Err(SendError(value));
+                }
+            } else {
+                if cancelled || state.receivers == 0 {
+                    return Err(SendError(value.take().expect("unsent value")));
+                }
+                if state.capacity.is_none_or(|cap| state.queue.len() < cap.max(1)) {
+                    let id = state.next_ticket;
+                    state.next_ticket += 1;
+                    state.queue.push_back((id, value.take().expect("unsent value")));
+                    let waiters = mem::take(&mut state.recv_waiters);
+                    if state.capacity != Some(0) {
+                        drop(state);
+                        wake(waiters);
+                        return Ok(());
+                    }
+                    ticket = Some(id);
+                    register(&mut state.send_waiters);
+                    drop(state);
+                    wake(waiters);
+                    thread::park();
+                    drop(cancellation);
+                    continue;
+                }
+            }
+            register(&mut state.send_waiters);
+            drop(state);
+            thread::park();
+            drop(cancellation);
         }
     }
 }

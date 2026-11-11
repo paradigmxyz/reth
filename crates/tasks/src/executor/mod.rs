@@ -5,6 +5,11 @@
 //! one OS thread in fixed round-robin order. Only primitives from this crate may
 //! block simulated tasks; native blocking or OS I/O is outside the simulation.
 
+#[cfg(feature = "fuzz")]
+pub use shuttle::thread_local;
+#[cfg(not(feature = "fuzz"))]
+pub use std::thread_local;
+
 pub mod channel;
 pub mod iter;
 pub mod pool;
@@ -42,8 +47,3 @@ pub mod rayon {
         pub use crate::executor::iter::*;
     }
 }
-
-#[cfg(feature = "fuzz")]
-pub use shuttle::thread_local;
-#[cfg(not(feature = "fuzz"))]
-pub use std::thread_local;

@@ -5,7 +5,7 @@ use super::{
 use blake3::Hasher;
 use eyre::Result;
 use reth_fs_util::{self as fs, FsPathError};
-use reth_tasks::executor::rayon::prelude::*;
+use reth_tasks::executor::rayon::{self, prelude::*};
 use std::{
     io::{ErrorKind, Read},
     mem,
@@ -137,7 +137,7 @@ impl<'a> OutputVerifier<'a> {
 
         let mut filled = read_full(&mut file, &mut current)?;
         while filled > 0 {
-            let (_, read) = reth_tasks::executor::rayon::join(
+            let (_, read) = rayon::join(
                 || {
                     #[cfg(not(feature = "fuzz"))]
                     hasher.update_rayon(&current[..filled]);

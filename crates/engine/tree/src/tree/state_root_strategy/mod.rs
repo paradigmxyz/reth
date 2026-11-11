@@ -71,9 +71,11 @@ use reth_storage_overlay::{OverlayManager, OverlayStateProviderFactory};
 use reth_tasks::{
     executor::{
         channel::{
+            self,
             mpsc::{self, RecvTimeoutError},
             Receiver,
         },
+        thread,
         time::Instant,
     },
     utils::increase_thread_priority,
@@ -553,7 +555,7 @@ impl DefaultStateRootStrategy {
             config,
             pending_sparse_trie_prune_blocks,
         } = options;
-        let (updates_tx, from_multi_proof) = reth_tasks::executor::channel::unbounded();
+        let (updates_tx, from_multi_proof) = channel::unbounded();
         let (cancel_guard, cancel_rx) = StateRootTaskCancelGuard::channel();
 
         let worker_counts = ProofWorkerCounts::new(
@@ -1245,7 +1247,7 @@ where
                 }
             }
 
-            reth_tasks::executor::thread::sleep(Duration::from_millis(1));
+            thread::sleep(Duration::from_millis(1));
         }
     }
 }
@@ -1270,6 +1272,7 @@ mod tests {
         HashingWriter,
     };
     use reth_storage_overlay::{OverlayManager, OverlayStateProviderFactory};
+    use reth_tasks::executor::{channel, thread};
     use reth_testing_utils::generators;
     use reth_trie::test_utils::state_root;
     use reth_trie_common::bundle_state::StorageSlot;
@@ -1365,7 +1368,7 @@ mod tests {
                     overlay_manager: overlay_manager.clone(),
                     handle: StateRootHandle::new(
                         B256::ZERO,
-                        reth_tasks::executor::channel::unbounded().0,
+                        channel::unbounded().0,
                         StateRootTaskCancelGuard::channel().0,
                         result_rx,
                         mpsc::channel().1,
@@ -1443,7 +1446,7 @@ mod tests {
         let (pending_trie_tx, pending_trie_rx) = mpsc::channel();
         let overlay_manager = OverlayManager::<EthPrimitives>::default();
         let (done_tx, done_rx) = mpsc::channel();
-        let worker = reth_tasks::executor::thread::spawn(move || {
+        let worker = thread::spawn(move || {
             publish_sparse_trie(&pending_trie_rx, &overlay_manager, B256::ZERO, B256::ZERO);
             assert!(overlay_manager.take_sparse_trie().is_none());
             done_tx.send(()).unwrap();

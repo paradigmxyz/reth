@@ -227,106 +227,116 @@ impl std::fmt::Debug for WorkerMap {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_utils;
 
-    #[tokio::test]
-    async fn worker_map_basic() {
-        let map = WorkerMap::new();
+    #[test]
+    fn worker_map_basic() {
+        test_utils::run(|| {
+            let map = WorkerMap::new();
 
-        let result = map.spawn_on("test", || 42).recv().unwrap();
-        assert_eq!(result, 42);
-    }
-
-    #[tokio::test]
-    async fn worker_map_same_thread() {
-        let map = WorkerMap::new();
-
-        let id1 = map.spawn_on("test", || thread::current().id()).recv().unwrap();
-        let id2 = map.spawn_on("test", || thread::current().id()).recv().unwrap();
-        assert_eq!(id1, id2, "same name should run on the same thread");
-    }
-
-    #[tokio::test]
-    async fn worker_map_different_names_different_threads() {
-        let map = WorkerMap::new();
-
-        let id1 = map.spawn_on("worker-a", || thread::current().id()).recv().unwrap();
-        let id2 = map.spawn_on("worker-b", || thread::current().id()).recv().unwrap();
-        assert_ne!(id1, id2, "different names should run on different threads");
-    }
-
-    #[tokio::test]
-    async fn worker_map_sequential_execution() {
-        use std::sync::{
-            atomic::{AtomicUsize, Ordering},
-            Arc,
-        };
-
-        let map = WorkerMap::new();
-        let counter = Arc::new(AtomicUsize::new(0));
-
-        let mut receivers = Vec::new();
-        for i in 0..10 {
-            let c = counter.clone();
-            let rx = map.spawn_on("sequential", move || {
-                let val = c.fetch_add(1, Ordering::SeqCst);
-                assert_eq!(val, i, "tasks should execute in order");
-                val
-            });
-            receivers.push(rx);
-        }
-
-        for (i, rx) in receivers.into_iter().enumerate() {
-            let val = rx.recv().unwrap();
-            assert_eq!(val, i);
-        }
-    }
-
-    #[tokio::test]
-    async fn worker_map_thread_name() {
-        let map = WorkerMap::new();
-
-        let name = map
-            .spawn_on("custom-worker", || thread::current().name().unwrap().to_string())
-            .recv()
-            .unwrap();
-        assert_eq!(name, "custom-worker");
-    }
-
-    #[tokio::test]
-    async fn worker_map_try_spawn_busy() {
-        let map = WorkerMap::new();
-        let (release_tx, release_rx) = std::sync::mpsc::channel();
-
-        let first = map.try_spawn_on("busy-worker", move || {
-            release_rx.recv().unwrap();
-            1
+            let result = map.spawn_on("test", || 42).recv().unwrap();
+            assert_eq!(result, 42);
         });
-        assert!(first.is_some());
+    }
 
-        let second = map.try_spawn_on("busy-worker", || 2);
-        assert!(second.is_none(), "busy worker should reject queued work");
+    #[test]
+    fn worker_map_same_thread() {
+        test_utils::run(|| {
+            let map = WorkerMap::new();
 
-        release_tx.send(()).unwrap();
-        assert_eq!(first.unwrap().recv().unwrap(), 1);
+            let id1 = map.spawn_on("test", || thread::current().id()).recv().unwrap();
+            let id2 = map.spawn_on("test", || thread::current().id()).recv().unwrap();
+            assert_eq!(id1, id2, "same name should run on the same thread");
+        });
+    }
 
-        let third = map.try_spawn_on("busy-worker", || 3).expect("worker should be idle");
-        assert_eq!(third.recv().unwrap(), 3);
+    #[test]
+    fn worker_map_different_names_different_threads() {
+        test_utils::run(|| {
+            let map = WorkerMap::new();
+
+            let id1 = map.spawn_on("worker-a", || thread::current().id()).recv().unwrap();
+            let id2 = map.spawn_on("worker-b", || thread::current().id()).recv().unwrap();
+            assert_ne!(id1, id2, "different names should run on different threads");
+        });
+    }
+
+    #[test]
+    fn worker_map_sequential_execution() {
+        test_utils::run(|| {
+            let map = WorkerMap::new();
+            let counter = Arc::new(AtomicUsize::new(0));
+
+            let mut receivers = Vec::new();
+            for i in 0..10 {
+                let c = counter.clone();
+                let rx = map.spawn_on("sequential", move || {
+                    let val = c.fetch_add(1, Ordering::SeqCst);
+                    assert_eq!(val, i, "tasks should execute in order");
+                    val
+                });
+                receivers.push(rx);
+            }
+
+            for (i, rx) in receivers.into_iter().enumerate() {
+                let val = rx.recv().unwrap();
+                assert_eq!(val, i);
+            }
+        });
+    }
+
+    #[test]
+    fn worker_map_thread_name() {
+        test_utils::run(|| {
+            let map = WorkerMap::new();
+
+            let name = map
+                .spawn_on("custom-worker", || thread::current().name().unwrap().to_string())
+                .recv()
+                .unwrap();
+            assert_eq!(name, "custom-worker");
+        });
+    }
+
+    #[test]
+    fn worker_map_try_spawn_busy() {
+        test_utils::run(|| {
+            let map = WorkerMap::new();
+            let (release_tx, release_rx) = channel::unbounded();
+
+            let first = map.try_spawn_on("busy-worker", move || {
+                release_rx.recv().unwrap();
+                1
+            });
+            assert!(first.is_some());
+
+            let second = map.try_spawn_on("busy-worker", || 2);
+            assert!(second.is_none(), "busy worker should reject queued work");
+
+            release_tx.send(()).unwrap();
+            assert_eq!(first.unwrap().recv().unwrap(), 1);
+
+            let third = map.try_spawn_on("busy-worker", || 3).expect("worker should be idle");
+            assert_eq!(third.recv().unwrap(), 3);
+        });
     }
 
     #[test]
     fn worker_map_last_owner_dropped_on_worker() {
-        let map = Arc::new(WorkerMap::new());
-        let owner = Arc::clone(&map);
-        let (release_tx, release_rx) = std::sync::mpsc::channel();
+        test_utils::run(|| {
+            let map = Arc::new(WorkerMap::new());
+            let owner = Arc::clone(&map);
+            let (release_tx, release_rx) = channel::unbounded();
 
-        let done = map.spawn_on("last-owner", move || {
-            release_rx.recv().unwrap();
-            // Drops the last reference to the map on the worker it would join.
-            drop(owner);
+            let done = map.spawn_on("last-owner", move || {
+                release_rx.recv().unwrap();
+                // Drops the last reference to the map on the worker it would join.
+                drop(owner);
+            });
+
+            drop(map);
+            release_tx.send(()).unwrap();
+            done.recv().expect("dropping the map on its own worker should not panic");
         });
-
-        drop(map);
-        release_tx.send(()).unwrap();
-        done.recv().expect("dropping the map on its own worker should not panic");
     }
 }

@@ -6,12 +6,11 @@
 //! - Dedicated rayon thread pools for different workloads (with `rayon` feature)
 //! - [`BlockingTaskGuard`] for rate-limiting expensive operations (with `rayon` feature)
 
-#[cfg(feature = "rayon")]
-use crate::pool::{build_pool_with_panic_handler, BlockingTaskGuard, BlockingTaskPool, WorkerPool};
 use crate::{
     metrics::{IncCounterOnDrop, TaskExecutorMetrics},
     shutdown::{GracefulShutdown, GracefulShutdownGuard, Shutdown},
     time::{Duration, Instant},
+    wait_for_shutdown_progress,
     worker_map::WorkerMap,
     PanickedTaskError, TaskEvent, TaskManager,
 };
@@ -26,15 +25,20 @@ use std::{
         atomic::{AtomicUsize, Ordering},
         Arc, Mutex,
     },
+    thread,
+    thread::Builder,
 };
 use tokio::{runtime::Handle, sync::mpsc::UnboundedSender, task::JoinHandle};
 use tracing::{debug, error};
 use tracing_futures::Instrument;
 
-use tokio::runtime::Runtime as TokioRuntime;
-
 #[cfg(feature = "rayon")]
-use crate::thread::available_parallelism;
+use crate::{
+    pool::{build_pool_with_panic_handler, BlockingTaskGuard, BlockingTaskPool, WorkerPool},
+    rayon::{ThreadPool, ThreadPoolBuildError, ThreadPoolBuilder},
+};
+
+use tokio::runtime::Runtime as TokioRuntime;
 
 /// Default thread keep-alive duration for the tokio runtime.
 pub const DEFAULT_THREAD_KEEP_ALIVE: Duration = Duration::from_secs(15);
@@ -213,6 +217,7 @@ impl RayonConfig {
 
     /// Compute the default number of threads based on available parallelism.
     fn default_thread_count(&self) -> usize {
+        use crate::thread::available_parallelism;
         // TODO: reserved_cpu_cores is currently ignored because subtracting from thread pool
         // sizes doesn't actually reserve CPU cores for other processes.
         let _ = self.reserved_cpu_cores;
@@ -280,7 +285,7 @@ pub enum RuntimeBuildError {
     /// Failed to build a rayon thread pool.
     #[cfg(feature = "rayon")]
     #[error("Failed to build rayon thread pool: {0}")]
-    RayonBuild(#[from] crate::rayon::ThreadPoolBuildError),
+    RayonBuild(#[from] ThreadPoolBuildError),
 }
 
 // ── RuntimeInner ──────────────────────────────────────────────────────
@@ -300,13 +305,13 @@ struct RuntimeInner {
     graceful_tasks: Arc<AtomicUsize>,
     /// General-purpose rayon CPU pool.
     #[cfg(feature = "rayon")]
-    cpu_pool: crate::rayon::ThreadPool,
+    cpu_pool: ThreadPool,
     /// RPC blocking pool.
     #[cfg(feature = "rayon")]
     rpc_pool: BlockingTaskPool,
     /// Storage I/O pool.
     #[cfg(feature = "rayon")]
-    storage_pool: crate::rayon::ThreadPool,
+    storage_pool: ThreadPool,
     /// Rate limiter for expensive RPC operations.
     #[cfg(feature = "rayon")]
     blocking_guard: BlockingTaskGuard,
@@ -388,7 +393,7 @@ impl Runtime {
 
     /// Get the general-purpose rayon CPU thread pool.
     #[cfg(feature = "rayon")]
-    pub fn cpu_pool(&self) -> &crate::rayon::ThreadPool {
+    pub fn cpu_pool(&self) -> &ThreadPool {
         &self.0.cpu_pool
     }
 
@@ -400,7 +405,7 @@ impl Runtime {
 
     /// Get the storage I/O pool.
     #[cfg(feature = "rayon")]
-    pub fn storage_pool(&self) -> &crate::rayon::ThreadPool {
+    pub fn storage_pool(&self) -> &ThreadPool {
         &self.0.storage_pool
     }
 
@@ -736,7 +741,7 @@ impl Runtime {
         thread_name: &'static str,
         task_name: &'static str,
         fut: F,
-    ) -> std::thread::JoinHandle<()>
+    ) -> thread::JoinHandle<()>
     where
         F: Future<Output = ()> + Send + 'static,
     {
@@ -748,7 +753,7 @@ impl Runtime {
         thread_name: &'static str,
         task_name: &'static str,
         fut: BoxFuture<'static, ()>,
-    ) -> std::thread::JoinHandle<()> {
+    ) -> thread::JoinHandle<()> {
         self.0.metrics.inc_critical_tasks();
         let handle = self.0.handle.clone();
         let panicked_tasks_tx = self.0.task_events_tx.clone();
@@ -771,7 +776,7 @@ impl Runtime {
             let _ = select(on_shutdown, task).await;
         };
 
-        std::thread::Builder::new()
+        Builder::new()
             .name(thread_name.to_string())
             .spawn(move || {
                 let _guard = handle.enter();
@@ -918,7 +923,7 @@ impl Runtime {
                 debug!("graceful shutdown timed out");
                 return false;
             }
-            crate::wait_for_shutdown_progress();
+            wait_for_shutdown_progress();
         }
         debug!("gracefully shut down");
         true
@@ -987,13 +992,13 @@ impl RuntimeBuilder {
             let rpc_threads = config.rayon.rpc_threads.unwrap_or(default_threads);
 
             let cpu_pool = build_pool_with_panic_handler(
-                crate::rayon::ThreadPoolBuilder::new()
+                ThreadPoolBuilder::new()
                     .num_threads(default_threads)
                     .thread_name(|i| format!("cpu-{i:02}")),
             )?;
 
             let rpc_raw = build_pool_with_panic_handler(
-                crate::rayon::ThreadPoolBuilder::new()
+                ThreadPoolBuilder::new()
                     .num_threads(rpc_threads)
                     .thread_name(|i| format!("rpc-{i:02}")),
             )?;
@@ -1002,7 +1007,7 @@ impl RuntimeBuilder {
             let storage_threads =
                 config.rayon.storage_threads.unwrap_or(DEFAULT_STORAGE_POOL_THREADS);
             let storage_pool = build_pool_with_panic_handler(
-                crate::rayon::ThreadPoolBuilder::new()
+                ThreadPoolBuilder::new()
                     .num_threads(storage_threads)
                     .thread_name(|i| format!("storage-{i:02}")),
             )?;
@@ -1120,7 +1125,9 @@ impl RuntimeBuilder {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::thread;
+    use crate::test_utils;
+    use std::{future, sync::mpsc};
+    use tokio::sync::oneshot;
 
     #[test]
     fn test_runtime_config_default() {
@@ -1154,29 +1161,31 @@ mod tests {
     #[cfg(feature = "rayon")]
     #[test]
     fn cpu_cores_override_sizes_cpu_pools() {
-        let runtime = RuntimeBuilder::new(
-            RuntimeConfig::default().with_cpu_cores(NonZeroUsize::new(5).unwrap()),
-        )
-        .build()
-        .unwrap();
-        assert_eq!(runtime.handle().metrics().num_workers(), 5);
-        assert_eq!(runtime.cpu_pool().current_num_threads(), 5);
-        assert_eq!(
-            runtime
-                .handle()
-                .block_on(runtime.rpc_pool().spawn(crate::rayon::current_num_threads))
+        test_utils::run(|| {
+            let runtime = RuntimeBuilder::new(
+                RuntimeConfig::default().with_cpu_cores(NonZeroUsize::new(5).unwrap()),
+            )
+            .build()
+            .unwrap();
+            assert_eq!(runtime.handle().metrics().num_workers(), 5);
+            assert_eq!(runtime.cpu_pool().current_num_threads(), 5);
+            assert_eq!(
+                crate::test_utils::block_on(
+                    runtime.rpc_pool().spawn(crate::rayon::current_num_threads)
+                )
                 .unwrap(),
-            5
-        );
-        assert_eq!(runtime.prewarming_pool().current_num_threads(), 5);
-        assert_eq!(runtime.bal_streaming_pool().current_num_threads(), 5);
-        assert_eq!(runtime.proof_storage_worker_pool().num_threads(), 20);
-        assert_eq!(runtime.proof_account_worker_pool().num_threads(), 20);
-        assert_eq!(runtime.storage_pool().current_num_threads(), DEFAULT_STORAGE_POOL_THREADS);
-        assert_eq!(
-            runtime.state_trie_overlay_worker_pool().num_threads(),
-            DEFAULT_STATE_TRIE_OVERLAY_WORKER_THREADS
-        );
+                5
+            );
+            assert_eq!(runtime.prewarming_pool().current_num_threads(), 5);
+            assert_eq!(runtime.bal_streaming_pool().current_num_threads(), 5);
+            assert_eq!(runtime.proof_storage_worker_pool().num_threads(), 20);
+            assert_eq!(runtime.proof_account_worker_pool().num_threads(), 20);
+            assert_eq!(runtime.storage_pool().current_num_threads(), DEFAULT_STORAGE_POOL_THREADS);
+            assert_eq!(
+                runtime.state_trie_overlay_worker_pool().num_threads(),
+                DEFAULT_STATE_TRIE_OVERLAY_WORKER_THREADS
+            );
+        });
     }
 
     #[cfg(feature = "rayon")]
@@ -1207,166 +1216,193 @@ mod tests {
     #[cfg(feature = "rayon")]
     #[test]
     fn zero_cpu_threads_still_size_the_proof_pools() {
-        let rt = TokioRuntime::new().unwrap();
-        let mut config =
-            Runtime::test_config().with_tokio(TokioConfig::existing_handle(rt.handle().clone()));
-        config.rayon.cpu_threads = Some(0);
-        config.rayon.proof_storage_worker_threads = None;
-        config.rayon.proof_account_worker_threads = None;
-        let runtime = RuntimeBuilder::new(config).build().unwrap();
+        test_utils::run(|| {
+            let rt = TokioRuntime::new().unwrap();
+            let mut config = Runtime::test_config()
+                .with_tokio(TokioConfig::existing_handle(rt.handle().clone()));
+            config.rayon.cpu_threads = Some(0);
+            config.rayon.proof_storage_worker_threads = None;
+            config.rayon.proof_account_worker_threads = None;
+            let runtime = RuntimeBuilder::new(config).build().unwrap();
 
-        let resolved = runtime.cpu_pool().current_num_threads();
-        assert!(resolved >= 1);
-        assert_eq!(runtime.proof_storage_worker_pool().current_num_threads(), resolved * 4);
-        assert_eq!(runtime.proof_account_worker_pool().current_num_threads(), resolved * 4);
+            let resolved = runtime.cpu_pool().current_num_threads();
+            assert!(resolved >= 1);
+            assert_eq!(runtime.proof_storage_worker_pool().current_num_threads(), resolved * 4);
+            assert_eq!(runtime.proof_account_worker_pool().current_num_threads(), resolved * 4);
+        });
     }
 
     #[cfg(feature = "rayon")]
     #[test]
     fn proof_worker_threads_keep_pinned_counts() {
-        let rt = TokioRuntime::new().unwrap();
-        for configured in [1, 8, 16, 17, 64] {
-            let mut config = Runtime::test_config()
-                .with_tokio(TokioConfig::existing_handle(rt.handle().clone()));
-            config.rayon.proof_storage_worker_threads = Some(configured);
-            config.rayon.proof_account_worker_threads = Some(configured);
-            let runtime = RuntimeBuilder::new(config).build().unwrap();
-            assert_eq!(runtime.proof_storage_worker_pool().current_num_threads(), configured);
-            assert_eq!(runtime.proof_account_worker_pool().current_num_threads(), configured);
-            assert_eq!(runtime.proof_storage_worker_threads_override(), Some(configured));
-            assert_eq!(runtime.proof_account_worker_threads_override(), Some(configured));
-        }
+        test_utils::run(|| {
+            let rt = TokioRuntime::new().unwrap();
+            for configured in [1, 8, 16, 17, 64] {
+                let mut config = Runtime::test_config()
+                    .with_tokio(TokioConfig::existing_handle(rt.handle().clone()));
+                config.rayon.proof_storage_worker_threads = Some(configured);
+                config.rayon.proof_account_worker_threads = Some(configured);
+                let runtime = RuntimeBuilder::new(config).build().unwrap();
+                assert_eq!(runtime.proof_storage_worker_pool().current_num_threads(), configured);
+                assert_eq!(runtime.proof_account_worker_pool().current_num_threads(), configured);
+                assert_eq!(runtime.proof_storage_worker_threads_override(), Some(configured));
+                assert_eq!(runtime.proof_account_worker_threads_override(), Some(configured));
+            }
+        });
     }
 
     #[cfg(feature = "rayon")]
     #[test]
     fn zero_proof_worker_threads_use_the_default() {
-        let rt = TokioRuntime::new().unwrap();
-        let mut config =
-            Runtime::test_config().with_tokio(TokioConfig::existing_handle(rt.handle().clone()));
-        config.rayon.proof_storage_worker_threads = Some(0);
-        config.rayon.proof_account_worker_threads = Some(0);
-        let runtime = RuntimeBuilder::new(config).build().unwrap();
+        test_utils::run(|| {
+            let rt = TokioRuntime::new().unwrap();
+            let mut config = Runtime::test_config()
+                .with_tokio(TokioConfig::existing_handle(rt.handle().clone()));
+            config.rayon.proof_storage_worker_threads = Some(0);
+            config.rayon.proof_account_worker_threads = Some(0);
+            let runtime = RuntimeBuilder::new(config).build().unwrap();
 
-        let default = runtime.cpu_pool().current_num_threads() * 4;
-        assert_eq!(runtime.proof_storage_worker_pool().current_num_threads(), default);
-        assert_eq!(runtime.proof_account_worker_pool().current_num_threads(), default);
-        assert_eq!(runtime.proof_storage_worker_threads_override(), None);
-        assert_eq!(runtime.proof_account_worker_threads_override(), None);
+            let default = runtime.cpu_pool().current_num_threads() * 4;
+            assert_eq!(runtime.proof_storage_worker_pool().current_num_threads(), default);
+            assert_eq!(runtime.proof_account_worker_pool().current_num_threads(), default);
+            assert_eq!(runtime.proof_storage_worker_threads_override(), None);
+            assert_eq!(runtime.proof_account_worker_threads_override(), None);
+        });
     }
 
     #[test]
     fn test_runtime_builder() {
-        let rt = TokioRuntime::new().unwrap();
-        let config =
-            Runtime::test_config().with_tokio(TokioConfig::existing_handle(rt.handle().clone()));
-        let runtime = RuntimeBuilder::new(config).build().unwrap();
-        let _ = runtime.handle();
-    }
-
-    #[tokio::test]
-    async fn last_runtime_clone_can_drop_on_its_worker() {
-        let runtime = RuntimeBuilder::new(Runtime::test_config()).build().unwrap();
-        let task_runtime = runtime.clone();
-        let (release, wait) = tokio::sync::oneshot::channel();
-        let task = runtime.handle().spawn(async move {
-            wait.await.unwrap();
-            drop(task_runtime);
+        test_utils::run(|| {
+            let rt = TokioRuntime::new().unwrap();
+            let config = Runtime::test_config()
+                .with_tokio(TokioConfig::existing_handle(rt.handle().clone()));
+            let runtime = RuntimeBuilder::new(config).build().unwrap();
+            let _ = runtime.handle();
         });
-
-        thread::spawn(move || drop(runtime)).join().unwrap();
-        release.send(()).unwrap();
-        task.await.unwrap();
     }
 
-    #[tokio::test]
-    async fn shutdown_with_live_runtime_clones() {
-        let runtime = RuntimeBuilder::new(Runtime::test_config()).build().unwrap();
-        let retained = runtime.clone();
-        let task_runtime = runtime.clone();
-        let (started, ready) = tokio::sync::oneshot::channel();
-        let task = runtime.handle().spawn(async move {
-            let _runtime = task_runtime;
-            started.send(()).unwrap();
-            std::future::pending::<()>().await;
+    #[test]
+    fn last_runtime_clone_can_drop_on_its_worker() {
+        test_utils::run(|| {
+            let runtime = RuntimeBuilder::new(Runtime::test_config()).build().unwrap();
+            let task_runtime = runtime.clone();
+            let (release, wait) = oneshot::channel();
+            let task = runtime.handle().spawn(async move {
+                wait.await.unwrap();
+                drop(task_runtime);
+            });
+
+            thread::spawn(move || drop(runtime)).join().unwrap();
+            release.send(()).unwrap();
+            Handle::current().block_on(task).unwrap();
         });
-        ready.await.unwrap();
-
-        thread::spawn(move || runtime.shutdown_timeout(Duration::from_secs(5))).join().unwrap();
-
-        assert!(task.await.unwrap_err().is_cancelled());
-        assert!(retained.handle().spawn(async {}).await.unwrap_err().is_cancelled());
-        retained.shutdown_timeout(Duration::from_secs(5));
     }
 
-    #[tokio::test]
-    async fn shutdown_preserves_external_runtime() {
-        let runtime = RuntimeBuilder::new(
-            Runtime::test_config().with_tokio(TokioConfig::existing_handle(Handle::current())),
-        )
-        .build()
-        .unwrap();
-        let retained = runtime.clone();
+    #[test]
+    fn shutdown_with_live_runtime_clones() {
+        test_utils::run(|| {
+            let runtime = RuntimeBuilder::new(Runtime::test_config()).build().unwrap();
+            let retained = runtime.clone();
+            let task_runtime = runtime.clone();
+            let (started, ready) = oneshot::channel();
+            let task = runtime.handle().spawn(async move {
+                let _runtime = task_runtime;
+                started.send(()).unwrap();
+                future::pending::<()>().await;
+            });
+            Handle::current().block_on(ready).unwrap();
 
-        runtime.shutdown_timeout(Duration::from_secs(5));
+            thread::spawn(move || runtime.shutdown_timeout(Duration::from_secs(5))).join().unwrap();
 
-        assert_eq!(retained.handle().spawn(async { 42 }).await.unwrap(), 42);
+            assert!(Handle::current().block_on(task).unwrap_err().is_cancelled());
+            assert!(Handle::current()
+                .block_on(retained.handle().spawn(async {}))
+                .unwrap_err()
+                .is_cancelled());
+            retained.shutdown_timeout(Duration::from_secs(5));
+        });
+    }
+
+    #[test]
+    fn shutdown_preserves_external_runtime() {
+        test_utils::run(|| {
+            let runtime = RuntimeBuilder::new(
+                Runtime::test_config().with_tokio(TokioConfig::existing_handle(Handle::current())),
+            )
+            .build()
+            .unwrap();
+            let retained = runtime.clone();
+
+            runtime.shutdown_timeout(Duration::from_secs(5));
+
+            assert_eq!(
+                Handle::current().block_on(retained.handle().spawn(async { 42 })).unwrap(),
+                42
+            );
+        });
     }
 
     #[test]
     fn critical_os_thread_uses_requested_name() {
-        let runtime = Runtime::test();
-        let (tx, rx) = std::sync::mpsc::channel();
+        test_utils::run(|| {
+            let runtime = Runtime::test();
+            let (tx, rx) = mpsc::channel();
 
-        let handle = runtime.spawn_critical_os_thread(
-            "critical-os-test",
-            "critical os thread test",
-            async move {
-                let name = thread::current().name().unwrap().to_string();
-                tx.send(name).unwrap();
-            },
-        );
+            let handle = runtime.spawn_critical_os_thread(
+                "critical-os-test",
+                "critical os thread test",
+                async move {
+                    let name = thread::current().name().unwrap().to_string();
+                    tx.send(name).unwrap();
+                },
+            );
 
-        let name = rx.recv_timeout(Duration::from_secs(5)).unwrap();
-        assert_eq!(name, "critical-os-test");
-        handle.join().unwrap();
+            let name = rx.recv_timeout(Duration::from_secs(5)).unwrap();
+            assert_eq!(name, "critical-os-test");
+            handle.join().unwrap();
+        });
     }
 
     #[test]
     fn critical_os_thread_panic_is_reported() {
-        let runtime = Runtime::test();
-        let manager_handle = runtime.take_task_manager_handle().unwrap();
+        test_utils::run(|| {
+            let runtime = Runtime::test();
+            let manager_handle = runtime.take_task_manager_handle().unwrap();
 
-        let handle = runtime.spawn_critical_os_thread(
-            "critical-os-panic",
-            "critical os thread panic test",
-            async { panic!("critical os thread panic") },
-        );
+            let handle = runtime.spawn_critical_os_thread(
+                "critical-os-panic",
+                "critical os thread panic test",
+                async { panic!("critical os thread panic") },
+            );
 
-        let err =
-            runtime.handle().block_on(async move { manager_handle.await.unwrap().unwrap_err() });
-        assert_eq!(err.task_name, "critical os thread panic test");
-        assert_eq!(err.error, Some("critical os thread panic".to_string()));
-        handle.join().unwrap();
+            let err = runtime
+                .handle()
+                .block_on(async move { manager_handle.await.unwrap().unwrap_err() });
+            assert_eq!(err.task_name, "critical os thread panic test");
+            assert_eq!(err.error, Some("critical os thread panic".to_string()));
+            handle.join().unwrap();
+        });
     }
 
     #[cfg(feature = "rayon")]
     #[test]
     fn test_worker_pools_are_lazy() {
-        let runtime = Runtime::test();
+        test_utils::run(|| {
+            let runtime = Runtime::test();
 
-        // Worker pools are lazy — not initialized until first access.
-        assert!(!runtime.0.bal_streaming_pool.is_initialized());
-        assert!(!runtime.0.proof_storage_worker_pool.is_initialized());
-        assert!(!runtime.0.state_trie_overlay_worker_pool.is_initialized());
+            // Worker pools are lazy — not initialized until first access.
+            assert!(!runtime.0.bal_streaming_pool.is_initialized());
+            assert!(!runtime.0.proof_storage_worker_pool.is_initialized());
+            assert!(!runtime.0.state_trie_overlay_worker_pool.is_initialized());
 
-        // Accessing them triggers initialization and returns the configured thread count.
-        assert_eq!(runtime.bal_streaming_pool().current_num_threads(), 2);
-        assert!(runtime.0.bal_streaming_pool.is_initialized());
+            // Accessing them triggers initialization and returns the configured thread count.
+            assert_eq!(runtime.bal_streaming_pool().current_num_threads(), 2);
+            assert!(runtime.0.bal_streaming_pool.is_initialized());
 
-        assert_eq!(runtime.proof_storage_worker_pool().current_num_threads(), 2);
-        assert_eq!(runtime.proof_account_worker_pool().current_num_threads(), 2);
-        assert_eq!(runtime.prewarming_pool().current_num_threads(), 2);
-        assert_eq!(runtime.state_trie_overlay_worker_pool().current_num_threads(), 2);
+            assert_eq!(runtime.proof_storage_worker_pool().current_num_threads(), 2);
+            assert_eq!(runtime.proof_account_worker_pool().current_num_threads(), 2);
+            assert_eq!(runtime.prewarming_pool().current_num_threads(), 2);
+            assert_eq!(runtime.state_trie_overlay_worker_pool().current_num_threads(), 2);
+        });
     }
 }

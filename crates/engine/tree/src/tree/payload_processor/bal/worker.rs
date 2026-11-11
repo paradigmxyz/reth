@@ -7,7 +7,10 @@ use reth_evm::{
     BlockExecutionError, BlockExecutor, BlockExecutorFactory, BlockExecutorFor,
     BlockValidationError, ConfigureEvm, Database, EvmEnvFor, ExecutableTxFor, ExecutionCtxFor,
 };
-use reth_tasks::executor::channel::{Receiver, Sender};
+use reth_tasks::executor::{
+    channel::{select_biased, Receiver, Sender},
+    rayon::Scope,
+};
 use std::{cell::RefCell, rc::Rc, sync::Arc};
 
 #[derive(Debug, thiserror::Error)]
@@ -64,7 +67,7 @@ type WorkerResultSender<'a, Cfg> =
 
 #[expect(clippy::too_many_arguments)]
 pub(super) fn spawn_worker<'scope, Evm, Tx, Err, DB, MakeDb>(
-    scope: &reth_tasks::executor::rayon::Scope<'scope>,
+    scope: &Scope<'scope>,
     tx_rx: Receiver<(usize, Result<Tx, Err>)>,
     abort_rx: Receiver<()>,
     result_tx: WorkerResultSender<'scope, Evm>,
@@ -93,7 +96,7 @@ pub(super) fn spawn_worker<'scope, Evm, Tx, Err, DB, MakeDb>(
                 executor.set_block_access_list(Arc::clone(&received_bal));
 
                 loop {
-                    let (tx_index, tx) = reth_tasks::executor::channel::select_biased! {
+                    let (tx_index, tx) = select_biased! {
                         recv(abort_rx) -> _ => break 'worker,
                         recv(tx_rx) -> msg => match msg {
                             Ok(ix_tx) => ix_tx,

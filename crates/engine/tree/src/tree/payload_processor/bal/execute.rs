@@ -39,7 +39,11 @@ use reth_evm::{
 };
 use reth_primitives_traits::ReceiptTy;
 use reth_tasks::{
-    executor::channel::{Receiver, Sender},
+    executor::{
+        channel,
+        channel::{Receiver, Sender},
+        rayon::Scope,
+    },
     Runtime,
 };
 use std::sync::Arc;
@@ -93,7 +97,7 @@ where
 
 #[expect(clippy::too_many_arguments, clippy::type_complexity)]
 fn execute_block_inner<'scope, Evm, Tx, Err, DB, MakeDb>(
-    scope: &reth_tasks::executor::rayon::Scope<'scope>,
+    scope: &Scope<'scope>,
     evm_config: &'scope Evm,
     make_db: &'scope MakeDb,
     input_bal: Arc<DecodedBal>,
@@ -132,7 +136,7 @@ where
         )
         .map_err(BlockAccessListDecodeError::new)?,
     );
-    let (result_tx, result_rx) = reth_tasks::executor::channel::unbounded();
+    let (result_tx, result_rx) = channel::unbounded();
     let (abort_guard, abort_rx) = AbortGuard::new();
 
     for _ in 0..worker_count {
@@ -222,7 +226,7 @@ struct AbortGuard {
 
 impl AbortGuard {
     fn new() -> (Self, Receiver<()>) {
-        let (tx, rx) = reth_tasks::executor::channel::bounded(0);
+        let (tx, rx) = channel::bounded(0);
         (Self { _tx: tx }, rx)
     }
 }
@@ -257,6 +261,7 @@ mod tests {
     use reth_testing_utils::generators::{generate_key, rng, sign_tx_with_key_pair};
     use std::{
         convert::Infallible,
+        io,
         sync::atomic::{AtomicUsize, Ordering},
     };
 
@@ -356,7 +361,7 @@ mod tests {
     }
 
     fn tx_stream<Tx>(txs: Vec<Tx>) -> Receiver<(usize, Result<Tx, Infallible>)> {
-        let (tx, rx) = reth_tasks::executor::channel::unbounded();
+        let (tx, rx) = channel::unbounded();
         for (index, transaction) in txs.into_iter().enumerate() {
             tx.send((index, Ok(transaction))).unwrap();
         }
@@ -394,7 +399,7 @@ mod tests {
         MakeDb: Fn(bool) -> Result<DB, BalExecutionError> + Sync,
     {
         let transaction_count = txs.len();
-        let (receipt_tx, _receipt_rx) = reth_tasks::executor::channel::unbounded();
+        let (receipt_tx, _receipt_rx) = channel::unbounded();
         let evm_env = evm_config.evm_env(block.header()).unwrap();
         let execution_ctx = evm_config.context_for_block(block).unwrap();
         execute_block(
@@ -812,13 +817,11 @@ mod tests {
         // Infallible and cannot inject errors.
         let evm_config = test_evm_config();
         let block = empty_amsterdam_block(B256::ZERO);
-        let (tx_tx, tx_rx) = reth_tasks::executor::channel::unbounded::<(
-            usize,
-            Result<Recovered<TransactionSigned>, std::io::Error>,
-        )>();
-        tx_tx.send((0, Err(std::io::Error::other("sig fail")))).unwrap();
+        let (tx_tx, tx_rx) =
+            channel::unbounded::<(usize, Result<Recovered<TransactionSigned>, io::Error>)>();
+        tx_tx.send((0, Err(io::Error::other("sig fail")))).unwrap();
         drop(tx_tx);
-        let (receipt_tx, _receipt_rx) = reth_tasks::executor::channel::unbounded();
+        let (receipt_tx, _receipt_rx) = channel::unbounded();
         let evm_env = evm_config.evm_env(block.header()).unwrap();
         let execution_ctx = evm_config.context_for_block(&block).unwrap();
 
@@ -1103,15 +1106,15 @@ mod tests {
             }
             Ok(pre_block_db.clone())
         };
-        let (tx_tx, tx_rx) = reth_tasks::executor::channel::unbounded();
+        let (tx_tx, tx_rx) = channel::unbounded();
         // Recovery can finish out of order. A single worker must continue after both kinds
         // of error to execute slot 0, without reusing the failed slot 1 executor.
-        tx_tx.send((2, Err(std::io::Error::other("sig fail")))).unwrap();
+        tx_tx.send((2, Err(io::Error::other("sig fail")))).unwrap();
         tx_tx.send((1, Ok(tx2))).unwrap();
         tx_tx.send((0, Ok(tx1.clone()))).unwrap();
         drop(tx_tx);
         let (_abort_guard, abort_rx) = AbortGuard::new();
-        let (result_tx, result_rx) = reth_tasks::executor::channel::unbounded();
+        let (result_tx, result_rx) = channel::unbounded();
         let runtime = Runtime::test();
         runtime.bal_streaming_pool().in_place_scope(|scope| {
             worker::spawn_worker(
@@ -1193,7 +1196,7 @@ mod tests {
             serial.execute_transaction(tx1.clone()).unwrap();
             let serial_result = serial.execute_transaction(tx2.clone());
 
-            let (receipt_tx, _receipt_rx) = reth_tasks::executor::channel::unbounded();
+            let (receipt_tx, _receipt_rx) = channel::unbounded();
             let parallel_result = execute_block(
                 &Runtime::test(),
                 &evm_config,

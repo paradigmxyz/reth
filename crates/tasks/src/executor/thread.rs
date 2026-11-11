@@ -1,9 +1,15 @@
 //! Standard-compatible threads and borrowed scopes for the selected backend.
 
+use std::{io, num::NonZeroUsize};
+
+#[cfg(feature = "fuzz")]
+use shuttle::thread;
 #[cfg(feature = "fuzz")]
 use std::{
+    convert::identity,
     marker::PhantomData,
     panic::{catch_unwind, resume_unwind, AssertUnwindSafe},
+    ptr,
     sync::{
         atomic::{AtomicBool, AtomicPtr, Ordering},
         Arc, Mutex,
@@ -19,32 +25,16 @@ pub use std::thread::{
     ScopedJoinHandle, Thread, ThreadId,
 };
 
-/// Returns available native parallelism, or one logical execution thread in simulation.
-#[cfg_attr(
-    feature = "fuzz",
-    expect(clippy::missing_const_for_fn, reason = "The native implementation queries the OS.")
-)]
-pub fn available_parallelism() -> std::io::Result<std::num::NonZeroUsize> {
-    #[cfg(not(feature = "fuzz"))]
-    {
-        std::thread::available_parallelism()
-    }
-    #[cfg(feature = "fuzz")]
-    {
-        Ok(std::num::NonZeroUsize::MIN)
-    }
-}
-
 /// A logical thread builder; scoped tasks inherit their scope's stack settings.
 #[cfg(feature = "fuzz")]
 #[derive(Debug, Default)]
-pub struct Builder(shuttle::thread::Builder);
+pub struct Builder(thread::Builder);
 
 #[cfg(feature = "fuzz")]
 impl Builder {
     /// Creates a thread builder with default settings.
     pub fn new() -> Self {
-        Self(shuttle::thread::Builder::new())
+        Self(thread::Builder::new())
     }
     /// Sets the name of a non-scoped logical thread.
     pub fn name(self, name: String) -> Self {
@@ -55,7 +45,7 @@ impl Builder {
         Self(self.0.stack_size(size))
     }
     /// Spawns a named logical thread in the current simulation.
-    pub fn spawn<F, T>(self, work: F) -> std::io::Result<JoinHandle<T>>
+    pub fn spawn<F, T>(self, work: F) -> io::Result<JoinHandle<T>>
     where
         F: FnOnce() -> T + Send + 'static,
         T: Send + 'static,
@@ -75,7 +65,7 @@ impl Builder {
         self,
         scope: &'scope Scope<'scope, 'env>,
         work: F,
-    ) -> std::io::Result<ScopedJoinHandle<'scope, T>>
+    ) -> io::Result<ScopedJoinHandle<'scope, T>>
     where
         F: FnOnce() -> T + Send + 'scope,
         T: Send + 'scope,
@@ -88,7 +78,7 @@ impl Builder {
 #[cfg(feature = "fuzz")]
 #[derive(Debug)]
 pub struct JoinHandle<T> {
-    handle: shuttle::thread::JoinHandle<Result<T>>,
+    handle: thread::JoinHandle<Result<T>>,
     finished: Arc<AtomicBool>,
 }
 
@@ -108,16 +98,6 @@ impl<T> JoinHandle<T> {
     pub fn is_finished(&self) -> bool {
         self.finished.load(Ordering::Acquire)
     }
-}
-
-/// Spawns a logical thread in the current deterministic execution.
-#[cfg(feature = "fuzz")]
-pub fn spawn<F, T>(work: F) -> JoinHandle<T>
-where
-    F: FnOnce() -> T + Send + 'static,
-    T: Send + 'static,
-{
-    Builder::new().spawn(work).expect("Shuttle logical thread creation is infallible")
 }
 
 /// A borrowing scope that drains its children before propagating a panic.
@@ -146,9 +126,8 @@ impl<'scope, 'env> Scope<'scope, 'env> {
         // SAFETY: `scope` initializes this pointer before exposing `self`. It keeps this wrapper
         // alive until Shuttle drains every child, even if the callback panics. The invariant
         // lifetimes prevent either the wrapper or a borrowing child from escaping that scope.
-        let inner = unsafe {
-            &*self.inner.load(Ordering::Acquire).cast::<shuttle::thread::Scope<'scope, 'env>>()
-        };
+        let inner =
+            unsafe { &*self.inner.load(Ordering::Acquire).cast::<thread::Scope<'scope, 'env>>() };
         let handle = inner.spawn(move || {
             let _completion = completion;
             let result = catch_unwind(AssertUnwindSafe(work));
@@ -163,20 +142,11 @@ impl<'scope, 'env> Scope<'scope, 'env> {
 #[cfg(feature = "fuzz")]
 #[derive(Debug)]
 pub struct ScopedJoinHandle<'scope, T> {
-    handle: shuttle::thread::ScopedJoinHandle<'scope, Result<T>>,
+    handle: thread::ScopedJoinHandle<'scope, Result<T>>,
     finished: Arc<AtomicBool>,
     panicked: Arc<AtomicBool>,
     lifetime: PhantomData<&'scope mut &'scope ()>,
 }
-
-// SAFETY: Shuttle's handle synchronizes result access internally. Its `PhantomData<&T>` is not
-// an actual shared borrow, so the panic payload need not be Sync to move or share the handle.
-#[cfg(feature = "fuzz")]
-unsafe impl<T: Send> Send for ScopedJoinHandle<'_, T> {}
-
-// SAFETY: Shared access only exposes thread metadata and atomic flags; joining consumes the handle.
-#[cfg(feature = "fuzz")]
-unsafe impl<T: Send> Sync for ScopedJoinHandle<'_, T> {}
 
 #[cfg(feature = "fuzz")]
 impl<T> ScopedJoinHandle<'_, T> {
@@ -184,7 +154,7 @@ impl<T> ScopedJoinHandle<'_, T> {
     ///
     /// Joining handles the panic, so it will not propagate again at the end of the scope.
     pub fn join(self) -> Result<T> {
-        let result = self.handle.join().and_then(std::convert::identity);
+        let result = self.handle.join().and_then(identity);
         self.panicked.store(false, Ordering::Release);
         result
     }
@@ -200,6 +170,51 @@ impl<T> ScopedJoinHandle<'_, T> {
     }
 }
 
+// SAFETY: Shuttle's handle synchronizes result access internally. Its `PhantomData<&T>` is not
+// an actual shared borrow, so the panic payload need not be Sync to move or share the handle.
+#[cfg(feature = "fuzz")]
+unsafe impl<T: Send> Send for ScopedJoinHandle<'_, T> {}
+
+// SAFETY: Shared access only exposes thread metadata and atomic flags; joining consumes the handle.
+#[cfg(feature = "fuzz")]
+unsafe impl<T: Send> Sync for ScopedJoinHandle<'_, T> {}
+
+#[cfg(feature = "fuzz")]
+struct Completion(Arc<AtomicBool>);
+
+#[cfg(feature = "fuzz")]
+impl Drop for Completion {
+    fn drop(&mut self) {
+        self.0.store(true, Ordering::Release);
+    }
+}
+
+/// Returns available native parallelism, or one logical execution thread in simulation.
+#[cfg_attr(
+    feature = "fuzz",
+    expect(clippy::missing_const_for_fn, reason = "The native implementation queries the OS.")
+)]
+pub fn available_parallelism() -> io::Result<NonZeroUsize> {
+    #[cfg(not(feature = "fuzz"))]
+    {
+        std::thread::available_parallelism()
+    }
+    #[cfg(feature = "fuzz")]
+    {
+        Ok(NonZeroUsize::MIN)
+    }
+}
+
+/// Spawns a logical thread in the current deterministic execution.
+#[cfg(feature = "fuzz")]
+pub fn spawn<F, T>(work: F) -> JoinHandle<T>
+where
+    F: FnOnce() -> T + Send + 'static,
+    T: Send + 'static,
+{
+    Builder::new().spawn(work).expect("Shuttle logical thread creation is infallible")
+}
+
 /// Runs a borrowing scope, waiting for all children even when the callback panics.
 ///
 /// Unjoined child panics propagate after draining. A callback panic takes precedence.
@@ -209,12 +224,12 @@ where
     F: for<'scope> FnOnce(&'scope Scope<'scope, 'env>) -> T,
 {
     let scope = Scope {
-        inner: AtomicPtr::new(std::ptr::null_mut()),
+        inner: AtomicPtr::new(ptr::null_mut()),
         child_panics: Mutex::new(Vec::new()),
         lifetimes: PhantomData,
     };
-    let result = shuttle::thread::scope(|inner| {
-        scope.inner.store(std::ptr::from_ref(inner).cast_mut().cast(), Ordering::Release);
+    let result = thread::scope(|inner| {
+        scope.inner.store(ptr::from_ref(inner).cast_mut().cast(), Ordering::Release);
         // Shuttle only drains children when its callback returns normally.
         catch_unwind(AssertUnwindSafe(|| work(&scope)))
     });
@@ -232,15 +247,5 @@ where
             );
             value
         }
-    }
-}
-
-#[cfg(feature = "fuzz")]
-struct Completion(Arc<AtomicBool>);
-
-#[cfg(feature = "fuzz")]
-impl Drop for Completion {
-    fn drop(&mut self) {
-        self.0.store(true, Ordering::Release);
     }
 }

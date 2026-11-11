@@ -1,4 +1,7 @@
 use crate::rayon;
+
+#[cfg(feature = "fuzz")]
+use crate::channel;
 use crossbeam_utils::CachePadded;
 use rayon::iter::{IndexedParallelIterator, ParallelIterator};
 use std::panic::{catch_unwind, AssertUnwindSafe};
@@ -61,9 +64,9 @@ struct Slot<T> {
     #[cfg(not(feature = "fuzz"))]
     notify: parking_lot::Condvar,
     #[cfg(feature = "fuzz")]
-    tx: crate::channel::Sender<Result<T, ()>>,
+    tx: channel::Sender<Result<T, ()>>,
     #[cfg(feature = "fuzz")]
-    rx: crate::channel::Receiver<Result<T, ()>>,
+    rx: channel::Receiver<Result<T, ()>>,
 }
 
 impl<T> Slot<T> {
@@ -74,7 +77,7 @@ impl<T> Slot<T> {
 
     #[cfg(feature = "fuzz")]
     fn new() -> Self {
-        let (tx, rx) = crate::channel::unbounded();
+        let (tx, rx) = channel::unbounded();
         Self { tx, rx }
     }
 }
@@ -201,242 +204,274 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::rayon::prelude::*;
+    use crate::{rayon::prelude::*, test_utils};
     use std::{
+        cell::Cell,
         rc::Rc,
-        sync::{
-            atomic::{AtomicUsize, Ordering},
-            Barrier,
-        },
+        sync::atomic::{AtomicUsize, Ordering},
+        thread,
     };
+
+    #[cfg(not(feature = "fuzz"))]
+    use std::sync::Barrier;
 
     #[test]
     fn preserves_order() {
-        let input: Vec<u64> = (0..1000).collect();
-        let mut output = Vec::with_capacity(input.len());
-        input.par_iter().map(|x| x * 2).for_each_ordered(|x| output.push(x));
-        let expected: Vec<u64> = (0..1000).map(|x| x * 2).collect();
-        assert_eq!(output, expected);
+        test_utils::run(|| {
+            let input: Vec<u64> = (0..1000).collect();
+            let mut output = Vec::with_capacity(input.len());
+            input.par_iter().map(|x| x * 2).for_each_ordered(|x| output.push(x));
+            let expected: Vec<u64> = (0..1000).map(|x| x * 2).collect();
+            assert_eq!(output, expected);
+        });
     }
 
     #[test]
     fn empty_iterator() {
-        let input: Vec<u64> = vec![];
-        let mut output = Vec::new();
-        input.par_iter().map(|x| *x).for_each_ordered(|x| output.push(x));
-        assert!(output.is_empty());
+        test_utils::run(|| {
+            let input: Vec<u64> = vec![];
+            let mut output = Vec::new();
+            input.par_iter().map(|x| *x).for_each_ordered(|x| output.push(x));
+            assert!(output.is_empty());
+        });
     }
 
     #[test]
     fn single_element() {
-        let mut output = Vec::new();
-        vec![42u64].par_iter().map(|x| *x).for_each_ordered(|x| output.push(x));
-        assert_eq!(output, vec![42]);
+        test_utils::run(|| {
+            let mut output = Vec::new();
+            vec![42u64].par_iter().map(|x| *x).for_each_ordered(|x| output.push(x));
+            assert_eq!(output, vec![42]);
+        });
     }
 
+    // The fuzz iterator shim computes serially; two iterator items cannot rendezvous.
+    #[cfg(not(feature = "fuzz"))]
     #[test]
     fn slow_early_items_still_delivered_in_order() {
-        let barrier = Barrier::new(2);
-        let n = 64usize;
-        let input: Vec<usize> = (0..n).collect();
-        let mut output = Vec::with_capacity(n);
+        test_utils::run(|| {
+            let barrier = Barrier::new(2);
+            let n = 64usize;
+            let input: Vec<usize> = (0..n).collect();
+            let mut output = Vec::with_capacity(n);
 
-        input
-            .par_iter()
-            .map(|&i| {
-                if i == 0 || i == n - 1 {
-                    barrier.wait();
-                }
-                i
-            })
-            .for_each_ordered(|x| output.push(x));
+            input
+                .par_iter()
+                .map(|&i| {
+                    if i == 0 || i == n - 1 {
+                        barrier.wait();
+                    }
+                    i
+                })
+                .for_each_ordered(|x| output.push(x));
 
-        assert_eq!(output, input);
+            assert_eq!(output, input);
+        });
     }
 
     #[test]
     fn drops_unconsumed_slots_on_panic() {
-        static DROP_COUNT: AtomicUsize = AtomicUsize::new(0);
+        test_utils::run(|| {
+            static DROP_COUNT: AtomicUsize = AtomicUsize::new(0);
 
-        #[derive(Clone)]
-        struct Tracked(#[allow(dead_code)] u64);
-        impl Drop for Tracked {
-            fn drop(&mut self) {
-                DROP_COUNT.fetch_add(1, Ordering::Relaxed);
+            #[derive(Clone)]
+            struct Tracked(#[allow(dead_code)] u64);
+            impl Drop for Tracked {
+                fn drop(&mut self) {
+                    DROP_COUNT.fetch_add(1, Ordering::Relaxed);
+                }
             }
-        }
 
-        DROP_COUNT.store(0, Ordering::Relaxed);
+            DROP_COUNT.store(0, Ordering::Relaxed);
 
-        let input: Vec<u64> = (0..100).collect();
-        let result = std::panic::catch_unwind(|| {
-            input
-                .par_iter()
-                .map(|&i| {
-                    assert!(i != 50, "intentional");
-                    Tracked(i)
-                })
-                .for_each_ordered(|_item| {});
+            let input: Vec<u64> = (0..100).collect();
+            let result = catch_unwind(|| {
+                input
+                    .par_iter()
+                    .map(|&i| {
+                        assert!(i != 50, "intentional");
+                        Tracked(i)
+                    })
+                    .for_each_ordered(|_item| {});
+            });
+
+            assert_eq!(result.unwrap_err().downcast_ref::<&str>(), Some(&"intentional"));
+            let drops = DROP_COUNT.load(Ordering::Relaxed);
+            assert!(drops > 0, "some items should have been dropped");
         });
-
-        assert!(result.is_err());
-        let drops = DROP_COUNT.load(Ordering::Relaxed);
-        assert!(drops > 0, "some items should have been dropped");
     }
 
     #[test]
     fn no_double_drop() {
-        static DROP_COUNT: AtomicUsize = AtomicUsize::new(0);
+        test_utils::run(|| {
+            static DROP_COUNT: AtomicUsize = AtomicUsize::new(0);
 
-        struct Counted(#[allow(dead_code)] u64);
-        impl Drop for Counted {
-            fn drop(&mut self) {
-                DROP_COUNT.fetch_add(1, Ordering::Relaxed);
+            struct Counted(#[allow(dead_code)] u64);
+            impl Drop for Counted {
+                fn drop(&mut self) {
+                    DROP_COUNT.fetch_add(1, Ordering::Relaxed);
+                }
             }
-        }
 
-        DROP_COUNT.store(0, Ordering::Relaxed);
-        let n = 200u64;
-        let input: Vec<u64> = (0..n).collect();
-        input.par_iter().map(|&i| Counted(i)).for_each_ordered(|_item| {});
+            DROP_COUNT.store(0, Ordering::Relaxed);
+            let n = 200u64;
+            let input: Vec<u64> = (0..n).collect();
+            input.par_iter().map(|&i| Counted(i)).for_each_ordered(|_item| {});
 
-        assert_eq!(DROP_COUNT.load(Ordering::Relaxed), n as usize);
+            assert_eq!(DROP_COUNT.load(Ordering::Relaxed), n as usize);
+        });
     }
 
     #[test]
     fn callback_is_not_send() {
-        let counter = Rc::new(std::cell::Cell::new(0u64));
-        let input: Vec<u64> = (0..100).collect();
-        input.par_iter().map(|&x| x).for_each_ordered(|x| {
-            counter.set(counter.get() + x);
+        test_utils::run(|| {
+            let counter = Rc::new(Cell::new(0u64));
+            let input: Vec<u64> = (0..100).collect();
+            input.par_iter().map(|&x| x).for_each_ordered(|x| {
+                counter.set(counter.get() + x);
+            });
+            assert_eq!(counter.get(), (0..100u64).sum::<u64>());
         });
-        assert_eq!(counter.get(), (0..100u64).sum::<u64>());
     }
 
     #[test]
     fn panic_does_not_deadlock_consumer() {
-        // Regression test: producer panics while consumer is waiting on a condvar.
-        // Without the lock-before-notify fix, the consumer could miss the wakeup
-        // and deadlock.
-        for _ in 0..100 {
-            let result = std::panic::catch_unwind(|| {
-                let input: Vec<usize> = (0..256).collect();
-                input
-                    .par_iter()
-                    .map(|&i| {
-                        if i == 128 {
-                            // Yield to increase the chance of the consumer being
-                            // between the panicked check and condvar wait.
-                            std::thread::yield_now();
-                            panic!("intentional");
-                        }
-                        i
-                    })
-                    .for_each_ordered(|_| {});
-            });
-            assert!(result.is_err());
-        }
+        test_utils::run(|| {
+            // Regression test: producer panics while consumer is waiting on a condvar.
+            // Without the lock-before-notify fix, the consumer could miss the wakeup
+            // and deadlock.
+            for _ in 0..100 {
+                let result = catch_unwind(|| {
+                    let input: Vec<usize> = (0..256).collect();
+                    input
+                        .par_iter()
+                        .map(|&i| {
+                            if i == 128 {
+                                // Yield to increase the chance of the consumer being
+                                // between the panicked check and condvar wait.
+                                thread::yield_now();
+                                panic!("intentional");
+                            }
+                            i
+                        })
+                        .for_each_ordered(|_| {});
+                });
+                assert_eq!(result.unwrap_err().downcast_ref::<&str>(), Some(&"intentional"));
+            }
+        });
     }
 
     #[test]
     fn early_panic_at_item_zero() {
-        let result = std::panic::catch_unwind(|| {
-            let input: Vec<u64> = (0..10).collect();
-            input
-                .par_iter()
-                .map(|&i| {
-                    assert!(i != 0, "boom at zero");
-                    i
-                })
-                .for_each_ordered(|_| {});
+        test_utils::run(|| {
+            let result = catch_unwind(|| {
+                let input: Vec<u64> = (0..10).collect();
+                input
+                    .par_iter()
+                    .map(|&i| {
+                        assert!(i != 0, "boom at zero");
+                        i
+                    })
+                    .for_each_ordered(|_| {});
+            });
+            assert_eq!(result.unwrap_err().downcast_ref::<&str>(), Some(&"boom at zero"));
         });
-        assert!(result.is_err());
     }
 
     #[test]
     fn late_panic_at_last_item() {
-        let n = 100usize;
-        let result = std::panic::catch_unwind(|| {
-            let input: Vec<usize> = (0..n).collect();
-            input
-                .par_iter()
-                .map(|&i| {
-                    assert!(i != n - 1, "boom at last");
-                    i
-                })
-                .for_each_ordered(|_| {});
+        test_utils::run(|| {
+            let n = 100usize;
+            let result = catch_unwind(|| {
+                let input: Vec<usize> = (0..n).collect();
+                input
+                    .par_iter()
+                    .map(|&i| {
+                        assert!(i != n - 1, "boom at last");
+                        i
+                    })
+                    .for_each_ordered(|_| {});
+            });
+            assert_eq!(result.unwrap_err().downcast_ref::<&str>(), Some(&"boom at last"));
         });
-        assert!(result.is_err());
     }
 
     #[test]
     fn large_items() {
-        let n = 500usize;
-        let input: Vec<usize> = (0..n).collect();
-        let mut output = Vec::with_capacity(n);
-        input
-            .par_iter()
-            .map(|&i| {
-                // Return a heap-allocated value to stress drop semantics.
-                vec![i; 64]
-            })
-            .for_each_ordered(|v| output.push(v[0]));
-        assert_eq!(output, input);
+        test_utils::run(|| {
+            let n = 500usize;
+            let input: Vec<usize> = (0..n).collect();
+            let mut output = Vec::with_capacity(n);
+            input
+                .par_iter()
+                .map(|&i| {
+                    // Return a heap-allocated value to stress drop semantics.
+                    vec![i; 64]
+                })
+                .for_each_ordered(|v| output.push(v[0]));
+            assert_eq!(output, input);
+        });
     }
 
     #[test]
     fn consumer_slower_than_producer() {
-        // Producer is fast, consumer is slow. All items should still arrive in order.
-        let n = 64usize;
-        let input: Vec<usize> = (0..n).collect();
-        let mut output = Vec::with_capacity(n);
-        input.par_iter().map(|&i| i).for_each_ordered(|x| {
-            if x % 8 == 0 {
-                std::thread::yield_now();
-            }
-            output.push(x);
+        test_utils::run(|| {
+            // Producer is fast, consumer is slow. All items should still arrive in order.
+            let n = 64usize;
+            let input: Vec<usize> = (0..n).collect();
+            let mut output = Vec::with_capacity(n);
+            input.par_iter().map(|&i| i).for_each_ordered(|x| {
+                if x % 8 == 0 {
+                    thread::yield_now();
+                }
+                output.push(x);
+            });
+            assert_eq!(output, input);
         });
-        assert_eq!(output, input);
     }
 
+    // The fuzz iterator shim computes serially; two iterator items cannot rendezvous.
+    #[cfg(not(feature = "fuzz"))]
     #[test]
     fn concurrent_panic_and_drop_no_leak() {
-        // Ensure items produced before a panic are all dropped.
-        static DROP_COUNT: AtomicUsize = AtomicUsize::new(0);
-        static PRODUCED: AtomicUsize = AtomicUsize::new(0);
+        test_utils::run(|| {
+            // Ensure items produced before a panic are all dropped.
+            static DROP_COUNT: AtomicUsize = AtomicUsize::new(0);
+            static PRODUCED: AtomicUsize = AtomicUsize::new(0);
 
-        struct Tracked;
-        impl Drop for Tracked {
-            fn drop(&mut self) {
-                DROP_COUNT.fetch_add(1, Ordering::Relaxed);
+            struct Tracked;
+            impl Drop for Tracked {
+                fn drop(&mut self) {
+                    DROP_COUNT.fetch_add(1, Ordering::Relaxed);
+                }
             }
-        }
 
-        DROP_COUNT.store(0, Ordering::Relaxed);
-        PRODUCED.store(0, Ordering::Relaxed);
+            DROP_COUNT.store(0, Ordering::Relaxed);
+            PRODUCED.store(0, Ordering::Relaxed);
 
-        let barrier = Barrier::new(2);
-        let result = std::panic::catch_unwind(|| {
-            let input: Vec<usize> = (0..64).collect();
-            input
-                .par_iter()
-                .map(|&i| {
-                    if i == 32 {
-                        barrier.wait();
-                        panic!("intentional");
-                    }
-                    if i == 0 {
-                        barrier.wait();
-                    }
-                    PRODUCED.fetch_add(1, Ordering::Relaxed);
-                    Tracked
-                })
-                .for_each_ordered(|_| {});
+            let barrier = Barrier::new(2);
+            let result = catch_unwind(|| {
+                let input: Vec<usize> = (0..64).collect();
+                input
+                    .par_iter()
+                    .map(|&i| {
+                        if i == 32 {
+                            barrier.wait();
+                            panic!("intentional");
+                        }
+                        if i == 0 {
+                            barrier.wait();
+                        }
+                        PRODUCED.fetch_add(1, Ordering::Relaxed);
+                        Tracked
+                    })
+                    .for_each_ordered(|_| {});
+            });
+
+            assert_eq!(result.unwrap_err().downcast_ref::<&str>(), Some(&"intentional"));
+            let produced = PRODUCED.load(Ordering::Relaxed);
+            let dropped = DROP_COUNT.load(Ordering::Relaxed);
+            assert_eq!(dropped, produced, "all produced items must be dropped");
         });
-
-        assert!(result.is_err());
-        let produced = PRODUCED.load(Ordering::Relaxed);
-        let dropped = DROP_COUNT.load(Ordering::Relaxed);
-        assert_eq!(dropped, produced, "all produced items must be dropped");
     }
 }

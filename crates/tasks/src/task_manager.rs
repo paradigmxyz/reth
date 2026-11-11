@@ -17,7 +17,7 @@ use std::{
 use tokio::{
     runtime::Handle,
     sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender},
-    task::JoinHandle,
+    task::{self, JoinHandle},
 };
 use tracing::debug;
 
@@ -90,7 +90,7 @@ where
     F: FnOnce() -> R + Send + 'static,
     R: Send + 'static,
 {
-    tokio::task::spawn_blocking(Box::new(func) as Box<dyn FnOnce() -> R + Send>)
+    task::spawn_blocking(Box::new(func) as Box<dyn FnOnce() -> R + Send>)
 }
 
 /// Monitors critical tasks for panics and manages graceful shutdown.
@@ -233,142 +233,160 @@ pub(crate) enum TaskEvent {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_utils;
     use std::{
         sync::atomic::{AtomicBool, AtomicUsize, Ordering},
         time::Duration,
     };
+    use tokio::time::sleep;
 
     #[test]
     fn test_critical() {
-        let rt = Runtime::test();
-        let handle = rt.take_task_manager_handle().unwrap();
+        test_utils::run(|| {
+            let rt = Runtime::test();
+            let handle = rt.take_task_manager_handle().unwrap();
 
-        rt.spawn_critical_task("this is a critical task", async { panic!("intentionally panic") });
+            rt.spawn_critical_task("this is a critical task", async {
+                panic!("intentionally panic")
+            });
 
-        rt.handle().block_on(async move {
-            let err_result = handle.await.unwrap();
-            assert!(err_result.is_err(), "Expected TaskManager to return an error due to panic");
-            let panicked_err = err_result.unwrap_err();
+            rt.handle().block_on(async move {
+                let panicked_err = handle.await.unwrap().unwrap_err();
 
-            assert_eq!(panicked_err.task_name, "this is a critical task");
-            assert_eq!(panicked_err.error, Some("intentionally panic".to_string()));
-        })
+                assert_eq!(panicked_err.task_name, "this is a critical task");
+                assert_eq!(panicked_err.error, Some("intentionally panic".to_string()));
+            })
+        });
     }
 
     #[test]
     fn test_manager_shutdown_critical() {
-        let rt = Runtime::test();
+        test_utils::run(|| {
+            let rt = Runtime::test();
 
-        let (signal, shutdown) = signal();
+            let (signal, shutdown) = signal();
 
-        rt.spawn_critical_task("this is a critical task", async move {
-            tokio::time::sleep(Duration::from_millis(200)).await;
-            drop(signal);
+            rt.spawn_critical_task("this is a critical task", async move {
+                sleep(Duration::from_millis(200)).await;
+                drop(signal);
+            });
+
+            rt.graceful_shutdown();
+
+            rt.handle().block_on(shutdown);
         });
-
-        rt.graceful_shutdown();
-
-        rt.handle().block_on(shutdown);
     }
 
     #[test]
     fn test_manager_shutdown() {
-        let rt = Runtime::test();
+        test_utils::run(|| {
+            let rt = Runtime::test();
 
-        let (signal, shutdown) = signal();
+            let (signal, shutdown) = signal();
 
-        rt.spawn_task(async move {
-            tokio::time::sleep(Duration::from_millis(200)).await;
-            drop(signal);
+            rt.spawn_task(async move {
+                sleep(Duration::from_millis(200)).await;
+                drop(signal);
+            });
+
+            rt.graceful_shutdown();
+
+            rt.handle().block_on(shutdown);
         });
-
-        rt.graceful_shutdown();
-
-        rt.handle().block_on(shutdown);
     }
 
     #[test]
     fn test_manager_graceful_shutdown() {
-        let rt = Runtime::test();
+        test_utils::run(|| {
+            let rt = Runtime::test();
 
-        let val = Arc::new(AtomicBool::new(false));
-        let c = val.clone();
-        rt.spawn_critical_with_graceful_shutdown_signal("grace", async move |shutdown| {
-            let _guard = shutdown.await;
-            tokio::time::sleep(Duration::from_millis(200)).await;
-            c.store(true, Ordering::Relaxed);
+            let val = Arc::new(AtomicBool::new(false));
+            let c = val.clone();
+            rt.spawn_critical_with_graceful_shutdown_signal("grace", async move |shutdown| {
+                let _guard = shutdown.await;
+                sleep(Duration::from_millis(200)).await;
+                c.store(true, Ordering::Relaxed);
+            });
+
+            rt.graceful_shutdown();
+            assert!(val.load(Ordering::Relaxed));
         });
-
-        rt.graceful_shutdown();
-        assert!(val.load(Ordering::Relaxed));
     }
 
     #[test]
     fn test_manager_graceful_shutdown_many() {
-        let rt = Runtime::test();
+        test_utils::run(|| {
+            let rt = Runtime::test();
 
-        let counter = Arc::new(AtomicUsize::new(0));
-        let num = 10;
-        for _ in 0..num {
-            let c = counter.clone();
-            rt.spawn_critical_with_graceful_shutdown_signal("grace", async move |shutdown| {
-                let _guard = shutdown.await;
-                tokio::time::sleep(Duration::from_millis(200)).await;
-                c.fetch_add(1, Ordering::SeqCst);
-            });
-        }
+            let counter = Arc::new(AtomicUsize::new(0));
+            let num = 10;
+            for _ in 0..num {
+                let c = counter.clone();
+                rt.spawn_critical_with_graceful_shutdown_signal("grace", async move |shutdown| {
+                    let _guard = shutdown.await;
+                    sleep(Duration::from_millis(200)).await;
+                    c.fetch_add(1, Ordering::SeqCst);
+                });
+            }
 
-        rt.graceful_shutdown();
-        assert_eq!(counter.load(Ordering::Relaxed), num);
+            rt.graceful_shutdown();
+            assert_eq!(counter.load(Ordering::Relaxed), num);
+        });
     }
 
     #[test]
     fn test_manager_graceful_shutdown_timeout() {
-        let rt = Runtime::test();
+        test_utils::run(|| {
+            let rt = Runtime::test();
 
-        let timeout = Duration::from_millis(500);
-        let val = Arc::new(AtomicBool::new(false));
-        let val2 = val.clone();
-        rt.spawn_critical_with_graceful_shutdown_signal("grace", async move |shutdown| {
-            let _guard = shutdown.await;
-            tokio::time::sleep(timeout * 3).await;
-            val2.store(true, Ordering::Relaxed);
-            unreachable!("should not be reached");
+            let timeout = Duration::from_millis(500);
+            let val = Arc::new(AtomicBool::new(false));
+            let val2 = val.clone();
+            rt.spawn_critical_with_graceful_shutdown_signal("grace", async move |shutdown| {
+                let _guard = shutdown.await;
+                sleep(timeout * 3).await;
+                val2.store(true, Ordering::Relaxed);
+                unreachable!("should not be reached");
+            });
+
+            rt.graceful_shutdown_with_timeout(timeout);
+            assert!(!val.load(Ordering::Relaxed));
         });
-
-        rt.graceful_shutdown_with_timeout(timeout);
-        assert!(!val.load(Ordering::Relaxed));
     }
 
     #[test]
     fn can_build_runtime() {
-        let rt = Runtime::test();
-        let _handle = rt.handle();
+        test_utils::run(|| {
+            let rt = Runtime::test();
+            let _handle = rt.handle();
+        });
     }
 
     #[test]
     fn test_graceful_shutdown_triggered_by_executor() {
-        let rt = Runtime::test();
-        let task_manager_handle = rt.take_task_manager_handle().unwrap();
+        test_utils::run(|| {
+            let rt = Runtime::test();
+            let task_manager_handle = rt.take_task_manager_handle().unwrap();
 
-        let task_did_shutdown_flag = Arc::new(AtomicBool::new(false));
-        let flag_clone = task_did_shutdown_flag.clone();
+            let task_did_shutdown_flag = Arc::new(AtomicBool::new(false));
+            let flag_clone = task_did_shutdown_flag.clone();
 
-        let spawned_task_handle = rt.spawn_with_signal(async move |shutdown_signal| {
-            shutdown_signal.await;
-            flag_clone.store(true, Ordering::SeqCst);
+            let spawned_task_handle = rt.spawn_with_signal(async move |shutdown_signal| {
+                shutdown_signal.await;
+                flag_clone.store(true, Ordering::SeqCst);
+            });
+
+            let send_result = rt.initiate_graceful_shutdown();
+            assert!(send_result.is_ok());
+
+            let manager_final_result = rt.handle().block_on(task_manager_handle);
+            assert!(manager_final_result.is_ok(), "TaskManager task should not panic");
+            assert_eq!(manager_final_result.unwrap(), Ok(()));
+
+            let task_join_result = rt.handle().block_on(spawned_task_handle);
+            assert!(task_join_result.is_ok());
+
+            assert!(task_did_shutdown_flag.load(Ordering::Relaxed));
         });
-
-        let send_result = rt.initiate_graceful_shutdown();
-        assert!(send_result.is_ok());
-
-        let manager_final_result = rt.handle().block_on(task_manager_handle);
-        assert!(manager_final_result.is_ok(), "TaskManager task should not panic");
-        assert_eq!(manager_final_result.unwrap(), Ok(()));
-
-        let task_join_result = rt.handle().block_on(spawned_task_handle);
-        assert!(task_join_result.is_ok());
-
-        assert!(task_did_shutdown_flag.load(Ordering::Relaxed));
     }
 }

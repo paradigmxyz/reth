@@ -17,7 +17,10 @@ use reth_stages_api::{
     StageCheckpoint, StageError, StageId, UnwindInput, UnwindOutput,
 };
 use reth_storage_errors::provider::ProviderResult;
-use reth_tasks::executor::channel::mpsc::{self, Receiver};
+use reth_tasks::executor::{
+    channel::mpsc::{self, Receiver},
+    rayon,
+};
 use std::{
     collections::BTreeSet,
     fmt::Debug,
@@ -195,7 +198,7 @@ where
                 let (tx, rx) = mpsc::sync_channel(chunk.len());
                 channels.push(rx);
                 // Spawn the hashing task onto the global rayon pool
-                reth_tasks::executor::rayon::spawn(move || {
+                rayon::spawn(move || {
                     for (address, account) in chunk {
                         let address = address.key().unwrap();
                         let _ = tx.send((RawKey::new(keccak256(address)), account));

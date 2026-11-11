@@ -10,10 +10,12 @@ pub use rayon::{
 
 #[cfg(feature = "fuzz")]
 mod deterministic {
+    use shuttle::{sync::mpsc, thread, thread_local};
     use std::{
         any::Any,
         cell::RefCell,
-        fmt,
+        error::Error,
+        fmt, mem,
         panic::{catch_unwind, resume_unwind, AssertUnwindSafe},
         sync::{
             atomic::{AtomicUsize, Ordering},
@@ -24,7 +26,7 @@ mod deterministic {
     static NEXT_POOL: AtomicUsize = AtomicUsize::new(1);
     static GLOBAL_POOL: OnceLock<ThreadPool> = OnceLock::new();
 
-    shuttle::thread_local! {
+    thread_local! {
         static CONTEXT: RefCell<Option<WorkerContext>> = RefCell::new(None);
     }
 
@@ -70,7 +72,7 @@ mod deterministic {
         /// Starts a scheduler-managed job, waiting for pool capacity before executing it.
         pub fn spawn(&self, f: impl FnOnce() + Send + 'static) {
             let pool = self.clone();
-            let handle = shuttle::thread::Builder::new()
+            let handle = thread::Builder::new()
                 .name(self.names[0].clone().unwrap_or_else(|| "compute".into()))
                 .spawn(move || {
                     pool.execute(None, || {
@@ -96,7 +98,7 @@ mod deterministic {
         pub fn broadcast<T: Send>(&self, f: impl Fn(BroadcastContext<'_>) -> T + Sync) -> Vec<T> {
             without_current_slot(|| {
                 let results = scope_inner(None, |scope| {
-                    let (sender, receiver) = shuttle::sync::mpsc::channel();
+                    let (sender, receiver) = mpsc::channel();
                     let f = &f;
                     for index in 0..self.current_num_threads() {
                         let sender = sender.clone();
@@ -138,12 +140,12 @@ mod deterministic {
         fn execute<T>(&self, index: Option<usize>, f: impl FnOnce() -> T) -> T {
             let index = self.acquire(index);
             let _lease = Lease { pool: self.clone(), index };
-            with_context(WorkerContext { pool: self.clone(), index, owns_slot: true }, f)
+            WorkerContext { pool: self.clone(), index, owns_slot: true }.with(f)
         }
 
         fn acquire(&self, index: Option<usize>) -> usize {
             loop {
-                let current = shuttle::thread::current();
+                let current = thread::current();
                 let mut slots = self.slots.lock().expect("logical slot metadata is not poisoned");
                 let available = match index {
                     Some(index) => (!slots.occupied[index]).then_some(index),
@@ -157,7 +159,7 @@ mod deterministic {
                     slots.waiters.push(current);
                 }
                 drop(slots);
-                shuttle::thread::park();
+                thread::park();
             }
         }
 
@@ -165,11 +167,25 @@ mod deterministic {
             let waiters = {
                 let mut slots = self.slots.lock().expect("logical slot metadata is not poisoned");
                 slots.occupied[index] = false;
-                std::mem::take(&mut slots.waiters)
+                mem::take(&mut slots.waiters)
             };
             for waiter in waiters {
                 waiter.unpark();
             }
+        }
+
+        fn current() -> Option<Self> {
+            CONTEXT.with(|context| context.borrow().as_ref().map(|context| context.pool.clone()))
+        }
+
+        fn global() -> Self {
+            GLOBAL_POOL
+                .get_or_init(|| {
+                    ThreadPoolBuilder::new()
+                        .build()
+                        .expect("logical pool construction is infallible")
+                })
+                .clone()
         }
     }
 
@@ -252,15 +268,7 @@ mod deterministic {
             f.write_str("the global compute pool is already initialized")
         }
     }
-    impl std::error::Error for ThreadPoolBuildError {}
-
-    fn global_pool() -> ThreadPool {
-        GLOBAL_POOL
-            .get_or_init(|| {
-                ThreadPoolBuilder::new().build().expect("logical pool construction is infallible")
-            })
-            .clone()
-    }
+    impl Error for ThreadPoolBuildError {}
 
     /// Identifies the logical worker executing a broadcast callback.
     #[derive(Debug)]
@@ -281,7 +289,7 @@ mod deterministic {
 
     /// A borrowing scope that keeps all submitted jobs alive until they have finished.
     pub struct Scope<'env> {
-        sender: shuttle::sync::mpsc::Sender<Message<'env>>,
+        sender: mpsc::Sender<Message<'env>>,
     }
     impl<'env> Scope<'env> {
         /// Submits a borrowing job; nested submissions are included in the scope's drain.
@@ -301,10 +309,11 @@ mod deterministic {
         Job(Job<'env>),
         Done(Result<(), Panic>),
     }
-    // Metadata guards never span a scheduler operation; contended jobs park only after unlocking.
+    // Metadata guards never span a scheduler operation or user callback, so a job panic cannot
+    // poison this mutex. Contended jobs park only after unlocking.
     struct Slots {
         occupied: Vec<bool>,
-        waiters: Vec<shuttle::thread::Thread>,
+        waiters: Vec<thread::Thread>,
     }
     struct Lease {
         pool: ThreadPool,
@@ -327,10 +336,11 @@ mod deterministic {
             CONTEXT.with(|context| context.replace(self.0.take()));
         }
     }
-    fn with_context<T>(context: WorkerContext, f: impl FnOnce() -> T) -> T {
-        let previous = CONTEXT.with(|slot| slot.replace(Some(context)));
-        let _restore = RestoreContext(previous);
-        f()
+    impl WorkerContext {
+        fn with<T>(self, f: impl FnOnce() -> T) -> T {
+            let _restore = RestoreContext(CONTEXT.with(|slot| slot.replace(Some(self))));
+            f()
+        }
     }
     struct ResumeSlot(WorkerContext);
     impl Drop for ResumeSlot {
@@ -359,19 +369,16 @@ mod deterministic {
         });
         f()
     }
-    fn current_pool() -> Option<ThreadPool> {
-        CONTEXT.with(|context| context.borrow().as_ref().map(|context| context.pool.clone()))
-    }
 
     /// Runs a scope on the caller and drains all spawned jobs, including when the caller panics.
     pub fn in_place_scope<'env, T>(f: impl FnOnce(&Scope<'env>) -> T) -> T {
-        scope_inner(Some(current_pool().unwrap_or_else(global_pool)), f)
+        scope_inner(Some(ThreadPool::current().unwrap_or_else(ThreadPool::global)), f)
     }
 
     fn scope_inner<'env, T>(pool: Option<ThreadPool>, f: impl FnOnce(&Scope<'env>) -> T) -> T {
-        let (sender, receiver) = shuttle::sync::mpsc::channel();
+        let (sender, receiver) = mpsc::channel();
         let scope = Scope { sender };
-        let (result, child_panic) = shuttle::thread::scope(|threads| {
+        let (result, child_panic) = thread::scope(|threads| {
             let scope = &scope;
             let dispatcher = threads.spawn(move || {
                 let mut running = 1usize;
@@ -428,11 +435,11 @@ mod deterministic {
 
     /// Runs the callback on the current or global pool and waits for all descendants.
     pub fn scope<'env, T: Send>(f: impl FnOnce(&Scope<'env>) -> T + Send) -> T {
-        current_pool().unwrap_or_else(global_pool).scope(f)
+        ThreadPool::current().unwrap_or_else(ThreadPool::global).scope(f)
     }
     /// Returns the current pool size, or the configured global pool size outside a pool.
     pub fn current_num_threads() -> usize {
-        current_pool().unwrap_or_else(global_pool).current_num_threads()
+        ThreadPool::current().unwrap_or_else(ThreadPool::global).current_num_threads()
     }
     /// Returns the current pool identity for indexing logical worker-local state.
     pub fn current_pool_id() -> Option<usize> {
@@ -444,7 +451,7 @@ mod deterministic {
     }
     /// Starts a Shuttle job, acquiring current-pool capacity when called from a pool.
     pub fn spawn(f: impl FnOnce() + Send + 'static) {
-        current_pool().unwrap_or_else(global_pool).spawn(f);
+        ThreadPool::current().unwrap_or_else(ThreadPool::global).spawn(f);
     }
     /// Starts an unscoped job through Shuttle; its scheduler selects execution order.
     pub fn spawn_fifo(f: impl FnOnce() + Send + 'static) {
@@ -455,7 +462,7 @@ mod deterministic {
         a: impl FnOnce() -> A + Send,
         b: impl FnOnce() -> B + Send,
     ) -> (A, B) {
-        let (sender, receiver) = shuttle::sync::mpsc::channel();
+        let (sender, receiver) = mpsc::channel();
         let b = in_place_scope(|scope| {
             scope.spawn(move |_| {
                 sender.send(a()).unwrap_or_else(|_| panic!("join receiver outlives producer"));

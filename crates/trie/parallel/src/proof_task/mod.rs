@@ -806,7 +806,7 @@ mod tests {
             // initialization error is a message here, rather than a successful shutdown.
             assert!(matches!(
                 results.recv_timeout(Duration::from_secs(30)),
-                Err(reth_tasks::executor::channel::RecvTimeoutError::Disconnected)
+                Err(RecvTimeoutError::Disconnected)
             ));
         }
     }

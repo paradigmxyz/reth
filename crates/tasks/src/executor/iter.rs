@@ -10,8 +10,12 @@ pub use rayon::slice::ParallelSliceMut;
 #[cfg(feature = "fuzz")]
 mod deterministic {
     use std::{
-        collections::{BTreeMap, BTreeSet, HashMap, HashSet},
-        iter::{Chain, Enumerate, Filter, FilterMap, OnceWith, Skip, Take, Zip},
+        cmp::Ordering,
+        collections::{BTreeMap, BTreeSet, BinaryHeap, HashMap, HashSet, LinkedList, VecDeque},
+        iter::{
+            self, once_with, Chain, Enumerate, Filter, FilterMap, OnceWith, Skip, Sum, Take, Zip,
+        },
+        ops::{Range, RangeInclusive},
     };
 
     /// A lazy serial iterator with the compute facade's parallel-iterator API.
@@ -49,8 +53,8 @@ mod deterministic {
     into_parallel!([T] Vec<T>);
     into_parallel!([T] Option<T>);
     into_parallel!([T, E] Result<T, E>);
-    into_parallel!([T] std::ops::Range<T>);
-    into_parallel!([T] std::ops::RangeInclusive<T>);
+    into_parallel!([T] Range<T>);
+    into_parallel!([T] RangeInclusive<T>);
     into_parallel!([T, const N: usize] [T; N]);
     into_parallel!(['a, T] &'a [T]);
     into_parallel!(['a, T] &'a mut [T]);
@@ -62,13 +66,12 @@ mod deterministic {
     into_parallel!([T] BTreeSet<T>);
     into_parallel!([K, V, S] HashMap<K, V, S>);
     into_parallel!([T, S] HashSet<T, S>);
-    into_parallel!([T] std::collections::VecDeque<T>);
-    into_parallel!([T] std::collections::LinkedList<T>);
-    into_parallel!([T] std::collections::BinaryHeap<T>);
+    into_parallel!([T] VecDeque<T>);
+    into_parallel!([T] LinkedList<T>);
+    into_parallel!([T] BinaryHeap<T>);
 
     /// A lazy map adapter retaining the source compute iterator's indexed guarantees.
-    pub type Map<TIterator, TMap> =
-        Serial<std::iter::Map<<TIterator as ParallelIterator>::Inner, TMap>>;
+    pub type Map<TIterator, TMap> = Serial<iter::Map<<TIterator as ParallelIterator>::Inner, TMap>>;
 
     /// Borrows a collection as a deterministic compute iterator.
     pub trait IntoParallelRefIterator<'a> {
@@ -222,7 +225,7 @@ mod deterministic {
             identity: impl Fn() -> TAccumulator + Send + Sync,
             fold: impl Fn(TAccumulator, Self::Item) -> TAccumulator + Send + Sync,
         ) -> Serial<OnceWith<impl FnOnce() -> TAccumulator + Send>> {
-            Serial(std::iter::once_with(move || self.into_serial().fold(identity(), fold)))
+            Serial(once_with(move || self.into_serial().fold(identity(), fold)))
         }
         /// Combines all items starting with the identity value.
         fn reduce(
@@ -240,7 +243,7 @@ mod deterministic {
             self.into_serial().reduce(reduce)
         }
         /// Sums all yielded values.
-        fn sum<T: std::iter::Sum<Self::Item> + Send>(self) -> T {
+        fn sum<T: Sum<Self::Item> + Send>(self) -> T {
             self.into_serial().sum()
         }
         /// Counts all yielded values.
@@ -318,7 +321,7 @@ mod deterministic {
             key: TKeyFn,
         );
         /// Sorts items by a comparator without preserving equal-item order.
-        fn par_sort_unstable_by<TCompare: Fn(&T, &T) -> std::cmp::Ordering + Sync>(
+        fn par_sort_unstable_by<TCompare: Fn(&T, &T) -> Ordering + Sync>(
             &mut self,
             compare: TCompare,
         );
@@ -333,7 +336,7 @@ mod deterministic {
         ) {
             self.sort_unstable_by_key(key);
         }
-        fn par_sort_unstable_by<TCompare: Fn(&T, &T) -> std::cmp::Ordering + Sync>(
+        fn par_sort_unstable_by<TCompare: Fn(&T, &T) -> Ordering + Sync>(
             &mut self,
             compare: TCompare,
         ) {

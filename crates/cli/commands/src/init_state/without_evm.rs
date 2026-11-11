@@ -12,6 +12,7 @@ use reth_provider::{
 };
 use reth_stages::{StageCheckpoint, StageId};
 use reth_static_file_types::StaticFileSegment;
+use reth_tasks::executor::channel::mpsc;
 use std::{io::ErrorKind, path::Path};
 use tracing::info;
 
@@ -119,7 +120,7 @@ where
     N: NodePrimitives,
     F: Fn(BlockNumber) -> N::BlockHeader + Send + Sync + 'static,
 {
-    let (tx, rx) = reth_tasks::executor::channel::mpsc::channel();
+    let (tx, rx) = mpsc::channel();
 
     let mut handles = Vec::new();
 

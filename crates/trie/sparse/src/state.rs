@@ -6,17 +6,19 @@ use alloc::vec::Vec;
 use alloy_primitives::{map::B256Map, B256};
 use either::Either;
 use reth_execution_errors::{SparseStateTrieResult, SparseTrieErrorKind};
-#[cfg(feature = "std")]
-use reth_tasks::executor::rayon::iter::{
-    IntoParallelIterator, IntoParallelRefMutIterator, ParallelIterator,
-};
 use reth_trie_common::{
     updates::{StorageTrieUpdates, TrieUpdates},
     DecodedMultiProof, MultiProof, Nibbles, ProofTrieNodeV2,
 };
+use tracing::instrument;
+
+#[cfg(feature = "std")]
+use reth_tasks::executor::rayon::{
+    self,
+    iter::{IntoParallelIterator, IntoParallelRefMutIterator, ParallelIterator},
+};
 #[cfg(feature = "std")]
 use tracing::debug;
-use tracing::instrument;
 
 /// Holds data that should be dropped after any locks are released.
 ///
@@ -288,8 +290,8 @@ where
         #[cfg(feature = "std")]
         let results: Vec<_> = {
             let parent_span = tracing::Span::current();
-            let targets = targets.into_par_iter();
             targets
+                .into_par_iter()
                 .map(|(hashed_address, target, mut nodes)| {
                     let _span = tracing::trace_span!(
                         target: "trie::sparse",
@@ -496,7 +498,7 @@ where
         let account_parent_span = parent_span.clone();
 
         // Prune account and storage tries in parallel using the same epoch cutoff.
-        let (account_nodes_pruned, storage_tries_evicted) = reth_tasks::executor::rayon::join(
+        let (account_nodes_pruned, storage_tries_evicted) = rayon::join(
             || {
                 let hashed_address = Option::<B256>::None;
                 let _span = tracing::trace_span!(

@@ -1,6 +1,6 @@
 //! Sparse Trie task related functionality.
 
-use reth_tasks::executor::time::Instant;
+use reth_tasks::executor::{channel, rayon, time::Instant};
 use std::{
     any::Any,
     panic::{self, AssertUnwindSafe},
@@ -17,7 +17,7 @@ use metrics::{Gauge, Histogram};
 use reth_metrics::Metrics;
 use reth_primitives_traits::Account;
 use reth_tasks::{
-    executor::channel::{Receiver, Sender},
+    executor::channel::{mpsc, select_biased, Receiver, Sender},
     Runtime,
 };
 use reth_trie::{
@@ -127,8 +127,7 @@ pub(super) struct SparseTrieCacheTask<A = ArenaParallelSparseTrie, S = ArenaPara
     /// work never drains, since the updates channel closing is a normal end of stream.
     cancel_rx: Receiver<()>,
     /// Sender half for the channel to send final hashed state to.
-    final_hashed_state_tx:
-        Option<reth_tasks::executor::channel::mpsc::Sender<Arc<HashedPostState>>>,
+    final_hashed_state_tx: Option<mpsc::Sender<Arc<HashedPostState>>>,
     /// `SparseStateTrie` used for computing the state root.
     trie: SparseStateTrie<A, S>,
     /// The parent block's state root.
@@ -230,7 +229,7 @@ where
         executor: &Runtime,
         updates: Receiver<StateRootMessage>,
         cancel_rx: Receiver<()>,
-        final_hashed_state_tx: reth_tasks::executor::channel::mpsc::Sender<Arc<HashedPostState>>,
+        final_hashed_state_tx: mpsc::Sender<Arc<HashedPostState>>,
         proof_worker_handle: ProofWorkerHandle,
         metrics: SparseTrieTaskMetrics,
         trie: SparseStateTrie<A, S>,
@@ -238,8 +237,8 @@ where
         new_epoch: TrieNodeEpoch,
         chunk_size: usize,
     ) -> Self {
-        let (hashed_state_tx, hashed_state_rx) = reth_tasks::executor::channel::unbounded();
-        let (storage_done_tx, storage_done_rx) = reth_tasks::executor::channel::unbounded();
+        let (hashed_state_tx, hashed_state_rx) = channel::unbounded();
+        let (storage_done_tx, storage_done_rx) = channel::unbounded();
 
         let parent_span = tracing::Span::current();
         let hashing_metrics = metrics.clone();
@@ -380,7 +379,7 @@ where
         // marker means they died without finishing the stream.
         while !self.finished_state_updates {
             let mut t = Instant::now();
-            reth_tasks::executor::channel::select_biased! {
+            select_biased! {
                 recv(self.updates) -> message => {
                     let wake = Instant::now();
                     total_idle_time += wake.duration_since(idle_start);
@@ -434,7 +433,7 @@ where
         // hints are ignored: with all updates known, prefetching has nothing left to help.
         while !done {
             let mut t = Instant::now();
-            reth_tasks::executor::channel::select_biased! {
+            select_biased! {
                 recv(self.proof_worker_handle.results()) -> message => {
                     let wake = Instant::now();
                     total_idle_time += wake.duration_since(idle_start);
@@ -935,7 +934,7 @@ where
             let chunk = jobs.split_off(jobs.len().saturating_sub(chunk_len));
             let storage_done_tx = self.storage_done_tx.clone();
             let parent_span = parent_span.clone();
-            reth_tasks::executor::rayon::spawn(move || {
+            rayon::spawn(move || {
                 let _enter = debug_span!(
                     target: "engine::tree::payload_processor::sparse_trie",
                     parent: &parent_span,
@@ -1494,9 +1493,7 @@ fn storage_job_chunk_len(tries: usize) -> usize {
     /// Upper bound on how many tries a single slow one can hold up.
     const MAX_CHUNK_LEN: usize = 32;
 
-    tries
-        .div_ceil(reth_tasks::executor::rayon::current_num_threads().max(1) * 4)
-        .clamp(1, MAX_CHUNK_LEN)
+    tries.div_ceil(rayon::current_num_threads().max(1) * 4).clamp(1, MAX_CHUNK_LEN)
 }
 
 /// Metrics recorded by sparse trie and hashing tasks.
@@ -1661,6 +1658,7 @@ mod tests {
     use reth_db_common::init::init_genesis;
     use reth_provider::test_utils::create_test_provider_factory;
     use reth_storage_overlay::{OverlayManager, OverlayStateProviderFactory};
+    use reth_tasks::executor::thread;
     use reth_trie_common::{
         BranchNodeV2, ExtensionNode, LeafNode, Nibbles, RlpNode, TrieMask, TrieNodeV2,
     };
@@ -1690,13 +1688,13 @@ mod tests {
             ProofWorkerCounts::full(runtime),
             Default::default(),
         );
-        let (updates_tx, updates_rx) = reth_tasks::executor::channel::unbounded();
-        let (cancel_guard, cancel_rx) = reth_tasks::executor::channel::bounded(0);
+        let (updates_tx, updates_rx) = channel::unbounded();
+        let (cancel_guard, cancel_rx) = channel::bounded(0);
         let task = SparseTrieCacheTask::new_with_trie(
             runtime,
             updates_rx,
             cancel_rx,
-            reth_tasks::executor::channel::mpsc::channel().0,
+            mpsc::channel().0,
             proof_worker_handle,
             SparseTrieTaskMetrics::default(),
             trie,
@@ -2281,13 +2279,13 @@ mod tests {
             .with_updates(true);
 
         let parent_state_root = B256::repeat_byte(0x55);
-        let (updates_tx, updates_rx) = reth_tasks::executor::channel::unbounded();
-        let (_cancel_guard, cancel_rx) = reth_tasks::executor::channel::bounded::<()>(0);
+        let (updates_tx, updates_rx) = channel::unbounded();
+        let (_cancel_guard, cancel_rx) = channel::bounded::<()>(0);
         let mut task = SparseTrieCacheTask::new_with_trie(
             &runtime,
             updates_rx,
             cancel_rx,
-            reth_tasks::executor::channel::mpsc::channel().0,
+            mpsc::channel().0,
             proof_worker_handle,
             SparseTrieTaskMetrics::default(),
             trie,
@@ -2298,10 +2296,10 @@ mod tests {
 
         // Keep an input queued so progress cannot use its normal queue-empty flush.
         updates_tx.send(StateRootMessage::PrefetchProofs(Default::default())).unwrap();
-        let deadline = reth_tasks::executor::time::Instant::now();
+        let deadline = Instant::now();
         while task.updates.is_empty() {
             assert!(deadline.elapsed() < std::time::Duration::from_secs(1));
-            reth_tasks::executor::thread::yield_now();
+            thread::yield_now();
         }
         for index in 0..INITIAL_UPDATE_BATCH_SIZE {
             let mut state = HashedPostState::default();
@@ -2362,13 +2360,13 @@ mod tests {
             .with_updates(true);
 
         let parent_state_root = B256::repeat_byte(0x55);
-        let (updates_tx, updates_rx) = reth_tasks::executor::channel::unbounded();
-        let (_cancel_guard, cancel_rx) = reth_tasks::executor::channel::bounded::<()>(0);
+        let (updates_tx, updates_rx) = channel::unbounded();
+        let (_cancel_guard, cancel_rx) = channel::bounded::<()>(0);
         let mut task = SparseTrieCacheTask::new_with_trie(
             &runtime,
             updates_rx,
             cancel_rx,
-            reth_tasks::executor::channel::mpsc::channel().0,
+            mpsc::channel().0,
             proof_worker_handle,
             SparseTrieTaskMetrics::default(),
             trie,
@@ -2413,13 +2411,13 @@ mod tests {
             .with_default_storage_trie(default_trie)
             .with_updates(true);
 
-        let (updates_tx, updates_rx) = reth_tasks::executor::channel::unbounded();
-        let (_cancel_guard, cancel_rx) = reth_tasks::executor::channel::bounded::<()>(0);
+        let (updates_tx, updates_rx) = channel::unbounded();
+        let (_cancel_guard, cancel_rx) = channel::bounded::<()>(0);
         let mut task = SparseTrieCacheTask::new_with_trie(
             &runtime,
             updates_rx,
             cancel_rx,
-            reth_tasks::executor::channel::mpsc::channel().0,
+            mpsc::channel().0,
             proof_worker_handle,
             SparseTrieTaskMetrics::default(),
             trie,
@@ -2497,13 +2495,13 @@ mod tests {
             .with_default_storage_trie(default_trie)
             .with_updates(true);
 
-        let (updates_tx, updates_rx) = reth_tasks::executor::channel::unbounded();
-        let (cancel_guard, cancel_rx) = reth_tasks::executor::channel::bounded::<()>(0);
+        let (updates_tx, updates_rx) = channel::unbounded();
+        let (cancel_guard, cancel_rx) = channel::bounded::<()>(0);
         let mut task = SparseTrieCacheTask::new_with_trie(
             &runtime,
             updates_rx,
             cancel_rx,
-            reth_tasks::executor::channel::mpsc::channel().0,
+            mpsc::channel().0,
             proof_worker_handle,
             SparseTrieTaskMetrics::default(),
             trie,
@@ -2515,17 +2513,17 @@ mod tests {
         updates_tx.send(StateRootMessage::FinishedStateUpdates).unwrap();
         updates_tx.send(StateRootMessage::PrefetchProofs(Default::default())).unwrap();
 
-        let wait_start = reth_tasks::executor::time::Instant::now();
+        let wait_start = Instant::now();
         while task.updates.len() < 2 {
             assert!(
                 wait_start.elapsed() < std::time::Duration::from_secs(1),
                 "hashing task did not queue the test messages"
             );
-            reth_tasks::executor::thread::yield_now();
+            thread::yield_now();
         }
 
-        let (result_tx, result_rx) = reth_tasks::executor::channel::mpsc::channel();
-        let handle = reth_tasks::executor::thread::spawn(move || {
+        let (result_tx, result_rx) = mpsc::channel();
+        let handle = thread::spawn(move || {
             let _ = result_tx.send(task.run());
         });
 

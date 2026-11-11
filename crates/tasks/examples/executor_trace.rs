@@ -1,4 +1,5 @@
 //! The same blocking caller exercises either backend without a runtime trait.
+#![forbid(unsafe_code)]
 use reth_tasks::executor::{
     channel,
     sync::{Arc, Condvar, Mutex, OnceLock},
@@ -13,7 +14,7 @@ fn cancelled_sends() {
         if capacity == 1 {
             sender.send(String::from("buffered")).expect("receiver connected");
         }
-        let (cancel, cancelled) = channel::unbounded();
+        let (cancel, cancelled) = channel::bounded(1);
         thread::scope(|scope| {
             let blocked = scope
                 .spawn(|| channel::send_or_cancel(&sender, String::from("unsent"), &cancelled));
@@ -31,7 +32,7 @@ fn cancelled_sends() {
         assert_eq!(receiver.try_recv(), Err(channel::TryRecvError::Empty));
     }
     let (sender, receiver) = channel::bounded(0);
-    let (cancel, cancelled) = channel::unbounded::<()>();
+    let (cancel, cancelled) = channel::bounded::<()>(1);
     thread::scope(|scope| {
         let blocked = scope.spawn(|| channel::send_or_cancel(&sender, 7, &cancelled));
         thread::sleep(Duration::from_millis(1));
@@ -40,7 +41,7 @@ fn cancelled_sends() {
     });
     assert_eq!(receiver.try_recv(), Err(channel::TryRecvError::Empty));
     let (sender, receiver) = channel::bounded(0);
-    let (cancel, cancelled) = channel::unbounded();
+    let (cancel, cancelled) = channel::bounded(1);
     thread::scope(|scope| {
         let committed = scope.spawn(|| channel::send_or_cancel(&sender, 9, &cancelled));
         assert_eq!(receiver.recv().expect("rendezvous committed"), 9);
@@ -116,7 +117,7 @@ fn workload() -> Vec<String> {
         drop(guard);
         handle.join().expect("notification thread completed");
     });
-    let (send, receive) = channel::unbounded::<u8>();
+    let (send, receive) = channel::bounded::<u8>(1);
     assert_eq!(
         receive.recv_timeout(Duration::from_millis(2)),
         Err(channel::RecvTimeoutError::Timeout)

@@ -68,3 +68,50 @@ pub use task_manager::{
 };
 #[cfg(not(target_family = "wasm"))]
 pub(crate) use task_manager::{wait_for_shutdown_progress, TaskEvent};
+
+#[cfg(all(test, not(target_family = "wasm")))]
+mod test_utils {
+    use crate::executor::Runtime;
+    use tokio::runtime::Builder;
+
+    #[cfg(feature = "fuzz")]
+    use std::sync::Mutex;
+
+    #[cfg(feature = "rayon")]
+    use crate::thread;
+    #[cfg(feature = "rayon")]
+    use futures_util::FutureExt;
+    #[cfg(feature = "rayon")]
+    use std::{
+        future::Future,
+        pin::pin,
+        time::{Duration, Instant},
+    };
+
+    pub(crate) fn run(work: impl FnOnce() + Send + 'static) {
+        // Separate simulations cannot concurrently lease the process-global compute pool.
+        #[cfg(feature = "fuzz")]
+        static SIMULATION: Mutex<()> = Mutex::new(());
+        #[cfg(feature = "fuzz")]
+        let _simulation = SIMULATION.lock().unwrap_or_else(|error| error.into_inner());
+
+        let tokio = Builder::new_multi_thread().worker_threads(2).enable_all().build().unwrap();
+        // Logical threads share the runner's OS thread and its Tokio context.
+        let _entered = tokio.enter();
+        Runtime::new().run(work);
+    }
+
+    #[cfg(feature = "rayon")]
+    pub(crate) fn block_on<F: Future>(future: F) -> F::Output {
+        let mut future = pin!(future);
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            if let Some(result) = future.as_mut().now_or_never() {
+                return result;
+            }
+            assert!(Instant::now() < deadline, "task future did not complete");
+            // Tokio's block_on would park the OS thread instead of scheduling logical workers.
+            thread::yield_now();
+        }
+    }
+}

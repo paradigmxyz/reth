@@ -1,5 +1,8 @@
 //! Explicit entry point for a blocking workload.
 
+#[cfg(feature = "fuzz")]
+use super::deterministic;
+
 /// Runs a workload using the backend selected by the `fuzz` feature.
 ///
 /// Runtime construction exposes no scheduler configuration. Simulation runs one
@@ -31,7 +34,7 @@ impl Runtime {
         }
         #[cfg(feature = "fuzz")]
         {
-            crate::executor::deterministic::run(work)
+            deterministic::run(work)
         }
     }
 }
