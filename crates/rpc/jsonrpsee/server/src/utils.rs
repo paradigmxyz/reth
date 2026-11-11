@@ -138,41 +138,6 @@ pub(crate) async fn no_request_within(
     future::pending().await
 }
 
-/// Serve a service over a TCP connection without graceful shutdown.
-/// This means that pending requests will be dropped when the server is stopped.
-///
-/// Connections which don't send a request within 30 seconds are closed.
-///
-/// If you want to gracefully shutdown the server, use [`serve_with_graceful_shutdown`] instead.
-pub async fn serve<S, B, I>(io: I, service: S) -> Result<(), BoxError>
-where
-    S: tower::Service<http::Request<hyper::body::Incoming>, Response = http::Response<B>>
-        + Clone
-        + Send
-        + 'static,
-    S::Future: Send,
-    S::Response: Send,
-    S::Error: Into<BoxError>,
-    B: http_body::Body<Data = hyper::body::Bytes> + Send + 'static,
-    B::Error: Into<BoxError>,
-    I: tokio::io::AsyncRead + tokio::io::AsyncWrite + Send + Unpin + 'static,
-{
-    let request_received = Arc::new(Notify::new());
-    let service = NotifyOnRequest::new(
-        hyper_util::service::TowerToHyperService::new(service),
-        request_received.clone(),
-    );
-    let io = TokioIo::new(io);
-
-    let builder = hyper_util::server::conn::auto::Builder::new(TokioExecutor::new());
-    let conn = builder.serve_connection_with_upgrades(io, service);
-
-    tokio::select! {
-        res = conn => res,
-        err = no_request_within(&request_received, Some(DEFAULT_FIRST_REQUEST_TIMEOUT)) => Err(err),
-    }
-}
-
 /// Serve a service over a TCP connection with graceful shutdown.
 /// This means that pending requests will be completed before the server is stopped.
 ///

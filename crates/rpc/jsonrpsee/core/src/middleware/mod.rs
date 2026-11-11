@@ -13,7 +13,6 @@ use crate::server::MethodResponse;
 use futures_util::future::Either;
 use jsonrpsee_types::{ErrorObject, Id};
 use pin_project::pin_project;
-use serde::{ser::SerializeSeq, Serialize};
 use serde_json::value::RawValue;
 use tower::layer::{
     util::{Identity, Stack},
@@ -28,37 +27,27 @@ pub use jsonrpsee_types::Request;
 /// Error response that can used to indicate an error in JSON-RPC request batch request.
 /// This is used in the [`Batch`] type to indicate an error in the batch entry.
 #[derive(Debug)]
-pub struct BatchEntryErr<'a>(jsonrpsee_types::Response<'a, ()>);
+pub struct BatchEntryErr<'a> {
+    id: Id<'a>,
+    err: ErrorObject<'a>,
+}
 
 impl<'a> BatchEntryErr<'a> {
     /// Create a new error response.
-    pub fn new(id: Id<'a>, err: ErrorObject<'a>) -> Self {
-        let payload = jsonrpsee_types::ResponsePayload::Error(err);
-        let response = jsonrpsee_types::Response::new(payload, id);
-        Self(response)
+    pub const fn new(id: Id<'a>, err: ErrorObject<'a>) -> Self {
+        Self { id, err }
     }
 
-    /// Get the parts of the error response.q
+    /// Get the parts of the error response.
     pub fn into_parts(self) -> (ErrorObject<'a>, Id<'a>) {
-        let err = match self.0.payload {
-            jsonrpsee_types::ResponsePayload::Error(err) => err,
-            _ => unreachable!("BatchEntryErr can only be created from error payload; qed"),
-        };
-        (err, self.0.id)
+        (self.err, self.id)
     }
 }
 
 /// A batch of JSON-RPC requests.
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct Batch<'a> {
     inner: Vec<Result<BatchEntry<'a>, BatchEntryErr<'a>>>,
-}
-
-impl std::fmt::Display for Batch<'_> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let fmt = serde_json::to_string(self).map_err(|_| std::fmt::Error)?;
-        f.write_str(&fmt)
-    }
 }
 
 impl<'a> IntoIterator for Batch<'a> {
@@ -74,21 +63,6 @@ impl<'a> Batch<'a> {
     /// Create a new batch from a vector of batch entries.
     pub fn from(entries: Vec<Result<BatchEntry<'a>, BatchEntryErr<'a>>>) -> Self {
         Self { inner: entries }
-    }
-
-    /// Create a new empty batch.
-    pub fn new() -> Self {
-        Self { inner: Vec::new() }
-    }
-
-    /// Create a new empty batch with the at least capacity.
-    pub fn with_capacity(capacity: usize) -> Self {
-        Self { inner: Vec::with_capacity(capacity) }
-    }
-
-    /// Push a new batch entry to the batch.
-    pub fn push(&mut self, req: Request<'a>) {
-        self.inner.push(Ok(BatchEntry::Call(req)));
     }
 
     /// Get the length of the batch.
@@ -114,26 +88,9 @@ impl<'a> Batch<'a> {
     }
 }
 
-impl Serialize for Batch<'_> {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        let mut seq = serializer.serialize_seq(Some(self.inner.len()))?;
-        for entry in &self.inner {
-            match entry {
-                Ok(entry) => seq.serialize_element(entry)?,
-                Err(err) => seq.serialize_element(&err.0)?,
-            }
-        }
-        seq.end()
-    }
-}
-
 /// A batch entry specific for the [`RpcServiceT::batch`] method to support both
 /// method calls and notifications.
-#[derive(Debug, Clone, Serialize)]
-#[serde(untagged)]
+#[derive(Debug, Clone)]
 pub enum BatchEntry<'a> {
     /// A regular JSON-RPC call.
     Call(Request<'a>),
@@ -270,48 +227,5 @@ where
             Poll::Ready(rp) => Poll::Ready(rp),
             Poll::Pending => Poll::Pending,
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use jsonrpsee_types::{ErrorCode, ErrorObject};
-
-    #[test]
-    fn serialize_batch_entry() {
-        use super::{BatchEntry, Notification, Request};
-        use jsonrpsee_types::Id;
-
-        let req = Request::borrowed("say_hello", None, Id::Number(1));
-        let batch_entry = BatchEntry::Call(req.clone());
-        assert_eq!(
-            serde_json::to_string(&batch_entry).unwrap(),
-            "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"say_hello\"}",
-        );
-
-        let notification = Notification::new("say_hello".into(), None);
-        let batch_entry = BatchEntry::Notification(notification.clone());
-        assert_eq!(
-            serde_json::to_string(&batch_entry).unwrap(),
-            "{\"jsonrpc\":\"2.0\",\"method\":\"say_hello\",\"params\":null}",
-        );
-    }
-
-    #[test]
-    fn serialize_batch_works() {
-        use super::{Batch, BatchEntry, BatchEntryErr, Notification, Request};
-        use jsonrpsee_types::Id;
-
-        let req = Request::borrowed("say_hello", None, Id::Number(1));
-        let notification = Notification::new("say_hello".into(), None);
-        let batch = Batch::from(vec![
-            Ok(BatchEntry::Call(req)),
-            Ok(BatchEntry::Notification(notification)),
-            Err(BatchEntryErr::new(Id::Number(2), ErrorObject::from(ErrorCode::InvalidRequest))),
-        ]);
-        assert_eq!(
-            serde_json::to_string(&batch).unwrap(),
-            r#"[{"jsonrpc":"2.0","id":1,"method":"say_hello"},{"jsonrpc":"2.0","method":"say_hello","params":null},{"jsonrpc":"2.0","id":2,"error":{"code":-32600,"message":"Invalid request"}}]"#,
-        );
     }
 }

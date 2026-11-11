@@ -124,15 +124,6 @@ impl MethodResponse {
         self.success_or_error.as_error_code()
     }
 
-    /// Create a method response from [`BatchResponse`].
-    pub fn from_batch(batch: BatchResponse) -> Self {
-        Self {
-            json: batch.json,
-            success_or_error: MethodResponseResult::Success,
-            kind: ResponseKind::Batch,
-        }
-    }
-
     /// This is similar to [`MethodResponse::response`] but sets a flag to indicate
     /// that response is a subscription.
     pub fn subscription_response<T>(
@@ -297,8 +288,8 @@ impl MethodResponseResult {
     }
 }
 
-/// Builder to build a `BatchResponse`.
-#[derive(Debug, Clone, Default)]
+/// Builder for the response to a batch request.
+#[derive(Debug)]
 pub struct BatchResponseBuilder {
     /// Serialized JSON-RPC response,
     result: String,
@@ -341,32 +332,22 @@ impl BatchResponseBuilder {
         self.result.len() <= 1
     }
 
-    /// Finish the batch response
-    pub fn finish(mut self) -> BatchResponse {
-        // `Self::default` leaves `result` empty, so anything that `is_empty` regards as
-        // empty must be rejected here to keep the invariant relied upon below.
+    /// Finish the batch response.
+    ///
+    /// An empty batch is answered with an invalid request error.
+    pub fn finish(mut self) -> MethodResponse {
         if self.is_empty() {
-            BatchResponse {
-                json: batch_response_error(Id::Null, ErrorObject::from(ErrorCode::InvalidRequest)),
-            }
-        } else {
-            self.result.pop();
-            self.result.push(']');
-            BatchResponse { json: self.result }
+            return MethodResponse::error(Id::Null, ErrorObject::from(ErrorCode::InvalidRequest))
+        }
+        // Replace the trailing `,` of the last entry.
+        self.result.pop();
+        self.result.push(']');
+        MethodResponse {
+            json: self.result,
+            success_or_error: MethodResponseResult::Success,
+            kind: ResponseKind::Batch,
         }
     }
-}
-
-/// Serialized batch response.
-#[derive(Debug, Clone)]
-pub struct BatchResponse {
-    json: String,
-}
-
-/// Create a JSON-RPC error response.
-pub fn batch_response_error(id: Id, err: impl Into<ErrorObject<'static>>) -> String {
-    let err = ResponsePayload::<()>::error_borrowed(err);
-    serde_json::to_string(&Response::new(err, id)).expect("JSON serialization infallible; qed")
 }
 
 /// Size of a method's last response.

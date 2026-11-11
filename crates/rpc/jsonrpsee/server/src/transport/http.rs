@@ -1,19 +1,14 @@
 use crate::{server::handle_rpc_call, BatchRequestConfig, HttpRequest, HttpResponse, LOG_TARGET};
 use http::Method;
-use hyper::body::{Body, Bytes};
+use hyper::body::Bytes;
 use jsonrpsee_core::{
     http_helpers::{read_body, HttpError},
     middleware::RpcServiceT,
     BoxError,
 };
 
-/// Checks that content type of received request is valid for JSON-RPC.
-pub fn content_type_is_json<T: Body>(request: &HttpRequest<T>) -> bool {
-    is_json(request.headers().get(hyper::header::CONTENT_TYPE))
-}
-
 /// Returns true if the `content_type` header indicates a valid JSON message.
-pub fn is_json(content_type: Option<&hyper::header::HeaderValue>) -> bool {
+fn is_json(content_type: Option<&hyper::header::HeaderValue>) -> bool {
     content_type.and_then(|val| val.to_str().ok()).is_some_and(|content| {
         content.eq_ignore_ascii_case("application/json") ||
             content.eq_ignore_ascii_case("application/json; charset=utf-8") ||
@@ -41,7 +36,7 @@ where
 {
     // Only the `POST` method is allowed.
     match *request.method() {
-        Method::POST if content_type_is_json(&request) => {
+        Method::POST if is_json(request.headers().get(hyper::header::CONTENT_TYPE)) => {
             let (parts, body) = request.into_parts();
 
             let (body, is_single) = match read_body(&parts.headers, body, max_request_size).await {
@@ -127,11 +122,6 @@ pub mod response {
             // Parsing `StatusCode` and `HeaderValue` is infallible but
             // parsing body content is not.
             .expect("Unable to parse response body for type conversion")
-    }
-
-    /// Create a valid JSON response.
-    pub fn ok_response(body: impl Into<HttpBody>) -> HttpResponse {
-        from_template(hyper::StatusCode::OK, body, JSON)
     }
 
     /// Create a response from a method response.

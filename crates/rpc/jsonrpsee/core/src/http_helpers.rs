@@ -205,23 +205,14 @@ where
 /// NOTE: There's no specific hard limit on `Content_length` in HTTP specification.
 /// Thus this method might reject valid `content_length`
 fn read_header_content_length(headers: &http::header::HeaderMap) -> Option<u32> {
-    let length = read_header_value(headers, http::header::CONTENT_LENGTH)?;
-    // HTTP Content-Length indicates number of bytes in decimal.
-    length.parse::<u32>().ok()
-}
-
-/// Returns a string value when there is exactly one value for the given header.
-pub fn read_header_value(
-    headers: &http::header::HeaderMap,
-    header_name: http::header::HeaderName,
-) -> Option<&str> {
-    let mut values = headers.get_all(header_name).iter();
-    let val = values.next()?;
-    if values.next().is_none() {
-        val.to_str().ok()
-    } else {
-        None
+    let mut values = headers.get_all(http::header::CONTENT_LENGTH).iter();
+    let length = values.next()?;
+    // Reject ambiguous requests with more than one value.
+    if values.next().is_some() {
+        return None
     }
+    // HTTP Content-Length indicates number of bytes in decimal.
+    length.to_str().ok()?.parse().ok()
 }
 
 #[cfg(test)]

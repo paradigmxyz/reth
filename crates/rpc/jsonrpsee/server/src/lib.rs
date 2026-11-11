@@ -62,6 +62,6 @@ pub use jsonrpsee_core::http_helpers::{
     Body as HttpBody, Request as HttpRequest, Response as HttpResponse,
 };
 pub use transport::{http, ws};
-pub use utils::{serve, serve_with_graceful_shutdown};
+pub use utils::serve_with_graceful_shutdown;
 
 pub(crate) const LOG_TARGET: &str = "jsonrpsee-server";

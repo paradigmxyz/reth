@@ -82,11 +82,6 @@ impl ServerHandle {
     pub async fn stopped(self) {
         self.0.closed().await
     }
-
-    /// Check if the server has been stopped.
-    pub fn is_stopped(&self) -> bool {
-        self.0.is_closed()
-    }
 }
 
 /// Limits the number of connections.

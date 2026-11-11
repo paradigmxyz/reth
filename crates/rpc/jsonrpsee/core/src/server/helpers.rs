@@ -115,16 +115,6 @@ impl MethodSink {
     pub fn max_capacity(&self) -> usize {
         self.tx.max_capacity()
     }
-
-    /// Waits for there to be space on the return channel.
-    pub async fn has_capacity(&self) -> Result<(), DisconnectError> {
-        match self.tx.reserve().await {
-            // The permit is thrown away here because it's just
-            // a way to ensure that the return buffer has space.
-            Ok(_) => Ok(()),
-            Err(_) => Err(DisconnectError(RawValue::NULL.to_owned().into())),
-        }
-    }
 }
 
 /// Distinguish malformed JSON from an invalid request and recover its [`Id`] when possible.

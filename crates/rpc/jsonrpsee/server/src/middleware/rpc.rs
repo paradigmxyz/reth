@@ -211,7 +211,7 @@ impl RpcServiceT for RpcService {
             }
             // An empty batch is regarded as an invalid request here.
             else {
-                MethodResponse::from_batch(batch_rp.finish())
+                batch_rp.finish()
             }
         }
     }

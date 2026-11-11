@@ -98,15 +98,6 @@ impl<'a> Params<'a> {
         Self(raw.map(|r| r.trim().into()))
     }
 
-    /// Returns true if the contained JSON is an object
-    pub fn is_object(&self) -> bool {
-        let json: &str = match self.0 {
-            Some(ref cow) => cow,
-            None => return false,
-        };
-        json.starts_with('{')
-    }
-
     /// Obtain a sequence parser, [`ParamsSequence`].
     ///
     /// This allows sequential parsing of the incoming params, using an `Iterator`-style API and is
@@ -356,14 +347,6 @@ impl Id<'_> {
     pub fn as_str(&self) -> Option<&str> {
         match self {
             Self::Str(s) => Some(s.as_ref()),
-            _ => None,
-        }
-    }
-
-    /// If the ID is Null, returns (). Returns None otherwise.
-    pub fn as_null(&self) -> Option<()> {
-        match self {
-            Self::Null => Some(()),
             _ => None,
         }
     }
