@@ -791,7 +791,13 @@ impl<Context: Send + Sync + 'static> RpcModule<Context> {
                     };
 
                     let key = SubscriptionKey { conn_id, sub_id: sub_id.into_owned() };
-                    let result = subscribers.lock().remove(&key).is_some();
+                    let mut subs = subscribers.lock();
+                    let removed = subs.remove(&key);
+                    let result = removed.is_some();
+                    // Dropping the entry's receiver marks the sink inactive, which
+                    // `SubscriptionSink::drop` checks under the lock, so drop it before unlocking.
+                    drop(removed);
+                    drop(subs);
 
                     if !result {
                         tracing::debug!(

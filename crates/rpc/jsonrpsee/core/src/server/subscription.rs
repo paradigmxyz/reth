@@ -443,13 +443,15 @@ impl SubscriptionSink {
 
 impl Drop for SubscriptionSink {
     fn drop(&mut self) {
-        if self.is_active_subscription() {
-            // Only the last clone should tear down the subscription (see #1622).
-            // The lock serializes concurrent drops so that exactly one `try_unwrap` succeeds.
-            let mut subs = self.subscribers.lock();
-            if self._permit.take().is_some_and(|p| Arc::try_unwrap(p).is_ok()) {
-                subs.remove(&self.uniq_sub);
-            }
+        // The activity check must happen under the lock: unsubscribing removes the entry (which
+        // marks this sink inactive) under the lock, and the same key can then be registered again.
+        let mut subs = self.subscribers.lock();
+        // Only the last clone should tear down the subscription (see #1622).
+        // The lock serializes concurrent drops so that exactly one `try_unwrap` succeeds.
+        if self.is_active_subscription() &&
+            self._permit.take().is_some_and(|p| Arc::try_unwrap(p).is_ok())
+        {
+            subs.remove(&self.uniq_sub);
         }
     }
 }
@@ -525,8 +527,13 @@ pub(crate) fn sub_err_to_json(
 mod tests {
     use super::*;
     use crate::server::{MethodCallback, Methods, RpcModule};
+    use futures_util::FutureExt;
     use jsonrpsee_types::Params;
     use serde_json::value::to_raw_value;
+    use std::{
+        sync::atomic::{AtomicBool, Ordering},
+        time::Instant,
+    };
 
     const SUB_ID: &str = "0xdeadbeef";
 
@@ -588,13 +595,24 @@ mod tests {
 
         /// Calls the unsubscribe method for `SUB_ID` and returns its json answer.
         fn unsubscribe(&self, id: u64, conn_id: ConnectionId) -> String {
-            let params = format!(r#"["{SUB_ID}"]"#);
-            let Some(MethodCallback::Unsubscription(unsubscribe)) = self.methods.method("unsub")
-            else {
-                panic!("`unsub` is an unsubscription");
-            };
-            unsubscribe(Id::Number(id), Params::new(Some(&params)), conn_id, usize::MAX).into_json()
+            call_unsubscribe(&self.methods, SUB_ID, id, conn_id)
         }
+    }
+
+    struct StopOnDrop<'a>(&'a AtomicBool);
+
+    impl Drop for StopOnDrop<'_> {
+        fn drop(&mut self) {
+            self.0.store(true, Ordering::Relaxed);
+        }
+    }
+
+    fn call_unsubscribe(methods: &Methods, sub_id: &str, id: u64, conn_id: ConnectionId) -> String {
+        let params = format!(r#"["{sub_id}"]"#);
+        let Some(MethodCallback::Unsubscription(unsubscribe)) = methods.method("unsub") else {
+            panic!("`unsub` is an unsubscription");
+        };
+        unsubscribe(Id::Number(id), Params::new(Some(&params)), conn_id, usize::MAX).into_json()
     }
 
     #[tokio::test]
@@ -673,5 +691,88 @@ mod tests {
         let sink = pending.accept().await.unwrap();
         assert_eq!(harness.unsubscribe(4, conn_id), r#"{"jsonrpc":"2.0","id":4,"result":true}"#);
         assert!(sink.is_closed());
+    }
+
+    #[tokio::test]
+    async fn dropping_unsubscribed_sink_keeps_replacement_subscription() {
+        let mut harness = Harness::new();
+        let conn_id = ConnectionId(0);
+        let (tx, _rx) = mpsc::channel(8);
+
+        let (pending, _first_response) = harness.subscribe(1, conn_id, &tx);
+        let first = pending.accept().await.unwrap();
+        assert_eq!(harness.unsubscribe(2, conn_id), r#"{"jsonrpc":"2.0","id":2,"result":true}"#);
+
+        // The same id is registered again while the sink of the old subscription is still alive.
+        let (pending, _second_response) = harness.subscribe(3, conn_id, &tx);
+        let second = pending.accept().await.unwrap();
+
+        drop(first);
+        assert!(!second.is_closed());
+        assert_eq!(harness.unsubscribe(4, conn_id), r#"{"jsonrpc":"2.0","id":4,"result":true}"#);
+        assert!(second.is_closed());
+    }
+
+    /// Drops the sink of a subscription while it is unsubscribed and registered again under the
+    /// same id from another thread. The replacement must survive in every interleaving.
+    #[test]
+    fn dropping_sink_races_with_unsubscribe_and_resubscribe() {
+        let mut harness = Harness::new();
+        let methods = harness.methods.clone();
+        let conn_id = ConnectionId(0);
+        let (tx, mut rx) = mpsc::channel(8);
+        let deadline = Instant::now() + Duration::from_secs(1);
+        let stop = AtomicBool::new(false);
+        let mut removed_replacements = 0;
+
+        std::thread::scope(|scope| {
+            // Stops the contending threads even if an assertion below panics.
+            let _stop = StopOnDrop(&stop);
+
+            // Contend for the registry lock like other connections do.
+            for i in 0..4 {
+                let (methods, stop) = (&methods, &stop);
+                scope.spawn(move || {
+                    while !stop.load(Ordering::Relaxed) {
+                        call_unsubscribe(methods, "other", 0, ConnectionId(1000 + i));
+                    }
+                });
+            }
+
+            while Instant::now() < deadline {
+                while rx.try_recv().is_ok() {}
+
+                let (pending, _first_response) = harness.subscribe(1, conn_id, &tx);
+                let first = pending.accept().now_or_never().unwrap().unwrap();
+                let (pending, _second_response) = harness.subscribe(2, conn_id, &tx);
+
+                let go = AtomicBool::new(false);
+                let second = std::thread::scope(|race| {
+                    let (methods, go) = (&methods, &go);
+                    let dropper = race.spawn(move || {
+                        while !go.load(Ordering::Acquire) {
+                            std::hint::spin_loop();
+                        }
+                        drop(first);
+                    });
+                    let replacer = race.spawn(move || {
+                        while !go.load(Ordering::Acquire) {
+                            std::hint::spin_loop();
+                        }
+                        call_unsubscribe(methods, SUB_ID, 3, conn_id);
+                        pending.accept().now_or_never().unwrap().unwrap()
+                    });
+                    go.store(true, Ordering::Release);
+                    dropper.join().unwrap();
+                    replacer.join().unwrap()
+                });
+
+                if second.is_closed() {
+                    removed_replacements += 1;
+                }
+            }
+        });
+
+        assert_eq!(removed_replacements, 0);
     }
 }
