@@ -928,7 +928,17 @@ where
         &self,
         id: BlockNumberOrTag,
     ) -> ProviderResult<Option<Self::Header>> {
-        self.consistent_provider()?.header_by_number_or_tag(id)
+        match id {
+            BlockNumberOrTag::Latest |
+            BlockNumberOrTag::Finalized |
+            BlockNumberOrTag::Safe |
+            BlockNumberOrTag::Pending => {
+                Ok(self.sealed_header_by_number_or_tag(id)?.map(|h| h.unseal()))
+            }
+            BlockNumberOrTag::Earliest | BlockNumberOrTag::Number(_) => {
+                self.consistent_provider()?.header_by_number_or_tag(id)
+            }
+        }
     }
 
     fn sealed_header_by_number_or_tag(
@@ -961,7 +971,10 @@ where
     }
 
     fn header_by_id(&self, id: BlockId) -> ProviderResult<Option<Self::Header>> {
-        self.consistent_provider()?.header_by_id(id)
+        match id {
+            BlockId::Number(tag) => self.header_by_number_or_tag(tag),
+            BlockId::Hash(_) => self.consistent_provider()?.header_by_id(id),
+        }
     }
 }
 
@@ -1984,10 +1997,15 @@ mod tests {
         );
 
         assert_eq!(
+            provider.header_by_number_or_tag(BlockNumberOrTag::Earliest).unwrap(),
+            Some(database_block.header().clone())
+        );
+        assert_eq!(
             provider.sealed_header_by_number_or_tag(BlockNumberOrTag::Earliest).unwrap(),
             Some(database_block.clone_sealed_header())
         );
 
+        assert_eq!(provider.header_by_number_or_tag(BlockNumberOrTag::Pending)?, None);
         assert_eq!(provider.sealed_header_by_number_or_tag(BlockNumberOrTag::Pending)?, None);
         let pending_block = random_block(
             &mut rng,
@@ -2001,6 +2019,10 @@ mod tests {
             )),
             ..Default::default()
         });
+        assert_eq!(
+            provider.header_by_number_or_tag(BlockNumberOrTag::Pending).unwrap(),
+            Some(pending_block.header().clone())
+        );
         assert_eq!(
             provider.sealed_header_by_number_or_tag(BlockNumberOrTag::Pending).unwrap(),
             Some(pending_block.clone_sealed_header())
@@ -2067,22 +2089,39 @@ mod tests {
         let safe_block = in_memory_blocks[in_memory_blocks.len() - 2].clone();
         let finalized_block = in_memory_blocks[in_memory_blocks.len() - 3].clone();
         assert_eq!(
+            provider.header_by_id(BlockNumberOrTag::Latest.into()).unwrap(),
+            Some(in_memory_block.header().clone())
+        );
+        assert_eq!(
             provider.sealed_header_by_id(BlockNumberOrTag::Latest.into()).unwrap(),
             Some(in_memory_block.clone_sealed_header())
+        );
+        assert_eq!(
+            provider.header_by_id(BlockNumberOrTag::Safe.into()).unwrap(),
+            Some(safe_block.header().clone())
         );
         assert_eq!(
             provider.sealed_header_by_id(BlockNumberOrTag::Safe.into()).unwrap(),
             Some(safe_block.clone_sealed_header())
         );
         assert_eq!(
+            provider.header_by_id(BlockNumberOrTag::Finalized.into()).unwrap(),
+            Some(finalized_block.header().clone())
+        );
+        assert_eq!(
             provider.sealed_header_by_id(BlockNumberOrTag::Finalized.into()).unwrap(),
             Some(finalized_block.clone_sealed_header())
+        );
+        assert_eq!(
+            provider.header_by_id(BlockNumberOrTag::Earliest.into()).unwrap(),
+            Some(database_block.header().clone())
         );
         assert_eq!(
             provider.sealed_header_by_id(BlockNumberOrTag::Earliest.into()).unwrap(),
             Some(database_block.clone_sealed_header())
         );
 
+        assert_eq!(provider.header_by_id(BlockNumberOrTag::Pending.into())?, None);
         assert_eq!(provider.sealed_header_by_id(BlockNumberOrTag::Pending.into())?, None);
         let pending_block = random_block(
             &mut rng,
@@ -2096,6 +2135,10 @@ mod tests {
             )),
             ..Default::default()
         });
+        assert_eq!(
+            provider.header_by_id(BlockNumberOrTag::Pending.into()).unwrap(),
+            Some(pending_block.header().clone())
+        );
         assert_eq!(
             provider.sealed_header_by_id(BlockNumberOrTag::Pending.into()).unwrap(),
             Some(pending_block.clone_sealed_header())
