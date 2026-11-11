@@ -778,12 +778,12 @@ impl<Context: Send + Sync + 'static> RpcModule<Context> {
                     let sub_id = match params.one::<RpcSubscriptionId>() {
                         Ok(sub_id) => sub_id,
                         Err(_) => {
-                            tracing::warn!(
+                            // The params and request id are client input, so only their size is logged.
+                            tracing::debug!(
                                 target: LOG_TARGET,
-                                "Unsubscribe call `{}` failed: couldn't parse subscription id={:?} request id={:?}",
+                                "Unsubscribe call `{}` failed: couldn't parse subscription id from {} bytes of params",
                                 unsubscribe_method_name,
-                                params,
-                                id
+                                params.len_bytes(),
                             );
 
                             return MethodResponse::response(id, ResponsePayload::success(false), max_response_size);
