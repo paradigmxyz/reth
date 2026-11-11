@@ -30,13 +30,9 @@ pub(crate) type Receiver = soketto::Receiver<BufReader<BufWriter<Compat<TokioIo<
 
 pub use soketto::handshake::http::is_upgrade_request;
 
-pub(crate) async fn send_message(
-    sender: &mut Sender,
-    response: String,
-) -> Result<(), SokettoError> {
-    sender.send_text_owned(response).await?;
-    sender.flush().await
-}
+/// Most queued messages written before a flush, which bounds how long written messages wait in
+/// the buffer.
+const MAX_MESSAGES_PER_FLUSH: usize = 64;
 
 pub(crate) struct BackgroundTaskParams<S> {
     pub(crate) server_cfg: ServerConfig,
@@ -207,8 +203,20 @@ async fn send_task(
         // Nothing else to receive.
         let Some(response) = response else { break };
 
+        let mut result = timeout(write_timeout, ws_sender.send_text_owned(response)).await;
+        // Write the messages that are already queued too, and flush them together.
+        let mut written = 1;
+        while matches!(result, Ok(Ok(()))) && written < MAX_MESSAGES_PER_FLUSH {
+            let Ok(response) = rx.try_recv() else { break };
+            result = timeout(write_timeout, ws_sender.send_text_owned(response)).await;
+            written += 1;
+        }
+        if matches!(result, Ok(Ok(()))) {
+            result = timeout(write_timeout, ws_sender.flush()).await;
+        }
+
         // If websocket message send fail then terminate the connection.
-        match timeout(write_timeout, send_message(&mut ws_sender, response)).await {
+        match result {
             Ok(Ok(())) => {}
             Ok(Err(err)) => {
                 tracing::debug!(target: LOG_TARGET, "WS send error: {}", err);
