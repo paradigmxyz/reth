@@ -299,6 +299,9 @@ struct RuntimeInner {
     metrics: TaskExecutorMetrics,
     /// How many [`GracefulShutdown`] tasks are currently active.
     graceful_tasks: Arc<AtomicUsize>,
+    /// How many [`GracefulShutdown`] tasks are currently active that graceful shutdown awaits
+    /// past its timeout.
+    untimed_graceful_tasks: Arc<AtomicUsize>,
     /// General-purpose rayon CPU pool.
     #[cfg(feature = "rayon")]
     cpu_pool: rayon::ThreadPool,
@@ -868,6 +871,26 @@ impl Runtime {
         self.0.handle.spawn(f(on_shutdown).boxed())
     }
 
+    /// This spawns a critical task like [`Self::spawn_critical_with_graceful_shutdown_signal`],
+    /// but [`Self::graceful_shutdown_with_timeout`] keeps waiting for it after the timeout
+    /// elapses.
+    ///
+    /// Use this for bounded shutdown work that must not be cut off, like flushing state to disk.
+    pub fn spawn_critical_with_untimed_graceful_shutdown_signal<F>(
+        &self,
+        name: &'static str,
+        f: impl FnOnce(GracefulShutdown) -> F,
+    ) -> JoinHandle<()>
+    where
+        F: Future<Output = ()> + Send + 'static,
+    {
+        let on_shutdown = GracefulShutdown::new(
+            self.0.on_shutdown.clone(),
+            GracefulShutdownGuard::new(Arc::clone(&self.0.untimed_graceful_tasks)),
+        );
+        self.spawn_critical_graceful_boxed(name, f(on_shutdown).boxed())
+    }
+
     /// Sends a request to the `TaskManager` to initiate a graceful shutdown.
     ///
     /// Caution: This will terminate the entire program.
@@ -893,7 +916,10 @@ impl Runtime {
     /// Fires the shutdown signal and waits until all graceful tasks complete or the timeout
     /// elapses.
     ///
-    /// Returns `true` if all tasks completed before the timeout.
+    /// Tasks spawned with [`Self::spawn_critical_with_untimed_graceful_shutdown_signal`] are
+    /// awaited even after the timeout elapses.
+    ///
+    /// Returns `true` if all tasks completed.
     pub fn graceful_shutdown_with_timeout(&self, timeout: Duration) -> bool {
         self.do_graceful_shutdown(Some(timeout))
     }
@@ -912,9 +938,18 @@ impl Runtime {
     fn do_graceful_shutdown(&self, timeout: Option<Duration>) -> bool {
         let _ = self.0.task_events_tx.send(TaskEvent::GracefulShutdown);
         let deadline = timeout.map(|t| Instant::now() + t);
-        while self.0.graceful_tasks.load(Ordering::SeqCst) > 0 {
-            if deadline.is_some_and(|d| Instant::now() > d) {
-                debug!("graceful shutdown timed out");
+        let mut timed_out = false;
+        loop {
+            let graceful_tasks = self.0.graceful_tasks.load(Ordering::SeqCst);
+            let untimed_tasks = self.0.untimed_graceful_tasks.load(Ordering::SeqCst);
+            if graceful_tasks == 0 && untimed_tasks == 0 {
+                break
+            }
+            if !timed_out && deadline.is_some_and(|d| Instant::now() > d) {
+                debug!(untimed_tasks, "graceful shutdown timed out");
+                timed_out = true;
+            }
+            if timed_out && untimed_tasks == 0 {
                 return false;
             }
             std::thread::yield_now();
@@ -1082,6 +1117,7 @@ impl RuntimeBuilder {
             task_events_tx,
             metrics: Default::default(),
             graceful_tasks,
+            untimed_graceful_tasks: Arc::new(AtomicUsize::new(0)),
             #[cfg(feature = "rayon")]
             cpu_pool,
             #[cfg(feature = "rayon")]
