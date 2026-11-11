@@ -65,7 +65,7 @@ where
     let ServerConfig {
         batch_requests_config,
         max_request_body_size,
-        ws_write_timeout,
+        write_timeout,
         message_buffer_capacity,
         ..
     } = server_cfg;
@@ -73,7 +73,7 @@ where
     let (conn_tx, conn_rx) = oneshot::channel();
 
     // Spawn another task that sends out the responses on the Websocket.
-    let send_task_handle = tokio::spawn(send_task(rx, ws_sender, ws_write_timeout, conn_rx));
+    let send_task_handle = tokio::spawn(send_task(rx, ws_sender, write_timeout, conn_rx));
 
     let stopped = conn.stop_handle.clone().shutdown();
     let rpc_service = Arc::new(rpc_service);

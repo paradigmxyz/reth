@@ -32,7 +32,7 @@ use crate::{
     transport::{http, ws, ws::BackgroundTaskParams},
     utils::{
         accept_error_backoff, deserialize_notification, no_request_within, NotifyOnRequest,
-        DEFAULT_FIRST_REQUEST_TIMEOUT, DEFAULT_WS_WRITE_TIMEOUT,
+        PermitBody, WriteTimeoutIo, DEFAULT_FIRST_REQUEST_TIMEOUT, DEFAULT_WRITE_TIMEOUT,
     },
     HttpBody, HttpRequest, HttpResponse, LOG_TARGET,
 };
@@ -209,8 +209,9 @@ pub struct ServerConfig {
     pub(crate) id_provider: Arc<dyn IdProvider>,
     /// Timeout for receiving the first request of a connection.
     pub(crate) first_request_timeout: Option<Duration>,
-    /// Timeout for writing a single message to a WebSocket connection.
-    pub(crate) ws_write_timeout: Duration,
+    /// Timeout for writing a single message to a WebSocket connection and for a stalled HTTP
+    /// response write.
+    pub(crate) write_timeout: Duration,
 }
 
 /// The builder to configure and create a JSON-RPC server configuration.
@@ -279,7 +280,7 @@ impl Default for ServerConfigBuilder {
             message_buffer_capacity: 1024,
             id_provider: Arc::new(RandomIntegerIdProvider),
             first_request_timeout: Some(DEFAULT_FIRST_REQUEST_TIMEOUT),
-            ws_write_timeout: DEFAULT_WS_WRITE_TIMEOUT,
+            write_timeout: DEFAULT_WRITE_TIMEOUT,
         })
     }
 }
@@ -414,15 +415,16 @@ impl ServerConfigBuilder {
     }
 
     /// Configure how long writing a single message, ping or close frame to a WebSocket
-    /// connection may take before the connection is closed.
+    /// connection may take, and how long an HTTP response write may make no progress, before the
+    /// connection is closed.
     ///
     /// A client that stops reading fills the socket's send buffer, which blocks the write. When
     /// the timeout expires, the connection is dropped together with its queued messages,
-    /// subscriptions and pending calls.
+    /// subscriptions and pending calls, or with its buffered HTTP response.
     ///
     /// Default is 10 seconds.
-    pub fn set_ws_write_timeout(mut self, ws_write_timeout: Duration) -> Self {
-        self.0.ws_write_timeout = ws_write_timeout;
+    pub fn set_write_timeout(mut self, write_timeout: Duration) -> Self {
+        self.0.write_timeout = write_timeout;
         self
     }
 
@@ -769,10 +771,10 @@ where
                 let rp =
                     http::call_with_service(request, batch_config, max_request_size, rpc_service)
                         .await;
-                // NOTE: The `conn guard` must be held until the response is processed
-                // to respect the `max_connections` limit.
-                drop(conn);
-                Ok(rp)
+                // NOTE: The `conn guard` must be held until the response body is written (or
+                // dropped) to respect the `max_connections` limit, because hyper writes the body
+                // after this future completes.
+                Ok(rp.map(|body| HttpBody::new(PermitBody::new(body, conn))))
             })
         } else {
             // NOTE: the `conn guard` is dropped when this function which is fine
@@ -829,6 +831,7 @@ fn process_connection<RpcMiddleware, HttpMiddleware, Body>(
     }
 
     let first_request_timeout = server_cfg.first_request_timeout;
+    let write_timeout = server_cfg.write_timeout;
 
     let tower_service = TowerServiceNoHttp {
         inner: ServiceData {
@@ -850,7 +853,7 @@ fn process_connection<RpcMiddleware, HttpMiddleware, Body>(
             crate::utils::TowerToHyperService::new(service),
             request_received.clone(),
         );
-        let io = TokioIo::new(socket);
+        let io = TokioIo::new(WriteTimeoutIo::new(socket, write_timeout));
         let builder = hyper_util::server::conn::auto::Builder::new(TokioExecutor::new());
         let conn = builder.serve_connection_with_upgrades(io, service);
         let stopped = stop_handle.shutdown();

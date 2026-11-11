@@ -1178,7 +1178,7 @@ async fn server_with_flooding_subscription(
     let config = ServerConfig::builder()
         .max_connections(1)
         .set_message_buffer_capacity(4)
-        .set_ws_write_timeout(FLOOD_WRITE_TIMEOUT)
+        .set_write_timeout(FLOOD_WRITE_TIMEOUT)
         .build();
     let server = ServerBuilder::with_config(config)
         .build("127.0.0.1:0")
