@@ -152,6 +152,9 @@ impl<H: NippyJarHeader> NippyJarWriter<H> {
 
         let mut offsets_file = OpenOptions::new().read(true).write(true).open(offsets)?;
         if is_created {
+            // Drop stale offsets left behind by a previous jar at the same path.
+            offsets_file.set_len(0)?;
+
             let mut buf = Vec::with_capacity(1 + OFFSET_SIZE_BYTES as usize);
 
             // First byte of the offset file is the size of one offset in bytes
