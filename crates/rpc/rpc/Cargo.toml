@@ -99,7 +99,6 @@ reth-db-common.workspace = true
 reth-storage-overlay.workspace = true
 
 rand.workspace = true
-tokio = { workspace = true, features = ["test-util"] }
 
 jsonrpsee = { workspace = true, features = ["client"] }
 
