@@ -203,6 +203,16 @@ mod test {
         assert_eq!(deserialized, InvalidRequest { id: Id::Number(120) });
     }
 
+    #[test]
+    fn deserialize_invalid_request_bad_id_should_fail() {
+        let s = r#"{"id":[0,0],"method":"my_method","params":[]}"#;
+        let err = serde_json::from_str::<InvalidRequest>(s).unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            "invalid type: sequence, expected null, an unsigned integer or a string at line 1 column 7"
+        );
+    }
+
     /// Checks that we can serialize the object with or without non-mandatory fields.
     #[test]
     fn serialize_call() {

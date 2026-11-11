@@ -257,14 +257,12 @@ impl<'a> ParamsSequence<'a> {
 }
 
 /// Id of a subscription, communicated by the server.
-#[derive(Debug, PartialEq, Clone, Hash, Eq, Deserialize, Serialize)]
-#[serde(deny_unknown_fields)]
+#[derive(Debug, PartialEq, Clone, Hash, Eq, Serialize)]
 #[serde(untagged)]
 pub enum SubscriptionId<'a> {
     /// Numeric id
     Num(u64),
     /// String id
-    #[serde(borrow)]
     Str(Cow<'a, str>),
 }
 
@@ -320,9 +318,54 @@ impl SubscriptionId<'_> {
     }
 }
 
+struct SubscriptionIdVisitor;
+
+impl<'de> Visitor<'de> for SubscriptionIdVisitor {
+    type Value = SubscriptionId<'de>;
+
+    fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+        formatter.write_str("an unsigned integer or a string")
+    }
+
+    fn visit_u64<E>(self, v: u64) -> Result<Self::Value, E> {
+        Ok(SubscriptionId::Num(v))
+    }
+
+    fn visit_i64<E>(self, v: i64) -> Result<Self::Value, E>
+    where
+        E: de::Error,
+    {
+        u64::try_from(v)
+            .map(SubscriptionId::Num)
+            .map_err(|_| de::Error::invalid_value(Unexpected::Signed(v), &self))
+    }
+
+    fn visit_str<E>(self, v: &str) -> Result<Self::Value, E> {
+        Ok(SubscriptionId::Str(Cow::Owned(v.to_owned())))
+    }
+
+    fn visit_borrowed_str<E>(self, v: &'de str) -> Result<Self::Value, E> {
+        Ok(SubscriptionId::Str(Cow::Borrowed(v)))
+    }
+
+    fn visit_string<E>(self, v: String) -> Result<Self::Value, E> {
+        Ok(SubscriptionId::Str(Cow::Owned(v)))
+    }
+}
+
+/// Parses the id without buffering it: the untagged derive would first copy a peer-supplied array
+/// or object into an intermediate tree before rejecting it.
+impl<'de: 'a, 'a> Deserialize<'de> for SubscriptionId<'a> {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        deserializer.deserialize_any(SubscriptionIdVisitor)
+    }
+}
+
 /// Request Id
-#[derive(Debug, PartialEq, Clone, Hash, Eq, Deserialize, Serialize, PartialOrd, Ord)]
-#[serde(deny_unknown_fields)]
+#[derive(Debug, PartialEq, Clone, Hash, Eq, Serialize, PartialOrd, Ord)]
 #[serde(untagged)]
 pub enum Id<'a> {
     /// Null
@@ -330,7 +373,6 @@ pub enum Id<'a> {
     /// Numeric id
     Number(u64),
     /// String id
-    #[serde(borrow)]
     Str(Cow<'a, str>),
 }
 
@@ -373,6 +415,56 @@ impl std::fmt::Display for Id<'_> {
     }
 }
 
+struct IdVisitor;
+
+impl<'de> Visitor<'de> for IdVisitor {
+    type Value = Id<'de>;
+
+    fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+        formatter.write_str("null, an unsigned integer or a string")
+    }
+
+    fn visit_unit<E>(self) -> Result<Self::Value, E> {
+        Ok(Id::Null)
+    }
+
+    fn visit_u64<E>(self, v: u64) -> Result<Self::Value, E> {
+        Ok(Id::Number(v))
+    }
+
+    fn visit_i64<E>(self, v: i64) -> Result<Self::Value, E>
+    where
+        E: de::Error,
+    {
+        u64::try_from(v)
+            .map(Id::Number)
+            .map_err(|_| de::Error::invalid_value(Unexpected::Signed(v), &self))
+    }
+
+    fn visit_str<E>(self, v: &str) -> Result<Self::Value, E> {
+        Ok(Id::Str(Cow::Owned(v.to_owned())))
+    }
+
+    fn visit_borrowed_str<E>(self, v: &'de str) -> Result<Self::Value, E> {
+        Ok(Id::Str(Cow::Borrowed(v)))
+    }
+
+    fn visit_string<E>(self, v: String) -> Result<Self::Value, E> {
+        Ok(Id::Str(Cow::Owned(v)))
+    }
+}
+
+/// Parses the id without buffering it: the untagged derive would first copy a peer-supplied array
+/// or object into an intermediate tree before rejecting it.
+impl<'de: 'a, 'a> Deserialize<'de> for Id<'a> {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        deserializer.deserialize_any(IdVisitor)
+    }
+}
+
 fn invalid_params(e: impl ToString) -> ErrorObjectOwned {
     ErrorObject::owned(ErrorCode::InvalidParams.code(), INVALID_PARAMS_MSG, Some(e.to_string()))
 }
@@ -381,6 +473,7 @@ fn invalid_params(e: impl ToString) -> ErrorObjectOwned {
 mod test {
     use super::{Cow, Id, JsonValue, Params, SubscriptionId, TwoPointZero};
     use crate::response::SubscriptionPayload;
+    use serde::Deserialize;
 
     #[test]
     fn id_deserialization() {
@@ -411,6 +504,53 @@ mod test {
             deserialized,
             vec![Id::Null, Id::Number(0), Id::Number(2), Id::Str("\"3".into())]
         );
+    }
+
+    #[test]
+    fn id_deserialization_accepts_scalars() {
+        let test_vector = [
+            ("null", Id::Null),
+            ("0", Id::Number(0)),
+            ("18446744073709551615", Id::Number(u64::MAX)),
+            (r#""""#, Id::Str("".into())),
+            (r#""abc""#, Id::Str("abc".into())),
+        ];
+
+        for (ser, expected) in test_vector {
+            let id: Id = serde_json::from_str(ser).unwrap();
+            assert_eq!(id, expected);
+            assert_eq!(serde_json::to_string(&id).unwrap(), ser);
+        }
+    }
+
+    #[test]
+    fn id_deserialization_borrows_only_when_possible() {
+        let id: Id = serde_json::from_str(r#""abc""#).unwrap();
+        assert!(matches!(id, Id::Str(Cow::Borrowed("abc"))));
+
+        // Escapes can't be borrowed from the input.
+        let id: Id = serde_json::from_str(r#""a\nc""#).unwrap();
+        assert!(matches!(id, Id::Str(Cow::Owned(_))));
+        assert_eq!(id, Id::Str("a\nc".into()));
+
+        let id = Id::deserialize(JsonValue::from("abc")).unwrap();
+        assert!(matches!(id, Id::Str(Cow::Owned(_))));
+    }
+
+    #[test]
+    fn id_deserialization_rejects_non_scalars() {
+        let test_vector = [
+            ("-1", "invalid value: integer `-1`, expected null, an unsigned integer or a string at line 1 column 2"),
+            ("1.5", "invalid type: floating point `1.5`, expected null, an unsigned integer or a string at line 1 column 3"),
+            ("true", "invalid type: boolean `true`, expected null, an unsigned integer or a string at line 1 column 4"),
+            ("[1]", "invalid type: sequence, expected null, an unsigned integer or a string at line 1 column 1"),
+            (r#"{"a":1}"#, "invalid type: map, expected null, an unsigned integer or a string at line 1 column 1"),
+        ];
+
+        for (ser, expected) in test_vector {
+            let err = serde_json::from_str::<Id>(ser).unwrap_err();
+            assert_eq!(err.to_string(), expected);
+        }
     }
 
     #[test]
@@ -502,6 +642,44 @@ mod test {
             let serialized = serde_json::to_string(&id).unwrap();
             assert_eq!(&serialized, initial_ser);
         }
+    }
+
+    #[test]
+    fn subscription_id_deserialization_borrows_only_when_possible() {
+        let id: SubscriptionId = serde_json::from_str(r#""abc""#).unwrap();
+        assert!(matches!(id, SubscriptionId::Str(Cow::Borrowed("abc"))));
+
+        // Escapes can't be borrowed from the input.
+        let id: SubscriptionId = serde_json::from_str(r#""a\nc""#).unwrap();
+        assert!(matches!(id, SubscriptionId::Str(Cow::Owned(_))));
+        assert_eq!(id, SubscriptionId::Str("a\nc".into()));
+
+        let id = SubscriptionId::deserialize(JsonValue::from("abc")).unwrap();
+        assert!(matches!(id, SubscriptionId::Str(Cow::Owned(_))));
+
+        let id: SubscriptionId = serde_json::from_str("18446744073709551615").unwrap();
+        assert_eq!(id, SubscriptionId::Num(u64::MAX));
+    }
+
+    #[test]
+    fn subscription_id_deserialization_rejects_non_scalars() {
+        let test_vector = [
+            ("null", "invalid type: null, expected an unsigned integer or a string at line 1 column 4"),
+            ("-1", "invalid value: integer `-1`, expected an unsigned integer or a string at line 1 column 2"),
+            ("1.5", "invalid type: floating point `1.5`, expected an unsigned integer or a string at line 1 column 3"),
+            ("true", "invalid type: boolean `true`, expected an unsigned integer or a string at line 1 column 4"),
+            ("[1]", "invalid type: sequence, expected an unsigned integer or a string at line 1 column 1"),
+            (r#"{"a":1}"#, "invalid type: map, expected an unsigned integer or a string at line 1 column 1"),
+        ];
+
+        for (ser, expected) in test_vector {
+            let err = serde_json::from_str::<SubscriptionId>(ser).unwrap_err();
+            assert_eq!(err.to_string(), expected);
+        }
+
+        // The unsubscribe path parses the id out of the params.
+        let params = Params::new(Some("[[0,0,0]]"));
+        assert!(params.one::<SubscriptionId>().is_err());
     }
 
     #[test]
