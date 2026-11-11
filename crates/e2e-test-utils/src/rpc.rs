@@ -1,7 +1,7 @@
-use alloy_consensus::{EthereumTxEnvelope, TxEip4844Variant};
-use alloy_eips::eip7594::BlobTransactionSidecarVariant;
+use alloy_consensus::TxEnvelope;
 use alloy_network::eip2718::Decodable2718;
 use alloy_primitives::{Bytes, B256};
+use futures_util::future::BoxFuture;
 use reth_chainspec::EthereumHardforks;
 use reth_node_api::{BlockTy, FullNodeComponents};
 use reth_node_builder::{rpc::RpcRegistry, NodeTypes};
@@ -25,17 +25,16 @@ where
         + TraceExt,
 {
     /// Injects a raw transaction into the node tx pool via RPC server
-    pub async fn inject_tx(&self, raw_tx: Bytes) -> Result<B256, EthApi::Error> {
-        let eth_api = self.inner.eth_api();
-        eth_api.send_raw_transaction(raw_tx).await
+    ///
+    /// Boxed like [`NodeTestContext::mine`](crate::node::NodeTestContext::mine), to keep callers
+    /// from borrow-checking the eth API future.
+    pub fn inject_tx(&self, raw_tx: Bytes) -> BoxFuture<'_, Result<B256, EthApi::Error>> {
+        Box::pin(async move { self.inner.eth_api().send_raw_transaction(raw_tx).await })
     }
 
     /// Retrieves an Ethereum transaction envelope by its hash, including its blob sidecar if the
     /// transaction is still pooled.
-    pub async fn envelope_by_hash(
-        &self,
-        hash: B256,
-    ) -> eyre::Result<EthereumTxEnvelope<TxEip4844Variant<BlobTransactionSidecarVariant>>> {
+    pub async fn envelope_by_hash(&self, hash: B256) -> eyre::Result<TxEnvelope> {
         self.decoded_transaction_by_hash(hash).await
     }
 

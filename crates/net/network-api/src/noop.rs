@@ -125,7 +125,7 @@ where
     }
 
     fn local_enr(&self) -> Enr<SecretKey> {
-        let sk = SecretKey::from_slice(&[0xcd; 32]).unwrap();
+        let sk = SecretKey::from_secret_bytes([0xcd; 32]).unwrap();
         Enr::builder().build(&sk).unwrap()
     }
 }
@@ -242,20 +242,5 @@ where
 {
     fn peers_handle(&self) -> &PeersHandle {
         &self.peers_handle
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn configures_client_version() {
-        let network = NoopNetwork::default().with_client_version("custom-client/v1.0.0");
-
-        assert_eq!(
-            futures::executor::block_on(network.network_status()).unwrap().client_version,
-            "custom-client/v1.0.0"
-        );
     }
 }

@@ -25,35 +25,20 @@ use reth_node_ethereum::{
     engine_ssz_witness::PayloadStatusWithWitness, EthereumAddOns, EthereumNode,
 };
 use reth_provider::{BlockNumReader, StateProviderFactory};
-use reth_rpc_api::TestingBuildBlockRequestV1;
+use reth_rpc_api::{TestingBuildBlockRequestV1, TestingBuildBlockResponseV1};
 use reth_rpc_server_types::{RethRpcModule, RpcModuleSelection};
 use reth_tasks::Runtime;
 use ssz::Encode;
-use std::sync::Arc;
+use std::sync::{
+    atomic::{AtomicUsize, Ordering},
+    Arc,
+};
 
 const ENGINE_PAYLOADS_ROUTE: &str = "/engine/v1/payloads";
 const ENGINE_FORKCHOICE_ROUTE: &str = "/engine/v1/forkchoice";
 const ENGINE_V1_BLOBS_ROUTE: &str = "/engine/v1/blobs/v1";
 const ENGINE_CAPABILITIES_ROUTE: &str = "/engine/v1/capabilities";
 const ENGINE_IDENTITY_ROUTE: &str = "/engine/v1/identity";
-
-#[tokio::test]
-async fn can_run_eth_node() -> eyre::Result<()> {
-    reth_tracing::init_test_tracing();
-
-    let (mut node, wallet) =
-        EthereumNode::test_setup_for(EthereumHardfork::Cancun).build_single().await?;
-    let raw_tx = TransactionTestContext::transfer_tx_bytes(1, wallet.inner).await;
-
-    // mine an empty block first, so its canonical notification is still buffered when the next
-    // block is asserted
-    node.advance_block().await?;
-
-    // make the node advance and assert the block has been committed to the blockchain
-    node.inject_and_advance(raw_tx).await?;
-
-    Ok(())
-}
 
 #[tokio::test]
 #[cfg(unix)]
@@ -92,8 +77,10 @@ async fn test_failed_run_eth_node_with_no_auth_engine_api_over_ipc_opts() -> eyr
 async fn test_engine_graceful_shutdown() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
 
-    let (mut node, wallet) =
-        EthereumNode::test_setup_for(EthereumHardfork::Cancun).build_single().await?;
+    let (mut node, wallet) = EthereumNode::test_setup_for(EthereumHardfork::Cancun)
+        .with_restartable_nodes()
+        .build_single()
+        .await?;
 
     let raw_tx = TransactionTestContext::transfer_tx_bytes(1, wallet.inner).await;
     node.inject_and_advance(raw_tx).await?;
@@ -121,6 +108,10 @@ async fn test_engine_graceful_shutdown() -> eyre::Result<()> {
 
     let db_block = node.inner.provider.last_block_number()?;
     assert_eq!(db_block, 1, "Database should have persisted block 1");
+
+    // Stop the node so its database is closed before the test process exits. Otherwise node
+    // threads can still use RocksDB while the process tears down, which aborts.
+    node.stop().await?;
 
     Ok(())
 }
@@ -150,7 +141,10 @@ async fn test_testing_build_block_v1_osaka() -> eyre::Result<()> {
         extra_data: None,
     };
 
-    let envelope = node.testing_build_block_v1(request).await?;
+    let TestingBuildBlockResponseV1::V5(envelope) = node.testing_build_block_v1(request).await?
+    else {
+        panic!("expected a V5 envelope")
+    };
 
     let engine_client = node.auth_server_handle().http_client();
     let payload = envelope.execution_payload.clone();
@@ -193,7 +187,7 @@ async fn test_engine_ssz_proxy_can_mine_block() -> eyre::Result<()> {
 
     let raw_tx = TransactionTestContext::transfer_tx_bytes(1, wallet.signer(0)).await;
 
-    let envelope = node
+    let TestingBuildBlockResponseV1::V5(envelope) = node
         .testing_build_block_v1(TestingBuildBlockRequestV1 {
             parent_block_hash: genesis_hash,
             payload_attributes: eth_payload_attributes(
@@ -203,7 +197,10 @@ async fn test_engine_ssz_proxy_can_mine_block() -> eyre::Result<()> {
             transactions: vec![raw_tx],
             extra_data: None,
         })
-        .await?;
+        .await?
+    else {
+        panic!("expected a V5 envelope")
+    };
 
     let payload = envelope.execution_payload;
     let block_hash = payload.payload_inner.payload_inner.block_hash;
@@ -648,7 +645,6 @@ async fn test_engine_ssz_request_validation() -> eyre::Result<()> {
 
 #[tokio::test]
 async fn test_engine_ssz_custom_engine_and_middleware() -> eyre::Result<()> {
-    use std::sync::atomic::{AtomicUsize, Ordering};
     let requests = Arc::new(AtomicUsize::new(0));
     let observed = requests.clone();
     let middleware =
@@ -683,7 +679,7 @@ async fn test_engine_ssz_custom_engine_and_middleware() -> eyre::Result<()> {
 }
 
 #[tokio::test]
-async fn test_engine_ssz_witness_omitted_without_provider_parent_state() -> eyre::Result<()> {
+async fn test_engine_ssz_witness_requires_provider_parent_state() -> eyre::Result<()> {
     let (mut nodes, _) =
         EthereumNode::test_setup_for(EthereumHardfork::Amsterdam).with_num_nodes(2).build().await?;
     let target = nodes.pop().unwrap();
@@ -700,16 +696,26 @@ async fn test_engine_ssz_witness_omitted_without_provider_parent_state() -> eyre
         execution_requests: child.execution_requests,
     };
     let auth = target.auth_server_handle();
-    let response: PayloadStatusWithWitness = reqwest::Client::new()
-        .post(format!("{}/engine/v1/payloads/witness", auth.http_url()))
-        .jwt(&auth)
-        .fork("amsterdam")
-        .ssz(&request)
-        .send()
-        .await?
-        .ssz()
-        .await?;
+    let client = reqwest::Client::new();
+    let url = format!("{}/engine/v1/payloads/witness", auth.http_url());
+    let response = client.post(&url).jwt(&auth).fork("amsterdam").ssz(&request).send().await?;
+    assert_eq!(response.status(), reqwest::StatusCode::INTERNAL_SERVER_ERROR);
+    assert_eq!(response.headers()[reqwest::header::CONTENT_TYPE], "application/problem+json");
+    assert_eq!(
+        response.json::<serde_json::Value>().await?,
+        serde_json::json!({
+            "type": "/engine-api/errors/internal",
+            "detail": format!(
+                "parent state {parent_hash} is unavailable through the provider: \
+                 no state found for block {parent_hash}"
+            ),
+        })
+    );
+
+    target.reorg_to(parent_hash).await?;
+    let response: PayloadStatusWithWitness =
+        client.post(&url).jwt(&auth).fork("amsterdam").ssz(&request).send().await?.ssz().await?;
     assert_eq!(response.payload_status.status, PayloadStatusKind::Valid);
-    assert!(response.witness.is_none());
+    assert!(response.witness.is_some());
     Ok(())
 }

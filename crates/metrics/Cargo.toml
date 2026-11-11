@@ -20,7 +20,7 @@ metrics-derive.workspace = true
 reth-primitives-traits = { workspace = true, optional = true }
 
 # async
-tokio = { workspace = true, features = ["full"], optional = true }
+tokio = { workspace = true, features = ["sync"], optional = true }
 futures = { workspace = true, optional = true }
 tokio-util = { workspace = true, optional = true }
 

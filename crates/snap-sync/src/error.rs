@@ -48,6 +48,16 @@ pub enum SnapSyncError {
         /// Root the range was proved against.
         got: B256,
     },
+    /// A generation carries a state root other than the one its target header commits to.
+    #[error("block {block} commits to state root {expected}, not {got}")]
+    HeaderRootMismatch {
+        /// Target block of the generation.
+        block: u64,
+        /// State root of the canonical header.
+        expected: B256,
+        /// State root the generation carries.
+        got: B256,
+    },
     /// No catch-up progress is recorded for the attempt.
     #[error("no catch-up progress is recorded for the attempt")]
     NoCatchUpProgress,
@@ -117,6 +127,17 @@ pub enum SnapSyncError {
         /// Version found on disk, absent when the record carries no numeric version.
         version: Option<u64>,
     },
+    /// A persisted progress record that cannot be decoded.
+    #[error("{key} record is unreadable: {source}")]
+    UnreadableRecord {
+        /// Metadata key the record is stored under.
+        key: &'static str,
+        /// Why the record could not be decoded.
+        source: serde_json::Error,
+    },
+    /// A blocking task panicked or the runtime shut down before it finished.
+    #[error("blocking task failed: {0}")]
+    BlockingTask(#[source] Box<dyn core::error::Error + Send + Sync>),
     /// A range was downloaded from somewhere other than the next key to cover.
     #[error("account range starts at {got}, coverage continues at {expected:?}")]
     OutOfOrderRange {
@@ -204,6 +225,11 @@ pub enum SnapSyncError {
 }
 
 impl SnapSyncError {
+    /// Wraps the failure of a blocking task, which is a panic or a shutting-down runtime.
+    pub(crate) fn blocking_task(error: impl core::error::Error + Send + Sync + 'static) -> Self {
+        Self::BlockingTask(Box::new(error))
+    }
+
     /// Whether the node's progress resolves this error, as new peers serve the state or missing
     /// headers are downloaded.
     ///
@@ -213,6 +239,50 @@ impl SnapSyncError {
             Self::Request(error) => !error.is_channel_closed(),
             Self::MissingHeader { .. } => true,
             _ => false,
+        }
+    }
+
+    /// Whether retrying can't help: storage failed, the node's storage layout or on-disk records
+    /// don't support snap, a blocking task failed, or the network is gone.
+    ///
+    /// Exhaustive so that every new variant is classified on purpose.
+    pub const fn is_fatal(&self) -> bool {
+        match self {
+            Self::Provider(_) |
+            Self::UnsupportedStorage |
+            Self::UnsupportedRecord { .. } |
+            Self::UnreadableRecord { .. } |
+            Self::BlockingTask(_) => true,
+            Self::Request(error) => error.is_channel_closed(),
+            Self::AccountRangeRequest(_) |
+            Self::StorageRequest(_) |
+            Self::BlockAccessListRequest(_) |
+            Self::NoAttempt |
+            Self::StaleWrite { .. } |
+            Self::RootMismatch { .. } |
+            Self::HeaderRootMismatch { .. } |
+            Self::NoCatchUpProgress |
+            Self::MissingHeader { .. } |
+            Self::OutOfOrderBlock { .. } |
+            Self::BlockPastPivot { .. } |
+            Self::PivotNotAdvanced { .. } |
+            Self::CatchUpBehindPivot { .. } |
+            Self::NonCanonicalBlock { .. } |
+            Self::ForkedBlock { .. } |
+            Self::NoCoverage |
+            Self::OutOfOrderRange { .. } |
+            Self::NoProgress { .. } |
+            Self::OutOfOrderStorage { .. } |
+            Self::MissingStorage { .. } |
+            Self::StorageRootMismatch { .. } |
+            Self::UnexpectedStorage { .. } |
+            Self::MissingCode { .. } |
+            Self::CodeMismatch { .. } |
+            Self::PendingRepairs { .. } |
+            Self::IncompleteAccounts { .. } |
+            Self::GenesisPivot |
+            Self::Cancelled |
+            Self::PivotBelowAncestor { .. } => false,
         }
     }
 

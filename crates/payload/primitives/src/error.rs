@@ -31,6 +31,15 @@ pub enum PayloadBuilderError {
     /// Any other payload building errors.
     #[error(transparent)]
     Other(Box<dyn core::error::Error + Send + Sync>),
+    /// The payload attributes are invalid on top of the parent block, e.g. a transaction they
+    /// include is invalid.
+    ///
+    /// Returned from `PayloadJobGenerator::new_payload_job`, this is the only variant that rejects
+    /// the attributes; returned later from a running job, it is an internal error like any other.
+    /// Failures of this node, such as a failed state read during execution, must use another
+    /// variant.
+    #[error("invalid payload attributes: {0}")]
+    InvalidAttributes(Box<dyn core::error::Error + Send + Sync>),
 }
 
 impl PayloadBuilderError {
@@ -48,6 +57,14 @@ impl PayloadBuilderError {
         E: core::error::Error + Send + Sync + 'static,
     {
         Self::Other(Box::new(error))
+    }
+
+    /// Create a new error that rejects the payload attributes.
+    pub fn invalid_attributes<E>(error: E) -> Self
+    where
+        E: core::error::Error + Send + Sync + 'static,
+    {
+        Self::InvalidAttributes(Box::new(error))
     }
 }
 
@@ -114,12 +131,11 @@ pub enum VersionSpecificValidationError {
     /// Thrown if `engine_forkchoiceUpdatedV1` or `engine_newPayloadV1` contains withdrawals
     #[error("withdrawals not supported in V1")]
     WithdrawalsNotSupportedInV1,
-    /// Thrown if `engine_forkchoiceUpdated` or `engine_newPayload` contains no withdrawals after
-    /// Shanghai
+    /// Thrown if an engine method requires withdrawals but none are provided.
     #[error("no withdrawals post-Shanghai")]
     NoWithdrawalsPostShanghai,
-    /// Thrown if `engine_forkchoiceUpdated` or `engine_newPayload` contains withdrawals before
-    /// Shanghai
+    /// Thrown if V2 `PayloadAttributes` or `ExecutionPayload` contains withdrawals before
+    /// Shanghai.
     #[error("withdrawals pre-Shanghai")]
     HasWithdrawalsPreShanghai,
     /// Thrown if the `PayloadAttributes` or `ExecutionPayload` contains no parent beacon block
@@ -129,25 +145,15 @@ pub enum VersionSpecificValidationError {
     /// Thrown if the current engine method version does not support a block access list
     #[error("block access list not supported in this engine API version")]
     BlockAccessListNotSupported,
-    /// Thrown if  `engine_newPayload` contains no block access list
-    /// after Amsterdam
+    /// Thrown if an engine method that requires a block access list does not contain one.
     #[error("no block access list post-Amsterdam")]
     NoBlockAccessListPostAmsterdam,
-    /// Thrown if  `engine_newPayload` contains block access list
-    /// before Amsterdam
-    #[error("block access list pre-Amsterdam")]
-    HasBlockAccessListPreAmsterdam,
     /// Thrown if the current engine method version does not support a slot number
     #[error("slot number not supported in this engine API version")]
     SlotNumberNotSupported,
-    /// Thrown if  `engine_newPayload` contains no slot number
-    /// after Amsterdam
+    /// Thrown if an engine method that requires a slot number does not contain one.
     #[error("no slot number post-Amsterdam")]
     NoSlotNumberPostAmsterdam,
-    /// Thrown if  `engine_newPayload` contains slot number
-    /// before Amsterdam
-    #[error("slot number pre-Amsterdam")]
-    HasSlotNumberPreAmsterdam,
 }
 
 /// Error validating payload received over `newPayload` API.

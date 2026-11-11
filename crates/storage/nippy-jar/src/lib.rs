@@ -449,7 +449,10 @@ mod tests {
     use super::*;
     use compression::Compression;
     use rand::{rngs::SmallRng, seq::SliceRandom, RngCore, SeedableRng};
-    use std::{fs::OpenOptions, io::Read};
+    use std::{
+        fs::OpenOptions,
+        io::{Read, Seek, SeekFrom},
+    };
 
     type ColumnResults<T> = Vec<ColumnResult<T>>;
     type ColumnValues = Vec<Vec<u8>>;
@@ -842,6 +845,61 @@ mod tests {
     }
 
     #[test]
+    fn test_read_last_row_while_appending() {
+        let (col1, col2) = test_data(None);
+        let num_columns = 2;
+        let file_path = tempfile::NamedTempFile::new().unwrap();
+
+        append_two_rows(num_columns, file_path.path(), &col1, &col2);
+
+        // Appends a third row to the data file, without committing its offsets and the row count.
+        let nippy = NippyJar::load_without_header(file_path.path()).unwrap();
+        let mut writer = NippyJarWriter::new(nippy).unwrap();
+        writer.append_column(Some(Ok(&col1[2]))).unwrap();
+        writer.append_column(Some(Ok(&col2[2]))).unwrap();
+        writer.data_file().flush().unwrap();
+
+        // A jar loaded meanwhile reads the last committed row as it was written.
+        let nippy = NippyJar::load_without_header(file_path.path()).unwrap();
+        assert_eq!(nippy.rows, 2);
+        let mut cursor = NippyJarCursor::new(&nippy).unwrap();
+        assert_eq!(
+            cursor.row_by_number(1).unwrap().unwrap().as_slice(),
+            [col1[1].as_slice(), col2[1].as_slice()]
+        );
+        assert!(cursor.row_by_number(2).unwrap().is_none());
+    }
+
+    #[test]
+    fn test_read_last_row_with_invalid_final_offset() {
+        let (col1, col2) = test_data(None);
+        let num_columns = 2;
+
+        // Overwrites the final offset of a committed jar, then reads its last row.
+        let assert_inconsistent = |final_offset: fn(u64) -> u64| {
+            let file_path = tempfile::NamedTempFile::new().unwrap();
+            append_two_rows(num_columns, file_path.path(), &col1, &col2);
+
+            let nippy = NippyJar::load_without_header(file_path.path()).unwrap();
+            let data_len = File::open(nippy.data_path()).unwrap().metadata().unwrap().len();
+            let mut offsets =
+                OpenOptions::new().read(true).write(true).open(nippy.offsets_path()).unwrap();
+            offsets.seek(SeekFrom::End(-8)).unwrap();
+            offsets.write_all(&final_offset(data_len).to_le_bytes()).unwrap();
+            offsets.sync_all().unwrap();
+
+            let nippy = NippyJar::load_without_header(file_path.path()).unwrap();
+            let mut cursor = NippyJarCursor::new(&nippy).unwrap();
+            assert!(matches!(cursor.row_by_number(1), Err(NippyJarError::InconsistentState)));
+        };
+
+        // Before the start of the last value.
+        assert_inconsistent(|_| 0);
+        // Past the end of the data file.
+        assert_inconsistent(|data_len| data_len + 1);
+    }
+
+    #[test]
     fn test_prune_partially_uncommitted_rows() {
         let (col1, col2) = test_data(None);
         let num_columns = 2;
@@ -1205,5 +1263,41 @@ mod tests {
             assert_eq!((values[0], values[1]), (col1[row].as_slice(), col2[row].as_slice()));
         }
         assert!(cursor.row_by_number(rows).unwrap().is_none());
+    }
+
+    #[test]
+    fn test_zstd_013_compatibility() {
+        // These jars and the dictionary-compressed block were written with zstd 0.13.3.
+        let col1 = (0..100u8).map(|i| vec![i; 32]).collect::<Vec<_>>();
+        let col2 = (0..100u8)
+            .map(|i| (0..32u8).map(|j| i.wrapping_add(j)).collect::<Vec<_>>())
+            .collect::<Vec<_>>();
+        let fixtures = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/zstd-0.13");
+        let directory = tempfile::tempdir().unwrap();
+        for name in ["dictionary", "plain"] {
+            let path = directory.path().join(name);
+            for extension in ["", CONFIG_FILE_EXTENSION, OFFSETS_FILE_EXTENSION] {
+                reth_fs_util::write(
+                    path.with_extension(extension),
+                    reth_fs_util::read(fixtures.join(name).with_extension(extension)).unwrap(),
+                )
+                .unwrap();
+            }
+            assert_jar_rows(&path, &col1, &col2, 100);
+        }
+
+        let jar = NippyJar::load_without_header(&directory.path().join("dictionary")).unwrap();
+        let Some(Compressors::Zstd(zstd)) = jar.compressor() else {
+            panic!("Expected Zstd compressor")
+        };
+        let encoded = include_bytes!("../tests/fixtures/zstd-0.13/dictionary.block");
+        let mut output = Vec::with_capacity(32);
+        compression::Zstd::decompress_with_dictionary(
+            encoded,
+            &mut output,
+            &mut zstd.decompressors().unwrap()[0],
+        )
+        .unwrap();
+        assert_eq!(output, col1[5]);
     }
 }

@@ -19,6 +19,7 @@ pub struct TestStage {
     unwind_outputs: VecDeque<Result<UnwindOutput, StageError>>,
     post_execute_commit_counter: Arc<AtomicUsize>,
     post_unwind_commit_counter: Arc<AtomicUsize>,
+    validate_unwind_outputs: VecDeque<Result<(), StageError>>,
 }
 
 impl TestStage {
@@ -29,6 +30,7 @@ impl TestStage {
             unwind_outputs: VecDeque::new(),
             post_execute_commit_counter: Arc::new(AtomicUsize::new(0)),
             post_unwind_commit_counter: Arc::new(AtomicUsize::new(0)),
+            validate_unwind_outputs: VecDeque::new(),
         }
     }
 
@@ -66,6 +68,11 @@ impl TestStage {
         self.post_unwind_commit_counter = counter.clone();
         (self, counter)
     }
+
+    pub fn add_validate_unwind(mut self, output: Result<(), StageError>) -> Self {
+        self.validate_unwind_outputs.push_back(output);
+        self
+    }
 }
 
 impl<Provider> Stage<Provider> for TestStage {
@@ -95,5 +102,9 @@ impl<Provider> Stage<Provider> for TestStage {
         self.post_unwind_commit_counter.fetch_add(1, Ordering::Relaxed);
 
         Ok(())
+    }
+
+    fn validate_unwind(&mut self, _: &Provider, _input: UnwindInput) -> Result<(), StageError> {
+        self.validate_unwind_outputs.pop_front().unwrap_or(Ok(()))
     }
 }

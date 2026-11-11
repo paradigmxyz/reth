@@ -18,8 +18,8 @@ use reth_exex::ExExManagerHandle;
 use reth_provider::{providers::ProviderNodeTypes, BlockNumReader, ProviderFactory};
 use reth_stages::{
     sets::{DefaultStages, OfflineStages},
-    stages::ExecutionStage,
-    ExecutionStageThresholds, Pipeline, StageSet,
+    stages::{EraImportSource, EraStage, ExecutionStage},
+    ExecutionStageThresholds, Pipeline, StageId, StageSet,
 };
 use reth_static_file::StaticFileProducer;
 use std::sync::Arc;
@@ -114,6 +114,11 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
                     stage_conf.clone(),
                     prune_modes.clone(),
                     None,
+                )
+                .builder()
+                .add_before(
+                    EraStage::new(None::<EraImportSource>, stage_conf.etl.clone()),
+                    StageId::Headers,
                 )
                 .set(ExecutionStage::new(
                     evm_config,

@@ -549,7 +549,6 @@ impl<Pool: TransactionPool, N: NetworkPrimitives> TransactionsManager<Pool, N> {
     /// - exceeds gas limit
     /// - gas uint overflow
     /// - exceeds max init code size
-    /// - oversized data
     /// - signer account has bytecode
     /// - chain id mismatch
     /// - old legacy chain id
@@ -802,9 +801,9 @@ impl<Pool, N> TransactionsManager<Pool, N>
 where
     Pool: TransactionPool + Unpin + 'static,
     N: NetworkPrimitives<
-            BroadcastedTransaction: SignedTransaction,
-            PooledTransaction: SignedTransaction,
-        > + Unpin,
+        BroadcastedTransaction: SignedTransaction,
+        PooledTransaction: SignedTransaction,
+    >,
     Pool::Transaction:
         PoolTransaction<Consensus = N::BroadcastedTransaction, Pooled = N::PooledTransaction>,
 {
@@ -1389,7 +1388,7 @@ where
         // EIP-8070, so their sidecars can never validate. Drop them before touching the pool;
         // geth equivalently diverts these bodies into a buffer that is completed with cells
         // fetched via `GetCells`, which is not implemented yet.
-        if version == EthVersion::Eth72 {
+        if version.is_eth72() {
             let len_before = transactions.len();
             transactions.retain(|tx| !tx.is_eip4844());
             let dropped = len_before - transactions.len();
@@ -1559,9 +1558,9 @@ where
 impl<
         Pool: TransactionPool + Unpin + 'static,
         N: NetworkPrimitives<
-                BroadcastedTransaction: SignedTransaction,
-                PooledTransaction: SignedTransaction,
-            > + Unpin,
+            BroadcastedTransaction: SignedTransaction,
+            PooledTransaction: SignedTransaction,
+        >,
     > Future for TransactionsManager<Pool, N>
 where
     Pool::Transaction:
@@ -2349,7 +2348,7 @@ mod tests {
     };
     use alloy_consensus::{Transaction as _, TxEip1559, TxLegacy};
     use alloy_eips::{eip2718::Encodable2718, eip4844::BlobTransactionValidationError};
-    use alloy_primitives::{hex, Signature, TxKind, B256, U256};
+    use alloy_primitives::{address, hex, Signature, TxKind, B256, U256};
     use alloy_rlp::Decodable;
     use futures::FutureExt;
     use reth_chainspec::MIN_TRANSACTION_GAS;
@@ -2411,7 +2410,7 @@ mod tests {
         let policy = RecordingPolicy::default();
         manager.policies =
             NetworkPolicies::new(TransactionPropagationKind::default(), policy.clone());
-        let peer_id = PeerId::new([1; 64]);
+        let peer_id = PeerId::repeat_byte(1);
         let (peer, mut rx) = new_mock_session(peer_id, EthVersion::Eth68);
         manager.peers.insert(peer_id, peer);
         let [pending, accepted, ignored, rejected, later, bad] =
@@ -2447,7 +2446,7 @@ mod tests {
         TransactionsManager<EthTestPool, EthNetworkPrimitives>,
         NetworkManager<EthNetworkPrimitives>,
     ) {
-        let secret_key = SecretKey::new(&mut rand_08::thread_rng());
+        let secret_key = SecretKey::new(&mut rand::rng());
         let client = NoopProvider::default();
 
         let config = NetworkConfigBuilder::new(secret_key, Runtime::test())
@@ -2508,7 +2507,7 @@ mod tests {
 
         let listener0 = peer0.event_listener();
         peer0.add_peer(peer1);
-        let secret_key = SecretKey::new(&mut rand_08::thread_rng());
+        let secret_key = SecretKey::new(&mut rand::rng());
 
         let client = NoopProvider::default();
         let pool = testing_pool();
@@ -2571,7 +2570,7 @@ mod tests {
 
         let listener0 = peer0.event_listener();
         peer0.add_peer(peer1);
-        let secret_key = SecretKey::new(&mut rand_08::thread_rng());
+        let secret_key = SecretKey::new(&mut rand::rng());
 
         let client = NoopProvider::default();
         let pool = testing_pool();
@@ -2637,7 +2636,7 @@ mod tests {
     async fn test_handle_incoming_transactions_hashes() {
         reth_tracing::init_test_tracing();
 
-        let secret_key = SecretKey::new(&mut rand_08::thread_rng());
+        let secret_key = SecretKey::new(&mut rand::rng());
         let client = NoopProvider::default();
 
         let config = NetworkConfigBuilder::new(secret_key, Runtime::test())
@@ -2656,7 +2655,7 @@ mod tests {
             .transactions(pool.clone(), transactions_manager_config)
             .split_with_handle();
 
-        let peer_id_1 = PeerId::new([1; 64]);
+        let peer_id_1 = PeerId::repeat_byte(1);
         let eth_version = EthVersion::Eth66;
 
         let txs = vec![TransactionSigned::new_unhashed(
@@ -2665,7 +2664,7 @@ mod tests {
                 nonce: 15u64,
                 gas_price: 2200000000,
                 gas_limit: 34811,
-                to: TxKind::Call(hex!("cf7f9e66af820a19257a2108375b180b0ec49167").into()),
+                to: TxKind::Call(address!("cf7f9e66af820a19257a2108375b180b0ec49167")),
                 value: U256::from(1234u64),
                 input: Default::default(),
             }),
@@ -2745,7 +2744,7 @@ mod tests {
         let listener0 = peer0.event_listener();
 
         peer0.add_peer(peer1);
-        let secret_key = SecretKey::new(&mut rand_08::thread_rng());
+        let secret_key = SecretKey::new(&mut rand::rng());
 
         let client = NoopProvider::default();
         let pool = testing_pool();
@@ -2810,8 +2809,8 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn test_session_closed_cleans_transaction_peer_state() {
         let (mut tx_manager, _network) = new_tx_manager().await;
-        let peer_id = PeerId::new([1; 64]);
-        let fallback_peer = PeerId::new([2; 64]);
+        let peer_id = PeerId::repeat_byte(1);
+        let fallback_peer = PeerId::repeat_byte(2);
         let (peer, _) = new_mock_session(peer_id, EthVersion::Eth66);
         let (fallback, _) = new_mock_session(fallback_peer, EthVersion::Eth66);
         let hash_shared = B256::from_slice(&[1; 32]);
@@ -2848,7 +2847,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn test_bad_blob_sidecar_not_cached_as_bad_import() {
         let (mut tx_manager, _network) = new_tx_manager().await;
-        let peer_id = PeerId::new([1; 64]);
+        let peer_id = PeerId::repeat_byte(1);
         let hash = B256::from_slice(&[1; 32]);
 
         tx_manager.network.update_sync_state(SyncState::Idle);
@@ -2869,7 +2868,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn test_missing_blob_sidecar_not_cached_as_bad_import() {
         let (mut tx_manager, _network) = new_tx_manager().await;
-        let peer_id = PeerId::new([1; 64]);
+        let peer_id = PeerId::repeat_byte(1);
         let hash = B256::from_slice(&[3; 32]);
 
         tx_manager.network.update_sync_state(SyncState::Idle);
@@ -2890,7 +2889,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn test_non_blob_sidecar_error_still_cached_as_bad_import() {
         let (mut tx_manager, _network) = new_tx_manager().await;
-        let peer_id = PeerId::new([1; 64]);
+        let peer_id = PeerId::repeat_byte(1);
         let hash = B256::from_slice(&[2; 32]);
 
         tx_manager.network.update_sync_state(SyncState::Idle);
@@ -2915,7 +2914,7 @@ mod tests {
         let listener0 = peer0.event_listener();
 
         peer0.add_peer(peer1);
-        let secret_key = SecretKey::new(&mut rand_08::thread_rng());
+        let secret_key = SecretKey::new(&mut rand::rng());
 
         let client = NoopProvider::default();
         let pool = testing_pool();
@@ -2988,7 +2987,7 @@ mod tests {
         let mut tx_manager = new_tx_manager().await.0;
         let tx_fetcher = &mut tx_manager.transaction_fetcher;
 
-        let peer_id_1 = PeerId::new([1; 64]);
+        let peer_id_1 = PeerId::repeat_byte(1);
         let eth_version = EthVersion::Eth66;
 
         let txs = vec![
@@ -2998,7 +2997,7 @@ mod tests {
                     nonce: 15u64,
                     gas_price: 2200000000,
                     gas_limit: 34811,
-                    to: TxKind::Call(hex!("cf7f9e66af820a19257a2108375b180b0ec49167").into()),
+                    to: TxKind::Call(address!("cf7f9e66af820a19257a2108375b180b0ec49167")),
                     value: U256::from(1234u64),
                     input: Default::default(),
                 }),
@@ -3021,7 +3020,7 @@ mod tests {
                     max_priority_fee_per_gas: 1500000000,
                     max_fee_per_gas: 1500000013,
                     gas_limit: MIN_TRANSACTION_GAS,
-                    to: TxKind::Call(hex!("61815774383099e24810ab832a5b2a5425c154d5").into()),
+                    to: TxKind::Call(address!("61815774383099e24810ab832a5b2a5425c154d5")),
                     value: U256::from(3000000000000000000u64),
                     input: Default::default(),
                     access_list: Default::default(),
@@ -3104,8 +3103,8 @@ mod tests {
         let mut tx_manager = new_tx_manager().await.0;
         let tx_fetcher = &mut tx_manager.transaction_fetcher;
 
-        let peer_id_1 = PeerId::new([1; 64]);
-        let peer_id_2 = PeerId::new([2; 64]);
+        let peer_id_1 = PeerId::repeat_byte(1);
+        let peer_id_2 = PeerId::repeat_byte(2);
         let eth_version = EthVersion::Eth66;
         let seen_hashes = [B256::from_slice(&[1; 32]), B256::from_slice(&[2; 32])];
 
@@ -3441,7 +3440,7 @@ mod tests {
         let policy_bundle = NetworkPolicies::new(propagation_policy, announcement_policy);
 
         let pool = testing_pool();
-        let secret_key = SecretKey::new(&mut rand_08::thread_rng());
+        let secret_key = SecretKey::new(&mut rand::rng());
         let client = NoopProvider::default();
 
         let network_config = NetworkConfigBuilder::new(secret_key, Runtime::test())

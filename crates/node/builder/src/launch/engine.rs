@@ -5,7 +5,7 @@ use crate::{
     hooks::NodeHooks,
     rpc::{EngineShutdown, EngineValidatorAddOn, EngineValidatorBuilder, RethRpcAddOns, RpcHandle},
     setup::build_networked_pipeline,
-    sync::{BackfillContext, BackfillSyncBuilder, PipelineBackfill},
+    sync::{BackfillClientFor, BackfillContext, BackfillSyncBuilder, PipelineBackfill},
     AddOns, AddOnsContext, FullNode, LaunchContext, LaunchNode, Node, NodeAdapter,
     NodeBuilderWithComponents, NodeComponents, NodeComponentsBuilder, NodeHandle, NodeTypesAdapter,
     RethFullAdapter,
@@ -34,10 +34,12 @@ use reth_node_core::{
     primitives::Head,
 };
 use reth_node_events::node;
+use reth_node_metrics::recorder::install_prometheus_recorder;
 use reth_provider::{
     providers::{BlockchainProvider, NodeTypesForProvider},
     BlockNumReader, StorageSettingsCache,
 };
+use reth_rpc_layer::JwtSecret;
 use reth_storage_overlay::OverlayManager;
 use reth_tasks::TaskExecutor;
 use reth_tokio_util::EventSender;
@@ -94,10 +96,7 @@ impl<B> EngineNodeLauncher<B> {
         CB: NodeComponentsBuilder<T>,
         AO: RethRpcAddOns<NodeAdapter<T, CB::Components>>
             + EngineValidatorAddOn<NodeAdapter<T, CB::Components>>,
-        B: BackfillSyncBuilder<
-            NodeTypesWithDBAdapter<N, DB>,
-            <<CB::Components as NodeComponents<T>>::Network as BlockDownloaderProvider>::Client,
-        >,
+        B: BackfillSyncBuilder<NodeTypesWithDBAdapter<N, DB>, BackfillClientFor<T, CB::Components>>,
     {
         let Self { ctx, engine_tree_config, mut backfill } = self;
         let NodeBuilderWithComponents {
@@ -108,6 +107,10 @@ impl<B> EngineNodeLauncher<B> {
             config,
         } = target;
         let NodeHooks { on_component_initialized, on_node_started, .. } = hooks;
+
+        // Install the recorder before creating anything that registers metrics: metrics registered
+        // earlier stay no-ops, and derived metrics cache their first instance for the process.
+        install_prometheus_recorder();
 
         // Create the overlay manager that will be shared across the provider and engine.
         let overlay_manager = OverlayManager::<N::Primitives>::new(
@@ -213,8 +216,13 @@ impl<B> EngineNodeLauncher<B> {
 
         let beacon_engine_handle = ConsensusEngineHandle::new(consensus_engine_tx.clone());
 
-        // extract the jwt secret from the args if possible
-        let jwt_secret = ctx.auth_jwt_secret()?;
+        // The JWT secret is only used by the auth server, so don't read or create it when the auth
+        // server is disabled.
+        let jwt_secret = if ctx.node_config().rpc.disable_auth_server {
+            JwtSecret::random()
+        } else {
+            ctx.auth_jwt_secret()?
+        };
 
         let add_ons_ctx = AddOnsContext {
             node: ctx.node_adapter().clone(),
@@ -492,10 +500,8 @@ where
     AO: RethRpcAddOns<NodeAdapter<T, CB::Components>>
         + EngineValidatorAddOn<NodeAdapter<T, CB::Components>>
         + 'static,
-    B: BackfillSyncBuilder<
-            NodeTypesWithDBAdapter<N, DB>,
-            <<CB::Components as NodeComponents<T>>::Network as BlockDownloaderProvider>::Client,
-        > + 'static,
+    B: BackfillSyncBuilder<NodeTypesWithDBAdapter<N, DB>, BackfillClientFor<T, CB::Components>>
+        + 'static,
 {
     type Node = NodeHandle<NodeAdapter<T, CB::Components>, AO>;
     type Future = Pin<Box<dyn Future<Output = eyre::Result<Self::Node>> + Send>>;

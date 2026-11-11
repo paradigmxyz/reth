@@ -9,7 +9,7 @@ use crate::{
     Priority, SubPoolLimit, TransactionOrdering, ValidPoolTransaction,
 };
 use imbl::OrdMap;
-use rustc_hash::{FxHashMap, FxHashSet};
+use rustc_hash::FxHashMap;
 use std::{cmp::Ordering, collections::hash_map::Entry, ops::Bound::Unbounded, sync::Arc};
 use tokio::sync::broadcast;
 
@@ -423,23 +423,6 @@ impl<T: TransactionOrdering> PendingPool<T> {
         remove_locals: bool,
         end_removed: &mut Vec<Arc<ValidPoolTransaction<T::Transaction>>>,
     ) {
-        // This serves as a termination condition for the loop - it represents the number of
-        // _valid_ unique senders that might have descendants in the pool.
-        //
-        // If `remove_locals` is false, a value of zero means that there are no non-local txs in the
-        // pool that can be removed.
-        //
-        // If `remove_locals` is true, a value of zero means that there are no txs in the pool that
-        // can be removed.
-        let mut non_local_senders = self.highest_nonces.len();
-
-        // keeps track of unique senders from previous iterations, to understand how many unique
-        // senders were removed in the last iteration
-        let mut unique_senders = self.highest_nonces.len();
-
-        // keeps track of which senders we've marked as local
-        let mut local_senders = FxHashSet::default();
-
         // keep track of transactions to remove and how many have been removed so far
         let original_length = self.len();
         let mut removed = Vec::new();
@@ -450,32 +433,33 @@ impl<T: TransactionOrdering> PendingPool<T> {
         let mut total_size = 0;
 
         loop {
-            // check how many unique senders were removed last iteration
-            let unique_removed = unique_senders - self.highest_nonces.len();
-
-            // the new number of unique senders
-            unique_senders = self.highest_nonces.len();
-            non_local_senders -= unique_removed;
-
             // we can reuse the temp array
             removed.clear();
 
             // we prefer removing transactions with lower ordering
-            let mut worst_transactions = self.highest_nonces.values().collect::<Vec<_>>();
+            let mut worst_transactions = self
+                .highest_nonces
+                .values()
+                .filter(|tx| remove_locals || !tx.transaction.is_local())
+                .collect::<Vec<_>>();
+
+            // no eligible transactions left to remove
+            if worst_transactions.is_empty() {
+                return
+            }
 
             // Each pass removes at most one transaction per sender (its highest nonce), so only
             // the worst few senders can be relevant in this pass. Selecting them is O(n)
-            // instead of sorting all senders. The estimate may fall short for size-based limits
-            // or skipped local senders, in which case the outer loop runs another pass.
+            // instead of sorting all senders. The estimate may fall short for size-based limits, in
+            // which case the outer loop runs another pass.
             let current_len = original_length - total_removed;
             let current_size = original_size - total_size;
             let excess_txs = current_len.saturating_sub(limit.max_txs);
             let avg_tx_size = (current_size / current_len.max(1)).max(1);
             let excess_size_txs = current_size.saturating_sub(limit.max_size).div_ceil(avg_tx_size);
             // Number of worst senders to consider for removal in this pass: enough to cover the
-            // count and (estimated) size excess, widened by known local senders since those are
-            // skipped below.
-            let removal_candidates = excess_txs.max(excess_size_txs).max(1) + local_senders.len();
+            // count and (estimated) size excess.
+            let removal_candidates = excess_txs.max(excess_size_txs).max(1);
 
             if removal_candidates < worst_transactions.len() {
                 // keep only the `removal_candidates` worst senders, in O(n) without a full sort
@@ -487,9 +471,7 @@ impl<T: TransactionOrdering> PendingPool<T> {
             // loop through the highest nonces set, removing transactions until we reach the limit
             for tx in worst_transactions {
                 // return early if the pool is under limits
-                if !limit.is_exceeded(original_length - total_removed, original_size - total_size) ||
-                    non_local_senders == 0
-                {
+                if !limit.is_exceeded(original_length - total_removed, original_size - total_size) {
                     // need to remove remaining transactions before exiting
                     for id in &removed {
                         if let Some(tx) = self.remove_transaction(id) {
@@ -498,14 +480,6 @@ impl<T: TransactionOrdering> PendingPool<T> {
                     }
 
                     return
-                }
-
-                if !remove_locals && tx.transaction.is_local() {
-                    let sender_id = tx.transaction.sender_id();
-                    if local_senders.insert(sender_id) {
-                        non_local_senders -= 1;
-                    }
-                    continue
                 }
 
                 total_size += tx.transaction.size();
@@ -520,9 +494,7 @@ impl<T: TransactionOrdering> PendingPool<T> {
                 }
             }
 
-            // return if either the pool is under limits or there are no more _eligible_
-            // transactions to remove
-            if !self.exceeds(limit) || non_local_senders == 0 {
+            if !self.exceeds(limit) {
                 return
             }
         }
@@ -751,13 +723,14 @@ impl<T: TransactionOrdering> Ord for PendingTransaction<T> {
 
 #[cfg(test)]
 mod tests {
+
     use super::*;
     use crate::{
         test_utils::{MockOrdering, MockTransaction, MockTransactionFactory, MockTransactionSet},
-        PoolTransaction,
+        PoolTransaction, TransactionOrigin,
     };
     use alloy_consensus::{Transaction, TxType};
-    use alloy_primitives::address;
+    use alloy_primitives::Address;
     use std::collections::HashSet;
 
     #[test]
@@ -900,10 +873,10 @@ mod tests {
         let mut f = MockTransactionFactory::default();
         let mut pool = PendingPool::new(MockOrdering::default());
 
-        let a_sender = address!("0x000000000000000000000000000000000000000a");
-        let b_sender = address!("0x000000000000000000000000000000000000000b");
-        let c_sender = address!("0x000000000000000000000000000000000000000c");
-        let d_sender = address!("0x000000000000000000000000000000000000000d");
+        let a_sender = Address::with_last_byte(0x0a);
+        let b_sender = Address::with_last_byte(0x0b);
+        let c_sender = Address::with_last_byte(0x0c);
+        let d_sender = Address::with_last_byte(0x0d);
 
         // create a chain of transactions by sender A, B, C
         let mut tx_set = MockTransactionSet::dependent(a_sender, 0, 4, TxType::Eip1559);
@@ -949,10 +922,10 @@ mod tests {
         let mut pool = PendingPool::new(MockOrdering::default());
 
         // Addresses for simulated senders A, B, C, and D.
-        let a = address!("0x000000000000000000000000000000000000000a");
-        let b = address!("0x000000000000000000000000000000000000000b");
-        let c = address!("0x000000000000000000000000000000000000000c");
-        let d = address!("0x000000000000000000000000000000000000000d");
+        let a = Address::with_last_byte(0x0a);
+        let b = Address::with_last_byte(0x0b);
+        let c = Address::with_last_byte(0x0c);
+        let d = Address::with_last_byte(0x0d);
 
         // Create transaction chains for senders A, B, C, and D.
         let a_txs = MockTransactionSet::sequential_transactions_by_sender(a, 4, TxType::Eip1559);
@@ -1026,6 +999,57 @@ mod tests {
         let pending =
             pending.into_iter().map(|tx| (tx.sender(), tx.nonce())).collect::<HashSet<_>>();
         assert_eq!(pending, expected_pending);
+    }
+
+    #[test]
+    fn truncate_skips_local_heads_ranked_below_non_local() {
+        let mut f = MockTransactionFactory::default();
+        let mut pool = PendingPool::new(MockOrdering::default());
+
+        // many local senders that rank below every non-local sender
+        let num_locals = 3_000;
+        for _ in 0..num_locals {
+            let tx = f.validated_with_origin(TransactionOrigin::Local, MockTransaction::eip1559());
+            pool.add_transaction(Arc::new(tx), 0);
+        }
+
+        let non_locals: Vec<_> = (1..=3u128)
+            .map(|i| {
+                let tx = f.validated_arc(MockTransaction::eip1559().inc_price_by(10 * i));
+                pool.add_transaction(tx.clone(), 0);
+                tx
+            })
+            .collect();
+        pool.assert_invariants();
+
+        let removed =
+            pool.truncate_pool(SubPoolLimit { max_txs: num_locals + 2, max_size: usize::MAX });
+        pool.assert_invariants();
+
+        assert_eq!(removed.len(), 1);
+        assert_eq!(removed[0].hash(), non_locals[0].hash());
+        assert_eq!(pool.len(), num_locals + 2);
+    }
+
+    #[test]
+    fn truncate_removes_non_local_head_above_local_tx() {
+        let mut f = MockTransactionFactory::default();
+        let mut pool = PendingPool::new(MockOrdering::default());
+
+        // the sender's highest nonce tx is non-local, so it is removed even though a local tx
+        // of the same sender stays behind
+        let local = MockTransaction::eip1559();
+        let local_tx = f.validated_with_origin(TransactionOrigin::Local, local.clone());
+        let head_tx = f.validated_arc(local.inc_nonce().rng_hash());
+        pool.add_transaction(Arc::new(local_tx), 0);
+        pool.add_transaction(head_tx.clone(), 0);
+
+        let removed = pool.truncate_pool(SubPoolLimit { max_txs: 1, max_size: usize::MAX });
+        pool.assert_invariants();
+
+        assert_eq!(removed.len(), 1);
+        assert_eq!(removed[0].hash(), head_tx.hash());
+        assert_eq!(pool.len(), 1);
     }
 
     // <https://github.com/paradigmxyz/reth/issues/12340>
@@ -1177,9 +1201,9 @@ mod tests {
         let mut pool = PendingPool::new(MockOrdering::default());
 
         // Addresses for simulated senders A, B, C
-        let a = address!("0x000000000000000000000000000000000000000a");
-        let b = address!("0x000000000000000000000000000000000000000b");
-        let c = address!("0x000000000000000000000000000000000000000c");
+        let a = Address::with_last_byte(0x0a);
+        let b = Address::with_last_byte(0x0b);
+        let c = Address::with_last_byte(0x0c);
 
         // sender A (local) - 11+ transactions (large enough to keep limit exceeded)
         // sender B (external) - 2 transactions
@@ -1224,7 +1248,7 @@ mod tests {
     fn test_remove_non_highest_keeps_highest() {
         let mut f = MockTransactionFactory::default();
         let mut pool = PendingPool::new(MockOrdering::default());
-        let sender = address!("0x00000000000000000000000000000000000000aa");
+        let sender = Address::with_last_byte(0xaa);
         let txs = MockTransactionSet::dependent(sender, 0, 3, TxType::Eip1559).into_vec();
         for tx in txs {
             pool.add_transaction(f.validated_arc(tx), 0);
@@ -1242,7 +1266,7 @@ mod tests {
     fn test_cascade_removal_recomputes_highest() {
         let mut f = MockTransactionFactory::default();
         let mut pool = PendingPool::new(MockOrdering::default());
-        let sender = address!("0x00000000000000000000000000000000000000bb");
+        let sender = Address::with_last_byte(0xbb);
         let txs = MockTransactionSet::dependent(sender, 0, 4, TxType::Eip1559).into_vec();
         for tx in txs {
             pool.add_transaction(f.validated_arc(tx), 0);
@@ -1264,7 +1288,7 @@ mod tests {
     fn test_remove_only_tx_clears_highest() {
         let mut f = MockTransactionFactory::default();
         let mut pool = PendingPool::new(MockOrdering::default());
-        let sender = address!("0x00000000000000000000000000000000000000cc");
+        let sender = Address::with_last_byte(0xcc);
         let txs = MockTransactionSet::dependent(sender, 0, 1, TxType::Eip1559).into_vec();
         for tx in txs {
             pool.add_transaction(f.validated_arc(tx), 0);

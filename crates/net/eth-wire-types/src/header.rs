@@ -86,11 +86,11 @@ impl From<HeadersDirection> for bool {
 
 #[cfg(test)]
 mod tests {
+
     use super::*;
     use alloy_consensus::{Header, EMPTY_OMMER_ROOT_HASH, EMPTY_ROOT_HASH};
-    use alloy_primitives::{address, b256, bloom, bytes, hex, Bytes, B256, U256};
+    use alloy_primitives::{address, b256, bytes, hex, Bloom, Bytes, B256, U256};
     use alloy_rlp::{Decodable, Encodable};
-    use std::str::FromStr;
 
     // Test vector from: https://eips.ethereum.org/EIPS/eip-2481
     #[test]
@@ -104,7 +104,7 @@ mod tests {
             gas_limit: 0x115c,
             gas_used: 0x15b3,
             timestamp: 0x1a0a_u64,
-            extra_data: Bytes::from_str("7788").unwrap(),
+            extra_data: bytes!("7788"),
             ommers_hash: B256::ZERO,
             state_root: B256::ZERO,
             transactions_root: B256::ZERO,
@@ -123,29 +123,27 @@ mod tests {
         let expected_hash =
             b256!("0x6a251c7c3c5dca7b42407a3752ff48f3bbca1fab7f9868371d9918daf1988d1f");
         let header = Header {
-            parent_hash: b256!("0xe0a94a7a3c9617401586b1a27025d2d9671332d22d540e0af72b069170380f2a"),
+            parent_hash: b256!(
+                "0xe0a94a7a3c9617401586b1a27025d2d9671332d22d540e0af72b069170380f2a"
+            ),
             ommers_hash: EMPTY_OMMER_ROOT_HASH,
             beneficiary: address!("0xba5e000000000000000000000000000000000000"),
-            state_root: b256!(
-                "0xec3c94b18b8a1cff7d60f8d258ec723312932928626b4c9355eb4ab3568ec7f7"
-            ),
+            state_root: b256!("0xec3c94b18b8a1cff7d60f8d258ec723312932928626b4c9355eb4ab3568ec7f7"),
             transactions_root: b256!(
                 "0x50f738580ed699f0469702c7ccc63ed2e51bc034be9479b7bff4e68dee84accf"
             ),
             receipts_root: b256!(
                 "0x29b0562f7140574dd0d50dee8a271b22e1a0a7b78fca58f7c60370d8317ba2a9"
             ),
-            logs_bloom: bloom!(
-                "00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"
-            ),
+            logs_bloom: Bloom::ZERO,
             difficulty: U256::from(0x020000),
             number: 0x01_u64,
             gas_limit: 0x016345785d8a0000,
             gas_used: 0x015534,
             timestamp: 0x079e,
             extra_data: bytes!("42"),
-            mix_hash: b256!("0x0000000000000000000000000000000000000000000000000000000000000000"),
-            nonce: 0u64.into()  ,
+            mix_hash: B256::ZERO,
+            nonce: 0u64.into(),
             base_fee_per_gas: Some(0x036b),
             withdrawals_root: None,
             blob_gas_used: None,
@@ -170,7 +168,7 @@ mod tests {
             gas_limit: 0x115c,
             gas_used: 0x15b3,
             timestamp: 0x1a0au64,
-            extra_data: Bytes::from_str("7788").unwrap(),
+            extra_data: bytes!("7788"),
             ommers_hash: B256::ZERO,
             state_root: B256::ZERO,
             transactions_root: B256::ZERO,
@@ -193,28 +191,20 @@ mod tests {
             "f9021ca018db39e19931515b30b16b3a92c292398039e31d6c267111529c3f2ba0a26c17a01dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347942adc25665018aa1fe0e6bc666dac8fc2697ff9baa095efce3d6972874ca8b531b233b7a1d1ff0a56f08b20c8f1b89bef1b001194a5a071e515dd89e8a7973402c2e11646081b4e2209b2d3a1550df5095289dabcb3fba0ed9c51ea52c968e552e370a77a41dac98606e98b915092fb5f949d6452fce1c4b90100000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000008001887fffffffffffffff830125b882079e42a056e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b42188000000000000000009a027f166f1d7c789251299535cb176ba34116e44894476a7886fe5d73d9be5c973"
         );
         let expected = Header {
-            parent_hash: B256::from_str(
-                "18db39e19931515b30b16b3a92c292398039e31d6c267111529c3f2ba0a26c17",
-            )
-            .unwrap(),
+            parent_hash: b256!("18db39e19931515b30b16b3a92c292398039e31d6c267111529c3f2ba0a26c17"),
             beneficiary: address!("0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba"),
-            state_root: B256::from_str(
-                "95efce3d6972874ca8b531b233b7a1d1ff0a56f08b20c8f1b89bef1b001194a5",
-            )
-            .unwrap(),
-            transactions_root: B256::from_str(
-                "71e515dd89e8a7973402c2e11646081b4e2209b2d3a1550df5095289dabcb3fb",
-            )
-            .unwrap(),
-            receipts_root: B256::from_str(
-                "ed9c51ea52c968e552e370a77a41dac98606e98b915092fb5f949d6452fce1c4",
-            )
-            .unwrap(),
+            state_root: b256!("95efce3d6972874ca8b531b233b7a1d1ff0a56f08b20c8f1b89bef1b001194a5"),
+            transactions_root: b256!(
+                "71e515dd89e8a7973402c2e11646081b4e2209b2d3a1550df5095289dabcb3fb"
+            ),
+            receipts_root: b256!(
+                "ed9c51ea52c968e552e370a77a41dac98606e98b915092fb5f949d6452fce1c4"
+            ),
             number: 0x01,
             gas_limit: 0x7fffffffffffffff,
             gas_used: 0x0125b8,
             timestamp: 0x079e,
-            extra_data: Bytes::from_str("42").unwrap(),
+            extra_data: bytes!("42"),
             mix_hash: EMPTY_ROOT_HASH,
             base_fee_per_gas: Some(0x09),
             withdrawals_root: Some(b256!(
@@ -237,26 +227,18 @@ mod tests {
             "f90221a03a9b485972e7353edd9152712492f0c58d89ef80623686b6bf947a4a6dce6cb6a01dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347942adc25665018aa1fe0e6bc666dac8fc2697ff9baa03c837fc158e3e93eafcaf2e658a02f5d8f99abc9f1c4c66cdea96c0ca26406aea04409cc4b699384ba5f8248d92b784713610c5ff9c1de51e9239da0dac76de9cea046cab26abf1047b5b119ecc2dda1296b071766c8b1307e1381fcecc90d513d86b90100000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000008001887fffffffffffffff8302a86582079e42a056e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b42188000000000000000009a056e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b4218302000080"
         );
         let expected = Header {
-            parent_hash: B256::from_str(
-                "3a9b485972e7353edd9152712492f0c58d89ef80623686b6bf947a4a6dce6cb6",
-            )
-            .unwrap(),
+            parent_hash: b256!("3a9b485972e7353edd9152712492f0c58d89ef80623686b6bf947a4a6dce6cb6"),
             ommers_hash: EMPTY_OMMER_ROOT_HASH,
             beneficiary: address!("0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba"),
-            state_root: B256::from_str(
-                "3c837fc158e3e93eafcaf2e658a02f5d8f99abc9f1c4c66cdea96c0ca26406ae",
-            )
-            .unwrap(),
-            transactions_root: B256::from_str(
-                "4409cc4b699384ba5f8248d92b784713610c5ff9c1de51e9239da0dac76de9ce",
-            )
-            .unwrap(),
-            receipts_root: B256::from_str(
-                "46cab26abf1047b5b119ecc2dda1296b071766c8b1307e1381fcecc90d513d86",
-            )
-            .unwrap(),
+            state_root: b256!("3c837fc158e3e93eafcaf2e658a02f5d8f99abc9f1c4c66cdea96c0ca26406ae"),
+            transactions_root: b256!(
+                "4409cc4b699384ba5f8248d92b784713610c5ff9c1de51e9239da0dac76de9ce"
+            ),
+            receipts_root: b256!(
+                "46cab26abf1047b5b119ecc2dda1296b071766c8b1307e1381fcecc90d513d86"
+            ),
             logs_bloom: Default::default(),
-            difficulty: U256::from(0),
+            difficulty: U256::ZERO,
             number: 0x1,
             gas_limit: 0x7fffffffffffffff,
             gas_used: 0x02a865,
@@ -278,8 +260,7 @@ mod tests {
         assert_eq!(header, expected);
 
         let expected_hash =
-            B256::from_str("0x10aca3ebb4cf6ddd9e945a5db19385f9c105ede7374380c50d56384c3d233785")
-                .unwrap();
+            b256!("0x10aca3ebb4cf6ddd9e945a5db19385f9c105ede7374380c50d56384c3d233785");
         assert_eq!(header.hash_slow(), expected_hash);
     }
 
@@ -290,17 +271,14 @@ mod tests {
             "f90239a013a7ec98912f917b3e804654e37c9866092043c13eb8eab94eb64818e886cff5a01dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d4934794f97e180c050e5ab072211ad2c213eb5aee4df134a0ec229dbe85b0d3643ad0f471e6ec1a36bbc87deffbbd970762d22a53b35d068aa056e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421a056e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421b901000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000080830305988401c9c380808464c40d5499d883010c01846765746888676f312e32302e35856c696e7578a070ccadc40b16e2094954b1064749cc6fbac783c1712f1b271a8aac3eda2f232588000000000000000007a056e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421808401600000"
         );
         let expected = Header {
-            parent_hash: B256::from_str(
-                "13a7ec98912f917b3e804654e37c9866092043c13eb8eab94eb64818e886cff5",
-            )
-            .unwrap(),
+            parent_hash: b256!("13a7ec98912f917b3e804654e37c9866092043c13eb8eab94eb64818e886cff5"),
             ommers_hash: EMPTY_OMMER_ROOT_HASH,
             beneficiary: address!("0xf97e180c050e5ab072211ad2c213eb5aee4df134"),
             state_root: b256!("0xec229dbe85b0d3643ad0f471e6ec1a36bbc87deffbbd970762d22a53b35d068a"),
             transactions_root: EMPTY_ROOT_HASH,
             receipts_root: EMPTY_ROOT_HASH,
             logs_bloom: Default::default(),
-            difficulty: U256::from(0),
+            difficulty: U256::ZERO,
             number: 0x30598,
             gas_limit: 0x1c9c380,
             gas_used: 0,

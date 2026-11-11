@@ -460,7 +460,7 @@ mod tests {
         tokio::spawn(task.run());
         let tx = MockTransaction::legacy();
         let out = executor.validate_transaction(TransactionOrigin::External, tx).await;
-        assert!(matches!(out, TransactionValidationOutcome::Valid { .. }));
+        assert!(out.is_valid());
     }
 
     #[tokio::test]
@@ -474,7 +474,7 @@ mod tests {
         ];
         let out = executor.validate_transactions(txs).await;
         assert_eq!(out.len(), 2);
-        assert!(out.iter().all(|o| matches!(o, TransactionValidationOutcome::Valid { .. })));
+        assert!(out.iter().all(|o| o.is_valid()));
     }
 
     #[tokio::test]
@@ -494,7 +494,7 @@ mod tests {
 
         submissions.spawn(async move {
             let outcome = first_submission.await;
-            assert!(matches!(outcome, TransactionValidationOutcome::Valid { .. }));
+            assert!(outcome.is_valid());
         });
 
         for index in 1..64 {
@@ -520,7 +520,7 @@ mod tests {
                     }
                 };
                 assert_eq!(outcomes.len(), 1);
-                assert!(matches!(outcomes[0], TransactionValidationOutcome::Valid { .. }));
+                assert!(outcomes[0].is_valid());
             });
         }
 
@@ -551,7 +551,7 @@ mod tests {
             )
             .await
             .expect("configured validation workers must process jobs");
-            assert!(matches!(outcome, TransactionValidationOutcome::Valid { .. }));
+            assert!(outcome.is_valid());
         }
     }
 
@@ -582,7 +582,7 @@ mod tests {
                     state_nonce: 0,
                     bytecode_hash: None,
                     transaction: ValidTransaction::Valid(transaction),
-                    propagate: matches!(origin, TransactionOrigin::Local),
+                    propagate: origin.is_local(),
                     authorities: None,
                 })
                 .collect()

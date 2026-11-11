@@ -13,7 +13,7 @@ pub(super) fn test_reveal_nodes_empty_slice<T: SparseTrie>(new_trie: fn() -> T) 
     let mut key_b = B256::ZERO;
     key_b.0[0] = 0x20;
     let storage: BTreeMap<B256, U256> =
-        BTreeMap::from([(key_a, U256::from(1)), (key_b, U256::from(2))]);
+        BTreeMap::from([(key_a, U256::ONE), (key_b, U256::from(2))]);
 
     let harness = SuiteTestHarness::new(storage);
     let root_node = harness.root_node();
@@ -41,7 +41,7 @@ pub(super) fn test_reveal_nodes_single_leaf<T: SparseTrie>(new_trie: fn() -> T) 
     let mut key_c = B256::ZERO;
     key_c.0[0] = 0x30;
     let storage: BTreeMap<B256, U256> =
-        BTreeMap::from([(key_a, U256::from(1)), (key_b, U256::from(2)), (key_c, U256::from(3))]);
+        BTreeMap::from([(key_a, U256::ONE), (key_b, U256::from(2)), (key_c, U256::from(3))]);
 
     let harness = SuiteTestHarness::new(storage);
 
@@ -63,7 +63,7 @@ pub(super) fn test_reveal_nodes_idempotent<T: SparseTrie>(new_trie: fn() -> T) {
     let mut key_c = B256::ZERO;
     key_c.0[0] = 0x30;
     let storage: BTreeMap<B256, U256> =
-        BTreeMap::from([(key_a, U256::from(1)), (key_b, U256::from(2)), (key_c, U256::from(3))]);
+        BTreeMap::from([(key_a, U256::ONE), (key_b, U256::from(2)), (key_c, U256::from(3))]);
 
     let harness = SuiteTestHarness::new(storage);
 
@@ -248,7 +248,7 @@ pub(super) fn test_reveal_insert_reveal_preserves_branch_state<T: SparseTrie>(ne
     let key_c = B256::with_last_byte(0x02);
 
     let original_storage: BTreeMap<B256, U256> =
-        BTreeMap::from([(key_a, U256::from(1)), (key_c, U256::from(3))]);
+        BTreeMap::from([(key_a, U256::ONE), (key_c, U256::from(3))]);
 
     let harness = SuiteTestHarness::new(original_storage);
 
@@ -269,7 +269,7 @@ pub(super) fn test_reveal_insert_reveal_preserves_branch_state<T: SparseTrie>(ne
     // Root must match a reference trie with all 3 keys.
     let root = trie.root(epoch(0));
     let expected_storage =
-        BTreeMap::from([(key_a, U256::from(1)), (key_b, insert_value), (key_c, U256::from(3))]);
+        BTreeMap::from([(key_a, U256::ONE), (key_b, insert_value), (key_c, U256::from(3))]);
     let expected_harness = SuiteTestHarness::new(expected_storage);
     assert_eq!(
         root,
@@ -303,7 +303,7 @@ pub(super) fn test_remove_then_reveal_does_not_overwrite_collapsed_node<T: Spars
     };
 
     let original_storage: BTreeMap<B256, U256> =
-        BTreeMap::from([(key_a, U256::from(1)), (key_b, U256::from(2)), (key_c, U256::from(3))]);
+        BTreeMap::from([(key_a, U256::ONE), (key_b, U256::from(2)), (key_c, U256::from(3))]);
 
     let harness = SuiteTestHarness::new(original_storage);
 
@@ -353,7 +353,7 @@ pub(super) fn test_insert_then_reveal_does_not_overwrite_branch<T: SparseTrie>(
     };
 
     let original_storage: BTreeMap<B256, U256> =
-        BTreeMap::from([(key_a, U256::from(1)), (key_b, U256::from(2))]);
+        BTreeMap::from([(key_a, U256::ONE), (key_b, U256::from(2))]);
 
     let harness = SuiteTestHarness::new(original_storage);
 
@@ -379,7 +379,7 @@ pub(super) fn test_insert_then_reveal_does_not_overwrite_branch<T: SparseTrie>(
     // Root must match a reference trie with all 3 keys.
     let root = trie.root(epoch(0));
     let expected_storage =
-        BTreeMap::from([(key_a, U256::from(1)), (key_b, U256::from(2)), (key_c, insert_value)]);
+        BTreeMap::from([(key_a, U256::ONE), (key_b, U256::from(2)), (key_c, insert_value)]);
     let expected_harness = SuiteTestHarness::new(expected_storage);
     assert_eq!(
         root,

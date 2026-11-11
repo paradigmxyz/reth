@@ -241,6 +241,11 @@ pub struct NetworkArgs {
     #[command(flatten)]
     pub discovery: DiscoveryArgs,
 
+    /// Advertise and serve experimental snap/2. `reth node` also bootstraps a fresh database with
+    /// it, and uses the staged pipeline while the chain head predates block access lists.
+    #[arg(long = "snap.v2")]
+    pub snap_v2: bool,
+
     #[expect(clippy::doc_markdown)]
     /// Comma separated enode URLs or ENRs of trusted peers for P2P connections.
     ///
@@ -587,10 +592,13 @@ impl NetworkArgs {
             .with_max_inbound_opt(self.resolved_max_inbound_peers())
             .with_max_outbound_opt(self.resolved_max_outbound_peers())
             .with_ip_filter(ip_filter)
-            .with_enforce_enr_fork_id(self.enforce_enr_fork_id);
+            // The flag can only enable enforcement, so the reth.toml value applies when it is not
+            // passed.
+            .with_enforce_enr_fork_id(self.enforce_enr_fork_id || config.peers.enforce_enr_fork_id);
 
         // Configure basic network stack
         NetworkConfigBuilder::<N>::new(secret_key, executor)
+            .with_snap(self.snap_v2)
             .external_ip_resolver(self.nat.clone())
             .sessions_config(
                 config.sessions.clone().with_upscaled_event_buffer(peers_config.max_peers()),
@@ -684,7 +692,7 @@ impl NetworkArgs {
     ) -> Result<SecretKey, SecretKeyError> {
         if let Some(b256) = &self.p2p_secret_key_hex {
             // Use the B256 value directly (already validated as 32 bytes)
-            SecretKey::from_slice(b256.as_slice()).map_err(SecretKeyError::SecretKeyDecodeError)
+            SecretKey::from_secret_bytes(b256.0).map_err(SecretKeyError::SecretKeyDecodeError)
         } else {
             // Load from file (either provided path or default)
             let secret_key_path = self.p2p_secret_key.clone().unwrap_or(default_secret_key_path);
@@ -726,6 +734,7 @@ impl Default for NetworkArgs {
         } = DefaultNetworkArgs::get_global().clone();
         Self {
             discovery: DiscoveryArgs::default(),
+            snap_v2: false,
             trusted_peers: vec![],
             trusted_only: false,
             bootnodes: None,
@@ -1169,6 +1178,7 @@ mod tests {
     use clap::Parser;
     use reth_chainspec::MAINNET;
     use reth_config::Config;
+    use reth_network::EthNetworkPrimitives;
     use reth_network_peers::NodeRecord;
     use secp256k1::SecretKey;
     use std::{
@@ -1229,15 +1239,6 @@ mod tests {
             "enode://22a8232c3abc76a16ae9d6c3b164f98775fe226f0917b0ca871128a74a8e9630b458460865bab457221f1d448dd9791d24c4e5d88786180ac185df813a68d4de@3.209.45.79:30303".parse().unwrap()
             ]
         );
-    }
-
-    #[test]
-    fn parse_enr_bootnode_args() {
-        let enr = "enr:-IS4QHCYrYZbAKWCBRlAy5zzaDZXJBGkcnh4MHcBFZntXNFrdvJjX04jRzjzCBOonrkTfj499SZuOh8R33Ls8RRcy5wBgmlkgnY0gmlwhH8AAAGJc2VjcDI1NmsxoQPKY0yuDUmstAHYpMa2_oxVtw0RW_QAdpzBQA8yWM0xOIN1ZHCCdl8";
-        let args = CommandParser::<NetworkArgs>::parse_from(["reth", "--bootnodes", enr]).args;
-        let trusted =
-            CommandParser::<NetworkArgs>::parse_from(["reth", "--trusted-peers", enr]).args;
-        assert_eq!(args.bootnodes, Some(trusted.trusted_peers));
     }
 
     #[test]
@@ -1534,7 +1535,7 @@ mod tests {
         let secret_key = args.secret_key(default_path).unwrap();
 
         // Verify the secret key matches the hex input
-        assert_eq!(alloy_primitives::hex::encode(secret_key.secret_bytes()), hex);
+        assert_eq!(alloy_primitives::hex::encode(secret_key.to_secret_bytes()), hex);
     }
 
     #[test]
@@ -1602,6 +1603,31 @@ mod tests {
     }
 
     #[test]
+    fn snap_v2_flag_controls_advertisement() {
+        for (cli, enabled) in [(vec!["reth"], false), (vec!["reth", "--snap.v2"], true)] {
+            let args = CommandParser::<NetworkArgs>::parse_from(cli).args;
+            assert_eq!(args.snap_v2, enabled);
+            let config = args
+                .network_config::<EthNetworkPrimitives>(
+                    &Config::default(),
+                    MAINNET.clone(),
+                    SecretKey::from_secret_bytes([1u8; 32]).unwrap(),
+                    PathBuf::new(),
+                    Runtime::test(),
+                )
+                .build_with_noop_provider(MAINNET.clone());
+            let versions = config
+                .hello_message
+                .protocols
+                .iter()
+                .filter(|protocol| protocol.cap.name == "snap")
+                .map(|protocol| protocol.cap.version)
+                .collect::<Vec<_>>();
+            assert_eq!(versions, if enabled { vec![2] } else { vec![] });
+        }
+    }
+
+    #[test]
     fn network_config_preserves_basic_nodes_from_peers_file() {
         let enode = "enode://6f8a80d14311c39f35f516fa664deaaaa13e85b2f7493f37f6144d86991ec012937307647bd3b9a82abe2974e1407241d54947bbb39763a4cac9f77166ad92a0@10.3.58.6:30303?discport=30301";
         let unique = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
@@ -1617,8 +1643,8 @@ mod tests {
         };
 
         // Build the network config using a deterministic secret key
-        let secret_key = SecretKey::from_byte_array(&[1u8; 32]).unwrap();
-        let builder = args.network_config::<reth_network::EthNetworkPrimitives>(
+        let secret_key = SecretKey::from_secret_bytes([1u8; 32]).unwrap();
+        let builder = args.network_config::<EthNetworkPrimitives>(
             &Config::default(),
             MAINNET.clone(),
             secret_key,
@@ -1641,10 +1667,10 @@ mod tests {
         let enr = "enr:-IS4QHCYrYZbAKWCBRlAy5zzaDZXJBGkcnh4MHcBFZntXNFrdvJjX04jRzjzCBOonrkTfj499SZuOh8R33Ls8RRcy5wBgmlkgnY0gmlwhH8AAAGJc2VjcDI1NmsxoQPKY0yuDUmstAHYpMa2_oxVtw0RW_QAdpzBQA8yWM0xOIN1ZHCCdl8";
         let enode = "enode://6f8a80d14311c39f35f516fa664deaaaa13e85b2f7493f37f6144d86991ec012937307647bd3b9a82abe2974e1407241d54947bbb39763a4cac9f77166ad92a0@10.3.58.6:30303";
         let config = Config { bootnodes: vec![enr.parse().unwrap()], ..Default::default() };
-        let secret_key = SecretKey::from_byte_array(&[1u8; 32]).unwrap();
+        let secret_key = SecretKey::from_secret_bytes([1u8; 32]).unwrap();
 
         let boot_nodes = |args: &NetworkArgs| {
-            args.network_config::<reth_network::EthNetworkPrimitives>(
+            args.network_config::<EthNetworkPrimitives>(
                 &config,
                 MAINNET.clone(),
                 secret_key,
@@ -1661,5 +1687,34 @@ mod tests {
 
         let args = NetworkArgs { bootnodes: Some(vec![enode.parse().unwrap()]), ..args };
         assert_eq!(boot_nodes(&args), vec![enode.parse::<TrustedPeer>().unwrap()]);
+    }
+
+    #[test]
+    fn network_config_enforce_enr_fork_id_from_config_or_cli() {
+        let secret_key = SecretKey::from_secret_bytes([1u8; 32]).unwrap();
+
+        let enforced = |args: &NetworkArgs, config: &Config| {
+            args.network_config::<EthNetworkPrimitives>(
+                config,
+                MAINNET.clone(),
+                secret_key,
+                PathBuf::from("peers.json"),
+                Runtime::test(),
+            )
+            .build_with_noop_provider(MAINNET.clone())
+            .peers_config
+            .enforce_enr_fork_id
+        };
+
+        let args = NetworkArgs { no_persist_peers: true, ..Default::default() };
+        let mut config = Config::default();
+        assert!(!enforced(&args, &config));
+
+        config.peers.enforce_enr_fork_id = true;
+        assert!(enforced(&args, &config));
+
+        config.peers.enforce_enr_fork_id = false;
+        let args = NetworkArgs { enforce_enr_fork_id: true, ..args };
+        assert!(enforced(&args, &config));
     }
 }

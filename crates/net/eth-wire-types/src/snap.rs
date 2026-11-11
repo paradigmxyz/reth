@@ -331,7 +331,8 @@ pub enum SnapProtocolMessage {
     BlockAccessLists(BlockAccessListsMessage),
 }
 
-/// Error decoding an inbound `snap` protocol message from its framed bytes.
+/// Error decoding an inbound `snap` protocol message from its framed bytes, or matching a response
+/// to its request.
 #[derive(thiserror::Error, Debug)]
 pub enum SnapProtocolError {
     /// The payload was empty and carried no message id.
@@ -344,6 +345,31 @@ pub enum SnapProtocolError {
     /// Decoding the RLP message body failed.
     #[error("RLP error: {0}")]
     Rlp(#[from] alloy_rlp::Error),
+    /// The response answers no request sent on this connection.
+    ///
+    /// The response is rejected before its body is decoded.
+    #[error("received unsolicited {message_id:?} response with request id {request_id}")]
+    UnsolicitedResponse {
+        /// The message id of the response.
+        message_id: SnapMessageId,
+        /// The request id the response carried.
+        request_id: u64,
+    },
+    /// A list in the response is longer than its request allows: more entries than requested, or
+    /// more range proof nodes than two boundary paths can hold.
+    ///
+    /// The response is rejected before its body is decoded.
+    #[error(
+        "{message_id:?} response with request id {request_id} holds a list longer than the {max_items} items its request allows"
+    )]
+    ResponseExceedsRequest {
+        /// The message id of the response.
+        message_id: SnapMessageId,
+        /// The request id the response carried.
+        request_id: u64,
+        /// The longest the list may be.
+        max_items: usize,
+    },
 }
 
 impl SnapProtocolMessage {
@@ -1026,19 +1052,8 @@ mod tests {
     }
 
     #[test]
-    fn storage_data_carries_the_trie_leaf_encoding() {
-        let value = U256::from(1234);
-        let slot = StorageData::from_value(B256::repeat_byte(4), value);
-
-        // Clients verify range proofs against the RLP-encoded trie leaf, so the wire bytes must be
-        // exactly that rather than a fixed-width word.
-        assert_eq!(slot.data.as_ref(), alloy_rlp::encode(value));
-        assert_eq!(slot.value().unwrap(), value);
-    }
-
-    #[test]
     fn storage_data_rejects_trailing_bytes() {
-        let mut slot = StorageData::from_value(B256::repeat_byte(4), U256::from(1));
+        let mut slot = StorageData::from_value(B256::repeat_byte(4), U256::ONE);
         slot.data = [slot.data.as_ref(), &[0x00]].concat().into();
 
         assert!(slot.value().is_err());

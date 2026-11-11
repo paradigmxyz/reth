@@ -556,8 +556,8 @@ impl RethTransactionPoolConfig for TxPoolArgs {
 
 #[cfg(test)]
 mod tests {
+
     use super::*;
-    use alloy_primitives::address;
     use clap::Parser;
 
     /// A helper type to parse Args more easily
@@ -628,10 +628,7 @@ mod tests {
             max_tx_input_bytes: 131072,
             max_cached_entries: 200,
             no_locals: true,
-            locals: vec![
-                address!("0x0000000000000000000000000000000000000001"),
-                address!("0x0000000000000000000000000000000000000002"),
-            ],
+            locals: vec![Address::with_last_byte(1), Address::with_last_byte(2)],
             no_local_transactions_propagation: true,
             additional_validation_tasks: 4,
             pending_tx_listener_buffer_size: 512,

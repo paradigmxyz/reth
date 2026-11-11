@@ -5,7 +5,8 @@ use alloy_consensus::TxEnvelope;
 use alloy_rpc_types::{Block, Header, Receipt, Transaction, TransactionRequest};
 use eyre::OptionExt;
 use reth_chainspec::EthChainSpec;
-use reth_engine_primitives::InvalidBlockHook;
+use reth_engine_primitives::{InvalidBlockHook, InvalidBlockHooks, NoopInvalidBlockHook};
+use reth_invalid_block_hooks::InvalidBlockWitnessHook;
 use reth_node_api::{FullNodeComponents, NodeTypes};
 use reth_node_core::{
     args::InvalidBlockHookType,
@@ -15,6 +16,7 @@ use reth_node_core::{
 use reth_primitives_traits::NodePrimitives;
 use reth_provider::ChainSpecProvider;
 use reth_rpc_api::EthApiClient;
+use reth_tasks::Runtime;
 
 /// Extension trait for [`AddOnsContext`] to create invalid block hooks.
 pub trait InvalidBlockHookExt {
@@ -45,6 +47,7 @@ where
             self.node.provider().clone(),
             self.node.evm_config().clone(),
             self.node.provider().chain_spec().chain().id(),
+            self.node.task_executor().clone(),
         )
         .await
     }
@@ -63,26 +66,20 @@ where
 /// * `provider` - The blockchain database provider
 /// * `evm_config` - The EVM configuration
 /// * `chain_id` - The chain ID for verification
+/// * `runtime` - The runtime for background diagnostics and shutdown handling.
 pub async fn create_invalid_block_hook<N, P, E>(
     config: &NodeConfig<P::ChainSpec>,
     data_dir: &ChainPath<DataDirPath>,
     provider: P,
     evm_config: E,
     chain_id: u64,
+    runtime: Runtime,
 ) -> eyre::Result<Box<dyn InvalidBlockHook<N>>>
 where
     N: NodePrimitives,
-    P: reth_provider::StateProviderFactory
-        + reth_provider::ChainSpecProvider
-        + Clone
-        + Send
-        + Sync
-        + 'static,
-    E: reth_evm::ConfigureEvm<Primitives = N> + Clone + 'static,
+    P: reth_provider::StateProviderFactory + reth_provider::ChainSpecProvider + Clone + 'static,
+    E: reth_evm::ConfigureEvm<Primitives = N> + 'static,
 {
-    use reth_engine_primitives::{InvalidBlockHooks, NoopInvalidBlockHook};
-    use reth_invalid_block_hooks::InvalidBlockWitnessHook;
-
     let Some(ref hook) = config.debug.invalid_block_hook else {
         return Ok(Box::new(NoopInvalidBlockHook::default()))
     };
@@ -103,6 +100,7 @@ where
                     evm_config.clone(),
                     output_directory,
                     healthy_node_rpc_client.clone(),
+                    runtime.clone(),
                 )),
                 InvalidBlockHookType::PreState | InvalidBlockHookType::Opcode => {
                     eyre::bail!("invalid block hook {hook:?} is not implemented yet");

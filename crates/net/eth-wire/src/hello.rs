@@ -1,5 +1,5 @@
 use crate::{Capability, EthVersion, ProtocolVersion};
-use alloy_rlp::{RlpDecodable, RlpEncodable};
+use alloy_rlp::{Decodable, Header, RlpEncodable};
 use reth_codecs::add_arbitrary_tests;
 use reth_network_peers::PeerId;
 use reth_primitives_traits::constants::RETH_CLIENT_VERSION;
@@ -46,9 +46,9 @@ impl HelloMessageWithProtocols {
     /// ```
     /// use reth_eth_wire::HelloMessageWithProtocols;
     /// use reth_network_peers::pk2id;
-    /// use secp256k1::{SecretKey, SECP256K1};
-    /// let secret_key = SecretKey::new(&mut rand_08::thread_rng());
-    /// let id = pk2id(&secret_key.public_key(SECP256K1));
+    /// use secp256k1::SecretKey;
+    /// let secret_key = SecretKey::new(&mut rand::rng());
+    /// let id = pk2id(&secret_key.public_key());
     /// let status = HelloMessageWithProtocols::builder(id).build();
     /// ```
     pub const fn builder(id: PeerId) -> HelloMessageBuilder {
@@ -111,12 +111,13 @@ impl HelloMessageWithProtocols {
     }
 }
 
-// TODO: determine if we should allow for the extra fields at the end like EIP-706 suggests
 /// Raw rlpx protocol message used in the `p2p` handshake, containing information about the
 /// supported `RLPx` protocol version and capabilities.
 ///
+/// Decoding ignores list elements after `id`, which the spec reserves for future versions (EIP-8).
+///
 /// See also <https://github.com/ethereum/devp2p/blob/master/rlpx.md#hello-0x00>
-#[derive(Clone, Debug, PartialEq, Eq, RlpEncodable, RlpDecodable)]
+#[derive(Clone, Debug, PartialEq, Eq, RlpEncodable)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(any(test, feature = "arbitrary"), derive(arbitrary::Arbitrary))]
 #[add_arbitrary_tests(rlp)]
@@ -136,15 +137,28 @@ pub struct HelloMessage {
 
 // === impl HelloMessage ===
 
+impl Decodable for HelloMessage {
+    fn decode(buf: &mut &[u8]) -> alloy_rlp::Result<Self> {
+        let mut payload = Header::decode_bytes(buf, true)?;
+        Ok(Self {
+            protocol_version: Decodable::decode(&mut payload)?,
+            client_version: Decodable::decode(&mut payload)?,
+            capabilities: Decodable::decode(&mut payload)?,
+            port: Decodable::decode(&mut payload)?,
+            id: Decodable::decode(&mut payload)?,
+        })
+    }
+}
+
 impl HelloMessage {
     /// Starts a new `HelloMessageBuilder`
     ///
     /// ```
     /// use reth_eth_wire::HelloMessage;
     /// use reth_network_peers::pk2id;
-    /// use secp256k1::{SecretKey, SECP256K1};
-    /// let secret_key = SecretKey::new(&mut rand_08::thread_rng());
-    /// let id = pk2id(&secret_key.public_key(SECP256K1));
+    /// use secp256k1::SecretKey;
+    /// let secret_key = SecretKey::new(&mut rand::rng());
+    /// let id = pk2id(&secret_key.public_key());
     /// let status = HelloMessage::builder(id).build();
     /// ```
     pub const fn builder(id: PeerId) -> HelloMessageBuilder {
@@ -232,14 +246,14 @@ mod tests {
         p2pstream::P2PMessage, Capability, EthVersion, HelloMessage, HelloMessageWithProtocols,
         ProtocolVersion,
     };
-    use alloy_rlp::{Decodable, Encodable, EMPTY_STRING_CODE};
+    use alloy_rlp::{Decodable, Encodable, Header, EMPTY_STRING_CODE};
     use reth_network_peers::pk2id;
-    use secp256k1::{SecretKey, SECP256K1};
+    use secp256k1::SecretKey;
 
     #[test]
     fn test_hello_encoding_round_trip() {
-        let secret_key = SecretKey::new(&mut rand_08::thread_rng());
-        let id = pk2id(&secret_key.public_key(SECP256K1));
+        let secret_key = SecretKey::new(&mut rand::rng());
+        let id = pk2id(&secret_key.public_key());
         let hello = P2PMessage::Hello(HelloMessage {
             protocol_version: ProtocolVersion::V5,
             client_version: "reth/0.1.0".to_string(),
@@ -258,8 +272,8 @@ mod tests {
 
     #[test]
     fn hello_encoding_length() {
-        let secret_key = SecretKey::new(&mut rand_08::thread_rng());
-        let id = pk2id(&secret_key.public_key(SECP256K1));
+        let secret_key = SecretKey::new(&mut rand::rng());
+        let id = pk2id(&secret_key.public_key());
         let hello = P2PMessage::Hello(HelloMessage {
             protocol_version: ProtocolVersion::V5,
             client_version: "reth/0.1.0".to_string(),
@@ -278,8 +292,8 @@ mod tests {
     #[test]
     fn test_default_protocols_still_include_eth69() {
         // ensure that older eth/69 remains advertised for compatibility
-        let secret_key = SecretKey::new(&mut rand_08::thread_rng());
-        let id = pk2id(&secret_key.public_key(SECP256K1));
+        let secret_key = SecretKey::new(&mut rand::rng());
+        let id = pk2id(&secret_key.public_key());
         let hello = HelloMessageWithProtocols::builder(id).build();
 
         let has_eth69 = hello
@@ -292,8 +306,8 @@ mod tests {
     #[test]
     fn hello_message_id_prefix() {
         // ensure that the hello message id is prefixed
-        let secret_key = SecretKey::new(&mut rand_08::thread_rng());
-        let id = pk2id(&secret_key.public_key(SECP256K1));
+        let secret_key = SecretKey::new(&mut rand::rng());
+        let id = pk2id(&secret_key.public_key());
         let hello = P2PMessage::Hello(HelloMessage {
             protocol_version: ProtocolVersion::V5,
             client_version: "reth/0.1.0".to_string(),
@@ -307,5 +321,36 @@ mod tests {
 
         // zero is encoded as 0x80, the empty string code in RLP
         assert_eq!(hello_encoded[0], EMPTY_STRING_CODE);
+    }
+
+    #[test]
+    fn hello_decode_ignores_extra_fields() {
+        // EIP-8: additional list elements must be ignored
+        let secret_key = SecretKey::new(&mut rand::rng());
+        let hello = HelloMessage {
+            protocol_version: ProtocolVersion::V5,
+            client_version: "reth/0.1.0".to_string(),
+            capabilities: vec![Capability::new_static("eth", EthVersion::Eth68 as usize)],
+            port: 30303,
+            id: pk2id(&secret_key.public_key()),
+        };
+
+        let mut payload = Vec::new();
+        hello.protocol_version.encode(&mut payload);
+        hello.client_version.encode(&mut payload);
+        hello.capabilities.encode(&mut payload);
+        hello.port.encode(&mut payload);
+        hello.id.encode(&mut payload);
+        42u8.encode(&mut payload);
+        "future".encode(&mut payload);
+
+        let mut encoded = Vec::new();
+        Header { list: true, payload_length: payload.len() }.encode(&mut encoded);
+        encoded.extend_from_slice(&payload);
+        encoded.push(0xff);
+
+        let mut buf = encoded.as_slice();
+        assert_eq!(HelloMessage::decode(&mut buf).unwrap(), hello);
+        assert_eq!(buf, [0xff]);
     }
 }

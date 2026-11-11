@@ -1,7 +1,16 @@
 use crate::{ClientWithFakeIndex, FileMeta, ITHACA_ERA_INDEX_URL};
 use reqwest::{Client, Url};
 use reth_db_common::init::init_genesis;
-use reth_era::era1::types::execution::MAX_BLOCKS_PER_ERA1;
+use reth_era::{
+    e2s::types::{Entry, Header},
+    era1::types::execution::MAX_BLOCKS_PER_ERA1,
+    ere::types::{
+        execution::{
+            COMPRESSED_BODY, COMPRESSED_HEADER, COMPRESSED_SLIM_RECEIPTS, TOTAL_DIFFICULTY,
+        },
+        group::{DynamicBlockIndex, DYNAMIC_BLOCK_INDEX},
+    },
+};
 use reth_era_downloader::{EraClient, EraStream, EraStreamConfig};
 use reth_era_utils::{export, import, Era1, Ere, ExportConfig};
 use reth_etl::Collector;
@@ -13,7 +22,7 @@ use reth_provider::{
 };
 use reth_stages_types::{StageCheckpoint, StageId};
 use reth_static_file_types::StaticFileSegment;
-use std::str::FromStr;
+use std::{collections::HashMap, str::FromStr};
 use tempfile::tempdir;
 
 const EXPORT_FIRST_BLOCK: u64 = 0;
@@ -343,17 +352,6 @@ async fn test_ere_roundtrip_export_after_import() {
 /// Offsets are `i64`, relative to the index record, laid out per block as
 /// `[header, body, receipts, difficulty]` (the `noproofs` profile, so no proof component).
 fn assert_ere_index_offsets_resolve(path: &std::path::Path) {
-    use reth_era::{
-        e2s::types::{Entry, Header},
-        ere::types::{
-            execution::{
-                COMPRESSED_BODY, COMPRESSED_HEADER, COMPRESSED_SLIM_RECEIPTS, TOTAL_DIFFICULTY,
-            },
-            group::{DynamicBlockIndex, DYNAMIC_BLOCK_INDEX},
-        },
-    };
-    use std::collections::HashMap;
-
     let bytes = fs::read(path).unwrap();
 
     // Walk the TLV stream, recording each record's start position and type.

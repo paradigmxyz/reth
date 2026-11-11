@@ -57,32 +57,23 @@ pub(crate) fn policy() -> SnapPivotPolicy {
     SnapPivotPolicy::default().with_head_distance(1).with_advance_after(4).with_history(8)
 }
 
-/// A header with a state root distinctive to its number, and a commitment when one is given.
-///
-/// A commitment comes with the fields of the forks before it, as real headers carry them, so the
-/// header encodes and decodes the same.
+/// A header with a state root distinctive to its number, and a block access list hash when one
+/// is given.
 pub(crate) fn header(
     number: u64,
     parent_hash: B256,
     block_access_list_hash: Option<B256>,
 ) -> Header {
-    let forked = block_access_list_hash.is_some();
     Header {
         number,
         parent_hash,
         state_root: B256::repeat_byte(number as u8),
-        base_fee_per_gas: forked.then_some(0),
-        withdrawals_root: forked.then_some(B256::ZERO),
-        blob_gas_used: forked.then_some(0),
-        excess_blob_gas: forked.then_some(0),
-        parent_beacon_block_root: forked.then_some(B256::ZERO),
-        requests_hash: forked.then_some(B256::ZERO),
         block_access_list_hash,
         ..Default::default()
     }
 }
 
-/// Blocks `0..=3`, carrying a block access list commitment from `bal_from` onwards.
+/// Blocks `0..=3`, carrying a block access list hash from `bal_from` onwards.
 pub(crate) fn chain(bal_from: Option<u64>) -> Vec<Header> {
     let mut headers = Vec::new();
     let mut parent = B256::ZERO;
@@ -108,12 +99,20 @@ pub(crate) fn generation(block: u64, state_root: B256) -> SnapGeneration {
 }
 
 /// Writes blocks `0..=3` hashed the way [`generation`] anchors them, so an attempt started from
-/// one finds its pivot on the canonical chain.
-pub(crate) fn insert_generation_headers(factory: &ProviderFactory<MockNodeTypesWithDB>) {
+/// one finds its pivot on the canonical chain. `roots` are the state roots of blocks `1..`, the
+/// ones attempts download against; later blocks keep their distinctive root.
+pub(crate) fn insert_generation_headers(
+    factory: &ProviderFactory<MockNodeTypesWithDB>,
+    roots: &[B256],
+) {
     let headers: Vec<_> = (0..=3u64)
         .map(|number| {
             let parent = number.checked_sub(1).map_or(B256::ZERO, |n| B256::repeat_byte(n as u8));
-            SealedHeader::new(header(number, parent, None), B256::repeat_byte(number as u8))
+            let mut header = header(number, parent, None);
+            if let Some(root) = number.checked_sub(1).and_then(|i| roots.get(i as usize)) {
+                header.state_root = *root;
+            }
+            SealedHeader::new(header, B256::repeat_byte(number as u8))
         })
         .collect();
     insert_headers(factory, &headers);
@@ -130,6 +129,13 @@ pub(crate) fn hashed_factory() -> ProviderFactory<MockNodeTypesWithDB> {
     factory
 }
 
+/// A hashed database holding the blocks of [`insert_generation_headers`] with `roots`.
+pub(crate) fn hashed_factory_with_roots(roots: &[B256]) -> ProviderFactory<MockNodeTypesWithDB> {
+    let factory = hashed_factory();
+    insert_generation_headers(&factory, roots);
+    factory
+}
+
 /// A hashed account key in the lowest part of the key space.
 pub(crate) fn key(value: u64) -> B256 {
     B256::left_padding_from(&value.to_be_bytes())
@@ -137,7 +143,7 @@ pub(crate) fn key(value: u64) -> B256 {
 
 /// An account without storage or code, distinguished by its nonce.
 pub(crate) fn account(nonce: u64) -> TrieAccount {
-    TrieAccount { nonce, balance: U256::from(1), ..Default::default() }
+    TrieAccount { nonce, balance: U256::ONE, ..Default::default() }
 }
 
 /// Root of the account trie holding `accounts`.
@@ -284,7 +290,7 @@ pub(crate) struct BalChain {
 impl BalChain {
     /// A chain anchored at `pivot`, carrying one block per entry of `lists` after it.
     pub(crate) fn new(pivot: u64, lists: impl IntoIterator<Item = Vec<AccountChanges>>) -> Self {
-        let (commitments, lists): (Vec<B256>, Vec<Bytes>) = lists
+        let (access_list_hashes, lists): (Vec<B256>, Vec<Bytes>) = lists
             .into_iter()
             .map(|changes| {
                 (
@@ -299,13 +305,50 @@ impl BalChain {
             headers.push(SealedHeader::seal_slow(header(number, parent, None)));
             parent = headers[number as usize].hash();
         }
-        for (index, commitment) in commitments.into_iter().enumerate() {
-            let sealed =
-                SealedHeader::seal_slow(header(pivot + index as u64 + 1, parent, Some(commitment)));
+        for (index, access_list_hash) in access_list_hashes.into_iter().enumerate() {
+            let sealed = SealedHeader::seal_slow(header(
+                pivot + index as u64 + 1,
+                parent,
+                Some(access_list_hash),
+            ));
             parent = sealed.hash();
             headers.push(sealed);
         }
         Self { headers, pivot, lists }
+    }
+
+    /// The chain's headers with the state roots of the given blocks replaced, hashes unchanged, so
+    /// an attempt downloading against a root finds it in the canonical header.
+    pub(crate) fn headers_with_roots(&self, roots: &[(u64, B256)]) -> Vec<SealedHeader<Header>> {
+        self.headers
+            .iter()
+            .map(|sealed| {
+                let mut header = sealed.header().clone();
+                if let Some((_, root)) = roots.iter().find(|(number, _)| *number == header.number) {
+                    header.state_root = *root;
+                }
+                SealedHeader::new(header, sealed.hash())
+            })
+            .collect()
+    }
+
+    /// The chain's headers all committing to `state_root`, hashes unchanged.
+    pub(crate) fn headers_with_root(&self, state_root: B256) -> Vec<SealedHeader<Header>> {
+        let roots: Vec<_> =
+            self.headers.iter().map(|sealed| (sealed.number(), state_root)).collect();
+        self.headers_with_roots(&roots)
+    }
+
+    /// This chain with the state roots of the given blocks replaced, hashes unchanged.
+    pub(crate) fn with_state_roots(mut self, roots: &[(u64, B256)]) -> Self {
+        self.headers = self.headers_with_roots(roots);
+        self
+    }
+
+    /// This chain with every header committing to `state_root`, hashes unchanged.
+    pub(crate) fn with_state_root(mut self, state_root: B256) -> Self {
+        self.headers = self.headers_with_root(state_root);
+        self
     }
 
     /// Generation anchored to this chain's pivot, downloading against `state_root`.

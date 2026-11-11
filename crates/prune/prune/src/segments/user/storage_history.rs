@@ -6,7 +6,7 @@ use crate::{
     },
     PrunerError,
 };
-use alloy_primitives::{Address, BlockNumber, B256};
+use alloy_primitives::{map::HashMap, Address, BlockNumber, B256};
 use reth_db_api::{
     models::{storage_sharded_key::StorageShardedKey, BlockNumberAddress},
     tables,
@@ -18,7 +18,6 @@ use reth_prune_types::{
 };
 use reth_static_file_types::StaticFileSegment;
 use reth_storage_api::{StorageChangeSetReader, StorageSettingsCache};
-use rustc_hash::FxHashMap;
 use tracing::{instrument, trace};
 
 /// Number of storage history tables to prune in one step.
@@ -120,7 +119,7 @@ impl StorageHistory {
         // / 2`, so 8750 entries. Each entry is `160 bit + 256 bit + 64 bit`, so the total
         // size should be up to ~0.5MB + some hashmap overhead. `blocks_since_last_run` is
         // additionally limited by the `max_reorg_depth`, so no OOM is expected here.
-        let mut highest_deleted_storages = FxHashMap::default();
+        let mut highest_deleted_storages = HashMap::default();
         let mut last_changeset_pruned_block = None;
         let mut pruned_changesets = 0;
         let mut done = true;
@@ -205,7 +204,7 @@ impl StorageHistory {
         // size should be up to ~0.5MB + some hashmap overhead. `blocks_since_last_run` is
         // additionally limited by the `max_reorg_depth`, so no OOM is expected here.
         let mut last_changeset_pruned_block = None;
-        let mut highest_deleted_storages = FxHashMap::default();
+        let mut highest_deleted_storages = HashMap::default();
         let (pruned_changesets, done) =
             provider.tx_ref().prune_table_with_range::<tables::StorageChangeSets>(
                 BlockNumberAddress::range(range),
@@ -270,7 +269,7 @@ impl StorageHistory {
             ))
         }
 
-        let mut highest_deleted_storages: FxHashMap<_, _> = FxHashMap::default();
+        let mut highest_deleted_storages = HashMap::<_, _>::default();
         let mut last_changeset_pruned_block = None;
         let mut changesets_processed = 0usize;
         let mut done = true;
@@ -357,10 +356,16 @@ impl StorageHistory {
 mod tests {
     use super::STORAGE_HISTORY_TABLES_TO_PRUNE;
     use crate::segments::{PruneInput, PruneLimiter, Segment, SegmentOutput, StorageHistory};
-    use alloy_primitives::{BlockNumber, B256};
+    use alloy_primitives::{Address, BlockNumber, B256, U256};
     use assert_matches::assert_matches;
-    use reth_db_api::{models::StorageSettings, tables, BlockNumberList};
-    use reth_provider::{DBProvider, DatabaseProviderFactory, PruneCheckpointReader};
+    use reth_db_api::{
+        models::{storage_sharded_key::StorageShardedKey, StorageSettings},
+        tables, BlockNumberList,
+    };
+    use reth_primitives_traits::{Account, StorageEntry};
+    use reth_provider::{
+        DBProvider, DatabaseProviderFactory, PruneCheckpointReader, RocksDBProviderFactory,
+    };
     use reth_prune_types::{
         PruneCheckpoint, PruneInterruptReason, PruneMode, PruneProgress, PruneSegment,
     };
@@ -368,6 +373,7 @@ mod tests {
     use reth_storage_api::StorageSettingsCache;
     use reth_testing_utils::generators::{
         self, random_block_range, random_changeset_range, random_eoa_accounts, BlockRangeParams,
+        ChangeSet,
     };
     use std::{collections::BTreeMap, ops::AddAssign};
 
@@ -541,10 +547,6 @@ mod tests {
     #[test]
     #[allow(clippy::clone_on_copy)]
     fn prune_partial_progress_mid_block() {
-        use alloy_primitives::{Address, U256};
-        use reth_primitives_traits::Account;
-        use reth_testing_utils::generators::ChangeSet;
-
         let db = TestStageDB::default();
         let mut rng = generators::rng();
 
@@ -689,8 +691,6 @@ mod tests {
 
     #[test]
     fn prune_rocksdb() {
-        use reth_db_api::models::storage_sharded_key::StorageShardedKey;
-        use reth_provider::RocksDBProviderFactory;
         use reth_storage_api::StorageSettings;
 
         let db = TestStageDB::default();
@@ -800,10 +800,6 @@ mod tests {
     #[test]
     #[allow(clippy::clone_on_copy)]
     fn dense_block_advances_rocksdb_checkpoint() {
-        use alloy_primitives::U256;
-        use reth_db_api::models::storage_sharded_key::StorageShardedKey;
-        use reth_primitives_traits::StorageEntry;
-        use reth_provider::RocksDBProviderFactory;
         use reth_storage_api::StorageSettings;
 
         let db = TestStageDB::default();
@@ -825,9 +821,7 @@ mod tests {
                 vec![(
                     address,
                     account.clone(),
-                    keys.iter()
-                        .map(|key| StorageEntry { key: *key, value: U256::from(1) })
-                        .collect(),
+                    keys.iter().map(|key| StorageEntry { key: *key, value: U256::ONE }).collect(),
                 )]
             })
             .collect::<Vec<_>>();

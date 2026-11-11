@@ -1,7 +1,7 @@
 //! Core import functionality without CLI dependencies.
 
 use alloy_primitives::B256;
-use futures::StreamExt;
+use futures::{FutureExt, StreamExt};
 use reth_config::Config;
 use reth_consensus::FullConsensus;
 use reth_db_api::{tables, transaction::DbTx};
@@ -173,7 +173,9 @@ where
 
         let latest_block_number =
             provider_factory.get_stage_checkpoint(StageId::Finish)?.map(|ch| ch.block_number);
-        tokio::spawn(reth_node_events::node::handle_events(None, latest_block_number, events));
+        tokio::spawn(
+            reth_node_events::node::handle_events(None, latest_block_number, events).boxed(),
+        );
 
         // Run pipeline
         info!(target: "reth::import", "Starting sync pipeline");

@@ -22,14 +22,15 @@ type DbStateRoot<'a, TX, A> =
 type DbStorageRoot<'a, TX, A> =
     StorageRoot<DatabaseTrieCursorFactory<&'a TX, A>, DatabaseHashedCursorFactory<&'a TX>>;
 
-proptest! {
-    #![proptest_config(ProptestConfig {
-        cases: 128, ..ProptestConfig::default()
-    })]
-
-    #[test]
-    fn fuzz_in_memory_account_nodes(mut init_state: BTreeMap<B256, U256>, state_updates: [BTreeMap<B256, Option<U256>>; 10]) {
-        let factory = create_test_provider_factory();
+#[test]
+fn fuzz_in_memory_account_nodes() {
+    // The cases share one factory: each drops its provider without committing, so the next case
+    // starts from an empty database.
+    let factory = create_test_provider_factory();
+    proptest!(ProptestConfig::with_cases(128), |(
+        init_state in any::<BTreeMap<B256, U256>>(),
+        state_updates in any::<[BTreeMap<B256, Option<U256>>; 10]>(),
+    )| {
         let provider = factory.provider_rw().unwrap();
         let mut hashed_account_cursor = provider.tx_ref().cursor_write::<tables::HashedAccounts>().unwrap();
 
@@ -78,12 +79,19 @@ proptest! {
                 assert_eq!(expected_root, state_root);
             }
         });
-    }
+    });
+}
 
-    #[test]
-    fn fuzz_in_memory_storage_nodes(mut init_storage: BTreeMap<B256, U256>, storage_updates: [BTreeMap<B256, U256>; 10]) {
+#[test]
+fn fuzz_in_memory_storage_nodes() {
+    // The cases share one factory: each drops its provider without committing, so the next case
+    // starts from an empty database.
+    let factory = create_test_provider_factory();
+    proptest!(ProptestConfig::with_cases(128), |(
+        init_storage in any::<BTreeMap<B256, U256>>(),
+        storage_updates in any::<[BTreeMap<B256, U256>; 10]>(),
+    )| {
         let hashed_address = B256::random();
-        let factory = create_test_provider_factory();
         let provider = factory.provider_rw().unwrap();
         let mut hashed_storage_cursor =
             provider.tx_ref().cursor_write::<tables::HashedStorages>().unwrap();
@@ -132,5 +140,5 @@ proptest! {
                 assert_eq!(expected_root, storage_root);
             }
         });
-    }
+    });
 }

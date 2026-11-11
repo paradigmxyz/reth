@@ -8,7 +8,7 @@ use crate::{
     TmpDB,
 };
 use alloy_consensus::BlockHeader;
-use alloy_eips::BlockId;
+use alloy_eips::{eip2718::Encodable2718, BlockId};
 use alloy_network::{Ethereum, IntoWallet, ReceiptResponse};
 use alloy_primitives::{BlockHash, BlockNumber, Bytes, Sealable, B256};
 use alloy_provider::{
@@ -16,11 +16,10 @@ use alloy_provider::{
     Provider, ProviderBuilder, RootProvider,
 };
 use alloy_rpc_types_engine::{
-    ExecutionPayloadEnvelopeV5, ForkchoiceState, ForkchoiceUpdateError, ForkchoiceUpdated,
-    PayloadStatus, PayloadStatusEnum,
+    ForkchoiceState, ForkchoiceUpdateError, ForkchoiceUpdated, PayloadStatus, PayloadStatusEnum,
 };
 use alloy_rpc_types_eth::BlockNumberOrTag;
-use eyre::{bail, ensure, eyre, Ok, WrapErr};
+use eyre::{bail, ensure, eyre, Ok, OptionExt, WrapErr};
 use futures_util::{
     future::{select, BoxFuture, Either},
     Future,
@@ -43,10 +42,11 @@ use reth_primitives_traits::SealedBlock;
 use reth_provider::{
     providers::RocksDBProvider, BlockHashReader, BlockIdReader, BlockNumReader, BlockReader,
     BlockReaderIdExt, CanonStateNotificationStream, CanonStateSubscriptions, Chain,
-    DatabaseProviderFactory, HeaderProvider, PruneCheckpointReader, StageCheckpointReader,
+    DatabaseProviderFactory, HeaderProvider, MetadataProvider, PruneCheckpointReader, SnapAttempt,
+    StageCheckpointReader,
 };
 use reth_prune_types::PruneSegment;
-use reth_rpc_api::TestingBuildBlockRequestV1;
+use reth_rpc_api::{TestingBuildBlockRequestV1, TestingBuildBlockResponseV1};
 use reth_rpc_builder::auth::AuthServerHandle;
 use reth_rpc_eth_api::{
     helpers::{EthApiSpec, EthTransactions, LoadReceipt, TraceExt},
@@ -179,19 +179,22 @@ where
     ///
     /// Returns an error if the transaction is not included in the block, see
     /// [`Self::assert_new_block`].
-    pub async fn inject_and_advance(
+    pub fn inject_and_advance(
         &mut self,
         raw_tx: Bytes,
-    ) -> eyre::Result<(B256, Payload::BuiltPayload)>
+    ) -> BoxFuture<'_, eyre::Result<(B256, Payload::BuiltPayload)>>
     where
         AddOns::EthApi: EthApiSpec<Provider: BlockReader<Block = BlockTy<Node::Types>>>
             + EthTransactions
             + TraceExt,
     {
-        let tx_hash = self.rpc.inject_tx(raw_tx).await?;
-        let payload = self.advance_block().await?;
-        self.assert_new_block(tx_hash, payload.block().hash(), payload.block().number()).await?;
-        Ok((tx_hash, payload))
+        Box::pin(async move {
+            let tx_hash = self.rpc.inject_tx(raw_tx).await?;
+            let payload = self.advance_block().await?;
+            self.assert_new_block(tx_hash, payload.block().hash(), payload.block().number())
+                .await?;
+            Ok((tx_hash, payload))
+        })
     }
 
     /// Returns the current forkchoice state of the node.
@@ -411,10 +414,10 @@ where
     ///
     /// Returns the receipt without advancing if the transaction is already included. Returns an
     /// error if the transaction is not included within [`WAIT_TIMEOUT`].
-    pub async fn advance_until_receipt(
+    pub fn advance_until_receipt(
         &mut self,
         hash: B256,
-    ) -> eyre::Result<RpcReceipt<<AddOns::EthApi as EthApiTypes>::NetworkTypes>>
+    ) -> BoxFuture<'_, eyre::Result<RpcReceipt<<AddOns::EthApi as EthApiTypes>::NetworkTypes>>>
     where
         AddOns::EthApi: EthApiSpec<Provider: BlockReader<Block = BlockTy<Node::Types>>>
             + EthTransactions
@@ -422,17 +425,19 @@ where
             + LoadReceipt
             + 'static,
     {
-        let wait = async {
-            loop {
-                if let Some(receipt) = self.rpc.transaction_receipt(hash).await? {
-                    return Ok(receipt)
+        Box::pin(async move {
+            let wait = async {
+                loop {
+                    if let Some(receipt) = self.rpc.transaction_receipt(hash).await? {
+                        return Ok(receipt)
+                    }
+                    self.advance_block().await?;
                 }
-                self.advance_block().await?;
-            }
-        };
-        tokio::time::timeout(WAIT_TIMEOUT, wait)
-            .await
-            .map_err(|_| eyre!("timed out waiting for the receipt of transaction {hash}"))?
+            };
+            tokio::time::timeout(WAIT_TIMEOUT, wait)
+                .await
+                .map_err(|_| eyre!("timed out waiting for the receipt of transaction {hash}"))?
+        })
     }
 
     /// Advances the chain one block at a time until the transaction pool has no pending
@@ -537,15 +542,19 @@ where
     /// ones.
     ///
     /// Use [`Self::mine_pooled`] for transactions that are already in the pool, e.g. sent through
-    /// [`Self::rpc_provider_with_wallet`] or added with the pool API.
-    pub async fn mine(
+    /// [`Self::rpc_provider_with_wallet`] or added with the pool API, and [`Self::mine_signed`]
+    /// for signed transactions that should all succeed.
+    ///
+    /// The helpers that drive the eth API return boxed futures: with the new trait solver,
+    /// awaiting the unboxed future makes every caller borrow-check its whole state machine, which
+    /// dominates compile time for nodes with large eth API impls.
+    pub fn mine(
         &mut self,
         txs: impl IntoIterator<Item = Bytes>,
-    ) -> eyre::Result<
-        MinedBlock<
-            Payload::BuiltPayload,
-            RpcReceipt<<AddOns::EthApi as EthApiTypes>::NetworkTypes>,
-        >,
+    ) -> MinedBlockFuture<
+        '_,
+        Payload::BuiltPayload,
+        RpcReceipt<<AddOns::EthApi as EthApiTypes>::NetworkTypes>,
     >
     where
         // Implied by `NodeTypes`, but not derived by the compiler through the `Payload` parameter.
@@ -556,21 +565,21 @@ where
             + LoadReceipt
             + 'static,
     {
-        self.mine_txs(txs, true).await
+        let txs: Vec<Bytes> = txs.into_iter().collect();
+        Box::pin(async move { self.mine_txs(txs, true).await })
     }
 
     /// Mines the raw transactions like [`Self::mine`], but the block may also include other
     /// transactions of the pool, e.g. transactions that peers gossiped to the node.
     ///
     /// Only the receipts of the given transactions are returned.
-    pub async fn mine_including(
+    pub fn mine_including(
         &mut self,
         txs: impl IntoIterator<Item = Bytes>,
-    ) -> eyre::Result<
-        MinedBlock<
-            Payload::BuiltPayload,
-            RpcReceipt<<AddOns::EthApi as EthApiTypes>::NetworkTypes>,
-        >,
+    ) -> MinedBlockFuture<
+        '_,
+        Payload::BuiltPayload,
+        RpcReceipt<<AddOns::EthApi as EthApiTypes>::NetworkTypes>,
     >
     where
         Payload::BuiltPayload: BuiltPayload<Primitives = PrimitivesTy<Node::Types>>,
@@ -580,7 +589,35 @@ where
             + LoadReceipt
             + 'static,
     {
-        self.mine_txs(txs, false).await
+        let txs: Vec<Bytes> = txs.into_iter().collect();
+        Box::pin(async move { self.mine_txs(txs, false).await })
+    }
+
+    /// Mines the signed transactions like [`Self::mine`] and returns an error if one of them
+    /// reverted, see [`MinedBlock::ensure_success`].
+    ///
+    /// The transactions are EIP-2718 encoded before they are sent to the pool, so signed
+    /// transactions or envelopes, e.g. of a custom transaction type, can be passed without
+    /// encoding them first.
+    pub fn mine_signed<T: Encodable2718>(
+        &mut self,
+        txs: impl IntoIterator<Item = T>,
+    ) -> MinedBlockFuture<
+        '_,
+        Payload::BuiltPayload,
+        RpcReceipt<<AddOns::EthApi as EthApiTypes>::NetworkTypes>,
+    >
+    where
+        Payload::BuiltPayload: BuiltPayload<Primitives = PrimitivesTy<Node::Types>>,
+        AddOns::EthApi: EthApiSpec<Provider: BlockReader<Block = BlockTy<Node::Types>>>
+            + EthTransactions
+            + TraceExt
+            + LoadReceipt
+            + 'static,
+    {
+        // Encoded up front, so the returned future does not hold `T`.
+        let txs: Vec<Bytes> = txs.into_iter().map(|tx| tx.encoded_2718().into()).collect();
+        Box::pin(async move { self.mine(txs).await?.ensure_success() })
     }
 
     /// Mines the transactions with the given hashes like [`Self::mine`], for transactions that are
@@ -595,14 +632,13 @@ where
     /// next block, which can lag behind the block that is built. A transaction the block can not
     /// include, e.g. one queued behind a nonce gap, is reported as missing like with
     /// [`Self::mine`].
-    pub async fn mine_pooled(
+    pub fn mine_pooled(
         &mut self,
         hashes: impl IntoIterator<Item = B256>,
-    ) -> eyre::Result<
-        MinedBlock<
-            Payload::BuiltPayload,
-            RpcReceipt<<AddOns::EthApi as EthApiTypes>::NetworkTypes>,
-        >,
+    ) -> MinedBlockFuture<
+        '_,
+        Payload::BuiltPayload,
+        RpcReceipt<<AddOns::EthApi as EthApiTypes>::NetworkTypes>,
     >
     where
         Payload::BuiltPayload: BuiltPayload<Primitives = PrimitivesTy<Node::Types>>,
@@ -612,7 +648,8 @@ where
             + LoadReceipt
             + 'static,
     {
-        self.mine_pooled_txs(hashes.into_iter().collect(), true).await
+        let hashes: Vec<B256> = hashes.into_iter().collect();
+        Box::pin(async move { self.mine_pooled_txs(hashes, true).await })
     }
 
     /// Mines the raw transactions, see [`Self::mine`]. Unless `exclusive` is set, the block may
@@ -967,12 +1004,31 @@ where
             .hash()
     }
 
+    /// Returns the snap attempt the node persisted.
+    pub fn snap_attempt(&self) -> eyre::Result<SnapAttempt>
+    where
+        <Node::Provider as DatabaseProviderFactory>::Provider: MetadataProvider,
+    {
+        self.inner.provider.database_provider_ro()?.snap_attempt()?.ok_or_eyre("no snap attempt")
+    }
+
     /// Sends FCU and waits for the node to sync to the given block.
     ///
     /// The forkchoice update makes the block the head, safe and finalized block, regardless of the
     /// [`Finality`] policy of the context. Returns an error if the node does not sync within
     /// [`WAIT_TIMEOUT`].
     pub async fn sync_to(&self, block: BlockHash) -> eyre::Result<()> {
+        self.sync_to_forkchoice(ForkchoiceState::same_hash(block)).await
+    }
+
+    /// Sends the forkchoice update `state` and waits for the node to sync to its head, like
+    /// [`Self::sync_to`], but with the safe and finalized blocks of `state`.
+    ///
+    /// A finalized block below the head, e.g. one the node does not know yet, lets a backfill
+    /// anchor to it, as a snap sync anchors its pivot to the finalized block. Returns an error if
+    /// the node does not sync within [`WAIT_TIMEOUT`].
+    pub async fn sync_to_forkchoice(&self, state: ForkchoiceState) -> eyre::Result<()> {
+        let block = state.head_block_hash;
         let sync = async {
             while self
                 .inner
@@ -981,7 +1037,11 @@ where
                 .is_none_or(|h| h.hash() != block)
             {
                 tokio::time::sleep(Duration::from_millis(100)).await;
-                self.update_forkchoice(block, block).await?;
+                self.inner
+                    .add_ons_handle
+                    .beacon_engine_handle
+                    .fork_choice_updated(state, None)
+                    .await?;
             }
             Ok(())
         };
@@ -1355,13 +1415,36 @@ where
     pub async fn testing_build_block_v1(
         &self,
         request: TestingBuildBlockRequestV1,
-    ) -> eyre::Result<ExecutionPayloadEnvelopeV5> {
+    ) -> eyre::Result<TestingBuildBlockResponseV1> {
         let client =
             self.rpc_client().ok_or_else(|| eyre::eyre!("HTTP RPC client not available"))?;
 
-        let res: ExecutionPayloadEnvelopeV5 =
+        let res: TestingBuildBlockResponseV1 =
             client.request("testing_buildBlockV1", request.into_params()).await?;
         eyre::Ok(res)
+    }
+
+    /// Terminates the consensus engine after it persisted its canonical chain, and waits for it.
+    ///
+    /// Call this before [`Self::stop`] while a backfill is in flight, e.g. paused at a snap gate.
+    /// Stopping cancels the backfill, and its dropped task can end the engine loop with a fatal
+    /// error before the loop sees the shutdown signal, leaving the engine thread and its database
+    /// handles alive. The engine loop also reports a fatal error once the terminated engine
+    /// exits, so the future of [`Self::take_exit_future`] resolves with an error.
+    ///
+    /// Returns an error if shutdown was already requested or the engine does not terminate within
+    /// [`WAIT_TIMEOUT`].
+    pub async fn shutdown_engine(&self) -> eyre::Result<()> {
+        let done = self
+            .inner
+            .add_ons_handle
+            .engine_shutdown
+            .shutdown()
+            .ok_or_eyre("engine shutdown was already requested")?;
+        tokio::time::timeout(WAIT_TIMEOUT, done)
+            .await
+            .map_err(|_| eyre!("the engine did not shut down within {WAIT_TIMEOUT:?}"))??;
+        Ok(())
     }
 
     /// Stops the node and closes its database, keeping its datadir to launch the node again with
@@ -1390,7 +1473,16 @@ where
     ///   `RocksDB` is still open [`DATABASE_RELEASE_TIMEOUT`] after the node shut down.
     ///
     /// Drop such handles before stopping the node.
-    pub async fn stop(mut self) -> eyre::Result<StoppedNode<Node, AddOns>> {
+    pub async fn stop(self) -> eyre::Result<StoppedNode<Node, AddOns>> {
+        self.stop_with_release_timeout(DATABASE_RELEASE_TIMEOUT).await
+    }
+
+    /// Stops the node like [`Self::stop`], but waits at most `release_timeout` instead of
+    /// [`DATABASE_RELEASE_TIMEOUT`] for the database and `RocksDB` to be released.
+    pub async fn stop_with_release_timeout(
+        mut self,
+        release_timeout: Duration,
+    ) -> eyre::Result<StoppedNode<Node, AddOns>> {
         let Some(NodeRestart { database, relaunch }) = self.restart.take() else {
             bail!(
                 "the node is not restartable, launch it with \
@@ -1413,7 +1505,7 @@ where
         .await?;
         ensure!(shut_down, "the node did not shut down within {WAIT_TIMEOUT:?}");
 
-        close_database(database, &data_dir).await?;
+        close_database(database, &data_dir, release_timeout).await?;
         Ok(StoppedNode { data_dir, relaunch, remove_data_dir: true })
     }
 
@@ -1466,8 +1558,12 @@ async fn wait_for_committed_chain<N: NodePrimitives>(
 /// database without removing its datadir, and waits until `RocksDB` is closed.
 ///
 /// Returns an error if the database or `RocksDB` is still open afterwards.
-async fn close_database(database: TmpDB, data_dir: &ChainPath<DataDirPath>) -> eyre::Result<()> {
-    let released = tokio::time::timeout(DATABASE_RELEASE_TIMEOUT, async {
+async fn close_database(
+    database: TmpDB,
+    data_dir: &ChainPath<DataDirPath>,
+    release_timeout: Duration,
+) -> eyre::Result<()> {
+    let released = tokio::time::timeout(release_timeout, async {
         while Arc::strong_count(&database) > 1 {
             tokio::time::sleep(POLL_INTERVAL).await;
         }
@@ -1475,9 +1571,9 @@ async fn close_database(database: TmpDB, data_dir: &ChainPath<DataDirPath>) -> e
     .await;
     if released.is_err() {
         bail!(
-            "the database of the stopped node is still in use {DATABASE_RELEASE_TIMEOUT:?} after \
-             the node shut down: drop all handles that hold a provider of the node, e.g. a clone \
-             of `inner.provider`, before stopping it"
+            "the database of the stopped node is still in use {release_timeout:?} after the node \
+             shut down: drop all handles that hold a provider of the node, e.g. a clone of \
+             `inner.provider`, before stopping it"
         )
     }
     let database = Arc::into_inner(database)
@@ -1495,7 +1591,7 @@ async fn close_database(database: TmpDB, data_dir: &ChainPath<DataDirPath>) -> e
     // Providers drop their database handle before their `RocksDB` handle, whose drop flushes and
     // closes `RocksDB`, so the last provider can still be closing it. `RocksDB` does not open a
     // database twice in a process either, so wait until opening it succeeds.
-    let deadline = Instant::now() + DATABASE_RELEASE_TIMEOUT;
+    let deadline = Instant::now() + release_timeout;
     loop {
         let path = data_dir.rocksdb();
         let opened = tokio::task::spawn_blocking(move || {
@@ -1506,8 +1602,8 @@ async fn close_database(database: TmpDB, data_dir: &ChainPath<DataDirPath>) -> e
             Result::Ok(()) => return Ok(()),
             Err(err) if Instant::now() >= deadline => {
                 return Err(err).wrap_err(format!(
-                    "the RocksDB of the stopped node is still open {DATABASE_RELEASE_TIMEOUT:?} \
-                     after the node shut down: drop all handles of it, e.g. of \
+                    "the RocksDB of the stopped node is still open {release_timeout:?} after \
+                     the node shut down: drop all handles of it, e.g. of \
                      `inner.provider.rocksdb_provider()`, before stopping the node"
                 ))
             }
@@ -1561,8 +1657,12 @@ fn describe_pending_transactions<P: TransactionPool>(pool: &P) -> String {
     )
 }
 
-/// A block mined by [`NodeTestContext::mine`], [`NodeTestContext::mine_including`] or
-/// [`NodeTestContext::mine_pooled`].
+/// The future returned by [`NodeTestContext::mine`] and the related mining helpers.
+pub type MinedBlockFuture<'a, Payload, Receipt> =
+    BoxFuture<'a, eyre::Result<MinedBlock<Payload, Receipt>>>;
+
+/// A block mined by [`NodeTestContext::mine`], [`NodeTestContext::mine_including`],
+/// [`NodeTestContext::mine_signed`] or [`NodeTestContext::mine_pooled`].
 #[derive(Debug)]
 pub struct MinedBlock<Payload: BuiltPayload, Receipt> {
     /// The built payload of the block.
@@ -1723,9 +1823,11 @@ pub(crate) type Relaunch<Ctx> =
 mod tests {
     use super::*;
     use crate::{
+        snap::SnapControl,
         wait::{assert_holds_for, poll_until_with, PollOpts},
         NodeHelperType,
     };
+    use alloy_consensus::TxEnvelope;
     use reth_node_ethereum::{EthEngineTypes, EthereumNode};
     use reth_transaction_pool::test_utils::{testing_pool, MockTransaction};
 
@@ -1759,6 +1861,7 @@ mod tests {
         ));
         assert_send(node.mine([Bytes::new()]));
         assert_send(node.mine_including(Vec::new()));
+        assert_send(node.mine_signed(Vec::<TxEnvelope>::new()));
         assert_send(node.mine_pooled([B256::ZERO]));
         assert_send(node.wait_block(0, B256::ZERO, false));
         assert_send(node.wait_unwind(0));
@@ -1771,11 +1874,14 @@ mod tests {
         assert_send(node.wait_for_head(B256::ZERO));
         assert_send(node.assert_new_block(B256::ZERO, B256::ZERO, 0));
         assert_send(node.sync_to(B256::ZERO));
+        assert_send(node.sync_to_forkchoice(ForkchoiceState::default()));
         assert_send(node.submit_payload(payload.clone()));
         assert_send(node.submit_payload_with_status(payload.clone()));
         assert_send(node.import_payload(payload));
         assert_send(poll_until_with(PollOpts::default(), "", || async { Ok(Some(())) }));
         assert_send(assert_holds_for(Duration::ZERO, "", || async { Ok(true) }));
+        let gate = SnapControl::default().pause_on(|_| true);
+        assert_send(gate.reached());
     }
 
     /// Like [`test_helper_futures_are_send`], for the helpers that stop and restart a node.

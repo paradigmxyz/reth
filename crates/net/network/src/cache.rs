@@ -2,12 +2,12 @@
 
 use alloy_primitives::map::DefaultHashBuilder;
 use core::hash::BuildHasher;
-use derive_more::{Deref, DerefMut};
 use itertools::Itertools;
-use schnellru::{ByLength, Limiter, Unlimited};
 use std::{fmt, hash::Hash};
 
-/// A minimal LRU cache based on a [`LruMap`](schnellru::LruMap) with limited capacity.
+pub use reth_lru::LruMap;
+
+/// A minimal LRU cache based on a [`LruMap`] with limited capacity.
 ///
 /// If the length exceeds the set capacity, the oldest element will be removed
 /// In the limit, for each element inserted the oldest existing element will be removed.
@@ -15,8 +15,7 @@ pub struct LruCache<T: Hash + Eq + fmt::Debug, S = DefaultHashBuilder>
 where
     S: BuildHasher,
 {
-    limit: u32,
-    inner: LruMap<T, (), ByLength, S>,
+    inner: LruMap<T, (), S>,
 }
 
 impl<T: Hash + Eq + fmt::Debug> LruCache<T> {
@@ -29,15 +28,12 @@ impl<T: Hash + Eq + fmt::Debug> LruCache<T> {
 impl<T: Hash + Eq + fmt::Debug, S: BuildHasher> LruCache<T, S> {
     /// Creates a new [`LruCache`] using the given limit and hash builder.
     pub const fn with_hasher(limit: u32, hash_builder: S) -> Self {
-        // limit of lru map is one element more, so can give eviction feedback, which isn't
-        // supported by LruMap
-        Self { inner: LruMap::with_hasher(limit + 1, hash_builder), limit }
+        Self { inner: LruMap::with_hasher(limit, hash_builder) }
     }
 
     /// Insert an element into the set.
     ///
-    /// This operation uses `get_or_insert` from the underlying `schnellru::LruMap` which:
-    /// - Automatically evicts the least recently used item if capacity is exceeded
+    /// Automatically evicts the least recently used item if capacity is exceeded.
     ///
     /// This method is more efficient than [`insert_and_get_evicted`](Self::insert_and_get_evicted)
     /// as it performs fewer checks. Use this method when you don't need information about
@@ -56,18 +52,16 @@ impl<T: Hash + Eq + fmt::Debug, S: BuildHasher> LruCache<T, S> {
     /// Same as [`insert`](Self::insert) but returns a tuple, where the second index is the evicted
     /// value, if one was evicted.
     pub fn insert_and_get_evicted(&mut self, entry: T) -> (bool, Option<T>) {
-        let new = self.inner.peek(&entry).is_none();
-        let evicted =
-            (new && (self.limit as usize) <= self.inner.len()).then(|| self.remove_lru()).flatten();
-        _ = self.inner.get_or_insert(entry, || ());
-
-        (new, evicted)
+        if self.inner.get(&entry).is_some() {
+            return (false, None)
+        }
+        (true, self.inner.insert(entry, ()).map(|(evicted, ())| evicted))
     }
 
     /// Gets the given element, if exists, and promotes to lru.
     pub fn get(&mut self, entry: &T) -> Option<&T> {
-        let _ = self.inner.get(entry)?;
-        self.iter().next()
+        self.inner.get(entry)?;
+        self.inner.peek_newest().map(|(key, ())| key)
     }
 
     /// Iterates through entries and returns a reference to the given entry, if exists, without
@@ -80,15 +74,6 @@ impl<T: Hash + Eq + fmt::Debug, S: BuildHasher> LruCache<T, S> {
         self.iter().find(|key| *key == entry)
     }
 
-    /// Remove the least recently used entry and return it.
-    ///
-    /// If the `LruCache` is empty or if the eviction feedback is
-    /// configured, this will return None.
-    #[inline]
-    fn remove_lru(&mut self) -> Option<T> {
-        self.inner.pop_oldest().map(|(k, ())| k)
-    }
-
     /// Expels the given value. Returns true if the value existed.
     pub fn remove(&mut self, value: &T) -> bool {
         self.inner.remove(value).is_some()
@@ -96,7 +81,7 @@ impl<T: Hash + Eq + fmt::Debug, S: BuildHasher> LruCache<T, S> {
 
     /// Returns `true` if the set contains a value.
     pub fn contains(&self, value: &T) -> bool {
-        self.inner.peek(value).is_some()
+        self.inner.contains(value)
     }
 
     /// Returns an iterator over all cached entries in lru order
@@ -105,12 +90,12 @@ impl<T: Hash + Eq + fmt::Debug, S: BuildHasher> LruCache<T, S> {
     }
 
     /// Returns number of elements currently in cache.
-    pub fn len(&self) -> usize {
+    pub const fn len(&self) -> usize {
         self.inner.len()
     }
 
     /// Returns `true` if there are currently no elements in the cache.
-    pub fn is_empty(&self) -> bool {
+    pub const fn is_empty(&self) -> bool {
         self.inner.is_empty()
     }
 }
@@ -135,7 +120,7 @@ where
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut debug_struct = f.debug_struct("LruCache");
 
-        debug_struct.field("limit", &self.limit);
+        debug_struct.field("limit", &self.inner.max_length());
 
         debug_struct.field(
             "ret %iter",
@@ -146,77 +131,13 @@ where
     }
 }
 
-/// Wrapper of [`schnellru::LruMap`] that implements [`fmt::Debug`] and with the common hash
-/// builder.
-#[derive(Deref, DerefMut, Default)]
-pub struct LruMap<K, V, L = ByLength, S = DefaultHashBuilder>(schnellru::LruMap<K, V, L, S>)
-where
-    K: Hash + PartialEq,
-    L: Limiter<K, V>,
-    S: BuildHasher;
-
-impl<K, V, L, S> fmt::Debug for LruMap<K, V, L, S>
-where
-    K: Hash + PartialEq + fmt::Display,
-    V: fmt::Debug,
-    L: Limiter<K, V> + fmt::Debug,
-    S: BuildHasher,
-{
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let mut debug_struct = f.debug_struct("LruMap");
-
-        debug_struct.field("limiter", self.limiter());
-
-        debug_struct.field(
-            "ret %iter",
-            &format_args!(
-                "Iter: {{{} }}",
-                self.iter().map(|(k, v)| format!(" {k}: {v:?}")).format(",")
-            ),
-        );
-
-        debug_struct.finish()
-    }
-}
-
-impl<K, V> LruMap<K, V>
-where
-    K: Hash + PartialEq,
-{
-    /// Returns a new cache with default limiter and hash builder.
-    pub fn new(max_length: u32) -> Self {
-        Self::with_hasher(max_length, Default::default())
-    }
-}
-
-impl<K, V, S> LruMap<K, V, ByLength, S>
-where
-    K: Hash + PartialEq,
-    S: BuildHasher,
-{
-    /// Returns a new cache with default limiter and the given hash builder.
-    pub const fn with_hasher(max_length: u32, hash_builder: S) -> Self {
-        Self(schnellru::LruMap::with_hasher(ByLength::new(max_length), hash_builder))
-    }
-}
-
-impl<K, V> LruMap<K, V, Unlimited>
-where
-    K: Hash + PartialEq,
-{
-    /// Returns a new cache with [`Unlimited`] limiter and default hash builder.
-    pub fn new_unlimited() -> Self {
-        Self(schnellru::LruMap::with_hasher(Unlimited, Default::default()))
-    }
-}
-
 #[cfg(test)]
 mod test {
     use super::*;
-    use derive_more::{Constructor, Display};
+    use derive_more::Constructor;
     use std::hash::Hasher;
 
-    #[derive(Debug, Hash, PartialEq, Eq, Display, Clone, Copy)]
+    #[derive(Debug, Hash, PartialEq, Eq, Clone, Copy)]
     struct Key(i8);
 
     #[derive(Debug, Eq, Constructor, Clone, Copy)]
@@ -256,7 +177,7 @@ mod test {
 
     #[test]
     fn test_cache_should_remove_oldest_element_when_exceeding_limit() {
-        let mut cache = LruCache::new(1); // LruCache limit will be 2, check LruCache::new
+        let mut cache = LruCache::new(1);
         let old_entry = "old_entry";
         let new_entry = "new_entry";
         cache.insert(old_entry);
@@ -290,10 +211,7 @@ mod test {
         let value_2 = Value(22);
         cache.insert(key_2, value_2);
 
-        assert_eq!(
-            "LruMap { limiter: ByLength { max_length: 2 }, ret %iter: Iter: { 2: Value(22), 1: Value(11) } }",
-            format!("{cache:?}")
-        )
+        assert_eq!("LruMap { len: 2, max_length: 2, .. }", format!("{cache:?}"))
     }
 
     #[test]

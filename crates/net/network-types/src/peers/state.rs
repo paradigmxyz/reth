@@ -52,7 +52,7 @@ impl PeerConnectionState {
     /// Returns if there's currently no connection to that peer.
     #[inline]
     pub const fn is_unconnected(&self) -> bool {
-        matches!(self, Self::Idle)
+        self.is_idle()
     }
 
     /// Returns true if there's currently an outbound dial to that peer.

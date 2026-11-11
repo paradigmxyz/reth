@@ -1,4 +1,4 @@
-use crate::tree::TreeOutcome;
+use crate::tree::{payload_processor::reuse::ReuseMiss, TreeOutcome};
 use alloy_rpc_types_engine::{PayloadStatus, PayloadStatusEnum};
 use reth_engine_primitives::{ForkchoiceStatus, InsertBlockProcessingError, OnForkChoiceUpdated};
 use reth_errors::ProviderError;
@@ -39,6 +39,8 @@ pub struct EngineApiMetrics {
     pub(crate) execution_gas_buckets: ExecutionGasBucketMetrics,
     /// Gas-bucketed block validation sub-phase metrics.
     pub(crate) block_validation_gas_buckets: BlockValidationGasBucketMetrics,
+    /// Metrics for reusing transaction prewarming results.
+    pub(crate) prewarm_reuse: PrewarmReuseMetrics,
 }
 
 impl EngineApiMetrics {
@@ -111,6 +113,46 @@ impl EngineApiMetrics {
     /// Records the duration of a single transaction execution.
     pub fn record_transaction_execution(&self, elapsed: Duration) {
         self.executor.transaction_execution_histogram.record(elapsed);
+    }
+}
+
+/// Metrics for reusing transaction prewarming results during block execution.
+#[derive(Metrics)]
+#[metrics(scope = "sync.prewarm.reuse")]
+pub(crate) struct PrewarmReuseMetrics {
+    /// Transactions committed from prewarm results.
+    reused_transactions: Counter,
+    /// Transactions executed because prewarming had not finished them.
+    missing_transactions: Counter,
+    /// Transactions executed because a prewarm result was unusable or failed reuse checks.
+    stale_transactions: Counter,
+}
+
+impl PrewarmReuseMetrics {
+    /// Records the reuse outcomes of a block.
+    pub(crate) fn record(&self, stats: PrewarmReuseStats) {
+        self.reused_transactions.increment(stats.reused);
+        self.missing_transactions.increment(stats.missing);
+        self.stale_transactions.increment(stats.stale);
+    }
+}
+
+/// Prewarm result reuse outcomes of a block.
+#[derive(Debug, Default, Clone, Copy)]
+pub(crate) struct PrewarmReuseStats {
+    reused: u64,
+    missing: u64,
+    stale: u64,
+}
+
+impl PrewarmReuseStats {
+    /// Records the reuse outcome of a transaction.
+    pub(crate) const fn record(&mut self, outcome: Result<(), ReuseMiss>) {
+        match outcome {
+            Ok(()) => self.reused += 1,
+            Err(ReuseMiss::Missing) => self.missing += 1,
+            Err(ReuseMiss::Stale) => self.stale += 1,
+        }
     }
 }
 
@@ -636,7 +678,7 @@ mod tests {
     use metrics_util::debugging::{DebuggingRecorder, Snapshotter};
     use reth_ethereum_primitives::Receipt;
     use reth_execution_types::BlockExecutionResult;
-    use reth_revm::db::BundleState;
+    use reth_trie_common::bundle_state::BundleState;
 
     fn setup_test_recorder() -> Snapshotter {
         let recorder = DebuggingRecorder::new();

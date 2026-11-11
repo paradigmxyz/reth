@@ -20,7 +20,7 @@ impl<Provider> Stage<Provider> for FinishStage {
         _provider: &Provider,
         input: ExecInput,
     ) -> Result<ExecOutput, StageError> {
-        Ok(ExecOutput { checkpoint: StageCheckpoint::new(input.target()), done: true })
+        Ok(ExecOutput::done(StageCheckpoint::new(input.target())))
     }
 
     fn unwind(

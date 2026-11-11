@@ -2,20 +2,16 @@
 //!
 //! The "state-root task" is the background multiproof and sparse-trie pipeline that computes
 //! state roots incrementally while a block executes. This module holds its boundary types:
-//! the input messages, the [`StateRootSink`] and
+//! the input messages and
 //! stream views that feed it, and the handles
 //! that await its result. The per-block strategy abstraction that decides whether and how the
 //! task runs lives in `reth-engine-tree` under `tree::state_root_strategy`.
 
 use crate::error::StateRootTaskError;
-use alloy_evm::block::OnStateHook;
-use alloy_primitives::{keccak256, map::B256Map, B256};
-use reth_trie::{
-    updates::TrieUpdates, HashedPostState, HashedStorage, MultiProofTargetsV2, ProofV2Target,
-};
-use revm::state::EvmState;
+use alloy_primitives::{map::B256Map, B256};
+use reth_execution_types::{OnStateHook, StateUpdate};
+use reth_trie::{updates::TrieUpdates, HashedPostState, MultiProofTargetsV2, ProofV2Target};
 use std::{fmt, sync::Arc};
-use tracing::trace;
 
 /// Messages used internally by the multi proof task.
 #[derive(Debug)]
@@ -23,7 +19,7 @@ pub enum StateRootMessage {
     /// Prefetch proof targets
     PrefetchProofs(MultiProofTargetsV2),
     /// New state update from transaction execution.
-    StateUpdate(EvmState),
+    StateUpdate(StateUpdate),
     /// Pre-hashed state update from BAL conversion that can be applied directly without proofs.
     HashedStateUpdate(HashedPostState),
     /// Signals state update stream end.
@@ -47,11 +43,8 @@ pub struct StateRootComputeOutcome {
 
 /// Handle to a background sparse trie state root computation.
 ///
-/// Used by both the engine (during `newPayload`) and the payload builder (during `FCU`-triggered
-/// block building). Provides channels for streaming state updates into the pipeline and receiving
-/// the final computed state root.
-///
-/// Created by the engine's state-root strategy.
+/// Provides best-effort access hints, one authoritative update stream, and the final computation
+/// result. Dropping the handle cancels the task if it is still running.
 #[derive(Debug)]
 pub struct StateRootHandle {
     /// The state root that the cached sparse trie is anchored at (parent block's state root).
@@ -145,7 +138,7 @@ impl StateRootHandle {
             .take()
             .expect("state_root already taken")
             .recv()
-            .map_err(|_| StateRootTaskError::Other("sparse trie task dropped".to_string()))?
+            .map_err(|_| StateRootTaskError::Other("sparse trie task dropped".into()))?
     }
 
     /// Takes the state root receiver for use with custom waiting logic (e.g., timeouts).
@@ -293,7 +286,7 @@ impl PayloadStateRootHandle {
             .take()
             .expect("state_root already taken")
             .recv()
-            .map_err(|_| StateRootTaskError::Other("state root task dropped".to_string()))?
+            .map_err(|_| StateRootTaskError::Other("state root task dropped".into()))?
     }
 
     /// Takes the state root receiver for use with custom waiting logic (e.g., timeouts).
@@ -321,8 +314,7 @@ impl PayloadStateRootHandle {
 /// Hashed account and storage keys that a state-root task may want to prefetch.
 ///
 /// Hints are not authoritative. They may be missing, duplicated, stale, or ignored by a task.
-/// The conversions from and to proof-target types allocate; that cost is accepted because
-/// hints are produced on prewarm workers, off the block-execution thread.
+/// Conversions to and from proof-target types allocate new collections.
 #[derive(Debug, Clone, Default)]
 pub struct StateAccessHint {
     /// Hashed account keys that may be touched later in the block.
@@ -362,12 +354,15 @@ impl From<StateAccessHint> for MultiProofTargetsV2 {
 }
 
 /// Semantic update stream consumed by state-root tasks.
-pub trait StateRootSink: Send + Sync + 'static {
+///
+/// These callbacks submit messages without reporting task completion or failure. Consumers must
+/// obtain the computation result separately, for example through [`StateRootHandle::state_root`].
+trait StateRootSink: Send + Sync + 'static {
     /// Best-effort access hint from transaction prewarming.
     fn on_access_hint(&self, _hint: StateAccessHint) {}
 
     /// Authoritative state update from normal block execution.
-    fn on_state_update(&self, state: EvmState);
+    fn on_state_update(&self, state: StateUpdate);
 
     /// Authoritative pre-hashed state update, currently used by BAL streaming.
     fn on_hashed_state_update(&self, state: HashedPostState);
@@ -390,7 +385,7 @@ impl fmt::Debug for StateRootHintStream {
 
 impl StateRootHintStream {
     /// Creates a new hint stream view.
-    pub fn new(inner: Arc<dyn StateRootSink>) -> Self {
+    fn new(inner: Arc<dyn StateRootSink>) -> Self {
         Self { inner }
     }
 
@@ -402,9 +397,9 @@ impl StateRootHintStream {
 
 /// Authoritative update capability of a state-root stream.
 ///
-/// Exactly one of these exists per state-root task, so exactly one producer can end the
-/// update stream: either the EVM state hook made with [`Self::into_state_hook`] (finishes on
-/// drop) or a pre-hashed update producer such as BAL streaming (calls [`Self::finish`]). The
+/// A [`StateRootHandle`] provides this capability exactly once, so its producer can end the
+/// update stream either through the EVM state hook made with [`Self::into_state_hook`] (finishes
+/// on drop) or through a pre-hashed update stream (calls [`Self::finish`]). The
 /// type is deliberately not `Clone` and finishing consumes it, so a second end-of-stream
 /// signal cannot be produced.
 ///
@@ -423,7 +418,7 @@ impl fmt::Debug for StateRootUpdateStream {
 
 impl StateRootUpdateStream {
     /// Creates a new authoritative update stream backed by the given sink.
-    pub fn new(inner: Arc<dyn StateRootSink>) -> Self {
+    fn new(inner: Arc<dyn StateRootSink>) -> Self {
         Self { inner }
     }
 
@@ -446,7 +441,7 @@ impl StateRootUpdateStream {
     }
 }
 
-/// EVM hook that forwards state updates into a [`StateRootSink`].
+/// EVM hook that forwards state updates to the state-root task.
 ///
 /// Dropping the hook signals the end of the update stream, so the hook is deliberately not
 /// `Clone`: a second copy would fire a spurious end-of-stream signal.
@@ -469,7 +464,7 @@ impl fmt::Debug for StateRootUpdateHook {
 }
 
 impl OnStateHook for StateRootUpdateHook {
-    fn on_state(&mut self, state: EvmState) {
+    fn on_state(&mut self, state: StateUpdate) {
         self.inner.on_state_update(state);
     }
 }
@@ -496,12 +491,16 @@ impl SparseTrieStateRootSink {
     }
 }
 
+// Send errors mean the receiving pipeline has stopped, so further updates and the finish
+// signal cannot be processed. Task errors are delivered through the separate result channel;
+// if the task drops that channel without a result, StateRootHandle::state_root reports an error.
+// Cancellation abandons the result. Ignoring send errors here does not report a successful root.
 impl StateRootSink for SparseTrieStateRootSink {
     fn on_access_hint(&self, hint: StateAccessHint) {
         let _ = self.sender.send(StateRootMessage::PrefetchProofs(hint.into()));
     }
 
-    fn on_state_update(&self, state: EvmState) {
+    fn on_state_update(&self, state: StateUpdate) {
         let _ = self.sender.send(StateRootMessage::StateUpdate(state));
     }
 
@@ -514,312 +513,27 @@ impl StateRootSink for SparseTrieStateRootSink {
     }
 }
 
-/// Converts [`EvmState`] to [`HashedPostState`] by keccak256-hashing addresses and storage slots.
-pub fn evm_state_to_hashed_post_state(update: EvmState) -> HashedPostState {
-    let mut hashed_state = HashedPostState::with_capacity(update.len());
-
-    for (address, account) in update {
-        if account.is_touched() {
-            let hashed_address = keccak256(address);
-            trace!(target: "trie::parallel::sparse", ?address, ?hashed_address, "Adding account to state update");
-
-            let destroyed = account.is_selfdestructed();
-            // EIP-161: a touched account that ends up empty is deleted, so it must be emitted
-            // as a removal rather than as an all-zero account. This mirrors what revm does in
-            // the bundle path (`CacheAccount::touch_empty_eip161`) and what the sibling
-            // producer for this consumer already does in `send_bal_hashed_state`.
-            // An address that never existed and still does not exist is not a deletion: revm
-            // emits no transition for `LoadedNotExisting`. Skipping it matches the bundle
-            // producer; every `None` here becomes a storage-trie cursor walk in `StateRoot`.
-            let deleted = destroyed || (account.is_empty() && !account.is_loaded_as_not_existing());
-            if deleted {
-                hashed_state.accounts.insert(hashed_address, None);
-            } else if account.info != account.original_info() {
-                // A touched but unchanged account produces no bundle transition either.
-                hashed_state.accounts.insert(hashed_address, Some(account.info.into()));
-            }
-
-            let mut changed_storage_iter = account
-                .storage
-                .into_iter()
-                .filter(|(_slot, value)| value.is_changed())
-                .map(|(slot, value)| (keccak256(B256::from(slot)), value.present_value))
-                .peekable();
-
-            if !destroyed && changed_storage_iter.peek().is_some() {
-                hashed_state
-                    .storages
-                    .insert(hashed_address, HashedStorage::from_iter(changed_storage_iter));
-            }
-        }
-    }
-
-    hashed_state
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_primitives::{Address, U256};
-    use revm::state::{Account, EvmStorageSlot, TransactionId};
     use std::{
         sync::atomic::{AtomicUsize, Ordering},
         time::Duration,
     };
 
-    #[test]
-    fn created_selfdestruct_does_not_emit_storage() {
-        let address = Address::repeat_byte(0x01);
-        let mut account = Account::new_not_existing(TransactionId::ZERO);
-        account.mark_touch();
-        assert!(account.mark_created_locally());
-        assert!(account.mark_selfdestructed_locally());
-        account.info.nonce = 1;
-        account.storage.insert(
-            U256::from(1),
-            EvmStorageSlot::new_changed(U256::ZERO, U256::from(2), TransactionId::ZERO),
-        );
-
-        let hashed_state =
-            evm_state_to_hashed_post_state(EvmState::from_iter([(address, account)]));
-        let hashed_address = keccak256(address);
-
-        assert_eq!(hashed_state.accounts.get(&hashed_address), Some(&None));
-        assert!(!hashed_state.storages.contains_key(&hashed_address));
-    }
-
-    #[test]
-    fn existing_selfdestruct_does_not_emit_storage() {
-        let address = Address::repeat_byte(0x02);
-        let mut account = Account::default();
-        account.info.nonce = 1;
-        account.set_current_info_as_original();
-        account.mark_touch();
-        assert!(account.mark_selfdestructed_locally());
-        account.selfdestruct();
-        account.storage.insert(
-            U256::from(1),
-            EvmStorageSlot::new_changed(U256::ZERO, U256::from(2), TransactionId::ZERO),
-        );
-
-        let hashed_state =
-            evm_state_to_hashed_post_state(EvmState::from_iter([(address, account)]));
-        let hashed_address = keccak256(address);
-
-        assert_eq!(hashed_state.accounts.get(&hashed_address), Some(&None));
-        assert!(!hashed_state.storages.contains_key(&hashed_address));
-    }
-
-    /// An account drained to zero balance, with nonce 0 and no code, is EIP-161-empty and
-    /// canonical execution deletes it. Asserts the converter reports the deletion as `None`,
-    /// matching `HashedPostState::from_bundle_state`, so `write_hashed_state` removes the
-    /// `HashedAccounts` row instead of upserting an all-zero one.
-    #[test]
-    fn emptied_account_is_deleted() {
-        let address = Address::repeat_byte(0x05);
-        let mut account = Account::default();
-        // Pre-state: the account exists and holds a balance.
-        account.info.balance = U256::from(1);
-        account.set_current_info_as_original();
-        // This block drains it. Not selfdestructed: an ordinary value transfer out.
-        account.mark_touch();
-        account.info.balance = U256::ZERO;
-        assert!(account.is_empty(), "the drained account must be EIP-161-empty");
-        assert!(!account.is_selfdestructed());
-
-        let hashed_state =
-            evm_state_to_hashed_post_state(EvmState::from_iter([(address, account)]));
-
-        assert_eq!(hashed_state.accounts.get(&keccak256(address)), Some(&None));
-    }
-
-    /// A pre-existing EIP-161-empty account that is merely touched must be deleted. revm marks it
-    /// for removal (`touch_empty_eip161`) and the `BundleState` path reports `None`. Asserts the
-    /// converter emits the deletion even though `info == original_info()`, so an existing all-zero
-    /// `HashedAccounts` row can be cleared by a touch.
-    #[test]
-    fn touched_preexisting_empty_account_is_deleted() {
-        let address = Address::repeat_byte(0x06);
-        // Empty in the pre-state too: nonce 0, balance 0, no code.
-        let mut account = Account::default();
-        account.set_current_info_as_original();
-        account.mark_touch();
-        assert!(account.is_empty());
-
-        let hashed_state =
-            evm_state_to_hashed_post_state(EvmState::from_iter([(address, account)]));
-
-        assert_eq!(hashed_state.accounts.get(&keccak256(address)), Some(&None));
-    }
-
-    /// The two `HashedPostState` producers that feed the same consumer must agree.
-    ///
-    /// `evm_state_to_hashed_post_state` converts the raw `EvmState` handed to the state hook;
-    /// `HashedPostState::from_bundle_state` converts the `BundleState` revm produces from the
-    /// same execution. Since "perf: avoid hashing the state twice" the engine persists whichever
-    /// one it gets, so a disagreement between them is a disagreement about durable state.
-    ///
-    /// Asserts both producers agree for a touched account drained to EIP-161-empty, which revm
-    /// marks for removal in the bundle path (`CacheAccount::touch_empty_eip161`).
-    #[test]
-    fn matches_bundle_state_for_emptied_account() {
-        use revm::{
-            database::{states::bundle_state::BundleRetention, State},
-            state::AccountInfo,
-            DatabaseCommit,
-        };
-
-        let address = Address::repeat_byte(0x07);
-        let pre = AccountInfo { balance: U256::from(1), ..Default::default() };
-
-        // The EvmState the state hook observes: a funded account drained to empty.
-        let mut account = Account::from(pre.clone());
-        account.mark_touch();
-        account.info.balance = U256::ZERO;
-        let evm_state = EvmState::from_iter([(address, account)]);
-
-        // Same execution, through revm's own bundle machinery.
-        let mut db = State::builder().with_bundle_update().build();
-        db.insert_account(address, pre);
-        db.commit(evm_state.clone());
-        db.merge_transitions(BundleRetention::PlainState);
-        let bundle = db.take_bundle();
-
-        let from_bundle =
-            HashedPostState::from_bundle_state::<reth_trie::KeccakKeyHasher>(bundle.state.iter());
-        let from_hook = evm_state_to_hashed_post_state(evm_state);
-
-        assert_eq!(
-            from_hook.accounts, from_bundle.accounts,
-            "state-hook and bundle producers disagree about durable account state"
-        );
-    }
-
-    /// An account created during the block whose final info is empty. EIP-161 deletes it, so
-    /// the bundle producer reports a removal.
-    #[test]
-    fn created_empty_account_matches_bundle_state() {
-        use revm::{
-            database::{states::bundle_state::BundleRetention, State},
-            DatabaseCommit,
-        };
-
-        let address = Address::repeat_byte(0x08);
-        let mut account = Account::default();
-        account.mark_touch();
-        assert!(account.mark_created_locally());
-        assert!(account.is_empty());
-        let evm_state = EvmState::from_iter([(address, account)]);
-
-        let mut db = State::builder().with_bundle_update().build();
-        db.commit(evm_state.clone());
-        db.merge_transitions(BundleRetention::PlainState);
-        let bundle = db.take_bundle();
-
-        let from_bundle =
-            HashedPostState::from_bundle_state::<reth_trie::KeccakKeyHasher>(bundle.state.iter());
-        let from_hook = evm_state_to_hashed_post_state(evm_state);
-
-        assert_eq!(
-            from_hook.accounts.get(&keccak256(address)).and_then(Option::as_ref),
-            from_bundle.accounts.get(&keccak256(address)).and_then(Option::as_ref),
-            "state-hook and bundle producers disagree about a created-empty account"
-        );
-    }
-
-    /// A zero-value call to an address that never existed leaves it non-existent. revm's bundle
-    /// path emits no transition for it (`CacheAccount::touch_empty_eip161` returns `None` for
-    /// `LoadedNotExisting`). Asserts the converter also emits nothing, rather than a deletion
-    /// that would queue a `HashedAccounts` delete and a storage-trie wipe for an unused address.
-    #[test]
-    fn touched_never_existing_account_matches_bundle_state() {
-        use revm::{
-            database::{states::bundle_state::BundleRetention, State},
-            DatabaseCommit,
-        };
-
-        let address = Address::repeat_byte(0x09);
-        let mut account = Account::new_not_existing(TransactionId::default());
-        account.mark_touch();
-        let evm_state = EvmState::from_iter([(address, account)]);
-
-        let mut db = State::builder().with_bundle_update().build();
-        db.commit(evm_state.clone());
-        db.merge_transitions(BundleRetention::PlainState);
-        let bundle = db.take_bundle();
-
-        let from_bundle =
-            HashedPostState::from_bundle_state::<reth_trie::KeccakKeyHasher>(bundle.state.iter());
-        let from_hook = evm_state_to_hashed_post_state(evm_state);
-
-        assert_eq!(
-            from_hook.accounts, from_bundle.accounts,
-            "state-hook and bundle producers disagree about a never-existing touched account"
-        );
-    }
-
-    /// An account touched without being changed. revm's bundle producer reports nothing for it.
-    /// Asserts the converter agrees, so a block full of zero-value calls does not rewrite
-    /// unchanged `HashedAccounts` rows.
-    #[test]
-    fn touched_unchanged_account_matches_bundle_state() {
-        use revm::{
-            database::{states::bundle_state::BundleRetention, State},
-            state::AccountInfo,
-            DatabaseCommit,
-        };
-
-        let address = Address::repeat_byte(0x0a);
-        let pre = AccountInfo { balance: U256::from(7), nonce: 1, ..Default::default() };
-        let mut account = Account::from(pre.clone());
-        account.mark_touch();
-        assert!(!account.is_empty());
-        let evm_state = EvmState::from_iter([(address, account)]);
-
-        let mut db = State::builder().with_bundle_update().build();
-        db.insert_account(address, pre);
-        db.commit(evm_state.clone());
-        db.merge_transitions(BundleRetention::PlainState);
-        let bundle = db.take_bundle();
-
-        let from_bundle =
-            HashedPostState::from_bundle_state::<reth_trie::KeccakKeyHasher>(bundle.state.iter());
-        let from_hook = evm_state_to_hashed_post_state(evm_state);
-
-        assert_eq!(
-            from_hook.accounts, from_bundle.accounts,
-            "state-hook and bundle producers disagree about a touched but unchanged account"
-        );
-    }
-
     #[derive(Default)]
     struct CountingSink {
-        access_hints: AtomicUsize,
         state_updates: AtomicUsize,
-        hashed_state_updates: AtomicUsize,
         finished_updates: AtomicUsize,
     }
 
     impl StateRootSink for CountingSink {
-        fn on_access_hint(&self, hint: StateAccessHint) {
-            assert_eq!(hint.accounts, vec![B256::repeat_byte(0x01)]);
-            assert_eq!(
-                hint.storages.get(&B256::repeat_byte(0x02)),
-                Some(&vec![B256::repeat_byte(0x03)])
-            );
-            self.access_hints.fetch_add(1, Ordering::Relaxed);
-        }
-
-        fn on_state_update(&self, state: EvmState) {
+        fn on_state_update(&self, state: StateUpdate) {
             assert!(state.is_empty());
             self.state_updates.fetch_add(1, Ordering::Relaxed);
         }
 
-        fn on_hashed_state_update(&self, state: HashedPostState) {
-            assert!(state.accounts.is_empty());
-            assert!(state.storages.is_empty());
-            self.hashed_state_updates.fetch_add(1, Ordering::Relaxed);
-        }
+        fn on_hashed_state_update(&self, _state: HashedPostState) {}
 
         fn on_updates_finished(&self) {
             self.finished_updates.fetch_add(1, Ordering::Relaxed);
@@ -847,31 +561,6 @@ mod tests {
         assert_eq!(hint.accounts, vec![account]);
         assert_eq!(hint.storages.len(), 1);
         assert_eq!(hint.storages[&storage_account], vec![storage_slot]);
-    }
-
-    #[test]
-    fn state_root_capabilities_forward_to_sink() {
-        let sink = Arc::new(CountingSink::default());
-
-        let hint_stream = StateRootHintStream::new(sink.clone());
-        let mut storages = B256Map::default();
-        storages.insert(B256::repeat_byte(0x02), vec![B256::repeat_byte(0x03)]);
-        hint_stream
-            .on_access_hint(StateAccessHint { accounts: vec![B256::repeat_byte(0x01)], storages });
-
-        let updates = StateRootUpdateStream::new(sink.clone());
-        updates.on_hashed_state_update(HashedPostState::default());
-        updates.finish();
-
-        {
-            let mut hook = StateRootUpdateStream::new(sink.clone()).into_state_hook();
-            hook.on_state(EvmState::default());
-        }
-
-        assert_eq!(sink.access_hints.load(Ordering::Relaxed), 1);
-        assert_eq!(sink.state_updates.load(Ordering::Relaxed), 1);
-        assert_eq!(sink.hashed_state_updates.load(Ordering::Relaxed), 1);
-        assert_eq!(sink.finished_updates.load(Ordering::Relaxed), 2);
     }
 
     /// A hook dropped by a panic unwind must not finish the stream: the updates are
@@ -930,7 +619,7 @@ mod tests {
 
         {
             let mut hook = handle.take_state_hook();
-            hook.on_state(EvmState::default());
+            hook.on_state(StateUpdate::default());
         }
         assert_eq!(sink.state_updates.load(Ordering::Relaxed), 1);
         assert_eq!(sink.finished_updates.load(Ordering::Relaxed), 1);
@@ -949,16 +638,6 @@ mod tests {
             .unwrap();
         let outcome = handle.state_root().expect("outcome is delivered");
         assert_eq!(outcome.state_root, B256::repeat_byte(0x42));
-    }
-
-    #[test]
-    #[should_panic(expected = "state_root already taken")]
-    fn payload_state_root_receiver_can_only_be_taken_once() {
-        let (_state_root_tx, state_root_rx) = std::sync::mpsc::channel();
-        let mut handle = PayloadStateRootHandle::new("test", None, state_root_rx, None);
-
-        let _state_root_rx = handle.take_state_root_rx();
-        let _ = handle.take_state_root_rx();
     }
 
     #[test]

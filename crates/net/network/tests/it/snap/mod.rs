@@ -161,7 +161,7 @@ fn assert_boundary_proof(root: B256, key: B256, expected_value: Option<Vec<u8>>,
 /// A valid RLP-encoded EIP-7928 block access list for `address`, with its commitment hash.
 fn valid_bal(address: Address) -> (Bytes, B256) {
     let mut change = AccountChanges::new(address);
-    change.balance_changes.push(BalanceChange::new(BlockAccessIndex::PRE_EXECUTION, U256::from(1)));
+    change.balance_changes.push(BalanceChange::new(BlockAccessIndex::PRE_EXECUTION, U256::ONE));
     let bal = vec![change];
 
     let mut buf = Vec::new();
@@ -314,7 +314,7 @@ async fn storage_range_roundtrip_carries_rlp_values_and_proof() {
 
     let factory = genesis_provider_factory();
     let address = Address::random();
-    let account = Account { nonce: 1, balance: U256::from(1), ..Default::default() };
+    let account = Account { nonce: 1, balance: U256::ONE, ..Default::default() };
     let slots: Vec<StorageEntry> = (0..6u8)
         .map(|i| StorageEntry { key: B256::with_last_byte(i), value: U256::from(i as u64 + 1) })
         .collect();
@@ -384,7 +384,7 @@ async fn storage_range_empty_window_returns_boundary_slot() {
 
     let factory = genesis_provider_factory();
     let address = Address::random();
-    let account = Account { nonce: 1, balance: U256::from(1), ..Default::default() };
+    let account = Account { nonce: 1, balance: U256::ONE, ..Default::default() };
     let slots: Vec<StorageEntry> = (0..4u8)
         .map(|i| StorageEntry { key: B256::with_last_byte(i), value: U256::from(i as u64 + 1) })
         .collect();
@@ -411,7 +411,7 @@ async fn storage_range_empty_window_returns_boundary_slot() {
     // A window strictly between the 2nd- and 3rd-lowest hashes contains no slots; the response
     // must still return the first slot past it, proven with a boundary proof (non-zero origin
     // always requires one).
-    let origin = B256::from(U256::from_be_bytes(expected[1].0 .0) + U256::from(1));
+    let origin = B256::from(U256::from_be_bytes(expected[1].0 .0) + U256::ONE);
     let limit = origin;
     let response = fetch
         .get_storage_ranges(GetStorageRangesMessage {
@@ -451,7 +451,7 @@ async fn storage_ranges_multi_account_bounds_only_first_account() {
 
     let factory = genesis_provider_factory();
     let (address_a, account_a) =
-        (Address::random(), Account { nonce: 1, balance: U256::from(1), ..Default::default() });
+        (Address::random(), Account { nonce: 1, balance: U256::ONE, ..Default::default() });
     let (address_b, account_b) =
         (Address::random(), Account { nonce: 2, balance: U256::from(2), ..Default::default() });
     // 2 slots for A (fits fully in the byte budget below), 5 for B (doesn't).

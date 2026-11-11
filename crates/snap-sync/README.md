@@ -65,8 +65,8 @@ assert_eq!(policy.pivot_block(4, None), None);
 ## Reorgs across the pivot
 
 A reorg that orphans the pivot leaves the downloaded state holding the abandoned branch's changes.
-The attempt keeps the headers of the last 64 blocks through its pivot, so it can find the last block
-both branches share and fetch the orphaned blocks' BALs:
+The attempt keeps the number, hash, parent and BAL hash of the last 64 blocks through its pivot, so
+it can find the last block both branches share and fetch the orphaned blocks' BALs:
 
 - Every field and storage slot those BALs changed is scheduled for repair, catch-up rewinds to the
   shared block, and the attempt re-anchors to a new canonical pivot.
@@ -76,9 +76,21 @@ both branches share and fetch the orphaned blocks' BALs:
   its root, and the hand-off waits until none remain.
 
 Orphaned BALs no peer serves are waited for while the head is within the served-state window (128
-blocks) of the ancestor. A reorg reaching further back than the kept headers, orphaned BALs still
+blocks) of the ancestor. A reorg reaching further back than the kept blocks, orphaned BALs still
 unserved past that window, or a reorg after the hand-off to the merkle stage starts the attempt over
 instead.
 
 snap/1 synchronization is not covered: this design keeps the state current with BALs, which only
 snap/2 serves, rather than with snap/1's trie-node healing.
+
+## Monitoring
+
+The sync exports account progress, catch-up lag and restarts under `sync.snap`:
+
+- `account_progress` reports the share of the account keyspace downloaded, from 0 to 1.
+- The difference between `pivot_block` and `applied_block` measures how far BAL catch-up lags the
+  pivot. A gap that keeps growing leads to a restart once peers no longer serve the BALs required
+  to close it.
+- `restarts` counts attempts abandoned and started over.
+
+`downloaders.snap.invalid_responses` counts responses rejected by verification.

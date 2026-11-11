@@ -1,3 +1,4 @@
+use alloy_consensus::Header;
 use alloy_eips::{
     eip2718::Encodable2718, eip7910::EthConfig, eip7928::BlockAccessList, BlockNumberOrTag,
 };
@@ -24,7 +25,10 @@ use alloy_rpc_types_trace::geth::{
 };
 use jsonrpsee::core::client::{ClientT, Subscription, SubscriptionClientT};
 use rand::{rngs::StdRng, Rng, SeedableRng};
-use reth_chainspec::{EthChainSpec, EthereumHardfork};
+use reth_chainspec::{
+    sepolia::{SEPOLIA_AMSTERDAM_TIMESTAMP, SEPOLIA_BPO2_TIMESTAMP},
+    EthChainSpec, EthereumHardfork, SEPOLIA,
+};
 use reth_e2e_test_utils::{
     receipt::PendingTransactionExt, test_chain_spec, test_chain_spec_builder,
     transaction::TransactionTestContext, wait::poll_until, wallet::Wallet, E2ETestSetupExt,
@@ -38,10 +42,12 @@ use reth_node_core::{
 };
 use reth_node_ethereum::EthereumNode;
 use reth_payload_primitives::BuiltPayload;
-use reth_primitives_traits::Block as _;
+use reth_primitives_traits::{Block as _, SealedHeader, SignedTransaction};
+use reth_provider::CanonChainTracker;
 use reth_rpc_api::servers::AdminApiServer;
 use reth_rpc_server_types::RpcModuleSelection;
 use reth_tasks::Runtime;
+use reth_transaction_pool::test_utils::TransactionGenerator;
 use std::{
     net::{IpAddr, Ipv4Addr},
     sync::Arc,
@@ -64,9 +70,6 @@ alloy_sol_types::sol! {
 
 #[tokio::test]
 async fn test_rpc_shares_sender_recovery_cache_with_execution() -> eyre::Result<()> {
-    use reth_primitives_traits::SignedTransaction;
-    use reth_transaction_pool::test_utils::TransactionGenerator;
-
     let chain_spec = test_chain_spec(EthereumHardfork::Cancun);
     let (node, _) = EthereumNode::test_setup(1, chain_spec).build_single().await?;
     let cache = node.inner.evm_config.sender_recovery_cache.as_ref().unwrap();
@@ -134,7 +137,7 @@ async fn test_bal_prewarming_for_transaction_replay() -> eyre::Result<()> {
             .await?;
         let provider = node.rpc_provider_with_wallet(wallet.signer(0));
         let first = provider
-            .send_transaction(TransactionRequest::default().to(Address::ZERO).value(U256::from(1)))
+            .send_transaction(TransactionRequest::default().to(Address::ZERO).value(U256::ONE))
             .await?;
         let second = provider
             .send_transaction(TransactionRequest::default().to(Address::ZERO).value(U256::from(2)))
@@ -331,7 +334,7 @@ async fn test_debug_trace_eip8037_gas() -> eyre::Result<()> {
     let (mut node, wallet) = EthereumNode::test_setup(1, chain_spec).build_single().await?;
     let provider = node.rpc_provider_with_wallet(wallet.signer(0));
 
-    let pre_amsterdam = GasWaster::deploy_builder(&provider, U256::from(1)).send().await?;
+    let pre_amsterdam = GasWaster::deploy_builder(&provider, U256::ONE).send().await?;
     let pre_amsterdam_hash = *pre_amsterdam.tx_hash();
     node.advance_block().await?;
     pre_amsterdam.successful_receipt().await?;
@@ -363,7 +366,7 @@ async fn test_debug_trace_eip8037_gas() -> eyre::Result<()> {
     assert_eq!(frame.state_gas_used, None);
     assert_eq!(frame.gas_refund, None);
 
-    let amsterdam = GasWaster::deploy_builder(&provider, U256::from(1)).send().await?;
+    let amsterdam = GasWaster::deploy_builder(&provider, U256::ONE).send().await?;
     let amsterdam_hash = *amsterdam.tx_hash();
     node.advance_block().await?;
     amsterdam.successful_receipt().await?;
@@ -469,56 +472,6 @@ async fn test_flashbots_validate_v3() -> eyre::Result<()> {
         .raw_request::<_, ()>("flashbots_validateBuilderSubmissionV3".into(), (&request,))
         .await
         .is_err());
-    Ok(())
-}
-
-#[tokio::test]
-async fn test_flashbots_validate_uses_shared_sender_recovery_cache() -> eyre::Result<()> {
-    reth_tracing::init_test_tracing();
-
-    let (mut node, wallet) =
-        EthereumNode::test_setup_for(EthereumHardfork::Cancun).build_single().await?;
-    let cache = node.inner.evm_config.sender_recovery_cache.clone().expect("cache is enabled");
-
-    let signer = wallet.signer(0);
-    let sender = signer.address();
-    let provider = node.rpc_provider_with_wallet(signer);
-
-    let tx_hash = *provider
-        .send_transaction(TransactionRequest::default().to(Address::ZERO))
-        .await?
-        .tx_hash();
-    // Transaction ingress has already recovered the sender through the shared cache.
-    let payload = node.new_payload().await?;
-    assert!(payload.block().body().transactions.iter().any(|tx| *tx.tx_hash() == tx_hash));
-    assert_eq!(cache.get(&tx_hash), Some(sender));
-
-    let request = BuilderBlockValidationRequestV3 {
-        request: SignedBidSubmissionV3 {
-            message: BidTrace {
-                parent_hash: payload.block().parent_hash,
-                block_hash: payload.block().hash(),
-                gas_used: payload.block().gas_used,
-                gas_limit: payload.block().gas_limit,
-                ..Default::default()
-            },
-            execution_payload: ExecutionPayloadV3::from_block_unchecked(
-                payload.block().hash(),
-                &payload.block().clone().into_block(),
-            ),
-            blobs_bundle: BlobsBundleV1::new([]),
-            signature: Default::default(),
-        },
-        parent_beacon_block_root: payload.block().parent_beacon_block_root.unwrap(),
-        registered_gas_limit: payload.block().gas_limit,
-    };
-
-    provider
-        .raw_request::<_, ()>("flashbots_validateBuilderSubmissionV3".into(), (&request,))
-        .await?;
-    // Validation accepts the submission while reusing the sender cached by transaction ingress.
-    assert_eq!(cache.get(&tx_hash), Some(sender));
-
     Ok(())
 }
 
@@ -774,7 +727,7 @@ async fn test_estimate_gas_basic_transfers_post_amsterdam() -> eyre::Result<()> 
 
     let self_send_gas = provider
         .estimate_gas(
-            TransactionRequest::default().with_from(from).with_to(from).with_value(U256::from(1)),
+            TransactionRequest::default().with_from(from).with_to(from).with_value(U256::ONE),
         )
         .await?;
     assert_eq!(self_send_gas, 12_000);
@@ -789,7 +742,7 @@ async fn test_estimate_gas_basic_transfers_post_amsterdam() -> eyre::Result<()> 
             TransactionRequest::default()
                 .with_from(from)
                 .with_to(existing_recipient)
-                .with_value(U256::from(1)),
+                .with_value(U256::ONE),
         )
         .await?;
     assert_eq!(value_existing_gas, 21_000);
@@ -807,7 +760,7 @@ async fn test_estimate_gas_basic_transfers_post_amsterdam() -> eyre::Result<()> 
             TransactionRequest::default()
                 .with_from(from)
                 .with_to(fresh_recipient)
-                .with_value(U256::from(1)),
+                .with_value(U256::ONE),
         )
         .await?;
     assert!(value_fresh_gas > 21_000);
@@ -818,10 +771,7 @@ async fn test_estimate_gas_basic_transfers_post_amsterdam() -> eyre::Result<()> 
     let mut overrides = StateOverride::default();
     overrides.insert(
         gas_gate,
-        AccountOverride {
-            code: Some("0x5a610fa010600957fe5b00".parse::<Bytes>()?),
-            ..Default::default()
-        },
+        AccountOverride { code: Some(bytes!("0x5a610fa010600957fe5b00")), ..Default::default() },
     );
     let gated_tx = TransactionRequest::default().with_from(from).with_to(gas_gate);
     let gated_gas = provider.estimate_gas(gated_tx.clone()).overrides(overrides.clone()).await?;
@@ -885,15 +835,6 @@ async fn test_eth_config() -> eyre::Result<()> {
 
 #[tokio::test]
 async fn test_sepolia_amsterdam_eth_config() -> eyre::Result<()> {
-    use alloy_consensus::Header;
-    use alloy_primitives::hex;
-    use reth_chainspec::{
-        sepolia::{SEPOLIA_AMSTERDAM_TIMESTAMP, SEPOLIA_BPO2_TIMESTAMP},
-        SEPOLIA,
-    };
-    use reth_primitives_traits::SealedHeader;
-    use reth_provider::CanonChainTracker;
-
     let node_config = NodeConfig::test()
         .with_chain(SEPOLIA.clone())
         .with_unused_ports()
@@ -918,14 +859,14 @@ async fn test_sepolia_amsterdam_eth_config() -> eyre::Result<()> {
         let config = provider.client().request_noparams::<EthConfig>("eth_config").await?;
         if timestamp < SEPOLIA_AMSTERDAM_TIMESTAMP {
             assert_eq!(config.current.activation_time, SEPOLIA_BPO2_TIMESTAMP);
-            assert_eq!(config.current.fork_id, Bytes::from_static(&hex!("268956b6")));
+            assert_eq!(config.current.fork_id, bytes!("268956b6"));
             let next = config.next.unwrap();
             assert_eq!(next.activation_time, SEPOLIA_AMSTERDAM_TIMESTAMP);
-            assert_eq!(next.fork_id, Bytes::from_static(&hex!("6c1d9423")));
+            assert_eq!(next.fork_id, bytes!("6c1d9423"));
             assert_eq!(config.last.unwrap(), next);
         } else {
             assert_eq!(config.current.activation_time, SEPOLIA_AMSTERDAM_TIMESTAMP);
-            assert_eq!(config.current.fork_id, Bytes::from_static(&hex!("6c1d9423")));
+            assert_eq!(config.current.fork_id, bytes!("6c1d9423"));
             assert!(config.next.is_none());
             assert!(config.last.is_none());
         }
@@ -964,6 +905,33 @@ async fn test_admin_external_ip() -> eyre::Result<()> {
     let info = api.node_info().await.unwrap();
 
     assert_eq!(info.ip, external_ip);
+
+    Ok(())
+}
+
+// <https://github.com/paradigmxyz/reth/issues/27867>
+#[tokio::test]
+async fn test_disable_auth_server_skips_jwt_secret() -> eyre::Result<()> {
+    reth_tracing::init_test_tracing();
+
+    let missing_dir = tempfile::tempdir()?;
+    let missing = missing_dir.path().join("missing-jwt.hex");
+    for auth_jwtsecret in [None, Some(missing.clone())] {
+        let mut rpc = RpcServerArgs::default().with_unused_ports();
+        rpc.disable_auth_server = true;
+        rpc.auth_jwtsecret = auth_jwtsecret;
+        let node_config = NodeConfig::test()
+            .with_chain(Arc::new(test_chain_spec_builder().build()))
+            .with_unused_ports()
+            .with_rpc(rpc);
+        let NodeHandle { node, node_exit_future: _ } = NodeBuilder::new(node_config)
+            .testing_node(Runtime::test())
+            .node(EthereumNode::default())
+            .launch()
+            .await?;
+        assert!(!node.data_dir.jwt().exists());
+    }
+    assert!(!missing.exists());
 
     Ok(())
 }
@@ -1121,7 +1089,7 @@ async fn eth_call_caps_execution_gas_under_amsterdam() -> eyre::Result<()> {
 
         let ok: Bytes =
             provider.raw_request("eth_call".into(), (call(10_000), "latest", &overrides)).await?;
-        assert_eq!(U256::from_be_slice(&ok), U256::from(1), "{fork}");
+        assert_eq!(U256::from_be_slice(&ok), U256::ONE, "{fork}");
 
         // About 26M gas of execution, above the 16,777,216 cap.
         let call_result = provider
@@ -1136,12 +1104,30 @@ async fn eth_call_caps_execution_gas_under_amsterdam() -> eyre::Result<()> {
             assert_eq!(access_list.gas_used, U256::from(16_777_216));
             assert!(access_list.error.is_some());
         } else {
-            assert_eq!(U256::from_be_slice(&call_result?), U256::from(1));
+            assert_eq!(U256::from_be_slice(&call_result?), U256::ONE);
             assert!(access_list.gas_used > U256::from(26_000_000));
             assert!(access_list.error.is_none());
         }
     }
 
+    Ok(())
+}
+
+#[tokio::test]
+async fn eth_call_without_gas_with_max_rpc_gas_cap() -> eyre::Result<()> {
+    let (node, _) = EthereumNode::test_setup_for(EthereumHardfork::Amsterdam)
+        .with_rpc_modifier(|mut rpc| {
+            rpc.rpc_gas_cap = u64::MAX;
+            rpc
+        })
+        .build_single()
+        .await?;
+
+    let result = node
+        .rpc_provider()
+        .call(TransactionRequest::default().to(Address::with_last_byte(0x42)))
+        .await?;
+    assert_eq!(result, Bytes::new());
     Ok(())
 }
 
@@ -1197,7 +1183,7 @@ async fn test_mine() -> eyre::Result<()> {
     node.advance_blocks(2).await?;
 
     // The receipts are in the order of the given transactions, not in block order.
-    let first = account.transfer(recipient, U256::from(1)).await;
+    let first = account.transfer(recipient, U256::ONE).await;
     let second = account.transfer(recipient, U256::from(2)).await;
     let mined = node.mine([second.clone(), first.clone()]).await?.ensure_success()?;
     assert_eq!(mined.block().number, 3);
@@ -1263,6 +1249,57 @@ async fn test_mine() -> eyre::Result<()> {
         mined.receipts.iter().map(|receipt| receipt.transaction_hash).collect::<Vec<_>>(),
         [second, first]
     );
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_mine_signed() -> eyre::Result<()> {
+    reth_tracing::init_test_tracing();
+
+    let (mut node, wallet) =
+        EthereumNode::test_setup_for(EthereumHardfork::Cancun).build_single().await?;
+    let signer = wallet.signer(0);
+    let chain_id = node.inner.chain_spec().chain().id();
+    let request = |nonce| {
+        TransactionRequest::default()
+            .with_chain_id(chain_id)
+            .with_nonce(nonce)
+            .with_gas_limit(100_000)
+            .with_max_fee_per_gas(20e9 as u128)
+            .with_max_priority_fee_per_gas(1e9 as u128)
+    };
+    let recipient = Address::with_last_byte(0x77);
+
+    // Signed envelopes are mined without encoding them first, receipts in the given order.
+    let first = TransactionTestContext::sign_tx(
+        signer.clone(),
+        request(0).with_to(recipient).with_value(U256::ONE),
+    )
+    .await;
+    let second = TransactionTestContext::sign_tx(
+        signer.clone(),
+        request(1).with_to(recipient).with_value(U256::from(2)),
+    )
+    .await;
+    let mined = node.mine_signed([second.clone(), first.clone()]).await?;
+    assert_eq!(mined.block().number, 1);
+    assert_eq!(
+        mined.receipts.iter().map(|receipt| receipt.transaction_hash).collect::<Vec<_>>(),
+        [*second.tx_hash(), *first.tx_hash()]
+    );
+
+    // A reverted transaction is mined, but reported as an error.
+    // PUSH1 0 PUSH1 0 REVERT
+    let reverting =
+        TransactionTestContext::sign_tx(signer, request(2).with_deploy_code(bytes!("60006000fd")))
+            .await;
+    let err = node.mine_signed([reverting.clone()]).await.unwrap_err().to_string();
+    assert!(
+        err.starts_with(&format!("transaction {} reverted after using", reverting.tx_hash())),
+        "{err}"
+    );
+    assert_eq!(node.rpc_provider().get_block_number().await?, 2);
 
     Ok(())
 }

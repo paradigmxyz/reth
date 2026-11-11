@@ -26,7 +26,7 @@
 
 use crate::{
     error::{DecodePacketError, Discv4Error},
-    proto::{FindNode, Message, Neighbours, Packet, Ping, Pong},
+    proto::{FindNode, Message, Neighbours, NodeEndpoint, Packet, Ping, Pong},
 };
 use alloy_primitives::{bytes::Bytes, hex, B256};
 use discv5::{
@@ -213,12 +213,11 @@ impl Discv4 {
     /// ```
     /// use reth_discv4::{Discv4, Discv4Config};
     /// use reth_network_peers::{pk2id, NodeRecord, PeerId};
-    /// use secp256k1::SECP256K1;
     /// use std::{net::SocketAddr, str::FromStr};
     /// # async fn t() -> std:: io::Result<()> {
     ///
     /// // generate a (random) keypair
-    /// let (secret_key, pk) = SECP256K1.generate_keypair(&mut rand_08::thread_rng());
+    /// let (secret_key, pk) = secp256k1::generate_keypair(&mut rand::rng());
     /// let id = pk2id(&pk);
     ///
     /// let socket = SocketAddr::from_str("0.0.0.0:0").unwrap();
@@ -249,22 +248,35 @@ impl Discv4 {
         trace!(target: "discv4", local_addr=?socket.local_addr(), "opened UDP socket");
         let (tx, rx) = mpsc::channel(config.udp_ingress_message_buffer);
 
-        Self::bind_with_socket(socket, Some(tx), rx, local_node_record, secret_key, config)
+        Self::bind_with_socket(socket, None, Some(tx), rx, local_node_record, secret_key, config)
     }
 
     /// Creates a new `Discv4` instance using a pre-bound shared socket. No receive loop is
     /// spawned; instead returns an [`IngressHandler`] that should be used to forward raw packets
     /// received by the socket owner (e.g. discv5 unrecognized frames).
+    ///
+    /// An optional secondary socket of the opposite IP family (e.g. discv5's dual-stack sibling
+    /// socket) makes the service answer peers of that family too: outgoing packets are routed to
+    /// the socket matching the destination family, while ingress for both arrives via the
+    /// returned [`IngressHandler`].
     pub fn bind_shared(
         socket: Arc<UdpSocket>,
+        secondary_socket: Option<Arc<UdpSocket>>,
         local_node_record: NodeRecord,
         secret_key: SecretKey,
         config: Discv4Config,
     ) -> io::Result<(Self, Discv4Service, IngressHandler)> {
         let (tx, rx) = mpsc::channel(config.udp_ingress_message_buffer);
         let local_id = local_node_record.id;
-        let (discv4, service) =
-            Self::bind_with_socket(socket, None, rx, local_node_record, secret_key, config)?;
+        let (discv4, service) = Self::bind_with_socket(
+            socket,
+            secondary_socket,
+            None,
+            rx,
+            local_node_record,
+            secret_key,
+            config,
+        )?;
 
         let handler = IngressHandler::new(tx, local_id);
 
@@ -273,6 +285,7 @@ impl Discv4 {
 
     fn bind_with_socket(
         socket: Arc<UdpSocket>,
+        secondary_socket: Option<Arc<UdpSocket>>,
         ingress_tx: Option<IngressSender>,
         ingress_rx: IngressReceiver,
         mut local_node_record: NodeRecord,
@@ -284,6 +297,7 @@ impl Discv4 {
 
         let mut service = Discv4Service::new(
             socket,
+            secondary_socket,
             ingress_tx,
             ingress_rx,
             local_addr,
@@ -560,15 +574,24 @@ impl Discv4Service {
     ///
     /// If `ingress_tx` is `Some`, the receive loop is spawned to read from the socket. If `None`,
     /// the caller feeds packets into `ingress_rx` externally (shared socket mode).
+    #[expect(clippy::too_many_arguments)]
     pub(crate) fn new(
         socket: Arc<UdpSocket>,
+        secondary_socket: Option<Arc<UdpSocket>>,
         ingress_tx: Option<IngressSender>,
         ingress_rx: IngressReceiver,
         local_address: SocketAddr,
         local_node_record: NodeRecord,
         secret_key: SecretKey,
-        config: Discv4Config,
+        mut config: Discv4Config,
     ) -> Self {
+        // normalize once: only an opposite-family secondary socket can serve the advertisement
+        config.secondary_advertised_ip = config.secondary_advertised_ip.filter(|ip| {
+            secondary_socket.is_some() &&
+                !ip.is_unspecified() &&
+                ip.is_ipv4() != local_node_record.address.is_ipv4()
+        });
+
         let (egress_tx, egress_rx) = mpsc::channel(config.udp_egress_message_buffer);
         let mut tasks = JoinSet::<()>::new();
 
@@ -578,7 +601,7 @@ impl Discv4Service {
         }
 
         let udp = Arc::clone(&socket);
-        tasks.spawn(send_loop(udp, egress_rx));
+        tasks.spawn(send_loop(udp, secondary_socket, local_address.is_ipv4(), egress_rx));
 
         let kbuckets = KBucketsTable::new(
             NodeKey::from(&local_node_record).into(),
@@ -611,13 +634,20 @@ impl Discv4Service {
         // for EIP-868 construct an ENR
         let local_eip_868_enr = {
             let mut builder = Enr::builder();
-            builder.ip(local_node_record.address);
-            if local_node_record.address.is_ipv4() {
-                builder.udp4(local_node_record.udp_port);
-                builder.tcp4(local_node_record.tcp_port);
-            } else {
-                builder.udp6(local_node_record.udp_port);
-                builder.tcp6(local_node_record.tcp_port);
+            for ip in
+                std::iter::once(local_node_record.address).chain(config.secondary_advertised_ip)
+            {
+                // Keep port keys for NAT resolution, but omit unspecified IP addresses.
+                if !ip.is_unspecified() {
+                    builder.ip(ip);
+                }
+                if ip.is_ipv4() {
+                    builder.udp4(local_node_record.udp_port);
+                    builder.tcp4(local_node_record.tcp_port);
+                } else {
+                    builder.udp6(local_node_record.udp_port);
+                    builder.tcp6(local_node_record.tcp_port);
+                }
             }
 
             for (key, val) in &config.additional_eip868_rlp_pairs {
@@ -697,6 +727,14 @@ impl Discv4Service {
     /// Sets the given ip address as the node's external IP in the node record announced in
     /// discovery
     pub fn set_external_ip_addr(&mut self, external_ip: IpAddr) {
+        // an opposite-family resolution would overwrite the secondary ENR key and flip the
+        // record's family, so a secondary advertisement pins the record's family
+        if self.config.secondary_advertised_ip.is_some() &&
+            external_ip.is_ipv4() != self.local_node_record.address.is_ipv4()
+        {
+            debug!(target: "discv4", ?external_ip, "Ignoring opposite-family external ip");
+            return
+        }
         if self.local_node_record.address != external_ip {
             debug!(target: "discv4", ?external_ip, "Updating external ip");
             self.local_node_record.address = external_ip;
@@ -880,7 +918,7 @@ impl Discv4Service {
         let _ = self.egress.try_send((payload, to)).map_err(|err| {
             debug!(target: "discv4", %err, "dropped outgoing packet");
         });
-        self.pending_find_nodes.insert(node.id, FindNodeRequest::new(ctx));
+        self.pending_find_nodes.insert(node.id, FindNodeRequest::new(ctx, to.ip()));
     }
 
     /// Sends a new `FindNode` packet to the node with `target` as the lookup target but checks
@@ -1177,10 +1215,8 @@ impl Discv4Service {
         // > If no communication with the sender of this ping has occurred within the last 12h, a
         // > ping should be sent in addition to pong in order to receive an endpoint proof.
         //
-        // Note: we only mark if the node is absent because the `last 12h` condition is handled by
-        // the ping interval
         let mut is_new_insert = false;
-        let mut needs_bond = false;
+        let mut needs_bond = !self.has_bond(record.id, record.address);
         let mut is_proven = false;
 
         let old_enr = match self.kbuckets.entry(&key) {
@@ -1292,13 +1328,22 @@ impl Discv4Service {
             return
         }
 
-        if self.pending_pings.contains_key(&node.id) ||
-            self.pending_find_nodes.contains_key(&node.id)
-        {
+        if self.pending_pings.get(&node.id).is_some_and(|ping| ping.node.address == node.address) {
             return
         }
 
-        if self.queued_pings.iter().any(|(n, _)| n.id == node.id) {
+        if self.queued_pings.iter().any(|(n, _)| n.id == node.id && n.address == node.address) {
+            return
+        }
+
+        if self.pending_pings.contains_key(&node.id) ||
+            self.pending_find_nodes.contains_key(&node.id)
+        {
+            if matches!(reason, PingReason::EstablishBond) &&
+                self.queued_pings.len() < MAX_QUEUED_PINGS
+            {
+                self.queued_pings.push_back((node, reason));
+            }
             return
         }
 
@@ -1315,12 +1360,15 @@ impl Discv4Service {
     pub(crate) fn send_ping(&mut self, node: NodeRecord, reason: PingReason) -> B256 {
         let remote_addr = node.udp_addr();
         let id = node.id;
-        let ping = Ping {
-            from: self.local_node_record.into(),
-            to: node.into(),
-            expire: self.ping_expiration(),
-            enr_sq: self.enr_seq(),
-        };
+        let mut from: NodeEndpoint = self.local_node_record.into();
+        from.tcp_port = if node.address.is_ipv4() {
+            self.local_eip_868_enr.tcp4()
+        } else {
+            self.local_eip_868_enr.tcp6()
+        }
+        .unwrap_or_default();
+        let ping =
+            Ping { from, to: node.into(), expire: self.ping_expiration(), enr_sq: self.enr_seq() };
         trace!(target: "discv4", ?ping, "sending ping");
         let echo_hash = self.send_packet(Message::Ping(ping), remote_addr);
 
@@ -1358,6 +1406,13 @@ impl Discv4Service {
                     let request = entry.get();
                     if request.echo_hash != pong.echo {
                         trace!(target: "discv4", from=?remote_addr, expected=?request.echo_hash, echo_hash=?pong.echo,"Got unexpected Pong");
+                        return
+                    }
+                    // The echo only proves reachability at the IP the ping was sent to.
+                    if request.node.udp_addr().ip().to_canonical() !=
+                        remote_addr.ip().to_canonical()
+                    {
+                        trace!(target: "discv4", from=?remote_addr, expected=?request.node.udp_addr(), "Ignoring Pong from unexpected IP");
                         return
                     }
                 }
@@ -1482,6 +1537,13 @@ impl Discv4Service {
             Entry::Occupied(mut entry) => {
                 {
                     let request = entry.get_mut();
+                    // `Neighbours` packets carry no request binding, so a validly signed packet
+                    // from the queried node could be replayed from another address. Ignore it and
+                    // keep the request armed for the genuine reply.
+                    if !request.is_from_destination(remote_addr.ip()) {
+                        trace!(target: "discv4", from=?remote_addr, expected=?request.destination, "Ignoring Neighbours from unexpected IP");
+                        return
+                    }
                     // Mark the request as answered
                     request.answered = true;
                     let total = request.response_count + msg.nodes.len();
@@ -1774,7 +1836,10 @@ impl Discv4Service {
 
     /// Pops buffered ping requests and sends them.
     fn ping_buffered(&mut self) {
-        while self.pending_pings.len() < MAX_NODES_PING {
+        for _ in 0..self.queued_pings.len() {
+            if self.pending_pings.len() >= MAX_NODES_PING {
+                break
+            }
             match self.queued_pings.pop_front() {
                 Some((next, reason)) => self.try_ping(next, reason),
                 None => break,
@@ -1876,6 +1941,13 @@ impl Discv4Service {
                             let _ = self.local_eip_868_enr.set_tcp4(port, &self.secret_key);
                         } else {
                             let _ = self.local_eip_868_enr.set_tcp6(port, &self.secret_key);
+                        }
+                        if let Some(ip) = self.config.secondary_advertised_ip {
+                            if ip.is_ipv4() {
+                                let _ = self.local_eip_868_enr.set_tcp4(port, &self.secret_key);
+                            } else {
+                                let _ = self.local_eip_868_enr.set_tcp6(port, &self.secret_key);
+                            }
                         }
                     }
 
@@ -2014,10 +2086,22 @@ pub enum Discv4Event {
 }
 
 /// Continuously reads new messages from the channel and writes them to the socket
-pub(crate) async fn send_loop(udp: Arc<UdpSocket>, rx: EgressReceiver) {
+pub(crate) async fn send_loop(
+    udp: Arc<UdpSocket>,
+    secondary_udp: Option<Arc<UdpSocket>>,
+    primary_is_ipv4: bool,
+    rx: EgressReceiver,
+) {
     let mut stream = ReceiverStream::new(rx);
     while let Some((payload, to)) = stream.next().await {
-        match udp.send_to(&payload, to).await {
+        // a destination with no matching-family socket falls through to the primary, failing
+        // in `send_to` like any other unreachable destination
+        let socket = if to.is_ipv4() == primary_is_ipv4 {
+            &udp
+        } else {
+            secondary_udp.as_ref().unwrap_or(&udp)
+        };
+        match socket.send_to(&payload, to).await {
             Ok(size) => {
                 trace!(target: "discv4", ?to, ?size,"sent payload");
             }
@@ -2101,11 +2185,12 @@ impl IngressHandler {
 
         // A packet starts with the hash of everything that follows it, and `Message::decode`
         // rejects any packet whose contents do not hash to it. A repeat of a packet we already
-        // accepted can therefore be recognised from those 32 bytes alone, without decoding.
+        // accepted from the same IP can therefore be recognised from those 32 bytes alone,
+        // without decoding.
         // Decoding runs an ECDSA recovery, so checking here keeps a replayed packet from costing
         // a signature verification.
         if data.len() >= MIN_PACKET_SIZE &&
-            self.cache.contains_packet(B256::from_slice(&data[..32]))
+            self.cache.contains_packet(B256::from_slice(&data[..32]), src.ip())
         {
             trace!(target: "discv4", ?src, "Received duplicate packet.");
             return
@@ -2120,7 +2205,7 @@ impl IngressHandler {
 
                 // Only packets that decoded are remembered, so a peer cannot suppress a packet we
                 // have not seen yet by guessing its hash.
-                self.cache.insert_packet(packet.hash);
+                self.cache.insert_packet(packet.hash, src.ip());
 
                 IngressEvent::Packet(src, packet)
             }
@@ -2145,8 +2230,10 @@ struct ReceiveCache {
     /// This is used to count the number of messages received from a given IP address within an
     /// interval.
     ip_messages: HashMap<IpAddr, usize>,
-    // keeps track of unique packet hashes
-    unique_packets: schnellru::LruMap<B256, ()>,
+    /// Valid packet hashes paired with their canonical source IP.
+    ///
+    /// A replay from another IP must not suppress the genuine packet from the expected source.
+    unique_packets: reth_lru::LruMap<(B256, IpAddr), ()>,
 }
 
 impl ReceiveCache {
@@ -2171,25 +2258,22 @@ impl ReceiveCache {
         *ctn
     }
 
-    /// Returns true if we previously received the packet.
+    /// Returns true if we previously received the packet from this IP.
     ///
     /// A hit refreshes the entry so that a packet being replayed repeatedly stays cached.
-    fn contains_packet(&mut self, hash: B256) -> bool {
-        self.unique_packets.get(&hash).is_some()
+    fn contains_packet(&mut self, hash: B256, ip: IpAddr) -> bool {
+        self.unique_packets.get(&(hash, ip.to_canonical())).is_some()
     }
 
     /// Remembers a packet we accepted.
-    fn insert_packet(&mut self, hash: B256) {
-        self.unique_packets.insert(hash, ());
+    fn insert_packet(&mut self, hash: B256, ip: IpAddr) {
+        self.unique_packets.insert((hash, ip.to_canonical()), ());
     }
 }
 
 impl Default for ReceiveCache {
     fn default() -> Self {
-        Self {
-            ip_messages: Default::default(),
-            unique_packets: schnellru::LruMap::new(schnellru::ByLength::new(32)),
-        }
+        Self { ip_messages: Default::default(), unique_packets: reth_lru::LruMap::new(32) }
     }
 }
 
@@ -2428,13 +2512,29 @@ struct FindNodeRequest {
     answered: bool,
     /// Response buffer
     lookup_context: LookupContext,
+    /// IP address the request was sent to, in canonical form.
+    destination: IpAddr,
 }
 
 // === impl FindNodeRequest ===
 
 impl FindNodeRequest {
-    fn new(resp: LookupContext) -> Self {
-        Self { sent_at: Instant::now(), response_count: 0, answered: false, lookup_context: resp }
+    fn new(resp: LookupContext, destination: IpAddr) -> Self {
+        Self {
+            sent_at: Instant::now(),
+            response_count: 0,
+            answered: false,
+            lookup_context: resp,
+            destination: destination.to_canonical(),
+        }
+    }
+
+    /// Returns `true` if `ip` is the address this request was sent to.
+    ///
+    /// Only the IP is compared, not the port, and IPv4-mapped IPv6 addresses are treated as their
+    /// IPv4 counterparts because a dual-stack socket reports IPv4 peers as mapped addresses.
+    fn is_from_destination(&self, ip: IpAddr) -> bool {
+        self.destination == ip.to_canonical()
     }
 }
 
@@ -2599,49 +2699,50 @@ mod tests {
     use crate::test_utils::{create_discv4, create_discv4_with_config, rng_endpoint, rng_record};
     use alloy_primitives::hex;
     use alloy_rlp::{Decodable, Encodable};
-    use rand_08::Rng;
+    use rand::Rng;
     use reth_ethereum_forks::{EnrForkIdEntry, ForkHash};
     use reth_network_peers::mainnet_nodes;
-    use secp256k1::SECP256K1;
-    use std::future::poll_fn;
+    use std::{future::poll_fn, net::Ipv6Addr};
 
     #[tokio::test]
     async fn test_duplicate_packet_rejected_without_decoding() {
-        let secret_key = SecretKey::new(&mut rand_08::thread_rng());
-        let local_id = pk2id(&secret_key.public_key(SECP256K1));
+        let secret_key = SecretKey::new(&mut rand::rng());
+        let local_id = pk2id(&secret_key.public_key());
         let (tx, mut rx) = mpsc::channel(16);
         let mut handler = IngressHandler::new(tx, local_id);
 
-        let remote_key = SecretKey::new(&mut rand_08::thread_rng());
+        let remote_key = SecretKey::new(&mut rand::rng());
         let msg = Message::Ping(Ping {
-            from: rng_endpoint(&mut rand_08::thread_rng()),
-            to: rng_endpoint(&mut rand_08::thread_rng()),
+            from: rng_endpoint(&mut rand::rng()),
+            to: rng_endpoint(&mut rand::rng()),
             expire: u64::MAX,
             enr_sq: None,
         });
         let (packet, hash) = msg.encode(&remote_key);
-        let src = "10.0.0.1:30303".parse().unwrap();
+        let src = SocketAddr::from((Ipv4Addr::new(10, 0, 0, 1).to_ipv6_mapped(), 30303));
 
         handler.handle_packet(&packet, src).await;
         assert!(matches!(rx.try_recv(), Ok(IngressEvent::Packet(_, _))));
 
-        // the replay is dropped on the hash prefix alone
-        handler.handle_packet(&packet, src).await;
-        assert!(rx.try_recv().is_err());
-        assert!(handler.cache.contains_packet(hash));
+        // Replays from the same IP are dropped regardless of address representation or port.
+        for duplicate_src in [src, SocketAddr::from(([10, 0, 0, 1], 40404))] {
+            handler.handle_packet(&packet, duplicate_src).await;
+            assert_matches::assert_matches!(rx.try_recv(), Err(mpsc::error::TryRecvError::Empty));
+        }
+        assert!(handler.cache.contains_packet(hash, src.ip()));
     }
 
     #[tokio::test]
     async fn test_undecodable_packet_does_not_poison_cache() {
-        let secret_key = SecretKey::new(&mut rand_08::thread_rng());
-        let local_id = pk2id(&secret_key.public_key(SECP256K1));
+        let secret_key = SecretKey::new(&mut rand::rng());
+        let local_id = pk2id(&secret_key.public_key());
         let (tx, mut rx) = mpsc::channel(16);
         let mut handler = IngressHandler::new(tx, local_id);
 
-        let remote_key = SecretKey::new(&mut rand_08::thread_rng());
+        let remote_key = SecretKey::new(&mut rand::rng());
         let msg = Message::Ping(Ping {
-            from: rng_endpoint(&mut rand_08::thread_rng()),
-            to: rng_endpoint(&mut rand_08::thread_rng()),
+            from: rng_endpoint(&mut rand::rng()),
+            to: rng_endpoint(&mut rand::rng()),
             expire: u64::MAX,
             enr_sq: None,
         });
@@ -2655,7 +2756,7 @@ mod tests {
         forged[last] ^= 0xff;
         handler.handle_packet(&forged, src).await;
         assert!(matches!(rx.try_recv(), Ok(IngressEvent::BadPacket(..))));
-        assert!(!handler.cache.contains_packet(hash));
+        assert!(!handler.cache.contains_packet(hash, src.ip()));
 
         // so the genuine packet still gets through
         handler.handle_packet(&packet, src).await;
@@ -2678,6 +2779,120 @@ mod tests {
         };
         assert_eq!(expected, fork_entry_id);
         assert_eq!(expected, decoded);
+    }
+
+    #[tokio::test]
+    async fn test_secondary_advertised_ip_in_enr() {
+        let (Ok(secondary), Ok(secondary2)) =
+            (UdpSocket::bind("[::1]:0").await, UdpSocket::bind("[::1]:0").await)
+        else {
+            // no IPv6 loopback on this host
+            return;
+        };
+        let mut rng = rand::rng();
+        let (secret_key, pk) = secp256k1::generate_keypair(&mut rng);
+        let local_enr = NodeRecord {
+            address: Ipv4Addr::LOCALHOST.into(),
+            tcp_port: 30303,
+            udp_port: 30303,
+            id: pk2id(&pk),
+        };
+
+        let ip6: Ipv6Addr = "2001:db8::1".parse().unwrap();
+        let config = Discv4Config::builder().secondary_advertised_ip(ip6.into()).build();
+        let socket = Arc::new(UdpSocket::bind("127.0.0.1:0").await.unwrap());
+        let (_discv4, service, _ingress) =
+            Discv4::bind_shared(socket, Some(Arc::new(secondary)), local_enr, secret_key, config)
+                .unwrap();
+
+        let enr = &service.local_eip_868_enr;
+        assert_eq!(enr.ip6(), Some(ip6));
+        assert_eq!(enr.udp6(), Some(service.local_node_record.udp_port));
+        assert_eq!(enr.tcp6(), Some(service.local_node_record.tcp_port));
+
+        // an unspecified secondary is normalized away even with a secondary socket
+        let config =
+            Discv4Config::builder().secondary_advertised_ip(Ipv6Addr::UNSPECIFIED.into()).build();
+        let socket = Arc::new(UdpSocket::bind("127.0.0.1:0").await.unwrap());
+        let (_discv4, service, _ingress) =
+            Discv4::bind_shared(socket, Some(Arc::new(secondary2)), local_enr, secret_key, config)
+                .unwrap();
+
+        let enr = &service.local_eip_868_enr;
+        assert_eq!(enr.ip6(), None);
+        assert_eq!(enr.udp6(), None);
+        assert_eq!(enr.tcp6(), None);
+    }
+
+    #[tokio::test]
+    async fn test_secondary_advertised_ip_requires_secondary_socket() {
+        let ip6: Ipv6Addr = "2001:db8::1".parse().unwrap();
+        let config = Discv4Config::builder().secondary_advertised_ip(ip6.into()).build();
+        let (_discv4, service) = create_discv4_with_config(config).await;
+
+        let enr = &service.local_eip_868_enr;
+        assert_eq!(enr.ip6(), None);
+        assert_eq!(enr.udp6(), None);
+        assert_eq!(enr.tcp6(), None);
+    }
+
+    #[tokio::test]
+    async fn test_external_ip_completes_unspecified_enr_endpoint() {
+        let mut rng = rand::rng();
+        let socket: SocketAddr = "127.0.0.1:0".parse().unwrap();
+        let (secret_key, pk) = secp256k1::generate_keypair(&mut rng);
+        let local_enr = NodeRecord {
+            address: Ipv4Addr::UNSPECIFIED.into(),
+            tcp_port: 30303,
+            udp_port: 30303,
+            id: pk2id(&pk),
+        };
+        let (_discv4, mut service) =
+            Discv4::bind(socket, local_enr, secret_key, Default::default()).await.unwrap();
+
+        let udp_port = service.local_node_record.udp_port;
+        let enr = &service.local_eip_868_enr;
+        assert_eq!(enr.ip4(), None);
+        assert_eq!(enr.udp4(), Some(udp_port));
+        assert_eq!(enr.tcp4(), Some(30303));
+
+        let external_ip: Ipv4Addr = "1.2.3.4".parse().unwrap();
+        service.set_external_ip_addr(external_ip.into());
+
+        let enr = &service.local_eip_868_enr;
+        assert_eq!(enr.ip4(), Some(external_ip));
+        assert_eq!(enr.udp4(), Some(udp_port));
+        assert_eq!(enr.tcp4(), Some(30303));
+    }
+
+    #[tokio::test]
+    async fn test_send_loop_routes_by_destination_family() {
+        let (Ok(secondary), Ok(sink6)) =
+            (UdpSocket::bind("[::1]:0").await, UdpSocket::bind("[::1]:0").await)
+        else {
+            // no IPv6 loopback on this host
+            return;
+        };
+        let primary = Arc::new(UdpSocket::bind("127.0.0.1:0").await.unwrap());
+        let sink4 = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+
+        let (tx, rx) = mpsc::channel(8);
+        tokio::spawn(send_loop(primary, Some(Arc::new(secondary)), true, rx));
+
+        tx.send((Bytes::from_static(b"v4"), sink4.local_addr().unwrap())).await.unwrap();
+        tx.send((Bytes::from_static(b"v6"), sink6.local_addr().unwrap())).await.unwrap();
+
+        let mut buf = [0u8; 2];
+        let (read, _) = tokio::time::timeout(Duration::from_secs(5), sink4.recv_from(&mut buf))
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(&buf[..read], b"v4");
+        let (read, _) = tokio::time::timeout(Duration::from_secs(5), sink6.recv_from(&mut buf))
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(&buf[..read], b"v6");
     }
 
     #[test]
@@ -2704,7 +2919,7 @@ mod tests {
     #[tokio::test]
     async fn test_request_enr_of_proven_node() {
         reth_tracing::init_test_tracing();
-        let mut rng = rand_08::thread_rng();
+        let mut rng = rand::rng();
         let (_discv4, mut service) = create_discv4().await;
 
         let id = PeerId::random();
@@ -2719,7 +2934,8 @@ mod tests {
                 state: ConnectionState::Connected,
             },
         );
-        let ping = |service: &Discv4Service, rng: &mut rand_08::rngs::ThreadRng| Ping {
+        service.received_pongs.on_pong(id, addr.ip());
+        let ping = |service: &Discv4Service, rng: &mut rand::rngs::ThreadRng| Ping {
             from: rng_endpoint(rng),
             to: rng_endpoint(rng),
             expire: service.ping_expiration(),
@@ -2754,6 +2970,100 @@ mod tests {
         assert_ne!(rotator.next(&id), id);
         assert_ne!(rotator.next(&id), id);
         assert_eq!(rotator.next(&id), id);
+    }
+
+    #[tokio::test]
+    async fn test_ping_establishes_bond_per_ip() {
+        for (primary, secondary) in
+            [("127.0.0.1:30303", "[::1]:30303"), ("[::1]:30303", "127.0.0.1:30303")]
+        {
+            for initial_ping_pending in [false, true] {
+                let (_, mut service) = create_discv4().await;
+                let (egress, mut packets) = mpsc::channel(16);
+                service.egress = egress;
+                let primary = NodeRecord::new(primary.parse().unwrap(), PeerId::random());
+                let secondary = NodeRecord::new(secondary.parse().unwrap(), primary.id);
+                service.add_node(primary);
+                let pong = Pong {
+                    to: service.local_node_record.into(),
+                    echo: service.pending_pings[&primary.id].echo_hash,
+                    expire: service.ping_expiration(),
+                    enr_sq: None,
+                };
+                if !initial_ping_pending {
+                    service.on_pong(pong.clone(), primary.udp_addr(), primary.id);
+                }
+
+                let ping = Ping {
+                    from: secondary.into(),
+                    to: service.local_node_record.into(),
+                    expire: service.ping_expiration(),
+                    enr_sq: None,
+                };
+                service.on_ping(ping.clone(), secondary.udp_addr(), secondary.id, B256::random());
+                if initial_ping_pending {
+                    assert_eq!(service.queued_pings.len(), 1);
+                    service.ping_buffered();
+                    assert_eq!(service.queued_pings.len(), 1);
+                    service.on_pong(pong, primary.udp_addr(), primary.id);
+                    service.ping_buffered();
+                }
+
+                assert!(service.has_bond(primary.id, primary.address));
+                assert!(!service.has_bond(secondary.id, secondary.address));
+                let request = &service.pending_pings[&secondary.id];
+                assert_eq!(request.node.address, secondary.address);
+                assert!(matches!(request.reason, PingReason::EstablishBond));
+                let pong = Pong {
+                    to: service.local_node_record.into(),
+                    echo: request.echo_hash,
+                    expire: service.ping_expiration(),
+                    enr_sq: None,
+                };
+                while packets.try_recv().is_ok() {}
+                let find_node =
+                    FindNode { id: PeerId::random(), expire: service.ping_expiration() };
+                service.on_find_node(find_node, secondary.udp_addr(), secondary.id);
+                assert!(packets.try_recv().is_err());
+
+                service.on_pong(pong, secondary.udp_addr(), secondary.id);
+                assert!(service.has_bond(primary.id, primary.address));
+                assert!(service.has_bond(secondary.id, secondary.address));
+                service.on_find_node(find_node, secondary.udp_addr(), secondary.id);
+                let (packet, to) = packets.try_recv().unwrap();
+                assert_eq!(to, secondary.udp_addr());
+                assert!(matches!(Message::decode(&packet).unwrap().msg, Message::Neighbours(_)));
+
+                service.on_ping(ping, secondary.udp_addr(), secondary.id, B256::random());
+                assert!(service.pending_pings.is_empty());
+                assert!(service.queued_pings.is_empty());
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn test_ping_advertises_tcp_port_per_family() {
+        let (_, mut service) = create_discv4().await;
+        let (egress, mut packets) = mpsc::channel(16);
+        service.egress = egress;
+        service.local_node_record.tcp_port = 30303;
+        service.local_eip_868_enr.set_tcp4(30303, &service.secret_key).unwrap();
+
+        for (tcp6, expected_tcp6) in [(None, 0), (Some(30304), 30304), (Some(0), 0)] {
+            if let Some(port) = tcp6 {
+                service.local_eip_868_enr.set_tcp6(port, &service.secret_key).unwrap();
+            }
+            for (addr, expected) in [("127.0.0.1:30303", 30303), ("[::1]:30303", expected_tcp6)] {
+                let record = NodeRecord::new(addr.parse().unwrap(), PeerId::random());
+                service.send_ping(record, PingReason::InitialInsert);
+                let (packet, to) = packets.try_recv().unwrap();
+                assert_eq!(to, record.udp_addr());
+                let Message::Ping(ping) = Message::decode(&packet).unwrap().msg else {
+                    panic!("expected ping");
+                };
+                assert_eq!(ping.from.tcp_port, expected);
+            }
+        }
     }
 
     #[tokio::test]
@@ -2828,7 +3138,7 @@ mod tests {
     #[tokio::test]
     async fn test_mapped_ipv4() {
         reth_tracing::init_test_tracing();
-        let mut rng = rand_08::thread_rng();
+        let mut rng = rand::rng();
         let config = Discv4Config::builder().build();
         let (_discv4, mut service) = create_discv4_with_config(config).await;
 
@@ -2840,7 +3150,7 @@ mod tests {
             from: rng_endpoint(&mut rng),
             to: rng_endpoint(&mut rng),
             expire: service.ping_expiration(),
-            enr_sq: Some(rng.r#gen()),
+            enr_sq: Some(rng.random()),
         };
 
         let id = PeerId::random();
@@ -2860,7 +3170,7 @@ mod tests {
     #[tokio::test]
     async fn test_respect_ping_expiration() {
         reth_tracing::init_test_tracing();
-        let mut rng = rand_08::thread_rng();
+        let mut rng = rand::rng();
         let config = Discv4Config::builder().build();
         let (_discv4, mut service) = create_discv4_with_config(config).await;
 
@@ -2872,7 +3182,7 @@ mod tests {
             from: rng_endpoint(&mut rng),
             to: rng_endpoint(&mut rng),
             expire: SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs() - 1,
-            enr_sq: Some(rng.r#gen()),
+            enr_sq: Some(rng.random()),
         };
 
         let id = PeerId::random();
@@ -3267,7 +3577,7 @@ mod tests {
 
     #[test]
     fn test_insert() {
-        let local_node_record = rng_record(&mut rand_08::thread_rng());
+        let local_node_record = rng_record(&mut rand::rng());
         let mut kbuckets: KBucketsTable<NodeKey, NodeEntry> = KBucketsTable::new(
             NodeKey::from(&local_node_record).into(),
             Duration::from_secs(60),
@@ -3276,7 +3586,7 @@ mod tests {
             None,
         );
 
-        let new_record = rng_record(&mut rand_08::thread_rng());
+        let new_record = rng_record(&mut rand::rng());
         let key = kad_key(new_record.id);
         match kbuckets.entry(&key) {
             kbucket::Entry::Absent(entry) => {
@@ -3302,7 +3612,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_bootnode_not_in_update_stream() {
+    async fn test_bootnode_in_update_stream() {
         reth_tracing::init_test_tracing();
         let (_, service_1) = create_discv4().await;
         let peerid_1 = *service_1.local_peer_id();
@@ -3334,11 +3644,11 @@ mod tests {
             }
         }
 
-        // Assert bootnode did not appear in update stream
         assert!(bootnode_appeared, "Bootnode should appear in update stream");
     }
 
     fn insert_proven_node(service: &mut Discv4Service, record: NodeRecord) {
+        service.received_pongs.on_pong(record.id, record.address);
         let key = kad_key(record.id);
         let _ = service.kbuckets.insert_or_update(
             &key,
@@ -3366,11 +3676,30 @@ mod tests {
 
     fn make_pong(service: &Discv4Service, echo_hash: B256) -> Pong {
         Pong {
-            to: rng_endpoint(&mut rand_08::thread_rng()),
+            to: rng_endpoint(&mut rand::rng()),
             echo: echo_hash,
             expire: service.ping_expiration(),
             enr_sq: None,
         }
+    }
+
+    #[tokio::test]
+    async fn test_pong_from_unpinged_ip_does_not_establish_bond() {
+        let (_discv4, mut service) = create_discv4().await;
+        let record = NodeRecord::new("127.0.0.1:30303".parse().unwrap(), PeerId::random());
+        let echo_hash = insert_initial_ping(&mut service, record);
+        let unexpected_addr = "127.0.0.2:30303".parse().unwrap();
+
+        service.on_pong(make_pong(&service, echo_hash), unexpected_addr, record.id);
+
+        assert!(service.pending_pings.contains_key(&record.id));
+        assert!(!service.has_bond(record.id, unexpected_addr.ip()));
+
+        let expected_addr = SocketAddr::from((Ipv4Addr::LOCALHOST.to_ipv6_mapped(), 30304));
+        service.on_pong(make_pong(&service, echo_hash), expected_addr, record.id);
+
+        assert!(!service.pending_pings.contains_key(&record.id));
+        assert!(service.has_bond(record.id, expected_addr.ip()));
     }
 
     #[tokio::test]
@@ -3507,5 +3836,136 @@ mod tests {
                 assert_eq!(found_fork_id, fork_id);
             }
         );
+    }
+
+    /// Sets up a service with a pending `FindNode` request to a proven node at `node_addr`.
+    async fn pending_find_node_service(node_addr: SocketAddr) -> (Discv4Service, NodeRecord) {
+        let (_discv4, mut service) = create_discv4().await;
+
+        let id = PeerId::random();
+        let record = NodeRecord::new(node_addr, id);
+        let _ = service.kbuckets.insert_or_update(
+            &kad_key(id),
+            NodeEntry::new_proven(record),
+            NodeStatus {
+                direction: ConnectionDirection::Incoming,
+                state: ConnectionState::Connected,
+            },
+        );
+
+        service.lookup(PeerId::random());
+        assert_eq!(service.pending_find_nodes.len(), 1);
+        (service, record)
+    }
+
+    #[tokio::test]
+    async fn test_neighbours_from_unexpected_ip_ignored() {
+        reth_tracing::init_test_tracing();
+
+        let node_addr = SocketAddr::from(([10, 0, 0, 1], 30303));
+        let (mut service, record) = pending_find_node_service(node_addr).await;
+        let ctx = service.pending_find_nodes[&record.id].lookup_context.clone();
+        let lookup_nodes = ctx.inner.closest_nodes.borrow().len();
+
+        let expire = service.find_node_expiration() + 1000;
+        let discovered =
+            NodeRecord::new(SocketAddr::from(([10, 0, 0, 9], 30303)), PeerId::random());
+        let msg = Neighbours { nodes: vec![discovered], expire };
+
+        // A validly signed packet from the queried node's id but from another IP is ignored, even
+        // if only the port or the address family differs.
+        for spoofed in [
+            SocketAddr::from(([10, 0, 0, 2], 30303)),
+            SocketAddr::from(([10, 0, 0, 2], 1)),
+            SocketAddr::from((Ipv4Addr::new(10, 0, 0, 2).to_ipv6_mapped(), 30303)),
+            SocketAddr::from(([0, 0, 0, 0, 0, 0, 0, 1], 30303)),
+        ] {
+            service.on_neighbours(msg.clone(), spoofed, record.id);
+
+            let request = &service.pending_find_nodes[&record.id];
+            assert!(!request.answered);
+            assert_eq!(request.response_count, 0);
+            assert_eq!(ctx.inner.closest_nodes.borrow().len(), lookup_nodes);
+            assert!(service.pending_pings.is_empty());
+        }
+
+        // The genuine reply from the queried IP is still accepted, regardless of the port.
+        service.on_neighbours(msg, SocketAddr::from(([10, 0, 0, 1], 40404)), record.id);
+        let request = &service.pending_find_nodes[&record.id];
+        assert!(request.answered);
+        assert_eq!(request.response_count, 1);
+        assert_eq!(ctx.inner.closest_nodes.borrow().len(), lookup_nodes + 1);
+    }
+
+    #[tokio::test]
+    async fn test_neighbours_ipv4_mapped_ip_accepted() {
+        reth_tracing::init_test_tracing();
+
+        // A dual-stack socket reports IPv4 peers as IPv4-mapped IPv6 addresses.
+        let node_addr = SocketAddr::from(([10, 0, 0, 1], 30303));
+        let (mut service, record) = pending_find_node_service(node_addr).await;
+
+        let expire = service.find_node_expiration() + 1000;
+        let msg = Neighbours { nodes: Vec::new(), expire };
+        let mapped = SocketAddr::from((Ipv4Addr::new(10, 0, 0, 1).to_ipv6_mapped(), 30303));
+        service.on_neighbours(msg, mapped, record.id);
+
+        let request = &service.pending_find_nodes[&record.id];
+        assert!(request.answered);
+    }
+
+    #[tokio::test]
+    async fn test_neighbours_wrong_ip_replay_does_not_poison_cache() {
+        let (_discv4, mut service) = create_discv4().await;
+        let remote_key = SecretKey::new(&mut rand::rng());
+        let node_addr = SocketAddr::from(([10, 0, 0, 1], 30303));
+        let record = NodeRecord::from_secret_key(node_addr, &remote_key);
+        insert_proven_node(&mut service, record);
+        service.lookup(PeerId::random());
+        assert_eq!(service.pending_find_nodes.len(), 1);
+
+        let ctx = service.pending_find_nodes[&record.id].lookup_context.clone();
+        let lookup_nodes = ctx.inner.closest_nodes.borrow().len();
+        let discovered =
+            NodeRecord::new(SocketAddr::from(([10, 0, 0, 9], 30303)), PeerId::random());
+        let msg = Message::Neighbours(Neighbours {
+            nodes: vec![discovered],
+            expire: service.find_node_expiration(),
+        });
+        let (packet, _) = msg.encode(&remote_key);
+        let (tx, mut rx) = mpsc::channel(16);
+        let mut handler = IngressHandler::new(tx, *service.local_peer_id());
+
+        // A valid replay from another IP must not consume the request or suppress its reply.
+        handler.handle_packet(&packet, SocketAddr::from(([10, 0, 0, 2], 30303))).await;
+        let IngressEvent::Packet(src, Packet { msg: Message::Neighbours(msg), node_id, .. }) =
+            rx.try_recv().unwrap()
+        else {
+            panic!("expected a decoded Neighbours packet");
+        };
+        service.on_neighbours(msg, src, node_id);
+        let request = &service.pending_find_nodes[&record.id];
+        assert!(!request.answered);
+        assert_eq!(request.response_count, 0);
+        assert_eq!(ctx.inner.closest_nodes.borrow().len(), lookup_nodes);
+        assert!(service.pending_pings.is_empty());
+
+        // The identical signed packet from the queried IP must still reach the service.
+        handler.handle_packet(&packet, node_addr).await;
+        let IngressEvent::Packet(src, Packet { msg: Message::Neighbours(msg), node_id, .. }) =
+            rx.try_recv().expect("genuine reply was suppressed by the wrong-IP replay")
+        else {
+            panic!("expected a decoded Neighbours packet");
+        };
+        service.on_neighbours(msg, src, node_id);
+        let request = &service.pending_find_nodes[&record.id];
+        assert!(request.answered);
+        assert_eq!(request.response_count, 1);
+        assert_eq!(ctx.inner.closest_nodes.borrow().len(), lookup_nodes + 1);
+
+        // A port change or mapped address must not bypass deduplication for the same IP.
+        let mapped = SocketAddr::from((Ipv4Addr::new(10, 0, 0, 1).to_ipv6_mapped(), 40404));
+        handler.handle_packet(&packet, mapped).await;
+        assert_matches::assert_matches!(rx.try_recv(), Err(mpsc::error::TryRecvError::Empty));
     }
 }

@@ -30,7 +30,7 @@ pub type ComponentsFor<N> = <<<N as FullNodeTypes>::Types as Node<N>>::Component
 /// A [`crate::Node`] is a [`NodeTypes`] that comes with preconfigured components.
 ///
 /// This can be used to configure the builder with a preset of components.
-pub trait Node<N: FullNodeTypes>: NodeTypes + Clone {
+pub trait Node<N: FullNodeTypes>: NodeTypes {
     /// The type that builds the node's components.
     type ComponentsBuilder: NodeComponentsBuilder<N>;
 
@@ -89,7 +89,7 @@ where
 
 impl<N, C, AO> Node<N> for AnyNode<N, C, AO>
 where
-    N: FullNodeTypes + Clone,
+    N: FullNodeTypes,
     C: NodeComponentsBuilder<N> + Clone + Debug + Sync + Unpin + 'static,
     AO: NodeAddOns<NodeAdapter<N, C::Components>> + Clone + Debug + Sync + Unpin + 'static,
 {

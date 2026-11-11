@@ -13,6 +13,9 @@ pub struct TestConsensus {
     /// for testing networking logic for which the body failing this check is getting completely
     /// rejected while more high-level failures are handled by the sync logic.
     fail_body_against_header: AtomicBool,
+    /// Separate flag for setting whether `validate_header_against_parent` should fail, so a header
+    /// valid on its own can still be detached from its parent.
+    fail_header_against_parent: AtomicBool,
 }
 
 impl Default for TestConsensus {
@@ -20,6 +23,7 @@ impl Default for TestConsensus {
         Self {
             fail_validation: AtomicBool::new(false),
             fail_body_against_header: AtomicBool::new(false),
+            fail_header_against_parent: AtomicBool::new(false),
         }
     }
 }
@@ -34,6 +38,7 @@ impl TestConsensus {
     pub fn set_fail_validation(&self, val: bool) {
         self.fail_validation.store(val, Ordering::SeqCst);
         self.fail_body_against_header.store(val, Ordering::SeqCst);
+        self.fail_header_against_parent.store(val, Ordering::SeqCst);
     }
 
     /// Returns the body validation flag.
@@ -44,6 +49,16 @@ impl TestConsensus {
     /// Update the body validation flag.
     pub fn set_fail_body_against_header(&self, val: bool) {
         self.fail_body_against_header.store(val, Ordering::SeqCst);
+    }
+
+    /// Returns the header-against-parent validation flag.
+    pub fn fail_header_against_parent(&self) -> bool {
+        self.fail_header_against_parent.load(Ordering::SeqCst)
+    }
+
+    /// Update the header-against-parent validation flag.
+    pub fn set_fail_header_against_parent(&self, val: bool) {
+        self.fail_header_against_parent.store(val, Ordering::SeqCst);
     }
 }
 
@@ -99,7 +114,7 @@ impl<H> HeaderValidator<H> for TestConsensus {
         _header: &SealedHeader<H>,
         _parent: &SealedHeader<H>,
     ) -> Result<(), ConsensusError> {
-        if self.fail_validation() {
+        if self.fail_header_against_parent() {
             Err(ConsensusError::BaseFeeMissing)
         } else {
             Ok(())

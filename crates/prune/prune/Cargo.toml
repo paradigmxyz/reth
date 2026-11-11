@@ -38,11 +38,9 @@ tracing.workspace = true
 thiserror.workspace = true
 itertools.workspace = true
 tokio.workspace = true
-rustc-hash.workspace = true
 
 [dev-dependencies]
 # reth
-reth-db = { workspace = true, features = ["test-utils"] }
 reth-stages = { workspace = true, features = ["test-utils"] }
 reth-primitives-traits = { workspace = true, features = ["arbitrary"] }
 reth-testing-utils.workspace = true

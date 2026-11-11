@@ -4,7 +4,7 @@
 //! specific required blocks (primarily used for shadowfork testing).
 
 use alloy_eips::BlockNumHash;
-use futures::StreamExt;
+use futures::{FutureExt, StreamExt};
 use reth_eth_wire_types::{GetBlockHeaders, HeadersDirection};
 use reth_network_api::{
     NetworkEvent, NetworkEventListenerProvider, PeerRequest, Peers, ReputationChangeKind,
@@ -27,7 +27,7 @@ pub struct RequiredBlockFilter<N> {
 
 impl<N> RequiredBlockFilter<N>
 where
-    N: NetworkEventListenerProvider + Peers + Clone + Send + Sync + 'static,
+    N: NetworkEventListenerProvider + Peers + Clone + 'static,
 {
     /// Creates a new required block peer filter.
     pub const fn new(network: N, block_num_hashes: Vec<BlockNumHash>) -> Self {
@@ -46,9 +46,7 @@ where
 
         info!(target: "net::filter", "Starting required block peer filter with {} block hashes", self.block_num_hashes.len());
 
-        tokio::spawn(async move {
-            self.run().await;
-        });
+        tokio::spawn(self.run().boxed());
     }
 
     /// Main loop for the required block peer filter.
@@ -65,7 +63,7 @@ where
                 let block_num_hashes = self.block_num_hashes.clone();
                 let peer_block_number = info.status.latest_block.unwrap_or(0);
 
-                tokio::spawn(async move {
+                tokio::spawn(
                     Self::check_peer_blocks(
                         network,
                         peer_id,
@@ -73,8 +71,8 @@ where
                         block_num_hashes,
                         peer_block_number,
                     )
-                    .await;
-                });
+                    .boxed(),
+                );
             }
         }
     }
@@ -158,23 +156,18 @@ where
 
 #[cfg(test)]
 mod tests {
+
     use super::*;
     use alloy_eips::BlockNumHash;
-    use alloy_primitives::{b256, B256};
+    use alloy_primitives::B256;
     use reth_network_api::noop::NoopNetwork;
 
     #[test]
     fn test_required_block_filter_creation() {
         let network = NoopNetwork::default();
         let block_num_hashes = vec![
-            BlockNumHash::new(
-                0,
-                b256!("0x1111111111111111111111111111111111111111111111111111111111111111"),
-            ),
-            BlockNumHash::new(
-                23115201,
-                b256!("0x2222222222222222222222222222222222222222222222222222222222222222"),
-            ),
+            BlockNumHash::new(0, B256::repeat_byte(0x11)),
+            BlockNumHash::new(23115201, B256::repeat_byte(0x22)),
         ];
 
         let filter = RequiredBlockFilter::new(network, block_num_hashes.clone());

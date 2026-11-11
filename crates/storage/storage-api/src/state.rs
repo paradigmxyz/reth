@@ -12,8 +12,7 @@ use reth_chain_state::ExecutedBlock;
 use reth_execution_types::ExecutionOutcome;
 use reth_primitives_traits::{Bytecode, NodePrimitives};
 use reth_storage_errors::provider::ProviderResult;
-use reth_trie_common::HashedPostState;
-use revm::database::BundleState;
+use reth_trie_common::{bundle_state::BundleState, HashedPostState};
 
 /// This just receives state, or [`ExecutionOutcome`], from the provider
 #[auto_impl::auto_impl(&, Arc, Box)]
@@ -149,7 +148,7 @@ pub trait BytecodeReader {
 /// the parent block. For example, in order to trace block `n`, the state after block `n - 1` needs
 /// to be used, since block `n` was executed on its parent block's state.
 #[auto_impl(&, Box, Arc)]
-pub trait StateProviderFactory: BlockIdReader + Send {
+pub trait StateProviderFactory: BlockIdReader {
     /// The node primitive types.
     type Primitives: NodePrimitives;
 
@@ -194,9 +193,9 @@ pub trait StateProviderFactory: BlockIdReader + Send {
     /// Note: this only looks at historical blocks, not pending blocks.
     fn history_by_block_hash(&self, block: BlockHash) -> ProviderResult<StateProviderBox>;
 
-    /// Returns _any_ [StateProvider] with matching block hash.
+    /// Returns _any_ [`StateProvider`] with matching block hash.
     ///
-    /// This will return a [StateProvider] for either a historical or pending block.
+    /// This will return a [`StateProvider`] for either a historical or pending block.
     fn state_by_block_hash(&self, block: BlockHash) -> ProviderResult<StateProviderBox>;
 
     /// Storage provider for pending state.

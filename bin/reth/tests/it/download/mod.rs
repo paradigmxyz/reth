@@ -252,11 +252,23 @@ async fn wrong_chain_is_rejected_before_force_removes_data() {
     let dir = tempfile::tempdir().unwrap();
     fs::create_dir(dir.path().join("db")).unwrap();
     fs::write(dir.path().join("db/existing"), b"keep").unwrap();
-    let output = download(&server, dir.path(), &["--force"]);
+    let output = download(&server, dir.path(), &["--full", "--force"]);
     assert!(!output.status.success(), "a Sepolia snapshot must not be installed for mainnet");
     assert!(String::from_utf8_lossy(&output.stderr).contains("chain ID"));
     assert_eq!(fs::read(dir.path().join("db/existing")).unwrap(), b"keep");
     assert_eq!(server.requests(), vec![("/snapshot/manifest.json".into(), None)]);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn explicit_archive_source_and_datadir_allow_other_chains() {
+    let mut snapshot = Snapshot::new();
+    snapshot.manifest["chain_id"] = json!(42431);
+    let server = snapshot.serve(true).await;
+    let dir = tempfile::tempdir().unwrap();
+    success(download(&server, dir.path(), &["--archive"]));
+    assert_eq!(fs::read(dir.path().join("db/snapshot")).unwrap(), b"state.tar.zst");
+    assert_eq!(fs::read(dir.path().join("static_files/txs-0")).unwrap(), b"txs-0.tar.zst");
+    assert!(dir.path().join("reth.toml").exists());
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -282,4 +294,35 @@ async fn bad_output_checksum_prevents_finalization() {
     );
     assert!(!dir.path().join("reth.toml").exists());
     assert!(!dir.path().join("db/mdbx.dat").exists());
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn completion_only_suggests_startup_for_matching_chain() {
+    for (chain_id, expected_suffix) in [(1, " Run `reth node` to start syncing."), (42431, "")] {
+        let mut snapshot = Snapshot::new();
+        snapshot.manifest["chain_id"] = json!(chain_id);
+        let server = snapshot.serve(true).await;
+        let dir = tempfile::tempdir().unwrap();
+        let output = Command::new(RETH)
+            .env("RUST_LOG", "reth::cli=info")
+            .args(["download", "--color", "never", "--archive", "--non-interactive"])
+            .args(["--manifest-url", &format!("{}/snapshot/manifest.json", server.url)])
+            .arg("--datadir")
+            .arg(dir.path())
+            .output()
+            .unwrap();
+        let logs = format!(
+            "{}{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        success(output);
+        let suffix = logs
+            .lines()
+            .find_map(|line| {
+                line.split_once("Snapshot download complete.").map(|(_, suffix)| suffix)
+            })
+            .unwrap();
+        assert_eq!(suffix, expected_suffix);
+    }
 }

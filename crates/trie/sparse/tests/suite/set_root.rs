@@ -111,7 +111,7 @@ pub(super) fn test_set_root_does_not_retain_updates_when_not_requested<T: Sparse
     let mut key_c = B256::ZERO;
     key_c.0[0] = 0x30;
     let storage: BTreeMap<B256, U256> =
-        BTreeMap::from([(key_a, U256::from(1)), (key_b, U256::from(2)), (key_c, U256::from(3))]);
+        BTreeMap::from([(key_a, U256::ONE), (key_b, U256::from(2)), (key_c, U256::from(3))]);
 
     let harness = SuiteTestHarness::new(storage);
     // retain_updates = false

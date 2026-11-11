@@ -10,7 +10,7 @@ use reth_e2e_test_utils::{eth_payload_attributes, test_chain_spec, E2ETestSetupE
 use reth_node_api::BeaconForkChoiceUpdateError;
 use reth_node_ethereum::{EthEngineTypes, EthereumNode};
 use reth_provider::{DatabaseProviderFactory, HeaderProvider};
-use reth_rpc_api::{EngineApiClient, TestingBuildBlockRequestV1};
+use reth_rpc_api::{EngineApiClient, TestingBuildBlockRequestV1, TestingBuildBlockResponseV1};
 use reth_rpc_server_types::{RethRpcModule, RpcModuleSelection};
 use std::time::Duration;
 
@@ -40,7 +40,7 @@ async fn invalid_forkchoice_preserves_canonical_state() -> eyre::Result<()> {
     let mut chains = [vec![genesis], vec![genesis]];
     for (branch, length) in [3, 2].into_iter().enumerate() {
         for number in 1..=length {
-            let envelope = producer
+            let TestingBuildBlockResponseV1::V5(envelope) = producer
                 .testing_build_block_v1(TestingBuildBlockRequestV1 {
                     parent_block_hash: *chains[branch].last().unwrap(),
                     payload_attributes: eth_payload_attributes(
@@ -50,7 +50,10 @@ async fn invalid_forkchoice_preserves_canonical_state() -> eyre::Result<()> {
                     transactions: vec![],
                     extra_data: None,
                 })
-                .await?;
+                .await?
+            else {
+                panic!("expected a V5 envelope")
+            };
             let payload = envelope.execution_payload;
             let hash = payload.payload_inner.payload_inner.block_hash;
             for client in [&producer_engine, &engine] {
@@ -211,7 +214,7 @@ async fn assert_fcu_restores_reorged_out_persisted_head(sibling_len: u64) -> eyr
     let mut chains = [vec![genesis], vec![genesis]];
     for (branch, length) in [3, sibling_len].into_iter().enumerate() {
         for number in 1..=length {
-            let envelope = producer
+            let TestingBuildBlockResponseV1::V5(envelope) = producer
                 .testing_build_block_v1(TestingBuildBlockRequestV1 {
                     parent_block_hash: *chains[branch].last().unwrap(),
                     payload_attributes: eth_payload_attributes(
@@ -221,7 +224,10 @@ async fn assert_fcu_restores_reorged_out_persisted_head(sibling_len: u64) -> eyr
                     transactions: vec![],
                     extra_data: None,
                 })
-                .await?;
+                .await?
+            else {
+                panic!("expected a V5 envelope")
+            };
             let payload = envelope.execution_payload;
             let hash = payload.payload_inner.payload_inner.block_hash;
             for client in [&producer_engine, &engine] {
@@ -314,14 +320,17 @@ async fn fcu_unwinds_canonical_chain_to_genesis() -> eyre::Result<()> {
 
     let mut head = genesis;
     for number in 1..=3 {
-        let envelope = node
+        let TestingBuildBlockResponseV1::V5(envelope) = node
             .testing_build_block_v1(TestingBuildBlockRequestV1 {
                 parent_block_hash: head,
                 payload_attributes: eth_payload_attributes(&chain_spec, number),
                 transactions: vec![],
                 extra_data: None,
             })
-            .await?;
+            .await?
+        else {
+            panic!("expected a V5 envelope")
+        };
         let payload = envelope.execution_payload;
         let hash = payload.payload_inner.payload_inner.block_hash;
         let status =

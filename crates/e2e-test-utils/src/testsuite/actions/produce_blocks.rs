@@ -206,7 +206,7 @@ pub struct GeneratePayloadAttributes {}
 
 impl<Engine> Action<Engine> for GeneratePayloadAttributes
 where
-    Engine: EngineTypes + PayloadTypes,
+    Engine: EngineTypes,
     Engine::PayloadAttributes: From<PayloadAttributes>,
 {
     fn execute<'a>(&'a mut self, env: &'a mut Environment<Engine>) -> BoxFuture<'a, Result<()>> {
@@ -242,7 +242,7 @@ pub struct GenerateNextPayload {}
 
 impl<Engine> Action<Engine> for GenerateNextPayload
 where
-    Engine: EngineTypes + PayloadTypes,
+    Engine: EngineTypes,
     Engine::PayloadAttributes: From<PayloadAttributes> + Clone,
 {
     fn execute<'a>(&'a mut self, env: &'a mut Environment<Engine>) -> BoxFuture<'a, Result<()>> {
@@ -360,7 +360,7 @@ pub struct BroadcastLatestForkchoice {}
 
 impl<Engine> Action<Engine> for BroadcastLatestForkchoice
 where
-    Engine: EngineTypes + PayloadTypes,
+    Engine: EngineTypes,
     Engine::PayloadAttributes: From<PayloadAttributes> + Clone,
     Engine::ExecutionPayloadEnvelopeV3: Into<ExecutionPayloadEnvelopeV3>,
 {
@@ -467,7 +467,7 @@ pub struct UpdateBlockInfoToLatestPayload {}
 
 impl<Engine> Action<Engine> for UpdateBlockInfoToLatestPayload
 where
-    Engine: EngineTypes + PayloadTypes,
+    Engine: EngineTypes,
     Engine::ExecutionPayloadEnvelopeV3: Into<ExecutionPayloadEnvelopeV3>,
 {
     fn execute<'a>(&'a mut self, env: &'a mut Environment<Engine>) -> BoxFuture<'a, Result<()>> {
@@ -575,7 +575,7 @@ where
                     continue;
                 }
 
-                if rpc_latest_header.inner.difficulty != alloy_primitives::U256::ZERO {
+                if !rpc_latest_header.inner.difficulty.is_zero() {
                     debug!(
                         "Client {}: difficulty != 0: {:?}",
                         idx, rpc_latest_header.inner.difficulty
@@ -641,7 +641,7 @@ impl BroadcastNextNewPayload {
 
 impl<Engine> Action<Engine> for BroadcastNextNewPayload
 where
-    Engine: EngineTypes + PayloadTypes,
+    Engine: EngineTypes,
     Engine::PayloadAttributes: From<PayloadAttributes> + Clone,
     Engine::ExecutionPayloadEnvelopeV3: Into<ExecutionPayloadEnvelopeV3>,
 {
@@ -772,7 +772,7 @@ impl<Engine> Default for ProduceBlocks<Engine> {
 
 impl<Engine> Action<Engine> for ProduceBlocks<Engine>
 where
-    Engine: EngineTypes + PayloadTypes,
+    Engine: EngineTypes,
     Engine::PayloadAttributes: From<PayloadAttributes> + Clone,
     Engine::ExecutionPayloadEnvelopeV3: Into<ExecutionPayloadEnvelopeV3>,
 {
@@ -963,7 +963,7 @@ impl<Engine> Default for ProduceBlocksLocally<Engine> {
 
 impl<Engine> Action<Engine> for ProduceBlocksLocally<Engine>
 where
-    Engine: EngineTypes + PayloadTypes,
+    Engine: EngineTypes,
     Engine::PayloadAttributes: From<PayloadAttributes> + Clone,
     Engine::ExecutionPayloadEnvelopeV3: Into<ExecutionPayloadEnvelopeV3>,
 {
@@ -1020,7 +1020,7 @@ impl<Engine> ProduceInvalidBlocks<Engine> {
 
 impl<Engine> Action<Engine> for ProduceInvalidBlocks<Engine>
 where
-    Engine: EngineTypes + PayloadTypes,
+    Engine: EngineTypes,
     Engine::PayloadAttributes: From<PayloadAttributes> + Clone,
     Engine::ExecutionPayloadEnvelopeV3: Into<ExecutionPayloadEnvelopeV3>,
 {

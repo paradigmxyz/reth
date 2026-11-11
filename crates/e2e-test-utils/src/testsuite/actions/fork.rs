@@ -9,7 +9,7 @@ use alloy_rpc_types_eth::{Block, Header, Receipt, Transaction, TransactionReques
 use eyre::Result;
 use futures_util::future::BoxFuture;
 use reth_ethereum_primitives::TransactionSigned;
-use reth_node_api::{EngineTypes, PayloadTypes};
+use reth_node_api::EngineTypes;
 use reth_rpc_api::clients::EthApiClient;
 use std::marker::PhantomData;
 use tracing::debug;
@@ -52,7 +52,7 @@ impl<Engine> CreateFork<Engine> {
 
 impl<Engine> Action<Engine> for CreateFork<Engine>
 where
-    Engine: EngineTypes + PayloadTypes,
+    Engine: EngineTypes,
     Engine::PayloadAttributes: From<PayloadAttributes> + Clone,
     Engine::ExecutionPayloadEnvelopeV3:
         Into<alloy_rpc_types_engine::payload::ExecutionPayloadEnvelopeV3>,

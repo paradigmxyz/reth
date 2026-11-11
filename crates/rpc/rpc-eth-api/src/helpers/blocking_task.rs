@@ -23,7 +23,7 @@ use crate::EthApiTypes;
 /// This provides access to semaphores that permit how many of those are permitted concurrently.
 /// It's expected that tracing related tasks are configured with a lower threshold, because not only
 /// are they CPU heavy but they can also accumulate more memory for the traces.
-pub trait SpawnBlocking: EthApiTypes + Clone + Send + Sync + 'static {
+pub trait SpawnBlocking: EthApiTypes + 'static {
     /// Returns a handle for spawning IO heavy blocking tasks.
     ///
     /// Runtime access in default trait method implementations.

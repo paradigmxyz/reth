@@ -19,23 +19,25 @@ use core::fmt;
 use jsonrpsee::core::RpcResult;
 use jsonrpsee_types::error::ErrorObject;
 use reth_chainspec::{ChainSpecProvider, EthereumHardforks};
-use reth_consensus::{Consensus, FullConsensus};
+use reth_consensus::FullConsensus;
 use reth_consensus_common::validation::MAX_RLP_BLOCK_SIZE;
 use reth_engine_primitives::PayloadValidator;
 use reth_errors::{BlockExecutionError, ConsensusError, ProviderError};
-use reth_evm::{execute::Executor, ConfigureEvm, SenderRecoveryCache};
+use reth_evm::{
+    cached::CachedReads, database::StateProviderDatabase, execute::Executor, ConfigureEvm,
+    SenderRecoveryCache,
+};
 use reth_execution_types::BlockExecutionOutput;
 use reth_metrics::{
     metrics,
     metrics::{gauge, Gauge},
     Metrics,
 };
-use reth_node_api::{NewPayloadError, PayloadTypes};
+use reth_payload_primitives::{NewPayloadError, PayloadTypes};
 use reth_primitives_traits::{
     block::error::SealedBlockRecoveryError, BlockBody, GotExpected, NodePrimitives, RecoveredBlock,
     SealedBlock, SealedHeaderFor,
 };
-use reth_revm::{cached::CachedReads, database::StateProviderDatabase};
 use reth_rpc_api::BlockSubmissionValidationApiServer;
 use reth_rpc_server_types::result::{internal_rpc_err, invalid_params_rpc_err};
 use reth_storage_api::{
@@ -243,19 +245,18 @@ where
             let block_access_list_hash =
                 executor.take_bal().map(|bal| compute_block_access_list_hash(&bal));
 
-            let mut state = executor.into_state();
+            let state = executor.into_state();
             if !self.disallow.is_empty() {
                 // Check whether the submission interacted with any blacklisted account by
-                // scanning the `State`'s cache that records everything read from database
-                // during execution.
-                for account in state.cache.accounts.keys() {
+                // scanning the cached reads and the accounts changed during execution.
+                for account in request_cache.accounts.keys().chain(state.state.keys()) {
                     if self.disallow.contains(account) {
                         return Err(ValidationApiError::Blacklist(*account))
                     }
                 }
             }
 
-            (BlockExecutionOutput { state: state.take_bundle(), result }, block_access_list_hash)
+            (BlockExecutionOutput { state, result }, block_access_list_hash)
         };
 
         // update the cached reads
@@ -330,7 +331,7 @@ where
         }
 
         let (mut balance_before, balance_after) = if let Some(acc) =
-            output.state.account(&message.proposer_fee_recipient)
+            output.account_state(&message.proposer_fee_recipient)
         {
             let balance_before = acc.original_info.as_ref().map(|i| i.balance).unwrap_or_default();
             let balance_after = acc.info.as_ref().map(|i| i.balance).unwrap_or_default();
@@ -802,16 +803,12 @@ impl From<ValidationApiError> for ErrorObject<'static> {
             ValidationApiError::ProposerPayment |
             ValidationApiError::InvalidBlobsBundle |
             ValidationApiError::InvalidBlockAccessList(_) |
-            ValidationApiError::Blob(_) => invalid_params_rpc_err(error.to_string()),
+            ValidationApiError::Blob(_) |
+            ValidationApiError::Consensus(_) => invalid_params_rpc_err(error.to_string()),
 
-            ValidationApiError::Consensus(
-                error @ (ConsensusError::BlockAccessListCostMoreThanGasLimit(_) |
-                ConsensusError::BlockAccessListHashMismatch(_)),
-            ) => invalid_params_rpc_err(error.to_string()),
             ValidationApiError::MissingLatestBlock |
             ValidationApiError::MissingParentBlock |
             ValidationApiError::BlockTooOld |
-            ValidationApiError::Consensus(_) |
             ValidationApiError::Provider(_) => internal_rpc_err(error.to_string()),
             ValidationApiError::Execution(err) => match err {
                 error @ BlockExecutionError::Validation(_) => {
@@ -845,18 +842,19 @@ mod tests {
     use alloy_primitives::{Address, B256, U256};
     use alloy_rpc_types_beacon::relay::BidTrace;
     use alloy_rpc_types_engine::{ExecutionData, ExecutionPayload, ExecutionPayloadV1};
+    use evm2::evm::AccountInfo;
     use reth_consensus::noop::NoopConsensus;
     use reth_engine_primitives::PayloadValidator;
+    use reth_errors::ConsensusError;
     use reth_ethereum_engine_primitives::EthPayloadTypes;
     use reth_ethereum_primitives::Block;
     use reth_evm_ethereum::EthEvmConfig;
     use reth_execution_types::BlockExecutionOutput;
-    use reth_node_api::NewPayloadError;
+    use reth_payload_primitives::NewPayloadError;
     use reth_primitives_traits::{RecoveredBlock, SealedBlock, SealedHeader};
     use reth_provider::test_utils::MockEthProvider;
-    use reth_revm::db::{states::bundle_state::BundleState, AccountStatus, BundleAccount};
     use reth_tasks::Runtime;
-    use revm::state::AccountInfo;
+    use reth_trie_common::bundle_state::{AccountStatus, BundleAccount, BundleState};
     use std::sync::Arc;
 
     fn test_execution_payload() -> ExecutionPayload {
@@ -948,8 +946,8 @@ mod tests {
     #[test]
     fn test_hash_disallow_list_deterministic() {
         let mut addresses = AddressSet::default();
-        addresses.insert(Address::from([1u8; 20]));
-        addresses.insert(Address::from([2u8; 20]));
+        addresses.insert(Address::repeat_byte(1u8));
+        addresses.insert(Address::repeat_byte(2u8));
 
         let hash1 = hash_disallow_list(&addresses);
         let hash2 = hash_disallow_list(&addresses);
@@ -960,10 +958,10 @@ mod tests {
     #[test]
     fn test_hash_disallow_list_different_content() {
         let mut addresses1 = AddressSet::default();
-        addresses1.insert(Address::from([1u8; 20]));
+        addresses1.insert(Address::repeat_byte(1u8));
 
         let mut addresses2 = AddressSet::default();
-        addresses2.insert(Address::from([2u8; 20]));
+        addresses2.insert(Address::repeat_byte(2u8));
 
         let hash1 = hash_disallow_list(&addresses1);
         let hash2 = hash_disallow_list(&addresses2);
@@ -974,12 +972,12 @@ mod tests {
     #[test]
     fn test_hash_disallow_list_order_independent() {
         let mut addresses1 = AddressSet::default();
-        addresses1.insert(Address::from([1u8; 20]));
-        addresses1.insert(Address::from([2u8; 20]));
+        addresses1.insert(Address::repeat_byte(1u8));
+        addresses1.insert(Address::repeat_byte(2u8));
 
         let mut addresses2 = AddressSet::default();
-        addresses2.insert(Address::from([2u8; 20])); // Different insertion order
-        addresses2.insert(Address::from([1u8; 20]));
+        addresses2.insert(Address::repeat_byte(2u8)); // Different insertion order
+        addresses2.insert(Address::repeat_byte(1u8));
 
         let hash1 = hash_disallow_list(&addresses1);
         let hash2 = hash_disallow_list(&addresses2);
@@ -1103,6 +1101,73 @@ mod tests {
         };
 
         (provider, block, message)
+    }
+
+    #[tokio::test]
+    async fn execution_invalid_submission_is_invalid_params() {
+        let (provider, parent_block, mut message) = payment_free_submission();
+        let transaction = reth_ethereum_primitives::TransactionSigned::new_unhashed(
+            reth_ethereum_primitives::Transaction::Legacy(alloy_consensus::TxLegacy {
+                gas_limit: 20_999,
+                to: alloy_primitives::TxKind::Call(Address::with_last_byte(1)),
+                ..Default::default()
+            }),
+            alloy_primitives::Signature::test_signature(),
+        );
+        let block = RecoveredBlock::new_unhashed(
+            Block {
+                header: parent_block.clone_header(),
+                body: alloy_consensus::BlockBody {
+                    transactions: vec![transaction],
+                    ..Default::default()
+                },
+            },
+            vec![Address::ZERO],
+        );
+        message.block_hash = block.hash();
+        let error = test_validation_api(provider)
+            .validate_message_against_block(block, message, parent_block.gas_limit(), None)
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(
+                error,
+                ValidationApiError::Execution(reth_errors::BlockExecutionError::Validation(_))
+            ),
+            "{error}"
+        );
+        let error = jsonrpsee::types::ErrorObjectOwned::from(error);
+        assert_eq!(error.code(), jsonrpsee::types::error::INVALID_PARAMS_CODE);
+    }
+
+    #[tokio::test]
+    async fn consensus_invalid_submission_is_invalid_params() {
+        let (provider, block, mut message) = payment_free_submission();
+        // The mock provider hands out the recomputed state root from this list, so the block's
+        // header no longer matches it.
+        *provider.state_roots.lock() = vec![B256::repeat_byte(0xab)];
+        // A zero-value bid skips the payment check, leaving the state root comparison as the
+        // first failing check.
+        message.value = U256::ZERO;
+        let registered_gas_limit = block.gas_limit();
+
+        let error = test_validation_api(provider)
+            .validate_message_against_block(block, message, registered_gas_limit, None)
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(error, ValidationApiError::Consensus(ConsensusError::BodyStateRootDiff(_))),
+            "{error}"
+        );
+        let error = jsonrpsee::types::ErrorObjectOwned::from(error);
+        assert_eq!(error.code(), jsonrpsee::types::error::INVALID_PARAMS_CODE);
+    }
+
+    #[test]
+    fn node_fault_is_internal_error() {
+        let error =
+            jsonrpsee::types::ErrorObjectOwned::from(ValidationApiError::MissingParentBlock);
+        assert_eq!(error.code(), jsonrpsee::types::error::INTERNAL_ERROR_CODE);
     }
 
     #[tokio::test]
