@@ -7,6 +7,7 @@ use crate::{
     NetworkHandle, NetworkManager,
 };
 use alloy_eips::BlockNumHash;
+use futures::FutureExt;
 use reth_chainspec::{ChainSpecProvider, EthChainSpec, Hardforks};
 use reth_discv4::{Discv4Config, Discv4ConfigBuilder, NatResolver, DEFAULT_DISCOVERY_ADDRESS};
 use reth_discv5::NetworkStackId;
@@ -25,7 +26,6 @@ use reth_storage_api::{
     StateRangeProviderFactory,
 };
 use reth_tasks::Runtime;
-use secp256k1::SECP256K1;
 use std::{collections::HashSet, net::SocketAddr, sync::Arc};
 
 // re-export for convenience
@@ -37,7 +37,7 @@ pub use secp256k1::SecretKey;
 
 /// Convenience function to create a new random [`SecretKey`]
 pub fn rng_secret_key() -> SecretKey {
-    SecretKey::new(&mut rand_08::thread_rng())
+    SecretKey::new(&mut rand::rng())
 }
 
 /// All network related initialization settings.
@@ -179,8 +179,8 @@ where
             .request_handler::<C>(client)
             .split_with_handle();
 
-        tokio::task::spawn(network);
-        tokio::task::spawn(eth);
+        tokio::task::spawn(network.boxed());
+        tokio::task::spawn(eth.boxed());
         Ok(handle)
     }
 }
@@ -293,7 +293,7 @@ impl<N: NetworkPrimitives> NetworkConfigBuilder<N> {
 
     /// Returns the configured [`PeerId`]
     pub fn get_peer_id(&self) -> PeerId {
-        pk2id(&self.secret_key.public_key(SECP256K1))
+        pk2id(&self.secret_key.public_key())
     }
 
     /// Returns the configured [`SecretKey`], from which the node's identity is derived.
@@ -805,7 +805,7 @@ mod tests {
     use std::{net::Ipv4Addr, sync::Arc};
 
     fn builder() -> NetworkConfigBuilder {
-        let secret_key = SecretKey::new(&mut rand_08::thread_rng());
+        let secret_key = SecretKey::new(&mut rand::rng());
         NetworkConfigBuilder::new(secret_key, Runtime::test())
     }
 

@@ -311,6 +311,7 @@ mod tests {
     use crate::test_utils::insert_generation_headers;
     use alloy_eips::BlockNumHash;
     use alloy_primitives::{Bytes, B256};
+    use evm2::bytecode::Bytecode;
     use reth_db_api::{tables, transaction::DbTx};
     use reth_primitives_traits::Account;
     use reth_provider::{
@@ -318,8 +319,7 @@ mod tests {
         DBProvider, DatabaseProviderFactory, ProviderFactory,
     };
     use reth_storage_api::{metadata::keys, StateWriter};
-    use reth_trie_common::HashedPostState;
-    use revm::{bytecode::Bytecode, database::states::StateChangeset};
+    use reth_trie_common::{bundle_state::StateChangeset, HashedPostState};
 
     const HASHED_ADDRESS: B256 = B256::repeat_byte(0xbb);
 

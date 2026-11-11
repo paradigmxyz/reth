@@ -25,7 +25,6 @@ pub use alloy_chains::{Chain, ChainKind, NamedChain};
 /// Re-export for convenience
 pub use reth_ethereum_forks::*;
 
-pub use alloy_evm::EvmLimitParams;
 pub use api::EthChainSpec;
 pub use info::ChainInfo;
 #[cfg(any(test, feature = "test-utils"))]
@@ -39,6 +38,9 @@ pub use spec::{
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{ChainSpec, EthChainSpec};
+    use alloy_consensus::Header;
+    use alloy_eips::eip1559::INITIAL_BASE_FEE;
     use alloy_primitives::U256;
     use alloy_rlp::Encodable;
     use std::str::FromStr;
@@ -141,10 +143,6 @@ mod tests {
 
     #[test]
     fn test_centralized_base_fee_calculation() {
-        use crate::{ChainSpec, EthChainSpec};
-        use alloy_consensus::Header;
-        use alloy_eips::eip1559::INITIAL_BASE_FEE;
-
         fn parent_header() -> Header {
             Header {
                 gas_used: 15_000_000,

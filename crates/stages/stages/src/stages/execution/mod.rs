@@ -7,7 +7,9 @@ use reth_chainspec::{ChainSpecProvider, EthereumHardforks};
 use reth_config::config::ExecutionConfig;
 use reth_consensus::FullConsensus;
 use reth_db::{static_file::HeaderMask, tables};
-use reth_evm::{execute::Executor, metrics::ExecutorMetrics, ConfigureEvm};
+use reth_evm::{
+    database::StateProviderDatabase, execute::Executor, metrics::ExecutorMetrics, ConfigureEvm,
+};
 use reth_execution_types::Chain;
 use reth_exex::{ExExManagerHandle, ExExNotification, ExExNotificationSource};
 use reth_primitives_traits::{format_gas_throughput, BlockBody, NodePrimitives};
@@ -18,7 +20,6 @@ use reth_provider::{
     StateWriteConfig, StateWriter, StaticFileProviderFactory, StatsReader, StoragePath,
     StorageSettingsCache, TransactionVariant,
 };
-use reth_revm::database::StateProviderDatabase;
 use reth_stages_api::{
     BlockErrorKind, CheckpointBlockRange, EntitiesCheckpoint, ExecInput, ExecOutput,
     ExecutionCheckpoint, ExecutionStageThresholds, Stage, StageCheckpoint, StageError, StageId,
@@ -418,11 +419,7 @@ where
 
         // prepare execution output for writing
         let time = Instant::now();
-        let mut state = ExecutionOutcome::from_blocks(
-            start_block,
-            executor.into_state().take_bundle(),
-            results,
-        );
+        let mut state = ExecutionOutcome::from_blocks(start_block, executor.into_state(), results);
         let write_preparation_duration = time.elapsed();
 
         // log the gas per second for the range we just executed
@@ -571,7 +568,7 @@ where
             })
         }
 
-        reject_cancun_boundary_unwind(provider, input.checkpoint.block_number, unwind_to)?;
+        reject_cancun_boundary_unwind(provider, input.checkpoint.block_number, input.unwind_to)?;
 
         self.ensure_consistency(provider, input.checkpoint.block_number, Some(unwind_to))?;
 
@@ -629,6 +626,14 @@ where
         );
 
         Ok(())
+    }
+
+    fn validate_unwind(
+        &mut self,
+        provider: &Provider,
+        input: UnwindInput,
+    ) -> Result<(), StageError> {
+        reject_cancun_boundary_unwind(provider, input.checkpoint.block_number, input.unwind_to)
     }
 }
 
@@ -793,9 +798,9 @@ mod tests {
     };
     use reth_prune::PruneModes;
     use reth_prune_types::{PruneMode, ReceiptsLogPruneConfig};
-    use reth_revm::revm::database::{AccountStatus, BundleAccount};
     use reth_stages_api::StageUnitCheckpoint;
     use reth_testing_utils::generators;
+    use reth_trie::bundle_state::{AccountStatus, BundleAccount};
     use std::collections::BTreeMap;
 
     fn stage() -> ExecutionStage<EthEvmConfig> {
@@ -1265,44 +1270,16 @@ mod tests {
         let provider = factory.database_provider_rw().unwrap();
 
         let mut rng = generators::rng();
-        let mut genesis = generators::random_block(
-            &mut rng,
-            0,
-            generators::BlockParams { tx_count: Some(0), ..Default::default() },
-        )
-        .unseal();
-        genesis.header.timestamp = 0;
-        let genesis = genesis.seal_slow();
-
-        let mut block_1 = generators::random_block(
-            &mut rng,
-            1,
-            generators::BlockParams {
-                parent: Some(genesis.hash()),
-                tx_count: Some(0),
-                ..Default::default()
-            },
-        )
-        .unseal();
-        block_1.header.timestamp = 10;
-        let block_1 = block_1.seal_slow();
-
-        let mut block_2 = generators::random_block(
-            &mut rng,
-            2,
-            generators::BlockParams {
-                parent: Some(block_1.hash()),
-                tx_count: Some(0),
-                ..Default::default()
-            },
-        )
-        .unseal();
-        block_2.header.timestamp = 20;
-        let block_2 = block_2.seal_slow();
-
-        provider.insert_block(&genesis.try_recover().unwrap()).unwrap();
-        provider.insert_block(&block_1.try_recover().unwrap()).unwrap();
-        provider.insert_block(&block_2.try_recover().unwrap()).unwrap();
+        for number in 0..=4 {
+            let mut block = generators::random_block(
+                &mut rng,
+                number,
+                generators::BlockParams { tx_count: Some(0), ..Default::default() },
+            )
+            .unseal();
+            block.header.timestamp = number * 10;
+            provider.insert_block(&block.seal_slow().try_recover().unwrap()).unwrap();
+        }
         provider
             .static_file_provider()
             .latest_writer(StaticFileSegment::Headers)
@@ -1311,15 +1288,30 @@ mod tests {
             .unwrap();
 
         let mut execution_stage = stage();
-        let err = execution_stage
-            .unwind(
-                &provider,
-                UnwindInput { checkpoint: StageCheckpoint::new(2), unwind_to: 1, bad_block: None },
-            )
-            .unwrap_err();
-
-        assert_matches!(err, StageError::Fatal(_));
-        assert!(err.to_string().contains("across Cancun activation boundary"));
+        execution_stage.thresholds.max_blocks = Some(1);
+        // From block 4, the first batch stays Cancun-active. Reject the final pre-Cancun
+        // target on the very first call, before consistency checks or state writes.
+        for checkpoint in [2, 4] {
+            let input = UnwindInput {
+                checkpoint: StageCheckpoint::new(checkpoint),
+                unwind_to: 1,
+                bad_block: None,
+            };
+            if checkpoint == 4 {
+                assert!(input.unwind_block_range_with_threshold(1).1 >= 2);
+            }
+            for err in [
+                execution_stage.validate_unwind(&provider, input).unwrap_err(),
+                execution_stage.unwind(&provider, input).unwrap_err(),
+            ] {
+                assert_matches!(err, StageError::Fatal(_));
+                assert_eq!(err.to_string(), format!(
+                    "execution unwind across Cancun activation boundary is not allowed: checkpoint \
+                     block #{checkpoint} (ts={}) is Cancun-active but unwind target #1 (ts=10) is pre-Cancun",
+                    checkpoint * 10,
+                ));
+            }
+        }
     }
 
     #[tokio::test]

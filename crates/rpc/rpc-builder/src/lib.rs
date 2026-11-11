@@ -951,6 +951,19 @@ where
         namespaces
             .iter()
             .map(|namespace| {
+                // `rpc` lists the namespaces of the transport it is built for, so it can't be
+                // cached in `self.modules`
+                if matches!(namespace, RethRpcModule::Rpc) {
+                    return RPCApi::new(
+                        namespaces
+                            .iter()
+                            .map(|module| (module.to_string(), "1.0".to_string()))
+                            .collect(),
+                    )
+                    .into_rpc()
+                    .into();
+                }
+
                 self.modules
                     .entry(namespace.clone())
                     .or_insert_with(|| match namespace.clone() {
@@ -1003,14 +1016,6 @@ where
                         )
                         .into_rpc()
                         .into(),
-                        RethRpcModule::Rpc => RPCApi::new(
-                            namespaces
-                                .iter()
-                                .map(|module| (module.to_string(), "1.0".to_string()))
-                                .collect(),
-                        )
-                        .into_rpc()
-                        .into(),
                         RethRpcModule::Ots => OtterscanApi::new(eth_api.clone()).into_rpc().into(),
                         RethRpcModule::Reth => RethApi::new(
                             self.provider.clone(),
@@ -1026,9 +1031,10 @@ where
                                 .into_rpc()
                                 .into()
                         }
-                        // these are implementation specific and need to be handled during
-                        // initialization and should be registered via extend_rpc_modules in the
-                        // nodebuilder rpc addon stack
+                        // `rpc` is built above, the others are implementation specific and need
+                        // to be handled during initialization and should be registered via
+                        // extend_rpc_modules in the nodebuilder rpc addon stack
+                        RethRpcModule::Rpc |
                         RethRpcModule::Flashbots |
                         RethRpcModule::Testing |
                         RethRpcModule::Other(_) => Default::default(),
@@ -1508,9 +1514,8 @@ impl<RpcMiddleware> RpcServerConfig<RpcMiddleware> {
                     RpcError::server_error(err, ServerKind::WsHttp(http_socket_addr))
                 })?;
                 if let Some(module) = modules.http.as_ref().or(modules.ws.as_ref()) {
-                    let handle = server.start(module.clone());
-                    http_handle = Some(handle.clone());
-                    ws_handle = Some(handle);
+                    // Both transports share one server, so only keep one shutdown handle.
+                    http_handle = Some(server.start(module.clone()));
                 }
                 return Ok(RpcServerHandle {
                     http_local_addr: Some(addr),
@@ -1980,11 +1985,7 @@ impl TransportRpcModules {
     /// it's the caller responsibility to remove both `subscribe` and `unsubscribe` methods for
     /// subscriptions.
     pub fn remove_http_method(&mut self, method_name: &'static str) -> bool {
-        if let Some(http_module) = &mut self.http {
-            http_module.remove_method(method_name).is_some()
-        } else {
-            false
-        }
+        self.http.as_mut().is_some_and(|module| module.remove_method(method_name).is_some())
     }
 
     /// Removes the given methods from the configured http methods.
@@ -2002,11 +2003,7 @@ impl TransportRpcModules {
     /// it's the caller responsibility to remove both `subscribe` and `unsubscribe` methods for
     /// subscriptions.
     pub fn remove_ws_method(&mut self, method_name: &'static str) -> bool {
-        if let Some(ws_module) = &mut self.ws {
-            ws_module.remove_method(method_name).is_some()
-        } else {
-            false
-        }
+        self.ws.as_mut().is_some_and(|module| module.remove_method(method_name).is_some())
     }
 
     /// Removes the given methods from the configured ws methods.
@@ -2024,11 +2021,7 @@ impl TransportRpcModules {
     /// it's the caller responsibility to remove both `subscribe` and `unsubscribe` methods for
     /// subscriptions.
     pub fn remove_ipc_method(&mut self, method_name: &'static str) -> bool {
-        if let Some(ipc_module) = &mut self.ipc {
-            ipc_module.remove_method(method_name).is_some()
-        } else {
-            false
-        }
+        self.ipc.as_mut().is_some_and(|module| module.remove_method(method_name).is_some())
     }
 
     /// Removes the given methods from the configured ipc methods.
@@ -2247,11 +2240,16 @@ impl RpcServerHandle {
 
     /// Tell the server to stop without waiting for the server to stop.
     pub fn stop(self) -> Result<(), AlreadyStoppedError> {
+        // HTTP and WS share one server, and one stop handle, when they use the same address.
+        // Stopping it twice would race with the server shutting down after the first stop.
+        let shared_server =
+            self.http_local_addr.is_some() && self.http_local_addr == self.ws_local_addr;
+
         if let Some(handle) = self.http {
             handle.stop()?
         }
 
-        if let Some(handle) = self.ws {
+        if let Some(handle) = self.ws.filter(|_| !shared_server) {
             handle.stop()?
         }
 
@@ -2821,5 +2819,29 @@ mod tests {
 
         assert!(result.is_ok());
         assert!(!closure_called, "Closure should NOT be called when module is not configured");
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn test_stop_rpc_servers() {
+        let modules = TransportRpcModules::default()
+            .with_http(create_test_module())
+            .with_ws(create_test_module());
+        for config in [
+            RpcServerConfig::http(Default::default()),
+            RpcServerConfig::ws(Default::default()),
+            RpcServerConfig::http(Default::default()).with_ws(Default::default()),
+        ] {
+            let addr = SocketAddr::from((Ipv4Addr::LOCALHOST, 0));
+            let handle =
+                config.with_http_address(addr).with_ws_address(addr).start(&modules).await.unwrap();
+            let servers = handle.http.iter().chain(handle.ws.iter()).cloned().collect::<Vec<_>>();
+            let cloned = handle.clone();
+
+            handle.stop().unwrap();
+            for server in servers {
+                tokio::time::timeout(Duration::from_secs(5), server.stopped()).await.unwrap();
+            }
+            assert!(matches!(cloned.stop(), Err(AlreadyStoppedError)));
+        }
     }
 }

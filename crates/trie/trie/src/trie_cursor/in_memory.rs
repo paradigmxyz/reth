@@ -393,6 +393,7 @@ mod tests {
     use crate::trie_cursor::mock::MockTrieCursor;
     use parking_lot::Mutex;
     use std::{collections::BTreeMap, sync::Arc};
+    use tracing::debug;
 
     #[derive(Debug)]
     struct InMemoryTrieCursorTestCase {
@@ -801,7 +802,6 @@ mod tests {
 
     #[test]
     fn test_all_storage_nodes_deleted_exact_keys() {
-        use tracing::debug;
         reth_tracing::init_test_tracing();
 
         // This test reproduces an edge case where:

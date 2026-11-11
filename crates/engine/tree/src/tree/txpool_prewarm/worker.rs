@@ -3,22 +3,19 @@ use super::{
     Job, Source, Transaction, Transactions,
 };
 use crate::tree::{
-    payload_processor::reuse::{BalanceTracker, RecordingDb, SpeculativeTx},
-    StateProviderDatabase, TxPoolPrewarmCacheSnapshot as Snapshot,
+    payload_processor::reuse::{BalanceTracker, RecordingDb, RecordingHandle, SpeculativeTx},
+    TxPoolPrewarmCacheSnapshot as Snapshot,
 };
-use alloy_evm::Evm;
 use alloy_primitives::B256;
 use crossbeam_channel::{Receiver, RecvTimeoutError, TryRecvError};
-use reth_evm::ConfigureEvm;
+use reth_evm::{cached::CachedReads, database::StateProviderDatabase, ConfigureEvm, Evm, EvmEnv};
 use reth_primitives_traits::NodePrimitives;
 use reth_provider::{
     BlockNumReader, ChangeSetReader, DatabaseProviderFactory, DatabaseProviderROFactory,
     PruneCheckpointReader, StageCheckpointReader, StateProvider, StorageChangeSetReader,
     StorageSettingsCache,
 };
-use reth_revm::{cached::CachedReads, db::State};
 use reth_storage_overlay::OverlayStateProviderFactory;
-use revm::context::Transaction as _;
 use std::{
     sync::Arc,
     time::{Duration, Instant},
@@ -206,65 +203,57 @@ where
                 return BatchEnd::Rest
             }
         };
-        let mut state =
-            State::builder()
-                .with_database(self.cache.as_db_mut(StateProviderDatabase::new(
-                    state_provider.into_evm_state_provider(),
-                )))
-                .build();
-        // Unless results are recorded, the environment is the head block's own, not a predicted
-        // next-block one, and execution is out of context by design: transaction viability is the
-        // pool's business, so nonce, balance and (one-block-stale) basefee checks must not gate
-        // which state gets warmed. Recorded results show that the nonce and balance checks pass.
-        let mut evm_env = job.evm_env.clone();
-        evm_env.cfg_env.disable_nonce_check = true;
-        evm_env.cfg_env.disable_balance_check = true;
-        evm_env.cfg_env.disable_base_fee = job.results.is_none();
-        let mut evm_config = self.evm_config.clone();
-        if job.results.is_some() {
-            // JIT-compiled code would skip the inspector hooks that track observed balances.
-            evm_config = evm_config.with_jit_support_enabled(false);
+        let db = self
+            .cache
+            .as_db_mut(StateProviderDatabase::new(state_provider.into_evm_state_provider()));
+        let mut evm_env =
+            job.evm_env.clone().with_nonce_check_disabled().with_balance_check_disabled();
+        if job.results.is_none() {
+            evm_env.version_mut().features.remove(evm2::EvmFeatures::BASE_FEE_CHECK);
         }
-        let mut evm = evm_config.evm_with_env_and_inspector(
-            RecordingDb::new(&mut state),
-            evm_env,
-            BalanceTracker::default(),
-        );
-        evm.set_inspector_enabled(job.results.is_some());
-
+        let evm_config = if job.results.is_some() {
+            self.evm_config.clone().with_jit_support_enabled(false)
+        } else {
+            self.evm_config.clone()
+        };
+        let recording = RecordingHandle::default();
+        let mut evm = if job.results.is_some() {
+            evm_config.evm_with_env(RecordingDb::new(db, recording.clone()), evm_env)
+        } else {
+            evm_config.evm_with_env(db, evm_env)
+        };
         let deadline = Instant::now() + REFRESH_INTERVAL;
         while self.commands.is_empty() && Instant::now() < deadline {
             let Some(Transaction { hash, sender, transaction }) = transactions.next() else {
                 return BatchEnd::Rest
             };
-            let tx_env = evm_config.tx_env(transaction);
-            let speculative = job.results.as_ref().map(|_| SpeculativeTx {
-                caller: sender,
-                nonce: tx_env.nonce(),
-                max_balance_spending: tx_env.max_balance_spending(),
-            });
-            if speculative.is_some() {
-                evm.db_mut().start_recording_inner();
-                evm.inspector_mut().clear();
-            }
-            match evm.transact(tx_env) {
-                Ok(result) => {
-                    if let Some(results) = &job.results &&
-                        let Some(speculative) = speculative &&
-                        let Some(reads) = evm.db_mut().take_reads()
-                    {
-                        results.store(hash, result, reads, evm.inspector_mut(), speculative);
+            let result = if let Some(results) = &job.results {
+                let speculative = SpeculativeTx::new(sender, transaction.inner());
+                let tx_env = evm_config.tx_env(transaction);
+                // The underlying CachedReads retains warmed data; the EVM overlay must not hide
+                // reads from the recorder or keep values from an earlier prediction.
+                drop(evm.take_state_cache());
+                recording.start_recording_inner();
+                let result =
+                    evm.transact_with_inspector(&tx_env, BalanceTracker::new(recording.clone()));
+                let reads = recording.take_reads();
+                result.map(|(mut balances, result)| {
+                    if let Some(reads) = reads {
+                        results.store(hash, result, reads, &mut balances, speculative);
                     }
-                }
-                Err(err) => {
-                    trace!(
-                        target: "engine::tree::txpool_prewarm",
-                        %err,
-                        tx_hash = ?hash,
-                        %sender,
-                        "speculative txpool transaction execution failed"
-                    );
-                }
+                })
+            } else {
+                let tx_env = evm_config.tx_env(transaction);
+                evm.transact_result(&tx_env).map(drop)
+            };
+            if let Err(err) = result {
+                trace!(
+                    target: "engine::tree::txpool_prewarm",
+                    %err,
+                    tx_hash = ?hash,
+                    %sender,
+                    "speculative txpool transaction execution failed"
+                );
             }
         }
         BatchEnd::GoAgain
@@ -366,13 +355,13 @@ mod tests {
     use alloy_consensus::{transaction::Recovered, Signed, TxLegacy};
     use alloy_primitives::{Address, Signature, TxKind};
     use crossbeam_channel::{unbounded, Sender};
+    use evm2::BaseEvmTypes;
     use parking_lot::{Mutex, RwLock};
     use reth_ethereum_primitives::{EthPrimitives, TransactionSigned};
     use reth_evm::EvmEnvFor;
     use reth_evm_ethereum::EthEvmConfig;
     use reth_provider::test_utils::MockEthProvider;
     use reth_stages_api::{StageCheckpoint, StageId};
-    use revm::context::result::HaltReason;
     use std::{
         collections::{HashMap, VecDeque},
         sync::atomic::{AtomicUsize, Ordering},
@@ -422,19 +411,19 @@ mod tests {
         }
 
         /// Points the worker at `parent_hash` and returns the results it records.
-        fn start_recording(&self, parent_hash: B256) -> Arc<PoolResults<HaltReason>> {
+        fn start_recording(&self, parent_hash: B256) -> Arc<PoolResults<BaseEvmTypes>> {
             let results = Arc::new(PoolResults::default());
             self.start_with(parent_hash, Some(Arc::clone(&results)));
             results
         }
 
-        fn start_with(&self, parent_hash: B256, results: Option<Arc<PoolResults<HaltReason>>>) {
+        fn start_with(&self, parent_hash: B256, results: Option<Arc<PoolResults<BaseEvmTypes>>>) {
             let provider = MockEthProvider::default();
             provider.enable_database_provider();
             provider.add_header(parent_hash, Default::default());
             provider.add_stage_checkpoint(StageId::Finish, StageCheckpoint::new(0));
             let mut evm_env = EvmEnvFor::<EthEvmConfig>::default();
-            evm_env.block_env.beneficiary = POOL_BENEFICIARY;
+            evm_env.block.beneficiary = POOL_BENEFICIARY;
             let job = Job {
                 evm_env,
                 state_provider_factory: OverlayStateProviderFactory::new(

@@ -14,7 +14,7 @@ pub trait SyncStateProvider: Send + Sync {
     fn is_initially_syncing(&self) -> bool;
 }
 
-/// An updater for updating the [SyncState] and status of the network.
+/// An updater for updating the [`SyncState`] and status of the network.
 ///
 /// The node is either syncing, or it is idle.
 /// While syncing, the node will download data from the network and process it. The processing

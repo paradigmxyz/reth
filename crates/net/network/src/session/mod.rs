@@ -10,6 +10,7 @@ mod types;
 pub use types::BlockRangeInfo;
 
 use crate::{
+    budget::DEFAULT_BUDGET_PRIORITIZED_EVENTS,
     message::PeerMessage,
     metrics::SessionManagerMetrics,
     protocol::{IntoRlpxSubProtocol, OnNotSupported, RlpxSubProtocolHandlers, RlpxSubProtocols},
@@ -118,6 +119,8 @@ pub struct SessionManager<N: NetworkPrimitives> {
     active_session_tx: MeteredPollSender<ActiveSessionMessage<N>>,
     /// Receiver half that listens for [`ActiveSessionMessage`] produced by pending sessions.
     active_session_rx: ReceiverStream<ActiveSessionMessage<N>>,
+    /// Number of active session events returned since pending sessions were last polled.
+    active_events_in_row: u32,
     /// Additional `RLPx` sub-protocols to be used by the session manager.
     extra_protocols: RlpxSubProtocols,
     /// Tracks the ongoing graceful disconnections attempts for incoming connections.
@@ -182,6 +185,7 @@ impl<N: NetworkPrimitives> SessionManager<N> {
             pending_session_rx: ReceiverStream::new(pending_sessions_rx),
             active_session_tx: MeteredPollSender::new(active_session_tx, "network_active_session"),
             active_session_rx: ReceiverStream::new(active_session_rx),
+            active_events_in_row: 0,
             extra_protocols,
             disconnections_counter: Default::default(),
             metrics: Default::default(),
@@ -501,13 +505,36 @@ impl<N: NetworkPrimitives> SessionManager<N> {
 
     /// This polls all the session handles and returns [`SessionEvent`].
     ///
-    /// Active sessions are prioritized.
+    /// Active sessions are prioritized, but after [`DEFAULT_BUDGET_PRIORITIZED_EVENTS`] active
+    /// session events in a row pending sessions are polled first once, so a steady stream of active
+    /// session messages can't hold back new sessions. Established incoming sessions are
+    /// disconnected with the reason returned by `inbound_session_rejection` instead of being
+    /// activated.
     pub(crate) fn poll(
         &mut self,
         cx: &mut Context<'_>,
-        has_inbound_capacity: impl Fn(PeerId) -> bool,
+        inbound_session_rejection: impl Fn(PeerId) -> Option<DisconnectReason>,
     ) -> Poll<SessionEvent<N>> {
-        // Poll events from active sessions
+        if self.active_events_in_row >= DEFAULT_BUDGET_PRIORITIZED_EVENTS {
+            self.active_events_in_row = 0;
+            if let Poll::Ready(event) =
+                self.poll_pending_session_event(cx, &inbound_session_rejection)
+            {
+                return Poll::Ready(event)
+            }
+        }
+
+        if let Poll::Ready(event) = self.poll_active_session_event(cx) {
+            self.active_events_in_row += 1;
+            return Poll::Ready(event)
+        }
+
+        self.active_events_in_row = 0;
+        self.poll_pending_session_event(cx, inbound_session_rejection)
+    }
+
+    /// Polls the next event from the active sessions.
+    fn poll_active_session_event(&mut self, cx: &mut Context<'_>) -> Poll<SessionEvent<N>> {
         match self.active_session_rx.poll_next_unpin(cx) {
             Poll::Pending => {}
             Poll::Ready(None) => {
@@ -549,8 +576,15 @@ impl<N: NetworkPrimitives> SessionManager<N> {
                 }
             }
         }
+        Poll::Pending
+    }
 
-        // Poll the pending session event stream
+    /// Polls the next event from the pending sessions.
+    fn poll_pending_session_event(
+        &mut self,
+        cx: &mut Context<'_>,
+        inbound_session_rejection: impl Fn(PeerId) -> Option<DisconnectReason>,
+    ) -> Poll<SessionEvent<N>> {
         let event = loop {
             let event = match self.pending_session_rx.poll_next_unpin(cx) {
                 Poll::Pending => return Poll::Pending,
@@ -605,8 +639,8 @@ impl<N: NetworkPrimitives> SessionManager<N> {
                 }
 
                 if direction.is_incoming() {
-                    if !has_inbound_capacity(peer_id) {
-                        self.disconnect_pending_connection(conn, DisconnectReason::TooManyPeers);
+                    if let Some(reason) = inbound_session_rejection(peer_id) {
+                        self.disconnect_pending_connection(conn, reason);
                         return Poll::Ready(SessionEvent::IncomingPendingSessionClosed {
                             remote_addr,
                             error: None,

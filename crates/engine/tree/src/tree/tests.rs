@@ -22,6 +22,7 @@ use alloy_rpc_types_engine::{
     ForkchoiceUpdateError,
 };
 use assert_matches::assert_matches;
+use evm2::evm::Bal as EvmBal;
 use futures::FutureExt as _;
 use reth_chain_state::test_utils::TestBlockBuilder;
 use reth_chainspec::{ChainSpec, HOLESKY, MAINNET};
@@ -40,12 +41,11 @@ use reth_provider::{
 };
 use reth_tasks::spawn_os_thread;
 use reth_trie_common::SortedTrieData;
-use revm::state::bal::Bal as RevmBal;
 use std::{
     collections::BTreeMap,
     str::FromStr,
     sync::{
-        mpsc::{Receiver, Sender},
+        mpsc::{channel, Receiver, Sender},
         Arc,
     },
     time::Duration,
@@ -122,7 +122,6 @@ struct TestChannel<T> {
 impl<T: Send + 'static> TestChannel<T> {
     /// Creates a new test channel
     fn spawn_channel() -> (Sender<T>, Receiver<T>, TestChannelHandle) {
-        use std::sync::mpsc::channel;
         let (original_tx, original_rx) = channel();
         let (wrapped_tx, wrapped_rx) = channel();
         let (release_tx, release_rx) = channel();
@@ -186,7 +185,6 @@ impl TestHarness {
     }
 
     fn with_config(chain_spec: Arc<ChainSpec>, tree_config: TreeConfig) -> Self {
-        use std::sync::mpsc::channel;
         let (action_tx, action_rx) = channel();
         Self::with_persistence_channel_and_config(chain_spec, action_tx, action_rx, tree_config)
     }
@@ -1193,9 +1191,9 @@ fn test_validated_payload_bal_is_inserted_into_store() {
             child_block.block_with_parent(),
             child,
             |_, executed, _| {
-                // `raw_bal` is the empty-list RLP, so the empty revm BAL is its decoded value.
+                // `raw_bal` is the empty-list RLP, so the empty evm2 BAL is its decoded value.
                 let bal = DecodedBal::with_raw_bal(
-                    Arc::new(RevmBal::default()),
+                    Arc::new(EvmBal::default()),
                     RawBal::from(raw_bal.clone()),
                 );
                 Ok::<_, InsertPayloadError<Block>>(ValidationOutput::new(
@@ -2257,7 +2255,6 @@ fn test_validate_block_synchronous_strategy_during_persistence() {
     let mut test_harness = ValidatorTestHarness::new(MAINNET.clone());
 
     // Set up persistence action to force `Synchronous` strategy
-    use crate::tree::persistence_state::CurrentPersistenceAction;
     let persistence_action = CurrentPersistenceAction::SavingBlocks {
         highest: alloy_eips::NumHash::new(1, B256::random()),
     };

@@ -13,8 +13,8 @@ use reth_snap_sync::{SnapAttemptStore, SnapStateVerifier, SnapWrite};
 use reth_stages::{
     stages::MerkleStage, BlockErrorKind, ExecInput, PipelineError, Stage, StageError, StageId,
 };
-use reth_tracing::tracing::{error, info};
 use tokio_util::sync::CancellationToken;
+use tracing::{error, info};
 
 /// Hands one attempt's downloaded state over to the staged pipeline.
 ///

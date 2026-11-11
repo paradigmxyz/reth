@@ -549,7 +549,6 @@ impl<Pool: TransactionPool, N: NetworkPrimitives> TransactionsManager<Pool, N> {
     /// - exceeds gas limit
     /// - gas uint overflow
     /// - exceeds max init code size
-    /// - oversized data
     /// - signer account has bytecode
     /// - chain id mismatch
     /// - old legacy chain id
@@ -2447,7 +2446,7 @@ mod tests {
         TransactionsManager<EthTestPool, EthNetworkPrimitives>,
         NetworkManager<EthNetworkPrimitives>,
     ) {
-        let secret_key = SecretKey::new(&mut rand_08::thread_rng());
+        let secret_key = SecretKey::new(&mut rand::rng());
         let client = NoopProvider::default();
 
         let config = NetworkConfigBuilder::new(secret_key, Runtime::test())
@@ -2508,7 +2507,7 @@ mod tests {
 
         let listener0 = peer0.event_listener();
         peer0.add_peer(peer1);
-        let secret_key = SecretKey::new(&mut rand_08::thread_rng());
+        let secret_key = SecretKey::new(&mut rand::rng());
 
         let client = NoopProvider::default();
         let pool = testing_pool();
@@ -2571,7 +2570,7 @@ mod tests {
 
         let listener0 = peer0.event_listener();
         peer0.add_peer(peer1);
-        let secret_key = SecretKey::new(&mut rand_08::thread_rng());
+        let secret_key = SecretKey::new(&mut rand::rng());
 
         let client = NoopProvider::default();
         let pool = testing_pool();
@@ -2637,7 +2636,7 @@ mod tests {
     async fn test_handle_incoming_transactions_hashes() {
         reth_tracing::init_test_tracing();
 
-        let secret_key = SecretKey::new(&mut rand_08::thread_rng());
+        let secret_key = SecretKey::new(&mut rand::rng());
         let client = NoopProvider::default();
 
         let config = NetworkConfigBuilder::new(secret_key, Runtime::test())
@@ -2745,7 +2744,7 @@ mod tests {
         let listener0 = peer0.event_listener();
 
         peer0.add_peer(peer1);
-        let secret_key = SecretKey::new(&mut rand_08::thread_rng());
+        let secret_key = SecretKey::new(&mut rand::rng());
 
         let client = NoopProvider::default();
         let pool = testing_pool();
@@ -2915,7 +2914,7 @@ mod tests {
         let listener0 = peer0.event_listener();
 
         peer0.add_peer(peer1);
-        let secret_key = SecretKey::new(&mut rand_08::thread_rng());
+        let secret_key = SecretKey::new(&mut rand::rng());
 
         let client = NoopProvider::default();
         let pool = testing_pool();
@@ -3441,7 +3440,7 @@ mod tests {
         let policy_bundle = NetworkPolicies::new(propagation_policy, announcement_policy);
 
         let pool = testing_pool();
-        let secret_key = SecretKey::new(&mut rand_08::thread_rng());
+        let secret_key = SecretKey::new(&mut rand::rng());
         let client = NoopProvider::default();
 
         let network_config = NetworkConfigBuilder::new(secret_key, Runtime::test())

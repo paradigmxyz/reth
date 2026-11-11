@@ -8,9 +8,9 @@ use futures_util::Future;
 use reth_primitives_traits::constants::BEACON_CONSENSUS_REORG_UNWIND_DEPTH;
 use reth_provider::{
     providers::ProviderNodeTypes, BlockHashReader, BlockNumReader, ChainStateBlockReader,
-    ChainStateBlockWriter, DBProvider, DatabaseProviderFactory, ProviderFactory,
-    PruneCheckpointReader, StageCheckpointReader, StageCheckpointWriter, StaticFileProviderFactory,
-    StorageSettingsCache,
+    ChainStateBlockWriter, DBProvider, DatabaseProviderFactory, MetadataProvider, MetadataWriter,
+    PipelineUnwind, ProviderError, ProviderFactory, PruneCheckpointReader, StageCheckpointReader,
+    StageCheckpointWriter, StaticFileProviderFactory, StorageSettingsCache,
 };
 use reth_prune::PrunerBuilder;
 use reth_static_file::StaticFileProducer;
@@ -265,6 +265,7 @@ impl<N: ProviderNodeTypes> Pipeline<N> {
         &mut self,
         last_stage: Option<StageId>,
     ) -> Result<ControlFlow, PipelineError> {
+        self.resume_unwind()?;
         self.move_to_static_files()?;
 
         let mut previous_stage = None;
@@ -353,7 +354,39 @@ impl<N: ProviderNodeTypes> Pipeline<N> {
         to: BlockNumber,
         bad_block: Option<BlockNumber>,
     ) -> Result<(), PipelineError> {
-        // Add validation before starting unwind
+        self.resume_unwind()?;
+        self.unwind_stages(PipelineUnwind {
+            target: to,
+            stages: self.stages.iter().map(|stage| stage.id().to_string()).collect(),
+            bad_block,
+        })
+    }
+
+    /// Completes a recorded unwind without unwinding stages outside its original scope.
+    pub fn resume_unwind(&mut self) -> Result<(), PipelineError> {
+        let unwind = self.provider_factory.provider()?.pipeline_unwind()?;
+        if let Some(unwind) = unwind {
+            self.unwind_stages(unwind)?;
+        }
+        Ok(())
+    }
+
+    fn unwind_stages(&mut self, unwind: PipelineUnwind) -> Result<(), PipelineError> {
+        // Validate the entire scope before committing anything. A different pipeline must not
+        // silently clear work belonging to a disabled or custom stage.
+        for id in &unwind.stages {
+            if !self.stages.iter().any(|stage| stage.id().as_str() == id) {
+                return Err(ProviderError::other(std::io::Error::other(format!(
+                    "cannot resume interrupted unwind to block {}: pipeline is missing stage {id}; \
+                     restart the node with the original stages enabled or rerun `reth stage unwind` \
+                     without `--offline`",
+                    unwind.target,
+                )))
+                .into())
+            }
+        }
+        let to = unwind.target;
+        let bad_block = unwind.bad_block;
         let (latest_block, prune_modes, checkpoints) = {
             let provider = self.provider_factory.provider()?;
             (
@@ -364,17 +397,40 @@ impl<N: ProviderNodeTypes> Pipeline<N> {
         };
         prune_modes.ensure_unwind_target_unpruned(latest_block, to, &checkpoints)?;
 
-        // Unwind stages in reverse order of execution
-        let unwind_pipeline = self.stages.iter_mut().rev();
-
-        // Legacy Engine: This prevents a race condition in which the `StaticFileProducer` could
-        // attempt to proceed with a finalized block which has been unwinded
+        // Legacy Engine: Prevent the static file producer from racing the unwind.
         let _locked_sf_producer = self.static_file_producer.lock();
-
         let mut provider_rw =
             self.provider_factory.unwind_provider_rw()?.disable_long_read_transaction_safety();
 
-        for stage in unwind_pipeline {
+        // Reject unreachable targets before recording intent or committing any stage. Only
+        // validate the recorded scope: recovery must not adopt unrelated stages.
+        for stage in &mut self.stages {
+            let stage_id = stage.id();
+            if unwind.stages.iter().any(|id| id == stage_id.as_str()) {
+                let checkpoint = provider_rw.get_stage_checkpoint(stage_id)?.unwrap_or_default();
+                if checkpoint.block_number > to &&
+                    let Err(err) = stage.validate_unwind(
+                        &provider_rw,
+                        UnwindInput { checkpoint, unwind_to: to, bad_block },
+                    )
+                {
+                    self.event_sender.notify(PipelineEvent::Error { stage_id });
+                    return Err(PipelineError::Stage(StageError::Fatal(Box::new(err))))
+                }
+            }
+        }
+
+        // The intent must be durable before the first stage commits independently.
+        provider_rw.write_pipeline_unwind(Some(&unwind))?;
+        provider_rw.commit()?;
+        provider_rw = self.provider_factory.unwind_provider_rw()?;
+
+        for id in unwind.stages.iter().rev() {
+            let stage = self
+                .stages
+                .iter_mut()
+                .find(|stage| stage.id().as_str() == id)
+                .expect("unwind stages validated above");
             let stage_id = stage.id();
             let span = info_span!("Unwinding", stage = %stage_id);
             let _enter = span.enter();
@@ -473,6 +529,8 @@ impl<N: ProviderNodeTypes> Pipeline<N> {
             }
         }
 
+        provider_rw.write_pipeline_unwind(None)?;
+        provider_rw.commit()?;
         Ok(())
     }
 
@@ -1310,6 +1368,160 @@ mod tests {
                 flow,
                 Some(ControlFlow::Unwind { target: genesis, bad_block: block(genesis + 1) })
             );
+        }
+    }
+
+    #[test]
+    fn interrupted_unwind_preserves_scope_and_target() {
+        for target in [0, 2] {
+            let factory = create_test_provider_factory();
+            let provider = factory.database_provider_rw().unwrap();
+            for id in
+                [StageId::Headers, StageId::Execution, StageId::StorageHashing, StageId::Finish]
+            {
+                provider.save_stage_checkpoint(id, StageCheckpoint::new(10)).unwrap();
+            }
+            provider.commit().unwrap();
+            let build = |builder: PipelineBuilder<_>| {
+                builder.build(
+                    factory.clone(),
+                    StaticFileProducer::new(factory.clone(), PruneModes::default()),
+                )
+            };
+            // Like an offline unwind, this pipeline does not own Headers or Finish.
+            let mut pipeline =
+                build(
+                    Pipeline::builder()
+                        .add_stage(
+                            TestStage::new(StageId::Execution)
+                                .add_unwind(Err(StageError::MissingDownloadBuffer)),
+                        )
+                        .add_stage(TestStage::new(StageId::StorageHashing).add_unwind(Ok(
+                            UnwindOutput { checkpoint: StageCheckpoint::new(target) },
+                        ))),
+                );
+            assert!(pipeline.unwind(target, None).is_err());
+            drop(pipeline);
+            let pending = factory.provider().unwrap().pipeline_unwind().unwrap().unwrap();
+            assert_eq!(pending.target, target);
+            assert_eq!(pending.stages, ["Execution", "StorageHashing"]);
+
+            // A pipeline with missing stages cannot adopt and clear the unfinished unwind.
+            assert_eq!(
+                build(Pipeline::builder()).resume_unwind().unwrap_err().to_string(),
+                format!(
+                    "cannot resume interrupted unwind to block {target}: pipeline is missing stage Execution; \
+                     restart the node with the original stages enabled or rerun `reth stage unwind` without `--offline`"
+                )
+            );
+            assert_eq!(
+                factory.provider().unwrap().pipeline_unwind().unwrap(),
+                Some(pending.clone())
+            );
+
+            let mut pipeline = build(
+                Pipeline::builder()
+                    .add_stage(
+                        TestStage::new(StageId::Headers)
+                            .add_validate_unwind(Err(StageError::MissingDownloadBuffer)),
+                    )
+                    .add_stage(
+                        TestStage::new(StageId::Execution)
+                            .add_unwind(Err(StageError::MissingDownloadBuffer))
+                            .add_unwind(Ok(UnwindOutput {
+                                checkpoint: StageCheckpoint::new(target),
+                            })),
+                    )
+                    .add_stage(TestStage::new(StageId::StorageHashing))
+                    .add_stage(TestStage::new(StageId::Finish)),
+            );
+            assert!(pipeline.resume_unwind().is_err());
+            assert_eq!(factory.provider().unwrap().pipeline_unwind().unwrap(), Some(pending));
+            pipeline.resume_unwind().unwrap();
+            let provider = factory.provider().unwrap();
+            assert_eq!(provider.pipeline_unwind().unwrap(), None);
+            for id in [StageId::Execution, StageId::StorageHashing] {
+                assert_eq!(
+                    provider.get_stage_checkpoint(id).unwrap().unwrap().block_number,
+                    target
+                );
+            }
+            for id in [StageId::Headers, StageId::Finish] {
+                assert_eq!(provider.get_stage_checkpoint(id).unwrap().unwrap().block_number, 10);
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn forward_sync_resumes_unwind_first() {
+        let factory = create_test_provider_factory();
+        factory.set_storage_settings_cache(reth_provider::StorageSettings::v2());
+        let provider = factory.database_provider_rw().unwrap();
+        provider.save_stage_checkpoint(StageId::Execution, StageCheckpoint::new(10)).unwrap();
+        provider
+            .write_pipeline_unwind(Some(&PipelineUnwind {
+                target: 2,
+                stages: vec!["Execution".into()],
+                bad_block: None,
+            }))
+            .unwrap();
+        provider.commit().unwrap();
+        let mut pipeline = Pipeline::builder()
+            .with_max_block(10)
+            .add_stage(
+                TestStage::new(StageId::Execution)
+                    .add_unwind(Ok(UnwindOutput { checkpoint: StageCheckpoint::new(2) }))
+                    .add_exec(Ok(ExecOutput::done(StageCheckpoint::new(10)))),
+            )
+            .build(
+                factory.clone(),
+                StaticFileProducer::new(factory.clone(), PruneModes::default()),
+            );
+        pipeline.run_loop().await.unwrap();
+        assert_eq!(factory.provider().unwrap().pipeline_unwind().unwrap(), None);
+        assert_eq!(
+            factory.get_stage_checkpoint(StageId::Execution).unwrap().unwrap().block_number,
+            10
+        );
+    }
+
+    #[test]
+    fn malformed_unwind_is_not_ignored() {
+        let factory = create_test_provider_factory();
+        let provider = factory.database_provider_rw().unwrap();
+        provider.write_metadata("pipeline_unwind", vec![0xff]).unwrap();
+        provider.commit().unwrap();
+        assert!(factory.provider().unwrap().pipeline_unwind().is_err());
+    }
+    /// A target rejected by an earlier stage must not leave the later stages unwound.
+    #[test]
+    fn rejected_unwind_target_leaves_all_stages_intact() {
+        let factory = create_test_provider_factory();
+        let provider = factory.database_provider_rw().unwrap();
+        for id in [StageId::Other("A"), StageId::Other("B")] {
+            provider.save_stage_checkpoint(id, StageCheckpoint::new(10)).unwrap();
+        }
+        provider.commit().unwrap();
+
+        let mut pipeline = Pipeline::<MockNodeTypesWithDB>::builder()
+            .add_stage(
+                TestStage::new(StageId::Other("A"))
+                    .add_validate_unwind(Err(StageError::MissingDownloadBuffer)),
+            )
+            .add_stage(
+                TestStage::new(StageId::Other("B"))
+                    .add_unwind(Ok(UnwindOutput { checkpoint: StageCheckpoint::new(1) })),
+            )
+            .build(
+                factory.clone(),
+                StaticFileProducer::new(factory.clone(), PruneModes::default()),
+            );
+
+        assert_matches!(pipeline.unwind(1, None), Err(PipelineError::Stage(StageError::Fatal(_))));
+        let provider = factory.provider().unwrap();
+        assert_eq!(provider.pipeline_unwind().unwrap(), None);
+        for id in [StageId::Other("A"), StageId::Other("B")] {
+            assert_eq!(provider.get_stage_checkpoint(id).unwrap(), Some(StageCheckpoint::new(10)));
         }
     }
 }

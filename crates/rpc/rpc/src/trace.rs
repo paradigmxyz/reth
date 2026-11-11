@@ -1,6 +1,5 @@
-use alloy_consensus::BlockHeader as _;
+use alloy_consensus::{constants::ETH_TO_WEI, BlockHeader as _};
 use alloy_eips::{BlockId, BlockNumHash};
-use alloy_evm::block::calc::{base_block_reward, block_reward, ommer_reward};
 use alloy_primitives::{
     map::{HashMap, HashSet},
     Address, BlockHash, Bytes, B256, U256,
@@ -16,9 +15,15 @@ use alloy_rpc_types_trace::{
     tracerequest::TraceCallRequest,
 };
 use async_trait::async_trait;
+use evm2_inspectors::{
+    opcode::OpcodeGasInspector,
+    storage::StorageInspector,
+    tracing::{TracingInspector, TracingInspectorConfig},
+};
 use futures::{FutureExt, StreamExt};
 use jsonrpsee::core::RpcResult;
-use reth_chainspec::ChainSpecProvider;
+use reth_chainspec::{ChainSpecProvider, EthereumHardforks};
+use reth_evm::ConfigureEvm;
 use reth_primitives_traits::{BlockBody, BlockHeader};
 use reth_rpc_api::TraceApiServer;
 use reth_rpc_convert::RpcTxReq;
@@ -26,16 +31,10 @@ use reth_rpc_eth_api::{
     helpers::{LoadTransaction, Trace, TraceExt},
     FromEthApiError, RpcNodeCore,
 };
-use reth_rpc_eth_types::{error::EthApiError, EthConfig};
+use reth_rpc_eth_types::{error::EthApiError, utils::CallManyBudget, EthConfig};
 use reth_storage_api::{BlockNumReader, BlockReader};
 use reth_tasks::{cancel::is_cancelled, pool::BlockingTaskGuard};
 use reth_transaction_pool::{PoolPooledTx, PoolTransaction, TransactionPool};
-use revm::DatabaseCommit;
-use revm_inspectors::{
-    opcode::OpcodeGasInspector,
-    storage::StorageInspector,
-    tracing::{TracingInspector, TracingInspectorConfig},
-};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tokio::sync::{AcquireError, OwnedSemaphorePermit};
@@ -102,14 +101,18 @@ where
         let config = TracingInspectorConfig::from_parity_config(&trace_request.trace_types);
         let overrides =
             EvmOverrides::new(trace_request.state_overrides, trace_request.block_overrides);
-        let mut inspector = TracingInspector::new(config);
         let this = self.clone();
         self.eth_api()
             .spawn_with_call_at(trace_request.call, at, overrides, move |db, evm_env, tx_env| {
-                let res = this.eth_api().inspect(&mut *db, evm_env, tx_env, &mut inspector)?;
+                let (inspector, res) = this.eth_api().inspect(
+                    &mut *db,
+                    evm_env,
+                    &tx_env,
+                    TracingInspector::new(config),
+                )?;
                 let trace_res = inspector
                     .into_parity_builder()
-                    .into_trace_results_with_state(&res, &trace_request.trace_types, &db)
+                    .into_trace_results_with_state(&res, &trace_request.trace_types, &mut *db)
                     .map_err(Eth::Error::from_eth_err)?;
                 Ok(trace_res)
             })
@@ -130,18 +133,22 @@ where
             .map(<Eth::Pool as TransactionPool>::Transaction::pooled_into_consensus);
 
         let (evm_env, at) = self.eth_api().evm_env_at(block_id.unwrap_or_default()).await?;
+        let config = TracingInspectorConfig::from_parity_config(&trace_types);
 
+        let tx_env = self.eth_api().evm_config().tx_env(tx);
         self.eth_api()
-            .spawn_with_state_at_block(at, move |this, mut db| {
-                let mut inspector =
-                    TracingInspector::new(TracingInspectorConfig::from_parity_config(&trace_types));
-                let res = this.inspect(&mut db, evm_env, tx, &mut inspector)?;
-
-                inspector
-                    .into_parity_builder()
-                    .into_trace_results_with_state(&res, &trace_types, &db)
-                    .map_err(Eth::Error::from_eth_err)
-            })
+            .spawn_trace_at_with_state(
+                evm_env,
+                tx_env,
+                config,
+                at,
+                move |inspector, res, mut db| {
+                    inspector
+                        .into_parity_builder()
+                        .into_trace_results_with_state(&res, &trace_types, &mut db)
+                        .map_err(Eth::Error::from_eth_err)
+                },
+            )
             .await
     }
 
@@ -154,6 +161,7 @@ where
         calls: Vec<(RpcTxReq<Eth::NetworkTypes>, HashSet<TraceType>)>,
         block_id: Option<BlockId>,
     ) -> Result<Vec<TraceResults>, Eth::Error> {
+        let mut budget = CallManyBudget::new(calls.len(), self.eth_api().call_gas_limit())?;
         let at = block_id.unwrap_or_default();
         let (evm_env, at) = self.eth_api().evm_env_at(at).await?;
 
@@ -167,19 +175,22 @@ where
                     if is_cancelled() {
                         return Err(EthApiError::InternalEthError.into())
                     }
-                    let (evm_env, tx_env) = eth_api.prepare_call_env(
+                    let (evm_env, mut tx_env) = eth_api.prepare_call_env(
                         evm_env.clone(),
                         call,
                         &mut db,
                         Default::default(),
                     )?;
+                    budget.admit(&mut tx_env)?;
                     let config = TracingInspectorConfig::from_parity_config(&trace_types);
-                    let mut inspector = TracingInspector::new(config);
-                    let res = eth_api.inspect(&mut db, evm_env, tx_env, &mut inspector)?;
+                    let (inspector, res) = eth_api
+                        .inspect(&mut db, evm_env, &tx_env, TracingInspector::new(config))
+                        .map_err(|err| budget.map_call_err(err))?;
+                    budget.charge(&res.result)?;
 
                     let trace_res = inspector
                         .into_parity_builder()
-                        .into_trace_results_with_state(&res, &trace_types, &db)
+                        .into_trace_results_with_state(&res, &trace_types, &mut db)
                         .map_err(Eth::Error::from_eth_err)?;
 
                     results.push(trace_res);
@@ -187,7 +198,7 @@ where
                     // need to apply the state changes of this call before executing the
                     // next call
                     if calls.peek().is_some() {
-                        db.commit(res.state)
+                        db.commit_source(&res.pending_state)
                     }
                 }
 
@@ -204,10 +215,10 @@ where
     ) -> Result<Option<TraceResultsWithTransactionHash>, Eth::Error> {
         let config = TracingInspectorConfig::from_parity_config(&trace_types);
         self.eth_api()
-            .spawn_trace_transaction_in_block(hash, config, move |_, inspector, res, db| {
+            .spawn_trace_transaction_in_block(hash, config, move |_, inspector, res, mut db| {
                 let trace_res = inspector
                     .into_parity_builder()
-                    .into_trace_results_with_state(&res, &trace_types, &db)
+                    .into_trace_results_with_state(&res, &trace_types, &mut db)
                     .map_err(Eth::Error::from_eth_err)?;
                 Ok(TraceResultsWithTransactionHash {
                     transaction_hash: hash,
@@ -450,7 +461,7 @@ where
                                 Some(block.clone()),
                                 None,
                                 TracingInspectorConfig::default_parity(),
-                                move |tx_info, mut ctx| {
+                                move |tx_info, ctx| {
                                     // Keep the block replay permit inside the spawned replay task.
                                     let _block_replay_permit = &permit;
                                     let mut traces = ctx
@@ -533,7 +544,7 @@ where
                 block_id,
                 Some(block.clone()),
                 TracingInspectorConfig::default_parity(),
-                |tx_info, mut ctx| {
+                |tx_info, ctx| {
                     let traces = ctx
                         .take_inspector()
                         .into_parity_builder()
@@ -564,21 +575,20 @@ where
         block_id: BlockId,
         trace_types: HashSet<TraceType>,
     ) -> Result<Option<Vec<TraceResultsWithTransactionHash>>, Eth::Error> {
+        let Some(block) = self.eth_api().recovered_block(block_id).await? else {
+            return Err(EthApiError::HeaderNotFound(block_id).into());
+        };
+
         self.eth_api()
             .trace_block_with(
                 block_id,
-                None,
+                Some(block),
                 TracingInspectorConfig::from_parity_config(&trace_types),
-                move |tx_info, mut ctx| {
+                move |tx_info, ctx| {
                     let full_trace = ctx
-                        .take_inspector()
+                        .inspector
                         .into_parity_builder()
-                        .into_trace_results_with_state_parts(
-                            &ctx.result,
-                            ctx.state,
-                            &trace_types,
-                            &ctx.db,
-                        )
+                        .into_trace_results_with_state(ctx.result, &trace_types, ctx.db)
                         .map_err(Eth::Error::from_eth_err)?;
 
                     let trace = TraceResultsWithTransactionHash {
@@ -645,7 +655,7 @@ where
                 block_id,
                 Some(block.clone()),
                 StorageInspector::default,
-                move |tx_info, mut ctx| {
+                move |tx_info, ctx| {
                     let unique_loads = ctx.inspector.unique_loads();
                     let warm_loads = ctx.inspector.warm_loads();
                     let trace = TransactionStorageAccess {
@@ -842,6 +852,35 @@ struct TraceApiInner<Eth> {
     eth_config: EthConfig,
 }
 
+pub(super) fn base_block_reward(spec: impl EthereumHardforks, block_number: u64) -> Option<u128> {
+    if spec.is_paris_active_at_block(block_number) {
+        return None
+    }
+    Some(base_block_reward_pre_merge(spec, block_number))
+}
+
+fn base_block_reward_pre_merge(spec: impl EthereumHardforks, block_number: u64) -> u128 {
+    if spec.is_constantinople_active_at_block(block_number) {
+        ETH_TO_WEI * 2
+    } else if spec.is_byzantium_active_at_block(block_number) {
+        ETH_TO_WEI * 3
+    } else {
+        ETH_TO_WEI * 5
+    }
+}
+
+pub(super) const fn block_reward(base_block_reward: u128, ommers: usize) -> u128 {
+    base_block_reward + (base_block_reward >> 5) * ommers as u128
+}
+
+pub(super) const fn ommer_reward(
+    base_block_reward: u128,
+    block_number: u64,
+    ommer_block_number: u64,
+) -> u128 {
+    ((8 + ommer_block_number - block_number) as u128 * base_block_reward) >> 3
+}
+
 /// Response type for storage tracing that contains all accessed storage slots
 /// for a transaction.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -873,16 +912,18 @@ pub struct BlockStorageAccess {
 mod tests {
     use super::*;
     use crate::EthApiBuilder;
-    use alloy_consensus::Header;
+    use alloy_consensus::{Header, TxLegacy};
     use alloy_genesis::Genesis;
-    use alloy_primitives::bytes;
+    use alloy_primitives::{bytes, Signature, TxKind};
     use alloy_rpc_types_eth::TransactionRequest;
+    use reth_chain_state::CanonStateNotification;
     use reth_chainspec::ChainSpecBuilder;
     use reth_db_common::init::init_genesis;
-    use reth_ethereum_primitives::{Block, BlockBody};
+    use reth_ethereum_primitives::{Block, BlockBody, TransactionSigned};
     use reth_evm_ethereum::EthEvmConfig;
+    use reth_execution_types::{Chain, ExecutionOutcome};
     use reth_network_api::noop::NoopNetwork;
-    use reth_primitives_traits::Block as _;
+    use reth_primitives_traits::{Block as _, RecoveredBlock, SignerRecoverable};
     use reth_provider::{
         providers::BlockchainProvider,
         test_utils::{
@@ -890,6 +931,7 @@ mod tests {
         },
         BlockWriter, StageCheckpointWriter,
     };
+    use reth_rpc_eth_types::cache::cache_new_blocks_task;
     use reth_transaction_pool::test_utils::testing_pool;
 
     #[tokio::test]
@@ -973,19 +1015,6 @@ mod tests {
 
     #[tokio::test]
     async fn trace_get_selects_tree_paths() {
-        use crate::EthApiBuilder;
-        use alloy_consensus::{Header, TxLegacy};
-        use alloy_primitives::{Signature, TxKind};
-        use reth_chain_state::CanonStateNotification;
-        use reth_ethereum_primitives::{Block, BlockBody, TransactionSigned};
-        use reth_evm_ethereum::EthEvmConfig;
-        use reth_execution_types::{Chain, ExecutionOutcome};
-        use reth_network_api::noop::NoopNetwork;
-        use reth_primitives_traits::{RecoveredBlock, SignerRecoverable};
-        use reth_provider::test_utils::{ExtendedAccount, MockEthProvider};
-        use reth_rpc_eth_types::cache::cache_new_blocks_task;
-        use reth_transaction_pool::test_utils::testing_pool;
-
         let provider = MockEthProvider::default();
         // The root calls 0x43 (which calls 0x44), then calls 0x45.
         for (address, code) in [
@@ -1072,12 +1101,6 @@ mod tests {
 
     #[tokio::test]
     async fn replay_missing_transaction_returns_null() {
-        use crate::EthApiBuilder;
-        use reth_evm_ethereum::EthEvmConfig;
-        use reth_network_api::noop::NoopNetwork;
-        use reth_provider::test_utils::MockEthProvider;
-        use reth_transaction_pool::test_utils::testing_pool;
-
         let provider = MockEthProvider::default();
         let eth_api = EthApiBuilder::new(
             provider.clone(),
@@ -1103,19 +1126,6 @@ mod tests {
 
     #[tokio::test]
     async fn replay_transaction_includes_transaction_hash() {
-        use crate::EthApiBuilder;
-        use alloy_consensus::{Header, TxLegacy};
-        use alloy_primitives::{Signature, TxKind};
-        use reth_chain_state::CanonStateNotification;
-        use reth_ethereum_primitives::{Block, BlockBody, TransactionSigned};
-        use reth_evm_ethereum::EthEvmConfig;
-        use reth_execution_types::{Chain, ExecutionOutcome};
-        use reth_network_api::noop::NoopNetwork;
-        use reth_primitives_traits::{RecoveredBlock, SignerRecoverable};
-        use reth_provider::test_utils::{ExtendedAccount, MockEthProvider};
-        use reth_rpc_eth_types::cache::cache_new_blocks_task;
-        use reth_transaction_pool::test_utils::testing_pool;
-
         let provider = MockEthProvider::default();
         let tx = TransactionSigned::new_unhashed(
             TxLegacy {
@@ -1276,19 +1286,6 @@ mod tests {
 
     #[tokio::test]
     async fn replay_block_vmtrace_includes_root_and_callcode_bytecode() {
-        use crate::EthApiBuilder;
-        use alloy_consensus::{Header, TxLegacy};
-        use alloy_primitives::{Signature, TxKind};
-        use reth_chain_state::CanonStateNotification;
-        use reth_ethereum_primitives::{Block, BlockBody, TransactionSigned};
-        use reth_evm_ethereum::EthEvmConfig;
-        use reth_execution_types::{Chain, ExecutionOutcome};
-        use reth_network_api::noop::NoopNetwork;
-        use reth_primitives_traits::{RecoveredBlock, SignerRecoverable};
-        use reth_provider::test_utils::{ExtendedAccount, MockEthProvider};
-        use reth_rpc_eth_types::cache::cache_new_blocks_task;
-        use reth_transaction_pool::test_utils::testing_pool;
-
         let provider = MockEthProvider::default();
         let target = Address::with_last_byte(0x42);
         let child = Address::with_last_byte(0x43);
