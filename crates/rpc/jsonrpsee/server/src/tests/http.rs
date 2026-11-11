@@ -943,3 +943,34 @@ async fn http_response_is_delivered_to_slow_reader() {
     handle.stop().unwrap();
     handle.stopped().with_default_timeout().await.unwrap();
 }
+
+#[tokio::test]
+async fn only_json_whitespace_is_skipped_before_request() {
+    init_logger();
+
+    let (addr, handle, calls) = super::helpers::server_with_call_counter().await;
+    let uri = to_http_uri(addr);
+    let request = r#"{"jsonrpc":"2.0","method":"tick","id":1}"#;
+
+    // Form feed is not JSON whitespace.
+    let response = http_request(format!("\x0c{request}").into(), uri.clone())
+        .with_default_timeout()
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(response.status, StatusCode::BAD_REQUEST);
+    assert_eq!(response.body, parse_error(Id::Null));
+    assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 0);
+
+    let response = http_request(format!(" \t\r\n{request}").into(), uri)
+        .with_default_timeout()
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(response.status, StatusCode::OK);
+    assert_eq!(response.body, r#"{"jsonrpc":"2.0","id":1,"result":0}"#);
+    assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 1);
+
+    handle.stop().unwrap();
+    handle.stopped().with_default_timeout().await.unwrap();
+}

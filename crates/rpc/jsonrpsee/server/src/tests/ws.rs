@@ -1444,3 +1444,34 @@ async fn batch_limit_applies_while_reading() {
     handle.stop().unwrap();
     handle.stopped().await;
 }
+
+#[tokio::test]
+async fn only_json_whitespace_is_skipped_before_request() {
+    init_logger();
+
+    let (addr, handle, calls) = super::helpers::server_with_call_counter().await;
+    let mut client = WebSocketTestClient::new(addr).with_default_timeout().await.unwrap().unwrap();
+    let request = r#"{"jsonrpc":"2.0","method":"tick","id":1}"#;
+
+    // Form feed is not JSON whitespace.
+    let response = client
+        .send_request_text(format!("\x0c{request}"))
+        .with_default_timeout()
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(response, parse_error(Id::Null));
+    assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 0);
+
+    let response = client
+        .send_request_text(format!(" \t\r\n{request}"))
+        .with_default_timeout()
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(response, r#"{"jsonrpc":"2.0","id":1,"result":0}"#);
+    assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 1);
+
+    handle.stop().unwrap();
+    handle.stopped().with_default_timeout().await.unwrap();
+}

@@ -167,8 +167,12 @@ where
         tokio::spawn(async move {
             let _pending_calls = pending_calls;
             let _permit = permit;
-            let first_non_whitespace =
-                data.iter().enumerate().take(128).find(|(_, byte)| !byte.is_ascii_whitespace());
+            // Only the four JSON whitespace characters are skipped, not for example form feed.
+            let first_non_whitespace = data
+                .iter()
+                .enumerate()
+                .take(128)
+                .find(|(_, byte)| !matches!(byte, b' ' | b'\t' | b'\n' | b'\r'));
 
             let (idx, is_single) = match first_non_whitespace {
                 Some((start, b'{')) => (start, true),
