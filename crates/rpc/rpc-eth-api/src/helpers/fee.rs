@@ -74,6 +74,10 @@ pub trait EthFees:
                 return Ok(FeeHistory::default())
             }
 
+            // Like geth, treat an empty percentile list as no percentiles, so the response
+            // omits `reward` regardless of whether the range is served from the cache.
+            let reward_percentiles = reward_percentiles.filter(|p| !p.is_empty());
+
             // ensure the given reward percentiles aren't excessive
             if reward_percentiles.as_ref().map(|perc| perc.len() as u64) >
                 Some(self.gas_oracle().config().max_reward_percentile_count)
@@ -218,7 +222,7 @@ pub trait EthFees:
                     ));
                 }
 
-                if let Some(percentiles) = reward_percentiles.as_ref().filter(|p| !p.is_empty()) {
+                if let Some(percentiles) = &reward_percentiles {
                     let hashes: Vec<_> = headers.iter().map(|h| h.hash()).collect();
                     let mut stream =
                         futures::stream::iter(hashes)
