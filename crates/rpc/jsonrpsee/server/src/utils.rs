@@ -226,7 +226,7 @@ fn reject_notification_id<'de, D: Deserializer<'de>>(_: D) -> Result<(), D::Erro
 ///
 /// Errors that concern only the connection being accepted (refused, aborted or reset) return at
 /// once. Any other error, such as running out of file descriptors, persists and would make the
-/// loop spin, so it is followed by a [`ACCEPT_ERROR_BACKOFF`] sleep.
+/// loop spin, so it is followed by a one second sleep.
 ///
 /// Returns the `stopped` future to keep polling, or `None` if it resolved during the sleep and
 /// the loop must exit.
