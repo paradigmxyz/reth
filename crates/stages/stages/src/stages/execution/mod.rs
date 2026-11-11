@@ -1,6 +1,6 @@
 use crate::stages::MERKLE_STAGE_DEFAULT_INCREMENTAL_THRESHOLD;
 use alloy_consensus::BlockHeader;
-use alloy_eip7928::bal::Bal;
+use alloy_eip7928::{bal::Bal, BAL_RETENTION_PERIOD_SLOTS};
 use alloy_primitives::BlockNumber;
 use num_traits::Zero;
 use reth_chainspec::{ChainSpecProvider, EthereumHardforks};
@@ -15,11 +15,12 @@ use reth_exex::{ExExManagerHandle, ExExNotification, ExExNotificationSource};
 use reth_primitives_traits::{format_gas_throughput, BlockBody, NodePrimitives};
 use reth_provider::{
     providers::{StaticFileProvider, StaticFileWriter},
-    BlockReader, DBProvider, EitherWriter, ExecutionOutcome, HashedPostStateProvider,
-    HeaderProvider, LatestStateProviderRef, OriginalValuesKnown, ProviderError, StateProvider,
-    StateWriteConfig, StateWriter, StaticFileProviderFactory, StatsReader, StoragePath,
-    StorageSettingsCache, TransactionVariant,
+    BalStoreHandle, BlockReader, DBProvider, EitherWriter, ExecutionOutcome,
+    HashedPostStateProvider, HeaderProvider, LatestStateProviderRef, OriginalValuesKnown,
+    ProviderError, RawBal, StateProvider, StateWriteConfig, StateWriter, StaticFileProviderFactory,
+    StatsReader, StoragePath, StorageSettingsCache, TransactionVariant,
 };
+use reth_prune_types::PruneMode;
 use reth_stages_api::{
     BlockErrorKind, CheckpointBlockRange, EntitiesCheckpoint, ExecInput, ExecOutput,
     ExecutionCheckpoint, ExecutionStageThresholds, Stage, StageCheckpoint, StageError, StageId,
@@ -98,6 +99,8 @@ where
     exex_manager_handle: ExExManagerHandle<E::Primitives>,
     /// Executor metrics.
     metrics: ExecutorMetrics,
+    /// Store for the block access lists that this stage builds and validates.
+    bal_store: Option<BalStoreHandle>,
 }
 
 impl<E> ExecutionStage<E>
@@ -121,7 +124,17 @@ where
             post_unwind_commit_input: None,
             exex_manager_handle,
             metrics: ExecutorMetrics::default(),
+            bal_store: None,
         }
+    }
+
+    /// Stores the validated block access list of each executed block in `bal_store`.
+    ///
+    /// Blocks older than the EIP-7928 retention window relative to the sync target are skipped.
+    /// Without a store, the stage validates each BAL against its header and then drops it.
+    pub fn with_bal_store(mut self, bal_store: BalStoreHandle) -> Self {
+        self.bal_store = Some(bal_store);
+        self
     }
 
     /// Create an execution stage with the provided executor.
@@ -333,6 +346,7 @@ where
         let mut results = Vec::new();
         // Reused across blocks for BAL hash encoding.
         let mut bal_buf = Vec::new();
+        let mut bals = Vec::new();
         for block_number in start_block..=max_block {
             // Fetch the block
             let fetch_block_start = Instant::now();
@@ -378,6 +392,15 @@ where
                     error: BlockErrorKind::Validation(err),
                 })
             }
+            if self.bal_store.is_some() &&
+                let Some((bal, bal_hash)) = built_bal.zip(bal_hash) &&
+                within_bal_retention(block_number, max_block)
+            {
+                bals.push((
+                    block.num_hash(),
+                    RawBal::new_unchecked(alloy_rlp::encode(&bal).into(), bal_hash),
+                ));
+            }
             results.push(result);
 
             execution_duration += execute_start.elapsed();
@@ -414,6 +437,16 @@ where
                 batch_start.elapsed(),
             ) {
                 break
+            }
+        }
+
+        if let Some(bal_store) = &self.bal_store &&
+            !bals.is_empty()
+        {
+            let blocks = bals.iter().map(|(block, _)| *block).collect::<Vec<_>>();
+            // As in the engine, a BAL store failure does not fail block processing.
+            if let Err(err) = bal_store.insert_many(bals).and_then(|()| bal_store.flush(&blocks)) {
+                warn!(target: "sync::stages::execution", %err, "Failed to store block access lists");
             }
         }
 
@@ -775,10 +808,27 @@ where
     Ok(gas_total)
 }
 
+/// Returns whether the BAL of `block` is inside the EIP-7928 retention window at `tip`.
+///
+/// Uses the rule of the BAL store's pruning, so staged sync does not store a BAL that the next
+/// prune deletes.
+const fn within_bal_retention(block: BlockNumber, tip: BlockNumber) -> bool {
+    !PruneMode::Distance(BAL_RETENTION_PERIOD_SLOTS).should_prune(block, tip)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::{stages::MERKLE_STAGE_DEFAULT_REBUILD_THRESHOLD, test_utils::TestStageDB};
+    use alloy_consensus::{constants::EMPTY_WITHDRAWALS, Header};
+    use alloy_eips::{
+        eip1559::INITIAL_BASE_FEE,
+        eip2935::{HISTORY_STORAGE_ADDRESS, HISTORY_STORAGE_CODE},
+        eip4788::{BEACON_ROOTS_ADDRESS, BEACON_ROOTS_CODE},
+        eip7002::{WITHDRAWAL_REQUEST_PREDEPLOY_ADDRESS, WITHDRAWAL_REQUEST_PREDEPLOY_CODE},
+        eip7251::{CONSOLIDATION_REQUEST_PREDEPLOY_ADDRESS, CONSOLIDATION_REQUEST_PREDEPLOY_CODE},
+        eip7685::EMPTY_REQUESTS_HASH,
+    };
     use alloy_primitives::{address, hex_literal::hex, keccak256, Address, B256, U256};
     use alloy_rlp::Decodable;
     use assert_matches::assert_matches;
@@ -788,16 +838,16 @@ mod tests {
         transaction::{DbTx, DbTxMut},
     };
     use reth_ethereum_consensus::EthBeaconConsensus;
-    use reth_ethereum_primitives::Block;
+    use reth_ethereum_primitives::{Block, BlockBody};
     use reth_evm_ethereum::EthEvmConfig;
     use reth_primitives_traits::{Account, Block as _, Bytecode, SealedBlock, StorageEntry};
     use reth_provider::{
         test_utils::{create_test_provider_factory, create_test_provider_factory_with_chain_spec},
-        AccountReader, BlockWriter, DatabaseProviderFactory, ReceiptProvider,
+        AccountReader, BalProvider, BlockWriter, DatabaseProviderFactory, ReceiptProvider,
         StaticFileProviderFactory,
     };
     use reth_prune::PruneModes;
-    use reth_prune_types::{PruneMode, ReceiptsLogPruneConfig};
+    use reth_prune_types::ReceiptsLogPruneConfig;
     use reth_stages_api::StageUnitCheckpoint;
     use reth_testing_utils::generators;
     use reth_trie::bundle_state::{AccountStatus, BundleAccount};
@@ -1517,5 +1567,95 @@ mod tests {
         stage
             .ensure_consistency(&provider, 1, None)
             .expect("ensure_consistency should succeed when receipts are intentionally skipped");
+    }
+
+    #[test]
+    fn stores_validated_block_access_lists() {
+        let chain_spec = Arc::new(ChainSpecBuilder::mainnet().amsterdam_activated().build());
+        let evm_config = EthEvmConfig::new(chain_spec.clone());
+        let factory = create_test_provider_factory_with_chain_spec(chain_spec.clone());
+
+        let provider = factory.database_provider_rw().unwrap();
+        for (address, code) in [
+            (BEACON_ROOTS_ADDRESS, &BEACON_ROOTS_CODE),
+            (HISTORY_STORAGE_ADDRESS, &HISTORY_STORAGE_CODE),
+            (WITHDRAWAL_REQUEST_PREDEPLOY_ADDRESS, &WITHDRAWAL_REQUEST_PREDEPLOY_CODE),
+            (CONSOLIDATION_REQUEST_PREDEPLOY_ADDRESS, &CONSOLIDATION_REQUEST_PREDEPLOY_CODE),
+        ] {
+            let bytecode = Bytecode::new_raw(code.clone());
+            let account = Account {
+                nonce: 1,
+                bytecode_hash: Some(bytecode.hash_slow()),
+                ..Default::default()
+            };
+            provider.tx_ref().put::<tables::PlainAccountState>(address, account).unwrap();
+            provider.tx_ref().put::<tables::Bytecodes>(bytecode.hash_slow(), bytecode).unwrap();
+        }
+        let genesis = amsterdam_block(0, B256::ZERO, B256::ZERO);
+        provider.insert_block(&genesis.clone().try_recover().unwrap()).unwrap();
+
+        // Execute the block once to learn the hash of its access list.
+        let bal = {
+            let db = StateProviderDatabase(
+                LatestStateProviderRef::new(&provider).into_evm_state_provider(),
+            );
+            let mut executor = evm_config.batch_executor(db);
+            let block = amsterdam_block(1, genesis.hash(), B256::ZERO);
+            executor.execute_one(&block.try_recover().unwrap()).unwrap();
+            alloy_rlp::encode(executor.take_bal().unwrap())
+        };
+        let block = amsterdam_block(1, genesis.hash(), keccak256(&bal));
+        provider.insert_block(&block.clone().try_recover().unwrap()).unwrap();
+        provider
+            .static_file_provider()
+            .latest_writer(StaticFileSegment::Headers)
+            .unwrap()
+            .commit()
+            .unwrap();
+        provider.commit().unwrap();
+
+        let mut stage = ExecutionStage::new_with_executor(
+            evm_config,
+            Arc::new(EthBeaconConsensus::new(chain_spec)),
+        )
+        .with_bal_store(factory.bal_store().clone());
+        let provider = factory.database_provider_rw().unwrap();
+        let output = stage.execute(&provider, ExecInput { target: Some(1), checkpoint: None });
+        assert_matches!(output, Ok(ExecOutput { done: true, .. }));
+        provider.commit().unwrap();
+
+        assert_eq!(factory.bal_store().get_by_hash(block.hash()).unwrap(), Some(bal.into()));
+    }
+
+    fn amsterdam_block(number: u64, parent_hash: B256, bal_hash: B256) -> SealedBlock<Block> {
+        Block {
+            header: Header {
+                parent_hash,
+                number,
+                timestamp: number * 12,
+                gas_limit: 30_000_000,
+                base_fee_per_gas: Some(INITIAL_BASE_FEE),
+                withdrawals_root: Some(EMPTY_WITHDRAWALS),
+                blob_gas_used: Some(0),
+                excess_blob_gas: Some(0),
+                parent_beacon_block_root: Some(B256::ZERO),
+                requests_hash: Some(EMPTY_REQUESTS_HASH),
+                block_access_list_hash: Some(bal_hash),
+                slot_number: Some(number),
+                ..Default::default()
+            },
+            body: BlockBody { withdrawals: Some(Default::default()), ..Default::default() },
+        }
+        .seal_slow()
+    }
+
+    #[test]
+    fn bal_retention_matches_bal_store_pruning() {
+        let tip = 10 * BAL_RETENTION_PERIOD_SLOTS;
+        assert!(within_bal_retention(tip, tip));
+        assert!(within_bal_retention(tip - BAL_RETENTION_PERIOD_SLOTS, tip));
+        assert!(!within_bal_retention(tip - BAL_RETENTION_PERIOD_SLOTS - 1, tip));
+        // A chain shorter than the window keeps every BAL.
+        assert!(within_bal_retention(0, BAL_RETENTION_PERIOD_SLOTS - 1));
     }
 }
