@@ -124,14 +124,18 @@ where
 
     /// Traces every transaction of a block through the block executor, see
     /// [`Call::block_executor`](reth_rpc_eth_api::helpers::Call::block_executor).
+    ///
+    /// A supplied permit stays with the worker if the waiting request times out or is dropped.
     async fn trace_block(
         &self,
         block: Arc<RecoveredBlock<ProviderBlock<Eth::Provider>>>,
         evm_env: EvmEnvFor<Eth::Evm>,
         opts: GethDebugTracingOptions,
+        permit: Option<OwnedSemaphorePermit>,
     ) -> Result<Vec<TraceResult>, Eth::Error> {
         self.eth_api()
             .spawn_with_state_at_block(block.parent_hash(), move |eth_api, mut db| {
+                let _permit = permit;
                 let mut results = Vec::with_capacity(block.body().transactions().len());
 
                 eth_api.apply_pre_execution_changes(&block, &mut db)?;
@@ -285,11 +289,14 @@ where
     /// The block is supplied by the caller, so its replay is bounded by a timeout of 30 seconds: no
     /// transaction starts after it expires, the request then fails with
     /// [`EthApiError::ExecutionTimedOut`].
+    /// The replay retains its tracing permit until the running transaction finishes.
     pub async fn debug_trace_raw_block(
         &self,
         rlp_block: Bytes,
         opts: GethDebugTracingOptions,
     ) -> Result<Vec<TraceResult>, Eth::Error> {
+        let permit =
+            self.acquire_trace_permit().await.map_err(|_| EthApiError::InternalEthError)?;
         let block: ProviderBlock<Eth::Provider> = Decodable::decode(&mut rlp_block.as_ref())
             .map_err(BlockError::RlpDecodeRawBlock)
             .map_err(Eth::Error::from_eth_err)?;
@@ -313,7 +320,12 @@ where
         // Dropping the replay cancels it before its next transaction.
         tokio::time::timeout(
             RAW_BLOCK_TRACE_TIMEOUT,
-            self.trace_block(Arc::new(block.into_recovered_with_signers(senders)), evm_env, opts),
+            self.trace_block(
+                Arc::new(block.into_recovered_with_signers(senders)),
+                evm_env,
+                opts,
+                Some(permit),
+            ),
         )
         .await
         .map_err(|_| {
@@ -338,7 +350,7 @@ where
         }
         let evm_env = self.eth_api().evm_env_for_header(block.sealed_block().sealed_header())?;
 
-        self.trace_block(block, evm_env, opts).await
+        self.trace_block(block, evm_env, opts, None).await
     }
 
     /// Trace the transaction according to the provided options.
@@ -1163,7 +1175,6 @@ where
         rlp_block: Bytes,
         opts: Option<GethDebugTracingOptions>,
     ) -> RpcResult<Vec<TraceResult>> {
-        let _permit = self.acquire_trace_permit().await;
         Self::debug_trace_raw_block(self, rlp_block, opts.unwrap_or_default())
             .await
             .map_err(Into::into)
@@ -1472,7 +1483,7 @@ where
             .to_rpc_result()?;
 
         let opts = opts.map(|o| o.tracing_options).unwrap_or_default();
-        self.trace_block(entry.block.clone(), evm_env, opts).await.map_err(Into::into)
+        self.trace_block(entry.block.clone(), evm_env, opts, None).await.map_err(Into::into)
     }
 }
 
@@ -1656,22 +1667,41 @@ impl JsTraceInterrupt {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{eth::helpers::types::EthRpcConverter, EthApi};
+    use crate::{eth::helpers::types::EthRpcConverter, EthApi, EthApiBuilder};
+    use alloy_consensus::{transaction::SignerRecoverable, Header, TxLegacy};
     use alloy_genesis::{Genesis, GenesisAccount};
-    use alloy_primitives::{keccak256, U256};
-    use evm2::{bytecode::Bytecode, evm::AccountInfo};
+    use alloy_primitives::{keccak256, TxKind, U256};
+    use evm2::{
+        bytecode::Bytecode,
+        evm::{
+            precompile::{PrecompileOutput, PrecompileProvider},
+            AccountInfo,
+        },
+        interpreter::{GasTracker, Message},
+        precompiles::{MovePrecompileError, PrecompileId},
+        registry::TxRegistry,
+        BaseEvmTypes, PrecompileError, SpecId, TxResult,
+    };
+    use futures::FutureExt;
+    use jsonrpsee_types::error::CALL_EXECUTION_FAILED_CODE;
+    use parking_lot::Mutex;
     use reth_chainspec::{ChainSpec, ChainSpecBuilder};
     use reth_db_api::{tables, transaction::DbTxMut};
     use reth_db_common::init::init_genesis;
-    use reth_evm_ethereum::EthEvmConfig;
+    use reth_ethereum_primitives::{Block, Transaction};
+    use reth_evm_ethereum::{EthEvmConfig, EvmFactory};
     use reth_network_api::noop::NoopNetwork;
     use reth_primitives_traits::StorageEntry;
     use reth_provider::test_utils::{
-        create_test_provider_factory, create_test_provider_factory_with_chain_spec, NoopProvider,
+        create_test_provider_factory, create_test_provider_factory_with_chain_spec,
+        ExtendedAccount, MockEthProvider, NoopProvider,
     };
     use reth_rpc_eth_api::EthApiServer;
+    use reth_testing_utils::generators::{self, generate_key, sign_tx_with_key_pair};
     use reth_transaction_pool::test_utils::testing_pool;
     use reth_trie_common::bundle_state::{AccountStatus, BundleAccount, BundleState, StorageSlot};
+    use std::sync::mpsc;
+    use tokio::sync::mpsc::{error::TryRecvError, Sender};
 
     #[tokio::test]
     async fn trace_call_out_of_range_block_error() {
@@ -1883,5 +1913,170 @@ mod tests {
 
         assert_eq!(storage.storage[&hashed_old_slot], U256::ZERO);
         assert_eq!(storage.storage[&hashed_new_slot], new_value);
+    }
+
+    #[tokio::test]
+    async fn raw_block_trace_retains_permit_until_worker_exits() {
+        for expire in [true, false] {
+            let (entered_tx, mut entered_rx) = tokio::sync::mpsc::channel(2);
+            let (resume_tx, resume_rx) = mpsc::channel();
+            let factory = BlockingTraceEvmFactory {
+                entered: entered_tx,
+                resume: Arc::new(Mutex::new(resume_rx)),
+            };
+            let key = generate_key(&mut generators::rng());
+            let transactions = (0..2)
+                .map(|nonce| {
+                    sign_tx_with_key_pair(
+                        key,
+                        Transaction::Legacy(TxLegacy {
+                            chain_id: Some(1),
+                            nonce,
+                            gas_limit: 30_000,
+                            gas_price: 1,
+                            to: TxKind::Call(BlockingTraceEvmFactory::ADDRESS),
+                            ..Default::default()
+                        }),
+                    )
+                })
+                .collect::<Vec<_>>();
+            let mut provider = MockEthProvider::default();
+            provider.chain_spec = Arc::new(ChainSpecBuilder::mainnet().berlin_activated().build());
+            provider.extend_accounts([(
+                transactions[0].recover_signer().unwrap(),
+                ExtendedAccount::new(0, U256::from(1_000_000)),
+            )]);
+            let evm_config = EthEvmConfig::new_with_evm_factory(provider.chain_spec(), factory);
+            let eth_api =
+                EthApiBuilder::new(provider, testing_pool(), NoopNetwork::default(), evm_config)
+                    .build();
+            let debug_api = DebugApi::new(
+                eth_api,
+                BlockingTaskGuard::new(1),
+                &Runtime::test(),
+                futures::stream::empty(),
+            );
+            let mut block = Block {
+                header: Header { number: 1, gas_limit: 100_000, ..Default::default() },
+                ..Default::default()
+            };
+            block.body.transactions = transactions;
+            let rlp = alloy_rlp::encode(&block).into();
+            let api = debug_api.clone();
+            let request =
+                tokio::spawn(
+                    async move { DebugApiServer::debug_trace_block(&api, rlp, None).await },
+                );
+
+            // Wait until the first transaction is blocked inside the precompile.
+            tokio::time::timeout(Duration::from_secs(10), entered_rx.recv())
+                .await
+                .unwrap()
+                .unwrap();
+            if expire {
+                tokio::time::pause();
+                // Advance past the deadline to account for timer granularity.
+                tokio::time::advance(RAW_BLOCK_TRACE_TIMEOUT + Duration::from_secs(1)).await;
+                let error = request.await.unwrap().unwrap_err();
+                tokio::time::resume();
+                assert_eq!(error.code(), CALL_EXECUTION_FAILED_CODE);
+                assert_eq!(error.message(), "execution aborted (timeout = 30s)");
+            } else {
+                request.abort();
+                assert!(request.await.unwrap_err().is_cancelled());
+            }
+
+            assert!(debug_api.acquire_trace_permit().now_or_never().is_none());
+            resume_tx.send(()).unwrap();
+            drop(resume_tx);
+            let permit =
+                tokio::time::timeout(Duration::from_secs(10), debug_api.acquire_trace_permit())
+                    .await
+                    .unwrap()
+                    .unwrap();
+            // The cancelled replay must not enter its second transaction.
+            assert_eq!(entered_rx.try_recv(), Err(TryRecvError::Empty));
+            drop(permit);
+
+            // The permit is reusable, and a successful replay releases it as well.
+            block.body.transactions.clear();
+            let result = tokio::time::timeout(
+                Duration::from_secs(10),
+                DebugApiServer::debug_trace_block(
+                    &debug_api,
+                    alloy_rlp::encode(&block).into(),
+                    None,
+                ),
+            )
+            .await
+            .unwrap()
+            .unwrap();
+            assert!(result.is_empty());
+            assert!(debug_api.acquire_trace_permit().now_or_never().unwrap().is_ok());
+        }
+    }
+
+    /// Blocks transaction execution until the test releases it.
+    #[derive(Clone, Debug)]
+    struct BlockingTraceEvmFactory {
+        entered: Sender<()>,
+        resume: Arc<Mutex<mpsc::Receiver<()>>>,
+    }
+
+    impl BlockingTraceEvmFactory {
+        const ADDRESS: Address = Address::with_last_byte(0xff);
+    }
+
+    impl EvmFactory for BlockingTraceEvmFactory {
+        type Types = BaseEvmTypes;
+        type SpecId = SpecId;
+
+        fn spec_id(&self, spec: SpecId) -> SpecId {
+            spec
+        }
+
+        fn tx_registry(&self, spec: SpecId) -> TxRegistry<BaseEvmTypes, TxResult<BaseEvmTypes>> {
+            evm2::ethereum::ethereum_tx_registry(spec)
+        }
+
+        fn configure_evm(&self, evm: &mut evm2::Evm<'_, BaseEvmTypes>) {
+            evm.set_precompiles(self.clone());
+        }
+    }
+
+    impl PrecompileProvider<BaseEvmTypes> for BlockingTraceEvmFactory {
+        fn addresses(&self) -> Vec<Address> {
+            vec![Self::ADDRESS]
+        }
+
+        fn precompile_ids(&self) -> Vec<(Address, PrecompileId)> {
+            vec![(Self::ADDRESS, PrecompileId::custom("blocking"))]
+        }
+
+        fn contains(&self, address: &Address) -> bool {
+            *address == Self::ADDRESS
+        }
+
+        fn move_precompiles(
+            &mut self,
+            moves: &[(Address, Address)],
+        ) -> Result<(), MovePrecompileError> {
+            assert!(moves.is_empty());
+            Ok(())
+        }
+
+        fn execute(
+            &mut self,
+            _evm: &mut evm2::Evm<'_, BaseEvmTypes>,
+            message: &Message<BaseEvmTypes>,
+            _gas: &mut GasTracker,
+        ) -> Option<Result<PrecompileOutput, PrecompileError>> {
+            if !self.contains(&message.call_target) {
+                return None
+            }
+            self.entered.try_send(()).unwrap();
+            self.resume.lock().recv_timeout(Duration::from_secs(10)).unwrap();
+            Some(Ok(PrecompileOutput::new(Bytes::new())))
+        }
     }
 }
