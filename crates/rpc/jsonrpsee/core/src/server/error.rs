@@ -59,8 +59,11 @@ pub enum SendTimeoutError {
 }
 
 /// The error returned while accepting a subscription.
+///
+/// Accepting fails if the connection is closed or if the subscription response exceeds the max
+/// response size.
 #[derive(Debug, Copy, Clone, thiserror::Error)]
-#[error("The remote peer closed the connection")]
+#[error("The connection is closed or the subscription response was too big")]
 pub struct PendingSubscriptionAcceptError;
 
 impl From<mpsc::error::SendError<String>> for DisconnectError {
