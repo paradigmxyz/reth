@@ -17,6 +17,7 @@ use std::{
 
 const HASH_BYTES: usize = 32;
 const CHECKPOINT_LENGTH_BYTES: usize = 8;
+const LEGACY_CHECKPOINT_VERSION: u32 = 2;
 const PREIMAGE_ACCOUNT_BYTES: usize = 24;
 const SNAPSHOT_ACCOUNT_MAX_BYTES: usize = 130;
 const SNAPSHOT_LEAF_MAX_BYTES: usize = 68;
@@ -323,7 +324,18 @@ impl<H: TreeHasher> SnapshotStore<H> {
             let mut version = [0; 4];
             read_exact(&mut file, &mut version, &path)?;
             check_eof(&mut file, &path)?;
-            if stored != count || version != STORE_VERSION.to_be_bytes() {
+            if stored != count {
+                return Err(ArtifactError::Invalid("invalid PBT checkpoint marker").into());
+            }
+            if version == LEGACY_CHECKPOINT_VERSION.to_be_bytes() &&
+                version != STORE_VERSION.to_be_bytes()
+            {
+                // Authenticate native nodes before upgrading the separately published marker.
+                let state = self.database.load::<H>(root, count, self.limits)?;
+                self.write_marker(root, count)?;
+                return Ok(state)
+            }
+            if version != STORE_VERSION.to_be_bytes() {
                 return Err(ArtifactError::Invalid("invalid PBT checkpoint marker").into());
             }
         } else {

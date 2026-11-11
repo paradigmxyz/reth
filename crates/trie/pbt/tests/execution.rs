@@ -9,6 +9,9 @@ use reth_trie_pbt::{
     AccountData, Blake3Hasher, StateError, StateTree,
 };
 
+#[cfg(feature = "parallel")]
+use reth_trie_pbt::execution::apply_bundle_parallel;
+
 #[test]
 fn transfer_and_storage_output_matches_direct_encoding() {
     let a = Address::repeat_byte(1);
@@ -179,4 +182,40 @@ fn account_encoding_failure_preserves_parent_storage_and_code() {
     assert_eq!(parent.root(), root);
     assert_eq!(parent.storage(address, U256::MAX), B256::repeat_byte(1));
     assert_eq!(parent.account(address).unwrap().code.as_ref(), &[1]);
+}
+
+#[cfg(feature = "parallel")]
+#[test]
+fn dense_parallel_execution_matches_serial_and_preserves_failed_parent() {
+    let parent = StateTree::<Blake3Hasher>::new();
+    let mut bundle = BundleState::default();
+    for index in 0u64..4096 {
+        let address = Address::from_word(B256::from(U256::from(index)));
+        let mut account = BundleAccount::new(
+            None,
+            Some(Default::default()),
+            Default::default(),
+            AccountStatus::InMemoryChange,
+        );
+        let info = account.info.as_mut().unwrap();
+        info.nonce = 1;
+        info.balance = U256::from(index + 1);
+        account.storage.insert(U256::from(64), StorageSlot::new_changed(U256::ZERO, U256::from(1)));
+        bundle.state.insert(address, account);
+    }
+    let serial = apply_bundle(&parent, &bundle).unwrap();
+    let parallel = apply_bundle_parallel(&parent, &bundle).unwrap();
+    assert_eq!(parallel.root(), serial.root());
+    assert_eq!(
+        parallel.tree().entries().collect::<Vec<_>>(),
+        serial.tree().entries().collect::<Vec<_>>()
+    );
+    assert_eq!(parent.root(), B256::ZERO);
+    let before = parallel.root();
+    bundle.state.get_mut(&Address::ZERO).unwrap().info.as_mut().unwrap().balance = U256::MAX;
+    assert!(matches!(
+        apply_bundle_parallel(&parallel, &bundle),
+        Err(ExecutionError::State(StateError::BalanceOverflow))
+    ));
+    assert_eq!(parallel.root(), before);
 }

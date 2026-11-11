@@ -12,6 +12,9 @@ pub(crate) struct PbtArgs {
     /// Enable experimental BLAKE3 PBT state commitments using genesis config.binaryTrieTime.
     #[arg(long, conflicts_with = "snap_v2")]
     pbt: bool,
+    /// Hash dense PBT state-update batches in parallel; sparse updates remain incremental.
+    #[arg(long = "pbt.parallel", requires = "pbt")]
+    parallel: bool,
 }
 
 impl PbtArgs {
@@ -32,6 +35,10 @@ impl PbtArgs {
             );
         }
         Ok(activation)
+    }
+
+    pub(crate) const fn parallel(&self) -> bool {
+        self.parallel
     }
 }
 
@@ -76,7 +83,7 @@ mod tests {
         let chain = EthereumChainSpecParser::parse("dev").unwrap();
         assert_eq!(PbtArgs::default().activation(&chain).unwrap(), None);
         assert_eq!(
-            PbtArgs { pbt: true }.activation(&chain).unwrap_err().to_string(),
+            PbtArgs { pbt: true, ..Default::default() }.activation(&chain).unwrap_err().to_string(),
             "--pbt requires config.binaryTrieTime in the genesis file"
         );
         let mut chain = (*chain).clone();
@@ -86,8 +93,27 @@ mod tests {
             "this chain configures binaryTrieTime; enable --pbt"
         );
         assert_eq!(
-            PbtArgs { pbt: true }.activation(&chain).unwrap_err().to_string(),
+            PbtArgs { pbt: true, ..Default::default() }.activation(&chain).unwrap_err().to_string(),
             "--pbt requires Amsterdam/BAL activation at genesis for staged synchronization"
         );
+    }
+
+    #[test]
+    fn parallel_requires_pbt_and_is_opt_in() {
+        let mut cli =
+            Cli::<PbtChainSpecParser, PbtArgs>::try_parse_from(["reth", "node", "--pbt"]).unwrap();
+        assert!(!cli.as_node_command_mut().unwrap().ext.parallel());
+        let mut cli = Cli::<PbtChainSpecParser, PbtArgs>::try_parse_from([
+            "reth",
+            "node",
+            "--pbt",
+            "--pbt.parallel",
+        ])
+        .unwrap();
+        assert!(cli.as_node_command_mut().unwrap().ext.parallel());
+        let error =
+            Cli::<PbtChainSpecParser, PbtArgs>::try_parse_from(["reth", "node", "--pbt.parallel"])
+                .unwrap_err();
+        assert_eq!(error.kind(), clap::error::ErrorKind::MissingRequiredArgument);
     }
 }

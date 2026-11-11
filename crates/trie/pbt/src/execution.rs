@@ -1,6 +1,6 @@
 //! Applies finalized block output using plain address/slot preimages, never MPT hashed keys.
 
-use crate::{AccountData, StateError, StateTree, TreeHasher};
+use crate::{AccountData, StateError, StateTree, StateUpdate, TreeHasher};
 use alloy_primitives::{keccak256, Bytes, B256, KECCAK256_EMPTY};
 use reth_trie_common::bundle_state::BundleState;
 
@@ -13,13 +13,32 @@ pub fn apply_bundle<H: TreeHasher>(
     parent: &StateTree<H>,
     bundle: &BundleState,
 ) -> Result<StateTree<H>, ExecutionError> {
+    apply_bundle_with(parent, bundle, StateTree::apply_batch)
+}
+
+/// Applies block output with parallel hashing of dense PBT update batches.
+/// Validation and parent-snapshot guarantees match [`apply_bundle`].
+#[cfg(feature = "parallel")]
+pub fn apply_bundle_parallel<H: TreeHasher>(
+    parent: &StateTree<H>,
+    bundle: &BundleState,
+) -> Result<StateTree<H>, ExecutionError> {
+    apply_bundle_with(parent, bundle, StateTree::apply_batch_parallel)
+}
+
+fn apply_bundle_with<H: TreeHasher>(
+    parent: &StateTree<H>,
+    bundle: &BundleState,
+    apply: impl FnOnce(&mut StateTree<H>, Vec<StateUpdate>) -> Result<(), StateError>,
+) -> Result<StateTree<H>, ExecutionError> {
     let mut state = parent.clone();
+    let mut updates = Vec::new();
     for (address, account) in bundle.state() {
         if account.status.is_not_modified() {
             continue;
         }
         let Some(info) = &account.info else {
-            state.remove_account(*address);
+            updates.push(StateUpdate::Account { address: *address, account: None });
             continue;
         };
         let code = if info.code_hash == KECCAK256_EMPTY || info.code_hash.is_zero() {
@@ -39,18 +58,22 @@ pub fn apply_bundle<H: TreeHasher>(
             return Err(ExecutionError::MissingCode(info.code_hash));
         }
         if account.was_destroyed() {
-            state.clear_storage(*address);
+            updates.push(StateUpdate::ClearStorage { address: *address });
         }
-        state.apply_account(
-            *address,
-            Some(AccountData { nonce: info.nonce, balance: info.balance, code }),
-        )?;
-        if state.account(*address).is_some() {
+        let data = AccountData { nonce: info.nonce, balance: info.balance, code };
+        let has_account = !data.is_empty();
+        updates.push(StateUpdate::Account { address: *address, account: Some(data) });
+        if has_account {
             for (slot, value) in &account.storage {
-                state.set_storage(*address, *slot, B256::from(value.present_value))?;
+                updates.push(StateUpdate::Storage {
+                    address: *address,
+                    slot: *slot,
+                    value: B256::from(value.present_value),
+                });
             }
         }
     }
+    apply(&mut state, updates)?;
     Ok(state)
 }
 

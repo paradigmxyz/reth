@@ -7101,13 +7101,14 @@ dependencies = [
 [[package]]
 name = "pbt"
 version = "0.1.0"
-source = "git+https://github.com/Rimeeeeee/pbtree?rev=ba0c12d5399f327ac19328bf3b55b56d73b38154#ba0c12d5399f327ac19328bf3b55b56d73b38154"
+source = "git+https://github.com/Rimeeeeee/pbtree?rev=35ed3a11ed13942d232ccb22cbd73473022a7cf5#35ed3a11ed13942d232ccb22cbd73473022a7cf5"
 dependencies = [
  "alloy-eip7928",
  "alloy-primitives",
  "alloy-trie",
  "blake3",
  "imbl",
+ "rayon",
  "rocksdb",
  "thiserror 2.0.21",
 ]

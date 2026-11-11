@@ -33,7 +33,6 @@ use reth_storage_overlay::OverlayManager;
 use reth_trie_pbt::{
     migration::{mpt_root, DecodeLimits},
     persistence::SnapshotStore,
-    replay::replay,
     AccountData, StateTree,
 };
 use std::{
@@ -102,6 +101,16 @@ impl PbtNode {
     /// Returns the chain with its PBT genesis commitment when activation is at genesis.
     pub fn chain_spec(&self) -> Arc<ChainSpec> {
         self.chain.clone()
+    }
+
+    /// Selects parallel hashing for dense PBT block and BAL updates.
+    /// Configure this before obtaining add-ons or backfill; sparse updates stay incremental.
+    pub fn with_parallel(mut self, parallel: bool) -> Self {
+        self.strategy = Arc::new(
+            PbtStateRootStrategy::new(self.store.clone(), self.strategy.activation_timestamp())
+                .with_parallel(parallel),
+        );
+        self
     }
 
     /// Builds engine add-ons that maintain shadow roots and select PBT at activation.
@@ -647,7 +656,7 @@ impl Startup {
             let raw = RawBal::new(bytes);
             raw.ensure_hash(commitment)?;
             let bal = DecodedBal::from_raw_bal(raw.clone())?;
-            let next = replay(&state, bal.as_bal().as_slice(), commitment)?;
+            let next = strategy.replay(&state, bal.as_bal().as_slice(), commitment)?;
             let root = if header.timestamp() >= strategy.activation_timestamp() {
                 next.root()
             } else {
@@ -826,10 +835,21 @@ mod tests {
         activation: u64,
         backfill_threshold: u64,
     ) -> eyre::Result<TestNode> {
+        launch_test_node_with_parallel(chain, store, activation, backfill_threshold, false).await
+    }
+
+    async fn launch_test_node_with_parallel(
+        chain: Arc<ChainSpec>,
+        store: Arc<SnapshotStore>,
+        activation: u64,
+        backfill_threshold: u64,
+        parallel: bool,
+    ) -> eyre::Result<TestNode> {
         let mut config = test_node_config(chain.clone())
             .with_rpc(RpcServerArgs::default().with_unused_ports().with_http());
         config.engine.backfill_run_threshold = backfill_threshold;
-        let strategy = Arc::new(PbtStateRootStrategy::new(store.clone(), activation));
+        let strategy =
+            Arc::new(PbtStateRootStrategy::new(store.clone(), activation).with_parallel(parallel));
         let backfill = PbtBackfill::new(strategy.clone(), CatchupLimits::default());
         let NodeHandle { node, node_exit_future: _ } = NodeBuilder::new(config)
             .testing_node(Runtime::test())
@@ -873,6 +893,35 @@ mod tests {
         assert_eq!(node.current_forkchoice_state()?.head_block_hash, first[1].block().hash());
         node.reorg_to(fork[2].block().hash()).await?;
         assert_eq!(node.current_forkchoice_state()?.head_block_hash, fork[2].block().hash());
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn parallel_payload_building_matches_checkpoint_and_bal_roots() -> eyre::Result<()> {
+        reth_tracing::init_test_tracing();
+        let directory = tempfile::tempdir()?;
+        let store = Arc::new(SnapshotStore::open(directory.path(), DecodeLimits::default())?);
+        let chain =
+            prepare_chain((*test_chain_spec(EthereumHardfork::Amsterdam)).clone(), 0, &store)?;
+        let mut node = launch_test_node_with_parallel(chain, store.clone(), 0, 64, true).await?;
+        node.set_finality(Finality::Keep);
+        let parent = store.load_block(node.block_hash(0))?;
+        let mut sender = Wallet::new(1).account(0).with_gas_limit(1_000_000);
+        let recipient = Address::repeat_byte(0x77);
+        let transfer = sender.transfer(recipient, U256::from(7)).await;
+        let mined = node.mine([transfer]).await?.ensure_success()?;
+        let state = store.load_block(mined.block().hash())?;
+        assert_eq!(state.account(recipient).unwrap().balance, U256::from(7));
+        assert_eq!(state.root(), mined.block().state_root);
+        let raw = node.inner.provider.bal_store().get_by_hash(mined.block().hash())?.unwrap();
+        let bal = DecodedBal::from_raw_bal(RawBal::new(raw))?;
+        let strategy = PbtStateRootStrategy::new(store, 0).with_parallel(true);
+        let replayed = strategy.replay(
+            &parent,
+            bal.as_bal().as_slice(),
+            mined.block().block_access_list_hash().unwrap(),
+        )?;
+        assert_eq!(replayed.root(), state.root());
         Ok(())
     }
 
@@ -1908,7 +1957,7 @@ mod tests {
                 let marker = checkpoints.join("states").join(boundary.state_root.to_string());
                 let original = reth_fs_util::read(&marker)?;
                 let mut corrupt = original.clone();
-                corrupt[11] ^= 1;
+                corrupt[11] = u8::MAX;
                 reth_fs_util::write(&marker, corrupt)?;
                 let error = retirement::try_retire(&strategy, &node.inner.provider).unwrap_err();
                 assert!(matches!(

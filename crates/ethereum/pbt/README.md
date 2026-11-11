@@ -7,6 +7,31 @@ reth init --chain /path/to/genesis.json --datadir /path/to/data
 reth node --chain /path/to/genesis.json --datadir /path/to/data --pbt
 ```
 
+Add `--pbt.parallel` to hash dense execution and BAL update batches in parallel.
+It requires `--pbt`; sparse updates stay incremental and produce the same commitments.
+The arena backend is not enabled. Parallel hashing uses Reth's existing Rayon
+thread pool.
+
+PBT runs emit structured `engine::pbt` INFO events for parent restoration, BAL
+replay, payload building, and block validation. Payload and validation events include `phase`,
+`parallel`, `accounts`, `leaves`, `pbt_update_ms`, `mpt_ms`, `checkpoint_ms`,
+`total_ms`, and `maintain_mpt`. `pbt_update_ms` includes state embedding and root
+hashing; `checkpoint_ms` includes durable writes. `total_ms` covers that root-work
+step, excluding EVM execution and separately logged parent restoration. Payload
+and validation events are separate operations; compare matching phases and
+`maintain_mpt` values when measuring serial and parallel runs.
+`accounts` counts entries in the execution bundle or BAL, while `leaves` is the
+resulting state-tree leaf count.
+Durations are wall-clock milliseconds.
+
+```sh
+reth node --chain /path/to/genesis.json --datadir /path/to/data --pbt --pbt.parallel \
+  --log.stdout.format json
+```
+
+Existing version-2 checkpoint markers are upgraded only after authenticating the
+native PBT state. Corrupt checkpoints fail without publishing upgraded markers.
+
 Use the same genesis, fork schedule, and BLAKE3 configuration as the other clients.
 Set `config.binaryTrieTime` to `0` for PBT from genesis, or to the shared future
 activation timestamp for an MPT-to-PBT devnet. Amsterdam must be active at genesis

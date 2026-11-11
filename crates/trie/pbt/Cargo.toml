@@ -40,6 +40,7 @@ default = []
 migration = ["pbt/migration"]
 execution = ["dep:reth-trie-common", "dep:alloy-primitives", "dep:thiserror"]
 bal = ["pbt/bal"]
+parallel = ["pbt/parallel"]
 persistence = [
     "migration",
     "pbt/persistence",

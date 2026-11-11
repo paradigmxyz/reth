@@ -1,8 +1,8 @@
 # PBT adapters for Reth
 
 The PBT implementation is an external dependency:
-[`pbt`](https://github.com/Rimeeeeee/pbtree/tree/ba0c12d5399f327ac19328bf3b55b56d73b38154),
-pinned to `ba0c12d5399f327ac19328bf3b55b56d73b38154` in the workspace `Cargo.toml`.
+[`pbt`](https://github.com/Rimeeeeee/pbtree/tree/35ed3a11ed13942d232ccb22cbd73473022a7cf5),
+pinned to `35ed3a11ed13942d232ccb22cbd73473022a7cf5` in the workspace `Cargo.toml`.
 It is a standalone root-level PBT crate, with source, tests and tooling arranged
 like [alloy-rs/trie](https://github.com/alloy-rs/trie).
 
@@ -29,6 +29,9 @@ cargo test -p reth-node-pbt
 
 The feature names `execution`, `migration`, `bal`, `conversion` and `persistence`
 remain available to Reth callers; the generic surfaces forward to `pbt`.
+The optional `parallel` feature exposes parallel batch hashing, including
+`execution::apply_bundle_parallel`. Nodes select it at runtime with `--pbt.parallel`;
+sparse updates remain incremental. See the node README for timing logs.
 Core conformance tests run in that repository with
 `cargo test -p pbt --all-features`.
 

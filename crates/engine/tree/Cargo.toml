@@ -36,7 +36,7 @@ reth-trie-parallel.workspace = true
 reth-trie-sparse = { workspace = true, features = ["std", "metrics"] }
 reth-trie.workspace = true
 reth-trie-common.workspace = true
-reth-trie-pbt = { workspace = true, features = ["execution", "persistence"], optional = true }
+reth-trie-pbt = { workspace = true, features = ["execution", "persistence", "bal", "parallel"], optional = true }
 
 # alloy
 alloy-consensus.workspace = true

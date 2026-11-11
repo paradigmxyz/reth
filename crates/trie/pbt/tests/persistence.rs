@@ -3,11 +3,13 @@
 #![cfg(feature = "persistence")]
 
 use alloy_primitives::{Address, B256, U256};
+use pbt::persistence::STORE_VERSION;
 use reth_trie_pbt::{
     migration::{mpt_root, ArtifactError, Artifacts, DecodeLimits},
     persistence::{PruneOutcome, SnapshotStore, StoreError},
     AccountData, Blake3Hasher, StateTree,
 };
+use rocksdb::DB;
 
 #[test]
 fn checkpoints_survive_reopening_and_keep_competing_branches() {
@@ -333,11 +335,54 @@ fn retirement_verification_bypasses_cached_state() {
     assert_eq!(store.verify_block(B256::ZERO).unwrap(), root);
     let marker = directory.path().join("states").join(root.to_string());
     let mut bytes = reth_fs_util::read(&marker).unwrap();
-    bytes[11] ^= 1;
+    bytes[11] = u8::MAX;
     reth_fs_util::write(&marker, bytes).unwrap();
     assert_eq!(store.load_block(B256::ZERO).unwrap().root(), root);
     assert!(matches!(
         store.verify_block(B256::ZERO),
         Err(StoreError::Artifact(ArtifactError::Invalid("invalid PBT checkpoint marker")))
     ));
+}
+
+#[test]
+fn version_two_markers_upgrade_only_after_native_authentication() {
+    for corrupt_native in [false, true] {
+        let directory = tempfile::tempdir().unwrap();
+        let state = account_state(1);
+        let root = state.root();
+        let count = u64::try_from(state.tree().len()).unwrap().to_be_bytes();
+        let block = B256::repeat_byte(3);
+        let store =
+            SnapshotStore::<Blake3Hasher>::open(directory.path(), DecodeLimits::default()).unwrap();
+        store.save_block(block, &state).unwrap();
+        drop(store);
+        let marker = directory.path().join("states").join(root.to_string());
+        let legacy = [count.as_slice(), &2u32.to_be_bytes()].concat();
+        reth_fs_util::write(&marker, &legacy).unwrap();
+        if corrupt_native {
+            let database = DB::open_default(directory.path().join("nodes")).unwrap();
+            let mut key = [b'n'; 33];
+            key[1..].copy_from_slice(root.as_slice());
+            database.put(key, []).unwrap();
+        }
+        let store =
+            SnapshotStore::<Blake3Hasher>::open(directory.path(), DecodeLimits::default()).unwrap();
+        if corrupt_native {
+            assert!(matches!(
+                store.load_block(block),
+                Err(StoreError::Artifact(ArtifactError::Truncated))
+            ));
+            assert_eq!(reth_fs_util::read(&marker).unwrap(), legacy);
+        } else {
+            assert_eq!(store.load_block(block).unwrap().root(), root);
+            let upgraded = [count.as_slice(), &STORE_VERSION.to_be_bytes()].concat();
+            assert_eq!(reth_fs_util::read(&marker).unwrap(), upgraded);
+            assert_eq!(store.verify_block(block).unwrap(), root);
+            drop(store);
+            let reopened =
+                SnapshotStore::<Blake3Hasher>::open(directory.path(), DecodeLimits::default())
+                    .unwrap();
+            assert_eq!(reopened.load_block(block).unwrap().root(), root);
+        }
+    }
 }

@@ -6,7 +6,7 @@
 
 pub use pbt::{
     key, AccountData, BinaryTree, Blake3Hasher, Proof, ProofError, ProofStep, ProofTerminal,
-    StateError, StateTree, TreeError, TreeHasher, MAX_KEY_LENGTH,
+    StateError, StateTree, StateUpdate, TreeError, TreeHasher, MAX_KEY_LENGTH,
 };
 
 /// Canonical migration artifacts and independent MPT/PBT verification.

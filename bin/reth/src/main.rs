@@ -55,7 +55,8 @@ fn main() {
                     builder.config().chain.clone(),
                     builder.config().datadir().data_dir(),
                     activation,
-                )?;
+                )?
+                .with_parallel(args.parallel());
                 builder.config_mut().chain = pbt.chain_spec();
                 let backfill = pbt.backfill();
                 let methods = pbt.rpc_module()?;
