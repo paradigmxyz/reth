@@ -20,16 +20,21 @@ use alloy_rpc_types_eth::{
     state::{AccountOverride, StateOverride},
     AccessListResult, TransactionRequest,
 };
-use alloy_rpc_types_trace::geth::{CallConfig, GethDebugTracingOptions, GethTrace};
+use alloy_rpc_types_trace::geth::{
+    CallConfig, ChainBlockTraceResult, GethDebugTracingOptions, GethTrace,
+};
 use rand::{rngs::StdRng, Rng, SeedableRng};
 use reth_chainspec::{
     sepolia::{SEPOLIA_AMSTERDAM_TIMESTAMP, SEPOLIA_BPO2_TIMESTAMP},
     EthChainSpec, EthereumHardfork, SEPOLIA,
 };
 use reth_e2e_test_utils::{
-    receipt::PendingTransactionExt, test_chain_spec, test_chain_spec_builder,
-    transaction::TransactionTestContext, wait::poll_until, wallet::Wallet, E2ETestSetupExt,
-    NodeHelperType,
+    receipt::PendingTransactionExt,
+    test_chain_spec, test_chain_spec_builder,
+    transaction::TransactionTestContext,
+    wait::{poll_until, WAIT_TIMEOUT},
+    wallet::Wallet,
+    E2ETestSetupExt, NodeHelperType,
 };
 use reth_network::{types::NatResolver, PeersInfo};
 use reth_node_builder::{NodeBuilder, NodeHandle};
@@ -42,6 +47,7 @@ use reth_payload_primitives::BuiltPayload;
 use reth_primitives_traits::{Block as _, SealedHeader, SignedTransaction};
 use reth_provider::CanonChainTracker;
 use reth_rpc_api::servers::AdminApiServer;
+use reth_rpc_server_types::RpcModuleSelection;
 use reth_tasks::Runtime;
 use reth_transaction_pool::test_utils::TransactionGenerator;
 use std::{
@@ -255,6 +261,63 @@ async fn test_fee_history() -> eyre::Result<()> {
             prev_header = header;
         }
     }
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_debug_trace_chain_subscription() -> eyre::Result<()> {
+    reth_tracing::init_test_tracing();
+
+    let (mut node, wallet) = EthereumNode::test_setup_for(EthereumHardfork::Cancun)
+        .with_rpc_modifier(|rpc| rpc.with_ws().with_ws_api(RpcModuleSelection::All))
+        .build_single()
+        .await?;
+    let provider = node.rpc_provider_with_wallet(wallet.signer(0));
+
+    // Geth suppresses empty intermediate blocks but always emits the end block.
+    node.advance_block().await?;
+    let _ = GasWaster::deploy_builder(&provider, U256::from(5)).send().await?;
+    let _ = GasWaster::deploy_builder(&provider, U256::from(7)).send().await?;
+    node.advance_blocks(2).await?;
+
+    let client = node.inner.rpc_server_handle().ws_client().await.unwrap();
+
+    // Marking a call as a subscription makes the client track its notifications.
+    let mut invalid = client.request::<_, B256>("debug_subscribe", ("traceChain", "0x3", "0x3"));
+    invalid.set_is_subscription();
+    let err = invalid.await.unwrap_err();
+    assert_eq!(
+        err.as_error_resp().unwrap().message,
+        "end block (#3) needs to come after start block (#3)"
+    );
+
+    let mut subscribe = client.request::<_, B256>(
+        "debug_subscribe",
+        (
+            "traceChain",
+            BlockNumberOrTag::Number(0),
+            BlockNumberOrTag::Number(3),
+            GethDebugTracingOptions::default(),
+        ),
+    );
+    subscribe.set_is_subscription();
+    let mut subscription = client.get_subscription::<ChainBlockTraceResult>(subscribe.await?).await;
+
+    let traced = tokio::time::timeout(WAIT_TIMEOUT, subscription.recv()).await??;
+    assert_eq!(traced.block, U256::from(2));
+    let expected = provider
+        .debug_trace_block_by_number(
+            BlockNumberOrTag::Number(2),
+            GethDebugTracingOptions::default(),
+        )
+        .await?;
+    assert_eq!(expected.len(), 2, "both transactions must be traced");
+    assert_eq!(traced.traces, expected.into_iter().map(Some).collect::<Vec<_>>());
+
+    let terminal = tokio::time::timeout(WAIT_TIMEOUT, subscription.recv()).await??;
+    assert_eq!(terminal.block, U256::from(3));
+    assert!(terminal.traces.is_empty());
 
     Ok(())
 }
