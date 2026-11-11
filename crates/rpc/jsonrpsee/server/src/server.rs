@@ -357,11 +357,15 @@ impl ServerConfigBuilder {
     /// applies globally on the connection which implies
     /// all JSON-RPC messages.
     ///
+    /// It is the number of messages (responses and subscription notifications) that can wait to
+    /// be written to the client, and also the most calls a WebSocket connection runs at once.
+    ///
     /// For example if a subscription produces plenty of new items
     /// and the client can't keep up then no new messages are handled.
     ///
-    /// If this limit is exceeded then the server will "back-off"
-    /// and only accept new messages once the client reads pending messages.
+    /// If the client can't keep up then calls wait to queue their response. Once that many calls
+    /// are running, the server stops reading new messages from the connection until one
+    /// completes.
     ///
     /// # Panics
     ///

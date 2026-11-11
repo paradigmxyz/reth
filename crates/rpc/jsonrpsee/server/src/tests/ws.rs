@@ -24,7 +24,7 @@
 // IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 // DEALINGS IN THE SOFTWARE.
 
-use std::time::Duration;
+use std::{sync::Arc, time::Duration};
 
 use crate::{
     tests::helpers::{deser_call, init_logger, server_with_context},
@@ -956,7 +956,7 @@ async fn close_client_with_pending_calls_works() {
 
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
 
-    let (handle, addr) = server_with_infinite_call(tx).await;
+    let (handle, addr) = server_with_infinite_call(tx, ServerConfig::default()).await;
     let mut client = WebSocketTestClient::new(addr).with_default_timeout().await.unwrap().unwrap();
 
     for _ in 0..10 {
@@ -985,7 +985,7 @@ async fn drop_client_with_pending_calls_works() {
     init_logger();
 
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
-    let (handle, addr) = server_with_infinite_call(tx).await;
+    let (handle, addr) = server_with_infinite_call(tx, ServerConfig::default()).await;
 
     {
         let mut client =
@@ -1009,8 +1009,9 @@ async fn drop_client_with_pending_calls_works() {
 
 async fn server_with_infinite_call(
     tx: tokio::sync::mpsc::UnboundedSender<()>,
+    config: ServerConfig,
 ) -> (crate::ServerHandle, std::net::SocketAddr) {
-    let server = ServerBuilder::default()
+    let server = ServerBuilder::with_config(config)
         .build("127.0.0.1:0")
         .with_default_timeout()
         .await
@@ -1239,4 +1240,86 @@ async fn panicking_call_returns_internal_error() {
 
     handle.stop().unwrap();
     handle.stopped().await;
+}
+
+#[tokio::test]
+async fn ws_in_flight_calls_are_bounded() {
+    const LIMIT: usize = 4;
+    init_logger();
+
+    let config = ServerConfig::builder().set_message_buffer_capacity(LIMIT as u32).build();
+    let server = ServerBuilder::with_config(config)
+        .build("127.0.0.1:0")
+        .with_default_timeout()
+        .await
+        .unwrap()
+        .unwrap();
+
+    // Every call reports its start and then waits until the test releases it.
+    let (started_tx, mut started_rx) = tokio::sync::mpsc::unbounded_channel();
+    let release = Arc::new(tokio::sync::Semaphore::new(0));
+    let mut module = RpcModule::new((started_tx, release.clone()));
+    module
+        .register_async_method("blocked_call", |_, ctx| async move {
+            ctx.0.send(()).unwrap();
+            ctx.1.acquire().await.unwrap().forget();
+            "ok"
+        })
+        .unwrap();
+    let addr = server.local_addr().unwrap();
+    let handle = server.start(module);
+
+    let mut client = WebSocketTestClient::new(addr).with_default_timeout().await.unwrap().unwrap();
+    for id in 0..LIMIT * 3 {
+        let req = format!(r#"{{"jsonrpc":"2.0","method":"blocked_call","id":{id}}}"#);
+        client.send(req).with_default_timeout().await.unwrap().unwrap();
+    }
+
+    for _ in 0..LIMIT {
+        started_rx.recv().with_default_timeout().await.unwrap().unwrap();
+    }
+    // The remaining requests are not run while the limit is reached.
+    assert!(started_rx.recv().with_timeout(Duration::from_millis(200)).await.is_err());
+
+    // Completed calls free their permits for the waiting requests.
+    release.add_permits(LIMIT * 3);
+    for _ in 0..LIMIT * 3 {
+        client.receive().with_default_timeout().await.unwrap().unwrap();
+    }
+    let mut started = LIMIT;
+    while started_rx.try_recv().is_ok() {
+        started += 1;
+    }
+    assert_eq!(started, LIMIT * 3);
+
+    handle.stop().unwrap();
+    handle.stopped().with_default_timeout().await.unwrap();
+}
+
+#[tokio::test]
+async fn ws_waiting_for_call_permit_observes_server_stop() {
+    const LIMIT: usize = 4;
+    init_logger();
+
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+    let config = ServerConfig::builder().set_message_buffer_capacity(LIMIT as u32).build();
+    let (handle, addr) = server_with_infinite_call(tx, config).await;
+
+    {
+        let mut client =
+            WebSocketTestClient::new(addr).with_default_timeout().await.unwrap().unwrap();
+        for _ in 0..=LIMIT {
+            let req = r#"{"jsonrpc":"2.0","method":"infinite_call","id":1}"#;
+            client.send(req).with_default_timeout().await.unwrap().unwrap();
+        }
+        for _ in 0..LIMIT {
+            rx.recv().with_default_timeout().await.unwrap().unwrap();
+        }
+        // Give the connection time to read the last request and wait for a permit.
+        assert!(rx.recv().with_timeout(Duration::from_millis(200)).await.is_err());
+
+        handle.stop().unwrap();
+    }
+
+    handle.stopped().with_default_timeout().await.unwrap();
 }

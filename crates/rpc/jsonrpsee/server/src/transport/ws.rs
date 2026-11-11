@@ -19,7 +19,7 @@ use jsonrpsee_types::{
 };
 use soketto::connection::Error as SokettoError;
 use tokio::{
-    sync::{mpsc, oneshot},
+    sync::{mpsc, oneshot, Semaphore},
     time::timeout,
 };
 use tokio_stream::wrappers::ReceiverStream;
@@ -62,8 +62,13 @@ where
         pending_calls,
         pending_calls_completed,
     } = params;
-    let ServerConfig { batch_requests_config, max_request_body_size, ws_write_timeout, .. } =
-        server_cfg;
+    let ServerConfig {
+        batch_requests_config,
+        max_request_body_size,
+        ws_write_timeout,
+        message_buffer_capacity,
+        ..
+    } = server_cfg;
 
     let (conn_tx, conn_rx) = oneshot::channel();
 
@@ -93,6 +98,8 @@ where
     .fuse();
 
     tokio::pin!(ws_stream);
+
+    let call_permits = Arc::new(Semaphore::new(message_buffer_capacity as usize));
 
     let result = loop {
         let receive = tokio::select! {
@@ -140,12 +147,26 @@ where
             }
         };
 
+        // A connection runs at most `message_buffer_capacity` calls at once. While waiting for a
+        // permit no further messages are read, which pushes back on the client, and the message
+        // that is waiting is the only one held. The permit is acquired after the read so that a
+        // connection at the limit that sends nothing more is still read and its close is noticed.
+        // Every call ends once the sink is closed, which frees the permits, so this wait ends
+        // when the connection closes.
+        let permit = tokio::select! {
+            permit = call_permits.clone().acquire_owned() => permit,
+            _ = &mut stopped => break Ok(Shutdown::Stopped),
+        };
+        // The semaphore is never closed.
+        let Ok(permit) = permit else { break Ok(Shutdown::ConnectionClosed) };
+
         let rpc_service = rpc_service.clone();
         let sink = sink.clone();
         let pending_calls = pending_calls.clone();
 
         tokio::spawn(async move {
             let _pending_calls = pending_calls;
+            let _permit = permit;
             let first_non_whitespace =
                 data.iter().enumerate().take(128).find(|(_, byte)| !byte.is_ascii_whitespace());
 
