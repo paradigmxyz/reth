@@ -131,12 +131,11 @@ pub enum VersionSpecificValidationError {
     /// Thrown if `engine_forkchoiceUpdatedV1` or `engine_newPayloadV1` contains withdrawals
     #[error("withdrawals not supported in V1")]
     WithdrawalsNotSupportedInV1,
-    /// Thrown if `engine_forkchoiceUpdated` or `engine_newPayload` contains no withdrawals after
-    /// Shanghai
+    /// Thrown if an engine method requires withdrawals but none are provided.
     #[error("no withdrawals post-Shanghai")]
     NoWithdrawalsPostShanghai,
-    /// Thrown if `engine_forkchoiceUpdated` or `engine_newPayload` contains withdrawals before
-    /// Shanghai
+    /// Thrown if V2 `PayloadAttributes` or `ExecutionPayload` contains withdrawals before
+    /// Shanghai.
     #[error("withdrawals pre-Shanghai")]
     HasWithdrawalsPreShanghai,
     /// Thrown if the `PayloadAttributes` or `ExecutionPayload` contains no parent beacon block
@@ -146,25 +145,15 @@ pub enum VersionSpecificValidationError {
     /// Thrown if the current engine method version does not support a block access list
     #[error("block access list not supported in this engine API version")]
     BlockAccessListNotSupported,
-    /// Thrown if  `engine_newPayload` contains no block access list
-    /// after Amsterdam
+    /// Thrown if an engine method that requires a block access list does not contain one.
     #[error("no block access list post-Amsterdam")]
     NoBlockAccessListPostAmsterdam,
-    /// Thrown if  `engine_newPayload` contains block access list
-    /// before Amsterdam
-    #[error("block access list pre-Amsterdam")]
-    HasBlockAccessListPreAmsterdam,
     /// Thrown if the current engine method version does not support a slot number
     #[error("slot number not supported in this engine API version")]
     SlotNumberNotSupported,
-    /// Thrown if  `engine_newPayload` contains no slot number
-    /// after Amsterdam
+    /// Thrown if an engine method that requires a slot number does not contain one.
     #[error("no slot number post-Amsterdam")]
     NoSlotNumberPostAmsterdam,
-    /// Thrown if  `engine_newPayload` contains slot number
-    /// before Amsterdam
-    #[error("slot number pre-Amsterdam")]
-    HasSlotNumberPreAmsterdam,
 }
 
 /// Error validating payload received over `newPayload` API.

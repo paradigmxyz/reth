@@ -518,6 +518,18 @@ impl PeersManager {
             self.peers.get(&peer_id).is_some_and(|peer| peer.is_trusted())
     }
 
+    /// Returns the reason to reject an incoming session before it is activated, or `None` if the
+    /// session may become active.
+    pub(crate) fn inbound_session_rejection(&self, peer_id: PeerId) -> Option<DisconnectReason> {
+        if self.ban_list.is_banned_peer(&peer_id) ||
+            self.peers.get(&peer_id).is_some_and(|peer| peer.is_banned()) ||
+            (self.trusted_nodes_only && !self.trusted_peer_ids.contains(&peer_id))
+        {
+            return Some(DisconnectReason::DisconnectRequested)
+        }
+        (!self.has_inbound_capacity(peer_id)).then_some(DisconnectReason::TooManyPeers)
+    }
+
     /// Bans the peer temporarily with the configured ban timeout
     fn ban_peer(&mut self, peer_id: PeerId) {
         let ban_duration = if let Some(peer) = self.peers.get(&peer_id) &&
@@ -1033,8 +1045,17 @@ impl PeersManager {
 
     /// Removes the tracked node from the set.
     pub(crate) fn remove_peer(&mut self, peer_id: PeerId) {
-        let Entry::Occupied(entry) = self.peers.entry(peer_id) else { return };
+        let Entry::Occupied(mut entry) = self.peers.entry(peer_id) else { return };
         if entry.get().is_trusted() {
+            return
+        }
+        if matches!(
+            entry.get().state,
+            PeerConnectionState::DisconnectingIn | PeerConnectionState::DisconnectingOut
+        ) {
+            // a previous removal already queued the disconnect and `PeerRemoved`, the entry must
+            // stay so the session close handler can release its slot
+            entry.get_mut().remove_after_disconnect = true;
             return
         }
         let mut peer = entry.remove();
@@ -2808,6 +2829,10 @@ mod tests {
         assert!(peer_manager.on_incoming_pending_session(socket_addr.ip()).is_ok());
         // non-trusted nodes should also increase pending_in
         assert_eq!(peer_manager.connection_info.num_pending_in, 1);
+        assert_eq!(
+            peer_manager.inbound_session_rejection(given_peer_id),
+            Some(DisconnectReason::DisconnectRequested)
+        );
         peer_manager.on_incoming_session_established(given_peer_id, socket_addr);
         // after the connection is established, the peer should be removed, the num_pending_in
         // should be decreased, and the num_inbound should not be increased
@@ -3004,6 +3029,11 @@ mod tests {
         assert!(peers.on_incoming_pending_session(basic_sock.ip()).is_ok());
         // non-trusted nodes should also increase pending_in
         assert_eq!(peers.connection_info.num_pending_in, 1);
+        assert_eq!(
+            peers.inbound_session_rejection(basic_peer),
+            Some(DisconnectReason::DisconnectRequested)
+        );
+        assert_eq!(peers.inbound_session_rejection(trusted_peer), None);
         peers.on_incoming_session_established(basic_peer, basic_sock);
         // after the connection is established, the peer should be removed, the num_pending_in
         // should be decreased, and the num_inbound mut not be increased
@@ -3186,6 +3216,29 @@ mod tests {
 
         peers.on_active_session_gracefully_closed(peer_id);
         assert!(!peers.peers.contains_key(&peer_id))
+    }
+
+    #[tokio::test]
+    async fn test_repeated_remove_while_disconnecting_releases_slot() {
+        let peer_id = PeerId::random();
+        let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 1, 2)), 8009);
+        let mut peers = PeersManager::default();
+
+        peers.on_incoming_pending_session(addr.ip()).unwrap();
+        peers.on_incoming_session_established(peer_id, addr);
+        assert_eq!(peers.connection_info.num_inbound, 1);
+
+        peers.remove_peer(peer_id);
+        peers.remove_peer(peer_id);
+
+        let peer = peers.peers.get(&peer_id).unwrap();
+        assert_eq!(peer.state, PeerConnectionState::DisconnectingIn);
+        assert!(peer.remove_after_disconnect);
+        assert_eq!(peers.connection_info.num_inbound, 1);
+
+        peers.on_active_session_gracefully_closed(peer_id);
+        assert_eq!(peers.connection_info.num_inbound, 0);
+        assert!(!peers.peers.contains_key(&peer_id));
     }
 
     #[tokio::test]

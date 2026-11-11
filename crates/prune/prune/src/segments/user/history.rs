@@ -1,5 +1,5 @@
 use crate::PruneLimiter;
-use alloy_primitives::BlockNumber;
+use alloy_primitives::{map::HashMap, BlockNumber};
 use itertools::Itertools;
 use reth_db_api::{
     cursor::{DbCursorRO, DbCursorRW},
@@ -10,7 +10,6 @@ use reth_db_api::{
 };
 use reth_provider::DBProvider;
 use reth_prune_types::{SegmentOutput, SegmentOutputCheckpoint};
-use rustc_hash::FxHashMap;
 
 enum PruneShardOutcome {
     Deleted,
@@ -28,7 +27,7 @@ pub(crate) struct PrunedIndices {
 /// Result of pruning history changesets, used to build the final output.
 pub(crate) struct HistoryPruneResult<K> {
     /// Map of the highest deleted changeset keys to their block numbers.
-    pub(crate) highest_deleted: FxHashMap<K, BlockNumber>,
+    pub(crate) highest_deleted: HashMap<K, BlockNumber>,
     /// The highest block number whose changesets are fully pruned, becoming the checkpoint.
     ///
     /// Checkpoints have block granularity, so a caller that can stop in the middle of a block

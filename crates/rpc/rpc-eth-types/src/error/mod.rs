@@ -217,6 +217,10 @@ pub enum EthApiError {
     /// Error thrown when trying to access block access list for blocks before Amsterdam
     #[error("Block access list not available for pre-Amsterdam blocks")]
     BlockAccessListNotAvailablePreAmsterdam,
+    /// Thrown when the calls of an `eth_callMany`, `trace_callMany` or `debug_traceCallMany`
+    /// request need more gas than the RPC gas cap they share.
+    #[error("the request's calls exceed the RPC gas cap of {0}")]
+    CallManyGasCapExceeded(u64),
     /// Any other error
     #[error("{0}")]
     Other(Box<dyn ToRpcError>),
@@ -383,10 +387,12 @@ impl From<EthApiError> for jsonrpsee_types::error::ErrorObject<'static> {
                 internal_rpc_err(msg)
             }
             EthApiError::InvalidParams(msg) => invalid_params_rpc_err(msg),
-            err @ EthApiError::ExecutionTimedOut(_) => rpc_error_with_code(
-                jsonrpsee_types::error::CALL_EXECUTION_FAILED_CODE,
-                err.to_string(),
-            ),
+            err @ (EthApiError::ExecutionTimedOut(_) | EthApiError::CallManyGasCapExceeded(_)) => {
+                rpc_error_with_code(
+                    jsonrpsee_types::error::CALL_EXECUTION_FAILED_CODE,
+                    err.to_string(),
+                )
+            }
             err @ (EthApiError::InternalBlockingTaskError | EthApiError::InternalEthError) => {
                 internal_rpc_err(err.to_string())
             }
@@ -499,7 +505,7 @@ impl From<MuxError> for EthApiError {
 impl From<DebugInspectorError> for EthApiError {
     fn from(error: DebugInspectorError) -> Self {
         match error {
-            DebugInspectorError::InvalidTracerConfig => Self::InvalidTracerConfig,
+            DebugInspectorError::InvalidTracerConfig(_) => Self::InvalidTracerConfig,
             DebugInspectorError::UnsupportedTracer => Self::Unsupported("unsupported tracer"),
             DebugInspectorError::JsTracerNotEnabled => {
                 Self::Unsupported("JS Tracer is not enabled")

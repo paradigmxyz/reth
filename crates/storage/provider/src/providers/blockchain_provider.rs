@@ -6,10 +6,10 @@ use crate::{
     AccountReader, BalProvider, BalStoreHandle, BlockHashReader, BlockIdReader, BlockNumReader,
     BlockReader, BlockReaderIdExt, BlockSource, CanonChainTracker, CanonStateNotifications,
     CanonStateSubscriptions, ChainSpecProvider, ChainStateBlockReader, ChangeSetReader,
-    DatabaseProviderFactory, HeaderProvider, ProviderError, ProviderFactory, PruneCheckpointReader,
-    ReceiptProvider, ReceiptProviderIdExt, RocksDBProviderFactory, StageCheckpointReader,
-    StateProvider, StateProviderBox, StateProviderFactory, StateReader, StaticFileProviderFactory,
-    TransactionVariant, TransactionsProvider,
+    DatabaseProviderFactory, HeaderProvider, MetadataProvider, ProviderError, ProviderFactory,
+    PruneCheckpointReader, ReceiptProvider, ReceiptProviderIdExt, RocksDBProviderFactory,
+    StageCheckpointReader, StateProvider, StateProviderBox, StateProviderFactory, StateReader,
+    StaticFileProviderFactory, TransactionVariant, TransactionsProvider,
 };
 use alloy_consensus::{transaction::TransactionMeta, BlockHeader};
 use alloy_eips::{BlockHashOrNumber, BlockId, BlockNumHash, BlockNumberOrTag};
@@ -176,51 +176,58 @@ impl<N: ProviderNodeTypes> BlockchainProvider<N> {
         ))
     }
 
-    /// Returns a cursor-backed state view for a state root still in canonical in-memory blocks.
-    fn block_state_range_provider(
-        &self,
-        state_root: B256,
-    ) -> ProviderResult<Option<HistoricalStateRangeProvider<N>>> {
-        let Some(matched) = self
-            .canonical_in_memory_state
+    /// Returns the canonical in-memory block with `state_root`.
+    fn block_state_by_root(&self, state_root: B256) -> Option<Arc<BlockState<N::Primitives>>> {
+        self.canonical_in_memory_state
             .canonical_chain()
             .find(|state| state.state_root() == state_root)
-        else {
-            return Ok(None)
-        };
-
-        let state_provider_factory = OverlayStateProviderFactory::new(
-            self.database.clone(),
-            self.database.overlay_manager().overlay_builder_for_state(matched),
-        );
-        state_provider_factory.database_provider_ro().map(Some)
     }
 
-    /// Returns a cursor-backed state view for a retained canonical state root.
-    fn historical_state_range_provider(
+    /// Resolves `state_root` into a range view over `provider`'s snapshot, preferring
+    /// `block_state` over the persisted-history fallback.
+    ///
+    /// The snap attempt is read from `provider` too, so a bootstrap committing after the snapshot
+    /// was taken can't slip its downloads past the check.
+    fn state_range_view(
         &self,
+        provider: StateRangeDbProvider<N>,
+        block_state: Option<Arc<BlockState<N::Primitives>>>,
         state_root: B256,
-    ) -> ProviderResult<Option<HistoricalStateRangeProvider<N>>> {
-        let provider = self.database.provider()?;
-        let Some(finish) = provider.get_stage_checkpoint(StageId::Finish)? else { return Ok(None) };
-        let oldest = finish.block_number.saturating_sub(SNAPSHOT_STATE_RETENTION - 1);
-        let mut block_hash = None;
-
-        for number in (oldest..=finish.block_number).rev() {
-            let Some(header) = provider.sealed_header(number)? else { continue };
-            if header.state_root() == state_root {
-                block_hash = Some(header.hash());
-                break
-            }
+    ) -> ProviderResult<Option<StateRangeView>> {
+        if provider.snap_attempt()?.is_some_and(|attempt| !attempt.is_verified()) {
+            return Ok(None)
         }
-        drop(provider);
 
-        let Some(block_hash) = block_hash else { return Ok(None) };
-        let state_provider_factory = OverlayStateProviderFactory::new(
-            self.database.clone(),
-            self.database.overlay_manager().overlay_builder(block_hash),
-        );
-        state_provider_factory.database_provider_ro().map(Some)
+        // A pipeline run commits executed state before it moves `Finish`, so until then the state
+        // tables are ahead of every retained block.
+        let Some(finish) = provider.get_stage_checkpoint(StageId::Finish)? else { return Ok(None) };
+        if provider
+            .get_stage_checkpoint(StageId::Execution)?
+            .is_some_and(|execution| execution.block_number > finish.block_number)
+        {
+            return Ok(None)
+        }
+
+        let overlay_manager = self.database.overlay_manager();
+        let overlay_builder = match block_state {
+            Some(state) => overlay_manager.overlay_builder_for_state(state),
+            None => {
+                let Some(block_hash) =
+                    retained_block_hash::<N>(&provider, finish.block_number, state_root)?
+                else {
+                    return Ok(None)
+                };
+                overlay_manager.overlay_builder(block_hash)
+            }
+        };
+
+        // Peers choose the root, so its reverts stay out of the cache the engine shares.
+        Ok(Some(Box::new(HistoricalStateRangeView {
+            provider: OverlayStateProvider::new(
+                provider,
+                overlay_builder.without_trie_revert_caching(),
+            ),
+        })))
     }
 }
 
@@ -241,14 +248,14 @@ struct HistoricalStateRangeView<N: ProviderNodeTypes> {
 
 impl<N: ProviderNodeTypes> StateRangeProviderFactory for BlockchainProvider<N> {
     /// Resolves a retained canonical state root into a pinned range view, preferring a still
-    /// in-memory block over the persisted-history fallback.
+    /// in-memory block over the persisted-history fallback. Resolves nothing while a snap attempt
+    /// is unverified, since no root describes its partially downloaded state, or while the
+    /// `Execution` checkpoint is ahead of `Finish`.
     fn state_range_provider(&self, state_root: B256) -> ProviderResult<Option<StateRangeView>> {
-        let provider = match self.block_state_range_provider(state_root)? {
-            Some(provider) => Some(provider),
-            None => self.historical_state_range_provider(state_root)?,
-        };
-        Ok(provider
-            .map(|provider| Box::new(HistoricalStateRangeView { provider }) as StateRangeView))
+        // Persisted blocks leave memory only after their commit, so a canonical root missed here is
+        // already visible to a snapshot opened afterwards.
+        let block_state = self.block_state_by_root(state_root);
+        self.state_range_view(self.database.provider()?, block_state, state_root)
     }
 }
 
@@ -361,6 +368,24 @@ impl<N: ProviderNodeTypes> StateRangeProvider for HistoricalStateRangeView<N> {
             .storage_multiproof(keys.iter().copied().collect())?;
         Ok(multiproof.subtree.into_nodes_sorted().into_iter().map(|(_, bytes)| bytes).collect())
     }
+}
+
+/// Returns the hash of the canonical block with `state_root` among those retained up to `finish`,
+/// as seen by `provider`.
+fn retained_block_hash<N: ProviderNodeTypes>(
+    provider: &StateRangeDbProvider<N>,
+    finish: BlockNumber,
+    state_root: B256,
+) -> ProviderResult<Option<B256>> {
+    let oldest = finish.saturating_sub(SNAPSHOT_STATE_RETENTION - 1);
+
+    for number in (oldest..=finish).rev() {
+        let Some(header) = provider.sealed_header(number)? else { continue };
+        if header.state_root() == state_root {
+            return Ok(Some(header.hash()))
+        }
+    }
+    Ok(None)
 }
 
 impl<N: ProviderNodeTypes> DatabaseProviderFactory for BlockchainProvider<N> {
@@ -1082,7 +1107,7 @@ mod tests {
         CanonicalInMemoryState, ExecutedBlock, NewCanonicalChain,
     };
     use reth_chainspec::{ChainSpec, MAINNET};
-    use reth_db_api::models::{AccountBeforeTx, StoredBlockBodyIndices};
+    use reth_db_api::models::{AccountBeforeTx, SnapAttempt, StoredBlockBodyIndices};
     use reth_errors::ProviderError;
     use reth_ethereum_primitives::{Block, Receipt};
     use reth_execution_types::{
@@ -1095,10 +1120,11 @@ mod tests {
     use reth_storage_api::{
         BlockBodyIndicesProvider, BlockHashReader, BlockIdReader, BlockNumReader, BlockReader,
         BlockReaderIdExt, BlockSource, ChangeSetReader, DBProvider, DatabaseProviderFactory,
-        HashingWriter, HeaderProvider, RangeEnd, ReceiptProvider, ReceiptProviderIdExt,
-        StageCheckpointWriter, StateProviderFactory, StateRangeProvider, StateRangeProviderFactory,
-        StateRootProvider, StateWriteConfig, StateWriter, StorageRootProvider, StorageSettings,
-        StorageSettingsCache, TransactionVariant, TransactionsProvider, TrieWriter,
+        HashingWriter, HeaderProvider, MetadataWriter, RangeEnd, ReceiptProvider,
+        ReceiptProviderIdExt, StageCheckpointWriter, StateProviderFactory, StateRangeProvider,
+        StateRangeProviderFactory, StateRootProvider, StateWriteConfig, StateWriter,
+        StorageRootProvider, StorageSettings, StorageSettingsCache, TransactionVariant,
+        TransactionsProvider, TrieWriter,
     };
     use reth_testing_utils::generators::{
         self, random_block, random_block_range, random_changeset_range, random_eoa_accounts,
@@ -3101,6 +3127,36 @@ mod tests {
     }
 
     #[test]
+    fn state_range_view_checks_snap_attempt_on_its_snapshot() -> eyre::Result<()> {
+        let factory = test_provider_factory_with_genesis()?;
+        let provider = BlockchainProvider::new(factory.clone())?;
+        let (address, account) = random_account(1);
+        let mut attempt = SnapAttempt::start(None, BlockNumHash::default(), B256::ZERO);
+
+        // A snapshot taken before the attempt starts keeps serving, without its downloads.
+        let before_attempt = factory.provider()?;
+        let provider_rw = factory.provider_rw()?;
+        provider_rw.write_snap_attempt(&attempt)?;
+        provider_rw.insert_account_for_hashing([(address, Some(account))])?;
+        provider_rw.commit()?;
+        let state = provider
+            .state_range_view(before_attempt, None, EMPTY_ROOT_HASH)?
+            .expect("snapshot holds no attempt");
+        assert_eq!(state.account_range(B256::ZERO, B256::repeat_byte(0xff), 10_000)?.items, []);
+
+        // A snapshot taken while the attempt is unverified stays refused after verification.
+        let unverified = factory.provider()?;
+        attempt.verify();
+        let provider_rw = factory.provider_rw()?;
+        provider_rw.write_snap_attempt(&attempt)?;
+        provider_rw.insert_account_for_hashing([(address, None)])?;
+        provider_rw.commit()?;
+        assert!(provider.state_range_view(unverified, None, EMPTY_ROOT_HASH)?.is_none());
+
+        Ok(())
+    }
+
+    #[test]
     fn state_range_provider_account_range_respects_response_bytes() -> eyre::Result<()> {
         let factory = test_provider_factory_with_genesis()?;
         let provider_rw = factory.provider_rw()?;
@@ -3231,9 +3287,31 @@ mod tests {
         )?;
         provider_rw.commit()?;
 
-        let provider = BlockchainProvider::new(factory)?;
+        let provider = BlockchainProvider::new(factory.clone())?;
         assert!(provider.state_range_provider(recent_root)?.is_some());
         assert!(provider.state_range_provider(expired_root)?.is_none());
+
+        // An unverified snap attempt owns the state tables, so no root resolves.
+        let mut attempt = SnapAttempt::start(None, BlockNumHash::default(), B256::ZERO);
+        let provider_rw = factory.provider_rw()?;
+        provider_rw.write_snap_attempt(&attempt)?;
+        provider_rw.commit()?;
+        assert!(provider.state_range_provider(recent_root)?.is_none());
+
+        attempt.verify();
+        let provider_rw = factory.provider_rw()?;
+        provider_rw.write_snap_attempt(&attempt)?;
+        provider_rw.commit()?;
+        assert!(provider.state_range_provider(recent_root)?.is_some());
+
+        // State executed past `Finish` matches no retained root.
+        let provider_rw = factory.provider_rw()?;
+        provider_rw.save_stage_checkpoint(
+            StageId::Execution,
+            StageCheckpoint::new(SNAPSHOT_STATE_RETENTION + 1),
+        )?;
+        provider_rw.commit()?;
+        assert!(provider.state_range_provider(recent_root)?.is_none());
 
         Ok(())
     }

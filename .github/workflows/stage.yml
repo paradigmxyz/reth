@@ -10,8 +10,6 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
-  FROM_BLOCK: 0
-  TO_BLOCK: 50000
   RUSTC_WRAPPER: "sccache"
   # Pin vergen output so reth-node-core compiles identically across commits; otherwise it and
   # every crate depending on it miss sccache/rust-cache on every run. The installed binary reports a fake SHA.
@@ -59,33 +57,5 @@ jobs:
       - name: Build reth
         run: |
           cargo install --locked --path bin/reth
-      - name: Run headers stage
-        run: |
-          reth stage run headers --from ${{ env.FROM_BLOCK }} --to ${{ env.TO_BLOCK }} --commit --checkpoints
-      - name: Run bodies stage
-        run: |
-          reth stage run bodies --from ${{ env.FROM_BLOCK }} --to ${{ env.TO_BLOCK }} --commit --checkpoints
-      - name: Run senders stage
-        run: |
-          reth stage run senders --from ${{ env.FROM_BLOCK }} --to ${{ env.TO_BLOCK }} --commit --checkpoints
-      - name: Run execution stage
-        run: |
-          reth stage run execution --from ${{ env.FROM_BLOCK }} --to ${{ env.TO_BLOCK }} --commit --checkpoints
-      # NOTE: account-hashing, storage-hashing, and hashing stages are omitted.
-      # With storage v2 (now default), these stages are no-ops because the
-      # execution stage writes directly to HashedAccounts/HashedStorages.
-      # Running them here is harmful: `stage run` unwinds before executing,
-      # and the unwind reverts the hashed state that execution wrote, but
-      # the no-op execute never restores it — causing merkle to fail.
-      - name: Run merkle stage
-        run: |
-          reth stage run merkle --from ${{ env.FROM_BLOCK }} --to ${{ env.TO_BLOCK }} --commit --checkpoints
-      - name: Run transaction lookup stage
-        run: |
-          reth stage run tx-lookup --from ${{ env.FROM_BLOCK }} --to ${{ env.TO_BLOCK }} --commit --checkpoints
-      - name: Run account history stage
-        run: |
-          reth stage run account-history --from ${{ env.FROM_BLOCK }} --to ${{ env.TO_BLOCK }} --commit --checkpoints
-      - name: Run storage history stage
-        run: |
-          reth stage run storage-history --from ${{ env.FROM_BLOCK }} --to ${{ env.TO_BLOCK }} --commit --checkpoints
+      - name: Run stages against a local fixture peer
+        run: python3 .github/scripts/stage-test.py
