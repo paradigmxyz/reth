@@ -49,7 +49,7 @@ use reth_trie_common::{
     HashedStorage,
 };
 use serde::{Deserialize, Serialize};
-use std::{collections::VecDeque, sync::Arc};
+use std::{collections::VecDeque, sync::Arc, time::Duration};
 use tokio::sync::{AcquireError, OwnedSemaphorePermit};
 use tokio_stream::StreamExt;
 
@@ -59,8 +59,6 @@ use alloy_rpc_types_trace::geth::{
 };
 #[cfg(feature = "js-tracer")]
 use evm2_inspectors::tracing::js::JsInspectorInterrupt;
-#[cfg(feature = "js-tracer")]
-use std::time::Duration;
 
 /// `debug` API implementation.
 ///
@@ -283,6 +281,10 @@ where
     /// This expects a rlp encoded block
     ///
     /// Note, the parent of this block must be present, or it will fail.
+    ///
+    /// The block is supplied by the caller, so its replay is bounded by a timeout of 30 seconds: no
+    /// transaction starts after it expires, the request then fails with
+    /// [`EthApiError::ExecutionTimedOut`].
     pub async fn debug_trace_raw_block(
         &self,
         rlp_block: Bytes,
@@ -308,7 +310,15 @@ where
             }
             .map_err(Eth::Error::from_eth_err)?;
 
-        self.trace_block(Arc::new(block.into_recovered_with_signers(senders)), evm_env, opts).await
+        // Dropping the replay cancels it before its next transaction.
+        tokio::time::timeout(
+            RAW_BLOCK_TRACE_TIMEOUT,
+            self.trace_block(Arc::new(block.into_recovered_with_signers(senders)), evm_env, opts),
+        )
+        .await
+        .map_err(|_| {
+            Eth::Error::from_eth_err(EthApiError::ExecutionTimedOut(RAW_BLOCK_TRACE_TIMEOUT))
+        })?
     }
 
     /// Replays a block and returns the trace of each transaction.
@@ -1544,6 +1554,9 @@ impl<B: BlockTrait> Default for BadBlockStore<B> {
         Self::new(64)
     }
 }
+
+/// Timeout of tracing a block supplied by the caller, whose work no consensus rule bounds.
+const RAW_BLOCK_TRACE_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// Default timeout of a JS tracer, matching geth.
 #[cfg(feature = "js-tracer")]
