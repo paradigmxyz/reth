@@ -126,7 +126,7 @@ impl RpcServiceT for RpcService {
             }
             MethodCallback::Subscription(callback) => {
                 let Some(subscriptions) = &self.subscriptions else {
-                    tracing::warn!("Subscriptions not supported");
+                    tracing::debug!("Subscriptions not supported");
                     return ResponseFuture::ready(MethodResponse::error(
                         id,
                         ErrorObject::from(ErrorCode::InternalError),
@@ -157,7 +157,7 @@ impl RpcServiceT for RpcService {
                 // Don't adhere to any resource or subscription limits; always let unsubscribing
                 // happen!
                 if self.subscriptions.is_none() {
-                    tracing::warn!("Subscriptions not supported");
+                    tracing::debug!("Subscriptions not supported");
                     return ResponseFuture::ready(MethodResponse::error(
                         id,
                         ErrorObject::from(ErrorCode::InternalError),
