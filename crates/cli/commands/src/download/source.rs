@@ -109,9 +109,12 @@ pub(crate) fn print_snapshot_listing(entries: &[SnapshotApiEntry], chain_id: u64
     println!("{:<12}  {:>10}  {:<10}  {:>10}  MANIFEST URL", "DATE", "BLOCK", "PROFILE", "SIZE");
     println!("{}", "-".repeat(100));
 
+    // Strip control characters so remote strings can't inject terminal escape sequences.
+    let sanitize = |s: &str| s.replace(char::is_control, "");
+
     for entry in &modular {
-        let date = entry.date.as_deref().unwrap_or("-");
-        let profile = entry.profile.as_deref().unwrap_or("-");
+        let date = sanitize(entry.date.as_deref().unwrap_or("-"));
+        let profile = sanitize(entry.profile.as_deref().unwrap_or("-"));
         let size = if entry.size > 0 {
             DownloadProgress::format_size(entry.size)
         } else {
@@ -120,7 +123,8 @@ pub(crate) fn print_snapshot_listing(entries: &[SnapshotApiEntry], chain_id: u64
 
         println!(
             "{date:<12}  {:>10}  {profile:<10}  {size:>10}  {}",
-            entry.block, entry.metadata_url
+            entry.block,
+            sanitize(&entry.metadata_url)
         );
     }
 
