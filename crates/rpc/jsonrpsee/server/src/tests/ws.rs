@@ -31,7 +31,7 @@ use crate::{
     types::SubscriptionId,
     BatchRequestConfig, RegisterMethodError, RpcModule, ServerBuilder, ServerConfig,
 };
-use jsonrpsee_core::{server::SendTimeoutError, traits::IdProvider};
+use jsonrpsee_core::{server::SendTimeoutError, traits::IdProvider, SubscriptionError};
 use jsonrpsee_test_utils::{
     helpers::*,
     mocks::{Id, WebSocketTestClient, WebSocketTestError},
@@ -1321,5 +1321,47 @@ async fn ws_waiting_for_call_permit_observes_server_stop() {
         handle.stop().unwrap();
     }
 
+    handle.stopped().with_default_timeout().await.unwrap();
+}
+
+#[tokio::test]
+async fn subscription_response_respects_max_response_body_size() {
+    init_logger();
+
+    // Set the max response body size to 100 bytes.
+    let config = ServerConfig::builder().max_response_body_size(100).build();
+    let server = ServerBuilder::with_config(config).build("127.0.0.1:0").await.unwrap();
+    let mut module = RpcModule::new(());
+    module
+        .register_subscription::<Result<(), SubscriptionError>, _, _>(
+            "subscribe_hello",
+            "subscribe_hello",
+            "unsubscribe_hello",
+            |_, pending, _| async move {
+                let sink = pending.accept().await?;
+                sink.closed().await;
+                Ok(())
+            },
+        )
+        .unwrap();
+    let addr = server.local_addr().unwrap();
+    let handle = server.start(module);
+
+    let mut client = WebSocketTestClient::new(addr).with_default_timeout().await.unwrap().unwrap();
+
+    // The subscribe acknowledgement echoes the request id, so it does not fit into 100 bytes.
+    let id = Id::Str("a".repeat(100));
+    let sub_call = call("subscribe_hello", Vec::<()>::new(), id.clone());
+    let response =
+        client.send_request_text(sub_call).with_default_timeout().await.unwrap().unwrap();
+    assert_eq!(response, oversized_response(id, 100));
+
+    // Subscriptions that fit are not affected.
+    let sub_call = call("subscribe_hello", Vec::<()>::new(), Id::Num(0));
+    let response =
+        client.send_request_text(sub_call).with_default_timeout().await.unwrap().unwrap();
+    let _sub_id: u64 = deser_call(response);
+
+    handle.stop().unwrap();
     handle.stopped().with_default_timeout().await.unwrap();
 }

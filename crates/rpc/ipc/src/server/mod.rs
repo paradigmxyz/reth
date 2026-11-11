@@ -633,8 +633,14 @@ mod tests {
     use futures::{future::select, StreamExt};
     use interprocess::local_socket::tokio::{RecvHalf, SendHalf};
     use jsonrpsee::{
-        core::middleware::{Batch, BatchEntry, Notification},
-        types::{error::TOO_MANY_SUBSCRIPTIONS_CODE, ErrorCode, Request},
+        core::{
+            middleware::{Batch, BatchEntry, Notification},
+            server::PendingSubscriptionAcceptError,
+        },
+        types::{
+            error::{OVERSIZED_RESPONSE_CODE, OVERSIZED_RESPONSE_MSG, TOO_MANY_SUBSCRIPTIONS_CODE},
+            ErrorCode, Request,
+        },
         PendingSubscriptionSink, RpcModule, SubscriptionMessage,
     };
     use reth_tracing::init_test_tracing;
@@ -644,7 +650,7 @@ mod tests {
         sync::atomic::{AtomicUsize, Ordering},
         time::Duration,
     };
-    use tokio::sync::broadcast;
+    use tokio::sync::{broadcast, mpsc};
     use tokio_stream::wrappers::BroadcastStream;
     use tokio_util::codec::FramedRead;
 
@@ -1086,6 +1092,64 @@ mod tests {
         assert_eq!(error_code(&response), None, "{response}");
         let response = client.call("subscribe_hello", json!([])).await.unwrap();
         assert_eq!(error_code(&response), Some(TOO_MANY_SUBSCRIPTIONS_CODE.into()), "{response}");
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_oversized_subscription_response_returns_error() {
+        let endpoint = &dummy_name();
+        let server = Builder::default()
+            .max_response_body_size(100)
+            .max_subscriptions_per_connection(1)
+            .build(endpoint.clone());
+        let (tx, mut accepted) = mpsc::unbounded_channel();
+        let mut module = RpcModule::new(tx);
+        module
+            .register_subscription(
+                "subscribe_hello",
+                "s_hello",
+                "unsubscribe_hello",
+                |_, pending, ctx| async move {
+                    match pending.accept().await {
+                        Ok(sink) => {
+                            ctx.send(Ok(())).unwrap();
+                            sink.closed().await;
+                        }
+                        Err(err) => ctx.send(Err(err)).unwrap(),
+                    }
+                },
+            )
+            .unwrap();
+        let handle = server.start(module).await.unwrap();
+        tokio::spawn(handle.stopped());
+
+        let mut client = TestClient::connect(endpoint).await;
+        // The subscribe acknowledgement echoes the request id, so it does not fit into 100 bytes.
+        let id = "a".repeat(100);
+        client
+            .send(json!({"jsonrpc": "2.0", "id": id, "method": "subscribe_hello", "params": []}))
+            .await
+            .unwrap();
+        let response = client.recv().await.unwrap();
+        assert_eq!(
+            response,
+            json!({
+                "jsonrpc": "2.0",
+                "id": id,
+                "error": {
+                    "code": OVERSIZED_RESPONSE_CODE,
+                    "message": OVERSIZED_RESPONSE_MSG,
+                    "data": "Exceeded max limit of 100",
+                },
+            })
+        );
+        let result = tokio::time::timeout(Duration::from_secs(5), accepted.recv()).await.unwrap();
+        assert!(matches!(result, Some(Err(PendingSubscriptionAcceptError))), "{result:?}");
+
+        // The failed subscription must not keep the connection's only subscription slot.
+        let response = client.call("subscribe_hello", json!([])).await.unwrap();
+        assert_eq!(error_code(&response), None, "{response}");
+        let result = tokio::time::timeout(Duration::from_secs(5), accepted.recv()).await.unwrap();
+        assert!(matches!(result, Some(Ok(()))), "{result:?}");
     }
 
     #[tokio::test]
