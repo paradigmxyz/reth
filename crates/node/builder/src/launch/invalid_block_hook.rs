@@ -15,6 +15,10 @@ use reth_node_core::{
 use reth_primitives_traits::NodePrimitives;
 use reth_provider::ChainSpecProvider;
 use reth_tasks::Runtime;
+use std::time::Duration;
+
+/// Timeout for a request to the healthy node.
+const HEALTHY_NODE_REQUEST_TIMEOUT: Duration = Duration::from_secs(60);
 
 /// Extension trait for [`AddOnsContext`] to create invalid block hooks.
 pub trait InvalidBlockHookExt {
@@ -122,7 +126,9 @@ where
         return Ok(None);
     };
 
-    let client = ClientBuilder::default().http(url.parse()?);
+    // A healthy node that stops answering must not hang node launch or the invalid block hook.
+    let http = reqwest::Client::builder().timeout(HEALTHY_NODE_REQUEST_TIMEOUT).build()?;
+    let client = ClientBuilder::default().http_with_client(http, url.parse()?);
 
     // Verify that the healthy node is running the same chain as the current node.
     let healthy_chain_id: U64 = client.request_noparams("eth_chainId").await?;
