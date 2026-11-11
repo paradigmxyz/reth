@@ -1666,11 +1666,12 @@ impl Discv4Service {
 
         let enforce_eip868 = self.config.enable_eip868 && self.config.enforce_eip868_neighbours;
 
-        // get the MAX_NODES_PER_BUCKET closest nodes to the target, optionally filtering out
-        // entries that have no EIP-868 fork ID
+        // get the MAX_NODES_PER_BUCKET closest nodes to the target that completed the endpoint
+        // proof, optionally filtering out entries that have no EIP-868 fork ID
         let closest_nodes = self
             .kbuckets
             .closest_values(&key)
+            .filter(|entry| entry.value.has_endpoint_proof)
             .filter(|entry| !enforce_eip868 || entry.value.fork_id.is_some())
             .take(MAX_NODES_PER_BUCKET)
             .collect::<Vec<_>>();
