@@ -478,6 +478,9 @@ impl<N: ProviderNodeTypes> HeaderProvider for BlockchainProvider<N> {
 
 impl<N: ProviderNodeTypes> BlockHashReader for BlockchainProvider<N> {
     fn block_hash(&self, number: u64) -> ProviderResult<Option<B256>> {
+        if let Some(hash) = self.canonical_in_memory_state.hash_by_number(number) {
+            return Ok(Some(hash))
+        }
         self.consistent_provider()?.block_hash(number)
     }
 
