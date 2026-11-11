@@ -530,7 +530,7 @@ impl<N: NetworkPrimitives> Encodable for EthMessage<N> {
             Self::BlockAccessLists(block_access_lists) => block_access_lists.length(),
             Self::BlockRangeUpdate(block_range_update) => block_range_update.length(),
             Self::Cells(cells) => cells.length(),
-            Self::Other(unknown) => unknown.length(),
+            Self::Other(unknown) => unknown.payload.len(),
         }
     }
 }
@@ -799,6 +799,9 @@ impl<T> RequestPair<T> {
         F: FnOnce(&mut &[u8]) -> alloy_rlp::Result<T>,
     {
         let header = Header::decode(buf)?;
+        if !header.list {
+            return Err(alloy_rlp::Error::UnexpectedString)
+        }
 
         let initial_length = buf.len();
         let request_id = u64::decode(buf)?;
@@ -840,6 +843,9 @@ where
 {
     fn decode(buf: &mut &[u8]) -> alloy_rlp::Result<Self> {
         let header = Header::decode(buf)?;
+        if !header.list {
+            return Err(alloy_rlp::Error::UnexpectedString)
+        }
 
         let initial_length = buf.len();
         let request_id = u64::decode(buf)?;
