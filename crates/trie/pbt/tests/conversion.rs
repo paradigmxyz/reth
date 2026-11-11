@@ -157,10 +157,7 @@ fn source(state: &StateTree) -> (MockHashedCursorFactory, CodeStore, Artifacts) 
     for (address, account) in state.accounts() {
         let hash = keccak256(address);
         let code_hash = (!account.code.is_empty()).then(|| keccak256(&account.code));
-        accounts.insert(
-            hash,
-            Account { nonce: account.nonce, balance: account.balance, bytecode_hash: code_hash },
-        );
+        accounts.insert(hash, Account::new(account.nonce, account.balance, code_hash));
         storages.insert(
             hash,
             state

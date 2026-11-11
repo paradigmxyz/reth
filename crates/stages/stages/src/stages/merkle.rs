@@ -926,12 +926,13 @@ mod tests {
         let provider = runner.db.factory.provider_rw().unwrap();
         let mut stage = runner.stage();
         let mut called = false;
-        let result = stage.execute_with_root_validator(&*provider, input, |root, header, number| {
-            called = true;
-            assert_eq!(number, 2);
-            assert_eq!(root, header.state_root());
-            Err(StageError::MissingDownloadBuffer)
-        });
+        let result =
+            stage.execute_with_root_validator(&*provider, input, |root, header, number| {
+                called = true;
+                assert_eq!(number, 2);
+                assert_eq!(root, header.state_root());
+                Err(StageError::MissingDownloadBuffer)
+            });
         assert!(called);
         assert_matches!(result, Err(StageError::MissingDownloadBuffer));
         drop(provider);
