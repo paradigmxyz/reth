@@ -1375,3 +1375,31 @@ async fn ws_connection_cannot_unsubscribe_in_process_subscription() {
         .unwrap();
     assert_eq!(resp, r#"{"jsonrpc":"2.0","id":2,"result":true}"#);
 }
+
+#[tokio::test]
+async fn batch_array_entries_are_invalid_requests() {
+    init_logger();
+
+    let (addr, handle, calls) = super::helpers::server_with_call_counter().await;
+    let mut client = WebSocketTestClient::new(addr).with_default_timeout().await.unwrap().unwrap();
+    let mixed_response = r#"[{"jsonrpc":"2.0","id":1,"result":0},{"jsonrpc":"2.0","id":null,"error":{"code":-32600,"message":"Invalid request"}}]"#;
+
+    for (request, expected) in [
+        (r#"[["2.0",1,"tick",[]]]"#, invalid_batch(vec![Id::Null])),
+        (r#"[[7]]"#, invalid_batch(vec![Id::Null])),
+        (
+            r#"[{"jsonrpc":"2.0","method":"tick","id":1},["2.0",2,"tick",[]]]"#,
+            mixed_response.to_string(),
+        ),
+    ] {
+        let response =
+            client.send_request_text(request).with_default_timeout().await.unwrap().unwrap();
+        assert_eq!(response, expected, "{request}");
+    }
+
+    // Only the object entry of the mixed batch ran.
+    assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 1);
+
+    handle.stop().unwrap();
+    handle.stopped().with_default_timeout().await.unwrap();
+}

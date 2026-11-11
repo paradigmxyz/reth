@@ -950,24 +950,34 @@ where
             let mut batch = Vec::with_capacity(unchecked_batch.len());
 
             for call in unchecked_batch {
-                if let Ok(req) = serde_json::from_str(call.get()) {
-                    batch.push(Ok(BatchEntry::Call(req)));
-                } else if let Ok(notif) = deserialize_notification::<Notif>(call.get().as_bytes()) {
-                    batch.push(Ok(BatchEntry::Notification(notif)));
-                } else {
-                    let id =
-                        match serde_json::from_str::<jsonrpsee_types::InvalidRequest>(call.get()) {
-                            Ok(err) => err.id,
-                            Err(_) => Id::Null,
-                        };
-
-                    batch.push(Err(BatchEntryErr::new(id, ErrorCode::InvalidRequest.into())));
-                }
+                batch.push(parse_batch_entry(call));
             }
 
             rpc_service.batch(Batch::from(batch)).await
         } else {
             MethodResponse::error(Id::Null, ErrorObject::from(ErrorCode::ParseError))
         }
+    }
+}
+
+/// Classifies a raw batch entry as a call, a notification or an invalid request.
+fn parse_batch_entry(call: &JsonRawValue) -> Result<BatchEntry<'_>, BatchEntryErr<'_>> {
+    // The derived `Deserialize` impls below also accept a JSON array holding the fields in
+    // order, so only objects may reach them.
+    if !call.get().starts_with('{') {
+        return Err(BatchEntryErr::new(Id::Null, ErrorCode::InvalidRequest.into()));
+    }
+
+    if let Ok(req) = serde_json::from_str(call.get()) {
+        Ok(BatchEntry::Call(req))
+    } else if let Ok(notif) = deserialize_notification::<Notif>(call.get().as_bytes()) {
+        Ok(BatchEntry::Notification(notif))
+    } else {
+        let id = match serde_json::from_str::<jsonrpsee_types::InvalidRequest>(call.get()) {
+            Ok(err) => err.id,
+            Err(_) => Id::Null,
+        };
+
+        Err(BatchEntryErr::new(id, ErrorCode::InvalidRequest.into()))
     }
 }
