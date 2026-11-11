@@ -63,9 +63,6 @@ mod proc_macros_support;
 /// dependencies to be explicitly added by users of the macro.
 #[doc(hidden)]
 pub mod __reexports {
-    pub use serde;
-    pub use serde_json;
-
     // Needed for the params parsing in the proc macro API.
     #[cfg(feature = "server")]
     pub use tokio;
