@@ -722,7 +722,8 @@ pub fn generate_manifest(
                     ComponentManifest::Single(_) => None,
                 })
                 .filter(|(_, chunked)| {
-                    chunked.blocks_per_file == blocks_per_file &&
+                    chunked.chunk_files_are_consistent() &&
+                        chunked.blocks_per_file == blocks_per_file &&
                         chunked.chunk_sizes.len() as u64 == chunked.num_chunks() &&
                         chunked.chunk_output_files.len() as u64 == chunked.num_chunks()
                 });
@@ -2015,5 +2016,38 @@ mod tests {
                 "Previous manifest has no absolute base_url to locate its archives"
             );
         }
+    }
+
+    #[test]
+    fn generate_manifest_packages_chunks_when_previous_chunk_files_are_inconsistent() {
+        let source = snapshot_source();
+        write_test_static_files(source.path(), StaticFileSegment::Headers, 24);
+        let mut previous = generate_manifest(
+            source.path(),
+            tempdir().unwrap().path(),
+            Some("https://example.com/previous"),
+            24,
+            1,
+            10,
+            None,
+        )
+        .unwrap();
+        let Some(ComponentManifest::Chunked(headers)) =
+            previous.components.get_mut(SnapshotComponentType::Headers.key())
+        else {
+            panic!("headers should be chunked");
+        };
+
+        headers.chunk_files.truncate(1);
+
+        let output = tempdir().unwrap();
+        let manifest =
+            generate_manifest(source.path(), output.path(), None, 24, 1, 10, Some(&previous))
+                .unwrap();
+        assert_eq!(
+            manifest.archive_urls(SnapshotComponentType::Headers),
+            vec!["headers-0-9.tar.zst", "headers-10-19.tar.zst", "headers-20-29.tar.zst"]
+        );
+        assert!(output.path().join("headers-0-9.tar.zst").exists());
     }
 }
