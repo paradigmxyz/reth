@@ -212,32 +212,7 @@ pub struct ServerConfig {
 
 /// The builder to configure and create a JSON-RPC server configuration.
 #[derive(Debug, Clone)]
-pub struct ServerConfigBuilder {
-    /// Maximum size in bytes of a request.
-    max_request_body_size: u32,
-    /// Maximum size in bytes of a response.
-    max_response_body_size: u32,
-    /// Maximum number of incoming connections allowed.
-    max_connections: u32,
-    /// Maximum number of subscriptions per connection.
-    max_subscriptions_per_connection: u32,
-    /// Whether batch requests are supported by this server or not.
-    batch_requests_config: BatchRequestConfig,
-    /// Custom tokio runtime to run the server on.
-    tokio_runtime: Option<tokio::runtime::Handle>,
-    /// Enable HTTP.
-    enable_http: bool,
-    /// Enable WS.
-    enable_ws: bool,
-    /// Number of messages that server is allowed to `buffer` until backpressure kicks in.
-    message_buffer_capacity: u32,
-    /// ID provider.
-    id_provider: Arc<dyn IdProvider>,
-    /// Timeout for receiving the first request of a connection.
-    first_request_timeout: Option<Duration>,
-    /// Timeout for writing a single message to a WebSocket connection.
-    ws_write_timeout: Duration,
-}
+pub struct ServerConfigBuilder(ServerConfig);
 
 /// Configuration for batch request handling.
 #[derive(Debug, Copy, Clone)]
@@ -289,7 +264,7 @@ impl ServerConfig {
 
 impl Default for ServerConfigBuilder {
     fn default() -> Self {
-        ServerConfigBuilder {
+        Self(ServerConfig {
             max_request_body_size: TEN_MB_SIZE_BYTES,
             max_response_body_size: TEN_MB_SIZE_BYTES,
             max_connections: MAX_CONNECTIONS,
@@ -302,7 +277,7 @@ impl Default for ServerConfigBuilder {
             id_provider: Arc::new(RandomIntegerIdProvider),
             first_request_timeout: Some(DEFAULT_FIRST_REQUEST_TIMEOUT),
             ws_write_timeout: DEFAULT_WS_WRITE_TIMEOUT,
-        }
+        })
     }
 }
 
@@ -314,25 +289,25 @@ impl ServerConfigBuilder {
 
     /// Set the maximum size of a request body in bytes. Default is 10 MiB.
     pub fn max_request_body_size(mut self, size: u32) -> Self {
-        self.max_request_body_size = size;
+        self.0.max_request_body_size = size;
         self
     }
 
     /// Set the maximum size of a response body in bytes. Default is 10 MiB.
     pub fn max_response_body_size(mut self, size: u32) -> Self {
-        self.max_response_body_size = size;
+        self.0.max_response_body_size = size;
         self
     }
 
     /// Set the maximum number of connections allowed. Default is 100.
     pub fn max_connections(mut self, max: u32) -> Self {
-        self.max_connections = max;
+        self.0.max_connections = max;
         self
     }
 
-    /// Set the maximum number of connections allowed. Default is 1024.
+    /// Set the maximum number of subscriptions per connection. Default is 1024.
     pub fn max_subscriptions_per_connection(mut self, max: u32) -> Self {
-        self.max_subscriptions_per_connection = max;
+        self.0.max_subscriptions_per_connection = max;
         self
     }
 
@@ -342,7 +317,7 @@ impl ServerConfigBuilder {
     /// Default: batch requests are allowed and can be arbitrary big but the maximum payload size is
     /// limited.
     pub fn set_batch_request_config(mut self, cfg: BatchRequestConfig) -> Self {
-        self.batch_requests_config = cfg;
+        self.0.batch_requests_config = cfg;
         self
     }
 
@@ -350,7 +325,7 @@ impl ServerConfigBuilder {
     ///
     /// Default: [`tokio::spawn`]
     pub fn custom_tokio_runtime(mut self, rt: tokio::runtime::Handle) -> Self {
-        self.tokio_runtime = Some(rt);
+        self.0.tokio_runtime = Some(rt);
         self
     }
 
@@ -358,8 +333,8 @@ impl ServerConfigBuilder {
     ///
     /// Default: both http and ws are enabled.
     pub fn http_only(mut self) -> Self {
-        self.enable_http = true;
-        self.enable_ws = false;
+        self.0.enable_http = true;
+        self.0.enable_ws = false;
         self
     }
 
@@ -369,8 +344,8 @@ impl ServerConfigBuilder {
     ///
     /// Default: both http and ws are enabled.
     pub fn ws_only(mut self) -> Self {
-        self.enable_http = false;
-        self.enable_ws = true;
+        self.0.enable_http = false;
+        self.0.enable_ws = true;
         self
     }
 
@@ -393,7 +368,7 @@ impl ServerConfigBuilder {
     /// Panics if the buffer capacity is 0.
     pub fn set_message_buffer_capacity(mut self, c: u32) -> Self {
         assert!(c > 0, "buffer capacity must be set to > 0");
-        self.message_buffer_capacity = c;
+        self.0.message_buffer_capacity = c;
         self
     }
 
@@ -418,7 +393,7 @@ impl ServerConfigBuilder {
     ///     ServerConfigBuilder::default().set_id_provider(Box::new(RandomStringIdProvider::new(16)));
     /// ```
     pub fn set_id_provider<I: IdProvider + 'static>(mut self, id_provider: I) -> Self {
-        self.id_provider = Arc::new(id_provider);
+        self.0.id_provider = Arc::new(id_provider);
         self
     }
 
@@ -427,7 +402,7 @@ impl ServerConfigBuilder {
     ///
     /// Default is 30 seconds.
     pub fn set_first_request_timeout(mut self, first_request_timeout: Option<Duration>) -> Self {
-        self.first_request_timeout = first_request_timeout;
+        self.0.first_request_timeout = first_request_timeout;
         self
     }
 
@@ -440,26 +415,13 @@ impl ServerConfigBuilder {
     ///
     /// Default is 10 seconds.
     pub fn set_ws_write_timeout(mut self, ws_write_timeout: Duration) -> Self {
-        self.ws_write_timeout = ws_write_timeout;
+        self.0.ws_write_timeout = ws_write_timeout;
         self
     }
 
     /// Build the [`ServerConfig`].
     pub fn build(self) -> ServerConfig {
-        ServerConfig {
-            max_request_body_size: self.max_request_body_size,
-            max_response_body_size: self.max_response_body_size,
-            max_connections: self.max_connections,
-            max_subscriptions_per_connection: self.max_subscriptions_per_connection,
-            batch_requests_config: self.batch_requests_config,
-            tokio_runtime: self.tokio_runtime,
-            enable_http: self.enable_http,
-            enable_ws: self.enable_ws,
-            message_buffer_capacity: self.message_buffer_capacity,
-            id_provider: self.id_provider,
-            first_request_timeout: self.first_request_timeout,
-            ws_write_timeout: self.ws_write_timeout,
-        }
+        self.0
     }
 }
 
