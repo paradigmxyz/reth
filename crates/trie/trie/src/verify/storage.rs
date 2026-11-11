@@ -10,7 +10,7 @@ use crate::{
 use alloy_consensus::EMPTY_ROOT_HASH;
 use alloy_primitives::{B256, U256};
 use reth_execution_errors::StateRootError;
-use reth_executor::channel::{Receiver, Sender};
+use reth_tasks::executor::channel::{Receiver, Sender};
 
 #[cfg(feature = "metrics")]
 use crate::{metrics::TrieRootMetrics, trie::TrieType};

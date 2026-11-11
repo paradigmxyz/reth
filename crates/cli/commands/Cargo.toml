@@ -88,7 +88,6 @@ reqwest = { workspace = true, features = ["blocking"] }
 url.workspace = true
 metrics.workspace = true
 blake3 = { workspace = true, features = ["rayon"] }
-reth-executor.workspace = true
 
 # io
 fdlimit.workspace = true
@@ -113,7 +112,7 @@ tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 [features]
 fuzz = [
     "reth-trie/fuzz",
-    "reth-executor/fuzz",
+    "reth-tasks/fuzz",
     "reth-downloaders/fuzz",
     "reth-etl/fuzz",
     "reth-evm/fuzz",
@@ -122,7 +121,6 @@ fuzz = [
     "reth-provider/fuzz",
     "reth-stages/fuzz",
     "reth-static-file/fuzz",
-    "reth-tasks/fuzz",
     "reth-trie-common?/fuzz",
 ]
 arbitrary = [

@@ -25,7 +25,7 @@ use std::{
 const KV_LEN: usize = 8;
 
 use reth_db_api::table::{Compress, Encode, Key, Value};
-use reth_executor::rayon::prelude::*;
+use reth_tasks::executor::rayon::prelude::*;
 use tempfile::{NamedTempFile, TempDir};
 
 /// An ETL (extract, transform, load) data collector.

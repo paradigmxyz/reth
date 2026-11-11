@@ -44,7 +44,6 @@ members = [
     "crates/ethereum/primitives/",
     "crates/ethereum/reth/",
     "crates/etl/",
-    "crates/executor/",
     "crates/evm/evm",
     "crates/evm/execution-errors",
     "crates/evm/execution-types",
@@ -369,7 +368,6 @@ reth-evm = { path = "crates/evm/evm", default-features = false }
 reth-evm-ethereum = { path = "crates/ethereum/evm", default-features = false }
 reth-execution-errors = { path = "crates/evm/execution-errors", default-features = false }
 reth-execution-types = { path = "crates/evm/execution-types", default-features = false }
-reth-executor = { path = "crates/executor", default-features = false }
 reth-exex = { path = "crates/exex/exex" }
 reth-exex-types = { path = "crates/exex/types" }
 reth-fs-util = { path = "crates/fs-util" }

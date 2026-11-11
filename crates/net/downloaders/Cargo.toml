@@ -47,7 +47,6 @@ reth-metrics.workspace = true
 metrics.workspace = true
 
 # misc
-reth-executor.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
 
@@ -72,7 +71,7 @@ alloy-rlp.workspace = true
 itertools.workspace = true
 
 [features]
-fuzz = ["reth-executor/fuzz", "reth-tasks/fuzz", "reth-trie-common/fuzz"]
+fuzz = ["reth-tasks/fuzz", "reth-trie-common/fuzz"]
 default = []
 file-client = ["dep:async-compression", "dep:itertools"]
 test-utils = [

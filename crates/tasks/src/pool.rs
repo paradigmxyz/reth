@@ -157,7 +157,7 @@ impl<T> Future for BlockingTaskHandle<T> {
 #[non_exhaustive]
 pub struct TokioBlockingTaskError;
 
-reth_executor::thread_local! {
+crate::executor::thread_local! {
     static WORKER: RefCell<Worker> = const { RefCell::new(Worker::new()) };
 }
 
@@ -172,7 +172,7 @@ std::thread_local! {
 #[derive(Default)]
 struct WorkerSlot {
     state: RefCell<Worker>,
-    access: reth_executor::sync::Mutex<()>,
+    access: crate::executor::sync::Mutex<()>,
     owner: std::cell::Cell<Option<thread::ThreadId>>,
 }
 
@@ -637,7 +637,7 @@ impl Drop for WorkerStatefulPool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rayon::prelude::*;
+    use crate::rayon::prelude::*;
     use std::time::Duration;
 
     #[tokio::test]

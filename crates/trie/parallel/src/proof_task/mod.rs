@@ -28,12 +28,14 @@ pub mod metrics;
 
 use crate::error::StateRootTaskError;
 use alloy_primitives::B256;
-use reth_executor::{
-    channel::{unbounded, Receiver, Sender},
-    time::Instant,
-};
 use reth_provider::{DatabaseProviderROFactory, ProviderError, ProviderResult, StateProofProvider};
-use reth_tasks::{Runtime, WorkerPool};
+use reth_tasks::{
+    executor::{
+        channel::{unbounded, Receiver, Sender},
+        time::Instant,
+    },
+    Runtime, WorkerPool,
+};
 use reth_trie::{DecodedMultiProofV2, MultiProofTargetsV2, ProofV2Target};
 use std::{
     panic::{catch_unwind, AssertUnwindSafe},
@@ -476,7 +478,7 @@ impl<Factory: DatabaseProviderROFactory, J> ProofWorker<Factory, J> {
                     jitter_us = jitter.as_micros(),
                     "Proof worker applying proof jitter"
                 );
-                reth_executor::thread::sleep(jitter);
+                reth_tasks::executor::thread::sleep(jitter);
             }
 
             match catch_unwind(AssertUnwindSafe(|| process(&provider, job))) {
@@ -681,8 +683,8 @@ impl From<ProofJobError> for StateRootTaskError {
 mod tests {
     use super::*;
     use reth_chainspec::ChainSpec;
-    use reth_executor::channel::RecvTimeoutError;
     use reth_provider::test_utils::create_test_provider_factory_with_chain_spec;
+    use reth_tasks::executor::channel::RecvTimeoutError;
     use std::sync::Arc;
 
     fn test_ctx<Factory>(factory: Factory) -> ProofTaskCtx<Factory> {
@@ -804,7 +806,7 @@ mod tests {
             // initialization error is a message here, rather than a successful shutdown.
             assert!(matches!(
                 results.recv_timeout(Duration::from_secs(30)),
-                Err(reth_executor::channel::RecvTimeoutError::Disconnected)
+                Err(reth_tasks::executor::channel::RecvTimeoutError::Disconnected)
             ));
         }
     }

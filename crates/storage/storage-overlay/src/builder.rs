@@ -166,7 +166,7 @@ impl ExecutionOverlay {
         };
 
         #[cfg(feature = "rayon")]
-        reth_executor::rayon::join(extend_accounts_and_storage, extend_code_hashes);
+        reth_tasks::executor::rayon::join(extend_accounts_and_storage, extend_code_hashes);
 
         #[cfg(not(feature = "rayon"))]
         {

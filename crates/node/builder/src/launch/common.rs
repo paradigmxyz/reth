@@ -49,7 +49,6 @@ use reth_db_common::init::{
 use reth_downloaders::{bodies::noop::NoopBodiesDownloader, headers::noop::NoopHeaderDownloader};
 use reth_engine_local::MiningMode;
 use reth_evm::{noop::NoopEvmConfig, ConfigureEvm, SenderRecoveryCache};
-use reth_executor::rayon::ThreadPoolBuilder;
 use reth_exex::ExExManagerHandle;
 use reth_fs_util as fs;
 use reth_network_p2p::headers::client::HeadersClient;
@@ -86,7 +85,7 @@ use reth_stages::{
 };
 use reth_static_file::{blocks_per_file_for_prune_distance, StaticFileProducer, StaticFileSegment};
 use reth_storage_overlay::OverlayManager;
-use reth_tasks::TaskExecutor;
+use reth_tasks::{executor::rayon::ThreadPoolBuilder, TaskExecutor};
 use reth_tracing::tracing::{debug, error, info, warn};
 use reth_transaction_pool::TransactionPool;
 use std::{sync::Arc, time::Duration};

@@ -16,12 +16,12 @@ use alloy_primitives::{B256, U256};
 use alloy_rlp::Encodable;
 use alloy_trie::BranchNodeCompact;
 use reth_execution_errors::StateRootError;
-use reth_executor::{
+use reth_primitives_traits::Account;
+use reth_storage_errors::db::DatabaseError;
+use reth_tasks::executor::{
     channel::{self, Receiver, Sender},
     thread::{self, JoinHandle},
 };
-use reth_primitives_traits::Account;
-use reth_storage_errors::db::DatabaseError;
 use std::sync::Arc;
 
 mod compare;

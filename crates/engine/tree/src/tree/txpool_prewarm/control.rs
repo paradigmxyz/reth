@@ -1,6 +1,6 @@
 use crate::tree::TxPoolPrewarmCacheSnapshot as Snapshot;
 use alloy_primitives::B256;
-use reth_executor::{
+use reth_tasks::executor::{
     channel::{unbounded, Receiver, Sender},
     sync::parking_lot::RwLock,
 };

@@ -5,12 +5,12 @@ use reth_db_api::{
     cursor::{DbCursorRO, DbDupCursorRO},
     transaction::DbTx,
 };
-use reth_executor::rayon::prelude::ParallelSliceMut;
 use reth_libmdbx::{
     DatabaseFlags, Environment, EnvironmentFlags, Geometry, Mode, SyncMode, WriteFlags, RO,
 };
 use reth_provider::{DBProvider, ExecutionOutcome};
 use reth_stages_api::StageError;
+use reth_tasks::executor::rayon::prelude::ParallelSliceMut;
 use reth_trie::bundle_state::{AccountRevert, RevertToSlot};
 use std::path::Path;
 use tracing::trace;

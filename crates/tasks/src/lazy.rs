@@ -1,8 +1,7 @@
 //! A lazily-resolved handle to a value computed on a background thread.
 
-use crate::channel;
+use crate::{channel, executor::sync::OnceLock};
 use parking_lot::Mutex;
-use reth_executor::sync::OnceLock;
 use std::sync::Arc;
 
 /// Handle to a value computed on a background thread.

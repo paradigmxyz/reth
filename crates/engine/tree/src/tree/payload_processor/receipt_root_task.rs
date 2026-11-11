@@ -8,8 +8,8 @@
 
 use alloy_eips::Encodable2718;
 use alloy_primitives::{map::HashMap, Bloom, B256};
-use reth_executor::channel::Receiver;
 use reth_primitives_traits::Receipt;
+use reth_tasks::executor::channel::Receiver;
 use reth_trie_common::ordered_root::OrderedTrieRootEncodedBuilder;
 use tracing::debug_span;
 
@@ -41,14 +41,14 @@ pub struct ReceiptRootTaskHandle<R> {
     /// Receiver for indexed receipts.
     receipt_rx: Receiver<IndexedReceipt<R>>,
     /// Sender for the computed result.
-    result_tx: reth_executor::channel::Sender<(B256, Bloom)>,
+    result_tx: reth_tasks::executor::channel::Sender<(B256, Bloom)>,
 }
 
 impl<R: Receipt> ReceiptRootTaskHandle<R> {
     /// Creates a new handle from the receipt receiver and result sender channels.
     pub const fn new(
         receipt_rx: Receiver<IndexedReceipt<R>>,
-        result_tx: reth_executor::channel::Sender<(B256, Bloom)>,
+        result_tx: reth_tasks::executor::channel::Sender<(B256, Bloom)>,
     ) -> Self {
         Self { receipt_rx, result_tx }
     }
@@ -61,8 +61,8 @@ impl<R: Receipt> ReceiptRootTaskHandle<R> {
     ///
     /// With the native backend, run this inside a blocking task, for example via
     /// `executor.spawn_blocking(move || handle.run(receipts_len))`. With `fuzz`, create the
-    /// channels and run this computation in the same [`reth_executor::Runtime::run`] execution,
-    /// using its selected threads or pools rather than Tokio blocking tasks.
+    /// channels and run this computation in the same [`reth_tasks::executor::Runtime::run`]
+    /// execution, using its selected threads or pools rather than Tokio blocking tasks.
     ///
     /// # Arguments
     ///
@@ -139,12 +139,12 @@ mod tests {
     use alloy_consensus::{proofs::calculate_receipt_root, TxReceipt};
     use alloy_primitives::{b256, Address, Bytes, Log};
     use reth_ethereum_primitives::{Receipt, TxType};
-    use reth_executor::channel::bounded;
+    use reth_tasks::executor::channel::bounded;
 
     #[tokio::test]
     async fn test_receipt_root_task_empty() {
         let (_tx, rx) = bounded::<IndexedReceipt<Receipt>>(1);
-        let (result_tx, result_rx) = reth_executor::channel::bounded(1);
+        let (result_tx, result_rx) = reth_tasks::executor::channel::bounded(1);
         drop(_tx);
 
         let handle = ReceiptRootTaskHandle::new(rx, result_tx);
@@ -162,7 +162,7 @@ mod tests {
         let receipts: Vec<Receipt> = vec![Receipt::default()];
 
         let (tx, rx) = bounded(1);
-        let (result_tx, result_rx) = reth_executor::channel::bounded(1);
+        let (result_tx, result_rx) = reth_tasks::executor::channel::bounded(1);
         let receipts_len = receipts.len();
 
         let handle = ReceiptRootTaskHandle::new(rx, result_tx);
@@ -188,7 +188,7 @@ mod tests {
         let receipts: Vec<Receipt> = vec![Receipt::default(); 5];
 
         let (tx, rx) = bounded(4);
-        let (result_tx, result_rx) = reth_executor::channel::bounded(1);
+        let (result_tx, result_rx) = reth_tasks::executor::channel::bounded(1);
         let receipts_len = receipts.len();
 
         let handle = ReceiptRootTaskHandle::new(rx, result_tx);
@@ -245,7 +245,7 @@ mod tests {
 
         // Calculate using the task
         let (tx, rx) = bounded(4);
-        let (result_tx, result_rx) = reth_executor::channel::bounded(1);
+        let (result_tx, result_rx) = reth_tasks::executor::channel::bounded(1);
         let receipts_len = receipts.len();
 
         let handle = ReceiptRootTaskHandle::new(rx, result_tx);
@@ -272,7 +272,7 @@ mod tests {
         let expected_root = calculate_receipt_root(&receipts_with_bloom);
 
         let (tx, rx) = bounded(4);
-        let (result_tx, result_rx) = reth_executor::channel::bounded(1);
+        let (result_tx, result_rx) = reth_tasks::executor::channel::bounded(1);
         let receipts_len = receipts.len();
 
         let handle = ReceiptRootTaskHandle::new(rx, result_tx);

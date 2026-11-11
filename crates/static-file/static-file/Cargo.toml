@@ -27,7 +27,7 @@ alloy-primitives.workspace = true
 
 # misc
 tracing.workspace = true
-reth-executor.workspace = true
+reth-tasks.workspace = true
 parking_lot = { workspace = true, features = ["send_guard", "arc_lock"] }
 
 [dev-dependencies]
@@ -38,4 +38,4 @@ assert_matches.workspace = true
 tempfile.workspace = true
 
 [features]
-fuzz = ["reth-executor/fuzz", "reth-provider/fuzz"]
+fuzz = ["reth-tasks/fuzz", "reth-provider/fuzz"]

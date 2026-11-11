@@ -40,7 +40,6 @@ metrics.workspace = true
 
 # misc
 parking_lot.workspace = true
-reth-executor = { workspace = true, optional = true }
 tracing.workspace = true
 
 [dev-dependencies]
@@ -56,11 +55,10 @@ alloy-consensus.workspace = true
 fuzz = [
     "reth-trie/fuzz",
     "reth-chain-state/fuzz",
-    "dep:reth-executor",
-    "reth-executor/fuzz",
-    "reth-tasks?/fuzz",
+    "dep:reth-tasks",
+    "reth-tasks/fuzz",
     "reth-trie-common/fuzz",
 ]
 default = ["metrics"]
 metrics = ["reth-trie/metrics", "reth-trie-db/metrics"]
-rayon = ["dep:reth-executor", "dep:reth-tasks"]
+rayon = ["dep:reth-tasks"]

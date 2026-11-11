@@ -1,6 +1,6 @@
 //! Private virtual-time driver around Shuttle's fixed scheduler.
 
-use crate::time::{Duration, Instant};
+use crate::executor::time::{Duration, Instant};
 use shuttle::scheduler::{RoundRobinScheduler, Schedule, Scheduler, Task, TaskId};
 use std::{
     cell::RefCell,

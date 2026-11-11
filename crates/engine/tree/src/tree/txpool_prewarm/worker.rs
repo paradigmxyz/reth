@@ -8,10 +8,6 @@ use crate::tree::{
 };
 use alloy_primitives::B256;
 use reth_evm::{cached::CachedReads, database::StateProviderDatabase, ConfigureEvm, Evm, EvmEnv};
-use reth_executor::{
-    channel::{Receiver, RecvTimeoutError, TryRecvError},
-    time::Instant,
-};
 use reth_primitives_traits::NodePrimitives;
 use reth_provider::{
     BlockNumReader, ChangeSetReader, DatabaseProviderFactory, DatabaseProviderROFactory,
@@ -19,6 +15,10 @@ use reth_provider::{
     StorageSettingsCache,
 };
 use reth_storage_overlay::OverlayStateProviderFactory;
+use reth_tasks::executor::{
+    channel::{Receiver, RecvTimeoutError, TryRecvError},
+    time::Instant,
+};
 use std::{sync::Arc, time::Duration};
 use tracing::{debug, trace};
 
@@ -358,13 +358,13 @@ mod tests {
     use reth_ethereum_primitives::{EthPrimitives, TransactionSigned};
     use reth_evm::EvmEnvFor;
     use reth_evm_ethereum::EthEvmConfig;
-    use reth_executor::{
+    use reth_provider::test_utils::MockEthProvider;
+    use reth_stages_api::{StageCheckpoint, StageId};
+    use reth_tasks::executor::{
         channel::{unbounded, Sender},
         sync::parking_lot::{Mutex, RwLock},
         thread::{self, JoinHandle},
     };
-    use reth_provider::test_utils::MockEthProvider;
-    use reth_stages_api::{StageCheckpoint, StageId};
     use std::{
         collections::{HashMap, VecDeque},
         sync::atomic::{AtomicUsize, Ordering},

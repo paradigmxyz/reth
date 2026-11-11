@@ -13,8 +13,13 @@ workspace = true
 
 [dependencies]
 # executor
-reth-executor.workspace = true
+crossbeam-channel.workspace = true
+either = { workspace = true, optional = true }
+rayon.workspace = true
+shuttle = { workspace = true, optional = true }
+parking_lot.workspace = true
 
+[target.'cfg(not(target_family = "wasm"))'.dependencies]
 # async
 tokio = { workspace = true, features = ["sync", "rt", "rt-multi-thread"] }
 tracing-futures.workspace = true
@@ -26,7 +31,6 @@ metrics.workspace = true
 
 # misc
 dashmap.workspace = true
-parking_lot.workspace = true
 thread-priority.workspace = true
 tracing.workspace = true
 thiserror.workspace = true
@@ -38,14 +42,18 @@ pin-project = { workspace = true, optional = true }
 [target.'cfg(target_os = "linux")'.dependencies]
 libc.workspace = true
 
-[dev-dependencies]
+[target.'cfg(not(target_family = "wasm"))'.dev-dependencies]
 tokio = { workspace = true, features = ["sync", "rt", "rt-multi-thread", "time", "macros"] }
 
 [features]
 rayon = ["dep:crossbeam-utils", "pin-project"]
 test-utils = []
-fuzz = ["reth-executor/fuzz"]
+fuzz = ["dep:either", "dep:shuttle"]
 
 [[example]]
 name = "executor"
 required-features = ["rayon"]
+
+# The all-features udeps job selects fuzz, which replaces these native-only backends.
+[package.metadata.cargo-udeps.ignore]
+normal = ["parking_lot", "rayon"]

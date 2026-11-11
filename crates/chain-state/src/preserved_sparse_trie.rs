@@ -1,7 +1,7 @@
 //! Preserved sparse trie for reuse across payload validations.
 
 use alloy_primitives::{map::B256Map, B256};
-use reth_executor::channel::mpsc::Receiver;
+use reth_tasks::executor::channel::mpsc::Receiver;
 use reth_trie_sparse::SparseStateTrie;
 use std::fmt;
 use tracing::debug;
@@ -115,7 +115,7 @@ pub struct SparseTrieWithStorageRoots {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use reth_executor::channel::mpsc;
+    use reth_tasks::executor::channel::mpsc;
 
     #[test]
     fn pending_trie_exposes_block_hash_before_completion() {

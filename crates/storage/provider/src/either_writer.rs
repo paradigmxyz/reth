@@ -29,7 +29,6 @@ use reth_db_api::{
     tables::BlockNumberList,
 };
 use reth_errors::ProviderError;
-use reth_executor::rayon::prelude::ParallelSliceMut;
 use reth_node_types::NodePrimitives;
 use reth_primitives_traits::{ReceiptTy, StorageEntry};
 use reth_static_file_types::StaticFileSegment;
@@ -37,6 +36,7 @@ use reth_storage_api::{
     ChangeSetReader, DBProvider, DbTxProvider, NodePrimitivesProvider, StorageSettingsCache,
 };
 use reth_storage_errors::provider::ProviderResult;
+use reth_tasks::executor::rayon::prelude::ParallelSliceMut;
 use strum::{Display, EnumIs};
 
 /// Type alias for [`EitherReader`] constructors.

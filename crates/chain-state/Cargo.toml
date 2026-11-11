@@ -12,7 +12,7 @@ description = "Reth state related types and functionality."
 workspace = true
 
 [dependencies]
-reth-executor.workspace = true
+reth-tasks.workspace = true
 # reth
 reth-chainspec.workspace = true
 reth-execution-types.workspace = true
@@ -55,7 +55,7 @@ rand.workspace = true
 evm2.workspace = true
 
 [features]
-fuzz = ["reth-trie/fuzz", "reth-executor/fuzz", "reth-trie-sparse/fuzz"]
+fuzz = ["reth-trie/fuzz", "reth-tasks/fuzz", "reth-trie-sparse/fuzz"]
 serde = [
     "dep:serde",
     "alloy-consensus/serde",
@@ -69,6 +69,7 @@ serde = [
     "evm2?/serde",
 ]
 test-utils = [
+    "reth-tasks/test-utils",
     "alloy-primitives/getrandom",
     "dep:evm2",
     "alloy-signer",

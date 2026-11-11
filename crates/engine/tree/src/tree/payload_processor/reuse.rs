@@ -36,7 +36,7 @@ use evm2::{
     utils::WordExt,
     EvmFeatures, EvmTypes, Inspector, InspectorConfig, OpcodeSet, TxResultWithState, Version,
 };
-use reth_executor::sync::parking_lot::{Mutex, RwLock};
+use reth_tasks::executor::sync::parking_lot::{Mutex, RwLock};
 use std::{
     cell::RefCell,
     rc::Rc,

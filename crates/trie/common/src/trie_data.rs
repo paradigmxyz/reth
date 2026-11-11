@@ -9,10 +9,10 @@ use crate::{
 };
 use alloc::sync::Arc;
 use core::fmt;
-#[cfg(all(feature = "fuzz", feature = "std"))]
-use reth_executor::sync::OnceLock;
 #[cfg(not(all(feature = "fuzz", feature = "std")))]
 use reth_primitives_traits::sync::OnceLock;
+#[cfg(all(feature = "fuzz", feature = "std"))]
+use reth_tasks::executor::sync::OnceLock;
 
 /// Container for sorted trie data: hashed state and trie updates.
 ///
@@ -226,7 +226,7 @@ impl LazyTrieDataProducer {
         trie_updates: Arc<TrieUpdates>,
     ) -> SortedTrieData {
         #[cfg(feature = "rayon")]
-        let (sorted_hashed_state, sorted_trie_updates) = reth_executor::rayon::join(
+        let (sorted_hashed_state, sorted_trie_updates) = reth_tasks::executor::rayon::join(
             || match Arc::try_unwrap(hashed_state) {
                 Ok(state) => state.into_sorted(),
                 Err(arc) => arc.clone_into_sorted(),
@@ -268,8 +268,8 @@ mod tests {
 
     use super::*;
     use alloy_primitives::{B256, U256};
-    use reth_executor::thread;
     use reth_primitives_traits::Account;
+    use reth_tasks::executor::thread;
     use std::time::Duration;
 
     fn empty_pending() -> (LazyTrieData, LazyTrieDataProducer) {

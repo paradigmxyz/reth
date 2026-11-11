@@ -9,7 +9,6 @@ use futures::{stream::Stream, FutureExt};
 use futures_util::{stream::FuturesUnordered, StreamExt};
 use reth_config::config::HeadersConfig;
 use reth_consensus::HeaderValidator;
-use reth_executor::rayon::prelude::*;
 use reth_network_p2p::{
     error::{DownloadError, DownloadResult, PeerRequestResult},
     headers::{
@@ -21,7 +20,7 @@ use reth_network_p2p::{
 };
 use reth_network_peers::PeerId;
 use reth_primitives_traits::{GotExpected, SealedHeader};
-use reth_tasks::Runtime;
+use reth_tasks::{executor::rayon::prelude::*, Runtime};
 use std::{
     cmp::{Ordering, Reverse},
     collections::{binary_heap::PeekMut, BinaryHeap},

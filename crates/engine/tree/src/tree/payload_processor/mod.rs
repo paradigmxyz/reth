@@ -16,19 +16,21 @@ use reth_evm::{
     ExecutableTxFor, ExecutableTxIterator, ExecutableTxParts, ExecutableTxTuple, SpecFor, TxEnvFor,
     WithTxEnv,
 };
-use reth_executor::{
-    channel::{mpsc, Receiver, Sender},
-    rayon::prelude::*,
-    sync::OnceLock,
-    time::Instant,
-};
 use reth_primitives_traits::NodePrimitives;
 use reth_provider::{
     BlockExecutionOutput, BlockNumReader, ChangeSetReader, DatabaseProviderFactory, HistoryReader,
     PruneCheckpointReader, StageCheckpointReader, StorageChangeSetReader, StorageSettingsCache,
 };
 use reth_storage_overlay::OverlayStateProviderFactory;
-use reth_tasks::Runtime;
+use reth_tasks::{
+    executor::{
+        channel::{mpsc, Receiver, Sender},
+        rayon::prelude::*,
+        sync::OnceLock,
+        time::Instant,
+    },
+    Runtime,
+};
 use reth_trie_common::bundle_state::BundleState;
 pub use reth_trie_parallel::{
     error::StateRootTaskError,
@@ -273,7 +275,7 @@ where
     ) -> (Option<IteratorPrewarmTxReceiver<Evm, I>>, IteratorExecuteTxReceiver<Evm, I>) {
         let (prewarm_tx, prewarm_rx) =
             prewarm_transactions.then(|| mpsc::sync_channel(transaction_count)).unzip();
-        let (execute_tx, execute_rx) = reth_executor::channel::bounded(transaction_count);
+        let (execute_tx, execute_rx) = reth_tasks::executor::channel::bounded(transaction_count);
         let parent_span = Span::current();
 
         if transaction_count == 0 {
@@ -683,7 +685,7 @@ pub struct CacheTaskHandle<R, H: evm2::EvmTypes> {
     /// The shared cache the task operates with.
     saved_cache: Option<SavedCache>,
     /// Channel to the spawned prewarm task if any
-    to_prewarm_task: Option<reth_executor::channel::mpsc::Sender<PrewarmTaskEvent<R>>>,
+    to_prewarm_task: Option<reth_tasks::executor::channel::mpsc::Sender<PrewarmTaskEvent<R>>>,
     /// Shared counter tracking the next transaction index to be executed by the main execution
     /// loop. Prewarm workers skip transactions below this index.
     executed_tx_index: Arc<AtomicUsize>,
@@ -835,7 +837,7 @@ mod tests {
             loop {
                 match receiver.recv_timeout(std::time::Duration::from_secs(10)) {
                     Ok(tx) => results.push(tx),
-                    Err(reth_executor::channel::RecvTimeoutError::Disconnected) => break,
+                    Err(reth_tasks::executor::channel::RecvTimeoutError::Disconnected) => break,
                     Err(err) => panic!("conversion did not terminate: {err}"),
                 }
             }
@@ -882,8 +884,8 @@ mod tests {
             let processor = test_processor();
             let calls = Arc::new(super::AtomicUsize::new(0));
             let converted = calls.clone();
-            let (started_tx, started_rx) = reth_executor::channel::unbounded();
-            let (release_tx, release_rx) = reth_executor::channel::bounded::<()>(0);
+            let (started_tx, started_rx) = reth_tasks::executor::channel::unbounded();
+            let (release_tx, release_rx) = reth_tasks::executor::channel::bounded::<()>(0);
             let (_, receiver) = processor.spawn_tx_iterator(
                 ((0..count).collect::<Vec<_>>(), move |idx| {
                     converted.fetch_add(1, Ordering::Relaxed);
@@ -916,7 +918,7 @@ mod tests {
             loop {
                 match started_rx.recv_timeout(std::time::Duration::from_secs(10)) {
                     Ok(()) => {}
-                    Err(reth_executor::channel::RecvTimeoutError::Disconnected) => break,
+                    Err(reth_tasks::executor::channel::RecvTimeoutError::Disconnected) => break,
                     Err(err) => panic!("conversion did not terminate: {err}"),
                 }
             }
@@ -1257,7 +1259,7 @@ mod tests {
                     assert!(tx.is_ok());
                     indices.push(idx);
                 }
-                Err(reth_executor::channel::RecvTimeoutError::Disconnected) => break,
+                Err(reth_tasks::executor::channel::RecvTimeoutError::Disconnected) => break,
                 Err(err) => panic!("conversion did not terminate: {err}"),
             }
         }

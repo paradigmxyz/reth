@@ -2,8 +2,8 @@ use alloy_consensus::BlockHeader;
 use alloy_eips::BlockNumHash;
 use alloy_primitives::BlockNumber;
 use reth_chainspec::ChainInfo;
-use reth_executor::sync::parking_lot::RwLock;
 use reth_primitives_traits::{NodePrimitives, SealedHeader};
+use reth_tasks::executor::sync::parking_lot::RwLock;
 use std::{
     sync::{
         atomic::{AtomicU64, Ordering},

@@ -7,17 +7,19 @@ use reth_db_api::{
     transaction::DbTx,
 };
 use reth_db_common::DbTool;
-use reth_executor::{
-    sync::parking_lot::Mutex,
-    thread,
-    time::{Duration, Instant},
-};
 use reth_provider::{
     providers::{BlockchainProvider, ProviderNodeTypes},
     StaticFileProviderFactory,
 };
 use reth_storage_api::{BlockNumReader, StateProvider, StateProviderFactory, StorageSettingsCache};
-use reth_tasks::spawn_scoped_thread;
+use reth_tasks::{
+    executor::{
+        sync::parking_lot::Mutex,
+        thread,
+        time::{Duration, Instant},
+    },
+    spawn_scoped_thread,
+};
 use std::collections::BTreeSet;
 use tracing::info;
 

@@ -119,7 +119,7 @@ where
     N: NodePrimitives,
     F: Fn(BlockNumber) -> N::BlockHeader + Send + Sync + 'static,
 {
-    let (tx, rx) = reth_executor::channel::mpsc::channel();
+    let (tx, rx) = reth_tasks::executor::channel::mpsc::channel();
 
     let mut handles = Vec::new();
 

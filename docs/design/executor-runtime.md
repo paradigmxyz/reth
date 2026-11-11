@@ -1,6 +1,6 @@
 # Blocking executor runtime
 
-`reth-executor` supplies the blocking execution primitives used by Reth's task,
+`reth-tasks` supplies the blocking execution primitives used by Reth's task,
 engine, trie, storage, pipeline, EVM, and network workers. The default backend uses
 Rayon, OS threads, and Crossbeam channels. The `fuzz` feature selects Shuttle, a
 concurrency-testing runtime with resumable logical-thread stacks, a fixed
@@ -9,7 +9,7 @@ that feature; call sites need no runtime trait or backend type parameter.
 
 ## Entering deterministic execution
 
-`reth_executor::Runtime` owns a simulated execution when `fuzz` is enabled.
+`reth_tasks::executor::Runtime` owns a simulated execution when `fuzz` is enabled.
 Create its channel, thread, lock, and clock primitives and run synchronous work inside
 one explicit `Runtime::run` entry point. Finish or join spawned work before that entry point
 returns. Each invocation is a separate scheduler execution; its handles and primitives
@@ -17,7 +17,7 @@ cannot be reused in another invocation. The native
 backend runs the closure directly, so the same caller compiles with either backend.
 
 ```rust
-use reth_executor::{channel, thread, time::Duration, Runtime};
+use reth_tasks::executor::{channel, thread, time::Duration, Runtime};
 
 let value = Runtime::new().run(|| {
     let (send, receive) = channel::bounded(1);
@@ -38,7 +38,7 @@ operations. Pure compute iterators execute serially with `fuzz`. Channels suppor
 cloned senders and receivers, bounded/unbounded queues, zero-capacity rendezvous,
 blocking/nonblocking operations, receive timeouts, and disconnection. Receive
 selection prioritizes branches in their written order under `fuzz`;
-`reth_executor::channel::select!` and `select_biased!` support one to eight receive
+`reth_tasks::executor::channel::select!` and `select_biased!` support one to eight receive
 branches and an optional immediate default, not send branches or timed defaults.
 Native `select_biased!` also prioritizes written order; native `select!` randomizes
 among ready branches.
@@ -51,10 +51,13 @@ host instead, so it must not be used for coordination within that execution.
 
 ## Reth integration and limits
 
-Reth's task-management crate reexports this crate as `reth_tasks::executor`. Named workers, stateful compute pools,
+The `reth_tasks::executor` module owns the blocking primitives in the same crate as
+Reth's task runtime and worker pools. The crate-root `Runtime` manages Tokio tasks;
+`executor::Runtime` is the synchronous simulation entry point. Tokio task management
+is native-only; the blocking primitives remain available on wasm. Named workers, stateful compute pools,
 work/result queues, and the engine's synchronous proof/trie channels use the
 selected backend. Participating crates expose a `fuzz` feature and forward it to
-their executor dependencies. Cargo feature unification selects one backend across
+`reth-tasks`. Cargo feature unification selects one backend across
 the dependency graph.
 
 Tokio remains native, including explicitly Tokio-backed blocking APIs. Network
@@ -73,13 +76,13 @@ The `reth-tasks/rayon` feature exposes its compute-pool APIs; `fuzz` selects the
 deterministic implementation. From the repository root:
 
 ```sh
-cargo run -p reth-executor --example trace
-cargo run -p reth-executor --features fuzz --example trace
+cargo run -p reth-tasks --example executor_trace
+cargo run -p reth-tasks --features fuzz --example executor_trace
 cargo run -p reth-tasks --features rayon --example executor
 cargo run -p reth-tasks --features rayon,fuzz --example executor
 ```
 
-The `trace` example checks channel handshakes, backpressure, receive selection,
+The `executor_trace` example checks channel handshakes, backpressure, receive selection,
 timeouts, and equality of recorded send/receive events across repeated simulated
 runs. The `executor` example uses Reth's task APIs for named-worker reuse, multiple
 producers/consumers, borrowed scopes, and virtual time. It checks that non-`Send`

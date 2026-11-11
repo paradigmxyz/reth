@@ -1,5 +1,5 @@
 //! The same blocking caller exercises either backend without a runtime trait.
-use reth_executor::{
+use reth_tasks::executor::{
     channel,
     sync::{Arc, Condvar, Mutex, OnceLock},
     thread,

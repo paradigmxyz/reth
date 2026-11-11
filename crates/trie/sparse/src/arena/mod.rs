@@ -16,7 +16,7 @@ use alloy_primitives::{keccak256, map::B256Map, B256};
 use alloy_trie::TrieMask;
 use core::{cmp::Reverse, mem};
 use reth_execution_errors::{SparseTrieErrorKind, SparseTrieResult};
-use reth_executor::rayon::iter::{
+use reth_tasks::executor::rayon::iter::{
     IntoParallelIterator, IntoParallelRefMutIterator, ParallelIterator,
 };
 use reth_trie_common::{

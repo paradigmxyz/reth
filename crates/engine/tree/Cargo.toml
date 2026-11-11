@@ -11,7 +11,6 @@ repository.workspace = true
 workspace = true
 
 [dependencies]
-reth-executor.workspace = true
 evm2.workspace = true
 # reth
 reth-chain-state.workspace = true
@@ -102,7 +101,6 @@ fuzz = [
     "reth-evm/fuzz",
     "reth-provider/fuzz",
     "reth-storage-overlay/fuzz",
-    "reth-executor/fuzz",
     "reth-tasks/fuzz",
     "reth-trie-parallel/fuzz",
     "reth-trie-common/fuzz",

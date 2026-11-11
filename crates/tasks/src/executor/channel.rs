@@ -24,7 +24,7 @@ pub fn send_or_cancel<T>(
 
 #[cfg(feature = "fuzz")]
 mod simulated {
-    use crate::{
+    use crate::executor::{
         sync::{Arc, Mutex},
         thread,
         time::{Duration, Instant},
@@ -268,7 +268,7 @@ mod simulated {
         /// the deadline.
         pub fn recv_timeout(&self, timeout: Duration) -> Result<T, RecvTimeoutError> {
             let deadline = Instant::now() + timeout;
-            let timer = crate::deterministic::Timer::new(deadline);
+            let timer = crate::executor::deterministic::Timer::new(deadline);
             let result = loop {
                 let listener = self.listen_receive();
                 match self.try_recv() {

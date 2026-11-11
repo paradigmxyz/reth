@@ -12,7 +12,6 @@ description = "Parallel implementation of merkle root algorithm"
 workspace = true
 
 [dependencies]
-reth-executor.workspace = true
 # reth
 reth-execution-errors.workspace = true
 reth-execution-types.workspace = true
@@ -51,7 +50,7 @@ reth-trie = { workspace = true, features = ["test-utils"] }
 rand.workspace = true
 
 [features]
-fuzz = ["reth-trie/fuzz", "reth-executor/fuzz", "reth-tasks/fuzz", "reth-provider/fuzz"]
+fuzz = ["reth-trie/fuzz", "reth-tasks/fuzz", "reth-provider/fuzz"]
 default = ["metrics"]
 metrics = ["reth-metrics", "dep:metrics"]
 trie-debug = [

@@ -1,6 +1,6 @@
 //! Scheduler-managed synchronization primitives.
 
-use crate::{
+use crate::executor::{
     deterministic::Timer,
     time::{Duration, Instant},
 };

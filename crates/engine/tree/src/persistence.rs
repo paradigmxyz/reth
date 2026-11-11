@@ -2,11 +2,6 @@ use crate::metrics::PersistenceMetrics;
 use alloy_eips::BlockNumHash;
 use reth_errors::ProviderError;
 use reth_ethereum_primitives::EthPrimitives;
-use reth_executor::{
-    channel::{mpsc, Sender},
-    thread::JoinHandle,
-    time::Instant,
-};
 use reth_primitives_traits::NodePrimitives;
 use reth_provider::{
     providers::ProviderNodeTypes, BalProvider, BlockExecutionWriter, BlockHashReader,
@@ -14,7 +9,14 @@ use reth_provider::{
 };
 use reth_prune::{PrunerError, PrunerWithFactory};
 use reth_stages_api::{MetricEvent, MetricEventsSender};
-use reth_tasks::spawn_thread;
+use reth_tasks::{
+    executor::{
+        channel::{mpsc, Sender},
+        thread::JoinHandle,
+        time::Instant,
+    },
+    spawn_thread,
+};
 use std::{sync::Arc, time::Duration};
 use thiserror::Error;
 use tracing::{debug, error, instrument, warn};
@@ -35,8 +37,8 @@ pub struct PersistenceResult {
 /// This is meant to be a spawned service that listens for various incoming persistence operations,
 /// performing those actions on disk, and returning the result in a channel.
 ///
-/// This should be spawned in its own thread with [`reth_executor::thread::spawn`], since this
-/// performs blocking I/O operations in an endless loop.
+/// This should be spawned in its own thread with [`reth_tasks::executor::thread::spawn`], since
+/// this performs blocking I/O operations in an endless loop.
 #[derive(Debug)]
 pub struct PersistenceService<N>
 where
@@ -310,7 +312,7 @@ impl<T: NodePrimitives> PersistenceHandle<T> {
         N: ProviderNodeTypes,
     {
         // create the initial channels
-        let (db_service_tx, db_service_rx) = reth_executor::channel::mpsc::channel();
+        let (db_service_tx, db_service_rx) = reth_tasks::executor::channel::mpsc::channel();
 
         // spawn the persistence service
         let db_service =
@@ -474,7 +476,7 @@ mod tests {
             tokio::sync::watch::channel(FinishedExExHeight::NoExExs);
         let pruner =
             Pruner::new_with_factory(provider.clone(), vec![], 0, 0, None, finished_exex_height_rx);
-        let (_db_service_tx, db_service_rx) = reth_executor::channel::mpsc::channel();
+        let (_db_service_tx, db_service_rx) = reth_tasks::executor::channel::mpsc::channel();
         let (sync_metrics_tx, _sync_metrics_rx) = unbounded_channel();
         let mut service = PersistenceService::new(provider, db_service_rx, pruner, sync_metrics_tx);
 
@@ -496,7 +498,7 @@ mod tests {
             tokio::sync::watch::channel(FinishedExExHeight::NoExExs);
         let pruner =
             Pruner::new_with_factory(provider.clone(), vec![], 0, 0, None, finished_exex_height_rx);
-        let (_db_service_tx, db_service_rx) = reth_executor::channel::mpsc::channel();
+        let (_db_service_tx, db_service_rx) = reth_tasks::executor::channel::mpsc::channel();
         let (sync_metrics_tx, _sync_metrics_rx) = unbounded_channel();
         let mut service = PersistenceService::new(provider, db_service_rx, pruner, sync_metrics_tx);
 
@@ -512,7 +514,7 @@ mod tests {
             tokio::sync::watch::channel(FinishedExExHeight::NoExExs);
         let pruner =
             Pruner::new_with_factory(provider.clone(), vec![], 5, 0, None, finished_exex_height_rx);
-        let (_db_service_tx, db_service_rx) = reth_executor::channel::mpsc::channel();
+        let (_db_service_tx, db_service_rx) = reth_tasks::executor::channel::mpsc::channel();
         let (sync_metrics_tx, _sync_metrics_rx) = unbounded_channel();
         let service = PersistenceService::new(provider, db_service_rx, pruner, sync_metrics_tx);
 
@@ -550,7 +552,7 @@ mod tests {
         let block_hash = executed.recovered_block().hash();
 
         let blocks = full_save_input(vec![executed]);
-        let (tx, rx) = reth_executor::channel::bounded(1);
+        let (tx, rx) = reth_tasks::executor::channel::bounded(1);
 
         handle.save_blocks(blocks, tx).unwrap();
 
@@ -585,7 +587,7 @@ mod tests {
             pruner,
             sync_metrics_tx,
         );
-        let (tx, rx) = reth_executor::channel::bounded(1);
+        let (tx, rx) = reth_tasks::executor::channel::bounded(1);
 
         handle.save_blocks(full_save_input(vec![executed]), tx).unwrap();
 
@@ -603,7 +605,7 @@ mod tests {
         let mut test_block_builder = TestBlockBuilder::eth();
         let blocks = test_block_builder.get_executed_blocks(1..6).collect::<Vec<_>>();
         let last_hash = blocks.last().unwrap().recovered_block().hash();
-        let (tx, rx) = reth_executor::channel::bounded(1);
+        let (tx, rx) = reth_tasks::executor::channel::bounded(1);
 
         handle.save_blocks(full_save_input(blocks), tx).unwrap();
         let result = rx.recv().unwrap();
@@ -620,7 +622,7 @@ mod tests {
         for range in ranges {
             let blocks = test_block_builder.get_executed_blocks(range).collect::<Vec<_>>();
             let last_hash = blocks.last().unwrap().recovered_block().hash();
-            let (tx, rx) = reth_executor::channel::bounded(1);
+            let (tx, rx) = reth_tasks::executor::channel::bounded(1);
 
             handle.save_blocks(full_save_input(blocks), tx).unwrap();
 
@@ -768,7 +770,7 @@ mod tests {
         // reorg thread is on
         #[expect(clippy::redundant_clone)]
         let pf = provider_factory.clone();
-        let reorg_handle = reth_executor::thread::spawn(move || {
+        let reorg_handle = reth_tasks::executor::thread::spawn(move || {
             let provider_rw = pf.database_provider_rw().unwrap();
             let frontiers = provider_rw.remove_block_and_execution_above(1).unwrap();
             assert_eq!(frontiers.partial_state_trie, 1);
@@ -781,7 +783,7 @@ mod tests {
         });
 
         // Give the reorg thread time to start and block on wait_for_pre_commit_readers.
-        reth_executor::thread::sleep(std::time::Duration::from_millis(100));
+        reth_tasks::executor::thread::sleep(std::time::Duration::from_millis(100));
 
         // The pre-reorg provider still holds its MDBX snapshot — it must still see
         // the OLD block 2 from before the reorg.

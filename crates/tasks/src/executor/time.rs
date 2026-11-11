@@ -13,7 +13,7 @@ pub struct Instant(pub(crate) Duration);
 impl Instant {
     /// Returns the current virtual time.
     pub fn now() -> Self {
-        Self(crate::deterministic::now())
+        Self(crate::executor::deterministic::now())
     }
 
     /// Returns the time elapsed since this instant, saturating at zero.
@@ -76,7 +76,7 @@ pub fn sleep(duration: Duration) {
     #[cfg(feature = "fuzz")]
     {
         let deadline = Instant::now() + duration;
-        let timer = crate::deterministic::Timer::new(deadline);
+        let timer = crate::executor::deterministic::Timer::new(deadline);
         while Instant::now() < deadline {
             shuttle::thread::park();
         }

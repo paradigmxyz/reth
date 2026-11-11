@@ -31,7 +31,7 @@ impl Runtime {
         }
         #[cfg(feature = "fuzz")]
         {
-            crate::deterministic::run(work)
+            crate::executor::deterministic::run(work)
         }
     }
 }

@@ -14,7 +14,9 @@ use itertools::Itertools;
 use reth_primitives_traits::Account;
 
 #[cfg(feature = "rayon")]
-use reth_executor::rayon::prelude::{FromParallelIterator, IntoParallelIterator, ParallelIterator};
+use reth_tasks::executor::rayon::prelude::{
+    FromParallelIterator, IntoParallelIterator, ParallelIterator,
+};
 
 /// In-memory hashed state that stores account and storage changes with keccak256-hashed keys in
 /// hash maps.

@@ -10,7 +10,7 @@ use std::{
     },
 };
 
-pub use crate::time::sleep;
+pub use crate::executor::time::sleep;
 #[cfg(feature = "fuzz")]
 pub use shuttle::thread::{current, panicking, park, yield_now, Result, Thread, ThreadId};
 #[cfg(not(feature = "fuzz"))]

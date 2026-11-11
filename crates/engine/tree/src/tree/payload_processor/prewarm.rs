@@ -33,11 +33,6 @@ use reth_evm::{
     Evm as EvmInstance, EvmEnv, EvmEnvFor, EvmFor, EvmTypesFor, ExecutableTxFor, RecoveredTx,
     SpecFor,
 };
-use reth_executor::{
-    channel::mpsc::{self, channel, Receiver, Sender},
-    rayon::prelude::*,
-    time::Instant,
-};
 use reth_metrics::Metrics;
 use reth_primitives_traits::NodePrimitives;
 use reth_provider::{
@@ -47,7 +42,14 @@ use reth_provider::{
     StorageSettingsCache,
 };
 use reth_storage_overlay::OverlayStateProviderFactory;
-use reth_tasks::{Runtime, WorkerStatefulPool};
+use reth_tasks::{
+    executor::{
+        channel::mpsc::{self, channel, Receiver, Sender},
+        rayon::prelude::*,
+        time::Instant,
+    },
+    Runtime, WorkerStatefulPool,
+};
 use reth_trie_common::MultiProofTargetsV2;
 use std::{
     sync::{
@@ -314,7 +316,7 @@ where
             rounds = 0;
             window_len = REFRESH_WINDOW;
             while results.predicted().generation() == generation && !ctx.should_stop() {
-                reth_executor::thread::sleep(REFRESH_POLL_INTERVAL);
+                reth_tasks::executor::thread::sleep(REFRESH_POLL_INTERVAL);
             }
         }
     }
@@ -564,7 +566,7 @@ where
         let stream_parent_span = parent_span;
         let prefetch_bal = Arc::clone(&decoded_bal);
         let stream_bal = Arc::clone(&decoded_bal);
-        let (stream_tx, stream_rx) = reth_executor::channel::bounded(1);
+        let (stream_tx, stream_rx) = reth_tasks::executor::channel::bounded(1);
 
         if let Some(hashed_update_stream) = hashed_update_stream {
             let ctx = ctx.clone();
@@ -1201,7 +1203,7 @@ mod tests {
         let deadline = Instant::now() + Duration::from_secs(5);
         while saved.usage_count() != 2 {
             assert!(Instant::now() < deadline, "worker state outlived transaction prewarming");
-            reth_executor::thread::yield_now();
+            reth_tasks::executor::thread::yield_now();
         }
         assert!(task.ctx.saved_cache.is_some());
     }
@@ -1335,7 +1337,7 @@ mod tests {
 
     // EIP-7702 bytecode preserves its owned buffer, letting us observe actual cache destruction.
     struct CacheDropProbe {
-        started: Sender<reth_executor::thread::ThreadId>,
+        started: Sender<reth_tasks::executor::thread::ThreadId>,
         inspected: Receiver<()>,
         result: Sender<bool>,
     }
@@ -1348,7 +1350,7 @@ mod tests {
 
     impl Drop for CacheDropProbe {
         fn drop(&mut self) {
-            let _ = self.started.send(reth_executor::thread::current().id());
+            let _ = self.started.send(reth_tasks::executor::thread::current().id());
             // A timeout turns destruction under the mutex into a failure instead of a deadlock.
             let unlocked = self.inspected.recv_timeout(std::time::Duration::from_secs(5)).is_ok();
             let _ = self.result.send(unlocked);
@@ -1359,12 +1361,15 @@ mod tests {
         saved: &SavedCache,
         execution_cache: &PayloadExecutionCache,
         expect_saved_cache: bool,
-    ) -> (Receiver<bool>, reth_executor::thread::JoinHandle<reth_executor::thread::ThreadId>) {
+    ) -> (
+        Receiver<bool>,
+        reth_tasks::executor::thread::JoinHandle<reth_tasks::executor::thread::ThreadId>,
+    ) {
         let (started_tx, started_rx) = mpsc::channel();
         let (inspected_tx, inspected_rx) = mpsc::channel();
         let (result_tx, result_rx) = mpsc::channel();
         let cache = execution_cache.clone();
-        let reader = reth_executor::thread::spawn(move || {
+        let reader = reth_tasks::executor::thread::spawn(move || {
             let drop_thread = started_rx.recv().unwrap();
             // Waiting for the mutex must return while the removed cache is still being dropped.
             cache.wait_for_availability();
@@ -1403,7 +1408,7 @@ mod tests {
                 prewarm_results: None,
                 cache_metrics: None,
             },
-            transactions: reth_executor::channel::never::<(usize, Result<(), ()>)>(),
+            transactions: reth_tasks::executor::channel::never::<(usize, Result<(), ()>)>(),
             _span: Span::none(),
         };
         // The validator keeps this ExecutionCache clone after calling terminate_caching.
@@ -1418,7 +1423,7 @@ mod tests {
                 PrewarmMode::Skipped,
                 actions_tx,
             );
-            reth_executor::thread::current().id()
+            reth_tasks::executor::thread::current().id()
         });
         let prewarm_thread = *prewarm.get();
 
@@ -1431,7 +1436,7 @@ mod tests {
         drop(validator_cache);
         assert!(dropped.try_recv().expect("last ExecutionCache drop must free the cache"));
         let drop_thread = reader.join().unwrap();
-        assert_eq!(drop_thread, reth_executor::thread::current().id());
+        assert_eq!(drop_thread, reth_tasks::executor::thread::current().id());
         assert_ne!(drop_thread, prewarm_thread);
     }
 
@@ -1483,7 +1488,7 @@ mod tests {
                 result.try_recv().expect("removed cache must be destroyed before save returns"),
                 "cache mutex must be unlocked during destruction"
             );
-            assert_eq!(reader.join().unwrap(), reth_executor::thread::current().id());
+            assert_eq!(reader.join().unwrap(), reth_tasks::executor::thread::current().id());
         }
         execution_cache.update_with_guard(|slot| {
             if expect_saved_cache {

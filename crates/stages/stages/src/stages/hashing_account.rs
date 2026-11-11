@@ -8,7 +8,6 @@ use reth_db_api::{
     RawKey, RawTable, RawValue,
 };
 use reth_etl::Collector;
-use reth_executor::channel::mpsc::{self, Receiver};
 use reth_primitives_traits::Account;
 use reth_provider::{
     AccountExtReader, DBProvider, HashingWriter, StatsReader, StorageSettingsCache,
@@ -18,6 +17,7 @@ use reth_stages_api::{
     StageCheckpoint, StageError, StageId, UnwindInput, UnwindOutput,
 };
 use reth_storage_errors::provider::ProviderResult;
+use reth_tasks::executor::channel::mpsc::{self, Receiver};
 use std::{
     collections::BTreeSet,
     fmt::Debug,
@@ -195,7 +195,7 @@ where
                 let (tx, rx) = mpsc::sync_channel(chunk.len());
                 channels.push(rx);
                 // Spawn the hashing task onto the global rayon pool
-                reth_executor::rayon::spawn(move || {
+                reth_tasks::executor::rayon::spawn(move || {
                     for (address, account) in chunk {
                         let address = address.key().unwrap();
                         let _ = tx.send((RawKey::new(keccak256(address)), account));

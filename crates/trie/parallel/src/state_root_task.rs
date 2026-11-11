@@ -62,22 +62,24 @@ pub struct StateRootHandle {
     cancel_guard: StateRootTaskCancelGuard,
     /// Receiver for the final state root result.
     state_root_rx: Option<
-        reth_executor::channel::mpsc::Receiver<Result<StateRootComputeOutcome, StateRootTaskError>>,
+        reth_tasks::executor::channel::mpsc::Receiver<
+            Result<StateRootComputeOutcome, StateRootTaskError>,
+        >,
     >,
     /// Receiver for the hashed post state.
-    hashed_state_rx: Option<reth_executor::channel::mpsc::Receiver<Arc<HashedPostState>>>,
+    hashed_state_rx: Option<reth_tasks::executor::channel::mpsc::Receiver<Arc<HashedPostState>>>,
 }
 
 impl StateRootHandle {
     /// Creates a new [`StateRootHandle`].
     pub fn new(
         cached_trie_state_root: B256,
-        updates_tx: reth_executor::channel::Sender<StateRootMessage>,
+        updates_tx: reth_tasks::executor::channel::Sender<StateRootMessage>,
         cancel_guard: StateRootTaskCancelGuard,
-        state_root_rx: reth_executor::channel::mpsc::Receiver<
+        state_root_rx: reth_tasks::executor::channel::mpsc::Receiver<
             Result<StateRootComputeOutcome, StateRootTaskError>,
         >,
-        hashed_state_rx: reth_executor::channel::mpsc::Receiver<Arc<HashedPostState>>,
+        hashed_state_rx: reth_tasks::executor::channel::mpsc::Receiver<Arc<HashedPostState>>,
     ) -> Self {
         let sink: Arc<dyn StateRootSink> = Arc::new(SparseTrieStateRootSink::new(updates_tx));
         Self {
@@ -149,8 +151,9 @@ impl StateRootHandle {
     /// If called more than once.
     pub const fn take_state_root_rx(
         &mut self,
-    ) -> reth_executor::channel::mpsc::Receiver<Result<StateRootComputeOutcome, StateRootTaskError>>
-    {
+    ) -> reth_tasks::executor::channel::mpsc::Receiver<
+        Result<StateRootComputeOutcome, StateRootTaskError>,
+    > {
         self.state_root_rx.take().expect("state_root already taken")
     }
 
@@ -161,7 +164,7 @@ impl StateRootHandle {
     /// If called more than once.
     pub const fn take_hashed_state_rx(
         &mut self,
-    ) -> reth_executor::channel::mpsc::Receiver<Arc<HashedPostState>> {
+    ) -> reth_tasks::executor::channel::mpsc::Receiver<Arc<HashedPostState>> {
         self.hashed_state_rx.take().expect("hashed_state already taken")
     }
 
@@ -188,12 +191,12 @@ impl StateRootHandle {
 /// dropping disconnects the channel, which the task treats as the consumer abandoning the
 /// computation (for example on a timeout fallback or when a payload job is dropped unused).
 #[derive(Debug)]
-pub struct StateRootTaskCancelGuard(#[allow(dead_code)] reth_executor::channel::Sender<()>);
+pub struct StateRootTaskCancelGuard(#[allow(dead_code)] reth_tasks::executor::channel::Sender<()>);
 
 impl StateRootTaskCancelGuard {
     /// Creates a guard and the receiver a task watches for cancellation.
-    pub fn channel() -> (Self, reth_executor::channel::Receiver<()>) {
-        let (tx, rx) = reth_executor::channel::bounded(0);
+    pub fn channel() -> (Self, reth_tasks::executor::channel::Receiver<()>) {
+        let (tx, rx) = reth_tasks::executor::channel::bounded(0);
         (Self(tx), rx)
     }
 }
@@ -206,9 +209,11 @@ pub struct PayloadStateRootHandle {
     /// Cancels the backing task when the handle is dropped without consuming the result.
     cancel_guard: Option<StateRootTaskCancelGuard>,
     state_root_rx: Option<
-        reth_executor::channel::mpsc::Receiver<Result<StateRootComputeOutcome, StateRootTaskError>>,
+        reth_tasks::executor::channel::mpsc::Receiver<
+            Result<StateRootComputeOutcome, StateRootTaskError>,
+        >,
     >,
-    hashed_state_rx: Option<reth_executor::channel::mpsc::Receiver<Arc<HashedPostState>>>,
+    hashed_state_rx: Option<reth_tasks::executor::channel::mpsc::Receiver<Arc<HashedPostState>>>,
     /// Returns retained state to the engine once the completed block's identity is known.
     on_payload_built: Option<Box<dyn FnOnce(B256, B256) + Send>>,
 }
@@ -233,10 +238,12 @@ impl PayloadStateRootHandle {
     pub const fn new(
         name: &'static str,
         hook: Option<StateRootUpdateHook>,
-        state_root_rx: reth_executor::channel::mpsc::Receiver<
+        state_root_rx: reth_tasks::executor::channel::mpsc::Receiver<
             Result<StateRootComputeOutcome, StateRootTaskError>,
         >,
-        hashed_state_rx: Option<reth_executor::channel::mpsc::Receiver<Arc<HashedPostState>>>,
+        hashed_state_rx: Option<
+            reth_tasks::executor::channel::mpsc::Receiver<Arc<HashedPostState>>,
+        >,
     ) -> Self {
         Self {
             name,
@@ -301,8 +308,9 @@ impl PayloadStateRootHandle {
     /// If called more than once.
     pub const fn take_state_root_rx(
         &mut self,
-    ) -> reth_executor::channel::mpsc::Receiver<Result<StateRootComputeOutcome, StateRootTaskError>>
-    {
+    ) -> reth_tasks::executor::channel::mpsc::Receiver<
+        Result<StateRootComputeOutcome, StateRootTaskError>,
+    > {
         self.state_root_rx.take().expect("state_root already taken")
     }
 
@@ -310,7 +318,7 @@ impl PayloadStateRootHandle {
     /// yet.
     pub const fn try_take_hashed_state_rx(
         &mut self,
-    ) -> Option<reth_executor::channel::mpsc::Receiver<Arc<HashedPostState>>> {
+    ) -> Option<reth_tasks::executor::channel::mpsc::Receiver<Arc<HashedPostState>>> {
         self.hashed_state_rx.take()
     }
 }
@@ -477,7 +485,7 @@ impl Drop for StateRootUpdateHook {
     fn drop(&mut self) {
         // A drop during a panic unwind means execution died mid-block. Leave the stream
         // unfinished so the task fails instead of computing a root from partial updates.
-        if reth_executor::thread::panicking() {
+        if reth_tasks::executor::thread::panicking() {
             return;
         }
         self.inner.on_updates_finished();
@@ -486,11 +494,11 @@ impl Drop for StateRootUpdateHook {
 
 #[derive(Debug, Clone)]
 struct SparseTrieStateRootSink {
-    sender: reth_executor::channel::Sender<StateRootMessage>,
+    sender: reth_tasks::executor::channel::Sender<StateRootMessage>,
 }
 
 impl SparseTrieStateRootSink {
-    const fn new(sender: reth_executor::channel::Sender<StateRootMessage>) -> Self {
+    const fn new(sender: reth_tasks::executor::channel::Sender<StateRootMessage>) -> Self {
         Self { sender }
     }
 }
@@ -574,7 +582,7 @@ mod tests {
         let sink = Arc::new(CountingSink::default());
         let hook = StateRootUpdateStream::new(sink.clone()).into_state_hook();
 
-        let result = reth_executor::thread::spawn(move || {
+        let result = reth_tasks::executor::thread::spawn(move || {
             let _hook = hook;
             panic!("execution died mid-block");
         })
@@ -589,10 +597,10 @@ mod tests {
     #[test]
     #[should_panic(expected = "authoritative update capability already taken")]
     fn authoritative_capability_can_only_be_taken_once() {
-        let (updates_tx, _updates_rx) = reth_executor::channel::unbounded();
+        let (updates_tx, _updates_rx) = reth_tasks::executor::channel::unbounded();
         let (cancel_guard, _cancel_rx) = StateRootTaskCancelGuard::channel();
-        let (_state_root_tx, state_root_rx) = reth_executor::channel::mpsc::channel();
-        let (_hashed_state_tx, hashed_state_rx) = reth_executor::channel::mpsc::channel();
+        let (_state_root_tx, state_root_rx) = reth_tasks::executor::channel::mpsc::channel();
+        let (_hashed_state_tx, hashed_state_rx) = reth_tasks::executor::channel::mpsc::channel();
         let mut handle = StateRootHandle::new(
             B256::ZERO,
             updates_tx,
@@ -614,8 +622,8 @@ mod tests {
         let sink = Arc::new(CountingSink::default());
         let hook = StateRootUpdateStream::new(sink.clone()).into_state_hook();
 
-        let (state_root_tx, state_root_rx) = reth_executor::channel::mpsc::channel();
-        let (hashed_state_tx, hashed_state_rx) = reth_executor::channel::mpsc::channel();
+        let (state_root_tx, state_root_rx) = reth_tasks::executor::channel::mpsc::channel();
+        let (hashed_state_tx, hashed_state_rx) = reth_tasks::executor::channel::mpsc::channel();
         let mut handle =
             PayloadStateRootHandle::new("test", Some(hook), state_root_rx, Some(hashed_state_rx));
 
@@ -646,10 +654,10 @@ mod tests {
 
     #[test]
     fn payload_state_root_receiver_retains_cancellation() {
-        let (updates_tx, _updates_rx) = reth_executor::channel::unbounded();
+        let (updates_tx, _updates_rx) = reth_tasks::executor::channel::unbounded();
         let (cancel_guard, cancel_rx) = StateRootTaskCancelGuard::channel();
-        let (_state_root_tx, state_root_rx) = reth_executor::channel::mpsc::channel();
-        let (_hashed_state_tx, hashed_state_rx) = reth_executor::channel::mpsc::channel();
+        let (_state_root_tx, state_root_rx) = reth_tasks::executor::channel::mpsc::channel();
+        let (_hashed_state_tx, hashed_state_rx) = reth_tasks::executor::channel::mpsc::channel();
         let mut handle = StateRootHandle::new(
             B256::ZERO,
             updates_tx,
@@ -662,14 +670,17 @@ mod tests {
         let state_root_rx = handle.take_state_root_rx();
         assert!(matches!(
             state_root_rx.recv_timeout(Duration::ZERO),
-            Err(reth_executor::channel::mpsc::RecvTimeoutError::Timeout)
+            Err(reth_tasks::executor::channel::mpsc::RecvTimeoutError::Timeout)
         ));
-        assert!(matches!(cancel_rx.try_recv(), Err(reth_executor::channel::TryRecvError::Empty)));
+        assert!(matches!(
+            cancel_rx.try_recv(),
+            Err(reth_tasks::executor::channel::TryRecvError::Empty)
+        ));
 
         drop(handle);
         assert!(matches!(
             cancel_rx.recv_timeout(Duration::from_secs(1)),
-            Err(reth_executor::channel::RecvTimeoutError::Disconnected)
+            Err(reth_tasks::executor::channel::RecvTimeoutError::Disconnected)
         ));
     }
 }
