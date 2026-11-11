@@ -7099,6 +7099,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "pbt"
+version = "0.1.0"
+source = "git+https://github.com/Rimeeeeee/pbtree?rev=ba0c12d5399f327ac19328bf3b55b56d73b38154#ba0c12d5399f327ac19328bf3b55b56d73b38154"
+dependencies = [
+ "alloy-eip7928",
+ "alloy-primitives",
+ "alloy-trie",
+ "blake3",
+ "imbl",
+ "rocksdb",
+ "thiserror 2.0.21",
+]
+
+[[package]]
 name = "pem"
 version = "3.0.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -11256,12 +11270,8 @@ dependencies = [
 name = "reth-trie-pbt"
 version = "2.8.1"
 dependencies = [
- "alloy-eip7928",
  "alloy-primitives",
- "alloy-trie",
- "blake3",
- "imbl",
- "proptest",
+ "pbt",
  "reth-fs-util",
  "reth-primitives-traits",
  "reth-storage-api",
@@ -11269,7 +11279,6 @@ dependencies = [
  "reth-trie",
  "reth-trie-common",
  "rocksdb",
- "serde_json",
  "tempfile",
  "thiserror 2.0.21",
 ]

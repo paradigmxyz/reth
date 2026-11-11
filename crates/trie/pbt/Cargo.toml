@@ -6,36 +6,53 @@ rust-version.workspace = true
 license.workspace = true
 homepage.workspace = true
 repository.workspace = true
-description = "Partitioned binary state tree (EIP-8297)"
+description = "Reth adapters for the external partitioned binary state tree"
 
 [lints]
 workspace = true
 
 [dependencies]
-alloy-primitives = { workspace = true, features = ["std"] }
-alloy-trie = { workspace = true, features = ["std", "ethereum"], optional = true }
-blake3.workspace = true
-thiserror = { workspace = true, features = ["std"] }
+pbt.workspace = true
+
+# execution
 reth-trie-common = { workspace = true, features = ["std"], optional = true }
-alloy-eip7928 = { workspace = true, optional = true }
-reth-fs-util = { workspace = true, optional = true }
+
+# conversion
 reth-trie = { workspace = true, optional = true }
 reth-storage-api = { workspace = true, optional = true, features = ["std"] }
 reth-storage-errors = { workspace = true, optional = true, features = ["std"] }
-imbl.workspace = true
+
+# persistence
+reth-fs-util = { workspace = true, optional = true }
 rocksdb = { workspace = true, optional = true }
 
+# execution, conversion, persistence
+alloy-primitives = { workspace = true, features = ["std"], optional = true }
+thiserror = { workspace = true, features = ["std"], optional = true }
+
 [dev-dependencies]
-proptest.workspace = true
-serde_json.workspace = true
 tempfile.workspace = true
 reth-trie = { workspace = true, features = ["test-utils"] }
 reth-primitives-traits.workspace = true
 
 [features]
 default = []
-migration = ["dep:alloy-trie"]
-execution = ["dep:reth-trie-common"]
-bal = ["dep:alloy-eip7928"]
-persistence = ["migration", "dep:reth-fs-util", "dep:rocksdb"]
-conversion = ["migration", "dep:reth-trie", "dep:reth-storage-api", "dep:reth-storage-errors"]
+migration = ["pbt/migration"]
+execution = ["dep:reth-trie-common", "dep:alloy-primitives", "dep:thiserror"]
+bal = ["pbt/bal"]
+persistence = [
+    "migration",
+    "pbt/persistence",
+    "dep:reth-fs-util",
+    "dep:rocksdb",
+    "dep:alloy-primitives",
+    "dep:thiserror",
+]
+conversion = [
+    "migration",
+    "dep:reth-trie",
+    "dep:reth-storage-api",
+    "dep:reth-storage-errors",
+    "dep:alloy-primitives",
+    "dep:thiserror",
+]

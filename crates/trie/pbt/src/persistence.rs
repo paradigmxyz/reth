@@ -6,7 +6,7 @@ use crate::{
     Blake3Hasher, StateTree, TreeHasher,
 };
 use alloy_primitives::B256;
-use nodes::{NodeDatabase, STORE_VERSION};
+use pbt::persistence::{NodeDatabase, NodeError, STORE_VERSION};
 use std::{
     collections::{BTreeMap, BTreeSet},
     fs::File,
@@ -14,8 +14,6 @@ use std::{
     path::{Path, PathBuf},
     sync::{Arc, Mutex},
 };
-
-mod nodes;
 
 const HASH_BYTES: usize = 32;
 const CHECKPOINT_LENGTH_BYTES: usize = 8;
@@ -324,7 +322,7 @@ impl<H: TreeHasher> SnapshotStore<H> {
             self.write_marker(root, count)?;
             return Ok(state);
         }
-        self.database.load::<H>(root, count, self.limits)
+        Ok(self.database.load::<H>(root, count, self.limits)?)
     }
 
     fn load_legacy_state(&self, root: B256) -> Result<StateTree<H>, StoreError> {
@@ -393,6 +391,19 @@ pub enum StoreError {
     /// A requested finalized or obsolete block has no checkpoint reference.
     #[error("PBT checkpoint reference is unavailable for block {0}")]
     MissingBlockReference(B256),
+}
+
+impl From<NodeError> for StoreError {
+    fn from(error: NodeError) -> Self {
+        match error {
+            NodeError::Database(error) => Self::Database(error),
+            NodeError::Artifact(error) => Self::Artifact(error),
+            NodeError::Io { path, source } => {
+                Self::Io(reth_fs_util::FsPathError::metadata(source, path))
+            }
+            NodeError::Poisoned => Self::Poisoned,
+        }
+    }
 }
 
 fn cache_state<H>(cache: &mut BTreeMap<B256, StateTree<H>>, root: B256, state: StateTree<H>) {
