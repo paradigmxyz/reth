@@ -26,7 +26,8 @@ fn is_zero(value: &u64) -> bool {
 /// Archive paths are resolved relative to [`SnapshotManifest::base_url`] via URL joining.
 /// Single archives use [`SingleArchive::file`]; chunked archives default to
 /// `{component}-{start_block}-{end_block}.tar.zst`, or use [`ChunkedArchive::chunk_files`]
-/// when present so publishers can place finalized and tip chunks under different prefixes:
+/// when present so publishers can place finalized and tip chunks under different prefixes, or
+/// reference an earlier snapshot's archives by absolute URL:
 ///
 /// ```text
 /// base_url = https://example.com/mainnet
@@ -119,17 +120,17 @@ pub struct ChunkedArchive {
     /// `chunk_output_files`.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub chunk_decompressed_sizes: Vec<u64>,
-    /// Archive path for each chunk, relative to [`SnapshotManifest::base_url`], ordered from
-    /// first to last.
+    /// Archive location for each chunk, ordered from first to last.
     ///
     /// When empty (older manifests), downloaders fall back to the default
     /// `{component}-{start}-{end}.tar.zst` name. When set, the length must equal the chunk
-    /// count and each entry is joined with `base_url` so publishers can place chunks under
-    /// different prefixes (for example `static_files/…` for finalized chunks and
-    /// `{timestamp}/…` for the tip chunk).
+    /// count. Relative paths are joined with [`SnapshotManifest::base_url`] so publishers can
+    /// place chunks under different prefixes (for example `static_files/…` for finalized chunks
+    /// and `{timestamp}/…` for the tip chunk). Absolute URLs, such as archives reused from a
+    /// previous snapshot, are used as-is.
     ///
-    /// Paths must be relative (no leading `/`). A leading slash is treated as host-absolute by
-    /// URL joining and would drop the `base_url` path prefix.
+    /// Relative paths must not start with `/`: URL joining treats a leading slash as
+    /// host-absolute and would drop the `base_url` path prefix.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub chunk_files: Vec<String>,
     /// Expected extracted plain files per chunk, ordered from first to last.
@@ -714,43 +715,45 @@ pub fn generate_manifest(
 
         if found_any {
             // Chunk indices only match the previous manifest's positions without leading gaps.
-            let previous = previous.filter(|_| planned_chunks.len() as u64 == num_chunks).and_then(
-                |previous| {
-                    let ComponentManifest::Chunked(chunked) = previous.component(*ty)? else {
-                        return None;
-                    };
-
-                    let complete = chunked.blocks_per_file == blocks_per_file &&
+            let previous_chunks = previous
+                .filter(|_| planned_chunks.len() as u64 == num_chunks)
+                .and_then(|manifest| match manifest.component(*ty)? {
+                    ComponentManifest::Chunked(chunked) => Some((manifest, chunked)),
+                    ComponentManifest::Single(_) => None,
+                })
+                .filter(|(_, chunked)| {
+                    chunked.blocks_per_file == blocks_per_file &&
                         chunked.chunk_sizes.len() as u64 == chunked.num_chunks() &&
-                        chunked.chunk_output_files.len() as u64 == chunked.num_chunks();
-                    complete.then_some((previous, chunked))
-                },
-            );
+                        chunked.chunk_output_files.len() as u64 == chunked.num_chunks()
+                });
+
+            // The last chunk of either manifest may be partial, so only earlier chunks are reused.
+            let reusable_chunks = previous_chunks
+                .map_or(0, |(_, chunked)| num_chunks.min(chunked.num_chunks()).saturating_sub(1));
 
             let mut packaged_chunks = planned_chunks
                 .into_par_iter()
                 .map(|planned| -> Result<PackagedChunk> {
-                    // The last chunk of either manifest may be partial, so it is always packaged.
-                    let reusable = previous.filter(|(_, chunked)| {
-                        planned.chunk_idx + 1 < num_chunks &&
-                            planned.chunk_idx + 1 < chunked.num_chunks()
-                    });
-                    if let Some((previous, chunked)) = reusable {
+                    let start = planned.chunk_idx * blocks_per_file;
+                    let file_name = chunk_filename(key, start, start + blocks_per_file - 1);
+                    if planned.chunk_idx < reusable_chunks &&
+                        let Some((manifest, chunked)) = previous_chunks
+                    {
                         let idx = planned.chunk_idx as usize;
                         let output_files = hash_chunk_files(&planned.source_files)?;
                         eyre::ensure!(
                             output_files == chunked.chunk_output_files[idx],
-                            "{key} chunk {} differs from the previous manifest",
-                            planned.archive_path.display()
+                            "{file_name} differs from the previous manifest"
                         );
+
                         return Ok(PackagedChunk {
                             chunk_idx: planned.chunk_idx,
                             size: chunked.chunk_sizes[idx],
                             output_files,
-                            reused_from: Some(resolve_archive_url(
-                                previous.base_url_or_empty(),
+                            file: resolve_archive_url(
+                                manifest.base_url_or_empty(),
                                 &chunked.chunk_relative_path(key, planned.chunk_idx),
-                            )),
+                            ),
                         });
                     }
 
@@ -761,7 +764,7 @@ pub fn generate_manifest(
                         chunk_idx: planned.chunk_idx,
                         size,
                         output_files,
-                        reused_from: None,
+                        file: file_name,
                     })
                 })
                 .collect::<Vec<_>>()
@@ -769,21 +772,7 @@ pub fn generate_manifest(
                 .collect::<Result<Vec<_>>>()?;
 
             packaged_chunks.sort_unstable_by_key(|chunk| chunk.chunk_idx);
-            let reused = packaged_chunks.iter().filter(|chunk| chunk.reused_from.is_some()).count();
-            let chunk_files = if reused == 0 {
-                Vec::new()
-            } else {
-                packaged_chunks
-                    .iter()
-                    .map(|chunk| {
-                        chunk.reused_from.clone().unwrap_or_else(|| {
-                            let start = chunk.chunk_idx * blocks_per_file;
-                            chunk_filename(key, start, start + blocks_per_file - 1)
-                        })
-                    })
-                    .collect()
-            };
-
+            let chunk_files = packaged_chunks.iter().map(|chunk| chunk.file.clone()).collect();
             let chunk_sizes = packaged_chunks.iter().map(|chunk| chunk.size).collect::<Vec<_>>();
             let chunk_output_files =
                 packaged_chunks.into_iter().map(|chunk| chunk.output_files).collect::<Vec<_>>();
@@ -791,7 +780,6 @@ pub fn generate_manifest(
             info!(target: "reth::cli",
                 component = ty.display_name(),
                 chunks = chunk_sizes.len(),
-                reused,
                 total_blocks,
                 size = %super::DownloadProgress::format_size(total_size),
                 "Found chunked component"
@@ -876,8 +864,8 @@ struct PackagedChunk {
     chunk_idx: u64,
     size: u64,
     output_files: Vec<OutputFileChecksum>,
-    /// URL of the previously published archive, when the chunk was not packaged again.
-    reused_from: Option<String>,
+    /// Entry for `chunk_files`: the published URL when reused, otherwise the local file name.
+    file: String,
 }
 
 #[derive(Debug)]
