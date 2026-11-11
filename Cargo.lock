@@ -10556,6 +10556,7 @@ dependencies = [
  "derive_more",
  "evm2",
  "evm2-inspectors",
+ "fixed-cache",
  "futures",
  "itertools 0.14.0",
  "jsonrpsee-core",
