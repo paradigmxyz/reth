@@ -649,10 +649,10 @@ pub fn generate_manifest(
             "Previous manifest is for chain {}, not {chain_id}",
             previous.chain_id
         );
-        // Reused archives are referenced by absolute URL, which needs the previous base URL.
+        // Reused archives are referenced by absolute URL, which needs an absolute base URL.
         eyre::ensure!(
-            previous.base_url.is_some(),
-            "Previous manifest has no base_url to locate its archives"
+            previous.base_url.as_deref().is_some_and(|url| Url::parse(url).is_ok()),
+            "Previous manifest has no absolute base_url to locate its archives"
         );
     }
 
@@ -1981,5 +1981,39 @@ mod tests {
         )
         .unwrap_err();
         assert!(err.to_string().contains("differs from the previous manifest"), "{err}");
+    }
+
+    #[test]
+    fn generate_manifest_rejects_previous_manifest_without_absolute_base_url() {
+        let source = snapshot_source();
+        write_test_static_files(source.path(), StaticFileSegment::Headers, 24);
+        let mut previous = generate_manifest(
+            source.path(),
+            tempdir().unwrap().path(),
+            Some("https://example.com/previous"),
+            24,
+            1,
+            10,
+            None,
+        )
+        .unwrap();
+
+        for base_url in [None, Some(""), Some("previous")] {
+            previous.base_url = base_url.map(str::to_owned);
+            let err = generate_manifest(
+                source.path(),
+                tempdir().unwrap().path(),
+                None,
+                24,
+                1,
+                10,
+                Some(&previous),
+            )
+            .unwrap_err();
+            assert_eq!(
+                err.to_string(),
+                "Previous manifest has no absolute base_url to locate its archives"
+            );
+        }
     }
 }
