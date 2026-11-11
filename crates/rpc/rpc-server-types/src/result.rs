@@ -23,7 +23,7 @@ pub trait ToRpcResult<Ok, Err>: Sized {
     /// Converts this type into an [`RpcResult`]
     fn map_rpc_err<'a, F, M>(self, op: F) -> RpcResult<Ok>
     where
-        F: FnOnce(Err) -> (i32, M, Option<&'a [u8]>),
+        F: FnOnce(Err) -> (i64, M, Option<&'a [u8]>),
         M: Into<String>;
 
     /// Converts this type into an [`RpcResult`] with the
@@ -54,7 +54,7 @@ macro_rules! impl_to_rpc_result {
             #[inline]
             fn map_rpc_err<'a, F, M>(self, op: F) -> RpcResult<Ok>
             where
-                F: FnOnce($err) -> (i32, M, Option<&'a [u8]>),
+                F: FnOnce($err) -> (i64, M, Option<&'a [u8]>),
                 M: Into<String>,
             {
                 match self {
@@ -154,7 +154,7 @@ pub fn rpc_err(code: impl Into<i64>, msg: impl Into<String>, data: Option<&[u8]>
 #[cfg(test)]
 mod tests {
     use super::*;
-    use reth_errors::{RethError, RethResult};
+    use reth_errors::{ProviderError, RethError, RethResult};
 
     const fn assert_rpc_result<T, E, TRR: ToRpcResult<T, E>>() {}
 
@@ -178,5 +178,16 @@ mod tests {
             let err = rpc_err(INTERNAL_ERROR_CODE, "test error", data);
             assert_eq!(err.data.as_deref().map(|data| data.get()), expected);
         }
+    }
+
+    #[test]
+    fn map_rpc_err_preserves_i64_codes() {
+        let code = i64::from(i32::MAX) + 1;
+        let error = Err::<(), _>(ProviderError::BestBlockNotFound)
+            .map_rpc_err(|_| (code, "custom error", None))
+            .unwrap_err();
+        assert_eq!(error.code, code);
+        assert_eq!(error.message, "custom error");
+        assert!(error.data.is_none());
     }
 }

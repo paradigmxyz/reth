@@ -21,11 +21,11 @@ const SERVER_ERROR_MSG: &str = "Server error";
 pub type EngineApiResult<Ok> = Result<Ok, EngineApiError>;
 
 /// Payload unsupported fork code.
-pub const UNSUPPORTED_FORK_CODE: i32 = -38005;
+pub const UNSUPPORTED_FORK_CODE: i64 = -38005;
 /// Payload unknown error code.
-pub const UNKNOWN_PAYLOAD_CODE: i32 = -38001;
+pub const UNKNOWN_PAYLOAD_CODE: i64 = -38001;
 /// Request too large error code.
-pub const REQUEST_TOO_LARGE_CODE: i32 = -38004;
+pub const REQUEST_TOO_LARGE_CODE: i64 = -38004;
 
 /// Error message for the request too large error.
 const REQUEST_TOO_LARGE_MESSAGE: &str = "Too large request";

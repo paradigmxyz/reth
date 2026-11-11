@@ -34,12 +34,9 @@ pub trait IntoEngineApiRpcModule {
     fn into_rpc_module(self) -> RpcModule<()>;
 }
 
-// NOTE: We can't use associated types in the `EngineApi` trait because of the `rpc` macro, so we
-// use a generic here. It would be nice if the rpc macro would understand which types need to have
-// serde. By default, if the trait has a generic, the rpc macro will add e.g. `Engine:
-// DeserializeOwned` to the trait bounds, which is not what we want, because `Types` is not used
-// directly in any of the trait methods. Instead, we have to add the bounds manually. This would be
-// disastrous if we had more than one associated type used in the trait methods.
+// The macro infers serde bounds for type parameters used directly in arguments or results.
+// The engine marker is only used through associated types, whose serde bounds come from
+// `EngineTypes` and the method-specific bounds below.
 
 #[rpc(server, namespace = "engine")]
 pub trait EngineApi<Engine: EngineTypes> {
