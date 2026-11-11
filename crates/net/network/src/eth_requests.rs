@@ -6,7 +6,7 @@ use crate::{
 };
 use alloy_consensus::{constants::KECCAK_EMPTY, BlockHeader, ReceiptWithBloom};
 use alloy_eips::BlockHashOrNumber;
-use alloy_primitives::{Bytes, B256};
+use alloy_primitives::{map::B256Set, Bytes, B256};
 use alloy_rlp::{length_of_length, Encodable};
 use futures::StreamExt;
 use reth_eth_wire::{
@@ -74,6 +74,9 @@ pub const MAX_BLOCK_ACCESS_LISTS_SERVE: usize = 1024;
 ///
 /// Used to limit lookups.
 pub const MAX_CELLS_SERVE: usize = 1024;
+
+/// Maximum number of blob transactions to serve cells for in a single request.
+pub const MAX_CELL_COMPUTATION_BUDGET: usize = 128;
 
 /// Maximum number of bytecode lookups to serve.
 ///
@@ -448,20 +451,46 @@ where
         request: GetCells,
         response: oneshot::Sender<RequestResult<Cells>>,
     ) {
+        if request.cell_mask.is_zero() || request.hashes.is_empty() {
+            let _ = response.send(Ok(Cells { cell_mask: request.cell_mask, ..Default::default() }));
+            return;
+        }
+
         let mut cells_response = Cells { cell_mask: request.cell_mask, ..Default::default() };
         let mut total_bytes = 0;
         let cell_mask = request.cell_mask();
+        let mut seen = B256Set::with_capacity_and_hasher(
+            request.hashes.len().min(MAX_CELLS_SERVE),
+            Default::default(),
+        );
 
         for hash in request.hashes.into_iter().take(MAX_CELLS_SERVE) {
+            if !seen.insert(hash) {
+                continue;
+            }
+
             let Some(cells) = self.blob_store.get_cells(hash, cell_mask).unwrap_or_default() else {
                 continue;
             };
 
-            total_bytes += hash.length() + cells.length();
+            let item_len = hash.length() + cells.length();
+            if cells_response.hashes.is_empty() {
+                let reserve = response_reserve_hint(
+                    seen.capacity(),
+                    item_len,
+                    MAX_CELL_COMPUTATION_BUDGET,
+                );
+                cells_response.hashes.reserve(reserve);
+                cells_response.cells.reserve(reserve);
+            }
+
+            total_bytes += item_len;
             cells_response.hashes.push(hash);
             cells_response.cells.push(cells);
 
-            if total_bytes > SOFT_RESPONSE_LIMIT {
+            if total_bytes > SOFT_RESPONSE_LIMIT
+                || cells_response.hashes.len() >= MAX_CELL_COMPUTATION_BUDGET
+            {
                 break
             }
         }
@@ -1269,7 +1298,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn get_cells_request_limits_blob_store_lookups() {
+    async fn get_cells_request_returns_early_on_empty_cell_mask() {
         let (_incoming_tx, incoming_rx) = mpsc::channel(1);
         let get_cells_calls = Arc::new(AtomicUsize::new(0));
         let blob_store = CountingBlobStore {
@@ -1280,13 +1309,88 @@ mod tests {
             .with_blob_store(Box::new(blob_store));
         let (response, rx) = oneshot::channel();
         let request =
-            GetCells { hashes: vec![B256::ZERO; MAX_CELLS_SERVE + 1], cell_mask: B128::default() };
+            GetCells { hashes: vec![B256::repeat_byte(1); 10], cell_mask: B128::ZERO };
+
+        handler.on_cells_request(PeerId::default(), request, response);
+
+        let cells = rx.await.unwrap().unwrap();
+        assert!(cells.hashes.is_empty());
+        assert!(cells.cells.is_empty());
+        assert_eq!(cells.cell_mask, B128::ZERO);
+        assert_eq!(get_cells_calls.load(Ordering::Relaxed), 0);
+    }
+
+    #[tokio::test]
+    async fn get_cells_request_deduplicates_duplicate_hashes() {
+        let (_incoming_tx, incoming_rx) = mpsc::channel(1);
+        let get_cells_calls = Arc::new(AtomicUsize::new(0));
+        let blob_store = CountingBlobStore {
+            get_cells_calls: Arc::clone(&get_cells_calls),
+            ..Default::default()
+        };
+        let handler = EthRequestHandler::<NoopProvider>::new(NoopProvider::default(), incoming_rx)
+            .with_blob_store(Box::new(blob_store));
+        let (response, rx) = oneshot::channel();
+        let request = GetCells {
+            hashes: vec![B256::repeat_byte(1); 10],
+            cell_mask: B128::repeat_byte(0xff),
+        };
+
+        handler.on_cells_request(PeerId::default(), request, response);
+
+        let cells = rx.await.unwrap().unwrap();
+        assert!(cells.hashes.is_empty());
+        assert_eq!(get_cells_calls.load(Ordering::Relaxed), 1);
+    }
+
+    #[tokio::test]
+    async fn get_cells_request_limits_blob_store_lookups() {
+        let (_incoming_tx, incoming_rx) = mpsc::channel(1);
+        let get_cells_calls = Arc::new(AtomicUsize::new(0));
+        let blob_store = CountingBlobStore {
+            get_cells_calls: Arc::clone(&get_cells_calls),
+            ..Default::default()
+        };
+        let handler = EthRequestHandler::<NoopProvider>::new(NoopProvider::default(), incoming_rx)
+            .with_blob_store(Box::new(blob_store));
+        let (response, rx) = oneshot::channel();
+        let request = GetCells {
+            hashes: (0..=MAX_CELLS_SERVE as u64).map(B256::from).collect(),
+            cell_mask: B128::repeat_byte(0xff),
+        };
 
         handler.on_cells_request(PeerId::default(), request, response);
 
         let cells = rx.await.unwrap().unwrap();
         assert!(cells.hashes.is_empty());
         assert_eq!(get_cells_calls.load(Ordering::Relaxed), MAX_CELLS_SERVE);
+    }
+
+    #[tokio::test]
+    async fn get_cells_request_bounds_computation_budget() {
+        let (_incoming_tx, incoming_rx) = mpsc::channel(1);
+        let get_cells_calls = Arc::new(AtomicUsize::new(0));
+        let request_mask = B128::repeat_byte(0xff);
+        let blob_store = CountingBlobStore {
+            get_cells_calls: Arc::clone(&get_cells_calls),
+            expected_cell_mask: Some(
+                GetCells { hashes: vec![], cell_mask: request_mask }.cell_mask(),
+            ),
+        };
+        let handler = EthRequestHandler::<NoopProvider>::new(NoopProvider::default(), incoming_rx)
+            .with_blob_store(Box::new(blob_store));
+        let (response, rx) = oneshot::channel();
+        let request = GetCells {
+            hashes: (0..200u64).map(B256::from).collect(),
+            cell_mask: request_mask,
+        };
+
+        handler.on_cells_request(PeerId::default(), request, response);
+
+        let cells = rx.await.unwrap().unwrap();
+        assert_eq!(cells.hashes.len(), MAX_CELL_COMPUTATION_BUDGET);
+        assert_eq!(cells.cells.len(), MAX_CELL_COMPUTATION_BUDGET);
+        assert_eq!(get_cells_calls.load(Ordering::Relaxed), MAX_CELL_COMPUTATION_BUDGET);
     }
 
     #[test_case(0)]
