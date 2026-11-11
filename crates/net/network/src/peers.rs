@@ -888,11 +888,15 @@ impl PeersManager {
                 };
 
                 // `Self::remove_peer` keeps a connected peer only until its session closes, like
-                // `Self::on_active_session_gracefully_closed` does.
-                remove_peer = matches!(
-                    peer.state,
-                    PeerConnectionState::DisconnectingIn | PeerConnectionState::DisconnectingOut
-                ) && !peer.is_trusted();
+                // `Self::on_active_session_gracefully_closed` does. A reputation ban also
+                // disconnects the peer, but doesn't mark it for removal.
+                remove_peer = peer.remove_after_disconnect &&
+                    matches!(
+                        peer.state,
+                        PeerConnectionState::DisconnectingIn |
+                            PeerConnectionState::DisconnectingOut
+                    ) &&
+                    !peer.is_trusted();
 
                 self.connection_info.decr_state(peer.state);
                 peer.state = PeerConnectionState::Idle;
@@ -1670,7 +1674,8 @@ mod tests {
     use reth_network_api::Direction;
     use reth_network_peers::{NodeRecord, PeerId, TrustedPeer};
     use reth_network_types::{
-        peers::reputation::DEFAULT_REPUTATION, BackoffKind, Peer, PeerKind, ReputationChangeKind,
+        peers::reputation::{BANNED_REPUTATION, DEFAULT_REPUTATION},
+        BackoffKind, Peer, PeerKind, ReputationChangeKind,
     };
     use std::{
         future::{poll_fn, Future},
@@ -2184,6 +2189,30 @@ mod tests {
         );
 
         assert!(!peers.peers.contains_key(&peer));
+        assert_eq!(peers.connection_info.num_outbound, 0);
+    }
+
+    #[tokio::test]
+    async fn test_keep_banned_static_peer_on_active_drop() {
+        let peer = PeerId::random();
+        let socket_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 1, 2)), 8008);
+        let mut peers = PeersManager::default();
+        peers.add_and_connect_kind(peer, PeerKind::Static, PeerAddr::from_tcp(socket_addr), None);
+        peers.on_active_outgoing_established(peer);
+
+        peers.peers.get_mut(&peer).unwrap().reputation = BANNED_REPUTATION;
+        peers.apply_reputation_change(&peer, ReputationChangeKind::BadMessage);
+        assert_eq!(peers.peers.get(&peer).unwrap().state, PeerConnectionState::DisconnectingOut);
+
+        peers.on_active_session_dropped(
+            &socket_addr,
+            &peer,
+            &EthStreamError::P2PStreamError(P2PStreamError::Disconnected(
+                DisconnectReason::TooManyPeers,
+            )),
+        );
+
+        assert_eq!(peers.peers.get(&peer).unwrap().state, PeerConnectionState::Idle);
         assert_eq!(peers.connection_info.num_outbound, 0);
     }
 
