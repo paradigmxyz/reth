@@ -2341,10 +2341,10 @@ impl PendingPoolImportsInfo {
         }
     }
 
-    /// Returns `true` if the number of pool imports is under a given tolerated max and their
-    /// encoded byte size is under the configured max.
-    pub fn has_capacity(&self, max_pending_pool_imports: usize) -> bool {
-        self.pending_pool_imports.load(Ordering::Relaxed) < max_pending_pool_imports &&
+    /// Returns `true` if the number of pool imports and their encoded byte size are both under
+    /// the configured max.
+    pub fn has_capacity(&self) -> bool {
+        self.pending_pool_imports.load(Ordering::Relaxed) < self.max_pending_pool_imports &&
             self.pending_pool_imports_bytes.load(Ordering::Relaxed) <
                 self.max_pending_pool_imports_bytes
     }
