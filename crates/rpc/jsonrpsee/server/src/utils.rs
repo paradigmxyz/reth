@@ -28,7 +28,7 @@ use std::{
     borrow::Cow,
     future::Future,
     io,
-    pin::Pin,
+    pin::{pin, Pin},
     sync::Arc,
     task::{Context, Poll},
     time::Duration,
@@ -47,6 +47,9 @@ use tower::{util::Oneshot, ServiceExt};
 
 /// Default for how long a connection may take to send its first request.
 pub(crate) const DEFAULT_FIRST_REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// How long an accept loop pauses after `accept` fails for a reason that outlasts the attempt.
+const ACCEPT_ERROR_BACKOFF: Duration = Duration::from_secs(1);
 
 /// Default timeout for writing a single message to a WebSocket connection, matching geth.
 pub(crate) const DEFAULT_WS_WRITE_TIMEOUT: Duration = Duration::from_secs(10);
@@ -210,10 +213,38 @@ fn reject_notification_id<'de, D: Deserializer<'de>>(_: D) -> Result<(), D::Erro
     Err(serde::de::Error::custom("notification must not contain an id"))
 }
 
+/// Pauses an accept loop after `accept` failed with `err`.
+///
+/// Errors that concern only the connection being accepted (refused, aborted or reset) return at
+/// once. Any other error, such as running out of file descriptors, persists and would make the
+/// loop spin, so it is followed by a [`ACCEPT_ERROR_BACKOFF`] sleep.
+///
+/// Returns the `stopped` future to keep polling, or `None` if it resolved during the sleep and
+/// the loop must exit.
+pub async fn accept_error_backoff<S>(err: &io::Error, stopped: S) -> Option<S>
+where
+    S: Future + Unpin,
+{
+    if matches!(
+        err.kind(),
+        io::ErrorKind::ConnectionRefused |
+            io::ErrorKind::ConnectionAborted |
+            io::ErrorKind::ConnectionReset
+    ) {
+        return Some(stopped);
+    }
+
+    match future::select(pin!(tokio::time::sleep(ACCEPT_ERROR_BACKOFF)), stopped).await {
+        future::Either::Left((_, stopped)) => Some(stopped),
+        future::Either::Right(_) => None,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use serde_json::value::RawValue;
+    use tokio::time::Instant;
 
     #[test]
     fn notification_id_classification_notification_metadata() {
@@ -233,5 +264,36 @@ mod tests {
             let raw = format!(r#"{{"jsonrpc":"2.0","method":"example","id":{id}}}"#);
             assert!(deserialize_notification::<Params>(raw.as_bytes()).is_err());
         }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn accept_error_backoff_skips_connection_errors() {
+        for kind in [
+            io::ErrorKind::ConnectionRefused,
+            io::ErrorKind::ConnectionAborted,
+            io::ErrorKind::ConnectionReset,
+        ] {
+            let start = Instant::now();
+            let stopped =
+                accept_error_backoff(&io::Error::from(kind), future::pending::<()>()).await;
+            assert!(stopped.is_some());
+            assert_eq!(start.elapsed(), Duration::ZERO);
+        }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn accept_error_backoff_sleeps_on_persistent_errors() {
+        let start = Instant::now();
+        let err = io::Error::other("too many open files");
+        assert!(accept_error_backoff(&err, future::pending::<()>()).await.is_some());
+        assert_eq!(start.elapsed(), ACCEPT_ERROR_BACKOFF);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn accept_error_backoff_observes_stop() {
+        let start = Instant::now();
+        let err = io::Error::other("out of descriptors");
+        assert!(accept_error_backoff(&err, future::ready(())).await.is_none());
+        assert_eq!(start.elapsed(), Duration::ZERO);
     }
 }

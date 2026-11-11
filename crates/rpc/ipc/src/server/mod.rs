@@ -13,9 +13,9 @@ use interprocess::local_socket::{
 use jsonrpsee::{
     core::TEN_MB_SIZE_BYTES,
     server::{
-        handle_rpc_call, middleware::rpc::RpcServiceT, stop_channel, BatchRequestConfig,
-        ConnectionGuard, ConnectionPermit, IdProvider, RandomIntegerIdProvider, ServerHandle,
-        StopHandle,
+        accept_error_backoff, handle_rpc_call, middleware::rpc::RpcServiceT, stop_channel,
+        BatchRequestConfig, ConnectionGuard, ConnectionPermit, IdProvider, RandomIntegerIdProvider,
+        ServerHandle, StopHandle,
     },
     types::{error::reject_too_big_request, Id},
     BoundedSubscriptions, MethodResponse, MethodSink, Methods,
@@ -232,6 +232,7 @@ where
                 }
                 AcceptConnection::Err((err, stop)) => {
                     tracing::error!(%err, "Failed accepting a new IPC connection");
+                    let Some(stop) = accept_error_backoff(&err, stop).await else { break };
                     stopped = stop;
                 }
             }

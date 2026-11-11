@@ -31,7 +31,7 @@ use crate::{
     middleware::rpc::{catch_call_panic, RpcService},
     transport::{http, ws, ws::BackgroundTaskParams},
     utils::{
-        deserialize_notification, no_request_within, NotifyOnRequest,
+        accept_error_backoff, deserialize_notification, no_request_within, NotifyOnRequest,
         DEFAULT_FIRST_REQUEST_TIMEOUT, DEFAULT_WS_WRITE_TIMEOUT,
     },
     HttpBody, HttpRequest, HttpResponse, LOG_TARGET,
@@ -164,6 +164,7 @@ where
                 }
                 AcceptConnection::Err((e, stop)) => {
                     tracing::debug!(target: LOG_TARGET, "Error while awaiting a new connection: {:?}", e);
+                    let Some(stop) = accept_error_backoff(&e, stop).await else { break };
                     stopped = stop;
                 }
                 AcceptConnection::Shutdown => break,
