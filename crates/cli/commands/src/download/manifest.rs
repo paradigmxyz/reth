@@ -537,7 +537,8 @@ impl ChunkedArchive {
         self.chunk_files.is_empty() || self.chunk_files.len() as u64 == self.num_chunks()
     }
 
-    /// Returns the archive path for chunk `index`, relative to the manifest base URL.
+    /// Returns the archive location for chunk `index`: a path relative to the manifest base URL,
+    /// or an absolute URL for an archive reused from a previous snapshot.
     ///
     /// Uses [`Self::chunk_files`] when it has exactly one entry per chunk; otherwise the
     /// default `{key}-{start}-{end}.tar.zst` name.
@@ -579,8 +580,13 @@ impl ChunkedArchive {
 ///
 /// Ensures directory semantics for `base_url` so the last path segment is not replaced when
 /// joining nested paths like `static_files/headers-0-499999.tar.zst`. Leading slashes on
-/// `relative_path` are stripped so publisher paths stay relative to the base prefix.
+/// `relative_path` are stripped so publisher paths stay relative to the base prefix. An absolute
+/// URL, such as an archive reused from a previous snapshot, is returned unchanged.
 fn resolve_archive_url(base_url: &str, relative_path: &str) -> String {
+    if Url::parse(relative_path).is_ok() {
+        return relative_path.to_string();
+    }
+
     let relative_path = relative_path.trim_start_matches('/');
 
     if base_url.is_empty() {
@@ -1776,6 +1782,14 @@ mod tests {
     }
 
     #[test]
+    fn resolve_archive_url_keeps_absolute_urls() {
+        let url = "https://example.com/previous/headers-0-9.tar.zst";
+        for base_url in ["", "https://example.com/mainnet", "not-a-url"] {
+            assert_eq!(resolve_archive_url(base_url, url), url, "base_url {base_url:?}");
+        }
+    }
+
+    #[test]
     fn mismatched_chunk_files_length_falls_back_to_default_names() {
         let mut components = BTreeMap::new();
         components.insert(
@@ -1947,6 +1961,32 @@ mod tests {
                 headers.chunk_sizes[index as usize]
             );
         }
+
+        // A later snapshot keeps pointing reused chunks at their original archives.
+        let mut manifest = manifest;
+        manifest.base_url = Some("https://example.com/current".to_string());
+        let next_source = snapshot_source();
+        write_test_static_files(next_source.path(), StaticFileSegment::Headers, 44);
+        let next = generate_manifest(
+            next_source.path(),
+            tempdir().unwrap().path(),
+            None,
+            44,
+            1,
+            10,
+            Some(&manifest),
+        )
+        .unwrap();
+        assert_eq!(
+            next.archive_urls(SnapshotComponentType::Headers),
+            vec![
+                "https://example.com/previous/headers-0-9.tar.zst",
+                "https://example.com/previous/headers-10-19.tar.zst",
+                "https://example.com/current/headers-20-29.tar.zst",
+                "headers-30-39.tar.zst",
+                "headers-40-49.tar.zst",
+            ]
+        );
     }
 
     #[test]
