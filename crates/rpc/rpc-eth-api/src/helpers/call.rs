@@ -246,6 +246,7 @@ pub trait EthCall: EstimateCall + LoadBlock + FullEthApiTypes {
                         chain_id,
                         simulation_state.as_mut(),
                         this.converter(),
+                        |call, db| this.simulate_call_nonce(call, db),
                     )
                     .map_err(map_err)?;
 
@@ -545,6 +546,18 @@ pub trait Call:
     /// Returns the maximum memory the EVM can allocate per RPC request.
     fn evm_memory_limit(&self) -> u64 {
         self.eth_api_settings().evm_memory_limit
+    }
+
+    /// Returns the nonce for an `eth_simulateV1` call that has none.
+    ///
+    /// `db` holds the simulation state before the call, including all earlier calls. `None` falls
+    /// back to the sender's account nonce, which suits networks with a single nonce per account.
+    fn simulate_call_nonce(
+        &self,
+        _request: &RpcTxReq<<Self::RpcConvert as RpcConvert>::Network>,
+        _db: &mut dyn DynDatabase,
+    ) -> Result<Option<u64>, EthApiError> {
+        Ok(None)
     }
 
     /// Returns the max gas limit that the caller can afford given a transaction environment.

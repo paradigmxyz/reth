@@ -43,8 +43,7 @@ pub enum TestingBuildBlockResponseV1 {
 ///
 /// **Warning:** Never expose this on public-facing RPC endpoints without proper
 /// authentication.
-#[cfg_attr(not(feature = "client"), rpc(server, namespace = "testing"))]
-#[cfg_attr(feature = "client", rpc(server, client, namespace = "testing"))]
+#[rpc(server, namespace = "testing")]
 pub trait TestingApi {
     /// Builds a block using the provided parent, payload attributes, and transactions.
     ///

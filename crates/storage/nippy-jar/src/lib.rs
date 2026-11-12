@@ -1300,4 +1300,25 @@ mod tests {
         .unwrap();
         assert_eq!(output, col1[5]);
     }
+
+    #[test]
+    fn test_writer_resumes_interrupted_creation() {
+        let file_path = tempfile::NamedTempFile::new().unwrap();
+        let path = file_path.path();
+
+        // Crash after creating the data and offsets files, before writing the offsets header.
+        std::fs::write(path, b"junk").unwrap();
+        std::fs::write(path.with_extension(OFFSETS_FILE_EXTENSION), b"").unwrap();
+        assert!(!path.with_extension(CONFIG_FILE_EXTENSION).exists());
+
+        let mut writer = NippyJarWriter::new(NippyJar::new_without_header(1, path)).unwrap();
+        writer.append_column(Some(Ok(&b"row"[..]))).unwrap();
+        writer.commit().unwrap();
+        drop(writer);
+
+        let jar = NippyJar::load_without_header(path).unwrap();
+        assert_eq!(jar.rows(), 1);
+        NippyJarChecker::new(jar).check_consistency().unwrap();
+        assert_eq!(std::fs::read(path).unwrap(), b"row");
+    }
 }
