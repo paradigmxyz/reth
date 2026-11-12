@@ -70,6 +70,14 @@ pub enum ECIESErrorImpl {
         /// The max body size
         max_body_size: usize,
     },
+    /// The outgoing frame body is too large for the frame header to describe.
+    #[error("frame body is {size} but the max is {max_size}")]
+    FrameTooLarge {
+        /// The size of the frame body
+        size: usize,
+        /// The max frame body size
+        max_size: usize,
+    },
     /// Error when trying to split an array beyond its length
     #[error("requested {idx} but array len is {len}")]
     OutOfBounds {

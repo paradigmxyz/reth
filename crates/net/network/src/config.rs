@@ -639,6 +639,9 @@ impl<N: NetworkPrimitives> NetworkConfigBuilder<N> {
     /// to [`MAX_PAYLOAD_SIZE`] (16 MiB, from EIP-706).
     ///
     /// The limit applies to every subprotocol, in both directions, and to the `p2p` handshake.
+    /// An `RLPx` frame carries less than 16 MiB of snappy-compressed data, so a larger value only
+    /// admits messages that compress below that. Sending a frame that does not fit closes the
+    /// session with an error.
     pub const fn p2p_max_payload_size(mut self, max_payload_size: usize) -> Self {
         self.p2p_max_payload_size = max_payload_size;
         self
