@@ -1008,6 +1008,22 @@ mod tests {
     }
 
     #[test]
+    fn request_pair_decode_rejects_string_header() {
+        // A request pair wrapped in a string header instead of a list header
+        //
+        // 82: start of string (80) + len(payload)
+        // 2d: 45 (request_id)
+        // c0: empty list (message)
+        let raw_pair = &hex!("822dc0")[..];
+
+        let result = RequestPair::<Vec<u8>>::decode(&mut &*raw_pair);
+        assert_eq!(result, Err(Error::UnexpectedString));
+
+        let result = RequestPair::decode_with(&mut &*raw_pair, Vec::<u8>::decode);
+        assert_eq!(result, Err(Error::UnexpectedString));
+    }
+
+    #[test]
     fn empty_block_bodies_protocol() {
         let empty_block_bodies =
             ProtocolMessage::from(EthMessage::<EthNetworkPrimitives>::BlockBodies(RequestPair {
@@ -1061,6 +1077,7 @@ mod tests {
         };
 
         let encoded = encode(protocol_message.clone());
+        assert_eq!(protocol_message.length(), encoded.len());
         let decoded = ProtocolMessage::<EthNetworkPrimitives>::decode_message(
             EthVersion::Eth68,
             &mut &encoded[..],
