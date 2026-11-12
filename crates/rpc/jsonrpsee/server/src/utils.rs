@@ -34,7 +34,7 @@ use std::{
     time::Duration,
 };
 
-use crate::{ConnectionState, HttpBody, HttpRequest};
+use crate::{ConnectionState, HttpBody};
 
 use futures_util::{future, ready};
 use hyper::body::{Bytes, Frame};
@@ -48,7 +48,6 @@ use tokio::{
     sync::Notify,
     time::Sleep,
 };
-use tower::{util::Oneshot, ServiceExt};
 
 /// Largest data frame [`PermitBody`] yields.
 const BODY_CHUNK_SIZE: usize = 64 * 1024;
@@ -62,52 +61,6 @@ const ACCEPT_ERROR_BACKOFF: Duration = Duration::from_secs(1);
 /// Default timeout for writing a single WebSocket message and for a stalled HTTP response write,
 /// matching geth.
 pub(crate) const DEFAULT_WRITE_TIMEOUT: Duration = Duration::from_secs(10);
-
-#[derive(Debug, Copy, Clone)]
-pub(crate) struct TowerToHyperService<S> {
-    service: S,
-}
-
-impl<S> TowerToHyperService<S> {
-    pub(crate) fn new(service: S) -> Self {
-        Self { service }
-    }
-}
-
-impl<S> hyper::service::Service<HttpRequest<hyper::body::Incoming>> for TowerToHyperService<S>
-where
-    S: tower::Service<HttpRequest> + Clone,
-{
-    type Response = S::Response;
-    type Error = S::Error;
-    type Future = TowerToHyperServiceFuture<S, HttpRequest>;
-
-    fn call(&self, req: HttpRequest<hyper::body::Incoming>) -> Self::Future {
-        let req = req.map(HttpBody::new);
-        TowerToHyperServiceFuture { future: self.service.clone().oneshot(req) }
-    }
-}
-
-#[pin_project]
-pub(crate) struct TowerToHyperServiceFuture<S, R>
-where
-    S: tower::Service<R>,
-{
-    #[pin]
-    future: Oneshot<S, R>,
-}
-
-impl<S, R> std::future::Future for TowerToHyperServiceFuture<S, R>
-where
-    S: tower::Service<R>,
-{
-    type Output = Result<S::Response, S::Error>;
-
-    #[inline]
-    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        self.project().future.poll(cx)
-    }
-}
 
 /// Notifies `request_received` whenever hyper passes a request to the service.
 #[derive(Debug, Clone)]

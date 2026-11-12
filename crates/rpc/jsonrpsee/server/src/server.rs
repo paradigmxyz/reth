@@ -44,8 +44,11 @@ use futures_util::{
     future::{Either, FutureExt},
     io::{BufReader, BufWriter},
 };
-use hyper::body::Bytes;
-use hyper_util::rt::{TokioExecutor, TokioIo};
+use hyper::body::{Bytes, Incoming};
+use hyper_util::{
+    rt::{TokioExecutor, TokioIo},
+    service::TowerToHyperService,
+};
 use jsonrpsee_core::{
     id_providers::RandomIntegerIdProvider,
     middleware::{Batch, BatchEntry, BatchEntryErr, RpcServiceBuilder, RpcServiceT},
@@ -76,7 +79,7 @@ use tokio::{
     sync::{mpsc, watch, Notify, OwnedSemaphorePermit},
 };
 use tokio_util::compat::TokioAsyncReadCompatExt;
-use tower::{layer::util::Identity, Layer, Service};
+use tower::{layer::util::Identity, Layer, Service, ServiceExt};
 use tracing::{instrument, Instrument};
 
 /// Default maximum connections allowed.
@@ -860,7 +863,9 @@ fn process_connection<RpcMiddleware, HttpMiddleware, Body>(
         let request_received = Arc::new(Notify::new());
         // this requires Clone.
         let service = NotifyOnRequest::new(
-            crate::utils::TowerToHyperService::new(service),
+            TowerToHyperService::new(
+                service.map_request(|request: HttpRequest<Incoming>| request.map(HttpBody::new)),
+            ),
             request_received.clone(),
         );
         let io = TokioIo::new(WriteTimeoutIo::new(socket, write_timeout));
