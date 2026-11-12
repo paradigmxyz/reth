@@ -14,8 +14,8 @@ use jsonrpsee::{
         JsonRawValue, TEN_MB_SIZE_BYTES,
     },
     server::{
-        middleware::rpc::RpcServiceT, stop_channel, ConnectionGuard, ConnectionPermit, IdProvider,
-        RandomIntegerIdProvider, ServerHandle, StopHandle,
+        middleware::rpc::RpcServiceT, stop_channel, ConnectionGuard, ConnectionId,
+        ConnectionPermit, IdProvider, RandomIntegerIdProvider, ServerHandle, StopHandle,
     },
     BoundedSubscriptions, MethodResponse, MethodSink, Methods,
 };
@@ -441,7 +441,10 @@ where
         let rpc_service = self.rpc_middleware.service(RpcService::new(
             self.inner.methods.clone(),
             max_response_body_size,
-            self.inner.conn_id.into(),
+            // IPC counts connections separately from the HTTP and WS server, which shares RPC
+            // handlers such as `eth_subscribe`'s per-connection state with it, so its IDs start
+            // from the top of the range to stay unique across transports.
+            ConnectionId(usize::MAX - self.inner.conn_id as usize),
             cfg,
         ));
         // an ipc connection needs to handle read+write concurrently

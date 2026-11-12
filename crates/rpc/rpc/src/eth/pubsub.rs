@@ -1,6 +1,10 @@
 //! `eth_` `PubSub` RPC handler implementation
 
-use std::sync::Arc;
+use std::{
+    collections::{hash_map::Entry, HashMap, VecDeque},
+    sync::Arc,
+    time::Duration,
+};
 
 use alloy_primitives::TxHash;
 use alloy_rpc_types_eth::{
@@ -11,8 +15,12 @@ use alloy_rpc_types_eth::{
 };
 use futures::StreamExt;
 use jsonrpsee::{
-    server::SubscriptionMessage, types::ErrorObject, PendingSubscriptionSink, SubscriptionSink,
+    core::server::TrySendError,
+    server::{ConnectionId, SubscriptionMessage},
+    types::ErrorObject,
+    PendingSubscriptionSink, SubscriptionSink,
 };
+use parking_lot::Mutex;
 use reth_chain_state::CanonStateSubscriptions;
 use reth_network_api::NetworkInfo;
 use reth_rpc_convert::RpcHeader;
@@ -29,7 +37,20 @@ use tokio_stream::{
     wrappers::{BroadcastStream, ReceiverStream},
     Stream,
 };
-use tracing::error;
+use tracing::{debug, error};
+
+/// Upper bound on the serialized notification bytes `eth_subscribe` may have queued, but not yet
+/// written, on a single connection.
+///
+/// jsonrpsee queues up to 1024 messages per connection whatever their size, so without this a
+/// client that stops reading makes the node retain up to 1024 full notifications per connection.
+const MAX_QUEUED_NOTIFICATION_BYTES_PER_CONNECTION: usize = 16 * 1024 * 1024;
+
+/// How long a subscription waits for its connection to drain before it is closed.
+const STALLED_SUBSCRIPTION_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// How often a subscription that is over its connection's budget checks whether it drained.
+const BACKLOG_POLL_INTERVAL: Duration = Duration::from_millis(50);
 
 /// `Eth` pubsub RPC implementation.
 ///
@@ -45,7 +66,7 @@ pub struct EthPubSub<Eth> {
 impl<Eth> EthPubSub<Eth> {
     /// Creates a new, shareable instance.
     pub fn new(eth_api: Eth, subscription_task_spawner: Runtime) -> Self {
-        let inner = EthPubSubInner { eth_api, subscription_task_spawner };
+        let inner = EthPubSubInner { eth_api, subscription_task_spawner, backlogs: Arc::default() };
         Self { inner: Arc::new(inner) }
     }
 }
@@ -91,7 +112,8 @@ where
         #[allow(unreachable_patterns)]
         match kind {
             SubscriptionKind::NewHeads => {
-                pipe_from_stream(accepted_sink, self.new_headers_stream()).await
+                pipe_from_stream(accepted_sink, self.new_headers_stream(), &self.inner.backlogs)
+                    .await
             }
             SubscriptionKind::Logs => {
                 // if no params are provided, used default filter params
@@ -102,7 +124,7 @@ where
                     }
                     _ => Default::default(),
                 };
-                pipe_from_stream(accepted_sink, self.log_stream(filter)).await
+                pipe_from_stream(accepted_sink, self.log_stream(filter), &self.inner.backlogs).await
             }
             SubscriptionKind::NewPendingTransactions => {
                 if let Some(params) = params {
@@ -127,7 +149,8 @@ where
                                 };
                                 std::future::ready(tx_value)
                             });
-                            return pipe_from_stream(accepted_sink, stream).await
+                            return pipe_from_stream(accepted_sink, stream, &self.inner.backlogs)
+                                .await
                         }
                         Params::Bool(false) | Params::None => {
                             // only hashes requested
@@ -140,7 +163,12 @@ where
                     }
                 }
 
-                pipe_from_stream(accepted_sink, self.pending_transaction_hashes_stream()).await
+                pipe_from_stream(
+                    accepted_sink,
+                    self.pending_transaction_hashes_stream(),
+                    &self.inner.backlogs,
+                )
+                .await
             }
             SubscriptionKind::Syncing => {
                 // get new block subscription
@@ -210,6 +238,7 @@ where
                 pipe_from_stream(
                     accepted_sink,
                     self.inner.eth_api.transaction_receipts_stream(filter),
+                    &self.inner.backlogs,
                 )
                 .await
             }
@@ -258,9 +287,32 @@ impl From<SubscriptionSerializeError> for ErrorObject<'static> {
 }
 
 /// Pipes all stream items to the subscription sink.
+///
+/// Items are only queued while the connection's queued notifications stay within
+/// [`MAX_QUEUED_NOTIFICATION_BYTES_PER_CONNECTION`], and the subscription is closed once its
+/// connection has not drained for [`STALLED_SUBSCRIPTION_TIMEOUT`].
 async fn pipe_from_stream<T, St>(
-    sink: SubscriptionSink,
+    mut sink: SubscriptionSink,
+    stream: St,
+    backlogs: &NotificationBacklogs,
+) -> Result<(), ErrorObject<'static>>
+where
+    St: Stream<Item = T> + Unpin,
+    T: Serialize,
+{
+    backlogs.register(sink.connection_id());
+    let res = pipe_from_stream_within_budget(&mut sink, stream, backlogs).await;
+    while !backlogs.unregister_if_drained(&sink) {
+        tokio::time::sleep(BACKLOG_POLL_INTERVAL).await;
+    }
+    res
+}
+
+/// The body of [`pipe_from_stream`], run while the subscription is registered in `backlogs`.
+async fn pipe_from_stream_within_budget<T, St>(
+    sink: &mut SubscriptionSink,
     mut stream: St,
+    backlogs: &NotificationBacklogs,
 ) -> Result<(), ErrorObject<'static>>
 where
     St: Stream<Item = T> + Unpin,
@@ -280,14 +332,32 @@ where
                         break  Ok(())
                     },
                 };
-                let msg = SubscriptionMessage::new(
-                    sink.method_name(),
-                    sink.subscription_id(),
-                    &item
-                ).map_err(SubscriptionSerializeError::new)?;
+                let json =
+                    serde_json::value::to_raw_value(&item).map_err(SubscriptionSerializeError::new)?;
+                let len = json.get().len();
+                let mut msg = SubscriptionMessage::from(json);
+                let deadline = tokio::time::Instant::now() + STALLED_SUBSCRIPTION_TIMEOUT;
 
-                if sink.send(msg).await.is_err() {
-                    break Ok(());
+                loop {
+                    match backlogs.try_send(sink, msg, len) {
+                        Ok(()) => break,
+                        Err(TrySendError::Full(unsent)) => msg = unsent,
+                        Err(TrySendError::Closed(_)) => return Ok(()),
+                    }
+
+                    if tokio::time::Instant::now() >= deadline {
+                        debug!(
+                            target: "rpc::eth",
+                            connection = sink.connection_id().0,
+                            "Closing subscription of a connection that stopped reading"
+                        );
+                        return Ok(())
+                    }
+
+                    tokio::select! {
+                        _ = sink.closed() => return Ok(()),
+                        _ = tokio::time::sleep(BACKLOG_POLL_INTERVAL) => {}
+                    }
                 }
             }
         }
@@ -307,6 +377,8 @@ struct EthPubSubInner<EthApi> {
     eth_api: EthApi,
     /// The type that's used to spawn subscription tasks.
     subscription_task_spawner: Runtime,
+    /// Notifications queued on each connection with active subscriptions.
+    backlogs: Arc<NotificationBacklogs>,
 }
 
 // == impl EthPubSubInner ===
@@ -350,5 +422,171 @@ where
         &self,
     ) -> impl Stream<Item = NewTransactionEvent<<Eth::Pool as TransactionPool>::Transaction>> {
         self.eth_api.pool().new_pending_pool_transactions_listener()
+    }
+}
+
+/// Sizes of the notifications `eth_subscribe` recently queued on each connection.
+#[derive(Debug, Default)]
+struct NotificationBacklogs {
+    connections: Mutex<HashMap<ConnectionId, NotificationBacklog>>,
+}
+
+impl NotificationBacklogs {
+    /// Records a subscription that sends on `conn_id`.
+    fn register(&self, conn_id: ConnectionId) {
+        self.connections.lock().entry(conn_id).or_default().subscriptions += 1;
+    }
+
+    /// Removes a subscription [`Self::register`] recorded on `sink`'s connection, unless it is
+    /// the connection's last one and notifications may still be queued on it.
+    ///
+    /// Keeping the last one until the queue drains, or the connection closes and drops it, stops a
+    /// client from resetting its budget by subscribing again. Returns whether it was removed.
+    fn unregister_if_drained(&self, sink: &SubscriptionSink) -> bool {
+        let mut connections = self.connections.lock();
+        let Entry::Occupied(mut entry) = connections.entry(sink.connection_id()) else {
+            return true
+        };
+        let backlog = entry.get_mut();
+        if backlog.subscriptions > 1 {
+            backlog.subscriptions -= 1;
+            return true
+        }
+        if backlog.retain_queued(sink.max_capacity() - sink.capacity()) > 0 {
+            return false
+        }
+        entry.remove();
+        true
+    }
+
+    /// Queues `msg`, `len` serialized bytes, on `sink` if the connection's queued notifications
+    /// stay within [`MAX_QUEUED_NOTIFICATION_BYTES_PER_CONNECTION`] or its queue is empty.
+    ///
+    /// Returns [`TrySendError::Full`] with the message when it doesn't fit yet.
+    fn try_send(
+        &self,
+        sink: &mut SubscriptionSink,
+        msg: SubscriptionMessage,
+        len: usize,
+    ) -> Result<(), TrySendError> {
+        let mut connections = self.connections.lock();
+        let backlog = connections.entry(sink.connection_id()).or_default();
+        let queued = backlog.retain_queued(sink.max_capacity() - sink.capacity());
+        if queued > 0 && queued + len > MAX_QUEUED_NOTIFICATION_BYTES_PER_CONNECTION {
+            return Err(TrySendError::Full(msg))
+        }
+
+        sink.try_send(msg)?;
+        backlog.push(len);
+        Ok(())
+    }
+}
+
+/// Notifications queued on one connection.
+#[derive(Debug, Default)]
+struct NotificationBacklog {
+    /// Subscriptions sending on the connection.
+    subscriptions: usize,
+    /// Serialized sizes of the most recently queued notifications, oldest first.
+    sizes: VecDeque<usize>,
+    /// Sum of `sizes`.
+    total: usize,
+}
+
+impl NotificationBacklog {
+    /// Forgets notifications that can no longer be queued, given `queued` messages in the
+    /// connection's queue, and returns an upper bound on the queued notification bytes.
+    ///
+    /// The queue is FIFO and shared with ordinary responses, so any notification still in it is
+    /// among the last `queued` ones sent. The message the connection is writing is not counted.
+    fn retain_queued(&mut self, queued: usize) -> usize {
+        while self.sizes.len() > queued {
+            self.total -= self.sizes.pop_front().unwrap_or_default();
+        }
+        self.total
+    }
+
+    /// Records a notification of `len` serialized bytes that was queued.
+    fn push(&mut self, len: usize) {
+        self.sizes.push_back(len);
+        self.total += len;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use jsonrpsee::{rpc_params, RpcModule};
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    const ITEM_LEN: usize = 1024 * 1024;
+    const ITEMS: usize = 64;
+
+    /// A module whose subscription pipes [`ITEMS`] strings of [`ITEM_LEN`] bytes through
+    /// `backlogs`, counting the items it takes from the stream in `yielded`.
+    fn large_items_module(
+        yielded: Arc<AtomicUsize>,
+        backlogs: Arc<NotificationBacklogs>,
+    ) -> RpcModule<()> {
+        let mut module = RpcModule::new(());
+        module
+            .register_subscription("sub", "notif", "unsub", move |_, pending, _, _| {
+                let yielded = yielded.clone();
+                let backlogs = backlogs.clone();
+                async move {
+                    let sink = pending.accept().await.unwrap();
+                    let stream = futures::stream::iter(0..ITEMS).map(move |_| {
+                        yielded.fetch_add(1, Ordering::Relaxed);
+                        "a".repeat(ITEM_LEN)
+                    });
+                    pipe_from_stream(sink, stream, &backlogs).await.unwrap();
+                }
+            })
+            .unwrap();
+        module
+    }
+
+    #[tokio::test]
+    async fn unread_subscription_stops_at_byte_budget() {
+        let yielded = Arc::new(AtomicUsize::new(0));
+        let module = large_items_module(yielded.clone(), Arc::default());
+        let _sub = module.subscribe("sub", rpc_params![], 1024).await.unwrap();
+
+        tokio::time::sleep(Duration::from_millis(500)).await;
+
+        // The notifications that fit in the budget are queued, and one more waits for room.
+        let serialized_len = ITEM_LEN + 2;
+        let expected = MAX_QUEUED_NOTIFICATION_BYTES_PER_CONNECTION / serialized_len + 1;
+        assert_eq!(yielded.load(Ordering::Relaxed), expected);
+    }
+
+    #[tokio::test]
+    async fn reading_subscription_receives_every_item() {
+        let module = large_items_module(Arc::default(), Arc::default());
+        let mut sub = module.subscribe("sub", rpc_params![], 1024).await.unwrap();
+
+        for _ in 0..ITEMS {
+            let (item, _) = sub.next::<String>().await.unwrap().unwrap();
+            assert_eq!(item.len(), ITEM_LEN);
+        }
+    }
+
+    #[tokio::test]
+    async fn closed_connection_releases_backlog() {
+        let backlogs = Arc::new(NotificationBacklogs::default());
+        let module = large_items_module(Arc::default(), backlogs.clone());
+        let sub = module.subscribe("sub", rpc_params![], 1024).await.unwrap();
+        tokio::time::sleep(Duration::from_millis(500)).await;
+        assert_eq!(backlogs.connections.lock().len(), 1);
+
+        drop(sub);
+
+        tokio::time::timeout(Duration::from_secs(5), async {
+            while !backlogs.connections.lock().is_empty() {
+                tokio::time::sleep(BACKLOG_POLL_INTERVAL).await;
+            }
+        })
+        .await
+        .unwrap();
     }
 }
