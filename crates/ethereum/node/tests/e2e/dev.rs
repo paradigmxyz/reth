@@ -25,9 +25,9 @@ async fn can_run_dev_node() -> eyre::Result<()> {
         .await?;
     let node = &node.inner;
 
-    let canon_state = node.provider.canonical_in_memory_state();
-    let mut safe_block = canon_state.subscribe_safe_block();
-    let mut finalized_block = canon_state.subscribe_finalized_block();
+    let canonical_in_memory_state = node.provider.canonical_in_memory_state();
+    let mut safe_block = canonical_in_memory_state.subscribe_safe_block();
+    let mut finalized_block = canonical_in_memory_state.subscribe_finalized_block();
 
     assert_chain_advances(node).await;
 

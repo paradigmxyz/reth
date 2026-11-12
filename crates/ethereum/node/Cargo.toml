@@ -69,12 +69,15 @@ serde_json.workspace = true
 tower.workspace = true
 
 [dev-dependencies]
+reth-chain-state.workspace = true
 reth-db.workspace = true
+reth-db-common.workspace = true
 reth-exex.workspace = true
 reth-e2e-test-utils.workspace = true
 reth-tasks.workspace = true
 reth-testing-utils.workspace = true
 reth-stages-types.workspace = true
+reth-storage-overlay.workspace = true
 tempfile.workspace = true
 jsonrpsee-core.workspace = true
 
@@ -141,4 +144,5 @@ test-utils = [
     "reth-stages-types/test-utils",
     "reth-tasks/test-utils",
     "reth-trie-common/test-utils",
+    "reth-chain-state/test-utils",
 ]

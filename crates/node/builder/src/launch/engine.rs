@@ -11,7 +11,7 @@ use crate::{
 };
 use alloy_consensus::BlockHeader;
 use futures::{stream::FusedStream, stream_select, FutureExt, StreamExt};
-use reth_chain_state::CanonicalInMemoryState;
+use reth_chain_state::InMemoryState;
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_db::{database_metrics::DatabaseMetrics, Database};
 use reth_engine_tree::{
@@ -93,13 +93,12 @@ impl EngineNodeLauncher {
         } = target;
         let NodeHooks { on_component_initialized, on_node_started, .. } = hooks;
 
-        // Create the node's in-memory state and the overlay manager that shares it with the
-        // blockchain provider and the engine tree, which read it from the manager. Its chain info
-        // is initialized below, once the database is consistent and genesis is initialized.
-        let in_memory_state = CanonicalInMemoryState::<N::Primitives>::empty();
-        let overlay_manager = OverlayManager::new(
+        // The in-memory blocks of the node: the overlay manager and the provider factory read
+        // them, the engine writes them.
+        let (in_memory_state, in_memory_state_writer) = InMemoryState::<N::Primitives>::new();
+        let overlay_manager = OverlayManager::with_worker_pool(
+            in_memory_state,
             ctx.task_executor.state_trie_overlay_worker_pool(),
-            in_memory_state.clone(),
         );
         let disabled_stages = N::disabled_stages();
 
@@ -140,13 +139,8 @@ impl EngineNodeLauncher {
             // passing FullNodeTypes as type parameter here so that we can build
             // later the components.
             .with_blockchain_db::<T, _>(move |provider_factory| {
-                // Initialize the chain info of the node's in-memory state once, from the database
-                // that the provider factory already checked and unwound, and before anything reads
-                // it. The engine maintains it from here on.
-                let (latest, finalized, safe) =
-                    BlockchainProvider::head_markers_from_database(&provider_factory)?;
-                in_memory_state.set_head_markers(latest, finalized, safe);
-                Ok(BlockchainProvider::new(provider_factory)?)
+                let chain_info_headers = provider_factory.chain_info_headers()?;
+                Ok(BlockchainProvider::new(provider_factory, chain_info_headers))
             })?
             .with_components(components_builder, on_component_initialized).await?;
 
@@ -268,6 +262,7 @@ impl EngineNodeLauncher {
             pruner,
             payload_builder: ctx.components().payload_builder_handle().clone(),
             payload_validator: engine_validator,
+            in_memory_state_writer,
             overlay_manager,
             tree_config: engine_tree_config,
             sync_metrics_tx: ctx.sync_metrics_tx(),

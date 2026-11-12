@@ -162,8 +162,6 @@ pub struct EngineMetrics {
     /// Engine API newPayload response type metrics
     #[metric(skip)]
     pub(crate) new_payload: NewPayloadStatusMetrics,
-    /// How many executed blocks are currently stored.
-    pub(crate) executed_blocks: Gauge,
     /// How many already executed blocks were directly inserted into the tree.
     pub(crate) inserted_already_executed_blocks: Counter,
     /// The number of times the pipeline was run.

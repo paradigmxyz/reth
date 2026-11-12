@@ -573,13 +573,21 @@ mod tests {
     use alloy_eips::BlockNumHash;
     use eyre::OptionExt;
     use futures::StreamExt;
+    use reth_chain_state::{
+        CanonicalInMemoryStateWriter, ExecutedBlock, InMemoryCanonicalBlocksRemoval,
+        NewCanonicalChain,
+    };
+    use reth_chainspec::MAINNET;
     use reth_db_common::init::init_genesis;
     use reth_ethereum_primitives::Block;
     use reth_evm_ethereum::EthEvmConfig;
     use reth_primitives_traits::Block as _;
     use reth_provider::{
-        providers::BlockchainProvider, test_utils::create_test_provider_factory, BlockWriter,
-        Chain, DBProvider, DatabaseProviderFactory,
+        providers::BlockchainProvider,
+        test_utils::{
+            create_test_provider_factory, create_test_provider_factory_with_in_memory_state_writer,
+        },
+        BlockWriter, Chain, DBProvider, DatabaseProviderFactory,
     };
     use reth_testing_utils::generators::{self, random_block, BlockParams};
     use std::collections::BTreeMap;
@@ -598,7 +606,8 @@ mod tests {
             .block(genesis_hash.into())?
             .ok_or_else(|| eyre::eyre!("genesis block not found"))?;
 
-        let provider = BlockchainProvider::new(provider_factory.clone())?;
+        let chain_info_headers = provider_factory.chain_info_headers()?;
+        let provider = BlockchainProvider::new(provider_factory.clone(), chain_info_headers);
 
         let node_head_block = random_block(
             &mut rng,
@@ -668,12 +677,18 @@ mod tests {
         let temp_dir = tempfile::tempdir().unwrap();
         let wal = Wal::new(temp_dir.path()).unwrap();
 
-        let provider_factory = create_test_provider_factory();
+        let (provider_factory, in_memory_state_writer) =
+            create_test_provider_factory_with_in_memory_state_writer(MAINNET.clone());
         let genesis_hash = init_genesis(&provider_factory)?;
         let genesis_block = provider_factory
             .block(genesis_hash.into())?
             .ok_or_else(|| eyre::eyre!("genesis block not found"))?;
-        let provider = BlockchainProvider::new(provider_factory.clone())?;
+        let chain_info_headers = provider_factory.chain_info_headers()?;
+        let provider = BlockchainProvider::new(provider_factory.clone(), chain_info_headers);
+        let mut canonical_in_memory_state_writer = CanonicalInMemoryStateWriter::new(
+            provider.canonical_in_memory_state(),
+            in_memory_state_writer,
+        );
 
         let exex_head =
             ExExHead { block: BlockNumHash { number: genesis_block.number, hash: genesis_hash } };
@@ -708,14 +723,22 @@ mod tests {
         notifications_tx.send(block_1_notification.clone()).await?;
         assert_eq!(notifications.next().await.transpose()?, Some(block_1_notification));
 
-        // Meanwhile the node commits block 1 and advances its canonical head past the
-        // launch-time head.
+        // Meanwhile the node makes block 1 canonical, which advances its canonical head past the
+        // launch-time head, and persists it.
+        canonical_in_memory_state_writer.update_chain(NewCanonicalChain::Commit {
+            new: vec![ExecutedBlock {
+                recovered_block: Arc::new(node_head_block.clone()),
+                ..Default::default()
+            }],
+        });
         let provider_rw = provider_factory.provider_rw()?;
         provider_rw.insert_block(&node_head_block)?;
         provider_rw.commit()?;
-        provider
-            .canonical_in_memory_state()
-            .set_canonical_head(node_head_block.clone_sealed_header());
+        assert_eq!(
+            canonical_in_memory_state_writer
+                .remove_canonical_until(node_head.hash, node_head.number),
+            InMemoryCanonicalBlocksRemoval::Removed(1)
+        );
 
         // The ExEx recovers still at genesis and catches up, it needs block 1 again, but that
         // notification is long gone from the channel.
@@ -764,7 +787,8 @@ mod tests {
             .block(genesis_hash.into())?
             .ok_or_else(|| eyre::eyre!("genesis block not found"))?;
 
-        let provider = BlockchainProvider::new(provider_factory)?;
+        let chain_info_headers = provider_factory.chain_info_headers()?;
+        let provider = BlockchainProvider::new(provider_factory, chain_info_headers);
 
         let node_head = BlockNumHash { number: genesis_block.number, hash: genesis_hash };
         let exex_head = ExExHead { block: node_head };
@@ -818,7 +842,8 @@ mod tests {
             .block(genesis_hash.into())?
             .ok_or_else(|| eyre::eyre!("genesis block not found"))?;
 
-        let provider = BlockchainProvider::new(provider_factory)?;
+        let chain_info_headers = provider_factory.chain_info_headers()?;
+        let provider = BlockchainProvider::new(provider_factory, chain_info_headers);
 
         let node_head_block = random_block(
             &mut rng,
@@ -909,7 +934,8 @@ mod tests {
             .block(genesis_hash.into())?
             .ok_or_else(|| eyre::eyre!("genesis block not found"))?;
 
-        let provider = BlockchainProvider::new(provider_factory)?;
+        let chain_info_headers = provider_factory.chain_info_headers()?;
+        let provider = BlockchainProvider::new(provider_factory, chain_info_headers);
 
         let exex_head_block = random_block(
             &mut rng,
@@ -994,7 +1020,8 @@ mod tests {
             .block(genesis_hash.into())?
             .ok_or_else(|| eyre::eyre!("genesis block not found"))?;
 
-        let provider = BlockchainProvider::new(provider_factory.clone())?;
+        let chain_info_headers = provider_factory.chain_info_headers()?;
+        let provider = BlockchainProvider::new(provider_factory.clone(), chain_info_headers);
 
         // Insert block 1 into the DB so there's something to backfill
         let node_head_block = random_block(

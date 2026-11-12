@@ -1,4 +1,5 @@
 use alloy_primitives::{keccak256, Address, BlockNumber, TxHash, TxNumber, B256};
+use reth_chain_state::InMemoryState;
 use reth_chainspec::MAINNET;
 use reth_db::{
     test_utils::{
@@ -29,6 +30,7 @@ use reth_provider::{
 };
 use reth_static_file_types::StaticFileSegment;
 use reth_storage_errors::provider::ProviderResult;
+use reth_storage_overlay::OverlayManager;
 use reth_testing_utils::generators::ChangeSet;
 use std::{collections::BTreeMap, fmt::Debug, path::Path};
 use tempfile::TempDir;
@@ -54,6 +56,7 @@ impl Default for TestStageDB {
                 MAINNET.clone(),
                 StaticFileProvider::read_write(static_dir_path).unwrap(),
                 RocksDBProvider::builder(rocksdb_dir_path).with_default_tables().build().unwrap(),
+                OverlayManager::new(InMemoryState::read_only()),
                 reth_tasks::Runtime::test(),
             )
             .expect("failed to create test provider factory"),
@@ -74,6 +77,7 @@ impl TestStageDB {
                 MAINNET.clone(),
                 StaticFileProvider::read_write(static_dir_path).unwrap(),
                 RocksDBProvider::builder(rocksdb_dir_path).with_default_tables().build().unwrap(),
+                OverlayManager::new(InMemoryState::read_only()),
                 reth_tasks::Runtime::test(),
             )
             .expect("failed to create test provider factory"),

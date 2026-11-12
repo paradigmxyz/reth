@@ -6,6 +6,7 @@ use jsonrpsee::{
     core::client::{Subscription, SubscriptionClientT},
     server::ServerConfigBuilder,
 };
+use reth_chain_state::ChainInfoHeaders;
 use reth_consensus::noop::NoopConsensus;
 use reth_evm_ethereum::EthEvmConfig;
 use reth_network_api::noop::NoopNetwork;
@@ -41,9 +42,10 @@ async fn launch_ws_eth() -> reth_rpc_builder::RpcServerHandle {
 async fn launch_ws_eth_with_canon_state(
     max_subscriptions_per_connection: u32,
 ) -> reth_rpc_builder::RpcServerHandle {
-    let provider =
-        BlockchainProvider::with_latest(create_test_provider_factory(), SealedHeader::default())
-            .unwrap();
+    let provider = BlockchainProvider::new(
+        create_test_provider_factory(),
+        ChainInfoHeaders { canonical_head: SealedHeader::default(), safe: None, finalized: None },
+    );
     let pool: TestPool = TestPoolBuilder::default().into();
     let builder = RpcModuleBuilder::default()
         .with_provider(provider)

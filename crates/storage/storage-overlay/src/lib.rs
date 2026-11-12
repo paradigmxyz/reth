@@ -8,6 +8,9 @@ pub use builder::*;
 mod changeset_cache;
 pub(crate) use changeset_cache::ChangesetCache;
 
+mod error;
+pub use error::OverlayError;
+
 mod manager;
 pub use manager::*;
 
@@ -15,3 +18,6 @@ mod manager_metrics;
 
 mod provider;
 pub use provider::*;
+
+#[cfg(test)]
+mod test_utils;

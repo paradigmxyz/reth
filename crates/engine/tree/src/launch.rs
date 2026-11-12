@@ -13,6 +13,7 @@ use crate::{
     tree::{EngineApiTreeHandler, EngineValidator, TreeConfig, WaitForCaches},
 };
 use futures::Stream;
+use reth_chain_state::InMemoryStateWriter;
 use reth_consensus::FullConsensus;
 use reth_engine_primitives::BeaconEngineMessage;
 use reth_evm::ConfigureEvm;
@@ -76,19 +77,27 @@ where
     pub pipeline_task_spawner: Runtime,
     /// Provider factory handed to the persistence service.
     pub provider: ProviderFactory<N>,
-    /// Blockchain provider backing the engine tree.
+    /// Blockchain provider backing the engine tree. The engine advances its canonical chain
+    /// tracking.
     ///
-    /// It must use the in-memory state of `overlay_manager`, as providers built from a
-    /// [`ProviderFactory`] with that overlay manager do.
+    /// It must read the in-memory state that `in_memory_state_writer` writes to, otherwise
+    /// [`Self::build`] panics.
     pub blockchain_db: BlockchainProvider<N>,
+    /// Write access to the in-memory blocks.
+    ///
+    /// `blockchain_db` and `overlay_manager` must read the in-memory state it writes to,
+    /// otherwise [`Self::build`] panics.
+    pub in_memory_state_writer: InMemoryStateWriter<N::Primitives>,
     /// Pruner run by the persistence service.
     pub pruner: PrunerWithFactory<ProviderFactory<N>>,
     /// Handle to the payload builder service.
     pub payload_builder: PayloadBuilderHandle<N::Payload>,
     /// Validator for incoming payloads.
     pub payload_validator: V,
-    /// Overlay manager for state on top of the database, which holds the node's in-memory state
-    /// the engine tracks executed blocks in.
+    /// Overlay manager the engine builds state overlays with.
+    ///
+    /// It must read the in-memory state that `in_memory_state_writer` writes to, otherwise
+    /// [`Self::build`] panics.
     pub overlay_manager: OverlayManager<N::Primitives>,
     /// Engine tree configuration.
     pub tree_config: TreeConfig,
@@ -111,6 +120,13 @@ where
     C: ConfigureEvm<Primitives = N::Primitives> + 'static,
 {
     /// Spawns the engine services and returns the [`ChainOrchestrator`] driving them.
+    ///
+    /// # Panics
+    ///
+    /// - If `blockchain_db` or `overlay_manager` do not read the in-memory state that
+    ///   `in_memory_state_writer` writes to.
+    /// - If the in-memory state has canonical blocks and the highest of them is not the canonical
+    ///   head of `blockchain_db`.
     pub fn build(
         self,
     ) -> EngineOrchestrator<N::Payload, N::Primitives, Client, S, PipelineSync<N>> {
@@ -123,6 +139,7 @@ where
             pipeline_task_spawner,
             provider,
             blockchain_db,
+            in_memory_state_writer,
             pruner,
             payload_builder,
             payload_validator,
@@ -133,24 +150,20 @@ where
             runtime,
         } = self;
 
-        // The engine tracks the executed blocks in the overlay manager's in-memory state, which the
-        // provider serves them from.
-        assert!(
-            blockchain_db.canonical_in_memory_state().ptr_eq(overlay_manager.in_memory_state()),
-            "the blockchain provider and the overlay manager must share the node's in-memory state"
-        );
-
         let downloader = BasicBlockDownloader::new(client, consensus.clone());
 
         let persistence_handle =
             PersistenceHandle::<N::Primitives>::spawn_service(provider, pruner, sync_metrics_tx);
 
+        let canonical_in_memory_state = blockchain_db.canonical_in_memory_state();
         let (to_tree_tx, from_tree) = EngineApiTreeHandler::spawn_new(
             blockchain_db,
             consensus,
             payload_validator,
             persistence_handle,
             payload_builder,
+            canonical_in_memory_state,
+            in_memory_state_writer,
             overlay_manager,
             tree_config,
             engine_kind,

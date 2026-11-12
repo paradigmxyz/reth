@@ -141,7 +141,8 @@ impl Command {
         block: BlockNumber,
         limit: usize,
     ) -> eyre::Result<()> {
-        let provider = BlockchainProvider::new(tool.provider_factory.clone())?
+        let chain_info_headers = tool.provider_factory.chain_info_headers()?;
+        let provider = BlockchainProvider::new(tool.provider_factory.clone(), chain_info_headers)
             .history_by_block_number(block)?;
 
         // Get account info at that block

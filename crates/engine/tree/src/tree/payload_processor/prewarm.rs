@@ -788,6 +788,7 @@ mod tests {
     use alloy_eip7928::{AccountChanges, BalanceChange, BlockAccessIndex};
     use alloy_eips::eip7702::constants::EIP7702_CLEARED_DELEGATION;
     use alloy_primitives::{address, B256, U256};
+    use reth_chain_state::InMemoryState;
     use reth_chainspec::ChainSpec;
     use reth_ethereum_primitives::{EthPrimitives, TransactionSigned};
     use reth_evm::{execute::WithTxEnv, TxEnvFor};
@@ -805,7 +806,7 @@ mod tests {
             saved_cache: None,
             provider: OverlayStateProviderFactory::new(
                 MockEthProvider::default(),
-                OverlayManager::default().overlay_builder(B256::ZERO),
+                OverlayManager::new(InMemoryState::read_only()).overlay_builder(B256::ZERO),
             ),
             bal_prewarm_pool: None,
             metrics: PrewarmMetrics::default(),
@@ -845,7 +846,7 @@ mod tests {
             saved_cache: Some(saved_cache),
             provider: OverlayStateProviderFactory::new(
                 MockEthProvider::default(),
-                OverlayManager::default().overlay_builder(B256::ZERO),
+                OverlayManager::new(InMemoryState::read_only()).overlay_builder(B256::ZERO),
             ),
             bal_prewarm_pool: None,
             metrics: PrewarmMetrics {

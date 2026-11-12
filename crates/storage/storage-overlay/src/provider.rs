@@ -123,6 +123,14 @@ where
 }
 
 /// State provider with lazily resolved state trie and execution overlays.
+///
+/// # Errors
+///
+/// The overlays are built from in-memory blocks by the first read that needs them. A read whose
+/// overlay cannot be built returns the [`OverlayError`] as [`ProviderError::Other`], and
+/// [`ProviderError::downcast_other_ref`] returns it.
+///
+/// [`OverlayError`]: crate::OverlayError
 pub struct OverlayStateProvider<Provider, N: NodePrimitives = EthPrimitives> {
     provider: Provider,
     overlay_builder: Option<OverlayBuilder<N>>,
@@ -1027,10 +1035,12 @@ fn into_database_error(error: ProviderError) -> DatabaseError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{ExecutionOverlay, OverlayManager};
+    use crate::{test_utils::overlay_manager_with_writer, ExecutionOverlay, OverlayManager};
     use alloy_eips::BlockNumHash;
     use alloy_primitives::{Address, U256};
-    use reth_chain_state::{test_utils::TestBlockBuilder, ExecutedBlock};
+    use reth_chain_state::{
+        test_utils::TestBlockBuilder, ExecutedBlock, InMemoryState, InMemoryStateBlockCounts,
+    };
     use reth_db_api::{
         models::{
             storage_sharded_key::StorageShardedKey, AccountBeforeTx, BlockNumberAddress, ShardedKey,
@@ -1123,9 +1133,9 @@ mod tests {
     #[test]
     fn overlay_cache_is_keyed_by_both_durable_frontiers() {
         let (factory, blocks) = setup_frontiers(1, 3);
-        let manager = OverlayManager::default();
+        let (manager, mut in_memory_state_writer) = overlay_manager_with_writer();
         for block in &blocks[2..=3] {
-            manager.in_memory_state().writer().insert_executed(block.clone());
+            in_memory_state_writer.insert_executed(block.clone());
         }
         let state_provider_factory = OverlayStateProviderFactory::new(
             factory.clone(),
@@ -1158,9 +1168,9 @@ mod tests {
     #[test]
     fn overlays_are_computed_lazily() {
         let (factory, blocks) = setup_frontiers(1, 3);
-        let manager = OverlayManager::default();
+        let (manager, mut in_memory_state_writer) = overlay_manager_with_writer();
         for block in &blocks[2..=3] {
-            manager.in_memory_state().writer().insert_executed(block.clone());
+            in_memory_state_writer.insert_executed(block.clone());
         }
         let state_provider_factory = OverlayStateProviderFactory::new(
             factory,
@@ -1185,9 +1195,9 @@ mod tests {
     #[test]
     fn state_trie_overlay_cache_is_keyed_by_trie_changesets() {
         let (factory, blocks) = setup_frontiers(1, 3);
-        let manager = OverlayManager::default();
+        let (manager, mut in_memory_state_writer) = overlay_manager_with_writer();
         for block in &blocks[2..=3] {
-            manager.in_memory_state().writer().insert_executed(block.clone());
+            in_memory_state_writer.insert_executed(block.clone());
         }
         let state_provider_factory = OverlayStateProviderFactory::new(
             factory,
@@ -1218,9 +1228,9 @@ mod tests {
     #[test]
     fn lazy_overlays_survive_manager_block_removal() {
         let (factory, blocks) = setup_frontiers(1, 1);
-        let manager = OverlayManager::default();
+        let (manager, mut in_memory_state_writer) = overlay_manager_with_writer();
         for block in &blocks[2..=3] {
-            manager.in_memory_state().writer().insert_executed(block.clone());
+            in_memory_state_writer.insert_executed(block.clone());
         }
         let state_provider_factory = OverlayStateProviderFactory::new(
             factory,
@@ -1228,8 +1238,10 @@ mod tests {
         );
         let provider = state_provider_factory.database_provider_ro().unwrap();
 
-        manager.in_memory_state().writer().clear_state();
-        manager.prune_unreachable_overlays();
+        let block_counts = || manager.in_memory_state().block_counts();
+        assert_eq!(block_counts(), InMemoryStateBlockCounts { canonical: 0, non_canonical: 2 });
+        in_memory_state_writer.clear();
+        assert_eq!(block_counts(), InMemoryStateBlockCounts { canonical: 0, non_canonical: 0 });
 
         let (execution_overlay, _) = provider.execution_overlay().unwrap();
         assert_eq!(
@@ -1245,8 +1257,8 @@ mod tests {
     #[test]
     fn skipped_state_trie_overlay_is_not_cached_or_used_for_state_roots() {
         let (factory, blocks) = setup_frontiers(3, 3);
-        let manager = OverlayManager::default();
-        manager.in_memory_state().writer().insert_executed(blocks[4].clone());
+        let (manager, mut in_memory_state_writer) = overlay_manager_with_writer();
+        in_memory_state_writer.insert_executed(blocks[4].clone());
         let state_provider_factory = OverlayStateProviderFactory::new(
             factory,
             manager
@@ -1359,7 +1371,8 @@ mod tests {
 
         let state_provider_factory = OverlayStateProviderFactory::<_, EthPrimitives>::new(
             factory,
-            OverlayManager::default().overlay_builder(blocks[1].recovered_block().hash()),
+            OverlayManager::new(InMemoryState::read_only())
+                .overlay_builder(blocks[1].recovered_block().hash()),
         );
         let provider = state_provider_factory.database_provider_ro().unwrap();
 

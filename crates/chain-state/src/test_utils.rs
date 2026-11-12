@@ -1,6 +1,6 @@
 use crate::{
     in_memory::ExecutedBlock, CanonStateNotification, CanonStateNotifications,
-    CanonStateSubscriptions, CanonicalInMemoryState, InMemoryStateWriter,
+    CanonStateSubscriptions,
 };
 use alloy_consensus::{Header, SignableTransaction, TxEip1559, TxReceipt, EMPTY_ROOT_HASH};
 use alloy_eips::eip1559::{ETHEREUM_BLOCK_GAS_LIMIT_30M, INITIAL_BASE_FEE};
@@ -417,13 +417,6 @@ impl TestBlockBuilder {
     /// Creates a `TestBlockBuilder` configured for Ethereum primitives.
     pub fn eth() -> Self {
         Self::default()
-    }
-}
-
-impl<N: NodePrimitives> CanonicalInMemoryState<N> {
-    /// Returns a writer for this state, for tests that track blocks without running an engine.
-    pub fn writer(&self) -> InMemoryStateWriter<N> {
-        InMemoryStateWriter::new(self.clone())
     }
 }
 

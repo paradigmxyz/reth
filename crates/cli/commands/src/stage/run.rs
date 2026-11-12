@@ -175,7 +175,10 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
                             default_peers_path,
                             runtime.clone(),
                         )
-                        .build(BlockchainProvider::with_database_head(provider_factory.clone())?)
+                        .build(BlockchainProvider::new(
+                            provider_factory.clone(),
+                            provider_factory.chain_info_headers()?,
+                        ))
                         .start_network()
                         .await?;
                     let fetch_client = Arc::new(network.fetch_client().await?);
@@ -231,7 +234,10 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
                             default_peers_path,
                             runtime.clone(),
                         )
-                        .build(BlockchainProvider::with_database_head(provider_factory.clone())?)
+                        .build(BlockchainProvider::new(
+                            provider_factory.clone(),
+                            provider_factory.chain_info_headers()?,
+                        ))
                         .start_network()
                         .await?;
                     let fetch_client = Arc::new(network.fetch_client().await?);

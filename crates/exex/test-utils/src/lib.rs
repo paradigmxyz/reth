@@ -17,6 +17,7 @@ use std::{
 
 use alloy_eips::BlockNumHash;
 use futures_util::FutureExt;
+use reth_chain_state::InMemoryState;
 use reth_chainspec::{ChainSpec, MAINNET};
 use reth_consensus::test_utils::TestConsensus;
 use reth_db::{
@@ -55,6 +56,7 @@ use reth_provider::{
     providers::{BlockchainProvider, RocksDBProvider, StaticFileProvider},
     BlockReader, EthStorage, ProviderFactory,
 };
+use reth_storage_overlay::OverlayManager;
 use reth_tasks::Runtime;
 use reth_transaction_pool::test_utils::{testing_pool, TestPool};
 use tempfile::TempDir;
@@ -252,11 +254,13 @@ pub async fn test_exex_context_with_chain_spec(
         chain_spec.clone(),
         StaticFileProvider::read_write(static_dir.keep()).expect("static file provider"),
         RocksDBProvider::builder(rocksdb_dir.keep()).with_default_tables().build().unwrap(),
+        OverlayManager::new(InMemoryState::read_only()),
         reth_tasks::Runtime::test(),
     )?;
 
     let genesis_hash = init_genesis(&provider_factory)?;
-    let provider = BlockchainProvider::with_database_head(provider_factory.clone())?;
+    let chain_info_headers = provider_factory.chain_info_headers()?;
+    let provider = BlockchainProvider::new(provider_factory.clone(), chain_info_headers);
 
     let runtime = Runtime::test();
     let network_manager = NetworkManager::new(

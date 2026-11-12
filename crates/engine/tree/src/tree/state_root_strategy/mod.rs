@@ -1290,7 +1290,7 @@ mod tests {
     use alloy_consensus::constants::KECCAK_EMPTY;
     use alloy_primitives::{map::HashMap, Address, U256};
     use rand::Rng;
-    use reth_chain_state::test_utils::TestBlockBuilder;
+    use reth_chain_state::{test_utils::TestBlockBuilder, InMemoryState};
     use reth_chainspec::ChainSpec;
     use reth_db_common::init::init_genesis;
     use reth_ethereum_primitives::EthPrimitives;
@@ -1452,10 +1452,11 @@ mod tests {
             }
         }
 
-        let provider_factory = BlockchainProvider::new(factory).unwrap();
+        let chain_info_headers = factory.chain_info_headers().unwrap();
+        let provider_factory = BlockchainProvider::new(factory, chain_info_headers);
         let env: ExecutionEnv<EthEvmConfig> = ExecutionEnv::test_default();
         let runtime = reth_tasks::Runtime::test();
-        let overlay_manager = OverlayManager::<EthPrimitives>::default();
+        let overlay_manager = OverlayManager::<EthPrimitives>::new(InMemoryState::read_only());
         let mut state_root_handle = DefaultStateRootStrategy::default().spawn_state_root(
             &runtime,
             &overlay_manager,

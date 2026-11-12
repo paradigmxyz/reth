@@ -17,6 +17,7 @@ use alloy_primitives::{Address, BlockHash, BlockNumber, TxHash, TxNumber, B256};
 use core::fmt;
 use notify::{RecommendedWatcher, RecursiveMode, Watcher};
 use parking_lot::RwLock;
+use reth_chain_state::{ChainInfoHeaders, InMemoryState};
 use reth_chainspec::ChainInfo;
 use reth_db::{init_db, mdbx::DatabaseArguments, DatabaseEnv};
 use reth_db_api::{database::Database, models::StoredBlockBodyIndices};
@@ -72,6 +73,9 @@ struct ReadOnlySyncState {
 /// A common provider that fetches data from a database or static file.
 ///
 /// This provider implements most provider or provider factory traits.
+///
+/// The factory has no in-memory state of its own. It serves the in-memory state its overlay
+/// manager was created with, see [`Self::in_memory_state`].
 pub struct ProviderFactory<N: NodeTypesWithDB> {
     /// Database instance
     db: N::DB,
@@ -87,7 +91,8 @@ pub struct ProviderFactory<N: NodeTypesWithDB> {
     storage_settings: Arc<RwLock<StorageSettings>>,
     /// `RocksDB` provider
     rocksdb_provider: RocksDBProvider,
-    /// Manager for state trie overlays and cached changesets.
+    /// Manager for state trie overlays and cached changesets. Its in-memory state is the one this
+    /// factory serves.
     overlay_manager: OverlayManager<N::Primitives>,
     /// Store for block access lists.
     bal_store: BalStoreHandle,
@@ -114,6 +119,11 @@ impl<N: NodeTypesForProvider> ProviderFactory<NodeTypesWithDBAdapter<N, Database
 impl<N: ProviderNodeTypes> ProviderFactory<N> {
     /// Create new database provider factory.
     ///
+    /// The factory serves the in-memory state `overlay_manager` was created with: state
+    /// providers created from the factory are built on its blocks, and [`Self::in_memory_state`]
+    /// returns it. For storage that is only read from disk this is
+    /// [`InMemoryState::read_only`].
+    ///
     /// The storage backends used by the produced factory MAY be inconsistent.
     /// It is recommended to call [`Self::check_consistency`] after
     /// creation to ensure consistency between the database and static files.
@@ -124,6 +134,7 @@ impl<N: ProviderNodeTypes> ProviderFactory<N> {
         chain_spec: Arc<N::ChainSpec>,
         static_file_provider: StaticFileProvider<N::Primitives>,
         rocksdb_provider: RocksDBProvider,
+        overlay_manager: OverlayManager<N::Primitives>,
         runtime: reth_tasks::Runtime,
     ) -> ProviderResult<Self> {
         // Load storage settings from database at init time. Creates a temporary provider
@@ -132,7 +143,6 @@ impl<N: ProviderNodeTypes> ProviderFactory<N> {
         // Both factory and all providers it creates should share these cached settings.
         let legacy_settings = StorageSettings::v1();
         let database_provider_metrics = Arc::new(DatabaseProviderMetrics::default());
-        let overlay_manager = OverlayManager::default();
         let storage_settings = DatabaseProvider::<_, N>::new(
             db.tx()?,
             chain_spec.clone(),
@@ -177,9 +187,10 @@ impl<N: ProviderNodeTypes> ProviderFactory<N> {
         chain_spec: Arc<N::ChainSpec>,
         static_file_provider: StaticFileProvider<N::Primitives>,
         rocksdb_provider: RocksDBProvider,
+        overlay_manager: OverlayManager<N::Primitives>,
         runtime: reth_tasks::Runtime,
     ) -> ProviderResult<Self> {
-        Self::new(db, chain_spec, static_file_provider, rocksdb_provider, runtime)
+        Self::new(db, chain_spec, static_file_provider, rocksdb_provider, overlay_manager, runtime)
             .and_then(Self::assert_consistent)
     }
 }
@@ -197,13 +208,7 @@ impl<N: NodeTypesWithDB> ProviderFactory<N> {
         self
     }
 
-    /// Sets the overlay manager for an existing [`ProviderFactory`].
-    pub fn with_overlay_manager(mut self, overlay_manager: OverlayManager<N::Primitives>) -> Self {
-        self.overlay_manager = overlay_manager;
-        self
-    }
-
-    /// Returns the shared overlay manager.
+    /// Returns the overlay manager of this factory.
     pub(crate) const fn overlay_manager(&self) -> &OverlayManager<N::Primitives> {
         &self.overlay_manager
     }
@@ -323,6 +328,12 @@ impl<N: NodeTypesWithDB> ProviderFactory<N> {
     pub fn into_db(self) -> N::DB {
         self.db
     }
+
+    /// Returns the in-memory state the overlay manager of this factory was created with. Its
+    /// blocks are the ones this factory serves on top of the database.
+    pub const fn in_memory_state(&self) -> &InMemoryState<N::Primitives> {
+        self.overlay_manager.in_memory_state()
+    }
 }
 
 impl<N: NodeTypesWithDB> StorageSettingsCache for ProviderFactory<N> {
@@ -358,6 +369,7 @@ impl<N: ProviderNodeTypes<DB = DatabaseEnv>> ProviderFactory<N> {
         args: DatabaseArguments,
         static_file_provider: StaticFileProvider<N::Primitives>,
         rocksdb_provider: RocksDBProvider,
+        overlay_manager: OverlayManager<N::Primitives>,
         runtime: reth_tasks::Runtime,
     ) -> RethResult<Self> {
         Self::new(
@@ -365,6 +377,7 @@ impl<N: ProviderNodeTypes<DB = DatabaseEnv>> ProviderFactory<N> {
             chain_spec,
             static_file_provider,
             rocksdb_provider,
+            overlay_manager,
             runtime,
         )
         .map_err(RethError::Provider)
@@ -575,6 +588,54 @@ impl<N: ProviderNodeTypes> ProviderFactory<N> {
     ) -> ProviderResult<StaticFileProvider<N::Primitives>> {
         self.sync_providers_if_needed()?;
         Ok(self.static_file_provider.clone())
+    }
+
+    /// Returns the head of the chain stored in the database, and the safe and finalized blocks
+    /// if they are stored.
+    ///
+    /// The safe block is the finalized block if no safe block is stored. A stored safe or
+    /// finalized block number whose header is not stored yields `None` for that block.
+    ///
+    /// Returns [`ProviderError::HeaderNotFound`] if the header of the head is not stored, which is
+    /// the case for a database without a genesis block.
+    pub fn chain_info_headers(&self) -> ProviderResult<ChainInfoHeaders<HeaderTy<N>>> {
+        let provider = self.provider()?;
+        let ChainInfo { best_hash, best_number } = provider.chain_info()?;
+        let canonical_head = provider
+            .header_by_number(best_number)?
+            .ok_or_else(|| ProviderError::HeaderNotFound(best_number.into()))?;
+
+        // A stored block number without a header is not an error. Removing blocks from the
+        // database does not lower the stored finalized and safe block numbers unless a pipeline
+        // unwind does it, so they can point above the highest header. Such a block is unknown
+        // until it is set again.
+        let stored_header = |number: BlockNumber, kind: &str| {
+            let header = provider.sealed_header(number)?;
+            if header.is_none() {
+                warn!(
+                    target: "providers::db",
+                    kind,
+                    number,
+                    best_number,
+                    "Stored block number has no header, treating the block as unknown"
+                );
+            }
+            ProviderResult::Ok(header)
+        };
+        let finalized = match provider.last_finalized_block_number()? {
+            Some(number) => stored_header(number, "finalized")?,
+            None => None,
+        };
+        let safe = match provider.last_safe_block_number()? {
+            Some(number) => stored_header(number, "safe")?,
+            None => finalized.clone(),
+        };
+
+        Ok(ChainInfoHeaders {
+            canonical_head: SealedHeader::new(canonical_head, best_hash),
+            safe,
+            finalized,
+        })
     }
 }
 
@@ -1061,6 +1122,7 @@ mod tests {
             DatabaseArguments::new(Default::default()),
             StaticFileProvider::read_write(static_dir_path).unwrap(),
             RocksDBProvider::builder(&rocksdb_path).build().unwrap(),
+            OverlayManager::new(InMemoryState::read_only()),
             reth_tasks::Runtime::test(),
         )
         .unwrap();

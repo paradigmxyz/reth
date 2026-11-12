@@ -2,6 +2,8 @@
 
 use crate::tree::payload_processor::bal::BalExecutionError;
 use alloy_consensus::BlockHeader;
+use alloy_eips::BlockNumHash;
+use alloy_primitives::{BlockNumber, B256};
 use reth_consensus::ConsensusError;
 pub use reth_engine_primitives::{
     BlockAccessListDecodeError, InsertBlockErrorKind, InsertBlockFatalError,
@@ -20,6 +22,29 @@ pub enum AdvancePersistenceError {
     /// State/trie catch-up could not construct an input despite split persistence frontiers.
     #[error("state/trie catch-up input unavailable while persistence frontiers are split")]
     StateTrieCatchupUnavailable,
+    /// The canonical in-memory blocks are not the whole range of blocks to persist.
+    ///
+    /// The tree state keeps every canonical block above the persisted state/trie frontier in
+    /// memory, so this is a violated invariant and not a state to continue from.
+    #[error(
+        "canonical in-memory blocks below head {canonical_head} do not cover the range to \
+         persist: expected blocks {first_expected}..={last_expected}, found {found} blocks, \
+         the first is {first_found:?}, the last is {last_found:?}"
+    )]
+    CanonicalBlocksNotInMemory {
+        /// Hash of the canonical head whose in-memory chain was read.
+        canonical_head: B256,
+        /// Number of the first block to persist.
+        first_expected: BlockNumber,
+        /// Number of the last block to persist.
+        last_expected: BlockNumber,
+        /// Number of in-memory blocks found in the range.
+        found: usize,
+        /// The lowest in-memory block found in the range.
+        first_found: Option<BlockNumHash>,
+        /// The highest in-memory block found in the range.
+        last_found: Option<BlockNumHash>,
+    },
     /// A provider error
     #[error(transparent)]
     Provider(#[from] ProviderError),

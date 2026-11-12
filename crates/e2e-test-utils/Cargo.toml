@@ -11,6 +11,7 @@ repository.workspace = true
 workspace = true
 
 [dependencies]
+reth-chain-state.workspace = true
 reth-chainspec.workspace = true
 reth-tracing.workspace = true
 reth-db = { workspace = true, features = ["test-utils"] }
@@ -28,6 +29,7 @@ reth-node-core.workspace = true
 reth-node-builder = { workspace = true, features = ["test-utils"] }
 reth-tokio-util.workspace = true
 reth-stages-types.workspace = true
+reth-storage-overlay.workspace = true
 reth-network-peers.workspace = true
 reth-engine-local.workspace = true
 reth-engine-primitives.workspace = true

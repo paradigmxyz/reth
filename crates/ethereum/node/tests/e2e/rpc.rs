@@ -24,12 +24,17 @@ use alloy_rpc_types_trace::geth::{
 };
 use jsonrpsee::core::client::{ClientT, Subscription, SubscriptionClientT};
 use rand::{rngs::StdRng, Rng, SeedableRng};
+use reth_chain_state::{ExecutedBlock, InMemoryState};
 use reth_chainspec::{ChainSpecBuilder, EthChainSpec, EthereumHardfork};
+use reth_db::{init_db, mdbx::DatabaseArguments, DatabaseEnv};
+use reth_db_common::init::init_genesis_with_settings;
 use reth_e2e_test_utils::{
     receipt::PendingTransactionExt, test_chain_spec, test_chain_spec_builder,
     transaction::TransactionTestContext, wallet::Wallet, E2ETestSetupExt, NodeHelperType,
 };
+use reth_ethereum_primitives::Block;
 use reth_network::{types::NatResolver, PeersInfo};
+use reth_node_api::NodeTypesWithDBAdapter;
 use reth_node_builder::{NodeBuilder, NodeHandle};
 use reth_node_core::{
     args::{NetworkArgs, RpcServerArgs},
@@ -38,8 +43,13 @@ use reth_node_core::{
 use reth_node_ethereum::EthereumNode;
 use reth_payload_primitives::BuiltPayload;
 use reth_primitives_traits::Block as _;
+use reth_provider::{
+    providers::{RocksDBProvider, StaticFileProvider},
+    ProviderFactory, SaveBlocksInput,
+};
 use reth_rpc_api::servers::AdminApiServer;
 use reth_rpc_server_types::RpcModuleSelection;
+use reth_storage_overlay::OverlayManager;
 use reth_tasks::Runtime;
 use std::{
     net::{IpAddr, Ipv4Addr},
@@ -897,30 +907,61 @@ async fn test_sepolia_amsterdam_eth_config() -> eyre::Result<()> {
         sepolia::{SEPOLIA_AMSTERDAM_TIMESTAMP, SEPOLIA_BPO2_TIMESTAMP},
         SEPOLIA,
     };
-    use reth_primitives_traits::SealedHeader;
-    use reth_provider::CanonChainTracker;
 
-    let node_config = NodeConfig::test()
-        .with_chain(SEPOLIA.clone())
-        .with_unused_ports()
-        .with_rpc(RpcServerArgs::default().with_unused_ports().with_http());
-    let NodeHandle { node, .. } = NodeBuilder::new(node_config)
-        .testing_node(Runtime::test())
-        .node(EthereumNode::default())
-        .launch()
-        .await?;
-    let provider =
-        ProviderBuilder::new().connect_http(node.rpc_server_handle().http_url().unwrap().parse()?);
-
-    // eth_config reads the canonical header; move it across the fork without syncing the testnet.
+    // eth_config reads the canonical header, and a node starts with the head stored in its
+    // database: store a head on each side of the fork without syncing the testnet.
     for timestamp in [SEPOLIA_AMSTERDAM_TIMESTAMP - 1, SEPOLIA_AMSTERDAM_TIMESTAMP] {
-        node.provider.set_canonical_head(SealedHeader::seal_slow(Header {
-            number: 10_000_000,
-            timestamp,
-            base_fee_per_gas: Some(1_000_000_000),
-            excess_blob_gas: Some(0),
-            ..Default::default()
-        }));
+        let node_config = NodeConfig::test()
+            .with_chain(SEPOLIA.clone())
+            .with_unused_ports()
+            .with_rpc(RpcServerArgs::default().with_unused_ports().with_http());
+        let datadir = tempfile::tempdir()?;
+        // The database is closed at the end of this block, before the node opens it.
+        {
+            let provider_factory =
+                ProviderFactory::<NodeTypesWithDBAdapter<EthereumNode, DatabaseEnv>>::new(
+                    init_db(datadir.path().join("db"), DatabaseArguments::test())?,
+                    SEPOLIA.clone(),
+                    StaticFileProvider::read_write(datadir.path().join("static_files"))?,
+                    RocksDBProvider::builder(datadir.path().join("rocksdb"))
+                        .with_default_tables()
+                        .build()?,
+                    OverlayManager::new(InMemoryState::read_only()),
+                    Runtime::test(),
+                )?;
+            init_genesis_with_settings(&provider_factory, node_config.storage_settings())?;
+            let head = Block {
+                header: Header {
+                    parent_hash: SEPOLIA.genesis_hash(),
+                    number: 1,
+                    timestamp,
+                    base_fee_per_gas: Some(1_000_000_000),
+                    excess_blob_gas: Some(0),
+                    ..Default::default()
+                },
+                ..Default::default()
+            }
+            .seal_slow()
+            .try_recover()?;
+            // Persists the head on top of the genesis block, like the engine persists a block.
+            let provider_rw = provider_factory.provider_rw()?;
+            provider_rw.save_blocks(&SaveBlocksInput::new(
+                vec![ExecutedBlock { recovered_block: Arc::new(head), ..Default::default() }],
+                0,
+                0,
+                1,
+                1,
+            ))?;
+            provider_rw.commit()?;
+        }
+        let NodeHandle { node, .. } = NodeBuilder::new(node_config)
+            .testing_node_with_datadir(Runtime::test(), datadir.path())
+            .node(EthereumNode::default())
+            .launch()
+            .await?;
+        let provider = ProviderBuilder::new()
+            .connect_http(node.rpc_server_handle().http_url().unwrap().parse()?);
+
         let config = provider.client().request_noparams::<EthConfig>("eth_config").await?;
         if timestamp < SEPOLIA_AMSTERDAM_TIMESTAMP {
             assert_eq!(config.current.activation_time, SEPOLIA_BPO2_TIMESTAMP);

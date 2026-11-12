@@ -43,6 +43,9 @@ reth-tasks.workspace = true
 reth-trie = { workspace = true, features = ["metrics"] }
 reth-trie-db = { workspace = true, features = ["metrics"] }
 
+# test-utils
+reth-chain-state = { workspace = true, optional = true }
+reth-storage-overlay = { workspace = true, optional = true }
 reth-testing-utils = { workspace = true, optional = true }
 
 alloy-eip7928.workspace = true
@@ -69,6 +72,7 @@ eyre.workspace = true
 
 [dev-dependencies]
 # reth
+reth-chain-state.workspace = true
 reth-chainspec.workspace = true
 reth-db = { workspace = true, features = ["test-utils", "mdbx"] }
 reth-ethereum-primitives = { workspace = true, features = ["test-utils"] }
@@ -80,6 +84,7 @@ reth-downloaders = { workspace = true, features = ["file-client"] }
 reth-static-file.workspace = true
 reth-stages-api = { workspace = true, features = ["test-utils"] }
 reth-storage-api.workspace = true
+reth-storage-overlay.workspace = true
 reth-testing-utils.workspace = true
 reth-trie = { workspace = true, features = ["test-utils"] }
 reth-provider = { workspace = true, features = ["test-utils"] }
@@ -103,6 +108,8 @@ test-utils = [
     "reth-db/test-utils",
     "reth-provider/test-utils",
     "reth-stages-api/test-utils",
+    "dep:reth-chain-state",
+    "dep:reth-storage-overlay",
     "dep:reth-testing-utils",
     "dep:tempfile",
     "reth-chainspec/test-utils",
@@ -120,4 +127,5 @@ test-utils = [
     "reth-ethereum-primitives?/test-utils",
     "reth-evm-ethereum/test-utils",
     "reth-tasks/test-utils",
+    "reth-chain-state?/test-utils",
 ]
