@@ -176,7 +176,8 @@ const MAX_BOUNDED_RANGES: u32 = 4;
 pub(crate) struct ChangesetCache {
     inner: RwLock<ChangesetCacheInner>,
     /// Reverts of the ranges untrusted peers chose most recently, kept apart from `inner`, which
-    /// only evicts by block number.
+    /// only evicts by block number. Keyed by the range and the hash of `Finish`, so a reorg never
+    /// hits an old entry.
     bounded_ranges: Mutex<LruMap<ChangesetRangeKey, Arc<TrieUpdatesSorted>>>,
 }
 
@@ -1193,6 +1194,57 @@ mod tests {
             )
             .unwrap();
         assert_eq!(accumulated.account_nodes_ref(), &[(path, Some(older_node))]);
+    }
+
+    /// Returns a cache holding one revert per block in `1..=end_block`, each restoring a node of
+    /// its own and one shared path, along with the block's canonical position.
+    fn cache_with_block_reverts(end_block: BlockNumber) -> (ChangesetCache, BlockNumHash) {
+        let cache = ChangesetCache::new();
+        for number in 1..=end_block {
+            let node = BranchNodeCompact::new(number as u16, 0, 0, vec![], None);
+            insert_test_changesets(
+                &mut cache.inner.write(),
+                B256::with_last_byte(number as u8),
+                number,
+                Arc::new(TrieUpdatesSorted::new(
+                    vec![
+                        (Nibbles::from_nibbles([0x0]), Some(node.clone())),
+                        (Nibbles::from_nibbles([0x1, number as u8]), Some(node)),
+                    ],
+                    B256Map::default(),
+                )),
+            );
+        }
+        (cache, BlockNumHash::new(end_block, B256::with_last_byte(end_block as u8)))
+    }
+
+    #[test]
+    fn bounded_ranges_evict_least_recently_used() {
+        let factory = create_test_provider_factory();
+        seed_headers(&factory, 6);
+        let provider = factory.provider().unwrap();
+        let overlay_manager = OverlayManager::<reth_ethereum_primitives::EthPrimitives>::default();
+
+        let (cache, finish) = cache_with_block_reverts(6);
+        let bounded = |start| {
+            cache
+                .get_or_compute_range(&overlay_manager, &provider, start..=6, finish, finish, false)
+                .unwrap()
+        };
+        let key = |start| ChangesetRangeKey::new(start, 6, finish.hash);
+
+        let ranges = (1..=4).map(bounded).collect::<Vec<_>>();
+        assert_eq!(cache.bounded_ranges.lock().len(), 4);
+
+        // Touching the oldest range leaves the second oldest to be evicted by a fifth.
+        assert!(Arc::ptr_eq(&bounded(1), &ranges[0]));
+        bounded(5);
+        assert!(cache.bounded_ranges.lock().peek(&key(1)).is_some());
+        assert!(cache.bounded_ranges.lock().peek(&key(2)).is_none());
+
+        let rebuilt = bounded(2);
+        assert!(!Arc::ptr_eq(&rebuilt, &ranges[1]));
+        assert_eq!(rebuilt, ranges[1]);
     }
 
     #[test]
