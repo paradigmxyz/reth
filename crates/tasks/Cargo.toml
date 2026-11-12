@@ -17,7 +17,8 @@ crossbeam-channel.workspace = true
 either = { workspace = true, optional = true }
 rayon.workspace = true
 shuttle = { workspace = true, optional = true }
-parking_lot.workspace = true
+shuttle-sync.workspace = true
+shuttle-parking_lot.workspace = true
 
 [target.'cfg(not(target_family = "wasm"))'.dependencies]
 # async
@@ -30,6 +31,7 @@ reth-metrics.workspace = true
 metrics.workspace = true
 
 # misc
+parking_lot.workspace = true
 dashmap.workspace = true
 thread-priority.workspace = true
 tracing.workspace = true
@@ -48,12 +50,12 @@ tokio = { workspace = true, features = ["sync", "rt", "rt-multi-thread", "time",
 [features]
 rayon = ["dep:crossbeam-utils", "pin-project"]
 test-utils = []
-fuzz = ["dep:either", "dep:shuttle"]
+fuzz = ["dep:either", "dep:shuttle", "shuttle-sync/shuttle", "shuttle-parking_lot/shuttle"]
 
 [[example]]
 name = "executor"
 required-features = ["rayon"]
 
-# The all-features udeps job selects fuzz, which replaces these native-only backends.
+# The all-features udeps job selects fuzz, which replaces the native Rayon backend.
 [package.metadata.cargo-udeps.ignore]
-normal = ["parking_lot", "rayon"]
+normal = ["rayon"]

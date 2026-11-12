@@ -4,7 +4,8 @@ use crate::executor::{
     deterministic::Timer,
     time::{Duration, Instant},
 };
-use shuttle::{sync, thread};
+use shuttle::thread;
+use shuttle_sync::sync;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 /// A one-time initialized value whose waiting callers remain scheduler-managed.
@@ -184,87 +185,5 @@ impl WaitTimeoutResult {
     /// Returns `true` when the timeout notification fired.
     pub const fn timed_out(&self) -> bool {
         self.0
-    }
-}
-
-/// Non-poisoning locks with parking_lot-compatible locking methods.
-pub mod parking_lot {
-    use shuttle::sync;
-    pub use shuttle::sync::{MutexGuard, RwLockReadGuard, RwLockWriteGuard};
-
-    /// A non-poisoning mutex managed by the simulation scheduler.
-    #[derive(Debug)]
-    pub struct Mutex<T>(sync::Mutex<T>);
-    impl<T> Mutex<T> {
-        /// Creates a mutex containing `value`.
-        pub const fn new(value: T) -> Self {
-            Self(sync::Mutex::new(value))
-        }
-        /// Acquires the mutex, blocking only the current logical thread.
-        pub fn lock(&self) -> MutexGuard<'_, T> {
-            self.0.lock().unwrap_or_else(|error| error.into_inner())
-        }
-        /// Attempts to acquire the mutex without waiting.
-        pub fn try_lock(&self) -> Option<MutexGuard<'_, T>> {
-            match self.0.try_lock() {
-                Ok(guard) => Some(guard),
-                Err(sync::TryLockError::Poisoned(error)) => Some(error.into_inner()),
-                Err(sync::TryLockError::WouldBlock) => None,
-            }
-        }
-        /// Consumes the mutex, returning its value.
-        pub fn into_inner(self) -> T {
-            self.0.into_inner().unwrap_or_else(|error| error.into_inner())
-        }
-        /// Returns exclusive access without locking.
-        pub fn get_mut(&mut self) -> &mut T {
-            self.0.get_mut().unwrap_or_else(|error| error.into_inner())
-        }
-    }
-    impl<T: Default> Default for Mutex<T> {
-        fn default() -> Self {
-            Self::new(T::default())
-        }
-    }
-    impl<T> From<T> for Mutex<T> {
-        fn from(value: T) -> Self {
-            Self::new(value)
-        }
-    }
-
-    /// A non-poisoning reader-writer lock managed by the simulation scheduler.
-    #[derive(Debug)]
-    pub struct RwLock<T>(sync::RwLock<T>);
-    impl<T> RwLock<T> {
-        /// Creates a reader-writer lock containing `value`.
-        pub const fn new(value: T) -> Self {
-            Self(sync::RwLock::new(value))
-        }
-        /// Acquires shared access, blocking only the current logical thread.
-        pub fn read(&self) -> RwLockReadGuard<'_, T> {
-            self.0.read().unwrap_or_else(|error| error.into_inner())
-        }
-        /// Acquires exclusive access, blocking only the current logical thread.
-        pub fn write(&self) -> RwLockWriteGuard<'_, T> {
-            self.0.write().unwrap_or_else(|error| error.into_inner())
-        }
-        /// Consumes the lock, returning its value.
-        pub fn into_inner(self) -> T {
-            self.0.into_inner().unwrap_or_else(|error| error.into_inner())
-        }
-        /// Returns exclusive access without locking.
-        pub fn get_mut(&mut self) -> &mut T {
-            self.0.get_mut().unwrap_or_else(|error| error.into_inner())
-        }
-    }
-    impl<T: Default> Default for RwLock<T> {
-        fn default() -> Self {
-            Self::new(T::default())
-        }
-    }
-    impl<T> From<T> for RwLock<T> {
-        fn from(value: T) -> Self {
-            Self::new(value)
-        }
     }
 }

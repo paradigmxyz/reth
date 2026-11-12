@@ -10978,6 +10978,8 @@ dependencies = [
  "rayon",
  "reth-metrics",
  "shuttle",
+ "shuttle-parking_lot",
+ "shuttle-sync",
  "thiserror 2.0.21",
  "thread-priority",
  "tokio",
@@ -12091,6 +12093,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "shuttle-parking_lot"
+version = "0.12.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a1e19861a540ea53c42c73b8c81d09c9e83cc6894a720e7a16fb490c5a5297b4"
+dependencies = [
+ "cfg-if",
+ "parking_lot",
+ "shuttle-parking_lot-impl",
+]
+
+[[package]]
+name = "shuttle-parking_lot-impl"
+version = "0.1.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8035e1045dba1d77e443daed5c30a90c1008a9f6e8233076e24f88482254f783"
+dependencies = [
+ "lock_api",
+ "shuttle",
+ "tracing",
+]
+
+[[package]]
 name = "shuttle-schedulers"
 version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -12114,6 +12138,25 @@ dependencies = [
  "shuttle-engine",
  "smallvec",
  "tracing",
+]
+
+[[package]]
+name = "shuttle-sync"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "38c414697e170296cfdd2c7ad7247612010659c9d3c116ec73a95a04fdd5b2cc"
+dependencies = [
+ "cfg-if",
+ "shuttle-sync-inner",
+]
+
+[[package]]
+name = "shuttle-sync-inner"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "483b7abcff12a286f349bf105028764b88e77826c39aaf4b66f2621c40f6297e"
+dependencies = [
+ "shuttle",
 ]
 
 [[package]]
