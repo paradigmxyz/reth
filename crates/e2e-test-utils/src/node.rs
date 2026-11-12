@@ -15,6 +15,7 @@ use alloy_provider::{
     fillers::{FillProvider, RecommendedFillers, TxFiller},
     Provider, ProviderBuilder, RootProvider,
 };
+use alloy_rpc_client::RpcClient;
 use alloy_rpc_types_engine::{
     ForkchoiceState, ForkchoiceUpdateError, ForkchoiceUpdated, PayloadStatus, PayloadStatusEnum,
 };
@@ -24,7 +25,6 @@ use futures_util::{
     future::{select, BoxFuture, Either},
     Future,
 };
-use jsonrpsee::{core::client::ClientT, http_client::HttpClient};
 use reth_chainspec::EthereumHardforks;
 use reth_db::{mdbx::DatabaseArguments, open_db_read_only};
 use reth_engine_primitives::BeaconForkChoiceUpdateError;
@@ -1323,7 +1323,7 @@ where
     }
 
     /// Returns an RPC client.
-    pub fn rpc_client(&self) -> Option<HttpClient> {
+    pub fn rpc_client(&self) -> Option<RpcClient> {
         self.inner.rpc_server_handle().http_client()
     }
 
@@ -1438,8 +1438,12 @@ where
         let client =
             self.rpc_client().ok_or_else(|| eyre::eyre!("HTTP RPC client not available"))?;
 
-        let res: TestingBuildBlockResponseV1 =
-            client.request("testing_buildBlockV1", request.into_params()).await?;
+        let res = client
+            .request::<_, TestingBuildBlockResponseV1>(
+                "testing_buildBlockV1",
+                request.into_params(),
+            )
+            .await?;
         eyre::Ok(res)
     }
 
