@@ -10379,7 +10379,6 @@ dependencies = [
  "reth-tasks",
  "reth-transaction-pool",
  "reth-trie-common",
- "serde_json",
  "tokio",
  "tracing",
 ]
@@ -10408,6 +10407,7 @@ dependencies = [
  "jsonrpsee-core",
  "jsonrpsee-types",
  "metrics",
+ "parking_lot",
  "rand 0.9.5",
  "reqwest",
  "reth-chain-state",
