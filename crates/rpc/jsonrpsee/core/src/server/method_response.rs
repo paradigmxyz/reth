@@ -296,8 +296,13 @@ impl MethodResponseResult {
 /// Builder for the response to a batch request.
 #[derive(Debug)]
 pub struct BatchResponseBuilder {
-    /// Serialized JSON-RPC response,
-    result: String,
+    /// Serialized JSON-RPC responses of the entries.
+    ///
+    /// They are joined once the batch is finished, into a buffer of the batch's exact size,
+    /// instead of growing the batch response (and copying it) entry by entry.
+    entries: Vec<String>,
+    /// Length of the batch response: the `[` and every entry with the `,` or `]` after it.
+    len: usize,
     /// Max limit for the batch
     max_response_size: usize,
 }
@@ -305,10 +310,7 @@ pub struct BatchResponseBuilder {
 impl BatchResponseBuilder {
     /// Create a new batch response builder with limit.
     pub fn new_with_limit(limit: usize) -> Self {
-        let mut initial = String::with_capacity(2048);
-        initial.push('[');
-
-        Self { result: initial, max_response_size: limit }
+        Self { entries: Vec::new(), len: 1, max_response_size: limit }
     }
 
     /// Append a result from an individual method to the batch response.
@@ -318,7 +320,7 @@ impl BatchResponseBuilder {
     pub fn append(&mut self, response: MethodResponse) -> Result<(), MethodResponse> {
         // `,` will occupy one extra byte for each entry
         // on the last item the `,` is replaced by `]`.
-        let len = response.json.len() + self.result.len() + 1;
+        let len = response.json.len() + self.len + 1;
 
         if len > self.max_response_size {
             Err(MethodResponse::error(
@@ -326,29 +328,35 @@ impl BatchResponseBuilder {
                 reject_too_big_batch_response(self.max_response_size),
             ))
         } else {
-            self.result.push_str(&response.json);
-            self.result.push(',');
+            self.len = len;
+            self.entries.push(response.json);
             Ok(())
         }
     }
 
     /// Check if the batch is empty.
     pub fn is_empty(&self) -> bool {
-        self.result.len() <= 1
+        self.entries.is_empty()
     }
 
     /// Finish the batch response.
     ///
     /// An empty batch is answered with an invalid request error.
-    pub fn finish(mut self) -> MethodResponse {
+    pub fn finish(self) -> MethodResponse {
         if self.is_empty() {
             return MethodResponse::error(Id::Null, ErrorObject::from(ErrorCode::InvalidRequest))
         }
-        // Replace the trailing `,` of the last entry.
-        self.result.pop();
-        self.result.push(']');
+        let mut json = String::with_capacity(self.len);
+        json.push('[');
+        for (i, entry) in self.entries.iter().enumerate() {
+            if i > 0 {
+                json.push(',');
+            }
+            json.push_str(entry);
+        }
+        json.push(']');
         MethodResponse {
-            json: self.result,
+            json,
             success_or_error: MethodResponseResult::Success,
             kind: ResponseKind::Batch,
         }
@@ -490,6 +498,36 @@ mod tests {
             batch.json,
             r#"[{"jsonrpc":"2.0","id":1,"result":"a"},{"jsonrpc":"2.0","id":1,"result":"a"}]"#
         )
+    }
+
+    #[test]
+    fn batch_is_joined_into_its_exact_size() {
+        let entry = |id| {
+            MethodResponse::response(
+                Id::Number(id),
+                ResponsePayload::success_borrowed(&"a"),
+                usize::MAX,
+            )
+        };
+        // Two entries of 37 bytes, the `[`, the `,` and the `]`.
+        let len = 2 + 2 * 37 + 1;
+
+        let mut builder = BatchResponseBuilder::new_with_limit(len);
+        builder.append(entry(1)).unwrap();
+        builder.append(entry(2)).unwrap();
+        let batch = builder.finish();
+        assert_eq!(
+            batch.json,
+            r#"[{"jsonrpc":"2.0","id":1,"result":"a"},{"jsonrpc":"2.0","id":2,"result":"a"}]"#
+        );
+        assert_eq!(batch.json.len(), len);
+        assert_eq!(batch.json.capacity(), len);
+
+        let mut builder = BatchResponseBuilder::new_with_limit(len - 1);
+        builder.append(entry(1)).unwrap();
+        let err = builder.append(entry(2)).unwrap_err();
+        let exp_err = r#"{"jsonrpc":"2.0","id":null,"error":{"code":-32011,"message":"The batch response was too large","data":"Exceeded max limit of 76"}}"#;
+        assert_eq!(err.json, exp_err);
     }
 
     #[test]
