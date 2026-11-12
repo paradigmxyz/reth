@@ -4,8 +4,7 @@ use jsonrpsee::{core::RpcResult, proc_macros::rpc};
 
 /// Hardhat rpc interface.
 /// https://hardhat.org/hardhat-network/docs/reference#hardhat-network-methods
-#[cfg_attr(not(feature = "client"), rpc(server, namespace = "hardhat"))]
-#[cfg_attr(feature = "client", rpc(server, client, namespace = "hardhat"))]
+#[rpc(server, namespace = "hardhat")]
 pub trait HardhatApi {
     /// Removes the given transaction from the mempool, if it exists.
     ///
