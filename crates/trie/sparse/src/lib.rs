@@ -26,6 +26,9 @@ pub use arena::*;
 #[cfg(feature = "metrics")]
 mod metrics;
 
+#[cfg(feature = "std")]
+mod keccak_batch;
+
 /// Re-export sparse trie error types.
 pub mod errors {
     pub use reth_execution_errors::{
