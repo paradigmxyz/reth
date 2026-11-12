@@ -3256,11 +3256,12 @@ mod tests {
 
         peer_manager.peers.get_mut(&peer_id).unwrap().reputation -= 1;
 
-        peer_manager.last_tick -= Duration::from_secs(1);
+        // The elapsed time exceeds the deficit, so recovery must stop at the default.
+        peer_manager.last_tick -= Duration::from_secs(5);
         peer_manager.tick();
 
         // tick applied
-        assert!(peer_manager.peers.get_mut(&peer_id).unwrap().reputation >= DEFAULT_REPUTATION);
+        assert_eq!(peer_manager.peers.get_mut(&peer_id).unwrap().reputation, DEFAULT_REPUTATION);
     }
 
     #[tokio::test]
