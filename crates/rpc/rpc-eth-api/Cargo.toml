@@ -59,9 +59,6 @@ auto_impl.workspace = true
 dyn-clone.workspace = true
 tracing.workspace = true
 
-[dev-dependencies]
-serde_json.workspace = true
-
 [features]
 js-tracer = ["evm2-inspectors/js-tracer", "reth-rpc-eth-types/js-tracer"]
 account-ext = [
