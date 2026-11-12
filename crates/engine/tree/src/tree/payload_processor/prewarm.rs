@@ -1064,153 +1064,161 @@ mod tests {
 
     #[test]
     fn terminate_event_stops_transaction_execution() {
-        let terminate_execution = Arc::new(AtomicBool::new(false));
-        let ctx = PrewarmContext {
-            env: ExecutionEnv::test_default(),
-            evm_config: EthEvmConfig::new(Arc::new(ChainSpec::default())),
-            saved_cache: None,
-            provider: OverlayStateProviderFactory::new(
-                MockEthProvider::default(),
-                OverlayManager::default().overlay_builder(B256::ZERO),
-            ),
-            bal_prewarm_pool: None,
-            metrics: PrewarmMetrics::default(),
-            cache_metrics: None,
-            cache_state_metrics: None,
-            terminate_execution: Arc::clone(&terminate_execution),
-            executed_tx_index: Arc::new(AtomicUsize::new(0)),
-            precompile_cache_disabled: false,
-            precompile_cache_map: PrecompileCacheMap::default(),
-            disable_bal_parallel_state_root: false,
-            disable_bal_batch_io: false,
-            prewarm_results: None,
-        };
-        let (task, actions_tx) =
-            PrewarmCacheTask::new(Runtime::test(), PayloadExecutionCache::default(), ctx);
-        actions_tx
-            .send(PrewarmTaskEvent::Terminate {
-                execution_outcome: None,
-                valid_block_rx: mpsc::channel().1,
-            })
-            .unwrap();
-
-        task.run::<WithTxEnv<TxEnvFor<EthEvmConfig>, Recovered<TransactionSigned>>>(
-            PrewarmMode::Skipped,
-            actions_tx,
-        );
-
-        assert!(terminate_execution.load(Ordering::Relaxed));
-    }
-
-    #[test]
-    fn rebuilds_evm_for_each_prewarm_run() {
-        let caller = Address::repeat_byte(1);
-        let provider = MockEthProvider::default();
-        provider.enable_database_provider();
-        provider.add_header(B256::ZERO, Default::default());
-        provider.add_stage_checkpoint(StageId::Finish, StageCheckpoint::new(0));
-        let tx = Recovered::new_unchecked(
-            TransactionSigned::new_unhashed(
-                // Free, so that the empty caller can pay for it.
-                TxLegacy {
-                    gas_limit: 21_000,
-                    to: TxKind::Call(Address::repeat_byte(2)),
-                    ..Default::default()
-                }
-                .into(),
-                Signature::test_signature(),
-            ),
-            caller,
-        );
-        let pool = Arc::new(WorkerPool::new(1, "prewarm-test"));
-        // Payloads that claim the same block hash may still use different block environments.
-        let prewarm = |beneficiary| {
-            let mut env = ExecutionEnv::<EthEvmConfig>::test_default();
-            env.evm_env.block.beneficiary = beneficiary;
-            let results = Arc::new(PrewarmResults::new(1));
+        reth_tasks::executor::Runtime::new().run(|| {
+            let terminate_execution = Arc::new(AtomicBool::new(false));
             let ctx = PrewarmContext {
-                env,
+                env: ExecutionEnv::test_default(),
                 evm_config: EthEvmConfig::new(Arc::new(ChainSpec::default())),
                 saved_cache: None,
                 provider: OverlayStateProviderFactory::new(
-                    provider.clone(),
+                    MockEthProvider::default(),
                     OverlayManager::default().overlay_builder(B256::ZERO),
                 ),
                 bal_prewarm_pool: None,
                 metrics: PrewarmMetrics::default(),
                 cache_metrics: None,
                 cache_state_metrics: None,
-                terminate_execution: Arc::new(AtomicBool::new(false)),
+                terminate_execution: Arc::clone(&terminate_execution),
                 executed_tx_index: Arc::new(AtomicUsize::new(0)),
                 precompile_cache_disabled: false,
                 precompile_cache_map: PrecompileCacheMap::default(),
                 disable_bal_parallel_state_root: false,
                 disable_bal_batch_io: false,
-                prewarm_results: Some(Arc::clone(&results)),
+                prewarm_results: None,
             };
-            let tx =
-                WithTxEnv { tx_env: ctx.evm_config.tx_env(tx.clone()), tx: Arc::new(tx.clone()) };
-            let stateful_pool = WorkerStatefulPool::new(Arc::clone(&pool));
-            stateful_pool.install_fn(|| {
-                PrewarmCacheTask::transact_worker(&ctx, &stateful_pool, 0, tx, None, None)
-            });
-            results.take_valid(0, &mut EmptyDB::default()).unwrap().unwrap().pending_state
-        };
+            let (task, actions_tx) =
+                PrewarmCacheTask::new(Runtime::test(), PayloadExecutionCache::default(), ctx);
+            actions_tx
+                .send(PrewarmTaskEvent::Terminate {
+                    execution_outcome: None,
+                    valid_block_rx: mpsc::channel().1,
+                })
+                .unwrap();
 
-        assert!(prewarm(Address::repeat_byte(0xa))
-            .account_changes()
-            .any(|a| a.address == Address::repeat_byte(0xa)));
-        let state = prewarm(Address::repeat_byte(0xb));
-        assert!(state.account_changes().any(|a| a.address == Address::repeat_byte(0xb)));
-        assert!(!state.account_changes().any(|a| a.address == Address::repeat_byte(0xa)));
+            task.run::<WithTxEnv<TxEnvFor<EthEvmConfig>, Recovered<TransactionSigned>>>(
+                PrewarmMode::Skipped,
+                actions_tx,
+            );
+
+            assert!(terminate_execution.load(Ordering::Relaxed));
+        });
+    }
+
+    #[test]
+    fn rebuilds_evm_for_each_prewarm_run() {
+        reth_tasks::executor::Runtime::new().run(|| {
+            let caller = Address::repeat_byte(1);
+            let provider = MockEthProvider::default();
+            provider.enable_database_provider();
+            provider.add_header(B256::ZERO, Default::default());
+            provider.add_stage_checkpoint(StageId::Finish, StageCheckpoint::new(0));
+            let tx = Recovered::new_unchecked(
+                TransactionSigned::new_unhashed(
+                    // Free, so that the empty caller can pay for it.
+                    TxLegacy {
+                        gas_limit: 21_000,
+                        to: TxKind::Call(Address::repeat_byte(2)),
+                        ..Default::default()
+                    }
+                    .into(),
+                    Signature::test_signature(),
+                ),
+                caller,
+            );
+            let pool = Arc::new(WorkerPool::new(1, "prewarm-test"));
+            // Payloads that claim the same block hash may still use different block environments.
+            let prewarm = |beneficiary| {
+                let mut env = ExecutionEnv::<EthEvmConfig>::test_default();
+                env.evm_env.block.beneficiary = beneficiary;
+                let results = Arc::new(PrewarmResults::new(1));
+                let ctx = PrewarmContext {
+                    env,
+                    evm_config: EthEvmConfig::new(Arc::new(ChainSpec::default())),
+                    saved_cache: None,
+                    provider: OverlayStateProviderFactory::new(
+                        provider.clone(),
+                        OverlayManager::default().overlay_builder(B256::ZERO),
+                    ),
+                    bal_prewarm_pool: None,
+                    metrics: PrewarmMetrics::default(),
+                    cache_metrics: None,
+                    cache_state_metrics: None,
+                    terminate_execution: Arc::new(AtomicBool::new(false)),
+                    executed_tx_index: Arc::new(AtomicUsize::new(0)),
+                    precompile_cache_disabled: false,
+                    precompile_cache_map: PrecompileCacheMap::default(),
+                    disable_bal_parallel_state_root: false,
+                    disable_bal_batch_io: false,
+                    prewarm_results: Some(Arc::clone(&results)),
+                };
+                let tx = WithTxEnv {
+                    tx_env: ctx.evm_config.tx_env(tx.clone()),
+                    tx: Arc::new(tx.clone()),
+                };
+                let stateful_pool = WorkerStatefulPool::new(Arc::clone(&pool));
+                stateful_pool.install_fn(|| {
+                    PrewarmCacheTask::transact_worker(&ctx, &stateful_pool, 0, tx, None, None)
+                });
+                results.take_valid(0, &mut EmptyDB::default()).unwrap().unwrap().pending_state
+            };
+
+            assert!(prewarm(Address::repeat_byte(0xa))
+                .account_changes()
+                .any(|a| a.address == Address::repeat_byte(0xa)));
+            let state = prewarm(Address::repeat_byte(0xb));
+            assert!(state.account_changes().any(|a| a.address == Address::repeat_byte(0xb)));
+            assert!(!state.account_changes().any(|a| a.address == Address::repeat_byte(0xa)));
+        });
     }
 
     #[test]
     fn transaction_prewarm_releases_worker_cache_before_cache_task_finishes() {
-        let runtime = Runtime::test();
-        let saved = SavedCache::new(B256::ZERO, crate::tree::ExecutionCache::new(1_000));
-        let mut ctx = test_prewarm_context(saved.clone(), Gauge::noop());
-        let provider = MockEthProvider::default();
-        provider.enable_database_provider();
-        provider.add_header(B256::ZERO, Default::default());
-        provider.add_stage_checkpoint(StageId::Finish, StageCheckpoint::new(0));
-        ctx.provider = OverlayStateProviderFactory::new(
-            provider,
-            OverlayManager::default().overlay_builder(B256::ZERO),
-        );
-        assert!(ctx.evm_for_ctx().evm.is_some());
-        let tx = Recovered::new_unchecked(
-            TransactionSigned::new_unhashed(
-                TxLegacy {
-                    gas_limit: 21_000,
-                    to: TxKind::Call(Address::repeat_byte(2)),
-                    ..Default::default()
-                }
-                .into(),
-                Signature::test_signature(),
-            ),
-            Address::repeat_byte(1),
-        );
-        let tx = WithTxEnv { tx_env: ctx.evm_config.tx_env(tx.clone()), tx: Arc::new(tx) };
-        let (task, actions_tx) =
-            PrewarmCacheTask::new(runtime, PayloadExecutionCache::default(), ctx);
-        let (pending_tx, pending_rx) = mpsc::channel();
-        pending_tx.send((0, tx)).unwrap();
-        drop(pending_tx);
-        task.spawn_txs_prewarm(pending_rx, actions_tx, None);
-        assert!(matches!(
-            task.actions_rx.recv_timeout(Duration::from_secs(5)).unwrap(),
-            PrewarmTaskEvent::FinishedTxExecution { executed_transactions: 1 }
-        ));
+        reth_tasks::executor::Runtime::new().run(|| {
+            let runtime = Runtime::test();
+            let saved = SavedCache::new(B256::ZERO, crate::tree::ExecutionCache::new(1_000));
+            let mut ctx = test_prewarm_context(saved.clone(), Gauge::noop());
+            let provider = MockEthProvider::default();
+            provider.enable_database_provider();
+            provider.add_header(B256::ZERO, Default::default());
+            provider.add_stage_checkpoint(StageId::Finish, StageCheckpoint::new(0));
+            ctx.provider = OverlayStateProviderFactory::new(
+                provider,
+                OverlayManager::default().overlay_builder(B256::ZERO),
+            );
+            assert!(ctx.evm_for_ctx().evm.is_some());
+            let tx = Recovered::new_unchecked(
+                TransactionSigned::new_unhashed(
+                    TxLegacy {
+                        gas_limit: 21_000,
+                        to: TxKind::Call(Address::repeat_byte(2)),
+                        ..Default::default()
+                    }
+                    .into(),
+                    Signature::test_signature(),
+                ),
+                Address::repeat_byte(1),
+            );
+            let tx = WithTxEnv { tx_env: ctx.evm_config.tx_env(tx.clone()), tx: Arc::new(tx) };
+            let (task, actions_tx) =
+                PrewarmCacheTask::new(runtime, PayloadExecutionCache::default(), ctx);
+            let (pending_tx, pending_rx) = mpsc::channel();
+            pending_tx.send((0, tx)).unwrap();
+            drop(pending_tx);
+            task.spawn_txs_prewarm(pending_rx, actions_tx, None);
+            assert!(matches!(
+                task.actions_rx.recv_timeout(Duration::from_secs(5)).unwrap(),
+                PrewarmTaskEvent::FinishedTxExecution { executed_transactions: 1 }
+            ));
 
-        // The dispatcher can still be dropping its context after sending completion. The cache
-        // task remains alive, but its workers must no longer retain any cache references.
-        let deadline = Instant::now() + Duration::from_secs(5);
-        while saved.usage_count() != 2 {
-            assert!(Instant::now() < deadline, "worker state outlived transaction prewarming");
-            thread::yield_now();
-        }
-        assert!(task.ctx.saved_cache.is_some());
+            // The dispatcher can still be dropping its context after sending completion. The cache
+            // task remains alive, but its workers must no longer retain any cache references.
+            let deadline = Instant::now() + Duration::from_secs(5);
+            while saved.usage_count() != 2 {
+                assert!(Instant::now() < deadline, "worker state outlived transaction prewarming");
+                thread::yield_now();
+            }
+            assert!(task.ctx.saved_cache.is_some());
+        });
     }
 
     fn test_prewarm_context(
@@ -1284,53 +1292,66 @@ mod tests {
 
     #[test]
     fn save_cache_releases_warm_cache_before_duration_metric() {
-        let runtime = Runtime::test();
-        let execution_cache = PayloadExecutionCache::default();
-        let saved = SavedCache::new(B256::repeat_byte(1), crate::tree::ExecutionCache::new(1_000));
-        let address = Address::with_last_byte(1);
-        saved.cache().insert_storage(address, B256::ZERO, Some(U256::from(7)));
-        execution_cache.update_with_guard(|slot| *slot = Some(saved.clone()));
-        // Keep the drop worker occupied: a queued SavedCache would delay cache reuse.
-        let (release_tx, release_rx) = mpsc::channel::<()>();
-        runtime.spawn_blocking_named("drop", move || {
-            let _ = release_rx.recv();
+        reth_tasks::executor::Runtime::new().run(|| {
+            let runtime = Runtime::test();
+            let execution_cache = PayloadExecutionCache::default();
+            let saved =
+                SavedCache::new(B256::repeat_byte(1), crate::tree::ExecutionCache::new(1_000));
+            let address = Address::with_last_byte(1);
+            saved.cache().insert_storage(address, B256::ZERO, Some(U256::from(7)));
+            execution_cache.update_with_guard(|slot| *slot = Some(saved.clone()));
+            // Keep the drop worker occupied: a queued SavedCache would delay cache reuse.
+            let (release_tx, release_rx) = mpsc::channel::<()>();
+            runtime.spawn_blocking_named("drop", move || {
+                let _ = release_rx.recv();
+            });
+            let observed = Arc::new(AtomicBool::new(false));
+            let observer = Arc::new(CacheSaveObserver {
+                cache: execution_cache.clone(),
+                observed: observed.clone(),
+            });
+            save_test_cache(
+                &runtime,
+                &execution_cache,
+                saved,
+                Default::default(),
+                true,
+                Gauge::from_arc(observer),
+            );
+            assert!(observed.load(Ordering::Relaxed), "save duration was not recorded");
+            let saved = execution_cache.get_cache_for(B256::repeat_byte(2)).unwrap();
+            assert_eq!(
+                saved.cache().get_or_try_insert_storage_with(address, B256::ZERO, || Err(())),
+                Ok(reth_execution_cache::CachedStatus::Cached(U256::from(7))),
+                "handoff must preserve the warmed contents",
+            );
+            drop(release_tx);
         });
-        let observed = Arc::new(AtomicBool::new(false));
-        let observer = Arc::new(CacheSaveObserver {
-            cache: execution_cache.clone(),
-            observed: observed.clone(),
-        });
-        save_test_cache(
-            &runtime,
-            &execution_cache,
-            saved,
-            Default::default(),
-            true,
-            Gauge::from_arc(observer),
-        );
-        assert!(observed.load(Ordering::Relaxed), "save duration was not recorded");
-        let saved = execution_cache.get_cache_for(B256::repeat_byte(2)).unwrap();
-        assert_eq!(
-            saved.cache().get_or_try_insert_storage_with(address, B256::ZERO, || Err(())),
-            Ok(reth_execution_cache::CachedStatus::Cached(U256::from(7))),
-            "handoff must preserve the warmed contents",
-        );
-        drop(release_tx);
     }
 
     #[test]
     fn save_cache_blocks_reuse_while_execution_cache_is_cloned() {
-        let runtime = Runtime::test();
-        let execution_cache = PayloadExecutionCache::default();
-        let saved = SavedCache::new(B256::repeat_byte(1), crate::tree::ExecutionCache::new(1_000));
-        execution_cache.update_with_guard(|slot| *slot = Some(saved.clone()));
-        let other_cache_clone = saved.cache().clone();
+        reth_tasks::executor::Runtime::new().run(|| {
+            let runtime = Runtime::test();
+            let execution_cache = PayloadExecutionCache::default();
+            let saved =
+                SavedCache::new(B256::repeat_byte(1), crate::tree::ExecutionCache::new(1_000));
+            execution_cache.update_with_guard(|slot| *slot = Some(saved.clone()));
+            let other_cache_clone = saved.cache().clone();
 
-        save_test_cache(&runtime, &execution_cache, saved, Default::default(), true, Gauge::noop());
+            save_test_cache(
+                &runtime,
+                &execution_cache,
+                saved,
+                Default::default(),
+                true,
+                Gauge::noop(),
+            );
 
-        assert!(execution_cache.get_cache_for(B256::repeat_byte(2)).is_none());
-        drop(other_cache_clone);
-        assert!(execution_cache.get_cache_for(B256::repeat_byte(2)).is_some());
+            assert!(execution_cache.get_cache_for(B256::repeat_byte(2)).is_none());
+            drop(other_cache_clone);
+            assert!(execution_cache.get_cache_for(B256::repeat_byte(2)).is_some());
+        });
     }
 
     #[derive(Clone, Copy, Debug)]
@@ -1394,52 +1415,55 @@ mod tests {
 
     #[test]
     fn save_cache_freeing_waits_for_validator_cache_references() {
-        let runtime = Runtime::test();
-        let execution_cache = PayloadExecutionCache::default();
-        let saved = SavedCache::new(B256::repeat_byte(1), crate::tree::ExecutionCache::new(1_000));
-        execution_cache.update_with_guard(|cached| *cached = Some(saved.clone()));
-        let (dropped, reader) = observe_cache_drop(&saved, &execution_cache, false);
-        let ctx = test_prewarm_context(saved, Gauge::noop());
-        let (task, actions_tx) =
-            PrewarmCacheTask::new(runtime.clone(), execution_cache.clone(), ctx);
-        let mut payload = PayloadHandle {
-            prewarm_handle: CacheTaskHandle::<_, BaseEvmTypes> {
-                saved_cache: task.ctx.saved_cache.clone(),
-                to_prewarm_task: Some(actions_tx.clone()),
-                executed_tx_index: task.ctx.executed_tx_index.clone(),
-                prewarm_results: None,
-                cache_metrics: None,
-            },
-            transactions: channel::never::<(usize, Result<(), ()>)>(),
-            _span: Span::none(),
-        };
-        // The validator keeps this ExecutionCache clone after calling terminate_caching.
-        let validator_cache = payload.caches().unwrap();
-        let valid_block_tx = payload.terminate_caching(Some(Arc::new(BlockExecutionOutput {
-            state: Default::default(),
-            result: Default::default(),
-        })));
-        drop(valid_block_tx);
-        let prewarm = runtime.spawn_blocking_named("prewarm", move || {
-            task.run::<WithTxEnv<TxEnvFor<EthEvmConfig>, Recovered<TransactionSigned>>>(
-                PrewarmMode::Skipped,
-                actions_tx,
-            );
-            thread::current().id()
+        reth_tasks::executor::Runtime::new().run(|| {
+            let runtime = Runtime::test();
+            let execution_cache = PayloadExecutionCache::default();
+            let saved =
+                SavedCache::new(B256::repeat_byte(1), crate::tree::ExecutionCache::new(1_000));
+            execution_cache.update_with_guard(|cached| *cached = Some(saved.clone()));
+            let (dropped, reader) = observe_cache_drop(&saved, &execution_cache, false);
+            let ctx = test_prewarm_context(saved, Gauge::noop());
+            let (task, actions_tx) =
+                PrewarmCacheTask::new(runtime.clone(), execution_cache.clone(), ctx);
+            let mut payload = PayloadHandle {
+                prewarm_handle: CacheTaskHandle::<_, BaseEvmTypes> {
+                    saved_cache: task.ctx.saved_cache.clone(),
+                    to_prewarm_task: Some(actions_tx.clone()),
+                    executed_tx_index: task.ctx.executed_tx_index.clone(),
+                    prewarm_results: None,
+                    cache_metrics: None,
+                },
+                transactions: channel::never::<(usize, Result<(), ()>)>(),
+                _span: Span::none(),
+            };
+            // The validator keeps this ExecutionCache clone after calling terminate_caching.
+            let validator_cache = payload.caches().unwrap();
+            let valid_block_tx = payload.terminate_caching(Some(Arc::new(BlockExecutionOutput {
+                state: Default::default(),
+                result: Default::default(),
+            })));
+            drop(valid_block_tx);
+            let prewarm = runtime.spawn_blocking_named("prewarm", move || {
+                task.run::<WithTxEnv<TxEnvFor<EthEvmConfig>, Recovered<TransactionSigned>>>(
+                    PrewarmMode::Skipped,
+                    actions_tx,
+                );
+                thread::current().id()
+            });
+            let prewarm_thread = *prewarm.get();
+
+            execution_cache.update_with_guard(|cached| assert!(cached.is_none()));
+            assert_eq!(payload.prewarm_handle.saved_cache.as_ref().unwrap().usage_count(), 2);
+            assert!(matches!(dropped.try_recv(), Err(mpsc::TryRecvError::Empty)));
+            drop(payload);
+            assert!(matches!(dropped.try_recv(), Err(mpsc::TryRecvError::Empty)));
+
+            drop(validator_cache);
+            assert!(dropped.try_recv().expect("last ExecutionCache drop must free the cache"));
+            let drop_thread = reader.join().unwrap();
+            assert_eq!(drop_thread, thread::current().id());
+            assert_ne!(drop_thread, prewarm_thread);
         });
-        let prewarm_thread = *prewarm.get();
-
-        execution_cache.update_with_guard(|cached| assert!(cached.is_none()));
-        assert_eq!(payload.prewarm_handle.saved_cache.as_ref().unwrap().usage_count(), 2);
-        assert!(matches!(dropped.try_recv(), Err(mpsc::TryRecvError::Empty)));
-        drop(payload);
-        assert!(matches!(dropped.try_recv(), Err(mpsc::TryRecvError::Empty)));
-
-        drop(validator_cache);
-        assert!(dropped.try_recv().expect("last ExecutionCache drop must free the cache"));
-        let drop_thread = reader.join().unwrap();
-        assert_eq!(drop_thread, thread::current().id());
-        assert_ne!(drop_thread, prewarm_thread);
     }
 
     fn assert_save_cache_drops_removed_caches(slot: CacheSlot, valid: bool, insert_error: bool) {
@@ -1509,33 +1533,45 @@ mod tests {
 
     #[test]
     fn save_cache_drops_replaced_allocation_after_unlock() {
-        assert_save_cache_drops_removed_caches(CacheSlot::Distinct, true, false);
+        reth_tasks::executor::Runtime::new().run(|| {
+            assert_save_cache_drops_removed_caches(CacheSlot::Distinct, true, false);
+        });
     }
 
     #[test]
     fn save_cache_drops_invalid_allocations_after_unlock() {
-        assert_save_cache_drops_removed_caches(CacheSlot::Distinct, false, false);
+        reth_tasks::executor::Runtime::new().run(|| {
+            assert_save_cache_drops_removed_caches(CacheSlot::Distinct, false, false);
+        });
     }
 
     #[test]
     fn save_cache_drops_allocations_after_unlock_on_insert_error() {
-        assert_save_cache_drops_removed_caches(CacheSlot::Distinct, true, true);
+        reth_tasks::executor::Runtime::new().run(|| {
+            assert_save_cache_drops_removed_caches(CacheSlot::Distinct, true, true);
+        });
     }
 
     #[test]
     fn save_cache_drops_shared_allocation_after_unlock_on_invalid_block() {
-        assert_save_cache_drops_removed_caches(CacheSlot::Shared, false, false);
+        reth_tasks::executor::Runtime::new().run(|| {
+            assert_save_cache_drops_removed_caches(CacheSlot::Shared, false, false);
+        });
     }
 
     #[test]
     fn save_cache_drops_shared_allocation_after_unlock_on_insert_error() {
-        assert_save_cache_drops_removed_caches(CacheSlot::Shared, true, true);
+        reth_tasks::executor::Runtime::new().run(|| {
+            assert_save_cache_drops_removed_caches(CacheSlot::Shared, true, true);
+        });
     }
 
     #[test]
     fn save_cache_handles_empty_slot() {
-        for (valid, insert_error) in [(true, false), (false, false), (true, true)] {
-            assert_save_cache_drops_removed_caches(CacheSlot::Empty, valid, insert_error);
-        }
+        reth_tasks::executor::Runtime::new().run(|| {
+            for (valid, insert_error) in [(true, false), (false, false), (true, true)] {
+                assert_save_cache_drops_removed_caches(CacheSlot::Empty, valid, insert_error);
+            }
+        });
     }
 }

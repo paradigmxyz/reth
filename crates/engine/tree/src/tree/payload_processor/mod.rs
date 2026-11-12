@@ -795,137 +795,146 @@ mod tests {
 
     #[test]
     fn transaction_conversion_preserves_results() {
-        for (count, bal) in [(10, false), (200, false), (200, true)] {
-            let processor = test_processor();
-            let (prewarm, receiver) = processor.spawn_tx_iterator(
-                ((0..count).collect::<Vec<_>>(), |_| Ok::<_, std::io::Error>(converted_tx())),
-                count,
-                bal,
-                true,
-            );
-            let mut indices = Vec::new();
-            for _ in 0..count {
-                let (idx, tx) = receiver.recv_timeout(std::time::Duration::from_secs(10)).unwrap();
-                assert!(tx.is_ok());
-                indices.push(idx);
+        reth_tasks::executor::Runtime::new().run(|| {
+            for (count, bal) in [(10, false), (200, false), (200, true)] {
+                let processor = test_processor();
+                let (prewarm, receiver) = processor.spawn_tx_iterator(
+                    ((0..count).collect::<Vec<_>>(), |_| Ok::<_, std::io::Error>(converted_tx())),
+                    count,
+                    bal,
+                    true,
+                );
+                let mut indices = Vec::new();
+                for _ in 0..count {
+                    let (idx, tx) =
+                        receiver.recv_timeout(std::time::Duration::from_secs(10)).unwrap();
+                    assert!(tx.is_ok());
+                    indices.push(idx);
+                }
+                if bal {
+                    indices.sort_unstable();
+                }
+                assert_eq!(indices, (0..count).collect::<Vec<_>>());
+                assert_eq!(prewarm.unwrap().iter().count(), count);
             }
-            if bal {
-                indices.sort_unstable();
-            }
-            assert_eq!(indices, (0..count).collect::<Vec<_>>());
-            assert_eq!(prewarm.unwrap().iter().count(), count);
-        }
+        });
     }
 
     #[test]
     fn transaction_conversion_stops_on_error() {
-        for (count, bal, fail_at) in
-            [(10, false, 0), (10, true, 0), (200, false, 0), (200, false, 4), (200, false, 20)]
-        {
+        reth_tasks::executor::Runtime::new().run(|| {
+            for (count, bal, fail_at) in
+                [(10, false, 0), (10, true, 0), (200, false, 0), (200, false, 4), (200, false, 20)]
+            {
+                let processor = test_processor();
+                let (_, receiver) = processor.spawn_tx_iterator(
+                    ((0..count).collect::<Vec<_>>(), move |idx| {
+                        if idx >= fail_at {
+                            Err(std::io::Error::other("invalid transaction"))
+                        } else {
+                            Ok(converted_tx())
+                        }
+                    }),
+                    count,
+                    bal,
+                    false,
+                );
+                let mut results = Vec::new();
+                loop {
+                    match receiver.recv_timeout(std::time::Duration::from_secs(10)) {
+                        Ok(tx) => results.push(tx),
+                        Err(RecvTimeoutError::Disconnected) => break,
+                        Err(err) => panic!("conversion did not terminate: {err}"),
+                    }
+                }
+                assert!(results.iter().any(|(_, tx)| tx.is_err()));
+                assert!(results.len() < count);
+                if !bal {
+                    assert_eq!(results.len(), fail_at + 1);
+                    assert!(results.last().unwrap().1.is_err());
+                }
+            }
+        });
+    }
+
+    #[test]
+    fn bal_transaction_conversion_preserves_all_error_slots() {
+        reth_tasks::executor::Runtime::new().run(|| {
+            let count = 200;
             let processor = test_processor();
             let (_, receiver) = processor.spawn_tx_iterator(
-                ((0..count).collect::<Vec<_>>(), move |idx| {
-                    if idx >= fail_at {
+                ((0..count).collect::<Vec<_>>(), |idx| {
+                    if idx % 3 == 0 {
                         Err(std::io::Error::other("invalid transaction"))
                     } else {
                         Ok(converted_tx())
                     }
                 }),
                 count,
-                bal,
+                true,
                 false,
             );
-            let mut results = Vec::new();
-            loop {
-                match receiver.recv_timeout(std::time::Duration::from_secs(10)) {
-                    Ok(tx) => results.push(tx),
-                    Err(RecvTimeoutError::Disconnected) => break,
-                    Err(err) => panic!("conversion did not terminate: {err}"),
-                }
+            let mut indices = Vec::new();
+            for _ in 0..count {
+                let (idx, tx) = receiver.recv_timeout(std::time::Duration::from_secs(10)).unwrap();
+                assert_eq!(tx.is_err(), idx % 3 == 0);
+                indices.push(idx);
             }
-            assert!(results.iter().any(|(_, tx)| tx.is_err()));
-            assert!(results.len() < count);
-            if !bal {
-                assert_eq!(results.len(), fail_at + 1);
-                assert!(results.last().unwrap().1.is_err());
-            }
-        }
-    }
-
-    #[test]
-    fn bal_transaction_conversion_preserves_all_error_slots() {
-        let count = 200;
-        let processor = test_processor();
-        let (_, receiver) = processor.spawn_tx_iterator(
-            ((0..count).collect::<Vec<_>>(), |idx| {
-                if idx % 3 == 0 {
-                    Err(std::io::Error::other("invalid transaction"))
-                } else {
-                    Ok(converted_tx())
-                }
-            }),
-            count,
-            true,
-            false,
-        );
-        let mut indices = Vec::new();
-        for _ in 0..count {
-            let (idx, tx) = receiver.recv_timeout(std::time::Duration::from_secs(10)).unwrap();
-            assert_eq!(tx.is_err(), idx % 3 == 0);
-            indices.push(idx);
-        }
-        indices.sort_unstable();
-        assert_eq!(indices, (0..count).collect::<Vec<_>>());
+            indices.sort_unstable();
+            assert_eq!(indices, (0..count).collect::<Vec<_>>());
+        });
     }
 
     #[test]
     fn dropping_payload_handle_stops_transaction_conversion() {
-        for (count, bal, pause_at) in
-            [(10, false, 0), (1000, false, 0), (1000, false, 4), (1000, true, 0)]
-        {
-            let processor = test_processor();
-            let calls = Arc::new(super::AtomicUsize::new(0));
-            let converted = calls.clone();
-            let (started_tx, started_rx) = channel::unbounded();
-            let (release_tx, release_rx) = channel::bounded::<()>(0);
-            let (_, receiver) = processor.spawn_tx_iterator(
-                ((0..count).collect::<Vec<_>>(), move |idx| {
-                    converted.fetch_add(1, Ordering::Relaxed);
-                    if idx >= pause_at {
-                        started_tx.send(()).unwrap();
-                        let _ = release_rx.recv_timeout(std::time::Duration::from_secs(10));
-                    }
-                    Ok::<_, std::io::Error>(converted_tx())
-                }),
-                count,
-                bal,
-                false,
-            );
-            let handle = super::PayloadHandle {
-                prewarm_handle: super::CacheTaskHandle::<(), evm2::BaseEvmTypes> {
-                    saved_cache: None,
-                    to_prewarm_task: None,
-                    executed_tx_index: Default::default(),
-                    prewarm_results: None,
-                    cache_metrics: None,
-                },
-                transactions: receiver,
-                _span: tracing::Span::none(),
-            };
-            started_rx.recv_timeout(std::time::Duration::from_secs(10)).unwrap();
-            drop(handle);
-            drop(release_tx);
+        reth_tasks::executor::Runtime::new().run(|| {
+            for (count, bal, pause_at) in
+                [(10, false, 0), (1000, false, 0), (1000, false, 4), (1000, true, 0)]
+            {
+                let processor = test_processor();
+                let calls = Arc::new(super::AtomicUsize::new(0));
+                let converted = calls.clone();
+                let (started_tx, started_rx) = channel::unbounded();
+                let (release_tx, release_rx) = channel::bounded::<()>(0);
+                let (_, receiver) = processor.spawn_tx_iterator(
+                    ((0..count).collect::<Vec<_>>(), move |idx| {
+                        converted.fetch_add(1, Ordering::Relaxed);
+                        if idx >= pause_at {
+                            started_tx.send(()).unwrap();
+                            let _ = release_rx.recv_timeout(std::time::Duration::from_secs(10));
+                        }
+                        Ok::<_, std::io::Error>(converted_tx())
+                    }),
+                    count,
+                    bal,
+                    false,
+                );
+                let handle = super::PayloadHandle {
+                    prewarm_handle: super::CacheTaskHandle::<(), evm2::BaseEvmTypes> {
+                        saved_cache: None,
+                        to_prewarm_task: None,
+                        executed_tx_index: Default::default(),
+                        prewarm_results: None,
+                        cache_metrics: None,
+                    },
+                    transactions: receiver,
+                    _span: tracing::Span::none(),
+                };
+                started_rx.recv_timeout(std::time::Duration::from_secs(10)).unwrap();
+                drop(handle);
+                drop(release_tx);
 
-            // The converter owns the last sender, so disconnection confirms recovery exited.
-            loop {
-                match started_rx.recv_timeout(std::time::Duration::from_secs(10)) {
-                    Ok(()) => {}
-                    Err(RecvTimeoutError::Disconnected) => break,
-                    Err(err) => panic!("conversion did not terminate: {err}"),
+                // The converter owns the last sender, so disconnection confirms recovery exited.
+                loop {
+                    match started_rx.recv_timeout(std::time::Duration::from_secs(10)) {
+                        Ok(()) => {}
+                        Err(RecvTimeoutError::Disconnected) => break,
+                        Err(err) => panic!("conversion did not terminate: {err}"),
+                    }
                 }
+                assert!(calls.load(Ordering::Relaxed) < count);
             }
-            assert!(calls.load(Ordering::Relaxed) < count);
-        }
+        });
     }
 
     fn make_saved_cache(hash: B256) -> SavedCache {
@@ -935,201 +944,216 @@ mod tests {
 
     #[test]
     fn execution_cache_allows_single_checkout() {
-        let execution_cache = PayloadExecutionCache::default();
-        let hash = B256::repeat_byte(1u8);
+        reth_tasks::executor::Runtime::new().run(|| {
+            let execution_cache = PayloadExecutionCache::default();
+            let hash = B256::repeat_byte(1u8);
 
-        execution_cache.update_with_guard(|slot| *slot = Some(make_saved_cache(hash)));
+            execution_cache.update_with_guard(|slot| *slot = Some(make_saved_cache(hash)));
 
-        let first = execution_cache.get_cache_for(hash);
-        assert!(first.is_some(), "expected initial checkout to succeed");
+            let first = execution_cache.get_cache_for(hash);
+            assert!(first.is_some(), "expected initial checkout to succeed");
 
-        let second = execution_cache.get_cache_for(hash);
-        assert!(second.is_none(), "second checkout should be blocked while guard is active");
+            let second = execution_cache.get_cache_for(hash);
+            assert!(second.is_none(), "second checkout should be blocked while guard is active");
 
-        drop(first);
+            drop(first);
 
-        let third = execution_cache.get_cache_for(hash);
-        assert!(third.is_some(), "third checkout should succeed after guard is dropped");
+            let third = execution_cache.get_cache_for(hash);
+            assert!(third.is_some(), "third checkout should succeed after guard is dropped");
+        });
     }
 
     #[test]
     fn execution_cache_checkout_releases_on_drop() {
-        let execution_cache = PayloadExecutionCache::default();
-        let hash = B256::repeat_byte(2u8);
+        reth_tasks::executor::Runtime::new().run(|| {
+            let execution_cache = PayloadExecutionCache::default();
+            let hash = B256::repeat_byte(2u8);
 
-        execution_cache.update_with_guard(|slot| *slot = Some(make_saved_cache(hash)));
+            execution_cache.update_with_guard(|slot| *slot = Some(make_saved_cache(hash)));
 
-        {
-            let guard = execution_cache.get_cache_for(hash);
-            assert!(guard.is_some(), "expected checkout to succeed");
-            // Guard dropped at end of scope
-        }
+            {
+                let guard = execution_cache.get_cache_for(hash);
+                assert!(guard.is_some(), "expected checkout to succeed");
+                // Guard dropped at end of scope
+            }
 
-        let retry = execution_cache.get_cache_for(hash);
-        assert!(retry.is_some(), "checkout should succeed after guard drop");
+            let retry = execution_cache.get_cache_for(hash);
+            assert!(retry.is_some(), "checkout should succeed after guard drop");
+        });
     }
 
     #[test]
     fn execution_cache_mismatch_parent_clears_and_returns() {
-        let execution_cache = PayloadExecutionCache::default();
-        let hash = B256::repeat_byte(3u8);
+        reth_tasks::executor::Runtime::new().run(|| {
+            let execution_cache = PayloadExecutionCache::default();
+            let hash = B256::repeat_byte(3u8);
 
-        execution_cache.update_with_guard(|slot| *slot = Some(make_saved_cache(hash)));
+            execution_cache.update_with_guard(|slot| *slot = Some(make_saved_cache(hash)));
 
-        // When the parent hash doesn't match (fork block), the cache is cleared,
-        // hash updated on the original, and clone returned for reuse
-        let different_hash = B256::repeat_byte(4u8);
-        let cache = execution_cache.get_cache_for(different_hash);
-        assert!(cache.is_some(), "cache should be returned for reuse after clearing");
+            // When the parent hash doesn't match (fork block), the cache is cleared,
+            // hash updated on the original, and clone returned for reuse
+            let different_hash = B256::repeat_byte(4u8);
+            let cache = execution_cache.get_cache_for(different_hash);
+            assert!(cache.is_some(), "cache should be returned for reuse after clearing");
 
-        drop(cache);
+            drop(cache);
 
-        // The stored cache now has the fork block's parent hash.
-        // Canonical chain looking for original hash sees a mismatch → clears and reuses.
-        let original = execution_cache.get_cache_for(hash);
-        assert!(original.is_some(), "canonical chain gets cache back via mismatch+clear");
+            // The stored cache now has the fork block's parent hash.
+            // Canonical chain looking for original hash sees a mismatch → clears and reuses.
+            let original = execution_cache.get_cache_for(hash);
+            assert!(original.is_some(), "canonical chain gets cache back via mismatch+clear");
+        });
     }
 
     #[test]
     fn execution_cache_update_after_release_succeeds() {
-        let execution_cache = PayloadExecutionCache::default();
-        let initial = B256::repeat_byte(5u8);
+        reth_tasks::executor::Runtime::new().run(|| {
+            let execution_cache = PayloadExecutionCache::default();
+            let initial = B256::repeat_byte(5u8);
 
-        execution_cache.update_with_guard(|slot| *slot = Some(make_saved_cache(initial)));
+            execution_cache.update_with_guard(|slot| *slot = Some(make_saved_cache(initial)));
 
-        let guard =
-            execution_cache.get_cache_for(initial).expect("expected initial checkout to succeed");
+            let guard = execution_cache
+                .get_cache_for(initial)
+                .expect("expected initial checkout to succeed");
 
-        drop(guard);
+            drop(guard);
 
-        let updated = B256::repeat_byte(6u8);
-        execution_cache.update_with_guard(|slot| *slot = Some(make_saved_cache(updated)));
+            let updated = B256::repeat_byte(6u8);
+            execution_cache.update_with_guard(|slot| *slot = Some(make_saved_cache(updated)));
 
-        let new_checkout = execution_cache.get_cache_for(updated);
-        assert!(new_checkout.is_some(), "new checkout should succeed after release and update");
+            let new_checkout = execution_cache.get_cache_for(updated);
+            assert!(new_checkout.is_some(), "new checkout should succeed after release and update");
+        });
     }
 
     #[test]
     fn on_inserted_executed_block_populates_cache() {
-        let payload_processor = PayloadProcessor::new(
-            reth_tasks::Runtime::test(),
-            EthEvmConfig::new(Arc::new(ChainSpec::default())),
-            &TreeConfig::default(),
-            PrecompileCacheMap::default(),
-        );
+        reth_tasks::executor::Runtime::new().run(|| {
+            let payload_processor = PayloadProcessor::new(
+                reth_tasks::Runtime::test(),
+                EthEvmConfig::new(Arc::new(ChainSpec::default())),
+                &TreeConfig::default(),
+                PrecompileCacheMap::default(),
+            );
 
-        let parent_hash = B256::repeat_byte(1u8);
-        let block_hash = B256::repeat_byte(10u8);
-        let block_with_parent = BlockWithParent {
-            block: BlockNumHash { hash: block_hash, number: 1 },
-            parent: parent_hash,
-        };
-        let bundle_state = BundleState::default();
+            let parent_hash = B256::repeat_byte(1u8);
+            let block_hash = B256::repeat_byte(10u8);
+            let block_with_parent = BlockWithParent {
+                block: BlockNumHash { hash: block_hash, number: 1 },
+                parent: parent_hash,
+            };
+            let bundle_state = BundleState::default();
 
-        // Cache should be empty initially
-        assert!(payload_processor.execution_cache.get_cache_for(block_hash).is_none());
+            // Cache should be empty initially
+            assert!(payload_processor.execution_cache.get_cache_for(block_hash).is_none());
 
-        // Update cache with inserted block
-        payload_processor.on_inserted_executed_block(block_with_parent, &bundle_state);
+            // Update cache with inserted block
+            payload_processor.on_inserted_executed_block(block_with_parent, &bundle_state);
 
-        // Cache should now exist for the block hash
-        let cached = payload_processor.execution_cache.get_cache_for(block_hash);
-        assert!(cached.is_some());
-        assert_eq!(cached.unwrap().executed_block_hash(), block_hash);
+            // Cache should now exist for the block hash
+            let cached = payload_processor.execution_cache.get_cache_for(block_hash);
+            assert!(cached.is_some());
+            assert_eq!(cached.unwrap().executed_block_hash(), block_hash);
+        });
     }
 
     #[test]
     fn on_inserted_executed_block_skips_on_parent_mismatch() {
-        let payload_processor = PayloadProcessor::new(
-            reth_tasks::Runtime::test(),
-            EthEvmConfig::new(Arc::new(ChainSpec::default())),
-            &TreeConfig::default(),
-            PrecompileCacheMap::default(),
-        );
+        reth_tasks::executor::Runtime::new().run(|| {
+            let payload_processor = PayloadProcessor::new(
+                reth_tasks::Runtime::test(),
+                EthEvmConfig::new(Arc::new(ChainSpec::default())),
+                &TreeConfig::default(),
+                PrecompileCacheMap::default(),
+            );
 
-        // Setup: populate cache with block 1
-        let block1_hash = B256::repeat_byte(1u8);
-        payload_processor
-            .execution_cache
-            .update_with_guard(|slot| *slot = Some(make_saved_cache(block1_hash)));
+            // Setup: populate cache with block 1
+            let block1_hash = B256::repeat_byte(1u8);
+            payload_processor
+                .execution_cache
+                .update_with_guard(|slot| *slot = Some(make_saved_cache(block1_hash)));
 
-        // Try to insert block 3 with wrong parent (should skip and keep block 1's cache)
-        let wrong_parent = B256::repeat_byte(99u8);
-        let block3_hash = B256::repeat_byte(3u8);
-        let block_with_parent = BlockWithParent {
-            block: BlockNumHash { hash: block3_hash, number: 3 },
-            parent: wrong_parent,
-        };
-        let bundle_state = BundleState::default();
+            // Try to insert block 3 with wrong parent (should skip and keep block 1's cache)
+            let wrong_parent = B256::repeat_byte(99u8);
+            let block3_hash = B256::repeat_byte(3u8);
+            let block_with_parent = BlockWithParent {
+                block: BlockNumHash { hash: block3_hash, number: 3 },
+                parent: wrong_parent,
+            };
+            let bundle_state = BundleState::default();
 
-        payload_processor.on_inserted_executed_block(block_with_parent, &bundle_state);
+            payload_processor.on_inserted_executed_block(block_with_parent, &bundle_state);
 
-        // Cache should still be for block 1 (unchanged)
-        let cached = payload_processor.execution_cache.get_cache_for(block1_hash);
-        assert!(cached.is_some(), "Original cache should be preserved");
+            // Cache should still be for block 1 (unchanged)
+            let cached = payload_processor.execution_cache.get_cache_for(block1_hash);
+            assert!(cached.is_some(), "Original cache should be preserved");
 
-        // Cache for block 3 should not exist
-        let cached3 = payload_processor.execution_cache.get_cache_for(block3_hash);
-        assert!(cached3.is_none(), "New block cache should not be created on mismatch");
+            // Cache for block 3 should not exist
+            let cached3 = payload_processor.execution_cache.get_cache_for(block3_hash);
+            assert!(cached3.is_none(), "New block cache should not be created on mismatch");
+        });
     }
 
     #[test]
     fn on_inserted_executed_block_does_not_mutate_checked_out_parent_cache() {
-        let payload_processor = PayloadProcessor::new(
-            reth_tasks::Runtime::test(),
-            EthEvmConfig::new(Arc::new(ChainSpec::default())),
-            &TreeConfig::default(),
-            PrecompileCacheMap::default(),
-        );
+        reth_tasks::executor::Runtime::new().run(|| {
+            let payload_processor = PayloadProcessor::new(
+                reth_tasks::Runtime::test(),
+                EthEvmConfig::new(Arc::new(ChainSpec::default())),
+                &TreeConfig::default(),
+                PrecompileCacheMap::default(),
+            );
 
-        let parent_hash = B256::repeat_byte(1u8);
-        payload_processor
-            .execution_cache
-            .update_with_guard(|slot| *slot = Some(make_saved_cache(parent_hash)));
+            let parent_hash = B256::repeat_byte(1u8);
+            payload_processor
+                .execution_cache
+                .update_with_guard(|slot| *slot = Some(make_saved_cache(parent_hash)));
 
-        // Checking out the cache bumps its `ExecutionCache` refcount, marking the slot as in-use.
-        // The returned SavedCache shares the same underlying ExecutionCache Arc as the slot,
-        // so any writes through the slot are observable here
-        let checked_out = payload_processor
-            .execution_cache
-            .get_cache_for(parent_hash)
-            .expect("expected parent cache checkout to succeed");
+            // Checking out the cache bumps its `ExecutionCache` refcount, marking the slot as
+            // in-use. The returned SavedCache shares the same underlying ExecutionCache Arc as the
+            // slot, so any writes through the slot are observable here
+            let checked_out = payload_processor
+                .execution_cache
+                .get_cache_for(parent_hash)
+                .expect("expected parent cache checkout to succeed");
 
-        let polluted_address = Address::random();
-        let bundle_state = BundleState::builder(2..=2)
-            .state_present_account_info(
-                polluted_address,
-                AccountInfo {
-                    balance: U256::from(1337),
-                    nonce: 7,
-                    code_hash: KECCAK_EMPTY,
-                    code: None,
-                    ..Default::default()
-                },
-            )
-            .build();
+            let polluted_address = Address::random();
+            let bundle_state = BundleState::builder(2..=2)
+                .state_present_account_info(
+                    polluted_address,
+                    AccountInfo {
+                        balance: U256::from(1337),
+                        nonce: 7,
+                        code_hash: KECCAK_EMPTY,
+                        code: None,
+                        ..Default::default()
+                    },
+                )
+                .build();
 
-        // Make parent match the cached slot so we bypass the parent-mismatch guard and exercise
-        // the in-use guard specifically.
-        let block_with_parent = BlockWithParent {
-            block: BlockNumHash { hash: B256::repeat_byte(2u8), number: 2 },
-            parent: parent_hash,
-        };
+            // Make parent match the cached slot so we bypass the parent-mismatch guard and exercise
+            // the in-use guard specifically.
+            let block_with_parent = BlockWithParent {
+                block: BlockNumHash { hash: B256::repeat_byte(2u8), number: 2 },
+                parent: parent_hash,
+            };
 
-        payload_processor.on_inserted_executed_block(block_with_parent, &bundle_state);
+            payload_processor.on_inserted_executed_block(block_with_parent, &bundle_state);
 
-        // The closure runs only on a cache miss, so NotCached(None) means polluted_address was
-        // absent and Cached(Some(_)) means it was written by on_inserted_executed_block.
-        let account = checked_out
-            .cache()
-            .get_or_try_insert_account_with(polluted_address, || Ok::<_, ()>(None))
-            .expect("cache read should succeed");
+            // The closure runs only on a cache miss, so NotCached(None) means polluted_address was
+            // absent and Cached(Some(_)) means it was written by on_inserted_executed_block.
+            let account = checked_out
+                .cache()
+                .get_or_try_insert_account_with(polluted_address, || Ok::<_, ()>(None))
+                .expect("cache read should succeed");
 
-        assert_eq!(
-            account,
-            CachedStatus::NotCached(None),
-            "checked-out parent cache should not observe state from inserted local block"
-        );
+            assert_eq!(
+                account,
+                CachedStatus::NotCached(None),
+                "checked-out parent cache should not observe state from inserted local block"
+            );
+        });
     }
 
     /// Tests the full prewarm lifecycle for a fork block:
@@ -1144,49 +1168,51 @@ mod tests {
     ///    data.
     #[test]
     fn fork_prewarm_dropped_without_save_does_not_corrupt_cache() {
-        let execution_cache = PayloadExecutionCache::default();
+        reth_tasks::executor::Runtime::new().run(|| {
+            let execution_cache = PayloadExecutionCache::default();
 
-        // Canonical chain at block 4.
-        let block4_hash = B256::repeat_byte(4u8);
-        execution_cache.update_with_guard(|slot| *slot = Some(make_saved_cache(block4_hash)));
+            // Canonical chain at block 4.
+            let block4_hash = B256::repeat_byte(4u8);
+            execution_cache.update_with_guard(|slot| *slot = Some(make_saved_cache(block4_hash)));
 
-        // Fork block arrives with parent = block 2. Prewarm task checks out the cache.
-        // This simulates PrewarmCacheTask receiving a SavedCache clone from get_cache_for.
-        let fork_parent = B256::repeat_byte(2u8);
-        let prewarm_cache = execution_cache.get_cache_for(fork_parent);
-        assert!(prewarm_cache.is_some(), "prewarm should obtain cache for fork block");
-        let prewarm_cache = prewarm_cache.unwrap();
-        assert_eq!(prewarm_cache.executed_block_hash(), fork_parent);
+            // Fork block arrives with parent = block 2. Prewarm task checks out the cache.
+            // This simulates PrewarmCacheTask receiving a SavedCache clone from get_cache_for.
+            let fork_parent = B256::repeat_byte(2u8);
+            let prewarm_cache = execution_cache.get_cache_for(fork_parent);
+            assert!(prewarm_cache.is_some(), "prewarm should obtain cache for fork block");
+            let prewarm_cache = prewarm_cache.unwrap();
+            assert_eq!(prewarm_cache.executed_block_hash(), fork_parent);
 
-        // Prewarm populates cache with fork-specific state (ancestor data for block 2).
-        // Since ExecutionCache uses Arc<Inner>, this data is shared with the stored original.
-        let fork_addr = Address::repeat_byte(0xBB);
-        let fork_key = B256::repeat_byte(0xCC);
-        prewarm_cache.cache().insert_storage(fork_addr, fork_key, Some(U256::from(999)));
+            // Prewarm populates cache with fork-specific state (ancestor data for block 2).
+            // Since ExecutionCache uses Arc<Inner>, this data is shared with the stored original.
+            let fork_addr = Address::repeat_byte(0xBB);
+            let fork_key = B256::repeat_byte(0xCC);
+            prewarm_cache.cache().insert_storage(fork_addr, fork_key, Some(U256::from(999)));
 
-        // While prewarm holds the clone, the cache handle count > 1 so the cache is in use.
-        let during_prewarm = execution_cache.get_cache_for(block4_hash);
-        assert!(
-            during_prewarm.is_none(),
-            "cache must be unavailable while prewarm holds a reference"
-        );
+            // While prewarm holds the clone, the cache handle count > 1 so the cache is in use.
+            let during_prewarm = execution_cache.get_cache_for(block4_hash);
+            assert!(
+                during_prewarm.is_none(),
+                "cache must be unavailable while prewarm holds a reference"
+            );
 
-        // Fork block fails — prewarm task drops without calling save_cache/update_with_guard.
-        drop(prewarm_cache);
+            // Fork block fails — prewarm task drops without calling save_cache/update_with_guard.
+            drop(prewarm_cache);
 
-        // Canonical block 5 arrives (parent = block 4).
-        // Stored hash = fork_parent (our fix), so get_cache_for sees a mismatch,
-        // clears the stale fork data, and returns a cache with hash = block4_hash.
-        let block5_cache = execution_cache.get_cache_for(block4_hash);
-        assert!(
-            block5_cache.is_some(),
-            "canonical chain must get cache after fork prewarm is dropped"
-        );
-        assert_eq!(
-            block5_cache.as_ref().unwrap().executed_block_hash(),
-            block4_hash,
-            "cache must carry the canonical parent hash, not the fork parent"
-        );
+            // Canonical block 5 arrives (parent = block 4).
+            // Stored hash = fork_parent (our fix), so get_cache_for sees a mismatch,
+            // clears the stale fork data, and returns a cache with hash = block4_hash.
+            let block5_cache = execution_cache.get_cache_for(block4_hash);
+            assert!(
+                block5_cache.is_some(),
+                "canonical chain must get cache after fork prewarm is dropped"
+            );
+            assert_eq!(
+                block5_cache.as_ref().unwrap().executed_block_hash(),
+                block4_hash,
+                "cache must carry the canonical parent hash, not the fork parent"
+            );
+        });
     }
 
     #[test]
@@ -1217,21 +1243,23 @@ mod tests {
         let level = level.parse::<LevelFilter>().unwrap();
         tracing::subscriber::set_global_default(tracing_subscriber::registry().with(level))
             .unwrap();
-        let processor = test_processor();
+        reth_tasks::executor::Runtime::new().run(move || {
+            let processor = test_processor();
 
-        // Exercise both sides of the sequential cutoff and the first parallel window, as well
-        // as randomly sized blocks. BAL execution bypasses the sequential prefetch/windowing.
-        for count in [0, 1, 29, 30, 68, 69] {
-            for bal in [false, true] {
-                assert_conversion_spans(&processor, count, bal, level);
+            // Exercise both sides of the sequential cutoff and the first parallel window, as well
+            // as randomly sized blocks. BAL execution bypasses the sequential prefetch/windowing.
+            for count in [0, 1, 29, 30, 68, 69] {
+                for bal in [false, true] {
+                    assert_conversion_spans(&processor, count, bal, level);
+                }
             }
-        }
-        TestRunner::new(Config::with_cases(32))
-            .run(&(0..200usize, any::<bool>()), |(count, bal)| {
-                assert_conversion_spans(&processor, count, bal, level);
-                Ok(())
-            })
-            .unwrap();
+            TestRunner::new(Config::with_cases(32))
+                .run(&(0..200usize, any::<bool>()), |(count, bal)| {
+                    assert_conversion_spans(&processor, count, bal, level);
+                    Ok(())
+                })
+                .unwrap();
+        });
     }
 
     fn assert_conversion_spans(

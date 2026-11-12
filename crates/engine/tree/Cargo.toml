@@ -96,6 +96,7 @@ tracing-subscriber = { workspace = true, features = ["registry"] }
 
 [features]
 fuzz = [
+    "reth-execution-cache/fuzz",
     "reth-trie/fuzz",
     "reth-chain-state/fuzz",
     "reth-evm/fuzz",
