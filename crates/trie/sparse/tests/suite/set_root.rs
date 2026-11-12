@@ -135,10 +135,10 @@ pub(super) fn test_set_root_does_not_retain_updates_when_not_requested<T: Sparse
 
 /// `EmptyRoot` produces `EMPTY_ROOT_HASH`.
 ///
-/// Setting the root to `TrieNodeV2::EmptyRoot` should leave the trie in its initial
+/// Setting the root to `TrieNode::EmptyRoot` should leave the trie in its initial
 /// empty state, returning `EMPTY_ROOT_HASH` from `root()`.
 pub(super) fn test_set_root_with_empty_root<T: SparseTrie>(new_trie: fn() -> T) {
     let mut trie = (new_trie)();
-    trie.set_root(TrieNodeV2::EmptyRoot, None, true).expect("set_root should succeed");
+    trie.set_root(TrieNode::EmptyRoot, None, true).expect("set_root should succeed");
     assert_eq!(trie.root(epoch(0)), EMPTY_ROOT_HASH);
 }

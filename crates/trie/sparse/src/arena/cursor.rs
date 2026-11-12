@@ -34,6 +34,8 @@ pub(super) enum SeekResult {
     RevealedLeaf,
     /// The next child along the path is blinded (unrevealed).
     Blinded,
+    /// The branch at the head (or at its extension end) is still blinded.
+    BlindedBranch { path_len: usize },
     /// The target path diverges from the stack head's extension or leaf key.
     Diverged,
     /// The target nibble has no child in the branch's `state_mask`.
@@ -59,7 +61,11 @@ pub(super) enum NextResult {
 pub(super) fn branch_idx(arena: &NodeArena, idx: Index) -> Option<Index> {
     match &arena[idx] {
         ArenaSparseNode::Branch(_) => Some(idx),
-        ArenaSparseNode::Extension { child, .. } => Some(*child),
+        ArenaSparseNode::Extension { child, .. }
+            if matches!(arena[*child], ArenaSparseNode::Branch(_)) =>
+        {
+            Some(*child)
+        }
         _ => None,
     }
 }
@@ -195,8 +201,9 @@ impl ArenaCursor {
         if let Some(parent) = self.stack.last() {
             let child_is_dirty = match node {
                 ArenaSparseNode::Branch(b) => matches!(b.state, ArenaSparseNodeState::Dirty),
-                ArenaSparseNode::Extension { child, .. } => {
-                    matches!(arena[*child].state_ref(), Some(ArenaSparseNodeState::Dirty))
+                ArenaSparseNode::Extension { state, child, .. } => {
+                    matches!(state, ArenaSparseNodeState::Dirty) ||
+                        matches!(arena[*child].state_ref(), Some(ArenaSparseNodeState::Dirty))
                 }
                 ArenaSparseNode::Leaf { state, .. } => matches!(state, ArenaSparseNodeState::Dirty),
                 ArenaSparseNode::Subtrie(_) => {
@@ -205,9 +212,10 @@ impl ArenaCursor {
                 _ => false,
             };
             if child_is_dirty {
-                let parent_branch_idx =
-                    branch_idx(arena, parent.index).expect("parent must be a branch or extension");
-                *arena[parent_branch_idx].state_mut() = ArenaSparseNodeState::Dirty;
+                *arena[parent.index].state_mut() = ArenaSparseNodeState::Dirty;
+                if let Some(branch) = arena[parent.index].extension_child() {
+                    *arena[branch].state_mut() = ArenaSparseNodeState::Dirty;
+                }
             }
         }
 
@@ -399,7 +407,21 @@ impl ArenaCursor {
                     };
                 }
                 ArenaSparseNode::Branch(b) => b,
-                ArenaSparseNode::Extension { child, .. } => arena[*child].branch_ref(),
+                ArenaSparseNode::Extension { key, child, .. } => {
+                    let logical_len = head_path_len + key.len();
+                    if full_path.len() < logical_len ||
+                        full_path.slice_unchecked(head_path_len, logical_len) != *key
+                    {
+                        return SeekResult::Diverged;
+                    }
+                    if matches!(arena[*child], ArenaSparseNode::Blinded { .. }) {
+                        return SeekResult::BlindedBranch { path_len: logical_len };
+                    }
+                    arena[*child].branch_ref()
+                }
+                ArenaSparseNode::Blinded { .. } => {
+                    return SeekResult::BlindedBranch { path_len: head_path_len };
+                }
                 ArenaSparseNode::Subtrie(_) => {
                     return SeekResult::RevealedSubtrie;
                 }

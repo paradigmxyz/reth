@@ -1,6 +1,4 @@
 use super::*;
-use alloy_trie::{nodes::BranchNodeRef, TrieMask};
-use reth_trie_common::{BranchNodeV2, RlpNode};
 
 /// Empty slice is a no-op.
 ///
@@ -145,7 +143,7 @@ pub(super) fn test_reveal_nodes_skips_on_empty_root<T: SparseTrie>(new_trie: fn(
 
     // Create a trie with an empty root.
     let mut trie = (new_trie)();
-    trie.set_root(TrieNodeV2::EmptyRoot, None, true).expect("set_root EmptyRoot should succeed");
+    trie.set_root(TrieNode::EmptyRoot, None, true).expect("set_root EmptyRoot should succeed");
 
     // Reveal non-empty proof nodes — should be a no-op on an empty root.
     trie.reveal_nodes(&mut proof_nodes).expect("reveal_nodes on empty root should succeed");
@@ -396,37 +394,31 @@ pub(super) fn test_insert_then_reveal_does_not_overwrite_branch<T: SparseTrie>(
 pub(super) fn test_reveal_boundary_node_with_missing_upper_parent_branch<T: SparseTrie>(
     new_trie: fn() -> T,
 ) {
-    // Root reveals as extension [0x1, 0x2] with a branch below it at path 0x12.
-    // Use two children so the branch shape is canonical.
-    let child_hash_0 = RlpNode::word_rlp(&B256::repeat_byte(0xAA));
-    let child_hash_1 = RlpNode::word_rlp(&B256::repeat_byte(0xBB));
-    let state_mask = TrieMask::new(0b0011);
-    let branch_rlp = RlpNode::from_rlp(&alloy_rlp::encode(BranchNodeRef::new(
-        &[child_hash_0.clone(), child_hash_1.clone()],
-        state_mask,
-    )));
-    let root = TrieNodeV2::Branch(BranchNodeV2::new(
-        Nibbles::from_nibbles([0x1, 0x2]),
-        vec![child_hash_0, child_hash_1],
-        state_mask,
-        Some(branch_rlp),
+    let key_a = B256::right_padding_from(&[0x12, 0x00]);
+    let key_b = B256::right_padding_from(&[0x12, 0x10]);
+    let harness = SuiteTestHarness::new([(key_a, U256::ONE), (key_b, U256::from(2))].into());
+    let TrieNode::Extension(extension) = harness.root_node().node else {
+        panic!("fixture root must be an extension");
+    };
+    assert_eq!(extension.key, Nibbles::from_nibbles([1, 2]));
+    let mut trie = harness.init_trie_with_targets(&[], false, new_trie);
+    assert!(matches!(
+        trie.find_leaf(&Nibbles::unpack(key_a), None),
+        Err(LeafLookupError::BlindedNode { .. })
     ));
 
-    let mut trie = (new_trie)();
-    trie.set_root(root, None, false).expect("set_root should succeed");
-
-    // Before the fix this panicked at `hashes_from_upper` when trying to unwrap
-    // `upper_subtrie.nodes.get_mut([0x1])`.
-    //
-    // In this shape, 0x12 is the lower branch root path and 0x120/0x121 are its children.
-    // The missing entry is the upper parent at [0x1], which the old code incorrectly unwrapped.
-    let boundary_path = Nibbles::from_nibbles([0x1, 0x2]);
-    let leaf =
-        TrieNodeV2::Leaf(reth_trie_common::LeafNode::new(Nibbles::from_nibbles([0x3]), vec![0x01]));
-    trie.reveal_nodes(&mut [reth_trie_common::ProofTrieNodeV2 {
-        path: boundary_path,
-        node: leaf,
-        masks: None,
-    }])
-    .expect("boundary reveal should not panic");
+    let (mut proof, _) =
+        harness.proof_v2(&mut [ProofV2Target::new(key_a), ProofV2Target::new(key_b)]);
+    // The boundary branch has no upper parent branch at [1]. Its actual parent is the root
+    // extension, and both branch children must be revealed rather than silently skipped.
+    assert!(!proof.iter().any(|node| node.path == Nibbles::from_nibbles([1])));
+    assert!(proof.iter().any(|node| node.path == Nibbles::from_nibbles([1, 2]) &&
+        matches!(node.node, TrieNode::Branch(_))));
+    trie.reveal_nodes(&mut proof).expect("boundary branch and leaves should reveal");
+    for (key, value) in [(key_a, U256::ONE), (key_b, U256::from(2))] {
+        let value = encode_fixed_size(&value).to_vec();
+        assert_eq!(trie.find_leaf(&Nibbles::unpack(key), Some(&value)), Ok(LeafLookup::Exists));
+        assert_eq!(trie.get_leaf_value(&Nibbles::unpack(key)), Some(&value));
+    }
+    assert_eq!(trie.root(epoch(1)), harness.original_root());
 }

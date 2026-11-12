@@ -9,9 +9,7 @@ use alloy_primitives::{
 };
 use alloy_trie::BranchNodeCompact;
 use reth_execution_errors::SparseTrieResult;
-use reth_trie_common::{
-    BranchNodeMasks, Nibbles, ProofTrieNodeV2, ProofV2TargetParent, TrieNodeV2,
-};
+use reth_trie_common::{BranchNodeMasks, Nibbles, ProofTrieNode, ProofV2TargetParent, TrieNode};
 
 /// Modification epoch assigned to cached sparse trie nodes.
 ///
@@ -78,16 +76,15 @@ pub trait SparseTrie: Sized + Debug + Send + Sync {
     ///
     /// # Returns
     ///
-    /// `Ok(())` if successful, or an error if revealing fails. Implementations may reject
-    /// unsupported root variants. The arena implementation requires extensions to be merged
-    /// into branch nodes and returns an error for standalone [`TrieNodeV2::Extension`] roots.
+    /// `Ok(())` if successful, or an error if revealing fails. Extension roots may reference
+    /// branches that are supplied separately to [`Self::reveal_nodes`].
     ///
     /// # Panics
     ///
     /// May panic if the trie is not new/cleared, and has already revealed nodes.
     fn set_root(
         &mut self,
-        root: TrieNodeV2,
+        root: TrieNode,
         masks: Option<BranchNodeMasks>,
         retain_updates: bool,
     ) -> SparseTrieResult<()>;
@@ -122,8 +119,8 @@ pub trait SparseTrie: Sized + Debug + Send + Sync {
     /// # Note
     ///
     /// The implementation may modify the input nodes. A common thing to do is [`std::mem::replace`]
-    /// each node with [`TrieNodeV2::EmptyRoot`] to avoid cloning.
-    fn reveal_nodes(&mut self, nodes: &mut [ProofTrieNodeV2]) -> SparseTrieResult<()>;
+    /// each node with [`TrieNode::EmptyRoot`] to avoid cloning.
+    fn reveal_nodes(&mut self, nodes: &mut [ProofTrieNode]) -> SparseTrieResult<()>;
 
     /// Calculates and returns the root hash of the trie at the provided epoch.
     ///

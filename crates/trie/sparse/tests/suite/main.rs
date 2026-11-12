@@ -21,7 +21,7 @@ use alloy_primitives::{keccak256, map::B256Map, B256, U256};
 use alloy_rlp::{encode_fixed_size, Decodable};
 use alloy_trie::EMPTY_ROOT_HASH;
 use reth_trie::test_utils::TrieTestHarness;
-use reth_trie_common::{Nibbles, ProofV2Target, TrieNodeV2};
+use reth_trie_common::{Nibbles, ProofV2Target, TrieNode};
 use reth_trie_sparse::{LeafLookup, LeafLookupError, LeafUpdate, SparseTrie, TrieNodeEpoch};
 use std::{collections::BTreeMap, iter::once};
 
@@ -32,6 +32,7 @@ mod prune;
 mod reveal_nodes;
 mod root;
 mod set_root;
+mod standard_proofs;
 mod take_updates;
 mod update_leaves;
 mod wipe_clear;
@@ -195,6 +196,7 @@ use prune::*;
 use reveal_nodes::*;
 use root::*;
 use set_root::*;
+use standard_proofs::*;
 use take_updates::*;
 use update_leaves::*;
 use wipe_clear::*;
@@ -223,6 +225,12 @@ sparse_trie_tests! {
     test_reveal_insert_reveal_preserves_branch_state,
     test_remove_then_reveal_does_not_overwrite_collapsed_node,
     test_insert_then_reveal_does_not_overwrite_branch,
+
+    // standard_proofs
+    collapse_onto_an_unrevealed_extension_child,
+    hash_a_split_extension_with_an_unrevealed_branch_child,
+    divergent_extension_insert_fetches_unknown_branch_masks,
+    split_opaque_extension_at_subtrie_boundary,
 
     // update_leaves
     test_update_leaves_insert_new_leaf,

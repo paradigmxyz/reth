@@ -1,6 +1,7 @@
 //! Types related to sparse trie nodes and masks.
 
 use crate::Nibbles;
+use alloc::vec::Vec;
 use alloy_primitives::map::HashMap;
 use alloy_trie::{nodes::TrieNode, TrieMask};
 
@@ -63,4 +64,20 @@ pub struct ProofTrieNode {
     /// Tree and hash masks for the node, if known.
     /// Both masks are always set together (from database branch nodes).
     pub masks: Option<BranchNodeMasks>,
+}
+
+impl ProofTrieNode {
+    /// Creates a placeholder containing an empty root at the empty path.
+    pub fn empty() -> Self {
+        Self { path: Nibbles::default(), node: TrieNode::EmptyRoot, masks: None }
+    }
+
+    /// Collects proof nodes without changing their paths, masks, or input order.
+    ///
+    /// Callers supplying a proof in depth-first order must supply children before parents.
+    pub fn from_sorted_trie_nodes(
+        iter: impl IntoIterator<Item = (Nibbles, TrieNode, Option<BranchNodeMasks>)>,
+    ) -> Vec<Self> {
+        iter.into_iter().map(|(path, node, masks)| Self { path, node, masks }).collect()
+    }
 }

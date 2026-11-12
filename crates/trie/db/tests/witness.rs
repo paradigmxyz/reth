@@ -14,7 +14,7 @@ use reth_provider::{test_utils::create_test_provider_factory, HashingWriter};
 use reth_storage_api::StorageSettingsCache;
 use reth_trie::{
     proof::Proof, witness::TrieWitness, ExecutionWitnessMode, HashedPostState, HashedStorage,
-    LeafNode, MultiProofTargets, Nibbles, StateRoot, StorageRoot, TrieNodeV2,
+    LeafNode, MultiProofTargets, Nibbles, StateRoot, StorageRoot, TrieNode,
 };
 use reth_trie_db::{
     DatabaseHashedCursorFactory, DatabaseProof, DatabaseStateRoot, DatabaseStorageRoot,
@@ -307,7 +307,7 @@ fn canonical_mode_handles_mixed_storage_inserts_and_removals() {
         bytes[0] = 0x30;
         B256::from(bytes)
     };
-    let retained_leaf = Bytes::from(alloy_rlp::encode(TrieNodeV2::Leaf(LeafNode::new(
+    let retained_leaf = Bytes::from(alloy_rlp::encode(TrieNode::Leaf(LeafNode::new(
         Nibbles::unpack(retained_slot).slice(1..),
         alloy_rlp::encode_fixed_size(&U256::from(2)).to_vec(),
     ))));
