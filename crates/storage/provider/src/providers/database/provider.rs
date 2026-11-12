@@ -4032,27 +4032,11 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> StatsReader for DatabaseProvid
 
 impl<TX: DbTx + 'static, N: NodeTypes> ChainStateBlockReader for DatabaseProvider<TX, N> {
     fn last_finalized_block_number(&self) -> ProviderResult<Option<BlockNumber>> {
-        let mut finalized_blocks = self
-            .tx
-            .cursor_read::<tables::ChainState>()?
-            .walk(Some(tables::ChainStateKey::LastFinalizedBlock))?
-            .take(1)
-            .collect::<Result<BTreeMap<tables::ChainStateKey, BlockNumber>, _>>()?;
-
-        let last_finalized_block_number = finalized_blocks.pop_first().map(|pair| pair.1);
-        Ok(last_finalized_block_number)
+        Ok(self.tx.get::<tables::ChainState>(tables::ChainStateKey::LastFinalizedBlock)?)
     }
 
     fn last_safe_block_number(&self) -> ProviderResult<Option<BlockNumber>> {
-        let mut finalized_blocks = self
-            .tx
-            .cursor_read::<tables::ChainState>()?
-            .walk(Some(tables::ChainStateKey::LastSafeBlock))?
-            .take(1)
-            .collect::<Result<BTreeMap<tables::ChainStateKey, BlockNumber>, _>>()?;
-
-        let last_finalized_block_number = finalized_blocks.pop_first().map(|pair| pair.1);
-        Ok(last_finalized_block_number)
+        Ok(self.tx.get::<tables::ChainState>(tables::ChainStateKey::LastSafeBlock)?)
     }
 }
 
@@ -6100,5 +6084,29 @@ mod tests {
         assert!(all_blocks.contains(&3), "block 3 should remain");
         assert!(!all_blocks.contains(&7), "block 7 should be unwound");
         assert!(!all_blocks.contains(&10), "block 10 should be unwound");
+    }
+
+    #[test]
+    fn test_chain_state_block_numbers_are_read_by_exact_key() {
+        for (finalized, safe) in
+            [(None, None), (None, Some(100)), (Some(90), None), (Some(90), Some(100))]
+        {
+            let factory = create_test_provider_factory();
+            let provider = factory.provider_rw().unwrap();
+            if let Some(block_number) = finalized {
+                provider.save_finalized_block_number(block_number).unwrap();
+            }
+            if let Some(block_number) = safe {
+                provider.save_safe_block_number(block_number).unwrap();
+            }
+
+            assert_eq!(provider.last_finalized_block_number().unwrap(), finalized);
+            assert_eq!(provider.last_safe_block_number().unwrap(), safe);
+            provider.commit().unwrap();
+
+            let provider = factory.provider().unwrap();
+            assert_eq!(provider.last_finalized_block_number().unwrap(), finalized);
+            assert_eq!(provider.last_safe_block_number().unwrap(), safe);
+        }
     }
 }
