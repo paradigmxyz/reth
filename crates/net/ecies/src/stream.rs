@@ -194,6 +194,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::codec::MAX_FRAME_SIZE;
     use reth_network_peers::pk2id;
     use tokio::net::{TcpListener, TcpStream};
 
@@ -261,6 +262,33 @@ mod tests {
         // Assert that a timeout error occurred
         assert!(
             matches!(connect_result, Err(e) if e.to_string() == ECIESErrorImpl::StreamTimeout.to_string())
+        );
+    }
+
+    #[tokio::test]
+    async fn rejects_frame_larger_than_header_can_describe() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server_key = SecretKey::new(&mut rand::rng());
+
+        let handle = tokio::spawn(async move {
+            let (incoming, _) = listener.accept().await.unwrap();
+            ECIESStream::incoming(incoming, server_key).await.unwrap()
+        });
+
+        let server_id = pk2id(&server_key.public_key());
+        let client_key = SecretKey::new(&mut rand::rng());
+        let outgoing = TcpStream::connect(addr).await.unwrap();
+        let mut client_stream =
+            ECIESStream::connect(outgoing, client_key, server_id).await.unwrap();
+        let _server_stream = handle.await.unwrap();
+
+        let err = client_stream.send(Bytes::from(vec![0; MAX_FRAME_SIZE + 1])).await.unwrap_err();
+        assert_eq!(err.kind(), io::ErrorKind::InvalidInput);
+        assert_eq!(
+            err.to_string(),
+            ECIESErrorImpl::FrameTooLarge { size: MAX_FRAME_SIZE + 1, max_size: MAX_FRAME_SIZE }
+                .to_string()
         );
     }
 }

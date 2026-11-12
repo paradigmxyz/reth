@@ -1,8 +1,8 @@
 //! RPC compatibility test actions for testing RPC methods against execution-apis test data.
 
+use alloy_rpc_types_engine::ForkchoiceUpdated;
 use eyre::{eyre, Result};
 use futures_util::future::BoxFuture;
-use jsonrpsee::core::{client::ClientT, params::ArrayParams};
 use reth_e2e_test_utils::testsuite::{
     actions::{expect_fcu_valid, Action},
     BlockInfo, Environment,
@@ -170,27 +170,12 @@ impl RunRpcCompatTests {
 
         let params = test_case.request.get("params").cloned().unwrap_or(Value::Array(vec![]));
 
-        // Make the RPC request using jsonrpsee
-        // We need to handle the case where the RPC might return an error
-
-        let response_result: Result<Value, jsonrpsee::core::client::Error> = match params {
-            Value::Array(ref arr) => {
-                // Use ArrayParams for array parameters
-                let mut array_params = ArrayParams::new();
-                for param in arr {
-                    array_params
-                        .insert(param.clone())
-                        .map_err(|e| eyre!("Failed to insert param: {}", e))?;
-                }
-                node_client.rpc.request(method, array_params).await
-            }
-            _ => {
-                // For non-array params, wrap in an array
-                let mut array_params = ArrayParams::new();
-                array_params.insert(params).map_err(|e| eyre!("Failed to insert param: {}", e))?;
-                node_client.rpc.request(method, array_params).await
-            }
+        // Non-array params are wrapped in an array, and RPC errors become error responses below.
+        let params = match params {
+            Value::Array(_) => params,
+            _ => Value::Array(vec![params]),
         };
+        let response_result = node_client.rpc.request::<_, Value>(method.to_owned(), params).await;
 
         // Build actual response object to match execution-apis format
         let actual_response = match response_result {
@@ -384,12 +369,10 @@ where
             for (idx, client) in env.node_clients.iter().enumerate() {
                 debug!("Applying forkchoice update to node {}", idx);
 
-                let response =
-                    reth_rpc_api::clients::EngineApiClient::<Engine>::fork_choice_updated_v3(
-                        &client.engine.http_client(),
-                        fcu_state,
-                        None,
-                    )
+                let response: ForkchoiceUpdated = client
+                    .engine
+                    .http_client()
+                    .request("engine_forkchoiceUpdatedV3", (fcu_state, None::<()>))
                     .await
                     .map_err(|e| eyre!("Failed to update forkchoice on node {}: {}", idx, e))?;
                 expect_fcu_valid(&response, &format!("Forkchoice update on node {idx}"))?;

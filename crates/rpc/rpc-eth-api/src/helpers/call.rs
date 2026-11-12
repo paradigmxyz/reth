@@ -36,6 +36,7 @@ use reth_rpc_eth_types::{
     },
     error::{AsEthApiError, FromEthApiError},
     simulate::{self, EthSimulateError, SimulatedState},
+    utils::CallManyBudget,
     EthApiError, RpcInvalidTransactionError, StateCacheDb,
 };
 use reth_storage_api::{BlockIdReader, ProviderTx, StateProvider};
@@ -245,6 +246,7 @@ pub trait EthCall: EstimateCall + LoadBlock + FullEthApiTypes {
                         chain_id,
                         simulation_state.as_mut(),
                         this.converter(),
+                        |call, db| this.simulate_call_nonce(call, db),
                     )
                     .map_err(map_err)?;
 
@@ -288,8 +290,10 @@ pub trait EthCall: EstimateCall + LoadBlock + FullEthApiTypes {
         }
     }
 
-    /// Simulate arbitrary number of transactions at an arbitrary blockchain index, with the
-    /// optionality of state overrides
+    /// Simulate transactions at an arbitrary blockchain index, with the optionality of state
+    /// overrides.
+    ///
+    /// The request is bounded by [`CallManyBudget`]: its calls share the RPC gas cap.
     fn call_many(
         &self,
         bundles: Vec<Bundle<RpcTxReq<<Self::RpcConvert as RpcConvert>::Network>>>,
@@ -304,6 +308,7 @@ pub trait EthCall: EstimateCall + LoadBlock + FullEthApiTypes {
             if bundles.is_empty() {
                 return Err(EthApiError::InvalidParams(String::from("bundles are empty.")).into());
             }
+            let mut budget = CallManyBudget::for_bundles(&bundles, self.call_gas_limit())?;
 
             let permit = self
                 .acquire_owned_blocking_io()
@@ -384,7 +389,7 @@ pub trait EthCall: EstimateCall + LoadBlock + FullEthApiTypes {
                         let overrides =
                             EvmOverrides::new(state_override.take(), block_overrides.clone());
 
-                        let (current_evm_env, prepared_tx) = this
+                        let (current_evm_env, mut prepared_tx) = this
                             .prepare_call_env(evm_env.clone(), tx, &mut db, overrides)
                             .map_err(|err| {
                                 Self::Error::from_eth_err(EthApiError::call_many_error(
@@ -393,15 +398,23 @@ pub trait EthCall: EstimateCall + LoadBlock + FullEthApiTypes {
                                     err.into(),
                                 ))
                             })?;
+                        budget.admit(&mut prepared_tx)?;
                         let res = this.transact(&mut db, current_evm_env, prepared_tx).map_err(
                             |err| {
                                 Self::Error::from_eth_err(EthApiError::call_many_error(
                                     bundle_index,
                                     tx_index,
-                                    err.into(),
+                                    budget.map_call_err(err).into(),
                                 ))
                             },
                         )?;
+                        budget.charge(&res.result).map_err(|err| {
+                            Self::Error::from_eth_err(EthApiError::call_many_error(
+                                bundle_index,
+                                tx_index,
+                                err.into(),
+                            ))
+                        })?;
 
                         match Self::Error::ensure_success::<EvmTypesFor<Self::Evm>>(res.result) {
                             Ok(output) => {
@@ -533,6 +546,18 @@ pub trait Call:
     /// Returns the maximum memory the EVM can allocate per RPC request.
     fn evm_memory_limit(&self) -> u64 {
         self.eth_api_settings().evm_memory_limit
+    }
+
+    /// Returns the nonce for an `eth_simulateV1` call that has none.
+    ///
+    /// `db` holds the simulation state before the call, including all earlier calls. `None` falls
+    /// back to the sender's account nonce, which suits networks with a single nonce per account.
+    fn simulate_call_nonce(
+        &self,
+        _request: &RpcTxReq<<Self::RpcConvert as RpcConvert>::Network>,
+        _db: &mut dyn DynDatabase,
+    ) -> Result<Option<u64>, EthApiError> {
+        Ok(None)
     }
 
     /// Returns the max gas limit that the caller can afford given a transaction environment.

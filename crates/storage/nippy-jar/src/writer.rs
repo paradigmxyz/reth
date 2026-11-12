@@ -43,15 +43,23 @@ pub struct NippyJarWriter<H: NippyJarHeader = ()> {
     column: usize,
     /// Whether the writer has changed data that needs to be committed.
     dirty: bool,
+    pending_truncation: Option<PendingTruncation>,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct PendingTruncation {
+    offsets_len: u64,
+    data_len: u64,
 }
 
 impl<H: NippyJarHeader> NippyJarWriter<H> {
     /// Creates a [`NippyJarWriter`] from [`NippyJar`].
     ///
-    /// It will **always** attempt to heal any inconsistent state when called.
+    /// It will **always** attempt to heal any inconsistent state when called. A jar without a
+    /// config file is treated as never initialized, and its data and offsets files are truncated.
     pub fn new(jar: NippyJar<H>) -> Result<Self, NippyJarError> {
         let (data_file, offsets_file, is_created) =
-            Self::create_or_open_files(jar.data_path(), &jar.offsets_path())?;
+            Self::create_or_open_files(jar.data_path(), &jar.offsets_path(), &jar.config_path())?;
 
         let (jar, data_file, offsets_file) = if is_created {
             // Makes sure we don't have dangling data and offset files when we just created the file
@@ -79,6 +87,7 @@ impl<H: NippyJarHeader> NippyJarWriter<H> {
             offsets: Vec::with_capacity(1_000_000),
             column: 0,
             dirty: false,
+            pending_truncation: None,
         };
 
         if !is_created {
@@ -126,8 +135,11 @@ impl<H: NippyJarHeader> NippyJarWriter<H> {
     fn create_or_open_files(
         data: &Path,
         offsets: &Path,
+        config: &Path,
     ) -> Result<(File, File, bool), NippyJarError> {
-        let is_created = !data.exists() || !offsets.exists();
+        // The config is written last on creation, so a missing one means an interrupted
+        // initialization that has to start over.
+        let is_created = !data.exists() || !offsets.exists() || !config.exists();
 
         if !data.exists() {
             // File::create is write-only (no reading possible)
@@ -135,6 +147,10 @@ impl<H: NippyJarHeader> NippyJarWriter<H> {
         }
 
         let mut data_file = OpenOptions::new().read(true).write(true).open(data)?;
+        if is_created {
+            // Drop stale data left behind by a previous jar at the same path.
+            data_file.set_len(0)?;
+        }
         data_file.seek(SeekFrom::End(0))?;
 
         if !offsets.exists() {
@@ -144,6 +160,10 @@ impl<H: NippyJarHeader> NippyJarWriter<H> {
 
         let mut offsets_file = OpenOptions::new().read(true).write(true).open(offsets)?;
         if is_created {
+            data_file.set_len(0)?;
+            data_file.seek(SeekFrom::Start(0))?;
+            offsets_file.set_len(0)?;
+
             let mut buf = Vec::with_capacity(1 + OFFSET_SIZE_BYTES as usize);
 
             // First byte of the offset file is the size of one offset in bytes
@@ -154,6 +174,9 @@ impl<H: NippyJarHeader> NippyJarWriter<H> {
             buf.write_all(&[0; OFFSET_SIZE_BYTES as usize])?;
 
             offsets_file.write_all(&buf)?;
+            // Drop stale offsets left behind by a previous jar at the same path. Truncating after
+            // the header is written never leaves the file empty.
+            offsets_file.set_len(buf.len() as u64)?;
             offsets_file.seek(SeekFrom::End(0))?;
         }
 
@@ -197,6 +220,7 @@ impl<H: NippyJarHeader> NippyJarWriter<H> {
         &mut self,
         column: Option<ColumnResult<impl AsRef<[u8]>>>,
     ) -> Result<(), NippyJarError> {
+        self.apply_pending_truncation()?;
         self.dirty = true;
 
         match column {
@@ -248,6 +272,15 @@ impl<H: NippyJarHeader> NippyJarWriter<H> {
 
     /// Prunes rows from data and offsets file and updates its configuration on disk
     pub fn prune_rows(&mut self, num_rows: usize) -> Result<(), NippyJarError> {
+        self.prune_rows_deferred(num_rows)?;
+        self.apply_pending_truncation()?;
+        Ok(())
+    }
+
+    /// Prunes rows like [`Self::prune_rows`], but leaves the committed rows' bytes on disk until
+    /// [`Self::apply_pending_truncation`].
+    pub fn prune_rows_deferred(&mut self, num_rows: usize) -> Result<(), NippyJarError> {
+        self.apply_pending_truncation()?;
         self.dirty = true;
 
         self.offsets_file.flush()?;
@@ -297,8 +330,10 @@ impl<H: NippyJarHeader> NippyJarWriter<H> {
                     // file size = 0). This maintains the same structure as when
                     // a file is initially created.
                     // See `NippyJarWriter::create_or_open_files` for the initial file format.
-                    self.offsets_file.get_mut().set_len(1 + OFFSET_SIZE_BYTES as u64)?;
-                    self.data_file.get_mut().set_len(0)?;
+                    self.pending_truncation = Some(PendingTruncation {
+                        offsets_len: 1 + OFFSET_SIZE_BYTES as u64,
+                        data_len: 0,
+                    });
                 } else {
                     // Calculate the new length for the on-disk offset list
                     let new_len = 1 + new_num_offsets * OFFSET_SIZE_BYTES as u64;
@@ -311,8 +346,8 @@ impl<H: NippyJarHeader> NippyJarWriter<H> {
                     let last_offset = u64::from_le_bytes(last_offset);
 
                     // Update the lengths of both the offsets and data files
-                    self.offsets_file.get_mut().set_len(new_len)?;
-                    self.data_file.get_mut().set_len(last_offset)?;
+                    self.pending_truncation =
+                        Some(PendingTruncation { offsets_len: new_len, data_len: last_offset });
                 }
             } else {
                 return Err(NippyJarError::InvalidPruning(0, remaining_to_prune as u64))
@@ -344,6 +379,27 @@ impl<H: NippyJarHeader> NippyJarWriter<H> {
         self.jar.freeze_config()?;
 
         Ok(())
+    }
+
+    /// Truncates the files to the rows kept by [`Self::prune_rows_deferred`].
+    ///
+    /// Returns `false` if no truncation was pending.
+    pub fn apply_pending_truncation(&mut self) -> Result<bool, NippyJarError> {
+        let Some(PendingTruncation { offsets_len, data_len }) = self.pending_truncation else {
+            return Ok(false)
+        };
+
+        self.offsets_file.get_mut().set_len(offsets_len)?;
+        self.data_file.get_mut().set_len(data_len)?;
+
+        self.offsets_file.get_ref().sync_all()?;
+        self.data_file.get_ref().sync_all()?;
+
+        self.offsets_file.seek(SeekFrom::End(0))?;
+        self.data_file.seek(SeekFrom::End(0))?;
+        self.pending_truncation = None;
+
+        Ok(true)
     }
 
     /// Updates [`NippyJar`] with the new row count and maximum uncompressed row size, while
