@@ -5683,6 +5683,7 @@ dependencies = [
  "rustc-hash",
  "serde",
  "serde_json",
+ "test-case",
  "thiserror 2.0.21",
  "tokio",
  "tower",

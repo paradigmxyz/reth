@@ -26,7 +26,7 @@
 
 //! Shared HTTP utilities.
 
-use crate::BoxError;
+use crate::{classify_message, BoxError};
 use bytes::{Buf, Bytes};
 use http_body::Frame;
 use http_body_util::{BodyExt, Limited};
@@ -165,29 +165,15 @@ where
         };
 
         // If it's the first chunk, trim the whitespaces to determine whether it's valid JSON-RPC
-        // call. Only the four JSON whitespace characters count, not for example form feed.
+        // call.
         if received_data.is_empty() {
-            let first_non_whitespace = data
-                .chunk()
-                .iter()
-                .enumerate()
-                .take(128)
-                .find(|(_, byte)| !matches!(byte, b' ' | b'\t' | b'\n' | b'\r'));
-
-            let skip = match first_non_whitespace {
-                Some((idx, b'{')) => {
-                    is_single = Some(true);
-                    idx
-                }
-                Some((idx, b'[')) => {
-                    is_single = Some(false);
-                    idx
-                }
-                _ => return Err(HttpError::Malformed),
+            let Some((data, single)) = classify_message(data.chunk()) else {
+                return Err(HttpError::Malformed);
             };
+            is_single = Some(single);
 
             // ignore whitespace as these doesn't matter just makes the JSON decoding slower.
-            received_data.extend_from_slice(&data.chunk()[skip..]);
+            received_data.extend_from_slice(data);
         } else {
             received_data.extend_from_slice(data.chunk());
         }
