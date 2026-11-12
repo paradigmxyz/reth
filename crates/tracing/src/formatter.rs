@@ -36,6 +36,10 @@ impl LogFormat {
     ///
     /// # Returns
     /// A `BoxedLayer<Registry>` that can be added to a tracing subscriber.
+    ///
+    /// # Environment
+    /// * `RUST_LOG_THREAD_IDS` - Set to any value other than `0` to include the emitting thread's
+    ///   ID in JSON and terminal output. Thread IDs are omitted when it is unset.
     pub fn apply<F>(
         &self,
         filter: F,
@@ -51,11 +55,15 @@ impl LogFormat {
         });
 
         let target = std::env::var("RUST_LOG_TARGET").map(|val| val != "0").unwrap_or(show_target);
+        let thread_ids = std::env::var("RUST_LOG_THREAD_IDS").is_ok_and(|val| val != "0");
 
         match self {
             Self::Json => {
-                let layer =
-                    tracing_subscriber::fmt::layer().json().with_ansi(ansi).with_target(target);
+                let layer = tracing_subscriber::fmt::layer()
+                    .json()
+                    .with_ansi(ansi)
+                    .with_target(target)
+                    .with_thread_ids(thread_ids);
                 if let Some(writer) = file_writer {
                     layer.with_writer(writer).with_filter(filter).boxed()
                 } else {
@@ -71,7 +79,10 @@ impl LogFormat {
                 }
             }
             Self::Terminal => {
-                let layer = tracing_subscriber::fmt::layer().with_ansi(ansi).with_target(target);
+                let layer = tracing_subscriber::fmt::layer()
+                    .with_ansi(ansi)
+                    .with_target(target)
+                    .with_thread_ids(thread_ids);
                 if let Some(writer) = file_writer {
                     layer.with_writer(writer).with_filter(filter).boxed()
                 } else {
