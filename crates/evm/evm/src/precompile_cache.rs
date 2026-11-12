@@ -15,8 +15,20 @@ use reth_primitives_traits::dashmap::DashMap;
 use std::{fmt, hash::Hash, sync::Arc};
 use tracing::error;
 
-/// Number of entries of each precompile's [`PrecompileCache`].
-const CACHE_ENTRIES: usize = 1 << 16;
+/// Largest input kept in [`PrecompileCache::small`], which covers ecrecover, the BN254 additions
+/// and multiplications, and short hashes.
+const SMALL_INPUT_SIZE: usize = 128;
+
+/// Number of entries of [`PrecompileCache::small`].
+///
+/// A full table takes at most about 12 MiB with inputs and outputs of [`SMALL_INPUT_SIZE`].
+const SMALL_CACHE_ENTRIES: usize = 1 << 15;
+
+/// Number of entries of [`PrecompileCache::large`].
+///
+/// A full table takes at most about 4 MiB with inputs and outputs of
+/// [`MAX_PRECOMPILE_CACHE_INPUT_SIZE`].
+const LARGE_CACHE_ENTRIES: usize = 1 << 10;
 
 /// Maximum input retained by a precompile cache.
 const MAX_PRECOMPILE_CACHE_INPUT_SIZE: usize = 2 * 1024;
@@ -59,14 +71,22 @@ where
 /// Cache for one precompile's inputs and outputs.
 ///
 /// Lookups are a probe of a fixed-size table, where a new entry replaces the one it collides
-/// with.
+/// with. Inputs are split by size so that many small entries fit without letting large ones
+/// grow the cache past about 16 MiB.
 struct PrecompileCache<S> {
-    table: fixed_cache::Cache<Bytes, CacheEntry<S>, DefaultHashBuilder, PrecompileCacheConfig>,
+    /// Entries with inputs of up to [`SMALL_INPUT_SIZE`].
+    small: PrecompileCacheTable<S>,
+    /// Entries with larger inputs, up to [`MAX_PRECOMPILE_CACHE_INPUT_SIZE`].
+    large: PrecompileCacheTable<S>,
     #[cfg(feature = "metrics")]
     metrics: std::sync::OnceLock<CachedPrecompileMetrics>,
 }
 
-/// Configuration of [`PrecompileCache::table`].
+/// A table of [`PrecompileCache`].
+type PrecompileCacheTable<S> =
+    fixed_cache::Cache<Bytes, CacheEntry<S>, DefaultHashBuilder, PrecompileCacheConfig>;
+
+/// Configuration of [`PrecompileCacheTable`].
 struct PrecompileCacheConfig;
 
 impl fixed_cache::CacheConfig for PrecompileCacheConfig {
@@ -85,7 +105,8 @@ where
 {
     fn default() -> Self {
         Self {
-            table: fixed_cache::Cache::new(CACHE_ENTRIES, Default::default()),
+            small: fixed_cache::Cache::new(SMALL_CACHE_ENTRIES, Default::default()),
+            large: fixed_cache::Cache::new(LARGE_CACHE_ENTRIES, Default::default()),
             #[cfg(feature = "metrics")]
             metrics: Default::default(),
         }
@@ -97,7 +118,19 @@ where
     S: Eq + Hash + std::fmt::Debug + Send + Sync + Clone + 'static,
 {
     fn get(&self, input: &[u8], spec: S) -> Option<CacheEntry<S>> {
-        self.table.get(input).filter(|entry| entry.spec == spec)
+        self.table(input.len()).get(input).filter(|entry| entry.spec == spec)
+    }
+
+    fn insert(&self, input: Bytes, value: CacheEntry<S>) {
+        self.table(input.len()).insert(input, value)
+    }
+
+    const fn table(&self, input_len: usize) -> &PrecompileCacheTable<S> {
+        if input_len <= SMALL_INPUT_SIZE {
+            &self.small
+        } else {
+            &self.large
+        }
     }
 }
 
@@ -272,7 +305,7 @@ where
                         "cacheable precompile changed refund gas, skipping cache insertion"
                     );
                 } else if let Some(regular_gas_used) = after.spent.checked_sub(before.spent) {
-                    cache.table.insert(
+                    cache.insert(
                         input,
                         CacheEntry {
                             output: output.clone(),
@@ -445,7 +478,7 @@ mod tests {
         let destination = Address::with_last_byte(2);
         let input = Bytes::from_static(b"input");
         let shared = PrecompileCacheMap::default();
-        shared.cache_for_address(destination).table.insert(
+        shared.cache_for_address(destination).insert(
             input.clone(),
             CacheEntry {
                 output: PrecompileOutput::new(Bytes::from_static(b"old implementation")),
@@ -642,6 +675,31 @@ mod tests {
             }
             assert!(!cache.0.contains_key(&identity));
             assert!(!provider.cache_map.0.contains_key(&identity));
+        }
+    }
+
+    #[test]
+    fn splits_entries_by_input_size() {
+        let spec = SpecId::OSAKA;
+        let cache = PrecompileCache::default();
+        for len in [SMALL_INPUT_SIZE, SMALL_INPUT_SIZE + 1, MAX_PRECOMPILE_CACHE_INPUT_SIZE] {
+            let input = Bytes::from(vec![1; len]);
+            cache.insert(
+                input.clone(),
+                CacheEntry {
+                    output: PrecompileOutput::new(input.clone()),
+                    regular_gas_used: 15,
+                    spec,
+                },
+            );
+            assert_eq!(cache.get(&input, spec).unwrap().output.bytes(), &input);
+            let (holds, other) = if len <= SMALL_INPUT_SIZE {
+                (&cache.small, &cache.large)
+            } else {
+                (&cache.large, &cache.small)
+            };
+            assert!(holds.get(input.as_ref()).is_some());
+            assert!(other.get(input.as_ref()).is_none());
         }
     }
 }
