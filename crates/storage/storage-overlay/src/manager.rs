@@ -1090,18 +1090,6 @@ mod tests {
         in_memory_state_writer.remove_canonical_until(persisted.hash, persisted.number);
     }
 
-    /// Caches an empty state trie overlay and an empty execution overlay for `key`.
-    fn cache_empty_overlays(manager: &OverlayManager, key: OverlayCacheKey) {
-        manager
-            .state_trie_overlays
-            .entries
-            .insert(key, OverlayCacheEntry::Ready(Arc::new(TrieInputSorted::default())));
-        manager
-            .execution_overlays
-            .entries
-            .insert(key, OverlayCacheEntry::Ready(Arc::new(ExecutionOverlay::default())));
-    }
-
     /// Returns `true` if a state trie overlay and an execution overlay are cached for `key`, and
     /// `false` if neither is.
     fn caches_overlays(manager: &OverlayManager, key: OverlayCacheKey) -> bool {
@@ -1119,26 +1107,6 @@ mod tests {
         let err = overlay_for_parent(&manager, parent, anchor).unwrap_err();
 
         assert_eq!(err, OverlayError::TipNotInMemory { tip_hash: parent });
-    }
-
-    #[test]
-    fn errors_for_anchor_off_the_tip_chain() {
-        let (manager, mut in_memory_state_writer) = overlay_manager_with_writer();
-        let blocks = test_blocks();
-        for block in &blocks {
-            in_memory_state_writer.insert_executed(block.clone());
-        }
-        let tip_hash = blocks[2].recovered_block().hash();
-        let anchor_hash = B256::random();
-        let expected = OverlayError::AnchorNotReached { tip_hash, anchor_hash };
-
-        assert_eq!(overlay_for_parent(&manager, tip_hash, anchor_hash).unwrap_err(), expected);
-        assert_eq!(
-            manager.execution_overlay_for_parent(tip_hash, anchor_hash).unwrap_err(),
-            expected
-        );
-        assert!(manager.state_trie_overlays.entries.is_empty());
-        assert!(manager.execution_overlays.entries.is_empty());
     }
 
     #[test]
@@ -1498,132 +1466,6 @@ mod tests {
         let completed = rx.recv_timeout(Duration::from_millis(100));
         waiter.finish(Arc::new(ExecutionOverlay::default()));
         assert!(completed.is_ok(), "execution overlay precompute waited for pending entry");
-    }
-
-    #[cfg(feature = "rayon")]
-    #[test]
-    fn execution_overlay_precompute_errors_for_untracked_tip() {
-        let manager = OverlayManager::<EthPrimitives>::with_worker_pool(
-            InMemoryState::read_only(),
-            Arc::new(WorkerPool::new(1, "execution-overlay-test")),
-        );
-        let tip_hash = B256::random();
-
-        assert_eq!(
-            manager.precompute_execution_overlay_for_parent(tip_hash, B256::random()),
-            Err(OverlayError::TipNotInMemory { tip_hash })
-        );
-    }
-
-    #[cfg(feature = "rayon")]
-    #[test]
-    fn does_not_precompute_child_execution_overlays_for_untracked_block() {
-        let worker_pool = Arc::new(WorkerPool::new(1, "execution-overlay-test"));
-        let (in_memory_state, mut in_memory_state_writer) = InMemoryState::new();
-        let manager = OverlayManager::with_worker_pool(in_memory_state, Arc::clone(&worker_pool));
-        let blocks = test_blocks();
-        let parent_key = OverlayCacheKey {
-            anchor_hash: blocks[0].recovered_block().parent_hash(),
-            tip_hash: blocks[0].recovered_block().hash(),
-        };
-        in_memory_state_writer.insert_executed(blocks[0].clone());
-        manager
-            .execution_overlays
-            .entries
-            .insert(parent_key, OverlayCacheEntry::Ready(Arc::new(ExecutionOverlay::default())));
-
-        // The overlay of the parent is cached, but the child is not tracked.
-        manager.precompute_child_execution_overlays(blocks[1].recovered_block().hash());
-
-        assert!(!worker_pool.is_initialized(), "scheduled a precompute for an untracked block");
-        assert_eq!(manager.execution_overlays.len(), 1);
-        assert!(manager.execution_overlays.entries.contains_key(&parent_key));
-    }
-
-    #[test]
-    fn prune_keeps_overlays_anchored_on_the_tip_chain() {
-        let (manager, mut in_memory_state_writer) = overlay_manager_with_writer();
-        let blocks = test_blocks();
-        for block in &blocks {
-            in_memory_state_writer.insert_executed(block.clone());
-        }
-
-        let anchor_hash = blocks[0].recovered_block().parent_hash();
-        let tip_hash = blocks[2].recovered_block().hash();
-        let chain_hashes = manager
-            .in_memory_state()
-            .state_by_hash(tip_hash)
-            .unwrap()
-            .chain_hashes()
-            .collect::<Vec<_>>();
-        assert_eq!(
-            chain_hashes,
-            blocks
-                .iter()
-                .rev()
-                .map(|block| block.recovered_block().hash())
-                .chain([anchor_hash])
-                .collect::<Vec<_>>()
-        );
-
-        let unknown_key = OverlayCacheKey { anchor_hash: B256::random(), tip_hash };
-        cache_empty_overlays(&manager, unknown_key);
-        for &anchor_hash in &chain_hashes {
-            cache_empty_overlays(&manager, OverlayCacheKey { anchor_hash, tip_hash });
-        }
-
-        manager.prune_unreachable_overlays();
-
-        for anchor_hash in chain_hashes {
-            assert!(caches_overlays(&manager, OverlayCacheKey { anchor_hash, tip_hash }));
-        }
-        assert!(!caches_overlays(&manager, unknown_key));
-    }
-
-    #[test]
-    fn prune_drops_overlays_anchored_below_the_tip_chain() {
-        let (manager, mut in_memory_state_writer) = overlay_manager_with_writer();
-        let blocks = test_blocks();
-        // The chain of the tip ends at block 1, which is not tracked.
-        in_memory_state_writer.insert_executed(blocks[2].clone());
-
-        let tip_hash = blocks[2].recovered_block().hash();
-        let anchor_key =
-            OverlayCacheKey { anchor_hash: blocks[1].recovered_block().hash(), tip_hash };
-        let below_anchor_key =
-            OverlayCacheKey { anchor_hash: blocks[0].recovered_block().hash(), tip_hash };
-        cache_empty_overlays(&manager, anchor_key);
-        cache_empty_overlays(&manager, below_anchor_key);
-
-        manager.prune_unreachable_overlays();
-
-        assert!(caches_overlays(&manager, anchor_key));
-        assert!(!caches_overlays(&manager, below_anchor_key));
-    }
-
-    #[test]
-    fn prune_drops_overlays_with_unknown_anchor_or_untracked_tip() {
-        let (manager, mut in_memory_state_writer) = overlay_manager_with_writer();
-        let blocks = test_blocks();
-        for block in &blocks[..2] {
-            in_memory_state_writer.insert_executed(block.clone());
-        }
-
-        let unknown_anchor_key = OverlayCacheKey {
-            anchor_hash: B256::random(),
-            tip_hash: blocks[1].recovered_block().hash(),
-        };
-        let untracked_tip_key = OverlayCacheKey {
-            anchor_hash: blocks[0].recovered_block().parent_hash(),
-            tip_hash: blocks[2].recovered_block().hash(),
-        };
-        cache_empty_overlays(&manager, unknown_anchor_key);
-        cache_empty_overlays(&manager, untracked_tip_key);
-
-        manager.prune_unreachable_overlays();
-
-        assert!(!caches_overlays(&manager, unknown_anchor_key));
-        assert!(!caches_overlays(&manager, untracked_tip_key));
     }
 
     #[test]

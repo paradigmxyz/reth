@@ -499,7 +499,7 @@ where
             self.execution_timing_stats.insert(executed.recovered_block().hash(), stats);
         }
 
-        self.state.tree_state.insert_executed(executed.clone());
+        self.state.insert_executed(executed.clone());
 
         // emit insert event
         let elapsed = start.elapsed();

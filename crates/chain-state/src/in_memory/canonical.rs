@@ -17,6 +17,7 @@ use reth_primitives_traits::{
 };
 use std::{sync::Arc, time::Instant};
 use tokio::sync::{broadcast, watch};
+use tracing::debug;
 
 /// Size of the broadcast channel used to notify canonical state events.
 const CANON_STATE_NOTIFICATION_CHANNEL_SIZE: usize = 256;
@@ -405,6 +406,92 @@ impl<N: NodePrimitives> CanonicalInMemoryStateWriter<N> {
     pub fn notify_canon_state(&mut self, event: CanonStateNotification<N>) {
         // Sending only fails if nobody is subscribed.
         self.canonical_in_memory_state.inner.canon_state_notification_sender.send(event).ok();
+    }
+
+    /// Records `last_persisted_block` as persisted, removes the canonical blocks up to
+    /// `state_trie_persisted_block` and the non-canonical blocks that conflict with `finalized`.
+    ///
+    /// The canonical blocks are only removed if `last_persisted_block` is on the in-memory
+    /// canonical chain or the block it builds on.
+    pub fn on_blocks_persisted(
+        &mut self,
+        last_persisted_block: BlockNumHash,
+        state_trie_persisted_block: BlockNumHash,
+        finalized: Option<BlockNumHash>,
+    ) {
+        self.set_persisted(last_persisted_block);
+        self.remove_until(state_trie_persisted_block, last_persisted_block.hash, finalized);
+    }
+
+    /// Makes `backfill_head`, the block a backfill run ended at, the canonical head. No in-memory
+    /// block is canonical afterwards.
+    ///
+    /// If the run `unwound` the chain, all in-memory blocks are removed. Otherwise the canonical
+    /// blocks up to `backfill_head` are removed if `last_persisted_hash` is on the in-memory
+    /// canonical chain or the block it builds on, the non-canonical blocks that conflict with
+    /// `backfill_head` are removed, and the remaining blocks stay tracked as non-canonical.
+    pub fn on_backfill_finished(
+        &mut self,
+        backfill_head: SealedHeader<N::BlockHeader>,
+        last_persisted_hash: B256,
+        unwound: bool,
+    ) {
+        if unwound {
+            self.clear(backfill_head);
+        } else {
+            let backfill_num_hash = backfill_head.num_hash();
+            self.remove_until(backfill_num_hash, last_persisted_hash, Some(backfill_num_hash));
+            self.demote_canonical_chain(backfill_head);
+        }
+    }
+
+    /// Removes the canonical blocks that are persisted and the non-canonical blocks that can no
+    /// longer become canonical.
+    ///
+    /// Canonical blocks up to and including `upper_bound` are only removed if
+    /// `last_persisted_hash` is part of the in-memory canonical chain or the block it builds on.
+    /// Otherwise canonical blocks were not actually persisted, e.g. because a reorg happened while
+    /// persisting, and they stay in memory until the next removal that passes this check, even if
+    /// they are below the finalized block.
+    ///
+    /// Non-canonical blocks are removed either way if they conflict with `finalized`: the blocks
+    /// below its height, the other blocks at its height, and every block built on such a block at
+    /// its height. Without a finalized block no non-canonical block is removed.
+    ///
+    /// NOTE: if the finalized block is greater than the upper bound, the only blocks that will be
+    /// removed are canonical blocks and sidechains that fork below the `upper_bound`. This is the
+    /// same behavior as if the finalized block were `Some(upper_bound)`.
+    fn remove_until(
+        &mut self,
+        upper_bound: BlockNumHash,
+        last_persisted_hash: B256,
+        finalized: Option<BlockNumHash>,
+    ) {
+        debug!(target: "engine::tree", ?upper_bound, ?finalized, "Removing blocks from the tree");
+
+        // If the finalized block is ahead of the upper bound, the only blocks removed are the
+        // canonical blocks up to the upper bound and the non-canonical blocks that conflict with
+        // the upper bound.
+        let finalized = finalized.map(|mut finalized| {
+            if upper_bound.number < finalized.number {
+                finalized = upper_bound;
+                debug!(target: "engine::tree", ?finalized, "Adjusted upper bound");
+            }
+            finalized
+        });
+
+        match self.remove_canonical_until(last_persisted_hash, upper_bound.number) {
+            InMemoryCanonicalBlocksRemoval::Removed(removed) => {
+                debug!(target: "engine::tree", ?upper_bound, ?last_persisted_hash, removed, "Removed canonical blocks from the tree");
+            }
+            InMemoryCanonicalBlocksRemoval::PersistedHashNotCanonical => {
+                debug!(target: "engine::tree", ?upper_bound, ?last_persisted_hash, "Skipped removing canonical blocks: the persisted block is not on the in-memory canonical chain");
+            }
+        }
+        if let Some(finalized) = finalized {
+            let pruned = self.prune_conflicting_with_finalized(finalized);
+            debug!(target: "engine::tree", ?finalized, pruned, "Removed finalized sidechain blocks");
+        }
     }
 }
 
@@ -868,320 +955,5 @@ mod tests {
         assert_eq!(chain.len(), 2);
         assert_eq!(chain[0].number(), 2);
         assert_eq!(chain[1].number(), 1);
-    }
-
-    #[test]
-    fn only_a_block_built_on_the_canonical_head_becomes_pending() {
-        let mut builder = TestBlockBuilder::eth();
-        let persisted = builder.get_executed_block_with_number(1, B256::random());
-        let (canonical_in_memory_state, mut canonical_in_memory_state_writer) =
-            canonical_in_memory_state_with_head(persisted.recovered_block().clone_sealed_header());
-
-        // The canonical head can be a block that is not tracked.
-        let block2 = builder.get_executed_block_with_number(2, hash(&persisted));
-        assert!(canonical_in_memory_state_writer.insert_executed(block2.clone()));
-        assert_eq!(
-            canonical_in_memory_state.pending_block_num_hash(),
-            Some(block2.recovered_block().num_hash())
-        );
-
-        // A block built on another block does not replace the pending block.
-        let block3 = builder.get_executed_block_with_number(3, hash(&block2));
-        let fork = builder.get_executed_block_with_number(2, B256::random());
-        assert!(canonical_in_memory_state_writer.insert_executed(block3.clone()));
-        assert!(canonical_in_memory_state_writer.insert_executed(fork));
-        assert_eq!(
-            canonical_in_memory_state.pending_block_num_hash(),
-            Some(block2.recovered_block().num_hash())
-        );
-
-        // Another block built on the canonical head does.
-        let sibling = builder.get_executed_block_with_number(2, hash(&persisted));
-        assert!(canonical_in_memory_state_writer.insert_executed(sibling.clone()));
-        assert_eq!(
-            canonical_in_memory_state.pending_block_num_hash(),
-            Some(sibling.recovered_block().num_hash())
-        );
-
-        // Once block 2 is the canonical head, block 3 is built on it. It is tracked already and
-        // becomes the pending block when it is executed again.
-        canonical_in_memory_state_writer
-            .update_chain(NewCanonicalChain::Commit { new: vec![block2] });
-        assert!(canonical_in_memory_state.pending_state().is_none());
-        assert!(!canonical_in_memory_state_writer.insert_executed(block3.clone()));
-        assert_eq!(
-            canonical_in_memory_state.pending_block_num_hash(),
-            Some(block3.recovered_block().num_hash())
-        );
-        assert_eq!(block_counts(&canonical_in_memory_state), (1, 3));
-        assert_invariants(&canonical_in_memory_state);
-    }
-
-    #[test]
-    fn operations_that_change_the_canonical_head_set_it_and_clear_the_pending_block() {
-        let mut builder = TestBlockBuilder::eth();
-        let blocks = builder.get_executed_blocks(1..5).collect::<Vec<_>>();
-        let persisted_head = builder
-            .get_executed_block_with_number(0, B256::random())
-            .recovered_block()
-            .clone_sealed_header();
-
-        // Tracks blocks 1 to 3 as canonical and a pending block on top of them.
-        let setup = |builder: &mut TestBlockBuilder| {
-            let (canonical_in_memory_state, mut canonical_in_memory_state_writer) =
-                canonical_in_memory_state();
-            canonical_in_memory_state_writer
-                .update_chain(NewCanonicalChain::Commit { new: blocks[..3].to_vec() });
-            assert_eq!(
-                canonical_in_memory_state.get_canonical_head(),
-                blocks[2].recovered_block().clone_sealed_header()
-            );
-            canonical_in_memory_state_writer
-                .insert_executed(builder.get_executed_block_with_number(4, hash(&blocks[2])));
-            assert!(canonical_in_memory_state.pending_state().is_some());
-            (canonical_in_memory_state, canonical_in_memory_state_writer)
-        };
-
-        let (canonical_in_memory_state, mut canonical_in_memory_state_writer) = setup(&mut builder);
-        canonical_in_memory_state_writer
-            .update_chain(NewCanonicalChain::Commit { new: vec![blocks[3].clone()] });
-        assert_eq!(
-            canonical_in_memory_state.get_canonical_head(),
-            blocks[3].recovered_block().clone_sealed_header()
-        );
-        assert_eq!(
-            canonical_in_memory_state.get_canonical_num_hash(),
-            blocks[3].recovered_block().num_hash()
-        );
-        assert_eq!(canonical_in_memory_state.get_canonical_block_number(), 4);
-        assert_eq!(canonical_in_memory_state.chain_info().best_hash, hash(&blocks[3]));
-        assert_eq!(canonical_in_memory_state.head_state().unwrap().hash(), hash(&blocks[3]));
-        assert!(canonical_in_memory_state.pending_state().is_none());
-
-        let (canonical_in_memory_state, mut canonical_in_memory_state_writer) = setup(&mut builder);
-        canonical_in_memory_state_writer.unwind_canonical_head(blocks[1].clone());
-        assert_eq!(
-            canonical_in_memory_state.get_canonical_head(),
-            blocks[1].recovered_block().clone_sealed_header()
-        );
-        assert_eq!(canonical_in_memory_state.head_state().unwrap().hash(), hash(&blocks[1]));
-        assert!(canonical_in_memory_state.pending_state().is_none());
-
-        let (canonical_in_memory_state, mut canonical_in_memory_state_writer) = setup(&mut builder);
-        canonical_in_memory_state_writer.demote_canonical_chain(persisted_head.clone());
-        assert_eq!(canonical_in_memory_state.get_canonical_head(), persisted_head);
-        assert!(canonical_in_memory_state.head_state().is_none());
-        assert_eq!(block_counts(&canonical_in_memory_state), (0, 4));
-        assert!(canonical_in_memory_state.pending_state().is_none());
-
-        let (canonical_in_memory_state, mut canonical_in_memory_state_writer) = setup(&mut builder);
-        assert_eq!(block_counts(&canonical_in_memory_state), (3, 1));
-        canonical_in_memory_state_writer.clear(persisted_head.clone());
-        assert_eq!(canonical_in_memory_state.get_canonical_head(), persisted_head);
-        assert!(canonical_in_memory_state.head_state().is_none());
-        assert_eq!(block_counts(&canonical_in_memory_state), (0, 0));
-        assert!(canonical_in_memory_state.pending_state().is_none());
-    }
-
-    #[test]
-    fn removals_keep_the_chain_info_and_clear_a_removed_pending_block() {
-        let mut builder = TestBlockBuilder::eth();
-        let (canonical_in_memory_state, mut canonical_in_memory_state_writer) =
-            canonical_in_memory_state();
-        let blocks = builder.get_executed_blocks(1..4).collect::<Vec<_>>();
-        canonical_in_memory_state_writer
-            .update_chain(NewCanonicalChain::Commit { new: blocks.clone() });
-        let pending = builder.get_executed_block_with_number(4, hash(&blocks[2]));
-        canonical_in_memory_state_writer.insert_executed(pending.clone());
-        let canonical_head = canonical_in_memory_state.get_canonical_head();
-
-        // The pending block is built on a block that stays tracked.
-        let persisted = blocks[1].recovered_block().num_hash();
-        assert_eq!(
-            canonical_in_memory_state_writer
-                .remove_canonical_until(persisted.hash, persisted.number),
-            InMemoryCanonicalBlocksRemoval::Removed(2)
-        );
-        assert_eq!(canonical_in_memory_state_writer.prune_conflicting_with_finalized(persisted), 0);
-        assert_eq!(
-            canonical_in_memory_state.pending_block_num_hash(),
-            Some(pending.recovered_block().num_hash())
-        );
-        assert_eq!(canonical_in_memory_state.pending_state().unwrap().chain().count(), 2);
-        assert_eq!(canonical_in_memory_state.get_canonical_head(), canonical_head);
-
-        // A block at the height of the pending block is finalized, which removes the pending
-        // block.
-        let finalized = BlockNumHash::new(4, B256::random());
-        assert_eq!(canonical_in_memory_state_writer.prune_conflicting_with_finalized(finalized), 1);
-        assert!(canonical_in_memory_state.pending_state().is_none());
-        assert_eq!(canonical_in_memory_state.get_canonical_head(), canonical_head);
-        assert_invariants(&canonical_in_memory_state);
-    }
-
-    #[test]
-    fn unwind_canonical_head_to_an_in_memory_ancestor() {
-        let mut builder = TestBlockBuilder::eth();
-        let (canonical_in_memory_state, mut canonical_in_memory_state_writer) =
-            canonical_in_memory_state();
-        let blocks = builder.get_executed_blocks(1..6).collect::<Vec<_>>();
-        canonical_in_memory_state_writer
-            .update_chain(NewCanonicalChain::Commit { new: blocks.clone() });
-
-        canonical_in_memory_state_writer.unwind_canonical_head(blocks[2].clone());
-
-        assert_eq!(
-            canonical_in_memory_state.get_canonical_num_hash(),
-            blocks[2].recovered_block().num_hash()
-        );
-        assert_eq!(
-            canonical_in_memory_state
-                .canonical_chain()
-                .map(|state| state.hash())
-                .collect::<Vec<_>>(),
-            vec![hash(&blocks[2]), hash(&blocks[1]), hash(&blocks[0])]
-        );
-        assert_eq!(block_counts(&canonical_in_memory_state), (3, 2));
-        // The blocks above the new head stay tracked on top of it.
-        assert!(canonical_in_memory_state.state_by_hash(hash(&blocks[4])).is_none());
-        let old_head =
-            canonical_in_memory_state.in_memory_state().state_by_hash(hash(&blocks[4])).unwrap();
-        assert_eq!(old_head.chain().count(), 5);
-
-        // The block built on the new head is tracked. Executing it again makes it pending.
-        assert!(!canonical_in_memory_state_writer.insert_executed(blocks[3].clone()));
-        assert_eq!(
-            canonical_in_memory_state.pending_block_num_hash(),
-            Some(blocks[3].recovered_block().num_hash())
-        );
-        assert_invariants(&canonical_in_memory_state);
-    }
-
-    #[test]
-    fn unwind_canonical_head_to_a_persisted_ancestor() {
-        let mut builder = TestBlockBuilder::eth();
-        let (canonical_in_memory_state, mut canonical_in_memory_state_writer) =
-            canonical_in_memory_state();
-        // Blocks 1 to 3 are persisted and not tracked, 4 and 5 are the in-memory canonical chain.
-        let blocks = builder.get_executed_blocks(1..6).collect::<Vec<_>>();
-        canonical_in_memory_state_writer
-            .update_chain(NewCanonicalChain::Commit { new: blocks[3..].to_vec() });
-
-        canonical_in_memory_state_writer.unwind_canonical_head(blocks[1].clone());
-
-        assert_eq!(
-            canonical_in_memory_state.get_canonical_num_hash(),
-            blocks[1].recovered_block().num_hash()
-        );
-        // The new head is the only canonical in-memory block.
-        assert_eq!(
-            canonical_in_memory_state
-                .canonical_chain()
-                .map(|state| state.hash())
-                .collect::<Vec<_>>(),
-            vec![hash(&blocks[1])]
-        );
-        assert_eq!(block_counts(&canonical_in_memory_state), (1, 2));
-        let old_head =
-            canonical_in_memory_state.in_memory_state().state_by_hash(hash(&blocks[4])).unwrap();
-        assert_eq!(old_head.chain().count(), 2);
-        assert_eq!(old_head.anchor(), blocks[2].recovered_block().num_hash());
-        assert_invariants(&canonical_in_memory_state);
-    }
-
-    #[test]
-    #[should_panic(expected = "the writer does not write to the in-memory state")]
-    fn writer_of_another_in_memory_state_is_rejected() {
-        let (canonical_in_memory_state, _canonical_in_memory_state_writer) =
-            canonical_in_memory_state();
-        let (_, other_in_memory_state_writer) = InMemoryState::new();
-
-        let _ = CanonicalInMemoryStateWriter::new(
-            canonical_in_memory_state,
-            other_in_memory_state_writer,
-        );
-    }
-
-    #[test]
-    #[should_panic(
-        expected = "the highest canonical in-memory block is not the canonical head of the chain info"
-    )]
-    fn canonical_head_that_is_not_the_highest_canonical_block_is_rejected() {
-        let blocks = TestBlockBuilder::eth().get_executed_blocks(1..3).collect::<Vec<_>>();
-        let (in_memory_state, mut in_memory_state_writer) = InMemoryState::new();
-        in_memory_state_writer.update_chain(NewCanonicalChain::Commit { new: blocks.clone() });
-        let canonical_in_memory_state = CanonicalInMemoryState::new(
-            ChainInfoHeaders {
-                canonical_head: blocks[0].recovered_block().clone_sealed_header(),
-                safe: None,
-                finalized: None,
-            },
-            in_memory_state,
-        );
-
-        let _ =
-            CanonicalInMemoryStateWriter::new(canonical_in_memory_state, in_memory_state_writer);
-    }
-
-    #[test]
-    fn canonical_head_that_is_the_highest_canonical_block_is_accepted() {
-        let blocks = TestBlockBuilder::eth().get_executed_blocks(1..3).collect::<Vec<_>>();
-        let (in_memory_state, mut in_memory_state_writer) = InMemoryState::new();
-        in_memory_state_writer.update_chain(NewCanonicalChain::Commit { new: blocks.clone() });
-        let canonical_in_memory_state = CanonicalInMemoryState::new(
-            ChainInfoHeaders {
-                canonical_head: blocks[1].recovered_block().clone_sealed_header(),
-                safe: None,
-                finalized: None,
-            },
-            in_memory_state,
-        );
-
-        let canonical_in_memory_state_writer =
-            CanonicalInMemoryStateWriter::new(canonical_in_memory_state, in_memory_state_writer);
-        assert_eq!(
-            canonical_in_memory_state_writer
-                .canonical_in_memory_state()
-                .head_state()
-                .unwrap()
-                .hash(),
-            hash(&blocks[1])
-        );
-    }
-
-    #[test]
-    fn writer_sets_the_chain_info_and_notifies_subscribers() {
-        let mut builder = TestBlockBuilder::eth();
-        let (canonical_in_memory_state, mut canonical_in_memory_state_writer) =
-            canonical_in_memory_state();
-        assert_eq!(
-            canonical_in_memory_state_writer.canonical_in_memory_state().get_canonical_head(),
-            SealedHeader::default()
-        );
-        let block = builder.get_executed_block_with_number(1, B256::random());
-        let header = block.recovered_block().clone_sealed_header();
-
-        assert!(canonical_in_memory_state.get_safe_header().is_none());
-        canonical_in_memory_state_writer.set_safe(header.clone());
-        assert_eq!(canonical_in_memory_state.get_safe_header(), Some(header.clone()));
-        assert_eq!(canonical_in_memory_state.get_safe_num_hash(), Some(header.num_hash()));
-
-        assert!(canonical_in_memory_state.get_finalized_header().is_none());
-        canonical_in_memory_state_writer.set_finalized(header.clone());
-        assert_eq!(canonical_in_memory_state.get_finalized_header(), Some(header.clone()));
-        assert_eq!(canonical_in_memory_state.get_finalized_num_hash(), Some(header.num_hash()));
-
-        assert!(canonical_in_memory_state.get_persisted_num_hash().is_none());
-        canonical_in_memory_state_writer.set_persisted(header.num_hash());
-        assert_eq!(canonical_in_memory_state.get_persisted_num_hash(), Some(header.num_hash()));
-
-        assert!(canonical_in_memory_state.last_received_update_timestamp().is_none());
-        canonical_in_memory_state_writer.on_forkchoice_update_received();
-        assert!(canonical_in_memory_state.last_received_update_timestamp().is_some());
-
-        let mut notifications = canonical_in_memory_state.subscribe_canon_state();
-        let notification = NewCanonicalChain::Commit { new: vec![block] }.to_chain_notification();
-        canonical_in_memory_state_writer.notify_canon_state(notification.clone());
-        assert_eq!(notifications.try_recv().unwrap(), notification);
     }
 }

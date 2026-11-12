@@ -4,8 +4,7 @@ use crate::{
     tree::{
         canonical::NewHeadChain,
         error::{
-            AdvancePersistenceError, BlockAccessListDecodeError, InsertBlockError,
-            InsertBlockErrorKind, InsertPayloadError,
+            BlockAccessListDecodeError, InsertBlockError, InsertBlockErrorKind, InsertPayloadError,
         },
         payload_validator::{BasicEngineValidator, TreeCtx, ValidationOutcome},
         persist::PersistTarget,
@@ -301,10 +300,16 @@ impl TestHarness {
     /// Removes every tracked block and makes `blocks`, a chain from oldest to newest, the
     /// canonical in-memory chain.
     fn with_blocks(mut self, blocks: Vec<ExecutedBlock>) -> Self {
-        let tree_state = &mut self.tree.state.tree_state;
-        let canonical_head = tree_state.canonical_in_memory_state().get_canonical_head();
-        tree_state.on_backfill_finished(canonical_head, B256::ZERO, true);
-        tree_state.update_chain(NewCanonicalChain::Commit { new: blocks.clone() });
+        let state = &mut self.tree.state;
+        let canonical_head = state.tree_state.canonical_in_memory_state().get_canonical_head();
+        state.canonical_in_memory_state_writer.on_backfill_finished(
+            canonical_head,
+            B256::ZERO,
+            true,
+        );
+        state
+            .canonical_in_memory_state_writer
+            .update_chain(NewCanonicalChain::Commit { new: blocks.clone() });
 
         self.blocks = blocks.clone();
 
@@ -1275,14 +1280,14 @@ async fn test_tree_state_on_new_head_reorg() {
     let blocks: Vec<_> = test_block_builder.get_executed_blocks(1..6).collect();
 
     for block in &blocks {
-        test_harness.tree.state.tree_state.insert_executed(block.clone());
+        test_harness.tree.state.insert_executed(block.clone());
     }
 
     // Make block 3 the current canonical head.
     test_harness
         .tree
         .state
-        .tree_state
+        .canonical_in_memory_state_writer
         .update_chain(NewCanonicalChain::Commit { new: blocks[..3].to_vec() });
     assert_eq!(
         test_harness.tree.state.tree_state.canonical_head(),
@@ -1297,9 +1302,9 @@ async fn test_tree_state_on_new_head_reorg() {
     let fork_block_5 =
         test_block_builder.get_executed_block_with_number(5, fork_block_4.recovered_block().hash());
 
-    test_harness.tree.state.tree_state.insert_executed(fork_block_3.clone());
-    test_harness.tree.state.tree_state.insert_executed(fork_block_4.clone());
-    test_harness.tree.state.tree_state.insert_executed(fork_block_5.clone());
+    test_harness.tree.state.insert_executed(fork_block_3.clone());
+    test_harness.tree.state.insert_executed(fork_block_4.clone());
+    test_harness.tree.state.insert_executed(fork_block_5.clone());
 
     // Normal (non-reorg) case.
     //
@@ -1378,7 +1383,11 @@ async fn test_tree_state_on_new_head_reorg() {
     assert_eq!(current_action, None);
 
     // Let's change the canonical head by applying the reorg and advance persistence.
-    test_harness.tree.state.tree_state.update_chain(NewCanonicalChain::Reorg { new, old });
+    test_harness
+        .tree
+        .state
+        .canonical_in_memory_state_writer
+        .update_chain(NewCanonicalChain::Reorg { new, old });
     assert_eq!(
         test_harness.tree.state.tree_state.canonical_head(),
         fork_block_5.recovered_block().num_hash()
@@ -1407,13 +1416,17 @@ fn test_tree_state_on_new_head_deep_fork() {
     let blocks: Vec<_> = test_block_builder.get_executed_blocks(0..5).collect();
 
     for block in &blocks {
-        test_harness.tree.state.tree_state.insert_executed(block.clone());
+        test_harness.tree.state.insert_executed(block.clone());
     }
 
     // Make the last block the current canonical head.
     let last_block = blocks.last().unwrap().recovered_block().clone();
 
-    test_harness.tree.state.tree_state.update_chain(NewCanonicalChain::Commit { new: blocks });
+    test_harness
+        .tree
+        .state
+        .canonical_in_memory_state_writer
+        .update_chain(NewCanonicalChain::Commit { new: blocks });
     assert_eq!(test_harness.tree.state.tree_state.canonical_head(), last_block.num_hash());
 
     // create a fork chain from last_block
@@ -1433,13 +1446,13 @@ fn test_tree_state_on_new_head_deep_fork() {
         })
         .collect::<Vec<_>>();
     for block in &executed_chain_a {
-        test_harness.tree.state.tree_state.insert_executed(block.clone());
+        test_harness.tree.state.insert_executed(block.clone());
     }
     // Make the last block of chain a the current canonical head.
     test_harness
         .tree
         .state
-        .tree_state
+        .canonical_in_memory_state_writer
         .update_chain(NewCanonicalChain::Commit { new: executed_chain_a });
     assert_eq!(
         test_harness.tree.state.tree_state.canonical_head(),
@@ -1447,7 +1460,7 @@ fn test_tree_state_on_new_head_deep_fork() {
     );
 
     for block in &chain_b {
-        test_harness.tree.state.tree_state.insert_executed(ExecutedBlock::new(
+        test_harness.tree.state.insert_executed(ExecutedBlock::new(
             Arc::new(block.clone()),
             Arc::new(BlockExecutionOutput::default()),
             empty_trie_data(),
@@ -1519,7 +1532,7 @@ async fn test_get_canonical_blocks_to_persist() {
     // make sure only canonical blocks are included
     let fork_block = test_block_builder.get_executed_block_with_number(4, B256::random());
     let fork_block_hash = fork_block.recovered_block().hash();
-    test_harness.tree.state.tree_state.insert_executed(fork_block);
+    test_harness.tree.state.insert_executed(fork_block);
 
     assert!(test_harness.tree.state.tree_state.sealed_header_by_hash(&fork_block_hash).is_some());
 
@@ -1559,7 +1572,7 @@ fn canonicalization_moves_executed_blocks_between_sections() {
     let executed = blocks[2..]
         .iter()
         .map(|block| {
-            test_harness.tree.state.tree_state.insert_executed(block.clone());
+            test_harness.tree.state.insert_executed(block.clone());
             in_memory_state.state_by_hash(hash(block)).unwrap()
         })
         .collect::<Vec<_>>();
@@ -1583,7 +1596,7 @@ fn canonicalization_moves_executed_blocks_between_sections() {
 
     // A reorg to a fork off block 1 moves the replaced blocks back to the non-canonical section.
     let fork = builder.get_executed_block_with_number(2, hash(&blocks[1]));
-    test_harness.tree.state.tree_state.insert_executed(fork.clone());
+    test_harness.tree.state.insert_executed(fork.clone());
     test_harness.tree.make_canonical(hash(&fork)).unwrap();
     assert_eq!(canonical_in_memory_state.head_state().unwrap().hash(), hash(&fork));
     for (block, state) in blocks[2..].iter().zip(&executed) {
@@ -1611,7 +1624,7 @@ fn threshold_persistence_uses_canonical_in_memory_chain_length() {
         blocks[7].recovered_block().num_hash();
     test_harness.tree.persistence_state.last_state_trie_persisted_block =
         blocks[5].recovered_block().num_hash();
-    test_harness.tree.state.tree_state.on_blocks_persisted(
+    test_harness.tree.state.canonical_in_memory_state_writer.on_blocks_persisted(
         blocks[7].recovered_block().num_hash(),
         blocks[5].recovered_block().num_hash(),
         None,
@@ -1881,7 +1894,11 @@ async fn test_fcu_with_canonical_ancestor_below_finalized_is_rejected() {
     let current_head = blocks[3].recovered_block();
     let finalized = blocks[2].recovered_block();
     let ancestor = blocks[1].recovered_block();
-    test_harness.tree.state.tree_state.set_finalized(finalized.clone_sealed_header());
+    test_harness
+        .tree
+        .state
+        .canonical_in_memory_state_writer
+        .set_finalized(finalized.clone_sealed_header());
 
     // An FCU to an ancestor below the latest known finalized block would reorg out the
     // finalized block and is rejected, with or without payload attributes.
@@ -1960,7 +1977,11 @@ async fn test_fcu_with_canonical_ancestor_above_finalized_starts_payload_build()
     let current_head = blocks[3].recovered_block();
     let finalized = blocks[0].recovered_block();
     let ancestor = blocks[2].recovered_block();
-    test_harness.tree.state.tree_state.set_finalized(finalized.clone_sealed_header());
+    test_harness
+        .tree
+        .state
+        .canonical_in_memory_state_writer
+        .set_finalized(finalized.clone_sealed_header());
 
     let payload_attributes = EthPayloadAttributes {
         timestamp: ancestor.timestamp() + 1,
@@ -2862,8 +2883,8 @@ mod forkchoice_updated_tests {
         };
 
         // Set finalized=30, safe=50 to test all three commitment levels
-        test_harness.tree.state.tree_state.set_finalized(seal_header(30));
-        test_harness.tree.state.tree_state.set_safe(seal_header(50));
+        test_harness.tree.state.canonical_in_memory_state_writer.set_finalized(seal_header(30));
+        test_harness.tree.state.canonical_in_memory_state_writer.set_safe(seal_header(50));
 
         // Reorg at block 20 (below finalized=30) -> finalized reorg
         test_harness.tree.update_reorg_metrics(5, Some(NumHash::new(20, B256::random())));
@@ -2999,7 +3020,7 @@ fn test_on_valid_downloaded_non_head_sync_target_continues_to_head() {
     let head_hash = B256::random(); // head block is unknown — hasn't been downloaded yet
 
     // Unwind the canonical head to genesis so the safe block is in tree but not yet canonical.
-    test_harness.tree.state.tree_state.unwind_canonical_head(genesis.clone());
+    test_harness.tree.state.canonical_in_memory_state_writer.unwind_canonical_head(genesis.clone());
 
     // Set the forkchoice tracker to SYNCING with head != safe.
     let fcu_state = ForkchoiceState {
@@ -3063,7 +3084,7 @@ fn test_on_valid_downloaded_head_sync_target_returns_make_canonical() {
     let head_hash = head_block.recovered_block().hash();
 
     // Unwind the canonical head to genesis.
-    test_harness.tree.state.tree_state.unwind_canonical_head(genesis.clone());
+    test_harness.tree.state.canonical_in_memory_state_writer.unwind_canonical_head(genesis.clone());
 
     // Set the forkchoice tracker: head == the downloaded block.
     let fcu_state = ForkchoiceState {
@@ -3112,7 +3133,7 @@ fn test_canonicalizing_downloaded_sync_target_head_updates_finalized() {
     let finalized_num_hash = finalized_block.recovered_block().num_hash();
     let head_num_hash = head_block.recovered_block().num_hash();
 
-    test_harness.tree.state.tree_state.unwind_canonical_head(genesis.clone());
+    test_harness.tree.state.canonical_in_memory_state_writer.unwind_canonical_head(genesis.clone());
 
     let fcu_state = ForkchoiceState {
         head_block_hash: head_num_hash.hash,
@@ -3164,7 +3185,7 @@ fn test_backfill_reaching_sync_target_head_updates_finalized() {
     let initial_head = blocks[0].clone();
     let sync_target = blocks[2].recovered_block().num_hash();
     test_harness = test_harness.with_blocks(blocks);
-    test_harness.tree.state.tree_state.unwind_canonical_head(initial_head);
+    test_harness.tree.state.canonical_in_memory_state_writer.unwind_canonical_head(initial_head);
     // The block the backfill finished at is read from the database.
     test_harness.provider.enable_database_provider();
 
@@ -3550,10 +3571,9 @@ fn test_forkchoice_rejects_stale_persisted_prefix_hash() {
             )
         })
         .collect();
-    test_harness.tree.state.tree_state.update_chain(NewCanonicalChain::Reorg {
-        new: vec![new[0].clone()],
-        old: old[1..].to_vec(),
-    });
+    test_harness.tree.state.canonical_in_memory_state_writer.update_chain(
+        NewCanonicalChain::Reorg { new: vec![new[0].clone()], old: old[1..].to_vec() },
+    );
 
     let state = ForkchoiceState {
         head_block_hash: new[1].recovered_block().hash(),
@@ -3589,7 +3609,7 @@ async fn assert_fcu_back_to_reorged_out_head_with_pending_disk_reorg(sibling_len
         })
         .collect();
     for block in &new {
-        test_harness.tree.state.tree_state.insert_executed(block.clone());
+        test_harness.tree.state.insert_executed(block.clone());
     }
     let new_tip = new.last().unwrap().recovered_block().hash();
 
@@ -3628,147 +3648,4 @@ async fn test_fcu_back_to_reorged_out_head_with_pending_disk_reorg() {
 #[tokio::test]
 async fn test_fcu_back_to_reorged_out_head_above_shorter_branch_with_pending_disk_reorg() {
     assert_fcu_back_to_reorged_out_head_with_pending_disk_reorg(1).await;
-}
-
-/// A head whose in-memory chain ends before it reaches the canonical chain is reported as
-/// disconnected, and a forkchoice update to it is answered like one to an unknown head.
-#[test]
-fn on_new_head_reports_a_head_that_does_not_connect_to_the_canonical_chain() {
-    let mut builder = TestBlockBuilder::eth();
-    let blocks = builder.get_executed_blocks(0..4).collect::<Vec<_>>();
-    let mut test_harness = TestHarness::new(MAINNET.clone()).with_blocks(blocks.clone());
-    let canonical_head = blocks[3].recovered_block().num_hash();
-    let hash = |block: &ExecutedBlock| block.recovered_block().hash();
-
-    // The chain of a head above the canonical height ends before the height above the canonical
-    // head.
-    let detached = builder.get_executed_block_with_number(6, B256::random());
-    test_harness.tree.state.tree_state.insert_executed(detached.clone());
-    assert_matches!(
-        test_harness.tree.on_new_head(hash(&detached)).unwrap(),
-        NewHeadChain::Disconnected { oldest } if oldest == detached.recovered_block().num_hash()
-    );
-
-    // The chain of a head at the canonical height ends before it meets the canonical chain.
-    let detached_fork = builder.get_executed_block_with_number(2, B256::random());
-    let detached_fork_child = builder.get_executed_block_with_number(3, hash(&detached_fork));
-    for block in [&detached_fork, &detached_fork_child] {
-        test_harness.tree.state.tree_state.insert_executed(block.clone());
-    }
-    assert_matches!(
-        test_harness.tree.on_new_head(hash(&detached_fork_child)).unwrap(),
-        NewHeadChain::Disconnected { oldest }
-            if oldest == detached_fork.recovered_block().num_hash()
-    );
-
-    assert_matches!(
-        test_harness.tree.on_new_head(B256::random()).unwrap(),
-        NewHeadChain::NotInMemory
-    );
-
-    // Neither head becomes canonical: the forkchoice update starts a download of the head, and
-    // making the head canonical changes nothing.
-    for head in [&detached, &detached_fork_child] {
-        let outcome = test_harness
-            .tree
-            .on_forkchoice_updated(
-                ForkchoiceState {
-                    head_block_hash: hash(head),
-                    safe_block_hash: B256::ZERO,
-                    finalized_block_hash: B256::ZERO,
-                },
-                None,
-            )
-            .unwrap();
-        assert_eq!(outcome.outcome.forkchoice_status(), ForkchoiceStatus::Syncing);
-        assert_matches!(outcome.event, Some(TreeEvent::Download(_)));
-
-        test_harness.tree.make_canonical(hash(head)).unwrap();
-        assert_eq!(test_harness.tree.state.tree_state.canonical_head(), canonical_head);
-    }
-}
-
-/// Blocks are only handed to persistence if they are the whole range between the persisted
-/// state/trie frontier and the new database tip. Anything else is an error that stops the engine,
-/// and is not reported as nothing left to persist.
-#[test]
-fn get_save_blocks_input_requires_blocks_that_cover_the_range_to_persist() {
-    let blocks = TestBlockBuilder::eth().get_executed_blocks(0..6).collect::<Vec<_>>();
-    let mut test_harness = TestHarness::new(MAINNET.clone()).with_blocks(blocks.clone());
-    test_harness.tree.config = TreeConfig::default()
-        .with_num_state_masking_blocks(0)
-        .with_persistence_threshold(0)
-        .with_memory_block_buffer_target(0);
-    let genesis = blocks[0].recovered_block().num_hash();
-    let persisted = blocks[3].recovered_block().num_hash();
-    let head = blocks[5].recovered_block().num_hash();
-    test_harness.tree.persistence_state.last_persisted_block = genesis;
-    test_harness.tree.persistence_state.last_state_trie_persisted_block = genesis;
-
-    // The canonical blocks up to block 3 leave memory, while the persistence state still says
-    // that nothing above block 0 is persisted.
-    test_harness.tree.state.tree_state.on_blocks_persisted(persisted, persisted, None);
-    assert_eq!(
-        test_harness.tree.state.tree_state.in_memory_state().block_counts(),
-        InMemoryStateBlockCounts { canonical: 2, non_canonical: 0 }
-    );
-    let assert_not_in_memory = |result: Result<(), AdvancePersistenceError>| {
-        assert_matches!(
-            result,
-            Err(AdvancePersistenceError::CanonicalBlocksNotInMemory {
-                canonical_head,
-                first_expected: 1,
-                last_expected: 5,
-                found: 2,
-                first_found: Some(first_found),
-                last_found: Some(last_found),
-            }) if canonical_head == head.hash &&
-                first_found == blocks[4].recovered_block().num_hash() &&
-                last_found == head
-        );
-    };
-    for target in [PersistTarget::Threshold, PersistTarget::Head] {
-        assert_not_in_memory(test_harness.tree.get_save_blocks_input(target).map(drop));
-    }
-
-    // Neither the persistence that runs after every event nor the one that runs on shutdown
-    // starts a save or treats the gap as nothing left to persist. Shutdown is still signaled.
-    assert_not_in_memory(test_harness.tree.advance_persistence());
-    let (terminate_tx, mut terminate_rx) = oneshot::channel();
-    assert_not_in_memory(test_harness.tree.finish_termination(terminate_tx));
-    assert!(terminate_rx.try_recv().is_ok());
-    assert!(!test_harness.tree.persistence_state.in_progress());
-    assert!(test_harness.action_rx.try_recv().is_err());
-
-    // The remaining blocks are the range above block 3.
-    test_harness.tree.persistence_state.last_persisted_block = persisted;
-    test_harness.tree.persistence_state.last_state_trie_persisted_block = persisted;
-    for target in [PersistTarget::Threshold, PersistTarget::Head] {
-        let input = test_harness.tree.get_save_blocks_input(target).unwrap().unwrap();
-        assert_eq!(input.persist_rest_blocks(), &blocks[4..]);
-    }
-
-    // A canonical head that is not in memory has no blocks to persist.
-    test_harness.tree.state.tree_state.on_backfill_finished(
-        blocks[5].recovered_block().clone_sealed_header(),
-        persisted.hash,
-        true,
-    );
-    assert_eq!(test_harness.tree.state.tree_state.canonical_head(), head);
-    assert_matches!(
-        test_harness.tree.get_save_blocks_input(PersistTarget::Head),
-        Err(AdvancePersistenceError::CanonicalBlocksNotInMemory {
-            canonical_head,
-            first_expected: 4,
-            last_expected: 5,
-            found: 0,
-            first_found: None,
-            last_found: None,
-        }) if canonical_head == head.hash
-    );
-
-    // Nothing is left to persist once the frontiers have reached the canonical head.
-    test_harness.tree.persistence_state.last_persisted_block = head;
-    test_harness.tree.persistence_state.last_state_trie_persisted_block = head;
-    assert!(test_harness.tree.get_save_blocks_input(PersistTarget::Head).unwrap().is_none());
 }

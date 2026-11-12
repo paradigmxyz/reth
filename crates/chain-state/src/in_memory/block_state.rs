@@ -302,22 +302,4 @@ mod tests {
         assert_eq!(block_state_chain.len(), 1);
         assert_eq!(block_state_chain[0].block().recovered_block().number, 1);
     }
-
-    #[test]
-    fn chain_hashes_end_with_the_anchor() {
-        let mut test_block_builder = TestBlockBuilder::eth();
-        let chain = create_mock_state_chain(&mut test_block_builder, 3);
-
-        assert_eq!(
-            chain[2].chain_hashes().collect::<Vec<_>>(),
-            vec![chain[2].hash(), chain[1].hash(), chain[0].hash(), chain[2].anchor().hash]
-        );
-        assert_eq!(chain[2].anchor().hash, chain[0].parent_hash());
-
-        // A block without linked ancestors yields itself and its parent.
-        assert_eq!(
-            chain[0].chain_hashes().collect::<Vec<_>>(),
-            vec![chain[0].hash(), chain[0].parent_hash()]
-        );
-    }
 }

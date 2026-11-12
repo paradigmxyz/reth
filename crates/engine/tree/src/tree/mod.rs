@@ -10,7 +10,8 @@ use alloy_rpc_types_engine::{ForkchoiceState, PayloadStatus, PayloadStatusEnum};
 use error::InsertBlockFatalError;
 use payload_build::PayloadBuildTracker;
 use reth_chain_state::{
-    CanonicalInMemoryState, ExecutedBlock, ExecutionTimingStats, InMemoryStateWriter,
+    CanonicalInMemoryState, CanonicalInMemoryStateWriter, ExecutedBlock, ExecutionTimingStats,
+    InMemoryStateWriter,
 };
 use reth_consensus::FullConsensus;
 use reth_engine_primitives::{
@@ -88,12 +89,14 @@ const CHANGESET_CACHE_RETENTION_BLOCKS: u64 = 64;
 
 /// Tracks the state of the engine api internals.
 ///
-/// This type has a single owner. The executed blocks and the canonical chain tracking that its
-/// [`TreeState`] writes are read concurrently through their read handles.
+/// This type has a single owner. The executed blocks and the canonical chain tracking that it
+/// writes are read concurrently through their read handles.
 #[derive(Debug)]
 pub struct EngineApiTreeState<N: NodePrimitives> {
-    /// Tracks the executed in-memory blocks and the canonical chain.
+    /// Reads the executed in-memory blocks and the canonical chain.
     tree_state: TreeState<N>,
+    /// Write access to the executed in-memory blocks and the canonical chain tracking.
+    canonical_in_memory_state_writer: CanonicalInMemoryStateWriter<N>,
     /// Whether the next sparse trie task should attempt cache pruning during trie preservation.
     pending_sparse_trie_prune: bool,
     /// Tracks the forkchoice state updates received by the CL.
@@ -114,16 +117,20 @@ impl<N: NodePrimitives> EngineApiTreeState<N> {
         in_memory_state_writer: InMemoryStateWriter<N>,
         overlay_manager: OverlayManager<N>,
     ) -> Self {
+        assert!(
+            in_memory_state_writer.writes_to(overlay_manager.in_memory_state()),
+            "the writer does not write to the in-memory state of the overlay manager"
+        );
         Self {
             invalid_headers: InvalidHeaderCache::new(
                 max_invalid_header_cache_length,
                 invalid_header_hit_eviction_threshold,
             ),
             buffer: BlockBuffer::new(block_buffer_limit),
-            tree_state: TreeState::new(
+            tree_state: TreeState::new(canonical_in_memory_state.clone(), overlay_manager),
+            canonical_in_memory_state_writer: CanonicalInMemoryStateWriter::new(
                 canonical_in_memory_state,
                 in_memory_state_writer,
-                overlay_manager,
             ),
             pending_sparse_trie_prune: false,
             forkchoice_state_tracker: ForkchoiceStateTracker::default(),
@@ -166,6 +173,17 @@ impl<N: NodePrimitives> EngineApiTreeState<N> {
     /// Returns true if the block has been marked as invalid.
     pub fn has_invalid_header(&mut self, hash: &B256) -> bool {
         self.invalid_headers.get(hash).is_some()
+    }
+
+    /// Tracks a newly executed block. It becomes the pending block if it is built on the
+    /// canonical head.
+    ///
+    /// A block that is already tracked stays in its section.
+    fn insert_executed(&mut self, executed: ExecutedBlock<N>) {
+        let hash = executed.recovered_block().hash();
+        if self.canonical_in_memory_state_writer.insert_executed(executed) {
+            self.tree_state.overlay_manager().precompute_child_execution_overlays(hash);
+        }
     }
 }
 
@@ -357,8 +375,8 @@ where
     /// Creates a new [`EngineApiTreeHandler`].
     ///
     /// `provider` must read the in-memory state that `state` writes to. The handles `state`
-    /// was created from read that in-memory state, or creating it panicked, see
-    /// [`TreeState::new`]; `provider` is not checked.
+    /// was created from read that in-memory state, or creating it panicked; `provider` is not
+    /// checked.
     #[expect(clippy::too_many_arguments)]
     pub fn new(
         provider: P,
@@ -697,7 +715,7 @@ where
                             }
                         };
 
-                        self.state.tree_state.insert_executed(block.clone());
+                        self.state.insert_executed(block.clone());
 
                         self.metrics.engine.inserted_already_executed_blocks.increment(1);
                         self.emit_event(EngineApiEvent::BeaconConsensus(

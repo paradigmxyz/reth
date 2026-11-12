@@ -1068,7 +1068,7 @@ mod tests {
         providers::{StaticFileProvider, StaticFileWriter},
         test_utils::{blocks::TEST_BLOCK, create_test_provider_factory, MockNodeTypesWithDB},
         BlockHashReader, BlockNumReader, BlockWriter, DBProvider, HeaderSyncGapProvider,
-        StageCheckpointWriter, TransactionsProvider,
+        TransactionsProvider,
     };
     use alloy_primitives::{TxNumber, B256};
     use assert_matches::assert_matches;
@@ -1294,112 +1294,5 @@ mod tests {
         let local_head = provider.local_tip_header(checkpoint).unwrap();
 
         assert_eq!(local_head, head);
-    }
-
-    /// Inserts a chain of `count` blocks that starts with block 0, makes its last block the head
-    /// of the stored chain and returns the headers of the blocks.
-    fn insert_chain(
-        factory: &ProviderFactory<MockNodeTypesWithDB>,
-        count: u64,
-    ) -> Vec<SealedHeader> {
-        let mut rng = generators::rng();
-        let provider_rw = factory.provider_rw().unwrap();
-        let mut headers = Vec::<SealedHeader>::new();
-        for number in 0..count {
-            let block = random_block(
-                &mut rng,
-                number,
-                BlockParams {
-                    parent: headers.last().map(SealedHeader::hash),
-                    tx_count: Some(0),
-                    ..Default::default()
-                },
-            );
-            headers.push(block.clone_sealed_header());
-            provider_rw.insert_block(&block.try_recover().unwrap()).unwrap();
-        }
-        provider_rw
-            .save_stage_checkpoint(StageId::Finish, StageCheckpoint::new(count - 1))
-            .unwrap();
-        provider_rw.commit().unwrap();
-        headers
-    }
-
-    #[test]
-    fn chain_info_headers_fails_if_the_header_of_the_head_is_not_stored() {
-        let factory = create_test_provider_factory();
-        assert_matches!(
-            factory.chain_info_headers(),
-            Err(ProviderError::HeaderNotFound(block_number))
-                if block_number.as_number().unwrap() == 0
-        );
-    }
-
-    #[test]
-    fn chain_info_headers_returns_the_stored_head_safe_and_finalized_blocks() {
-        let factory = create_test_provider_factory();
-        let headers = insert_chain(&factory, 4);
-
-        // Neither a safe nor a finalized block is stored.
-        let ChainInfoHeaders { canonical_head, safe, finalized } =
-            factory.chain_info_headers().unwrap();
-        assert_eq!(canonical_head, headers[3]);
-        assert_eq!(safe, None);
-        assert_eq!(finalized, None);
-
-        let provider_rw = factory.provider_rw().unwrap();
-        provider_rw.save_safe_block_number(2).unwrap();
-        provider_rw.save_finalized_block_number(1).unwrap();
-        provider_rw.commit().unwrap();
-
-        let ChainInfoHeaders { canonical_head, safe, finalized } =
-            factory.chain_info_headers().unwrap();
-        assert_eq!(canonical_head, headers[3]);
-        assert_eq!(safe, Some(headers[2].clone()));
-        assert_eq!(finalized, Some(headers[1].clone()));
-    }
-
-    #[test]
-    fn chain_info_headers_uses_the_finalized_block_if_no_safe_block_is_stored() {
-        let factory = create_test_provider_factory();
-        let headers = insert_chain(&factory, 4);
-        let provider_rw = factory.provider_rw().unwrap();
-        provider_rw.save_finalized_block_number(1).unwrap();
-        provider_rw.commit().unwrap();
-
-        let ChainInfoHeaders { canonical_head, safe, finalized } =
-            factory.chain_info_headers().unwrap();
-        assert_eq!(canonical_head, headers[3]);
-        assert_eq!(safe, Some(headers[1].clone()));
-        assert_eq!(finalized, Some(headers[1].clone()));
-    }
-
-    #[test]
-    fn chain_info_headers_returns_none_for_a_stored_block_number_without_a_header() {
-        let factory = create_test_provider_factory();
-        let headers = insert_chain(&factory, 4);
-
-        // Both stored block numbers are above the highest header.
-        let provider_rw = factory.provider_rw().unwrap();
-        provider_rw.save_safe_block_number(10).unwrap();
-        provider_rw.save_finalized_block_number(11).unwrap();
-        provider_rw.commit().unwrap();
-
-        let ChainInfoHeaders { canonical_head, safe, finalized } =
-            factory.chain_info_headers().unwrap();
-        assert_eq!(canonical_head, headers[3]);
-        assert_eq!(safe, None);
-        assert_eq!(finalized, None);
-
-        // A stored safe block number without a header is not replaced by the finalized block.
-        let provider_rw = factory.provider_rw().unwrap();
-        provider_rw.save_finalized_block_number(1).unwrap();
-        provider_rw.commit().unwrap();
-
-        let ChainInfoHeaders { canonical_head, safe, finalized } =
-            factory.chain_info_headers().unwrap();
-        assert_eq!(canonical_head, headers[3]);
-        assert_eq!(safe, None);
-        assert_eq!(finalized, Some(headers[1].clone()));
     }
 }

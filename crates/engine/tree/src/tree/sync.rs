@@ -141,7 +141,7 @@ where
         // the backfill height is the new canonical block. Otherwise all executed blocks below the
         // backfill height are removed: the backfill block is passed as the finalized block to
         // ensure we remove all state before that.
-        self.state.tree_state.on_backfill_finished(
+        self.state.canonical_in_memory_state_writer.on_backfill_finished(
             backfill_head,
             self.persistence_state.last_persisted_block.hash,
             ctrl.is_unwind(),

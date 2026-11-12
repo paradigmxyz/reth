@@ -64,8 +64,9 @@
 //! and the blocks that are not canonical, and links every block to its tracked parent. The
 //! canonical head, the safe block and the finalized block are tracked by a
 //! [`CanonicalInMemoryState`](reth_chain_state::CanonicalInMemoryState). The
-//! [`TreeState`](tree::state::TreeState) holds the write access to both: every change to the
-//! tracked blocks and to the canonical chain goes through it.
+//! [`TreeState`](tree::state::TreeState) reads both. The engine holds the only
+//! [`CanonicalInMemoryStateWriter`](reth_chain_state::CanonicalInMemoryStateWriter): every change
+//! to the tracked blocks and to the canonical chain goes through it.
 //!
 //! ## Persistence model
 //!

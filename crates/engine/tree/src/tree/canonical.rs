@@ -167,7 +167,7 @@ where
         );
 
         let block = self.canonical_block_by_hash(canonical_header.hash())?;
-        self.state.tree_state.unwind_canonical_head(block);
+        self.state.canonical_in_memory_state_writer.unwind_canonical_head(block);
 
         Ok(())
     }
@@ -300,14 +300,14 @@ where
         }
 
         // Update the tracked in-memory state and the tracked canonical head with the new chain.
-        self.state.tree_state.update_chain(chain_update);
+        self.state.canonical_in_memory_state_writer.update_chain(chain_update);
         self.payload_validator.on_canonical_head_changed(tip.hash(), &self.state);
 
         // Update metrics based on new tip
         self.metrics.tree.canonical_chain_height.set(tip.number() as f64);
 
         // sends an event to all active listeners about the new canonical chain
-        self.state.tree_state.notify_canon_state(notification);
+        self.state.canonical_in_memory_state_writer.notify_canon_state(notification);
 
         // emit event
         self.emit_event(ConsensusEngineEvent::CanonicalChainCommitted(

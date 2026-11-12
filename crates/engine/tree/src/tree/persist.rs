@@ -444,7 +444,7 @@ where
             };
         // Trims the canonical chain to the state/trie frontier and prunes the non-canonical blocks
         // that conflict with the finalized block.
-        self.state.tree_state.on_blocks_persisted(
+        self.state.canonical_in_memory_state_writer.on_blocks_persisted(
             self.persistence_state.last_persisted_block,
             in_memory_persisted_block,
             finalized,

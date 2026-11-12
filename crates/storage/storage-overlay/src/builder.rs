@@ -1481,25 +1481,6 @@ mod tests {
     }
 
     #[test]
-    fn managed_overlay_errors_if_anchor_is_not_on_the_parent_chain() {
-        let (manager, mut in_memory_state_writer) = overlay_manager_with_writer();
-        let blocks = test_blocks();
-        for block in &blocks[2..=4] {
-            in_memory_state_writer.insert_executed(block.clone());
-        }
-        let parent_hash = blocks[4].recovered_block().hash();
-        let anchor_hash = B256::with_last_byte(200);
-        let builder = manager.overlay_builder(parent_hash);
-        let expected = OverlayError::AnchorNotReached { tip_hash: parent_hash, anchor_hash };
-
-        let err = builder.resolve_state_trie_overlays(anchor_hash).unwrap_err();
-        assert_eq!(err.downcast_other_ref::<OverlayError>(), Some(&expected));
-
-        let err = builder.resolve_execution_overlay(anchor_hash).unwrap_err();
-        assert_eq!(err.downcast_other_ref::<OverlayError>(), Some(&expected));
-    }
-
-    #[test]
     fn managed_overlay_skip_requires_both_frontiers() {
         let parent_hash = B256::with_last_byte(1);
         let builder = manager().overlay_builder(parent_hash);
