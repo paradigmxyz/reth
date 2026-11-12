@@ -16,7 +16,7 @@
 use super::{
     bal_prewarm_pool::BalPrewarmPool,
     reuse::{BalanceTracker, PoolTx, PrewarmResults, RecordingDb, RecordingHandle, SpeculativeTx},
-    StateRootHintStream, StateRootUpdateStream,
+    storage_scan, StateRootHintStream, StateRootUpdateStream,
 };
 use crate::tree::{
     CachedStateCacheMetrics, CachedStateMetrics, CachedStateProvider, ExecutionEnv,
@@ -25,7 +25,7 @@ use crate::tree::{
 use alloy_consensus::transaction::TxHashRef;
 use alloy_eip7928::bal::DecodedBal;
 use alloy_eips::eip4895::Withdrawal;
-use alloy_primitives::keccak256;
+use alloy_primitives::{keccak256, Address, B256};
 use evm2::evm::Database;
 use metrics::{Counter, Gauge, Histogram};
 use rayon::prelude::*;
@@ -34,6 +34,7 @@ use reth_evm::{
     Evm as EvmInstance, EvmEnv, EvmEnvFor, EvmFor, EvmTypesFor, ExecutableTxFor, RecoveredTx,
     SpecFor,
 };
+use reth_execution_cache::ProbeMisses;
 use reth_metrics::Metrics;
 use reth_primitives_traits::{FastInstant as Instant, NodePrimitives};
 use reth_provider::{
@@ -49,22 +50,43 @@ use std::{
     sync::{
         atomic::{AtomicBool, AtomicUsize, Ordering},
         mpsc::{self, channel, Receiver, Sender},
-        Arc,
+        Arc, OnceLock,
     },
     time::Duration,
 };
 use tokio::sync::oneshot;
 use tracing::{debug, debug_span, instrument, trace, trace_span, warn, Span};
 
-/// Maximum number of consecutive rounds that execute stale prewarm results again.
-const MAX_REFRESH_ROUNDS: usize = 4;
-
-/// Number of transactions ahead of block execution that refreshing checks after block execution
-/// published actual writes.
+/// Number of transactions ahead of block execution whose stale results idle speculation workers
+/// execute again.
 const REFRESH_WINDOW: usize = 64;
 
-/// How often refreshing checks whether block execution published actual writes.
-const REFRESH_POLL_INTERVAL: Duration = Duration::from_micros(50);
+/// Most rounds a transaction is probed for cold reads.
+///
+/// Each round reaches the reads that depend on what the previous rounds loaded. Most transactions
+/// need one or two; batch calls need dozens before their bulk of independent reads, and pure
+/// chains of dependent reads gain nothing from more.
+const MAX_PROBE_ROUNDS: usize = 64;
+
+/// Consecutive probe rounds through one contract after which its storage is bulk-loaded, see
+/// [`chain_contract`].
+const CHAIN_ROUNDS: usize = 4;
+
+/// Most storage misses a probe round may have to count as a step of a chain.
+const CHAIN_ROUND_KEYS: usize = 8;
+
+/// Threads per block that probe transactions for cold reads, beside the speculation workers.
+///
+/// Probing mostly waits for loads, so the threads take little CPU time from speculation.
+const PROBE_THREADS: usize = 4;
+
+/// Number of idle rounds an idle speculation worker spins before it waits for new work, so that
+/// it does not take CPU time from the state root computation.
+const IDLE_SPIN_ROUNDS: u32 = 6;
+
+/// Longest time an idle speculation worker waits for new work before checking again whether
+/// block execution moved on.
+const IDLE_WAIT_TIMEOUT: Duration = Duration::from_micros(100);
 
 /// Determines the prewarming mode: transaction-based, BAL-based, or skipped.
 ///
@@ -178,9 +200,11 @@ where
 
             let mut tx_count = 0usize;
             let state_root_hint_stream = state_root_hint_stream.as_ref();
-            // Transactions to execute again when their results become stale.
-            let mut refresh_txs = Vec::new();
-            {
+            if let Some(results) = &ctx.prewarm_results {
+                let pool = WorkerStatefulPool::new(pool);
+                tx_count =
+                    Self::speculate_txs(ctx, &pool, results, pending, state_root_hint_stream);
+            } else {
                 let pool = WorkerStatefulPool::new(pool);
                 let pool = &pool;
                 pool.in_place_scope(|s| {
@@ -199,20 +223,6 @@ where
                         }
 
                         tx_count += 1;
-                        if ctx.prewarm_results.is_some() {
-                            refresh_txs.push((index, tx.clone()));
-                        }
-                        // Seed results before queueing, so that they are ready as soon as possible.
-                        let seeded = if let Some(results) = &ctx.prewarm_results &&
-                            let Some(seeds) = &ctx.env.pool_seeds
-                        {
-                            results.seed(index, tx.tx().tx_hash(), seeds)
-                        } else {
-                            None
-                        };
-                        if seeded.is_some() {
-                            ctx.metrics.seeded_transactions.increment(1);
-                        }
                         let parent_span = Span::current();
                         s.spawn(move |_| {
                             let _enter = trace_span!(
@@ -227,25 +237,14 @@ where
                                 pool,
                                 index,
                                 tx,
-                                seeded,
+                                None,
                                 state_root_hint_stream,
                             );
                         });
                     }
 
-                    // Send withdrawal prefetch targets after all transactions dispatched
-                    if let Some(state_root_hint_stream) = state_root_hint_stream &&
-                        let Some(withdrawals) = &ctx.env.withdrawals &&
-                        !withdrawals.is_empty()
-                    {
-                        let targets = multiproof_targets_from_withdrawals(withdrawals);
-                        state_root_hint_stream.on_access_hint(targets.into());
-                    }
+                    Self::send_withdrawal_hints(ctx, state_root_hint_stream);
                 });
-
-                if let Some(results) = &ctx.prewarm_results {
-                    Self::refresh_results(ctx, pool, results, &refresh_txs);
-                }
             }
 
             let _ = actions_tx
@@ -253,66 +252,243 @@ where
         });
     }
 
-    /// Executes transactions again whose results became stale, because the predicted writes of
-    /// earlier transactions changed after they were executed.
+    /// Sends the withdrawals' prefetch targets, after all transactions were dispatched.
+    fn send_withdrawal_hints(
+        ctx: &PrewarmContext<N, P, Evm>,
+        state_root_hint_stream: Option<&StateRootHintStream>,
+    ) {
+        if let Some(state_root_hint_stream) = state_root_hint_stream &&
+            let Some(withdrawals) = &ctx.env.withdrawals &&
+            !withdrawals.is_empty()
+        {
+            let targets = multiproof_targets_from_withdrawals(withdrawals);
+            state_root_hint_stream.on_access_hint(targets.into());
+        }
+    }
+
+    /// Speculatively executes the `pending` transactions for block execution to reuse, until
+    /// prewarming stops, and returns the number of received transactions.
     ///
-    /// Each round checks the transactions that block execution has not reached yet, in block
-    /// order, on all pool threads. Rounds repeat while they find stale results, then wait for
-    /// block execution to publish actual writes that differ from the predicted ones, until
-    /// prewarming stops.
-    fn refresh_results<Tx>(
+    /// Every pool thread runs [`Self::speculation_worker`] while this thread queues transactions
+    /// as they arrive. Block execution waits for the results workers are executing instead of
+    /// executing those transactions itself, so the workers must keep ahead of it: they execute
+    /// arrived transactions in block order as soon as they can, and otherwise execute again the
+    /// stale results of the transactions block execution reaches next. With cold reads probed,
+    /// [`PROBE_THREADS`] threads run [`Self::probe_loop`] beside them.
+    fn speculate_txs<Tx>(
         ctx: &PrewarmContext<N, P, Evm>,
         pool: &WorkerStatefulPool,
         results: &PrewarmResults<EvmTypesFor<Evm>>,
-        txs: &[(usize, Tx)],
+        pending: Receiver<(usize, Tx)>,
+        state_root_hint_stream: Option<&StateRootHintStream>,
+    ) -> usize
+    where
+        Tx: ExecutableTxFor<Evm> + Clone + Send + Sync,
+    {
+        let queue = SpeculationQueue::new(results.len());
+        let fetch = ctx
+            .bal_prewarm_pool
+            .as_deref()
+            .zip(ctx.saved_cache.as_ref())
+            .filter(|_| ctx.probe_cold_reads)
+            .map(|(fetch, saved_cache)| {
+                let state_provider_factory = ctx.provider.clone();
+                let build = Arc::new(move || {
+                    state_provider_factory.database_provider_ro().map(|provider| {
+                        Box::new(provider.into_evm_state_provider()) as EvmStateProviderBox
+                    })
+                });
+                fetch.begin_block(
+                    build,
+                    saved_cache.cache().clone(),
+                    ctx.env.txpool_snapshot.clone(),
+                );
+                fetch
+            });
+        let tx_count = std::thread::scope(|probes| {
+            if let Some(fetch) = fetch {
+                for index in 0..PROBE_THREADS {
+                    let queue = &queue;
+                    let spawned = std::thread::Builder::new()
+                        .name(format!("prewarm-probe-{index}"))
+                        .spawn_scoped(probes, move || Self::probe_loop(ctx, results, queue, fetch));
+                    if let Err(err) = spawned {
+                        debug!(target: "engine::tree::payload_processor::prewarm", %err, "Failed to spawn probe thread");
+                    }
+                }
+            }
+            pool.in_place_scope(|s| {
+                for _ in 0..pool.current_num_threads() {
+                    s.spawn(|_| {
+                        Self::speculation_worker(ctx, pool, results, &queue, state_root_hint_stream)
+                    });
+                }
+
+                let mut tx_count = 0;
+                while let Ok((index, tx)) = pending.recv() {
+                    if ctx.should_stop() {
+                        break
+                    }
+                    tx_count += 1;
+                    // Seed results before queueing, so that they are ready as soon as possible.
+                    let seeded = ctx
+                        .env
+                        .pool_seeds
+                        .as_ref()
+                        .and_then(|seeds| results.seed(index, tx.tx().tx_hash(), seeds));
+                    if seeded.is_some() {
+                        ctx.metrics.seeded_transactions.increment(1);
+                    }
+                    queue.push(index, tx, seeded);
+                    results.wake(false);
+                }
+                queue.close();
+                results.wake(true);
+                Self::send_withdrawal_hints(ctx, state_root_hint_stream);
+                tx_count
+            })
+        });
+        if let Some(fetch) = fetch {
+            fetch.end_block();
+        }
+        tx_count
+    }
+
+    /// Runs on a probe thread until prewarming stops or every transaction was claimed for probing.
+    ///
+    /// Probes the next arrived transaction against the cache alone and has `fetch` load all keys
+    /// it missed in parallel, then probes it again, which reaches the reads that depend on the
+    /// loaded values, until a round misses nothing or the transaction was executed. Missing slots
+    /// read as a large value in every other round, so that batch calls pass their balance
+    /// checks and reach every item.
+    fn probe_loop<Tx>(
+        ctx: &PrewarmContext<N, P, Evm>,
+        results: &PrewarmResults<EvmTypesFor<Evm>>,
+        queue: &SpeculationQueue<Tx, EvmTypesFor<Evm>>,
+        fetch: &BalPrewarmPool,
+    ) where
+        Tx: ExecutableTxFor<Evm> + Clone,
+    {
+        // Probes only load ahead of execution, which must not wait for them.
+        reth_tasks::utils::lower_background_worker_priority();
+        let mut state = ctx.evm_for_ctx();
+        let Some((evm, misses)) = state.probe.as_mut() else { return };
+        let mut idle = 0;
+        while !ctx.should_stop() && !queue.probed_all() {
+            let generation = results.predicted().generation();
+            let Some((index, (tx, _))) = queue.claim_probe() else {
+                backoff(results, generation, &mut idle);
+                continue
+            };
+            idle = 0;
+            if index < ctx.executed_tx_index.load(Ordering::Relaxed) {
+                continue
+            }
+            let (tx_env, _) = tx.clone().into_parts();
+            // The contract the latest rounds walked a chain of storage reads through, and for how
+            // many rounds in a row.
+            let mut chain: Option<(Address, usize)> = None;
+            for round in 0..MAX_PROBE_ROUNDS {
+                if ctx.should_stop() {
+                    return
+                }
+                // A finished execution loaded everything the transaction reads, and most do
+                // finish before a probe: on a warm cache a probe would only execute it again.
+                if results.has_executed(index) {
+                    break
+                }
+                misses.guess_large(round % 2 == 0);
+                drop(evm.take_state_cache());
+                let _ = evm.transact_and_discard(&tx_env, |_| ());
+                let missed = misses.take();
+                if missed.is_empty() {
+                    break
+                }
+                let mut accounts = missed.accounts;
+                accounts.sort_unstable();
+                accounts.dedup();
+                let mut storage = missed.storage;
+                storage.sort_unstable();
+                storage.dedup();
+                let mut code = missed.code;
+                code.sort_unstable();
+                code.dedup();
+                // A few keys of one contract per round, round after round, is a walk the rounds
+                // cannot parallelize: load the contract's whole storage instead.
+                chain = chain_contract(&storage).map(|address| match chain {
+                    Some((chained, rounds)) if chained == address => (address, rounds + 1),
+                    _ => (address, 1),
+                });
+                if let Some((address, CHAIN_ROUNDS)) = chain &&
+                    fetch.claim_storage_load(address)
+                {
+                    let factory = ctx.provider.factory().clone();
+                    let spawned = std::thread::Builder::new()
+                        .name("storage-load".to_string())
+                        .spawn(move || storage_scan::load_storage(&factory, address));
+                    if let Err(err) = spawned {
+                        debug!(target: "engine::tree::payload_processor::prewarm", %err, "Failed to spawn storage load");
+                    }
+                }
+                fetch.warm_all(accounts, &storage, code).wait();
+            }
+        }
+    }
+
+    /// Runs on a pool thread until prewarming stops: executes the next queued transaction, or
+    /// else executes again the first stale result among the transactions block execution reaches
+    /// next.
+    fn speculation_worker<Tx>(
+        ctx: &PrewarmContext<N, P, Evm>,
+        pool: &WorkerStatefulPool,
+        results: &PrewarmResults<EvmTypesFor<Evm>>,
+        queue: &SpeculationQueue<Tx, EvmTypesFor<Evm>>,
+        state_root_hint_stream: Option<&StateRootHintStream>,
     ) where
         Tx: ExecutableTxFor<Evm> + Clone + Send + Sync,
     {
-        let mut rounds = 0;
-        // Rounds after block execution published writes only check the transactions it reaches
-        // soon, the others are checked in later rounds.
-        let mut window_len = usize::MAX;
+        let mut idle = 0;
         while !ctx.should_stop() {
-            let generation = results.predicted().generation();
-            // Skip the transaction block execution is executing and the one it reaches next.
-            let next = ctx.executed_tx_index.load(Ordering::Relaxed) + 1;
-            let start = txs.partition_point(|(index, _)| *index <= next);
-            if start == txs.len() {
-                break
-            }
-            let window = &txs[start..txs.len().min(start.saturating_add(window_len))];
-            // Checking is cheap, so only stale transactions are handed to the pool.
-            let stale = window
-                .iter()
-                .filter(|(index, _)| results.needs_refresh(*index))
-                .collect::<Vec<_>>();
-            let refreshed = !stale.is_empty();
-            if refreshed {
-                let cursor = AtomicUsize::new(0);
-                pool.in_place_scope(|s| {
-                    for _ in 0..pool.current_num_threads().min(stale.len()) {
-                        s.spawn(|_| {
-                            while let Some((index, tx)) =
-                                stale.get(cursor.fetch_add(1, Ordering::Relaxed))
-                            {
-                                if ctx.should_stop() {
-                                    break
-                                }
-                                Self::transact_worker(ctx, pool, *index, tx.clone(), None, None);
-                            }
-                        });
-                    }
-                });
-            }
-
-            rounds += 1;
-            if refreshed && rounds < MAX_REFRESH_ROUNDS {
+            if let Some((index, (tx, seeded))) = queue.claim() {
+                if let Some(_speculation) = results.begin_speculation(index) {
+                    Self::transact_worker(
+                        ctx,
+                        pool,
+                        index,
+                        tx.clone(),
+                        seeded.clone(),
+                        state_root_hint_stream,
+                    );
+                }
+                idle = 0;
                 continue
             }
-            rounds = 0;
-            window_len = REFRESH_WINDOW;
-            while results.predicted().generation() == generation && !ctx.should_stop() {
-                std::thread::sleep(REFRESH_POLL_INTERVAL);
+
+            // Block execution executes the transaction it is at itself if its result is stale.
+            let generation = results.predicted().generation();
+            let from = ctx.executed_tx_index.load(Ordering::Relaxed) + 1;
+            let mut refreshed = false;
+            while let Some(index) = results.take_maybe_stale(from..from + REFRESH_WINDOW) {
+                let Some((tx, _)) = queue.get(index) else { continue };
+                let Some(speculation) = results.begin_speculation(index) else {
+                    // The worker executing it checks it again when it stores its result.
+                    continue
+                };
+                if index > ctx.executed_tx_index.load(Ordering::Relaxed) &&
+                    results.needs_refresh(index)
+                {
+                    Self::transact_worker(ctx, pool, index, tx.clone(), None, None);
+                    refreshed = true;
+                }
+                drop(speculation);
+                if refreshed {
+                    break
+                }
+            }
+            if refreshed {
+                idle = 0;
+            } else {
+                backoff(results, generation, &mut idle);
             }
         }
     }
@@ -758,6 +934,9 @@ where
     pub disable_bal_batch_io: bool,
     /// Results of transaction prewarming that block execution may reuse, `None` if disabled.
     pub(crate) prewarm_results: Option<Arc<PrewarmResults<EvmTypesFor<Evm>>>>,
+    /// Whether probe threads load each transaction's cold reads in parallel on
+    /// [`Self::bal_prewarm_pool`] while speculation workers execute it.
+    pub(crate) probe_cold_reads: bool,
 }
 
 /// Per-thread EVM state initialised by [`PrewarmContext::evm_for_ctx`] and stored in
@@ -766,6 +945,8 @@ struct PrewarmEvmState<Evm: ConfigureEvm> {
     /// The EVM, `None` if its state provider could not be created.
     evm: Option<EvmFor<'static, Evm>>,
     recording: RecordingHandle,
+    /// An EVM that reads only the cache, with the keys it missed, if cold reads are probed.
+    probe: Option<(EvmFor<'static, Evm>, Arc<ProbeMisses>)>,
 }
 
 impl<N, P, Evm> PrewarmContext<N, P, Evm>
@@ -793,7 +974,11 @@ where
                     %err,
                     "Failed to build state provider in prewarm thread"
                 );
-                return PrewarmEvmState { evm: None, recording: RecordingHandle::default() }
+                return PrewarmEvmState {
+                    evm: None,
+                    recording: RecordingHandle::default(),
+                    probe: None,
+                }
             }
         };
 
@@ -815,13 +1000,27 @@ where
         } else {
             self.evm_config.clone()
         };
+        let probe =
+            self.saved_cache.as_ref().filter(|_| self.probe_cold_reads).and_then(|saved_cache| {
+                let provider = self.provider.database_provider_ro().ok()?;
+                let misses = Arc::new(ProbeMisses::default());
+                let provider = CachedStateProvider::new_probe(
+                    Box::new(provider.into_evm_state_provider()) as EvmStateProviderBox,
+                    saved_cache.cache().clone(),
+                    Arc::clone(&misses),
+                )
+                .with_txpool_snapshot(self.env.txpool_snapshot.clone());
+                let evm =
+                    self.create_evm(&config, StateProviderDatabase::new(provider), evm_env.clone());
+                Some((evm, misses))
+            });
         let db = StateProviderDatabase::new(state_provider);
         let evm = if self.prewarm_results.is_some() {
             self.create_evm(&config, RecordingDb::new(db, recording.clone()), evm_env)
         } else {
             self.create_evm(&config, db, evm_env)
         };
-        PrewarmEvmState { evm: Some(evm), recording }
+        PrewarmEvmState { evm: Some(evm), recording, probe }
     }
 
     /// Creates a prewarm EVM, caching precompile results unless the cache is disabled.
@@ -1033,6 +1232,118 @@ pub struct PrewarmMetrics {
     pub(crate) bal_slot_iteration_duration: Histogram,
 }
 
+/// A transaction queued for speculative execution, with the seeded result of its pool
+/// transaction.
+type QueuedTx<Tx, T> = (Tx, Option<Arc<PoolTx<T>>>);
+
+/// Transactions queued for speculative execution, in block order.
+struct SpeculationQueue<Tx, T: evm2::EvmTypes> {
+    /// Each transaction, set once it arrives.
+    txs: Box<[OnceLock<QueuedTx<Tx, T>>]>,
+    /// Index of the next transaction to execute for the first time.
+    next: AtomicUsize,
+    /// Index of the next transaction to probe.
+    next_probe: AtomicUsize,
+    /// Whether all transactions that will arrive have arrived.
+    closed: AtomicBool,
+}
+
+impl<Tx, T: evm2::EvmTypes> SpeculationQueue<Tx, T> {
+    /// Creates a queue whose first transaction is never claimed: block execution executes it
+    /// itself, on the parent state that speculation would see too, instead of waiting for a
+    /// worker that starts at about the same time.
+    fn new(transaction_count: usize) -> Self {
+        Self {
+            txs: (0..transaction_count).map(|_| OnceLock::new()).collect(),
+            next: AtomicUsize::new(1),
+            next_probe: AtomicUsize::new(1),
+            closed: AtomicBool::new(false),
+        }
+    }
+
+    /// Queues the transaction at `index`.
+    fn push(&self, index: usize, tx: Tx, seeded: Option<Arc<PoolTx<T>>>) {
+        if let Some(slot) = self.txs.get(index) {
+            let _ = slot.set((tx, seeded));
+        }
+    }
+
+    /// Marks the queue as complete, so that transactions that never arrived are skipped.
+    fn close(&self) {
+        self.closed.store(true, Ordering::Release);
+    }
+
+    /// Returns the transaction at `index` if it arrived.
+    fn get(&self, index: usize) -> Option<&QueuedTx<Tx, T>> {
+        self.txs.get(index)?.get()
+    }
+
+    /// Claims the next transaction to execute for the first time, unless it has not arrived yet.
+    fn claim(&self) -> Option<(usize, &QueuedTx<Tx, T>)> {
+        self.claim_from(&self.next)
+    }
+
+    /// Returns whether every transaction that will arrive was claimed for probing.
+    fn probed_all(&self) -> bool {
+        self.next_probe.load(Ordering::Acquire) >= self.txs.len()
+    }
+
+    /// Claims the next transaction to probe, unless it has not arrived yet.
+    fn claim_probe(&self) -> Option<(usize, &QueuedTx<Tx, T>)> {
+        self.claim_from(&self.next_probe)
+    }
+
+    /// Claims the transaction at `cursor` and advances it, unless the transaction has not arrived.
+    fn claim_from(&self, cursor: &AtomicUsize) -> Option<(usize, &QueuedTx<Tx, T>)> {
+        loop {
+            let next = cursor.load(Ordering::Acquire);
+            let slot = self.txs.get(next)?;
+            match slot.get() {
+                Some(tx) => {
+                    if cursor
+                        .compare_exchange_weak(next, next + 1, Ordering::AcqRel, Ordering::Relaxed)
+                        .is_ok()
+                    {
+                        return Some((next, tx))
+                    }
+                }
+                None if self.closed.load(Ordering::Acquire) => {
+                    let _ = cursor.compare_exchange(
+                        next,
+                        next + 1,
+                        Ordering::AcqRel,
+                        Ordering::Relaxed,
+                    );
+                }
+                None => return None,
+            }
+        }
+    }
+}
+
+/// Returns the contract a probe round's sorted storage misses step through, if the round missed
+/// at most [`CHAIN_ROUND_KEYS`] slots and at least half of them in that contract.
+fn chain_contract(storage: &[(Address, B256)]) -> Option<Address> {
+    if storage.is_empty() || storage.len() > CHAIN_ROUND_KEYS {
+        return None
+    }
+    let top = storage.chunk_by(|a, b| a.0 == b.0).max_by_key(|slots| slots.len())?;
+    (top.len() * 2 >= storage.len()).then_some(top[0].0)
+}
+
+/// Spins for longer the more consecutive idle rounds `idle` counts, then waits for the prediction
+/// generation to change from `generation`.
+fn backoff<T: evm2::EvmTypes>(results: &PrewarmResults<T>, generation: usize, idle: &mut u32) {
+    if *idle < IDLE_SPIN_ROUNDS {
+        for _ in 0..1 << *idle {
+            std::hint::spin_loop();
+        }
+    } else {
+        results.wait_for_generation_change(generation, IDLE_WAIT_TIMEOUT);
+    }
+    *idle = idle.saturating_add(1);
+}
+
 #[cfg(test)]
 mod tests {
 
@@ -1052,6 +1363,24 @@ mod tests {
     use reth_tasks::WorkerPool;
     use reth_trie_common::bundle_state::{AccountStatus, BundleAccount, BundleState};
     use std::time::Duration;
+
+    #[test]
+    fn chain_contract_detects_rounds_through_one_contract() {
+        let (a, b) = (Address::with_last_byte(1), Address::with_last_byte(2));
+        let slot = |i: u8| B256::with_last_byte(i);
+        assert_eq!(chain_contract(&[]), None);
+        assert_eq!(chain_contract(&[(a, slot(1))]), Some(a));
+        assert_eq!(chain_contract(&[(a, slot(1)), (a, slot(2)), (b, slot(1))]), Some(a));
+        assert_eq!(
+            chain_contract(&[(a, slot(1)), (b, slot(1)), (b, slot(2)), (b, slot(3))]),
+            Some(b)
+        );
+        // Spread over contracts, or too many keys for one step of a walk.
+        let c = Address::with_last_byte(3);
+        assert_eq!(chain_contract(&[(a, slot(1)), (b, slot(1)), (c, slot(1))]), None);
+        let wide = (0..9).map(|i| (a, slot(i))).collect::<Vec<_>>();
+        assert_eq!(chain_contract(&wide), None);
+    }
 
     #[test]
     fn terminate_event_stops_transaction_execution() {
@@ -1075,6 +1404,7 @@ mod tests {
             disable_bal_parallel_state_root: false,
             disable_bal_batch_io: false,
             prewarm_results: None,
+            probe_cold_reads: false,
         };
         let (task, actions_tx) =
             PrewarmCacheTask::new(Runtime::test(), PayloadExecutionCache::default(), ctx);
@@ -1138,6 +1468,7 @@ mod tests {
                 disable_bal_parallel_state_root: false,
                 disable_bal_batch_io: false,
                 prewarm_results: Some(Arc::clone(&results)),
+                probe_cold_reads: false,
             };
             let tx =
                 WithTxEnv { tx_env: ctx.evm_config.tx_env(tx.clone()), tx: Arc::new(tx.clone()) };
@@ -1230,6 +1561,7 @@ mod tests {
             disable_bal_parallel_state_root: false,
             disable_bal_batch_io: false,
             prewarm_results: None,
+            probe_cold_reads: false,
         }
     }
 
@@ -1528,5 +1860,30 @@ mod tests {
         for (valid, insert_error) in [(true, false), (false, false), (true, true)] {
             assert_save_cache_drops_removed_caches(CacheSlot::Empty, valid, insert_error);
         }
+    }
+
+    #[test]
+    fn speculation_queue_claims_arrived_transactions_in_order() {
+        let queue = SpeculationQueue::<u8, BaseEvmTypes>::new(5);
+        // Block execution executes the first transaction itself.
+        queue.push(0, 10, None);
+        assert!(queue.claim().is_none());
+
+        // A later transaction cannot be claimed before an earlier one arrived.
+        queue.push(2, 12, None);
+        assert!(queue.claim().is_none());
+        assert_eq!(queue.get(2).map(|(tx, _)| *tx), Some(12));
+
+        queue.push(1, 11, None);
+        assert_eq!(queue.claim().map(|(index, (tx, _))| (index, *tx)), Some((1, 11)));
+        assert_eq!(queue.claim().map(|(index, (tx, _))| (index, *tx)), Some((2, 12)));
+        assert!(queue.claim().is_none());
+
+        // Once closed, transactions that never arrived are skipped.
+        queue.push(4, 14, None);
+        queue.close();
+        assert_eq!(queue.claim().map(|(index, (tx, _))| (index, *tx)), Some((4, 14)));
+        assert!(queue.claim().is_none());
+        assert!(queue.get(3).is_none());
     }
 }

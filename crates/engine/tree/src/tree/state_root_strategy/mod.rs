@@ -85,7 +85,8 @@ pub use reth_trie_parallel::{
     },
 };
 use reth_trie_sparse::{
-    ArenaParallelSparseTrie, RevealableSparseTrie, SparseStateTrie, TrieNodeEpoch,
+    ArenaExecutor, ArenaParallelSparseTrie, ArenaParallelismThresholds, RevealableSparseTrie,
+    SparseStateTrie, TrieNodeEpoch,
 };
 use std::{
     fmt,
@@ -667,10 +668,20 @@ impl DefaultStateRootStrategy {
                     target: "engine::tree::payload_processor",
                     "Creating new sparse trie - no preserved trie available"
                 );
-                let default_trie =
-                    RevealableSparseTrie::blind_from(ArenaParallelSparseTrie::default());
+                let trie_executor = Arc::new(StorageTriePoolExecutor(executor.clone()));
+                let default_trie = RevealableSparseTrie::blind_from(
+                    ArenaParallelSparseTrie::default().with_executor(trie_executor.clone()),
+                );
+                let accounts_trie = RevealableSparseTrie::blind_from(
+                    ArenaParallelSparseTrie::default()
+                        .with_parallelism_thresholds(ArenaParallelismThresholds {
+                            min_dirty_leaves: ACCOUNT_TRIE_PARALLEL_DIRTY_LEAVES,
+                            ..Default::default()
+                        })
+                        .with_executor(trie_executor),
+                );
                 SparseStateTrie::default()
-                    .with_accounts_trie(default_trie.clone())
+                    .with_accounts_trie(accounts_trie)
                     .with_default_storage_trie(default_trie)
                     .with_updates(true)
             };
@@ -709,6 +720,10 @@ impl DefaultStateRootStrategy {
                 parent_header.num_hash(),
                 pending_sparse_trie_prune_blocks.as_deref(),
             );
+            // The roots of the retained storage tries, updated for the tries this block changes
+            // once its root is known. Copying the table is cheaper than collecting every retained
+            // trie's root again.
+            let mut storage_roots = known_storage_roots.clone();
             let factory = if reused_preserved_sparse_trie {
                 multiproof_provider_factory.with_skip_overlay_for_reused_sparse_trie(
                     sparse_trie_anchor_hash,
@@ -765,15 +780,22 @@ impl DefaultStateRootStrategy {
                 // Complete every handed-off handle, even if the root receiver was abandoned:
                 // a builder may have accepted the matching root through another strategy.
                 let start = Instant::now();
+                let changed = task.changed_storage_tries().copied().collect::<Vec<_>>();
                 let (mut trie, deferred) = task.into_trie_for_reuse();
-                let storage_roots = trie.storage_roots(new_epoch);
+                trie.update_storage_roots(&mut storage_roots, &changed, new_epoch);
                 if let Some((prune_before, _)) = prune_target {
                     let prune_start = Instant::now();
                     trie.prune(prune_before);
+                    storage_roots.retain(|address, _| trie.storage_trie_ref(address).is_some());
                     trie_metrics
                         .sparse_trie_prune_duration_histogram
                         .record(prune_start.elapsed().as_secs_f64());
                 }
+                debug_assert_eq!(
+                    storage_roots,
+                    trie.storage_roots(new_epoch),
+                    "incrementally updated storage roots differ from the retained tries' roots"
+                );
                 trie_metrics
                     .into_trie_for_reuse_duration_histogram
                     .record(start.elapsed().as_secs_f64());
@@ -865,6 +887,25 @@ pub struct StateRootTaskOptions<'a, N: NodePrimitives> {
     /// `None` disables pruning; an empty chain means the parent is durable.
     pub pending_sparse_trie_prune_blocks: Option<Vec<ExecutedBlock<N>>>,
 }
+
+/// Hashes the sparse trie's subtries in parallel on the runtime's storage trie pool, whose threads
+/// park when idle, instead of the global rayon pool, whose threads keep looking for work after
+/// every parallel call: 60% of that pool's CPU while it hashed the account trie.
+#[derive(Debug)]
+struct StorageTriePoolExecutor(reth_tasks::Runtime);
+
+impl ArenaExecutor for StorageTriePoolExecutor {
+    fn run_all(&self, jobs: Vec<Box<dyn FnOnce() + Send>>) {
+        self.0.storage_trie_pool().run_all(jobs);
+    }
+}
+
+/// Number of dirty leaves from which the account trie hashes its subtries in parallel.
+///
+/// A dirty account leaf takes about 10 us to hash, so under the default of 64 a block changing 32
+/// to 63 accounts since the last hashing pass spent ~0.4 ms on the sparse trie thread, often after
+/// the last transaction. In parallel it takes ~0.16 ms.
+const ACCOUNT_TRIE_PARALLEL_DIRTY_LEAVES: u64 = 4;
 
 fn sparse_trie_prune_target<N: NodePrimitives>(
     current_anchor: B256,

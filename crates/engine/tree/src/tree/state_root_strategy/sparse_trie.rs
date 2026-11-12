@@ -55,8 +55,8 @@ use tracing::{debug, debug_span, error, instrument, trace_span};
 ///    [`ProofWorkerHandle::results`], reveals account proofs locally, and queues storage proofs on
 ///    the corresponding address' [`StorageTrieState`].
 /// 3. **Storage jobs:** [`Self::spawn_storage_jobs`] moves each [`StorageTrieWork`] into a rayon
-///    closure. A pass reveals queued proofs, applies unblocked leaves, and hashes the storage trie
-///    once its pending leaves are drained. It sends [`StorageJobMessage::Done`] via
+///    closure. A pass reveals queued proofs, applies unblocked leaves, and hashes the storage trie,
+///    also while some of its leaves still wait for proofs. It sends [`StorageJobMessage::Done`] via
 ///    [`Self::storage_done_tx`] to [`Self::storage_done_rx`], returning ownership of the payload
 ///    along with newly discovered proof targets, cache counters, and any error. Small or
 ///    target-only passes run inline and apply the same output directly.
@@ -195,6 +195,8 @@ pub(super) struct SparseTrieCacheTask<A = ArenaParallelSparseTrie, S = ArenaPara
     storage_to_drop: B256Map<StorageTrieState<S>>,
     /// Number of storage tries currently owned by a job running off this thread.
     storage_in_flight: usize,
+    /// Runtime whose storage trie pool runs the storage jobs.
+    runtime: Runtime,
     /// Sender handed to storage jobs. Kept alive by the task so the receiver never disconnects.
     storage_done_tx: CrossbeamSender<StorageJobMessage<S>>,
     /// Receives storage tries coming back from jobs spawned by this task.
@@ -270,6 +272,7 @@ where
             storage: Default::default(),
             storage_to_drop: Default::default(),
             storage_in_flight: 0,
+            runtime: executor.clone(),
             storage_done_tx,
             storage_done_rx,
             pending_updates: Default::default(),
@@ -281,6 +284,10 @@ where
 
     /// Runs the hashing task that drains updates from the channel and converts them to
     /// `HashedPostState` in parallel.
+    ///
+    /// Returns once it forwarded the finish marker, since the sparse trie task reads nothing after
+    /// it. Waiting for the channel to close instead would hold the `trie-hashing` thread, and with
+    /// it the next block's hashing task, for as long as prewarming keeps a hint sender alive.
     fn run_hashing_task(
         updates: CrossbeamReceiver<StateRootMessage>,
         hashed_state_tx: CrossbeamSender<SparseTrieTaskMessage>,
@@ -292,6 +299,7 @@ where
         while let Ok(message) = updates.recv() {
             total_idle_time += idle_start.elapsed();
 
+            let finished = matches!(message, StateRootMessage::FinishedStateUpdates);
             let msg = match message {
                 StateRootMessage::PrefetchProofs(targets) => {
                     SparseTrieTaskMessage::PrefetchProofs(targets)
@@ -308,7 +316,7 @@ where
                     SparseTrieTaskMessage::HashedState(state)
                 }
             };
-            if hashed_state_tx.send(msg).is_err() {
+            if hashed_state_tx.send(msg).is_err() || finished {
                 break;
             }
 
@@ -321,6 +329,12 @@ where
     /// Returns the trie for reuse in the next payload built on top of this one.
     ///
     /// Should be called after the state root result has been sent.
+    /// Returns the hashed addresses of the storage tries the block changed or revealed, once
+    /// [`Self::run`] returned the root.
+    pub(super) fn changed_storage_tries(&self) -> impl Iterator<Item = &B256> {
+        self.storage_to_drop.keys()
+    }
+
     pub(super) fn into_trie_for_reuse(self) -> (SparseStateTrie<A, S>, DeferredDrops) {
         debug_assert!(
             self.storage.is_empty(),
@@ -473,7 +487,9 @@ where
 
         let start = Instant::now();
         self.return_storage_tries();
-        let (state_root, trie_updates) = match self.trie.root_with_updates(self.new_epoch) {
+        // Every storage trie changed this block passed through the task's storage map.
+        let root = self.trie.root_with_updates_of(self.storage_to_drop.keys(), self.new_epoch);
+        let (state_root, trie_updates) = match root {
             Ok(result) => result,
             Err(err)
                 if matches!(
@@ -801,9 +817,9 @@ where
     /// leaf updates that were not tried against the current state of the trie yet.
     ///
     /// Each pass owns its address' payload for its whole duration, so the passes are independent
-    /// of each other and of this thread. Most of them are handed to the rayon pool; the ones that
-    /// would cost more in handoff than in work stay here, see [`StorageTrieWork::is_target_only`]
-    /// and [`INLINE_STORAGE_WORK_UNITS`].
+    /// of each other and of this thread. Most of them are handed to the storage trie pool; the ones
+    /// that would cost more in handoff than in work stay here, see
+    /// [`StorageTrieWork::is_target_only`] and [`INLINE_STORAGE_WORK_UNITS`].
     #[instrument(
         level = "trace",
         target = "engine::tree::payload_processor::sparse_trie",
@@ -914,7 +930,7 @@ where
         Ok(updates_len_after < updates_len_before)
     }
 
-    /// Hands checked out storage tries to the rayon pool in chunks.
+    /// Hands checked out storage tries to the runtime's storage trie pool in chunks.
     ///
     /// Chunking amortizes the spawn cost over a batch, while each trie is still sent back on its
     /// own so promotion does not wait for the rest of the chunk.
@@ -924,14 +940,15 @@ where
         }
 
         let parent_span = debug_span!("spawn_storage_jobs", n = jobs.len());
-        let chunk_len = storage_job_chunk_len(jobs.len());
+        let pool = self.runtime.storage_trie_pool();
+        let chunk_len = storage_job_chunk_len(jobs.len(), pool.num_threads());
         let new_epoch = self.new_epoch;
         let retain_updates = self.trie.retains_updates();
         while !jobs.is_empty() {
             let chunk = jobs.split_off(jobs.len().saturating_sub(chunk_len));
             let storage_done_tx = self.storage_done_tx.clone();
             let parent_span = parent_span.clone();
-            rayon::spawn(move || {
+            pool.spawn(move || {
                 let _enter = debug_span!(
                     target: "engine::tree::payload_processor::sparse_trie",
                     parent: &parent_span,
@@ -1287,7 +1304,7 @@ impl<S: SparseTrie + Default> StorageTrieWork<S> {
     }
 
     /// Reveals the queued proof nodes, applies the leaf updates that are not blocked by a blinded
-    /// node, and recomputes the root once nothing is left to apply.
+    /// node, and recomputes the root.
     fn run(&mut self, new_epoch: TrieNodeEpoch, retain_updates: bool) -> StorageWorkOutput {
         let Self { trie, pending, proofs, fetched, dirty, .. } = self;
         *dirty = false;
@@ -1360,19 +1377,18 @@ impl<S: SparseTrie + Default> StorageTrieWork<S> {
 
     /// Returns whether a pass would do anything.
     fn has_work(&self) -> bool {
-        debug_assert!(self.dirty || !self.needs_root(), "a drained pass must hash its trie");
+        debug_assert!(self.dirty || !self.needs_root(), "a pass must leave its trie hashed");
         self.dirty
     }
 
     /// Returns whether the trie was modified since its root was last computed.
     ///
     /// Only a trie this block changed is hashed here: for the others the root the account leaf
-    /// already carries is still correct.
+    /// already carries is still correct. A trie with leaves still waiting for proofs is hashed as
+    /// well, so that the pass applying them, usually after the last transaction, only rehashes
+    /// their paths instead of every leaf applied before. Its account waits for those leaves.
     fn needs_root(&self) -> bool {
-        self.updated &&
-            self.pending.is_empty() &&
-            self.trie.is_revealed() &&
-            !self.trie.is_root_cached()
+        self.updated && self.trie.is_revealed() && !self.trie.is_root_cached()
     }
 
     /// Returns whether a pass would only turn pending updates into proof targets.
@@ -1419,9 +1435,9 @@ impl<S: SparseTrie + Default> StorageTrieJob<S> {
 enum StorageJobMessage<S> {
     /// The job finished and hands its payload back.
     Done(StorageTrieJobDone<S>),
-    /// The job panicked and its trie is lost. The global rayon pool has no panic handler, so a
-    /// panic escaping a spawned job would abort the process; it is caught and resumed on the task
-    /// thread instead, where it fails the state root calculation like an inline panic.
+    /// The job panicked and its trie is lost. A panic escaping a spawned job would only be logged
+    /// by the pool; it is caught and resumed on the task thread instead, where it fails the state
+    /// root calculation like an inline panic.
     Panicked {
         /// Hashed address of the payload the job owned.
         address: B256,
@@ -1482,15 +1498,15 @@ fn merge_leaf_updates(queued: &mut B256Map<LeafUpdate>, updates: B256Map<LeafUpd
 
 /// Number of storage tries handed to a single spawned job.
 ///
-/// Chunking keeps a block with thousands of tiny tries from paying a rayon spawn per trie, while
+/// Chunking keeps a block with thousands of tiny tries from paying a spawn per trie, while
 /// staying small enough that one slow trie only delays the few behind it in its own chunk. Tries
 /// are still handed back one at a time, so a chunk does not delay promotion of the ones it
 /// already finished.
-fn storage_job_chunk_len(tries: usize) -> usize {
+fn storage_job_chunk_len(tries: usize, threads: usize) -> usize {
     /// Upper bound on how many tries a single slow one can hold up.
     const MAX_CHUNK_LEN: usize = 32;
 
-    tries.div_ceil(rayon::current_num_threads().max(1) * 4).clamp(1, MAX_CHUNK_LEN)
+    tries.div_ceil(threads.max(1) * 4).clamp(1, MAX_CHUNK_LEN)
 }
 
 /// Metrics recorded by sparse trie and hashing tasks.
@@ -2058,6 +2074,65 @@ mod tests {
     }
 
     #[test]
+    fn storage_pass_hashes_applied_leaves_while_others_wait_for_proofs() {
+        let runtime = Runtime::test();
+        let trie = SparseStateTrie::default()
+            .with_accounts_trie(RevealableSparseTrie::<ArenaParallelSparseTrie>::revealed_empty())
+            .with_default_storage_trie(RevealableSparseTrie::blind_from(
+                ArenaParallelSparseTrie::default(),
+            ))
+            .with_updates(true);
+        let (mut task, updates_tx, _cancel_guard) = test_task(&runtime, trie);
+
+        let address = B256::repeat_byte(0x11);
+        let revealed_slot = B256::repeat_byte(0x22);
+        let blinded_slot = B256::repeat_byte(0x33);
+        let leaf = TrieNodeV2::Leaf(LeafNode::new(
+            Nibbles::unpack(revealed_slot).slice(1..),
+            alloy_rlp::encode_fixed_size(&U256::from(7)).to_vec(),
+        ));
+        let root = TrieNodeV2::Branch(BranchNodeV2 {
+            key: Nibbles::default(),
+            stack: vec![
+                RlpNode::from_rlp(&alloy_rlp::encode(&leaf)),
+                RlpNode::word_rlp(&B256::repeat_byte(0x44)),
+            ],
+            state_mask: TrieMask::new(0b1100),
+            branch_rlp_node: None,
+        });
+
+        let mut state = HashedPostState::default();
+        let storage = &mut state.storages.entry(address).or_default().storage;
+        storage.insert(revealed_slot, U256::from(8));
+        storage.insert(blinded_slot, U256::from(9));
+        task.on_hashed_state_update(state);
+        task.pending_updates = 1;
+        task.apply_new_updates().unwrap();
+        let StorageTrieState::Idle(work) = task.storage_trie_state_mut(address) else {
+            unreachable!()
+        };
+        work.queue_proofs(&mut vec![
+            ProofTrieNodeV2 { path: Nibbles::default(), node: root, masks: None },
+            ProofTrieNodeV2 { path: Nibbles::from_nibbles([0x2]), node: leaf, masks: None },
+        ]);
+        task.run_ready_storage_work().unwrap();
+
+        let StorageTrieState::Idle(work) = &task.storage[&address] else {
+            panic!("a small pass runs inline")
+        };
+        assert_eq!(work.pending.keys().collect::<Vec<_>>(), [&blinded_slot]);
+        assert!(work.trie.is_root_cached(), "the applied leaf is hashed before the blocked one");
+
+        // The root does not count yet: the account waits for the blocked leaf.
+        task.promote_pending_account_updates().unwrap();
+        assert!(task.pending_account_updates.contains_key(&address));
+
+        drop(updates_tx);
+        drop(task);
+        drain_sparse_trie_tasks(&runtime);
+    }
+
+    #[test]
     fn canceled_task_disconnects_checked_out_storage_jobs() {
         let runtime = Runtime::test();
         let trie = SparseStateTrie::default()
@@ -2469,7 +2544,7 @@ mod tests {
     }
 
     #[test]
-    fn run_ignores_hints_queued_after_updates_finish() {
+    fn hashing_task_returns_after_the_finish_marker() {
         let runtime = reth_tasks::Runtime::test();
         let provider_factory = create_test_provider_factory();
         let anchor_hash = init_genesis(&provider_factory).expect("failed to initialize genesis");
@@ -2509,14 +2584,15 @@ mod tests {
         updates_tx.send(StateRootMessage::FinishedStateUpdates).unwrap();
         updates_tx.send(StateRootMessage::PrefetchProofs(Default::default())).unwrap();
 
-        let wait_start = std::time::Instant::now();
-        while task.updates.len() < 2 {
-            assert!(
-                wait_start.elapsed() < std::time::Duration::from_secs(1),
-                "hashing task did not queue the test messages"
-            );
-            std::thread::yield_now();
-        }
+        // The next block's hashing task gets the thread while prewarming still holds a sender.
+        let (free_tx, free_rx) = std::sync::mpsc::channel();
+        runtime.spawn_blocking_named("trie-hashing", move || {
+            let _ = free_tx.send(());
+        });
+        free_rx
+            .recv_timeout(std::time::Duration::from_secs(5))
+            .expect("hashing task kept its thread after the finish marker");
+        assert_eq!(task.updates.len(), 1, "a hint after the finish marker was forwarded");
 
         let (result_tx, result_rx) = std::sync::mpsc::channel();
         let handle = std::thread::spawn(move || {

@@ -133,6 +133,7 @@ members = [
     "examples/custom-auth-http-middleware",
     "examples/custom-rpc-middleware",
     "examples/db-access",
+    "examples/exec-replay",
     "examples/exex-subscription",
     "examples/exex-test",
     "examples/full-contract-state",
@@ -530,7 +531,6 @@ url = { version = "2.3", default-features = false }
 zstd = "0.14.3"
 byteorder = "1"
 fixed-cache = { version = "0.1.10", default-features = false, features = ["alloc"] }
-moka = "0.12"
 chrono = "0.4.41"
 
 # metrics

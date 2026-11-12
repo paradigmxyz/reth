@@ -1437,6 +1437,16 @@ where
     /// the current persistence action while we're saving blocks.
     fn persist_blocks(&mut self, input: SaveBlocksInput<N>) {
         let highest_num_hash = input.last_block();
+        // The saved state/trie frontier becomes the overlay anchor once the save completes. The
+        // overlay from there to the canonical tip is flattened now and extended in the background
+        // as blocks are inserted, so the first payload after the save does not rebuild it from
+        // every remaining in-memory block.
+        if let Some(anchor) = input.state_trie_blocks().last() {
+            self.state.tree_state.overlay_manager.precompute_execution_overlay(
+                self.state.tree_state.canonical_block_hash(),
+                anchor.recovered_block().hash(),
+            );
+        }
         debug!(target: "engine::tree", count=input.persist_rest_blocks().len(), blocks = ?input.persist_rest_blocks().iter().map(|block| block.recovered_block().num_hash()).collect::<Vec<_>>(), "Persisting blocks");
 
         let (tx, rx) = crossbeam_channel::bounded(1);
@@ -1884,11 +1894,12 @@ where
             self.state.set_pending_sparse_trie_prune(false);
             self.state.tree_state.reset(backfill_num_hash)
         } else {
-            self.state.tree_state.remove_until(
+            let removed = self.state.tree_state.remove_until(
                 backfill_num_hash,
                 self.persistence_state.last_persisted_block.hash,
                 Some(backfill_num_hash),
             );
+            self.runtime.spawn_drop(removed);
         }
 
         self.metrics.engine.executed_blocks.set(self.state.tree_state.block_count() as f64);
@@ -3649,11 +3660,14 @@ where
             None
         };
 
-        self.state.tree_state.remove_until(
+        // Persisted blocks can hold the last references to their execution output and trie data,
+        // whose drop would delay the next payload.
+        let removed = self.state.tree_state.remove_until(
             upper_bound,
             self.persistence_state.last_persisted_block.hash,
             num,
         );
+        self.runtime.spawn_drop(removed);
         self.metrics.engine.executed_blocks.set(self.state.tree_state.block_count() as f64);
         Ok(())
     }

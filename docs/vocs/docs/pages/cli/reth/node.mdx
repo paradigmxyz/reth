@@ -908,6 +908,11 @@ Database:
 
           [env: RETH_DB_SYNC_MODE=]
 
+      --db.sync-interval <SYNC_INTERVAL>
+          Time after which a commit with `--db.sync-mode=safe-no-sync` flushes the data committed since the last flush (e.g., 12s, 5m). Defaults to 60 seconds.
+
+          A crash loses the data committed since the last flush, which the node syncs again.
+
       --db.rocksdb-block-cache-size <ROCKSDB_BLOCK_CACHE_SIZE>
           `RocksDB` block cache size (e.g., 512MB, 4GB).
 
@@ -918,6 +923,11 @@ Database:
 
       --db.disable-metrics
           Disable built-in database metrics
+
+      --db.warm-branch-pages
+          Read the branch pages of the state and trie tables into the page cache at startup.
+
+          After a restart the page cache is cold, and a state lookup then reads its tree's branch pages from disk before its leaf. Reading them up front, together with the leaves that point to the trees of large storages (about 20 GB on mainnet), makes the first blocks after a restart execute faster. Startup waits for it: about 10 seconds on an `NVMe` drive, while reading them beside block execution would slow the first blocks down.
 
 Dev testnet:
       --dev
@@ -1140,13 +1150,13 @@ Engine:
           Allow unwinding canonical header to ancestor during forkchoice updates. See `TreeConfig::unwind_canonical_header` for more details
 
       --engine.storage-worker-count <STORAGE_WORKER_COUNT>
-          Configure the number of storage proof workers spawned for each block. If not specified or zero, the count is derived from the block: 2x available parallelism, halved for blocks with few transactions and doubled for blocks at or above 100M gas
+          Configure the number of storage proof workers spawned for each block. If not specified or zero, the count is derived from the block: twice the physical cores, halved for blocks with few transactions and doubled for blocks at or above 100M gas
 
       --engine.account-worker-count <ACCOUNT_WORKER_COUNT>
           Configure the number of account proof workers spawned for each block. If not specified or zero, the count is derived from the block the same way as for storage workers
 
       --engine.prewarming-threads <PREWARMING_THREADS>
-          Configure the number of prewarming threads. If not specified, defaults to available parallelism
+          Configure the number of prewarming threads. If not specified, defaults to the number of physical cores
 
       --engine.disable-cache-metrics
           Disable cache metrics recording, which can take up to 50ms with large cached state
@@ -1202,10 +1212,14 @@ Engine:
       --engine.disable-bal-batch-io
           Disable BAL (Block Access List) storage prefetch IO during prewarming. When set, BAL storage slots are not read into the execution cache
 
-      --engine.prewarm-reuse
-          Reuse transaction prewarming results during block execution instead of executing transactions again when their prewarm reads are still valid
+      --engine.prewarm-reuse [<PREWARM_REUSE>]
+          Reuse transaction prewarming results during block execution instead of executing transactions again when their prewarm reads are still valid.
+
+          Enabled by default, use `--engine.prewarm-reuse=false` to disable it.
 
           [env: RETH_ENGINE_PREWARM_REUSE=]
+          [default: true]
+          [possible values: true, false]
 
 ERA:
       --era.enable

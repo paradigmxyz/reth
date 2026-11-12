@@ -233,7 +233,9 @@ impl LaunchContext {
             Err(err) => warn!(%err, "Failed to raise file descriptor limit"),
         }
 
-        // Configure the implicit global rayon pool for `par_iter` usage.
+        // Configure the implicit global rayon pool for `par_iter` usage. It runs the sparse trie's
+        // storage jobs and other work that block execution does not wait for, so its threads run
+        // below execution's priority. Execution's own parallel work runs on the runtime's pools.
         // TODO: reserved_cpu_cores is currently ignored because subtracting from thread pool
         // sizes doesn't actually reserve CPU cores for other processes.
         let _ = reserved_cpu_cores;
@@ -241,6 +243,7 @@ impl LaunchContext {
         if let Err(err) = ThreadPoolBuilder::new()
             .num_threads(num_threads)
             .thread_name(|i| format!("rayon-{i:02}"))
+            .start_handler(|_| reth_tasks::utils::lower_background_worker_priority())
             .build_global()
         {
             warn!(%err, "Failed to build global thread pool")
