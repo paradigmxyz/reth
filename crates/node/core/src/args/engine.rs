@@ -340,10 +340,21 @@ pub struct EngineArgs {
     )]
     pub num_state_masking_blocks: u64,
 
-    /// Configure the target number of blocks to keep in memory.
+    /// Configure how many of the most recent canonical blocks persistence leaves in memory.
+    ///
+    /// When more than `--engine.persistence-threshold` canonical blocks are held in memory, the
+    /// engine writes the canonical chain to disk up to `head - memory-block-buffer-target`. The
+    /// blocks above that height are kept only in memory, so a reorg of them does not unwind the
+    /// database. With state masking enabled, the `--engine.num-state-masking-blocks` blocks below
+    /// that height also stay in memory until a later cycle persists their state/trie updates.
+    ///
+    /// This is also the in-memory buffer that `--engine.persistence-backpressure-threshold` is
+    /// measured from.
     ///
     /// If omitted, this defaults to the lesser of `--engine.persistence-threshold` and the
-    /// configured default memory block buffer target.
+    /// configured default memory block buffer target. The value must not exceed
+    /// `--engine.persistence-threshold`, and with state masking enabled, its sum with
+    /// `--engine.num-state-masking-blocks` must be less than `--engine.persistence-threshold`.
     #[arg(long = "engine.memory-block-buffer-target")]
     pub memory_block_buffer_target: Option<u64>,
 

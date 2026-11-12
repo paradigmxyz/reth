@@ -470,34 +470,6 @@ impl<N: NetworkPrimitives> EthMessage<N> {
                 Self::Cells(_)
         )
     }
-
-    /// Converts the message types where applicable.
-    ///
-    /// This handles up/downcasting where appropriate, for example for different receipt request
-    /// types.
-    pub fn map_versioned(self, version: EthVersion) -> Self {
-        // For eth/70 peers we send `GetReceipts` using the new eth/70
-        // encoding with `firstBlockReceiptIndex = 0`, while keeping the
-        // user-facing `PeerRequest` API unchanged.
-        if version >= EthVersion::Eth70 {
-            return match self {
-                Self::GetReceipts(pair) => {
-                    let RequestPair { request_id, message } = pair;
-                    let req = RequestPair {
-                        request_id,
-                        message: GetReceipts70 {
-                            first_block_receipt_index: 0,
-                            block_hashes: message.0,
-                        },
-                    };
-                    Self::GetReceipts70(req)
-                }
-                other => other,
-            }
-        }
-
-        self
-    }
 }
 
 impl<N: NetworkPrimitives> Encodable for EthMessage<N> {
