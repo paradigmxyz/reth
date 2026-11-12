@@ -803,16 +803,12 @@ impl From<ValidationApiError> for ErrorObject<'static> {
             ValidationApiError::ProposerPayment |
             ValidationApiError::InvalidBlobsBundle |
             ValidationApiError::InvalidBlockAccessList(_) |
-            ValidationApiError::Blob(_) => invalid_params_rpc_err(error.to_string()),
+            ValidationApiError::Blob(_) |
+            ValidationApiError::Consensus(_) => invalid_params_rpc_err(error.to_string()),
 
-            ValidationApiError::Consensus(
-                error @ (ConsensusError::BlockAccessListCostMoreThanGasLimit(_) |
-                ConsensusError::BlockAccessListHashMismatch(_)),
-            ) => invalid_params_rpc_err(error.to_string()),
             ValidationApiError::MissingLatestBlock |
             ValidationApiError::MissingParentBlock |
             ValidationApiError::BlockTooOld |
-            ValidationApiError::Consensus(_) |
             ValidationApiError::Provider(_) => internal_rpc_err(error.to_string()),
             ValidationApiError::Execution(err) => match err {
                 error @ BlockExecutionError::Validation(_) => {
@@ -849,6 +845,7 @@ mod tests {
     use evm2::evm::AccountInfo;
     use reth_consensus::noop::NoopConsensus;
     use reth_engine_primitives::PayloadValidator;
+    use reth_errors::ConsensusError;
     use reth_ethereum_engine_primitives::EthPayloadTypes;
     use reth_ethereum_primitives::Block;
     use reth_evm_ethereum::EthEvmConfig;
@@ -1141,6 +1138,36 @@ mod tests {
         );
         let error = jsonrpsee::types::ErrorObjectOwned::from(error);
         assert_eq!(error.code(), jsonrpsee::types::error::INVALID_PARAMS_CODE);
+    }
+
+    #[tokio::test]
+    async fn consensus_invalid_submission_is_invalid_params() {
+        let (provider, block, mut message) = payment_free_submission();
+        // The mock provider hands out the recomputed state root from this list, so the block's
+        // header no longer matches it.
+        *provider.state_roots.lock() = vec![B256::repeat_byte(0xab)];
+        // A zero-value bid skips the payment check, leaving the state root comparison as the
+        // first failing check.
+        message.value = U256::ZERO;
+        let registered_gas_limit = block.gas_limit();
+
+        let error = test_validation_api(provider)
+            .validate_message_against_block(block, message, registered_gas_limit, None)
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(error, ValidationApiError::Consensus(ConsensusError::BodyStateRootDiff(_))),
+            "{error}"
+        );
+        let error = jsonrpsee::types::ErrorObjectOwned::from(error);
+        assert_eq!(error.code(), jsonrpsee::types::error::INVALID_PARAMS_CODE);
+    }
+
+    #[test]
+    fn node_fault_is_internal_error() {
+        let error =
+            jsonrpsee::types::ErrorObjectOwned::from(ValidationApiError::MissingParentBlock);
+        assert_eq!(error.code(), jsonrpsee::types::error::INTERNAL_ERROR_CODE);
     }
 
     #[tokio::test]

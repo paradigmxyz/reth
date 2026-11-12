@@ -72,6 +72,9 @@ tracing.workspace = true
 
 [dev-dependencies]
 reth-db.workspace = true
+reth-network-api.workspace = true
+reth-payload-builder.workspace = true
+reth-storage-api.workspace = true
 reth-exex.workspace = true
 reth-e2e-test-utils.workspace = true
 reth-tasks.workspace = true
@@ -166,4 +169,5 @@ test-utils = [
     "reth-consensus/test-utils",
     "reth-engine-tree/test-utils",
     "reth-stages-api/test-utils",
+    "reth-payload-builder/test-utils",
 ]

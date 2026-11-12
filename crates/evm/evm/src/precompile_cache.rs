@@ -226,7 +226,7 @@ where
 
         let cacheable_input = message.input.len() <= MAX_PRECOMPILE_CACHE_INPUT_SIZE;
         if cacheable_input &&
-            let Some(entry) = cache.get(message.input.as_ref(), self.spec_id.clone())
+            let Some(entry) = cache.get(evm.message_input(message), self.spec_id.clone())
         {
             return Some(match gas.spend(entry.regular_gas_used).map_err(PrecompileError::from) {
                 Ok(()) => {
@@ -246,12 +246,14 @@ where
             })
         }
 
+        // Copy the input before running the precompile: it may be a range of the caller's memory.
+        let input = cacheable_input.then(|| Bytes::copy_from_slice(evm.message_input(message)));
         let before = GasSnapshot::new(gas);
         let result = self.inner.execute(evm, message, gas)?;
         let after = GasSnapshot::new(gas);
 
         match &result {
-            Ok(output) if cacheable_input => {
+            Ok(output) if let Some(input) = input => {
                 if before.reservoir != after.reservoir {
                     error!(
                         target: "evm::precompile_cache",
@@ -272,7 +274,7 @@ where
                     );
                 } else if let Some(regular_gas_used) = after.spent.checked_sub(before.spent) {
                     let _size = cache.insert(
-                        Bytes::copy_from_slice(message.input.as_ref()),
+                        input,
                         CacheEntry {
                             output: output.clone(),
                             regular_gas_used,
@@ -477,7 +479,7 @@ mod tests {
             destination,
             code_address: destination,
             call_target: destination,
-            input: input.clone(),
+            input: input.clone().into(),
             ..Default::default()
         };
         for _ in 0..2 {
@@ -526,7 +528,7 @@ mod tests {
             gas_limit: 30_000,
             destination: address,
             caller: Address::ZERO,
-            input: Bytes::copy_from_slice(b"cached-input"),
+            input: Bytes::copy_from_slice(b"cached-input").into(),
             value: U256::ZERO,
             code_address: address,
             call_target: address,
@@ -542,7 +544,8 @@ mod tests {
         assert_eq!(output.bytes(), b"cached-input");
 
         let cache = cache_map.cache_for_address(address);
-        let entry = cache.get(message.input.as_ref(), SpecId::OSAKA).expect("cache entry exists");
+        let entry =
+            cache.get(evm.message_input(&message), SpecId::OSAKA).expect("cache entry exists");
         assert_eq!(entry.output.bytes(), b"cached-input");
         assert_eq!(entry.regular_gas_used, 18);
 
@@ -579,18 +582,18 @@ mod tests {
                 destination: address,
                 code_address: address,
                 call_target: address,
-                input: Bytes::from(vec![1; len]),
+                input: Bytes::from(vec![1; len]).into(),
                 ..Default::default()
             };
             let output = provider
                 .execute(&mut evm, &message, &mut GasTracker::new(30_000))
                 .unwrap()
                 .unwrap();
-            assert_eq!(output.bytes(), message.input.as_ref());
+            assert_eq!(output.bytes(), evm.message_input(&message));
             assert_eq!(
                 cache
                     .cache_for_address(address)
-                    .get(message.input.as_ref(), SpecId::OSAKA)
+                    .get(evm.message_input(&message), SpecId::OSAKA)
                     .is_some(),
                 len == 2048
             );

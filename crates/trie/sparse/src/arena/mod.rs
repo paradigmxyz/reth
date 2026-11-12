@@ -396,10 +396,11 @@ impl ArenaSparseSubtrie {
                     self.num_dirty_leaves =
                         (self.num_dirty_leaves as i64 + deltas.num_dirty_leaves_delta) as u64;
 
-                    if let RemoveLeafResult::NeedsProof { key, proof_key, parent } = result {
+                    // The removed leaf is already revealed, so only the blinded sibling needs a
+                    // proof. The caller retries the update once that sibling is revealed.
+                    if let RemoveLeafResult::NeedsProof { proof_key, parent, .. } = result {
                         self.required_proofs
                             .push((idx, ArenaRequiredProof { key: proof_key, parent }));
-                        self.required_proofs.push((idx, ArenaRequiredProof { key, parent }));
                     }
                 }
                 LeafUpdate::Touched => {}
