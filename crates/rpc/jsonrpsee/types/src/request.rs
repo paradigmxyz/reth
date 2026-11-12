@@ -34,7 +34,7 @@ use crate::{
     params::{Id, TwoPointZero},
     Params,
 };
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::value::RawValue;
 
 /// JSON-RPC request object as defined in the [spec](https://www.jsonrpc.org/specification#request-object).
@@ -49,7 +49,7 @@ pub struct Request<'a> {
     #[serde(borrow)]
     pub method: Cow<'a, str>,
     /// Parameter values of the request.
-    #[serde(borrow)]
+    #[serde(borrow, default, deserialize_with = "deserialize_borrowed_params")]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub params: Option<Cow<'a, RawValue>>,
 }
@@ -127,6 +127,14 @@ impl<'a, T> Notification<'a, T> {
     pub fn params(&self) -> &T {
         &self.params
     }
+}
+
+/// Borrows `params` from the input, which `#[serde(borrow)]` alone does only for `Cow<str>` and
+/// `Cow<[u8]>`: a `Cow<RawValue>` would be decoded as an owned copy.
+fn deserialize_borrowed_params<'de, D: Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<Cow<'de, RawValue>>, D::Error> {
+    Option::<&'de RawValue>::deserialize(deserializer).map(|params| params.map(Cow::Borrowed))
 }
 
 #[cfg(test)]

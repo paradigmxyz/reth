@@ -1035,12 +1035,13 @@ struct ValidBatchEntry<'a> {
     #[serde(borrow)]
     method: Cow<'a, str>,
     #[serde(borrow)]
-    params: Option<Cow<'a, JsonRawValue>>,
+    params: Option<&'a JsonRawValue>,
 }
 
 impl<'a> From<ValidBatchEntry<'a>> for BatchEntry<'a> {
     fn from(entry: ValidBatchEntry<'a>) -> Self {
         let ValidBatchEntry { jsonrpc, id, method, params } = entry;
+        let params = params.map(Cow::Borrowed);
         match id {
             Some(id) => Self::Call(Request { jsonrpc, id, method, params }),
             None => Self::Notification(Notification::new(method, params)),
