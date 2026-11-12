@@ -40,6 +40,7 @@ tracing = { workspace = true, features = ["std"] }
 
 [dev-dependencies]
 jsonrpsee-test-utils = { path = "../test-utils" }
+test-case.workspace = true
 tokio = { workspace = true, features = ["test-util", "io-util"] }
 tower = { workspace = true, features = ["limit", "timeout"] }
 tracing-subscriber = { workspace = true, features = ["env-filter", "fmt"] }
