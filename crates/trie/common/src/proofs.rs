@@ -540,8 +540,11 @@ impl DecodedMultiProofV2 {
     }
 
     /// Builds a `DecodedMultiProofV2` by BFS from `state_root`, resolving hashed nodes with
-    /// `node_by_hash`. A node it returns as `None` is left blinded.
-    fn from_witness_with(
+    /// `node_by_hash`.
+    ///
+    /// `node_by_hash` returns the decoded node for a hash, `None` to leave that node blinded, or
+    /// an error that aborts the traversal. Inline children are decoded from their parent.
+    pub fn from_witness_with(
         state_root: B256,
         mut node_by_hash: impl FnMut(&B256) -> Result<Option<TrieNode>, alloy_rlp::Error>,
     ) -> Result<Self, alloy_rlp::Error> {
