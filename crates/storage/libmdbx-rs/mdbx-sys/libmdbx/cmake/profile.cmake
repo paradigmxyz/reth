@@ -23,7 +23,7 @@ if(NOT DEFINED ENABLE_MEMCHECK)
   endif()
   if(MEMCHECK_OPTION_NAME STREQUAL "ENABLE_MEMCHECK")
     option(ENABLE_MEMCHECK "Enable integration with valgrind, a memory analyzing tool" OFF)
-  elseif(${MEMCHECK_OPTION_NAME})
+  elseif(${${MEMCHECK_OPTION_NAME}})
     set(ENABLE_MEMCHECK ON)
   else()
     set(ENABLE_MEMCHECK OFF)
@@ -36,6 +36,8 @@ check_library_exists(gcov __gcov_flush "" HAVE_GCOV)
 option(ENABLE_GCOV "Enable integration with gcov, a code coverage program" OFF)
 
 option(ENABLE_GPROF "Enable integration with gprof, a performance analyzing tool" OFF)
+
+option(ENABLE_DTRACE "Enable using DTrace dynamic tracing framework" OFF)
 
 option(ENABLE_ASAN "Enable AddressSanitizer, a fast memory error detector based on compiler instrumentation" OFF)
 

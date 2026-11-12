@@ -1,5 +1,6 @@
 use crate::error::mdbx_result;
 use crossbeam_queue::ArrayQueue;
+use std::ptr;
 
 /// Lock-free pool of reset read-only MDBX transaction handles.
 ///
@@ -73,7 +74,7 @@ impl ReadTxnPool {
 
 /// Aborts a transaction handle, logging any error.
 fn abort_txn(txn: *mut ffi::MDBX_txn) {
-    if let Err(e) = mdbx_result(unsafe { ffi::mdbx_txn_abort(txn) }) {
+    if let Err(e) = mdbx_result(unsafe { ffi::mdbx_txn_abort_ex(txn, ptr::null_mut()) }) {
         tracing::error!(target: "libmdbx", %e, "failed to abort transaction");
     }
 }
