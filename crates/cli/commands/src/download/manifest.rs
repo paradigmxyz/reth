@@ -1091,9 +1091,12 @@ fn package_rocksdb_archives(
     files: Vec<PlannedFile>,
     previous: Option<&SnapshotManifest>,
 ) -> Result<Vec<SingleArchive>> {
-    let (sst_files, other_files): (Vec<_>, Vec<_>) = files
-        .into_iter()
-        .partition(|file| file.relative_path.extension().is_some_and(|ext| ext == "sst"));
+    // Only SST files directly under the RocksDB directory get their own archive: their file
+    // names are unique there, while nested directories may repeat them.
+    let (sst_files, other_files): (Vec<_>, Vec<_>) = files.into_iter().partition(|file| {
+        file.relative_path.parent() == Some(Path::new("rocksdb")) &&
+            file.relative_path.extension().is_some_and(|ext| ext == "sst")
+    });
 
     // Published SST archives by the file they extract, with absolute URLs.
     let mut published = HashMap::new();
@@ -1936,6 +1939,9 @@ mod tests {
         std::fs::write(rocksdb_dir.join("MANIFEST-000001"), b"manifest").unwrap();
         std::fs::write(rocksdb_dir.join("000007.sst"), b"sst-7").unwrap();
         std::fs::write(rocksdb_dir.join("000009.sst"), b"sst-9").unwrap();
+        // A nested SST with a top-level file name stays in the shared archive.
+        std::fs::create_dir_all(rocksdb_dir.join("checkpoint")).unwrap();
+        std::fs::write(rocksdb_dir.join("checkpoint/000007.sst"), b"sst-7").unwrap();
         let sst_7_hash = blake3::hash(b"sst-7").to_hex().to_string();
         let sst_9_hash = blake3::hash(b"sst-9").to_hex().to_string();
 
@@ -1974,7 +1980,7 @@ mod tests {
         assert_eq!(set.archives[0].decompressed_size, 5);
         assert_eq!(
             set.archives[2].output_files.iter().map(|file| file.path.as_str()).collect::<Vec<_>>(),
-            ["rocksdb/CURRENT", "rocksdb/MANIFEST-000001"]
+            ["rocksdb/CURRENT", "rocksdb/MANIFEST-000001", "rocksdb/checkpoint/000007.sst"]
         );
         assert!(!output.path().join("rocksdb/000007.tar.zst.tmp").exists());
         assert_eq!(manifest.chunks_for_distance(SnapshotComponentType::RocksdbIndices, None), 3);
