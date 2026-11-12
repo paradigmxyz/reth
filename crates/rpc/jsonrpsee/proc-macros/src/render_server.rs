@@ -28,7 +28,7 @@ use std::collections::HashSet;
 
 use super::RpcDescription;
 use crate::{
-    helpers::{generate_where_clause, is_option},
+    helpers::{generate_where_clause, is_option, may_borrow},
     rpc_macro::RpcFnArg,
 };
 use proc_macro2::{Span, TokenStream as TokenStream2};
@@ -344,10 +344,14 @@ impl RpcDescription {
                 }
             });
 
+            // Move the raw params into the decoding block so they are freed once decoded, instead
+            // of living as long as an async method or subscription future. Arguments that may
+            // borrow from the params need them to outlive the call.
+            let free_params = (!params.iter().any(|arg| may_borrow(&arg.ty)))
+                .then(|| quote! { let params = params; });
+
             quote! {
-                // Move the raw params into this block so they are freed once decoded, instead of
-                // living as long as an async method or subscription future.
-                let params = params;
+                #free_params
                 let mut seq = params.sequence();
                 #(#decode_fields);*
                 (#params_fields)
