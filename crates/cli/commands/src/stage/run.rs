@@ -335,7 +335,12 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
         let unwind_stage = unwind_stage.as_mut().unwrap_or(&mut exec_stage);
 
         let mut unwind = UnwindInput {
-            checkpoint: checkpoint.with_block_number(self.to),
+            // Execution's state includes changes above `--to`.
+            checkpoint: if self.stage == StageEnum::Execution {
+                checkpoint
+            } else {
+                checkpoint.with_block_number(self.to)
+            },
             unwind_to: self.from,
             bad_block: None,
         };
