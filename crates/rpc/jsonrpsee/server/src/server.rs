@@ -24,7 +24,10 @@
 // IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 // DEALINGS IN THE SOFTWARE.
 
-use std::{fmt, future::Future, net::SocketAddr, pin::Pin, sync::Arc, task::Poll, time::Duration};
+use std::{
+    borrow::Cow, fmt, future::Future, net::SocketAddr, pin::Pin, sync::Arc, task::Poll,
+    time::Duration,
+};
 
 use crate::{
     future::{ConnectionGuard, ServerHandle, StopHandle},
@@ -58,9 +61,15 @@ use jsonrpsee_types::{
         reject_too_big_batch_request, ErrorCode, BATCHES_NOT_SUPPORTED_CODE,
         BATCHES_NOT_SUPPORTED_MSG,
     },
-    ErrorObject, Id, Request,
+    ErrorObject, Id, Notification, Request, TwoPointZero,
 };
-use serde::de::{DeserializeSeed, Deserializer, Error as _, SeqAccess, Visitor};
+use serde::{
+    de::{
+        value::MapAccessDeserializer, DeserializeSeed, Deserializer, Error as _, IgnoredAny,
+        MapAccess, SeqAccess, Visitor,
+    },
+    Deserialize,
+};
 use soketto::handshake::http::is_upgrade_request;
 use tokio::{
     net::{TcpListener, TcpStream, ToSocketAddrs},
@@ -73,7 +82,7 @@ use tracing::{instrument, Instrument};
 /// Default maximum connections allowed.
 const MAX_CONNECTIONS: u32 = 100;
 
-type Notif<'a> = Option<std::borrow::Cow<'a, JsonRawValue>>;
+type Notif<'a> = Option<Cow<'a, JsonRawValue>>;
 
 /// JSON RPC server.
 pub struct Server<HttpMiddleware = Identity, RpcMiddleware = Identity> {
@@ -950,22 +959,39 @@ where
             BatchRequestConfig::Unlimited => usize::MAX,
         };
 
-        let mut too_big = false;
-        let mut deserializer = serde_json::Deserializer::from_slice(body);
-        let batch = BatchSeed { max_len, too_big: &mut too_big }
-            .deserialize(&mut deserializer)
-            .and_then(|batch| deserializer.end().map(|()| batch));
-
-        match batch {
-            Ok(batch) => rpc_service.batch(Batch::from(batch)).await,
-            // The seed stops reading as soon as the batch exceeds the limit, which surfaces as a
-            // deserialization error.
-            Err(_) if too_big => {
-                MethodResponse::error(Id::Null, reject_too_big_batch_request(max_len))
-            }
-            Err(_) => MethodResponse::error(Id::Null, ErrorObject::from(ErrorCode::ParseError)),
+        match parse_batch(body, max_len) {
+            Ok(batch) => rpc_service.batch(batch).await,
+            Err(rp) => rp,
         }
     }
+}
+
+/// Reads `body` as a batch of at most `max_len` entries, or returns the response to a batch that
+/// can't be read.
+fn parse_batch(body: &[u8], max_len: usize) -> Result<Batch<'_>, MethodResponse> {
+    let mut entries = Vec::new();
+    let mut too_big = false;
+
+    // Most batches hold only valid requests, so the entries are decoded as they are read. Once an
+    // entry doesn't decode, the batch is read again from that entry on, classifying each raw entry
+    // to answer the invalid ones in place.
+    for raw in [false, true] {
+        let mut deserializer = serde_json::Deserializer::from_slice(body);
+        let read = BatchSeed { max_len, too_big: &mut too_big, entries: &mut entries, raw }
+            .deserialize(&mut deserializer)
+            .and_then(|()| deserializer.end());
+
+        if read.is_ok() {
+            return Ok(Batch::from(entries));
+        }
+        // The seed stops reading as soon as the batch exceeds the limit, which surfaces as a
+        // deserialization error.
+        if too_big {
+            return Err(MethodResponse::error(Id::Null, reject_too_big_batch_request(max_len)));
+        }
+    }
+
+    Err(MethodResponse::error(Id::Null, ErrorObject::from(ErrorCode::ParseError)))
 }
 
 /// Classifies a raw batch entry as a call, a notification or an invalid request.
@@ -990,44 +1016,118 @@ fn parse_batch_entry(call: &JsonRawValue) -> Result<BatchEntry<'_>, BatchEntryEr
     }
 }
 
-/// Reads a JSON array of batch entries, classifying each entry as it is read.
+/// A valid batch entry: a call if it has an `id`, a notification otherwise.
+///
+/// Unknown members use the raw pass, which validates UTF-8 even in ignored values.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ValidBatchEntry<'a> {
+    jsonrpc: TwoPointZero,
+    #[serde(borrow, default, deserialize_with = "deserialize_present_id")]
+    id: Option<Id<'a>>,
+    #[serde(borrow)]
+    method: Cow<'a, str>,
+    #[serde(borrow)]
+    params: Option<Cow<'a, JsonRawValue>>,
+}
+
+impl<'a> From<ValidBatchEntry<'a>> for BatchEntry<'a> {
+    fn from(entry: ValidBatchEntry<'a>) -> Self {
+        let ValidBatchEntry { jsonrpc, id, method, params } = entry;
+        match id {
+            Some(id) => Self::Call(Request { jsonrpc, id, method, params }),
+            None => Self::Notification(Notification::new(method, params)),
+        }
+    }
+}
+
+/// Only runs for an `id` that is present, so `null` is an id and not a missing one.
+fn deserialize_present_id<'de, D: Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<Id<'de>>, D::Error> {
+    Id::deserialize(deserializer).map(Some)
+}
+
+/// Decodes a [`ValidBatchEntry`] from a JSON object only, because its derived `Deserialize` impl
+/// also accepts a JSON array holding the fields in order.
+struct ValidBatchEntrySeed;
+
+impl<'de> DeserializeSeed<'de> for ValidBatchEntrySeed {
+    type Value = ValidBatchEntry<'de>;
+
+    fn deserialize<D: Deserializer<'de>>(self, deserializer: D) -> Result<Self::Value, D::Error> {
+        deserializer.deserialize_map(self)
+    }
+}
+
+impl<'de> Visitor<'de> for ValidBatchEntrySeed {
+    type Value = ValidBatchEntry<'de>;
+
+    fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("a JSON-RPC request object")
+    }
+
+    fn visit_map<A: MapAccess<'de>>(self, map: A) -> Result<Self::Value, A::Error> {
+        ValidBatchEntry::deserialize(MapAccessDeserializer::new(map))
+    }
+}
+
+/// Reads a JSON array of batch entries into `entries`.
+///
+/// Entries are decoded as they are read, or, if `raw`, classified from their raw JSON, after
+/// skipping the entries that `entries` already holds.
 ///
 /// Stops with an error as soon as an entry beyond `max_len` is read and sets `too_big`, so an
 /// oversized batch is never collected.
-struct BatchSeed<'a> {
+struct BatchSeed<'a, 'de> {
     max_len: usize,
     too_big: &'a mut bool,
+    entries: &'a mut Vec<Result<BatchEntry<'de>, BatchEntryErr<'de>>>,
+    raw: bool,
 }
 
-impl<'de> DeserializeSeed<'de> for BatchSeed<'_> {
-    type Value = Vec<Result<BatchEntry<'de>, BatchEntryErr<'de>>>;
+impl<'de> DeserializeSeed<'de> for BatchSeed<'_, 'de> {
+    type Value = ();
 
     fn deserialize<D: Deserializer<'de>>(self, deserializer: D) -> Result<Self::Value, D::Error> {
         deserializer.deserialize_seq(self)
     }
 }
 
-impl<'de> Visitor<'de> for BatchSeed<'_> {
-    type Value = Vec<Result<BatchEntry<'de>, BatchEntryErr<'de>>>;
+impl<'de> Visitor<'de> for BatchSeed<'_, 'de> {
+    type Value = ();
 
     fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter.write_str("a batch of JSON-RPC requests")
     }
 
     fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> Result<Self::Value, A::Error> {
-        // Not preallocated from the size hint, which the input controls.
-        let mut batch = Vec::new();
-
-        while let Some(call) = seq.next_element::<&'de JsonRawValue>()? {
-            if batch.len() == self.max_len {
-                *self.too_big = true;
-                return Err(A::Error::custom("batch too big"));
+        if self.raw {
+            for _ in 0..self.entries.len() {
+                seq.next_element::<IgnoredAny>()?;
             }
-
-            batch.push(parse_batch_entry(call));
         }
 
-        Ok(batch)
+        loop {
+            if self.entries.len() == self.max_len {
+                // Read the excess entry without decoding or allocating its fields.
+                if seq.next_element::<&'de JsonRawValue>()?.is_some() {
+                    *self.too_big = true;
+                    return Err(A::Error::custom("batch too big"));
+                }
+                return Ok(());
+            }
+
+            let entry = if self.raw {
+                seq.next_element::<&'de JsonRawValue>()?.map(parse_batch_entry)
+            } else {
+                seq.next_element_seed(ValidBatchEntrySeed)?.map(|entry| Ok(entry.into()))
+            };
+            let Some(entry) = entry else { return Ok(()) };
+
+            // Not preallocated from the size hint, which the input controls.
+            self.entries.push(entry);
+        }
     }
 }
 
@@ -1035,6 +1135,22 @@ impl<'de> Visitor<'de> for BatchSeed<'_> {
 mod tests {
     use super::*;
     use futures_util::future;
+    use test_case::test_case;
+
+    const CALL: &str = r#"{"jsonrpc":"2.0","method":"m","params":[1],"id":1}"#;
+
+    const NOTIFICATION: &str = r#"{"jsonrpc":"2.0","method":"m"}"#;
+
+    /// Classifies every entry of `body` from its raw JSON.
+    fn classify_raw_batch(body: &str, max_len: usize) -> Option<String> {
+        let (mut entries, mut too_big) = (Vec::new(), false);
+        let mut deserializer = serde_json::Deserializer::from_str(body);
+        BatchSeed { max_len, too_big: &mut too_big, entries: &mut entries, raw: true }
+            .deserialize(&mut deserializer)
+            .and_then(|()| deserializer.end())
+            .ok()
+            .map(|()| format!("{entries:?}"))
+    }
 
     #[tokio::test]
     async fn try_accept_conn_observes_stop_before_a_waiting_connection() {
@@ -1048,5 +1164,69 @@ mod tests {
 
         let accepted = try_accept_conn(&listener, future::ready(())).await;
         assert!(matches!(accepted, AcceptConnection::Shutdown));
+    }
+
+    #[test_case(&[CALL, CALL], usize::MAX; "calls")]
+    #[test_case(&[CALL, NOTIFICATION, r#"{"jsonrpc":"2.0","method":"m","id":null}"#], usize::MAX; "call, notification and null id")]
+    #[test_case(&[r#"{"id":"a","params":null,"method":"\"m\"","x":1,"jsonrpc":"2.0"}"#], usize::MAX; "escaped method, null params and unknown member")]
+    #[test_case(&[CALL, r#"{"jsonrpc":"2.0","id":2}"#, NOTIFICATION, CALL], usize::MAX; "missing method between valid entries")]
+    #[test_case(&[r#"{"jsonrpc":"1.0","method":"m","id":3}"#, CALL], usize::MAX; "wrong version first")]
+    #[test_case(&[CALL, r#"{"jsonrpc":"2.0","method":"m","id":{}}"#], usize::MAX; "object id")]
+    #[test_case(&[CALL, r#"{"jsonrpc":"2.0","method":"m","id":1,"id":2}"#], usize::MAX; "duplicate id")]
+    #[test_case(&[CALL, r#"["2.0",2,"m",[]]"#, "7", CALL], usize::MAX; "array and number entries")]
+    #[test_case(&[CALL, r#"{"id":2}"#], 2; "invalid entry at the limit")]
+    #[test_case(&[CALL, r#"{"id":2}"#, CALL], 2; "valid entry past the limit")]
+    #[test_case(&[CALL, CALL, r#"{"id":2}"#], 2; "invalid entry past the limit")]
+    #[test_case(&[CALL, r#"{"jsonrpc""#], usize::MAX; "not json")]
+    fn batch_entries_decode_like_their_raw_json(entries: &[&str], max_len: usize) {
+        let body = format!("[{}]", entries.join(","));
+        let batch = parse_batch(body.as_bytes(), max_len)
+            .ok()
+            .map(|batch| format!("{:?}", batch.into_iter().collect::<Vec<_>>()));
+        assert_eq!(batch, classify_raw_batch(&body, max_len));
+    }
+
+    #[test]
+    fn batch_with_invalid_utf8_is_a_parse_error() {
+        // Unknown members must still be validated as UTF-8 by the raw pass.
+        let body = b"[{\"jsonrpc\":\"2.0\",\"method\":\"m\",\"id\":1,\"x\":\"\xff\"}]";
+        let rp = parse_batch(body, usize::MAX).unwrap_err();
+        assert_eq!(rp.as_error_code(), Some(ErrorCode::ParseError.code()));
+    }
+
+    #[test]
+    fn valid_batch_entries_are_calls_or_notifications() {
+        let body = br#"[{"jsonrpc":"2.0","method":"a","id":null},{"jsonrpc":"2.0","method":"b"}]"#;
+        let batch = parse_batch(body, usize::MAX).unwrap().into_iter().collect::<Vec<_>>();
+        assert!(matches!(
+            batch.as_slice(),
+            [Ok(BatchEntry::Call(call)), Ok(BatchEntry::Notification(notification))]
+                if call.id == Id::Null && call.method == "a" && notification.method == "b"
+        ));
+    }
+
+    #[test_case(&[CALL.as_bytes(), CALL.as_bytes(), b"\"\xff\""], 1, reject_too_big_batch_request(1); "invalid utf8 after excess call")]
+    #[test_case(&[br#"{"id":2}"#, CALL.as_bytes(), b"\"\xff\""], 1, reject_too_big_batch_request(1); "invalid utf8 after fallback exceeds limit")]
+    #[test_case(&[CALL.as_bytes(), b"\"\xff\""], 1, ErrorCode::ParseError.into(); "invalid utf8 in excess entry")]
+    #[test_case(&[b"{\"jsonrpc\":\"2.0\",\"method\":\"m\",\"x\":\"\xff\"}", CALL.as_bytes()], 1, ErrorCode::ParseError.into(); "invalid utf8 before excess entry")]
+    #[test_case(&[CALL.as_bytes(), br#"{"jsonrpc"#], 1, ErrorCode::ParseError.into(); "malformed excess entry")]
+    #[test_case(&[CALL.as_bytes(), b"7", b"\"\xff\""], 1, reject_too_big_batch_request(1); "invalid utf8 after excess scalar")]
+    #[test_case(&[CALL.as_bytes(), b"\"\xff\""], 0, reject_too_big_batch_request(0); "zero limit ignores tail")]
+    fn batch_limit_preserves_parse_errors(
+        entries: &[&[u8]],
+        max_len: usize,
+        expected: ErrorObject<'_>,
+    ) {
+        let body = [b"[".as_slice(), entries.join(b",".as_slice()).as_slice(), b"]"].concat();
+        assert_eq!(
+            parse_batch(&body, max_len).unwrap_err().into_json(),
+            MethodResponse::error(Id::Null, expected).into_json()
+        );
+    }
+
+    #[test_case(b"[]", 0; "empty batch")]
+    #[test_case(b"[{\"jsonrpc\":\"2.0\",\"method\":\"m\"}]", 1; "notification")]
+    fn batch_at_limit_is_accepted(body: &[u8], max_len: usize) {
+        assert_eq!(parse_batch(body, max_len).unwrap().len(), max_len);
     }
 }
