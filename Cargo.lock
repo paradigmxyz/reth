@@ -5742,6 +5742,7 @@ dependencies = [
  "serde",
  "serde_json",
  "soketto",
+ "test-case",
  "thiserror 2.0.21",
  "tokio",
  "tokio-stream",
@@ -10410,7 +10411,6 @@ dependencies = [
  "reth-tasks",
  "reth-transaction-pool",
  "reth-trie-common",
- "serde_json",
  "tokio",
  "tracing",
 ]
@@ -10439,6 +10439,7 @@ dependencies = [
  "jsonrpsee-core",
  "jsonrpsee-types",
  "metrics",
+ "parking_lot",
  "rand 0.9.5",
  "reqwest",
  "reth-chain-state",

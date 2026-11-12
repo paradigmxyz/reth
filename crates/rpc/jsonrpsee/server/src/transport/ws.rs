@@ -12,7 +12,7 @@ use futures_util::{
 };
 use hyper::upgrade::Upgraded;
 use hyper_util::rt::TokioIo;
-use jsonrpsee_core::{middleware::RpcServiceT, server::MethodSink};
+use jsonrpsee_core::{classify_message, middleware::RpcServiceT, server::MethodSink};
 use jsonrpsee_types::{
     error::{reject_too_big_request, ErrorCode},
     Id,
@@ -167,27 +167,19 @@ where
         tokio::spawn(async move {
             let _pending_calls = pending_calls;
             let _permit = permit;
-            // Only the four JSON whitespace characters are skipped, not for example form feed.
-            let first_non_whitespace = data
-                .iter()
-                .enumerate()
-                .take(128)
-                .find(|(_, byte)| !matches!(byte, b' ' | b'\t' | b'\n' | b'\r'));
-
-            let (idx, is_single) = match first_non_whitespace {
-                Some((start, b'{')) => (start, true),
-                Some((start, b'[')) => (start, false),
-                _ => {
-                    _ = sink.send_error(Id::Null, ErrorCode::ParseError.into()).await;
-                    return;
-                }
+            let Some((data, is_single)) = classify_message(&data) else {
+                _ = sink.send_error(Id::Null, ErrorCode::ParseError.into()).await;
+                return;
             };
 
             // Calls are not tied to the connection task, so stop them once the connection is closed
             // instead of running them to completion without anyone to send the response to.
             let rp = tokio::select! {
+                // The call is polled first, so one that answers at once doesn't have to register
+                // for the close of the connection.
+                biased;
+                rp = handle_rpc_call(data, is_single, batch_requests_config, &*rpc_service) => rp,
                 _ = sink.closed() => return,
-                rp = handle_rpc_call(&data[idx..], is_single, batch_requests_config, &*rpc_service) => rp,
             };
 
             // Subscriptions are handled by the subscription callback and
@@ -220,10 +212,18 @@ async fn send_task(
 
     loop {
         let response = tokio::select! {
+            // Stop is polled first: a subscription that queues messages faster than the client
+            // reads them keeps `rx.recv()` ready, which would never let a stopped server end the
+            // session.
             biased;
+            _ = &mut stop, if !rx.is_closed() => {
+                // Take nothing new but write out what is queued: answers to calls this server has
+                // run, which a graceful shutdown owes its clients. `rx.recv()` returns `None` once
+                // the closed queue is drained.
+                rx.close();
+                continue;
+            }
             response = rx.recv() => response,
-            // The server has stopped.
-            _ = &mut stop => break,
         };
         // Nothing else to receive.
         let Some(response) = response else { break };
@@ -280,15 +280,18 @@ where
     S: Future<Output = ()> + Unpin,
     T: StreamExt<Item = Result<Vec<u8>, SokettoError>> + Unpin,
 {
-    match future::select(ws_stream.next(), stopped).await {
-        // The connection is closed.
-        Either::Left((None, _)) => Receive::ConnectionClosed,
-        // The message has been received, we are done
-        Either::Left((Some(Ok(data)), stopped)) => Receive::Ok(data, stopped),
-        // Received an error, terminate the connection.
-        Either::Left((Some(Err(e)), stopped)) => Receive::Err(e, stopped),
+    // `select` polls its first argument first and returns as soon as that one is ready, so the stop
+    // signal has to come first. Polling the stream first starves it: a peer that always has another
+    // message ready never lets the read be pending, and the session would then never stop.
+    match future::select(stopped, ws_stream.next()).await {
         // Server has been stopped.
-        Either::Right(_) => Receive::Stopped,
+        Either::Left(_) => Receive::Stopped,
+        // The connection is closed.
+        Either::Right((None, _)) => Receive::ConnectionClosed,
+        // The message has been received, we are done
+        Either::Right((Some(Ok(data)), stopped)) => Receive::Ok(data, stopped),
+        // Received an error, terminate the connection.
+        Either::Right((Some(Err(e)), stopped)) => Receive::Err(e, stopped),
     }
 }
 
@@ -332,4 +335,19 @@ async fn graceful_shutdown<S>(
     _ = conn_tx.send(());
     // Ensure that send task has been closed.
     _ = send_task_handle.await;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use futures_util::stream;
+
+    #[tokio::test]
+    async fn try_recv_observes_stop_while_input_stays_ready() {
+        // A peer that always has another message ready must not keep the session from stopping.
+        let mut always_ready = stream::repeat_with(|| Ok::<_, SokettoError>(b"{}".to_vec()));
+
+        let received = try_recv(&mut always_ready, future::ready(())).await;
+        assert!(matches!(received, Receive::Stopped));
+    }
 }

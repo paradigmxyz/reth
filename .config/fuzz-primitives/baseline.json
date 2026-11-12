@@ -2471,7 +2471,7 @@
         "lint": "clippy::disallowed_methods",
         "source": "Instant::now",
         "message": "use of a disallowed method `std::time::Instant::now`",
-        "count": 16,
+        "count": 19,
         "reason": "Deferred native async/service boundary: Tokio and its shared state remain outside simulation; audit before moving work into the selected Runtime."
       },
       {
@@ -2495,7 +2495,7 @@
         "lint": "clippy::disallowed_types",
         "source": "Instant",
         "message": "use of a disallowed type `std::time::Instant`",
-        "count": 27,
+        "count": 30,
         "reason": "Deferred native async/service boundary: Tokio and its shared state remain outside simulation; audit before moving work into the selected Runtime."
       },
       {
@@ -5953,6 +5953,30 @@
         "message": "use of a disallowed type `std::sync::atomic::AtomicU64`",
         "count": 1,
         "reason": "Deferred native async/service boundary: Tokio and its shared state remain outside simulation; audit before moving work into the selected Runtime."
+      },
+      {
+        "path": "crates/rpc/rpc-eth-types/src/gas_oracle.rs",
+        "lint": "clippy::disallowed_types",
+        "source": "RwLock",
+        "message": "use of a disallowed type `parking_lot::RwLock`",
+        "count": 1,
+        "reason": "Native RPC/Tokio boundary: gas-price cache lock shared by async RPC calls, outside the managed simulation."
+      },
+      {
+        "path": "crates/rpc/rpc-eth-types/src/gas_oracle.rs",
+        "lint": "clippy::disallowed_types",
+        "source": "RwLock<Option<GasPriceOracleResult>>",
+        "message": "use of a disallowed type `parking_lot::RwLock`",
+        "count": 1,
+        "reason": "Native RPC/Tokio boundary: gas-price cache lock shared by async RPC calls, outside the managed simulation."
+      },
+      {
+        "path": "crates/rpc/rpc-eth-types/src/gas_oracle.rs",
+        "lint": "clippy::disallowed_types",
+        "source": "use parking_lot::RwLock;",
+        "message": "use of a disallowed type `parking_lot::RwLock`",
+        "count": 1,
+        "reason": "Native RPC/Tokio boundary: gas-price cache lock shared by async RPC calls, outside the managed simulation."
       },
       {
         "path": "crates/rpc/rpc-eth-types/src/pending_block.rs",
@@ -12681,7 +12705,7 @@
         "lint": "clippy::disallowed_methods",
         "source": "Instant::now",
         "message": "use of a disallowed method `std::time::Instant::now`",
-        "count": 16,
+        "count": 19,
         "reason": "Deferred native async/service boundary: Tokio and its shared state remain outside simulation; audit before moving work into the selected Runtime."
       },
       {
@@ -12705,7 +12729,7 @@
         "lint": "clippy::disallowed_types",
         "source": "Instant",
         "message": "use of a disallowed type `std::time::Instant`",
-        "count": 27,
+        "count": 30,
         "reason": "Deferred native async/service boundary: Tokio and its shared state remain outside simulation; audit before moving work into the selected Runtime."
       },
       {
@@ -16179,6 +16203,30 @@
         "message": "use of a disallowed type `std::sync::atomic::AtomicU64`",
         "count": 1,
         "reason": "Deferred native async/service boundary: Tokio and its shared state remain outside simulation; audit before moving work into the selected Runtime."
+      },
+      {
+        "path": "crates/rpc/rpc-eth-types/src/gas_oracle.rs",
+        "lint": "clippy::disallowed_types",
+        "source": "RwLock",
+        "message": "use of a disallowed type `parking_lot::RwLock`",
+        "count": 1,
+        "reason": "Native RPC/Tokio boundary: gas-price cache lock shared by async RPC calls, outside the managed simulation."
+      },
+      {
+        "path": "crates/rpc/rpc-eth-types/src/gas_oracle.rs",
+        "lint": "clippy::disallowed_types",
+        "source": "RwLock<Option<GasPriceOracleResult>>",
+        "message": "use of a disallowed type `parking_lot::RwLock`",
+        "count": 1,
+        "reason": "Native RPC/Tokio boundary: gas-price cache lock shared by async RPC calls, outside the managed simulation."
+      },
+      {
+        "path": "crates/rpc/rpc-eth-types/src/gas_oracle.rs",
+        "lint": "clippy::disallowed_types",
+        "source": "use parking_lot::RwLock;",
+        "message": "use of a disallowed type `parking_lot::RwLock`",
+        "count": 1,
+        "reason": "Native RPC/Tokio boundary: gas-price cache lock shared by async RPC calls, outside the managed simulation."
       },
       {
         "path": "crates/rpc/rpc-eth-types/src/pending_block.rs",

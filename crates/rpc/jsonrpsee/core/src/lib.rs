@@ -84,3 +84,20 @@ pub type SubscriptionResult = Result<(), SubscriptionError>;
 
 /// Type erased error.
 pub type BoxError = Box<dyn std::error::Error + Send + Sync>;
+
+/// Skips the leading whitespace of a JSON-RPC message and tells a single request from a batch by
+/// its first byte.
+///
+/// Returns the message from that byte on and whether it is a single request, or `None` if the
+/// first 128 bytes do not lead to a `{` or a `[`. Only the four JSON whitespace characters are
+/// skipped, not for example form feed.
+pub fn classify_message(data: &[u8]) -> Option<(&[u8], bool)> {
+    let start =
+        data.iter().take(128).position(|byte| !matches!(byte, b' ' | b'\t' | b'\n' | b'\r'))?;
+
+    match data[start] {
+        b'{' => Some((&data[start..], true)),
+        b'[' => Some((&data[start..], false)),
+        _ => None,
+    }
+}

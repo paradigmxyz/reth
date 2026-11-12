@@ -237,9 +237,11 @@ impl PendingSubscriptionSink {
 
     /// Attempt to accept the subscription and respond the subscription method call.
     ///
-    /// # Panics
+    /// # Errors
     ///
-    /// Panics if the subscription response exceeded the `max_response_size`.
+    /// Fails if the connection is closed, or if the subscription response exceeds the
+    /// `max_response_size`. In the latter case the call is answered with an oversized response
+    /// error and the subscription is not registered.
     pub async fn accept(self) -> Result<SubscriptionSink, PendingSubscriptionAcceptError> {
         let (tx, rx) = mpsc::channel(1);
 
@@ -287,9 +289,8 @@ impl PendingSubscriptionSink {
         if success {
             Ok(sink)
         } else {
-            panic!(
-                "The subscription response was too big; adjust the `max_response_size` or change Subscription ID generation"
-            );
+            // The response exceeded the max response size and the call was answered with an error.
+            Err(PendingSubscriptionAcceptError)
         }
     }
 

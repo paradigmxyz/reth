@@ -33,6 +33,11 @@ Options:
 
           If omitted, this is inferred from header static file ranges in the source datadir.
 
+      --previous-manifest <PREVIOUS_MANIFEST>
+          Path to the manifest of a previously published snapshot of the same chain.
+
+          Chunks sealed in both snapshots are hashed against it instead of being packaged again, and the new manifest references their published archives. Fails if any sealed chunk's files differ from the previous manifest.
+
   -h, --help
           Print help (see a summary with '-h')
 
