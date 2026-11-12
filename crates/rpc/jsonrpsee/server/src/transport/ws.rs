@@ -12,7 +12,7 @@ use futures_util::{
 };
 use hyper::upgrade::Upgraded;
 use hyper_util::rt::TokioIo;
-use jsonrpsee_core::{middleware::RpcServiceT, server::MethodSink};
+use jsonrpsee_core::{classify_message, middleware::RpcServiceT, server::MethodSink};
 use jsonrpsee_types::{
     error::{reject_too_big_request, ErrorCode},
     Id,
@@ -167,20 +167,9 @@ where
         tokio::spawn(async move {
             let _pending_calls = pending_calls;
             let _permit = permit;
-            // Only the four JSON whitespace characters are skipped, not for example form feed.
-            let first_non_whitespace = data
-                .iter()
-                .enumerate()
-                .take(128)
-                .find(|(_, byte)| !matches!(byte, b' ' | b'\t' | b'\n' | b'\r'));
-
-            let (idx, is_single) = match first_non_whitespace {
-                Some((start, b'{')) => (start, true),
-                Some((start, b'[')) => (start, false),
-                _ => {
-                    _ = sink.send_error(Id::Null, ErrorCode::ParseError.into()).await;
-                    return;
-                }
+            let Some((data, is_single)) = classify_message(&data) else {
+                _ = sink.send_error(Id::Null, ErrorCode::ParseError.into()).await;
+                return;
             };
 
             // Calls are not tied to the connection task, so stop them once the connection is closed
@@ -189,7 +178,7 @@ where
                 // The call is polled first, so one that answers at once doesn't have to register
                 // for the close of the connection.
                 biased;
-                rp = handle_rpc_call(&data[idx..], is_single, batch_requests_config, &*rpc_service) => rp,
+                rp = handle_rpc_call(data, is_single, batch_requests_config, &*rpc_service) => rp,
                 _ = sink.closed() => return,
             };
 
