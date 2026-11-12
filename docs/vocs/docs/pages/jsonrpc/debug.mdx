@@ -165,6 +165,8 @@ Allows for re-execution of a block with the purpose of generating an execution w
 
 The `block` parameter accepts a block number, tag, hash, or EIP-1898 block object. An optional second parameter selects the witness generation mode.
 
+While the node is syncing, the method fails with a `node is syncing` error.
+
 | Client | Method invocation                                            |
 | ------ | ------------------------------------------------------------ |
 | RPC    | `{"method": "debug_executionWitness", "params": [block]}` |

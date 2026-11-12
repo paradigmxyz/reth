@@ -681,8 +681,10 @@ where
         mode: ExecutionWitnessMode,
     ) -> Result<ExecutionWitness, Eth::Error> {
         let block_number = block.header().number();
+        self.eth_api().ensure_not_syncing()?;
         self.eth_api()
             .spawn_with_state_at_block(block.parent_hash(), move |eth_api, mut db| {
+                eth_api.ensure_not_syncing()?;
                 let output = eth_api
                     .evm_config()
                     .executor(&mut db)

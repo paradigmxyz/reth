@@ -13,6 +13,7 @@ use alloy_serde::JsonStorageKey;
 use futures::Future;
 use reth_errors::RethError;
 use reth_evm::{ConfigureEvm, EvmEnvFor};
+use reth_network_api::NetworkInfo;
 use reth_primitives_traits::{BlockTy, RecoveredBlock, SealedHeaderFor};
 use reth_rpc_convert::{RpcConvert, RpcTxReq};
 use reth_rpc_eth_types::{
@@ -181,10 +182,12 @@ pub trait EthState: LoadState + SpawnBlocking {
                 .map_err(EthApiError::Internal)?;
 
             let block_id = block_id.unwrap_or_default();
+            self.ensure_not_syncing()?;
             self.ensure_within_proof_window(block_id)?;
 
-            self.spawn_blocking_io_with_state(block_id, move |_, state| {
+            self.spawn_blocking_io_with_state(block_id, move |this, state| {
                 let _permit = permit;
+                this.ensure_not_syncing()?;
                 let storage_keys = keys.iter().map(|key| key.as_b256()).collect::<Vec<_>>();
                 let proof = state
                     .proof(Default::default(), address, &storage_keys)
@@ -231,10 +234,12 @@ pub trait EthState: LoadState + SpawnBlocking {
                 .map_err(EthApiError::Internal)?;
 
             let block_id = block_id.unwrap_or_default();
+            self.ensure_not_syncing()?;
             self.ensure_within_proof_window(block_id)?;
 
-            self.spawn_blocking_io_with_state(block_id, move |_, state| {
+            self.spawn_blocking_io_with_state(block_id, move |this, state| {
                 let _permit = permit;
+                this.ensure_not_syncing()?;
                 let mut proof_targets = MultiProofTargetsV2::default();
                 proof_targets.account_targets.reserve(targets.len());
                 proof_targets.storage_targets.reserve(targets.len());
@@ -646,5 +651,19 @@ pub trait LoadState:
                 .unwrap_or_default()
                 .original_bytes())
         })
+    }
+
+    /// Returns [`EthApiError::NodeSyncing`] if the node is syncing.
+    ///
+    /// A pipeline run commits executed state before it advances the node's head, so until it
+    /// finishes, proofs and witnesses don't match the block they are requested for. Call this
+    /// both before and after the state is opened. The state is a snapshot taken when it is
+    /// opened, so a check only afterwards misses a sync that ended in between, and a check only
+    /// before misses one that started in between.
+    fn ensure_not_syncing(&self) -> Result<(), Self::Error> {
+        if self.network().is_syncing() {
+            return Err(EthApiError::NodeSyncing.into())
+        }
+        Ok(())
     }
 }
