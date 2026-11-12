@@ -59,9 +59,11 @@ fn result(result: &str) -> String {
     format!(r#"{{"jsonrpc":"2.0","id":0,"result":{result}}}"#)
 }
 
-/// The invalid params error without additional data.
-fn invalid_params() -> String {
-    r#"{"jsonrpc":"2.0","id":0,"error":{"code":-32602,"message":"Invalid params"}}"#.into()
+/// The invalid params error, where `data` is the JSON-escaped content of its `data` string.
+fn invalid_params(data: &str) -> String {
+    format!(
+        r#"{{"jsonrpc":"2.0","id":0,"error":{{"code":-32602,"message":"Invalid params","data":"{data}"}}}}"#
+    )
 }
 
 #[tokio::test]
@@ -86,16 +88,27 @@ async fn rejects_invalid_params() {
     let module = Api.into_rpc();
 
     // A required parameter is missing.
-    let missing = invalid_params();
+    let missing = invalid_params("No more params");
     assert_eq!(call(&module, "test_add", Some("[]")).await, missing);
     assert_eq!(call(&module, "test_add", None).await, missing);
 
     // A parameter has the wrong type.
-    assert_eq!(call(&module, "test_add", Some(r#"["one"]"#)).await, invalid_params());
+    assert_eq!(
+        call(&module, "test_add", Some(r#"["one"]"#)).await,
+        invalid_params(r#"invalid type: string \"one\", expected u64 at line 1 column 5"#)
+    );
 
     // Parameters are positional, so objects are rejected even if every parameter is optional.
-    assert_eq!(call(&module, "test_add", Some(r#"{"a":1,"b":2}"#)).await, invalid_params());
-    assert_eq!(call(&module, "test_optional", Some("{}")).await, invalid_params());
+    assert_eq!(
+        call(&module, "test_add", Some(r#"{"a":1,"b":2}"#)).await,
+        invalid_params(
+            r#"Invalid params. Expected one of '[', ']' or ',' but found \"{\\\"a\\\":1,\\\"b\\\":2}\""#
+        )
+    );
+    assert_eq!(
+        call(&module, "test_optional", Some("{}")).await,
+        invalid_params(r#"Invalid params. Expected one of '[', ']' or ',' but found \"{}\""#)
+    );
 }
 
 #[tokio::test]

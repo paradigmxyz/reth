@@ -465,8 +465,8 @@ impl<'de: 'a, 'a> Deserialize<'de> for Id<'a> {
     }
 }
 
-fn invalid_params(_: impl ToString) -> ErrorObjectOwned {
-    ErrorObject::owned(ErrorCode::InvalidParams.code(), INVALID_PARAMS_MSG, None::<()>)
+fn invalid_params(e: impl ToString) -> ErrorObjectOwned {
+    ErrorObject::owned(ErrorCode::InvalidParams.code(), INVALID_PARAMS_MSG, Some(e.to_string()))
 }
 
 #[cfg(test)]
@@ -748,17 +748,5 @@ mod test {
             seq.optional_next::<serde_json::Value>().unwrap(),
             Some(serde_json::json!({"named":7}))
         );
-    }
-
-    #[test]
-    fn params_errors_omit_data() {
-        let params = Params::new(Some(r#"["2"]"#));
-        let expected = r#"{"code":-32602,"message":"Invalid params"}"#;
-
-        let error = params.parse::<[u64; 1]>().unwrap_err();
-        assert_eq!(serde_json::to_string(&error).unwrap(), expected);
-
-        let error = params.sequence().next::<u64>().unwrap_err();
-        assert_eq!(serde_json::to_string(&error).unwrap(), expected);
     }
 }
