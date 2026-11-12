@@ -1,4 +1,4 @@
-use crate::download::manifest::generate_manifest;
+use crate::download::manifest::{generate_manifest, SnapshotManifest};
 use clap::Parser;
 use eyre::{Result, WrapErr};
 use reth_db::{mdbx::DatabaseArguments, open_db_read_only, tables, Database};
@@ -42,6 +42,14 @@ pub struct SnapshotManifestCommand {
     /// If omitted, this is inferred from header static file ranges in the source datadir.
     #[arg(long, value_parser = clap::value_parser!(u64).range(1..))]
     blocks_per_file: Option<u64>,
+
+    /// Path to the manifest of a previously published snapshot of the same chain.
+    ///
+    /// Chunks sealed in both snapshots are hashed against it instead of being packaged again,
+    /// and the new manifest references their published archives. Fails if any sealed chunk's
+    /// files differ from the previous manifest.
+    #[arg(long)]
+    previous_manifest: Option<PathBuf>,
 }
 
 impl SnapshotManifestCommand {
@@ -63,6 +71,16 @@ impl SnapshotManifestCommand {
             blocks_per_file,
             "Packaging modular snapshot archives"
         );
+        let previous = self
+            .previous_manifest
+            .as_ref()
+            .map(|path| -> Result<SnapshotManifest> {
+                let json = reth_fs_util::read_to_string(path)?;
+                serde_json::from_str(&json)
+                    .wrap_err_with(|| format!("Invalid previous manifest: {}", path.display()))
+            })
+            .transpose()?;
+
         let start = Instant::now();
         let manifest = generate_manifest(
             &self.source_datadir,
@@ -71,6 +89,7 @@ impl SnapshotManifestCommand {
             block,
             self.chain_id,
             blocks_per_file,
+            previous.as_ref(),
         )?;
 
         let num_components = manifest.components.len();

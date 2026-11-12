@@ -55,10 +55,11 @@ struct PendingTruncation {
 impl<H: NippyJarHeader> NippyJarWriter<H> {
     /// Creates a [`NippyJarWriter`] from [`NippyJar`].
     ///
-    /// It will **always** attempt to heal any inconsistent state when called.
+    /// It will **always** attempt to heal any inconsistent state when called. A jar without a
+    /// config file is treated as never initialized, and its data and offsets files are truncated.
     pub fn new(jar: NippyJar<H>) -> Result<Self, NippyJarError> {
         let (data_file, offsets_file, is_created) =
-            Self::create_or_open_files(jar.data_path(), &jar.offsets_path())?;
+            Self::create_or_open_files(jar.data_path(), &jar.offsets_path(), &jar.config_path())?;
 
         let (jar, data_file, offsets_file) = if is_created {
             // Makes sure we don't have dangling data and offset files when we just created the file
@@ -134,8 +135,11 @@ impl<H: NippyJarHeader> NippyJarWriter<H> {
     fn create_or_open_files(
         data: &Path,
         offsets: &Path,
+        config: &Path,
     ) -> Result<(File, File, bool), NippyJarError> {
-        let is_created = !data.exists() || !offsets.exists();
+        // The config is written last on creation, so a missing one means an interrupted
+        // initialization that has to start over.
+        let is_created = !data.exists() || !offsets.exists() || !config.exists();
 
         if !data.exists() {
             // File::create is write-only (no reading possible)
@@ -143,6 +147,10 @@ impl<H: NippyJarHeader> NippyJarWriter<H> {
         }
 
         let mut data_file = OpenOptions::new().read(true).write(true).open(data)?;
+        if is_created {
+            // Drop stale data left behind by a previous jar at the same path.
+            data_file.set_len(0)?;
+        }
         data_file.seek(SeekFrom::End(0))?;
 
         if !offsets.exists() {
@@ -152,6 +160,10 @@ impl<H: NippyJarHeader> NippyJarWriter<H> {
 
         let mut offsets_file = OpenOptions::new().read(true).write(true).open(offsets)?;
         if is_created {
+            data_file.set_len(0)?;
+            data_file.seek(SeekFrom::Start(0))?;
+            offsets_file.set_len(0)?;
+
             let mut buf = Vec::with_capacity(1 + OFFSET_SIZE_BYTES as usize);
 
             // First byte of the offset file is the size of one offset in bytes
@@ -162,6 +174,9 @@ impl<H: NippyJarHeader> NippyJarWriter<H> {
             buf.write_all(&[0; OFFSET_SIZE_BYTES as usize])?;
 
             offsets_file.write_all(&buf)?;
+            // Drop stale offsets left behind by a previous jar at the same path. Truncating after
+            // the header is written never leaves the file empty.
+            offsets_file.set_len(buf.len() as u64)?;
             offsets_file.seek(SeekFrom::End(0))?;
         }
 

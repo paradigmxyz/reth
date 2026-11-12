@@ -14,7 +14,9 @@ workspace = true
 [dependencies]
 # reth
 reth-e2e-test-utils.workspace = true
-reth-rpc-api = { workspace = true, features = ["client"] }
+
+# alloy
+alloy-rpc-types-engine.workspace = true
 
 # async
 futures-util.workspace = true
@@ -23,7 +25,6 @@ futures-util.workspace = true
 eyre.workspace = true
 serde_json.workspace = true
 tracing.workspace = true
-jsonrpsee.workspace = true
 
 # required for the Action trait
 reth-node-api.workspace = true
