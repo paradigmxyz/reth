@@ -43,7 +43,11 @@ secp256k1.workspace = true
 alloy-genesis.workspace = true
 
 [features]
-fuzz = ["reth-tasks?/fuzz", "reth-evm/fuzz"]
+fuzz = [
+    "reth-tasks?/fuzz",
+    "reth-evm/fuzz",
+    "reth-trie-common/fuzz",
+]
 gmp = ["evm2/gmp", "reth-evm/gmp"]
 default = ["std"]
 asm-keccak = [

@@ -218,4 +218,5 @@ fuzz = [
     "reth-provider?/fuzz",
     "reth-tasks?/fuzz",
     "reth-trie?/fuzz",
+    "reth-db?/fuzz",
 ]

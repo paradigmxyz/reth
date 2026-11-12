@@ -50,7 +50,12 @@ reth-trie = { workspace = true, features = ["test-utils"] }
 rand.workspace = true
 
 [features]
-fuzz = ["reth-trie/fuzz", "reth-tasks/fuzz", "reth-provider/fuzz"]
+fuzz = [
+    "reth-trie/fuzz",
+    "reth-tasks/fuzz",
+    "reth-provider/fuzz",
+    "reth-storage-overlay/fuzz",
+]
 default = ["metrics"]
 metrics = ["reth-metrics", "dep:metrics"]
 trie-debug = [

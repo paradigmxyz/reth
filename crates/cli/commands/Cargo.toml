@@ -122,6 +122,8 @@ fuzz = [
     "reth-stages/fuzz",
     "reth-static-file/fuzz",
     "reth-trie-common?/fuzz",
+    "reth-db/fuzz",
+    "reth-ethereum-cli/fuzz",
 ]
 arbitrary = [
     "secp256k1/arbitrary",

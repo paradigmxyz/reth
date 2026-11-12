@@ -102,6 +102,11 @@ fuzz = [
     "reth-etl/fuzz",
     "reth-evm/fuzz",
     "reth-provider/fuzz",
+    "reth-db/fuzz",
+    "reth-downloaders/fuzz",
+    "reth-evm-ethereum/fuzz",
+    "reth-libmdbx/fuzz",
+    "reth-static-file/fuzz",
 ]
 test-utils = [
     "reth-network-p2p/test-utils",

@@ -107,6 +107,9 @@ fuzz = [
     "reth-stages/fuzz",
     "reth-static-file/fuzz",
     "reth-storage-overlay/fuzz",
+    "reth-db/fuzz",
+    "reth-evm-ethereum/fuzz",
+    "reth-node-ethereum/fuzz",
 ]
 default = []
 js-tracer = [

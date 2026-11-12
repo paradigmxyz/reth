@@ -97,4 +97,5 @@ fuzz = [
     "reth-node-builder/fuzz",
     "reth-node-ethereum/fuzz",
     "reth-tasks/fuzz",
+    "reth-db/fuzz",
 ]

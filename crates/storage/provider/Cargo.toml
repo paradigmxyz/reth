@@ -90,6 +90,7 @@ fuzz = [
     "reth-chain-state/fuzz",
     "reth-tasks/fuzz",
     "reth-storage-overlay/fuzz",
+    "reth-db/fuzz",
 ]
 test-utils = [
     "dep:evm2",

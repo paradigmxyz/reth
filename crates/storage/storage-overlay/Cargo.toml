@@ -58,6 +58,8 @@ fuzz = [
     "dep:reth-tasks",
     "reth-tasks/fuzz",
     "reth-trie-common/fuzz",
+    "reth-db/fuzz",
+    "reth-provider/fuzz",
 ]
 default = ["metrics"]
 metrics = ["reth-trie/metrics", "reth-trie-db/metrics"]

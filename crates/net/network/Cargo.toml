@@ -106,7 +106,14 @@ url.workspace = true
 secp256k1 = { workspace = true, features = ["rand"] }
 
 [features]
-fuzz = ["reth-tasks/fuzz", "reth-evm-ethereum?/fuzz", "reth-evm/fuzz"]
+fuzz = [
+    "reth-tasks/fuzz",
+    "reth-evm-ethereum?/fuzz",
+    "reth-evm/fuzz",
+    "reth-network/fuzz",
+    "reth-provider/fuzz",
+    "reth-trie/fuzz",
+]
 serde = [
     "dep:serde",
     "secp256k1/serde",
