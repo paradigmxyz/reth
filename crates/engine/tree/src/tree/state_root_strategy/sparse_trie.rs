@@ -283,7 +283,7 @@ where
     }
 
     /// Runs the hashing task that drains updates from the channel and converts them to
-    /// `HashedPostState` in parallel.
+    /// `HashedPostState` in parallel, until it forwards the finish marker or the channel closes.
     fn run_hashing_task(
         updates: Receiver<StateRootMessage>,
         hashed_state_tx: Sender<SparseTrieTaskMessage>,
@@ -295,6 +295,7 @@ where
         while let Ok(message) = updates.recv() {
             total_idle_time += idle_start.elapsed();
 
+            let finished = matches!(message, StateRootMessage::FinishedStateUpdates);
             let msg = match message {
                 StateRootMessage::PrefetchProofs(targets) => {
                     SparseTrieTaskMessage::PrefetchProofs(targets)
@@ -311,7 +312,10 @@ where
                     SparseTrieTaskMessage::HashedState(state)
                 }
             };
-            if hashed_state_tx.send(msg).is_err() {
+            // Only hints can follow the finish marker, and the task ignores them. Returning here
+            // frees the shared hashing thread for the next block's task while a hint sender, such
+            // as a prewarm task queued behind earlier blocks, is still alive.
+            if hashed_state_tx.send(msg).is_err() || finished {
                 break;
             }
 
@@ -1805,6 +1809,30 @@ mod tests {
     }
 
     #[test]
+    fn hashing_task_returns_after_finish_marker_while_hint_sender_is_alive() {
+        reth_tasks::executor::Runtime::new().run(|| {
+            let runtime = Runtime::test();
+            let (task, updates_tx, _cancel_guard) = test_task(&runtime, SparseStateTrie::default());
+            // A hint sender outliving execution, like a prewarm task queued behind earlier blocks.
+            let _hint_tx = updates_tx.clone();
+            updates_tx.send(StateRootMessage::FinishedStateUpdates).unwrap();
+            drop(updates_tx);
+
+            // The next block's hashing task runs on the same thread, so it must not wait for the
+            // hint sender to drop.
+            let (next_task_tx, next_task_rx) = mpsc::channel();
+            runtime.spawn_blocking_named("trie-hashing", move || next_task_tx.send(()).unwrap());
+            next_task_rx
+                .recv_timeout(std::time::Duration::from_secs(5))
+                .expect("hashing thread is still held by the finished task");
+            assert!(matches!(
+                task.updates.try_recv(),
+                Ok(SparseTrieTaskMessage::FinishedStateUpdates)
+            ));
+        });
+    }
+
+    #[test]
     fn checked_out_storage_trie_holds_back_its_updates_until_it_returns() {
         let runtime = Runtime::test();
         let trie = SparseStateTrie::default()
@@ -2473,67 +2501,73 @@ mod tests {
     }
 
     #[test]
-    fn run_ignores_hints_queued_after_updates_finish() {
-        let runtime = reth_tasks::Runtime::test();
-        let provider_factory = create_test_provider_factory();
-        let anchor_hash = init_genesis(&provider_factory).expect("failed to initialize genesis");
-        let state_provider_factory = OverlayStateProviderFactory::new(
-            provider_factory,
-            OverlayManager::<reth_chain_state::EthPrimitives>::default()
-                .overlay_builder(anchor_hash),
-        );
-        let proof_worker_handle = ProofWorkerHandle::new(
-            &runtime,
-            ProofTaskCtx::new(state_provider_factory),
-            ProofWorkerCounts::full(&runtime),
-            Default::default(),
-        );
-
-        let default_trie = RevealableSparseTrie::blind_from(ArenaParallelSparseTrie::default());
-        let trie = SparseStateTrie::default()
-            .with_accounts_trie(default_trie.clone())
-            .with_default_storage_trie(default_trie)
-            .with_updates(true);
-
-        let (updates_tx, updates_rx) = channel::unbounded();
-        let (cancel_guard, cancel_rx) = channel::bounded::<()>(0);
-        let mut task = SparseTrieCacheTask::new_with_trie(
-            &runtime,
-            updates_rx,
-            cancel_rx,
-            mpsc::channel().0,
-            proof_worker_handle,
-            SparseTrieTaskMetrics::default(),
-            trie,
-            B256::repeat_byte(0x55),
-            TrieNodeEpoch::UNMODIFIED,
-            1,
-        );
-
-        updates_tx.send(StateRootMessage::FinishedStateUpdates).unwrap();
-        updates_tx.send(StateRootMessage::PrefetchProofs(Default::default())).unwrap();
-
-        let wait_start = Instant::now();
-        while task.updates.len() < 2 {
-            assert!(
-                wait_start.elapsed() < std::time::Duration::from_secs(1),
-                "hashing task did not queue the test messages"
+    fn run_completes_when_hints_follow_updates_finish() {
+        reth_tasks::executor::Runtime::new().run(|| {
+            let runtime = reth_tasks::Runtime::test();
+            let provider_factory = create_test_provider_factory();
+            let anchor_hash =
+                init_genesis(&provider_factory).expect("failed to initialize genesis");
+            let state_provider_factory = OverlayStateProviderFactory::new(
+                provider_factory,
+                OverlayManager::<reth_chain_state::EthPrimitives>::default()
+                    .overlay_builder(anchor_hash),
             );
-            thread::yield_now();
-        }
+            let proof_worker_handle = ProofWorkerHandle::new(
+                &runtime,
+                ProofTaskCtx::new(state_provider_factory),
+                ProofWorkerCounts::full(&runtime),
+                Default::default(),
+            );
 
-        let (result_tx, result_rx) = mpsc::channel();
-        let handle = thread::spawn(move || {
-            let _ = result_tx.send(task.run());
+            let default_trie = RevealableSparseTrie::blind_from(ArenaParallelSparseTrie::default());
+            let trie = SparseStateTrie::default()
+                .with_accounts_trie(default_trie.clone())
+                .with_default_storage_trie(default_trie)
+                .with_updates(true);
+
+            let (updates_tx, updates_rx) = channel::unbounded();
+            let (cancel_guard, cancel_rx) = channel::bounded::<()>(0);
+            let mut task = SparseTrieCacheTask::new_with_trie(
+                &runtime,
+                updates_rx,
+                cancel_rx,
+                mpsc::channel().0,
+                proof_worker_handle,
+                SparseTrieTaskMetrics::default(),
+                trie,
+                B256::repeat_byte(0x55),
+                TrieNodeEpoch::UNMODIFIED,
+                1,
+            );
+
+            updates_tx.send(StateRootMessage::FinishedStateUpdates).unwrap();
+            // The hashing task returns after the finish marker, so this send fails if it already
+            // dropped the receiver.
+            let _ = updates_tx.send(StateRootMessage::PrefetchProofs(Default::default()));
+
+            // The hashing task forwards the finish marker and never forwards the hint after it.
+            let wait_start = Instant::now();
+            while task.updates.is_empty() {
+                assert!(
+                    wait_start.elapsed() < std::time::Duration::from_secs(1),
+                    "hashing task did not queue the finish marker"
+                );
+                thread::yield_now();
+            }
+
+            let (result_tx, result_rx) = mpsc::channel();
+            let handle = thread::spawn(move || {
+                let _ = result_tx.send(task.run());
+            });
+
+            let result = result_rx.recv_timeout(std::time::Duration::from_secs(1));
+            drop(cancel_guard);
+            handle.join().unwrap();
+
+            assert!(result.expect("state root task stalled on a late hint").is_ok());
+
+            drop(updates_tx);
+            drain_sparse_trie_tasks(&runtime);
         });
-
-        let result = result_rx.recv_timeout(std::time::Duration::from_secs(1));
-        drop(cancel_guard);
-        handle.join().unwrap();
-
-        assert!(result.expect("state root task stalled on a late hint").is_ok());
-
-        drop(updates_tx);
-        drain_sparse_trie_tasks(&runtime);
     }
 }

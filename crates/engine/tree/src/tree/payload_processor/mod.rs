@@ -5,8 +5,8 @@ use crate::tree::{
         prewarm::{PrewarmCacheTask, PrewarmContext, PrewarmMode, PrewarmTaskEvent},
         reuse::{cfg_reuses_prewarm_results, PrewarmResults},
     },
-    CachedStateCacheMetrics, CachedStateMetrics, CachedStateMetricsSource, ExecutionCache,
-    ExecutionEnv, PayloadExecutionCache, SavedCache, TreeConfig,
+    CacheCheckout, CachedStateCacheMetrics, CachedStateMetrics, CachedStateMetricsSource,
+    ExecutionCache, ExecutionEnv, PayloadExecutionCache, SavedCache, TreeConfig,
 };
 use alloy_eips::eip1898::BlockWithParent;
 use alloy_primitives::B256;
@@ -450,7 +450,8 @@ where
         } else {
             PrewarmMode::Skipped
         };
-        let saved_cache = self.disable_state_cache.not().then(|| self.cache_for(env.parent_hash));
+        let saved_cache =
+            self.disable_state_cache.not().then(|| self.cache_for(env.parent_hash)).flatten();
 
         // Reused results replace whole transaction executions, which is only equivalent for
         // configurations that opt in, without block access lists and EIP-8037 multidimensional
@@ -500,23 +501,32 @@ where
         }
     }
 
-    /// Returns the cache for the given parent hash.
+    /// Returns the cache for the given parent hash, creating one if none is stored yet.
     ///
-    /// If the given hash is different then what is recently cached, then this will create a new
-    /// instance.
+    /// Returns `None` while the stored cache is still held by another task, such as a prewarm
+    /// task queued behind earlier blocks. A new cache is not created then: saving it would free
+    /// the stored cache on the prewarm thread, which slows saves enough that a prewarm backlog
+    /// keeps growing while payloads arrive back to back.
     #[instrument(level = "debug", target = "engine::caching", skip(self))]
-    pub fn cache_for(&self, parent_hash: B256) -> SavedCache {
-        if let Some(cache) = self.execution_cache.get_cache_for(parent_hash) {
-            debug!("reusing execution cache");
-            cache
-        } else {
-            debug!("creating new execution cache on cache miss");
-            let start = Instant::now();
-            let cache = ExecutionCache::new(self.cross_block_cache_size);
-            if let Some(metrics) = &self.cache_metrics {
-                metrics.record_cache_creation(start.elapsed());
+    pub fn cache_for(&self, parent_hash: B256) -> Option<SavedCache> {
+        match self.execution_cache.checkout(parent_hash) {
+            CacheCheckout::Available(cache) => {
+                debug!("reusing execution cache");
+                Some(cache)
             }
-            SavedCache::new(parent_hash, cache)
+            CacheCheckout::InUse { cached_hash } => {
+                warn!(%cached_hash, "Execution cache still in use, executing without it");
+                None
+            }
+            CacheCheckout::Empty => {
+                debug!("creating new execution cache");
+                let start = Instant::now();
+                let cache = ExecutionCache::new(self.cross_block_cache_size);
+                if let Some(metrics) = &self.cache_metrics {
+                    metrics.record_cache_creation(start.elapsed());
+                }
+                Some(SavedCache::new(parent_hash, cache))
+            }
         }
     }
 
@@ -1055,6 +1065,33 @@ mod tests {
             let cached = payload_processor.execution_cache.get_cache_for(block_hash);
             assert!(cached.is_some());
             assert_eq!(cached.unwrap().executed_block_hash(), block_hash);
+        });
+    }
+
+    #[test]
+    fn cache_for_executes_without_cache_while_stored_cache_is_in_use() {
+        reth_tasks::executor::Runtime::new().run(|| {
+            let payload_processor = PayloadProcessor::new(
+                reth_tasks::Runtime::test(),
+                EthEvmConfig::new(Arc::new(ChainSpec::default())),
+                &TreeConfig::default(),
+                PrecompileCacheMap::default(),
+            );
+            let hash = B256::repeat_byte(1u8);
+            let next = B256::repeat_byte(2u8);
+            assert!(payload_processor.cache_for(hash).is_some(), "empty slot creates a cache");
+
+            payload_processor
+                .execution_cache
+                .update_with_guard(|slot| *slot = Some(make_saved_cache(hash)));
+            let held = payload_processor.cache_for(hash).expect("stored cache is available");
+            assert!(payload_processor.cache_for(next).is_none(), "held cache is not replaced");
+
+            drop(held);
+            assert_eq!(
+                payload_processor.cache_for(next).map(|cache| cache.executed_block_hash()),
+                Some(next)
+            );
         });
     }
 
