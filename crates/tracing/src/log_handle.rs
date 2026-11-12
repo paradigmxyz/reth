@@ -4,6 +4,7 @@
 //! reloadable layers (stdout, file, etc.). `set_log_verbosity` and `set_log_vmodule`
 //! update every registered layer in one shot.
 
+use crate::layers::DEFAULT_ENV_FILTER_DIRECTIVES;
 use tracing::level_filters::LevelFilter;
 use tracing_subscriber::{reload, EnvFilter, Registry};
 
@@ -13,7 +14,8 @@ pub type LogFilterReloadHandle = reload::Handle<EnvFilter, Registry>;
 /// Collects reload handles so all layers can be updated together.
 #[derive(Debug)]
 pub struct LogFilterHandle {
-    handles: Vec<LogFilterReloadHandle>,
+    /// Each layer's handle and the filter it started with, so an empty pattern restores it.
+    handles: Vec<(LogFilterReloadHandle, String)>,
 }
 
 impl LogFilterHandle {
@@ -24,7 +26,8 @@ impl LogFilterHandle {
 
     /// Adds a reload handle for a layer.
     fn push(&mut self, handle: LogFilterReloadHandle) {
-        self.handles.push(handle);
+        let initial = handle.with_current(|filter| filter.to_string()).unwrap_or_default();
+        self.handles.push((handle, initial));
     }
 
     /// Returns `true` if at least one handle is registered.
@@ -32,13 +35,14 @@ impl LogFilterHandle {
         !self.handles.is_empty()
     }
 
-    /// Reloads every registered layer with a fresh filter built by `make_filter`.
+    /// Reloads every registered layer with a fresh filter built by `make_filter`, which receives
+    /// that layer's initial filter.
     fn reload_all(
         &self,
-        make_filter: impl Fn() -> Result<EnvFilter, String>,
+        make_filter: impl Fn(&str) -> Result<EnvFilter, String>,
     ) -> Result<(), String> {
-        for handle in &self.handles {
-            let filter = make_filter()?;
+        for (handle, initial) in &self.handles {
+            let filter = make_filter(initial)?;
             handle.reload(filter).map_err(|e| e.to_string())?;
         }
         Ok(())
@@ -70,7 +74,8 @@ pub fn log_handle_available() -> bool {
 /// - 4: DEBUG
 /// - 5+: TRACE
 ///
-/// Updates all reloadable layers (stdout, file, etc.).
+/// Updates all reloadable layers (stdout, file, etc.). The default directives that suppress noisy
+/// dependencies are kept, as they are at startup.
 ///
 /// Returns an error if no log handle is installed or if the reload fails.
 pub fn set_log_verbosity(level: usize) -> Result<(), String> {
@@ -89,9 +94,35 @@ pub fn set_log_verbosity(level: usize) -> Result<(), String> {
         _ => LevelFilter::TRACE,
     };
 
-    guard.reload_all(|| {
-        Ok(EnvFilter::builder().with_default_directive(level_filter.into()).parse_lossy(""))
-    })
+    guard.reload_all(|_| Ok(verbosity_filter(level_filter)))
+}
+
+/// Prepends the default directives to `pattern`, as startup does, so they still apply unless
+/// `pattern` names the same target.
+fn with_default_directives(pattern: &str) -> String {
+    DEFAULT_ENV_FILTER_DIRECTIVES
+        .iter()
+        .copied()
+        .chain(pattern.split(',').map(str::trim).filter(|directive| !directive.is_empty()))
+        .collect::<Vec<_>>()
+        .join(",")
+}
+
+/// The filter `set_log_verbosity` installs: `level` over the default directives. A builder's
+/// default directive applies only to an empty directive string, so the defaults are added after.
+fn verbosity_filter(level: LevelFilter) -> EnvFilter {
+    let filter = EnvFilter::builder().with_default_directive(level.into()).parse_lossy("");
+    DEFAULT_ENV_FILTER_DIRECTIVES
+        .iter()
+        .filter_map(|directive| directive.parse().ok())
+        .fold(filter, EnvFilter::add_directive)
+}
+
+/// The filter `set_log_vmodule` installs for a non-empty `pattern`: the default directives, then
+/// `pattern`.
+fn vmodule_filter(pattern: &str) -> Result<EnvFilter, String> {
+    EnvFilter::try_new(with_default_directives(pattern))
+        .map_err(|e| format!("Invalid filter pattern: {e}"))
 }
 
 /// Sets module-specific log levels using a pattern string.
@@ -101,7 +132,8 @@ pub fn set_log_verbosity(level: usize) -> Result<(), String> {
 /// - Example: `reth::sync=debug,reth::net=trace`
 /// - Example: `info,reth::stages=debug`
 ///
-/// An empty string resets the filter to the default level (INFO).
+/// The default directives that suppress noisy dependencies are kept, as they are at startup. An
+/// empty string restores each layer's initial filter.
 ///
 /// Updates all reloadable layers (stdout, file, etc.).
 ///
@@ -114,16 +146,76 @@ pub fn set_log_vmodule(pattern: &str) -> Result<(), String> {
     }
 
     if pattern.trim().is_empty() {
-        guard.reload_all(|| {
-            Ok(EnvFilter::builder()
-                .with_default_directive(LevelFilter::INFO.into())
-                .parse_lossy(""))
-        })
+        // The initial filter is an `EnvFilter` rendered back to its directive list.
+        guard.reload_all(|initial| EnvFilter::try_new(initial).map_err(|e| e.to_string()))
     } else {
         // Validate the pattern once before reloading all handles
-        EnvFilter::try_new(pattern).map_err(|e| format!("Invalid filter pattern: {e}"))?;
-        guard.reload_all(|| {
-            EnvFilter::try_new(pattern).map_err(|e| format!("Invalid filter pattern: {e}"))
-        })
+        vmodule_filter(pattern)?;
+        guard.reload_all(|_| vmodule_filter(pattern))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::{Arc, Mutex};
+    use tracing::{Event, Subscriber};
+    use tracing_subscriber::{
+        layer::{Context, SubscriberExt},
+        Layer,
+    };
+
+    /// Records the target of every event it sees.
+    struct Targets(Arc<Mutex<Vec<String>>>);
+
+    impl<S: Subscriber> Layer<S> for Targets {
+        fn on_event(&self, event: &Event<'_>, _: Context<'_, S>) {
+            self.0.lock().unwrap().push(event.metadata().target().to_owned());
+        }
+    }
+
+    /// Emits a `discv5` debug event (off by default) and two events that a debug filter keeps.
+    fn emit() {
+        tracing::debug!(target: "discv5::unit", "suppressed by default");
+        tracing::warn!(target: "discv5::unit", "suppressed by default");
+        tracing::debug!(target: "reload_test", "kept");
+    }
+
+    fn seen_through(filter: EnvFilter) -> Vec<String> {
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        let subscriber = Registry::default().with(Targets(Arc::clone(&seen)).with_filter(filter));
+        tracing::subscriber::with_default(subscriber, emit);
+        Arc::into_inner(seen).expect("the subscriber is dropped").into_inner().unwrap()
+    }
+
+    #[test]
+    fn a_reloaded_filter_keeps_the_default_directives() {
+        assert_eq!(seen_through(verbosity_filter(LevelFilter::DEBUG)), ["reload_test"]);
+        assert_eq!(seen_through(vmodule_filter("debug").unwrap()), ["reload_test"]);
+        assert_eq!(
+            seen_through(vmodule_filter("debug,discv5=debug").unwrap()),
+            ["discv5::unit", "discv5::unit", "reload_test"]
+        );
+        assert!(vmodule_filter("reload_test=nonsense").is_err());
+    }
+
+    #[test]
+    fn an_empty_pattern_restores_the_initial_filter() {
+        let initial = EnvFilter::try_new("warn,reload_test=debug").unwrap();
+        let (filter, handle) = reload::Layer::new(initial);
+        install_log_handle(handle);
+
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        let subscriber = Registry::default().with(Targets(Arc::clone(&seen)).with_filter(filter));
+        tracing::subscriber::with_default(subscriber, || {
+            set_log_vmodule("error").unwrap();
+            emit();
+            set_log_vmodule("").unwrap();
+            emit();
+        });
+
+        // Under "error" nothing passes; the restored filter lets `reload_test` debug and the
+        // `discv5` warning through, exactly as it did before the first reload.
+        assert_eq!(*seen.lock().unwrap(), ["discv5::unit", "reload_test"]);
     }
 }
