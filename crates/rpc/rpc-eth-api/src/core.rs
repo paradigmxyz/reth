@@ -51,8 +51,7 @@ impl<T> FullEthApiServer for T where
 }
 
 /// Eth rpc interface: <https://ethereum.github.io/execution-apis/api-documentation>
-#[cfg_attr(not(feature = "client"), rpc(server, namespace = "eth"))]
-#[cfg_attr(feature = "client", rpc(server, client, namespace = "eth"))]
+#[rpc(server, namespace = "eth")]
 pub trait EthApi<
     TxReq: RpcObject,
     T: RpcObject,
@@ -263,8 +262,11 @@ pub trait EthApi<
     #[method(name = "fillTransaction")]
     async fn fill_transaction(&self, request: TxReq) -> RpcResult<FillTransaction<RawTx>>;
 
-    /// Simulate arbitrary number of transactions at an arbitrary blockchain index, with the
-    /// optionality of state overrides
+    /// Simulate transactions at an arbitrary blockchain index, with the optionality of state
+    /// overrides.
+    ///
+    /// The request is bounded by [`CallManyBudget`](reth_rpc_eth_types::utils::CallManyBudget):
+    /// its calls share the RPC gas cap.
     #[method(name = "callMany")]
     async fn call_many(
         &self,
@@ -451,7 +453,6 @@ pub trait EthApi<
     async fn block_access_list_raw(&self, block: BlockId) -> RpcResult<Option<Bytes>>;
 }
 
-#[async_trait::async_trait]
 impl<T>
     EthApiServer<
         RpcTxReq<T::NetworkTypes>,

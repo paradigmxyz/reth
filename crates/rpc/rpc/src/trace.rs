@@ -14,7 +14,6 @@ use alloy_rpc_types_trace::{
     parity::*,
     tracerequest::TraceCallRequest,
 };
-use async_trait::async_trait;
 use evm2_inspectors::{
     opcode::OpcodeGasInspector,
     storage::StorageInspector,
@@ -31,7 +30,7 @@ use reth_rpc_eth_api::{
     helpers::{LoadTransaction, Trace, TraceExt},
     FromEthApiError, RpcNodeCore,
 };
-use reth_rpc_eth_types::{error::EthApiError, EthConfig};
+use reth_rpc_eth_types::{error::EthApiError, utils::CallManyBudget, EthConfig};
 use reth_storage_api::{BlockNumReader, BlockReader};
 use reth_tasks::{cancel::is_cancelled, pool::BlockingTaskGuard};
 use reth_transaction_pool::{PoolPooledTx, PoolTransaction, TransactionPool};
@@ -161,6 +160,7 @@ where
         calls: Vec<(RpcTxReq<Eth::NetworkTypes>, HashSet<TraceType>)>,
         block_id: Option<BlockId>,
     ) -> Result<Vec<TraceResults>, Eth::Error> {
+        let mut budget = CallManyBudget::new(calls.len(), self.eth_api().call_gas_limit())?;
         let at = block_id.unwrap_or_default();
         let (evm_env, at) = self.eth_api().evm_env_at(at).await?;
 
@@ -174,19 +174,18 @@ where
                     if is_cancelled() {
                         return Err(EthApiError::InternalEthError.into())
                     }
-                    let (evm_env, tx_env) = eth_api.prepare_call_env(
+                    let (evm_env, mut tx_env) = eth_api.prepare_call_env(
                         evm_env.clone(),
                         call,
                         &mut db,
                         Default::default(),
                     )?;
+                    budget.admit(&mut tx_env)?;
                     let config = TracingInspectorConfig::from_parity_config(&trace_types);
-                    let (inspector, res) = eth_api.inspect(
-                        &mut db,
-                        evm_env,
-                        &tx_env,
-                        TracingInspector::new(config),
-                    )?;
+                    let (inspector, res) = eth_api
+                        .inspect(&mut db, evm_env, &tx_env, TracingInspector::new(config))
+                        .map_err(|err| budget.map_call_err(err))?;
+                    budget.charge(&res.result)?;
 
                     let trace_res = inspector
                         .into_parity_builder()
@@ -708,7 +707,6 @@ fn apply_trace_filter_pagination(
     None
 }
 
-#[async_trait]
 impl<Eth> TraceApiServer<RpcTxReq<Eth::NetworkTypes>> for TraceApi<Eth>
 where
     Eth: TraceExt,
@@ -727,7 +725,7 @@ where
         let _permit = self.acquire_trace_permit().await;
         let request =
             TraceCallRequest { call, trace_types, block_id, state_overrides, block_overrides };
-        Ok(Self::trace_call(self, request).await.map_err(Into::into)?)
+        Self::trace_call(self, request).await.map_err(Into::into)
     }
 
     /// Handler for `trace_callMany`
@@ -737,7 +735,7 @@ where
         block_id: Option<BlockId>,
     ) -> RpcResult<Vec<TraceResults>> {
         let _permit = self.acquire_trace_permit().await;
-        Ok(Self::trace_call_many(self, calls, block_id).await.map_err(Into::into)?)
+        Self::trace_call_many(self, calls, block_id).await.map_err(Into::into)
     }
 
     /// Handler for `trace_rawTransaction`
@@ -748,9 +746,7 @@ where
         block_id: Option<BlockId>,
     ) -> RpcResult<TraceResults> {
         let _permit = self.acquire_trace_permit().await;
-        Ok(Self::trace_raw_transaction(self, data, trace_types, block_id)
-            .await
-            .map_err(Into::into)?)
+        Self::trace_raw_transaction(self, data, trace_types, block_id).await.map_err(Into::into)
     }
 
     /// Handler for `trace_replayBlockTransactions`
@@ -760,9 +756,7 @@ where
         trace_types: HashSet<TraceType>,
     ) -> RpcResult<Option<Vec<TraceResultsWithTransactionHash>>> {
         let _permit = self.acquire_trace_permit().await;
-        Ok(Self::replay_block_transactions(self, block_id, trace_types)
-            .await
-            .map_err(Into::into)?)
+        Self::replay_block_transactions(self, block_id, trace_types).await.map_err(Into::into)
     }
 
     /// Handler for `trace_replayTransaction`
@@ -772,7 +766,7 @@ where
         trace_types: HashSet<TraceType>,
     ) -> RpcResult<Option<TraceResultsWithTransactionHash>> {
         let _permit = self.acquire_trace_permit().await;
-        Ok(Self::replay_transaction(self, transaction, trace_types).await.map_err(Into::into)?)
+        Self::replay_transaction(self, transaction, trace_types).await.map_err(Into::into)
     }
 
     /// Handler for `trace_block`
@@ -781,7 +775,7 @@ where
         block_id: BlockId,
     ) -> RpcResult<Option<Vec<LocalizedTransactionTrace>>> {
         let _permit = self.acquire_trace_permit().await;
-        Ok(Self::trace_block(self, block_id).await.map_err(Into::into)?)
+        Self::trace_block(self, block_id).await.map_err(Into::into)
     }
 
     /// Handler for `trace_filter`
@@ -791,7 +785,7 @@ where
     /// # Limitations
     /// This currently requires block filter fields, since reth does not have address indices yet.
     async fn trace_filter(&self, filter: TraceFilter) -> RpcResult<Vec<LocalizedTransactionTrace>> {
-        Ok(Self::trace_filter(self, filter).await.map_err(Into::into)?)
+        Self::trace_filter(self, filter).await.map_err(Into::into)
     }
 
     /// Returns transaction trace at given index.
@@ -802,9 +796,9 @@ where
         indices: Vec<Index>,
     ) -> RpcResult<Option<LocalizedTransactionTrace>> {
         let _permit = self.acquire_trace_permit().await;
-        Ok(Self::trace_get(self, hash, indices.into_iter().map(Into::into).collect())
+        Self::trace_get(self, hash, indices.into_iter().map(Into::into).collect())
             .await
-            .map_err(Into::into)?)
+            .map_err(Into::into)
     }
 
     /// Handler for `trace_transaction`
@@ -813,7 +807,7 @@ where
         hash: B256,
     ) -> RpcResult<Option<Vec<LocalizedTransactionTrace>>> {
         let _permit = self.acquire_trace_permit().await;
-        Ok(Self::trace_transaction(self, hash).await.map_err(Into::into)?)
+        Self::trace_transaction(self, hash).await.map_err(Into::into)
     }
 
     /// Handler for `trace_transactionOpcodeGas`
@@ -822,13 +816,13 @@ where
         tx_hash: B256,
     ) -> RpcResult<Option<TransactionOpcodeGas>> {
         let _permit = self.acquire_trace_permit().await;
-        Ok(Self::trace_transaction_opcode_gas(self, tx_hash).await.map_err(Into::into)?)
+        Self::trace_transaction_opcode_gas(self, tx_hash).await.map_err(Into::into)
     }
 
     /// Handler for `trace_blockOpcodeGas`
     async fn trace_block_opcode_gas(&self, block_id: BlockId) -> RpcResult<Option<BlockOpcodeGas>> {
         let _permit = self.acquire_trace_permit().await;
-        Ok(Self::trace_block_opcode_gas(self, block_id).await.map_err(Into::into)?)
+        Self::trace_block_opcode_gas(self, block_id).await.map_err(Into::into)
     }
 }
 
@@ -968,7 +962,7 @@ mod tests {
 
         let module = api.into_rpc();
         let (response, _) = module.raw_json_request(&request.to_string(), 1).await.unwrap();
-        let response: serde_json::Value = serde_json::from_str(response.get()).unwrap();
+        let response: serde_json::Value = serde_json::from_str(&response).unwrap();
         assert_eq!(response["result"], serde_json::to_value(latest).unwrap());
     }
 
@@ -1003,7 +997,7 @@ mod tests {
             "jsonrpc": "2.0", "id": 1, "method": "trace_filter", "params": [{"toBlock": "0x1"}],
         });
         let (response, _) = module.raw_json_request(&request.to_string(), 1).await.unwrap();
-        let response: serde_json::Value = serde_json::from_str(response.get()).unwrap();
+        let response: serde_json::Value = serde_json::from_str(&response).unwrap();
         assert_eq!(
             response["error"],
             serde_json::json!({
@@ -1090,7 +1084,7 @@ mod tests {
                 "jsonrpc": "2.0", "id": 1, "method": "trace_get", "params": [hash, indices],
             });
             let (response, _) = module.raw_json_request(&request.to_string(), 1).await.unwrap();
-            let response: serde_json::Value = serde_json::from_str(response.get()).unwrap();
+            let response: serde_json::Value = serde_json::from_str(&response).unwrap();
             assert!(response.get("error").is_none(), "{response}");
             assert_eq!(response["result"], serde_json::to_value(expected).unwrap());
         }
@@ -1119,7 +1113,7 @@ mod tests {
                 "params": [B256::with_last_byte(1), types],
             });
             let (response, _) = module.raw_json_request(&request.to_string(), 1).await.unwrap();
-            let response: serde_json::Value = serde_json::from_str(response.get()).unwrap();
+            let response: serde_json::Value = serde_json::from_str(&response).unwrap();
             assert_eq!(response, serde_json::json!({"jsonrpc": "2.0", "id": 1, "result": null}));
         }
     }
@@ -1182,7 +1176,7 @@ mod tests {
                 "params": [hash, types],
             });
             let (response, _) = module.raw_json_request(&request.to_string(), 1).await.unwrap();
-            let response: serde_json::Value = serde_json::from_str(response.get()).unwrap();
+            let response: serde_json::Value = serde_json::from_str(&response).unwrap();
             assert!(response.get("error").is_none(), "{response}");
             assert_eq!(response["result"]["transactionHash"], serde_json::json!(hash));
 

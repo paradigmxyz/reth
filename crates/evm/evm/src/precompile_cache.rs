@@ -132,6 +132,7 @@ where
         if let Some(entry) = self.get(input, spec) {
             return Ok(entry)
         }
+        // Copy the input before the precompile runs: it may be a range of the caller's memory.
         let input = Bytes::copy_from_slice(input);
         let output = Arc::new(OnceLock::new());
         in_flight.insert(input.clone(), Arc::clone(&output));
@@ -301,7 +302,7 @@ where
 
         let cacheable_input = message.input.len() <= MAX_PRECOMPILE_CACHE_INPUT_SIZE;
         let claimed = if cacheable_input {
-            match cache.get_or_claim(message.input.as_ref(), self.spec_id.clone()) {
+            match cache.get_or_claim(evm.message_input(message), self.spec_id.clone()) {
                 Ok(entry) => Err(entry),
                 Err(in_flight) => Ok(Some(in_flight)),
             }
@@ -672,7 +673,8 @@ mod tests {
         assert_eq!(output.bytes(), b"cached-input");
 
         let cache = cache_map.cache_for_address(address);
-        let entry = cache.get(message.input.as_ref(), SpecId::OSAKA).expect("cache entry exists");
+        let entry =
+            cache.get(evm.message_input(&message), SpecId::OSAKA).expect("cache entry exists");
         assert_eq!(entry.output.bytes(), b"cached-input");
         assert_eq!(entry.regular_gas_used, 18);
 
@@ -716,11 +718,11 @@ mod tests {
                 .execute(&mut evm, &message, &mut GasTracker::new(30_000))
                 .unwrap()
                 .unwrap();
-            assert_eq!(output.bytes(), message.input.as_ref());
+            assert_eq!(output.bytes(), evm.message_input(&message));
             assert_eq!(
                 cache
                     .cache_for_address(address)
-                    .get(message.input.as_ref(), SpecId::OSAKA)
+                    .get(evm.message_input(&message), SpecId::OSAKA)
                     .is_some(),
                 len == 2048
             );

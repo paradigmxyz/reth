@@ -8,8 +8,7 @@ use alloy_rpc_types_beacon::relay::{
 use jsonrpsee::proc_macros::rpc;
 
 /// Block validation rpc interface.
-#[cfg_attr(not(feature = "client"), rpc(server, namespace = "flashbots"))]
-#[cfg_attr(feature = "client", rpc(server, client, namespace = "flashbots"))]
+#[rpc(server, namespace = "flashbots")]
 pub trait BlockSubmissionValidationApi {
     /// A Request to validate a block submission.
     #[method(name = "validateBuilderSubmissionV1")]

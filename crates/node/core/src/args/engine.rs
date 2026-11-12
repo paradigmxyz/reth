@@ -38,7 +38,6 @@ pub struct DefaultEngineValues {
     sender_recovery_cache_enabled: bool,
     state_provider_metrics: bool,
     cross_block_cache_size: usize,
-    state_root_task_compare_updates: bool,
     accept_execution_requests_hash: bool,
     multiproof_chunk_size: usize,
     reserved_cpu_cores: usize,
@@ -140,12 +139,6 @@ impl DefaultEngineValues {
     /// Set the default cross-block cache size in MB
     pub const fn with_cross_block_cache_size(mut self, v: usize) -> Self {
         self.cross_block_cache_size = v;
-        self
-    }
-
-    /// Set whether to compare state root task updates by default
-    pub const fn with_state_root_task_compare_updates(mut self, v: bool) -> Self {
-        self.state_root_task_compare_updates = v;
         self
     }
 
@@ -282,7 +275,6 @@ impl Default for DefaultEngineValues {
             sender_recovery_cache_enabled: true,
             state_provider_metrics: false,
             cross_block_cache_size: DEFAULT_CROSS_BLOCK_CACHE_SIZE_MB,
-            state_root_task_compare_updates: false,
             accept_execution_requests_hash: false,
             multiproof_chunk_size: DEFAULT_MULTIPROOF_TASK_CHUNK_SIZE,
             reserved_cpu_cores: DEFAULT_RESERVED_CPU_CORES,
@@ -348,10 +340,21 @@ pub struct EngineArgs {
     )]
     pub num_state_masking_blocks: u64,
 
-    /// Configure the target number of blocks to keep in memory.
+    /// Configure how many of the most recent canonical blocks persistence leaves in memory.
+    ///
+    /// When more than `--engine.persistence-threshold` canonical blocks are held in memory, the
+    /// engine writes the canonical chain to disk up to `head - memory-block-buffer-target`. The
+    /// blocks above that height are kept only in memory, so a reorg of them does not unwind the
+    /// database. With state masking enabled, the `--engine.num-state-masking-blocks` blocks below
+    /// that height also stay in memory until a later cycle persists their state/trie updates.
+    ///
+    /// This is also the in-memory buffer that `--engine.persistence-backpressure-threshold` is
+    /// measured from.
     ///
     /// If omitted, this defaults to the lesser of `--engine.persistence-threshold` and the
-    /// configured default memory block buffer target.
+    /// configured default memory block buffer target. The value must not exceed
+    /// `--engine.persistence-threshold`, and with state masking enabled, its sum with
+    /// `--engine.num-state-masking-blocks` must be less than `--engine.persistence-threshold`.
     #[arg(long = "engine.memory-block-buffer-target")]
     pub memory_block_buffer_target: Option<u64>,
 
@@ -376,18 +379,6 @@ pub struct EngineArgs {
     /// lookup.
     #[arg(long = "engine.invalid-header-cache-hit-eviction-threshold", default_value_t = DefaultEngineValues::get_global().invalid_header_hit_eviction_threshold)]
     pub invalid_header_hit_eviction_threshold: u8,
-
-    /// CAUTION: This CLI flag has no effect anymore, use --engine.state-root-fallback if you
-    /// want to force synchronous state root computation
-    #[arg(long = "engine.legacy-state-root", default_value_t = false, hide = true)]
-    #[deprecated]
-    pub legacy_state_root_task_enabled: bool,
-
-    /// CAUTION: This CLI flag has no effect anymore, use --engine.disable-caching-and-prewarming
-    /// if you want to disable caching and prewarming
-    #[arg(long = "engine.caching-and-prewarming", default_value = "true", hide = true)]
-    #[deprecated]
-    pub caching_and_prewarming_enabled: bool,
 
     /// Disable state cache
     #[arg(long = "engine.disable-state-cache", default_value_t = DefaultEngineValues::get_global().state_cache_disabled)]
@@ -417,16 +408,6 @@ pub struct EngineArgs {
     )]
     pub sender_recovery_cache_enabled: bool,
 
-    /// CAUTION: This CLI flag has no effect anymore. The parallel sparse trie is always enabled.
-    #[deprecated]
-    #[arg(long = "engine.parallel-sparse-trie", default_value = "true", hide = true)]
-    pub parallel_sparse_trie_enabled: bool,
-
-    /// CAUTION: This CLI flag has no effect anymore. The parallel sparse trie is always enabled.
-    #[deprecated]
-    #[arg(long = "engine.disable-parallel-sparse-trie", default_value = "false", hide = true)]
-    pub parallel_sparse_trie_disabled: bool,
-
     /// Enable state provider latency metrics. This allows the engine to collect and report stats
     /// about how long state provider calls took during execution, but this does introduce slight
     /// overhead to state provider calls.
@@ -436,11 +417,6 @@ pub struct EngineArgs {
     /// Configure the size of cross-block cache in megabytes
     #[arg(long = "engine.cross-block-cache-size", default_value_t = DefaultEngineValues::get_global().cross_block_cache_size)]
     pub cross_block_cache_size: usize,
-
-    /// Enable comparing trie updates from the state root task to the trie updates from the regular
-    /// state root calculation.
-    #[arg(long = "engine.state-root-task-compare-updates", default_value_t = DefaultEngineValues::get_global().state_root_task_compare_updates)]
-    pub state_root_task_compare_updates: bool,
 
     /// Enables accepting requests hash instead of an array of requests in `engine_newPayloadV4`.
     #[arg(long = "engine.accept-execution-requests-hash", default_value_t = DefaultEngineValues::get_global().accept_execution_requests_hash)]
@@ -458,12 +434,6 @@ pub struct EngineArgs {
     /// Does not change CPU affinity. Explicit thread counts take precedence.
     #[arg(long = "cpu-cores", value_name = "COUNT")]
     pub cpu_cores: Option<NonZeroUsize>,
-
-    /// CAUTION: This CLI flag has no effect anymore, use --engine.disable-precompile-cache
-    /// if you want to disable precompile cache
-    #[arg(long = "engine.precompile-cache", default_value = "true", hide = true)]
-    #[deprecated]
-    pub precompile_cache_enabled: bool,
 
     /// Disable precompile cache
     #[arg(long = "engine.disable-precompile-cache", default_value_t = DefaultEngineValues::get_global().precompile_cache_disabled)]
@@ -620,7 +590,6 @@ pub struct EngineArgs {
     pub proof_jitter: Option<Duration>,
 }
 
-#[allow(deprecated)]
 impl Default for EngineArgs {
     fn default() -> Self {
         let DefaultEngineValues {
@@ -636,7 +605,6 @@ impl Default for EngineArgs {
             sender_recovery_cache_enabled,
             state_provider_metrics,
             cross_block_cache_size,
-            state_root_task_compare_updates,
             accept_execution_requests_hash,
             multiproof_chunk_size,
             reserved_cpu_cores,
@@ -664,22 +632,16 @@ impl Default for EngineArgs {
             memory_block_buffer_target: None,
             backfill_run_threshold,
             invalid_header_hit_eviction_threshold,
-            state_root_task_compare_updates,
-            legacy_state_root_task_enabled: false,
-            caching_and_prewarming_enabled: true,
             state_cache_disabled,
             prewarming_disabled,
             txpool_prewarming_enabled,
             sender_recovery_cache_enabled,
-            parallel_sparse_trie_enabled: true,
-            parallel_sparse_trie_disabled: false,
             state_provider_metrics,
             cross_block_cache_size,
             accept_execution_requests_hash,
             multiproof_chunk_size,
             reserved_cpu_cores,
             cpu_cores: None,
-            precompile_cache_enabled: true,
             precompile_cache_disabled,
             state_root_fallback,
             always_process_payload_attributes_on_canonical_head,
@@ -772,10 +734,6 @@ impl EngineArgs {
 
     /// Creates a [`TreeConfig`] from the engine arguments.
     pub fn tree_config(&self) -> TreeConfig {
-        #[allow(deprecated)]
-        if self.legacy_state_root_task_enabled {
-            tracing::warn!(target: "reth::cli", "--engine.legacy-state-root has no effect anymore, use --engine.state-root-fallback to force synchronous state root computation");
-        }
         let config = TreeConfig::default()
             // Clear the default window before applying overrides that may be smaller than it.
             .with_persistence_threshold(0)
@@ -789,7 +747,6 @@ impl EngineArgs {
             .without_prewarming(self.prewarming_disabled)
             .with_txpool_prewarming(self.txpool_prewarming_enabled)
             .with_state_provider_metrics(self.state_provider_metrics)
-            .with_always_compare_trie_updates(self.state_root_task_compare_updates)
             .with_cross_block_cache_size(self.cross_block_cache_size * 1024 * 1024)
             .with_multiproof_chunk_size(self.multiproof_chunk_size)
             .with_reserved_cpu_cores(self.reserved_cpu_cores)
@@ -989,7 +946,6 @@ mod tests {
     }
 
     #[test]
-    #[allow(deprecated)]
     fn engine_args() {
         let args = EngineArgs {
             persistence_threshold: 100,
@@ -998,23 +954,17 @@ mod tests {
             memory_block_buffer_target: Some(50),
             backfill_run_threshold: 100,
             invalid_header_hit_eviction_threshold: 7,
-            legacy_state_root_task_enabled: true,
-            caching_and_prewarming_enabled: true,
             state_cache_disabled: true,
             prewarming_disabled: true,
             // conflicts with --engine.disable-state-cache, covered by its own test below
             txpool_prewarming_enabled: false,
             sender_recovery_cache_enabled: true,
-            parallel_sparse_trie_enabled: true,
-            parallel_sparse_trie_disabled: false,
             state_provider_metrics: true,
             cross_block_cache_size: 256,
-            state_root_task_compare_updates: true,
             accept_execution_requests_hash: true,
             multiproof_chunk_size: 512,
             reserved_cpu_cores: 4,
             cpu_cores: Some(NonZeroUsize::new(8).unwrap()),
-            precompile_cache_enabled: true,
             precompile_cache_disabled: true,
             state_root_fallback: true,
             always_process_payload_attributes_on_canonical_head: true,
@@ -1049,14 +999,12 @@ mod tests {
             "100",
             "--engine.invalid-header-cache-hit-eviction-threshold",
             "7",
-            "--engine.legacy-state-root",
             "--engine.disable-state-cache",
             "--engine.disable-prewarming",
             "--engine.sender-recovery-cache",
             "--engine.state-provider-metrics",
             "--engine.cross-block-cache-size",
             "256",
-            "--engine.state-root-task-compare-updates",
             "--engine.accept-execution-requests-hash",
             "--engine.multiproof-chunk-size",
             "512",

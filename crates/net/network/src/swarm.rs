@@ -147,6 +147,7 @@ impl<N: NetworkPrimitives> Swarm<N> {
                 self.state.on_session_activated(SessionActivation {
                     peer: peer_id,
                     capabilities: capabilities.clone(),
+                    version,
                     status: status.clone(),
                     request_tx: messages.clone(),
                     timeout,
@@ -350,7 +351,9 @@ impl<N: NetworkPrimitives> Stream for Swarm<N> {
             }
 
             // poll all sessions
-            match this.sessions.poll(cx, |peer_id| this.state.peers().has_inbound_capacity(peer_id))
+            match this
+                .sessions
+                .poll(cx, |peer_id| this.state.peers().inbound_session_rejection(peer_id))
             {
                 Poll::Pending => {}
                 Poll::Ready(event) => {

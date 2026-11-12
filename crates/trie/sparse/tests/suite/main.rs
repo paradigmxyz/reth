@@ -255,6 +255,7 @@ sparse_trie_tests! {
     test_branch_collapse_multi_empty_subtries_blinded_remaining,
     test_subtrie_collapse_touched_with_blinded_sibling,
     test_subtrie_emptied_by_deletes_with_touched,
+    test_subtrie_removal_onto_blinded_sibling_requests_only_sibling_proof,
 
     // root
     test_root_empty_trie,
@@ -281,6 +282,8 @@ sparse_trie_tests! {
     test_prune_then_update_no_panic,
     test_prune_only_descends_into_branch_root,
     test_prune_handles_small_subtrie_root_nodes,
+    test_prune_extension_roots_and_upper_children,
+    test_prune_rehash_preserves_cached_extension_epoch,
 
     // clear
     test_clear_resets_trie_but_preserves_update_tracking,

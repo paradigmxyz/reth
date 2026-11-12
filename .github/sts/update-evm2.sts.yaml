@@ -1,0 +1,12 @@
+# Allow the Update evm2 workflow's publish job (running in the evm2-auto-bump environment) to
+# mint a short-lived token to push the evm2-auto-bump branch and open its pull request. The
+# job_workflow_ref check pins minting to update-evm2.yml as it exists on main; the update job,
+# where Amp runs, has no environment and so cannot mint one.
+subject: repo:paradigmxyz@97369466/reth@537233603:environment:evm2-auto-bump
+claim_pattern:
+  repository_id: '537233603'
+  event_name: '(schedule|workflow_dispatch)'
+  job_workflow_ref: paradigmxyz/reth/\.github/workflows/update-evm2\.yml@refs/heads/main
+permissions:
+  contents: write
+  pull_requests: write
