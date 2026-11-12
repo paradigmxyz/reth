@@ -85,8 +85,6 @@ use tracing::{instrument, Instrument};
 /// Default maximum connections allowed.
 const MAX_CONNECTIONS: u32 = 100;
 
-type Notif<'a> = Option<Cow<'a, JsonRawValue>>;
-
 /// JSON RPC server.
 pub struct Server<HttpMiddleware = Identity, RpcMiddleware = Identity> {
     listener: TcpListener,
@@ -941,7 +939,7 @@ where
     if is_single {
         if let Ok(req) = serde_json::from_slice::<Request<'_>>(body) {
             catch_call_panic(req.id(), || rpc_service.call(req)).await
-        } else if let Ok(notif) = deserialize_notification::<Notif>(body) {
+        } else if let Ok(notif) = deserialize_notification(body) {
             rpc_service.notification(notif).await
         } else {
             let (id, code) = prepare_error(body);
@@ -1011,7 +1009,7 @@ fn parse_batch_entry(call: &JsonRawValue) -> Result<BatchEntry<'_>, BatchEntryEr
 
     if let Ok(req) = serde_json::from_str(call.get()) {
         Ok(BatchEntry::Call(req))
-    } else if let Ok(notif) = deserialize_notification::<Notif>(call.get().as_bytes()) {
+    } else if let Ok(notif) = deserialize_notification(call.get().as_bytes()) {
         Ok(BatchEntry::Notification(notif))
     } else {
         let id = match serde_json::from_str::<jsonrpsee_types::InvalidRequest>(call.get()) {
@@ -1035,12 +1033,13 @@ struct ValidBatchEntry<'a> {
     #[serde(borrow)]
     method: Cow<'a, str>,
     #[serde(borrow)]
-    params: Option<Cow<'a, JsonRawValue>>,
+    params: Option<&'a JsonRawValue>,
 }
 
 impl<'a> From<ValidBatchEntry<'a>> for BatchEntry<'a> {
     fn from(entry: ValidBatchEntry<'a>) -> Self {
         let ValidBatchEntry { jsonrpc, id, method, params } = entry;
+        let params = params.map(Cow::Borrowed);
         match id {
             Some(id) => Self::Call(Request { jsonrpc, id, method, params }),
             None => Self::Notification(Notification::new(method, params)),
