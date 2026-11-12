@@ -2530,9 +2530,11 @@ mod tests {
         );
 
         updates_tx.send(StateRootMessage::FinishedStateUpdates).unwrap();
-        updates_tx.send(StateRootMessage::PrefetchProofs(Default::default())).unwrap();
+        // The hashing task returns after the finish marker, so this send fails if it already
+        // dropped the receiver.
+        let _ = updates_tx.send(StateRootMessage::PrefetchProofs(Default::default()));
 
-        // The hashing task forwards the finish marker and drops the hint that follows it.
+        // The hashing task forwards the finish marker and never forwards the hint after it.
         let wait_start = std::time::Instant::now();
         while task.updates.is_empty() {
             assert!(
