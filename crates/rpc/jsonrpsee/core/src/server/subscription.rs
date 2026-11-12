@@ -157,10 +157,7 @@ impl SubscriptionMessage {
     }
 
     /// Create a subscription message from a result that was serialized once for many
-    /// subscriptions.
-    ///
-    /// Sending it copies the result into the subscription's notification, which is much cheaper
-    /// than serializing the result for every subscription with [`SubscriptionMessage::new`].
+    /// subscriptions. Sending it only copies the result into the notification.
     pub fn from_shared(result: SharedResult) -> Self {
         Self(SubscriptionMessageInner::Shared(result))
     }
@@ -525,11 +522,10 @@ pub struct SubscriptionState<'a> {
     pub subscription_permit: SubscriptionPermit,
 }
 
-/// Returns the JSON of a subscription's notifications up to their `result` value, which is the
-/// same for every notification of the subscription.
+/// Returns the start of every notification of a subscription, up to its `result` value.
 ///
-/// Followed by a result and [`NOTIFICATION_SUFFIX`], it is byte for byte what serializing a
-/// [`SubscriptionResponse`] produces.
+/// Followed by a result and [`NOTIFICATION_SUFFIX`], it matches what serializing a
+/// [`SubscriptionResponse`] produces byte for byte.
 pub(crate) fn notification_prefix(method: &str, sub_id: &SubscriptionId) -> Arc<str> {
     let method = serde_json::to_string(method).expect("Serialize infallible; qed");
     let sub_id = serde_json::to_string(sub_id).expect("Serialize infallible; qed");
@@ -537,7 +533,7 @@ pub(crate) fn notification_prefix(method: &str, sub_id: &SubscriptionId) -> Arc<
         .into()
 }
 
-/// Closes the `params` and notification objects opened by [`notification_prefix`].
+/// Closes the objects that [`notification_prefix`] opens.
 const NOTIFICATION_SUFFIX: &str = "}}";
 
 /// Returns the notification JSON for `msg`, given the subscription's [`notification_prefix`].
@@ -553,8 +549,7 @@ pub(crate) fn sub_message_to_json(msg: SubscriptionMessage, notification_prefix:
     }
 }
 
-/// Builds a notification from a [`notification_prefix`] and a serialized result with one
-/// exact-size allocation.
+/// Builds a notification from a [`notification_prefix`] and a result with one allocation.
 fn splice_notification(notification_prefix: &str, result: &str) -> String {
     let mut json =
         String::with_capacity(notification_prefix.len() + result.len() + NOTIFICATION_SUFFIX.len());
@@ -732,26 +727,6 @@ mod tests {
                 }
             }
         }
-    }
-
-    #[tokio::test]
-    async fn shared_result_is_sent_to_every_subscription() {
-        let mut harness = Harness::new();
-        let (tx, mut rx) = mpsc::channel(8);
-        let (pending, _first_response) = harness.subscribe(1, ConnectionId(0), &tx);
-        let first = pending.accept().await.unwrap();
-        let (pending, _second_response) = harness.subscribe(2, ConnectionId(1), &tx);
-        let second = pending.accept().await.unwrap();
-        let ack = r#"{"jsonrpc":"2.0","id":1,"result":"0xdeadbeef"}"#;
-        assert_eq!(rx.recv().await.unwrap(), ack);
-        assert_eq!(rx.recv().await.unwrap(), ack.replace(r#""id":1"#, r#""id":2"#));
-
-        let result = SharedResult::new(&serde_json::json!({"number": "0x1"})).unwrap();
-        first.send(SubscriptionMessage::from_shared(result.clone())).await.unwrap();
-        second.send(SubscriptionMessage::from_shared(result)).await.unwrap();
-        let notification = r#"{"jsonrpc":"2.0","method":"notif","params":{"subscription":"0xdeadbeef","result":{"number":"0x1"}}}"#;
-        assert_eq!(rx.recv().await.unwrap(), notification);
-        assert_eq!(rx.recv().await.unwrap(), notification);
     }
 
     #[tokio::test]

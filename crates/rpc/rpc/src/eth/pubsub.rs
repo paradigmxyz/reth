@@ -1,6 +1,6 @@
 //! `eth_` `PubSub` RPC handler implementation
 
-use std::{sync::Arc, task::Poll};
+use std::sync::Arc;
 
 use alloy_primitives::TxHash;
 use alloy_rpc_types_eth::{
@@ -9,7 +9,7 @@ use alloy_rpc_types_eth::{
     },
     Filter,
 };
-use futures::{stream::BoxStream, StreamExt};
+use futures::{stream::BoxStream, FutureExt, StreamExt};
 use jsonrpsee::{
     server::{SharedResult, SubscriptionMessage},
     types::ErrorObject,
@@ -38,11 +38,12 @@ use tokio_stream::{
 };
 use tracing::{debug, error};
 
-/// Capacity of the shared feeds fed by canonical state notifications, in batches.
-///
-/// The items of one notification form one batch, so like the canonical state notification channel
-/// this lets a subscriber fall 256 notifications behind before it skips the oldest.
-const CANONICAL_FEED_CAPACITY: usize = 256;
+/// Capacity of the shared feeds with one item per block. Like the canonical state notification
+/// channel, it lets a subscriber fall 256 blocks behind before it skips the oldest.
+const PER_BLOCK_FEED_CAPACITY: usize = 256;
+
+/// Capacity of the shared logs feed, which holds more items because a block has many logs.
+const LOGS_FEED_CAPACITY: usize = 16 * 1024;
 
 /// `Eth` pubsub RPC implementation.
 ///
@@ -105,11 +106,11 @@ where
         #[allow(unreachable_patterns)]
         match kind {
             SubscriptionKind::NewHeads => {
-                let batches = self.subscribe_shared(
+                let results = self.subscribe_shared(
                     |feeds| &feeds.new_heads,
                     |pubsub| pubsub.new_headers_stream().boxed(),
                 );
-                pipe_from_shared(accepted_sink, batches).await;
+                pipe_from_shared(accepted_sink, results).await;
                 Ok(())
             }
             SubscriptionKind::Logs => {
@@ -123,11 +124,11 @@ where
                 };
                 if filter == Filter::default() {
                     // The default filter matches every log, so all its subscribers get the same.
-                    let batches = self.subscribe_shared(
+                    let results = self.subscribe_shared(
                         |feeds| &feeds.logs,
                         |pubsub| pubsub.log_stream(Filter::default()).boxed(),
                     );
-                    pipe_from_shared(accepted_sink, batches).await;
+                    pipe_from_shared(accepted_sink, results).await;
                     return Ok(())
                 }
                 pipe_from_stream(accepted_sink, self.log_stream(filter)).await
@@ -137,7 +138,7 @@ where
                     match params {
                         Params::Bool(true) => {
                             // full transaction objects requested
-                            let batches = self.subscribe_shared(
+                            let results = self.subscribe_shared(
                                 |feeds| &feeds.full_pending_transactions,
                                 |pubsub| {
                                     let converter = pubsub.inner.eth_api.converter();
@@ -161,7 +162,7 @@ where
                                         .boxed()
                                 },
                             );
-                            pipe_from_shared(accepted_sink, batches).await;
+                            pipe_from_shared(accepted_sink, results).await;
                             return Ok(())
                         }
                         Params::Bool(false) | Params::None => {
@@ -175,11 +176,11 @@ where
                     }
                 }
 
-                let batches = self.subscribe_shared(
+                let results = self.subscribe_shared(
                     |feeds| &feeds.pending_transaction_hashes,
                     |pubsub| pubsub.pending_transaction_hashes_stream().boxed(),
                 );
-                pipe_from_shared(accepted_sink, batches).await;
+                pipe_from_shared(accepted_sink, results).await;
                 Ok(())
             }
             SubscriptionKind::Syncing => {
@@ -249,7 +250,7 @@ where
 
                 if filter.transaction_hashes.as_ref().is_none_or(Vec::is_empty) {
                     // Without hashes every receipt matches, so all such subscribers get the same.
-                    let batches = self.subscribe_shared(
+                    let results = self.subscribe_shared(
                         |feeds| &feeds.transaction_receipts,
                         |pubsub| {
                             pubsub
@@ -259,7 +260,7 @@ where
                                 .boxed()
                         },
                     );
-                    pipe_from_shared(accepted_sink, batches).await;
+                    pipe_from_shared(accepted_sink, results).await;
                     return Ok(())
                 }
 
@@ -275,17 +276,25 @@ where
 
     /// Subscribes to the shared feed that `feed` selects, starting a producer over the stream that
     /// `items` returns if the feed has none.
-    fn subscribe_shared<T: Serialize + Send + 'static>(
+    fn subscribe_shared<T: Serialize + 'static>(
         &self,
         feed: fn(&SharedFeeds) -> &SharedFeed,
         items: for<'a> fn(&'a Self) -> BoxStream<'a, T>,
-    ) -> broadcast::Receiver<SharedBatch> {
-        feed(&self.inner.feeds).subscribe(|sender| {
+    ) -> broadcast::Receiver<SharedResult> {
+        let (receiver, sender) = feed(&self.inner.feeds).subscribe();
+        if let Some(sender) = sender {
             let pubsub = self.clone();
-            self.inner.subscription_task_spawner.spawn_task(async move {
-                feed(&pubsub.inner.feeds).produce(sender, items(&pubsub)).await
-            });
-        })
+            let mut producer =
+                Box::pin(
+                    async move { feed(&pubsub.inner.feeds).produce(sender, items(&pubsub)).await },
+                );
+            // The first poll subscribes the producer to its source, so it misses nothing that is
+            // published before the spawned task first runs.
+            if producer.as_mut().now_or_never().is_none() {
+                self.inner.subscription_task_spawner.spawn_task(producer);
+            }
+        }
+        receiver
     }
 }
 
@@ -365,25 +374,28 @@ where
 }
 
 /// Sends the notifications of a shared feed to the subscription sink.
-async fn pipe_from_shared(sink: SubscriptionSink, mut batches: broadcast::Receiver<SharedBatch>) {
-    loop {
-        let batch = tokio::select! {
-            _ = sink.closed() => break,
-            batch = batches.recv() => match batch {
-                Ok(batch) => batch,
+async fn pipe_from_shared(sink: SubscriptionSink, mut results: broadcast::Receiver<SharedResult>) {
+    let forward = async {
+        loop {
+            match results.recv().await {
+                Ok(result) => {
+                    if sink.send(SubscriptionMessage::from_shared(result)).await.is_err() {
+                        break
+                    }
+                }
                 Err(RecvError::Lagged(skipped)) => {
-                    debug!(target: "rpc", skipped, "subscription lagging behind its shared feed");
-                    continue
+                    debug!(target: "rpc", skipped, "subscription lagging behind its shared feed")
                 }
                 // the feed ended
                 Err(RecvError::Closed) => break,
-            },
-        };
-        for result in batch.iter() {
-            if sink.send(SubscriptionMessage::from_shared(result.clone())).await.is_err() {
-                return
             }
         }
+    };
+    // Also watched while a send waits for room, so an unsubscribed task drops its receiver and the
+    // feed can stop.
+    tokio::select! {
+        _ = sink.closed() => {}
+        _ = forward => {}
     }
 }
 
@@ -447,11 +459,7 @@ where
     }
 }
 
-/// Notifications that a shared feed serialized once for all of its subscribers.
-type SharedBatch = Arc<[SharedResult]>;
-
 /// Feeds of the subscriptions whose notifications are the same for every subscriber.
-#[derive(Debug)]
 struct SharedFeeds {
     /// `newHeads`.
     new_heads: SharedFeed,
@@ -468,13 +476,12 @@ struct SharedFeeds {
 impl Default for SharedFeeds {
     fn default() -> Self {
         Self {
-            new_heads: SharedFeed::new(CANONICAL_FEED_CAPACITY),
-            logs: SharedFeed::new(CANONICAL_FEED_CAPACITY),
-            // The transactions queued at the pool listener form one batch, so a subscriber skips
-            // transactions no earlier than its own pool listener used to drop them.
+            new_heads: SharedFeed::new(PER_BLOCK_FEED_CAPACITY),
+            logs: SharedFeed::new(LOGS_FEED_CAPACITY),
+            // As many transactions as a subscriber's own pool listener used to buffer.
             full_pending_transactions: SharedFeed::new(NEW_TX_LISTENER_BUFFER_SIZE),
             pending_transaction_hashes: SharedFeed::new(PENDING_TX_LISTENER_BUFFER_SIZE),
-            transaction_receipts: SharedFeed::new(CANONICAL_FEED_CAPACITY),
+            transaction_receipts: SharedFeed::new(PER_BLOCK_FEED_CAPACITY),
         }
     }
 }
@@ -482,17 +489,16 @@ impl Default for SharedFeeds {
 /// Serializes the notifications of one subscription kind once and broadcasts them to all of its
 /// subscribers.
 ///
-/// The producer task starts with the first subscriber and stops when the last one leaves, so
-/// nothing is converted or serialized while the kind has no subscribers.
-#[derive(Debug)]
+/// The producer starts with the first subscriber and stops when the last one leaves, so nothing
+/// is converted or serialized while the kind has no subscribers.
 struct SharedFeed {
-    /// Capacity of the broadcast channel, in batches.
+    /// Capacity of the broadcast channel.
     capacity: usize,
     /// The running producer's sender, if any.
     ///
     /// The producer holds the only strong sender, so if it dies its subscriptions end and the
     /// next subscriber starts a new one.
-    sender: Mutex<Option<broadcast::WeakSender<SharedBatch>>>,
+    sender: Mutex<Option<broadcast::WeakSender<SharedResult>>>,
 }
 
 impl SharedFeed {
@@ -501,30 +507,27 @@ impl SharedFeed {
         Self { capacity, sender: Mutex::new(None) }
     }
 
-    /// Subscribes to the feed. If no producer is running, `start` must run [`Self::produce`] with
-    /// the given sender.
+    /// Subscribes to the feed. If no producer is running, also returns the sender that a new one
+    /// must [produce](Self::produce) with.
     fn subscribe(
         &self,
-        start: impl FnOnce(broadcast::Sender<SharedBatch>),
-    ) -> broadcast::Receiver<SharedBatch> {
+    ) -> (broadcast::Receiver<SharedResult>, Option<broadcast::Sender<SharedResult>>) {
         let mut slot = self.sender.lock();
         if let Some(sender) = slot.as_ref().and_then(broadcast::WeakSender::upgrade) {
-            return sender.subscribe()
+            return (sender.subscribe(), None)
         }
         let (sender, receiver) = broadcast::channel(self.capacity);
         *slot = Some(sender.downgrade());
-        start(sender);
-        receiver
+        (receiver, Some(sender))
     }
 
     /// Serializes the items of `items` once and broadcasts them until the feed has no subscribers
     /// left or `items` ends.
-    async fn produce<T: Serialize + Send>(
+    async fn produce<T: Serialize>(
         &self,
-        sender: broadcast::Sender<SharedBatch>,
-        items: BoxStream<'_, T>,
+        sender: broadcast::Sender<SharedResult>,
+        mut items: BoxStream<'_, T>,
     ) {
-        let mut items = items.fuse();
         loop {
             tokio::select! {
                 _ = sender.closed() => {
@@ -539,18 +542,13 @@ impl SharedFeed {
                         *self.sender.lock() = None;
                         break
                     };
-                    // Items that are ready together, such as the logs of one block, share one slot
-                    // of the channel, so its capacity counts what the source channel counts.
-                    let mut batch = Vec::new();
-                    push_serialized(&mut batch, &item);
-                    while let Poll::Ready(Some(item)) = futures::poll!(items.next()) {
-                        push_serialized(&mut batch, &item);
-                    }
-                    if !batch.is_empty() &&
-                        sender.send(batch.into()).is_err() &&
-                        self.stop_if_unused(&sender)
-                    {
-                        break
+                    match SharedResult::new(&item) {
+                        Ok(result) => {
+                            if sender.send(result).is_err() && self.stop_if_unused(&sender) {
+                                break
+                            }
+                        }
+                        Err(err) => error!(target: "rpc", %err, "Failed to serialize subscription item"),
                     }
                 }
             }
@@ -563,21 +561,13 @@ impl SharedFeed {
     ///
     /// Subscribing holds the same lock, so a new subscriber either joins before this check or
     /// starts a new producer after it.
-    fn stop_if_unused(&self, sender: &broadcast::Sender<SharedBatch>) -> bool {
+    fn stop_if_unused(&self, sender: &broadcast::Sender<SharedResult>) -> bool {
         let mut slot = self.sender.lock();
         if sender.receiver_count() > 0 {
             return false
         }
         *slot = None;
         true
-    }
-}
-
-/// Serializes `item` into `batch`, logging and skipping it if it can't be serialized.
-fn push_serialized<T: Serialize>(batch: &mut Vec<SharedResult>, item: &T) {
-    match SharedResult::new(item) {
-        Ok(result) => batch.push(result),
-        Err(err) => error!(target: "rpc", %err, "Failed to serialize subscription item"),
     }
 }
 
@@ -613,6 +603,9 @@ mod tests {
 
     /// How long a test waits for a notification or a feed to change.
     const TIMEOUT: Duration = Duration::from_secs(5);
+
+    /// Capacity of a test subscription's connection channel.
+    const NOTIFICATION_BUFFER: usize = 16;
 
     fn test_provider() -> TestProvider {
         BlockchainProvider::with_latest(create_test_provider_factory(), SealedHeader::default())
@@ -673,7 +666,8 @@ mod tests {
     ) -> (SubscriptionId<'static>, mpsc::Receiver<String>) {
         let request =
             format!(r#"{{"jsonrpc":"2.0","id":1,"method":"eth_subscribe","params":{params}}}"#);
-        let (response, notifications) = module.raw_json_request(&request, 16).await.unwrap();
+        let (response, notifications) =
+            module.raw_json_request(&request, NOTIFICATION_BUFFER).await.unwrap();
         let response: Value = serde_json::from_str(&response).unwrap();
         let id = response["result"].as_u64().unwrap_or_else(|| panic!("{response}"));
         (SubscriptionId::Num(id), notifications)
@@ -707,12 +701,7 @@ mod tests {
         feed.sender.lock().as_ref()?.upgrade().map(|sender| sender.receiver_count())
     }
 
-    /// Waits until each feed has a running producer with the given number of subscribers, and the
-    /// producer has subscribed to its source.
-    ///
-    /// Producers are spawned by the subscription tasks and subscribe to their source when first
-    /// polled. On a current-thread runtime a yielding test runs again only after all other ready
-    /// tasks ran.
+    /// Waits until each feed has a running producer with the given number of subscribers.
     async fn wait_for_producers(feeds: &[(&SharedFeed, usize)]) {
         tokio::time::timeout(TIMEOUT, async {
             while !feeds.iter().all(|(feed, count)| feed_subscribers(feed) == Some(*count)) {
@@ -721,7 +710,17 @@ mod tests {
         })
         .await
         .unwrap();
-        tokio::task::yield_now().await;
+    }
+
+    /// Waits until the producer behind `sender` has exited.
+    async fn wait_until_stopped(sender: &broadcast::WeakSender<SharedResult>) {
+        tokio::time::timeout(TIMEOUT, async {
+            while sender.upgrade().is_some() {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
     }
 
     #[tokio::test]
@@ -844,19 +843,11 @@ mod tests {
         wait_for_producers(&[(feed, 1)]).await;
         commit(&provider, chain_with_logs(3));
         next_notification(&mut second).await;
-        let running = feed.sender.lock().as_ref().and_then(broadcast::WeakSender::upgrade).unwrap();
-        assert!(running.same_channel(&producer.upgrade().unwrap()));
-        drop(running);
+        assert!(producer.upgrade().is_some());
 
         // It stops when the last one leaves.
         unsubscribe(&module, &second_id).await;
-        tokio::time::timeout(TIMEOUT, async {
-            while producer.upgrade().is_some() {
-                tokio::task::yield_now().await;
-            }
-        })
-        .await
-        .unwrap();
+        wait_until_stopped(&producer).await;
         assert!(feed.sender.lock().is_none());
 
         // The next subscriber starts a new one.
@@ -868,7 +859,7 @@ mod tests {
 
     #[tokio::test]
     async fn lagging_subscriber_skips_oldest_notifications() {
-        const BLOCKS: u64 = CANONICAL_FEED_CAPACITY as u64 + 64;
+        const BLOCKS: u64 = PER_BLOCK_FEED_CAPACITY as u64 + 64;
 
         let provider = test_provider();
         let pubsub = test_pubsub(provider.clone(), testing_pool());
@@ -893,5 +884,38 @@ mod tests {
         }
         assert!(received.len() < BLOCKS as usize, "nothing was skipped: {received:?}");
         assert!(received.is_sorted_by(|a, b| a < b), "{received:?}");
+    }
+
+    #[tokio::test]
+    async fn new_producer_misses_nothing_published_before_it_runs() {
+        let provider = test_provider();
+        let pubsub = test_pubsub(provider.clone(), testing_pool());
+        let mut results = pubsub.subscribe_shared(
+            |feeds| &feeds.new_heads,
+            |pubsub| pubsub.new_headers_stream().boxed(),
+        );
+
+        // Published before the spawned producer task first runs.
+        commit(&provider, chain_with_logs(1));
+        tokio::time::timeout(TIMEOUT, results.recv()).await.unwrap().unwrap();
+    }
+
+    #[tokio::test]
+    async fn unsubscribing_while_a_send_waits_stops_the_feed() {
+        let provider = test_provider();
+        let pubsub = test_pubsub(provider.clone(), testing_pool());
+        let module = pubsub.clone().into_rpc().remove_context();
+        let feed = &pubsub.inner.feeds.new_heads;
+        let (id, _notifications) = subscribe(&module, r#"["newHeads"]"#).await;
+        wait_for_producers(&[(feed, 1)]).await;
+        let producer = feed.sender.lock().clone().unwrap();
+
+        // The test doesn't read, so the subscription task ends up waiting for room to send.
+        for number in 0..=NOTIFICATION_BUFFER as u64 {
+            commit(&provider, chain_with_logs(number));
+            tokio::task::yield_now().await;
+        }
+        unsubscribe(&module, &id).await;
+        wait_until_stopped(&producer).await;
     }
 }

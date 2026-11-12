@@ -101,7 +101,6 @@ reth-storage-overlay.workspace = true
 rand.workspace = true
 
 jsonrpsee = { workspace = true, features = ["server"] }
-criterion.workspace = true
 
 [features]
 js-tracer = [
@@ -121,7 +120,3 @@ account-ext = [
     "reth-execution-types/account-ext",
     "reth-trie-common/account-ext",
 ]
-
-[[bench]]
-name = "pubsub_fanout"
-harness = false
