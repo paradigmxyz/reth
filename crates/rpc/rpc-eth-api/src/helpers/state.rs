@@ -182,6 +182,7 @@ pub trait EthState: LoadState + SpawnBlocking {
                 .map_err(EthApiError::Internal)?;
 
             let block_id = block_id.unwrap_or_default();
+            self.ensure_not_syncing()?;
             self.ensure_within_proof_window(block_id)?;
 
             self.spawn_blocking_io_with_state(block_id, move |this, state| {
@@ -233,6 +234,7 @@ pub trait EthState: LoadState + SpawnBlocking {
                 .map_err(EthApiError::Internal)?;
 
             let block_id = block_id.unwrap_or_default();
+            self.ensure_not_syncing()?;
             self.ensure_within_proof_window(block_id)?;
 
             self.spawn_blocking_io_with_state(block_id, move |this, state| {
@@ -655,7 +657,9 @@ pub trait LoadState:
     ///
     /// A pipeline run commits executed state before it advances the node's head, so until it
     /// finishes, proofs and witnesses don't match the block they are requested for. Call this
-    /// after the state was opened, because the node can start syncing before that.
+    /// both before and after the state is opened. The state is a snapshot taken when it is
+    /// opened, so a check only afterwards misses a sync that ended in between, and a check only
+    /// before misses one that started in between.
     fn ensure_not_syncing(&self) -> Result<(), Self::Error> {
         if self.network().is_syncing() {
             return Err(EthApiError::NodeSyncing.into())
