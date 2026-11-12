@@ -39,7 +39,8 @@ impl LogFormat {
     ///
     /// # Environment
     /// * `RUST_LOG_THREAD_IDS` - Set to any value other than `0` to include the emitting thread's
-    ///   ID in JSON and terminal output. Thread IDs are omitted when it is unset.
+    ///   ID in log output. Thread IDs are omitted when it is unset. JSON and terminal output show
+    ///   the Rust [`std::thread::ThreadId`], while logfmt output shows the OS thread ID.
     pub fn apply<F>(
         &self,
         filter: F,
@@ -71,7 +72,7 @@ impl LogFormat {
                 }
             }
             Self::LogFmt => {
-                let layer = tracing_logfmt::builder().layer();
+                let layer = tracing_logfmt::builder().with_thread_ids(thread_ids).layer();
                 if let Some(writer) = file_writer {
                     layer.with_writer(writer).with_filter(filter).boxed()
                 } else {
