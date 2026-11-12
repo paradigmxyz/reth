@@ -6,7 +6,7 @@ use reth_db::static_file::iter_static_files;
 use reth_static_file_types::StaticFileSegment;
 use serde::{Deserialize, Serialize};
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, HashMap},
     io::Read,
     path::{Component, Path, PathBuf},
 };
@@ -156,7 +156,7 @@ pub struct ArchiveSet {
 }
 
 /// Expected metadata for one extracted plain file.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct OutputFileChecksum {
     /// Relative path under the target datadir where this file is extracted.
     pub path: String,
@@ -700,6 +700,9 @@ pub async fn fetch_manifest(manifest_url: &str) -> Result<SnapshotManifest> {
 /// manifest is not packaged again: its source files are hashed and must match the previous
 /// manifest's `chunk_output_files`, and the new manifest points `chunk_files` at the
 /// previously published archive. A mismatch is an error, since sealed history must not change.
+/// Likewise, a RocksDB SST file whose path and checksum match an SST archive in the previous
+/// manifest is not packaged again and points at the previously published archive. SST files
+/// that are new or changed are packaged, since compaction replaces them between snapshots.
 pub fn generate_manifest(
     source_datadir: &Path,
     output_dir: &Path,
@@ -888,7 +891,7 @@ pub fn generate_manifest(
 
     let rocksdb_files = rocksdb_source_files(source_datadir)?;
     if !rocksdb_files.is_empty() {
-        let archives = package_rocksdb_archives(output_dir, rocksdb_files)?;
+        let archives = package_rocksdb_archives(output_dir, rocksdb_files, previous)?;
         info!(target: "reth::cli",
             archives = archives.len(),
             size = %super::DownloadProgress::format_size(
@@ -1080,19 +1083,48 @@ fn package_single_component(
 /// SST archives are written to `rocksdb/{file_stem}-{blake3}.tar.zst`, so an unchanged SST gets
 /// the same archive name in every snapshot and publishers can upload it once. The file stem
 /// keeps the final path segment unique, since downloads are cached by that segment.
+///
+/// An SST file that matches a single-file archive in the `previous` manifest's RocksDB indices is
+/// not packaged; its archive entry points at the previously published archive instead.
 fn package_rocksdb_archives(
     output_dir: &Path,
     files: Vec<PlannedFile>,
+    previous: Option<&SnapshotManifest>,
 ) -> Result<Vec<SingleArchive>> {
     let (sst_files, other_files): (Vec<_>, Vec<_>) = files
         .into_iter()
         .partition(|file| file.relative_path.extension().is_some_and(|ext| ext == "sst"));
+
+    // Published SST archives by the file they extract, with absolute URLs.
+    let mut published = HashMap::new();
+    if let Some(previous) = previous &&
+        let Some(ComponentManifest::Files(set)) =
+            previous.component(SnapshotComponentType::RocksdbIndices)
+    {
+        for archive in &set.archives {
+            if let [output] = archive.output_files.as_slice() {
+                published.insert(
+                    output.clone(),
+                    SingleArchive {
+                        file: resolve_archive_url(previous.base_url_or_empty(), &archive.file),
+                        ..archive.clone()
+                    },
+                );
+            }
+        }
+    }
 
     let sst_dir = output_dir.join("rocksdb");
     std::fs::create_dir_all(&sst_dir)?;
     let mut archives = sst_files
         .into_par_iter()
         .map(|planned| -> Result<SingleArchive> {
+            if !published.is_empty() &&
+                let Some(archive) = published.get(&hash_planned_file(&planned)?)
+            {
+                return Ok(archive.clone());
+            }
+
             let stem = planned
                 .relative_path
                 .file_stem()
@@ -1117,7 +1149,8 @@ fn package_rocksdb_archives(
             })
         })
         .collect::<Result<Vec<_>>>()?;
-    archives.sort_unstable_by(|a, b| a.file.cmp(&b.file));
+    // Reused archives are absolute URLs, so order by the SST each archive extracts.
+    archives.sort_unstable_by(|a, b| a.output_files[0].path.cmp(&b.output_files[0].path));
 
     if !other_files.is_empty() {
         let file = "rocksdb_indices.tar.zst";
@@ -1140,18 +1173,18 @@ fn write_chunk_archive(path: &Path, source_files: &[PathBuf]) -> Result<Vec<Outp
 
 /// Computes the output checksums a chunk archive of these files would record, without packaging.
 fn hash_chunk_files(source_files: &[PathBuf]) -> Result<Vec<OutputFileChecksum>> {
-    chunk_planned_files(source_files)?
-        .into_iter()
-        .map(|planned| {
-            let mut reader = HashingReader::new(reth_fs_util::open(&planned.source_path)?);
-            std::io::copy(&mut reader, &mut std::io::sink())?;
-            Ok(OutputFileChecksum {
-                path: planned.relative_path.to_string_lossy().to_string(),
-                size: reader.bytes_read,
-                blake3: reader.finalize(),
-            })
-        })
-        .collect()
+    chunk_planned_files(source_files)?.iter().map(hash_planned_file).collect()
+}
+
+/// Computes the output checksum an archive would record for this file, without packaging.
+fn hash_planned_file(planned: &PlannedFile) -> Result<OutputFileChecksum> {
+    let mut reader = HashingReader::new(reth_fs_util::open(&planned.source_path)?);
+    std::io::copy(&mut reader, &mut std::io::sink())?;
+    Ok(OutputFileChecksum {
+        path: planned.relative_path.to_string_lossy().to_string(),
+        size: reader.bytes_read,
+        blake3: reader.finalize(),
+    })
 }
 
 fn chunk_planned_files(source_files: &[PathBuf]) -> Result<Vec<PlannedFile>> {
@@ -1393,6 +1426,86 @@ mod tests {
         assert_eq!(urls.len(), 1);
         assert_eq!(urls[0], "https://example.com/rocksdb_indices.tar.zst");
         assert_eq!(m.size_for_distance(SnapshotComponentType::RocksdbIndices, Some(10)), 777);
+    }
+
+    #[test]
+    fn generate_manifest_reuses_unchanged_rocksdb_ssts_from_previous_manifest() {
+        let source = tempdir().unwrap();
+        let db_dir = source.path().join("db");
+        std::fs::create_dir_all(&db_dir).unwrap();
+        std::fs::write(db_dir.join("mdbx.dat"), b"state-data").unwrap();
+        let rocksdb_dir = source.path().join("rocksdb");
+        std::fs::create_dir_all(&rocksdb_dir).unwrap();
+        std::fs::write(rocksdb_dir.join("CURRENT"), b"MANIFEST-000001").unwrap();
+        std::fs::write(rocksdb_dir.join("000007.sst"), b"sst-7").unwrap();
+        std::fs::write(rocksdb_dir.join("000009.sst"), b"sst-9").unwrap();
+        let hash = |contents: &[u8]| blake3::hash(contents).to_hex().to_string();
+        let rocksdb_archives = |manifest: &SnapshotManifest| {
+            let Some(ComponentManifest::Files(set)) =
+                manifest.component(SnapshotComponentType::RocksdbIndices)
+            else {
+                panic!("rocksdb indices should be an archive set")
+            };
+            set.archives.clone()
+        };
+
+        let previous = generate_manifest(
+            source.path(),
+            tempdir().unwrap().path(),
+            Some("https://example.com/previous"),
+            0,
+            1,
+            500_000,
+            None,
+        )
+        .unwrap();
+        let previous_archives = rocksdb_archives(&previous);
+
+        // 000007 is unchanged, 000009 is rewritten in place, and 000011 is new.
+        std::fs::write(rocksdb_dir.join("000009.sst"), b"sst-9-compacted").unwrap();
+        std::fs::write(rocksdb_dir.join("000011.sst"), b"sst-11").unwrap();
+        let output = tempdir().unwrap();
+        let mut next =
+            generate_manifest(source.path(), output.path(), None, 0, 1, 500_000, Some(&previous))
+                .unwrap();
+        let archives = rocksdb_archives(&next);
+
+        let reused_sst = format!("rocksdb/000007-{}.tar.zst", hash(b"sst-7"));
+        let files = archives.iter().map(|archive| archive.file.as_str()).collect::<Vec<_>>();
+        assert_eq!(
+            files,
+            [
+                format!("https://example.com/previous/{reused_sst}"),
+                format!("rocksdb/000009-{}.tar.zst", hash(b"sst-9-compacted")),
+                format!("rocksdb/000011-{}.tar.zst", hash(b"sst-11")),
+                "rocksdb_indices.tar.zst".to_string(),
+            ]
+        );
+        assert_eq!(archives[0].size, previous_archives[0].size);
+        assert_eq!(archives[0].output_files, previous_archives[0].output_files);
+        assert!(!output.path().join(&reused_sst).exists());
+        for archive in &archives[1..] {
+            assert!(output.path().join(&archive.file).exists(), "{}", archive.file);
+        }
+
+        // An archive reused from an older manifest keeps its absolute URL in later manifests.
+        next.base_url = Some("https://example.com/next".to_string());
+        let later = generate_manifest(
+            source.path(),
+            tempdir().unwrap().path(),
+            None,
+            0,
+            1,
+            500_000,
+            Some(&next),
+        )
+        .unwrap();
+        let later_archives = rocksdb_archives(&later);
+        assert_eq!(later_archives[0].file, format!("https://example.com/previous/{reused_sst}"));
+        assert_eq!(
+            later_archives[2].file,
+            format!("https://example.com/next/rocksdb/000011-{}.tar.zst", hash(b"sst-11"))
+        );
     }
 
     #[test]

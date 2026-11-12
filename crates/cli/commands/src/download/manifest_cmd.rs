@@ -47,7 +47,8 @@ pub struct SnapshotManifestCommand {
     ///
     /// Chunks sealed in both snapshots are hashed against it instead of being packaged again,
     /// and the new manifest references their published archives. Fails if any sealed chunk's
-    /// files differ from the previous manifest.
+    /// files differ from the previous manifest. RocksDB SST files that match an archive in it are
+    /// reused the same way; new or changed SST files are packaged.
     #[arg(long)]
     previous_manifest: Option<PathBuf>,
 }
