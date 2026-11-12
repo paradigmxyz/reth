@@ -1073,6 +1073,9 @@ impl Discv4Service {
     }
 
     /// Callback invoked when we receive a pong from the peer.
+    ///
+    /// The pong only proves the endpoint that was pinged, so the entry is left untouched unless
+    /// `record` is its stored endpoint (IP and UDP port).
     fn update_on_pong(&mut self, record: NodeRecord, mut last_enr_seq: Option<u64>) {
         if record.id == *self.local_peer_id() {
             return
@@ -1089,7 +1092,9 @@ impl Discv4Service {
 
         let key = kad_key(record.id);
         match self.kbuckets.entry(&key) {
-            kbucket::Entry::Present(mut entry, old_status) => {
+            kbucket::Entry::Present(mut entry, old_status)
+                if entry.value().record.udp_addr() == record.udp_addr() =>
+            {
                 // endpoint is now proven
                 entry.value_mut().establish_proof();
                 entry.value_mut().update_with_enr(last_enr_seq);
@@ -1105,7 +1110,9 @@ impl Discv4Service {
                     }
                 }
             }
-            kbucket::Entry::Pending(mut entry, mut status) => {
+            kbucket::Entry::Pending(mut entry, mut status)
+                if entry.value().record.udp_addr() == record.udp_addr() =>
+            {
                 // endpoint is now proven
                 entry.value_mut().establish_proof();
                 entry.value_mut().update_with_enr(last_enr_seq);
@@ -1122,6 +1129,7 @@ impl Discv4Service {
                     }
                 }
             }
+            // A pong from another endpoint proves nothing about the stored one.
             _ => {}
         };
     }
@@ -3680,6 +3688,47 @@ mod tests {
             echo: echo_hash,
             expire: service.ping_expiration(),
             enr_sq: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn test_pong_from_other_endpoint_does_not_prove_stored_endpoint() {
+        let (_discv4, mut service) = create_discv4().await;
+        let mut rng = rand::rng();
+
+        // Neither another IP nor another UDP port on the stored IP is the stored endpoint.
+        for other in ["127.0.0.2:30303", "127.0.0.1:30304"] {
+            let record = NodeRecord::new("127.0.0.1:30303".parse().unwrap(), PeerId::random());
+            let other = NodeRecord::new(other.parse().unwrap(), record.id);
+            let ping = Ping {
+                from: record.into(),
+                to: service.local_node_record.into(),
+                expire: service.ping_expiration(),
+                enr_sq: None,
+            };
+
+            // Both ping queues are full, so the initial ping to the new entry is dropped.
+            for _ in 0..MAX_NODES_PING {
+                insert_initial_ping(&mut service, rng_record(&mut rng));
+            }
+            service.queued_pings.extend(
+                (0..MAX_QUEUED_PINGS).map(|_| (rng_record(&mut rng), PingReason::InitialInsert)),
+            );
+            service.on_ping(ping.clone(), record.udp_addr(), record.id, B256::random());
+            assert!(!service.pending_pings.contains_key(&record.id));
+            service.pending_pings.clear();
+            service.queued_pings.clear();
+
+            // The node then pings from another endpoint and answers the bond ping from there.
+            service.on_ping(ping, other.udp_addr(), record.id, B256::random());
+            let echo_hash = service.pending_pings[&record.id].echo_hash;
+            service.on_pong(make_pong(&service, echo_hash), other.udp_addr(), record.id);
+
+            assert!(service.has_bond(record.id, other.address));
+            assert_eq!(
+                service.on_entry(record.id, |entry| (entry.record, entry.has_endpoint_proof)),
+                Some((record, false))
+            );
         }
     }
 
