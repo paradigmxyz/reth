@@ -36,7 +36,12 @@ Options:
       --previous-manifest <PREVIOUS_MANIFEST>
           Path to the manifest of a previously published snapshot of the same chain.
 
-          Chunks sealed in both snapshots are hashed against it instead of being packaged again, and the new manifest references their published archives. Fails if any sealed chunk's files differ from the previous manifest. RocksDB SST files that match an archive in it are reused the same way; new or changed SST files are packaged.
+          Chunks sealed in both snapshots are hashed against it instead of being packaged again, and the new manifest references their published archives. Fails if any sealed chunk's files differ from the previous manifest. With `--rocksdb-archive-per-file`, RocksDB SST and blob files that match an archive in it are reused the same way; new or changed files are packaged.
+
+      --rocksdb-archive-per-file
+          Package each RocksDB SST and blob file into its own archive instead of one archive.
+
+          Unchanged files keep their archive name between snapshots, so they can be uploaded once and reused with `--previous-manifest`. Downloaders without support for per-file archives fail to parse the manifest, so only enable this once they have updated.
 
   -h, --help
           Print help (see a summary with '-h')

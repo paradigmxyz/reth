@@ -245,8 +245,8 @@ pub enum SnapshotComponentType {
     AccountChangesets,
     /// Storage changeset static files. Chunked.
     StorageChangesets,
-    /// RocksDB index files. One archive per SST or blob file plus one for the remaining files.
-    /// Optional and archive-only.
+    /// RocksDB index files. A single archive, or one archive per SST or blob file plus one for the
+    /// remaining files. Optional and archive-only.
     RocksdbIndices,
 }
 
@@ -700,9 +700,13 @@ pub async fn fetch_manifest(manifest_url: &str) -> Result<SnapshotManifest> {
 /// manifest is not packaged again: its source files are hashed and must match the previous
 /// manifest's `chunk_output_files`, and the new manifest points `chunk_files` at the
 /// previously published archive. A mismatch is an error, since sealed history must not change.
-/// Likewise, a RocksDB SST file whose path and checksum match an SST archive in the previous
-/// manifest is not packaged again and points at the previously published archive. SST files
-/// that are new or changed are packaged, since compaction replaces them between snapshots.
+///
+/// RocksDB indices are packaged into one archive unless `rocksdb_archive_per_file` is set, in
+/// which case each SST and blob file gets its own archive. A file whose path and checksum match
+/// such an archive in the previous manifest is not packaged again and points at the previously
+/// published archive. Files that are new or changed are packaged, since compaction replaces them
+/// between snapshots.
+#[expect(clippy::too_many_arguments)]
 pub fn generate_manifest(
     source_datadir: &Path,
     output_dir: &Path,
@@ -711,6 +715,7 @@ pub fn generate_manifest(
     chain_id: u64,
     blocks_per_file: u64,
     previous: Option<&SnapshotManifest>,
+    rocksdb_archive_per_file: bool,
 ) -> Result<SnapshotManifest> {
     eyre::ensure!(blocks_per_file > 0, "blocks_per_file must be greater than zero");
     if let Some(previous) = previous {
@@ -891,18 +896,28 @@ pub fn generate_manifest(
 
     let rocksdb_files = rocksdb_source_files(source_datadir)?;
     if !rocksdb_files.is_empty() {
-        let archives = package_rocksdb_archives(output_dir, rocksdb_files, previous)?;
-        info!(target: "reth::cli",
-            archives = archives.len(),
-            size = %super::DownloadProgress::format_size(
-                archives.iter().map(|archive| archive.size).sum()
-            ),
-            "Found RocksDB indices"
-        );
-        components.insert(
-            SnapshotComponentType::RocksdbIndices.key().to_string(),
-            ComponentManifest::Files(ArchiveSet { archives }),
-        );
+        let rocksdb = if rocksdb_archive_per_file {
+            let archives = package_rocksdb_archives(output_dir, rocksdb_files, previous)?;
+            info!(target: "reth::cli",
+                archives = archives.len(),
+                size = %super::DownloadProgress::format_size(
+                    archives.iter().map(|archive| archive.size).sum()
+                ),
+                "Found RocksDB indices"
+            );
+            ComponentManifest::Files(ArchiveSet { archives })
+        } else {
+            let (rocksdb_size, rocksdb_output_files) =
+                package_single_component(output_dir, "rocksdb_indices.tar.zst", &rocksdb_files)?;
+            ComponentManifest::Single(SingleArchive {
+                file: "rocksdb_indices.tar.zst".to_string(),
+                size: rocksdb_size,
+                decompressed_size: rocksdb_output_files.iter().map(|file| file.size).sum(),
+                blake3: None,
+                output_files: rocksdb_output_files,
+            })
+        };
+        components.insert(SnapshotComponentType::RocksdbIndices.key().to_string(), rocksdb);
     }
 
     let timestamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)?.as_secs();
@@ -1460,6 +1475,7 @@ mod tests {
             1,
             500_000,
             None,
+            true,
         )
         .unwrap();
         let previous_archives = rocksdb_archives(&previous);
@@ -1468,9 +1484,17 @@ mod tests {
         std::fs::write(rocksdb_dir.join("000009.sst"), b"sst-9-compacted").unwrap();
         std::fs::write(rocksdb_dir.join("000011.sst"), b"sst-11").unwrap();
         let output = tempdir().unwrap();
-        let mut next =
-            generate_manifest(source.path(), output.path(), None, 0, 1, 500_000, Some(&previous))
-                .unwrap();
+        let mut next = generate_manifest(
+            source.path(),
+            output.path(),
+            None,
+            0,
+            1,
+            500_000,
+            Some(&previous),
+            true,
+        )
+        .unwrap();
         let archives = rocksdb_archives(&next);
 
         let reused_sst = format!("rocksdb_indices/000007-{}.tar.zst", hash(b"sst-7"));
@@ -1501,6 +1525,7 @@ mod tests {
             1,
             500_000,
             Some(&next),
+            true,
         )
         .unwrap();
         let later_archives = rocksdb_archives(&later);
@@ -1524,7 +1549,8 @@ mod tests {
 
         for _ in 0..2 {
             let manifest =
-                generate_manifest(source.path(), source.path(), None, 0, 1, 500_000, None).unwrap();
+                generate_manifest(source.path(), source.path(), None, 0, 1, 500_000, None, true)
+                    .unwrap();
             let Some(ComponentManifest::Files(set)) =
                 manifest.component(SnapshotComponentType::RocksdbIndices)
             else {
@@ -1943,7 +1969,8 @@ mod tests {
         std::fs::write(db_dir.join("mdbx.dat"), b"state-data").unwrap();
 
         let manifest =
-            generate_manifest(source.path(), output.path(), None, 0, 1, 500_000, None).unwrap();
+            generate_manifest(source.path(), output.path(), None, 0, 1, 500_000, None, false)
+                .unwrap();
 
         let state = manifest.component(SnapshotComponentType::State).unwrap();
         let ComponentManifest::Single(state) = state else {
@@ -1954,6 +1981,32 @@ mod tests {
         assert!(!state.output_files.is_empty());
         assert_eq!(state.output_files[0].path, "db/mdbx.dat");
         assert!(output.path().join("state.tar.zst").exists());
+    }
+
+    #[test]
+    fn generate_manifest_includes_rocksdb_single_archive_when_present() {
+        let source = tempdir().unwrap();
+        let output = tempdir().unwrap();
+        let db_dir = source.path().join("db");
+        std::fs::create_dir_all(&db_dir).unwrap();
+        std::fs::write(db_dir.join("mdbx.dat"), b"state-data").unwrap();
+        let rocksdb_dir = source.path().join("rocksdb");
+        std::fs::create_dir_all(&rocksdb_dir).unwrap();
+        std::fs::write(rocksdb_dir.join("CURRENT"), b"MANIFEST-000001").unwrap();
+
+        let manifest =
+            generate_manifest(source.path(), output.path(), None, 0, 1, 500_000, None, false)
+                .unwrap();
+
+        let rocksdb = manifest.component(SnapshotComponentType::RocksdbIndices).unwrap();
+        let ComponentManifest::Single(rocksdb) = rocksdb else {
+            panic!("rocksdb indices should be a single archive")
+        };
+        assert_eq!(rocksdb.file, "rocksdb_indices.tar.zst");
+        assert!(rocksdb.decompressed_size > 0);
+        assert!(!rocksdb.output_files.is_empty());
+        assert_eq!(rocksdb.output_files[0].path, "rocksdb/CURRENT");
+        assert!(output.path().join("rocksdb_indices.tar.zst").exists());
     }
 
     #[test]
@@ -1977,7 +2030,8 @@ mod tests {
 
         let output = tempdir().unwrap();
         let manifest =
-            generate_manifest(source.path(), output.path(), None, 0, 1, 500_000, None).unwrap();
+            generate_manifest(source.path(), output.path(), None, 0, 1, 500_000, None, true)
+                .unwrap();
 
         let rocksdb = manifest.component(SnapshotComponentType::RocksdbIndices).unwrap();
         let ComponentManifest::Files(set) = rocksdb else {
@@ -2021,7 +2075,7 @@ mod tests {
         std::fs::write(rocksdb_dir.join("000011.sst"), b"sst-11").unwrap();
         let later_output = tempdir().unwrap();
         let later =
-            generate_manifest(source.path(), later_output.path(), None, 0, 1, 500_000, None)
+            generate_manifest(source.path(), later_output.path(), None, 0, 1, 500_000, None, true)
                 .unwrap();
         let Some(ComponentManifest::Files(later_set)) =
             later.component(SnapshotComponentType::RocksdbIndices)
@@ -2210,7 +2264,7 @@ mod tests {
 
         // The declared height is beyond both components' actual tips, within the same chunk.
         let manifest =
-            generate_manifest(source.path(), output.path(), None, 29, 1, 10, None).unwrap();
+            generate_manifest(source.path(), output.path(), None, 29, 1, 10, None, false).unwrap();
         assert_eq!(manifest.block, 29);
         for (component, expected_blocks) in
             [(SnapshotComponentType::Headers, 25), (SnapshotComponentType::Transactions, 22)]
@@ -2240,7 +2294,8 @@ mod tests {
             write_test_static_files(source.path(), StaticFileSegment::Headers, tip);
 
             let manifest =
-                generate_manifest(source.path(), output.path(), None, tip, 1, 10, None).unwrap();
+                generate_manifest(source.path(), output.path(), None, tip, 1, 10, None, false)
+                    .unwrap();
             let ComponentManifest::Chunked(chunked) =
                 manifest.component(SnapshotComponentType::Headers).unwrap()
             else {
@@ -2262,7 +2317,8 @@ mod tests {
         for (block, expected_blocks) in [(9, 10), (10, 20), (20, 25), (39, 25)] {
             let output = tempdir().unwrap();
             let manifest =
-                generate_manifest(source.path(), output.path(), None, block, 1, 10, None).unwrap();
+                generate_manifest(source.path(), output.path(), None, block, 1, 10, None, false)
+                    .unwrap();
 
             let ComponentManifest::Chunked(chunked) =
                 manifest.component(SnapshotComponentType::Headers).unwrap()
@@ -2288,15 +2344,24 @@ mod tests {
             1,
             10,
             None,
+            false,
         )
         .unwrap();
 
         let source = snapshot_source();
         let output = tempdir().unwrap();
         write_test_static_files(source.path(), StaticFileSegment::Headers, 34);
-        let manifest =
-            generate_manifest(source.path(), output.path(), None, 34, 1, 10, Some(&previous))
-                .unwrap();
+        let manifest = generate_manifest(
+            source.path(),
+            output.path(),
+            None,
+            34,
+            1,
+            10,
+            Some(&previous),
+            false,
+        )
+        .unwrap();
 
         let ComponentManifest::Chunked(previous_headers) =
             previous.component(SnapshotComponentType::Headers).unwrap()
@@ -2345,6 +2410,7 @@ mod tests {
             1,
             10,
             Some(&manifest),
+            false,
         )
         .unwrap();
         assert_eq!(
@@ -2371,6 +2437,7 @@ mod tests {
             1,
             10,
             None,
+            false,
         )
         .unwrap();
         let Some(ComponentManifest::Chunked(headers)) =
@@ -2389,6 +2456,7 @@ mod tests {
             1,
             10,
             Some(&previous),
+            false,
         )
         .unwrap_err();
         assert!(err.to_string().contains("differs from the previous manifest"), "{err}");
@@ -2406,6 +2474,7 @@ mod tests {
             1,
             10,
             None,
+            false,
         )
         .unwrap();
 
@@ -2419,6 +2488,7 @@ mod tests {
                 1,
                 10,
                 Some(&previous),
+                false,
             )
             .unwrap_err();
             assert_eq!(
@@ -2440,6 +2510,7 @@ mod tests {
             1,
             10,
             None,
+            false,
         )
         .unwrap();
         let Some(ComponentManifest::Chunked(headers)) =
@@ -2451,9 +2522,17 @@ mod tests {
         headers.chunk_files.truncate(1);
 
         let output = tempdir().unwrap();
-        let manifest =
-            generate_manifest(source.path(), output.path(), None, 24, 1, 10, Some(&previous))
-                .unwrap();
+        let manifest = generate_manifest(
+            source.path(),
+            output.path(),
+            None,
+            24,
+            1,
+            10,
+            Some(&previous),
+            false,
+        )
+        .unwrap();
         assert_eq!(
             manifest.archive_urls(SnapshotComponentType::Headers),
             vec!["headers-0-9.tar.zst", "headers-10-19.tar.zst", "headers-20-29.tar.zst"]
@@ -2473,6 +2552,7 @@ mod tests {
             1,
             10,
             None,
+            false,
         )
         .unwrap();
         let Some(ComponentManifest::Chunked(headers)) =
@@ -2484,9 +2564,17 @@ mod tests {
         headers.blocks_per_file = 0;
 
         let output = tempdir().unwrap();
-        let manifest =
-            generate_manifest(source.path(), output.path(), None, 24, 1, 10, Some(&previous))
-                .unwrap();
+        let manifest = generate_manifest(
+            source.path(),
+            output.path(),
+            None,
+            24,
+            1,
+            10,
+            Some(&previous),
+            false,
+        )
+        .unwrap();
         assert_eq!(
             manifest.archive_urls(SnapshotComponentType::Headers),
             vec!["headers-0-9.tar.zst", "headers-10-19.tar.zst", "headers-20-29.tar.zst"]
