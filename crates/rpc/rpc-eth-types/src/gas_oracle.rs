@@ -88,11 +88,12 @@ where
     oracle_config: GasPriceOracleConfig,
     /// The price under which the sample will be ignored.
     ignore_price: Option<u128>,
-    /// The latest calculated price and the hash of the block it was calculated for.
+    /// The latest calculated price and the hash of the block it was calculated for, `None` until
+    /// the first calculation.
     ///
     /// Kept outside of the async mutex so that a price that is already cached for the current head
     /// can be served without waiting on a concurrent computation.
-    last_price: RwLock<GasPriceOracleResult>,
+    last_price: RwLock<Option<GasPriceOracleResult>>,
     /// Cache of the lowest effective tip values of recent blocks.
     lowest_effective_tip_cache: Mutex<EffectiveTipLruCache>,
 }
@@ -116,12 +117,7 @@ where
 
         // this is the number of blocks that we will cache the values for
         let cached_values = (oracle_config.blocks * 5).max(oracle_config.max_block_history as u32);
-        let last_price = RwLock::new(GasPriceOracleResult {
-            block_hash: B256::ZERO,
-            price: oracle_config
-                .default_suggested_fee
-                .unwrap_or_else(|| GasPriceOracleResult::default().price),
-        });
+        let last_price = RwLock::new(None);
         let lowest_effective_tip_cache = Mutex::new(EffectiveTipLruCache(LruMap::with_hasher(
             cached_values,
             Default::default(),
@@ -205,7 +201,11 @@ where
 
         // sort results then take the configured percentile result
         let mut price = if results.is_empty() {
-            self.last_price.read().price
+            self.last_price.read().as_ref().map(|last| last.price).unwrap_or_else(|| {
+                self.oracle_config
+                    .default_suggested_fee
+                    .unwrap_or_else(|| GasPriceOracleResult::default().price)
+            })
         } else {
             results.sort_unstable();
             *results.get((results.len() - 1) * self.oracle_config.percentile as usize / 100).expect(
@@ -220,7 +220,7 @@ where
             price = max_price;
         }
 
-        *self.last_price.write() = GasPriceOracleResult { block_hash: header.hash(), price };
+        *self.last_price.write() = Some(GasPriceOracleResult { block_hash: header.hash(), price });
 
         Ok(price)
     }
@@ -361,7 +361,7 @@ where
         }
 
         *self.last_price.write() =
-            GasPriceOracleResult { block_hash: header.hash(), price: suggestion };
+            Some(GasPriceOracleResult { block_hash: header.hash(), price: suggestion });
 
         Ok(suggestion)
     }
@@ -406,7 +406,7 @@ where
     /// Returns the cached price if it was calculated for the given head.
     fn cached_price(&self, head_hash: B256) -> Option<U256> {
         let last_price = self.last_price.read();
-        (last_price.block_hash == head_hash).then_some(last_price.price)
+        last_price.as_ref().filter(|last| last.block_hash == head_hash).map(|last| last.price)
     }
 }
 
@@ -474,7 +474,7 @@ mod tests {
         // `NoopProvider` reports the zero hash as its head and has no headers, so only the cached
         // price can answer.
         let price = U256::from(42);
-        *oracle.last_price.write() = GasPriceOracleResult { block_hash: B256::ZERO, price };
+        *oracle.last_price.write() = Some(GasPriceOracleResult { block_hash: B256::ZERO, price });
 
         // a computation in flight holds the async mutex
         let _guard = oracle.lowest_effective_tip_cache.lock().await;
@@ -491,8 +491,10 @@ mod tests {
     async fn stale_price_requires_latest_header() {
         let oracle = test_oracle();
 
-        *oracle.last_price.write() =
-            GasPriceOracleResult { block_hash: B256::with_last_byte(1), price: U256::from(42) };
+        *oracle.last_price.write() = Some(GasPriceOracleResult {
+            block_hash: B256::with_last_byte(1),
+            price: U256::from(42),
+        });
 
         let err = oracle.suggest_tip_cap().await.unwrap_err();
         assert!(
