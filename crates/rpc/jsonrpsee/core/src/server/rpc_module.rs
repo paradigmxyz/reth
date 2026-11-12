@@ -41,9 +41,9 @@ use crate::{
     server::{
         helpers::MethodSink,
         subscription::{
-            sub_message_to_json, BoundedSubscriptions, IntoSubscriptionCloseResponse,
-            PendingSubscriptionSink, Subscribers, SubscriptionCloseResponse, SubscriptionKey,
-            SubscriptionPermit, SubscriptionState,
+            notification_prefix, sub_message_to_json, BoundedSubscriptions,
+            IntoSubscriptionCloseResponse, PendingSubscriptionSink, Subscribers,
+            SubscriptionCloseResponse, SubscriptionKey, SubscriptionPermit, SubscriptionState,
         },
         MethodResponse, ResponsePayload, ResponseSizeHint, LOG_TARGET,
     },
@@ -641,7 +641,8 @@ impl<Context: Send + Sync + 'static> RpcModule<Context> {
 
                         match response {
                             SubscriptionCloseResponse::Notif(msg) => {
-                                let json = sub_message_to_json(msg, &sub_id, method);
+                                let json =
+                                    sub_message_to_json(msg, &notification_prefix(method, &sub_id));
                                 let _ = method_sink.send(json).await;
                             }
                             SubscriptionCloseResponse::NotifErr(err) => {

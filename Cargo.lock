@@ -10121,6 +10121,7 @@ dependencies = [
  "alloy-signer",
  "alloy-signer-local",
  "async-trait",
+ "codspeed-criterion-compat",
  "derive_more",
  "dyn-clone",
  "evm2",
