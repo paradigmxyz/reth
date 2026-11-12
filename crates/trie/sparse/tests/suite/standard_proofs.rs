@@ -106,7 +106,7 @@ pub(super) fn split_opaque_extension_at_subtrie_boundary<T: SparseTrie>(new_trie
     expected.reveal_and_update(&mut trie, &mut updates);
     assert!(updates.is_empty());
     assert_eq!(trie.root(epoch(4)), expected.get_root_with_updates(&changes).0);
-    assert_eq!(trie.find_leaf(&Nibbles::unpack(&first), None), Ok(LeafLookup::Exists));
+    assert_eq!(trie.find_leaf(&Nibbles::unpack(first), None), Ok(LeafLookup::Exists));
 }
 
 fn extension_harness() -> SuiteTestHarness {
