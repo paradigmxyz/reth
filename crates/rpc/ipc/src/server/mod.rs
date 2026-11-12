@@ -11,7 +11,7 @@ use interprocess::local_socket::{
     GenericFilePath, ListenerOptions, ToFsName,
 };
 use jsonrpsee::{
-    core::TEN_MB_SIZE_BYTES,
+    core::{server::ConnectionId, TEN_MB_SIZE_BYTES},
     server::{
         accept_error_backoff, handle_rpc_call, middleware::rpc::RpcServiceT, stop_channel,
         BatchRequestConfig, ConnectionGuard, ConnectionPermit, IdProvider, RandomIntegerIdProvider,
@@ -186,8 +186,6 @@ where
         // signal that we're ready to accept connections
         on_ready.send(Ok(())).ok();
 
-        // A `usize` counter cannot wrap in practice on 64-bit targets, so ids are never reused.
-        let mut id: usize = 0;
         let connection_guard = ConnectionGuard::new(self.cfg.max_connections as usize);
 
         let stopped = stop_handle.clone().shutdown();
@@ -215,7 +213,7 @@ where
                     process_connection(ProcessConnection {
                         rpc_middleware: self.rpc_middleware.clone(),
                         conn_permit: Arc::new(conn_permit),
-                        conn_id: id,
+                        conn_id: ConnectionId::next_unique().0,
                         server_cfg: self.cfg.clone(),
                         stop_handle: stop_handle.clone(),
                         drop_on_completion: drop_on_completion.clone(),
@@ -224,7 +222,6 @@ where
                         local_socket_stream,
                     });
 
-                    id += 1;
                     stopped = stop;
                 }
                 AcceptConnection::Shutdown => {
@@ -260,12 +257,15 @@ async fn try_accept_conn<S>(listener: &LocalSocketListener, stopped: S) -> Accep
 where
     S: Future + Unpin,
 {
-    match futures_util::future::select(pin!(listener.accept()), stopped).await {
-        Either::Left((res, stop)) => match res {
+    // `select` polls its first argument first and returns as soon as that one is ready, so the
+    // stop signal has to come first: with `accept` first, a listener that keeps returning without
+    // ever pending starves the stop signal and the server can no longer be stopped.
+    match futures_util::future::select(stopped, pin!(listener.accept())).await {
+        Either::Left(_) => AcceptConnection::Shutdown,
+        Either::Right((res, stop)) => match res {
             Ok(local_socket_stream) => AcceptConnection::Established { local_socket_stream, stop },
             Err(e) => AcceptConnection::Err((e, stop)),
         },
-        Either::Right(_) => AcceptConnection::Shutdown,
     }
 }
 

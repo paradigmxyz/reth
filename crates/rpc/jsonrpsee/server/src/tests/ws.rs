@@ -1353,7 +1353,7 @@ async fn ws_connection_cannot_unsubscribe_in_process_subscription() {
         .unwrap();
     let sub_id: u64 = deser_call(resp);
 
-    // The first accepted connection is the one the server numbers 0.
+    // No transport connection is ever numbered `ConnectionId::IN_PROCESS`.
     let mut client = WebSocketTestClient::new(addr).with_default_timeout().await.unwrap().unwrap();
     let unsub = client
         .send_request_text(call("unsub", vec![sub_id], Id::Num(1)))
@@ -1374,6 +1374,63 @@ async fn ws_connection_cannot_unsubscribe_in_process_subscription() {
         .unwrap()
         .unwrap();
     assert_eq!(resp, r#"{"jsonrpc":"2.0","id":2,"result":true}"#);
+}
+
+#[tokio::test]
+async fn connection_of_another_server_cannot_unsubscribe() {
+    init_logger();
+
+    let mut module = RpcModule::new(());
+    module
+        .register_subscription::<(), _, _>("sub", "notif", "unsub", |_, pending, _| async move {
+            let sink = pending.accept().await.unwrap();
+            sink.closed().await;
+        })
+        .unwrap();
+
+    // Two servers serving one subscription table, as an embedder's WS and IPC servers do. Were the
+    // connections numbered per server, the first connection of each would share one id.
+    let mut addrs = Vec::new();
+    let mut handles = Vec::new();
+    for _ in 0..2 {
+        let server = ServerBuilder::default()
+            .build("127.0.0.1:0")
+            .with_default_timeout()
+            .await
+            .unwrap()
+            .unwrap();
+        addrs.push(server.local_addr().unwrap());
+        handles.push(server.start(module.clone()));
+    }
+
+    let mut owner =
+        WebSocketTestClient::new(addrs[0]).with_default_timeout().await.unwrap().unwrap();
+    let resp = owner
+        .send_request_text(call("sub", Vec::<u64>::new(), Id::Num(1)))
+        .with_default_timeout()
+        .await
+        .unwrap()
+        .unwrap();
+    let sub_id: u64 = deser_call(resp);
+
+    let mut other =
+        WebSocketTestClient::new(addrs[1]).with_default_timeout().await.unwrap().unwrap();
+    let unsub = other
+        .send_request_text(call("unsub", vec![sub_id], Id::Num(2)))
+        .with_default_timeout()
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(&unsub, r#"{"jsonrpc":"2.0","id":2,"result":false}"#);
+
+    // The subscription is still alive, so its owner can still end it.
+    let unsub = owner
+        .send_request_text(call("unsub", vec![sub_id], Id::Num(3)))
+        .with_default_timeout()
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(&unsub, r#"{"jsonrpc":"2.0","id":3,"result":true}"#);
 }
 
 #[tokio::test]

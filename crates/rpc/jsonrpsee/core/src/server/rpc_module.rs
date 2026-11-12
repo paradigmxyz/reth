@@ -29,7 +29,10 @@ use std::{
     fmt::Debug,
     future::Future,
     ops::{Deref, DerefMut},
-    sync::Arc,
+    sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
+    },
 };
 
 use crate::{
@@ -90,6 +93,22 @@ impl ConnectionId {
     /// Servers count connections upwards from zero and never reach this value, so no transport
     /// connection can unsubscribe an in-process subscription.
     pub const IN_PROCESS: Self = Self(usize::MAX);
+
+    /// Returns an id that no other live connection in this process shares.
+    ///
+    /// Together with the subscription id this scopes a subscription, and servers of different
+    /// transports can serve one shared subscription table, so the id has to be unique across every
+    /// server in the process and not only within a single accept loop. Counting per server would
+    /// give the first connection of each transport the same id, and an unsubscribe on one of them
+    /// would then cancel a subscription of another.
+    ///
+    /// A `usize` cannot wrap in practice on 64-bit targets, so ids are never reused and never reach
+    /// [`Self::IN_PROCESS`].
+    pub fn next_unique() -> Self {
+        static NEXT: AtomicUsize = AtomicUsize::new(0);
+
+        Self(NEXT.fetch_add(1, Ordering::Relaxed))
+    }
 }
 
 impl From<usize> for ConnectionId {

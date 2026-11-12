@@ -46,7 +46,10 @@ use hyper_util::rt::{TokioExecutor, TokioIo};
 use jsonrpsee_core::{
     id_providers::RandomIntegerIdProvider,
     middleware::{Batch, BatchEntry, BatchEntryErr, RpcServiceBuilder, RpcServiceT},
-    server::{helpers::prepare_error, BoundedSubscriptions, MethodResponse, MethodSink, Methods},
+    server::{
+        helpers::prepare_error, BoundedSubscriptions, ConnectionId, MethodResponse, MethodSink,
+        Methods,
+    },
     traits::IdProvider,
     BoxError, JsonRawValue, TEN_MB_SIZE_BYTES,
 };
@@ -135,8 +138,6 @@ where
     }
 
     async fn start_inner(self, methods: Methods, stop_handle: StopHandle) {
-        // A `usize` counter cannot wrap in practice on 64-bit targets, so ids are never reused.
-        let mut id: usize = 0;
         let connection_guard = ConnectionGuard::new(self.server_cfg.max_connections as usize);
         let listener = self.listener;
 
@@ -154,13 +155,12 @@ where
                         remote_addr,
                         methods: methods.clone(),
                         stop_handle: stop_handle.clone(),
-                        conn_id: id,
+                        conn_id: ConnectionId::next_unique().0,
                         server_cfg: self.server_cfg.clone(),
                         conn_guard: &connection_guard,
                         socket,
                         drop_on_completion: drop_on_completion.clone(),
                     });
-                    id += 1;
                     stopped = stop;
                 }
                 AcceptConnection::Err((e, stop)) => {
@@ -891,14 +891,17 @@ where
     let accept = listener.accept();
     tokio::pin!(accept);
 
-    match futures_util::future::select(accept, stopped).await {
-        Either::Left((res, stop)) => match res {
+    // `select` polls its first argument first and returns as soon as that one is ready, so the
+    // stop signal has to come first: with `accept` first, a listener that keeps returning without
+    // ever pending starves the stop signal and the server can no longer be stopped.
+    match futures_util::future::select(stopped, accept).await {
+        Either::Left(_) => AcceptConnection::Shutdown,
+        Either::Right((res, stop)) => match res {
             Ok((socket, remote_addr)) => {
                 AcceptConnection::Established { socket, remote_addr, stop }
             }
             Err(e) => AcceptConnection::Err((e, stop)),
         },
-        Either::Right(_) => AcceptConnection::Shutdown,
     }
 }
 
@@ -1024,5 +1027,25 @@ impl<'de> Visitor<'de> for BatchSeed<'_> {
         }
 
         Ok(batch)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use futures_util::future;
+
+    #[tokio::test]
+    async fn try_accept_conn_observes_stop_before_a_waiting_connection() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        let _client = TcpStream::connect(addr).await.unwrap();
+        // Let the kernel put the connection in the backlog, so that `accept` would hand it over on
+        // its first poll and only the polling order keeps it waiting.
+        tokio::time::sleep(Duration::from_millis(50)).await;
+
+        let accepted = try_accept_conn(&listener, future::ready(())).await;
+        assert!(matches!(accepted, AcceptConnection::Shutdown));
     }
 }
