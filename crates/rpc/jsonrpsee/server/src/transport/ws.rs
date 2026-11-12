@@ -220,10 +220,12 @@ async fn send_task(
 
     loop {
         let response = tokio::select! {
+            // The stop signal is polled first: a subscription that queues messages faster than the
+            // client reads them keeps `rx.recv()` ready, and polling that first would never let a
+            // stopped server end the session.
             biased;
-            response = rx.recv() => response,
-            // The server has stopped.
             _ = &mut stop => break,
+            response = rx.recv() => response,
         };
         // Nothing else to receive.
         let Some(response) = response else { break };
