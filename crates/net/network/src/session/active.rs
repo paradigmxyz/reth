@@ -524,7 +524,7 @@ impl<N: NetworkPrimitives> ActiveSession<N> {
         let request_id = self.next_id();
         trace!(?request, peer_id=?self.remote_peer_id, ?request_id, "sending request to peer");
         let msg = match request.create_request_message(request_id) {
-            RequestMessage::Eth(msg) => msg.map_versioned(version).into(),
+            RequestMessage::Eth(msg) => msg.into(),
             RequestMessage::Snap(msg) => OutgoingMessage::Snap(msg),
         };
 
@@ -1336,7 +1336,7 @@ mod tests {
         handshake::EthHandshake, protocol::Protocol, BlockBodies, BlockHeaders,
         EthNetworkPrimitives, EthStream, GetBlockAccessLists, GetBlockBodies,
         HelloMessageWithProtocols, P2PStream, StatusBuilder, UnauthedEthStream, UnauthedP2PStream,
-        UnifiedStatus,
+        UnifiedStatus, MAX_PAYLOAD_SIZE,
     };
     use reth_eth_wire_types::{
         message::MAX_MESSAGE_SIZE,
@@ -1423,6 +1423,7 @@ mod tests {
             tokio::task::spawn(start_pending_incoming_session(
                 Arc::new(EthHandshake::default()),
                 MAX_MESSAGE_SIZE,
+                MAX_PAYLOAD_SIZE,
                 disconnect_rx,
                 session_id,
                 stream,

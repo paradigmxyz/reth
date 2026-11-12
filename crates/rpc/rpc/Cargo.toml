@@ -100,7 +100,7 @@ reth-storage-overlay.workspace = true
 
 rand.workspace = true
 
-jsonrpsee = { workspace = true, features = ["client"] }
+jsonrpsee = { workspace = true, features = ["server"] }
 
 [features]
 js-tracer = [

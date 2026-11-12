@@ -11,11 +11,12 @@ repository.workspace = true
 workspace = true
 
 [dependencies]
+alloy-json-rpc.workspace = true
 alloy-rpc-types-engine = { workspace = true, features = ["jwt-aws-lc-rs", "serde"] }
 
 http.workspace = true
 http-body-util.workspace = true
-jsonrpsee-http-client.workspace = true
+jsonrpsee-server.workspace = true
 pin-project.workspace = true
 tokio = { workspace = true, features = ["sync", "time"] }
 tower.workspace = true

@@ -1,5 +1,5 @@
 [workspace.package]
-version = "2.10.1"
+version = "2.11.0"
 edition = "2024"
 rust-version = "1.96"
 license = "MIT OR Apache-2.0"
@@ -82,6 +82,12 @@ members = [
     "crates/prune/prune",
     "crates/prune/types",
     "crates/rpc/ipc/",
+    "crates/rpc/jsonrpsee/core/",
+    "crates/rpc/jsonrpsee/jsonrpsee/",
+    "crates/rpc/jsonrpsee/proc-macros/",
+    "crates/rpc/jsonrpsee/server/",
+    "crates/rpc/jsonrpsee/test-utils/",
+    "crates/rpc/jsonrpsee/types/",
     "crates/rpc/rpc-api/",
     "crates/rpc/rpc-builder/",
     "crates/rpc/rpc-engine-api/",
@@ -571,11 +577,12 @@ libp2p-identity = { version = "0.3", default-features = false }
 multiaddr = { version = "0.19", default-features = false }
 
 # rpc
-jsonrpsee = "0.26.0"
-jsonrpsee-core = "0.26.0"
-jsonrpsee-server = "0.26.0"
-jsonrpsee-http-client = "0.26.0"
-jsonrpsee-types = "0.26.0"
+jsonrpsee = { path = "crates/rpc/jsonrpsee/jsonrpsee" }
+jsonrpsee-core = { path = "crates/rpc/jsonrpsee/core" }
+jsonrpsee-proc-macros = { path = "crates/rpc/jsonrpsee/proc-macros" }
+jsonrpsee-server = { path = "crates/rpc/jsonrpsee/server" }
+jsonrpsee-test-utils = { path = "crates/rpc/jsonrpsee/test-utils" }
+jsonrpsee-types = { path = "crates/rpc/jsonrpsee/types" }
 
 # http
 http = "1.0"

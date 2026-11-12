@@ -10,14 +10,7 @@ use tower::{
 pub trait RethRpcMiddleware:
     Layer<
         RpcService,
-        Service: jsonrpsee::server::middleware::rpc::RpcServiceT<
-            MethodResponse = jsonrpsee::MethodResponse,
-            BatchResponse = jsonrpsee::MethodResponse,
-            NotificationResponse = jsonrpsee::MethodResponse,
-        > + Send
-                     + Sync
-                     + Clone
-                     + 'static,
+        Service: jsonrpsee::server::middleware::rpc::RpcServiceT + Send + Sync + Clone + 'static,
     > + Clone
     + Send
     + 'static
@@ -27,11 +20,8 @@ pub trait RethRpcMiddleware:
 impl<T> RethRpcMiddleware for T where
     T: Layer<
             RpcService,
-            Service: jsonrpsee::server::middleware::rpc::RpcServiceT<
-                MethodResponse = jsonrpsee::MethodResponse,
-                BatchResponse = jsonrpsee::MethodResponse,
-                NotificationResponse = jsonrpsee::MethodResponse,
-            > + Send
+            Service: jsonrpsee::server::middleware::rpc::RpcServiceT
+                         + Send
                          + Sync
                          + Clone
                          + 'static,

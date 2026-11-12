@@ -1,12 +1,15 @@
 //! Contains RPC handler implementations specific to state.
 
 use crate::EthApi;
+use alloy_eips::BlockId;
+use alloy_primitives::{Address, U256};
 use reth_rpc_convert::RpcConvert;
 use reth_rpc_eth_api::{
-    helpers::{EthState, LoadPendingBlock, LoadState},
-    RpcNodeCore,
+    helpers::{EthState, LoadPendingBlock, LoadState, SpawnBlocking},
+    FromEthApiError, RpcNodeCore,
 };
 use reth_rpc_eth_types::EthApiError;
+use reth_storage_api::StateProviderFactory;
 
 impl<N, Rpc> EthState for EthApi<N, Rpc>
 where
@@ -22,6 +25,29 @@ where
     Rpc: RpcConvert<Primitives = N::Primitives>,
     Self: LoadPendingBlock,
 {
+    /// Reads the nonce from the provider's state instead of a locally built pending block.
+    ///
+    /// A local pending block only applies pool transactions on top of the latest state, and the
+    /// pool lookup for the pending tag already accounts for the sender's transactions, so
+    /// building the block and its state overlay only to read one nonce is redundant.
+    fn transaction_count(
+        &self,
+        address: Address,
+        block_id: Option<BlockId>,
+    ) -> impl Future<Output = Result<U256, Self::Error>> + Send
+    where
+        Self: SpawnBlocking,
+    {
+        let at = block_id.unwrap_or_default();
+        self.spawn_blocking_io(move |this| {
+            let state = if at.is_latest() {
+                this.latest_state()?
+            } else {
+                this.provider().state_by_block_id(at).map_err(Self::Error::from_eth_err)?
+            };
+            this.transaction_count_with_state(address, at, &state)
+        })
+    }
 }
 
 #[cfg(test)]
@@ -56,7 +82,10 @@ mod tests {
         pool::{BlockingTaskGuard, BlockingTaskPool},
         Runtime,
     };
-    use reth_transaction_pool::test_utils::{testing_pool, TestPool};
+    use reth_transaction_pool::{
+        test_utils::{testing_pool, MockTransaction, TestPool},
+        TransactionOrigin, TransactionPool,
+    };
     use std::{future::Future, sync::Arc, time::Duration};
     use tokio::sync::{Mutex, Semaphore};
 
@@ -348,5 +377,36 @@ mod tests {
             U256::from(42)
         );
         assert_eq!(eth_api.balance(address, None).await.unwrap(), U256::from(1337));
+    }
+
+    #[tokio::test]
+    async fn pending_transaction_count_skips_local_pending_block() {
+        let address = Address::random();
+        let accounts = AddressMap::from_iter([(address, ExtendedAccount::new(7, U256::ZERO))]);
+        let eth_api = mock_eth_api(accounts);
+        let mut block = Block::default();
+        block.header.number = 13_000_000;
+        block.header.timestamp = 1_629_000_000;
+        block.header.gas_limit = 30_000_000;
+        block.header.base_fee_per_gas = Some(1_000_000_000);
+        eth_api.provider().add_block(B256::ZERO, block);
+
+        let pending = Some(BlockId::pending());
+        let count = EthState::transaction_count(&eth_api, address, pending).await.unwrap();
+        assert_eq!(count, U256::from(7));
+
+        // Nonces 7 and 8 follow the account nonce, nonce 10 is gapped.
+        for nonce in [7, 8, 10] {
+            let tx = MockTransaction::eip1559().with_sender(address).with_nonce(nonce);
+            eth_api.pool().add_transaction(TransactionOrigin::External, tx).await.unwrap();
+        }
+        let count = EthState::transaction_count(&eth_api, address, pending).await.unwrap();
+        assert_eq!(count, U256::from(9));
+        assert_eq!(
+            EthState::transaction_count(&eth_api, address, None).await.unwrap(),
+            U256::from(7)
+        );
+
+        assert!(eth_api.pending_block().lock().await.is_none());
     }
 }
