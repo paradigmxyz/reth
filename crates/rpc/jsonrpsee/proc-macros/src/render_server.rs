@@ -345,6 +345,9 @@ impl RpcDescription {
             });
 
             quote! {
+                // Move the raw params into this block so they are freed once decoded, instead of
+                // living as long as an async method or subscription future.
+                let params = params;
                 let mut seq = params.sequence();
                 #(#decode_fields);*
                 (#params_fields)
