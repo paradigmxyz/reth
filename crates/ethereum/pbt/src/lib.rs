@@ -2,6 +2,9 @@
 //!
 //! BLAKE3 is the reference/devnet hash. Configure a shared `binaryTrieTime` in genesis
 //! and install the returned add-ons, backfill, and authenticated RPC methods together.
+//! This node integration is available on native targets; portable tree APIs live in `pbt`.
+
+#![cfg(not(target_family = "wasm"))]
 
 use alloy_eip7928::bal::DecodedBal;
 use alloy_primitives::{Bytes, B256, U256};
@@ -77,7 +80,23 @@ impl PbtNode {
     /// environment variables. Missing or inconsistent persisted state fails startup.
     pub fn new(chain: Arc<ChainSpec>, directory: &Path, activation: u64) -> eyre::Result<Self> {
         let directory_lock = lock_directory(directory)?;
-        let store = Arc::new(SnapshotStore::open(directory.join("pbt"), DecodeLimits::default())?);
+        let mut limits = DecodeLimits::default();
+        for (name, limit) in [
+            ("PBT_IMPORT_MAX_ACCOUNTS", &mut limits.max_accounts),
+            ("PBT_IMPORT_MAX_LEAVES", &mut limits.max_leaves),
+            ("PBT_IMPORT_MAX_CODE_SIZE", &mut limits.max_code_size),
+            ("PBT_IMPORT_MAX_TOTAL_CODE_SIZE", &mut limits.max_total_code_size),
+        ] {
+            if let Some(value) = std::env::var_os(name) {
+                *limit = parse_resource_budget(name, value)?;
+            }
+        }
+        let mut store =
+            SnapshotStore::open_with_limits(directory.join("pbt"), limits, DecodeLimits::native())?;
+        if let Some(value) = std::env::var_os("PBT_CACHE_MAX_BYTES") {
+            store.set_cache_budget(parse_resource_budget("PBT_CACHE_MAX_BYTES", value)?)?;
+        }
+        let store = Arc::new(store);
         let chain = prepare_chain((*chain).clone(), activation, &store)?;
         let mut startup = Startup::new(
             std::env::var_os("PBT_MIGRATION_SNAPSHOT"),
@@ -89,6 +108,10 @@ impl PbtNode {
                 std::env::var_os("PBT_CATCHUP_MAX_BAL_BYTES"),
             )?,
         )?;
+        if let Some(value) = std::env::var_os("PBT_CHECKPOINT_HISTORY") {
+            startup.checkpoint_history =
+                u64::try_from(parse_resource_budget("PBT_CHECKPOINT_HISTORY", value)?)?;
+        }
         startup.keep_mpt = match std::env::var("PBT_KEEP_MPT") {
             Ok(value) => value.parse().wrap_err("PBT_KEEP_MPT must be true or false")?,
             Err(std::env::VarError::NotPresent) => false,
@@ -208,8 +231,13 @@ where
         tree_config: TreeConfig,
         overlay_manager: OverlayManager<EthPrimitives>,
     ) -> eyre::Result<Self::EngineValidator> {
+        eyre::ensure!(
+            !ctx.config.rpc.rpc_compute_state_root_for_eth_simulate,
+            "--rpc.compute-state-root-for-eth-simulate is unsupported with PBT"
+        );
         let strategy = self.strategy.clone();
         let keep_mpt = self.startup.keep_mpt;
+        let checkpoint_history = self.startup.checkpoint_history;
         let provider = ctx.node.provider().clone();
         let network = ctx.node.network().clone();
         let runtime = tokio::runtime::Handle::current();
@@ -258,42 +286,42 @@ where
         let validator = BasicEngineValidatorBuilder::<EthereumEngineValidatorBuilder>::default()
             .build_tree_validator(ctx, tree_config, overlay_manager)
             .await?;
-        if !keep_mpt {
-            let strategy = self.strategy.clone();
-            let provider = ctx.node.provider().clone();
-            ctx.node.task_executor().spawn_critical_with_graceful_shutdown_signal(
-                "pbt-mpt-retirement",
-                move |shutdown| async move {
-                    let mut interval = tokio::time::interval(std::time::Duration::from_secs(1));
-                    interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
-                    tokio::pin!(shutdown);
-                    loop {
-                        tokio::select! {
-                            _ = &mut shutdown => return,
-                            _ = interval.tick() => {}
-                        }
-                        let strategy = strategy.clone();
-                        let provider = provider.clone();
-                        let span = Span::current();
-                        // Retry when persistence catches up, even if finality does not change.
-                        // Await the transaction before releasing the graceful shutdown guard.
-                        let result = tokio::task::spawn_blocking(move || {
-                            let _entered = span.enter();
-                            retirement::try_retire(&strategy, &provider)
-                        }).await;
-                        match result {
-                            Ok(Ok(true)) => return,
-                            Ok(Ok(false)) => {}
-                            Ok(Err(error)) => tracing::error!(target: "pbt::retirement", %error, "MPT retirement deferred"),
-                            Err(error) => {
-                                tracing::error!(target: "pbt::retirement", %error, "MPT retirement task failed");
-                                return
-                            }
+        let strategy = self.strategy.clone();
+        let provider = ctx.node.provider().clone();
+        ctx.node.task_executor().spawn_critical_with_graceful_shutdown_signal(
+            "pbt-checkpoint-maintenance",
+            move |shutdown| async move {
+                let mut retired = keep_mpt;
+                let mut last_pruned = None;
+                let mut interval = tokio::time::interval(std::time::Duration::from_secs(1));
+                interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+                tokio::pin!(shutdown);
+                loop {
+                    tokio::select! {
+                        _ = &mut shutdown => return,
+                        _ = interval.tick() => {}
+                    }
+                    let strategy = strategy.clone();
+                    let provider = provider.clone();
+                    let span = Span::current();
+                    // Join blocking maintenance before releasing the shutdown guard.
+                    let result = tokio::task::spawn_blocking(move || -> eyre::Result<_> {
+                        let _entered = span.enter();
+                        let retired = retired || retirement::try_retire(&strategy, &provider)?;
+                        let pruned = retirement::prune_finalized(&strategy, &provider, last_pruned, checkpoint_history)?;
+                        Ok((retired, pruned))
+                    }).await;
+                    match result {
+                        Ok(Ok((is_retired, pruned))) => { retired = is_retired; last_pruned = pruned; }
+                        Ok(Err(error)) => tracing::error!(target: "pbt::persistence", %error, "PBT checkpoint maintenance deferred"),
+                        Err(error) => {
+                            tracing::error!(target: "pbt::persistence", %error, "PBT checkpoint maintenance task failed");
+                            return
                         }
                     }
-                },
-            );
-        }
+                }
+            },
+        );
         let strategy: Arc<dyn StateRootStrategy<EthPrimitives, N::Provider, N::Evm>> =
             self.strategy;
         Ok(validator.with_state_root_strategy(strategy))
@@ -383,7 +411,7 @@ fn prepare_chain(
             store.is_empty()?,
             "PBT checkpoint directory is populated but chain-config is missing"
         );
-        store.save_block(chain.genesis_hash(), &state)?;
+        store.save_block_with_number(chain.genesis_hash(), 0, &state)?;
         reth_fs_util::atomic_write_file(&path, |file| {
             std::io::Write::write_all(file, &configuration)
         })?;
@@ -392,6 +420,15 @@ fn prepare_chain(
 }
 
 const CONFIGURATION_LENGTH: usize = 4 + 32 + 8;
+const DEFAULT_CHECKPOINT_HISTORY: u64 = 64;
+
+fn parse_resource_budget(name: &str, value: OsString) -> eyre::Result<usize> {
+    value
+        .to_str()
+        .ok_or_else(|| eyre::eyre!("{name} must be a nonnegative integer"))?
+        .parse()
+        .wrap_err_with(|| format!("{name} must be a nonnegative integer"))
+}
 
 fn lock_directory(directory: &Path) -> eyre::Result<File> {
     reth_fs_util::create_dir_all(directory)?;
@@ -409,12 +446,25 @@ fn lock_directory(directory: &Path) -> eyre::Result<File> {
     }
 }
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug)]
 struct Startup {
     migration: Option<MigrationFiles>,
     obsolete_checkpoints: Vec<B256>,
     catchup: CatchupLimits,
     keep_mpt: bool,
+    checkpoint_history: u64,
+}
+
+impl Default for Startup {
+    fn default() -> Self {
+        Self {
+            migration: None,
+            obsolete_checkpoints: Vec::new(),
+            catchup: CatchupLimits::default(),
+            keep_mpt: false,
+            checkpoint_history: DEFAULT_CHECKPOINT_HISTORY,
+        }
+    }
 }
 
 impl Startup {
@@ -454,7 +504,7 @@ impl Startup {
             })
             .transpose()?
             .unwrap_or_default();
-        Ok(Self { migration, obsolete_checkpoints, catchup, keep_mpt: false })
+        Ok(Self { migration, obsolete_checkpoints, catchup, ..Default::default() })
     }
 
     #[cfg(test)]
@@ -681,7 +731,7 @@ impl Startup {
                 provider.bal_store().insert(header.num_hash(), raw)?;
                 provider.bal_store().flush(&[header.num_hash()])?;
             }
-            strategy.store().save_block(header.hash(), &next)?;
+            strategy.store().save_block_with_number(header.hash(), header.number(), &next)?;
             state = next;
         }
         Ok(())
@@ -806,9 +856,29 @@ mod tests {
         key,
         migration::{ArtifactError, Artifacts},
         persistence::StoreError,
-        Blake3Hasher,
+        Blake3Hasher, TreeHasher,
     };
-    use std::{sync::Mutex, time::Duration};
+    use std::{
+        cell::RefCell,
+        sync::{mpsc, Mutex},
+        time::Duration,
+    };
+
+    thread_local! {
+        static RETIREMENT_PAUSE: RefCell<Option<Box<dyn FnOnce()>>> = const { RefCell::new(None) };
+    }
+
+    #[derive(Clone, Debug)]
+    struct RetirementHasher;
+
+    impl TreeHasher for RetirementHasher {
+        fn hash(parts: &[&[u8]]) -> B256 {
+            if let Some(pause) = RETIREMENT_PAUSE.with(|pause| pause.borrow_mut().take()) {
+                pause();
+            }
+            Blake3Hasher::hash(parts)
+        }
+    }
 
     type TestNode = NodeTestContext<Adapter<EthereumNode>, PbtAddOns<Adapter<EthereumNode>>>;
 
@@ -1747,7 +1817,7 @@ mod tests {
         let mut header = chain.genesis_header().clone();
         header.state_root = state.root();
         let header = SealedHeader::seal_slow(header);
-        store.save_block(header.hash(), &state)?;
+        store.save_block_with_number(header.hash(), header.number(), &state)?;
         let mut next = header.clone().into_header();
         next.parent_hash = header.hash();
         next.number += 1;
@@ -1871,6 +1941,150 @@ mod tests {
             assert_eq!(state.root(), tip.state_root);
             assert_eq!(state.account(recipient).unwrap().balance, U256::from(17));
         }
+        Ok(())
+    }
+
+    #[test]
+    fn resource_budgets_reject_invalid_values() {
+        assert_eq!(parse_resource_budget("PBT_CACHE_MAX_BYTES", "0".into()).unwrap(), 0);
+        assert_eq!(
+            parse_resource_budget("PBT_IMPORT_MAX_LEAVES", "1048576".into()).unwrap(),
+            1_048_576
+        );
+        for value in ["-1", "many", "184467440737095516160"] {
+            assert_eq!(
+                parse_resource_budget("PBT_IMPORT_MAX_LEAVES", value.into())
+                    .unwrap_err()
+                    .to_string(),
+                "PBT_IMPORT_MAX_LEAVES must be a nonnegative integer"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn pbt_rejects_mpt_simulation_root_configuration() -> eyre::Result<()> {
+        let directory = tempfile::tempdir()?;
+        let path = directory.path().join("pbt");
+        let store = SnapshotStore::open(&path, DecodeLimits::default())?;
+        let chain =
+            prepare_chain((*test_chain_spec(EthereumHardfork::Amsterdam)).clone(), 0, &store)?;
+        let result = E2ETestSetupBuilder::<RestartNode>::new(1, chain)
+            .with_node(move |_| RestartNode { checkpoints: path.clone(), ..Default::default() })
+            .with_node_config_modifier(|mut config| {
+                config.rpc.rpc_compute_state_root_for_eth_simulate = true;
+                config
+            })
+            .build_single()
+            .await;
+        let error = match result {
+            Ok(_) => eyre::bail!("PBT accepted MPT simulation roots"),
+            Err(error) => error,
+        };
+        assert_eq!(
+            error.to_string(),
+            "--rpc.compute-state-root-for-eth-simulate is unsupported with PBT"
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn finalized_cleanup_keeps_history_and_retirement_checkpoint() -> eyre::Result<()> {
+        let directory = tempfile::tempdir()?;
+        let path = directory.path().join("pbt");
+        let store = Arc::new(SnapshotStore::open(&path, DecodeLimits::default())?);
+        let chain =
+            prepare_chain((*test_chain_spec(EthereumHardfork::Amsterdam)).clone(), 0, &store)?;
+        let backfill_path = path.clone();
+        let (mut node, _) = E2ETestSetupBuilder::<RestartNode>::new(1, chain)
+            .with_node(move |_| RestartNode {
+                checkpoints: path.clone(),
+                startup: Startup { keep_mpt: true, ..Default::default() },
+                ..Default::default()
+            })
+            .with_tree_config_modifier(|config| {
+                config.with_persistence_threshold(0).with_memory_block_buffer_target(0)
+            })
+            .with_backfill(move |_| {
+                PbtBackfill::new(
+                    Arc::new(PbtStateRootStrategy::new(
+                        Arc::new(
+                            SnapshotStore::open(&backfill_path, DecodeLimits::default()).unwrap(),
+                        ),
+                        0,
+                    )),
+                    CatchupLimits::default(),
+                )
+            })
+            .build_single()
+            .await?;
+        node.set_finality(Finality::Keep);
+        let genesis = node.block_hash(0);
+        let canonical = node.advance_blocks(4).await?;
+        let fork = node.advance_fork(canonical[0].block().hash(), 2).await?;
+        node.reorg_to(canonical[3].block().hash()).await?;
+        let unknown = B256::repeat_byte(0xab);
+        let state = store.load_block(canonical[0].block().hash())?;
+        store.save_block_with_number(unknown, 1, &state)?;
+        let mut orphan = state.clone();
+        orphan.set_account(
+            Address::repeat_byte(0xac),
+            AccountData { nonce: 7, ..Default::default() },
+        )?;
+        store.save(&orphan)?;
+        node.set_finality(Finality::Head);
+        let finalized = node.advance_block().await?;
+        node.wait_for_persisted_state(finalized.block().number()).await?;
+        let strategy = PbtStateRootStrategy::new(store.clone(), 0);
+        assert_eq!(
+            retirement::prune_finalized(&strategy, &node.inner.provider, None, 1)?,
+            Some(finalized.block().hash())
+        );
+        assert!(!store.contains_block(canonical[2].block().hash())?);
+        assert!(!store.contains_block(fork[1].block().hash())?);
+        assert!(!store.contains_block(unknown)?);
+        assert!(store.contains_block(canonical[3].block().hash())?);
+        assert!(store.contains_block(genesis)?);
+        assert!(matches!(store.load(orphan.root()), Err(StoreError::Io(_))));
+        let verifying_store = Arc::new(SnapshotStore::<RetirementHasher>::open(
+            store.path(),
+            DecodeLimits::default(),
+        )?);
+        let verifying_strategy = PbtStateRootStrategy::new(verifying_store, 0);
+        let provider = node.inner.provider.clone();
+        let (started_sender, started_receiver) = mpsc::channel();
+        let (resume_sender, resume_receiver) = mpsc::channel();
+        let verifier = tokio::task::spawn_blocking(move || {
+            RETIREMENT_PAUSE.with(|pause| {
+                *pause.borrow_mut() = Some(Box::new(move || {
+                    started_sender.send(()).unwrap();
+                    resume_receiver.recv_timeout(Duration::from_secs(20)).unwrap();
+                }))
+            });
+            retirement::try_retire(&verifying_strategy, &provider)
+        });
+        started_receiver.recv_timeout(Duration::from_secs(10))?;
+        let advanced = tokio::time::timeout(Duration::from_secs(10), async {
+            let block = node.advance_block().await?;
+            node.wait_for_persisted_state(block.block().number()).await?;
+            Ok::<_, eyre::Report>(block)
+        })
+        .await;
+        resume_sender.send(())?;
+        let retired = verifier.await??;
+        let advanced = advanced??;
+        assert!(advanced.block().number() > finalized.block().number());
+        assert!(retired);
+        assert_eq!(
+            node.inner.provider.database_provider_ro()?.mpt_retired_at()?,
+            Some(finalized.block().number())
+        );
+        let tip = node.advance_blocks(2).await?;
+        let tip = tip.last().unwrap().block();
+        node.wait_for_persisted_state(tip.number()).await?;
+        retirement::prune_finalized(&strategy, &node.inner.provider, None, 0)?;
+        assert!(store.contains_block(finalized.block().hash())?);
+        assert!(store.contains_block(genesis)?);
+        retirement::validate_startup(&strategy, &node.inner.provider)?;
         Ok(())
     }
 

@@ -57,7 +57,7 @@ impl ProofRpc {
             tokio::task::spawn_blocking(move || -> RpcResult<ProofResponse> {
                 // Keep the permit until blocking work ends, including if the request is cancelled.
                 let _permit = permit;
-                let state = context.store.load_block(block_hash).map_err(|error| {
+                let state = context.store.proof_block(block_hash, &keys).map_err(|error| {
                     ErrorObjectOwned::owned(
                         INTERNAL_ERROR_CODE,
                         "PBT checkpoint could not be loaded",
@@ -66,8 +66,16 @@ impl ProofRpc {
                 })?;
                 let proofs = keys
                     .into_iter()
-                    .map(|key| {
-                        let proof = state.tree().proof(&key);
+                    .zip(state.proofs)
+                    .map(|(key, proof)| {
+                        let value = match &proof.terminal {
+                            ProofTerminal::Leaf { key: stored, value }
+                                if stored.as_slice() == key.as_ref() =>
+                            {
+                                Some(*value)
+                            }
+                            _ => None,
+                        };
                         let terminal = match proof.terminal {
                             ProofTerminal::Empty => RpcTerminal::Empty,
                             ProofTerminal::Leaf { key, value } => {
@@ -78,7 +86,7 @@ impl ProofRpc {
                             }
                         };
                         KeyProof {
-                            value: state.tree().get(&key),
+                            value,
                             key,
                             steps: proof
                                 .steps
@@ -96,7 +104,7 @@ impl ProofRpc {
                 Ok(ProofResponse {
                     version: PROOF_VERSION,
                     block_hash,
-                    pbt_state_root: state.root(),
+                    pbt_state_root: state.root,
                     proofs,
                 })
             })

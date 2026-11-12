@@ -232,7 +232,7 @@ where
             let mpt_ms =
                 if retired.is_none() { mpt_started.elapsed().as_secs_f64() * 1000.0 } else { 0.0 };
             let checkpoint_started = Instant::now();
-            store.save(&state).map_err(|err| StateRootTaskError::Other(err.into()))?;
+            store.cache_candidate(&state).map_err(|err| StateRootTaskError::Other(err.into()))?;
             let checkpoint_elapsed = checkpoint_started.elapsed();
             info!(
                 target: "engine::pbt",
@@ -246,7 +246,8 @@ where
                 pbt_root = ?state.root(),
                 pbt_update_ms = update_elapsed.as_secs_f64() * 1000.0,
                 mpt_ms,
-                checkpoint_ms = checkpoint_elapsed.as_secs_f64() * 1000.0,
+                checkpoint_ms = 0.0,
+                candidate_cache_ms = checkpoint_elapsed.as_secs_f64() * 1000.0,
                 total_ms = started.elapsed().as_secs_f64() * 1000.0,
                 "PBT state root timings"
             );
@@ -325,7 +326,9 @@ where
         let checkpoint_started = Instant::now();
         let checkpointed = outcome.state_root == block.header().state_root();
         if checkpointed {
-            self.store.save_block(block.hash(), &state).map_err(ProviderError::other)?;
+            self.store
+                .save_block_with_number(block.hash(), block.number(), &state)
+                .map_err(ProviderError::other)?;
         }
         let checkpoint_ms =
             if checkpointed { checkpoint_started.elapsed().as_secs_f64() * 1000.0 } else { 0.0 };

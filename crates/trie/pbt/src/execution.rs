@@ -46,7 +46,11 @@ fn apply_bundle_with<H: TreeHasher>(
         } else if let Some(code) =
             info.code.as_ref().or_else(|| bundle.contracts.get(&info.code_hash))
         {
-            code.original_bytes()
+            let bytes = code.original_bytes();
+            if keccak256(&bytes) != info.code_hash {
+                return Err(ExecutionError::MissingCode(info.code_hash));
+            }
+            bytes
         } else if let Some(account) =
             parent.account(*address).filter(|account| keccak256(&account.code) == info.code_hash)
         {
@@ -54,9 +58,6 @@ fn apply_bundle_with<H: TreeHasher>(
         } else {
             return Err(ExecutionError::MissingCode(info.code_hash));
         };
-        if !info.code_hash.is_zero() && keccak256(&code) != info.code_hash {
-            return Err(ExecutionError::MissingCode(info.code_hash));
-        }
         if account.was_destroyed() {
             updates.push(StateUpdate::ClearStorage { address: *address });
         }
