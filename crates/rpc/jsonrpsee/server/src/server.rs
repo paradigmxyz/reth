@@ -969,9 +969,6 @@ where
 /// Reads `body` as a batch of at most `max_len` entries, or returns the response to a batch that
 /// can't be read.
 fn parse_batch(body: &[u8], max_len: usize) -> Result<Batch<'_>, MethodResponse> {
-    let parse_error = || MethodResponse::error(Id::Null, ErrorObject::from(ErrorCode::ParseError));
-    // Decoding skips the members it doesn't know without checking that they are UTF-8.
-    let body = std::str::from_utf8(body).map_err(|_| parse_error())?;
     let mut entries = Vec::new();
     let mut too_big = false;
 
@@ -979,7 +976,7 @@ fn parse_batch(body: &[u8], max_len: usize) -> Result<Batch<'_>, MethodResponse>
     // entry doesn't decode, the batch is read again from that entry on, classifying each raw entry
     // to answer the invalid ones in place.
     for raw in [false, true] {
-        let mut deserializer = serde_json::Deserializer::from_str(body);
+        let mut deserializer = serde_json::Deserializer::from_slice(body);
         let read = BatchSeed { max_len, too_big: &mut too_big, entries: &mut entries, raw }
             .deserialize(&mut deserializer)
             .and_then(|()| deserializer.end());
@@ -994,7 +991,7 @@ fn parse_batch(body: &[u8], max_len: usize) -> Result<Batch<'_>, MethodResponse>
         }
     }
 
-    Err(parse_error())
+    Err(MethodResponse::error(Id::Null, ErrorObject::from(ErrorCode::ParseError)))
 }
 
 /// Classifies a raw batch entry as a call, a notification or an invalid request.
@@ -1020,7 +1017,10 @@ fn parse_batch_entry(call: &JsonRawValue) -> Result<BatchEntry<'_>, BatchEntryEr
 }
 
 /// A valid batch entry: a call if it has an `id`, a notification otherwise.
+///
+/// Unknown members use the raw pass, which validates UTF-8 even in ignored values.
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct ValidBatchEntry<'a> {
     jsonrpc: TwoPointZero,
     #[serde(borrow, default, deserialize_with = "deserialize_present_id")]
@@ -1109,17 +1109,21 @@ impl<'de> Visitor<'de> for BatchSeed<'_, 'de> {
         }
 
         loop {
+            if self.entries.len() == self.max_len {
+                // Read the excess entry without decoding or allocating its fields.
+                if seq.next_element::<&'de JsonRawValue>()?.is_some() {
+                    *self.too_big = true;
+                    return Err(A::Error::custom("batch too big"));
+                }
+                return Ok(());
+            }
+
             let entry = if self.raw {
                 seq.next_element::<&'de JsonRawValue>()?.map(parse_batch_entry)
             } else {
                 seq.next_element_seed(ValidBatchEntrySeed)?.map(|entry| Ok(entry.into()))
             };
             let Some(entry) = entry else { return Ok(()) };
-
-            if self.entries.len() == self.max_len {
-                *self.too_big = true;
-                return Err(A::Error::custom("batch too big"));
-            }
 
             // Not preallocated from the size hint, which the input controls.
             self.entries.push(entry);
@@ -1184,7 +1188,7 @@ mod tests {
 
     #[test]
     fn batch_with_invalid_utf8_is_a_parse_error() {
-        // In a member that is ignored, so only reading the batch as text notices.
+        // Unknown members must still be validated as UTF-8 by the raw pass.
         let body = b"[{\"jsonrpc\":\"2.0\",\"method\":\"m\",\"id\":1,\"x\":\"\xff\"}]";
         let rp = parse_batch(body, usize::MAX).unwrap_err();
         assert_eq!(rp.as_error_code(), Some(ErrorCode::ParseError.code()));
@@ -1199,5 +1203,30 @@ mod tests {
             [Ok(BatchEntry::Call(call)), Ok(BatchEntry::Notification(notification))]
                 if call.id == Id::Null && call.method == "a" && notification.method == "b"
         ));
+    }
+
+    #[test_case(&[CALL.as_bytes(), CALL.as_bytes(), b"\"\xff\""], 1, reject_too_big_batch_request(1); "invalid utf8 after excess call")]
+    #[test_case(&[br#"{"id":2}"#, CALL.as_bytes(), b"\"\xff\""], 1, reject_too_big_batch_request(1); "invalid utf8 after fallback exceeds limit")]
+    #[test_case(&[CALL.as_bytes(), b"\"\xff\""], 1, ErrorCode::ParseError.into(); "invalid utf8 in excess entry")]
+    #[test_case(&[b"{\"jsonrpc\":\"2.0\",\"method\":\"m\",\"x\":\"\xff\"}", CALL.as_bytes()], 1, ErrorCode::ParseError.into(); "invalid utf8 before excess entry")]
+    #[test_case(&[CALL.as_bytes(), br#"{"jsonrpc"#], 1, ErrorCode::ParseError.into(); "malformed excess entry")]
+    #[test_case(&[CALL.as_bytes(), b"7", b"\"\xff\""], 1, reject_too_big_batch_request(1); "invalid utf8 after excess scalar")]
+    #[test_case(&[CALL.as_bytes(), b"\"\xff\""], 0, reject_too_big_batch_request(0); "zero limit ignores tail")]
+    fn batch_limit_preserves_parse_errors(
+        entries: &[&[u8]],
+        max_len: usize,
+        expected: ErrorObject<'_>,
+    ) {
+        let body = [b"[".as_slice(), entries.join(b",".as_slice()).as_slice(), b"]"].concat();
+        assert_eq!(
+            parse_batch(&body, max_len).unwrap_err().into_json(),
+            MethodResponse::error(Id::Null, expected).into_json()
+        );
+    }
+
+    #[test_case(b"[]", 0; "empty batch")]
+    #[test_case(b"[{\"jsonrpc\":\"2.0\",\"method\":\"m\"}]", 1; "notification")]
+    fn batch_at_limit_is_accepted(body: &[u8], max_len: usize) {
+        assert_eq!(parse_batch(body, max_len).unwrap().len(), max_len);
     }
 }
