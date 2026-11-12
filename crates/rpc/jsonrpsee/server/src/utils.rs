@@ -62,6 +62,11 @@ const ACCEPT_ERROR_BACKOFF: Duration = Duration::from_secs(1);
 /// matching geth.
 pub(crate) const DEFAULT_WRITE_TIMEOUT: Duration = Duration::from_secs(10);
 
+/// How long a connection may take to finish its in-flight requests once the server is stopped,
+/// before it is dropped. hyper's graceful shutdown waits forever on a peer that holds a partial
+/// request.
+pub(crate) const SHUTDOWN_GRACE_PERIOD: Duration = Duration::from_secs(10);
+
 /// Notifies `request_received` whenever hyper passes a request to the service.
 #[derive(Debug, Clone)]
 pub(crate) struct NotifyOnRequest<S> {
@@ -104,7 +109,8 @@ pub(crate) async fn no_request_within(
 }
 
 /// Serve a service over a TCP connection with graceful shutdown.
-/// This means that pending requests will be completed before the server is stopped.
+/// This means that pending requests are given 10 seconds to complete before the connection is
+/// closed.
 ///
 /// Connections which don't send a request within 30 seconds are closed.
 pub async fn serve_with_graceful_shutdown<S, B, I>(
@@ -143,7 +149,7 @@ where
         // the connection and poll it until it finishes.
         _ = &mut stopped => {
             conn.as_mut().graceful_shutdown();
-            conn.await
+            tokio::time::timeout(SHUTDOWN_GRACE_PERIOD, conn).await.unwrap_or_else(|e| Err(e.into()))
         }
         err = no_request_within(&request_received, Some(DEFAULT_FIRST_REQUEST_TIMEOUT)) => Err(err),
     }

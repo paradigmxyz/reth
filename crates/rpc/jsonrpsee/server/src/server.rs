@@ -36,6 +36,7 @@ use crate::{
     utils::{
         accept_error_backoff, deserialize_notification, no_request_within, NotifyOnRequest,
         PermitBody, WriteTimeoutIo, DEFAULT_FIRST_REQUEST_TIMEOUT, DEFAULT_WRITE_TIMEOUT,
+        SHUTDOWN_GRACE_PERIOD,
     },
     HttpBody, HttpRequest, HttpResponse, LOG_TARGET,
 };
@@ -881,7 +882,9 @@ fn process_connection<RpcMiddleware, HttpMiddleware, Body>(
                 // NOTE: the connection should continue to be polled until shutdown can finish.
                 // Thus, both lines below are needed and not a nit.
                 conn.as_mut().graceful_shutdown();
-                conn.await
+                tokio::time::timeout(SHUTDOWN_GRACE_PERIOD, conn)
+                    .await
+                    .unwrap_or_else(|e| Err(e.into()))
             }
             err = no_request_within(&request_received, first_request_timeout) => Err(err),
         };
