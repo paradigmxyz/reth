@@ -951,6 +951,19 @@ where
         namespaces
             .iter()
             .map(|namespace| {
+                // `rpc` lists the namespaces of the transport it is built for, so it can't be
+                // cached in `self.modules`
+                if matches!(namespace, RethRpcModule::Rpc) {
+                    return RPCApi::new(
+                        namespaces
+                            .iter()
+                            .map(|module| (module.to_string(), "1.0".to_string()))
+                            .collect(),
+                    )
+                    .into_rpc()
+                    .into();
+                }
+
                 self.modules
                     .entry(namespace.clone())
                     .or_insert_with(|| match namespace.clone() {
@@ -1003,14 +1016,6 @@ where
                         )
                         .into_rpc()
                         .into(),
-                        RethRpcModule::Rpc => RPCApi::new(
-                            namespaces
-                                .iter()
-                                .map(|module| (module.to_string(), "1.0".to_string()))
-                                .collect(),
-                        )
-                        .into_rpc()
-                        .into(),
                         RethRpcModule::Ots => OtterscanApi::new(eth_api.clone()).into_rpc().into(),
                         RethRpcModule::Reth => RethApi::new(
                             self.provider.clone(),
@@ -1026,9 +1031,10 @@ where
                                 .into_rpc()
                                 .into()
                         }
-                        // these are implementation specific and need to be handled during
-                        // initialization and should be registered via extend_rpc_modules in the
-                        // nodebuilder rpc addon stack
+                        // `rpc` is built above, the others are implementation specific and need
+                        // to be handled during initialization and should be registered via
+                        // extend_rpc_modules in the nodebuilder rpc addon stack
+                        RethRpcModule::Rpc |
                         RethRpcModule::Flashbots |
                         RethRpcModule::Testing |
                         RethRpcModule::Other(_) => Default::default(),

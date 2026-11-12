@@ -5,7 +5,8 @@ use alloy_primitives::{Address, Signature};
 use alloy_rpc_types_eth::TransactionRequest;
 use dyn_clone::DynClone;
 use reth_rpc_eth_types::SignError;
-use std::result;
+use std::{result, sync::Arc};
+use tokio::sync::Mutex;
 
 /// Result returned by [`EthSigner`] methods.
 pub type Result<T> = result::Result<T, SignError>;
@@ -29,6 +30,15 @@ pub trait EthSigner<T, TxReq = TransactionRequest>: Send + Sync + DynClone {
 
     /// Encodes and signs the typed data according EIP-712. Payload must implement Eip712 trait.
     fn sign_typed_data(&self, address: Address, payload: &TypedData) -> Result<Signature>;
+
+    /// Returns the lock `eth_sendTransaction` holds for this signer's accounts from filling the
+    /// nonce until the signed transaction is in the pool, so concurrent requests from one account
+    /// get distinct nonces.
+    ///
+    /// `None` leaves those requests unserialized.
+    fn nonce_lock(&self) -> Option<Arc<Mutex<()>>> {
+        None
+    }
 }
 
 dyn_clone::clone_trait_object!(<T, TxReq> EthSigner<T, TxReq>);
