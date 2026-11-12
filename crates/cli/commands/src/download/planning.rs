@@ -234,6 +234,13 @@ pub(crate) fn collect_planned_archives(
             );
         }
 
+        // An empty set would download nothing while the component counts as downloaded.
+        if let Some(ComponentManifest::Files(set)) = manifest.component(*ty) &&
+            set.archives.is_empty()
+        {
+            eyre::bail!("Invalid modular manifest: {} has no archives", ty.key());
+        }
+
         total_download_size += manifest.size_for_distance(*ty, distance);
         total_output_size += manifest.output_size_for_distance(*ty, distance);
 
@@ -568,6 +575,28 @@ mod tests {
                 ]
             })
         );
+    }
+
+    #[test]
+    fn collect_planned_archives_rejects_empty_archive_set() {
+        let manifest = SnapshotManifest {
+            block: 1,
+            chain_id: 1,
+            storage_version: 2,
+            timestamp: 0,
+            base_url: Some("https://example.com".to_string()),
+            reth_version: None,
+            components: BTreeMap::from([(
+                SnapshotComponentType::RocksdbIndices.key().to_string(),
+                ComponentManifest::Files(ArchiveSet { archives: vec![] }),
+            )]),
+            extensions: Default::default(),
+        };
+        let selections =
+            BTreeMap::from([(SnapshotComponentType::RocksdbIndices, ComponentSelection::All)]);
+
+        let err = collect_planned_archives(&manifest, &selections).unwrap_err();
+        assert_eq!(err.to_string(), "Invalid modular manifest: rocksdb_indices has no archives");
     }
 
     #[test]

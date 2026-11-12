@@ -245,7 +245,7 @@ pub enum SnapshotComponentType {
     AccountChangesets,
     /// Storage changeset static files. Chunked.
     StorageChangesets,
-    /// RocksDB index files. One archive per SST file plus one for the remaining files.
+    /// RocksDB index files. One archive per SST or blob file plus one for the remaining files.
     /// Optional and archive-only.
     RocksdbIndices,
 }
@@ -1078,7 +1078,7 @@ fn package_single_component(
     Ok((size, output_files))
 }
 
-/// Packages each RocksDB SST file into its own archive and the remaining files into one.
+/// Packages each RocksDB SST and blob file into its own archive and the remaining files into one.
 ///
 /// SST archives are written to `rocksdb/{file_stem}-{blake3}.tar.zst`, so an unchanged SST gets
 /// the same archive name in every snapshot and publishers can upload it once. The file stem
@@ -1091,11 +1091,11 @@ fn package_rocksdb_archives(
     files: Vec<PlannedFile>,
     previous: Option<&SnapshotManifest>,
 ) -> Result<Vec<SingleArchive>> {
-    // Only SST files directly under the RocksDB directory get their own archive: their file
-    // names are unique there, while nested directories may repeat them.
+    // Only immutable table and blob files directly under the RocksDB directory get their own
+    // archive: their file numbers are unique there, while nested directories may repeat them.
     let (sst_files, other_files): (Vec<_>, Vec<_>) = files.into_iter().partition(|file| {
         file.relative_path.parent() == Some(Path::new("rocksdb")) &&
-            file.relative_path.extension().is_some_and(|ext| ext == "sst")
+            file.relative_path.extension().is_some_and(|ext| ext == "sst" || ext == "blob")
     });
 
     // Published SST archives by the file they extract, with absolute URLs.
@@ -1939,6 +1939,7 @@ mod tests {
         std::fs::write(rocksdb_dir.join("MANIFEST-000001"), b"manifest").unwrap();
         std::fs::write(rocksdb_dir.join("000007.sst"), b"sst-7").unwrap();
         std::fs::write(rocksdb_dir.join("000009.sst"), b"sst-9").unwrap();
+        std::fs::write(rocksdb_dir.join("000010.blob"), b"blob-10").unwrap();
         // A nested SST with a top-level file name stays in the shared archive.
         std::fs::create_dir_all(rocksdb_dir.join("checkpoint")).unwrap();
         std::fs::write(rocksdb_dir.join("checkpoint/000007.sst"), b"sst-7").unwrap();
@@ -1959,6 +1960,7 @@ mod tests {
             [
                 format!("rocksdb/000007-{sst_7_hash}.tar.zst"),
                 format!("rocksdb/000009-{sst_9_hash}.tar.zst"),
+                format!("rocksdb/000010-{}.tar.zst", blake3::hash(b"blob-10").to_hex()),
                 "rocksdb_indices.tar.zst".to_string(),
             ]
         );
@@ -1979,11 +1981,11 @@ mod tests {
         );
         assert_eq!(set.archives[0].decompressed_size, 5);
         assert_eq!(
-            set.archives[2].output_files.iter().map(|file| file.path.as_str()).collect::<Vec<_>>(),
+            set.archives[3].output_files.iter().map(|file| file.path.as_str()).collect::<Vec<_>>(),
             ["rocksdb/CURRENT", "rocksdb/MANIFEST-000001", "rocksdb/checkpoint/000007.sst"]
         );
         assert!(!output.path().join("rocksdb/000007.tar.zst.tmp").exists());
-        assert_eq!(manifest.chunks_for_distance(SnapshotComponentType::RocksdbIndices, None), 3);
+        assert_eq!(manifest.chunks_for_distance(SnapshotComponentType::RocksdbIndices, None), 4);
 
         // An unchanged SST keeps its archive name in a later snapshot, so publishers can reuse it.
         std::fs::remove_file(rocksdb_dir.join("000009.sst")).unwrap();
@@ -1999,7 +2001,7 @@ mod tests {
         };
         assert_eq!(later_set.archives[0].file, set.archives[0].file);
         assert_eq!(
-            later_set.archives[1].file,
+            later_set.archives[2].file,
             format!("rocksdb/000011-{}.tar.zst", blake3::hash(b"sst-11").to_hex())
         );
     }
