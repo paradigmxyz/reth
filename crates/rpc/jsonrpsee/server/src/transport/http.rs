@@ -9,16 +9,18 @@ use jsonrpsee_core::{
 
 /// Returns true if the `content_type` header indicates a valid JSON message.
 ///
-/// Only the media type is compared. Everything after the first `;` is a parameter list, which may
-/// be spaced freely and may quote its values, so comparing the whole header would reject spellings
-/// that mean the same type, such as `application/json; charset="utf-8"`.
+/// Only the media type is compared. The parameter list after it may be spaced freely and may quote
+/// its values, so comparing the whole header would reject spellings that mean the same type, such
+/// as `application/json; charset="utf-8"`. The media type is matched as a prefix rather than split
+/// off and trimmed, so rejecting another type never walks the whitespace a client put after it.
 fn is_json(content_type: Option<&hyper::header::HeaderValue>) -> bool {
     content_type.and_then(|val| val.to_str().ok()).is_some_and(|content| {
-        let (media_type, _) = content.split_once(';').unwrap_or((content, ""));
-        let media_type = media_type.trim();
-
-        media_type.eq_ignore_ascii_case("application/json") ||
-            media_type.eq_ignore_ascii_case("application/json-rpc")
+        ["application/json", "application/json-rpc"].into_iter().any(|media_type| {
+            content.split_at_checked(media_type.len()).is_some_and(|(prefix, params)| {
+                prefix.eq_ignore_ascii_case(media_type) &&
+                    matches!(params.trim_ascii_start().as_bytes(), [] | [b';', ..])
+            })
+        })
     })
 }
 
@@ -183,6 +185,7 @@ mod tests {
             "",
             "text/plain",
             "application/jsonx",
+            "application/json x",
             "application/json-rpcx",
             "application/octet-stream; charset=utf-8",
         ] {
