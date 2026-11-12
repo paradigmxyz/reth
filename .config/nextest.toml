@@ -1,6 +1,3 @@
-[test-groups.pbt-node]
-max-threads = 1
-
 [profile.default]
 retries = { backoff = "exponential", count = 2, delay = "2s", jitter = true }
 slow-timeout = { period = "30s", terminate-after = 2 }
@@ -27,8 +24,3 @@ slow-timeout = { period = "2m", terminate-after = 10 }
 [[profile.default.overrides]]
 filter = "package(reth-node-ethereum) and binary(e2e)"
 slow-timeout = { period = "1m", terminate-after = 5 }
-
-# Each test starts a complete node with its own state caches.
-[[profile.default.overrides]]
-filter = "package(reth-node-pbt)"
-test-group = "pbt-node"

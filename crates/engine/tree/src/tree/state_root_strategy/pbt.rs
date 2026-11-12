@@ -209,8 +209,8 @@ where
         if ctx.timestamp() < self.activation_timestamp && matches!(&retired, Ok(None)) {
             return <DefaultStateRootStrategy as StateRootStrategy<N, P, Evm>>::prepare_payload_builder(&self.default, ctx);
         }
-        // Preparation errors are treated as an optional optimization failure by the engine.
-        // Retain a failing output backend so a missing checkpoint cannot select an MPT root.
+        // Retain preparation failures in the output backend so a missing checkpoint
+        // cannot select an MPT root when the payload is completed.
         let parent_number = ctx.parent_header().number();
         let timestamp = ctx.timestamp();
         let parallel = self.parallel;
@@ -223,14 +223,14 @@ where
                     ctx.parent_header().timestamp(),
                 )
             })
-            .map_err(|error| error.to_string());
+            .map_err(Arc::new);
         let store = self.store.clone();
         let factory = ctx.state_provider_factory;
         Ok(Some(PayloadStateRootHandle::from_output("pbt", move |bundle| {
             let started = Instant::now();
-            let parent = parent.as_ref().map_err(|error| {
-                StateRootTaskError::Other(std::io::Error::other(error.clone()).into())
-            })?;
+            let parent = parent
+                .as_ref()
+                .map_err(|error| StateRootTaskError::Other(Box::new(error.clone())))?;
             let update_started = Instant::now();
             let state = if parallel {
                 apply_bundle_parallel(parent, bundle)

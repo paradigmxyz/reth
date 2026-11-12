@@ -1292,13 +1292,6 @@ JIT:
 
           IR, assembly, and bytecode are written to `<datadir>/jit/<spec_id>/<code_hash>/` for each compiled contract. Note that this is not ever cleaned up, and has a non negligible performance overhead.
 
-Extension:
-      --pbt
-          Enable experimental BLAKE3 PBT state commitments using genesis config.binaryTrieTime
-
-      --pbt.parallel
-          Hash dense PBT state-update batches in parallel; sparse updates remain incremental
-
 Logging:
       --log.stdout.format <FORMAT>
           The format to use for logs written to stdout
