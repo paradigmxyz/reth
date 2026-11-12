@@ -11,6 +11,12 @@
 //! with the service via a channel. Whenever the underlying table changes service produces a
 //! [`DiscoveryUpdate`] that listeners will receive.
 //!
+//! Public subnets are limited to ten proven nodes per IPv4 /24 or IPv6 /48, with at most two
+//! per bucket, including proven discoveries retained outside a full routing bucket. Unproven
+//! records do not consume quota. Each bucket retains at most one bucket's worth of overflow
+//! peers until their endpoint proofs expire, without evicting entries to admit new identities.
+//! Peers rejected by subnet limits can still establish endpoint proofs and query the service.
+//!
 //! ## Feature Flags
 //!
 //! - `serde` (default): Enable serde support
@@ -33,7 +39,7 @@ use discv5::{
     kbucket,
     kbucket::{
         BucketInsertResult, Distance, Entry as BucketEntry, InsertResult, KBucketsTable,
-        NodeStatus, MAX_NODES_PER_BUCKET,
+        NodeStatus, UpdateResult, MAX_NODES_PER_BUCKET,
     },
     ConnectionDirection, ConnectionState,
 };
@@ -73,6 +79,7 @@ pub use config::{Discv4Config, Discv4ConfigBuilder};
 mod node;
 use node::{kad_key, NodeKey};
 
+mod filter;
 mod table;
 
 // reexport NodeRecord primitive
@@ -81,7 +88,10 @@ pub use reth_network_peers::NodeRecord;
 #[cfg(any(test, feature = "test-utils"))]
 pub mod test_utils;
 
-use crate::table::PongTable;
+use crate::{
+    filter::{subnet_filter, MAX_NODES_PER_SUBNET_BUCKET, MAX_NODES_PER_SUBNET_TABLE},
+    table::PongTable,
+};
 use reth_net_nat::ResolveNatInterval;
 /// reexport to get public ip.
 pub use reth_net_nat::{external_ip, NatResolver};
@@ -513,6 +523,9 @@ pub struct Discv4Service {
     _tasks: JoinSet<()>,
     /// The routing table.
     kbuckets: KBucketsTable<NodeKey, NodeEntry>,
+    /// Proven overflow discoveries, capped at `MAX_NODES_PER_BUCKET` per routing bucket.
+    /// Their `last_seen` timestamps are refreshed only by validated pongs.
+    at_capacity: Vec<Vec<NodeEntry>>,
     /// Receiver for incoming messages
     ///
     /// Receives incoming messages from the UDP task.
@@ -666,6 +679,7 @@ impl Discv4Service {
             local_node_record,
             shared_node_record,
             _socket: socket,
+            at_capacity: vec![Vec::new(); kbuckets.buckets_iter().count()],
             kbuckets,
             secret_key,
             _tasks: tasks,
@@ -787,6 +801,9 @@ impl Discv4Service {
     /// **Note:** This is a noop if there are no bootnodes.
     pub fn bootstrap(&mut self) {
         for record in self.config.bootstrap_nodes.clone() {
+            if !self.is_subnet_allowed(&record) {
+                continue
+            }
             debug!(target: "discv4", ?record, "pinging boot node");
             let key = kad_key(record.id);
             let entry = NodeEntry::new(record);
@@ -972,10 +989,10 @@ impl Discv4Service {
         self.config.ban_list.ban_peer_until(node_id, until);
     }
 
-    /// Removes a `node_id` from the routing table.
+    /// Removes a `node_id` from the routing table or retained overflow discoveries.
     ///
-    /// This allows applications, for whatever reason, to remove nodes from the local routing
-    /// table. Returns `true` if the node was in the table and `false` otherwise.
+    /// Cancels outstanding pings so a delayed pong cannot rediscover a removed node.
+    /// Returns `true` if the node was tracked and `false` otherwise.
     pub fn remove_node(&mut self, node_id: PeerId) -> bool {
         let key = kad_key(node_id);
         self.remove_key(node_id, key)
@@ -996,7 +1013,15 @@ impl Discv4Service {
     }
 
     fn remove_key(&mut self, node_id: PeerId, key: discv5::Key<NodeKey>) -> bool {
-        let removed = self.kbuckets.remove(&key);
+        self.pending_pings.remove(&node_id);
+        self.queued_pings.retain(|(node, _)| node.id != node_id);
+        let mut removed = self.kbuckets.remove(&key);
+        if let Some(index) = self.kbuckets.get_index(&key) {
+            let nodes = &mut self.at_capacity[index];
+            let len = nodes.len();
+            nodes.retain(|node| node.record.id != node_id);
+            removed |= nodes.len() != len;
+        }
         if removed {
             trace!(target: "discv4", ?node_id, "removed node");
             self.notify(DiscoveryUpdate::Removed(node_id));
@@ -1051,10 +1076,10 @@ impl Discv4Service {
         let key = kad_key(record.id);
         let old_enr = match self.kbuckets.entry(&key) {
             kbucket::Entry::Present(mut entry, _) => {
-                entry.value_mut().update_with_enr(last_enr_seq)
+                entry.value_mut().update_with_enr(record.address, last_enr_seq)
             }
             kbucket::Entry::Pending(mut entry, _) => {
-                entry.value_mut().update_with_enr(last_enr_seq)
+                entry.value_mut().update_with_enr(record.address, last_enr_seq)
             }
             _ => return,
         };
@@ -1072,58 +1097,59 @@ impl Discv4Service {
         };
     }
 
-    /// Callback invoked when we receive a pong from the peer.
-    fn update_on_pong(&mut self, record: NodeRecord, mut last_enr_seq: Option<u64>) {
-        if record.id == *self.local_peer_id() {
-            return
-        }
+    /// Promotes a proven endpoint if it fits the subnet limits.
+    ///
+    /// Returns whether the node is admitted to the routing table. Bonding remains independent
+    /// of admission, so peers outside the table can still query us.
+    fn update_on_pong(&mut self, record: NodeRecord, mut last_enr_seq: Option<u64>) -> bool {
+        let key = kad_key(record.id);
+        let (mut node, status) = match self.kbuckets.entry(&key) {
+            BucketEntry::Present(entry, status) => (entry.value().clone(), status),
+            BucketEntry::Pending(entry, status) => (entry.value().clone(), status),
+            _ => return false,
+        };
 
-        // If EIP868 extension is disabled then we want to ignore this
+        if !node.has_endpoint_proof &&
+            let Some(overflow) = self.node_at_capacity(record.id)
+        {
+            // Preserve the endpoint already announced while transferring its quota slot.
+            node = overflow.clone();
+        }
+        if !node.has_endpoint_proof {
+            // Recheck after proof: other pongs may have filled the quota since the initial ping.
+            if !self.is_subnet_allowed(&record) {
+                self.remove_node(record.id);
+                return false
+            }
+            // The ping may have targeted a different IP than the original, unproven record.
+            node.record = record;
+        }
+        // A bond on a secondary IP must not replace an already proven routing address.
+        node.establish_proof(record.address);
         if !self.config.enable_eip868 {
             last_enr_seq = None;
         }
+        node.update_with_enr(record.address, last_enr_seq);
+        let record = node.record;
 
-        // if the peer included a enr seq in the pong then we can try to request the ENR of that
-        // node
-        let has_enr_seq = last_enr_seq.is_some();
+        if let UpdateResult::Failed(reason) =
+            self.kbuckets.update_node(&key, node, Some(ConnectionState::Connected))
+        {
+            trace!(target: "discv4", ?record, ?reason, "failed to promote proven endpoint");
+            return false
+        }
 
-        let key = kad_key(record.id);
-        match self.kbuckets.entry(&key) {
-            kbucket::Entry::Present(mut entry, old_status) => {
-                // endpoint is now proven
-                entry.value_mut().establish_proof();
-                entry.value_mut().update_with_enr(last_enr_seq);
-
-                if !old_status.is_connected() {
-                    let _ = entry.update(ConnectionState::Connected, Some(old_status.direction));
-                    trace!(target: "discv4", ?record, "added after successful endpoint proof");
-                    self.notify(DiscoveryUpdate::Added(record));
-
-                    if has_enr_seq {
-                        // request the ENR of the node
-                        self.send_enr_request(record);
-                    }
-                }
+        if let Some(index) = self.kbuckets.get_index(&key) {
+            self.at_capacity[index].retain(|node| node.record.id != record.id);
+        }
+        if !status.is_connected() {
+            trace!(target: "discv4", ?record, "added after successful endpoint proof");
+            self.notify(DiscoveryUpdate::Added(record));
+            if last_enr_seq.is_some() {
+                self.send_enr_request(record);
             }
-            kbucket::Entry::Pending(mut entry, mut status) => {
-                // endpoint is now proven
-                entry.value_mut().establish_proof();
-                entry.value_mut().update_with_enr(last_enr_seq);
-
-                if !status.is_connected() {
-                    status.state = ConnectionState::Connected;
-                    let _ = entry.update(status);
-                    trace!(target: "discv4", ?record, "added after successful endpoint proof");
-                    self.notify(DiscoveryUpdate::Added(record));
-
-                    if has_enr_seq {
-                        // request the ENR of the node
-                        self.send_enr_request(record);
-                    }
-                }
-            }
-            _ => {}
-        };
+        }
+        true
     }
 
     /// Adds all nodes
@@ -1139,8 +1165,11 @@ impl Discv4Service {
     /// proof by sending a ping to the node.
     ///
     /// Returns `true` if the record was added successfully, and `false` if the node is either
-    /// already in the table or the record's bucket is full.
+    /// already in the table, its bucket is full, or its subnet quota is exhausted.
     pub fn add_node(&mut self, record: NodeRecord) -> bool {
+        if !self.is_subnet_allowed(&record) {
+            return false
+        }
         let key = kad_key(record.id);
         match self.kbuckets.entry(&key) {
             kbucket::Entry::Absent(entry) => {
@@ -1209,36 +1238,59 @@ impl Discv4Service {
         }
         .into_ipv4_mapped();
 
+        if record.id == *self.local_peer_id() {
+            return
+        }
+
+        // Answer valid pings even when the sender cannot enter the routing table.
+        let pong = Message::Pong(Pong {
+            // we use the actual address of the peer
+            to: record.into(),
+            echo: hash,
+            expire: ping.expire,
+            enr_sq: self.enr_seq(),
+        });
+        self.send_packet(pong, remote_addr);
+
+        if !self.is_subnet_allowed(&record) {
+            trace!(target: "discv4", ?record, "rejecting routing admission, subnet limit reached");
+            // FindNode and ENRRequest require a bond even when the sender cannot enter the table.
+            if !self.has_bond(record.id, record.address) {
+                self.try_ping(record, PingReason::EstablishBond);
+            }
+            return
+        }
+
         let key = kad_key(record.id);
 
         // See also <https://github.com/ethereum/devp2p/blob/master/discv4.md#ping-packet-0x01>:
         // > If no communication with the sender of this ping has occurred within the last 12h, a
         // > ping should be sent in addition to pong in order to receive an endpoint proof.
         //
-        let mut is_new_insert = false;
+        let mut ping_reason = None;
         let mut needs_bond = !self.has_bond(record.id, record.address);
         let mut is_proven = false;
 
         let old_enr = match self.kbuckets.entry(&key) {
             kbucket::Entry::Present(mut entry, _) => {
-                if entry.value().is_expired() {
+                if entry.value().is_expired() && entry.value().matches_ip(record.address) {
                     // If no communication with the sender has occurred within the last 12h, a ping
                     // should be sent in addition to pong in order to receive an endpoint proof.
                     needs_bond = true;
                 } else {
                     is_proven = entry.value().has_endpoint_proof;
                 }
-                entry.value_mut().update_with_enr(ping.enr_sq)
+                entry.value_mut().update_with_enr(record.address, ping.enr_sq)
             }
             kbucket::Entry::Pending(mut entry, _) => {
-                if entry.value().is_expired() {
+                if entry.value().is_expired() && entry.value().matches_ip(record.address) {
                     // If no communication with the sender has occurred within the last 12h, a ping
                     // should be sent in addition to pong in order to receive an endpoint proof.
                     needs_bond = true;
                 } else {
                     is_proven = entry.value().has_endpoint_proof;
                 }
-                entry.value_mut().update_with_enr(ping.enr_sq)
+                entry.value_mut().update_with_enr(record.address, ping.enr_sq)
             }
             kbucket::Entry::Absent(entry) => {
                 let mut node = NodeEntry::new(record);
@@ -1253,22 +1305,12 @@ impl Discv4Service {
                     },
                 ) {
                     BucketInsertResult::Inserted | BucketInsertResult::Pending { .. } => {
-                        // mark as new insert if insert was successful
-                        is_new_insert = true;
+                        ping_reason = Some(PingReason::InitialInsert);
                     }
                     BucketInsertResult::Full => {
-                        // we received a ping but the corresponding bucket for the peer is already
-                        // full, we can't add any additional peers to that bucket, but we still want
-                        // to emit an event that we discovered the node
-                        trace!(target: "discv4", ?record, "discovered new record but bucket is full");
-                        self.notify(DiscoveryUpdate::DiscoveredAtCapacity(record));
-                        needs_bond = true;
+                        ping_reason = Some(PingReason::AtCapacity);
                     }
-                    BucketInsertResult::TooManyIncoming | BucketInsertResult::NodeExists => {
-                        needs_bond = true;
-                        // insert unsuccessful but we still want to send the pong
-                    }
-                    BucketInsertResult::FailedFilter => return,
+                    _ => needs_bond = true,
                 }
 
                 None
@@ -1276,27 +1318,16 @@ impl Discv4Service {
             kbucket::Entry::SelfEntry => return,
         };
 
-        // send the pong first, but the PONG and optionally PING don't need to be send in a
-        // particular order
-        let pong = Message::Pong(Pong {
-            // we use the actual address of the peer
-            to: record.into(),
-            echo: hash,
-            expire: ping.expire,
-            enr_sq: self.enr_seq(),
-        });
-        self.send_packet(pong, remote_addr);
-
         // if node was absent also send a ping to establish the endpoint proof from our end
-        if is_new_insert {
-            self.try_ping(record, PingReason::InitialInsert);
+        if let Some(reason) = ping_reason {
+            self.try_ping(record, reason);
         } else if needs_bond {
             self.try_ping(record, PingReason::EstablishBond);
-        } else {
+        } else if is_proven {
             // if node has been proven, this means we've received a pong and verified its endpoint
             // proof. We've also sent a pong above to verify our endpoint proof, so we can now
             // send our find_nodes request if PingReason::Lookup
-            if is_proven && let Some((_, ctx)) = self.pending_lookup.remove(&record.id) {
+            if let Some((_, ctx)) = self.pending_lookup.remove(&record.id) {
                 if self.pending_find_nodes.contains_key(&record.id) {
                     // there's already another pending request, unmark it so the next round can
                     // try to send it
@@ -1339,7 +1370,7 @@ impl Discv4Service {
         if self.pending_pings.contains_key(&node.id) ||
             self.pending_find_nodes.contains_key(&node.id)
         {
-            if matches!(reason, PingReason::EstablishBond) &&
+            if matches!(reason, PingReason::EstablishBond | PingReason::AtCapacity) &&
                 self.queued_pings.len() < MAX_QUEUED_PINGS
             {
                 self.queued_pings.push_back((node, reason));
@@ -1435,20 +1466,30 @@ impl Discv4Service {
                 }
             }
             PingReason::EstablishBond => {
-                // no initial lookup needed here since the node was already in the table.
+                // Bonding does not start a lookup and may involve peers excluded from the table.
                 self.update_on_pong(node, pong.enr_sq);
             }
             PingReason::RePing => {
                 self.update_on_reping(node, pong.enr_sq);
             }
+            PingReason::AtCapacity => self.on_pong_at_capacity(node, pong.enr_sq),
             PingReason::Lookup(node, ctx) => {
-                self.update_on_pong(node, pong.enr_sq);
+                if !self.update_on_pong(node, pong.enr_sq) {
+                    return
+                }
                 // insert node and assoc. lookup_context into the pending_lookup table to complete
                 // our side of the endpoint proof verification.
                 // Start the lookup timer here - and evict accordingly. Note that this is a separate
                 // timer than the ping_request timer.
                 self.pending_lookup.insert(node.id, (Instant::now(), ctx));
             }
+        }
+
+        // Secondary proofs must not starve revalidation of the retained routing endpoint.
+        if let Some(record) =
+            self.on_entry(remote_id, |entry| entry.is_expired().then_some(entry.record)).flatten()
+        {
+            self.try_ping(record, PingReason::RePing);
         }
     }
 
@@ -1484,11 +1525,11 @@ impl Discv4Service {
         let fork_id = msg.eth_fork_id();
         let (record, old_fork_id) = match self.kbuckets.entry(&key) {
             kbucket::Entry::Present(mut entry, _) => {
-                let id = entry.value_mut().update_with_fork_id(fork_id);
+                let id = entry.value_mut().update_with_fork_id(remote_addr.ip(), fork_id);
                 (entry.value().record, id)
             }
             kbucket::Entry::Pending(mut entry, _) => {
-                let id = entry.value_mut().update_with_fork_id(fork_id);
+                let id = entry.value_mut().update_with_fork_id(remote_addr.ip(), fork_id);
                 (entry.value().record, id)
             }
             _ => return,
@@ -1595,9 +1636,17 @@ impl Discv4Service {
             ctx.add_node(node);
         }
 
-        // get the next closest nodes, not yet queried nodes and start over.
-        let closest =
-            ctx.filter_closest(ALPHA, |node| !self.pending_find_nodes.contains_key(&node.id));
+        // Apply subnet limits before taking ALPHA so rejected candidates do not consume slots.
+        let closest = ctx.filter_map_closest(ALPHA, |node| {
+            // An advertised address must not replace an endpoint we have already proven.
+            let node = self
+                .on_entry(node.id, |entry| entry.has_endpoint_proof.then_some(entry.record))
+                .flatten()
+                .or_else(|| self.node_at_capacity(node.id).map(|entry| entry.record))
+                .unwrap_or(node);
+            (!self.pending_find_nodes.contains_key(&node.id) && self.is_subnet_allowed(&node))
+                .then_some(node)
+        });
 
         for closest in closest {
             let key = kad_key(closest.id);
@@ -1618,12 +1667,10 @@ impl Discv4Service {
                         },
                     ) {
                         BucketInsertResult::Inserted | BucketInsertResult::Pending { .. } => {
-                            // only ping if the node was added to the table
                             self.try_ping(closest, PingReason::Lookup(closest, ctx.clone()))
                         }
                         BucketInsertResult::Full => {
-                            // new node but the node's bucket is already full
-                            self.notify(DiscoveryUpdate::DiscoveredAtCapacity(closest))
+                            self.try_ping(closest, PingReason::AtCapacity);
                         }
                         _ => {}
                     }
@@ -1722,7 +1769,14 @@ impl Discv4Service {
             // remove nodes that failed to pong
             trace!(target: "discv4", num=%failed_pings.len(), "evicting nodes due to failed pong");
             for node_id in failed_pings {
-                self.remove_node(node_id);
+                if self.node_at_capacity(node_id).is_some() {
+                    // Keep the announced overflow quota until proof expiry: unanswered repeat
+                    // pings must not free slots for a stream of fresh identities.
+                    self.queued_pings.retain(|(node, _)| node.id != node_id);
+                    self.kbuckets.remove(&kad_key(node_id));
+                } else {
+                    self.remove_node(node_id);
+                }
             }
         }
 
@@ -1744,6 +1798,17 @@ impl Discv4Service {
         }
 
         self.evict_failed_find_nodes(now);
+
+        let expired = self
+            .at_capacity
+            .iter()
+            .flatten()
+            .filter(|node| now.duration_since(node.last_seen) >= self.config.bond_expiration)
+            .map(|node| node.record.id)
+            .collect::<Vec<_>>();
+        for id in expired {
+            self.remove_node(id);
+        }
     }
 
     /// Handles failed responses to `FindNode`
@@ -2032,6 +2097,75 @@ impl Discv4Service {
                 return Poll::Pending
             }
         }
+    }
+
+    /// Checks both quotas against proven entries, including pending replacements and overflow.
+    fn is_subnet_allowed(&self, record: &NodeRecord) -> bool {
+        let key = kad_key(record.id);
+        let (Some(bucket), Some(index)) =
+            (self.kbuckets.get_bucket(&key), self.kbuckets.get_index(&key))
+        else {
+            return false
+        };
+        subnet_filter(
+            record,
+            bucket
+                .iter()
+                .map(|node| &node.value)
+                .chain(bucket.pending().map(|node| node.value()))
+                .chain(self.at_capacity[index].iter()),
+            MAX_NODES_PER_SUBNET_BUCKET,
+        ) && subnet_filter(
+            record,
+            self.kbuckets
+                .buckets_iter()
+                .flat_map(|bucket| {
+                    bucket
+                        .iter()
+                        .map(|node| &node.value)
+                        .chain(bucket.pending().map(|node| node.value()))
+                })
+                .chain(self.at_capacity.iter().flatten()),
+            MAX_NODES_PER_SUBNET_TABLE,
+        )
+    }
+
+    /// Returns an overflow entry whose endpoint has been proven and announced.
+    fn node_at_capacity(&self, id: PeerId) -> Option<&NodeEntry> {
+        let index = self.kbuckets.get_index(&kad_key(id))?;
+        self.at_capacity[index].iter().find(|node| node.record.id == id)
+    }
+
+    /// Announces a proven full-bucket discovery once, retaining it for shared quota accounting.
+    fn on_pong_at_capacity(&mut self, record: NodeRecord, last_enr_seq: Option<u64>) {
+        if self.config.ban_list.is_banned(&record.id, &record.address) {
+            return
+        }
+        // Another request may have inserted this identity while its overflow ping was in flight.
+        if self.on_entry(record.id, |_| ()).is_some() {
+            self.update_on_pong(record, last_enr_seq);
+            return
+        }
+        let Some(index) = self.kbuckets.get_index(&kad_key(record.id)) else { return };
+        if let Some(node) =
+            self.at_capacity[index].iter_mut().find(|node| node.record.id == record.id)
+        {
+            // A secondary address must not replace the endpoint already sent to the peer set.
+            if node.matches_ip(record.address) {
+                node.last_seen = Instant::now();
+            }
+            return
+        }
+        if self.at_capacity[index].len() >= MAX_NODES_PER_BUCKET || !self.is_subnet_allowed(&record)
+        {
+            return
+        }
+
+        let mut node = NodeEntry::new(record);
+        node.establish_proof(record.address);
+        self.at_capacity[index].push(node);
+        trace!(target: "discv4", ?record, "discovered proven record at capacity");
+        self.notify(DiscoveryUpdate::DiscoveredAtCapacity(record));
     }
 }
 
@@ -2404,18 +2538,20 @@ impl LookupContext {
             .collect()
     }
 
-    /// Returns the closest nodes that have not been queried yet.
-    fn filter_closest<P>(&self, num: usize, filter: P) -> Vec<NodeRecord>
+    /// Filters unqueried nodes, retaining any corrected records for the lookup result.
+    fn filter_map_closest<P>(&self, num: usize, mut filter: P) -> Vec<NodeRecord>
     where
-        P: FnMut(&NodeRecord) -> bool,
+        P: FnMut(NodeRecord) -> Option<NodeRecord>,
     {
         self.inner
             .closest_nodes
-            .borrow()
-            .iter()
-            .filter(|(_, node)| !node.queried)
-            .map(|(_, n)| n.record)
-            .filter(filter)
+            .borrow_mut()
+            .values_mut()
+            .filter(|node| !node.queried)
+            .filter_map(|node| {
+                node.record = filter(node.record)?;
+                Some(node.record)
+            })
             .take(num)
             .collect()
     }
@@ -2586,7 +2722,7 @@ struct EnrRequestState {
 struct NodeEntry {
     /// Node record info.
     record: NodeRecord,
-    /// Timestamp of last pong.
+    /// Timestamp of last activity from the stored endpoint's IP.
     last_seen: Instant,
     /// Last enr seq we retrieved via a ENR request.
     last_enr_seq: Option<u64>,
@@ -2620,10 +2756,12 @@ impl NodeEntry {
         node
     }
 
-    /// Marks the entry with an established proof and resets the consecutive failure counter.
-    const fn establish_proof(&mut self) {
-        self.has_endpoint_proof = true;
-        self.find_node_failures = 0;
+    /// Establishes proof and resets failures only for the stored endpoint's IP.
+    fn establish_proof(&mut self, source_ip: IpAddr) {
+        if self.matches_ip(source_ip) {
+            self.has_endpoint_proof = true;
+            self.find_node_failures = 0;
+        }
     }
 
     /// Returns true if the tracked find node failures exceed the max amount
@@ -2631,9 +2769,9 @@ impl NodeEntry {
         self.find_node_failures >= max_failures
     }
 
-    /// Updates the last timestamp and sets the enr seq
-    fn update_with_enr(&mut self, last_enr_seq: Option<u64>) -> Option<u64> {
-        self.update_now(|s| std::mem::replace(&mut s.last_enr_seq, last_enr_seq))
+    /// Sets the ENR sequence, refreshing liveness only for the stored endpoint's IP.
+    fn update_with_enr(&mut self, source_ip: IpAddr, last_enr_seq: Option<u64>) -> Option<u64> {
+        self.update_now(source_ip, |s| std::mem::replace(&mut s.last_enr_seq, last_enr_seq))
     }
 
     /// Increases the failed request counter
@@ -2641,18 +2779,29 @@ impl NodeEntry {
         self.find_node_failures += 1;
     }
 
-    /// Updates the last timestamp and sets the enr seq
-    fn update_with_fork_id(&mut self, fork_id: Option<ForkId>) -> Option<ForkId> {
-        self.update_now(|s| std::mem::replace(&mut s.fork_id, fork_id))
+    /// Sets the fork ID, refreshing liveness only for the stored endpoint's IP.
+    fn update_with_fork_id(
+        &mut self,
+        source_ip: IpAddr,
+        fork_id: Option<ForkId>,
+    ) -> Option<ForkId> {
+        self.update_now(source_ip, |s| std::mem::replace(&mut s.fork_id, fork_id))
     }
 
-    /// Updates the `last_seen` timestamp and calls the closure
-    fn update_now<F, R>(&mut self, f: F) -> R
+    /// Updates `last_seen` only for the stored endpoint's IP, then applies identity metadata.
+    fn update_now<F, R>(&mut self, source_ip: IpAddr, f: F) -> R
     where
         F: FnOnce(&mut Self) -> R,
     {
-        self.last_seen = Instant::now();
+        if self.matches_ip(source_ip) {
+            self.last_seen = Instant::now();
+        }
         f(self)
+    }
+
+    /// Matches the stored endpoint's IP, including equivalent IPv4-mapped addresses.
+    fn matches_ip(&self, ip: IpAddr) -> bool {
+        self.record.address.to_canonical() == ip.to_canonical()
     }
 }
 
@@ -2676,6 +2825,8 @@ enum PingReason {
     RePing,
     /// Part of a lookup to ensure endpoint is proven before we can send a `FindNode` request.
     Lookup(NodeRecord, LookupContext),
+    /// Proves a full-bucket candidate before announcing it and retaining its subnet quota slot.
+    AtCapacity,
 }
 
 /// Represents node related updates state changes in the underlying node table
@@ -2684,6 +2835,8 @@ pub enum DiscoveryUpdate {
     /// A new node was discovered _and_ added to the table.
     Added(NodeRecord),
     /// A new node was discovered but _not_ added to the table because it is currently full.
+    ///
+    /// Its endpoint is proven and retained outside the table under the same subnet quotas.
     DiscoveredAtCapacity(NodeRecord),
     /// Received a [`ForkId`] via EIP-868 for the given [`NodeRecord`].
     EnrForkId(NodeRecord, ForkId),
@@ -3967,5 +4120,1164 @@ mod tests {
         let mapped = SocketAddr::from((Ipv4Addr::new(10, 0, 0, 1).to_ipv6_mapped(), 40404));
         handler.handle_packet(&packet, mapped).await;
         assert_matches::assert_matches!(rx.try_recv(), Err(mpsc::error::TryRecvError::Empty));
+    }
+
+    /// Bonds `count` distinct node ids at `ips` and returns the number of pongs sent.
+    fn ping_from_distinct_ids(
+        service: &mut Discv4Service,
+        packets: &mut mpsc::Receiver<(Bytes, SocketAddr)>,
+        ips: &[IpAddr],
+        count: usize,
+    ) -> usize {
+        for i in 0..count {
+            let addr = SocketAddr::new(ips[i % ips.len()], 30303);
+            let record = NodeRecord::new(addr, PeerId::random());
+            let ping = Ping {
+                from: record.into(),
+                to: service.local_node_record.into(),
+                expire: service.ping_expiration(),
+                enr_sq: None,
+            };
+            service.on_ping(ping, addr, record.id, B256::random());
+            if let Some(request) = service.pending_pings.get(&record.id) {
+                service.on_pong(make_pong(service, request.echo_hash), addr, record.id);
+            }
+        }
+
+        let mut pongs = 0;
+        while let Ok((packet, _)) = packets.try_recv() {
+            if matches!(Message::decode(&packet).unwrap().msg, Message::Pong(_)) {
+                pongs += 1;
+            }
+        }
+        pongs
+    }
+
+    #[tokio::test]
+    async fn test_ping_flood_from_public_subnet_is_limited() {
+        let (_discv4, mut service) = create_discv4().await;
+        let (egress, mut packets) = mpsc::channel(256);
+        service.egress = egress;
+
+        // many fresh ids from a single public IP.
+        let ips = [IpAddr::V4(Ipv4Addr::new(203, 0, 113, 7))];
+        let pongs = ping_from_distinct_ids(&mut service, &mut packets, &ips, 50);
+
+        // every ping is still answered, but at most the per-subnet table limit is kept.
+        assert_eq!(pongs, 50);
+        let in_table = service.kbuckets.buckets_iter().map(|b| b.num_entries()).sum::<usize>();
+        assert!(in_table > 0 && in_table <= filter::MAX_NODES_PER_SUBNET_TABLE, "{in_table}");
+        assert_eq!(service.num_connected(), in_table);
+        assert!(service.pending_pings.is_empty());
+        assert!(service
+            .kbuckets
+            .buckets_iter()
+            .all(|bucket| { bucket.num_connected() <= filter::MAX_NODES_PER_SUBNET_BUCKET }));
+    }
+
+    #[tokio::test]
+    async fn test_ping_flood_from_loopback_is_not_limited() {
+        let (_discv4, mut service) = create_discv4().await;
+        let (egress, mut packets) = mpsc::channel(256);
+        service.egress = egress;
+
+        let ips = [IpAddr::V4(Ipv4Addr::LOCALHOST)];
+        let pongs = ping_from_distinct_ids(&mut service, &mut packets, &ips, 50);
+
+        assert_eq!(pongs, 50);
+        let in_table = service.kbuckets.buckets_iter().map(|b| b.num_entries()).sum::<usize>();
+        assert!(in_table > filter::MAX_NODES_PER_SUBNET_TABLE, "{in_table}");
+    }
+
+    #[tokio::test]
+    async fn test_add_node_from_public_subnet_is_limited() {
+        let (_discv4, mut service) = create_discv4().await;
+        let (egress, _packets) = mpsc::channel(256);
+        service.egress = egress;
+
+        let addr = SocketAddr::from((Ipv4Addr::new(203, 0, 113, 7), 30303));
+        let added = (0..50)
+            .filter(|_| {
+                let record = NodeRecord::new(addr, PeerId::random());
+                if !service.add_node(record) {
+                    return false
+                }
+                let echo = service.pending_pings[&record.id].echo_hash;
+                service.on_pong(make_pong(&service, echo), addr, record.id);
+                true
+            })
+            .count();
+
+        assert!(added > 0 && added <= filter::MAX_NODES_PER_SUBNET_TABLE, "{added}");
+    }
+
+    /// Finds a record in the requested bucket with a bounded search.
+    fn record_in_bucket(service: &Discv4Service, addr: SocketAddr, bucket: usize) -> NodeRecord {
+        (0..10_000)
+            .map(|_| NodeRecord::new(addr, PeerId::random()))
+            .find(|record| service.kbuckets.get_index(&kad_key(record.id)) == Some(bucket))
+            .expect("record in bucket")
+    }
+
+    #[tokio::test]
+    async fn test_subnet_rejected_ping_sends_pong_and_bond_ping() {
+        let (_, mut service) = create_discv4().await;
+        let (egress, mut packets) = mpsc::channel(16);
+        service.egress = egress;
+        let addr = "203.0.113.1:30303".parse().unwrap();
+        let bucket = service.kbuckets.buckets_iter().count() - 1;
+        for _ in 0..filter::MAX_NODES_PER_SUBNET_BUCKET {
+            let record = record_in_bucket(&service, addr, bucket);
+            insert_proven_node(&mut service, record);
+        }
+        let record = record_in_bucket(&service, addr, bucket);
+        let echo = B256::random();
+        service.on_ping(
+            Ping {
+                from: record.into(),
+                to: service.local_node_record.into(),
+                expire: service.ping_expiration(),
+                enr_sq: Some(1),
+            },
+            addr,
+            record.id,
+            echo,
+        );
+
+        let (packet, to) = packets.try_recv().unwrap();
+        assert_eq!(to, addr);
+        let Message::Pong(pong) = Message::decode(&packet).unwrap().msg else {
+            panic!("expected pong");
+        };
+        assert_eq!(pong.echo, echo);
+        let (packet, to) = packets.try_recv().unwrap();
+        assert_eq!(to, addr);
+        assert_matches::assert_matches!(Message::decode(&packet).unwrap().msg, Message::Ping(_));
+        assert_eq!(packets.try_recv(), Err(mpsc::error::TryRecvError::Empty));
+        assert_eq!(service.pending_pings.len(), 1);
+        assert_matches::assert_matches!(
+            &service.pending_pings[&record.id].reason,
+            PingReason::EstablishBond
+        );
+        assert!(service.queued_pings.is_empty());
+        assert!(service.pending_enr_requests.is_empty());
+        assert_eq!(service.on_entry(record.id, |entry| entry.has_endpoint_proof), None);
+    }
+
+    #[tokio::test]
+    async fn test_subnet_unproven_records_do_not_reserve_quota() {
+        let (_, mut service) = create_discv4().await;
+        let addr = "203.0.113.1:30303".parse().unwrap();
+        let last_bucket = service.kbuckets.buckets_iter().count() - 1;
+        // Ten forged records occupy five buckets, but have never answered a ping.
+        for offset in 0..filter::MAX_NODES_PER_SUBNET_TABLE {
+            let record = record_in_bucket(&service, addr, last_bucket - offset / 2);
+            assert!(service.add_node(record));
+        }
+        let honest = record_in_bucket(&service, addr, last_bucket);
+        assert!(service.add_node(honest));
+        let echo = service.pending_pings[&honest.id].echo_hash;
+        service.on_pong(make_pong(&service, echo), addr, honest.id);
+        assert_eq!(service.num_connected(), 1);
+        assert_eq!(service.on_entry(honest.id, |entry| entry.has_endpoint_proof), Some(true));
+    }
+
+    #[tokio::test]
+    async fn test_subnet_quota_rechecked_after_pong() {
+        for table_limit in [false, true] {
+            let (_, mut service) = create_discv4().await;
+            let (egress, _packets) = mpsc::channel(64);
+            service.egress = egress;
+            let mut updates = service.update_stream().into_inner();
+            let addr = "203.0.113.1:30303".parse().unwrap();
+            let last_bucket = service.kbuckets.buckets_iter().count() - 1;
+            let limit = if table_limit {
+                filter::MAX_NODES_PER_SUBNET_TABLE
+            } else {
+                filter::MAX_NODES_PER_SUBNET_BUCKET
+            };
+            let records = (0..=limit)
+                .map(|i| {
+                    record_in_bucket(
+                        &service,
+                        addr,
+                        last_bucket - if table_limit { i / 2 } else { 0 },
+                    )
+                })
+                .collect::<Vec<_>>();
+            // All requests are in flight before any endpoint is proven.
+            for record in &records {
+                assert!(service.add_node(*record));
+            }
+            let rejected = records[limit];
+            let ctx = LookupContext::new(kad_key(PeerId::random()), [], None);
+            service.pending_pings.get_mut(&rejected.id).unwrap().reason =
+                PingReason::Lookup(rejected, ctx);
+            for (i, record) in records.iter().enumerate() {
+                let echo = service.pending_pings[&record.id].echo_hash;
+                let mut pong = make_pong(&service, echo);
+                pong.enr_sq = Some(1);
+                service.on_pong(pong, addr, record.id);
+                if i < limit {
+                    assert_matches::assert_matches!(updates.try_recv(), Ok(DiscoveryUpdate::Added(added)) if added == *record);
+                }
+            }
+
+            assert_eq!(service.num_connected(), limit);
+            assert_eq!(service.on_entry(rejected.id, |entry| entry.has_endpoint_proof), None);
+            assert!(service.has_bond(rejected.id, addr.ip()));
+            assert!(!service.pending_enr_requests.contains_key(&rejected.id));
+            assert!(!service.pending_lookup.contains_key(&rejected.id));
+            assert_matches::assert_matches!(updates.try_recv(), Ok(DiscoveryUpdate::Removed(id)) if id == rejected.id);
+            assert_matches::assert_matches!(
+                updates.try_recv(),
+                Err(mpsc::error::TryRecvError::Empty)
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn test_subnet_lookup_skips_rejected_candidates() {
+        let (_, mut service) = create_discv4().await;
+        let addr = "203.0.113.1:30303".parse().unwrap();
+        let last_bucket = service.kbuckets.buckets_iter().count() - 1;
+        for i in 0..filter::MAX_NODES_PER_SUBNET_TABLE {
+            let record = record_in_bucket(&service, addr, last_bucket - i / 2);
+            insert_proven_node(&mut service, record);
+        }
+        let target = kad_key(PeerId::random());
+        let mut candidates =
+            (0..=ALPHA).map(|_| NodeRecord::new(addr, PeerId::random())).collect::<Vec<_>>();
+        candidates.sort_by_key(|record| target.distance(&kad_key(record.id)));
+        candidates[ALPHA].address = "198.51.100.1".parse().unwrap();
+        let eligible = candidates[ALPHA];
+        let responder = NodeRecord::new("127.0.0.1:30303".parse().unwrap(), PeerId::random());
+        let ctx = LookupContext::new(target, [], None);
+        service
+            .pending_find_nodes
+            .insert(responder.id, FindNodeRequest::new(ctx, responder.address));
+        service.on_neighbours(
+            Neighbours { nodes: candidates, expire: service.find_node_expiration() },
+            responder.udp_addr(),
+            responder.id,
+        );
+
+        assert_eq!(service.pending_pings.len(), 1);
+        assert!(service.pending_pings.contains_key(&eligible.id));
+    }
+
+    #[tokio::test]
+    async fn test_subnet_stale_record_uses_proven_address() {
+        for full in [false, true] {
+            let (_, mut service) = create_discv4().await;
+            let (egress, _packets) = mpsc::channel(16);
+            service.egress = egress;
+            let mut updates = service.update_stream().into_inner();
+            let bucket = service.kbuckets.buckets_iter().count() - 1;
+            let stale = record_in_bucket(&service, "10.0.0.1:30303".parse().unwrap(), bucket);
+            assert!(service.add_node(stale));
+            // The initial request was dropped; this ID later pings from another IP.
+            service.pending_pings.clear();
+            let proven =
+                NodeRecord::new("203.0.113.1:30303".parse().unwrap(), stale.id).into_ipv4_mapped();
+            service.on_ping(
+                Ping {
+                    from: proven.into(),
+                    to: service.local_node_record.into(),
+                    expire: service.ping_expiration(),
+                    enr_sq: Some(1),
+                },
+                proven.udp_addr(),
+                proven.id,
+                B256::random(),
+            );
+            let count = if full { filter::MAX_NODES_PER_SUBNET_BUCKET } else { 1 };
+            for _ in 0..count {
+                let record = record_in_bucket(&service, proven.udp_addr(), bucket);
+                insert_proven_node(&mut service, record);
+            }
+            let echo = service.pending_pings[&proven.id].echo_hash;
+            let mut pong = make_pong(&service, echo);
+            pong.enr_sq = Some(1);
+            service.on_pong(pong, proven.udp_addr(), proven.id);
+
+            assert!(service.has_bond(proven.id, proven.address));
+            if full {
+                assert_eq!(service.on_entry(proven.id, |entry| entry.record), None);
+                assert!(!service.pending_enr_requests.contains_key(&proven.id));
+                assert_matches::assert_matches!(updates.try_recv(), Ok(DiscoveryUpdate::Removed(id)) if id == proven.id);
+            } else {
+                assert_eq!(service.on_entry(proven.id, |entry| entry.record), Some(proven));
+                assert_matches::assert_matches!(updates.try_recv(), Ok(DiscoveryUpdate::Added(record)) if record == proven);
+                let next = record_in_bucket(&service, proven.udp_addr(), bucket);
+                assert!(!service.add_node(next));
+            }
+            assert_matches::assert_matches!(
+                updates.try_recv(),
+                Err(mpsc::error::TryRecvError::Empty)
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn test_subnet_full_bucket_announcements_are_limited() {
+        let (_, mut service) = create_discv4().await;
+        let (egress, mut packets) = mpsc::channel(256);
+        service.egress = egress;
+        let mut updates = service.update_stream().into_inner();
+        let bucket = service.kbuckets.buckets_iter().count() - 1;
+        for _ in 0..MAX_NODES_PER_BUCKET {
+            let record = record_in_bucket(&service, "127.0.0.1:30303".parse().unwrap(), bucket);
+            insert_proven_node(&mut service, record);
+        }
+        let addr = "203.0.113.1:30303".parse().unwrap();
+        let mut candidates = Vec::new();
+        for i in 0..MAX_NODES_PER_BUCKET {
+            let record = record_in_bucket(&service, addr, bucket);
+            service.on_ping(
+                Ping {
+                    from: record.into(),
+                    to: service.local_node_record.into(),
+                    expire: service.ping_expiration(),
+                    enr_sq: Some(1),
+                },
+                addr,
+                record.id,
+                B256::random(),
+            );
+            assert_matches::assert_matches!(
+                updates.try_recv(),
+                Err(mpsc::error::TryRecvError::Empty)
+            );
+            let echo = service.pending_pings[&record.id].echo_hash;
+            service.on_pong(make_pong(&service, echo), addr, record.id);
+            assert!(service.has_bond(record.id, addr.ip()));
+            if i < filter::MAX_NODES_PER_SUBNET_BUCKET {
+                assert_matches::assert_matches!(updates.try_recv(), Ok(DiscoveryUpdate::DiscoveredAtCapacity(added)) if added == record);
+            } else {
+                assert!(service.node_at_capacity(record.id).is_none());
+                assert_matches::assert_matches!(
+                    updates.try_recv(),
+                    Err(mpsc::error::TryRecvError::Empty)
+                );
+            }
+            candidates.push(record);
+        }
+        let responder = candidates[0];
+        let ctx = LookupContext::new(kad_key(PeerId::random()), [], None);
+        service
+            .pending_find_nodes
+            .insert(responder.id, FindNodeRequest::new(ctx, responder.address));
+        service.on_neighbours(
+            Neighbours { nodes: candidates, expire: service.find_node_expiration() },
+            addr,
+            responder.id,
+        );
+        assert_matches::assert_matches!(updates.try_recv(), Err(mpsc::error::TryRecvError::Empty));
+        assert!(service.pending_enr_requests.is_empty());
+        assert_eq!(service.at_capacity[bucket].len(), filter::MAX_NODES_PER_SUBNET_BUCKET);
+        assert_eq!(service.num_connected(), MAX_NODES_PER_BUCKET);
+
+        // A peer outside the table can still use its bond to query us.
+        while packets.try_recv().is_ok() {}
+        service.on_find_node(
+            FindNode { id: PeerId::random(), expire: service.find_node_expiration() },
+            addr,
+            responder.id,
+        );
+        let (packet, to) = packets.try_recv().unwrap();
+        assert_eq!(to, addr);
+        assert_matches::assert_matches!(
+            Message::decode(&packet).unwrap().msg,
+            Message::Neighbours(_)
+        );
+    }
+
+    #[tokio::test]
+    async fn test_subnet_lookup_uses_admitted_endpoint() {
+        let (_, mut service) = create_discv4().await;
+        let bucket = service.kbuckets.buckets_iter().count() - 1;
+        let admitted = record_in_bucket(&service, "203.0.113.1:30303".parse().unwrap(), bucket);
+        insert_proven_node(&mut service, admitted);
+        let forged = NodeRecord::new("198.51.100.1:30303".parse().unwrap(), admitted.id);
+        for _ in 0..filter::MAX_NODES_PER_SUBNET_BUCKET {
+            let record = record_in_bucket(&service, forged.udp_addr(), bucket);
+            insert_proven_node(&mut service, record);
+        }
+        let responder = NodeRecord::new("127.0.0.1:30303".parse().unwrap(), PeerId::random());
+        let (tx, mut rx) = oneshot::channel();
+        let ctx = LookupContext::new(kad_key(PeerId::random()), [], Some(tx));
+        service
+            .pending_find_nodes
+            .insert(responder.id, FindNodeRequest::new(ctx, responder.address));
+        service.on_neighbours(
+            Neighbours { nodes: vec![forged], expire: service.find_node_expiration() },
+            responder.udp_addr(),
+            responder.id,
+        );
+        assert_eq!(service.pending_find_nodes[&admitted.id].destination, admitted.address);
+
+        // A genuine reply must return the proven record, not the advertised forgery.
+        service.on_neighbours(
+            Neighbours {
+                nodes: vec![service.local_node_record; MAX_NODES_PER_BUCKET],
+                expire: service.find_node_expiration(),
+            },
+            admitted.udp_addr(),
+            admitted.id,
+        );
+        service.pending_find_nodes.clear();
+        assert_eq!(rx.try_recv().unwrap(), vec![admitted]);
+    }
+
+    #[tokio::test]
+    async fn test_full_bucket_neighbour_is_announced_after_proof() {
+        let (_, mut service) = create_discv4().await;
+        let (egress, _packets) = mpsc::channel(64);
+        service.egress = egress;
+        let mut updates = service.update_stream().into_inner();
+        let bucket = service.kbuckets.buckets_iter().count() - 1;
+        for _ in 0..MAX_NODES_PER_BUCKET {
+            let record = record_in_bucket(&service, "127.0.0.1:30303".parse().unwrap(), bucket);
+            insert_proven_node(&mut service, record);
+        }
+        let record = record_in_bucket(&service, "203.0.113.1:30303".parse().unwrap(), bucket);
+        let responder = NodeRecord::new("127.0.0.1:30303".parse().unwrap(), PeerId::random());
+        let ctx = LookupContext::new(kad_key(PeerId::random()), [], None);
+        service
+            .pending_find_nodes
+            .insert(responder.id, FindNodeRequest::new(ctx, responder.address));
+        service.on_neighbours(
+            Neighbours { nodes: vec![record], expire: service.find_node_expiration() },
+            responder.udp_addr(),
+            responder.id,
+        );
+        let echo = service.pending_pings[&record.id].echo_hash;
+        assert_matches::assert_matches!(updates.try_recv(), Err(mpsc::error::TryRecvError::Empty));
+
+        // A replay from a different IP does not prove the advertised endpoint.
+        service.on_pong(
+            make_pong(&service, echo),
+            "198.51.100.1:30303".parse().unwrap(),
+            record.id,
+        );
+        assert!(service.pending_pings.contains_key(&record.id));
+        assert_matches::assert_matches!(updates.try_recv(), Err(mpsc::error::TryRecvError::Empty));
+        service.on_pong(make_pong(&service, echo), record.udp_addr(), record.id);
+        assert_matches::assert_matches!(updates.try_recv(), Ok(DiscoveryUpdate::DiscoveredAtCapacity(added)) if added == record);
+        assert!(service.pending_lookup.is_empty());
+        assert!(service.pending_enr_requests.is_empty());
+    }
+
+    /// Fills a routing bucket with proven local endpoints that are exempt from subnet limits.
+    fn fill_routing_bucket(service: &mut Discv4Service, bucket: usize) {
+        for _ in 0..MAX_NODES_PER_BUCKET {
+            let record = record_in_bucket(service, "127.0.0.1:30303".parse().unwrap(), bucket);
+            insert_proven_node(service, record);
+        }
+        assert_eq!(
+            service.kbuckets.buckets_iter().nth(bucket).unwrap().num_entries(),
+            MAX_NODES_PER_BUCKET
+        );
+    }
+
+    /// Completes an explicitly requested overflow endpoint proof.
+    fn prove_at_capacity(service: &mut Discv4Service, record: NodeRecord) {
+        let echo = service.send_ping(record, PingReason::AtCapacity);
+        service.on_pong(make_pong(service, echo), record.udp_addr(), record.id);
+    }
+
+    #[tokio::test]
+    async fn test_overflow_shares_table_and_bucket_quotas() {
+        let (_, mut service) = create_discv4().await;
+        let (egress, _packets) = mpsc::channel(64);
+        service.egress = egress;
+        let mut updates = service.update_stream().into_inner();
+        let last_bucket = service.kbuckets.buckets_iter().count() - 1;
+        let addr = "203.0.113.1:30303".parse().unwrap();
+        for offset in 0..filter::MAX_NODES_PER_SUBNET_TABLE / 2 {
+            let bucket = last_bucket - offset;
+            fill_routing_bucket(&mut service, bucket);
+            let removed = service
+                .kbuckets
+                .buckets_iter()
+                .nth(bucket)
+                .unwrap()
+                .iter()
+                .next()
+                .unwrap()
+                .value
+                .record
+                .id;
+            assert!(service.remove_node(removed));
+            assert_matches::assert_matches!(updates.try_recv(), Ok(DiscoveryUpdate::Removed(id)) if id == removed);
+            let stored = record_in_bucket(&service, addr, bucket);
+            insert_proven_node(&mut service, stored);
+            let overflow = record_in_bucket(&service, addr, bucket);
+            prove_at_capacity(&mut service, overflow);
+            assert_matches::assert_matches!(updates.try_recv(), Ok(DiscoveryUpdate::DiscoveredAtCapacity(added)) if added == overflow);
+
+            // The proven table record and overflow record share the two-node bucket quota.
+            let rejected = record_in_bucket(&service, addr, bucket);
+            prove_at_capacity(&mut service, rejected);
+            assert!(service.node_at_capacity(rejected.id).is_none());
+            assert_matches::assert_matches!(
+                updates.try_recv(),
+                Err(mpsc::error::TryRecvError::Empty)
+            );
+        }
+
+        // Five table records and five overflow records also exhaust the table-wide quota.
+        let other_bucket = last_bucket - filter::MAX_NODES_PER_SUBNET_TABLE / 2;
+        fill_routing_bucket(&mut service, other_bucket);
+        let rejected = record_in_bucket(&service, addr, other_bucket);
+        prove_at_capacity(&mut service, rejected);
+        assert!(!service.add_node(rejected));
+        assert!(service.at_capacity[other_bucket].is_empty());
+        assert_matches::assert_matches!(updates.try_recv(), Err(mpsc::error::TryRecvError::Empty));
+    }
+
+    #[tokio::test]
+    async fn test_overflow_rechecks_in_flight_proofs() {
+        for addr in ["203.0.113.1:30303", "[::ffff:203.0.113.1]:30303", "[2001:db8:1::1]:30303"] {
+            let (_, mut service) = create_discv4().await;
+            let (egress, _packets) = mpsc::channel(64);
+            service.egress = egress;
+            let mut updates = service.update_stream().into_inner();
+            let bucket = service.kbuckets.buckets_iter().count() - 1;
+            fill_routing_bucket(&mut service, bucket);
+            let records = (0..=filter::MAX_NODES_PER_SUBNET_BUCKET)
+                .map(|_| record_in_bucket(&service, addr.parse().unwrap(), bucket))
+                .collect::<Vec<_>>();
+            let echoes = records
+                .iter()
+                .map(|record| service.send_ping(*record, PingReason::AtCapacity))
+                .collect::<Vec<_>>();
+            assert!(service.at_capacity[bucket].is_empty());
+            for (i, (record, echo)) in records.iter().zip(echoes).enumerate() {
+                service.on_pong(make_pong(&service, echo), record.udp_addr(), record.id);
+                if i < filter::MAX_NODES_PER_SUBNET_BUCKET {
+                    assert_matches::assert_matches!(updates.try_recv(), Ok(DiscoveryUpdate::DiscoveredAtCapacity(added)) if added == *record);
+                } else {
+                    assert!(service.node_at_capacity(record.id).is_none());
+                }
+            }
+            assert_eq!(service.at_capacity[bucket].len(), filter::MAX_NODES_PER_SUBNET_BUCKET);
+            assert_matches::assert_matches!(
+                updates.try_recv(),
+                Err(mpsc::error::TryRecvError::Empty)
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn test_overflow_capacity_and_expiry() {
+        let (_, mut service) = create_discv4().await;
+        let (egress, _packets) = mpsc::channel(64);
+        service.egress = egress;
+        let mut updates = service.update_stream().into_inner();
+        let bucket = service.kbuckets.buckets_iter().count() - 1;
+        fill_routing_bucket(&mut service, bucket);
+        let records = (0..=MAX_NODES_PER_BUCKET)
+            .map(|i| {
+                record_in_bucket(
+                    &service,
+                    SocketAddr::from((Ipv4Addr::new(198, 18, u8::try_from(i).unwrap(), 1), 30303)),
+                    bucket,
+                )
+            })
+            .collect::<Vec<_>>();
+        for (i, record) in records.iter().enumerate() {
+            prove_at_capacity(&mut service, *record);
+            if i < MAX_NODES_PER_BUCKET {
+                assert_matches::assert_matches!(updates.try_recv(), Ok(DiscoveryUpdate::DiscoveredAtCapacity(added)) if added == *record);
+            }
+        }
+        assert_eq!(
+            service.at_capacity[bucket].iter().map(|node| node.record).collect::<Vec<_>>(),
+            records[..MAX_NODES_PER_BUCKET]
+        );
+        assert_matches::assert_matches!(updates.try_recv(), Err(mpsc::error::TryRecvError::Empty));
+
+        service.evict_expired_requests(Instant::now() + service.config.bond_expiration);
+        assert!(service.at_capacity[bucket].is_empty());
+        for record in &records[..MAX_NODES_PER_BUCKET] {
+            assert_matches::assert_matches!(updates.try_recv(), Ok(DiscoveryUpdate::Removed(id)) if id == record.id);
+        }
+        let record = records[MAX_NODES_PER_BUCKET];
+        prove_at_capacity(&mut service, record);
+        assert_matches::assert_matches!(updates.try_recv(), Ok(DiscoveryUpdate::DiscoveredAtCapacity(added)) if added == record);
+    }
+
+    #[tokio::test]
+    async fn test_overflow_preserves_endpoint_on_promotion() {
+        let (_, mut service) = create_discv4().await;
+        let (egress, _packets) = mpsc::channel(64);
+        service.egress = egress;
+        let mut updates = service.update_stream().into_inner();
+        let bucket = service.kbuckets.buckets_iter().count() - 1;
+        fill_routing_bucket(&mut service, bucket);
+        let record = record_in_bucket(&service, "203.0.113.1:30303".parse().unwrap(), bucket);
+        prove_at_capacity(&mut service, record);
+        assert_matches::assert_matches!(updates.try_recv(), Ok(DiscoveryUpdate::DiscoveredAtCapacity(added)) if added == record);
+        let secondary = NodeRecord::new("198.51.100.1:30303".parse().unwrap(), record.id);
+        let last_seen = service.node_at_capacity(record.id).unwrap().last_seen;
+        prove_at_capacity(&mut service, secondary);
+        assert_eq!(service.node_at_capacity(record.id).unwrap().record, record);
+        assert_eq!(service.node_at_capacity(record.id).unwrap().last_seen, last_seen);
+        assert_matches::assert_matches!(updates.try_recv(), Err(mpsc::error::TryRecvError::Empty));
+
+        // A stale advertisement must also be resolved to the retained proven endpoint.
+        let responder = NodeRecord::new("127.0.0.1:30303".parse().unwrap(), PeerId::random());
+        let ctx = LookupContext::new(kad_key(PeerId::random()), [], None);
+        service
+            .pending_find_nodes
+            .insert(responder.id, FindNodeRequest::new(ctx, responder.address));
+        service.on_neighbours(
+            Neighbours { nodes: vec![secondary], expire: service.find_node_expiration() },
+            responder.udp_addr(),
+            responder.id,
+        );
+        assert_eq!(service.pending_pings[&record.id].node, record);
+        let echo = service.pending_pings[&record.id].echo_hash;
+        service.on_pong(make_pong(&service, echo), record.udp_addr(), record.id);
+        assert_matches::assert_matches!(updates.try_recv(), Err(mpsc::error::TryRecvError::Empty));
+
+        let last_seen = Instant::now() - ENDPOINT_PROOF_EXPIRATION / 2;
+        let index = service.kbuckets.get_index(&kad_key(record.id)).unwrap();
+        let retained =
+            service.at_capacity[index].iter_mut().find(|node| node.record.id == record.id).unwrap();
+        retained.last_seen = last_seen;
+        retained.find_node_failures = 1;
+
+        let removed = service
+            .kbuckets
+            .get_bucket(&kad_key(record.id))
+            .unwrap()
+            .iter()
+            .next()
+            .unwrap()
+            .value
+            .record
+            .id;
+        assert!(service.remove_node(removed));
+        assert_matches::assert_matches!(updates.try_recv(), Ok(DiscoveryUpdate::Removed(id)) if id == removed);
+        assert!(service.add_node(secondary));
+        let echo = service.pending_pings[&record.id].echo_hash;
+        service.on_pong(make_pong(&service, echo), secondary.udp_addr(), record.id);
+        assert_matches::assert_matches!(updates.try_recv(), Ok(DiscoveryUpdate::Added(added)) if added == record);
+        assert!(service.node_at_capacity(record.id).is_none());
+        assert_eq!(service.on_entry(record.id, |entry| entry.record), Some(record));
+        assert_eq!(
+            service.on_entry(record.id, |entry| (entry.last_seen, entry.find_node_failures)),
+            Some((last_seen, 1))
+        );
+        let next = record_in_bucket(&service, record.udp_addr(), bucket);
+        assert!(service.is_subnet_allowed(&next));
+    }
+
+    #[tokio::test]
+    async fn test_overflow_removal_cancels_proofs() {
+        let (_, mut service) = create_discv4().await;
+        let (egress, _packets) = mpsc::channel(64);
+        service.egress = egress;
+        let mut updates = service.update_stream().into_inner();
+        let bucket = service.kbuckets.buckets_iter().count() - 1;
+        fill_routing_bucket(&mut service, bucket);
+        let record = record_in_bucket(&service, "203.0.113.1:30303".parse().unwrap(), bucket);
+        let echo = service.send_ping(record, PingReason::AtCapacity);
+        assert!(!service.remove_node(record.id));
+        service.on_pong(make_pong(&service, echo), record.udp_addr(), record.id);
+        assert!(service.at_capacity[bucket].is_empty());
+        assert_matches::assert_matches!(updates.try_recv(), Err(mpsc::error::TryRecvError::Empty));
+
+        prove_at_capacity(&mut service, record);
+        assert_matches::assert_matches!(updates.try_recv(), Ok(DiscoveryUpdate::DiscoveredAtCapacity(added)) if added == record);
+        let echo = service.send_ping(record, PingReason::AtCapacity);
+        let secondary = NodeRecord::new("198.51.100.1:30303".parse().unwrap(), record.id);
+        service.try_ping(secondary, PingReason::AtCapacity);
+        assert_eq!(service.queued_pings.len(), 1);
+        service.ban_node(record.id);
+        assert!(service.pending_pings.is_empty());
+        assert!(service.queued_pings.is_empty());
+        service.on_pong(make_pong(&service, echo), record.udp_addr(), record.id);
+        prove_at_capacity(&mut service, record);
+        assert!(service.at_capacity[bucket].is_empty());
+        assert_matches::assert_matches!(updates.try_recv(), Ok(DiscoveryUpdate::Removed(id)) if id == record.id);
+        assert_matches::assert_matches!(updates.try_recv(), Err(mpsc::error::TryRecvError::Empty));
+    }
+
+    #[tokio::test]
+    async fn test_overflow_ping_does_not_refresh_proof() {
+        let (_, mut service) = create_discv4().await;
+        let (egress, _packets) = mpsc::channel(64);
+        service.egress = egress;
+        let mut updates = service.update_stream().into_inner();
+        let bucket = service.kbuckets.buckets_iter().count() - 1;
+        fill_routing_bucket(&mut service, bucket);
+        let record = record_in_bucket(&service, "203.0.113.1:30303".parse().unwrap(), bucket);
+        prove_at_capacity(&mut service, record);
+        assert_matches::assert_matches!(updates.try_recv(), Ok(DiscoveryUpdate::DiscoveredAtCapacity(added)) if added == record);
+        let expired = Instant::now() - service.config.bond_expiration;
+        service.at_capacity[bucket][0].last_seen = expired;
+        service.on_ping(
+            Ping {
+                from: record.into(),
+                to: service.local_node_record.into(),
+                expire: service.ping_expiration(),
+                enr_sq: Some(1),
+            },
+            record.udp_addr(),
+            record.id,
+            B256::random(),
+        );
+        assert_eq!(service.node_at_capacity(record.id).unwrap().last_seen, expired);
+        service.evict_expired_requests(Instant::now());
+        assert!(service.at_capacity[bucket].is_empty());
+        assert!(service.pending_pings.is_empty());
+        assert_matches::assert_matches!(updates.try_recv(), Ok(DiscoveryUpdate::Removed(id)) if id == record.id);
+    }
+
+    #[tokio::test]
+    async fn test_overflow_proof_promotes_concurrent_table_insert() {
+        let (_, mut service) = create_discv4().await;
+        let (egress, _packets) = mpsc::channel(64);
+        service.egress = egress;
+        let mut updates = service.update_stream().into_inner();
+        let bucket = service.kbuckets.buckets_iter().count() - 1;
+        fill_routing_bucket(&mut service, bucket);
+        let record = record_in_bucket(&service, "203.0.113.1:30303".parse().unwrap(), bucket);
+        let echo = service.send_ping(record, PingReason::AtCapacity);
+        let removed = service
+            .kbuckets
+            .get_bucket(&kad_key(record.id))
+            .unwrap()
+            .iter()
+            .next()
+            .unwrap()
+            .value
+            .record
+            .id;
+        assert!(service.remove_node(removed));
+        assert_matches::assert_matches!(updates.try_recv(), Ok(DiscoveryUpdate::Removed(id)) if id == removed);
+        assert!(service.add_node(record));
+        service.on_pong(make_pong(&service, echo), record.udp_addr(), record.id);
+        assert_eq!(service.on_entry(record.id, |entry| entry.has_endpoint_proof), Some(true));
+        assert!(service.at_capacity[bucket].is_empty());
+        assert_matches::assert_matches!(updates.try_recv(), Ok(DiscoveryUpdate::Added(added)) if added == record);
+    }
+
+    #[tokio::test]
+    async fn test_overflow_failed_ping_retains_quota() {
+        for insert_into_table in [false, true] {
+            let (_, mut service) = create_discv4().await;
+            let (egress, _packets) = mpsc::channel(64);
+            service.egress = egress;
+            let mut updates = service.update_stream().into_inner();
+            let bucket = service.kbuckets.buckets_iter().count() - 1;
+            fill_routing_bucket(&mut service, bucket);
+            let addr = "203.0.113.1:30303".parse().unwrap();
+            let records = (0..filter::MAX_NODES_PER_SUBNET_BUCKET)
+                .map(|_| record_in_bucket(&service, addr, bucket))
+                .collect::<Vec<_>>();
+            for record in &records {
+                prove_at_capacity(&mut service, *record);
+                assert_matches::assert_matches!(updates.try_recv(), Ok(DiscoveryUpdate::DiscoveredAtCapacity(added)) if added == *record);
+            }
+            let record = records[0];
+            service.try_ping(record, PingReason::AtCapacity);
+            service.try_ping(record, PingReason::AtCapacity);
+            if insert_into_table {
+                let removed = service
+                    .kbuckets
+                    .buckets_iter()
+                    .nth(bucket)
+                    .unwrap()
+                    .iter()
+                    .next()
+                    .unwrap()
+                    .value
+                    .record
+                    .id;
+                assert!(service.remove_node(removed));
+                assert_matches::assert_matches!(updates.try_recv(), Ok(DiscoveryUpdate::Removed(id)) if id == removed);
+                assert!(service.add_node(record));
+            }
+            service.evict_expired_requests(
+                Instant::now() + service.config.ping_expiration + Duration::from_secs(1),
+            );
+            assert!(service.pending_pings.is_empty());
+            assert!(service.queued_pings.is_empty());
+            assert!(service.on_entry(record.id, |_| ()).is_none());
+            assert_eq!(service.node_at_capacity(record.id).unwrap().record, record);
+            let rejected = record_in_bucket(&service, addr, bucket);
+            assert!(!service.is_subnet_allowed(&rejected));
+            assert_matches::assert_matches!(
+                updates.try_recv(),
+                Err(mpsc::error::TryRecvError::Empty)
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn test_subnet_rejected_peer_can_bond_and_query() {
+        check_subnet_rejected_peer_bonds(None).await;
+    }
+
+    #[tokio::test]
+    async fn test_subnet_rejected_secondary_ip_can_bond_and_query() {
+        check_subnet_rejected_peer_bonds(Some("[2001:db8:1::1]:30303".parse().unwrap())).await;
+    }
+
+    /// Checks that bucket and table quotas restrict admission without preventing endpoint proofs.
+    async fn check_subnet_rejected_peer_bonds(primary: Option<SocketAddr>) {
+        for table_limit in [false, true] {
+            let (_, mut service) = create_discv4().await;
+            let (egress, mut packets) = mpsc::channel(32);
+            service.egress = egress;
+            let last_bucket = service.kbuckets.buckets_iter().count() - 1;
+            let addr = "203.0.113.1:30303".parse().unwrap();
+            let limit = if table_limit {
+                filter::MAX_NODES_PER_SUBNET_TABLE
+            } else {
+                filter::MAX_NODES_PER_SUBNET_BUCKET
+            };
+            for i in 0..limit {
+                let record = record_in_bucket(
+                    &service,
+                    addr,
+                    last_bucket - i / filter::MAX_NODES_PER_SUBNET_BUCKET,
+                );
+                insert_proven_node(&mut service, record);
+            }
+            // Use an empty bucket to exercise the table quota independently of the bucket quota.
+            let bucket = if table_limit {
+                last_bucket - limit / filter::MAX_NODES_PER_SUBNET_BUCKET
+            } else {
+                last_bucket
+            };
+            let record = record_in_bucket(&service, addr, bucket);
+            let primary = primary.map(|addr| NodeRecord::new(addr, record.id));
+            let last_seen = primary.map(|primary| insert_stale_node(&mut service, primary));
+            let mut updates = service.update_stream().into_inner();
+            assert!(!service.is_subnet_allowed(&record));
+            let ping = Ping {
+                from: record.into(),
+                to: service.local_node_record.into(),
+                expire: service.ping_expiration(),
+                enr_sq: Some(1),
+            };
+            service.on_ping(ping.clone(), addr, record.id, B256::random());
+            let (packet, to) = packets.try_recv().unwrap();
+            assert_eq!(to, addr);
+            assert_matches::assert_matches!(
+                Message::decode(&packet).unwrap().msg,
+                Message::Pong(_)
+            );
+            let (packet, to) = packets.try_recv().unwrap();
+            assert_eq!(to, addr);
+            assert_matches::assert_matches!(
+                Message::decode(&packet).unwrap().msg,
+                Message::Ping(_)
+            );
+            assert_eq!(packets.try_recv(), Err(mpsc::error::TryRecvError::Empty));
+
+            // Queries remain gated on the reciprocal proof, even for an admitted identity.
+            let find_node =
+                FindNode { id: PeerId::random(), expire: service.find_node_expiration() };
+            let request_hash = B256::random();
+            service.on_find_node(find_node, addr, record.id);
+            service.on_enr_request(
+                EnrRequest { expire: service.enr_request_expiration() },
+                addr,
+                record.id,
+                request_hash,
+            );
+            assert_eq!(packets.try_recv(), Err(mpsc::error::TryRecvError::Empty));
+            let request = &service.pending_pings[&record.id];
+            assert_matches::assert_matches!(&request.reason, PingReason::EstablishBond);
+            let mut pong = make_pong(&service, request.echo_hash);
+            pong.enr_sq = Some(1);
+            service.on_pong(pong, addr, record.id);
+            assert!(service.has_bond(record.id, addr.ip()));
+            assert_eq!(service.on_entry(record.id, |entry| entry.record), primary);
+            assert_eq!(
+                service.on_entry(record.id, |entry| (entry.last_seen, entry.find_node_failures)),
+                last_seen.map(|last_seen| (last_seen, 1))
+            );
+            assert_eq!(service.num_connected(), limit + usize::from(primary.is_some()));
+            assert!(service.at_capacity.iter().all(Vec::is_empty));
+            assert_eq!(service.pending_pings.get(&record.id).map(|ping| ping.node), primary);
+            if let Some(primary) = primary {
+                let (packet, to) = packets.try_recv().unwrap();
+                assert_eq!(to, primary.udp_addr());
+                assert_matches::assert_matches!(
+                    Message::decode(&packet).unwrap().msg,
+                    Message::Ping(_)
+                );
+            }
+            assert!(service.pending_enr_requests.is_empty());
+            assert_eq!(packets.try_recv(), Err(mpsc::error::TryRecvError::Empty));
+            assert_matches::assert_matches!(
+                updates.try_recv(),
+                Err(mpsc::error::TryRecvError::Empty)
+            );
+
+            service.on_find_node(find_node, addr, record.id);
+            let (packet, to) = packets.try_recv().unwrap();
+            assert_eq!(to, addr);
+            assert_matches::assert_matches!(
+                Message::decode(&packet).unwrap().msg,
+                Message::Neighbours(_)
+            );
+            assert_eq!(packets.try_recv(), Err(mpsc::error::TryRecvError::Empty));
+            service.on_enr_request(
+                EnrRequest { expire: service.enr_request_expiration() },
+                addr,
+                record.id,
+                request_hash,
+            );
+            let (packet, to) = packets.try_recv().unwrap();
+            assert_eq!(to, addr);
+            assert_matches::assert_matches!(Message::decode(&packet).unwrap().msg, Message::EnrResponse(response) if response.request_hash == request_hash && response.enr == service.local_eip_868_enr);
+
+            // A repeated ping reuses the bond without another ping or ENR request.
+            service.on_ping(ping, addr, record.id, B256::random());
+            let (packet, to) = packets.try_recv().unwrap();
+            assert_eq!(to, addr);
+            assert_matches::assert_matches!(
+                Message::decode(&packet).unwrap().msg,
+                Message::Pong(_)
+            );
+            assert_eq!(packets.try_recv(), Err(mpsc::error::TryRecvError::Empty));
+            assert_eq!(service.pending_pings.get(&record.id).map(|ping| ping.node), primary);
+            assert!(service.queued_pings.is_empty());
+            assert!(service.pending_enr_requests.is_empty());
+        }
+    }
+
+    #[tokio::test]
+    async fn test_secondary_ip_does_not_refresh_stale_endpoint() {
+        for addr in ["203.0.113.1:30303", "[2001:db8:1::1]:30303"] {
+            let (_, mut service) = create_discv4().await;
+            let (egress, _packets) = mpsc::channel(32);
+            service.egress = egress;
+            let bucket = service.kbuckets.buckets_iter().count() - 1;
+            let record = record_in_bucket(&service, addr.parse().unwrap(), bucket);
+            let last_seen = insert_stale_node(&mut service, record);
+            let other = record_in_bucket(&service, record.udp_addr(), bucket);
+            insert_proven_node(&mut service, other);
+            let candidate = record_in_bucket(&service, record.udp_addr(), bucket);
+            assert!(!service.is_subnet_allowed(&candidate));
+
+            let secondary = NodeRecord::new("198.51.100.1:40404".parse().unwrap(), record.id);
+            let ping = Ping {
+                from: secondary.into(),
+                to: service.local_node_record.into(),
+                expire: service.ping_expiration(),
+                enr_sq: None,
+            };
+            service.on_ping(ping.clone(), secondary.udp_addr(), record.id, B256::random());
+            assert_eq!(
+                service.on_entry(record.id, |entry| (entry.last_seen, entry.find_node_failures)),
+                Some((last_seen, 1))
+            );
+            let echo = service.pending_pings[&record.id].echo_hash;
+            service.on_pong(make_pong(&service, echo), secondary.udp_addr(), record.id);
+            assert!(service.has_bond(record.id, secondary.address));
+            assert_eq!(
+                service.on_entry(record.id, |entry| (entry.last_seen, entry.find_node_failures)),
+                Some((last_seen, 1))
+            );
+
+            // A valid secondary bond must not queue more secondary proofs behind the primary.
+            service.on_ping(ping, secondary.udp_addr(), record.id, B256::random());
+            assert!(service.queued_pings.is_empty());
+            service.re_ping_oldest();
+            assert_eq!(service.pending_pings[&record.id].node, record);
+            assert_matches::assert_matches!(
+                &service.pending_pings[&record.id].reason,
+                PingReason::RePing
+            );
+            service.evict_expired_requests(
+                Instant::now() + service.config.ping_expiration + Duration::from_secs(1),
+            );
+            assert!(service.on_entry(record.id, |_| ()).is_none());
+            assert!(service.is_subnet_allowed(&candidate));
+        }
+    }
+
+    #[tokio::test]
+    async fn test_pong_refreshes_only_matching_endpoint() {
+        for (addr, matches) in [
+            ("203.0.113.1:40404", true),
+            ("[::ffff:203.0.113.1]:40404", true),
+            ("198.51.100.1:30303", false),
+            ("[2001:db8::1]:30303", false),
+        ] {
+            for reason in [PingReason::EstablishBond, PingReason::RePing, PingReason::AtCapacity] {
+                let reping = matches!(reason, PingReason::RePing);
+                let (_, mut service) = create_discv4().await;
+                let record =
+                    NodeRecord::new("203.0.113.1:30303".parse().unwrap(), PeerId::random());
+                let last_seen = insert_stale_node(&mut service, record);
+                let source = NodeRecord::new(addr.parse().unwrap(), record.id);
+                service.try_ping(source, reason);
+                let mut pong = make_pong(&service, service.pending_pings[&record.id].echo_hash);
+                pong.enr_sq = Some(1);
+                service.on_pong(pong, source.udp_addr(), record.id);
+                assert!(service.has_bond(record.id, source.address));
+                service
+                    .on_entry(record.id, |entry| {
+                        assert_eq!(entry.record, record);
+                        assert_eq!(entry.last_enr_seq, Some(1));
+                        assert_eq!(entry.last_seen > last_seen, matches);
+                        assert_eq!(entry.find_node_failures, u8::from(!matches || reping));
+                        assert!(entry.has_endpoint_proof);
+                    })
+                    .unwrap();
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn test_enr_response_refreshes_only_matching_endpoint() {
+        let fork_id = ForkId { hash: ForkHash([1, 2, 3, 4]), next: 0 };
+        let mut config = Discv4Config::default();
+        config.add_eip868_pair("eth", EnrForkIdEntry::from(fork_id));
+        let (_, remote) = create_discv4_with_config(config).await;
+        for (addr, matches) in [
+            ("203.0.113.1:40404", true),
+            ("[::ffff:203.0.113.1]:40404", true),
+            ("198.51.100.1:30303", false),
+            ("[2001:db8::1]:30303", false),
+        ] {
+            let (_, mut service) = create_discv4().await;
+            let record =
+                NodeRecord::new("203.0.113.1:30303".parse().unwrap(), *remote.local_peer_id());
+            let last_seen = insert_stale_node(&mut service, record);
+            service.send_enr_request(record);
+            service.on_enr_response(
+                EnrResponse {
+                    request_hash: service.pending_enr_requests[&record.id].echo_hash,
+                    enr: remote.local_eip_868_enr.clone(),
+                },
+                addr.parse().unwrap(),
+                record.id,
+            );
+            assert!(service.pending_enr_requests.is_empty());
+            service
+                .on_entry(record.id, |entry| {
+                    assert_eq!(entry.record, record);
+                    assert_eq!(entry.fork_id, Some(fork_id));
+                    assert_eq!(entry.last_seen > last_seen, matches);
+                    assert_eq!(entry.find_node_failures, 1);
+                })
+                .unwrap();
+        }
+    }
+
+    fn insert_stale_node(service: &mut Discv4Service, record: NodeRecord) -> Instant {
+        insert_proven_node(service, record);
+        let key = kad_key(record.id);
+        let BucketEntry::Present(mut entry, _) = service.kbuckets.entry(&key) else {
+            panic!("missing routing entry")
+        };
+        let last_seen = Instant::now() - ENDPOINT_PROOF_EXPIRATION;
+        entry.value_mut().last_seen = last_seen;
+        entry.value_mut().find_node_failures = 1;
+        last_seen
+    }
+
+    #[tokio::test]
+    async fn test_ping_refreshes_matching_stale_endpoint() {
+        for (stored, source) in [
+            ("203.0.113.1:30303", "203.0.113.1:40404"),
+            ("203.0.113.1:30303", "[::ffff:203.0.113.1]:40404"),
+            ("[2001:db8::1]:30303", "[2001:db8::1]:40404"),
+        ] {
+            let (_, mut service) = create_discv4().await;
+            let record = NodeRecord::new(stored.parse().unwrap(), PeerId::random());
+            let last_seen = insert_stale_node(&mut service, record);
+            service.on_ping(
+                Ping {
+                    from: record.into(),
+                    to: service.local_node_record.into(),
+                    expire: service.ping_expiration(),
+                    enr_sq: None,
+                },
+                source.parse().unwrap(),
+                record.id,
+                B256::random(),
+            );
+            service
+                .on_entry(record.id, |entry| {
+                    assert_eq!(entry.record, record);
+                    assert!(entry.last_seen > last_seen);
+                    assert_eq!(entry.find_node_failures, 1);
+                })
+                .unwrap();
+            // The existing bond cannot replace revalidation of an expired routing endpoint.
+            assert_matches::assert_matches!(
+                &service.pending_pings[&record.id].reason,
+                PingReason::EstablishBond
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn test_secondary_bond_queue_cannot_starve_stale_endpoint_probe() {
+        for primary_replies in [false, true] {
+            let config = Discv4Config::builder().enable_lookup(false).build();
+            let (_, mut service) = create_discv4_with_config(config).await;
+            let (egress, _packets) = mpsc::channel(32);
+            service.egress = egress;
+            let record = NodeRecord::new("203.0.113.1:30303".parse().unwrap(), PeerId::random());
+            let last_seen = insert_stale_node(&mut service, record);
+            let first = NodeRecord::new("[2001:db8::1]:30303".parse().unwrap(), record.id);
+            let second = NodeRecord::new("[2001:db8::2]:30303".parse().unwrap(), record.id);
+            for secondary in [first, second] {
+                service.on_ping(
+                    Ping {
+                        from: secondary.into(),
+                        to: service.local_node_record.into(),
+                        expire: service.ping_expiration(),
+                        enr_sq: None,
+                    },
+                    secondary.udp_addr(),
+                    record.id,
+                    B256::random(),
+                );
+            }
+            service.re_ping_oldest();
+            assert_eq!(service.pending_pings[&record.id].node, first);
+            assert_eq!(service.queued_pings.len(), 1);
+            let echo = service.pending_pings[&record.id].echo_hash;
+            service.on_pong(make_pong(&service, echo), first.udp_addr(), record.id);
+            assert!(service.has_bond(record.id, first.address));
+            service.ping_buffered();
+            assert_eq!(service.pending_pings[&record.id].node, record);
+            assert_matches::assert_matches!(
+                &service.pending_pings[&record.id].reason,
+                PingReason::RePing
+            );
+            if primary_replies {
+                let echo = service.pending_pings[&record.id].echo_hash;
+                service.on_pong(make_pong(&service, echo), record.udp_addr(), record.id);
+                assert!(service.on_entry(record.id, |entry| entry.last_seen > last_seen).unwrap());
+                service.ping_buffered();
+                assert_eq!(service.pending_pings[&record.id].node, second);
+                let echo = service.pending_pings[&record.id].echo_hash;
+                service.on_pong(make_pong(&service, echo), second.udp_addr(), record.id);
+                assert!(service.has_bond(record.id, second.address));
+                assert!(service.pending_pings.is_empty());
+            } else {
+                service.evict_expired_requests(
+                    Instant::now() + service.config.ping_expiration + Duration::from_secs(1),
+                );
+                assert!(service.on_entry(record.id, |_| ()).is_none());
+            }
+            assert!(service.queued_pings.is_empty());
+        }
     }
 }
