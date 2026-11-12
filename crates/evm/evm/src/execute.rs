@@ -1686,6 +1686,70 @@ impl<TxEnv, T: RecoveredTx<Tx>, Tx> ExecutableTxParts<TxEnv, Tx> for WithTxEnv<T
     }
 }
 
+/// Request-local native dispatch filter that preserves custom providers and their caches.
+struct FilteredPrecompiles<'a, T: EvmTypesHost> {
+    inner: Box<dyn PrecompileProvider<T> + 'a>,
+    disabled: AddressSet,
+}
+
+impl<T: EvmTypesHost> PrecompileProvider<T> for FilteredPrecompiles<'_, T> {
+    fn addresses(&self) -> Vec<Address> {
+        self.inner
+            .addresses()
+            .into_iter()
+            .filter(|address| !self.disabled.contains(address))
+            .collect()
+    }
+
+    fn warm_addresses(&self, warm: &mut evm2::evm::PrewarmSet) {
+        // Code overrides change native dispatch, but preserve the provider's warm set.
+        self.inner.warm_addresses(warm);
+    }
+
+    fn precompile_ids(&self) -> Vec<(Address, PrecompileId)> {
+        self.inner
+            .precompile_ids()
+            .into_iter()
+            .filter(|(address, _)| !self.disabled.contains(address))
+            .collect()
+    }
+
+    fn contains(&self, address: &Address) -> bool {
+        !self.disabled.contains(address) && self.inner.contains(address)
+    }
+
+    fn move_precompiles(
+        &mut self,
+        moves: &[(Address, Address)],
+    ) -> Result<(), MovePrecompileError> {
+        if let Some((source, _)) =
+            moves.iter().find(|(source, dest)| source != dest && !self.contains(source))
+        {
+            return Err(MovePrecompileError::NotAPrecompile(*source));
+        }
+        self.inner.move_precompiles(moves)?;
+        // A move installs a new native implementation even at a previously filtered destination.
+        for (source, dest) in moves {
+            if source != dest {
+                self.disabled.remove(dest);
+            }
+        }
+        Ok(())
+    }
+
+    fn execute(
+        &mut self,
+        evm: &mut evm2::Evm<'_, T>,
+        message: &Message<T>,
+        gas: &mut GasTracker,
+    ) -> Option<Result<PrecompileOutput, PrecompileError>> {
+        if self.disabled.contains(&message.call_target) {
+            return None;
+        }
+        self.inner.execute(evm, message, gas)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1814,69 +1878,5 @@ mod tests {
         assert_eq!(actual, expected);
         assert!(filtered.addresses().is_empty());
         assert!(!filtered.contains(&Address::with_last_byte(4)));
-    }
-}
-
-/// Request-local native dispatch filter that preserves custom providers and their caches.
-struct FilteredPrecompiles<'a, T: EvmTypesHost> {
-    inner: Box<dyn PrecompileProvider<T> + 'a>,
-    disabled: AddressSet,
-}
-
-impl<T: EvmTypesHost> PrecompileProvider<T> for FilteredPrecompiles<'_, T> {
-    fn addresses(&self) -> Vec<Address> {
-        self.inner
-            .addresses()
-            .into_iter()
-            .filter(|address| !self.disabled.contains(address))
-            .collect()
-    }
-
-    fn warm_addresses(&self, warm: &mut evm2::evm::PrewarmSet) {
-        // Code overrides change native dispatch, but preserve the provider's warm set.
-        self.inner.warm_addresses(warm);
-    }
-
-    fn precompile_ids(&self) -> Vec<(Address, PrecompileId)> {
-        self.inner
-            .precompile_ids()
-            .into_iter()
-            .filter(|(address, _)| !self.disabled.contains(address))
-            .collect()
-    }
-
-    fn contains(&self, address: &Address) -> bool {
-        !self.disabled.contains(address) && self.inner.contains(address)
-    }
-
-    fn move_precompiles(
-        &mut self,
-        moves: &[(Address, Address)],
-    ) -> Result<(), MovePrecompileError> {
-        if let Some((source, _)) =
-            moves.iter().find(|(source, dest)| source != dest && !self.contains(source))
-        {
-            return Err(MovePrecompileError::NotAPrecompile(*source));
-        }
-        self.inner.move_precompiles(moves)?;
-        // A move installs a new native implementation even at a previously filtered destination.
-        for (source, dest) in moves {
-            if source != dest {
-                self.disabled.remove(dest);
-            }
-        }
-        Ok(())
-    }
-
-    fn execute(
-        &mut self,
-        evm: &mut evm2::Evm<'_, T>,
-        message: &Message<T>,
-        gas: &mut GasTracker,
-    ) -> Option<Result<PrecompileOutput, PrecompileError>> {
-        if self.disabled.contains(&message.call_target) {
-            return None;
-        }
-        self.inner.execute(evm, message, gas)
     }
 }
