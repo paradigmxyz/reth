@@ -30,7 +30,6 @@ thiserror.workspace = true
 tempfile.workspace = true
 reth-ethereum = { workspace = true, features = ["test-utils"] }
 alloy-rlp.workspace = true
-jsonrpsee = { workspace = true, features = ["http-client"] }
 reth-e2e-test-utils.workspace = true
 reth-tracing.workspace = true
 reth-payload-primitives.workspace = true

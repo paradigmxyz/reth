@@ -192,6 +192,10 @@ where
         self.execute_with_root_validator(provider, input, validate_state_root)
     }
 
+    fn as_any(&self) -> Option<&dyn std::any::Any> {
+        Some(self)
+    }
+
     fn unwind(
         &mut self,
         provider: &Provider,

@@ -99,7 +99,7 @@ rand.workspace = true
 tracing-subscriber = { workspace = true, features = ["registry"] }
 
 [features]
-pbt = ["dep:reth-trie-pbt"]
+pbt = ["dep:reth-trie-pbt", "reth-provider/pbt", "reth-storage-overlay/pbt"]
 asm-keccak = [
     "reth-evm/asm-keccak",
     "alloy-primitives/asm-keccak",

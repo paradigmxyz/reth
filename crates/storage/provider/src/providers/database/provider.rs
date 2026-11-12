@@ -3281,7 +3281,11 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> TrieWriter for DatabaseProvider
     /// Returns the number of entries modified.
     #[instrument(level = "debug", target = "providers::db", skip_all)]
     fn write_trie_updates_sorted(&self, trie_updates: &TrieUpdatesSorted) -> ProviderResult<usize> {
-        if trie_updates.is_empty() || self.mpt_retired_at()?.is_some() {
+        if trie_updates.is_empty() {
+            return Ok(0)
+        }
+        #[cfg(feature = "pbt")]
+        if self.mpt_retired_at()?.is_some() {
             return Ok(0)
         }
 
@@ -3292,8 +3296,12 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> TrieWriter for DatabaseProvider
             Self::write_account_trie_updates::<A>(self.tx_ref(), trie_updates, &mut num_entries)?;
         });
 
-        num_entries +=
-            self.write_storage_trie_updates_sorted(trie_updates.storage_tries_ref().iter())?;
+        // The transaction's retirement check above also covers these storage writes.
+        let mut storage_tries = trie_updates.storage_tries_ref().iter().collect::<Vec<_>>();
+        storage_tries.sort_unstable_by(|a, b| a.0.cmp(b.0));
+        reth_trie_db::with_adapter!(self, |A| {
+            Self::write_storage_tries::<A>(self.tx_ref(), storage_tries, &mut num_entries)?;
+        });
 
         Ok(num_entries)
     }
@@ -3310,6 +3318,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> StorageTrieWriter for DatabaseP
         storage_tries: impl Iterator<Item = (&'a B256, &'a StorageTrieUpdatesSorted)>,
     ) -> ProviderResult<usize> {
         // In-flight pre-retirement jobs can finish after the disposal transaction.
+        #[cfg(feature = "pbt")]
         if self.mpt_retired_at()?.is_some() {
             return Ok(0)
         }
@@ -4060,10 +4069,13 @@ impl<TX: DbTx + 'static, N: NodeTypes> ChainStateBlockReader for DatabaseProvide
 impl<TX: DbTxMut + DbTx, N: NodeTypes> ChainStateBlockWriter for DatabaseProvider<TX, N> {
     fn save_finalized_block_number(&self, block_number: BlockNumber) -> ProviderResult<()> {
         // A delayed finality flush must not reopen the permanent retirement boundary.
+        #[cfg(feature = "pbt")]
         let retired = self
             .tx
             .get::<tables::ChainState>(tables::ChainStateKey::PbtMptRetiredBlock)?
             .unwrap_or_default();
+        #[cfg(not(feature = "pbt"))]
+        let retired = 0;
         let block_number = block_number.max(retired);
         Ok(self
             .tx
@@ -4191,6 +4203,31 @@ mod tests {
         SortedTrieData, StoredNibbles, StoredNibblesSubKey,
     };
     use std::{sync::mpsc, time::Duration};
+
+    #[test]
+    fn chain_state_lookups_do_not_substitute_adjacent_keys() {
+        let factory = create_test_provider_factory();
+        let provider = factory.provider_rw().unwrap();
+        assert_eq!(provider.last_finalized_block_number().unwrap(), None);
+        assert_eq!(provider.last_safe_block_number().unwrap(), None);
+        provider.save_safe_block_number(17).unwrap();
+        assert_eq!(provider.last_finalized_block_number().unwrap(), None);
+        assert_eq!(provider.last_safe_block_number().unwrap(), Some(17));
+        provider
+            .tx_ref()
+            .put::<tables::ChainState>(tables::ChainStateKey::PbtMptRetiredBlock, 9)
+            .unwrap();
+        provider
+            .tx_ref()
+            .delete::<tables::ChainState>(tables::ChainStateKey::LastSafeBlock, None)
+            .unwrap();
+        assert_eq!(provider.last_safe_block_number().unwrap(), None);
+        provider
+            .tx_ref()
+            .put::<tables::ChainState>(tables::ChainStateKey::LastFinalizedBlock, 7)
+            .unwrap();
+        assert_eq!(provider.last_finalized_block_number().unwrap(), Some(7));
+    }
 
     /// Seeds block zero through the writer core because [`SaveBlocksInput`] only describes
     /// advancing an existing persistence frontier.
@@ -6109,6 +6146,7 @@ mod tests {
         assert!(!all_blocks.contains(&10), "block 10 should be unwound");
     }
 
+    #[cfg(feature = "pbt")]
     #[test]
     fn retirement_marker_is_not_finality_or_safety() {
         let factory = create_test_provider_factory();
@@ -6129,6 +6167,7 @@ mod tests {
         assert_eq!(provider.last_finalized_block_number().unwrap(), Some(7));
     }
 
+    #[cfg(feature = "pbt")]
     #[test]
     fn retired_mpt_rejects_late_trie_writes_and_deep_unwind() {
         let factory = create_test_provider_factory();

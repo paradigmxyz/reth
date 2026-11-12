@@ -239,6 +239,7 @@ impl<N: NodePrimitives> OverlayManager<N> {
             + BlockNumReader
             + StorageSettingsCache,
     {
+        #[cfg(feature = "pbt")]
         if provider.mpt_retired_at()?.is_some() {
             return Ok(TrieUpdatesSorted::default())
         }

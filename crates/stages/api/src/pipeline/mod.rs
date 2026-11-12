@@ -146,6 +146,12 @@ impl<N: ProviderNodeTypes> Pipeline<N> {
         *existing = Box::new(stage);
         Ok(())
     }
+
+    /// Returns the configured stage with `id` when it exposes the requested concrete type.
+    /// Returns `None` for an absent stage or one without matching typed configuration access.
+    pub fn stage_by_id<S: 'static>(&self, id: StageId) -> Option<&S> {
+        self.stages.iter().find(|stage| stage.id() == id)?.as_ref().as_any()?.downcast_ref()
+    }
 }
 
 impl<N: ProviderNodeTypes> Pipeline<N> {

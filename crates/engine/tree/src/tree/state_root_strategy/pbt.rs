@@ -158,19 +158,44 @@ where
         let parent = ctx.parent_header();
         let retired = ctx.state_provider_factory.database_provider_ro()?.mpt_retired_at()?;
         self.validate_retired_parent(parent.header(), retired)?;
-        let state = self.restore_parent(parent.hash(), parent.state_root(), parent.timestamp())?;
         let active = ctx.env().evm_env.block_env().timestamp.saturating_to::<u64>() >=
             self.activation_timestamp;
-        Ok(PreparedStateRootJob::new(
-            Box::new(PbtStateRootJob {
-                state_provider_factory: ctx.state_provider_factory,
-                parent: state,
-                store: self.store.clone(),
-                active,
-                parallel: self.parallel,
-            }),
-            None,
-        ))
+        let state = if !active && parent.timestamp() < self.activation_timestamp {
+            // These checkpoints derive from an authenticated anchor and locally accepted
+            // execution. Re-authenticate at startup and activation, not every warm read.
+            self.store.load_block(parent.hash()).map_err(ProviderError::other)?
+        } else {
+            self.restore_parent(parent.hash(), parent.state_root(), parent.timestamp())?
+        };
+        let mpt_parent = if retired.is_none() {
+            Some(if parent.timestamp() < self.activation_timestamp {
+                parent.state_root()
+            } else {
+                self.store.shadow_mpt_root(&state).map_err(ProviderError::other)?
+            })
+        } else {
+            None
+        };
+        let job = PbtStateRootJob {
+            state_provider_factory: ctx.state_provider_factory.clone(),
+            mpt: None,
+            parent: state,
+            store: self.store.clone(),
+            active,
+            parallel: self.parallel,
+        };
+        if let Some(root) = mpt_parent {
+            let prepared = <DefaultStateRootStrategy as StateRootStrategy<N, P, Evm>>::prepare(
+                &self.default,
+                if active { ctx.with_parent_state_root(root) } else { ctx },
+            )?;
+            Ok(PreparedStateRootJob {
+                job: Box::new(PbtStateRootJob { mpt: Some(prepared.job), ..job }),
+                ..prepared
+            })
+        } else {
+            Ok(PreparedStateRootJob::new(Box::new(job), None))
+        }
     }
 
     fn prepare_payload_builder(
@@ -258,11 +283,15 @@ where
             })
         })))
     }
+
+    fn requires_payload_output(&self, timestamp: u64) -> bool {
+        timestamp >= self.activation_timestamp
+    }
 }
 
-#[derive(Debug)]
 struct PbtStateRootJob<N: NodePrimitives, P, H> {
     state_provider_factory: OverlayStateProviderFactory<P, N>,
+    mpt: Option<Box<dyn StateRootJob<N>>>,
     parent: StateTree<H>,
     store: Arc<SnapshotStore<H>>,
     active: bool,
@@ -292,6 +321,7 @@ where
         output: Arc<BlockExecutionOutput<N::Receipt>>,
         hashed_state: &LazyHashedPostState,
     ) -> ProviderResult<StateRootJobOutcome> {
+        let accounts = output.state.state().len();
         let started = Instant::now();
         let update_started = Instant::now();
         let state = if self.parallel {
@@ -301,31 +331,34 @@ where
         }
         .map_err(ProviderError::other)?;
         let update_elapsed = update_started.elapsed();
-        // Read the marker and compute MPT from one MVCC snapshot, so disposal cannot
-        // leave an in-flight job observing a partially retired commitment store.
-        let provider = self.state_provider_factory.database_provider_ro()?;
-        let retired = provider.mpt_retired_at()?;
+        let retired = self.state_provider_factory.database_provider_ro()?.mpt_retired_at()?;
         if retired.is_some_and(|number| block.number() <= number || !self.active) {
             return Err(ProviderError::other(std::io::Error::other(
                 "cannot unwind past MPT retirement; re-anchor or resync",
             )))
         }
         let mpt_started = Instant::now();
-        let mut outcome = if retired.is_none() {
-            let (root, updates) =
-                provider.state_root_with_updates(hashed_state.get().as_ref().clone())?;
-            StateRootJobOutcome::new(root, Arc::new(updates))
+        let maintain_mpt = retired.is_none() && self.mpt.is_some();
+        let mut outcome = if maintain_mpt && let Some(mpt) = &mut self.mpt {
+            let outcome = mpt.finish(block, output, hashed_state)?;
+            self.store
+                .cache_shadow_mpt_root(state.root(), outcome.state_root)
+                .map_err(ProviderError::other)?;
+            outcome
         } else {
             StateRootJobOutcome::new(state.root(), Arc::new(TrieUpdates::default()))
         };
-        let mpt_ms =
-            if retired.is_none() { mpt_started.elapsed().as_secs_f64() * 1000.0 } else { 0.0 };
+        let mpt_ms = if maintain_mpt { mpt_started.elapsed().as_secs_f64() * 1000.0 } else { 0.0 };
+        let auxiliary_root = outcome.state_root;
         if self.active {
             outcome.state_root = state.root();
         }
         let checkpoint_started = Instant::now();
         let checkpointed = outcome.state_root == block.header().state_root();
         if checkpointed {
+            if maintain_mpt && let Some(mpt) = &mut self.mpt {
+                mpt.on_validated(block.hash(), auxiliary_root);
+            }
             self.store
                 .save_block_with_number(block.hash(), block.number(), &state)
                 .map_err(ProviderError::other)?;
@@ -339,9 +372,9 @@ where
             block_hash = ?block.hash(),
             pbt_root = ?state.root(),
             parallel = self.parallel,
-            maintain_mpt = retired.is_none(),
+            maintain_mpt,
             active = self.active,
-            accounts = output.state.state().len(),
+            accounts,
             leaves = state.tree().len(),
             pbt_update_ms = update_elapsed.as_secs_f64() * 1000.0,
             mpt_ms,

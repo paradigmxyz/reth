@@ -53,6 +53,7 @@ reth-trie = { workspace = true, features = ["test-utils"] }
 alloy-consensus.workspace = true
 
 [features]
+pbt = []
 default = ["metrics"]
 metrics = ["reth-trie/metrics", "reth-trie-db/metrics"]
 rayon = ["dep:rayon", "dep:reth-tasks"]

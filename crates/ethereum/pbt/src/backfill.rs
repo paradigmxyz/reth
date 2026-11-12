@@ -57,7 +57,10 @@ where
         let client = ctx.client().clone();
         let runtime = ctx.runtime().clone();
         let mut pipeline = ctx.into_pipeline();
-        for merkle in [MerkleStage::default_execution(), MerkleStage::default_unwind()] {
+        for id in [StageId::MerkleExecute, StageId::MerkleUnwind] {
+            let merkle = pipeline.stage_by_id::<MerkleStage>(id).cloned().ok_or_else(|| {
+                eyre::eyre!("PBT backfill requires a configured MerkleStage at {id}")
+            })?;
             pipeline.replace_stage(PbtMerkleStage {
                 merkle,
                 strategy: self.strategy.clone(),
@@ -214,16 +217,18 @@ where
 {
     let mut number = input.checkpoint().block_number;
     while number < input.target() {
-        let end =
+        let mut end =
             number.saturating_add(u64::try_from(limits.max_blocks.get())?).min(input.target());
         let anchor = factory
             .sealed_header(number)?
             .ok_or_else(|| ProviderError::HeaderNotFound(number.into()))?;
-        let tip =
-            factory.sealed_header(end)?.ok_or_else(|| ProviderError::HeaderNotFound(end.into()))?;
         let mut fetched = B256Map::default();
         let mut remaining = limits.max_bal_bytes.get();
         for next in number + 1..=end {
+            if remaining == 0 {
+                end = next - 1;
+                break;
+            }
             let header = factory
                 .sealed_header(next)?
                 .ok_or_else(|| ProviderError::HeaderNotFound(next.into()))?;
@@ -231,9 +236,12 @@ where
                 .block_access_list_hash()
                 .ok_or_else(|| eyre::eyre!("PBT backfill header has no BAL commitment"))?;
             if let Some(raw) = factory.bal_store().get_by_hash(header.hash())? {
-                remaining = remaining
-                    .checked_sub(raw.len())
-                    .ok_or_else(|| eyre::eyre!("PBT catch-up BAL byte budget exceeded"))?;
+                if raw.len() > remaining {
+                    eyre::ensure!(next > number + 1, "PBT catch-up BAL byte budget exceeded");
+                    end = next - 1;
+                    break;
+                }
+                remaining -= raw.len();
             } else {
                 let raw =
                     match download::download_bal(&client, header.hash(), commitment, remaining)
@@ -241,7 +249,11 @@ where
                     {
                         Ok(raw) => raw,
                         Err(error) if error.is::<download::BalByteBudgetExceeded>() => {
-                            return Err(error)
+                            if next == number + 1 {
+                                return Err(error)
+                            }
+                            end = next - 1;
+                            break;
                         }
                         Err(error) => {
                             // An unavailable peer must stall replay, without a tight stage retry
@@ -256,6 +268,8 @@ where
                 fetched.insert(header.hash(), raw);
             }
         }
+        let tip =
+            factory.sealed_header(end)?.ok_or_else(|| ProviderError::HeaderNotFound(end.into()))?;
         let replay_factory = factory.clone();
         let replay_strategy = strategy.clone();
         let span = Span::current();
@@ -301,18 +315,82 @@ fn verify<H: BlockHeader>(
 mod tests {
     use super::*;
     use crate::retirement;
-    use alloy_primitives::Address;
+    use alloy_primitives::{keccak256, Address, Bytes};
     use reth_ethereum::{
         network::p2p::NoopFullBlockClient,
         provider::{
             db::{tables, transaction::DbTx},
             test_utils::{create_test_provider_factory, insert_headers},
+            RawBal,
         },
         Block,
     };
     use reth_trie_pbt::{
         migration::DecodeLimits, persistence::SnapshotStore, AccountData, StateTree,
     };
+    use std::num::NonZeroUsize;
+
+    #[tokio::test]
+    async fn replay_chunks_stop_at_the_byte_budget_but_reject_one_oversized_bal() -> eyre::Result<()>
+    {
+        for oversized in [false, true] {
+            let directory = tempfile::tempdir()?;
+            let store = Arc::new(SnapshotStore::open(directory.path(), DecodeLimits::default())?);
+            let factory = create_test_provider_factory();
+            let state = StateTree::new();
+            let raw = if oversized {
+                Bytes::from_static(&[0xc1, 0xc0])
+            } else {
+                Bytes::from_static(&[0xc0])
+            };
+            let mut headers = Vec::new();
+            let mut parent = B256::ZERO;
+            for number in 0..=3 {
+                let mut header = Block::default().header;
+                header.number = number;
+                header.timestamp = number;
+                header.parent_hash = parent;
+                header.state_root = state.root();
+                header.block_access_list_hash = Some(keccak256(&raw));
+                let header = SealedHeader::seal_slow(header);
+                parent = header.hash();
+                factory.bal_store().insert(header.num_hash(), RawBal::new(raw.clone()))?;
+                factory.bal_store().flush(&[header.num_hash()])?;
+                headers.push(header);
+            }
+            insert_headers(&factory, &headers);
+            let database = factory.provider_rw()?;
+            for header in &headers {
+                database.tx_ref().put::<tables::HeaderNumbers>(header.hash(), header.number())?;
+            }
+            database.commit()?;
+            store.save_block_with_number(headers[0].hash(), 0, &state)?;
+            let result = prepare::<_, NoopFullBlockClient>(
+                factory,
+                NoopFullBlockClient::default(),
+                Arc::new(PbtStateRootStrategy::new(store.clone(), 0)),
+                CatchupLimits {
+                    max_blocks: NonZeroUsize::new(3).unwrap(),
+                    max_bal_bytes: NonZeroUsize::new(1).unwrap(),
+                },
+                ExecInput { target: Some(3), checkpoint: Some(StageCheckpoint::new(0)) },
+            )
+            .await;
+            if oversized {
+                assert_eq!(
+                    result.unwrap_err().to_string(),
+                    "PBT catch-up BAL byte budget exceeded"
+                );
+                assert!(!store.contains_block(headers[1].hash())?);
+            } else {
+                result?;
+                for header in &headers {
+                    assert_eq!(store.verify_block(header.hash())?, state.root());
+                }
+            }
+        }
+        Ok(())
+    }
 
     #[test]
     fn retired_backfill_skips_mpt_and_rejects_deep_unwind() -> eyre::Result<()> {

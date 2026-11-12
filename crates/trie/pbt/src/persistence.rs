@@ -2,7 +2,7 @@
 //! the corresponding trie nodes and root record have been durably synced.
 
 use crate::{
-    migration::{ArtifactError, Artifacts, DecodeLimits},
+    migration::{mpt_root, ArtifactError, Artifacts, DecodeLimits},
     Blake3Hasher, Proof, StateTree, TreeHasher,
 };
 use alloy_primitives::B256;
@@ -42,6 +42,7 @@ pub struct SnapshotStore<H = Blake3Hasher> {
     path: PathBuf,
     database: Arc<NodeDatabase>,
     cache: Mutex<LruMap<B256, StateTree<H>>>,
+    shadow_mpt_roots: Mutex<LruMap<B256, B256>>,
     cache_generation: AtomicU64,
     cache_bytes: usize,
     limits: DecodeLimits,
@@ -70,6 +71,7 @@ impl<H: TreeHasher> SnapshotStore<H> {
             path,
             database,
             cache: Mutex::new(LruMap::new(STATE_CACHE_CAPACITY)),
+            shadow_mpt_roots: Mutex::new(LruMap::new(STATE_CACHE_CAPACITY)),
             cache_generation: AtomicU64::new(0),
             cache_bytes: STATE_CACHE_BYTES,
             limits,
@@ -515,6 +517,34 @@ impl<H: TreeHasher> SnapshotStore<H> {
     pub fn cache_candidate(&self, state: &StateTree<H>) -> Result<(), StoreError> {
         let mut cache = self.cache()?;
         cache_state(&mut cache, state.root(), state.clone(), self.cache_bytes);
+        Ok(())
+    }
+
+    /// Returns the auxiliary MPT root for an authenticated state during dual maintenance.
+    /// Accepted blocks populate the bounded cache from their MPT job. A cold or evicted
+    /// checkpoint reconstructs this auxiliary root once, outside the cache lock.
+    pub fn shadow_mpt_root(&self, state: &StateTree<H>) -> Result<B256, StoreError> {
+        if let Some(root) =
+            self.shadow_mpt_roots.lock().map_err(|_| StoreError::Poisoned)?.get(&state.root())
+        {
+            return Ok(*root)
+        }
+        let root = mpt_root(state);
+        self.cache_shadow_mpt_root(state.root(), root)?;
+        Ok(root)
+    }
+
+    /// Records a root computed by the MPT job from the same accepted execution output.
+    /// This is an auxiliary cache, not authentication of a block's PBT commitment.
+    pub fn cache_shadow_mpt_root(
+        &self,
+        state_root: B256,
+        mpt_root: B256,
+    ) -> Result<(), StoreError> {
+        self.shadow_mpt_roots
+            .lock()
+            .map_err(|_| StoreError::Poisoned)?
+            .insert(state_root, mpt_root);
         Ok(())
     }
 

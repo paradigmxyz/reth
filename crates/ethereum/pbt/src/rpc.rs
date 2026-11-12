@@ -28,7 +28,7 @@ impl ProofRpc {
 
     pub(super) fn into_rpc(self) -> Result<RpcModule<Self>, RegisterMethodError> {
         let mut module = RpcModule::new(self);
-        module.register_async_method("pbt_getProof", |params, context, _| async move {
+        module.register_async_method("pbt_getProof", |params, context| async move {
             if params.len_bytes() > MAX_PROOF_PARAMS_BYTES {
                 return Err(ErrorObjectOwned::owned(
                     INVALID_PARAMS_CODE,
@@ -163,12 +163,27 @@ const LIMIT_EXCEEDED_CODE: i32 = -32005;
 mod tests {
     use super::*;
     use alloy_primitives::{Address, U256};
-    use jsonrpsee::{core::server::MethodsError, rpc_params};
     use reth_trie_pbt::{
         key, migration::DecodeLimits, AccountData, Blake3Hasher, Proof, ProofError, ProofStep,
         StateTree,
     };
     use std::collections::BTreeSet;
+
+    async fn call<R: serde::de::DeserializeOwned>(
+        module: &RpcModule<ProofRpc>,
+        params: (B256, Vec<Bytes>),
+    ) -> Result<R, ErrorObjectOwned> {
+        let request = serde_json::json!({
+            "jsonrpc": "2.0", "id": 1, "method": "pbt_getProof", "params": params,
+        });
+        let (response, _) = module.raw_json_request(&request.to_string(), 1).await.unwrap();
+        let mut response: serde_json::Value = serde_json::from_str(&response).unwrap();
+        if let Some(error) = response.get_mut("error") {
+            Err(serde_json::from_value(error.take()).unwrap())
+        } else {
+            Ok(serde_json::from_value(response["result"].take()).unwrap())
+        }
+    }
 
     fn verify(proof: KeyProof, root: B256) {
         let terminal = match proof.terminal {
@@ -216,8 +231,7 @@ mod tests {
             Bytes::from(key::storage_key::<Blake3Hasher>(address, U256::from(1))),
             Bytes::from(vec![0]),
         ];
-        let response: ProofResponse =
-            module.call("pbt_getProof", rpc_params![block, keys.clone()]).await.unwrap();
+        let response: ProofResponse = call(&module, (block, keys.clone())).await.unwrap();
         assert_eq!(response.version, PROOF_VERSION);
         assert_eq!(response.block_hash, block);
         assert_eq!(response.pbt_state_root, state.root());
@@ -236,10 +250,8 @@ mod tests {
             assert_eq!(proof.key, key);
             verify(proof, state.root());
         }
-        let response: ProofResponse = module
-            .call("pbt_getProof", rpc_params![empty, vec![Bytes::from(vec![0])]])
-            .await
-            .unwrap();
+        let response: ProofResponse =
+            call(&module, (empty, vec![Bytes::from(vec![0])])).await.unwrap();
         assert_eq!(response.pbt_state_root, B256::ZERO);
         assert!(matches!(response.proofs[0].terminal, RpcTerminal::Empty));
         verify(response.proofs.into_iter().next().unwrap(), B256::ZERO);
@@ -257,31 +269,21 @@ mod tests {
             vec![Bytes::from(vec![0]); MAX_PROOF_KEYS + 1],
             vec![Bytes::from(vec![0; MAX_KEY_LENGTH + 1])],
         ] {
-            let error = module
-                .call::<_, ProofResponse>("pbt_getProof", rpc_params![B256::ZERO, keys])
-                .await
-                .unwrap_err();
-            assert!(
-                matches!(error, MethodsError::JsonRpc(error) if error.code() == INVALID_PARAMS_CODE)
-            );
+            let error = call::<ProofResponse>(&module, (B256::ZERO, keys)).await.unwrap_err();
+            assert!(error.code() == INVALID_PARAMS_CODE);
         }
         let keys = vec![Bytes::from(vec![0; MAX_KEY_LENGTH]); MAX_PROOF_KEYS + 1];
-        let error = module
-            .call::<_, ProofResponse>("pbt_getProof", rpc_params![B256::ZERO, keys])
-            .await
-            .unwrap_err();
+        let error = call::<ProofResponse>(&module, (B256::ZERO, keys)).await.unwrap_err();
         assert!(
-            matches!(error, MethodsError::JsonRpc(error) if error.code() == INVALID_PARAMS_CODE && error.message() == "PBT proof request exceeds the byte limit")
+            error.code() == INVALID_PARAMS_CODE &&
+                error.message() == "PBT proof request exceeds the byte limit"
         );
-        let error = module
-            .call::<_, ProofResponse>(
-                "pbt_getProof",
-                rpc_params![B256::ZERO, vec![Bytes::from(vec![0])]],
-            )
+        let error = call::<ProofResponse>(&module, (B256::ZERO, vec![Bytes::from(vec![0])]))
             .await
             .unwrap_err();
         assert!(
-            matches!(error, MethodsError::JsonRpc(error) if error.code() == INTERNAL_ERROR_CODE && error.message() == "PBT checkpoint could not be loaded")
+            error.code() == INTERNAL_ERROR_CODE &&
+                error.message() == "PBT checkpoint could not be loaded"
         );
     }
 
@@ -295,22 +297,16 @@ mod tests {
         let permit =
             service.permits.clone().acquire_many_owned(MAX_CONCURRENT_PROOFS as u32).await.unwrap();
         let module = service.into_rpc().unwrap();
-        let error = module
-            .call::<_, ProofResponse>(
-                "pbt_getProof",
-                rpc_params![B256::ZERO, vec![Bytes::from(vec![0])]],
-            )
+        let error = call::<ProofResponse>(&module, (B256::ZERO, vec![Bytes::from(vec![0])]))
             .await
             .unwrap_err();
         assert!(
-            matches!(error, MethodsError::JsonRpc(error) if error.code() == LIMIT_EXCEEDED_CODE && error.message() == "PBT proof service is busy")
+            error.code() == LIMIT_EXCEEDED_CODE && error.message() == "PBT proof service is busy"
         );
         drop(permit);
         for _ in 0..2 {
-            let response: ProofResponse = module
-                .call("pbt_getProof", rpc_params![B256::ZERO, vec![Bytes::from(vec![0])]])
-                .await
-                .unwrap();
+            let response: ProofResponse =
+                call(&module, (B256::ZERO, vec![Bytes::from(vec![0])])).await.unwrap();
             assert_eq!(response.pbt_state_root, B256::ZERO);
         }
     }
@@ -323,16 +319,13 @@ mod tests {
         store.save_block(B256::ZERO, &StateTree::new()).unwrap();
         let module = ProofRpc::new(store).into_rpc().unwrap();
         let keys = vec![Bytes::from(vec![0; MAX_KEY_LENGTH]); MAX_PROOF_KEYS];
-        let response: ProofResponse =
-            module.call("pbt_getProof", rpc_params![B256::ZERO, keys]).await.unwrap();
+        let response: ProofResponse = call(&module, (B256::ZERO, keys)).await.unwrap();
         assert_eq!(response.proofs.len(), MAX_PROOF_KEYS);
         for proof in response.proofs {
             verify(proof, B256::ZERO);
         }
-        let wire: serde_json::Value = module
-            .call("pbt_getProof", rpc_params![B256::ZERO, vec![Bytes::from(vec![0])]])
-            .await
-            .unwrap();
+        let wire: serde_json::Value =
+            call(&module, (B256::ZERO, vec![Bytes::from(vec![0])])).await.unwrap();
         assert_eq!(
             wire,
             serde_json::json!({
@@ -348,15 +341,12 @@ mod tests {
         let fresh =
             Arc::new(SnapshotStore::open(directory.path(), DecodeLimits::default()).unwrap());
         let module = ProofRpc::new(fresh).into_rpc().unwrap();
-        let error = module
-            .call::<_, ProofResponse>(
-                "pbt_getProof",
-                rpc_params![B256::ZERO, vec![Bytes::from(vec![0])]],
-            )
+        let error = call::<ProofResponse>(&module, (B256::ZERO, vec![Bytes::from(vec![0])]))
             .await
             .unwrap_err();
         assert!(
-            matches!(error, MethodsError::JsonRpc(error) if error.code() == INTERNAL_ERROR_CODE && error.message() == "PBT checkpoint could not be loaded")
+            error.code() == INTERNAL_ERROR_CODE &&
+                error.message() == "PBT checkpoint could not be loaded"
         );
     }
 }

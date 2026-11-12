@@ -4,8 +4,9 @@ use alloy_primitives::B256;
 use reth_ethereum::{
     primitives::{AlloyBlockHeader, SealedHeader},
     provider::{
-        BlockNumReader, ChangeSetReader, DatabaseProviderFactory, DbTxProvider, HeaderProvider,
-        StageCheckpointReader, StateProviderFactory, StorageChangeSetReader,
+        BlockHashReader, BlockNumReader, ChangeSetReader, DBProvider, DatabaseProviderFactory,
+        DbTxProvider, HeaderProvider, LatestStateProviderRef, StageCheckpointReader,
+        StorageChangeSetReader,
     },
     trie::{
         hashed_cursor::HashedPostStateCursorFactory, DatabaseHashedCursorFactory,
@@ -25,10 +26,14 @@ pub(super) fn convert_anchor<P>(
     should_stop: impl FnMut() -> bool,
 ) -> eyre::Result<B256>
 where
-    P: DatabaseProviderFactory + StateProviderFactory + HeaderProvider,
-    P::Provider: BlockNumReader + ChangeSetReader + StorageChangeSetReader + StageCheckpointReader,
+    P: DatabaseProviderFactory + HeaderProvider,
+    P::Provider: BlockHashReader
+        + BlockNumReader
+        + ChangeSetReader
+        + StorageChangeSetReader
+        + StageCheckpointReader,
 {
-    let database = provider.database_provider_ro()?;
+    let database = provider.database_provider_ro()?.disable_long_read_transaction_safety();
     let accounts = database.get_stage_checkpoint(StageId::AccountHashing)?;
     let storage = database.get_stage_checkpoint(StageId::StorageHashing)?;
     eyre::ensure!(
@@ -53,12 +58,13 @@ where
         DatabaseHashedCursorFactory::new(database.tx()),
         &reverts,
     );
-    let code = provider.latest()?;
+    // Conversion runs before the engine starts; use the same pinned, timeout-free
+    // view for bytecode rather than opening a second timed latest-state transaction.
     Ok(store.convert_anchor(
         anchor.hash(),
         anchor.state_root(),
         &cursors,
-        &code,
+        &LatestStateProviderRef::new(&database),
         preimages,
         should_stop,
     )?)

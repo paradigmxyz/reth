@@ -1497,6 +1497,7 @@ mod tests {
         writer.commit().unwrap();
         assert_eq!(before.mpt_retired_at().unwrap(), None);
         assert_eq!(overlay.database_provider_ro().unwrap().mpt_retired_at().unwrap(), Some(7));
+        #[cfg(feature = "pbt")]
         assert_eq!(
             manager.compute_block_trie_updates(&factory.provider().unwrap(), 8).unwrap(),
             TrieUpdatesSorted::default()

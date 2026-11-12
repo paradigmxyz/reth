@@ -18,18 +18,11 @@ configuration; startup verifies the persisted checkpoint.
 |---|---|
 | `PBT_DATADIR` | Persistent data directory; unset uses temporary storage. |
 | `PBT_ACTIVATION_TIMESTAMP` | Fork timestamp; defaults to `0`. |
-| `PBT_KEEP_MPT` | Set to `true` to retain MPT maintenance. |
-| `PBT_MIGRATION_ANCHOR` | Local finalized ancestor selected for migration. |
-| `PBT_MIGRATION_PREIMAGES` | Required with a migration anchor. |
-| `PBT_MIGRATION_SNAPSHOT` | Optional snapshot; otherwise retained state is converted. |
-| `PBT_PRUNE_BLOCKS` | Comma-separated block hashes; only strict ancestors of local finality may be pruned. |
-| `PBT_CATCHUP_MAX_BLOCKS` | Maximum BAL catch-up range; defaults to `1024`. |
-| `PBT_CATCHUP_MAX_BAL_BYTES` | Maximum BAL bytes per range; defaults to `67108864`. |
 
-Migration authenticates the selected anchor and replays BALs to the persisted
-tip. Missing BALs are fetched over `eth/71` and checked against local headers
-before checkpoint publication. Missing history, invalid commitments, or exceeded
-budgets stop startup.
+The example retains MPT maintenance by default. For migration, resource budgets,
+parallel hashing, or explicit retirement, use the PBT-enabled `reth` binary and its
+`--pbt.*` arguments documented in [PBT node integration](../../crates/ethereum/pbt/README.md).
+Library integrations pass those settings explicitly through `PbtConfig`.
 
 `pbt_getProof(blockHash, keys)` is available only on JWT-authenticated RPC. It
 accepts 1–16 raw hex-encoded tree keys and returns `version`, `blockHash`,

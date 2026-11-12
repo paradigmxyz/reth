@@ -478,21 +478,23 @@ where
         let requires_output = task.uses_output();
         // Streaming jobs overlap execution; output backends compute from the final bundle.
         // Only a streaming MPT job may fall back to synchronous MPT computation.
-        builder.finish_with_state_root(state_provider.as_ref(), |output| match task.finish_with_output(&output.state) {
-            Ok(outcome) => {
-                debug!(
-                    target: "payload_builder",
-                    id = %payload_id,
-                    state_root = ?outcome.state_root,
-                    job = task.name(),
-                    "received state root from state-root job"
-                );
-                Ok(Some((outcome.state_root, Arc::unwrap_or_clone(outcome.trie_updates))))
-            }
-            Err(err) => {
-                if requires_output { return Err(BlockExecutionError::other(err)); }
-                warn!(target: "payload_builder", id = %payload_id, %err, "state-root job failed, falling back to sync state root");
-                Ok(None)
+        builder.finish_with_state_root(state_provider.as_ref(), |output| {
+            match task.finish_with_output(&output.state) {
+                Ok(outcome) => {
+                    debug!(
+                        target: "payload_builder",
+                        id = %payload_id,
+                        state_root = ?outcome.state_root,
+                        job = task.name(),
+                        "received state root from state-root job"
+                    );
+                    Ok(Some((outcome.state_root, Arc::unwrap_or_clone(outcome.trie_updates))))
+                }
+                Err(err) if requires_output => Err(BlockExecutionError::other(err)),
+                Err(err) => {
+                    warn!(target: "payload_builder", id = %payload_id, %err, "state-root job failed, falling back to sync state root");
+                    Ok(None)
+                }
             }
         })?
     } else {

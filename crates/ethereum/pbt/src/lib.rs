@@ -33,14 +33,8 @@ use reth_ethereum::{
     EthPrimitives,
 };
 use reth_storage_overlay::OverlayManager;
-use reth_trie_pbt::{
-    migration::{mpt_root, DecodeLimits},
-    persistence::SnapshotStore,
-    AccountData, StateTree,
-};
+use reth_trie_pbt::{migration::mpt_root, persistence::SnapshotStore, AccountData, StateTree};
 use std::{
-    collections::BTreeSet,
-    ffi::OsString,
     fs::{File, OpenOptions, TryLockError},
     num::NonZeroUsize,
     path::{Path, PathBuf},
@@ -53,6 +47,10 @@ use tracing::Span;
 
 mod backfill;
 pub use backfill::PbtBackfill;
+
+mod config;
+pub use config::PbtConfig;
+pub use reth_trie_pbt::migration::DecodeLimits;
 
 mod conversion;
 mod download;
@@ -74,48 +72,37 @@ pub struct PbtNode {
 }
 
 impl PbtNode {
-    /// Opens durable PBT checkpoints and pins genesis and the activation timestamp.
-    ///
-    /// Migration artifacts, pruning, and catch-up budgets use the documented `PBT_*`
-    /// environment variables. Missing or inconsistent persisted state fails startup.
+    /// Opens PBT with default resource limits and MPT retirement disabled.
+    /// Use [`Self::new_with_config`] to select migration inputs or explicitly enable retirement.
     pub fn new(chain: Arc<ChainSpec>, directory: &Path, activation: u64) -> eyre::Result<Self> {
+        Self::new_with_config(chain, directory, activation, PbtConfig::default())
+    }
+
+    /// Opens durable checkpoints with explicit node-owned settings.
+    /// Missing or inconsistent persisted state fails startup; this does not read process
+    /// environment.
+    pub fn new_with_config(
+        chain: Arc<ChainSpec>,
+        directory: &Path,
+        activation: u64,
+        config: PbtConfig,
+    ) -> eyre::Result<Self> {
         let directory_lock = lock_directory(directory)?;
-        let mut limits = DecodeLimits::default();
-        for (name, limit) in [
-            ("PBT_IMPORT_MAX_ACCOUNTS", &mut limits.max_accounts),
-            ("PBT_IMPORT_MAX_LEAVES", &mut limits.max_leaves),
-            ("PBT_IMPORT_MAX_CODE_SIZE", &mut limits.max_code_size),
-            ("PBT_IMPORT_MAX_TOTAL_CODE_SIZE", &mut limits.max_total_code_size),
-        ] {
-            if let Some(value) = std::env::var_os(name) {
-                *limit = parse_resource_budget(name, value)?;
-            }
-        }
-        let mut store =
-            SnapshotStore::open_with_limits(directory.join("pbt"), limits, DecodeLimits::native())?;
-        if let Some(value) = std::env::var_os("PBT_CACHE_MAX_BYTES") {
-            store.set_cache_budget(parse_resource_budget("PBT_CACHE_MAX_BYTES", value)?)?;
+        let mut store = SnapshotStore::open_with_limits(
+            directory.join("pbt"),
+            config.import_limits,
+            DecodeLimits::native(),
+        )?;
+        if let Some(bytes) = config.cache_max_bytes {
+            store.set_cache_budget(bytes)?;
         }
         let store = Arc::new(store);
         let chain = prepare_chain((*chain).clone(), activation, &store)?;
-        let mut startup = Startup::new(
-            std::env::var_os("PBT_MIGRATION_SNAPSHOT"),
-            std::env::var_os("PBT_MIGRATION_PREIMAGES"),
-            std::env::var_os("PBT_MIGRATION_ANCHOR"),
-            std::env::var_os("PBT_PRUNE_BLOCKS"),
-            CatchupLimits::new(
-                std::env::var_os("PBT_CATCHUP_MAX_BLOCKS"),
-                std::env::var_os("PBT_CATCHUP_MAX_BAL_BYTES"),
-            )?,
-        )?;
-        if let Some(value) = std::env::var_os("PBT_CHECKPOINT_HISTORY") {
-            startup.checkpoint_history =
-                u64::try_from(parse_resource_budget("PBT_CHECKPOINT_HISTORY", value)?)?;
-        }
-        startup.keep_mpt = match std::env::var("PBT_KEEP_MPT") {
-            Ok(value) => value.parse().wrap_err("PBT_KEEP_MPT must be true or false")?,
-            Err(std::env::VarError::NotPresent) => false,
-            Err(error) => return Err(error.into()),
+        let startup = Startup {
+            migration: config.migration,
+            catchup: config.catchup,
+            keep_mpt: !config.retire_mpt,
+            checkpoint_history: config.checkpoint_history,
         };
         let strategy = Arc::new(PbtStateRootStrategy::new(store.clone(), activation));
         Ok(Self { chain, store, strategy, startup, _directory_lock: directory_lock })
@@ -411,24 +398,25 @@ fn prepare_chain(
             store.is_empty()?,
             "PBT checkpoint directory is populated but chain-config is missing"
         );
-        store.save_block_with_number(chain.genesis_hash(), 0, &state)?;
         reth_fs_util::atomic_write_file(&path, |file| {
             std::io::Write::write_all(file, &configuration)
         })?;
+    }
+    // Pin the chain before publishing any state. A crash during genesis publication
+    // can then resume with the same configuration instead of stranding the directory.
+    if store.contains_block(chain.genesis_hash())? {
+        eyre::ensure!(
+            store.checkpoint_root(chain.genesis_hash())? == state.root(),
+            "PBT genesis checkpoint does not match the pinned chain"
+        );
+    } else {
+        store.save_block_with_number(chain.genesis_hash(), 0, &state)?;
     }
     Ok(Arc::new(chain))
 }
 
 const CONFIGURATION_LENGTH: usize = 4 + 32 + 8;
 const DEFAULT_CHECKPOINT_HISTORY: u64 = 64;
-
-fn parse_resource_budget(name: &str, value: OsString) -> eyre::Result<usize> {
-    value
-        .to_str()
-        .ok_or_else(|| eyre::eyre!("{name} must be a nonnegative integer"))?
-        .parse()
-        .wrap_err_with(|| format!("{name} must be a nonnegative integer"))
-}
 
 fn lock_directory(directory: &Path) -> eyre::Result<File> {
     reth_fs_util::create_dir_all(directory)?;
@@ -449,7 +437,6 @@ fn lock_directory(directory: &Path) -> eyre::Result<File> {
 #[derive(Clone, Debug)]
 struct Startup {
     migration: Option<MigrationFiles>,
-    obsolete_checkpoints: Vec<B256>,
     catchup: CatchupLimits,
     keep_mpt: bool,
     checkpoint_history: u64,
@@ -459,54 +446,14 @@ impl Default for Startup {
     fn default() -> Self {
         Self {
             migration: None,
-            obsolete_checkpoints: Vec::new(),
             catchup: CatchupLimits::default(),
-            keep_mpt: false,
+            keep_mpt: true,
             checkpoint_history: DEFAULT_CHECKPOINT_HISTORY,
         }
     }
 }
 
 impl Startup {
-    fn new(
-        snapshot: Option<OsString>,
-        preimages: Option<OsString>,
-        anchor: Option<OsString>,
-        obsolete: Option<OsString>,
-        catchup: CatchupLimits,
-    ) -> eyre::Result<Self> {
-        let migration = match (snapshot, preimages, anchor) {
-            (snapshot, Some(preimages), Some(anchor)) => {
-                let anchor = anchor
-                    .into_string()
-                    .map_err(|_| eyre::eyre!("PBT_MIGRATION_ANCHOR must contain a UTF-8 block hash"))?
-                    .parse()?;
-                Some(MigrationFiles {
-                    source: snapshot.map_or(MigrationSource::Mpt, |path| MigrationSource::Snapshot(path.into())),
-                    preimages: preimages.into(),
-                    anchor,
-                })
-            }
-            (None, None, None) => None,
-            _ => eyre::bail!(
-                "PBT_MIGRATION_PREIMAGES and PBT_MIGRATION_ANCHOR are required together; PBT_MIGRATION_SNAPSHOT is optional for self-conversion"
-            ),
-        };
-        let obsolete_checkpoints = obsolete
-            .map(|hashes| {
-                let hashes = hashes
-                    .into_string()
-                    .map_err(|_| eyre::eyre!("PBT_PRUNE_BLOCKS must contain UTF-8 block hashes"))?;
-                hashes
-                    .split(',')
-                    .map(|hash| hash.parse::<B256>().map_err(Into::into))
-                    .collect::<eyre::Result<Vec<_>>>()
-            })
-            .transpose()?
-            .unwrap_or_default();
-        Ok(Self { migration, obsolete_checkpoints, catchup, ..Default::default() })
-    }
-
     #[cfg(test)]
     fn initialize<P>(&self, strategy: &PbtStateRootStrategy, provider: &P) -> eyre::Result<()>
     where
@@ -542,10 +489,10 @@ impl Startup {
     where
         P: BalProvider + BlockIdReader + BlockNumReader + HeaderProvider + StageCheckpointReader,
     {
-        let finalized = if self.migration.is_some() || !self.obsolete_checkpoints.is_empty() {
-            let hash = provider.finalized_block_hash()?.ok_or_else(|| {
-                eyre::eyre!("PBT onboarding or pruning requires a locally finalized block")
-            })?;
+        let finalized = if self.migration.is_some() {
+            let hash = provider
+                .finalized_block_hash()?
+                .ok_or_else(|| eyre::eyre!("PBT onboarding requires a locally finalized block"))?;
             Some(
                 provider
                     .sealed_header_by_hash(hash)?
@@ -600,41 +547,6 @@ impl Startup {
         strategy
             .restore_parent(tip.hash(), tip.state_root(), tip.timestamp())
             .wrap_err("PBT persisted tip checkpoint is missing or inconsistent")?;
-        if !self.obsolete_checkpoints.is_empty() {
-            let finalized =
-                finalized.ok_or_else(|| eyre::eyre!("missing local finalized header"))?;
-            let trusted = strategy.restore_parent(
-                finalized.hash(),
-                finalized.state_root(),
-                finalized.timestamp(),
-            )?;
-            eyre::ensure!(
-                strategy.store().load_block(finalized.hash())?.root() == trusted.root(),
-                "PBT finalized checkpoint reference does not match its header"
-            );
-            let mut unmatched = self.obsolete_checkpoints.iter().copied().collect::<BTreeSet<_>>();
-            eyre::ensure!(
-                !unmatched.contains(&finalized.hash()),
-                "cannot prune the finalized PBT checkpoint"
-            );
-            let mut ancestor = finalized.clone();
-            while !unmatched.is_empty() && ancestor.number() != 0 {
-                let parent = provider
-                    .sealed_header_by_hash(ancestor.parent_hash())?
-                    .ok_or_else(|| eyre::eyre!("missing finalized ancestor header"))?;
-                eyre::ensure!(
-                    parent.number().checked_add(1) == Some(ancestor.number()),
-                    "inconsistent finalized header ancestry"
-                );
-                unmatched.remove(&parent.hash());
-                ancestor = parent;
-            }
-            eyre::ensure!(
-                unmatched.is_empty(),
-                "PBT prune candidates must be strict ancestors of the finalized block"
-            );
-            strategy.store().prune_finalized(finalized.hash(), &self.obsolete_checkpoints)?;
-        }
         Ok(())
     }
 
@@ -690,6 +602,7 @@ impl Startup {
         let mut state =
             strategy.restore_parent(anchor.hash(), anchor.state_root(), anchor.timestamp())?;
         let mut remaining_bytes = self.catchup.max_bal_bytes.get();
+        let mut parent = anchor.clone();
         for header in headers.into_iter().rev() {
             let commitment = header
                 .block_access_list_hash()
@@ -698,19 +611,35 @@ impl Startup {
             let fetched = local.is_none();
             let bytes = match local {
                 Some(bytes) => bytes,
-                None => fetch(header.hash(), commitment, remaining_bytes)?,
+                None => fetch(header.hash(), commitment, self.catchup.max_bal_bytes.get())?,
             };
-            remaining_bytes = remaining_bytes
-                .checked_sub(bytes.len())
-                .ok_or_else(|| eyre::eyre!("PBT catch-up BAL byte budget exceeded"))?;
+            eyre::ensure!(
+                bytes.len() <= self.catchup.max_bal_bytes.get(),
+                "PBT catch-up BAL byte budget exceeded"
+            );
+            if bytes.len() > remaining_bytes {
+                remaining_bytes = self.catchup.max_bal_bytes.get();
+            }
+            remaining_bytes -= bytes.len();
             let raw = RawBal::new(bytes);
             raw.ensure_hash(commitment)?;
             let bal = DecodedBal::from_raw_bal(raw.clone())?;
+            if header.timestamp() >= strategy.activation_timestamp() &&
+                parent.timestamp() < strategy.activation_timestamp()
+            {
+                // Authenticate the activation parent even when preceding shadow steps
+                // skipped redundant full-state MPT reconstruction.
+                strategy.restore_parent(parent.hash(), parent.state_root(), parent.timestamp())?;
+            }
             let next = strategy.replay(&state, bal.as_bal().as_slice(), commitment)?;
             let root = if header.timestamp() >= strategy.activation_timestamp() {
                 next.root()
-            } else {
+            } else if header.hash() == tip.hash() {
                 mpt_root(&next)
+            } else {
+                // Pre-fork roots are shadow-only. Verify the range endpoint and
+                // activation parent, retaining the canonical header commitment here.
+                header.state_root()
             };
             if root != header.state_root() {
                 return Err(reth_stages::StageError::Block {
@@ -733,15 +662,19 @@ impl Startup {
             }
             strategy.store().save_block_with_number(header.hash(), header.number(), &next)?;
             state = next;
+            parent = header;
         }
         Ok(())
     }
 }
 
+/// Resource budgets for one bounded replay chunk.
 #[derive(Clone, Copy, Debug)]
-struct CatchupLimits {
-    max_blocks: NonZeroUsize,
-    max_bal_bytes: NonZeroUsize,
+pub struct CatchupLimits {
+    /// Maximum blocks in an onboarding range or staged replay chunk.
+    pub max_blocks: NonZeroUsize,
+    /// Maximum authenticated BAL bytes in one replay chunk.
+    pub max_bal_bytes: NonZeroUsize,
 }
 
 impl Default for CatchupLimits {
@@ -750,34 +683,20 @@ impl Default for CatchupLimits {
     }
 }
 
-impl CatchupLimits {
-    fn new(blocks: Option<OsString>, bytes: Option<OsString>) -> eyre::Result<Self> {
-        let parse = |value: Option<OsString>, default| -> eyre::Result<NonZeroUsize> {
-            match value {
-                Some(value) => Ok(value
-                    .into_string()
-                    .map_err(|_| eyre::eyre!("PBT catch-up budgets must be UTF-8 integers"))?
-                    .parse()?),
-                None => Ok(default),
-            }
-        };
-        Ok(Self {
-            max_blocks: parse(blocks, DEFAULT_CATCHUP_BLOCKS)?,
-            max_bal_bytes: parse(bytes, DEFAULT_CATCHUP_BAL_BYTES)?,
-        })
-    }
-}
-
 const DEFAULT_CATCHUP_BLOCKS: NonZeroUsize =
     NonZeroUsize::new(1024).expect("block budget is nonzero");
 const DEFAULT_CATCHUP_BAL_BYTES: NonZeroUsize =
     NonZeroUsize::new(64 * 1024 * 1024).expect("BAL byte budget is nonzero");
 
+/// Canonical migration inputs bound to a locally finalized header.
 #[derive(Clone, Debug)]
-struct MigrationFiles {
-    source: MigrationSource,
-    preimages: PathBuf,
-    anchor: B256,
+pub struct MigrationFiles {
+    /// Snapshot input or conversion from retained local MPT state.
+    pub source: MigrationSource,
+    /// Canonical EIP-8347 preimages for the finalized anchor.
+    pub preimages: PathBuf,
+    /// Locally finalized header anchoring the migration.
+    pub anchor: B256,
 }
 
 impl MigrationFiles {
@@ -813,9 +732,12 @@ impl MigrationFiles {
     }
 }
 
+/// Source of the finalized anchor state.
 #[derive(Clone, Debug)]
-enum MigrationSource {
+pub enum MigrationSource {
+    /// Read a canonical snapshot artifact from this path.
     Snapshot(PathBuf),
+    /// Convert retained local MPT state at the selected anchor.
     Mpt,
 }
 
@@ -824,7 +746,6 @@ mod tests {
     use super::*;
     use alloy_primitives::{hex, Address, Bytes};
     use alloy_rpc_types_engine::ForkchoiceState;
-    use jsonrpsee::{core::client::ClientT, rpc_params};
     use reth_e2e_test_utils::{
         eth_payload_attributes,
         node::{Finality, NodeTestContext},
@@ -1320,40 +1241,35 @@ mod tests {
     }
 
     #[test]
-    fn startup_requires_complete_migration_configuration() {
-        let snapshot = Some(OsString::from("snapshot"));
-        let preimages = Some(OsString::from("preimages"));
-        let anchor = Some(OsString::from(B256::ZERO.to_string()));
-        for (snapshot, preimages, anchor) in [
-            (snapshot.clone(), None, None),
-            (None, preimages.clone(), None),
-            (None, None, anchor.clone()),
-            (snapshot.clone(), preimages.clone(), None),
-            (snapshot.clone(), None, anchor.clone()),
-        ] {
-            assert_eq!(
-                Startup::new(snapshot, preimages, anchor, None, CatchupLimits::default())
-                    .unwrap_err()
-                    .to_string(),
-                "PBT_MIGRATION_PREIMAGES and PBT_MIGRATION_ANCHOR are required together; PBT_MIGRATION_SNAPSHOT is optional for self-conversion"
-            );
-        }
-        assert!(Startup::new(None, None, None, None, CatchupLimits::default())
-            .unwrap()
-            .migration
-            .is_none());
-        assert!(matches!(
-            Startup::new(None, preimages.clone(), anchor.clone(), None, CatchupLimits::default())
-                .unwrap()
-                .migration
-                .unwrap()
-                .source,
-            MigrationSource::Mpt
-        ));
-        assert!(Startup::new(snapshot, preimages, anchor, None, CatchupLimits::default())
-            .unwrap()
-            .migration
-            .is_some());
+    fn genesis_publication_resumes_after_the_configuration_pin() -> eyre::Result<()> {
+        let directory = tempfile::tempdir()?;
+        let store = SnapshotStore::open(directory.path(), DecodeLimits::default())?;
+        let chain = (*test_chain_spec(EthereumHardfork::Cancun)).clone();
+        let activation = 1u64;
+        let configuration =
+            [b"PBT1".as_slice(), chain.genesis_hash().as_slice(), &activation.to_be_bytes()]
+                .concat();
+        reth_fs_util::write(store.path().join("chain-config"), configuration)?;
+        let prepared = prepare_chain(chain.clone(), activation, &store)?;
+        let root = genesis_state(&chain)?.root();
+        assert_eq!(store.load_block(prepared.genesis_hash())?.root(), root);
+        reth_fs_util::remove_file(
+            store.path().join("blocks").join(prepared.genesis_hash().to_string()),
+        )?;
+        prepare_chain(chain.clone(), activation, &store)?;
+        assert_eq!(store.verify_block(prepared.genesis_hash())?, root);
+        let mut forged = genesis_state(&chain)?;
+        forged.set_account(
+            Address::repeat_byte(0xfa),
+            AccountData { nonce: 1, ..Default::default() },
+        )?;
+        store.save_block(prepared.genesis_hash(), &forged)?;
+        assert_eq!(
+            prepare_chain(chain, activation, &store).unwrap_err().to_string(),
+            "PBT genesis checkpoint does not match the pinned chain"
+        );
+        assert!(!PbtConfig::default().retire_mpt);
+        Ok(())
     }
 
     #[test]
@@ -1388,11 +1304,11 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn finalized_pruning_only_removes_proven_ancestors() -> eyre::Result<()> {
+    async fn migration_rejects_a_post_activation_anchor() -> eyre::Result<()> {
         let (mut node, store, _directory) = setup(0).await?;
         node.set_finality(Finality::Keep);
         let genesis = node.block_hash(0);
-        let sibling = node.advance_block().await?;
+        node.advance_block().await?;
         let finalized = node.advance_fork(genesis, 1).await?;
         let finalized_hash = finalized[0].block().hash();
         let response = node
@@ -1417,64 +1333,27 @@ mod tests {
             active_anchor.initialize(&strategy, &node.inner.provider).unwrap_err().to_string(),
             "PBT migration anchor must precede activation"
         );
-        for (candidate, error) in [
-            (finalized_hash, "cannot prune the finalized PBT checkpoint"),
-            (
-                sibling.block().hash(),
-                "PBT prune candidates must be strict ancestors of the finalized block",
-            ),
-        ] {
-            let root = store.load_block(candidate)?.root();
-            let startup = Startup { obsolete_checkpoints: vec![candidate], ..Default::default() };
-            assert_eq!(
-                startup.initialize(&strategy, &node.inner.provider).unwrap_err().to_string(),
-                error
-            );
-            assert_eq!(store.load_block(candidate)?.root(), root);
-        }
-        let canonical = store.load_block(finalized_hash)?;
-        let mut forged = canonical.clone();
-        forged.set_account(
-            Address::repeat_byte(0x88),
-            AccountData { balance: U256::ONE, ..Default::default() },
-        )?;
-        store.save_block(finalized_hash, &forged)?;
-        let prune = Startup { obsolete_checkpoints: vec![genesis], ..Default::default() };
-        assert_eq!(
-            prune.initialize(&strategy, &node.inner.provider).unwrap_err().to_string(),
-            "PBT finalized checkpoint reference does not match its header"
-        );
-        assert!(store.path().join("blocks").join(genesis.to_string()).try_exists()?);
-        store.save_block(finalized_hash, &canonical)?;
-        prune.initialize(&strategy, &node.inner.provider)?;
-        assert!(!store.path().join("blocks").join(genesis.to_string()).try_exists()?);
-        assert_eq!(store.load_block(finalized_hash)?.root(), finalized[0].block().state_root);
-        assert_eq!(store.load_block(sibling.block().hash())?.root(), sibling.block().state_root);
         Ok(())
     }
 
     #[test]
-    fn onboarding_and_pruning_require_local_finality() -> eyre::Result<()> {
+    fn onboarding_requires_local_finality() -> eyre::Result<()> {
         let directory = tempfile::tempdir()?;
         let store = Arc::new(SnapshotStore::open(directory.path(), DecodeLimits::default())?);
         let strategy = PbtStateRootStrategy::new(store, 1);
         let provider = NoopProvider::default();
-        for startup in [
-            Startup {
-                migration: Some(MigrationFiles {
-                    source: MigrationSource::Snapshot("snapshot".into()),
-                    preimages: "preimages".into(),
-                    anchor: B256::ZERO,
-                }),
-                ..Default::default()
-            },
-            Startup { obsolete_checkpoints: vec![B256::repeat_byte(1)], ..Default::default() },
-        ] {
-            assert_eq!(
-                startup.initialize(&strategy, &provider).unwrap_err().to_string(),
-                "PBT onboarding or pruning requires a locally finalized block"
-            );
-        }
+        let startup = Startup {
+            migration: Some(MigrationFiles {
+                source: MigrationSource::Snapshot("snapshot".into()),
+                preimages: "preimages".into(),
+                anchor: B256::ZERO,
+            }),
+            ..Default::default()
+        };
+        assert_eq!(
+            startup.initialize(&strategy, &provider).unwrap_err().to_string(),
+            "PBT onboarding requires a locally finalized block"
+        );
         Ok(())
     }
 
@@ -1494,7 +1373,7 @@ mod tests {
             .inner
             .auth_server_handle()
             .http_client()
-            .request("pbt_getProof", rpc_params![mined.block().hash(), vec![key.clone()]])
+            .request("pbt_getProof", (mined.block().hash(), vec![key.clone()]))
             .await?;
         assert_eq!(response["version"], 1);
         assert_eq!(
@@ -1512,18 +1391,15 @@ mod tests {
         );
         let public = node.rpc_client().ok_or_else(|| eyre::eyre!("HTTP RPC is not enabled"))?;
         let error = public
-            .request::<serde_json::Value, _>(
-                "pbt_getProof",
-                rpc_params![mined.block().hash(), vec![key]],
-            )
+            .request::<_, serde_json::Value>("pbt_getProof", (mined.block().hash(), vec![key]))
             .await
             .unwrap_err();
-        let jsonrpsee::core::client::Error::Call(error) = error else {
-            eyre::bail!("public RPC returned a transport error instead of method-not-found");
-        };
-        assert_eq!(error.code(), jsonrpsee::types::error::METHOD_NOT_FOUND_CODE);
-        assert_eq!(error.message(), "Method not found");
-        assert!(error.data().is_none());
+        let error = error.as_error_resp().ok_or_else(|| {
+            eyre::eyre!("public RPC returned a transport error instead of method-not-found")
+        })?;
+        assert_eq!(error.code, i64::from(jsonrpsee::types::error::METHOD_NOT_FOUND_CODE));
+        assert_eq!(error.message, "Method not found");
+        assert!(error.data.is_none());
         Ok(())
     }
 
@@ -1672,23 +1548,6 @@ mod tests {
             U256::from(9)
         );
         Ok(())
-    }
-
-    #[test]
-    fn catchup_budgets_are_nonzero_operator_limits() {
-        let defaults = CatchupLimits::new(None, None).unwrap();
-        assert_eq!(defaults.max_blocks.get(), 1024);
-        assert_eq!(defaults.max_bal_bytes.get(), 64 * 1024 * 1024);
-        let configured = CatchupLimits::new(Some("3".into()), Some("4096".into())).unwrap();
-        assert_eq!(configured.max_blocks.get(), 3);
-        assert_eq!(configured.max_bal_bytes.get(), 4096);
-        for (blocks, bytes) in [(Some("0".into()), None), (None, Some("0".into()))] {
-            let error = CatchupLimits::new(blocks, bytes).unwrap_err();
-            assert_eq!(
-                error.downcast_ref::<std::num::ParseIntError>().unwrap().kind(),
-                &std::num::IntErrorKind::Zero
-            );
-        }
     }
 
     #[test]
@@ -1944,23 +1803,6 @@ mod tests {
         Ok(())
     }
 
-    #[test]
-    fn resource_budgets_reject_invalid_values() {
-        assert_eq!(parse_resource_budget("PBT_CACHE_MAX_BYTES", "0".into()).unwrap(), 0);
-        assert_eq!(
-            parse_resource_budget("PBT_IMPORT_MAX_LEAVES", "1048576".into()).unwrap(),
-            1_048_576
-        );
-        for value in ["-1", "many", "184467440737095516160"] {
-            assert_eq!(
-                parse_resource_budget("PBT_IMPORT_MAX_LEAVES", value.into())
-                    .unwrap_err()
-                    .to_string(),
-                "PBT_IMPORT_MAX_LEAVES must be a nonnegative integer"
-            );
-        }
-    }
-
     #[tokio::test]
     async fn pbt_rejects_mpt_simulation_root_configuration() -> eyre::Result<()> {
         let directory = tempfile::tempdir()?;
@@ -2035,6 +1877,26 @@ mod tests {
         let finalized = node.advance_block().await?;
         node.wait_for_persisted_state(finalized.block().number()).await?;
         let strategy = PbtStateRootStrategy::new(store.clone(), 0);
+        let accepted = store.load_block(finalized.block().hash())?;
+        let mut forged = accepted.clone();
+        forged.set_account(
+            Address::repeat_byte(0x88),
+            AccountData { nonce: 99, ..Default::default() },
+        )?;
+        store.save_block(finalized.block().hash(), &forged)?;
+        assert_eq!(
+            retirement::prune_finalized(&strategy, &node.inner.provider, None, 1)
+                .unwrap_err()
+                .to_string(),
+            "PBT finalized checkpoint reference does not match its header"
+        );
+        assert!(store.contains_block(genesis)?);
+        store.save_block_with_number(
+            finalized.block().hash(),
+            finalized.block().number(),
+            &accepted,
+        )?;
+
         assert_eq!(
             retirement::prune_finalized(&strategy, &node.inner.provider, None, 1)?,
             Some(finalized.block().hash())
