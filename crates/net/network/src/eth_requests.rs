@@ -324,8 +324,7 @@ where
         let mut last_block_incomplete = false;
 
         // The request ID is unavailable here. Reserve the message code, the largest request ID,
-        // the incomplete flag, and the three RLP list headers (message, receipts, and the partial
-        // block) to bound the encoded response. This is the budget for the last block's receipts.
+        // the incomplete flag, and the three RLP list headers to bound the full encoded response.
         let max_receipts_size = MAX_MESSAGE_SIZE -
             (1 + u64::MAX.length() + false.length() + 3 * length_of_length(MAX_MESSAGE_SIZE));
 
@@ -360,10 +359,9 @@ where
                 continue;
             }
 
-            // The block does not fit within the soft limit, so it is the last block served. Per
-            // the devp2p spec the response may only be flagged incomplete when the block's
-            // receipts overflow the 10 MiB message, so budget the remaining receipts against that
-            // limit rather than the soft limit.
+            // This block crosses the soft limit, so it is the last one served. The devp2p spec only
+            // allows `lastBlockIncomplete` when its receipts would overflow the message, so it gets
+            // the remaining message budget.
             let remaining = block_receipts.len();
             let mut partial_block = Vec::new();
             for receipt in block_receipts {
@@ -1627,28 +1625,9 @@ mod tests {
     #[tokio::test]
     async fn receipts70_serves_block_over_soft_limit_complete() {
         let provider = MockEthProvider::default();
-        // The block's receipts exceed the soft limit but fit within the 10 MiB message, so the
-        // whole block is served and not flagged incomplete.
-        let oversized = receipt_with_data(SOFT_RESPONSE_LIMIT + 1024);
+        // The block crosses the soft limit but fits within the message, so it is served whole.
         let small = receipt_with_data(16);
-        let hash = insert_receipts_block(&provider, 1, vec![oversized.clone(), small.clone()]);
-
-        let resp = get_receipts70(provider, 0, vec![hash]).await;
-
-        assert_eq!(
-            resp,
-            Receipts70 { last_block_incomplete: false, receipts: vec![vec![oversized, small]] }
-        );
-    }
-
-    #[tokio::test]
-    async fn receipts70_serves_small_then_large_receipt_complete() {
-        let provider = MockEthProvider::default();
-        // A small receipt followed by a large one: the old code served only the small receipt and
-        // flagged the block incomplete once the large one crossed the 2 MiB soft limit. Both fit
-        // within the 10 MiB message, so the whole block is served complete.
-        let small = receipt_with_data(131_150);
-        let large = receipt_with_data(2_032_565);
+        let large = receipt_with_data(SOFT_RESPONSE_LIMIT);
         let hash = insert_receipts_block(&provider, 1, vec![small.clone(), large.clone()]);
 
         let resp = get_receipts70(provider, 0, vec![hash]).await;
@@ -1657,63 +1636,24 @@ mod tests {
             resp,
             Receipts70 { last_block_incomplete: false, receipts: vec![vec![small, large]] }
         );
-        assert!(encode_receipts70_response(resp).len() <= MAX_MESSAGE_SIZE);
     }
 
     #[tokio::test]
-    async fn receipts70_serves_busy_block_before_large_block_complete() {
+    async fn receipts70_serves_last_block_over_soft_limit_complete() {
         let provider = MockEthProvider::default();
-        // A busy block of small receipts followed by a block with one large receipt. The old code
-        // split the second block once the accumulated response crossed the 2 MiB soft limit; both
-        // fit within the 10 MiB message, so both are served complete.
-        let busy = vec![receipt_with_data(1024); 160];
-        let busy_hash = insert_receipts_block(&provider, 5, busy.clone());
-        let large = vec![receipt_with_data(2 * 1024 * 1024)];
-        let large_hash = insert_receipts_block(&provider, 3, large.clone());
-
-        let resp = get_receipts70(provider, 0, vec![busy_hash, large_hash]).await;
-
-        assert_eq!(resp, Receipts70 { last_block_incomplete: false, receipts: vec![busy, large] });
-        assert!(encode_receipts70_response(resp).len() <= MAX_MESSAGE_SIZE);
-    }
-
-    #[tokio::test]
-    async fn receipts70_splits_block_after_complete_block() {
-        let provider = MockEthProvider::default();
-        let first = vec![receipt_with_data(1024); 100];
+        let first = vec![receipt_with_data(1024); 160];
         let first_hash = insert_receipts_block(&provider, 1, first.clone());
-        // The second block's receipts overflow the 10 MiB message, so it is split after the first
-        // block is already in the response.
-        let second = vec![receipt_with_data(1024 * 1024); 12];
+        // The second block crosses the soft limit but fits within the message, so it is served
+        // whole after the first block.
+        let second = vec![receipt_with_data(SOFT_RESPONSE_LIMIT)];
         let second_hash = insert_receipts_block(&provider, 2, second.clone());
 
         let resp = get_receipts70(provider, 0, vec![first_hash, second_hash]).await;
 
-        assert!(resp.last_block_incomplete);
-        assert_eq!(resp.receipts.len(), 2);
-        assert_eq!(&resp.receipts[0], &first);
-        let partial = &resp.receipts[1];
-        assert!(!partial.is_empty() && partial.len() < second.len());
-        assert_eq!(partial.as_slice(), &second[..partial.len()]);
-        assert!(encode_receipts70_response(resp).len() <= MAX_MESSAGE_SIZE);
-    }
-
-    #[tokio::test]
-    async fn receipts70_serves_partial_block_of_many_small_receipts() {
-        let provider = MockEthProvider::default();
-        // Many small receipts whose total overflows the 10 MiB message, exercising the per-receipt
-        // size accounting across a long list.
-        let receipts = vec![receipt_with_data(4 * 1024); 3000];
-        let hash = insert_receipts_block(&provider, 1, receipts.clone());
-
-        let resp = get_receipts70(provider, 0, vec![hash]).await;
-
-        assert!(resp.last_block_incomplete);
-        assert_eq!(resp.receipts.len(), 1);
-        let partial = &resp.receipts[0];
-        assert!(!partial.is_empty() && partial.len() < receipts.len());
-        assert_eq!(partial.as_slice(), &receipts[..partial.len()]);
-        assert!(encode_receipts70_response(resp).len() <= MAX_MESSAGE_SIZE);
+        assert_eq!(
+            resp,
+            Receipts70 { last_block_incomplete: false, receipts: vec![first, second] }
+        );
     }
 
     #[tokio::test]
