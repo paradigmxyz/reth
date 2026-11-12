@@ -859,7 +859,7 @@ fn process_connection<RpcMiddleware, HttpMiddleware, Body>(
 
     let service = http_middleware.service(tower_service);
 
-    tokio::spawn(async move {
+    let serve = async move {
         let request_received = Arc::new(Notify::new());
         // this requires Clone.
         let service = NotifyOnRequest::new(
@@ -890,7 +890,9 @@ fn process_connection<RpcMiddleware, HttpMiddleware, Body>(
             tracing::debug!(target: LOG_TARGET, "HTTP serve connection failed {:?}", e);
         }
         drop(drop_on_completion)
-    });
+    };
+    // `#[instrument]` only spans this function, so the connection span is carried into the task.
+    tokio::spawn(serve.in_current_span());
 }
 
 enum AcceptConnection<S> {
