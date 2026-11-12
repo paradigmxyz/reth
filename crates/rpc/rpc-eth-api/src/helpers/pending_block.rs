@@ -551,7 +551,11 @@ impl<H: BlockHeader> BuildPendingEnv<H> for NextBlockEnvAttributes {
         block_overrides: Option<&BlockOverrides>,
     ) -> Self {
         let mut attributes = Self {
-            timestamp: parent.timestamp().saturating_add(12),
+            // The timestamp selects the hardfork rules, so it must be overridden before the EVM
+            // environment is derived from these attributes.
+            timestamp: block_overrides
+                .and_then(|overrides| overrides.time)
+                .unwrap_or_else(|| parent.timestamp().saturating_add(12)),
             suggested_fee_recipient: parent.beneficiary(),
             prev_randao: B256::random(),
             gas_limit: parent.gas_limit(),

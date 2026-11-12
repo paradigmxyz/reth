@@ -34,10 +34,10 @@ const MAX_NESTED_BUNDLE_DEPTH: usize = 5;
 const MAX_BUNDLE_BODY_SIZE: usize = 50;
 
 /// Default simulation timeout
-const DEFAULT_SIM_TIMEOUT: Duration = Duration::from_secs(5);
+pub(crate) const DEFAULT_SIM_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// Maximum simulation timeout
-const MAX_SIM_TIMEOUT: Duration = Duration::from_secs(30);
+pub(crate) const MAX_SIM_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// Maximum payout cost
 const SBUNDLE_PAYOUT_MAX_COST: u64 = 30_000;
