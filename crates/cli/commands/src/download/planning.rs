@@ -383,7 +383,7 @@ mod tests {
         let sst_archive = |number: u32, contents: &[u8]| {
             let hash = blake3::hash(contents).to_hex().to_string();
             SingleArchive {
-                file: format!("rocksdb/{number:06}-{hash}.tar.zst"),
+                file: format!("rocksdb_indices/{number:06}-{hash}.tar.zst"),
                 size: 10,
                 decompressed_size: contents.len() as u64,
                 blake3: None,

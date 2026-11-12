@@ -1080,8 +1080,8 @@ fn package_single_component(
 
 /// Packages each RocksDB SST and blob file into its own archive and the remaining files into one.
 ///
-/// SST archives are written to `rocksdb/{file_stem}-{blake3}.tar.zst`, so an unchanged SST gets
-/// the same archive name in every snapshot and publishers can upload it once. The file stem
+/// SST archives are written to `rocksdb_indices/{file_stem}-{blake3}.tar.zst`, so an unchanged SST
+/// gets the same archive name in every snapshot and publishers can upload it once. The file stem
 /// keeps the final path segment unique, since downloads are cached by that segment.
 ///
 /// An SST file that matches a single-file archive in the `previous` manifest's RocksDB indices is
@@ -1117,7 +1117,7 @@ fn package_rocksdb_archives(
         }
     }
 
-    let sst_dir = output_dir.join("rocksdb");
+    let sst_dir = output_dir.join("rocksdb_indices");
     std::fs::create_dir_all(&sst_dir)?;
     let mut archives = sst_files
         .into_par_iter()
@@ -1141,7 +1141,7 @@ fn package_rocksdb_archives(
             let output_files =
                 write_archive_from_planned_files(&temp_path, std::slice::from_ref(&planned))?;
             let output = &output_files[0];
-            let file = format!("rocksdb/{stem}-{}.tar.zst", output.blake3);
+            let file = format!("rocksdb_indices/{stem}-{}.tar.zst", output.blake3);
             std::fs::rename(&temp_path, output_dir.join(&file))?;
             Ok(SingleArchive {
                 size: std::fs::metadata(output_dir.join(&file))?.len(),
@@ -1473,14 +1473,14 @@ mod tests {
                 .unwrap();
         let archives = rocksdb_archives(&next);
 
-        let reused_sst = format!("rocksdb/000007-{}.tar.zst", hash(b"sst-7"));
+        let reused_sst = format!("rocksdb_indices/000007-{}.tar.zst", hash(b"sst-7"));
         let files = archives.iter().map(|archive| archive.file.as_str()).collect::<Vec<_>>();
         assert_eq!(
             files,
             [
                 format!("https://example.com/previous/{reused_sst}"),
-                format!("rocksdb/000009-{}.tar.zst", hash(b"sst-9-compacted")),
-                format!("rocksdb/000011-{}.tar.zst", hash(b"sst-11")),
+                format!("rocksdb_indices/000009-{}.tar.zst", hash(b"sst-9-compacted")),
+                format!("rocksdb_indices/000011-{}.tar.zst", hash(b"sst-11")),
                 "rocksdb_indices.tar.zst".to_string(),
             ]
         );
@@ -1507,8 +1507,37 @@ mod tests {
         assert_eq!(later_archives[0].file, format!("https://example.com/previous/{reused_sst}"));
         assert_eq!(
             later_archives[2].file,
-            format!("https://example.com/next/rocksdb/000011-{}.tar.zst", hash(b"sst-11"))
+            format!("https://example.com/next/rocksdb_indices/000011-{}.tar.zst", hash(b"sst-11"))
         );
+    }
+
+    #[test]
+    fn generate_manifest_into_source_datadir_does_not_package_its_own_archives() {
+        let source = tempdir().unwrap();
+        let db_dir = source.path().join("db");
+        std::fs::create_dir_all(&db_dir).unwrap();
+        std::fs::write(db_dir.join("mdbx.dat"), b"state-data").unwrap();
+        let rocksdb_dir = source.path().join("rocksdb");
+        std::fs::create_dir_all(&rocksdb_dir).unwrap();
+        std::fs::write(rocksdb_dir.join("CURRENT"), b"MANIFEST-000001").unwrap();
+        std::fs::write(rocksdb_dir.join("000007.sst"), b"sst-7").unwrap();
+
+        for _ in 0..2 {
+            let manifest =
+                generate_manifest(source.path(), source.path(), None, 0, 1, 500_000, None).unwrap();
+            let Some(ComponentManifest::Files(set)) =
+                manifest.component(SnapshotComponentType::RocksdbIndices)
+            else {
+                panic!("rocksdb indices should be an archive set")
+            };
+            let outputs = set
+                .archives
+                .iter()
+                .flat_map(|archive| &archive.output_files)
+                .map(|file| file.path.as_str())
+                .collect::<Vec<_>>();
+            assert_eq!(outputs, ["rocksdb/000007.sst", "rocksdb/CURRENT"]);
+        }
     }
 
     #[test]
@@ -1523,7 +1552,7 @@ mod tests {
                 "rocksdb_indices": {
                     "archives": [
                         {
-                            "file": "../rocksdb/000007-aa.tar.zst",
+                            "file": "../rocksdb_indices/000007-aa.tar.zst",
                             "size": 10,
                             "decompressed_size": 100,
                             "output_files": [
@@ -1547,7 +1576,7 @@ mod tests {
         m.validate_output_paths().unwrap();
 
         let urls = [
-            "https://example.com/rocksdb/000007-aa.tar.zst",
+            "https://example.com/rocksdb_indices/000007-aa.tar.zst",
             "https://example.com/1700000/rocksdb_indices.tar.zst",
         ];
         assert_eq!(m.archive_urls(ty), urls);
@@ -1958,9 +1987,9 @@ mod tests {
         assert_eq!(
             files,
             [
-                format!("rocksdb/000007-{sst_7_hash}.tar.zst"),
-                format!("rocksdb/000009-{sst_9_hash}.tar.zst"),
-                format!("rocksdb/000010-{}.tar.zst", blake3::hash(b"blob-10").to_hex()),
+                format!("rocksdb_indices/000007-{sst_7_hash}.tar.zst"),
+                format!("rocksdb_indices/000009-{sst_9_hash}.tar.zst"),
+                format!("rocksdb_indices/000010-{}.tar.zst", blake3::hash(b"blob-10").to_hex()),
                 "rocksdb_indices.tar.zst".to_string(),
             ]
         );
@@ -1984,7 +2013,7 @@ mod tests {
             set.archives[3].output_files.iter().map(|file| file.path.as_str()).collect::<Vec<_>>(),
             ["rocksdb/CURRENT", "rocksdb/MANIFEST-000001", "rocksdb/checkpoint/000007.sst"]
         );
-        assert!(!output.path().join("rocksdb/000007.tar.zst.tmp").exists());
+        assert!(!output.path().join("rocksdb_indices/000007.tar.zst.tmp").exists());
         assert_eq!(manifest.chunks_for_distance(SnapshotComponentType::RocksdbIndices, None), 4);
 
         // An unchanged SST keeps its archive name in a later snapshot, so publishers can reuse it.
@@ -2002,7 +2031,7 @@ mod tests {
         assert_eq!(later_set.archives[0].file, set.archives[0].file);
         assert_eq!(
             later_set.archives[2].file,
-            format!("rocksdb/000011-{}.tar.zst", blake3::hash(b"sst-11").to_hex())
+            format!("rocksdb_indices/000011-{}.tar.zst", blake3::hash(b"sst-11").to_hex())
         );
     }
 
