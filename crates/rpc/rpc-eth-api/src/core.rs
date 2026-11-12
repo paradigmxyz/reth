@@ -5,7 +5,7 @@ use crate::{
     RpcBlock, RpcHeader, RpcReceipt, RpcTransaction,
 };
 use alloy_dyn_abi::TypedData;
-use alloy_eips::{eip2930::AccessListResult, BlockId, BlockNumberOrTag};
+use alloy_eips::{eip2930::AccessListResult, eip7928::BlockAccessList, BlockId, BlockNumberOrTag};
 use alloy_json_rpc::RpcObject;
 use alloy_primitives::{Address, Bytes, B256, B64, U256, U64};
 use alloy_rpc_types_eth::{
@@ -18,9 +18,8 @@ use alloy_serde::JsonStorageKey;
 use jsonrpsee::{core::RpcResult, proc_macros::rpc};
 use reth_primitives_traits::TxTy;
 use reth_rpc_convert::RpcTxReq;
-use reth_rpc_eth_types::{EthApiError, EthCapabilities, FillTransaction};
+use reth_rpc_eth_types::{EthCapabilities, FillTransaction};
 use reth_rpc_server_types::{result::internal_rpc_err, ToRpcResult};
-use serde_json::Value;
 use std::collections::HashMap;
 use tracing::trace;
 
@@ -435,18 +434,21 @@ pub trait EthApi<
 
     /// Returns the EIP-7928 block access list for a block by hash.
     #[method(name = "getBlockAccessListByBlockHash")]
-    async fn block_access_list_by_block_hash(&self, hash: B256) -> RpcResult<Option<Value>>;
+    async fn block_access_list_by_block_hash(
+        &self,
+        hash: B256,
+    ) -> RpcResult<Option<BlockAccessList>>;
 
     /// Returns the EIP-7928 block access list for a block by number.
     #[method(name = "getBlockAccessListByBlockNumber")]
     async fn block_access_list_by_block_number(
         &self,
         number: BlockNumberOrTag,
-    ) -> RpcResult<Option<Value>>;
+    ) -> RpcResult<Option<BlockAccessList>>;
 
     /// Returns the EIP-7928 block access list for a given block id.
     #[method(name = "getBlockAccessList")]
-    async fn block_access_list(&self, block_id: BlockId) -> RpcResult<Option<Value>>;
+    async fn block_access_list(&self, block_id: BlockId) -> RpcResult<Option<BlockAccessList>>;
 
     /// Returns the EIP-7928 block access list bytes for a block by number.
     #[method(name = "getBlockAccessListRaw")]
@@ -982,39 +984,30 @@ where
     }
 
     /// Handler for: `eth_getBlockAccessListByBlockHash`
-    async fn block_access_list_by_block_hash(&self, block_hash: B256) -> RpcResult<Option<Value>> {
+    async fn block_access_list_by_block_hash(
+        &self,
+        block_hash: B256,
+    ) -> RpcResult<Option<BlockAccessList>> {
         trace!(target: "rpc::eth", ?block_hash, "Serving eth_getBlockAccessListByBlockHash");
 
-        let bal = self.get_block_access_list(block_hash.into()).await?;
-        let json = serde_json::to_value(&bal)
-            .map_err(|e| EthApiError::Internal(reth_errors::RethError::msg(e.to_string())))?;
-
-        Ok(Some(json))
+        Ok(self.get_block_access_list(block_hash.into()).await?)
     }
 
     /// Handler for: `eth_getBlockAccessListByBlockNumber`
     async fn block_access_list_by_block_number(
         &self,
         number: BlockNumberOrTag,
-    ) -> RpcResult<Option<Value>> {
+    ) -> RpcResult<Option<BlockAccessList>> {
         trace!(target: "rpc::eth", ?number, "Serving eth_getBlockAccessListByBlockNumber");
 
-        let bal = self.get_block_access_list(number.into()).await?;
-        let json = serde_json::to_value(&bal)
-            .map_err(|e| EthApiError::Internal(reth_errors::RethError::msg(e.to_string())))?;
-
-        Ok(Some(json))
+        Ok(self.get_block_access_list(number.into()).await?)
     }
 
     /// Handler for: `eth_getBlockAccessList`
-    async fn block_access_list(&self, block_id: BlockId) -> RpcResult<Option<Value>> {
+    async fn block_access_list(&self, block_id: BlockId) -> RpcResult<Option<BlockAccessList>> {
         trace!(target: "rpc::eth", ?block_id, "Serving eth_getBlockAccessList");
 
-        let bal = self.get_block_access_list(block_id).await?;
-        let json = serde_json::to_value(&bal)
-            .map_err(|e| EthApiError::Internal(reth_errors::RethError::msg(e.to_string())))?;
-
-        Ok(Some(json))
+        Ok(self.get_block_access_list(block_id).await?)
     }
 
     /// Handler for: `eth_getBlockAccessListRaw`
@@ -1022,5 +1015,78 @@ where
         trace!(target: "rpc::eth", ?block, "Serving eth_getBlockAccessListRaw");
 
         Ok(self.get_raw_block_access_list(block).await?)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use alloy_eips::eip7928::{
+        AccountChanges, BalanceChange, BlockAccessIndex, CodeChange, NonceChange, SlotChanges,
+        StorageChange,
+    };
+    use serde_json::Value;
+
+    fn block_access_list() -> BlockAccessList {
+        vec![
+            AccountChanges::new(Address::with_last_byte(1))
+                .with_storage_change(SlotChanges::new(
+                    U256::from(1),
+                    vec![
+                        StorageChange::new(BlockAccessIndex::new(1), U256::from(100)),
+                        StorageChange::new(BlockAccessIndex::new(2), U256::from(200)),
+                    ],
+                ))
+                .with_storage_change(SlotChanges::new(
+                    U256::from(2),
+                    vec![StorageChange::new(BlockAccessIndex::new(2), U256::ZERO)],
+                ))
+                .with_storage_read(U256::from(3))
+                .with_balance_change(BalanceChange::new(BlockAccessIndex::new(1), U256::from(1000)))
+                .with_nonce_change(NonceChange::new(BlockAccessIndex::new(1), 42))
+                .with_code_change(CodeChange::new(
+                    BlockAccessIndex::new(1),
+                    Bytes::from_static(&[0x60, 0x00]),
+                )),
+            AccountChanges::new(Address::with_last_byte(2)).with_storage_read(U256::from(7)),
+        ]
+    }
+
+    #[test]
+    fn block_access_list_json_matches_value_tree() {
+        let bal = block_access_list();
+
+        // A `Value` round trip yields the same document but sorts object keys, while direct
+        // serialization keeps the field order.
+        let direct = serde_json::to_string(&Some(&bal)).unwrap();
+        let via_value = serde_json::to_string(&serde_json::to_value(Some(&bal)).unwrap()).unwrap();
+        assert_eq!(
+            serde_json::from_str::<Value>(&direct).unwrap(),
+            serde_json::from_str::<Value>(&via_value).unwrap()
+        );
+        assert_eq!(
+            direct,
+            concat!(
+                r#"[{"address":"0x0000000000000000000000000000000000000001","#,
+                r#""storageChanges":[{"key":"0x1","changes":[{"index":"0x1","value":"0x64"},"#,
+                r#"{"index":"0x2","value":"0xc8"}]},{"key":"0x2","changes":[{"index":"0x2","#,
+                r#""value":"0x0"}]}],"storageReads":["0x3"],"#,
+                r#""balanceChanges":[{"index":"0x1","value":"0x3e8"}],"#,
+                r#""nonceChanges":[{"index":"0x1","value":"0x2a"}],"#,
+                r#""codeChanges":[{"index":"0x1","code":"0x6000"}]},"#,
+                r#"{"address":"0x0000000000000000000000000000000000000002","#,
+                r#""storageChanges":[],"storageReads":["0x7"],"balanceChanges":[],"#,
+                r#""nonceChanges":[],"codeChanges":[]}]"#,
+            )
+        );
+    }
+
+    #[test]
+    fn missing_block_access_list_json_is_null() {
+        // A missing list is `null` on the wire, the same as `Some(Value::Null)`.
+        let missing = None::<BlockAccessList>;
+        let via_value = serde_json::to_string(&Some(serde_json::to_value(&missing).unwrap()));
+        assert_eq!(serde_json::to_string(&missing).unwrap(), "null");
+        assert_eq!(via_value.unwrap(), "null");
     }
 }

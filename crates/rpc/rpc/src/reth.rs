@@ -21,6 +21,7 @@ use reth_storage_api::{
 };
 use reth_tasks::{pool::BlockingTaskGuard, CancelOnDrop, Runtime};
 use serde::Serialize;
+use serde_json::value::RawValue;
 use tokio::sync::oneshot;
 
 /// `reth` API implementation.
@@ -228,14 +229,14 @@ where
         &self,
         block_id: BlockId,
         count: Option<U64>,
-    ) -> RpcResult<Option<serde_json::Value>> {
+    ) -> RpcResult<Option<Box<RawValue>>> {
         let outcome = Self::block_execution_outcome(self, block_id, count).await?;
         match outcome {
             Some(outcome) => {
-                let value = serde_json::to_value(&outcome).map_err(|e| {
+                let raw = serde_json::value::to_raw_value(&outcome).map_err(|e| {
                     EthApiError::Internal(reth_errors::RethError::msg(e.to_string()))
                 })?;
-                Ok(Some(value))
+                Ok(Some(raw))
             }
             None => Ok(None),
         }
@@ -448,12 +449,13 @@ struct RethApiInner<Provider, EvmConfig> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_consensus::{Block, Header};
+    use alloy_consensus::{Block, Header, TxType};
     use alloy_genesis::{Genesis, GenesisAccount};
     use alloy_primitives::Address;
     use evm2::evm::AccountInfo;
     use reth_chainspec::ChainSpecBuilder;
     use reth_db_common::init::init_genesis;
+    use reth_ethereum_primitives::Receipt;
     use reth_primitives_traits::Block as _;
     use reth_provider::{
         providers::BlockchainProvider, test_utils::create_test_provider_factory_with_chain_spec,
@@ -546,6 +548,39 @@ mod tests {
                 (Address::with_last_byte(5), U256::from(20)),
                 (Address::with_last_byte(6), U256::ZERO),
             ])
+        );
+    }
+
+    #[test]
+    fn block_execution_outcome_json_matches_value_tree() {
+        let address = Address::with_last_byte(1);
+        let outcome = ExecutionOutcome {
+            bundle: BundleState::new(
+                [(
+                    address,
+                    None,
+                    Some(AccountInfo { balance: U256::from(10), nonce: 1, ..Default::default() }),
+                    std::iter::once((U256::from(1), (U256::ZERO, U256::from(2)))).collect(),
+                )],
+                [[(address, Some(None), [(U256::from(1), U256::ZERO)])]],
+                [],
+            ),
+            receipts: vec![vec![Receipt {
+                tx_type: TxType::Eip1559,
+                success: true,
+                cumulative_gas_used: 21_000,
+                logs: vec![],
+            }]],
+            first_block: 1,
+            ..Default::default()
+        };
+
+        // A `Value` round trip yields the same document but sorts object keys, while direct
+        // serialization keeps the field order.
+        let raw = serde_json::value::to_raw_value(&outcome).unwrap();
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(raw.get()).unwrap(),
+            serde_json::to_value(&outcome).unwrap()
         );
     }
 }
