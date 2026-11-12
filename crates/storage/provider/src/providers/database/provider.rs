@@ -6203,4 +6203,28 @@ mod tests {
             "cannot unwind past MPT retirement; re-anchor or resync",
         );
     }
+
+    #[test]
+    fn test_chain_state_block_numbers_are_read_by_exact_key() {
+        for (finalized, safe) in
+            [(None, None), (None, Some(100)), (Some(90), None), (Some(90), Some(100))]
+        {
+            let factory = create_test_provider_factory();
+            let provider = factory.provider_rw().unwrap();
+            if let Some(block_number) = finalized {
+                provider.save_finalized_block_number(block_number).unwrap();
+            }
+            if let Some(block_number) = safe {
+                provider.save_safe_block_number(block_number).unwrap();
+            }
+
+            assert_eq!(provider.last_finalized_block_number().unwrap(), finalized);
+            assert_eq!(provider.last_safe_block_number().unwrap(), safe);
+            provider.commit().unwrap();
+
+            let provider = factory.provider().unwrap();
+            assert_eq!(provider.last_finalized_block_number().unwrap(), finalized);
+            assert_eq!(provider.last_safe_block_number().unwrap(), safe);
+        }
+    }
 }

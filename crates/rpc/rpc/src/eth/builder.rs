@@ -42,7 +42,8 @@ pub struct EthApiBuilder<N: RpcNodeCore, Rpc, NextEnv = ()> {
     gas_oracle_config: GasPriceOracleConfig,
     gas_oracle: Option<GasPriceOracle<N::Provider>>,
     blocking_task_pool: Option<BlockingTaskPool>,
-    task_spawner: Runtime,
+    /// Runtime used to spawn tasks. Defaults to [`Runtime::test`] when not configured.
+    task_spawner: Option<Runtime>,
     next_env: NextEnv,
     max_batch_size: usize,
     max_blocking_io_requests: usize,
@@ -156,7 +157,7 @@ where
             blocking_task_pool: None,
             fee_history_cache_config: FeeHistoryCacheConfig::default(),
             proof_permits: DEFAULT_PROOF_PERMITS,
-            task_spawner: Runtime::test(),
+            task_spawner: None,
             gas_oracle_config: Default::default(),
             eth_state_cache_config: Default::default(),
             next_env: Default::default(),
@@ -178,7 +179,7 @@ where
 {
     /// Configures the task spawner used to spawn additional tasks.
     pub fn task_spawner(mut self, spawner: Runtime) -> Self {
-        self.task_spawner = spawner;
+        self.task_spawner = Some(spawner);
         self
     }
 
@@ -551,6 +552,7 @@ where
         } = self;
 
         let provider = components.provider().clone();
+        let task_spawner = task_spawner.unwrap_or_else(Runtime::test);
 
         let eth_cache = eth_cache.unwrap_or_else(|| {
             EthStateCache::spawn_with(
