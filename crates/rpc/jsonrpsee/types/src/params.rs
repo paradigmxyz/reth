@@ -61,7 +61,7 @@ impl Visitor<'_> for TwoPointZeroVisitor {
     {
         match s {
             "2.0" => Ok(TwoPointZero),
-            _ => Err(de::Error::invalid_value(Unexpected::Str(s), &self)),
+            _ => Err(de::Error::invalid_value(Unexpected::Other("string"), &self)),
         }
     }
 }
@@ -173,15 +173,15 @@ impl<'a> ParamsSequence<'a> {
         T: Deserialize<'a>,
     {
         let mut json = self.0;
-        match json.as_bytes().first()? {
-            b']' => {
+        match json.chars().next()? {
+            ']' => {
                 self.0 = "";
                 return None;
             }
-            b'[' | b',' => json = &json[1..],
-            _ => {
+            '[' | ',' => json = &json[1..],
+            found => {
                 let errmsg =
-                    format!("Invalid params. Expected one of '[', ']' or ',' but found {json:?}");
+                    format!("Invalid params. Expected one of '[', ']' or ',' but found {found:?}");
                 return Some(Err(invalid_params(errmsg)));
             }
         }
