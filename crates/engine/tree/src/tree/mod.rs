@@ -876,10 +876,16 @@ where
     ) -> Result<PayloadStatus, InsertBlockProcessingError> {
         let parent_hash = payload.parent_hash();
         let num_hash = payload.num_hash();
+        let bal_decode_result = ensure_decodable_block_access_list(&payload);
 
         match self.payload_validator.convert_payload_to_block(payload) {
             // if the block is well-formed, buffer it for later
             Ok(block) => {
+                // Undecodable block access list bytes invalidate the payload even during backfill.
+                if let Err(err) = bal_decode_result {
+                    let error = self.undecodable_block_access_list_error(block, err);
+                    return self.on_insert_block_error(error)
+                }
                 if let Err(error) = self.buffer_block(block) {
                     self.on_insert_block_error(error)
                 } else {
@@ -3137,13 +3143,7 @@ where
             payload,
             |validator, payload, ctx| validator.validate_payload(payload, ctx),
             |this, payload| Ok(this.payload_validator.convert_payload_to_block(payload)?.into()),
-            |payload| {
-                payload
-                    .block_access_list()
-                    .map(|bal| DecodedBal::from_rlp_bytes(bal.clone()))
-                    .transpose()
-                    .map(|_| ())
-            },
+            ensure_decodable_block_access_list,
         )
     }
 
@@ -3233,11 +3233,9 @@ where
                 // Undecodable block access list bytes invalidate the payload even though it
                 // can't be executed yet.
                 if let Err(err) = bal_decode_result {
-                    return Err(InsertBlockError::new(
-                        block.split().0,
-                        BlockAccessListDecodeError::new(err).into(),
-                    )
-                    .into())
+                    return Err(self
+                        .undecodable_block_access_list_error(block.split().0, err)
+                        .into())
                 }
                 // we don't have the state required to execute this block, buffering it and find the
                 // missing parent block
@@ -3408,6 +3406,19 @@ where
 
         let status = PayloadStatusEnum::from(error);
         Ok(PayloadStatus::new(status, latest_valid_hash))
+    }
+
+    /// Builds the error for a payload whose block access list can't be decoded.
+    ///
+    /// Also drops a previously buffered copy of the block and its descendants, because a buffered
+    /// copy would hide the invalid header entry from ancestor lookups.
+    fn undecodable_block_access_list_error(
+        &mut self,
+        block: SealedBlock<N::Block>,
+        err: alloy_rlp::Error,
+    ) -> InsertBlockError<N::Block> {
+        self.state.buffer.remove_block_with_children(&block.hash());
+        InsertBlockError::new(block, BlockAccessListDecodeError::new(err).into())
     }
 
     /// Attempts to find the header for the given block hash if it is canonical.
@@ -3678,6 +3689,17 @@ where
         self.metrics.engine.executed_blocks.set(self.state.tree_state.block_count() as f64);
         Ok(())
     }
+}
+
+/// Returns an error if the payload carries block access list bytes that aren't decodable RLP.
+fn ensure_decodable_block_access_list<P: ExecutionPayload>(
+    payload: &P,
+) -> Result<(), alloy_rlp::Error> {
+    payload
+        .block_access_list()
+        .map(|bal| DecodedBal::from_rlp_bytes(bal.clone()))
+        .transpose()
+        .map(|_| ())
 }
 
 /// Events received in the main engine loop.

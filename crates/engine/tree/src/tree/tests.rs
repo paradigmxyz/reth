@@ -11,21 +11,21 @@ use crate::{
 use reth_storage_overlay::OverlayManager;
 
 use alloy_eip7928::bal::DecodedBal;
-use alloy_eips::eip1898::BlockWithParent;
+use alloy_eips::{eip1898::BlockWithParent, eip7685::Requests};
 use alloy_primitives::{
     map::{B256Map, B256Set},
     Bytes, B256,
 };
 use alloy_rlp::Decodable;
 use alloy_rpc_types_engine::{
-    ExecutionData, ExecutionPayloadSidecar, ExecutionPayloadV1, ForkchoiceState,
-    ForkchoiceUpdateError,
+    CancunPayloadFields, ExecutionData, ExecutionPayloadSidecar, ExecutionPayloadV1,
+    ExecutionPayloadV4, ForkchoiceState, ForkchoiceUpdateError, PraguePayloadFields,
 };
 use assert_matches::assert_matches;
 use evm2::evm::Bal as EvmBal;
 use futures::FutureExt as _;
 use reth_chain_state::test_utils::TestBlockBuilder;
-use reth_chainspec::{ChainSpec, HOLESKY, MAINNET};
+use reth_chainspec::{ChainSpec, ChainSpecBuilder, HOLESKY, MAINNET};
 use reth_engine_primitives::{
     BeaconForkChoiceUpdateError, ConsensusEngineHandle, EngineApiValidator, ForkchoiceStatus,
     NoopInvalidBlockHook, DEFAULT_BACKFILL_RUN_THRESHOLD,
@@ -1150,6 +1150,91 @@ fn test_disconnected_payload() {
     assert_eq!(*buffered, sealed_clone);
 }
 
+/// Returns a harness for a chain with Amsterdam active at genesis.
+fn amsterdam_harness() -> TestHarness {
+    TestHarness::new(Arc::new(ChainSpecBuilder::mainnet().amsterdam_activated().build()))
+}
+
+/// Returns a payload for an Amsterdam block with an unknown parent that carries the given block
+/// access list bytes, along with the block the payload converts to.
+fn amsterdam_payload(block_access_list: &'static [u8]) -> (ExecutionData, SealedBlock<Block>) {
+    let block = Block {
+        header: alloy_consensus::Header {
+            parent_hash: B256::random(),
+            number: 1,
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    let mut payload = ExecutionData {
+        payload: ExecutionPayloadV4::from_block_unchecked_with_bal(
+            B256::ZERO,
+            &block,
+            Bytes::from_static(block_access_list),
+        )
+        .into(),
+        sidecar: ExecutionPayloadSidecar::v4(
+            CancunPayloadFields::new(B256::ZERO, vec![]),
+            PraguePayloadFields::new(Requests::default()),
+        ),
+    };
+    // The conversion fills in the remaining header fields, so the hash is only known afterwards.
+    let block =
+        payload.payload.clone().try_into_block_with_sidecar(&payload.sidecar).unwrap().seal_slow();
+    payload.payload.as_v1_mut().block_hash = block.hash();
+    (payload, block)
+}
+
+/// Asserts that a payload that can't be executed yet is buffered if its block access list is
+/// decodable and rejected if it isn't.
+fn assert_undecodable_bal_is_rejected(mut test_harness: TestHarness) {
+    let (payload, block) = amsterdam_payload(&[0xc0]);
+    let outcome = test_harness.tree.on_new_payload(payload).unwrap();
+    assert_eq!(outcome.outcome, PayloadStatus::from_status(PayloadStatusEnum::Syncing));
+    assert_eq!(test_harness.tree.state.buffer.block(&block.hash()), Some(&block));
+
+    let (payload, block) = amsterdam_payload(&[0x01]);
+    let outcome = test_harness.tree.on_new_payload(payload).unwrap();
+    assert_eq!(
+        outcome.outcome,
+        PayloadStatus::new(
+            PayloadStatusEnum::Invalid {
+                validation_error: BlockAccessListDecodeError::new(
+                    alloy_rlp::Error::UnexpectedString
+                )
+                .to_string(),
+            },
+            None,
+        )
+    );
+    assert_eq!(test_harness.tree.state.buffer.block(&block.hash()), None);
+    assert_eq!(
+        test_harness.tree.state.invalid_headers.get(&block.hash()),
+        Some(block.block_with_parent())
+    );
+}
+
+#[test]
+fn test_disconnected_payload_undecodable_bal() {
+    assert_undecodable_bal_is_rejected(amsterdam_harness());
+}
+
+#[test]
+fn test_undecodable_bal_drops_buffered_block() {
+    let mut test_harness = amsterdam_harness();
+    let (payload, block) = amsterdam_payload(&[0x01]);
+    let child = test_harness.block_builder.generate_random_block(2, block.hash());
+
+    // Copies downloaded from a peer carry no block access list bytes.
+    for buffered in [block.clone(), child.clone()] {
+        test_harness.tree.state.buffer.insert_block(buffered.into());
+    }
+
+    test_harness.tree.on_new_payload(payload).unwrap();
+    assert_eq!(test_harness.tree.state.buffer.block(&block.hash()), None);
+    assert_eq!(test_harness.tree.state.buffer.block(&child.hash()), None);
+}
+
 #[test]
 fn test_disconnected_block() {
     let s = include_str!("../../test-data/holesky/2.rlp");
@@ -2131,6 +2216,13 @@ fn test_on_new_payload_backfill_buffering() {
 
     // Verify the buffered block matches what we submitted
     assert_eq!(*buffered_block, sealed, "Buffered block should match submitted payload");
+}
+
+#[test]
+fn test_on_new_payload_backfill_undecodable_bal() {
+    assert_undecodable_bal_is_rejected(
+        amsterdam_harness().with_backfill_state(BackfillSyncState::Active),
+    );
 }
 
 /// Test that captures the Engine-API rule where malformed payloads report latestValidHash = None
