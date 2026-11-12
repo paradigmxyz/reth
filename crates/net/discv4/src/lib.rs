@@ -1712,7 +1712,7 @@ impl Discv4Service {
         let mut failed_pings = Vec::new();
         self.pending_pings.retain(|node_id, ping_request| {
             if now.duration_since(ping_request.sent_at) > self.config.ping_expiration {
-                failed_pings.push((*node_id, ping_request.node.address));
+                failed_pings.push((*node_id, ping_request.node.udp_addr()));
                 return false
             }
             true
@@ -1721,10 +1721,16 @@ impl Discv4Service {
         if !failed_pings.is_empty() {
             // remove nodes that failed to pong
             trace!(target: "discv4", num=%failed_pings.len(), "evicting nodes due to failed pong");
-            for (node_id, address) in failed_pings {
-                // a failed bond ping to a different address than the stored endpoint must not
-                // evict the node
-                if self.on_entry(node_id, |entry| entry.record.address == address).unwrap_or(true) {
+            for (node_id, pinged) in failed_pings {
+                // A proven node is only evicted when its stored endpoint failed to pong. A failed
+                // ping to any other endpoint revalidates the stored one instead.
+                let proven_elsewhere = self
+                    .on_entry(node_id, |entry| entry.has_endpoint_proof.then_some(entry.record))
+                    .flatten()
+                    .filter(|record| record.udp_addr() != pinged);
+                if let Some(record) = proven_elsewhere {
+                    self.try_ping(record, PingReason::RePing);
+                } else {
                     self.remove_node(node_id);
                 }
             }
@@ -1758,7 +1764,7 @@ impl Discv4Service {
                 if !find_node_request.answered {
                     // node actually responded but with fewer entries than expected, but we don't
                     // treat this as an hard error since it responded.
-                    failed_find_nodes.push(*node_id);
+                    failed_find_nodes.push((*node_id, find_node_request.destination));
                 }
                 return false
             }
@@ -1771,17 +1777,22 @@ impl Discv4Service {
 
         trace!(target: "discv4", num=%failed_find_nodes.len(), "processing failed find nodes");
 
-        for node_id in failed_find_nodes {
+        for (node_id, destination) in failed_find_nodes {
             let key = kad_key(node_id);
             let failures = match self.kbuckets.entry(&key) {
-                kbucket::Entry::Present(mut entry, _) => {
+                kbucket::Entry::Present(mut entry, _)
+                    if entry.value().record.address.to_canonical() == destination =>
+                {
                     entry.value_mut().inc_failed_request();
                     entry.value().find_node_failures
                 }
-                kbucket::Entry::Pending(mut entry, _) => {
+                kbucket::Entry::Pending(mut entry, _)
+                    if entry.value().record.address.to_canonical() == destination =>
+                {
                     entry.value_mut().inc_failed_request();
                     entry.value().find_node_failures
                 }
+                // A request sent to another address is not the node's failure.
                 _ => continue,
             };
 
@@ -3704,6 +3715,64 @@ mod tests {
 
         assert!(!service.pending_pings.contains_key(&record.id));
         assert!(service.has_bond(record.id, expected_addr.ip()));
+    }
+
+    #[tokio::test]
+    async fn test_failed_ping_to_other_endpoint_revalidates_proven_node() {
+        let (_discv4, mut service) = create_discv4().await;
+        let expired = Instant::now() + service.config.ping_expiration * 2;
+
+        // Neither another IP nor another UDP port on the stored IP is the stored endpoint.
+        for other in ["127.0.0.2:30303", "127.0.0.1:30304"] {
+            let record = NodeRecord::new("127.0.0.1:30303".parse().unwrap(), PeerId::random());
+            insert_proven_node(&mut service, record);
+            let other = NodeRecord::new(other.parse().unwrap(), record.id);
+            service.send_ping(other, PingReason::EstablishBond);
+            service.evict_expired_requests(expired);
+
+            assert!(service.on_entry(record.id, |_| ()).is_some());
+            let request = &service.pending_pings[&record.id];
+            assert_eq!(request.node, record);
+            assert!(matches!(request.reason, PingReason::RePing));
+
+            // The stored endpoint does not pong either.
+            service.evict_expired_requests(expired);
+            assert!(service.on_entry(record.id, |_| ()).is_none());
+        }
+    }
+
+    #[tokio::test]
+    async fn test_failed_ping_to_other_endpoint_evicts_unproven_node() {
+        let (_discv4, mut service) = create_discv4().await;
+        let record = NodeRecord::new("127.0.0.1:30303".parse().unwrap(), PeerId::random());
+        let other = NodeRecord::new("127.0.0.2:30303".parse().unwrap(), record.id);
+
+        // The pending ping to the other endpoint drops the initial ping to the new entry.
+        service.send_ping(other, PingReason::EstablishBond);
+        assert!(service.add_node(record));
+        assert_eq!(service.pending_pings[&record.id].node, other);
+
+        service.evict_expired_requests(Instant::now() + service.config.ping_expiration * 2);
+        assert!(service.on_entry(record.id, |_| ()).is_none());
+    }
+
+    #[tokio::test]
+    async fn test_find_node_timeout_counts_only_at_stored_address() {
+        let (_discv4, mut service) = create_discv4().await;
+        let record = NodeRecord::new("127.0.0.1:30303".parse().unwrap(), PeerId::random());
+        insert_proven_node(&mut service, record);
+        let other = NodeRecord::new("127.0.0.2:30303".parse().unwrap(), record.id);
+        let ctx = LookupContext::new(kad_key(PeerId::random()), [], None);
+        let expired = Instant::now() + service.config.neighbours_expiration * 2;
+
+        for (destination, failures) in [(other, 0), (record, 1)] {
+            service.find_node(&destination, ctx.clone());
+            service.evict_failed_find_nodes(expired);
+            assert_eq!(
+                service.on_entry(record.id, |entry| entry.find_node_failures),
+                Some(failures)
+            );
+        }
     }
 
     #[tokio::test]
