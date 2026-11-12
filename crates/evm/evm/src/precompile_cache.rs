@@ -16,7 +16,7 @@ use std::{fmt, hash::Hash, sync::Arc};
 use tracing::error;
 
 /// Number of entries of each precompile's [`PrecompileCache`].
-const CACHE_ENTRIES: usize = 1 << 13;
+const CACHE_ENTRIES: usize = 1 << 16;
 
 /// Maximum input retained by a precompile cache.
 const MAX_PRECOMPILE_CACHE_INPUT_SIZE: usize = 2 * 1024;
