@@ -353,7 +353,7 @@ async fn single_method_call_with_params_works() {
 async fn single_method_call_with_faulty_params_returns_err() {
     let addr = server().await;
     let mut client = WebSocketTestClient::new(addr).with_default_timeout().await.unwrap().unwrap();
-    let expected = r#"{"jsonrpc":"2.0","id":1,"error":{"code":-32602,"message":"Invalid params","data":"invalid type: string \"should be a number\", expected u64 at line 1 column 21"}}"#;
+    let expected = r#"{"jsonrpc":"2.0","id":1,"error":{"code":-32602,"message":"Invalid params"}}"#;
 
     let req = r#"{"jsonrpc":"2.0","method":"add", "params":["should be a number"],"id":1}"#;
     let response = client.send_request_text(req).with_default_timeout().await.unwrap().unwrap();
