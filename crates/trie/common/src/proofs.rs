@@ -521,13 +521,36 @@ impl DecodedMultiProofV2 {
         state_root: B256,
         witness: &B256Map<impl AsRef<[u8]>>,
     ) -> Result<Self, alloy_rlp::Error> {
+        Self::from_witness_with(state_root, |hash| {
+            witness.get(hash).map(|bytes| TrieNode::decode(&mut bytes.as_ref())).transpose()
+        })
+    }
+
+    /// Builds a `DecodedMultiProofV2` from a witness map of already decoded trie nodes, keyed by
+    /// node hash.
+    ///
+    /// Same traversal as [`Self::from_witness`], for callers that build multiproofs at several
+    /// roots over one witness and decode each node once. Inline children are still decoded from
+    /// their parent.
+    pub fn from_witness_decoded(
+        state_root: B256,
+        witness: &B256Map<TrieNode>,
+    ) -> Result<Self, alloy_rlp::Error> {
+        Self::from_witness_with(state_root, |hash| Ok(witness.get(hash).cloned()))
+    }
+
+    /// Builds a `DecodedMultiProofV2` by BFS from `state_root`, resolving hashed nodes with
+    /// `node_by_hash`. A node it returns as `None` is left blinded.
+    fn from_witness_with(
+        state_root: B256,
+        mut node_by_hash: impl FnMut(&B256) -> Result<Option<TrieNode>, alloy_rlp::Error>,
+    ) -> Result<Self, alloy_rlp::Error> {
         let mut account_nodes: Vec<(Nibbles, TrieNode, Option<BranchNodeMasks>)> = Vec::new();
         let mut storage_nodes: B256Map<Vec<(Nibbles, TrieNode, Option<BranchNodeMasks>)>> =
             B256Map::default();
 
-        let Some(root) = witness.get(&state_root) else { return Ok(Self::default()) };
-        let mut queue =
-            VecDeque::from([(TrieNode::decode(&mut root.as_ref())?, Nibbles::default(), None)]);
+        let Some(root) = node_by_hash(&state_root)? else { return Ok(Self::default()) };
+        let mut queue = VecDeque::from([(root, Nibbles::default(), None)]);
 
         while let Some((trie_node, path, maybe_account)) = queue.pop_front() {
             match &trie_node {
@@ -540,8 +563,8 @@ impl DecodedMultiProofV2 {
                             let mut child_path = path;
                             child_path.push_unchecked(idx);
                             let child = if let Some(hash) = child.as_hash() {
-                                let Some(bytes) = witness.get(&hash) else { continue };
-                                TrieNode::decode(&mut bytes.as_ref())?
+                                let Some(node) = node_by_hash(&hash)? else { continue };
+                                node
                             } else {
                                 TrieNode::decode(&mut child.as_slice())?
                             };
@@ -556,8 +579,8 @@ impl DecodedMultiProofV2 {
                     let mut child_path = path;
                     child_path.extend(&ext.key);
                     let child = if let Some(hash) = ext.child.as_hash() {
-                        let Some(bytes) = witness.get(&hash) else { continue };
-                        TrieNode::decode(&mut bytes.as_ref())?
+                        let Some(node) = node_by_hash(&hash)? else { continue };
+                        node
                     } else {
                         TrieNode::decode(&mut ext.child.as_slice())?
                     };
@@ -573,13 +596,9 @@ impl DecodedMultiProofV2 {
                         let hashed_address = B256::from_slice(&full_path.pack());
                         let account = TrieAccount::decode(&mut &leaf.value[..])?;
                         if account.storage_root != EMPTY_ROOT_HASH &&
-                            let Some(bytes) = witness.get(&account.storage_root)
+                            let Some(node) = node_by_hash(&account.storage_root)?
                         {
-                            queue.push_back((
-                                TrieNode::decode(&mut bytes.as_ref())?,
-                                Nibbles::default(),
-                                Some(hashed_address),
-                            ));
+                            queue.push_back((node, Nibbles::default(), Some(hashed_address)));
                         }
                     }
                 }
@@ -1222,6 +1241,13 @@ mod tests {
         assert!(proof.info.is_none());
     }
 
+    fn decode_witness(witness: &B256Map<impl AsRef<[u8]>>) -> B256Map<TrieNode> {
+        witness
+            .iter()
+            .map(|(hash, bytes)| (*hash, TrieNode::decode(&mut bytes.as_ref()).unwrap()))
+            .collect()
+    }
+
     #[test]
     fn witness_nodes_are_depth_first_ordered() {
         fn insert_node(witness: &mut B256Map<Bytes>, node: impl alloy_rlp::Encodable) -> RlpNode {
@@ -1268,6 +1294,10 @@ mod tests {
         .expect("state root is hashed");
 
         let proof = DecodedMultiProofV2::from_witness(state_root, &witness).unwrap();
+        assert_eq!(
+            DecodedMultiProofV2::from_witness_decoded(state_root, &decode_witness(&witness)),
+            Ok(proof.clone())
+        );
         let expected_paths =
             [Nibbles::from_nibbles([0]), Nibbles::from_nibbles([1]), Nibbles::default()];
 
@@ -1313,6 +1343,10 @@ mod tests {
         ]);
 
         let proof = DecodedMultiProofV2::from_witness(state_root, &witness).unwrap();
+        assert_eq!(
+            DecodedMultiProofV2::from_witness_decoded(state_root, &decode_witness(&witness)),
+            Ok(proof.clone())
+        );
         let mut leaf_0_path = extension_key;
         leaf_0_path.push_unchecked(0);
         let mut leaf_1_path = extension_key;
@@ -1380,6 +1414,10 @@ mod tests {
                 DecodedMultiProofV2::from_witness(state_root, &witness),
                 Err(alloy_rlp::Error::Custom(expected)),
             );
+            assert_eq!(
+                DecodedMultiProofV2::from_witness_decoded(state_root, &decode_witness(&witness)),
+                Err(alloy_rlp::Error::Custom(expected)),
+            );
         }
 
         for length in [63, 65] {
@@ -1397,6 +1435,10 @@ mod tests {
             let witness = B256Map::from_iter([(state_root, root), (hash, account)]);
             assert_eq!(
                 DecodedMultiProofV2::from_witness(state_root, &witness),
+                Err(alloy_rlp::Error::Custom("leaf path must contain 64 nibbles")),
+            );
+            assert_eq!(
+                DecodedMultiProofV2::from_witness_decoded(state_root, &decode_witness(&witness)),
                 Err(alloy_rlp::Error::Custom("leaf path must contain 64 nibbles")),
             );
         }
