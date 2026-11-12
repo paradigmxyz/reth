@@ -217,32 +217,21 @@ async fn send_task(
     mut stop: oneshot::Receiver<()>,
 ) {
     let mut write_timed_out = false;
-    let mut stopping = false;
 
     loop {
-        let response = if stopping {
-            // The queue takes nothing new, so this writes out what is left and then ends the loop.
-            rx.recv().await
-        } else {
-            let received = tokio::select! {
-                // The stop signal is polled first: a subscription that queues messages faster than
-                // the client reads them keeps `rx.recv()` ready, and polling that first would never
-                // let a stopped server end the session.
-                biased;
-                _ = &mut stop => None,
-                response = rx.recv() => Some(response),
-            };
-
-            let Some(response) = received else {
-                // Stop taking new messages, but keep writing the ones already queued: those are
-                // answers to calls this server has run, which a graceful shutdown owes its clients.
-                // Closing the queue is what lets the drain above finish.
-                stopping = true;
+        let response = tokio::select! {
+            // Stop is polled first: a subscription that queues messages faster than the client
+            // reads them keeps `rx.recv()` ready, which would never let a stopped server end the
+            // session.
+            biased;
+            _ = &mut stop, if !rx.is_closed() => {
+                // Take nothing new but write out what is queued: answers to calls this server has
+                // run, which a graceful shutdown owes its clients. `rx.recv()` returns `None` once
+                // the closed queue is drained.
                 rx.close();
                 continue;
-            };
-
-            response
+            }
+            response = rx.recv() => response,
         };
         // Nothing else to receive.
         let Some(response) = response else { break };
