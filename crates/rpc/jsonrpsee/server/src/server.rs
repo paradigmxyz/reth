@@ -1027,7 +1027,7 @@ struct ValidBatchEntry<'a> {
     id: Option<Id<'a>>,
     #[serde(borrow)]
     method: Cow<'a, str>,
-    #[serde(borrow, default)]
+    #[serde(borrow)]
     params: Option<Cow<'a, JsonRawValue>>,
 }
 
