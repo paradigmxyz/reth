@@ -1,3 +1,4 @@
+use alloy_rpc_client::RpcClient;
 use reth_db::DatabaseEnv;
 // re-export the node api types
 pub use reth_node_api::{FullNodeTypes, NodeTypes};
@@ -6,14 +7,13 @@ use crate::{
     components::NodeComponentsBuilder, rpc::RethRpcAddOns, NodeAdapter, NodeAddOns, NodeHandle,
     RethFullAdapter,
 };
-use reth_node_api::{EngineTypes, FullNodeComponents, PayloadTypes};
+use reth_node_api::{FullNodeComponents, PayloadTypes};
 use reth_node_core::{
     dirs::{ChainPath, DataDirPath},
     node_config::NodeConfig,
 };
 use reth_payload_builder::PayloadBuilderHandle;
 use reth_provider::ChainSpecProvider;
-use reth_rpc_api::EngineApiClient;
 use reth_rpc_builder::{auth::AuthServerHandle, RpcServerHandle};
 use reth_tasks::TaskExecutor;
 use std::{
@@ -175,35 +175,30 @@ where
     }
 }
 
-impl<Engine, Node, AddOns> FullNode<Node, AddOns>
+impl<Node, AddOns> FullNode<Node, AddOns>
 where
-    Engine: EngineTypes,
-    Node: FullNodeComponents<Types: NodeTypes<Payload = Engine>>,
+    Node: FullNodeComponents,
     AddOns: RethRpcAddOns<Node>,
 {
-    /// Returns the [`EngineApiClient`] interface for the authenticated engine API.
+    /// Returns a client for the authenticated engine API.
     ///
     /// This will send authenticated http requests to the node's auth server.
-    pub fn engine_http_client(&self) -> impl EngineApiClient<Engine> + use<Engine, Node, AddOns> {
+    pub fn engine_http_client(&self) -> RpcClient {
         self.auth_server_handle().http_client()
     }
 
-    /// Returns the [`EngineApiClient`] interface for the authenticated engine API.
+    /// Returns a client for the authenticated engine API.
     ///
     /// This will send authenticated ws requests to the node's auth server.
-    pub async fn engine_ws_client(
-        &self,
-    ) -> impl EngineApiClient<Engine> + use<Engine, Node, AddOns> {
+    pub async fn engine_ws_client(&self) -> RpcClient {
         self.auth_server_handle().ws_client().await
     }
 
-    /// Returns the [`EngineApiClient`] interface for the authenticated engine API.
+    /// Returns a client for the authenticated engine API.
     ///
     /// This will send not authenticated IPC requests to the node's auth server.
     #[cfg(unix)]
-    pub async fn engine_ipc_client(
-        &self,
-    ) -> Option<impl EngineApiClient<Engine> + use<Engine, Node, AddOns>> {
+    pub async fn engine_ipc_client(&self) -> Option<RpcClient> {
         self.auth_server_handle().ipc_client().await
     }
 }

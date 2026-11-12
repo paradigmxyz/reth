@@ -6,7 +6,9 @@
 use alloy_consensus::proofs::calculate_transaction_root;
 use alloy_eips::{eip2718::Decodable2718, eip7685::RequestsOrHash};
 use alloy_primitives::{bytes, keccak256, Bytes, B256};
-use alloy_rpc_types_engine::{ExecutionPayloadV1, ExecutionPayloadV3, PayloadStatusEnum};
+use alloy_rpc_types_engine::{
+    ExecutionPayloadV1, ExecutionPayloadV3, PayloadStatus, PayloadStatusEnum,
+};
 use rand::{rngs::StdRng, Rng, SeedableRng};
 use reth_chainspec::EthereumHardfork;
 use reth_e2e_test_utils::{transaction::TransactionTestContext, E2ETestSetupExt};
@@ -15,8 +17,6 @@ use reth_ethereum_primitives::{EthPrimitives, TransactionSigned};
 use reth_node_ethereum::EthereumNode;
 use reth_primitives_traits::{RecoveredBlock, SignedTransaction};
 use std::sync::Arc;
-
-use reth_rpc_api::EngineApiClient;
 
 /// Tests that a node can handle receiving an invalid payload (with wrong state root)
 /// followed by the correct payload, and continue operating normally.
@@ -59,13 +59,16 @@ async fn can_handle_invalid_payload_then_valid() -> eyre::Result<()> {
     invalid_payload.payload_inner.payload_inner.state_root = B256::random_with(&mut rng);
 
     // Send the invalid payload to the receiver - should be rejected
-    let invalid_result = EngineApiClient::<reth_node_ethereum::EthEngineTypes>::new_payload_v3(
-        &receiver_engine,
-        invalid_payload.clone(),
-        vec![],
-        valid_block.header().parent_beacon_block_root.unwrap_or_default(),
-    )
-    .await?;
+    let invalid_result = receiver_engine
+        .request::<_, PayloadStatus>(
+            "engine_newPayloadV3",
+            (
+                invalid_payload.clone(),
+                Vec::<B256>::new(),
+                valid_block.header().parent_beacon_block_root.unwrap_or_default(),
+            ),
+        )
+        .await?;
 
     println!(
         "Invalid payload response: {:?} (state_root changed from {original_state_root} to {})",
@@ -88,13 +91,16 @@ async fn can_handle_invalid_payload_then_valid() -> eyre::Result<()> {
         &valid_block.clone().into_block(),
     );
 
-    let valid_result = EngineApiClient::<reth_node_ethereum::EthEngineTypes>::new_payload_v3(
-        &receiver_engine,
-        valid_payload,
-        vec![],
-        valid_block.header().parent_beacon_block_root.unwrap_or_default(),
-    )
-    .await?;
+    let valid_result = receiver_engine
+        .request::<_, PayloadStatus>(
+            "engine_newPayloadV3",
+            (
+                valid_payload,
+                Vec::<B256>::new(),
+                valid_block.header().parent_beacon_block_root.unwrap_or_default(),
+            ),
+        )
+        .await?;
 
     println!("Valid payload response: {:?}", valid_result.status);
 
@@ -161,13 +167,16 @@ async fn can_handle_multiple_invalid_payloads() -> eyre::Result<()> {
         );
         invalid_payload.payload_inner.payload_inner.state_root = B256::random_with(&mut rng);
 
-        let result = EngineApiClient::<reth_node_ethereum::EthEngineTypes>::new_payload_v3(
-            &receiver_engine,
-            invalid_payload,
-            vec![],
-            valid_block.header().parent_beacon_block_root.unwrap_or_default(),
-        )
-        .await?;
+        let result = receiver_engine
+            .request::<_, PayloadStatus>(
+                "engine_newPayloadV3",
+                (
+                    invalid_payload,
+                    Vec::<B256>::new(),
+                    valid_block.header().parent_beacon_block_root.unwrap_or_default(),
+                ),
+            )
+            .await?;
 
         println!("Invalid payload {i}: status = {:?}", result.status);
 
@@ -184,13 +193,16 @@ async fn can_handle_multiple_invalid_payloads() -> eyre::Result<()> {
         &valid_block.clone().into_block(),
     );
 
-    let valid_result = EngineApiClient::<reth_node_ethereum::EthEngineTypes>::new_payload_v3(
-        &receiver_engine,
-        valid_payload,
-        vec![],
-        valid_block.header().parent_beacon_block_root.unwrap_or_default(),
-    )
-    .await?;
+    let valid_result = receiver_engine
+        .request::<_, PayloadStatus>(
+            "engine_newPayloadV3",
+            (
+                valid_payload,
+                Vec::<B256>::new(),
+                valid_block.header().parent_beacon_block_root.unwrap_or_default(),
+            ),
+        )
+        .await?;
 
     println!("Valid payload: status = {:?}", valid_result.status);
 
@@ -254,13 +266,16 @@ async fn can_handle_invalid_payload_with_transactions() -> eyre::Result<()> {
     invalid_payload.payload_inner.payload_inner.state_root = B256::random_with(&mut rng);
 
     // Send invalid payload - should be rejected
-    let invalid_result = EngineApiClient::<reth_node_ethereum::EthEngineTypes>::new_payload_v3(
-        &receiver_engine,
-        invalid_payload.clone(),
-        vec![],
-        valid_block.header().parent_beacon_block_root.unwrap_or_default(),
-    )
-    .await?;
+    let invalid_result = receiver_engine
+        .request::<_, PayloadStatus>(
+            "engine_newPayloadV3",
+            (
+                invalid_payload.clone(),
+                Vec::<B256>::new(),
+                valid_block.header().parent_beacon_block_root.unwrap_or_default(),
+            ),
+        )
+        .await?;
 
     println!(
         "Invalid payload (with tx) response: {:?} (state_root changed from {original_state_root} to {})",
@@ -283,13 +298,16 @@ async fn can_handle_invalid_payload_with_transactions() -> eyre::Result<()> {
         &valid_block.clone().into_block(),
     );
 
-    let valid_result = EngineApiClient::<reth_node_ethereum::EthEngineTypes>::new_payload_v3(
-        &receiver_engine,
-        valid_payload,
-        vec![],
-        valid_block.header().parent_beacon_block_root.unwrap_or_default(),
-    )
-    .await?;
+    let valid_result = receiver_engine
+        .request::<_, PayloadStatus>(
+            "engine_newPayloadV3",
+            (
+                valid_payload,
+                Vec::<B256>::new(),
+                valid_block.header().parent_beacon_block_root.unwrap_or_default(),
+            ),
+        )
+        .await?;
 
     println!("Valid payload (with tx) response: {:?}", valid_result.status);
 
@@ -356,11 +374,8 @@ async fn invalid_transaction_is_invalid_payload() -> eyre::Result<()> {
             &invalid_block,
         );
 
-        let status = EngineApiClient::<reth_node_ethereum::EthEngineTypes>::new_payload_v1(
-            &engine,
-            invalid_payload,
-        )
-        .await?;
+        let status =
+            engine.request::<_, PayloadStatus>("engine_newPayloadV1", (invalid_payload,)).await?;
         let PayloadStatusEnum::Invalid { validation_error } = status.status else {
             panic!("Expected INVALID for {expected_error}, got {status:?}");
         };
@@ -368,11 +383,8 @@ async fn invalid_transaction_is_invalid_payload() -> eyre::Result<()> {
         assert_eq!(status.latest_valid_hash, Some(block.parent_hash));
     }
 
-    let status = EngineApiClient::<reth_node_ethereum::EthEngineTypes>::new_payload_v1(
-        &engine,
-        valid_payload,
-    )
-    .await?;
+    let status =
+        engine.request::<_, PayloadStatus>("engine_newPayloadV1", (valid_payload,)).await?;
     assert_eq!(status.status, PayloadStatusEnum::Valid);
     assert_eq!(status.latest_valid_hash, Some(block.hash()));
 
@@ -408,26 +420,32 @@ async fn undecodable_bal_is_invalid_payload() -> eyre::Result<()> {
 
     let engine = node.auth_server_handle().http_client();
     let parent_beacon_block_root = block.header().parent_beacon_block_root.unwrap();
-    let invalid_status = EngineApiClient::<reth_node_ethereum::EthEngineTypes>::new_payload_v5(
-        &engine,
-        corrupted,
-        vec![],
-        parent_beacon_block_root,
-        RequestsOrHash::Requests(envelope.execution_requests.clone()),
-    )
-    .await?;
+    let invalid_status = engine
+        .request::<_, PayloadStatus>(
+            "engine_newPayloadV5",
+            (
+                corrupted,
+                Vec::<B256>::new(),
+                parent_beacon_block_root,
+                RequestsOrHash::Requests(envelope.execution_requests.clone()),
+            ),
+        )
+        .await?;
     assert!(invalid_status.is_invalid());
     assert_eq!(invalid_status.latest_valid_hash, None);
 
     // The same block with well-formed block access list bytes is processed normally.
-    let status = EngineApiClient::<reth_node_ethereum::EthEngineTypes>::new_payload_v5(
-        &engine,
-        valid_payload,
-        vec![],
-        parent_beacon_block_root,
-        RequestsOrHash::Requests(envelope.execution_requests),
-    )
-    .await?;
+    let status = engine
+        .request::<_, PayloadStatus>(
+            "engine_newPayloadV5",
+            (
+                valid_payload,
+                Vec::<B256>::new(),
+                parent_beacon_block_root,
+                RequestsOrHash::Requests(envelope.execution_requests),
+            ),
+        )
+        .await?;
     assert!(status.is_valid());
 
     Ok(())
