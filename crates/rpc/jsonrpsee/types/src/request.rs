@@ -49,6 +49,9 @@ pub struct Request<'a> {
     #[serde(borrow)]
     pub method: Cow<'a, str>,
     /// Parameter values of the request.
+    ///
+    /// Decoding borrows them from the input, so a request with params only decodes from borrowed
+    /// input such as [`serde_json::from_str`] or [`serde_json::from_slice`].
     #[serde(borrow, default, deserialize_with = "deserialize_borrowed_params")]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub params: Option<Cow<'a, RawValue>>,
@@ -139,7 +142,7 @@ fn deserialize_borrowed_params<'de, D: Deserializer<'de>>(
 
 #[cfg(test)]
 mod test {
-    use super::{Id, InvalidRequest, Notification, Request, TwoPointZero};
+    use super::{Cow, Id, InvalidRequest, Notification, Request, TwoPointZero};
     use serde_json::value::RawValue;
 
     fn assert_request<'a>(request: Request<'a>, id: Id<'a>, method: &str, params: Option<&str>) {
@@ -147,6 +150,7 @@ mod test {
         assert_eq!(request.id, id);
         assert_eq!(request.method, method);
         assert_eq!(request.params.as_ref().map(|p| RawValue::get(p)), params);
+        assert!(!matches!(request.params, Some(Cow::Owned(_))));
     }
 
     /// Checks that we can deserialize the object with or without non-mandatory fields.
