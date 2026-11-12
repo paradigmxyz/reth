@@ -96,7 +96,7 @@ RUST_LOG=info,engine::tree=debug cargo nextest run -p reth-node-ethereum --test 
 | Insert a payload without making it canonical | `submit_payload(payload)`, an error on `INVALID`; `submit_payload_with_status` returns the status |
 | Insert a payload and make it the head | `import_payload(payload)`, which follows the finality policy |
 | Send an exact forkchoice state or a sealed block, and get typed errors | `node.engine.forkchoice_updated(state)`, `forkchoice_updated_with_attributes`, `new_payload`, `new_payload_from_block` |
-| Test Engine API method versions, fork checks, error codes or encoding | `reth_rpc_api::EngineApiClient` on `node.auth_server_handle().http_client()` |
+| Test Engine API method versions, fork checks, error codes or encoding | the versioned `engine_*` methods on `node.auth_server_handle().http_client()`, e.g. `client.request::<_, PayloadStatus>("engine_newPayloadV3", params)` |
 | **Multiple nodes** | |
 | Connect two nodes | `a.connect(&mut b)`, done by `build()` unless disabled |
 | Give a node the block of another node | `follower.import_payload(payload)`; the parent must be known |
@@ -492,7 +492,7 @@ async fn builds_with_fee_recipient() -> eyre::Result<()> {
 - **The harness bypasses the Engine API RPC layer.** `node.engine` and all block producing and
   importing helpers send messages to the engine in-process: no check that the method version
   matches the fork, no check of fork-specific fields, no JSON or SSZ decoding, no error codes. Test
-  those with `EngineApiClient` on the auth server.
+  those with the versioned `engine_*` methods on the client of the auth server.
 - **`TransactionTestContext` signs with nonce 0** (except `transfer_tx_bytes_with_nonce`) and fixed
   fees, so a second transaction from the same signer conflicts with the first. Use `TestAccount`,
   which tracks nonces. `wallet.inner` is the signer of account 0.

@@ -147,6 +147,7 @@ impl<N: NetworkPrimitives> Swarm<N> {
                 self.state.on_session_activated(SessionActivation {
                     peer: peer_id,
                     capabilities: capabilities.clone(),
+                    version,
                     status: status.clone(),
                     request_tx: messages.clone(),
                     timeout,

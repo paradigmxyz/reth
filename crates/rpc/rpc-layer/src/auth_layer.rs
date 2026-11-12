@@ -1,5 +1,5 @@
 use super::AuthValidator;
-use jsonrpsee_http_client::{HttpRequest, HttpResponse};
+use jsonrpsee_server::{HttpRequest, HttpResponse};
 use pin_project::pin_project;
 use std::{
     future::Future,
@@ -270,7 +270,7 @@ mod tests {
 
         // Create a mock rpc module
         let mut module = RpcModule::new(());
-        module.register_method("greet_melkor", |_, _, _| "You are the dark lord").unwrap();
+        module.register_method("greet_melkor", |_, _| "You are the dark lord").unwrap();
 
         server.start(module)
     }

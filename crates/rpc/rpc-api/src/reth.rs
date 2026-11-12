@@ -7,8 +7,7 @@ use serde::{Deserialize, Serialize};
 use reth_chain_state as _;
 
 /// Reth API namespace for reth-specific methods
-#[cfg_attr(not(feature = "client"), rpc(server, namespace = "reth"))]
-#[cfg_attr(feature = "client", rpc(server, client, namespace = "reth"))]
+#[rpc(server, namespace = "reth")]
 pub trait RethApi {
     /// Returns all ETH balance changes in a block
     #[method(name = "getBalanceChangesInBlock")]

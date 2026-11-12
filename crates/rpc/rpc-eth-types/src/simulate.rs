@@ -20,7 +20,7 @@ use jsonrpsee_types::{error::INTERNAL_ERROR_CODE, ErrorObject};
 use reth_errors::ProviderResult;
 use reth_evm::{
     execute::{BlockBuilder, BlockBuilderOutcome, BlockTransactionResult},
-    BlockExecutionError, BundleState, Database, Evm as RethEvm, EvmEnv,
+    BlockExecutionError, BundleState, Database, DynDatabase, Evm as RethEvm, EvmEnv,
 };
 use reth_primitives_traits::{
     BlockBody as _, BlockTy, NodePrimitives, Recovered, RecoveredBlock, SealedHeader,
@@ -313,8 +313,11 @@ pub fn apply_precompile_overrides(
 /// execution. This matches the spec rule `"gasLimit: blockGasLimit - soFarUsedGasInBlock"` and
 /// geth's per-call `sanitizeCall` behavior.
 ///
+/// `call_nonce` returns the nonce for a call without one from the state before the call, or `None`
+/// to use the sender's account nonce.
+///
 /// [`TransactionRequest`]: alloy_rpc_types_eth::TransactionRequest
-#[expect(clippy::type_complexity)]
+#[expect(clippy::type_complexity, clippy::too_many_arguments)]
 pub fn execute_transactions<S, T, EvmTypes>(
     mut builder: S,
     state_provider: impl StateProvider,
@@ -323,6 +326,10 @@ pub fn execute_transactions<S, T, EvmTypes>(
     chain_id: u64,
     simulation_state: Option<&mut SimulatedState>,
     converter: &T,
+    mut call_nonce: impl FnMut(
+        &RpcTxReq<T::Network>,
+        &mut dyn DynDatabase,
+    ) -> Result<Option<u64>, EthApiError>,
 ) -> Result<(BlockBuilderOutcome<S::Primitives>, Vec<TxResult<EvmTypes>>), EthApiError>
 where
     S: BlockBuilder<Executor: reth_evm::BlockExecutor<Evm: RethEvm<EvmTypes = EvmTypes>>>,
@@ -373,6 +380,12 @@ where
             } else {
                 default_gas_limit = default_gas_limit.min(remaining_call_gas_limit);
             }
+        }
+
+        if call.as_ref().nonce().is_none() &&
+            let Some(nonce) = call_nonce(&call, builder.evm_mut().state_db_mut())?
+        {
+            call.as_mut().set_nonce(nonce);
         }
 
         // Resolve transaction, populate missing fields and enforce calls
