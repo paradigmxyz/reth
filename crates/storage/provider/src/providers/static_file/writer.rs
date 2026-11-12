@@ -8,7 +8,7 @@ use parking_lot::{lock_api::RwLockWriteGuard, RawRwLock, RwLock};
 use reth_codecs::Compact;
 use reth_db::models::{AccountBeforeTx, StorageBeforeTx};
 use reth_db_api::models::CompactU256;
-use reth_nippy_jar::{NippyJar, NippyJarError, NippyJarWriter};
+use reth_nippy_jar::{NippyJar, NippyJarError, NippyJarWriter, CONFIG_FILE_EXTENSION};
 use reth_node_types::NodePrimitives;
 use reth_primitives_traits::FastInstant as Instant;
 use reth_static_file_types::{
@@ -735,9 +735,9 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
         //
         // However if there's no block range (because there's no data), we try to calculate it by
         // subtracting 1 from the expected block start, resulting on the last block of the
-        // previous file — but only if that file actually exists. If the previous file doesn't
-        // exist (e.g. first-ever file for a segment starting past range boundary), there's
-        // nothing to index.
+        // previous file — but only if that file exists and has its config, i.e. it was fully
+        // initialized. If the previous file doesn't exist (e.g. first-ever file for a segment
+        // starting past range boundary) or its creation was interrupted, there's nothing to index.
         let segment_max_block = self
             .writer
             .user_header()
@@ -753,7 +753,8 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
                 let prev_block = expected_start - 1;
                 let prev_range = self.reader().find_fixed_range(segment, prev_block);
                 let prev_path = self.reader().directory().join(segment.filename(&prev_range));
-                prev_path.exists().then_some(prev_block)
+                (prev_path.exists() && prev_path.with_extension(CONFIG_FILE_EXTENSION).exists())
+                    .then_some(prev_block)
             });
 
         self.reader().update_index(segment, segment_max_block)
@@ -1077,14 +1078,12 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
         if let Some(last_block) = last_block {
             let mut expected_block_start = self.writer.user_header().expected_block_start();
 
-            if num_rows == 0 {
-                // Edge case for when we are unwinding a chain of empty blocks that goes across
-                // files, and therefore, the only reference point to know which file
-                // we are supposed to be at is `last_block`.
-                while last_block < expected_block_start {
-                    self.delete_current_and_open_previous()?;
-                    expected_block_start = self.writer.user_header().expected_block_start();
-                }
+            // Row deletion stops once `num_rows` rows are removed, which can be on a file above
+            // `last_block` when the blocks right above it are empty and span files, so `last_block`
+            // is the only reference point to know which file we are supposed to be at.
+            while last_block < expected_block_start {
+                self.delete_current_and_open_previous()?;
+                expected_block_start = self.writer.user_header().expected_block_start();
             }
             // Preserve the anchor; the fixed file range may start before any retained history.
             let block_start =

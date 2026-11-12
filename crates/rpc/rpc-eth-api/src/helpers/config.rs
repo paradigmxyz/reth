@@ -17,8 +17,7 @@ use reth_storage_api::BlockReaderIdExt;
 use std::collections::BTreeMap;
 
 /// RPC endpoint support for [EIP-7910](https://eips.ethereum.org/EIPS/eip-7910)
-#[cfg_attr(not(feature = "client"), rpc(server, namespace = "eth"))]
-#[cfg_attr(feature = "client", rpc(server, client, namespace = "eth"))]
+#[rpc(server, namespace = "eth")]
 pub trait EthConfigApi {
     /// Returns an object with data about recent and upcoming fork configurations.
     #[method(name = "config")]

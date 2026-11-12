@@ -34,15 +34,4 @@ pub use reth_rpc_eth_types::error::{
 };
 pub use types::{EthApiTypes, FullEthApiTypes, RpcBlock, RpcHeader, RpcReceipt, RpcTransaction};
 
-#[cfg(feature = "client")]
-pub use bundle::{EthBundleApiClient, EthCallBundleApiClient};
-#[cfg(feature = "client")]
-pub use core::EthApiClient;
-#[cfg(feature = "client")]
-pub use ext::L2EthApiExtClient;
-#[cfg(feature = "client")]
-pub use filter::EthFilterApiClient;
-#[cfg(feature = "client")]
-pub use helpers::config::EthConfigApiClient;
-
 use reth_trie_common as _;

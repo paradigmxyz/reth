@@ -34,7 +34,7 @@ use reth_network::{
                 DEFAULT_MAX_COUNT_CONCURRENT_REQUESTS_PER_PEER,
             },
             tx_manager::{
-                DEFAULT_MAX_COUNT_PENDING_POOL_IMPORTS,
+                DEFAULT_MAX_BYTE_SIZE_PENDING_POOL_IMPORTS, DEFAULT_MAX_COUNT_PENDING_POOL_IMPORTS,
                 DEFAULT_MAX_COUNT_TRANSACTIONS_SEEN_BY_PEER,
                 DEFAULT_TX_MANAGER_CHANNEL_MEMORY_LIMIT_BYTES,
             },
@@ -536,6 +536,7 @@ impl NetworkArgs {
             ),
             max_transactions_seen_by_peer_history: self.max_seen_tx_history,
             max_pending_pool_imports: self.max_pending_pool_imports,
+            max_pending_pool_imports_bytes: DEFAULT_MAX_BYTE_SIZE_PENDING_POOL_IMPORTS,
             propagation_mode: self.propagation_mode,
             ingress_policy: self.tx_ingress_policy,
             tx_channel_memory_limit_bytes: self.tx_channel_memory_limit_bytes,

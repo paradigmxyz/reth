@@ -572,6 +572,7 @@ where
                 let block_numbers = block_numbers
                     .unwrap()
                     .iter()
+                    .take(HISTORY_UPDATE_RANGE as usize + 1)
                     .map(|val| {
                         val.as_u64().ok_or_else(|| {
                             debug!(

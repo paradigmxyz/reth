@@ -12,7 +12,6 @@ use alloy_rpc_types_trace::geth::{
     ChainBlockTraceResult, GethDebugTracingCallOptions, GethDebugTracingOptions, GethTrace,
     TraceResult,
 };
-use async_trait::async_trait;
 use evm2::evm::StateChangeSource;
 use evm2_inspectors::tracing::{DebugInspector, TransactionContext};
 use futures::Stream;
@@ -49,7 +48,7 @@ use reth_trie_common::{
     HashedStorage,
 };
 use serde::{Deserialize, Serialize};
-use std::{collections::VecDeque, sync::Arc};
+use std::{collections::VecDeque, sync::Arc, time::Duration};
 use tokio::sync::{AcquireError, OwnedSemaphorePermit};
 use tokio_stream::StreamExt;
 
@@ -59,8 +58,6 @@ use alloy_rpc_types_trace::geth::{
 };
 #[cfg(feature = "js-tracer")]
 use evm2_inspectors::tracing::js::JsInspectorInterrupt;
-#[cfg(feature = "js-tracer")]
-use std::time::Duration;
 
 /// `debug` API implementation.
 ///
@@ -126,14 +123,18 @@ where
 
     /// Traces every transaction of a block through the block executor, see
     /// [`Call::block_executor`](reth_rpc_eth_api::helpers::Call::block_executor).
+    ///
+    /// A supplied permit stays with the worker if the waiting request times out or is dropped.
     async fn trace_block(
         &self,
         block: Arc<RecoveredBlock<ProviderBlock<Eth::Provider>>>,
         evm_env: EvmEnvFor<Eth::Evm>,
         opts: GethDebugTracingOptions,
+        permit: Option<OwnedSemaphorePermit>,
     ) -> Result<Vec<TraceResult>, Eth::Error> {
         self.eth_api()
             .spawn_with_state_at_block(block.parent_hash(), move |eth_api, mut db| {
+                let _permit = permit;
                 let mut results = Vec::with_capacity(block.body().transactions().len());
 
                 eth_api.apply_pre_execution_changes(&block, &mut db)?;
@@ -283,11 +284,18 @@ where
     /// This expects a rlp encoded block
     ///
     /// Note, the parent of this block must be present, or it will fail.
+    ///
+    /// The block is supplied by the caller, so its replay is bounded by a timeout of 30 seconds: no
+    /// transaction starts after it expires, the request then fails with
+    /// [`EthApiError::ExecutionTimedOut`].
+    /// The replay retains its tracing permit until the running transaction finishes.
     pub async fn debug_trace_raw_block(
         &self,
         rlp_block: Bytes,
         opts: GethDebugTracingOptions,
     ) -> Result<Vec<TraceResult>, Eth::Error> {
+        let permit =
+            self.acquire_trace_permit().await.map_err(|_| EthApiError::InternalEthError)?;
         let block: ProviderBlock<Eth::Provider> = Decodable::decode(&mut rlp_block.as_ref())
             .map_err(BlockError::RlpDecodeRawBlock)
             .map_err(Eth::Error::from_eth_err)?;
@@ -308,7 +316,20 @@ where
             }
             .map_err(Eth::Error::from_eth_err)?;
 
-        self.trace_block(Arc::new(block.into_recovered_with_signers(senders)), evm_env, opts).await
+        // Dropping the replay cancels it before its next transaction.
+        tokio::time::timeout(
+            RAW_BLOCK_TRACE_TIMEOUT,
+            self.trace_block(
+                Arc::new(block.into_recovered_with_signers(senders)),
+                evm_env,
+                opts,
+                Some(permit),
+            ),
+        )
+        .await
+        .map_err(|_| {
+            Eth::Error::from_eth_err(EthApiError::ExecutionTimedOut(RAW_BLOCK_TRACE_TIMEOUT))
+        })?
     }
 
     /// Replays a block and returns the trace of each transaction.
@@ -328,7 +349,7 @@ where
         }
         let evm_env = self.eth_api().evm_env_for_header(block.sealed_block().sealed_header())?;
 
-        self.trace_block(block, evm_env, opts).await
+        self.trace_block(block, evm_env, opts, None).await
     }
 
     /// Trace the transaction according to the provided options.
@@ -890,7 +911,6 @@ where
     }
 }
 
-#[async_trait]
 impl<Eth> DebugApiServer<RpcTxReq<Eth::NetworkTypes>> for DebugApi<Eth>
 where
     Eth: EthTransactions + TraceExt,
@@ -1153,7 +1173,6 @@ where
         rlp_block: Bytes,
         opts: Option<GethDebugTracingOptions>,
     ) -> RpcResult<Vec<TraceResult>> {
-        let _permit = self.acquire_trace_permit().await;
         Self::debug_trace_raw_block(self, rlp_block, opts.unwrap_or_default())
             .await
             .map_err(Into::into)
@@ -1306,9 +1325,11 @@ where
     /// * Contract bytecode associated with a code hash. The key format is: `<0x63><code_hash>`
     ///     * Prefix byte: 0x63 (required)
     ///     * Code hash: 32 bytes
+    ///
     ///   Must be provided as either:
     ///     * Hex string: "0x63..." (66 hex characters after 0x)
     ///     * Raw byte string: raw byte string (33 bytes)
+    ///
     ///   See Geth impl: <https://github.com/ethereum/go-ethereum/blob/737ffd1bf0cbee378d0111a5b17ae4724fb2216c/core/rawdb/schema.go#L120>
     async fn debug_db_get(&self, key: String) -> RpcResult<Option<Bytes>> {
         let key_bytes = if key.starts_with("0x") {
@@ -1462,7 +1483,7 @@ where
             .to_rpc_result()?;
 
         let opts = opts.map(|o| o.tracing_options).unwrap_or_default();
-        self.trace_block(entry.block.clone(), evm_env, opts).await.map_err(Into::into)
+        self.trace_block(entry.block.clone(), evm_env, opts, None).await.map_err(Into::into)
     }
 }
 
@@ -1544,6 +1565,9 @@ impl<B: BlockTrait> Default for BadBlockStore<B> {
         Self::new(64)
     }
 }
+
+/// Timeout of tracing a block supplied by the caller, whose work no consensus rule bounds.
+const RAW_BLOCK_TRACE_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// Default timeout of a JS tracer, matching geth.
 #[cfg(feature = "js-tracer")]
