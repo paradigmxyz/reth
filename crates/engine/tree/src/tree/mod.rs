@@ -2542,7 +2542,7 @@ where
         Ok(PayloadStatus::from_status(PayloadStatusEnum::Invalid {
             validation_error: PayloadValidationError::LinksToRejectedPayload.to_string(),
         })
-        .with_latest_valid_hash(valid_parent_hash.unwrap_or_default()))
+        .maybe_latest_valid_hash(valid_parent_hash))
     }
 
     /// Returns true if the given hash is the last received sync target block.
