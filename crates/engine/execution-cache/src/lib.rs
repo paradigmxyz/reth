@@ -14,6 +14,8 @@
 #![cfg_attr(docsrs, feature(doc_cfg))]
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 
+mod buckets;
+
 mod cached_state;
 pub use cached_state::*;
 
@@ -22,7 +24,7 @@ pub use txpool::*;
 
 use alloy_primitives::B256;
 use metrics::{Counter, Histogram};
-use parking_lot::Mutex;
+use parking_lot::{Condvar, Mutex};
 use reth_metrics::Metrics;
 use reth_primitives_traits::FastInstant as Instant;
 use std::{sync::Arc, time::Duration};
@@ -45,6 +47,8 @@ use tracing::{debug, instrument, warn};
 pub struct PayloadExecutionCache {
     /// Guarded cloneable cache identified by a block hash.
     inner: Arc<Mutex<Option<SavedCache>>>,
+    /// Notified whenever the guarded cache is updated.
+    updated: Arc<Condvar>,
     /// Metrics for cache operations.
     metrics: PayloadExecutionCacheMetrics,
 }
@@ -104,6 +108,24 @@ impl PayloadExecutionCache {
         None
     }
 
+    /// Returns the cache for `parent_hash` like [`Self::get_cache_for`], but waits up to
+    /// `timeout` while the stored cache is checked out.
+    ///
+    /// The next payload usually arrives while its parent's prewarm task still holds the cache
+    /// and has not saved it under the parent's hash yet. Waiting for that save keeps the warm
+    /// cache instead of allocating an empty one. Returns `None` if the cache is still checked out
+    /// after `timeout`, or if none is stored.
+    pub fn wait_for_cache(&self, parent_hash: B256, timeout: Duration) -> Option<SavedCache> {
+        let deadline = Instant::now() + timeout;
+        let mut cache = self.inner.lock();
+        // Clones are released without the lock, so the wait also wakes up periodically.
+        while cache.as_ref().is_some_and(|c| !c.is_available()) && Instant::now() < deadline {
+            self.updated.wait_for(&mut cache, AVAILABILITY_POLL_INTERVAL);
+        }
+        drop(cache);
+        self.get_cache_for(parent_hash)
+    }
+
     /// Waits for the mutex protecting the stored `Option<SavedCache>` to be released.
     ///
     /// This does not wait for other users to drop their [`ExecutionCache`] clones or for removed
@@ -149,9 +171,16 @@ impl PayloadExecutionCache {
         F: FnOnce(&mut Option<SavedCache>) -> R,
     {
         let mut guard = self.inner.lock();
-        update_fn(&mut guard)
+        let result = update_fn(&mut guard);
+        drop(guard);
+        self.updated.notify_all();
+        result
     }
 }
+
+/// How often [`PayloadExecutionCache::wait_for_cache`] rechecks whether the checked out cache was
+/// released.
+const AVAILABILITY_POLL_INTERVAL: Duration = Duration::from_micros(200);
 
 /// Metrics for [`PayloadExecutionCache`] operations.
 #[derive(Metrics, Clone)]
@@ -242,5 +271,39 @@ mod tests {
     fn empty_cache_returns_none() {
         let cache = PayloadExecutionCache::default();
         assert!(cache.get_cache_for(B256::ZERO).is_none());
+    }
+    #[test]
+    fn waits_for_the_parent_to_save_its_checked_out_cache() {
+        let cache = PayloadExecutionCache::default();
+        let (grandparent, parent) = (B256::repeat_byte(1), B256::repeat_byte(2));
+        cache.update_with_guard(|slot| {
+            *slot = Some(SavedCache::new(grandparent, ExecutionCache::new(1_000)))
+        });
+        // The parent's prewarm task holds the cache until it saves it under the parent's hash.
+        let checked_out = cache.get_cache_for(grandparent).expect("cache is available");
+        assert!(cache.get_cache_for(parent).is_none());
+
+        let saver = cache.clone();
+        let save = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(20));
+            saver.update_with_guard(|slot| {
+                *slot = Some(SavedCache::new(parent, checked_out.into_cache()));
+            });
+        });
+        let reused = cache.wait_for_cache(parent, Duration::from_secs(10));
+        save.join().unwrap();
+        assert_eq!(reused.expect("parent saved its cache").executed_block_hash(), parent);
+    }
+
+    #[test]
+    fn stops_waiting_for_a_checked_out_cache_after_the_timeout() {
+        let cache = PayloadExecutionCache::default();
+        let hash = B256::repeat_byte(1);
+        cache.update_with_guard(|slot| {
+            *slot = Some(SavedCache::new(hash, ExecutionCache::new(1_000)))
+        });
+        let _checked_out = cache.get_cache_for(hash).expect("cache is available");
+
+        assert!(cache.wait_for_cache(hash, Duration::from_millis(5)).is_none());
     }
 }
