@@ -201,7 +201,7 @@ mod tests {
     async fn can_write_and_read() {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
-        let server_key = SecretKey::new(&mut rand::rng());
+        let server_key = SecretKey::from_secret_bytes(rand::random()).unwrap();
 
         let handle = tokio::spawn(async move {
             // roughly based off of the design of tokio::net::TcpListener
@@ -216,7 +216,7 @@ mod tests {
         // create the server pubkey
         let server_id = pk2id(&server_key.public_key());
 
-        let client_key = SecretKey::new(&mut rand::rng());
+        let client_key = SecretKey::from_secret_bytes(rand::random()).unwrap();
         let outgoing = TcpStream::connect(addr).await.unwrap();
         let mut client_stream =
             ECIESStream::connect(outgoing, client_key, server_id).await.unwrap();
@@ -230,7 +230,7 @@ mod tests {
     async fn connection_should_timeout() {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
-        let server_key = SecretKey::new(&mut rand::rng());
+        let server_key = SecretKey::from_secret_bytes(rand::random()).unwrap();
 
         let _handle = tokio::spawn(async move {
             // Delay accepting the connection for longer than the client's timeout period
@@ -246,7 +246,7 @@ mod tests {
         // create the server pubkey
         let server_id = pk2id(&server_key.public_key());
 
-        let client_key = SecretKey::new(&mut rand::rng());
+        let client_key = SecretKey::from_secret_bytes(rand::random()).unwrap();
         let outgoing = TcpStream::connect(addr).await.unwrap();
 
         // Attempt to connect, expecting a timeout due to the server's delayed response

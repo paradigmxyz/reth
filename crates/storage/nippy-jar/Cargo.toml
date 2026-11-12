@@ -32,7 +32,7 @@ thiserror.workspace = true
 derive_more.workspace = true
 
 [dev-dependencies]
-rand = { workspace = true, features = ["small_rng"] }
+rand.workspace = true
 tempfile.workspace = true
 
 [features]

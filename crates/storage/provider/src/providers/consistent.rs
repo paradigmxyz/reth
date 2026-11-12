@@ -1425,7 +1425,7 @@ mod tests {
     use alloy_eips::BlockHashOrNumber;
     use alloy_primitives::{B256, U256};
     use itertools::Itertools;
-    use rand::Rng;
+    use rand::RngExt;
     use reth_chain_state::{ExecutedBlock, NewCanonicalChain};
     use reth_db_api::{
         models::{AccountBeforeTx, StorageSettings},
@@ -1452,7 +1452,7 @@ mod tests {
     const TEST_BLOCKS_COUNT: usize = 5;
 
     fn random_blocks(
-        rng: &mut impl Rng,
+        rng: &mut impl RngExt,
         database_blocks: usize,
         in_memory_blocks: usize,
         requests_count: Option<Range<u8>>,

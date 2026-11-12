@@ -448,7 +448,7 @@ impl DataReader {
 mod tests {
     use super::*;
     use compression::Compression;
-    use rand::{rngs::SmallRng, seq::SliceRandom, RngCore, SeedableRng};
+    use rand::{rngs::SmallRng, seq::SliceRandom, Rng, SeedableRng};
     use std::{
         fs::OpenOptions,
         io::{Read, Seek, SeekFrom},
@@ -462,7 +462,7 @@ mod tests {
         let num_rows = 100;
 
         let mut vec: Vec<u8> = vec![0; value_length];
-        let mut rng = seed.map(SmallRng::seed_from_u64).unwrap_or_else(SmallRng::from_os_rng);
+        let mut rng = seed.map(SmallRng::seed_from_u64).unwrap_or_else(rand::make_rng);
 
         let mut entry_gen = || {
             (0..num_rows)

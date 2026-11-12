@@ -30,7 +30,7 @@ byteorder.workspace = true
 # crypto
 ctr.workspace = true
 digest.workspace = true
-secp256k1 = { workspace = true, features = ["global-context", "std", "recovery", "rand"] }
+secp256k1 = { workspace = true, features = ["global-context", "std", "recovery"] }
 rand.workspace = true
 concat-kdf.workspace = true
 sha2.workspace = true

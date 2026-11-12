@@ -705,7 +705,7 @@ pub(super) mod serde_bincode_compat {
         use super::super::{serde_bincode_compat, Chain};
         use alloc::collections::BTreeMap;
         use arbitrary::Arbitrary;
-        use rand::Rng;
+        use rand::RngExt;
         use reth_primitives_traits::RecoveredBlock;
         use serde::{Deserialize, Serialize};
         use serde_with::serde_as;

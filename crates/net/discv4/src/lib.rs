@@ -217,7 +217,8 @@ impl Discv4 {
     /// # async fn t() -> std:: io::Result<()> {
     ///
     /// // generate a (random) keypair
-    /// let (secret_key, pk) = secp256k1::generate_keypair(&mut rand::rng());
+    /// let secret_key = secp256k1::SecretKey::from_secret_bytes(rand::random()).unwrap();
+    /// let pk = secret_key.public_key();
     /// let id = pk2id(&pk);
     ///
     /// let socket = SocketAddr::from_str("0.0.0.0:0").unwrap();
@@ -2699,19 +2700,19 @@ mod tests {
     use crate::test_utils::{create_discv4, create_discv4_with_config, rng_endpoint, rng_record};
     use alloy_primitives::hex;
     use alloy_rlp::{Decodable, Encodable};
-    use rand::Rng;
+    use rand::RngExt;
     use reth_ethereum_forks::{EnrForkIdEntry, ForkHash};
     use reth_network_peers::mainnet_nodes;
     use std::{future::poll_fn, net::Ipv6Addr};
 
     #[tokio::test]
     async fn test_duplicate_packet_rejected_without_decoding() {
-        let secret_key = SecretKey::new(&mut rand::rng());
+        let secret_key = SecretKey::from_secret_bytes(rand::random()).unwrap();
         let local_id = pk2id(&secret_key.public_key());
         let (tx, mut rx) = mpsc::channel(16);
         let mut handler = IngressHandler::new(tx, local_id);
 
-        let remote_key = SecretKey::new(&mut rand::rng());
+        let remote_key = SecretKey::from_secret_bytes(rand::random()).unwrap();
         let msg = Message::Ping(Ping {
             from: rng_endpoint(&mut rand::rng()),
             to: rng_endpoint(&mut rand::rng()),
@@ -2734,12 +2735,12 @@ mod tests {
 
     #[tokio::test]
     async fn test_undecodable_packet_does_not_poison_cache() {
-        let secret_key = SecretKey::new(&mut rand::rng());
+        let secret_key = SecretKey::from_secret_bytes(rand::random()).unwrap();
         let local_id = pk2id(&secret_key.public_key());
         let (tx, mut rx) = mpsc::channel(16);
         let mut handler = IngressHandler::new(tx, local_id);
 
-        let remote_key = SecretKey::new(&mut rand::rng());
+        let remote_key = SecretKey::from_secret_bytes(rand::random()).unwrap();
         let msg = Message::Ping(Ping {
             from: rng_endpoint(&mut rand::rng()),
             to: rng_endpoint(&mut rand::rng()),
@@ -2790,7 +2791,8 @@ mod tests {
             return;
         };
         let mut rng = rand::rng();
-        let (secret_key, pk) = secp256k1::generate_keypair(&mut rng);
+        let secret_key = secp256k1::SecretKey::from_secret_bytes(rng.random()).unwrap();
+        let pk = secret_key.public_key();
         let local_enr = NodeRecord {
             address: Ipv4Addr::LOCALHOST.into(),
             tcp_port: 30303,
@@ -2840,7 +2842,8 @@ mod tests {
     async fn test_external_ip_completes_unspecified_enr_endpoint() {
         let mut rng = rand::rng();
         let socket: SocketAddr = "127.0.0.1:0".parse().unwrap();
-        let (secret_key, pk) = secp256k1::generate_keypair(&mut rng);
+        let secret_key = secp256k1::SecretKey::from_secret_bytes(rng.random()).unwrap();
+        let pk = secret_key.public_key();
         let local_enr = NodeRecord {
             address: Ipv4Addr::UNSPECIFIED.into(),
             tcp_port: 30303,
@@ -3917,7 +3920,7 @@ mod tests {
     #[tokio::test]
     async fn test_neighbours_wrong_ip_replay_does_not_poison_cache() {
         let (_discv4, mut service) = create_discv4().await;
-        let remote_key = SecretKey::new(&mut rand::rng());
+        let remote_key = SecretKey::from_secret_bytes(rand::random()).unwrap();
         let node_addr = SocketAddr::from(([10, 0, 0, 1], 30303));
         let record = NodeRecord::from_secret_key(node_addr, &remote_key);
         insert_proven_node(&mut service, record);

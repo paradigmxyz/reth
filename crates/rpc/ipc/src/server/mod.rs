@@ -811,7 +811,7 @@ impl<HttpMiddleware, RpcMiddleware> Builder<HttpMiddleware, RpcMiddleware> {
 #[cfg(test)]
 #[expect(missing_docs)]
 pub fn dummy_name() -> String {
-    use rand::Rng;
+    use rand::RngExt;
     let num: u64 = rand::rng().random();
     format!(r"/tmp/my-uds-{num}")
 }

@@ -682,7 +682,7 @@ mod tests {
     use crate::wal::WalResult;
     use alloy_primitives::B256;
     use futures::{StreamExt, TryStreamExt};
-    use rand::Rng;
+    use rand::RngExt;
     use reth_db_common::init::init_genesis;
     use reth_evm_ethereum::EthEvmConfig;
     use reth_primitives_traits::RecoveredBlock;
@@ -1396,7 +1396,9 @@ mod tests {
 
         // Send a `FinishedHeight` event with a non-canonical block
         events_tx
-            .send(ExExEvent::FinishedHeight((rng.random::<u64>(), rng.random::<B256>()).into()))
+            .send(ExExEvent::FinishedHeight(
+                (rng.random::<u64>(), B256::from(rng.random::<[u8; 32]>())).into(),
+            ))
             .unwrap();
 
         finalized_headers_tx.send(Some(block.clone_sealed_header()))?;

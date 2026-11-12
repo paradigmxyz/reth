@@ -24,7 +24,7 @@ use alloy_rpc_types_trace::geth::{
     CallConfig, ChainBlockTraceResult, GethDebugTracingOptions, GethTrace,
 };
 use jsonrpsee::core::client::{ClientT, Subscription, SubscriptionClientT};
-use rand::{rngs::StdRng, Rng, SeedableRng};
+use rand::{rngs::StdRng, RngExt, SeedableRng};
 use reth_chainspec::{
     sepolia::{SEPOLIA_AMSTERDAM_TIMESTAMP, SEPOLIA_BPO2_TIMESTAMP},
     EthChainSpec, EthereumHardfork, SEPOLIA,

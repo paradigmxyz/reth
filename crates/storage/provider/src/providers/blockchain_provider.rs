@@ -1129,7 +1129,7 @@ mod tests {
     use alloy_primitives::{keccak256, Address, BlockNumber, TxNumber, B256, U256};
     use evm2::evm::AccountInfo;
     use itertools::Itertools;
-    use rand::Rng;
+    use rand::RngExt;
     use reth_chain_state::{
         test_utils::TestBlockBuilder, CanonStateNotification, CanonStateSubscriptions,
         CanonicalInMemoryState, ExecutedBlock, NewCanonicalChain,
@@ -1318,7 +1318,7 @@ mod tests {
     const TEST_TRANSACTIONS_COUNT: u8 = 4;
 
     fn random_blocks(
-        rng: &mut impl Rng,
+        rng: &mut impl RngExt,
         database_blocks: usize,
         in_memory_blocks: usize,
         requests_count: Option<Range<u8>>,
@@ -1352,7 +1352,7 @@ mod tests {
 
     #[expect(clippy::type_complexity)]
     fn provider_with_chain_spec_and_random_blocks(
-        rng: &mut impl Rng,
+        rng: &mut impl RngExt,
         chain_spec: Arc<ChainSpec>,
         database_blocks: usize,
         in_memory_blocks: usize,
@@ -1456,7 +1456,7 @@ mod tests {
 
     #[expect(clippy::type_complexity)]
     fn provider_with_random_blocks(
-        rng: &mut impl Rng,
+        rng: &mut impl RngExt,
         database_blocks: usize,
         in_memory_blocks: usize,
         block_range_params: BlockRangeParams,

@@ -1559,7 +1559,7 @@ impl MockTransactionDistribution {
     }
 
     /// Generates a new transaction
-    pub fn tx(&self, nonce: u64, rng: &mut impl rand::Rng) -> MockTransaction {
+    pub fn tx(&self, nonce: u64, rng: &mut impl rand::RngExt) -> MockTransaction {
         let transaction_sample = self.transaction_ratio.weighted_index().sample(rng);
         let tx = match transaction_sample {
             0 => MockTransaction::legacy().with_gas_price(self.fee_ranges.sample_gas_price(rng)),
@@ -1586,7 +1586,7 @@ impl MockTransactionDistribution {
         &self,
         sender: Address,
         nonce_range: Range<u64>,
-        rng: &mut impl rand::Rng,
+        rng: &mut impl rand::RngExt,
     ) -> MockTransactionSet {
         let txs =
             nonce_range.map(|nonce| self.tx(nonce, rng).with_sender(sender)).collect::<Vec<_>>();
@@ -1602,7 +1602,7 @@ impl MockTransactionDistribution {
         &self,
         sender: Address,
         nonce_range: Range<u64>,
-        rng: &mut impl rand::Rng,
+        rng: &mut impl rand::RngExt,
     ) -> NonConflictingSetOutcome {
         // This will create a modified distribution that will only generate blob transactions
         // for the given sender, if the blob transaction is the first transaction in the set.
@@ -1689,7 +1689,7 @@ impl NonConflictingSetOutcome {
         &mut self,
         gap_pct: u32,
         gap_range: Range<u64>,
-        rng: &mut impl rand::Rng,
+        rng: &mut impl rand::RngExt,
     ) {
         match self {
             Self::BlobsOnly(_) => {}
@@ -1757,7 +1757,7 @@ impl MockTransactionSet {
         &mut self,
         gap_pct: u32,
         gap_range: Range<u64>,
-        rng: &mut impl rand::Rng,
+        rng: &mut impl rand::RngExt,
     ) {
         assert!(gap_pct <= 100, "gap_pct must be between 0 and 100");
         assert!(gap_range.start >= 1, "gap_range must have a lower bound of at least one");

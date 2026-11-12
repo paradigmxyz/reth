@@ -246,7 +246,7 @@ mod tests {
     use super::*;
     use alloy_primitives::b512;
     use alloy_rlp::Decodable;
-    use rand::{rng, Rng, RngCore};
+    use rand::{rng, Rng, RngExt};
     use std::net::Ipv6Addr;
 
     #[test]
@@ -260,7 +260,7 @@ mod tests {
             address: v6.into(),
             tcp_port: rng.random(),
             udp_port: rng.random(),
-            id: rng.random(),
+            id: PeerId::from(rng.random::<[u8; 64]>()),
         };
 
         assert!(record.clone().convert_ipv4_mapped());
@@ -276,7 +276,7 @@ mod tests {
             address: v4.into(),
             tcp_port: rng.random(),
             udp_port: rng.random(),
-            id: rng.random(),
+            id: PeerId::from(rng.random::<[u8; 64]>()),
         };
 
         assert!(!record.clone().convert_ipv4_mapped());
@@ -293,7 +293,7 @@ mod tests {
                 address: IpAddr::V4(ip.into()),
                 tcp_port: rng.random(),
                 udp_port: rng.random(),
-                id: rng.random(),
+                id: PeerId::from(rng.random::<[u8; 64]>()),
             };
 
             let decoded = NodeRecord::decode(&mut alloy_rlp::encode(record).as_slice()).unwrap();
@@ -311,7 +311,7 @@ mod tests {
                 address: IpAddr::V6(ip.into()),
                 tcp_port: rng.random(),
                 udp_port: rng.random(),
-                id: rng.random(),
+                id: PeerId::from(rng.random::<[u8; 64]>()),
             };
 
             let decoded = NodeRecord::decode(&mut alloy_rlp::encode(record).as_slice()).unwrap();

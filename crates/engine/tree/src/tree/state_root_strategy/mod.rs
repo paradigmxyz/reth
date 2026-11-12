@@ -1257,7 +1257,7 @@ mod tests {
     use alloy_consensus::constants::KECCAK_EMPTY;
     use alloy_primitives::{map::HashMap, Address, U256};
     use evm2::evm::AccountInfo;
-    use rand::Rng;
+    use rand::RngExt;
     use reth_chain_state::test_utils::TestBlockBuilder;
     use reth_chainspec::ChainSpec;
     use reth_db_common::init::init_genesis;
@@ -1559,7 +1559,8 @@ mod tests {
         updates_per_account: usize,
     ) -> Vec<StateUpdate> {
         let mut rng = generators::rng();
-        let all_addresses: Vec<Address> = (0..num_accounts).map(|_| rng.random()).collect();
+        let all_addresses: Vec<Address> =
+            (0..num_accounts).map(|_| Address::from(rng.random::<[u8; 20]>())).collect();
         let mut updates = Vec::with_capacity(updates_per_account);
 
         for _ in 0..updates_per_account {

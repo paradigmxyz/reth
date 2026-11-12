@@ -1045,7 +1045,7 @@ mod tests {
     use crate::test_utils::TestBlockBuilder;
     use alloy_eips::eip7685::Requests;
     use alloy_primitives::Bytes;
-    use rand::Rng;
+    use rand::RngExt;
     use reth_ethereum_primitives::{EthPrimitives, Receipt};
 
     fn create_mock_state(

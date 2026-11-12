@@ -104,7 +104,7 @@ alloy-trie.workspace = true
 criterion.workspace = true
 test-case.workspace = true
 url.workspace = true
-secp256k1 = { workspace = true, features = ["rand"] }
+secp256k1.workspace = true
 
 [features]
 serde = [

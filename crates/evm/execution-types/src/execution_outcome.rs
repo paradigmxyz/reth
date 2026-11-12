@@ -531,7 +531,7 @@ pub(super) mod serde_bincode_compat {
     #[cfg(test)]
     mod tests {
         use super::super::{serde_bincode_compat, ExecutionOutcome};
-        use rand::Rng;
+        use rand::RngExt;
         use reth_ethereum_primitives::Receipt;
         use serde::{Deserialize, Serialize};
         use serde_with::serde_as;

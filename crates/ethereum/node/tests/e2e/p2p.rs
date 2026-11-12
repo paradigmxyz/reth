@@ -4,7 +4,7 @@ use alloy_primitives::{Address, B256};
 use alloy_provider::Provider;
 use alloy_rpc_types_engine::{ForkchoiceState, PayloadStatusEnum};
 use futures::StreamExt;
-use rand::{rngs::StdRng, seq::IndexedRandom, Rng, SeedableRng};
+use rand::{rngs::StdRng, seq::IndexedRandom, RngExt, SeedableRng};
 use reth_chainspec::EthereumHardfork;
 use reth_e2e_test_utils::{test_chain_spec, transaction::TransactionTestContext, E2ETestSetupExt};
 use reth_engine_primitives::ConsensusEngineEvent;

@@ -450,7 +450,6 @@ mod tests {
     use enr::EnrKey;
     use reth_chainspec::MAINNET;
     use reth_ethereum_forks::{EthereumHardfork, ForkHash};
-    use secp256k1::rand::rng;
     use std::{
         future::poll_fn,
         net::{IpAddr, Ipv4Addr},
@@ -464,7 +463,7 @@ mod tests {
     #[test]
     fn test_convert_enr_node_record() {
         // rig
-        let secret_key = SecretKey::new(&mut secp256k1::rand::rng());
+        let secret_key = SecretKey::from_secret_bytes(rand::random()).unwrap();
         let enr = Enr::builder()
             .ip("127.0.0.1".parse().unwrap())
             .udp4(9000)
@@ -487,7 +486,7 @@ mod tests {
     fn test_decode_and_convert_enr_node_record() {
         // rig
 
-        let secret_key = SecretKey::new(&mut secp256k1::rand::rng());
+        let secret_key = SecretKey::from_secret_bytes(rand::random()).unwrap();
         let enr = Enr::builder()
             .ip("127.0.0.1".parse().unwrap())
             .udp4(9000)
@@ -516,7 +515,7 @@ mod tests {
     async fn test_start_root_sync() {
         reth_tracing::init_test_tracing();
 
-        let secret_key = SecretKey::new(&mut rng());
+        let secret_key = SecretKey::from_secret_bytes(rand::random()).unwrap();
         let resolver = MapResolver::default();
         let s = "enrtree-root:v1 e=QFT4PBCRX4XQCV3VUYJ6BTCEPU l=JGUFMSAGI7KZYB3P7IZW4S5Y3A seq=3 sig=3FmXuVwpa8Y7OstZTx9PIb1mt8FrW7VpDOFv4AaGCsZ2EIHmhraWhe4NxYhQDlw5MjeFXYMbJjsPeKlHzmJREQE";
         let mut root: TreeRootEntry = s.parse().unwrap();
@@ -544,7 +543,7 @@ mod tests {
     async fn test_get_node() {
         reth_tracing::init_test_tracing();
 
-        let secret_key = SecretKey::new(&mut rng());
+        let secret_key = SecretKey::from_secret_bytes(rand::random()).unwrap();
         let resolver = MapResolver::default();
         let s = "enrtree-root:v1 e=QFT4PBCRX4XQCV3VUYJ6BTCEPU l=JGUFMSAGI7KZYB3P7IZW4S5Y3A seq=3 sig=3FmXuVwpa8Y7OstZTx9PIb1mt8FrW7VpDOFv4AaGCsZ2EIHmhraWhe4NxYhQDlw5MjeFXYMbJjsPeKlHzmJREQE";
         let mut root: TreeRootEntry = s.parse().unwrap();
@@ -605,7 +604,7 @@ mod tests {
             ..Default::default()
         };
 
-        let secret_key = SecretKey::new(&mut rng());
+        let secret_key = SecretKey::from_secret_bytes(rand::random()).unwrap();
         let resolver = Arc::new(MapResolver::default());
         let s = "enrtree-root:v1 e=QFT4PBCRX4XQCV3VUYJ6BTCEPU l=JGUFMSAGI7KZYB3P7IZW4S5Y3A seq=3 sig=3FmXuVwpa8Y7OstZTx9PIb1mt8FrW7VpDOFv4AaGCsZ2EIHmhraWhe4NxYhQDlw5MjeFXYMbJjsPeKlHzmJREQE";
         let mut root: TreeRootEntry = s.parse().unwrap();
@@ -663,7 +662,7 @@ mod tests {
             ..Default::default()
         };
 
-        let secret_key = SecretKey::new(&mut rng());
+        let secret_key = SecretKey::from_secret_bytes(rand::random()).unwrap();
         let resolver = Arc::new(MapResolver::default());
         let s = "enrtree-root:v1 e=QFT4PBCRX4XQCV3VUYJ6BTCEPU l=JGUFMSAGI7KZYB3P7IZW4S5Y3A seq=3 sig=3FmXuVwpa8Y7OstZTx9PIb1mt8FrW7VpDOFv4AaGCsZ2EIHmhraWhe4NxYhQDlw5MjeFXYMbJjsPeKlHzmJREQE";
         let mut root: TreeRootEntry = s.parse().unwrap();
@@ -719,7 +718,7 @@ mod tests {
             ..Default::default()
         };
 
-        let secret_key = SecretKey::new(&mut rng());
+        let secret_key = SecretKey::from_secret_bytes(rand::random()).unwrap();
         let resolver = Arc::new(MapResolver::default());
         let s = "enrtree-root:v1 e=QFT4PBCRX4XQCV3VUYJ6BTCEPU l=JGUFMSAGI7KZYB3P7IZW4S5Y3A seq=3 sig=3FmXuVwpa8Y7OstZTx9PIb1mt8FrW7VpDOFv4AaGCsZ2EIHmhraWhe4NxYhQDlw5MjeFXYMbJjsPeKlHzmJREQE";
         let mut root: TreeRootEntry = s.parse().unwrap();
@@ -754,7 +753,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_hash_mismatch_is_not_cached_and_does_not_poison_same_hash() {
-        let secret_key = SecretKey::new(&mut rng());
+        let secret_key = SecretKey::from_secret_bytes(rand::random()).unwrap();
         let resolver = MapResolver::default();
 
         let invalid_entry = "enrtree-branch:AAAAAAAAAAAAAAAAAAAA".to_string();

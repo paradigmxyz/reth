@@ -47,7 +47,7 @@ impl HelloMessageWithProtocols {
     /// use reth_eth_wire::HelloMessageWithProtocols;
     /// use reth_network_peers::pk2id;
     /// use secp256k1::SecretKey;
-    /// let secret_key = SecretKey::new(&mut rand::rng());
+    /// let secret_key = SecretKey::from_secret_bytes(rand::random()).unwrap();
     /// let id = pk2id(&secret_key.public_key());
     /// let status = HelloMessageWithProtocols::builder(id).build();
     /// ```
@@ -157,7 +157,7 @@ impl HelloMessage {
     /// use reth_eth_wire::HelloMessage;
     /// use reth_network_peers::pk2id;
     /// use secp256k1::SecretKey;
-    /// let secret_key = SecretKey::new(&mut rand::rng());
+    /// let secret_key = SecretKey::from_secret_bytes(rand::random()).unwrap();
     /// let id = pk2id(&secret_key.public_key());
     /// let status = HelloMessage::builder(id).build();
     /// ```
@@ -252,7 +252,7 @@ mod tests {
 
     #[test]
     fn test_hello_encoding_round_trip() {
-        let secret_key = SecretKey::new(&mut rand::rng());
+        let secret_key = SecretKey::from_secret_bytes(rand::random()).unwrap();
         let id = pk2id(&secret_key.public_key());
         let hello = P2PMessage::Hello(HelloMessage {
             protocol_version: ProtocolVersion::V5,
@@ -272,7 +272,7 @@ mod tests {
 
     #[test]
     fn hello_encoding_length() {
-        let secret_key = SecretKey::new(&mut rand::rng());
+        let secret_key = SecretKey::from_secret_bytes(rand::random()).unwrap();
         let id = pk2id(&secret_key.public_key());
         let hello = P2PMessage::Hello(HelloMessage {
             protocol_version: ProtocolVersion::V5,
@@ -292,7 +292,7 @@ mod tests {
     #[test]
     fn test_default_protocols_still_include_eth69() {
         // ensure that older eth/69 remains advertised for compatibility
-        let secret_key = SecretKey::new(&mut rand::rng());
+        let secret_key = SecretKey::from_secret_bytes(rand::random()).unwrap();
         let id = pk2id(&secret_key.public_key());
         let hello = HelloMessageWithProtocols::builder(id).build();
 
@@ -306,7 +306,7 @@ mod tests {
     #[test]
     fn hello_message_id_prefix() {
         // ensure that the hello message id is prefixed
-        let secret_key = SecretKey::new(&mut rand::rng());
+        let secret_key = SecretKey::from_secret_bytes(rand::random()).unwrap();
         let id = pk2id(&secret_key.public_key());
         let hello = P2PMessage::Hello(HelloMessage {
             protocol_version: ProtocolVersion::V5,
@@ -326,7 +326,7 @@ mod tests {
     #[test]
     fn hello_decode_ignores_extra_fields() {
         // EIP-8: additional list elements must be ignored
-        let secret_key = SecretKey::new(&mut rand::rng());
+        let secret_key = SecretKey::from_secret_bytes(rand::random()).unwrap();
         let hello = HelloMessage {
             protocol_version: ProtocolVersion::V5,
             client_version: "reth/0.1.0".to_string(),

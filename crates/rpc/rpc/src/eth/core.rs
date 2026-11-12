@@ -550,7 +550,7 @@ mod tests {
     use alloy_rpc_types_trace::{parity::TraceType, tracerequest::TraceCallRequest};
     use evm2::{evm::CacheDB, AccountInfo};
     use jsonrpsee_types::error::INVALID_PARAMS_CODE;
-    use rand::Rng;
+    use rand::RngExt;
     use reth_chain_state::CanonStateSubscriptions;
     use reth_chainspec::{ChainSpec, ChainSpecBuilder, ChainSpecProvider, EthChainSpec};
     use reth_db_common::init::init_genesis;
@@ -874,7 +874,7 @@ mod tests {
         let mut parent_hash = B256::default();
 
         for i in (0..block_count).rev() {
-            let hash = rng.random();
+            let hash = B256::from(rng.random::<[u8; 32]>());
             // Note: Generates saner values to avoid invalid overflows later
             let gas_limit = rng.random::<u32>() as u64;
             let base_fee_per_gas: Option<u64> =

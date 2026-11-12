@@ -708,7 +708,7 @@ mod tests {
     use assert_matches::assert_matches;
     use async_compression::tokio::write::GzipEncoder;
     use futures_util::stream::StreamExt;
-    use rand::Rng;
+    use rand::RngExt;
     use reth_consensus::{noop::NoopConsensus, test_utils::TestConsensus, ConsensusError};
     use reth_ethereum_primitives::Block;
     use reth_network_p2p::{

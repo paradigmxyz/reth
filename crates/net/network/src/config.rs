@@ -37,7 +37,11 @@ pub use secp256k1::SecretKey;
 
 /// Convenience function to create a new random [`SecretKey`]
 pub fn rng_secret_key() -> SecretKey {
-    SecretKey::new(&mut rand::rng())
+    loop {
+        if let Ok(key) = SecretKey::from_secret_bytes(rand::random()) {
+            return key
+        }
+    }
 }
 
 /// All network related initialization settings.
@@ -805,7 +809,7 @@ mod tests {
     use std::{net::Ipv4Addr, sync::Arc};
 
     fn builder() -> NetworkConfigBuilder {
-        let secret_key = SecretKey::new(&mut rand::rng());
+        let secret_key = SecretKey::from_secret_bytes(rand::random()).unwrap();
         NetworkConfigBuilder::new(secret_key, Runtime::test())
     }
 

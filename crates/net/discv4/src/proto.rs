@@ -632,7 +632,7 @@ mod tests {
     use alloy_rlp::Decodable;
     use assert_matches::assert_matches;
     use enr::{secp256k1::SecretKey, EnrPublicKey};
-    use rand::{rng, Rng, RngCore};
+    use rand::{rng, Rng, RngExt};
     use reth_ethereum_forks::ForkHash;
     use std::net::Ipv4Addr;
 
@@ -762,7 +762,7 @@ mod tests {
     fn test_hash_mismatch() {
         let mut rng = rng();
         let msg = rng_message(&mut rng);
-        let (secret_key, _) = secp256k1::generate_keypair(&mut rng);
+        let secret_key = secp256k1::SecretKey::from_secret_bytes(rng.random()).unwrap();
         let (buf, _) = msg.encode(&secret_key);
 
         let mut buf_vec = buf.to_vec();
@@ -782,7 +782,7 @@ mod tests {
             nodes: std::iter::repeat_with(|| rng_ipv4_record(&mut rng)).take(16).collect(),
             expire: rng.random(),
         });
-        let (secret_key, _) = secp256k1::generate_keypair(&mut rng);
+        let secret_key = secp256k1::SecretKey::from_secret_bytes(rng.random()).unwrap();
 
         let (encoded, _) = msg.encode(&secret_key);
         // Assert that 16 nodes never fit into one packet
@@ -799,7 +799,7 @@ mod tests {
                     .collect(),
                 expire: rng.random(),
             });
-            let (secret_key, _) = secp256k1::generate_keypair(&mut rng);
+            let secret_key = secp256k1::SecretKey::from_secret_bytes(rng.random()).unwrap();
 
             let (encoded, _) = msg.encode(&secret_key);
             assert!(encoded.len() <= MAX_PACKET_SIZE, "{} {msg:?}", encoded.len());
@@ -822,7 +822,8 @@ mod tests {
         let mut rng = rng();
         for _ in 0..100 {
             let msg = rng_message(&mut rng);
-            let (secret_key, pk) = secp256k1::generate_keypair(&mut rng);
+            let secret_key = secp256k1::SecretKey::from_secret_bytes(rng.random()).unwrap();
+            let pk = secret_key.public_key();
             let sender_id = pk2id(&pk);
 
             let (buf, _) = msg.encode(&secret_key);
@@ -850,7 +851,7 @@ mod tests {
     #[test]
     fn encode_decode_enr_msg() {
         let mut rng = rand::rng();
-        let key = SecretKey::new(&mut rng);
+        let key = SecretKey::from_secret_bytes(rng.random()).unwrap();
         let ip = Ipv4Addr::new(127, 0, 0, 1);
         let tcp = 3000;
 
@@ -959,7 +960,7 @@ mod tests {
     // <https://github.com/sigp/enr/blob/e59dcb45ea07e423a7091d2a6ede4ad6d8ef2840/src/lib.rs#LL1206C35-L1206C35>
     #[test]
     fn encode_decode_enr_rlp() {
-        let key = SecretKey::new(&mut rand::rng());
+        let key = SecretKey::from_secret_bytes(rand::random()).unwrap();
         let ip = Ipv4Addr::new(127, 0, 0, 1);
         let tcp = 3000;
 
@@ -1087,7 +1088,7 @@ mod tests {
         // when the record and the junk together exceed the ENR size limit.
         #[test]
         fn eip8_decode_enr_response() {
-            let key = SecretKey::new(&mut rand::rng());
+            let key = SecretKey::from_secret_bytes(rand::random()).unwrap();
             let enr = Enr::builder().build(&key).unwrap();
             let request_hash = B256::random();
             let junk = Bytes::from(vec![0xab; 300]);

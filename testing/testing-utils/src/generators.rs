@@ -9,7 +9,7 @@ use alloy_eips::{
     NumHash,
 };
 use alloy_primitives::{Address, BlockNumber, Bytes, TxKind, B256, B64, U256};
-pub use rand::Rng;
+pub use rand::RngExt;
 use rand::{distr::uniform::SampleRange, prelude::IndexedRandom, rngs::StdRng, SeedableRng};
 use reth_ethereum_primitives::{Block, BlockBody, Receipt, Transaction, TransactionSigned};
 use reth_primitives_traits::{
@@ -88,7 +88,7 @@ pub fn rng_with_seed(seed: &[u8]) -> StdRng {
 /// in the result will be equal to `head`.
 ///
 /// The headers are assumed not to be correct if validated.
-pub fn random_header_range<R: Rng>(
+pub fn random_header_range<R: RngExt>(
     rng: &mut R,
     range: Range<u64>,
     head: B256,
@@ -105,21 +105,21 @@ pub fn random_header_range<R: Rng>(
 }
 
 /// Generate a random [`BlockWithParent`].
-pub fn random_block_with_parent<R: Rng>(
+pub fn random_block_with_parent<R: RngExt>(
     rng: &mut R,
     number: u64,
     parent: Option<B256>,
 ) -> BlockWithParent {
     BlockWithParent {
         parent: parent.unwrap_or_default(),
-        block: NumHash::new(number, rng.random()),
+        block: NumHash::new(number, B256::from(rng.random::<[u8; 32]>())),
     }
 }
 
 /// Generate a random [`SealedHeader`].
 ///
 /// The header is assumed not to be correct if validated.
-pub fn random_header<R: Rng>(rng: &mut R, number: u64, parent: Option<B256>) -> SealedHeader {
+pub fn random_header<R: RngExt>(rng: &mut R, number: u64, parent: Option<B256>) -> SealedHeader {
     let header = alloy_consensus::Header {
         number,
         nonce: B64::random(),
@@ -136,7 +136,7 @@ pub fn random_header<R: Rng>(rng: &mut R, number: u64, parent: Option<B256>) -> 
 ///
 /// - The chain ID, which is always 1
 /// - The input, which is always nothing
-pub fn random_tx<R: Rng>(rng: &mut R) -> Transaction {
+pub fn random_tx<R: RngExt>(rng: &mut R) -> Transaction {
     Transaction::Legacy(TxLegacy {
         chain_id: Some(1),
         nonce: rng.random::<u16>().into(),
@@ -153,14 +153,14 @@ pub fn random_tx<R: Rng>(rng: &mut R) -> Transaction {
 /// On top of the considerations of [`random_tx`], these apply as well:
 ///
 /// - There is no guarantee that the nonce is not used twice for the same account
-pub fn random_signed_tx<R: Rng>(rng: &mut R) -> TransactionSigned {
+pub fn random_signed_tx<R: RngExt>(rng: &mut R) -> TransactionSigned {
     let tx = random_tx(rng);
     sign_tx_with_random_key_pair(rng, tx)
 }
 
 /// Signs the [Transaction] with a random key pair.
-pub fn sign_tx_with_random_key_pair<R: Rng>(_rng: &mut R, tx: Transaction) -> TransactionSigned {
-    let key_pair = Keypair::new(&mut rand::rng());
+pub fn sign_tx_with_random_key_pair<R: RngExt>(_rng: &mut R, tx: Transaction) -> TransactionSigned {
+    let key_pair = random_keypair(&mut rand::rng());
     sign_tx_with_key_pair(key_pair, tx)
 }
 
@@ -174,13 +174,22 @@ pub fn sign_tx_with_key_pair(key_pair: Keypair, tx: Transaction) -> TransactionS
 }
 
 /// Generates a new random [Keypair].
-pub fn generate_key<R: Rng>(_rng: &mut R) -> Keypair {
-    Keypair::new(&mut rand::rng())
+pub fn generate_key<R: RngExt>(_rng: &mut R) -> Keypair {
+    random_keypair(&mut rand::rng())
+}
+
+/// Generates a new random [Keypair] from the given rng.
+pub(crate) fn random_keypair<R: rand::Rng + ?Sized>(rng: &mut R) -> Keypair {
+    loop {
+        if let Ok(key_pair) = Keypair::from_secret_bytes(rng.random()) {
+            return key_pair
+        }
+    }
 }
 
 /// Generates a set of [Keypair]s based on the desired count.
-pub fn generate_keys<R: Rng>(_rng: &mut R, count: usize) -> Vec<Keypair> {
-    (0..count).map(|_| Keypair::new(&mut rand::rng())).collect()
+pub fn generate_keys<R: RngExt>(_rng: &mut R, count: usize) -> Vec<Keypair> {
+    (0..count).map(|_| random_keypair(&mut rand::rng())).collect()
 }
 
 /// Generate a random block filled with signed transactions (generated using
@@ -197,7 +206,7 @@ pub fn generate_keys<R: Rng>(_rng: &mut R, count: usize) -> Vec<Keypair> {
 /// transactions in the block.
 ///
 /// The ommer headers are not assumed to be valid.
-pub fn random_block<R: Rng>(
+pub fn random_block<R: RngExt>(
     rng: &mut R,
     number: u64,
     block_params: BlockParams,
@@ -257,7 +266,7 @@ pub fn random_block<R: Rng>(
 /// in the result will be equal to `head`.
 ///
 /// See [`random_block`] for considerations when validating the generated blocks.
-pub fn random_block_range<R: Rng>(
+pub fn random_block_range<R: RngExt>(
     rng: &mut R,
     block_numbers: RangeInclusive<BlockNumber>,
     block_range_params: BlockRangeParams,
@@ -297,7 +306,7 @@ type AccountState = (Account, Vec<StorageEntry>);
 /// Returns a Vec of account and storage changes for each block,
 /// along with the final state of all accounts and storages.
 #[allow(clippy::clone_on_copy)]
-pub fn random_changeset_range<'a, R: Rng, IBlk, IAcc>(
+pub fn random_changeset_range<'a, R: RngExt, IBlk, IAcc>(
     rng: &mut R,
     blocks: IBlk,
     accounts: IAcc,
@@ -374,13 +383,13 @@ where
 /// Generate a random account change.
 ///
 /// Returns two addresses, a `balance_change`, and a Vec of new storage entries.
-pub fn random_account_change<R: Rng>(
+pub fn random_account_change<R: RngExt>(
     rng: &mut R,
     valid_addresses: &[Address],
     n_storage_changes: Range<u64>,
     key_range: Range<u64>,
 ) -> (Address, Address, U256, Vec<StorageEntry>) {
-    let mut addresses = valid_addresses.choose_multiple(rng, 2).copied();
+    let mut addresses = valid_addresses.sample(rng, 2).copied();
 
     let addr_from = addresses.next().unwrap_or_else(Address::random);
     let addr_to = addresses.next().unwrap_or_else(Address::random);
@@ -399,7 +408,7 @@ pub fn random_account_change<R: Rng>(
 }
 
 /// Generate a random storage change.
-pub fn random_storage_entry<R: Rng>(rng: &mut R, key_range: Range<u64>) -> StorageEntry {
+pub fn random_storage_entry<R: RngExt>(rng: &mut R, key_range: Range<u64>) -> StorageEntry {
     let key = B256::new({
         let n = key_range.sample_single(rng).unwrap();
         let mut m = [0u8; 32];
@@ -412,7 +421,7 @@ pub fn random_storage_entry<R: Rng>(rng: &mut R, key_range: Range<u64>) -> Stora
 }
 
 /// Generate random Externally Owned Account (EOA account without contract).
-pub fn random_eoa_account<R: Rng>(rng: &mut R) -> (Address, Account) {
+pub fn random_eoa_account<R: RngExt>(rng: &mut R) -> (Address, Account) {
     let nonce: u64 = rng.random();
     let balance = U256::from(rng.random::<u32>());
     let addr = Address::random();
@@ -421,7 +430,7 @@ pub fn random_eoa_account<R: Rng>(rng: &mut R) -> (Address, Account) {
 }
 
 /// Generate random Externally Owned Accounts
-pub fn random_eoa_accounts<R: Rng>(rng: &mut R, accounts_num: usize) -> Vec<(Address, Account)> {
+pub fn random_eoa_accounts<R: RngExt>(rng: &mut R, accounts_num: usize) -> Vec<(Address, Account)> {
     let mut accounts = Vec::with_capacity(accounts_num);
     for _ in 0..accounts_num {
         accounts.push(random_eoa_account(rng))
@@ -430,7 +439,7 @@ pub fn random_eoa_accounts<R: Rng>(rng: &mut R, accounts_num: usize) -> Vec<(Add
 }
 
 /// Generate random Contract Accounts
-pub fn random_contract_account_range<R: Rng>(
+pub fn random_contract_account_range<R: RngExt>(
     rng: &mut R,
     acc_range: &mut Range<u64>,
 ) -> Vec<(Address, Account)> {
@@ -444,7 +453,7 @@ pub fn random_contract_account_range<R: Rng>(
 }
 
 /// Generate random receipt for transaction
-pub fn random_receipt<R: Rng>(
+pub fn random_receipt<R: RngExt>(
     rng: &mut R,
     transaction: &TransactionSigned,
     logs_count: Option<u8>,
@@ -467,7 +476,11 @@ pub fn random_receipt<R: Rng>(
 }
 
 /// Generate random log
-pub fn random_log<R: Rng>(rng: &mut R, address: Option<Address>, topics_count: Option<u8>) -> Log {
+pub fn random_log<R: RngExt>(
+    rng: &mut R,
+    address: Option<Address>,
+    topics_count: Option<u8>,
+) -> Log {
     let data_byte_count = rng.random::<u8>() as usize;
     let topics_count = topics_count.unwrap_or_else(|| rng.random()) as usize;
     Log::new_unchecked(
@@ -502,7 +515,7 @@ mod tests {
         let signature_hash = tx.signature_hash();
 
         for _ in 0..100 {
-            let key_pair = Keypair::new(&mut rand::rng());
+            let key_pair = random_keypair(&mut rand::rng());
 
             let signature =
                 sign_message(B256::from_slice(&key_pair.to_secret_bytes()[..]), signature_hash)

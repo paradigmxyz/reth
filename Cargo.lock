@@ -3953,7 +3953,6 @@ dependencies = [
  "reth-provider",
  "reth-tasks",
  "reth-tracing",
- "secp256k1 0.33.1",
  "serde",
  "serde_json",
  "thiserror 2.0.21",
@@ -4218,7 +4217,6 @@ dependencies = [
  "reth-discv4",
  "reth-ethereum",
  "reth-tracing",
- "secp256k1 0.33.1",
  "serde_json",
  "tokio",
  "tokio-stream",
@@ -7012,7 +7010,6 @@ dependencies = [
  "arrayvec",
  "bitvec",
  "byte-slice-cast",
- "bytes",
  "const_format",
  "impl-trait-for-tuples",
  "parity-scale-codec-derive",
@@ -7723,6 +7720,7 @@ dependencies = [
  "chacha20",
  "getrandom 0.4.3",
  "rand_core 0.10.1",
+ "serde",
 ]
 
 [[package]]
@@ -8168,7 +8166,7 @@ dependencies = [
  "metrics",
  "parking_lot",
  "pin-project",
- "rand 0.9.5",
+ "rand 0.10.3",
  "reth-chainspec",
  "reth-ethereum-primitives",
  "reth-execution-types",
@@ -8321,7 +8319,7 @@ dependencies = [
  "alloy-primitives",
  "eyre",
  "libc",
- "rand 0.9.5",
+ "rand 0.10.3",
  "reth-fs-util",
  "reth-tracing",
  "secp256k1 0.33.1",
@@ -8336,7 +8334,7 @@ dependencies = [
 [[package]]
 name = "reth-codecs"
 version = "0.8.2"
-source = "git+https://github.com/paradigmxyz/reth-core?rev=275ce4cf5befeb9f1e8acd935ff2882d2d25fc61#275ce4cf5befeb9f1e8acd935ff2882d2d25fc61"
+source = "git+https://github.com/paradigmxyz/reth-core?rev=5a0f687949d8befda3b46c8d7581e9921ad071aa#5a0f687949d8befda3b46c8d7581e9921ad071aa"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -8346,7 +8344,6 @@ dependencies = [
  "arbitrary",
  "bytes",
  "modular-bitfield",
- "parity-scale-codec",
  "reth-codecs-derive",
  "reth-zstd-compressors",
  "serde",
@@ -8356,7 +8353,7 @@ dependencies = [
 [[package]]
 name = "reth-codecs-derive"
 version = "0.8.2"
-source = "git+https://github.com/paradigmxyz/reth-core?rev=275ce4cf5befeb9f1e8acd935ff2882d2d25fc61#275ce4cf5befeb9f1e8acd935ff2882d2d25fc61"
+source = "git+https://github.com/paradigmxyz/reth-core?rev=5a0f687949d8befda3b46c8d7581e9921ad071aa#5a0f687949d8befda3b46c8d7581e9921ad071aa"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -8401,7 +8398,7 @@ dependencies = [
  "alloy-consensus",
  "alloy-eips",
  "alloy-primitives",
- "rand 0.9.5",
+ "rand 0.10.3",
  "reth-chainspec",
  "reth-consensus",
  "reth-ethereum-primitives",
@@ -8481,7 +8478,7 @@ dependencies = [
  "modular-bitfield",
  "proptest",
  "proptest-arbitrary-interop",
- "rand 0.9.5",
+ "rand 0.10.3",
  "reth-codecs",
  "reth-db-models",
  "reth-ethereum-primitives",
@@ -8554,7 +8551,7 @@ dependencies = [
  "enr",
  "itertools 0.14.0",
  "parking_lot",
- "rand 0.9.5",
+ "rand 0.10.3",
  "reth-ethereum-forks",
  "reth-lru",
  "reth-net-banlist",
@@ -8583,7 +8580,7 @@ dependencies = [
  "libp2p-identity",
  "metrics",
  "multiaddr",
- "rand 0.9.5",
+ "rand 0.10.3",
  "reth-chainspec",
  "reth-ethereum-forks",
  "reth-metrics",
@@ -8607,7 +8604,7 @@ dependencies = [
  "enr",
  "hickory-resolver",
  "linked_hash_set",
- "rand 0.9.5",
+ "rand 0.10.3",
  "reth-chainspec",
  "reth-ethereum-forks",
  "reth-lru",
@@ -8638,7 +8635,7 @@ dependencies = [
  "itertools 0.14.0",
  "metrics",
  "pin-project",
- "rand 0.9.5",
+ "rand 0.10.3",
  "rayon",
  "reth-chainspec",
  "reth-config",
@@ -8749,7 +8746,7 @@ dependencies = [
  "futures",
  "hmac 0.12.1",
  "pin-project",
- "rand 0.9.5",
+ "rand 0.10.3",
  "reth-network-peers",
  "secp256k1 0.33.1",
  "sha2 0.10.9",
@@ -8833,7 +8830,7 @@ dependencies = [
  "metrics-util",
  "parking_lot",
  "proptest",
- "rand 0.9.5",
+ "rand 0.10.3",
  "rayon",
  "reth-chain-state",
  "reth-chainspec",
@@ -9004,7 +9001,7 @@ dependencies = [
  "pin-project",
  "proptest",
  "proptest-arbitrary-interop",
- "rand 0.9.5",
+ "rand 0.10.3",
  "reth-codecs",
  "reth-ecies",
  "reth-eth-wire-types",
@@ -9042,7 +9039,7 @@ dependencies = [
  "derive_more",
  "proptest",
  "proptest-arbitrary-interop",
- "rand 0.9.5",
+ "rand 0.10.3",
  "reth-chainspec",
  "reth-codecs-derive",
  "reth-ethereum-primitives",
@@ -9199,7 +9196,6 @@ dependencies = [
  "arbitrary",
  "proptest",
  "proptest-arbitrary-interop",
- "rand 0.9.5",
  "reth-codecs",
  "reth-primitives-traits",
  "reth-zstd-compressors",
@@ -9318,7 +9314,7 @@ dependencies = [
  "bincode",
  "derive_more",
  "evm2",
- "rand 0.9.5",
+ "rand 0.10.3",
  "reth-ethereum-primitives",
  "reth-primitives-traits",
  "reth-trie-common",
@@ -9340,7 +9336,7 @@ dependencies = [
  "itertools 0.14.0",
  "metrics",
  "parking_lot",
- "rand 0.9.5",
+ "rand 0.10.3",
  "reth-chain-state",
  "reth-chainspec",
  "reth-config",
@@ -9411,7 +9407,7 @@ dependencies = [
  "alloy-primitives",
  "arbitrary",
  "bincode",
- "rand 0.9.5",
+ "rand 0.10.3",
  "reth-chain-state",
  "reth-ethereum-primitives",
  "reth-execution-types",
@@ -9472,7 +9468,7 @@ dependencies = [
  "interprocess",
  "jsonrpsee",
  "pin-project",
- "rand 0.9.5",
+ "rand 0.10.3",
  "reth-tracing",
  "serde",
  "serde_json",
@@ -9574,7 +9570,7 @@ dependencies = [
  "metrics",
  "parking_lot",
  "pin-project",
- "rand 0.9.5",
+ "rand 0.10.3",
  "rayon",
  "reth-chainspec",
  "reth-consensus",
@@ -9677,7 +9673,7 @@ dependencies = [
  "alloy-primitives",
  "alloy-rlp",
  "enr",
- "rand 0.9.5",
+ "rand 0.10.3",
  "secp256k1 0.33.1",
  "serde_json",
  "serde_with",
@@ -9708,7 +9704,7 @@ dependencies = [
  "derive_more",
  "lz4_flex",
  "memmap2",
- "rand 0.9.5",
+ "rand 0.10.3",
  "reth-fs-util",
  "serde",
  "smallvec",
@@ -9830,7 +9826,7 @@ dependencies = [
  "humantime",
  "ipnet",
  "proptest",
- "rand 0.9.5",
+ "rand 0.10.3",
  "reth-chainspec",
  "reth-cli-util",
  "reth-config",
@@ -9896,7 +9892,7 @@ dependencies = [
  "http-body-util",
  "jsonrpsee",
  "jsonrpsee-core",
- "rand 0.9.5",
+ "rand 0.10.3",
  "reqwest",
  "reth-chainspec",
  "reth-consensus",
@@ -10124,7 +10120,7 @@ dependencies = [
 [[package]]
 name = "reth-primitives-traits"
 version = "0.8.2"
-source = "git+https://github.com/paradigmxyz/reth-core?rev=275ce4cf5befeb9f1e8acd935ff2882d2d25fc61#275ce4cf5befeb9f1e8acd935ff2882d2d25fc61"
+source = "git+https://github.com/paradigmxyz/reth-core?rev=5a0f687949d8befda3b46c8d7581e9921ad071aa#5a0f687949d8befda3b46c8d7581e9921ad071aa"
 dependencies = [
  "alloy-consensus",
  "alloy-eip7928",
@@ -10147,7 +10143,6 @@ dependencies = [
  "quanta 0.13.0",
  "rayon",
  "reth-codecs",
- "secp256k1 0.30.0",
  "serde",
  "thiserror 2.0.21",
 ]
@@ -10170,7 +10165,7 @@ dependencies = [
  "metrics",
  "notify",
  "parking_lot",
- "rand 0.9.5",
+ "rand 0.10.3",
  "rayon",
  "reth-chain-state",
  "reth-chainspec",
@@ -10290,7 +10285,7 @@ dependencies = [
  "jsonrpsee-types",
  "parking_lot",
  "pin-project",
- "rand 0.9.5",
+ "rand 0.10.3",
  "reth-chain-state",
  "reth-chainspec",
  "reth-consensus",
@@ -10562,7 +10557,7 @@ dependencies = [
  "jsonrpsee-core",
  "jsonrpsee-types",
  "metrics",
- "rand 0.9.5",
+ "rand 0.10.3",
  "reqwest",
  "reth-chain-state",
  "reth-chainspec",
@@ -10628,7 +10623,7 @@ dependencies = [
 [[package]]
 name = "reth-rpc-traits"
 version = "0.8.2"
-source = "git+https://github.com/paradigmxyz/reth-core?rev=275ce4cf5befeb9f1e8acd935ff2882d2d25fc61#275ce4cf5befeb9f1e8acd935ff2882d2d25fc61"
+source = "git+https://github.com/paradigmxyz/reth-core?rev=5a0f687949d8befda3b46c8d7581e9921ad071aa#5a0f687949d8befda3b46c8d7581e9921ad071aa"
 dependencies = [
  "alloy-consensus",
  "alloy-network",
@@ -10697,7 +10692,7 @@ dependencies = [
  "num-traits",
  "page_size",
  "paste",
- "rand 0.9.5",
+ "rand 0.10.3",
  "rayon",
  "reqwest",
  "reth-chainspec",
@@ -10786,7 +10781,7 @@ dependencies = [
  "modular-bitfield",
  "proptest",
  "proptest-arbitrary-interop",
- "rand 0.9.5",
+ "rand 0.10.3",
  "reth-codecs",
  "reth-primitives-traits",
  "reth-trie-common",
@@ -10963,7 +10958,7 @@ dependencies = [
  "alloy-genesis",
  "alloy-primitives",
  "alloy-rlp",
- "rand 0.9.5",
+ "rand 0.10.3",
  "reth-ethereum-primitives",
  "reth-primitives-traits",
  "secp256k1 0.33.1",
@@ -11041,7 +11036,7 @@ dependencies = [
  "pin-project",
  "proptest",
  "proptest-arbitrary-interop",
- "rand 0.9.5",
+ "rand 0.10.3",
  "reth-chain-state",
  "reth-chainspec",
  "reth-eth-wire-types",
@@ -11088,7 +11083,7 @@ dependencies = [
  "pretty_assertions",
  "proptest",
  "proptest-arbitrary-interop",
- "rand 0.9.5",
+ "rand 0.10.3",
  "reth-execution-errors",
  "reth-metrics",
  "reth-primitives-traits",
@@ -11170,7 +11165,7 @@ dependencies = [
  "crossbeam-channel",
  "crossbeam-utils",
  "metrics",
- "rand 0.9.5",
+ "rand 0.10.3",
  "reth-chainspec",
  "reth-db-common",
  "reth-ethereum-primitives",
@@ -11199,7 +11194,7 @@ dependencies = [
  "pretty_assertions",
  "proptest",
  "proptest-arbitrary-interop",
- "rand 0.9.5",
+ "rand 0.10.3",
  "rayon",
  "reth-execution-errors",
  "reth-metrics",
@@ -11215,7 +11210,7 @@ dependencies = [
 [[package]]
 name = "reth-zstd-compressors"
 version = "0.8.2"
-source = "git+https://github.com/paradigmxyz/reth-core?rev=275ce4cf5befeb9f1e8acd935ff2882d2d25fc61#275ce4cf5befeb9f1e8acd935ff2882d2d25fc61"
+source = "git+https://github.com/paradigmxyz/reth-core?rev=5a0f687949d8befda3b46c8d7581e9921ad071aa#5a0f687949d8befda3b46c8d7581e9921ad071aa"
 dependencies = [
  "zstd",
 ]

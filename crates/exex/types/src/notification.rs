@@ -196,7 +196,7 @@ pub(super) mod serde_bincode_compat {
     mod tests {
         use super::super::{serde_bincode_compat, ExExNotification};
         use arbitrary::Arbitrary;
-        use rand::Rng;
+        use rand::RngExt;
         use reth_execution_types::Chain;
         use reth_primitives_traits::RecoveredBlock;
         use serde::{Deserialize, Serialize};

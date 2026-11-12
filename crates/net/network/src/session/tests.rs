@@ -94,7 +94,8 @@ impl ConnectionHandler for ProtocolSpy {
 }
 
 fn new_peer() -> (SecretKey, PeerId) {
-    let (key, pk) = secp256k1::generate_keypair(&mut rand::rng());
+    let key = secp256k1::SecretKey::from_secret_bytes(rand::random()).unwrap();
+    let pk = key.public_key();
     (key, pk2id(&pk))
 }
 

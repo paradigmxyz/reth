@@ -847,6 +847,7 @@ mod tests {
     };
 
     use super::*;
+    use rand::RngExt;
     use std::sync::atomic::Ordering;
 
     fn tmp_store() -> (DiskFileBlobStore, tempfile::TempDir) {
@@ -859,7 +860,7 @@ mod tests {
         let mut rng = rand::rng();
         (0..num)
             .map(|_| {
-                let tx = TxHash::random_with(&mut rng);
+                let tx = TxHash::from(rng.random::<[u8; 32]>());
                 let blob = BlobTransactionSidecarVariant::Eip4844(BlobTransactionSidecar {
                     blobs: vec![],
                     commitments: vec![],

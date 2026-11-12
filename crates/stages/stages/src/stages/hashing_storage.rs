@@ -281,7 +281,7 @@ mod tests {
     };
     use alloy_primitives::{Address, U256};
     use assert_matches::assert_matches;
-    use rand::Rng;
+    use rand::RngExt;
     use reth_db_api::{
         cursor::{DbCursorRW, DbDupCursorRO},
         models::{BlockNumberAddress, StoredBlockBodyIndices},
