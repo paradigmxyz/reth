@@ -1397,6 +1397,7 @@ impl MockTransactionFactory {
             timestamp: Instant::now(),
             origin,
             authority_ids: None,
+            slot_account_ids: Vec::new(),
         }
     }
 

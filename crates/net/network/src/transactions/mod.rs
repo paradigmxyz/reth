@@ -2542,6 +2542,7 @@ mod tests {
             timestamp: Instant::now(),
             origin: TransactionOrigin::External,
             authority_ids: None,
+            slot_account_ids: Vec::new(),
         })
     }
 

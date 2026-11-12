@@ -1462,6 +1462,10 @@ pub(crate) struct AllTransactions<T: PoolTransaction> {
     sender_info: FxHashMap<SenderId, SenderInfo>,
     /// Tracks the number of transactions by sender that are currently in the pool.
     tx_counter: FxHashMap<SenderId, usize>,
+    /// Tracks the number of transactions in the pool that occupy a slot of an account other than
+    /// their sender, by that account. Empty unless transactions report
+    /// [`PoolTransaction::additional_slot_accounts`].
+    slot_counter: FxHashMap<SenderId, usize>,
     /// The current block number the pool keeps track of.
     last_seen_block_number: u64,
     /// The current block hash the pool keeps track of.
@@ -1533,6 +1537,32 @@ impl<T: PoolTransaction> AllTransactions<T> {
         let count = self.tx_counter.entry(sender).or_default();
         *count += 1;
         self.metrics.all_transactions_by_all_senders.increment(1.0);
+    }
+
+    /// Returns the number of pooled transactions that occupy a slot of the account, as their
+    /// sender or as one of their [`PoolTransaction::additional_slot_accounts`].
+    fn occupied_slots(&self, account: SenderId) -> usize {
+        self.tx_counter.get(&account).copied().unwrap_or_default() +
+            self.slot_counter.get(&account).copied().unwrap_or_default()
+    }
+
+    /// Counts the transaction against its additional slot accounts.
+    fn occupy_slot_accounts(&mut self, tx: &ValidPoolTransaction<T>) {
+        for account in &tx.slot_account_ids {
+            *self.slot_counter.entry(*account).or_default() += 1;
+        }
+    }
+
+    /// Reverts [`Self::occupy_slot_accounts`].
+    fn release_slot_accounts(&mut self, tx: &ValidPoolTransaction<T>) {
+        for account in &tx.slot_account_ids {
+            if let hash_map::Entry::Occupied(mut entry) = self.slot_counter.entry(*account) {
+                *entry.get_mut() -= 1;
+                if *entry.get() == 0 {
+                    entry.remove();
+                }
+            }
+        }
     }
 
     /// Decrements the transaction counter for the sender
@@ -1876,6 +1906,7 @@ impl<T: PoolTransaction> AllTransactions<T> {
         let tx = self.by_hash.remove(tx_hash)?;
         let internal = self.txs.remove(&tx.transaction_id)?;
         self.remove_auths(&internal);
+        self.release_slot_accounts(&internal.transaction);
         self.tx_type_counts.dec(internal.transaction.transaction.ty());
         // decrement the counter for the sender.
         self.tx_decr(tx.sender_id());
@@ -1892,6 +1923,7 @@ impl<T: PoolTransaction> AllTransactions<T> {
         let internal = self.txs.remove(tx_id)?;
         let tx = self.by_hash.remove(internal.transaction.hash())?;
         self.remove_auths(&internal);
+        self.release_slot_accounts(&internal.transaction);
         self.tx_type_counts.dec(internal.transaction.transaction.ty());
         // decrement the counter for the sender.
         self.tx_decr(tx.sender_id());
@@ -1945,6 +1977,7 @@ impl<T: PoolTransaction> AllTransactions<T> {
             self.by_hash.remove(internal.transaction.hash()).map(|tx| (tx, internal.subpool));
 
         self.remove_auths(&internal);
+        self.release_slot_accounts(&internal.transaction);
 
         result
     }
@@ -1992,16 +2025,30 @@ impl<T: PoolTransaction> AllTransactions<T> {
         on_chain_nonce: u64,
     ) -> Result<ValidPoolTransaction<T>, InsertErr<T>> {
         if !self.local_transactions_config.is_local(transaction.origin, transaction.sender_ref()) {
-            let current_txs =
-                self.tx_counter.get(&transaction.sender_id()).copied().unwrap_or_default();
+            let current_txs = self.occupied_slots(transaction.sender_id());
+            let replaced = self.txs.get(&transaction.transaction_id);
 
             // Reject transactions if sender's capacity is exceeded.
             // If transaction's nonce matches on-chain nonce always let it through.
             // Replacements of an existing transaction don't increase the sender's count.
             if current_txs >= self.max_account_slots &&
                 transaction.nonce() > on_chain_nonce &&
-                !self.txs.contains_key(&transaction.transaction_id)
+                replaced.is_none()
             {
+                return Err(InsertErr::ExceededSenderTransactionsCapacity {
+                    transaction: Arc::new(transaction),
+                })
+            }
+
+            // Reject transactions if the capacity of another account they occupy a slot of is
+            // exceeded. There is no exemption for the on-chain nonce here, otherwise one such
+            // account could back a transaction from every sender. A replacement doesn't increase
+            // the count of the accounts the replaced transaction already occupies.
+            let exceeds_slot_account = transaction.slot_account_ids.iter().any(|account| {
+                self.occupied_slots(*account) >= self.max_account_slots &&
+                    replaced.is_none_or(|tx| !tx.transaction.slot_account_ids.contains(account))
+            });
+            if exceeds_slot_account {
                 return Err(InsertErr::ExceededSenderTransactionsCapacity {
                     transaction: Arc::new(transaction),
                 })
@@ -2216,6 +2263,7 @@ impl<T: PoolTransaction> AllTransactions<T> {
                 self.by_hash.insert(new_hash, new_transaction);
 
                 self.remove_auths(&replaced);
+                self.release_slot_accounts(&replaced.transaction);
 
                 // also remove the hash
                 replaced_tx = Some((replaced.transaction, replaced.subpool));
@@ -2228,6 +2276,7 @@ impl<T: PoolTransaction> AllTransactions<T> {
                 self.auths.entry(*auth).or_default().insert(*tx_hash);
             }
         }
+        self.occupy_slot_accounts(&transaction);
 
         // Take the scratch buffer only after all fallible checks so rejected inserts retain it.
         let mut updates = std::mem::take(&mut self.update_buffer);
@@ -2348,6 +2397,7 @@ impl<T: PoolTransaction> Default for AllTransactions<T> {
             txs: Default::default(),
             sender_info: Default::default(),
             tx_counter: Default::default(),
+            slot_counter: Default::default(),
             last_seen_block_number: Default::default(),
             last_seen_block_hash: Default::default(),
             pending_fees: Default::default(),
@@ -2439,7 +2489,9 @@ pub(crate) enum InsertErr<T: PoolTransaction> {
     FeeCapBelowMinimumProtocolFeeCap { transaction: Arc<ValidPoolTransaction<T>>, fee_cap: u128 },
     /// Sender currently exceeds the configured limit for max account slots.
     ///
-    /// The sender can be considered a spammer at this point.
+    /// The sender can be considered a spammer at this point. Also returned when another account
+    /// the transaction occupies a slot of exceeded its capacity, see
+    /// [`PoolTransaction::additional_slot_accounts`].
     ExceededSenderTransactionsCapacity { transaction: Arc<ValidPoolTransaction<T>> },
     /// Transaction gas limit exceeds block's gas limit
     TxGasLimitMoreThanAvailableBlockGas {
@@ -3578,6 +3630,93 @@ mod tests {
         let err =
             pool.insert_tx(f.validated(tx.next()), on_chain_balance, on_chain_nonce).unwrap_err();
         assert!(matches!(err, InsertErr::ExceededSenderTransactionsCapacity { .. }));
+    }
+
+    #[test]
+    fn reject_tx_over_slot_account_capacity() {
+        let on_chain_balance = U256::from(1_000);
+        let on_chain_nonce = 0;
+        let mut f = MockTransactionFactory::default();
+        let mut pool = AllTransactions::default();
+        let backer = f.ids.sender_id_or_create(Address::random());
+
+        // every transaction has another sender, is at the on-chain nonce and occupies a slot of
+        // the same account
+        let backed = |f: &mut MockTransactionFactory| {
+            let tx = MockTransaction::eip1559().with_nonce(on_chain_nonce);
+            let mut tx = f.validated(tx);
+            tx.slot_account_ids = vec![backer];
+            tx
+        };
+
+        let mut hashes = Vec::new();
+        for _ in 0..pool.max_account_slots {
+            let tx = backed(&mut f);
+            hashes.push(*tx.hash());
+            pool.insert_tx(tx, on_chain_balance, on_chain_nonce).unwrap();
+        }
+        assert_eq!(pool.occupied_slots(backer), pool.max_account_slots);
+
+        // unlike for the sender, the on-chain nonce does not exempt the transaction
+        let err = pool.insert_tx(backed(&mut f), on_chain_balance, on_chain_nonce).unwrap_err();
+        assert!(matches!(err, InsertErr::ExceededSenderTransactionsCapacity { .. }));
+
+        // a transaction that doesn't occupy a slot of the account is unaffected
+        let unbacked = MockTransaction::eip1559().with_nonce(on_chain_nonce);
+        pool.insert_tx(f.validated(unbacked), on_chain_balance, on_chain_nonce).unwrap();
+
+        // the account's own transactions share its slots
+        let own = MockTransaction::eip1559().with_nonce(on_chain_nonce + 1);
+        let mut own = f.validated(own);
+        own.transaction_id.sender = backer;
+        let err = pool.insert_tx(own, on_chain_balance, on_chain_nonce).unwrap_err();
+        assert!(matches!(err, InsertErr::ExceededSenderTransactionsCapacity { .. }));
+
+        // removing a transaction frees the slot
+        pool.remove_transaction_by_hash(&hashes[0]).unwrap();
+        assert_eq!(pool.occupied_slots(backer), pool.max_account_slots - 1);
+        pool.insert_tx(backed(&mut f), on_chain_balance, on_chain_nonce).unwrap();
+
+        for hash in pool.by_hash.keys().copied().collect::<Vec<_>>() {
+            pool.remove_transaction_by_hash(&hash).unwrap();
+        }
+        assert!(pool.slot_counter.is_empty());
+    }
+
+    #[test]
+    fn replace_at_slot_account_capacity() {
+        let on_chain_balance = U256::from(1_000);
+        let on_chain_nonce = 0;
+        let mut f = MockTransactionFactory::default();
+        let mut pool = AllTransactions::default();
+        let backer = f.ids.sender_id_or_create(Address::random());
+
+        let mut tx = MockTransaction::eip1559().with_nonce(on_chain_nonce);
+        for _ in 0..pool.max_account_slots {
+            tx = MockTransaction::eip1559().with_nonce(on_chain_nonce);
+            let mut valid = f.validated(tx.clone());
+            valid.slot_account_ids = vec![backer];
+            pool.insert_tx(valid, on_chain_balance, on_chain_nonce).unwrap();
+        }
+        let unbacked = MockTransaction::eip1559().with_nonce(on_chain_nonce);
+        pool.insert_tx(f.validated(unbacked.clone()), on_chain_balance, on_chain_nonce).unwrap();
+
+        // a replacement that occupies the same account as the replaced transaction keeps its slot
+        let mut replacement = f.validated(tx.clone().rng_hash().inc_price_by(tx.get_gas_price()));
+        replacement.slot_account_ids = vec![backer];
+        let InsertOk { replaced_tx, .. } =
+            pool.insert_tx(replacement, on_chain_balance, on_chain_nonce).unwrap();
+        assert_eq!(replaced_tx.unwrap().0.hash(), tx.hash());
+        assert_eq!(pool.occupied_slots(backer), pool.max_account_slots);
+
+        // a replacement that newly occupies the account needs a free slot
+        let mut replacement =
+            f.validated(unbacked.clone().rng_hash().inc_price_by(unbacked.get_gas_price()));
+        replacement.slot_account_ids = vec![backer];
+        let err = pool.insert_tx(replacement, on_chain_balance, on_chain_nonce).unwrap_err();
+        assert!(matches!(err, InsertErr::ExceededSenderTransactionsCapacity { .. }));
+        assert!(pool.contains(unbacked.hash()));
+        assert_eq!(pool.occupied_slots(backer), pool.max_account_slots);
     }
 
     #[test]
