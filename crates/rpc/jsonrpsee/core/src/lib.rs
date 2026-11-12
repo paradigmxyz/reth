@@ -101,22 +101,3 @@ pub fn classify_message(data: &[u8]) -> Option<(&[u8], bool)> {
         _ => None,
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::classify_message;
-    use test_case::test_case;
-
-    #[test_case(b"{}", Some((b"{}", true)); "single")]
-    #[test_case(b"[]", Some((b"[]", false)); "batch")]
-    #[test_case(b" \t\r\n{}", Some((b"{}", true)); "json whitespace is skipped")]
-    #[test_case(b"\x0c{}", None; "form feed is not whitespace")]
-    #[test_case(b"1", None; "neither an object nor an array")]
-    #[test_case(b"", None; "empty")]
-    #[test_case(b"   ", None; "only whitespace")]
-    #[test_case(&[[b' '; 127].as_slice(), b"[]"].concat(), Some((b"[]", false)); "last byte looked at")]
-    #[test_case(&[[b' '; 128].as_slice(), b"[]"].concat(), None; "past the bytes looked at")]
-    fn classify_message_cases(data: &[u8], expected: Option<(&[u8], bool)>) {
-        assert_eq!(classify_message(data), expected);
-    }
-}

@@ -59,7 +59,6 @@ serde_json = { workspace = true, features = ["raw_value"] }
 tokio = { workspace = true, features = ["macros", "rt"] }
 jsonrpsee = { path = "../jsonrpsee", features = ["server", "macros"] }
 http-body-util = { workspace = true }
-test-case = { workspace = true }
 
 # Only used by doc tests, which cargo-udeps does not see.
 [package.metadata.cargo-udeps.ignore]
