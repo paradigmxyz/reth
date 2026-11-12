@@ -177,7 +177,7 @@ pub(crate) struct ChangesetCache {
     inner: RwLock<ChangesetCacheInner>,
     /// Reverts of the ranges untrusted peers chose most recently, kept apart from `inner`, which
     /// only evicts by block number. Keyed by the range and the hash of `Finish`, so a reorg never
-    /// hits an old entry.
+    /// hits an old entry; when `Finish` advances, the entry is extended and moved to the new key.
     bounded_ranges: Mutex<LruMap<ChangesetRangeKey, Arc<TrieUpdatesSorted>>>,
 }
 
@@ -422,6 +422,13 @@ impl ChangesetCache {
             return Ok(accumulated_reverts)
         }
 
+        if !write_reverts_to_cache &&
+            let Some(accumulated_reverts) =
+                self.extend_bounded_range(provider, range_key, &cached_reverts)?
+        {
+            return Ok(accumulated_reverts)
+        }
+
         warn!(
             target: "trie::changeset_cache",
             start_block,
@@ -481,6 +488,56 @@ impl ChangesetCache {
         }
 
         Ok(accumulated_reverts)
+    }
+
+    /// Extends the bounded range that starts like `range_key` but ended at an earlier `Finish`,
+    /// instead of rebuilding it from the database.
+    ///
+    /// `cached_reverts` holds the per-block reverts of the newest blocks of the range, newest
+    /// first. Returns `None` if no earlier range exists, its end block is no longer canonical, or
+    /// `cached_reverts` doesn't cover every block after it.
+    fn extend_bounded_range(
+        &self,
+        provider: &impl BlockNumReader,
+        range_key: ChangesetRangeKey,
+        cached_reverts: &[Arc<TrieUpdatesSorted>],
+    ) -> ProviderResult<Option<Arc<TrieUpdatesSorted>>> {
+        let prefix = self
+            .bounded_ranges
+            .lock()
+            .iter()
+            .filter(|(key, _)| {
+                key.start_block == range_key.start_block &&
+                    key.end_block < range_key.end_block &&
+                    range_key.end_block - key.end_block <= cached_reverts.len() as u64
+            })
+            .max_by_key(|(key, _)| key.end_block)
+            .map(|(key, reverts)| (*key, Arc::clone(reverts)));
+
+        let Some((prefix_key, prefix_reverts)) = prefix else { return Ok(None) };
+        if provider.block_hash(prefix_key.end_block)? != Some(prefix_key.end_block_hash) {
+            return Ok(None)
+        }
+
+        let num_blocks = (range_key.end_block - prefix_key.end_block) as usize;
+        let mut reverts = Vec::with_capacity(num_blocks + 1);
+        reverts.push(prefix_reverts);
+        reverts.extend(cached_reverts[..num_blocks].iter().rev().cloned());
+        // `merge_slice` gives precedence to earlier items, so the older range goes first.
+        let accumulated_reverts = Arc::new(TrieUpdatesSorted::merge_slice(&reverts));
+
+        debug!(
+            target: "trie::changeset_cache",
+            ?range_key,
+            num_blocks,
+            "Extended bounded trie reverts for block range"
+        );
+
+        // The shorter range is only reachable from snapshots taken before `Finish` moved.
+        let mut bounded_ranges = self.bounded_ranges.lock();
+        bounded_ranges.remove(&prefix_key);
+        bounded_ranges.insert(range_key, Arc::clone(&accumulated_reverts));
+        Ok(Some(accumulated_reverts))
     }
 }
 
@@ -1245,6 +1302,64 @@ mod tests {
         let rebuilt = bounded(2);
         assert!(!Arc::ptr_eq(&rebuilt, &ranges[1]));
         assert_eq!(rebuilt, ranges[1]);
+    }
+
+    #[test]
+    fn bounded_range_is_extended_when_finish_advances() {
+        let factory = create_test_provider_factory();
+        seed_headers(&factory, 3);
+        let provider = factory.provider().unwrap();
+        let overlay_manager = OverlayManager::<reth_ethereum_primitives::EthPrimitives>::default();
+
+        let (fresh_cache, finish) = cache_with_block_reverts(3);
+        let fresh = fresh_cache
+            .get_or_compute_range(&overlay_manager, &provider, 1..=3, finish, finish, true)
+            .unwrap();
+
+        // The range is built while `Finish` is block 2, whose reverts then leave the cache.
+        let (cache, _) = cache_with_block_reverts(3);
+        let old_finish = BlockNumHash::new(2, B256::with_last_byte(2));
+        cache
+            .get_or_compute_range(&overlay_manager, &provider, 1..=2, old_finish, old_finish, false)
+            .unwrap();
+        cache.evict(3);
+
+        let extended = cache
+            .get_or_compute_range(&overlay_manager, &provider, 1..=3, finish, finish, false)
+            .unwrap();
+        assert_eq!(extended, fresh);
+
+        let mut bounded_ranges = cache.bounded_ranges.lock();
+        assert_eq!(bounded_ranges.len(), 1);
+        let key = ChangesetRangeKey::new(1, 3, finish.hash);
+        assert!(Arc::ptr_eq(bounded_ranges.get(&key).unwrap(), &extended));
+    }
+
+    #[test]
+    fn bounded_range_from_another_fork_is_not_extended() {
+        let factory = create_test_provider_factory();
+        seed_headers(&factory, 3);
+        let provider = factory.provider_rw().unwrap();
+        provider.save_stage_checkpoint(StageId::Finish, StageCheckpoint::new(3)).unwrap();
+        let overlay_manager = OverlayManager::<reth_ethereum_primitives::EthPrimitives>::default();
+
+        // The cached range ends at a block 2 that a reorg replaced.
+        let (cache, finish) = cache_with_block_reverts(3);
+        cache.evict(3);
+        let reorged_key = ChangesetRangeKey::new(1, 2, B256::with_last_byte(0xff));
+        cache.bounded_ranges.lock().insert(
+            reorged_key,
+            Arc::new(TrieUpdatesSorted::new(
+                vec![(Nibbles::from_nibbles([0xf]), None)],
+                B256Map::default(),
+            )),
+        );
+
+        let rebuilt = cache
+            .get_or_compute_range(&overlay_manager, &*provider, 1..=3, finish, finish, false)
+            .unwrap();
+        assert!(rebuilt.is_empty());
+        assert!(cache.bounded_ranges.lock().peek(&reorged_key).is_some());
     }
 
     #[test]
