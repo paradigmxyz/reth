@@ -94,34 +94,13 @@ pub fn set_log_verbosity(level: usize) -> Result<(), String> {
         _ => LevelFilter::TRACE,
     };
 
-    guard.reload_all(|_| Ok(verbosity_filter(level_filter)))
+    guard.reload_all(|_| filter_with_defaults(&level_filter.to_string()))
 }
 
-/// Prepends the default directives to `pattern`, as startup does, so they still apply unless
-/// `pattern` names the same target.
-fn with_default_directives(pattern: &str) -> String {
-    DEFAULT_ENV_FILTER_DIRECTIVES
-        .iter()
-        .copied()
-        .chain(pattern.split(',').map(str::trim).filter(|directive| !directive.is_empty()))
-        .collect::<Vec<_>>()
-        .join(",")
-}
-
-/// The filter `set_log_verbosity` installs: `level` over the default directives. A builder's
-/// default directive applies only to an empty directive string, so the defaults are added after.
-fn verbosity_filter(level: LevelFilter) -> EnvFilter {
-    let filter = EnvFilter::builder().with_default_directive(level.into()).parse_lossy("");
-    DEFAULT_ENV_FILTER_DIRECTIVES
-        .iter()
-        .filter_map(|directive| directive.parse().ok())
-        .fold(filter, EnvFilter::add_directive)
-}
-
-/// The filter `set_log_vmodule` installs for a non-empty `pattern`: the default directives, then
-/// `pattern`.
-fn vmodule_filter(pattern: &str) -> Result<EnvFilter, String> {
-    EnvFilter::try_new(with_default_directives(pattern))
+/// Builds a filter from the default directives followed by `pattern`, as startup does, so the
+/// defaults still apply unless `pattern` names the same target.
+fn filter_with_defaults(pattern: &str) -> Result<EnvFilter, String> {
+    EnvFilter::try_new(format!("{},{pattern}", DEFAULT_ENV_FILTER_DIRECTIVES.join(",")))
         .map_err(|e| format!("Invalid filter pattern: {e}"))
 }
 
@@ -150,8 +129,8 @@ pub fn set_log_vmodule(pattern: &str) -> Result<(), String> {
         guard.reload_all(|initial| EnvFilter::try_new(initial).map_err(|e| e.to_string()))
     } else {
         // Validate the pattern once before reloading all handles
-        vmodule_filter(pattern)?;
-        guard.reload_all(|_| vmodule_filter(pattern))
+        filter_with_defaults(pattern)?;
+        guard.reload_all(|_| filter_with_defaults(pattern))
     }
 }
 
@@ -174,7 +153,7 @@ mod tests {
         }
     }
 
-    /// Emits a `discv5` debug event (off by default) and two events that a debug filter keeps.
+    /// Emits `discv5` debug and warn events, both off by default, and a `reload_test` debug event.
     fn emit() {
         tracing::debug!(target: "discv5::unit", "suppressed by default");
         tracing::warn!(target: "discv5::unit", "suppressed by default");
@@ -190,13 +169,15 @@ mod tests {
 
     #[test]
     fn a_reloaded_filter_keeps_the_default_directives() {
-        assert_eq!(seen_through(verbosity_filter(LevelFilter::DEBUG)), ["reload_test"]);
-        assert_eq!(seen_through(vmodule_filter("debug").unwrap()), ["reload_test"]);
         assert_eq!(
-            seen_through(vmodule_filter("debug,discv5=debug").unwrap()),
+            seen_through(filter_with_defaults(&LevelFilter::DEBUG.to_string()).unwrap()),
+            ["reload_test"]
+        );
+        assert_eq!(
+            seen_through(filter_with_defaults("debug,discv5=debug").unwrap()),
             ["discv5::unit", "discv5::unit", "reload_test"]
         );
-        assert!(vmodule_filter("reload_test=nonsense").is_err());
+        assert!(filter_with_defaults("reload_test=nonsense").is_err());
     }
 
     #[test]
