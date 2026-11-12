@@ -29,6 +29,7 @@ use reth_chainspec::{
     EthChainSpec, EthereumHardfork, SEPOLIA,
 };
 use reth_e2e_test_utils::{
+    node::Finality,
     receipt::PendingTransactionExt,
     test_chain_spec, test_chain_spec_builder,
     transaction::TransactionTestContext,
@@ -50,6 +51,7 @@ use reth_rpc_api::servers::AdminApiServer;
 use reth_rpc_server_types::RpcModuleSelection;
 use reth_tasks::Runtime;
 use reth_transaction_pool::test_utils::TransactionGenerator;
+use serde_json::{json, value::RawValue};
 use std::{
     net::{IpAddr, Ipv4Addr},
     sync::Arc,
@@ -1302,5 +1304,59 @@ async fn test_mine_signed() -> eyre::Result<()> {
     );
     assert_eq!(node.rpc_provider().get_block_number().await?, 2);
 
+    Ok(())
+}
+
+/// Recent blocks are answered from cached serialized responses. Those must equal what the handlers
+/// produce without the cache, `latest` must follow the head, and a reorg must not serve the block
+/// it replaced.
+#[tokio::test]
+async fn test_block_response_cache_matches_uncached_responses() -> eyre::Result<()> {
+    reth_tracing::init_test_tracing();
+    let (mut node, wallet) =
+        EthereumNode::test_setup_for(EthereumHardfork::Cancun).build_single().await?;
+    // Keep the blocks reorgable.
+    node.set_finality(Finality::Keep);
+    let client = node.rpc_client().unwrap();
+    let raw = async |method: &'static str, params: serde_json::Value| -> eyre::Result<String> {
+        Ok(client.request::<_, Box<RawValue>>(method, params).await?.get().to_owned())
+    };
+
+    let mut account = wallet.account(0);
+    let mut txs = Vec::new();
+    for value in 1..=3 {
+        txs.push(account.transfer(Address::with_last_byte(0x77), U256::from(value)).await);
+    }
+    let mined = node.mine(txs).await?;
+    let (number, hash) = (mined.block().number, mined.block().hash());
+
+    // Cached while the block is recent, whichever way it is asked for.
+    let full = raw("eth_getBlockByNumber", json!(["latest", true])).await?;
+    let hashes = raw("eth_getBlockByNumber", json!(["latest", false])).await?;
+    let receipts = raw("eth_getBlockReceipts", json!(["latest"])).await?;
+    assert_eq!(raw("eth_getBlockByNumber", json!(["latest", true])).await?, full);
+    assert_eq!(raw("eth_getBlockByHash", json!([hash, true])).await?, full);
+    assert_eq!(raw("eth_getBlockByNumber", json!([U256::from(number), false])).await?, hashes);
+    assert_eq!(raw("eth_getBlockReceipts", json!([hash])).await?, receipts);
+    assert!(full.contains(&format!("{hash}")) && receipts.len() > hashes.len());
+
+    // Well past the cached window, a request by number goes to the handlers themselves.
+    node.advance_blocks(10).await?;
+    assert_eq!(raw("eth_getBlockByNumber", json!([U256::from(number), true])).await?, full);
+    assert_eq!(raw("eth_getBlockByNumber", json!([U256::from(number), false])).await?, hashes);
+    assert_eq!(raw("eth_getBlockReceipts", json!([U256::from(number)])).await?, receipts);
+
+    // `latest` follows the head instead of answering with a block cached earlier.
+    let head = node.block_hash(number + 10);
+    let latest = raw("eth_getBlockByNumber", json!(["latest", false])).await?;
+    assert!(latest.contains(&format!("{head}")), "latest is not the head: {latest}");
+
+    // Replace the head with a fork block at the same height: it must be served, not the old head.
+    let fork = node.advance_fork(node.block_hash(number + 9), 1).await?.remove(0).block().hash();
+    assert_ne!(fork, head);
+    for request in [json!(["latest", false]), json!([U256::from(number + 10), false])] {
+        let block = raw("eth_getBlockByNumber", request).await?;
+        assert!(block.contains(&format!("{fork}")), "not the fork block: {block}");
+    }
     Ok(())
 }
