@@ -1666,11 +1666,12 @@ impl Discv4Service {
 
         let enforce_eip868 = self.config.enable_eip868 && self.config.enforce_eip868_neighbours;
 
-        // get the MAX_NODES_PER_BUCKET closest nodes to the target, optionally filtering out
-        // entries that have no EIP-868 fork ID
+        // get the MAX_NODES_PER_BUCKET closest nodes to the target that completed the endpoint
+        // proof, optionally filtering out entries that have no EIP-868 fork ID
         let closest_nodes = self
             .kbuckets
             .closest_values(&key)
+            .filter(|entry| entry.value.has_endpoint_proof)
             .filter(|entry| !enforce_eip868 || entry.value.fork_id.is_some())
             .take(MAX_NODES_PER_BUCKET)
             .collect::<Vec<_>>();
@@ -3054,6 +3055,36 @@ mod tests {
                 assert!(service.queued_pings.is_empty());
             }
         }
+    }
+
+    #[tokio::test]
+    async fn test_neighbours_exclude_unproven_nodes() {
+        let (_, mut service) = create_discv4().await;
+        let (egress, mut packets) = mpsc::channel(16);
+        service.egress = egress;
+        let proven = NodeRecord::new("127.0.0.1:30303".parse().unwrap(), PeerId::random());
+        insert_proven_node(&mut service, proven);
+
+        // An incoming ping inserts its sender before the endpoint proof completes.
+        let unproven = NodeRecord::new("127.0.0.2:30303".parse().unwrap(), PeerId::random());
+        let ping = Ping {
+            from: unproven.into(),
+            to: service.local_node_record.into(),
+            expire: service.ping_expiration(),
+            enr_sq: None,
+        };
+        service.on_ping(ping, unproven.udp_addr(), unproven.id, B256::random());
+        assert_eq!(service.on_entry(unproven.id, |entry| entry.has_endpoint_proof), Some(false));
+        while packets.try_recv().is_ok() {}
+
+        let find_node = FindNode { id: unproven.id, expire: service.ping_expiration() };
+        service.on_find_node(find_node, proven.udp_addr(), proven.id);
+        let (packet, to) = packets.try_recv().unwrap();
+        assert_eq!(to, proven.udp_addr());
+        let Message::Neighbours(neighbours) = Message::decode(&packet).unwrap().msg else {
+            panic!("expected a neighbours packet")
+        };
+        assert_eq!(neighbours.nodes, vec![proven]);
     }
 
     #[tokio::test]
