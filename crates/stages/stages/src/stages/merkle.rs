@@ -316,7 +316,7 @@ where
             debug!(target: "sync::stages::merkle::exec", current = ?current_block_number, target = ?to_block, "Updating trie in chunks");
             let mut final_root = None;
             for start_block in range.step_by(incremental_threshold as usize) {
-                let chunk_to = std::cmp::min(start_block + incremental_threshold - 1, to_block);
+                let chunk_to = start_block.saturating_add(incremental_threshold - 1).min(to_block);
                 let chunk_range = start_block..=chunk_to;
                 debug!(
                     target: "sync::stages::merkle::exec",
@@ -572,9 +572,14 @@ mod tests {
 
     #[tokio::test]
     async fn execute_chunked_merkle() {
+        for incremental_threshold in [0, 10, u64::MAX] {
+            execute_chunked_merkle_with(incremental_threshold).await;
+        }
+    }
+
+    async fn execute_chunked_merkle_with(incremental_threshold: u64) {
         let (previous_stage, stage_progress) = (200, 100);
         let clean_threshold = 100;
-        let incremental_threshold = 10;
 
         // Set up the runner
         let mut runner =
