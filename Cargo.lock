@@ -5717,6 +5717,7 @@ dependencies = [
  "serde",
  "serde_json",
  "soketto",
+ "test-case",
  "thiserror 2.0.21",
  "tokio",
  "tokio-stream",
