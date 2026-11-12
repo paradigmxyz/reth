@@ -693,7 +693,8 @@ where
             let response = match server.receive_request(&request) {
                 Ok(response) => {
                     let (tx, rx) = mpsc::channel(this.server_cfg.message_buffer_capacity as usize);
-                    let sink = MethodSink::new(tx);
+                    let sink =
+                        MethodSink::new_with_limit(tx, this.server_cfg.max_response_body_size);
 
                     // On each method call the `pending_calls` is cloned
                     // then when all pending_calls are dropped
