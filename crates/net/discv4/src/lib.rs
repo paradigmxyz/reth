@@ -3043,6 +3043,36 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_neighbours_exclude_unproven_nodes() {
+        let (_, mut service) = create_discv4().await;
+        let (egress, mut packets) = mpsc::channel(16);
+        service.egress = egress;
+        let proven = NodeRecord::new("127.0.0.1:30303".parse().unwrap(), PeerId::random());
+        insert_proven_node(&mut service, proven);
+
+        // An incoming ping inserts its sender before the endpoint proof completes.
+        let unproven = NodeRecord::new("127.0.0.2:30303".parse().unwrap(), PeerId::random());
+        let ping = Ping {
+            from: unproven.into(),
+            to: service.local_node_record.into(),
+            expire: service.ping_expiration(),
+            enr_sq: None,
+        };
+        service.on_ping(ping, unproven.udp_addr(), unproven.id, B256::random());
+        assert_eq!(service.on_entry(unproven.id, |entry| entry.has_endpoint_proof), Some(false));
+        while packets.try_recv().is_ok() {}
+
+        let find_node = FindNode { id: unproven.id, expire: service.ping_expiration() };
+        service.on_find_node(find_node, proven.udp_addr(), proven.id);
+        let (packet, to) = packets.try_recv().unwrap();
+        assert_eq!(to, proven.udp_addr());
+        let Message::Neighbours(neighbours) = Message::decode(&packet).unwrap().msg else {
+            panic!("expected a neighbours packet")
+        };
+        assert_eq!(neighbours.nodes, vec![proven]);
+    }
+
+    #[tokio::test]
     async fn test_ping_advertises_tcp_port_per_family() {
         let (_, mut service) = create_discv4().await;
         let (egress, mut packets) = mpsc::channel(16);
