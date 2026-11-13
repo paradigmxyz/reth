@@ -166,6 +166,8 @@ where
             // Determine inclusion and validity
             let inclusion = &current_bundle.inclusion;
             let validity = &current_bundle.validity;
+            let refund_payouts =
+                validity.as_ref().and_then(|v| v.refund_config.as_ref()).map_or(1, Vec::len);
 
             // Validate inclusion parameters
             let block_number = inclusion.block_number();
@@ -237,10 +239,6 @@ where
                                     (refund.body_idx as usize == idx).then_some(refund.percent)
                                 })
                             });
-                        let refund_payouts = validity
-                            .as_ref()
-                            .and_then(|v| v.refund_config.as_ref())
-                            .map_or(1, Vec::len);
 
                         // Create FlattenedBundleItem with current inclusion and refund settings
                         let flattened_item = FlattenedBundleItem {
