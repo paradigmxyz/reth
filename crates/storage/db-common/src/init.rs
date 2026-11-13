@@ -941,6 +941,13 @@ fn snapshot_state_tables_empty<TX: reth_db_api::transaction::DbTx>(
         tx.entries::<tables::Bytecodes>()? == 0)
 }
 
+/// Deletes the changeset static files of `segment` when the state import at `block` does not
+/// continue them: they end at or before `block`, and the caller has checked that the state tables
+/// are empty. The import then starts a new file at `block`'s range boundary, padded with empty
+/// changesets up to `block`.
+///
+/// A segment that ends exactly at `block` is the empty changeset `init_genesis` writes when the
+/// import is at a non-zero genesis.
 fn reset_pre_snapshot_changeset_segment<N: NodePrimitives>(
     static_file_provider: &reth_provider::providers::StaticFileProvider<N>,
     segment: StaticFileSegment,
@@ -954,7 +961,7 @@ fn reset_pre_snapshot_changeset_segment<N: NodePrimitives>(
         return Ok(())
     };
 
-    if highest_block >= block {
+    if highest_block > block {
         return Ok(())
     }
 
@@ -1920,6 +1927,39 @@ mod tests {
     fn init_genesis_v2_unaligned_changeset_writers_resume_after_reopen() {
         let factory = init_unaligned_v2_genesis();
         let static_files = reopen_static_files(&factory);
+        for segment in [StaticFileSegment::AccountChangeSets, StaticFileSegment::StorageChangeSets]
+        {
+            let writer = static_files.latest_writer(segment).unwrap();
+            assert_eq!(writer.next_block_number(), UNALIGNED_GENESIS + 1, "{segment}");
+        }
+    }
+
+    #[test]
+    fn dump_state_v2_at_unaligned_genesis_replaces_empty_genesis_changeset() {
+        let storage_key = B256::with_last_byte(3);
+        let input = br#"{"address":"0x0000000000000000000000000000000000000002","balance":"0x5","storage":{"0x0000000000000000000000000000000000000000000000000000000000000003":"0x0000000000000000000000000000000000000000000000000000000000000004"}}
+"#;
+        let factory = init_unaligned_v2_genesis();
+        let collector = parse_accounts(&input[..], EtlConfig::new(None, 128)).unwrap();
+        dump_state(collector, &factory, UNALIGNED_GENESIS).unwrap();
+
+        let static_files = factory.static_file_provider();
+        static_files.initialize_index().unwrap();
+        let provider = factory.provider().unwrap();
+        let address = Address::with_last_byte(2);
+        assert_eq!(
+            reth_provider::ChangeSetReader::account_block_changeset(&provider, UNALIGNED_GENESIS)
+                .unwrap(),
+            vec![AccountBeforeTx { address, info: None }]
+        );
+        assert_eq!(
+            reth_provider::StorageChangeSetReader::storage_changeset(&provider, UNALIGNED_GENESIS)
+                .unwrap(),
+            vec![(
+                BlockNumberAddress((UNALIGNED_GENESIS, address)),
+                StorageEntry { key: storage_key, value: U256::ZERO }
+            )]
+        );
         for segment in [StaticFileSegment::AccountChangeSets, StaticFileSegment::StorageChangeSets]
         {
             let writer = static_files.latest_writer(segment).unwrap();
