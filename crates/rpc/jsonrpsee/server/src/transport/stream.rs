@@ -244,10 +244,10 @@ where
         incoming
     };
 
-    // The send loop is polled first. Both loops share the task's budget, and a client that keeps
-    // sending lets the receive loop use all of it, so the responses would otherwise only be
-    // written once the receive loop has to wait for a call permit.
-    let ((), _incoming) = future::join(send, receive).await;
+    // Both loops share the task's budget, so neither may always go first: a client that keeps
+    // sending would use it all in the receive loop, and a subscription that keeps the queue full
+    // would use it all in the send loop. `tokio::join!` alternates which one it polls first.
+    let ((), _incoming) = tokio::join!(send, receive);
 }
 
 /// Waits for new messages via the `rx` channel and writes them to the connection, and pings the
@@ -369,6 +369,8 @@ mod tests {
     struct TestWriter {
         written: Arc<AtomicUsize>,
         fail: bool,
+        /// Whether a write uses up the task's budget, as a write to a socket does.
+        cooperative: bool,
     }
 
     impl MessageWriter for TestWriter {
@@ -377,6 +379,9 @@ mod tests {
         async fn write(&mut self, _: String) -> Result<(), Self::Error> {
             if self.fail {
                 return Err(io::ErrorKind::BrokenPipe.into());
+            }
+            if self.cooperative {
+                tokio::task::consume_budget().await;
             }
             self.written.fetch_add(1, Ordering::Relaxed);
             Ok(())
@@ -424,7 +429,7 @@ mod tests {
         // of the time by the wait for a call permit, which observes the stop signal too.
         for _ in 0..32 {
             let written = Arc::new(AtomicUsize::new(0));
-            let outgoing = TestWriter { written: written.clone(), fail: false };
+            let outgoing = TestWriter { written: written.clone(), fail: false, cooperative: false };
 
             let served = serve_stream(flooded(outgoing, future::ready(())));
             tokio::time::timeout(Duration::from_secs(5), served).await.unwrap();
@@ -438,9 +443,39 @@ mod tests {
     async fn send_loop_runs_while_input_stays_ready() {
         // The first response fails to be written, which ends the send loop and with it the
         // connection. That only happens if the send loop gets to run.
-        let outgoing = TestWriter { written: Arc::default(), fail: true };
+        let outgoing = TestWriter { written: Arc::default(), fail: true, cooperative: false };
 
         let served = serve_stream(flooded(outgoing, future::pending()));
         tokio::time::timeout(Duration::from_secs(5), served).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn receive_loop_runs_while_output_stays_ready() {
+        // Counts the messages read from the client.
+        let read = Arc::new(AtomicUsize::new(0));
+        let counter = read.clone();
+        let mut conn = flooded(
+            TestWriter { written: Arc::default(), fail: false, cooperative: true },
+            future::pending(),
+        );
+        conn.incoming = Box::pin(conn.incoming.inspect(move |_| {
+            counter.fetch_add(1, Ordering::Relaxed);
+        }));
+
+        // A subscription that refills the queue whenever the connection task gives way, so the
+        // send loop always has another message to write.
+        let (tx, rx) = mpsc::channel(1024);
+        conn.sink = MethodSink::new(tx.clone());
+        conn.rx = rx;
+        // The queue is full from the start, so that the send loop has work before the first read.
+        while tx.try_send(String::new()).is_ok() {}
+        let producer = tokio::spawn(async move { while tx.send(String::new()).await.is_ok() {} });
+
+        // The connection never ends by itself.
+        let served = tokio::time::timeout(Duration::from_millis(200), serve_stream(conn)).await;
+        assert!(served.is_err());
+        producer.abort();
+
+        assert!(read.load(Ordering::Relaxed) > 0);
     }
 }
