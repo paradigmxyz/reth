@@ -20,7 +20,7 @@ configuration; startup verifies the persisted checkpoint.
 | `PBT_ACTIVATION_TIMESTAMP` | Fork timestamp; defaults to `0`. |
 
 The example retains MPT maintenance by default. For migration, resource budgets,
-parallel hashing, or explicit retirement, use the PBT-enabled `reth` binary and its
+parallel hashing, or explicit retirement, use the `reth` binary and its
 `--pbt.*` arguments documented in [PBT node integration](../../crates/ethereum/pbt/README.md).
 Library integrations pass those settings explicitly through `PbtConfig`.
 

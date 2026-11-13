@@ -11,7 +11,11 @@ use reth_ethereum::{
     chainspec::{ChainSpec, EthereumHardforks},
     cli::chainspec::EthereumChainSpecParser,
 };
-use std::{num::NonZeroUsize, path::PathBuf, sync::Arc};
+use std::{
+    num::NonZeroUsize,
+    path::{Path, PathBuf},
+    sync::Arc,
+};
 
 /// PBT launch options, migration inputs, and resource limits for a node command.
 #[derive(Debug, Default, Args)]
@@ -86,6 +90,16 @@ impl PbtArgs {
         Ok(activation)
     }
 
+    /// Rejects a PBT-pinned data directory unless `--pbt` is enabled.
+    /// Call after validating the chain's activation timestamp and before opening the node.
+    pub fn validate_directory(&self, directory: &Path) -> eyre::Result<()> {
+        eyre::ensure!(
+            self.pbt || !directory.join("pbt/chain-config").try_exists()?,
+            "this data directory requires --pbt"
+        );
+        Ok(())
+    }
+
     /// Returns whether dense PBT update batches should use parallel hashing.
     pub const fn parallel(&self) -> bool {
         self.parallel
@@ -147,6 +161,19 @@ mod tests {
     use super::*;
     use clap::Parser;
     use reth_ethereum::cli::Cli;
+
+    #[test]
+    fn pinned_pbt_data_requires_the_runtime_flag() {
+        let directory = tempfile::tempdir().unwrap();
+        PbtArgs::default().validate_directory(directory.path()).unwrap();
+        reth_fs_util::create_dir_all(directory.path().join("pbt")).unwrap();
+        reth_fs_util::write(directory.path().join("pbt/chain-config"), b"pinned").unwrap();
+        assert_eq!(
+            PbtArgs::default().validate_directory(directory.path()).unwrap_err().to_string(),
+            "this data directory requires --pbt"
+        );
+        PbtArgs { pbt: true, ..Default::default() }.validate_directory(directory.path()).unwrap();
+    }
 
     #[test]
     fn resource_limits_and_retirement_are_explicit() {

@@ -216,7 +216,5 @@ use clap as _;
 use eyre as _;
 use reth_cli as _;
 use reth_cli_util as _;
-use tracing as _;
-
-#[cfg(feature = "pbt")]
 use reth_node_pbt as _;
+use tracing as _;

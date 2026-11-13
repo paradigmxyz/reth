@@ -1,7 +1,7 @@
 # PBT node integration
 
-Build the optional backend with `cargo build --release --bin reth --features pbt`.
-Default builds do not link the PBT library or enable its engine/storage integration.
+Build with `cargo build --release --bin reth`. PBT support is included in the
+regular binary; `--pbt` enables it for a chain with `config.binaryTrieTime`.
 
 Library users can enable `reth-node-pbt/cli` to reuse
 `cli::{PbtArgs, PbtChainSpecParser}`. The executable only parses these options and
@@ -84,7 +84,7 @@ chunk (1024 by default), and `--pbt.catchup-max-bal-bytes` bounds each BAL chunk
 (64 MiB by default). A full chunk ends replay preparation at its last fitting
 block; only a single BAL larger than the configured budget is rejected.
 
-Run `reth node --help` in a PBT-enabled build for all settings and their compatible
+Run `reth node --help` for all settings and their compatible
 `PBT_*` environment bindings. Library callers pass `PbtConfig` to
 `PbtNode::new_with_config`; library code does not read process environment.
 Checkpoint pruning is automatic and preserves genesis and the retirement checkpoint.
@@ -94,5 +94,5 @@ Pre-fork shadow checks authenticate onboarding endpoints and the activation pare
 instead of rebuilding the complete MPT for every warm parent read.
 
 ```sh
-docker build --build-arg FEATURES=pbt -t reth-pbt:local .
+docker build -t reth-pbt:local .
 ```
