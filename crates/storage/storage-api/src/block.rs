@@ -48,6 +48,10 @@ pub type ProviderBlock<P> = <P as BlockReader>::Block;
 ///
 /// If not requested otherwise, implementers of this trait should prioritize fetching blocks from
 /// the database.
+///
+/// Lookups by hash may also return non-canonical blocks the engine tree still holds, such as side
+/// chain or reorged-out blocks. Use [`Self::find_block_by_hash`] with [`BlockSource::Canonical`]
+/// when only canonical blocks are wanted.
 pub trait BlockReader:
     HeaderProvider + BlockBodyIndicesProvider + TransactionsProvider + ReceiptProvider
 {
@@ -363,7 +367,10 @@ pub trait BlockReaderIdExt: BlockReader + ReceiptProviderIdExt {
         transaction_kind: TransactionVariant,
     ) -> ProviderResult<Option<RecoveredBlock<Self::Block>>> {
         match id {
-            BlockId::Hash(hash) => self.recovered_block(hash.block_hash.into(), transaction_kind),
+            BlockId::Hash(_) => self.block_hash_for_id(id)?.map_or_else(
+                || Ok(None),
+                |hash| self.recovered_block(hash.into(), transaction_kind),
+            ),
             BlockId::Number(num) => self
                 .convert_block_number(num)?
                 .map_or_else(|| Ok(None), |num| self.recovered_block(num.into(), transaction_kind)),
