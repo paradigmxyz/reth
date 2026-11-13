@@ -17,6 +17,7 @@ use reth_storage_api::{
     BlockHashReader, BlockIdReader, BlockNumReader, BlockReader, BlockReaderIdExt, HeaderProvider,
     ProviderHeader, ReceiptProvider,
 };
+use reth_tasks::cancel::is_cancelled;
 use tracing::debug;
 
 /// Fee related functions for the [`EthApiServer`](crate::EthApiServer) trait in the
@@ -220,6 +221,11 @@ pub trait EthFees:
                         let mut chunk_start = start_block;
                         let mut previous_chunk_hash = None;
                         while chunk_start <= end_block {
+                            // Stop reading once the request is dropped, instead of holding a
+                            // blocking thread and permit for the rest of the range.
+                            if is_cancelled() {
+                                return Err(EthApiError::InternalEthError.into())
+                            }
                             let chunk_end = chunk_start
                                 .saturating_add(FEE_HISTORY_REWARD_CHUNK_SIZE - 1)
                                 .min(end_block);
