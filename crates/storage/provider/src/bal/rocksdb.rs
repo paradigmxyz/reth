@@ -8,7 +8,7 @@ use reth_db_api::{
     table::{Decode, Decompress},
     tables, DatabaseError,
 };
-use reth_prune_types::{PruneMode, PruneSegment};
+use reth_prune_types::PruneMode;
 use reth_storage_api::{BalStore, GetBlockAccessListLimit, RawBal};
 use reth_storage_errors::provider::{ProviderError, ProviderResult};
 use std::{
@@ -58,12 +58,17 @@ impl RocksDBBalStore {
     /// Caps the persisted BAL retention at the block bodies prune distance, if it is shorter.
     ///
     /// A node that prunes bodies earlier already keeps less history than EIP-7928 requires, so its
-    /// BALs need not outlive the bodies.
-    pub fn with_bodies_prune_mode(mut self, mode: Option<PruneMode>) -> Self {
+    /// BALs need not outlive the bodies. [`PruneMode::Full`] keeps `minimum_pruning_distance`
+    /// blocks, which is never less than the pruner keeps for bodies.
+    pub fn with_bodies_prune_mode(
+        mut self,
+        mode: Option<PruneMode>,
+        minimum_pruning_distance: u64,
+    ) -> Self {
         let distance = match mode {
-            Some(PruneMode::Full) => PruneSegment::Bodies.min_blocks(),
+            Some(PruneMode::Full) => minimum_pruning_distance,
             Some(PruneMode::Distance(distance)) => distance,
-            // `Before` names a fixed block; presets only use the merge block, which predates BALs.
+            // `Before` is a fixed block, not a distance; BALs below it expire with the EIP window.
             Some(PruneMode::Before(_)) | None => return self,
         };
         self.retention_distance = self.retention_distance.min(distance);
@@ -515,7 +520,7 @@ mod tests {
     #[test]
     fn prune_caps_retention_at_bodies_distance() {
         let (_dir, store) = test_store();
-        let store = store.with_bodies_prune_mode(Some(PruneMode::Distance(10)));
+        let store = store.with_bodies_prune_mode(Some(PruneMode::Distance(10)), 100);
         let old = NumHash::new(1, B256::with_last_byte(1));
         let retained = NumHash::new(2, B256::with_last_byte(2));
         let retained_bal = Bytes::from_static(&[0xc1, 0x02]);
@@ -529,11 +534,11 @@ mod tests {
         assert_eq!(disk_bal(&store, retained), Some(retained_bal));
 
         let (_dir, store) = test_store();
-        let store = store.with_bodies_prune_mode(Some(PruneMode::Full));
-        assert_eq!(store.retention_distance, PruneSegment::Bodies.min_blocks());
+        let store = store.with_bodies_prune_mode(Some(PruneMode::Full), 100);
+        assert_eq!(store.retention_distance, 100);
 
         let (_dir, store) = test_store();
-        let store = store.with_bodies_prune_mode(Some(PruneMode::Distance(u64::MAX)));
+        let store = store.with_bodies_prune_mode(Some(PruneMode::Distance(u64::MAX)), 100);
         assert_eq!(store.retention_distance, BAL_RETENTION_PERIOD_SLOTS);
     }
 

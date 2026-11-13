@@ -553,7 +553,10 @@ where
                 RocksDBBalStore::with_buffer_retention_distance(rocksdb_provider.clone(), distance)
             })
             .unwrap_or_else(|| RocksDBBalStore::new(rocksdb_provider.clone()))
-            .with_bodies_prune_mode(prune_config.segments.bodies_history);
+            .with_bodies_prune_mode(
+                prune_config.segments.bodies_history,
+                prune_config.minimum_pruning_distance,
+            );
         let bal_store = BalStoreHandle::new(bal_store);
         let factory = ProviderFactory::new(
             self.right().clone(),
