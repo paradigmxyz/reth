@@ -239,6 +239,24 @@ impl<N: ProviderNodeTypes> BalProvider for BlockchainProvider<N> {
     fn bal_store(&self) -> &BalStoreHandle {
         &self.bal_store
     }
+
+    fn get_bal_by_hash(&self, block_hash: BlockHash) -> ProviderResult<Option<Bytes>> {
+        Ok(self.get_bals_by_hashes(&[block_hash])?.pop().flatten())
+    }
+
+    /// Falls back to the blocks the engine tree holds, because the store only buffers side chain
+    /// BALs briefly and never persists them.
+    fn get_bals_by_hashes(&self, block_hashes: &[BlockHash]) -> ProviderResult<Vec<Option<Bytes>>> {
+        let mut bals = self.bal_store.get_by_hashes(block_hashes)?;
+        for (bal, hash) in bals.iter_mut().zip(block_hashes).filter(|(bal, _)| bal.is_none()) {
+            *bal = self
+                .database
+                .overlay_manager()
+                .block_by_hash(hash)
+                .and_then(|block| block.bal().map(|bal| bal.as_raw_bal().as_raw().clone()));
+        }
+        Ok(bals)
+    }
 }
 
 /// State range view backed by one resolved historical overlay.
@@ -1125,8 +1143,8 @@ mod tests {
         BlockWriter, CanonChainTracker, ProviderFactory, SaveBlocksInput,
     };
     use alloy_consensus::constants::EMPTY_ROOT_HASH;
-    use alloy_eips::{BlockHashOrNumber, BlockNumHash, BlockNumberOrTag};
-    use alloy_primitives::{keccak256, Address, BlockNumber, TxNumber, B256, U256};
+    use alloy_eips::{BlockHashOrNumber, BlockId, BlockNumHash, BlockNumberOrTag, RpcBlockHash};
+    use alloy_primitives::{keccak256, Address, BlockNumber, Bytes, TxNumber, B256, U256};
     use evm2::evm::AccountInfo;
     use itertools::Itertools;
     use rand::Rng;
@@ -1139,20 +1157,20 @@ mod tests {
     use reth_errors::ProviderError;
     use reth_ethereum_primitives::{Block, Receipt};
     use reth_execution_types::{
-        BlockExecutionOutput, BlockExecutionResult, Chain, ExecutionOutcome,
+        BlockExecutionOutput, BlockExecutionResult, Chain, DecodedEvmBal, ExecutionOutcome,
     };
     use reth_primitives_traits::{
         Account, Block as _, RecoveredBlock, SealedBlock, SignerRecoverable, StorageEntry,
     };
     use reth_stages_types::{StageCheckpoint, StageId};
     use reth_storage_api::{
-        BlockBodyIndicesProvider, BlockHashReader, BlockIdReader, BlockNumReader, BlockReader,
-        BlockReaderIdExt, BlockSource, ChangeSetReader, DBProvider, DatabaseProviderFactory,
-        HashingWriter, HeaderProvider, MetadataWriter, RangeEnd, ReceiptProvider,
-        ReceiptProviderIdExt, StageCheckpointWriter, StateProviderFactory, StateRangeProvider,
-        StateRangeProviderFactory, StateRootProvider, StateWriteConfig, StateWriter,
-        StorageRootProvider, StorageSettings, StorageSettingsCache, TransactionVariant,
-        TransactionsProvider, TrieWriter,
+        BalProvider, BlockBodyIndicesProvider, BlockHashReader, BlockIdReader, BlockNumReader,
+        BlockReader, BlockReaderIdExt, BlockSource, ChangeSetReader, DBProvider,
+        DatabaseProviderFactory, HashingWriter, HeaderProvider, MetadataWriter, RangeEnd,
+        ReceiptProvider, ReceiptProviderIdExt, StageCheckpointWriter, StateProviderFactory,
+        StateRangeProvider, StateRangeProviderFactory, StateRootProvider, StateWriteConfig,
+        StateWriter, StorageRootProvider, StorageSettings, StorageSettingsCache,
+        TransactionVariant, TransactionsProvider, TrieWriter,
     };
     use reth_testing_utils::generators::{
         self, random_block, random_block_range, random_changeset_range, random_eoa_accounts,
@@ -1723,6 +1741,59 @@ mod tests {
         let pending = provider.pending_block_and_receipts()?.unwrap();
         assert!(Arc::ptr_eq(&pending_block, pending.block()));
         assert!(pending.execution_output().receipts.is_empty());
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_block_reader_side_chain_block_by_hash() -> eyre::Result<()> {
+        let mut rng = generators::rng();
+        let (provider, _, in_memory_blocks, _) = provider_with_random_blocks(
+            &mut rng,
+            TEST_BLOCKS_COUNT,
+            TEST_BLOCKS_COUNT,
+            BlockRangeParams::default(),
+        )?;
+
+        // A fork of the first in-memory block that the engine tree holds but is not canonical.
+        let canonical = in_memory_blocks.first().unwrap();
+        let fork = random_block(
+            &mut rng,
+            canonical.number,
+            BlockParams { parent: Some(canonical.parent_hash), ..Default::default() },
+        );
+        let fork_hash = fork.hash();
+        let recovered = RecoveredBlock::new_sealed(fork.clone(), fork.senders().unwrap());
+        let bal = Bytes::from_static(&[0xc0]);
+        provider.database.overlay_manager().insert_block(
+            ExecutedBlock { recovered_block: Arc::new(recovered.clone()), ..Default::default() }
+                .with_bal(Some(Arc::new(DecodedEvmBal::new(Arc::default(), bal.clone())))),
+        );
+
+        assert_eq!(provider.block(fork_hash.into())?, Some(fork.into_block()));
+        assert_eq!(
+            provider.recovered_block(fork_hash.into(), TransactionVariant::WithHash)?,
+            Some(recovered.clone())
+        );
+        assert_eq!(
+            provider.sealed_block_with_senders(fork_hash.into(), TransactionVariant::WithHash)?,
+            Some(recovered)
+        );
+        assert_eq!(provider.get_bal_by_hash(fork_hash)?, Some(bal.clone()));
+        assert_eq!(provider.get_bals_by_hashes(&[fork_hash])?, vec![Some(bal)]);
+
+        // Canonical lookups still only see the canonical chain.
+        assert_eq!(provider.block(canonical.number.into())?, Some(canonical.clone().into_block()));
+        assert_eq!(provider.block_number(fork_hash)?, None);
+        assert_eq!(
+            provider.block_by_id(BlockId::Hash(RpcBlockHash::from_hash(fork_hash, Some(true))))?,
+            None
+        );
+
+        // Once the tree drops the fork, its hash is unknown again.
+        provider.database.overlay_manager().remove_blocks([fork_hash]);
+        assert_eq!(provider.block(fork_hash.into())?, None);
+        assert_eq!(provider.get_bals_by_hashes(&[fork_hash])?, vec![None]);
 
         Ok(())
     }

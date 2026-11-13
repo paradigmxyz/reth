@@ -419,6 +419,14 @@ impl<N: NodePrimitives> OverlayManager<N> {
         );
     }
 
+    /// Returns the in-memory block with the given hash, canonical or not.
+    ///
+    /// Returns `None` once the engine tree drops the block: after it is persisted, after its fork
+    /// falls below the finalized block, or when the tree is reset.
+    pub fn block_by_hash(&self, hash: &B256) -> Option<ExecutedBlock<N>> {
+        self.inner.blocks.get(hash).map(|block| block.clone())
+    }
+
     /// Returns the flattened overlay from `anchor_hash` to `parent_hash`.
     #[tracing::instrument(
         level = "trace",

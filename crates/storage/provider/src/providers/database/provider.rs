@@ -269,6 +269,11 @@ impl<TX, N: NodeTypes> DatabaseProvider<TX, N> {
         self.reader_txn_tracker = Some(Arc::new(reader_txn_tracker));
         self
     }
+
+    /// Returns the manager of the in-memory blocks the engine tree holds.
+    pub(crate) const fn overlay_manager(&self) -> &OverlayManager<N::Primitives> {
+        &self.overlay_manager
+    }
 }
 
 impl<TX: DbTx + 'static, N: NodeTypes> DatabaseProvider<TX, N> {
