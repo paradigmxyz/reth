@@ -300,13 +300,8 @@ impl MethodResponseResult {
 /// Builder for the response to a batch request.
 #[derive(Debug)]
 pub struct BatchResponseBuilder {
-    /// Serialized JSON-RPC responses of the entries.
-    ///
-    /// They are joined once the batch is finished, into a buffer of the batch's exact size,
-    /// instead of growing the batch response (and copying it) entry by entry.
-    entries: Vec<String>,
-    /// Length of the batch response: the `[` and every entry with the `,` or `]` after it.
-    len: usize,
+    /// Serialized JSON-RPC response,
+    result: String,
     /// Max limit for the batch
     max_response_size: usize,
 }
@@ -314,7 +309,10 @@ pub struct BatchResponseBuilder {
 impl BatchResponseBuilder {
     /// Create a new batch response builder with limit.
     pub fn new_with_limit(limit: usize) -> Self {
-        Self { entries: Vec::new(), len: 1, max_response_size: limit }
+        let mut initial = String::with_capacity(2048);
+        initial.push('[');
+
+        Self { result: initial, max_response_size: limit }
     }
 
     /// Append a result from an individual method to the batch response.
@@ -324,7 +322,7 @@ impl BatchResponseBuilder {
     pub fn append(&mut self, response: MethodResponse) -> Result<(), MethodResponse> {
         // `,` will occupy one extra byte for each entry
         // on the last item the `,` is replaced by `]`.
-        let len = response.json.len() + self.len + 1;
+        let len = response.json.len() + self.result.len() + 1;
 
         if len > self.max_response_size {
             Err(MethodResponse::error(
@@ -332,41 +330,29 @@ impl BatchResponseBuilder {
                 reject_too_big_batch_response(self.max_response_size),
             ))
         } else {
-            let mut json = response.json;
-            // Entries are kept until the batch is finished, so a buffer that `sized_response`
-            // left mostly unused would stay allocated for the whole batch.
-            if json.capacity() - json.len() > json.len() {
-                json.shrink_to_fit();
-            }
-            self.len = len;
-            self.entries.push(json);
+            self.result.push_str(&response.json);
+            self.result.push(',');
             Ok(())
         }
     }
 
     /// Check if the batch is empty.
     pub fn is_empty(&self) -> bool {
-        self.entries.is_empty()
+        self.result.len() <= 1
     }
 
     /// Finish the batch response.
     ///
     /// An empty batch is answered with an invalid request error.
-    pub fn finish(self) -> MethodResponse {
+    pub fn finish(mut self) -> MethodResponse {
         if self.is_empty() {
             return MethodResponse::error(Id::Null, ErrorObject::from(ErrorCode::InvalidRequest))
         }
-        let mut json = String::with_capacity(self.len);
-        json.push('[');
-        for (i, entry) in self.entries.iter().enumerate() {
-            if i > 0 {
-                json.push(',');
-            }
-            json.push_str(entry);
-        }
-        json.push(']');
+        // Replace the trailing `,` of the last entry.
+        self.result.pop();
+        self.result.push(']');
         MethodResponse {
-            json,
+            json: self.result,
             success_or_error: MethodResponseResult::Success,
             kind: ResponseKind::Batch,
         }
@@ -410,8 +396,8 @@ impl ResponseSizeHint {
 /// call of the method, from any connection, reserve as much.
 const MAX_RESPONSE_SIZE_HINT: usize = 8 * 1024 * 1024;
 
-/// A single response is shrunk only if more than half of its buffer, and more than this many
-/// bytes, is unused. Smaller buffers aren't worth reallocating.
+/// A response is shrunk only if more than half of its buffer, and more than this many bytes, is
+/// unused. Smaller buffers aren't worth reallocating.
 const RESPONSE_SHRINK_THRESHOLD: usize = 16 * 1024;
 
 /// Bounded writer that allows writing at most `max_len` bytes.
@@ -509,36 +495,6 @@ mod tests {
             batch.json,
             r#"[{"jsonrpc":"2.0","id":1,"result":"a"},{"jsonrpc":"2.0","id":1,"result":"a"}]"#
         )
-    }
-
-    #[test]
-    fn batch_is_joined_into_its_exact_size() {
-        let entry = |id| {
-            MethodResponse::response(
-                Id::Number(id),
-                ResponsePayload::success_borrowed(&"a"),
-                usize::MAX,
-            )
-        };
-        // Two entries of 37 bytes, the `[`, the `,` and the `]`.
-        let len = 2 + 2 * 37 + 1;
-
-        let mut builder = BatchResponseBuilder::new_with_limit(len);
-        builder.append(entry(1)).unwrap();
-        builder.append(entry(2)).unwrap();
-        let batch = builder.finish();
-        assert_eq!(
-            batch.json,
-            r#"[{"jsonrpc":"2.0","id":1,"result":"a"},{"jsonrpc":"2.0","id":2,"result":"a"}]"#
-        );
-        assert_eq!(batch.json.len(), len);
-        assert_eq!(batch.json.capacity(), len);
-
-        let mut builder = BatchResponseBuilder::new_with_limit(len - 1);
-        builder.append(entry(1)).unwrap();
-        let err = builder.append(entry(2)).unwrap_err();
-        let exp_err = r#"{"jsonrpc":"2.0","id":null,"error":{"code":-32011,"message":"The batch response was too large","data":"Exceeded max limit of 76"}}"#;
-        assert_eq!(err.json, exp_err);
     }
 
     #[test]
@@ -685,19 +641,5 @@ mod tests {
         let rp = sized_response(success(&"a"), &hint);
         // Most of the buffer is unused, but too little to be worth reallocating.
         assert!(rp.json.capacity() >= reserved);
-    }
-
-    #[test]
-    fn batch_entries_do_not_keep_unused_capacity() {
-        let hint = ResponseSizeHint::new();
-        sized_response(success(&"x".repeat(8 * 1024)), &hint);
-
-        let rp = sized_response(success(&"a"), &hint);
-        let len = rp.json.len();
-        assert!(rp.json.capacity() > 2 * len);
-
-        let mut builder = BatchResponseBuilder::new_with_limit(usize::MAX);
-        builder.append(rp).unwrap();
-        assert_eq!(builder.entries[0].capacity(), len);
     }
 }
