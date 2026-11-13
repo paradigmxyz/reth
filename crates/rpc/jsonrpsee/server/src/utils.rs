@@ -38,7 +38,7 @@ use crate::{ConnectionPermit, HttpBody};
 
 use futures_util::{future, ready};
 use hyper::body::{Bytes, Frame};
-use hyper_util::rt::{TokioExecutor, TokioIo};
+use hyper_util::rt::{TokioExecutor, TokioIo, TokioTimer};
 use jsonrpsee_core::{middleware::Notification, BoxError, JsonRawValue};
 use jsonrpsee_types::TwoPointZero;
 use pin_project::pin_project;
@@ -134,7 +134,9 @@ where
     );
     let io = TokioIo::new(io);
 
-    let builder = hyper_util::server::conn::auto::Builder::new(TokioExecutor::new());
+    let mut builder = hyper_util::server::conn::auto::Builder::new(TokioExecutor::new());
+    // Also bounds how long an idle HTTP/1 keep-alive connection waits for its next request.
+    builder.http1().timer(TokioTimer::new()).header_read_timeout(DEFAULT_FIRST_REQUEST_TIMEOUT);
     let conn = builder.serve_connection_with_upgrades(io, service);
 
     tokio::pin!(stopped, conn);
