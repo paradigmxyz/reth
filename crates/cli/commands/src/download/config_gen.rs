@@ -126,9 +126,13 @@ where
 const INDEX_STAGE_IDS: [&str; 3] =
     ["TransactionLookup", "IndexAccountHistory", "IndexStorageHistory"];
 
-/// Prune segments that correspond to the index stages.
-const INDEX_PRUNE_SEGMENTS: [PruneSegment; 3] =
-    [PruneSegment::TransactionLookup, PruneSegment::AccountHistory, PruneSegment::StorageHistory];
+/// Prune segments whose checkpoint only describes an index stage output.
+///
+/// `AccountHistory` and `StorageHistory` are not listed: their checkpoints mark the lowest block
+/// with changesets, which the history lookup needs to tell a key unwritten since that block from
+/// one that was never written. Rebuilt indices cover only the downloaded changesets, so dropping
+/// the checkpoint makes every older key read as absent.
+const INDEX_PRUNE_SEGMENTS: [PruneSegment; 1] = [PruneSegment::TransactionLookup];
 
 /// Resets stage and prune checkpoints for stages whose output is not included
 /// in the snapshot inside an existing write transaction.
@@ -141,7 +145,8 @@ const INDEX_PRUNE_SEGMENTS: [PruneSegment; 3] =
 ///
 /// We intentionally do not reset `SenderRecovery`: sender static files are
 /// distributed for archive downloads, and non-archive downloads rely on the
-/// configured prune checkpoints for this segment.
+/// configured prune checkpoints for this segment. The history prune checkpoints
+/// are kept for the reason given on [`INDEX_PRUNE_SEGMENTS`].
 pub(crate) fn reset_index_stage_checkpoints_tx<Tx>(tx: &Tx) -> eyre::Result<()>
 where
     Tx: DbTx + DbTxMut,
@@ -668,18 +673,24 @@ mod tests {
                 .unwrap();
             }
 
-            // Sender recovery checkpoints should be preserved by reset.
+            // Sender recovery and history prune checkpoints should be preserved by reset.
             tx.put::<tables::StageCheckpoints>("SenderRecovery".to_string(), tip_checkpoint)
                 .unwrap();
-            tx.put::<tables::PruneCheckpoints>(
+            for segment in [
                 PruneSegment::SenderRecovery,
-                PruneCheckpoint {
-                    block_number: Some(24_500_000),
-                    tx_number: None,
-                    prune_mode: PruneMode::Full,
-                },
-            )
-            .unwrap();
+                PruneSegment::AccountHistory,
+                PruneSegment::StorageHistory,
+            ] {
+                tx.put::<tables::PruneCheckpoints>(
+                    segment,
+                    PruneCheckpoint {
+                        block_number: Some(24_500_000),
+                        tx_number: None,
+                        prune_mode: PruneMode::Full,
+                    },
+                )
+                .unwrap();
+            }
             tx.commit().unwrap();
         }
 
@@ -715,11 +726,54 @@ mod tests {
             .expect("sender checkpoint should exist");
         assert_eq!(sender_stage_checkpoint.block_number, tip_checkpoint.block_number);
 
-        let sender_prune_checkpoint = tx
-            .get::<tables::PruneCheckpoints>(PruneSegment::SenderRecovery)
-            .unwrap()
-            .expect("sender prune checkpoint should exist");
-        assert_eq!(sender_prune_checkpoint.block_number, Some(tip_checkpoint.block_number));
+        for segment in [
+            PruneSegment::SenderRecovery,
+            PruneSegment::AccountHistory,
+            PruneSegment::StorageHistory,
+        ] {
+            let prune_checkpoint = tx
+                .get::<tables::PruneCheckpoints>(segment)
+                .unwrap()
+                .expect("prune checkpoint should exist");
+            assert_eq!(prune_checkpoint.block_number, Some(tip_checkpoint.block_number));
+        }
+    }
+
+    /// Without `RocksDB` indices the index stages rebuild history from the downloaded changesets
+    /// only, so the history prune checkpoints written for the selection must survive the reset.
+    #[test]
+    fn history_checkpoints_survive_index_reset() {
+        let snapshot_block = 21_000_000;
+        let distance = 10_064;
+        let dir = tempfile::tempdir().unwrap();
+        let db = reth_db::init_db(dir.path(), reth_db::mdbx::DatabaseArguments::default()).unwrap();
+        let selections = BTreeMap::from([
+            (SnapshotComponentType::State, ComponentSelection::All),
+            (SnapshotComponentType::Headers, ComponentSelection::All),
+            (SnapshotComponentType::AccountChangesets, ComponentSelection::Distance(distance)),
+            (SnapshotComponentType::StorageChangesets, ComponentSelection::Distance(distance)),
+        ]);
+        let config = config_for_selections(
+            &selections,
+            &empty_manifest(),
+            None,
+            None::<&reth_chainspec::ChainSpec>,
+        );
+        assert!(super::super::should_reset_index_stage_checkpoints(&selections));
+
+        let tx = db.tx_mut().unwrap();
+        write_prune_checkpoints_tx(&tx, &config, &selections, snapshot_block).unwrap();
+        reset_index_stage_checkpoints_tx(&tx).unwrap();
+
+        for segment in [PruneSegment::AccountHistory, PruneSegment::StorageHistory] {
+            assert_eq!(
+                tx.get::<tables::PruneCheckpoints>(segment)
+                    .unwrap()
+                    .and_then(|checkpoint| checkpoint.block_number),
+                Some(snapshot_block - distance),
+                "{segment} prune checkpoint should mark the start of the downloaded history"
+            );
+        }
     }
 
     #[test]
