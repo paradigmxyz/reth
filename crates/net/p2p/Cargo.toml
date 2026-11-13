@@ -17,7 +17,6 @@ reth-ethereum-primitives.workspace = true
 reth-primitives-traits.workspace = true
 reth-eth-wire-types.workspace = true
 reth-consensus.workspace = true
-reth-consensus-common.workspace = true
 reth-network-peers.workspace = true
 reth-network-types.workspace = true
 reth-storage-errors.workspace = true
@@ -58,7 +57,6 @@ test-utils = [
 ]
 std = [
     "reth-consensus/std",
-    "reth-consensus-common/std",
     "reth-ethereum-primitives/std",
     "alloy-eip7928/std",
     "alloy-eips/std",

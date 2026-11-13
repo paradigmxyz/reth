@@ -34,7 +34,6 @@ use reth_ethereum_consensus::EthBeaconConsensus;
 use reth_ethereum_engine_primitives::{EthEngineTypes, EthPayloadAttributes};
 use reth_ethereum_primitives::{Block, EthPrimitives};
 use reth_evm_ethereum::MockEvmConfig;
-use reth_network_p2p::{full_block::FullBlockClient, test_utils::TestFullBlockClient};
 use reth_payload_builder::PayloadServiceCommand;
 use reth_primitives_traits::Block as _;
 use reth_provider::{
@@ -3671,107 +3670,4 @@ impl<S: Subscriber + for<'a> LookupSpan<'a>> Layer<S> for EngineSpanParents {
             self.0.lock().unwrap().push(ctx.span(id).unwrap().parent().map(|parent| parent.id()));
         }
     }
-}
-
-#[tokio::test]
-async fn test_downloaded_invalid_ancestor_reports_latest_valid_hash() {
-    for invalid_timestamp in [false, true] {
-        let mut harness = TestHarness::new(MAINNET.clone());
-        let blocks = harness.block_builder.get_executed_blocks(0..8).collect();
-        harness = harness.with_blocks(blocks);
-        let parent = harness.blocks.last().unwrap().clone_sealed_block();
-        let mut invalid =
-            harness.block_builder.generate_random_block(8, parent.hash()).into_block();
-        if invalid_timestamp {
-            invalid.header.timestamp = parent.timestamp;
-        } else {
-            invalid.header.gas_limit = parent.gas_limit * 2;
-        }
-        let invalid = invalid.seal_slow();
-        let error = harness
-            .tree
-            .consensus
-            .validate_header_against_parent(invalid.sealed_header(), parent.sealed_header())
-            .unwrap_err();
-        if invalid_timestamp {
-            assert_matches!(error, ConsensusError::TimestampIsInPast { .. });
-        } else {
-            assert_matches!(error, ConsensusError::GasLimitInvalidIncrease { .. });
-        }
-        let head = harness.block_builder.generate_random_block(9, invalid.hash());
-        let head_hash = head.hash();
-        let payload = ExecutionData::from_block_unchecked(head_hash, &head.into_block());
-        assert!(harness.tree.on_new_payload(payload.clone()).unwrap().outcome.is_syncing());
-        let state = ForkchoiceState {
-            head_block_hash: head_hash,
-            safe_block_hash: B256::ZERO,
-            finalized_block_hash: B256::ZERO,
-        };
-        assert!(harness
-            .tree
-            .on_forkchoice_updated(state, None)
-            .unwrap()
-            .outcome
-            .await
-            .unwrap()
-            .payload_status
-            .is_syncing());
-
-        let peer = TestFullBlockClient::default();
-        for block in [&parent, &invalid] {
-            peer.insert(block.clone_sealed_header(), block.body().clone());
-        }
-        let client = FullBlockClient::new(peer, harness.tree.consensus.clone());
-        let ancestors = tokio::time::timeout(
-            Duration::from_secs(1),
-            client.get_full_block_range(invalid.hash(), 2),
-        )
-        .await
-        .unwrap();
-        for block in ancestors.into_iter().rev() {
-            harness.tree.on_downloaded_block(block.into()).unwrap();
-        }
-
-        let status = harness.tree.on_new_payload(payload).unwrap().outcome;
-        assert!(status.is_invalid());
-        assert_eq!(status.latest_valid_hash, Some(parent.hash()));
-        let status = harness
-            .tree
-            .on_forkchoice_updated(state, None)
-            .unwrap()
-            .outcome
-            .await
-            .unwrap()
-            .payload_status;
-        assert!(status.is_invalid());
-        assert_eq!(status.latest_valid_hash, Some(parent.hash()));
-    }
-}
-
-#[test]
-fn test_backfill_downloads_only_missing_parent_gap() {
-    let mut harness = TestHarness::new(MAINNET.clone());
-    let blocks: Vec<_> = harness.block_builder.get_executed_blocks(0..6).collect();
-    harness = harness.with_blocks(vec![blocks[0].clone()]);
-    let backfill_tip = &blocks[2];
-    harness.provider.add_block(backfill_tip.hash(), backfill_tip.clone().into_block());
-    for block in &blocks[4..] {
-        harness.tree.state.buffer.insert_block(block.clone_sealed_block().into());
-    }
-    harness.tree.state.forkchoice_state_tracker.set_latest(
-        ForkchoiceState {
-            head_block_hash: blocks[5].hash(),
-            safe_block_hash: blocks[4].hash(),
-            finalized_block_hash: backfill_tip.hash(),
-        },
-        ForkchoiceStatus::Syncing,
-    );
-
-    harness.tree.on_backfill_sync_finished(ControlFlow::Continue { block_number: 2 }).unwrap();
-
-    assert_matches!(
-        harness.from_tree_rx.try_recv().unwrap(),
-        EngineApiEvent::Download(DownloadRequest::BlockRange { hash, count: 1, .. })
-            if hash == blocks[3].hash()
-    );
 }

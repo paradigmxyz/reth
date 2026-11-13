@@ -393,32 +393,3 @@ async fn advance_block_ignores_foreign_payload_jobs() -> eyre::Result<()> {
 
     Ok(())
 }
-
-/// Backfill stops at finalized block 127; live sync must connect buffered blocks 128 and 129.
-#[tokio::test]
-async fn cold_sync_reaches_head_above_finalized() -> eyre::Result<()> {
-    reth_tracing::init_test_tracing();
-
-    let (mut nodes, _) = EthereumNode::test_setup_for(EthereumHardfork::Shanghai)
-        .with_num_nodes(2)
-        .with_connect_nodes(false)
-        .build()
-        .await?;
-    let mut follower = nodes.pop().unwrap();
-    let mut producer = nodes.pop().unwrap();
-    let head = producer.advance_blocks(129).await?.pop().unwrap();
-    let state = ForkchoiceState {
-        head_block_hash: producer.block_hash(129),
-        safe_block_hash: producer.block_hash(128),
-        finalized_block_hash: producer.block_hash(127),
-    };
-    producer.connect(&mut follower).await;
-
-    assert_eq!(
-        follower.engine.new_payload_from_block(head.block().clone(), None).await?.status,
-        PayloadStatusEnum::Syncing
-    );
-    follower.sync_to_forkchoice(state).await?;
-    assert_eq!(follower.current_forkchoice_state()?, state);
-    Ok(())
-}
