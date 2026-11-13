@@ -226,8 +226,15 @@ impl TrieTestHarness {
         self.hashed_cursor_factory.clone()
     }
 
-    /// Obtains the root node of the storage trie via [`StorageProofCalculator`].
+    /// Obtains only the root node of the storage trie via [`StorageProofCalculator`].
     pub fn root_node(&self) -> ProofTrieNode {
+        self.root_nodes().pop().expect("root_nodes should contain the root")
+    }
+
+    /// Obtains the root and, for an extension root, its separate child branch with masks.
+    ///
+    /// Nodes are ordered children before parents, with the root last, including for an empty trie.
+    pub fn root_nodes(&self) -> Vec<ProofTrieNode> {
         let trie_cursor = self
             .trie_cursor_factory
             .storage_trie_cursor(self.hashed_address())
@@ -239,8 +246,8 @@ impl TrieTestHarness {
 
         let mut proof_calculator = StorageProofCalculator::new_storage(trie_cursor, hashed_cursor);
         proof_calculator
-            .storage_root_node(self.hashed_address())
-            .expect("storage_root_node should succeed")
+            .storage_root_nodes(self.hashed_address())
+            .expect("storage_root_nodes should succeed")
     }
 
     /// Generates storage proofs for the given targets using [`StorageProofCalculator`].

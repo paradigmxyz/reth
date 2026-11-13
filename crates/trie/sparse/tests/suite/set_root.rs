@@ -27,9 +27,9 @@ pub(super) fn test_set_root_with_leaf_node<T: SparseTrie>(new_trie: fn() -> T) {
     let storage: BTreeMap<B256, U256> = BTreeMap::from([(B256::ZERO, U256::from(42))]);
 
     let harness = SuiteTestHarness::new(storage);
-    let root_node = harness.root_node();
+    let mut root_nodes = harness.root_nodes();
     let mut trie = (new_trie)();
-    trie.set_root(root_node.node, root_node.masks, true).expect("set_root should succeed");
+    trie.set_root(&mut root_nodes, true).expect("set_root should succeed");
     let root = trie.root(epoch(0));
     assert_eq!(root, harness.original_root());
 }
@@ -139,6 +139,6 @@ pub(super) fn test_set_root_does_not_retain_updates_when_not_requested<T: Sparse
 /// empty state, returning `EMPTY_ROOT_HASH` from `root()`.
 pub(super) fn test_set_root_with_empty_root<T: SparseTrie>(new_trie: fn() -> T) {
     let mut trie = (new_trie)();
-    trie.set_root(TrieNode::EmptyRoot, None, true).expect("set_root should succeed");
+    trie.set_root(&mut [ProofTrieNode::empty()], true).expect("set_root should succeed");
     assert_eq!(trie.root(epoch(0)), EMPTY_ROOT_HASH);
 }

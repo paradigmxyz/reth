@@ -1651,12 +1651,12 @@ enum SparseTrieTaskMessage {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_primitives::{keccak256, B256, U256};
+    use alloy_primitives::{B256, U256};
     use reth_db_common::init::init_genesis;
     use reth_provider::test_utils::create_test_provider_factory;
     use reth_storage_overlay::{OverlayManager, OverlayStateProviderFactory};
     use reth_trie_common::{
-        BranchNode, BranchNodeMasks, ExtensionNode, LeafNode, Nibbles, RlpNode, TrieMask, TrieNode,
+        BranchNode, BranchNodeMasks, ExtensionNode, LeafNode, Nibbles, TrieMask, TrieNode,
     };
     use reth_trie_parallel::proof_task::{ProofTaskCtx, ProofWorkerCounts};
     use reth_trie_sparse::ArenaParallelSparseTrie;
@@ -2594,34 +2594,6 @@ mod tests {
                 (sibling, U256::from(2)),
             ])
         );
-
-        drop(updates_tx);
-        drop(task);
-        drain_sparse_trie_tasks(&runtime);
-    }
-
-    #[test]
-    fn storage_jobs_accept_extension_roots_with_blinded_children() {
-        let runtime = Runtime::test();
-        let (mut task, updates_tx, _cancel_guard) = test_task(&runtime, SparseStateTrie::default());
-        let address = B256::repeat_byte(0x11);
-        let node = TrieNode::Extension(ExtensionNode::new(
-            Nibbles::from_nibbles([1]),
-            RlpNode::word_rlp(&B256::repeat_byte(0x22)),
-        ));
-        let expected_root = keccak256(alloy_rlp::encode(&node));
-        let StorageTrieState::Idle(work) = task.storage_trie_state_mut(address) else {
-            unreachable!()
-        };
-        work.queue_proofs(&mut vec![ProofTrieNode { path: Nibbles::default(), node, masks: None }]);
-        let work = check_out_storage(&mut task, address);
-        task.spawn_storage_jobs(vec![StorageTrieJob { address, work }]);
-
-        let message = receive_storage_job(&task);
-        assert!(matches!(&message, StorageJobMessage::Done(done) if done.address == address));
-        task.on_storage_job_message(message).unwrap();
-        assert_eq!(task.storage_in_flight, 0);
-        assert_eq!(storage_root_of(&mut task, address), expected_root);
 
         drop(updates_tx);
         drop(task);

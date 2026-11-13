@@ -1052,9 +1052,9 @@ pub(super) fn test_remove_leaf_marks_ancestors_dirty_unconditionally<T: SparseTr
     let harness = SuiteTestHarness::new(storage.clone());
 
     // Initialize trie: set root and reveal all proofs.
-    let root_node = harness.root_node();
+    let mut root_nodes = harness.root_nodes();
     let mut trie = (new_trie)();
-    trie.set_root(root_node.node, root_node.masks, false).expect("set_root should succeed");
+    trie.set_root(&mut root_nodes, false).expect("set_root should succeed");
 
     let mut targets: Vec<ProofV2Target> = keys.iter().map(|k| ProofV2Target::new(*k)).collect();
     let (mut proof_nodes, _) = harness.proof_v2(&mut targets);

@@ -14,9 +14,9 @@ pub(super) fn test_reveal_nodes_empty_slice<T: SparseTrie>(new_trie: fn() -> T) 
         BTreeMap::from([(key_a, U256::ONE), (key_b, U256::from(2))]);
 
     let harness = SuiteTestHarness::new(storage);
-    let root_node = harness.root_node();
+    let mut root_nodes = harness.root_nodes();
     let mut trie = (new_trie)();
-    trie.set_root(root_node.node, root_node.masks, true).expect("set_root should succeed");
+    trie.set_root(&mut root_nodes, true).expect("set_root should succeed");
 
     let root_before = trie.root(epoch(0));
 
@@ -143,7 +143,7 @@ pub(super) fn test_reveal_nodes_skips_on_empty_root<T: SparseTrie>(new_trie: fn(
 
     // Create a trie with an empty root.
     let mut trie = (new_trie)();
-    trie.set_root(TrieNode::EmptyRoot, None, true).expect("set_root EmptyRoot should succeed");
+    trie.set_root(&mut [ProofTrieNode::empty()], true).expect("set_root EmptyRoot should succeed");
 
     // Reveal non-empty proof nodes — should be a no-op on an empty root.
     trie.reveal_nodes(&mut proof_nodes).expect("reveal_nodes on empty root should succeed");
@@ -193,9 +193,9 @@ pub(super) fn test_reveal_nodes_filters_unreachable_boundary_leaves<T: SparseTri
     let harness = SuiteTestHarness::new(storage);
 
     // Initialize trie with root and reveal ONLY group A keys.
-    let root_node = harness.root_node();
+    let mut root_nodes = harness.root_nodes();
     let mut trie = (new_trie)();
-    trie.set_root(root_node.node, root_node.masks, false).expect("set_root should succeed");
+    trie.set_root(&mut root_nodes, false).expect("set_root should succeed");
 
     let mut targets_a: Vec<ProofV2Target> = keys_a.iter().map(|k| ProofV2Target::new(*k)).collect();
     let (mut proof_a, _) = harness.proof_v2(&mut targets_a);
@@ -390,18 +390,26 @@ pub(super) fn test_insert_then_reveal_does_not_overwrite_branch<T: SparseTrie>(
 ///
 /// When root is an extension that crosses the upper/lower boundary, a boundary node path can be
 /// reachable even if there is no explicit upper branch at `path[..UPPER_TRIE_MAX_DEPTH - 1]`.
-/// Revealing such a node should not panic.
+/// The calculator root batch reveals the boundary branch with its extension; revealing its
+/// leaves later should not skip them because the upper parent branch is absent.
 pub(super) fn test_reveal_boundary_node_with_missing_upper_parent_branch<T: SparseTrie>(
     new_trie: fn() -> T,
 ) {
     let key_a = B256::right_padding_from(&[0x12, 0x00]);
     let key_b = B256::right_padding_from(&[0x12, 0x10]);
     let harness = SuiteTestHarness::new([(key_a, U256::ONE), (key_b, U256::from(2))].into());
-    let TrieNode::Extension(extension) = harness.root_node().node else {
+    let mut root_nodes = harness.root_nodes();
+    assert_eq!(root_nodes.len(), 2);
+    let branch = &root_nodes[0];
+    assert_eq!(branch.path, Nibbles::from_nibbles([1, 2]));
+    assert!(matches!(branch.node, TrieNode::Branch(_)));
+    assert_eq!(branch.masks, None, "this branch has no persisted descendants");
+    let TrieNode::Extension(extension) = &root_nodes[1].node else {
         panic!("fixture root must be an extension");
     };
     assert_eq!(extension.key, Nibbles::from_nibbles([1, 2]));
-    let mut trie = harness.init_trie_with_targets(&[], false, new_trie);
+    let mut trie = (new_trie)();
+    trie.set_root(&mut root_nodes, false).expect("extension and boundary branch should reveal");
     assert!(matches!(
         trie.find_leaf(&Nibbles::unpack(key_a), None),
         Err(LeafLookupError::BlindedNode { .. })
@@ -409,8 +417,8 @@ pub(super) fn test_reveal_boundary_node_with_missing_upper_parent_branch<T: Spar
 
     let (mut proof, _) =
         harness.proof_v2(&mut [ProofV2Target::new(key_a), ProofV2Target::new(key_b)]);
-    // The boundary branch has no upper parent branch at [1]. Its actual parent is the root
-    // extension, and both branch children must be revealed rather than silently skipped.
+    // The already-revealed boundary branch has no upper parent branch at [1]. Both of its
+    // leaves must be revealed rather than silently skipped by the upper-parent lookup.
     assert!(!proof.iter().any(|node| node.path == Nibbles::from_nibbles([1])));
     assert!(proof.iter().any(|node| node.path == Nibbles::from_nibbles([1, 2]) &&
         matches!(node.node, TrieNode::Branch(_))));
