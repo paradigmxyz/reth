@@ -941,7 +941,7 @@ where
 {
     // Single request or notification
     if is_single {
-        match parse_message(body, false) {
+        match parse_message(body) {
             Ok(BatchEntry::Call(req)) => catch_call_panic(req.id(), || rpc_service.call(req)).await,
             Ok(BatchEntry::Notification(notif)) => rpc_service.notification(notif).await,
             Err((id, code)) => MethodResponse::error(id, ErrorObject::from(code)),
@@ -1002,48 +1002,61 @@ fn parse_batch(body: &[u8], max_len: usize) -> Result<Batch<'_>, MethodResponse>
 
 /// Classifies a raw batch entry as a call, a notification or an invalid request.
 fn parse_batch_entry(call: &JsonRawValue) -> Result<BatchEntry<'_>, BatchEntryErr<'_>> {
-    // The derived `InvalidRequest` impl, which recovers the id of an entry that doesn't decode,
-    // also accepts a JSON array holding the id, so only objects may reach it.
+    // The derived `InvalidRequest` impl below also accepts a JSON array holding the id, so only
+    // objects may reach it.
     if !call.get().starts_with('{') {
         return Err(BatchEntryErr::new(Id::Null, ErrorCode::InvalidRequest.into()));
     }
 
-    parse_message(call.get().as_bytes(), true)
-        .map_err(|(id, code)| BatchEntryErr::new(id, code.into()))
+    // The entry is JSON already, so it can't be a parse error: it is read as a `str` and no
+    // further than the member that makes it invalid.
+    let mut members = MessageMembers { is_json: true, ..Default::default() };
+    let mut deserializer = serde_json::Deserializer::from_str(call.get());
+    let read = deserializer.deserialize_map(&mut members).and_then(|()| deserializer.end());
+
+    let id = match read {
+        Ok(()) => match members.classify() {
+            Ok(entry) => return Ok(entry),
+            Err(id) => id,
+        },
+        // Either that member stopped the read or one that doesn't decode. Decoding the id stops
+        // at the first `id` it can't use.
+        Err(_) => serde_json::from_str::<InvalidRequest<'_>>(call.get())
+            .map_or(Id::Null, |request| request.id),
+    };
+    Err(BatchEntryErr::new(id, ErrorCode::InvalidRequest.into()))
 }
 
 /// Reads a JSON-RPC message object and classifies it as a call or a notification, or returns the
 /// id and code of the error response.
 ///
 /// The members are decoded until one of them rules out a call and a notification. The rest is
-/// skipped while looking for the `id` of the error response, so an invalid message costs one pass
-/// over `body` like a valid one. Only a `body` that isn't a JSON object, or a member name or a
-/// `jsonrpc`, `id` or `method` value that doesn't decode at all, is read again by
-/// [`prepare_error`].
-///
-/// `is_json` tells that `body` is a JSON value already, like a batch entry. It can't be a parse
-/// error, so the read stops at the member that makes it invalid and the id comes from decoding it
-/// as an [`InvalidRequest`], which stops at the first `id` it can't use.
+/// skipped while looking for the `id` of the error response, so most invalid messages are read
+/// once like a valid one. The read stops at an `id` that the error response can't use, because
+/// only whether `body` is JSON is left to tell then, which takes one raw read. A `body` that isn't
+/// a JSON object, or that holds a member name or a `jsonrpc`, `id` or `method` value that doesn't
+/// decode before it is known to be invalid, is left to [`prepare_error`].
 ///
 /// For an object, the outcome is the one of decoding `body` as a [`Request`], then as a
 /// [`Notification`] without an `id`, and otherwise the one of [`prepare_error`].
-fn parse_message(body: &[u8], is_json: bool) -> Result<BatchEntry<'_>, (Id<'_>, ErrorCode)> {
-    let mut members = MessageMembers { is_json, ..Default::default() };
+fn parse_message(body: &[u8]) -> Result<BatchEntry<'_>, (Id<'_>, ErrorCode)> {
+    let mut members = MessageMembers::default();
     let mut deserializer = serde_json::Deserializer::from_slice(body);
     let read = deserializer.deserialize_map(&mut members).and_then(|()| deserializer.end());
-    let MessageMembers { invalid, jsonrpc, id, method, params, .. } = members;
 
     if read.is_err() {
-        // The read stopped at the member that makes the message invalid, or at one that doesn't
-        // decode.
-        if is_json {
-            let id = serde_json::from_slice::<InvalidRequest<'_>>(body)
-                .map_or(Id::Null, |request| request.id);
-            return Err((id, ErrorCode::InvalidRequest));
+        // The read stopped at an `id` that leaves the error response without one, so only whether
+        // `body` is JSON is left to tell.
+        if matches!(members.id, MemberId::Lost) {
+            let code = match serde_json::from_slice::<&JsonRawValue>(body) {
+                Ok(_) => ErrorCode::InvalidRequest,
+                Err(_) => ErrorCode::ParseError,
+            };
+            return Err((Id::Null, code));
         }
         // Past the member that makes it invalid a message is only skipped, which fails for
         // nothing but invalid JSON.
-        if invalid {
+        if members.invalid {
             return Err((Id::Null, ErrorCode::ParseError));
         }
         // Either `body` isn't a JSON object, or a member name or a `jsonrpc`, `id` or `method`
@@ -1052,32 +1065,23 @@ fn parse_message(body: &[u8], is_json: bool) -> Result<BatchEntry<'_>, (Id<'_>, 
         return Err(prepare_error(body));
     }
 
-    // Decoded as an `Option`, `null` params are absent.
-    let params = params.filter(|params| params.get() != "null").map(Cow::Borrowed);
-    let valid = !invalid && jsonrpc;
-    let id = match (id, method) {
-        (MemberId::Missing, Some(method)) if valid => {
-            return Ok(BatchEntry::Notification(Notification::new(method, params)));
-        }
-        (MemberId::Valid(id), Some(method)) if valid => {
-            return Ok(BatchEntry::Call(Request { jsonrpc: TwoPointZero, id, method, params }));
-        }
-        (MemberId::Valid(id), _) => id,
-        _ => Id::Null,
+    let id = match members.classify() {
+        Ok(message) => return Ok(message),
+        Err(id) => id,
     };
-
     // Skipped values aren't checked to be UTF-8, so a valid message may hold invalid UTF-8 but an
     // invalid one is then a parse error.
-    if !is_json && std::str::from_utf8(body).is_err() {
+    if std::str::from_utf8(body).is_err() {
         return Err((Id::Null, ErrorCode::ParseError));
     }
     Err((id, ErrorCode::InvalidRequest))
 }
 
-/// The members of a JSON-RPC message object, as far as [`parse_message`] has to read them.
+/// The members of a JSON-RPC message object, as far as its classification has to read them.
 #[derive(Default)]
 struct MessageMembers<'a> {
-    /// Whether the message is a JSON value already, see [`parse_message`].
+    /// Whether the message is known to be JSON, like a batch entry. The read then stops at the
+    /// member that makes the message invalid, because nothing past it has to be checked.
     is_json: bool,
     /// Whether a member rules out a call and a notification.
     invalid: bool,
@@ -1088,16 +1092,43 @@ struct MessageMembers<'a> {
     params: Option<&'a JsonRawValue>,
 }
 
-impl MessageMembers<'_> {
+impl<'a> MessageMembers<'a> {
+    /// Returns the call or notification that the members of a message read to its end make up,
+    /// or the id of the error response.
+    fn classify(self) -> Result<BatchEntry<'a>, Id<'a>> {
+        let Self { invalid, jsonrpc, id, method, params, .. } = self;
+        // Decoded as an `Option`, `null` params are absent.
+        let params = params.filter(|params| params.get() != "null").map(Cow::Borrowed);
+        let valid = !invalid && jsonrpc;
+        match (id, method) {
+            (MemberId::Missing, Some(method)) if valid => {
+                Ok(BatchEntry::Notification(Notification::new(method, params)))
+            }
+            (MemberId::Valid(id), Some(method)) if valid => {
+                Ok(BatchEntry::Call(Request { jsonrpc: TwoPointZero, id, method, params }))
+            }
+            (MemberId::Valid(id), _) => Err(id),
+            _ => Err(Id::Null),
+        }
+    }
+
     /// Records that a member rules out a call and a notification.
     ///
-    /// Stops the read with an error if the message is a JSON value already.
+    /// Stops the read with an error if the message is known to be JSON.
     fn reject<E: Error>(&mut self) -> Result<(), E> {
         self.invalid = true;
         if self.is_json {
             return Err(E::custom("invalid request"));
         }
         Ok(())
+    }
+
+    /// Records that the error response has a null id and returns the error that stops the read:
+    /// nothing after this member changes the response to a message that is JSON.
+    fn lose_id<E: Error>(&mut self) -> E {
+        self.invalid = true;
+        self.id = MemberId::Lost;
+        E::custom("no id for the error response")
     }
 }
 
@@ -1121,10 +1152,7 @@ impl<'de> Visitor<'de> for &mut MessageMembers<'de> {
                 MemberName::Id if matches!(self.id, MemberId::Missing) => {
                     match map.next_value::<Value<'_>>()?.into_id() {
                         Some(id) => self.id = MemberId::Valid(id),
-                        None => {
-                            self.id = MemberId::Lost;
-                            self.reject()?;
-                        }
+                        None => return Err(self.lose_id()),
                     }
                 }
                 MemberName::Method if self.method.is_none() => match map.next_value()? {
@@ -1137,12 +1165,10 @@ impl<'de> Visitor<'de> for &mut MessageMembers<'de> {
                 MemberName::Other => {
                     map.next_value::<IgnoredAny>()?;
                 }
-                // A member that is present already, which the derived `Deserialize` impls reject
-                // at its name.
-                repeated => {
-                    if matches!(repeated, MemberName::Id) {
-                        self.id = MemberId::Lost;
-                    }
+                // The remaining names are of members that are present already, which the derived
+                // `Deserialize` impls reject at the name.
+                MemberName::Id => return Err(self.lose_id()),
+                _ => {
                     self.reject()?;
                     map.next_value::<IgnoredAny>()?;
                 }
@@ -1150,27 +1176,20 @@ impl<'de> Visitor<'de> for &mut MessageMembers<'de> {
         }
 
         // Only the `id` of the error response is left to find. From here on names and values are
-        // read as raw JSON or skipped, which accepts all JSON, so that a name or an `id` that
-        // doesn't decode can't be mistaken for invalid JSON.
+        // read as raw JSON or skipped, which accepts all JSON, so that a failure can't be a name
+        // or an `id` that doesn't decode but only invalid JSON.
         while let Some(name) = map.next_key::<&JsonRawValue>()? {
-            // Without an id left to find, the names don't matter.
-            let name = if matches!(self.id, MemberId::Lost) {
-                Ok(MemberName::Other)
-            } else {
-                serde_json::from_str(name.get())
-            };
-            match name {
+            match serde_json::from_str(name.get()) {
                 Ok(MemberName::Id) if matches!(self.id, MemberId::Missing) => {
                     let id = map.next_value::<&JsonRawValue>()?;
-                    self.id =
-                        serde_json::from_str(id.get()).map_or(MemberId::Lost, MemberId::Valid);
+                    match serde_json::from_str(id.get()) {
+                        Ok(id) => self.id = MemberId::Valid(id),
+                        Err(_) => return Err(self.lose_id()),
+                    }
                 }
                 // A second `id` or a name that doesn't decode, both of which fail the derived
                 // `InvalidRequest` impl at the name.
-                Ok(MemberName::Id) | Err(_) => {
-                    self.id = MemberId::Lost;
-                    map.next_value::<IgnoredAny>()?;
-                }
+                Ok(MemberName::Id) | Err(_) => return Err(self.lose_id()),
                 Ok(_) => {
                     map.next_value::<IgnoredAny>()?;
                 }
@@ -1187,7 +1206,7 @@ enum MemberId<'a> {
     Missing,
     Valid(Id<'a>),
     /// Present more than once, not an id, or in an invalid message with a member name that
-    /// doesn't decode. The error response to any of these has a null id.
+    /// doesn't decode. The error response to any of these has a null id, and the read stops.
     Lost,
 }
 
@@ -1495,10 +1514,15 @@ mod tests {
     #[test_case(b"{\"jsonrpc\":\"2.0\",\"method\":\"m\",\"id\":1,\"x\":\"\xff\"}", r#"call Number(1) "m" None"#; "invalid utf8 in unknown member of a call")]
     #[test_case(br#"{"jsonrpc":"2.0","method":"m","params":[1],"x":{"id":true}}"#, r#"notification "m" Some("[1]")"#; "notification")]
     #[test_case(br#"{"jsonrpc":"2.0","id":7,"params":[1]}"#, "error Number(7) InvalidRequest"; "missing method")]
+    #[test_case(br#"{"method":"m","id":8}"#, "error Number(8) InvalidRequest"; "missing version")]
     #[test_case(br#"{"jsonrpc":"1.0","method":"m","id":3}"#, "error Number(3) InvalidRequest"; "wrong version")]
     #[test_case(br#"{"jsonrpc":"2.0","method":"m","id":true}"#, "error Null InvalidRequest"; "invalid id")]
+    #[test_case(br#"{"jsonrpc":"2.0","method":"m","id":{}}"#, "error Null InvalidRequest"; "object id")]
     #[test_case(br#"{"jsonrpc":"2.0","method":"m","id":1,"id":2}"#, "error Null InvalidRequest"; "duplicate id")]
+    #[test_case(br#"{"jsonrpc":"2.0","method":"m","id":true,"id":2}"#, "error Null InvalidRequest"; "valid id after an invalid id")]
+    #[test_case(br#"{"jsonrpc":"2.0","jsonrpc":"2.0","method":"m","id":6}"#, "error Number(6) InvalidRequest"; "duplicate version")]
     #[test_case(br#"{"jsonrpc":"2.0","method":"m","method":"n","id":5}"#, "error Number(5) InvalidRequest"; "duplicate method")]
+    #[test_case(br#"{"jsonrpc":"2.0","method":1,"method":"m","id":9}"#, "error Number(9) InvalidRequest"; "valid method after an invalid method")]
     #[test_case(br#"{"jsonrpc":"2.0","method":"m","params":[],"params":[]}"#, "error Null InvalidRequest"; "duplicate params")]
     #[test_case(b"{\"jsonrpc\":\"2.0\",\"id\":1,\"x\":\"\xff\"}", "error Null ParseError"; "invalid utf8 in unknown member of an invalid request")]
     #[test_case(br#"{"jsonrpc":"2.0","id":1,"method":"\ud800"}"#, "error Number(1) InvalidRequest"; "method that does not decode")]
@@ -1511,18 +1535,22 @@ mod tests {
     #[test_case(br#"{"jsonrpc":"1.0","\ud800":1,"id":4}"#, "error Null InvalidRequest"; "member name that does not decode after the wrong version")]
     #[test_case(br#"{"jsonrpc":"1.0","id":4,"method":"\ud800","x":[1e999]}"#, "error Number(4) InvalidRequest"; "values that do not decode after the wrong version")]
     #[test_case(br#"{"id":true,"method":"\ud800","\ud800":1}"#, "error Null InvalidRequest"; "nothing decodes after an invalid id")]
+    #[test_case(br#"{"jsonrpc":"1.0","x":}"#, "error Null ParseError"; "invalid json after the wrong version")]
     #[test_case(br#"{"id":true,"x":}"#, "error Null ParseError"; "invalid json after an invalid id")]
     #[test_case(br#"["2.0",1,"m"]"#, "error Null InvalidRequest"; "array of the request fields")]
     #[test_case(br#"{"jsonrpc":"2.0","method":"m","id":1} x"#, "error Null ParseError"; "trailing characters")]
     fn message_outcome(body: &[u8], outcome: &str) {
-        // A message that is a JSON object has the same outcome as a batch entry.
-        let entry = serde_json::from_slice::<&JsonRawValue>(body)
-            .ok()
-            .filter(|entry| entry.get().starts_with('{'))
-            .map(|entry| (entry.get().as_bytes(), true));
+        // A message that is JSON has the same outcome as a batch entry.
+        let entry = serde_json::from_slice::<&JsonRawValue>(body).ok().map(|entry| {
+            parse_batch_entry(entry).map_err(|err| {
+                let (err, id) = err.into_parts();
+                (id, ErrorCode::from(err.code()))
+            })
+        });
 
-        for (body, is_json) in [Some((body, false)), entry].into_iter().flatten() {
-            let parsed = match parse_message(body, is_json) {
+        for (kind, parsed) in [("message", Some(parse_message(body))), ("batch entry", entry)] {
+            let Some(parsed) = parsed else { continue };
+            let parsed = match parsed {
                 Ok(BatchEntry::Call(call)) => format!(
                     "call {:?} {:?} {:?}",
                     call.id,
@@ -1536,7 +1564,7 @@ mod tests {
                 ),
                 Err((id, code)) => format!("error {id:?} {code:?}"),
             };
-            assert_eq!(parsed, outcome, "is_json: {is_json}");
+            assert_eq!(parsed, outcome, "{kind}");
         }
     }
 }
