@@ -1030,12 +1030,13 @@ fn parse_batch_entry(call: &JsonRawValue) -> Result<BatchEntry<'_>, BatchEntryEr
 /// Reads a JSON-RPC message object and classifies it as a call or a notification, or returns the
 /// id and code of the error response.
 ///
-/// The members are decoded until one of them rules out a call and a notification. The rest is
-/// skipped while looking for the `id` of the error response, so most invalid messages are read
-/// once like a valid one. The read stops at an `id` that the error response can't use, because
-/// only whether `body` is JSON is left to tell then, which takes one raw read. A `body` that isn't
-/// a JSON object, or that holds a member name or a `jsonrpc`, `id` or `method` value that doesn't
-/// decode before it is known to be invalid, is left to [`prepare_error`].
+/// The members are decoded until one of them rules out a call and a notification. From there on
+/// only the `id` of the error response is looked for and the other values are skipped, so most
+/// invalid messages are read once like a valid one. The read stops where the error response loses
+/// its id: at an `id` that it can't use, or past that member at a name or an `id` that fails to
+/// decode. Only whether `body` is JSON is left to tell then, which takes one raw read. A `body`
+/// that isn't a JSON object, or that holds a member name or a `jsonrpc`, `id` or `method` value
+/// that doesn't decode before it is known to be invalid, is left to [`prepare_error`].
 ///
 /// For an object, the outcome is the one of decoding `body` as a [`Request`], then as a
 /// [`Notification`] without an `id`, and otherwise the one of [`prepare_error`].
@@ -1045,8 +1046,8 @@ fn parse_message(body: &[u8]) -> Result<BatchEntry<'_>, (Id<'_>, ErrorCode)> {
     let read = deserializer.deserialize_map(&mut members).and_then(|()| deserializer.end());
 
     if read.is_err() {
-        // The read stopped at an `id` that leaves the error response without one, so only whether
-        // `body` is JSON is left to tell.
+        // The read stopped where the error response lost its id, so only whether `body` is JSON is
+        // left to tell.
         if matches!(members.id, MemberId::Lost) {
             let code = match serde_json::from_slice::<&JsonRawValue>(body) {
                 Ok(_) => ErrorCode::InvalidRequest,
@@ -1054,8 +1055,9 @@ fn parse_message(body: &[u8]) -> Result<BatchEntry<'_>, (Id<'_>, ErrorCode)> {
             };
             return Err((Id::Null, code));
         }
-        // Past the member that makes it invalid a message is only skipped, which fails for
-        // nothing but invalid JSON.
+        // Past the member that makes a message invalid, a name or an `id` that fails to decode
+        // loses the id. That leaves the values that are skipped and the end of the message, which
+        // fail for nothing but invalid JSON.
         if members.invalid {
             return Err((Id::Null, ErrorCode::ParseError));
         }
@@ -1175,27 +1177,27 @@ impl<'de> Visitor<'de> for &mut MessageMembers<'de> {
             }
         }
 
-        // Only the `id` of the error response is left to find. From here on names and values are
-        // read as raw JSON or skipped, which accepts all JSON, so that a failure can't be a name
-        // or an `id` that doesn't decode but only invalid JSON.
-        while let Some(name) = map.next_key::<&JsonRawValue>()? {
-            match serde_json::from_str(name.get()) {
-                Ok(MemberName::Id) if matches!(self.id, MemberId::Missing) => {
-                    let id = map.next_value::<&JsonRawValue>()?;
-                    match serde_json::from_str(id.get()) {
-                        Ok(id) => self.id = MemberId::Valid(id),
-                        Err(_) => return Err(self.lose_id()),
+        // Only the `id` of the error response is left to find. A name or an `id` that fails to
+        // decode loses it whether the message is JSON or not, which the raw read of the body then
+        // tells apart. The error of the failed read is returned as it is: it holds its position,
+        // which a new error would look up by scanning the input read so far.
+        loop {
+            match map.next_key().inspect_err(|_| self.id = MemberId::Lost)? {
+                None => return Ok(()),
+                Some(MemberName::Id) if matches!(self.id, MemberId::Missing) => {
+                    let id = map.next_value::<Value<'_>>();
+                    match id.inspect_err(|_| self.id = MemberId::Lost)?.into_id() {
+                        Some(id) => self.id = MemberId::Valid(id),
+                        None => return Err(self.lose_id()),
                     }
                 }
-                // A second `id` or a name that doesn't decode, both of which fail the derived
-                // `InvalidRequest` impl at the name.
-                Ok(MemberName::Id) | Err(_) => return Err(self.lose_id()),
-                Ok(_) => {
+                // A second `id`, which fails the derived `InvalidRequest` impl at the name.
+                Some(MemberName::Id) => return Err(self.lose_id()),
+                Some(_) => {
                     map.next_value::<IgnoredAny>()?;
                 }
             }
         }
-        Ok(())
     }
 }
 
@@ -1205,8 +1207,8 @@ enum MemberId<'a> {
     #[default]
     Missing,
     Valid(Id<'a>),
-    /// Present more than once, not an id, or in an invalid message with a member name that
-    /// doesn't decode. The error response to any of these has a null id, and the read stops.
+    /// Present more than once or not an id, or the read of an invalid message failed at a member
+    /// name or at the `id`. The error response to any of these has a null id, and the read stops.
     Lost,
 }
 
@@ -1517,6 +1519,8 @@ mod tests {
     #[test_case(br#"{"method":"m","id":8}"#, "error Number(8) InvalidRequest"; "missing version")]
     #[test_case(br#"{"jsonrpc":"1.0","method":"m","id":3}"#, "error Number(3) InvalidRequest"; "wrong version")]
     #[test_case(br#"{"jsonrpc":"2.0","method":"m","id":true}"#, "error Null InvalidRequest"; "invalid id")]
+    #[test_case(br#"{"jsonrpc":"2.0","method":"m","id":-1}"#, "error Null InvalidRequest"; "negative id")]
+    #[test_case(br#"{"jsonrpc":"2.0","method":"m","id":1.5}"#, "error Null InvalidRequest"; "fractional id")]
     #[test_case(br#"{"jsonrpc":"2.0","method":"m","id":{}}"#, "error Null InvalidRequest"; "object id")]
     #[test_case(br#"{"jsonrpc":"2.0","method":"m","id":1,"id":2}"#, "error Null InvalidRequest"; "duplicate id")]
     #[test_case(br#"{"jsonrpc":"2.0","method":"m","id":true,"id":2}"#, "error Null InvalidRequest"; "valid id after an invalid id")]
@@ -1531,6 +1535,7 @@ mod tests {
     #[test_case(br#"{"jsonrpc":"2.0","id":3,"method":[1]}"#, "error Number(3) InvalidRequest"; "array method")]
     #[test_case(br#"{"jsonrpc":"1.0","\u0069d":4}"#, "error Number(4) InvalidRequest"; "escaped id name after the wrong version")]
     #[test_case(br#"{"jsonrpc":"1.0","id":4,"id":4}"#, "error Null InvalidRequest"; "duplicate id after the wrong version")]
+    #[test_case(br#"{"jsonrpc":"1.0","id":true,"id":4}"#, "error Null InvalidRequest"; "valid id after an invalid id after the wrong version")]
     #[test_case(br#"{"jsonrpc":"1.0","id":"\ud800"}"#, "error Null InvalidRequest"; "id that does not decode after the wrong version")]
     #[test_case(br#"{"jsonrpc":"1.0","\ud800":1,"id":4}"#, "error Null InvalidRequest"; "member name that does not decode after the wrong version")]
     #[test_case(br#"{"jsonrpc":"1.0","id":4,"method":"\ud800","x":[1e999]}"#, "error Number(4) InvalidRequest"; "values that do not decode after the wrong version")]
