@@ -177,9 +177,8 @@ impl<'a, DB> ExecutionWitnessRecord<'a, DB> {
                     ),
                 }),
             );
-            if account.is_some() {
-                keys.push(address.to_vec().into());
-            }
+            // Absent accounts are still proof targets, so the witness needs their preimages.
+            keys.push(address.to_vec().into());
 
             if let Some(storage) = self.state.cache.storage.get(address) {
                 let hashed_storage = hashed_state.storages.entry(hashed_address).or_default();
@@ -210,9 +209,10 @@ mod tests {
         state.cache.accounts.insert(address, None);
         state.cache.storage.entry(address).or_default().wipe();
 
-        let (hashed_state, _) = ExecutionWitnessRecord::new(&state).hashed_post_state();
+        let (hashed_state, keys) = ExecutionWitnessRecord::new(&state).hashed_post_state();
         assert_eq!(hashed_state.accounts[&hashed_address], None);
         assert!(hashed_state.storages[&hashed_address].storage.is_empty());
+        assert_eq!(keys, vec![Bytes::copy_from_slice(address.as_slice())]);
     }
 
     #[cfg(feature = "account-ext")]
