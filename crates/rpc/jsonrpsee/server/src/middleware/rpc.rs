@@ -117,7 +117,7 @@ impl RpcServiceT for RpcService {
         match method {
             MethodCallback::Async(callback) => ResponseFuture::future((callback)(
                 id.into_owned(),
-                params.into_owned(),
+                params,
                 conn_id,
                 max_response_body_size,
             )),
