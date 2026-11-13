@@ -34,7 +34,6 @@ soketto = { version = "0.8.1", features = ["http"] }
 thiserror = { workspace = true, features = ["std"] }
 tokio = { workspace = true, features = ["net", "rt-multi-thread", "macros", "time"] }
 tokio-util = { workspace = true, features = ["compat"] }
-tokio-stream = { workspace = true, features = ["sync"] }
 tower = { workspace = true, features = ["util"] }
 tracing = { workspace = true, features = ["std"] }
 
