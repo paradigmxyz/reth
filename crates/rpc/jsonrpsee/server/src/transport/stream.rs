@@ -1,8 +1,8 @@
 //! Serves JSON-RPC over a connection that carries whole messages in both directions, such as a
 //! WebSocket or an IPC socket.
 //!
-//! The transport supplies the incoming messages as a [`Stream`] and a [`MessageWriter`] for the
-//! outgoing ones; [`serve_stream`] runs the calls and writes their responses.
+//! The transport supplies the incoming messages as a `Stream` and a `MessageWriter` for the
+//! outgoing ones; `serve_stream` runs the calls and writes their responses.
 
 use std::{fmt, future::Future, sync::Arc, time::Duration};
 
