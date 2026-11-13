@@ -1,10 +1,10 @@
 //! JSON-RPC IPC server implementation
 
-use crate::{
-    server::connection::{IpcConn, IpcConnDriver, JsonRpcStream},
-    stream_codec::StreamCodec,
+use crate::stream_codec::StreamCodec;
+use futures_util::{
+    future::{self, Either},
+    StreamExt,
 };
-use futures_util::future::Either;
 use interprocess::local_socket::{
     tokio::prelude::{LocalSocketListener, LocalSocketStream},
     traits::tokio::{Listener, Stream},
@@ -13,27 +13,23 @@ use interprocess::local_socket::{
 use jsonrpsee::{
     core::{server::ConnectionId, TEN_MB_SIZE_BYTES},
     server::{
-        accept_error_backoff, handle_rpc_call, middleware::rpc::RpcServiceT, stop_channel,
+        accept_error_backoff,
+        middleware::rpc::RpcServiceT,
+        stop_channel,
+        stream::{serve_stream, StreamConnection, TooLarge},
         BatchRequestConfig, ConnectionGuard, ConnectionPermit, IdProvider, RandomIntegerIdProvider,
         ServerHandle, StopHandle,
     },
-    types::{error::reject_too_big_request, Id},
-    BoundedSubscriptions, MethodResponse, MethodSink, Methods,
+    BoundedSubscriptions, MethodSink, Methods,
 };
-use std::{
-    future::Future,
-    io,
-    pin::{pin, Pin},
-    sync::Arc,
-    task::{Context, Poll},
-};
+use std::{future::Future, io, pin::pin, sync::Arc};
 use tokio::{
-    io::{AsyncRead, AsyncWrite, AsyncWriteExt},
-    sync::{mpsc, oneshot},
+    io::AsyncWriteExt,
+    sync::{mpsc, oneshot, Semaphore},
 };
-use tokio_util::task::AbortOnDropHandle;
-use tower::{layer::util::Identity, Layer, Service};
-use tracing::{instrument, trace, warn, Instrument};
+use tokio_util::codec::{FramedRead, FramedWrite};
+use tower::{layer::util::Identity, Layer};
+use tracing::{instrument, trace, Instrument};
 
 #[cfg(unix)]
 use interprocess::os::unix::local_socket::ListenerOptionsExt;
@@ -41,8 +37,6 @@ use interprocess::os::unix::local_socket::ListenerOptionsExt;
 use std::os::unix::fs::PermissionsExt;
 
 pub use jsonrpsee::server::middleware::rpc::{RpcService, RpcServiceBuilder};
-
-mod connection;
 
 /// Number of messages a connection buffers before backpressure kicks in.
 const MESSAGE_BUFFER_CAPACITY: usize = 1024;
@@ -288,111 +282,6 @@ pub struct IpcServerStartError {
     source: io::Error,
 }
 
-/// Data required by the server to handle requests received via an IPC connection
-#[derive(Debug, Clone)]
-struct ServiceData {
-    /// Registered server methods.
-    methods: Methods,
-    /// Subscription ID provider.
-    id_provider: Arc<dyn IdProvider>,
-    /// Connection ID
-    conn_id: usize,
-    /// Connection Permit.
-    conn_permit: Arc<ConnectionPermit>,
-    /// Limits the number of subscriptions for this connection
-    bounded_subscriptions: BoundedSubscriptions,
-    /// Sink that is used to send back responses to the connection.
-    ///
-    /// This is used for subscriptions.
-    method_sink: MethodSink,
-    /// `ServerConfig`
-    server_cfg: Settings,
-}
-
-/// Turns raw IPC messages into serialized JSON-RPC responses.
-#[derive(Debug, Clone)]
-struct TowerServiceNoHttp<L> {
-    inner: ServiceData,
-    rpc_middleware: RpcServiceBuilder<L>,
-}
-
-impl<RpcMiddleware> Service<String> for TowerServiceNoHttp<RpcMiddleware>
-where
-    RpcMiddleware: Layer<RpcService>,
-    RpcMiddleware::Service: RpcServiceT + Send + Sync + 'static,
-{
-    /// The response of a handled RPC call
-    ///
-    /// This is an `Option` because subscriptions and call responses are handled differently.
-    /// This will be `Some` for calls, and `None` for subscriptions and notifications, because the
-    /// subscription response will be emitted via the `method_sink`.
-    type Response = Option<String>;
-
-    type Error = Box<dyn core::error::Error + Send + Sync + 'static>;
-
-    type Future = Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send>>;
-
-    /// Opens door for back pressure implementation.
-    fn poll_ready(&mut self, _: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        Poll::Ready(Ok(()))
-    }
-
-    fn call(&mut self, request: String) -> Self::Future {
-        trace!(request_bytes = request.len(), "Received IPC request");
-
-        let max_request_body_size = self.inner.server_cfg.max_request_body_size;
-        let conn = self.inner.conn_permit.clone();
-        let rpc_service = self.rpc_middleware.service(RpcService::new(
-            self.inner.methods.clone(),
-            self.inner.server_cfg.max_response_body_size as usize,
-            self.inner.conn_id.into(),
-            self.inner.bounded_subscriptions.clone(),
-            self.inner.method_sink.clone(),
-            self.inner.id_provider.clone(),
-        ));
-        // an ipc connection needs to handle read+write concurrently
-        // even if the underlying rpc handler spawns the actual work or is does a lot of async any
-        // additional overhead performed by `handle_request` can result in I/O latencies, for
-        // example tracing calls are relatively CPU expensive on serde::serialize alone, moving this
-        // work to a separate task takes the pressure off the connection so all concurrent responses
-        // are also serialized concurrently and the connection can focus on read+write
-        //
-        // The connection drops its pending calls when it closes, so the call must not outlive the
-        // returned future, otherwise it keeps running without anyone waiting for the response.
-        let f = AbortOnDropHandle::new(tokio::task::spawn(async move {
-            let rp = if request.len() > max_request_body_size as usize {
-                MethodResponse::error(Id::Null, reject_too_big_request(max_request_body_size))
-            } else {
-                let is_single = request.chars().find_map(|c| match c {
-                    '{' => Some(true),
-                    '[' => Some(false),
-                    _ => None,
-                });
-                handle_rpc_call(
-                    request.as_bytes(),
-                    is_single.unwrap_or(true),
-                    BatchRequestConfig::Unlimited,
-                    &rpc_service,
-                )
-                .await
-            };
-            drop(conn);
-
-            (rp.is_method_call() || rp.is_batch()).then(|| rp.into_json())
-        }));
-
-        Box::pin(async move {
-            // Call panics are answered by the call itself. Anything left here has no request id to
-            // respond to, and the connection writes errors verbatim, which would corrupt the
-            // stream.
-            Ok(f.await.unwrap_or_else(|err| {
-                warn!(%err, "IPC call task failed");
-                None
-            }))
-        })
-    }
-}
-
 struct ProcessConnection<RpcMiddleware> {
     rpc_middleware: RpcServiceBuilder<RpcMiddleware>,
     conn_permit: Arc<ConnectionPermit>,
@@ -424,61 +313,67 @@ where
         local_socket_stream,
     } = params;
 
-    let codec =
-        StreamCodec::stream_incoming().with_max_length(server_cfg.max_request_body_size as usize);
-    let ipc = IpcConn(tokio_util::codec::Decoder::framed(codec, local_socket_stream));
+    let max_request_body_size = server_cfg.max_request_body_size;
+    let (recv, send) = local_socket_stream.split();
+    // The codec truncates a longer message to one byte more than the limit.
+    let codec = StreamCodec::stream_incoming().with_max_length(max_request_body_size as usize);
+    let incoming = FramedRead::new(recv, codec).scan((), move |(), request| {
+        future::ready(match request {
+            Ok(request) if request.len() > max_request_body_size as usize => Some(Err(TooLarge)),
+            Ok(request) => {
+                trace!(request_bytes = request.len(), "Received IPC request");
+                Some(Ok(request))
+            }
+            Err(err) => {
+                // this can happen if the client closes the connection
+                tracing::debug!("IPC request failed: {:?}", err);
+                None
+            }
+        })
+    });
+    let outgoing = FramedWrite::new(send, StreamCodec::stream_incoming());
 
     let (tx, rx) = mpsc::channel::<String>(MESSAGE_BUFFER_CAPACITY);
-    let method_sink = MethodSink::new_with_limit(tx, server_cfg.max_response_body_size);
-    let service = TowerServiceNoHttp {
-        inner: ServiceData {
-            methods,
-            id_provider,
-            conn_id,
-            conn_permit,
-            bounded_subscriptions: BoundedSubscriptions::new(
-                server_cfg.max_subscriptions_per_connection,
-            ),
-            method_sink,
-            server_cfg,
-        },
-        rpc_middleware,
+    let sink = MethodSink::new_with_limit(tx, server_cfg.max_response_body_size);
+    let rpc_service = rpc_middleware.service(RpcService::new(
+        methods,
+        server_cfg.max_response_body_size as usize,
+        conn_id.into(),
+        BoundedSubscriptions::new(server_cfg.max_subscriptions_per_connection),
+        sink.clone(),
+        id_provider,
+    ));
+
+    let conn = StreamConnection {
+        incoming,
+        outgoing,
+        rpc_service,
+        sink,
+        rx,
+        // The connection is dropped when the server stops, see below.
+        stopped: std::future::pending(),
+        batch_requests_config: BatchRequestConfig::Unlimited,
+        max_request_body_size,
+        // Calls are not limited, so the connection keeps reading while they run and notices when
+        // the client disconnects, which cancels them.
+        max_concurrent_calls: Semaphore::MAX_PERMITS,
+        ping_interval: None,
     };
 
     // `#[instrument]` only spans this function, so the connection span is carried into the task.
     tokio::spawn(
-        async {
-            to_ipc_service(ipc, service, stop_handle, rx).await;
+        async move {
+            // Dropping the connection ends its calls, which stop once nothing reads their
+            // responses.
+            tokio::select! {
+                _ = serve_stream(conn) => {}
+                _ = stop_handle.shutdown() => {}
+            }
+            drop(conn_permit);
             drop(drop_on_completion)
         }
         .in_current_span(),
     );
-}
-
-async fn to_ipc_service<S, T>(
-    ipc: IpcConn<JsonRpcStream<T>>,
-    service: S,
-    stop_handle: StopHandle,
-    rx: mpsc::Receiver<String>,
-) where
-    S: Service<String, Response = Option<String>> + Send + 'static,
-    S::Error: Into<Box<dyn core::error::Error + Send + Sync>>,
-    S::Future: Send + Unpin,
-    T: AsyncRead + AsyncWrite + Unpin + Send + 'static,
-{
-    let conn = IpcConnDriver {
-        conn: ipc,
-        service,
-        pending_calls: Default::default(),
-        items: Default::default(),
-        messages: rx,
-    };
-    let stopped = stop_handle.shutdown();
-
-    tokio::select! {
-        _ = conn => {}
-        _ = stopped => {}
-    }
 }
 
 /// JSON-RPC IPC server settings.
@@ -647,7 +542,7 @@ mod tests {
             error::{OVERSIZED_RESPONSE_CODE, OVERSIZED_RESPONSE_MSG, TOO_MANY_SUBSCRIPTIONS_CODE},
             ErrorCode, Request,
         },
-        PendingSubscriptionSink, RpcModule, SubscriptionMessage,
+        MethodResponse, PendingSubscriptionSink, RpcModule, SubscriptionMessage,
     };
     use reth_tracing::init_test_tracing;
     use serde_json::{json, Value};
@@ -696,6 +591,36 @@ mod tests {
         async fn recv(&mut self) -> Option<Value> {
             let msg = self.recv.next().await?.ok()?;
             Some(serde_json::from_str(&msg).unwrap())
+        }
+    }
+
+    /// Counts the calls that started and the ones that were dropped.
+    #[derive(Default)]
+    struct RunningCalls {
+        started: AtomicUsize,
+        dropped: AtomicUsize,
+    }
+
+    impl RunningCalls {
+        /// Waits until `reached` holds, and panics if it doesn't within five seconds.
+        async fn wait_for(&self, reached: impl Fn(&Self) -> bool) {
+            let wait = async {
+                while !reached(self) {
+                    tokio::time::sleep(Duration::from_millis(10)).await;
+                }
+            };
+            tokio::time::timeout(Duration::from_secs(5), wait)
+                .await
+                .expect("condition not reached");
+        }
+    }
+
+    /// Counts a call as dropped when it ends.
+    struct RunningCall(Arc<RunningCalls>);
+
+    impl Drop for RunningCall {
+        fn drop(&mut self) {
+            self.0.dropped.fetch_add(1, Ordering::Relaxed);
         }
     }
 
@@ -880,6 +805,42 @@ mod tests {
 
         let dropped = tokio::time::timeout(std::time::Duration::from_secs(5), dropped_rx).await;
         assert!(dropped.is_ok(), "call kept running after the connection closed");
+    }
+
+    #[tokio::test]
+    async fn test_pending_calls_aborted_on_disconnect_with_many_running() {
+        // More calls than the connection buffers messages.
+        const CALLS: usize = MESSAGE_BUFFER_CAPACITY + 1;
+
+        let endpoint = &dummy_name();
+        let server = Builder::default().build(endpoint.clone());
+        let running = Arc::new(RunningCalls::default());
+        let mut module = RpcModule::from_arc(running.clone());
+        module
+            .register_async_method("hang", |_, running| async move {
+                running.started.fetch_add(1, Ordering::Relaxed);
+                let _running = RunningCall(running);
+                std::future::pending::<()>().await;
+                "unreachable"
+            })
+            .unwrap();
+        let handle = server.start(module).await.unwrap();
+        tokio::spawn(handle.stopped());
+
+        let mut client = TestClient::connect(endpoint).await;
+        for _ in 0..CALLS {
+            let request = client.request("hang", json!([]));
+            client.send(request).await.unwrap();
+        }
+        running.wait_for(|running| running.started.load(Ordering::Relaxed) == CALLS).await;
+        drop(client);
+
+        // Every call that started is dropped once the connection is closed.
+        running
+            .wait_for(|running| {
+                running.dropped.load(Ordering::Relaxed) == running.started.load(Ordering::Relaxed)
+            })
+            .await;
     }
 
     #[tokio::test]
