@@ -3,7 +3,6 @@
 name: hive
 
 on:
-  pull_request:
   workflow_dispatch:
   schedule:
     - cron: "0 0 * * *"
@@ -30,6 +29,7 @@ jobs:
       DEPOT_TOKEN: ${{ secrets.DEPOT_TOKEN }}
 
   prepare-hive:
+    if: github.repository == 'paradigmxyz/reth'
     timeout-minutes: 45
     runs-on: ${{ github.repository == 'paradigmxyz/reth' && 'depot-ubuntu-latest-16' || 'ubuntu-latest' }}
     permissions:
@@ -328,11 +328,10 @@ jobs:
       - test-amsterdam
     if: failure()
     runs-on: ubuntu-latest
-    env:
-      SLACK_WEBHOOK: ${{ secrets.SLACK_HIVE_WEBHOOK_URL }}
     steps:
       - name: Slack Webhook Action
         uses: rtCamp/action-slack-notify@06cc13f74fa8d4d2296c09455d91e9453e4025f4 # v2.4.1
         env:
           SLACK_COLOR: ${{ job.status }}
-          SLACK_MESSAGE: "Failed run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          SLACK_MESSAGE: "Failed run: https://github.com/paradigmxyz/reth/actions/runs/${{ github.run_id }}"
+          SLACK_WEBHOOK: ${{ secrets.SLACK_HIVE_WEBHOOK_URL }}
