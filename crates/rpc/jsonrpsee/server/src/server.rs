@@ -636,7 +636,6 @@ impl<HttpMiddleware, RpcMiddleware> Builder<HttpMiddleware, RpcMiddleware> {
 }
 
 /// Data required by the server to handle requests.
-#[derive(Debug)]
 struct ServiceData<S> {
     /// Registered server methods.
     methods: Methods,
@@ -659,7 +658,6 @@ struct ServiceData<S> {
 ///
 /// # Note
 /// This is similar to [`hyper::service::service_fn`].
-#[derive(Debug)]
 pub struct TowerServiceNoHttp<L: Layer<RpcService>> {
     inner: Arc<ServiceData<L::Service>>,
     rpc_middleware: RpcServiceBuilder<L>,
@@ -668,6 +666,16 @@ pub struct TowerServiceNoHttp<L: Layer<RpcService>> {
 impl<L: Layer<RpcService> + Clone> Clone for TowerServiceNoHttp<L> {
     fn clone(&self) -> Self {
         Self { inner: self.inner.clone(), rpc_middleware: self.rpc_middleware.clone() }
+    }
+}
+
+// Not derived, a derive would require the RPC service of the middleware to be `Debug` as well.
+impl<L: Layer<RpcService> + fmt::Debug> fmt::Debug for TowerServiceNoHttp<L> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("TowerServiceNoHttp")
+            .field("conn_id", &self.inner.conn_id)
+            .field("rpc_middleware", &self.rpc_middleware)
+            .finish_non_exhaustive()
     }
 }
 
