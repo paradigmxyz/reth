@@ -777,6 +777,22 @@ impl<N: ProviderNodeTypes> TransactionsProvider for ConsistentProvider<N> {
         self.storage_provider.transaction_by_hash_with_meta(tx_hash)
     }
 
+    fn transaction_by_hash_with_meta_and_sender(
+        &self,
+        tx_hash: TxHash,
+    ) -> ProviderResult<Option<(Self::Transaction, TransactionMeta, Option<Address>)>> {
+        if let Some(found) = self.head_block.as_ref().and_then(|b| {
+            b.chain().find_map(|block_state| {
+                let indexed = block_state.find_indexed(tx_hash)?;
+                Some((indexed.tx().clone(), indexed.meta(), Some(indexed.recovered_tx().signer())))
+            })
+        }) {
+            return Ok(Some(found))
+        }
+
+        self.storage_provider.transaction_by_hash_with_meta_and_sender(tx_hash)
+    }
+
     fn transactions_by_block(
         &self,
         id: BlockHashOrNumber,

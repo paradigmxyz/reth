@@ -553,7 +553,8 @@ mod tests {
     use rand::Rng;
     use reth_chain_state::CanonStateSubscriptions;
     use reth_chainspec::{ChainSpec, ChainSpecBuilder, ChainSpecProvider, EthChainSpec};
-    use reth_db_common::init::init_genesis;
+    use reth_db_api::{tables, transaction::DbTxMut};
+    use reth_db_common::init::{init_genesis, init_genesis_with_settings};
     use reth_ethereum_primitives::TransactionSigned;
     use reth_evm::{ConfigureEvm, EvmEnvFor, TxEnvFor};
     use reth_evm_ethereum::EthEvmConfig;
@@ -567,7 +568,8 @@ mod tests {
             create_test_provider_factory_with_chain_spec, ExtendedAccount, MockEthProvider,
             NoopProvider,
         },
-        PruneCheckpointReader, StageCheckpointReader,
+        BlockWriter, ExecutionOutcome, PruneCheckpointReader, StageCheckpointReader,
+        StageCheckpointWriter,
     };
     use reth_rpc_convert::{EthTxEnvError, TryIntoTxEnv};
     use reth_rpc_eth_api::{
@@ -579,9 +581,10 @@ mod tests {
     use reth_rpc_server_types::constants::DEFAULT_MAX_CALL_MANY_CALLS;
     use reth_storage_api::{
         BalProvider, BlockReaderIdExt, NodePrimitivesProvider, StateProviderFactory,
+        StorageSettings,
     };
     use reth_tasks::cancel::{is_cancelled, CancelOnDrop};
-    use reth_testing_utils::generators;
+    use reth_testing_utils::generators::{self, random_block, random_receipt, BlockParams};
     use reth_transaction_pool::test_utils::{testing_pool, MockTransaction, TestPool};
     use std::time::{Duration, Instant};
 
@@ -2059,6 +2062,104 @@ mod tests {
                         if *cost == value.saturating_add(blob_fee) && *actual == balance
                 ),
                 "{err}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn lookups_by_tx_hash_match_block_lookups() {
+        let chain_spec = Arc::new(ChainSpecBuilder::mainnet().genesis(Genesis::default()).build());
+        let mut rng = generators::rng();
+        for prune_senders in [false, true] {
+            let factory = create_test_provider_factory_with_chain_spec(chain_spec.clone());
+            let mut parent = init_genesis_with_settings(&factory, StorageSettings::v1()).unwrap();
+            // Block 2 starts at a non-zero tx number.
+            let blocks = (1..=2)
+                .map(|number| {
+                    let block = random_block(
+                        &mut rng,
+                        number,
+                        BlockParams {
+                            parent: Some(parent),
+                            tx_count: Some(3),
+                            ommers_count: Some(0),
+                            ..Default::default()
+                        },
+                    );
+                    parent = block.hash();
+                    block.try_recover().unwrap()
+                })
+                .collect::<Vec<_>>();
+            let receipts = blocks
+                .iter()
+                .map(|block| {
+                    let mut cumulative_gas_used = 0;
+                    block
+                        .body()
+                        .transactions
+                        .iter()
+                        .map(|tx| {
+                            let mut receipt = random_receipt(&mut rng, tx, Some(2), None);
+                            cumulative_gas_used += receipt.cumulative_gas_used;
+                            receipt.cumulative_gas_used = cumulative_gas_used;
+                            receipt
+                        })
+                        .collect()
+                })
+                .collect();
+
+            let provider_rw = factory.provider_rw().unwrap();
+            provider_rw
+                .append_blocks_with_state(
+                    blocks.clone(),
+                    &ExecutionOutcome { first_block: 1, receipts, ..Default::default() },
+                    Default::default(),
+                )
+                .unwrap();
+            if prune_senders {
+                provider_rw.tx_ref().clear::<tables::TransactionSenders>().unwrap();
+            }
+            provider_rw.update_pipeline_stages(2, false).unwrap();
+            provider_rw.commit().unwrap();
+
+            let api = build_test_eth_api(BlockchainProvider::new(factory).unwrap());
+            for block in &blocks {
+                let mut by_hash = Vec::new();
+                for (sender, tx) in block.transactions_with_sender() {
+                    let tx = EthTransactions::transaction_by_hash(&api, *tx.tx_hash())
+                        .await
+                        .unwrap()
+                        .unwrap()
+                        .into_transaction(api.converter())
+                        .unwrap();
+                    assert_eq!(tx.inner.signer(), *sender);
+                    let receipt = EthTransactions::transaction_receipt(&api, *tx.inner.tx_hash())
+                        .await
+                        .unwrap()
+                        .unwrap();
+                    by_hash.push((tx, receipt));
+                }
+                assert!(api.cache().get_maybe_block(block.hash()).await.unwrap().is_none());
+
+                let block_receipts =
+                    EthBlocks::block_receipts(&api, block.hash().into()).await.unwrap().unwrap();
+                for (index, (tx, receipt)) in by_hash.into_iter().enumerate() {
+                    assert_eq!(
+                        EthTransactions::transaction_by_block_and_tx_index(
+                            &api,
+                            block.hash().into(),
+                            index
+                        )
+                        .await
+                        .unwrap(),
+                        Some(tx)
+                    );
+                    assert_eq!(receipt, block_receipts[index]);
+                }
+            }
+            assert_eq!(
+                EthTransactions::transaction_receipt(&api, B256::random()).await.unwrap(),
+                None
             );
         }
     }
