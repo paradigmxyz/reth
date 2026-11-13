@@ -1297,6 +1297,73 @@ JIT:
 
           IR, assembly, and bytecode are written to `<datadir>/jit/<spec_id>/<code_hash>/` for each compiled contract. Note that this is not ever cleaned up, and has a non negligible performance overhead.
 
+Extension:
+      --pbt
+          Enable experimental BLAKE3 PBT state commitments using genesis config.binaryTrieTime
+
+      --pbt.parallel
+          Hash dense PBT state-update batches in parallel; sparse updates remain incremental
+
+      --pbt.retire-mpt
+          Irreversibly retire MPT storage after persisted post-PBT finality
+
+          [env: PBT_RETIRE_MPT=]
+
+      --pbt.migration-snapshot <MIGRATION_SNAPSHOT>
+          Canonical snapshot input; omit to convert retained local MPT state
+
+          [env: PBT_MIGRATION_SNAPSHOT=]
+
+      --pbt.migration-preimages <MIGRATION_PREIMAGES>
+          Canonical preimages for the finalized migration anchor
+
+          [env: PBT_MIGRATION_PREIMAGES=]
+
+      --pbt.migration-anchor <MIGRATION_ANCHOR>
+          Locally finalized pre-PBT migration header hash
+
+          [env: PBT_MIGRATION_ANCHOR=]
+
+      --pbt.catchup-max-blocks <CATCHUP_MAX_BLOCKS>
+          Maximum onboarding range or staged chunk length (default 1024 blocks)
+
+          [env: PBT_CATCHUP_MAX_BLOCKS=]
+
+      --pbt.catchup-max-bal-bytes <CATCHUP_MAX_BAL_BYTES>
+          Maximum authenticated BAL bytes per replay chunk (default 64 MiB)
+
+          [env: PBT_CATCHUP_MAX_BAL_BYTES=]
+
+      --pbt.cache-max-bytes <CACHE_MAX_BYTES>
+          Estimated full-state cache byte budget (default 1 GiB); zero disables caching
+
+          [env: PBT_CACHE_MAX_BYTES=]
+
+      --pbt.checkpoint-history <CHECKPOINT_HISTORY>
+          Checkpoints retained below finality, excluding genesis and retirement (default 64)
+
+          [env: PBT_CHECKPOINT_HISTORY=]
+
+      --pbt.import-max-accounts <IMPORT_MAX_ACCOUNTS>
+          Maximum accounts in an untrusted migration artifact (default 1000000)
+
+          [env: PBT_IMPORT_MAX_ACCOUNTS=]
+
+      --pbt.import-max-leaves <IMPORT_MAX_LEAVES>
+          Maximum leaves in an untrusted migration artifact (default 10000000)
+
+          [env: PBT_IMPORT_MAX_LEAVES=]
+
+      --pbt.import-max-code-size <IMPORT_MAX_CODE_SIZE>
+          Maximum single-code byte length in an artifact (default 16 MiB)
+
+          [env: PBT_IMPORT_MAX_CODE_SIZE=]
+
+      --pbt.import-max-total-code-size <IMPORT_MAX_TOTAL_CODE_SIZE>
+          Maximum aggregate artifact bytecode size (default 256 MiB)
+
+          [env: PBT_IMPORT_MAX_TOTAL_CODE_SIZE=]
+
 Logging:
       --log.stdout.format <FORMAT>
           The format to use for logs written to stdout
