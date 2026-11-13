@@ -34,8 +34,8 @@ use crate::{
     middleware::rpc::{catch_call_panic, RpcService},
     transport::{http, ws, ws::BackgroundTaskParams},
     utils::{
-        accept_error_backoff, deserialize_notification, no_request_within, NotifyOnRequest,
-        PermitBody, WriteTimeoutIo, DEFAULT_FIRST_REQUEST_TIMEOUT, DEFAULT_WRITE_TIMEOUT,
+        accept_error_backoff, no_request_within, NotifyOnRequest, PermitBody, WriteTimeoutIo,
+        DEFAULT_FIRST_REQUEST_TIMEOUT, DEFAULT_WRITE_TIMEOUT,
     },
     HttpBody, HttpRequest, HttpResponse, LOG_TARGET,
 };
@@ -52,10 +52,7 @@ use hyper_util::{
 use jsonrpsee_core::{
     id_providers::RandomIntegerIdProvider,
     middleware::{Batch, BatchEntry, BatchEntryErr, RpcServiceBuilder, RpcServiceT},
-    server::{
-        helpers::prepare_error, BoundedSubscriptions, ConnectionId, MethodResponse, MethodSink,
-        Methods,
-    },
+    server::{BoundedSubscriptions, ConnectionId, MethodResponse, MethodSink, Methods},
     traits::IdProvider,
     BoxError, JsonRawValue, TEN_MB_SIZE_BYTES,
 };
@@ -84,8 +81,6 @@ use tracing::{instrument, Instrument};
 
 /// Default maximum connections allowed.
 const MAX_CONNECTIONS: u32 = 100;
-
-type Notif<'a> = Option<Cow<'a, JsonRawValue>>;
 
 /// JSON RPC server.
 pub struct Server<HttpMiddleware = Identity, RpcMiddleware = Identity> {
@@ -939,13 +934,10 @@ where
 {
     // Single request or notification
     if is_single {
-        if let Ok(req) = serde_json::from_slice::<Request<'_>>(body) {
-            catch_call_panic(req.id(), || rpc_service.call(req)).await
-        } else if let Ok(notif) = deserialize_notification::<Notif>(body) {
-            rpc_service.notification(notif).await
-        } else {
-            let (id, code) = prepare_error(body);
-            MethodResponse::error(id, ErrorObject::from(code))
+        match parse_message(body) {
+            Ok(BatchEntry::Call(req)) => catch_call_panic(req.id(), || rpc_service.call(req)).await,
+            Ok(BatchEntry::Notification(notif)) => rpc_service.notification(notif).await,
+            Err((id, code)) => MethodResponse::error(id, ErrorObject::from(code)),
         }
     }
     // Batch of requests.
@@ -1003,25 +995,135 @@ fn parse_batch(body: &[u8], max_len: usize) -> Result<Batch<'_>, MethodResponse>
 
 /// Classifies a raw batch entry as a call, a notification or an invalid request.
 fn parse_batch_entry(call: &JsonRawValue) -> Result<BatchEntry<'_>, BatchEntryErr<'_>> {
-    // The derived `Deserialize` impls below also accept a JSON array holding the fields in
-    // order, so only objects may reach them.
+    // `parse_message` reads only objects.
     if !call.get().starts_with('{') {
         return Err(BatchEntryErr::new(Id::Null, ErrorCode::InvalidRequest.into()));
     }
 
-    if let Ok(req) = serde_json::from_str(call.get()) {
-        Ok(BatchEntry::Call(req))
-    } else if let Ok(notif) = deserialize_notification::<Notif>(call.get().as_bytes()) {
-        Ok(BatchEntry::Notification(notif))
-    } else {
-        let id = match serde_json::from_str::<jsonrpsee_types::InvalidRequest>(call.get()) {
-            Ok(err) => err.id,
-            Err(_) => Id::Null,
-        };
+    // The entry was read as raw JSON, so it can't be a parse error.
+    parse_message(call.get().as_bytes()).map_err(|(id, code)| BatchEntryErr::new(id, code.into()))
+}
 
-        Err(BatchEntryErr::new(id, ErrorCode::InvalidRequest.into()))
+/// Reads a JSON-RPC message object in one pass and classifies it as a call or a notification, or
+/// returns the id and code of the error response.
+///
+/// `body` must start with `{`. The members are decoded only once the whole object is read, so an
+/// invalid message costs one pass over `body` like a valid one. The outcome is the one of decoding
+/// `body` as a [`Request`], then as a [`Notification`] without an `id`, and otherwise recovering
+/// the `id` of the invalid request.
+fn parse_message(body: &[u8]) -> Result<BatchEntry<'_>, (Id<'_>, ErrorCode)> {
+    let mut deserializer = serde_json::Deserializer::from_slice(body);
+    let Ok(members) = MessageMembers::deserialize(&mut deserializer)
+        .and_then(|members| deserializer.end().map(|()| members))
+    else {
+        return Err((Id::Null, ErrorCode::ParseError));
+    };
+
+    let id = members.id.decode::<Id<'_>>();
+    let params = match members.params {
+        Member::Missing => Some(None),
+        // Decoded as an `Option`, `null` params are absent.
+        Member::Once(params) => Some((params.get() != "null").then_some(Cow::Borrowed(params))),
+        Member::Repeated => None,
+    };
+    if let Some(TwoPointZero) = members.jsonrpc.decode() &&
+        let Some(MethodName(method)) = members.method.decode() &&
+        let Some(params) = params
+    {
+        if let Member::Missing = members.id {
+            return Ok(BatchEntry::Notification(Notification::new(method, params)));
+        }
+        if let Some(id) = id {
+            return Ok(BatchEntry::Call(Request { jsonrpc: TwoPointZero, id, method, params }));
+        }
+    }
+
+    // Unknown members are skipped without checking that they are UTF-8, so a valid message may
+    // hold invalid UTF-8 but an invalid one is then a parse error.
+    if std::str::from_utf8(body).is_err() {
+        return Err((Id::Null, ErrorCode::ParseError));
+    }
+    Err((id.unwrap_or(Id::Null), ErrorCode::InvalidRequest))
+}
+
+/// The members of a JSON-RPC message object, read without decoding them.
+#[derive(Default)]
+struct MessageMembers<'a> {
+    jsonrpc: Member<'a>,
+    id: Member<'a>,
+    method: Member<'a>,
+    params: Member<'a>,
+}
+
+impl<'de> Deserialize<'de> for MessageMembers<'de> {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        deserializer.deserialize_map(Self::default())
     }
 }
+
+impl<'de> Visitor<'de> for MessageMembers<'de> {
+    type Value = Self;
+
+    fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("a JSON-RPC message object")
+    }
+
+    fn visit_map<A: MapAccess<'de>>(mut self, mut map: A) -> Result<Self::Value, A::Error> {
+        while let Some(name) = map.next_key()? {
+            let member = match name {
+                MemberName::Jsonrpc => &mut self.jsonrpc,
+                MemberName::Id => &mut self.id,
+                MemberName::Method => &mut self.method,
+                MemberName::Params => &mut self.params,
+                MemberName::Other => {
+                    map.next_value::<IgnoredAny>()?;
+                    continue;
+                }
+            };
+            let value = map.next_value()?;
+            *member = match member {
+                Member::Missing => Member::Once(value),
+                Member::Once(_) | Member::Repeated => Member::Repeated,
+            };
+        }
+        Ok(self)
+    }
+}
+
+/// A member of a [`MessageMembers`] object.
+#[derive(Clone, Copy, Default)]
+enum Member<'a> {
+    #[default]
+    Missing,
+    Once(&'a JsonRawValue),
+    /// Present more than once, which the derived `Deserialize` impls reject.
+    Repeated,
+}
+
+impl<'a> Member<'a> {
+    /// Decodes the member, or returns `None` if it is missing, repeated or invalid.
+    fn decode<T: Deserialize<'a>>(self) -> Option<T> {
+        let Self::Once(value) = self else { return None };
+        serde_json::from_str(value.get()).ok()
+    }
+}
+
+/// The name of a [`MessageMembers`] member, matched like the derived `Deserialize` impls match
+/// field names.
+#[derive(Deserialize)]
+#[serde(field_identifier, rename_all = "lowercase")]
+enum MemberName {
+    Jsonrpc,
+    Id,
+    Method,
+    Params,
+    #[serde(other)]
+    Other,
+}
+
+/// A method name, borrowed from the message unless it holds escapes.
+#[derive(Deserialize)]
+struct MethodName<'a>(#[serde(borrow)] Cow<'a, str>);
 
 /// A valid batch entry: a call if it has an `id`, a notification otherwise.
 ///
@@ -1235,5 +1337,37 @@ mod tests {
     #[test_case(b"[{\"jsonrpc\":\"2.0\",\"method\":\"m\"}]", 1; "notification")]
     fn batch_at_limit_is_accepted(body: &[u8], max_len: usize) {
         assert_eq!(parse_batch(body, max_len).unwrap().len(), max_len);
+    }
+
+    #[test_case(CALL.as_bytes(), r#"call Number(1) "m" Some("[1]")"#; "call")]
+    #[test_case(br#"{"jsonrpc":"2.0","method":"m","id":null}"#, r#"call Null "m" None"#; "null id")]
+    #[test_case(br#"{"id":"a","params":null,"method":"\"m\"","x":1,"jsonrpc":"2.0"}"#, r#"call Str("a") "\"m\"" None"#; "escaped method, null params and unknown member")]
+    #[test_case(br#"{"\u0069d":1,"jsonrpc":"2\u002e0","\u006dethod":"m"}"#, r#"call Number(1) "m" None"#; "escaped names and version")]
+    #[test_case(b"{\"jsonrpc\":\"2.0\",\"method\":\"m\",\"id\":1,\"x\":\"\xff\"}", r#"call Number(1) "m" None"#; "invalid utf8 in unknown member of a call")]
+    #[test_case(br#"{"jsonrpc":"2.0","method":"m","params":[1],"x":{"id":true}}"#, r#"notification "m" Some("[1]")"#; "notification")]
+    #[test_case(br#"{"jsonrpc":"2.0","id":7,"params":[1]}"#, "error Number(7) InvalidRequest"; "missing method")]
+    #[test_case(br#"{"jsonrpc":"1.0","method":"m","id":3}"#, "error Number(3) InvalidRequest"; "wrong version")]
+    #[test_case(br#"{"jsonrpc":"2.0","method":"m","id":true}"#, "error Null InvalidRequest"; "invalid id")]
+    #[test_case(br#"{"jsonrpc":"2.0","method":"m","id":1,"id":2}"#, "error Null InvalidRequest"; "duplicate id")]
+    #[test_case(br#"{"jsonrpc":"2.0","method":"m","method":"n","id":5}"#, "error Number(5) InvalidRequest"; "duplicate method")]
+    #[test_case(br#"{"jsonrpc":"2.0","method":"m","params":[],"params":[]}"#, "error Null InvalidRequest"; "duplicate params")]
+    #[test_case(b"{\"jsonrpc\":\"2.0\",\"id\":1,\"x\":\"\xff\"}", "error Null ParseError"; "invalid utf8 in unknown member of an invalid request")]
+    #[test_case(br#"{"jsonrpc":"2.0","method":"m","id":1} x"#, "error Null ParseError"; "trailing characters")]
+    fn message_outcome(body: &[u8], outcome: &str) {
+        let parsed = match parse_message(body) {
+            Ok(BatchEntry::Call(call)) => format!(
+                "call {:?} {:?} {:?}",
+                call.id,
+                call.method,
+                call.params.as_deref().map(JsonRawValue::get)
+            ),
+            Ok(BatchEntry::Notification(notification)) => format!(
+                "notification {:?} {:?}",
+                notification.method,
+                notification.params.as_deref().map(JsonRawValue::get)
+            ),
+            Err((id, code)) => format!("error {id:?} {code:?}"),
+        };
+        assert_eq!(parsed, outcome);
     }
 }

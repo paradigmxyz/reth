@@ -25,7 +25,6 @@
 // DEALINGS IN THE SOFTWARE.
 
 use std::{
-    borrow::Cow,
     future::Future,
     io,
     pin::{pin, Pin},
@@ -40,9 +39,7 @@ use futures_util::{future, ready};
 use hyper::body::{Bytes, Frame};
 use hyper_util::rt::{TokioExecutor, TokioIo};
 use jsonrpsee_core::BoxError;
-use jsonrpsee_types::{Notification, TwoPointZero};
 use pin_project::pin_project;
-use serde::{Deserialize, Deserializer};
 use tokio::{
     io::{AsyncRead, AsyncWrite, ReadBuf},
     sync::Notify,
@@ -147,32 +144,6 @@ where
         }
         err = no_request_within(&request_received, Some(DEFAULT_FIRST_REQUEST_TIMEOUT)) => Err(err),
     }
-}
-
-/// Deserializes a JSON-RPC notification, rejecting objects that contain an `id` member.
-pub(crate) fn deserialize_notification<'a, T>(
-    data: &'a [u8],
-) -> Result<Notification<'a, T>, serde_json::Error>
-where
-    T: Deserialize<'a>,
-{
-    let notif: NotificationWithoutId<'a, T> = serde_json::from_slice(data)?;
-    Ok(Notification::new(notif.method, notif.params))
-}
-
-#[derive(Deserialize)]
-struct NotificationWithoutId<'a, T> {
-    #[serde(rename = "jsonrpc")]
-    _jsonrpc: TwoPointZero,
-    #[serde(borrow)]
-    method: Cow<'a, str>,
-    params: T,
-    #[serde(default, rename = "id", deserialize_with = "reject_notification_id")]
-    _id: (),
-}
-
-fn reject_notification_id<'de, D: Deserializer<'de>>(_: D) -> Result<(), D::Error> {
-    Err(serde::de::Error::custom("notification must not contain an id"))
 }
 
 /// Pauses an accept loop after `accept` failed with `err`.
@@ -352,28 +323,7 @@ fn poll_write_timeout(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_json::value::RawValue;
     use tokio::time::Instant;
-
-    #[test]
-    fn notification_id_classification_notification_metadata() {
-        type Params<'a> = Option<Cow<'a, RawValue>>;
-        for (raw, expected) in [
-            (
-                r#"{"jsonrpc":"2.0","method":"example","params":[1],"extra":{"id":true}}"#,
-                Some("[1]"),
-            ),
-            (r#"{"jsonrpc":"2.0","method":"example"}"#, None),
-        ] {
-            let notification = deserialize_notification::<Params>(raw.as_bytes()).unwrap();
-            assert_eq!(notification.method_name(), "example");
-            assert_eq!(notification.params().as_ref().map(|p| p.get()), expected);
-        }
-        for id in ["true", "false", "{}", "[]", "null", "0", "\"valid\""] {
-            let raw = format!(r#"{{"jsonrpc":"2.0","method":"example","id":{id}}}"#);
-            assert!(deserialize_notification::<Params>(raw.as_bytes()).is_err());
-        }
-    }
 
     #[tokio::test(start_paused = true)]
     async fn accept_error_backoff_skips_connection_errors() {
